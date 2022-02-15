@@ -1,2 +1,2 @@
-# renderling
-🍖 A collection of WGPU render pipelines 
+# renderling 🍖 
+A collection of WGPU render pipelines 
