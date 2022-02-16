@@ -62,10 +62,15 @@ pub fn compile_glsl(dir: &str) -> Result<()> {
     // be better just to only compile shaders that have been changed
     // recently.
     for shader in shaders {
-        // This tells cargo to rerun this script if something in dir changes.
+        // This tells cargo to rerun this script if either of the glsl
+        // sources or spir-v changes
         println!(
             "cargo:rerun-if-changed={}",
             shader.src_path.as_os_str().to_str().unwrap()
+        );
+        println!(
+            "cargo:rerun-if-changed={}",
+            shader.spv_path.as_os_str().to_str().unwrap()
         );
         let compiled = compiler.compile_into_spirv(
             &shader.src,

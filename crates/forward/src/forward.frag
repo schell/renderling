@@ -126,7 +126,7 @@ vec3 color_spot(SpotLight light, vec3 normal, vec3 cameraToFragDir, vec4 diffuse
   return (ambient + diffuse + specular);
 }
 
-// Calculate a directional light's color contribution a fragment.
+// Calculate a directional light's color contribution to a fragment.
 vec3 color_directional(DirectionalLight light, vec3 normal, vec3 cameraToFragDir, vec4 diffuseColor, vec4 specularColor) {
   vec3 lightDir = normalize(-(uView * vec4(light.direction, 0.0)).xyz);
   // diffuse shading

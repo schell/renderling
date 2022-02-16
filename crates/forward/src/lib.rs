@@ -81,7 +81,7 @@ pub fn material_bindgroup_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout
                 count: None,
             },
         ],
-        label: Some("pxy-render-forward material bindgroup layout"),
+        label: Some("forward material bindgroup layout"),
     })
 }
 
@@ -119,7 +119,7 @@ pub fn lights_bindgroup_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
                 count: None,
             },
         ],
-        label: Some("pxy-render-forward lights bindgroup layout"),
+        label: Some("forward lights bindgroup layout"),
     })
 }
 
@@ -275,7 +275,7 @@ pub fn create_material_bindgroup(
     shininess: f32,
 ) -> MaterialUniform {
     let shininess_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("pxy-render-forward shininess"),
+        label: Some("forward shininess"),
         contents: bytemuck::cast_slice(&[shininess]),
         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
     });
@@ -303,7 +303,7 @@ pub fn create_material_bindgroup(
                 resource: shininess_buffer.as_entire_binding(),
             },
         ],
-        label: Some("pxy-render-forward material bind group"),
+        label: Some("forward material bind group"),
     });
 
     MaterialUniform {
@@ -437,7 +437,7 @@ pub fn create_lights_uniform(
         .take(MAX_POINT_LIGHTS)
         .collect::<Vec<_>>();
     let point_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("pxy-render-forward point light buffer"),
+        label: Some("forward point light buffer"),
         contents: bytemuck::cast_slice(point_lights.as_slice()),
         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
     });
@@ -448,7 +448,7 @@ pub fn create_lights_uniform(
         .take(MAX_SPOT_LIGHTS)
         .collect::<Vec<_>>();
     let spot_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("pxy-render-forward spot light buffer"),
+        label: Some("forward spot light buffer"),
         contents: bytemuck::cast_slice(&spot_lights),
         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
     });
@@ -459,7 +459,7 @@ pub fn create_lights_uniform(
         .take(MAX_DIRECTIONAL_LIGHTS)
         .collect::<Vec<_>>();
     let directional_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("pxy-render-forward directional light buffer"),
+        label: Some("forward directional light buffer"),
         contents: bytemuck::cast_slice(&dir_lights),
         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
     });
@@ -479,7 +479,7 @@ pub fn create_lights_uniform(
                 resource: directional_buffer.as_entire_binding(),
             },
         ],
-        label: Some("pxy-render-forward light bind group"),
+        label: Some("forward light bind group"),
     });
 
     LightsUniform {

@@ -111,7 +111,7 @@ pub fn camera_uniform_bindgroup_layout(device: &wgpu::Device) -> wgpu::BindGroup
 /// The blending ops are as follows:
 ///   0 - color only
 ///   1 - texture only
-///   3 - multiply texture's red channel with color
+///   2 - multiply texture's red channel with color
 pub fn create_ui_material_bindgroup(
     device: &wgpu::Device,
     color_blend: u32,
@@ -176,7 +176,6 @@ pub fn create_pipeline(device: &wgpu::Device, format: TextureFormat) -> wgpu::Re
                     },
                     wgpu::VertexBufferLayout {
                         array_stride: std::mem::size_of::<[[f32; 4]; 4]>() as wgpu::BufferAddress,
-                        // We need to switch from using a step mode of Vertex to Instance
                         // This means that our shaders will only change to use the next
                         // instance when the shader starts processing a new instance
                         step_mode: wgpu::VertexStepMode::Instance,
