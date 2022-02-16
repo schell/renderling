@@ -1,0 +1,20 @@
+[package]
+name = "renderling"
+version = "0.1.0"
+edition = "2021"
+description = "A collection of WGPU render pipelines and simple types."
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[features]
+default = []
+forward = ["renderling_forward"]
+ui = ["renderling_ui"]
+
+[dependencies]
+renderling_core = { path = "../core" }
+renderling_forward = { path = "../forward", optional = true }
+renderling_ui = { path = "../ui", optional = true }
+
+[package.metadata.docs.rs]
+features = ["forward", "ui"]
