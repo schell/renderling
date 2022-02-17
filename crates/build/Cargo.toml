@@ -3,6 +3,10 @@ name = "renderling_build"
 version = "0.1.0"
 edition = "2018"
 description = "Helper for compiling GLSL shaders for renderlings. To be used in build.rs files."
+repository = "https://github.com/schell/renderling"
+license = "MIT OR Apache-2.0"
+keywords = ["game", "graphics", "shader", "rendering", "spirv"]
+categories = ["rendering", "game-development", "graphics"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
