@@ -3,6 +3,10 @@ name = "renderling"
 version = "0.1.0"
 edition = "2021"
 description = "A collection of WGPU render pipelines and simple types."
+repository = "https://github.com/schell/renderling"
+license = "MIT OR Apache-2.0"
+keywords = ["game", "graphics", "shader", "rendering"]
+categories = ["rendering", "game-development", "graphics"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
