@@ -152,30 +152,27 @@ void main()
 
   for (int i = 0; i < MAX_DIRECTIONAL_LIGHTS; i++) {
     DirectionalLight light = uDirectionalLights[i];
+    color += color_directional(light, norm, cameraToFragDir, diffuseColor, specularColor);
     if (light.should_continue == 0) {
       break;
-    } else {
-      color += color_directional(light, norm, cameraToFragDir, diffuseColor, specularColor);
     }
   }
 
   for (int i = 0; i < MAX_POINT_LIGHTS; i++) {
     PointLight light = uPointLights[i];
+    color += color_point(light, norm, cameraToFragDir, diffuseColor, specularColor);
     if (light.should_continue == 0) {
       break;
-    } else {
-      color += color_point(light, norm, cameraToFragDir, diffuseColor, specularColor);
     }
   }
 
   for (int i = 0; i < MAX_SPOT_LIGHTS; i++) {
     SpotLight light = uSpotLights[i];
+    color += color_spot(light, norm, cameraToFragDir, diffuseColor, specularColor);
     if (light.should_continue == 0) {
       break;
-    } else {
-      color += color_spot(light, norm, cameraToFragDir, diffuseColor, specularColor);
     }
   }
 
-  FragColor = vec4(color, 1.0);
+  FragColor = vec4(1.0, 0.0, 0.0, 1.0);//vec4(color, 1.0);
 }
