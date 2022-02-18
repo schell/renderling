@@ -133,7 +133,7 @@ pub fn create_pipeline(
         device.create_shader_module(&wgpu::include_spirv!("forward.frag.spv"));
 
     let render_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-        label: Some("Forward Render Pipeline Layout"),
+        label: Some("renderling forward pipeline layout"),
         bind_group_layouts: &[
             &camera_uniform_layout(device),
             &material_bindgroup_layout(device),
@@ -143,7 +143,7 @@ pub fn create_pipeline(
     });
 
     let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("Forward Render Pipeline"),
+            label: Some("renderling forward pipeline"),
             layout: Some(&render_pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &forward_vert_shader,
@@ -265,50 +265,52 @@ pub struct MaterialUniform {
     pub bindgroup: wgpu::BindGroup,
 }
 
-/// Creates a buffer to store shininess and a bindgroup for the material.
-pub fn create_material_bindgroup(
-    device: &wgpu::Device,
-    diffuse_texture_view: &wgpu::TextureView,
-    diffuse_texture_sampler: &wgpu::Sampler,
-    specular_texture_view: &wgpu::TextureView,
-    specular_texture_sampler: &wgpu::Sampler,
-    shininess: f32,
-) -> MaterialUniform {
-    let shininess_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("forward shininess"),
-        contents: bytemuck::cast_slice(&[shininess]),
-        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-    });
-    let bindgroup = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        layout: &material_bindgroup_layout(device),
-        entries: &[
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: wgpu::BindingResource::TextureView(diffuse_texture_view),
-            },
-            wgpu::BindGroupEntry {
-                binding: 1,
-                resource: wgpu::BindingResource::Sampler(diffuse_texture_sampler),
-            },
-            wgpu::BindGroupEntry {
-                binding: 2,
-                resource: wgpu::BindingResource::TextureView(specular_texture_view),
-            },
-            wgpu::BindGroupEntry {
-                binding: 3,
-                resource: wgpu::BindingResource::Sampler(specular_texture_sampler),
-            },
-            wgpu::BindGroupEntry {
-                binding: 4,
-                resource: shininess_buffer.as_entire_binding(),
-            },
-        ],
-        label: Some("forward material bind group"),
-    });
+impl MaterialUniform {
+    /// Creates a buffer to store shininess and a bindgroup for the material.
+    pub fn new(
+        device: &wgpu::Device,
+        diffuse_texture_view: &wgpu::TextureView,
+        diffuse_texture_sampler: &wgpu::Sampler,
+        specular_texture_view: &wgpu::TextureView,
+        specular_texture_sampler: &wgpu::Sampler,
+        shininess: f32,
+    ) -> MaterialUniform {
+        let shininess_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("renderling forward material shininess"),
+            contents: bytemuck::cast_slice(&[shininess]),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+        let bindgroup = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &material_bindgroup_layout(device),
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(diffuse_texture_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(diffuse_texture_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::TextureView(specular_texture_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::Sampler(specular_texture_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: shininess_buffer.as_entire_binding(),
+                },
+            ],
+            label: Some("renderling forward material bind group"),
+        });
 
-    MaterialUniform {
-        shininess_buffer,
-        bindgroup,
+        MaterialUniform {
+            shininess_buffer,
+            bindgroup,
+        }
     }
 }
 
@@ -325,8 +327,8 @@ pub struct PointLight {
     /// evaluate it.
     ///
     /// Because uniform structs need to be 16-byte spaced, we need a float
-    /// or uint here, so we use this parameter to tell the shader if it can
-    /// skip this light.
+    /// or uint here, so we use this parameter to tell the shader if it should
+    /// continue processing the lights after this one in our array.
     pub should_continue: u32,
     /// Constant, linear and quadratic term of attenuation.
     pub attenuation: [f32; 3],
@@ -349,8 +351,8 @@ pub struct SpotLight {
     /// evaluate it.
     ///
     /// Because uniform structs need to be 16-byte spaced, we need a float
-    /// or uint here, so we use this parameter to tell the shader if it can
-    /// skip this light.
+    /// or uint here, so we use this parameter to tell the shader if it should
+    /// continue processing the lights after this one in our array.
     pub should_continue: u32,
     /// The direction the light is pointing in.
     pub direction: [f32; 3],
@@ -377,8 +379,8 @@ pub struct DirectionalLight {
     /// evaluate it.
     ///
     /// Because uniform structs need to be 16-byte spaced, we need a float
-    /// or uint here, so we use this parameter to tell the shader if it can
-    /// skip this light.
+    /// or uint here, so we use this parameter to tell the shader if it should
+    /// continue processing the lights after this one in our array.
     pub should_continue: u32,
     /// Ambient color value.
     pub ambient_color: [f32; 4],
@@ -397,96 +399,109 @@ pub struct LightsUniform {
 }
 
 impl LightsUniform {
-    pub fn update_point_lights(&self, queue: &wgpu::Queue, point_lights: Vec<PointLight>) {
+    pub fn new(
+        device: &wgpu::Device,
+        point_lights: Vec<PointLight>,
+        spot_lights: Vec<SpotLight>,
+        dir_lights: Vec<DirectionalLight>,
+    ) -> LightsUniform {
         let point_lights = point_lights
             .into_iter()
-            .chain(std::iter::once(PointLight::default()))
+            .chain(std::iter::repeat(PointLight::default()))
             .take(MAX_POINT_LIGHTS)
             .collect::<Vec<_>>();
-        queue.write_buffer(&self.point_buffer, 0, bytemuck::cast_slice(&point_lights));
+        let point_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("forward point light buffer"),
+            contents: bytemuck::cast_slice(point_lights.as_slice()),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+
+        let spot_lights = spot_lights
+            .into_iter()
+            .chain(std::iter::repeat(SpotLight::default()))
+            .take(MAX_SPOT_LIGHTS)
+            .collect::<Vec<_>>();
+        let spot_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("forward spot light buffer"),
+            contents: bytemuck::cast_slice(&spot_lights),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+
+        let dir_lights = dir_lights
+            .into_iter()
+            .chain(std::iter::repeat(DirectionalLight::default()))
+            .take(MAX_DIRECTIONAL_LIGHTS)
+            .collect::<Vec<_>>();
+        let directional_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("forward directional light buffer"),
+            contents: bytemuck::cast_slice(&dir_lights),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        });
+        let bindgroup = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &lights_bindgroup_layout(device),
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: point_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: spot_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: directional_buffer.as_entire_binding(),
+                },
+            ],
+            label: Some("forward light bind group"),
+        });
+
+        LightsUniform {
+            directional_buffer,
+            point_buffer,
+            spot_buffer,
+            bindgroup,
+        }
+    }
+
+    pub fn update_point_lights(&self, queue: &wgpu::Queue, lights: Vec<PointLight>) {
+        // the shader only supports a limited number of lights and we use a padding u32
+        // to determine when to short circuit running the lights
+        let short = usize::min(lights.len(), MAX_POINT_LIGHTS);
+        let mut taken_lights: Vec<_> = vec![];
+        for (mut light, index) in lights.into_iter().zip(1..).take(short) {
+            light.should_continue = if index < short { 1 } else { 0 };
+            taken_lights.push(short);
+        }
+        queue.write_buffer(&self.point_buffer, 0, bytemuck::cast_slice(&taken_lights));
     }
 
     pub fn update_spot_lights(&self, queue: &wgpu::Queue, lights: Vec<SpotLight>) {
-        let lights = lights
-            .into_iter()
-            .chain(std::iter::once(SpotLight::default()))
-            .take(MAX_SPOT_LIGHTS)
-            .collect::<Vec<_>>();
-        queue.write_buffer(&self.spot_buffer, 0, bytemuck::cast_slice(&lights));
+        // the shader only supports a limited number of lights and we use a padding u32
+        // to determine when to short circuit running the lights
+        let short = usize::min(lights.len(), MAX_POINT_LIGHTS);
+        let mut taken_lights: Vec<_> = vec![];
+        for (mut light, index) in lights.into_iter().zip(1..).take(short) {
+            light.should_continue = if index < short { 1 } else { 0 };
+            taken_lights.push(short);
+        }
+        queue.write_buffer(&self.spot_buffer, 0, bytemuck::cast_slice(&taken_lights));
     }
 
     pub fn update_directional_lights(&self, queue: &wgpu::Queue, lights: Vec<DirectionalLight>) {
-        let lights = lights
-            .into_iter()
-            .chain(std::iter::once(DirectionalLight::default()))
-            .take(MAX_DIRECTIONAL_LIGHTS)
-            .collect::<Vec<_>>();
-        queue.write_buffer(&self.directional_buffer, 0, bytemuck::cast_slice(&lights));
-    }
-}
-
-pub fn create_lights_uniform(
-    device: &wgpu::Device,
-    point_lights: Vec<PointLight>,
-    spot_lights: Vec<SpotLight>,
-    dir_lights: Vec<DirectionalLight>,
-) -> LightsUniform {
-    let point_lights = point_lights
-        .into_iter()
-        .chain(std::iter::repeat(PointLight::default()))
-        .take(MAX_POINT_LIGHTS)
-        .collect::<Vec<_>>();
-    let point_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("forward point light buffer"),
-        contents: bytemuck::cast_slice(point_lights.as_slice()),
-        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-    });
-
-    let spot_lights = spot_lights
-        .into_iter()
-        .chain(std::iter::repeat(SpotLight::default()))
-        .take(MAX_SPOT_LIGHTS)
-        .collect::<Vec<_>>();
-    let spot_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("forward spot light buffer"),
-        contents: bytemuck::cast_slice(&spot_lights),
-        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-    });
-
-    let dir_lights = dir_lights
-        .into_iter()
-        .chain(std::iter::repeat(DirectionalLight::default()))
-        .take(MAX_DIRECTIONAL_LIGHTS)
-        .collect::<Vec<_>>();
-    let directional_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some("forward directional light buffer"),
-        contents: bytemuck::cast_slice(&dir_lights),
-        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-    });
-    let bindgroup = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        layout: &lights_bindgroup_layout(device),
-        entries: &[
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: point_buffer.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 1,
-                resource: spot_buffer.as_entire_binding(),
-            },
-            wgpu::BindGroupEntry {
-                binding: 2,
-                resource: directional_buffer.as_entire_binding(),
-            },
-        ],
-        label: Some("forward light bind group"),
-    });
-
-    LightsUniform {
-        directional_buffer,
-        point_buffer,
-        spot_buffer,
-        bindgroup,
+        // the shader only supports a limited number of lights and we use a padding u32
+        // to determine when to short circuit running the lights
+        let short = usize::min(lights.len(), MAX_POINT_LIGHTS);
+        let mut taken_lights: Vec<_> = vec![];
+        for (mut light, index) in lights.into_iter().zip(1..).take(short) {
+            light.should_continue = if index < short { 1 } else { 0 };
+            taken_lights.push(short);
+        }
+        queue.write_buffer(
+            &self.directional_buffer,
+            0,
+            bytemuck::cast_slice(&taken_lights),
+        );
     }
 }
 
@@ -504,6 +519,7 @@ pub struct ObjectGroup<'a> {
     pub objects: Vec<Object<'a>>,
 }
 
+/// Conducts a render pass.
 pub fn render<'a, O>(
     label: &'a str,
     device: &'a wgpu::Device,
@@ -551,8 +567,9 @@ pub fn render<'a, O>(
     // bind the lights
     render_pass.set_bind_group(2, lights, &[]);
     // draw objects
-    for group in object_groups {
+    for (group, i) in object_groups.zip(0..) {
         // bind the material for this group
+        tracing::trace!("group {}", i);
         render_pass.set_bind_group(1, group.material, &[]);
 
         // draw objects

@@ -2,6 +2,7 @@
 members = [
     "crates/build",
     "crates/core",
+    "crates/examples/blinn-phong",
     "crates/forward",
     "crates/renderling",
     "crates/ui"
