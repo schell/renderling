@@ -1,5 +1,3 @@
-use std::str::Matches;
-
 use anyhow::Context;
 use nalgebra::{Matrix4, Point3, UnitVector3, Vector3};
 use wgpu::util::DeviceExt;
@@ -151,7 +149,7 @@ fn main() -> Result<(), anyhow::Error> {
     surface.configure(&device, &surface_config);
 
     struct Texture {
-        texture: wgpu::Texture,
+        _texture: wgpu::Texture,
         view: wgpu::TextureView,
         sampler: wgpu::Sampler,
     }
@@ -188,7 +186,7 @@ fn main() -> Result<(), anyhow::Error> {
         });
 
         Texture {
-            texture,
+            _texture: texture,
             view,
             sampler,
         }
@@ -251,14 +249,12 @@ fn main() -> Result<(), anyhow::Error> {
 
     pub struct Mesh {
         vertex_buffer: MeshBuffer,
-        index_buffer: Option<MeshBuffer>,
     }
 
     impl Mesh {
         pub fn buffer<T: bytemuck::Pod>(
             device: &wgpu::Device,
             vertices: &[T],
-            indices: Option<&[u16]>,
         ) -> Self {
             tracing::trace!("buffering mesh");
             let len = vertices.len();
@@ -268,25 +264,15 @@ fn main() -> Result<(), anyhow::Error> {
                 usage: wgpu::BufferUsages::VERTEX,
             });
             let vertex_buffer = MeshBuffer { buffer, len };
-            let index_buffer = indices.map(|ndxs| {
-                let len = ndxs.len();
-                let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("Index Buffer"),
-                    contents: bytemuck::cast_slice(ndxs),
-                    usage: wgpu::BufferUsages::INDEX,
-                });
-                MeshBuffer { buffer, len }
-            });
 
             Mesh {
                 vertex_buffer,
-                index_buffer,
             }
         }
     }
 
-    let sphere_mesh: Mesh = Mesh::buffer(&device, &sphere_vertices, None);
-    let cube_mesh: Mesh = Mesh::buffer(&device, &cube_vertices, None);
+    let sphere_mesh: Mesh = Mesh::buffer(&device, &sphere_vertices);
+    let cube_mesh: Mesh = Mesh::buffer(&device, &cube_vertices);
 
     let sphere_model_matrix:Matrix4<f32> = Matrix4::identity();
     let sphere_normal_matrix = sphere_model_matrix
@@ -375,7 +361,7 @@ fn main() -> Result<(), anyhow::Error> {
             });
 
             Texture {
-                texture,
+                _texture: texture,
                 view,
                 sampler,
             }
