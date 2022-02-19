@@ -8,6 +8,18 @@ Shaders are written in GLSL. **shaderc** is used to compile shaders to SPIR-V.
 
 A WGPU graphics pipeline, along with simple types used to marshal data to the GPU.
 
+## Pipelines
+
+### Forward 
+A blinn-phong material forward shader.
+
+![renderling forward shader pipeline](img/forward.png "renderling forward pipeline")
+
+### UI 
+A simple forward shader that supports vertices with colors and/or textures. It has a special 
+blending uniform that determines how vertex colors should be blended with vertex UV texture 
+coords. This enables support for colorful text. 
+
 ## License
 Renderling is free and open source. All code in this repository is dual-licensed under either:
 
