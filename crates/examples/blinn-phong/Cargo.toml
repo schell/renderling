@@ -1,6 +1,6 @@
 [package]
 name = "renderling-example-blinn-phong"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -16,4 +16,4 @@ tracing = "^0.1"
 tracing-log = "0.1.2"
 tracing-subscriber = "^0.3"
 winit = "^0.26"
-wgpu = "^0.10"
+wgpu = "^0.12"
