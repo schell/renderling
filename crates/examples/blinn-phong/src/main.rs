@@ -122,6 +122,7 @@ fn main() -> Result<(), anyhow::Error> {
     let adapter = smol::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
         power_preference: wgpu::PowerPreference::default(),
         compatible_surface: Some(&surface),
+        force_fallback_adapter: false,
     }))
     .context("could not create adapter")?;
 
@@ -451,10 +452,9 @@ fn main() -> Result<(), anyhow::Error> {
                 device.poll(wgpu::Maintain::Wait);
             }
             winit::event::Event::RedrawRequested(_) => {
-                let surface_frame = surface.get_current_frame().unwrap();
+                let surface_texture = surface.get_current_texture().unwrap();
                 let surface_texture_view =
-                    surface_frame
-                        .output
+                    surface_texture
                         .texture
                         .create_view(&wgpu::TextureViewDescriptor {
                             label: Some("blinn-phong scene surface texture view"),

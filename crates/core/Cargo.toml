@@ -1,6 +1,6 @@
 [package]
 name = "renderling_core"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2018"
 description = "Types shared by renderling pipelines"
 repository = "https://github.com/schell/renderling"
@@ -12,4 +12,4 @@ categories = ["rendering", "game-development", "graphics"]
 
 [dependencies]
 bytemuck = { version = "1.7.2", features = ["derive"] }
-wgpu = { version = "^0.10" }
+wgpu = { version = "^0.12" }

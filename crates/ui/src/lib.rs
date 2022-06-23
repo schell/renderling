@@ -79,10 +79,9 @@ pub fn object_texture_bindgroup_layout(device: &wgpu::Device) -> wgpu::BindGroup
             wgpu::BindGroupLayoutEntry {
                 binding: 2,
                 visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Sampler {
-                    filtering: true,
-                    comparison: false,
-                },
+                ty: wgpu::BindingType::Sampler(
+                    wgpu::SamplerBindingType::Filtering
+                ),
                 count: None,
             },
         ],
@@ -199,10 +198,9 @@ pub fn create_pipeline(device: &wgpu::Device, format: TextureFormat) -> wgpu::Re
                 cull_mode: Some(wgpu::Face::Back),
                 // Setting this to anything other than Fill requires Features::NON_FILL_POLYGON_MODE
                 polygon_mode: wgpu::PolygonMode::Fill,
-                // Requires Features::DEPTH_CLAMPING
-                clamp_depth: false,
                 // Requires Features::CONSERVATIVE_RASTERIZATION
                 conservative: false,
+                unclipped_depth: false,
             },
 
             depth_stencil: Some(wgpu::DepthStencilState {
@@ -217,6 +215,7 @@ pub fn create_pipeline(device: &wgpu::Device, format: TextureFormat) -> wgpu::Re
                 alpha_to_coverage_enabled: false,
                 count: 1,
             },
+            multiview: None,
         })
 }
 
