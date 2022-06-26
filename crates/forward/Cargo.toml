@@ -9,6 +9,9 @@ keywords = ["shader", "forward", "3d", "lighting"]
 categories = ["rendering", "game-development", "graphics"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[features]
+default = []
+wasm = ["wgpu/webgl", "renderling_core/wasm"]
 
 [dependencies]
 anyhow = "^1.0"
