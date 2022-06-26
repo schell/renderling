@@ -1,6 +1,6 @@
 [package]
 name = "renderling_ui"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2018"
 description = "A WGPU rendering pipeline for user interfaces"
 repository = "https://github.com/schell/renderling"
@@ -9,6 +9,9 @@ keywords = ["shader", "gui", "texture", "rendering"]
 categories = ["rendering", "game-development", "graphics"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[features]
+default = []
+wasm = ["wgpu/webgl", "renderling_core/wasm"]
 
 [dependencies]
 bytemuck = { version = "1.7.2", features = ["derive"] }

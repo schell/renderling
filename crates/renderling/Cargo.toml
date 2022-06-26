@@ -14,6 +14,7 @@ categories = ["rendering", "game-development", "graphics"]
 default = []
 forward = ["renderling_forward"]
 ui = ["renderling_ui"]
+wasm = ["renderling_forward/wasm", "renderling_ui/wasm"]
 
 [dependencies]
 renderling_core = { path = "../core", version = "^0.1" }
