@@ -224,16 +224,23 @@ pub fn create_pipeline(device: &wgpu::Device, format: TextureFormat) -> wgpu::Re
         })
 }
 
-pub struct Object<'a> {
+/// A renderable object.
+///
+/// Bundles together buffers, ranges, material and draw instructions.
+///
+/// **Note:** There is a slot for `Extra` data to help with collation and sorting, if
+/// need be.
+pub struct Object<'a, Extra> {
     pub mesh_buffer: wgpu::BufferSlice<'a>,
     pub instances: wgpu::BufferSlice<'a>,
     pub instances_range: Range<u32>,
     pub material: Option<&'a wgpu::BindGroup>,
     pub name: Option<&'a str>,
     pub draw: ObjectDraw<'a>,
+    pub extra: Extra
 }
 
-pub fn render<'a, O>(
+pub fn render<'a, O, Extra>(
     label: &'a str,
     device: &'a wgpu::Device,
     queue: &'a wgpu::Queue,
@@ -245,7 +252,8 @@ pub fn render<'a, O>(
     objects: O,
 )
 where
-    O: Iterator<Item = &'a Object<'a>>,
+    O: Iterator<Item = &'a Object<'a, Extra>>,
+    Extra: 'a
 {
     tracing::trace!(
         "{} rendering",

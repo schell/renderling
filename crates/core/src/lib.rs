@@ -1,7 +1,7 @@
 //! Canonical types and helpers for authoring render pipelines.
 use std::ops::Range;
 
-/// Shader resources for view and projection matrices.
+/// Projection and view matrices.
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct ViewProjection {
@@ -9,13 +9,15 @@ pub struct ViewProjection {
     pub view: [[f32; 4]; 4],
 }
 
-/// A wrapped bindgroup that represents a uniform camera.
+/// A bindgroup that represents a camera uniform.
 pub struct Camera<'a> {
     pub bindgroup: &'a wgpu::BindGroup,
 }
 
-/// Draw parameters for a renderable object. This roughly corresponds to
-/// [`wgpu::RenderPass::draw_indexed`] and [`wgpu::RenderPass::draw`].
+/// Draw parameters for a renderable object.
+///
+/// This roughly corresponds to [`wgpu::RenderPass::draw_indexed`] and
+/// [`wgpu::RenderPass::draw`].
 #[derive(Clone)]
 pub enum ObjectDraw<'a> {
     Indexed {

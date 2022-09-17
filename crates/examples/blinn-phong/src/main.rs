@@ -2,7 +2,7 @@ use anyhow::Context;
 use nalgebra::{Matrix4, Point3, UnitVector3, Vector3};
 use wgpu::util::DeviceExt;
 
-/// Creates a right-handed perspective projection matrix with [0,1] depth range.
+/// Creates a right-handed perspective projection matrix with `[0,1]` depth range.
 fn perspective_rh(fov_y_radians: f32, aspect_ratio: f32, z_near: f32, z_far: f32) -> [[f32; 4]; 4] {
     assert!(z_near > 0.0 && z_far > 0.0);
     let (sin_fov, cos_fov) = (0.5 * fov_y_radians).sin_cos();
@@ -39,15 +39,15 @@ fn perspective_rh(fov_y_radians: f32, aspect_ratio: f32, z_near: f32, z_far: f32
 ///   /    g      |    | /   | /    /
 /// z/r           |____|/   4|/____/5
 pub fn unit_points() -> [Point3<f32>; 8] {
-    let p0 = Point3::new(-0.5, 0.5, 0.5);
-    let p1 = Point3::new(-0.5, 0.5, -0.5);
-    let p2 = Point3::new(0.5, 0.5, -0.5);
-    let p3 = Point3::new(0.5, 0.5, 0.5);
+    let p0 = Point3::from([-0.5, 0.5, 0.5]);
+    let p1 = Point3::from([-0.5, 0.5, -0.5]);
+    let p2 = Point3::from([0.5, 0.5, -0.5]);
+    let p3 = Point3::from([0.5, 0.5, 0.5]);
 
-    let p4 = Point3::new(-0.5, -0.5, 0.5);
-    let p7 = Point3::new(-0.5, -0.5, -0.5);
-    let p6 = Point3::new(0.5, -0.5, -0.5);
-    let p5 = Point3::new(0.5, -0.5, 0.5);
+    let p4 = Point3::from([-0.5, -0.5, 0.5]);
+    let p7 = Point3::from([-0.5, -0.5, -0.5]);
+    let p6 = Point3::from([0.5, -0.5, -0.5]);
+    let p5 = Point3::from([0.5, -0.5, 0.5]);
 
     [p0, p1, p2, p3, p4, p5, p6, p7]
 }
@@ -198,9 +198,9 @@ fn main() -> Result<(), anyhow::Error> {
         let fovy = std::f32::consts::PI / 4.0;
         let znear = 0.1;
         let zfar = 100.0;
-        let position = nalgebra::Point3::new(0.0, 1.0, 2.5f32);
+        let position = nalgebra::Point3::from([0.0, 1.0, 2.5f32]);
 
-        let look_at = nalgebra::Point3::new(0.0, 0.0, 0.0f32);
+        let look_at = nalgebra::Point3::from([0.0, 0.0, 0.0f32]);
         let up = nalgebra::Vector3::y_axis();
 
         let view: [[f32; 4]; 4] = nalgebra::Matrix4::look_at_rh(&position, &look_at, &up).into();
@@ -229,9 +229,9 @@ fn main() -> Result<(), anyhow::Error> {
     let sphere_vertices: Vec<renderling::forward::Vertex> = cells
         .iter()
         .flat_map(|icosahedron::Triangle { a, b, c }| {
-            let p0 = to_vertex(a);
-            let p1 = to_vertex(b);
-            let p2 = to_vertex(c);
+            let p0 = to_vertex(&a);
+            let p1 = to_vertex(&b);
+            let p2 = to_vertex(&c);
             vec![p2, p1, p0]
         })
         .collect();
@@ -492,6 +492,7 @@ fn main() -> Result<(), anyhow::Error> {
                     draw: renderling::ObjectDraw::Default {
                         vertex_range: 0..sphere_mesh.vertex_buffer.len as u32,
                     },
+                    extra: ()
                 };
 
                 let cube = renderling::forward::Object {
@@ -502,6 +503,7 @@ fn main() -> Result<(), anyhow::Error> {
                     draw: renderling::ObjectDraw::Default {
                         vertex_range: 0..cube_mesh.vertex_buffer.len as u32,
                     },
+                    extra: ()
                 };
 
                 let object_group = renderling::forward::ObjectGroup {
@@ -519,7 +521,9 @@ fn main() -> Result<(), anyhow::Error> {
                     &lights.bindgroup,
                     &camera,
                     std::iter::once(&object_group),
-                )
+                );
+
+                surface_texture.present();
             }
             _ => {}
         }

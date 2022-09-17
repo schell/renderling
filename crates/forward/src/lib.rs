@@ -499,22 +499,30 @@ impl LightsUniform {
     }
 }
 
+/// A renderable object.
+///
+/// Bundles together buffers, ranges and draw instructions.
+///
+/// **Note:** There is a slot for `Extra` data to help with collation and sorting, if
+/// need be.
 #[derive(Clone)]
-pub struct Object<'a> {
+pub struct Object<'a, Extra> {
     pub mesh_buffer: wgpu::BufferSlice<'a>,
     pub instances: wgpu::BufferSlice<'a>,
     pub instances_range: Range<u32>,
     pub name: Option<&'a str>,
     pub draw: ObjectDraw<'a>,
+    pub extra: Extra
 }
 
-pub struct ObjectGroup<'a> {
+/// A collection of objects that share the same material.
+pub struct ObjectGroup<'a, Extra> {
     pub material: &'a wgpu::BindGroup,
-    pub objects: Vec<Object<'a>>,
+    pub objects: Vec<Object<'a, Extra>>,
 }
 
 /// Conducts a render pass.
-pub fn render<'a, O>(
+pub fn render<'a, O, Extra>(
     label: &'a str,
     device: &'a wgpu::Device,
     queue: &'a wgpu::Queue,
@@ -525,7 +533,8 @@ pub fn render<'a, O>(
     camera: &'a Camera<'a>,
     object_groups: O,
 ) where
-    O: Iterator<Item = &'a ObjectGroup<'a>>,
+    O: Iterator<Item = &'a ObjectGroup<'a, Extra>>,
+    Extra: 'a
 {
     tracing::trace!("rendering {}", label);
 
