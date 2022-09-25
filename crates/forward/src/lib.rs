@@ -317,13 +317,12 @@ pub const MAX_DIRECTIONAL_LIGHTS: usize = 8;
 pub struct PointLight {
     /// The position of the light in world space.
     pub position: [f32; 3],
-    /// Whether or not this is a valid light and that the shader should
-    /// evaluate it.
+    /// The number of all point lights in the scene.
     ///
     /// Because uniform structs need to be 16-byte spaced, we need a float
     /// or uint here, so we use this parameter to tell the shader if it should
     /// continue processing the lights after this one in our array.
-    pub should_continue: u32,
+    pub num_lights: u32,
     /// Constant, linear and quadratic term of attenuation.
     pub attenuation: [f32; 3],
     /// Just padding to keep everything 16-byte aligned.
@@ -341,13 +340,12 @@ pub struct PointLight {
 pub struct SpotLight {
     /// The position of the light in world space.
     pub position: [f32; 3],
-    /// Whether or not this is a valid light and that the shader should
-    /// evaluate it.
+    /// The number of all spot lights in the scene.
     ///
     /// Because uniform structs need to be 16-byte spaced, we need a float
     /// or uint here, so we use this parameter to tell the shader if it should
     /// continue processing the lights after this one in our array.
-    pub should_continue: u32,
+    pub num_lights: u32,
     /// The direction the light is pointing in.
     pub direction: [f32; 3],
     /// Inner angular cutoff.
@@ -369,19 +367,53 @@ pub struct SpotLight {
 pub struct DirectionalLight {
     /// The direction the light is pointing in.
     pub direction: [f32; 3],
-    /// Whether or not this is a valid light and that the shader should
-    /// evaluate it.
+    /// The number of all spot lights in the scene.
     ///
     /// Because uniform structs need to be 16-byte spaced, we need a float
     /// or uint here, so we use this parameter to tell the shader if it should
     /// continue processing the lights after this one in our array.
-    pub should_continue: u32,
+    pub num_lights: u32,
     /// Ambient color value.
     pub ambient_color: [f32; 4],
     /// Diffuse color value.
     pub diffuse_color: [f32; 4],
     /// Specular color value.
     pub specular_color: [f32; 4],
+}
+
+/// The shader only supports a limited number of lights and we need to set some
+/// parameters to control the lighting loop in the shader.
+trait Light: Default {
+    fn set_num_lights(&mut self, num_lights: u32);
+
+    fn process_lights<L: Light>(lights: &mut Vec<L>, max_lights: usize, fill: bool) {
+        let len = lights.len();
+        let resize_len = if fill {
+            max_lights
+        } else {
+            len.max(1)
+        };
+        lights.resize_with(resize_len, L::default);
+        lights.iter_mut().for_each(|light| light.set_num_lights(len as u32));
+    }
+}
+
+impl Light for PointLight {
+    fn set_num_lights(&mut self, num_lights: u32) {
+        self.num_lights = num_lights;
+    }
+}
+
+impl Light for SpotLight {
+    fn set_num_lights(&mut self, num_lights: u32) {
+        self.num_lights = num_lights;
+    }
+}
+
+impl Light for DirectionalLight {
+    fn set_num_lights(&mut self, num_lights: u32) {
+        self.num_lights = num_lights;
+    }
 }
 
 /// Helper struct for managing the light uniforms.
@@ -395,37 +427,25 @@ pub struct LightsUniform {
 impl LightsUniform {
     pub fn new(
         device: &wgpu::Device,
-        point_lights: Vec<PointLight>,
-        spot_lights: Vec<SpotLight>,
-        dir_lights: Vec<DirectionalLight>,
+        mut point_lights: Vec<PointLight>,
+        mut spot_lights: Vec<SpotLight>,
+        mut dir_lights: Vec<DirectionalLight>,
     ) -> LightsUniform {
-        let point_lights = point_lights
-            .into_iter()
-            .chain(std::iter::repeat(PointLight::default()))
-            .take(MAX_POINT_LIGHTS)
-            .collect::<Vec<_>>();
+        PointLight::process_lights(&mut point_lights, MAX_POINT_LIGHTS, true);
         let point_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("forward point light buffer"),
             contents: bytemuck::cast_slice(point_lights.as_slice()),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
-        let spot_lights = spot_lights
-            .into_iter()
-            .chain(std::iter::repeat(SpotLight::default()))
-            .take(MAX_SPOT_LIGHTS)
-            .collect::<Vec<_>>();
+        SpotLight::process_lights(&mut spot_lights, MAX_SPOT_LIGHTS, true);
         let spot_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("forward spot light buffer"),
             contents: bytemuck::cast_slice(&spot_lights),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
-        let dir_lights = dir_lights
-            .into_iter()
-            .chain(std::iter::repeat(DirectionalLight::default()))
-            .take(MAX_DIRECTIONAL_LIGHTS)
-            .collect::<Vec<_>>();
+        DirectionalLight::process_lights(&mut dir_lights, MAX_DIRECTIONAL_LIGHTS, true);
         let directional_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("forward directional light buffer"),
             contents: bytemuck::cast_slice(&dir_lights),
@@ -458,44 +478,19 @@ impl LightsUniform {
         }
     }
 
-    pub fn update_point_lights(&self, queue: &wgpu::Queue, lights: Vec<PointLight>) {
-        // the shader only supports a limited number of lights and we use a padding u32
-        // to determine when to short circuit running the lights
-        let short = usize::min(lights.len(), MAX_POINT_LIGHTS);
-        let mut taken_lights: Vec<_> = vec![];
-        for (mut light, index) in lights.into_iter().zip(1..).take(short) {
-            light.should_continue = if index < short { 1 } else { 0 };
-            taken_lights.push(short);
-        }
-        queue.write_buffer(&self.point_buffer, 0, bytemuck::cast_slice(&taken_lights));
+    pub fn update_point_lights(&self, queue: &wgpu::Queue, mut lights: Vec<PointLight>) {
+        PointLight::process_lights(&mut lights, MAX_POINT_LIGHTS, false);
+        queue.write_buffer(&self.point_buffer, 0, bytemuck::cast_slice(&lights));
     }
 
-    pub fn update_spot_lights(&self, queue: &wgpu::Queue, lights: Vec<SpotLight>) {
-        // the shader only supports a limited number of lights and we use a padding u32
-        // to determine when to short circuit running the lights
-        let short = usize::min(lights.len(), MAX_POINT_LIGHTS);
-        let mut taken_lights: Vec<_> = vec![];
-        for (mut light, index) in lights.into_iter().zip(1..).take(short) {
-            light.should_continue = if index < short { 1 } else { 0 };
-            taken_lights.push(short);
-        }
-        queue.write_buffer(&self.spot_buffer, 0, bytemuck::cast_slice(&taken_lights));
+    pub fn update_spot_lights(&self, queue: &wgpu::Queue, mut lights: Vec<SpotLight>) {
+        SpotLight::process_lights(&mut lights, MAX_SPOT_LIGHTS, false);
+        queue.write_buffer(&self.spot_buffer, 0, bytemuck::cast_slice(&lights));
     }
 
-    pub fn update_directional_lights(&self, queue: &wgpu::Queue, lights: Vec<DirectionalLight>) {
-        // the shader only supports a limited number of lights and we use a padding u32
-        // to determine when to short circuit running the lights
-        let short = usize::min(lights.len(), MAX_POINT_LIGHTS);
-        let mut taken_lights: Vec<_> = vec![];
-        for (mut light, index) in lights.into_iter().zip(1..).take(short) {
-            light.should_continue = if index < short { 1 } else { 0 };
-            taken_lights.push(short);
-        }
-        queue.write_buffer(
-            &self.directional_buffer,
-            0,
-            bytemuck::cast_slice(&taken_lights),
-        );
+    pub fn update_directional_lights(&self, queue: &wgpu::Queue, mut lights: Vec<DirectionalLight>) {
+        DirectionalLight::process_lights(&mut lights, MAX_DIRECTIONAL_LIGHTS, false);
+        queue.write_buffer(&self.directional_buffer, 0, bytemuck::cast_slice(&lights));
     }
 }
 
