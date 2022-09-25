@@ -427,6 +427,9 @@ fn main() -> Result<(), anyhow::Error> {
         vec![],
     );
 
+    lights.update_point_lights(&queue, vec![point_light]);
+    lights.update_spot_lights(&queue, vec![spot_light]);
+
     let pipeline = renderling::forward::create_pipeline(&device, format)?;
 
     event_loop.run(move |event, _target, control_flow| {
