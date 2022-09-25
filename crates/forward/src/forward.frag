@@ -19,7 +19,7 @@ layout(set = 0, binding = 0) uniform Camera {
 
 struct PointLight {
   vec3 position;
-  uint should_continue;
+  uint num_lights;
 
   vec3 attenuation;
   uint _padding;
@@ -31,7 +31,7 @@ struct PointLight {
 
 struct SpotLight {
   vec3 position;
-  uint should_continue;
+  uint num_lights;
 
   vec3 direction;
   float inner_cutoff;
@@ -46,7 +46,7 @@ struct SpotLight {
 
 struct DirectionalLight {
   vec3 direction;
-  uint should_continue;
+  uint num_lights;
 
   vec4 ambient_color;
   vec4 diffuse_color;
@@ -150,28 +150,28 @@ void main()
 
   vec3 color = vec3(0.0);
 
-  for (int i = 0; i < MAX_DIRECTIONAL_LIGHTS; i++) {
+  for (uint i = 0; i < MAX_DIRECTIONAL_LIGHTS; i++) {
     DirectionalLight light = uDirectionalLights[i];
+    if (i >= light.num_lights) {
+      break;
+    }
     color += color_directional(light, norm, cameraToFragDir, diffuseColor, specularColor);
-    if (light.should_continue == 0) {
-      break;
-    }
   }
 
-  for (int i = 0; i < MAX_POINT_LIGHTS; i++) {
+  for (uint i = 0; i < MAX_POINT_LIGHTS; i++) {
     PointLight light = uPointLights[i];
-    color += color_point(light, norm, cameraToFragDir, diffuseColor, specularColor);
-    if (light.should_continue == 0) {
+    if (i >= light.num_lights) {
       break;
     }
+    color += color_point(light, norm, cameraToFragDir, diffuseColor, specularColor);
   }
 
-  for (int i = 0; i < MAX_SPOT_LIGHTS; i++) {
+  for (uint i = 0; i < MAX_SPOT_LIGHTS; i++) {
     SpotLight light = uSpotLights[i];
-    color += color_spot(light, norm, cameraToFragDir, diffuseColor, specularColor);
-    if (light.should_continue == 0) {
+    if (i >= light.num_lights) {
       break;
     }
+    color += color_spot(light, norm, cameraToFragDir, diffuseColor, specularColor);
   }
 
   FragColor = vec4(color, 1.0);
