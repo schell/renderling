@@ -1,6 +1,6 @@
 [package]
 name = "renderling_build"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2018"
 description = "Helper for compiling GLSL shaders for renderlings. To be used in build.rs files."
 repository = "https://github.com/schell/renderling"
