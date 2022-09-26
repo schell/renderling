@@ -46,14 +46,14 @@ pub fn conduct_clear_pass(
 
     let _ = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
         label,
-        color_attachments: &[wgpu::RenderPassColorAttachment {
+        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
             view: frame_view,
             resolve_target: None,
             ops: wgpu::Operations {
                 load: wgpu::LoadOp::Clear(clear_color),
                 store: true,
             },
-        }],
+        })],
         depth_stencil_attachment: depth_view.map(|view| wgpu::RenderPassDepthStencilAttachment {
             view,
             depth_ops: Some(wgpu::Operations {

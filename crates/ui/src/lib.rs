@@ -2,7 +2,7 @@
 use std::ops::Range;
 use wgpu::{util::DeviceExt, TextureFormat};
 
-pub use renderling_core::{ObjectDraw, ViewProjection, Camera};
+pub use renderling_core::{Camera, ObjectDraw, ViewProjection};
 
 #[repr(C)]
 #[derive(Copy, Clone, Default, bytemuck::Pod, bytemuck::Zeroable)]
@@ -79,9 +79,7 @@ pub fn object_texture_bindgroup_layout(device: &wgpu::Device) -> wgpu::BindGroup
             wgpu::BindGroupLayoutEntry {
                 binding: 2,
                 visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Sampler(
-                    wgpu::SamplerBindingType::Filtering
-                ),
+                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                 count: None,
             },
         ],
@@ -149,8 +147,8 @@ pub fn create_ui_material_bindgroup(
 }
 
 pub fn create_pipeline(device: &wgpu::Device, format: TextureFormat) -> wgpu::RenderPipeline {
-    let ui_vert_shader = device.create_shader_module(&wgpu::include_spirv!("shader.vert.spv"));
-    let ui_frag_shader = device.create_shader_module(&wgpu::include_spirv!("shader.frag.spv"));
+    let ui_vert_shader = device.create_shader_module(wgpu::include_spirv!("shader.vert.spv"));
+    let ui_frag_shader = device.create_shader_module(wgpu::include_spirv!("shader.frag.spv"));
 
     let render_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("ui render pipeline layout"),
@@ -190,11 +188,11 @@ pub fn create_pipeline(device: &wgpu::Device, format: TextureFormat) -> wgpu::Re
             fragment: Some(wgpu::FragmentState {
                 module: &ui_frag_shader,
                 entry_point: "main",
-                targets: &[wgpu::ColorTargetState {
+                targets: &[Some(wgpu::ColorTargetState {
                     format,
                     blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                     write_mask: wgpu::ColorWrites::ALL,
-                }],
+                })],
             }),
             primitive: wgpu::PrimitiveState {
                 topology: wgpu::PrimitiveTopology::TriangleList,
@@ -228,8 +226,8 @@ pub fn create_pipeline(device: &wgpu::Device, format: TextureFormat) -> wgpu::Re
 ///
 /// Bundles together buffers, ranges, material and draw instructions.
 ///
-/// **Note:** There is a slot for `Extra` data to help with collation and sorting, if
-/// need be.
+/// **Note:** There is a slot for `Extra` data to help with collation and
+/// sorting, if need be.
 pub struct Object<'a, Extra> {
     pub mesh_buffer: wgpu::BufferSlice<'a>,
     pub instances: wgpu::BufferSlice<'a>,
@@ -237,7 +235,7 @@ pub struct Object<'a, Extra> {
     pub material: Option<&'a wgpu::BindGroup>,
     pub name: Option<&'a str>,
     pub draw: ObjectDraw<'a>,
-    pub extra: Extra
+    pub extra: Extra,
 }
 
 pub fn render<'a, O, Extra>(
@@ -250,15 +248,11 @@ pub fn render<'a, O, Extra>(
     default_material_bindgroup: &'a wgpu::BindGroup,
     camera: &'a Camera<'a>,
     objects: O,
-)
-where
+) where
     O: Iterator<Item = &'a Object<'a, Extra>>,
-    Extra: 'a
+    Extra: 'a,
 {
-    tracing::trace!(
-        "{} rendering",
-        label,
-    );
+    tracing::trace!("{} rendering", label,);
 
     let encoder_label = format!("{} ui encoder", label);
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -269,14 +263,14 @@ where
     // start the render pass
     let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
         label: Some(&render_pass_label),
-        color_attachments: &[wgpu::RenderPassColorAttachment {
+        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
             view: &frame_texture_view,
             resolve_target: None,
             ops: wgpu::Operations {
                 load: wgpu::LoadOp::Load,
                 store: true,
             },
-        }],
+        })],
         depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
             view: &depth_texture_view,
             depth_ops: Some(wgpu::Operations {
@@ -305,15 +299,21 @@ where
         render_pass.set_vertex_buffer(1, object.instances);
         // draw
         match &object.draw {
-            ObjectDraw::Indexed { index_buffer, index_range, base_vertex, index_format } => {
+            ObjectDraw::Indexed {
+                index_buffer,
+                index_range,
+                base_vertex,
+                index_format,
+            } => {
                 render_pass.set_index_buffer(*index_buffer, *index_format);
-                render_pass.draw_indexed(index_range.clone(), *base_vertex, object.instances_range.clone());
-            }
-            ObjectDraw::Default { vertex_range } => {
-                render_pass.draw(
-                    vertex_range.clone(),
+                render_pass.draw_indexed(
+                    index_range.clone(),
+                    *base_vertex,
                     object.instances_range.clone(),
                 );
+            }
+            ObjectDraw::Default { vertex_range } => {
+                render_pass.draw(vertex_range.clone(), object.instances_range.clone());
             }
         }
     }

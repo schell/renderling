@@ -121,10 +121,8 @@ pub fn create_pipeline(
     device: &wgpu::Device,
     format: TextureFormat,
 ) -> anyhow::Result<wgpu::RenderPipeline> {
-    let forward_vert_shader =
-        device.create_shader_module(&wgpu::include_spirv!("forward.vert.spv"));
-    let forward_frag_shader =
-        device.create_shader_module(&wgpu::include_spirv!("forward.frag.spv"));
+    let forward_vert_shader = device.create_shader_module(wgpu::include_spirv!("forward.vert.spv"));
+    let forward_frag_shader = device.create_shader_module(wgpu::include_spirv!("forward.frag.spv"));
 
     let render_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("renderling forward pipeline layout"),
@@ -171,11 +169,11 @@ pub fn create_pipeline(
             fragment: Some(wgpu::FragmentState {
                 module: &forward_frag_shader,
                 entry_point: "main",
-                targets: &[wgpu::ColorTargetState {
+                targets: &[Some(wgpu::ColorTargetState {
                     format,
                     blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                     write_mask: wgpu::ColorWrites::ALL,
-                }],
+                })],
             }),
             primitive: wgpu::PrimitiveState {
                 topology: wgpu::PrimitiveTopology::TriangleList,
@@ -388,13 +386,11 @@ trait Light: Default {
 
     fn process_lights<L: Light>(lights: &mut Vec<L>, max_lights: usize, fill: bool) {
         let len = lights.len();
-        let resize_len = if fill {
-            max_lights
-        } else {
-            len.max(1)
-        };
+        let resize_len = if fill { max_lights } else { len.max(1) };
         lights.resize_with(resize_len, L::default);
-        lights.iter_mut().for_each(|light| light.set_num_lights(len as u32));
+        lights
+            .iter_mut()
+            .for_each(|light| light.set_num_lights(len as u32));
     }
 }
 
@@ -488,7 +484,11 @@ impl LightsUniform {
         queue.write_buffer(&self.spot_buffer, 0, bytemuck::cast_slice(&lights));
     }
 
-    pub fn update_directional_lights(&self, queue: &wgpu::Queue, mut lights: Vec<DirectionalLight>) {
+    pub fn update_directional_lights(
+        &self,
+        queue: &wgpu::Queue,
+        mut lights: Vec<DirectionalLight>,
+    ) {
         DirectionalLight::process_lights(&mut lights, MAX_DIRECTIONAL_LIGHTS, false);
         queue.write_buffer(&self.directional_buffer, 0, bytemuck::cast_slice(&lights));
     }
@@ -498,8 +498,8 @@ impl LightsUniform {
 ///
 /// Bundles together buffers, ranges and draw instructions.
 ///
-/// **Note:** There is a slot for `Extra` data to help with collation and sorting, if
-/// need be.
+/// **Note:** There is a slot for `Extra` data to help with collation and
+/// sorting, if need be.
 #[derive(Clone)]
 pub struct Object<'a, Extra> {
     pub mesh_buffer: wgpu::BufferSlice<'a>,
@@ -507,7 +507,7 @@ pub struct Object<'a, Extra> {
     pub instances_range: Range<u32>,
     pub name: Option<&'a str>,
     pub draw: ObjectDraw<'a>,
-    pub extra: Extra
+    pub extra: Extra,
 }
 
 /// A collection of objects that share the same material.
@@ -529,7 +529,7 @@ pub fn render<'a, O, Extra>(
     object_groups: O,
 ) where
     O: Iterator<Item = &'a ObjectGroup<'a, Extra>>,
-    Extra: 'a
+    Extra: 'a,
 {
     tracing::trace!("rendering {}", label);
 
@@ -542,14 +542,14 @@ pub fn render<'a, O, Extra>(
     // start the render pass
     let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
         label: Some(&render_pass_label),
-        color_attachments: &[wgpu::RenderPassColorAttachment {
+        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
             view: &frame_view,
             resolve_target: None,
             ops: wgpu::Operations {
                 load: wgpu::LoadOp::Load,
                 store: true,
             },
-        }],
+        })],
         depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
             view: &depth_view,
             depth_ops: Some(wgpu::Operations {

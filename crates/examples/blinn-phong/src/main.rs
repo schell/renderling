@@ -137,7 +137,9 @@ fn main() -> Result<(), anyhow::Error> {
     .context("adapter could not request the device and queue")?;
 
     let format = surface
-        .get_preferred_format(&adapter)
+        .get_supported_formats(&adapter)
+        .first()
+        .copied()
         .context("surface is incompatible with the adapder")?;
     tracing::info!("surface prefers {:?} texture format", format);
     let surface_config = wgpu::SurfaceConfiguration {
