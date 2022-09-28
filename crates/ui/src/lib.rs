@@ -115,14 +115,10 @@ pub fn create_ui_material_bindgroup(
     diffuse_texture_view: &wgpu::TextureView,
     diffuse_texture_sampler: &wgpu::Sampler,
 ) -> wgpu::BindGroup {
-    let color_blend_buffer = if cfg!(all(target_arch = "wasm32")) {
-        vec![color_blend; 4]
-    } else {
-        vec![color_blend]
-    };
+    let color_blend_buffer: [u32; 4] = [color_blend; 4];
     let blend_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("ui object blend buffer"),
-        contents: bytemuck::cast_slice(color_blend_buffer.as_slice()),
+        contents: bytemuck::cast_slice(&color_blend_buffer),
         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
     });
 

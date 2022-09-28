@@ -207,7 +207,7 @@ fn main() -> Result<(), anyhow::Error> {
 
         let view: [[f32; 4]; 4] = nalgebra::Matrix4::look_at_rh(&position, &look_at, &up).into();
         let projection = perspective_rh(fovy, aspect, znear, zfar);
-        let viewproj = renderling::forward::ViewProjection { projection, view };
+        let viewproj = renderling::ViewProjection { projection, view };
 
         renderling::forward::create_camera_uniform(&device, viewproj, "3dcamera")
     };

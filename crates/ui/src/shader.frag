@@ -8,6 +8,9 @@ const uint ReplaceUvRedWithColor = 2u;
 
 layout(set = 1, binding = 0) uniform BlendStyle {
   uint uBlendStyle;
+  uint _padding0;
+  uint _padding1;
+  uint _padding2;
 };
 layout(set = 1, binding = 1) uniform texture2D uTexture;
 layout(set = 1, binding = 2) uniform sampler uSampler;

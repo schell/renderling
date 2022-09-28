@@ -10,6 +10,9 @@ layout(set = 1, binding = 2) uniform texture2D uSpecularTexture;
 layout(set = 1, binding = 3) uniform sampler uSpecularSampler;
 layout(set = 1, binding = 4) uniform MaterialShininess {
   float uShininess;
+  float _padding0;
+  float _padding1;
+  float _padding2;
 };
 
 layout(set = 0, binding = 0) uniform Camera {
