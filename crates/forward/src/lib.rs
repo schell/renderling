@@ -1,5 +1,6 @@
 //! A forward-shader renderling for simple 3d scenes.
 use std::ops::Range;
+use renderling_core::ViewProjection;
 use wgpu::{util::DeviceExt, TextureFormat};
 
 pub use renderling_core::{Camera, ObjectDraw};
@@ -203,14 +204,6 @@ pub fn create_pipeline(
     Ok(pipeline)
 }
 
-/// Shader resources for view and projection matrices.
-#[repr(C)]
-#[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct ViewProjection {
-    pub projection: [[f32; 4]; 4],
-    pub view: [[f32; 4]; 4],
-}
-
 pub fn camera_uniform_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
     device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         entries: &[wgpu::BindGroupLayoutEntry {
@@ -267,9 +260,10 @@ impl MaterialUniform {
         specular_texture_sampler: &wgpu::Sampler,
         shininess: f32,
     ) -> MaterialUniform {
+        let shininess: [f32; 4] = [shininess; 4];
         let shininess_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("renderling forward material shininess"),
-            contents: bytemuck::cast_slice(&[shininess]),
+            contents: bytemuck::cast_slice(&shininess),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
         let bindgroup = device.create_bind_group(&wgpu::BindGroupDescriptor {
