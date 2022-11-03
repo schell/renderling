@@ -1,6 +1,6 @@
 [package]
 name = "renderling_core"
-version = "0.1.3"
+version = "0.1.4"
 edition = "2018"
 description = "Types shared by renderling pipelines"
 repository = "https://github.com/schell/renderling"
@@ -16,4 +16,4 @@ wasm = ["wgpu/webgl"]
 
 [dependencies]
 bytemuck = { version = "1.7.2", features = ["derive"] }
-wgpu = { version = "^0.13" }
+wgpu = { version = "^0.14" }
