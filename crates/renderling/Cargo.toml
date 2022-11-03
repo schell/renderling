@@ -1,6 +1,6 @@
 [package]
 name = "renderling"
-version = "0.2.4"
+version = "0.2.5"
 edition = "2021"
 description = "A collection of WGPU render pipelines and simple types."
 repository = "https://github.com/schell/renderling"
@@ -18,8 +18,8 @@ wasm = ["renderling_forward/wasm", "renderling_ui/wasm"]
 
 [dependencies]
 renderling_core = { path = "../core", version = "^0.1.4" }
-renderling_forward = { path = "../forward", version = "^0.2.3", optional = true }
-renderling_ui = { path = "../ui", version = "^0.2.2", optional = true }
+renderling_forward = { path = "../forward", version = "^0.2.4", optional = true }
+renderling_ui = { path = "../ui", version = "^0.2.3", optional = true }
 
 [package.metadata.docs.rs]
 features = ["forward", "ui"]
