@@ -148,6 +148,7 @@ fn main() -> Result<(), anyhow::Error> {
         width: window_size.width,
         height: window_size.height,
         present_mode: wgpu::PresentMode::Fifo,
+        alpha_mode: wgpu::CompositeAlphaMode::Auto,
     };
     surface.configure(&device, &surface_config);
 
