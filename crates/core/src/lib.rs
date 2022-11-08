@@ -66,3 +66,15 @@ pub fn conduct_clear_pass(
 
     queue.submit(std::iter::once(encoder.finish()));
 }
+
+/// A uniform buffer living in the GPU.
+pub struct UniformBuffer {
+    pub buffer: wgpu::Buffer,
+    pub bindgroup: wgpu::BindGroup,
+}
+
+/// A vertex buffer living in the GPU.
+pub struct VertexBuffer {
+    pub buffer: wgpu::Buffer,
+    pub len: usize,
+}

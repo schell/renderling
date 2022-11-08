@@ -1,5 +1,6 @@
 use anyhow::Context;
 use nalgebra::{Matrix4, Point3, UnitVector3, Vector3};
+use renderling::{Texture, Mesh};
 use wgpu::util::DeviceExt;
 
 /// Creates a right-handed perspective projection matrix with `[0,1]` depth range.
@@ -91,7 +92,7 @@ pub fn unit_cube() -> Vec<(Point3<f32>, UnitVector3<f32>)> {
         .collect::<Vec<_>>()
 }
 
-fn main() -> Result<(), anyhow::Error> {
+pub fn run() -> Result<(), anyhow::Error> {
     // a builder for `FmtSubscriber`.
     let subscriber = tracing_subscriber::FmtSubscriber::builder()
         .with_max_level(tracing::Level::INFO)
@@ -152,49 +153,7 @@ fn main() -> Result<(), anyhow::Error> {
     };
     surface.configure(&device, &surface_config);
 
-    struct Texture {
-        _texture: wgpu::Texture,
-        view: wgpu::TextureView,
-        sampler: wgpu::Sampler,
-    }
-
-    let depth_texture = {
-        let size = wgpu::Extent3d {
-            width: window_size.width,
-            height: window_size.height,
-            depth_or_array_layers: 1,
-        };
-        let desc = wgpu::TextureDescriptor {
-            label: Some("depth_texture"),
-            size,
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Depth32Float,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-        };
-        let texture = device.create_texture(&desc);
-
-        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            address_mode_u: wgpu::AddressMode::ClampToEdge,
-            address_mode_v: wgpu::AddressMode::ClampToEdge,
-            address_mode_w: wgpu::AddressMode::ClampToEdge,
-            mag_filter: wgpu::FilterMode::Linear,
-            min_filter: wgpu::FilterMode::Linear,
-            mipmap_filter: wgpu::FilterMode::Nearest,
-            compare: Some(wgpu::CompareFunction::LessEqual),
-            lod_min_clamp: -100.0,
-            lod_max_clamp: 100.0,
-            ..Default::default()
-        });
-
-        Texture {
-            _texture: texture,
-            view,
-            sampler,
-        }
-    };
+    let depth_texture = Texture::create_depth_texture(&device, window_size.width, window_size.height);
 
     let (_camera_buffer, camera_bindgroup) = {
         let aspect = window_size.width as f32 / window_size.height as f32;
@@ -246,37 +205,8 @@ fn main() -> Result<(), anyhow::Error> {
         )
         .collect::<Vec<_>>();
 
-    pub struct MeshBuffer {
-        buffer: wgpu::Buffer,
-        len: usize,
-    }
-
-    pub struct Mesh {
-        vertex_buffer: MeshBuffer,
-    }
-
-    impl Mesh {
-        pub fn buffer<T: bytemuck::Pod>(
-            device: &wgpu::Device,
-            vertices: &[T],
-        ) -> Self {
-            tracing::trace!("buffering mesh");
-            let len = vertices.len();
-            let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("Vertex Buffer"),
-                contents: bytemuck::cast_slice(vertices),
-                usage: wgpu::BufferUsages::VERTEX,
-            });
-            let vertex_buffer = MeshBuffer { buffer, len };
-
-            Mesh {
-                vertex_buffer,
-            }
-        }
-    }
-
-    let sphere_mesh: Mesh = Mesh::buffer(&device, &sphere_vertices);
-    let cube_mesh: Mesh = Mesh::buffer(&device, &cube_vertices);
+    let sphere_mesh: Mesh = Mesh::buffer(Some("sphere mesh"), &device, &sphere_vertices, None);
+    let cube_mesh: Mesh = Mesh::buffer(Some("cube mesh"), &device, &cube_vertices, None);
 
     let sphere_model_matrix:Matrix4<f32> = Matrix4::identity();
     let sphere_normal_matrix = sphere_model_matrix
@@ -308,71 +238,7 @@ fn main() -> Result<(), anyhow::Error> {
         usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
     });
 
-    impl Texture {
-        fn create_texture(
-            device: &wgpu::Device,
-            queue: &wgpu::Queue,
-            label: Option<&str>,
-            usage: Option<wgpu::TextureUsages>,
-            color_channels: u32,
-            width: u32,
-            height: u32,
-            data: &[u8],
-        ) -> Self {
-            let size = wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
-            };
-
-            let texture = device.create_texture(&wgpu::TextureDescriptor {
-                label,
-                size,
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                usage: usage.unwrap_or(
-                    wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-                ),
-            });
-
-            queue.write_texture(
-                wgpu::ImageCopyTextureBase {
-                    texture: &texture,
-                    mip_level: 0,
-                    origin: wgpu::Origin3d::ZERO,
-                    aspect: wgpu::TextureAspect::All,
-                },
-                data,
-                wgpu::ImageDataLayout {
-                    offset: 0,
-                    bytes_per_row: std::num::NonZeroU32::new(color_channels * width),
-                    rows_per_image: std::num::NonZeroU32::new(height),
-                },
-                size,
-            );
-
-            let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-            let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-                address_mode_u: wgpu::AddressMode::ClampToEdge,
-                address_mode_v: wgpu::AddressMode::ClampToEdge,
-                address_mode_w: wgpu::AddressMode::ClampToEdge,
-                mag_filter: wgpu::FilterMode::Linear,
-                min_filter: wgpu::FilterMode::Nearest,
-                mipmap_filter: wgpu::FilterMode::Nearest,
-                ..Default::default()
-            });
-
-            Texture {
-                _texture: texture,
-                view,
-                sampler,
-            }
-        }
-    }
-
-    let material_diffuse_texture = Texture::create_texture(
+    let material_diffuse_texture = Texture::new(
         &device,
         &queue,
         Some("diffuse material component"),
@@ -382,7 +248,7 @@ fn main() -> Result<(), anyhow::Error> {
         1,
         &[0xff, 0xff, 0xff, 0xff],
     );
-    let material_specular_texture = Texture::create_texture(
+    let material_specular_texture = Texture::new(
         &device,
         &queue,
         Some("specular material component"),

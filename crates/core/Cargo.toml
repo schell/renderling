@@ -1,6 +1,6 @@
 [package]
 name = "renderling_core"
-version = "0.1.4"
+version = "0.1.5"
 edition = "2018"
 description = "Types shared by renderling pipelines"
 repository = "https://github.com/schell/renderling"
