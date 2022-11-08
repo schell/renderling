@@ -31,3 +31,9 @@ pub mod ui {
     //! See [renderling_ui]'s module documentation for more info.
     pub use renderling_ui::*;
 }
+
+mod mesh;
+pub use mesh::*;
+
+mod texture;
+pub use texture::*;
