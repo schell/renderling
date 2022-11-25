@@ -1,5 +1,5 @@
 # renderling 🍖
-This library is a collection of WGPU render pipelines.
+This library is a collection of WGPU render pipelines and types.
 
 Shaders are written in GLSL. **shaderc** is used to compile shaders to SPIR-V.
 
@@ -10,15 +10,20 @@ A WGPU graphics pipeline, along with simple types used to marshal data to the GP
 
 ## Pipelines
 
-### Forward 
+### Forward
 A blinn-phong material forward shader.
 
-![renderling forward shader pipeline](img/forward.png "renderling forward pipeline")
+![renderling forward shader pipeline](https://raw.githubusercontent.com/schell/renderling/main/img/forward.png "renderling forward pipeline")
 
-### UI 
-A simple forward shader that supports vertices with colors and/or textures. It has a special 
-blending uniform that determines how vertex colors should be blended with vertex UV texture 
-coords. This enables support for colorful text. 
+### UI
+A simple forward shader that supports vertices with colors and/or textures. It has a special
+blending uniform that determines how vertex colors should be blended with vertex UV texture
+coords. This enables support for colorful text.
+
+## Conveniences
+
+* `Texture` type
+* `Mesh` and `MeshBuilder` types
 
 ## License
 Renderling is free and open source. All code in this repository is dual-licensed under either:
@@ -32,3 +37,9 @@ is the de-facto standard in the Rust ecosystem and there are very good reasons t
 Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion
 in the work by you, as defined in the Apache-2.0 license, shall be dual licensed as above,
 without any additional terms or conditions.
+
+## Roadmap
+
+- [ ] deferred shading pipeline
+- [ ] physically-based pipeline
+- [ ] rust-gpu shaders
