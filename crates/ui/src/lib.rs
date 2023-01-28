@@ -234,26 +234,15 @@ pub struct Object<'a, Extra> {
     pub extra: Extra,
 }
 
-pub fn render<'a, O, Extra>(
+/// Begin a new rendering pass.
+pub fn begin_render_pass<'a>(
+    encoder: &'a mut wgpu::CommandEncoder,
     label: &'a str,
-    device: &'a wgpu::Device,
-    queue: &'a wgpu::Queue,
     pipeline: &'a wgpu::RenderPipeline,
     frame_texture_view: &'a wgpu::TextureView,
     depth_texture_view: &'a wgpu::TextureView,
-    default_material_bindgroup: &'a wgpu::BindGroup,
-    camera: &'a Camera<'a>,
-    objects: O,
-) where
-    O: Iterator<Item = &'a Object<'a, Extra>>,
-    Extra: 'a,
-{
-    tracing::trace!("{} rendering", label,);
-
-    let encoder_label = format!("{} ui encoder", label);
-    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-        label: Some(&encoder_label),
-    });
+) -> wgpu::RenderPass<'a> {
+    tracing::trace!("{} rendering", label);
 
     let render_pass_label = format!("{} ui render pass", label);
     // start the render pass
@@ -278,40 +267,79 @@ pub fn render<'a, O, Extra>(
     });
     render_pass.set_pipeline(pipeline);
 
+    render_pass
+}
+
+pub fn render_object<'a, 'b: 'a, Extra: 'b>(
+    render_pass: &'a mut wgpu::RenderPass<'b>,
+    object: Object<'b, Extra>,
+    default_material_bindgroup: &'b wgpu::BindGroup,
+) {
+    // bind the material using the default for any non-textured meshes
+    render_pass.set_bind_group(
+        1,
+        object.material.unwrap_or(default_material_bindgroup),
+        &[],
+    );
+    render_pass.set_vertex_buffer(0, object.mesh_buffer);
+    render_pass.set_vertex_buffer(1, object.instances);
+    // draw
+    match &object.draw {
+        ObjectDraw::Indexed {
+            index_buffer,
+            index_range,
+            base_vertex,
+            index_format,
+        } => {
+            render_pass.set_index_buffer(*index_buffer, *index_format);
+            render_pass.draw_indexed(
+                index_range.clone(),
+                *base_vertex,
+                object.instances_range.clone(),
+            );
+        }
+        ObjectDraw::Default { vertex_range } => {
+            render_pass.draw(vertex_range.clone(), object.instances_range.clone());
+        }
+    }
+}
+
+pub fn render<'a, I, Extra>(
+    label: &'a str,
+    device: &'a wgpu::Device,
+    queue: &'a wgpu::Queue,
+    pipeline: &'a wgpu::RenderPipeline,
+    frame_texture_view: &'a wgpu::TextureView,
+    depth_texture_view: &'a wgpu::TextureView,
+    default_material_bindgroup: &'a wgpu::BindGroup,
+    camera: &'a wgpu::BindGroup,
+    objects: I,
+) where
+    I: Iterator<Item = Object<'a, Extra>>,
+    Extra: 'a,
+{
+    tracing::trace!("{} rendering", label,);
+
+    let encoder_label = format!("{} ui encoder", label);
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some(&encoder_label),
+    });
+
+    let mut render_pass = begin_render_pass(
+        &mut encoder,
+        label,
+        pipeline,
+        frame_texture_view,
+        depth_texture_view,
+    );
+
     // bind the camera to our shader uniform
-    render_pass.set_bind_group(0, camera.bindgroup, &[]);
+    render_pass.set_bind_group(0, camera, &[]);
 
     // draw objects
     for object in objects {
         tracing::trace!("    object {:?}", object.name);
-
-        // bind the material using the default for any non-textured meshes
-        render_pass.set_bind_group(
-            1,
-            object.material.unwrap_or(default_material_bindgroup),
-            &[],
-        );
-        render_pass.set_vertex_buffer(0, object.mesh_buffer);
-        render_pass.set_vertex_buffer(1, object.instances);
-        // draw
-        match &object.draw {
-            ObjectDraw::Indexed {
-                index_buffer,
-                index_range,
-                base_vertex,
-                index_format,
-            } => {
-                render_pass.set_index_buffer(*index_buffer, *index_format);
-                render_pass.draw_indexed(
-                    index_range.clone(),
-                    *base_vertex,
-                    object.instances_range.clone(),
-                );
-            }
-            ObjectDraw::Default { vertex_range } => {
-                render_pass.draw(vertex_range.clone(), object.instances_range.clone());
-            }
-        }
+        render_object(&mut render_pass, object, default_material_bindgroup);
     }
 
     drop(render_pass);
