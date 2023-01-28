@@ -14,7 +14,7 @@ pub use renderling_ui::{
 };
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::{camera::*, resources::*, MeshBuilder, Projection, WorldTransform};
+use crate::{camera::*, resources::*, MeshBuilder, WorldTransform};
 
 #[derive(Debug, Snafu)]
 pub enum UiRenderlingError {
@@ -442,20 +442,10 @@ impl<'a> From<&'a UiObjectData> for Object<'a, ()> {
             name: None,
             draw,
             extra: (),
-            //UiExtra {
-            //    layers,
-            //},
         };
         object
     }
 }
-
-//pub trait Renderling {
-//    type UserCamera;
-//    type CameraData;
-//    type UserObject;
-//    type ObjectData;
-//}
 
 #[derive(Default)]
 struct Scene {
@@ -468,6 +458,14 @@ struct Scene {
 }
 
 impl Scene {
+    fn get_camera_mut(&mut self, camera_id: Id) -> Option<&mut CameraData> {
+        self.cameras.iter_mut().find_map(|c| if c.0 == camera_id {
+            Some(&mut c.1)
+        } else {
+            None
+        })
+    }
+
     fn find_object_data_mut(
         &mut self,
         object_id: &Id,
@@ -587,7 +585,6 @@ impl UiRenderling {
     }
 
     pub fn new_camera(&mut self) -> UiCameraBuilder<'_> {
-        let position = Point3::new(0.0, 1.0, 2.5);
         let (width, height) = *self.size.read().unwrap();
         UiCameraBuilder {
             data: self,
@@ -678,7 +675,7 @@ impl UiRenderling {
         while let Ok(cmd) = self.camera_update_queue.1.try_recv() {
             match cmd {
                 CameraUpdateCmd { camera_id } => {
-                    if let Some((_, camera_data)) = self.scene.cameras.get_mut(*camera_id) {
+                    if let Some(camera_data) = self.scene.get_camera_mut(camera_id) {
                         cameras_to_sort.insert(camera_id);
                         let mut inner = camera_data.inner.write();
                         let (buffer, bindgroup) = new_camera_uniform(&inner, &self.device);
@@ -693,7 +690,8 @@ impl UiRenderling {
         for camera_id in cameras_to_sort.into_iter() {
             if let Some((_, camera_data)) = self.scene.cameras.get(*camera_id) {
                 if let Some(objects) = self.scene.visible_objects.get_mut(&camera_id) {
-                    let camera_position = camera_data.inner.read().position;
+                    let camera_position =
+                        Point3::from(camera_data.inner.read().view.translation.vector);
                     objects.sort_by(|a, b| {
                         let a_d = nalgebra::distance(&a.position, &camera_position);
                         let b_d = nalgebra::distance(&b.position, &camera_position);
@@ -930,9 +928,7 @@ mod test {
 
         // test updating the camera by starting with ortho2d
         let cam = ui.new_camera().with_projection_ortho2d().build();
-        cam.set_position(Point3::new(0.0, 12.0, 20.0));
-        cam.look_at(Point3::origin());
-        cam.set_up(Vector3::y_axis());
+        cam.look_at(Point3::new(0.0, 12.0, 20.0), Point3::origin(), Vector3::y());
         cam.set_projection(Projection::Perspective(Perspective3::new(
             1.0,
             std::f32::consts::PI / 4.0,

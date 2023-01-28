@@ -1,7 +1,7 @@
 //! Cameras, projections and utilities.
 use std::sync::mpsc::Sender;
 
-use nalgebra::{Matrix4, Perspective3, Point3, Unit, UnitVector3, Vector3, Orthographic3};
+use nalgebra::{Matrix4, Perspective3, Point3, Vector3, Orthographic3, Isometry3};
 
 use crate::resources::{Id, Shared};
 
@@ -31,21 +31,15 @@ impl From<&Projection> for Matrix4<f32> {
 /// Camera primitive shared by both user-land and under-the-hood camera data.
 #[derive(Clone)]
 pub struct CameraInner {
-    pub(crate) position: Point3<f32>,
-    pub(crate) look_at: Point3<f32>,
-    pub(crate) up: Unit<Vector3<f32>>,
+    pub(crate) view: Isometry3<f32>,
     pub(crate) projection: Projection,
     pub(crate) dirty_uniform: bool,
 }
 
 impl CameraInner {
-    pub fn as_view(&self) -> Matrix4<f32> {
-        Matrix4::look_at_rh(&self.position, &self.look_at, &self.up)
-    }
-
     pub fn as_projection_and_view(&self) -> (Matrix4<f32>, Matrix4<f32>) {
         let projection = self.projection.to_homogeneous();
-        let view = Matrix4::look_at_rh(&self.position, &self.look_at, &self.up);
+        let view = self.view.to_homogeneous();
         (projection, view)
     }
 
@@ -57,14 +51,13 @@ impl CameraInner {
         let near = 1.0;
         let far = -1.0;
         let projection = Projection::Orthographic(Orthographic3::new(left, right, bottom, top, near, far));
-        let position = Point3::from([0.0, 0.0, 0.0]);
-        let look_at = Point3::from([0.0, 0.0, -1.0]);
-        let up = Vector3::y_axis();
+        let eye = Point3::new(0.0, 0.0, 0.0);
+        let target = Point3::new(0.0, 0.0, -1.0);
+        let up = Vector3::y();
+        let view = Isometry3::look_at_rh(&eye, &target, &up);
         CameraInner {
-            position,
             projection,
-            look_at,
-            up,
+            view,
             dirty_uniform: false,
         }
     }
@@ -75,16 +68,13 @@ impl CameraInner {
         let znear = 0.1;
         let zfar = 100.0;
         let projection = Projection::Perspective(Perspective3::new(aspect, fovy, znear, zfar));
-        //    Projection::Perspective {
-        //};
-        let position = Point3::new(0.0, 12.0, 20.0);
-        let look_at = Point3::origin();
-        let up = Vector3::y_axis();
+        let eye = Point3::new(0.0, 12.0, 20.0);
+        let target = Point3::origin();
+        let up = Vector3::y();
+        let view = Isometry3::look_at_rh(&eye, &target, &up);
         CameraInner {
-            position,
             projection,
-            look_at,
-            up,
+            view,
             dirty_uniform: false,
         }
     }
@@ -116,24 +106,24 @@ impl Camera {
         }
     }
 
-    pub fn set_position(&self, position: Point3<f32>) {
+    /// Set the view.
+    ///
+    /// This is a combination of the camera's position and rotation.
+    pub fn set_view(&self, view: Isometry3<f32>) {
         self.update(|inner| {
-            inner.position = position;
+            inner.view = view;
         });
     }
 
-    pub fn look_at(&self, p: Point3<f32>) {
+
+    /// Set the view to a position and rotation that looks in a direction.
+    pub fn look_at(&self, eye: Point3<f32>, target: Point3<f32>, up: Vector3<f32>) {
         self.update(|inner| {
-            inner.look_at = p;
+            inner.view = Isometry3::look_at_rh(&eye, &target, &up)
         });
     }
 
-    pub fn set_up(&self, up: UnitVector3<f32>) {
-        self.update(|inner| {
-            inner.up = up;
-        });
-    }
-
+    /// Set the projection of the camera.
     pub fn set_projection(&self, projection: Projection) {
         self.update(|inner| {
             inner.projection = projection;
