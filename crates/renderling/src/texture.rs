@@ -9,7 +9,7 @@ use image::{
 };
 
 #[derive(Debug, Snafu)]
-pub enum RenderlingError {
+pub enum TextureError {
     #[snafu(display("Unable to load '{}' image from memory: {}", label, source))]
     Loading { source: ImageError, label: String },
 
@@ -20,7 +20,7 @@ pub enum RenderlingError {
     },
 }
 
-type Result<T, E = RenderlingError> = std::result::Result<T, E>;
+type Result<T, E = TextureError> = std::result::Result<T, E>;
 
 /// A texture living on the GPU.
 #[derive(Debug, Clone)]

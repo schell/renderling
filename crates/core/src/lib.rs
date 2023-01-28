@@ -10,6 +10,7 @@ pub struct ViewProjection {
 }
 
 /// A bindgroup that represents a camera uniform.
+// TODO: remove Camera<'a>
 pub struct Camera<'a> {
     pub bindgroup: &'a wgpu::BindGroup,
 }
