@@ -37,8 +37,12 @@ pub mod forward {
 #[cfg(feature = "ui")]
 pub mod ui;
 
+//#[cfg(feature = "forward")]
+//pub mod forward;
+
 mod mesh;
 mod projection;
+mod resources;
 mod state;
 mod texture;
 mod transform;
