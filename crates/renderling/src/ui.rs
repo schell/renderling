@@ -1,5 +1,5 @@
 //! Builds the UI pipeline and manages resources.
-use nalgebra::{Matrix4, Point3, Unit, UnitQuaternion, UnitVector3, Vector3};
+use nalgebra::{Matrix4, Point3, UnitQuaternion, Vector3};
 use snafu::prelude::*;
 use std::sync::{
     mpsc::{channel, Receiver, Sender},
@@ -14,7 +14,7 @@ pub use renderling_ui::{
 };
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::{resources::*, MeshBuilder, Projection, WorldTransform};
+use crate::{camera::*, resources::*, MeshBuilder, Projection, WorldTransform};
 
 #[derive(Debug, Snafu)]
 pub enum UiRenderlingError {
@@ -25,89 +25,17 @@ pub enum UiRenderlingError {
     MissingDefaultMaterial,
 }
 
-#[derive(Clone)]
-pub struct CameraInner {
-    position: Point3<f32>,
-    look_at: Point3<f32>,
-    up: Unit<Vector3<f32>>,
-    projection: Projection,
-    dirty_uniform: bool,
-}
-
-impl CameraInner {
-    pub fn as_view(&self) -> Matrix4<f32> {
-        Matrix4::look_at_rh(&self.position, &self.look_at, &self.up)
-    }
-
-    pub fn as_projection_and_view(&self) -> (Matrix4<f32>, Matrix4<f32>) {
-        let projection = self.projection.to_homogeneous();
-        let view = Matrix4::look_at_rh(&self.position, &self.look_at, &self.up);
-        (projection, view)
-    }
-
-    /// Create a new camera uniform
-    fn new_camera_uniform(&self, device: &wgpu::Device) -> (wgpu::Buffer, wgpu::BindGroup) {
-        let (projection, view) = self.as_projection_and_view();
-        let viewproj = ViewProjection {
-            projection: projection.into(),
-            view: view.into(),
-        };
-        create_camera_buffer_bindgroup(device, viewproj, "UiRenderling::new_camera_uniform")
-    }
-}
-
-struct CameraUpdateCmd {
-    camera_id: Id
-}
-
-#[derive(Clone)]
-pub struct Camera {
-    id: Id,
-    inner: Shared<CameraInner>,
-    cmd: Sender<CameraUpdateCmd>,
-}
-
-impl Camera {
-    fn update(&self, f: impl FnOnce(&mut CameraInner)) {
-        let mut inner = self.inner.write();
-        f(&mut inner);
-        if !inner.dirty_uniform {
-            self.cmd
-                .send(CameraUpdateCmd { camera_id: self.id })
-                .unwrap();
-            inner.dirty_uniform = true;
-        }
-    }
-
-    pub fn set_position(&self, position: Point3<f32>) {
-        self.update(|inner| {
-            inner.position = position;
-        });
-    }
-
-    pub fn look_at(&self, p: Point3<f32>) {
-        self.update(|inner| {
-            inner.look_at = p;
-        });
-    }
-
-    pub fn set_up(&self, up: UnitVector3<f32>) {
-        self.update(|inner| {
-            inner.up = up;
-        });
-    }
-
-    pub fn set_projection(&self, projection: crate::Projection) {
-        self.update(|inner| {
-            inner.projection = projection;
-        });
-    }
-}
-
-struct UiCameraData {
-    buffer: wgpu::Buffer,
-    bindgroup: wgpu::BindGroup,
-    inner: Shared<CameraInner>,
+/// Create a new camera uniform
+fn new_camera_uniform(
+    inner: &CameraInner,
+    device: &wgpu::Device,
+) -> (wgpu::Buffer, wgpu::BindGroup) {
+    let (projection, view) = inner.as_projection_and_view();
+    let viewproj = ViewProjection {
+        projection: projection.into(),
+        view: view.into(),
+    };
+    create_camera_buffer_bindgroup(device, viewproj, "UiRenderling::new_camera_uniform")
 }
 
 pub struct UiCameraBuilder<'a> {
@@ -121,25 +49,7 @@ impl<'a> UiCameraBuilder<'a> {
     /// out of the screen towards the viewer.
     pub fn with_projection_ortho2d(mut self) -> Self {
         let (width, height) = *self.data.size.read().unwrap();
-        let projection = Projection::Orthographic {
-            left: 0.0,
-            right: width as f32,
-            bottom: height as f32,
-            top: 0.0,
-            near: 1.0,
-            far: -1.0,
-        };
-        let position = Point3::from([0.0, 0.0, 0.0]);
-        let look_at = Point3::from([0.0, 0.0, -1.0]);
-        let up = Vector3::y_axis();
-        self.inner = CameraInner {
-            position,
-            projection,
-            look_at,
-            up,
-            dirty_uniform: false,
-        };
-
+        self.inner = CameraInner::new_ortho2d(width as f32, height as f32);
         self
     }
 
@@ -148,31 +58,15 @@ impl<'a> UiCameraBuilder<'a> {
         let (width, height) = *self.data.size.read().unwrap();
         let width = width as f32;
         let height = height as f32;
-        let projection = Projection::Perspective {
-            aspect: width / height,
-            fovy: std::f32::consts::PI / 4.0,
-            znear: 0.1,
-            zfar: 100.0,
-        };
-        let position = Point3::new(0.0, 12.0, 20.0);
-        let look_at = Point3::origin();
-        let up = Vector3::y_axis();
-        self.inner = CameraInner {
-            position,
-            projection,
-            look_at,
-            up,
-            dirty_uniform: false,
-        };
-
+        self.inner = CameraInner::new_perspective(width, height);
         self
     }
 
     pub fn build(self) -> Camera {
         let UiCameraBuilder { data, inner } = self;
-        let (buffer, bindgroup) = inner.new_camera_uniform(&data.device);
+        let (buffer, bindgroup) = new_camera_uniform(&inner, &data.device);
         let inner = Shared::new(inner);
-        let camera_data = UiCameraData {
+        let camera_data = CameraData {
             buffer,
             bindgroup,
             inner: inner.clone(),
@@ -566,7 +460,7 @@ impl<'a> From<&'a UiObjectData> for Object<'a, ()> {
 #[derive(Default)]
 struct Scene {
     // all cameras, in their render order
-    cameras: Vec<(Id, UiCameraData)>,
+    cameras: Vec<(Id, CameraData)>,
     // invisible objects keyed by their object id
     invisible_objects: FxHashMap<Id, UiObjectData>,
     // all visible objects collated by their camera's id, in render order
@@ -695,24 +589,9 @@ impl UiRenderling {
     pub fn new_camera(&mut self) -> UiCameraBuilder<'_> {
         let position = Point3::new(0.0, 1.0, 2.5);
         let (width, height) = *self.size.read().unwrap();
-        let aspect = width as f32 / height as f32;
-        let fovy = std::f32::consts::PI / 4.0;
-        let znear = 0.1;
-        let zfar = 100.0;
         UiCameraBuilder {
             data: self,
-            inner: CameraInner {
-                position,
-                look_at: Point3::origin(),
-                up: Vector3::y_axis(),
-                projection: Projection::Perspective {
-                    aspect,
-                    fovy,
-                    znear,
-                    zfar,
-                },
-                dirty_uniform: false,
-            },
+            inner: CameraInner::new_perspective(width as f32, height as f32),
         }
     }
 
@@ -802,7 +681,7 @@ impl UiRenderling {
                     if let Some((_, camera_data)) = self.scene.cameras.get_mut(*camera_id) {
                         cameras_to_sort.insert(camera_id);
                         let mut inner = camera_data.inner.write();
-                        let (buffer, bindgroup) = inner.new_camera_uniform(&self.device);
+                        let (buffer, bindgroup) = new_camera_uniform(&inner, &self.device);
                         inner.dirty_uniform = false;
                         camera_data.buffer = buffer;
                         camera_data.bindgroup = bindgroup;
@@ -873,7 +752,7 @@ impl UiRenderling {
 
 #[cfg(test)]
 mod test {
-    use nalgebra::Point2;
+    use nalgebra::{Perspective3, Point2};
 
     use crate::{ui::*, MeshBuilder, WgpuState};
 
@@ -1054,12 +933,12 @@ mod test {
         cam.set_position(Point3::new(0.0, 12.0, 20.0));
         cam.look_at(Point3::origin());
         cam.set_up(Vector3::y_axis());
-        cam.set_projection(Projection::Perspective {
-            aspect: 1.0,
-            fovy: std::f32::consts::PI / 4.0,
-            znear: 0.1,
-            zfar: 100.0,
-        });
+        cam.set_projection(Projection::Perspective(Perspective3::new(
+            1.0,
+            std::f32::consts::PI / 4.0,
+            0.1,
+            100.0,
+        )));
 
         let _cube = ui
             .new_object()

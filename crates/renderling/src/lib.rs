@@ -41,14 +41,14 @@ pub mod ui;
 //pub mod forward;
 
 mod mesh;
-mod projection;
+mod camera;
 mod resources;
 mod state;
 mod texture;
 mod transform;
 
 pub use mesh::*;
-pub use projection::*;
+pub use camera::*;
 pub use state::*;
 pub use texture::*;
 pub use transform::*;
