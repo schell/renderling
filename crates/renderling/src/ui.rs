@@ -152,7 +152,7 @@ pub struct UiObjectBuilder<'a> {
     mesh: Option<Arc<crate::Mesh>>,
     world_transform: WorldTransform,
     world_transforms: Vec<WorldTransform>,
-    material: Option<UiMaterial>,
+    material: Option<Material>,
     is_visible: bool,
     data: &'a mut UiRenderling,
 }
@@ -449,7 +449,7 @@ impl<'a> From<&'a UiObjectData> for Object<'a, ()> {
 
 #[derive(Default)]
 struct Scene {
-    // all cameras, in their render order
+    // all cameras, in their intended render order
     cameras: Vec<(Id, CameraData)>,
     // invisible objects keyed by their object id
     invisible_objects: FxHashMap<Id, UiObjectData>,
@@ -522,7 +522,7 @@ pub struct UiRenderling {
     // Built shader render pipeline
     pipeline: wgpu::RenderPipeline,
     // default material to use when there is no other
-    pub default_material: Option<UiMaterial>,
+    pub default_material: Option<crate::AnyMaterial>,
     pub default_material_bindgroup: Option<wgpu::BindGroup>,
     // for creating camera ids
     camera_id_bank: BankOfIds,
@@ -577,7 +577,7 @@ impl UiRenderling {
                 &default_material.diffuse_texture.view,
                 &default_material.diffuse_texture.sampler,
             );
-            renderling.default_material = Some(default_material);
+            renderling.default_material = Some(crate::AnyMaterial::new(default_material));
             renderling.default_material_bindgroup = Some(material_bindgroup);
         }
 

@@ -40,6 +40,7 @@ pub mod ui;
 //#[cfg(feature = "forward")]
 //pub mod forward;
 
+mod material;
 mod mesh;
 mod camera;
 mod resources;
@@ -47,6 +48,7 @@ mod state;
 mod texture;
 mod transform;
 
+pub use material::*;
 pub use mesh::*;
 pub use camera::*;
 pub use state::*;
