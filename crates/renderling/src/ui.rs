@@ -9,7 +9,7 @@ use wgpu::util::DeviceExt;
 
 pub use renderling_ui::{
     begin_render_pass, create_camera_buffer_bindgroup, create_pipeline,
-    create_ui_material_bindgroup, render_object, Camera as ShaderCamera, Object, ObjectDraw,
+    create_ui_material_bindgroup, render_object, Camera as ShaderCamera, Object as ShaderObject, ObjectDraw,
     Vertex, ViewProjection,
 };
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -219,7 +219,7 @@ impl<'a> ObjectBuilder<'a> {
         self
     }
 
-    pub fn build(self) -> Result<UiObject, ObjectBuilderError> {
+    pub fn build(self) -> Result<Object, ObjectBuilderError> {
         //let id = self.data.object_id_bank.dequeue();
         let material_bindgroup = self
             .material
@@ -241,7 +241,7 @@ impl<'a> ObjectBuilder<'a> {
         let instances = inner.new_world_transforms_buffer(self.device);
         let obj_inner = Shared::new(inner);
         let id = self.scene.new_object_id();
-        let obj_data = UiObjectData {
+        let obj_data = ObjectData {
             id,
             mesh,
             material_bindgroup,
@@ -258,7 +258,7 @@ impl<'a> ObjectBuilder<'a> {
             let _ = self.scene.invisible_objects.insert(obj_data.id, obj_data);
         }
 
-        let object = UiObject {
+        let object = Object {
             id,
             inner: obj_inner,
             cmd: self.update_tx,
@@ -309,18 +309,18 @@ impl ObjectInner {
     }
 }
 
-/// A `UiRenderling`'s library-user-facing display structure.
+/// A library-user-facing display "object".
 ///
-/// `UiObject`s are used as a handle to update graphical resources within the
+/// `Object`s are used as a handle to update graphical resources within the
 /// renderling that was used to create it. To release the underlying resources
 /// the object should be dropped.
-pub struct UiObject {
+pub struct Object {
     id: Id,
     inner: Shared<ObjectInner>,
     cmd: Sender<ObjUpdateCmd>,
 }
 
-impl UiObject {
+impl Object {
     /// Associate this object with the given camera.
     ///
     /// This will have the effect that the object will be drawn with this camera on
@@ -413,7 +413,7 @@ impl UiObject {
 }
 
 /// Underlying data used by `wgpu` to render an object.
-struct UiObjectData {
+struct ObjectData {
     id: Id,
     mesh: Arc<crate::Mesh>,
     material_bindgroup: Option<wgpu::BindGroup>,
@@ -422,8 +422,8 @@ struct UiObjectData {
     inner: Shared<ObjectInner>,
 }
 
-impl<'a> From<&'a UiObjectData> for Object<'a, ()> {
-    fn from(value: &'a UiObjectData) -> Self {
+impl<'a> From<&'a ObjectData> for ShaderObject<'a, ()> {
+    fn from(value: &'a ObjectData) -> Self {
         let draw = value
             .mesh
             .index_buffer
@@ -437,7 +437,7 @@ impl<'a> From<&'a UiObjectData> for Object<'a, ()> {
             .unwrap_or_else(|| ObjectDraw::Default {
                 vertex_range: 0..value.mesh.vertex_buffer.len as u32,
             });
-        let object = Object {
+        let object = ShaderObject {
             mesh_buffer: value.mesh.vertex_buffer.buffer.slice(..),
             instances: value.instances.buffer.slice(..),
             instances_range: 0..value.instances.len as u32,
@@ -459,9 +459,9 @@ struct Scene {
     // all cameras, in their intended render order
     cameras: Vec<(Id, CameraData)>,
     // invisible objects keyed by their object id
-    invisible_objects: FxHashMap<Id, UiObjectData>,
+    invisible_objects: FxHashMap<Id, ObjectData>,
     // all visible objects collated by their camera's id, in render order
-    visible_objects: FxHashMap<Id, Vec<UiObjectData>>,
+    visible_objects: FxHashMap<Id, Vec<ObjectData>>,
 }
 
 impl Scene {
@@ -487,7 +487,7 @@ impl Scene {
         &mut self,
         object_id: &Id,
         camera_id: Option<&Id>,
-    ) -> Option<&mut UiObjectData> {
+    ) -> Option<&mut ObjectData> {
         if let Some(camera_id) = camera_id {
             let objects = self.visible_objects.get_mut(camera_id)?;
             objects.iter_mut().find(|o| o.id == *object_id)
@@ -748,7 +748,7 @@ impl UiRenderling {
             render_pass.set_bind_group(0, &camera_data.bindgroup, &[]);
 
             if let Some(visible_objects) = self.scene.visible_objects.get(camera_id) {
-                for object in visible_objects.iter().map(Object::from) {
+                for object in visible_objects.iter().map(ShaderObject::from) {
                     render_object(&mut render_pass, object, default_material_bindgroup)
                 }
             }
@@ -785,7 +785,7 @@ mod test {
         gpu: WgpuState,
         ui: UiRenderling,
         _cam: Camera,
-        tri: UiObject,
+        tri: Object,
     }
 
     fn cmy_triangle_setup() -> CmyTri {
