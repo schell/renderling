@@ -1,9 +1,11 @@
 //! Builds the UI pipeline and manages resources.
 use nalgebra::{Matrix4, Point3, UnitQuaternion, Vector3};
 use snafu::prelude::*;
-use std::sync::{
-    mpsc::{channel, Receiver, Sender},
-    Arc, RwLock,
+use std::{
+    sync::{
+        mpsc::{channel, Receiver, Sender},
+        Arc, RwLock,
+    },
 };
 use wgpu::util::DeviceExt;
 
@@ -141,6 +143,17 @@ pub struct UiMaterial {
     pub color_blend: UiColorBlend,
 }
 
+impl crate::Material for UiMaterial {
+    fn create_bindgroup(&self, device: &wgpu::Device) -> wgpu::BindGroup {
+        create_ui_material_bindgroup(
+            device,
+            self.color_blend as u32,
+            &self.diffuse_texture.view,
+            &self.diffuse_texture.sampler,
+        )
+    }
+}
+
 #[derive(Debug, Snafu)]
 pub enum UiObjectBuilderError {
     #[snafu(display("object builder is missing `mesh`"))]
@@ -150,9 +163,9 @@ pub enum UiObjectBuilderError {
 pub struct UiObjectBuilder<'a> {
     camera: Option<Camera>,
     mesh: Option<Arc<crate::Mesh>>,
+    material: Option<crate::AnyMaterial>,
     world_transform: WorldTransform,
     world_transforms: Vec<WorldTransform>,
-    material: Option<UiMaterial>,
     is_visible: bool,
     data: &'a mut UiRenderling,
 }
@@ -193,8 +206,8 @@ impl<'a> UiObjectBuilder<'a> {
         self
     }
 
-    pub fn with_material(mut self, material: UiMaterial) -> Self {
-        self.material = Some(material);
+    pub fn with_material<T: crate::Material>(mut self, material: impl Into<Arc<T>>) -> Self {
+        self.material = Some(crate::AnyMaterial::new(material));
         self
     }
 
@@ -205,14 +218,10 @@ impl<'a> UiObjectBuilder<'a> {
 
     pub fn build(self) -> Result<UiObject, UiObjectBuilderError> {
         let id = self.data.object_id_bank.dequeue();
-        let material_bindgroup = self.material.as_ref().map(|material| {
-            create_ui_material_bindgroup(
-                &self.data.device,
-                material.color_blend as u32,
-                &material.diffuse_texture.view,
-                &material.diffuse_texture.sampler,
-            )
-        });
+        let material_bindgroup = self
+            .material
+            .as_ref()
+            .map(|mat| mat.create_bindgroup(&self.data.device));
         let mesh = self.mesh.context(MissingMeshSnafu)?;
         let position = Point3::from(self.world_transform.translate.xyz());
         let world_transforms = std::iter::once(self.world_transform)
@@ -272,7 +281,7 @@ impl<'a> UiObjectBuilder<'a> {
 /// in `UiRenderling::update`.
 struct UiObjectInner {
     mesh: Arc<crate::Mesh>,
-    material: Option<UiMaterial>,
+    material: Option<crate::AnyMaterial>,
     world_transforms: Vec<WorldTransform>,
     camera: Option<Camera>,
     is_visible: bool,
@@ -397,9 +406,9 @@ impl UiObject {
     }
 
     /// Update the material of this object.
-    pub fn set_material(&self, material: UiMaterial) {
+    pub fn set_material<T: crate::Material>(&self, material: impl Into<Arc<T>>) {
         let mut inner = self.inner.write();
-        inner.material = Some(material);
+        inner.material = Some(crate::AnyMaterial::new(material));
         self.cmd
             .send(UiUpdateCmd::ObjectMaterial {
                 object_id: self.id,
@@ -459,10 +468,12 @@ struct Scene {
 
 impl Scene {
     fn get_camera_mut(&mut self, camera_id: Id) -> Option<&mut CameraData> {
-        self.cameras.iter_mut().find_map(|c| if c.0 == camera_id {
-            Some(&mut c.1)
-        } else {
-            None
+        self.cameras.iter_mut().find_map(|c| {
+            if c.0 == camera_id {
+                Some(&mut c.1)
+            } else {
+                None
+            }
         })
     }
 
@@ -659,14 +670,10 @@ impl UiRenderling {
                         .find_object_data_mut(&object_id, camera_id.as_ref())
                     {
                         let inner = object.inner.read();
-                        object.material_bindgroup = inner.material.as_ref().map(|material| {
-                            create_ui_material_bindgroup(
-                                &self.device,
-                                material.color_blend as u32,
-                                &material.diffuse_texture.view,
-                                &material.diffuse_texture.sampler,
-                            )
-                        });
+                        object.material_bindgroup = inner
+                            .material
+                            .as_ref()
+                            .map(|mat| mat.create_bindgroup(&self.device));
                     }
                 }
             }
