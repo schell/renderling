@@ -446,8 +446,42 @@ impl WgpuState {
     }
 
     #[cfg(feature = "ui")]
-    pub fn new_ui_renderling(&self) -> crate::ui::UiRenderling {
-        crate::ui::UiRenderling::new(self, None)
+    pub fn new_ui_renderling(&self) -> crate::renderling::Renderling {
+        let mut renderling = crate::renderling::Renderling::new(self, crate::UiPipeline::new(
+            &self.device,
+            self.target.format(),
+        ));
+
+        #[cfg(feature = "image")]
+        {
+            // this is the _default_ texture bind group which will be used when
+            // there is no available texture to bind.
+            let default_img: image::RgbaImage =
+                image::ImageBuffer::from_pixel(1, 1, image::Rgba([0; 4]));
+            let default_texture: crate::Texture = crate::Texture::from_image_buffer(
+                &self.device,
+                &self.queue,
+                &default_img,
+                Some("Renderling default texture"),
+                None,
+            )
+            .unwrap();
+
+            let default_material = crate::UiMaterial {
+                diffuse_texture: default_texture,
+                color_blend: crate::UiColorBlend::ColorOnly,
+            };
+            let material_bindgroup = renderling_ui::create_ui_material_bindgroup(
+                &self.device,
+                default_material.color_blend as u32,
+                &default_material.diffuse_texture.view,
+                &default_material.diffuse_texture.sampler,
+            );
+            renderling.default_material = Some(crate::AnyMaterial::new(default_material));
+            renderling.default_material_bindgroup = Some(material_bindgroup);
+        }
+
+        renderling
     }
 }
 

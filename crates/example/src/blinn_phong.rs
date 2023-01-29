@@ -1,8 +1,5 @@
 use nalgebra::{Matrix4, Point3, UnitVector3, Vector3};
-use renderling::{
-    ui::{self, UiRenderling},
-    MeshBuilder, Texture, WgpuState,
-};
+use renderling::{MeshBuilder, Renderling, Texture, WgpuState};
 use wgpu::util::DeviceExt;
 
 /// Points around the unit cube.
@@ -91,20 +88,20 @@ pub fn run() -> Result<(), anyhow::Error> {
     // Set up wgpu
     let mut wgpu_state = WgpuState::from_window(&window).unwrap();
     // Get our ui renderling
-    let mut ui: UiRenderling = wgpu_state.new_ui_renderling();
+    let mut ui: Renderling = wgpu_state.new_ui_renderling();
 
     let ui_camera = ui.new_camera().with_projection_ortho2d().build();
     let triangle = ui
         .new_object()
         .with_camera(&ui_camera)
         .with_mesh_builder(MeshBuilder::default().with_vertices(vec![
-                    ui::Vertex::default()
+                    renderling::Vertex::default()
                         .with_position(10.0, 10.0, 0.5)
                         .with_color(0.0, 1.0, 1.0, 1.0),
-                    ui::Vertex::default()
+                    renderling::Vertex::default()
                         .with_position(window_size.width as f32 - 10.0, 10.0, 0.5)
                         .with_color(1.0, 0.0, 1.0, 1.0),
-                    ui::Vertex::default()
+                    renderling::Vertex::default()
                         .with_position(10.0, window_size.height as f32 - 10.0, 0.5)
                         .with_color(1.0, 1.0, 0.0, 1.0),
                 ]))
