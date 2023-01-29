@@ -35,22 +35,30 @@ pub mod forward {
 }
 
 #[cfg(feature = "ui")]
-pub mod ui;
+mod ui;
+
+#[cfg(feature = "ui")]
+pub use ui::*;
+
 
 //#[cfg(feature = "forward")]
 //pub mod forward;
 
+mod camera;
 mod material;
 mod mesh;
-mod camera;
+mod pipeline;
 mod resources;
+mod renderling;
 mod state;
 mod texture;
 mod transform;
 
+pub use camera::*;
 pub use material::*;
 pub use mesh::*;
-pub use camera::*;
+pub use pipeline::*;
+pub use renderling::*;
 pub use state::*;
 pub use texture::*;
 pub use transform::*;

@@ -243,11 +243,9 @@ pub fn begin_render_pass<'a>(
     depth_texture_view: &'a wgpu::TextureView,
 ) -> wgpu::RenderPass<'a> {
     tracing::trace!("{} rendering", label);
-
-    let render_pass_label = format!("{} ui render pass", label);
     // start the render pass
     let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-        label: Some(&render_pass_label),
+        label: Some(label),
         color_attachments: &[Some(wgpu::RenderPassColorAttachment {
             view: &frame_texture_view,
             resolve_target: None,
