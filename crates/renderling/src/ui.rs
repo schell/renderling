@@ -1,11 +1,9 @@
 //! Builds the UI pipeline and manages resources.
 use nalgebra::{Matrix4, Point3, UnitQuaternion, Vector3};
 use snafu::prelude::*;
-use std::{
-    sync::{
-        mpsc::{channel, Receiver, Sender},
-        Arc, RwLock,
-    },
+use std::sync::{
+    mpsc::{channel, Receiver, Sender},
+    Arc, RwLock,
 };
 use wgpu::util::DeviceExt;
 
@@ -37,49 +35,52 @@ fn new_camera_uniform(
         projection: projection.into(),
         view: view.into(),
     };
-    create_camera_buffer_bindgroup(device, viewproj, "UiRenderling::new_camera_uniform")
+    create_camera_buffer_bindgroup(device, viewproj, "new_camera_uniform")
 }
 
-pub struct UiCameraBuilder<'a> {
-    data: &'a mut UiRenderling,
+pub struct CameraBuilder<'a> {
+    width: f32,
+    height: f32,
+    device: &'a wgpu::Device,
+    update_tx: Sender<CameraUpdateCmd>,
+    scene: &'a mut Scene,
     inner: CameraInner,
 }
 
-impl<'a> UiCameraBuilder<'a> {
+impl<'a> CameraBuilder<'a> {
     /// Create an orthographic 2d camera with a projection where the x axis
     /// increases to the right, the y axis increases down and z increases
     /// out of the screen towards the viewer.
     pub fn with_projection_ortho2d(mut self) -> Self {
-        let (width, height) = *self.data.size.read().unwrap();
-        self.inner = CameraInner::new_ortho2d(width as f32, height as f32);
+        self.inner = CameraInner::new_ortho2d(self.width, self.height);
         self
     }
 
     /// Create a perspective 3d camera positioned at 0,12,20 looking at the origin.
     pub fn with_projection_perspective(mut self) -> Self {
-        let (width, height) = *self.data.size.read().unwrap();
-        let width = width as f32;
-        let height = height as f32;
-        self.inner = CameraInner::new_perspective(width, height);
+        self.inner = CameraInner::new_perspective(self.width, self.height);
         self
     }
 
     pub fn build(self) -> Camera {
-        let UiCameraBuilder { data, inner } = self;
-        let (buffer, bindgroup) = new_camera_uniform(&inner, &data.device);
+        let id = self.scene.new_camera_id();
+        let CameraBuilder {
+            device,
+            update_tx: cmd,
+            scene,
+            width: _,
+            height: _,
+            inner,
+        } = self;
+        let (buffer, bindgroup) = new_camera_uniform(&inner, device);
         let inner = Shared::new(inner);
         let camera_data = CameraData {
             buffer,
             bindgroup,
             inner: inner.clone(),
         };
-        let id = data.camera_id_bank.dequeue();
-        let camera = Camera {
-            id,
-            cmd: data.camera_update_queue.0.clone(),
-            inner,
-        };
-        data.scene.cameras.push((id, camera_data));
+        let camera = Camera { id, cmd, inner };
+        scene.cameras.push((id, camera_data));
         camera
     }
 }
@@ -108,29 +109,29 @@ mod ui {
     }
 }
 
-enum UiUpdateCmd {
+enum ObjUpdateCmd {
     // remove the object from the camera's objects
-    RemoveObjectFromCamera {
+    RemoveFromCamera {
         camera_id: Id,
         object_id: Id,
     },
     // add the object to the camera's list of objects
-    AddObjectToCamera {
+    AddToCamera {
         camera_id: Id,
         object_id: Id,
     },
     // update the given object's transform
-    ObjectTransform {
+    Transform {
         object_id: Id,
         camera_id: Option<Id>,
     },
     // update the given object's mesh
-    ObjectMesh {
+    Mesh {
         object_id: Id,
         camera_id: Option<Id>,
     },
     // update the given object's mesh
-    ObjectMaterial {
+    Material {
         object_id: Id,
         camera_id: Option<Id>,
     },
@@ -155,22 +156,24 @@ impl crate::Material for UiMaterial {
 }
 
 #[derive(Debug, Snafu)]
-pub enum UiObjectBuilderError {
+pub enum ObjectBuilderError {
     #[snafu(display("object builder is missing `mesh`"))]
     MissingMesh,
 }
 
-pub struct UiObjectBuilder<'a> {
+pub struct ObjectBuilder<'a> {
     camera: Option<Camera>,
     mesh: Option<Arc<crate::Mesh>>,
     material: Option<crate::AnyMaterial>,
     world_transform: WorldTransform,
     world_transforms: Vec<WorldTransform>,
     is_visible: bool,
-    data: &'a mut UiRenderling,
+    update_tx: Sender<ObjUpdateCmd>,
+    device: &'a wgpu::Device,
+    scene: &'a mut Scene,
 }
 
-impl<'a> UiObjectBuilder<'a> {
+impl<'a> ObjectBuilder<'a> {
     pub fn with_camera(mut self, camera: &Camera) -> Self {
         self.camera = Some(camera.clone());
         self
@@ -182,7 +185,7 @@ impl<'a> UiObjectBuilder<'a> {
     }
 
     pub fn with_mesh_builder(self, mesh_builder: MeshBuilder<Vertex>) -> Self {
-        let mesh = mesh_builder.build(Some("UiRenderling object builder"), &self.data.device);
+        let mesh = mesh_builder.build(Some("object_builder_mesh"), self.device);
         self.with_mesh(Arc::new(mesh))
     }
 
@@ -216,28 +219,28 @@ impl<'a> UiObjectBuilder<'a> {
         self
     }
 
-    pub fn build(self) -> Result<UiObject, UiObjectBuilderError> {
-        let id = self.data.object_id_bank.dequeue();
+    pub fn build(self) -> Result<UiObject, ObjectBuilderError> {
+        //let id = self.data.object_id_bank.dequeue();
         let material_bindgroup = self
             .material
             .as_ref()
-            .map(|mat| mat.create_bindgroup(&self.data.device));
+            .map(|mat| mat.create_bindgroup(self.device));
         let mesh = self.mesh.context(MissingMeshSnafu)?;
         let position = Point3::from(self.world_transform.translate.xyz());
         let world_transforms = std::iter::once(self.world_transform)
             .chain(self.world_transforms)
             .collect::<Vec<_>>();
         let is_visible = self.camera.is_some() && self.is_visible;
-        let inner = UiObjectInner {
+        let inner = ObjectInner {
             camera: self.camera.clone(),
             mesh: mesh.clone(),
             material: self.material,
             world_transforms,
             is_visible: self.is_visible,
         };
-        let instances = inner.new_world_transforms_buffer(&self.data.device);
+        let instances = inner.new_world_transforms_buffer(self.device);
         let obj_inner = Shared::new(inner);
-
+        let id = self.scene.new_object_id();
         let obj_data = UiObjectData {
             id,
             mesh,
@@ -249,37 +252,28 @@ impl<'a> UiObjectBuilder<'a> {
 
         if is_visible {
             let camera_id = self.camera.as_ref().unwrap().id;
-            let objects = self
-                .data
-                .scene
-                .visible_objects
-                .entry(camera_id)
-                .or_default();
+            let objects = self.scene.visible_objects.entry(camera_id).or_default();
             objects.push(obj_data);
         } else {
-            let _ = self
-                .data
-                .scene
-                .invisible_objects
-                .insert(obj_data.id, obj_data);
+            let _ = self.scene.invisible_objects.insert(obj_data.id, obj_data);
         }
 
         let object = UiObject {
             id,
             inner: obj_inner,
-            cmd: self.data.object_update_queue.0.clone(),
+            cmd: self.update_tx,
         };
 
         Ok(object)
     }
 }
 
-/// Data shared between the library user and `UiRenderling`.
+/// Data shared between the library user and the renderling backend.
 ///
-/// The data held in `UiObjectInner` is data that the library user can change at any time
+/// The data held in `ObjectInner` is data that the library user can change at any time
 /// and data that has a downstream representation in `wgpu`, which is created/modified
 /// in `UiRenderling::update`.
-struct UiObjectInner {
+struct ObjectInner {
     mesh: Arc<crate::Mesh>,
     material: Option<crate::AnyMaterial>,
     world_transforms: Vec<WorldTransform>,
@@ -287,7 +281,7 @@ struct UiObjectInner {
     is_visible: bool,
 }
 
-impl UiObjectInner {
+impl ObjectInner {
     /// Create a new instances buffer from a list of world transforms
     fn new_world_transforms_buffer(&self, device: &wgpu::Device) -> crate::VertexBuffer {
         let ms: Vec<f32> = self
@@ -322,8 +316,8 @@ impl UiObjectInner {
 /// the object should be dropped.
 pub struct UiObject {
     id: Id,
-    inner: Shared<UiObjectInner>,
-    cmd: Sender<UiUpdateCmd>,
+    inner: Shared<ObjectInner>,
+    cmd: Sender<ObjUpdateCmd>,
 }
 
 impl UiObject {
@@ -336,14 +330,14 @@ impl UiObject {
         let object_id = self.id;
         if let Some(old_camera) = std::mem::replace(&mut self.inner.write().camera, Some(camera)) {
             self.cmd
-                .send(UiUpdateCmd::RemoveObjectFromCamera {
+                .send(ObjUpdateCmd::RemoveFromCamera {
                     camera_id: old_camera.id,
                     object_id,
                 })
                 .unwrap();
         }
         self.cmd
-            .send(UiUpdateCmd::AddObjectToCamera {
+            .send(ObjUpdateCmd::AddToCamera {
                 camera_id: new_camera_id,
                 object_id,
             })
@@ -355,7 +349,7 @@ impl UiObject {
         let mut inner = self.inner.write();
         *inner.world_transforms.get_mut(0).unwrap() = transform;
         self.cmd
-            .send(UiUpdateCmd::ObjectTransform {
+            .send(ObjUpdateCmd::Transform {
                 object_id: self.id,
                 camera_id: if inner.is_visible {
                     inner.camera.as_ref().map(|c| c.id)
@@ -374,7 +368,7 @@ impl UiObject {
             if is_visible {
                 if let Some(camera) = inner.camera.as_ref() {
                     self.cmd
-                        .send(UiUpdateCmd::AddObjectToCamera {
+                        .send(ObjUpdateCmd::AddToCamera {
                             camera_id: camera.id,
                             object_id: self.id,
                         })
@@ -383,7 +377,7 @@ impl UiObject {
             } else {
                 if let Some(camera) = inner.camera.as_ref() {
                     self.cmd
-                        .send(UiUpdateCmd::RemoveObjectFromCamera {
+                        .send(ObjUpdateCmd::RemoveFromCamera {
                             camera_id: camera.id,
                             object_id: self.id,
                         })
@@ -398,7 +392,7 @@ impl UiObject {
         let mut inner = self.inner.write();
         inner.mesh = mesh;
         self.cmd
-            .send(UiUpdateCmd::ObjectMesh {
+            .send(ObjUpdateCmd::Mesh {
                 object_id: self.id,
                 camera_id: inner.camera.as_ref().map(|c| c.id),
             })
@@ -410,7 +404,7 @@ impl UiObject {
         let mut inner = self.inner.write();
         inner.material = Some(crate::AnyMaterial::new(material));
         self.cmd
-            .send(UiUpdateCmd::ObjectMaterial {
+            .send(ObjUpdateCmd::Material {
                 object_id: self.id,
                 camera_id: inner.camera.as_ref().map(|c| c.id),
             })
@@ -425,7 +419,7 @@ struct UiObjectData {
     material_bindgroup: Option<wgpu::BindGroup>,
     instances: crate::VertexBuffer,
     position: Point3<f32>,
-    inner: Shared<UiObjectInner>,
+    inner: Shared<ObjectInner>,
 }
 
 impl<'a> From<&'a UiObjectData> for Object<'a, ()> {
@@ -458,6 +452,10 @@ impl<'a> From<&'a UiObjectData> for Object<'a, ()> {
 
 #[derive(Default)]
 struct Scene {
+    // for creating camera ids
+    camera_id_bank: BankOfIds,
+    // for creating objects
+    object_id_bank: BankOfIds,
     // all cameras, in their intended render order
     cameras: Vec<(Id, CameraData)>,
     // invisible objects keyed by their object id
@@ -467,6 +465,14 @@ struct Scene {
 }
 
 impl Scene {
+    fn new_camera_id(&self) -> Id {
+        self.camera_id_bank.dequeue()
+    }
+
+    fn new_object_id(&self) -> Id {
+        self.object_id_bank.dequeue()
+    }
+
     fn get_camera_mut(&mut self, camera_id: Id) -> Option<&mut CameraData> {
         self.cameras.iter_mut().find_map(|c| {
             if c.0 == camera_id {
@@ -522,7 +528,7 @@ impl Scene {
 
 pub struct UiRenderling {
     // queue/channel of updates from objects to make before the next render
-    object_update_queue: (Sender<UiUpdateCmd>, Receiver<UiUpdateCmd>),
+    object_update_queue: (Sender<ObjUpdateCmd>, Receiver<ObjUpdateCmd>),
     // queue/channel of updates from cameras to make before the next render
     camera_update_queue: (Sender<CameraUpdateCmd>, Receiver<CameraUpdateCmd>),
     // link to the global wgpu state
@@ -535,10 +541,6 @@ pub struct UiRenderling {
     // default material to use when there is no other
     pub default_material: Option<crate::AnyMaterial>,
     pub default_material_bindgroup: Option<wgpu::BindGroup>,
-    // for creating camera ids
-    camera_id_bank: BankOfIds,
-    // for creating objects
-    object_id_bank: BankOfIds,
     scene: Scene,
 }
 
@@ -556,8 +558,6 @@ impl UiRenderling {
             pipeline,
             object_update_queue: channel(),
             camera_update_queue: channel(),
-            camera_id_bank: Default::default(),
-            object_id_bank: Default::default(),
             default_material: None,
             default_material_bindgroup: None,
             scene: Default::default(),
@@ -595,23 +595,29 @@ impl UiRenderling {
         renderling
     }
 
-    pub fn new_camera(&mut self) -> UiCameraBuilder<'_> {
+    pub fn new_camera(&mut self) -> CameraBuilder<'_> {
         let (width, height) = *self.size.read().unwrap();
-        UiCameraBuilder {
-            data: self,
+        CameraBuilder {
             inner: CameraInner::new_perspective(width as f32, height as f32),
+            width: width as f32,
+            height: height as f32,
+            device: &self.device,
+            update_tx: self.camera_update_queue.0.clone(),
+            scene: &mut self.scene,
         }
     }
 
-    pub fn new_object(&mut self) -> UiObjectBuilder<'_> {
-        UiObjectBuilder {
-            data: self,
+    pub fn new_object(&mut self) -> ObjectBuilder<'_> {
+        ObjectBuilder {
             camera: None,
             mesh: None,
             material: None,
             world_transform: WorldTransform::default(),
             world_transforms: vec![],
             is_visible: true,
+            update_tx: self.object_update_queue.0.clone(),
+            device: &self.device,
+            scene: &mut self.scene,
         }
     }
 
@@ -622,13 +628,13 @@ impl UiRenderling {
         let mut cameras_to_sort = FxHashSet::<Id>::default();
         while let Ok(cmd) = self.object_update_queue.1.try_recv() {
             match cmd {
-                UiUpdateCmd::RemoveObjectFromCamera {
+                ObjUpdateCmd::RemoveFromCamera {
                     camera_id,
                     object_id,
                 } => {
                     self.scene.remove_object_from_camera(&object_id, &camera_id);
                 }
-                UiUpdateCmd::AddObjectToCamera {
+                ObjUpdateCmd::AddToCamera {
                     camera_id,
                     object_id,
                 } => {
@@ -636,7 +642,7 @@ impl UiRenderling {
                         cameras_to_sort.insert(camera_id);
                     }
                 }
-                UiUpdateCmd::ObjectTransform {
+                ObjUpdateCmd::Transform {
                     object_id,
                     camera_id,
                 } => {
@@ -650,7 +656,7 @@ impl UiRenderling {
                             .update_world_transforms_buffer(&self.queue, &object.instances);
                     }
                 }
-                UiUpdateCmd::ObjectMesh {
+                ObjUpdateCmd::Mesh {
                     object_id,
                     camera_id,
                 } => {
@@ -661,7 +667,7 @@ impl UiRenderling {
                         object.mesh = object.inner.read().mesh.clone();
                     }
                 }
-                UiUpdateCmd::ObjectMaterial {
+                ObjUpdateCmd::Material {
                     object_id,
                     camera_id,
                 } => {

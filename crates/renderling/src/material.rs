@@ -22,13 +22,6 @@ impl AnyMaterial {
         Self { inner: inner.into() }
     }
 
-    //pub fn downcast<T: Any + Send + Sync + 'static>(self) -> Result<Arc<T>, AnyMaterial> {
-    //    match self.inner.downcast::<T>() {
-    //        Ok(t) => Ok(t),
-    //        Err(inner) => Err(AnyMaterial { inner }),
-    //    }
-    //}
-
     pub fn create_bindgroup(&self, device: &wgpu::Device) -> wgpu::BindGroup {
         self.inner.create_bindgroup(device)
     }
