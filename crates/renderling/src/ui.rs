@@ -152,7 +152,7 @@ pub struct UiObjectBuilder<'a> {
     mesh: Option<Arc<crate::Mesh>>,
     world_transform: WorldTransform,
     world_transforms: Vec<WorldTransform>,
-    material: Option<Material>,
+    material: Option<UiMaterial>,
     is_visible: bool,
     data: &'a mut UiRenderling,
 }
