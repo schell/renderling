@@ -1,4 +1,5 @@
 //! Ui pipeline and material definitions.
+use crate::{AnyMaterialUniform, Material, MaterialUniform};
 
 /// Variants of uv/color blending.
 ///
@@ -24,6 +25,16 @@ mod ui {
     }
 }
 
+pub struct UiMaterialUniform {
+    bindgroup: wgpu::BindGroup,
+}
+
+impl MaterialUniform for UiMaterialUniform {
+    fn get_bindgroup(&self) -> &wgpu::BindGroup {
+        &self.bindgroup
+    }
+}
+
 /// A material for ui meshes.
 #[derive(Debug)]
 pub struct UiMaterial {
@@ -31,14 +42,16 @@ pub struct UiMaterial {
     pub color_blend: UiColorBlend,
 }
 
-impl crate::Material for UiMaterial {
-    fn create_bindgroup(&self, device: &wgpu::Device) -> wgpu::BindGroup {
-        renderling_ui::create_ui_material_bindgroup(
-            device,
-            self.color_blend as u32,
-            &self.diffuse_texture.view,
-            &self.diffuse_texture.sampler,
-        )
+impl Material for UiMaterial {
+    fn create_material_uniform(&self, device: &wgpu::Device) -> AnyMaterialUniform {
+        AnyMaterialUniform::new(UiMaterialUniform {
+            bindgroup: renderling_ui::create_ui_material_bindgroup(
+                device,
+                self.color_blend as u32,
+                &self.diffuse_texture.view,
+                &self.diffuse_texture.sampler,
+            ),
+        })
     }
 }
 

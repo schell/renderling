@@ -1,6 +1,10 @@
 //! Canonical types and helpers for authoring render pipelines.
 use std::ops::Range;
 
+use wgpu::util::DeviceExt;
+
+pub mod light;
+
 /// Projection and view matrices.
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
@@ -66,6 +70,45 @@ pub fn conduct_clear_pass(
     });
 
     queue.submit(std::iter::once(encoder.finish()));
+}
+
+pub fn camera_uniform_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+    device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        entries: &[wgpu::BindGroupLayoutEntry {
+            binding: 0,
+            visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Uniform,
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        }],
+        label: Some("proj+view matrix uniform bind group layout"),
+    })
+}
+
+
+pub fn create_camera_uniform(
+    device: &wgpu::Device,
+    viewproj: ViewProjection,
+    label: &str,
+) -> (wgpu::Buffer, wgpu::BindGroup) {
+    let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some(&label),
+        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+        contents: bytemuck::cast_slice(&[viewproj]),
+    });
+
+    let bindgroup = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        layout: &camera_uniform_layout(device),
+        entries: &[wgpu::BindGroupEntry {
+            binding: 0,
+            resource: buffer.as_entire_binding(),
+        }],
+        label: Some(label),
+    });
+    (buffer, bindgroup)
 }
 
 /// A uniform buffer living in the GPU.

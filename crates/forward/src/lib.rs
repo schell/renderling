@@ -1,9 +1,8 @@
 //! A forward-shader renderling for simple 3d scenes.
 use std::ops::Range;
-use renderling_core::ViewProjection;
 use wgpu::{util::DeviceExt, TextureFormat};
 
-pub use renderling_core::{Camera, ObjectDraw};
+pub use renderling_core::{Camera, ObjectDraw, light::*, camera_uniform_layout, create_camera_uniform};
 
 #[repr(C)]
 #[derive(Copy, Clone, Default, bytemuck::Pod, bytemuck::Zeroable)]
@@ -204,45 +203,6 @@ pub fn create_pipeline(
     Ok(pipeline)
 }
 
-pub fn camera_uniform_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
-    device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        entries: &[wgpu::BindGroupLayoutEntry {
-            binding: 0,
-            visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
-            ty: wgpu::BindingType::Buffer {
-                ty: wgpu::BufferBindingType::Uniform,
-                has_dynamic_offset: false,
-                min_binding_size: None,
-            },
-            count: None,
-        }],
-        label: Some("forward pipeline proj+view matrix uniform bind group layout"),
-    })
-}
-
-pub fn create_camera_uniform(
-    device: &wgpu::Device,
-    viewproj: ViewProjection,
-    name: &str,
-) -> (wgpu::Buffer, wgpu::BindGroup) {
-    let label = format!("forward camera {} uniform buffer", name);
-    let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some(&label),
-        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        contents: bytemuck::cast_slice(&[viewproj]),
-    });
-
-    let label = format!("forward camera {} bindgroup", name);
-    let bindgroup = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        layout: &camera_uniform_layout(device),
-        entries: &[wgpu::BindGroupEntry {
-            binding: 0,
-            resource: buffer.as_entire_binding(),
-        }],
-        label: Some(&label),
-    });
-    (buffer, bindgroup)
-}
 
 /// Helper struct for blinn-phong materials.
 pub struct MaterialUniform {
@@ -303,75 +263,6 @@ impl MaterialUniform {
 pub const MAX_POINT_LIGHTS: usize = 64;
 pub const MAX_SPOT_LIGHTS: usize = 32;
 pub const MAX_DIRECTIONAL_LIGHTS: usize = 8;
-
-#[repr(C)]
-#[derive(Copy, Clone, Default, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct PointLight {
-    /// The position of the light in world space.
-    pub position: [f32; 3],
-    /// The number of all point lights in the scene.
-    ///
-    /// Because uniform structs need to be 16-byte spaced, we need a float
-    /// or uint here, so we use this parameter to tell the shader if it should
-    /// continue processing the lights after this one in our array.
-    pub num_lights: u32,
-    /// Constant, linear and quadratic term of attenuation.
-    pub attenuation: [f32; 3],
-    /// Just padding to keep everything 16-byte aligned.
-    pub _padding: u32,
-    /// Ambient color value.
-    pub ambient_color: [f32; 4],
-    /// Diffuse color value.
-    pub diffuse_color: [f32; 4],
-    /// Specular color value.
-    pub specular_color: [f32; 4],
-}
-
-#[repr(C)]
-#[derive(Copy, Clone, Default, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct SpotLight {
-    /// The position of the light in world space.
-    pub position: [f32; 3],
-    /// The number of all spot lights in the scene.
-    ///
-    /// Because uniform structs need to be 16-byte spaced, we need a float
-    /// or uint here, so we use this parameter to tell the shader if it should
-    /// continue processing the lights after this one in our array.
-    pub num_lights: u32,
-    /// The direction the light is pointing in.
-    pub direction: [f32; 3],
-    /// Inner angular cutoff.
-    pub inner_cutoff: f32,
-    /// Constant, linear and quadratic terms of attenuation.
-    pub attenuation: [f32; 3],
-    /// Outer angular cutoff.
-    pub outer_cutoff: f32,
-    /// Ambient color value.
-    pub ambient_color: [f32; 4],
-    /// Diffuse color value.
-    pub diffuse_color: [f32; 4],
-    /// Specular color value.
-    pub specular_color: [f32; 4],
-}
-
-#[repr(C)]
-#[derive(Copy, Clone, Default, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct DirectionalLight {
-    /// The direction the light is pointing in.
-    pub direction: [f32; 3],
-    /// The number of all spot lights in the scene.
-    ///
-    /// Because uniform structs need to be 16-byte spaced, we need a float
-    /// or uint here, so we use this parameter to tell the shader if it should
-    /// continue processing the lights after this one in our array.
-    pub num_lights: u32,
-    /// Ambient color value.
-    pub ambient_color: [f32; 4],
-    /// Diffuse color value.
-    pub diffuse_color: [f32; 4],
-    /// Specular color value.
-    pub specular_color: [f32; 4],
-}
 
 /// The shader only supports a limited number of lights and we need to set some
 /// parameters to control the lighting loop in the shader.

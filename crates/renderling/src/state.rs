@@ -446,8 +446,8 @@ impl WgpuState {
     }
 
     #[cfg(feature = "ui")]
-    pub fn new_ui_renderling(&self) -> crate::renderling::Renderling {
-        let mut renderling = crate::renderling::Renderling::new(self, crate::UiPipeline::new(
+    pub fn new_ui_renderling(&self) -> crate::renderer::Renderling {
+        let mut renderling = crate::renderer::Renderling::new(self, crate::UiPipeline::new(
             &self.device,
             self.target.format(),
         ));
