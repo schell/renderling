@@ -73,7 +73,7 @@ pub fn run() {
         let projection = renderling::math::perspective_rh(fovy, aspect, znear, zfar);
         let viewproj = renderling::ViewProjection { projection, view };
 
-        renderling::forward::create_camera_uniform(&device, viewproj, "3dcamera")
+        renderling::shaders::forward::create_camera_uniform(&device, viewproj, "3dcamera")
     };
 
     //let (document, buffers, images) = gltf::import("gltf/orange_cube.glb").unwrap();

@@ -139,3 +139,63 @@ pub struct CameraData {
     pub(crate) bindgroup: wgpu::BindGroup,
     pub(crate) inner: Shared<CameraInner>,
 }
+
+/// Create a new camera uniform
+pub(crate) fn new_camera_uniform(
+    inner: &CameraInner,
+    device: &wgpu::Device,
+) -> (wgpu::Buffer, wgpu::BindGroup) {
+    let (projection, view) = inner.as_projection_and_view();
+    let viewproj = renderling_core::ViewProjection {
+        projection: projection.into(),
+        view: view.into(),
+    };
+    renderling_core::create_camera_uniform(device, viewproj, "new_camera_uniform")
+}
+
+pub struct CameraBuilder<'a> {
+    pub(crate) width: f32,
+    pub(crate) height: f32,
+    pub(crate) device: &'a wgpu::Device,
+    pub(crate) update_tx: Sender<CameraUpdateCmd>,
+    pub(crate) scene: &'a mut crate::Scene,
+    pub(crate) inner: CameraInner,
+}
+
+impl<'a> CameraBuilder<'a> {
+    /// Create an orthographic 2d camera with a projection where the x axis
+    /// increases to the right, the y axis increases down and z increases
+    /// out of the screen towards the viewer.
+    pub fn with_projection_ortho2d(mut self) -> Self {
+        self.inner = CameraInner::new_ortho2d(self.width, self.height);
+        self
+    }
+
+    /// Create a perspective 3d camera positioned at 0,12,20 looking at the origin.
+    pub fn with_projection_perspective(mut self) -> Self {
+        self.inner = CameraInner::new_perspective(self.width, self.height);
+        self
+    }
+
+    pub fn build(self) -> Camera {
+        let id = self.scene.new_camera_id();
+        let CameraBuilder {
+            device,
+            update_tx: cmd,
+            scene,
+            width: _,
+            height: _,
+            inner,
+        } = self;
+        let (buffer, bindgroup) = new_camera_uniform(&inner, device);
+        let inner = Shared::new(inner);
+        let camera_data = CameraData {
+            buffer,
+            bindgroup,
+            inner: inner.clone(),
+        };
+        let camera = Camera { id, cmd, inner };
+        scene.cameras.push((id, camera_data));
+        camera
+    }
+}

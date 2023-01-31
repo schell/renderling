@@ -2,7 +2,7 @@
 use std::ops::Range;
 use wgpu::{util::DeviceExt, TextureFormat};
 
-pub use renderling_core::{Camera, ObjectDraw, ViewProjection};
+pub use renderling_core::{Camera, ObjectDraw, ViewProjection, camera_uniform_layout, create_camera_uniform};
 
 #[repr(C)]
 #[derive(Copy, Clone, Default, bytemuck::Pod, bytemuck::Zeroable)]
@@ -27,30 +27,6 @@ impl Vertex {
         self.uv = [u, v];
         self
     }
-}
-
-pub fn create_camera_buffer_bindgroup(
-    device: &wgpu::Device,
-    viewproj: ViewProjection,
-    name: &str,
-) -> (wgpu::Buffer, wgpu::BindGroup) {
-    let label = format!("ui camera {} uniform buffer", name);
-    let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-        label: Some(&label),
-        usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        contents: bytemuck::cast_slice(&[viewproj]),
-    });
-
-    let label = format!("ui camera {} bindgroup", name);
-    let bindgroup = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        layout: &camera_uniform_bindgroup_layout(device),
-        entries: &[wgpu::BindGroupEntry {
-            binding: 0,
-            resource: buffer.as_entire_binding(),
-        }],
-        label: Some(&label),
-    });
-    (buffer, bindgroup)
 }
 
 pub fn object_texture_bindgroup_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
@@ -84,22 +60,6 @@ pub fn object_texture_bindgroup_layout(device: &wgpu::Device) -> wgpu::BindGroup
             },
         ],
         label: Some("Ui's object texture bindgroup layout"),
-    })
-}
-
-pub fn camera_uniform_bindgroup_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
-    device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        entries: &[wgpu::BindGroupLayoutEntry {
-            binding: 0,
-            visibility: wgpu::ShaderStages::VERTEX,
-            ty: wgpu::BindingType::Buffer {
-                ty: wgpu::BufferBindingType::Uniform,
-                has_dynamic_offset: false,
-                min_binding_size: None,
-            },
-            count: None,
-        }],
-        label: Some("ui pipeline proj+view matrix uniform bind group layout"),
     })
 }
 
@@ -149,7 +109,7 @@ pub fn create_pipeline(device: &wgpu::Device, format: TextureFormat) -> wgpu::Re
     let render_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("ui render pipeline layout"),
         bind_group_layouts: &[
-            &camera_uniform_bindgroup_layout(device),
+            &camera_uniform_layout(device),
             &object_texture_bindgroup_layout(device),
         ],
         push_constant_ranges: &[],

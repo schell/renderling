@@ -8,13 +8,13 @@ use std::sync::{
 use wgpu::util::DeviceExt;
 
 pub use renderling_ui::{
-    begin_render_pass, create_camera_buffer_bindgroup, create_pipeline,
+    begin_render_pass, create_pipeline,
     create_ui_material_bindgroup, render_object, Camera as ShaderCamera, Object as ShaderObject,
     ObjectDraw, Vertex, ViewProjection,
 };
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::{camera::*, resources::*, MeshBuilder, WorldTransform};
+use crate::{camera::*, resources::*, LightUpdateCmd, MeshBuilder, WorldTransform};
 
 #[derive(Debug, Snafu)]
 pub enum RenderlingError {
@@ -23,66 +23,6 @@ pub enum RenderlingError {
 
     #[snafu(display("default_material field is `None`"))]
     MissingDefaultMaterial,
-}
-
-/// Create a new camera uniform
-fn new_camera_uniform(
-    inner: &CameraInner,
-    device: &wgpu::Device,
-) -> (wgpu::Buffer, wgpu::BindGroup) {
-    let (projection, view) = inner.as_projection_and_view();
-    let viewproj = ViewProjection {
-        projection: projection.into(),
-        view: view.into(),
-    };
-    create_camera_buffer_bindgroup(device, viewproj, "new_camera_uniform")
-}
-
-pub struct CameraBuilder<'a> {
-    width: f32,
-    height: f32,
-    device: &'a wgpu::Device,
-    update_tx: Sender<CameraUpdateCmd>,
-    scene: &'a mut Scene,
-    inner: CameraInner,
-}
-
-impl<'a> CameraBuilder<'a> {
-    /// Create an orthographic 2d camera with a projection where the x axis
-    /// increases to the right, the y axis increases down and z increases
-    /// out of the screen towards the viewer.
-    pub fn with_projection_ortho2d(mut self) -> Self {
-        self.inner = CameraInner::new_ortho2d(self.width, self.height);
-        self
-    }
-
-    /// Create a perspective 3d camera positioned at 0,12,20 looking at the origin.
-    pub fn with_projection_perspective(mut self) -> Self {
-        self.inner = CameraInner::new_perspective(self.width, self.height);
-        self
-    }
-
-    pub fn build(self) -> Camera {
-        let id = self.scene.new_camera_id();
-        let CameraBuilder {
-            device,
-            update_tx: cmd,
-            scene,
-            width: _,
-            height: _,
-            inner,
-        } = self;
-        let (buffer, bindgroup) = new_camera_uniform(&inner, device);
-        let inner = Shared::new(inner);
-        let camera_data = CameraData {
-            buffer,
-            bindgroup,
-            inner: inner.clone(),
-        };
-        let camera = Camera { id, cmd, inner };
-        scene.cameras.push((id, camera_data));
-        camera
-    }
 }
 
 enum ObjUpdateCmd {
@@ -179,10 +119,10 @@ impl<'a> ObjectBuilder<'a> {
 
     pub fn build(self) -> Result<Object, ObjectBuilderError> {
         //let id = self.data.object_id_bank.dequeue();
-        let material_bindgroup = self
+        let material_uniform = self
             .material
             .as_ref()
-            .map(|mat| mat.create_bindgroup(self.device));
+            .map(|mat| mat.create_material_uniform(self.device));
         let mesh = self.mesh.context(MissingMeshSnafu)?;
         let position = Point3::from(self.world_transform.translate.xyz());
         let world_transforms = std::iter::once(self.world_transform)
@@ -202,7 +142,7 @@ impl<'a> ObjectBuilder<'a> {
         let obj_data = ObjectData {
             id,
             mesh,
-            material_bindgroup,
+            material_uniform,
             instances,
             position,
             inner: obj_inner.clone(),
@@ -231,7 +171,7 @@ impl<'a> ObjectBuilder<'a> {
 /// The data held in `ObjectInner` is data that the library user can change at any time
 /// and data that has a downstream representation in `wgpu`, which is created/modified
 /// in `Renderling::update`.
-struct ObjectInner {
+pub(crate) struct ObjectInner {
     mesh: Arc<crate::Mesh>,
     material: Option<crate::AnyMaterial>,
     world_transforms: Vec<WorldTransform>,
@@ -371,10 +311,10 @@ impl Object {
 }
 
 /// Underlying data used by `wgpu` to render an object.
-struct ObjectData {
+pub(crate) struct ObjectData {
     id: Id,
     mesh: Arc<crate::Mesh>,
-    material_bindgroup: Option<wgpu::BindGroup>,
+    material_uniform: Option<crate::AnyMaterialUniform>,
     instances: crate::VertexBuffer,
     position: Point3<f32>,
     inner: Shared<ObjectInner>,
@@ -399,7 +339,7 @@ impl<'a> From<&'a ObjectData> for ShaderObject<'a, ()> {
             mesh_buffer: value.mesh.vertex_buffer.buffer.slice(..),
             instances: value.instances.buffer.slice(..),
             instances_range: 0..value.instances.len as u32,
-            material: value.material_bindgroup.as_ref(),
+            material: value.material_uniform.as_ref().map(|mu| mu.get_bindgroup()),
             name: None,
             draw,
             extra: (),
@@ -409,13 +349,19 @@ impl<'a> From<&'a ObjectData> for ShaderObject<'a, ()> {
 }
 
 #[derive(Default)]
-struct Scene {
+pub(crate) struct Scene {
+    // Point lights
+    pub(crate) point_lights: Vec<Shared<crate::light::PointLightInner>>,
+    // Spot lights
+    pub(crate) spot_lights: Vec<Shared<crate::light::SpotLightInner>>,
+    // Directional lights
+    pub(crate) directional_lights: Vec<Shared<crate::light::DirectionalLightInner>>,
     // for creating camera ids
     camera_id_bank: BankOfIds,
     // for creating objects
     object_id_bank: BankOfIds,
     // all cameras, in their intended render order
-    cameras: Vec<(Id, CameraData)>,
+    pub(crate) cameras: Vec<(Id, CameraData)>,
     // invisible objects keyed by their object id
     invisible_objects: FxHashMap<Id, ObjectData>,
     // all visible objects collated by their camera's id, in render order
@@ -423,15 +369,15 @@ struct Scene {
 }
 
 impl Scene {
-    fn new_camera_id(&self) -> Id {
+    pub(crate) fn new_camera_id(&self) -> Id {
         self.camera_id_bank.dequeue()
     }
 
-    fn new_object_id(&self) -> Id {
+    pub(crate) fn new_object_id(&self) -> Id {
         self.object_id_bank.dequeue()
     }
 
-    fn get_camera_mut(&mut self, camera_id: Id) -> Option<&mut CameraData> {
+    pub(crate) fn get_camera_mut(&mut self, camera_id: Id) -> Option<&mut CameraData> {
         self.cameras.iter_mut().find_map(|c| {
             if c.0 == camera_id {
                 Some(&mut c.1)
@@ -441,7 +387,7 @@ impl Scene {
         })
     }
 
-    fn find_object_data_mut(
+    pub(crate) fn find_object_data_mut(
         &mut self,
         object_id: &Id,
         camera_id: Option<&Id>,
@@ -454,7 +400,7 @@ impl Scene {
         }
     }
 
-    fn remove_object_from_camera(&mut self, object_id: &Id, camera_id: &Id) {
+    pub(crate) fn remove_object_from_camera(&mut self, object_id: &Id, camera_id: &Id) {
         if let Some(objects) = self.visible_objects.get_mut(&camera_id) {
             if let Some(object_index) =
                 objects.iter().enumerate().find_map(
@@ -473,7 +419,7 @@ impl Scene {
         }
     }
 
-    fn add_object_to_camera(&mut self, object_id: &Id, camera_id: &Id) -> bool {
+    pub(crate) fn add_object_to_camera(&mut self, object_id: &Id, camera_id: &Id) -> bool {
         if let Some(object) = self.invisible_objects.remove(object_id) {
             if let Some(objects) = self.visible_objects.get_mut(camera_id) {
                 objects.push(object);
@@ -489,6 +435,8 @@ pub struct Renderling {
     object_update_queue: (Sender<ObjUpdateCmd>, Receiver<ObjUpdateCmd>),
     // queue/channel of updates from cameras to make before the next render
     camera_update_queue: (Sender<CameraUpdateCmd>, Receiver<CameraUpdateCmd>),
+    // queue/channel of updates from lights to make before the next render
+    light_update_queue: (Sender<LightUpdateCmd>, Receiver<LightUpdateCmd>),
     // link to the global wgpu state
     //wgpu_state: Arc<crate::WgpuState>,
     device: Arc<wgpu::Device>,
@@ -515,6 +463,7 @@ impl Renderling {
             pipeline: crate::AnyPipeline::new::<T>(pipeline.into()),
             object_update_queue: channel(),
             camera_update_queue: channel(),
+            light_update_queue: channel(),
             default_material: None,
             default_material_bindgroup: None,
             scene: Default::default(),
@@ -545,6 +494,18 @@ impl Renderling {
             device: &self.device,
             scene: &mut self.scene,
         }
+    }
+
+    pub fn new_point_light(&mut self) -> crate::PointLightBuilder<'_> {
+        crate::PointLightBuilder::new(&mut self.scene, self.light_update_queue.0.clone())
+    }
+
+    pub fn new_spot_light(&mut self) -> crate::SpotLightBuilder<'_> {
+        crate::SpotLightBuilder::new(&mut self.scene, self.light_update_queue.0.clone())
+    }
+
+    pub fn new_directional_light(&mut self) -> crate::DirectionalLightBuilder<'_> {
+        crate::DirectionalLightBuilder::new(&mut self.scene, self.light_update_queue.0.clone())
     }
 
     /// Conduct all updates made from outside the renderling.
@@ -602,10 +563,10 @@ impl Renderling {
                         .find_object_data_mut(&object_id, camera_id.as_ref())
                     {
                         let inner = object.inner.read();
-                        object.material_bindgroup = inner
+                        object.material_uniform = inner
                             .material
                             .as_ref()
-                            .map(|mat| mat.create_bindgroup(&self.device));
+                            .map(|mat| mat.create_material_uniform(&self.device));
                     }
                 }
             }
@@ -664,7 +625,7 @@ impl Renderling {
             .as_ref()
             .context(MissingDefaultMaterialSnafu)?;
 
-        // render
+        // over each camera
         for (camera_id, camera_data) in self.scene.cameras.iter() {
             // bind the camera to our shader uniform
             render_pass.set_bind_group(0, &camera_data.bindgroup, &[]);
@@ -687,7 +648,7 @@ impl Renderling {
 mod test {
     use nalgebra::{Perspective3, Point2};
 
-    use crate::{renderling::*, MeshBuilder, UiColorBlend, UiMaterial, WgpuState};
+    use crate::{renderer::*, MeshBuilder, UiColorBlend, UiMaterial, WgpuState};
 
     fn right_tri_builder() -> MeshBuilder<Vertex> {
         MeshBuilder::default().with_vertices(vec![

@@ -1,64 +1,73 @@
-//! A collection of renderers with a focus on simplicity and ease of use.
-//! Backed by WGPU render pipelines and simple types for marshalling data to the GPU.
+//! A collection of renderers (callend "renderlings") with a focus on simplicity and ease of use.
+//! Backed by WebGPU render pipelines and simple types for marshalling data to the GPU.
 //!
 //! # WARNING
 //! This is very much a work in progress.
 //! YMMV.
 //! PRs are very welcomed :)
 //!
-//! # Features
-//! Features are used to enable specific render pipelines and managed renderers.
-//! Without any features, only [`renderling_core`] is exported.
-//!
 //! # renderlings 🍖
 //! Individual renderers are called "renderlings" for maximum cuteness.
 //! Renderlings manage their own resources and come in a couple flavors depending on the shader used.
 //!
-//! * [`ui::UiRenderling`] - used for simple colored or textured meshes, mostly for rendering user interfaces.
+//! ## Features
+//! Features are used to enable specific renderlings, by default all renderlings are enabled.
 //!
-//! ## shaders
-//! You can also use the re-exported shaders and manage your own resources for maximum flexibility.
+//! * **ui**
+//!   - simple simple diffuse material
+//!   - colored or textured mesh attributes
+//!   - mostly for rendering user interfaces
+//! * **forward**
+//!   - blinn-phong material
+//!   - textured mesh attribute
+//!   - maximum 64 point, 32 spot and 8 directional lights
 //!
-//! ### forward
-//! A simple forward shader that supports blinn-phong material shading and a few light sources.
-//!
-//! ### ui
-//! A simple interface shader that supports color meshes and text by using a custom blend uniform.
+//! ## Raw shaders
+//! You can also use the [shaders module](crate::shaders) without renderlings and manage your own resources for maximum flexibility.
 pub use renderling_core::*;
 
 #[cfg(feature = "forward")]
-pub mod forward {
-    //! A simple forward shader that supports blinn-phong material shading and a few light sources.
-    //!
-    //! See [renderling_forward]'s module documentation for more info.
-    pub use renderling_forward::*;
-}
+mod forward;
+#[cfg(feature = "forward")]
+pub use forward::*;
 
 #[cfg(feature = "ui")]
 mod ui;
-
 #[cfg(feature = "ui")]
 pub use ui::*;
 
+pub mod shaders {
+    //! Raw `wgpu` shaders.
 
-//#[cfg(feature = "forward")]
-//pub mod forward;
+    #[cfg(feature = "forward")]
+    pub mod forward {
+        //! Forward shader `wgpu` types and operations.
+        pub use renderling_forward::*;
+    }
+    #[cfg(feature = "ui")]
+    pub mod ui {
+        //! User interface shader `wgpu` types and operations.
+        pub use renderling_ui::*;
+    }
+}
 
 mod camera;
+mod light;
 mod material;
 mod mesh;
 mod pipeline;
 mod resources;
-mod renderling;
+mod renderer;
 mod state;
 mod texture;
 mod transform;
 
 pub use camera::*;
+pub use light::*;
 pub use material::*;
 pub use mesh::*;
 pub use pipeline::*;
-pub use renderling::*;
+pub use renderer::*;
 pub use state::*;
 pub use texture::*;
 pub use transform::*;
