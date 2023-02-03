@@ -22,5 +22,5 @@ void main()
   mat4 model = mat4(aModelMatrix0, aModelMatrix1, aModelMatrix2, aModelMatrix3);
   vColor = aColor;
   vUv = aUv;
-  gl_Position = uProjection * uView * model * vec4(aPos.x, aPos.y, aPos.z, 1.0);
+  gl_Position = uProjection * uView * model * vec4(aPos, 1.0);
 }

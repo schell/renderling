@@ -13,10 +13,16 @@ pub struct ViewProjection {
     pub view: [[f32; 4]; 4],
 }
 
-/// A bindgroup that represents a camera uniform.
-// TODO: remove Camera<'a>
-pub struct Camera<'a> {
-    pub bindgroup: &'a wgpu::BindGroup,
+/// A renderable object.
+///
+/// Bundles together buffers, ranges, material and draw instructions.
+pub struct ShaderObject<'a> {
+    pub mesh_buffer: wgpu::BufferSlice<'a>,
+    pub instances: wgpu::BufferSlice<'a>,
+    pub instances_range: Range<u32>,
+    pub material: Option<&'a wgpu::BindGroup>,
+    pub name: Option<&'a str>,
+    pub draw: ObjectDraw<'a>,
 }
 
 /// Draw parameters for a renderable object.
@@ -36,12 +42,45 @@ pub enum ObjectDraw<'a> {
     },
 }
 
-/// Perform a clearing render pass.
+/// Begin a new rendering pass.
+pub fn begin_render_pass<'a>(
+    encoder: &'a mut wgpu::CommandEncoder,
+    label: Option<&'a str>,
+    pipeline: &'a wgpu::RenderPipeline,
+    frame_texture_view: &'a wgpu::TextureView,
+    depth_texture_view: &'a wgpu::TextureView,
+) -> wgpu::RenderPass<'a> {
+    // start the render pass
+    let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+        label,
+        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+            view: &frame_texture_view,
+            resolve_target: None,
+            ops: wgpu::Operations {
+                load: wgpu::LoadOp::Load,
+                store: true,
+            },
+        })],
+        depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+            view: &depth_texture_view,
+            depth_ops: Some(wgpu::Operations {
+                load: wgpu::LoadOp::Load,
+                store: true,
+            }),
+            stencil_ops: None,
+        }),
+    });
+    render_pass.set_pipeline(pipeline);
+
+    render_pass
+}
+
+/// Perform a clearing render pass on a frame and/or a depth texture.
 pub fn conduct_clear_pass(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     label: Option<&str>,
-    frame_view: &wgpu::TextureView,
+    frame_view: Option<&wgpu::TextureView>,
     depth_view: Option<&wgpu::TextureView>,
     clear_color: wgpu::Color,
 ) {
@@ -51,8 +90,8 @@ pub fn conduct_clear_pass(
 
     let _ = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
         label,
-        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-            view: frame_view,
+        color_attachments: &[frame_view.map(|view| wgpu::RenderPassColorAttachment {
+            view,
             resolve_target: None,
             ops: wgpu::Operations {
                 load: wgpu::LoadOp::Clear(clear_color),
@@ -109,6 +148,40 @@ pub fn create_camera_uniform(
         label: Some(label),
     });
     (buffer, bindgroup)
+}
+
+pub fn render_object<'a, 'b: 'a>(
+    render_pass: &'a mut wgpu::RenderPass<'b>,
+    object: ShaderObject<'b>,
+    default_material_bindgroup: &'b wgpu::BindGroup,
+) {
+    // bind the material using the default for any non-textured meshes
+    render_pass.set_bind_group(
+        1,
+        object.material.unwrap_or(default_material_bindgroup),
+        &[],
+    );
+    render_pass.set_vertex_buffer(0, object.mesh_buffer);
+    render_pass.set_vertex_buffer(1, object.instances);
+    // draw
+    match &object.draw {
+        ObjectDraw::Indexed {
+            index_buffer,
+            index_range,
+            base_vertex,
+            index_format,
+        } => {
+            render_pass.set_index_buffer(*index_buffer, *index_format);
+            render_pass.draw_indexed(
+                index_range.clone(),
+                *base_vertex,
+                object.instances_range.clone(),
+            );
+        }
+        ObjectDraw::Default { vertex_range } => {
+            render_pass.draw(vertex_range.clone(), object.instances_range.clone());
+        }
+    }
 }
 
 /// A uniform buffer living in the GPU.

@@ -2,6 +2,7 @@
 use std::sync::mpsc::Sender;
 
 use nalgebra::{Matrix4, Perspective3, Point3, Vector3, Orthographic3, Isometry3};
+use renderling_core::{ViewProjection, create_camera_uniform};
 
 use crate::resources::{Id, Shared};
 
@@ -146,11 +147,11 @@ pub(crate) fn new_camera_uniform(
     device: &wgpu::Device,
 ) -> (wgpu::Buffer, wgpu::BindGroup) {
     let (projection, view) = inner.as_projection_and_view();
-    let viewproj = renderling_core::ViewProjection {
+    let viewproj = ViewProjection {
         projection: projection.into(),
         view: view.into(),
     };
-    renderling_core::create_camera_uniform(device, viewproj, "new_camera_uniform")
+    create_camera_uniform(device, viewproj, "new_camera_uniform")
 }
 
 pub struct CameraBuilder<'a> {
@@ -174,6 +175,24 @@ impl<'a> CameraBuilder<'a> {
     /// Create a perspective 3d camera positioned at 0,12,20 looking at the origin.
     pub fn with_projection_perspective(mut self) -> Self {
         self.inner = CameraInner::new_perspective(self.width, self.height);
+        self
+    }
+
+    /// Set the projection.
+    pub fn with_projection(mut self, projection: Projection) -> Self {
+        self.inner.projection = projection;
+        self
+    }
+
+    /// Set the view.
+    pub fn with_view(mut self, view: Isometry3<f32>) -> Self {
+        self.inner.view = view;
+        self
+    }
+
+    /// Set the view to a position and rotation that looks in a direction.
+    pub fn with_look_at(mut self, eye: Point3<f32>, target: Point3<f32>, up: Vector3<f32>) -> Self {
+        self.inner.view = Isometry3::look_at_rh(&eye, &target, &up);
         self
     }
 

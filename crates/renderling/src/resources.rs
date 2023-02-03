@@ -21,7 +21,7 @@ impl Deref for Id {
 }
 
 #[derive(Clone)]
-pub struct BankOfIds {
+pub(crate) struct BankOfIds {
     next_id: Arc<AtomicUsize>,
 }
 
@@ -42,7 +42,7 @@ impl BankOfIds {
 }
 
 #[derive(Default)]
-pub struct Shared<T> {
+pub(crate) struct Shared<T> {
     inner: Arc<RwLock<T>>,
 }
 

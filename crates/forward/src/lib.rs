@@ -2,7 +2,7 @@
 use std::ops::Range;
 use wgpu::{util::DeviceExt, TextureFormat};
 
-pub use renderling_core::{Camera, ObjectDraw, light::*, camera_uniform_layout, create_camera_uniform};
+pub use renderling_core::{ObjectDraw, light::*, camera_uniform_layout, create_camera_uniform};
 
 #[repr(C)]
 #[derive(Copy, Clone, Default, bytemuck::Pod, bytemuck::Zeroable)]
@@ -79,48 +79,10 @@ pub fn material_bindgroup_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout
     })
 }
 
-pub fn lights_bindgroup_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
-    device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        entries: &[
-            wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-            wgpu::BindGroupLayoutEntry {
-                binding: 1,
-                visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-            wgpu::BindGroupLayoutEntry {
-                binding: 2,
-                visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-        ],
-        label: Some("forward lights bindgroup layout"),
-    })
-}
-
 pub fn create_pipeline(
     device: &wgpu::Device,
     format: TextureFormat,
-) -> anyhow::Result<wgpu::RenderPipeline> {
+) -> wgpu::RenderPipeline {
     let forward_vert_shader = device.create_shader_module(wgpu::include_spirv!("forward.vert.spv"));
     let forward_frag_shader = device.create_shader_module(wgpu::include_spirv!("forward.frag.spv"));
 
@@ -200,9 +162,8 @@ pub fn create_pipeline(
             },
             multiview: None,
         });
-    Ok(pipeline)
+    pipeline
 }
-
 
 /// Helper struct for blinn-phong materials.
 pub struct MaterialUniform {
@@ -260,125 +221,6 @@ impl MaterialUniform {
     }
 }
 
-pub const MAX_POINT_LIGHTS: usize = 64;
-pub const MAX_SPOT_LIGHTS: usize = 32;
-pub const MAX_DIRECTIONAL_LIGHTS: usize = 8;
-
-/// The shader only supports a limited number of lights and we need to set some
-/// parameters to control the lighting loop in the shader.
-trait Light: Default {
-    fn set_num_lights(&mut self, num_lights: u32);
-
-    fn process_lights<L: Light>(lights: &mut Vec<L>, max_lights: usize, fill: bool) {
-        let len = lights.len();
-        let resize_len = if fill { max_lights } else { len.max(1) };
-        lights.resize_with(resize_len, L::default);
-        lights
-            .iter_mut()
-            .for_each(|light| light.set_num_lights(len as u32));
-    }
-}
-
-impl Light for PointLight {
-    fn set_num_lights(&mut self, num_lights: u32) {
-        self.num_lights = num_lights;
-    }
-}
-
-impl Light for SpotLight {
-    fn set_num_lights(&mut self, num_lights: u32) {
-        self.num_lights = num_lights;
-    }
-}
-
-impl Light for DirectionalLight {
-    fn set_num_lights(&mut self, num_lights: u32) {
-        self.num_lights = num_lights;
-    }
-}
-
-/// Helper struct for managing the light uniforms.
-pub struct LightsUniform {
-    pub point_buffer: wgpu::Buffer,
-    pub spot_buffer: wgpu::Buffer,
-    pub directional_buffer: wgpu::Buffer,
-    pub bindgroup: wgpu::BindGroup,
-}
-
-impl LightsUniform {
-    pub fn new(
-        device: &wgpu::Device,
-        mut point_lights: Vec<PointLight>,
-        mut spot_lights: Vec<SpotLight>,
-        mut dir_lights: Vec<DirectionalLight>,
-    ) -> LightsUniform {
-        PointLight::process_lights(&mut point_lights, MAX_POINT_LIGHTS, true);
-        let point_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("forward point light buffer"),
-            contents: bytemuck::cast_slice(point_lights.as_slice()),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
-
-        SpotLight::process_lights(&mut spot_lights, MAX_SPOT_LIGHTS, true);
-        let spot_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("forward spot light buffer"),
-            contents: bytemuck::cast_slice(&spot_lights),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
-
-        DirectionalLight::process_lights(&mut dir_lights, MAX_DIRECTIONAL_LIGHTS, true);
-        let directional_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("forward directional light buffer"),
-            contents: bytemuck::cast_slice(&dir_lights),
-            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        });
-        let bindgroup = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            layout: &lights_bindgroup_layout(device),
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: point_buffer.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: spot_buffer.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: directional_buffer.as_entire_binding(),
-                },
-            ],
-            label: Some("forward light bind group"),
-        });
-
-        LightsUniform {
-            directional_buffer,
-            point_buffer,
-            spot_buffer,
-            bindgroup,
-        }
-    }
-
-    pub fn update_point_lights(&self, queue: &wgpu::Queue, mut lights: Vec<PointLight>) {
-        PointLight::process_lights(&mut lights, MAX_POINT_LIGHTS, false);
-        queue.write_buffer(&self.point_buffer, 0, bytemuck::cast_slice(&lights));
-    }
-
-    pub fn update_spot_lights(&self, queue: &wgpu::Queue, mut lights: Vec<SpotLight>) {
-        SpotLight::process_lights(&mut lights, MAX_SPOT_LIGHTS, false);
-        queue.write_buffer(&self.spot_buffer, 0, bytemuck::cast_slice(&lights));
-    }
-
-    pub fn update_directional_lights(
-        &self,
-        queue: &wgpu::Queue,
-        mut lights: Vec<DirectionalLight>,
-    ) {
-        DirectionalLight::process_lights(&mut lights, MAX_DIRECTIONAL_LIGHTS, false);
-        queue.write_buffer(&self.directional_buffer, 0, bytemuck::cast_slice(&lights));
-    }
-}
-
 /// A renderable object.
 ///
 /// Bundles together buffers, ranges and draw instructions.
@@ -410,7 +252,7 @@ pub fn render<'a, O, Extra>(
     frame_view: &'a wgpu::TextureView,
     depth_view: &'a wgpu::TextureView,
     lights: &'a wgpu::BindGroup,
-    camera: &'a Camera<'a>,
+    camera: &'a wgpu::BindGroup,
     object_groups: O,
 ) where
     O: Iterator<Item = &'a ObjectGroup<'a, Extra>>,
@@ -446,7 +288,7 @@ pub fn render<'a, O, Extra>(
     });
     render_pass.set_pipeline(pipeline);
     // bind the camera to our shader uniform
-    render_pass.set_bind_group(0, camera.bindgroup, &[]);
+    render_pass.set_bind_group(0, camera, &[]);
     // bind the lights
     render_pass.set_bind_group(2, lights, &[]);
     // draw objects
