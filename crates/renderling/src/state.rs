@@ -426,8 +426,8 @@ impl WgpuState {
         })
     }
 
-    /// Clear the given texture and depth texture
-    pub fn clear(&self, frame_view: &wgpu::TextureView, depth_view: Option<&wgpu::TextureView>) {
+    /// Clear the given texture and/or depth texture.
+    pub fn clear(&self, frame_view: Option<&wgpu::TextureView>, depth_view: Option<&wgpu::TextureView>) {
         conduct_clear_pass(
             &self.device,
             &self.queue,
@@ -447,41 +447,67 @@ impl WgpuState {
 
     #[cfg(feature = "ui")]
     pub fn new_ui_renderling(&self) -> crate::renderer::Renderling {
-        let mut renderling = crate::renderer::Renderling::new(self, crate::UiPipeline::new(
+        // this is the _default_ texture bind group which will be used when
+        // there is no available texture to bind.
+        let diffuse_texture = crate::Texture::new(
             &self.device,
-            self.target.format(),
-        ));
+            &self.queue,
+            Some("ui-default-diffuse"),
+            None,
+            4,
+            1,
+            1,
+            &[0, 0, 0, 0],
+        );
 
-        #[cfg(feature = "image")]
-        {
-            // this is the _default_ texture bind group which will be used when
-            // there is no available texture to bind.
-            let default_img: image::RgbaImage =
-                image::ImageBuffer::from_pixel(1, 1, image::Rgba([0; 4]));
-            let default_texture: crate::Texture = crate::Texture::from_image_buffer(
-                &self.device,
-                &self.queue,
-                &default_img,
-                Some("Renderling default texture"),
-                None,
-            )
-            .unwrap();
+        let material = crate::UiMaterial {
+            diffuse_texture,
+            color_blend: crate::UiColorBlend::ColorOnly,
+        };
 
-            let default_material = crate::UiMaterial {
-                diffuse_texture: default_texture,
-                color_blend: crate::UiColorBlend::ColorOnly,
-            };
-            let material_bindgroup = renderling_ui::create_ui_material_bindgroup(
-                &self.device,
-                default_material.color_blend as u32,
-                &default_material.diffuse_texture.view,
-                &default_material.diffuse_texture.sampler,
-            );
-            renderling.default_material = Some(crate::AnyMaterial::new(default_material));
-            renderling.default_material_bindgroup = Some(material_bindgroup);
-        }
+        crate::renderer::Renderling::new(
+            self,
+            crate::UiPipeline::new(&self.device, self.target.format()),
+            material,
+            false,
+        )
+    }
 
-        renderling
+    #[cfg(feature = "forward")]
+    pub fn new_forward_renderling(&self) -> crate::renderer::Renderling {
+        // this is the _default_ texture bind group which will be used when
+        // there is no available texture to bind.
+        let diffuse_texture = crate::Texture::new(
+            &self.device,
+            &self.queue,
+            Some("forward-default-diffuse"),
+            None,
+            4,
+            1,
+            1,
+            &[0xff, 0xff, 0xff, 0xff],
+        );
+        let specular_texture = crate::Texture::new(
+            &self.device,
+            &self.queue,
+            Some("forward-default-specular"),
+            None,
+            4,
+            1,
+            1,
+            &[0xff, 0xff, 0xff, 0xff],
+        );
+        let material = crate::forward::BlinnPhongMaterial {
+            diffuse_texture,
+            specular_texture,
+            shininess: 16.0,
+        };
+        crate::renderer::Renderling::new(
+            self,
+            crate::ForwardPipeline::new(&self.device, self.target.format()),
+            material,
+            true
+        )
     }
 }
 

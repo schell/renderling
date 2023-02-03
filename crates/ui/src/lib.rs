@@ -1,8 +1,10 @@
 //! A renderling for user interfaces.
-use std::ops::Range;
+use renderling_core::ShaderObject;
 use wgpu::{util::DeviceExt, TextureFormat};
 
-pub use renderling_core::{Camera, ObjectDraw, ViewProjection, camera_uniform_layout, create_camera_uniform};
+pub use renderling_core::{
+    camera_uniform_layout, create_camera_uniform, ObjectDraw, ViewProjection,
+};
 
 #[repr(C)]
 #[derive(Copy, Clone, Default, bytemuck::Pod, bytemuck::Zeroable)]
@@ -178,90 +180,6 @@ pub fn create_pipeline(device: &wgpu::Device, format: TextureFormat) -> wgpu::Re
         })
 }
 
-/// A renderable object.
-///
-/// Bundles together buffers, ranges, material and draw instructions.
-///
-/// **Note:** There is a slot for `Extra` data to help with collation and
-/// sorting, if need be.
-pub struct Object<'a, Extra> {
-    pub mesh_buffer: wgpu::BufferSlice<'a>,
-    pub instances: wgpu::BufferSlice<'a>,
-    pub instances_range: Range<u32>,
-    pub material: Option<&'a wgpu::BindGroup>,
-    pub name: Option<&'a str>,
-    pub draw: ObjectDraw<'a>,
-    pub extra: Extra,
-}
-
-/// Begin a new rendering pass.
-pub fn begin_render_pass<'a>(
-    encoder: &'a mut wgpu::CommandEncoder,
-    label: &'a str,
-    pipeline: &'a wgpu::RenderPipeline,
-    frame_texture_view: &'a wgpu::TextureView,
-    depth_texture_view: &'a wgpu::TextureView,
-) -> wgpu::RenderPass<'a> {
-    tracing::trace!("{} rendering", label);
-    // start the render pass
-    let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-        label: Some(label),
-        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-            view: &frame_texture_view,
-            resolve_target: None,
-            ops: wgpu::Operations {
-                load: wgpu::LoadOp::Load,
-                store: true,
-            },
-        })],
-        depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-            view: &depth_texture_view,
-            depth_ops: Some(wgpu::Operations {
-                load: wgpu::LoadOp::Load,
-                store: true,
-            }),
-            stencil_ops: None,
-        }),
-    });
-    render_pass.set_pipeline(pipeline);
-
-    render_pass
-}
-
-pub fn render_object<'a, 'b: 'a, Extra: 'b>(
-    render_pass: &'a mut wgpu::RenderPass<'b>,
-    object: Object<'b, Extra>,
-    default_material_bindgroup: &'b wgpu::BindGroup,
-) {
-    // bind the material using the default for any non-textured meshes
-    render_pass.set_bind_group(
-        1,
-        object.material.unwrap_or(default_material_bindgroup),
-        &[],
-    );
-    render_pass.set_vertex_buffer(0, object.mesh_buffer);
-    render_pass.set_vertex_buffer(1, object.instances);
-    // draw
-    match &object.draw {
-        ObjectDraw::Indexed {
-            index_buffer,
-            index_range,
-            base_vertex,
-            index_format,
-        } => {
-            render_pass.set_index_buffer(*index_buffer, *index_format);
-            render_pass.draw_indexed(
-                index_range.clone(),
-                *base_vertex,
-                object.instances_range.clone(),
-            );
-        }
-        ObjectDraw::Default { vertex_range } => {
-            render_pass.draw(vertex_range.clone(), object.instances_range.clone());
-        }
-    }
-}
-
 pub fn render<'a, I, Extra>(
     label: &'a str,
     device: &'a wgpu::Device,
@@ -273,7 +191,7 @@ pub fn render<'a, I, Extra>(
     camera: &'a wgpu::BindGroup,
     objects: I,
 ) where
-    I: Iterator<Item = Object<'a, Extra>>,
+    I: Iterator<Item = ShaderObject<'a>>,
     Extra: 'a,
 {
     tracing::trace!("{} rendering", label,);
@@ -283,9 +201,9 @@ pub fn render<'a, I, Extra>(
         label: Some(&encoder_label),
     });
 
-    let mut render_pass = begin_render_pass(
+    let mut render_pass = renderling_core::begin_render_pass(
         &mut encoder,
-        label,
+        Some(label),
         pipeline,
         frame_texture_view,
         depth_texture_view,
@@ -297,7 +215,7 @@ pub fn render<'a, I, Extra>(
     // draw objects
     for object in objects {
         tracing::trace!("    object {:?}", object.name);
-        render_object(&mut render_pass, object, default_material_bindgroup);
+        renderling_core::render_object(&mut render_pass, object, default_material_bindgroup);
     }
 
     drop(render_pass);
