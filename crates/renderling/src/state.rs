@@ -3,6 +3,11 @@ use renderling_core::conduct_clear_pass;
 use snafu::prelude::*;
 use std::sync::{Arc, RwLock};
 
+#[cfg(feature = "text")]
+use ab_glyph::FontArc;
+
+use crate::{forward::ForwardPipeline, renderer::Renderling, ui::UiPipeline};
+
 #[derive(Debug, Snafu)]
 pub enum WgpuStateError {
     #[snafu(display("cannot create adaptor"))]
@@ -427,7 +432,11 @@ impl WgpuState {
     }
 
     /// Clear the given texture and/or depth texture.
-    pub fn clear(&self, frame_view: Option<&wgpu::TextureView>, depth_view: Option<&wgpu::TextureView>) {
+    pub fn clear(
+        &self,
+        frame_view: Option<&wgpu::TextureView>,
+        depth_view: Option<&wgpu::TextureView>,
+    ) {
         conduct_clear_pass(
             &self.device,
             &self.queue,
@@ -446,9 +455,13 @@ impl WgpuState {
     }
 
     #[cfg(feature = "ui")]
-    pub fn new_ui_renderling(&self) -> crate::renderer::Renderling {
+    /// Creates a new renderling with a UI shader pipeline.
+    ///
+    /// By default this renderling has a camera set with an orthographic 2d projection.
+    pub fn new_ui_renderling(&self) -> Renderling<UiPipeline> {
         // this is the _default_ texture bind group which will be used when
         // there is no available texture to bind.
+
         let diffuse_texture = crate::Texture::new(
             &self.device,
             &self.queue,
@@ -465,16 +478,18 @@ impl WgpuState {
             color_blend: crate::UiColorBlend::ColorOnly,
         };
 
-        crate::renderer::Renderling::new(
+        let mut r = Renderling::new(
             self,
             crate::UiPipeline::new(&self.device, self.target.format()),
             material,
             false,
-        )
+        );
+        let _ = r.new_camera().with_projection_ortho2d().build();
+        r
     }
 
     #[cfg(feature = "forward")]
-    pub fn new_forward_renderling(&self) -> crate::renderer::Renderling {
+    pub fn new_forward_renderling(&self) -> Renderling<ForwardPipeline> {
         // this is the _default_ texture bind group which will be used when
         // there is no available texture to bind.
         let diffuse_texture = crate::Texture::new(
@@ -502,12 +517,17 @@ impl WgpuState {
             specular_texture,
             shininess: 16.0,
         };
-        crate::renderer::Renderling::new(
+        Renderling::new(
             self,
             crate::ForwardPipeline::new(&self.device, self.target.format()),
             material,
-            true
+            true,
         )
+    }
+
+    #[cfg(feature = "text")]
+    pub fn new_glyph_cache(&self, fonts: impl IntoIterator<Item = FontArc>) -> crate::GlyphCache {
+        crate::GlyphCache::new(self, fonts.into_iter().collect())
     }
 }
 

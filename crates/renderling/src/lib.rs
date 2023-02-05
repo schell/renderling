@@ -103,8 +103,7 @@ mod test {
 
     struct CmyTri {
         gpu: WgpuState,
-        ui: Renderling,
-        _cam: Camera,
+        ui: Renderling<UiPipeline>,
         tri: Object,
     }
 
@@ -112,20 +111,13 @@ mod test {
         let mut gpu = WgpuState::headless(100, 100).unwrap();
         gpu.default_background_color = wgpu::Color::WHITE;
 
-        let mut ui: Renderling = gpu.new_ui_renderling();
-        let cam = ui.new_camera().with_projection_ortho2d().build();
+        let mut ui: Renderling<UiPipeline> = gpu.new_ui_renderling();
         let tri = ui
             .new_object()
-            .with_camera(&cam)
             .with_mesh_builder(right_tri_builder())
             .build()
             .unwrap();
-        CmyTri {
-            gpu,
-            ui,
-            _cam: cam,
-            tri,
-        }
+        CmyTri { gpu, ui, tri }
     }
 
     #[test]
@@ -236,10 +228,10 @@ mod test {
         let mut gpu = WgpuState::headless(100, 100).unwrap();
         gpu.default_background_color = wgpu::Color::WHITE;
 
-        let mut ui: Renderling = gpu.new_ui_renderling();
+        let mut ui = gpu.new_ui_renderling();
 
-        // test updating the camera by starting with ortho2d
-        let cam = ui.new_camera().with_projection_ortho2d().build();
+        // test updating the camera by using a new one
+        let cam = ui.default_camera();
         cam.look_at(Point3::new(0.0, 12.0, 20.0), Point3::origin(), Vector3::y());
         cam.set_projection(Projection::Perspective(Perspective3::new(
             1.0,
@@ -274,7 +266,7 @@ mod test {
         let mut gpu = WgpuState::headless(100, 100).unwrap();
         gpu.default_background_color = wgpu::Color::WHITE;
 
-        let mut ui: Renderling = gpu.new_ui_renderling();
+        let mut ui = gpu.new_ui_renderling();
 
         let cam = ui.new_camera().with_projection_perspective().build();
 
@@ -360,7 +352,7 @@ mod test {
     fn cmy_cube_remesh() {
         let mut gpu = WgpuState::headless(100, 100).unwrap();
         gpu.default_background_color = wgpu::Color::TRANSPARENT;
-        let mut ui: Renderling = gpu.new_ui_renderling();
+        let mut ui = gpu.new_ui_renderling();
         let cam = ui.new_camera().with_projection_perspective().build();
         let cube = ui
             .new_object()
@@ -412,7 +404,7 @@ mod test {
     fn cmy_cube_material() {
         let mut gpu = WgpuState::headless(100, 100).unwrap();
         gpu.default_background_color = wgpu::Color::TRANSPARENT;
-        let mut ui: Renderling = gpu.new_ui_renderling();
+        let mut ui = gpu.new_ui_renderling();
         let cam = ui.new_camera().with_projection_perspective().build();
         let png = image::open("../../img/sandstone.png").unwrap();
         let tex = gpu
@@ -673,5 +665,54 @@ mod test {
             img,
         )
         .unwrap();
+    }
+
+    #[test]
+    fn ui_text() {
+        use crate::ui;
+
+        let mut gpu = WgpuState::headless(100, 50).unwrap();
+        gpu.default_background_color = wgpu::Color::TRANSPARENT;
+        let bytes: Vec<u8> =
+            std::fs::read("../../fonts/Font Awesome 6 Free-Regular-400.otf").unwrap();
+
+        let font = ui::FontArc::try_from_vec(bytes).unwrap();
+        let mut glyph_cache = gpu.new_glyph_cache(vec![font]);
+        glyph_cache.queue(
+            ui::Section::default()
+                .add_text(
+                    ui::Text::new("")
+                        .with_color([1.0, 1.0, 0.0, 1.0])
+                        .with_scale(32.0),
+                )
+                .add_text(
+                    ui::Text::new("")
+                        .with_color([1.0, 0.0, 1.0, 1.0])
+                        .with_scale(32.0),
+                )
+                .add_text(
+                    ui::Text::new("")
+                        .with_color([0.0, 1.0, 1.0, 1.0])
+                        .with_scale(32.0),
+                )
+        );
+        let (material, mesh) = glyph_cache.get_updated();
+
+        let mut r = gpu.new_ui_renderling();
+        let obj = r.new_object()
+            .with_material(material.unwrap())
+            .with_mesh(mesh.unwrap())
+            .build()
+            .unwrap();
+        r.update().unwrap();
+
+        let (frame, depth) = gpu.next_frame().unwrap();
+        gpu.clear(Some(&frame), Some(&depth));
+        r.render(&frame, &depth).unwrap();
+
+        let img = gpu.grab_frame_image().unwrap();
+        img.save_with_format("../../img/ui_text.png", image::ImageFormat::Png)
+            .unwrap();
+        crate::img_diff::assert_img_eq("ui_text", "../../img/ui_text.png", img).unwrap();
     }
 }

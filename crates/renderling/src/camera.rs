@@ -81,18 +81,29 @@ impl CameraInner {
     }
 }
 
-pub(crate) struct CameraUpdateCmd {
-    pub(crate) camera_id: Id,
+pub(crate) enum CameraUpdateCmd {
+    Update { camera_id: Id },
+    Destroy { camera_id: Id }
 }
 
 /// A user-land camera object.
 ///
 /// Used to update various camera properties in renderlings.
+///
+/// Dropping this struct will result in its GPU resources being cleaned up and/or recycled.
 #[derive(Clone)]
 pub struct Camera {
     pub(crate) id: Id,
     pub(crate) inner: Shared<CameraInner>,
     pub(crate) cmd: Sender<CameraUpdateCmd>,
+}
+
+impl Drop for Camera {
+    fn drop(&mut self) {
+        if self.inner.count() <= 1 {
+            let _ = self.cmd.send(CameraUpdateCmd::Destroy{ camera_id: self.id });
+        }
+    }
 }
 
 impl Camera {
@@ -101,10 +112,15 @@ impl Camera {
         f(&mut inner);
         if !inner.dirty_uniform {
             self.cmd
-                .send(CameraUpdateCmd { camera_id: self.id })
+                .send(CameraUpdateCmd::Update { camera_id: self.id })
                 .unwrap();
             inner.dirty_uniform = true;
         }
+    }
+
+    /// Get the id of this camera.
+    pub fn get_id(&self) -> usize {
+        *self.id
     }
 
     /// Set the view.
@@ -214,7 +230,7 @@ impl<'a> CameraBuilder<'a> {
             inner: inner.clone(),
         };
         let camera = Camera { id, cmd, inner };
-        scene.cameras.push((id, camera_data));
+        scene.cameras[id.0] = Some(camera_data);
         camera
     }
 }

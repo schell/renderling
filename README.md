@@ -1,12 +1,19 @@
 # renderling 🍖
-This library is a collection of WGPU render pipelines and types.
+This is a collection of WGPU renderers wrapped in a convenient interface.
+
+## Features
+
+* automatic resource management
+* builder pattern for lights, camera and objects
+* gltf support
+* headless rendering
 
 Shaders are written in GLSL. **shaderc** is used to compile shaders to SPIR-V.
 
 ## Definition
 **renderling** noun
 
-A WGPU graphics pipeline, along with simple types used to marshal data to the GPU.
+A wrapper around a WGPU graphics pipeline, along with simple types used to marshal data to the GPU.
 
 ## Pipelines
 
@@ -40,6 +47,12 @@ without any additional terms or conditions.
 
 ## Roadmap
 
+- [x] ui shader
+- [x] blinn-phong forward shader
+- [ ] automatic resource management
+- [x] builder pattern for lights, camera and objects
+- [ ] gltf support
+- [x] headless rendering
 - [ ] deferred shading pipeline
 - [ ] physically-based pipeline
 - [ ] rust-gpu shaders
