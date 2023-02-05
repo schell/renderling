@@ -3,6 +3,7 @@ use std::sync::{mpsc::Sender, Arc};
 
 use nalgebra::{Matrix4, Point3, UnitQuaternion, Vector3};
 use renderling_core::{ObjectDraw, ShaderObject};
+use rustc_hash::FxHashSet;
 use snafu::prelude::*;
 use wgpu::util::DeviceExt;
 
@@ -10,30 +11,17 @@ use crate::resources::Id;
 
 pub(crate) enum ObjUpdateCmd {
     // remove the object from the camera's objects
-    RemoveFromCamera {
-        camera_id: Id,
-        object_id: Id,
-    },
+    RemoveFromCamera { camera_id: Id, object_id: Id },
     // add the object to the camera's list of objects
-    AddToCamera {
-        camera_id: Id,
-        object_id: Id,
-    },
+    AddToCamera { camera_id: Id, object_id: Id },
     // update the given object's transform
-    Transform {
-        object_id: Id,
-        camera_id: Option<Id>,
-    },
+    Transform { object_id: Id },
     // update the given object's mesh
-    Mesh {
-        object_id: Id,
-        camera_id: Option<Id>,
-    },
+    Mesh { object_id: Id },
     // update the given object's mesh
-    Material {
-        object_id: Id,
-        camera_id: Option<Id>,
-    },
+    Material { object_id: Id },
+    // Destroy this object
+    Destroy { object_id: Id }
 }
 
 #[derive(Debug, Snafu)]
@@ -110,7 +98,6 @@ impl<'a> ObjectBuilder<'a> {
             .material
             .as_ref()
             .map(|mat| mat.create_material_uniform(self.device));
-        let mesh = self.mesh.context(MissingMeshSnafu)?;
         let position = Point3::from(self.world_transform.translate.xyz());
         let world_transforms = std::iter::once(self.world_transform)
             .chain(self.world_transforms)
@@ -118,7 +105,7 @@ impl<'a> ObjectBuilder<'a> {
         let is_visible = self.camera.is_some() && self.is_visible;
         let inner = ObjectInner {
             camera: self.camera.clone(),
-            mesh: mesh.clone(),
+            mesh: self.mesh.clone(),
             material: self.material,
             world_transforms,
             is_visible: self.is_visible,
@@ -128,19 +115,18 @@ impl<'a> ObjectBuilder<'a> {
         let id = self.scene.new_object_id();
         let obj_data = ObjectData {
             id,
-            mesh,
+            mesh: self.mesh,
             material_uniform,
             instances,
             position,
+            cameras: FxHashSet::from_iter(self.camera.clone()),
             inner: obj_inner.clone(),
         };
 
+        self.scene.objects[id.0] = Some(obj_data);
         if is_visible {
             let camera_id = self.camera.as_ref().unwrap();
-            let objects = self.scene.visible_objects.entry(*camera_id).or_default();
-            objects.push(obj_data);
-        } else {
-            let _ = self.scene.invisible_objects.insert(obj_data.id, obj_data);
+            self.scene.add_object_to_camera(&id, camera_id);
         }
 
         let object = Object {
@@ -159,7 +145,7 @@ impl<'a> ObjectBuilder<'a> {
 /// and data that has a downstream representation in `wgpu`, which is created/modified
 /// in `Renderling::update`.
 pub(crate) struct ObjectInner {
-    pub(crate) mesh: Arc<crate::Mesh>,
+    pub(crate) mesh: Option<Arc<crate::Mesh>>,
     pub(crate) material: Option<crate::AnyMaterial>,
     pub(crate) world_transforms: Vec<crate::WorldTransform>,
     pub(crate) camera: Option<Id>,
@@ -167,11 +153,18 @@ pub(crate) struct ObjectInner {
 }
 
 impl ObjectInner {
-    fn model_matrix_to_vec<M: Into<Matrix4<f32>>>(model: M, generate_normal_matrix: bool) -> Vec<f32> {
+    fn model_matrix_to_vec<M: Into<Matrix4<f32>>>(
+        model: M,
+        generate_normal_matrix: bool,
+    ) -> Vec<f32> {
         let model = model.into();
         let mut m = model.as_slice().to_vec();
         if generate_normal_matrix {
-            let normal = model.try_inverse().unwrap().transpose().fixed_resize::<3, 3>(0.0);
+            let normal = model
+                .try_inverse()
+                .unwrap()
+                .transpose()
+                .fixed_resize::<3, 3>(0.0);
             let mut n = normal.as_slice().to_vec();
             m.append(&mut n);
         }
@@ -179,8 +172,10 @@ impl ObjectInner {
     }
 
     /// Create a new instances buffer from a list of world transforms
-    pub(crate) fn new_world_transforms_buffer(&self, device: &wgpu::Device,
-                                              generate_normal_matrix: bool,
+    pub(crate) fn new_world_transforms_buffer(
+        &self,
+        device: &wgpu::Device,
+        generate_normal_matrix: bool,
     ) -> crate::VertexBuffer {
         let ms: Vec<f32> = self
             .world_transforms
@@ -224,6 +219,14 @@ pub struct Object {
     pub(crate) cmd: Sender<ObjUpdateCmd>,
 }
 
+impl Drop for Object {
+    fn drop(&mut self) {
+        if self.inner.count() <= 1 {
+            let _ = self.cmd.send(ObjUpdateCmd::Destroy{ object_id: self.id });
+        }
+    }
+}
+
 impl Object {
     /// Associate this object with the given camera.
     ///
@@ -232,7 +235,8 @@ impl Object {
     pub fn set_camera(&self, camera: &crate::Camera) {
         let new_camera_id = camera.id;
         let object_id = self.id;
-        if let Some(old_camera) = std::mem::replace(&mut self.inner.write().camera, Some(camera.id)) {
+        if let Some(old_camera) = std::mem::replace(&mut self.inner.write().camera, Some(camera.id))
+        {
             self.cmd
                 .send(ObjUpdateCmd::RemoveFromCamera {
                     camera_id: old_camera,
@@ -253,14 +257,7 @@ impl Object {
         let mut inner = self.inner.write();
         *inner.world_transforms.get_mut(0).unwrap() = transform;
         self.cmd
-            .send(ObjUpdateCmd::Transform {
-                object_id: self.id,
-                camera_id: if inner.is_visible {
-                    inner.camera.as_ref().copied()
-                } else {
-                    None
-                },
-            })
+            .send(ObjUpdateCmd::Transform { object_id: self.id })
             .unwrap();
     }
 
@@ -294,12 +291,9 @@ impl Object {
     /// Update the mesh of this object.
     pub fn set_mesh(&self, mesh: Arc<crate::Mesh>) {
         let mut inner = self.inner.write();
-        inner.mesh = mesh;
+        inner.mesh = Some(mesh);
         self.cmd
-            .send(ObjUpdateCmd::Mesh {
-                object_id: self.id,
-                camera_id: inner.camera.as_ref().copied(),
-            })
+            .send(ObjUpdateCmd::Mesh { object_id: self.id })
             .unwrap();
     }
 
@@ -308,10 +302,7 @@ impl Object {
         let mut inner = self.inner.write();
         inner.material = Some(crate::AnyMaterial::new(material));
         self.cmd
-            .send(ObjUpdateCmd::Material {
-                object_id: self.id,
-                camera_id: inner.camera.as_ref().copied(),
-            })
+            .send(ObjUpdateCmd::Material { object_id: self.id })
             .unwrap();
     }
 }
@@ -319,17 +310,18 @@ impl Object {
 /// Underlying data used by `wgpu` to render an object.
 pub(crate) struct ObjectData {
     pub(crate) id: Id,
-    pub(crate) mesh: Arc<crate::Mesh>,
+    pub(crate) mesh: Option<Arc<crate::Mesh>>,
     pub(crate) material_uniform: Option<crate::AnyMaterialUniform>,
     pub(crate) instances: crate::VertexBuffer,
     pub(crate) position: Point3<f32>,
+    pub(crate) cameras: FxHashSet<Id>,
     pub(crate) inner: crate::Shared<ObjectInner>,
 }
 
-impl<'a> From<&'a ObjectData> for ShaderObject<'a> {
-    fn from(value: &'a ObjectData) -> Self {
-        let draw = value
-            .mesh
+impl ObjectData {
+    pub(crate) fn as_shader_object(&self) -> Option<ShaderObject<'_>> {
+        let mesh = self.mesh.as_ref()?;
+        let draw = mesh
             .index_buffer
             .as_ref()
             .map(|mb| ObjectDraw::Indexed {
@@ -339,16 +331,16 @@ impl<'a> From<&'a ObjectData> for ShaderObject<'a> {
                 base_vertex: 0,
             })
             .unwrap_or_else(|| ObjectDraw::Default {
-                vertex_range: 0..value.mesh.vertex_buffer.len as u32,
+                vertex_range: 0..mesh.vertex_buffer.len as u32,
             });
         let object = ShaderObject {
-            mesh_buffer: value.mesh.vertex_buffer.buffer.slice(..),
-            instances: value.instances.buffer.slice(..),
-            instances_range: 0..value.instances.len as u32,
-            material: value.material_uniform.as_ref().map(|mu| mu.get_bindgroup()),
+            mesh_buffer: mesh.vertex_buffer.buffer.slice(..),
+            instances: self.instances.buffer.slice(..),
+            instances_range: 0..self.instances.len as u32,
+            material: self.material_uniform.as_ref().map(|mu| mu.get_bindgroup()),
             name: None,
             draw,
         };
-        object
+        Some(object)
     }
 }

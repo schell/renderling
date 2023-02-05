@@ -12,15 +12,17 @@ readme = "../../README.md"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-default = ["forward", "ui", "image", "raw-window-handle", "winit"]
+default = ["forward", "ui", "text", "image", "raw-window-handle", "winit"]
 forward = ["renderling_forward"]
 ui = ["renderling_ui"]
+text = ["ab_glyph", "glyph_brush"]
 wasm = ["renderling_forward/wasm", "renderling_ui/wasm"]
 
 [dependencies]
+ab_glyph = { version = "^0.2", optional = true }
 bytemuck = { version = "1.13.0", features = ["derive"] }
-handle-key = "0.1.0"
 futures-lite = "1.12.0"
+glyph_brush = { version = "^0.7", optional = true }
 image = { version = "0.24.4", optional = true }
 log = "0.4.17"
 nalgebra = "0.32.1"
