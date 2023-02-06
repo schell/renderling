@@ -1,5 +1,5 @@
 //! Ui pipeline and material definitions.
-use crate::{AnyMaterialUniform, Material, MaterialUniform, Renderling};
+use crate::{AnyMaterialUniform, Material, MaterialUniform};
 
 #[cfg(feature = "text")]
 mod text;

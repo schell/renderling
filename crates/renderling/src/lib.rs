@@ -697,11 +697,18 @@ mod test {
                 )
         );
         let (material, mesh) = glyph_cache.get_updated();
-
+        let material = Arc::new(material.unwrap());
+        let mesh = Arc::new(mesh.unwrap());
         let mut r = gpu.new_ui_renderling();
-        let obj = r.new_object()
-            .with_material(material.unwrap())
-            .with_mesh(mesh.unwrap())
+        let _obj_a = r.new_object()
+            .with_material::<UiMaterial>(material.clone())
+            .with_mesh(mesh.clone())
+            .build()
+            .unwrap();
+        let _obj_b = r.new_object()
+            .with_material::<UiMaterial>(material.clone())
+            .with_mesh(mesh.clone())
+            .with_position(Point3::new(15.0, 15.0, 0.5))
             .build()
             .unwrap();
         r.update().unwrap();
@@ -711,8 +718,8 @@ mod test {
         r.render(&frame, &depth).unwrap();
 
         let img = gpu.grab_frame_image().unwrap();
-        img.save_with_format("../../img/ui_text.png", image::ImageFormat::Png)
-            .unwrap();
+        //img.save_with_format("../../img/ui_text.png", image::ImageFormat::Png)
+        //    .unwrap();
         crate::img_diff::assert_img_eq("ui_text", "../../img/ui_text.png", img).unwrap();
     }
 }
