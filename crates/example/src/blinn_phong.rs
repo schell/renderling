@@ -143,6 +143,9 @@ pub fn run() -> Result<(), anyhow::Error> {
         })
         .build();
 
+    let (document, buffers, images) = gltf::import("gltf/pyramid.gltf").unwrap();
+    log::info!("{:#?}", document);
+
     let mut last_frame = Instant::now();
     let rotation_speed = std::f32::consts::FRAC_PI_4; // per second
     let mut rotation_y = 0.0;

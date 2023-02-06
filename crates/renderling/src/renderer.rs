@@ -1,10 +1,11 @@
 //! Builds the UI pipeline and manages resources.
+use nalgebra::Point3;
 use renderling_core::{
     light::{
         DirectionalLight as ShaderDirectionalLight, LightsUniform, PointLight as ShaderPointLight,
         SpotLight as ShaderSpotLight,
     },
-    ObjectDraw, ShaderObject,
+    ObjectDraw,
 };
 use rustc_hash::FxHashSet;
 use snafu::prelude::*;
@@ -49,6 +50,8 @@ pub(crate) struct Scene {
     object_id_bank: BankOfIds,
     // all cameras, indexed by Id
     pub cameras: Vec<Option<CameraData>>,
+    // all object ids, sorted by distance to camera
+    camera_objects_by_distance: Vec<Vec<Id>>,
     // all objects, indexed by Id
     pub objects: Vec<Option<ObjectData>>,
 }
@@ -75,6 +78,7 @@ impl Scene {
     pub fn destroy_camera(&mut self, camera_id: Id) {
         log::trace!("destroying and recycling camera {:?}", camera_id);
         self.cameras[camera_id.0] = None;
+        self.camera_objects_by_distance[camera_id.0] = vec![];
         for object in self.objects.iter_mut() {
             if let Some(object) = object.as_mut() {
                 let _ = object.cameras.remove(&camera_id);
@@ -89,10 +93,6 @@ impl Scene {
             self.objects.resize_with(id.0 + 1, || None);
         }
         id
-    }
-
-    pub fn has_object(&self, object_id: &Id) -> bool {
-        self.objects.get(object_id.0).map(Option::as_ref).flatten().is_some()
     }
 
     pub fn get_object_mut(&mut self, object_id: &Id) -> Option<&mut ObjectData> {
@@ -124,6 +124,36 @@ impl Scene {
         if let Some(_object) = self.objects[object_id.0].take() {
             self.object_id_bank.recycle(object_id);
         }
+    }
+
+    // TODO: make this more efficient by only sorting based on one camera_id
+    pub fn sort_objects(&mut self) {
+        let mut sorted = vec![];
+        struct Sorter {
+            object_id: Id,
+            distance: f32
+        }
+        for (i, camera) in self.cameras.iter().enumerate() {
+            let camera_id = Id(i);
+            if let Some(cam_data) = camera {
+                let v = cam_data.inner.read().view.translation.vector;
+                let cam_pos = Point3::new(v.x, v.y, v.z);
+                let mut objects = self.objects.iter().enumerate().filter_map(|(j, obj_data)| {
+                    let obj_data = obj_data.as_ref()?;
+                    let object_id = Id(j);
+                    if obj_data.cameras.contains(&camera_id) {
+                        let distance = nalgebra::distance(&obj_data.position, &cam_pos);
+                        Some(Sorter{ object_id, distance })
+                    } else {
+                        None
+                    }
+                }).collect::<Vec<_>>();
+                // we want to sort back to front
+                objects.sort_by(|a, b| b.distance.total_cmp(&a.distance));
+                sorted.push(objects.into_iter().map(|s| s.object_id).collect::<Vec<_>>());
+            }
+        }
+        self.camera_objects_by_distance = sorted;
     }
 }
 
@@ -350,29 +380,9 @@ impl<P: Pipeline> Renderling<P> {
             }
         }
 
-        //for camera_id in cameras_to_sort.into_iter() {
-        //    if let Some(v) = self
-        //        .scene
-        //        .get_camera(&camera_id)
-        //        .map(|data| data.inner.read().view.translation.vector)
-        //    {
-        //        let camera_position:Point3<f32> = Point3::new(v.x, v.y, v.z);
-        //        let mut object_ids = self
-        //            .scene
-        //            .cameras_to_objects
-        //            .remove(&camera_id)
-        //            .unwrap_or(vec![])
-        //            .into_iter()
-        //            .filter_map(|id| self.scene.get_object(&id).map(|o| (id, o.position)))
-        //            .collect::<Vec<_>>();
-        //        object_ids.sort_by(|(a_id, a_p), (b_id, b_p)| {
-        //            let a_d = nalgebra::distance(&a_p, &camera_position);
-        //            let b_d = nalgebra::distance(&b_p, &camera_position);
-        //            b_d.total_cmp(&a_d)
-        //        });
-        //        self.scene.cameras_to_objects.insert(camera_id, object_ids.into_iter().map(|(id, _)| id).collect());
-        //    }
-        //}
+        if true || !cameras_to_sort.is_empty() {
+            self.scene.sort_objects();
+        }
 
         // update lights
         let mut update_point_lights = false;
@@ -534,15 +544,15 @@ impl<P: Pipeline> Renderling<P> {
         depth_texture_view: &wgpu::TextureView,
         camera_id: &Id,
     ) -> Result<(), RenderlingError> {
-        let objects = self.scene.objects.iter().filter_map(|may_o| {
-            let obj = may_o.as_ref()?;
-            if obj.cameras.contains(camera_id) {
-                Some(obj)
-            } else {
-                None
-            }
-        });
-        self.render_camera_objects(frame_texture_view, depth_texture_view, camera_id, objects)
+        if let Some(object_ids) = self.scene.camera_objects_by_distance.get(camera_id.0) {
+            let objects = object_ids.iter().filter_map(|id| {
+                let may_o = self.scene.objects.get(id.0)?;
+                may_o.as_ref()
+            });
+            self.render_camera_objects(frame_texture_view, depth_texture_view, camera_id, objects)
+        } else {
+            Ok(())
+        }
     }
 
     /// Conduct a full render pass into the given textures.

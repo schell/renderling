@@ -3,7 +3,6 @@ members = [
     "crates/build",
     "crates/core",
     "crates/example",
-    "crates/example-gltf",
     "crates/forward",
     "crates/renderling",
     "crates/ui"

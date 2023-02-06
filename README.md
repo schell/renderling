@@ -3,10 +3,12 @@ This is a collection of WGPU renderers wrapped in a convenient interface.
 
 ## Features
 
-* automatic resource management
-* builder pattern for lights, camera and objects
+* builder pattern for lights, cameras and objects
+* automatic resource management (objects and cameras are removed from the scene and gpu resources released on drop)
+* headless rendering support
+  - rendering to texture and saving via `image` crate
+* text rendering support (cargo feature `text` - on by default)
 * gltf support
-* headless rendering
 
 Shaders are written in GLSL. **shaderc** is used to compile shaders to SPIR-V.
 
@@ -27,11 +29,6 @@ A simple forward shader that supports vertices with colors and/or textures. It h
 blending uniform that determines how vertex colors should be blended with vertex UV texture
 coords. This enables support for colorful text.
 
-## Conveniences
-
-* `Texture` type
-* `Mesh` and `MeshBuilder` types
-
 ## License
 Renderling is free and open source. All code in this repository is dual-licensed under either:
 
@@ -49,10 +46,10 @@ without any additional terms or conditions.
 
 - [x] ui shader
 - [x] blinn-phong forward shader
-- [ ] automatic resource management
 - [x] builder pattern for lights, camera and objects
-- [ ] gltf support
+- [x] automatic resource management
 - [x] headless rendering
+- [ ] gltf support
 - [ ] deferred shading pipeline
-- [ ] physically-based pipeline
-- [ ] rust-gpu shaders
+- [ ] physically based rendering pipeline
+- [ ] [rust-gpu](https://github.com/EmbarkStudios/rust-gpu) shaders - maybe?

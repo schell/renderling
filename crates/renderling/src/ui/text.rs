@@ -5,12 +5,11 @@ use std::{borrow::Cow, num::NonZeroU32, ops::{Deref, DerefMut}, sync::Arc};
 
 use ::ab_glyph::Rect;
 use glyph_brush::*;
-use snafu::prelude::*;
 
 pub use ::ab_glyph::FontArc;
 pub use glyph_brush::{Color, Section, Text};
 
-use crate::{Id, Mesh, Texture, UiColorBlend, UiMaterial, UiVertex, WgpuState};
+use crate::{Mesh, Texture, UiColorBlend, UiMaterial, UiVertex, WgpuState};
 
 /// A text cache maintained mostly by ab_glyph.
 pub struct Cache {
