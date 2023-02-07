@@ -59,6 +59,7 @@ mod object;
 mod pipeline;
 mod renderer;
 mod resources;
+mod scene;
 mod state;
 mod texture;
 mod transform;
@@ -71,6 +72,7 @@ pub use object::*;
 pub use pipeline::*;
 pub use renderer::*;
 pub use resources::*;
+pub use scene::*;
 pub use state::*;
 pub use texture::*;
 pub use transform::*;
@@ -128,7 +130,7 @@ mod test {
         c.ui.update().unwrap();
         c.ui.render(&frame, &depth).unwrap();
         let img = c.gpu.grab_frame_image().unwrap();
-        crate::img_diff::assert_img_eq("cmy_triangle", "../../img/cmy_triangle.png", img).unwrap();
+        crate::img_diff::assert_img_eq("cmy_triangle", "cmy_triangle.png", img).unwrap();
     }
 
     #[test]
@@ -143,7 +145,7 @@ mod test {
         let (frame, depth) = c.gpu.next_frame().unwrap();
         c.gpu.clear(Some(&frame), Some(&depth));
         c.tri.set_transform(
-            WorldTransform::default()
+            Transform::default()
                 .with_position(Point3::new(100.0, 0.0, 0.0))
                 .with_rotation(UnitQuaternion::from_axis_angle(
                     &Vector3::z_axis(),
@@ -157,7 +159,7 @@ mod test {
         let img = c.gpu.grab_frame_image().unwrap();
         crate::img_diff::assert_img_eq(
             "cmy_triangle_update_transform",
-            "../../img/cmy_triangle_update_transform.png",
+            "cmy_triangle_update_transform.png",
             img,
         )
         .unwrap();
@@ -258,7 +260,7 @@ mod test {
         ui.render(&frame, &depth).unwrap();
 
         let img = gpu.grab_frame_image().unwrap();
-        crate::img_diff::assert_img_eq("cmy_cube", "../../img/cmy_cube.png", img).unwrap();
+        crate::img_diff::assert_img_eq("cmy_cube", "cmy_cube.png", img).unwrap();
     }
 
     #[test]
@@ -303,13 +305,13 @@ mod test {
 
         let img = gpu.grab_frame_image().unwrap();
         //img.save_with_format(
-        //    "../../img/cmy_cube_visible_before.png",
+        //    "cmy_cube_visible_before.png",
         //    image::ImageFormat::Png,
         //)
         //.unwrap();
         crate::img_diff::assert_img_eq(
             "cmy_cube_visible_before",
-            "../../img/cmy_cube_visible_before.png",
+            "cmy_cube_visible_before.png",
             img,
         )
         .unwrap();
@@ -322,13 +324,13 @@ mod test {
 
         let img = gpu.grab_frame_image().unwrap();
         //img.save_with_format(
-        //    "../../img/cmy_cube_visible_after.png",
+        //    "cmy_cube_visible_after.png",
         //    image::ImageFormat::Png,
         //)
         //.unwrap();
         crate::img_diff::assert_img_eq(
             "cmy_cube_visible_after",
-            "../../img/cmy_cube_visible_after.png",
+            "cmy_cube_visible_after.png",
             img,
         )
         .unwrap();
@@ -342,7 +344,7 @@ mod test {
         let img = gpu.grab_frame_image().unwrap();
         crate::img_diff::assert_img_eq(
             "cmy_cube_visible_before_again",
-            "../../img/cmy_cube_visible_before.png",
+            "cmy_cube_visible_before.png",
             img,
         )
         .unwrap();
@@ -368,13 +370,13 @@ mod test {
 
         let img = gpu.grab_frame_image().unwrap();
         //img.save_with_format(
-        //    "../../img/cmy_cube_remesh_before.png",
+        //    "cmy_cube_remesh_before.png",
         //    image::ImageFormat::Png,
         //)
         //.unwrap();
         crate::img_diff::assert_img_eq(
             "cmy_cube_remesh_before",
-            "../../img/cmy_cube_remesh_before.png",
+            "cmy_cube_remesh_before.png",
             img,
         )
         .unwrap();
@@ -388,33 +390,20 @@ mod test {
 
         let img = gpu.grab_frame_image().unwrap();
         //img.save_with_format(
-        //    "../../img/cmy_cube_remesh_after.png",
+        //    "cmy_cube_remesh_after.png",
         //    image::ImageFormat::Png,
         //)
         //.unwrap();
         crate::img_diff::assert_img_eq(
             "cmy_cube_remesh_after",
-            "../../img/cmy_cube_remesh_after.png",
+            "cmy_cube_remesh_after.png",
             img,
         )
         .unwrap();
     }
 
-    #[test]
-    fn cmy_cube_material() {
-        let mut gpu = WgpuState::headless(100, 100).unwrap();
-        gpu.default_background_color = wgpu::Color::TRANSPARENT;
-        let mut ui = gpu.new_ui_renderling();
-        let cam = ui.new_camera().with_projection_perspective().build();
-        let png = image::open("../../img/sandstone.png").unwrap();
-        let tex = gpu
-            .create_texture(Some("sandstone_material"), &png.to_rgba8())
-            .unwrap();
-        let material = UiMaterial {
-            diffuse_texture: tex,
-            color_blend: UiColorBlend::UvOnly,
-        };
-        let builder = MeshBuilder::default().with_vertices({
+    fn uv_unit_cube() -> MeshBuilder<UiVertex> {
+        MeshBuilder::default().with_vertices({
             let p: [Point3<f32>; 8] = crate::math::unit_points();
             let tl = Point2::from([0.0, 0.0]);
             let tr = Point2::from([1.0, 0.0]);
@@ -518,7 +507,24 @@ mod test {
                     .with_position(p[5].x, p[5].y, p[5].z)
                     .with_uv(br.x, br.y),
             ]
-        });
+        })
+    }
+
+    #[test]
+    fn cmy_cube_material() {
+        let mut gpu = WgpuState::headless(100, 100).unwrap();
+        gpu.default_background_color = wgpu::Color::TRANSPARENT;
+        let mut ui = gpu.new_ui_renderling();
+        let cam = ui.new_camera().with_projection_perspective().build();
+        let png = image::open("../../img/sandstone.png").unwrap();
+        let tex = gpu
+            .create_texture(Some("sandstone_material"), &png.to_rgba8())
+            .unwrap();
+        let material = UiMaterial {
+            diffuse_texture: tex,
+            color_blend: UiColorBlend::UvOnly,
+        };
+        let builder = uv_unit_cube();
         let cube = ui
             .new_object()
             .with_camera(&cam)
@@ -534,13 +540,13 @@ mod test {
 
         let img = gpu.grab_frame_image().unwrap();
         //img.save_with_format(
-        //    "../../img/cmy_cube_material_before.png",
+        //    "cmy_cube_material_before.png",
         //    image::ImageFormat::Png,
         //)
         //.unwrap();
         crate::img_diff::assert_img_eq(
             "cmy_cube_material_before",
-            "../../img/cmy_cube_material_before.png",
+            "cmy_cube_material_before.png",
             img,
         )
         .unwrap();
@@ -561,19 +567,19 @@ mod test {
 
         let img = gpu.grab_frame_image().unwrap();
         //img.save_with_format(
-        //    "../../img/cmy_cube_material_after.png",
+        //    "cmy_cube_material_after.png",
         //    image::ImageFormat::Png,
         //)
         //.unwrap();
         crate::img_diff::assert_img_eq(
             "cmy_cube_material_after",
-            "../../img/cmy_cube_material_after.png",
+            "cmy_cube_material_after.png",
             img,
         )
         .unwrap();
     }
 
-    fn init_logging() {
+    fn _init_logging() {
         let _ = env_logger::builder()
             .is_test(true)
             .filter_module("renderling", log::LevelFilter::Trace)
@@ -655,13 +661,13 @@ mod test {
 
         let img = gpu.grab_frame_image().unwrap();
         //img.save_with_format(
-        //    "../../img/forward_cube_directional.png",
+        //    "forward_cube_directional.png",
         //    image::ImageFormat::Png,
         //)
         //.unwrap();
         crate::img_diff::assert_img_eq(
             "forward_cube_directional",
-            "../../img/forward_cube_directional.png",
+            "forward_cube_directional.png",
             img,
         )
         .unwrap();
@@ -718,8 +724,126 @@ mod test {
         r.render(&frame, &depth).unwrap();
 
         let img = gpu.grab_frame_image().unwrap();
-        //img.save_with_format("../../img/ui_text.png", image::ImageFormat::Png)
+        //img.save_with_format("ui_text.png", image::ImageFormat::Png)
         //    .unwrap();
-        crate::img_diff::assert_img_eq("ui_text", "../../img/ui_text.png", img).unwrap();
+        crate::img_diff::assert_img_eq("ui_text", "ui_text.png", img).unwrap();
+    }
+
+    #[test]
+    // tests importing a gltf file and rendering the first image as a 2d object
+    fn gltf_images() {
+        let mut gpu = WgpuState::headless(100, 100).unwrap();
+        let scene = gpu.import_gltf("../../gltf/cheetah_cone.glb").unwrap();
+        let mut ui = gpu.new_ui_renderling();
+        let _img = ui
+            .new_object()
+            .with_mesh_builder(
+                MeshBuilder::default()
+                    .with_vertices(
+                        vec![
+                            UiVertex::default()
+                                .with_position(0.0, 0.0, 0.0)
+                                .with_uv(0.0, 0.0),
+                            UiVertex::default()
+                                .with_position(1.0, 0.0, 0.0)
+                                .with_uv(1.0, 0.0),
+                            UiVertex::default()
+                                .with_position(1.0, 1.0, 0.0)
+                                .with_uv(1.0, 1.0),
+                            UiVertex::default()
+                                .with_position(0.0, 1.0, 0.0)
+                                .with_uv(0.0, 1.0),
+                        ]
+                    )
+                    .with_indices(vec![
+                        0, 1, 2,
+                        0, 2, 3
+                    ])
+            )
+            .with_material(UiMaterial {
+                diffuse_texture: scene.textures[0].clone(),
+                color_blend: UiColorBlend::UvOnly,
+            })
+            .with_scale(Vector3::new(100.0, 100.0, 1.0))
+            .build()
+            .unwrap();
+        ui.update().unwrap();
+        let (frame, depth) = gpu.next_frame().unwrap();
+        gpu.clear(Some(&frame), Some(&depth));
+        ui.render(&frame, &depth).unwrap();
+
+        let img = gpu.grab_frame_image().unwrap();
+        //img.save_with_format("gltf_images.png", image::ImageFormat::Png)
+        //    .unwrap();
+        crate::img_diff::assert_img_eq("gltf_images", "gltf_images.png", img).unwrap();
+    }
+
+    #[test]
+    // tests that nested children are transformed by their parent's transform
+    fn parent_sanity() {
+        let mut gpu = WgpuState::headless(100, 100).unwrap();
+        let mut ui = gpu.new_ui_renderling();
+        let size = 1.0;
+        let yellow_tri = ui
+            .new_object()
+            .with_mesh_builder(
+                MeshBuilder::default()
+                    .with_vertices(
+                        vec![
+                            UiVertex::default()
+                                .with_position(0.0, 0.0, 0.0)
+                                .with_color(1.0, 1.0, 0.0, 1.0),
+                            UiVertex::default()
+                                .with_position(size, 0.0, 0.0)
+                                .with_color(1.0, 1.0, 0.0, 1.0),
+                            UiVertex::default()
+                                .with_position(size, size, 0.0)
+                                .with_color(1.0, 1.0, 0.0, 1.0),
+                        ]
+                    )
+            )
+            .with_position(Point3::new(25.0, 25.0, 0.0))
+            .build()
+            .unwrap();
+        let _cyan_tri = ui
+            .new_object()
+            .with_mesh_builder(
+                MeshBuilder::default()
+                    .with_vertices(
+                        vec![
+                            UiVertex::default()
+                                .with_position(0.0, 0.0, 0.0)
+                                .with_color(0.0, 1.0, 1.0, 1.0),
+                            UiVertex::default()
+                                .with_position(size, 0.0, 0.0)
+                                .with_color(0.0, 1.0, 1.0, 1.0),
+                            UiVertex::default()
+                                .with_position(size, size, 0.0)
+                                .with_color(0.0, 1.0, 1.0, 1.0),
+                        ]
+                    )
+            )
+            .with_position(Point3::new(25.0, 25.0, 0.0))
+            .with_scale(Vector3::new(25.0, 25.0, 1.0))
+            .with_child(&yellow_tri)
+            .build()
+            .unwrap();
+
+        assert_eq!(
+            WorldTransform::default()
+                .with_position(Point3::new(50.0, 50.0, 0.0))
+                .with_scale(Vector3::new(25.0, 25.0, 1.0)),
+            yellow_tri.get_world_transform()
+        );
+
+        ui.update().unwrap();
+        let (frame, depth) = gpu.next_frame().unwrap();
+        gpu.clear(Some(&frame), Some(&depth));
+        ui.render(&frame, &depth).unwrap();
+
+        let img = gpu.grab_frame_image().unwrap();
+        //img.save_with_format("../../test_img/parent_sanity.png", image::ImageFormat::Png)
+        //    .unwrap();
+        crate::img_diff::assert_img_eq("parent_sanity", "parent_sanity.png", img).unwrap();
     }
 }

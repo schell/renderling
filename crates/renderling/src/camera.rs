@@ -82,8 +82,8 @@ impl CameraInner {
 }
 
 pub(crate) enum CameraUpdateCmd {
-    Update { camera_id: Id },
-    Destroy { camera_id: Id }
+    Update { camera_id: Id<Camera> },
+    Destroy { camera_id: Id<Camera> }
 }
 
 /// A user-land camera object.
@@ -93,7 +93,7 @@ pub(crate) enum CameraUpdateCmd {
 /// Dropping this struct will result in its GPU resources being cleaned up and/or recycled.
 #[derive(Clone)]
 pub struct Camera {
-    pub(crate) id: Id,
+    pub(crate) id: Id<Camera>,
     pub(crate) inner: Shared<CameraInner>,
     pub(crate) cmd: Sender<CameraUpdateCmd>,
 }
@@ -175,7 +175,7 @@ pub struct CameraBuilder<'a> {
     pub(crate) height: f32,
     pub(crate) device: &'a wgpu::Device,
     pub(crate) update_tx: Sender<CameraUpdateCmd>,
-    pub(crate) scene: &'a mut crate::Scene,
+    pub(crate) scene: &'a mut crate::Stage,
     pub(crate) inner: CameraInner,
 }
 

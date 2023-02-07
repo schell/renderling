@@ -7,21 +7,35 @@ use rustc_hash::FxHashSet;
 use snafu::prelude::*;
 use wgpu::util::DeviceExt;
 
-use crate::resources::Id;
+use crate::{resources::Id, Camera, LocalTransform, Shared, WorldTransform};
 
 pub(crate) enum ObjUpdateCmd {
     // remove the object from the camera's objects
-    RemoveFromCamera { camera_id: Id, object_id: Id },
+    RemoveFromCamera {
+        camera_id: Id<Camera>,
+        object_id: Id<Object>,
+    },
     // add the object to the camera's list of objects
-    AddToCamera { camera_id: Id, object_id: Id },
+    AddToCamera {
+        camera_id: Id<Camera>,
+        object_id: Id<Object>,
+    },
     // update the given object's transform
-    Transform { object_id: Id },
+    Transform {
+        object_id: Id<Object>,
+    },
     // update the given object's mesh
-    Mesh { object_id: Id },
+    Mesh {
+        object_id: Id<Object>,
+    },
     // update the given object's mesh
-    Material { object_id: Id },
+    Material {
+        object_id: Id<Object>,
+    },
     // Destroy this object
-    Destroy { object_id: Id }
+    Destroy {
+        object_id: Id<Object>,
+    },
 }
 
 #[derive(Debug, Snafu)]
@@ -31,16 +45,17 @@ pub enum ObjectBuilderError {
 }
 
 pub struct ObjectBuilder<'a> {
-    pub(crate) camera: Option<Id>,
+    pub(crate) camera: Option<Id<Camera>>,
     pub(crate) mesh: Option<Arc<crate::Mesh>>,
     pub(crate) material: Option<crate::AnyMaterial>,
-    pub(crate) world_transform: crate::WorldTransform,
-    pub(crate) world_transforms: Vec<crate::WorldTransform>,
+    pub(crate) local_transform: crate::LocalTransform,
+    pub(crate) local_transforms: Vec<crate::LocalTransform>,
+    pub(crate) children: Vec<&'a Object>,
     pub(crate) generate_normal_matrix: bool,
     pub(crate) is_visible: bool,
     pub(crate) update_tx: Sender<ObjUpdateCmd>,
     pub(crate) device: &'a wgpu::Device,
-    pub(crate) scene: &'a mut crate::Scene,
+    pub(crate) scene: &'a mut crate::Stage,
 }
 
 impl<'a> ObjectBuilder<'a> {
@@ -62,28 +77,36 @@ impl<'a> ObjectBuilder<'a> {
         self.with_mesh(mesh)
     }
 
-    pub fn add_world_transform(mut self, wt: crate::WorldTransform) -> Self {
-        self.world_transforms.push(wt);
+    /// Add another local transform.
+    ///
+    /// This object will be rendered once with every transform using instancing.
+    pub fn add_transform(mut self, wt: crate::LocalTransform) -> Self {
+        self.local_transforms.push(wt);
         self
     }
 
     pub fn with_position(mut self, p: Point3<f32>) -> Self {
-        self.world_transform.translate = Vector3::new(p.x, p.y, p.z);
+        self.local_transform.translate = Vector3::new(p.x, p.y, p.z);
         self
     }
 
     pub fn with_rotation(mut self, rotation: UnitQuaternion<f32>) -> Self {
-        self.world_transform.rotate = rotation;
+        self.local_transform.rotate = rotation;
         self
     }
 
     pub fn with_scale(mut self, scale: Vector3<f32>) -> Self {
-        self.world_transform.scale = scale;
+        self.local_transform.scale = scale;
         self
     }
 
     pub fn with_material<T: crate::Material>(mut self, material: impl Into<Arc<T>>) -> Self {
         self.material = Some(crate::AnyMaterial::new(material));
+        self
+    }
+
+    pub fn with_child(mut self, child: &'a Object) -> Self {
+        self.children.push(child);
         self
     }
 
@@ -93,34 +116,49 @@ impl<'a> ObjectBuilder<'a> {
     }
 
     pub fn build(self) -> Result<Object, ObjectBuilderError> {
-        //let id = self.data.object_id_bank.dequeue();
         let material_uniform = self
             .material
             .as_ref()
             .map(|mat| mat.create_material_uniform(self.device));
-        let position = Point3::from(self.world_transform.translate.xyz());
-        let world_transforms = std::iter::once(self.world_transform)
-            .chain(self.world_transforms)
+        let position = Point3::from(self.local_transform.translate.xyz());
+        let local_transforms = std::iter::once(self.local_transform)
+            .chain(self.local_transforms)
             .collect::<Vec<_>>();
         let is_visible = self.camera.is_some() && self.is_visible;
+        let id = self.scene.new_object_id();
         let inner = ObjectInner {
             camera: self.camera.clone(),
+            // parent is set to `Some` when/if the parent is built, or updated
+            parent: None,
+            children: vec![],
             mesh: self.mesh.clone(),
             material: self.material,
-            world_transforms,
+            local_transforms,
             is_visible: self.is_visible,
         };
-        let instances = inner.new_world_transforms_buffer(self.device, self.generate_normal_matrix);
-        let obj_inner = crate::Shared::new(inner);
-        let id = self.scene.new_object_id();
+        let inner = Shared::new(inner);
+        let mut children = vec![];
+        for child in self.children.into_iter() {
+            child.inner.write().parent = Some(ParentObject(inner.clone()));
+            children.push(ChildObject(child.id));
+            self.update_tx
+                .send(ObjUpdateCmd::Transform {
+                    object_id: child.id,
+                })
+                .unwrap();
+        }
+        inner.write().children = children;
+        let instances = inner
+            .read()
+            .new_world_transforms_buffer(self.device, self.generate_normal_matrix);
         let obj_data = ObjectData {
             id,
             mesh: self.mesh,
             material_uniform,
             instances,
-            position,
+            world_position: position,
             cameras: FxHashSet::from_iter(self.camera.clone()),
-            inner: obj_inner.clone(),
+            inner: inner.clone(),
         };
 
         self.scene.objects[id.0] = Some(obj_data);
@@ -131,13 +169,17 @@ impl<'a> ObjectBuilder<'a> {
 
         let object = Object {
             id,
-            inner: obj_inner,
+            inner,
             cmd: self.update_tx,
         };
 
         Ok(object)
     }
 }
+
+pub(crate) struct ParentObject(Shared<ObjectInner>);
+
+pub(crate) struct ChildObject(Id<Object>);
 
 /// Data shared between the library user and the renderling backend.
 ///
@@ -147,17 +189,15 @@ impl<'a> ObjectBuilder<'a> {
 pub(crate) struct ObjectInner {
     pub(crate) mesh: Option<Arc<crate::Mesh>>,
     pub(crate) material: Option<crate::AnyMaterial>,
-    pub(crate) world_transforms: Vec<crate::WorldTransform>,
-    pub(crate) camera: Option<Id>,
+    pub(crate) camera: Option<Id<Camera>>,
+    pub(crate) parent: Option<ParentObject>,
+    pub(crate) children: Vec<ChildObject>,
     pub(crate) is_visible: bool,
+    pub(crate) local_transforms: Vec<crate::LocalTransform>,
 }
 
 impl ObjectInner {
-    fn model_matrix_to_vec<M: Into<Matrix4<f32>>>(
-        model: M,
-        generate_normal_matrix: bool,
-    ) -> Vec<f32> {
-        let model = model.into();
+    fn model_matrix_to_vec(model: Matrix4<f32>, generate_normal_matrix: bool) -> Vec<f32> {
         let mut m = model.as_slice().to_vec();
         if generate_normal_matrix {
             let normal = model
@@ -178,9 +218,8 @@ impl ObjectInner {
         generate_normal_matrix: bool,
     ) -> crate::VertexBuffer {
         let ms: Vec<f32> = self
-            .world_transforms
-            .iter()
-            .flat_map(|t| Self::model_matrix_to_vec(t, generate_normal_matrix))
+            .get_world_transforms()
+            .flat_map(|t| Self::model_matrix_to_vec(Matrix4::from(&t), generate_normal_matrix))
             .collect::<Vec<_>>();
         crate::VertexBuffer {
             buffer: device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -188,7 +227,7 @@ impl ObjectInner {
                 contents: bytemuck::cast_slice(ms.as_slice()),
                 usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
             }),
-            len: self.world_transforms.len(),
+            len: self.local_transforms.len(),
         }
     }
 
@@ -199,12 +238,32 @@ impl ObjectInner {
         generate_normal_matrix: bool,
     ) {
         let ms: Vec<f32> = self
-            .world_transforms
-            .iter()
-            .flat_map(|t| Self::model_matrix_to_vec(t, generate_normal_matrix))
+            .get_world_transforms()
+            .flat_map(|t| Self::model_matrix_to_vec(Matrix4::from(&t), generate_normal_matrix))
             .collect::<Vec<_>>();
 
         queue.write_buffer(&buffer.buffer, 0, bytemuck::cast_slice(ms.as_slice()));
+    }
+
+    /// Returns the world transform.
+    pub(crate) fn get_parent_world_transform(&self) -> Option<WorldTransform> {
+        let parent = self.parent.as_ref()?;
+        let parent_inner = parent.0.read();
+        let parent_tfrm = parent_inner
+            .get_parent_world_transform()
+            .unwrap_or_default();
+        Some(
+            parent_inner.local_transforms[0]
+                .as_global()
+                .append(&parent_tfrm),
+        )
+    }
+
+    pub(crate) fn get_world_transforms(&self) -> impl Iterator<Item = WorldTransform> + '_ {
+        let parent_tfrm = self.get_parent_world_transform().unwrap_or_default();
+        self.local_transforms
+            .iter()
+            .map(move |t| t.as_global().append(&parent_tfrm))
     }
 }
 
@@ -214,15 +273,15 @@ impl ObjectInner {
 /// renderling that was used to create it. To release the underlying resources
 /// the object should be dropped.
 pub struct Object {
-    pub(crate) id: Id,
-    pub(crate) inner: crate::Shared<ObjectInner>,
+    pub(crate) id: Id<Object>,
+    pub(crate) inner: Shared<ObjectInner>,
     pub(crate) cmd: Sender<ObjUpdateCmd>,
 }
 
 impl Drop for Object {
     fn drop(&mut self) {
         if self.inner.count() <= 1 {
-            let _ = self.cmd.send(ObjUpdateCmd::Destroy{ object_id: self.id });
+            let _ = self.cmd.send(ObjUpdateCmd::Destroy { object_id: self.id });
         }
     }
 }
@@ -252,13 +311,31 @@ impl Object {
             .unwrap();
     }
 
-    /// Update the transform of this object.
-    pub fn set_transform(&self, transform: crate::WorldTransform) {
+    /// Update the local transform of this object.
+    pub fn set_transform(&self, transform: LocalTransform) {
         let mut inner = self.inner.write();
-        *inner.world_transforms.get_mut(0).unwrap() = transform;
+        *inner.local_transforms.get_mut(0).unwrap() = transform;
         self.cmd
             .send(ObjUpdateCmd::Transform { object_id: self.id })
             .unwrap();
+    }
+
+    /// Get the current local transformation of this object.
+    pub fn get_transform(&self) -> LocalTransform {
+        self.inner.read().local_transforms[0].clone()
+    }
+
+    /// Get all the instance transforms of this object.
+    pub fn get_local_transforms(&self) -> Vec<LocalTransform> {
+        self.inner.read().local_transforms.clone()
+    }
+
+    pub fn get_world_transform(&self) -> WorldTransform {
+        self.inner.read().get_world_transforms().next().unwrap()
+    }
+
+    pub fn get_world_transforms(&self) -> Vec<WorldTransform> {
+        self.inner.read().get_world_transforms().collect::<Vec<_>>()
     }
 
     /// Update the visibility of this object.
@@ -305,17 +382,65 @@ impl Object {
             .send(ObjUpdateCmd::Material { object_id: self.id })
             .unwrap();
     }
+
+    /// Nest another object in this object.
+    ///
+    /// This has the effect of transforming the child object by this object's transform,
+    /// until the child is removed with [`Object::remove_child`] or [`Object::detach_from_parent`].
+    pub fn append_child(&self, child_object: &Object) {
+        let mut parent = self.inner.write();
+        parent.children.push(ChildObject(child_object.id));
+        let mut child = child_object.inner.write();
+        child.parent = Some(ParentObject(self.inner.clone()));
+        self.cmd
+            .send(ObjUpdateCmd::Transform {
+                object_id: child_object.id,
+            })
+            .unwrap();
+    }
+
+    /// Un-nest another object from this object.
+    ///
+    /// This restores the child object's local transform as its global transform.
+    pub fn remove_child(&self, child_object: &Object) {
+        let mut parent = self.inner.write();
+        parent.children.retain(|child| child.0 != child_object.id);
+        let mut child = child_object.inner.write();
+        child.parent = None;
+        self.cmd
+            .send(ObjUpdateCmd::Transform {
+                object_id: child_object.id,
+            })
+            .unwrap();
+    }
+
+    /// Un-nest this object from its parent.
+    ///
+    /// This restores the object's local transform as its global transform.
+    pub fn detach_from_parent(&self) {
+        let mut inner = self.inner.write();
+        if let Some(parent) = inner.parent.take() {
+            parent
+                .0
+                .write()
+                .children
+                .retain(|child| child.0 != self.id);
+            self.cmd
+                .send(ObjUpdateCmd::Transform { object_id: self.id })
+                .unwrap();
+        }
+    }
 }
 
 /// Underlying data used by `wgpu` to render an object.
 pub(crate) struct ObjectData {
-    pub(crate) id: Id,
+    pub(crate) id: Id<Object>,
     pub(crate) mesh: Option<Arc<crate::Mesh>>,
     pub(crate) material_uniform: Option<crate::AnyMaterialUniform>,
     pub(crate) instances: crate::VertexBuffer,
-    pub(crate) position: Point3<f32>,
-    pub(crate) cameras: FxHashSet<Id>,
-    pub(crate) inner: crate::Shared<ObjectInner>,
+    pub(crate) world_position: Point3<f32>,
+    pub(crate) cameras: FxHashSet<Id<Camera>>,
+    pub(crate) inner: Shared<ObjectInner>,
 }
 
 impl ObjectData {
@@ -342,5 +467,19 @@ impl ObjectData {
             draw,
         };
         Some(object)
+    }
+
+    pub(crate) fn update_world_transform(
+        &mut self,
+        queue: &wgpu::Queue,
+        generate_normal_matrix: bool,
+    ) {
+        log::trace!("updating object {:?} world transform", self.id);
+        let inner = self.inner.read();
+        inner.update_world_transforms_buffer(&queue, &self.instances, generate_normal_matrix);
+        let parent_tfrm = inner.get_parent_world_transform().unwrap_or_default();
+        let parent_model_matrix = Matrix4::from(&parent_tfrm);
+        let p = inner.local_transforms[0].translate;
+        self.world_position = parent_model_matrix.transform_point(&Point3::new(p.x, p.y, p.z));
     }
 }

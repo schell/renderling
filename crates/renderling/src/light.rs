@@ -77,12 +77,12 @@ impl PointLight {
 pub struct PointLightBuilder<'a> {
     inner: PointLightInner,
     cmd: Sender<LightUpdateCmd>,
-    scene: &'a mut crate::Scene,
+    scene: &'a mut crate::Stage,
 }
 
 impl<'a> PointLightBuilder<'a> {
     pub(crate) fn new(
-        scene: &'a mut crate::Scene,
+        scene: &'a mut crate::Stage,
         cmd: Sender<LightUpdateCmd>,
     ) -> PointLightBuilder<'a> {
         Self {
@@ -238,12 +238,12 @@ impl SpotLight {
 pub struct SpotLightBuilder<'a> {
     inner: SpotLightInner,
     cmd: Sender<LightUpdateCmd>,
-    scene: &'a mut crate::Scene,
+    scene: &'a mut crate::Stage,
 }
 
 impl<'a> SpotLightBuilder<'a> {
     pub(crate) fn new(
-        scene: &'a mut crate::Scene,
+        scene: &'a mut crate::Stage,
         cmd: Sender<LightUpdateCmd>,
     ) -> SpotLightBuilder<'a> {
         Self {
@@ -388,12 +388,12 @@ impl DirectionalLight {
 pub struct DirectionalLightBuilder<'a> {
     inner: DirectionalLightInner,
     cmd: Sender<LightUpdateCmd>,
-    scene: &'a mut crate::Scene,
+    scene: &'a mut crate::Stage,
 }
 
 impl<'a> DirectionalLightBuilder<'a> {
     pub(crate) fn new(
-        scene: &'a mut crate::Scene,
+        scene: &'a mut crate::Stage,
         cmd: Sender<LightUpdateCmd>,
     ) -> DirectionalLightBuilder<'a> {
         Self {

@@ -1,10 +1,11 @@
 use std::time::Instant;
 
 use nalgebra::{Point3, UnitQuaternion, Vector3};
-use renderling::{ForwardVertex, MeshBuilder, Renderling, WgpuState, WorldTransform, UiPipeline};
+use renderling::{ForwardVertex, MeshBuilder, Renderling, UiPipeline, WgpuState, Transform, Scene};
 
 pub fn run() -> Result<(), anyhow::Error> {
     env_logger::Builder::default()
+        .filter_module("example", log::LevelFilter::Trace)
         .filter_module("renderling", log::LevelFilter::Debug)
         .filter_module("naga", log::LevelFilter::Warn)
         .filter_module("wgpu", log::LevelFilter::Warn)
@@ -143,8 +144,8 @@ pub fn run() -> Result<(), anyhow::Error> {
         })
         .build();
 
-    let (document, buffers, images) = gltf::import("gltf/pyramid.gltf").unwrap();
-    log::info!("{:#?}", document);
+    let scene = gpu.import_gltf("gltf/cheetah_cone.glb").unwrap();
+    log::info!("textures: {:#?}", scene.textures);
 
     let mut last_frame = Instant::now();
     let rotation_speed = std::f32::consts::FRAC_PI_4; // per second
@@ -179,7 +180,7 @@ pub fn run() -> Result<(), anyhow::Error> {
                 let rotation = rotation_speed * dt.as_secs_f32();
                 rotation_y += rotation;
                 last_frame = now;
-                cube.set_transform(WorldTransform::default().with_rotation(
+                cube.set_transform(Transform::default().with_rotation(
                     UnitQuaternion::from_axis_angle(&Vector3::y_axis(), rotation_y),
                 ));
 

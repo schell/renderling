@@ -33,6 +33,13 @@ pub enum WgpuStateError {
 
     #[snafu(display("could not convert image buffer"))]
     CouldNotConvertImageBuffer,
+
+    #[cfg(feature = "gltf")]
+    #[snafu(display("gltf import failed: {}", source))]
+    GltfImport{ source: gltf::Error },
+
+    #[snafu(display("could not create scene: {}", source))]
+    Scene{ source: crate::SceneError },
 }
 
 pub enum RenderTarget {
@@ -528,6 +535,15 @@ impl WgpuState {
     #[cfg(feature = "text")]
     pub fn new_glyph_cache(&self, fonts: impl IntoIterator<Item = FontArc>) -> crate::GlyphCache {
         crate::GlyphCache::new(self, fonts.into_iter().collect())
+    }
+
+    #[cfg(feature = "gltf")]
+    pub fn import_gltf(&self, path: impl AsRef<std::path::Path>) -> Result<crate::Scene, WgpuStateError> {
+        use crate::Scene;
+
+        let (doc, buf, img) = gltf::import(path).context(GltfImportSnafu)?;
+        let scene = Scene::new_gltf(self, doc, buf, img).context(SceneSnafu)?;
+        Ok(scene)
     }
 }
 
