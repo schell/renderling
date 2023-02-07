@@ -31,11 +31,13 @@ pub struct Texture {
 }
 
 impl Texture {
-    pub fn new(
+    /// Create a new texture.
+    pub fn new_with_format(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         label: Option<&str>,
         usage: Option<wgpu::TextureUsages>,
+        format: wgpu::TextureFormat,
         color_channels: u32,
         width: u32,
         height: u32,
@@ -53,7 +55,7 @@ impl Texture {
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            format,
             usage: usage
                 .unwrap_or(wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST),
         });
@@ -90,6 +92,32 @@ impl Texture {
             view: Arc::new(view),
             sampler: Arc::new(sampler),
         }
+    }
+
+    /// Create a new texture.
+    ///
+    /// This defaults the format to `Rgba8UnormSrgb`.
+    pub fn new(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        label: Option<&str>,
+        usage: Option<wgpu::TextureUsages>,
+        color_channels: u32,
+        width: u32,
+        height: u32,
+        data: &[u8],
+    ) -> Self {
+        Self::new_with_format(
+            device,
+            queue,
+            label,
+            usage,
+            wgpu::TextureFormat::Rgba8UnormSrgb,
+            color_channels,
+            width,
+            height,
+            data,
+        )
     }
 
     #[cfg(feature = "image")]

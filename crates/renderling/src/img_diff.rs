@@ -3,18 +3,19 @@ use std::path::Path;
 
 use snafu::prelude::*;
 
+const TEST_IMG_DIR: &'static str = "../../test_img";
 const TEST_OUTPUT_DIR: &'static str = "../../test_output";
 
 pub fn assert_img_eq(
     test_name: &'static str,
-    expected_path: &'static str,
+    filename: &'static str,
     seen: image::RgbaImage,
 ) -> Result<(), snafu::Whatever> {
     let cwd = std::env::current_dir().whatever_context("no cwd")?;
-    let left_image = image::open(expected_path)
+    let left_image = image::open(Path::new(TEST_IMG_DIR).join(filename))
         .whatever_context(format!(
             "can't open expected image '{}'",
-            cwd.join(expected_path).display()
+            cwd.join(filename).display()
         ))?
         .to_rgba8();
     let right_image = seen;

@@ -9,17 +9,20 @@ use renderling_core::{
 };
 use rustc_hash::FxHashSet;
 use snafu::prelude::*;
-use std::{sync::{
-    mpsc::{channel, Receiver, Sender},
-    Arc, RwLock,
-}, marker::PhantomData};
+use std::{
+    marker::PhantomData,
+    sync::{
+        mpsc::{channel, Receiver, Sender},
+        Arc, RwLock,
+    },
+};
 
 use crate::{
     camera::*,
     light::{DirectionalLightInner, PointLightInner, SpotLightInner},
     resources::*,
-    AnyMaterial, AnyMaterialUniform, AnyPipeline, LightUpdateCmd, Material, ObjUpdateCmd,
-    ObjectBuilder, ObjectData, Pipeline, WorldTransform,
+    AnyMaterial, AnyMaterialUniform, AnyPipeline, LightUpdateCmd, Material, ObjUpdateCmd, Object,
+    ObjectBuilder, ObjectData, Pipeline, Transform,
 };
 
 #[derive(Debug, Snafu)]
@@ -37,7 +40,7 @@ pub enum RenderlingError {
 }
 
 #[derive(Default)]
-pub(crate) struct Scene {
+pub(crate) struct Stage {
     // Point lights
     pub point_lights: Vec<Shared<PointLightInner>>,
     // Spot lights
@@ -45,19 +48,19 @@ pub(crate) struct Scene {
     // Directional lights
     pub directional_lights: Vec<Shared<DirectionalLightInner>>,
     // for creating camera ids
-    camera_id_bank: BankOfIds,
+    camera_id_bank: BankOfIds<Camera>,
     // for creating objects
-    object_id_bank: BankOfIds,
+    object_id_bank: BankOfIds<Object>,
     // all cameras, indexed by Id
     pub cameras: Vec<Option<CameraData>>,
     // all object ids, sorted by distance to camera
-    camera_objects_by_distance: Vec<Vec<Id>>,
+    camera_objects_by_distance: Vec<Vec<Id<Object>>>,
     // all objects, indexed by Id
     pub objects: Vec<Option<ObjectData>>,
 }
 
-impl Scene {
-    pub fn new_camera_id(&mut self) -> Id {
+impl Stage {
+    pub fn new_camera_id(&mut self) -> Id<Camera> {
         let id = self.camera_id_bank.dequeue();
         if self.cameras.len() < id.0 + 1 {
             self.cameras.resize_with(id.0 + 1, || None);
@@ -65,17 +68,17 @@ impl Scene {
         id
     }
 
-    pub fn get_camera_mut(&mut self, camera_id: &Id) -> Option<&mut CameraData> {
+    pub fn get_camera_mut(&mut self, camera_id: &Id<Camera>) -> Option<&mut CameraData> {
         let may_cam = self.cameras.get_mut(camera_id.0)?;
         may_cam.as_mut()
     }
 
-    pub fn get_camera(&self, camera_id: &Id) -> Option<&CameraData> {
+    pub fn get_camera(&self, camera_id: &Id<Camera>) -> Option<&CameraData> {
         let may_cam = self.cameras.get(camera_id.0)?;
         may_cam.as_ref()
     }
 
-    pub fn destroy_camera(&mut self, camera_id: Id) {
+    pub fn destroy_camera(&mut self, camera_id: Id<Camera>) {
         log::trace!("destroying and recycling camera {:?}", camera_id);
         self.cameras[camera_id.0] = None;
         self.camera_objects_by_distance[camera_id.0] = vec![];
@@ -87,7 +90,7 @@ impl Scene {
         self.camera_id_bank.recycle(camera_id);
     }
 
-    pub fn new_object_id(&mut self) -> Id {
+    pub fn new_object_id(&mut self) -> Id<Object> {
         let id = self.object_id_bank.dequeue();
         if self.objects.len() < id.0 + 1 {
             self.objects.resize_with(id.0 + 1, || None);
@@ -95,23 +98,43 @@ impl Scene {
         id
     }
 
-    pub fn get_object_mut(&mut self, object_id: &Id) -> Option<&mut ObjectData> {
+    pub fn get_object_mut(&mut self, object_id: &Id<Object>) -> Option<&mut ObjectData> {
         let may_dat = self.objects.get_mut(object_id.0)?;
         may_dat.as_mut()
     }
 
-    pub fn get_object(&self, object_id: &Id) -> Option<&ObjectData> {
+    pub fn get_object(&self, object_id: &Id<Object>) -> Option<&ObjectData> {
         let may_dat = self.objects.get(object_id.0)?;
         may_dat.as_ref()
     }
 
-    pub fn remove_object_from_camera(&mut self, object_id: &Id, camera_id: &Id) {
+    // /// Returns the global parent transformation of the object with the given id, if possible.
+    // ///
+    // /// Returns `None` if the object cannot be found, or if the object has no parent, or if
+    // /// the parent cannot be found.
+    // pub fn get_parent_transform(&self, object_id: &Id<Object>) -> Option<WorldTransform> {
+    //     let object = self.get_object(object_id)?;
+    //     let inner = object.inner.read();
+    //     let parent_id = inner.parent.as_ref()?;
+    //     let parent = self.get_object(parent_id)?;
+    //     let parent_inner = parent.inner.read();
+    //     let grand_parent_tfrm = parent_inner
+    //         .parent
+    //         .as_ref()
+    //         .map(|id| self.get_parent_transform(id))
+    //         .flatten()
+    //         .unwrap_or(WorldTransform::default());
+    //     let parent_local_tfrm = parent_inner.local_transforms[0].as_global();
+    //     Some(parent_local_tfrm.append(&grand_parent_tfrm))
+    // }
+
+    pub fn remove_object_from_camera(&mut self, object_id: &Id<Object>, camera_id: &Id<Camera>) {
         if let Some(object) = self.get_object_mut(object_id) {
             object.cameras.remove(camera_id);
         }
     }
 
-    pub fn add_object_to_camera(&mut self, object_id: &Id, camera_id: &Id) -> bool {
+    pub fn add_object_to_camera(&mut self, object_id: &Id<Object>, camera_id: &Id<Camera>) -> bool {
         if let Some(object) = self.get_object_mut(object_id) {
             let _ = object.cameras.insert(*camera_id);
             true
@@ -120,7 +143,7 @@ impl Scene {
         }
     }
 
-    pub fn destroy_object(&mut self, object_id: Id) {
+    pub fn destroy_object(&mut self, object_id: Id<Object>) {
         if let Some(_object) = self.objects[object_id.0].take() {
             self.object_id_bank.recycle(object_id);
         }
@@ -130,24 +153,32 @@ impl Scene {
     pub fn sort_objects(&mut self) {
         let mut sorted = vec![];
         struct Sorter {
-            object_id: Id,
-            distance: f32
+            object_id: Id<Object>,
+            distance: f32,
         }
         for (i, camera) in self.cameras.iter().enumerate() {
-            let camera_id = Id(i);
+            let camera_id = Id::new(i);
             if let Some(cam_data) = camera {
                 let v = cam_data.inner.read().view.translation.vector;
                 let cam_pos = Point3::new(v.x, v.y, v.z);
-                let mut objects = self.objects.iter().enumerate().filter_map(|(j, obj_data)| {
-                    let obj_data = obj_data.as_ref()?;
-                    let object_id = Id(j);
-                    if obj_data.cameras.contains(&camera_id) {
-                        let distance = nalgebra::distance(&obj_data.position, &cam_pos);
-                        Some(Sorter{ object_id, distance })
-                    } else {
-                        None
-                    }
-                }).collect::<Vec<_>>();
+                let mut objects = self
+                    .objects
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(j, obj_data)| {
+                        let obj_data = obj_data.as_ref()?;
+                        let object_id = Id::new(j);
+                        if obj_data.cameras.contains(&camera_id) {
+                            let distance = nalgebra::distance(&obj_data.world_position, &cam_pos);
+                            Some(Sorter {
+                                object_id,
+                                distance,
+                            })
+                        } else {
+                            None
+                        }
+                    })
+                    .collect::<Vec<_>>();
                 // we want to sort back to front
                 objects.sort_by(|a, b| b.distance.total_cmp(&a.distance));
                 sorted.push(objects.into_iter().map(|s| s.object_id).collect::<Vec<_>>());
@@ -189,9 +220,9 @@ pub struct Renderling<P: Pipeline> {
     // The index of the material's bindgroup
     material_bindgroup_index: u32,
     // The entire scene - all cameras and objects
-    pub(crate) scene: Scene,
+    pub(crate) stage: Stage,
 
-    _phantom: PhantomData<P>
+    _phantom: PhantomData<P>,
 }
 
 impl<P: Pipeline> Renderling<P> {
@@ -213,11 +244,11 @@ impl<P: Pipeline> Renderling<P> {
             default_material: AnyMaterial::new::<M>(material.into()),
             default_material_uniform: None,
             lights_uniform: None,
-            scene: Default::default(),
+            stage: Default::default(),
             camera_bindgroup_index: 0,
             material_bindgroup_index: 1,
             light_bindgroup_index: 2,
-            _phantom: PhantomData
+            _phantom: PhantomData,
         };
         // this will cause the next update to create (at least an empty) light uniform
         r.light_update_queue
@@ -236,7 +267,7 @@ impl<P: Pipeline> Renderling<P> {
             height: height as f32,
             device: &self.device,
             update_tx: self.camera_update_queue.0.clone(),
-            scene: &mut self.scene,
+            scene: &mut self.stage,
         }
     }
 
@@ -244,14 +275,14 @@ impl<P: Pipeline> Renderling<P> {
     ///
     /// This will always have at least one camera in it.
     pub fn cameras(&self) -> impl Iterator<Item = Camera> + '_ {
-        self.scene
+        self.stage
             .cameras
             .iter()
             .enumerate()
             .filter_map(|(i, data)| {
                 let data = data.as_ref()?;
                 Some(Camera {
-                    id: Id(i),
+                    id: Id::new(i),
                     inner: data.inner.clone(),
                     cmd: self.camera_update_queue.0.clone(),
                 })
@@ -282,36 +313,37 @@ impl<P: Pipeline> Renderling<P> {
     /// no rotation and scale 1,1,1.
     pub fn new_object(&mut self) -> ObjectBuilder<'_> {
         ObjectBuilder {
-            camera: Some(Id(0)),
+            camera: Some(Id::new(0)),
             mesh: None,
             material: None,
-            world_transform: WorldTransform::default(),
-            world_transforms: vec![],
+            children: vec![],
+            local_transform: Transform::default(),
+            local_transforms: vec![],
             generate_normal_matrix: self.meshes_have_normal_matrix_attribute,
             is_visible: true,
             update_tx: self.object_update_queue.0.clone(),
             device: &self.device,
-            scene: &mut self.scene,
+            scene: &mut self.stage,
         }
     }
 
     pub fn new_point_light(&mut self) -> crate::PointLightBuilder<'_> {
-        crate::PointLightBuilder::new(&mut self.scene, self.light_update_queue.0.clone())
+        crate::PointLightBuilder::new(&mut self.stage, self.light_update_queue.0.clone())
     }
 
     pub fn new_spot_light(&mut self) -> crate::SpotLightBuilder<'_> {
-        crate::SpotLightBuilder::new(&mut self.scene, self.light_update_queue.0.clone())
+        crate::SpotLightBuilder::new(&mut self.stage, self.light_update_queue.0.clone())
     }
 
     pub fn new_directional_light(&mut self) -> crate::DirectionalLightBuilder<'_> {
-        crate::DirectionalLightBuilder::new(&mut self.scene, self.light_update_queue.0.clone())
+        crate::DirectionalLightBuilder::new(&mut self.stage, self.light_update_queue.0.clone())
     }
 
     /// Conduct all updates made from outside the renderling.
     ///
     /// This must be called in order to display any changes.
     pub fn update(&mut self) -> Result<(), RenderlingError> {
-        let mut cameras_to_sort = FxHashSet::<Id>::default();
+        let mut cameras_to_sort = FxHashSet::<Id<Camera>>::default();
         while let Ok(cmd) = self.object_update_queue.1.try_recv() {
             match cmd {
                 ObjUpdateCmd::RemoveFromCamera {
@@ -319,35 +351,35 @@ impl<P: Pipeline> Renderling<P> {
                     object_id,
                 } => {
                     log::trace!("removed object {:?} from camera {:?}", object_id, camera_id);
-                    self.scene.remove_object_from_camera(&object_id, &camera_id);
+                    self.stage.remove_object_from_camera(&object_id, &camera_id);
                 }
                 ObjUpdateCmd::AddToCamera {
                     camera_id,
                     object_id,
                 } => {
-                    if self.scene.add_object_to_camera(&object_id, &camera_id) {
+                    if self.stage.add_object_to_camera(&object_id, &camera_id) {
                         log::trace!("added object {:?} to camera {:?}", object_id, camera_id);
                         cameras_to_sort.insert(camera_id);
                     }
                 }
                 ObjUpdateCmd::Transform { object_id } => {
-                    if let Some(object) = self.scene.get_object_mut(&object_id) {
-                        log::trace!("updated object {:?} transform", object_id);
-                        object.inner.read().update_world_transforms_buffer(
+                    if let Some(object) = self.stage.get_object_mut(&object_id) {
+                        object.update_world_transform(
                             &self.queue,
-                            &object.instances,
                             self.meshes_have_normal_matrix_attribute,
                         );
+                        // this object's transform changed, so we should resort all the cameras that contain this one
+                        cameras_to_sort.extend(object.cameras.clone());
                     }
                 }
                 ObjUpdateCmd::Mesh { object_id } => {
-                    if let Some(object) = self.scene.get_object_mut(&object_id) {
+                    if let Some(object) = self.stage.get_object_mut(&object_id) {
                         log::trace!("updated object {:?} mesh", object_id);
                         object.mesh = object.inner.read().mesh.clone();
                     }
                 }
                 ObjUpdateCmd::Material { object_id } => {
-                    if let Some(object) = self.scene.get_object_mut(&object_id) {
+                    if let Some(object) = self.stage.get_object_mut(&object_id) {
                         log::trace!("updated object {:?} material", object_id);
                         let inner = object.inner.read();
                         object.material_uniform = inner
@@ -357,7 +389,7 @@ impl<P: Pipeline> Renderling<P> {
                     }
                 }
                 ObjUpdateCmd::Destroy { object_id } => {
-                    self.scene.destroy_object(object_id);
+                    self.stage.destroy_object(object_id);
                 }
             }
         }
@@ -365,10 +397,10 @@ impl<P: Pipeline> Renderling<P> {
         while let Ok(cmd) = self.camera_update_queue.1.try_recv() {
             match cmd {
                 CameraUpdateCmd::Destroy { camera_id } => {
-                    self.scene.destroy_camera(camera_id);
+                    self.stage.destroy_camera(camera_id);
                 }
                 CameraUpdateCmd::Update { camera_id } => {
-                    if let Some(camera_data) = self.scene.get_camera_mut(&camera_id) {
+                    if let Some(camera_data) = self.stage.get_camera_mut(&camera_id) {
                         cameras_to_sort.insert(camera_id);
                         let mut inner = camera_data.inner.write();
                         let (buffer, bindgroup) = new_camera_uniform(&inner, &self.device);
@@ -381,7 +413,7 @@ impl<P: Pipeline> Renderling<P> {
         }
 
         if true || !cameras_to_sort.is_empty() {
-            self.scene.sort_objects();
+            self.stage.sort_objects();
         }
 
         // update lights
@@ -436,15 +468,15 @@ impl<P: Pipeline> Renderling<P> {
     }
 
     fn get_point_lights(&self) -> Vec<ShaderPointLight> {
-        self.scene.point_lights.iter().map(|l| l.read().0).collect()
+        self.stage.point_lights.iter().map(|l| l.read().0).collect()
     }
 
     fn get_spot_lights(&self) -> Vec<ShaderSpotLight> {
-        self.scene.spot_lights.iter().map(|l| l.read().0).collect()
+        self.stage.spot_lights.iter().map(|l| l.read().0).collect()
     }
 
     fn get_directional_lights(&self) -> Vec<ShaderDirectionalLight> {
-        self.scene
+        self.stage
             .directional_lights
             .iter()
             .map(|l| l.read().0)
@@ -457,7 +489,7 @@ impl<P: Pipeline> Renderling<P> {
         &'a self,
         frame_texture_view: &wgpu::TextureView,
         depth_texture_view: &wgpu::TextureView,
-        camera: &Id,
+        camera: &Id<Camera>,
         objects: impl Iterator<Item = &'a ObjectData>,
     ) -> Result<(), RenderlingError> {
         log::trace!("render");
@@ -486,7 +518,7 @@ impl<P: Pipeline> Renderling<P> {
         } else {
             log::warn!("no lights to bind");
         }
-        let camera_data = self.scene.get_camera(camera).context(MissingCameraSnafu)?;
+        let camera_data = self.stage.get_camera(camera).context(MissingCameraSnafu)?;
         log::trace!("rendering camera {:?}", camera);
         // bind the camera to our shader
         render_pass.set_bind_group(self.camera_bindgroup_index, &camera_data.bindgroup, &[]);
@@ -494,7 +526,7 @@ impl<P: Pipeline> Renderling<P> {
         // TODO: de-dupe this code with other render function
         for outer_object in objects {
             if let Some(object) = self
-                .scene
+                .stage
                 .get_object(&outer_object.id)
                 .map(ObjectData::as_shader_object)
                 .flatten()
@@ -542,11 +574,11 @@ impl<P: Pipeline> Renderling<P> {
         &self,
         frame_texture_view: &wgpu::TextureView,
         depth_texture_view: &wgpu::TextureView,
-        camera_id: &Id,
+        camera_id: &Id<Camera>,
     ) -> Result<(), RenderlingError> {
-        if let Some(object_ids) = self.scene.camera_objects_by_distance.get(camera_id.0) {
+        if let Some(object_ids) = self.stage.camera_objects_by_distance.get(camera_id.0) {
             let objects = object_ids.iter().filter_map(|id| {
-                let may_o = self.scene.objects.get(id.0)?;
+                let may_o = self.stage.objects.get(id.0)?;
                 may_o.as_ref()
             });
             self.render_camera_objects(frame_texture_view, depth_texture_view, camera_id, objects)
@@ -563,8 +595,8 @@ impl<P: Pipeline> Renderling<P> {
         frame_texture_view: &wgpu::TextureView,
         depth_texture_view: &wgpu::TextureView,
     ) -> Result<(), RenderlingError> {
-        for i in 0..self.scene.cameras.len() {
-            let id = Id(i);
+        for i in 0..self.stage.cameras.len() {
+            let id = Id::new(i);
             self.render_camera(frame_texture_view, depth_texture_view, &id)?;
         }
         Ok(())

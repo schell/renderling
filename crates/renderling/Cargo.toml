@@ -1,8 +1,8 @@
 [package]
 name = "renderling"
-version = "0.2.6"
+version = "0.3.0"
 edition = "2021"
-description = "A collection of WGPU render pipelines and simple types."
+description = "User-friendly real-time rendering. 🍖"
 repository = "https://github.com/schell/renderling"
 license = "MIT OR Apache-2.0"
 keywords = ["game", "graphics", "shader", "rendering"]
@@ -12,7 +12,7 @@ readme = "../../README.md"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-default = ["forward", "ui", "text", "image", "raw-window-handle", "winit"]
+default = ["forward", "ui", "gltf", "text", "image", "raw-window-handle", "winit"]
 forward = ["renderling_forward"]
 ui = ["renderling_ui"]
 text = ["ab_glyph", "glyph_brush"]
@@ -22,14 +22,15 @@ wasm = ["renderling_forward/wasm", "renderling_ui/wasm"]
 ab_glyph = { version = "^0.2", optional = true }
 bytemuck = { version = "1.13.0", features = ["derive"] }
 futures-lite = "1.12.0"
+gltf = { version = "1.1.0", optional = true }
 glyph_brush = { version = "^0.7", optional = true }
 image = { version = "0.24.4", optional = true }
 log = "0.4.17"
 nalgebra = "0.32.1"
 raw-window-handle = { version = "0.5.0", optional = true }
-renderling_core = { path = "../core", version = "^0.1.5" }
-renderling_forward = { path = "../forward", version = "^0.2.5", optional = true }
-renderling_ui = { path = "../ui", version = "^0.2.4", optional = true }
+renderling_core = { path = "../core", version = "^0.1.6" }
+renderling_forward = { path = "../forward", version = "^0.2.6", optional = true }
+renderling_ui = { path = "../ui", version = "^0.2.5", optional = true }
 rustc-hash = "1.1.0"
 snafu = "0.7.4"
 wgpu = { version = "^0.14" }

@@ -8,6 +8,7 @@ This is a collection of WGPU renderers wrapped in a convenient interface.
 * headless rendering support
   - rendering to texture and saving via `image` crate
 * text rendering support (cargo feature `text` - on by default)
+* nested nodes with local transforms
 * gltf support
 
 Shaders are written in GLSL. **shaderc** is used to compile shaders to SPIR-V.
@@ -49,7 +50,9 @@ without any additional terms or conditions.
 - [x] builder pattern for lights, camera and objects
 - [x] automatic resource management
 - [x] headless rendering
+- [x] object nesting / parenting / local transforms
 - [ ] gltf support
+- [ ] wireframe shader pipeline
 - [ ] deferred shading pipeline
 - [ ] physically based rendering pipeline
-- [ ] [rust-gpu](https://github.com/EmbarkStudios/rust-gpu) shaders - maybe?
+- [ ] convert shaders to [rust-gpu](https://github.com/EmbarkStudios/rust-gpu) - maybe?
