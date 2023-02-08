@@ -3,7 +3,7 @@
 //! A scene is the structure that is built by importing a gltf file.
 use snafu::prelude::*;
 
-use crate::{Texture, WgpuState};
+use crate::Texture;
 
 #[derive(Debug, Snafu)]
 pub enum SceneError {
@@ -58,7 +58,8 @@ pub struct Scene {
 impl Scene {
     #[cfg(feature = "gltf")]
     pub fn new_gltf(
-        gpu: &WgpuState,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
         document: gltf::Document,
         buffers: Vec<gltf::buffer::Data>,
         images: Vec<gltf::image::Data>,
@@ -82,8 +83,8 @@ impl Scene {
                 dat.pixels
             };
             textures.push(Texture::new_with_format(
-                &gpu.device,
-                &gpu.queue,
+                &device,
+                &queue,
                 None,
                 None,
                 format,

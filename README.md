@@ -52,7 +52,16 @@ without any additional terms or conditions.
 - [x] headless rendering
 - [x] object nesting / parenting / local transforms
 - [ ] gltf support
+  - [ ] scenes, nodes
+  - [ ] cameras
+  - [ ] meshes
+  - [ ] buffers, bufferViews, accessors
+  - [ ] materials
+  - [x] textures, images, samplers
+  - [ ] skins
+  - [ ] animations
 - [ ] wireframe shader pipeline
 - [ ] deferred shading pipeline
 - [ ] physically based rendering pipeline
 - [ ] convert shaders to [rust-gpu](https://github.com/EmbarkStudios/rust-gpu) - maybe?
+- [ ] render graph?

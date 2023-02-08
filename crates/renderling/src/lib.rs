@@ -733,8 +733,8 @@ mod test {
     // tests importing a gltf file and rendering the first image as a 2d object
     fn gltf_images() {
         let mut gpu = WgpuState::headless(100, 100).unwrap();
-        let scene = gpu.import_gltf("../../gltf/cheetah_cone.glb").unwrap();
         let mut ui = gpu.new_ui_renderling();
+        let scene = ui.import_gltf("../../gltf/cheetah_cone.glb").unwrap();
         let _img = ui
             .new_object()
             .with_mesh_builder(
