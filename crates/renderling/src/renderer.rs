@@ -37,6 +37,13 @@ pub enum RenderlingError {
 
     #[snafu(display("missing a camera, this should not have happened"))]
     MissingCamera,
+
+    #[cfg(feature = "gltf")]
+    #[snafu(display("gltf import failed: {}", source))]
+    GltfImport{ source: gltf::Error },
+
+    #[snafu(display("could not create scene: {}", source))]
+    Scene{ source: crate::SceneError },
 }
 
 #[derive(Default)]
@@ -256,6 +263,15 @@ impl<P: Pipeline> Renderling<P> {
             .send(LightUpdateCmd::DirectionalLights)
             .unwrap();
         r
+    }
+
+    #[cfg(feature = "gltf")]
+    pub fn import_gltf(&self, path: impl AsRef<std::path::Path>) -> Result<crate::Scene, RenderlingError> {
+        use crate::Scene;
+
+        let (doc, buf, img) = gltf::import(path).context(GltfImportSnafu)?;
+        let scene = Scene::new_gltf(&self.device, &self.queue, doc, buf, img).context(SceneSnafu)?;
+        Ok(scene)
     }
 
     /// Create a new camera builder.

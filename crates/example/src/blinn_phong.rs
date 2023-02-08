@@ -1,7 +1,7 @@
 use std::time::Instant;
 
 use nalgebra::{Point3, UnitQuaternion, Vector3};
-use renderling::{ForwardVertex, MeshBuilder, Renderling, UiPipeline, WgpuState, Transform, Scene};
+use renderling::{ForwardVertex, MeshBuilder, Renderling, UiPipeline, WgpuState, Transform};
 
 pub fn run() -> Result<(), anyhow::Error> {
     env_logger::Builder::default()
@@ -144,7 +144,7 @@ pub fn run() -> Result<(), anyhow::Error> {
         })
         .build();
 
-    let scene = gpu.import_gltf("gltf/cheetah_cone.glb").unwrap();
+    let scene = forward.import_gltf("gltf/cheetah_cone.glb").unwrap();
     log::info!("textures: {:#?}", scene.textures);
 
     let mut last_frame = Instant::now();
