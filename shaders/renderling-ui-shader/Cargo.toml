@@ -1,0 +1,16 @@
+[package]
+name = "renderling-ui-shader"
+version = "0.1.0"
+authors = ["Schell Carl Scivally <efsubenovex@gmail.com>"]
+edition = "2021"
+license = "MIT OR Apache-2.0"
+keywords = ["game", "graphics", "shader", "rendering"]
+categories = ["rendering", "game-development", "graphics"]
+description = "User interface forward shader for the renderling project"
+
+[lib]
+crate-type = ["dylib"]
+
+[dependencies]
+renderling-shader = { path = "../../crates/renderling-shader" }
+spirv-std = { version = "0.5", features = ["glam"] }

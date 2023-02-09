@@ -30,6 +30,34 @@ A simple forward shader that supports vertices with colors and/or textures. It h
 blending uniform that determines how vertex colors should be blended with vertex UV texture
 coords. This enables support for colorful text.
 
+## Project Organization
+* crates/renderling-shader
+
+  Contains Rust shader code that can be shared on CPU and GPU.
+  Most of the shader code is here!
+  This crate is a member of the workspace so you get nice editor tooling while writing shaders in Rust.
+  You can also write sanity tests that run with `cargo test`.
+  Things just work like BAU.
+
+* shaders
+
+  Contains a thin `rust-gpu` wrapper around `renderling-shader`.
+  Provides the GPU linkage between `renderling` and `renderling-shader`.
+  Contains a program that compiles and copies **.spv** files into the main `renderling` crate.
+
+* crates/renderling
+
+  The main crate.
+  Contains CPU Rust code for creating pipelines and managing resources, making render passes, etc.
+
+* crates/example
+
+  Contains an example of using the `renderling` crate to make an application.
+
+## Tests
+
+Tests use `renderling` in headless mode and generate images that are compared to expected output.
+
 ## License
 Renderling is free and open source. All code in this repository is dual-licensed under either:
 
@@ -60,8 +88,8 @@ without any additional terms or conditions.
   - [x] textures, images, samplers
   - [ ] skins
   - [ ] animations
-- [ ] wireframe shader pipeline
+- [ ] convert shaders to [rust-gpu](https://github.com/EmbarkStudios/rust-gpu) - maybe?
 - [ ] deferred shading pipeline
 - [ ] physically based rendering pipeline
-- [ ] convert shaders to [rust-gpu](https://github.com/EmbarkStudios/rust-gpu) - maybe?
 - [ ] render graph?
+- [ ] wireframe shader pipeline - maybe?

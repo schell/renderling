@@ -1,10 +1,8 @@
-//! A renderling for user interfaces.
-use renderling_core::ShaderObject;
-use wgpu::{util::DeviceExt, TextureFormat};
-
+//! UI shader pipeline
 pub use renderling_core::{
     camera_uniform_layout, create_camera_uniform, ObjectDraw, ViewProjection,
 };
+use wgpu::util::DeviceExt;
 
 #[repr(C)]
 #[derive(Copy, Clone, Default, bytemuck::Pod, bytemuck::Zeroable)]
@@ -104,9 +102,8 @@ pub fn create_ui_material_bindgroup(
     })
 }
 
-pub fn create_pipeline(device: &wgpu::Device, format: TextureFormat) -> wgpu::RenderPipeline {
-    let ui_vert_shader = device.create_shader_module(wgpu::include_spirv!("shader.vert.spv"));
-    let ui_frag_shader = device.create_shader_module(wgpu::include_spirv!("shader.frag.spv"));
+pub fn create_pipeline(device: &wgpu::Device, format: wgpu::TextureFormat) -> wgpu::RenderPipeline {
+    let ui_shader = device.create_shader_module(wgpu::include_spirv!("ui.spv"));
 
     let render_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("ui render pipeline layout"),
@@ -121,8 +118,8 @@ pub fn create_pipeline(device: &wgpu::Device, format: TextureFormat) -> wgpu::Re
             label: Some("ui render pipeline"),
             layout: Some(&render_pipeline_layout),
             vertex: wgpu::VertexState {
-                module: &ui_vert_shader,
-                entry_point: "main",
+                module: &ui_shader,
+                entry_point: "main_vs",
                 buffers: &[
                     wgpu::VertexBufferLayout {
                         array_stride: {
@@ -144,8 +141,8 @@ pub fn create_pipeline(device: &wgpu::Device, format: TextureFormat) -> wgpu::Re
                 ],
             },
             fragment: Some(wgpu::FragmentState {
-                module: &ui_frag_shader,
-                entry_point: "main",
+                module: &ui_shader,
+                entry_point: "main_fs",
                 targets: &[Some(wgpu::ColorTargetState {
                     format,
                     blend: Some(wgpu::BlendState::ALPHA_BLENDING),
@@ -191,10 +188,10 @@ pub fn render<'a, I, Extra>(
     camera: &'a wgpu::BindGroup,
     objects: I,
 ) where
-    I: Iterator<Item = ShaderObject<'a>>,
+    I: Iterator<Item = renderling_core::ShaderObject<'a>>,
     Extra: 'a,
 {
-    tracing::trace!("{} rendering", label,);
+    log::trace!("{} rendering", label,);
 
     let encoder_label = format!("{} ui encoder", label);
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -214,7 +211,7 @@ pub fn render<'a, I, Extra>(
 
     // draw objects
     for object in objects {
-        tracing::trace!("    object {:?}", object.name);
+        log::trace!("    object {:?}", object.name);
         renderling_core::render_object(&mut render_pass, object, default_material_bindgroup);
     }
 

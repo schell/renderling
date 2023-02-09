@@ -7,7 +7,7 @@ mod text;
 pub use text::*;
 
 
-pub type UiVertex = renderling_ui::Vertex;
+pub type UiVertex = crate::shaders::ui::Vertex;
 
 /// Variants of uv/color blending.
 ///
@@ -53,7 +53,7 @@ pub struct UiMaterial {
 impl Material for UiMaterial {
     fn create_material_uniform(&self, device: &wgpu::Device) -> AnyMaterialUniform {
         AnyMaterialUniform::new(UiMaterialUniform {
-            bindgroup: renderling_ui::create_ui_material_bindgroup(
+            bindgroup: crate::shaders::ui::create_ui_material_bindgroup(
                 device,
                 self.color_blend as u32,
                 &self.diffuse_texture.view,
@@ -78,7 +78,7 @@ impl crate::Pipeline for UiPipeline {
 impl UiPipeline {
     pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat) -> Self {
         UiPipeline {
-            inner: renderling_ui::create_pipeline(device, format),
+            inner: crate::shaders::ui::create_pipeline(device, format),
         }
     }
 }

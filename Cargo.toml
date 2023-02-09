@@ -4,9 +4,10 @@ members = [
     "crates/core",
     "crates/example",
     "crates/forward",
-    "crates/pbr",
     "crates/renderling",
-    "crates/ui"
+    "crates/renderling-shader",
 ]
+
+exclude = ["./shaders"]
 
 resolver = "2"
