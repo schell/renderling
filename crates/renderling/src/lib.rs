@@ -36,20 +36,7 @@ mod ui;
 #[cfg(feature = "ui")]
 pub use ui::*;
 
-pub mod shaders {
-    //! Raw `wgpu` shaders.
-
-    #[cfg(feature = "forward")]
-    pub mod forward {
-        //! Forward shader `wgpu` types and operations.
-        pub use renderling_forward::*;
-    }
-    #[cfg(feature = "ui")]
-    pub mod ui {
-        //! User interface shader `wgpu` types and operations.
-        pub use renderling_ui::*;
-    }
-}
+pub mod shaders;
 
 mod camera;
 mod light;
@@ -265,6 +252,7 @@ mod test {
 
     #[test]
     fn cmy_cube_visible() {
+        //_init_logging();
         let mut gpu = WgpuState::headless(100, 100).unwrap();
         gpu.default_background_color = wgpu::Color::WHITE;
 
@@ -304,11 +292,11 @@ mod test {
         ui.render(&frame, &depth).unwrap();
 
         let img = gpu.grab_frame_image().unwrap();
-        //img.save_with_format(
-        //    "cmy_cube_visible_before.png",
-        //    image::ImageFormat::Png,
-        //)
-        //.unwrap();
+        img.save_with_format(
+            "../../test_img/cmy_cube_visible_before.png",
+            image::ImageFormat::Png,
+        )
+        .unwrap();
         crate::img_diff::assert_img_eq(
             "cmy_cube_visible_before",
             "cmy_cube_visible_before.png",
@@ -583,6 +571,8 @@ mod test {
         let _ = env_logger::builder()
             .is_test(true)
             .filter_module("renderling", log::LevelFilter::Trace)
+            .filter_module("naga", log::LevelFilter::Debug)
+            .filter_module("wgpu", log::LevelFilter::Debug)
             .try_init();
     }
 

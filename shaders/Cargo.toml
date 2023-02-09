@@ -1,0 +1,20 @@
+[package]
+name = "shaders"
+version = "0.1.0"
+edition = "2021"
+description = "Generates the shader .spv files for the renderling project"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+
+[build-dependencies]
+spirv-builder = "0.5"
+
+# Compile build-dependencies in release mode with
+# the same settings as regular dependencies.
+[profile.release.build-override]
+opt-level = 3
+codegen-units = 16
+[profile.dev.build-override]
+opt-level = 3

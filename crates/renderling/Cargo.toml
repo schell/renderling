@@ -14,9 +14,9 @@ readme = "../../README.md"
 [features]
 default = ["forward", "ui", "gltf", "text", "image", "raw-window-handle", "winit"]
 forward = ["renderling_forward"]
-ui = ["renderling_ui"]
+ui = []
 text = ["ab_glyph", "glyph_brush"]
-wasm = ["renderling_forward/wasm", "renderling_ui/wasm"]
+wasm = ["wgpu/webgl"]
 
 [dependencies]
 ab_glyph = { version = "^0.2", optional = true }
@@ -30,7 +30,6 @@ nalgebra = "0.32.1"
 raw-window-handle = { version = "0.5.0", optional = true }
 renderling_core = { path = "../core", version = "^0.1.6" }
 renderling_forward = { path = "../forward", version = "^0.2.6", optional = true }
-renderling_ui = { path = "../ui", version = "^0.2.5", optional = true }
 rustc-hash = "1.1.0"
 snafu = "0.7.4"
 wgpu = { version = "^0.14" }
