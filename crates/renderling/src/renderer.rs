@@ -1,11 +1,9 @@
 //! Builds the UI pipeline and manages resources.
 use nalgebra::Point3;
-use renderling_core::{
-    light::{
-        DirectionalLight as ShaderDirectionalLight, LightsUniform, PointLight as ShaderPointLight,
-        SpotLight as ShaderSpotLight,
-    },
-    ObjectDraw,
+use renderling_core::ObjectDraw;
+use renderling_shader::pbr::{
+    DirectionalLight as ShaderDirectionalLight, PointLight as ShaderPointLight,
+    SpotLight as ShaderSpotLight,
 };
 use rustc_hash::FxHashSet;
 use snafu::prelude::*;
@@ -20,6 +18,7 @@ use std::{
 use crate::{
     camera::*,
     light::{DirectionalLightInner, PointLightInner, SpotLightInner},
+    linkage::pbr::LightsUniform,
     resources::*,
     AnyMaterial, AnyMaterialUniform, AnyPipeline, LightUpdateCmd, Material, ObjUpdateCmd, Object,
     ObjectBuilder, ObjectData, Pipeline, Transform,
@@ -40,10 +39,10 @@ pub enum RenderlingError {
 
     #[cfg(feature = "gltf")]
     #[snafu(display("gltf import failed: {}", source))]
-    GltfImport{ source: gltf::Error },
+    GltfImport { source: gltf::Error },
 
     #[snafu(display("could not create scene: {}", source))]
-    Scene{ source: crate::SceneError },
+    Scene { source: crate::SceneError },
 }
 
 #[derive(Default)]
@@ -114,26 +113,6 @@ impl Stage {
         let may_dat = self.objects.get(object_id.0)?;
         may_dat.as_ref()
     }
-
-    // /// Returns the global parent transformation of the object with the given id, if possible.
-    // ///
-    // /// Returns `None` if the object cannot be found, or if the object has no parent, or if
-    // /// the parent cannot be found.
-    // pub fn get_parent_transform(&self, object_id: &Id<Object>) -> Option<WorldTransform> {
-    //     let object = self.get_object(object_id)?;
-    //     let inner = object.inner.read();
-    //     let parent_id = inner.parent.as_ref()?;
-    //     let parent = self.get_object(parent_id)?;
-    //     let parent_inner = parent.inner.read();
-    //     let grand_parent_tfrm = parent_inner
-    //         .parent
-    //         .as_ref()
-    //         .map(|id| self.get_parent_transform(id))
-    //         .flatten()
-    //         .unwrap_or(WorldTransform::default());
-    //     let parent_local_tfrm = parent_inner.local_transforms[0].as_global();
-    //     Some(parent_local_tfrm.append(&grand_parent_tfrm))
-    // }
 
     pub fn remove_object_from_camera(&mut self, object_id: &Id<Object>, camera_id: &Id<Camera>) {
         if let Some(object) = self.get_object_mut(object_id) {
@@ -266,11 +245,15 @@ impl<P: Pipeline> Renderling<P> {
     }
 
     #[cfg(feature = "gltf")]
-    pub fn import_gltf(&self, path: impl AsRef<std::path::Path>) -> Result<crate::Scene, RenderlingError> {
+    pub fn import_gltf(
+        &self,
+        path: impl AsRef<std::path::Path>,
+    ) -> Result<crate::Scene, RenderlingError> {
         use crate::Scene;
 
         let (doc, buf, img) = gltf::import(path).context(GltfImportSnafu)?;
-        let scene = Scene::new_gltf(&self.device, &self.queue, doc, buf, img).context(SceneSnafu)?;
+        let scene =
+            Scene::new_gltf(&self.device, &self.queue, doc, buf, img).context(SceneSnafu)?;
         Ok(scene)
     }
 
@@ -512,12 +495,12 @@ impl<P: Pipeline> Renderling<P> {
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("Renderling encoder"),
+                label: Some("render_camera_objects"),
             });
 
         let mut render_pass = renderling_core::begin_render_pass(
             &mut encoder,
-            Some("renderling-pass"),
+            Some("render_camera_objects"),
             self.pipeline.get_render_pipeline(),
             frame_texture_view,
             depth_texture_view,

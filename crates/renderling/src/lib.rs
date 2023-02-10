@@ -36,7 +36,7 @@ mod ui;
 #[cfg(feature = "ui")]
 pub use ui::*;
 
-pub mod shaders;
+pub mod linkage;
 
 mod camera;
 mod light;
@@ -571,14 +571,15 @@ mod test {
         let _ = env_logger::builder()
             .is_test(true)
             .filter_module("renderling", log::LevelFilter::Trace)
-            .filter_module("naga", log::LevelFilter::Debug)
-            .filter_module("wgpu", log::LevelFilter::Debug)
+            .filter_module("naga", log::LevelFilter::Warn)
+            .filter_module("wgpu", log::LevelFilter::Warn)
             .try_init();
     }
 
     #[test]
     /// Ensures that the directional light coloring works.
     fn forward_cube_directional() {
+        _init_logging();
         let mut gpu = WgpuState::headless(100, 100).unwrap();
         gpu.default_background_color = wgpu::Color::TRANSPARENT;
         let mut r = gpu.new_forward_renderling();

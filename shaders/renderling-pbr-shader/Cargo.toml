@@ -1,8 +1,8 @@
 [package]
-name = "renderling-ui-shader"
+name = "renderling-pbr-shader"
 version = "0.1.0"
-authors = ["Schell Carl Scivally <efsubenovex@gmail.com>"]
 edition = "2021"
+authors = ["Schell Carl Scivally <efsubenovex@gmail.com>"]
 license = "MIT OR Apache-2.0"
 keywords = ["game", "graphics", "shader", "rendering"]
 categories = ["rendering", "game-development", "graphics"]
@@ -10,6 +10,8 @@ description = "User interface forward shader for the renderling project"
 
 [lib]
 crate-type = ["dylib"]
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
 renderling-shader = { path = "../../crates/renderling-shader", default-features = false, features = ["gpu"] }
