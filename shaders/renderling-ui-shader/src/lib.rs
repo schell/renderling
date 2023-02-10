@@ -1,13 +1,8 @@
 #![no_std]
 #![feature(lang_items)]
-
-use renderling_shader::ui::{BlendStyle, Camera};
+use renderling_shader::Camera;
 use spirv_std::spirv;
-use spirv_std::{
-    Sampler,
-    glam::{mat4, vec4, Mat4, UVec4, Vec2, Vec3, Vec4},
-    image::Image2d,
-};
+use spirv_std::{glam::*, image::Image2d, Sampler};
 
 #[spirv(vertex)]
 pub fn main_vs(

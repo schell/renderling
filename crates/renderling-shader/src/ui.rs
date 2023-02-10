@@ -1,13 +1,8 @@
 //! Renderling's user interface shader.
-use spirv_std::{
-    glam::{mat4, vec4, Mat4, UVec4, Vec2, Vec3, Vec4},
-    image::Image2d, Sampler,
-};
+use glam::{mat4, vec4, Mat4, UVec4, Vec2, Vec3, Vec4};
+use spirv_std::{image::Image2d, Sampler};
 
-pub struct Camera {
-    projection: Mat4,
-    view: Mat4,
-}
+use crate::Camera;
 
 pub fn main_vertex(
     camera: &Camera,
@@ -55,7 +50,6 @@ impl From<u32> for BlendStyle {
 
 pub fn main_fragment(
     blend: &UVec4,
-    // TODO: confirm `SampledImage` is what we want here, and not `Image2d` + `Sampler`...
     texture: &Image2d,
     sampler: &Sampler,
 

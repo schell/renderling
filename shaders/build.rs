@@ -1,7 +1,8 @@
 use spirv_builder::{MetadataPrintout, SpirvBuilder};
 
-const SHADERS: [&'static str; 1] = [
-    "renderling-ui-shader"
+const SHADERS: [&'static str; 2] = [
+    "renderling-ui-shader",
+    "renderling-pbr-shader"
 ];
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {

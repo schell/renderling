@@ -2,8 +2,9 @@
 use std::sync::mpsc::Sender;
 
 use crate::resources::Shared;
+use glam::{vec3, vec4, Vec3};
 use nalgebra::{Point3, Vector3};
-use renderling_core::light::{
+use renderling_shader::pbr::{
     DirectionalLight as ShaderDirectionalLight, PointLight as ShaderPointLight,
     SpotLight as ShaderSpotLight,
 };
@@ -30,46 +31,46 @@ pub struct PointLight {
 impl PointLight {
     /// Sets the position of the light in world space.
     pub fn set_position(&self, position: Vector3<f32>) {
-        self.inner.write().0.position = position.into();
+        self.inner.write().0.position = vec3(position.x, position.y, position.z);
         self.cmd.send(LightUpdateCmd::PointLights).unwrap();
     }
 
     /// Sets the ambient color.
     pub fn set_ambient_color(&self, color: wgpu::Color) {
-        self.inner.write().0.ambient_color = [
+        self.inner.write().0.ambient_color = vec4(
             color.r as f32,
             color.g as f32,
             color.b as f32,
             color.a as f32,
-        ];
+        );
         self.cmd.send(LightUpdateCmd::PointLights).unwrap();
     }
 
     /// Sets the diffuse color.
     pub fn set_diffuse_color(&self, color: wgpu::Color) {
-        self.inner.write().0.diffuse_color = [
+        self.inner.write().0.diffuse_color = vec4(
             color.r as f32,
             color.g as f32,
             color.b as f32,
             color.a as f32,
-        ];
+        );
         self.cmd.send(LightUpdateCmd::PointLights).unwrap();
     }
 
     /// Sets the specular color.
     pub fn set_specular_color(&self, color: wgpu::Color) {
-        self.inner.write().0.specular_color = [
+        self.inner.write().0.specular_color = vec4(
             color.r as f32,
             color.g as f32,
             color.b as f32,
             color.a as f32,
-        ];
+        );
         self.cmd.send(LightUpdateCmd::PointLights).unwrap();
     }
 
     /// Sets the attenuation coefficients for the point light.
     pub fn set_attenuation(&self, constant: f32, linear: f32, quadratic: f32) {
-        self.inner.write().0.attenuation = [constant, linear, quadratic];
+        self.inner.write().0.attenuation = vec3(constant, linear, quadratic);
         self.cmd.send(LightUpdateCmd::PointLights).unwrap();
     }
 }
@@ -112,42 +113,42 @@ impl<'a> PointLightBuilder<'a> {
     }
 
     pub fn with_position(mut self, position: Point3<f32>) -> Self {
-        self.inner.0.position = position.into();
+        self.inner.0.position = vec3(position.x, position.y, position.z);
         self
     }
 
     pub fn with_attenuation(mut self, constant: f32, linear: f32, quadratic: f32) -> Self {
-        self.inner.0.attenuation = [constant, linear, quadratic];
+        self.inner.0.attenuation = vec3(constant, linear, quadratic);
         self
     }
 
     pub fn with_ambient_color(mut self, color: wgpu::Color) -> Self {
-        self.inner.0.ambient_color = [
+        self.inner.0.ambient_color = vec4(
             color.r as f32,
             color.g as f32,
             color.b as f32,
             color.a as f32,
-        ];
+        );
         self
     }
 
     pub fn with_diffuse_color(mut self, color: wgpu::Color) -> Self {
-        self.inner.0.diffuse_color = [
+        self.inner.0.diffuse_color = vec4(
             color.r as f32,
             color.g as f32,
             color.b as f32,
             color.a as f32,
-        ];
+        );
         self
     }
 
     pub fn with_specular_color(mut self, color: wgpu::Color) -> Self {
-        self.inner.0.specular_color = [
+        self.inner.0.specular_color = vec4(
             color.r as f32,
             color.g as f32,
             color.b as f32,
             color.a as f32,
-        ];
+        );
         self
     }
 
@@ -173,13 +174,13 @@ pub struct SpotLight {
 impl SpotLight {
     /// Sets the position of the light in world space.
     pub fn set_position(&self, position: Vector3<f32>) {
-        self.inner.write().0.position = position.into();
+        self.inner.write().0.position = vec3(position.x, position.y, position.z);
         self.cmd.send(LightUpdateCmd::SpotLights).unwrap();
     }
 
     /// Sets the direction the light is pointing in.
     pub fn set_direction(&self, direction: Vector3<f32>) {
-        self.inner.write().0.direction = direction.into();
+        self.inner.write().0.direction = vec3(direction.x, direction.y, direction.z);
         self.cmd.send(LightUpdateCmd::SpotLights).unwrap();
     }
 
@@ -191,7 +192,7 @@ impl SpotLight {
 
     /// Sets the constant, linear, and quadratic terms of attenuation.
     pub fn set_attenuation(&self, attenuation: [f32; 3]) {
-        self.inner.write().0.attenuation = attenuation;
+        self.inner.write().0.attenuation = attenuation.into();
         self.cmd.send(LightUpdateCmd::SpotLights).unwrap();
     }
 
@@ -203,34 +204,34 @@ impl SpotLight {
 
     /// Sets the ambient color.
     pub fn set_ambient_color(&self, color: wgpu::Color) {
-        self.inner.write().0.ambient_color = [
+        self.inner.write().0.ambient_color = vec4(
             color.r as f32,
             color.g as f32,
             color.b as f32,
             color.a as f32,
-        ];
+        );
         self.cmd.send(LightUpdateCmd::SpotLights).unwrap();
     }
 
     /// Sets the diffuse color.
     pub fn set_diffuse_color(&self, color: wgpu::Color) {
-        self.inner.write().0.diffuse_color = [
+        self.inner.write().0.diffuse_color = vec4(
             color.r as f32,
             color.g as f32,
             color.b as f32,
             color.a as f32,
-        ];
+        );
         self.cmd.send(LightUpdateCmd::SpotLights).unwrap();
     }
 
     /// Sets the specular color.
     pub fn set_specular_color(&self, color: wgpu::Color) {
-        self.inner.write().0.specular_color = [
+        self.inner.write().0.specular_color = vec4(
             color.r as f32,
             color.g as f32,
             color.b as f32,
             color.a as f32,
-        ];
+        );
         self.cmd.send(LightUpdateCmd::SpotLights).unwrap();
     }
 }
@@ -275,17 +276,17 @@ impl<'a> SpotLightBuilder<'a> {
     }
 
     pub fn with_position(mut self, position: Point3<f32>) -> Self {
-        self.inner.0.position = position.into();
+        self.inner.0.position = vec3(position.x, position.y, position.z);
         self
     }
 
     pub fn with_direction(mut self, direction: Vector3<f32>) -> Self {
-        self.inner.0.direction = direction.into();
+        self.inner.0.direction = vec3(direction.x, direction.y, direction.z);
         self
     }
 
     pub fn with_attenuation(mut self, constant: f32, linear: f32, quadratic: f32) -> Self {
-        self.inner.0.attenuation = [constant, linear, quadratic];
+        self.inner.0.attenuation = vec3(constant, linear, quadratic);
         self
     }
 
@@ -296,32 +297,32 @@ impl<'a> SpotLightBuilder<'a> {
     }
 
     pub fn with_ambient_color(mut self, color: wgpu::Color) -> Self {
-        self.inner.0.ambient_color = [
+        self.inner.0.ambient_color = vec4(
             color.r as f32,
             color.g as f32,
             color.b as f32,
             color.a as f32,
-        ];
+        );
         self
     }
 
     pub fn with_diffuse_color(mut self, color: wgpu::Color) -> Self {
-        self.inner.0.diffuse_color = [
+        self.inner.0.diffuse_color = vec4(
             color.r as f32,
             color.g as f32,
             color.b as f32,
             color.a as f32,
-        ];
+        );
         self
     }
 
     pub fn with_specular_color(mut self, color: wgpu::Color) -> Self {
-        self.inner.0.specular_color = [
+        self.inner.0.specular_color = vec4(
             color.r as f32,
             color.g as f32,
             color.b as f32,
             color.a as f32,
-        ];
+        );
         self
     }
 
@@ -347,40 +348,40 @@ pub struct DirectionalLight {
 impl DirectionalLight {
     /// Sets the direction this light points in.
     pub fn set_direction(&self, direction: Vector3<f32>) {
-        self.inner.write().0.direction = direction.into();
+        self.inner.write().0.direction = vec3(direction.x, direction.y, direction.z);
         self.cmd.send(LightUpdateCmd::DirectionalLights).unwrap();
     }
 
     /// Sets the ambient color.
     pub fn set_ambient_color(&self, color: wgpu::Color) {
-        self.inner.write().0.ambient_color = [
+        self.inner.write().0.ambient_color = vec4(
             color.r as f32,
             color.g as f32,
             color.b as f32,
             color.a as f32,
-        ];
+        );
         self.cmd.send(LightUpdateCmd::DirectionalLights).unwrap();
     }
 
     /// Sets the diffuse color.
     pub fn set_diffuse_color(&self, color: wgpu::Color) {
-        self.inner.write().0.diffuse_color = [
+        self.inner.write().0.diffuse_color = vec4(
             color.r as f32,
             color.g as f32,
             color.b as f32,
             color.a as f32,
-        ];
+        );
         self.cmd.send(LightUpdateCmd::DirectionalLights).unwrap();
     }
 
     /// Sets the specular color.
     pub fn set_specular_color(&self, color: wgpu::Color) {
-        self.inner.write().0.specular_color = [
+        self.inner.write().0.specular_color = vec4(
             color.r as f32,
             color.g as f32,
             color.b as f32,
             color.a as f32,
-        ];
+        );
         self.cmd.send(LightUpdateCmd::DirectionalLights).unwrap();
     }
 }
@@ -423,37 +424,37 @@ impl<'a> DirectionalLightBuilder<'a> {
     }
 
     pub fn with_direction(mut self, direction: Vector3<f32>) -> Self {
-        self.inner.0.direction = direction.into();
+        self.inner.0.direction = vec3(direction.x, direction.y, direction.z);
         self
     }
 
     pub fn with_ambient_color(mut self, color: wgpu::Color) -> Self {
-        self.inner.0.ambient_color = [
+        self.inner.0.ambient_color = vec4(
             color.r as f32,
             color.g as f32,
             color.b as f32,
             color.a as f32,
-        ];
+        );
         self
     }
 
     pub fn with_diffuse_color(mut self, color: wgpu::Color) -> Self {
-        self.inner.0.diffuse_color = [
+        self.inner.0.diffuse_color = vec4(
             color.r as f32,
             color.g as f32,
             color.b as f32,
             color.a as f32,
-        ];
+        );
         self
     }
 
     pub fn with_specular_color(mut self, color: wgpu::Color) -> Self {
-        self.inner.0.specular_color = [
+        self.inner.0.specular_color = vec4(
             color.r as f32,
             color.g as f32,
             color.b as f32,
             color.a as f32,
-        ];
+        );
         self
     }
 

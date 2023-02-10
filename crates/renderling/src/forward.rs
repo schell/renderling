@@ -1,9 +1,9 @@
 //! Forward pipeline and blinn-phong material definitions
 use crate::{AnyMaterialUniform, MaterialUniform};
 
-pub type ForwardVertex = renderling_forward::Vertex;
+pub type ForwardVertex = crate::linkage::pbr::Vertex;
 
-impl MaterialUniform for renderling_forward::MaterialUniform {
+impl MaterialUniform for crate::linkage::pbr::MaterialUniform {
     fn get_bindgroup(&self) -> &wgpu::BindGroup {
         &self.bindgroup
     }
@@ -19,7 +19,7 @@ pub struct BlinnPhongMaterial {
 
 impl crate::Material for BlinnPhongMaterial {
     fn create_material_uniform(&self, device: &wgpu::Device) -> crate::AnyMaterialUniform {
-        let material_uniform = renderling_forward::MaterialUniform::new(
+        let material_uniform = crate::linkage::pbr::MaterialUniform::new(
             device,
             &self.diffuse_texture.view,
             &self.diffuse_texture.sampler,
@@ -67,6 +67,6 @@ impl crate::Pipeline for ForwardPipeline {
 
 impl ForwardPipeline {
     pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat) -> Self {
-        ForwardPipeline { inner: renderling_forward::create_pipeline(device, format) }
+        ForwardPipeline { inner: crate::linkage::pbr::create_pipeline(device, format) }
     }
 }
