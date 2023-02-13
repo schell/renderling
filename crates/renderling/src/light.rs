@@ -3,14 +3,11 @@ use std::sync::mpsc::Sender;
 
 use crate::resources::Shared;
 use glam::{vec3, vec4, Vec3};
-use renderling_shader::pbr::{
-    ShaderDirectionalLight as ShaderDirectionalLight, ShaderPointLight as ShaderPointLight,
-    ShaderSpotLight as ShaderSpotLight,
-};
+use renderling_shader::pbr::{DirectionalLightRaw, PointLightRaw, SpotLightRaw};
 
-pub(crate) struct PointLightInner(pub(crate) ShaderPointLight);
-pub(crate) struct SpotLightInner(pub(crate) ShaderSpotLight);
-pub(crate) struct DirectionalLightInner(pub(crate) ShaderDirectionalLight);
+pub(crate) struct PointLightInner(pub(crate) PointLightRaw);
+pub(crate) struct SpotLightInner(pub(crate) SpotLightRaw);
+pub(crate) struct DirectionalLightInner(pub(crate) DirectionalLightRaw);
 
 #[derive(PartialEq)]
 pub(crate) enum LightUpdateCmd {
@@ -19,7 +16,8 @@ pub(crate) enum LightUpdateCmd {
     DirectionalLights,
 }
 
-/// Illuminates geometry in all directions surrounding a point, with attenuation.
+/// Illuminates geometry in all directions surrounding a point, with
+/// attenuation.
 ///
 /// This is like a light bulb, a match or a firefly.
 pub struct PointLight {
@@ -30,7 +28,7 @@ pub struct PointLight {
 impl PointLight {
     /// Sets the position of the light in world space.
     pub fn set_position(&self, position: Vec3) {
-        self.inner.write().0.position = vec3(position.x, position.y, position.z);
+        self.inner.write().0.position_ = position.extend(0.0);
         self.cmd.send(LightUpdateCmd::PointLights).unwrap();
     }
 
@@ -69,7 +67,7 @@ impl PointLight {
 
     /// Sets the attenuation coefficients for the point light.
     pub fn set_attenuation(&self, constant: f32, linear: f32, quadratic: f32) {
-        self.inner.write().0.attenuation = vec3(constant, linear, quadratic);
+        self.inner.write().0.attenuation_ = vec4(constant, linear, quadratic, 0.0);
         self.cmd.send(LightUpdateCmd::PointLights).unwrap();
     }
 }
@@ -112,12 +110,12 @@ impl<'a> PointLightBuilder<'a> {
     }
 
     pub fn with_position(mut self, position: Vec3) -> Self {
-        self.inner.0.position = vec3(position.x, position.y, position.z);
+        self.inner.0.position_ = position.extend(0.0);
         self
     }
 
     pub fn with_attenuation(mut self, constant: f32, linear: f32, quadratic: f32) -> Self {
-        self.inner.0.attenuation = vec3(constant, linear, quadratic);
+        self.inner.0.attenuation_ = vec3(constant, linear, quadratic).extend(0.0);
         self
     }
 
@@ -162,7 +160,8 @@ impl<'a> PointLightBuilder<'a> {
     }
 }
 
-/// Illuminates geometry in a cone in front of a point, within a certain cutoff boundary.
+/// Illuminates geometry in a cone in front of a point, within a certain cutoff
+/// boundary.
 ///
 /// This is like a street light or a flashlight.
 pub struct SpotLight {
@@ -173,31 +172,31 @@ pub struct SpotLight {
 impl SpotLight {
     /// Sets the position of the light in world space.
     pub fn set_position(&self, position: Vec3) {
-        self.inner.write().0.position = vec3(position.x, position.y, position.z);
+        self.inner.write().0.position_ = position.extend(0.0);
         self.cmd.send(LightUpdateCmd::SpotLights).unwrap();
     }
 
     /// Sets the direction the light is pointing in.
     pub fn set_direction(&self, direction: Vec3) {
-        self.inner.write().0.direction = vec3(direction.x, direction.y, direction.z);
+        self.inner.write().0.direction_ = direction.extend(0.0);
         self.cmd.send(LightUpdateCmd::SpotLights).unwrap();
     }
 
     /// Sets the inner angular cutoff.
     pub fn set_inner_cutoff(&self, cutoff: f32) {
-        self.inner.write().0.inner_cutoff = cutoff;
+        self.inner.write().0.cutoff_.x = cutoff;
         self.cmd.send(LightUpdateCmd::SpotLights).unwrap();
     }
 
     /// Sets the constant, linear, and quadratic terms of attenuation.
-    pub fn set_attenuation(&self, [a, b, c]: [f32; 3]) {
-        self.inner.write().0.attenuation = vec3(a, b, c);
+    pub fn set_attenuation(&self, attenuation: Vec3) {
+        self.inner.write().0.attenuation_ = attenuation.extend(0.0);
         self.cmd.send(LightUpdateCmd::SpotLights).unwrap();
     }
 
     /// Sets the outer angular cutoff.
     pub fn set_outer_cutoff(&self, cutoff: f32) {
-        self.inner.write().0.outer_cutoff = cutoff;
+        self.inner.write().0.cutoff_.y = cutoff;
         self.cmd.send(LightUpdateCmd::SpotLights).unwrap();
     }
 
@@ -275,23 +274,23 @@ impl<'a> SpotLightBuilder<'a> {
     }
 
     pub fn with_position(mut self, position: Vec3) -> Self {
-        self.inner.0.position = vec3(position.x, position.y, position.z);
+        self.inner.0.position_ = position.extend(0.0);
         self
     }
 
     pub fn with_direction(mut self, direction: Vec3) -> Self {
-        self.inner.0.direction = vec3(direction.x, direction.y, direction.z);
+        self.inner.0.direction_ = direction.extend(0.0);
         self
     }
 
     pub fn with_attenuation(mut self, constant: f32, linear: f32, quadratic: f32) -> Self {
-        self.inner.0.attenuation = vec3(constant, linear, quadratic);
+        self.inner.0.attenuation_ = vec4(constant, linear, quadratic, 0.0);
         self
     }
 
     pub fn with_cutoff(mut self, inner: f32, outer: f32) -> Self {
-        self.inner.0.inner_cutoff = inner;
-        self.inner.0.outer_cutoff = outer;
+        self.inner.0.cutoff_.x = inner;
+        self.inner.0.cutoff_.y = outer;
         self
     }
 
@@ -347,7 +346,7 @@ pub struct DirectionalLight {
 impl DirectionalLight {
     /// Sets the direction this light points in.
     pub fn set_direction(&self, direction: Vec3) {
-        self.inner.write().0.direction = vec3(direction.x, direction.y, direction.z);
+        self.inner.write().0.direction_ = direction.extend(0.0);
         self.cmd.send(LightUpdateCmd::DirectionalLights).unwrap();
     }
 
@@ -408,22 +407,22 @@ impl<'a> DirectionalLightBuilder<'a> {
             b: 1.0,
             a: 1.0,
         })
-            .with_diffuse_color(wgpu::Color {
-                r: 1.0,
-                g: 1.0,
-                b: 1.0,
-                a: 1.0,
-            })
-            .with_specular_color(wgpu::Color {
-                r: 1.0,
-                g: 1.0,
-                b: 1.0,
-                a: 1.0,
-            })
+        .with_diffuse_color(wgpu::Color {
+            r: 1.0,
+            g: 1.0,
+            b: 1.0,
+            a: 1.0,
+        })
+        .with_specular_color(wgpu::Color {
+            r: 1.0,
+            g: 1.0,
+            b: 1.0,
+            a: 1.0,
+        })
     }
 
     pub fn with_direction(mut self, direction: Vec3) -> Self {
-        self.inner.0.direction = vec3(direction.x, direction.y, direction.z);
+        self.inner.0.direction_ = direction.extend(0.0);
         self
     }
 

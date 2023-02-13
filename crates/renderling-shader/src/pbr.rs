@@ -9,33 +9,35 @@ use spirv_std::num_traits::Float;
 
 use crate::{math::Vec3ColorSwizzles, ShaderCamera};
 
+#[repr(C)]
 #[derive(Copy, Clone, Default)]
-#[cfg_attr(not(target_arch = "spirv"), derive(encase::ShaderType))]
-pub struct ShaderPointLight {
-    pub position: Vec3,
-    pub attenuation: Vec3,
+#[cfg_attr(not(target_arch = "spirv"), derive(encase::ShaderType, bytemuck::Pod, bytemuck::Zeroable))]
+pub struct PointLightRaw {
+    pub position_: Vec4,
+    pub attenuation_: Vec4,
     pub ambient_color: Vec4,
     pub diffuse_color: Vec4,
     pub specular_color: Vec4,
 }
 
+#[repr(C)]
 #[derive(Copy, Clone, Default)]
-#[cfg_attr(not(target_arch = "spirv"), derive(encase::ShaderType))]
-pub struct ShaderSpotLight {
-    pub position: Vec3,
-    pub direction: Vec3,
-    pub attenuation: Vec3,
-    pub inner_cutoff: f32,
-    pub outer_cutoff: f32,
+#[cfg_attr(not(target_arch = "spirv"), derive(encase::ShaderType, bytemuck::Pod, bytemuck::Zeroable))]
+pub struct SpotLightRaw {
+    pub position_: Vec4,
+    pub direction_: Vec4,
+    pub attenuation_: Vec4,
     pub ambient_color: Vec4,
     pub diffuse_color: Vec4,
     pub specular_color: Vec4,
+    pub cutoff_: Vec4,
 }
 
+#[repr(C)]
 #[derive(Copy, Clone, Default)]
-#[cfg_attr(not(target_arch = "spirv"), derive(encase::ShaderType))]
-pub struct ShaderDirectionalLight {
-    pub direction: Vec3,
+#[cfg_attr(not(target_arch = "spirv"), derive(encase::ShaderType, bytemuck::Pod, bytemuck::Zeroable))]
+pub struct DirectionalLightRaw {
+    pub direction_: Vec4,
     pub ambient_color: Vec4,
     pub diffuse_color: Vec4,
     pub specular_color: Vec4,
@@ -56,7 +58,17 @@ pub fn attenuate(attenuation: Vec3, distance: f32) -> f32 {
     }
 }
 
-impl ShaderPointLight {
+impl PointLightRaw {
+    pub fn position(&self) -> Vec3 {
+        self.position_.xyz()
+    }
+
+
+
+    pub fn attenuation(&self) -> Vec3 {
+        self.attenuation_.xyz()
+    }
+
     /// Calculate a point light's color contribution to a fragment.
     pub fn color(
         &self,
@@ -68,7 +80,7 @@ impl ShaderPointLight {
         specular_color: Vec4,
         shininess: f32,
     ) -> Vec3 {
-        let light_pos: Vec3 = (view * self.position.extend(1.0)).xyz();
+        let light_pos: Vec3 = (view * self.position().extend(1.0)).xyz();
         let vertex_to_light = light_pos - vertex_pos;
         let vertex_to_light_distance = vertex_to_light.length();
 
@@ -80,7 +92,7 @@ impl ShaderPointLight {
         let spec: f32 = normal.dot(halfway_dir).max(0.0).powf(shininess);
         // attenuation
         let distance: f32 = vertex_to_light_distance;
-        let attenuation: f32 = attenuate(self.attenuation, distance);
+        let attenuation: f32 = attenuate(self.attenuation(), distance);
         // combine results
         let mut ambient: Vec3 = self.ambient_color.rgb() * diffuse_color.rgb();
         let mut diffuse: Vec3 = self.diffuse_color.rgb() * diff * diffuse_color.rgb();
@@ -93,7 +105,26 @@ impl ShaderPointLight {
     }
 }
 
-impl ShaderSpotLight {
+impl SpotLightRaw {
+    pub fn position(&self) -> Vec3 {
+        self.position_.xyz()
+    }
+
+    pub fn attenuation(&self) -> Vec3 {
+        self.attenuation_.xyz()
+    }
+
+    pub fn direction(&self) -> Vec3 {
+        self.direction_.xyz()
+    }
+
+    pub fn inner_cutoff(&self) -> f32 {
+        self.cutoff_.x
+    }
+
+    pub fn outer_cutoff(&self) -> f32 {
+        self.cutoff_.y
+    }
     // Calculate a spotlight's color contribution to a fragment.
     pub fn color(
         &self,
@@ -105,10 +136,10 @@ impl ShaderSpotLight {
         specular_color: Vec4,
         shininess: f32,
     ) -> Vec3 {
-        if self.direction == Vec3::ZERO {
+        if self.direction() == Vec3::ZERO {
             return Vec3::ZERO;
         }
-        let light_pos: Vec3 = (view * self.position.extend(1.0)).xyz();
+        let light_pos: Vec3 = (view * self.position().extend(1.0)).xyz();
         let light_dir: Vec3 = (light_pos - vertex_pos).normalize();
         // diffuse shading
         let diff: f32 = normal.dot(light_dir).max(0.0);
@@ -117,12 +148,12 @@ impl ShaderSpotLight {
         let spec: f32 = normal.dot(halfway_dir).max(0.0).powf(shininess);
         // attenuation
         let distance: f32 = (light_pos - vertex_pos).length();
-        let attenuation: f32 = attenuate(self.attenuation.xyz(), distance);
+        let attenuation: f32 = attenuate(self.attenuation(), distance);
         // spotlight intensity
-        let direction: Vec3 = (-(view * self.direction.extend(0.0)).xyz()).normalize();
+        let direction: Vec3 = (-(view * self.direction().extend(0.0)).xyz()).normalize();
         let theta: f32 = light_dir.dot(direction);
-        let epsilon: f32 = self.inner_cutoff - self.outer_cutoff;
-        let intensity: f32 = ((theta - self.outer_cutoff) / epsilon).clamp(0.0, 1.0);
+        let epsilon: f32 = self.inner_cutoff() - self.outer_cutoff();
+        let intensity: f32 = ((theta - self.outer_cutoff()) / epsilon).clamp(0.0, 1.0);
         // combine results
         let mut ambient: Vec3 = self.ambient_color.rgb() * diffuse_color.rgb();
         let mut diffuse: Vec3 = self.diffuse_color.rgb() * diff * diffuse_color.rgb();
@@ -135,7 +166,10 @@ impl ShaderSpotLight {
     }
 }
 
-impl ShaderDirectionalLight {
+impl DirectionalLightRaw {
+    pub fn direction(&self) -> Vec3 {
+        self.direction_.xyz()
+    }
     // Calculate a directional light's color contribution to a fragment.
     pub fn color(
         &self,
@@ -146,10 +180,10 @@ impl ShaderDirectionalLight {
         specular_color: Vec4,
         shininess: f32,
     ) -> Vec3 {
-        if self.direction == Vec3::ZERO {
+        if self.direction() == Vec3::ZERO {
             return Vec3::ZERO;
         }
-        let light_dir: Vec3 = (-(view * self.direction.xyz().extend(0.0)).xyz()).normalize();
+        let light_dir: Vec3 = (-(view * self.direction().extend(0.0)).xyz()).normalize();
         // diffuse shading
         let diff: f32 = normal.dot(light_dir).max(0.0);
         // specular shading
@@ -165,54 +199,57 @@ impl ShaderDirectionalLight {
 
 pub const POINT_LIGHTS_MAX: usize = 64;
 
+#[repr(C)]
 #[cfg_attr(not(target_arch = "spirv"), derive(encase::ShaderType))]
 pub struct PointLights {
+    pub lights: [PointLightRaw; POINT_LIGHTS_MAX],
     pub length: u32,
-    pub lights: [ShaderPointLight; POINT_LIGHTS_MAX],
 }
 
 impl Default for PointLights {
     fn default() -> Self {
         Self {
             length: 0,
-            lights: [ShaderPointLight::default(); POINT_LIGHTS_MAX],
+            lights: [PointLightRaw::default(); POINT_LIGHTS_MAX],
         }
     }
 }
 
 pub const SPOT_LIGHTS_MAX: usize = 32;
 
+#[repr(C)]
 #[cfg_attr(not(target_arch = "spirv"), derive(encase::ShaderType))]
 pub struct SpotLights {
+    pub lights: [SpotLightRaw; SPOT_LIGHTS_MAX],
     pub length: u32,
-    pub lights: [ShaderSpotLight; SPOT_LIGHTS_MAX],
 }
 
 impl Default for SpotLights {
     fn default() -> Self {
         Self {
             length: 0,
-            lights: [ShaderSpotLight::default(); SPOT_LIGHTS_MAX],
+            lights: [SpotLightRaw::default(); SPOT_LIGHTS_MAX],
         }
     }
 }
 
 pub const DIRECTIONAL_LIGHTS_MAX: usize = 8;
 
+#[repr(C)]
 #[cfg_attr(not(target_arch = "spirv"), derive(encase::ShaderType))]
 pub struct DirectionalLights {
+    pub lights: [DirectionalLightRaw; DIRECTIONAL_LIGHTS_MAX],
     pub length: u32,
-    pub lights: [ShaderDirectionalLight; DIRECTIONAL_LIGHTS_MAX],
 }
 
-//impl Default for DirectionalLights {
-//    fn default() -> Self {
-//        Self {
-//            length: 0,
-//            lights: [ShaderDirectionalLight::default(); DIRECTIONAL_LIGHTS_MAX],
-//        }
-//    }
-//}
+impl Default for DirectionalLights {
+    fn default() -> Self {
+        Self {
+            length: 0,
+            lights: [DirectionalLightRaw::default(); DIRECTIONAL_LIGHTS_MAX],
+        }
+    }
+}
 
 pub fn main_vertex(
     camera: &ShaderCamera,
@@ -345,7 +382,7 @@ mod test {
         let specular_color = Vec4::new(1.0, 0.0, 0.0, 1.0);
         let shininess = 16.0;
 
-        let point = ShaderPointLight::default();
+        let point = PointLightRaw::default();
         let point_color = point.color(
             vertex_pos,
             view,
@@ -359,7 +396,7 @@ mod test {
         assert!(point_color.y >= 0.0, "'{point_color:?}' y is negative");
         assert!(point_color.z >= 0.0, "'{point_color:?}' z is negative");
 
-        let spot = ShaderSpotLight::default();
+        let spot = SpotLightRaw::default();
         let spot_color = spot.color(
             vertex_pos,
             view,
@@ -373,7 +410,7 @@ mod test {
         assert!(spot_color.y >= 0.0, "'{spot_color:?}' y is negative");
         assert!(spot_color.z >= 0.0, "'{spot_color:?}' z is negative");
 
-        let directional = ShaderDirectionalLight::default();
+        let directional = DirectionalLightRaw::default();
         let directional_color = directional.color(
             view,
             normal,
