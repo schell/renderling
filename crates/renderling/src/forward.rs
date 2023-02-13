@@ -19,14 +19,7 @@ pub struct BlinnPhongMaterial {
 
 impl crate::Material for BlinnPhongMaterial {
     fn create_material_uniform(&self, device: &wgpu::Device) -> crate::AnyMaterialUniform {
-        let material_uniform = crate::linkage::pbr::MaterialUniform::new(
-            device,
-            &self.diffuse_texture.view,
-            &self.diffuse_texture.sampler,
-            &self.specular_texture.view,
-            &self.specular_texture.sampler,
-            self.shininess,
-        );
+        let material_uniform = crate::linkage::pbr::MaterialUniform::new(device, &self);
         AnyMaterialUniform::new(material_uniform)
     }
 }
@@ -40,7 +33,7 @@ impl crate::Pipeline for ForwardPipeline {
         &self.inner
     }
 
-    //fn begin_render_pass<'a, 'b: 'a>(
+    // fn begin_render_pass<'a, 'b: 'a>(
     //    &'b self,
     //    encoder: &'a mut wgpu::CommandEncoder,
     //    frame_texture_view: &'a wgpu::TextureView,
@@ -55,18 +48,21 @@ impl crate::Pipeline for ForwardPipeline {
     //    )
     //}
 
-    //fn render_object<'a, 'b: 'a>(
+    // fn render_object<'a, 'b: 'a>(
     //    &'b self,
     //    render_pass: &'a mut wgpu::RenderPass<'b>,
     //    object: renderling_core::ShaderObject<'b>,
     //    default_material_bindgroup: &'b wgpu::BindGroup,
     //) {
-    //    renderling_core::render_object(render_pass, object, default_material_bindgroup)
+    //    renderling_core::render_object(render_pass, object,
+    // default_material_bindgroup)
     //}
 }
 
 impl ForwardPipeline {
     pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat) -> Self {
-        ForwardPipeline { inner: crate::linkage::pbr::create_pipeline(device, format) }
+        ForwardPipeline {
+            inner: crate::linkage::pbr::create_pipeline(device, format),
+        }
     }
 }

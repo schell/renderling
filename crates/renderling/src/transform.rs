@@ -1,7 +1,7 @@
 //! Geometric transformations.
 use std::marker::PhantomData;
 
-use nalgebra::{Matrix4, Point3, Transform3, Translation3, UnitQuaternion, Vector3};
+use glam::{Vec3, Quat, Mat4};
 
 /// A transformation with separate translation, scale and rotation.
 ///
@@ -10,9 +10,9 @@ use nalgebra::{Matrix4, Point3, Transform3, Translation3, UnitQuaternion, Vector
 ///
 /// M = T * R * S
 pub struct Transform<T> {
-    pub translate: Vector3<f32>,
-    pub scale: Vector3<f32>,
-    pub rotate: UnitQuaternion<f32>,
+    pub translate: Vec3,
+    pub scale: Vec3,
+    pub rotate: Quat,
     _phantom: PhantomData<T>,
 }
 
@@ -50,29 +50,20 @@ impl<T> Clone for Transform<T> {
 impl<T> Default for Transform<T> {
     fn default() -> Self {
         Transform {
-            translate: Vector3::new(0.0, 0.0, 0.0),
-            scale: Vector3::new(1.0, 1.0, 1.0),
-            rotate: UnitQuaternion::identity(),
+            translate: Vec3::new(0.0, 0.0, 0.0),
+            scale: Vec3::new(1.0, 1.0, 1.0),
+            rotate: Quat::IDENTITY,
             _phantom: PhantomData,
         }
     }
 }
 
-impl<T> From<&Transform<T>> for Matrix4<f32> {
+impl<T> From<&Transform<T>> for Mat4 {
     fn from(trns: &Transform<T>) -> Self {
-        let t: Matrix4<f32> =
-            Translation3::new(trns.translate.x, trns.translate.y, trns.translate.z)
-                .to_homogeneous();
-        let r: Matrix4<f32> = trns.rotate.to_homogeneous();
-        let s: Matrix4<f32> = Matrix4::new_nonuniform_scaling(&trns.scale);
+        let t = Mat4::from_translation(trns.translate);
+        let r = Mat4::from_quat(trns.rotate);
+        let s = Mat4::from_scale(trns.scale);
         t * r * s
-    }
-}
-
-impl<T> From<&Transform<T>> for Transform3<f32> {
-    fn from(t: &Transform<T>) -> Self {
-        let mat4 = Matrix4::from(t);
-        Transform3::from_matrix_unchecked(mat4)
     }
 }
 
@@ -85,24 +76,24 @@ impl<T> Transform<T> {
         t
     }
 
-    pub fn from_translate(v: Vector3<f32>) -> Self {
+    pub fn from_translate(v: Vec3) -> Self {
         Transform {
             translate: v,
             ..Default::default()
         }
     }
 
-    pub fn with_position(mut self, p: Point3<f32>) -> Self {
-        self.translate = Vector3::new(p.x, p.y, p.z);
+    pub fn with_position(mut self, p: Vec3) -> Self {
+        self.translate = Vec3::new(p.x, p.y, p.z);
         self
     }
 
-    pub fn with_rotation(mut self, r: UnitQuaternion<f32>) -> Self {
+    pub fn with_rotation(mut self, r: Quat) -> Self {
         self.rotate = r;
         self
     }
 
-    pub fn with_scale(mut self, s: Vector3<f32>) -> Self {
+    pub fn with_scale(mut self, s: Vec3) -> Self {
         self.scale = s;
         self
     }
@@ -113,7 +104,7 @@ impl<T> Transform<T> {
     pub fn append(&self, other: &Transform<T>) -> Transform<T> {
         Transform {
             translate: self.translate + other.translate,
-            scale: Vector3::new(
+            scale: Vec3::new(
                 self.scale.x * other.scale.x,
                 self.scale.y * other.scale.y,
                 self.scale.z * other.scale.z,
@@ -123,9 +114,9 @@ impl<T> Transform<T> {
         }
     }
 
-    pub fn transform_point(&self, p: &Point3<f32>) -> Point3<f32> {
-        let m = Matrix4::from(self);
-        m.transform_point(p)
+    pub fn transform_point(&self, p: Vec3) -> Vec3 {
+        let m = Mat4::from(self);
+        m.project_point3(p)
     }
 
     pub fn as_global(&self) -> Transform<Global> {

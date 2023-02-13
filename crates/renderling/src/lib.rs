@@ -1,5 +1,6 @@
-//! A collection of renderers (callend "renderlings") with a focus on simplicity and ease of use.
-//! Backed by WebGPU render pipelines and simple types for marshalling data to the GPU.
+//! A collection of renderers (callend "renderlings") with a focus on simplicity
+//! and ease of use. Backed by WebGPU render pipelines and simple types for
+//! marshalling data to the GPU.
 //!
 //! # WARNING
 //! This is very much a work in progress.
@@ -8,10 +9,12 @@
 //!
 //! # renderlings 🍖
 //! Individual renderers are called "renderlings" for maximum cuteness.
-//! Renderlings manage their own resources and come in a couple flavors depending on the shader used.
+//! Renderlings manage their own resources and come in a couple flavors
+//! depending on the shader used.
 //!
 //! ## Features
-//! Features are used to enable specific renderlings, by default all renderlings are enabled.
+//! Features are used to enable specific renderlings, by default all renderlings
+//! are enabled.
 //!
 //! * **ui**
 //!   - simple simple diffuse material
@@ -23,9 +26,8 @@
 //!   - maximum 64 point, 32 spot and 8 directional lights
 //!
 //! ## Raw shaders
-//! You can also use the [shaders module](crate::shaders) without renderlings and manage your own resources for maximum flexibility.
-pub use renderling_core::*;
-
+//! You can also use the [shaders module](crate::shaders) without renderlings
+//! and manage your own resources for maximum flexibility.
 #[cfg(feature = "forward")]
 mod forward;
 #[cfg(feature = "forward")]
@@ -74,7 +76,7 @@ mod test {
     use std::sync::Arc;
 
     use super::*;
-    use nalgebra::{Perspective3, Point2, Point3, UnitQuaternion, Vector3};
+    use glam::{Mat4, Quat, Vec2, Vec3};
 
     fn right_tri_builder() -> MeshBuilder<UiVertex> {
         MeshBuilder::default().with_vertices(vec![
@@ -133,12 +135,9 @@ mod test {
         c.gpu.clear(Some(&frame), Some(&depth));
         c.tri.set_transform(
             Transform::default()
-                .with_position(Point3::new(100.0, 0.0, 0.0))
-                .with_rotation(UnitQuaternion::from_axis_angle(
-                    &Vector3::z_axis(),
-                    std::f32::consts::FRAC_PI_2,
-                ))
-                .with_scale(Vector3::new(0.5, 0.5, 1.0)),
+                .with_position(Vec3::new(100.0, 0.0, 0.0))
+                .with_rotation(Quat::from_axis_angle(Vec3::Z, std::f32::consts::FRAC_PI_2))
+                .with_scale(Vec3::new(0.5, 0.5, 1.0)),
         );
         c.ui.update().unwrap();
         c.ui.render(&frame, &depth).unwrap();
@@ -159,12 +158,12 @@ mod test {
     ///    |___x       tl_____tr
     ///   /    g        /    /
     /// z/r          bl/____/br
-    fn pyramid_points() -> [Point3<f32>; 5] {
-        let tl = Point3::new(-0.5, -0.5, -0.5);
-        let tr = Point3::new(0.5, -0.5, -0.5);
-        let br = Point3::new(0.5, -0.5, 0.5);
-        let bl = Point3::new(-0.5, -0.5, 0.5);
-        let top = Point3::new(0.0, 0.5, 0.0);
+    fn pyramid_points() -> [Vec3; 5] {
+        let tl = Vec3::new(-0.5, -0.5, -0.5);
+        let tr = Vec3::new(0.5, -0.5, -0.5);
+        let br = Vec3::new(0.5, -0.5, 0.5);
+        let bl = Vec3::new(-0.5, -0.5, 0.5);
+        let top = Vec3::new(0.0, 0.5, 0.0);
         [tl, tr, br, bl, top]
     }
 
@@ -180,7 +179,7 @@ mod test {
         ]
     }
 
-    fn cmy_vertex(p: Point3<f32>) -> UiVertex {
+    fn cmy_vertex(p: Vec3) -> UiVertex {
         let r: f32 = p.z + 0.5;
         let g: f32 = p.x + 0.5;
         let b: f32 = p.y + 0.5;
@@ -214,6 +213,7 @@ mod test {
 
     #[test]
     fn cmy_cube() {
+        //_init_logging();
         let mut gpu = WgpuState::headless(100, 100).unwrap();
         gpu.default_background_color = wgpu::Color::WHITE;
 
@@ -221,23 +221,20 @@ mod test {
 
         // test updating the camera by using a new one
         let cam = ui.default_camera();
-        cam.look_at(Point3::new(0.0, 12.0, 20.0), Point3::origin(), Vector3::y());
-        cam.set_projection(Projection::Perspective(Perspective3::new(
-            1.0,
+        cam.look_at(Vec3::new(0.0, 12.0, 20.0), Vec3::ZERO, Vec3::Y);
+        cam.set_projection(Mat4::perspective_rh(
             std::f32::consts::PI / 4.0,
+            1.0,
             0.1,
             100.0,
-        )));
+        ));
 
         let _cube = ui
             .new_object()
             .with_camera(&cam)
             .with_mesh_builder(cube_builder())
-            .with_scale(Vector3::new(6.0, 6.0, 6.0))
-            .with_rotation(UnitQuaternion::from_axis_angle(
-                &Vector3::y_axis(),
-                -std::f32::consts::FRAC_PI_4,
-            ))
+            .with_scale(Vec3::new(6.0, 6.0, 6.0))
+            .with_rotation(Quat::from_axis_angle(Vec3::Y, -std::f32::consts::FRAC_PI_4))
             .build()
             .unwrap();
 
@@ -264,12 +261,9 @@ mod test {
             .new_object()
             .with_camera(&cam)
             .with_mesh_builder(cube_builder())
-            .with_position(Point3::new(-4.0, 0.0, 0.0))
-            .with_scale(Vector3::new(6.0, 6.0, 6.0))
-            .with_rotation(UnitQuaternion::from_axis_angle(
-                &Vector3::y_axis(),
-                -std::f32::consts::FRAC_PI_4,
-            ))
+            .with_position(Vec3::new(-4.0, 0.0, 0.0))
+            .with_scale(Vec3::new(6.0, 6.0, 6.0))
+            .with_rotation(Quat::from_axis_angle(Vec3::Y, -std::f32::consts::FRAC_PI_4))
             .build()
             .unwrap();
 
@@ -277,12 +271,9 @@ mod test {
             .new_object()
             .with_camera(&cam)
             .with_mesh_builder(cube_builder())
-            .with_position(Point3::new(4.0, 0.0, 0.0))
-            .with_scale(Vector3::new(6.0, 6.0, 6.0))
-            .with_rotation(UnitQuaternion::from_axis_angle(
-                &Vector3::y_axis(),
-                std::f32::consts::FRAC_PI_4,
-            ))
+            .with_position(Vec3::new(4.0, 0.0, 0.0))
+            .with_scale(Vec3::new(6.0, 6.0, 6.0))
+            .with_rotation(Quat::from_axis_angle(Vec3::Y, std::f32::consts::FRAC_PI_4))
             .build()
             .unwrap();
 
@@ -311,17 +302,13 @@ mod test {
         ui.render(&frame, &depth).unwrap();
 
         let img = gpu.grab_frame_image().unwrap();
-        //img.save_with_format(
+        // img.save_with_format(
         //    "cmy_cube_visible_after.png",
         //    image::ImageFormat::Png,
         //)
         //.unwrap();
-        crate::img_diff::assert_img_eq(
-            "cmy_cube_visible_after",
-            "cmy_cube_visible_after.png",
-            img,
-        )
-        .unwrap();
+        crate::img_diff::assert_img_eq("cmy_cube_visible_after", "cmy_cube_visible_after.png", img)
+            .unwrap();
 
         cube_two.set_visible(true);
         let (frame, depth) = gpu.next_frame().unwrap();
@@ -340,6 +327,7 @@ mod test {
 
     #[test]
     fn cmy_cube_remesh() {
+        _init_logging();
         let mut gpu = WgpuState::headless(100, 100).unwrap();
         gpu.default_background_color = wgpu::Color::TRANSPARENT;
         let mut ui = gpu.new_ui_renderling();
@@ -348,7 +336,7 @@ mod test {
             .new_object()
             .with_camera(&cam)
             .with_mesh_builder(cube_builder())
-            .with_scale(Vector3::new(10.0, 10.0, 10.0))
+            .with_scale(Vec3::new(10.0, 10.0, 10.0))
             .build()
             .unwrap();
         let (frame, depth) = gpu.next_frame().unwrap();
@@ -357,17 +345,13 @@ mod test {
         ui.render(&frame, &depth).unwrap();
 
         let img = gpu.grab_frame_image().unwrap();
-        //img.save_with_format(
+        // img.save_with_format(
         //    "cmy_cube_remesh_before.png",
         //    image::ImageFormat::Png,
         //)
         //.unwrap();
-        crate::img_diff::assert_img_eq(
-            "cmy_cube_remesh_before",
-            "cmy_cube_remesh_before.png",
-            img,
-        )
-        .unwrap();
+        crate::img_diff::assert_img_eq("cmy_cube_remesh_before", "cmy_cube_remesh_before.png", img)
+            .unwrap();
 
         let pyramid_mesh = pyramid_builder().build(Some("pyramid mesh"), &gpu.device);
         cube.set_mesh(Arc::new(pyramid_mesh));
@@ -377,26 +361,22 @@ mod test {
         ui.render(&frame, &depth).unwrap();
 
         let img = gpu.grab_frame_image().unwrap();
-        //img.save_with_format(
+        // img.save_with_format(
         //    "cmy_cube_remesh_after.png",
         //    image::ImageFormat::Png,
         //)
         //.unwrap();
-        crate::img_diff::assert_img_eq(
-            "cmy_cube_remesh_after",
-            "cmy_cube_remesh_after.png",
-            img,
-        )
-        .unwrap();
+        crate::img_diff::assert_img_eq("cmy_cube_remesh_after", "cmy_cube_remesh_after.png", img)
+            .unwrap();
     }
 
     fn uv_unit_cube() -> MeshBuilder<UiVertex> {
         MeshBuilder::default().with_vertices({
-            let p: [Point3<f32>; 8] = crate::math::unit_points();
-            let tl = Point2::from([0.0, 0.0]);
-            let tr = Point2::from([1.0, 0.0]);
-            let bl = Point2::from([0.0, 1.0]);
-            let br = Point2::from([1.0, 1.0]);
+            let p: [Vec3; 8] = crate::math::unit_points();
+            let tl = Vec2::from([0.0, 0.0]);
+            let tr = Vec2::from([1.0, 0.0]);
+            let bl = Vec2::from([0.0, 1.0]);
+            let br = Vec2::from([1.0, 1.0]);
 
             vec![
                 // top
@@ -518,7 +498,7 @@ mod test {
             .with_camera(&cam)
             .with_material(material)
             .with_mesh_builder(builder)
-            .with_scale(Vector3::new(10.0, 10.0, 10.0))
+            .with_scale(Vec3::new(10.0, 10.0, 10.0))
             .build()
             .unwrap();
         let (frame, depth) = gpu.next_frame().unwrap();
@@ -527,7 +507,7 @@ mod test {
         ui.render(&frame, &depth).unwrap();
 
         let img = gpu.grab_frame_image().unwrap();
-        //img.save_with_format(
+        // img.save_with_format(
         //    "cmy_cube_material_before.png",
         //    image::ImageFormat::Png,
         //)
@@ -554,7 +534,7 @@ mod test {
         ui.render(&frame, &depth).unwrap();
 
         let img = gpu.grab_frame_image().unwrap();
-        //img.save_with_format(
+        // img.save_with_format(
         //    "cmy_cube_material_after.png",
         //    image::ImageFormat::Png,
         //)
@@ -609,21 +589,21 @@ mod test {
         };
         let _dir_red = r
             .new_directional_light()
-            .with_direction(Vector3::new(0.0, -1.0, 0.0))
+            .with_direction(Vec3::new(0.0, -1.0, 0.0))
             .with_diffuse_color(red)
             .with_specular_color(red)
             .with_ambient_color(dark_grey)
             .build();
         let _dir_green = r
             .new_directional_light()
-            .with_direction(Vector3::new(-1.0, 0.0, 0.0))
+            .with_direction(Vec3::new(-1.0, 0.0, 0.0))
             .with_diffuse_color(green)
             .with_specular_color(green)
             .with_ambient_color(dark_grey)
             .build();
-        let _dir_blue = r
+        let dir_blue = r
             .new_directional_light()
-            .with_direction(Vector3::new(0.0, 0.0, -1.0))
+            .with_direction(Vec3::new(0.0, 0.0, -1.0))
             .with_diffuse_color(blue)
             .with_specular_color(blue)
             .with_ambient_color(dark_grey)
@@ -631,7 +611,11 @@ mod test {
         let cam = r
             .new_camera()
             .with_projection_perspective()
-            .with_look_at(Point3::new(1.8, 1.8, 1.8), Point3::origin(), Vector3::y())
+            .with_look_at(
+                Vec3::new(1.8, 1.8, 1.8),
+                Vec3::ZERO,
+                Vec3::new(0.0, 1.0, 0.0),
+            )
             .build();
         let _tri = r
             .new_object()
@@ -645,13 +629,17 @@ mod test {
             ))
             .build()
             .unwrap();
+
         r.update().unwrap();
+        dir_blue.set_direction(Vec3::NEG_Z);
+        r.update().unwrap();
+
         let (frame, depth) = gpu.next_frame().unwrap();
         gpu.clear(Some(&frame), Some(&depth));
         r.render(&frame, &depth).unwrap();
 
         let img = gpu.grab_frame_image().unwrap();
-        //img.save_with_format(
+        // img.save_with_format(
         //    "forward_cube_directional.png",
         //    image::ImageFormat::Png,
         //)
@@ -691,21 +679,23 @@ mod test {
                     ui::Text::new("")
                         .with_color([0.0, 1.0, 1.0, 1.0])
                         .with_scale(32.0),
-                )
+                ),
         );
         let (material, mesh) = glyph_cache.get_updated();
         let material = Arc::new(material.unwrap());
         let mesh = Arc::new(mesh.unwrap());
         let mut r = gpu.new_ui_renderling();
-        let _obj_a = r.new_object()
+        let _obj_a = r
+            .new_object()
             .with_material::<UiMaterial>(material.clone())
             .with_mesh(mesh.clone())
             .build()
             .unwrap();
-        let _obj_b = r.new_object()
+        let _obj_b = r
+            .new_object()
             .with_material::<UiMaterial>(material.clone())
             .with_mesh(mesh.clone())
-            .with_position(Point3::new(15.0, 15.0, 0.5))
+            .with_position(Vec3::new(15.0, 15.0, 0.5))
             .build()
             .unwrap();
         r.update().unwrap();
@@ -715,7 +705,7 @@ mod test {
         r.render(&frame, &depth).unwrap();
 
         let img = gpu.grab_frame_image().unwrap();
-        //img.save_with_format("ui_text.png", image::ImageFormat::Png)
+        // img.save_with_format("ui_text.png", image::ImageFormat::Png)
         //    .unwrap();
         crate::img_diff::assert_img_eq("ui_text", "ui_text.png", img).unwrap();
     }
@@ -730,32 +720,27 @@ mod test {
             .new_object()
             .with_mesh_builder(
                 MeshBuilder::default()
-                    .with_vertices(
-                        vec![
-                            UiVertex::default()
-                                .with_position(0.0, 0.0, 0.0)
-                                .with_uv(0.0, 0.0),
-                            UiVertex::default()
-                                .with_position(1.0, 0.0, 0.0)
-                                .with_uv(1.0, 0.0),
-                            UiVertex::default()
-                                .with_position(1.0, 1.0, 0.0)
-                                .with_uv(1.0, 1.0),
-                            UiVertex::default()
-                                .with_position(0.0, 1.0, 0.0)
-                                .with_uv(0.0, 1.0),
-                        ]
-                    )
-                    .with_indices(vec![
-                        0, 1, 2,
-                        0, 2, 3
+                    .with_vertices(vec![
+                        UiVertex::default()
+                            .with_position(0.0, 0.0, 0.0)
+                            .with_uv(0.0, 0.0),
+                        UiVertex::default()
+                            .with_position(1.0, 0.0, 0.0)
+                            .with_uv(1.0, 0.0),
+                        UiVertex::default()
+                            .with_position(1.0, 1.0, 0.0)
+                            .with_uv(1.0, 1.0),
+                        UiVertex::default()
+                            .with_position(0.0, 1.0, 0.0)
+                            .with_uv(0.0, 1.0),
                     ])
+                    .with_indices(vec![0, 1, 2, 0, 2, 3]),
             )
             .with_material(UiMaterial {
                 diffuse_texture: scene.textures[0].clone(),
                 color_blend: UiColorBlend::UvOnly,
             })
-            .with_scale(Vector3::new(100.0, 100.0, 1.0))
+            .with_scale(Vec3::new(100.0, 100.0, 1.0))
             .build()
             .unwrap();
         ui.update().unwrap();
@@ -764,7 +749,7 @@ mod test {
         ui.render(&frame, &depth).unwrap();
 
         let img = gpu.grab_frame_image().unwrap();
-        //img.save_with_format("gltf_images.png", image::ImageFormat::Png)
+        // img.save_with_format("gltf_images.png", image::ImageFormat::Png)
         //    .unwrap();
         crate::img_diff::assert_img_eq("gltf_images", "gltf_images.png", img).unwrap();
     }
@@ -777,10 +762,7 @@ mod test {
         let size = 1.0;
         let yellow_tri = ui
             .new_object()
-            .with_mesh_builder(
-                MeshBuilder::default()
-                    .with_vertices(
-                        vec![
+            .with_mesh_builder(MeshBuilder::default().with_vertices(vec![
                             UiVertex::default()
                                 .with_position(0.0, 0.0, 0.0)
                                 .with_color(1.0, 1.0, 0.0, 1.0),
@@ -790,18 +772,13 @@ mod test {
                             UiVertex::default()
                                 .with_position(size, size, 0.0)
                                 .with_color(1.0, 1.0, 0.0, 1.0),
-                        ]
-                    )
-            )
-            .with_position(Point3::new(25.0, 25.0, 0.0))
+                        ]))
+            .with_position(Vec3::new(25.0, 25.0, 0.0))
             .build()
             .unwrap();
         let _cyan_tri = ui
             .new_object()
-            .with_mesh_builder(
-                MeshBuilder::default()
-                    .with_vertices(
-                        vec![
+            .with_mesh_builder(MeshBuilder::default().with_vertices(vec![
                             UiVertex::default()
                                 .with_position(0.0, 0.0, 0.0)
                                 .with_color(0.0, 1.0, 1.0, 1.0),
@@ -811,19 +788,17 @@ mod test {
                             UiVertex::default()
                                 .with_position(size, size, 0.0)
                                 .with_color(0.0, 1.0, 1.0, 1.0),
-                        ]
-                    )
-            )
-            .with_position(Point3::new(25.0, 25.0, 0.0))
-            .with_scale(Vector3::new(25.0, 25.0, 1.0))
+                        ]))
+            .with_position(Vec3::new(25.0, 25.0, 0.0))
+            .with_scale(Vec3::new(25.0, 25.0, 1.0))
             .with_child(&yellow_tri)
             .build()
             .unwrap();
 
         assert_eq!(
             WorldTransform::default()
-                .with_position(Point3::new(50.0, 50.0, 0.0))
-                .with_scale(Vector3::new(25.0, 25.0, 1.0)),
+                .with_position(Vec3::new(50.0, 50.0, 0.0))
+                .with_scale(Vec3::new(25.0, 25.0, 1.0)),
             yellow_tri.get_world_transform()
         );
 
@@ -833,8 +808,8 @@ mod test {
         ui.render(&frame, &depth).unwrap();
 
         let img = gpu.grab_frame_image().unwrap();
-        //img.save_with_format("../../test_img/parent_sanity.png", image::ImageFormat::Png)
-        //    .unwrap();
+        // img.save_with_format("../../test_img/parent_sanity.png",
+        // image::ImageFormat::Png)    .unwrap();
         crate::img_diff::assert_img_eq("parent_sanity", "parent_sanity.png", img).unwrap();
     }
 }

@@ -3,10 +3,9 @@ use std::sync::mpsc::Sender;
 
 use crate::resources::Shared;
 use glam::{vec3, vec4, Vec3};
-use nalgebra::{Point3, Vector3};
 use renderling_shader::pbr::{
-    DirectionalLight as ShaderDirectionalLight, PointLight as ShaderPointLight,
-    SpotLight as ShaderSpotLight,
+    ShaderDirectionalLight as ShaderDirectionalLight, ShaderPointLight as ShaderPointLight,
+    ShaderSpotLight as ShaderSpotLight,
 };
 
 pub(crate) struct PointLightInner(pub(crate) ShaderPointLight);
@@ -30,7 +29,7 @@ pub struct PointLight {
 
 impl PointLight {
     /// Sets the position of the light in world space.
-    pub fn set_position(&self, position: Vector3<f32>) {
+    pub fn set_position(&self, position: Vec3) {
         self.inner.write().0.position = vec3(position.x, position.y, position.z);
         self.cmd.send(LightUpdateCmd::PointLights).unwrap();
     }
@@ -112,7 +111,7 @@ impl<'a> PointLightBuilder<'a> {
         })
     }
 
-    pub fn with_position(mut self, position: Point3<f32>) -> Self {
+    pub fn with_position(mut self, position: Vec3) -> Self {
         self.inner.0.position = vec3(position.x, position.y, position.z);
         self
     }
@@ -173,13 +172,13 @@ pub struct SpotLight {
 
 impl SpotLight {
     /// Sets the position of the light in world space.
-    pub fn set_position(&self, position: Vector3<f32>) {
+    pub fn set_position(&self, position: Vec3) {
         self.inner.write().0.position = vec3(position.x, position.y, position.z);
         self.cmd.send(LightUpdateCmd::SpotLights).unwrap();
     }
 
     /// Sets the direction the light is pointing in.
-    pub fn set_direction(&self, direction: Vector3<f32>) {
+    pub fn set_direction(&self, direction: Vec3) {
         self.inner.write().0.direction = vec3(direction.x, direction.y, direction.z);
         self.cmd.send(LightUpdateCmd::SpotLights).unwrap();
     }
@@ -191,8 +190,8 @@ impl SpotLight {
     }
 
     /// Sets the constant, linear, and quadratic terms of attenuation.
-    pub fn set_attenuation(&self, attenuation: [f32; 3]) {
-        self.inner.write().0.attenuation = attenuation.into();
+    pub fn set_attenuation(&self, [a, b, c]: [f32; 3]) {
+        self.inner.write().0.attenuation = vec3(a, b, c);
         self.cmd.send(LightUpdateCmd::SpotLights).unwrap();
     }
 
@@ -254,7 +253,7 @@ impl<'a> SpotLightBuilder<'a> {
         }
         .with_cutoff(std::f32::consts::PI / 3.0, std::f32::consts::PI / 2.0)
         .with_attenuation(1.0, 0.014, 0.007)
-        .with_direction(Vector3::new(0.0, -1.0, 0.0))
+        .with_direction(Vec3::new(0.0, -1.0, 0.0))
         .with_ambient_color(wgpu::Color {
             r: 1.0,
             g: 1.0,
@@ -275,12 +274,12 @@ impl<'a> SpotLightBuilder<'a> {
         })
     }
 
-    pub fn with_position(mut self, position: Point3<f32>) -> Self {
+    pub fn with_position(mut self, position: Vec3) -> Self {
         self.inner.0.position = vec3(position.x, position.y, position.z);
         self
     }
 
-    pub fn with_direction(mut self, direction: Vector3<f32>) -> Self {
+    pub fn with_direction(mut self, direction: Vec3) -> Self {
         self.inner.0.direction = vec3(direction.x, direction.y, direction.z);
         self
     }
@@ -347,7 +346,7 @@ pub struct DirectionalLight {
 
 impl DirectionalLight {
     /// Sets the direction this light points in.
-    pub fn set_direction(&self, direction: Vector3<f32>) {
+    pub fn set_direction(&self, direction: Vec3) {
         self.inner.write().0.direction = vec3(direction.x, direction.y, direction.z);
         self.cmd.send(LightUpdateCmd::DirectionalLights).unwrap();
     }
@@ -402,7 +401,7 @@ impl<'a> DirectionalLightBuilder<'a> {
             cmd,
             scene,
         }
-        .with_direction(Vector3::new(0.0, -1.0, 0.0))
+        .with_direction(Vec3::new(0.0, -1.0, 0.0))
         .with_ambient_color(wgpu::Color {
             r: 1.0,
             g: 1.0,
@@ -423,7 +422,7 @@ impl<'a> DirectionalLightBuilder<'a> {
             })
     }
 
-    pub fn with_direction(mut self, direction: Vector3<f32>) -> Self {
+    pub fn with_direction(mut self, direction: Vec3) -> Self {
         self.inner.0.direction = vec3(direction.x, direction.y, direction.z);
         self
     }

@@ -7,125 +7,39 @@ use spirv_std::{image::Image2d, Sampler};
 #[cfg(target_arch = "spirv")]
 use spirv_std::num_traits::Float;
 
-use crate::{math::Vec3ColorSwizzles, Camera};
+use crate::{math::Vec3ColorSwizzles, ShaderCamera};
 
-pub trait IsLight: Default {
-    fn num_lights(&self) -> u32;
-    fn set_num_lights(&mut self, num_lights: usize);
-}
-
-#[repr(C)]
 #[derive(Copy, Clone, Default)]
-#[cfg_attr(feature = "cpu", derive(bytemuck::Pod, bytemuck::Zeroable))]
-pub struct PointLight {
+#[cfg_attr(not(target_arch = "spirv"), derive(encase::ShaderType))]
+pub struct ShaderPointLight {
     pub position: Vec3,
-    pub num_lights: u32,
-
     pub attenuation: Vec3,
-    _padding: u32,
-
     pub ambient_color: Vec4,
     pub diffuse_color: Vec4,
     pub specular_color: Vec4,
 }
 
-impl IsLight for PointLight {
-    fn num_lights(&self) -> u32 {
-        self.num_lights
-    }
-
-    fn set_num_lights(&mut self, num_lights: usize) {
-        self.num_lights = num_lights as u32;
-    }
-}
-
-#[repr(C)]
 #[derive(Copy, Clone, Default)]
-#[cfg_attr(feature = "cpu", derive(bytemuck::Pod, bytemuck::Zeroable))]
-pub struct SpotLight {
+#[cfg_attr(not(target_arch = "spirv"), derive(encase::ShaderType))]
+pub struct ShaderSpotLight {
     pub position: Vec3,
-    pub num_lights: u32,
-
     pub direction: Vec3,
+    pub attenuation: Vec3,
     pub inner_cutoff: f32,
-
-    pub attenuation: Vec3,
     pub outer_cutoff: f32,
-
     pub ambient_color: Vec4,
     pub diffuse_color: Vec4,
     pub specular_color: Vec4,
 }
 
-impl IsLight for SpotLight {
-    fn num_lights(&self) -> u32 {
-        self.num_lights
-    }
-
-    fn set_num_lights(&mut self, num_lights: usize) {
-        self.num_lights = num_lights as u32;
-    }
-}
-
-#[repr(C)]
 #[derive(Copy, Clone, Default)]
-#[cfg_attr(feature = "cpu", derive(bytemuck::Pod, bytemuck::Zeroable))]
-pub struct DirectionalLight {
+#[cfg_attr(not(target_arch = "spirv"), derive(encase::ShaderType))]
+pub struct ShaderDirectionalLight {
     pub direction: Vec3,
-    pub num_lights: u32,
-
     pub ambient_color: Vec4,
     pub diffuse_color: Vec4,
     pub specular_color: Vec4,
 }
-
-impl IsLight for DirectionalLight {
-    fn num_lights(&self) -> u32 {
-        self.num_lights
-    }
-
-
-    fn set_num_lights(&mut self, num_lights: usize) {
-        self.num_lights = num_lights as u32;
-    }
-}
-
-#[repr(transparent)]
-pub struct LightArray<T, const S: usize>(pub [T; S]); //
-
-
-impl<T: IsLight + Default + Copy, const S: usize> Default for LightArray<T, S> {
-    fn default() -> Self {
-        let inner = [T::default(); S];
-        Self(inner)
-    }
-}
-
-impl<T: IsLight + Default + Copy, const S: usize> LightArray<T, S> {
-    pub fn len(&self) -> usize {
-        self.0[0].num_lights() as usize
-    }
-
-    #[cfg(feature = "cpu")]
-    pub fn into_array(lights: Vec<T>) -> Self {
-        let len = lights.len();
-        let mut array: [T; S] = [T::default(); S];
-        for (mut light, i) in lights.into_iter().zip(0..S) {
-            light.set_num_lights(len);
-            array[i] = light;
-        }
-        LightArray(array)
-    }
-}
-
-pub const POINT_LIGHTS_MAX: usize = 64;
-pub type PointLights = LightArray<PointLight, POINT_LIGHTS_MAX>;
-
-pub const SPOT_LIGHTS_MAX: usize = 32;
-pub type SpotLights = LightArray<SpotLight, SPOT_LIGHTS_MAX>;
-
-pub const DIRECTIONAL_LIGHTS_MAX: usize = 8;
-pub type DirectionalLights = LightArray<DirectionalLight, DIRECTIONAL_LIGHTS_MAX>;
 
 /// Calculate attenuation
 ///
@@ -133,10 +47,16 @@ pub type DirectionalLights = LightArray<DirectionalLight, DIRECTIONAL_LIGHTS_MAX
 /// attenuation.y: linear
 /// attenuation.z: quadratic
 pub fn attenuate(attenuation: Vec3, distance: f32) -> f32 {
-    1.0 / (attenuation.x + attenuation.y * distance + attenuation.z * (distance * distance))
+    let level = attenuation.x + attenuation.y * distance + attenuation.z * (distance * distance);
+    if level == 0.0 {
+        // no attenuation
+        1.0
+    } else {
+        1.0 / level
+    }
 }
 
-impl PointLight {
+impl ShaderPointLight {
     /// Calculate a point light's color contribution to a fragment.
     pub fn color(
         &self,
@@ -149,14 +69,17 @@ impl PointLight {
         shininess: f32,
     ) -> Vec3 {
         let light_pos: Vec3 = (view * self.position.extend(1.0)).xyz();
-        let light_dir: Vec3 = (light_pos - vertex_pos).normalize();
+        let vertex_to_light = light_pos - vertex_pos;
+        let vertex_to_light_distance = vertex_to_light.length();
+
+        let light_dir: Vec3 = vertex_to_light.normalize();
         // diffuse shading
         let diff: f32 = normal.dot(light_dir).max(0.0);
         // specular shading
         let halfway_dir: Vec3 = (light_dir + camera_to_frag_dir).normalize();
         let spec: f32 = normal.dot(halfway_dir).max(0.0).powf(shininess);
         // attenuation
-        let distance: f32 = (light_pos - vertex_pos).length();
+        let distance: f32 = vertex_to_light_distance;
         let attenuation: f32 = attenuate(self.attenuation, distance);
         // combine results
         let mut ambient: Vec3 = self.ambient_color.rgb() * diffuse_color.rgb();
@@ -170,7 +93,7 @@ impl PointLight {
     }
 }
 
-impl SpotLight {
+impl ShaderSpotLight {
     // Calculate a spotlight's color contribution to a fragment.
     pub fn color(
         &self,
@@ -182,6 +105,9 @@ impl SpotLight {
         specular_color: Vec4,
         shininess: f32,
     ) -> Vec3 {
+        if self.direction == Vec3::ZERO {
+            return Vec3::ZERO;
+        }
         let light_pos: Vec3 = (view * self.position.extend(1.0)).xyz();
         let light_dir: Vec3 = (light_pos - vertex_pos).normalize();
         // diffuse shading
@@ -191,7 +117,7 @@ impl SpotLight {
         let spec: f32 = normal.dot(halfway_dir).max(0.0).powf(shininess);
         // attenuation
         let distance: f32 = (light_pos - vertex_pos).length();
-        let attenuation: f32 = attenuate(self.attenuation, distance);
+        let attenuation: f32 = attenuate(self.attenuation.xyz(), distance);
         // spotlight intensity
         let direction: Vec3 = (-(view * self.direction.extend(0.0)).xyz()).normalize();
         let theta: f32 = light_dir.dot(direction);
@@ -209,7 +135,7 @@ impl SpotLight {
     }
 }
 
-impl DirectionalLight {
+impl ShaderDirectionalLight {
     // Calculate a directional light's color contribution to a fragment.
     pub fn color(
         &self,
@@ -220,7 +146,10 @@ impl DirectionalLight {
         specular_color: Vec4,
         shininess: f32,
     ) -> Vec3 {
-        let light_dir: Vec3 = (-(view * self.direction.extend(0.0)).xyz()).normalize();
+        if self.direction == Vec3::ZERO {
+            return Vec3::ZERO;
+        }
+        let light_dir: Vec3 = (-(view * self.direction.xyz().extend(0.0)).xyz()).normalize();
         // diffuse shading
         let diff: f32 = normal.dot(light_dir).max(0.0);
         // specular shading
@@ -234,8 +163,59 @@ impl DirectionalLight {
     }
 }
 
+pub const POINT_LIGHTS_MAX: usize = 64;
+
+#[cfg_attr(not(target_arch = "spirv"), derive(encase::ShaderType))]
+pub struct PointLights {
+    pub length: u32,
+    pub lights: [ShaderPointLight; POINT_LIGHTS_MAX],
+}
+
+impl Default for PointLights {
+    fn default() -> Self {
+        Self {
+            length: 0,
+            lights: [ShaderPointLight::default(); POINT_LIGHTS_MAX],
+        }
+    }
+}
+
+pub const SPOT_LIGHTS_MAX: usize = 32;
+
+#[cfg_attr(not(target_arch = "spirv"), derive(encase::ShaderType))]
+pub struct SpotLights {
+    pub length: u32,
+    pub lights: [ShaderSpotLight; SPOT_LIGHTS_MAX],
+}
+
+impl Default for SpotLights {
+    fn default() -> Self {
+        Self {
+            length: 0,
+            lights: [ShaderSpotLight::default(); SPOT_LIGHTS_MAX],
+        }
+    }
+}
+
+pub const DIRECTIONAL_LIGHTS_MAX: usize = 8;
+
+#[cfg_attr(not(target_arch = "spirv"), derive(encase::ShaderType))]
+pub struct DirectionalLights {
+    pub length: u32,
+    pub lights: [ShaderDirectionalLight; DIRECTIONAL_LIGHTS_MAX],
+}
+
+//impl Default for DirectionalLights {
+//    fn default() -> Self {
+//        Self {
+//            length: 0,
+//            lights: [ShaderDirectionalLight::default(); DIRECTIONAL_LIGHTS_MAX],
+//        }
+//    }
+//}
+
 pub fn main_vertex(
-    camera: &Camera,
+    camera: &ShaderCamera,
     in_pos: Vec3,
     in_uv: Vec2,
     in_norm: Vec3,
@@ -277,12 +257,12 @@ pub fn main_vertex(
 }
 
 pub fn main_fragment(
-    camera: &Camera,
+    camera: &ShaderCamera,
     diffuse_texture: &Image2d,
     diffuse_sampler: &Sampler,
     specular_texture: &Image2d,
     specular_sampler: &Sampler,
-    material_shininess: &Vec4,
+    material_shininess: &f32,
     point_lights: &PointLights,
     spot_lights: &SpotLights,
     directional_lights: &DirectionalLights,
@@ -291,45 +271,51 @@ pub fn main_fragment(
     in_norm: Vec3,
     frag_color: &mut Vec4,
 ) {
-    let norm: Vec3 = in_norm.normalize();
-    let camera_to_frag_dir: Vec3 = (-in_pos).normalize();
     let diffuse_color: Vec4 = diffuse_texture.sample(*diffuse_sampler, in_uv);
     let specular_color: Vec4 = specular_texture.sample(*specular_sampler, in_uv);
 
+    if directional_lights.length == 0 && point_lights.length == 0 && spot_lights.length == 0 {
+        *frag_color = in_norm.extend(1.0);
+        return;
+    }
+
+    let norm: Vec3 = in_norm.normalize_or_zero();
+    let camera_to_frag_dir: Vec3 = (-in_pos).normalize_or_zero();
+
     let mut color: Vec3 = Vec3::default();
 
-    for i in 0..directional_lights.len() {
-        color += directional_lights.0[i].color(
+    for i in 0..directional_lights.length as usize {
+        color += directional_lights.lights[i].color(
             camera.view,
             norm,
             camera_to_frag_dir,
             diffuse_color,
             specular_color,
-            material_shininess.x,
+            *material_shininess,
         );
     }
 
-    for i in 0..point_lights.len() {
-        color += point_lights.0[i].color(
+    for i in 0..point_lights.length as usize {
+        color += point_lights.lights[i].color(
             in_pos,
             camera.view,
             norm,
             camera_to_frag_dir,
             diffuse_color,
             specular_color,
-            material_shininess.x,
+            *material_shininess,
         );
     }
 
-    for i in 0..spot_lights.len() {
-        color += spot_lights.0[i].color(
+    for i in 0..spot_lights.length as usize {
+        color += spot_lights.lights[i].color(
             in_pos,
             camera.view,
             norm,
             camera_to_frag_dir,
             diffuse_color,
             specular_color,
-            material_shininess.x,
+            *material_shininess,
         );
     }
 
@@ -343,11 +329,77 @@ mod test {
 
     #[test]
     fn vec3_default_sanity() {
-        assert_eq!(Vec3::new(0.0, 0.0, 0.0), Vec3::default());
+        assert_eq!(Vec3::ZERO, Vec3::default());
     }
 
     #[test]
-    fn size_of_lights_sanity() {
-        assert_eq!(7168 / 64, std::mem::size_of_val(&PointLight::default()));
+    /// Tests that a light's `color` function returns positive elements.
+    ///
+    /// Important because lights never "remove" light from the scene.
+    fn light_color_always_positive() {
+        let vertex_pos = Vec3::new(0.0, 0.5, 0.0);
+        let view = Mat4::look_at_rh(Vec3::new(1.8, 1.8, 1.8), Vec3::ZERO, Vec3::Y);
+        let normal = Vec3::Y;
+        let camera_to_frag_dir = (-vertex_pos).normalize();
+        let diffuse_color = Vec4::new(1.0, 0.0, 0.0, 1.0);
+        let specular_color = Vec4::new(1.0, 0.0, 0.0, 1.0);
+        let shininess = 16.0;
+
+        let point = ShaderPointLight::default();
+        let point_color = point.color(
+            vertex_pos,
+            view,
+            normal,
+            camera_to_frag_dir,
+            diffuse_color,
+            specular_color,
+            shininess,
+        );
+        assert!(point_color.x >= 0.0, "'{point_color:?}' x is negative");
+        assert!(point_color.y >= 0.0, "'{point_color:?}' y is negative");
+        assert!(point_color.z >= 0.0, "'{point_color:?}' z is negative");
+
+        let spot = ShaderSpotLight::default();
+        let spot_color = spot.color(
+            vertex_pos,
+            view,
+            normal,
+            camera_to_frag_dir,
+            diffuse_color,
+            specular_color,
+            shininess,
+        );
+        assert!(spot_color.x >= 0.0, "'{spot_color:?}' x is negative");
+        assert!(spot_color.y >= 0.0, "'{spot_color:?}' y is negative");
+        assert!(spot_color.z >= 0.0, "'{spot_color:?}' z is negative");
+
+        let directional = ShaderDirectionalLight::default();
+        let directional_color = directional.color(
+            view,
+            normal,
+            camera_to_frag_dir,
+            diffuse_color,
+            specular_color,
+            shininess,
+        );
+        assert!(
+            directional_color.x >= 0.0,
+            "'{directional_color:?}' x is negative"
+        );
+        assert!(
+            directional_color.y >= 0.0,
+            "'{directional_color:?}' y is negative"
+        );
+        assert!(
+            directional_color.z >= 0.0,
+            "'{directional_color:?}' z is negative"
+        );
     }
+
+//    #[test]
+//    #[should_panic]
+//    /// Tests that glam assertions are on while running tests.
+//    fn glam_assert() {
+//        let _ = Vec3::ZERO.normalize();
+//    }
 }
