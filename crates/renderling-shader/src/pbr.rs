@@ -11,7 +11,10 @@ use crate::{math::Vec3ColorSwizzles, ShaderCamera};
 
 #[repr(C)]
 #[derive(Copy, Clone, Default)]
-#[cfg_attr(not(target_arch = "spirv"), derive(encase::ShaderType, bytemuck::Pod, bytemuck::Zeroable))]
+#[cfg_attr(
+    not(target_arch = "spirv"),
+    derive(encase::ShaderType, bytemuck::Pod, bytemuck::Zeroable)
+)]
 pub struct PointLightRaw {
     pub position_: Vec4,
     pub attenuation_: Vec4,
@@ -22,7 +25,10 @@ pub struct PointLightRaw {
 
 #[repr(C)]
 #[derive(Copy, Clone, Default)]
-#[cfg_attr(not(target_arch = "spirv"), derive(encase::ShaderType, bytemuck::Pod, bytemuck::Zeroable))]
+#[cfg_attr(
+    not(target_arch = "spirv"),
+    derive(encase::ShaderType, bytemuck::Pod, bytemuck::Zeroable)
+)]
 pub struct SpotLightRaw {
     pub position_: Vec4,
     pub direction_: Vec4,
@@ -35,7 +41,10 @@ pub struct SpotLightRaw {
 
 #[repr(C)]
 #[derive(Copy, Clone, Default)]
-#[cfg_attr(not(target_arch = "spirv"), derive(encase::ShaderType, bytemuck::Pod, bytemuck::Zeroable))]
+#[cfg_attr(
+    not(target_arch = "spirv"),
+    derive(encase::ShaderType, bytemuck::Pod, bytemuck::Zeroable)
+)]
 pub struct DirectionalLightRaw {
     pub direction_: Vec4,
     pub ambient_color: Vec4,
@@ -62,8 +71,6 @@ impl PointLightRaw {
     pub fn position(&self) -> Vec3 {
         self.position_.xyz()
     }
-
-
 
     pub fn attenuation(&self) -> Vec3 {
         self.attenuation_.xyz()
@@ -433,10 +440,10 @@ mod test {
         );
     }
 
-//    #[test]
-//    #[should_panic]
-//    /// Tests that glam assertions are on while running tests.
-//    fn glam_assert() {
-//        let _ = Vec3::ZERO.normalize();
-//    }
+    //    #[test]
+    //    #[should_panic]
+    //    /// Tests that glam assertions are on while running tests.
+    //    fn glam_assert() {
+    //        let _ = Vec3::ZERO.normalize();
+    //    }
 }

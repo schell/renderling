@@ -3,12 +3,12 @@ use encase::UniformBuffer;
 use wgpu::{util::DeviceExt, TextureFormat};
 
 pub use renderling_shader::pbr::{
-    DirectionalLights, PointLights, DirectionalLightRaw, PointLightRaw, SpotLightRaw,
-    SpotLights, DIRECTIONAL_LIGHTS_MAX, POINT_LIGHTS_MAX, SPOT_LIGHTS_MAX,
+    DirectionalLightRaw, DirectionalLights, PointLightRaw, PointLights, SpotLightRaw, SpotLights,
+    DIRECTIONAL_LIGHTS_MAX, POINT_LIGHTS_MAX, SPOT_LIGHTS_MAX,
 };
 
-use crate::BlinnPhongMaterial;
 pub use crate::linkage::{camera_uniform_layout, create_camera_uniform, ObjectDraw};
+use crate::BlinnPhongMaterial;
 
 #[repr(C)]
 #[derive(Copy, Clone, Default, bytemuck::Pod, bytemuck::Zeroable)]
@@ -219,8 +219,10 @@ impl LightsUniform {
 }
 
 pub fn create_pipeline(device: &wgpu::Device, format: TextureFormat) -> wgpu::RenderPipeline {
-    let vertex_shader_module = device.create_shader_module(wgpu::include_spirv!("pbr-vertex_pbr.spv"));
-    let fragment_shader_module = device.create_shader_module(wgpu::include_spirv!("pbr-fragment_pbr.spv"));
+    let vertex_shader_module =
+        device.create_shader_module(wgpu::include_spirv!("pbr-vertex_pbr.spv"));
+    let fragment_shader_module =
+        device.create_shader_module(wgpu::include_spirv!("pbr-fragment_pbr.spv"));
 
     let render_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("renderling forward pipeline layout"),
@@ -309,10 +311,7 @@ pub struct MaterialUniform {
 
 impl MaterialUniform {
     /// Creates a buffer to store shininess and a bindgroup for the material.
-    pub fn new(
-        device: &wgpu::Device,
-        material: &BlinnPhongMaterial,
-    ) -> MaterialUniform {
+    pub fn new(device: &wgpu::Device, material: &BlinnPhongMaterial) -> MaterialUniform {
         let mut data = UniformBuffer::new(vec![]);
         data.write(&material.shininess).unwrap();
         let shininess_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {

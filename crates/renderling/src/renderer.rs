@@ -1,8 +1,8 @@
 //! Builds the UI pipeline and manages resources.
 use glam::Vec3;
 use renderling_shader::pbr::{
-    DirectionalLights, PointLights, DirectionalLightRaw, PointLightRaw, SpotLightRaw,
-    SpotLights, DIRECTIONAL_LIGHTS_MAX, POINT_LIGHTS_MAX, SPOT_LIGHTS_MAX,
+    DirectionalLightRaw, DirectionalLights, PointLightRaw, PointLights, SpotLightRaw, SpotLights,
+    DIRECTIONAL_LIGHTS_MAX, POINT_LIGHTS_MAX, SPOT_LIGHTS_MAX,
 };
 use rustc_hash::FxHashSet;
 use snafu::prelude::*;

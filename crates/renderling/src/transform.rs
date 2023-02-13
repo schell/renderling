@@ -1,7 +1,7 @@
 //! Geometric transformations.
 use std::marker::PhantomData;
 
-use glam::{Vec3, Quat, Mat4};
+use glam::{Mat4, Quat, Vec3};
 
 /// A transformation with separate translation, scale and rotation.
 ///

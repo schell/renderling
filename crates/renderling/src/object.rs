@@ -1,7 +1,7 @@
 //! Renderable things with positions, transformations, meshes and materials.
 use std::sync::{mpsc::Sender, Arc};
 
-use glam::{Mat4, Vec3, Quat, Mat3};
+use glam::{Mat3, Mat4, Quat, Vec3};
 use rustc_hash::FxHashSet;
 use snafu::prelude::*;
 use wgpu::util::DeviceExt;
@@ -203,9 +203,7 @@ impl ObjectInner {
     fn model_matrix_to_vec(model: Mat4, generate_normal_matrix: bool) -> Vec<f32> {
         let mut m = model.as_ref().to_vec();
         if generate_normal_matrix {
-            let normal = Mat3::from_mat4(model
-                .inverse()
-                .transpose());
+            let normal = Mat3::from_mat4(model.inverse().transpose());
             let mut n = normal.as_ref().to_vec();
             m.append(&mut n);
         }

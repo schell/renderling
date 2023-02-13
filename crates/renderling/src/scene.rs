@@ -1,4 +1,5 @@
-//! Collections of textures, materials, meshes, lights cameras and objects arranged in 3d space.
+//! Collections of textures, materials, meshes, lights cameras and objects
+//! arranged in 3d space.
 //!
 //! A scene is the structure that is built by importing a gltf file.
 use snafu::prelude::*;
@@ -48,7 +49,8 @@ mod gl {
     }
 }
 
-/// Collections of textures, materials, meshes, lights cameras and objects arranged in 3d space.
+/// Collections of textures, materials, meshes, lights cameras and objects
+/// arranged in 3d space.
 ///
 /// A scene is the structure that is built by importing a gltf file.
 pub struct Scene {

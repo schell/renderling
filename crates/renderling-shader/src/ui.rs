@@ -49,7 +49,7 @@ pub enum UiColorBlend {
 }
 
 impl From<&ShaderColorBlend> for UiColorBlend {
-    fn from(ShaderColorBlend{inner}: &ShaderColorBlend) -> Self {
+    fn from(ShaderColorBlend { inner }: &ShaderColorBlend) -> Self {
         match inner {
             0 => UiColorBlend::ColorOnly,
             1 => UiColorBlend::UvOnly,
@@ -60,13 +60,15 @@ impl From<&ShaderColorBlend> for UiColorBlend {
 
 impl From<UiColorBlend> for ShaderColorBlend {
     fn from(value: UiColorBlend) -> Self {
-        ShaderColorBlend{inner: value as u32}
+        ShaderColorBlend {
+            inner: value as u32,
+        }
     }
 }
 
 #[cfg_attr(not(target_arch = "spirv"), derive(encase::ShaderType))]
 pub struct ShaderColorBlend {
-    inner: u32
+    inner: u32,
 }
 
 pub fn main_fragment(

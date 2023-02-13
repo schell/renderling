@@ -181,7 +181,8 @@ impl<'a> CameraBuilder<'a> {
             height: _,
             inner,
         } = self;
-        let (buffer, bindgroup) = create_camera_uniform(device, &inner.camera, "CameraBuilder::build");
+        let (buffer, bindgroup) =
+            create_camera_uniform(device, &inner.camera, "CameraBuilder::build");
         let inner = Shared::new(inner);
         let camera_data = CameraData {
             buffer,

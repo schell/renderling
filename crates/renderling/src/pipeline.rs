@@ -4,14 +4,14 @@ use std::{any::Any, sync::Arc};
 /// Defines the operations a pipeline can do within a `Renderling`.
 pub trait Pipeline: Any + Send + Sync + 'static {
     fn get_render_pipeline(&self) -> &wgpu::RenderPipeline;
-    //fn begin_render_pass<'a, 'b: 'a>(
+    // fn begin_render_pass<'a, 'b: 'a>(
     //    &'b self,
     //    encoder: &'a mut wgpu::CommandEncoder,
     //    frame_texture_view: &'a wgpu::TextureView,
     //    depth_texture_view: &'a wgpu::TextureView,
     //) -> wgpu::RenderPass<'a>;
 
-    //fn render_object<'a, 'b: 'a>(
+    // fn render_object<'a, 'b: 'a>(
     //    &'b self,
     //    render_pass: &'a mut wgpu::RenderPass<'b>,
     //    object: renderling_core::ShaderObject<'b>,
@@ -42,18 +42,19 @@ impl AnyPipeline {
         self.inner.get_render_pipeline()
     }
     ///// Begin a new render pass.
-    //pub fn begin_render_pass<'a, 'b: 'a>(
+    // pub fn begin_render_pass<'a, 'b: 'a>(
     //    &'b self,
     //    encoder: &'a mut wgpu::CommandEncoder,
     //    frame_texture_view: &'a wgpu::TextureView,
     //    depth_texture_view: &'a wgpu::TextureView,
     //) -> wgpu::RenderPass<'a> {
 
-    //    self.inner.begin_render_pass(encoder, frame_texture_view, depth_texture_view)
+    //    self.inner.begin_render_pass(encoder, frame_texture_view,
+    // depth_texture_view)
     //}
 
     ///// Render a single shader object.
-    //pub fn render_object<'a, 'b: 'a>(
+    // pub fn render_object<'a, 'b: 'a>(
     //    &'b self,
     //    render_pass: &'a mut wgpu::RenderPass<'b>,
     //    object: renderling_core::ShaderObject<'b>,
