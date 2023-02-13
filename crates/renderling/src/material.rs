@@ -1,5 +1,9 @@
 //! Material types and utilities.
-use std::{any::Any, sync::Arc, hash::{Hasher, Hash}};
+use std::{
+    any::Any,
+    hash::{Hash, Hasher},
+    sync::Arc,
+};
 
 use rustc_hash::FxHasher;
 
@@ -12,12 +16,14 @@ pub trait MaterialUniform: Any + Send + Sync + 'static {
 ///
 /// These are shader resources for a material object.
 pub struct AnyMaterialUniform {
-    inner: Arc<dyn MaterialUniform>
+    inner: Arc<dyn MaterialUniform>,
 }
 
 impl AnyMaterialUniform {
     pub fn new<T: MaterialUniform>(material: impl Into<Arc<T>>) -> AnyMaterialUniform {
-        AnyMaterialUniform { inner: material.into() }
+        AnyMaterialUniform {
+            inner: material.into(),
+        }
     }
 
     pub fn get_bindgroup(&self) -> &wgpu::BindGroup {
@@ -75,7 +81,9 @@ impl std::fmt::Debug for AnyMaterial {
 
 impl AnyMaterial {
     pub fn new<T: Material>(inner: impl Into<Arc<T>>) -> Self {
-        Self { inner: inner.into() }
+        Self {
+            inner: inner.into(),
+        }
     }
 
     pub fn create_material_uniform(&self, device: &wgpu::Device) -> AnyMaterialUniform {

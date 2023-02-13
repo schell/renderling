@@ -1,7 +1,12 @@
 //! Text rendering capabilities for `Renderling<UiPipeline>`.
 //!
 //! This module is only enabled with the `text` cargo feature.
-use std::{borrow::Cow, num::NonZeroU32, ops::{Deref, DerefMut}, sync::Arc};
+use std::{
+    borrow::Cow,
+    num::NonZeroU32,
+    ops::{Deref, DerefMut},
+    sync::Arc,
+};
 
 use ::ab_glyph::Rect;
 use glyph_brush::*;
@@ -228,7 +233,8 @@ impl GlyphCache {
     /// Returns a new material if the material needs to be updated.
     /// Returns a new mesh if the mesh needs to be updated.
     ///
-    /// The material and mesh are meant to be used to build or update an object to display.
+    /// The material and mesh are meant to be used to build or update an object
+    /// to display.
     pub fn get_updated(&mut self) -> (Option<UiMaterial>, Option<Mesh>) {
         let mut may_material: Option<UiMaterial> = if self.cache.is_none() {
             Some(self.get_material())

@@ -1,5 +1,5 @@
 //! Math helpers for writing shader code.
-use glam::{Vec4Swizzles, Vec3, Vec4, Vec3Swizzles};
+use glam::{Vec3, Vec3Swizzles, Vec4, Vec4Swizzles};
 
 pub trait Vec3ColorSwizzles {
     fn r(&self) -> f32;

@@ -1,11 +1,7 @@
 //! Mathematical helper types and functions.
 use glam::Vec3;
 
-pub fn triangle_face_normal(
-    p1: Vec3,
-    p2: Vec3,
-    p3: Vec3,
-) -> Vec3 {
+pub fn triangle_face_normal(p1: Vec3, p2: Vec3, p3: Vec3) -> Vec3 {
     let a = p1 - p2;
     let b = p1 - p3;
     let n: Vec3 = a.cross(b).normalize();
