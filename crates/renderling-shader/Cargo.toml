@@ -13,6 +13,7 @@ default = []
 spirv-std = { version = "0.5", features = ["glam"] }
 
 [target.'cfg(not(target_arch = "spirv"))'.dependencies]
+bytemuck = { version = "1.13.0", features = ["derive"] }
 encase = { version = "0.4.1", features = ["glam"] }
 glam = { version = "0.22" }
 

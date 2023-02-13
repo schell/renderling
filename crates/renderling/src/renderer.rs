@@ -1,7 +1,7 @@
 //! Builds the UI pipeline and manages resources.
 use glam::Vec3;
 use renderling_shader::pbr::{
-    DirectionalLights, PointLights, ShaderDirectionalLight, ShaderPointLight, ShaderSpotLight,
+    DirectionalLights, PointLights, DirectionalLightRaw, PointLightRaw, SpotLightRaw,
     SpotLights, DIRECTIONAL_LIGHTS_MAX, POINT_LIGHTS_MAX, SPOT_LIGHTS_MAX,
 };
 use rustc_hash::FxHashSet;
@@ -477,7 +477,7 @@ impl<P: Pipeline> Renderling<P> {
     }
 
     fn get_point_lights(&self) -> PointLights {
-        let mut lights = [ShaderPointLight::default(); POINT_LIGHTS_MAX];
+        let mut lights = [PointLightRaw::default(); POINT_LIGHTS_MAX];
         for (light, i) in self
             .stage
             .point_lights
@@ -494,7 +494,7 @@ impl<P: Pipeline> Renderling<P> {
     }
 
     fn get_spot_lights(&self) -> SpotLights {
-        let mut lights = [ShaderSpotLight::default(); SPOT_LIGHTS_MAX];
+        let mut lights = [SpotLightRaw::default(); SPOT_LIGHTS_MAX];
         for (light, i) in self
             .stage
             .spot_lights
@@ -511,7 +511,7 @@ impl<P: Pipeline> Renderling<P> {
     }
 
     fn get_directional_lights(&self) -> DirectionalLights {
-        let mut lights = [ShaderDirectionalLight::default(); DIRECTIONAL_LIGHTS_MAX];
+        let mut lights = [DirectionalLightRaw::default(); DIRECTIONAL_LIGHTS_MAX];
         for (light, i) in self
             .stage
             .directional_lights
