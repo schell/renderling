@@ -1,9 +1,8 @@
 //! Builds the UI pipeline and manages resources.
-use nalgebra::Point3;
-use renderling_core::ObjectDraw;
+use glam::Vec3;
 use renderling_shader::pbr::{
-    DirectionalLight as ShaderDirectionalLight, PointLight as ShaderPointLight,
-    SpotLight as ShaderSpotLight,
+    DirectionalLights, PointLights, ShaderDirectionalLight, ShaderPointLight, ShaderSpotLight,
+    SpotLights, DIRECTIONAL_LIGHTS_MAX, POINT_LIGHTS_MAX, SPOT_LIGHTS_MAX,
 };
 use rustc_hash::FxHashSet;
 use snafu::prelude::*;
@@ -18,7 +17,7 @@ use std::{
 use crate::{
     camera::*,
     light::{DirectionalLightInner, PointLightInner, SpotLightInner},
-    linkage::pbr::LightsUniform,
+    linkage::{create_camera_uniform, pbr::LightsUniform, ObjectDraw},
     resources::*,
     AnyMaterial, AnyMaterialUniform, AnyPipeline, LightUpdateCmd, Material, ObjUpdateCmd, Object,
     ObjectBuilder, ObjectData, Pipeline, Transform,
@@ -145,8 +144,12 @@ impl Stage {
         for (i, camera) in self.cameras.iter().enumerate() {
             let camera_id = Id::new(i);
             if let Some(cam_data) = camera {
-                let v = cam_data.inner.read().view.translation.vector;
-                let cam_pos = Point3::new(v.x, v.y, v.z);
+                let cam_pos = cam_data
+                    .inner
+                    .read()
+                    .camera
+                    .view
+                    .project_point3(Vec3::default());
                 let mut objects = self
                     .objects
                     .iter()
@@ -155,7 +158,7 @@ impl Stage {
                         let obj_data = obj_data.as_ref()?;
                         let object_id = Id::new(j);
                         if obj_data.cameras.contains(&camera_id) {
-                            let distance = nalgebra::distance(&obj_data.world_position, &cam_pos);
+                            let distance = obj_data.world_position.distance(cam_pos);
                             Some(Sorter {
                                 object_id,
                                 distance,
@@ -291,11 +294,12 @@ impl<P: Pipeline> Renderling<P> {
     /// Retrieves the default camera.
     ///
     /// The default camera is the camera that renders first.
-    /// The default camera comes first in the iterator returned by `Renderling::cameras`.
-    /// The default camera is often the one that was created automatically when the renderling was
-    /// created.
+    /// The default camera comes first in the iterator returned by
+    /// `Renderling::cameras`. The default camera is often the one that was
+    /// created automatically when the renderling was created.
     pub fn default_camera(&self) -> Camera {
-        // UNWRAP: having one default camera is an invariant of the system and we should panic otherwise
+        // UNWRAP: having one default camera is an invariant of the system and we should
+        // panic otherwise
         self.cameras().next().unwrap()
     }
 
@@ -306,10 +310,11 @@ impl<P: Pipeline> Renderling<P> {
     /// If no camera is specified with `ObjectBuilder::with_camera`, the camera
     /// with first rendering priority will be selected, if available.
     ///
-    /// If no material is provided, the renderling's default material will be used.
+    /// If no material is provided, the renderling's default material will be
+    /// used.
     ///
-    /// If no transform is provided, the object will be positioned at the origin with
-    /// no rotation and scale 1,1,1.
+    /// If no transform is provided, the object will be positioned at the origin
+    /// with no rotation and scale 1,1,1.
     pub fn new_object(&mut self) -> ObjectBuilder<'_> {
         ObjectBuilder {
             camera: Some(Id::new(0)),
@@ -367,7 +372,8 @@ impl<P: Pipeline> Renderling<P> {
                             &self.queue,
                             self.meshes_have_normal_matrix_attribute,
                         );
-                        // this object's transform changed, so we should resort all the cameras that contain this one
+                        // this object's transform changed, so we should resort all the cameras that
+                        // contain this one
                         cameras_to_sort.extend(object.cameras.clone());
                     }
                 }
@@ -402,7 +408,11 @@ impl<P: Pipeline> Renderling<P> {
                     if let Some(camera_data) = self.stage.get_camera_mut(&camera_id) {
                         cameras_to_sort.insert(camera_id);
                         let mut inner = camera_data.inner.write();
-                        let (buffer, bindgroup) = new_camera_uniform(&inner, &self.device);
+                        let (buffer, bindgroup) = create_camera_uniform(
+                            &self.device,
+                            &inner.camera,
+                            "Renderling::update",
+                        );
                         inner.dirty_uniform = false;
                         camera_data.buffer = buffer;
                         camera_data.bindgroup = bindgroup;
@@ -429,25 +439,25 @@ impl<P: Pipeline> Renderling<P> {
         if let Some(lights_uniform) = self.lights_uniform.as_ref() {
             if update_point_lights {
                 log::trace!("updating point lights");
-                lights_uniform.update_point_lights(&self.queue, self.get_point_lights());
+                lights_uniform.update_point_lights(&self.queue, &self.get_point_lights());
             }
             if update_spot_lights {
                 log::trace!("updating spot lights");
-                lights_uniform.update_spot_lights(&self.queue, self.get_spot_lights());
+                lights_uniform.update_spot_lights(&self.queue, &self.get_spot_lights());
             }
             if update_directional_lights {
                 log::trace!("updating directional lights");
                 lights_uniform
-                    .update_directional_lights(&self.queue, self.get_directional_lights());
+                    .update_directional_lights(&self.queue, &self.get_directional_lights());
             }
         } else if update_point_lights || update_spot_lights || update_directional_lights {
             log::trace!("creating initial lights uniform");
             // create our lights uniform
             self.lights_uniform = Some(LightsUniform::new(
                 &self.device,
-                self.get_point_lights(),
-                self.get_spot_lights(),
-                self.get_directional_lights(),
+                &self.get_point_lights(),
+                &self.get_spot_lights(),
+                &self.get_directional_lights(),
             ));
         }
 
@@ -466,24 +476,59 @@ impl<P: Pipeline> Renderling<P> {
         self.default_material = AnyMaterial::new(material);
     }
 
-    fn get_point_lights(&self) -> Vec<ShaderPointLight> {
-        self.stage.point_lights.iter().map(|l| l.read().0).collect()
+    fn get_point_lights(&self) -> PointLights {
+        let mut lights = [ShaderPointLight::default(); POINT_LIGHTS_MAX];
+        for (light, i) in self
+            .stage
+            .point_lights
+            .iter()
+            .map(|l| l.read().0)
+            .zip(0..POINT_LIGHTS_MAX)
+        {
+            lights[i] = light;
+        }
+        PointLights {
+            length: self.stage.point_lights.len() as u32,
+            lights,
+        }
     }
 
-    fn get_spot_lights(&self) -> Vec<ShaderSpotLight> {
-        self.stage.spot_lights.iter().map(|l| l.read().0).collect()
+    fn get_spot_lights(&self) -> SpotLights {
+        let mut lights = [ShaderSpotLight::default(); SPOT_LIGHTS_MAX];
+        for (light, i) in self
+            .stage
+            .spot_lights
+            .iter()
+            .map(|l| l.read().0)
+            .zip(0..SPOT_LIGHTS_MAX)
+        {
+            lights[i] = light;
+        }
+        SpotLights {
+            length: self.stage.spot_lights.len() as u32,
+            lights,
+        }
     }
 
-    fn get_directional_lights(&self) -> Vec<ShaderDirectionalLight> {
-        self.stage
+    fn get_directional_lights(&self) -> DirectionalLights {
+        let mut lights = [ShaderDirectionalLight::default(); DIRECTIONAL_LIGHTS_MAX];
+        for (light, i) in self
+            .stage
             .directional_lights
             .iter()
             .map(|l| l.read().0)
-            .collect()
+            .zip(0..DIRECTIONAL_LIGHTS_MAX)
+        {
+            lights[i] = light;
+        }
+        DirectionalLights {
+            length: self.stage.directional_lights.len() as u32,
+            lights,
+        }
     }
 
-    /// Conduct a full render pass into the given textures using the given camera
-    /// and objects.
+    /// Conduct a full render pass into the given textures using the given
+    /// camera and objects.
     fn render_camera_objects<'a>(
         &'a self,
         frame_texture_view: &wgpu::TextureView,
@@ -498,7 +543,7 @@ impl<P: Pipeline> Renderling<P> {
                 label: Some("render_camera_objects"),
             });
 
-        let mut render_pass = renderling_core::begin_render_pass(
+        let mut render_pass = crate::linkage::begin_render_pass(
             &mut encoder,
             Some("render_camera_objects"),
             self.pipeline.get_render_pipeline(),

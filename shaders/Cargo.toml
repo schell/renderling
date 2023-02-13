@@ -7,8 +7,6 @@ description = "Generates the shader .spv files for the renderling project"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-
-[build-dependencies]
 spirv-builder = "0.5"
 
 # Compile build-dependencies in release mode with

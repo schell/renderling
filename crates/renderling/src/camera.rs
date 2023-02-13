@@ -1,49 +1,22 @@
 //! Cameras, projections and utilities.
 use std::sync::mpsc::Sender;
 
-use nalgebra::{Matrix4, Perspective3, Point3, Vector3, Orthographic3, Isometry3};
-use renderling_core::{ViewProjection, create_camera_uniform};
+use glam::{Mat4, Vec3};
+use renderling_shader::ShaderCamera;
 
-use crate::resources::{Id, Shared};
-
-#[derive(Clone, Debug)]
-pub enum Projection {
-    Perspective(Perspective3<f32>),
-    Orthographic(Orthographic3<f32>),
-    Any(Matrix4<f32>),
-}
-
-impl Projection {
-    pub fn to_homogeneous(&self) -> Matrix4<f32> {
-        match self {
-            Projection::Perspective(p) => p.to_homogeneous(),
-            Projection::Orthographic(o) => o.to_homogeneous(),
-            Projection::Any(m) => m.clone(),
-        }
-    }
-}
-
-impl From<&Projection> for Matrix4<f32> {
-    fn from(value: &Projection) -> Self {
-        value.to_homogeneous()
-    }
-}
+use crate::{
+    linkage::create_camera_uniform,
+    resources::{Id, Shared},
+};
 
 /// Camera primitive shared by both user-land and under-the-hood camera data.
 #[derive(Clone)]
 pub struct CameraInner {
-    pub(crate) view: Isometry3<f32>,
-    pub(crate) projection: Projection,
+    pub(crate) camera: ShaderCamera,
     pub(crate) dirty_uniform: bool,
 }
 
 impl CameraInner {
-    pub fn as_projection_and_view(&self) -> (Matrix4<f32>, Matrix4<f32>) {
-        let projection = self.projection.to_homogeneous();
-        let view = self.view.to_homogeneous();
-        (projection, view)
-    }
-
     pub fn new_ortho2d(width: f32, height: f32) -> Self {
         let left = 0.0;
         let right = width;
@@ -51,14 +24,13 @@ impl CameraInner {
         let top = 0.0;
         let near = 1.0;
         let far = -1.0;
-        let projection = Projection::Orthographic(Orthographic3::new(left, right, bottom, top, near, far));
-        let eye = Point3::new(0.0, 0.0, 0.0);
-        let target = Point3::new(0.0, 0.0, -1.0);
-        let up = Vector3::y();
-        let view = Isometry3::look_at_rh(&eye, &target, &up);
+        let projection = Mat4::orthographic_rh(left, right, bottom, top, near, far);
+        let eye = Vec3::new(0.0, 0.0, 0.0);
+        let target = Vec3::new(0.0, 0.0, -1.0);
+        let up = Vec3::new(0.0, 1.0, 0.0);
+        let view = Mat4::look_at_rh(eye, target, up);
         CameraInner {
-            projection,
-            view,
+            camera: ShaderCamera { projection, view },
             dirty_uniform: false,
         }
     }
@@ -68,14 +40,13 @@ impl CameraInner {
         let fovy = std::f32::consts::PI / 4.0;
         let znear = 0.1;
         let zfar = 100.0;
-        let projection = Projection::Perspective(Perspective3::new(aspect, fovy, znear, zfar));
-        let eye = Point3::new(0.0, 12.0, 20.0);
-        let target = Point3::origin();
-        let up = Vector3::y();
-        let view = Isometry3::look_at_rh(&eye, &target, &up);
+        let projection = Mat4::perspective_rh(fovy, aspect, znear, zfar);
+        let eye = Vec3::new(0.0, 12.0, 20.0);
+        let target = Vec3::ZERO;
+        let up = Vec3::Y;
+        let view = Mat4::look_at_rh(eye, target, up);
         CameraInner {
-            projection,
-            view,
+            camera: ShaderCamera { projection, view },
             dirty_uniform: false,
         }
     }
@@ -83,14 +54,15 @@ impl CameraInner {
 
 pub(crate) enum CameraUpdateCmd {
     Update { camera_id: Id<Camera> },
-    Destroy { camera_id: Id<Camera> }
+    Destroy { camera_id: Id<Camera> },
 }
 
 /// A user-land camera object.
 ///
 /// Used to update various camera properties in renderlings.
 ///
-/// Dropping this struct will result in its GPU resources being cleaned up and/or recycled.
+/// Dropping this struct will result in its GPU resources being cleaned up
+/// and/or recycled.
 #[derive(Clone)]
 pub struct Camera {
     pub(crate) id: Id<Camera>,
@@ -101,7 +73,9 @@ pub struct Camera {
 impl Drop for Camera {
     fn drop(&mut self) {
         if self.inner.count() <= 1 {
-            let _ = self.cmd.send(CameraUpdateCmd::Destroy{ camera_id: self.id });
+            let _ = self
+                .cmd
+                .send(CameraUpdateCmd::Destroy { camera_id: self.id });
         }
     }
 }
@@ -126,24 +100,21 @@ impl Camera {
     /// Set the view.
     ///
     /// This is a combination of the camera's position and rotation.
-    pub fn set_view(&self, view: Isometry3<f32>) {
+    pub fn set_view(&self, view: Mat4) {
         self.update(|inner| {
-            inner.view = view;
+            inner.camera.view = view;
         });
     }
 
-
     /// Set the view to a position and rotation that looks in a direction.
-    pub fn look_at(&self, eye: Point3<f32>, target: Point3<f32>, up: Vector3<f32>) {
-        self.update(|inner| {
-            inner.view = Isometry3::look_at_rh(&eye, &target, &up)
-        });
+    pub fn look_at(&self, eye: Vec3, target: Vec3, up: Vec3) {
+        self.update(|inner| inner.camera.view = Mat4::look_at_rh(eye, target, up));
     }
 
     /// Set the projection of the camera.
-    pub fn set_projection(&self, projection: Projection) {
+    pub fn set_projection(&self, projection: Mat4) {
         self.update(|inner| {
-            inner.projection = projection;
+            inner.camera.projection = projection;
         });
     }
 }
@@ -155,19 +126,6 @@ pub struct CameraData {
     pub(crate) buffer: wgpu::Buffer,
     pub(crate) bindgroup: wgpu::BindGroup,
     pub(crate) inner: Shared<CameraInner>,
-}
-
-/// Create a new camera uniform
-pub(crate) fn new_camera_uniform(
-    inner: &CameraInner,
-    device: &wgpu::Device,
-) -> (wgpu::Buffer, wgpu::BindGroup) {
-    let (projection, view) = inner.as_projection_and_view();
-    let viewproj = ViewProjection {
-        projection: projection.into(),
-        view: view.into(),
-    };
-    create_camera_uniform(device, viewproj, "new_camera_uniform")
 }
 
 pub struct CameraBuilder<'a> {
@@ -188,27 +146,28 @@ impl<'a> CameraBuilder<'a> {
         self
     }
 
-    /// Create a perspective 3d camera positioned at 0,12,20 looking at the origin.
+    /// Create a perspective 3d camera positioned at 0,12,20 looking at the
+    /// origin.
     pub fn with_projection_perspective(mut self) -> Self {
         self.inner = CameraInner::new_perspective(self.width, self.height);
         self
     }
 
     /// Set the projection.
-    pub fn with_projection(mut self, projection: Projection) -> Self {
-        self.inner.projection = projection;
+    pub fn with_projection(mut self, projection: Mat4) -> Self {
+        self.inner.camera.projection = projection;
         self
     }
 
     /// Set the view.
-    pub fn with_view(mut self, view: Isometry3<f32>) -> Self {
-        self.inner.view = view;
+    pub fn with_view(mut self, view: Mat4) -> Self {
+        self.inner.camera.view = view;
         self
     }
 
     /// Set the view to a position and rotation that looks in a direction.
-    pub fn with_look_at(mut self, eye: Point3<f32>, target: Point3<f32>, up: Vector3<f32>) -> Self {
-        self.inner.view = Isometry3::look_at_rh(&eye, &target, &up);
+    pub fn with_look_at(mut self, eye: Vec3, target: Vec3, up: Vec3) -> Self {
+        self.inner.camera.view = Mat4::look_at_rh(eye, target, up);
         self
     }
 
@@ -222,7 +181,7 @@ impl<'a> CameraBuilder<'a> {
             height: _,
             inner,
         } = self;
-        let (buffer, bindgroup) = new_camera_uniform(&inner, device);
+        let (buffer, bindgroup) = create_camera_uniform(device, &inner.camera, "CameraBuilder::build");
         let inner = Shared::new(inner);
         let camera_data = CameraData {
             buffer,

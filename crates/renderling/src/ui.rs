@@ -3,35 +3,11 @@ use crate::{AnyMaterialUniform, Material, MaterialUniform};
 
 #[cfg(feature = "text")]
 mod text;
+pub use renderling_shader::ui::UiColorBlend;
 #[cfg(feature = "text")]
 pub use text::*;
 
-
 pub type UiVertex = crate::linkage::ui::Vertex;
-
-/// Variants of uv/color blending.
-///
-/// This determines how UV and Color coords are blended
-/// together.
-#[derive(Debug, Copy, Clone)]
-pub enum UiColorBlend {
-    /// The mesh should be colored only with its color attribute
-    ColorOnly = 0,
-    /// The mesh should be colored only with its uv vertex attribute
-    UvOnly = 1,
-    /// The mesh should replace uv red with its color vertex attribute.
-    ///
-    /// This is used for colored text.
-    ReplaceRedUvWithColor = 2,
-}
-
-#[cfg(test)]
-mod ui {
-    #[test]
-    fn ui_color() {
-        assert!(super::UiColorBlend::ReplaceRedUvWithColor as u32 == 2);
-    }
-}
 
 pub struct UiMaterialUniform {
     bindgroup: wgpu::BindGroup,
@@ -53,12 +29,7 @@ pub struct UiMaterial {
 impl Material for UiMaterial {
     fn create_material_uniform(&self, device: &wgpu::Device) -> AnyMaterialUniform {
         AnyMaterialUniform::new(UiMaterialUniform {
-            bindgroup: crate::linkage::ui::create_ui_material_bindgroup(
-                device,
-                self.color_blend as u32,
-                &self.diffuse_texture.view,
-                &self.diffuse_texture.sampler,
-            ),
+            bindgroup: crate::linkage::ui::create_ui_material_bindgroup(device, &self),
         })
     }
 }

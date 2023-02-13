@@ -1,8 +1,9 @@
 //! UI shader pipeline
-pub use renderling_core::{
-    camera_uniform_layout, create_camera_uniform, ObjectDraw, ViewProjection,
-};
+use encase::UniformBuffer;
+use renderling_shader::ui::ShaderColorBlend;
 use wgpu::util::DeviceExt;
+
+use crate::{linkage::camera_uniform_layout, UiMaterial};
 
 #[repr(C)]
 #[derive(Copy, Clone, Default, bytemuck::Pod, bytemuck::Zeroable)]
@@ -71,14 +72,14 @@ pub fn object_texture_bindgroup_layout(device: &wgpu::Device) -> wgpu::BindGroup
 ///   2 - multiply texture's red channel with color
 pub fn create_ui_material_bindgroup(
     device: &wgpu::Device,
-    color_blend: u32,
-    diffuse_texture_view: &wgpu::TextureView,
-    diffuse_texture_sampler: &wgpu::Sampler,
+    material: &UiMaterial,
 ) -> wgpu::BindGroup {
-    let color_blend_buffer: [u32; 4] = [color_blend; 4];
+    let shader_blend_style = ShaderColorBlend::from(material.color_blend);
+    let mut data = UniformBuffer::new(vec![]);
+    data.write(&shader_blend_style).unwrap();
     let blend_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("ui object blend buffer"),
-        contents: bytemuck::cast_slice(&color_blend_buffer),
+        contents: data.into_inner().as_slice(),
         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
     });
 
@@ -91,11 +92,11 @@ pub fn create_ui_material_bindgroup(
             },
             wgpu::BindGroupEntry {
                 binding: 1,
-                resource: wgpu::BindingResource::TextureView(&diffuse_texture_view),
+                resource: wgpu::BindingResource::TextureView(&material.diffuse_texture.view),
             },
             wgpu::BindGroupEntry {
                 binding: 2,
-                resource: wgpu::BindingResource::Sampler(&diffuse_texture_sampler),
+                resource: wgpu::BindingResource::Sampler(&material.diffuse_texture.sampler),
             },
         ],
         label: Some("ui pass diffuse texture bind group"),
@@ -103,7 +104,8 @@ pub fn create_ui_material_bindgroup(
 }
 
 pub fn create_pipeline(device: &wgpu::Device, format: wgpu::TextureFormat) -> wgpu::RenderPipeline {
-    let ui_shader = device.create_shader_module(wgpu::include_spirv!("ui.spv"));
+    let vertex_shader = device.create_shader_module(wgpu::include_spirv!("ui-vertex_ui.spv"));
+    let fragment_shader = device.create_shader_module(wgpu::include_spirv!("ui-fragment_ui.spv"));
 
     let render_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("ui render pipeline layout"),
@@ -118,8 +120,8 @@ pub fn create_pipeline(device: &wgpu::Device, format: wgpu::TextureFormat) -> wg
             label: Some("ui render pipeline"),
             layout: Some(&render_pipeline_layout),
             vertex: wgpu::VertexState {
-                module: &ui_shader,
-                entry_point: "main_vs",
+                module: &&vertex_shader,
+                entry_point: "ui::vertex_ui",
                 buffers: &[
                     wgpu::VertexBufferLayout {
                         array_stride: {
@@ -141,8 +143,8 @@ pub fn create_pipeline(device: &wgpu::Device, format: wgpu::TextureFormat) -> wg
                 ],
             },
             fragment: Some(wgpu::FragmentState {
-                module: &ui_shader,
-                entry_point: "main_fs",
+                module: &fragment_shader,
+                entry_point: "ui::fragment_ui",
                 targets: &[Some(wgpu::ColorTargetState {
                     format,
                     blend: Some(wgpu::BlendState::ALPHA_BLENDING),
@@ -188,7 +190,7 @@ pub fn render<'a, I, Extra>(
     camera: &'a wgpu::BindGroup,
     objects: I,
 ) where
-    I: Iterator<Item = renderling_core::ShaderObject<'a>>,
+    I: Iterator<Item = crate::linkage::ShaderObject<'a>>,
     Extra: 'a,
 {
     log::trace!("{} rendering", label,);
@@ -198,7 +200,7 @@ pub fn render<'a, I, Extra>(
         label: Some(&encoder_label),
     });
 
-    let mut render_pass = renderling_core::begin_render_pass(
+    let mut render_pass = crate::linkage::begin_render_pass(
         &mut encoder,
         Some(label),
         pipeline,
@@ -212,7 +214,7 @@ pub fn render<'a, I, Extra>(
     // draw objects
     for object in objects {
         log::trace!("    object {:?}", object.name);
-        renderling_core::render_object(&mut render_pass, object, default_material_bindgroup);
+        crate::linkage::render_object(&mut render_pass, object, default_material_bindgroup);
     }
 
     drop(render_pass);

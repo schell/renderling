@@ -1,12 +1,11 @@
-#![no_std]
-#![feature(lang_items)]
-use renderling_shader::Camera;
+//! Shader wrapper for user interface shaders.
+use renderling_shader::{ShaderCamera, ui::ShaderColorBlend};
 use spirv_std::spirv;
 use spirv_std::{glam::*, image::Image2d, Sampler};
 
 #[spirv(vertex)]
-pub fn main_vs(
-    #[spirv(uniform, descriptor_set = 0, binding = 0)] camera: &Camera,
+pub fn vertex_ui(
+    #[spirv(uniform, descriptor_set = 0, binding = 0)] camera: &ShaderCamera,
 
     in_pos: Vec3,
     in_color: Vec4,
@@ -20,7 +19,7 @@ pub fn main_vs(
     out_color: &mut Vec4,
     out_uv: &mut Vec2,
 
-    #[spirv(position)] out_pos: &mut Vec4,
+    #[spirv(position)] gl_pos: &mut Vec4,
 ) {
     renderling_shader::ui::main_vertex(
         camera,
@@ -33,20 +32,20 @@ pub fn main_vs(
         in_model_matrix_3,
         out_color,
         out_uv,
-        out_pos,
+        gl_pos,
     );
 }
 
 #[spirv(fragment)]
-pub fn main_fs(
-    #[spirv(uniform, descriptor_set = 1, binding = 0)] blend: &UVec4,
+pub fn fragment_ui(
+    #[spirv(uniform, descriptor_set = 1, binding = 0)] blend: &ShaderColorBlend,
     #[spirv(descriptor_set = 1, binding = 1)] texture: &Image2d,
     #[spirv(descriptor_set = 1, binding = 2)] sampler: &Sampler,
 
     in_color: Vec4,
     in_uv: Vec2,
 
-    output: &mut Vec4,
+    frag_color: &mut Vec4,
 ) {
-    renderling_shader::ui::main_fragment(blend, texture, sampler, in_color, in_uv, output);
+    renderling_shader::ui::main_fragment(blend, texture, sampler, in_color, in_uv, frag_color);
 }

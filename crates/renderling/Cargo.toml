@@ -22,19 +22,18 @@ wasm = ["wgpu/webgl"]
 [dependencies]
 ab_glyph = { version = "^0.2", optional = true }
 bytemuck = { version = "1.13.0", features = ["derive"] }
+encase = { version = "0.4.1", features = ["glam"] }
 futures-lite = "1.12.0"
-glam = { version = "0.22", features = ["bytemuck"] }
+glam = { version = "0.22", default-features = false, features = ["bytemuck", "libm"] }
 gltf = { version = "1.1.0", optional = true }
 glyph_brush = { version = "^0.7", optional = true }
 image = { version = "0.24.4", optional = true }
 log = "0.4.17"
-nalgebra = "0.32.1"
 raw-window-handle = { version = "0.5.0", optional = true }
 renderling-shader = { path = "../renderling-shader" }
-renderling_core = { path = "../core", version = "^0.1.6" }
 rustc-hash = "1.1.0"
 snafu = "0.7.4"
-wgpu = { version = "^0.14" }
+wgpu = { version = "^0.14", features = ["spirv"] }
 winit = { version = "0.27.5", optional = true }
 
 [package.metadata.docs.rs]

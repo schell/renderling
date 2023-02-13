@@ -1,17 +1,13 @@
-//! PBR shader.
-#![no_std]
-#![feature(lang_items)]
-
 use renderling_shader::{
     pbr::{DirectionalLights, PointLights, SpotLights},
-    Camera,
+    ShaderCamera,
 };
 use spirv_std::spirv;
 use spirv_std::{glam::*, image::Image2d, Sampler};
 
 #[spirv(vertex)]
-pub fn main_vs(
-    #[spirv(uniform, descriptor_set = 0, binding = 0)] camera: &Camera,
+pub fn vertex_pbr(
+    #[spirv(uniform, descriptor_set = 0, binding = 0)] camera: &ShaderCamera,
 
     in_pos: Vec3,
     in_uv: Vec2,
@@ -52,14 +48,14 @@ pub fn main_vs(
 }
 
 #[spirv(fragment)]
-pub fn main_fs(
-    #[spirv(uniform, descriptor_set = 0, binding = 0)] camera: &Camera,
+pub fn fragment_pbr(
+    #[spirv(uniform, descriptor_set = 0, binding = 0)] camera: &ShaderCamera,
 
     #[spirv(descriptor_set = 1, binding = 0)] diffuse_texture: &Image2d,
     #[spirv(descriptor_set = 1, binding = 1)] diffuse_sampler: &Sampler,
     #[spirv(descriptor_set = 1, binding = 2)] specular_texture: &Image2d,
     #[spirv(descriptor_set = 1, binding = 3)] specular_sampler: &Sampler,
-    #[spirv(uniform, descriptor_set = 1, binding = 4)] material_shininess: &Vec4,
+    #[spirv(uniform, descriptor_set = 1, binding = 4)] material_shininess: &f32,
 
     #[spirv(uniform, descriptor_set = 2, binding = 0)] point_lights: &PointLights,
     #[spirv(uniform, descriptor_set = 2, binding = 1)] spot_lights: &SpotLights,

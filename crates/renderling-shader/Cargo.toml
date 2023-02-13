@@ -7,11 +7,17 @@ description = "Shared types and functions for renderling shaders compiled w/ rus
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-default = ["cpu"]
-cpu = ["bytemuck", "glam/bytemuck", "glam/std"]
-gpu = ["glam/libm"]
+default = []
 
 [dependencies]
-bytemuck = { version = "1.7.2", features = ["derive"], optional = true }
-glam = { version = "0.22", default-features = false }
 spirv-std = { version = "0.5", features = ["glam"] }
+
+[target.'cfg(not(target_arch = "spirv"))'.dependencies]
+encase = { version = "0.4.1", features = ["glam"] }
+glam = { version = "0.22" }
+
+[target.'cfg(not(target_arch = "spirv"))'.dev-dependencies]
+glam = { version = "0.22", features = ["debug-glam-assert"] }
+
+[target.'cfg(target_arch = "spirv")'.dependencies]
+glam = { version = "0.22", default-features = false, features = ["libm"] }

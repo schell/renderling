@@ -1,12 +1,13 @@
 //! Rendering state management.
-use renderling_core::conduct_clear_pass;
 use snafu::prelude::*;
 use std::sync::{Arc, RwLock};
 
 #[cfg(feature = "text")]
 use ab_glyph::FontArc;
 
-use crate::{forward::ForwardPipeline, renderer::Renderling, ui::UiPipeline};
+use crate::{
+    forward::ForwardPipeline, linkage::conduct_clear_pass, renderer::Renderling, ui::UiPipeline,
+};
 
 #[derive(Debug, Snafu)]
 pub enum WgpuStateError {
@@ -457,7 +458,8 @@ impl WgpuState {
     #[cfg(feature = "ui")]
     /// Creates a new renderling with a UI shader pipeline.
     ///
-    /// By default this renderling has a camera set with an orthographic 2d projection.
+    /// By default this renderling has a camera set with an orthographic 2d
+    /// projection.
     pub fn new_ui_renderling(&self) -> Renderling<UiPipeline> {
         // this is the _default_ texture bind group which will be used when
         // there is no available texture to bind.

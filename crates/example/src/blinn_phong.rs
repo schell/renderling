@@ -1,7 +1,7 @@
 use std::time::Instant;
 
-use nalgebra::{Point3, UnitQuaternion, Vector3};
-use renderling::{ForwardVertex, MeshBuilder, Renderling, UiPipeline, WgpuState, Transform};
+use glam::{Quat, Vec3};
+use renderling::{ForwardVertex, MeshBuilder, Renderling, Transform, UiPipeline, WgpuState};
 
 pub fn run() -> Result<(), anyhow::Error> {
     env_logger::Builder::default()
@@ -50,7 +50,7 @@ pub fn run() -> Result<(), anyhow::Error> {
     let forward_camera = forward
         .new_camera()
         .with_projection_perspective()
-        .with_look_at(Point3::new(0.0, 1.0, 2.5), Point3::origin(), Vector3::y())
+        .with_look_at(Vec3::new(0.0, 1.0, 2.5), Vec3::ZERO, Vec3::Y)
         .build();
 
     let mut icosphere = icosahedron::Polyhedron::new_isocahedron(0.65, 5);
@@ -96,8 +96,8 @@ pub fn run() -> Result<(), anyhow::Error> {
 
     let _spot_light = forward
         .new_spot_light()
-        .with_position(Point3::new(0.0, 10.0, 0.0))
-        .with_direction(Vector3::new(0.0, -1.0, 0.0))
+        .with_position(Vec3::new(0.0, 10.0, 0.0))
+        .with_direction(Vec3::new(0.0, -1.0, 0.0))
         .with_cutoff(std::f32::consts::PI / 3.0, std::f32::consts::PI / 2.0)
         .with_attenuation(1.0, 0.014, 0.007)
         .with_ambient_color(wgpu::Color {
@@ -122,7 +122,7 @@ pub fn run() -> Result<(), anyhow::Error> {
 
     let _point_light = forward
         .new_point_light()
-        .with_position(Point3::new(2.0, 2.0, 0.0))
+        .with_position(Vec3::new(2.0, 2.0, 0.0))
         .with_attenuation(1.0, 0.14, 0.07)
         .with_ambient_color(wgpu::Color {
             r: 0.1,
@@ -180,9 +180,9 @@ pub fn run() -> Result<(), anyhow::Error> {
                 let rotation = rotation_speed * dt.as_secs_f32();
                 rotation_y += rotation;
                 last_frame = now;
-                cube.set_transform(Transform::default().with_rotation(
-                    UnitQuaternion::from_axis_angle(&Vector3::y_axis(), rotation_y),
-                ));
+                cube.set_transform(
+                    Transform::default().with_rotation(Quat::from_axis_angle(Vec3::Y, rotation_y)),
+                );
 
                 let (frame, depth) = gpu.next_frame().unwrap();
                 gpu.clear(Some(&frame), Some(&depth));

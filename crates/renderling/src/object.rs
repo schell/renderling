@@ -1,13 +1,16 @@
 //! Renderable things with positions, transformations, meshes and materials.
 use std::sync::{mpsc::Sender, Arc};
 
-use nalgebra::{Matrix4, Point3, UnitQuaternion, Vector3};
-use renderling_core::{ObjectDraw, ShaderObject};
+use glam::{Mat4, Vec3, Quat, Mat3};
 use rustc_hash::FxHashSet;
 use snafu::prelude::*;
 use wgpu::util::DeviceExt;
 
-use crate::{resources::Id, Camera, LocalTransform, Shared, WorldTransform};
+use crate::{
+    linkage::{ObjectDraw, ShaderObject},
+    resources::Id,
+    Camera, LocalTransform, Shared, WorldTransform,
+};
 
 pub(crate) enum ObjUpdateCmd {
     // remove the object from the camera's objects
@@ -85,17 +88,17 @@ impl<'a> ObjectBuilder<'a> {
         self
     }
 
-    pub fn with_position(mut self, p: Point3<f32>) -> Self {
-        self.local_transform.translate = Vector3::new(p.x, p.y, p.z);
+    pub fn with_position(mut self, p: Vec3) -> Self {
+        self.local_transform.translate = Vec3::new(p.x, p.y, p.z);
         self
     }
 
-    pub fn with_rotation(mut self, rotation: UnitQuaternion<f32>) -> Self {
+    pub fn with_rotation(mut self, rotation: Quat) -> Self {
         self.local_transform.rotate = rotation;
         self
     }
 
-    pub fn with_scale(mut self, scale: Vector3<f32>) -> Self {
+    pub fn with_scale(mut self, scale: Vec3) -> Self {
         self.local_transform.scale = scale;
         self
     }
@@ -120,7 +123,7 @@ impl<'a> ObjectBuilder<'a> {
             .material
             .as_ref()
             .map(|mat| mat.create_material_uniform(self.device));
-        let position = Point3::from(self.local_transform.translate.xyz());
+        let position = self.local_transform.translate;
         let local_transforms = std::iter::once(self.local_transform)
             .chain(self.local_transforms)
             .collect::<Vec<_>>();
@@ -183,9 +186,9 @@ pub(crate) struct ChildObject(Id<Object>);
 
 /// Data shared between the library user and the renderling backend.
 ///
-/// The data held in `ObjectInner` is data that the library user can change at any time
-/// and data that has a downstream representation in `wgpu`, which is created/modified
-/// in `Renderling::update`.
+/// The data held in `ObjectInner` is data that the library user can change at
+/// any time and data that has a downstream representation in `wgpu`, which is
+/// created/modified in `Renderling::update`.
 pub(crate) struct ObjectInner {
     pub(crate) mesh: Option<Arc<crate::Mesh>>,
     pub(crate) material: Option<crate::AnyMaterial>,
@@ -197,15 +200,13 @@ pub(crate) struct ObjectInner {
 }
 
 impl ObjectInner {
-    fn model_matrix_to_vec(model: Matrix4<f32>, generate_normal_matrix: bool) -> Vec<f32> {
-        let mut m = model.as_slice().to_vec();
+    fn model_matrix_to_vec(model: Mat4, generate_normal_matrix: bool) -> Vec<f32> {
+        let mut m = model.as_ref().to_vec();
         if generate_normal_matrix {
-            let normal = model
-                .try_inverse()
-                .unwrap()
-                .transpose()
-                .fixed_resize::<3, 3>(0.0);
-            let mut n = normal.as_slice().to_vec();
+            let normal = Mat3::from_mat4(model
+                .inverse()
+                .transpose());
+            let mut n = normal.as_ref().to_vec();
             m.append(&mut n);
         }
         m
@@ -216,12 +217,12 @@ impl ObjectInner {
         &self,
         device: &wgpu::Device,
         generate_normal_matrix: bool,
-    ) -> crate::VertexBuffer {
+    ) -> crate::linkage::VertexBuffer {
         let ms: Vec<f32> = self
             .get_world_transforms()
-            .flat_map(|t| Self::model_matrix_to_vec(Matrix4::from(&t), generate_normal_matrix))
+            .flat_map(|t| Self::model_matrix_to_vec(Mat4::from(&t), generate_normal_matrix))
             .collect::<Vec<_>>();
-        crate::VertexBuffer {
+        crate::linkage::VertexBuffer {
             buffer: device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("Renderling instance buffer"),
                 contents: bytemuck::cast_slice(ms.as_slice()),
@@ -234,14 +235,13 @@ impl ObjectInner {
     pub(crate) fn update_world_transforms_buffer(
         &self,
         queue: &wgpu::Queue,
-        buffer: &crate::VertexBuffer,
+        buffer: &crate::linkage::VertexBuffer,
         generate_normal_matrix: bool,
     ) {
         let ms: Vec<f32> = self
             .get_world_transforms()
-            .flat_map(|t| Self::model_matrix_to_vec(Matrix4::from(&t), generate_normal_matrix))
+            .flat_map(|t| Self::model_matrix_to_vec(Mat4::from(&t), generate_normal_matrix))
             .collect::<Vec<_>>();
-
         queue.write_buffer(&buffer.buffer, 0, bytemuck::cast_slice(ms.as_slice()));
     }
 
@@ -289,8 +289,8 @@ impl Drop for Object {
 impl Object {
     /// Associate this object with the given camera.
     ///
-    /// This will have the effect that the object will be drawn with this camera on
-    /// the next frame.
+    /// This will have the effect that the object will be drawn with this camera
+    /// on the next frame.
     pub fn set_camera(&self, camera: &crate::Camera) {
         let new_camera_id = camera.id;
         let object_id = self.id;
@@ -385,8 +385,9 @@ impl Object {
 
     /// Nest another object in this object.
     ///
-    /// This has the effect of transforming the child object by this object's transform,
-    /// until the child is removed with [`Object::remove_child`] or [`Object::detach_from_parent`].
+    /// This has the effect of transforming the child object by this object's
+    /// transform, until the child is removed with [`Object::remove_child`]
+    /// or [`Object::detach_from_parent`].
     pub fn append_child(&self, child_object: &Object) {
         let mut parent = self.inner.write();
         parent.children.push(ChildObject(child_object.id));
@@ -401,7 +402,8 @@ impl Object {
 
     /// Un-nest another object from this object.
     ///
-    /// This restores the child object's local transform as its global transform.
+    /// This restores the child object's local transform as its global
+    /// transform.
     pub fn remove_child(&self, child_object: &Object) {
         let mut parent = self.inner.write();
         parent.children.retain(|child| child.0 != child_object.id);
@@ -420,11 +422,7 @@ impl Object {
     pub fn detach_from_parent(&self) {
         let mut inner = self.inner.write();
         if let Some(parent) = inner.parent.take() {
-            parent
-                .0
-                .write()
-                .children
-                .retain(|child| child.0 != self.id);
+            parent.0.write().children.retain(|child| child.0 != self.id);
             self.cmd
                 .send(ObjUpdateCmd::Transform { object_id: self.id })
                 .unwrap();
@@ -437,8 +435,8 @@ pub(crate) struct ObjectData {
     pub(crate) id: Id<Object>,
     pub(crate) mesh: Option<Arc<crate::Mesh>>,
     pub(crate) material_uniform: Option<crate::AnyMaterialUniform>,
-    pub(crate) instances: crate::VertexBuffer,
-    pub(crate) world_position: Point3<f32>,
+    pub(crate) instances: crate::linkage::VertexBuffer,
+    pub(crate) world_position: Vec3,
     pub(crate) cameras: FxHashSet<Id<Camera>>,
     pub(crate) inner: Shared<ObjectInner>,
 }
@@ -478,8 +476,8 @@ impl ObjectData {
         let inner = self.inner.read();
         inner.update_world_transforms_buffer(&queue, &self.instances, generate_normal_matrix);
         let parent_tfrm = inner.get_parent_world_transform().unwrap_or_default();
-        let parent_model_matrix = Matrix4::from(&parent_tfrm);
+        let parent_model_matrix = Mat4::from(&parent_tfrm);
         let p = inner.local_transforms[0].translate;
-        self.world_position = parent_model_matrix.transform_point(&Point3::new(p.x, p.y, p.z));
+        self.world_position = parent_model_matrix.project_point3(p);
     }
 }
