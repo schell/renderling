@@ -2,7 +2,7 @@
 use std::sync::mpsc::Sender;
 
 use crate::resources::Shared;
-use glam::{vec3, vec4, Vec3};
+use glam::{vec3, vec4, Vec3, Vec4};
 use renderling_shader::pbr::{DirectionalLightRaw, PointLightRaw, SpotLightRaw};
 
 pub(crate) struct PointLightInner(pub(crate) PointLightRaw);
@@ -83,30 +83,16 @@ impl<'a> PointLightBuilder<'a> {
         scene: &'a mut crate::Stage,
         cmd: Sender<LightUpdateCmd>,
     ) -> PointLightBuilder<'a> {
+        let white = Vec4::splat(1.0);
         Self {
             inner: PointLightInner(Default::default()),
             cmd,
             scene,
         }
         .with_attenuation(1.0, 0.14, 0.07)
-        .with_ambient_color(wgpu::Color {
-            r: 1.0,
-            g: 1.0,
-            b: 1.0,
-            a: 1.0,
-        })
-        .with_diffuse_color(wgpu::Color {
-            r: 1.0,
-            g: 1.0,
-            b: 1.0,
-            a: 1.0,
-        })
-        .with_specular_color(wgpu::Color {
-            r: 1.0,
-            g: 1.0,
-            b: 1.0,
-            a: 1.0,
-        })
+        .with_ambient_color(white)
+        .with_diffuse_color(white)
+        .with_specular_color(white)
     }
 
     pub fn with_position(mut self, position: Vec3) -> Self {
@@ -119,33 +105,18 @@ impl<'a> PointLightBuilder<'a> {
         self
     }
 
-    pub fn with_ambient_color(mut self, color: wgpu::Color) -> Self {
-        self.inner.0.ambient_color = vec4(
-            color.r as f32,
-            color.g as f32,
-            color.b as f32,
-            color.a as f32,
-        );
+    pub fn with_ambient_color(mut self, color: impl Into<Vec4>) -> Self {
+        self.inner.0.ambient_color = color.into();
         self
     }
 
-    pub fn with_diffuse_color(mut self, color: wgpu::Color) -> Self {
-        self.inner.0.diffuse_color = vec4(
-            color.r as f32,
-            color.g as f32,
-            color.b as f32,
-            color.a as f32,
-        );
+    pub fn with_diffuse_color(mut self, color: impl Into<Vec4>) -> Self {
+        self.inner.0.diffuse_color = color.into();
         self
     }
 
-    pub fn with_specular_color(mut self, color: wgpu::Color) -> Self {
-        self.inner.0.specular_color = vec4(
-            color.r as f32,
-            color.g as f32,
-            color.b as f32,
-            color.a as f32,
-        );
+    pub fn with_specular_color(mut self, color: impl Into<Vec4>) -> Self {
+        self.inner.0.specular_color = color.into();
         self
     }
 
@@ -245,6 +216,7 @@ impl<'a> SpotLightBuilder<'a> {
         scene: &'a mut crate::Stage,
         cmd: Sender<LightUpdateCmd>,
     ) -> SpotLightBuilder<'a> {
+        let white = Vec4::splat(1.0);
         Self {
             cmd,
             inner: SpotLightInner(Default::default()),
@@ -253,24 +225,9 @@ impl<'a> SpotLightBuilder<'a> {
         .with_cutoff(std::f32::consts::PI / 3.0, std::f32::consts::PI / 2.0)
         .with_attenuation(1.0, 0.014, 0.007)
         .with_direction(Vec3::new(0.0, -1.0, 0.0))
-        .with_ambient_color(wgpu::Color {
-            r: 1.0,
-            g: 1.0,
-            b: 1.0,
-            a: 1.0,
-        })
-        .with_diffuse_color(wgpu::Color {
-            r: 1.0,
-            g: 1.0,
-            b: 1.0,
-            a: 1.0,
-        })
-        .with_specular_color(wgpu::Color {
-            r: 1.0,
-            g: 1.0,
-            b: 1.0,
-            a: 1.0,
-        })
+        .with_ambient_color(white)
+        .with_diffuse_color(white)
+        .with_specular_color(white)
     }
 
     pub fn with_position(mut self, position: Vec3) -> Self {
@@ -294,33 +251,18 @@ impl<'a> SpotLightBuilder<'a> {
         self
     }
 
-    pub fn with_ambient_color(mut self, color: wgpu::Color) -> Self {
-        self.inner.0.ambient_color = vec4(
-            color.r as f32,
-            color.g as f32,
-            color.b as f32,
-            color.a as f32,
-        );
+    pub fn with_ambient_color(mut self, color: impl Into<Vec4>) -> Self {
+        self.inner.0.ambient_color = color.into();
         self
     }
 
-    pub fn with_diffuse_color(mut self, color: wgpu::Color) -> Self {
-        self.inner.0.diffuse_color = vec4(
-            color.r as f32,
-            color.g as f32,
-            color.b as f32,
-            color.a as f32,
-        );
+    pub fn with_diffuse_color(mut self, color: impl Into<Vec4>) -> Self {
+        self.inner.0.diffuse_color = color.into();
         self
     }
 
-    pub fn with_specular_color(mut self, color: wgpu::Color) -> Self {
-        self.inner.0.specular_color = vec4(
-            color.r as f32,
-            color.g as f32,
-            color.b as f32,
-            color.a as f32,
-        );
+    pub fn with_specular_color(mut self, color: impl Into<Vec4>) -> Self {
+        self.inner.0.specular_color = color.into();
         self
     }
 
@@ -401,24 +343,9 @@ impl<'a> DirectionalLightBuilder<'a> {
             scene,
         }
         .with_direction(Vec3::new(0.0, -1.0, 0.0))
-        .with_ambient_color(wgpu::Color {
-            r: 1.0,
-            g: 1.0,
-            b: 1.0,
-            a: 1.0,
-        })
-        .with_diffuse_color(wgpu::Color {
-            r: 1.0,
-            g: 1.0,
-            b: 1.0,
-            a: 1.0,
-        })
-        .with_specular_color(wgpu::Color {
-            r: 1.0,
-            g: 1.0,
-            b: 1.0,
-            a: 1.0,
-        })
+        .with_ambient_color(Vec4::splat(1.0))
+        .with_diffuse_color(Vec4::splat(1.0))
+        .with_specular_color(Vec4::splat(1.0))
     }
 
     pub fn with_direction(mut self, direction: Vec3) -> Self {
@@ -426,33 +353,18 @@ impl<'a> DirectionalLightBuilder<'a> {
         self
     }
 
-    pub fn with_ambient_color(mut self, color: wgpu::Color) -> Self {
-        self.inner.0.ambient_color = vec4(
-            color.r as f32,
-            color.g as f32,
-            color.b as f32,
-            color.a as f32,
-        );
+    pub fn with_ambient_color(mut self, color: impl Into<Vec4>) -> Self {
+        self.inner.0.ambient_color = color.into();
         self
     }
 
-    pub fn with_diffuse_color(mut self, color: wgpu::Color) -> Self {
-        self.inner.0.diffuse_color = vec4(
-            color.r as f32,
-            color.g as f32,
-            color.b as f32,
-            color.a as f32,
-        );
+    pub fn with_diffuse_color(mut self, color: impl Into<Vec4>) -> Self {
+        self.inner.0.diffuse_color = color.into();
         self
     }
 
-    pub fn with_specular_color(mut self, color: wgpu::Color) -> Self {
-        self.inner.0.specular_color = vec4(
-            color.r as f32,
-            color.g as f32,
-            color.b as f32,
-            color.a as f32,
-        );
+    pub fn with_specular_color(mut self, color: impl Into<Vec4>) -> Self {
+        self.inner.0.specular_color = color.into();
         self
     }
 

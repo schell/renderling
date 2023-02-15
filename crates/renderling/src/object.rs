@@ -80,11 +80,16 @@ impl<'a> ObjectBuilder<'a> {
         self.with_mesh(mesh)
     }
 
+    pub fn with_transform(mut self, t: crate::LocalTransform) -> Self {
+        self.local_transform = t;
+        self
+    }
+
     /// Add another local transform.
     ///
     /// This object will be rendered once with every transform using instancing.
-    pub fn add_transform(mut self, wt: crate::LocalTransform) -> Self {
-        self.local_transforms.push(wt);
+    pub fn add_transform(mut self, t: crate::LocalTransform) -> Self {
+        self.local_transforms.push(t);
         self
     }
 
@@ -110,6 +115,11 @@ impl<'a> ObjectBuilder<'a> {
 
     pub fn with_child(mut self, child: &'a Object) -> Self {
         self.children.push(child);
+        self
+    }
+
+    pub fn with_children(mut self, children: impl IntoIterator<Item = &'a Object>) -> Self {
+        self.children = children.into_iter().collect();
         self
     }
 
@@ -270,6 +280,7 @@ impl ObjectInner {
 /// `Object`s are used as a handle to update graphical resources within the
 /// renderling that was used to create it. To release the underlying resources
 /// the object should be dropped.
+#[derive(Clone)]
 pub struct Object {
     pub(crate) id: Id<Object>,
     pub(crate) inner: Shared<ObjectInner>,

@@ -67,6 +67,12 @@ impl<T> From<&Transform<T>> for Mat4 {
     }
 }
 
+impl<T> From<Transform<T>> for Mat4 {
+    fn from(trns: Transform<T>) -> Self {
+        Mat4::from(&trns)
+    }
+}
+
 impl<T> Transform<T> {
     pub fn from_xyz(x: f32, y: f32, z: f32) -> Self {
         let mut t = Transform::default();

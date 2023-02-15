@@ -527,6 +527,11 @@ impl WgpuState {
         )
     }
 
+    #[cfg(feature = "gltf")]
+    pub fn new_gltf_loader<'a, 'b>(&'a self) -> crate::gltf_support::GltfLoader<'a, 'b> {
+        crate::gltf_support::GltfLoader::new(&self.device, &self.queue)
+    }
+
     #[cfg(feature = "text")]
     pub fn new_glyph_cache(&self, fonts: impl IntoIterator<Item = FontArc>) -> crate::GlyphCache {
         crate::GlyphCache::new(self, fonts.into_iter().collect())

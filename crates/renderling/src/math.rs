@@ -1,5 +1,5 @@
 //! Mathematical helper types and functions.
-use glam::Vec3;
+pub use glam::*;
 
 pub fn triangle_face_normal(p1: Vec3, p2: Vec3, p3: Vec3) -> Vec3 {
     let a = p1 - p2;
