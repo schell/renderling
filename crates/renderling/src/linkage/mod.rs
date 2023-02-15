@@ -23,7 +23,7 @@
 use std::ops::Range;
 
 use encase::UniformBuffer;
-use renderling_shader::ShaderCamera;
+use renderling_shader::CameraRaw;
 use wgpu::util::DeviceExt;
 #[cfg(feature = "ui")]
 pub mod ui;
@@ -147,7 +147,7 @@ pub fn conduct_clear_pass(
 
 pub fn create_camera_uniform(
     device: &wgpu::Device,
-    camera: &ShaderCamera,
+    camera: &CameraRaw,
     label: &str,
 ) -> (wgpu::Buffer, wgpu::BindGroup) {
     let mut data = UniformBuffer::new(vec![]);

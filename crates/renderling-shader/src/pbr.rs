@@ -7,7 +7,7 @@ use spirv_std::{image::Image2d, Sampler};
 #[cfg(target_arch = "spirv")]
 use spirv_std::num_traits::Float;
 
-use crate::{math::Vec3ColorSwizzles, ShaderCamera};
+use crate::{math::Vec3ColorSwizzles, CameraRaw};
 
 #[repr(C)]
 #[derive(Copy, Clone, Default)]
@@ -259,7 +259,7 @@ impl Default for DirectionalLights {
 }
 
 pub fn main_vertex(
-    camera: &ShaderCamera,
+    camera: &CameraRaw,
     in_pos: Vec3,
     in_uv: Vec2,
     in_norm: Vec3,
@@ -301,7 +301,7 @@ pub fn main_vertex(
 }
 
 pub fn main_fragment(
-    camera: &ShaderCamera,
+    camera: &CameraRaw,
     diffuse_texture: &Image2d,
     diffuse_sampler: &Sampler,
     specular_texture: &Image2d,

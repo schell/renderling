@@ -219,10 +219,7 @@ impl LightsUniform {
 }
 
 pub fn create_pipeline(device: &wgpu::Device, format: TextureFormat) -> wgpu::RenderPipeline {
-    let vertex_shader_module =
-        device.create_shader_module(wgpu::include_spirv!("pbr-vertex_pbr.spv"));
-    let fragment_shader_module =
-        device.create_shader_module(wgpu::include_spirv!("pbr-fragment_pbr.spv"));
+    let shader_crate = device.create_shader_module(wgpu::include_spirv!("shader_crate.spv"));
 
     let render_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("renderling forward pipeline layout"),
@@ -238,7 +235,7 @@ pub fn create_pipeline(device: &wgpu::Device, format: TextureFormat) -> wgpu::Re
             label: Some("renderling forward pipeline"),
             layout: Some(&render_pipeline_layout),
             vertex: wgpu::VertexState {
-                module: &vertex_shader_module,
+                module: &shader_crate,
                 entry_point: "pbr::vertex_pbr",
                 buffers: &[
                     wgpu::VertexBufferLayout {
@@ -267,7 +264,7 @@ pub fn create_pipeline(device: &wgpu::Device, format: TextureFormat) -> wgpu::Re
                 ],
             },
             fragment: Some(wgpu::FragmentState {
-                module: &fragment_shader_module,
+                module: &shader_crate,
                 entry_point: "pbr::fragment_pbr",
                 targets: &[Some(wgpu::ColorTargetState {
                     format,

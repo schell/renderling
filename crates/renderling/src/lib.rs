@@ -41,6 +41,7 @@ pub use ui::*;
 pub mod linkage;
 
 mod camera;
+mod gltf_support;
 mod light;
 mod material;
 mod mesh;
@@ -48,12 +49,13 @@ mod object;
 mod pipeline;
 mod renderer;
 mod resources;
-mod scene;
 mod state;
 mod texture;
 mod transform;
 
 pub use camera::*;
+#[cfg(feature = "gltf")]
+pub use gltf_support::*;
 pub use light::*;
 pub use material::*;
 pub use mesh::*;
@@ -61,7 +63,6 @@ pub use object::*;
 pub use pipeline::*;
 pub use renderer::*;
 pub use resources::*;
-pub use scene::*;
 pub use state::*;
 pub use texture::*;
 pub use transform::*;
@@ -563,30 +564,10 @@ mod test {
         let mut gpu = WgpuState::headless(100, 100).unwrap();
         gpu.default_background_color = wgpu::Color::TRANSPARENT;
         let mut r = gpu.new_forward_renderling();
-        let red = wgpu::Color {
-            r: 1.0,
-            g: 0.0,
-            b: 0.0,
-            a: 1.0,
-        };
-        let green = wgpu::Color {
-            r: 0.0,
-            g: 1.0,
-            b: 0.0,
-            a: 1.0,
-        };
-        let blue = wgpu::Color {
-            r: 0.0,
-            g: 0.0,
-            b: 1.0,
-            a: 1.0,
-        };
-        let dark_grey = wgpu::Color {
-            r: 0.01,
-            g: 0.01,
-            b: 0.01,
-            a: 1.0,
-        };
+        let red = Vec3::X.extend(1.0);
+        let green = Vec3::Y.extend(1.0);
+        let blue = Vec3::Z.extend(1.0);
+        let dark_grey = Vec3::splat(0.1).extend(1.0);
         let _dir_red = r
             .new_directional_light()
             .with_direction(Vec3::new(0.0, -1.0, 0.0))
@@ -715,7 +696,9 @@ mod test {
     fn gltf_images() {
         let mut gpu = WgpuState::headless(100, 100).unwrap();
         let mut ui = gpu.new_ui_renderling();
-        let scene = ui.import_gltf("../../gltf/cheetah_cone.glb").unwrap();
+        let mut loader = gpu.new_gltf_loader();
+        let (document, _buffers, images) = gltf::import("../../gltf/cheetah_cone.glb").unwrap();
+        loader.load_materials(&document, &images).unwrap();
         let _img = ui
             .new_object()
             .with_mesh_builder(
@@ -737,7 +720,7 @@ mod test {
                     .with_indices(vec![0, 1, 2, 0, 2, 3]),
             )
             .with_material(UiMaterial {
-                diffuse_texture: scene.textures[0].clone(),
+                diffuse_texture: loader.textures()[0].clone(),
                 color_blend: UiColorBlend::UvOnly,
             })
             .with_scale(Vec3::new(100.0, 100.0, 1.0))
@@ -811,5 +794,17 @@ mod test {
         // img.save_with_format("../../test_img/parent_sanity.png",
         // image::ImageFormat::Png)    .unwrap();
         crate::img_diff::assert_img_eq("parent_sanity", "parent_sanity.png", img).unwrap();
+    }
+
+    #[cfg(feature = "gltf")]
+    #[test]
+    fn gltf_meshes() {
+        _init_logging();
+        let gpu = WgpuState::headless(100, 100).unwrap();
+        let mut r = &mut gpu.new_forward_renderling();
+        let mut loader = gpu.new_gltf_loader();
+        let (document, buffers, images) = gltf::import("../../gltf/cheetah_cone.glb").unwrap();
+        assert!(document.lights().is_some());
+        let _scene = loader.load_scene(None, r, &document, &buffers, &images).unwrap();
     }
 }

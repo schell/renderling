@@ -81,10 +81,9 @@ without any additional terms or conditions.
 - [x] object nesting / parenting / local transforms
 - [ ] gltf support
   - [ ] scenes, nodes
-  - [ ] cameras
-  - [ ] meshes
-  - [ ] buffers, bufferViews, accessors
-  - [ ] materials
+  - [x] cameras
+  - [x] meshes
+  - [x] materials
   - [x] textures, images, samplers
   - [ ] skins
   - [ ] animations

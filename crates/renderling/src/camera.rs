@@ -2,7 +2,7 @@
 use std::sync::mpsc::Sender;
 
 use glam::{Mat4, Vec3};
-use renderling_shader::ShaderCamera;
+use renderling_shader::CameraRaw;
 
 use crate::{
     linkage::create_camera_uniform,
@@ -12,7 +12,7 @@ use crate::{
 /// Camera primitive shared by both user-land and under-the-hood camera data.
 #[derive(Clone)]
 pub struct CameraInner {
-    pub(crate) camera: ShaderCamera,
+    pub(crate) camera: CameraRaw,
     pub(crate) dirty_uniform: bool,
 }
 
@@ -30,7 +30,7 @@ impl CameraInner {
         let up = Vec3::new(0.0, 1.0, 0.0);
         let view = Mat4::look_at_rh(eye, target, up);
         CameraInner {
-            camera: ShaderCamera { projection, view },
+            camera: CameraRaw { projection, view },
             dirty_uniform: false,
         }
     }
@@ -46,7 +46,7 @@ impl CameraInner {
         let up = Vec3::Y;
         let view = Mat4::look_at_rh(eye, target, up);
         CameraInner {
-            camera: ShaderCamera { projection, view },
+            camera: CameraRaw { projection, view },
             dirty_uniform: false,
         }
     }

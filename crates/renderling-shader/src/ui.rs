@@ -2,10 +2,10 @@
 use glam::{mat4, vec4, Mat4, Vec2, Vec3, Vec4};
 use spirv_std::{image::Image2d, Sampler};
 
-use crate::ShaderCamera;
+use crate::CameraRaw;
 
 pub fn main_vertex(
-    camera: &ShaderCamera,
+    camera: &CameraRaw,
 
     in_pos: Vec3,
     in_color: Vec4,

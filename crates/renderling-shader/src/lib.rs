@@ -11,7 +11,7 @@ pub mod ui;
 /// A camera projection and view.
 #[derive(Clone, Copy)]
 #[cfg_attr(not(target_arch = "spirv"), derive(encase::ShaderType))]
-pub struct ShaderCamera {
+pub struct CameraRaw {
     pub projection: Mat4,
     pub view: Mat4,
 }
