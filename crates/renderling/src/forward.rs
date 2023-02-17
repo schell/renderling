@@ -32,31 +32,6 @@ impl crate::Pipeline for ForwardPipeline {
     fn get_render_pipeline(&self) -> &wgpu::RenderPipeline {
         &self.inner
     }
-
-    // fn begin_render_pass<'a, 'b: 'a>(
-    //    &'b self,
-    //    encoder: &'a mut wgpu::CommandEncoder,
-    //    frame_texture_view: &'a wgpu::TextureView,
-    //    depth_texture_view: &'a wgpu::TextureView,
-    //) -> wgpu::RenderPass<'a> {
-    //    renderling_core::begin_render_pass(
-    //        encoder,
-    //        Some("forward-pipeline"),
-    //        &self.inner,
-    //        frame_texture_view,
-    //        depth_texture_view,
-    //    )
-    //}
-
-    // fn render_object<'a, 'b: 'a>(
-    //    &'b self,
-    //    render_pass: &'a mut wgpu::RenderPass<'b>,
-    //    object: renderling_core::ShaderObject<'b>,
-    //    default_material_bindgroup: &'b wgpu::BindGroup,
-    //) {
-    //    renderling_core::render_object(render_pass, object,
-    // default_material_bindgroup)
-    //}
 }
 
 impl ForwardPipeline {

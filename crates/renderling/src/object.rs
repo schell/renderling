@@ -2,27 +2,16 @@
 use std::sync::{mpsc::Sender, Arc};
 
 use glam::{Mat3, Mat4, Quat, Vec3};
-use rustc_hash::FxHashSet;
 use snafu::prelude::*;
 use wgpu::util::DeviceExt;
 
 use crate::{
     linkage::{ObjectDraw, ShaderObject},
     resources::Id,
-    Camera, LocalTransform, Shared, WorldTransform,
+    LocalTransform, Shared, WorldTransform,
 };
 
 pub(crate) enum ObjUpdateCmd {
-    // remove the object from the camera's objects
-    RemoveFromCamera {
-        camera_id: Id<Camera>,
-        object_id: Id<Object>,
-    },
-    // add the object to the camera's list of objects
-    AddToCamera {
-        camera_id: Id<Camera>,
-        object_id: Id<Object>,
-    },
     // update the given object's transform
     Transform {
         object_id: Id<Object>,
@@ -48,7 +37,6 @@ pub enum ObjectBuilderError {
 }
 
 pub struct ObjectBuilder<'a> {
-    pub(crate) camera: Option<Id<Camera>>,
     pub(crate) mesh: Option<Arc<crate::Mesh>>,
     pub(crate) material: Option<crate::AnyMaterial>,
     pub(crate) local_transform: crate::LocalTransform,
@@ -62,11 +50,6 @@ pub struct ObjectBuilder<'a> {
 }
 
 impl<'a> ObjectBuilder<'a> {
-    pub fn with_camera(mut self, camera: &crate::Camera) -> Self {
-        self.camera = Some(camera.id);
-        self
-    }
-
     pub fn with_mesh(mut self, mesh: impl Into<Arc<crate::Mesh>>) -> Self {
         self.mesh = Some(mesh.into());
         self
@@ -94,12 +77,12 @@ impl<'a> ObjectBuilder<'a> {
     }
 
     pub fn with_position(mut self, p: Vec3) -> Self {
-        self.local_transform.translate = Vec3::new(p.x, p.y, p.z);
+        self.local_transform.position = Vec3::new(p.x, p.y, p.z);
         self
     }
 
     pub fn with_rotation(mut self, rotation: Quat) -> Self {
-        self.local_transform.rotate = rotation;
+        self.local_transform.rotation = rotation;
         self
     }
 
@@ -133,14 +116,12 @@ impl<'a> ObjectBuilder<'a> {
             .material
             .as_ref()
             .map(|mat| mat.create_material_uniform(self.device));
-        let position = self.local_transform.translate;
+        let position = self.local_transform.position;
         let local_transforms = std::iter::once(self.local_transform)
             .chain(self.local_transforms)
             .collect::<Vec<_>>();
-        let is_visible = self.camera.is_some() && self.is_visible;
         let id = self.scene.new_object_id();
         let inner = ObjectInner {
-            camera: self.camera.clone(),
             // parent is set to `Some` when/if the parent is built, or updated
             parent: None,
             children: vec![],
@@ -170,23 +151,16 @@ impl<'a> ObjectBuilder<'a> {
             material_uniform,
             instances,
             world_position: position,
-            cameras: FxHashSet::from_iter(self.camera.clone()),
             inner: inner.clone(),
         };
 
         self.scene.objects[id.0] = Some(obj_data);
-        if is_visible {
-            let camera_id = self.camera.as_ref().unwrap();
-            self.scene.add_object_to_camera(&id, camera_id);
-        }
 
-        let object = Object {
+        Ok(Object {
             id,
             inner,
             cmd: self.update_tx,
-        };
-
-        Ok(object)
+        })
     }
 }
 
@@ -202,7 +176,6 @@ pub(crate) struct ChildObject(Id<Object>);
 pub(crate) struct ObjectInner {
     pub(crate) mesh: Option<Arc<crate::Mesh>>,
     pub(crate) material: Option<crate::AnyMaterial>,
-    pub(crate) camera: Option<Id<Camera>>,
     pub(crate) parent: Option<ParentObject>,
     pub(crate) children: Vec<ChildObject>,
     pub(crate) is_visible: bool,
@@ -296,30 +269,6 @@ impl Drop for Object {
 }
 
 impl Object {
-    /// Associate this object with the given camera.
-    ///
-    /// This will have the effect that the object will be drawn with this camera
-    /// on the next frame.
-    pub fn set_camera(&self, camera: &crate::Camera) {
-        let new_camera_id = camera.id;
-        let object_id = self.id;
-        if let Some(old_camera) = std::mem::replace(&mut self.inner.write().camera, Some(camera.id))
-        {
-            self.cmd
-                .send(ObjUpdateCmd::RemoveFromCamera {
-                    camera_id: old_camera,
-                    object_id,
-                })
-                .unwrap();
-        }
-        self.cmd
-            .send(ObjUpdateCmd::AddToCamera {
-                camera_id: new_camera_id,
-                object_id,
-            })
-            .unwrap();
-    }
-
     /// Update the local transform of this object.
     pub fn set_transform(&self, transform: LocalTransform) {
         let mut inner = self.inner.write();
@@ -352,25 +301,6 @@ impl Object {
         let mut inner = self.inner.write();
         if inner.is_visible != is_visible {
             inner.is_visible = is_visible;
-            if is_visible {
-                if let Some(camera) = inner.camera.as_ref() {
-                    self.cmd
-                        .send(ObjUpdateCmd::AddToCamera {
-                            camera_id: *camera,
-                            object_id: self.id,
-                        })
-                        .unwrap();
-                }
-            } else {
-                if let Some(camera) = inner.camera.as_ref() {
-                    self.cmd
-                        .send(ObjUpdateCmd::RemoveFromCamera {
-                            camera_id: *camera,
-                            object_id: self.id,
-                        })
-                        .unwrap();
-                }
-            }
         }
     }
 
@@ -446,7 +376,6 @@ pub(crate) struct ObjectData {
     pub(crate) material_uniform: Option<crate::AnyMaterialUniform>,
     pub(crate) instances: crate::linkage::VertexBuffer,
     pub(crate) world_position: Vec3,
-    pub(crate) cameras: FxHashSet<Id<Camera>>,
     pub(crate) inner: Shared<ObjectInner>,
 }
 
@@ -486,7 +415,7 @@ impl ObjectData {
         inner.update_world_transforms_buffer(&queue, &self.instances, generate_normal_matrix);
         let parent_tfrm = inner.get_parent_world_transform().unwrap_or_default();
         let parent_model_matrix = Mat4::from(&parent_tfrm);
-        let p = inner.local_transforms[0].translate;
+        let p = inner.local_transforms[0].position;
         self.world_position = parent_model_matrix.project_point3(p);
     }
 }

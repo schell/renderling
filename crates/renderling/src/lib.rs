@@ -76,8 +76,19 @@ mod img_diff;
 mod test {
     use std::sync::Arc;
 
+    use crate::img_diff::Save;
+
     use super::*;
-    use glam::{Mat4, Quat, Vec2, Vec3};
+    use glam::{Mat4, Quat, Vec2, Vec3, Vec4};
+
+    #[test]
+    fn init() {
+        let gpu = WgpuState::headless(100, 100).unwrap();
+        let ui = gpu.new_ui_renderling();
+        assert_eq!(0, ui.cameras().count());
+        let forward = gpu.new_forward_renderling();
+        assert_eq!(0, forward.cameras().count());
+    }
 
     fn right_tri_builder() -> MeshBuilder<UiVertex> {
         MeshBuilder::default().with_vertices(vec![
@@ -96,6 +107,7 @@ mod test {
     struct CmyTri {
         gpu: WgpuState,
         ui: Renderling<UiPipeline>,
+        _cam: Camera,
         tri: Object,
     }
 
@@ -104,19 +116,23 @@ mod test {
         gpu.default_background_color = wgpu::Color::WHITE;
 
         let mut ui: Renderling<UiPipeline> = gpu.new_ui_renderling();
+        let cam = ui
+            .new_camera()
+            .with_projection_ortho2d()
+            .build();
         let tri = ui
             .new_object()
             .with_mesh_builder(right_tri_builder())
             .build()
             .unwrap();
-        CmyTri { gpu, ui, tri }
+        CmyTri { gpu, _cam: cam, ui, tri }
     }
 
     #[test]
-    fn cmy_triangle() {
+    fn cmy_triangle_sanity() {
+        _init_logging();
         let mut c = cmy_triangle_setup();
-        let (frame, depth) = c.gpu.next_frame().unwrap();
-        c.gpu.clear(Some(&frame), Some(&depth));
+        let (frame, depth) = c.gpu.next_frame_cleared().unwrap();
         c.ui.update().unwrap();
         c.ui.render(&frame, &depth).unwrap();
         let img = c.gpu.grab_frame_image().unwrap();
@@ -213,34 +229,34 @@ mod test {
     }
 
     #[test]
-    fn cmy_cube() {
-        //_init_logging();
+    fn cmy_cube_sanity() {
+        _init_logging();
         let mut gpu = WgpuState::headless(100, 100).unwrap();
         gpu.default_background_color = wgpu::Color::WHITE;
 
         let mut ui = gpu.new_ui_renderling();
+        assert_eq!(0, ui.cameras().count());
 
-        // test updating the camera by using a new one
-        let cam = ui.default_camera();
-        cam.look_at(Vec3::new(0.0, 12.0, 20.0), Vec3::ZERO, Vec3::Y);
-        cam.set_projection(Mat4::perspective_rh(
-            std::f32::consts::PI / 4.0,
-            1.0,
-            0.1,
-            100.0,
-        ));
+        let _cam = ui
+            .new_camera()
+            .with_look_at(Vec3::new(0.0, 12.0, 20.0), Vec3::ZERO, Vec3::Y)
+            .with_projection(Mat4::perspective_rh(
+                std::f32::consts::PI / 4.0,
+                1.0,
+                0.1,
+                100.0,
+            ))
+            .build();
 
         let _cube = ui
             .new_object()
-            .with_camera(&cam)
             .with_mesh_builder(cube_builder())
             .with_scale(Vec3::new(6.0, 6.0, 6.0))
             .with_rotation(Quat::from_axis_angle(Vec3::Y, -std::f32::consts::FRAC_PI_4))
             .build()
             .unwrap();
 
-        let (frame, depth) = gpu.next_frame().unwrap();
-        gpu.clear(Some(&frame), Some(&depth));
+        let (frame, depth) = gpu.next_frame_cleared().unwrap();
         ui.update().unwrap();
         ui.render(&frame, &depth).unwrap();
 
@@ -250,17 +266,16 @@ mod test {
 
     #[test]
     fn cmy_cube_visible() {
-        //_init_logging();
+        _init_logging();
         let mut gpu = WgpuState::headless(100, 100).unwrap();
         gpu.default_background_color = wgpu::Color::WHITE;
 
         let mut ui = gpu.new_ui_renderling();
 
-        let cam = ui.new_camera().with_projection_perspective().build();
+        let _cam = ui.new_camera().with_projection_perspective().build();
 
         let _cube_one = ui
             .new_object()
-            .with_camera(&cam)
             .with_mesh_builder(cube_builder())
             .with_position(Vec3::new(-4.0, 0.0, 0.0))
             .with_scale(Vec3::new(6.0, 6.0, 6.0))
@@ -270,7 +285,6 @@ mod test {
 
         let cube_two = ui
             .new_object()
-            .with_camera(&cam)
             .with_mesh_builder(cube_builder())
             .with_position(Vec3::new(4.0, 0.0, 0.0))
             .with_scale(Vec3::new(6.0, 6.0, 6.0))
@@ -278,8 +292,7 @@ mod test {
             .build()
             .unwrap();
 
-        let (frame, depth) = gpu.next_frame().unwrap();
-        gpu.clear(Some(&frame), Some(&depth));
+        let (frame, depth) = gpu.next_frame_cleared().unwrap();
         ui.update().unwrap();
         ui.render(&frame, &depth).unwrap();
 
@@ -297,8 +310,7 @@ mod test {
         .unwrap();
 
         cube_two.set_visible(false);
-        let (frame, depth) = gpu.next_frame().unwrap();
-        gpu.clear(Some(&frame), Some(&depth));
+        let (frame, depth) = gpu.next_frame_cleared().unwrap();
         ui.update().unwrap();
         ui.render(&frame, &depth).unwrap();
 
@@ -332,10 +344,9 @@ mod test {
         let mut gpu = WgpuState::headless(100, 100).unwrap();
         gpu.default_background_color = wgpu::Color::TRANSPARENT;
         let mut ui = gpu.new_ui_renderling();
-        let cam = ui.new_camera().with_projection_perspective().build();
+        let _cam = ui.new_camera().with_projection_perspective().build();
         let cube = ui
             .new_object()
-            .with_camera(&cam)
             .with_mesh_builder(cube_builder())
             .with_scale(Vec3::new(10.0, 10.0, 10.0))
             .build()
@@ -484,7 +495,7 @@ mod test {
         let mut gpu = WgpuState::headless(100, 100).unwrap();
         gpu.default_background_color = wgpu::Color::TRANSPARENT;
         let mut ui = gpu.new_ui_renderling();
-        let cam = ui.new_camera().with_projection_perspective().build();
+        let _cam = ui.new_camera().with_projection_perspective().build();
         let png = image::open("../../img/sandstone.png").unwrap();
         let tex = gpu
             .create_texture(Some("sandstone_material"), &png.to_rgba8())
@@ -496,7 +507,6 @@ mod test {
         let builder = uv_unit_cube();
         let cube = ui
             .new_object()
-            .with_camera(&cam)
             .with_material(material)
             .with_mesh_builder(builder)
             .with_scale(Vec3::new(10.0, 10.0, 10.0))
@@ -562,34 +572,34 @@ mod test {
     fn forward_cube_directional() {
         _init_logging();
         let mut gpu = WgpuState::headless(100, 100).unwrap();
-        gpu.default_background_color = wgpu::Color::TRANSPARENT;
+        gpu.default_background_color = wgpu::Color::BLACK;
         let mut r = gpu.new_forward_renderling();
         let red = Vec3::X.extend(1.0);
         let green = Vec3::Y.extend(1.0);
         let blue = Vec3::Z.extend(1.0);
-        let dark_grey = Vec3::splat(0.1).extend(1.0);
+        let transparent = Vec4::ZERO;
         let _dir_red = r
             .new_directional_light()
-            .with_direction(Vec3::new(0.0, -1.0, 0.0))
+            .with_direction(Vec3::NEG_Y)
             .with_diffuse_color(red)
             .with_specular_color(red)
-            .with_ambient_color(dark_grey)
+            .with_ambient_color(transparent)
             .build();
         let _dir_green = r
             .new_directional_light()
-            .with_direction(Vec3::new(-1.0, 0.0, 0.0))
+            .with_direction(Vec3::NEG_X)
             .with_diffuse_color(green)
             .with_specular_color(green)
-            .with_ambient_color(dark_grey)
+            .with_ambient_color(transparent)
             .build();
-        let dir_blue = r
+        let _dir_blue = r
             .new_directional_light()
-            .with_direction(Vec3::new(0.0, 0.0, -1.0))
+            .with_direction(Vec3::NEG_Z)
             .with_diffuse_color(blue)
             .with_specular_color(blue)
-            .with_ambient_color(dark_grey)
+            .with_ambient_color(transparent)
             .build();
-        let cam = r
+        let _cam = r
             .new_camera()
             .with_projection_perspective()
             .with_look_at(
@@ -600,7 +610,6 @@ mod test {
             .build();
         let _tri = r
             .new_object()
-            .with_camera(&cam)
             .with_mesh_builder(MeshBuilder::default().with_vertices(
                 crate::math::unit_cube().into_iter().map(|(p, n)| {
                     ForwardVertex::default()
@@ -611,21 +620,13 @@ mod test {
             .build()
             .unwrap();
 
+        let (frame, depth) = gpu.next_frame_cleared().unwrap();
         r.update().unwrap();
-        dir_blue.set_direction(Vec3::NEG_Z);
-        r.update().unwrap();
-
-        let (frame, depth) = gpu.next_frame().unwrap();
-        gpu.clear(Some(&frame), Some(&depth));
         r.render(&frame, &depth).unwrap();
 
         let img = gpu.grab_frame_image().unwrap();
-        // img.save_with_format(
-        //    "forward_cube_directional.png",
-        //    image::ImageFormat::Png,
-        //)
-        //.unwrap();
-        crate::img_diff::assert_img_eq(
+        crate::img_diff::assert_img_eq_save(
+            Save::No,
             "forward_cube_directional",
             "forward_cube_directional.png",
             img,
@@ -666,6 +667,10 @@ mod test {
         let material = Arc::new(material.unwrap());
         let mesh = Arc::new(mesh.unwrap());
         let mut r = gpu.new_ui_renderling();
+        let _cam = r
+            .new_camera()
+            .with_projection_ortho2d()
+            .build();
         let _obj_a = r
             .new_object()
             .with_material::<UiMaterial>(material.clone())
@@ -681,8 +686,7 @@ mod test {
             .unwrap();
         r.update().unwrap();
 
-        let (frame, depth) = gpu.next_frame().unwrap();
-        gpu.clear(Some(&frame), Some(&depth));
+        let (frame, depth) = gpu.next_frame_cleared().unwrap();
         r.render(&frame, &depth).unwrap();
 
         let img = gpu.grab_frame_image().unwrap();
@@ -696,6 +700,10 @@ mod test {
     fn gltf_images() {
         let mut gpu = WgpuState::headless(100, 100).unwrap();
         let mut ui = gpu.new_ui_renderling();
+        let _cam = ui
+            .new_camera()
+            .with_projection_ortho2d()
+            .build();
         let mut loader = gpu.new_gltf_loader();
         let (document, _buffers, images) = gltf::import("../../gltf/cheetah_cone.glb").unwrap();
         loader.load_materials(&document, &images).unwrap();
@@ -720,15 +728,14 @@ mod test {
                     .with_indices(vec![0, 1, 2, 0, 2, 3]),
             )
             .with_material(UiMaterial {
-                diffuse_texture: loader.textures()[0].clone(),
+                diffuse_texture: loader.textures().next().unwrap().clone(),
                 color_blend: UiColorBlend::UvOnly,
             })
             .with_scale(Vec3::new(100.0, 100.0, 1.0))
             .build()
             .unwrap();
         ui.update().unwrap();
-        let (frame, depth) = gpu.next_frame().unwrap();
-        gpu.clear(Some(&frame), Some(&depth));
+        let (frame, depth) = gpu.next_frame_cleared().unwrap();
         ui.render(&frame, &depth).unwrap();
 
         let img = gpu.grab_frame_image().unwrap();
@@ -742,6 +749,10 @@ mod test {
     fn parent_sanity() {
         let mut gpu = WgpuState::headless(100, 100).unwrap();
         let mut ui = gpu.new_ui_renderling();
+        let _cam = ui
+            .new_camera()
+            .with_projection_ortho2d()
+            .build();
         let size = 1.0;
         let yellow_tri = ui
             .new_object()
@@ -798,13 +809,24 @@ mod test {
 
     #[cfg(feature = "gltf")]
     #[test]
-    fn gltf_meshes() {
+    fn gltf_load_scene() {
         _init_logging();
-        let gpu = WgpuState::headless(100, 100).unwrap();
-        let mut r = &mut gpu.new_forward_renderling();
+        let mut gpu = WgpuState::headless(100, 100).unwrap();
+        let mut r = gpu.new_forward_renderling();
+
         let mut loader = gpu.new_gltf_loader();
         let (document, buffers, images) = gltf::import("../../gltf/cheetah_cone.glb").unwrap();
-        assert!(document.lights().is_some());
-        let _scene = loader.load_scene(None, r, &document, &buffers, &images).unwrap();
+        loader
+            .load_scene(None, &mut r, &document, &buffers, &images)
+            .unwrap();
+
+        r.update().unwrap();
+        let (frame, depth) = gpu.next_frame_cleared().unwrap();
+        r.render(&frame, &depth).unwrap();
+
+        let img = gpu.grab_frame_image().unwrap();
+        // img.save_with_format("../../test_img/parent_sanity.png",
+        // image::ImageFormat::Png)    .unwrap();
+        crate::img_diff::assert_img_eq("gltf_load_scene", "parent_sanity.png", img).unwrap();
     }
 }

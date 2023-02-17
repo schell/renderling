@@ -6,6 +6,36 @@ use snafu::prelude::*;
 const TEST_IMG_DIR: &'static str = "../../test_img";
 const TEST_OUTPUT_DIR: &'static str = "../../test_output";
 
+pub enum Save {
+    Yes,
+    No,
+}
+
+impl From<Save> for bool {
+    fn from(value: Save) -> Self {
+        match value {
+            Save::Yes => true,
+            Save::No => false,
+        }
+    }
+}
+
+pub fn assert_img_eq_save(
+    should_save: Save,
+    test_name: &'static str,
+    filename: &'static str,
+    seen: image::RgbaImage,
+) -> Result<(), snafu::Whatever> {
+    if should_save.into() {
+        seen.save_with_format(
+            Path::new(TEST_IMG_DIR).join(filename),
+            image::ImageFormat::Png,
+        )
+        .unwrap();
+    }
+    assert_img_eq(test_name, filename, seen)
+}
+
 pub fn assert_img_eq(
     test_name: &'static str,
     filename: &'static str,

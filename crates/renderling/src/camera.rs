@@ -191,6 +191,7 @@ impl<'a> CameraBuilder<'a> {
         };
         let camera = Camera { id, cmd, inner };
         scene.cameras[id.0] = Some(camera_data);
+        scene.should_sort = true;
         camera
     }
 }
