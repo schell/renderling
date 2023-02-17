@@ -9,18 +9,19 @@ use glam::{Mat4, Quat, Vec3};
 /// to a 4x4 matrix that has been translated, rotated and then scaled.
 ///
 /// M = T * R * S
+#[derive(Copy)]
 pub struct Transform<T> {
-    pub translate: Vec3,
+    pub position: Vec3,
     pub scale: Vec3,
-    pub rotate: Quat,
+    pub rotation: Quat,
     _phantom: PhantomData<T>,
 }
 
 impl<T> PartialEq for Transform<T> {
     fn eq(&self, other: &Self) -> bool {
-        self.translate == other.translate
+        self.position == other.position
             && self.scale == other.scale
-            && self.rotate == other.rotate
+            && self.rotation == other.rotation
     }
 }
 
@@ -29,9 +30,9 @@ impl<T> Eq for Transform<T> {}
 impl<T> std::fmt::Debug for Transform<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Transform")
-            .field("translate", &self.translate)
+            .field("translate", &self.position)
             .field("scale", &self.scale)
-            .field("rotate", &self.rotate)
+            .field("rotate", &self.rotation)
             .finish()
     }
 }
@@ -39,9 +40,9 @@ impl<T> std::fmt::Debug for Transform<T> {
 impl<T> Clone for Transform<T> {
     fn clone(&self) -> Self {
         Self {
-            translate: self.translate.clone(),
+            position: self.position.clone(),
             scale: self.scale.clone(),
-            rotate: self.rotate.clone(),
+            rotation: self.rotation.clone(),
             _phantom: PhantomData,
         }
     }
@@ -50,9 +51,9 @@ impl<T> Clone for Transform<T> {
 impl<T> Default for Transform<T> {
     fn default() -> Self {
         Transform {
-            translate: Vec3::new(0.0, 0.0, 0.0),
+            position: Vec3::new(0.0, 0.0, 0.0),
             scale: Vec3::new(1.0, 1.0, 1.0),
-            rotate: Quat::IDENTITY,
+            rotation: Quat::IDENTITY,
             _phantom: PhantomData,
         }
     }
@@ -60,8 +61,8 @@ impl<T> Default for Transform<T> {
 
 impl<T> From<&Transform<T>> for Mat4 {
     fn from(trns: &Transform<T>) -> Self {
-        let t = Mat4::from_translation(trns.translate);
-        let r = Mat4::from_quat(trns.rotate);
+        let t = Mat4::from_translation(trns.position);
+        let r = Mat4::from_quat(trns.rotation);
         let s = Mat4::from_scale(trns.scale);
         t * r * s
     }
@@ -76,26 +77,26 @@ impl<T> From<Transform<T>> for Mat4 {
 impl<T> Transform<T> {
     pub fn from_xyz(x: f32, y: f32, z: f32) -> Self {
         let mut t = Transform::default();
-        t.translate.x = x;
-        t.translate.y = y;
-        t.translate.z = z;
+        t.position.x = x;
+        t.position.y = y;
+        t.position.z = z;
         t
     }
 
     pub fn from_translate(v: Vec3) -> Self {
         Transform {
-            translate: v,
+            position: v,
             ..Default::default()
         }
     }
 
     pub fn with_position(mut self, p: Vec3) -> Self {
-        self.translate = Vec3::new(p.x, p.y, p.z);
+        self.position = Vec3::new(p.x, p.y, p.z);
         self
     }
 
     pub fn with_rotation(mut self, r: Quat) -> Self {
-        self.rotate = r;
+        self.rotation = r;
         self
     }
 
@@ -109,13 +110,13 @@ impl<T> Transform<T> {
     /// M = (T + T) * (R * R) * (S * S)
     pub fn append(&self, other: &Transform<T>) -> Transform<T> {
         Transform {
-            translate: self.translate + other.translate,
+            position: self.position + other.position,
             scale: Vec3::new(
                 self.scale.x * other.scale.x,
                 self.scale.y * other.scale.y,
                 self.scale.z * other.scale.z,
             ),
-            rotate: self.rotate * other.rotate,
+            rotation: self.rotation * other.rotation,
             _phantom: PhantomData,
         }
     }
@@ -127,9 +128,9 @@ impl<T> Transform<T> {
 
     pub fn as_global(&self) -> Transform<Global> {
         Transform {
-            translate: self.translate,
+            position: self.position,
             scale: self.scale,
-            rotate: self.rotate,
+            rotation: self.rotation,
             _phantom: PhantomData,
         }
     }

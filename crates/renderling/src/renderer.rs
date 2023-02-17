@@ -4,7 +4,6 @@ use renderling_shader::pbr::{
     DirectionalLightRaw, DirectionalLights, PointLightRaw, PointLights, SpotLightRaw, SpotLights,
     DIRECTIONAL_LIGHTS_MAX, POINT_LIGHTS_MAX, SPOT_LIGHTS_MAX,
 };
-use rustc_hash::FxHashSet;
 use snafu::prelude::*;
 use std::{
     marker::PhantomData,
@@ -60,6 +59,8 @@ pub(crate) struct Stage {
     pub cameras: Vec<Option<CameraData>>,
     // all object ids, sorted by distance to camera
     camera_objects_by_distance: Vec<Vec<Id<Object>>>,
+    // whether we need to sort on the next update
+    pub should_sort: bool,
     // all objects, indexed by Id
     pub objects: Vec<Option<ObjectData>>,
 }
@@ -87,11 +88,6 @@ impl Stage {
         log::trace!("destroying and recycling camera {:?}", camera_id);
         self.cameras[camera_id.0] = None;
         self.camera_objects_by_distance[camera_id.0] = vec![];
-        for object in self.objects.iter_mut() {
-            if let Some(object) = object.as_mut() {
-                let _ = object.cameras.remove(&camera_id);
-            }
-        }
         self.camera_id_bank.recycle(camera_id);
     }
 
@@ -113,36 +109,25 @@ impl Stage {
         may_dat.as_ref()
     }
 
-    pub fn remove_object_from_camera(&mut self, object_id: &Id<Object>, camera_id: &Id<Camera>) {
-        if let Some(object) = self.get_object_mut(object_id) {
-            object.cameras.remove(camera_id);
-        }
-    }
-
-    pub fn add_object_to_camera(&mut self, object_id: &Id<Object>, camera_id: &Id<Camera>) -> bool {
-        if let Some(object) = self.get_object_mut(object_id) {
-            let _ = object.cameras.insert(*camera_id);
-            true
-        } else {
-            false
-        }
-    }
-
     pub fn destroy_object(&mut self, object_id: Id<Object>) {
         if let Some(_object) = self.objects[object_id.0].take() {
             self.object_id_bank.recycle(object_id);
         }
     }
 
-    // TODO: make this more efficient by only sorting based on one camera_id
+    /// Sorts objects by their distance to each camera.
+    ///
+    /// This also generates the lists of objects sorted per camera.
     pub fn sort_objects(&mut self) {
+        log::trace!("sorting objects by distance to camera");
+        self.should_sort = false;
+
         let mut sorted = vec![];
         struct Sorter {
             object_id: Id<Object>,
             distance: f32,
         }
-        for (i, camera) in self.cameras.iter().enumerate() {
-            let camera_id = Id::new(i);
+        for camera in self.cameras.iter() {
             if let Some(cam_data) = camera {
                 let cam_pos = cam_data
                     .inner
@@ -154,18 +139,14 @@ impl Stage {
                     .objects
                     .iter()
                     .enumerate()
-                    .filter_map(|(j, obj_data)| {
+                    .filter_map(|(i, obj_data)| {
                         let obj_data = obj_data.as_ref()?;
-                        let object_id = Id::new(j);
-                        if obj_data.cameras.contains(&camera_id) {
-                            let distance = obj_data.world_position.distance(cam_pos);
-                            Some(Sorter {
-                                object_id,
-                                distance,
-                            })
-                        } else {
-                            None
-                        }
+                        let object_id = Id::new(i);
+                        let distance = obj_data.world_position.distance(cam_pos);
+                        Some(Sorter {
+                            object_id,
+                            distance,
+                        })
                     })
                     .collect::<Vec<_>>();
                 // we want to sort back to front
@@ -280,10 +261,9 @@ impl<P: Pipeline> Renderling<P> {
 
     /// Retrieves the default camera.
     ///
-    /// The default camera is the camera that renders first.
     /// The default camera comes first in the iterator returned by
-    /// `Renderling::cameras`. The default camera is often the one that was
-    /// created automatically when the renderling was created.
+    /// `Renderling::cameras`. The default camera is the one that was
+    /// created first after the renderling was created.
     pub fn default_camera(&self) -> Camera {
         // UNWRAP: having one default camera is an invariant of the system and we should
         // panic otherwise
@@ -304,7 +284,6 @@ impl<P: Pipeline> Renderling<P> {
     /// with no rotation and scale 1,1,1.
     pub fn new_object(&mut self) -> ObjectBuilder<'_> {
         ObjectBuilder {
-            camera: Some(Id::new(0)),
             mesh: None,
             material: None,
             children: vec![],
@@ -334,34 +313,16 @@ impl<P: Pipeline> Renderling<P> {
     ///
     /// This must be called in order to display any changes.
     pub fn update(&mut self) -> Result<(), RenderlingError> {
-        let mut cameras_to_sort = FxHashSet::<Id<Camera>>::default();
         while let Ok(cmd) = self.object_update_queue.1.try_recv() {
             match cmd {
-                ObjUpdateCmd::RemoveFromCamera {
-                    camera_id,
-                    object_id,
-                } => {
-                    log::trace!("removed object {:?} from camera {:?}", object_id, camera_id);
-                    self.stage.remove_object_from_camera(&object_id, &camera_id);
-                }
-                ObjUpdateCmd::AddToCamera {
-                    camera_id,
-                    object_id,
-                } => {
-                    if self.stage.add_object_to_camera(&object_id, &camera_id) {
-                        log::trace!("added object {:?} to camera {:?}", object_id, camera_id);
-                        cameras_to_sort.insert(camera_id);
-                    }
-                }
                 ObjUpdateCmd::Transform { object_id } => {
                     if let Some(object) = self.stage.get_object_mut(&object_id) {
                         object.update_world_transform(
                             &self.queue,
                             self.meshes_have_normal_matrix_attribute,
                         );
-                        // this object's transform changed, so we should resort all the cameras that
-                        // contain this one
-                        cameras_to_sort.extend(object.cameras.clone());
+                        // this object's transform changed, so we should resort the cameras
+                        self.stage.should_sort = true;
                     }
                 }
                 ObjUpdateCmd::Mesh { object_id } => {
@@ -382,6 +343,7 @@ impl<P: Pipeline> Renderling<P> {
                 }
                 ObjUpdateCmd::Destroy { object_id } => {
                     self.stage.destroy_object(object_id);
+                    self.stage.should_sort = true;
                 }
             }
         }
@@ -392,8 +354,8 @@ impl<P: Pipeline> Renderling<P> {
                     self.stage.destroy_camera(camera_id);
                 }
                 CameraUpdateCmd::Update { camera_id } => {
+                    self.stage.should_sort = true;
                     if let Some(camera_data) = self.stage.get_camera_mut(&camera_id) {
-                        cameras_to_sort.insert(camera_id);
                         let mut inner = camera_data.inner.write();
                         let (buffer, bindgroup) = create_camera_uniform(
                             &self.device,
@@ -408,7 +370,7 @@ impl<P: Pipeline> Renderling<P> {
             }
         }
 
-        if true || !cameras_to_sort.is_empty() {
+        if self.stage.should_sort {
             self.stage.sort_objects();
         }
 
@@ -514,14 +476,18 @@ impl<P: Pipeline> Renderling<P> {
         }
     }
 
+    pub fn get_object_ids_sorted_by_distance_to_camera(&self, camera: &Camera) -> &Vec<Id<Object>> {
+        &self.stage.camera_objects_by_distance[camera.id.0]
+    }
+
     /// Conduct a full render pass into the given textures using the given
     /// camera and objects.
-    fn render_camera_objects<'a>(
+    pub fn render_object_ids<'a>(
         &'a self,
         frame_texture_view: &wgpu::TextureView,
         depth_texture_view: &wgpu::TextureView,
         camera: &Id<Camera>,
-        objects: impl Iterator<Item = &'a ObjectData>,
+        objects: impl Iterator<Item = &'a Id<Object>>,
     ) -> Result<(), RenderlingError> {
         log::trace!("render");
         let mut encoder = self
@@ -554,14 +520,16 @@ impl<P: Pipeline> Renderling<P> {
         // bind the camera to our shader
         render_pass.set_bind_group(self.camera_bindgroup_index, &camera_data.bindgroup, &[]);
 
-        // TODO: de-dupe this code with other render function
-        for outer_object in objects {
-            if let Some(object) = self
-                .stage
-                .get_object(&outer_object.id)
-                .map(ObjectData::as_shader_object)
-                .flatten()
-            {
+        for object_id in objects {
+            let object = if let Some(object) = self.stage.get_object(object_id) {
+                if !object.inner.read().is_visible {
+                    continue;
+                }
+                object
+            } else {
+                continue;
+            };
+            if let Some(object) = object.as_shader_object() {
                 let material = object
                     .material
                     .unwrap_or(default_material_uniform.get_bindgroup());
@@ -600,19 +568,38 @@ impl<P: Pipeline> Renderling<P> {
 
     /// Conduct a full render pass into the given textures.
     ///
-    /// Only renders using the given camera.
+    /// Renders all objects with the given camera.
+    pub fn render_objects<'a>(
+        &self,
+        frame_texture_view: &wgpu::TextureView,
+        depth_texture_view: &wgpu::TextureView,
+        camera: &Camera,
+        objects: impl Iterator<Item = &'a Object>,
+    ) -> Result<(), RenderlingError> {
+        self.render_object_ids(
+            frame_texture_view,
+            depth_texture_view,
+            &camera.id,
+            objects.map(|o| &o.id),
+        )
+    }
+
+    /// Conduct a full render pass into the given textures.
+    ///
+    /// Renders all objects with the given camera.
     pub fn render_camera(
         &self,
         frame_texture_view: &wgpu::TextureView,
         depth_texture_view: &wgpu::TextureView,
-        camera_id: &Id<Camera>,
+        camera: &Camera,
     ) -> Result<(), RenderlingError> {
-        if let Some(object_ids) = self.stage.camera_objects_by_distance.get(camera_id.0) {
-            let objects = object_ids.iter().filter_map(|id| {
-                let may_o = self.stage.objects.get(id.0)?;
-                may_o.as_ref()
-            });
-            self.render_camera_objects(frame_texture_view, depth_texture_view, camera_id, objects)
+        if let Some(object_ids) = self.stage.camera_objects_by_distance.get(camera.id.0) {
+            self.render_object_ids(
+                frame_texture_view,
+                depth_texture_view,
+                &camera.id,
+                object_ids.iter(),
+            )
         } else {
             Ok(())
         }
@@ -620,16 +607,14 @@ impl<P: Pipeline> Renderling<P> {
 
     /// Conduct a full render pass into the given textures.
     ///
-    /// Uses all cameras in the order they were created.
+    /// Uses the first camera to render, if available.
+    /// Errs if no cameras have been created.
     pub fn render(
         &self,
         frame_texture_view: &wgpu::TextureView,
         depth_texture_view: &wgpu::TextureView,
     ) -> Result<(), RenderlingError> {
-        for i in 0..self.stage.cameras.len() {
-            let id = Id::new(i);
-            self.render_camera(frame_texture_view, depth_texture_view, &id)?;
-        }
-        Ok(())
+        let camera = self.cameras().next().context(MissingCameraSnafu)?;
+        self.render_camera(frame_texture_view, depth_texture_view, &camera)
     }
 }

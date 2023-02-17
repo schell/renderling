@@ -91,6 +91,9 @@ impl RenderTarget {
         }
     }
 
+    /// Get the current render target frame.
+    ///
+    /// Errs if the render target is a surface and there was an error getting the next swapchain texture.
     pub fn get_current_frame(&self) -> Result<Frame, WgpuStateError> {
         match self {
             RenderTarget::Surface { surface, .. } => {
@@ -330,6 +333,8 @@ impl WgpuState {
     }
 
     /// Loads [`current_target_frame`] with a [`TargetFrame`], if possible.
+    ///
+    /// Errs if the render target is a surface and the next swapchain texture cannot be produced.
     pub fn prepare_target_frame(&mut self) -> Result<(), WgpuStateError> {
         let current_surface_frame = self.target.get_current_frame()?;
         // Save the frame for subsequent systems' render passes
@@ -337,6 +342,7 @@ impl WgpuState {
         Ok(())
     }
 
+    /// Get the next frame texture and depth texture, if possible.
     pub fn next_frame(
         &mut self,
     ) -> Result<(Arc<wgpu::TextureView>, Arc<wgpu::TextureView>), WgpuStateError> {
@@ -346,6 +352,25 @@ impl WgpuState {
         let frame = self.current_frame.as_ref().unwrap();
         let frame_view = Arc::new(Self::default_frame_texture_view(frame.texture()));
         Ok((frame_view, self.depth_texture.view.clone()))
+    }
+
+    /// Get the next frame texture and depth texture, if possible, and clear both
+    /// with a clearing render pass.
+    ///
+    /// This is equivalent to:
+    /// ```rust
+    /// use renderling::{WgpuState};
+    ///
+    /// let gpu = WgpuState::headless(100, 100).unwrap();
+    /// let (frame, depth) = gpu.next_frame().unwrap();
+    /// gpu.clear(Some(&frame), Some(&depth));
+    /// ```
+    pub fn next_frame_cleared(
+        &mut self,
+    ) -> Result<(Arc<wgpu::TextureView>, Arc<wgpu::TextureView>), WgpuStateError> {
+        let (frame, depth) = self.next_frame()?;
+        self.clear(Some(&frame), Some(&depth));
+        Ok((frame, depth))
     }
 
     /// Grab the current frame as a buffer.
@@ -480,14 +505,12 @@ impl WgpuState {
             color_blend: crate::UiColorBlend::ColorOnly,
         };
 
-        let mut r = Renderling::new(
+        Renderling::new(
             self,
             crate::UiPipeline::new(&self.device, self.target.format()),
             material,
             false,
-        );
-        let _ = r.new_camera().with_projection_ortho2d().build();
-        r
+        )
     }
 
     #[cfg(feature = "forward")]

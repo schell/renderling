@@ -30,10 +30,9 @@ fn run() -> Result<(), anyhow::Error> {
     // Get our ui renderling
     let mut ui: Renderling<UiPipeline> = gpu.new_ui_renderling();
 
-    let ui_camera = ui.new_camera().with_projection_ortho2d().build();
+    let _ui_camera = ui.new_camera().with_projection_ortho2d().build();
     let _triangle = ui
         .new_object()
-        .with_camera(&ui_camera)
         .with_mesh_builder(MeshBuilder::default().with_vertices(vec![
                     renderling::UiVertex::default()
                         .with_position(10.0, 10.0, 0.0)
@@ -49,7 +48,7 @@ fn run() -> Result<(), anyhow::Error> {
         .unwrap();
 
     let mut forward = gpu.new_forward_renderling();
-    let forward_camera = forward
+    let _forward_camera = forward
         .new_camera()
         .with_projection_perspective()
         .with_look_at(Vec3::new(0.0, 1.0, 2.5), Vec3::ZERO, Vec3::Y)
@@ -85,13 +84,11 @@ fn run() -> Result<(), anyhow::Error> {
 
     let _sphere = forward
         .new_object()
-        .with_camera(&forward_camera)
         .with_mesh_builder(MeshBuilder::default().with_vertices(sphere_vertices))
         .build()
         .unwrap();
     let cube = forward
         .new_object()
-        .with_camera(&forward_camera)
         .with_mesh_builder(MeshBuilder::default().with_vertices(cube_vertices))
         .build()
         .unwrap();
