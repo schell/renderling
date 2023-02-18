@@ -3,7 +3,7 @@ use std::sync::mpsc::Sender;
 
 use crate::resources::Shared;
 use glam::{vec3, vec4, Vec3, Vec4};
-use renderling_shader::pbr::{DirectionalLightRaw, PointLightRaw, SpotLightRaw};
+use renderling_shader::light::{DirectionalLightRaw, PointLightRaw, SpotLightRaw};
 
 pub(crate) struct PointLightInner(pub(crate) PointLightRaw);
 pub(crate) struct SpotLightInner(pub(crate) SpotLightRaw);
@@ -293,35 +293,20 @@ impl DirectionalLight {
     }
 
     /// Sets the ambient color.
-    pub fn set_ambient_color(&self, color: wgpu::Color) {
-        self.inner.write().0.ambient_color = vec4(
-            color.r as f32,
-            color.g as f32,
-            color.b as f32,
-            color.a as f32,
-        );
+    pub fn set_ambient_color(&self, color: impl Into<Vec4>) {
+        self.inner.write().0.ambient_color = color.into();
         self.cmd.send(LightUpdateCmd::DirectionalLights).unwrap();
     }
 
     /// Sets the diffuse color.
-    pub fn set_diffuse_color(&self, color: wgpu::Color) {
-        self.inner.write().0.diffuse_color = vec4(
-            color.r as f32,
-            color.g as f32,
-            color.b as f32,
-            color.a as f32,
-        );
+    pub fn set_diffuse_color(&self, color: impl Into<Vec4>) {
+        self.inner.write().0.diffuse_color = color.into();
         self.cmd.send(LightUpdateCmd::DirectionalLights).unwrap();
     }
 
     /// Sets the specular color.
-    pub fn set_specular_color(&self, color: wgpu::Color) {
-        self.inner.write().0.specular_color = vec4(
-            color.r as f32,
-            color.g as f32,
-            color.b as f32,
-            color.a as f32,
-        );
+    pub fn set_specular_color(&self, color: impl Into<Vec4>) {
+        self.inner.write().0.specular_color = color.into();
         self.cmd.send(LightUpdateCmd::DirectionalLights).unwrap();
     }
 }

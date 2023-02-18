@@ -1,6 +1,6 @@
 //! Builds the UI pipeline and manages resources.
 use glam::Vec3;
-use renderling_shader::pbr::{
+use renderling_shader::light::{
     DirectionalLightRaw, DirectionalLights, PointLightRaw, PointLights, SpotLightRaw, SpotLights,
     DIRECTIONAL_LIGHTS_MAX, POINT_LIGHTS_MAX, SPOT_LIGHTS_MAX,
 };

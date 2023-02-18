@@ -2,7 +2,7 @@
 use encase::UniformBuffer;
 use wgpu::{util::DeviceExt, TextureFormat};
 
-pub use renderling_shader::pbr::{
+pub use renderling_shader::light::{
     DirectionalLightRaw, DirectionalLights, PointLightRaw, PointLights, SpotLightRaw, SpotLights,
     DIRECTIONAL_LIGHTS_MAX, POINT_LIGHTS_MAX, SPOT_LIGHTS_MAX,
 };

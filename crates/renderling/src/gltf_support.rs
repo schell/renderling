@@ -4,7 +4,7 @@
 //! A scene is the structure that is built by importing a gltf file.
 use std::sync::Arc;
 
-use glam::{Mat4, Quat, Vec3};
+use glam::{Mat4, Quat, Vec3, Vec4};
 use gltf::khr_lights_punctual::Kind;
 use rustc_hash::FxHashMap;
 use snafu::prelude::*;
@@ -33,6 +33,15 @@ pub enum GltfError {
 
     #[snafu(display("Missing mesh {} {:?}", index, name))]
     MissingMesh { index: usize, name: Option<String> },
+
+    #[snafu(display("Missing material {:?} {:?}", index, name))]
+    MissingMaterial {
+        index: Option<usize>,
+        name: Option<String>,
+    },
+
+    #[snafu(display("Missing image {}", index))]
+    MissingImage { index: usize },
 
     #[snafu(display("{}", source))]
     Object { source: ObjectBuilderError },
@@ -125,16 +134,35 @@ impl<'a, T> GltfStore<'a, T> {
     }
 }
 
+#[derive(Clone)]
+pub struct GltfMeshPrimitive {
+    pub mesh: Arc<Mesh>,
+    pub material: Arc<BlinnPhongMaterial>,
+}
+
 pub enum GltfLightVariant {
     Directional(DirectionalLight),
     Point(PointLight),
     Spot(SpotLight),
 }
 
-pub enum GltfNodeVariant {
+impl GltfLightVariant {
+    pub fn as_directional(&self) -> Option<&DirectionalLight> {
+        match self {
+            GltfLightVariant::Directional(d) => Some(&d),
+            _ => None,
+        }
+    }
+}
+
+pub enum GltfNodeVariant<'a> {
     Camera(Camera),
     Object(Object),
-    Light(GltfLightVariant),
+    Light {
+        light_index: usize,
+        light_name: Option<&'a str>,
+        variant: GltfLightVariant,
+    },
 }
 
 pub struct GltfNode<'a> {
@@ -149,7 +177,7 @@ pub struct GltfNode<'a> {
     /// The variant of this node.
     ///
     /// This is the meat of the data of this node.
-    pub variant: GltfNodeVariant,
+    pub variant: GltfNodeVariant<'a>,
 }
 
 fn decomposed_transform(transform: gltf::scene::Transform) -> LocalTransform {
@@ -165,9 +193,9 @@ pub struct GltfLoader<'a, 'b> {
     queue: &'a wgpu::Queue,
     default_texture: Option<Texture>,
     textures: GltfStore<'b, Texture>,
-    default_material: Option<BlinnPhongMaterial>,
-    materials: GltfStore<'b, BlinnPhongMaterial>,
-    meshes: GltfStore<'b, Vec<Arc<Mesh>>>,
+    default_material: Option<Arc<BlinnPhongMaterial>>,
+    materials: GltfStore<'b, Arc<BlinnPhongMaterial>>,
+    meshes: GltfStore<'b, Vec<GltfMeshPrimitive>>,
     nodes: GltfStore<'b, GltfNode<'b>>,
 }
 
@@ -209,16 +237,16 @@ impl<'a, 'b> GltfLoader<'a, 'b> {
         self.default_texture.clone().unwrap()
     }
 
-    /// Load all materials from the gltf data into the loader.
-    ///
-    /// This also loads all textures.
-    pub fn load_materials(
+    pub fn texture_for(
         &mut self,
-        document: &'b gltf::Document,
+        texture: gltf::Texture<'b>,
         images: &[gltf::image::Data],
-    ) -> Result<(), GltfError> {
-        log::trace!("loading materials and textures");
-        for (index, dat) in images.into_iter().enumerate() {
+    ) -> Result<Texture, GltfError> {
+        if let Some(texture) = self.textures.get(texture.index()) {
+            Ok(texture.clone())
+        } else {
+            let index = texture.index();
+            let dat = images.get(index).context(MissingImageSnafu { index })?;
             let format = image_data_format_to_wgpu(dat.format)?;
             let num_channels = image_data_format_num_channels(dat.format);
             let pixels = if dat.format == gltf::image::Format::R8G8B8 {
@@ -234,55 +262,174 @@ impl<'a, 'b> GltfLoader<'a, 'b> {
             } else {
                 dat.pixels.to_vec()
             };
-            self.textures.insert(
-                index,
+            let texture = Texture::new_with_format(
+                self.device,
+                self.queue,
                 None,
-                Texture::new_with_format(
-                    self.device,
-                    self.queue,
-                    None,
-                    None,
-                    format,
-                    num_channels,
-                    dat.width,
-                    dat.height,
-                    &pixels,
-                ),
+                None,
+                format,
+                num_channels,
+                dat.width,
+                dat.height,
+                &pixels,
             );
+            self.textures.insert(index, None, texture.clone());
+            Ok(texture)
         }
+    }
 
+    pub fn load_material(
+        &mut self,
+        material: gltf::Material<'b>,
+        images: &[gltf::image::Data],
+    ) -> Result<Arc<BlinnPhongMaterial>, GltfError> {
+        let metallic = material.pbr_metallic_roughness();
+        log::trace!("material: {:?} {:?}", material.index(), material.name(),);
+        log::trace!(
+            "-metallic: base_color_factor: {:?}",
+            metallic.base_color_factor()
+        );
+        let diffuse_texture: Texture = if let Some(texture_info) = metallic.base_color_texture() {
+            let tex = texture_info.texture();
+            log::trace!("--base_color_texture: {} {:?}", tex.index(), tex.name());
+            self.texture_for(tex, images)?
+        } else {
+            let [r, g, b, a] = metallic.base_color_factor();
+            let data = [
+                (r * 255.0) as u8,
+                (g * 255.0) as u8,
+                (b * 255.0) as u8,
+                (a * 255.0) as u8,
+            ];
+            Texture::new_with_format(
+                self.device,
+                self.queue,
+                material.name(),
+                None,
+                wgpu::TextureFormat::Rgba8UnormSrgb,
+                4,
+                1,
+                1,
+                &data,
+            )
+        };
+
+        let specular_texture = self.get_default_texture();
+
+        let blinn_phong = Arc::new(BlinnPhongMaterial {
+            diffuse_texture,
+            specular_texture,
+            shininess: 16.0,
+        });
+
+        if let Some(index) = material.index() {
+            self.materials
+                .insert(index, material.name(), blinn_phong.clone());
+        } else {
+            self.default_material = Some(blinn_phong.clone());
+        }
+        Ok(blinn_phong)
+    }
+
+    /// Load all materials from the gltf data into the loader.
+    ///
+    /// This also loads all textures.
+    pub fn load_materials(
+        &mut self,
+        document: &'b gltf::Document,
+        images: &[gltf::image::Data],
+    ) -> Result<(), GltfError> {
+        log::trace!("loading materials and textures");
         for material in document.materials() {
-            let metallic = material.pbr_metallic_roughness();
-            log::trace!("material: {:?} {:?}", material.index(), material.name());
-            log::trace!(
-                "-metallic: base_color_factor: {:?}",
-                metallic.base_color_factor()
-            );
-            let diffuse_texture = if let Some(texture_info) = metallic.base_color_texture() {
-                let tex = texture_info.texture();
-                log::trace!("--base_color_texture: {} {:?}", tex.index(), tex.name());
-                self.textures
-                    .get(tex.index())
-                    .context(MissingTextureSnafu { index: tex.index() })?
-                    .clone()
-            } else {
-                self.get_default_texture()
-            };
+            let _ = self.load_material(material, images)?;
+        }
+        Ok(())
+    }
 
-            let specular_texture = self.get_default_texture();
-
-            let blinn_phong = BlinnPhongMaterial {
-                diffuse_texture,
-                specular_texture,
-                shininess: 16.0,
-            };
-
-            if let Some(index) = material.index() {
-                self.materials.insert(index, material.name(), blinn_phong);
-            } else {
-                self.default_material = Some(blinn_phong);
+    pub fn material_for(
+        &mut self,
+        material: gltf::Material<'b>,
+        images: &[gltf::image::Data],
+    ) -> Result<Arc<BlinnPhongMaterial>, GltfError> {
+        let index = material.index();
+        if index.is_none() {
+            // this material is the default material
+            if let Some(bp_mat) = self.default_material.as_ref() {
+                return Ok(bp_mat.clone());
+            }
+        } else {
+            // UNWRAP: safe because we checked its Some
+            if let Some(bp_mat) = self.materials.get(index.unwrap()) {
+                return Ok(bp_mat.clone());
             }
         }
+
+        // since we're still here we need to generate/load the material
+        self.load_material(material, images)
+    }
+
+    pub fn load_mesh(
+        &mut self,
+        mesh: gltf::Mesh<'b>,
+        buffers: &[gltf::buffer::Data],
+        images: &[gltf::image::Data],
+    ) -> Result<(), GltfError> {
+        let mut prims = vec![];
+        log::trace!("mesh: {} {:?}", mesh.index(), mesh.name());
+        log::trace!("-weights: {:?}", mesh.weights());
+        for primitive in mesh.primitives() {
+            log::trace!("-primitive: {}", primitive.index());
+            log::trace!("--mode: {:?}", primitive.mode());
+            log::trace!("--bounding_box: {:?}", primitive.bounding_box());
+            let reader = primitive.reader(|buffer| Some(&buffers[buffer.index()]));
+            let positions = reader.read_positions().context(MissingAttributeSnafu {
+                attribute: gltf::Semantic::Positions,
+            })?;
+            log::trace!("--positions: {} vertices", positions.len());
+            let normals = reader.read_positions().context(MissingAttributeSnafu {
+                attribute: gltf::Semantic::Normals,
+            })?;
+            log::trace!("--normals: {} vertices", normals.len());
+            let uvs: Box<dyn Iterator<Item = [f32; 2]>> =
+                if let Some(uvs) = reader.read_tex_coords(0) {
+                    let uvs = uvs.into_f32();
+                    log::trace!("--uvs: {} vertices", uvs.len());
+                    Box::new(uvs)
+                } else {
+                    Box::new(std::iter::repeat([0.0; 2]))
+                };
+
+            let builder = positions.zip(normals.zip(uvs)).fold(
+                MeshBuilder::<pbr::Vertex>::default(),
+                |builder, (position, (normal, uv))| -> MeshBuilder<_> {
+                    builder.with_vertex(pbr::Vertex {
+                        position,
+                        normal,
+                        uv,
+                    })
+                },
+            );
+            let builder = if let Some(indices) = reader.read_indices() {
+                let indices = match indices {
+                    gltf::mesh::util::ReadIndices::U8(_) => todo!(),
+                    gltf::mesh::util::ReadIndices::U16(indices) => indices,
+                    gltf::mesh::util::ReadIndices::U32(_) => todo!(),
+                };
+                log::trace!("--indices: length {}", indices.len());
+                builder.with_indices(indices)
+            } else {
+                builder
+            };
+            let material = primitive.material();
+            let material: Arc<BlinnPhongMaterial> = self.material_for(material, images)?;
+            let prim = GltfMeshPrimitive {
+                mesh: Arc::new(builder.build(Some("gltf_support"), self.device)),
+                material,
+            };
+            prims.push(prim);
+        }
+        self.meshes.insert(mesh.index(), mesh.name(), prims);
+
         Ok(())
     }
 
@@ -291,69 +438,42 @@ impl<'a, 'b> GltfLoader<'a, 'b> {
         &mut self,
         document: &'b gltf::Document,
         buffers: &[gltf::buffer::Data],
+        images: &[gltf::image::Data],
     ) -> Result<(), GltfError> {
         log::trace!("loading meshes");
         for mesh in document.meshes() {
-            let mut prims = vec![];
-            log::trace!("mesh: {} {:?}", mesh.index(), mesh.name());
-            log::trace!("-weights: {:?}", mesh.weights());
-            for primitive in mesh.primitives() {
-                log::trace!("-primitive: {}", primitive.index());
-                log::trace!("--mode: {:?}", primitive.mode());
-                log::trace!("--bounding_box: {:?}", primitive.bounding_box());
-                let reader = primitive.reader(|buffer| Some(&buffers[buffer.index()]));
-                let positions = reader.read_positions().context(MissingAttributeSnafu {
-                    attribute: gltf::Semantic::Positions,
-                })?;
-                log::trace!("--positions: {} vertices", positions.len());
-                let normals = reader.read_positions().context(MissingAttributeSnafu {
-                    attribute: gltf::Semantic::Normals,
-                })?;
-                log::trace!("--normals: {} vertices", normals.len());
-                let uvs: Box<dyn Iterator<Item = [f32; 2]>> =
-                    if let Some(uvs) = reader.read_tex_coords(0) {
-                        let uvs = uvs.into_f32();
-                        log::trace!("--uvs: {} vertices", uvs.len());
-                        Box::new(uvs)
-                    } else {
-                        Box::new(std::iter::repeat([0.0; 2]))
-                    };
-
-                let builder = positions.zip(normals.zip(uvs)).fold(
-                    MeshBuilder::<pbr::Vertex>::default(),
-                    |builder, (position, (normal, uv))| -> MeshBuilder<_> {
-                        builder.with_vertex(pbr::Vertex {
-                            position,
-                            normal,
-                            uv,
-                        })
-                    },
-                );
-                let builder = if let Some(indices) = reader.read_indices() {
-                    let indices = match indices {
-                        gltf::mesh::util::ReadIndices::U8(_) => todo!(),
-                        gltf::mesh::util::ReadIndices::U16(indices) => indices,
-                        gltf::mesh::util::ReadIndices::U32(_) => todo!(),
-                    };
-                    log::trace!("--indices: length {}", indices.len());
-                    builder.with_indices(indices)
-                } else {
-                    builder
-                };
-                let prim = builder.build(Some("gltf_support"), self.device);
-                prims.push(Arc::new(prim));
-            }
-            self.meshes.insert(mesh.index(), mesh.name(), prims);
+            let _ = self.load_mesh(mesh, buffers, images)?;
         }
 
         Ok(())
     }
 
+    pub fn mesh_primitives_for(
+        &mut self,
+        mesh: gltf::Mesh<'b>,
+        buffers: &[gltf::buffer::Data],
+        images: &[gltf::image::Data],
+    ) -> Result<Vec<GltfMeshPrimitive>, GltfError> {
+        if let Some(prims) = self.meshes.get(mesh.index()) {
+            Ok(prims.clone())
+        } else {
+            let index = mesh.index();
+            let name = mesh.name().map(|n| n.to_string());
+            self.load_mesh(mesh, buffers, images)?;
+            let prims = self
+                .meshes
+                .get(index)
+                .context(MissingMeshSnafu { index, name })?;
+            Ok(prims.clone())
+        }
+    }
+
     pub fn load_node(
         &mut self,
         r: &mut Renderling<ForwardPipeline>,
+        buffers: &[gltf::buffer::Data],
+        images: &[gltf::image::Data],
         node: gltf::Node<'b>,
-        parent_transform: LocalTransform,
         depth: usize,
     ) -> Result<(), GltfError> {
         let pad = std::iter::repeat("-")
@@ -420,10 +540,7 @@ impl<'a, 'b> GltfLoader<'a, 'b> {
 
         if let Some(mesh) = node.mesh() {
             log::trace!("{pad}-mesh: {} {:?}", mesh.index(), mesh.name());
-            let prims = self.meshes.get(mesh.index()).context(MissingMeshSnafu {
-                index: mesh.index(),
-                name: mesh.name().map(|n| n.to_string()),
-            })?;
+            let prims = self.mesh_primitives_for(mesh, buffers, images)?;
             let r_node = if prims.len() > 1 {
                 // the mesh is made up of multiple mesh "primitives", so add those
                 // as children
@@ -431,7 +548,8 @@ impl<'a, 'b> GltfLoader<'a, 'b> {
                 for prim in prims.iter() {
                     let child = r
                         .new_object()
-                        .with_mesh(prim.clone())
+                        .with_mesh(prim.mesh.clone())
+                        .with_material::<BlinnPhongMaterial>(prim.material.clone())
                         .build()
                         .context(ObjectSnafu)?;
                     children.push(child);
@@ -451,10 +569,13 @@ impl<'a, 'b> GltfLoader<'a, 'b> {
                     variant: GltfNodeVariant::Object(object),
                 }
             } else {
+                let mesh = prims[0].mesh.clone();
+                let material = prims[0].material.clone();
                 let object = r
                     .new_object()
                     .with_transform(transform.clone())
-                    .with_mesh(prims[0].clone())
+                    .with_mesh(mesh)
+                    .with_material::<BlinnPhongMaterial>(material)
                     .build()
                     .context(ObjectSnafu)?;
                 GltfNode {
@@ -470,28 +591,31 @@ impl<'a, 'b> GltfLoader<'a, 'b> {
 
         if let Some(light) = node.light() {
             log::trace!("{pad}-light: {} {:?}", light.index(), light.name());
-            let diffuse_color = Vec3::from(light.color()).extend(1.0);
+            let color = Vec3::from(light.color()).extend(1.0);
+            let transparent = Vec4::splat(0.0);
             let direction = Mat4::from_quat(transform.rotation).transform_vector3(Vec3::NEG_Z);
-            let light = match light.kind() {
+            let variant = match light.kind() {
                 Kind::Directional => {
                     log::trace!("{pad}--kind: directional");
-                    log::trace!("{pad}---color: {:?}", diffuse_color);
+                    log::trace!("{pad}---color: {:?}", color);
                     log::trace!("{pad}---direction: {:?}", direction);
                     GltfLightVariant::Directional(
                         r.new_directional_light()
                             .with_direction(direction)
-                            .with_diffuse_color(diffuse_color)
+                            .with_diffuse_color(color)
+                            .with_specular_color(color)
+                            .with_ambient_color(transparent)
                             .build(),
                     )
                 }
                 Kind::Point => {
                     log::trace!("{pad}--kind: point");
-                    log::trace!("{pad}---color: {:?}", diffuse_color);
+                    log::trace!("{pad}---color: {:?}", color);
                     log::trace!("{pad}---position: {:?}", transform.position);
                     GltfLightVariant::Point(
                         r.new_point_light()
                             .with_position(transform.position)
-                            .with_diffuse_color(diffuse_color)
+                            .with_diffuse_color(color)
                             .build(),
                     )
                 }
@@ -500,13 +624,13 @@ impl<'a, 'b> GltfLoader<'a, 'b> {
                     outer_cone_angle,
                 } => {
                     log::trace!("{pad}--kind: spot");
-                    log::trace!("{pad}---color: {:?}", diffuse_color);
+                    log::trace!("{pad}---color: {:?}", color);
                     log::trace!("{pad}---direction: {:?}", direction);
                     GltfLightVariant::Spot(
                         r.new_spot_light()
                             .with_position(transform.position)
                             .with_direction(direction)
-                            .with_diffuse_color(diffuse_color)
+                            .with_diffuse_color(color)
                             .with_cutoff(inner_cone_angle, outer_cone_angle)
                             .build(),
                     )
@@ -520,7 +644,11 @@ impl<'a, 'b> GltfLoader<'a, 'b> {
                     name: node.name(),
                     index: node.index(),
                     prim_objects: vec![],
-                    variant: GltfNodeVariant::Light(light),
+                    variant: GltfNodeVariant::Light {
+                        light_index: light.index(),
+                        light_name: light.name(),
+                        variant,
+                    },
                 },
             );
         }
@@ -532,7 +660,7 @@ impl<'a, 'b> GltfLoader<'a, 'b> {
                 printed = true;
             }
 
-            let _ = self.load_node(r, node, transform.clone(), depth + 2);
+            let _ = self.load_node(r, buffers, images, node, depth + 2);
         }
 
         Ok(())
@@ -553,9 +681,6 @@ impl<'a, 'b> GltfLoader<'a, 'b> {
         let index = index.unwrap_or_default();
         log::trace!("loading scene {}", index);
 
-        self.load_materials(document, images)?;
-        self.load_meshes(document, buffers)?;
-
         for scene in document.scenes() {
             log::trace!("scene: {} {:?}", scene.index(), scene.name());
             if scene.index() != index {
@@ -564,10 +689,29 @@ impl<'a, 'b> GltfLoader<'a, 'b> {
             }
 
             for node in scene.nodes() {
-                let _ = self.load_node(r, node, LocalTransform::default(), 1);
+                let _ = self.load_node(r, buffers, images, node, 1);
             }
         }
 
         Ok(())
+    }
+
+    pub fn get_light_by_index(&self, index: usize) -> Option<&GltfLightVariant> {
+        for node in self.nodes.iter() {
+            match &node.variant {
+                GltfNodeVariant::Camera(_) => todo!(),
+                GltfNodeVariant::Object(_) => todo!(),
+                GltfNodeVariant::Light {
+                    light_index,
+                    light_name: _,
+                    variant,
+                } => {
+                    if *light_index == index {
+                        return Some(variant);
+                    }
+                }
+            }
+        }
+        None
     }
 }

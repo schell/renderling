@@ -1,11 +1,11 @@
 //! Shader wrapper for user interface shaders.
-use renderling_shader::{ShaderCamera, ui::ShaderColorBlend};
+use renderling_shader::{CameraRaw, ui::ShaderColorBlend};
 use spirv_std::spirv;
 use spirv_std::{glam::*, image::Image2d, Sampler};
 
 #[spirv(vertex)]
 pub fn vertex_ui(
-    #[spirv(uniform, descriptor_set = 0, binding = 0)] camera: &ShaderCamera,
+    #[spirv(uniform, descriptor_set = 0, binding = 0)] camera: &CameraRaw,
 
     in_pos: Vec3,
     in_color: Vec4,
