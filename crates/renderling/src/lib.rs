@@ -116,16 +116,18 @@ mod test {
         gpu.default_background_color = wgpu::Color::WHITE;
 
         let mut ui: Renderling<UiPipeline> = gpu.new_ui_renderling();
-        let cam = ui
-            .new_camera()
-            .with_projection_ortho2d()
-            .build();
+        let cam = ui.new_camera().with_projection_ortho2d().build();
         let tri = ui
             .new_object()
             .with_mesh_builder(right_tri_builder())
             .build()
             .unwrap();
-        CmyTri { gpu, _cam: cam, ui, tri }
+        CmyTri {
+            gpu,
+            _cam: cam,
+            ui,
+            tri,
+        }
     }
 
     #[test]
@@ -667,10 +669,7 @@ mod test {
         let material = Arc::new(material.unwrap());
         let mesh = Arc::new(mesh.unwrap());
         let mut r = gpu.new_ui_renderling();
-        let _cam = r
-            .new_camera()
-            .with_projection_ortho2d()
-            .build();
+        let _cam = r.new_camera().with_projection_ortho2d().build();
         let _obj_a = r
             .new_object()
             .with_material::<UiMaterial>(material.clone())
@@ -700,10 +699,7 @@ mod test {
     fn gltf_images() {
         let mut gpu = WgpuState::headless(100, 100).unwrap();
         let mut ui = gpu.new_ui_renderling();
-        let _cam = ui
-            .new_camera()
-            .with_projection_ortho2d()
-            .build();
+        let _cam = ui.new_camera().with_projection_ortho2d().build();
         let mut loader = gpu.new_gltf_loader();
         let (document, _buffers, images) = gltf::import("../../gltf/cheetah_cone.glb").unwrap();
         loader.load_materials(&document, &images).unwrap();
@@ -749,10 +745,7 @@ mod test {
     fn parent_sanity() {
         let mut gpu = WgpuState::headless(100, 100).unwrap();
         let mut ui = gpu.new_ui_renderling();
-        let _cam = ui
-            .new_camera()
-            .with_projection_ortho2d()
-            .build();
+        let _cam = ui.new_camera().with_projection_ortho2d().build();
         let size = 1.0;
         let yellow_tri = ui
             .new_object()
@@ -802,16 +795,15 @@ mod test {
         ui.render(&frame, &depth).unwrap();
 
         let img = gpu.grab_frame_image().unwrap();
-        // img.save_with_format("../../test_img/parent_sanity.png",
-        // image::ImageFormat::Png)    .unwrap();
-        crate::img_diff::assert_img_eq("parent_sanity", "parent_sanity.png", img).unwrap();
+        crate::img_diff::assert_img_eq_save(Save::Yes, "parent_sanity", "parent_sanity.png", img)
+            .unwrap();
     }
 
     #[cfg(feature = "gltf")]
     #[test]
     fn gltf_load_scene() {
         _init_logging();
-        let mut gpu = WgpuState::headless(100, 100).unwrap();
+        let mut gpu = WgpuState::headless(177, 100).unwrap();
         let mut r = gpu.new_forward_renderling();
 
         let mut loader = gpu.new_gltf_loader();
@@ -820,13 +812,21 @@ mod test {
             .load_scene(None, &mut r, &document, &buffers, &images)
             .unwrap();
 
+        //let dir_light = loader.get_light_by_index(0).unwrap().as_directional().unwrap();
+        //dir_light.set_ambient_color(Vec3::splat(0.1).extend(1.0));
+        //dir_light.set_direction(Vec3::NEG_Z);
+
         r.update().unwrap();
         let (frame, depth) = gpu.next_frame_cleared().unwrap();
         r.render(&frame, &depth).unwrap();
 
         let img = gpu.grab_frame_image().unwrap();
-        // img.save_with_format("../../test_img/parent_sanity.png",
-        // image::ImageFormat::Png)    .unwrap();
-        crate::img_diff::assert_img_eq("gltf_load_scene", "parent_sanity.png", img).unwrap();
+        crate::img_diff::assert_img_eq_save(
+            Save::Yes,
+            "gltf_load_scene",
+            "gltf_load_scene.png",
+            img,
+        )
+        .unwrap();
     }
 }

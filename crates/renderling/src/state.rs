@@ -357,11 +357,12 @@ impl WgpuState {
     /// Get the next frame texture and depth texture, if possible, and clear both
     /// with a clearing render pass.
     ///
-    /// This is equivalent to:
+    /// This is equivalent to using [`WgpuState::next_frame`] and then calling [`WgpuState::clear`]
+    /// on the result:
     /// ```rust
     /// use renderling::{WgpuState};
     ///
-    /// let gpu = WgpuState::headless(100, 100).unwrap();
+    /// let mut gpu = WgpuState::headless(100, 100).unwrap();
     /// let (frame, depth) = gpu.next_frame().unwrap();
     /// gpu.clear(Some(&frame), Some(&depth));
     /// ```

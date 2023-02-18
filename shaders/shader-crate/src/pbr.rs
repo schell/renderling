@@ -1,13 +1,13 @@
 use renderling_shader::{
-    pbr::{DirectionalLights, PointLights, SpotLights},
-    ShaderCamera,
+    light::{DirectionalLights, PointLights, SpotLights},
+    CameraRaw,
 };
 use spirv_std::spirv;
 use spirv_std::{glam::*, image::Image2d, Sampler};
 
 #[spirv(vertex)]
 pub fn vertex_pbr(
-    #[spirv(uniform, descriptor_set = 0, binding = 0)] camera: &ShaderCamera,
+    #[spirv(uniform, descriptor_set = 0, binding = 0)] camera: &CameraRaw,
 
     in_pos: Vec3,
     in_uv: Vec2,
@@ -49,7 +49,7 @@ pub fn vertex_pbr(
 
 #[spirv(fragment)]
 pub fn fragment_pbr(
-    #[spirv(uniform, descriptor_set = 0, binding = 0)] camera: &ShaderCamera,
+    #[spirv(uniform, descriptor_set = 0, binding = 0)] camera: &CameraRaw,
 
     #[spirv(descriptor_set = 1, binding = 0)] diffuse_texture: &Image2d,
     #[spirv(descriptor_set = 1, binding = 1)] diffuse_sampler: &Sampler,
