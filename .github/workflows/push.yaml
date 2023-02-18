@@ -13,7 +13,7 @@ jobs:
       - run: cd shaders && cargo run --release
 
   renderling-test:
-    runs-on: macos-latest
+    runs-on: [ubuntu-latest, gpu]
     steps:
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1
