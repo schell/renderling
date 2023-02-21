@@ -515,7 +515,10 @@ impl WgpuState {
     }
 
     #[cfg(feature = "forward")]
-    pub fn new_forward_renderling(&self) -> Renderling<ForwardPipeline> {
+    pub fn new_forward_renderling_with(
+        &self,
+        primitive: Option<wgpu::PrimitiveState>,
+    ) -> Renderling<ForwardPipeline> {
         // this is the _default_ texture bind group which will be used when
         // there is no available texture to bind.
         let diffuse_texture = crate::Texture::new(
@@ -545,15 +548,20 @@ impl WgpuState {
         };
         Renderling::new(
             self,
-            crate::ForwardPipeline::new(&self.device, self.target.format()),
+            crate::ForwardPipeline::new(&self.device, self.target.format(), primitive),
             material,
             true,
         )
     }
 
+    #[cfg(feature = "forward")]
+    pub fn new_forward_renderling(&self) -> Renderling<ForwardPipeline> {
+        self.new_forward_renderling_with(None)
+    }
+
     #[cfg(feature = "gltf")]
-    pub fn new_gltf_loader<'a, 'b>(&'a self) -> crate::gltf_support::GltfLoader<'a, 'b> {
-        crate::gltf_support::GltfLoader::new(&self.device, &self.queue)
+    pub fn new_gltf_loader(&self) -> crate::gltf_support::GltfLoader {
+        crate::gltf_support::GltfLoader::new(self.device.clone(), self.queue.clone())
     }
 
     #[cfg(feature = "text")]

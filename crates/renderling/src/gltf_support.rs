@@ -77,12 +77,12 @@ fn image_data_format_num_channels(gltf_format: gltf::image::Format) -> u32 {
     }
 }
 
-pub struct GltfStore<'a, T> {
+pub struct GltfStore<T> {
     dense: Vec<Option<T>>,
-    names: FxHashMap<&'a str, Vec<usize>>,
+    names: FxHashMap<String, Vec<usize>>,
 }
 
-impl<'a, T> Default for GltfStore<'a, T> {
+impl<T> Default for GltfStore<T> {
     fn default() -> Self {
         Self {
             dense: Default::default(),
@@ -91,28 +91,28 @@ impl<'a, T> Default for GltfStore<'a, T> {
     }
 }
 
-impl<'a, T> GltfStore<'a, T> {
+impl<T> GltfStore<T> {
     pub fn iter(&self) -> impl Iterator<Item = &T> {
         self.dense.iter().flatten()
     }
 
-    pub fn remove(&mut self, index: usize, name: Option<&'a str>) -> Option<T> {
+    pub fn remove(&mut self, index: usize, name: Option<String>) -> Option<T> {
         if let Some(name) = name {
-            if let Some(indices) = self.names.get_mut(name) {
+            if let Some(indices) = self.names.get_mut(&name) {
                 indices.retain(|i| *i != index);
             }
         }
         self.dense.get_mut(index)?.take()
     }
 
-    pub fn insert(&mut self, index: usize, name: Option<&'a str>, item: T) -> Option<T> {
+    pub fn insert(&mut self, index: usize, name: Option<String>, item: T) -> Option<T> {
         if self.dense.len() <= index {
             self.dense.resize_with(index + 1, || None);
         }
         while self.dense.len() <= index {
             self.dense.push(None);
         }
-        let existing = self.remove(index, name);
+        let existing = self.remove(index, name.clone());
         self.dense[index] = Some(item);
         if let Some(name) = name {
             let indices = self.names.entry(name).or_default();
@@ -155,19 +155,19 @@ impl GltfLightVariant {
     }
 }
 
-pub enum GltfNodeVariant<'a> {
+pub enum GltfNodeVariant {
     Camera(Camera),
     Object(Object),
     Light {
         light_index: usize,
-        light_name: Option<&'a str>,
+        light_name: Option<String>,
         variant: GltfLightVariant,
     },
 }
 
-pub struct GltfNode<'a> {
+pub struct GltfNode {
     /// The name of this node, if available.
-    pub name: Option<&'a str>,
+    pub name: Option<String>,
     /// The index of this node in the list of all nodes in the document.
     pub index: usize,
     /// The primitive mesh objects "nested" within this node, if any.
@@ -177,7 +177,7 @@ pub struct GltfNode<'a> {
     /// The variant of this node.
     ///
     /// This is the meat of the data of this node.
-    pub variant: GltfNodeVariant<'a>,
+    pub variant: GltfNodeVariant,
 }
 
 fn decomposed_transform(transform: gltf::scene::Transform) -> LocalTransform {
@@ -188,20 +188,20 @@ fn decomposed_transform(transform: gltf::scene::Transform) -> LocalTransform {
         .with_scale(Vec3::from(s))
 }
 
-pub struct GltfLoader<'a, 'b> {
-    device: &'a wgpu::Device,
-    queue: &'a wgpu::Queue,
+pub struct GltfLoader {
+    device: Arc<wgpu::Device>,
+    queue: Arc<wgpu::Queue>,
     default_texture: Option<Texture>,
-    textures: GltfStore<'b, Texture>,
+    textures: GltfStore<Texture>,
     default_material: Option<Arc<BlinnPhongMaterial>>,
-    materials: GltfStore<'b, Arc<BlinnPhongMaterial>>,
-    meshes: GltfStore<'b, Vec<GltfMeshPrimitive>>,
-    nodes: GltfStore<'b, GltfNode<'b>>,
+    materials: GltfStore<Arc<BlinnPhongMaterial>>,
+    meshes: GltfStore<Vec<GltfMeshPrimitive>>,
+    nodes: GltfStore<GltfNode>,
 }
 
-impl<'a, 'b> GltfLoader<'a, 'b> {
+impl GltfLoader {
     /// Create a new loader.
-    pub fn new(device: &'a wgpu::Device, queue: &'a wgpu::Queue) -> Self {
+    pub fn new(device: Arc<wgpu::Device>, queue: Arc<wgpu::Queue>) -> Self {
         GltfLoader {
             device,
             queue,
@@ -214,6 +214,10 @@ impl<'a, 'b> GltfLoader<'a, 'b> {
         }
     }
 
+    pub fn unload(&mut self) {
+        *self = GltfLoader::new(self.device.clone(), self.queue.clone());
+    }
+
     /// Get a reference to all the textures loaded thus far.
     pub fn textures(&self) -> impl Iterator<Item = &Texture> {
         self.textures.iter()
@@ -222,8 +226,8 @@ impl<'a, 'b> GltfLoader<'a, 'b> {
     pub fn get_default_texture(&mut self) -> Texture {
         if self.default_texture.is_none() {
             self.default_texture = Some(Texture::new(
-                self.device,
-                self.queue,
+                &self.device,
+                &self.queue,
                 Some("GltfLoader::new-default"),
                 None,
                 4,
@@ -237,7 +241,7 @@ impl<'a, 'b> GltfLoader<'a, 'b> {
         self.default_texture.clone().unwrap()
     }
 
-    pub fn texture_for(
+    pub fn texture_for<'b>(
         &mut self,
         texture: gltf::Texture<'b>,
         images: &[gltf::image::Data],
@@ -263,8 +267,8 @@ impl<'a, 'b> GltfLoader<'a, 'b> {
                 dat.pixels.to_vec()
             };
             let texture = Texture::new_with_format(
-                self.device,
-                self.queue,
+                &self.device,
+                &self.queue,
                 None,
                 None,
                 format,
@@ -278,7 +282,7 @@ impl<'a, 'b> GltfLoader<'a, 'b> {
         }
     }
 
-    pub fn load_material(
+    pub fn load_material<'b>(
         &mut self,
         material: gltf::Material<'b>,
         images: &[gltf::image::Data],
@@ -302,8 +306,8 @@ impl<'a, 'b> GltfLoader<'a, 'b> {
                 (a * 255.0) as u8,
             ];
             Texture::new_with_format(
-                self.device,
-                self.queue,
+                &self.device,
+                &self.queue,
                 material.name(),
                 None,
                 wgpu::TextureFormat::Rgba8UnormSrgb,
@@ -324,7 +328,7 @@ impl<'a, 'b> GltfLoader<'a, 'b> {
 
         if let Some(index) = material.index() {
             self.materials
-                .insert(index, material.name(), blinn_phong.clone());
+                .insert(index, material.name().map(|s| s.to_string()), blinn_phong.clone());
         } else {
             self.default_material = Some(blinn_phong.clone());
         }
@@ -334,7 +338,7 @@ impl<'a, 'b> GltfLoader<'a, 'b> {
     /// Load all materials from the gltf data into the loader.
     ///
     /// This also loads all textures.
-    pub fn load_materials(
+    pub fn load_materials<'b>(
         &mut self,
         document: &'b gltf::Document,
         images: &[gltf::image::Data],
@@ -346,7 +350,7 @@ impl<'a, 'b> GltfLoader<'a, 'b> {
         Ok(())
     }
 
-    pub fn material_for(
+    pub fn material_for<'b>(
         &mut self,
         material: gltf::Material<'b>,
         images: &[gltf::image::Data],
@@ -368,7 +372,7 @@ impl<'a, 'b> GltfLoader<'a, 'b> {
         self.load_material(material, images)
     }
 
-    pub fn load_mesh(
+    pub fn load_mesh<'b>(
         &mut self,
         mesh: gltf::Mesh<'b>,
         buffers: &[gltf::buffer::Data],
@@ -386,10 +390,12 @@ impl<'a, 'b> GltfLoader<'a, 'b> {
                 attribute: gltf::Semantic::Positions,
             })?;
             log::trace!("--positions: {} vertices", positions.len());
-            let normals = reader.read_positions().context(MissingAttributeSnafu {
+            let normals = reader.read_normals().context(MissingAttributeSnafu {
                 attribute: gltf::Semantic::Normals,
             })?;
             log::trace!("--normals: {} vertices", normals.len());
+            let normalized = primitive.get(&gltf::Semantic::Normals).unwrap().normalized();
+            log::trace!("---normalized: {normalized}");
             let uvs: Box<dyn Iterator<Item = [f32; 2]>> =
                 if let Some(uvs) = reader.read_tex_coords(0) {
                     let uvs = uvs.into_f32();
@@ -423,18 +429,18 @@ impl<'a, 'b> GltfLoader<'a, 'b> {
             let material = primitive.material();
             let material: Arc<BlinnPhongMaterial> = self.material_for(material, images)?;
             let prim = GltfMeshPrimitive {
-                mesh: Arc::new(builder.build(Some("gltf_support"), self.device)),
+                mesh: Arc::new(builder.build(Some("gltf_support"), &self.device)),
                 material,
             };
             prims.push(prim);
         }
-        self.meshes.insert(mesh.index(), mesh.name(), prims);
+        self.meshes.insert(mesh.index(), mesh.name().map(|s| s.to_string()), prims);
 
         Ok(())
     }
 
     /// Load all mesh primitives from the gltf document into the loader.
-    pub fn load_meshes(
+    pub fn load_meshes<'b>(
         &mut self,
         document: &'b gltf::Document,
         buffers: &[gltf::buffer::Data],
@@ -448,7 +454,7 @@ impl<'a, 'b> GltfLoader<'a, 'b> {
         Ok(())
     }
 
-    pub fn mesh_primitives_for(
+    pub fn mesh_primitives_for<'b>(
         &mut self,
         mesh: gltf::Mesh<'b>,
         buffers: &[gltf::buffer::Data],
@@ -468,7 +474,7 @@ impl<'a, 'b> GltfLoader<'a, 'b> {
         }
     }
 
-    pub fn load_node(
+    pub fn load_node<'b>(
         &mut self,
         r: &mut Renderling<ForwardPipeline>,
         buffers: &[gltf::buffer::Data],
@@ -526,11 +532,12 @@ impl<'a, 'b> GltfLoader<'a, 'b> {
                 })
                 .with_view(view.into())
                 .build();
+            let name = node.name().map(|s| s.to_string());
             self.nodes.insert(
                 node.index(),
-                node.name(),
+                name.clone(),
                 GltfNode {
-                    name: node.name(),
+                    name,
                     index: node.index(),
                     prim_objects: vec![],
                     variant: GltfNodeVariant::Camera(r_camera),
@@ -563,7 +570,7 @@ impl<'a, 'b> GltfLoader<'a, 'b> {
                 log::trace!("{pad}-mesh-primitive-children: {}", children.len());
                 // hold on to the child objects so they don't get dropped
                 GltfNode {
-                    name: node.name(),
+                    name: node.name().map(|s| s.to_string()),
                     index: node.index(),
                     prim_objects: children,
                     variant: GltfNodeVariant::Object(object),
@@ -579,14 +586,14 @@ impl<'a, 'b> GltfLoader<'a, 'b> {
                     .build()
                     .context(ObjectSnafu)?;
                 GltfNode {
-                    name: node.name(),
+                    name: node.name().map(|s| s.to_string()),
                     index: node.index(),
                     prim_objects: vec![],
                     variant: GltfNodeVariant::Object(object),
                 }
             };
 
-            self.nodes.insert(node.index(), node.name(), r_node);
+            self.nodes.insert(node.index(), node.name().map(|s| s.to_string()), r_node);
         }
 
         if let Some(light) = node.light() {
@@ -637,16 +644,17 @@ impl<'a, 'b> GltfLoader<'a, 'b> {
                 }
             };
 
+            let name = node.name().map(|s| s.to_string());
             self.nodes.insert(
                 node.index(),
-                node.name(),
+                name.clone(),
                 GltfNode {
-                    name: node.name(),
+                    name,
                     index: node.index(),
                     prim_objects: vec![],
                     variant: GltfNodeVariant::Light {
                         light_index: light.index(),
-                        light_name: light.name(),
+                        light_name: light.name().map(|s| s.to_string()),
                         variant,
                     },
                 },
@@ -670,7 +678,7 @@ impl<'a, 'b> GltfLoader<'a, 'b> {
     ///
     /// Loads all display objects (meshes, materials and transforms) into the
     /// loader and into the given renderling.
-    pub fn load_scene(
+    pub fn load_scene<'b>(
         &mut self,
         index: Option<usize>,
         r: &mut Renderling<ForwardPipeline>,
@@ -713,5 +721,19 @@ impl<'a, 'b> GltfLoader<'a, 'b> {
             }
         }
         None
+    }
+
+    /// Iterate over the nodes that are cameras
+    pub fn cameras(&self) -> impl Iterator<Item = &GltfNode> {
+        self.nodes
+            .iter()
+            .filter(|node| matches!(node.variant, GltfNodeVariant::Camera(_)))
+    }
+
+    /// Iterate over the nodes that are lights
+    pub fn lights(&self) -> impl Iterator<Item = &GltfNode> {
+        self.nodes
+            .iter()
+            .filter(|node| matches!(node.variant, GltfNodeVariant::Light { .. }))
     }
 }

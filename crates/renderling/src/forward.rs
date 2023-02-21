@@ -35,9 +35,13 @@ impl crate::Pipeline for ForwardPipeline {
 }
 
 impl ForwardPipeline {
-    pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat) -> Self {
+    pub fn new(
+        device: &wgpu::Device,
+        format: wgpu::TextureFormat,
+        primitive: Option<wgpu::PrimitiveState>,
+    ) -> Self {
         ForwardPipeline {
-            inner: crate::linkage::pbr::create_pipeline(device, format),
+            inner: crate::linkage::pbr::create_pipeline(device, format, primitive),
         }
     }
 }

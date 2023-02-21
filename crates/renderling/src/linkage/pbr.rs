@@ -218,7 +218,11 @@ impl LightsUniform {
     }
 }
 
-pub fn create_pipeline(device: &wgpu::Device, format: TextureFormat) -> wgpu::RenderPipeline {
+pub fn create_pipeline(
+    device: &wgpu::Device,
+    format: TextureFormat,
+    primitive: Option<wgpu::PrimitiveState>,
+) -> wgpu::RenderPipeline {
     let shader_crate = device.create_shader_module(wgpu::include_spirv!("shader_crate.spv"));
 
     let render_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -229,6 +233,18 @@ pub fn create_pipeline(device: &wgpu::Device, format: TextureFormat) -> wgpu::Re
             &lights_bindgroup_layout(device),
         ],
         push_constant_ranges: &[],
+    });
+
+    let primitive = primitive.unwrap_or_else(|| wgpu::PrimitiveState {
+        topology: wgpu::PrimitiveTopology::TriangleList,
+        strip_index_format: None,
+        front_face: wgpu::FrontFace::Cw,
+        cull_mode: Some(wgpu::Face::Back),
+        // Setting this to anything other than Fill requires Features::NON_FILL_POLYGON_MODE
+        polygon_mode: wgpu::PolygonMode::Fill,
+        // Requires Features::CONSERVATIVE_RASTERIZATION
+        conservative: false,
+        unclipped_depth: false,
     });
 
     let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -272,17 +288,7 @@ pub fn create_pipeline(device: &wgpu::Device, format: TextureFormat) -> wgpu::Re
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
             }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                strip_index_format: None,
-                front_face: wgpu::FrontFace::Cw,
-                cull_mode: Some(wgpu::Face::Back),
-                // Setting this to anything other than Fill requires Features::NON_FILL_POLYGON_MODE
-                polygon_mode: wgpu::PolygonMode::Fill,
-                // Requires Features::CONSERVATIVE_RASTERIZATION
-                conservative: false,
-                unclipped_depth: false,
-            },
+            primitive,
             depth_stencil: Some(wgpu::DepthStencilState {
                 format: wgpu::TextureFormat::Depth32Float,
                 depth_write_enabled: true,
