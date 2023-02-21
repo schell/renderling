@@ -305,9 +305,9 @@ impl Object {
     }
 
     /// Update the mesh of this object.
-    pub fn set_mesh(&self, mesh: Arc<crate::Mesh>) {
+    pub fn set_mesh(&self, mesh: impl Into<Arc<crate::Mesh>>) {
         let mut inner = self.inner.write();
-        inner.mesh = Some(mesh);
+        inner.mesh = Some(mesh.into());
         self.cmd
             .send(ObjUpdateCmd::Mesh { object_id: self.id })
             .unwrap();

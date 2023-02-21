@@ -1,10 +1,10 @@
 //! Physically based renderer shader code.
 //!
 //! This is actually just blinne-phong lighting, but is a placeholder for PBR.
-use glam::{mat3, mat4, vec4, Mat3, Mat4, Vec2, Vec3, Vec3Swizzles, Vec4, Vec4Swizzles};
+use glam::{mat3, mat4, vec4, Mat3, Mat4, Vec2, Vec3, Vec3Swizzles, Vec4, Vec4Swizzles, vec3};
 use spirv_std::{image::Image2d, Sampler};
 
-use crate::{CameraRaw, light::*};
+use crate::{CameraRaw, light::*, math::Vec3ColorSwizzles};
 
 pub fn main_vertex(
     camera: &CameraRaw,
@@ -67,7 +67,9 @@ pub fn main_fragment(
     let specular_color: Vec4 = specular_texture.sample(*specular_sampler, in_uv);
 
     if directional_lights.length == 0 && point_lights.length == 0 && spot_lights.length == 0 {
-        *frag_color = in_norm.extend(1.0);
+        // the scene is unlit, so we should provide some default
+        let desaturated_norm = in_norm.abs().dot(vec3(0.2126, 0.7152, 0.0722));
+        *frag_color = (diffuse_color.rgb() * desaturated_norm).extend(1.0);
         return;
     }
 
