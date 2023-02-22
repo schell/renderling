@@ -266,11 +266,61 @@ impl GltfLoader {
             } else {
                 dat.pixels.to_vec()
             };
-            let texture = Texture::new_with_format(
+
+            let sampler = texture.sampler();
+
+            fn to_address_mode(mode: gltf::texture::WrappingMode) -> wgpu::AddressMode {
+                match mode {
+                    gltf::texture::WrappingMode::ClampToEdge => wgpu::AddressMode::ClampToEdge,
+                    gltf::texture::WrappingMode::MirroredRepeat => wgpu::AddressMode::MirrorRepeat,
+                    gltf::texture::WrappingMode::Repeat => wgpu::AddressMode::Repeat,
+                }
+            }
+
+            let r_sampler = self.device.create_sampler(&wgpu::SamplerDescriptor {
+                address_mode_u: to_address_mode(sampler.wrap_s()),
+                address_mode_v: to_address_mode(sampler.wrap_t()),
+                address_mode_w: wgpu::AddressMode::ClampToEdge,
+                mag_filter: sampler
+                    .mag_filter()
+                    .map(|f| match f {
+                        gltf::texture::MagFilter::Nearest => wgpu::FilterMode::Nearest,
+                        gltf::texture::MagFilter::Linear => wgpu::FilterMode::Linear,
+                    })
+                    .unwrap_or(wgpu::FilterMode::Linear),
+                min_filter: sampler
+                    .min_filter()
+                    .map(|f| match f {
+                        gltf::texture::MinFilter::Nearest
+                        | gltf::texture::MinFilter::NearestMipmapNearest
+                        | gltf::texture::MinFilter::NearestMipmapLinear => {
+                            wgpu::FilterMode::Nearest
+                        }
+                        gltf::texture::MinFilter::Linear
+                        | gltf::texture::MinFilter::LinearMipmapNearest
+                        | gltf::texture::MinFilter::LinearMipmapLinear => wgpu::FilterMode::Linear,
+                    })
+                    .unwrap_or(wgpu::FilterMode::Nearest),
+                mipmap_filter: sampler
+                    .min_filter()
+                    .map(|f| match f {
+                        gltf::texture::MinFilter::NearestMipmapNearest
+                        | gltf::texture::MinFilter::LinearMipmapNearest => {
+                            wgpu::FilterMode::Nearest
+                        }
+                        gltf::texture::MinFilter::NearestMipmapLinear
+                        | gltf::texture::MinFilter::LinearMipmapLinear => wgpu::FilterMode::Linear,
+                        _ => wgpu::FilterMode::Nearest,
+                    })
+                    .unwrap_or(wgpu::FilterMode::Nearest),
+                ..Default::default()
+            });
+            let texture = Texture::new_with(
                 &self.device,
                 &self.queue,
                 None,
                 None,
+                Some(r_sampler),
                 format,
                 num_channels,
                 dat.width,
@@ -305,10 +355,11 @@ impl GltfLoader {
                 (b * 255.0) as u8,
                 (a * 255.0) as u8,
             ];
-            Texture::new_with_format(
+            Texture::new_with(
                 &self.device,
                 &self.queue,
                 material.name(),
+                None,
                 None,
                 wgpu::TextureFormat::Rgba8UnormSrgb,
                 4,
@@ -327,8 +378,11 @@ impl GltfLoader {
         });
 
         if let Some(index) = material.index() {
-            self.materials
-                .insert(index, material.name().map(|s| s.to_string()), blinn_phong.clone());
+            self.materials.insert(
+                index,
+                material.name().map(|s| s.to_string()),
+                blinn_phong.clone(),
+            );
         } else {
             self.default_material = Some(blinn_phong.clone());
         }
@@ -394,7 +448,10 @@ impl GltfLoader {
                 attribute: gltf::Semantic::Normals,
             })?;
             log::trace!("--normals: {} vertices", normals.len());
-            let normalized = primitive.get(&gltf::Semantic::Normals).unwrap().normalized();
+            let normalized = primitive
+                .get(&gltf::Semantic::Normals)
+                .unwrap()
+                .normalized();
             log::trace!("---normalized: {normalized}");
             let uvs: Box<dyn Iterator<Item = [f32; 2]>> =
                 if let Some(uvs) = reader.read_tex_coords(0) {
@@ -408,11 +465,13 @@ impl GltfLoader {
             let builder = positions.zip(normals.zip(uvs)).fold(
                 MeshBuilder::<pbr::Vertex>::default(),
                 |builder, (position, (normal, uv))| -> MeshBuilder<_> {
-                    builder.with_vertex(pbr::Vertex {
+                    let vertex = pbr::Vertex {
                         position,
                         normal,
                         uv,
-                    })
+                    };
+                    log::trace!("--vertex: {:?}", vertex);
+                    builder.with_vertex(vertex)
                 },
             );
             let builder = if let Some(indices) = reader.read_indices() {
@@ -434,7 +493,8 @@ impl GltfLoader {
             };
             prims.push(prim);
         }
-        self.meshes.insert(mesh.index(), mesh.name().map(|s| s.to_string()), prims);
+        self.meshes
+            .insert(mesh.index(), mesh.name().map(|s| s.to_string()), prims);
 
         Ok(())
     }
@@ -593,7 +653,8 @@ impl GltfLoader {
                 }
             };
 
-            self.nodes.insert(node.index(), node.name().map(|s| s.to_string()), r_node);
+            self.nodes
+                .insert(node.index(), node.name().map(|s| s.to_string()), r_node);
         }
 
         if let Some(light) = node.light() {

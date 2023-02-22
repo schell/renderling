@@ -32,11 +32,12 @@ pub struct Texture {
 
 impl Texture {
     /// Create a new texture.
-    pub fn new_with_format(
+    pub fn new_with(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         label: Option<&str>,
         usage: Option<wgpu::TextureUsages>,
+        sampler: Option<wgpu::Sampler>,
         format: wgpu::TextureFormat,
         color_channels: u32,
         width: u32,
@@ -77,7 +78,7 @@ impl Texture {
         );
 
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+        let sampler = sampler.unwrap_or_else(|| device.create_sampler(&wgpu::SamplerDescriptor {
             address_mode_u: wgpu::AddressMode::ClampToEdge,
             address_mode_v: wgpu::AddressMode::ClampToEdge,
             address_mode_w: wgpu::AddressMode::ClampToEdge,
@@ -85,7 +86,7 @@ impl Texture {
             min_filter: wgpu::FilterMode::Nearest,
             mipmap_filter: wgpu::FilterMode::Nearest,
             ..Default::default()
-        });
+        }));
 
         Texture {
             texture: Arc::new(texture),
@@ -107,11 +108,12 @@ impl Texture {
         height: u32,
         data: &[u8],
     ) -> Self {
-        Self::new_with_format(
+        Self::new_with(
             device,
             queue,
             label,
             usage,
+            None,
             wgpu::TextureFormat::Rgba8UnormSrgb,
             color_channels,
             width,

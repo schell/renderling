@@ -11,7 +11,7 @@ use winit::event::KeyboardInput;
 const RADIUS_SCROLL_DAMPENING: f32 = 0.001;
 const DX_DY_DRAG_DAMPENING: f32 = 0.01;
 
-const MODELS: [(&str, &str); 2] = [
+const MODELS: [(&str, &str); 3] = [
     // standard
     (
         "Box",
@@ -20,7 +20,11 @@ const MODELS: [(&str, &str); 2] = [
     (
         "Box Interleaved",
         "https://github.com/KhronosGroup/glTF-Sample-Models/raw/master/2.0/BoxInterleaved/glTF-Binary/BoxInterleaved.glb"
-    )
+    ),
+    (
+        "Box Textured",
+        "https://github.com/KhronosGroup/glTF-Sample-Models/raw/master/2.0/BoxTextured/glTF-Binary/BoxTextured.glb"
+    ),
 ];
 
 struct App {

@@ -11,7 +11,7 @@ pub use crate::linkage::{camera_uniform_layout, create_camera_uniform, ObjectDra
 use crate::BlinnPhongMaterial;
 
 #[repr(C)]
-#[derive(Copy, Clone, Default, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(Copy, Clone, Debug, Default, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Vertex {
     pub position: [f32; 3],
     pub uv: [f32; 2],
