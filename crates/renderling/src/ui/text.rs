@@ -35,6 +35,7 @@ impl Cache {
             usage: wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::TEXTURE_BINDING,
             mip_level_count: 1,
             sample_count: 1,
+            view_formats: &[]
         });
 
         let texture = Texture::from_wgpu_tex(texture, device);
