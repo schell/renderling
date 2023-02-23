@@ -1,6 +1,8 @@
 //! Runs through all the gltf sample models to test and show-off renderling's gltf capabilities.
 //!
 //! This demo requires an internet connection to download the samples.
+use core::f32;
+
 use renderling::{
     math::{Mat4, Vec3},
     Camera, FontArc, ForwardPipeline, GltfLoader, GlyphCache, Object, Renderling, Section, Text,
@@ -11,35 +13,28 @@ use winit::event::KeyboardInput;
 const RADIUS_SCROLL_DAMPENING: f32 = 0.001;
 const DX_DY_DRAG_DAMPENING: f32 = 0.01;
 
-const MODELS: [(&str, &str); 3] = [
-    // standard
-    (
-        "Box",
-        "https://github.com/KhronosGroup/glTF-Sample-Models/raw/master/2.0/Box/glTF-Binary/Box.glb",
-    ),
-    (
-        "Box Interleaved",
-        "https://github.com/KhronosGroup/glTF-Sample-Models/raw/master/2.0/BoxInterleaved/glTF-Binary/BoxInterleaved.glb"
-    ),
-    (
-        "Box Textured",
-        "https://github.com/KhronosGroup/glTF-Sample-Models/raw/master/2.0/BoxTextured/glTF-Binary/BoxTextured.glb"
-    ),
-];
+#[derive(Default)]
+struct Ui {
+    title_text: String,
+}
 
 struct App {
-    index: usize,
+    renderling_ui: Renderling<UiPipeline>,
+    renderling_forward: Renderling<ForwardPipeline>,
 
-    ui: Renderling<UiPipeline>,
-    text: Object,
+    ui: Ui,
+
+    text_title: Object,
+    text_camera: Object,
     ui_camera: Camera,
     cache: GlyphCache,
 
-    forward: Renderling<ForwardPipeline>,
     forward_camera: Camera,
 
     loader: GltfLoader,
 
+    // look at
+    eye: Vec3,
     // distance from the origin
     radius: f32,
     // anglular position on a circle `radius` away from the origin on x,z
@@ -53,7 +48,7 @@ struct App {
 }
 
 impl App {
-    fn new(gpu: &mut WgpuState, starting_index: usize) -> Self {
+    fn new(gpu: &mut WgpuState) -> Self {
         let radius = 6.0;
         let phi = 0.0;
         let theta = std::f32::consts::FRAC_PI_4;
@@ -63,8 +58,10 @@ impl App {
         let mut ui: Renderling<UiPipeline> = gpu.new_ui_renderling();
         let ui_camera = ui.new_camera().with_projection_ortho2d().build();
         let text = ui.new_object().build().unwrap();
+        let text_camera = ui.new_object().build().unwrap();
         // get the font for the UI
-        let bytes: Vec<u8> = std::fs::read("fonts/Font Awesome 6 Free-Regular-400.otf").unwrap();
+        let bytes: Vec<u8> =
+            std::fs::read("fonts/Recursive Mn Lnr St Med Nerd Font Complete.ttf").unwrap();
 
         let font = FontArc::try_from_vec(bytes).unwrap();
         let cache = gpu.new_glyph_cache(vec![font]);
@@ -73,14 +70,18 @@ impl App {
             topology: wgpu::PrimitiveTopology::TriangleList,
             strip_index_format: None,
             front_face: wgpu::FrontFace::Ccw,
-            cull_mode: Some(wgpu::Face::Back),
+            cull_mode: None, //Some(wgpu::Face::Back),
             polygon_mode: wgpu::PolygonMode::Fill,
             conservative: false,
             unclipped_depth: false,
         }));
         let forward_camera = forward
             .new_camera()
-            .with_projection_perspective()
+            .with_projection(Mat4::perspective_infinite_rh(
+                std::f32::consts::FRAC_PI_4,
+                window_size.0 as f32 / window_size.1 as f32,
+                0.01,
+            ))
             .with_view(Mat4::look_at_rh(
                 Self::camera_position(radius, phi, theta),
                 Vec3::ZERO,
@@ -90,23 +91,25 @@ impl App {
         let loader = gpu.new_gltf_loader();
 
         let mut app = Self {
-            index: starting_index,
-            ui,
-            text,
+            renderling_ui: ui,
+            text_title: text,
+            text_camera,
             ui_camera,
             cache,
-            forward,
+            renderling_forward: forward,
             forward_camera,
             loader,
             radius,
+            eye: Vec3::ZERO,
             phi,
             theta,
             left_mb_down,
             last_cursor_position,
+            ui: Ui {
+                title_text: "drag and drop a `.gltf` or `.glb` file to load".to_string(),
+            },
         };
-        let (name, url) = MODELS[app.index];
-        app.load(url);
-        app.update_ui(name);
+        app.update_ui();
         app
     }
 
@@ -118,48 +121,98 @@ impl App {
         Vec3::new(x, z, y)
     }
 
-    fn update_ui(&mut self, name: &str) {
+    fn update_ui(&mut self) {
         self.cache.queue(
-            Section::default().add_text(
-                Text::new(name)
-                    .with_color([1.0, 1.0, 1.0, 1.0])
-                    .with_scale(64.0),
-            ),
+            Section::default()
+                .add_text(
+                    Text::new(&self.ui.title_text)
+                        .with_color([1.0, 1.0, 1.0, 1.0])
+                        .with_scale(46.0),
+                )
+                .add_text(Text::new("\n"))
+                .add_text(
+                    Text::new(&format!("distance: {}, center: {}", self.radius, self.eye))
+                        .with_color([0.8, 0.8, 0.8, 1.0])
+                        .with_scale(32.0)
+                ),
         );
 
         let (material, mesh) = self.cache.get_updated();
 
         if let Some(material) = material {
-            self.text.set_material(material);
+            self.text_title.set_material(material);
         }
         if let Some(mesh) = mesh {
-            self.text.set_mesh(mesh);
+            self.text_title.set_mesh(mesh);
         }
     }
 
-    fn load(&mut self, url: &str) {
+    fn update_camera(&mut self) {
+        self.forward_camera.set_view(Mat4::look_at_rh(
+            Self::camera_position(self.radius, self.phi, self.theta),
+            self.eye,
+            Vec3::Y,
+        ));
+    }
+
+    fn update(&mut self) {
+        self.update_camera();
+        self.update_ui();
+    }
+
+    fn load(&mut self, file: impl AsRef<std::path::Path>) {
         self.loader.unload();
 
-        self.radius = 6.0;
         self.phi = 0.0;
         self.theta = std::f32::consts::FRAC_PI_4;
         self.left_mb_down = false;
         self.last_cursor_position = None;
 
-        let bytes = reqwest::blocking::get(url).unwrap().bytes().unwrap();
-        let (document, buffers, images) = gltf::import_slice(bytes).unwrap();
+        let (document, buffers, images) = gltf::import(&file).unwrap();
         self.loader
-            .load_scene(None, &mut self.forward, &document, &buffers, &images)
+            .load_scene(
+                None,
+                &mut self.renderling_forward,
+                &document,
+                &buffers,
+                &images,
+            )
             .unwrap();
+
+        if self.loader.lights().count() == 0 {
+            let name = get_name(file);
+            self.ui.title_text = format!("{name} (unlit)");
+        }
+
+        // find the bounding box of the model so we can display it correctly
+        let mut min = Vec3::splat(f32::INFINITY);
+        let mut max = Vec3::splat(f32::NEG_INFINITY);
+        for node in document.nodes() {
+            if let Some(mesh) = node.mesh() {
+                for primitive in mesh.primitives() {
+                    let aabb = primitive.bounding_box();
+                    min.x = min.x.min(aabb.min[0]);
+                    min.y = min.y.min(aabb.min[1]);
+                    min.z = min.z.min(aabb.min[2]);
+                    max.x = max.x.max(aabb.max[0]);
+                    max.y = max.y.max(aabb.max[1]);
+                    max.z = max.z.max(aabb.max[2]);
+                }
+            }
+        }
+
+        let halfway_point = min + ((max - min).normalize() * ((max - min).length() / 2.0));
+        let length = min.distance(max);
+        let radius = length * 1.25;
+
+        self.radius = radius;
+        self.eye = halfway_point;
+        self.update();
     }
 
     fn zoom(&mut self, delta: f32) {
-        self.radius -= delta * RADIUS_SCROLL_DAMPENING;
-        self.forward_camera.set_view(Mat4::look_at_rh(
-            Self::camera_position(self.radius, self.phi, self.theta),
-            Vec3::ZERO,
-            Vec3::Y,
-        ));
+        self.radius = (self.radius - (delta * RADIUS_SCROLL_DAMPENING)).max(0.0);
+        self.update();
     }
 
     fn pan(&mut self, position: winit::dpi::PhysicalPosition<f64>) {
@@ -173,11 +226,7 @@ impl App {
                 let next_theta = self.theta - dy as f32 * DX_DY_DRAG_DAMPENING;
                 self.theta = next_theta.max(0.0001).min(std::f32::consts::PI);
 
-                self.forward_camera.set_view(Mat4::look_at_rh(
-                    Self::camera_position(self.radius, self.phi, self.theta),
-                    Vec3::ZERO,
-                    Vec3::Y,
-                ));
+                self.update();
             }
             self.last_cursor_position = Some(position);
         }
@@ -208,26 +257,15 @@ impl App {
         if matches!(state, winit::event::ElementState::Pressed) {
             return;
         }
-        let should_load = match virtual_keycode {
-            Some(winit::event::VirtualKeyCode::Left) => {
-                self.index = (self.index + MODELS.len() - 1) % MODELS.len();
-                true
+        match virtual_keycode {
+            Some(winit::event::VirtualKeyCode::Space) => {
+                // clear all objects, cameras and lights
+                self.loader.unload();
+                self.ui.title_text = "awaiting drag and dropped `.gltf` or `.glb` file".to_string();
+                self.update();
             }
-            Some(winit::event::VirtualKeyCode::Right) => {
-                self.index = (self.index + 1) % MODELS.len();
-                true
-            }
-            _ => false,
+            _ => {}
         };
-        if should_load {
-            let (name, url) = MODELS[self.index];
-            self.update_ui(name);
-            self.loader.unload();
-            self.forward.update().unwrap();
-            self.render(gpu);
-
-            self.load(url);
-        }
     }
 
     fn resize(&mut self, gpu: &mut WgpuState, width: u32, height: u32) {
@@ -240,27 +278,32 @@ impl App {
             1.0,
             -1.0,
         ));
-        self.forward_camera.set_projection(Mat4::perspective_rh(
+        self.forward_camera.set_projection(Mat4::perspective_infinite_rh(
             std::f32::consts::FRAC_PI_4,
             width as f32 / height as f32,
-            0.1,
-            100.0,
+            0.01,
         ));
     }
 
     fn render(&mut self, gpu: &mut WgpuState) {
         let (frame, depth) = gpu.next_frame_cleared().unwrap();
 
-        self.forward.update().unwrap();
-        self.forward.render(&frame, &depth).unwrap();
+        self.renderling_forward.update().unwrap();
+        self.renderling_forward.render(&frame, &depth).unwrap();
 
         // just clear the depth texture, because we want to render the 2d UI over the 3d background
         gpu.clear(None, Some(&depth));
-        self.ui.update().unwrap();
-        self.ui.render(&frame, &depth).unwrap();
+        self.renderling_ui.update().unwrap();
+        self.renderling_ui.render(&frame, &depth).unwrap();
 
         gpu.present().unwrap();
     }
+}
+
+fn get_name(path: impl AsRef<std::path::Path>) -> String {
+    let file = path.as_ref().file_name();
+    let name = file.map(|s| s.to_str()).flatten().unwrap_or("unknown");
+    name.to_string()
 }
 
 /// Sets up the demo for a given model
@@ -268,20 +311,11 @@ pub fn demo(
     gpu: &mut WgpuState,
     start: Option<impl AsRef<str>>,
 ) -> impl FnMut(&mut WgpuState, Option<&winit::event::WindowEvent>) {
-    // find which model we're going to view
-    let index = start
-        .map(|input_name| {
-            for (i, (name, _)) in MODELS.iter().enumerate() {
-                if input_name.as_ref().to_lowercase() == name.to_lowercase() {
-                    return Some(i);
-                }
-            }
-            None
-        })
-        .flatten()
-        .unwrap_or_else(|| 0);
+    let mut app = App::new(gpu);
 
-    let mut app = App::new(gpu, index);
+    if let Some(file) = start {
+        app.load(file.as_ref());
+    }
 
     move |gpu, ev: Option<&winit::event::WindowEvent>| {
         if let Some(ev) = ev {
@@ -305,6 +339,11 @@ pub fn demo(
                 }
                 winit::event::WindowEvent::Resized(size) => {
                     app.resize(gpu, size.width, size.height);
+                }
+                winit::event::WindowEvent::DroppedFile(path) => {
+                    app.ui.title_text = get_name(&path);
+                    app.update_ui();
+                    app.load(path);
                 }
                 _ => {}
             }

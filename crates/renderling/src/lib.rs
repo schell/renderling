@@ -576,6 +576,7 @@ mod test {
         let mut gpu = WgpuState::headless(100, 100).unwrap();
         gpu.default_background_color = wgpu::Color::BLACK;
         let mut r = gpu.new_forward_renderling();
+        let white = Vec4::splat(1.0);
         let red = Vec3::X.extend(1.0);
         let green = Vec3::Y.extend(1.0);
         let blue = Vec3::Z.extend(1.0);
@@ -610,8 +611,9 @@ mod test {
                 Vec3::new(0.0, 1.0, 0.0),
             )
             .build();
-        let _tri = r
+        let _cube = r
             .new_object()
+            .with_material(BlinnPhongMaterial::from_colors(&gpu, white, white, 16.0))
             .with_mesh_builder(MeshBuilder::default().with_vertices(
                 crate::math::unit_cube().into_iter().map(|(p, n)| {
                     ForwardVertex::default()
@@ -695,52 +697,6 @@ mod test {
     }
 
     #[test]
-    // tests importing a gltf file and rendering the first image as a 2d object
-    fn gltf_images() {
-        let mut gpu = WgpuState::headless(100, 100).unwrap();
-        let mut ui = gpu.new_ui_renderling();
-        let _cam = ui.new_camera().with_projection_ortho2d().build();
-        let mut loader = gpu.new_gltf_loader();
-        let (document, _buffers, images) = gltf::import("../../gltf/cheetah_cone.glb").unwrap();
-        loader.load_materials(&document, &images).unwrap();
-        let _img = ui
-            .new_object()
-            .with_mesh_builder(
-                MeshBuilder::default()
-                    .with_vertices(vec![
-                        UiVertex::default()
-                            .with_position(0.0, 0.0, 0.0)
-                            .with_uv(0.0, 0.0),
-                        UiVertex::default()
-                            .with_position(1.0, 0.0, 0.0)
-                            .with_uv(1.0, 0.0),
-                        UiVertex::default()
-                            .with_position(1.0, 1.0, 0.0)
-                            .with_uv(1.0, 1.0),
-                        UiVertex::default()
-                            .with_position(0.0, 1.0, 0.0)
-                            .with_uv(0.0, 1.0),
-                    ])
-                    .with_indices(vec![0, 1, 2, 0, 2, 3]),
-            )
-            .with_material(UiMaterial {
-                diffuse_texture: loader.textures().next().unwrap().clone(),
-                color_blend: UiColorBlend::UvOnly,
-            })
-            .with_scale(Vec3::new(100.0, 100.0, 1.0))
-            .build()
-            .unwrap();
-        ui.update().unwrap();
-        let (frame, depth) = gpu.next_frame_cleared().unwrap();
-        ui.render(&frame, &depth).unwrap();
-
-        let img = gpu.grab_frame_image().unwrap();
-        // img.save_with_format("gltf_images.png", image::ImageFormat::Png)
-        //    .unwrap();
-        crate::img_diff::assert_img_eq("gltf_images", "gltf_images.png", img).unwrap();
-    }
-
-    #[test]
     // tests that nested children are transformed by their parent's transform
     fn parent_sanity() {
         let mut gpu = WgpuState::headless(100, 100).unwrap();
@@ -801,6 +757,52 @@ mod test {
 
     #[cfg(feature = "gltf")]
     #[test]
+    // tests importing a gltf file and rendering the first image as a 2d object
+    fn gltf_images() {
+        let mut gpu = WgpuState::headless(100, 100).unwrap();
+        let mut ui = gpu.new_ui_renderling();
+        let _cam = ui.new_camera().with_projection_ortho2d().build();
+        let mut loader = gpu.new_gltf_loader();
+        let (document, _buffers, images) = gltf::import("../../gltf/cheetah_cone.glb").unwrap();
+        loader.load_materials(&document, &images).unwrap();
+        let _img = ui
+            .new_object()
+            .with_mesh_builder(
+                MeshBuilder::default()
+                    .with_vertices(vec![
+                        UiVertex::default()
+                            .with_position(0.0, 0.0, 0.0)
+                            .with_uv(0.0, 0.0),
+                        UiVertex::default()
+                            .with_position(1.0, 0.0, 0.0)
+                            .with_uv(1.0, 0.0),
+                        UiVertex::default()
+                            .with_position(1.0, 1.0, 0.0)
+                            .with_uv(1.0, 1.0),
+                        UiVertex::default()
+                            .with_position(0.0, 1.0, 0.0)
+                            .with_uv(0.0, 1.0),
+                    ])
+                    .with_indices(vec![0, 1, 2, 0, 2, 3]),
+            )
+            .with_material(UiMaterial {
+                diffuse_texture: loader.textures().next().unwrap().clone(),
+                color_blend: UiColorBlend::UvOnly,
+            })
+            .with_scale(Vec3::new(100.0, 100.0, 1.0))
+            .build()
+            .unwrap();
+        ui.update().unwrap();
+        let (frame, depth) = gpu.next_frame_cleared().unwrap();
+        ui.render(&frame, &depth).unwrap();
+
+        let img = gpu.grab_frame_image().unwrap();
+        crate::img_diff::assert_img_eq_save(Save::No, "gltf_images", "gltf_images.png", img)
+            .unwrap();
+    }
+
+    #[cfg(feature = "gltf")]
+    #[test]
     fn gltf_load_scene() {
         _init_logging();
         let mut gpu = WgpuState::headless(177, 100).unwrap();
@@ -812,9 +814,43 @@ mod test {
             .load_scene(None, &mut r, &document, &buffers, &images)
             .unwrap();
 
-        //let dir_light = loader.get_light_by_index(0).unwrap().as_directional().unwrap();
-        //dir_light.set_ambient_color(Vec3::splat(0.1).extend(1.0));
-        //dir_light.set_direction(Vec3::NEG_Z);
+        r.update().unwrap();
+        let (frame, depth) = gpu.next_frame_cleared().unwrap();
+        r.render(&frame, &depth).unwrap();
+
+        let img = gpu.grab_frame_image().unwrap();
+        crate::img_diff::assert_img_eq_save(
+            Save::No,
+            "gltf_load_scene",
+            "gltf_load_scene.png",
+            img,
+        )
+        .unwrap();
+    }
+
+    #[cfg(feature = "gltf")]
+    #[test]
+    fn gltf_simple_animation() {
+        _init_logging();
+
+        let mut gpu = WgpuState::headless(100, 100).unwrap();
+        let mut r = gpu.new_forward_renderling();
+        let _cam = r
+            .new_camera()
+            .with_projection_ortho2d()
+            .build();
+
+        let mut loader = gpu.new_gltf_loader();
+        let (document, buffers, images) =
+            gltf::import("../../gltf/animated_triangle.gltf").unwrap();
+        loader
+            .load_scene(None, &mut r, &document, &buffers, &images)
+            .unwrap();
+
+        let tri_node = loader.get_node(0).unwrap();
+        let tri = tri_node.variant.as_object().unwrap();
+        tri.set_scale(Vec3::splat(25.0));
+        tri.set_position(Vec3::new(50.0, 50.0, 0.0));
 
         r.update().unwrap();
         let (frame, depth) = gpu.next_frame_cleared().unwrap();
@@ -822,9 +858,9 @@ mod test {
 
         let img = gpu.grab_frame_image().unwrap();
         crate::img_diff::assert_img_eq_save(
-            Save::Yes,
-            "gltf_load_scene",
-            "gltf_load_scene.png",
+            Save::No,
+            "gltf_simple_animation",
+            "gltf_simple_animation.png",
             img,
         )
         .unwrap();

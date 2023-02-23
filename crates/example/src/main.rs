@@ -6,19 +6,19 @@ mod gltf;
 fn run() -> Result<(), anyhow::Error> {
     env_logger::Builder::default()
         .filter_module("example", log::LevelFilter::Trace)
-        .filter_module("renderling", log::LevelFilter::Trace)
+        .filter_module("renderling", log::LevelFilter::Debug)
         .filter_module("naga", log::LevelFilter::Warn)
         .filter_module("wgpu", log::LevelFilter::Warn)
         .init();
 
     let event_loop = winit::event_loop::EventLoop::new();
     let window_size = winit::dpi::LogicalSize {
-        width: 400,
-        height: 300,
+        width: 800,
+        height: 600,
     };
     let window_builder = winit::window::WindowBuilder::new()
         .with_inner_size::<winit::dpi::LogicalSize<u32>>(window_size)
-        .with_title("blinn-phong lighting w/ forward pipeline");
+        .with_title("renderling gltf viewer");
     let window = window_builder.build(&event_loop)?;
 
     // Set up wgpu

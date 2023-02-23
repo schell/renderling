@@ -342,6 +342,7 @@ impl<P: Pipeline> Renderling<P> {
                     }
                 }
                 ObjUpdateCmd::Destroy { object_id } => {
+                    log::debug!("destroying {:?}", object_id);
                     self.stage.destroy_object(object_id);
                     self.stage.should_sort = true;
                 }
@@ -351,6 +352,7 @@ impl<P: Pipeline> Renderling<P> {
         while let Ok(cmd) = self.camera_update_queue.1.try_recv() {
             match cmd {
                 CameraUpdateCmd::Destroy { camera_id } => {
+                    log::debug!("destroying {:?}", camera_id);
                     self.stage.destroy_camera(camera_id);
                 }
                 CameraUpdateCmd::Update { camera_id } => {

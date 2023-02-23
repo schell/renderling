@@ -521,6 +521,7 @@ impl WgpuState {
     ) -> Renderling<ForwardPipeline> {
         // this is the _default_ texture bind group which will be used when
         // there is no available texture to bind.
+        let grey = [0x7f, 0x7f, 0x7f, 0xff];
         let diffuse_texture = crate::Texture::new(
             &self.device,
             &self.queue,
@@ -529,7 +530,7 @@ impl WgpuState {
             4,
             1,
             1,
-            &[0xff, 0xff, 0xff, 0xff],
+            &grey,
         );
         let specular_texture = crate::Texture::new(
             &self.device,
@@ -539,7 +540,7 @@ impl WgpuState {
             4,
             1,
             1,
-            &[0xff, 0xff, 0xff, 0xff],
+            &grey,
         );
         let material = crate::forward::BlinnPhongMaterial {
             diffuse_texture,

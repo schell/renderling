@@ -13,6 +13,5 @@ gltf = "1.1.0"
 icosahedron = "^0.1"
 log = "0.4.17"
 renderling = { path = "../renderling" }
-reqwest = { version = "0.11.14", features = ["blocking"] }
 winit = "^0.27"
 wgpu = "^0.14"
