@@ -33,7 +33,7 @@ raw-window-handle = { version = "0.5.0", optional = true }
 renderling-shader = { path = "../renderling-shader" }
 rustc-hash = "1.1.0"
 snafu = "0.7.4"
-wgpu = { version = "^0.14", features = ["spirv"] }
+wgpu = { version = "^0.15", features = ["spirv"] }
 winit = { version = "0.27.5", optional = true }
 
 [package.metadata.docs.rs]

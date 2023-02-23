@@ -20,6 +20,9 @@ pub enum WgpuStateError {
     #[snafu(display("surface is incompatible with adapter"))]
     IncompatibleSurface,
 
+    #[snafu(display("could not create surface: {}", source))]
+    CreateSurface { source: wgpu::CreateSurfaceError },
+
     #[snafu(display("missing surface texture: {}", source))]
     MissingSurfaceTexture { source: wgpu::SurfaceError },
 
@@ -78,6 +81,7 @@ impl RenderTarget {
                     format: wgpu::TextureFormat::Rgba8UnormSrgb,
                     usage: wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::RENDER_ATTACHMENT,
                     label: None,
+                    view_formats: &[]
                 };
                 *texture = Arc::new(device.create_texture(&texture_desc));
             }
@@ -151,12 +155,15 @@ impl WgpuState {
 
         // The instance is a handle to our GPU
         // BackendBit::PRIMARY => Vulkan + Metal + DX12 + Browser WebGPU
-        let backend = if cfg!(target_arch = "wasm32") {
+        let backends = if cfg!(target_arch = "wasm32") {
             wgpu::Backends::all()
         } else {
             wgpu::Backends::PRIMARY
         };
-        let instance = wgpu::Instance::new(backend);
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+            backends,
+            dx12_shader_compiler: wgpu::Dx12Compiler::default(),
+        });
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
                 power_preference: wgpu::PowerPreference::default(),
@@ -194,6 +201,7 @@ impl WgpuState {
             format: wgpu::TextureFormat::Rgba8UnormSrgb,
             usage: wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::RENDER_ATTACHMENT,
             label: None,
+            view_formats: &[],
         };
         let texture = Arc::new(device.create_texture(&texture_desc));
         let depth_texture = crate::Texture::create_depth_texture(&device, width, height);
@@ -219,13 +227,16 @@ impl WgpuState {
 
         // The instance is a handle to our GPU
         // BackendBit::PRIMARY => Vulkan + Metal + DX12 + Browser WebGPU
-        let backend = if cfg!(target_arch = "wasm32") {
+        let backends = if cfg!(target_arch = "wasm32") {
             wgpu::Backends::all()
         } else {
             wgpu::Backends::PRIMARY
         };
-        let instance = wgpu::Instance::new(backend);
-        let surface = unsafe { instance.create_surface(window) };
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+            backends,
+            dx12_shader_compiler: wgpu::Dx12Compiler::default(),
+        });
+        let surface = unsafe { instance.create_surface(window) }.context(CreateSurfaceSnafu)?;
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
                 power_preference: wgpu::PowerPreference::default(),
@@ -251,18 +262,22 @@ impl WgpuState {
             .await
             .context(CannotRequestDeviceSnafu)?;
 
-        let surface_config = wgpu::SurfaceConfiguration {
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-            format: surface
-                .get_supported_formats(&adapter)
-                .first()
-                .copied()
-                .context(IncompatibleSurfaceSnafu)?,
-            width,
-            height,
-            present_mode: wgpu::PresentMode::Fifo,
-            alpha_mode: wgpu::CompositeAlphaMode::Auto,
-        };
+        let surface_config = surface
+            .get_default_config(&adapter, width, height)
+            .context(IncompatibleSurfaceSnafu)?;
+        //let surface_config = wgpu::SurfaceConfiguration {
+        //    usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+        //    format: surface
+        //        .get_supported_formats(&adapter)
+        //        .first()
+        //        .copied()
+        //        .context(IncompatibleSurfaceSnafu)?,
+        //    width,
+        //    height,
+        //    present_mode: wgpu::PresentMode::Fifo,
+        //    alpha_mode: wgpu::CompositeAlphaMode::Auto,
+        //    view_formats: &[]
+        //};
         surface.configure(&device, &surface_config);
         let target = RenderTarget::Surface {
             surface,
