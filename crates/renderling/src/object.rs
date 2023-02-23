@@ -261,8 +261,11 @@ pub struct Object {
 }
 
 impl Drop for Object {
+    // TODO: do the same drop treatment for cameras and lights
     fn drop(&mut self) {
-        if self.inner.count() <= 1 {
+        // the minimum count here is 2 because when the object is dropped there is 1 from the
+        // this object here and one stored in the renderer
+        if self.inner.count() <= 2 {
             let _ = self.cmd.send(ObjUpdateCmd::Destroy { object_id: self.id });
         }
     }
@@ -273,6 +276,24 @@ impl Object {
     pub fn set_transform(&self, transform: LocalTransform) {
         let mut inner = self.inner.write();
         *inner.local_transforms.get_mut(0).unwrap() = transform;
+        self.cmd
+            .send(ObjUpdateCmd::Transform { object_id: self.id })
+            .unwrap();
+    }
+
+    /// Update the local transform's scale of this object.
+    pub fn set_scale(&self, scale: Vec3) {
+        let mut inner = self.inner.write();
+        inner.local_transforms.get_mut(0).unwrap().scale = scale;
+        self.cmd
+            .send(ObjUpdateCmd::Transform { object_id: self.id })
+            .unwrap();
+    }
+
+    /// Update the local transform's scale of this object.
+    pub fn set_position(&self, position: Vec3) {
+        let mut inner = self.inner.write();
+        inner.local_transforms.get_mut(0).unwrap().position = position;
         self.cmd
             .send(ObjUpdateCmd::Transform { object_id: self.id })
             .unwrap();

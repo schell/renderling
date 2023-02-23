@@ -43,6 +43,9 @@ pub enum GltfError {
     #[snafu(display("Missing image {}", index))]
     MissingImage { index: usize },
 
+    #[snafu(display("Unsupported primitive mode: {:?}", mode))]
+    PrimitiveMode { mode: gltf::mesh::Mode },
+
     #[snafu(display("{}", source))]
     Object { source: ObjectBuilderError },
 }
@@ -165,6 +168,15 @@ pub enum GltfNodeVariant {
     },
 }
 
+impl GltfNodeVariant {
+    pub fn as_object(&self) -> Option<&Object> {
+        match self {
+            GltfNodeVariant::Object(o) => Some(o),
+            _ => None
+        }
+    }
+}
+
 pub struct GltfNode {
     /// The name of this node, if available.
     pub name: Option<String>,
@@ -188,6 +200,13 @@ fn decomposed_transform(transform: gltf::scene::Transform) -> LocalTransform {
         .with_scale(Vec3::from(s))
 }
 
+#[derive(Debug)]
+pub struct GltfVertex {
+    position: [f32; 3],
+    uv: Option<[f32; 2]>,
+    normal: Option<[f32; 3]>,
+}
+
 pub struct GltfLoader {
     device: Arc<wgpu::Device>,
     queue: Arc<wgpu::Queue>,
@@ -197,6 +216,8 @@ pub struct GltfLoader {
     materials: GltfStore<Arc<BlinnPhongMaterial>>,
     meshes: GltfStore<Vec<GltfMeshPrimitive>>,
     nodes: GltfStore<GltfNode>,
+    animations: GltfStore<()>,
+    pub generate_normals: bool,
 }
 
 impl GltfLoader {
@@ -211,6 +232,8 @@ impl GltfLoader {
             materials: Default::default(),
             meshes: Default::default(),
             nodes: Default::default(),
+            animations: Default::default(),
+            generate_normals: true,
         }
     }
 
@@ -426,52 +449,77 @@ impl GltfLoader {
         self.load_material(material, images)
     }
 
-    pub fn load_mesh<'b>(
+    pub fn load_mesh_with<'b, Vertex: bytemuck::Pod>(
         &mut self,
         mesh: gltf::Mesh<'b>,
         buffers: &[gltf::buffer::Data],
         images: &[gltf::image::Data],
+        // a function that converts a GltfVertex, which may or may not contain certain
+        // attributes, into a mesh vertex
+        build_vertex: fn(GltfVertex) -> Vertex,
     ) -> Result<(), GltfError> {
         let mut prims = vec![];
         log::trace!("mesh: {} {:?}", mesh.index(), mesh.name());
         log::trace!("-weights: {:?}", mesh.weights());
         for primitive in mesh.primitives() {
+            snafu::ensure!(primitive.mode() == gltf::mesh::Mode::Triangles, PrimitiveModeSnafu{ mode: primitive.mode() });
             log::trace!("-primitive: {}", primitive.index());
-            log::trace!("--mode: {:?}", primitive.mode());
             log::trace!("--bounding_box: {:?}", primitive.bounding_box());
             let reader = primitive.reader(|buffer| Some(&buffers[buffer.index()]));
             let positions = reader.read_positions().context(MissingAttributeSnafu {
                 attribute: gltf::Semantic::Positions,
             })?;
             log::trace!("--positions: {} vertices", positions.len());
-            let normals = reader.read_normals().context(MissingAttributeSnafu {
-                attribute: gltf::Semantic::Normals,
-            })?;
-            log::trace!("--normals: {} vertices", normals.len());
+            let (positions, normals): (
+                Box<dyn Iterator<Item = [f32; 3]>>,
+                Box<dyn Iterator<Item = Option<[f32; 3]>>>,
+            ) = if let Some(normals) = reader.read_normals() {
+                log::trace!("--normals: {} vertices", normals.len());
+                (Box::new(positions), Box::new(normals.map(Some)))
+            } else if self.generate_normals {
+                let positions = positions.collect::<Vec<_>>();
+                let normals = positions.chunks(3).flat_map(|t| match t {
+                    [a, b, c] => {
+                        let a = Vec3::from(*a);
+                        let b = Vec3::from(*b);
+                        let c = Vec3::from(*c);
+                        let ab = b - a;
+                        let ac = c - a;
+                        let n = ab.cross(ac);
+                        let n = [n.x, n.y, n.z];
+                        [n, n, n]
+                    }
+                    _ => unreachable!("safe because we know these are triangles")
+                }).collect::<Vec<_>>();
+                (Box::new(positions.into_iter()), Box::new(normals.into_iter().map(Some)))
+            } else {
+                log::trace!("--normals: none");
+                (Box::new(positions), Box::new(std::iter::repeat(None)))
+            };
             let normalized = primitive
                 .get(&gltf::Semantic::Normals)
-                .unwrap()
-                .normalized();
-            log::trace!("---normalized: {normalized}");
-            let uvs: Box<dyn Iterator<Item = [f32; 2]>> =
+                .map(|n| n.normalized());
+            log::trace!("---normalized: {normalized:?}");
+            let uvs: Box<dyn Iterator<Item = Option<[f32; 2]>>> =
                 if let Some(uvs) = reader.read_tex_coords(0) {
-                    let uvs = uvs.into_f32();
+                    let uvs = uvs.into_f32().map(Some);
                     log::trace!("--uvs: {} vertices", uvs.len());
                     Box::new(uvs)
                 } else {
-                    Box::new(std::iter::repeat([0.0; 2]))
+                    log::trace!("--uvs: none");
+                    Box::new(std::iter::repeat(None))
                 };
 
             let builder = positions.zip(normals.zip(uvs)).fold(
-                MeshBuilder::<pbr::Vertex>::default(),
+                MeshBuilder::<Vertex>::default(),
                 |builder, (position, (normal, uv))| -> MeshBuilder<_> {
-                    let vertex = pbr::Vertex {
+                    let vertex = GltfVertex {
                         position,
                         normal,
                         uv,
                     };
                     log::trace!("--vertex: {:?}", vertex);
-                    builder.with_vertex(vertex)
+                    builder.with_vertex(build_vertex(vertex))
                 },
             );
             let builder = if let Some(indices) = reader.read_indices() {
@@ -497,6 +545,19 @@ impl GltfLoader {
             .insert(mesh.index(), mesh.name().map(|s| s.to_string()), prims);
 
         Ok(())
+    }
+
+    pub fn load_mesh<'b>(
+        &mut self,
+        mesh: gltf::Mesh<'b>,
+        buffers: &[gltf::buffer::Data],
+        images: &[gltf::image::Data],
+    ) -> Result<(), GltfError> {
+        self.load_mesh_with(mesh, buffers, images, |v| pbr::Vertex {
+            position: v.position,
+            uv: v.uv.unwrap_or_default(),
+            normal: v.normal.unwrap(),
+        })
     }
 
     /// Load all mesh primitives from the gltf document into the loader.
@@ -729,7 +790,7 @@ impl GltfLoader {
                 printed = true;
             }
 
-            let _ = self.load_node(r, buffers, images, node, depth + 2);
+            let _ = self.load_node(r, buffers, images, node, depth + 2)?;
         }
 
         Ok(())
@@ -758,7 +819,7 @@ impl GltfLoader {
             }
 
             for node in scene.nodes() {
-                let _ = self.load_node(r, buffers, images, node, 1);
+                let _ = self.load_node(r, buffers, images, node, 1)?;
             }
         }
 
@@ -782,6 +843,10 @@ impl GltfLoader {
             }
         }
         None
+    }
+
+    pub fn get_node(&self, index: usize) -> Option<&GltfNode> {
+        self.nodes.get(index)
     }
 
     /// Iterate over the nodes that are cameras
