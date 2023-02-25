@@ -247,7 +247,7 @@ impl App {
 
     fn key_input(
         &mut self,
-        gpu: &mut WgpuState,
+        _: &mut WgpuState,
         KeyboardInput {
             state,
             virtual_keycode,

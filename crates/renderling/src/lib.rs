@@ -833,12 +833,10 @@ mod test {
     fn gltf_simple_animation() {
         _init_logging();
 
-        let mut gpu = WgpuState::headless(100, 100).unwrap();
+        let mut gpu = WgpuState::headless(50, 50).unwrap();
+        gpu.default_background_color = wgpu::Color::WHITE;
         let mut r = gpu.new_forward_renderling();
-        let _cam = r
-            .new_camera()
-            .with_projection_ortho2d()
-            .build();
+        let _cam = r.new_camera().with_projection_ortho2d().build();
 
         let mut loader = gpu.new_gltf_loader();
         let (document, buffers, images) =
@@ -850,7 +848,7 @@ mod test {
         let tri_node = loader.get_node(0).unwrap();
         let tri = tri_node.variant.as_object().unwrap();
         tri.set_scale(Vec3::splat(25.0));
-        tri.set_position(Vec3::new(50.0, 50.0, 0.0));
+        tri.set_position(Vec3::new(25.0, 25.0, 0.0));
 
         r.update().unwrap();
         let (frame, depth) = gpu.next_frame_cleared().unwrap();
@@ -861,6 +859,36 @@ mod test {
             Save::No,
             "gltf_simple_animation",
             "gltf_simple_animation.png",
+            img,
+        )
+        .unwrap();
+
+        loader.load_animations(&document, &buffers).unwrap();
+
+        assert_eq!(1, loader.animations().count());
+
+        let anime = loader.get_animation(0).unwrap();
+        println!("anime: {:?}", anime);
+        assert_eq!(1.0, anime.tweens[0].length_in_seconds());
+
+        let num = 8;
+        for i in 0..num {
+            let t = i as f32 / num as f32;
+            for tween in anime.tweens.iter() {
+                let property = tween.interpolate(t).unwrap();
+                let node = loader.get_node(tween.target_node_index).unwrap();
+                node.set_tween_property(property);
+            }
+            r.update().unwrap();
+            gpu.clear(None, Some(&depth));
+            r.render(&frame, &depth).unwrap();
+        }
+
+        let img = gpu.grab_frame_image().unwrap();
+        crate::img_diff::assert_img_eq_save(
+            Save::No,
+            "gltf_simple_animation_after",
+            "gltf_simple_animation_after.png",
             img,
         )
         .unwrap();

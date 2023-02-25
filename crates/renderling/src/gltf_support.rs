@@ -8,6 +8,7 @@ use glam::{Mat4, Quat, Vec3, Vec4};
 use gltf::khr_lights_punctual::Kind;
 use rustc_hash::FxHashMap;
 use snafu::prelude::*;
+use splines::Interpolate;
 
 use crate::{
     linkage::pbr, BlinnPhongMaterial, Camera, DirectionalLight, ForwardPipeline, LocalTransform,
@@ -48,6 +49,27 @@ pub enum GltfError {
 
     #[snafu(display("{}", source))]
     Object { source: ObjectBuilderError },
+}
+
+#[derive(Debug, Snafu)]
+pub enum InterpolationError {
+    #[snafu(display("No keyframes"))]
+    NoKeyframes,
+
+    #[snafu(display("Not enough keyframes"))]
+    NotEnoughKeyframes,
+
+    #[snafu(display("Property with index {} is missing", index))]
+    MissingPropertyIndex { index: usize },
+
+    #[snafu(display("No previous keyframe"))]
+    NoPreviousKeyframe,
+
+    #[snafu(display("No next keyframe"))]
+    NoNextKeyframe,
+
+    #[snafu(display("Mismatched properties"))]
+    MismatchedProperties
 }
 
 fn image_data_format_to_wgpu(
@@ -172,7 +194,7 @@ impl GltfNodeVariant {
     pub fn as_object(&self) -> Option<&Object> {
         match self {
             GltfNodeVariant::Object(o) => Some(o),
-            _ => None
+            _ => None,
         }
     }
 }
@@ -192,6 +214,20 @@ pub struct GltfNode {
     pub variant: GltfNodeVariant,
 }
 
+impl GltfNode {
+    pub fn set_tween_property(&self, property: TweenProperty) {
+        match &self.variant {
+            GltfNodeVariant::Camera(_) => todo!(),
+            GltfNodeVariant::Object(o) => match property {
+                TweenProperty::Translation(t) => o.set_position(t),
+                TweenProperty::Rotation(r) => o.set_rotation(r),
+                TweenProperty::Scale(s) => o.set_scale(s),
+            },
+            GltfNodeVariant::Light { .. } => todo!(),
+        }
+    }
+}
+
 fn decomposed_transform(transform: gltf::scene::Transform) -> LocalTransform {
     let (t, r, s) = transform.decomposed();
     LocalTransform::default()
@@ -207,6 +243,288 @@ pub struct GltfVertex {
     normal: Option<[f32; 3]>,
 }
 
+#[derive(Debug)]
+pub enum GltfInterpolation {
+    Linear,
+    Step,
+    CubicSpline,
+}
+
+impl From<gltf::animation::Interpolation> for GltfInterpolation {
+    fn from(value: gltf::animation::Interpolation) -> Self {
+        match value {
+            gltf::animation::Interpolation::Linear => GltfInterpolation::Linear,
+            gltf::animation::Interpolation::Step => GltfInterpolation::Step,
+            gltf::animation::Interpolation::CubicSpline => GltfInterpolation::CubicSpline,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct Keyframe(pub f32);
+
+#[derive(Debug)]
+pub enum TweenProperty {
+    Translation(Vec3),
+    Rotation(Quat),
+    Scale(Vec3),
+}
+
+impl TweenProperty {
+    fn as_translation(&self) -> Option<&Vec3> {
+        match self {
+            TweenProperty::Translation(a) => Some(a),
+            _ => None,
+        }
+    }
+
+    fn as_rotation(&self) -> Option<&Quat> {
+        match self {
+            TweenProperty::Rotation(a) => Some(a),
+            _ => None,
+        }
+    }
+
+    fn as_scale(&self) -> Option<&Vec3> {
+        match self {
+            TweenProperty::Scale(a) => Some(a),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum TweenProperties {
+    Translations(Vec<Vec3>),
+    Rotations(Vec<Quat>),
+    Scales(Vec<Vec3>),
+}
+
+impl TweenProperties {
+    pub fn get(&self, index: usize) -> Option<TweenProperty> {
+        match self {
+            TweenProperties::Translations(translations) => translations
+                .get(index)
+                .map(|translation| TweenProperty::Translation(*translation)),
+            TweenProperties::Rotations(rotations) => rotations
+                .get(index)
+                .map(|rotation| TweenProperty::Rotation(*rotation)),
+            TweenProperties::Scales(scales) => {
+                scales.get(index).map(|scale| TweenProperty::Scale(*scale))
+            }
+        }
+    }
+
+    pub fn get_cubic(&self, index: usize) -> Option<[TweenProperty; 3]> {
+        let start = 3 * index;
+        let end = start + 3;
+        match self {
+            TweenProperties::Translations(translations) => {
+                if let Some([p0, p1, p2]) = translations.get(start..end) {
+                    Some([
+                        TweenProperty::Translation(p0.clone()),
+                        TweenProperty::Translation(p1.clone()),
+                        TweenProperty::Translation(p2.clone()),
+                    ])
+                } else {
+                    None
+                }
+            }
+            TweenProperties::Rotations(rotations) => {
+                if let Some([p0, p1, p2]) = rotations.get(start..end) {
+                    Some([
+                        TweenProperty::Rotation(p0.clone()),
+                        TweenProperty::Rotation(p1.clone()),
+                        TweenProperty::Rotation(p2.clone()),
+                    ])
+                } else {
+                    None
+                }
+            }
+            TweenProperties::Scales(scales) => {
+                if let Some([p0, p1, p2]) = scales.get(start..end) {
+                    Some([
+                        TweenProperty::Scale(p0.clone()),
+                        TweenProperty::Scale(p1.clone()),
+                        TweenProperty::Scale(p2.clone()),
+                    ])
+                } else {
+                    None
+                }
+            }
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct Tween {
+    // times (inputs)
+    pub keyframes: Vec<Keyframe>,
+    // properties (outputs)
+    pub properties: TweenProperties,
+    // the type of interpolation
+    pub interpolation: GltfInterpolation,
+    // the index of target node this tween applies to
+    pub target_node_index: usize,
+}
+
+impl Tween {
+    /// Compute the interpolated tween property at the given time.
+    ///
+    /// Returns `None` if the properties don't match.
+    ///
+    /// See https://github.com/KhronosGroup/glTF-Tutorials/blob/master/gltfTutorial/gltfTutorial_007_Animations.md
+    pub fn interpolate(&self, time: f32) -> Result<TweenProperty, InterpolationError> {
+        snafu::ensure!(!self.keyframes.is_empty(), NoKeyframesSnafu);
+
+        match self.interpolation {
+            GltfInterpolation::Linear => self.interpolate_linear(time),
+            GltfInterpolation::Step => self.interpolate_step(time),
+            GltfInterpolation::CubicSpline => self.interpolate_cubic(time),
+        }
+    }
+
+    fn interpolate_step(&self, time: f32) -> Result<TweenProperty, InterpolationError> {
+        let (prev_keyframe_ndx, _) = self
+            .keyframes
+            .iter()
+            .enumerate()
+            .filter(|(_, keyframe)| keyframe.0 <= time)
+            .last()
+            .context(NoPreviousKeyframeSnafu)?;
+
+        self.properties
+            .get(prev_keyframe_ndx)
+            .context(MissingPropertyIndexSnafu {
+                index: prev_keyframe_ndx,
+            })
+    }
+
+    fn interpolate_cubic(&self, time: f32) -> Result<TweenProperty, InterpolationError> {
+        snafu::ensure!(self.keyframes.len() >= 2, NotEnoughKeyframesSnafu);
+
+        let (prev_keyframe_ndx, prev_keyframe) = self
+            .keyframes
+            .iter()
+            .enumerate()
+            .filter(|(_, keyframe)| keyframe.0 < time)
+            .last()
+            .context(NoPreviousKeyframeSnafu)?;
+        let prev_time = prev_keyframe.0;
+        let (next_keyframe_ndx, next_keyframe) = self
+            .keyframes
+            .iter()
+            .enumerate()
+            .find(|(_, keyframe)| keyframe.0 > time)
+            .context(NoNextKeyframeSnafu)?;
+        let next_time = next_keyframe.0;
+
+        // UNWRAP: safe because we know this was found above
+        let [_, from, from_out] =
+            self.properties
+                .get_cubic(prev_keyframe_ndx)
+                .context(MissingPropertyIndexSnafu {
+                    index: prev_keyframe_ndx,
+                })?;
+        // UNWRAP: safe because we know this is either the first index or was found above
+        let [to_in, to, _] =
+            self.properties
+                .get_cubic(next_keyframe_ndx)
+                .context(MissingPropertyIndexSnafu {
+                    index: next_keyframe_ndx,
+                })?;
+
+        let amount = (time - prev_time) / (next_time - prev_time);
+
+        Ok(match from {
+            TweenProperty::Translation(from) => {
+                let from_out = *from_out.as_translation().context(MismatchedPropertiesSnafu)?;
+                let to_in = *to_in.as_translation().context(MismatchedPropertiesSnafu)?;
+                let to = *to.as_translation().context(MismatchedPropertiesSnafu)?;
+                TweenProperty::Translation(Vec3::cubic_bezier(amount, from, from_out, to_in, to))
+            }
+            TweenProperty::Rotation(from) => {
+                let from_out = *from_out.as_rotation().context(MismatchedPropertiesSnafu)?;
+                let to_in = *to_in.as_rotation().context(MismatchedPropertiesSnafu)?;
+                let to = *to.as_rotation().context(MismatchedPropertiesSnafu)?;
+                TweenProperty::Rotation(Quat::cubic_bezier(amount, from, from_out, to_in, to))
+            }
+            TweenProperty::Scale(from) => {
+                let from_out = *from_out.as_scale().context(MismatchedPropertiesSnafu)?;
+                let to_in = *to_in.as_scale().context(MismatchedPropertiesSnafu)?;
+                let to = *to.as_scale().context(MismatchedPropertiesSnafu)?;
+                TweenProperty::Scale(Vec3::cubic_bezier(amount, from, from_out, to_in, to))
+                //
+            }
+        })
+    }
+
+    fn interpolate_linear(&self, time: f32) -> Result<TweenProperty, InterpolationError> {
+        let last_keyframe = self.keyframes.len() - 1;
+        let last_time = self.keyframes[last_keyframe].0;
+        let time = time.min(last_time);
+        log::trace!("time: {}", time);
+        let (prev_keyframe_ndx, prev_keyframe) = self
+            .keyframes
+            .iter()
+            .enumerate()
+            .filter(|(_, keyframe)| keyframe.0 <= time)
+            .last()
+            .context(NoPreviousKeyframeSnafu)?;
+        let prev_time = prev_keyframe.0;
+        log::trace!("prev_time: {}", prev_time);
+        let (next_keyframe_ndx, next_keyframe) = self
+            .keyframes
+            .iter()
+            .enumerate()
+            .find(|(_, keyframe)| keyframe.0 > time)
+            .context(NoNextKeyframeSnafu)?;
+        let next_time = next_keyframe.0;
+        log::trace!("next_time: {}", next_time);
+
+        // UNWRAP: safe because we know this was found above
+        let from = self.properties.get(prev_keyframe_ndx).unwrap();
+        log::trace!("from: {} {:?}", prev_keyframe_ndx, from);
+
+        // UNWRAP: safe because we know this is either the first index or was found above
+        let to = self.properties.get(next_keyframe_ndx).unwrap();
+        log::trace!("to: {} {:?}", next_keyframe_ndx, to);
+
+        let amount = (time - prev_time) / (next_time - prev_time);
+        log::trace!("amount: {:?}", amount);
+        Ok(match from {
+            TweenProperty::Translation(a) => {
+                let b = to.as_translation().context(MismatchedPropertiesSnafu)?;
+                TweenProperty::Translation(a.lerp(*b, amount))
+            }
+            TweenProperty::Rotation(a) => {
+                let a = a.normalize();
+                let b = to.as_rotation().context(MismatchedPropertiesSnafu)?.normalize();
+                TweenProperty::Rotation(a.slerp(b, amount))
+            }
+            TweenProperty::Scale(a) => {
+                let b = to.as_scale().context(MismatchedPropertiesSnafu)?;
+                TweenProperty::Scale(a.lerp(*b, amount))
+            }
+        })
+    }
+
+    pub fn length_in_seconds(&self) -> f32 {
+        if self.keyframes.is_empty() {
+            return 0.0;
+        }
+
+        let last_keyframe = self.keyframes.len() - 1;
+        let last_time = self.keyframes[last_keyframe].0;
+        last_time
+    }
+}
+
+#[derive(Default, Debug)]
+pub struct GltfAnimation {
+    pub tweens: Vec<Tween>,
+}
+
 pub struct GltfLoader {
     device: Arc<wgpu::Device>,
     queue: Arc<wgpu::Queue>,
@@ -216,7 +534,7 @@ pub struct GltfLoader {
     materials: GltfStore<Arc<BlinnPhongMaterial>>,
     meshes: GltfStore<Vec<GltfMeshPrimitive>>,
     nodes: GltfStore<GltfNode>,
-    animations: GltfStore<()>,
+    animations: GltfStore<GltfAnimation>,
     pub generate_normals: bool,
 }
 
@@ -462,7 +780,12 @@ impl GltfLoader {
         log::trace!("mesh: {} {:?}", mesh.index(), mesh.name());
         log::trace!("-weights: {:?}", mesh.weights());
         for primitive in mesh.primitives() {
-            snafu::ensure!(primitive.mode() == gltf::mesh::Mode::Triangles, PrimitiveModeSnafu{ mode: primitive.mode() });
+            snafu::ensure!(
+                primitive.mode() == gltf::mesh::Mode::Triangles,
+                PrimitiveModeSnafu {
+                    mode: primitive.mode()
+                }
+            );
             log::trace!("-primitive: {}", primitive.index());
             log::trace!("--bounding_box: {:?}", primitive.bounding_box());
             let reader = primitive.reader(|buffer| Some(&buffers[buffer.index()]));
@@ -478,20 +801,26 @@ impl GltfLoader {
                 (Box::new(positions), Box::new(normals.map(Some)))
             } else if self.generate_normals {
                 let positions = positions.collect::<Vec<_>>();
-                let normals = positions.chunks(3).flat_map(|t| match t {
-                    [a, b, c] => {
-                        let a = Vec3::from(*a);
-                        let b = Vec3::from(*b);
-                        let c = Vec3::from(*c);
-                        let ab = b - a;
-                        let ac = c - a;
-                        let n = ab.cross(ac);
-                        let n = [n.x, n.y, n.z];
-                        [n, n, n]
-                    }
-                    _ => unreachable!("safe because we know these are triangles")
-                }).collect::<Vec<_>>();
-                (Box::new(positions.into_iter()), Box::new(normals.into_iter().map(Some)))
+                let normals = positions
+                    .chunks(3)
+                    .flat_map(|t| match t {
+                        [a, b, c] => {
+                            let a = Vec3::from(*a);
+                            let b = Vec3::from(*b);
+                            let c = Vec3::from(*c);
+                            let ab = b - a;
+                            let ac = c - a;
+                            let n = ab.cross(ac);
+                            let n = [n.x, n.y, n.z];
+                            [n, n, n]
+                        }
+                        _ => unreachable!("safe because we know these are triangles"),
+                    })
+                    .collect::<Vec<_>>();
+                (
+                    Box::new(positions.into_iter()),
+                    Box::new(normals.into_iter().map(Some)),
+                )
             } else {
                 log::trace!("--normals: none");
                 (Box::new(positions), Box::new(std::iter::repeat(None)))
@@ -861,5 +1190,58 @@ impl GltfLoader {
         self.nodes
             .iter()
             .filter(|node| matches!(node.variant, GltfNodeVariant::Light { .. }))
+    }
+
+    pub fn load_animations(
+        &mut self,
+        document: &gltf::Document,
+        buffers: &[gltf::buffer::Data],
+    ) -> Result<(), GltfError> {
+        for animation in document.animations() {
+            let mut r_animation = GltfAnimation::default();
+            for channel in animation.channels() {
+                let reader = channel.reader(|buffer| Some(&buffers[buffer.index()]));
+                let inputs = reader.read_inputs().context(MissingBufferSnafu)?;
+                let outputs = reader.read_outputs().context(MissingBufferSnafu)?;
+                let tween = Tween {
+                    keyframes: inputs.map(|t| Keyframe(t)).collect::<Vec<_>>(),
+                    properties: match outputs {
+                        gltf::animation::util::ReadOutputs::Translations(ts) => {
+                            TweenProperties::Translations(ts.map(Vec3::from).collect())
+                        }
+                        gltf::animation::util::ReadOutputs::Rotations(rs) => {
+                            TweenProperties::Rotations(
+                                rs.into_f32().map(Quat::from_array).collect(),
+                            )
+                        }
+                        gltf::animation::util::ReadOutputs::Scales(ss) => {
+                            TweenProperties::Scales(ss.map(Vec3::from).collect())
+                        }
+                        gltf::animation::util::ReadOutputs::MorphTargetWeights(_) => {
+                            todo!("morph targets unsupported")
+                        }
+                    },
+                    interpolation: channel.sampler().interpolation().into(),
+                    target_node_index: channel.target().node().index(),
+                };
+                r_animation.tweens.push(tween);
+            }
+
+            self.animations.insert(
+                animation.index(),
+                animation.name().map(|s| s.to_string()),
+                r_animation,
+            );
+        }
+
+        Ok(())
+    }
+
+    pub fn animations(&self) -> impl Iterator<Item = &GltfAnimation> {
+        self.animations.iter()
+    }
+
+    pub fn get_animation(&self, index: usize) -> Option<&GltfAnimation> {
+        self.animations.get(index)
     }
 }

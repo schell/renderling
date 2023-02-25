@@ -290,6 +290,15 @@ impl Object {
             .unwrap();
     }
 
+    /// Update the local transform's rotation of this object.
+    pub fn set_rotation(&self, rotation: Quat) {
+        let mut inner = self.inner.write();
+        inner.local_transforms.get_mut(0).unwrap().rotation = rotation;
+        self.cmd
+            .send(ObjUpdateCmd::Transform { object_id: self.id })
+            .unwrap();
+    }
+
     /// Update the local transform's scale of this object.
     pub fn set_position(&self, position: Vec3) {
         let mut inner = self.inner.write();
