@@ -49,6 +49,9 @@ pub enum GltfError {
 
     #[snafu(display("{}", source))]
     Object { source: ObjectBuilderError },
+
+    #[snafu(display("Parent is not an object"))]
+    ParentNotAnObject,
 }
 
 #[derive(Debug, Snafu)]
@@ -62,14 +65,14 @@ pub enum InterpolationError {
     #[snafu(display("Property with index {} is missing", index))]
     MissingPropertyIndex { index: usize },
 
-    #[snafu(display("No previous keyframe"))]
-    NoPreviousKeyframe,
+    #[snafu(display("No previous keyframe, first is {first:?}"))]
+    NoPreviousKeyframe { first: Keyframe },
 
-    #[snafu(display("No next keyframe"))]
-    NoNextKeyframe,
+    #[snafu(display("No next keyframe, last is {last:?}"))]
+    NoNextKeyframe { last: Keyframe },
 
     #[snafu(display("Mismatched properties"))]
-    MismatchedProperties
+    MismatchedProperties,
 }
 
 fn image_data_format_to_wgpu(
@@ -101,6 +104,7 @@ fn image_data_format_num_channels(gltf_format: gltf::image::Format) -> u32 {
         gltf::image::Format::R32G32B32A32FLOAT => 4,
     }
 }
+
 
 pub struct GltfStore<T> {
     dense: Vec<Option<T>>,
@@ -260,7 +264,7 @@ impl From<gltf::animation::Interpolation> for GltfInterpolation {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub struct Keyframe(pub f32);
 
 #[derive(Debug)]
@@ -371,10 +375,11 @@ pub struct Tween {
 impl Tween {
     /// Compute the interpolated tween property at the given time.
     ///
-    /// Returns `None` if the properties don't match.
+    /// If the given time is before the first keyframe or after the the last keyframe, `Ok(None)`
+    /// is returned.
     ///
     /// See https://github.com/KhronosGroup/glTF-Tutorials/blob/master/gltfTutorial/gltfTutorial_007_Animations.md
-    pub fn interpolate(&self, time: f32) -> Result<TweenProperty, InterpolationError> {
+    pub fn interpolate(&self, time: f32) -> Result<Option<TweenProperty>, InterpolationError> {
         snafu::ensure!(!self.keyframes.is_empty(), NoKeyframesSnafu);
 
         match self.interpolation {
@@ -384,39 +389,73 @@ impl Tween {
         }
     }
 
-    fn interpolate_step(&self, time: f32) -> Result<TweenProperty, InterpolationError> {
-        let (prev_keyframe_ndx, _) = self
+    /// Compute the interpolated tween property at the given time.
+    ///
+    /// If the time is greater than the last keyframe, the time will be wrapped to loop the tween.
+    ///
+    /// Returns `None` if the properties don't match.
+    pub fn interpolate_wrap(&self, time: f32) -> Result<Option<TweenProperty>, InterpolationError> {
+        let total = self.length_in_seconds();
+        let time = time % total;
+        self.interpolate(time)
+    }
+
+    fn get_previous_keyframe(
+        &self,
+        time: f32,
+    ) -> Result<Option<(usize, &Keyframe)>, InterpolationError> {
+        snafu::ensure!(!self.keyframes.is_empty(), NoKeyframesSnafu);
+        Ok(self
             .keyframes
             .iter()
             .enumerate()
             .filter(|(_, keyframe)| keyframe.0 <= time)
-            .last()
-            .context(NoPreviousKeyframeSnafu)?;
-
-        self.properties
-            .get(prev_keyframe_ndx)
-            .context(MissingPropertyIndexSnafu {
-                index: prev_keyframe_ndx,
-            })
+            .last())
     }
 
-    fn interpolate_cubic(&self, time: f32) -> Result<TweenProperty, InterpolationError> {
+    fn get_next_keyframe(
+        &self,
+        time: f32,
+    ) -> Result<Option<(usize, &Keyframe)>, InterpolationError> {
+        snafu::ensure!(!self.keyframes.is_empty(), NoKeyframesSnafu);
+        Ok(self
+            .keyframes
+            .iter()
+            .enumerate()
+            .find(|(_, keyframe)| keyframe.0 > time))
+    }
+
+    fn interpolate_step(&self, time: f32) -> Result<Option<TweenProperty>, InterpolationError> {
+        log::trace!("step");
+        if let Some((prev_keyframe_ndx, _)) = self.get_previous_keyframe(time)? {
+            self.properties
+                .get(prev_keyframe_ndx)
+                .context(MissingPropertyIndexSnafu {
+                    index: prev_keyframe_ndx,
+                })
+                .map(Some)
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn interpolate_cubic(&self, time: f32) -> Result<Option<TweenProperty>, InterpolationError> {
+        log::trace!("cubic");
         snafu::ensure!(self.keyframes.len() >= 2, NotEnoughKeyframesSnafu);
 
-        let (prev_keyframe_ndx, prev_keyframe) = self
-            .keyframes
-            .iter()
-            .enumerate()
-            .filter(|(_, keyframe)| keyframe.0 < time)
-            .last()
-            .context(NoPreviousKeyframeSnafu)?;
+        let (prev_keyframe_ndx, prev_keyframe) =
+            if let Some(prev) = self.get_previous_keyframe(time)? {
+                prev
+            } else {
+                return Ok(None);
+            };
         let prev_time = prev_keyframe.0;
-        let (next_keyframe_ndx, next_keyframe) = self
-            .keyframes
-            .iter()
-            .enumerate()
-            .find(|(_, keyframe)| keyframe.0 > time)
-            .context(NoNextKeyframeSnafu)?;
+
+        let (next_keyframe_ndx, next_keyframe) = if let Some(next) = self.get_next_keyframe(time)? {
+            next
+        } else {
+            return Ok(None);
+        };
         let next_time = next_keyframe.0;
 
         // UNWRAP: safe because we know this was found above
@@ -436,9 +475,11 @@ impl Tween {
 
         let amount = (time - prev_time) / (next_time - prev_time);
 
-        Ok(match from {
+        Ok(Some(match from {
             TweenProperty::Translation(from) => {
-                let from_out = *from_out.as_translation().context(MismatchedPropertiesSnafu)?;
+                let from_out = *from_out
+                    .as_translation()
+                    .context(MismatchedPropertiesSnafu)?;
                 let to_in = *to_in.as_translation().context(MismatchedPropertiesSnafu)?;
                 let to = *to.as_translation().context(MismatchedPropertiesSnafu)?;
                 TweenProperty::Translation(Vec3::cubic_bezier(amount, from, from_out, to_in, to))
@@ -454,31 +495,30 @@ impl Tween {
                 let to_in = *to_in.as_scale().context(MismatchedPropertiesSnafu)?;
                 let to = *to.as_scale().context(MismatchedPropertiesSnafu)?;
                 TweenProperty::Scale(Vec3::cubic_bezier(amount, from, from_out, to_in, to))
-                //
             }
-        })
+        }))
     }
 
-    fn interpolate_linear(&self, time: f32) -> Result<TweenProperty, InterpolationError> {
+    fn interpolate_linear(&self, time: f32) -> Result<Option<TweenProperty>, InterpolationError> {
+        log::trace!("linear");
         let last_keyframe = self.keyframes.len() - 1;
         let last_time = self.keyframes[last_keyframe].0;
         let time = time.min(last_time);
         log::trace!("time: {}", time);
-        let (prev_keyframe_ndx, prev_keyframe) = self
-            .keyframes
-            .iter()
-            .enumerate()
-            .filter(|(_, keyframe)| keyframe.0 <= time)
-            .last()
-            .context(NoPreviousKeyframeSnafu)?;
+        let (prev_keyframe_ndx, prev_keyframe) =
+            if let Some(prev) = self.get_previous_keyframe(time)? {
+                prev
+            } else {
+                return Ok(None);
+            };
         let prev_time = prev_keyframe.0;
         log::trace!("prev_time: {}", prev_time);
-        let (next_keyframe_ndx, next_keyframe) = self
-            .keyframes
-            .iter()
-            .enumerate()
-            .find(|(_, keyframe)| keyframe.0 > time)
-            .context(NoNextKeyframeSnafu)?;
+
+        let (next_keyframe_ndx, next_keyframe) = if let Some(next) = self.get_next_keyframe(time)? {
+            next
+        } else {
+            return Ok(None);
+        };
         let next_time = next_keyframe.0;
         log::trace!("next_time: {}", next_time);
 
@@ -492,21 +532,24 @@ impl Tween {
 
         let amount = (time - prev_time) / (next_time - prev_time);
         log::trace!("amount: {:?}", amount);
-        Ok(match from {
+        Ok(Some(match from {
             TweenProperty::Translation(a) => {
                 let b = to.as_translation().context(MismatchedPropertiesSnafu)?;
                 TweenProperty::Translation(a.lerp(*b, amount))
             }
             TweenProperty::Rotation(a) => {
                 let a = a.normalize();
-                let b = to.as_rotation().context(MismatchedPropertiesSnafu)?.normalize();
+                let b = to
+                    .as_rotation()
+                    .context(MismatchedPropertiesSnafu)?
+                    .normalize();
                 TweenProperty::Rotation(a.slerp(b, amount))
             }
             TweenProperty::Scale(a) => {
                 let b = to.as_scale().context(MismatchedPropertiesSnafu)?;
                 TweenProperty::Scale(a.lerp(*b, amount))
             }
-        })
+        }))
     }
 
     pub fn length_in_seconds(&self) -> f32 {
@@ -518,11 +561,37 @@ impl Tween {
         let last_time = self.keyframes[last_keyframe].0;
         last_time
     }
+
+    pub fn get_first_keyframe_property(&self) -> Option<TweenProperty> {
+        match &self.properties {
+            TweenProperties::Translations(ts) => ts.first().copied().map(TweenProperty::Translation),
+            TweenProperties::Rotations(rs) => rs.first().copied().map(TweenProperty::Rotation),
+            TweenProperties::Scales(ss) => ss.first().copied().map(TweenProperty::Scale),
+        }
+    }
+
+    pub fn get_last_keyframe_property(&self) -> Option<TweenProperty> {
+        match &self.properties {
+            TweenProperties::Translations(ts) => ts.last().copied().map(TweenProperty::Translation),
+            TweenProperties::Rotations(rs) => rs.last().copied().map(TweenProperty::Rotation),
+            TweenProperties::Scales(ss) => ss.last().copied().map(TweenProperty::Scale),
+        }
+    }
 }
 
 #[derive(Default, Debug)]
 pub struct GltfAnimation {
     pub tweens: Vec<Tween>,
+}
+
+impl GltfAnimation {
+    pub fn length_in_seconds(&self) -> f32 {
+        self.tweens
+            .iter()
+            .flat_map(|tween| tween.keyframes.iter().map(|k| k.0))
+            .max_by(f32::total_cmp)
+            .unwrap_or_default()
+    }
 }
 
 pub struct GltfLoader {
@@ -847,7 +916,6 @@ impl GltfLoader {
                         normal,
                         uv,
                     };
-                    log::trace!("--vertex: {:?}", vertex);
                     builder.with_vertex(build_vertex(vertex))
                 },
             );
@@ -931,7 +999,7 @@ impl GltfLoader {
         images: &[gltf::image::Data],
         node: gltf::Node<'b>,
         depth: usize,
-    ) -> Result<(), GltfError> {
+    ) -> Result<&GltfNode, GltfError> {
         let pad = std::iter::repeat("-")
             .take(depth)
             .collect::<Vec<_>>()
@@ -944,161 +1012,148 @@ impl GltfLoader {
         log::trace!("{pad}--rotation: {:?}", transform.rotation);
         log::trace!("{pad}--scale: {:?}", transform.scale);
 
-        if let Some(camera) = node.camera() {
-            log::trace!("{pad}-camera: {} {:?}", camera.index(), camera.name());
-            let view: Mat4 = Mat4::from_cols_array_2d(&node.transform().matrix()).inverse();
-            let r_camera = r
-                .new_camera()
-                .with_projection({
-                    let projection = camera.projection();
-                    match projection {
-                        gltf::camera::Projection::Orthographic(o) => Mat4::orthographic_rh(
-                            -o.xmag(),
-                            o.xmag(),
-                            -o.ymag(),
-                            o.ymag(),
-                            o.znear(),
-                            o.zfar(),
-                        ),
-                        gltf::camera::Projection::Perspective(p) => {
-                            let fovy = p.yfov();
-                            let aspect = p.aspect_ratio().unwrap_or(1.0);
-                            let znear = p.znear();
-                            log::trace!("{pad}--fovy: {fovy}");
-                            log::trace!("{pad}--aspect: {aspect}");
-                            log::trace!("{pad}--znear: {znear}");
-                            log::trace!("{pad}--zfar: {:?}", p.zfar());
-                            if let Some(zfar) = p.zfar() {
-                                Mat4::perspective_rh(fovy, aspect, p.znear(), zfar)
-                            } else {
-                                Mat4::perspective_infinite_rh(
-                                    p.yfov(),
-                                    p.aspect_ratio().unwrap_or(1.0),
-                                    p.znear(),
-                                )
+        let r_node = {
+            if let Some(camera) = node.camera() {
+                log::trace!("{pad}-camera: {} {:?}", camera.index(), camera.name());
+                let view: Mat4 = Mat4::from_cols_array_2d(&node.transform().matrix()).inverse();
+                let r_camera = r
+                    .new_camera()
+                    .with_projection({
+                        let projection = camera.projection();
+                        match projection {
+                            gltf::camera::Projection::Orthographic(o) => Mat4::orthographic_rh(
+                                -o.xmag(),
+                                o.xmag(),
+                                -o.ymag(),
+                                o.ymag(),
+                                o.znear(),
+                                o.zfar(),
+                            ),
+                            gltf::camera::Projection::Perspective(p) => {
+                                let fovy = p.yfov();
+                                let aspect = p.aspect_ratio().unwrap_or(1.0);
+                                let znear = p.znear();
+                                log::trace!("{pad}--fovy: {fovy}");
+                                log::trace!("{pad}--aspect: {aspect}");
+                                log::trace!("{pad}--znear: {znear}");
+                                log::trace!("{pad}--zfar: {:?}", p.zfar());
+                                if let Some(zfar) = p.zfar() {
+                                    Mat4::perspective_rh(fovy, aspect, p.znear(), zfar)
+                                } else {
+                                    Mat4::perspective_infinite_rh(
+                                        p.yfov(),
+                                        p.aspect_ratio().unwrap_or(1.0),
+                                        p.znear(),
+                                    )
+                                }
                             }
                         }
-                    }
-                })
-                .with_view(view.into())
-                .build();
-            let name = node.name().map(|s| s.to_string());
-            self.nodes.insert(
-                node.index(),
-                name.clone(),
+                    })
+                    .with_view(view.into())
+                    .build();
+                let name = node.name().map(|s| s.to_string());
                 GltfNode {
                     name,
                     index: node.index(),
                     prim_objects: vec![],
                     variant: GltfNodeVariant::Camera(r_camera),
-                },
-            );
-        }
-
-        if let Some(mesh) = node.mesh() {
-            log::trace!("{pad}-mesh: {} {:?}", mesh.index(), mesh.name());
-            let prims = self.mesh_primitives_for(mesh, buffers, images)?;
-            let r_node = if prims.len() > 1 {
-                // the mesh is made up of multiple mesh "primitives", so add those
-                // as children
-                let mut children = vec![];
-                for prim in prims.iter() {
-                    let child = r
+                }
+            } else if let Some(mesh) = node.mesh() {
+                log::trace!("{pad}-mesh: {} {:?}", mesh.index(), mesh.name());
+                let prims = self.mesh_primitives_for(mesh, buffers, images)?;
+                if prims.len() > 1 {
+                    // the mesh is made up of multiple mesh "primitives", so add those
+                    // as children
+                    let mut children = vec![];
+                    for prim in prims.iter() {
+                        let child = r
+                            .new_object()
+                            .with_mesh(prim.mesh.clone())
+                            .with_material::<BlinnPhongMaterial>(prim.material.clone())
+                            .build()
+                            .context(ObjectSnafu)?;
+                        children.push(child);
+                    }
+                    let object = r
                         .new_object()
-                        .with_mesh(prim.mesh.clone())
-                        .with_material::<BlinnPhongMaterial>(prim.material.clone())
+                        .with_transform(transform.clone())
+                        .with_children(children.iter())
                         .build()
                         .context(ObjectSnafu)?;
-                    children.push(child);
+                    log::trace!("{pad}-mesh-primitive-children: {}", children.len());
+                    // hold on to the child objects so they don't get dropped
+                    GltfNode {
+                        name: node.name().map(|s| s.to_string()),
+                        index: node.index(),
+                        prim_objects: children,
+                        variant: GltfNodeVariant::Object(object),
+                    }
+                } else {
+                    let mesh = prims[0].mesh.clone();
+                    let material = prims[0].material.clone();
+                    let object = r
+                        .new_object()
+                        .with_transform(transform.clone())
+                        .with_mesh(mesh)
+                        .with_material::<BlinnPhongMaterial>(material)
+                        .build()
+                        .context(ObjectSnafu)?;
+                    GltfNode {
+                        name: node.name().map(|s| s.to_string()),
+                        index: node.index(),
+                        prim_objects: vec![],
+                        variant: GltfNodeVariant::Object(object),
+                    }
                 }
-                let object = r
-                    .new_object()
-                    .with_transform(transform.clone())
-                    .with_children(children.iter())
-                    .build()
-                    .context(ObjectSnafu)?;
-                log::trace!("{pad}-mesh-primitive-children: {}", children.len());
-                // hold on to the child objects so they don't get dropped
-                GltfNode {
-                    name: node.name().map(|s| s.to_string()),
-                    index: node.index(),
-                    prim_objects: children,
-                    variant: GltfNodeVariant::Object(object),
-                }
-            } else {
-                let mesh = prims[0].mesh.clone();
-                let material = prims[0].material.clone();
-                let object = r
-                    .new_object()
-                    .with_transform(transform.clone())
-                    .with_mesh(mesh)
-                    .with_material::<BlinnPhongMaterial>(material)
-                    .build()
-                    .context(ObjectSnafu)?;
-                GltfNode {
-                    name: node.name().map(|s| s.to_string()),
-                    index: node.index(),
-                    prim_objects: vec![],
-                    variant: GltfNodeVariant::Object(object),
-                }
-            };
+            } else if let Some(light) = node.light() {
+                log::trace!("{pad}-light: {} {:?}", light.index(), light.name());
+                let color = Vec3::from(light.color()).extend(1.0);
+                let transparent = Vec4::splat(0.0);
+                let direction = Mat4::from_quat(transform.rotation).transform_vector3(Vec3::NEG_Z);
+                let variant = match light.kind() {
+                    Kind::Directional => {
+                        log::trace!("{pad}--kind: directional");
+                        log::trace!("{pad}---color: {:?}", color);
+                        log::trace!("{pad}---direction: {:?}", direction);
+                        GltfLightVariant::Directional(
+                            r.new_directional_light()
+                                .with_direction(direction)
+                                .with_diffuse_color(color)
+                                .with_specular_color(color)
+                                .with_ambient_color(transparent)
+                                .build(),
+                        )
+                    }
+                    Kind::Point => {
+                        log::trace!("{pad}--kind: point");
+                        log::trace!("{pad}---color: {:?}", color);
+                        log::trace!("{pad}---position: {:?}", transform.position);
+                        GltfLightVariant::Point(
+                            r.new_point_light()
+                                .with_position(transform.position)
+                                .with_diffuse_color(color)
+                                .build(),
+                        )
+                    }
+                    Kind::Spot {
+                        inner_cone_angle,
+                        outer_cone_angle,
+                    } => {
+                        log::trace!("{pad}--kind: spot");
+                        log::trace!("{pad}---color: {:?}", color);
+                        log::trace!("{pad}---direction: {:?}", direction);
+                        GltfLightVariant::Spot(
+                            r.new_spot_light()
+                                .with_position(transform.position)
+                                .with_direction(direction)
+                                .with_diffuse_color(color)
+                                .with_cutoff(inner_cone_angle, outer_cone_angle)
+                                .build(),
+                        )
+                    }
+                };
 
-            self.nodes
-                .insert(node.index(), node.name().map(|s| s.to_string()), r_node);
-        }
-
-        if let Some(light) = node.light() {
-            log::trace!("{pad}-light: {} {:?}", light.index(), light.name());
-            let color = Vec3::from(light.color()).extend(1.0);
-            let transparent = Vec4::splat(0.0);
-            let direction = Mat4::from_quat(transform.rotation).transform_vector3(Vec3::NEG_Z);
-            let variant = match light.kind() {
-                Kind::Directional => {
-                    log::trace!("{pad}--kind: directional");
-                    log::trace!("{pad}---color: {:?}", color);
-                    log::trace!("{pad}---direction: {:?}", direction);
-                    GltfLightVariant::Directional(
-                        r.new_directional_light()
-                            .with_direction(direction)
-                            .with_diffuse_color(color)
-                            .with_specular_color(color)
-                            .with_ambient_color(transparent)
-                            .build(),
-                    )
-                }
-                Kind::Point => {
-                    log::trace!("{pad}--kind: point");
-                    log::trace!("{pad}---color: {:?}", color);
-                    log::trace!("{pad}---position: {:?}", transform.position);
-                    GltfLightVariant::Point(
-                        r.new_point_light()
-                            .with_position(transform.position)
-                            .with_diffuse_color(color)
-                            .build(),
-                    )
-                }
-                Kind::Spot {
-                    inner_cone_angle,
-                    outer_cone_angle,
-                } => {
-                    log::trace!("{pad}--kind: spot");
-                    log::trace!("{pad}---color: {:?}", color);
-                    log::trace!("{pad}---direction: {:?}", direction);
-                    GltfLightVariant::Spot(
-                        r.new_spot_light()
-                            .with_position(transform.position)
-                            .with_direction(direction)
-                            .with_diffuse_color(color)
-                            .with_cutoff(inner_cone_angle, outer_cone_angle)
-                            .build(),
-                    )
-                }
-            };
-
-            let name = node.name().map(|s| s.to_string());
-            self.nodes.insert(
-                node.index(),
-                name.clone(),
+                let name = node.name().map(|s| s.to_string());
                 GltfNode {
                     name,
                     index: node.index(),
@@ -1108,9 +1163,22 @@ impl GltfLoader {
                         light_name: light.name().map(|s| s.to_string()),
                         variant,
                     },
-                },
-            );
-        }
+                }
+            } else {
+                log::trace!("{pad}-node is just a container");
+                GltfNode {
+                    name: node.name().map(|s| s.to_string()),
+                    index: node.index(),
+                    prim_objects: vec![],
+                    variant: GltfNodeVariant::Object(
+                        r.new_object()
+                            .with_transform(transform.clone())
+                            .build()
+                            .context(ObjectSnafu)?,
+                    ),
+                }
+            }
+        };
 
         let mut printed = false;
         for node in node.children() {
@@ -1119,38 +1187,32 @@ impl GltfLoader {
                 printed = true;
             }
 
-            let _ = self.load_node(r, buffers, images, node, depth + 2)?;
+            let child_node = self.load_node(r, buffers, images, node, depth + 2)?;
+            if let Some(child_object) = child_node.variant.as_object() {
+                let parent = r_node.variant.as_object().context(ParentNotAnObjectSnafu)?;
+                parent.append_child(child_object);
+            }
         }
 
-        Ok(())
+        self.nodes
+            .insert(node.index(), node.name().map(|s| s.to_string()), r_node);
+        Ok(self.nodes.get(node.index()).unwrap())
     }
 
-    /// Load and return a scene.
-    ///
-    /// Loads all display objects (meshes, materials and transforms) into the
-    /// loader and into the given renderling.
-    pub fn load_scene<'b>(
+    /// Load everything.
+    pub fn load<'b>(
         &mut self,
-        index: Option<usize>,
         r: &mut Renderling<ForwardPipeline>,
         document: &'b gltf::Document,
         buffers: &[gltf::buffer::Data],
         images: &[gltf::image::Data],
     ) -> Result<(), GltfError> {
-        let index = index.unwrap_or_default();
-        log::trace!("loading scene {}", index);
-
         for scene in document.scenes() {
-            log::trace!("scene: {} {:?}", scene.index(), scene.name());
-            if scene.index() != index {
-                log::trace!("  skipping");
-                continue;
-            }
-
             for node in scene.nodes() {
                 let _ = self.load_node(r, buffers, images, node, 1)?;
             }
         }
+        self.load_animations(&document, &buffers)?;
 
         Ok(())
     }

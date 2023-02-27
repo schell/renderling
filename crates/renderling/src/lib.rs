@@ -810,9 +810,7 @@ mod test {
 
         let mut loader = gpu.new_gltf_loader();
         let (document, buffers, images) = gltf::import("../../gltf/cheetah_cone.glb").unwrap();
-        loader
-            .load_scene(None, &mut r, &document, &buffers, &images)
-            .unwrap();
+        loader.load(&mut r, &document, &buffers, &images).unwrap();
 
         r.update().unwrap();
         let (frame, depth) = gpu.next_frame_cleared().unwrap();
@@ -841,9 +839,7 @@ mod test {
         let mut loader = gpu.new_gltf_loader();
         let (document, buffers, images) =
             gltf::import("../../gltf/animated_triangle.gltf").unwrap();
-        loader
-            .load_scene(None, &mut r, &document, &buffers, &images)
-            .unwrap();
+        loader.load(&mut r, &document, &buffers, &images).unwrap();
 
         let tri_node = loader.get_node(0).unwrap();
         let tri = tri_node.variant.as_object().unwrap();
@@ -875,7 +871,7 @@ mod test {
         for i in 0..num {
             let t = i as f32 / num as f32;
             for tween in anime.tweens.iter() {
-                let property = tween.interpolate(t).unwrap();
+                let property = tween.interpolate(t).unwrap().unwrap();
                 let node = loader.get_node(tween.target_node_index).unwrap();
                 node.set_tween_property(property);
             }
@@ -889,6 +885,83 @@ mod test {
             Save::No,
             "gltf_simple_animation_after",
             "gltf_simple_animation_after.png",
+            img,
+        )
+        .unwrap();
+    }
+
+    #[cfg(feature = "gltf")]
+    #[test]
+    fn gltf_box_animated() {
+        _init_logging();
+
+        let mut gpu = WgpuState::headless(100, 100).unwrap();
+        gpu.default_background_color = wgpu::Color::WHITE;
+        let mut r = gpu.new_forward_renderling_with(Some(wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::TriangleList,
+            strip_index_format: None,
+            front_face: wgpu::FrontFace::Ccw,
+            cull_mode: Some(wgpu::Face::Back),
+            polygon_mode: wgpu::PolygonMode::Fill,
+            conservative: false,
+            unclipped_depth: false,
+        }));
+        let _cam = r
+            .new_camera()
+            .with_projection_perspective()
+            .with_view(Mat4::look_at_rh(
+                Vec3::new(0.0, 2.0, 2.0),
+                Vec3::ZERO,
+                Vec3::Y,
+            ))
+            .build();
+
+        let mut loader = gpu.new_gltf_loader();
+        let (document, buffers, images) = gltf::import("../../gltf/box_animated.glb").unwrap();
+        loader.load(&mut r, &document, &buffers, &images).unwrap();
+
+        r.update().unwrap();
+        let (frame, depth) = gpu.next_frame_cleared().unwrap();
+        r.render(&frame, &depth).unwrap();
+
+        let img = gpu.grab_frame_image().unwrap();
+        crate::img_diff::assert_img_eq_save(
+            Save::No,
+            "gltf_box_animated",
+            "gltf_box_animated.png",
+            img,
+        )
+        .unwrap();
+
+        loader.load_animations(&document, &buffers).unwrap();
+        assert_eq!(1, loader.animations().count());
+
+        let anime = loader.get_animation(0).unwrap();
+        println!("anime: {:?}", anime);
+        assert_eq!(3.70833, anime.length_in_seconds());
+        assert_eq!(2, anime.tweens[0].target_node_index);
+        assert_eq!(0, anime.tweens[1].target_node_index);
+
+        panic!("blah");
+        let num = 8;
+        for i in 0..num {
+            let t = i as f32 / num as f32;
+            for tween in anime.tweens.iter() {
+                if let Some(property) = tween.interpolate(t).unwrap() {
+                    let node = loader.get_node(tween.target_node_index).unwrap();
+                    node.set_tween_property(property);
+                }
+            }
+            r.update().unwrap();
+            gpu.clear(None, Some(&depth));
+            r.render(&frame, &depth).unwrap();
+        }
+
+        let img = gpu.grab_frame_image().unwrap();
+        crate::img_diff::assert_img_eq_save(
+            Save::No,
+            "gltf_box_animated_after",
+            "gltf_box_animated_after.png",
             img,
         )
         .unwrap();

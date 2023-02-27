@@ -2,6 +2,7 @@
 //!
 //! This demo requires an internet connection to download the samples.
 use core::f32;
+use std::time::Instant;
 
 use renderling::{
     math::{Mat4, Vec3},
@@ -32,6 +33,8 @@ struct App {
     forward_camera: Camera,
 
     loader: GltfLoader,
+    last_frame_instant: Instant,
+    timestamp: f32,
 
     // look at
     eye: Vec3,
@@ -91,6 +94,7 @@ impl App {
         let loader = gpu.new_gltf_loader();
 
         let mut app = Self {
+            timestamp: 0.0,
             renderling_ui: ui,
             text_title: text,
             text_camera,
@@ -99,6 +103,7 @@ impl App {
             renderling_forward: forward,
             forward_camera,
             loader,
+            last_frame_instant: Instant::now(),
             radius,
             eye: Vec3::ZERO,
             phi,
@@ -133,7 +138,7 @@ impl App {
                 .add_text(
                     Text::new(&format!("distance: {}, center: {}", self.radius, self.eye))
                         .with_color([0.8, 0.8, 0.8, 1.0])
-                        .with_scale(32.0)
+                        .with_scale(32.0),
                 ),
         );
 
@@ -156,6 +161,7 @@ impl App {
     }
 
     fn update(&mut self) {
+        self.animate();
         self.update_camera();
         self.update_ui();
     }
@@ -170,13 +176,7 @@ impl App {
 
         let (document, buffers, images) = gltf::import(&file).unwrap();
         self.loader
-            .load_scene(
-                None,
-                &mut self.renderling_forward,
-                &document,
-                &buffers,
-                &images,
-            )
+            .load(&mut self.renderling_forward, &document, &buffers, &images)
             .unwrap();
 
         if self.loader.lights().count() == 0 {
@@ -207,6 +207,8 @@ impl App {
 
         self.radius = radius;
         self.eye = halfway_point;
+        self.last_frame_instant = Instant::now();
+        self.timestamp = 0.0;
         self.update();
     }
 
@@ -278,11 +280,34 @@ impl App {
             1.0,
             -1.0,
         ));
-        self.forward_camera.set_projection(Mat4::perspective_infinite_rh(
-            std::f32::consts::FRAC_PI_4,
-            width as f32 / height as f32,
-            0.01,
-        ));
+        self.forward_camera
+            .set_projection(Mat4::perspective_infinite_rh(
+                std::f32::consts::FRAC_PI_4,
+                width as f32 / height as f32,
+                0.01,
+            ));
+    }
+
+    fn animate(&mut self) {
+        let now = Instant::now();
+        let dt = now - self.last_frame_instant;
+        self.last_frame_instant = now;
+        self.timestamp += dt.as_secs_f32();
+
+        for animation in self.loader.animations() {
+            let time = self.timestamp % animation.length_in_seconds();
+            for tween in animation.tweens.iter() {
+                let prop = if let Some(prop) = tween.interpolate(time).unwrap() {
+                    prop
+                } else if time >= tween.length_in_seconds() {
+                    tween.get_last_keyframe_property().unwrap()
+                } else {
+                    tween.get_first_keyframe_property().unwrap()
+                };
+                let node = self.loader.get_node(tween.target_node_index).unwrap();
+                node.set_tween_property(prop);
+            };
+        }
     }
 
     fn render(&mut self, gpu: &mut WgpuState) {
@@ -348,6 +373,7 @@ pub fn demo(
                 _ => {}
             }
         } else {
+            app.update();
             app.render(gpu);
         }
     }
