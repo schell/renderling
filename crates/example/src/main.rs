@@ -7,7 +7,7 @@ fn run() -> Result<(), anyhow::Error> {
     env_logger::Builder::default()
         .filter_module("example", log::LevelFilter::Trace)
         .filter_module("renderling", log::LevelFilter::Debug)
-        .filter_module("naga", log::LevelFilter::Warn)
+        //.filter_module("naga", log::LevelFilter::Warn)
         .filter_module("wgpu", log::LevelFilter::Warn)
         .init();
 
