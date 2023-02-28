@@ -296,17 +296,7 @@ impl App {
 
         for animation in self.loader.animations() {
             let time = self.timestamp % animation.length_in_seconds();
-            for tween in animation.tweens.iter() {
-                let prop = if let Some(prop) = tween.interpolate(time).unwrap() {
-                    prop
-                } else if time >= tween.length_in_seconds() {
-                    tween.get_last_keyframe_property().unwrap()
-                } else {
-                    tween.get_first_keyframe_property().unwrap()
-                };
-                let node = self.loader.get_node(tween.target_node_index).unwrap();
-                node.set_tween_property(prop);
-            };
+            animation.set_time(&self.loader, time).unwrap();
         }
     }
 
