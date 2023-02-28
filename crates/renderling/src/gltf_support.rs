@@ -105,7 +105,6 @@ fn image_data_format_num_channels(gltf_format: gltf::image::Format) -> u32 {
     }
 }
 
-
 pub struct GltfStore<T> {
     dense: Vec<Option<T>>,
     names: FxHashMap<String, Vec<usize>>,
@@ -564,7 +563,9 @@ impl Tween {
 
     pub fn get_first_keyframe_property(&self) -> Option<TweenProperty> {
         match &self.properties {
-            TweenProperties::Translations(ts) => ts.first().copied().map(TweenProperty::Translation),
+            TweenProperties::Translations(ts) => {
+                ts.first().copied().map(TweenProperty::Translation)
+            }
             TweenProperties::Rotations(rs) => rs.first().copied().map(TweenProperty::Rotation),
             TweenProperties::Scales(ss) => ss.first().copied().map(TweenProperty::Scale),
         }
@@ -579,6 +580,14 @@ impl Tween {
     }
 }
 
+#[derive(Debug, Snafu)]
+pub enum AnimationError {
+    #[snafu(display("{}", source))]
+    Interpolation { source: InterpolationError },
+    #[snafu(display("missing node {}", index))]
+    MissingNode { index: usize },
+}
+
 #[derive(Default, Debug)]
 pub struct GltfAnimation {
     pub tweens: Vec<Tween>,
@@ -591,6 +600,26 @@ impl GltfAnimation {
             .flat_map(|tween| tween.keyframes.iter().map(|k| k.0))
             .max_by(f32::total_cmp)
             .unwrap_or_default()
+    }
+
+    pub fn set_time(&self, loader: &GltfLoader, t: f32) -> Result<(), AnimationError> {
+        for tween in self.tweens.iter() {
+            let prop = if let Some(prop) = tween.interpolate(t).context(InterpolationSnafu)? {
+                prop
+            } else if t >= tween.length_in_seconds() {
+                tween.get_last_keyframe_property().unwrap()
+            } else {
+                tween.get_first_keyframe_property().unwrap()
+            };
+            let node = loader
+                .get_node(tween.target_node_index)
+                .context(MissingNodeSnafu {
+                    index: tween.target_node_index,
+                })?;
+            node.set_tween_property(prop);
+        }
+
+        Ok(())
     }
 }
 

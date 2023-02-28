@@ -941,29 +941,24 @@ mod test {
         assert_eq!(3.70833, anime.length_in_seconds());
         assert_eq!(2, anime.tweens[0].target_node_index);
         assert_eq!(0, anime.tweens[1].target_node_index);
+    }
 
-        panic!("blah");
-        let num = 8;
-        for i in 0..num {
-            let t = i as f32 / num as f32;
-            for tween in anime.tweens.iter() {
-                if let Some(property) = tween.interpolate(t).unwrap() {
-                    let node = loader.get_node(tween.target_node_index).unwrap();
-                    node.set_tween_property(property);
-                }
-            }
-            r.update().unwrap();
-            gpu.clear(None, Some(&depth));
-            r.render(&frame, &depth).unwrap();
+    #[cfg(feature = "gltf")]
+    #[test]
+    fn gltf_simple_morph_triangle() {
+        let (document, buffers, images) = gltf::import("../../gltf/simple_morph_triangle.gltf").unwrap();
+        let mesh = document.meshes().next().unwrap();
+        let primitive = mesh.primitives().next().unwrap();
+        let reader = primitive.reader(|buffer| Some(&buffers[buffer.index()]));
+        let positions: Vec<_> = reader.read_positions().unwrap().collect();
+        let morphs: Vec<(_, _, _)> = reader.read_morph_targets().collect();
+        println!("positions.len(): {}", positions.len());
+        println!("morphs.len(): {}", morphs.len());
+        for (ps, ns, ts) in morphs.into_iter() {
+            println!("ps: {:?}", ps.map(|vs| vs.collect::<Vec<_>>()));
+            println!("ns: {:?}", ns.map(|vs| vs.collect::<Vec<_>>()));
+            println!("ts: {:?}", ts.map(|vs| vs.collect::<Vec<_>>()));
         }
-
-        let img = gpu.grab_frame_image().unwrap();
-        crate::img_diff::assert_img_eq_save(
-            Save::No,
-            "gltf_box_animated_after",
-            "gltf_box_animated_after.png",
-            img,
-        )
-        .unwrap();
+        panic!("blah");
     }
 }
