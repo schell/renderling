@@ -42,6 +42,7 @@ pub mod linkage;
 
 mod camera;
 mod gltf_support;
+mod graph;
 mod light;
 mod material;
 mod mesh;
@@ -56,6 +57,7 @@ mod transform;
 pub use camera::*;
 #[cfg(feature = "gltf")]
 pub use gltf_support::*;
+pub use graph::*;
 pub use light::*;
 pub use material::*;
 pub use mesh::*;
@@ -954,11 +956,12 @@ mod test {
         let morphs: Vec<(_, _, _)> = reader.read_morph_targets().collect();
         println!("positions.len(): {}", positions.len());
         println!("morphs.len(): {}", morphs.len());
-        for (ps, ns, ts) in morphs.into_iter() {
+        for (i, (ps, ns, ts)) in morphs.into_iter().enumerate() {
+            println!("{i}");
             println!("ps: {:?}", ps.map(|vs| vs.collect::<Vec<_>>()));
             println!("ns: {:?}", ns.map(|vs| vs.collect::<Vec<_>>()));
             println!("ts: {:?}", ts.map(|vs| vs.collect::<Vec<_>>()));
         }
-        panic!("blah");
+        panic!("blah")
     }
 }

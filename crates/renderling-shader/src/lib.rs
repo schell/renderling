@@ -6,6 +6,7 @@ use glam::Mat4;
 pub mod array;
 pub mod light;
 pub mod math;
+pub mod primitive;
 pub mod pbr;
 pub mod ui;
 
