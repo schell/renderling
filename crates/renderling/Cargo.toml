@@ -21,7 +21,9 @@ wasm = ["wgpu/webgl"]
 
 [dependencies]
 ab_glyph = { version = "^0.2", optional = true }
+broomdog = "^0.1"
 bytemuck = { version = "1.13.0", features = ["derive"] }
+dagga = { version = "^0.1", default-features = false }
 encase = { version = "0.4.1", features = ["glam"] }
 futures-lite = "1.12.0"
 glam = { version = "0.22", default-features = false, features = ["bytemuck", "libm"] }
