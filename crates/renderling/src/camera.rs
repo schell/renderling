@@ -1,5 +1,5 @@
 //! Cameras, projections and utilities.
-use std::sync::mpsc::Sender;
+use async_channel::Sender;
 
 use glam::{Mat4, Vec3};
 use renderling_shader::CameraRaw;
@@ -86,7 +86,7 @@ impl Camera {
         f(&mut inner);
         if !inner.dirty_uniform {
             self.cmd
-                .send(CameraUpdateCmd::Update { camera_id: self.id })
+                .try_send(CameraUpdateCmd::Update { camera_id: self.id })
                 .unwrap();
             inner.dirty_uniform = true;
         }

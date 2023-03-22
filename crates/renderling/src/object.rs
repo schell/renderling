@@ -1,6 +1,7 @@
 //! Renderable things with positions, transformations, meshes and materials.
-use std::sync::{mpsc::Sender, Arc};
+use std::sync::Arc;
 
+use async_channel::Sender;
 use glam::{Mat3, Mat4, Quat, Vec3};
 use snafu::prelude::*;
 use wgpu::util::DeviceExt;
@@ -12,15 +13,15 @@ use crate::{
 };
 
 pub(crate) enum ObjUpdateCmd {
-    // update the given object's transform
+    // Update the given object's transform
     Transform {
         object_id: Id<Object>,
     },
-    // update the given object's mesh
+    // Update the given object's mesh
     Mesh {
         object_id: Id<Object>,
     },
-    // update the given object's mesh
+    // Update the given object's mesh
     Material {
         object_id: Id<Object>,
     },
@@ -136,10 +137,9 @@ impl<'a> ObjectBuilder<'a> {
             child.inner.write().parent = Some(ParentObject(inner.clone()));
             children.push(ChildObject(child.id));
             self.update_tx
-                .send(ObjUpdateCmd::Transform {
+                .try_send(ObjUpdateCmd::Transform {
                     object_id: child.id,
-                })
-                .unwrap();
+                }).unwrap();
         }
         inner.write().children = children;
         let instances = inner
@@ -266,7 +266,7 @@ impl Drop for Object {
         // the minimum count here is 2 because when the object is dropped there is 1 from the
         // this object here and one stored in the renderer
         if self.inner.count() <= 2 {
-            let _ = self.cmd.send(ObjUpdateCmd::Destroy { object_id: self.id });
+            let _ = self.cmd.try_send(ObjUpdateCmd::Destroy { object_id: self.id });
         }
     }
 }
@@ -277,7 +277,7 @@ impl Object {
         let mut inner = self.inner.write();
         *inner.local_transforms.get_mut(0).unwrap() = transform;
         self.cmd
-            .send(ObjUpdateCmd::Transform { object_id: self.id })
+            .try_send(ObjUpdateCmd::Transform { object_id: self.id })
             .unwrap();
     }
 
@@ -286,7 +286,7 @@ impl Object {
         let mut inner = self.inner.write();
         inner.local_transforms.get_mut(0).unwrap().scale = scale;
         self.cmd
-            .send(ObjUpdateCmd::Transform { object_id: self.id })
+            .try_send(ObjUpdateCmd::Transform { object_id: self.id })
             .unwrap();
     }
 
@@ -295,7 +295,7 @@ impl Object {
         let mut inner = self.inner.write();
         inner.local_transforms.get_mut(0).unwrap().rotation = rotation;
         self.cmd
-            .send(ObjUpdateCmd::Transform { object_id: self.id })
+            .try_send(ObjUpdateCmd::Transform { object_id: self.id })
             .unwrap();
     }
 
@@ -304,7 +304,7 @@ impl Object {
         let mut inner = self.inner.write();
         inner.local_transforms.get_mut(0).unwrap().position = position;
         self.cmd
-            .send(ObjUpdateCmd::Transform { object_id: self.id })
+            .try_send(ObjUpdateCmd::Transform { object_id: self.id })
             .unwrap();
     }
 
@@ -339,7 +339,7 @@ impl Object {
         let mut inner = self.inner.write();
         inner.mesh = Some(mesh.into());
         self.cmd
-            .send(ObjUpdateCmd::Mesh { object_id: self.id })
+            .try_send(ObjUpdateCmd::Mesh { object_id: self.id })
             .unwrap();
     }
 
@@ -348,7 +348,7 @@ impl Object {
         let mut inner = self.inner.write();
         inner.material = Some(crate::AnyMaterial::new(material));
         self.cmd
-            .send(ObjUpdateCmd::Material { object_id: self.id })
+            .try_send(ObjUpdateCmd::Material { object_id: self.id })
             .unwrap();
     }
 
@@ -363,7 +363,7 @@ impl Object {
         let mut child = child_object.inner.write();
         child.parent = Some(ParentObject(self.inner.clone()));
         self.cmd
-            .send(ObjUpdateCmd::Transform {
+            .try_send(ObjUpdateCmd::Transform {
                 object_id: child_object.id,
             })
             .unwrap();
@@ -379,7 +379,7 @@ impl Object {
         let mut child = child_object.inner.write();
         child.parent = None;
         self.cmd
-            .send(ObjUpdateCmd::Transform {
+            .try_send(ObjUpdateCmd::Transform {
                 object_id: child_object.id,
             })
             .unwrap();
@@ -393,7 +393,7 @@ impl Object {
         if let Some(parent) = inner.parent.take() {
             parent.0.write().children.retain(|child| child.0 != self.id);
             self.cmd
-                .send(ObjUpdateCmd::Transform { object_id: self.id })
+                .try_send(ObjUpdateCmd::Transform { object_id: self.id })
                 .unwrap();
         }
     }
