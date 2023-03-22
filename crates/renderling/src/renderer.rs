@@ -1,11 +1,11 @@
 //! Builds the UI pipeline and manages resources.
+use async_channel::{Sender, Receiver, unbounded};
 use glam::Vec3;
 use moongraph::Graph;
 use snafu::prelude::*;
 use std::{
     marker::PhantomData,
     sync::{
-        mpsc::{channel, Receiver, Sender},
         Arc, RwLock,
     },
 };
@@ -218,8 +218,8 @@ impl<P: Pipeline> Renderling<P> {
             queue: wgpu_state.queue.clone(),
             size: wgpu_state.size.clone(),
             pipeline: AnyPipeline::new::<P>(pipeline.into()),
-            object_update_queue: channel(),
-            camera_update_queue: channel(),
+            object_update_queue: unbounded(),
+            camera_update_queue: unbounded(),
             meshes_have_normal_matrix_attribute,
             default_material: AnyMaterial::new::<M>(material.into()),
             default_material_uniform: None,
