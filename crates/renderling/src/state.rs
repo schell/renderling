@@ -265,19 +265,6 @@ impl WgpuState {
         let surface_config = surface
             .get_default_config(&adapter, width, height)
             .context(IncompatibleSurfaceSnafu)?;
-        //let surface_config = wgpu::SurfaceConfiguration {
-        //    usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-        //    format: surface
-        //        .get_supported_formats(&adapter)
-        //        .first()
-        //        .copied()
-        //        .context(IncompatibleSurfaceSnafu)?,
-        //    width,
-        //    height,
-        //    present_mode: wgpu::PresentMode::Fifo,
-        //    alpha_mode: wgpu::CompositeAlphaMode::Auto,
-        //    view_formats: &[]
-        //};
         surface.configure(&device, &surface_config);
         let target = RenderTarget::Surface {
             surface,

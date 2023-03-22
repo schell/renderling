@@ -1,9 +1,6 @@
 //! Builds the UI pipeline and manages resources.
 use glam::Vec3;
-use renderling_shader::light::{
-    DirectionalLightRaw, DirectionalLights, PointLightRaw, PointLights, SpotLightRaw, SpotLights,
-    DIRECTIONAL_LIGHTS_MAX, POINT_LIGHTS_MAX, SPOT_LIGHTS_MAX,
-};
+use moongraph::Graph;
 use snafu::prelude::*;
 use std::{
     marker::PhantomData,
@@ -15,11 +12,10 @@ use std::{
 
 use crate::{
     camera::*,
-    light::{DirectionalLightInner, PointLightInner, SpotLightInner},
-    linkage::{create_camera_uniform, pbr::LightsUniform, ObjectDraw},
+    linkage::{create_camera_uniform, ObjectDraw},
     resources::*,
-    AnyMaterial, AnyMaterialUniform, AnyPipeline, LightUpdateCmd, Material, ObjUpdateCmd, Object,
-    ObjectBuilder, ObjectData, Pipeline, Transform,
+    AnyMaterial, AnyMaterialUniform, AnyPipeline, Lights, Material, ObjUpdateCmd,
+    Object, ObjectBuilder, ObjectData, Pipeline, Transform, WgpuState,
 };
 
 #[derive(Debug, Snafu)]
@@ -43,14 +39,33 @@ pub enum RenderlingError {
     Scene { source: crate::GltfError },
 }
 
+/// Full-fledged renderer.
+pub struct Renderer {
+    graph: Graph,
+}
+
+impl Renderer {
+    /// Create a new full-fledged renderer.
+    pub fn new(gpu: WgpuState) -> Self {
+        let graph = Graph::default().with_resource(gpu);
+        Renderer { graph }
+    }
+
+    pub fn gpu(&self) -> &WgpuState {
+        // UNWRAP: safe because we always have the gpu
+        self.graph.get_resource().unwrap().unwrap()
+    }
+
+    pub fn gpu_mut(&mut self) -> &mut WgpuState {
+        // UNWRAP: safe because we always have the gpu
+        self.graph.get_resource_mut().unwrap().unwrap()
+    }
+}
+
 #[derive(Default)]
 pub(crate) struct Stage {
-    // Point lights
-    pub point_lights: Vec<Shared<PointLightInner>>,
-    // Spot lights
-    pub spot_lights: Vec<Shared<SpotLightInner>>,
-    // Directional lights
-    pub directional_lights: Vec<Shared<DirectionalLightInner>>,
+    // Lighting
+    pub lights: Lights,
     // for creating camera ids
     camera_id_bank: BankOfIds<Camera>,
     // for creating objects
@@ -166,8 +181,6 @@ pub struct Renderling<P: Pipeline> {
     pub(crate) object_update_queue: (Sender<ObjUpdateCmd>, Receiver<ObjUpdateCmd>),
     // queue/channel of updates from cameras to make before the next render
     camera_update_queue: (Sender<CameraUpdateCmd>, Receiver<CameraUpdateCmd>),
-    // queue/channel of updates from lights to make before the next render
-    light_update_queue: (Sender<LightUpdateCmd>, Receiver<LightUpdateCmd>),
 
     pub(crate) device: Arc<wgpu::Device>,
     pub(crate) queue: Arc<wgpu::Queue>,
@@ -181,8 +194,6 @@ pub struct Renderling<P: Pipeline> {
     default_material_uniform: Option<AnyMaterialUniform>,
     // whether object meshes have a 3x3 normal matrix attribute (defaults to `true`)
     meshes_have_normal_matrix_attribute: bool,
-    // lights uniform - optional because not all renderlings have lighting
-    lights_uniform: Option<LightsUniform>,
     // The index of the camera's bindgroup
     camera_bindgroup_index: u32,
     // The index of the lights's bindgroup
@@ -209,22 +220,15 @@ impl<P: Pipeline> Renderling<P> {
             pipeline: AnyPipeline::new::<P>(pipeline.into()),
             object_update_queue: channel(),
             camera_update_queue: channel(),
-            light_update_queue: channel(),
             meshes_have_normal_matrix_attribute,
             default_material: AnyMaterial::new::<M>(material.into()),
             default_material_uniform: None,
-            lights_uniform: None,
             stage: Default::default(),
             camera_bindgroup_index: 0,
             material_bindgroup_index: 1,
             light_bindgroup_index: 2,
             _phantom: PhantomData,
         };
-        // this will cause the next update to create (at least an empty) light uniform
-        r.light_update_queue
-            .0
-            .send(LightUpdateCmd::DirectionalLights)
-            .unwrap();
         r
     }
 
@@ -297,16 +301,16 @@ impl<P: Pipeline> Renderling<P> {
         }
     }
 
-    pub fn new_point_light(&mut self) -> crate::PointLightBuilder<'_> {
-        crate::PointLightBuilder::new(&mut self.stage, self.light_update_queue.0.clone())
+    pub fn new_point_light(&mut self) -> crate::PointLightBuilder {
+        crate::PointLightBuilder::new(&mut self.stage.lights)
     }
 
-    pub fn new_spot_light(&mut self) -> crate::SpotLightBuilder<'_> {
-        crate::SpotLightBuilder::new(&mut self.stage, self.light_update_queue.0.clone())
+    pub fn new_spot_light(&mut self) -> crate::SpotLightBuilder {
+        crate::SpotLightBuilder::new(&mut self.stage.lights)
     }
 
-    pub fn new_directional_light(&mut self) -> crate::DirectionalLightBuilder<'_> {
-        crate::DirectionalLightBuilder::new(&mut self.stage, self.light_update_queue.0.clone())
+    pub fn new_directional_light(&mut self) -> crate::DirectionalLightBuilder {
+        crate::DirectionalLightBuilder::new(&mut self.stage.lights)
     }
 
     /// Conduct all updates made from outside the renderling.
@@ -377,40 +381,7 @@ impl<P: Pipeline> Renderling<P> {
         }
 
         // update lights
-        let mut update_point_lights = false;
-        let mut update_spot_lights = false;
-        let mut update_directional_lights = false;
-        while let Ok(cmd) = self.light_update_queue.1.try_recv() {
-            update_point_lights = update_point_lights || cmd == LightUpdateCmd::PointLights;
-            update_spot_lights = update_spot_lights || cmd == LightUpdateCmd::SpotLights;
-            update_directional_lights =
-                update_directional_lights || cmd == LightUpdateCmd::DirectionalLights;
-        }
-
-        if let Some(lights_uniform) = self.lights_uniform.as_ref() {
-            if update_point_lights {
-                log::trace!("updating point lights");
-                lights_uniform.update_point_lights(&self.queue, &self.get_point_lights());
-            }
-            if update_spot_lights {
-                log::trace!("updating spot lights");
-                lights_uniform.update_spot_lights(&self.queue, &self.get_spot_lights());
-            }
-            if update_directional_lights {
-                log::trace!("updating directional lights");
-                lights_uniform
-                    .update_directional_lights(&self.queue, &self.get_directional_lights());
-            }
-        } else if update_point_lights || update_spot_lights || update_directional_lights {
-            log::trace!("creating initial lights uniform");
-            // create our lights uniform
-            self.lights_uniform = Some(LightsUniform::new(
-                &self.device,
-                &self.get_point_lights(),
-                &self.get_spot_lights(),
-                &self.get_directional_lights(),
-            ));
-        }
+        self.stage.lights.update(&self.device, &self.queue);
 
         // update default material
         if self.default_material_uniform.is_none() {
@@ -425,57 +396,6 @@ impl<P: Pipeline> Renderling<P> {
     pub fn set_default_material<T: Material>(&mut self, material: impl Into<Arc<T>>) {
         self.default_material_uniform = None;
         self.default_material = AnyMaterial::new(material);
-    }
-
-    fn get_point_lights(&self) -> PointLights {
-        let mut lights = [PointLightRaw::default(); POINT_LIGHTS_MAX];
-        for (light, i) in self
-            .stage
-            .point_lights
-            .iter()
-            .map(|l| l.read().0)
-            .zip(0..POINT_LIGHTS_MAX)
-        {
-            lights[i] = light;
-        }
-        PointLights {
-            length: self.stage.point_lights.len() as u32,
-            lights,
-        }
-    }
-
-    fn get_spot_lights(&self) -> SpotLights {
-        let mut lights = [SpotLightRaw::default(); SPOT_LIGHTS_MAX];
-        for (light, i) in self
-            .stage
-            .spot_lights
-            .iter()
-            .map(|l| l.read().0)
-            .zip(0..SPOT_LIGHTS_MAX)
-        {
-            lights[i] = light;
-        }
-        SpotLights {
-            length: self.stage.spot_lights.len() as u32,
-            lights,
-        }
-    }
-
-    fn get_directional_lights(&self) -> DirectionalLights {
-        let mut lights = [DirectionalLightRaw::default(); DIRECTIONAL_LIGHTS_MAX];
-        for (light, i) in self
-            .stage
-            .directional_lights
-            .iter()
-            .map(|l| l.read().0)
-            .zip(0..DIRECTIONAL_LIGHTS_MAX)
-        {
-            lights[i] = light;
-        }
-        DirectionalLights {
-            length: self.stage.directional_lights.len() as u32,
-            lights,
-        }
     }
 
     pub fn get_object_ids_sorted_by_distance_to_camera(&self, camera: &Camera) -> &Vec<Id<Object>> {
@@ -512,7 +432,7 @@ impl<P: Pipeline> Renderling<P> {
             .context(MissingDefaultMaterialSnafu)?;
 
         // bind the lights to our shader
-        if let Some(lights_uniform) = self.lights_uniform.as_ref() {
+        if let Some(lights_uniform) = self.stage.lights.uniform() {
             render_pass.set_bind_group(self.light_bindgroup_index, &lights_uniform.bindgroup, &[]);
         } else {
             log::warn!("no lights to bind");
