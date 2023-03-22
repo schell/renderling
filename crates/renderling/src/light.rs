@@ -1,133 +1,128 @@
 //! Different kinds of scene lighting.
-use std::sync::mpsc::Sender;
+use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 
-use crate::resources::Shared;
+use crate::{linkage::pbr::LightsUniform, resources::Shared, WgpuState};
 use glam::{vec3, vec4, Vec3, Vec4};
-use renderling_shader::light::{DirectionalLightRaw, PointLightRaw, SpotLightRaw};
+use moongraph::{Read, Write};
+use renderling_shader::light::{
+    DirectionalLightRaw, DirectionalLights, PointLightRaw, PointLights, SpotLightRaw, SpotLights,
+    DIRECTIONAL_LIGHTS_MAX, POINT_LIGHTS_MAX, SPOT_LIGHTS_MAX,
+};
 
-pub(crate) struct PointLightInner(pub(crate) PointLightRaw);
-pub(crate) struct SpotLightInner(pub(crate) SpotLightRaw);
-pub(crate) struct DirectionalLightInner(pub(crate) DirectionalLightRaw);
-
-#[derive(PartialEq)]
-pub(crate) enum LightUpdateCmd {
-    PointLights,
-    SpotLights,
-    DirectionalLights,
-}
+#[derive(snafu::Snafu, Debug)]
+pub enum LightsError {}
 
 /// Illuminates geometry in all directions surrounding a point, with
 /// attenuation.
 ///
 /// This is like a light bulb, a match or a firefly.
 pub struct PointLight {
-    inner: Shared<PointLightInner>,
-    cmd: Sender<LightUpdateCmd>,
+    inner: Shared<PointLightRaw>,
+    dirty: Arc<AtomicBool>,
 }
 
 impl PointLight {
+    pub fn new(lights: &mut Lights) -> Self {
+        let inner = Shared::new(PointLightRaw::default());
+        lights.point_lights.push(inner.clone());
+        let light = PointLight {
+            inner,
+            dirty: lights.dirty.point.clone(),
+        };
+        let white = Vec4::splat(1.0);
+        light.set_attenuation(1.0, 0.14, 0.07);
+        light.set_ambient_color(white);
+        light.set_diffuse_color(white);
+        light.set_specular_color(white);
+        light
+    }
+
     /// Sets the position of the light in world space.
     pub fn set_position(&self, position: Vec3) {
-        self.inner.write().0.position_ = position.extend(0.0);
-        self.cmd.send(LightUpdateCmd::PointLights).unwrap();
+        self.inner.write().position_ = position.extend(0.0);
+        self.dirty.store(true, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// Sets the ambient color.
-    pub fn set_ambient_color(&self, color: wgpu::Color) {
-        self.inner.write().0.ambient_color = vec4(
-            color.r as f32,
-            color.g as f32,
-            color.b as f32,
-            color.a as f32,
-        );
-        self.cmd.send(LightUpdateCmd::PointLights).unwrap();
+    pub fn set_ambient_color(&self, color: impl Into<Vec4>) {
+        self.inner.write().ambient_color = color.into();
+        self.dirty.store(true, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// Sets the diffuse color.
-    pub fn set_diffuse_color(&self, color: wgpu::Color) {
-        self.inner.write().0.diffuse_color = vec4(
-            color.r as f32,
-            color.g as f32,
-            color.b as f32,
-            color.a as f32,
-        );
-        self.cmd.send(LightUpdateCmd::PointLights).unwrap();
+    pub fn set_diffuse_color(&self, color: impl Into<Vec4>) {
+        self.inner.write().diffuse_color = color.into();
+        self.dirty.store(true, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// Sets the specular color.
-    pub fn set_specular_color(&self, color: wgpu::Color) {
-        self.inner.write().0.specular_color = vec4(
-            color.r as f32,
-            color.g as f32,
-            color.b as f32,
-            color.a as f32,
-        );
-        self.cmd.send(LightUpdateCmd::PointLights).unwrap();
+    pub fn set_specular_color(&self, color: impl Into<Vec4>) {
+        self.inner.write().specular_color = color.into();
+        self.dirty.store(true, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// Sets the attenuation coefficients for the point light.
     pub fn set_attenuation(&self, constant: f32, linear: f32, quadratic: f32) {
-        self.inner.write().0.attenuation_ = vec4(constant, linear, quadratic, 0.0);
-        self.cmd.send(LightUpdateCmd::PointLights).unwrap();
+        self.inner.write().attenuation_ = vec4(constant, linear, quadratic, 0.0);
+        self.dirty.store(true, std::sync::atomic::Ordering::Relaxed);
     }
 }
 
-pub struct PointLightBuilder<'a> {
-    inner: PointLightInner,
-    cmd: Sender<LightUpdateCmd>,
-    scene: &'a mut crate::Stage,
+#[derive(Clone)]
+pub struct DirtyLights {
+    pub point: Arc<AtomicBool>,
+    pub spot: Arc<AtomicBool>,
+    pub directional: Arc<AtomicBool>,
 }
 
-impl<'a> PointLightBuilder<'a> {
-    pub(crate) fn new(
-        scene: &'a mut crate::Stage,
-        cmd: Sender<LightUpdateCmd>,
-    ) -> PointLightBuilder<'a> {
-        let white = Vec4::splat(1.0);
+impl Default for DirtyLights {
+    fn default() -> Self {
         Self {
-            inner: PointLightInner(Default::default()),
-            cmd,
-            scene,
+            point: Arc::new(AtomicBool::new(true)),
+            spot: Arc::new(AtomicBool::new(true)),
+            directional: Arc::new(AtomicBool::new(true)),
         }
-        .with_attenuation(1.0, 0.14, 0.07)
-        .with_ambient_color(white)
-        .with_diffuse_color(white)
-        .with_specular_color(white)
+    }
+}
+
+pub struct PointLightBuilder {
+    inner: PointLight,
+}
+
+impl PointLightBuilder {
+    pub(crate) fn new(lights: &mut Lights) -> PointLightBuilder {
+        let inner = PointLight::new(lights);
+        PointLightBuilder { inner }
     }
 
-    pub fn with_position(mut self, position: Vec3) -> Self {
-        self.inner.0.position_ = position.extend(0.0);
+    pub fn with_position(self, position: Vec3) -> Self {
+        self.inner.set_position(position);
         self
     }
 
-    pub fn with_attenuation(mut self, constant: f32, linear: f32, quadratic: f32) -> Self {
-        self.inner.0.attenuation_ = vec3(constant, linear, quadratic).extend(0.0);
+    pub fn with_attenuation(self, constant: f32, linear: f32, quadratic: f32) -> Self {
+        self.inner.set_attenuation(constant, linear, quadratic);
         self
     }
 
-    pub fn with_ambient_color(mut self, color: impl Into<Vec4>) -> Self {
-        self.inner.0.ambient_color = color.into();
+    pub fn with_ambient_color(self, color: impl Into<Vec4>) -> Self {
+        self.inner.set_ambient_color(color);
         self
     }
 
-    pub fn with_diffuse_color(mut self, color: impl Into<Vec4>) -> Self {
-        self.inner.0.diffuse_color = color.into();
+    pub fn with_diffuse_color(self, color: impl Into<Vec4>) -> Self {
+        self.inner.set_diffuse_color(color);
         self
     }
 
-    pub fn with_specular_color(mut self, color: impl Into<Vec4>) -> Self {
-        self.inner.0.specular_color = color.into();
+    pub fn with_specular_color(self, color: impl Into<Vec4>) -> Self {
+        self.inner.set_specular_color(color);
         self
     }
 
     pub fn build(self) -> PointLight {
-        let inner = Shared::new(self.inner);
-        self.scene.point_lights.push(inner.clone());
-        self.cmd.send(LightUpdateCmd::PointLights).unwrap();
-        PointLight {
-            inner,
-            cmd: self.cmd.clone(),
-        }
+        self.inner
     }
 }
 
@@ -136,144 +131,125 @@ impl<'a> PointLightBuilder<'a> {
 ///
 /// This is like a street light or a flashlight.
 pub struct SpotLight {
-    inner: Shared<SpotLightInner>,
-    cmd: Sender<LightUpdateCmd>,
+    inner: Shared<SpotLightRaw>,
+    dirty: Arc<AtomicBool>,
 }
 
 impl SpotLight {
+    pub fn new(lights: &Lights) -> Self {
+        let white = Vec4::splat(1.0);
+        let light = Self {
+            inner: Default::default(),
+            dirty: lights.dirty.spot.clone(),
+        };
+        light.set_inner_cutoff(std::f32::consts::PI / 3.0);
+        light.set_outer_cutoff(std::f32::consts::PI / 2.0);
+        light.set_attenuation(Vec3::new(1.0, 0.014, 0.007));
+        light.set_direction(Vec3::new(0.0, -1.0, 0.0));
+        light.set_ambient_color(white);
+        light.set_diffuse_color(white);
+        light.set_specular_color(white);
+        light
+    }
     /// Sets the position of the light in world space.
     pub fn set_position(&self, position: Vec3) {
-        self.inner.write().0.position_ = position.extend(0.0);
-        self.cmd.send(LightUpdateCmd::SpotLights).unwrap();
+        self.inner.write().position_ = position.extend(0.0);
+        self.dirty.store(true, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// Sets the direction the light is pointing in.
     pub fn set_direction(&self, direction: Vec3) {
-        self.inner.write().0.direction_ = direction.extend(0.0);
-        self.cmd.send(LightUpdateCmd::SpotLights).unwrap();
+        self.inner.write().direction_ = direction.extend(0.0);
+        self.dirty.store(true, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// Sets the inner angular cutoff.
     pub fn set_inner_cutoff(&self, cutoff: f32) {
-        self.inner.write().0.cutoff_.x = cutoff;
-        self.cmd.send(LightUpdateCmd::SpotLights).unwrap();
+        self.inner.write().cutoff_.x = cutoff;
+        self.dirty.store(true, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// Sets the constant, linear, and quadratic terms of attenuation.
     pub fn set_attenuation(&self, attenuation: Vec3) {
-        self.inner.write().0.attenuation_ = attenuation.extend(0.0);
-        self.cmd.send(LightUpdateCmd::SpotLights).unwrap();
+        self.inner.write().attenuation_ = attenuation.extend(0.0);
+        self.dirty.store(true, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// Sets the outer angular cutoff.
     pub fn set_outer_cutoff(&self, cutoff: f32) {
-        self.inner.write().0.cutoff_.y = cutoff;
-        self.cmd.send(LightUpdateCmd::SpotLights).unwrap();
+        self.inner.write().cutoff_.y = cutoff;
+        self.dirty.store(true, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// Sets the ambient color.
-    pub fn set_ambient_color(&self, color: wgpu::Color) {
-        self.inner.write().0.ambient_color = vec4(
-            color.r as f32,
-            color.g as f32,
-            color.b as f32,
-            color.a as f32,
-        );
-        self.cmd.send(LightUpdateCmd::SpotLights).unwrap();
+    pub fn set_ambient_color(&self, color: impl Into<Vec4>) {
+        self.inner.write().ambient_color = color.into();
+        self.dirty.store(true, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// Sets the diffuse color.
-    pub fn set_diffuse_color(&self, color: wgpu::Color) {
-        self.inner.write().0.diffuse_color = vec4(
-            color.r as f32,
-            color.g as f32,
-            color.b as f32,
-            color.a as f32,
-        );
-        self.cmd.send(LightUpdateCmd::SpotLights).unwrap();
+    pub fn set_diffuse_color(&self, color: impl Into<Vec4>) {
+        self.inner.write().diffuse_color = color.into();
+        self.dirty.store(true, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// Sets the specular color.
-    pub fn set_specular_color(&self, color: wgpu::Color) {
-        self.inner.write().0.specular_color = vec4(
-            color.r as f32,
-            color.g as f32,
-            color.b as f32,
-            color.a as f32,
-        );
-        self.cmd.send(LightUpdateCmd::SpotLights).unwrap();
+    pub fn set_specular_color(&self, color: impl Into<Vec4>) {
+        self.inner.write().specular_color = color.into();
+        self.dirty.store(true, std::sync::atomic::Ordering::Relaxed);
     }
 }
 
-pub struct SpotLightBuilder<'a> {
-    inner: SpotLightInner,
-    cmd: Sender<LightUpdateCmd>,
-    scene: &'a mut crate::Stage,
+pub struct SpotLightBuilder {
+    inner: SpotLight,
 }
 
-impl<'a> SpotLightBuilder<'a> {
-    pub(crate) fn new(
-        scene: &'a mut crate::Stage,
-        cmd: Sender<LightUpdateCmd>,
-    ) -> SpotLightBuilder<'a> {
-        let white = Vec4::splat(1.0);
+impl SpotLightBuilder {
+    pub(crate) fn new(lights: &mut Lights) -> SpotLightBuilder {
         Self {
-            cmd,
-            inner: SpotLightInner(Default::default()),
-            scene,
+            inner: SpotLight::new(lights),
         }
-        .with_cutoff(std::f32::consts::PI / 3.0, std::f32::consts::PI / 2.0)
-        .with_attenuation(1.0, 0.014, 0.007)
-        .with_direction(Vec3::new(0.0, -1.0, 0.0))
-        .with_ambient_color(white)
-        .with_diffuse_color(white)
-        .with_specular_color(white)
     }
 
-    pub fn with_position(mut self, position: Vec3) -> Self {
-        self.inner.0.position_ = position.extend(0.0);
+    pub fn with_position(self, position: Vec3) -> Self {
+        self.inner.set_position(position);
         self
     }
 
-    pub fn with_direction(mut self, direction: Vec3) -> Self {
-        self.inner.0.direction_ = direction.extend(0.0);
+    pub fn with_direction(self, direction: Vec3) -> Self {
+        self.inner.set_direction(direction);
         self
     }
 
-    pub fn with_attenuation(mut self, constant: f32, linear: f32, quadratic: f32) -> Self {
-        self.inner.0.attenuation_ = vec4(constant, linear, quadratic, 0.0);
+    pub fn with_attenuation(self, constant: f32, linear: f32, quadratic: f32) -> Self {
+        self.inner
+            .set_attenuation(vec3(constant, linear, quadratic));
         self
     }
 
-    pub fn with_cutoff(mut self, inner: f32, outer: f32) -> Self {
-        self.inner.0.cutoff_.x = inner;
-        self.inner.0.cutoff_.y = outer;
+    pub fn with_cutoff(self, inner: f32, outer: f32) -> Self {
+        self.inner.set_inner_cutoff(inner);
+        self.inner.set_outer_cutoff(outer);
         self
     }
 
-    pub fn with_ambient_color(mut self, color: impl Into<Vec4>) -> Self {
-        self.inner.0.ambient_color = color.into();
+    pub fn with_ambient_color(self, color: impl Into<Vec4>) -> Self {
+        self.inner.set_ambient_color(color);
         self
     }
 
-    pub fn with_diffuse_color(mut self, color: impl Into<Vec4>) -> Self {
-        self.inner.0.diffuse_color = color.into();
+    pub fn with_diffuse_color(self, color: impl Into<Vec4>) -> Self {
+        self.inner.set_diffuse_color(color);
         self
     }
 
-    pub fn with_specular_color(mut self, color: impl Into<Vec4>) -> Self {
-        self.inner.0.specular_color = color.into();
+    pub fn with_specular_color(self, color: impl Into<Vec4>) -> Self {
+        self.inner.set_specular_color(color);
         self
     }
 
     pub fn build(self) -> SpotLight {
-        let inner = Shared::new(self.inner);
-        self.scene.spot_lights.push(inner.clone());
-        self.cmd.send(LightUpdateCmd::SpotLights).unwrap();
-        SpotLight {
-            inner,
-            cmd: self.cmd,
-        }
+        self.inner
     }
 }
 
@@ -281,85 +257,191 @@ impl<'a> SpotLightBuilder<'a> {
 ///
 /// This is like the sun, or the moon.
 pub struct DirectionalLight {
-    inner: Shared<DirectionalLightInner>,
-    cmd: Sender<LightUpdateCmd>,
+    inner: Shared<DirectionalLightRaw>,
+    dirty: Arc<AtomicBool>,
 }
 
 impl DirectionalLight {
+    pub fn new(lights: &mut Lights) -> Self {
+        let inner = Shared::new(DirectionalLightRaw::default());
+        lights.directional_lights.push(inner.clone());
+        let light = Self {
+            inner,
+            dirty: lights.dirty.directional.clone(),
+        };
+        light.set_direction(Vec3::new(0.0, -1.0, 0.0));
+        light.set_ambient_color(Vec4::splat(1.0));
+        light.set_diffuse_color(Vec4::splat(1.0));
+        light.set_specular_color(Vec4::splat(1.0));
+        light
+    }
     /// Sets the direction this light points in.
     pub fn set_direction(&self, direction: Vec3) {
-        self.inner.write().0.direction_ = direction.extend(0.0);
-        self.cmd.send(LightUpdateCmd::DirectionalLights).unwrap();
+        self.inner.write().direction_ = direction.extend(0.0);
+        self.dirty.store(true, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// Sets the ambient color.
     pub fn set_ambient_color(&self, color: impl Into<Vec4>) {
-        self.inner.write().0.ambient_color = color.into();
-        self.cmd.send(LightUpdateCmd::DirectionalLights).unwrap();
+        self.inner.write().ambient_color = color.into();
+        self.dirty.store(true, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// Sets the diffuse color.
     pub fn set_diffuse_color(&self, color: impl Into<Vec4>) {
-        self.inner.write().0.diffuse_color = color.into();
-        self.cmd.send(LightUpdateCmd::DirectionalLights).unwrap();
+        self.inner.write().diffuse_color = color.into();
+        self.dirty.store(true, std::sync::atomic::Ordering::Relaxed);
     }
 
     /// Sets the specular color.
     pub fn set_specular_color(&self, color: impl Into<Vec4>) {
-        self.inner.write().0.specular_color = color.into();
-        self.cmd.send(LightUpdateCmd::DirectionalLights).unwrap();
+        self.inner.write().specular_color = color.into();
+        self.dirty.store(true, std::sync::atomic::Ordering::Relaxed);
     }
 }
 
-pub struct DirectionalLightBuilder<'a> {
-    inner: DirectionalLightInner,
-    cmd: Sender<LightUpdateCmd>,
-    scene: &'a mut crate::Stage,
+pub struct DirectionalLightBuilder {
+    inner: DirectionalLight,
 }
 
-impl<'a> DirectionalLightBuilder<'a> {
-    pub(crate) fn new(
-        scene: &'a mut crate::Stage,
-        cmd: Sender<LightUpdateCmd>,
-    ) -> DirectionalLightBuilder<'a> {
-        Self {
-            inner: DirectionalLightInner(Default::default()),
-            cmd,
-            scene,
-        }
-        .with_direction(Vec3::new(0.0, -1.0, 0.0))
-        .with_ambient_color(Vec4::splat(1.0))
-        .with_diffuse_color(Vec4::splat(1.0))
-        .with_specular_color(Vec4::splat(1.0))
+impl DirectionalLightBuilder {
+    pub(crate) fn new(lights: &mut Lights) -> DirectionalLightBuilder {
+        let inner = DirectionalLight::new(lights);
+        Self { inner }
     }
 
-    pub fn with_direction(mut self, direction: Vec3) -> Self {
-        self.inner.0.direction_ = direction.extend(0.0);
+    pub fn with_direction(self, direction: Vec3) -> Self {
+        self.inner.set_direction(direction);
         self
     }
 
-    pub fn with_ambient_color(mut self, color: impl Into<Vec4>) -> Self {
-        self.inner.0.ambient_color = color.into();
+    pub fn with_ambient_color(self, color: impl Into<Vec4>) -> Self {
+        self.inner.set_ambient_color(color);
         self
     }
 
-    pub fn with_diffuse_color(mut self, color: impl Into<Vec4>) -> Self {
-        self.inner.0.diffuse_color = color.into();
+    pub fn with_diffuse_color(self, color: impl Into<Vec4>) -> Self {
+        self.inner.set_diffuse_color(color);
         self
     }
 
-    pub fn with_specular_color(mut self, color: impl Into<Vec4>) -> Self {
-        self.inner.0.specular_color = color.into();
+    pub fn with_specular_color(self, color: impl Into<Vec4>) -> Self {
+        self.inner.set_specular_color(color);
         self
     }
 
     pub fn build(self) -> DirectionalLight {
-        let inner = Shared::new(self.inner);
-        self.scene.directional_lights.push(inner.clone());
-        self.cmd.send(LightUpdateCmd::DirectionalLights).unwrap();
-        DirectionalLight {
-            inner,
-            cmd: self.cmd,
+        self.inner
+    }
+}
+
+/// All lighting on the stage.
+#[derive(Default)]
+pub struct Lights {
+    point_lights: Vec<Shared<PointLightRaw>>,
+    spot_lights: Vec<Shared<SpotLightRaw>>,
+    directional_lights: Vec<Shared<DirectionalLightRaw>>,
+    dirty: DirtyLights,
+    uniform: Option<LightsUniform>,
+}
+
+impl Lights {
+    /// Get a reference to the lights uniform.
+    pub fn uniform(&self) -> Option<&LightsUniform> {
+        self.uniform.as_ref()
+    }
+
+    fn get_point_lights(&self) -> PointLights {
+        let mut lights = [PointLightRaw::default(); POINT_LIGHTS_MAX];
+        for (light, i) in self
+            .point_lights
+            .iter()
+            .map(|l| *l.read())
+            .zip(0..POINT_LIGHTS_MAX)
+        {
+            lights[i] = light;
+        }
+        PointLights {
+            length: self.point_lights.len() as u32,
+            lights,
         }
     }
+
+    fn get_spot_lights(&self) -> SpotLights {
+        let mut lights = [SpotLightRaw::default(); SPOT_LIGHTS_MAX];
+        for (light, i) in self
+            .spot_lights
+            .iter()
+            .map(|l| *l.read())
+            .zip(0..SPOT_LIGHTS_MAX)
+        {
+            lights[i] = light;
+        }
+        SpotLights {
+            length: self.spot_lights.len() as u32,
+            lights,
+        }
+    }
+
+    fn get_directional_lights(&self) -> DirectionalLights {
+        let mut lights = [DirectionalLightRaw::default(); DIRECTIONAL_LIGHTS_MAX];
+        for (light, i) in self
+            .directional_lights
+            .iter()
+            .map(|l| *l.read())
+            .zip(0..DIRECTIONAL_LIGHTS_MAX)
+        {
+            lights[i] = light;
+        }
+        DirectionalLights {
+            length: self.directional_lights.len() as u32,
+            lights,
+        }
+    }
+
+    /// Update lights
+    pub fn update(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) {
+        let update_point_lights = self
+            .dirty
+            .point
+            .swap(false, std::sync::atomic::Ordering::Relaxed);
+        let update_spot_lights = self
+            .dirty
+            .spot
+            .swap(false, std::sync::atomic::Ordering::Relaxed);
+        let update_directional_lights = self
+            .dirty
+            .directional
+            .swap(false, std::sync::atomic::Ordering::Relaxed);
+
+        if let Some(lights_uniform) = self.uniform.as_ref() {
+            if update_point_lights {
+                log::trace!("updating point lights");
+                lights_uniform.update_point_lights(queue, &self.get_point_lights());
+            }
+            if update_spot_lights {
+                log::trace!("updating spot lights");
+                lights_uniform.update_spot_lights(queue, &self.get_spot_lights());
+            }
+            if update_directional_lights {
+                log::trace!("updating directional lights");
+                lights_uniform.update_directional_lights(queue, &self.get_directional_lights());
+            }
+        } else if update_point_lights || update_spot_lights || update_directional_lights {
+            log::trace!("creating initial lights uniform");
+            // create our lights uniform
+            self.uniform = Some(LightsUniform::new(
+                &device,
+                &self.get_point_lights(),
+                &self.get_spot_lights(),
+                &self.get_directional_lights(),
+            ));
+        }
+    }
+}
+
+/// A render graph node that updates lights on-demand.
+pub fn update_lights(gpu: Read<WgpuState>, mut lights: Write<Lights>) -> Result<(), LightsError> {
+    lights.update(&gpu.device, &gpu.queue);
+    Ok(())
 }

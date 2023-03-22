@@ -1,4 +1,5 @@
 //! Light types and calculations.
+// TODO: make the internal fields private and then use getter/setters.
 use glam::{Mat4, Vec3, Vec4, Vec4Swizzles};
 
 #[cfg(target_arch = "spirv")]

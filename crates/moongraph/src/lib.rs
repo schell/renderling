@@ -2,12 +2,15 @@
 use std::{
     any::Any,
     marker::PhantomData,
-    ops::{Deref, DerefMut},
+    ops::{Deref, DerefMut}, collections::HashMap,
 };
 
-use broomdog::{Loan, LoanMut, TypeKey, TypeMap};
+use broomdog::{Loan, LoanMut};
 use dagga::{Dag, Node};
 use snafu::prelude::*;
+
+pub use broomdog::{TypeKey, TypeMap};
+pub use moongraph_macros::Edges;
 
 #[derive(Debug, Snafu)]
 pub enum GraphError {
@@ -297,6 +300,26 @@ impl<T: Any + Send + Sync> Deref for Read<T> {
     }
 }
 
+impl<T: Any + Send + Sync> Edges for Read<T> {
+    fn reads() -> Vec<TypeKey> {
+        vec![TypeKey::new::<T>()]
+    }
+
+    fn construct(resources: &mut TypeMap) -> Result<Self, GraphError> {
+        let key = TypeKey::new::<T>();
+        let inner = resources
+            .loan(key)
+            .context(ResourceSnafu)?
+            .context(MissingSnafu {
+                name: std::any::type_name::<T>(),
+            })?;
+        Ok(Read {
+            inner,
+            _phantom: PhantomData,
+        })
+    }
+}
+
 pub struct Write<T> {
     inner: LoanMut,
     _phantom: PhantomData<T>,
@@ -346,6 +369,40 @@ pub struct Graph {
 }
 
 impl Graph {
+    /// Merge two graphs, preferring the right in cases of key collisions.
+    ///
+    /// The values of `rhs` will override those of `lhs`.
+    pub fn merge(mut lhs: Graph, mut rhs: Graph) -> Graph {
+        lhs.unschedule();
+        rhs.unschedule();
+        let Graph{ resources: mut rhs_resources, unscheduled: rhs_nodes, schedule: _} = rhs;
+        lhs.resources.extend(std::mem::take(rhs_resources.deref_mut()).into_iter());
+        let mut unscheduled: HashMap<String, Node<Function, TypeKey>> = HashMap::default();
+        unscheduled.extend(lhs.unscheduled.into_iter().map(|node| (node.name().to_string(), node)));
+        unscheduled.extend(rhs_nodes.into_iter().map(|node| (node.name().to_string(), node)));
+        lhs.unscheduled = unscheduled.into_iter().map(|(_, node)| node).collect();
+        lhs
+    }
+
+    /// Unschedule all functions.
+    fn unschedule(&mut self) {
+        self.unscheduled
+            .extend(std::mem::take(&mut self.schedule).into_iter().flatten());
+    }
+
+    // Schedule all functions.
+    fn reschedule(&mut self) -> Result<(), GraphError> {
+        log::trace!("rescheduling the render graph:");
+        self.unschedule();
+        let all_nodes = std::mem::take(&mut self.unscheduled);
+        let dag = all_nodes.into_iter().fold(Dag::default(), |dag, node| dag.with_node(node));
+        let schedule = dag.build_schedule().context(SchedulingSnafu)?;
+        log::trace!("{:#?}", schedule.batched_names());
+        self.schedule = schedule.batches;
+        Ok(())
+    }
+
+    /// Add a named function to the graph.
     pub fn with_function<Input, Output>(
         mut self,
         name: impl Into<String>,
@@ -355,18 +412,29 @@ impl Graph {
         self
     }
 
+    /// Return whether the graph contains a function with the given name.
+    pub fn contains_function(&self, name: impl AsRef<str>) -> bool {
+        let name = name.as_ref();
+        let search = |node: &Node<Function, TypeKey>| node.name() == name;
+        if self.unscheduled.iter().any(search) {
+            return true
+        }
+        self.schedule.iter().flatten().any(search)
+    }
+
+    /// Explicitly insert a resource (an edge) into the graph.
+    ///
+    /// This will overwrite any existing resource in the graph.
+    pub fn with_resource<T: Any + Send + Sync>(mut self, t: T) -> Self {
+        // UNWRAP: safe because of the guarantees around `insert_value`
+        self.resources.insert_value(t).unwrap();
+        self
+    }
+
+    /// Run the graph.
     pub fn run(&mut self) -> Result<(), GraphError> {
         if !self.unscheduled.is_empty() {
-            log::trace!("rescheduling the render graph:");
-            let all_nodes = std::mem::take(&mut self.unscheduled).into_iter().chain(
-                std::mem::take(&mut self.schedule)
-                    .into_iter()
-                    .flat_map(|batches| batches),
-            );
-            let dag = all_nodes.fold(Dag::default(), |dag, node| dag.with_node(node));
-            let schedule = dag.build_schedule().context(SchedulingSnafu)?;
-            log::trace!("{:#?}", schedule.batched_names());
-            self.schedule = schedule.batches;
+            self.reschedule()?;
         }
 
         // TODO: run batches concurrently
@@ -379,6 +447,7 @@ impl Graph {
         Ok(())
     }
 
+    /// Remove a resource from the graph.
     pub fn remove_resource<T: Any + Send + Sync>(&mut self) -> Result<Option<T>, GraphError> {
         let key = TypeKey::new::<T>();
         if let Some(inner_loan) = self.resources.remove(&key) {
@@ -392,8 +461,14 @@ impl Graph {
         }
     }
 
+    /// Get a reference to a resource in the graph.
     pub fn get_resource<T: Any + Send + Sync>(&self) -> Result<Option<&T>, GraphError> {
         Ok(self.resources.get_value().context(ResourceSnafu)?)
+    }
+
+    /// Get a mutable reference to a resource in the graph.
+    pub fn get_resource_mut<T: Any + Send + Sync>(&mut self) -> Result<Option<&mut T>, GraphError> {
+        Ok(self.resources.get_value_mut().context(ResourceSnafu)?)
     }
 }
 
@@ -507,6 +582,44 @@ mod test {
             vec!["start", "modify_strings, modify_floats, modify_ints", "end"],
             schedule,
             "schedule is wrong"
+        );
+    }
+
+    #[test]
+    fn can_derive() {
+        use crate as moongraph;
+
+        #[derive(Debug, Snafu)]
+        enum TestError {}
+
+        #[derive(Edges)]
+        struct Input {
+            num_usize: Read<usize>,
+            num_f32: Write<f32>,
+            num_f64: Move<f64>,
+        }
+
+        type Output = (String, &'static str);
+
+        fn start(_: ()) -> Result<(usize, f32, f64), TestError> {
+            Ok((1, 0.0, 10.0))
+        }
+
+        fn end(mut input: Input) -> Result<Output, TestError> {
+            *input.num_f32 += *input.num_f64 as f32;
+            Ok((
+                format!("{},{},{}", *input.num_usize, *input.num_f32, *input.num_f64),
+                "done",
+            ))
+        }
+
+        let mut graph = Graph::default()
+            .with_function("start", start)
+            .with_function("end", end);
+        graph.run().unwrap();
+        assert_eq!(
+            "1,10,10",
+            graph.get_resource::<String>().unwrap().unwrap().as_str()
         );
     }
 }

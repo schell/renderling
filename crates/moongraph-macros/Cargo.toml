@@ -1,0 +1,19 @@
+[package]
+name = "moongraph-macros"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+keywords = ["gamedev", "ecs", "dag"]
+documentation = "https://docs.rs/moongraph-macros/"
+repository = "https://github.com/schell/moongraph"
+categories = ["concurrency", "algorithms", "data-structures"]
+description = "Derive macros for the moongraph library"
+
+[lib]
+proc-macro = true
+bench = false
+
+[dependencies]
+proc-macro2 = "^1.0"
+quote = "^1.0"
+syn = "^1.0"

@@ -96,7 +96,7 @@ impl<T> BankOfIds<T> {
 }
 
 #[derive(Default)]
-pub(crate) struct Shared<T> {
+pub struct Shared<T> {
     inner: Arc<RwLock<T>>,
 }
 
@@ -109,20 +109,24 @@ impl<T> Clone for Shared<T> {
 }
 
 impl<T> Shared<T> {
+    /// Wrap a `T` to create a new `Shared` thing.
     pub fn new(inner: T) -> Self {
         Self {
             inner: Arc::new(RwLock::new(inner)),
         }
     }
 
+    /// Get a read guard.
     pub fn read(&self) -> RwLockReadGuard<'_, T> {
         self.inner.read().unwrap()
     }
 
+    /// Get a write guard.
     pub fn write(&self) -> RwLockWriteGuard<'_, T> {
         self.inner.write().unwrap()
     }
 
+    /// Return the number of owners of this `Shared<T>`.
     pub fn count(&self) -> usize {
         Arc::strong_count(&self.inner)
     }

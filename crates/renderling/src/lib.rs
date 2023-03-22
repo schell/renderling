@@ -42,7 +42,6 @@ pub mod linkage;
 
 mod camera;
 mod gltf_support;
-mod graph;
 mod light;
 mod material;
 mod mesh;
@@ -57,7 +56,6 @@ mod transform;
 pub use camera::*;
 #[cfg(feature = "gltf")]
 pub use gltf_support::*;
-pub use graph::*;
 pub use light::*;
 pub use material::*;
 pub use mesh::*;
@@ -945,23 +943,23 @@ mod test {
         assert_eq!(0, anime.tweens[1].target_node_index);
     }
 
-    #[cfg(feature = "gltf")]
-    #[test]
-    fn gltf_simple_morph_triangle() {
-        let (document, buffers, images) = gltf::import("../../gltf/simple_morph_triangle.gltf").unwrap();
-        let mesh = document.meshes().next().unwrap();
-        let primitive = mesh.primitives().next().unwrap();
-        let reader = primitive.reader(|buffer| Some(&buffers[buffer.index()]));
-        let positions: Vec<_> = reader.read_positions().unwrap().collect();
-        let morphs: Vec<(_, _, _)> = reader.read_morph_targets().collect();
-        println!("positions.len(): {}", positions.len());
-        println!("morphs.len(): {}", morphs.len());
-        for (i, (ps, ns, ts)) in morphs.into_iter().enumerate() {
-            println!("{i}");
-            println!("ps: {:?}", ps.map(|vs| vs.collect::<Vec<_>>()));
-            println!("ns: {:?}", ns.map(|vs| vs.collect::<Vec<_>>()));
-            println!("ts: {:?}", ts.map(|vs| vs.collect::<Vec<_>>()));
-        }
-        panic!("blah")
-    }
+    //#[cfg(feature = "gltf")]
+    //#[test]
+    //fn gltf_simple_morph_triangle() {
+    //    let (document, buffers, images) = gltf::import("../../gltf/simple_morph_triangle.gltf").unwrap();
+    //    let mesh = document.meshes().next().unwrap();
+    //    let primitive = mesh.primitives().next().unwrap();
+    //    let reader = primitive.reader(|buffer| Some(&buffers[buffer.index()]));
+    //    let positions: Vec<_> = reader.read_positions().unwrap().collect();
+    //    let morphs: Vec<(_, _, _)> = reader.read_morph_targets().collect();
+    //    println!("positions.len(): {}", positions.len());
+    //    println!("morphs.len(): {}", morphs.len());
+    //    for (i, (ps, ns, ts)) in morphs.into_iter().enumerate() {
+    //        println!("{i}");
+    //        println!("ps: {:?}", ps.map(|vs| vs.collect::<Vec<_>>()));
+    //        println!("ns: {:?}", ns.map(|vs| vs.collect::<Vec<_>>()));
+    //        println!("ts: {:?}", ts.map(|vs| vs.collect::<Vec<_>>()));
+    //    }
+    //    panic!("blah")
+    //}
 }
