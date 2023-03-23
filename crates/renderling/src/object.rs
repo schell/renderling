@@ -1,12 +1,13 @@
 //! Renderable things with positions, transformations, meshes and materials.
-use std::sync::Arc;
+use std::{sync::Arc, ops::{Deref, DerefMut}};
 
-use async_channel::Sender;
+use async_channel::{unbounded, Receiver, Sender};
 use glam::{Mat3, Mat4, Quat, Vec3};
 use snafu::prelude::*;
 use wgpu::util::DeviceExt;
 
 use crate::{
+    bank::Bank,
     linkage::{ObjectDraw, ShaderObject},
     resources::Id,
     LocalTransform, Shared, WorldTransform,
@@ -14,21 +15,13 @@ use crate::{
 
 pub(crate) enum ObjUpdateCmd {
     // Update the given object's transform
-    Transform {
-        object_id: Id<Object>,
-    },
+    Transform { object_id: Id<Object> },
     // Update the given object's mesh
-    Mesh {
-        object_id: Id<Object>,
-    },
+    Mesh { object_id: Id<Object> },
     // Update the given object's mesh
-    Material {
-        object_id: Id<Object>,
-    },
+    Material { object_id: Id<Object> },
     // Destroy this object
-    Destroy {
-        object_id: Id<Object>,
-    },
+    Destroy { object_id: Id<Object> },
 }
 
 #[derive(Debug, Snafu)]
@@ -47,7 +40,7 @@ pub struct ObjectBuilder<'a> {
     pub(crate) is_visible: bool,
     pub(crate) update_tx: Sender<ObjUpdateCmd>,
     pub(crate) device: &'a wgpu::Device,
-    pub(crate) scene: &'a mut crate::Stage,
+    pub(crate) objects: &'a mut Objects,
 }
 
 impl<'a> ObjectBuilder<'a> {
@@ -112,6 +105,11 @@ impl<'a> ObjectBuilder<'a> {
         self
     }
 
+    pub fn with_generate_normal_matrix(mut self, should_generate_normal_matrix: bool) -> Self {
+        self.generate_normal_matrix = should_generate_normal_matrix;
+        self
+    }
+
     pub fn build(self) -> Result<Object, ObjectBuilderError> {
         let material_uniform = self
             .material
@@ -121,7 +119,6 @@ impl<'a> ObjectBuilder<'a> {
         let local_transforms = std::iter::once(self.local_transform)
             .chain(self.local_transforms)
             .collect::<Vec<_>>();
-        let id = self.scene.new_object_id();
         let inner = ObjectInner {
             // parent is set to `Some` when/if the parent is built, or updated
             parent: None,
@@ -139,25 +136,29 @@ impl<'a> ObjectBuilder<'a> {
             self.update_tx
                 .try_send(ObjUpdateCmd::Transform {
                     object_id: child.id,
-                }).unwrap();
+                })
+                .unwrap();
         }
         inner.write().children = children;
         let instances = inner
             .read()
             .new_world_transforms_buffer(self.device, self.generate_normal_matrix);
-        let obj_data = ObjectData {
-            id,
-            mesh: self.mesh,
-            material_uniform,
-            instances,
-            world_position: position,
-            inner: inner.clone(),
-        };
 
-        self.scene.objects[id.0] = Some(obj_data);
+        let id = self.objects.bank.insert_with({
+            let inner = inner.clone();
+            move |id| ObjectData {
+                id: id.into(),
+                mesh: self.mesh,
+                material_uniform,
+                instances,
+                generate_normal_matrix: self.generate_normal_matrix,
+                world_position: position,
+                inner,
+            }
+        });
 
         Ok(Object {
-            id,
+            id: id.into(),
             inner,
             cmd: self.update_tx,
         })
@@ -263,10 +264,12 @@ pub struct Object {
 impl Drop for Object {
     // TODO: do the same drop treatment for cameras and lights
     fn drop(&mut self) {
-        // the minimum count here is 2 because when the object is dropped there is 1 from the
-        // this object here and one stored in the renderer
+        // the minimum count here is 2 because when the object is dropped there is 1
+        // from the this object here and one stored in the renderer
         if self.inner.count() <= 2 {
-            let _ = self.cmd.try_send(ObjUpdateCmd::Destroy { object_id: self.id });
+            let _ = self
+                .cmd
+                .try_send(ObjUpdateCmd::Destroy { object_id: self.id });
         }
     }
 }
@@ -400,17 +403,18 @@ impl Object {
 }
 
 /// Underlying data used by `wgpu` to render an object.
-pub(crate) struct ObjectData {
+pub struct ObjectData {
     pub(crate) id: Id<Object>,
     pub(crate) mesh: Option<Arc<crate::Mesh>>,
     pub(crate) material_uniform: Option<crate::AnyMaterialUniform>,
     pub(crate) instances: crate::linkage::VertexBuffer,
     pub(crate) world_position: Vec3,
+    pub(crate) generate_normal_matrix: bool,
     pub(crate) inner: Shared<ObjectInner>,
 }
 
 impl ObjectData {
-    pub(crate) fn as_shader_object(&self) -> Option<ShaderObject<'_>> {
+    pub fn as_shader_object(&self) -> Option<ShaderObject<'_>> {
         let mesh = self.mesh.as_ref()?;
         let draw = mesh
             .index_buffer
@@ -435,17 +439,101 @@ impl ObjectData {
         Some(object)
     }
 
-    pub(crate) fn update_world_transform(
-        &mut self,
-        queue: &wgpu::Queue,
-        generate_normal_matrix: bool,
-    ) {
+    pub fn update_world_transform(&mut self, queue: &wgpu::Queue) {
         log::trace!("updating object {:?} world transform", self.id);
         let inner = self.inner.read();
-        inner.update_world_transforms_buffer(&queue, &self.instances, generate_normal_matrix);
+        inner.update_world_transforms_buffer(&queue, &self.instances, self.generate_normal_matrix);
         let parent_tfrm = inner.get_parent_world_transform().unwrap_or_default();
         let parent_model_matrix = Mat4::from(&parent_tfrm);
         let p = inner.local_transforms[0].position;
         self.world_position = parent_model_matrix.project_point3(p);
+    }
+}
+
+impl From<Id<ObjectData>> for Id<Object> {
+    fn from(value: Id<ObjectData>) -> Self {
+        Id::new(*value)
+    }
+}
+
+impl From<Id<Object>> for Id<ObjectData> {
+    fn from(value: Id<Object>) -> Self {
+        Id::new(*value)
+    }
+}
+
+/// All display objects on the "stage".
+pub struct Objects {
+    bank: Bank<ObjectData>,
+    // queue/channel of updates from library userland objects to make before the next render
+    pub(crate) object_update_queue: (Sender<ObjUpdateCmd>, Receiver<ObjUpdateCmd>),
+}
+
+impl Deref for Objects {
+    type Target = Bank<ObjectData>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.bank
+    }
+}
+
+impl DerefMut for Objects {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.bank
+    }
+}
+
+impl Default for Objects {
+    fn default() -> Self {
+        Self {
+            bank: Default::default(),
+            object_update_queue: unbounded(),
+        }
+    }
+}
+
+impl Objects {
+    pub fn iter(&self) -> impl Iterator<Item = Option<&ObjectData>> + '_ {
+        self.bank.iter()
+    }
+
+    /// Update any object properties that have changed in userland.
+    ///
+    /// Returns whether the cameras need to have their objects resorted because of any updates.
+    pub fn update(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) -> bool {
+        let mut should_sort = false;
+        while let Ok(cmd) = self.object_update_queue.1.try_recv() {
+            match cmd {
+                ObjUpdateCmd::Transform { object_id } => {
+                    if let Some(object) = self.bank.get_mut(&object_id.into()) {
+                        object.update_world_transform(queue);
+                        // this object's transform changed, so we should resort the cameras
+                        should_sort = true;
+                    }
+                }
+                ObjUpdateCmd::Mesh { object_id } => {
+                    if let Some(object) = self.bank.get_mut(&object_id.into()) {
+                        log::trace!("updated object {:?} mesh", object_id);
+                        object.mesh = object.inner.read().mesh.clone();
+                    }
+                }
+                ObjUpdateCmd::Material { object_id } => {
+                    if let Some(object) = self.bank.get_mut(&object_id.into()) {
+                        log::trace!("updated object {:?} material", object_id);
+                        let inner = object.inner.read();
+                        object.material_uniform = inner
+                            .material
+                            .as_ref()
+                            .map(|mat| mat.create_material_uniform(device));
+                    }
+                }
+                ObjUpdateCmd::Destroy { object_id } => {
+                    log::debug!("destroying {:?}", object_id);
+                    self.bank.destroy(object_id.into());
+                    should_sort = true;
+                }
+            }
+        }
+        should_sort
     }
 }

@@ -1,12 +1,16 @@
 //! Cameras, projections and utilities.
-use async_channel::Sender;
+use std::ops::{Deref, DerefMut};
+
+use async_channel::{unbounded, Receiver, Sender};
 
 use glam::{Mat4, Vec3};
 use renderling_shader::CameraRaw;
 
 use crate::{
+    bank::Bank,
     linkage::create_camera_uniform,
     resources::{Id, Shared},
+    Object, Objects,
 };
 
 /// Camera primitive shared by both user-land and under-the-hood camera data.
@@ -133,7 +137,7 @@ pub struct CameraBuilder<'a> {
     pub(crate) height: f32,
     pub(crate) device: &'a wgpu::Device,
     pub(crate) update_tx: Sender<CameraUpdateCmd>,
-    pub(crate) scene: &'a mut crate::Stage,
+    pub(crate) cameras: &'a mut Cameras,
     pub(crate) inner: CameraInner,
 }
 
@@ -172,11 +176,10 @@ impl<'a> CameraBuilder<'a> {
     }
 
     pub fn build(self) -> Camera {
-        let id = self.scene.new_camera_id();
         let CameraBuilder {
             device,
             update_tx: cmd,
-            scene,
+            cameras,
             width: _,
             height: _,
             inner,
@@ -189,9 +192,144 @@ impl<'a> CameraBuilder<'a> {
             bindgroup,
             inner: inner.clone(),
         };
-        let camera = Camera { id, cmd, inner };
-        scene.cameras[id.0] = Some(camera_data);
-        scene.should_sort = true;
+
+        let id = cameras.bank.insert_with(move |_| camera_data);
+        let camera = Camera {
+            id: id.into(),
+            cmd,
+            inner,
+        };
+        cameras.should_sort = true;
         camera
+    }
+}
+
+impl From<Id<CameraData>> for Id<Camera> {
+    fn from(value: Id<CameraData>) -> Self {
+        Id::new(*value)
+    }
+}
+
+impl From<Id<Camera>> for Id<CameraData> {
+    fn from(value: Id<Camera>) -> Self {
+        Id::new(*value)
+    }
+}
+
+pub struct Cameras {
+    bank: Bank<CameraData>,
+    // all object ids, sorted by distance to camera
+    camera_objects_by_distance: Vec<Vec<Id<Object>>>,
+    // whether we need to sort on the next update
+    should_sort: bool,
+    // queue/channel of updates from cameras to make before the next render
+    pub(crate) camera_update_queue: (Sender<CameraUpdateCmd>, Receiver<CameraUpdateCmd>),
+}
+
+impl Default for Cameras {
+    fn default() -> Self {
+        Self {
+            bank: Default::default(),
+            camera_objects_by_distance: Default::default(),
+            should_sort: Default::default(),
+            camera_update_queue: unbounded(),
+        }
+    }
+}
+
+impl Deref for Cameras {
+    type Target = Bank<CameraData>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.bank
+    }
+}
+
+impl DerefMut for Cameras {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.bank
+    }
+}
+
+impl Cameras {
+    /// Sorts objects by their distance to each camera.
+    ///
+    /// This also generates the lists of objects sorted per camera.
+    pub fn sort_objects(&mut self, objects: &Objects) {
+        log::trace!("sorting objects by distance to camera");
+        self.should_sort = false;
+
+        let mut sorted = vec![];
+        struct Sorter {
+            object_id: Id<Object>,
+            distance: f32,
+        }
+        for camera in self.bank.iter() {
+            if let Some(cam_data) = camera {
+                let cam_pos = cam_data
+                    .inner
+                    .read()
+                    .camera
+                    .view
+                    .project_point3(Vec3::default());
+                let mut objects = objects
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, obj_data)| {
+                        let obj_data = obj_data.as_ref()?;
+                        let object_id = Id::new(i);
+                        let distance = obj_data.world_position.distance(cam_pos);
+                        Some(Sorter {
+                            object_id,
+                            distance,
+                        })
+                    })
+                    .collect::<Vec<_>>();
+                // we want to sort back to front
+                objects.sort_by(|a, b| b.distance.total_cmp(&a.distance));
+                sorted.push(objects.into_iter().map(|s| s.object_id).collect::<Vec<_>>());
+            }
+        }
+        self.camera_objects_by_distance = sorted;
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = Option<&CameraData>> {
+        self.bank.iter()
+    }
+
+    pub fn update(
+        &mut self,
+        device: &wgpu::Device,
+        camera_objects_need_sorting: bool,
+        objects: &Objects,
+    ) {
+        self.should_sort = self.should_sort || camera_objects_need_sorting;
+        while let Ok(cmd) = self.camera_update_queue.1.try_recv() {
+            match cmd {
+                CameraUpdateCmd::Destroy { camera_id } => {
+                    log::debug!("destroying {:?}", camera_id);
+                    self.bank.destroy(camera_id.into());
+                }
+                CameraUpdateCmd::Update { camera_id } => {
+                    self.should_sort = true;
+                    if let Some(camera_data) = self.bank.get_mut(&camera_id.into()) {
+                        let mut inner = camera_data.inner.write();
+                        let (buffer, bindgroup) =
+                            create_camera_uniform(device, &inner.camera, "Renderling::update");
+                        inner.dirty_uniform = false;
+                        camera_data.buffer = buffer;
+                        camera_data.bindgroup = bindgroup;
+                    }
+                }
+            }
+        }
+
+        if self.should_sort {
+            self.sort_objects(objects);
+        }
+    }
+
+    pub fn get_object_ids_sorted_by_distance_to_camera(&self, camera: &Camera) -> &Vec<Id<Object>> {
+        &self.camera_objects_by_distance[camera.id.0]
     }
 }

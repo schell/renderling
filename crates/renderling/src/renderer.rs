@@ -1,21 +1,15 @@
 //! Builds the UI pipeline and manages resources.
-use async_channel::{Sender, Receiver, unbounded};
-use glam::Vec3;
 use moongraph::Graph;
 use snafu::prelude::*;
 use std::{
     marker::PhantomData,
-    sync::{
-        Arc, RwLock,
-    },
+    sync::{Arc, RwLock},
 };
 
+use crate::linkage::ObjectDraw;
 use crate::{
-    camera::*,
-    linkage::{create_camera_uniform, ObjectDraw},
-    resources::*,
-    AnyMaterial, AnyMaterialUniform, AnyPipeline, Lights, Material, ObjUpdateCmd,
-    Object, ObjectBuilder, ObjectData, Pipeline, Transform, WgpuState,
+    camera::*, resources::*, AnyMaterial, AnyMaterialUniform, AnyPipeline, Lights, Material,
+    Object, ObjectBuilder, Objects, Pipeline, Transform, WgpuState,
 };
 
 #[derive(Debug, Snafu)]
@@ -62,130 +56,18 @@ impl Renderer {
     }
 }
 
-#[derive(Default)]
-pub(crate) struct Stage {
-    // Lighting
-    pub lights: Lights,
-    // for creating camera ids
-    camera_id_bank: BankOfIds<Camera>,
-    // for creating objects
-    object_id_bank: BankOfIds<Object>,
-    // all cameras, indexed by Id
-    pub cameras: Vec<Option<CameraData>>,
-    // all object ids, sorted by distance to camera
-    camera_objects_by_distance: Vec<Vec<Id<Object>>>,
-    // whether we need to sort on the next update
-    pub should_sort: bool,
-    // all objects, indexed by Id
-    pub objects: Vec<Option<ObjectData>>,
-}
-
-impl Stage {
-    pub fn new_camera_id(&mut self) -> Id<Camera> {
-        let id = self.camera_id_bank.dequeue();
-        if self.cameras.len() < id.0 + 1 {
-            self.cameras.resize_with(id.0 + 1, || None);
-        }
-        id
-    }
-
-    pub fn get_camera_mut(&mut self, camera_id: &Id<Camera>) -> Option<&mut CameraData> {
-        let may_cam = self.cameras.get_mut(camera_id.0)?;
-        may_cam.as_mut()
-    }
-
-    pub fn get_camera(&self, camera_id: &Id<Camera>) -> Option<&CameraData> {
-        let may_cam = self.cameras.get(camera_id.0)?;
-        may_cam.as_ref()
-    }
-
-    pub fn destroy_camera(&mut self, camera_id: Id<Camera>) {
-        log::trace!("destroying and recycling camera {:?}", camera_id);
-        self.cameras[camera_id.0] = None;
-        self.camera_objects_by_distance[camera_id.0] = vec![];
-        self.camera_id_bank.recycle(camera_id);
-    }
-
-    pub fn new_object_id(&mut self) -> Id<Object> {
-        let id = self.object_id_bank.dequeue();
-        if self.objects.len() < id.0 + 1 {
-            self.objects.resize_with(id.0 + 1, || None);
-        }
-        id
-    }
-
-    pub fn get_object_mut(&mut self, object_id: &Id<Object>) -> Option<&mut ObjectData> {
-        let may_dat = self.objects.get_mut(object_id.0)?;
-        may_dat.as_mut()
-    }
-
-    pub fn get_object(&self, object_id: &Id<Object>) -> Option<&ObjectData> {
-        let may_dat = self.objects.get(object_id.0)?;
-        may_dat.as_ref()
-    }
-
-    pub fn destroy_object(&mut self, object_id: Id<Object>) {
-        if let Some(_object) = self.objects[object_id.0].take() {
-            self.object_id_bank.recycle(object_id);
-        }
-    }
-
-    /// Sorts objects by their distance to each camera.
-    ///
-    /// This also generates the lists of objects sorted per camera.
-    pub fn sort_objects(&mut self) {
-        log::trace!("sorting objects by distance to camera");
-        self.should_sort = false;
-
-        let mut sorted = vec![];
-        struct Sorter {
-            object_id: Id<Object>,
-            distance: f32,
-        }
-        for camera in self.cameras.iter() {
-            if let Some(cam_data) = camera {
-                let cam_pos = cam_data
-                    .inner
-                    .read()
-                    .camera
-                    .view
-                    .project_point3(Vec3::default());
-                let mut objects = self
-                    .objects
-                    .iter()
-                    .enumerate()
-                    .filter_map(|(i, obj_data)| {
-                        let obj_data = obj_data.as_ref()?;
-                        let object_id = Id::new(i);
-                        let distance = obj_data.world_position.distance(cam_pos);
-                        Some(Sorter {
-                            object_id,
-                            distance,
-                        })
-                    })
-                    .collect::<Vec<_>>();
-                // we want to sort back to front
-                objects.sort_by(|a, b| b.distance.total_cmp(&a.distance));
-                sorted.push(objects.into_iter().map(|s| s.object_id).collect::<Vec<_>>());
-            }
-        }
-        self.camera_objects_by_distance = sorted;
-    }
-}
-
 /// A renderer typed by its pipeline.
 ///
 /// `Renderling` manages GPU resources for cameras, materials and objects.
 pub struct Renderling<P: Pipeline> {
-    // queue/channel of updates from objects to make before the next render
-    pub(crate) object_update_queue: (Sender<ObjUpdateCmd>, Receiver<ObjUpdateCmd>),
-    // queue/channel of updates from cameras to make before the next render
-    camera_update_queue: (Sender<CameraUpdateCmd>, Receiver<CameraUpdateCmd>),
-
     pub(crate) device: Arc<wgpu::Device>,
     pub(crate) queue: Arc<wgpu::Queue>,
     pub(crate) size: Arc<RwLock<(u32, u32)>>,
 
+    // Lighting
+    pub(crate) lights: Lights,
+    pub(crate) cameras: Cameras,
+    pub(crate) objects: Objects,
     // Built shader render pipeline
     pipeline: AnyPipeline,
     // default material to use when there is no other
@@ -200,8 +82,6 @@ pub struct Renderling<P: Pipeline> {
     light_bindgroup_index: u32,
     // The index of the material's bindgroup
     material_bindgroup_index: u32,
-    // The entire scene - all cameras and objects
-    pub(crate) stage: Stage,
 
     _phantom: PhantomData<P>,
 }
@@ -218,12 +98,12 @@ impl<P: Pipeline> Renderling<P> {
             queue: wgpu_state.queue.clone(),
             size: wgpu_state.size.clone(),
             pipeline: AnyPipeline::new::<P>(pipeline.into()),
-            object_update_queue: unbounded(),
-            camera_update_queue: unbounded(),
+            cameras: Cameras::default(),
+            objects: Objects::default(),
+            lights: Lights::default(),
             meshes_have_normal_matrix_attribute,
             default_material: AnyMaterial::new::<M>(material.into()),
             default_material_uniform: None,
-            stage: Default::default(),
             camera_bindgroup_index: 0,
             material_bindgroup_index: 1,
             light_bindgroup_index: 2,
@@ -240,8 +120,8 @@ impl<P: Pipeline> Renderling<P> {
             width: width as f32,
             height: height as f32,
             device: &self.device,
-            update_tx: self.camera_update_queue.0.clone(),
-            scene: &mut self.stage,
+            update_tx: self.cameras.camera_update_queue.0.clone(),
+            cameras: &mut self.cameras,
         }
     }
 
@@ -249,18 +129,14 @@ impl<P: Pipeline> Renderling<P> {
     ///
     /// This will always have at least one camera in it.
     pub fn cameras(&self) -> impl Iterator<Item = Camera> + '_ {
-        self.stage
-            .cameras
-            .iter()
-            .enumerate()
-            .filter_map(|(i, data)| {
-                let data = data.as_ref()?;
-                Some(Camera {
-                    id: Id::new(i),
-                    inner: data.inner.clone(),
-                    cmd: self.camera_update_queue.0.clone(),
-                })
+        self.cameras.iter().enumerate().filter_map(|(i, data)| {
+            let data = data.as_ref()?;
+            Some(Camera {
+                id: Id::new(i),
+                inner: data.inner.clone(),
+                cmd: self.cameras.camera_update_queue.0.clone(),
             })
+        })
     }
 
     /// Retrieves the default camera.
@@ -278,9 +154,6 @@ impl<P: Pipeline> Renderling<P> {
     ///
     /// The builder can be used to customize the object befoure building it.
     ///
-    /// If no camera is specified with `ObjectBuilder::with_camera`, the camera
-    /// with first rendering priority will be selected, if available.
-    ///
     /// If no material is provided, the renderling's default material will be
     /// used.
     ///
@@ -295,93 +168,33 @@ impl<P: Pipeline> Renderling<P> {
             local_transforms: vec![],
             generate_normal_matrix: self.meshes_have_normal_matrix_attribute,
             is_visible: true,
-            update_tx: self.object_update_queue.0.clone(),
+            update_tx: self.objects.object_update_queue.0.clone(),
             device: &self.device,
-            scene: &mut self.stage,
+            objects: &mut self.objects,
         }
     }
 
     pub fn new_point_light(&mut self) -> crate::PointLightBuilder {
-        crate::PointLightBuilder::new(&mut self.stage.lights)
+        crate::PointLightBuilder::new(&mut self.lights)
     }
 
     pub fn new_spot_light(&mut self) -> crate::SpotLightBuilder {
-        crate::SpotLightBuilder::new(&mut self.stage.lights)
+        crate::SpotLightBuilder::new(&mut self.lights)
     }
 
     pub fn new_directional_light(&mut self) -> crate::DirectionalLightBuilder {
-        crate::DirectionalLightBuilder::new(&mut self.stage.lights)
+        crate::DirectionalLightBuilder::new(&mut self.lights)
     }
 
     /// Conduct all updates made from outside the renderling.
     ///
     /// This must be called in order to display any changes.
     pub fn update(&mut self) -> Result<(), RenderlingError> {
-        while let Ok(cmd) = self.object_update_queue.1.try_recv() {
-            match cmd {
-                ObjUpdateCmd::Transform { object_id } => {
-                    if let Some(object) = self.stage.get_object_mut(&object_id) {
-                        object.update_world_transform(
-                            &self.queue,
-                            self.meshes_have_normal_matrix_attribute,
-                        );
-                        // this object's transform changed, so we should resort the cameras
-                        self.stage.should_sort = true;
-                    }
-                }
-                ObjUpdateCmd::Mesh { object_id } => {
-                    if let Some(object) = self.stage.get_object_mut(&object_id) {
-                        log::trace!("updated object {:?} mesh", object_id);
-                        object.mesh = object.inner.read().mesh.clone();
-                    }
-                }
-                ObjUpdateCmd::Material { object_id } => {
-                    if let Some(object) = self.stage.get_object_mut(&object_id) {
-                        log::trace!("updated object {:?} material", object_id);
-                        let inner = object.inner.read();
-                        object.material_uniform = inner
-                            .material
-                            .as_ref()
-                            .map(|mat| mat.create_material_uniform(&self.device));
-                    }
-                }
-                ObjUpdateCmd::Destroy { object_id } => {
-                    log::debug!("destroying {:?}", object_id);
-                    self.stage.destroy_object(object_id);
-                    self.stage.should_sort = true;
-                }
-            }
-        }
-
-        while let Ok(cmd) = self.camera_update_queue.1.try_recv() {
-            match cmd {
-                CameraUpdateCmd::Destroy { camera_id } => {
-                    log::debug!("destroying {:?}", camera_id);
-                    self.stage.destroy_camera(camera_id);
-                }
-                CameraUpdateCmd::Update { camera_id } => {
-                    self.stage.should_sort = true;
-                    if let Some(camera_data) = self.stage.get_camera_mut(&camera_id) {
-                        let mut inner = camera_data.inner.write();
-                        let (buffer, bindgroup) = create_camera_uniform(
-                            &self.device,
-                            &inner.camera,
-                            "Renderling::update",
-                        );
-                        inner.dirty_uniform = false;
-                        camera_data.buffer = buffer;
-                        camera_data.bindgroup = bindgroup;
-                    }
-                }
-            }
-        }
-
-        if self.stage.should_sort {
-            self.stage.sort_objects();
-        }
-
-        // update lights
-        self.stage.lights.update(&self.device, &self.queue);
+        // lights, camera, objects!
+        self.lights.update(&self.device, &self.queue);
+        let camera_objects_need_sorting = self.objects.update(&self.device, &self.queue);
+        self.cameras
+            .update(&self.device, camera_objects_need_sorting, &self.objects);
 
         // update default material
         if self.default_material_uniform.is_none() {
@@ -399,7 +212,8 @@ impl<P: Pipeline> Renderling<P> {
     }
 
     pub fn get_object_ids_sorted_by_distance_to_camera(&self, camera: &Camera) -> &Vec<Id<Object>> {
-        &self.stage.camera_objects_by_distance[camera.id.0]
+        self.cameras
+            .get_object_ids_sorted_by_distance_to_camera(camera)
     }
 
     /// Conduct a full render pass into the given textures using the given
@@ -432,18 +246,21 @@ impl<P: Pipeline> Renderling<P> {
             .context(MissingDefaultMaterialSnafu)?;
 
         // bind the lights to our shader
-        if let Some(lights_uniform) = self.stage.lights.uniform() {
+        if let Some(lights_uniform) = self.lights.uniform() {
             render_pass.set_bind_group(self.light_bindgroup_index, &lights_uniform.bindgroup, &[]);
         } else {
             log::warn!("no lights to bind");
         }
-        let camera_data = self.stage.get_camera(camera).context(MissingCameraSnafu)?;
+        let camera_data = self
+            .cameras
+            .get(&Id::new(**camera))
+            .context(MissingCameraSnafu)?;
         log::trace!("rendering camera {:?}", camera);
         // bind the camera to our shader
         render_pass.set_bind_group(self.camera_bindgroup_index, &camera_data.bindgroup, &[]);
 
         for object_id in objects {
-            let object = if let Some(object) = self.stage.get_object(object_id) {
+            let object = if let Some(object) = self.objects.get(&Id::new(**object_id)) {
                 if !object.inner.read().is_visible {
                     continue;
                 }
@@ -515,16 +332,15 @@ impl<P: Pipeline> Renderling<P> {
         depth_texture_view: &wgpu::TextureView,
         camera: &Camera,
     ) -> Result<(), RenderlingError> {
-        if let Some(object_ids) = self.stage.camera_objects_by_distance.get(camera.id.0) {
-            self.render_object_ids(
-                frame_texture_view,
-                depth_texture_view,
-                &camera.id,
-                object_ids.iter(),
-            )
-        } else {
-            Ok(())
-        }
+        let object_ids = self
+            .cameras
+            .get_object_ids_sorted_by_distance_to_camera(camera);
+        self.render_object_ids(
+            frame_texture_view,
+            depth_texture_view,
+            &camera.id,
+            object_ids.iter(),
+        )
     }
 
     /// Conduct a full render pass into the given textures.
