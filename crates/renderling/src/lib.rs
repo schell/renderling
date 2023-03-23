@@ -41,6 +41,7 @@ pub use ui::*;
 pub mod linkage;
 
 mod camera;
+mod bank;
 mod gltf_support;
 mod light;
 mod material;
