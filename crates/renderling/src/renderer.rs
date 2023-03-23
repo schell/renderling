@@ -6,7 +6,7 @@ use std::{
     sync::{Arc, RwLock},
 };
 
-use crate::linkage::ObjectDraw;
+use crate::{linkage::ObjectDraw, Pipelines};
 use crate::{
     camera::*, resources::*, AnyMaterial, AnyMaterialUniform, AnyPipeline, Lights, Material,
     Object, ObjectBuilder, Objects, Pipeline, Transform, WgpuState,
@@ -56,58 +56,31 @@ impl Renderer {
     }
 }
 
-/// A renderer typed by its pipeline.
-///
-/// `Renderling` manages GPU resources for cameras, materials and objects.
-pub struct Renderling<P: Pipeline> {
+/// A graph-based renderer that manages GPU resources for cameras, materials and objects.
+pub struct Renderling {
     pub(crate) device: Arc<wgpu::Device>,
     pub(crate) queue: Arc<wgpu::Queue>,
     pub(crate) size: Arc<RwLock<(u32, u32)>>,
 
-    // Lighting
     pub(crate) lights: Lights,
     pub(crate) cameras: Cameras,
     pub(crate) objects: Objects,
-    // Built shader render pipeline
-    pipeline: AnyPipeline,
-    // default material to use when there is no other
-    default_material: AnyMaterial,
-    // default material bindgroup
-    default_material_uniform: Option<AnyMaterialUniform>,
-    // whether object meshes have a 3x3 normal matrix attribute (defaults to `true`)
-    meshes_have_normal_matrix_attribute: bool,
-    // The index of the camera's bindgroup
-    camera_bindgroup_index: u32,
-    // The index of the lights's bindgroup
-    light_bindgroup_index: u32,
-    // The index of the material's bindgroup
-    material_bindgroup_index: u32,
 
-    _phantom: PhantomData<P>,
+    pub(crate) pipelines: Pipelines,
 }
 
-impl<P: Pipeline> Renderling<P> {
+impl Renderling {
     pub fn new<M: Material>(
         wgpu_state: &crate::WgpuState,
-        pipeline: impl Into<Arc<P>>,
-        material: impl Into<Arc<M>>,
-        meshes_have_normal_matrix_attribute: bool,
     ) -> Self {
         let r = Self {
             device: wgpu_state.device.clone(),
             queue: wgpu_state.queue.clone(),
             size: wgpu_state.size.clone(),
-            pipeline: AnyPipeline::new::<P>(pipeline.into()),
             cameras: Cameras::default(),
             objects: Objects::default(),
             lights: Lights::default(),
-            meshes_have_normal_matrix_attribute,
-            default_material: AnyMaterial::new::<M>(material.into()),
-            default_material_uniform: None,
-            camera_bindgroup_index: 0,
-            material_bindgroup_index: 1,
-            light_bindgroup_index: 2,
-            _phantom: PhantomData,
+            pipelines: Pipelines::default(),
         };
         r
     }

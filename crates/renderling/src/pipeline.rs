@@ -1,31 +1,30 @@
 //! Pipeline types and utilities.
-use std::{any::Any, sync::Arc};
 
-/// Defines the operations a pipeline can do within a `Renderling`.
-pub trait Pipeline: Any + Send + Sync + 'static {
-    fn get_render_pipeline(&self) -> &wgpu::RenderPipeline;
+use crate::bank::Bank;
+
+pub struct Pipeline {
+    pipeline: wgpu::RenderPipeline,
+    // default material to use when there is no other
+    default_material: crate::AnyMaterial,
+    // default material bindgroup
+    default_material_uniform: Option<crate::AnyMaterialUniform>,
+    // whether object meshes have a 3x3 normal matrix attribute (defaults to `true`)
+    meshes_have_normal_matrix_attribute: bool,
+    // The index of the camera's bindgroup
+    camera_bindgroup_index: u32,
+    // The index of the lights's bindgroup
+    light_bindgroup_index: u32,
+    // The index of the material's bindgroup
+    material_bindgroup_index: u32,
 }
 
-/// A type-erased shader pipeline.
-#[derive(Clone)]
-pub struct AnyPipeline {
-    inner: Arc<dyn Pipeline>,
-}
-
-impl std::fmt::Debug for AnyPipeline {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("AnyPipeline").field("inner", &"_").finish()
+impl Pipeline {
+    fn get_render_pipeline(&self) -> &wgpu::RenderPipeline {
+        &self.pipeline
     }
 }
 
-impl AnyPipeline {
-    pub fn new<T: Pipeline>(inner: impl Into<Arc<T>>) -> Self {
-        Self {
-            inner: inner.into(),
-        }
-    }
-
-    pub fn get_render_pipeline(&self) -> &wgpu::RenderPipeline {
-        self.inner.get_render_pipeline()
-    }
+#[derive(Default)]
+pub struct Pipelines {
+    bank: Bank<Pipeline>
 }
