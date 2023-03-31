@@ -1,6 +1,6 @@
 [workspace]
 members = [
-    "crates/example",
+    #"crates/example",
     "crates/moongraph",
     "crates/moongraph-macros",
     "crates/renderling",

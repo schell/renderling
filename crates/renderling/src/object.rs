@@ -1,8 +1,13 @@
 //! Renderable things with positions, transformations, meshes and materials.
-use std::{sync::Arc, ops::{Deref, DerefMut}};
+use std::{
+    ops::{Deref, DerefMut},
+    sync::Arc,
+};
 
 use async_channel::{unbounded, Receiver, Sender};
 use glam::{Mat3, Mat4, Quat, Vec3};
+use moongraph::{Read, Write};
+use rustc_hash::{FxHashMap, FxHashSet};
 use snafu::prelude::*;
 use wgpu::util::DeviceExt;
 
@@ -10,19 +15,31 @@ use crate::{
     bank::Bank,
     linkage::{ObjectDraw, ShaderObject},
     resources::Id,
-    LocalTransform, Shared, WorldTransform,
+    CamerasNeedSorting, LocalTransform, Pipeline, Renderling, Shared, WorldTransform,
 };
 
 pub(crate) enum ObjUpdateCmd {
     // Update the given object's transform
-    Transform { object_id: Id<Object> },
+    Transform {
+        object_id: Id<Object>,
+    },
     // Update the given object's mesh
-    Mesh { object_id: Id<Object> },
+    Mesh {
+        object_id: Id<Object>,
+        mesh: Arc<crate::Mesh>,
+    },
     // Update the given object's mesh
-    Material { object_id: Id<Object> },
+    Material {
+        object_id: Id<Object>,
+    },
     // Destroy this object
-    Destroy { object_id: Id<Object> },
+    Destroy {
+        object_id: Id<Object>,
+    },
 }
+
+#[derive(Debug, Snafu)]
+pub enum ObjectError {}
 
 #[derive(Debug, Snafu)]
 pub enum ObjectBuilderError {
@@ -31,16 +48,12 @@ pub enum ObjectBuilderError {
 }
 
 pub struct ObjectBuilder<'a> {
+    pub(crate) inner: ObjectInner,
     pub(crate) mesh: Option<Arc<crate::Mesh>>,
-    pub(crate) material: Option<crate::AnyMaterial>,
-    pub(crate) local_transform: crate::LocalTransform,
-    pub(crate) local_transforms: Vec<crate::LocalTransform>,
     pub(crate) children: Vec<&'a Object>,
     pub(crate) generate_normal_matrix: bool,
-    pub(crate) is_visible: bool,
-    pub(crate) update_tx: Sender<ObjUpdateCmd>,
-    pub(crate) device: &'a wgpu::Device,
-    pub(crate) objects: &'a mut Objects,
+    pub(crate) properties: FxHashMap<String, serde_json::Value>,
+    pub(crate) renderer: &'a mut Renderling,
 }
 
 impl<'a> ObjectBuilder<'a> {
@@ -53,12 +66,12 @@ impl<'a> ObjectBuilder<'a> {
         self,
         mesh_builder: crate::MeshBuilder<Vertex>,
     ) -> Self {
-        let mesh = mesh_builder.build(Some("object-builder-mesh"), self.device);
+        let mesh = mesh_builder.build(Some("object-builder-mesh"), self.renderer.get_device());
         self.with_mesh(mesh)
     }
 
     pub fn with_transform(mut self, t: crate::LocalTransform) -> Self {
-        self.local_transform = t;
+        self.inner.local_transforms[0] = t;
         self
     }
 
@@ -66,27 +79,27 @@ impl<'a> ObjectBuilder<'a> {
     ///
     /// This object will be rendered once with every transform using instancing.
     pub fn add_transform(mut self, t: crate::LocalTransform) -> Self {
-        self.local_transforms.push(t);
+        self.inner.local_transforms.push(t);
         self
     }
 
     pub fn with_position(mut self, p: Vec3) -> Self {
-        self.local_transform.position = Vec3::new(p.x, p.y, p.z);
+        self.inner.local_transforms[0].position = Vec3::new(p.x, p.y, p.z);
         self
     }
 
     pub fn with_rotation(mut self, rotation: Quat) -> Self {
-        self.local_transform.rotation = rotation;
+        self.inner.local_transforms[0].rotation = rotation;
         self
     }
 
     pub fn with_scale(mut self, scale: Vec3) -> Self {
-        self.local_transform.scale = scale;
+        self.inner.local_transforms[0].scale = scale;
         self
     }
 
     pub fn with_material<T: crate::Material>(mut self, material: impl Into<Arc<T>>) -> Self {
-        self.material = Some(crate::AnyMaterial::new(material));
+        self.inner.material = Some(crate::AnyMaterial::new(material));
         self
     }
 
@@ -101,7 +114,7 @@ impl<'a> ObjectBuilder<'a> {
     }
 
     pub fn with_is_visible(mut self, is_visible: bool) -> Self {
-        self.is_visible = is_visible;
+        self.inner.is_visible = is_visible;
         self
     }
 
@@ -110,45 +123,50 @@ impl<'a> ObjectBuilder<'a> {
         self
     }
 
+    pub fn with_property(mut self, name: impl Into<String>, property: serde_json::Value) -> Self {
+        self.properties.insert(name.into(), property);
+        self
+    }
+
     pub fn build(self) -> Result<Object, ObjectBuilderError> {
-        let material_uniform = self
+        let ObjectBuilder {
+            mesh,
+            inner,
+            children,
+            generate_normal_matrix,
+            properties,
+            renderer,
+        } = self;
+        let material_uniform = inner
             .material
             .as_ref()
-            .map(|mat| mat.create_material_uniform(self.device));
-        let position = self.local_transform.position;
-        let local_transforms = std::iter::once(self.local_transform)
-            .chain(self.local_transforms)
-            .collect::<Vec<_>>();
-        let inner = ObjectInner {
-            // parent is set to `Some` when/if the parent is built, or updated
-            parent: None,
-            children: vec![],
-            mesh: self.mesh.clone(),
-            material: self.material,
-            local_transforms,
-            is_visible: self.is_visible,
-        };
+            .map(|mat| mat.create_material_uniform(renderer.get_device()));
+        let position = inner.local_transforms[0].position;
+        let objects = renderer.get_objects_mut();
+        let update_queue = objects.update_queue();
         let inner = Shared::new(inner);
-        let mut children = vec![];
-        for child in self.children.into_iter() {
-            child.inner.write().parent = Some(ParentObject(inner.clone()));
-            children.push(ChildObject(child.id));
-            self.update_tx
-                .try_send(ObjUpdateCmd::Transform {
-                    object_id: child.id,
-                })
-                .unwrap();
-        }
+        let children = children
+            .into_iter()
+            .map(|child| {
+                child.inner.write().parent = Some(ParentObject(inner.clone()));
+                update_queue
+                    .try_send(ObjUpdateCmd::Transform {
+                        object_id: child.id,
+                    })
+                    .unwrap();
+                ChildObject(child.id)
+            })
+            .collect::<Vec<_>>();
         inner.write().children = children;
         let instances = inner
             .read()
-            .new_world_transforms_buffer(self.device, self.generate_normal_matrix);
+            .new_world_transforms_buffer(renderer.get_device(), self.generate_normal_matrix);
 
-        let id = self.objects.bank.insert_with({
+        let id = renderer.get_objects_mut().bank.insert_with({
             let inner = inner.clone();
             move |id| ObjectData {
                 id: id.into(),
-                mesh: self.mesh,
+                mesh,
                 material_uniform,
                 instances,
                 generate_normal_matrix: self.generate_normal_matrix,
@@ -160,7 +178,7 @@ impl<'a> ObjectBuilder<'a> {
         Ok(Object {
             id: id.into(),
             inner,
-            cmd: self.update_tx,
+            cmd: update_queue,
         })
     }
 }
@@ -175,12 +193,27 @@ pub(crate) struct ChildObject(Id<Object>);
 /// any time and data that has a downstream representation in `wgpu`, which is
 /// created/modified in `Renderling::update`.
 pub(crate) struct ObjectInner {
-    pub(crate) mesh: Option<Arc<crate::Mesh>>,
     pub(crate) material: Option<crate::AnyMaterial>,
     pub(crate) parent: Option<ParentObject>,
     pub(crate) children: Vec<ChildObject>,
+    pub(crate) pipeline_membership: FxHashSet<Id<Pipeline>>,
+    pub(crate) properties: FxHashMap<String, serde_json::Value>,
     pub(crate) is_visible: bool,
     pub(crate) local_transforms: Vec<crate::LocalTransform>,
+}
+
+impl Default for ObjectInner {
+    fn default() -> Self {
+        Self {
+            material: Default::default(),
+            parent: Default::default(),
+            children: Default::default(),
+            properties: Default::default(),
+            pipeline_membership: Default::default(),
+            is_visible: true,
+            local_transforms: vec![LocalTransform::default()],
+        }
+    }
 }
 
 impl ObjectInner {
@@ -311,6 +344,24 @@ impl Object {
             .unwrap();
     }
 
+    /// Returns whether this object is rendered by the pipeline with the given
+    /// id.
+    pub fn is_member_of_pipeline(&self, pipeline: &Id<Pipeline>) -> bool {
+        self.inner.read().pipeline_membership.contains(pipeline)
+    }
+
+    /// Update the pipeline membership.
+    pub fn add_to_pipeline(&self, pipeline: Id<Pipeline>) {
+        let mut inner = self.inner.write();
+        inner.pipeline_membership.insert(pipeline);
+    }
+
+    /// Update the pipeline membership.
+    pub fn remove_from_pipeline(&self, pipeline: &Id<Pipeline>) {
+        let mut inner = self.inner.write();
+        inner.pipeline_membership.remove(pipeline);
+    }
+
     /// Get the current local transformation of this object.
     pub fn get_transform(&self) -> LocalTransform {
         self.inner.read().local_transforms[0].clone()
@@ -339,10 +390,11 @@ impl Object {
 
     /// Update the mesh of this object.
     pub fn set_mesh(&self, mesh: impl Into<Arc<crate::Mesh>>) {
-        let mut inner = self.inner.write();
-        inner.mesh = Some(mesh.into());
         self.cmd
-            .try_send(ObjUpdateCmd::Mesh { object_id: self.id })
+            .try_send(ObjUpdateCmd::Mesh {
+                object_id: self.id,
+                mesh: mesh.into(),
+            })
             .unwrap();
     }
 
@@ -403,6 +455,8 @@ impl Object {
 }
 
 /// Underlying data used by `wgpu` to render an object.
+///
+/// Contains `ObjectInner` as well as additional fields needed for rendering.
 pub struct ObjectData {
     pub(crate) id: Id<Object>,
     pub(crate) mesh: Option<Arc<crate::Mesh>>,
@@ -437,6 +491,10 @@ impl ObjectData {
             draw,
         };
         Some(object)
+    }
+
+    pub fn is_member_of_pipeline(&self, pipeline: &Id<Pipeline>) -> bool {
+        self.inner.read().pipeline_membership.contains(pipeline)
     }
 
     pub fn update_world_transform(&mut self, queue: &wgpu::Queue) {
@@ -497,9 +555,19 @@ impl Objects {
         self.bank.iter()
     }
 
+    pub fn iter_with_ids<'a>(
+        &self,
+        ids: impl IntoIterator<Item = &'a Id<Object>>,
+    ) -> impl Iterator<Item = &ObjectData> {
+        ids.into_iter().copied().filter_map(|id| {
+            self.bank.get(&id.into())
+        })
+    }
+
     /// Update any object properties that have changed in userland.
     ///
-    /// Returns whether the cameras need to have their objects resorted because of any updates.
+    /// Returns whether the cameras need to have their objects resorted because
+    /// of any updates.
     pub fn update(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) -> bool {
         let mut should_sort = false;
         while let Ok(cmd) = self.object_update_queue.1.try_recv() {
@@ -511,10 +579,11 @@ impl Objects {
                         should_sort = true;
                     }
                 }
-                ObjUpdateCmd::Mesh { object_id } => {
+                ObjUpdateCmd::Mesh { object_id, mesh } => {
                     if let Some(object) = self.bank.get_mut(&object_id.into()) {
+                        object.mesh = Some(mesh);
                         log::trace!("updated object {:?} mesh", object_id);
-                        object.mesh = object.inner.read().mesh.clone();
+                        should_sort = true;
                     }
                 }
                 ObjUpdateCmd::Material { object_id } => {
@@ -536,4 +605,41 @@ impl Objects {
         }
         should_sort
     }
+
+    pub(crate) fn update_queue(&self) -> Sender<ObjUpdateCmd> {
+        self.object_update_queue.0.clone()
+    }
+
+    pub fn objects_with_property<'a>(
+        &'a self,
+        name: impl AsRef<str> + 'a,
+    ) -> impl Iterator<Item = &'a ObjectData> + 'a {
+        self.bank.iter().filter_map(move |obj| {
+            let obj = obj.as_ref()?;
+            if obj.inner.read().properties.contains_key(name.as_ref()) {
+                Some(*obj)
+            } else {
+                None
+            }
+        })
+    }
 }
+
+#[derive(moongraph::Edges)]
+pub struct ObjectUpdate {
+    pub objects: Write<Objects>,
+    pub device: Read<crate::Device>,
+    pub queue: Read<crate::Queue>,
+}
+
+impl ObjectUpdate {
+    /// Graph node that runs all object updates.
+    pub fn run(mut self) -> Result<(CamerasNeedSorting,), ObjectError> {
+        Ok((CamerasNeedSorting(
+            self.objects.update(&self.device, &self.queue),
+        ),))
+    }
+}
+
+/// A render graph resource to use as the objects to render.
+pub struct RenderObjects(pub Vec<Id<Object>>);

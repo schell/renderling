@@ -10,7 +10,7 @@ use renderling::{
 pub fn historical(gpu: &mut WgpuState) -> impl FnMut(&mut WgpuState) {
     let window_size = gpu.get_size();
     // Get our ui renderling
-    let mut ui: Renderling<UiPipeline> = gpu.new_ui_renderling();
+    let mut ui: Renderling = gpu.new_ui_renderling();
 
     let _ui_camera = ui.new_camera().with_projection_ortho2d().build();
     let _triangle = ui

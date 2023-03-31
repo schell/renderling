@@ -1,0 +1,78 @@
+digraph my_graph {
+    subgraph cluster_0 {
+        label="batch_0";
+
+        node_0;
+    }
+
+    subgraph cluster_1 {
+        label="batch_1";
+
+        node_1;
+    }
+
+    subgraph cluster_2 {
+        label="batch_2";
+
+        node_2;
+    }
+
+    subgraph cluster_3 {
+        label="batch_3";
+
+        node_3;
+    }
+
+    subgraph cluster_4 {
+        label="batch_4";
+
+        node_4;
+    }
+
+    subgraph cluster_5 {
+        label="batch_5";
+
+        node_5;
+    }
+
+    subgraph cluster_6 {
+        label="batch_6";
+
+        node_6;
+    }
+
+    node_0[label="object_update"];
+    node_1[label="camera_update"];
+    node_2[label="create_frame"];
+    node_3[label="clear_frame_and_depth"];
+    node_4[label="ui_render"];
+    node_5[label="copy_frame_to_post"];
+    node_6[label="present_frame"];
+    ghost_node[label="required_resources"][style="dotted"];
+    ghost_node -> node_2[label="renderling::state::RenderTarget"][color="limegreen"];
+    ghost_node -> node_4[label="renderling::node::UiRenderCamera"][color="limegreen"];
+    ghost_node -> node_0[label="renderling::renderer::Device"][color="limegreen"];
+    ghost_node -> node_1[label="renderling::renderer::Device"][color="limegreen"];
+    ghost_node -> node_3[label="renderling::renderer::Device"][color="limegreen"];
+    ghost_node -> node_4[label="renderling::renderer::Device"][color="limegreen"];
+    ghost_node -> node_5[label="renderling::renderer::Device"][color="limegreen"];
+    ghost_node -> node_4[label="renderling::ui::UiPipeline"][color="limegreen"];
+    ghost_node -> node_1[label="renderling::camera::Cameras"][color="mediumblue"];
+    ghost_node -> node_4[label="renderling::camera::Cameras"][color="limegreen"];
+    ghost_node -> node_0[label="renderling::object::Objects"][color="mediumblue"];
+    ghost_node -> node_1[label="renderling::object::Objects"][color="limegreen"];
+    ghost_node -> node_4[label="renderling::object::Objects"][color="limegreen"];
+    ghost_node -> node_5[label="renderling::renderer::ScreenSize"][color="limegreen"];
+    ghost_node -> node_3[label="renderling::renderer::DepthTexture"][color="limegreen"];
+    ghost_node -> node_4[label="renderling::renderer::DepthTexture"][color="limegreen"];
+    ghost_node -> node_3[label="renderling::renderer::BackgroundColor"][color="limegreen"];
+    ghost_node -> node_0[label="renderling::renderer::Queue"][color="limegreen"];
+    ghost_node -> node_3[label="renderling::renderer::Queue"][color="limegreen"];
+    ghost_node -> node_4[label="renderling::renderer::Queue"][color="limegreen"];
+    ghost_node -> node_5[label="renderling::renderer::Queue"][color="limegreen"];
+    node_0 -> node_1[label="renderling::camera::CamerasNeedSorting"][color="tomato"];
+    node_2 -> node_3[label="renderling::node::FrameTextureView"][color="limegreen"];
+    node_2 -> node_4[label="renderling::node::FrameTextureView"][color="limegreen"];
+    node_2 -> node_5[label="renderling::state::Frame"][color="limegreen"];
+    node_2 -> node_6[label="renderling::state::Frame"][color="tomato"];
+}

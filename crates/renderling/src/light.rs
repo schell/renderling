@@ -2,7 +2,7 @@
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
-use crate::{linkage::pbr::LightsUniform, resources::Shared, WgpuState};
+use crate::{linkage::pbr::LightsUniform, resources::Shared, WgpuState, Device, Queue};
 use glam::{vec3, vec4, Vec3, Vec4};
 use moongraph::{Read, Write};
 use renderling_shader::light::{
@@ -440,8 +440,17 @@ impl Lights {
     }
 }
 
-/// A render graph node that updates lights on-demand.
-pub fn update_lights(gpu: Read<WgpuState>, mut lights: Write<Lights>) -> Result<(), LightsError> {
-    lights.update(&gpu.device, &gpu.queue);
-    Ok(())
+#[derive(moongraph::Edges)]
+pub struct LightUpdate {
+    pub device: Read<Device>,
+    pub queue: Read<Queue>,
+    pub lights: Write<Lights>
+}
+
+impl LightUpdate {
+    /// A render graph node that updates lights on-demand.
+    pub fn run(mut self) -> Result<(), LightsError> {
+        self.lights.update(&self.device, &self.queue);
+        Ok(())
+    }
 }

@@ -1,15 +1,17 @@
 //! Render graph
 use std::{
     any::Any,
+    collections::HashMap,
     marker::PhantomData,
-    ops::{Deref, DerefMut}, collections::HashMap,
+    ops::{Deref, DerefMut},
 };
 
 use broomdog::{Loan, LoanMut};
-use dagga::{Dag, Node};
+use dagga::Dag;
 use snafu::prelude::*;
 
 pub use broomdog::{TypeKey, TypeMap};
+pub use dagga::{DaggaError, Node};
 pub use moongraph_macros::Edges;
 
 #[derive(Debug, Snafu)]
@@ -364,6 +366,7 @@ impl<'a, T: Any + Send + Sync> Edges for Write<T> {
 #[derive(Default)]
 pub struct Graph {
     resources: TypeMap,
+    barrier: usize,
     unscheduled: Vec<Node<Function, TypeKey>>,
     schedule: Vec<Vec<Node<Function, TypeKey>>>,
 }
@@ -375,12 +378,27 @@ impl Graph {
     pub fn merge(mut lhs: Graph, mut rhs: Graph) -> Graph {
         lhs.unschedule();
         rhs.unschedule();
-        let Graph{ resources: mut rhs_resources, unscheduled: rhs_nodes, schedule: _} = rhs;
-        lhs.resources.extend(std::mem::take(rhs_resources.deref_mut()).into_iter());
+        let Graph {
+            resources: mut rhs_resources,
+            unscheduled: rhs_nodes,
+            barrier: _,
+            schedule: _,
+        } = rhs;
+        lhs.resources
+            .extend(std::mem::take(rhs_resources.deref_mut()).into_iter());
         let mut unscheduled: HashMap<String, Node<Function, TypeKey>> = HashMap::default();
-        unscheduled.extend(lhs.unscheduled.into_iter().map(|node| (node.name().to_string(), node)));
-        unscheduled.extend(rhs_nodes.into_iter().map(|node| (node.name().to_string(), node)));
+        unscheduled.extend(
+            lhs.unscheduled
+                .into_iter()
+                .map(|node| (node.name().to_string(), node)),
+        );
+        unscheduled.extend(
+            rhs_nodes
+                .into_iter()
+                .map(|node| (node.name().to_string(), node)),
+        );
         lhs.unscheduled = unscheduled.into_iter().map(|(_, node)| node).collect();
+        lhs.barrier = lhs.barrier.max(rhs.barrier);
         lhs
     }
 
@@ -395,11 +413,66 @@ impl Graph {
         log::trace!("rescheduling the render graph:");
         self.unschedule();
         let all_nodes = std::mem::take(&mut self.unscheduled);
-        let dag = all_nodes.into_iter().fold(Dag::default(), |dag, node| dag.with_node(node));
-        let schedule = dag.build_schedule().context(SchedulingSnafu)?;
+        let dag = all_nodes
+            .into_iter()
+            .fold(Dag::default(), |dag, node| dag.with_node(node));
+        let schedule = dag.build_schedule().map_err(|dagga::BuildScheduleError{ source, mut dag }| {
+            // we have to put the nodes back so the library user can do debugging
+            for node in dag.take_nodes() {
+                self.add_node(node);
+            }
+            GraphError::Scheduling { source }
+        })?;
         log::trace!("{:#?}", schedule.batched_names());
         self.schedule = schedule.batches;
         Ok(())
+    }
+
+    /// An iterator over all nodes.
+    pub fn nodes(&self) -> impl Iterator<Item = &Node<Function, TypeKey>> {
+        self.schedule
+            .iter()
+            .flatten()
+            .chain(self.unscheduled.iter())
+    }
+
+    /// Add a node to the graph.
+    pub fn add_node(&mut self, node: Node<Function, TypeKey>) {
+        self.unscheduled.push(node.runs_after_barrier(self.barrier));
+    }
+
+    /// Return a reference to the node with the given name, if possible.
+    pub fn get_node(&self, name: impl AsRef<str>) -> Option<&Node<Function, TypeKey>> {
+        for node in self.nodes() {
+            if node.name() == name.as_ref() {
+                return Some(node);
+            }
+        }
+        None
+    }
+
+    /// Remove a node from the graph by name.
+    ///
+    /// This leaves the graph in an unscheduled state.
+    pub fn remove_node(&mut self, name: impl AsRef<str>) -> Option<Node<Function, TypeKey>> {
+        self.unschedule();
+        let mut may_index = None;
+        for (i, node) in self.unscheduled.iter().enumerate() {
+            if node.name() == name.as_ref() {
+                may_index = Some(i);
+            }
+        }
+        if let Some(i) = may_index.take() {
+            Some(self.unscheduled.swap_remove(i))
+        } else {
+            None
+        }
+    }
+
+    /// Add a node to the graph.
+    pub fn with_node(mut self, node: Node<Function, TypeKey>) -> Self {
+        self.add_node(node);
+        self
     }
 
     /// Add a named function to the graph.
@@ -408,8 +481,17 @@ impl Graph {
         name: impl Into<String>,
         f: impl IsGraphNode<Input, Output>,
     ) -> Self {
-        self.unscheduled.push(f.into_node().with_name(name));
+        self.add_function(name, f);
         self
+    }
+
+    /// Add a named function to the graph.
+    pub fn add_function<Input, Output>(
+        &mut self,
+        name: impl Into<String>,
+        f: impl IsGraphNode<Input, Output>,
+    ) {
+        self.add_node(f.into_node().with_name(name));
     }
 
     /// Return whether the graph contains a function with the given name.
@@ -417,17 +499,48 @@ impl Graph {
         let name = name.as_ref();
         let search = |node: &Node<Function, TypeKey>| node.name() == name;
         if self.unscheduled.iter().any(search) {
-            return true
+            return true;
         }
         self.schedule.iter().flatten().any(search)
     }
 
+    /// Return whether the graph contains a resource with the parameterized
+    /// type.
+    pub fn contains_resource<T: Any + Send + Sync>(&self) -> bool {
+        let key = TypeKey::new::<T>();
+        self.resources.contains_key(&key)
+    }
+
     /// Explicitly insert a resource (an edge) into the graph.
     ///
-    /// This will overwrite any existing resource in the graph.
+    /// This will overwrite an existing resource of the same type in the graph.
     pub fn with_resource<T: Any + Send + Sync>(mut self, t: T) -> Self {
+        self.add_resource(t);
+        self
+    }
+
+    /// Explicitly insert a resource (an edge) into the graph.
+    ///
+    /// This will overwrite an existing resource of the same type in the graph.
+    pub fn add_resource<T: Any + Send + Sync>(&mut self, t: T) {
         // UNWRAP: safe because of the guarantees around `insert_value`
         self.resources.insert_value(t).unwrap();
+    }
+
+    /// Add a barrier to the graph.
+    ///
+    /// All nodes added after the barrier will run after nodes added before the
+    /// barrier.
+    pub fn add_barrier(&mut self) {
+        self.barrier += 1;
+    }
+
+    /// Add a barrier to the graph.
+    ///
+    /// All nodes added after the barrier will run after nodes added before the
+    /// barrier.
+    pub fn with_barrier(mut self) -> Self {
+        self.add_barrier();
         self
     }
 
@@ -469,6 +582,71 @@ impl Graph {
     /// Get a mutable reference to a resource in the graph.
     pub fn get_resource_mut<T: Any + Send + Sync>(&mut self) -> Result<Option<&mut T>, GraphError> {
         Ok(self.resources.get_value_mut().context(ResourceSnafu)?)
+    }
+
+    /// Fetch a loanable type and visit it with a closure.
+    ///
+    /// This is like running a one-off graph node, but `S` does not get packed
+    /// into the graph as a result resource, instead it is given back to the
+    /// callsite.
+    ///
+    /// ## Note
+    /// By design, visiting the graph with a type that uses `Move` in one of its
+    /// fields will result in the type of that field being `move`d **out**
+    /// of the graph. The resource will no longer be available within the
+    /// graph.
+    ///
+    /// ```rust
+    /// use moongraph::*;
+    /// use snafu::prelude::*;
+    ///
+    /// #[derive(Debug, Snafu)]
+    /// enum TestError {}
+    ///
+    /// #[derive(Edges)]
+    /// struct Input {
+    ///     num_usize: Read<usize>,
+    ///     num_f32: Write<f32>,
+    ///     num_f64: Move<f64>,
+    /// }
+    ///
+    /// // pack the graph with resources
+    /// let mut graph = Graph::default()
+    ///     .with_resource(0usize)
+    ///     .with_resource(0.0f32)
+    ///     .with_resource(0.0f64);
+    ///
+    /// // visit the graph, reading, modifying and _moving_!
+    /// let num_usize = graph.visit(|mut input: Input| {
+    ///     *input.num_f32 = 666.0;
+    ///     *input.num_f64 += 10.0;
+    ///     *input.num_usize
+    /// }).unwrap();
+    ///
+    /// // observe we read usize
+    /// assert_eq!(0, num_usize);
+    /// assert_eq!(0, *graph.get_resource::<usize>().unwrap().unwrap());
+    ///
+    /// // observe we modified f32
+    /// assert_eq!(666.0, *graph.get_resource::<f32>().unwrap().unwrap());
+    ///
+    /// // observe we moved f64 out of the graph and it is no longer present
+    /// assert!(!graph.contains_resource::<f64>());
+    pub fn visit<T: Edges, S>(&mut self, f: impl FnOnce(T) -> S) -> Result<S, GraphError> {
+        let t = T::construct(&mut self.resources)?;
+        let s = f(t);
+        self.resources.unify().context(ResourceSnafu)?;
+        Ok(s)
+    }
+
+    #[cfg(feature = "dot")]
+    pub fn save_graph_dot(&self, path: &str) {
+        use dagga::dot::DagLegend;
+
+        let legend = DagLegend::new(self.nodes()).with_resources_named(|ty: &TypeKey| {
+            ty.name().to_string()
+        });
+        legend.save_to(path).unwrap();
     }
 }
 
@@ -621,5 +799,36 @@ mod test {
             "1,10,10",
             graph.get_resource::<String>().unwrap().unwrap().as_str()
         );
+    }
+
+    #[test]
+    fn can_visit_and_then_borrow() {
+        use crate as moongraph;
+
+        #[derive(Debug, Snafu)]
+        enum TestError {}
+
+        #[derive(Edges)]
+        struct Input {
+            num_usize: Read<usize>,
+            num_f32: Write<f32>,
+            num_f64: Move<f64>,
+        }
+
+        let mut graph = Graph::default()
+            .with_resource(0usize)
+            .with_resource(0.0f32)
+            .with_resource(0.0f64);
+        let num_usize = graph
+            .visit(|mut input: Input| {
+                *input.num_f32 = 666.0;
+                *input.num_f64 += 10.0;
+                *input.num_usize
+            })
+            .unwrap();
+        assert_eq!(0, num_usize);
+        assert_eq!(0, *graph.get_resource::<usize>().unwrap().unwrap());
+        assert_eq!(666.0, *graph.get_resource::<f32>().unwrap().unwrap());
+        assert!(!graph.contains_resource::<f64>());
     }
 }

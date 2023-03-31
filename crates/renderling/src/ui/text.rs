@@ -1,4 +1,4 @@
-//! Text rendering capabilities for `Renderling<UiPipeline>`.
+//! Text rendering capabilities for `Renderling`.
 //!
 //! This module is only enabled with the `text` cargo feature.
 use std::{
@@ -14,7 +14,7 @@ use glyph_brush::*;
 pub use ::ab_glyph::FontArc;
 pub use glyph_brush::{Color, Section, Text};
 
-use crate::{Mesh, Texture, UiColorBlend, UiMaterial, UiVertex, WgpuState};
+use crate::{Mesh, Renderling, Texture, UiColorBlend, UiMaterial, UiVertex, WgpuState};
 
 /// A text cache maintained mostly by ab_glyph.
 pub struct Cache {
@@ -35,7 +35,7 @@ impl Cache {
             usage: wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::TEXTURE_BINDING,
             mip_level_count: 1,
             sample_count: 1,
-            view_formats: &[]
+            view_formats: &[],
         });
 
         let texture = Texture::from_wgpu_tex(texture, device);
@@ -131,12 +131,24 @@ impl DerefMut for GlyphCache {
 }
 
 impl GlyphCache {
-    pub fn new(gpu: &WgpuState, fonts: Vec<FontArc>) -> Self {
+    pub fn new(r: &Renderling, fonts: Vec<FontArc>) -> Self {
         let brush = GlyphBrushBuilder::using_fonts(fonts).build();
         GlyphCache {
             cache: None,
-            device: gpu.device.clone(),
-            queue: gpu.queue.clone(),
+            device: r
+                .graph
+                .get_resource::<crate::Device>()
+                .unwrap()
+                .unwrap()
+                .0
+                .clone(),
+            queue: r
+                .graph
+                .get_resource::<crate::Queue>()
+                .unwrap()
+                .unwrap()
+                .0
+                .clone(),
             brush,
         }
     }
