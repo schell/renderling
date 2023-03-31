@@ -20,8 +20,8 @@ struct Ui {
 }
 
 struct App {
-    renderling_ui: Renderling<UiPipeline>,
-    renderling_forward: Renderling<ForwardPipeline>,
+    renderling_ui: Renderling,
+    renderling_forward: Renderling,
 
     ui: Ui,
 
@@ -58,7 +58,7 @@ impl App {
         let left_mb_down: bool = false;
         let last_cursor_position: Option<winit::dpi::PhysicalPosition<f64>> = None;
         let window_size = gpu.get_size();
-        let mut ui: Renderling<UiPipeline> = gpu.new_ui_renderling();
+        let mut ui: Renderling = gpu.new_ui_renderling();
         let ui_camera = ui.new_camera().with_projection_ortho2d().build();
         let text = ui.new_object().build().unwrap();
         let text_camera = ui.new_object().build().unwrap();

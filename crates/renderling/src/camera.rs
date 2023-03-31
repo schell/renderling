@@ -2,16 +2,47 @@
 use std::ops::{Deref, DerefMut};
 
 use async_channel::{unbounded, Receiver, Sender};
-
 use glam::{Mat4, Vec3};
+use moongraph::{Edges, Read, Write, Move};
 use renderling_shader::CameraRaw;
 
 use crate::{
     bank::Bank,
     linkage::create_camera_uniform,
     resources::{Id, Shared},
-    Object, Objects,
+    Object, Objects, Renderling, Device, WgpuStateError,
 };
+
+/// Returns the projection and view matrices for a camera with default perspective.
+pub fn default_perspective(width: f32, height: f32) -> (Mat4, Mat4) {
+    let aspect = width / height;
+    let fovy = std::f32::consts::PI / 4.0;
+    let znear = 0.1;
+    let zfar = 100.0;
+    let projection = Mat4::perspective_rh(fovy, aspect, znear, zfar);
+    let eye = Vec3::new(0.0, 12.0, 20.0);
+    let target = Vec3::ZERO;
+    let up = Vec3::Y;
+    let view = Mat4::look_at_rh(eye, target, up);
+    (projection, view)
+}
+
+/// Creates a typical 2d orthographic projection with +Y extending downward
+/// and the Z axis coming out towards the viewer.
+pub fn default_ortho2d(width: f32, height: f32) -> (Mat4, Mat4) {
+    let left = 0.0;
+    let right = width;
+    let bottom = height;
+    let top = 0.0;
+    let near = 1.0;
+    let far = -1.0;
+    let projection = Mat4::orthographic_rh(left, right, bottom, top, near, far);
+    let eye = Vec3::new(0.0, 0.0, 0.0);
+    let target = Vec3::new(0.0, 0.0, -1.0);
+    let up = Vec3::new(0.0, 1.0, 0.0);
+    let view = Mat4::look_at_rh(eye, target, up);
+    (projection, view)
+}
 
 /// Camera primitive shared by both user-land and under-the-hood camera data.
 #[derive(Clone)]
@@ -22,17 +53,7 @@ pub struct CameraInner {
 
 impl CameraInner {
     pub fn new_ortho2d(width: f32, height: f32) -> Self {
-        let left = 0.0;
-        let right = width;
-        let bottom = height;
-        let top = 0.0;
-        let near = 1.0;
-        let far = -1.0;
-        let projection = Mat4::orthographic_rh(left, right, bottom, top, near, far);
-        let eye = Vec3::new(0.0, 0.0, 0.0);
-        let target = Vec3::new(0.0, 0.0, -1.0);
-        let up = Vec3::new(0.0, 1.0, 0.0);
-        let view = Mat4::look_at_rh(eye, target, up);
+        let (projection, view) = default_ortho2d(width, height);
         CameraInner {
             camera: CameraRaw { projection, view },
             dirty_uniform: false,
@@ -40,15 +61,7 @@ impl CameraInner {
     }
 
     pub fn new_perspective(width: f32, height: f32) -> Self {
-        let aspect = width / height;
-        let fovy = std::f32::consts::PI / 4.0;
-        let znear = 0.1;
-        let zfar = 100.0;
-        let projection = Mat4::perspective_rh(fovy, aspect, znear, zfar);
-        let eye = Vec3::new(0.0, 12.0, 20.0);
-        let target = Vec3::ZERO;
-        let up = Vec3::Y;
-        let view = Mat4::look_at_rh(eye, target, up);
+        let (projection, view) = default_perspective(width, height);
         CameraInner {
             camera: CameraRaw { projection, view },
             dirty_uniform: false,
@@ -56,7 +69,7 @@ impl CameraInner {
     }
 }
 
-pub(crate) enum CameraUpdateCmd {
+pub enum CameraUpdateCmd {
     Update { camera_id: Id<Camera> },
     Destroy { camera_id: Id<Camera> },
 }
@@ -121,6 +134,12 @@ impl Camera {
             inner.camera.projection = projection;
         });
     }
+
+    /// Destroy the camera.
+    pub fn destroy(self) {
+        // UNWRAP: safe because the channel is unbounded
+        self.cmd.try_send(CameraUpdateCmd::Destroy { camera_id: self.id }).unwrap();
+    }
 }
 
 /// Under-the-hood camera data.
@@ -135,10 +154,8 @@ pub struct CameraData {
 pub struct CameraBuilder<'a> {
     pub(crate) width: f32,
     pub(crate) height: f32,
-    pub(crate) device: &'a wgpu::Device,
-    pub(crate) update_tx: Sender<CameraUpdateCmd>,
-    pub(crate) cameras: &'a mut Cameras,
     pub(crate) inner: CameraInner,
+    pub(crate) renderer: &'a mut Renderling
 }
 
 impl<'a> CameraBuilder<'a> {
@@ -177,15 +194,13 @@ impl<'a> CameraBuilder<'a> {
 
     pub fn build(self) -> Camera {
         let CameraBuilder {
-            device,
-            update_tx: cmd,
-            cameras,
             width: _,
             height: _,
             inner,
+            renderer
         } = self;
         let (buffer, bindgroup) =
-            create_camera_uniform(device, &inner.camera, "CameraBuilder::build");
+            create_camera_uniform(renderer.get_device(), &inner.camera, "CameraBuilder::build");
         let inner = Shared::new(inner);
         let camera_data = CameraData {
             buffer,
@@ -193,10 +208,11 @@ impl<'a> CameraBuilder<'a> {
             inner: inner.clone(),
         };
 
+        let cameras = renderer.get_cameras_mut();
         let id = cameras.bank.insert_with(move |_| camera_data);
         let camera = Camera {
             id: id.into(),
-            cmd,
+            cmd: cameras.update_channel(),
             inner,
         };
         cameras.should_sort = true;
@@ -252,6 +268,10 @@ impl DerefMut for Cameras {
 }
 
 impl Cameras {
+    pub(crate) fn update_queue(&self) -> Sender<CameraUpdateCmd> {
+        self.camera_update_queue.0.clone()
+    }
+
     /// Sorts objects by their distance to each camera.
     ///
     /// This also generates the lists of objects sorted per camera.
@@ -329,7 +349,29 @@ impl Cameras {
         }
     }
 
-    pub fn get_object_ids_sorted_by_distance_to_camera(&self, camera: &Camera) -> &Vec<Id<Object>> {
-        &self.camera_objects_by_distance[camera.id.0]
+    pub fn update_channel(&self) -> Sender<CameraUpdateCmd> {
+        self.camera_update_queue.0.clone()
+    }
+
+    pub fn get_object_ids_sorted_by_distance_to_camera(&self, camera_id: &Id<CameraData>) -> &Vec<Id<Object>> {
+        &self.camera_objects_by_distance[camera_id.0]
+    }
+}
+
+/// Wrapper type to be used as a result of the ObjectUpdate node.
+pub struct CamerasNeedSorting(pub bool);
+
+#[derive(Edges)]
+pub struct CameraUpdate {
+    device: Read<Device>,
+    camera_objects_need_sorting: Move<CamerasNeedSorting>,
+    cameras: Write<Cameras>,
+    objects: Read<Objects>,
+}
+
+impl CameraUpdate {
+    pub fn run(mut self) -> Result<(), WgpuStateError> {
+        self.cameras.update(&self.device, self.camera_objects_need_sorting.0, &self.objects);
+        Ok(())
     }
 }

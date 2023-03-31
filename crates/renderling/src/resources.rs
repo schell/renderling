@@ -4,10 +4,11 @@ use std::{
     ops::Deref,
     sync::{
         atomic::AtomicUsize,
-        mpsc::{channel, Receiver, Sender},
         Arc, RwLock, RwLockReadGuard, RwLockWriteGuard,
     },
 };
+
+use async_channel::{Sender, Receiver, unbounded};
 
 /// An identifier.
 #[derive(Ord)]
@@ -72,7 +73,7 @@ impl<T> Default for BankOfIds<T> {
     fn default() -> Self {
         BankOfIds {
             next_id: Arc::new(AtomicUsize::new(0)),
-            recycler: channel(),
+            recycler: unbounded(),
         }
     }
 }

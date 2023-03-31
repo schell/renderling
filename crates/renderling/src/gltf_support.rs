@@ -195,9 +195,18 @@ pub enum GltfNodeVariant {
 
 impl GltfNodeVariant {
     pub fn as_object(&self) -> Option<&Object> {
-        match self {
-            GltfNodeVariant::Object(o) => Some(o),
-            _ => None,
+        if let GltfNodeVariant::Object(o) = self {
+            Some(o)
+        } else {
+            None
+        }
+    }
+
+    pub fn as_camera(&self) -> Option<&Camera> {
+        if let GltfNodeVariant::Camera(c) = self {
+            Some(c)
+        } else {
+            None
         }
     }
 }
@@ -995,7 +1004,7 @@ impl GltfLoader {
     ) -> Result<(), GltfError> {
         log::trace!("loading meshes");
         for mesh in document.meshes() {
-            let _ = self.load_mesh(mesh, buffers, images)?;
+            self.load_mesh(mesh, buffers, images)?;
         }
 
         Ok(())
@@ -1023,7 +1032,7 @@ impl GltfLoader {
 
     pub fn load_node<'b>(
         &mut self,
-        r: &mut Renderling<ForwardPipeline>,
+        r: &mut Renderling,
         buffers: &[gltf::buffer::Data],
         images: &[gltf::image::Data],
         node: gltf::Node<'b>,
@@ -1099,6 +1108,7 @@ impl GltfLoader {
                             .new_object()
                             .with_mesh(prim.mesh.clone())
                             .with_material::<BlinnPhongMaterial>(prim.material.clone())
+                            .with_generate_normal_matrix(true)
                             .build()
                             .context(ObjectSnafu)?;
                         children.push(child);
@@ -1124,6 +1134,7 @@ impl GltfLoader {
                         .new_object()
                         .with_transform(transform.clone())
                         .with_mesh(mesh)
+                        .with_generate_normal_matrix(true)
                         .with_material::<BlinnPhongMaterial>(material)
                         .build()
                         .context(ObjectSnafu)?;
@@ -1231,7 +1242,7 @@ impl GltfLoader {
     /// Load everything.
     pub fn load<'b>(
         &mut self,
-        r: &mut Renderling<ForwardPipeline>,
+        r: &mut Renderling,
         document: &'b gltf::Document,
         buffers: &[gltf::buffer::Data],
         images: &[gltf::image::Data],
