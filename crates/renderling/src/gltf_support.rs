@@ -11,7 +11,7 @@ use snafu::prelude::*;
 use splines::Interpolate;
 
 use crate::{
-    linkage::pbr, BlinnPhongMaterial, Camera, DirectionalLight, ForwardPipeline, LocalTransform,
+    linkage::pbr, BlinnPhongMaterial, Camera, DirectionalLight, LocalTransform,
     Mesh, MeshBuilder, Object, ObjectBuilderError, PointLight, Renderling, SpotLight, Texture,
 };
 

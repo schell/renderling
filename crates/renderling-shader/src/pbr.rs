@@ -1,10 +1,10 @@
 //! Physically based renderer shader code.
 //!
-//! This is actually just blinne-phong lighting, but is a placeholder for PBR.
+//! This is actually just blinn-phong lighting, but is a placeholder for PBR.
 use glam::{mat3, mat4, vec4, Mat3, Mat4, Vec2, Vec3, Vec3Swizzles, Vec4, Vec4Swizzles, vec3};
 use spirv_std::{image::Image2d, Sampler};
 
-use crate::{CameraRaw, light::*, math::Vec3ColorSwizzles};
+use crate::{CameraRaw, light::*, math::Vec3ColorSwizzles, mesh::*};
 
 pub fn main_vertex(
     camera: &CameraRaw,
