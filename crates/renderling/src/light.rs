@@ -2,7 +2,7 @@
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 
-use crate::{linkage::pbr::LightsUniform, resources::Shared, WgpuState, Device, Queue};
+use crate::{linkage::pbr::LightsUniform, resources::Shared, Device, Queue};
 use glam::{vec3, vec4, Vec3, Vec4};
 use moongraph::{Read, Write};
 use renderling_shader::light::{

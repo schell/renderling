@@ -6,8 +6,8 @@ use snafu::prelude::*;
 use std::{any::Any, ops::Deref, sync::Arc};
 
 use crate::{
-    camera::*, node::UiRenderCamera, resources::*, ForwardPipeline, Lights, Object, ObjectBuilder,
-    ObjectInner, Objects, Pipelines, PostRenderBuffer, RenderTarget, WgpuStateError,
+    camera::*, resources::*, CreateSurfaceFn, ForwardPipeline, Lights, ObjectBuilder, ObjectInner,
+    Objects, Pipelines, PostRenderBuffer, RenderTarget, WgpuStateError,
 };
 
 pub use moongraph::IsGraphNode;
@@ -16,21 +16,6 @@ pub type RenderNode = Node<Function, TypeKey>;
 
 #[derive(Debug, Snafu)]
 pub enum RenderlingError {
-    #[snafu(display("cannot create adaptor"))]
-    CannotCreateAdaptor,
-
-    #[snafu(display("cannot request device: {}", source))]
-    CannotRequestDevice { source: wgpu::RequestDeviceError },
-
-    #[snafu(display("surface is incompatible with adapter"))]
-    IncompatibleSurface,
-
-    #[snafu(display("could not create surface: {}", source))]
-    CreateSurface { source: wgpu::CreateSurfaceError },
-
-    #[snafu(display("missing surface texture: {}", source))]
-    MissingSurfaceTexture { source: wgpu::SurfaceError },
-
     #[snafu(display("{}", source))]
     Texture { source: crate::TextureError },
 
@@ -81,6 +66,9 @@ pub enum RenderlingError {
 
     #[snafu(display("Timeout while waiting for a screengrab"))]
     ScreenGrabTimeout { source: WgpuStateError },
+
+    #[snafu(display("{source}"))]
+    State { source: WgpuStateError },
 }
 
 /// A thread-safe wrapper around `wgpu::Device`.
@@ -128,8 +116,8 @@ pub struct BackgroundColor(pub Vec4);
 
 /// A graph-based renderer that manages GPU resources for cameras, materials and
 /// meshes.
-// TODO: Think about adding a phantom type variable to Renderling, and then using adjoint types that
-// include specific functionality:
+// TODO: Think about adding a phantom type variable to Renderling, and then
+// using adjoint types that include specific functionality:
 // ```rust
 // pub struct Renderling<T> {
 //     ...
@@ -167,61 +155,14 @@ impl Renderling {
 
     pub async fn try_new_headless(width: u32, height: u32) -> Result<Self, RenderlingError> {
         let size = (width, height);
-
-        // The instance is a handle to our GPU
-        // BackendBit::PRIMARY => Vulkan + Metal + DX12 + Browser WebGPU
-        let backends = if cfg!(target_arch = "wasm32") {
-            wgpu::Backends::all()
-        } else {
-            wgpu::Backends::PRIMARY
-        };
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-            backends,
-            dx12_shader_compiler: wgpu::Dx12Compiler::default(),
-        });
-        let adapter = instance
-            .request_adapter(&wgpu::RequestAdapterOptions {
-                power_preference: wgpu::PowerPreference::default(),
-                compatible_surface: None,
-                force_fallback_adapter: false,
-            })
-            .await
-            .context(CannotCreateAdaptorSnafu)?;
-        let limits = if cfg!(target_arch = "wasm32") {
-            wgpu::Limits::downlevel_webgl2_defaults().using_resolution(adapter.limits())
-        } else {
-            wgpu::Limits::default()
-        };
-        let (device, queue) = adapter
-            .request_device(
-                &wgpu::DeviceDescriptor {
-                    features: wgpu::Features::empty(),
-                    limits,
-                    label: None,
-                },
-                None, // Trace path
-            )
-            .await
-            .context(CannotRequestDeviceSnafu)?;
-
-        let texture_desc = wgpu::TextureDescriptor {
-            size: wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8UnormSrgb,
-            usage: wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::RENDER_ATTACHMENT,
-            label: None,
-            view_formats: &[],
-        };
-        let texture = Arc::new(device.create_texture(&texture_desc));
+        let (device, queue, target) = crate::state::new_device_queue_and_target(
+            width,
+            height,
+            None as Option<CreateSurfaceFn>,
+        )
+        .await
+        .context(StateSnafu)?;
         let depth_texture = crate::Texture::create_depth_texture(&device, width, height);
-        let target = RenderTarget::Texture { texture };
-
         Ok(Self::new(target, depth_texture, device, queue, size))
     }
 
@@ -235,52 +176,16 @@ impl Renderling {
         W: raw_window_handle::HasRawWindowHandle + raw_window_handle::HasRawDisplayHandle,
     {
         let size = (width, height);
-
-        // The instance is a handle to our GPU
-        // BackendBit::PRIMARY => Vulkan + Metal + DX12 + Browser WebGPU
-        let backends = if cfg!(target_arch = "wasm32") {
-            wgpu::Backends::all()
-        } else {
-            wgpu::Backends::PRIMARY
-        };
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-            backends,
-            dx12_shader_compiler: wgpu::Dx12Compiler::default(),
-        });
-        let surface = unsafe { instance.create_surface(window) }.context(CreateSurfaceSnafu)?;
-        let adapter = instance
-            .request_adapter(&wgpu::RequestAdapterOptions {
-                power_preference: wgpu::PowerPreference::default(),
-                compatible_surface: Some(&surface),
-                force_fallback_adapter: false,
-            })
-            .await
-            .context(CannotCreateAdaptorSnafu)?;
-        let limits = if cfg!(target_arch = "wasm32") {
-            wgpu::Limits::downlevel_webgl2_defaults().using_resolution(adapter.limits())
-        } else {
-            wgpu::Limits::default()
-        };
-        let (device, queue) = adapter
-            .request_device(
-                &wgpu::DeviceDescriptor {
-                    features: wgpu::Features::empty(),
-                    limits,
-                    label: None,
-                },
-                None, // Trace path
-            )
-            .await
-            .context(CannotRequestDeviceSnafu)?;
-
-        let surface_config = surface
-            .get_default_config(&adapter, width, height)
-            .context(IncompatibleSurfaceSnafu)?;
-        surface.configure(&device, &surface_config);
-        let target = RenderTarget::Surface {
-            surface,
-            surface_config,
-        };
+        let (device, queue, target) = crate::state::new_device_queue_and_target(
+            width,
+            height,
+            Some(Box::new(|instance: &wgpu::Instance| {
+                unsafe { instance.create_surface(window) }
+                    .map_err(|e| WgpuStateError::CreateSurface { source: e })
+            }) as crate::CreateSurfaceFn),
+        )
+        .await
+        .context(StateSnafu)?;
         let depth_texture = crate::Texture::create_depth_texture(&device, width, height);
 
         Ok(Self::new(target, depth_texture, device, queue, size))
@@ -449,7 +354,6 @@ impl Renderling {
     /// If no transform is provided, the object will be positioned at the origin
     /// with no rotation and scale 1,1,1.
     pub fn new_object(&mut self) -> ObjectBuilder<'_> {
-        let objects = self.get_objects_mut();
         ObjectBuilder {
             mesh: None,
             children: vec![],
@@ -608,7 +512,8 @@ impl Renderling {
 
     #[cfg(feature = "gltf")]
     pub fn new_gltf_loader(&self) -> crate::gltf_support::GltfLoader {
-        // UNWRAP: safe because device and queue are _always_ available (if not we should panic)
+        // UNWRAP: safe because device and queue are _always_ available (if not we
+        // should panic)
         let device = self
             .graph
             .get_resource::<Device>()
@@ -632,8 +537,8 @@ impl Renderling {
     /// This should be called after rendering, before presentation.
     /// Good for getting headless screen grabs.
     ///
-    /// For this call to succeed, the `PostRenderBufferCreate::create` node must be
-    /// present in the graph.
+    /// For this call to succeed, the `PostRenderBufferCreate::create` node must
+    /// be present in the graph.
     ///
     /// ## Note
     /// This operation can take a long time, depending on how big the screen is.

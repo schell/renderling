@@ -88,7 +88,9 @@ mod test {
 
     use super::*;
     use glam::{Mat4, Quat, Vec2, Vec3, Vec4};
-    use moongraph::{GraphError, DaggaError, Function, TypeKey, Node};
+    use moongraph::{DaggaError, Function, GraphError, Node, TypeKey};
+    use renderling_shader::TestStorage;
+    use wgpu::util::DeviceExt;
 
     #[test]
     fn init() {
@@ -618,18 +620,38 @@ mod test {
         let res = r.render_image();
         let img = match res {
             Ok(img) => img,
-            Err(RenderlingError::Graph { source: GraphError::Scheduling { source } }) => match &source {
+            Err(RenderlingError::Graph {
+                source: GraphError::Scheduling { source },
+            }) => match &source {
                 DaggaError::CannotSolve { constraint } => {
-                    //println!("{}", source);
+                    // println!("{}", source);
                     fn print_node(name: &str, node: &Node<Function, TypeKey>) {
                         println!("{name}: {}", node.name());
                         println!("  barrier: {}", node.get_barrier());
-                        println!("  runs_after: {:?}", node.get_runs_after().collect::<Vec<_>>());
-                        println!("  runs_before: {:?}", node.get_runs_before().collect::<Vec<_>>());
-                        println!("  reads: {:?}", node.get_reads().map(|k| k.name()).collect::<Vec<_>>());
-                        println!("  writes: {:?}", node.get_writes().map(|k| k.name()).collect::<Vec<_>>());
-                        println!("  moves: {:?}", node.get_moves().map(|k| k.name()).collect::<Vec<_>>());
-                        println!("  results: {:?}", node.get_results().map(|k| k.name()).collect::<Vec<_>>());
+                        println!(
+                            "  runs_after: {:?}",
+                            node.get_runs_after().collect::<Vec<_>>()
+                        );
+                        println!(
+                            "  runs_before: {:?}",
+                            node.get_runs_before().collect::<Vec<_>>()
+                        );
+                        println!(
+                            "  reads: {:?}",
+                            node.get_reads().map(|k| k.name()).collect::<Vec<_>>()
+                        );
+                        println!(
+                            "  writes: {:?}",
+                            node.get_writes().map(|k| k.name()).collect::<Vec<_>>()
+                        );
+                        println!(
+                            "  moves: {:?}",
+                            node.get_moves().map(|k| k.name()).collect::<Vec<_>>()
+                        );
+                        println!(
+                            "  results: {:?}",
+                            node.get_results().map(|k| k.name()).collect::<Vec<_>>()
+                        );
                     }
                     assert!(r.graph.nodes().count() > 0);
                     println!("{source}");
@@ -638,9 +660,9 @@ mod test {
                     let rhs = r.graph.get_node(&constraint.rhs).unwrap();
                     print_node("rhs", rhs);
                     panic!("bah!");
-                },
+                }
                 other => panic!("{}", other),
-            }
+            },
             Err(other) => panic!("{}", other),
         };
         crate::img_diff::assert_img_eq_save(
@@ -850,8 +872,9 @@ mod test {
         r.render().unwrap();
 
         // after this point we don't want to clear the frame before every rendering
-        // because we're going to composite different frames of an animation into one, so we'll
-        // replace the clear_frame_and_depth node with our own node that only clears the depth.
+        // because we're going to composite different frames of an animation into one,
+        // so we'll replace the clear_frame_and_depth node with our own node
+        // that only clears the depth.
         let clear_frame_and_depth_node = r.graph.remove_node("clear_frame_and_depth").unwrap();
         pub fn clear_only_depth(
             (device, queue, frame_view, depth, color): (
@@ -982,6 +1005,74 @@ mod test {
         assert_eq!(0, anime.tweens[1].target_node_index);
     }
 
+    #[test]
+    fn test_compute_storage_buffer() {
+        let (device, queue, _) = futures_lite::future::block_on(
+            crate::state::new_device_queue_and_target(100, 100, None as Option<CreateSurfaceFn>),
+        )
+        .unwrap();
+        let shader_crate =
+            device.create_shader_module(wgpu::include_spirv!("linkage/shader_crate.spv"));
+        let label = Some("test compute storage buffer");
+        let bindgroup_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label,
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::COMPUTE,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: false },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            }],
+        });
+        let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label,
+            bind_group_layouts: &[&bindgroup_layout],
+            push_constant_ranges: &[],
+        });
+        let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label,
+            layout: Some(&layout),
+            module: &shader_crate,
+            entry_point: "compute_test_storage",
+        });
+
+        let mut byte_buffer = vec![];
+        let mut storage = TestStorage::default();
+        let mut data = encase::StorageBuffer::new(&mut byte_buffer);
+        data.write(&storage).unwrap();
+        let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label,
+            contents: data.into_inner().as_slice(),
+            usage: wgpu::BufferUsages::STORAGE,
+        });
+
+        let bindgroup_entry = wgpu::BindGroupEntry {
+            binding: 0,
+            resource: buffer.as_entire_binding(),
+        };
+        let bindgroup = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label,
+            layout: &bindgroup_layout,
+            entries: &[bindgroup_entry],
+        });
+
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label });
+        let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label });
+        compute_pass.set_pipeline(&pipeline);
+        compute_pass.set_bind_group(0, &bindgroup, &[]);
+        compute_pass.dispatch_workgroups(1, 1, 1);
+        drop(compute_pass);
+        queue.submit(std::iter::once(encoder.finish()));
+
+        let data = encase::StorageBuffer::new(&mut byte_buffer);
+        data.read(&mut storage).unwrap();
+
+        assert_eq!(Vec4::new(6.0, 6.0, 6.0, 666.0), storage.position);
+    }
+
     ////#[cfg(feature = "gltf")]
     ////#[test]
     //// fn gltf_simple_morph_triangle() {
@@ -1001,5 +1092,5 @@ mod test {
     ////        println!("ts: {:?}", ts.map(|vs| vs.collect::<Vec<_>>()));
     ////    }
     ////    panic!("blah")
-    ////}
+    //// }
 }

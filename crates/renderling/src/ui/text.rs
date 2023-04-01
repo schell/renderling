@@ -14,7 +14,7 @@ use glyph_brush::*;
 pub use ::ab_glyph::FontArc;
 pub use glyph_brush::{Color, Section, Text};
 
-use crate::{Mesh, Renderling, Texture, UiColorBlend, UiMaterial, UiVertex, WgpuState};
+use crate::{Mesh, Renderling, Texture, UiColorBlend, UiMaterial, UiVertex};
 
 /// A text cache maintained mostly by ab_glyph.
 pub struct Cache {
