@@ -1046,7 +1046,13 @@ mod test {
         let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label,
             contents: data.into_inner().as_slice(),
-            usage: wgpu::BufferUsages::STORAGE,
+            usage: wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::STORAGE,
+        });
+        let output_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label,
+            size: std::mem::size_of_val(&storage) as _,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
         });
 
         let bindgroup_entry = wgpu::BindGroupEntry {
@@ -1065,9 +1071,16 @@ mod test {
         compute_pass.set_bind_group(0, &bindgroup, &[]);
         compute_pass.dispatch_workgroups(1, 1, 1);
         drop(compute_pass);
+        encoder.copy_buffer_to_buffer(&buffer, 0, &output_buffer, 0, std::mem::size_of::<TestStorage>() as _);
         queue.submit(std::iter::once(encoder.finish()));
 
-        let data = encase::StorageBuffer::new(&mut byte_buffer);
+        let buffer_slice = output_buffer.slice(..);
+        buffer_slice.map_async(wgpu::MapMode::Read, |_| {});
+        device.poll(wgpu::Maintain::Wait);
+
+        let mut output = buffer_slice.get_mapped_range().to_vec();
+        output_buffer.unmap();
+        let data = encase::StorageBuffer::new(&mut output);
         data.read(&mut storage).unwrap();
 
         assert_eq!(Vec4::new(6.0, 6.0, 6.0, 666.0), storage.position);
