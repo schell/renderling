@@ -42,7 +42,7 @@ coords. This enables support for colorful text.
 * shaders
 
   Contains a thin `rust-gpu` wrapper around `renderling-shader`.
-  Provides the GPU linkage between `renderling` and `renderling-shader`.
+  Provides the GPU annotations needed to bind `renderling` and `renderling-shader`.
   Contains a program that compiles and copies **.spv** files into the main `renderling` crate.
 
 * crates/renderling
@@ -57,6 +57,23 @@ coords. This enables support for colorful text.
 ## Tests
 
 Tests use `renderling` in headless mode and generate images that are compared to expected output.
+
+### Running tests
+
+```
+cargo test
+```
+
+## Building the shaders
+
+The `shaders/` folder is a crate that is excluded from the cargo workspace.
+It compiles into a program that can be run to generate the shaders:
+
+```
+cd shaders/ && cargo run --release
+```
+
+Currently they all compile into one monolithic `.spv` file, but that may change in the future.
 
 ## License
 Renderling is free and open source. All code in this repository is dual-licensed under either:
@@ -81,10 +98,9 @@ without any additional terms or conditions.
 - [x] object nesting / parenting / local transforms
 - [ ] gltf support
   - [ ] scenes, nodes
-  - [ ] cameras
-  - [ ] meshes
-  - [ ] buffers, bufferViews, accessors
-  - [ ] materials
+  - [x] cameras
+  - [x] meshes
+  - [x] materials
   - [x] textures, images, samplers
   - [ ] skins
   - [ ] animations

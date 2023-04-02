@@ -4,10 +4,11 @@ use std::{
     ops::Deref,
     sync::{
         atomic::AtomicUsize,
-        mpsc::{channel, Receiver, Sender},
         Arc, RwLock, RwLockReadGuard, RwLockWriteGuard,
     },
 };
+
+use async_channel::{Sender, Receiver, unbounded};
 
 /// An identifier.
 #[derive(Ord)]
@@ -72,7 +73,7 @@ impl<T> Default for BankOfIds<T> {
     fn default() -> Self {
         BankOfIds {
             next_id: Arc::new(AtomicUsize::new(0)),
-            recycler: channel(),
+            recycler: unbounded(),
         }
     }
 }
@@ -96,7 +97,7 @@ impl<T> BankOfIds<T> {
 }
 
 #[derive(Default)]
-pub(crate) struct Shared<T> {
+pub struct Shared<T> {
     inner: Arc<RwLock<T>>,
 }
 
@@ -109,20 +110,24 @@ impl<T> Clone for Shared<T> {
 }
 
 impl<T> Shared<T> {
+    /// Wrap a `T` to create a new `Shared` thing.
     pub fn new(inner: T) -> Self {
         Self {
             inner: Arc::new(RwLock::new(inner)),
         }
     }
 
+    /// Get a read guard.
     pub fn read(&self) -> RwLockReadGuard<'_, T> {
         self.inner.read().unwrap()
     }
 
+    /// Get a write guard.
     pub fn write(&self) -> RwLockWriteGuard<'_, T> {
         self.inner.write().unwrap()
     }
 
+    /// Return the number of owners of this `Shared<T>`.
     pub fn count(&self) -> usize {
         Arc::strong_count(&self.inner)
     }

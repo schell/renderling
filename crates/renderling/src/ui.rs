@@ -1,37 +1,16 @@
-//! Ui pipeline and material definitions.
-use crate::{AnyMaterialUniform, Material, MaterialUniform};
+//! Ui pipeline, material definitions and sub-graph.
+use std::ops::Deref;
+
+use crate::{AnyMaterialUniform, Id, Material, MaterialUniform, Pipeline, Pipelines, AnyMaterial, Queue, Device, RenderTarget};
 
 #[cfg(feature = "text")]
 mod text;
+use moongraph::{Write, Read, Edges};
+pub use renderling_shader::ui::UiColorBlend;
 #[cfg(feature = "text")]
 pub use text::*;
 
-
-pub type UiVertex = crate::shaders::ui::Vertex;
-
-/// Variants of uv/color blending.
-///
-/// This determines how UV and Color coords are blended
-/// together.
-#[derive(Debug, Copy, Clone)]
-pub enum UiColorBlend {
-    /// The mesh should be colored only with its color attribute
-    ColorOnly = 0,
-    /// The mesh should be colored only with its uv vertex attribute
-    UvOnly = 1,
-    /// The mesh should replace uv red with its color vertex attribute.
-    ///
-    /// This is used for colored text.
-    ReplaceRedUvWithColor = 2,
-}
-
-#[cfg(test)]
-mod ui {
-    #[test]
-    fn ui_color() {
-        assert!(super::UiColorBlend::ReplaceRedUvWithColor as u32 == 2);
-    }
-}
+pub type UiVertex = crate::linkage::ui::Vertex;
 
 pub struct UiMaterialUniform {
     bindgroup: wgpu::BindGroup,
@@ -53,32 +32,82 @@ pub struct UiMaterial {
 impl Material for UiMaterial {
     fn create_material_uniform(&self, device: &wgpu::Device) -> AnyMaterialUniform {
         AnyMaterialUniform::new(UiMaterialUniform {
-            bindgroup: crate::shaders::ui::create_ui_material_bindgroup(
-                device,
-                self.color_blend as u32,
-                &self.diffuse_texture.view,
-                &self.diffuse_texture.sampler,
-            ),
+            bindgroup: crate::linkage::ui::create_ui_material_bindgroup(device, &self),
         })
     }
 }
 
 /// A pipeline for UI.
-#[derive(Debug)]
 pub struct UiPipeline {
-    inner: wgpu::RenderPipeline,
+    id: Id<Pipeline>,
+    inner: Pipeline,
 }
 
-impl crate::Pipeline for UiPipeline {
-    fn get_render_pipeline(&self) -> &wgpu::RenderPipeline {
+impl Deref for UiPipeline {
+    type Target = Pipeline;
+
+    fn deref(&self) -> &Self::Target {
         &self.inner
     }
 }
 
 impl UiPipeline {
-    pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat) -> Self {
+    /// Creates a new UI shader pipeline.
+    pub fn new(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        format: wgpu::TextureFormat,
+        pipelines: &mut Pipelines,
+    ) -> Self {
+        let diffuse_texture = crate::Texture::new(
+            device,
+            queue,
+            Some("ui-default-diffuse"),
+            None,
+            4,
+            1,
+            1,
+            &[0, 0, 0, 0],
+        );
+
+        let material = crate::UiMaterial {
+            diffuse_texture,
+            color_blend: crate::UiColorBlend::ColorOnly,
+        };
+
         UiPipeline {
-            inner: crate::shaders::ui::create_pipeline(device, format),
+            id: pipelines.ids.dequeue(),
+            inner: Pipeline {
+                pipeline: crate::linkage::ui::create_pipeline(device, format),
+                default_material_uniform: material.create_material_uniform(device),
+                default_material: AnyMaterial::new(material),
+                bindgroup_index_config: crate::PipelineBindGroupIndexConfig {
+                    camera_bindgroup_index: 0,
+                    light_bindgroup_index: 2,
+                    material_bindgroup_index: 1,
+                },
+            },
         }
+    }
+
+    pub fn id(&self) -> Id<Pipeline> {
+        self.id
+    }
+}
+
+
+/// Helper type to create a UiPipeline from a [`Renderer`].
+#[derive(Edges)]
+pub struct UiPipelineCreator {
+    device: Read<Device>,
+    queue: Read<Queue>,
+    target: Read<RenderTarget>,
+    pipelines: Write<Pipelines>,
+}
+
+impl UiPipelineCreator {
+    /// Helper to create a UiPipeline from a [`Renderer`].
+    pub fn create(Self { device, queue, target, mut pipelines }: Self) -> UiPipeline {
+        UiPipeline::new(&device, &queue, target.format(), &mut pipelines)
     }
 }

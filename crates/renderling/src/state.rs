@@ -1,12 +1,9 @@
-//! Rendering state management.
-use renderling_core::conduct_clear_pass;
+//! `wgpu` state management.
+//!
+//! Contains stuff for initializing [`Renderling`]s and doing GPU things like
+//! building pipelines, etc.
 use snafu::prelude::*;
-use std::sync::{Arc, RwLock};
-
-#[cfg(feature = "text")]
-use ab_glyph::FontArc;
-
-use crate::{forward::ForwardPipeline, renderer::Renderling, ui::UiPipeline};
+use std::sync::Arc;
 
 #[derive(Debug, Snafu)]
 pub enum WgpuStateError {
@@ -18,6 +15,9 @@ pub enum WgpuStateError {
 
     #[snafu(display("surface is incompatible with adapter"))]
     IncompatibleSurface,
+
+    #[snafu(display("could not create surface: {}", source))]
+    CreateSurface { source: wgpu::CreateSurfaceError },
 
     #[snafu(display("missing surface texture: {}", source))]
     MissingSurfaceTexture { source: wgpu::SurfaceError },
@@ -77,6 +77,7 @@ impl RenderTarget {
                     format: wgpu::TextureFormat::Rgba8UnormSrgb,
                     usage: wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::RENDER_ATTACHMENT,
                     label: None,
+                    view_formats: &[],
                 };
                 *texture = Arc::new(device.create_texture(&texture_desc));
             }
@@ -90,6 +91,10 @@ impl RenderTarget {
         }
     }
 
+    /// Get the current render target frame.
+    ///
+    /// Errs if the render target is a surface and there was an error getting
+    /// the next swapchain texture.
     pub fn get_current_frame(&self) -> Result<Frame, WgpuStateError> {
         match self {
             RenderTarget::Surface { surface, .. } => {
@@ -131,53 +136,78 @@ impl Frame {
     }
 }
 
-pub struct WgpuState {
-    pub target: RenderTarget,
-    pub current_frame: Option<Frame>,
-    pub device: Arc<wgpu::Device>,
-    pub queue: Arc<wgpu::Queue>,
-    pub size: Arc<RwLock<(u32, u32)>>,
-    pub depth_texture: crate::Texture,
-    pub default_background_color: wgpu::Color,
-}
+pub type CreateSurfaceFn<'a> = Box<dyn FnOnce(&wgpu::Instance) -> Result<wgpu::Surface, WgpuStateError> + 'a>;
 
-impl WgpuState {
-    pub async fn try_new_headless(width: u32, height: u32) -> Result<Self, WgpuStateError> {
-        let size = (width, height);
+pub async fn new_device_queue_and_target<'a>(
+    width: u32,
+    height: u32,
+    create_surface: Option<impl FnOnce(&wgpu::Instance) -> Result<wgpu::Surface, WgpuStateError> + 'a>,
+) -> Result<(wgpu::Device, wgpu::Queue, RenderTarget), WgpuStateError> {
+    // The instance is a handle to our GPU
+    // BackendBit::PRIMARY => Vulkan + Metal + DX12 + Browser WebGPU
+    let backends = if cfg!(target_arch = "wasm32") {
+        wgpu::Backends::all()
+    } else {
+        wgpu::Backends::PRIMARY
+    };
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+        backends,
+        dx12_shader_compiler: wgpu::Dx12Compiler::default(),
+    });
 
-        // The instance is a handle to our GPU
-        // BackendBit::PRIMARY => Vulkan + Metal + DX12 + Browser WebGPU
-        let backend = if cfg!(target_arch = "wasm32") {
-            wgpu::Backends::all()
-        } else {
-            wgpu::Backends::PRIMARY
-        };
-        let instance = wgpu::Instance::new(backend);
-        let adapter = instance
-            .request_adapter(&wgpu::RequestAdapterOptions {
-                power_preference: wgpu::PowerPreference::default(),
-                compatible_surface: None,
-                force_fallback_adapter: false,
-            })
-            .await
-            .context(CannotCreateAdaptorSnafu)?;
-        let limits = if cfg!(target_arch = "wasm32") {
+    fn limits(adapter: &wgpu::Adapter) -> wgpu::Limits {
+        if cfg!(target_arch = "wasm32") {
             wgpu::Limits::downlevel_webgl2_defaults().using_resolution(adapter.limits())
         } else {
             wgpu::Limits::default()
-        };
-        let (device, queue) = adapter
+        }
+    }
+
+    async fn adapter(
+        instance: &wgpu::Instance,
+        compatible_surface: Option<&wgpu::Surface>,
+    ) -> Result<wgpu::Adapter, WgpuStateError> {
+        instance
+            .request_adapter(&wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::default(),
+                compatible_surface,
+                force_fallback_adapter: false,
+            })
+            .await
+            .context(CannotCreateAdaptorSnafu)
+    }
+
+    async fn device(
+        adapter: &wgpu::Adapter,
+    ) -> Result<(wgpu::Device, wgpu::Queue), WgpuStateError> {
+        adapter
             .request_device(
                 &wgpu::DeviceDescriptor {
                     features: wgpu::Features::empty(),
-                    limits,
+                    limits: limits(&adapter),
                     label: None,
                 },
                 None, // Trace path
             )
             .await
-            .context(CannotRequestDeviceSnafu)?;
+            .context(CannotRequestDeviceSnafu)
+    }
 
+    if let Some(create_surface) = create_surface {
+        let surface = (create_surface)(&instance)?;
+        let adapter = adapter(&instance, Some(&surface)).await?;
+        let surface_config = surface
+            .get_default_config(&adapter, width, height)
+            .context(IncompatibleSurfaceSnafu)?;
+        let (device, queue) = device(&adapter).await?;
+        surface.configure(&device, &surface_config);
+        let target = RenderTarget::Surface {
+            surface,
+            surface_config,
+        };
+        Ok((device, queue, target))
+    } else {
+        let adapter = adapter(&instance, None).await?;
         let texture_desc = wgpu::TextureDescriptor {
             size: wgpu::Extent3d {
                 width,
@@ -190,344 +220,12 @@ impl WgpuState {
             format: wgpu::TextureFormat::Rgba8UnormSrgb,
             usage: wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::RENDER_ATTACHMENT,
             label: None,
+            view_formats: &[],
         };
+        let (device, queue) = device(&adapter).await?;
         let texture = Arc::new(device.create_texture(&texture_desc));
-        let depth_texture = crate::Texture::create_depth_texture(&device, width, height);
         let target = RenderTarget::Texture { texture };
-
-        Ok(WgpuState {
-            target,
-            current_frame: None,
-            device: Arc::new(device),
-            queue: Arc::new(queue),
-            size: Arc::new(RwLock::new(size)),
-            depth_texture,
-            default_background_color: wgpu::Color::TRANSPARENT,
-        })
-    }
-
-    #[cfg(feature = "raw-window-handle")]
-    pub async fn try_new<W>(width: u32, height: u32, window: &W) -> Result<Self, WgpuStateError>
-    where
-        W: raw_window_handle::HasRawWindowHandle + raw_window_handle::HasRawDisplayHandle,
-    {
-        let size = (width, height);
-
-        // The instance is a handle to our GPU
-        // BackendBit::PRIMARY => Vulkan + Metal + DX12 + Browser WebGPU
-        let backend = if cfg!(target_arch = "wasm32") {
-            wgpu::Backends::all()
-        } else {
-            wgpu::Backends::PRIMARY
-        };
-        let instance = wgpu::Instance::new(backend);
-        let surface = unsafe { instance.create_surface(window) };
-        let adapter = instance
-            .request_adapter(&wgpu::RequestAdapterOptions {
-                power_preference: wgpu::PowerPreference::default(),
-                compatible_surface: Some(&surface),
-                force_fallback_adapter: false,
-            })
-            .await
-            .context(CannotCreateAdaptorSnafu)?;
-        let limits = if cfg!(target_arch = "wasm32") {
-            wgpu::Limits::downlevel_webgl2_defaults().using_resolution(adapter.limits())
-        } else {
-            wgpu::Limits::default()
-        };
-        let (device, queue) = adapter
-            .request_device(
-                &wgpu::DeviceDescriptor {
-                    features: wgpu::Features::empty(),
-                    limits,
-                    label: None,
-                },
-                None, // Trace path
-            )
-            .await
-            .context(CannotRequestDeviceSnafu)?;
-
-        let surface_config = wgpu::SurfaceConfiguration {
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-            format: surface
-                .get_supported_formats(&adapter)
-                .first()
-                .copied()
-                .context(IncompatibleSurfaceSnafu)?,
-            width,
-            height,
-            present_mode: wgpu::PresentMode::Fifo,
-            alpha_mode: wgpu::CompositeAlphaMode::Auto,
-        };
-        surface.configure(&device, &surface_config);
-        let target = RenderTarget::Surface {
-            surface,
-            surface_config,
-        };
-        let depth_texture = crate::Texture::create_depth_texture(&device, width, height);
-
-        Ok(WgpuState {
-            target,
-            current_frame: None,
-            device: Arc::new(device),
-            queue: Arc::new(queue),
-            size: Arc::new(RwLock::new(size)),
-            depth_texture,
-            default_background_color: wgpu::Color::TRANSPARENT,
-        })
-    }
-
-    #[cfg(feature = "raw-window-handle")]
-    pub fn from_handle(
-        window_handle: &(impl raw_window_handle::HasRawWindowHandle
-              + raw_window_handle::HasRawDisplayHandle),
-        width: u32,
-        height: u32,
-    ) -> Result<Self, WgpuStateError> {
-        futures_lite::future::block_on(WgpuState::try_new(width, height, window_handle))
-    }
-
-    #[cfg(feature = "winit")]
-    pub fn from_window(window: &winit::window::Window) -> Result<Self, WgpuStateError> {
-        let inner_size = window.inner_size();
-        Self::from_handle(window, inner_size.width, inner_size.height)
-    }
-
-    pub fn headless(width: u32, height: u32) -> Result<Self, WgpuStateError> {
-        futures_lite::future::block_on(Self::try_new_headless(width, height))
-    }
-
-    pub fn get_size(&self) -> (u32, u32) {
-        *self.size.read().unwrap()
-    }
-
-    pub fn resize(&mut self, size: (u32, u32)) {
-        *self.size.write().unwrap() = size;
-        self.target.resize(size.0, size.1, &self.device);
-        self.depth_texture = crate::Texture::create_depth_texture(&self.device, size.0, size.1);
-    }
-
-    #[cfg(feature = "image")]
-    pub fn create_texture<P>(
-        &self,
-        label: Option<&str>,
-        img: &image::ImageBuffer<P, Vec<u8>>,
-    ) -> Result<crate::Texture, WgpuStateError>
-    where
-        P: image::PixelWithColorType,
-        image::ImageBuffer<P, Vec<u8>>: image::GenericImage + std::ops::Deref<Target = [u8]>,
-    {
-        let name = label.unwrap_or("unknown");
-        crate::Texture::from_image_buffer(
-            &self.device,
-            &self.queue,
-            img,
-            Some(&format!("Renderling::create_texture {}", name)),
-            None,
-        )
-        .context(TextureSnafu)
-    }
-
-    /// Loads [`current_target_frame`] with a [`TargetFrame`], if possible.
-    pub fn prepare_target_frame(&mut self) -> Result<(), WgpuStateError> {
-        let current_surface_frame = self.target.get_current_frame()?;
-        // Save the frame for subsequent systems' render passes
-        self.current_frame = Some(current_surface_frame);
-        Ok(())
-    }
-
-    pub fn next_frame(
-        &mut self,
-    ) -> Result<(Arc<wgpu::TextureView>, Arc<wgpu::TextureView>), WgpuStateError> {
-        if self.current_frame.is_none() {
-            self.prepare_target_frame()?;
-        }
-        let frame = self.current_frame.as_ref().unwrap();
-        let frame_view = Arc::new(Self::default_frame_texture_view(frame.texture()));
-        Ok((frame_view, self.depth_texture.view.clone()))
-    }
-
-    /// Grab the current frame as a buffer.
-    ///
-    /// This should be called after rendering, before presentation.
-    pub fn grab_frame_buffer(&self) -> Result<PostRenderBuffer, WgpuStateError> {
-        let (width, height) = *self.size.read().unwrap();
-        let dimensions = BufferDimensions::new(width as usize, height as usize);
-        // The output buffer lets us retrieve the self as an array
-        let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("screen capture buffer"),
-            size: (dimensions.padded_bytes_per_row * dimensions.height) as u64,
-            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        let mut encoder = self
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("post render screen capture encoder"),
-            });
-
-        let frame = self
-            .current_frame
-            .as_ref()
-            .context(MissingTargetFrameSnafu)?;
-        let texture = frame.texture();
-
-        // Copy the data from the surface texture to the buffer
-        encoder.copy_texture_to_buffer(
-            texture.as_image_copy(),
-            wgpu::ImageCopyBuffer {
-                buffer: &buffer,
-                layout: wgpu::ImageDataLayout {
-                    offset: 0,
-                    bytes_per_row: Some(
-                        std::num::NonZeroU32::new(dimensions.padded_bytes_per_row as u32).unwrap(),
-                    ),
-                    rows_per_image: None,
-                },
-            },
-            wgpu::Extent3d {
-                width: dimensions.width as u32,
-                height: dimensions.height as u32,
-                depth_or_array_layers: 1,
-            },
-        );
-
-        self.queue.submit(std::iter::once(encoder.finish()));
-
-        Ok(PostRenderBuffer { dimensions, buffer })
-    }
-
-    #[cfg(feature = "image")]
-    /// Grab the current frame as an image.
-    ///
-    /// This should be called after rendering, before presentation.
-    /// Good for getting headless screen grabs.
-    pub fn grab_frame_image(&self) -> Result<image::RgbaImage, WgpuStateError> {
-        use futures_lite::future::FutureExt;
-
-        let buffer = self.grab_frame_buffer()?;
-        futures_lite::future::block_on(async move {
-            async { buffer.convert_to_rgba().await }
-                .or(async {
-                    loop {
-                        self.device.poll(wgpu::Maintain::Poll);
-                        futures_lite::future::yield_now().await;
-                    }
-                })
-                .await
-        })
-    }
-
-    pub fn default_frame_texture_view(frame_texture: &wgpu::Texture) -> wgpu::TextureView {
-        frame_texture.create_view(&wgpu::TextureViewDescriptor {
-            label: Some("WgpuState::default_frame_texture_view"),
-            format: None,
-            dimension: None,
-            aspect: wgpu::TextureAspect::All,
-            base_mip_level: 0,
-            mip_level_count: None,
-            base_array_layer: 0,
-            array_layer_count: None,
-        })
-    }
-
-    /// Clear the given texture and/or depth texture.
-    pub fn clear(
-        &self,
-        frame_view: Option<&wgpu::TextureView>,
-        depth_view: Option<&wgpu::TextureView>,
-    ) {
-        conduct_clear_pass(
-            &self.device,
-            &self.queue,
-            Some("WgpuState::clear"),
-            frame_view,
-            depth_view,
-            self.default_background_color,
-        )
-    }
-
-    /// Present the current frame, if possible.
-    pub fn present(&mut self) -> Result<(), WgpuStateError> {
-        let frame = self.current_frame.take().context(MissingTargetFrameSnafu)?;
-        frame.present();
-        Ok(())
-    }
-
-    #[cfg(feature = "ui")]
-    /// Creates a new renderling with a UI shader pipeline.
-    ///
-    /// By default this renderling has a camera set with an orthographic 2d projection.
-    pub fn new_ui_renderling(&self) -> Renderling<UiPipeline> {
-        // this is the _default_ texture bind group which will be used when
-        // there is no available texture to bind.
-
-        let diffuse_texture = crate::Texture::new(
-            &self.device,
-            &self.queue,
-            Some("ui-default-diffuse"),
-            None,
-            4,
-            1,
-            1,
-            &[0, 0, 0, 0],
-        );
-
-        let material = crate::UiMaterial {
-            diffuse_texture,
-            color_blend: crate::UiColorBlend::ColorOnly,
-        };
-
-        let mut r = Renderling::new(
-            self,
-            crate::UiPipeline::new(&self.device, self.target.format()),
-            material,
-            false,
-        );
-        let _ = r.new_camera().with_projection_ortho2d().build();
-        r
-    }
-
-    #[cfg(feature = "forward")]
-    pub fn new_forward_renderling(&self) -> Renderling<ForwardPipeline> {
-        // this is the _default_ texture bind group which will be used when
-        // there is no available texture to bind.
-        let diffuse_texture = crate::Texture::new(
-            &self.device,
-            &self.queue,
-            Some("forward-default-diffuse"),
-            None,
-            4,
-            1,
-            1,
-            &[0xff, 0xff, 0xff, 0xff],
-        );
-        let specular_texture = crate::Texture::new(
-            &self.device,
-            &self.queue,
-            Some("forward-default-specular"),
-            None,
-            4,
-            1,
-            1,
-            &[0xff, 0xff, 0xff, 0xff],
-        );
-        let material = crate::forward::BlinnPhongMaterial {
-            diffuse_texture,
-            specular_texture,
-            shininess: 16.0,
-        };
-        Renderling::new(
-            self,
-            crate::ForwardPipeline::new(&self.device, self.target.format()),
-            material,
-            true,
-        )
-    }
-
-    #[cfg(feature = "text")]
-    pub fn new_glyph_cache(&self, fonts: impl IntoIterator<Item = FontArc>) -> crate::GlyphCache {
-        crate::GlyphCache::new(self, fonts.into_iter().collect())
+        Ok((device, queue, target))
     }
 }
 
@@ -596,15 +294,5 @@ impl PostRenderBuffer {
             )
             .context(CouldNotConvertImageBufferSnafu)?;
         Ok(image::DynamicImage::ImageRgba8(img_buffer).to_rgba8())
-    }
-}
-
-#[cfg(test)]
-mod test {
-    use crate::*;
-
-    #[test]
-    fn headless() {
-        let _wgpu_state = WgpuState::headless(100, 100).unwrap();
     }
 }

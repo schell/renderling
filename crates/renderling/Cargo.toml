@@ -12,28 +12,33 @@ readme = "../../README.md"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-default = ["forward", "ui", "gltf", "text", "image", "raw-window-handle", "winit"]
-forward = ["renderling_forward"]
+default = ["forward", "pbr", "ui", "gltf", "text", "image", "raw-window-handle", "winit"]
+forward = []
 ui = []
+pbr = []
 text = ["ab_glyph", "glyph_brush"]
 wasm = ["wgpu/webgl"]
 
 [dependencies]
 ab_glyph = { version = "^0.2", optional = true }
-bytemuck = { version = "1.13.0", features = ["derive"] }
-futures-lite = "1.12.0"
-gltf = { version = "1.1.0", optional = true }
+async-channel = "^1.8"
+bytemuck = { version = "^1.13", features = ["derive"] }
+encase = { version = "^0.4", features = ["glam"] }
+futures-lite = "^1.12"
+glam = { version = "^0.22", default-features = false, features = ["bytemuck", "libm"] }
+gltf = { version = "^1.1", optional = true, features = ["KHR_lights_punctual", "extras"] }
 glyph_brush = { version = "^0.7", optional = true }
 image = { version = "0.24.4", optional = true }
-log = "0.4.17"
-nalgebra = "0.32.1"
-raw-window-handle = { version = "0.5.0", optional = true }
-renderling_core = { path = "../core", version = "^0.1.6" }
-renderling_forward = { path = "../forward", version = "^0.2.6", optional = true }
-rustc-hash = "1.1.0"
-snafu = "0.7.4"
-wgpu = { version = "^0.14" }
-winit = { version = "0.27.5", optional = true }
+log = "^0.4"
+moongraph = { path = "../moongraph", features = ["dot"] }
+raw-window-handle = { version = "^0.5", optional = true }
+renderling-shader = { path = "../renderling-shader" }
+rustc-hash = "^1.1"
+serde_json = "^1.0"
+snafu = "^0.7"
+splines = { version = "^4.2", features = ["glam"] }
+wgpu = { version = "^0.15", features = ["spirv"] }
+winit = { version = "^0.27", optional = true }
 
 [package.metadata.docs.rs]
 features = ["forward", "ui", "image", "raw-window-handle", "winit"]
