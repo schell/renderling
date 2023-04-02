@@ -1,7 +1,12 @@
-//! Text rendering capabilities for `Renderling<UiPipeline>`.
+//! Text rendering capabilities for `Renderling`.
 //!
 //! This module is only enabled with the `text` cargo feature.
-use std::{borrow::Cow, num::NonZeroU32, ops::{Deref, DerefMut}, sync::Arc};
+use std::{
+    borrow::Cow,
+    num::NonZeroU32,
+    ops::{Deref, DerefMut},
+    sync::Arc,
+};
 
 use ::ab_glyph::Rect;
 use glyph_brush::*;
@@ -9,7 +14,7 @@ use glyph_brush::*;
 pub use ::ab_glyph::FontArc;
 pub use glyph_brush::{Color, Section, Text};
 
-use crate::{Mesh, Texture, UiColorBlend, UiMaterial, UiVertex, WgpuState};
+use crate::{Mesh, Renderling, Texture, UiColorBlend, UiMaterial, UiVertex};
 
 /// A text cache maintained mostly by ab_glyph.
 pub struct Cache {
@@ -30,6 +35,7 @@ impl Cache {
             usage: wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::TEXTURE_BINDING,
             mip_level_count: 1,
             sample_count: 1,
+            view_formats: &[],
         });
 
         let texture = Texture::from_wgpu_tex(texture, device);
@@ -125,12 +131,24 @@ impl DerefMut for GlyphCache {
 }
 
 impl GlyphCache {
-    pub fn new(gpu: &WgpuState, fonts: Vec<FontArc>) -> Self {
+    pub fn new(r: &Renderling, fonts: Vec<FontArc>) -> Self {
         let brush = GlyphBrushBuilder::using_fonts(fonts).build();
         GlyphCache {
             cache: None,
-            device: gpu.device.clone(),
-            queue: gpu.queue.clone(),
+            device: r
+                .graph
+                .get_resource::<crate::Device>()
+                .unwrap()
+                .unwrap()
+                .0
+                .clone(),
+            queue: r
+                .graph
+                .get_resource::<crate::Queue>()
+                .unwrap()
+                .unwrap()
+                .0
+                .clone(),
             brush,
         }
     }
@@ -228,7 +246,8 @@ impl GlyphCache {
     /// Returns a new material if the material needs to be updated.
     /// Returns a new mesh if the mesh needs to be updated.
     ///
-    /// The material and mesh are meant to be used to build or update an object to display.
+    /// The material and mesh are meant to be used to build or update an object
+    /// to display.
     pub fn get_updated(&mut self) -> (Option<UiMaterial>, Option<Mesh>) {
         let mut may_material: Option<UiMaterial> = if self.cache.is_none() {
             Some(self.get_material())

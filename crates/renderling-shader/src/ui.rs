@@ -1,16 +1,11 @@
 //! Renderling's user interface shader.
-use spirv_std::{
-    glam::{mat4, vec4, Mat4, UVec4, Vec2, Vec3, Vec4},
-    image::Image2d, Sampler,
-};
+use glam::{mat4, vec4, Mat4, Vec2, Vec3, Vec4};
+use spirv_std::{image::Image2d, Sampler};
 
-pub struct Camera {
-    projection: Mat4,
-    view: Mat4,
-}
+use crate::CameraRaw;
 
 pub fn main_vertex(
-    camera: &Camera,
+    camera: &CameraRaw,
 
     in_pos: Vec3,
     in_color: Vec4,
@@ -36,26 +31,48 @@ pub fn main_vertex(
     *out_pos = camera.projection * camera.view * model * vec4(in_pos.x, in_pos.y, in_pos.z, 1.0);
 }
 
+/// Variants of uv/color blending.
+///
+/// This determines how UV and Color coords are blended
+/// together.
 #[repr(u32)]
-pub enum BlendStyle {
-    ColorOnly,
-    TextureOnly,
-    ReplaceUvRedWithColor,
+#[derive(Clone, Copy, Debug)]
+pub enum UiColorBlend {
+    /// The mesh should be colored only with its color attribute
+    ColorOnly = 0,
+    /// The mesh should be colored only with its uv vertex attribute
+    UvOnly = 1,
+    /// The mesh should replace uv red with its color vertex attribute.
+    ///
+    /// This is used for colored text.
+    ReplaceRedUvWithColor = 2,
 }
 
-impl From<u32> for BlendStyle {
-    fn from(value: u32) -> Self {
-        match value {
-            0 => BlendStyle::ColorOnly,
-            1 => BlendStyle::TextureOnly,
-            _ => BlendStyle::ReplaceUvRedWithColor,
+impl From<&ShaderColorBlend> for UiColorBlend {
+    fn from(ShaderColorBlend { inner }: &ShaderColorBlend) -> Self {
+        match inner {
+            0 => UiColorBlend::ColorOnly,
+            1 => UiColorBlend::UvOnly,
+            _ => UiColorBlend::ReplaceRedUvWithColor,
         }
     }
 }
 
+impl From<UiColorBlend> for ShaderColorBlend {
+    fn from(value: UiColorBlend) -> Self {
+        ShaderColorBlend {
+            inner: value as u32,
+        }
+    }
+}
+
+#[cfg_attr(not(target_arch = "spirv"), derive(encase::ShaderType))]
+pub struct ShaderColorBlend {
+    inner: u32,
+}
+
 pub fn main_fragment(
-    blend: &UVec4,
-    // TODO: confirm `SampledImage` is what we want here, and not `Image2d` + `Sampler`...
+    blend: &ShaderColorBlend,
     texture: &Image2d,
     sampler: &Sampler,
 
@@ -65,11 +82,19 @@ pub fn main_fragment(
     output: &mut Vec4,
 ) {
     let uv_color: Vec4 = texture.sample(*sampler, in_uv);
-    *output = match BlendStyle::from(blend.x) {
-        BlendStyle::ColorOnly => in_color,
-        BlendStyle::TextureOnly => uv_color,
-        BlendStyle::ReplaceUvRedWithColor => {
+    *output = match UiColorBlend::from(blend) {
+        UiColorBlend::ColorOnly => in_color,
+        UiColorBlend::UvOnly => uv_color,
+        UiColorBlend::ReplaceRedUvWithColor => {
             vec4(in_color.x, in_color.y, in_color.z, in_color.w * uv_color.x)
         }
     };
+}
+
+#[cfg(test)]
+mod test {
+    #[test]
+    fn ui_color() {
+        assert!(super::UiColorBlend::ReplaceRedUvWithColor as u32 == 2);
+    }
 }

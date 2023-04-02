@@ -1,6 +1,5 @@
 //! Creating and storing meshes using `wgpu`.
 use bytemuck::Pod;
-//use pxy::math::{Point3, UnitVector3, Vector3};
 use wgpu::util::DeviceExt;
 
 /// An unbuffered mesh.
