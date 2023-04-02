@@ -17,7 +17,7 @@ dot = ["dagga/dot"]
 
 [dependencies]
 broomdog = "^0.1"
-dagga = { path = "../../../dagga", default-features = false }#{ version = "^0.1", default-features = false }
+dagga { version = "^0.2", default-features = false }
 log = "0.4.17"
 moongraph-macros = { path = "../moongraph-macros", version = "^0.1" }
 snafu = "0.7.4"
