@@ -23,6 +23,7 @@ wasm = ["wgpu/webgl"]
 ab_glyph = { version = "^0.2", optional = true }
 async-channel = "^1.8"
 bytemuck = { version = "^1.13", features = ["derive"] }
+derive_more = "^0.99"
 encase = { version = "^0.4", features = ["glam"] }
 futures-lite = "^1.12"
 glam = { version = "^0.22", default-features = false, features = ["bytemuck", "libm"] }

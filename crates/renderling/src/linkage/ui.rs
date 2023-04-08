@@ -104,8 +104,7 @@ pub fn create_ui_material_bindgroup(
 }
 
 pub fn create_pipeline(device: &wgpu::Device, format: wgpu::TextureFormat) -> wgpu::RenderPipeline {
-    let shader_crate = device.create_shader_module(wgpu::include_spirv!("shader_crate.spv"));
-
+    let shader_crate = super::shader_crate(device);
     let render_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("ui render pipeline layout"),
         bind_group_layouts: &[

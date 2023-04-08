@@ -136,20 +136,19 @@ impl Frame {
     }
 }
 
-pub type CreateSurfaceFn<'a> = Box<dyn FnOnce(&wgpu::Instance) -> Result<wgpu::Surface, WgpuStateError> + 'a>;
+pub type CreateSurfaceFn<'a> =
+    Box<dyn FnOnce(&wgpu::Instance) -> Result<wgpu::Surface, WgpuStateError> + 'a>;
 
 pub async fn new_device_queue_and_target<'a>(
     width: u32,
     height: u32,
-    create_surface: Option<impl FnOnce(&wgpu::Instance) -> Result<wgpu::Surface, WgpuStateError> + 'a>,
-) -> Result<(wgpu::Device, wgpu::Queue, RenderTarget), WgpuStateError> {
+    create_surface: Option<
+        impl FnOnce(&wgpu::Instance) -> Result<wgpu::Surface, WgpuStateError> + 'a,
+    >,
+) -> (wgpu::Device, wgpu::Queue, RenderTarget) {
     // The instance is a handle to our GPU
     // BackendBit::PRIMARY => Vulkan + Metal + DX12 + Browser WebGPU
-    let backends = if cfg!(target_arch = "wasm32") {
-        wgpu::Backends::all()
-    } else {
-        wgpu::Backends::PRIMARY
-    };
+    let backends = wgpu::Backends::all();
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
         backends,
         dx12_shader_compiler: wgpu::Dx12Compiler::default(),
@@ -157,7 +156,7 @@ pub async fn new_device_queue_and_target<'a>(
 
     fn limits(adapter: &wgpu::Adapter) -> wgpu::Limits {
         if cfg!(target_arch = "wasm32") {
-            wgpu::Limits::downlevel_webgl2_defaults().using_resolution(adapter.limits())
+            wgpu::Limits::downlevel_defaults().using_resolution(adapter.limits())
         } else {
             wgpu::Limits::default()
         }
@@ -166,7 +165,7 @@ pub async fn new_device_queue_and_target<'a>(
     async fn adapter(
         instance: &wgpu::Instance,
         compatible_surface: Option<&wgpu::Surface>,
-    ) -> Result<wgpu::Adapter, WgpuStateError> {
+    ) -> wgpu::Adapter {
         instance
             .request_adapter(&wgpu::RequestAdapterOptions {
                 power_preference: wgpu::PowerPreference::default(),
@@ -174,40 +173,40 @@ pub async fn new_device_queue_and_target<'a>(
                 force_fallback_adapter: false,
             })
             .await
-            .context(CannotCreateAdaptorSnafu)
+            .unwrap()
     }
 
-    async fn device(
-        adapter: &wgpu::Adapter,
-    ) -> Result<(wgpu::Device, wgpu::Queue), WgpuStateError> {
+    async fn device(adapter: &wgpu::Adapter) -> (wgpu::Device, wgpu::Queue) {
         adapter
             .request_device(
                 &wgpu::DeviceDescriptor {
-                    features: wgpu::Features::empty(),
+                    features: wgpu::Features::INDIRECT_FIRST_INSTANCE
+                        | wgpu::Features::MULTI_DRAW_INDIRECT
+                        // this one is a funny requirement, it seems it is needed if using storage buffers in
+                        // vertex shaders, even if those shaders are read-only
+                        | wgpu::Features::VERTEX_WRITABLE_STORAGE,
                     limits: limits(&adapter),
                     label: None,
                 },
                 None, // Trace path
             )
             .await
-            .context(CannotRequestDeviceSnafu)
+            .unwrap()
     }
 
     if let Some(create_surface) = create_surface {
-        let surface = (create_surface)(&instance)?;
-        let adapter = adapter(&instance, Some(&surface)).await?;
-        let surface_config = surface
-            .get_default_config(&adapter, width, height)
-            .context(IncompatibleSurfaceSnafu)?;
-        let (device, queue) = device(&adapter).await?;
+        let surface = (create_surface)(&instance).unwrap();
+        let adapter = adapter(&instance, Some(&surface)).await;
+        let surface_config = surface.get_default_config(&adapter, width, height).unwrap();
+        let (device, queue) = device(&adapter).await;
         surface.configure(&device, &surface_config);
         let target = RenderTarget::Surface {
             surface,
             surface_config,
         };
-        Ok((device, queue, target))
+        (device, queue, target)
     } else {
-        let adapter = adapter(&instance, None).await?;
+        let adapter = adapter(&instance, None).await;
         let texture_desc = wgpu::TextureDescriptor {
             size: wgpu::Extent3d {
                 width,
@@ -222,10 +221,10 @@ pub async fn new_device_queue_and_target<'a>(
             label: None,
             view_formats: &[],
         };
-        let (device, queue) = device(&adapter).await?;
+        let (device, queue) = device(&adapter).await;
         let texture = Arc::new(device.create_texture(&texture_desc));
         let target = RenderTarget::Texture { texture };
-        Ok((device, queue, target))
+        (device, queue, target)
     }
 }
 

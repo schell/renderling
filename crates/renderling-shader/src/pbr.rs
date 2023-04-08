@@ -4,7 +4,7 @@
 use glam::{mat3, mat4, vec4, Mat3, Mat4, Vec2, Vec3, Vec3Swizzles, Vec4, Vec4Swizzles, vec3};
 use spirv_std::{image::Image2d, Sampler};
 
-use crate::{CameraRaw, light::*, math::Vec3ColorSwizzles, mesh::*};
+use crate::{CameraRaw, light::*, math::Vec3ColorSwizzles};
 
 pub fn main_vertex(
     camera: &CameraRaw,

@@ -79,7 +79,7 @@ impl BlinnPhongMaterial {
 
 /// A pipeline for phong shaded 3d objects.
 pub struct ForwardPipeline {
-    id: Id<Pipeline>,
+    _id: Id<Pipeline>,
     inner: Pipeline,
 }
 
@@ -130,7 +130,7 @@ impl ForwardPipeline {
         };
 
         ForwardPipeline {
-            id: pipelines.ids.dequeue(),
+            _id: pipelines.ids.dequeue(),
             inner: Pipeline {
                 pipeline: crate::linkage::pbr::create_pipeline(device, format, primitive),
                 default_material_uniform: material.create_material_uniform(device),

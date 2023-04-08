@@ -209,3 +209,8 @@ pub struct VertexBuffer {
     pub buffer: wgpu::Buffer,
     pub len: usize,
 }
+
+pub fn shader_crate(device: &wgpu::Device) -> wgpu::ShaderModule {
+    let module = wgpu::include_spirv!("shader_crate.spv");
+    device.create_shader_module(module)
+}
