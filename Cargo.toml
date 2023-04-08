@@ -10,3 +10,6 @@ members = [
 exclude = ["./shaders"]
 
 resolver = "2"
+
+[patch.crates-io]
+naga = { git = "https://github.com/EmbarkStudios/naga", branch = "spv-in-break-if-v0.11.0" }

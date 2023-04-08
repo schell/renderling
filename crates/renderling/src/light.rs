@@ -11,7 +11,10 @@ use renderling_shader::light::{
 };
 
 #[derive(snafu::Snafu, Debug)]
-pub enum LightsError {}
+pub enum LightsError {
+    #[snafu(display("none"))]
+    None
+}
 
 /// Illuminates geometry in all directions surrounding a point, with
 /// attenuation.

@@ -46,11 +46,12 @@ mod gltf_support;
 mod light;
 mod material;
 mod mesh;
-mod node;
+pub mod node;
 mod object;
 mod pipeline;
 mod renderer;
 mod resources;
+mod scene;
 mod state;
 mod texture;
 mod transform;
@@ -65,6 +66,7 @@ pub use object::*;
 pub use pipeline::*;
 pub use renderer::*;
 pub use resources::*;
+pub use scene::*;
 pub use state::*;
 pub use texture::*;
 pub use transform::*;
@@ -76,10 +78,7 @@ mod img_diff;
 
 #[cfg(test)]
 mod test {
-    use std::{
-        ops::{Deref, DerefMut},
-        sync::Arc,
-    };
+    use std::sync::Arc;
 
     use crate::{
         img_diff::Save,
@@ -88,9 +87,8 @@ mod test {
 
     use super::*;
     use glam::{Mat4, Quat, Vec2, Vec3, Vec4};
-    use moongraph::{DaggaError, Function, GraphError, Node, TypeKey};
-    use renderling_shader::TestStorage;
-    use wgpu::util::DeviceExt;
+    use moongraph::{DaggaError, Function, GraphError, Node, Read, TypeKey};
+    use renderling_shader::scene::{DrawIndirect, GpuCamera, GpuMeshlet, GpuVertex};
 
     #[test]
     fn init() {
@@ -115,9 +113,11 @@ mod test {
     fn _init_logging() {
         let _ = env_logger::builder()
             .is_test(true)
+            //.filter_level(log::LevelFilter::Trace)
             .filter_module("renderling", log::LevelFilter::Trace)
             .filter_module("naga", log::LevelFilter::Warn)
-            .filter_module("wgpu", log::LevelFilter::Warn)
+            .filter_module("wgpu", log::LevelFilter::Debug)
+            .filter_module("wgpu_hal", log::LevelFilter::Warn)
             .try_init();
     }
 
@@ -733,7 +733,7 @@ mod test {
     #[test]
     // tests that nested children are transformed by their parent's transform
     fn parent_sanity() {
-        let (mut ui, cam) = ui_renderling();
+        let (mut ui, _cam) = ui_renderling();
         ui.set_background_color(Vec4::splat(0.0));
         let size = 1.0;
         let yellow_tri = ui
@@ -787,7 +787,7 @@ mod test {
     #[test]
     // tests importing a gltf file and rendering the first image as a 2d object
     fn gltf_images() {
-        let (mut ui, cam) = ui_renderling();
+        let (mut ui, _cam) = ui_renderling();
         let mut loader = ui.new_gltf_loader();
         let (document, _buffers, images) = gltf::import("../../gltf/cheetah_cone.glb").unwrap();
         loader.load_materials(&document, &images).unwrap();
@@ -877,7 +877,7 @@ mod test {
         // that only clears the depth.
         let clear_frame_and_depth_node = r.graph.remove_node("clear_frame_and_depth").unwrap();
         pub fn clear_only_depth(
-            (device, queue, frame_view, depth, color): (
+            (device, queue, _frame_view, depth, color): (
                 Read<Device>,
                 Read<Queue>,
                 Read<FrameTextureView>,
@@ -1005,85 +1005,180 @@ mod test {
         assert_eq!(0, anime.tweens[1].target_node_index);
     }
 
+    // fn big_scene_cube_builder() -> MeshBuilder<UiVertex> {
+    //    let vertices = crate::math::unit_points();
+    //    let indices: [([u16; 3], [u16; 3], Vec4); 6] = [
+    //        ([0, 1, 2], [0, 2, 3], Vec4::Y),     // top
+    //        ([0, 3, 4], [4, 3, 5], Vec4::Z),     // front
+    //        ([3, 2, 6], [3, 6, 5], Vec4::X),     // right
+    //        ([1, 0, 7], [7, 0, 4], Vec4::NEG_X), // left
+    //        ([4, 5, 6], [4, 6, 7], Vec4::NEG_Y), // bottom
+    //        ([2, 1, 7], [2, 7, 6], Vec4::NEG_Z), // back
+    //    ];
+    //    MeshBuilder::default()
+    //        .with_vertices(indices.flat_map(|ui_vert| GpuVertex {
+    //            position: Vec3::from_array(ui_vert.position).extend(0.0),
+    //            color: Vec4::from_array(ui_vert.color),
+    //            uv: Vec4::ZERO,
+    //            norm: Vec4::ZERO,
+    //        }))
+    //        .with_indices(indices)
+    //}
+
     #[test]
-    fn test_compute_storage_buffer() {
+    fn gpu_array_update() {
+        _init_logging();
         let (device, queue, _) = futures_lite::future::block_on(
             crate::state::new_device_queue_and_target(100, 100, None as Option<CreateSurfaceFn>),
+        );
+
+        let points = vec![
+            Vec4::new(0.0, 0.0, 0.0, 0.0),
+            Vec4::new(1.0, 0.0, 0.0, 0.0),
+            Vec4::new(1.0, 1.0, 0.0, 0.0),
+        ];
+        let mut array = GpuArray::new(
+            &device,
+            &points,
+            6,
+            wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::COPY_SRC,
+        );
+
+        // send them to the GPU
+        array.update(&queue);
+        // read them back
+        let verts = array.read(&device, &queue, 0, 3).unwrap();
+
+        println!("{verts:#?}");
+        assert_eq!(points, verts);
+
+        let additions = vec![Vec4::splat(1.0), Vec4::splat(2.0)];
+        let (start_index, len) = array.overwrite(2, additions.clone()).unwrap();
+        assert_eq!((2, 2), (start_index, len));
+
+        array.update(&queue);
+        let verts = array.read(&device, &queue, 0, 4).unwrap();
+        let all_points = points[0..2]
+            .into_iter()
+            .copied()
+            .chain(additions)
+            .collect::<Vec<_>>();
+        assert_eq!(all_points, verts);
+
+        let (start, len) = array.extend(vec![Vec4::Y, Vec4::Z]).unwrap();
+        assert_eq!((4, 2), (start, len));
+    }
+
+    #[test]
+    fn gpu_scene_sanity() {
+        _init_logging();
+        let mut r = Renderling::headless(100, 100)
+            .unwrap()
+            .with_background_color(Vec4::splat(1.0));
+        let mut scene = r
+            .graph
+            .visit(|device: Read<Device>| Scene::new(&device, 3, 1, 1, 1))
+            .unwrap();
+        let (projection, view) = camera::default_ortho2d(100.0, 100.0);
+        let camera = GpuCamera { projection, view };
+        scene.set_camera(camera);
+        let verts = vec![
+            GpuVertex {
+                position: Vec4::new(0.0, 0.0, 0.0, 1.0),
+                color: Vec4::new(1.0, 1.0, 0.0, 1.0),
+            },
+            GpuVertex {
+                position: Vec4::new(100.0, 0.0, 0.0, 1.0),
+                color: Vec4::new(1.0, 0.0, 1.0, 1.0),
+            },
+            GpuVertex {
+                position: Vec4::new(100.0, 100.0, 0.0, 1.0),
+                color: Vec4::new(0.0, 1.0, 1.0, 1.0),
+            },
+        ];
+        let ent = scene
+            .new_entity()
+            .with_meshlet(verts.clone())
+            .with_transform(Mat4::IDENTITY)
+            .build()
+            .unwrap();
+        scene::setup_scene_render_graph(scene, &mut r);
+
+        r.graph.visit(scene::scene_update).unwrap().unwrap();
+        r.graph.visit(scene::scene_cull).unwrap().unwrap();
+
+        let (gpu_camera, gpu_verts, ents, meshes, transforms, indirect, indirect_count) = r
+            .graph
+            .visit(
+                |(scene, device, queue): (Read<Scene>, Read<Device>, Read<Queue>)| {
+                    let camera =
+                        scene::read_buffer::<GpuCamera>(&device, &queue, &scene.camera, 0, 1)
+                            .unwrap();
+                    let vertices = scene.vertices.read(&device, &queue, 0, 3).unwrap();
+                    let entities = scene.entities.read(&device, &queue, 0, 1).unwrap();
+                    let meshlets = scene.meshlets.read(&device, &queue, 0, 1).unwrap();
+                    let transforms = scene.transforms.read(&device, &queue, 0, 1).unwrap();
+                    let indirect_count = scene.read_indirect_count(&device, &queue).unwrap();
+                    let indirect = if indirect_count > 0 {
+                        scene
+                            .indirect_draws
+                            .read(&device, &queue, 0, indirect_count as usize)
+                            .unwrap()
+                    } else {
+                        vec![]
+                    };
+                    (
+                        camera[0],
+                        vertices,
+                        entities,
+                        meshlets,
+                        transforms,
+                        indirect,
+                        indirect_count,
+                    )
+                },
+            )
+            .unwrap();
+        assert_eq!(camera, gpu_camera);
+        assert_eq!(verts, gpu_verts);
+        assert_eq!(vec![ent], ents);
+        assert_eq!(
+            vec![GpuMeshlet {
+                first_vertex: 0,
+                vertex_count: 3
+            }],
+            meshes
+        );
+        assert_eq!(vec![Mat4::IDENTITY], transforms);
+        assert_eq!(1, indirect_count);
+        assert_eq!(
+            vec![DrawIndirect {
+                vertex_count: 3,
+                instance_count: 1,
+                base_vertex: 0,
+                base_instance: 0
+            }],
+            indirect
+        );
+
+        r.graph.add_node(
+            crate::node::PostRenderBufferCreate::create
+                .into_node()
+                .with_name("copy_frame_to_post")
+                .run_after("scene_render")
+                .run_before("present"),
+        );
+
+        let img = r.render_image().unwrap();
+        crate::img_diff::assert_img_eq_save(
+            Save::Yes,
+            "gpu_scene_sanity",
+            "gpu_scene_sanity.png",
+            img,
         )
         .unwrap();
-        let shader_crate =
-            device.create_shader_module(wgpu::include_spirv!("linkage/shader_crate.spv"));
-        let label = Some("test compute storage buffer");
-        let bindgroup_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label,
-            entries: &[wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: false },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            }],
-        });
-        let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label,
-            bind_group_layouts: &[&bindgroup_layout],
-            push_constant_ranges: &[],
-        });
-        let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label,
-            layout: Some(&layout),
-            module: &shader_crate,
-            entry_point: "compute_test_storage",
-        });
-
-        let mut byte_buffer = vec![];
-        let mut storage = TestStorage::default();
-        let mut data = encase::StorageBuffer::new(&mut byte_buffer);
-        data.write(&storage).unwrap();
-        let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label,
-            contents: data.into_inner().as_slice(),
-            usage: wgpu::BufferUsages::COPY_SRC | wgpu::BufferUsages::STORAGE,
-        });
-        let output_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label,
-            size: std::mem::size_of_val(&storage) as _,
-            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-            mapped_at_creation: false,
-        });
-
-        let bindgroup_entry = wgpu::BindGroupEntry {
-            binding: 0,
-            resource: buffer.as_entire_binding(),
-        };
-        let bindgroup = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label,
-            layout: &bindgroup_layout,
-            entries: &[bindgroup_entry],
-        });
-
-        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label });
-        let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label });
-        compute_pass.set_pipeline(&pipeline);
-        compute_pass.set_bind_group(0, &bindgroup, &[]);
-        compute_pass.dispatch_workgroups(1, 1, 1);
-        drop(compute_pass);
-        encoder.copy_buffer_to_buffer(&buffer, 0, &output_buffer, 0, std::mem::size_of::<TestStorage>() as _);
-        queue.submit(std::iter::once(encoder.finish()));
-
-        let buffer_slice = output_buffer.slice(..);
-        buffer_slice.map_async(wgpu::MapMode::Read, |_| {});
-        device.poll(wgpu::Maintain::Wait);
-
-        let mut output = buffer_slice.get_mapped_range().to_vec();
-        output_buffer.unmap();
-        let data = encase::StorageBuffer::new(&mut output);
-        data.read(&mut storage).unwrap();
-
-        assert_eq!(Vec4::new(6.0, 6.0, 6.0, 666.0), storage.position);
     }
 
     ////#[cfg(feature = "gltf")]

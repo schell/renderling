@@ -72,6 +72,7 @@ pub enum RenderlingError {
 }
 
 /// A thread-safe wrapper around `wgpu::Device`.
+#[derive(Clone)]
 pub struct Device(pub Arc<wgpu::Device>);
 
 impl Deref for Device {
@@ -83,6 +84,7 @@ impl Deref for Device {
 }
 
 /// A thread-safe wrapper around `wgpu::Queue`.
+#[derive(Clone)]
 pub struct Queue(pub Arc<wgpu::Queue>);
 
 impl Deref for Queue {
@@ -160,8 +162,7 @@ impl Renderling {
             height,
             None as Option<CreateSurfaceFn>,
         )
-        .await
-        .context(StateSnafu)?;
+        .await;
         let depth_texture = crate::Texture::create_depth_texture(&device, width, height);
         Ok(Self::new(target, depth_texture, device, queue, size))
     }
@@ -184,8 +185,7 @@ impl Renderling {
                     .map_err(|e| WgpuStateError::CreateSurface { source: e })
             }) as crate::CreateSurfaceFn),
         )
-        .await
-        .context(StateSnafu)?;
+        .await;
         let depth_texture = crate::Texture::create_depth_texture(&device, width, height);
 
         Ok(Self::new(target, depth_texture, device, queue, size))

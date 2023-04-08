@@ -39,7 +39,10 @@ pub(crate) enum ObjUpdateCmd {
 }
 
 #[derive(Debug, Snafu)]
-pub enum ObjectError {}
+pub enum ObjectError {
+    #[snafu(display("none"))]
+    None
+}
 
 #[derive(Debug, Snafu)]
 pub enum ObjectBuilderError {
@@ -134,7 +137,7 @@ impl<'a> ObjectBuilder<'a> {
             inner,
             children,
             generate_normal_matrix,
-            properties,
+            properties: _,
             renderer,
         } = self;
         let material_uniform = inner
@@ -169,7 +172,7 @@ impl<'a> ObjectBuilder<'a> {
                 mesh,
                 material_uniform,
                 instances,
-                generate_normal_matrix: self.generate_normal_matrix,
+                generate_normal_matrix,
                 world_position: position,
                 inner,
             }

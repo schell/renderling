@@ -74,7 +74,7 @@ impl<T> Default for MeshBuilder<T> {
     }
 }
 
-impl<T: Pod> MeshBuilder<T> {
+impl<T> MeshBuilder<T> {
     pub fn with_vertex(mut self, v: T) -> Self {
         self.unbuffered_mesh.vertices.push(v);
         self
@@ -92,7 +92,9 @@ impl<T: Pod> MeshBuilder<T> {
         self.unbuffered_mesh.indices.as_mut().unwrap().extend(is);
         self
     }
+}
 
+impl<T: Pod> MeshBuilder<T> {
     pub fn build(self, label: Option<&str>, device: &wgpu::Device) -> Mesh {
         Mesh::buffer(
             label,
