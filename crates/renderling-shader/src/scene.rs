@@ -61,11 +61,23 @@ pub struct GpuCamera {
     repr(C),
     derive(bytemuck::Pod, bytemuck::Zeroable)
 )]
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct GpuEntity {
     pub id: u32,
     pub mesh: u32,
     pub transform: u32,
+}
+
+impl Default for GpuEntity {
+    fn default() -> Self {
+        Self { id: u32::MAX, mesh: u32::MAX, transform: u32::MAX }
+    }
+}
+
+impl GpuEntity {
+    pub fn is_alive(&self) -> bool {
+        self.id != u32::MAX
+    }
 }
 
 #[cfg_attr(
@@ -136,29 +148,29 @@ pub fn compute_cull_entities(
         return;
     }
 
+    let mut call = DrawIndirect::default();
     let entity = &entities[i];
-    let mesh = meshes[entity.mesh as usize];
-    let call = DrawIndirect {
-        vertex_count: mesh.vertex_count,
-        instance_count: 1,
-        base_vertex: mesh.first_vertex,
-        base_instance: entity.id,
-    };
+    if entity.is_alive() {
+        let mesh = meshes[entity.mesh as usize];
 
-    // at first we'll just draw everything into the draw indirect buffer
-    let should_cull = false;
-    if !should_cull {
-        //// once naga supports atomics we can use this to compact the array
-        // let index = unsafe {
-        //    spirv_std::arch::atomic_i_increment::<
-        //        u32,
-        //        { spirv_std::memory::Scope::Device as u32 },
-        //        { spirv_std::memory::Semantics::NONE.bits() as u32 },
-        //    >(count)
-        //};
-        let index = i;
-        draws[index as usize] = call;
-    } else {
-        draws[i] = DrawIndirect::default();
+        // at first we'll just draw everything into the draw indirect buffer
+        let should_cull = false;
+        if !should_cull {
+            //// once naga supports atomics we can use this to compact the array
+            // let index = unsafe {
+            //    spirv_std::arch::atomic_i_increment::<
+            //        u32,
+            //        { spirv_std::memory::Scope::Device as u32 },
+            //        { spirv_std::memory::Semantics::NONE.bits() as u32 },
+            //    >(count)
+            //};
+            call = DrawIndirect {
+                vertex_count: mesh.vertex_count,
+                instance_count: 1,
+                base_vertex: mesh.first_vertex,
+                base_instance: entity.id,
+            };
+        }
     }
+    draws[i] = call;
 }
