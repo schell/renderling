@@ -6,8 +6,8 @@ use snafu::prelude::*;
 use std::{any::Any, ops::Deref, sync::Arc};
 
 use crate::{
-    camera::*, resources::*, CreateSurfaceFn, ForwardPipeline, Lights, ObjectBuilder, ObjectInner,
-    Objects, Pipelines, PostRenderBuffer, RenderTarget, WgpuStateError,
+    camera::*, resources::*, CopiedTextureBuffer, CreateSurfaceFn, ForwardPipeline, Lights,
+    ObjectBuilder, ObjectInner, Objects, Pipelines, RenderTarget, TextureError, WgpuStateError,
 };
 
 pub use moongraph::IsGraphNode;
@@ -65,7 +65,7 @@ pub enum RenderlingError {
     MissingPostRenderBuffer { source: moongraph::GraphError },
 
     #[snafu(display("Timeout while waiting for a screengrab"))]
-    ScreenGrabTimeout { source: WgpuStateError },
+    ScreenGrabTimeout { source: TextureError },
 
     #[snafu(display("{source}"))]
     State { source: WgpuStateError },
@@ -543,6 +543,8 @@ impl Renderling {
     /// ## Note
     /// This operation can take a long time, depending on how big the screen is.
     pub fn render_image(&mut self) -> Result<image::RgbaImage, RenderlingError> {
+        use crate::node::PostRenderBuffer;
+
         self.render()?;
         let buffer = self
             .graph
@@ -550,17 +552,7 @@ impl Renderling {
             .context(MissingPostRenderBufferSnafu)?
             .context(ResourceSnafu)?;
         let device = self.get_device();
-        let img = futures_lite::future::block_on(async move {
-            async { buffer.convert_to_rgba().await }
-                .or(async {
-                    loop {
-                        device.poll(wgpu::Maintain::Poll);
-                        futures_lite::future::yield_now().await;
-                    }
-                })
-                .await
-        })
-        .with_context(|_| ScreenGrabTimeoutSnafu)?;
+        let img = buffer.0.into_rgba(device).context(TextureSnafu)?;
         Ok(img)
     }
 

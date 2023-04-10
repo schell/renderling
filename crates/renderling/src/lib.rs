@@ -87,8 +87,8 @@ mod test {
 
     use super::*;
     use glam::{Mat4, Quat, Vec2, Vec3, Vec4};
-    use moongraph::{DaggaError, Function, GraphError, Node, Read, TypeKey};
-    use renderling_shader::scene::{DrawIndirect, GpuCamera, GpuMeshlet, GpuVertex};
+    use moongraph::{DaggaError, Function, GraphError, Node, Read, TypeKey, Write};
+    use renderling_shader::scene::{DrawIndirect, GpuCamera, GpuEntity, GpuMeshlet, GpuVertex};
 
     #[test]
     fn init() {
@@ -1076,10 +1076,16 @@ mod test {
         _init_logging();
         let mut r = Renderling::headless(100, 100)
             .unwrap()
-            .with_background_color(Vec4::splat(1.0));
+            .with_background_color(Vec3::splat(0.0).extend(1.0));
+        let cfg = SceneConfig {
+            max_vertices: 6,
+            max_meshlets: 2,
+            max_transforms: 2,
+            max_entities: 2,
+        };
         let mut scene = r
             .graph
-            .visit(|device: Read<Device>| Scene::new(&device, 3, 1, 1, 1))
+            .visit(|(device, queue): (Read<Device>, Read<Queue>)| Scene::new(&device, &queue, cfg))
             .unwrap();
         let (projection, view) = camera::default_ortho2d(100.0, 100.0);
         let camera = GpuCamera { projection, view };
@@ -1088,14 +1094,17 @@ mod test {
             GpuVertex {
                 position: Vec4::new(0.0, 0.0, 0.0, 1.0),
                 color: Vec4::new(1.0, 1.0, 0.0, 1.0),
+                ..Default::default()
             },
             GpuVertex {
                 position: Vec4::new(100.0, 0.0, 0.0, 1.0),
                 color: Vec4::new(1.0, 0.0, 1.0, 1.0),
+                ..Default::default()
             },
             GpuVertex {
                 position: Vec4::new(100.0, 100.0, 0.0, 1.0),
                 color: Vec4::new(0.0, 1.0, 1.0, 1.0),
+                ..Default::default()
             },
         ];
         let ent = scene
@@ -1104,6 +1113,7 @@ mod test {
             .with_transform(Mat4::IDENTITY)
             .build()
             .unwrap();
+
         scene::setup_scene_render_graph(scene, &mut r);
 
         r.graph.visit(scene::scene_update).unwrap().unwrap();
@@ -1117,7 +1127,7 @@ mod test {
                         scene::read_buffer::<GpuCamera>(&device, &queue, &scene.camera, 0, 1)
                             .unwrap();
                     let vertices = scene.vertices.read(&device, &queue, 0, 3).unwrap();
-                    let entities = scene.entities.read(&device, &queue, 0, 1).unwrap();
+                    let entities = scene.entities.read(&device, &queue, 0, 2).unwrap();
                     let meshlets = scene.meshlets.read(&device, &queue, 0, 1).unwrap();
                     let transforms = scene.transforms.read(&device, &queue, 0, 1).unwrap();
                     let indirect_count = scene.read_indirect_count(&device, &queue).unwrap();
@@ -1143,7 +1153,7 @@ mod test {
             .unwrap();
         assert_eq!(camera, gpu_camera);
         assert_eq!(verts, gpu_verts);
-        assert_eq!(vec![ent], ents);
+        assert_eq!(vec![ent, GpuEntity::default()], ents);
         assert_eq!(
             vec![GpuMeshlet {
                 first_vertex: 0,
@@ -1152,14 +1162,21 @@ mod test {
             meshes
         );
         assert_eq!(vec![Mat4::IDENTITY], transforms);
-        assert_eq!(1, indirect_count);
         assert_eq!(
-            vec![DrawIndirect {
-                vertex_count: 3,
-                instance_count: 1,
-                base_vertex: 0,
-                base_instance: 0
-            }],
+            vec![
+                DrawIndirect {
+                    vertex_count: 3,
+                    instance_count: 1,
+                    base_vertex: 0,
+                    base_instance: 0
+                },
+                DrawIndirect {
+                    vertex_count: 0,
+                    instance_count: 0,
+                    base_vertex: 0,
+                    base_instance: 1,
+                }
+            ],
             indirect
         );
 
@@ -1173,12 +1190,137 @@ mod test {
 
         let img = r.render_image().unwrap();
         crate::img_diff::assert_img_eq_save(
-            Save::Yes,
+            Save::No,
             "gpu_scene_sanity",
             "gpu_scene_sanity.png",
             img,
         )
         .unwrap();
+
+        // now test the textures functionality
+        let img = image::io::Reader::open("../../img/cheetah.jpg")
+            .unwrap()
+            .decode()
+            .unwrap();
+        let img = img.to_rgba8();
+
+        r.graph
+            .visit(
+                |(mut scene, device, queue): (Write<Scene>, Read<Device>, Read<Queue>)| {
+                    *scene = Scene::new(&device, &queue, cfg);
+                    let (projection, view) = camera::default_ortho2d(100.0, 100.0);
+                    scene.set_camera(GpuCamera { projection, view });
+                    let tex_ids = scene
+                        .load_images(&device, &queue, vec![img.clone()])
+                        .unwrap();
+                    assert_eq!(vec![1], tex_ids);
+
+                    let rects = scene.atlas().images();
+                    assert_eq!(0, rects[0].0);
+                    assert_eq!(2, rects[0].1.w);
+                    assert_eq!(2, rects[0].1.h);
+
+                    let verts = vec![
+                        GpuVertex {
+                            position: Vec4::new(0.0, 0.0, 0.0, 0.0),
+                            color: Vec4::new(1.0, 1.0, 0.0, 1.0),
+                            uv: Vec4::new(0.0, 0.0, 0.0, 0.0),
+                        },
+                        GpuVertex {
+                            position: Vec4::new(100.0, 0.0, 0.0, 0.0),
+                            color: Vec4::new(1.0, 0.0, 1.0, 1.0),
+                            uv: Vec4::new(1.0, 0.0, 0.0, 0.0),
+                        },
+                        GpuVertex {
+                            position: Vec4::new(100.0, 100.0, 0.0, 0.0),
+                            color: Vec4::new(0.0, 1.0, 1.0, 1.0),
+                            uv: Vec4::new(1.0, 1.0, 0.0, 0.0),
+                        },
+                    ];
+                    let ent = scene
+                        .new_entity()
+                        .with_meshlet(verts.clone())
+                        .with_transform(Mat4::IDENTITY)
+                        .build()
+                        .unwrap();
+                    assert_eq!(0, ent.id);
+
+                    let ent = scene
+                        .new_entity()
+                        .with_meshlet(verts.clone())
+                        .with_texture_id(tex_ids[0])
+                        .with_transform(
+                            Mat4::from_translation(Vec3::new(15.0, 35.0, 0.5))
+                                * Mat4::from_scale(Vec3::new(0.5, 0.5, 1.0)),
+                        )
+                        .build()
+                        .unwrap();
+                    assert_eq!(1, ent.id);
+
+                    scene.update(&queue);
+                },
+            )
+            .unwrap();
+
+        let img = r.render_image().unwrap();
+        crate::img_diff::assert_img_eq("gpu_scene_sanity2", "gpu_scene_sanity2.png", img).unwrap();
+
+        r.graph
+            .visit(
+                |(device, queue, scene): (Read<Device>, Read<Queue>, Read<Scene>)| {
+                    let draws = scene.indirect_draws.read(&device, &queue, 0, 2).unwrap();
+                    assert_eq!(
+                        vec![
+                            DrawIndirect {
+                                vertex_count: 3,
+                                instance_count: 1,
+                                base_vertex: 0,
+                                base_instance: 0
+                            },
+                            DrawIndirect {
+                                vertex_count: 3,
+                                instance_count: 1,
+                                base_vertex: 3,
+                                base_instance: 1
+                            }
+                        ],
+                        draws
+                    );
+                },
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn transform_uvs_for_atlas() {
+        let rect = crunch::Rect {
+            x: 0,
+            y: 0,
+            w: 1,
+            h: 1,
+        };
+        assert_eq!(
+            Vec2::ZERO,
+            Atlas::transform_uvs(Vec2::ZERO, rect, Vec2::splat(100.0))
+        );
+        assert_eq!(
+            Vec2::ZERO,
+            Atlas::transform_uvs(Vec2::ZERO, rect, Vec2::splat(1.0))
+        );
+        assert_eq!(
+            Vec2::ZERO,
+            Atlas::transform_uvs(Vec2::ZERO, rect, Vec2::splat(256.0))
+        );
+        let rect = crunch::Rect {
+            x: 10,
+            y: 10,
+            w: 1,
+            h: 1,
+        };
+        assert_eq!(
+            Vec2::splat(0.1),
+            Atlas::transform_uvs(Vec2::ZERO, rect, Vec2::splat(100.0))
+        );
     }
 
     ////#[cfg(feature = "gltf")]

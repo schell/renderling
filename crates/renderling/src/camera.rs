@@ -34,13 +34,10 @@ pub fn default_ortho2d(width: f32, height: f32) -> (Mat4, Mat4) {
     let right = width;
     let bottom = height;
     let top = 0.0;
-    let near = 1.0;
-    let far = -1.0;
+    let near = -1.0;
+    let far = 1.0;
     let projection = Mat4::orthographic_rh(left, right, bottom, top, near, far);
-    let eye = Vec3::new(0.0, 0.0, 0.0);
-    let target = Vec3::new(0.0, 0.0, -1.0);
-    let up = Vec3::new(0.0, 1.0, 0.0);
-    let view = Mat4::look_at_rh(eye, target, up);
+    let view = Mat4::IDENTITY;
     (projection, view)
 }
 
