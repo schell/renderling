@@ -18,6 +18,12 @@ pub enum TextureError {
         color_type: ColorType,
         label: String,
     },
+
+    #[snafu(display("Could not map buffer"))]
+    CouldNotMapBuffer { source: wgpu::BufferAsyncError },
+
+    #[snafu(display("Could not convert image buffer"))]
+    CouldNotConvertImageBuffer,
 }
 
 type Result<T, E = TextureError> = std::result::Result<T, E>;
@@ -59,7 +65,7 @@ impl Texture {
             format,
             usage: usage
                 .unwrap_or(wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST),
-            view_formats: &[]
+            view_formats: &[],
         });
 
         queue.write_texture(
@@ -79,15 +85,17 @@ impl Texture {
         );
 
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let sampler = sampler.unwrap_or_else(|| device.create_sampler(&wgpu::SamplerDescriptor {
-            address_mode_u: wgpu::AddressMode::ClampToEdge,
-            address_mode_v: wgpu::AddressMode::ClampToEdge,
-            address_mode_w: wgpu::AddressMode::ClampToEdge,
-            mag_filter: wgpu::FilterMode::Linear,
-            min_filter: wgpu::FilterMode::Nearest,
-            mipmap_filter: wgpu::FilterMode::Nearest,
-            ..Default::default()
-        }));
+        let sampler = sampler.unwrap_or_else(|| {
+            device.create_sampler(&wgpu::SamplerDescriptor {
+                address_mode_u: wgpu::AddressMode::ClampToEdge,
+                address_mode_v: wgpu::AddressMode::ClampToEdge,
+                address_mode_w: wgpu::AddressMode::ClampToEdge,
+                mag_filter: wgpu::FilterMode::Linear,
+                min_filter: wgpu::FilterMode::Nearest,
+                mipmap_filter: wgpu::FilterMode::Nearest,
+                ..Default::default()
+            })
+        });
 
         Texture {
             texture: Arc::new(texture),
@@ -191,7 +199,7 @@ impl Texture {
             },
             usage: usage
                 .unwrap_or(wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST),
-            view_formats: &[]
+            view_formats: &[],
         });
 
         queue.write_texture(
@@ -249,7 +257,7 @@ impl Texture {
             dimension: wgpu::TextureDimension::D2,
             format: Self::DEPTH_FORMAT,
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[]
+            view_formats: &[],
         };
         let texture = device.create_texture(&desc);
 
@@ -272,5 +280,145 @@ impl Texture {
             view: Arc::new(view),
             sampler: Arc::new(sampler),
         }
+    }
+
+    /// Read the texture from the GPU.
+    ///
+    /// To read the texture you must provide the width and height.
+    pub fn read(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        width: usize,
+        height: usize,
+    ) -> CopiedTextureBuffer {
+        let dimensions = BufferDimensions::new(width, height);
+        // The output buffer lets us retrieve the self as an array
+        let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Texture::read buffer"),
+            size: (dimensions.padded_bytes_per_row * dimensions.height) as u64,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("post render screen capture encoder"),
+        });
+        // Copy the data from the surface texture to the buffer
+        encoder.copy_texture_to_buffer(
+            self.texture.as_image_copy(),
+            wgpu::ImageCopyBuffer {
+                buffer: &buffer,
+                layout: wgpu::ImageDataLayout {
+                    offset: 0,
+                    bytes_per_row: Some(
+                        std::num::NonZeroU32::new(dimensions.padded_bytes_per_row as u32).unwrap(),
+                    ),
+                    rows_per_image: None,
+                },
+            },
+            wgpu::Extent3d {
+                width: dimensions.width as u32,
+                height: dimensions.height as u32,
+                depth_or_array_layers: 1,
+            },
+        );
+        queue.submit(std::iter::once(encoder.finish()));
+
+        CopiedTextureBuffer { dimensions, buffer }
+    }
+}
+
+/// Helper for retreiving an image from a texture.
+pub struct BufferDimensions {
+    pub width: usize,
+    pub height: usize,
+    pub unpadded_bytes_per_row: usize,
+    pub padded_bytes_per_row: usize,
+}
+
+impl BufferDimensions {
+    pub fn new(width: usize, height: usize) -> Self {
+        let bytes_per_pixel = std::mem::size_of::<u32>();
+        let unpadded_bytes_per_row = width * bytes_per_pixel;
+        let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT as usize;
+        let padded_bytes_per_row_padding = (align - unpadded_bytes_per_row % align) % align;
+        let padded_bytes_per_row = unpadded_bytes_per_row + padded_bytes_per_row_padding;
+        Self {
+            width,
+            height,
+            unpadded_bytes_per_row,
+            padded_bytes_per_row,
+        }
+    }
+}
+
+/// Helper for retreiving a rendered frame.
+pub struct CopiedTextureBuffer {
+    pub dimensions: BufferDimensions,
+    pub buffer: wgpu::Buffer,
+}
+
+impl CopiedTextureBuffer {
+    #[cfg(feature = "image")]
+    /// Convert the post render buffer into an RgbaImage.
+    pub async fn convert_to_rgba(self) -> Result<image::RgbaImage, TextureError> {
+        let buffer_slice = self.buffer.slice(..);
+        let (tx, rx) = std::sync::mpsc::channel();
+        buffer_slice.map_async(wgpu::MapMode::Read, {
+            move |result| {
+                tx.send(result).unwrap();
+            }
+        });
+        loop {
+            if let Ok(result) = rx.try_recv() {
+                result.context(CouldNotMapBufferSnafu)?;
+                break;
+            } else {
+                futures_lite::future::yield_now().await;
+            }
+        }
+
+        let padded_buffer = buffer_slice.get_mapped_range();
+        let mut unpadded_buffer = vec![];
+        // from the padded_buffer we write just the unpadded bytes into the
+        // unpadded_buffer
+        for chunk in padded_buffer.chunks(self.dimensions.padded_bytes_per_row) {
+            unpadded_buffer.extend_from_slice(&chunk[..self.dimensions.unpadded_bytes_per_row]);
+        }
+        let img_buffer: image::ImageBuffer<image::Rgba<u8>, Vec<u8>> =
+            image::ImageBuffer::from_raw(
+                self.dimensions.width as u32,
+                self.dimensions.height as u32,
+                unpadded_buffer,
+            )
+            .context(CouldNotConvertImageBufferSnafu)?;
+        Ok(image::DynamicImage::ImageRgba8(img_buffer).to_rgba8())
+    }
+
+    #[cfg(feature = "image")]
+    /// Convert the post render buffer into an RgbaImage.
+    pub fn into_rgba(
+        self,
+        device: &wgpu::Device,
+    ) -> Result<image::RgbaImage, TextureError> {
+        let buffer_slice = self.buffer.slice(..);
+        buffer_slice.map_async(wgpu::MapMode::Read, |_| {});
+        device.poll(wgpu::Maintain::Wait);
+
+        let padded_buffer = buffer_slice.get_mapped_range();
+        let mut unpadded_buffer = vec![];
+        // from the padded_buffer we write just the unpadded bytes into the
+        // unpadded_buffer
+        for chunk in padded_buffer.chunks(self.dimensions.padded_bytes_per_row) {
+            unpadded_buffer.extend_from_slice(&chunk[..self.dimensions.unpadded_bytes_per_row]);
+        }
+        let img_buffer: image::ImageBuffer<image::Rgba<u8>, Vec<u8>> =
+            image::ImageBuffer::from_raw(
+                self.dimensions.width as u32,
+                self.dimensions.height as u32,
+                unpadded_buffer,
+            )
+            .context(CouldNotConvertImageBufferSnafu)?;
+        Ok(image::DynamicImage::ImageRgba8(img_buffer).to_rgba8())
     }
 }

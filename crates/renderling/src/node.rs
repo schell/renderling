@@ -15,7 +15,7 @@ use snafu::prelude::*;
 
 use crate::{
     linkage::ObjectDraw, BackgroundColor, BufferDimensions, Camera, Cameras, DepthTexture, Device,
-    Frame, Id, ObjectData, Objects, PostRenderBuffer, Queue, RenderTarget, ScreenSize,
+    Frame, Id, ObjectData, Objects, CopiedTextureBuffer, Queue, RenderTarget, ScreenSize,
     UiPipeline, WgpuStateError, ForwardPipeline, Lights,
 };
 
@@ -158,6 +158,9 @@ pub fn render_objects<'a>(
     queue.submit(std::iter::once(encoder.finish()));
 }
 
+/// A buffer holding a copy of the last frame's buffer/texture.
+pub struct PostRenderBuffer(pub CopiedTextureBuffer);
+
 /// Render node that copies the current frame into a buffer.
 #[derive(Edges)]
 pub struct PostRenderBufferCreate {
@@ -210,7 +213,7 @@ impl PostRenderBufferCreate {
 
         self.queue.submit(std::iter::once(encoder.finish()));
 
-        Ok((PostRenderBuffer { dimensions, buffer },))
+        Ok((PostRenderBuffer(CopiedTextureBuffer { dimensions, buffer }),))
     }
 }
 

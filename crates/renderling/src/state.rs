@@ -5,6 +5,8 @@
 use snafu::prelude::*;
 use std::sync::Arc;
 
+use crate::BufferDimensions;
+
 #[derive(Debug, Snafu)]
 pub enum WgpuStateError {
     #[snafu(display("cannot create adaptor"))]
@@ -225,73 +227,5 @@ pub async fn new_device_queue_and_target<'a>(
         let texture = Arc::new(device.create_texture(&texture_desc));
         let target = RenderTarget::Texture { texture };
         (device, queue, target)
-    }
-}
-
-/// Helper for retreiving a rendered frame in a texture.
-pub struct BufferDimensions {
-    pub width: usize,
-    pub height: usize,
-    pub unpadded_bytes_per_row: usize,
-    pub padded_bytes_per_row: usize,
-}
-
-impl BufferDimensions {
-    pub fn new(width: usize, height: usize) -> Self {
-        let bytes_per_pixel = std::mem::size_of::<u32>();
-        let unpadded_bytes_per_row = width * bytes_per_pixel;
-        let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT as usize;
-        let padded_bytes_per_row_padding = (align - unpadded_bytes_per_row % align) % align;
-        let padded_bytes_per_row = unpadded_bytes_per_row + padded_bytes_per_row_padding;
-        Self {
-            width,
-            height,
-            unpadded_bytes_per_row,
-            padded_bytes_per_row,
-        }
-    }
-}
-
-/// Helper for retreiving a rendered frame.
-pub struct PostRenderBuffer {
-    pub dimensions: BufferDimensions,
-    pub buffer: wgpu::Buffer,
-}
-
-impl PostRenderBuffer {
-    #[cfg(feature = "image")]
-    /// Convert the post render buffer into an RgbaImage.
-    pub async fn convert_to_rgba(self) -> Result<image::RgbaImage, WgpuStateError> {
-        let buffer_slice = self.buffer.slice(..);
-        let (tx, rx) = std::sync::mpsc::channel();
-        buffer_slice.map_async(wgpu::MapMode::Read, {
-            move |result| {
-                tx.send(result).unwrap();
-            }
-        });
-        loop {
-            if let Ok(result) = rx.try_recv() {
-                result.context(CouldNotMapBufferSnafu)?;
-                break;
-            } else {
-                futures_lite::future::yield_now().await;
-            }
-        }
-
-        let padded_buffer = buffer_slice.get_mapped_range();
-        let mut unpadded_buffer = vec![];
-        // from the padded_buffer we write just the unpadded bytes into the
-        // unpadded_buffer
-        for chunk in padded_buffer.chunks(self.dimensions.padded_bytes_per_row) {
-            unpadded_buffer.extend_from_slice(&chunk[..self.dimensions.unpadded_bytes_per_row]);
-        }
-        let img_buffer: image::ImageBuffer<image::Rgba<u8>, Vec<u8>> =
-            image::ImageBuffer::from_raw(
-                self.dimensions.width as u32,
-                self.dimensions.height as u32,
-                unpadded_buffer,
-            )
-            .context(CouldNotConvertImageBufferSnafu)?;
-        Ok(image::DynamicImage::ImageRgba8(img_buffer).to_rgba8())
     }
 }

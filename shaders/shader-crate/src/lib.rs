@@ -2,7 +2,7 @@
 #![no_std]
 #![feature(lang_items)]
 use renderling_shader::scene;
-use spirv_std::{glam, spirv};
+use spirv_std::{glam, image::Image2d, spirv, Sampler};
 
 mod ui;
 pub use ui::*;
@@ -24,6 +24,7 @@ pub fn main_vertex_scene(
     #[spirv(vertex_index)] vertex_id: u32,
 
     out_color: &mut glam::Vec4,
+    out_uv: &mut glam::Vec2,
     #[spirv(position)] out_pos: &mut glam::Vec4,
 ) {
     scene::main_vertex_scene(
@@ -35,16 +36,28 @@ pub fn main_vertex_scene(
         transforms,
         entities,
         out_color,
+        out_uv,
         out_pos,
     )
 }
 
 #[spirv(fragment)]
 pub fn main_fragment_scene(
+    #[spirv(descriptor_set = 1, binding = 0)] atlas: &Image2d,
+    #[spirv(descriptor_set = 1, binding = 1)] sampler: &Sampler,
+
     in_color: glam::Vec4,
-    output: &mut glam::Vec4
+    in_uv: glam::Vec2,
+
+    output: &mut glam::Vec4,
 ) {
-    scene::main_fragment_scene(in_color, output)
+    scene::main_fragment_scene(
+        atlas,
+        sampler,
+        in_color,
+        in_uv,
+        output,
+    )
 }
 
 #[spirv(compute(threads(32)))]
@@ -61,6 +74,6 @@ pub fn compute_cull_entities(
     #[spirv(global_invocation_id)] global_id: glam::UVec3,
 ) {
     scene::compute_cull_entities(
-        camera, meshes, vertices, transforms, entities, draws, count, global_id
+        camera, meshes, vertices, transforms, entities, draws, count, global_id,
     )
 }
