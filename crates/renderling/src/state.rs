@@ -5,8 +5,6 @@
 use snafu::prelude::*;
 use std::sync::Arc;
 
-use crate::BufferDimensions;
-
 #[derive(Debug, Snafu)]
 pub enum WgpuStateError {
     #[snafu(display("cannot create adaptor"))]

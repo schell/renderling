@@ -31,6 +31,7 @@ Just pro-cons on tech choices and little things I don't want to forget.
 * not yet 1.0
 * what happens if WebGPU the standard fails? (everyone doubts it will)
 * atomics are not supported in the Naga SPIRV frontend
+  - see [the related Naga issue](https://github.com/gfx-rs/naga/issues/2301)
 
 # more things to figure out
 * bindless - what exactly is it

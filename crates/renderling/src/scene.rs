@@ -2,11 +2,12 @@
 use std::{any::Any, marker::PhantomData};
 
 use async_channel::{Receiver, Sender};
-use glam::{Mat4, Vec2, Vec4Swizzles};
+use glam::{Mat4, Vec2};
 use image::{EncodableLayout, RgbaImage};
 use moongraph::{IsGraphNode, Read, Write};
-use renderling_shader::scene::{DrawIndirect, GpuCamera, GpuEntity, GpuMeshlet, GpuVertex};
-use rustc_hash::FxHashMap;
+use renderling_shader::scene::{
+    DrawIndirect, GpuCamera, GpuEntity, GpuLight, GpuMeshlet, GpuVertex,
+};
 use snafu::prelude::*;
 use wgpu::util::DeviceExt;
 
@@ -136,6 +137,7 @@ impl<T: Any + Clone + Copy + bytemuck::Pod + bytemuck::Zeroable> GpuArray<T> {
         capacity: usize,
         usage: wgpu::BufferUsages,
     ) -> Self {
+        let capacity = capacity.max(1);
         GpuArray {
             buffer: GpuBuffer {
                 buffer: gpu_storage_buffer(
@@ -219,6 +221,11 @@ impl<T: Any + Clone + Copy + bytemuck::Pod + bytemuck::Zeroable> GpuArray<T> {
         self.buffer.len
     }
 
+    /// Return the capacity of the array.
+    pub fn capacity(&self) -> usize {
+        self.buffer.capacity
+    }
+
     /// Update the buffer on the GPU side.
     ///
     /// This array won't be fully updated on the GPU side until the queue has
@@ -254,10 +261,6 @@ impl<T: Any + Clone + Copy + bytemuck::Pod + bytemuck::Zeroable> GpuArray<T> {
         length: usize,
     ) -> Result<Vec<T>, SceneError> {
         read_buffer(device, queue, self.get_buffer(), start, length)
-    }
-
-    pub fn capacity(&self) -> usize {
-        self.buffer.capacity
     }
 }
 
@@ -443,6 +446,8 @@ pub struct SceneConfig {
     pub max_transforms: usize,
     // the maximum number of entities in the scene
     pub max_entities: usize,
+    // the naxmum number of lights in the scene
+    pub max_lights: usize,
 }
 
 impl Default for SceneConfig {
@@ -456,6 +461,7 @@ impl Default for SceneConfig {
             max_meshlets: kibibyte / std::mem::size_of::<GpuMeshlet>() + 1,
             max_transforms: kibibyte / std::mem::size_of::<Mat4>() + 1,
             max_entities: kibibyte,
+            max_lights: 64,
         }
     }
 }
@@ -466,10 +472,11 @@ pub struct Scene {
     pub meshlets: GpuArray<GpuMeshlet>,
     pub transforms: GpuArray<Mat4>,
     pub entities: GpuArray<GpuEntity>,
+    pub lights: GpuArray<GpuLight>,
+    // TODO: change the camera to a uniform to save storage buffers
     pub camera: wgpu::Buffer,
     pub indirect_draws: GpuArray<DrawIndirect>,
     camera_update: Option<GpuCamera>,
-    indirect_count_buffer: wgpu::Buffer,
     cull_bindgroup: wgpu::BindGroup,
     render_buffers_bindgroup: wgpu::BindGroup,
     render_atlas_bindgroup: wgpu::BindGroup,
@@ -484,7 +491,9 @@ impl Scene {
             max_meshlets,
             max_transforms,
             max_entities,
+            max_lights,
         } = scene_config;
+        let lights = GpuArray::<GpuLight>::new(&device, &[], max_lights, scene_render_usage());
         let vertices = GpuArray::<GpuVertex>::new(&device, &[], max_vertices, scene_render_usage());
         let meshlets =
             GpuArray::<GpuMeshlet>::new(&device, &[], max_meshlets, scene_render_usage());
@@ -499,13 +508,6 @@ impl Scene {
         let atlas = Atlas::new(device, queue, 1, 1);
         let indirect_draws =
             GpuArray::<DrawIndirect>::new(&device, &[], max_entities, scene_indirect_usage());
-        let indirect_count = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Scene::new indirect_count"),
-            contents: bytemuck::cast_slice(&[0u32]),
-            usage: wgpu::BufferUsages::STORAGE
-                | wgpu::BufferUsages::COPY_DST
-                | wgpu::BufferUsages::COPY_SRC,
-        });
         let camera = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Scene::new camera"),
             contents: bytemuck::cast_slice(&[GpuCamera::default()]),
@@ -515,16 +517,12 @@ impl Scene {
         });
 
         let cull_bindgroup = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("scene render bindgroup"),
+            label: Some("Scene::new cull_bindgroup"),
             layout: &scene_draw_indirect_bindgroup_layout(device),
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
                     resource: indirect_draws.get_buffer().as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: indirect_count.as_entire_binding(),
                 },
             ],
         });
@@ -553,6 +551,10 @@ impl Scene {
                     binding: 4,
                     resource: entities.get_buffer().as_entire_binding(),
                 },
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: lights.get_buffer().as_entire_binding(),
+                }
             ],
         });
 
@@ -582,9 +584,9 @@ impl Scene {
             camera_update: None,
             camera,
             indirect_draws,
-            indirect_count_buffer: indirect_count,
             cull_bindgroup,
             atlas,
+            lights,
         }
     }
 
@@ -598,7 +600,6 @@ impl Scene {
             render_buffers_bindgroup: _,
             render_atlas_bindgroup: _,
             indirect_draws: _,
-            indirect_count_buffer: _,
             cull_bindgroup: _,
             atlas: _,
             vertices,
@@ -606,27 +607,17 @@ impl Scene {
             transforms,
             entities,
             camera_update,
+            lights,
         } = self;
         vertices.update(queue);
         meshlets.update(queue);
         transforms.update(queue);
         entities.update(queue);
+        lights.update(queue);
         if let Some(camera) = camera_update.take() {
             queue.write_buffer(&self.camera, 0, bytemuck::cast_slice(&[camera]));
         }
         queue.submit(std::iter::empty());
-    }
-
-    /// Reads the indirect count from the count buffer.
-    pub fn read_indirect_count(
-        &self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-    ) -> Result<u32, SceneError> {
-        match read_buffer(device, queue, &self.indirect_count_buffer, 0, 1)?.as_slice() {
-            &[count] => Ok(count),
-            _ => Err(SceneError::InvalidIndirectCount),
-        }
     }
 
     /// Set the camera.
@@ -664,22 +655,28 @@ impl Scene {
     pub fn new_meshlet(
         &mut self,
         vertices: impl IntoIterator<Item = GpuVertex>,
-        texture_id: Option<u32>,
+        texture0_id: Option<u32>,
+        texture1_id: Option<u32>,
     ) -> Result<u32, SceneError> {
-        let id = texture_id.unwrap_or_default();
+        let id0 = texture0_id.unwrap_or_default();
+        let id1 = texture1_id.unwrap_or_default();
         let vertices = {
-            let rect = self
+            let rect0 = self
                 .atlas
                 .rects
-                .get(id as usize)
-                .context(MissingTextureSnafu { id })?;
+                .get(id0 as usize)
+                .context(MissingTextureSnafu { id: id0 })?;
+            let rect1 = self
+                .atlas
+                .rects
+                .get(id1 as usize)
+                .context(MissingTextureSnafu { id: id1 })?;
             let size = self.atlas.size;
             vertices
                 .into_iter()
                 .map(|mut v| {
-                    let uv = Atlas::transform_uvs(v.uv.xy(), *rect, size);
-                    v.uv.x = uv.x;
-                    v.uv.y = uv.y;
+                    v.uv0 = Atlas::transform_uvs(v.uv0, *rect0, size);
+                    v.uv1 = Atlas::transform_uvs(v.uv1, *rect1, size);
                     v
                 })
                 .collect::<Vec<_>>()
@@ -734,7 +731,7 @@ impl Scene {
             scene: self,
             meshlet: Err(u32::MAX),
             transform: None,
-            texture: None,
+            textures: [0, 0],
         }
     }
 
@@ -748,7 +745,7 @@ pub struct EntityBuilder<'a> {
     scene: &'a mut Scene,
     meshlet: Result<Vec<GpuVertex>, u32>,
     transform: Option<Mat4>,
-    texture: Option<u32>,
+    textures: [u32; 2],
 }
 
 impl<'a> EntityBuilder<'a> {
@@ -767,8 +764,8 @@ impl<'a> EntityBuilder<'a> {
         self
     }
 
-    pub fn with_texture_id(mut self, id: u32) -> Self {
-        self.texture = Some(id);
+    pub fn with_texture_ids(mut self, id0: Option<u32>, id1: Option<u32>) -> Self {
+        self.textures = [id0.unwrap_or_default(), id1.unwrap_or_default()];
         self
     }
 
@@ -777,7 +774,7 @@ impl<'a> EntityBuilder<'a> {
             scene,
             meshlet,
             transform,
-            texture,
+            textures,
         } = self;
         let mut entity = GpuEntity {
             id: scene.next_entity,
@@ -789,12 +786,11 @@ impl<'a> EntityBuilder<'a> {
         let transform_id = scene.new_transform(transform)?;
         entity.transform = transform_id as u32;
 
-        let texture = texture.unwrap_or_default();
-        entity.texture = texture;
+        entity.textures = textures;
 
         match meshlet {
             Ok(vertices) => {
-                let mesh_id = scene.new_meshlet(vertices, Some(texture))?;
+                let mesh_id = scene.new_meshlet(vertices, Some(textures[0]), Some(textures[1]))?;
                 entity.mesh = mesh_id as u32;
             }
             Err(id) => {
@@ -810,7 +806,7 @@ impl<'a> EntityBuilder<'a> {
 }
 
 pub fn scene_vertex_bindgroup_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
-    let entries = (0..5)
+    let entries = (0..6)
         .map(|binding| wgpu::BindGroupLayoutEntry {
             binding,
             visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::COMPUTE,
@@ -858,16 +854,6 @@ pub fn scene_draw_indirect_bindgroup_layout(device: &wgpu::Device) -> wgpu::Bind
         entries: &[
             wgpu::BindGroupLayoutEntry {
                 binding: 0,
-                visibility: wgpu::ShaderStages::COMPUTE,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: false },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-            wgpu::BindGroupLayoutEntry {
-                binding: 1,
                 visibility: wgpu::ShaderStages::COMPUTE,
                 ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Storage { read_only: false },
@@ -997,7 +983,6 @@ fn scene_render(
         Read<DepthTexture>,
     ),
 ) -> Result<(), SceneError> {
-    let count = scene.read_indirect_count(&device, &queue)?;
     let label = Some("scene render");
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label });
     let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -1022,7 +1007,9 @@ fn scene_render(
     render_pass.set_pipeline(&pipeline.0);
     render_pass.set_bind_group(0, &scene.render_buffers_bindgroup, &[]);
     render_pass.set_bind_group(1, &scene.render_atlas_bindgroup, &[]);
-    render_pass.multi_draw_indirect(scene.indirect_draws.get_buffer(), 0, count);
+    // TODO: use RenderPass::multi_draw_indirect_count after atomics are added to naga's spirv frontend
+    // @see
+    render_pass.multi_draw_indirect(scene.indirect_draws.get_buffer(), 0, scene.entities.len() as u32);
     drop(render_pass);
     queue.submit(std::iter::once(encoder.finish()));
     Ok(())

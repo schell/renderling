@@ -13,7 +13,6 @@ pub use pbr::*;
 #[spirv(vertex)]
 pub fn main_vertex_scene(
     #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] camera: &scene::GpuCamera,
-    #[spirv(storage_buffer, descriptor_set = 0, binding = 1)] meshes: &[scene::GpuMeshlet],
     #[spirv(storage_buffer, descriptor_set = 0, binding = 2)] vertices: &[scene::GpuVertex],
     #[spirv(storage_buffer, descriptor_set = 0, binding = 3)] transforms: &[glam::Mat4],
     #[spirv(storage_buffer, descriptor_set = 0, binding = 4)] entities: &[scene::GpuEntity],
@@ -31,7 +30,6 @@ pub fn main_vertex_scene(
         instance_id,
         vertex_id,
         camera,
-        meshes,
         vertices,
         transforms,
         entities,
@@ -62,18 +60,14 @@ pub fn main_fragment_scene(
 
 #[spirv(compute(threads(32)))]
 pub fn compute_cull_entities(
-    #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] camera: &scene::GpuCamera,
     #[spirv(storage_buffer, descriptor_set = 0, binding = 1)] meshes: &[scene::GpuMeshlet],
-    #[spirv(storage_buffer, descriptor_set = 0, binding = 2)] vertices: &[scene::GpuVertex],
-    #[spirv(storage_buffer, descriptor_set = 0, binding = 3)] transforms: &[glam::Mat4],
     #[spirv(storage_buffer, descriptor_set = 0, binding = 4)] entities: &[scene::GpuEntity],
 
     #[spirv(storage_buffer, descriptor_set = 1, binding = 0)] draws: &mut [scene::DrawIndirect],
-    #[spirv(storage_buffer, descriptor_set = 1, binding = 1)] count: &mut u32,
 
     #[spirv(global_invocation_id)] global_id: glam::UVec3,
 ) {
     scene::compute_cull_entities(
-        camera, meshes, vertices, transforms, entities, draws, count, global_id,
+        meshes, entities, draws, global_id,
     )
 }

@@ -5,8 +5,13 @@
 //!
 //! To read more about the technique, check out these resources:
 //! * https://stackoverflow.com/questions/59686151/what-is-gpu-driven-rendering
-use glam::{Mat4, UVec3, Vec2, Vec4, Vec4Swizzles};
+use glam::{Mat4, UVec3, Vec2, Vec4, Vec4Swizzles, Vec3};
 use spirv_std::{image::Image2d, Sampler};
+
+#[cfg(target_arch = "spirv")]
+use spirv_std::num_traits::Float;
+
+use crate::math::Vec3ColorSwizzles;
 
 /// A vertex in a mesh.
 #[cfg_attr(
@@ -18,7 +23,8 @@ use spirv_std::{image::Image2d, Sampler};
 pub struct GpuVertex {
     pub position: Vec4,
     pub color: Vec4,
-    pub uv: Vec4,
+    pub uv0: Vec2,
+    pub uv1: Vec2,
 }
 
 impl Default for GpuVertex {
@@ -26,12 +32,18 @@ impl Default for GpuVertex {
         Self {
             position: Default::default(),
             color: Vec4::splat(1.0),
-            uv: Vec4::splat(0.0),
+            uv0: Vec2::splat(0.0),
+            uv1: Vec2::splat(0.0),
         }
     }
 }
 
 /// A GPU mesh.
+// TODO: we don't _necessarily need_ a buffer of [GpuMeshlet].
+// We could instead have a field on GpuEntity like `mesh: (u32, u32)` representing
+// the index of the first vertex and the number of vertices.
+//
+// We only need to do this if we run out of storage buffers.
 #[cfg_attr(
     not(target_arch = "spirv"),
     repr(C),
@@ -78,17 +90,22 @@ pub fn attenuate(attenuation: Vec3, distance: f32) -> f32 {
     derive(bytemuck::Pod, bytemuck::Zeroable)
 )]
 #[derive(Copy, Clone, Default)]
-pub struct GpuPointLight {
+pub struct GpuLight {
     pub position: Vec4,
+    pub direction: Vec4,
     pub attenuation: Vec4,
     pub ambient_color: Vec4,
     pub diffuse_color: Vec4,
     pub specular_color: Vec4,
+    pub inner_cutoff: f32,
+    pub outer_cutoff: f32,
+    pub light_type: u32,
+    pub _padding0: u32,
 }
 
-impl GpuPointLight {
+impl GpuLight {
     /// Calculate a point light's color contribution to a fragment.
-    pub fn color_phong(
+    pub fn color_point_phong(
         &self,
         vertex_pos: Vec3,
         view: Mat4,
@@ -98,7 +115,7 @@ impl GpuPointLight {
         specular_color: Vec4,
         shininess: f32,
     ) -> Vec3 {
-        let light_pos: Vec3 = (view * self.position().extend(1.0)).xyz();
+        let light_pos: Vec3 = (view * self.position.xyz().extend(1.0)).xyz();
         let vertex_to_light = light_pos - vertex_pos;
         let vertex_to_light_distance = vertex_to_light.length();
 
@@ -110,7 +127,7 @@ impl GpuPointLight {
         let spec: f32 = normal.dot(halfway_dir).max(0.0).powf(shininess);
         // attenuation
         let distance: f32 = vertex_to_light_distance;
-        let attenuation: f32 = attenuate(self.attenuation(), distance);
+        let attenuation: f32 = attenuate(self.attenuation.xyz(), distance);
         // combine results
         let mut ambient: Vec3 = self.ambient_color.rgb() * diffuse_color.rgb();
         let mut diffuse: Vec3 = self.diffuse_color.rgb() * diff * diffuse_color.rgb();
@@ -121,30 +138,9 @@ impl GpuPointLight {
 
         ambient + diffuse + specular
     }
-}
 
-
-}
-
-#[cfg_attr(
-    not(target_arch = "spirv"),
-    repr(C),
-    derive(bytemuck::Pod, bytemuck::Zeroable)
-)]
-#[derive(Copy, Clone, Default)]
-pub struct GpuSpotLight {
-    pub position: Vec4,
-    pub direction: Vec4,
-    pub attenuation: Vec4,
-    pub ambient_color: Vec4,
-    pub diffuse_color: Vec4,
-    pub specular_color: Vec4,
-    pub cutoff: Vec4,
-}
-
-impl GpuSpotLight {
     // Calculate a spotlight's color contribution to a fragment.
-    pub fn color_phong(
+    pub fn color_spot_phong(
         &self,
         vertex_pos: Vec3,
         view: Mat4,
@@ -154,10 +150,10 @@ impl GpuSpotLight {
         specular_color: Vec4,
         shininess: f32,
     ) -> Vec3 {
-        if self.direction() == Vec3::ZERO {
+        if self.direction.xyz() == Vec3::ZERO {
             return Vec3::ZERO;
         }
-        let light_pos: Vec3 = (view * self.position().extend(1.0)).xyz();
+        let light_pos: Vec3 = (view * self.position.xyz().extend(1.0)).xyz();
         let light_dir: Vec3 = (light_pos - vertex_pos).normalize();
         // diffuse shading
         let diff: f32 = normal.dot(light_dir).max(0.0);
@@ -166,12 +162,12 @@ impl GpuSpotLight {
         let spec: f32 = normal.dot(halfway_dir).max(0.0).powf(shininess);
         // attenuation
         let distance: f32 = (light_pos - vertex_pos).length();
-        let attenuation: f32 = attenuate(self.attenuation(), distance);
+        let attenuation: f32 = attenuate(self.attenuation.xyz(), distance);
         // spotlight intensity
-        let direction: Vec3 = (-(view * self.direction().extend(0.0)).xyz()).normalize();
+        let direction: Vec3 = (-(view * self.direction.xyz().extend(0.0)).xyz()).normalize();
         let theta: f32 = light_dir.dot(direction);
-        let epsilon: f32 = self.inner_cutoff() - self.outer_cutoff();
-        let intensity: f32 = ((theta - self.outer_cutoff()) / epsilon).clamp(0.0, 1.0);
+        let epsilon: f32 = self.inner_cutoff - self.outer_cutoff;
+        let intensity: f32 = ((theta - self.outer_cutoff) / epsilon).clamp(0.0, 1.0);
         // combine results
         let mut ambient: Vec3 = self.ambient_color.rgb() * diffuse_color.rgb();
         let mut diffuse: Vec3 = self.diffuse_color.rgb() * diff * diffuse_color.rgb();
@@ -182,24 +178,9 @@ impl GpuSpotLight {
 
         ambient + diffuse + specular
     }
-}
 
-#[cfg_attr(
-    not(target_arch = "spirv"),
-    repr(C),
-    derive(bytemuck::Pod, bytemuck::Zeroable)
-)]
-#[derive(Copy, Clone, Default)]
-pub struct GpuDirectionalLight {
-    pub direction: Vec4,
-    pub ambient_color: Vec4,
-    pub diffuse_color: Vec4,
-    pub specular_color: Vec4,
-}
-
-impl GpuDirectionalLight {
     // Calculate a directional light's color contribution to a fragment.
-    pub fn color_phong(
+    pub fn color_directional_phong(
         &self,
         view: Mat4,
         normal: Vec3,
@@ -208,10 +189,10 @@ impl GpuDirectionalLight {
         specular_color: Vec4,
         shininess: f32,
     ) -> Vec3 {
-        if self.direction() == Vec3::ZERO {
+        if self.direction.xyz() == Vec3::ZERO {
             return Vec3::ZERO;
         }
-        let light_dir: Vec3 = (-(view * self.direction().extend(0.0)).xyz()).normalize();
+        let light_dir: Vec3 = (-(view * self.direction.xyz().extend(0.0)).xyz()).normalize();
         // diffuse shading
         let diff: f32 = normal.dot(light_dir).max(0.0);
         // specular shading
@@ -240,7 +221,7 @@ pub struct GpuEntity {
     pub id: u32,
     pub mesh: u32,
     pub transform: u32,
-    pub texture: u32,
+    pub textures: [u32; 2],
 }
 
 impl Default for GpuEntity {
@@ -249,7 +230,7 @@ impl Default for GpuEntity {
             id: u32::MAX,
             mesh: u32::MAX,
             transform: u32::MAX,
-            texture: 0,
+            textures: [0, 0],
         }
     }
 }
@@ -272,14 +253,6 @@ impl GpuEntity {
             None
         } else {
             Some(self.transform)
-        }
-    }
-
-    pub fn texture_id(&self) -> Option<u32> {
-        if self.texture == u32::MAX {
-            None
-        } else {
-            Some(self.texture)
         }
     }
 }
@@ -305,7 +278,6 @@ pub fn main_vertex_scene(
     vertex_index: u32,
 
     camera: &GpuCamera,
-    _meshes: &[GpuMeshlet],
     vertices: &[GpuVertex],
     transforms: &[Mat4],
     entities: &[GpuEntity],
@@ -319,7 +291,7 @@ pub fn main_vertex_scene(
     let transform = transforms[entity.transform as usize];
 
     *out_color = vertex.color;
-    *out_uv = vertex.uv.xy();
+    *out_uv = vertex.uv0;
     *out_pos = camera.projection * camera.view * transform * vertex.position.xyz().extend(1.0);
 }
 
@@ -341,28 +313,21 @@ pub fn main_fragment_scene(
 ///
 /// This should be called with `groupcount = (entities.len() / threads) + 1`.
 pub fn compute_cull_entities(
-    _camera: &GpuCamera,
     meshes: &[GpuMeshlet],
-    _vertices: &[GpuVertex],
-    _transforms: &[Mat4],
     entities: &[GpuEntity],
 
     draws: &mut [DrawIndirect],
-    count: &mut u32,
 
     global_id: UVec3,
 ) {
     let i = global_id.x as usize;
 
-    // this is a hack because we can't use atomics yet
-    if i == 0 {
-        *count = entities.len() as u32;
-    }
-
     if i > entities.len() {
         return;
     }
 
+    // when the vertex count and/or instance count is 0, it effectively filters
+    // the draw call
     let mut call = DrawIndirect {
         vertex_count: 0,
         instance_count: 0,

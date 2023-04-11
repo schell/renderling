@@ -1082,6 +1082,7 @@ mod test {
             max_meshlets: 2,
             max_transforms: 2,
             max_entities: 2,
+            max_lights: 0,
         };
         let mut scene = r
             .graph
@@ -1119,7 +1120,7 @@ mod test {
         r.graph.visit(scene::scene_update).unwrap().unwrap();
         r.graph.visit(scene::scene_cull).unwrap().unwrap();
 
-        let (gpu_camera, gpu_verts, ents, meshes, transforms, indirect, indirect_count) = r
+        let (gpu_camera, gpu_verts, ents, meshes, transforms, indirect) = r
             .graph
             .visit(
                 |(scene, device, queue): (Read<Scene>, Read<Device>, Read<Queue>)| {
@@ -1130,11 +1131,10 @@ mod test {
                     let entities = scene.entities.read(&device, &queue, 0, 2).unwrap();
                     let meshlets = scene.meshlets.read(&device, &queue, 0, 1).unwrap();
                     let transforms = scene.transforms.read(&device, &queue, 0, 1).unwrap();
-                    let indirect_count = scene.read_indirect_count(&device, &queue).unwrap();
-                    let indirect = if indirect_count > 0 {
+                    let indirect = if scene.entities.capacity() > 0 {
                         scene
                             .indirect_draws
-                            .read(&device, &queue, 0, indirect_count as usize)
+                            .read(&device, &queue, 0, scene.entities.capacity())
                             .unwrap()
                     } else {
                         vec![]
@@ -1146,7 +1146,6 @@ mod test {
                         meshlets,
                         transforms,
                         indirect,
-                        indirect_count,
                     )
                 },
             )
@@ -1224,17 +1223,17 @@ mod test {
                         GpuVertex {
                             position: Vec4::new(0.0, 0.0, 0.0, 0.0),
                             color: Vec4::new(1.0, 1.0, 0.0, 1.0),
-                            uv: Vec4::new(0.0, 0.0, 0.0, 0.0),
+                            uv0: Vec4::new(0.0, 0.0, 0.0, 0.0),
                         },
                         GpuVertex {
                             position: Vec4::new(100.0, 0.0, 0.0, 0.0),
                             color: Vec4::new(1.0, 0.0, 1.0, 1.0),
-                            uv: Vec4::new(1.0, 0.0, 0.0, 0.0),
+                            uv0: Vec4::new(1.0, 0.0, 0.0, 0.0),
                         },
                         GpuVertex {
                             position: Vec4::new(100.0, 100.0, 0.0, 0.0),
                             color: Vec4::new(0.0, 1.0, 1.0, 1.0),
-                            uv: Vec4::new(1.0, 1.0, 0.0, 0.0),
+                            uv0: Vec4::new(1.0, 1.0, 0.0, 0.0),
                         },
                     ];
                     let ent = scene
