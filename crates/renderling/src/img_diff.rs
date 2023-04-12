@@ -6,12 +6,14 @@ use snafu::prelude::*;
 const TEST_IMG_DIR: &'static str = "../../test_img";
 const TEST_OUTPUT_DIR: &'static str = "../../test_output";
 
+#[allow(dead_code)]
 #[derive(Clone, Copy)]
 pub enum Save {
     Yes,
     No,
 }
 
+#[allow(dead_code)]
 pub fn save(seen: image::RgbaImage, filename: &'static str) {
     std::fs::create_dir_all(TEST_OUTPUT_DIR).unwrap();
     seen.save(Path::new(TEST_OUTPUT_DIR).join(filename)).unwrap();
@@ -24,7 +26,7 @@ pub fn assert_img_eq_save(
     filename: &'static str,
     seen: image::RgbaImage,
 ) -> Result<(), snafu::Whatever> {
-    if matches!(Save::Yes, should_save) {
+    if matches!(should_save, Save::Yes) {
         seen.save_with_format(
             Path::new(TEST_IMG_DIR).join(filename),
             image::ImageFormat::Png,

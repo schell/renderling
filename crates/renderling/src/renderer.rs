@@ -1,12 +1,11 @@
 //! Builds the UI pipeline and manages resources.
-use futures_lite::future::FutureExt;
 use glam::Vec4;
 use moongraph::{Edges, Function, Graph, Node, Read, TypeKey, Write};
 use snafu::prelude::*;
 use std::{any::Any, ops::Deref, sync::Arc};
 
 use crate::{
-    camera::*, resources::*, CopiedTextureBuffer, CreateSurfaceFn, ForwardPipeline, Lights,
+    camera::*, resources::*, CreateSurfaceFn, ForwardPipeline, Lights,
     ObjectBuilder, ObjectInner, Objects, Pipelines, RenderTarget, TextureError, WgpuStateError,
 };
 
