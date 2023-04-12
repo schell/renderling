@@ -5,6 +5,7 @@ members = [
     "crates/moongraph-macros",
     "crates/renderling",
     "crates/renderling-shader",
+    "crates/sandbox",
 ]
 
 exclude = ["./shaders"]
