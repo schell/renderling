@@ -65,9 +65,9 @@ pub fn attenuate(attenuation: Vec3, distance: f32) -> f32 {
     }
 }
 
-#[cfg_attr(not(target_arch = "spirv"), derive(bytemuck::Pod, bytemuck::Zeroable))]
+//#[cfg_attr(not(target_arch = "spirv"), derive(bytemuck::Pod, bytemuck::Zeroable))]
 #[repr(C)]
-#[derive(Copy, Clone, Default)]
+#[derive(Copy, Clone, Default, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct GpuLight {
     pub position: Vec4,
     pub direction: Vec4,
