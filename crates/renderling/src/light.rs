@@ -154,6 +154,7 @@ impl SpotLight {
         light.set_specular_color(white);
         light
     }
+
     /// Sets the position of the light in world space.
     pub fn set_position(&self, position: Vec3) {
         self.inner.write().position_ = position.extend(0.0);
