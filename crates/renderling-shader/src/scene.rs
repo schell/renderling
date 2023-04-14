@@ -5,7 +5,7 @@
 //!
 //! To read more about the technique, check out these resources:
 //! * https://stackoverflow.com/questions/59686151/what-is-gpu-driven-rendering
-use glam::{Mat4, UVec2, UVec3, Vec2, Vec3, Vec4, Vec4Swizzles, Mat3};
+use glam::{Mat3, Mat4, UVec2, UVec3, Vec2, Vec3, Vec4, Vec4Swizzles};
 use spirv_std::{image::Image2d, Sampler};
 
 #[cfg(target_arch = "spirv")]
@@ -65,9 +65,9 @@ pub fn attenuate(attenuation: Vec3, distance: f32) -> f32 {
     }
 }
 
-//#[cfg_attr(not(target_arch = "spirv"), derive(bytemuck::Pod, bytemuck::Zeroable))]
 #[repr(C)]
-#[derive(Copy, Clone, Default, bytemuck::Pod, bytemuck::Zeroable)]
+#[cfg_attr(not(target_arch = "spirv"), derive(bytemuck::Pod, bytemuck::Zeroable))]
+#[derive(Copy, Clone, Default)]
 pub struct GpuLight {
     pub position: Vec4,
     pub direction: Vec4,
@@ -203,10 +203,7 @@ impl LightingModel {
 /// index of the property in a global buffer (or the atlas in the case of
 /// textures). [`u32::MAX`] is
 /// used to specify that the entity **does not have that property**.
-#[cfg_attr(
-    not(target_arch = "spirv"),
-    derive(bytemuck::Pod, bytemuck::Zeroable)
-)]
+#[cfg_attr(not(target_arch = "spirv"), derive(bytemuck::Pod, bytemuck::Zeroable))]
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct GpuEntity {
@@ -249,10 +246,7 @@ impl GpuEntity {
     }
 }
 
-#[cfg_attr(
-    not(target_arch = "spirv"),
-    derive(bytemuck::Pod, bytemuck::Zeroable)
-)]
+#[cfg_attr(not(target_arch = "spirv"), derive(bytemuck::Pod, bytemuck::Zeroable))]
 #[repr(C)]
 #[derive(Default, Debug, Clone, Copy, PartialEq)]
 pub struct DrawIndirect {

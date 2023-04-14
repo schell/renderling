@@ -104,7 +104,8 @@ pub fn create_ui_material_bindgroup(
 }
 
 pub fn create_pipeline(device: &wgpu::Device, format: wgpu::TextureFormat) -> wgpu::RenderPipeline {
-    let shader_crate = super::shader_crate(device);
+    let vertex_shader = device.create_shader_module(wgpu::include_spirv!("ui-vertex_ui.spv"));
+    let fragment_shader = device.create_shader_module(wgpu::include_spirv!("ui-fragment_ui.spv"));
     let render_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("ui render pipeline layout"),
         bind_group_layouts: &[
@@ -118,7 +119,7 @@ pub fn create_pipeline(device: &wgpu::Device, format: wgpu::TextureFormat) -> wg
             label: Some("ui render pipeline"),
             layout: Some(&render_pipeline_layout),
             vertex: wgpu::VertexState {
-                module: &shader_crate,
+                module: &vertex_shader,
                 entry_point: "ui::vertex_ui",
                 buffers: &[
                     wgpu::VertexBufferLayout {
@@ -141,7 +142,7 @@ pub fn create_pipeline(device: &wgpu::Device, format: wgpu::TextureFormat) -> wg
                 ],
             },
             fragment: Some(wgpu::FragmentState {
-                module: &shader_crate,
+                module: &fragment_shader,
                 entry_point: "ui::fragment_ui",
                 targets: &[Some(wgpu::ColorTargetState {
                     format,

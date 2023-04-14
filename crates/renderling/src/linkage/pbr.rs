@@ -223,7 +223,8 @@ pub fn create_pipeline(
     format: TextureFormat,
     primitive: Option<wgpu::PrimitiveState>,
 ) -> wgpu::RenderPipeline {
-    let shader_crate = super::shader_crate(device);
+    let vertex_shader = device.create_shader_module(wgpu::include_spirv!("pbr-vertex_pbr.spv"));
+    let fragment_shader = device.create_shader_module(wgpu::include_spirv!("pbr-fragment_pbr.spv"));
 
     let render_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("renderling forward pipeline layout"),
@@ -251,7 +252,7 @@ pub fn create_pipeline(
             label: Some("renderling forward pipeline"),
             layout: Some(&render_pipeline_layout),
             vertex: wgpu::VertexState {
-                module: &shader_crate,
+                module: &vertex_shader,
                 entry_point: "pbr::vertex_pbr",
                 buffers: &[
                     wgpu::VertexBufferLayout {
@@ -280,7 +281,7 @@ pub fn create_pipeline(
                 ],
             },
             fragment: Some(wgpu::FragmentState {
-                module: &shader_crate,
+                module: &fragment_shader,
                 entry_point: "pbr::fragment_pbr",
                 targets: &[Some(wgpu::ColorTargetState {
                     format,

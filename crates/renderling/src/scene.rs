@@ -11,7 +11,7 @@ use wgpu::util::DeviceExt;
 pub use renderling_shader::scene::*;
 
 use crate::{
-    linkage, node::FrameTextureView, DepthTexture, Device, Queue, RenderTarget, Renderling, Texture,
+    node::FrameTextureView, DepthTexture, Device, Queue, RenderTarget, Renderling, Texture,
 };
 
 #[derive(Debug, Snafu)]
@@ -579,7 +579,7 @@ impl<'a> GpuPointLightBuilder<'a> {
     }
 
     pub fn with_ambient_color(mut self, color: impl Into<Vec4>) -> Self {
-        self.inner.ambient_color= color.into();
+        self.inner.ambient_color = color.into();
         self
     }
 
@@ -1037,7 +1037,8 @@ pub fn create_scene_render_pipeline(
     format: wgpu::TextureFormat,
 ) -> wgpu::RenderPipeline {
     let label = Some("scene render pipeline");
-    let shader_crate = linkage::shader_crate(device);
+    let vertex_shader = device.create_shader_module(wgpu::include_spirv!("linkage/main_vertex_scene.spv"));
+    let fragment_shader = device.create_shader_module(wgpu::include_spirv!("linkage/main_fragment_scene.spv"));
     let scene_buffers_layout = scene_vertex_bindgroup_layout(device);
     let scene_atlas_layout = scene_fragment_bindgroup_layout(device);
     let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -1049,7 +1050,7 @@ pub fn create_scene_render_pipeline(
         label,
         layout: Some(&layout),
         vertex: wgpu::VertexState {
-            module: &shader_crate,
+            module: &vertex_shader,
             entry_point: "main_vertex_scene",
             buffers: &[],
         },
@@ -1075,7 +1076,7 @@ pub fn create_scene_render_pipeline(
             count: 1,
         },
         fragment: Some(wgpu::FragmentState {
-            module: &shader_crate,
+            module: &fragment_shader,
             entry_point: "main_fragment_scene",
             targets: &[Some(wgpu::ColorTargetState {
                 format,
@@ -1090,7 +1091,7 @@ pub fn create_scene_render_pipeline(
 
 pub fn create_scene_compute_cull_pipeline(device: &wgpu::Device) -> wgpu::ComputePipeline {
     let label = Some("scene compute cull pipeline");
-    let shader_crate = linkage::shader_crate(device);
+    let shader_crate = device.create_shader_module(wgpu::include_spirv!("linkage/compute_cull_entities.spv"));
     let scene_buffers_layout = scene_vertex_bindgroup_layout(device);
     let indirect_buffers_layout = scene_draw_indirect_bindgroup_layout(device);
     let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {

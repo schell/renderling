@@ -1,22 +1,39 @@
 # renderling 🍖
-This is a collection of WGPU renderers wrapped in a convenient interface.
 
-## Features
+This is a modern "GPU-driven" renderer, along with a collection of
+shaders and types that can facilitate writing new renderers.
+
+## API Features
 
 * builder pattern for lights, cameras and objects
-* automatic resource management (objects and cameras are removed from the scene and gpu resources released on drop)
 * headless rendering support
   - rendering to texture and saving via `image` crate
 * text rendering support (cargo feature `text` - on by default)
 * nested nodes with local transforms
 * gltf support
 
-Shaders are written in GLSL. **shaderc** is used to compile shaders to SPIR-V.
+Shaders are written in Rust via `rust-gpu`.
+
+## Rendering Jargon
+
+- forward+ style pipeline, configurable lighting model per object
+  - [ ] physically based shading
+  - [x] blinn-phong shading
+  - [x] no shading
+- [ ] high definition rendering
+- [ ] bloom
+- [ ] image based lighting
+- [ ] ssao
 
 ## Definition
 **renderling** noun
 
-A wrapper around a WGPU graphics pipeline, along with simple types used to marshal data to the GPU.
+> A ghost in the machine, ready to do your graphics bidding.
+
+`Renderling` is the main type in this library.
+It contains a render graph and all its resources.
+`Renderling` can be configured to render whatever you like, and this library provides many types and
+functions for customizing `Renderling`s.
 
 ## Pipelines
 

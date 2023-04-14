@@ -19,12 +19,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         module,
     } = SpirvBuilder::new("shader-crate", "spirv-unknown-spv1.5")
         .print_metadata(MetadataPrintout::None)
+        .multimodule(true)
         .build()?;
 
     let dir = std::path::PathBuf::from("../crates/renderling/src/linkage");
     match module {
-        ModuleResult::MultiModule(map) => {
-            for (entry, filepath) in map.into_iter() {
+        ModuleResult::MultiModule(modules) => {
+            for (entry, filepath) in modules.into_iter() {
                 let path = dir.join(filepath.file_name().unwrap());
                 println!(
                     "copying '{entry}' from {} to {}",
