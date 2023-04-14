@@ -49,3 +49,12 @@ Just pro-cons on tech choices and little things I don't want to forget whil impl
 * `location[...] is provided by the previous stage output but is not consumed as input by this stage.`
   - rust-gpu has optimized away the shader input, you must use the input parameter in your downstream shader
   - sometimes the optimization is pretty agressive, so you really gotta _use_ the input
+
+# links
+
+- [Forward+ shading (as opposed to deferred)](https://takahiroharada.files.wordpress.com/2015/04/forward_plus.pdf)
+  **tl;dr**
+  In a compute shader before the vertex pass:
+  * break up the frame into tiles
+  * for each tile compute which lights contribute to the pixels in the tile
+  * during shading, iterate over the lights for each pixel according to its tile
