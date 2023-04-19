@@ -96,7 +96,7 @@ mod test {
     use super::*;
     use glam::{Mat4, Quat, Vec2, Vec3, Vec4};
     use moongraph::{DaggaError, Function, GraphError, Node, Read, TypeKey};
-    use renderling_shader::scene::{DrawIndirect, GpuCamera, GpuEntity, GpuVertex};
+    use renderling_shader::scene::{DrawIndirect, GpuEntity, GpuVertex};
 
     #[test]
     fn init() {
@@ -1080,24 +1080,13 @@ mod test {
     }
 
     #[test]
-    fn gpu_scene_sanity() {
+    fn gpu_scene_sanity1() {
         _init_logging();
         let mut r = Renderling::headless(100, 100)
             .unwrap()
             .with_background_color(Vec3::splat(0.0).extend(1.0));
-        let cfg = SceneConfig {
-            max_vertices: 6,
-            max_transforms: 4,
-            max_entities: 2,
-            max_lights: 0,
-        };
-        let mut scene = r
-            .graph
-            .visit(|(device, queue): (Read<Device>, Read<Queue>)| Scene::new(&device, &queue, cfg))
-            .unwrap();
-        let (projection, view) = camera::default_ortho2d(100.0, 100.0);
-        let camera = GpuCamera { projection, view };
-        scene.set_camera(camera);
+        let mut builder = r.new_scene();
+
         let verts = vec![
             GpuVertex {
                 position: Vec4::new(0.0, 0.0, 0.0, 1.0),
@@ -1115,27 +1104,35 @@ mod test {
                 ..Default::default()
             },
         ];
-        let ent = scene
+
+        let ent = builder
             .new_entity()
             .with_meshlet(verts.clone())
             .with_transform(Mat4::IDENTITY)
-            .build()
-            .unwrap();
+            .build();
+
+        let mut scene = builder.build();
+
+        let (projection, view) = camera::default_ortho2d(100.0, 100.0);
+        scene.set_camera(projection, view);
 
         scene::setup_scene_render_graph(scene, &mut r);
 
         r.graph.visit(scene::scene_update).unwrap().unwrap();
         r.graph.visit(scene::scene_cull).unwrap().unwrap();
 
-        let (gpu_camera, gpu_verts, ents, transforms, indirect) = r
+        let (constants, gpu_verts, ents, transforms, indirect) = r
             .graph
             .visit(
                 |(scene, device, queue): (Read<Scene>, Read<Device>, Read<Queue>)| {
-                    let camera =
-                        scene::read_buffer::<GpuCamera>(&device, &queue, &scene.camera, 0, 1)
+                    let constants =
+                        scene::read_buffer::<GpuConstants>(&device, &queue, &scene.constants, 0, 1)
                             .unwrap();
                     let vertices = scene.vertices.read(&device, &queue, 0, 3).unwrap();
-                    let entities = scene.entities.read(&device, &queue, 0, 2).unwrap();
+                    let entities = scene
+                        .entities
+                        .read(&device, &queue, 0, scene.entities.capacity())
+                        .unwrap();
                     let transforms = scene.transforms.read(&device, &queue, 0, 1).unwrap();
                     let indirect = if scene.entities.capacity() > 0 {
                         scene
@@ -1145,29 +1142,22 @@ mod test {
                     } else {
                         vec![]
                     };
-                    (camera[0], vertices, entities, transforms, indirect)
+                    (constants[0], vertices, entities, transforms, indirect)
                 },
             )
             .unwrap();
-        assert_eq!(camera, gpu_camera);
+        assert_eq!(constants.camera_projection, projection);
+        assert_eq!(constants.camera_view, view);
         assert_eq!(verts, gpu_verts);
-        assert_eq!(vec![ent, GpuEntity::default()], ents);
+        assert_eq!(vec![ent], ents);
         assert_eq!(vec![Mat4::IDENTITY], transforms);
         assert_eq!(
-            vec![
-                DrawIndirect {
-                    vertex_count: 3,
-                    instance_count: 1,
-                    base_vertex: 0,
-                    base_instance: 0
-                },
-                DrawIndirect {
-                    vertex_count: 0,
-                    instance_count: 0,
-                    base_vertex: 0,
-                    base_instance: 1,
-                }
-            ],
+            vec![DrawIndirect {
+                vertex_count: 3,
+                instance_count: 1,
+                base_vertex: 0,
+                base_instance: 0
+            },],
             indirect
         );
 
@@ -1196,37 +1186,15 @@ mod test {
         let mut r = Renderling::headless(100, 100)
             .unwrap()
             .with_background_color(Vec3::splat(0.0).extend(1.0));
-        let cfg = SceneConfig {
-            max_vertices: 6,
-            max_transforms: 4,
-            max_entities: 2,
-            max_lights: 0,
-        };
-        let mut scene = r
-            .graph
-            .visit(|(device, queue): (Read<Device>, Read<Queue>)| Scene::new(&device, &queue, cfg))
-            .unwrap();
-        let (projection, view) = camera::default_ortho2d(100.0, 100.0);
-        let camera = GpuCamera { projection, view };
-        scene.set_camera(camera);
-
+        let mut builder = r.new_scene();
         // now test the textures functionality
         let img = image::io::Reader::open("../../img/cheetah.jpg")
             .unwrap()
             .decode()
             .unwrap();
         let img = img.to_rgba8();
-
-        scene.set_camera(GpuCamera { projection, view });
-        let tex_ids = scene
-            .load_images(r.get_device(), r.get_queue(), vec![img.clone()])
-            .unwrap();
-        assert_eq!(vec![1], tex_ids);
-
-        let rects = scene.atlas().images();
-        assert_eq!(0, rects[0].0);
-        assert_eq!(1, rects[0].1.w);
-        assert_eq!(1, rects[0].1.h);
+        let tex_id = builder.add_image(img);
+        assert_eq!(1, tex_id);
 
         let verts = vec![
             GpuVertex {
@@ -1248,11 +1216,7 @@ mod test {
                 ..Default::default()
             },
         ];
-        let ent = scene
-            .new_entity()
-            .with_meshlet(verts.clone())
-            .build()
-            .unwrap();
+        let ent = builder.new_entity().with_meshlet(verts.clone()).build();
         assert_eq!(0, ent.id);
         assert_eq!(
             GpuEntity {
@@ -1263,22 +1227,32 @@ mod test {
                 normal_matrix: 1,
                 texture0: 0,
                 texture1: 0,
-                lighting: LightingModel::NO_LIGHTING
+                lighting: LightingModel::NO_LIGHTING,
+                parent: u32::MAX,
             },
             ent
         );
 
-        let ent = scene
+        let ent = builder
             .new_entity()
             .with_meshlet(verts.clone())
-            .with_texture_ids(Some(tex_ids[0]), None)
+            .with_texture_ids(Some(tex_id), None)
             .with_transform(
                 Mat4::from_translation(Vec3::new(15.0, 35.0, 0.5))
                     * Mat4::from_scale(Vec3::new(0.5, 0.5, 1.0)),
             )
-            .build()
-            .unwrap();
+            .build();
         assert_eq!(1, ent.id);
+
+        let mut scene = builder.build();
+
+        let (projection, view) = camera::default_ortho2d(100.0, 100.0);
+        scene.set_camera(projection, view);
+
+        let rects = scene.atlas().images();
+        assert_eq!(0, rects[0].0);
+        assert_eq!(1, rects[0].1.w);
+        assert_eq!(1, rects[0].1.h);
 
         scene::setup_scene_render_graph(scene, &mut r);
         r.graph.add_node(
@@ -1358,42 +1332,27 @@ mod test {
             .unwrap()
             .with_background_color(Vec3::splat(0.0).extend(1.0));
 
-        let cfg = SceneConfig::default();
-        let mut scene = r
-            .graph
-            .visit(|(device, queue): (Read<Device>, Read<Queue>)| Scene::new(&device, &queue, cfg))
-            .unwrap();
-
-        let (projection, _) = camera::default_perspective(100.0, 100.0);
-        let camera = GpuCamera {
-            projection,
-            view: Mat4::look_at_rh(
-                Vec3::new(1.8, 1.8, 1.8),
-                Vec3::ZERO,
-                Vec3::new(0.0, 1.0, 0.0),
-            ),
-        };
-        scene.set_camera(camera);
+        let mut builder = r.new_scene();
 
         let red = Vec3::X.extend(1.0);
         let green = Vec3::Y.extend(1.0);
         let blue = Vec3::Z.extend(1.0);
         let transparent = Vec4::ZERO;
-        let _dir_red = scene
+        let _dir_red = builder
             .new_directional_light()
             .with_direction(Vec3::NEG_Y)
             .with_diffuse_color(red)
             .with_specular_color(red)
             .with_ambient_color(transparent)
             .build();
-        let _dir_green = scene
+        let _dir_green = builder
             .new_directional_light()
             .with_direction(Vec3::NEG_X)
             .with_diffuse_color(green)
             .with_specular_color(green)
             .with_ambient_color(transparent)
             .build();
-        let _dir_blue = scene
+        let _dir_blue = builder
             .new_directional_light()
             .with_direction(Vec3::NEG_Z)
             .with_diffuse_color(blue)
@@ -1401,7 +1360,7 @@ mod test {
             .with_ambient_color(transparent)
             .build();
 
-        let _cube = scene
+        let _cube = builder
             .new_entity()
             .with_meshlet(
                 crate::math::unit_cube()
@@ -1413,8 +1372,17 @@ mod test {
                     }),
             )
             .with_lighting_model(LightingModel::PHONG_LIGHTING)
-            .build()
-            .unwrap();
+            .build();
+
+        let mut scene = builder.build();
+
+        let (projection, _) = camera::default_perspective(100.0, 100.0);
+        let view = Mat4::look_at_rh(
+            Vec3::new(1.8, 1.8, 1.8),
+            Vec3::ZERO,
+            Vec3::new(0.0, 1.0, 0.0),
+        );
+        scene.set_camera(projection, view);
 
         setup_scene_render_graph(scene, &mut r);
         r.graph.add_node(
@@ -1426,11 +1394,61 @@ mod test {
         );
 
         let img = r.render_image().unwrap();
-        crate::img_diff::assert_img_eq(
-            "scene_cube_directional",
-            "scene_cube_directional.png",
-            img,
-        ).unwrap();
+        crate::img_diff::assert_img_eq("scene_cube_directional", "scene_cube_directional.png", img)
+            .unwrap();
+    }
+
+    #[test]
+    // tests that nested children are transformed by their parent's transform
+    fn scene_parent_sanity() {
+        let (mut ui, _cam) = ui_renderling();
+        ui.set_background_color(Vec4::splat(0.0));
+        let size = 1.0;
+        let yellow_tri = ui
+            .new_object()
+            .with_mesh_builder(MeshBuilder::default().with_vertices(vec![
+                            UiVertex::default()
+                                .with_position(0.0, 0.0, 0.0)
+                                .with_color(1.0, 1.0, 0.0, 1.0),
+                            UiVertex::default()
+                                .with_position(size, 0.0, 0.0)
+                                .with_color(1.0, 1.0, 0.0, 1.0),
+                            UiVertex::default()
+                                .with_position(size, size, 0.0)
+                                .with_color(1.0, 1.0, 0.0, 1.0),
+                        ]))
+            .with_position(Vec3::new(25.0, 25.0, 0.0))
+            .build()
+            .unwrap();
+        let _cyan_tri = ui
+            .new_object()
+            .with_mesh_builder(MeshBuilder::default().with_vertices(vec![
+                            UiVertex::default()
+                                .with_position(0.0, 0.0, 0.0)
+                                .with_color(0.0, 1.0, 1.0, 1.0),
+                            UiVertex::default()
+                                .with_position(size, 0.0, 0.0)
+                                .with_color(0.0, 1.0, 1.0, 1.0),
+                            UiVertex::default()
+                                .with_position(size, size, 0.0)
+                                .with_color(0.0, 1.0, 1.0, 1.0),
+                        ]))
+            .with_position(Vec3::new(25.0, 25.0, 0.0))
+            .with_scale(Vec3::new(25.0, 25.0, 1.0))
+            .with_child(&yellow_tri)
+            .build()
+            .unwrap();
+
+        assert_eq!(
+            WorldTransform::default()
+                .with_position(Vec3::new(50.0, 50.0, 0.0))
+                .with_scale(Vec3::new(25.0, 25.0, 1.0)),
+            yellow_tri.get_world_transform()
+        );
+
+        let img = ui.render_image().unwrap();
+        crate::img_diff::assert_img_eq_save(Save::No, "parent_sanity", "parent_sanity.png", img)
+            .unwrap();
     }
 
     ////#[cfg(feature = "gltf")]

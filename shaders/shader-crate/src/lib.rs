@@ -12,10 +12,11 @@ pub use pbr::*;
 
 #[spirv(vertex)]
 pub fn main_vertex_scene(
-    #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] camera: &scene::GpuCamera,
+    #[spirv(uniform, descriptor_set = 0, binding = 0)] constants: &scene::GpuConstants,
     #[spirv(storage_buffer, descriptor_set = 0, binding = 1)] vertices: &[scene::GpuVertex],
     #[spirv(storage_buffer, descriptor_set = 0, binding = 2)] transforms: &[glam::Mat4],
     #[spirv(storage_buffer, descriptor_set = 0, binding = 3)] entities: &[scene::GpuEntity],
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 5)] textures: &[scene::GpuTexture],
 
     //// which entity are we drawing
     #[spirv(instance_index)] instance_id: u32,
@@ -29,15 +30,16 @@ pub fn main_vertex_scene(
     out_uv1: &mut glam::Vec2,
     out_norm: &mut glam::Vec3,
     out_pos: &mut glam::Vec3,
-    #[spirv(position)] gl_pos: &mut glam::Vec4
+    #[spirv(position)] gl_pos: &mut glam::Vec4,
 ) {
     scene::main_vertex_scene(
         instance_id,
         vertex_id,
-        camera,
+        constants,
         vertices,
         transforms,
         entities,
+        textures,
         out_lighting_model,
         out_color,
         out_tex_ids,
@@ -45,7 +47,7 @@ pub fn main_vertex_scene(
         out_uv1,
         out_norm,
         out_pos,
-        gl_pos
+        gl_pos,
     )
 }
 
@@ -54,7 +56,7 @@ pub fn main_fragment_scene(
     #[spirv(descriptor_set = 1, binding = 0)] atlas: &Image2d,
     #[spirv(descriptor_set = 1, binding = 1)] sampler: &Sampler,
 
-    #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] camera: &scene::GpuCamera,
+    #[spirv(uniform, descriptor_set = 0, binding = 0)] constants: &scene::GpuConstants,
     #[spirv(storage_buffer, descriptor_set = 0, binding = 4)] lights: &[scene::GpuLight],
 
     #[spirv(flat)] in_lighting_model: u32,
@@ -70,7 +72,7 @@ pub fn main_fragment_scene(
     scene::main_fragment_scene(
         atlas,
         sampler,
-        camera,
+        constants,
         lights,
         in_lighting_model,
         in_color,
@@ -91,7 +93,34 @@ pub fn compute_cull_entities(
 
     #[spirv(global_invocation_id)] global_id: glam::UVec3,
 ) {
-    scene::compute_cull_entities(
-        entities, draws, global_id,
-    )
+    scene::compute_cull_entities(entities, draws, global_id)
+}
+
+#[spirv(compute(threads(32)))]
+pub fn compute_atomics(
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] data: &mut [u32],
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 1)] sum: &mut u32,
+    #[spirv(global_invocation_id)] global_id: glam::UVec3,
+) {
+    let index = global_id.x as usize;
+    if index > data.len() {
+        return;
+    }
+
+    let n =
+        unsafe {
+            spirv_std::arch::atomic_load::<
+                    u32,
+                { spirv_std::memory::Scope::Device as u32 },
+                { spirv_std::memory::Semantics::NONE.bits() as u32 },
+                >(&data[index])
+        };
+    *sum = n;
+    //unsafe {
+    //    spirv_std::arch::atomic_i_add::<
+    //        u32,
+    //        { spirv_std::memory::Scope::Device as u32 },
+    //        { spirv_std::memory::Semantics::NONE.bits() as u32 },
+    //    >(sum, n)
+    //};
 }

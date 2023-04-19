@@ -38,18 +38,6 @@ impl Default for GpuVertex {
     }
 }
 
-/// A GPU camera.
-#[cfg_attr(
-    not(target_arch = "spirv"),
-    derive(bytemuck::Pod, bytemuck::Zeroable, Debug)
-)]
-#[repr(C)]
-#[derive(Clone, Copy, Default, PartialEq)]
-pub struct GpuCamera {
-    pub projection: Mat4,
-    pub view: Mat4,
-}
-
 /// Calculate attenuation
 ///
 /// attenuation.x: constant
@@ -197,12 +185,43 @@ impl LightingModel {
     pub const PHONG_LIGHTING: u32 = 0;
 }
 
+/// A GPU texture.
+#[cfg_attr(not(target_arch = "spirv"), derive(bytemuck::Pod, bytemuck::Zeroable, Debug))]
+#[repr(C)]
+#[derive(Clone, Copy, PartialEq)]
+pub struct GpuTexture {
+    // top left offset of texture in the atlas
+    pub offset_px: Vec2,
+    // size of texture in the atlas
+    pub size_px: Vec2,
+}
+
+impl GpuTexture {
+    pub fn uv(&self, uv: Vec2, atlas_size: Vec2) -> Vec2 {
+        let x = self.offset_px.x;
+        let y = self.offset_px.y;
+        let w = self.size_px.x;
+        let h = self.size_px.y;
+        let img_origin = Vec2::new(x, y);
+        let img_size = Vec2::new(w, h);
+        // convert the uv from normalized into pixel locations in the original image
+        let uv_img_pixels = uv * img_size;
+        // convert those into pixel locations in the atlas image
+        let uv_atlas_pixels = img_origin + uv_img_pixels;
+        // normalize the uvs by the atlas size
+        let uv_atlas_normalized = uv_atlas_pixels / atlas_size;
+        uv_atlas_normalized
+    }
+}
+
 /// A bundle of GPU components.
 ///
 /// The fields of `GpuEntity` are all u32s that represent the
 /// index of the property in a global buffer (or the atlas in the case of
 /// textures). [`u32::MAX`] is
 /// used to specify that the entity **does not have that property**.
+// TODO: We might not need a separate "transforms" buffer if we kept the transforms
+// inline in this struct.
 #[cfg_attr(not(target_arch = "spirv"), derive(bytemuck::Pod, bytemuck::Zeroable))]
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -223,6 +242,8 @@ pub struct GpuEntity {
     pub texture1: u32,
     // The lighting model used for shading this object. `u32::MAX` means "no lighting".
     pub lighting: u32,
+    // The id of this entity's parent, if it exists. `u32::MAX` means "none".
+    pub parent: u32,
 }
 
 impl Default for GpuEntity {
@@ -236,6 +257,7 @@ impl Default for GpuEntity {
             texture0: 0,
             texture1: 0,
             lighting: LightingModel::NO_LIGHTING,
+            parent: u32::MAX,
         }
     }
 }
@@ -244,6 +266,17 @@ impl GpuEntity {
     pub fn is_alive(&self) -> bool {
         self.id != u32::MAX
     }
+}
+
+/// Unforms/constants for a scene's worth of rendering.
+#[cfg_attr(not(target_arch = "spirv"), derive(bytemuck::Pod, bytemuck::Zeroable, Debug))]
+#[repr(C)]
+#[derive(Default, Clone, Copy, PartialEq)]
+pub struct GpuConstants {
+    pub camera_projection: Mat4,
+    pub camera_view: Mat4,
+    pub atlas_size: Vec2,
+    pub padding: Vec2,
 }
 
 #[cfg_attr(not(target_arch = "spirv"), derive(bytemuck::Pod, bytemuck::Zeroable))]
@@ -263,10 +296,11 @@ pub fn main_vertex_scene(
     // which vertex are we drawing
     vertex_index: u32,
 
-    camera: &GpuCamera,
+    constants: &GpuConstants,
     vertices: &[GpuVertex],
     transforms: &[Mat4],
     entities: &[GpuEntity],
+    textures: &[GpuTexture],
 
     out_lighting_model: &mut u32,
     out_color: &mut Vec4,
@@ -282,17 +316,21 @@ pub fn main_vertex_scene(
     let vertex = vertices[vertex_index as usize];
     let model_matrix = transforms[entity.model_matrix as usize];
     let normal_matrix = transforms[entity.normal_matrix as usize];
+    let texture0 = textures[entity.texture0 as usize];
+    let texture1 = textures[entity.texture1 as usize];
 
     *out_lighting_model = entity.lighting;
     *out_color = vertex.color;
     *out_tex_ids = UVec2::new(entity.texture0, entity.texture1);
-    *out_uv0 = vertex.uv.xy();
-    *out_uv1 = vertex.uv.zw();
-    *out_norm = Mat3::from_mat4(camera.view) * Mat3::from_mat4(normal_matrix) * vertex.normal.xyz();
+    *out_uv0 = texture0.uv(vertex.uv.xy(), constants.atlas_size);
+    *out_uv1 = texture1.uv(vertex.uv.zw(), constants.atlas_size);
+    *out_norm = Mat3::from_mat4(constants.camera_view)
+        * Mat3::from_mat4(normal_matrix)
+        * vertex.normal.xyz();
 
-    let view_pos = camera.view * model_matrix * vertex.position.xyz().extend(1.0);
+    let view_pos = constants.camera_view * model_matrix * vertex.position.xyz().extend(1.0);
     *out_pos = view_pos.xyz();
-    *gl_pos = camera.projection * view_pos;
+    *gl_pos = constants.camera_projection * view_pos;
 }
 
 /// Scene fragment shader.
@@ -300,7 +338,7 @@ pub fn main_fragment_scene(
     atlas: &Image2d,
     sampler: &Sampler,
 
-    camera: &GpuCamera,
+    constants: &GpuConstants,
     lights: &[GpuLight],
 
     in_lighting_model: u32,
@@ -327,7 +365,7 @@ pub fn main_fragment_scene(
             let diffuse_color: Vec4 = uv0_color * in_color;
             let specular_color: Vec4 = uv1_color * in_color;
             lighting_phong(
-                camera,
+                &constants.camera_view,
                 lights,
                 diffuse_color,
                 specular_color,
@@ -340,7 +378,7 @@ pub fn main_fragment_scene(
 }
 
 fn lighting_phong(
-    camera: &GpuCamera,
+    camera_view: &Mat4,
     lights: &[GpuLight],
     diffuse_color: Vec4,
     specular_color: Vec4,
@@ -364,7 +402,7 @@ fn lighting_phong(
             }
             GpuLight::DIRECTIONAL_LIGHT => {
                 color += light.color_phong_directional(
-                    camera.view,
+                    *camera_view,
                     norm,
                     camera_to_frag_dir,
                     diffuse_color,
@@ -376,7 +414,7 @@ fn lighting_phong(
             GpuLight::POINT_LIGHT => {
                 color += light.color_phong_point(
                     in_pos,
-                    camera.view,
+                    *camera_view,
                     norm,
                     camera_to_frag_dir,
                     diffuse_color,
@@ -388,7 +426,7 @@ fn lighting_phong(
             GpuLight::SPOT_LIGHT => {
                 color += light.color_phong_spot(
                     in_pos,
-                    camera.view,
+                    *camera_view,
                     norm,
                     camera_to_frag_dir,
                     diffuse_color,

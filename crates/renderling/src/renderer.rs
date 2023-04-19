@@ -5,8 +5,8 @@ use snafu::prelude::*;
 use std::{any::Any, ops::Deref, sync::Arc};
 
 use crate::{
-    camera::*, resources::*, CreateSurfaceFn, ForwardPipeline, Lights,
-    ObjectBuilder, ObjectInner, Objects, Pipelines, RenderTarget, TextureError, WgpuStateError,
+    camera::*, resources::*, CreateSurfaceFn, ForwardPipeline, Lights, ObjectBuilder, ObjectInner,
+    Objects, Pipelines, RenderTarget, TextureError, WgpuStateError, SceneBuilder,
 };
 
 pub use moongraph::IsGraphNode;
@@ -528,6 +528,24 @@ impl Renderling {
             .0
             .clone();
         crate::gltf_support::GltfLoader::new(device, queue)
+    }
+
+    pub fn new_scene(&self) -> SceneBuilder {
+        let device = self
+            .graph
+            .get_resource::<Device>()
+            .unwrap()
+            .unwrap()
+            .0
+            .clone();
+        let queue = self
+            .graph
+            .get_resource::<Queue>()
+            .unwrap()
+            .unwrap()
+            .0
+            .clone();
+        SceneBuilder::new(device, queue)
     }
 
     #[cfg(feature = "image")]
