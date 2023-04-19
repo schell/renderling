@@ -1,4 +1,4 @@
-use renderling::{Renderling, math::{Vec3, Vec4, Vec2, Mat4}, SceneConfig, Read, Scene, GpuCamera, Device, Queue, GpuVertex, IsGraphNode};
+use renderling::{Renderling, math::{Vec3, Vec4, Vec2, Mat4}, SceneBuilder, Read, Scene, Device, Queue, GpuVertex, IsGraphNode};
 
 fn main() {
     let event_loop = winit::event_loop::EventLoop::new();
@@ -14,68 +14,50 @@ fn main() {
     let mut r = Renderling::try_from_window(&window)
         .unwrap()
         .with_background_color(Vec3::splat(0.0).extend(1.0));
-    let cfg = SceneConfig {
-        max_vertices: 6,
-        max_transforms: 4,
-        max_entities: 2,
-        max_lights: 0,
-    };
-    let mut scene = r
-        .graph
-        .visit(|(device, queue): (Read<Device>, Read<Queue>)| Scene::new(&device, &queue, cfg))
-        .unwrap();
     let (projection, view) = renderling::default_ortho2d(100.0, 100.0);
-    let camera = GpuCamera { projection, view };
-    scene.set_camera(camera);
-
+    let mut builder = r.new_scene()
+        .with_camera(projection, view);
     // now test the textures functionality
-    let img = image::io::Reader::open("img/cheetah.jpg")
+        let img = image::io::Reader::open("img/cheetah.jpg")
         .unwrap()
         .decode()
         .unwrap();
     let img = img.to_rgba8();
-
-    let tex_ids = scene
-        .load_images(r.get_device(), r.get_queue(), vec![img.clone()])
-        .unwrap();
-    assert_eq!(vec![1], tex_ids);
-
-    let rects = scene.atlas().images();
-    assert_eq!(0, rects[0].0);
-    assert_eq!(1, rects[0].1.w);
-    assert_eq!(1, rects[0].1.h);
+    let tex_id = builder.add_image(img);
 
     let verts = vec![
         GpuVertex {
             position: Vec4::new(0.0, 0.0, 0.0, 0.0),
             color: Vec4::new(1.0, 1.0, 0.0, 1.0),
-            uv0: Vec2::new(0.0, 0.0),
-            uv1: Vec2::new(0.0, 0.0),
+            uv: Vec4::new(0.0, 0.0, 0.0, 0.0),
             ..Default::default()
         },
         GpuVertex {
             position: Vec4::new(100.0, 0.0, 0.0, 0.0),
             color: Vec4::new(1.0, 0.0, 1.0, 1.0),
-            uv0: Vec2::new(1.0, 0.0),
-            uv1: Vec2::new(1.0, 0.0),
+            uv: Vec4::new(1.0, 0.0, 1.0, 0.0),
             ..Default::default()
         },
         GpuVertex {
             position: Vec4::new(100.0, 100.0, 0.0, 0.0),
             color: Vec4::new(0.0, 1.0, 1.0, 1.0),
-            uv0: Vec2::new(1.0, 1.0),
-            uv1: Vec2::new(1.0, 1.0),
+            uv: Vec4::new(1.0, 1.0, 1.0, 1.0),
             ..Default::default()
         },
     ];
-    let ent = scene
+    let ent = builder
         .new_entity()
         .with_meshlet(verts.clone())
         .with_transform(Mat4::IDENTITY)
-        .with_texture_ids(Some(tex_ids[0]), None)
-        .build()
-        .unwrap();
+        .with_texture_ids(Some(tex_id), None)
+        .build();
     assert_eq!(0, ent.id);
+
+    let scene = builder.build();
+    let rects = scene.atlas().images();
+    assert_eq!(0, rects[0].0);
+    assert_eq!(1, rects[0].1.w);
+    assert_eq!(1, rects[0].1.h);
 
     renderling::setup_scene_render_graph(scene, &mut r);
 
