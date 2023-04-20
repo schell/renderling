@@ -1186,7 +1186,8 @@ mod test {
         let mut r = Renderling::headless(100, 100)
             .unwrap()
             .with_background_color(Vec3::splat(0.0).extend(1.0));
-        let mut builder = r.new_scene();
+        let (projection, view) = camera::default_ortho2d(100.0, 100.0);
+        let mut builder = r.new_scene().with_camera(projection, view);
         // now test the textures functionality
         let img = image::io::Reader::open("../../img/cheetah.jpg")
             .unwrap()
@@ -1216,23 +1217,6 @@ mod test {
                 ..Default::default()
             },
         ];
-        let ent = builder.new_entity().with_meshlet(verts.clone()).build();
-        assert_eq!(0, ent.id);
-        assert_eq!(
-            GpuEntity {
-                id: 0,
-                mesh_first_vertex: 0,
-                mesh_vertex_count: 3,
-                model_matrix: 0,
-                normal_matrix: 1,
-                texture0: 0,
-                texture1: 0,
-                lighting: LightingModel::NO_LIGHTING,
-                parent: u32::MAX,
-            },
-            ent
-        );
-
         let ent = builder
             .new_entity()
             .with_meshlet(verts.clone())
@@ -1242,14 +1226,31 @@ mod test {
                     * Mat4::from_scale(Vec3::new(0.5, 0.5, 1.0)),
             )
             .build();
+
+        assert_eq!(0, ent.id);
+        assert_eq!(
+            GpuEntity {
+                id: 0,
+                mesh_first_vertex: 0,
+                mesh_vertex_count: 3,
+                model_matrix: 0,
+                normal_matrix: 1,
+                texture0: 1,
+                texture1: 0,
+                lighting: LightingModel::NO_LIGHTING,
+                parent: u32::MAX,
+            },
+            ent
+        );
+
+        let ent = builder.new_entity().with_meshlet(verts.clone()).build();
         assert_eq!(1, ent.id);
 
-        let mut scene = builder.build();
-
-        let (projection, view) = camera::default_ortho2d(100.0, 100.0);
-        scene.set_camera(projection, view);
+        let scene = builder.build();
+        assert_eq!(2, scene.entities.len());
 
         let rects = scene.atlas().images();
+        assert_eq!(2, rects.len());
         assert_eq!(0, rects[0].0);
         assert_eq!(1, rects[0].1.w);
         assert_eq!(1, rects[0].1.h);
@@ -1264,32 +1265,52 @@ mod test {
         );
 
         let img = r.render_image().unwrap();
-        crate::img_diff::assert_img_eq("gpu_scene_sanity2", "gpu_scene_sanity2.png", img).unwrap();
 
-        r.graph
-            .visit(
-                |(device, queue, scene): (Read<Device>, Read<Queue>, Read<Scene>)| {
-                    let draws = scene.indirect_draws.read(&device, &queue, 0, 2).unwrap();
-                    assert_eq!(
-                        vec![
-                            DrawIndirect {
-                                vertex_count: 3,
-                                instance_count: 1,
-                                base_vertex: 0,
-                                base_instance: 0
-                            },
-                            DrawIndirect {
-                                vertex_count: 3,
-                                instance_count: 1,
-                                base_vertex: 3,
-                                base_instance: 1
-                            }
-                        ],
-                        draws
-                    );
-                },
-            )
+        let scene = r.graph.get_resource::<Scene>().unwrap().unwrap();
+        let draws = scene
+            .indirect_draws
+            .read(r.get_device(), r.get_queue(), 0, 2)
             .unwrap();
+        assert_eq!(
+            vec![
+                DrawIndirect {
+                    vertex_count: 3,
+                    instance_count: 1,
+                    base_vertex: 0,
+                    base_instance: 0
+                },
+                DrawIndirect {
+                    vertex_count: 3,
+                    instance_count: 1,
+                    base_vertex: 3,
+                    base_instance: 1
+                }
+            ],
+            draws
+        );
+        let constants: GpuConstants =
+            read_buffer(r.get_device(), r.get_queue(), &scene.constants, 0, 1).unwrap()[0];
+        assert_eq!(Vec2::splat(256.0), constants.atlas_size);
+
+        let textures = scene
+            .textures
+            .read(r.get_device(), r.get_queue(), 0, 2)
+            .unwrap();
+        assert_eq!(
+            vec![
+                GpuTexture {
+                    offset_px: Vec2::new(170.0, 0.0,),
+                    size_px: Vec2::new(1.0, 1.0,),
+                },
+                GpuTexture {
+                    offset_px: Vec2::new(0.0, 0.0,),
+                    size_px: Vec2::new(170.0, 170.0,),
+                },
+            ],
+            textures
+        );
+
+        crate::img_diff::assert_img_eq("gpu_scene_sanity2", "gpu_scene_sanity2.png", img).unwrap();
     }
 
     #[test]
