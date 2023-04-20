@@ -75,7 +75,10 @@ pub fn read_buffer<T: bytemuck::Pod + bytemuck::Zeroable>(
     );
     let output_buffer_size = (length * std::mem::size_of::<T>()) as u64;
     let output_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some(&format!("GpuArray output buffer {}", std::any::type_name::<T>())),
+        label: Some(&format!(
+            "GpuArray output buffer {}",
+            std::any::type_name::<T>()
+        )),
         size: output_buffer_size,
         usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
         mapped_at_creation: false,
@@ -146,12 +149,12 @@ impl<T: Any + Clone + Copy + bytemuck::Pod + bytemuck::Zeroable> GpuArray<T> {
             buffer: GpuBuffer {
                 buffer: gpu_storage_buffer(
                     device,
-                    Some("GpuArray::new"),
+                    Some(&format!("GpuArray::new {}", std::any::type_name::<T>())),
                     &contents,
                     capacity,
                     usage,
                 ),
-                len: 0,
+                len: contents.len(),
                 capacity,
             },
             updates: async_channel::unbounded(),
@@ -646,10 +649,7 @@ impl SceneBuilder {
     ///
     /// The data is not uploaded to the GPU until [`Scene::update`] has been
     /// called.
-    pub fn new_meshlet(
-        &mut self,
-        vertices: impl IntoIterator<Item = GpuVertex>,
-    ) -> (u32, u32) {
+    pub fn new_meshlet(&mut self, vertices: impl IntoIterator<Item = GpuVertex>) -> (u32, u32) {
         let vertices = vertices.into_iter().collect::<Vec<_>>();
         let start = self.vertices.len();
         let len = vertices.len();
@@ -690,7 +690,6 @@ impl SceneBuilder {
 }
 
 pub struct Scene {
-    next_entity: u32,
     pub vertices: GpuArray<GpuVertex>,
     pub transforms: GpuArray<Mat4>,
     pub entities: GpuArray<GpuEntity>,
@@ -722,23 +721,24 @@ impl Scene {
         let vertices = GpuArray::new(&device, &vertices, vertices.len(), scene_render_usage());
         let transforms =
             GpuArray::new(&device, &transforms, transforms.len(), scene_render_usage());
+        let draws = entities
+            .iter()
+            .map(|_| DrawIndirect::default())
+            .collect::<Vec<_>>();
+        let indirect_draws = GpuArray::new(&device, &draws, draws.len(), scene_indirect_usage());
         let entities = GpuArray::new(&device, &entities, entities.len(), scene_render_usage());
         let lights = GpuArray::new(&device, &lights, lights.len(), scene_render_usage());
         let mut atlas = Atlas::new(&device, &queue, 1, 1);
-        let texture_ids = atlas.pack(&device, &queue, images).unwrap();
-        let textures = texture_ids
+        let _texture_ids = atlas.pack(&device, &queue, images).unwrap();
+        let textures = atlas
+            .images()
             .into_iter()
-            .map(|id| {
-                let r = atlas.rects[id as usize];
-                GpuTexture {
-                    offset_px: Vec2::new(r.x as f32, r.y as f32),
-                    size_px: Vec2::new(r.w as f32, r.h as f32),
-                }
+            .map(|(id, r)| GpuTexture {
+                offset_px: Vec2::new(r.x as f32, r.y as f32),
+                size_px: Vec2::new(r.w as f32, r.h as f32),
             })
             .collect::<Vec<_>>();
         let textures = GpuArray::new(&device, &textures, textures.len(), scene_render_usage());
-        let indirect_draws =
-            GpuArray::<DrawIndirect>::new(&device, &[], entities.len(), scene_indirect_usage());
         let constants = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Scene::new constants"),
             contents: bytemuck::cast_slice(&[GpuConstants {
@@ -807,8 +807,7 @@ impl Scene {
             ],
         });
 
-        Self {
-            next_entity: 0,
+        let mut scene = Self {
             render_buffers_bindgroup,
             render_atlas_bindgroup,
             vertices,
@@ -821,7 +820,9 @@ impl Scene {
             cull_bindgroup,
             atlas,
             lights,
-        }
+        };
+        scene.update(&queue);
+        scene
     }
 
     /// Update the scene.
@@ -829,7 +830,6 @@ impl Scene {
     /// This uploads changed data to the GPU and submits the queue.
     pub fn update(&mut self, queue: &wgpu::Queue) {
         let Self {
-            next_entity: _,
             constants: _,
             render_buffers_bindgroup: _,
             render_atlas_bindgroup: _,
@@ -1173,9 +1173,9 @@ pub fn scene_cull(
     compute_pass.set_pipeline(&pipeline.0);
     compute_pass.set_bind_group(0, &scene.render_buffers_bindgroup, &[]);
     compute_pass.set_bind_group(1, &scene.cull_bindgroup, &[]);
-    let num_entities = scene.next_entity;
+    let num_entities = scene.entities.capacity();
     let groups = num_entities / 32 + 1;
-    compute_pass.dispatch_workgroups(groups, 1, 1);
+    compute_pass.dispatch_workgroups(groups as u32, 1, 1);
     drop(compute_pass);
     queue.submit(std::iter::once(encoder.finish()));
 
