@@ -22,7 +22,6 @@
 
 use std::ops::Range;
 
-use encase::UniformBuffer;
 use renderling_shader::CameraRaw;
 use wgpu::util::DeviceExt;
 #[cfg(feature = "ui")]
@@ -150,13 +149,13 @@ pub fn create_camera_uniform(
     camera: &CameraRaw,
     label: &str,
 ) -> (wgpu::Buffer, wgpu::BindGroup) {
-    let mut data = UniformBuffer::new(vec![]);
-    data.write(camera).unwrap();
+    //let mut data = UniformBuffer::new(vec![]);
+    //data.write(camera).unwrap();
 
     let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some(&label),
         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-        contents: data.into_inner().as_slice(),
+        contents: todo!(),
     });
 
     let bindgroup = device.create_bind_group(&wgpu::BindGroupDescriptor {

@@ -14,9 +14,8 @@ pub use pbr::*;
 pub fn main_vertex_scene(
     #[spirv(uniform, descriptor_set = 0, binding = 0)] constants: &scene::GpuConstants,
     #[spirv(storage_buffer, descriptor_set = 0, binding = 1)] vertices: &[scene::GpuVertex],
-    #[spirv(storage_buffer, descriptor_set = 0, binding = 2)] transforms: &[glam::Mat4],
-    #[spirv(storage_buffer, descriptor_set = 0, binding = 3)] entities: &[scene::GpuEntity],
-    #[spirv(storage_buffer, descriptor_set = 0, binding = 5)] textures: &[scene::GpuTexture],
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 2)] entities: &[scene::GpuEntity],
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 4)] textures: &[scene::GpuTexture],
 
     //// which entity are we drawing
     #[spirv(instance_index)] instance_id: u32,
@@ -37,7 +36,6 @@ pub fn main_vertex_scene(
         vertex_id,
         constants,
         vertices,
-        transforms,
         entities,
         textures,
         out_lighting_model,
@@ -57,7 +55,7 @@ pub fn main_fragment_scene(
     #[spirv(descriptor_set = 1, binding = 1)] sampler: &Sampler,
 
     #[spirv(uniform, descriptor_set = 0, binding = 0)] constants: &scene::GpuConstants,
-    #[spirv(storage_buffer, descriptor_set = 0, binding = 4)] lights: &[scene::GpuLight],
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 3)] lights: &[scene::GpuLight],
 
     #[spirv(flat)] in_lighting_model: u32,
     in_color: glam::Vec4,
@@ -87,7 +85,7 @@ pub fn main_fragment_scene(
 
 #[spirv(compute(threads(32)))]
 pub fn compute_cull_entities(
-    #[spirv(storage_buffer, descriptor_set = 0, binding = 3)] entities: &[scene::GpuEntity],
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 2)] entities: &[scene::GpuEntity],
 
     #[spirv(storage_buffer, descriptor_set = 1, binding = 0)] draws: &mut [scene::DrawIndirect],
 

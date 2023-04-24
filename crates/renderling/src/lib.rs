@@ -94,7 +94,7 @@ mod test {
     };
 
     use super::*;
-    use glam::{Mat4, Quat, Vec2, Vec3, Vec4};
+    use glam::{Mat3, Mat4, Quat, Vec2, Vec3, Vec4};
     use moongraph::{DaggaError, Function, GraphError, Node, Read, TypeKey};
     use renderling_shader::scene::{DrawIndirect, GpuEntity, GpuVertex};
 
@@ -1105,23 +1105,19 @@ mod test {
             },
         ];
 
-        let ent = builder
-            .new_entity()
-            .with_meshlet(verts.clone())
-            .with_transform(Mat4::IDENTITY)
-            .build();
+        let ent = builder.new_entity().with_meshlet(verts.clone()).build();
 
         let mut scene = builder.build();
 
         let (projection, view) = camera::default_ortho2d(100.0, 100.0);
         scene.set_camera(projection, view);
 
-        scene::setup_scene_render_graph(scene, &mut r);
+        scene::setup_scene_render_graph(scene, &mut r, true);
 
         r.graph.visit(scene::scene_update).unwrap().unwrap();
         r.graph.visit(scene::scene_cull).unwrap().unwrap();
 
-        let (constants, gpu_verts, ents, transforms, indirect) = r
+        let (constants, gpu_verts, ents, indirect) = r
             .graph
             .visit(
                 |(scene, device, queue): (Read<Scene>, Read<Device>, Read<Queue>)| {
@@ -1133,7 +1129,6 @@ mod test {
                         .entities
                         .read(&device, &queue, 0, scene.entities.capacity())
                         .unwrap();
-                    let transforms = scene.transforms.read(&device, &queue, 0, 1).unwrap();
                     let indirect = if scene.entities.capacity() > 0 {
                         scene
                             .indirect_draws
@@ -1142,7 +1137,7 @@ mod test {
                     } else {
                         vec![]
                     };
-                    (constants[0], vertices, entities, transforms, indirect)
+                    (constants[0], vertices, entities, indirect)
                 },
             )
             .unwrap();
@@ -1150,7 +1145,6 @@ mod test {
         assert_eq!(constants.camera_view, view);
         assert_eq!(verts, gpu_verts);
         assert_eq!(vec![ent], ents);
-        assert_eq!(vec![Mat4::IDENTITY], transforms);
         assert_eq!(
             vec![DrawIndirect {
                 vertex_count: 3,
@@ -1159,14 +1153,6 @@ mod test {
                 base_instance: 0
             },],
             indirect
-        );
-
-        r.graph.add_node(
-            crate::node::PostRenderBufferCreate::create
-                .into_node()
-                .with_name("copy_frame_to_post")
-                .run_after("scene_render")
-                .run_before("present"),
         );
 
         let img = r.render_image().unwrap();
@@ -1221,10 +1207,8 @@ mod test {
             .new_entity()
             .with_meshlet(verts.clone())
             .with_texture_ids(Some(tex_id), None)
-            .with_transform(
-                Mat4::from_translation(Vec3::new(15.0, 35.0, 0.5))
-                    * Mat4::from_scale(Vec3::new(0.5, 0.5, 1.0)),
-            )
+            .with_position(Vec3::new(15.0, 35.0, 0.5))
+            .with_scale(Vec3::new(0.5, 0.5, 1.0))
             .build();
 
         assert_eq!(0, ent.id);
@@ -1233,12 +1217,14 @@ mod test {
                 id: 0,
                 mesh_first_vertex: 0,
                 mesh_vertex_count: 3,
-                model_matrix: 0,
-                normal_matrix: 1,
                 texture0: 1,
                 texture1: 0,
                 lighting: LightingModel::NO_LIGHTING,
                 parent: u32::MAX,
+                position: Vec4::new(15.0, 35.0, 0.5, 0.0),
+                scale: Vec4::new(0.5, 0.5, 1.0, 0.0),
+                rotation: Quat::IDENTITY,
+                padding0: 0
             },
             ent
         );
@@ -1255,14 +1241,7 @@ mod test {
         assert_eq!(1, rects[0].1.w);
         assert_eq!(1, rects[0].1.h);
 
-        scene::setup_scene_render_graph(scene, &mut r);
-        r.graph.add_node(
-            crate::node::PostRenderBufferCreate::create
-                .into_node()
-                .with_name("copy_frame_to_post")
-                .run_after("scene_render")
-                .run_before("present"),
-        );
+        scene::setup_scene_render_graph(scene, &mut r, true);
 
         let img = r.render_image().unwrap();
 
@@ -1405,14 +1384,7 @@ mod test {
         );
         scene.set_camera(projection, view);
 
-        setup_scene_render_graph(scene, &mut r);
-        r.graph.add_node(
-            crate::node::PostRenderBufferCreate::create
-                .into_node()
-                .with_name("copy_frame_to_post")
-                .run_after("scene_render")
-                .run_before("present"),
-        );
+        setup_scene_render_graph(scene, &mut r, true);
 
         let img = r.render_image().unwrap();
         crate::img_diff::assert_img_eq("scene_cube_directional", "scene_cube_directional.png", img)
@@ -1420,56 +1392,194 @@ mod test {
     }
 
     #[test]
+    // Test to make sure that we can reconstruct a normal matrix without using the
+    // inverse transpose of a model matrix, so long as we have the T R S
+    // transformation components (we really only need the scale).
+    //
+    // see Eric's comment here https://computergraphics.stackexchange.com/questions/1502/why-is-the-transposed-inverse-of-the-model-view-matrix-used-to-transform-the-nor?newreg=ffeabc7602da4fa2bc15fb9c84179dff
+    // see Eric's blog post here https://lxjk.github.io/2017/10/01/Stop-Using-Normal-Matrix.html
+    // squaring a vector https://math.stackexchange.com/questions/1419887/squaring-a-vector#1419889
+    // more convo wrt shaders https://github.com/mrdoob/three.js/issues/18497
+    fn square_scale_norm_check() {
+        let quat = Quat::from_axis_angle(Vec3::Z, std::f32::consts::FRAC_PI_4);
+        let scale = Vec3::new(10.0, 20.0, 1.0);
+        let model_matrix = Mat4::from_translation(Vec3::new(10.0, 10.0, 20.0))
+            * Mat4::from_quat(quat)
+            * Mat4::from_scale(scale);
+        let normal_matrix = model_matrix.inverse().transpose();
+        let scale2 = scale * scale;
+
+        for i in 0..9 {
+            for j in 0..9 {
+                for k in 0..9 {
+                    if i == 0 && j == 0 && k == 0 {
+                        continue;
+                    }
+                    let norm = Vec3::new(i as f32, j as f32, k as f32).normalize();
+                    let model = Mat3::from_mat4(model_matrix);
+                    let norm_a = (Mat3::from_mat4(normal_matrix) * norm).normalize();
+                    let norm_b = (model * (norm / scale2)).normalize();
+                    assert!(
+                        norm_a.abs_diff_eq(norm_b, f32::EPSILON),
+                        "norm:{norm}, scale2:{scale2}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
     // tests that nested children are transformed by their parent's transform
     fn scene_parent_sanity() {
-        let (mut ui, _cam) = ui_renderling();
-        ui.set_background_color(Vec4::splat(0.0));
+        let mut r = Renderling::headless(100, 100).unwrap();
+        r.set_background_color(Vec4::splat(0.0));
+        let (projection, view) = camera::default_ortho2d(100.0, 100.0);
+        let mut builder = r.new_scene().with_camera(projection, view);
         let size = 1.0;
-        let yellow_tri = ui
-            .new_object()
-            .with_mesh_builder(MeshBuilder::default().with_vertices(vec![
-                            UiVertex::default()
-                                .with_position(0.0, 0.0, 0.0)
-                                .with_color(1.0, 1.0, 0.0, 1.0),
-                            UiVertex::default()
-                                .with_position(size, 0.0, 0.0)
-                                .with_color(1.0, 1.0, 0.0, 1.0),
-                            UiVertex::default()
-                                .with_position(size, size, 0.0)
-                                .with_color(1.0, 1.0, 0.0, 1.0),
-                        ]))
-            .with_position(Vec3::new(25.0, 25.0, 0.0))
-            .build()
-            .unwrap();
-        let _cyan_tri = ui
-            .new_object()
-            .with_mesh_builder(MeshBuilder::default().with_vertices(vec![
-                            UiVertex::default()
-                                .with_position(0.0, 0.0, 0.0)
-                                .with_color(0.0, 1.0, 1.0, 1.0),
-                            UiVertex::default()
-                                .with_position(size, 0.0, 0.0)
-                                .with_color(0.0, 1.0, 1.0, 1.0),
-                            UiVertex::default()
-                                .with_position(size, size, 0.0)
-                                .with_color(0.0, 1.0, 1.0, 1.0),
-                        ]))
+        let cyan_tri = builder
+            .new_entity()
+            .with_meshlet(vec![
+                GpuVertex {
+                    position: Vec4::new(0.0, 0.0, 0.0, 0.0),
+                    color: Vec4::new(0.0, 1.0, 1.0, 1.0),
+                    ..Default::default()
+                },
+                GpuVertex {
+                    position: Vec4::new(size, 0.0, 0.0, 0.0),
+                    color: Vec4::new(0.0, 1.0, 1.0, 1.0),
+                    ..Default::default()
+                },
+                GpuVertex {
+                    position: Vec4::new(size, size, 0.0, 0.0),
+                    color: Vec4::new(0.0, 1.0, 1.0, 1.0),
+                    ..Default::default()
+                },
+            ])
             .with_position(Vec3::new(25.0, 25.0, 0.0))
             .with_scale(Vec3::new(25.0, 25.0, 1.0))
-            .with_child(&yellow_tri)
-            .build()
-            .unwrap();
+            .build();
+        let yellow_tri = builder
+            .new_entity()
+            .with_meshlet(vec![
+                GpuVertex {
+                    position: Vec4::new(0.0, 0.0, 0.0, 0.0),
+                    color: Vec4::new(1.0, 1.0, 0.0, 1.0),
+                    ..Default::default()
+                },
+                GpuVertex {
+                    position: Vec4::new(size, 0.0, 0.0, 0.0),
+                    color: Vec4::new(1.0, 1.0, 0.0, 1.0),
+                    ..Default::default()
+                },
+                GpuVertex {
+                    position: Vec4::new(size, size, 0.0, 0.0),
+                    color: Vec4::new(1.0, 1.0, 0.0, 1.0),
+                    ..Default::default()
+                },
+            ])
+            .with_position(Vec3::new(25.0, 25.0, 0.1))
+            .with_parent(&cyan_tri)
+            .build();
+        let red_tri = builder
+            .new_entity()
+            .with_meshlet(vec![
+                GpuVertex {
+                    position: Vec4::new(0.0, 0.0, 0.0, 0.0),
+                    color: Vec4::new(1.0, 0.0, 0.0, 1.0),
+                    ..Default::default()
+                },
+                GpuVertex {
+                    position: Vec4::new(size, 0.0, 0.0, 0.0),
+                    color: Vec4::new(1.0, 0.0, 0.0, 1.0),
+                    ..Default::default()
+                },
+                GpuVertex {
+                    position: Vec4::new(size, size, 0.0, 0.0),
+                    color: Vec4::new(1.0, 0.0, 0.0, 1.0),
+                    ..Default::default()
+                },
+            ])
+            .with_position(Vec3::new(25.0, 25.0, 0.1))
+            .with_parent(&yellow_tri)
+            .build();
 
+
+        let entities = builder.entities().to_vec();
+        //assert_eq!(
+        //    vec![
+        //        GpuEntity {
+        //            position: Vec4::new(25.0, 25.0, 0.0, 0.0),
+        //            scale: Vec4::new(25.0, 25.0, 1.0, 0.0),
+        //            rotation: Quat::IDENTITY,
+        //            id: 0,
+        //            mesh_first_vertex: 0,
+        //            mesh_vertex_count: 3,
+        //            texture0: 0,
+        //            texture1: 0,
+        //            lighting: LightingModel::NO_LIGHTING,
+        //            parent: ID_NONE,
+        //            padding0: 0
+        //        },
+        //        GpuEntity {
+        //            position: Vec4::new(25.0, 25.0, 0.1, 0.0),
+        //            scale: Vec4::new(1.0, 1.0, 1.0, 1.0),
+        //            rotation: Quat::IDENTITY,
+        //            id: 1,
+        //            mesh_first_vertex: 3,
+        //            mesh_vertex_count: 3,
+        //            texture0: 0,
+        //            texture1: 0,
+        //            lighting: LightingModel::NO_LIGHTING,
+        //            parent: 0,
+        //            padding0: 0
+        //        }
+        //    ],
+        //    entities
+        //);
+        let tfrm = yellow_tri.get_world_transform(builder.entities());
         assert_eq!(
-            WorldTransform::default()
-                .with_position(Vec3::new(50.0, 50.0, 0.0))
-                .with_scale(Vec3::new(25.0, 25.0, 1.0)),
-            yellow_tri.get_world_transform()
+            (
+                Vec3::new(50.0, 50.0, 0.1),
+                Quat::IDENTITY,
+                Vec3::new(25.0, 25.0, 1.0),
+            ),
+            tfrm
         );
 
-        let img = ui.render_image().unwrap();
-        crate::img_diff::assert_img_eq_save(Save::No, "parent_sanity", "parent_sanity.png", img)
+        let scene = builder.build();
+        setup_scene_render_graph(scene, &mut r, true);
+
+        let gpu_entities = r
+            .graph
+            .get_resource::<Scene>()
+            .unwrap()
+            .unwrap()
+            .entities
+            .read(r.get_device(), r.get_queue(), 0, 2)
             .unwrap();
+        //assert_eq!(entities, gpu_entities);
+
+        let img = r.render_image().unwrap();
+        crate::img_diff::assert_img_eq_save(Save::No, "scene_parent_sanity", "scene_parent_sanity.png", img)
+            .unwrap();
+    }
+
+    #[test]
+    fn sanity_transmute() {
+        let zerof32 = 0f32;
+        let zerof32asu32: u32 = unsafe {std::mem::transmute(zerof32)};
+        assert_eq!(0, zerof32asu32);
+
+        let foure_45 = 4e-45f32;
+        let in_u32: u32 = unsafe { std:: mem::transmute(foure_45)};
+        assert_eq!(3, in_u32);
+
+        let u32max = u32::MAX;
+        let f32nan: f32 = unsafe { std::mem::transmute(u32max) };
+        assert!(f32nan.is_nan());
+
+        let u32max: u32 = unsafe{ std::mem::transmute(f32nan)};
+        assert_eq!(u32::MAX, u32max);
     }
 
     ////#[cfg(feature = "gltf")]

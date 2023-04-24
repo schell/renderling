@@ -138,27 +138,21 @@ impl LightsUniform {
         spot_lights: &SpotLights,
         dir_lights: &DirectionalLights,
     ) -> LightsUniform {
-        let mut point_buffer_data = UniformBuffer::new(vec![]);
-        point_buffer_data.write(point_lights).unwrap();
         let point_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("point-lights-buffer"),
-            contents: point_buffer_data.into_inner().as_slice(),
+            contents: todo!("remove this"),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
-        let mut spot_buffer_data = UniformBuffer::new(vec![]);
-        spot_buffer_data.write(spot_lights).unwrap();
         let spot_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("spot-lights-buffer"),
-            contents: spot_buffer_data.into_inner().as_slice(),
+            contents: todo!("remove this"),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
-        let mut directional_buffer_data = UniformBuffer::new(vec![]);
-        directional_buffer_data.write(dir_lights).unwrap();
         let directional_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("directional-lights-buffer"),
-            contents: directional_buffer_data.into_inner().as_slice(),
+            contents: todo!("remove this"),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
 
@@ -198,23 +192,17 @@ impl LightsUniform {
 
     pub fn update_point_lights(&self, queue: &wgpu::Queue, lights: &PointLights) {
         log::trace!("updating to {} point lights", lights.length);
-        let mut buffer = UniformBuffer::new(vec![]);
-        buffer.write(lights).unwrap();
-        queue.write_buffer(&self.point_buffer, 0, buffer.into_inner().as_slice());
+        queue.write_buffer(&self.point_buffer, 0, todo!());
     }
 
     pub fn update_spot_lights(&self, queue: &wgpu::Queue, lights: &SpotLights) {
         log::trace!("updating to {} spot lights", lights.length);
-        let mut buffer = UniformBuffer::new(vec![]);
-        buffer.write(lights).unwrap();
-        queue.write_buffer(&self.spot_buffer, 0, buffer.into_inner().as_slice());
+        queue.write_buffer(&self.spot_buffer, 0, todo!());
     }
 
     pub fn update_directional_lights(&self, queue: &wgpu::Queue, lights: &DirectionalLights) {
         log::trace!("updating to {} dir lights", lights.length);
-        let mut buffer = UniformBuffer::new(vec![]);
-        buffer.write(lights).unwrap();
-        queue.write_buffer(&self.directional_buffer, 0, buffer.into_inner().as_slice());
+        queue.write_buffer(&self.directional_buffer, 0, todo!());
     }
 }
 

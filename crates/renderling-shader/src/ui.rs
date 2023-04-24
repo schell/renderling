@@ -66,7 +66,8 @@ impl From<UiColorBlend> for ShaderColorBlend {
     }
 }
 
-#[cfg_attr(not(target_arch = "spirv"), derive(encase::ShaderType))]
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct ShaderColorBlend {
     inner: u32,
 }

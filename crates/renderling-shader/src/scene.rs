@@ -5,7 +5,7 @@
 //!
 //! To read more about the technique, check out these resources:
 //! * https://stackoverflow.com/questions/59686151/what-is-gpu-driven-rendering
-use glam::{Mat3, Mat4, UVec2, UVec3, Vec2, Vec3, Vec4, Vec4Swizzles};
+use glam::{Mat3, Mat4, Quat, UVec2, UVec3, Vec2, Vec3, Vec4, Vec4Swizzles};
 use spirv_std::{image::Image2d, Sampler};
 
 #[cfg(target_arch = "spirv")]
@@ -16,10 +16,10 @@ use crate::math::Vec3ColorSwizzles;
 /// A vertex in a mesh.
 #[cfg_attr(
     not(target_arch = "spirv"),
-    derive(bytemuck::Pod, bytemuck::Zeroable, Debug)
+    derive(Debug)
 )]
 #[repr(C)]
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct GpuVertex {
     pub position: Vec4,
     pub color: Vec4,
@@ -54,8 +54,7 @@ pub fn attenuate(attenuation: Vec3, distance: f32) -> f32 {
 }
 
 #[repr(C)]
-#[cfg_attr(not(target_arch = "spirv"), derive(bytemuck::Pod, bytemuck::Zeroable))]
-#[derive(Copy, Clone, Default)]
+#[derive(Copy, Clone, Default, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct GpuLight {
     pub position: Vec4,
     pub direction: Vec4,
@@ -181,14 +180,17 @@ impl GpuLight {
 pub struct LightingModel;
 
 impl LightingModel {
-    pub const NO_LIGHTING: u32 = u32::MAX;
-    pub const PHONG_LIGHTING: u32 = 0;
+    pub const NO_LIGHTING: u32 = 0;
+    pub const PHONG_LIGHTING: u32 = 1;
 }
 
 /// A GPU texture.
-#[cfg_attr(not(target_arch = "spirv"), derive(bytemuck::Pod, bytemuck::Zeroable, Debug))]
+#[cfg_attr(
+    not(target_arch = "spirv"),
+    derive(Debug)
+)]
 #[repr(C)]
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct GpuTexture {
     // top left offset of texture in the atlas
     pub offset_px: Vec2,
@@ -214,64 +216,91 @@ impl GpuTexture {
     }
 }
 
+/// `u32` representing "null" or "none".
+pub const ID_NONE: u32 = 1024;
+
 /// A bundle of GPU components.
-///
-/// The fields of `GpuEntity` are all u32s that represent the
-/// index of the property in a global buffer (or the atlas in the case of
-/// textures). [`u32::MAX`] is
-/// used to specify that the entity **does not have that property**.
-// TODO: We might not need a separate "transforms" buffer if we kept the transforms
-// inline in this struct.
-#[cfg_attr(not(target_arch = "spirv"), derive(bytemuck::Pod, bytemuck::Zeroable))]
+#[cfg_attr(
+    not(target_arch = "spirv"),
+    derive(Debug)
+)]
 #[repr(C)]
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct GpuEntity {
-    // The id of this entity. `u32::MAX` means this entity is not in use.
+    // The id of this entity. `ID_MAX` means this entity is not in use.
     pub id: u32,
     // The index of the first vertex in this entity's mesh.
     pub mesh_first_vertex: u32,
     // The number of vertices in this entity's mesh.
     pub mesh_vertex_count: u32,
-    // The id of this entity's transform in the transform buffer.
-    pub model_matrix: u32,
-    // The id of this entity's normal matrix in the transform buffer. `u32::MAX` means "none".
-    pub normal_matrix: u32,
     // The id of this entity's first texture in the atlas.
     pub texture0: u32,
     // The id of this entity's second texture in the atlas.
     pub texture1: u32,
-    // The lighting model used for shading this object. `u32::MAX` means "no lighting".
+    // The lighting model used for shading this object.
     pub lighting: u32,
-    // The id of this entity's parent, if it exists. `u32::MAX` means "none".
+    // The id of this entity's parent, if it exists. `ID_NONE` means "no parent".
     pub parent: u32,
+    pub padding0: u32,
+    // The local translation of this entity
+    pub position: Vec4,
+    // The local scale of this entity
+    pub scale: Vec4,
+    // The local rotation of this entity
+    pub rotation: Quat,
 }
 
 impl Default for GpuEntity {
     fn default() -> Self {
         Self {
-            id: u32::MAX,
+            id: ID_NONE,
             mesh_first_vertex: 0,
             mesh_vertex_count: 0,
-            model_matrix: u32::MAX,
-            normal_matrix: u32::MAX,
+            position: Vec4::ZERO,
+            scale: Vec4::ONE,
+            rotation: Quat::IDENTITY,
+            padding0: 0,
             texture0: 0,
             texture1: 0,
             lighting: LightingModel::NO_LIGHTING,
-            parent: u32::MAX,
+            parent: ID_NONE,
         }
     }
 }
 
 impl GpuEntity {
     pub fn is_alive(&self) -> bool {
-        self.id != u32::MAX
+        self.id != ID_NONE
+    }
+
+    /// Return the position, rotation and scale that describe this entity's
+    /// transform in world space.
+    pub fn get_world_transform(&self, entities: &[GpuEntity]) -> (Vec3, Quat, Vec3) {
+        let mut position = Vec3::ZERO;
+        let mut scale = Vec3::ONE;
+        let mut rotation = Quat::IDENTITY;
+        let mut index = self.id as usize;
+        loop {
+            let entity = entities[index];
+            position += entity.position.xyz();
+            scale *= entity.scale.xyz();
+            rotation = entity.rotation * rotation;
+            index = entity.parent as usize;
+            if index >= entities.len() {
+                break;
+            }
+        }
+        (position, rotation, scale)
     }
 }
 
 /// Unforms/constants for a scene's worth of rendering.
-#[cfg_attr(not(target_arch = "spirv"), derive(bytemuck::Pod, bytemuck::Zeroable, Debug))]
+#[cfg_attr(
+    not(target_arch = "spirv"),
+    derive(Debug)
+)]
 #[repr(C)]
-#[derive(Default, Clone, Copy, PartialEq)]
+#[derive(Default, Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct GpuConstants {
     pub camera_projection: Mat4,
     pub camera_view: Mat4,
@@ -279,9 +308,8 @@ pub struct GpuConstants {
     pub padding: Vec2,
 }
 
-#[cfg_attr(not(target_arch = "spirv"), derive(bytemuck::Pod, bytemuck::Zeroable))]
 #[repr(C)]
-#[derive(Default, Debug, Clone, Copy, PartialEq)]
+#[derive(Default, Debug, Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct DrawIndirect {
     pub vertex_count: u32,
     pub instance_count: u32,
@@ -298,7 +326,6 @@ pub fn main_vertex_scene(
 
     constants: &GpuConstants,
     vertices: &[GpuVertex],
-    transforms: &[Mat4],
     entities: &[GpuEntity],
     textures: &[GpuTexture],
 
@@ -314,8 +341,9 @@ pub fn main_vertex_scene(
 ) {
     let entity = entities[instance_index as usize];
     let vertex = vertices[vertex_index as usize];
-    let model_matrix = transforms[entity.model_matrix as usize];
-    let normal_matrix = transforms[entity.normal_matrix as usize];
+    let (position, rotation, scale) = entity.get_world_transform(entities);
+    let model_matrix =
+        Mat4::from_translation(position) * Mat4::from_quat(rotation) * Mat4::from_scale(scale);
     let texture0 = textures[entity.texture0 as usize];
     let texture1 = textures[entity.texture1 as usize];
 
@@ -324,9 +352,10 @@ pub fn main_vertex_scene(
     *out_tex_ids = UVec2::new(entity.texture0, entity.texture1);
     *out_uv0 = texture0.uv(vertex.uv.xy(), constants.atlas_size);
     *out_uv1 = texture1.uv(vertex.uv.zw(), constants.atlas_size);
-    *out_norm = Mat3::from_mat4(constants.camera_view)
-        * Mat3::from_mat4(normal_matrix)
-        * vertex.normal.xyz();
+    *out_norm = (Mat3::from_mat4(constants.camera_view)
+        * Mat3::from_mat4(model_matrix)
+        * (vertex.normal.xyz() / (scale * scale)))
+        .normalize();
 
     let view_pos = constants.camera_view * model_matrix * vertex.position.xyz().extend(1.0);
     *out_pos = view_pos.xyz();

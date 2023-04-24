@@ -11,7 +11,7 @@ use crate::math::Vec3ColorSwizzles;
 #[derive(Copy, Clone, Default)]
 #[cfg_attr(
     not(target_arch = "spirv"),
-    derive(encase::ShaderType, bytemuck::Pod, bytemuck::Zeroable)
+    derive(bytemuck::Pod, bytemuck::Zeroable)
 )]
 pub struct PointLightRaw {
     pub position_: Vec4,
@@ -25,7 +25,7 @@ pub struct PointLightRaw {
 #[derive(Copy, Clone, Default)]
 #[cfg_attr(
     not(target_arch = "spirv"),
-    derive(encase::ShaderType, bytemuck::Pod, bytemuck::Zeroable)
+    derive(bytemuck::Pod, bytemuck::Zeroable)
 )]
 pub struct SpotLightRaw {
     pub position_: Vec4,
@@ -41,7 +41,7 @@ pub struct SpotLightRaw {
 #[derive(Copy, Clone, Default)]
 #[cfg_attr(
     not(target_arch = "spirv"),
-    derive(encase::ShaderType, bytemuck::Pod, bytemuck::Zeroable)
+    derive(bytemuck::Pod, bytemuck::Zeroable)
 )]
 pub struct DirectionalLightRaw {
     pub direction_: Vec4,
@@ -205,7 +205,6 @@ impl DirectionalLightRaw {
 pub const POINT_LIGHTS_MAX: usize = 64;
 
 #[repr(C)]
-#[cfg_attr(not(target_arch = "spirv"), derive(encase::ShaderType))]
 pub struct PointLights {
     pub lights: [PointLightRaw; POINT_LIGHTS_MAX],
     pub length: u32,
@@ -223,7 +222,6 @@ impl Default for PointLights {
 pub const SPOT_LIGHTS_MAX: usize = 32;
 
 #[repr(C)]
-#[cfg_attr(not(target_arch = "spirv"), derive(encase::ShaderType))]
 pub struct SpotLights {
     pub lights: [SpotLightRaw; SPOT_LIGHTS_MAX],
     pub length: u32,
@@ -241,7 +239,6 @@ impl Default for SpotLights {
 pub const DIRECTIONAL_LIGHTS_MAX: usize = 8;
 
 #[repr(C)]
-#[cfg_attr(not(target_arch = "spirv"), derive(encase::ShaderType))]
 pub struct DirectionalLights {
     pub lights: [DirectionalLightRaw; DIRECTIONAL_LIGHTS_MAX],
     pub length: u32,
