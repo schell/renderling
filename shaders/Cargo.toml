@@ -9,7 +9,7 @@ description = "Generates the shader .spv files for the renderling project"
 [dependencies]
 env_logger = "^0.10"
 log = "^0.4"
-spirv-builder = "^0.6"
+spirv-builder = "^0.7"
 
 # Compile build-dependencies in release mode with
 # the same settings as regular dependencies.

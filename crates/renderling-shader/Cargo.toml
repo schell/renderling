@@ -11,14 +11,13 @@ default = []
 
 [dependencies]
 bytemuck = { version = "1.13.0", features = ["derive"] }
-spirv-std = { version = "0.5", features = ["glam"] }
+spirv-std = "^0.7"
 
 [target.'cfg(not(target_arch = "spirv"))'.dependencies]
-encase = { version = "0.4.1", features = ["glam"] }
-glam = { version = "0.22" }
+glam = { version = "0.22", features = ["bytemuck"] }
 
 [target.'cfg(not(target_arch = "spirv"))'.dev-dependencies]
-glam = { version = "0.22", features = ["debug-glam-assert"] }
+glam = { version = "0.22", features = ["debug-glam-assert", "bytemuck"] }
 
 [target.'cfg(target_arch = "spirv")'.dependencies]
-glam = { version = "0.22", default-features = false, features = ["libm"] }
+glam = { version = "0.22", default-features = false, features = ["libm", "bytemuck"] }

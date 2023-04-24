@@ -75,11 +75,9 @@ pub fn create_ui_material_bindgroup(
     material: &UiMaterial,
 ) -> wgpu::BindGroup {
     let shader_blend_style = ShaderColorBlend::from(material.color_blend);
-    let mut data = UniformBuffer::new(vec![]);
-    data.write(&shader_blend_style).unwrap();
     let blend_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("ui object blend buffer"),
-        contents: data.into_inner().as_slice(),
+        contents: bytemuck::cast_slice(&[shader_blend_style]),
         usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
     });
 

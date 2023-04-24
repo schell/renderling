@@ -2,7 +2,7 @@
 use std::{any::Any, marker::PhantomData, sync::Arc};
 
 use async_channel::{Receiver, Sender};
-use glam::{Mat4, Vec2, Vec3, Vec4};
+use glam::{Mat4, Vec2, Vec3, Vec4, Quat};
 use image::{EncodableLayout, RgbaImage};
 use moongraph::{IsGraphNode, Read, Write};
 use snafu::prelude::*;
@@ -616,7 +616,6 @@ pub struct SceneBuilder {
     view: Mat4,
     images: Vec<RgbaImage>,
     vertices: Vec<GpuVertex>,
-    transforms: Vec<Mat4>,
     entities: Vec<GpuEntity>,
     lights: Vec<GpuLight>,
 }
@@ -630,10 +629,13 @@ impl SceneBuilder {
             view: Mat4::IDENTITY,
             images: vec![],
             vertices: vec![],
-            transforms: vec![],
             entities: vec![],
             lights: vec![],
         }
+    }
+
+    pub fn entities(&self) -> &[GpuEntity] {
+        &self.entities
     }
 
     pub fn with_camera(mut self, projection: Mat4, view: Mat4) -> Self {
@@ -660,10 +662,7 @@ impl SceneBuilder {
     pub fn new_entity(&mut self) -> EntityBuilder<'_> {
         EntityBuilder {
             scene: self,
-            meshlet: Err((0, 0)),
-            transform: None,
-            textures: [0, 0],
-            lighting: LightingModel::NO_LIGHTING,
+            entity: GpuEntity::default(),
         }
     }
 
@@ -691,7 +690,6 @@ impl SceneBuilder {
 
 pub struct Scene {
     pub vertices: GpuArray<GpuVertex>,
-    pub transforms: GpuArray<Mat4>,
     pub entities: GpuArray<GpuEntity>,
     pub lights: GpuArray<GpuLight>,
     pub textures: GpuArray<GpuTexture>,
@@ -714,13 +712,10 @@ impl Scene {
             view,
             images,
             vertices,
-            transforms,
             entities,
             lights,
         } = scene_builder;
         let vertices = GpuArray::new(&device, &vertices, vertices.len(), scene_render_usage());
-        let transforms =
-            GpuArray::new(&device, &transforms, transforms.len(), scene_render_usage());
         let draws = entities
             .iter()
             .map(|_| DrawIndirect::default())
@@ -733,7 +728,7 @@ impl Scene {
         let textures = atlas
             .images()
             .into_iter()
-            .map(|(id, r)| GpuTexture {
+            .map(|(_, r)| GpuTexture {
                 offset_px: Vec2::new(r.x as f32, r.y as f32),
                 size_px: Vec2::new(r.w as f32, r.h as f32),
             })
@@ -763,7 +758,7 @@ impl Scene {
 
         let render_buffers_bindgroup = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Scene::new render_buffers_bindgroup"),
-            layout: &scene_vertex_bindgroup_layout(&device),
+            layout: &scene_buffers_bindgroup_layout(&device),
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
@@ -775,18 +770,14 @@ impl Scene {
                 },
                 wgpu::BindGroupEntry {
                     binding: 2,
-                    resource: transforms.get_buffer().as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 3,
                     resource: entities.get_buffer().as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
-                    binding: 4,
+                    binding: 3,
                     resource: lights.get_buffer().as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
-                    binding: 5,
+                    binding: 4,
                     resource: textures.get_buffer().as_entire_binding(),
                 },
             ],
@@ -794,7 +785,7 @@ impl Scene {
 
         let render_atlas_bindgroup = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Scene::new render_atlas_bindgroup"),
-            layout: &scene_fragment_bindgroup_layout(&device),
+            layout: &scene_atlas_bindgroup_layout(&device),
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
@@ -811,7 +802,6 @@ impl Scene {
             render_buffers_bindgroup,
             render_atlas_bindgroup,
             vertices,
-            transforms,
             textures,
             entities,
             constants_update: None,
@@ -837,14 +827,12 @@ impl Scene {
             cull_bindgroup: _,
             atlas: _,
             vertices,
-            transforms,
             entities,
             textures,
             constants_update: camera_update,
             lights,
         } = self;
         vertices.update(queue);
-        transforms.update(queue);
         entities.update(queue);
         textures.update(queue);
         lights.update(queue);
@@ -867,15 +855,6 @@ impl Scene {
         });
     }
 
-    /// Set a transform.
-    pub fn set_transform(&mut self, id: u32, transform: Mat4) -> Result<(), SceneError> {
-        let (i, n) = self
-            .transforms
-            .overwrite(id as usize, std::iter::once(transform))?;
-        debug_assert_eq!((id as usize, 1), (i, n));
-        Ok(())
-    }
-
     /// Update/set an entity.
     pub fn update_entity(&mut self, entity: GpuEntity) -> Result<(), SceneError> {
         let (i, n) = self
@@ -883,16 +862,6 @@ impl Scene {
             .overwrite(entity.id as usize, std::iter::once(entity))?;
         debug_assert_eq!((entity.id as usize, 1), (i, n));
         Ok(())
-    }
-
-    /// Load a new transform.
-    ///
-    /// Returns the index of the transform in the GPU transform buffer.
-    ///
-    /// The data is not uploaded to the cpu until [`Scene::update`] has been
-    /// called.
-    pub fn new_transform(&mut self, transform: Mat4) -> Result<usize, SceneError> {
-        Ok(self.transforms.push(transform)?.0)
     }
 
     /// Load an atlas full of images.
@@ -907,7 +876,7 @@ impl Scene {
         let ids = self.atlas.pack(device, queue, images)?;
         self.render_atlas_bindgroup = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Scene::load_images render_atlas_bindgroup"),
-            layout: &scene_fragment_bindgroup_layout(device),
+            layout: &scene_atlas_bindgroup_layout(device),
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
@@ -930,75 +899,70 @@ impl Scene {
 
 pub struct EntityBuilder<'a> {
     scene: &'a mut SceneBuilder,
-    meshlet: Result<Vec<GpuVertex>, (u32, u32)>,
-    transform: Option<Mat4>,
-    textures: [u32; 2],
-    lighting: u32,
+    entity: GpuEntity,
 }
 
 impl<'a> EntityBuilder<'a> {
     pub fn with_meshlet(mut self, vertices: impl IntoIterator<Item = GpuVertex>) -> Self {
-        self.meshlet = Ok(vertices.into_iter().collect());
+        let (start, len) = self.scene.new_meshlet(vertices);
+        self.entity.mesh_first_vertex = start;
+        self.entity.mesh_vertex_count = len;
         self
     }
 
     pub fn with_starting_vertex_and_count(mut self, first_vertex: u32, count: u32) -> Self {
-        self.meshlet = Err((first_vertex, count));
+        self.entity.mesh_first_vertex = first_vertex;
+        self.entity.mesh_vertex_count = count;
         self
     }
 
-    pub fn with_transform(mut self, transform: Mat4) -> Self {
-        self.transform = Some(transform);
+    pub fn with_position(mut self, position: Vec3) -> Self {
+        self.entity.position = position.extend(0.0);
+        self
+    }
+
+    pub fn with_scale(mut self, scale: Vec3) -> Self {
+        self.entity.scale = scale.extend(0.0);
+        self
+    }
+
+    pub fn with_rotation(mut self, rotation: Quat) -> Self {
+        self.entity.rotation = rotation;
         self
     }
 
     pub fn with_texture_ids(mut self, id0: Option<u32>, id1: Option<u32>) -> Self {
-        self.textures = [id0.unwrap_or_default(), id1.unwrap_or_default()];
+        self.entity.texture0 = id0.unwrap_or_default();
+        self.entity.texture1 = id1.unwrap_or_default();
         self
     }
 
     pub fn with_lighting_model(mut self, lighting: u32) -> Self {
-        self.lighting = lighting;
+        self.entity.lighting = lighting;
+        self
+    }
+
+    pub fn with_parent(mut self, parent: &GpuEntity) -> Self {
+        if let Some(parent) = self.scene.entities.get_mut(parent.id as usize) {
+            self.entity.parent = parent.id;
+        } else {
+            log::error!("no such parent entity {}", parent.id);
+        }
         self
     }
 
     pub fn build(self) -> GpuEntity {
         let EntityBuilder {
             scene,
-            meshlet,
-            transform,
-            textures,
-            lighting,
+            mut entity,
         } = self;
-        let mut entity = GpuEntity {
-            id: scene.entities.len() as u32,
-            ..Default::default()
-        };
-
-        let model_matrix = transform.unwrap_or_else(|| Mat4::IDENTITY);
-        let model_matrix_id = scene.transforms.len();
-        scene.transforms.push(model_matrix);
-        let normal_matrix = model_matrix.inverse().transpose();
-        let normal_matrix_id = scene.transforms.len();
-        scene.transforms.push(normal_matrix);
-        entity.model_matrix = model_matrix_id as u32;
-        entity.normal_matrix = normal_matrix_id as u32;
-        entity.lighting = lighting;
-        entity.texture0 = textures[0];
-        entity.texture1 = textures[1];
-
-        let (start, len) = match meshlet {
-            Ok(vertices) => scene.new_meshlet(vertices),
-            Err(start_len) => start_len,
-        };
-        entity.mesh_first_vertex = start;
-        entity.mesh_vertex_count = len;
+        entity.id = scene.entities.len() as u32;
         scene.entities.push(entity.clone());
         entity
     }
 }
 
-pub fn scene_vertex_bindgroup_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+pub fn scene_buffers_bindgroup_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
     let visibility =
         wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT | wgpu::ShaderStages::COMPUTE;
     let cfg = wgpu::BindGroupLayoutEntry {
@@ -1012,12 +976,12 @@ pub fn scene_vertex_bindgroup_layout(device: &wgpu::Device) -> wgpu::BindGroupLa
         count: None,
     };
     let mut entries = vec![cfg];
-    let buffers = (1..6)
+    let buffers = (1..5)
         .map(|binding| wgpu::BindGroupLayoutEntry {
             binding,
             visibility,
             ty: wgpu::BindingType::Buffer {
-                ty: wgpu::BufferBindingType::Storage { read_only: false },
+                ty: wgpu::BufferBindingType::Storage { read_only: true },
                 has_dynamic_offset: false,
                 min_binding_size: None,
             },
@@ -1026,14 +990,14 @@ pub fn scene_vertex_bindgroup_layout(device: &wgpu::Device) -> wgpu::BindGroupLa
         .collect::<Vec<_>>();
     entries.extend(buffers);
     device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        label: Some("scene render vertex"),
+        label: Some("scene buffers"),
         entries: &entries,
     })
 }
 
-pub fn scene_fragment_bindgroup_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+pub fn scene_atlas_bindgroup_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
     device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        label: Some("scene render fragment"),
+        label: Some("scene atlas"),
         entries: &[
             wgpu::BindGroupLayoutEntry {
                 binding: 0,
@@ -1080,8 +1044,8 @@ pub fn create_scene_render_pipeline(
         device.create_shader_module(wgpu::include_spirv!("linkage/main_vertex_scene.spv"));
     let fragment_shader =
         device.create_shader_module(wgpu::include_spirv!("linkage/main_fragment_scene.spv"));
-    let scene_buffers_layout = scene_vertex_bindgroup_layout(device);
-    let scene_atlas_layout = scene_fragment_bindgroup_layout(device);
+    let scene_buffers_layout = scene_buffers_bindgroup_layout(device);
+    let scene_atlas_layout = scene_atlas_bindgroup_layout(device);
     let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label,
         bind_group_layouts: &[&scene_buffers_layout, &scene_atlas_layout],
@@ -1134,7 +1098,7 @@ pub fn create_scene_compute_cull_pipeline(device: &wgpu::Device) -> wgpu::Comput
     let label = Some("scene compute cull pipeline");
     let shader_crate =
         device.create_shader_module(wgpu::include_spirv!("linkage/compute_cull_entities.spv"));
-    let scene_buffers_layout = scene_vertex_bindgroup_layout(device);
+    let scene_buffers_layout = scene_buffers_bindgroup_layout(device);
     let indirect_buffers_layout = scene_draw_indirect_bindgroup_layout(device);
     let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label,
@@ -1228,7 +1192,7 @@ fn scene_render(
     Ok(())
 }
 
-pub fn setup_scene_render_graph(scene: Scene, r: &mut Renderling) {
+pub fn setup_scene_render_graph(scene: Scene, r: &mut Renderling, with_screen_capture: bool) {
     r.add_resource(scene);
 
     let pipeline = SceneRenderPipeline(
@@ -1273,4 +1237,13 @@ pub fn setup_scene_render_graph(scene: Scene, r: &mut Renderling) {
         .add_node(scene_render.into_node().with_name("scene_render"));
     r.graph
         .add_node(crate::node::present.into_node().with_name("present"));
+    if with_screen_capture {
+        r.graph.add_node(
+            crate::node::PostRenderBufferCreate::create
+                .into_node()
+                .with_name("copy_frame_to_post")
+                .run_after("scene_render")
+                .run_before("present"),
+        );
+    }
 }

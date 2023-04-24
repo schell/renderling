@@ -1,4 +1,7 @@
-use renderling::{Renderling, math::{Vec3, Vec4, Vec2, Mat4}, SceneBuilder, Read, Scene, Device, Queue, GpuVertex, IsGraphNode};
+use renderling::{
+    math::{Vec3, Vec4},
+    GpuVertex, Renderling,
+};
 
 fn main() {
     let event_loop = winit::event_loop::EventLoop::new();
@@ -15,51 +18,54 @@ fn main() {
         .unwrap()
         .with_background_color(Vec3::splat(0.0).extend(1.0));
     let (projection, view) = renderling::default_ortho2d(100.0, 100.0);
-    let mut builder = r.new_scene()
-        .with_camera(projection, view);
-    // now test the textures functionality
-        let img = image::io::Reader::open("img/cheetah.jpg")
-        .unwrap()
-        .decode()
-        .unwrap();
-    let img = img.to_rgba8();
-    let tex_id = builder.add_image(img);
-
-    let verts = vec![
-        GpuVertex {
-            position: Vec4::new(0.0, 0.0, 0.0, 0.0),
-            color: Vec4::new(1.0, 1.0, 0.0, 1.0),
-            uv: Vec4::new(0.0, 0.0, 0.0, 0.0),
-            ..Default::default()
-        },
-        GpuVertex {
-            position: Vec4::new(100.0, 0.0, 0.0, 0.0),
-            color: Vec4::new(1.0, 0.0, 1.0, 1.0),
-            uv: Vec4::new(1.0, 0.0, 1.0, 0.0),
-            ..Default::default()
-        },
-        GpuVertex {
-            position: Vec4::new(100.0, 100.0, 0.0, 0.0),
-            color: Vec4::new(0.0, 1.0, 1.0, 1.0),
-            uv: Vec4::new(1.0, 1.0, 1.0, 1.0),
-            ..Default::default()
-        },
-    ];
-    let ent = builder
+    let mut builder = r.new_scene().with_camera(projection, view);
+    let size = 1.0;
+    let cyan_tri = builder
         .new_entity()
-        .with_meshlet(verts.clone())
-        .with_transform(Mat4::IDENTITY)
-        .with_texture_ids(Some(tex_id), None)
+        .with_meshlet(vec![
+            GpuVertex {
+                position: Vec4::new(0.0, 0.0, 0.0, 0.0),
+                color: Vec4::new(0.0, 1.0, 1.0, 1.0),
+                ..Default::default()
+            },
+            GpuVertex {
+                position: Vec4::new(size, 0.0, 0.0, 0.0),
+                color: Vec4::new(0.0, 1.0, 1.0, 1.0),
+                ..Default::default()
+            },
+            GpuVertex {
+                position: Vec4::new(size, size, 0.0, 0.0),
+                color: Vec4::new(0.0, 1.0, 1.0, 1.0),
+                ..Default::default()
+            },
+        ])
+        .with_position(Vec3::new(25.0, 25.0, 0.0))
+        .with_scale(Vec3::new(25.0, 25.0, 1.0))
         .build();
-    assert_eq!(0, ent.id);
-
+    let _yellow_tri = builder
+        .new_entity()
+        .with_meshlet(vec![
+            GpuVertex {
+                position: Vec4::new(0.0, 0.0, 0.0, 0.0),
+                color: Vec4::new(1.0, 1.0, 0.0, 1.0),
+                ..Default::default()
+            },
+            GpuVertex {
+                position: Vec4::new(size, 0.0, 0.0, 0.0),
+                color: Vec4::new(1.0, 1.0, 0.0, 1.0),
+                ..Default::default()
+            },
+            GpuVertex {
+                position: Vec4::new(size, size, 0.0, 0.0),
+                color: Vec4::new(1.0, 1.0, 0.0, 1.0),
+                ..Default::default()
+            },
+        ])
+        .with_position(Vec3::new(25.0, 25.0, 0.1))
+        .with_parent(&cyan_tri)
+        .build();
     let scene = builder.build();
-    let rects = scene.atlas().images();
-    assert_eq!(0, rects[0].0);
-    assert_eq!(1, rects[0].1.w);
-    assert_eq!(1, rects[0].1.h);
-
-    renderling::setup_scene_render_graph(scene, &mut r);
+    renderling::setup_scene_render_graph(scene, &mut r, false);
 
     event_loop.run(move |event, _target, control_flow| {
         *control_flow = winit::event_loop::ControlFlow::Poll;
