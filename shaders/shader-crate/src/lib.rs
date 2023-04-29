@@ -4,27 +4,22 @@
 use renderling_shader::scene;
 use spirv_std::{glam, image::Image2d, spirv, Sampler};
 
-mod ui;
-pub use ui::*;
-
-mod pbr;
-pub use pbr::*;
-
 #[spirv(vertex)]
 pub fn main_vertex_scene(
     #[spirv(uniform, descriptor_set = 0, binding = 0)] constants: &scene::GpuConstants,
     #[spirv(storage_buffer, descriptor_set = 0, binding = 1)] vertices: &[scene::GpuVertex],
     #[spirv(storage_buffer, descriptor_set = 0, binding = 2)] entities: &[scene::GpuEntity],
-    #[spirv(storage_buffer, descriptor_set = 0, binding = 4)] textures: &[scene::GpuTexture],
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 4)] materials: &[scene::GpuMaterial],
+    #[spirv(storage_buffer, descriptor_set = 1, binding = 2)] textures: &[scene::GpuTexture],
 
     //// which entity are we drawing
     #[spirv(instance_index)] instance_id: u32,
     // which vertex on that entity
     #[spirv(vertex_index)] vertex_id: u32,
 
-    #[spirv(flat)] out_lighting_model: &mut u32,
+    #[spirv(flat)] out_material_config: &mut u32,
+    #[spirv(flat)] out_material_lighting_model: &mut scene::LightingModel,
     out_color: &mut glam::Vec4,
-    #[spirv(flat)] out_tex_ids: &mut glam::UVec2,
     out_uv0: &mut glam::Vec2,
     out_uv1: &mut glam::Vec2,
     out_norm: &mut glam::Vec3,
@@ -37,10 +32,11 @@ pub fn main_vertex_scene(
         constants,
         vertices,
         entities,
+        materials,
         textures,
-        out_lighting_model,
+        out_material_config,
+        out_material_lighting_model,
         out_color,
-        out_tex_ids,
         out_uv0,
         out_uv1,
         out_norm,
@@ -57,9 +53,9 @@ pub fn main_fragment_scene(
     #[spirv(uniform, descriptor_set = 0, binding = 0)] constants: &scene::GpuConstants,
     #[spirv(storage_buffer, descriptor_set = 0, binding = 3)] lights: &[scene::GpuLight],
 
-    #[spirv(flat)] in_lighting_model: u32,
+    #[spirv(flat)] in_material_config: u32,
+    #[spirv(flat)] in_material_lighting_model: scene::LightingModel,
     in_color: glam::Vec4,
-    #[spirv(flat)] in_tex_ids: glam::UVec2,
     in_uv0: glam::Vec2,
     in_uv1: glam::Vec2,
     in_norm: glam::Vec3,
@@ -72,9 +68,9 @@ pub fn main_fragment_scene(
         sampler,
         constants,
         lights,
-        in_lighting_model,
+        in_material_config,
+        in_material_lighting_model,
         in_color,
-        in_tex_ids,
         in_uv0,
         in_uv1,
         in_norm,
@@ -94,31 +90,32 @@ pub fn compute_cull_entities(
     scene::compute_cull_entities(entities, draws, global_id)
 }
 
-#[spirv(compute(threads(32)))]
-pub fn compute_atomics(
-    #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] data: &mut [u32],
-    #[spirv(storage_buffer, descriptor_set = 0, binding = 1)] sum: &mut u32,
-    #[spirv(global_invocation_id)] global_id: glam::UVec3,
-) {
-    let index = global_id.x as usize;
-    if index > data.len() {
-        return;
-    }
-
-    let n =
-        unsafe {
-            spirv_std::arch::atomic_load::<
-                    u32,
-                { spirv_std::memory::Scope::Device as u32 },
-                { spirv_std::memory::Semantics::NONE.bits() as u32 },
-                >(&data[index])
-        };
-    *sum = n;
-    //unsafe {
-    //    spirv_std::arch::atomic_i_add::<
-    //        u32,
-    //        { spirv_std::memory::Scope::Device as u32 },
-    //        { spirv_std::memory::Semantics::NONE.bits() as u32 },
-    //    >(sum, n)
-    //};
-}
+///// Just a test for atomics in Naga.
+//#[spirv(compute(threads(32)))]
+//pub fn compute_atomics(
+//    #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] data: &mut [u32],
+//    #[spirv(storage_buffer, descriptor_set = 0, binding = 1)] sum: &mut u32,
+//    #[spirv(global_invocation_id)] global_id: glam::UVec3,
+//) {
+//    let index = global_id.x as usize;
+//    if index > data.len() {
+//        return;
+//    }
+//
+//    let n =
+//        unsafe {
+//            spirv_std::arch::atomic_load::<
+//                    u32,
+//                { spirv_std::memory::Scope::Device as u32 },
+//                { spirv_std::memory::Semantics::NONE.bits() as u32 },
+//                >(&data[index])
+//        };
+//    *sum = n;
+//    //unsafe {
+//    //    spirv_std::arch::atomic_i_add::<
+//    //        u32,
+//    //        { spirv_std::memory::Scope::Device as u32 },
+//    //        { spirv_std::memory::Semantics::NONE.bits() as u32 },
+//    //    >(sum, n)
+//    //};
+//}

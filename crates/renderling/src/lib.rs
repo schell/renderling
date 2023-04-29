@@ -1,6 +1,6 @@
-//! A collection of renderers (callend "renderlings") with a focus on simplicity
-//! and ease of use. Backed by WebGPU render pipelines and simple types for
-//! marshalling data to the GPU.
+//! A "GPU driven" renderer  with a focus on simplicity and ease of use.
+//! Backed by WebGPU.
+//! Shaders written in rust using `rust-gpu`.
 //!
 //! # WARNING
 //! This is very much a work in progress.
@@ -8,68 +8,62 @@
 //! PRs are very welcomed :)
 //!
 //! # renderlings 🍖
-//! Individual renderers are called "renderlings" for maximum cuteness.
-//! Renderlings manage their own resources and come in a couple flavors
-//! depending on the shader used.
+//!
+//! Render graphs and all their resources are called "renderlings" for maximum
+//! cuteness. Renderlings are configurable DAGs.
 //!
 //! ## Features
-//! Features are used to enable specific renderlings, by default all renderlings
-//! are enabled.
 //!
-//! * **ui**
-//!   - simple simple diffuse material
-//!   - colored or textured mesh attributes
-//!   - mostly for rendering user interfaces
-//! * **forward**
-//!   - blinn-phong material
-//!   - textured mesh attribute
-//!   - maximum 64 point, 32 spot and 8 directional lights
+//! - forward+ style pipeline, configurable lighting model per material
+//!   - [ ] physically based shading
+//!   - [x] blinn-phong shading
+//!   - [x] user interface "colored text" shading (uses opacity glyphs in an
+//!     atlas)
+//!   - [x] no shading
+//! - [ ] gltf support
+//!   - [ ] scenes, nodes
+//!   - [x] cameras
+//!   - [x] meshes
+//!   - [x] materials
+//!   - [x] textures, images, samplers
+//!   - [ ] skins
+//!   - [ ] animations
+//! - [ ] high definition rendering
+//! - [ ] bloom
+//! - [ ] image based lighting
+//! - [ ] ssao
+//! - [ ] depth of field
 //!
 //! ## Raw shaders
 //! You can also use the [shaders module](crate::shaders) without renderlings
 //! and manage your own resources for maximum flexibility.
-#[cfg(feature = "forward")]
-mod forward;
-#[cfg(feature = "forward")]
-pub use forward::*;
 
-#[cfg(feature = "ui")]
-mod ui;
-#[cfg(feature = "ui")]
-pub use ui::*;
-
-pub mod linkage;
-
-mod bank;
+mod atlas;
+// mod bank;
+mod buffer_array;
 mod camera;
-mod gltf_support;
-mod light;
-mod material;
-mod mesh;
+// mod gltf_support;
 pub mod node;
-mod object;
-mod pipeline;
 mod renderer;
-mod resources;
+// mod resources;
 mod scene;
 mod state;
+#[cfg(feature = "text")]
+mod text;
 mod texture;
-mod transform;
 
+pub use atlas::*;
+pub use buffer_array::*;
 pub use camera::*;
-#[cfg(feature = "gltf")]
-pub use gltf_support::*;
-pub use light::*;
-pub use material::*;
-pub use mesh::*;
-pub use object::*;
-pub use pipeline::*;
+//#[cfg(feature = "gltf")]
+// pub use gltf_support::*;
 pub use renderer::*;
-pub use resources::*;
+// pub use resources::*;
 pub use scene::*;
 pub use state::*;
+#[cfg(feature = "text")]
+pub use text::*;
 pub use texture::*;
-pub use transform::*;
 
 pub mod math;
 
@@ -77,45 +71,52 @@ pub mod graph {
     //! Re-exports of [`moongraph`].
 
     pub use moongraph::*;
+
+    pub type RenderNode = Node<Function, TypeKey>;
 }
 
-pub use graph::{Move, Read, Write};
+pub use graph::{Graph, Move, Read, Write};
 
 #[cfg(test)]
 mod img_diff;
 
 #[cfg(test)]
 mod test {
-    use std::sync::Arc;
-
-    use crate::{
-        img_diff::Save,
-        node::{ForwardRenderCamera, UiRenderCamera},
-    };
-
     use super::*;
     use glam::{Mat3, Mat4, Quat, Vec2, Vec3, Vec4};
-    use moongraph::{DaggaError, Function, GraphError, Node, Read, TypeKey};
+    use moongraph::Read;
     use renderling_shader::scene::{DrawIndirect, GpuEntity, GpuVertex};
 
     #[test]
-    fn init() {
-        let r = Renderling::headless(100, 100).unwrap();
-        assert_eq!(0, r.get_cameras().iter().count());
+    fn sanity_transmute() {
+        let zerof32 = 0f32;
+        let zerof32asu32: u32 = unsafe { std::mem::transmute(zerof32) };
+        assert_eq!(0, zerof32asu32);
+
+        let foure_45 = 4e-45f32;
+        let in_u32: u32 = unsafe { std::mem::transmute(foure_45) };
+        assert_eq!(3, in_u32);
+
+        let u32max = u32::MAX;
+        let f32nan: f32 = unsafe { std::mem::transmute(u32max) };
+        assert!(f32nan.is_nan());
+
+        let u32max: u32 = unsafe { std::mem::transmute(f32nan) };
+        assert_eq!(u32::MAX, u32max);
     }
 
-    fn right_tri_builder() -> MeshBuilder<UiVertex> {
-        MeshBuilder::default().with_vertices(vec![
-            UiVertex::default()
-                .with_position(0.0, 0.0, 0.5)
-                .with_color(0.0, 1.0, 1.0, 1.0),
-            UiVertex::default()
-                .with_position(100.0, 0.0, 0.5)
-                .with_color(1.0, 0.0, 1.0, 1.0),
-            UiVertex::default()
-                .with_position(0.0, 100.0, 0.5)
-                .with_color(1.0, 1.0, 0.0, 1.0),
-        ])
+    fn right_tri_vertices() -> Vec<GpuVertex> {
+        vec![
+            GpuVertex::default()
+                .with_position([0.0, 0.0, 0.5])
+                .with_color([0.0, 1.0, 1.0, 1.0]),
+            GpuVertex::default()
+                .with_position([0.0, 100.0, 0.5])
+                .with_color([1.0, 1.0, 0.0, 1.0]),
+            GpuVertex::default()
+                .with_position([100.0, 0.0, 0.5])
+                .with_color([1.0, 0.0, 1.0, 1.0]),
+        ]
     }
 
     fn _init_logging() {
@@ -123,72 +124,58 @@ mod test {
             .is_test(true)
             //.filter_level(log::LevelFilter::Trace)
             .filter_module("renderling", log::LevelFilter::Trace)
-            .filter_module("naga", log::LevelFilter::Warn)
-            .filter_module("wgpu", log::LevelFilter::Debug)
-            .filter_module("wgpu_hal", log::LevelFilter::Warn)
+            //.filter_module("naga", log::LevelFilter::Debug)
+            //.filter_module("wgpu", log::LevelFilter::Debug)
+            //.filter_module("wgpu_hal", log::LevelFilter::Warn)
             .try_init();
-    }
-
-    fn ui_renderling() -> (Renderling, Camera) {
-        // set up our rendering graph
-        let mut ui = Renderling::headless(100, 100)
-            .unwrap()
-            .with_default_ui_render_graph()
-            .with_node(
-                crate::node::PostRenderBufferCreate::create
-                    .into_node()
-                    .with_name("copy_frame_to_post")
-                    .run_after("ui_render")
-                    .run_before("present_frame"),
-            );
-        let cam = ui.new_camera().with_projection_ortho2d().build();
-        ui.add_resource(UiRenderCamera(cam.id));
-        (ui, cam)
     }
 
     struct CmyTri {
         ui: Renderling,
-        _cam: Camera,
-        tri: Object,
+        tri: GpuEntity,
     }
 
     fn cmy_triangle_setup() -> CmyTri {
-        let (mut ui, cam) = ui_renderling();
-        let tri = ui
-            .new_object()
-            .with_mesh_builder(right_tri_builder())
-            .build()
-            .unwrap();
-        CmyTri { _cam: cam, ui, tri }
+        let mut r = Renderling::headless(100, 100)
+            .unwrap()
+            .with_background_color(Vec4::splat(1.0));
+        let (projection, view) = default_ortho2d(100.0, 100.0);
+        let mut builder = r.new_scene().with_camera(projection, view);
+        let tri = builder
+            .new_entity()
+            .with_meshlet(right_tri_vertices())
+            .build();
+        let scene = builder.build().unwrap();
+        crate::setup_scene_render_graph(scene, &mut r, true);
+
+        CmyTri { ui: r, tri }
     }
 
     #[test]
     fn cmy_triangle_sanity() {
-        _init_logging();
         let mut c = cmy_triangle_setup();
         let img = c.ui.render_image().unwrap();
         c.ui.graph.save_graph_dot("cmy_triangle_renderer.dot");
-        crate::img_diff::assert_img_eq("cmy_triangle", "cmy_triangle.png", img).unwrap();
+        crate::img_diff::assert_img_eq("cmy_triangle.png", img);
     }
 
     #[test]
     fn cmy_triangle_update_transform() {
-        _init_logging();
         let mut c = cmy_triangle_setup();
         let _ = c.ui.render_image().unwrap();
-        c.tri.set_transform(
-            Transform::default()
-                .with_position(Vec3::new(100.0, 0.0, 0.0))
-                .with_rotation(Quat::from_axis_angle(Vec3::Z, std::f32::consts::FRAC_PI_2))
-                .with_scale(Vec3::new(0.5, 0.5, 1.0)),
-        );
+
+        let mut tri = c.tri;
+        tri.position = Vec4::new(100.0, 0.0, 0.0, 0.0);
+        tri.rotation = Quat::from_axis_angle(Vec3::Z, std::f32::consts::FRAC_PI_2);
+        tri.scale = Vec4::new(0.5, 0.5, 1.0, 0.0);
+        c.ui.graph
+            .visit(|mut scene: Write<Scene>| {
+                scene.update_entity(tri).unwrap();
+            })
+            .unwrap();
+
         let img = c.ui.render_image().unwrap();
-        crate::img_diff::assert_img_eq(
-            "cmy_triangle_update_transform",
-            "cmy_triangle_update_transform.png",
-            img,
-        )
-        .unwrap();
+        crate::img_diff::assert_img_eq("cmy_triangle_update_transform.png", img);
     }
 
     /// Points around a pyramid height=1 with the base around the origin.
@@ -210,828 +197,310 @@ mod test {
     fn pyramid_indices() -> [u16; 18] {
         let (tl, tr, br, bl, top) = (0, 1, 2, 3, 4);
         [
-            // bottom
-            tl, bl, br, tl, br, tr, // front
-            br, bl, top, // left
-            bl, tl, top, // back
-            tl, tr, top, // right
-            tr, br, top,
+            tl, br, bl, tl, tr, br, br, top, bl, bl, top, tl, tl, top, tr, tr, top, br,
         ]
     }
 
-    fn cmy_vertex(p: Vec3) -> UiVertex {
+    fn cmy_gpu_vertex(p: Vec3) -> GpuVertex {
         let r: f32 = p.z + 0.5;
         let g: f32 = p.x + 0.5;
         let b: f32 = p.y + 0.5;
-        UiVertex::default()
-            .with_position(p.x.min(1.0), p.y.min(1.0), p.z.min(1.0))
-            .with_color(r, g, b, 1.0)
+        GpuVertex::default()
+            .with_position([p.x.min(1.0), p.y.min(1.0), p.z.min(1.0)])
+            .with_color([r, g, b, 1.0])
     }
 
-    fn cube_builder() -> MeshBuilder<UiVertex> {
+    fn gpu_cube_vertices() -> Vec<GpuVertex> {
         let vertices = crate::math::unit_points();
         let indices: [u16; 12 * 3] = [
-            0, 1, 2, 0, 2, 3, // top
-            0, 3, 4, 4, 3, 5, // front
-            3, 2, 6, 3, 6, 5, // right
-            1, 0, 7, 7, 0, 4, // left
-            4, 5, 6, 4, 6, 7, // bottom
-            2, 1, 7, 2, 7, 6, // back
+            0, 2, 1, 0, 3, 2, // top
+            0, 4, 3, 4, 5, 3, // front
+            3, 6, 2, 3, 5, 6, // right
+            1, 7, 0, 7, 4, 0, // left
+            4, 6, 5, 4, 7, 6, // bottom
+            2, 7, 1, 2, 6, 7, // back
         ];
-        MeshBuilder::default()
-            .with_vertices(vertices.map(cmy_vertex))
-            .with_indices(indices)
+        indices
+            .iter()
+            .map(|i| cmy_gpu_vertex(vertices[*i as usize]))
+            .collect()
     }
 
-    fn pyramid_builder() -> MeshBuilder<UiVertex> {
+    fn gpu_pyramid_vertices() -> Vec<GpuVertex> {
         let vertices = pyramid_points();
         let indices = pyramid_indices();
-        MeshBuilder::default()
-            .with_vertices(vertices.map(cmy_vertex))
-            .with_indices(indices)
+        indices
+            .into_iter()
+            .map(|i| cmy_gpu_vertex(vertices[i as usize]))
+            .collect()
     }
 
     #[test]
     fn cmy_cube_sanity() {
         _init_logging();
-        let (mut ui, cam) = ui_renderling();
-        assert_eq!(1, ui.cameras().count());
+        let mut r = Renderling::headless(100, 100)
+            .unwrap()
+            .with_background_color(Vec4::splat(1.0));
+        let mut builder = r.new_scene().with_camera(
+            Mat4::perspective_rh(std::f32::consts::PI / 4.0, 1.0, 0.1, 100.0),
+            Mat4::look_at_rh(Vec3::new(0.0, 12.0, 20.0), Vec3::ZERO, Vec3::Y),
+        );
 
-        cam.look_at(Vec3::new(0.0, 12.0, 20.0), Vec3::ZERO, Vec3::Y);
-        cam.set_projection(Mat4::perspective_rh(
-            std::f32::consts::PI / 4.0,
-            1.0,
-            0.1,
-            100.0,
-        ));
-
-        let _cube = ui
-            .new_object()
-            .with_mesh_builder(cube_builder())
+        let _cube = builder
+            .new_entity()
+            .with_meshlet(gpu_cube_vertices())
             .with_scale(Vec3::new(6.0, 6.0, 6.0))
             .with_rotation(Quat::from_axis_angle(Vec3::Y, -std::f32::consts::FRAC_PI_4))
-            .build()
-            .unwrap();
+            .build();
+        let scene = builder.build().unwrap();
 
-        let img = ui.render_image().unwrap();
-        crate::img_diff::assert_img_eq("cmy_cube", "cmy_cube.png", img).unwrap();
+        crate::setup_scene_render_graph(scene, &mut r, true);
+        let img = r.render_image().unwrap();
+        crate::img_diff::assert_img_eq("cmy_cube.png", img);
     }
 
     #[test]
     fn cmy_cube_visible() {
-        _init_logging();
-        let (mut ui, cam) = ui_renderling();
+        let mut r = Renderling::headless(100, 100)
+            .unwrap()
+            .with_background_color(Vec4::splat(1.0));
 
         let (projection, view) = camera::default_perspective(100.0, 100.0);
-        cam.set_projection(projection);
-        cam.set_view(view);
+        let mut builder = r.new_scene().with_camera(projection, view);
 
-        let _cube_one = ui
-            .new_object()
-            .with_mesh_builder(cube_builder())
-            .with_position(Vec3::new(-4.0, 0.0, 0.0))
+        let _cube_one = builder
+            .new_entity()
+            .with_meshlet(gpu_cube_vertices())
+            .with_position(Vec3::new(-4.5, 0.0, 0.0))
             .with_scale(Vec3::new(6.0, 6.0, 6.0))
             .with_rotation(Quat::from_axis_angle(Vec3::Y, -std::f32::consts::FRAC_PI_4))
-            .build()
-            .unwrap();
+            .build();
 
-        let cube_two = ui
-            .new_object()
-            .with_mesh_builder(cube_builder())
-            .with_position(Vec3::new(4.0, 0.0, 0.0))
+        let mut cube_two = builder
+            .new_entity()
+            .with_meshlet(gpu_cube_vertices())
+            .with_position(Vec3::new(4.5, 0.0, 0.0))
             .with_scale(Vec3::new(6.0, 6.0, 6.0))
             .with_rotation(Quat::from_axis_angle(Vec3::Y, std::f32::consts::FRAC_PI_4))
-            .build()
-            .unwrap();
+            .build();
+
+        let scene = builder.build().unwrap();
+        crate::setup_scene_render_graph(scene, &mut r, true);
 
         // we should see two colored cubes
-        let img = ui.render_image().unwrap();
-        crate::img_diff::assert_img_eq_save(
-            Save::No,
-            "cmy_cube_visible_before",
-            "cmy_cube_visible_before.png",
-            img,
-        )
-        .unwrap();
+        let img = r.render_image().unwrap();
+        crate::img_diff::assert_img_eq("cmy_cube_visible_before.png", img);
+
+        // update cube two making in invisible
+        r.graph
+            .visit(|mut scene: Write<Scene>| {
+                cube_two.visible = 0;
+                scene.update_entity(cube_two).unwrap();
+            })
+            .unwrap();
 
         // we should see one colored cube
-        cube_two.set_visible(false);
-        let img = ui.render_image().unwrap();
-        crate::img_diff::assert_img_eq_save(
-            Save::No,
-            "cmy_cube_visible_after",
-            "cmy_cube_visible_after.png",
-            img,
-        )
-        .unwrap();
+        let img = r.render_image().unwrap();
+        crate::img_diff::assert_img_eq("cmy_cube_visible_after.png", img);
+
+        // update cube two making in visible again
+        r.graph
+            .visit(|mut scene: Write<Scene>| {
+                cube_two.visible = 1;
+                scene.update_entity(cube_two).unwrap();
+            })
+            .unwrap();
 
         // we should see two colored cubes again
-        cube_two.set_visible(true);
-        let img = ui.render_image().unwrap();
-        crate::img_diff::assert_img_eq(
+        let img = r.render_image().unwrap();
+        crate::img_diff::assert_img_eq_with_testname(
             "cmy_cube_visible_before_again",
             "cmy_cube_visible_before.png",
             img,
-        )
-        .unwrap();
+        );
     }
 
     #[test]
     fn cmy_cube_remesh() {
-        _init_logging();
-        let (mut ui, cam) = ui_renderling();
-        // transparent background
-        ui.set_background_color(Vec4::splat(0.0));
+        let mut r = Renderling::headless(100, 100)
+            .unwrap()
+            .with_background_color(Vec4::splat(0.0));
         let (projection, view) = camera::default_perspective(100.0, 100.0);
-        cam.set_projection(projection);
-        cam.set_view(view);
-        let cube = ui
-            .new_object()
-            .with_mesh_builder(cube_builder())
+        let mut builder = r.new_scene().with_camera(projection, view);
+
+        let (pyramid_start, pyramid_count) = builder.add_meshlet(gpu_pyramid_vertices());
+
+        let mut cube = builder
+            .new_entity()
+            .with_meshlet(gpu_cube_vertices())
             .with_scale(Vec3::new(10.0, 10.0, 10.0))
-            .build()
-            .unwrap();
+            .build();
+
+        let scene = builder.build().unwrap();
+        crate::setup_scene_render_graph(scene, &mut r, true);
+
         // we should see a cube
-        let img = ui.render_image().unwrap();
-        crate::img_diff::assert_img_eq_save(
-            Save::No,
-            "cmy_cube_remesh_before",
-            "cmy_cube_remesh_before.png",
-            img,
-        )
-        .unwrap();
+        let img = r.render_image().unwrap();
+        crate::img_diff::assert_img_eq("cmy_cube_remesh_before.png", img);
+
+        // update the cube mesh to a pyramid
+        r.graph
+            .visit(|mut scene: Write<Scene>| {
+                cube.mesh_first_vertex = pyramid_start;
+                cube.mesh_vertex_count = pyramid_count;
+                scene.update_entity(cube).unwrap();
+            })
+            .unwrap();
 
         // we should see a pyramid
-        let pyramid_mesh = pyramid_builder().build(Some("pyramid mesh"), &ui.get_device());
-        cube.set_mesh(Arc::new(pyramid_mesh));
-        let img = ui.render_image().unwrap();
-        crate::img_diff::assert_img_eq_save(
-            Save::No,
-            "cmy_cube_remesh_after",
-            "cmy_cube_remesh_after.png",
-            img,
-        )
-        .unwrap();
+        let img = r.render_image().unwrap();
+        crate::img_diff::assert_img_eq("cmy_cube_remesh_after.png", img);
     }
 
-    fn uv_unit_cube() -> MeshBuilder<UiVertex> {
-        MeshBuilder::default().with_vertices({
-            let p: [Vec3; 8] = crate::math::unit_points();
-            let tl = Vec2::from([0.0, 0.0]);
-            let tr = Vec2::from([1.0, 0.0]);
-            let bl = Vec2::from([0.0, 1.0]);
-            let br = Vec2::from([1.0, 1.0]);
+    fn gpu_uv_unit_cube() -> Vec<GpuVertex> {
+        let p: [Vec3; 8] = crate::math::unit_points();
+        let tl = Vec2::new(0.0, 0.0);
+        let tr = Vec2::new(1.0, 0.0);
+        let bl = Vec2::new(0.0, 1.0);
+        let br = Vec2::new(1.0, 1.0);
 
-            vec![
-                // top
-                UiVertex::default()
-                    .with_position(p[0].x, p[0].y, p[0].z)
-                    .with_uv(bl.x, bl.y),
-                UiVertex::default()
-                    .with_position(p[1].x, p[1].y, p[1].z)
-                    .with_uv(tl.x, tl.y),
-                UiVertex::default()
-                    .with_position(p[2].x, p[2].y, p[2].z)
-                    .with_uv(tr.x, tr.y),
-                UiVertex::default()
-                    .with_position(p[0].x, p[0].y, p[0].z)
-                    .with_uv(bl.x, bl.y),
-                UiVertex::default()
-                    .with_position(p[2].x, p[2].y, p[2].z)
-                    .with_uv(tr.x, tr.y),
-                UiVertex::default()
-                    .with_position(p[3].x, p[3].y, p[3].z)
-                    .with_uv(br.x, br.y),
-                // bottom
-                UiVertex::default()
-                    .with_position(p[4].x, p[4].y, p[4].z)
-                    .with_uv(bl.x, bl.y),
-                UiVertex::default()
-                    .with_position(p[5].x, p[5].y, p[5].z)
-                    .with_uv(tl.x, tl.y),
-                UiVertex::default()
-                    .with_position(p[6].x, p[6].y, p[6].z)
-                    .with_uv(tr.x, tr.y),
-                UiVertex::default()
-                    .with_position(p[4].x, p[4].y, p[4].z)
-                    .with_uv(bl.x, bl.y),
-                UiVertex::default()
-                    .with_position(p[6].x, p[6].y, p[6].z)
-                    .with_uv(tr.x, tr.y),
-                UiVertex::default()
-                    .with_position(p[7].x, p[7].y, p[7].z)
-                    .with_uv(br.x, br.y),
-                // left
-                UiVertex::default()
-                    .with_position(p[7].x, p[7].y, p[7].z)
-                    .with_uv(bl.x, bl.y),
-                UiVertex::default()
-                    .with_position(p[1].x, p[1].y, p[1].z)
-                    .with_uv(tl.x, tl.y),
-                UiVertex::default()
-                    .with_position(p[0].x, p[0].y, p[0].z)
-                    .with_uv(tr.x, tr.y),
-                UiVertex::default()
-                    .with_position(p[7].x, p[7].y, p[7].z)
-                    .with_uv(bl.x, bl.y),
-                UiVertex::default()
-                    .with_position(p[0].x, p[0].y, p[0].z)
-                    .with_uv(tr.x, tr.y),
-                UiVertex::default()
-                    .with_position(p[4].x, p[4].y, p[4].z)
-                    .with_uv(br.x, br.y),
-                // right
-                UiVertex::default()
-                    .with_position(p[5].x, p[5].y, p[5].z)
-                    .with_uv(bl.x, bl.y),
-                UiVertex::default()
-                    .with_position(p[3].x, p[3].y, p[3].z)
-                    .with_uv(tl.x, tl.y),
-                UiVertex::default()
-                    .with_position(p[2].x, p[2].y, p[2].z)
-                    .with_uv(tr.x, tr.y),
-                UiVertex::default()
-                    .with_position(p[5].x, p[5].y, p[5].z)
-                    .with_uv(bl.x, bl.y),
-                UiVertex::default()
-                    .with_position(p[2].x, p[2].y, p[2].z)
-                    .with_uv(tr.x, tr.y),
-                UiVertex::default()
-                    .with_position(p[6].x, p[6].y, p[6].z)
-                    .with_uv(br.x, br.y),
-                // front
-                UiVertex::default()
-                    .with_position(p[4].x, p[4].y, p[4].z)
-                    .with_uv(bl.x, bl.y),
-                UiVertex::default()
-                    .with_position(p[0].x, p[0].y, p[0].z)
-                    .with_uv(tl.x, tl.y),
-                UiVertex::default()
-                    .with_position(p[3].x, p[3].y, p[3].z)
-                    .with_uv(tr.x, tr.y),
-                UiVertex::default()
-                    .with_position(p[4].x, p[4].y, p[4].z)
-                    .with_uv(bl.x, bl.y),
-                UiVertex::default()
-                    .with_position(p[3].x, p[3].y, p[3].z)
-                    .with_uv(tr.x, tr.y),
-                UiVertex::default()
-                    .with_position(p[5].x, p[5].y, p[5].z)
-                    .with_uv(br.x, br.y),
-            ]
-        })
+        vec![
+            // top
+            GpuVertex::default().with_position(p[0]).with_uv0(bl),
+            GpuVertex::default().with_position(p[2]).with_uv0(tr),
+            GpuVertex::default().with_position(p[1]).with_uv0(tl),
+            GpuVertex::default().with_position(p[0]).with_uv0(bl),
+            GpuVertex::default().with_position(p[3]).with_uv0(br),
+            GpuVertex::default().with_position(p[2]).with_uv0(tr),
+            // bottom
+            GpuVertex::default().with_position(p[4]).with_uv0(bl),
+            GpuVertex::default().with_position(p[6]).with_uv0(tr),
+            GpuVertex::default().with_position(p[5]).with_uv0(tl),
+            GpuVertex::default().with_position(p[4]).with_uv0(bl),
+            GpuVertex::default().with_position(p[7]).with_uv0(br),
+            GpuVertex::default().with_position(p[6]).with_uv0(tr),
+            // left
+            GpuVertex::default().with_position(p[7]).with_uv0(bl),
+            GpuVertex::default().with_position(p[0]).with_uv0(tr),
+            GpuVertex::default().with_position(p[1]).with_uv0(tl),
+            GpuVertex::default().with_position(p[7]).with_uv0(bl),
+            GpuVertex::default().with_position(p[4]).with_uv0(br),
+            GpuVertex::default().with_position(p[0]).with_uv0(tr),
+            // right
+            GpuVertex::default().with_position(p[5]).with_uv0(bl),
+            GpuVertex::default().with_position(p[2]).with_uv0(tr),
+            GpuVertex::default().with_position(p[3]).with_uv0(tl),
+            GpuVertex::default().with_position(p[5]).with_uv0(bl),
+            GpuVertex::default().with_position(p[6]).with_uv0(br),
+            GpuVertex::default().with_position(p[2]).with_uv0(tr),
+            // front
+            GpuVertex::default().with_position(p[4]).with_uv0(bl),
+            GpuVertex::default().with_position(p[3]).with_uv0(tr),
+            GpuVertex::default().with_position(p[0]).with_uv0(tl),
+            GpuVertex::default().with_position(p[4]).with_uv0(bl),
+            GpuVertex::default().with_position(p[5]).with_uv0(br),
+            GpuVertex::default().with_position(p[3]).with_uv0(tr),
+        ]
     }
 
     #[test]
-    fn cmy_cube_material() {
-        let (mut ui, cam) = ui_renderling();
-        ui.set_background_color(Vec4::splat(0.0));
-        let (proj, view) = camera::default_perspective(100.0, 100.0);
-        cam.set_projection(proj);
-        cam.set_view(view);
-
-        let png = image::open("../../img/sandstone.png").unwrap();
-        let tex = ui
-            .create_texture(Some("sandstone_material"), &png.to_rgba8())
-            .unwrap();
-        let material = UiMaterial {
-            diffuse_texture: tex,
-            color_blend: UiColorBlend::UvOnly,
-        };
-        let builder = uv_unit_cube();
-        let cube = ui
-            .new_object()
-            .with_material(material)
-            .with_mesh_builder(builder)
-            .with_scale(Vec3::new(10.0, 10.0, 10.0))
-            .build()
-            .unwrap();
-        // we should see a cube with a stoney texture
-        let img = ui.render_image().unwrap();
-        crate::img_diff::assert_img_eq_save(
-            Save::No,
-            "cmy_cube_material_before",
-            "cmy_cube_material_before.png",
-            img,
-        )
-        .unwrap();
-
-        let png = image::open("../../img/dirt.jpg").unwrap();
-        let tex = ui
-            .create_texture(Some("dirt_material"), &png.to_rgba8())
-            .unwrap();
-        let material = UiMaterial {
-            diffuse_texture: tex,
-            color_blend: UiColorBlend::UvOnly,
-        };
-        cube.set_material(material);
-        // we should see a cube with a dirty texture
-        let img = ui.render_image().unwrap();
-        crate::img_diff::assert_img_eq_save(
-            Save::No,
-            "cmy_cube_material_after",
-            "cmy_cube_material_after.png",
-            img,
-        )
-        .unwrap();
-    }
-
-    fn forward_renderling_with(
-        width: u32,
-        height: u32,
-        prim: Option<wgpu::PrimitiveState>,
-    ) -> (Renderling, Camera) {
-        // set up our rendering graph
-        let mut r = Renderling::headless(width, height)
+    // tests that updating the material actually updates the rendering of an unlit
+    // mesh
+    fn unlit_textured_cube_material() {
+        let mut r = Renderling::headless(100, 100)
             .unwrap()
-            .with_forward_render_graph(if let Some(prim) = prim {
-                Box::new(ForwardPipelineCreator::create_with_prim(prim))
-                    as Box<dyn FnOnce(ForwardPipelineCreator) -> ForwardPipeline>
-            } else {
-                Box::new(ForwardPipelineCreator::create)
-                    as Box<dyn FnOnce(ForwardPipelineCreator) -> ForwardPipeline>
+            .with_background_color(Vec4::splat(0.0));
+        let (proj, view) = camera::default_perspective(100.0, 100.0);
+        let mut builder = r.new_scene().with_camera(proj, view);
+        let sandstone = image::open("../../img/sandstone.png").unwrap().to_rgba8();
+        let sandstone_id = builder.add_image(sandstone);
+        let dirt = image::open("../../img/dirt.jpg").unwrap().to_rgba8();
+        let dirt_id = builder.add_image(dirt);
+
+        let material_id = builder
+            .new_unlit_material()
+            .with_texture0(sandstone_id)
+            .build();
+        let mut material = builder.get_material(material_id).unwrap();
+        let _cube = builder
+            .new_entity()
+            .with_material(material_id)
+            .with_meshlet(gpu_uv_unit_cube())
+            .with_scale(Vec3::new(10.0, 10.0, 10.0))
+            .build();
+        let scene = builder.build().unwrap();
+        crate::setup_scene_render_graph(scene, &mut r, true);
+        // we should see a cube with a stoney texture
+        let img = r.render_image().unwrap();
+        crate::img_diff::assert_img_eq("unlit_textured_cube_material_before.png", img);
+
+        // update the material's texture on the GPU
+        r.graph
+            .visit(|mut scene: Write<Scene>| {
+                material.texture0 = dirt_id;
+                let _ = scene
+                    .materials
+                    .overwrite(material_id as usize, vec![material])
+                    .unwrap();
             })
-            .with_background_color(Vec4::splat(0.0))
-            .with_node(
-                crate::node::PostRenderBufferCreate::create
-                    .into_node()
-                    .with_name("copy_frame_to_post")
-                    .run_after("forward_render")
-                    .run_before("present_frame"),
-            );
-        let cam = r.new_camera().with_projection_perspective().build();
-        r.add_resource(ForwardRenderCamera(cam.id));
-        (r, cam)
-    }
-
-    fn forward_renderling(width: u32, height: u32) -> (Renderling, Camera) {
-        forward_renderling_with(width, height, None)
-    }
-
-    #[test]
-    /// Ensures that the directional light coloring works.
-    fn forward_cube_directional() {
-        _init_logging();
-        let (mut r, cam) = forward_renderling(100, 100);
-        r.set_background_color(Vec3::splat(0.0).extend(1.0));
-
-        let (proj, _) = camera::default_perspective(100.0, 100.0);
-        cam.set_projection(proj);
-        cam.look_at(
-            Vec3::new(1.8, 1.8, 1.8),
-            Vec3::ZERO,
-            Vec3::new(0.0, 1.0, 0.0),
-        );
-
-        let white = Vec4::splat(1.0);
-        let red = Vec3::X.extend(1.0);
-        let green = Vec3::Y.extend(1.0);
-        let blue = Vec3::Z.extend(1.0);
-        let transparent = Vec4::ZERO;
-        let _dir_red = r
-            .new_directional_light()
-            .with_direction(Vec3::NEG_Y)
-            .with_diffuse_color(red)
-            .with_specular_color(red)
-            .with_ambient_color(transparent)
-            .build();
-        let _dir_green = r
-            .new_directional_light()
-            .with_direction(Vec3::NEG_X)
-            .with_diffuse_color(green)
-            .with_specular_color(green)
-            .with_ambient_color(transparent)
-            .build();
-        let _dir_blue = r
-            .new_directional_light()
-            .with_direction(Vec3::NEG_Z)
-            .with_diffuse_color(blue)
-            .with_specular_color(blue)
-            .with_ambient_color(transparent)
-            .build();
-
-        let material = BlinnPhongMaterial::from_colors(&r, white, white, 16.0);
-        let _cube = r
-            .new_object()
-            .with_material(material)
-            .with_mesh_builder(MeshBuilder::default().with_vertices(
-                crate::math::unit_cube().into_iter().map(|(p, n)| {
-                    ForwardVertex::default()
-                        .with_position(p.x, p.y, p.z)
-                        .with_normal(n.x, n.y, n.z)
-                }),
-            ))
-            .with_generate_normal_matrix(true)
-            .build()
             .unwrap();
 
-        let res = r.render_image();
-        let img = match res {
-            Ok(img) => img,
-            Err(RenderlingError::Graph {
-                source: GraphError::Scheduling { source },
-            }) => match &source {
-                DaggaError::CannotSolve { constraint } => {
-                    // println!("{}", source);
-                    fn print_node(name: &str, node: &Node<Function, TypeKey>) {
-                        println!("{name}: {}", node.name());
-                        println!("  barrier: {}", node.get_barrier());
-                        println!(
-                            "  runs_after: {:?}",
-                            node.get_runs_after().collect::<Vec<_>>()
-                        );
-                        println!(
-                            "  runs_before: {:?}",
-                            node.get_runs_before().collect::<Vec<_>>()
-                        );
-                        println!(
-                            "  reads: {:?}",
-                            node.get_reads().map(|k| k.name()).collect::<Vec<_>>()
-                        );
-                        println!(
-                            "  writes: {:?}",
-                            node.get_writes().map(|k| k.name()).collect::<Vec<_>>()
-                        );
-                        println!(
-                            "  moves: {:?}",
-                            node.get_moves().map(|k| k.name()).collect::<Vec<_>>()
-                        );
-                        println!(
-                            "  results: {:?}",
-                            node.get_results().map(|k| k.name()).collect::<Vec<_>>()
-                        );
-                    }
-                    assert!(r.graph.nodes().count() > 0);
-                    println!("{source}");
-                    let lhs = r.graph.get_node(&constraint.lhs).unwrap();
-                    print_node("lhs", lhs);
-                    let rhs = r.graph.get_node(&constraint.rhs).unwrap();
-                    print_node("rhs", rhs);
-                    panic!("bah!");
-                }
-                other => panic!("{}", other),
-            },
-            Err(other) => panic!("{}", other),
-        };
-        crate::img_diff::assert_img_eq_save(
-            Save::No,
-            "forward_cube_directional",
-            "forward_cube_directional.png",
-            img,
-        )
-        .unwrap();
+        // we should see a cube with a dirty texture
+        let img = r.render_image().unwrap();
+        crate::img_diff::assert_img_eq("unlit_textured_cube_material_after.png", img);
     }
 
     #[test]
     fn ui_text() {
-        use crate::ui;
-
-        let (mut r, cam) = ui_renderling();
-        r.set_background_color(Vec4::splat(0.0));
-        r.resize(100, 50);
-        // after resizing we also have to adjust the camera
-        let (proj, view) = camera::default_ortho2d(100.0, 50.0);
-        cam.set_projection(proj);
-        cam.set_view(view);
+        let mut r = Renderling::headless(100, 50)
+            .unwrap()
+            .with_background_color(Vec4::splat(0.0));
 
         let bytes: Vec<u8> =
             std::fs::read("../../fonts/Font Awesome 6 Free-Regular-400.otf").unwrap();
 
-        let font = ui::FontArc::try_from_vec(bytes).unwrap();
+        let font = FontArc::try_from_vec(bytes).unwrap();
         let mut glyph_cache = GlyphCache::new(&r, vec![font]);
         glyph_cache.queue(
-            ui::Section::default()
+            Section::default()
                 .add_text(
-                    ui::Text::new("")
+                    Text::new("")
                         .with_color([1.0, 1.0, 0.0, 1.0])
                         .with_scale(32.0),
                 )
                 .add_text(
-                    ui::Text::new("")
+                    Text::new("")
                         .with_color([1.0, 0.0, 1.0, 1.0])
                         .with_scale(32.0),
                 )
                 .add_text(
-                    ui::Text::new("")
+                    Text::new("")
                         .with_color([0.0, 1.0, 1.0, 1.0])
                         .with_scale(32.0),
                 ),
         );
-        let (material, mesh) = glyph_cache.get_updated();
-        let material = Arc::new(material.unwrap());
-        let mesh = Arc::new(mesh.unwrap());
-        let _obj_a = r
-            .new_object()
-            .with_material::<UiMaterial>(material.clone())
-            .with_mesh(mesh.clone())
-            .build()
-            .unwrap();
-        let _obj_b = r
-            .new_object()
-            .with_material::<UiMaterial>(material.clone())
-            .with_mesh(mesh.clone())
+        let (projection, view) = default_ortho2d(100.0, 50.0);
+        let mut builder = r.new_scene().with_camera(projection, view);
+        let mesh = glyph_cache.get_updated().unwrap();
+        let (mesh_start, mesh_count) = builder.add_meshlet(mesh);
+        let _obj_a = builder
+            .new_entity()
+            .with_material(0)
+            .with_starting_vertex_and_count(mesh_start, mesh_count)
+            .build();
+        let _obj_b = builder
+            .new_entity()
+            .with_material(0)
+            .with_starting_vertex_and_count(mesh_start, mesh_count)
             .with_position(Vec3::new(15.0, 15.0, 0.5))
-            .build()
-            .unwrap();
+            .build();
+
+        let scene = builder.build_text_scene(&glyph_cache).unwrap();
+        crate::setup_scene_render_graph(scene, &mut r, true);
         // we should see three different colored check icons
         let img = r.render_image().unwrap();
-        crate::img_diff::assert_img_eq_save(Save::No, "ui_text", "ui_text.png", img).unwrap();
+        crate::img_diff::assert_img_eq("ui_text.png", img);
     }
-
-    #[test]
-    // tests that nested children are transformed by their parent's transform
-    fn parent_sanity() {
-        let (mut ui, _cam) = ui_renderling();
-        ui.set_background_color(Vec4::splat(0.0));
-        let size = 1.0;
-        let yellow_tri = ui
-            .new_object()
-            .with_mesh_builder(MeshBuilder::default().with_vertices(vec![
-                            UiVertex::default()
-                                .with_position(0.0, 0.0, 0.0)
-                                .with_color(1.0, 1.0, 0.0, 1.0),
-                            UiVertex::default()
-                                .with_position(size, 0.0, 0.0)
-                                .with_color(1.0, 1.0, 0.0, 1.0),
-                            UiVertex::default()
-                                .with_position(size, size, 0.0)
-                                .with_color(1.0, 1.0, 0.0, 1.0),
-                        ]))
-            .with_position(Vec3::new(25.0, 25.0, 0.0))
-            .build()
-            .unwrap();
-        let _cyan_tri = ui
-            .new_object()
-            .with_mesh_builder(MeshBuilder::default().with_vertices(vec![
-                            UiVertex::default()
-                                .with_position(0.0, 0.0, 0.0)
-                                .with_color(0.0, 1.0, 1.0, 1.0),
-                            UiVertex::default()
-                                .with_position(size, 0.0, 0.0)
-                                .with_color(0.0, 1.0, 1.0, 1.0),
-                            UiVertex::default()
-                                .with_position(size, size, 0.0)
-                                .with_color(0.0, 1.0, 1.0, 1.0),
-                        ]))
-            .with_position(Vec3::new(25.0, 25.0, 0.0))
-            .with_scale(Vec3::new(25.0, 25.0, 1.0))
-            .with_child(&yellow_tri)
-            .build()
-            .unwrap();
-
-        assert_eq!(
-            WorldTransform::default()
-                .with_position(Vec3::new(50.0, 50.0, 0.0))
-                .with_scale(Vec3::new(25.0, 25.0, 1.0)),
-            yellow_tri.get_world_transform()
-        );
-
-        let img = ui.render_image().unwrap();
-        crate::img_diff::assert_img_eq_save(Save::No, "parent_sanity", "parent_sanity.png", img)
-            .unwrap();
-    }
-
-    #[cfg(feature = "gltf")]
-    #[test]
-    // tests importing a gltf file and rendering the first image as a 2d object
-    fn gltf_images() {
-        let (mut ui, _cam) = ui_renderling();
-        let mut loader = ui.new_gltf_loader();
-        let (document, _buffers, images) = gltf::import("../../gltf/cheetah_cone.glb").unwrap();
-        loader.load_materials(&document, &images).unwrap();
-        let _img = ui
-            .new_object()
-            .with_mesh_builder(
-                MeshBuilder::default()
-                    .with_vertices(vec![
-                        UiVertex::default()
-                            .with_position(0.0, 0.0, 0.0)
-                            .with_uv(0.0, 0.0),
-                        UiVertex::default()
-                            .with_position(1.0, 0.0, 0.0)
-                            .with_uv(1.0, 0.0),
-                        UiVertex::default()
-                            .with_position(1.0, 1.0, 0.0)
-                            .with_uv(1.0, 1.0),
-                        UiVertex::default()
-                            .with_position(0.0, 1.0, 0.0)
-                            .with_uv(0.0, 1.0),
-                    ])
-                    .with_indices(vec![0, 1, 2, 0, 2, 3]),
-            )
-            .with_material(UiMaterial {
-                diffuse_texture: loader.textures().next().unwrap().clone(),
-                color_blend: UiColorBlend::UvOnly,
-            })
-            .with_scale(Vec3::new(100.0, 100.0, 1.0))
-            .build()
-            .unwrap();
-
-        let img = ui.render_image().unwrap();
-        crate::img_diff::assert_img_eq_save(Save::No, "gltf_images", "gltf_images.png", img)
-            .unwrap();
-    }
-
-    #[cfg(feature = "gltf")]
-    #[test]
-    fn gltf_load_scene() {
-        _init_logging();
-        let (mut r, cam) = forward_renderling(177, 100);
-        cam.destroy();
-
-        let mut loader = r.new_gltf_loader();
-        let (document, buffers, images) = gltf::import("../../gltf/cheetah_cone.glb").unwrap();
-        loader.load(&mut r, &document, &buffers, &images).unwrap();
-        let cam = loader
-            .cameras()
-            .next()
-            .unwrap()
-            .variant
-            .as_camera()
-            .unwrap()
-            .clone();
-        r.graph.add_resource(ForwardRenderCamera(cam.id));
-
-        let img = r.render_image().unwrap();
-        crate::img_diff::assert_img_eq_save(
-            Save::No,
-            "gltf_load_scene",
-            "gltf_load_scene.png",
-            img,
-        )
-        .unwrap();
-    }
-
-    #[cfg(feature = "gltf")]
-    #[test]
-    fn gltf_simple_animation() {
-        use moongraph::Read;
-
-        use crate::node::FrameTextureView;
-
-        _init_logging();
-        let (mut r, cam) = forward_renderling(50, 50);
-        r.set_background_color(Vec4::splat(1.0));
-
-        let (proj, view) = camera::default_ortho2d(50.0, 50.0);
-        cam.set_projection(proj);
-        cam.set_view(view);
-        // render once to get the right background color
-        r.render().unwrap();
-
-        // after this point we don't want to clear the frame before every rendering
-        // because we're going to composite different frames of an animation into one,
-        // so we'll replace the clear_frame_and_depth node with our own node
-        // that only clears the depth.
-        let clear_frame_and_depth_node = r.graph.remove_node("clear_frame_and_depth").unwrap();
-        pub fn clear_only_depth(
-            (device, queue, _frame_view, depth, color): (
-                Read<Device>,
-                Read<Queue>,
-                Read<FrameTextureView>,
-                Read<DepthTexture>,
-                Read<BackgroundColor>,
-            ),
-        ) -> Result<(), WgpuStateError> {
-            let depth_view = &depth.view;
-            let [r, g, b, a] = color.0.to_array();
-            let color = wgpu::Color {
-                r: r.into(),
-                g: g.into(),
-                b: b.into(),
-                a: a.into(),
-            };
-            crate::linkage::conduct_clear_pass(
-                &device,
-                &queue,
-                Some("clear_only_depth"),
-                None,
-                Some(&depth_view),
-                color,
-            );
-            Ok(())
-        }
-        let clear_only_depth_node = clear_only_depth
-            .into_node()
-            .with_name("clear_only_depth_node")
-            .runs_after_barrier(clear_frame_and_depth_node.get_barrier());
-        r.graph.add_node(clear_only_depth_node);
-
-        let mut loader = r.new_gltf_loader();
-        let (document, buffers, images) =
-            gltf::import("../../gltf/animated_triangle.gltf").unwrap();
-        loader.load(&mut r, &document, &buffers, &images).unwrap();
-
-        let tri_node = loader.get_node(0).unwrap();
-        let tri = tri_node.variant.as_object().unwrap();
-        tri.set_scale(Vec3::splat(25.0));
-        tri.set_position(Vec3::new(25.0, 25.0, 0.0));
-
-        let img = r.render_image().unwrap();
-        crate::img_diff::assert_img_eq_save(
-            Save::No,
-            "gltf_simple_animation",
-            "gltf_simple_animation.png",
-            img,
-        )
-        .unwrap();
-
-        loader.load_animations(&document, &buffers).unwrap();
-
-        assert_eq!(1, loader.animations().count());
-
-        let anime = loader.get_animation(0).unwrap();
-        println!("anime: {:?}", anime);
-        assert_eq!(1.0, anime.tweens[0].length_in_seconds());
-
-        let num = 8;
-        for i in 0..num {
-            let t = i as f32 / num as f32;
-            for tween in anime.tweens.iter() {
-                let property = tween.interpolate(t).unwrap().unwrap();
-                let node = loader.get_node(tween.target_node_index).unwrap();
-                node.set_tween_property(property);
-            }
-            r.render().unwrap();
-        }
-
-        let img = r.render_image().unwrap();
-        crate::img_diff::assert_img_eq_save(
-            Save::No,
-            "gltf_simple_animation_after",
-            "gltf_simple_animation_after.png",
-            img,
-        )
-        .unwrap();
-    }
-
-    #[cfg(feature = "gltf")]
-    #[test]
-    fn gltf_box_animated() {
-        _init_logging();
-
-        let (mut r, cam) = forward_renderling_with(
-            100,
-            100,
-            Some(wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw,
-                cull_mode: Some(wgpu::Face::Back),
-                polygon_mode: wgpu::PolygonMode::Fill,
-                conservative: false,
-                unclipped_depth: false,
-            }),
-        );
-        r.set_background_color(Vec4::splat(1.0));
-        cam.set_view(Mat4::look_at_rh(
-            Vec3::new(0.0, 2.0, 2.0),
-            Vec3::ZERO,
-            Vec3::Y,
-        ));
-
-        let mut loader = r.new_gltf_loader();
-        let (document, buffers, images) = gltf::import("../../gltf/box_animated.glb").unwrap();
-        loader.load(&mut r, &document, &buffers, &images).unwrap();
-
-        let img = r.render_image().unwrap();
-        crate::img_diff::assert_img_eq_save(
-            Save::No,
-            "gltf_box_animated",
-            "gltf_box_animated.png",
-            img,
-        )
-        .unwrap();
-
-        loader.load_animations(&document, &buffers).unwrap();
-        assert_eq!(1, loader.animations().count());
-
-        let anime = loader.get_animation(0).unwrap();
-        println!("anime: {:?}", anime);
-        assert_eq!(3.70833, anime.length_in_seconds());
-        assert_eq!(2, anime.tweens[0].target_node_index);
-        assert_eq!(0, anime.tweens[1].target_node_index);
-    }
-
-    // fn big_scene_cube_builder() -> MeshBuilder<UiVertex> {
-    //    let vertices = crate::math::unit_points();
-    //    let indices: [([u16; 3], [u16; 3], Vec4); 6] = [
-    //        ([0, 1, 2], [0, 2, 3], Vec4::Y),     // top
-    //        ([0, 3, 4], [4, 3, 5], Vec4::Z),     // front
-    //        ([3, 2, 6], [3, 6, 5], Vec4::X),     // right
-    //        ([1, 0, 7], [7, 0, 4], Vec4::NEG_X), // left
-    //        ([4, 5, 6], [4, 6, 7], Vec4::NEG_Y), // bottom
-    //        ([2, 1, 7], [2, 7, 6], Vec4::NEG_Z), // back
-    //    ];
-    //    MeshBuilder::default()
-    //        .with_vertices(indices.flat_map(|ui_vert| GpuVertex {
-    //            position: Vec3::from_array(ui_vert.position).extend(0.0),
-    //            color: Vec4::from_array(ui_vert.color),
-    //            uv: Vec4::ZERO,
-    //            norm: Vec4::ZERO,
-    //        }))
-    //        .with_indices(indices)
-    //}
 
     #[test]
     fn gpu_array_update() {
@@ -1094,20 +563,20 @@ mod test {
                 ..Default::default()
             },
             GpuVertex {
-                position: Vec4::new(100.0, 0.0, 0.0, 1.0),
-                color: Vec4::new(1.0, 0.0, 1.0, 1.0),
+                position: Vec4::new(100.0, 100.0, 0.0, 1.0),
+                color: Vec4::new(0.0, 1.0, 1.0, 1.0),
                 ..Default::default()
             },
             GpuVertex {
-                position: Vec4::new(100.0, 100.0, 0.0, 1.0),
-                color: Vec4::new(0.0, 1.0, 1.0, 1.0),
+                position: Vec4::new(100.0, 0.0, 0.0, 1.0),
+                color: Vec4::new(1.0, 0.0, 1.0, 1.0),
                 ..Default::default()
             },
         ];
 
         let ent = builder.new_entity().with_meshlet(verts.clone()).build();
 
-        let mut scene = builder.build();
+        let mut scene = builder.build().unwrap();
 
         let (projection, view) = camera::default_ortho2d(100.0, 100.0);
         scene.set_camera(projection, view);
@@ -1122,7 +591,7 @@ mod test {
             .visit(
                 |(scene, device, queue): (Read<Scene>, Read<Device>, Read<Queue>)| {
                     let constants =
-                        scene::read_buffer::<GpuConstants>(&device, &queue, &scene.constants, 0, 1)
+                        crate::read_buffer::<GpuConstants>(&device, &queue, &scene.constants, 0, 1)
                             .unwrap();
                     let vertices = scene.vertices.read(&device, &queue, 0, 3).unwrap();
                     let entities = scene
@@ -1156,13 +625,7 @@ mod test {
         );
 
         let img = r.render_image().unwrap();
-        crate::img_diff::assert_img_eq_save(
-            Save::No,
-            "gpu_scene_sanity",
-            "gpu_scene_sanity.png",
-            img,
-        )
-        .unwrap();
+        crate::img_diff::assert_img_eq("gpu_scene_sanity.png", img);
     }
 
     #[test]
@@ -1181,7 +644,8 @@ mod test {
             .unwrap();
         let img = img.to_rgba8();
         let tex_id = builder.add_image(img);
-        assert_eq!(1, tex_id);
+        assert_eq!(0, tex_id);
+        let material = builder.new_unlit_material().with_texture0(tex_id).build();
 
         let verts = vec![
             GpuVertex {
@@ -1191,22 +655,22 @@ mod test {
                 ..Default::default()
             },
             GpuVertex {
-                position: Vec4::new(100.0, 0.0, 0.0, 0.0),
-                color: Vec4::new(1.0, 0.0, 1.0, 1.0),
-                uv: Vec4::new(1.0, 0.0, 1.0, 0.0),
-                ..Default::default()
-            },
-            GpuVertex {
                 position: Vec4::new(100.0, 100.0, 0.0, 0.0),
                 color: Vec4::new(0.0, 1.0, 1.0, 1.0),
                 uv: Vec4::new(1.0, 1.0, 1.0, 1.0),
+                ..Default::default()
+            },
+            GpuVertex {
+                position: Vec4::new(100.0, 0.0, 0.0, 0.0),
+                color: Vec4::new(1.0, 0.0, 1.0, 1.0),
+                uv: Vec4::new(1.0, 0.0, 1.0, 0.0),
                 ..Default::default()
             },
         ];
         let ent = builder
             .new_entity()
             .with_meshlet(verts.clone())
-            .with_texture_ids(Some(tex_id), None)
+            .with_material(material)
             .with_position(Vec3::new(15.0, 35.0, 0.5))
             .with_scale(Vec3::new(0.5, 0.5, 1.0))
             .build();
@@ -1217,14 +681,10 @@ mod test {
                 id: 0,
                 mesh_first_vertex: 0,
                 mesh_vertex_count: 3,
-                texture0: 1,
-                texture1: 0,
-                lighting: LightingModel::NO_LIGHTING,
-                parent: u32::MAX,
+                material: 0,
                 position: Vec4::new(15.0, 35.0, 0.5, 0.0),
                 scale: Vec4::new(0.5, 0.5, 1.0, 0.0),
-                rotation: Quat::IDENTITY,
-                padding0: 0
+                ..Default::default()
             },
             ent
         );
@@ -1232,14 +692,13 @@ mod test {
         let ent = builder.new_entity().with_meshlet(verts.clone()).build();
         assert_eq!(1, ent.id);
 
-        let scene = builder.build();
+        let scene = builder.build().unwrap();
         assert_eq!(2, scene.entities.len());
 
-        let rects = scene.atlas().images();
-        assert_eq!(2, rects.len());
-        assert_eq!(0, rects[0].0);
-        assert_eq!(1, rects[0].1.w);
-        assert_eq!(1, rects[0].1.h);
+        let textures = scene.atlas().textures().collect::<Vec<_>>();
+        assert_eq!(1, textures.len());
+        assert_eq!(0, textures[0].0);
+        assert_eq!(Vec2::splat(170.0), textures[0].1.size_px);
 
         scene::setup_scene_render_graph(scene, &mut r, true);
 
@@ -1271,25 +730,19 @@ mod test {
             read_buffer(r.get_device(), r.get_queue(), &scene.constants, 0, 1).unwrap()[0];
         assert_eq!(Vec2::splat(256.0), constants.atlas_size);
 
-        let textures = scene
-            .textures
-            .read(r.get_device(), r.get_queue(), 0, 2)
+        let materials = scene
+            .materials
+            .read(r.get_device(), r.get_queue(), 0, 1)
             .unwrap();
         assert_eq!(
-            vec![
-                GpuTexture {
-                    offset_px: Vec2::new(170.0, 0.0,),
-                    size_px: Vec2::new(1.0, 1.0,),
-                },
-                GpuTexture {
-                    offset_px: Vec2::new(0.0, 0.0,),
-                    size_px: Vec2::new(170.0, 170.0,),
-                },
-            ],
-            textures
+            vec![GpuMaterial {
+                texture0: 0,
+                ..Default::default()
+            },],
+            materials
         );
 
-        crate::img_diff::assert_img_eq("gpu_scene_sanity2", "gpu_scene_sanity2.png", img).unwrap();
+        crate::img_diff::assert_img_eq("gpu_scene_sanity2.png", img);
     }
 
     #[test]
@@ -1333,7 +786,6 @@ mod test {
             .with_background_color(Vec3::splat(0.0).extend(1.0));
 
         let mut builder = r.new_scene();
-
         let red = Vec3::X.extend(1.0);
         let green = Vec3::Y.extend(1.0);
         let blue = Vec3::Z.extend(1.0);
@@ -1360,6 +812,8 @@ mod test {
             .with_ambient_color(transparent)
             .build();
 
+        let material = builder.new_phong_material().build();
+
         let _cube = builder
             .new_entity()
             .with_meshlet(
@@ -1371,10 +825,10 @@ mod test {
                         ..Default::default()
                     }),
             )
-            .with_lighting_model(LightingModel::PHONG_LIGHTING)
+            .with_material(material)
             .build();
 
-        let mut scene = builder.build();
+        let mut scene = builder.build().unwrap();
 
         let (projection, _) = camera::default_perspective(100.0, 100.0);
         let view = Mat4::look_at_rh(
@@ -1387,8 +841,7 @@ mod test {
         setup_scene_render_graph(scene, &mut r, true);
 
         let img = r.render_image().unwrap();
-        crate::img_diff::assert_img_eq("scene_cube_directional", "scene_cube_directional.png", img)
-            .unwrap();
+        crate::img_diff::assert_img_eq("scene_cube_directional.png", img);
     }
 
     #[test]
@@ -1445,12 +898,12 @@ mod test {
                     ..Default::default()
                 },
                 GpuVertex {
-                    position: Vec4::new(size, 0.0, 0.0, 0.0),
+                    position: Vec4::new(size, size, 0.0, 0.0),
                     color: Vec4::new(0.0, 1.0, 1.0, 1.0),
                     ..Default::default()
                 },
                 GpuVertex {
-                    position: Vec4::new(size, size, 0.0, 0.0),
+                    position: Vec4::new(size, 0.0, 0.0, 0.0),
                     color: Vec4::new(0.0, 1.0, 1.0, 1.0),
                     ..Default::default()
                 },
@@ -1467,12 +920,12 @@ mod test {
                     ..Default::default()
                 },
                 GpuVertex {
-                    position: Vec4::new(size, 0.0, 0.0, 0.0),
+                    position: Vec4::new(size, size, 0.0, 0.0),
                     color: Vec4::new(1.0, 1.0, 0.0, 1.0),
                     ..Default::default()
                 },
                 GpuVertex {
-                    position: Vec4::new(size, size, 0.0, 0.0),
+                    position: Vec4::new(size, 0.0, 0.0, 0.0),
                     color: Vec4::new(1.0, 1.0, 0.0, 1.0),
                     ..Default::default()
                 },
@@ -1480,7 +933,7 @@ mod test {
             .with_position(Vec3::new(25.0, 25.0, 0.1))
             .with_parent(&cyan_tri)
             .build();
-        let red_tri = builder
+        let _red_tri = builder
             .new_entity()
             .with_meshlet(vec![
                 GpuVertex {
@@ -1489,12 +942,12 @@ mod test {
                     ..Default::default()
                 },
                 GpuVertex {
-                    position: Vec4::new(size, 0.0, 0.0, 0.0),
+                    position: Vec4::new(size, size, 0.0, 0.0),
                     color: Vec4::new(1.0, 0.0, 0.0, 1.0),
                     ..Default::default()
                 },
                 GpuVertex {
-                    position: Vec4::new(size, size, 0.0, 0.0),
+                    position: Vec4::new(size, 0.0, 0.0, 0.0),
                     color: Vec4::new(1.0, 0.0, 0.0, 1.0),
                     ..Default::default()
                 },
@@ -1503,39 +956,38 @@ mod test {
             .with_parent(&yellow_tri)
             .build();
 
-
         let entities = builder.entities().to_vec();
-        //assert_eq!(
-        //    vec![
-        //        GpuEntity {
-        //            position: Vec4::new(25.0, 25.0, 0.0, 0.0),
-        //            scale: Vec4::new(25.0, 25.0, 1.0, 0.0),
-        //            rotation: Quat::IDENTITY,
-        //            id: 0,
-        //            mesh_first_vertex: 0,
-        //            mesh_vertex_count: 3,
-        //            texture0: 0,
-        //            texture1: 0,
-        //            lighting: LightingModel::NO_LIGHTING,
-        //            parent: ID_NONE,
-        //            padding0: 0
-        //        },
-        //        GpuEntity {
-        //            position: Vec4::new(25.0, 25.0, 0.1, 0.0),
-        //            scale: Vec4::new(1.0, 1.0, 1.0, 1.0),
-        //            rotation: Quat::IDENTITY,
-        //            id: 1,
-        //            mesh_first_vertex: 3,
-        //            mesh_vertex_count: 3,
-        //            texture0: 0,
-        //            texture1: 0,
-        //            lighting: LightingModel::NO_LIGHTING,
-        //            parent: 0,
-        //            padding0: 0
-        //        }
-        //    ],
-        //    entities
-        //);
+        assert_eq!(
+            vec![
+                GpuEntity {
+                    id: 0,
+                    position: Vec4::new(25.0, 25.0, 0.0, 0.0),
+                    scale: Vec4::new(25.0, 25.0, 1.0, 0.0),
+                    mesh_first_vertex: 0,
+                    mesh_vertex_count: 3,
+                    ..Default::default()
+                },
+                GpuEntity {
+                    id: 1,
+                    parent: 0,
+                    position: Vec4::new(25.0, 25.0, 0.1, 0.0),
+                    scale: Vec4::new(1.0, 1.0, 1.0, 1.0),
+                    mesh_first_vertex: 3,
+                    mesh_vertex_count: 3,
+                    ..Default::default()
+                },
+                GpuEntity {
+                    id: 2,
+                    parent: 1,
+                    position: Vec4::new(25.0, 25.0, 0.1, 0.0),
+                    scale: Vec4::new(1.0, 1.0, 1.0, 1.0),
+                    mesh_first_vertex: 6,
+                    mesh_vertex_count: 3,
+                    ..Default::default()
+                }
+            ],
+            entities
+        );
         let tfrm = yellow_tri.get_world_transform(builder.entities());
         assert_eq!(
             (
@@ -1546,7 +998,7 @@ mod test {
             tfrm
         );
 
-        let scene = builder.build();
+        let scene = builder.build().unwrap();
         setup_scene_render_graph(scene, &mut r, true);
 
         let gpu_entities = r
@@ -1555,32 +1007,341 @@ mod test {
             .unwrap()
             .unwrap()
             .entities
-            .read(r.get_device(), r.get_queue(), 0, 2)
+            .read(r.get_device(), r.get_queue(), 0, entities.len())
             .unwrap();
-        //assert_eq!(entities, gpu_entities);
+        assert_eq!(entities, gpu_entities);
 
         let img = r.render_image().unwrap();
-        crate::img_diff::assert_img_eq_save(Save::No, "scene_parent_sanity", "scene_parent_sanity.png", img)
-            .unwrap();
+        crate::img_diff::assert_img_eq("scene_parent_sanity.png", img);
     }
 
+    #[cfg(feature = "gltf")]
     #[test]
-    fn sanity_transmute() {
-        let zerof32 = 0f32;
-        let zerof32asu32: u32 = unsafe {std::mem::transmute(zerof32)};
-        assert_eq!(0, zerof32asu32);
-
-        let foure_45 = 4e-45f32;
-        let in_u32: u32 = unsafe { std:: mem::transmute(foure_45)};
-        assert_eq!(3, in_u32);
-
-        let u32max = u32::MAX;
-        let f32nan: f32 = unsafe { std::mem::transmute(u32max) };
-        assert!(f32nan.is_nan());
-
-        let u32max: u32 = unsafe{ std::mem::transmute(f32nan)};
-        assert_eq!(u32::MAX, u32max);
+    // tests importing a gltf file and rendering the first image as a 2d object
+    // ensures we are decoding images correctly
+    fn gltf_images() {
+        let (document, buffers, images) = gltf::import("../../gltf/cheetah_cone.glb").unwrap();
+        let mut r = Renderling::headless(100, 100)
+            .unwrap()
+            .with_background_color(Vec4::splat(1.0));
+        let (device, queue) = r.get_device_and_queue();
+        let (_loader, mut builder) =
+            crate::GltfLoader::load(device, queue, &document, &buffers, &images).unwrap();
+        let (projection, view) = camera::default_ortho2d(100.0, 100.0);
+        builder.set_camera(projection, view);
+        let material_id = builder.new_unlit_material().with_texture0(0).build();
+        let _img = builder
+            .new_entity()
+            .with_meshlet({
+                let vs = vec![
+                    GpuVertex::default()
+                        .with_position([0.0, 0.0, 0.0])
+                        .with_uv0([0.0, 0.0]),
+                    GpuVertex::default()
+                        .with_position([1.0, 0.0, 0.0])
+                        .with_uv0([1.0, 0.0]),
+                    GpuVertex::default()
+                        .with_position([1.0, 1.0, 0.0])
+                        .with_uv0([1.0, 1.0]),
+                    GpuVertex::default()
+                        .with_position([0.0, 1.0, 0.0])
+                        .with_uv0([0.0, 1.0]),
+                ];
+                [0, 3, 2, 0, 2, 1].map(|i| vs[i])
+            })
+            .with_material(material_id)
+            .with_scale(Vec3::new(100.0, 100.0, 1.0))
+            .build();
+        let scene = builder.build().unwrap();
+        crate::setup_scene_render_graph(scene, &mut r, true);
+        let img = r.render_image().unwrap();
+        crate::img_diff::assert_img_eq("gltf_images.png", img);
     }
+
+    #[cfg(feature = "gltf")]
+    #[test]
+    // ensures we can read a minimal gltf file with a simple triangle mesh
+    fn gltf_minimal_mesh() {
+        let (document, buffers, images) =
+            gltf::import("../../gltf/gltfTutorial_003_MinimalGltfFile.gltf").unwrap();
+        let mut r = Renderling::headless(20, 20)
+            .unwrap()
+            .with_background_color(Vec3::splat(0.0).extend(1.0));
+        let (device, queue) = r.get_device_and_queue();
+        let (_loader, mut builder) =
+            crate::GltfLoader::load(device.clone(), queue.clone(), &document, &buffers, &images)
+                .unwrap();
+        let projection = camera::perspective(20.0, 20.0);
+        let view = camera::look_at(Vec3::new(0.5, 0.5, 2.0), Vec3::new(0.5, 0.5, 0.0), Vec3::Y);
+        builder.set_camera(projection, view);
+        let scene = builder.build().unwrap();
+        crate::setup_scene_render_graph(scene, &mut r, true);
+
+        let img = r.render_image().unwrap();
+        crate::img_diff::assert_img_eq("gltf_minimal_mesh.png", img);
+    }
+
+    #[cfg(feature = "gltf")]
+    #[test]
+    // ensures we can
+    // * read simple meshes
+    // * support multiple nodes that reference the same mesh
+    // * support primitives w/ positions and normal attributes
+    // * support transforming nodes (T * R * S)
+    fn gltf_simple_meshes() {
+        _init_logging();
+        let (document, buffers, images) =
+            gltf::import("../../gltf/gltfTutorial_008_SimpleMeshes.gltf").unwrap();
+        let mut r = Renderling::headless(100, 50)
+            .unwrap()
+            .with_background_color(Vec3::splat(0.0).extend(1.0));
+        let (device, queue) = r.get_device_and_queue();
+        let (_loader, mut builder) =
+            crate::GltfLoader::load(device.clone(), queue.clone(), &document, &buffers, &images)
+                .unwrap();
+        let projection = camera::perspective(100.0, 50.0);
+        let view = camera::look_at(Vec3::new(1.0, 0.5, 1.5), Vec3::new(1.0, 0.5, 0.0), Vec3::Y);
+        builder.set_camera(projection, view);
+        let scene = builder.build().unwrap();
+        crate::setup_scene_render_graph(scene, &mut r, true);
+
+        let img = r.render_image().unwrap();
+        crate::img_diff::assert_img_eq("gltf_simple_meshes.png", img);
+    }
+
+    #[cfg(feature = "gltf")]
+    #[test]
+    fn gltf_simple_texture() {
+        let (document, buffers, images) =
+            gltf::import("../../gltf/gltfTutorial_013_SimpleTexture.gltf").unwrap();
+        let size = 100;
+        let mut r = Renderling::headless(size, size)
+            .unwrap()
+            .with_background_color(Vec3::splat(0.0).extend(1.0));
+        let (device, queue) = r.get_device_and_queue();
+        let (_loader, mut builder) =
+            crate::GltfLoader::load(device.clone(), queue.clone(), &document, &buffers, &images)
+                .unwrap();
+
+        let projection = camera::perspective(size as f32, size as f32);
+        let view = camera::look_at(Vec3::new(0.5, 0.5, 1.25), Vec3::new(0.5, 0.5, 0.0), Vec3::Y);
+        builder.set_camera(projection, view);
+
+        // there are no lights in the scene and the material isn't marked as "unlit", so
+        // let's force it to be unlit.
+        let mut material = builder.get_material(0).unwrap();
+        material.lighting_model = LightingModel::NO_LIGHTING;
+        builder.materials[0] = material;
+
+        let scene = builder.build().unwrap();
+        crate::setup_scene_render_graph(scene, &mut r, true);
+
+        let img = r.render_image().unwrap();
+        crate::img_diff::assert_img_eq("gltf_simple_texture.png", img);
+    }
+
+    //#[cfg(feature = "gltf")]
+    //#[test]
+    // fn gltf_load_scene() {
+    //    _init_logging();
+    //    let (mut r, cam) = forward_renderling(177, 100);
+    //    cam.destroy();
+
+    //    let mut loader = r.new_gltf_loader();
+    //    let (document, buffers, images) =
+    // gltf::import("../../gltf/cheetah_cone.glb").unwrap();    loader.load(&mut
+    // r, &document, &buffers, &images).unwrap();    let cam = loader
+    //        .cameras()
+    //        .next()
+    //        .unwrap()
+    //        .variant
+    //        .as_camera()
+    //        .unwrap()
+    //        .clone();
+    //    r.graph.add_resource(ForwardRenderCamera(cam.id));
+
+    //    let img = r.render_image().unwrap();
+    //    crate::img_diff::assert_img_eq_save(
+    //        Save::No,
+    //        "gltf_load_scene",
+    //        "gltf_load_scene.png",
+    //        img,
+    //    )
+    //    .unwrap();
+    //}
+
+    //#[cfg(feature = "gltf")]
+    //#[test]
+    // fn gltf_simple_animation() {
+    //    use moongraph::Read;
+
+    //    use crate::node::FrameTextureView;
+
+    //    _init_logging();
+    //    let (mut r, cam) = forward_renderling(50, 50);
+    //    r.set_background_color(Vec4::splat(1.0));
+
+    //    let (proj, view) = camera::default_ortho2d(50.0, 50.0);
+    //    cam.set_projection(proj);
+    //    cam.set_view(view);
+    //    // render once to get the right background color
+    //    r.render().unwrap();
+
+    //    // after this point we don't want to clear the frame before every
+    // rendering    // because we're going to composite different frames of an
+    // animation into one,    // so we'll replace the clear_frame_and_depth node
+    // with our own node    // that only clears the depth.
+    //    let clear_frame_and_depth_node =
+    // r.graph.remove_node("clear_frame_and_depth").unwrap();
+    //    pub fn clear_only_depth(
+    //        (device, queue, _frame_view, depth, color): (
+    //            Read<Device>,
+    //            Read<Queue>,
+    //            Read<FrameTextureView>,
+    //            Read<DepthTexture>,
+    //            Read<BackgroundColor>,
+    //        ),
+    //    ) -> Result<(), WgpuStateError> {
+    //        let depth_view = &depth.view;
+    //        let [r, g, b, a] = color.0.to_array();
+    //        let color = wgpu::Color {
+    //            r: r.into(),
+    //            g: g.into(),
+    //            b: b.into(),
+    //            a: a.into(),
+    //        };
+    //        crate::linkage::conduct_clear_pass(
+    //            &device,
+    //            &queue,
+    //            Some("clear_only_depth"),
+    //            None,
+    //            Some(&depth_view),
+    //            color,
+    //        );
+    //        Ok(())
+    //    }
+    //    let clear_only_depth_node = clear_only_depth
+    //        .into_node()
+    //        .with_name("clear_only_depth_node")
+    //        .runs_after_barrier(clear_frame_and_depth_node.get_barrier());
+    //    r.graph.add_node(clear_only_depth_node);
+
+    //    let mut loader = r.new_gltf_loader();
+    //    let (document, buffers, images) =
+    //        gltf::import("../../gltf/animated_triangle.gltf").unwrap();
+    //    loader.load(&mut r, &document, &buffers, &images).unwrap();
+
+    //    let tri_node = loader.get_node(0).unwrap();
+    //    let tri = tri_node.variant.as_object().unwrap();
+    //    tri.set_scale(Vec3::splat(25.0));
+    //    tri.set_position(Vec3::new(25.0, 25.0, 0.0));
+
+    //    let img = r.render_image().unwrap();
+    //    crate::img_diff::assert_img_eq_save(
+    //        Save::No,
+    //        "gltf_simple_animation",
+    //        "gltf_simple_animation.png",
+    //        img,
+    //    )
+    //    .unwrap();
+
+    //    loader.load_animations(&document, &buffers).unwrap();
+
+    //    assert_eq!(1, loader.animations().count());
+
+    //    let anime = loader.get_animation(0).unwrap();
+    //    println!("anime: {:?}", anime);
+    //    assert_eq!(1.0, anime.tweens[0].length_in_seconds());
+
+    //    let num = 8;
+    //    for i in 0..num {
+    //        let t = i as f32 / num as f32;
+    //        for tween in anime.tweens.iter() {
+    //            let property = tween.interpolate(t).unwrap().unwrap();
+    //            let node = loader.get_node(tween.target_node_index).unwrap();
+    //            node.set_tween_property(property);
+    //        }
+    //        r.render().unwrap();
+    //    }
+
+    //    let img = r.render_image().unwrap();
+    //    crate::img_diff::assert_img_eq_save(
+    //        Save::No,
+    //        "gltf_simple_animation_after",
+    //        "gltf_simple_animation_after.png",
+    //        img,
+    //    )
+    //    .unwrap();
+    //}
+
+    //#[cfg(feature = "gltf")]
+    //#[test]
+    // fn gltf_box_animated() {
+    //    _init_logging();
+
+    //    let (mut r, cam) = forward_renderling_with(
+    //        100,
+    //        100,
+    //        Some(wgpu::PrimitiveState {
+    //            topology: wgpu::PrimitiveTopology::TriangleList,
+    //            strip_index_format: None,
+    //            front_face: wgpu::FrontFace::Ccw,
+    //            cull_mode: Some(wgpu::Face::Back),
+    //            polygon_mode: wgpu::PolygonMode::Fill,
+    //            conservative: false,
+    //            unclipped_depth: false,
+    //        }),
+    //    );
+    //    r.set_background_color(Vec4::splat(1.0));
+    //    cam.set_view(Mat4::look_at_rh(
+    //        Vec3::new(0.0, 2.0, 2.0),
+    //        Vec3::ZERO,
+    //        Vec3::Y,
+    //    ));
+
+    //    let mut loader = r.new_gltf_loader();
+    //    let (document, buffers, images) =
+    // gltf::import("../../gltf/box_animated.glb").unwrap();    loader.load(&mut
+    // r, &document, &buffers, &images).unwrap();
+
+    //    let img = r.render_image().unwrap();
+    //    crate::img_diff::assert_img_eq_save(
+    //        Save::No,
+    //        "gltf_box_animated",
+    //        "gltf_box_animated.png",
+    //        img,
+    //    )
+    //    .unwrap();
+
+    //    loader.load_animations(&document, &buffers).unwrap();
+    //    assert_eq!(1, loader.animations().count());
+
+    //    let anime = loader.get_animation(0).unwrap();
+    //    println!("anime: {:?}", anime);
+    //    assert_eq!(3.70833, anime.length_in_seconds());
+    //    assert_eq!(2, anime.tweens[0].target_node_index);
+    //    assert_eq!(0, anime.tweens[1].target_node_index);
+    //}
+
+    // fn big_scene_cube_builder() -> MeshBuilder<UiVertex> {
+    //    let vertices = crate::math::unit_points();
+    //    let indices: [([u16; 3], [u16; 3], Vec4); 6] = [
+    //        ([0, 1, 2], [0, 2, 3], Vec4::Y),     // top
+    //        ([0, 3, 4], [4, 3, 5], Vec4::Z),     // front
+    //        ([3, 2, 6], [3, 6, 5], Vec4::X),     // right
+    //        ([1, 0, 7], [7, 0, 4], Vec4::NEG_X), // left
+    //        ([4, 5, 6], [4, 6, 7], Vec4::NEG_Y), // bottom
+    //        ([2, 1, 7], [2, 7, 6], Vec4::NEG_Z), // back
+    //    ];
+    //    MeshBuilder::default()
+    //        .with_vertices(indices.flat_map(|ui_vert| GpuVertex {
+    //            position: Vec3::from_array(ui_vert.position).extend(0.0),
+    //            color: Vec4::from_array(ui_vert.color),
+    //            uv: Vec4::ZERO,
+    //            norm: Vec4::ZERO,
+    //        }))
+    //        .with_indices(indices)
+    //}
 
     ////#[cfg(feature = "gltf")]
     ////#[test]

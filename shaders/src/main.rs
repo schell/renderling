@@ -17,7 +17,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let CompileResult {
         entry_points,
         module,
-    } = SpirvBuilder::new("shader-crate", "spirv-unknown-spv1.5")
+    } = SpirvBuilder::new("shader-crate", "spirv-unknown-vulkan1.2")
         .print_metadata(MetadataPrintout::None)
         .multimodule(true)
         .build()?;

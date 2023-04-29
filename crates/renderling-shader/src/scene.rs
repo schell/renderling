@@ -5,19 +5,14 @@
 //!
 //! To read more about the technique, check out these resources:
 //! * https://stackoverflow.com/questions/59686151/what-is-gpu-driven-rendering
-use glam::{Mat3, Mat4, Quat, UVec2, UVec3, Vec2, Vec3, Vec4, Vec4Swizzles};
+use bitflags::bitflags;
+use glam::{Mat3, Mat4, Quat, UVec3, Vec2, Vec3, Vec4, Vec4Swizzles};
 use spirv_std::{image::Image2d, Sampler};
 
-#[cfg(target_arch = "spirv")]
-use spirv_std::num_traits::Float;
-
-use crate::math::Vec3ColorSwizzles;
+use crate::{math::Vec3ColorSwizzles, pbr, phong};
 
 /// A vertex in a mesh.
-#[cfg_attr(
-    not(target_arch = "spirv"),
-    derive(Debug)
-)]
+#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[repr(C)]
 #[derive(Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct GpuVertex {
@@ -38,22 +33,40 @@ impl Default for GpuVertex {
     }
 }
 
-/// Calculate attenuation
-///
-/// attenuation.x: constant
-/// attenuation.y: linear
-/// attenuation.z: quadratic
-pub fn attenuate(attenuation: Vec3, distance: f32) -> f32 {
-    let level = attenuation.x + attenuation.y * distance + attenuation.z * (distance * distance);
-    if level == 0.0 {
-        // no attenuation
-        1.0
-    } else {
-        1.0 / level
+impl GpuVertex {
+    pub fn with_position(mut self, p: impl Into<Vec3>) -> Self {
+        self.position = p.into().extend(0.0);
+        self
+    }
+
+    pub fn with_color(mut self, c: impl Into<Vec4>) -> Self {
+        self.color = c.into();
+        self
+    }
+
+    pub fn with_uv0(mut self, uv: impl Into<Vec2>) -> Self {
+        let uv = uv.into();
+        self.uv.x = uv.x;
+        self.uv.y = uv.y;
+        self
+    }
+
+    pub fn with_uv1(mut self, uv: impl Into<Vec2>) -> Self {
+        let uv = uv.into();
+        self.uv.z = uv.x;
+        self.uv.w = uv.y;
+        self
+    }
+
+    pub fn with_normal(mut self, n: impl Into<Vec3>) -> Self {
+        self.normal = n.into().extend(0.0);
+        self
     }
 }
 
+/// A light capable of representing a directional, point or spotlight.
 #[repr(C)]
+#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[derive(Copy, Clone, Default, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct GpuLight {
     pub position: Vec4,
@@ -69,128 +82,16 @@ pub struct GpuLight {
 }
 
 impl GpuLight {
-    const END_OF_LIGHTS: u32 = 0;
+    pub const END_OF_LIGHTS: u32 = 0;
     pub const POINT_LIGHT: u32 = 1;
     pub const SPOT_LIGHT: u32 = 2;
     pub const DIRECTIONAL_LIGHT: u32 = 3;
-
-    /// Calculate a point light's color contribution to a fragment.
-    pub fn color_phong_point(
-        &self,
-        vertex_pos: Vec3,
-        view: Mat4,
-        normal: Vec3,
-        camera_to_frag_dir: Vec3,
-        diffuse_color: Vec4,
-        specular_color: Vec4,
-        shininess: f32,
-    ) -> Vec3 {
-        let light_pos: Vec3 = (view * self.position.xyz().extend(1.0)).xyz();
-        let vertex_to_light = light_pos - vertex_pos;
-        let vertex_to_light_distance = vertex_to_light.length();
-
-        let light_dir: Vec3 = vertex_to_light.normalize();
-        // diffuse shading
-        let diff: f32 = normal.dot(light_dir).max(0.0);
-        // specular shading
-        let halfway_dir: Vec3 = (light_dir + camera_to_frag_dir).normalize();
-        let spec: f32 = normal.dot(halfway_dir).max(0.0).powf(shininess);
-        // attenuation
-        let distance: f32 = vertex_to_light_distance;
-        let attenuation: f32 = attenuate(self.attenuation.xyz(), distance);
-        // combine results
-        let mut ambient: Vec3 = self.ambient_color.rgb() * diffuse_color.rgb();
-        let mut diffuse: Vec3 = self.diffuse_color.rgb() * diff * diffuse_color.rgb();
-        let mut specular: Vec3 = self.specular_color.rgb() * spec * specular_color.rgb();
-        ambient *= attenuation;
-        diffuse *= attenuation;
-        specular *= attenuation;
-
-        ambient + diffuse + specular
-    }
-
-    // Calculate a spotlight's color contribution to a fragment.
-    pub fn color_phong_spot(
-        &self,
-        vertex_pos: Vec3,
-        view: Mat4,
-        normal: Vec3,
-        camera_to_frag_dir: Vec3,
-        diffuse_color: Vec4,
-        specular_color: Vec4,
-        shininess: f32,
-    ) -> Vec3 {
-        if self.direction.xyz() == Vec3::ZERO {
-            return Vec3::ZERO;
-        }
-        let light_pos: Vec3 = (view * self.position.xyz().extend(1.0)).xyz();
-        let light_dir: Vec3 = (light_pos - vertex_pos).normalize();
-        // diffuse shading
-        let diff: f32 = normal.dot(light_dir).max(0.0);
-        // specular shading
-        let halfway_dir: Vec3 = (light_dir + camera_to_frag_dir).normalize();
-        let spec: f32 = normal.dot(halfway_dir).max(0.0).powf(shininess);
-        // attenuation
-        let distance: f32 = (light_pos - vertex_pos).length();
-        let attenuation: f32 = attenuate(self.attenuation.xyz(), distance);
-        // spotlight intensity
-        let direction: Vec3 = (-(view * self.direction.xyz().extend(0.0)).xyz()).normalize();
-        let theta: f32 = light_dir.dot(direction);
-        let epsilon: f32 = self.inner_cutoff - self.outer_cutoff;
-        let intensity: f32 = ((theta - self.outer_cutoff) / epsilon).clamp(0.0, 1.0);
-        // combine results
-        let mut ambient: Vec3 = self.ambient_color.rgb() * diffuse_color.rgb();
-        let mut diffuse: Vec3 = self.diffuse_color.rgb() * diff * diffuse_color.rgb();
-        let mut specular: Vec3 = self.specular_color.rgb() * spec * specular_color.rgb();
-        ambient *= attenuation * intensity;
-        diffuse *= attenuation * intensity;
-        specular *= attenuation * intensity;
-
-        ambient + diffuse + specular
-    }
-
-    // Calculate a directional light's color contribution to a fragment.
-    pub fn color_phong_directional(
-        &self,
-        view: Mat4,
-        normal: Vec3,
-        camera_to_frag_dir: Vec3,
-        diffuse_color: Vec4,
-        specular_color: Vec4,
-        shininess: f32,
-    ) -> Vec3 {
-        if self.direction.xyz() == Vec3::ZERO {
-            return Vec3::ZERO;
-        }
-        let light_dir: Vec3 = (-(view * self.direction.xyz().extend(0.0)).xyz()).normalize();
-        // diffuse shading
-        let diff: f32 = normal.dot(light_dir).max(0.0);
-        // specular shading
-        let halfway_dir: Vec3 = (light_dir + camera_to_frag_dir).normalize();
-        let spec: f32 = normal.dot(halfway_dir).max(0.0).powf(shininess);
-        // combine results
-        let ambient: Vec3 = self.ambient_color.rgb() * diffuse_color.rgb();
-        let diffuse: Vec3 = self.diffuse_color.rgb() * diff * diffuse_color.rgb();
-        let specular: Vec3 = self.specular_color.rgb() * spec * specular_color.rgb();
-        ambient + diffuse + specular
-    }
-}
-
-/// Type has no inhabitants.
-pub struct LightingModel;
-
-impl LightingModel {
-    pub const NO_LIGHTING: u32 = 0;
-    pub const PHONG_LIGHTING: u32 = 1;
 }
 
 /// A GPU texture.
-#[cfg_attr(
-    not(target_arch = "spirv"),
-    derive(Debug)
-)]
+#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[repr(C)]
-#[derive(Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(Clone, Copy, Default, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct GpuTexture {
     // top left offset of texture in the atlas
     pub offset_px: Vec2,
@@ -217,13 +118,81 @@ impl GpuTexture {
 }
 
 /// `u32` representing "null" or "none".
-pub const ID_NONE: u32 = 1024;
+pub const ID_NONE: u32 = u32::MAX;
+
+bitflags! {
+    pub struct GpuMaterialConfig: u32 {
+        /// Whether texture0 is used
+        const TEXTURE0 = 1;
+        /// Whether texture1 is used
+        const TEXTURE1 = 1 << 1;
+        /// Whether texture2 is used
+        const TEXTURE2 = 1 << 2;
+    }
+}
+
+impl GpuMaterialConfig {
+    pub fn texture0_used(&self) -> bool {
+        self.contains(Self::TEXTURE0)
+    }
+
+    pub fn texture1_used(&self) -> bool {
+        self.contains(Self::TEXTURE1)
+    }
+
+    pub fn texture2_used(&self) -> bool {
+        self.contains(Self::TEXTURE2)
+    }
+}
+
+/// Determines the lighting to use in an ubershader.
+#[repr(transparent)]
+#[derive(
+    Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Debug, bytemuck::Pod, bytemuck::Zeroable,
+)]
+pub struct LightingModel(u32);
+
+impl LightingModel {
+    pub const NO_LIGHTING: Self = LightingModel(0);
+    pub const TEXT_LIGHTING: Self = LightingModel(1);
+    pub const PHONG_LIGHTING: Self = LightingModel(2);
+    pub const PBR_LIGHTING: Self = LightingModel(3);
+}
+
+/// Represents a material on the GPU.
+///
+/// `GpuMaterial` is capable of representing many material types.
+/// Use the appropriate builder for your material type from
+/// [`SceneBuilder`](crate::SceneBuilder).
+#[repr(C)]
+#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
+#[derive(Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct GpuMaterial {
+    pub factor0: Vec4,
+    pub factor1: Vec4,
+
+    pub texture0: u32,
+    pub texture1: u32,
+    pub texture2: u32,
+
+    pub lighting_model: LightingModel,
+}
+
+impl Default for GpuMaterial {
+    fn default() -> Self {
+        Self {
+            factor0: Default::default(),
+            factor1: Default::default(),
+            texture0: ID_NONE,
+            texture1: ID_NONE,
+            texture2: ID_NONE,
+            lighting_model: LightingModel::NO_LIGHTING,
+        }
+    }
+}
 
 /// A bundle of GPU components.
-#[cfg_attr(
-    not(target_arch = "spirv"),
-    derive(Debug)
-)]
+#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[repr(C)]
 #[derive(Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct GpuEntity {
@@ -233,15 +202,13 @@ pub struct GpuEntity {
     pub mesh_first_vertex: u32,
     // The number of vertices in this entity's mesh.
     pub mesh_vertex_count: u32,
-    // The id of this entity's first texture in the atlas.
-    pub texture0: u32,
-    // The id of this entity's second texture in the atlas.
-    pub texture1: u32,
-    // The lighting model used for shading this object.
-    pub lighting: u32,
+    // The index/id of this entity's material in the material buffer.
+    pub material: u32,
     // The id of this entity's parent, if it exists. `ID_NONE` means "no parent".
     pub parent: u32,
-    pub padding0: u32,
+    // Whether this entity is visible. `0` is "not visible", any other value is "visible".
+    pub visible: u32,
+    pub padding0: [u32; 2],
     // The local translation of this entity
     pub position: Vec4,
     // The local scale of this entity
@@ -256,13 +223,12 @@ impl Default for GpuEntity {
             id: ID_NONE,
             mesh_first_vertex: 0,
             mesh_vertex_count: 0,
+            material: ID_NONE,
             position: Vec4::ZERO,
             scale: Vec4::ONE,
             rotation: Quat::IDENTITY,
-            padding0: 0,
-            texture0: 0,
-            texture1: 0,
-            lighting: LightingModel::NO_LIGHTING,
+            visible: 1,
+            padding0: [0, 0],
             parent: ID_NONE,
         }
     }
@@ -295,10 +261,7 @@ impl GpuEntity {
 }
 
 /// Unforms/constants for a scene's worth of rendering.
-#[cfg_attr(
-    not(target_arch = "spirv"),
-    derive(Debug)
-)]
+#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[repr(C)]
 #[derive(Default, Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct GpuConstants {
@@ -327,14 +290,16 @@ pub fn main_vertex_scene(
     constants: &GpuConstants,
     vertices: &[GpuVertex],
     entities: &[GpuEntity],
+    materials: &[GpuMaterial],
     textures: &[GpuTexture],
 
-    out_lighting_model: &mut u32,
+    out_material_config: &mut u32,
+    out_material_lighting_model: &mut LightingModel,
     out_color: &mut Vec4,
-    out_tex_ids: &mut UVec2,
     out_uv0: &mut Vec2,
     out_uv1: &mut Vec2,
     out_norm: &mut Vec3,
+    // position of the vertex/fragment in world space
     out_pos: &mut Vec3,
 
     gl_pos: &mut Vec4,
@@ -344,22 +309,38 @@ pub fn main_vertex_scene(
     let (position, rotation, scale) = entity.get_world_transform(entities);
     let model_matrix =
         Mat4::from_translation(position) * Mat4::from_quat(rotation) * Mat4::from_scale(scale);
-    let texture0 = textures[entity.texture0 as usize];
-    let texture1 = textures[entity.texture1 as usize];
+    let material = if entity.material == ID_NONE {
+        GpuMaterial::default()
+    } else {
+        materials[entity.material as usize]
+    };
 
-    *out_lighting_model = entity.lighting;
+    let mut material_config = GpuMaterialConfig::empty();
     *out_color = vertex.color;
-    *out_tex_ids = UVec2::new(entity.texture0, entity.texture1);
-    *out_uv0 = texture0.uv(vertex.uv.xy(), constants.atlas_size);
-    *out_uv1 = texture1.uv(vertex.uv.zw(), constants.atlas_size);
+    *out_material_lighting_model = material.lighting_model;
+    *out_uv0 = if material.texture0 == ID_NONE {
+        Vec2::ZERO
+    } else {
+        material_config |= GpuMaterialConfig::TEXTURE0;
+        let texture0 = textures[material.texture0 as usize];
+        texture0.uv(vertex.uv.xy(), constants.atlas_size)
+    };
+    *out_uv1 = if material.texture1 == ID_NONE {
+        Vec2::ZERO
+    } else {
+        material_config |= GpuMaterialConfig::TEXTURE1;
+        let texture1 = textures[material.texture1 as usize];
+        texture1.uv(vertex.uv.zw(), constants.atlas_size)
+    };
+    *out_material_config = material_config.bits();
     *out_norm = (Mat3::from_mat4(constants.camera_view)
         * Mat3::from_mat4(model_matrix)
         * (vertex.normal.xyz() / (scale * scale)))
         .normalize();
 
-    let view_pos = constants.camera_view * model_matrix * vertex.position.xyz().extend(1.0);
+    let view_pos = model_matrix * vertex.position.xyz().extend(1.0);
     *out_pos = view_pos.xyz();
-    *gl_pos = constants.camera_projection * view_pos;
+    *gl_pos = constants.camera_projection * constants.camera_view * view_pos;
 }
 
 /// Scene fragment shader.
@@ -370,9 +351,9 @@ pub fn main_fragment_scene(
     constants: &GpuConstants,
     lights: &[GpuLight],
 
-    in_lighting_model: u32,
+    in_material_config: u32,
+    in_material_lighting_model: LightingModel,
     in_color: Vec4,
-    in_tex_ids: UVec2,
     in_uv0: Vec2,
     in_uv1: Vec2,
     in_norm: Vec3,
@@ -380,20 +361,39 @@ pub fn main_fragment_scene(
 
     output: &mut Vec4,
 ) {
+    let config = GpuMaterialConfig::from_bits_retain(in_material_config);
+
     let mut uv0_color: Vec4 = atlas.sample(*sampler, in_uv0);
-    if in_tex_ids.x == 0 {
+    if !config.texture0_used() {
         uv0_color = Vec4::splat(1.0);
     }
+
     let mut uv1_color: Vec4 = atlas.sample(*sampler, in_uv1);
-    if in_tex_ids.y == 0 {
+    if !config.texture1_used() {
         uv1_color = Vec4::splat(1.0);
     }
 
-    *output = match in_lighting_model {
+    *output = match in_material_lighting_model {
+        LightingModel::PBR_LIGHTING => {
+            let metalness = 0.5;
+            let roughness = 0.5;
+            let ao = 1.0;
+            let albedo = uv0_color * in_color;
+            pbr::shade_fragment(
+                &constants.camera_view,
+                in_norm,
+                in_pos,
+                albedo.rgb(),
+                metalness,
+                roughness,
+                ao,
+                lights,
+            )
+        }
         LightingModel::PHONG_LIGHTING => {
             let diffuse_color: Vec4 = uv0_color * in_color;
             let specular_color: Vec4 = uv1_color * in_color;
-            lighting_phong(
+            phong::lighting_phong(
                 &constants.camera_view,
                 lights,
                 diffuse_color,
@@ -402,73 +402,9 @@ pub fn main_fragment_scene(
                 in_norm,
             )
         }
-        LightingModel::NO_LIGHTING | _ => in_color * uv0_color * uv1_color,
+        LightingModel::TEXT_LIGHTING => in_color * Vec3::splat(1.0).extend(uv0_color.x),
+        _unlit => in_color * uv0_color * uv1_color,
     };
-}
-
-fn lighting_phong(
-    camera_view: &Mat4,
-    lights: &[GpuLight],
-    diffuse_color: Vec4,
-    specular_color: Vec4,
-    in_pos: Vec3,
-    in_norm: Vec3,
-) -> Vec4 {
-    if lights.is_empty() || lights[0].light_type == GpuLight::END_OF_LIGHTS {
-        // the scene is unlit, so we should provide some default
-        let desaturated_norm = in_norm.abs().dot(Vec3::new(0.2126, 0.7152, 0.0722));
-        return (diffuse_color.rgb() * desaturated_norm).extend(1.0);
-    }
-
-    let norm: Vec3 = in_norm.normalize_or_zero();
-    let camera_to_frag_dir: Vec3 = (-in_pos).normalize_or_zero();
-    let mut color: Vec3 = Vec3::ZERO;
-    for i in 0..lights.len() {
-        let light = lights[i];
-        match light.light_type {
-            GpuLight::END_OF_LIGHTS => {
-                break;
-            }
-            GpuLight::DIRECTIONAL_LIGHT => {
-                color += light.color_phong_directional(
-                    *camera_view,
-                    norm,
-                    camera_to_frag_dir,
-                    diffuse_color,
-                    specular_color,
-                    // change this to material shininess when we have materials
-                    16.0,
-                );
-            }
-            GpuLight::POINT_LIGHT => {
-                color += light.color_phong_point(
-                    in_pos,
-                    *camera_view,
-                    norm,
-                    camera_to_frag_dir,
-                    diffuse_color,
-                    specular_color,
-                    // change this to material shininess when we have materials
-                    16.0,
-                );
-            }
-            GpuLight::SPOT_LIGHT => {
-                color += light.color_phong_spot(
-                    in_pos,
-                    *camera_view,
-                    norm,
-                    camera_to_frag_dir,
-                    diffuse_color,
-                    specular_color,
-                    // change this to material shininess when we have materials
-                    16.0,
-                );
-            }
-            _ => {}
-        }
-    }
-
-    color.extend(1.0)
 }
 
 /// Compute the draw calls for this frame.
@@ -490,8 +426,7 @@ pub fn compute_cull_entities(entities: &[GpuEntity], draws: &mut [DrawIndirect],
         base_instance: i as u32,
     };
     let entity = &entities[i];
-    // at first we'll just draw everything into the draw indirect buffer
-    let is_visible = true;
+    let is_visible = entity.visible != 0;
     if entity.is_alive() && is_visible {
         //// once naga supports atomics we can use this to compact the array
         // let index = unsafe {

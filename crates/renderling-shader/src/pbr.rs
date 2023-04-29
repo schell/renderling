@@ -1,199 +1,139 @@
 //! Physically based renderer shader code.
 //!
-//! This is actually just blinn-phong lighting, but is a placeholder for PBR.
-use glam::{mat3, mat4, vec4, Mat3, Mat4, Vec2, Vec3, Vec3Swizzles, Vec4, Vec4Swizzles, vec3};
-use spirv_std::{image::Image2d, Sampler};
+//! Thanks to https://learnopengl.com/PBR/Theory
+#[cfg(target_arch = "spirv")]
+use spirv_std::num_traits::Float;
 
-use crate::{CameraRaw, light::*, math::Vec3ColorSwizzles};
+use glam::{Mat4, Vec3, Vec4, Vec4Swizzles};
 
-pub fn main_vertex(
-    camera: &CameraRaw,
-    in_pos: Vec3,
-    in_uv: Vec2,
-    in_norm: Vec3,
-    in_model_matrix_0: Vec4,
-    in_model_matrix_1: Vec4,
-    in_model_matrix_2: Vec4,
-    in_model_matrix_3: Vec4,
-    in_norm_matrix_0: Vec3,
-    in_norm_matrix_1: Vec3,
-    in_norm_matrix_2: Vec3,
-    out_pos: &mut Vec3,
-    out_uv: &mut Vec2,
-    out_norm: &mut Vec3,
-    gl_pos: &mut Vec4,
-) {
-    let model: Mat4 = mat4(
-        in_model_matrix_0,
-        in_model_matrix_1,
-        in_model_matrix_2,
-        in_model_matrix_3,
-    );
-    let norm: Mat3 = mat3(
-        in_norm_matrix_0.xyz(),
-        in_norm_matrix_1.xyz(),
-        in_norm_matrix_2.xyz(),
-    );
-    let view: Mat3 = mat3(
-        camera.view.x_axis.xyz(),
-        camera.view.y_axis.xyz(),
-        camera.view.z_axis.xyz(),
-    );
-    let view_pos: Vec4 = camera.view * model * vec4(in_pos.x, in_pos.y, in_pos.z, 1.0);
+use crate::{scene::GpuLight, math::Vec3ColorSwizzles};
 
-    *out_pos = view_pos.xyz();
-    *out_uv = in_uv;
-    *out_norm = view * norm * in_norm;
+/// Trowbridge-Reitz GGX normal distribution function (NDF).
+///
+/// The normal distribution function D statistically approximates the relative
+/// surface area of microfacets exactly aligned to the (halfway) vector h.
+fn normal_distribution_ggx(n: Vec3, h: Vec3, roughness: f32) -> f32 {
+    let a = roughness * roughness;
+    let a2 = a * a;
+    let ndot_h = n.dot(h).max(0.0);
+    let ndot_h2 = ndot_h * ndot_h;
 
-    *gl_pos = camera.projection * view_pos;
+    let num = a2;
+    let denom = (ndot_h2 * (a2 - 1.0) + 1.0).powf(2.0) * core::f32::consts::PI;
+
+    num / denom
 }
 
-pub fn main_fragment(
-    camera: &CameraRaw,
-    diffuse_texture: &Image2d,
-    diffuse_sampler: &Sampler,
-    specular_texture: &Image2d,
-    specular_sampler: &Sampler,
-    material_shininess: &f32,
-    point_lights: &PointLights,
-    spot_lights: &SpotLights,
-    directional_lights: &DirectionalLights,
-    in_pos: Vec3,
-    in_uv: Vec2,
-    in_norm: Vec3,
-    frag_color: &mut Vec4,
-) {
-    let diffuse_color: Vec4 = diffuse_texture.sample(*diffuse_sampler, in_uv);
-    let specular_color: Vec4 = specular_texture.sample(*specular_sampler, in_uv);
+fn geometry_schlick_ggx(ndot_v: f32, roughness: f32) -> f32 {
+    let r = roughness + 1.0;
+    let k = (r * r) / 8.0;
+    let num = ndot_v;
+    let denom = ndot_v * (1.0 - k) + k;
 
-    if directional_lights.length == 0 && point_lights.length == 0 && spot_lights.length == 0 {
+    num / denom
+}
+
+/// The geometry function statistically approximates the relative surface area
+/// where its micro surface-details overshadow each other, causing light rays to
+/// be occluded.
+fn geometry_smith(n: Vec3, v: Vec3, l: Vec3, roughness: f32) -> f32 {
+    let ndot_v = n.dot(v).max(0.0);
+    let ndot_l = n.dot(l).max(0.0);
+    let ggx1 = geometry_schlick_ggx(ndot_v, roughness);
+    let ggx2 = geometry_schlick_ggx(ndot_l, roughness);
+
+    ggx1 * ggx2
+}
+
+/// Fresnel-Schlick approximation function.
+///
+/// The Fresnel equation describes the ratio of light that gets reflected over
+/// the light that gets refracted, which varies over the angle we're looking at
+/// a surface. The moment light hits a surface, based on the surface-to-view
+/// angle, the Fresnel equation tells us the percentage of light that gets
+/// reflected. From this ratio of reflection and the energy conservation
+/// principle we can directly obtain the refracted portion of light.
+fn fresnel_schlick(
+    // dot product result between the surface's normal n and the halfway h (or view v) direction.
+    cos_theta: f32,
+    // surface reflection at zero incidence (how much the surface reflects if looking directly at
+    // the surface)
+    f0: Vec3,
+) -> Vec3 {
+    f0 + (1.0 - f0) * (1.0 - cos_theta).clamp(0.0, 1.0).powf(5.0)
+}
+
+pub fn shade_fragment(
+    // world transform of the camera
+    camera_view: &Mat4,
+    // normal of the fragment
+    in_norm: Vec3,
+    // position of the fragment (world space)
+    in_pos: Vec3,
+    // base color of the fragment
+    albedo: Vec3,
+    metalness: f32,
+    roughness: f32,
+    ao: f32,
+
+    lights: &[GpuLight],
+) -> Vec4 {
+    if lights.is_empty() || lights[0].light_type == GpuLight::END_OF_LIGHTS {
         // the scene is unlit, so we should provide some default
-        let desaturated_norm = in_norm.abs().dot(vec3(0.2126, 0.7152, 0.0722));
-        *frag_color = (diffuse_color.rgb() * desaturated_norm).extend(1.0);
-        return;
+        let desaturated_norm = in_norm.abs().dot(Vec3::new(0.2126, 0.7152, 0.0722));
+        return (albedo * desaturated_norm).extend(1.0);
     }
 
-    let norm: Vec3 = in_norm.normalize_or_zero();
-    let camera_to_frag_dir: Vec3 = (-in_pos).normalize_or_zero();
+    let camera_pos = camera_view.transform_point3(Vec3::ZERO);
+    let n = in_norm.normalize_or_zero();
+    let v = (camera_pos - in_pos).normalize_or_zero();
 
-    let mut color: Vec3 = Vec3::ZERO;
+    let f0 = Vec3::splat(0.4).lerp(albedo, metalness);
 
-    for i in 0..directional_lights.length as usize {
-        color += directional_lights.lights[i].color(
-            camera.view,
-            norm,
-            camera_to_frag_dir,
-            diffuse_color,
-            specular_color,
-            *material_shininess,
-        );
+    // reflectance
+    let mut lo = Vec3::ZERO;
+    for i in 0..lights.len() {
+        // calculate per-light radiance
+        let light = lights[i];
+        match light.light_type {
+            GpuLight::END_OF_LIGHTS => {
+                break;
+            }
+            GpuLight::POINT_LIGHT => {
+                let frag_to_light = light.position.xyz() - in_pos;
+                let l = frag_to_light.normalize_or_zero();
+                let h = (v + l).normalize_or_zero();
+                let distance = frag_to_light.length();
+                if distance == 0.0 {
+                    continue;
+                }
+                let attenuation = 1.0 / (distance * distance);
+                let radiance = light.diffuse_color.rgb() * attenuation;
+
+                // cook-torrance brdf
+                let ndf: f32 = normal_distribution_ggx(n, h, roughness);
+                let g: f32 = geometry_smith(n, v, l, roughness);
+                let f: Vec3 = fresnel_schlick(h.dot(v).max(0.0), f0);
+
+                let k_s = f;
+                let k_d = (Vec3::splat(1.0) - k_s) * (1.0 - metalness);
+
+                let numerator: Vec3 = ndf * g * f;
+                let denominator: f32 = 4.0 * n.dot(v).max(0.0) * n.dot(l).max(0.0) + 0.0001;
+                let specular: Vec3 = numerator / denominator;
+
+                // add to outgoing radiance Lo
+                let ndot_l = n.dot(l).max(0.0);
+                lo += (k_d * albedo / core::f32::consts::PI + specular) * radiance * ndot_l;
+            }
+            _ => {}
+        }
     }
 
-    for i in 0..point_lights.length as usize {
-        color += point_lights.lights[i].color(
-            in_pos,
-            camera.view,
-            norm,
-            camera_to_frag_dir,
-            diffuse_color,
-            specular_color,
-            *material_shininess,
-        );
-    }
+    let ambient = Vec3::splat(0.03) * albedo * ao;
+    let color = ambient + lo;
+    let color = color / (color + Vec3::ONE);
+    let color = color.powf(1.0 / 2.2);
 
-    for i in 0..spot_lights.length as usize {
-        color += spot_lights.lights[i].color(
-            in_pos,
-            camera.view,
-            norm,
-            camera_to_frag_dir,
-            diffuse_color,
-            specular_color,
-            *material_shininess,
-        );
-    }
-
-    *frag_color = color.extend(1.0);
-}
-
-#[cfg(test)]
-mod test {
-    use super::*;
-    use glam::Vec3;
-
-    #[test]
-    fn vec3_default_sanity() {
-        assert_eq!(Vec3::ZERO, Vec3::default());
-    }
-
-    #[test]
-    /// Tests that a light's `color` function returns positive elements.
-    ///
-    /// Important because lights never "remove" light from the scene.
-    fn light_color_always_positive() {
-        let vertex_pos = Vec3::new(0.0, 0.5, 0.0);
-        let view = Mat4::look_at_rh(Vec3::new(1.8, 1.8, 1.8), Vec3::ZERO, Vec3::Y);
-        let normal = Vec3::Y;
-        let camera_to_frag_dir = (-vertex_pos).normalize();
-        let diffuse_color = Vec4::new(1.0, 0.0, 0.0, 1.0);
-        let specular_color = Vec4::new(1.0, 0.0, 0.0, 1.0);
-        let shininess = 16.0;
-
-        let point = PointLightRaw::default();
-        let point_color = point.color(
-            vertex_pos,
-            view,
-            normal,
-            camera_to_frag_dir,
-            diffuse_color,
-            specular_color,
-            shininess,
-        );
-        assert!(point_color.x >= 0.0, "'{point_color:?}' x is negative");
-        assert!(point_color.y >= 0.0, "'{point_color:?}' y is negative");
-        assert!(point_color.z >= 0.0, "'{point_color:?}' z is negative");
-
-        let spot = SpotLightRaw::default();
-        let spot_color = spot.color(
-            vertex_pos,
-            view,
-            normal,
-            camera_to_frag_dir,
-            diffuse_color,
-            specular_color,
-            shininess,
-        );
-        assert!(spot_color.x >= 0.0, "'{spot_color:?}' x is negative");
-        assert!(spot_color.y >= 0.0, "'{spot_color:?}' y is negative");
-        assert!(spot_color.z >= 0.0, "'{spot_color:?}' z is negative");
-
-        let directional = DirectionalLightRaw::default();
-        let directional_color = directional.color(
-            view,
-            normal,
-            camera_to_frag_dir,
-            diffuse_color,
-            specular_color,
-            shininess,
-        );
-        assert!(
-            directional_color.x >= 0.0,
-            "'{directional_color:?}' x is negative"
-        );
-        assert!(
-            directional_color.y >= 0.0,
-            "'{directional_color:?}' y is negative"
-        );
-        assert!(
-            directional_color.z >= 0.0,
-            "'{directional_color:?}' z is negative"
-        );
-    }
-
-    //    #[test]
-    //    #[should_panic]
-    //    /// Tests that glam assertions are on while running tests.
-    //    fn glam_assert() {
-    //        let _ = Vec3::ZERO.normalize();
-    //    }
+    color.extend(1.0)
 }

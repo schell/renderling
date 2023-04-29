@@ -32,18 +32,18 @@ pub fn unit_points() -> [Vec3; 8] {
 pub fn unit_cube() -> Vec<(Vec3, Vec3)> {
     let points = unit_points();
     let triangles: [(usize, usize, usize); 12] = [
-        (0, 1, 2),
-        (0, 2, 3), // top
-        (0, 3, 4),
-        (4, 3, 5), // front
-        (3, 2, 6),
-        (3, 6, 5), // right
-        (1, 0, 7),
-        (7, 0, 4), // left
-        (4, 5, 6),
-        (4, 6, 7), // bottom
-        (2, 1, 7),
-        (2, 7, 6), // back
+        (0, 2, 1),
+        (0, 3, 2), // top
+        (0, 4, 3),
+        (4, 5, 3), // front
+        (3, 6, 2),
+        (3, 5, 6), // right
+        (1, 7, 0),
+        (7, 4, 0), // left
+        (4, 6, 5),
+        (4, 7, 6), // bottom
+        (2, 7, 1),
+        (2, 6, 7), // back
     ];
     triangles
         .iter()
@@ -51,7 +51,7 @@ pub fn unit_cube() -> Vec<(Vec3, Vec3)> {
             let a = points[*a];
             let b = points[*b];
             let c = points[*c];
-            let n = triangle_face_normal(c, b, a);
+            let n = triangle_face_normal(a, b, c);
             vec![(a, n), (b, n), (c, n)]
         })
         .collect::<Vec<_>>()

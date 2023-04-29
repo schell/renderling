@@ -3,69 +3,91 @@
 This is a modern "GPU-driven" renderer, along with a collection of
 shaders and types that can facilitate writing new renderers.
 
+`renderling` holds entire scenes of geometry, textures, materials and lighting in GPU buffers.
+Most of the rendering operations happen on the GPU.
+The CPU is used to interact with the filesystem to marshall data to the GPU and to bind buffers.
+This makes `renderling` very effective at rendering certain types of scenes.
+Specifically `renderling` aims to be good at rendering scenes with a moderate level of geometry
+and lots of lighting effects.
+
 ## API Features
 
-* builder pattern for lights, cameras and objects
+* builder pattern for scenes, entities (objects), materials and lights
 * headless rendering support
   - rendering to texture and saving via `image` crate
 * text rendering support (cargo feature `text` - on by default)
 * nested nodes with local transforms
-* gltf support
+* tight support for loading scenes through `gltf`
 
-Shaders are written in Rust via `rust-gpu`.
+Shaders are written in Rust via `rust-gpu` where possible, falling back to `wgsl` where needed.
 
-## Rendering Jargon
+## Rendering Features / Roadmap
 
-- forward+ style pipeline, configurable lighting model per object
-  - [ ] physically based shading
+- forward+ style pipeline, configurable lighting model per material
+  - [x] physically based shading
   - [x] blinn-phong shading
+  - [x] user interface "colored text" shading (uses opacity glyphs in an atlas)
   - [x] no shading
+- [ ] gltf support
+  - [ ] scenes, nodes
+  - [x] cameras
+  - [x] meshes
+  - [x] materials
+    - [x] funky phong
+    - [ ] metallic roughness
+    - [ ] specular glosiness
+    - [ ] normal/bump mapping
+  - [x] textures, images, samplers
+  - [ ] animations
+  - [ ] morph targets
+  - [ ] skins
+- [ ] skybox
 - [ ] high definition rendering
 - [ ] bloom
 - [ ] image based lighting
 - [ ] ssao
+- [ ] depth of field
 
 ## Definition
 **renderling** noun
 
-> A ghost in the machine, ready to do your graphics bidding.
+A small beast that looks cute up close, ready to do your graphics bidding.
 
-`Renderling` is the main type in this library.
-It contains a render graph and all its resources.
-`Renderling` can be configured to render whatever you like, and this library provides many types and
-functions for customizing `Renderling`s.
+## Haiku
 
-## Pipelines
-
-### Forward
-A blinn-phong material forward shader.
-
-![renderling forward shader pipeline](https://raw.githubusercontent.com/schell/renderling/main/img/forward.png "renderling forward pipeline")
-
-### UI
-A simple forward shader that supports vertices with colors and/or textures. It has a special
-blending uniform that determines how vertex colors should be blended with vertex UV texture
-coords. This enables support for colorful text.
+> Ghost in the machine,
+> lighting your scene with magic.
+> Cute technology.
 
 ## Project Organization
 * crates/renderling-shader
 
-  Contains Rust shader code that can be shared on CPU and GPU.
+  Contains Rust shader code that can be shared on CPU and GPU (using `rust-gpu` to compile to SPIR-V).
   Most of the shader code is here!
+  Certain tasks require atomics which doesn't work from `rust-gpu` to `wgpu` yet. See [NOTES.md](NOTES.md).
   This crate is a member of the workspace so you get nice editor tooling while writing shaders in Rust.
   You can also write sanity tests that run with `cargo test`.
   Things just work like BAU.
 
 * shaders
 
-  Contains a thin `rust-gpu` wrapper around `renderling-shader`.
-  Provides the GPU annotations needed to bind `renderling` and `renderling-shader`.
-  Contains a program that compiles and copies **.spv** files into the main `renderling` crate.
+  Contains a thin crate wrapper around `renderling-shader`.
+  Provides the spirv annotations for shaders.
+  Contains a program that compiles Rust into SPIR-V and copies **.spv** files into the main `renderling` crate.
 
 * crates/renderling
 
   The main crate.
   Contains CPU Rust code for creating pipelines and managing resources, making render passes, etc.
+  Contains tests, some using image comparison of actual frame renders for consistency and backwards compatibility.
+
+* img
+
+  Image assets for tests (textures, etc.)
+
+* test_img
+
+  Reference images to use for testing.
 
 * crates/example
 
@@ -90,7 +112,11 @@ It compiles into a program that can be run to generate the shaders:
 cd shaders/ && cargo run --release
 ```
 
-Currently they all compile into one monolithic `.spv` file, but that may change in the future.
+## :heart: Sponsor this!
+
+This work will always be free and open source. If you use it (outright or for inspiration), please consider donating.
+
+[💰 Sponsor 💝](https://github.com/sponsors/schell)
 
 ## License
 Renderling is free and open source. All code in this repository is dual-licensed under either:
@@ -104,25 +130,3 @@ is the de-facto standard in the Rust ecosystem and there are very good reasons t
 Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion
 in the work by you, as defined in the Apache-2.0 license, shall be dual licensed as above,
 without any additional terms or conditions.
-
-## Roadmap
-
-- [x] ui shader
-- [x] blinn-phong forward shader
-- [x] builder pattern for lights, camera and objects
-- [x] automatic resource management
-- [x] headless rendering
-- [x] object nesting / parenting / local transforms
-- [ ] gltf support
-  - [ ] scenes, nodes
-  - [x] cameras
-  - [x] meshes
-  - [x] materials
-  - [x] textures, images, samplers
-  - [ ] skins
-  - [ ] animations
-- [ ] convert shaders to [rust-gpu](https://github.com/EmbarkStudios/rust-gpu) - maybe?
-- [ ] deferred shading pipeline
-- [ ] physically based rendering pipeline
-- [ ] render graph?
-- [ ] wireframe shader pipeline - maybe?
