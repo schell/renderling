@@ -11,12 +11,10 @@
 use std::{ops::Deref, sync::Arc};
 
 use moongraph::*;
-use snafu::prelude::*;
 
 use crate::{
-    linkage::ObjectDraw, BackgroundColor, BufferDimensions, Camera, Cameras, DepthTexture, Device,
-    Frame, Id, ObjectData, Objects, CopiedTextureBuffer, Queue, RenderTarget, ScreenSize,
-    UiPipeline, WgpuStateError, ForwardPipeline, Lights,
+    BackgroundColor, BufferDimensions, CopiedTextureBuffer, DepthTexture, Device, Frame, Queue,
+    RenderTarget, ScreenSize, WgpuStateError,
 };
 
 fn default_frame_texture_view(frame_texture: &wgpu::Texture) -> wgpu::TextureView {
@@ -51,6 +49,42 @@ pub fn create_frame(
     Ok((frame, FrameTextureView(frame_view.into())))
 }
 
+/// Perform a clearing render pass on a frame and/or a depth texture.
+pub fn conduct_clear_pass(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    label: Option<&str>,
+    frame_view: Option<&wgpu::TextureView>,
+    depth_view: Option<&wgpu::TextureView>,
+    clear_color: wgpu::Color,
+) {
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        label: Some("renderling clear pass"),
+    });
+
+    let _ = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+        label,
+        color_attachments: &[frame_view.map(|view| wgpu::RenderPassColorAttachment {
+            view,
+            resolve_target: None,
+            ops: wgpu::Operations {
+                load: wgpu::LoadOp::Clear(clear_color),
+                store: true,
+            },
+        })],
+        depth_stencil_attachment: depth_view.map(|view| wgpu::RenderPassDepthStencilAttachment {
+            view,
+            depth_ops: Some(wgpu::Operations {
+                load: wgpu::LoadOp::Clear(1.0),
+                store: true,
+            }),
+            stencil_ops: None,
+        }),
+    });
+
+    queue.submit(std::iter::once(encoder.finish()));
+}
+
 /// Conduct a clear pass on the global frame and depth textures.
 pub fn clear_frame_and_depth(
     (device, queue, frame_view, depth, color): (
@@ -69,7 +103,7 @@ pub fn clear_frame_and_depth(
         b: b.into(),
         a: a.into(),
     };
-    crate::linkage::conduct_clear_pass(
+    conduct_clear_pass(
         &device,
         &queue,
         Some("clear_frame_and_depth"),
@@ -78,84 +112,6 @@ pub fn clear_frame_and_depth(
         color,
     );
     Ok(())
-}
-
-/// Conduct a full render pass into the given textures using the given
-/// camera and objects.
-///
-/// Helper for building render nodes that render objects w/ a particular
-/// pipeline.
-pub fn render_objects<'a>(
-    device: &wgpu::Device,
-    queue: &wgpu::Queue,
-    pipeline: &wgpu::RenderPipeline,
-    frame_texture_view: &wgpu::TextureView,
-    depth_texture_view: &wgpu::TextureView,
-    default_material_uniform: &wgpu::BindGroup,
-    material_bindgroup_index: u32,
-    lights_uniform: Option<&wgpu::BindGroup>,
-    light_bindgroup_index: Option<u32>,
-    camera_uniform: &wgpu::BindGroup,
-    camera_bindgroup_index: u32,
-    objects: impl IntoIterator<Item = &'a ObjectData>,
-) {
-    log::trace!("render");
-    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-        label: Some("render_camera_objects"),
-    });
-
-    let mut render_pass = crate::linkage::begin_render_pass(
-        &mut encoder,
-        Some("render_camera_objects"),
-        pipeline,
-        frame_texture_view,
-        depth_texture_view,
-    );
-
-    // bind the lights to our shader
-    if let Some(lights_uniform) = lights_uniform {
-        render_pass.set_bind_group(light_bindgroup_index.unwrap(), lights_uniform, &[]);
-    } else {
-        log::warn!("no lights to bind");
-    }
-    // bind the camera to our shader
-    render_pass.set_bind_group(camera_bindgroup_index, camera_uniform, &[]);
-
-    for object in objects {
-        if !object.inner.read().is_visible {
-            continue;
-        }
-        if let Some(object) = object.as_shader_object() {
-            let material = object.material.unwrap_or(default_material_uniform);
-            // bind the object's material to our shader
-            render_pass.set_bind_group(material_bindgroup_index, material, &[]);
-
-            render_pass.set_vertex_buffer(0, object.mesh_buffer);
-            render_pass.set_vertex_buffer(1, object.instances);
-            // draw
-            match &object.draw {
-                ObjectDraw::Indexed {
-                    index_buffer,
-                    index_range,
-                    base_vertex,
-                    index_format,
-                } => {
-                    render_pass.set_index_buffer(*index_buffer, *index_format);
-                    render_pass.draw_indexed(
-                        index_range.clone(),
-                        *base_vertex,
-                        object.instances_range.clone(),
-                    );
-                }
-                ObjectDraw::Default { vertex_range } => {
-                    render_pass.draw(vertex_range.clone(), object.instances_range.clone());
-                }
-            }
-        }
-    }
-
-    drop(render_pass);
-    queue.submit(std::iter::once(encoder.finish()));
 }
 
 /// A buffer holding a copy of the last frame's buffer/texture.
@@ -221,87 +177,5 @@ impl PostRenderBufferCreate {
 pub fn present(frame: Move<Frame>) -> Result<(), WgpuStateError> {
     let frame = frame.into();
     frame.present();
-    Ok(())
-}
-
-#[derive(Debug, Snafu)]
-pub enum RenderNodeError {
-    #[snafu(display("Missing {id:?}"))]
-    MissingCamera { id: Id<Camera> },
-}
-
-/// A render graph resource to use as the camera to render with.
-pub struct UiRenderCamera(pub Id<Camera>);
-
-pub fn ui_render(
-    (device, queue, ui_pipeline, frame, depth_texture, rcam, cameras, objects): (
-        Read<Device>,
-        Read<Queue>,
-        Read<UiPipeline>,
-        Read<FrameTextureView>,
-        Read<DepthTexture>,
-        Read<UiRenderCamera>,
-        Read<Cameras>,
-        Read<Objects>,
-    ),
-) -> Result<(), RenderNodeError> {
-    let camera_id = rcam.0.into();
-    let camera_data = cameras
-        .get(&camera_id)
-        .with_context(|| MissingCameraSnafu { id: camera_id })?;
-    let camera_objects = cameras.get_object_ids_sorted_by_distance_to_camera(&camera_id);
-    let object_data = objects.iter_with_ids(camera_objects);
-    render_objects(
-        &device,
-        &queue,
-        &ui_pipeline.pipeline,
-        &frame,
-        &depth_texture.view,
-        ui_pipeline.default_material_uniform.get_bindgroup(),
-        ui_pipeline.bindgroup_index_config.material_bindgroup_index,
-        None,
-        None,
-        &camera_data.bindgroup,
-        ui_pipeline.bindgroup_index_config.camera_bindgroup_index,
-        object_data,
-    );
-    Ok(())
-}
-
-/// A render graph resource to use as the camera to render with.
-pub struct ForwardRenderCamera(pub Id<Camera>);
-
-pub fn forward_render(
-    (device, queue, pipeline, frame, depth_texture, rcam, lights, cameras, objects): (
-        Read<Device>,
-        Read<Queue>,
-        Read<ForwardPipeline>,
-        Read<FrameTextureView>,
-        Read<DepthTexture>,
-        Read<ForwardRenderCamera>,
-        Read<Lights>,
-        Read<Cameras>,
-        Read<Objects>,
-    ),
-) -> Result<(), RenderNodeError> {
-    let camera_id = rcam.0.into();
-    let camera_data = cameras
-        .get(&camera_id)
-        .with_context(|| MissingCameraSnafu { id: camera_id })?;
-    let object_data = objects.iter().flatten();
-    render_objects(
-        &device,
-        &queue,
-        &pipeline.pipeline,
-        &frame,
-        &depth_texture.view,
-        pipeline.default_material_uniform.get_bindgroup(),
-        pipeline.bindgroup_index_config.material_bindgroup_index,
-        lights.uniform().map(|uniform| &uniform.bindgroup),
-        Some(pipeline.bindgroup_index_config.light_bindgroup_index),
-        &camera_data.bindgroup,
-        pipeline.bindgroup_index_config.camera_bindgroup_index,
-        object_data,
-    );
     Ok(())
 }

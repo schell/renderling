@@ -9,12 +9,12 @@ use std::{
 };
 
 use ::ab_glyph::Rect;
-use glam::Vec2;
+use glam::Vec4;
 use glyph_brush::*;
 
 pub use ::ab_glyph::FontArc;
 pub use glyph_brush::{Color, Section, Text};
-use renderling_shader::scene::{GpuMaterial, GpuMaterialConfig, GpuTexture, GpuVertex};
+use renderling_shader::scene::{GpuMaterial, GpuVertex, LightingModel, ID_NONE};
 
 use crate::{Renderling, Texture};
 
@@ -218,38 +218,20 @@ fn to_vertex(
         .with_color(extra.color);
 
     // Draw as two tris
-    let data = vec![tl, tr, br, tl, br, bl];
+    let data = vec![tl, br, tr, tl, bl, br];
     data
 }
 
-fn material_with_size(w: u32, h: u32) -> GpuMaterial {
-    let mut material = GpuMaterial::default();
-    material.texture0 = GpuTexture {
-        offset_px: Vec2::ZERO,
-        size_px: Vec2::new(w as f32, h as f32),
-    };
-    material.set_config(GpuMaterialConfig::TEXTURE0 | GpuMaterialConfig::LIGHTING | GpuMaterialConfig::TEXT);
-    material
-}
+pub const TEXT_MATERIAL: GpuMaterial = GpuMaterial {
+    texture0: 0,
+    texture1: ID_NONE,
+    texture2: ID_NONE,
+    lighting_model: LightingModel::TEXT_LIGHTING,
+    factor0: Vec4::ZERO,
+    factor1: Vec4::ZERO,
+};
 
 impl GlyphCache {
-    fn new_cache(&self) -> Cache {
-        let (width, height) = self.brush.texture_dimensions();
-        Cache::new(&self.device, width, height)
-    }
-
-    /// Get the cache's material.
-    ///
-    /// This is used to build an object to display text.
-    pub fn get_material(&mut self) -> GpuMaterial {
-        // ensure we have a cache
-        if self.cache.is_none() {
-            self.cache = Some(self.new_cache());
-        }
-        let (w, h) = self.brush.texture_dimensions();
-        material_with_size(w, h)
-    }
-
     /// Process any brushes, updating textures, etc.
     ///
     /// Returns a new material if the material needs to be updated.
@@ -257,16 +239,13 @@ impl GlyphCache {
     ///
     /// The material and mesh are meant to be used to build or update an object
     /// to display.
-    pub fn get_updated(&mut self) -> (Option<GpuMaterial>, Option<Vec<GpuVertex>>) {
-        let mut may_material: Option<GpuMaterial> = if self.cache.is_none() {
-            Some(self.get_material())
-        } else {
-            None
-        };
+    pub fn get_updated(&mut self) -> Option<Vec<GpuVertex>> {
         let mut may_mesh: Option<Vec<GpuVertex>> = None;
+        let mut cache = self.cache.take().unwrap_or_else(|| {
+            let (width, height) = self.brush.texture_dimensions();
+            Cache::new(&self.device, width, height)
+        });
 
-        // UNWRAP: safe because the cache always exists after the check above
-        let mut cache = self.cache.take().unwrap();
         let mut brush_action;
         loop {
             brush_action = self.brush.process_queued(
@@ -306,7 +285,6 @@ impl GlyphCache {
                     );
 
                     cache = Cache::new(&self.device, new_width, new_height);
-                    may_material = Some(material_with_size(new_width, new_height));
                     self.brush.resize_texture(new_width, new_height);
                 }
             }
@@ -326,6 +304,6 @@ impl GlyphCache {
             BrushAction::ReDraw => {}
         }
 
-        (may_material, may_mesh)
+        may_mesh
     }
 }

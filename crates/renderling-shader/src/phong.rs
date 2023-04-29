@@ -1,54 +1,9 @@
-//! Light types and calculations.
-// TODO: make the internal fields private and then use getter/setters.
-use glam::{Mat4, Vec3, Vec4, Vec4Swizzles};
-
+//! Phong shading helpers.
 #[cfg(target_arch = "spirv")]
 use spirv_std::num_traits::Float;
 
-use crate::math::Vec3ColorSwizzles;
-
-#[repr(C)]
-#[derive(Copy, Clone, Default)]
-#[cfg_attr(
-    not(target_arch = "spirv"),
-    derive(bytemuck::Pod, bytemuck::Zeroable)
-)]
-pub struct PointLightRaw {
-    pub position_: Vec4,
-    pub attenuation_: Vec4,
-    pub ambient_color: Vec4,
-    pub diffuse_color: Vec4,
-    pub specular_color: Vec4,
-}
-
-#[repr(C)]
-#[derive(Copy, Clone, Default)]
-#[cfg_attr(
-    not(target_arch = "spirv"),
-    derive(bytemuck::Pod, bytemuck::Zeroable)
-)]
-pub struct SpotLightRaw {
-    pub position_: Vec4,
-    pub direction_: Vec4,
-    pub attenuation_: Vec4,
-    pub ambient_color: Vec4,
-    pub diffuse_color: Vec4,
-    pub specular_color: Vec4,
-    pub cutoff_: Vec4,
-}
-
-#[repr(C)]
-#[derive(Copy, Clone, Default)]
-#[cfg_attr(
-    not(target_arch = "spirv"),
-    derive(bytemuck::Pod, bytemuck::Zeroable)
-)]
-pub struct DirectionalLightRaw {
-    pub direction_: Vec4,
-    pub ambient_color: Vec4,
-    pub diffuse_color: Vec4,
-    pub specular_color: Vec4,
-}
+use glam::{Vec3, Vec4, Mat4, Vec4Swizzles};
+use crate::{scene::GpuLight, math::Vec3ColorSwizzles};
 
 /// Calculate attenuation
 ///
@@ -65,17 +20,9 @@ pub fn attenuate(attenuation: Vec3, distance: f32) -> f32 {
     }
 }
 
-impl PointLightRaw {
-    pub fn position(&self) -> Vec3 {
-        self.position_.xyz()
-    }
-
-    pub fn attenuation(&self) -> Vec3 {
-        self.attenuation_.xyz()
-    }
-
+impl GpuLight {
     /// Calculate a point light's color contribution to a fragment.
-    pub fn color(
+    pub fn color_phong_point(
         &self,
         vertex_pos: Vec3,
         view: Mat4,
@@ -85,7 +32,7 @@ impl PointLightRaw {
         specular_color: Vec4,
         shininess: f32,
     ) -> Vec3 {
-        let light_pos: Vec3 = (view * self.position().extend(1.0)).xyz();
+        let light_pos: Vec3 = (view * self.position.xyz().extend(1.0)).xyz();
         let vertex_to_light = light_pos - vertex_pos;
         let vertex_to_light_distance = vertex_to_light.length();
 
@@ -97,7 +44,7 @@ impl PointLightRaw {
         let spec: f32 = normal.dot(halfway_dir).max(0.0).powf(shininess);
         // attenuation
         let distance: f32 = vertex_to_light_distance;
-        let attenuation: f32 = attenuate(self.attenuation(), distance);
+        let attenuation: f32 = attenuate(self.attenuation.xyz(), distance);
         // combine results
         let mut ambient: Vec3 = self.ambient_color.rgb() * diffuse_color.rgb();
         let mut diffuse: Vec3 = self.diffuse_color.rgb() * diff * diffuse_color.rgb();
@@ -108,30 +55,9 @@ impl PointLightRaw {
 
         ambient + diffuse + specular
     }
-}
 
-impl SpotLightRaw {
-    pub fn position(&self) -> Vec3 {
-        self.position_.xyz()
-    }
-
-    pub fn attenuation(&self) -> Vec3 {
-        self.attenuation_.xyz()
-    }
-
-    pub fn direction(&self) -> Vec3 {
-        self.direction_.xyz()
-    }
-
-    pub fn inner_cutoff(&self) -> f32 {
-        self.cutoff_.x
-    }
-
-    pub fn outer_cutoff(&self) -> f32 {
-        self.cutoff_.y
-    }
     // Calculate a spotlight's color contribution to a fragment.
-    pub fn color(
+    pub fn color_phong_spot(
         &self,
         vertex_pos: Vec3,
         view: Mat4,
@@ -141,10 +67,10 @@ impl SpotLightRaw {
         specular_color: Vec4,
         shininess: f32,
     ) -> Vec3 {
-        if self.direction() == Vec3::ZERO {
+        if self.direction.xyz() == Vec3::ZERO {
             return Vec3::ZERO;
         }
-        let light_pos: Vec3 = (view * self.position().extend(1.0)).xyz();
+        let light_pos: Vec3 = (view * self.position.xyz().extend(1.0)).xyz();
         let light_dir: Vec3 = (light_pos - vertex_pos).normalize();
         // diffuse shading
         let diff: f32 = normal.dot(light_dir).max(0.0);
@@ -153,12 +79,12 @@ impl SpotLightRaw {
         let spec: f32 = normal.dot(halfway_dir).max(0.0).powf(shininess);
         // attenuation
         let distance: f32 = (light_pos - vertex_pos).length();
-        let attenuation: f32 = attenuate(self.attenuation(), distance);
+        let attenuation: f32 = attenuate(self.attenuation.xyz(), distance);
         // spotlight intensity
-        let direction: Vec3 = (-(view * self.direction().extend(0.0)).xyz()).normalize();
+        let direction: Vec3 = (-(view * self.direction.xyz().extend(0.0)).xyz()).normalize();
         let theta: f32 = light_dir.dot(direction);
-        let epsilon: f32 = self.inner_cutoff() - self.outer_cutoff();
-        let intensity: f32 = ((theta - self.outer_cutoff()) / epsilon).clamp(0.0, 1.0);
+        let epsilon: f32 = self.inner_cutoff - self.outer_cutoff;
+        let intensity: f32 = ((theta - self.outer_cutoff) / epsilon).clamp(0.0, 1.0);
         // combine results
         let mut ambient: Vec3 = self.ambient_color.rgb() * diffuse_color.rgb();
         let mut diffuse: Vec3 = self.diffuse_color.rgb() * diff * diffuse_color.rgb();
@@ -169,14 +95,9 @@ impl SpotLightRaw {
 
         ambient + diffuse + specular
     }
-}
 
-impl DirectionalLightRaw {
-    pub fn direction(&self) -> Vec3 {
-        self.direction_.xyz()
-    }
     // Calculate a directional light's color contribution to a fragment.
-    pub fn color(
+    pub fn color_phong_directional(
         &self,
         view: Mat4,
         normal: Vec3,
@@ -185,10 +106,10 @@ impl DirectionalLightRaw {
         specular_color: Vec4,
         shininess: f32,
     ) -> Vec3 {
-        if self.direction() == Vec3::ZERO {
+        if self.direction.xyz() == Vec3::ZERO {
             return Vec3::ZERO;
         }
-        let light_dir: Vec3 = (-(view * self.direction().extend(0.0)).xyz()).normalize();
+        let light_dir: Vec3 = (-(view * self.direction.xyz().extend(0.0)).xyz()).normalize();
         // diffuse shading
         let diff: f32 = normal.dot(light_dir).max(0.0);
         // specular shading
@@ -202,53 +123,68 @@ impl DirectionalLightRaw {
     }
 }
 
-pub const POINT_LIGHTS_MAX: usize = 64;
+pub fn lighting_phong(
+    camera_view: &Mat4,
+    lights: &[GpuLight],
+    diffuse_color: Vec4,
+    specular_color: Vec4,
+    in_pos: Vec3,
+    in_norm: Vec3,
+) -> Vec4 {
+    if lights.is_empty() || lights[0].light_type == GpuLight::END_OF_LIGHTS {
+        // the scene is unlit, so we should provide some default
+        let desaturated_norm = in_norm.abs().dot(Vec3::new(0.2126, 0.7152, 0.0722));
+        return (diffuse_color.rgb() * desaturated_norm).extend(1.0);
+    }
 
-#[repr(C)]
-pub struct PointLights {
-    pub lights: [PointLightRaw; POINT_LIGHTS_MAX],
-    pub length: u32,
-}
-
-impl Default for PointLights {
-    fn default() -> Self {
-        Self {
-            length: 0,
-            lights: [PointLightRaw::default(); POINT_LIGHTS_MAX],
+    let in_pos = (*camera_view * in_pos.extend(1.0)).xyz();
+    let norm: Vec3 = in_norm.normalize_or_zero();
+    let camera_to_frag_dir: Vec3 = (-in_pos).normalize_or_zero();
+    let mut color: Vec3 = Vec3::ZERO;
+    for i in 0..lights.len() {
+        let light = lights[i];
+        match light.light_type {
+            GpuLight::END_OF_LIGHTS => {
+                break;
+            }
+            GpuLight::DIRECTIONAL_LIGHT => {
+                color += light.color_phong_directional(
+                    *camera_view,
+                    norm,
+                    camera_to_frag_dir,
+                    diffuse_color,
+                    specular_color,
+                    // change this to material shininess when we have materials
+                    16.0,
+                );
+            }
+            GpuLight::POINT_LIGHT => {
+                color += light.color_phong_point(
+                    in_pos,
+                    *camera_view,
+                    norm,
+                    camera_to_frag_dir,
+                    diffuse_color,
+                    specular_color,
+                    // change this to material shininess when we have materials
+                    16.0,
+                );
+            }
+            GpuLight::SPOT_LIGHT => {
+                color += light.color_phong_spot(
+                    in_pos,
+                    *camera_view,
+                    norm,
+                    camera_to_frag_dir,
+                    diffuse_color,
+                    specular_color,
+                    // change this to material shininess when we have materials
+                    16.0,
+                );
+            }
+            _ => {}
         }
     }
-}
 
-pub const SPOT_LIGHTS_MAX: usize = 32;
-
-#[repr(C)]
-pub struct SpotLights {
-    pub lights: [SpotLightRaw; SPOT_LIGHTS_MAX],
-    pub length: u32,
-}
-
-impl Default for SpotLights {
-    fn default() -> Self {
-        Self {
-            length: 0,
-            lights: [SpotLightRaw::default(); SPOT_LIGHTS_MAX],
-        }
-    }
-}
-
-pub const DIRECTIONAL_LIGHTS_MAX: usize = 8;
-
-#[repr(C)]
-pub struct DirectionalLights {
-    pub lights: [DirectionalLightRaw; DIRECTIONAL_LIGHTS_MAX],
-    pub length: u32,
-}
-
-impl Default for DirectionalLights {
-    fn default() -> Self {
-        Self {
-            length: 0,
-            lights: [DirectionalLightRaw::default(); DIRECTIONAL_LIGHTS_MAX],
-        }
-    }
+    color.extend(1.0)
 }

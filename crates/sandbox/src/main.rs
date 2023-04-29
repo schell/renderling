@@ -18,7 +18,9 @@ fn main() {
         .unwrap()
         .with_background_color(Vec3::splat(0.0).extend(1.0));
     let (projection, view) = renderling::default_ortho2d(100.0, 100.0);
-    let mut builder = r.new_scene().with_camera(projection, view);
+    let mut builder = r
+        .new_scene()
+        .with_camera(projection, view);
     let size = 1.0;
     let cyan_tri = builder
         .new_entity()
@@ -64,7 +66,7 @@ fn main() {
         .with_position(Vec3::new(25.0, 25.0, 0.1))
         .with_parent(&cyan_tri)
         .build();
-    let scene = builder.build();
+    let scene = builder.build().unwrap();
     renderling::setup_scene_render_graph(scene, &mut r, false);
 
     event_loop.run(move |event, _target, control_flow| {

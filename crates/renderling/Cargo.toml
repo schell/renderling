@@ -28,7 +28,7 @@ derive_more = "^0.99"
 encase = { version = "^0.4", features = ["glam"] }
 futures-lite = "^1.12"
 glam = { version = "^0.22", default-features = false, features = ["bytemuck", "libm"] }
-gltf = { version = "^1.1", optional = true, features = ["KHR_lights_punctual", "extras"] }
+gltf = { version = "^1.1", optional = true, features = ["KHR_lights_punctual", "KHR_materials_unlit", "extras"] }
 glyph_brush = { version = "^0.7", optional = true }
 image = { version = "0.24.4", optional = true }
 log = "^0.4"

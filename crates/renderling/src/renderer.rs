@@ -1,17 +1,12 @@
 //! Builds the UI pipeline and manages resources.
 use glam::Vec4;
-use moongraph::{Edges, Function, Graph, Node, Read, TypeKey, Write};
 use snafu::prelude::*;
-use std::{any::Any, ops::Deref, sync::Arc};
+use std::{ops::Deref, sync::Arc};
 
 use crate::{
-    camera::*, resources::*, CreateSurfaceFn, ForwardPipeline, Lights, ObjectBuilder, ObjectInner,
-    Objects, Pipelines, RenderTarget, TextureError, WgpuStateError, SceneBuilder,
+    CreateSurfaceFn, Graph, Read, RenderTarget, SceneBuilder, TextureError,
+    WgpuStateError, Write,
 };
-
-pub use moongraph::IsGraphNode;
-
-pub type RenderNode = Node<Function, TypeKey>;
 
 #[derive(Debug, Snafu)]
 pub enum RenderlingError {
@@ -42,21 +37,19 @@ pub enum RenderlingError {
     #[snafu(display("gltf import failed: {}", source))]
     GltfImport { source: gltf::Error },
 
-    #[snafu(display("could not create scene: {}", source))]
-    Scene { source: crate::GltfError },
-
+    //#[snafu(display("could not create scene: {}", source))]
+    // Scene { source: crate::GltfError },
     #[snafu(display("missing resource"))]
     Resource,
 
     #[snafu(display("{source}"))]
     Graph { source: moongraph::GraphError },
 
-    #[snafu(display("{source}"))]
-    Lights { source: crate::light::LightsError },
+    //#[snafu(display("{source}"))]
+    // Lights { source: crate::light::LightsError },
 
-    #[snafu(display("{source}"))]
-    Object { source: crate::object::ObjectError },
-
+    //#[snafu(display("{source}"))]
+    // Object { source: crate::object::ObjectError },
     #[snafu(display(
         "Missing PostRenderBuffer resource. Ensure a node that creates PostRenderBuffer (like \
          PostRenderbufferCreate) is present in the graph: {source}"
@@ -128,6 +121,7 @@ pub struct BackgroundColor(pub Vec4);
 // }
 // ```
 pub struct Renderling {
+    // The inner render graph
     pub graph: Graph,
 }
 
@@ -146,10 +140,6 @@ impl Renderling {
                 .with_resource(Device(device.into()))
                 .with_resource(Queue(queue.into()))
                 .with_resource(ScreenSize { width, height })
-                .with_resource(Lights::default())
-                .with_resource(Cameras::default())
-                .with_resource(Objects::default())
-                .with_resource(Pipelines::default())
                 .with_resource(BackgroundColor(Vec4::splat(0.0))),
         }
     }
@@ -285,249 +275,21 @@ impl Renderling {
         &self.graph.get_resource::<Queue>().unwrap().unwrap().0
     }
 
-    pub fn get_cameras(&self) -> &Cameras {
-        // UNWRAP: safe because invariant - Renderer always has Cameras
-        self.graph.get_resource::<Cameras>().unwrap().unwrap()
-    }
-
-    pub fn get_cameras_mut(&mut self) -> &mut Cameras {
-        // UNWRAP: safe because invariant - Renderer always has Cameras
-        self.graph.get_resource_mut::<Cameras>().unwrap().unwrap()
-    }
-
-    pub fn get_objects(&self) -> &Objects {
-        // UNWRAP: safe because invariant - Renderer always has Objects
-        self.graph.get_resource::<Objects>().unwrap().unwrap()
-    }
-
-    pub fn get_objects_mut(&mut self) -> &mut Objects {
-        // UNWRAP: safe because invariant - Renderer always has Objects
-        self.graph.get_resource_mut::<Objects>().unwrap().unwrap()
-    }
-
-    /// Create a new camera builder.
-    pub fn new_camera(&mut self) -> CameraBuilder<'_> {
-        let (width, height) = self.get_screen_size();
-        CameraBuilder {
-            inner: CameraInner::new_perspective(width as f32, height as f32),
-            width: width as f32,
-            height: height as f32,
-            renderer: self,
-        }
-    }
-
-    /// Retrieves an iterator over all cameras.
-    ///
-    /// This will always have at least one camera in it.
-    pub fn cameras(&self) -> impl Iterator<Item = Camera> + '_ {
-        // UNWRAP: safe because Renderer always has the Cameras object
-        let cameras = self.graph.get_resource::<Cameras>().unwrap().unwrap();
-        cameras.iter().enumerate().filter_map(|(i, data)| {
-            let data = data.as_ref()?;
-            Some(Camera {
-                id: Id::new(i),
-                inner: data.inner.clone(),
-                cmd: cameras.update_queue(),
-            })
-        })
-    }
-
-    /// Retrieves the default camera.
-    ///
-    /// The default camera comes first in the iterator returned by
-    /// `Renderling::cameras`. The default camera is the one that was
-    /// created first after the renderling was created.
-    pub fn default_camera(&self) -> Camera {
-        // UNWRAP: having one default camera is an invariant of the system and we should
-        // panic otherwise
-        self.cameras().next().unwrap()
-    }
-
-    /// Creates a new object builder.
-    ///
-    /// The builder can be used to customize the object before building it.
-    ///
-    /// If no material is provided, the renderling's default material will be
-    /// used.
-    ///
-    /// If no transform is provided, the object will be positioned at the origin
-    /// with no rotation and scale 1,1,1.
-    pub fn new_object(&mut self) -> ObjectBuilder<'_> {
-        ObjectBuilder {
-            mesh: None,
-            children: vec![],
-            generate_normal_matrix: false,
-            properties: Default::default(),
-            inner: ObjectInner::default(),
-            renderer: self,
-        }
-    }
-
-    pub fn get_lights(&self) -> &Lights {
-        // UNWRAP: safe because invariant - Renderer always has Lights
-        self.graph.get_resource::<Lights>().unwrap().unwrap()
-    }
-
-    pub fn get_lights_mut(&mut self) -> &mut Lights {
-        // UNWRAP: safe because invariant - Renderer always has Lights
-        self.graph.get_resource_mut::<Lights>().unwrap().unwrap()
-    }
-
-    pub fn new_point_light(&mut self) -> crate::PointLightBuilder {
-        crate::PointLightBuilder::new(&mut self.get_lights_mut())
-    }
-
-    pub fn new_spot_light(&mut self) -> crate::SpotLightBuilder {
-        crate::SpotLightBuilder::new(&mut self.get_lights_mut())
-    }
-
-    pub fn new_directional_light(&mut self) -> crate::DirectionalLightBuilder {
-        crate::DirectionalLightBuilder::new(&mut self.get_lights_mut())
-    }
-
-    /// Add a render node to the render graph.
-    pub fn add_node(&mut self, node: RenderNode) {
-        self.graph.add_node(node);
-    }
-
-    pub fn with_node(mut self, node: RenderNode) -> Self {
-        self.add_node(node);
-        self
-    }
-
-    /// Add a barrier to the render graph.
-    ///
-    /// All nodes added after the barrier will run after nodes added before the
-    /// barrier.
-    pub fn with_barrier(mut self) -> Self {
-        self.add_barrier();
-        self
-    }
-
-    /// Add a barrier to the render graph.
-    ///
-    /// All nodes added after the barrier will run after nodes added before the
-    /// barrier.
-    pub fn add_barrier(&mut self) {
-        self.graph.add_barrier();
-    }
-
-    /// Add a resource to the render graph.
-    pub fn add_resource<T: Any + Send + Sync>(&mut self, resource: T) {
-        self.graph.add_resource(resource);
-    }
-
-    /// Add a resource to the render graph.
-    pub fn with_resource<T: Any + Send + Sync>(mut self, resource: T) -> Self {
-        self.add_resource(resource);
-        self
-    }
-
-    #[cfg(feature = "ui")]
-    /// Set the graph to the default user interface rendering configuration.
-    pub fn with_default_ui_render_graph(mut self) -> Self {
-        self.set_background_color(Vec4::splat(1.0));
-        self.add_node(
-            crate::ObjectUpdate::run
-                .into_node()
-                .with_name("object_update"),
-        );
-        self.add_node(
-            crate::CameraUpdate::run
-                .into_node()
-                .with_name("camera_update"),
-        );
-        self.add_barrier();
-        self.add_node(
-            crate::node::create_frame
-                .into_node()
-                .with_name("create_frame"),
-        );
-        self.add_node(
-            crate::node::clear_frame_and_depth
-                .into_node()
-                .with_name("clear_frame_and_depth"),
-        );
-        self.add_barrier();
-
-        let ui_pipeline = self.graph.visit(crate::UiPipelineCreator::create).unwrap();
-        self.with_resource(ui_pipeline)
-            .with_node(crate::node::ui_render.into_node().with_name("ui_render"))
-            .with_node(crate::node::present.into_node().with_name("present_frame"))
-    }
-
-    #[cfg(feature = "forward")]
-    /// Set the graph to a default forward rendering configuration.
-    ///
-    /// This renderer uses blinn-phong shading.
-    pub fn with_default_forward_render_graph(self) -> Self {
-        self.with_forward_render_graph(crate::ForwardPipelineCreator::create)
-    }
-
-    #[cfg(feature = "forward")]
-    /// Set the graph to a forward rendering configuration.
-    pub fn with_forward_render_graph<T: Edges>(
-        mut self,
-        create: impl FnOnce(T) -> ForwardPipeline,
-    ) -> Self {
-        self.set_background_color(Vec4::splat(1.0));
-        self.add_node(
-            crate::LightUpdate::run
-                .into_node()
-                .with_name("light_update"),
-        );
-        self.add_node(
-            crate::ObjectUpdate::run
-                .into_node()
-                .with_name("object_update"),
-        );
-        self.add_node(
-            crate::CameraUpdate::run
-                .into_node()
-                .with_name("camera_update"),
-        );
-        self.add_barrier();
-        self.add_node(
-            crate::node::create_frame
-                .into_node()
-                .with_name("create_frame"),
-        );
-        self.add_node(
-            crate::node::clear_frame_and_depth
-                .into_node()
-                .with_name("clear_frame_and_depth"),
-        );
-        self.add_barrier();
-
-        let forward_pipeline = self.graph.visit(create).unwrap();
-        self.with_resource(forward_pipeline)
-            .with_node(
-                crate::node::forward_render
-                    .into_node()
-                    .with_name("forward_render"),
-            )
-            .with_node(crate::node::present.into_node().with_name("present_frame"))
-    }
-
-    #[cfg(feature = "gltf")]
-    pub fn new_gltf_loader(&self) -> crate::gltf_support::GltfLoader {
-        // UNWRAP: safe because device and queue are _always_ available (if not we
-        // should panic)
+    pub fn get_device_and_queue(&self) -> (crate::Device, crate::Queue) {
+        // UNWRAP: safe because we always have device and queue
         let device = self
             .graph
-            .get_resource::<Device>()
+            .get_resource::<crate::Device>()
             .unwrap()
             .unwrap()
-            .0
             .clone();
         let queue = self
             .graph
-            .get_resource::<Queue>()
+            .get_resource::<crate::Queue>()
             .unwrap()
             .unwrap()
-            .0
             .clone();
-        crate::gltf_support::GltfLoader::new(device, queue)
+        (device, queue)
     }
 
     pub fn new_scene(&self) -> SceneBuilder {
