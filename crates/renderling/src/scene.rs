@@ -279,12 +279,61 @@ impl<'a> UnlitMaterialBuilder<'a> {
         Self { builder, material }
     }
 
+    pub fn with_base_color(mut self, color: impl Into<Vec4>) -> Self {
+        self.material.factor0 = color.into();
+        self
+    }
+
     pub fn with_texture0(mut self, texture_id: u32) -> Self {
         self.material.texture0 = texture_id;
         self
     }
 
     pub fn with_texture2(mut self, texture_id: u32) -> Self {
+        self.material.texture1 = texture_id;
+        self
+    }
+
+    pub fn build(self) -> u32 {
+        let id = self.builder.materials.len();
+        self.builder.materials.push(self.material);
+        id as u32
+    }
+}
+
+pub struct PbrMaterialBuilder<'a> {
+    builder: &'a mut SceneBuilder,
+    material: GpuMaterial,
+}
+
+impl<'a> PbrMaterialBuilder<'a> {
+    pub fn new(builder: &'a mut SceneBuilder) -> Self {
+        let mut material = GpuMaterial::default();
+        material.lighting_model = LightingModel::PBR_LIGHTING;
+        Self { builder, material }
+    }
+
+    pub fn with_base_color_factor(mut self, factor: impl Into<Vec4>) -> Self {
+        self.material.factor0 = factor.into();
+        self
+    }
+
+    pub fn with_base_color_texture(mut self, texture_id: u32) -> Self {
+        self.material.texture0 = texture_id;
+        self
+    }
+
+    pub fn with_metallic_factor(mut self, metallic: f32) -> Self {
+        self.material.factor1.y = metallic;
+        self
+    }
+
+    pub fn with_roughness_factor(mut self, roughness: f32) -> Self {
+        self.material.factor1.z = roughness;
+        self
+    }
+
+    pub fn with_metallic_roughness_texture(mut self, texture_id: u32) -> Self {
         self.material.texture1 = texture_id;
         self
     }
@@ -320,18 +369,18 @@ impl<'a> EntityBuilder<'a> {
         self
     }
 
-    pub fn with_position(mut self, position: Vec3) -> Self {
-        self.entity.position = position.extend(0.0);
+    pub fn with_position(mut self, position: impl Into<Vec3>) -> Self {
+        self.entity.position = position.into().extend(0.0);
         self
     }
 
-    pub fn with_scale(mut self, scale: Vec3) -> Self {
-        self.entity.scale = scale.extend(0.0);
+    pub fn with_scale(mut self, scale: impl Into<Vec3>) -> Self {
+        self.entity.scale = scale.into().extend(0.0);
         self
     }
 
-    pub fn with_rotation(mut self, rotation: Quat) -> Self {
-        self.entity.rotation = rotation;
+    pub fn with_rotation(mut self, rotation: impl Into<Quat>) -> Self {
+        self.entity.rotation = rotation.into();
         self
     }
 
@@ -448,6 +497,10 @@ impl SceneBuilder {
 
     pub fn new_phong_material(&mut self) -> PhongMaterialBuilder<'_> {
         PhongMaterialBuilder::new(self)
+    }
+
+    pub fn new_pbr_material(&mut self) -> PbrMaterialBuilder<'_> {
+        PbrMaterialBuilder::new(self)
     }
 
     pub fn new_entity(&mut self) -> EntityBuilder<'_> {

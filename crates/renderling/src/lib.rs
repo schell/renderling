@@ -1015,6 +1015,109 @@ mod test {
         crate::img_diff::assert_img_eq("scene_parent_sanity.png", img);
     }
 
+    #[test]
+    // tests the initial implementation of pbr metallic roughness on an array of
+    // spheres with different metallic roughnesses lit by 4 point lights
+    //
+    // see https://learnopengl.com/PBR/Lighting
+    fn pbr_point_lights_metallic_roughness_spheres() {
+        let mut r = Renderling::headless(400, 400)
+            .unwrap()
+            .with_background_color(Vec3::splat(0.0).extend(1.0));
+
+        let radius = 0.5;
+        let mut icosphere = icosahedron::Polyhedron::new_isocahedron(radius, 5);
+        icosphere.compute_triangle_normals();
+        let icosahedron::Polyhedron {
+            positions,
+            normals,
+            cells,
+            ..
+        } = icosphere;
+        log::info!("icosphere created");
+
+        let to_vertex = |ndx: &usize| -> GpuVertex {
+            let p: [f32; 3] = positions[*ndx].0.into();
+            let n: [f32; 3] = normals[*ndx].0.into();
+            GpuVertex::default().with_position(p).with_normal(n)
+        };
+        let sphere_vertices = cells.iter().flat_map(|icosahedron::Triangle { a, b, c }| {
+            let p0 = to_vertex(&a);
+            let p1 = to_vertex(&b);
+            let p2 = to_vertex(&c);
+            vec![p0, p1, p2]
+        });
+
+        let projection = camera::perspective(400.0, 400.0);
+        let k = 5;
+        let diameter = 2.0 * radius;
+        let len = (k - 1) as f32 * diameter;
+        let half = len / 2.0;
+        let view = camera::look_at(
+            Vec3::new(half, half, k as f32 * 1.3),
+            Vec3::new(half, half, 0.0),
+            Vec3::Y,
+        );
+
+        let mut builder = r.new_scene().with_camera(projection, view);
+        let (start, count) = builder.add_meshlet(sphere_vertices);
+
+        let light_z = 2.0 * radius;
+        let light_positions = [
+            Vec3::new(0.0, 0.0, light_z),
+            Vec3::new(len, 0.0, light_z),
+            Vec3::new(0.0, len, light_z),
+            Vec3::new(len, len, light_z),
+        ];
+        let light_material_id = builder
+            .new_unlit_material()
+            .with_base_color(Vec4::ONE)
+            .build();
+        for position in light_positions.into_iter() {
+            let _ = builder
+                .new_point_light()
+                .with_position(position)
+                .with_diffuse_color(Vec4::ONE)
+                .build();
+            let _ = builder
+                .new_entity()
+                .with_starting_vertex_and_count(start, count)
+                .with_position(position)
+                .with_scale(Vec3::splat(0.5))
+                .with_material(light_material_id)
+                .build();
+        }
+
+        let metallic = 0.5;
+        let roughness = 0.5;
+        for i in 0..k {
+            // let metallic = 1.0 - (i as f32 / k as f32);
+            let x = diameter * i as f32;
+            for j in 0..k {
+                // let roughness = j as f32 / k as f32;
+                let y = diameter * j as f32;
+                let material_id = builder
+                    .new_pbr_material()
+                    .with_base_color_factor(Vec4::new(1.0, 0.0, 0.0, 1.0))
+                    .with_metallic_factor(metallic)
+                    .with_roughness_factor(roughness)
+                    .build();
+                let _entity = builder
+                    .new_entity()
+                    .with_starting_vertex_and_count(start, count)
+                    .with_material(material_id)
+                    .with_position([x, y, 0.0])
+                    .build();
+            }
+        }
+
+        let scene = builder.build().unwrap();
+        crate::setup_scene_render_graph(scene, &mut r, true);
+
+        let img = r.render_image().unwrap();
+        crate::img_diff::save("pbr_point_lights_metallic_roughness.png", img);
+    }
+
     #[cfg(feature = "gltf")]
     #[test]
     // tests importing a gltf file and rendering the first image as a 2d object

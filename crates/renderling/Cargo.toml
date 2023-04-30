@@ -48,3 +48,4 @@ features = ["forward", "ui", "image", "raw-window-handle", "winit"]
 [dev-dependencies]
 env_logger = "0.10.0"
 dify = { git = "https://github.com/schell/dify", branch = "patch-1" }
+icosahedron = "^0.1"

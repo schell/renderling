@@ -181,8 +181,8 @@ pub struct GpuMaterial {
 impl Default for GpuMaterial {
     fn default() -> Self {
         Self {
-            factor0: Default::default(),
-            factor1: Default::default(),
+            factor0: Vec4::ONE,
+            factor1: Vec4::ONE,
             texture0: ID_NONE,
             texture1: ID_NONE,
             texture2: ID_NONE,
@@ -296,8 +296,12 @@ pub fn main_vertex_scene(
     out_material_config: &mut u32,
     out_material_lighting_model: &mut LightingModel,
     out_color: &mut Vec4,
+    // material
     out_uv0: &mut Vec2,
+    out_factor0: &mut Vec4,
     out_uv1: &mut Vec2,
+    out_factor1: &mut Vec4,
+
     out_norm: &mut Vec3,
     // position of the vertex/fragment in world space
     out_pos: &mut Vec3,
@@ -318,6 +322,8 @@ pub fn main_vertex_scene(
     let mut material_config = GpuMaterialConfig::empty();
     *out_color = vertex.color;
     *out_material_lighting_model = material.lighting_model;
+    *out_factor0 = material.factor0;
+    *out_factor1 = material.factor1;
     *out_uv0 = if material.texture0 == ID_NONE {
         Vec2::ZERO
     } else {
@@ -355,7 +361,9 @@ pub fn main_fragment_scene(
     in_material_lighting_model: LightingModel,
     in_color: Vec4,
     in_uv0: Vec2,
+    in_factor0: Vec4,
     in_uv1: Vec2,
+    in_factor1: Vec4,
     in_norm: Vec3,
     in_pos: Vec3,
 
@@ -375,16 +383,16 @@ pub fn main_fragment_scene(
 
     *output = match in_material_lighting_model {
         LightingModel::PBR_LIGHTING => {
-            let metalness = 0.5;
-            let roughness = 0.5;
+            let albedo = uv0_color * in_factor0 * in_color;
+            let metallic = uv1_color.y * in_factor1.y;
+            let roughness = uv1_color.z * in_factor1.z;
             let ao = 1.0;
-            let albedo = uv0_color * in_color;
             pbr::shade_fragment(
                 &constants.camera_view,
                 in_norm,
                 in_pos,
                 albedo.rgb(),
-                metalness,
+                metallic,
                 roughness,
                 ao,
                 lights,
@@ -403,7 +411,7 @@ pub fn main_fragment_scene(
             )
         }
         LightingModel::TEXT_LIGHTING => in_color * Vec3::splat(1.0).extend(uv0_color.x),
-        _unlit => in_color * uv0_color * uv1_color,
+        _unlit => in_color * uv0_color * in_factor0 * uv1_color,
     };
 }
 
