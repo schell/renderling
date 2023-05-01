@@ -267,6 +267,7 @@ impl GpuEntity {
 pub struct GpuConstants {
     pub camera_projection: Mat4,
     pub camera_view: Mat4,
+    pub camera_pos: Vec4,
     pub atlas_size: Vec2,
     pub padding: Vec2,
 }
@@ -339,10 +340,8 @@ pub fn main_vertex_scene(
         texture1.uv(vertex.uv.zw(), constants.atlas_size)
     };
     *out_material_config = material_config.bits();
-    *out_norm = (Mat3::from_mat4(constants.camera_view)
-        * Mat3::from_mat4(model_matrix)
-        * (vertex.normal.xyz() / (scale * scale)))
-        .normalize();
+    *out_norm =
+        (Mat3::from_mat4(model_matrix) * (vertex.normal.xyz() / (scale * scale))).normalize();
 
     let view_pos = model_matrix * vertex.position.xyz().extend(1.0);
     *out_pos = view_pos.xyz();
@@ -388,7 +387,7 @@ pub fn main_fragment_scene(
             let roughness = uv1_color.z * in_factor1.z;
             let ao = 1.0;
             pbr::shade_fragment(
-                &constants.camera_view,
+                constants.camera_pos.xyz(),
                 in_norm,
                 in_pos,
                 albedo.rgb(),
@@ -401,7 +400,7 @@ pub fn main_fragment_scene(
         LightingModel::PHONG_LIGHTING => {
             let diffuse_color: Vec4 = uv0_color * in_color;
             let specular_color: Vec4 = uv1_color * in_color;
-            phong::lighting_phong(
+            phong::shade_fragment(
                 &constants.camera_view,
                 lights,
                 diffuse_color,

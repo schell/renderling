@@ -1016,12 +1016,23 @@ mod test {
     }
 
     #[test]
-    // tests the initial implementation of pbr metallic roughness on an array of
+    // sanity tests that we can extract the position of the camera using the camera's view
+    // transform
+    fn camera_position_from_view_matrix() {
+        let position = Vec3::new(1.0, 2.0, 12.0);
+        let view = Mat4::look_at_rh(position, Vec3::new(1.0, 2.0, 0.0), Vec3::Y);
+        let extracted_position = view.inverse().transform_point3(Vec3::ZERO);
+        assert_eq!(position, extracted_position);
+    }
+
+    #[test]
+    // Tests the initial implementation of pbr metallic roughness on an array of
     // spheres with different metallic roughnesses lit by 4 point lights
     //
     // see https://learnopengl.com/PBR/Lighting
     fn pbr_point_lights_metallic_roughness_spheres() {
-        let mut r = Renderling::headless(400, 400)
+        let ss = 600;
+        let mut r = Renderling::headless(ss, ss)
             .unwrap()
             .with_background_color(Vec3::splat(0.0).extend(1.0));
 
@@ -1048,13 +1059,15 @@ mod test {
             vec![p0, p1, p2]
         });
 
-        let projection = camera::perspective(400.0, 400.0);
-        let k = 5;
+        let ss = ss as f32;
+        let projection = camera::perspective(ss, ss);
+        let k = 7;
         let diameter = 2.0 * radius;
-        let len = (k - 1) as f32 * diameter;
+        let spacing = radius * 0.25;
+        let len = (k - 1) as f32 * (diameter + spacing);
         let half = len / 2.0;
         let view = camera::look_at(
-            Vec3::new(half, half, k as f32 * 1.3),
+            Vec3::new(half, half, 1.6 * len),
             Vec3::new(half, half, 0.0),
             Vec3::Y,
         );
@@ -1062,24 +1075,24 @@ mod test {
         let mut builder = r.new_scene().with_camera(projection, view);
         let (start, count) = builder.add_meshlet(sphere_vertices);
 
-        let light_z = 2.0 * radius;
+        let light_z = 3.0 * radius;
         let light_positions = [
-            Vec3::new(0.0, 0.0, light_z),
-            Vec3::new(len, 0.0, light_z),
-            Vec3::new(0.0, len, light_z),
-            Vec3::new(len, len, light_z),
+            [0.0, 0.0, light_z],
+            [len, 0.0, light_z],
+            [0.0, len, light_z],
+            [len, len, light_z],
         ];
-        let light_material_id = builder
-            .new_unlit_material()
-            .with_base_color(Vec4::ONE)
-            .build();
         for position in light_positions.into_iter() {
-            let _ = builder
+            let _light = builder
                 .new_point_light()
                 .with_position(position)
                 .with_diffuse_color(Vec4::ONE)
                 .build();
-            let _ = builder
+            let light_material_id = builder
+                .new_unlit_material()
+                .with_base_color(Vec4::splat(1.0))
+                .build();
+            let _light_entity = builder
                 .new_entity()
                 .with_starting_vertex_and_count(start, count)
                 .with_position(position)
@@ -1088,14 +1101,12 @@ mod test {
                 .build();
         }
 
-        let metallic = 0.5;
-        let roughness = 0.5;
         for i in 0..k {
-            // let metallic = 1.0 - (i as f32 / k as f32);
-            let x = diameter * i as f32;
+            let roughness = i as f32 / (k - 1) as f32;
+            let x = (diameter + spacing) * i as f32;
             for j in 0..k {
-                // let roughness = j as f32 / k as f32;
-                let y = diameter * j as f32;
+                let metallic = j as f32 / (k - 1) as f32;
+                let y = (diameter + spacing) * j as f32;
                 let material_id = builder
                     .new_pbr_material()
                     .with_base_color_factor(Vec4::new(1.0, 0.0, 0.0, 1.0))
@@ -1115,7 +1126,13 @@ mod test {
         crate::setup_scene_render_graph(scene, &mut r, true);
 
         let img = r.render_image().unwrap();
-        crate::img_diff::save("pbr_point_lights_metallic_roughness.png", img);
+        crate::img_diff::assert_img_eq("pbr_point_lights_metallic_roughness.png", img);
+
+        let view = camera::look_at([-len, len, len], [half, half, 0.0], Vec3::Y);
+        r.graph.visit(|mut scene: Write<Scene>| scene.set_camera(projection, view)).unwrap();
+
+        let img = r.render_image().unwrap();
+        crate::img_diff::assert_img_eq("pbr_point_lights_metallic_roughness_side.png", img);
     }
 
     #[cfg(feature = "gltf")]

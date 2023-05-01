@@ -2,8 +2,8 @@
 #[cfg(target_arch = "spirv")]
 use spirv_std::num_traits::Float;
 
-use glam::{Vec3, Vec4, Mat4, Vec4Swizzles};
-use crate::{scene::GpuLight, math::Vec3ColorSwizzles};
+use crate::{math::Vec3ColorSwizzles, scene::GpuLight};
+use glam::{Mat4, Vec3, Vec4, Vec4Swizzles};
 
 /// Calculate attenuation
 ///
@@ -123,7 +123,7 @@ impl GpuLight {
     }
 }
 
-pub fn lighting_phong(
+pub fn shade_fragment(
     camera_view: &Mat4,
     lights: &[GpuLight],
     diffuse_color: Vec4,
@@ -137,8 +137,8 @@ pub fn lighting_phong(
         return (diffuse_color.rgb() * desaturated_norm).extend(1.0);
     }
 
-    let in_pos = (*camera_view * in_pos.extend(1.0)).xyz();
-    let norm: Vec3 = in_norm.normalize_or_zero();
+    let in_pos = camera_view.transform_vector3(in_pos);
+    let norm: Vec3 = camera_view.transform_vector3(in_norm).normalize_or_zero();
     let camera_to_frag_dir: Vec3 = (-in_pos).normalize_or_zero();
     let mut color: Vec3 = Vec3::ZERO;
     for i in 0..lights.len() {

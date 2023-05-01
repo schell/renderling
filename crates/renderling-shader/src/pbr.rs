@@ -1,10 +1,10 @@
 //! Physically based renderer shader code.
 //!
-//! Thanks to https://learnopengl.com/PBR/Theory
+//! Thanks to https://learnopengl.com/PBR/Theory.
 #[cfg(target_arch = "spirv")]
 use spirv_std::num_traits::Float;
 
-use glam::{Mat4, Vec3, Vec4, Vec4Swizzles};
+use glam::{Vec3, Vec4, Vec4Swizzles};
 
 use crate::{scene::GpuLight, math::Vec3ColorSwizzles};
 
@@ -64,11 +64,11 @@ fn fresnel_schlick(
 }
 
 pub fn shade_fragment(
-    // world transform of the camera
-    camera_view: &Mat4,
+    // camera's position in world space
+    camera_pos: Vec3,
     // normal of the fragment
     in_norm: Vec3,
-    // position of the fragment (world space)
+    // position of the fragment in world space
     in_pos: Vec3,
     // base color of the fragment
     albedo: Vec3,
@@ -84,7 +84,6 @@ pub fn shade_fragment(
         return (albedo * desaturated_norm).extend(1.0);
     }
 
-    let camera_pos = camera_view.transform_point3(Vec3::ZERO);
     let n = in_norm.normalize_or_zero();
     let v = (camera_pos - in_pos).normalize_or_zero();
 
@@ -132,6 +131,8 @@ pub fn shade_fragment(
 
     let ambient = Vec3::splat(0.03) * albedo * ao;
     let color = ambient + lo;
+
+    // This is built in gamma correction
     let color = color / (color + Vec3::ONE);
     let color = color.powf(1.0 / 2.2);
 
