@@ -1,23 +1,26 @@
 # renderling 🍖
 
-This is a modern "GPU-driven" renderer, along with a collection of
-shaders and types that can facilitate writing new renderers.
+This aspires to be a modern "GPU-driven" renderer. It is alpha software. I'm still learning, but quickly!
 
 `renderling` holds entire scenes of geometry, textures, materials and lighting in GPU buffers.
 Most of the rendering operations happen on the GPU.
 The CPU is used to interact with the filesystem to marshall data to the GPU and to bind buffers.
 This makes `renderling` very effective at rendering certain types of scenes.
-Specifically `renderling` aims to be good at rendering scenes with a moderate level of geometry
-and lots of lighting effects.
+Specifically `renderling` aims to be good at rendering scenes with a moderate level of geometry, 
+with a moderate number of textures (or small textures) and lots of lighting effects.
+
+![renderling pbr](test_img/pbr_point_lights_metallic_roughness.png)
+
+![renderling pbr](test_img/pbr_point_lights_metallic_roughness_side.png)
 
 ## API Features
 
-* builder pattern for scenes, entities (objects), materials and lights
+* builder pattern for scenes, entities (scene nodes), materials and lights
 * headless rendering support
   - rendering to texture and saving via `image` crate
 * text rendering support (cargo feature `text` - on by default)
 * nested nodes with local transforms
-* tight support for loading scenes through `gltf`
+* tight support for loading scenes through `gltf` (cargo feature `gltf` - on by default)
 
 Shaders are written in Rust via `rust-gpu` where possible, falling back to `wgsl` where needed.
 
@@ -29,12 +32,13 @@ Shaders are written in Rust via `rust-gpu` where possible, falling back to `wgsl
   - [x] user interface "colored text" shading (uses opacity glyphs in an atlas)
   - [x] no shading
 - [ ] gltf support
-  - [ ] scenes, nodes
+  - [ ] scenes
+  - [x] nodes
   - [x] cameras
   - [x] meshes
   - [x] materials
     - [x] funky phong
-    - [ ] metallic roughness
+    - [x] metallic roughness
     - [ ] specular glosiness
     - [ ] normal/bump mapping
   - [x] textures, images, samplers
@@ -112,7 +116,7 @@ It compiles into a program that can be run to generate the shaders:
 cd shaders/ && cargo run --release
 ```
 
-## :heart: Sponsor this!
+## 🫶 Sponsor this!
 
 This work will always be free and open source. If you use it (outright or for inspiration), please consider donating.
 
