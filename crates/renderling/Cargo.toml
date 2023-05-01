@@ -32,7 +32,7 @@ gltf = { version = "^1.1", optional = true, features = ["KHR_lights_punctual", "
 glyph_brush = { version = "^0.7", optional = true }
 image = { version = "0.24.4", optional = true }
 log = "^0.4"
-moongraph = { path = "../moongraph", features = ["dot"] }
+moongraph = { version = "^0.1", features = ["dot"] }
 raw-window-handle = { version = "^0.5", optional = true }
 renderling-shader = { path = "../renderling-shader" }
 rustc-hash = "^1.1"
