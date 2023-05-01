@@ -615,6 +615,7 @@ impl Scene {
             label: Some("Scene::new constants"),
             contents: bytemuck::cast_slice(&[GpuConstants {
                 camera_projection: projection,
+                camera_pos: view.inverse().transform_point3(Vec3::ZERO).extend(0.0),
                 camera_view: view,
                 atlas_size: atlas.size,
                 padding: Vec2::ZERO,
@@ -733,6 +734,7 @@ impl Scene {
     pub fn set_camera(&mut self, proj: Mat4, view: Mat4) {
         self.constants_update = Some(GpuConstants {
             camera_projection: proj,
+            camera_pos: view.inverse().transform_point3(Vec3::ZERO).extend(0.0),
             camera_view: view,
             atlas_size: self.atlas.size,
             padding: Vec2::ZERO,
