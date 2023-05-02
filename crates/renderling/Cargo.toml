@@ -39,7 +39,7 @@ rustc-hash = "^1.1"
 serde_json = "^1.0"
 snafu = "^0.7"
 splines = { version = "^4.2", features = ["glam"] }
-wgpu = { version = "^0.15", features = ["spirv"] }
+wgpu = { version = "^0.16", features = ["spirv"] }
 winit = { version = "^0.27", optional = true }
 
 [package.metadata.docs.rs]

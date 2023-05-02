@@ -6,7 +6,7 @@ This aspires to be a modern "GPU-driven" renderer. It is alpha software. I'm sti
 Most of the rendering operations happen on the GPU.
 The CPU is used to interact with the filesystem to marshall data to the GPU and to bind buffers.
 This makes `renderling` very effective at rendering certain types of scenes.
-Specifically `renderling` aims to be good at rendering scenes with a moderate level of geometry, 
+Specifically `renderling` aims to be good at rendering scenes with a moderate level of geometry,
 with a moderate number of textures (or small textures) and lots of lighting effects.
 
 ![renderling pbr](test_img/pbr_point_lights_metallic_roughness.png)
@@ -26,31 +26,39 @@ Shaders are written in Rust via `rust-gpu` where possible, falling back to `wgsl
 
 ## Rendering Features / Roadmap
 
-- forward+ style pipeline, configurable lighting model per material
+Renderling takes a [forward+](https://takahiroharada.files.wordpress.com/2015/04/forward_plus.pdf) approach to rendering.
+
+By default it uses a single uber-shader with a configurable lighting model per material.
+
+This means each model may be shaded separately, with a different lighting style.
+
+- [x] Built-in support for common lighting/material workflows
   - [x] physically based shading
   - [x] blinn-phong shading
   - [x] user interface "colored text" shading (uses opacity glyphs in an atlas)
-  - [x] no shading
+  - [x] unlit
+- [ ] skybox
+- [ ] image based lighting
+  - [ ] diffuse
+  - [ ] specular
+- [ ] high definition rendering
+- [ ] bloom
+- [ ] ssao
+- [ ] depth of field
 - [ ] gltf support
   - [ ] scenes
   - [x] nodes
   - [x] cameras
   - [x] meshes
   - [x] materials
-    - [x] funky phong
+    - [x] funky phong (gltf doesn't support phong directly afaik, so we "guess")
     - [x] metallic roughness
-    - [ ] specular glosiness
     - [ ] normal/bump mapping
+    - [ ] specular glosiness
   - [x] textures, images, samplers
   - [ ] animations
   - [ ] morph targets
   - [ ] skins
-- [ ] skybox
-- [ ] high definition rendering
-- [ ] bloom
-- [ ] image based lighting
-- [ ] ssao
-- [ ] depth of field
 
 ## Definition
 **renderling** noun

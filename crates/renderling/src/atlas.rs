@@ -64,8 +64,9 @@ impl Atlas {
             img.as_bytes(),
             wgpu::ImageDataLayout {
                 offset: 0,
-                bytes_per_row: std::num::NonZeroU32::new(4 * width),
-                rows_per_image: std::num::NonZeroU32::new(height),
+                // TODO: pad this to a multiple 256 if needed
+                bytes_per_row: Some(4 * width),
+                rows_per_image: None,
             },
             size,
         );
@@ -117,8 +118,8 @@ impl Atlas {
                 img.as_bytes(),
                 wgpu::ImageDataLayout {
                     offset: 0,
-                    bytes_per_row: std::num::NonZeroU32::new(4 * img.width()),
-                    rows_per_image: std::num::NonZeroU32::new(img.height()),
+                    bytes_per_row: Some(4 * img.width()),
+                    rows_per_image: None,
                 },
                 wgpu::Extent3d {
                     width: img.width(),
