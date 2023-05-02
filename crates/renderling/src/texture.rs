@@ -78,8 +78,8 @@ impl Texture {
             data,
             wgpu::ImageDataLayout {
                 offset: 0,
-                bytes_per_row: std::num::NonZeroU32::new(color_channels * width),
-                rows_per_image: std::num::NonZeroU32::new(height),
+                bytes_per_row: Some(color_channels * width),
+                rows_per_image: None,
             },
             size,
         );
@@ -212,8 +212,8 @@ impl Texture {
             img.deref(),
             wgpu::ImageDataLayout {
                 offset: 0,
-                bytes_per_row: std::num::NonZeroU32::new(P::CHANNEL_COUNT as u32 * dimensions.0),
-                rows_per_image: std::num::NonZeroU32::new(dimensions.1),
+                bytes_per_row: Some(P::CHANNEL_COUNT as u32 * dimensions.0),
+                rows_per_image: Some(dimensions.1),
             },
             size,
         );
@@ -311,7 +311,7 @@ impl Texture {
                 layout: wgpu::ImageDataLayout {
                     offset: 0,
                     bytes_per_row: Some(
-                        std::num::NonZeroU32::new(dimensions.padded_bytes_per_row as u32).unwrap(),
+                        dimensions.padded_bytes_per_row as u32,
                     ),
                     rows_per_image: None,
                 },

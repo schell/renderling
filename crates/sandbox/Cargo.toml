@@ -8,5 +8,5 @@ edition = "2021"
 [dependencies]
 image = { version = "^0.24" }
 renderling = { path = "../renderling" }
-wgpu = "^0.15"
+wgpu = "^0.16"
 winit = "^0.27"

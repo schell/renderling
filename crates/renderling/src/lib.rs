@@ -124,7 +124,7 @@ mod test {
             .is_test(true)
             //.filter_level(log::LevelFilter::Trace)
             .filter_module("renderling", log::LevelFilter::Trace)
-            //.filter_module("naga", log::LevelFilter::Debug)
+            .filter_module("naga", log::LevelFilter::Debug)
             //.filter_module("wgpu", log::LevelFilter::Debug)
             //.filter_module("wgpu_hal", log::LevelFilter::Warn)
             .try_init();
@@ -1031,6 +1031,7 @@ mod test {
     //
     // see https://learnopengl.com/PBR/Lighting
     fn pbr_point_lights_metallic_roughness_spheres() {
+        _init_logging();
         let ss = 600;
         let mut r = Renderling::headless(ss, ss)
             .unwrap()

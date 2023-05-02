@@ -155,7 +155,7 @@ impl PostRenderBufferCreate {
                 layout: wgpu::ImageDataLayout {
                     offset: 0,
                     bytes_per_row: Some(
-                        std::num::NonZeroU32::new(dimensions.padded_bytes_per_row as u32).unwrap(),
+                        dimensions.padded_bytes_per_row as u32,
                     ),
                     rows_per_image: None,
                 },

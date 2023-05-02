@@ -3,7 +3,6 @@
 //! This module is only enabled with the `text` cargo feature.
 use std::{
     borrow::Cow,
-    num::NonZeroU32,
     ops::{Deref, DerefMut},
     sync::Arc,
 };
@@ -63,8 +62,8 @@ impl Cache {
             &data,
             wgpu::ImageDataLayout {
                 offset: 0,
-                bytes_per_row: NonZeroU32::new(width as u32),
-                rows_per_image: NonZeroU32::new(height as u32),
+                bytes_per_row: Some(width as u32),
+                rows_per_image: Some(height as u32),
             },
             wgpu::Extent3d {
                 width: size[0] as u32,
