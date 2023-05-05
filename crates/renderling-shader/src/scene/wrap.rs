@@ -55,7 +55,8 @@ pub fn wrap(input: f32, mode: TextureAddressMode) -> f32 {
                 1.0 - input
             }
         },
-        TextureAddressMode::MIRRORED_REPEAT => todo!(),
+        // TODO: implement mirrored repeat wrapping
+        TextureAddressMode::MIRRORED_REPEAT => repeat(input * input.signum()),
         _ => clamp(input)
     }
 }

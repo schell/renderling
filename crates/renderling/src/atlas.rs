@@ -76,8 +76,16 @@ impl Atlas {
             },
             size,
         );
-
-        let gpu_texture = crate::Texture::from_wgpu_tex(texture, device);
+        let sampler_desc = wgpu::SamplerDescriptor {
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
+        };
+        let gpu_texture = crate::Texture::from_wgpu_tex(device, texture, Some(sampler_desc));
         Self::new_with_texture(gpu_texture, width, height)
     }
 

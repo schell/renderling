@@ -41,6 +41,7 @@ This means each model may be shaded separately, with a different lighting style.
 - [ ] image based lighting
   - [ ] diffuse
   - [ ] specular
+- [ ] msaa
 - [ ] high definition rendering
 - [ ] bloom
 - [ ] ssao

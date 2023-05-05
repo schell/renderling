@@ -364,7 +364,7 @@ fn texture_color(
         textures[texture_id as usize]
     };
     let uv = texture.uv(uv, atlas_size);
-    let mut color: Vec4 = atlas.sample(*sampler, uv);
+    let mut color: Vec4 = atlas.sample_by_lod(*sampler, uv, 0.0);
     if texture_id == ID_NONE {
         color = Vec4::splat(1.0);
     }
