@@ -33,6 +33,9 @@ pub enum SceneError {
     #[snafu(display("Missing texture {id}"))]
     MissingTexture { id: u32 },
 
+    #[snafu(display("Missing image {index}"))]
+    MissingImage { index: usize },
+
     #[snafu(display("All atlases are used."))]
     ExhaustedAtlases,
 
@@ -40,16 +43,10 @@ pub enum SceneError {
     AlreadyPackedAtlas,
 
     #[snafu(display(
-        "The scene builder has images, but a text scene cannot contain images because the atlas \
-         must be used for text."
-    ))]
-    TextSceneAtlasCannotContainExtraImages,
-
-    #[snafu(display(
-        "The scene builder has materials, but a text scene only contains one material which is \
+        "The scene builder has {name}s, but a text scene only contains one {name} which is \
          automatically included."
     ))]
-    TextSceneDefaultMaterial,
+    TextSceneSingleton { name: &'static str },
 
     #[snafu(display("Missing the glyph.cache"))]
     MissingCache,
@@ -414,6 +411,7 @@ pub struct SceneBuilder {
     pub(crate) projection: Mat4,
     pub(crate) view: Mat4,
     pub(crate) images: Vec<RgbaImage>,
+    pub(crate) textures: Vec<(usize, TextureAddressMode, TextureAddressMode)>,
     pub(crate) materials: Vec<GpuMaterial>,
     pub(crate) vertices: Vec<GpuVertex>,
     pub(crate) entities: Vec<GpuEntity>,
@@ -429,20 +427,57 @@ impl SceneBuilder {
             view: Mat4::IDENTITY,
             images: vec![],
             vertices: vec![],
+            textures: vec![],
             materials: vec![],
             entities: vec![],
             lights: vec![],
         }
     }
 
-    pub fn add_image(&mut self, img: RgbaImage) -> u32 {
-        let id = self.images.len() as u32;
+    /// Add an image and return a texture id for it.
+    pub fn add_image_texture_mode(
+        &mut self,
+        img: RgbaImage,
+        mode_s: TextureAddressMode,
+        mode_t: TextureAddressMode,
+    ) -> u32 {
+        let image_index = self.images.len();
         self.images.push(img);
-        id
+        self.add_texture(image_index, mode_s, mode_t)
     }
-}
 
-impl SceneBuilder {
+    /// Add an image and return a texture id for it.
+    ///
+    /// The texture sampling mode defaults to "repeat".
+    pub fn add_image_texture(&mut self, img: RgbaImage) -> u32 {
+        self.add_image_texture_mode(
+            img,
+            TextureAddressMode::CLAMP_TO_EDGE,
+            TextureAddressMode::CLAMP_TO_EDGE,
+        )
+    }
+
+    /// Add an image, without adding an explicit texture.
+    ///
+    /// Returns the index of the image.
+    pub fn add_image(&mut self, img: RgbaImage) -> usize {
+        let index = self.images.len();
+        self.images.push(img);
+        index
+    }
+
+    /// Add a texture referencing an image.
+    pub fn add_texture(
+        &mut self,
+        image_index: usize,
+        mode_s: TextureAddressMode,
+        mode_t: TextureAddressMode,
+    ) -> u32 {
+        let texture_id = self.textures.len();
+        self.textures.push((image_index, mode_s, mode_t));
+        texture_id as u32
+    }
+
     pub fn with_camera(mut self, projection: Mat4, view: Mat4) -> Self {
         self.set_camera(projection, view);
         self
@@ -554,8 +589,18 @@ impl Scene {
     ) -> Result<Self, SceneError> {
         snafu::ensure!(
             scene_builder.images.is_empty(),
-            TextSceneAtlasCannotContainExtraImagesSnafu
+            TextSceneSingletonSnafu { name: "image" }
         );
+
+        if scene_builder.textures.is_empty() {
+            scene_builder.textures.push(crate::TEXT_TEXTURE);
+        } else {
+            snafu::ensure!(
+                scene_builder.textures.len() == 1
+                    && scene_builder.textures[0] == crate::TEXT_TEXTURE,
+                TextSceneSingletonSnafu { name: "texture" }
+            );
+        }
 
         if scene_builder.materials.is_empty() {
             scene_builder.materials.push(crate::TEXT_MATERIAL);
@@ -563,14 +608,19 @@ impl Scene {
             snafu::ensure!(
                 scene_builder.materials.len() == 1
                     && scene_builder.materials[0] == crate::TEXT_MATERIAL,
-                TextSceneDefaultMaterialSnafu
+                TextSceneSingletonSnafu { name: "material" }
             );
         }
 
         let (w, h) = glyph_cache.brush.texture_dimensions();
         let cache = glyph_cache.cache.as_ref().context(MissingCacheSnafu)?;
         let mut atlas = Atlas::new_with_texture(cache.texture.clone(), w, h);
-        atlas.rects = vec![crunch::Rect{x: 0, y: 0, w: w as usize, h: h as usize}];
+        atlas.rects = vec![crunch::Rect {
+            x: 0,
+            y: 0,
+            w: w as usize,
+            h: h as usize,
+        }];
         Self::new_with_atlas(scene_builder, atlas)
     }
 
@@ -593,6 +643,7 @@ impl Scene {
             projection,
             view,
             images,
+            textures,
             materials,
             vertices,
             entities,
@@ -600,7 +651,19 @@ impl Scene {
         } = scene_builder;
         snafu::ensure!(images.is_empty(), AlreadyPackedAtlasSnafu);
 
-        let textures = atlas.textures().map(|i| i.1).collect::<Vec<_>>();
+        let frames = textures.into_iter();
+        let mut textures = vec![];
+        for (image_index, address_mode_s, address_mode_t) in frames {
+            let (offset_px, size_px) = atlas
+                .get_frame(image_index)
+                .context(MissingImageSnafu { index: image_index })?;
+            textures.push(GpuTexture {
+                offset_px,
+                size_px,
+                address_mode_s,
+                address_mode_t,
+            });
+        }
         let textures = GpuArray::new(&device, &textures, textures.len(), scene_render_usage());
         let vertices = GpuArray::new(&device, &vertices, vertices.len(), scene_render_usage());
         let draws = entities

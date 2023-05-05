@@ -153,6 +153,7 @@ pub struct GltfMeshPrim {
 pub struct GltfLoader {
     pub cameras: GltfStore<(Mat4, Mat4)>,
     pub lights: GltfStore<GpuLight>,
+    pub textures: GltfStore<u32>,
     pub materials: GltfStore<(u32, GpuMaterial)>,
     pub meshes: GltfStore<Vec<GltfMeshPrim>>,
     pub nodes: GltfStore<GltfNode>,
@@ -173,15 +174,13 @@ impl GltfLoader {
         for image in images {
             // let format = image_data_format_to_wgpu(image.format)?;
             // let num_channels = image_data_format_num_channels(image.format);
-            let img = match image.format {
+            let dyn_img: image::DynamicImage = match image.format {
                 gltf::image::Format::R8 => todo!(),
                 gltf::image::Format::R8G8 => todo!(),
                 gltf::image::Format::R8G8B8 => {
-                    let img: image::DynamicImage =
-                        image::RgbImage::from_vec(image.width, image.height, image.pixels.clone())
-                            .context(InvalidImageSnafu)?
-                            .into();
-                    img.to_rgba8()
+                    image::RgbImage::from_vec(image.width, image.height, image.pixels.clone())
+                        .context(InvalidImageSnafu)?
+                        .into()
                 }
                 gltf::image::Format::R8G8B8A8 => {
                     image::RgbaImage::from_vec(image.width, image.height, image.pixels.clone())
@@ -190,14 +189,31 @@ impl GltfLoader {
                 }
                 gltf::image::Format::R16 => todo!(),
                 gltf::image::Format::R16G16 => todo!(),
-                gltf::image::Format::R16G16B16 => todo!(),
-                gltf::image::Format::R16G16B16A16 => todo!(),
+                gltf::image::Format::R16G16B16 => {
+                    image::ImageBuffer::<image::Rgb<u16>, Vec<u16>>::from_vec(
+                        image.width,
+                        image.height,
+                        bytemuck::cast_slice(&image.pixels).to_vec(),
+                    )
+                    .context(InvalidImageSnafu)?
+                    .into()
+                }
+                gltf::image::Format::R16G16B16A16 => {
+                    image::ImageBuffer::<image::Rgba<u16>, Vec<u16>>::from_vec(
+                        image.width,
+                        image.height,
+                        bytemuck::cast_slice(&image.pixels).to_vec(),
+                    )
+                    .context(InvalidImageSnafu)?
+                    .into()
+                }
                 gltf::image::Format::R32G32B32FLOAT => todo!(),
                 gltf::image::Format::R32G32B32A32FLOAT => todo!(),
             };
-            builder.add_image(img);
+            let _ = builder.add_image(dyn_img.to_rgba8());
         }
 
+        loader.load_textures(document, &mut builder)?;
         loader.load_materials(document, &mut builder)?;
 
         log::debug!("adding meshlets");
@@ -213,6 +229,36 @@ impl GltfLoader {
         Ok((loader, builder))
     }
 
+    fn load_textures(
+        &mut self,
+        document: &gltf::Document,
+        builder: &mut SceneBuilder,
+    ) -> Result<(), GltfLoaderError> {
+        log::debug!("loading textures");
+        for texture in document.textures() {
+            self.load_texture(texture, builder);
+        }
+        Ok(())
+    }
+
+    fn load_texture(&mut self, texture: gltf::Texture<'_>, builder: &mut SceneBuilder) {
+        let index = texture.index();
+        let name = texture.name().map(String::from);
+        let image_index = texture.source().index();
+        fn mode(mode: gltf::texture::WrappingMode) -> TextureAddressMode {
+            match mode {
+                gltf::texture::WrappingMode::ClampToEdge => TextureAddressMode::CLAMP_TO_EDGE,
+                gltf::texture::WrappingMode::MirroredRepeat => TextureAddressMode::MIRRORED_REPEAT,
+                gltf::texture::WrappingMode::Repeat => TextureAddressMode::REPEAT,
+            }
+        }
+        let mode_s = mode(texture.sampler().wrap_s());
+        let mode_t = mode(texture.sampler().wrap_t());
+
+        let texture_id = builder.add_texture(image_index, mode_s, mode_t);
+        let _ = self.textures.insert(index, name, texture_id);
+    }
+
     fn load_materials(
         &mut self,
         document: &gltf::Document,
@@ -226,33 +272,43 @@ impl GltfLoader {
     }
 
     fn load_material(&mut self, material: gltf::Material<'_>, builder: &mut SceneBuilder) {
-        let mut gpu_material = GpuMaterial::default();
-        gpu_material.lighting_model = if material.unlit() {
-            LightingModel::NO_LIGHTING
+        let pbr = material.pbr_metallic_roughness();
+        let gpu_material_id = if material.unlit() {
+            builder
+                .new_unlit_material()
+                .with_base_color(pbr.base_color_factor())
+                .with_texture0(
+                    pbr.base_color_texture()
+                        .map(|info| info.texture().index() as u32)
+                        .unwrap_or(ID_NONE),
+                )
+                .build()
         } else {
-            LightingModel::PHONG_LIGHTING
+            builder
+                .new_pbr_material()
+                .with_base_color_factor(pbr.base_color_factor())
+                .with_base_color_texture(
+                    pbr.base_color_texture()
+                        .map(|info| info.texture().index() as u32)
+                        .unwrap_or(ID_NONE),
+                )
+                .with_metallic_factor(pbr.metallic_factor())
+                .with_roughness_factor(pbr.roughness_factor())
+                .with_metallic_roughness_texture(
+                    pbr.metallic_roughness_texture()
+                        .map(|info| info.texture().index() as u32)
+                        .unwrap_or(ID_NONE),
+                )
+                .build()
         };
 
-        let pbr = material.pbr_metallic_roughness();
-
-        gpu_material.factor0 = pbr.base_color_factor().into();
-        if let Some(info) = pbr.base_color_texture() {
-            let index = info.texture().index();
-            gpu_material.texture0 = index as u32;
-        }
-
-        gpu_material.factor1.x = pbr.metallic_factor();
-        gpu_material.factor1.y = pbr.roughness_factor();
-        if let Some(info) = pbr.metallic_roughness_texture() {
-            let index = info.texture().index();
-            gpu_material.texture1 = index as u32;
-        }
-        let material_id = builder.add_material(gpu_material);
+        // UNWRAP: ok because we just stored this material above
+        let gpu_material = builder.get_material(gpu_material_id).unwrap();
         if let Some(index) = material.index() {
             let _ = self.materials.insert(
                 index,
                 material.name().map(String::from),
-                (material_id, gpu_material),
+                (gpu_material_id, gpu_material),
             );
         }
     }
@@ -329,13 +385,12 @@ impl GltfLoader {
                 })
                 .collect::<Vec<_>>();
             // we don't yet support indices, so we'll just repeat vertices
-            let mut vertices =
-                if let Some(indices) = reader.read_indices() {
-                    let indices = indices.into_u32();
-                    indices.map(|i| vertices[i as usize]).collect::<Vec<_>>()
-                } else {
-                    vertices
-                };
+            let mut vertices = if let Some(indices) = reader.read_indices() {
+                let indices = indices.into_u32();
+                indices.map(|i| vertices[i as usize]).collect::<Vec<_>>()
+            } else {
+                vertices
+            };
             if gen_normals {
                 vertices.chunks_mut(3).for_each(|t| match t {
                     [a, b, c] => {

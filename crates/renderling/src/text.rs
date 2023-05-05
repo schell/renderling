@@ -13,7 +13,9 @@ use glyph_brush::*;
 
 pub use ::ab_glyph::FontArc;
 pub use glyph_brush::{Color, Section, Text};
-use renderling_shader::scene::{GpuMaterial, GpuVertex, LightingModel, ID_NONE};
+use renderling_shader::scene::{
+    GpuMaterial, GpuVertex, LightingModel, TextureAddressMode, ID_NONE,
+};
 
 use crate::{Renderling, Texture};
 
@@ -220,6 +222,12 @@ fn to_vertex(
     let data = vec![tl, br, tr, tl, bl, br];
     data
 }
+
+pub const TEXT_TEXTURE: (usize, TextureAddressMode, TextureAddressMode) = (
+    0,
+    TextureAddressMode::CLAMP_TO_EDGE,
+    TextureAddressMode::CLAMP_TO_EDGE,
+);
 
 pub const TEXT_MATERIAL: GpuMaterial = GpuMaterial {
     texture0: 0,
