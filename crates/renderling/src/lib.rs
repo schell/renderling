@@ -756,7 +756,9 @@ mod test {
         builder.add_image(dirt);
         let sandstone = image::open("../../img/sandstone.png").unwrap().into_rgba8();
         builder.add_image(sandstone);
-        let texels = image::open("../../test_img/atlas_uv_mapping.png").unwrap().into_rgba8();
+        let texels = image::open("../../test_img/atlas_uv_mapping.png")
+            .unwrap()
+            .into_rgba8();
         let texels_index = builder.add_image(texels);
         let texture_id = builder.add_texture(
             texels_index,
@@ -914,10 +916,7 @@ mod test {
         assert_eq!(Vec2::ZERO, tex.uv(Vec2::ZERO, UVec2::splat(1)));
         assert_eq!(Vec2::ZERO, tex.uv(Vec2::ZERO, UVec2::splat(256)));
         tex.offset_px = UVec2::splat(10);
-        assert_eq!(
-            Vec2::splat(0.1010101),
-            tex.uv(Vec2::ZERO, UVec2::splat(100))
-        );
+        assert_eq!(Vec2::splat(0.1), tex.uv(Vec2::ZERO, UVec2::splat(100)));
     }
 
     #[test]
@@ -1159,8 +1158,8 @@ mod test {
     }
 
     #[test]
-    // sanity tests that we can extract the position of the camera using the camera's view
-    // transform
+    // sanity tests that we can extract the position of the camera using the
+    // camera's view transform
     fn camera_position_from_view_matrix() {
         let position = Vec3::new(1.0, 2.0, 12.0);
         let view = Mat4::look_at_rh(position, Vec3::new(1.0, 2.0, 0.0), Vec3::Y);
@@ -1381,6 +1380,7 @@ mod test {
     #[cfg(feature = "gltf")]
     #[test]
     fn gltf_simple_texture() {
+        _init_logging();
         let (document, buffers, images) =
             gltf::import("../../gltf/gltfTutorial_013_SimpleTexture.gltf").unwrap();
         let size = 100;

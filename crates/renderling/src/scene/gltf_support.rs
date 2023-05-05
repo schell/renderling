@@ -171,9 +171,10 @@ impl GltfLoader {
         let mut loader = GltfLoader::default();
         let mut builder = SceneBuilder::new(device.0, queue.0);
 
-        for image in images {
+        for (i, image) in images.iter().enumerate() {
             // let format = image_data_format_to_wgpu(image.format)?;
             // let num_channels = image_data_format_num_channels(image.format);
+            log::trace!("adding image {} with format {:?}", i, image.format);
             let dyn_img: image::DynamicImage = match image.format {
                 gltf::image::Format::R8 => todo!(),
                 gltf::image::Format::R8G8 => todo!(),
@@ -256,6 +257,10 @@ impl GltfLoader {
         let mode_t = mode(texture.sampler().wrap_t());
 
         let texture_id = builder.add_texture(image_index, mode_s, mode_t);
+        log::trace!(
+            "adding texture index:{index} name:{name:?} id:{texture_id} with wrapping \
+             s:{mode_s:?} t:{mode_t:?}"
+        );
         let _ = self.textures.insert(index, name, texture_id);
     }
 

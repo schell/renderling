@@ -218,13 +218,17 @@ impl Texture {
             size,
         );
 
-        Ok(Self::from_wgpu_tex(texture, device))
+        Ok(Self::from_wgpu_tex(device, texture, None))
     }
 
-    pub fn from_wgpu_tex(texture: wgpu::Texture, device: &wgpu::Device) -> Self {
+    pub fn from_wgpu_tex(
+        device: &wgpu::Device,
+        texture: wgpu::Texture,
+        sampler: Option<wgpu::SamplerDescriptor>,
+    ) -> Self {
         let texture = Arc::new(texture);
         let view = Arc::new(texture.create_view(&wgpu::TextureViewDescriptor::default()));
-        let sampler = Arc::new(device.create_sampler(&wgpu::SamplerDescriptor {
+        let sampler_descriptor = sampler.unwrap_or_else(|| wgpu::SamplerDescriptor {
             address_mode_u: wgpu::AddressMode::ClampToEdge,
             address_mode_v: wgpu::AddressMode::ClampToEdge,
             address_mode_w: wgpu::AddressMode::ClampToEdge,
@@ -232,7 +236,8 @@ impl Texture {
             min_filter: wgpu::FilterMode::Linear,
             mipmap_filter: wgpu::FilterMode::Linear,
             ..Default::default()
-        }));
+        });
+        let sampler = Arc::new(device.create_sampler(&sampler_descriptor));
 
         Self {
             texture,
@@ -310,9 +315,7 @@ impl Texture {
                 buffer: &buffer,
                 layout: wgpu::ImageDataLayout {
                     offset: 0,
-                    bytes_per_row: Some(
-                        dimensions.padded_bytes_per_row as u32,
-                    ),
+                    bytes_per_row: Some(dimensions.padded_bytes_per_row as u32),
                     rows_per_image: None,
                 },
             },
@@ -397,10 +400,7 @@ impl CopiedTextureBuffer {
 
     #[cfg(feature = "image")]
     /// Convert the post render buffer into an RgbaImage.
-    pub fn into_rgba(
-        self,
-        device: &wgpu::Device,
-    ) -> Result<image::RgbaImage, TextureError> {
+    pub fn into_rgba(self, device: &wgpu::Device) -> Result<image::RgbaImage, TextureError> {
         let buffer_slice = self.buffer.slice(..);
         buffer_slice.map_async(wgpu::MapMode::Read, |_| {});
         device.poll(wgpu::Maintain::Wait);
