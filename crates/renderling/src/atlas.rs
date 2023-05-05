@@ -1,14 +1,21 @@
-//! Texture atlas
-use glam::Vec2;
+//! Texture atlas.
+//!
+//! All images are packed into an atlas at scene build time.
+//! Texture descriptors describing where in the atlas an image is,
+//! and how callsites should sample pixels is packed into a buffer
+//! on the GPU. This makes the number of texture binds _very_ low.
+//!
+//! An atlas should be temporary until we can use bindless techniques
+//! on web.
+use glam::UVec2;
 use image::{EncodableLayout, RgbaImage};
-use renderling_shader::scene::GpuTexture;
 use snafu::prelude::*;
 
-fn gpu_texture_from_rect(r: crunch::Rect) -> GpuTexture {
-    GpuTexture {
-        offset_px: Vec2::new(r.x as f32, r.y as f32),
-        size_px: Vec2::new(r.w as f32, r.h as f32),
-    }
+fn gpu_frame_from_rect(r: crunch::Rect) -> (UVec2, UVec2) {
+    (
+        UVec2::new(r.x as u32, r.y as u32),
+        UVec2::new(r.w as u32, r.h as u32),
+    )
 }
 
 #[derive(Debug, Snafu)]
@@ -21,7 +28,7 @@ pub enum AtlasError {
 pub struct Atlas {
     pub texture: crate::Texture,
     pub rects: Vec<crunch::Rect>,
-    pub size: Vec2,
+    pub size: UVec2,
 }
 
 impl Atlas {
@@ -29,7 +36,7 @@ impl Atlas {
         Atlas {
             texture,
             rects: vec![],
-            size: Vec2::new(width as f32, height as f32),
+            size: UVec2::new(width, height),
         }
     }
 
@@ -64,9 +71,8 @@ impl Atlas {
             img.as_bytes(),
             wgpu::ImageDataLayout {
                 offset: 0,
-                // TODO: pad this to a multiple 256 if needed
                 bytes_per_row: Some(4 * width),
-                rows_per_image: None,
+                rows_per_image: Some(height),
             },
             size,
         );
@@ -119,7 +125,7 @@ impl Atlas {
                 wgpu::ImageDataLayout {
                     offset: 0,
                     bytes_per_row: Some(4 * img.width()),
-                    rows_per_image: None,
+                    rows_per_image: Some(img.height()),
                 },
                 wgpu::Extent3d {
                     width: img.width(),
@@ -133,25 +139,11 @@ impl Atlas {
         Ok(atlas)
     }
 
-    pub fn textures(&self) -> impl Iterator< Item = (u32, GpuTexture)> + '_ {
-        (0u32..)
-            .zip(self.rects.iter().copied().map(gpu_texture_from_rect))
+    pub fn frames(&self) -> impl Iterator<Item = (u32, (UVec2, UVec2))> + '_ {
+        (0u32..).zip(self.rects.iter().copied().map(gpu_frame_from_rect))
     }
 
-    pub fn transform_uvs(uv: Vec2, rect: crunch::Rect, atlas_size: Vec2) -> Vec2 {
-        let crunch::Rect { x, y, w, h } = rect;
-        let img_origin = Vec2::new(x as f32, y as f32);
-        let img_size = Vec2::new(w as f32, h as f32);
-        // convert the uv from normalized into pixel locations in the original image
-        let uv_img_pixels = uv * img_size;
-        // convert those into pixel locations in the atlas image
-        let uv_atlas_pixels = img_origin + uv_img_pixels;
-        // normalize the uvs by the atlas size
-        let uv_atlas_normalized = uv_atlas_pixels / atlas_size;
-        uv_atlas_normalized
-    }
-
-    pub fn get_texture(&self, texture_id: u32) -> Option<GpuTexture> {
-        self.rects.get(texture_id as usize).copied().map(gpu_texture_from_rect)
+    pub fn get_frame(&self, index: usize) -> Option<(UVec2, UVec2)> {
+        self.rects.get(index).copied().map(gpu_frame_from_rect)
     }
 }

@@ -6,10 +6,13 @@
 //! To read more about the technique, check out these resources:
 //! * https://stackoverflow.com/questions/59686151/what-is-gpu-driven-rendering
 use bitflags::bitflags;
-use glam::{Mat3, Mat4, Quat, UVec3, Vec2, Vec3, Vec4, Vec4Swizzles};
+use glam::{Mat3, Mat4, Quat, UVec2, UVec3, Vec2, Vec3, Vec4, Vec4Swizzles};
 use spirv_std::{image::Image2d, Sampler};
 
 use crate::{math::Vec3ColorSwizzles, pbr, phong};
+
+mod wrap;
+pub use wrap::*;
 
 /// A vertex in a mesh.
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
@@ -93,27 +96,37 @@ impl GpuLight {
 #[repr(C)]
 #[derive(Clone, Copy, Default, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct GpuTexture {
-    // top left offset of texture in the atlas
-    pub offset_px: Vec2,
-    // size of texture in the atlas
-    pub size_px: Vec2,
+    // The top left offset of texture in the atlas
+    pub offset_px: UVec2,
+    // The size of texture in the atlas
+    pub size_px: UVec2,
+    // How `s` edges should be handled in texture addressing.
+    pub address_mode_s: TextureAddressMode,
+    // How `t` edges should be handled in texture addressing.
+    pub address_mode_t: TextureAddressMode,
 }
 
 impl GpuTexture {
-    pub fn uv(&self, uv: Vec2, atlas_size: Vec2) -> Vec2 {
-        let x = self.offset_px.x;
-        let y = self.offset_px.y;
-        let w = self.size_px.x;
-        let h = self.size_px.y;
-        let img_origin = Vec2::new(x, y);
-        let img_size = Vec2::new(w, h);
-        // convert the uv from normalized into pixel locations in the original image
-        let uv_img_pixels = uv * img_size;
-        // convert those into pixel locations in the atlas image
-        let uv_atlas_pixels = img_origin + uv_img_pixels;
-        // normalize the uvs by the atlas size
-        let uv_atlas_normalized = uv_atlas_pixels / atlas_size;
-        uv_atlas_normalized
+    /// Transform the given `uv` coordinates for this texture's address mode
+    /// and placement in the atlas of the given size.
+    pub fn uv(&self, mut uv: Vec2, atlas_size: UVec2) -> Vec2 {
+        uv.x = wrap::wrap(uv.x, self.address_mode_s);
+        uv.y = wrap::wrap(uv.y, self.address_mode_t);
+
+        // get the pixel index of the uv coordinate in terms of the original image
+        let mut px_index_s = (uv.x * self.size_px.x as f32) as u32;
+        let mut px_index_t = (uv.y * self.size_px.y as f32) as u32;
+
+        // convert the pixel index from image to atlas space
+        px_index_s += self.offset_px.x;
+        px_index_t += self.offset_px.y;
+
+        let sx = atlas_size.x as f32;
+        let sy = atlas_size.y as f32;
+        // normalize the pixels by dividing by the atlas size
+        let uv_s = px_index_s as f32 / sx;
+        let uv_t = px_index_t as f32 / sy;
+        Vec2::new(uv_s, uv_t)
     }
 }
 
@@ -268,7 +281,7 @@ pub struct GpuConstants {
     pub camera_projection: Mat4,
     pub camera_view: Mat4,
     pub camera_pos: Vec4,
-    pub atlas_size: Vec2,
+    pub atlas_size: UVec2,
     pub padding: Vec2,
 }
 
@@ -292,14 +305,14 @@ pub fn main_vertex_scene(
     vertices: &[GpuVertex],
     entities: &[GpuEntity],
     materials: &[GpuMaterial],
-    textures: &[GpuTexture],
 
-    out_material_config: &mut u32,
     out_material_lighting_model: &mut LightingModel,
     out_color: &mut Vec4,
     // material
+    out_texture0: &mut u32,
     out_uv0: &mut Vec2,
     out_factor0: &mut Vec4,
+    out_texture1: &mut u32,
     out_uv1: &mut Vec2,
     out_factor1: &mut Vec4,
 
@@ -314,32 +327,21 @@ pub fn main_vertex_scene(
     let (position, rotation, scale) = entity.get_world_transform(entities);
     let model_matrix =
         Mat4::from_translation(position) * Mat4::from_quat(rotation) * Mat4::from_scale(scale);
+
     let material = if entity.material == ID_NONE {
         GpuMaterial::default()
     } else {
         materials[entity.material as usize]
     };
 
-    let mut material_config = GpuMaterialConfig::empty();
     *out_color = vertex.color;
     *out_material_lighting_model = material.lighting_model;
     *out_factor0 = material.factor0;
     *out_factor1 = material.factor1;
-    *out_uv0 = if material.texture0 == ID_NONE {
-        Vec2::ZERO
-    } else {
-        material_config |= GpuMaterialConfig::TEXTURE0;
-        let texture0 = textures[material.texture0 as usize];
-        texture0.uv(vertex.uv.xy(), constants.atlas_size)
-    };
-    *out_uv1 = if material.texture1 == ID_NONE {
-        Vec2::ZERO
-    } else {
-        material_config |= GpuMaterialConfig::TEXTURE1;
-        let texture1 = textures[material.texture1 as usize];
-        texture1.uv(vertex.uv.zw(), constants.atlas_size)
-    };
-    *out_material_config = material_config.bits();
+    *out_texture0 = material.texture0;
+    *out_texture1 = material.texture1;
+    *out_uv0 = vertex.uv.xy();
+    *out_uv1 = vertex.uv.zw();
     *out_norm =
         (Mat3::from_mat4(model_matrix) * (vertex.normal.xyz() / (scale * scale))).normalize();
 
@@ -348,19 +350,41 @@ pub fn main_vertex_scene(
     *gl_pos = constants.camera_projection * constants.camera_view * view_pos;
 }
 
-/// Scene fragment shader.
+fn texture_color(
+    texture_id: u32,
+    uv: Vec2,
+    atlas: &Image2d,
+    sampler: &Sampler,
+    atlas_size: UVec2,
+    textures: &[GpuTexture],
+) -> Vec4 {
+    let texture = if texture_id == ID_NONE {
+        GpuTexture::default()
+    } else {
+        textures[texture_id as usize]
+    };
+    let uv = texture.uv(uv, atlas_size);
+    let mut color: Vec4 = atlas.sample(*sampler, uv);
+    if texture_id == ID_NONE {
+        color = Vec4::splat(1.0);
+    }
+    color
+}
+
 pub fn main_fragment_scene(
     atlas: &Image2d,
     sampler: &Sampler,
+    textures: &[GpuTexture],
 
     constants: &GpuConstants,
     lights: &[GpuLight],
 
-    in_material_config: u32,
     in_material_lighting_model: LightingModel,
     in_color: Vec4,
+    in_texture0: u32,
     in_uv0: Vec2,
     in_factor0: Vec4,
+    in_texture1: u32,
     in_uv1: Vec2,
     in_factor1: Vec4,
     in_norm: Vec3,
@@ -368,17 +392,22 @@ pub fn main_fragment_scene(
 
     output: &mut Vec4,
 ) {
-    let config = GpuMaterialConfig::from_bits_retain(in_material_config);
-
-    let mut uv0_color: Vec4 = atlas.sample(*sampler, in_uv0);
-    if !config.texture0_used() {
-        uv0_color = Vec4::splat(1.0);
-    }
-
-    let mut uv1_color: Vec4 = atlas.sample(*sampler, in_uv1);
-    if !config.texture1_used() {
-        uv1_color = Vec4::splat(1.0);
-    }
+    let uv0_color = texture_color(
+        in_texture0,
+        in_uv0,
+        atlas,
+        sampler,
+        constants.atlas_size,
+        textures,
+    );
+    let uv1_color = texture_color(
+        in_texture1,
+        in_uv1,
+        atlas,
+        sampler,
+        constants.atlas_size,
+        textures,
+    );
 
     *output = match in_material_lighting_model {
         LightingModel::PBR_LIGHTING => {

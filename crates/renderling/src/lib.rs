@@ -83,7 +83,7 @@ mod img_diff;
 #[cfg(test)]
 mod test {
     use super::*;
-    use glam::{Mat3, Mat4, Quat, Vec2, Vec3, Vec4};
+    use glam::{Mat3, Mat4, Quat, UVec2, Vec2, Vec3, Vec4};
     use moongraph::Read;
     use renderling_shader::scene::{DrawIndirect, GpuEntity, GpuVertex};
 
@@ -124,7 +124,7 @@ mod test {
             .is_test(true)
             //.filter_level(log::LevelFilter::Trace)
             .filter_module("renderling", log::LevelFilter::Trace)
-            .filter_module("naga", log::LevelFilter::Debug)
+            //.filter_module("naga", log::LevelFilter::Debug)
             //.filter_module("wgpu", log::LevelFilter::Debug)
             //.filter_module("wgpu_hal", log::LevelFilter::Warn)
             .try_init();
@@ -413,9 +413,9 @@ mod test {
         let (proj, view) = camera::default_perspective(100.0, 100.0);
         let mut builder = r.new_scene().with_camera(proj, view);
         let sandstone = image::open("../../img/sandstone.png").unwrap().to_rgba8();
-        let sandstone_id = builder.add_image(sandstone);
+        let sandstone_id = builder.add_image_texture(sandstone);
         let dirt = image::open("../../img/dirt.jpg").unwrap().to_rgba8();
-        let dirt_id = builder.add_image(dirt);
+        let dirt_id = builder.add_image_texture(dirt);
 
         let material_id = builder
             .new_unlit_material()
@@ -643,7 +643,7 @@ mod test {
             .decode()
             .unwrap();
         let img = img.to_rgba8();
-        let tex_id = builder.add_image(img);
+        let tex_id = builder.add_image_texture(img);
         assert_eq!(0, tex_id);
         let material = builder.new_unlit_material().with_texture0(tex_id).build();
 
@@ -695,10 +695,10 @@ mod test {
         let scene = builder.build().unwrap();
         assert_eq!(2, scene.entities.len());
 
-        let textures = scene.atlas().textures().collect::<Vec<_>>();
+        let textures = scene.atlas().frames().collect::<Vec<_>>();
         assert_eq!(1, textures.len());
         assert_eq!(0, textures[0].0);
-        assert_eq!(Vec2::splat(170.0), textures[0].1.size_px);
+        assert_eq!(UVec2::splat(170), textures[0].1 .1);
 
         scene::setup_scene_render_graph(scene, &mut r, true);
 
@@ -728,7 +728,7 @@ mod test {
         );
         let constants: GpuConstants =
             read_buffer(r.get_device(), r.get_queue(), &scene.constants, 0, 1).unwrap()[0];
-        assert_eq!(Vec2::splat(256.0), constants.atlas_size);
+        assert_eq!(UVec2::splat(256), constants.atlas_size);
 
         let materials = scene
             .materials
@@ -746,34 +746,177 @@ mod test {
     }
 
     #[test]
+    fn atlas_uv_mapping() {
+        let mut r = Renderling::headless(32, 32)
+            .unwrap()
+            .with_background_color(Vec3::splat(0.0).extend(1.0));
+        let (projection, view) = camera::default_ortho2d(32.0, 32.0);
+        let mut builder = r.new_scene().with_camera(projection, view);
+        let dirt = image::open("../../img/dirt.jpg").unwrap().into_rgba8();
+        builder.add_image(dirt);
+        let sandstone = image::open("../../img/sandstone.png").unwrap().into_rgba8();
+        builder.add_image(sandstone);
+        let texels = image::open("../../test_img/atlas_uv_mapping.png").unwrap().into_rgba8();
+        let texels_index = builder.add_image(texels);
+        let texture_id = builder.add_texture(
+            texels_index,
+            TextureAddressMode::CLAMP_TO_EDGE,
+            TextureAddressMode::CLAMP_TO_EDGE,
+        );
+        let material_id = builder
+            .new_unlit_material()
+            .with_texture0(texture_id)
+            .build();
+        let _ = builder
+            .new_entity()
+            .with_material(material_id)
+            .with_meshlet({
+                let tl = GpuVertex::default()
+                    .with_position(Vec3::ZERO)
+                    .with_uv0(Vec2::ZERO);
+                let tr = GpuVertex::default()
+                    .with_position(Vec3::new(1.0, 0.0, 0.0))
+                    .with_uv0(Vec2::new(1.0, 0.0));
+                let bl = GpuVertex::default()
+                    .with_position(Vec3::new(0.0, 1.0, 0.0))
+                    .with_uv0(Vec2::new(0.0, 1.0));
+                let br = GpuVertex::default()
+                    .with_position(Vec3::new(1.0, 1.0, 0.0))
+                    .with_uv0(Vec2::splat(1.0));
+                vec![tl, bl, br, tl, br, tr]
+            })
+            .with_scale([32.0, 32.0, 1.0])
+            .build();
+        let scene = builder.build().unwrap();
+        let atlas_img = scene.atlas.texture.read(
+            r.get_device(),
+            r.get_queue(),
+            scene.atlas.size.x as usize,
+            scene.atlas.size.y as usize,
+        );
+        let atlas_img = atlas_img.into_rgba(r.get_device()).unwrap();
+        crate::img_diff::save("atlas.png", atlas_img);
+        crate::setup_scene_render_graph(scene, &mut r, true);
+
+        let img = r.render_image().unwrap();
+        crate::img_diff::assert_img_eq("atlas_uv_mapping.png", img);
+    }
+
+    #[test]
+    fn uv_wrapping() {
+        let icon_w = 32;
+        let icon_h = 41;
+        let sheet_w = icon_w * 3;
+        let sheet_h = icon_h * 3;
+        let w = sheet_w * 3 + 2;
+        let h = sheet_h;
+        let mut r = Renderling::headless(w, h)
+            .unwrap()
+            .with_background_color(Vec4::new(1.0, 1.0, 0.0, 1.0));
+        let (projection, view) = camera::default_ortho2d(w as f32, h as f32);
+        let mut builder = r.new_scene().with_camera(projection, view);
+        let dirt = image::open("../../img/dirt.jpg").unwrap().into_rgba8();
+        builder.add_image(dirt);
+        let sandstone = image::open("../../img/sandstone.png").unwrap().into_rgba8();
+        builder.add_image(sandstone);
+        let texels = image::open("../../img/happy_mac.png").unwrap().into_rgba8();
+        let texels_index = builder.add_image(texels);
+        let clamp_texture_id = builder.add_texture(
+            texels_index,
+            TextureAddressMode::CLAMP_TO_EDGE,
+            TextureAddressMode::CLAMP_TO_EDGE,
+        );
+        let repeat_texture_id = builder.add_texture(
+            texels_index,
+            TextureAddressMode::REPEAT,
+            TextureAddressMode::REPEAT,
+        );
+        let mirror_texture_id = builder.add_texture(
+            texels_index,
+            TextureAddressMode::MIRRORED_REPEAT,
+            TextureAddressMode::MIRRORED_REPEAT,
+        );
+
+        let clamp_material_id = builder
+            .new_unlit_material()
+            .with_texture0(clamp_texture_id)
+            .build();
+        let repeat_material_id = builder
+            .new_unlit_material()
+            .with_texture0(repeat_texture_id)
+            .build();
+        let mirror_material_id = builder
+            .new_unlit_material()
+            .with_texture0(mirror_texture_id)
+            .build();
+
+        let sheet_w = sheet_w as f32;
+        let sheet_h = sheet_h as f32;
+
+        let (start, count) = builder.add_meshlet({
+            let tl = GpuVertex::default()
+                .with_position(Vec3::ZERO)
+                .with_uv0(Vec2::ZERO);
+            let tr = GpuVertex::default()
+                .with_position(Vec3::new(sheet_w, 0.0, 0.0))
+                .with_uv0(Vec2::new(3.0, 0.0));
+            let bl = GpuVertex::default()
+                .with_position(Vec3::new(0.0, sheet_h, 0.0))
+                .with_uv0(Vec2::new(0.0, 3.0));
+            let br = GpuVertex::default()
+                .with_position(Vec3::new(sheet_w, sheet_h, 0.0))
+                .with_uv0(Vec2::splat(3.0));
+            vec![tl, bl, br, tl, br, tr]
+        });
+
+        let _clamp = builder
+            .new_entity()
+            .with_material(clamp_material_id)
+            .with_starting_vertex_and_count(start, count)
+            .build();
+        let _repeat = builder
+            .new_entity()
+            .with_material(repeat_material_id)
+            .with_starting_vertex_and_count(start, count)
+            .with_position([sheet_w as f32 + 1.0, 0.0, 0.0])
+            .build();
+        let _mirror = builder
+            .new_entity()
+            .with_material(mirror_material_id)
+            .with_starting_vertex_and_count(start, count)
+            .with_position([sheet_w as f32 * 2.0 + 1.0, 0.0, 0.0])
+            .build();
+
+        let scene = builder.build().unwrap();
+        let atlas_img = scene.atlas.texture.read(
+            r.get_device(),
+            r.get_queue(),
+            scene.atlas.size.x as usize,
+            scene.atlas.size.y as usize,
+        );
+        let atlas_img = atlas_img.into_rgba(r.get_device()).unwrap();
+        crate::img_diff::save("uv_wrapping_atlas.png", atlas_img);
+        crate::setup_scene_render_graph(scene, &mut r, true);
+
+        let img = r.render_image().unwrap();
+        crate::img_diff::save("uv_wrapping.png", img);
+    }
+
+    #[test]
     fn transform_uvs_for_atlas() {
-        let rect = crunch::Rect {
-            x: 0,
-            y: 0,
-            w: 1,
-            h: 1,
+        let mut tex = GpuTexture {
+            offset_px: UVec2::ZERO,
+            size_px: UVec2::ONE,
+            address_mode_s: TextureAddressMode::CLAMP_TO_EDGE,
+            address_mode_t: TextureAddressMode::CLAMP_TO_EDGE,
         };
+        assert_eq!(Vec2::ZERO, tex.uv(Vec2::ZERO, UVec2::splat(100)));
+        assert_eq!(Vec2::ZERO, tex.uv(Vec2::ZERO, UVec2::splat(1)));
+        assert_eq!(Vec2::ZERO, tex.uv(Vec2::ZERO, UVec2::splat(256)));
+        tex.offset_px = UVec2::splat(10);
         assert_eq!(
-            Vec2::ZERO,
-            Atlas::transform_uvs(Vec2::ZERO, rect, Vec2::splat(100.0))
-        );
-        assert_eq!(
-            Vec2::ZERO,
-            Atlas::transform_uvs(Vec2::ZERO, rect, Vec2::splat(1.0))
-        );
-        assert_eq!(
-            Vec2::ZERO,
-            Atlas::transform_uvs(Vec2::ZERO, rect, Vec2::splat(256.0))
-        );
-        let rect = crunch::Rect {
-            x: 10,
-            y: 10,
-            w: 1,
-            h: 1,
-        };
-        assert_eq!(
-            Vec2::splat(0.1),
-            Atlas::transform_uvs(Vec2::ZERO, rect, Vec2::splat(100.0))
+            Vec2::splat(0.1010101),
+            tex.uv(Vec2::ZERO, UVec2::splat(100))
         );
     }
 
@@ -1130,7 +1273,9 @@ mod test {
         crate::img_diff::assert_img_eq("pbr_point_lights_metallic_roughness.png", img);
 
         let view = camera::look_at([-len, len, len], [half, half, 0.0], Vec3::Y);
-        r.graph.visit(|mut scene: Write<Scene>| scene.set_camera(projection, view)).unwrap();
+        r.graph
+            .visit(|mut scene: Write<Scene>| scene.set_camera(projection, view))
+            .unwrap();
 
         let img = r.render_image().unwrap();
         crate::img_diff::assert_img_eq("pbr_point_lights_metallic_roughness_side.png", img);
@@ -1147,7 +1292,8 @@ mod test {
             .with_background_color(Vec4::splat(1.0));
         let (device, queue) = r.get_device_and_queue();
         let (_loader, mut builder) =
-            crate::GltfLoader::load(device, queue, &document, &buffers, &images).unwrap();
+            crate::GltfLoader::load(device.clone(), queue.clone(), &document, &buffers, &images)
+                .unwrap();
         let (projection, view) = camera::default_ortho2d(100.0, 100.0);
         builder.set_camera(projection, view);
         let material_id = builder.new_unlit_material().with_texture0(0).build();
@@ -1174,6 +1320,8 @@ mod test {
             .with_scale(Vec3::new(100.0, 100.0, 1.0))
             .build();
         let scene = builder.build().unwrap();
+        let texture = scene.textures.read(&device, &queue, 0, 1).unwrap()[0];
+        println!("{texture:?}");
         crate::setup_scene_render_graph(scene, &mut r, true);
         let img = r.render_image().unwrap();
         crate::img_diff::assert_img_eq("gltf_images.png", img);
@@ -1259,6 +1407,46 @@ mod test {
 
         let img = r.render_image().unwrap();
         crate::img_diff::assert_img_eq("gltf_simple_texture.png", img);
+    }
+
+    #[cfg(feature = "gltf")]
+    #[test]
+    fn gltf_normal_mapping_brick_sphere() {
+        let (document, buffers, images) = gltf::import("../../gltf/red_brick_03_1k.glb").unwrap();
+        let size = 600;
+        let mut r = Renderling::headless(size, size)
+            .unwrap()
+            .with_background_color(Vec3::splat(1.0).extend(1.0));
+        let (device, queue) = r.get_device_and_queue();
+        let (loader, mut builder) =
+            crate::GltfLoader::load(device.clone(), queue.clone(), &document, &buffers, &images)
+                .unwrap();
+
+        let (projection, view) = loader.cameras.get(0).copied().unwrap();
+        builder.set_camera(projection, view);
+
+        let scene = builder.build().unwrap();
+        crate::setup_scene_render_graph(scene, &mut r, true);
+
+        let img = r.render_image().unwrap();
+        crate::img_diff::save("gltf_normal_mapping_brick_sphere.png", img);
+
+        let atlas_img = r
+            .graph
+            .visit(
+                |(scene, device, queue): (Read<Scene>, Read<Device>, Read<Queue>)| {
+                    let s = scene.atlas.size;
+                    let copied_texture =
+                        scene
+                            .atlas
+                            .texture
+                            .read(&device, &queue, s.x as usize, s.y as usize);
+                    copied_texture.into_rgba(&device).unwrap()
+                },
+            )
+            .unwrap();
+
+        crate::img_diff::save("gltf_normal_mapping_atlas.png", atlas_img);
     }
 
     //#[cfg(feature = "gltf")]
