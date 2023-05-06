@@ -74,7 +74,7 @@ pub struct GpuSpotLightBuilder<'a> {
 impl<'a> GpuSpotLightBuilder<'a> {
     pub fn new(lights: &'a mut Vec<GpuLight>) -> GpuSpotLightBuilder<'a> {
         let inner = GpuLight {
-            light_type: GpuLight::SPOT_LIGHT,
+            light_type: LightType::SPOT_LIGHT,
             ..Default::default()
         };
         let index = lights.len();
@@ -145,7 +145,7 @@ pub struct GpuDirectionalLightBuilder<'a> {
 impl<'a> GpuDirectionalLightBuilder<'a> {
     pub fn new(lights: &'a mut Vec<GpuLight>) -> GpuDirectionalLightBuilder<'a> {
         let inner = GpuLight {
-            light_type: GpuLight::DIRECTIONAL_LIGHT,
+            light_type: LightType::DIRECTIONAL_LIGHT,
             ..Default::default()
         };
         let index = lights.len();
@@ -191,7 +191,7 @@ pub struct GpuPointLightBuilder<'a> {
 impl<'a> GpuPointLightBuilder<'a> {
     pub fn new(lights: &mut Vec<GpuLight>) -> GpuPointLightBuilder<'_> {
         let inner = GpuLight {
-            light_type: GpuLight::POINT_LIGHT,
+            light_type: LightType::POINT_LIGHT,
             ..Default::default()
         };
         let index = lights.len();
@@ -632,6 +632,7 @@ impl Scene {
             std::mem::take(&mut scene_builder.images),
         )
         .context(AtlasSnafu)?;
+        log::trace!("atlas created");
         Self::new_with_atlas(scene_builder, atlas)
     }
 

@@ -6,7 +6,10 @@ use spirv_std::num_traits::Float;
 
 use glam::{Vec3, Vec4, Vec4Swizzles};
 
-use crate::{scene::GpuLight, math::Vec3ColorSwizzles};
+use crate::{
+    math::Vec3ColorSwizzles,
+    scene::{GpuLight, LightType},
+};
 
 /// Trowbridge-Reitz GGX normal distribution function (NDF).
 ///
@@ -63,6 +66,35 @@ fn fresnel_schlick(
     f0 + (1.0 - f0) * (1.0 - cos_theta).clamp(0.0, 1.0).powf(5.0)
 }
 
+fn outgoing_radiance(
+    light: &GpuLight,
+    albedo: Vec3,
+    attenuation: f32,
+    v: Vec3,
+    l: Vec3,
+    n: Vec3,
+    metalness: f32,
+    roughness: f32,
+) -> Vec3 {
+    let f0 = Vec3::splat(0.4).lerp(albedo, metalness);
+    let radiance = light.diffuse_color.rgb() * attenuation;
+    let h = (v + l).normalize_or_zero();
+    // cook-torrance brdf
+    let ndf: f32 = normal_distribution_ggx(n, h, roughness);
+    let g: f32 = geometry_smith(n, v, l, roughness);
+    let f: Vec3 = fresnel_schlick(h.dot(v).max(0.0), f0);
+
+    let k_s = f;
+    let k_d = (Vec3::splat(1.0) - k_s) * (1.0 - metalness);
+
+    let numerator: Vec3 = ndf * g * f;
+    let n_dot_l = n.dot(l).max(0.0);
+    let denominator: f32 = 4.0 * n.dot(v).max(0.0) * n_dot_l + 0.0001;
+    let specular: Vec3 = numerator / denominator;
+
+    (k_d * albedo / core::f32::consts::PI + specular) * radiance * n_dot_l
+}
+
 pub fn shade_fragment(
     // camera's position in world space
     camera_pos: Vec3,
@@ -78,7 +110,7 @@ pub fn shade_fragment(
 
     lights: &[GpuLight],
 ) -> Vec4 {
-    if lights.is_empty() || lights[0].light_type == GpuLight::END_OF_LIGHTS {
+    if lights.is_empty() || lights[0].light_type == LightType::END_OF_LIGHTS {
         // the scene is unlit, so we should provide some default
         let desaturated_norm = in_norm.abs().dot(Vec3::new(0.2126, 0.7152, 0.0722));
         return (albedo * desaturated_norm).extend(1.0);
@@ -87,50 +119,53 @@ pub fn shade_fragment(
     let n = in_norm.normalize_or_zero();
     let v = (camera_pos - in_pos).normalize_or_zero();
 
-    let f0 = Vec3::splat(0.4).lerp(albedo, metalness);
-
     // reflectance
     let mut lo = Vec3::ZERO;
     for i in 0..lights.len() {
         // calculate per-light radiance
         let light = lights[i];
+
+        // determine the light ray and the radiance
         match light.light_type {
-            GpuLight::END_OF_LIGHTS => {
+            LightType::END_OF_LIGHTS => {
                 break;
             }
-            GpuLight::POINT_LIGHT => {
+            LightType::POINT_LIGHT => {
                 let frag_to_light = light.position.xyz() - in_pos;
-                let l = frag_to_light.normalize_or_zero();
-                let h = (v + l).normalize_or_zero();
                 let distance = frag_to_light.length();
                 if distance == 0.0 {
                     continue;
                 }
+                let l = frag_to_light.normalize_or_zero();
                 let attenuation = 1.0 / (distance * distance);
-                let radiance = light.diffuse_color.rgb() * attenuation;
+                lo += outgoing_radiance(&light, albedo, attenuation, v, l, n, metalness, roughness);
+            }
 
-                // cook-torrance brdf
-                let ndf: f32 = normal_distribution_ggx(n, h, roughness);
-                let g: f32 = geometry_smith(n, v, l, roughness);
-                let f: Vec3 = fresnel_schlick(h.dot(v).max(0.0), f0);
+            LightType::SPOT_LIGHT => {
+                let frag_to_light = light.position.xyz() - in_pos;
+                let distance = frag_to_light.length();
+                if distance == 0.0 {
+                    continue;
+                }
+                let l = frag_to_light.normalize_or_zero();
+                let theta: f32 = l.dot(light.direction.xyz().normalize_or_zero());
+                let epsilon: f32 = light.inner_cutoff - light.outer_cutoff;
+                let intensity: f32 = ((theta - light.outer_cutoff) / epsilon).clamp(0.0, 1.0);
+                let attenuation = intensity;
+                lo += outgoing_radiance(&light, albedo, attenuation, v, l, n, metalness, roughness);
+            }
 
-                let k_s = f;
-                let k_d = (Vec3::splat(1.0) - k_s) * (1.0 - metalness);
-
-                let numerator: Vec3 = ndf * g * f;
-                let denominator: f32 = 4.0 * n.dot(v).max(0.0) * n.dot(l).max(0.0) + 0.0001;
-                let specular: Vec3 = numerator / denominator;
-
-                // add to outgoing radiance Lo
-                let ndot_l = n.dot(l).max(0.0);
-                lo += (k_d * albedo / core::f32::consts::PI + specular) * radiance * ndot_l;
+            LightType::DIRECTIONAL_LIGHT => {
+                let l = -light.direction.xyz().normalize_or_zero();
+                let attenuation = 1.0;
+                lo += outgoing_radiance(&light, albedo, attenuation, v, l, n, metalness, roughness);
             }
             _ => {}
         }
     }
 
     let ambient = Vec3::splat(0.03) * albedo * ao;
-    let color = ambient + lo;
+    let color = lo + ambient;
 
     // This is built in gamma correction
     let color = color / (color + Vec3::ONE);

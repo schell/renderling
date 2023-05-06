@@ -277,8 +277,12 @@ impl GltfLoader {
     }
 
     fn load_material(&mut self, material: gltf::Material<'_>, builder: &mut SceneBuilder) {
+        let index = material.index();
+        let name = material.name().map(String::from);
+        log::trace!("loading material {index:?} {name:?}");
         let pbr = material.pbr_metallic_roughness();
         let gpu_material_id = if material.unlit() {
+            log::trace!("  is unlit");
             builder
                 .new_unlit_material()
                 .with_base_color(pbr.base_color_factor())
@@ -289,6 +293,7 @@ impl GltfLoader {
                 )
                 .build()
         } else {
+            log::trace!("  is pbr");
             builder
                 .new_pbr_material()
                 .with_base_color_factor(pbr.base_color_factor())
@@ -309,12 +314,11 @@ impl GltfLoader {
 
         // UNWRAP: ok because we just stored this material above
         let gpu_material = builder.get_material(gpu_material_id).unwrap();
-        if let Some(index) = material.index() {
-            let _ = self.materials.insert(
-                index,
-                material.name().map(String::from),
-                (gpu_material_id, gpu_material),
-            );
+        // TODO: figure out why a material would not have an index
+        if let Some(index) = index {
+            let _ = self
+                .materials
+                .insert(index, name, (gpu_material_id, gpu_material));
         }
     }
 
@@ -572,6 +576,7 @@ impl GltfLoader {
                     .with_cutoff(inner_cone_angle, outer_cone_angle)
                     .build(),
             };
+            log::trace!("  node is {}", gpu_light.light_type);
             let _ = self.lights.insert(light.index(), None, gpu_light);
             GltfNode::Light(light.index())
         } else {
