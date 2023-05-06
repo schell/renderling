@@ -67,6 +67,32 @@ impl GpuVertex {
     }
 }
 
+#[repr(transparent)]
+#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
+#[derive(Copy, Clone, Default, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct LightType(u32);
+
+#[cfg(not(target_arch = "spirv"))]
+impl core::fmt::Display for LightType {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let s = match self {
+            &Self::END_OF_LIGHTS => "end of lights",
+            &Self::POINT_LIGHT => "point light",
+            &Self::SPOT_LIGHT => "spot light",
+            &Self::DIRECTIONAL_LIGHT => "directional light",
+            _ => "unsupported light"
+        };
+        f.write_str(s)
+    }
+}
+
+impl LightType {
+    pub const END_OF_LIGHTS: Self = Self(0);
+    pub const POINT_LIGHT: Self = Self(1);
+    pub const SPOT_LIGHT: Self = Self(2);
+    pub const DIRECTIONAL_LIGHT: Self = Self(3);
+}                               //
+
 /// A light capable of representing a directional, point or spotlight.
 #[repr(C)]
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
@@ -80,15 +106,8 @@ pub struct GpuLight {
     pub specular_color: Vec4,
     pub inner_cutoff: f32,
     pub outer_cutoff: f32,
-    pub light_type: u32,
+    pub light_type: LightType,
     pub _padding0: u32,
-}
-
-impl GpuLight {
-    pub const END_OF_LIGHTS: u32 = 0;
-    pub const POINT_LIGHT: u32 = 1;
-    pub const SPOT_LIGHT: u32 = 2;
-    pub const DIRECTIONAL_LIGHT: u32 = 3;
 }
 
 /// A GPU texture.

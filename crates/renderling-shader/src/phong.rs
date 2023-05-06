@@ -2,7 +2,7 @@
 #[cfg(target_arch = "spirv")]
 use spirv_std::num_traits::Float;
 
-use crate::{math::Vec3ColorSwizzles, scene::GpuLight};
+use crate::{math::Vec3ColorSwizzles, scene::{GpuLight, LightType}};
 use glam::{Mat4, Vec3, Vec4, Vec4Swizzles};
 
 /// Calculate attenuation
@@ -131,7 +131,7 @@ pub fn shade_fragment(
     in_pos: Vec3,
     in_norm: Vec3,
 ) -> Vec4 {
-    if lights.is_empty() || lights[0].light_type == GpuLight::END_OF_LIGHTS {
+    if lights.is_empty() || lights[0].light_type == LightType::END_OF_LIGHTS {
         // the scene is unlit, so we should provide some default
         let desaturated_norm = in_norm.abs().dot(Vec3::new(0.2126, 0.7152, 0.0722));
         return (diffuse_color.rgb() * desaturated_norm).extend(1.0);
@@ -144,10 +144,10 @@ pub fn shade_fragment(
     for i in 0..lights.len() {
         let light = lights[i];
         match light.light_type {
-            GpuLight::END_OF_LIGHTS => {
+            LightType::END_OF_LIGHTS => {
                 break;
             }
-            GpuLight::DIRECTIONAL_LIGHT => {
+            LightType::DIRECTIONAL_LIGHT => {
                 color += light.color_phong_directional(
                     *camera_view,
                     norm,
@@ -158,7 +158,7 @@ pub fn shade_fragment(
                     16.0,
                 );
             }
-            GpuLight::POINT_LIGHT => {
+            LightType::POINT_LIGHT => {
                 color += light.color_phong_point(
                     in_pos,
                     *camera_view,
@@ -170,7 +170,7 @@ pub fn shade_fragment(
                     16.0,
                 );
             }
-            GpuLight::SPOT_LIGHT => {
+            LightType::SPOT_LIGHT => {
                 color += light.color_phong_spot(
                     in_pos,
                     *camera_view,

@@ -1497,6 +1497,7 @@ mod test {
     #[cfg(feature = "gltf")]
     #[test]
     fn gltf_normal_mapping_brick_sphere() {
+        _init_logging();
         let (document, buffers, images) = gltf::import("../../gltf/red_brick_03_1k.glb").unwrap();
         let size = 600;
         let mut r = Renderling::headless(size, size)
@@ -1514,8 +1515,10 @@ mod test {
         crate::setup_scene_render_graph(scene, &mut r, true);
 
         let img = r.render_image().unwrap();
+        println!("saving frame");
         crate::img_diff::save("gltf_normal_mapping_brick_sphere.png", img);
 
+        println!("saving atlas");
         let atlas_img = r
             .graph
             .visit(
