@@ -126,7 +126,9 @@ impl GpuTexture {
         // normalize the pixels by dividing by the atlas size
         let uv_s = px_index_s as f32 / sx;
         let uv_t = px_index_t as f32 / sy;
-        Vec2::new(uv_s, uv_t)
+
+        let st = Vec2::new(uv_s, uv_t);
+        st
     }
 }
 
@@ -363,6 +365,7 @@ fn texture_color(
     } else {
         textures[texture_id as usize]
     };
+
     let uv = texture.uv(uv, atlas_size);
     let mut color: Vec4 = atlas.sample_by_lod(*sampler, uv, 0.0);
     if texture_id == ID_NONE {
