@@ -886,22 +886,107 @@ mod test {
             .new_entity()
             .with_material(mirror_material_id)
             .with_starting_vertex_and_count(start, count)
-            .with_position([sheet_w as f32 * 2.0 + 1.0, 0.0, 0.0])
+            .with_position([sheet_w as f32 * 2.0 + 2.0, 0.0, 0.0])
             .build();
 
         let scene = builder.build().unwrap();
-        let atlas_img = scene.atlas.texture.read(
-            r.get_device(),
-            r.get_queue(),
-            scene.atlas.size.x as usize,
-            scene.atlas.size.y as usize,
-        );
-        let atlas_img = atlas_img.into_rgba(r.get_device()).unwrap();
-        crate::img_diff::save("uv_wrapping_atlas.png", atlas_img);
         crate::setup_scene_render_graph(scene, &mut r, true);
 
         let img = r.render_image().unwrap();
-        crate::img_diff::save("uv_wrapping.png", img);
+        crate::img_diff::assert_img_eq("uv_wrapping.png", img);
+    }
+
+
+    #[test]
+    fn negative_uv_wrapping() {
+        let icon_w = 32;
+        let icon_h = 41;
+        let sheet_w = icon_w * 3;
+        let sheet_h = icon_h * 3;
+        let w = sheet_w * 3 + 2;
+        let h = sheet_h;
+        let mut r = Renderling::headless(w, h)
+            .unwrap()
+            .with_background_color(Vec4::new(1.0, 1.0, 0.0, 1.0));
+        let (projection, view) = camera::default_ortho2d(w as f32, h as f32);
+        let mut builder = r.new_scene().with_camera(projection, view);
+        let dirt = image::open("../../img/dirt.jpg").unwrap().into_rgba8();
+        builder.add_image(dirt);
+        let sandstone = image::open("../../img/sandstone.png").unwrap().into_rgba8();
+        builder.add_image(sandstone);
+        let texels = image::open("../../img/happy_mac.png").unwrap().into_rgba8();
+        let texels_index = builder.add_image(texels);
+        let clamp_texture_id = builder.add_texture(
+            texels_index,
+            TextureAddressMode::CLAMP_TO_EDGE,
+            TextureAddressMode::CLAMP_TO_EDGE,
+        );
+        let repeat_texture_id = builder.add_texture(
+            texels_index,
+            TextureAddressMode::REPEAT,
+            TextureAddressMode::REPEAT,
+        );
+        let mirror_texture_id = builder.add_texture(
+            texels_index,
+            TextureAddressMode::MIRRORED_REPEAT,
+            TextureAddressMode::MIRRORED_REPEAT,
+        );
+
+        let clamp_material_id = builder
+            .new_unlit_material()
+            .with_texture0(clamp_texture_id)
+            .build();
+        let repeat_material_id = builder
+            .new_unlit_material()
+            .with_texture0(repeat_texture_id)
+            .build();
+        let mirror_material_id = builder
+            .new_unlit_material()
+            .with_texture0(mirror_texture_id)
+            .build();
+
+        let sheet_w = sheet_w as f32;
+        let sheet_h = sheet_h as f32;
+
+        let (start, count) = builder.add_meshlet({
+            let tl = GpuVertex::default()
+                .with_position(Vec3::ZERO)
+                .with_uv0(Vec2::ZERO);
+            let tr = GpuVertex::default()
+                .with_position(Vec3::new(sheet_w, 0.0, 0.0))
+                .with_uv0(Vec2::new(-3.0, 0.0));
+            let bl = GpuVertex::default()
+                .with_position(Vec3::new(0.0, sheet_h, 0.0))
+                .with_uv0(Vec2::new(0.0, -3.0));
+            let br = GpuVertex::default()
+                .with_position(Vec3::new(sheet_w, sheet_h, 0.0))
+                .with_uv0(Vec2::splat(-3.0));
+            vec![tl, bl, br, tl, br, tr]
+        });
+
+        let _clamp = builder
+            .new_entity()
+            .with_material(clamp_material_id)
+            .with_starting_vertex_and_count(start, count)
+            .build();
+        let _repeat = builder
+            .new_entity()
+            .with_material(repeat_material_id)
+            .with_starting_vertex_and_count(start, count)
+            .with_position([sheet_w as f32 + 1.0, 0.0, 0.0])
+            .build();
+        let _mirror = builder
+            .new_entity()
+            .with_material(mirror_material_id)
+            .with_starting_vertex_and_count(start, count)
+            .with_position([sheet_w as f32 * 2.0 + 2.0, 0.0, 0.0])
+            .build();
+
+        let scene = builder.build().unwrap();
+        crate::setup_scene_render_graph(scene, &mut r, true);
+
+        let img = r.render_image().unwrap();
+        crate::img_diff::assert_img_eq("negative_uv_wrapping.png", img);
     }
 
     #[test]

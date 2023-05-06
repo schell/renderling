@@ -60,7 +60,7 @@ impl Atlas {
                 | wgpu::TextureUsages::COPY_SRC,
             view_formats: &[],
         });
-        let img = RgbaImage::from_pixel(width, height, image::Rgba([255, 255, 255, 255]));
+        let img = RgbaImage::from_pixel(width, height, image::Rgba([0, 0, 0, 0]));
         queue.write_texture(
             wgpu::ImageCopyTextureBase {
                 texture: &texture,

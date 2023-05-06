@@ -18,10 +18,10 @@ pub fn repeat(mut input: f32) -> f32 {
 
 /// Clamp the input between 0.0 and 1.0.
 pub fn clamp(input: f32) -> f32 {
-    if input >= 1.0 {
-        1.0
-    } else if input <= 0.0 {
-        0.0
+    if input > 1.0 {
+        1.0 - f32::EPSILON
+    } else if input < 0.0 {
+        0.0 + f32::EPSILON
     } else {
         input
     }
@@ -34,29 +34,45 @@ pub fn clamp(input: f32) -> f32 {
 pub struct TextureAddressMode(u32);
 
 impl TextureAddressMode {
-    /// Clamp the value to the edge of the texture:
+    /// Clamp the value to the edge of the texture.
     pub const CLAMP_TO_EDGE: TextureAddressMode = TextureAddressMode(0);
-    /// Repeat the texture in a tiling fashion
+    /// Repeat the texture in a tiling fashion.
     pub const REPEAT: TextureAddressMode = TextureAddressMode(1);
-    /// Repeat the texture, mirroring it every repeat
+    /// Repeat the texture, mirroring it every integer wrap.
     pub const MIRRORED_REPEAT: TextureAddressMode = TextureAddressMode(2);
 }
 
 /// Wrap the given s/t coord into a pixel index according to texture addressing.
 pub fn wrap(input: f32, mode: TextureAddressMode) -> f32 {
     match mode {
-        TextureAddressMode::CLAMP_TO_EDGE => clamp(input),
         TextureAddressMode::REPEAT => {
             let sign = input.signum();
-            let input = repeat(input);
+            let input = repeat(input.abs());
             if sign > 0.0 {
                 input
             } else {
                 1.0 - input
             }
         },
-        // TODO: implement mirrored repeat wrapping
-        TextureAddressMode::MIRRORED_REPEAT => repeat(input * input.signum()),
+        TextureAddressMode::MIRRORED_REPEAT => {
+            let sign = input.signum();
+            let i = input.abs();
+            let flip = i as u32 % 2 == 0;
+            let t = repeat(i);
+            if sign > 0.0 {
+                if flip {
+                    t
+                } else {
+                    1.0 - t
+                }
+            } else {
+                if flip {
+                    1.0 - t
+                } else {
+                    t
+                }
+            }
+        }
         _ => clamp(input)
     }
 }
