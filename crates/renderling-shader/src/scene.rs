@@ -194,8 +194,10 @@ pub struct GpuMaterial {
     pub texture0_tex_coord: u32,
     pub texture1_tex_coord: u32,
     pub texture2_tex_coord: u32,
+    pub texture3_tex_coord: u32,
 
     pub lighting_model: LightingModel,
+    pub padding: [u32; 3]
 }
 
 impl Default for GpuMaterial {
@@ -210,7 +212,9 @@ impl Default for GpuMaterial {
             texture0_tex_coord: 0,
             texture1_tex_coord: 0,
             texture2_tex_coord: 0,
+            texture3_tex_coord: 0,
             lighting_model: LightingModel::NO_LIGHTING,
+            padding: [0; 3]
         }
     }
 }
