@@ -52,10 +52,11 @@ This means each model may be shaded separately, with a different lighting style.
   - [x] cameras
   - [x] meshes
   - [x] materials
-    - [x] funky phong (gltf doesn't support phong directly afaik, so we "guess")
-    - [x] metallic roughness
-    - [ ] normal/bump mapping
-    - [ ] specular glosiness
+    - [x] pbr metallic roughness (factors + textures)
+    - [x] normal mapping
+    - [ ] occlusion textures
+    - [ ] pbr specular glosiness
+    - [ ] parallax mapping
   - [x] textures, images, samplers
   - [ ] animations
   - [ ] morph targets

@@ -253,6 +253,8 @@ pub const TEXT_MATERIAL: GpuMaterial = GpuMaterial {
     texture3: ID_NONE,
     texture1_tex_coord: 0,
     texture2_tex_coord: 0,
+    texture3_tex_coord: 0,
+    padding: [0; 3]
 };
 
 impl GlyphCache {

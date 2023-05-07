@@ -337,6 +337,16 @@ impl GltfLoader {
         if let Some(norm_tex) = material.normal_texture() {
             gpu_material.texture2 = norm_tex.texture().index() as u32;
             gpu_material.texture2_tex_coord = norm_tex.tex_coord();
+            log::trace!("  using normal map");
+            log::trace!("    texture_id:        {}", gpu_material.texture2);
+            log::trace!("    texture_tex_coord: {}", gpu_material.texture2_tex_coord);
+        }
+        if let Some(occlusion_tex) = material.occlusion_texture() {
+            gpu_material.texture3 = occlusion_tex.texture().index() as u32;
+            gpu_material.texture3_tex_coord = occlusion_tex.tex_coord();
+            log::trace!("  using occlusion map");
+            log::trace!("    texture_id:        {}", gpu_material.texture3);
+            log::trace!("    texture_tex_coord: {}", gpu_material.texture3_tex_coord);
         }
         // TODO: figure out why a material would not have an index
         if let Some(index) = index {
