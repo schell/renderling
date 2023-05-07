@@ -5,7 +5,7 @@
 //!
 //! To read more about the technique, check out these resources:
 //! * https://stackoverflow.com/questions/59686151/what-is-gpu-driven-rendering
-use glam::{Mat3, Mat4, Quat, UVec2, UVec3, Vec2, Vec3, Vec4, Vec4Swizzles};
+use glam::{Mat3, Mat4, Quat, UVec2, UVec3, Vec2, Vec3, Vec4, Vec4Swizzles, mat3};
 use spirv_std::{image::Image2d, Sampler};
 
 use crate::{math::Vec3ColorSwizzles, pbr, phong};
@@ -22,6 +22,7 @@ pub struct GpuVertex {
     pub color: Vec4,
     pub uv: Vec4,
     pub normal: Vec4,
+    pub tangent: Vec4
 }
 
 impl Default for GpuVertex {
@@ -31,6 +32,7 @@ impl Default for GpuVertex {
             color: Vec4::splat(1.0),
             uv: Vec4::splat(0.0),
             normal: Vec4::Z,
+            tangent: Vec4::Y
         }
     }
 }
@@ -62,6 +64,11 @@ impl GpuVertex {
 
     pub fn with_normal(mut self, n: impl Into<Vec3>) -> Self {
         self.normal = n.into().extend(0.0);
+        self
+    }
+
+    pub fn with_tangent(mut self, t: impl Into<Vec4>) -> Self {
+        self.tangent = t.into();
         self
     }
 }
@@ -336,6 +343,8 @@ pub fn main_vertex_scene(
     out_uv0: &mut Vec2,
     out_uv1: &mut Vec2,
     out_norm: &mut Vec3,
+    out_tangent: &mut Vec3,
+    out_bitangent: &mut Vec3,
     // position of the vertex/fragment in world space
     out_pos: &mut Vec3,
 
@@ -351,8 +360,16 @@ pub fn main_vertex_scene(
     *out_color = vertex.color;
     *out_uv0 = vertex.uv.xy();
     *out_uv1 = vertex.uv.zw();
-    *out_norm =
-        (Mat3::from_mat4(model_matrix) * (vertex.normal.xyz() / (scale * scale))).normalize();
+
+    let scale2 = scale * scale;
+    let model_matrix3 = Mat3::from_mat4(model_matrix);
+    let t = (model_matrix3 * (vertex.tangent.xyz() / scale2)).normalize_or_zero();
+    let n = (model_matrix3 * (vertex.normal.xyz() / scale2)).normalize_or_zero();
+    let b = t.cross(n) * vertex.tangent.w;
+
+    *out_tangent = t;
+    *out_bitangent = b;
+    *out_norm = n;
 
     let view_pos = model_matrix * vertex.position.xyz().extend(1.0);
     *out_pos = view_pos.xyz();
@@ -374,6 +391,8 @@ pub fn main_fragment_scene(
     in_uv0: Vec2,
     in_uv1: Vec2,
     in_norm: Vec3,
+    in_tangent: Vec3,
+    in_bitangent: Vec3,
     in_pos: Vec3,
 
     output: &mut Vec4,
@@ -412,6 +431,31 @@ pub fn main_fragment_scene(
         textures,
     );
 
+    let texture2_uv = if material.texture2_tex_coord == 0 {
+        in_uv0
+    } else {
+        in_uv1
+    };
+    let tex_color2 = texture_color(
+        material.texture2,
+        texture2_uv,
+        atlas,
+        sampler,
+        constants.atlas_size,
+        textures,
+    );
+
+    let norm = if material.texture2 == ID_NONE {
+        // there is no normal map, use the normal normal ;)
+        in_norm
+    } else {
+        let tbn = mat3(in_tangent, in_bitangent, in_norm);
+        // convert the normal from color coords to tangent space -1,1
+        let norm = tex_color2.xyz() * 2.0 - 1.0;
+        // convert the normal from tangent space to world space
+        (tbn * norm).normalize_or_zero()
+    };
+
     *output = match material.lighting_model {
         LightingModel::PBR_LIGHTING => {
             let albedo = tex_color0 * material.factor0 * in_color;
@@ -423,7 +467,7 @@ pub fn main_fragment_scene(
             let ao = 1.0;
             pbr::shade_fragment(
                 constants.camera_pos.xyz(),
-                in_norm,
+                norm,
                 in_pos,
                 albedo.rgb(),
                 metallic,
@@ -441,7 +485,7 @@ pub fn main_fragment_scene(
                 diffuse_color,
                 specular_color,
                 in_pos,
-                in_norm,
+                norm,
             )
         }
         LightingModel::TEXT_LIGHTING => in_color * Vec3::splat(1.0).extend(tex_color0.x),

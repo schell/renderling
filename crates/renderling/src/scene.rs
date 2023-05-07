@@ -527,6 +527,11 @@ impl SceneBuilder {
         self.materials.get(material_id as usize).copied()
     }
 
+    pub fn get_material_mut(&mut self, material_id: u32) -> Option<&mut GpuMaterial> {
+        self.materials.get_mut(material_id as usize)
+    }
+
+
     pub fn entities(&self) -> &[GpuEntity] {
         &self.entities
     }

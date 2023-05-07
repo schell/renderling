@@ -320,7 +320,6 @@ impl GltfLoader {
             log::trace!("  roughness: {roughness}");
             log::trace!("  metallic_roughness_tex_id: {metallic_roughness_tex_id}");
             log::trace!("  metallic_roughness_tex_coord: {metallic_roughness_tex_coord}");
-            if let Some(norm_tex) = material.normal_texture() {}
             builder
                 .new_pbr_material()
                 .with_base_color_factor(base_color)
@@ -334,12 +333,16 @@ impl GltfLoader {
         };
 
         // UNWRAP: ok because we just stored this material above
-        let gpu_material = builder.get_material(gpu_material_id).unwrap();
+        let gpu_material = builder.get_material_mut(gpu_material_id).unwrap();
+        if let Some(norm_tex) = material.normal_texture() {
+            gpu_material.texture2 = norm_tex.texture().index() as u32;
+            gpu_material.texture2_tex_coord = norm_tex.tex_coord();
+        }
         // TODO: figure out why a material would not have an index
         if let Some(index) = index {
             let _ = self
                 .materials
-                .insert(index, name, (gpu_material_id, gpu_material));
+                .insert(index, name, (gpu_material_id, *gpu_material));
         }
     }
 
@@ -378,6 +381,14 @@ impl GltfLoader {
                     gen_normals = true;
                     Box::new(std::iter::repeat(Vec3::ZERO))
                 };
+            let mut gen_tangents = false;
+            let tangents: Box<dyn Iterator<Item = Vec4>> =
+                if let Some(tangents) = reader.read_tangents() {
+                    Box::new(tangents.map(Vec4::from))
+                } else {
+                    gen_tangents = true;
+                    Box::new(std::iter::repeat(Vec4::ZERO))
+                };
             let colors: Box<dyn Iterator<Item = Vec4>> = if let Some(colors) = reader.read_colors(0)
             {
                 let colors = colors.into_rgba_f32();
@@ -406,12 +417,13 @@ impl GltfLoader {
                 .map(|(uv0, uv1)| Vec4::new(uv0.x, uv0.y, uv1.x, uv1.y));
             let vertices = positions
                 .iter()
-                .zip(colors.zip(uvs.zip(normals)))
-                .map(|(position, (color, (uv, normal)))| GpuVertex {
+                .zip(colors.zip(uvs.zip(normals.zip(tangents))))
+                .map(|(position, (color, (uv, (normal, tangent))))| GpuVertex {
                     position: position.extend(0.0),
                     color,
                     uv,
                     normal: normal.extend(0.0),
+                    tangent
                 })
                 .collect::<Vec<_>>();
             // we don't yet support indices, so we'll just repeat vertices
@@ -421,15 +433,39 @@ impl GltfLoader {
             } else {
                 vertices
             };
-            if gen_normals {
+            if gen_normals || gen_tangents {
                 vertices.chunks_mut(3).for_each(|t| match t {
                     [a, b, c] => {
                         let ab = b.position.xyz() - a.position.xyz();
                         let ac = c.position.xyz() - a.position.xyz();
-                        let n = ab.cross(ac).extend(0.0);
-                        a.normal = n;
-                        b.normal = n;
-                        c.normal = n;
+                        let n = if gen_normals {
+                            let n = ab.cross(ac).extend(0.0);
+                            a.normal = n;
+                            b.normal = n;
+                            c.normal = n;
+                            n.xyz()
+                        } else {
+                            a.normal.xyz()
+                        };
+                        if gen_tangents {
+                            let d_uv1 = b.uv.xy() - a.uv.xy();
+                            let d_uv2 = c.uv.xy() - a.uv.xy();
+                            let f = 1.0 / (d_uv1.x * d_uv2.y - d_uv2.x * d_uv1.y);
+                            let s = f * Vec3::new(
+                                d_uv2.y * ab.x - d_uv1.y * ac.x,
+                                d_uv2.y * ab.y - d_uv1.y * ac.y,
+                                d_uv2.y * ab.z - d_uv1.y * ac.z,
+                            );
+                            let t = f * Vec3::new(
+                                d_uv1.x * ac.x - d_uv2.x * ab.x,
+                                d_uv1.x * ac.y - d_uv2.x * ab.y,
+                                d_uv1.x * ac.z - d_uv2.x * ab.z,
+                            );
+                            let tangent = (s - s.dot(n) * n).normalize_or_zero().extend(n.cross(s).dot(t).signum());
+                            a.tangent = tangent;
+                            b.tangent = tangent;
+                            c.tangent = tangent;
+                        }
                     }
                     _ => unreachable!("safe because we know these are triangles"),
                 });
