@@ -320,6 +320,11 @@ impl<'a> PbrMaterialBuilder<'a> {
         self
     }
 
+    pub fn with_base_color_texture_coord(mut self, tex_coord: u32) -> Self {
+        self.material.texture0_tex_coord = tex_coord;
+        self
+    }
+
     pub fn with_metallic_factor(mut self, metallic: f32) -> Self {
         self.material.factor1.y = metallic;
         self
@@ -332,6 +337,11 @@ impl<'a> PbrMaterialBuilder<'a> {
 
     pub fn with_metallic_roughness_texture(mut self, texture_id: u32) -> Self {
         self.material.texture1 = texture_id;
+        self
+    }
+
+    pub fn with_metallic_roughness_texture_coord(mut self, tex_coord: u32) -> Self {
+        self.material.texture1_tex_coord = tex_coord;
         self
     }
 
@@ -403,6 +413,15 @@ impl<'a> EntityBuilder<'a> {
     }
 }
 
+/// Helps build textures, storing texture parameters before images are packed
+/// into the atlas.
+#[derive(Clone, Copy, Default, Debug, PartialEq)]
+pub struct TextureParams {
+    pub image_index: usize,
+    pub mode_s: TextureAddressMode,
+    pub mode_t: TextureAddressMode,
+}
+
 /// Sets up the scene using different build phases.
 #[derive(Clone, Debug)]
 pub struct SceneBuilder {
@@ -411,7 +430,7 @@ pub struct SceneBuilder {
     pub(crate) projection: Mat4,
     pub(crate) view: Mat4,
     pub(crate) images: Vec<RgbaImage>,
-    pub(crate) textures: Vec<(usize, TextureAddressMode, TextureAddressMode)>,
+    pub(crate) textures: Vec<TextureParams>,
     pub(crate) materials: Vec<GpuMaterial>,
     pub(crate) vertices: Vec<GpuVertex>,
     pub(crate) entities: Vec<GpuEntity>,
@@ -443,7 +462,7 @@ impl SceneBuilder {
     ) -> u32 {
         let image_index = self.images.len();
         self.images.push(img);
-        self.add_texture(image_index, mode_s, mode_t)
+        self.add_texture(TextureParams{image_index, mode_s, mode_t})
     }
 
     /// Add an image and return a texture id for it.
@@ -469,12 +488,10 @@ impl SceneBuilder {
     /// Add a texture referencing an image.
     pub fn add_texture(
         &mut self,
-        image_index: usize,
-        mode_s: TextureAddressMode,
-        mode_t: TextureAddressMode,
+        params: TextureParams,
     ) -> u32 {
         let texture_id = self.textures.len();
-        self.textures.push((image_index, mode_s, mode_t));
+        self.textures.push(params);
         texture_id as u32
     }
 
@@ -593,11 +610,11 @@ impl Scene {
         );
 
         if scene_builder.textures.is_empty() {
-            scene_builder.textures.push(crate::TEXT_TEXTURE);
+            scene_builder.textures.push(crate::TEXT_TEXTURE_PARAMS);
         } else {
             snafu::ensure!(
                 scene_builder.textures.len() == 1
-                    && scene_builder.textures[0] == crate::TEXT_TEXTURE,
+                    && scene_builder.textures[0] == crate::TEXT_TEXTURE_PARAMS,
                 TextSceneSingletonSnafu { name: "texture" }
             );
         }
@@ -654,15 +671,16 @@ impl Scene {
 
         let frames = textures.into_iter();
         let mut textures = vec![];
-        for (image_index, address_mode_s, address_mode_t) in frames {
+        for TextureParams{image_index, mode_s, mode_t, ..} in frames {
             let (offset_px, size_px) = atlas
                 .get_frame(image_index)
                 .context(MissingImageSnafu { index: image_index })?;
             textures.push(GpuTexture {
                 offset_px,
                 size_px,
-                address_mode_s,
-                address_mode_t,
+                mode_s,
+                mode_t,
+                ..Default::default()
             });
         }
         let textures = GpuArray::new(&device, &textures, textures.len(), scene_render_usage());

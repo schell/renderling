@@ -761,9 +761,11 @@ mod test {
             .into_rgba8();
         let texels_index = builder.add_image(texels);
         let texture_id = builder.add_texture(
-            texels_index,
-            TextureAddressMode::CLAMP_TO_EDGE,
-            TextureAddressMode::CLAMP_TO_EDGE,
+            TextureParams {
+                image_index: texels_index,
+                mode_s: TextureAddressMode::CLAMP_TO_EDGE,
+                mode_t: TextureAddressMode::CLAMP_TO_EDGE,
+            }
         );
         let material_id = builder
             .new_unlit_material()
@@ -823,21 +825,21 @@ mod test {
         builder.add_image(sandstone);
         let texels = image::open("../../img/happy_mac.png").unwrap().into_rgba8();
         let texels_index = builder.add_image(texels);
-        let clamp_texture_id = builder.add_texture(
-            texels_index,
-            TextureAddressMode::CLAMP_TO_EDGE,
-            TextureAddressMode::CLAMP_TO_EDGE,
-        );
-        let repeat_texture_id = builder.add_texture(
-            texels_index,
-            TextureAddressMode::REPEAT,
-            TextureAddressMode::REPEAT,
-        );
-        let mirror_texture_id = builder.add_texture(
-            texels_index,
-            TextureAddressMode::MIRRORED_REPEAT,
-            TextureAddressMode::MIRRORED_REPEAT,
-        );
+        let clamp_texture_id = builder.add_texture(TextureParams {
+            image_index: texels_index,
+            mode_s: TextureAddressMode::CLAMP_TO_EDGE,
+            mode_t: TextureAddressMode::CLAMP_TO_EDGE,
+        });
+        let repeat_texture_id = builder.add_texture(TextureParams {
+            image_index: texels_index,
+            mode_s: TextureAddressMode::REPEAT,
+            mode_t: TextureAddressMode::REPEAT,
+        });
+        let mirror_texture_id = builder.add_texture(TextureParams {
+            image_index: texels_index,
+            mode_s: TextureAddressMode::MIRRORED_REPEAT,
+            mode_t: TextureAddressMode::MIRRORED_REPEAT,
+        });
 
         let clamp_material_id = builder
             .new_unlit_material()
@@ -916,21 +918,21 @@ mod test {
         builder.add_image(sandstone);
         let texels = image::open("../../img/happy_mac.png").unwrap().into_rgba8();
         let texels_index = builder.add_image(texels);
-        let clamp_texture_id = builder.add_texture(
-            texels_index,
-            TextureAddressMode::CLAMP_TO_EDGE,
-            TextureAddressMode::CLAMP_TO_EDGE,
-        );
-        let repeat_texture_id = builder.add_texture(
-            texels_index,
-            TextureAddressMode::REPEAT,
-            TextureAddressMode::REPEAT,
-        );
-        let mirror_texture_id = builder.add_texture(
-            texels_index,
-            TextureAddressMode::MIRRORED_REPEAT,
-            TextureAddressMode::MIRRORED_REPEAT,
-        );
+        let clamp_texture_id = builder.add_texture(TextureParams {
+            image_index: texels_index,
+            mode_s: TextureAddressMode::CLAMP_TO_EDGE,
+            mode_t: TextureAddressMode::CLAMP_TO_EDGE,
+        });
+        let repeat_texture_id = builder.add_texture(TextureParams {
+            image_index: texels_index,
+            mode_s: TextureAddressMode::REPEAT,
+            mode_t: TextureAddressMode::REPEAT,
+        });
+        let mirror_texture_id = builder.add_texture(TextureParams {
+            image_index: texels_index,
+            mode_s: TextureAddressMode::MIRRORED_REPEAT,
+            mode_t: TextureAddressMode::MIRRORED_REPEAT,
+        });
 
         let clamp_material_id = builder
             .new_unlit_material()
@@ -994,8 +996,8 @@ mod test {
         let mut tex = GpuTexture {
             offset_px: UVec2::ZERO,
             size_px: UVec2::ONE,
-            address_mode_s: TextureAddressMode::CLAMP_TO_EDGE,
-            address_mode_t: TextureAddressMode::CLAMP_TO_EDGE,
+            mode_s: TextureAddressMode::CLAMP_TO_EDGE,
+            mode_t: TextureAddressMode::CLAMP_TO_EDGE,
         };
         assert_eq!(Vec2::ZERO, tex.uv(Vec2::ZERO, UVec2::splat(100)));
         assert_eq!(Vec2::ZERO, tex.uv(Vec2::ZERO, UVec2::splat(1)));
@@ -1516,25 +1518,26 @@ mod test {
 
         let img = r.render_image().unwrap();
         println!("saving frame");
-        crate::img_diff::save("gltf_normal_mapping_brick_sphere.png", img);
+        //crate::img_diff::save("gltf_normal_mapping_brick_sphere.png", img.clone());
+        crate::img_diff::assert_img_eq("gltf_normal_mapping_brick_sphere.png", img);
 
-        println!("saving atlas");
-        let atlas_img = r
-            .graph
-            .visit(
-                |(scene, device, queue): (Read<Scene>, Read<Device>, Read<Queue>)| {
-                    let s = scene.atlas.size;
-                    let copied_texture =
-                        scene
-                            .atlas
-                            .texture
-                            .read(&device, &queue, s.x as usize, s.y as usize);
-                    copied_texture.into_rgba(&device).unwrap()
-                },
-            )
-            .unwrap();
+//        println!("saving atlas");
+//        let atlas_img = r
+//            .graph
+//            .visit(
+//                |(scene, device, queue): (Read<Scene>, Read<Device>, Read<Queue>)| {
+//                    let s = scene.atlas.size;
+//                    let copied_texture =
+//                        scene
+//                            .atlas
+//                            .texture
+//                            .read(&device, &queue, s.x as usize, s.y as usize);
+//                    copied_texture.into_rgba(&device).unwrap()
+//                },
+//            )
+//            .unwrap();
 
-        crate::img_diff::save("gltf_normal_mapping_atlas.png", atlas_img);
+        //crate::img_diff::save("gltf_normal_mapping_atlas.png", atlas_img);
     }
 
     //#[cfg(feature = "gltf")]

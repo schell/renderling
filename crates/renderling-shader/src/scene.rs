@@ -5,7 +5,6 @@
 //!
 //! To read more about the technique, check out these resources:
 //! * https://stackoverflow.com/questions/59686151/what-is-gpu-driven-rendering
-use bitflags::bitflags;
 use glam::{Mat3, Mat4, Quat, UVec2, UVec3, Vec2, Vec3, Vec4, Vec4Swizzles};
 use spirv_std::{image::Image2d, Sampler};
 
@@ -80,7 +79,7 @@ impl core::fmt::Display for LightType {
             &Self::POINT_LIGHT => "point light",
             &Self::SPOT_LIGHT => "spot light",
             &Self::DIRECTIONAL_LIGHT => "directional light",
-            _ => "unsupported light"
+            _ => "unsupported light",
         };
         f.write_str(s)
     }
@@ -91,7 +90,7 @@ impl LightType {
     pub const POINT_LIGHT: Self = Self(1);
     pub const SPOT_LIGHT: Self = Self(2);
     pub const DIRECTIONAL_LIGHT: Self = Self(3);
-}                               //
+}
 
 /// A light capable of representing a directional, point or spotlight.
 #[repr(C)]
@@ -120,17 +119,17 @@ pub struct GpuTexture {
     // The size of texture in the atlas
     pub size_px: UVec2,
     // How `s` edges should be handled in texture addressing.
-    pub address_mode_s: TextureAddressMode,
+    pub mode_s: TextureAddressMode,
     // How `t` edges should be handled in texture addressing.
-    pub address_mode_t: TextureAddressMode,
+    pub mode_t: TextureAddressMode,
 }
 
 impl GpuTexture {
     /// Transform the given `uv` coordinates for this texture's address mode
     /// and placement in the atlas of the given size.
     pub fn uv(&self, mut uv: Vec2, atlas_size: UVec2) -> Vec2 {
-        uv.x = wrap::wrap(uv.x, self.address_mode_s);
-        uv.y = wrap::wrap(uv.y, self.address_mode_t);
+        uv.x = wrap::wrap(uv.x, self.mode_s);
+        uv.y = wrap::wrap(uv.y, self.mode_t);
 
         // get the pixel index of the uv coordinate in terms of the original image
         let mut px_index_s = (uv.x * self.size_px.x as f32) as u32;
@@ -153,31 +152,6 @@ impl GpuTexture {
 
 /// `u32` representing "null" or "none".
 pub const ID_NONE: u32 = u32::MAX;
-
-bitflags! {
-    pub struct GpuMaterialConfig: u32 {
-        /// Whether texture0 is used
-        const TEXTURE0 = 1;
-        /// Whether texture1 is used
-        const TEXTURE1 = 1 << 1;
-        /// Whether texture2 is used
-        const TEXTURE2 = 1 << 2;
-    }
-}
-
-impl GpuMaterialConfig {
-    pub fn texture0_used(&self) -> bool {
-        self.contains(Self::TEXTURE0)
-    }
-
-    pub fn texture1_used(&self) -> bool {
-        self.contains(Self::TEXTURE1)
-    }
-
-    pub fn texture2_used(&self) -> bool {
-        self.contains(Self::TEXTURE2)
-    }
-}
 
 /// Determines the lighting to use in an ubershader.
 #[repr(transparent)]
@@ -208,6 +182,11 @@ pub struct GpuMaterial {
     pub texture0: u32,
     pub texture1: u32,
     pub texture2: u32,
+    pub texture3: u32,
+
+    pub texture0_tex_coord: u32,
+    pub texture1_tex_coord: u32,
+    pub texture2_tex_coord: u32,
 
     pub lighting_model: LightingModel,
 }
@@ -220,6 +199,10 @@ impl Default for GpuMaterial {
             texture0: ID_NONE,
             texture1: ID_NONE,
             texture2: ID_NONE,
+            texture3: ID_NONE,
+            texture0_tex_coord: 0,
+            texture1_tex_coord: 0,
+            texture2_tex_coord: 0,
             lighting_model: LightingModel::NO_LIGHTING,
         }
     }
@@ -315,62 +298,6 @@ pub struct DrawIndirect {
     pub base_instance: u32,
 }
 
-/// Scene vertex shader.
-pub fn main_vertex_scene(
-    // which entity are we drawing
-    instance_index: u32,
-    // which vertex are we drawing
-    vertex_index: u32,
-
-    constants: &GpuConstants,
-    vertices: &[GpuVertex],
-    entities: &[GpuEntity],
-    materials: &[GpuMaterial],
-
-    out_material_lighting_model: &mut LightingModel,
-    out_color: &mut Vec4,
-    // material
-    out_texture0: &mut u32,
-    out_uv0: &mut Vec2,
-    out_factor0: &mut Vec4,
-    out_texture1: &mut u32,
-    out_uv1: &mut Vec2,
-    out_factor1: &mut Vec4,
-
-    out_norm: &mut Vec3,
-    // position of the vertex/fragment in world space
-    out_pos: &mut Vec3,
-
-    gl_pos: &mut Vec4,
-) {
-    let entity = entities[instance_index as usize];
-    let vertex = vertices[vertex_index as usize];
-    let (position, rotation, scale) = entity.get_world_transform(entities);
-    let model_matrix =
-        Mat4::from_translation(position) * Mat4::from_quat(rotation) * Mat4::from_scale(scale);
-
-    let material = if entity.material == ID_NONE {
-        GpuMaterial::default()
-    } else {
-        materials[entity.material as usize]
-    };
-
-    *out_color = vertex.color;
-    *out_material_lighting_model = material.lighting_model;
-    *out_factor0 = material.factor0;
-    *out_factor1 = material.factor1;
-    *out_texture0 = material.texture0;
-    *out_texture1 = material.texture1;
-    *out_uv0 = vertex.uv.xy();
-    *out_uv1 = vertex.uv.zw();
-    *out_norm =
-        (Mat3::from_mat4(model_matrix) * (vertex.normal.xyz() / (scale * scale))).normalize();
-
-    let view_pos = model_matrix * vertex.position.xyz().extend(1.0);
-    *out_pos = view_pos.xyz();
-    *gl_pos = constants.camera_projection * constants.camera_view * view_pos;
-}
-
 fn texture_color(
     texture_id: u32,
     uv: Vec2,
@@ -393,49 +320,106 @@ fn texture_color(
     color
 }
 
+/// Scene vertex shader.
+pub fn main_vertex_scene(
+    // which entity are we drawing
+    instance_index: u32,
+    // which vertex are we drawing
+    vertex_index: u32,
+
+    constants: &GpuConstants,
+    vertices: &[GpuVertex],
+    entities: &[GpuEntity],
+
+    out_material: &mut u32,
+    out_color: &mut Vec4,
+    out_uv0: &mut Vec2,
+    out_uv1: &mut Vec2,
+    out_norm: &mut Vec3,
+    // position of the vertex/fragment in world space
+    out_pos: &mut Vec3,
+
+    gl_pos: &mut Vec4,
+) {
+    let entity = entities[instance_index as usize];
+    let vertex = vertices[vertex_index as usize];
+    let (position, rotation, scale) = entity.get_world_transform(entities);
+    let model_matrix =
+        Mat4::from_translation(position) * Mat4::from_quat(rotation) * Mat4::from_scale(scale);
+
+    *out_material = entity.material;
+    *out_color = vertex.color;
+    *out_uv0 = vertex.uv.xy();
+    *out_uv1 = vertex.uv.zw();
+    *out_norm =
+        (Mat3::from_mat4(model_matrix) * (vertex.normal.xyz() / (scale * scale))).normalize();
+
+    let view_pos = model_matrix * vertex.position.xyz().extend(1.0);
+    *out_pos = view_pos.xyz();
+    *gl_pos = constants.camera_projection * constants.camera_view * view_pos;
+}
+
+/// Scene fragment shader.
 pub fn main_fragment_scene(
     atlas: &Image2d,
     sampler: &Sampler,
-    textures: &[GpuTexture],
 
     constants: &GpuConstants,
     lights: &[GpuLight],
+    materials: &[GpuMaterial],
+    textures: &[GpuTexture],
 
-    in_material_lighting_model: LightingModel,
+    in_material: u32,
     in_color: Vec4,
-    in_texture0: u32,
     in_uv0: Vec2,
-    in_factor0: Vec4,
-    in_texture1: u32,
     in_uv1: Vec2,
-    in_factor1: Vec4,
     in_norm: Vec3,
     in_pos: Vec3,
 
     output: &mut Vec4,
 ) {
-    let uv0_color = texture_color(
-        in_texture0,
-        in_uv0,
-        atlas,
-        sampler,
-        constants.atlas_size,
-        textures,
-    );
-    let uv1_color = texture_color(
-        in_texture1,
-        in_uv1,
+    let material = if in_material == ID_NONE {
+        GpuMaterial::default()
+    } else {
+        materials[in_material as usize]
+    };
+
+    let texture0_uv = if material.texture0_tex_coord == 0 {
+        in_uv0
+    } else {
+        in_uv1
+    };
+    let tex_color0 = texture_color(
+        material.texture0,
+        texture0_uv,
         atlas,
         sampler,
         constants.atlas_size,
         textures,
     );
 
-    *output = match in_material_lighting_model {
+    let texture1_uv = if material.texture1_tex_coord == 0 {
+        in_uv0
+    } else {
+        in_uv1
+    };
+    let tex_color1 = texture_color(
+        material.texture1,
+        texture1_uv,
+        atlas,
+        sampler,
+        constants.atlas_size,
+        textures,
+    );
+
+    *output = match material.lighting_model {
         LightingModel::PBR_LIGHTING => {
-            let albedo = uv0_color * in_factor0 * in_color;
-            let metallic = uv1_color.y * in_factor1.y;
-            let roughness = uv1_color.z * in_factor1.z;
+            let albedo = tex_color0 * material.factor0 * in_color;
+            let (metallic, roughness) = if material.texture1 == ID_NONE {
+                (material.factor1.y, material.factor1.z)
+            } else {
+                (tex_color1.y, tex_color1.z)
+            };
             let ao = 1.0;
             pbr::shade_fragment(
                 constants.camera_pos.xyz(),
@@ -449,8 +433,8 @@ pub fn main_fragment_scene(
             )
         }
         LightingModel::PHONG_LIGHTING => {
-            let diffuse_color: Vec4 = uv0_color * in_color;
-            let specular_color: Vec4 = uv1_color * in_color;
+            let diffuse_color: Vec4 = tex_color0 * in_color;
+            let specular_color: Vec4 = tex_color1 * in_color;
             phong::shade_fragment(
                 &constants.camera_view,
                 lights,
@@ -460,8 +444,8 @@ pub fn main_fragment_scene(
                 in_norm,
             )
         }
-        LightingModel::TEXT_LIGHTING => in_color * Vec3::splat(1.0).extend(uv0_color.x),
-        _unlit => in_color * uv0_color * in_factor0 * uv1_color,
+        LightingModel::TEXT_LIGHTING => in_color * Vec3::splat(1.0).extend(tex_color0.x),
+        _unlit => in_color * tex_color0 * material.factor0 * tex_color1,
     };
 }
 

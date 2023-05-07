@@ -10,7 +10,6 @@ description = "Shared types and functions for renderling shaders compiled w/ rus
 default = []
 
 [dependencies]
-bitflags = "^2.2"
 bytemuck = { version = "1.13.0", features = ["derive"] }
 spirv-std = "^0.7"
 
