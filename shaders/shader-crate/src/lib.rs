@@ -20,6 +20,8 @@ pub fn main_vertex_scene(
     out_uv0: &mut glam::Vec2,
     out_uv1: &mut glam::Vec2,
     out_norm: &mut glam::Vec3,
+    out_tangent: &mut glam::Vec3,
+    out_bitangent: &mut glam::Vec3,
     out_pos: &mut glam::Vec3,
     #[spirv(position)] gl_pos: &mut glam::Vec4,
 ) {
@@ -34,6 +36,8 @@ pub fn main_vertex_scene(
         out_uv0,
         out_uv1,
         out_norm,
+        out_tangent,
+        out_bitangent,
         out_pos,
         gl_pos,
     )
@@ -54,6 +58,8 @@ pub fn main_fragment_scene(
     in_uv0: glam::Vec2,
     in_uv1: glam::Vec2,
     in_norm: glam::Vec3,
+    in_tangent: glam::Vec3,
+    in_bitangent: glam::Vec3,
     in_pos: glam::Vec3,
 
     output: &mut glam::Vec4,
@@ -70,6 +76,8 @@ pub fn main_fragment_scene(
         in_uv0,
         in_uv1,
         in_norm,
+        in_tangent,
+        in_bitangent,
         in_pos,
         output,
     )
