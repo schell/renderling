@@ -17,7 +17,7 @@ use renderling_shader::scene::{
     GpuMaterial, GpuVertex, LightingModel, TextureAddressMode, ID_NONE,
 };
 
-use crate::{Renderling, Texture};
+use crate::{Renderling, Texture, TextureParams};
 
 /// A text cache maintained mostly by ab_glyph.
 pub struct Cache {
@@ -235,19 +235,24 @@ fn to_vertex(
     data
 }
 
-pub const TEXT_TEXTURE: (usize, TextureAddressMode, TextureAddressMode) = (
-    0,
-    TextureAddressMode::CLAMP_TO_EDGE,
-    TextureAddressMode::CLAMP_TO_EDGE,
-);
+pub const TEXT_TEXTURE_PARAMS: TextureParams = TextureParams {
+    image_index: 0,
+    mode_s: TextureAddressMode::CLAMP_TO_EDGE,
+    mode_t: TextureAddressMode::CLAMP_TO_EDGE,
+};
 
 pub const TEXT_MATERIAL: GpuMaterial = GpuMaterial {
     texture0: 0,
-    texture1: ID_NONE,
-    texture2: ID_NONE,
+    texture0_tex_coord: 0,
     lighting_model: LightingModel::TEXT_LIGHTING,
+
     factor0: Vec4::ZERO,
     factor1: Vec4::ZERO,
+    texture1: ID_NONE,
+    texture2: ID_NONE,
+    texture3: ID_NONE,
+    texture1_tex_coord: 0,
+    texture2_tex_coord: 0,
 };
 
 impl GlyphCache {

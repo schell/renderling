@@ -255,8 +255,14 @@ impl GltfLoader {
         }
         let mode_s = mode(texture.sampler().wrap_s());
         let mode_t = mode(texture.sampler().wrap_t());
+        let params = TextureParams {
+            image_index,
+            mode_s,
+            mode_t,
+            ..Default::default()
+        };
 
-        let texture_id = builder.add_texture(image_index, mode_s, mode_t);
+        let texture_id = builder.add_texture(params);
         log::trace!(
             "adding texture index:{index} name:{name:?} id:{texture_id} with wrapping \
              s:{mode_s:?} t:{mode_t:?}"
@@ -283,6 +289,7 @@ impl GltfLoader {
         let pbr = material.pbr_metallic_roughness();
         let gpu_material_id = if material.unlit() {
             log::trace!("  is unlit");
+            // TODO: add tex_coord params to the unlit materials
             builder
                 .new_unlit_material()
                 .with_base_color(pbr.base_color_factor())
@@ -294,21 +301,35 @@ impl GltfLoader {
                 .build()
         } else {
             log::trace!("  is pbr");
+            let base_color = pbr.base_color_factor();
+            let (base_color_tex_id, base_color_tex_coord) = pbr
+                .base_color_texture()
+                .map(|info| (info.texture().index() as u32, info.tex_coord()))
+                .unwrap_or((ID_NONE, 0));
+            let metallic = pbr.metallic_factor();
+            let roughness = pbr.roughness_factor();
+            let (metallic_roughness_tex_id, metallic_roughness_tex_coord) = pbr
+                .metallic_roughness_texture()
+                .map(|info| (info.texture().index() as u32, info.tex_coord()))
+                .unwrap_or((ID_NONE, 0));
+
+            log::trace!("  base_color: {base_color:?}");
+            log::trace!("  base_color_tex_id: {base_color_tex_id}");
+            log::trace!("  base_color_tex_coord: {base_color_tex_coord}");
+            log::trace!("  metallic: {metallic}");
+            log::trace!("  roughness: {roughness}");
+            log::trace!("  metallic_roughness_tex_id: {metallic_roughness_tex_id}");
+            log::trace!("  metallic_roughness_tex_coord: {metallic_roughness_tex_coord}");
+            if let Some(norm_tex) = material.normal_texture() {}
             builder
                 .new_pbr_material()
-                .with_base_color_factor(pbr.base_color_factor())
-                .with_base_color_texture(
-                    pbr.base_color_texture()
-                        .map(|info| info.texture().index() as u32)
-                        .unwrap_or(ID_NONE),
-                )
-                .with_metallic_factor(pbr.metallic_factor())
-                .with_roughness_factor(pbr.roughness_factor())
-                .with_metallic_roughness_texture(
-                    pbr.metallic_roughness_texture()
-                        .map(|info| info.texture().index() as u32)
-                        .unwrap_or(ID_NONE),
-                )
+                .with_base_color_factor(base_color)
+                .with_base_color_texture(base_color_tex_id)
+                .with_base_color_texture_coord(base_color_tex_coord)
+                .with_metallic_factor(metallic)
+                .with_roughness_factor(roughness)
+                .with_metallic_roughness_texture(metallic_roughness_tex_id)
+                .with_metallic_roughness_texture_coord(metallic_roughness_tex_coord)
                 .build()
         };
 
