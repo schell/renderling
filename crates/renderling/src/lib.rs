@@ -420,7 +420,7 @@ mod test {
             .new_unlit_material()
             .with_texture0(sandstone_id)
             .build();
-        let mut material = builder.get_material(material_id).unwrap();
+        let mut material = builder.materials.get(material_id.index()).copied().unwrap();
         let _cube = builder
             .new_entity()
             .with_material(material_id)
@@ -439,7 +439,7 @@ mod test {
                 material.texture0 = dirt_id;
                 let _ = scene
                     .materials
-                    .overwrite(material_id as usize, vec![material])
+                    .overwrite(material_id.index(), vec![material])
                     .unwrap();
             })
             .unwrap();
@@ -484,12 +484,12 @@ mod test {
         let (mesh_start, mesh_count) = builder.add_meshlet(mesh);
         let _obj_a = builder
             .new_entity()
-            .with_material(0)
+            .with_material(Id::new(0))
             .with_starting_vertex_and_count(mesh_start, mesh_count)
             .build();
         let _obj_b = builder
             .new_entity()
-            .with_material(0)
+            .with_material(Id::new(0))
             .with_starting_vertex_and_count(mesh_start, mesh_count)
             .with_position(Vec3::new(15.0, 15.0, 0.5))
             .build();
@@ -643,7 +643,7 @@ mod test {
             .unwrap();
         let img = img.to_rgba8();
         let tex_id = builder.add_image_texture(img);
-        assert_eq!(0, tex_id);
+        assert_eq!(Id::new(0), tex_id);
         let material = builder.new_unlit_material().with_texture0(tex_id).build();
 
         let verts = vec![
@@ -674,13 +674,13 @@ mod test {
             .with_scale(Vec3::new(0.5, 0.5, 1.0))
             .build();
 
-        assert_eq!(0, ent.id);
+        assert_eq!(Id::new(0), ent.id);
         assert_eq!(
             GpuEntity {
-                id: 0,
+                id: Id::new(0),
                 mesh_first_vertex: 0,
                 mesh_vertex_count: 3,
-                material: 0,
+                material: Id::new(0),
                 position: Vec4::new(15.0, 35.0, 0.5, 0.0),
                 scale: Vec4::new(0.5, 0.5, 1.0, 0.0),
                 ..Default::default()
@@ -689,7 +689,7 @@ mod test {
         );
 
         let ent = builder.new_entity().with_meshlet(verts.clone()).build();
-        assert_eq!(1, ent.id);
+        assert_eq!(Id::new(1), ent.id);
 
         let scene = builder.build().unwrap();
         assert_eq!(2, scene.entities.len());
@@ -735,7 +735,7 @@ mod test {
             .unwrap();
         assert_eq!(
             vec![GpuMaterial {
-                texture0: 0,
+                texture0: Id::new(0),
                 ..Default::default()
             },],
             materials
@@ -1181,11 +1181,10 @@ mod test {
             .with_parent(&yellow_tri)
             .build();
 
-        let entities = builder.entities().to_vec();
         assert_eq!(
             vec![
                 GpuEntity {
-                    id: 0,
+                    id: Id::new(0),
                     position: Vec4::new(25.0, 25.0, 0.0, 0.0),
                     scale: Vec4::new(25.0, 25.0, 1.0, 0.0),
                     mesh_first_vertex: 0,
@@ -1193,8 +1192,8 @@ mod test {
                     ..Default::default()
                 },
                 GpuEntity {
-                    id: 1,
-                    parent: 0,
+                    id: Id::new(1),
+                    parent: Id::new(0),
                     position: Vec4::new(25.0, 25.0, 0.1, 0.0),
                     scale: Vec4::new(1.0, 1.0, 1.0, 1.0),
                     mesh_first_vertex: 3,
@@ -1202,8 +1201,8 @@ mod test {
                     ..Default::default()
                 },
                 GpuEntity {
-                    id: 2,
-                    parent: 1,
+                    id: Id::new(2),
+                    parent: Id::new(1),
                     position: Vec4::new(25.0, 25.0, 0.1, 0.0),
                     scale: Vec4::new(1.0, 1.0, 1.0, 1.0),
                     mesh_first_vertex: 6,
@@ -1211,9 +1210,9 @@ mod test {
                     ..Default::default()
                 }
             ],
-            entities
+            builder.entities
         );
-        let tfrm = yellow_tri.get_world_transform(builder.entities());
+        let tfrm = yellow_tri.get_world_transform(&builder.entities);
         assert_eq!(
             (
                 Vec3::new(50.0, 50.0, 0.1),
@@ -1223,6 +1222,7 @@ mod test {
             tfrm
         );
 
+        let entities = builder.entities.clone();
         let scene = builder.build().unwrap();
         setup_scene_render_graph(scene, &mut r, true);
 
@@ -1378,7 +1378,7 @@ mod test {
                 .unwrap();
         let (projection, view) = camera::default_ortho2d(100.0, 100.0);
         builder.set_camera(projection, view);
-        let material_id = builder.new_unlit_material().with_texture0(0).build();
+        let material_id = builder.new_unlit_material().with_texture0(Id::new(0)).build();
         let _img = builder
             .new_entity()
             .with_meshlet({
@@ -1481,7 +1481,7 @@ mod test {
 
         // there are no lights in the scene and the material isn't marked as "unlit", so
         // let's force it to be unlit.
-        let mut material = builder.get_material(0).unwrap();
+        let mut material = builder.materials.get(0).copied().unwrap();
         material.lighting_model = LightingModel::NO_LIGHTING;
         builder.materials[0] = material;
 

@@ -60,8 +60,8 @@ pub enum SceneError {
     #[snafu(display("Missing the glyph.cache"))]
     MissingCache,
 
-    #[snafu(display("Missing entity {id}"))]
-    MissingEntity { id: u32 },
+    #[snafu(display("Missing entity {id:?}"))]
+    MissingEntity { id: Id<GpuEntity> },
 }
 
 pub(crate) fn scene_render_usage() -> wgpu::BufferUsages {
@@ -87,16 +87,16 @@ pub struct TextureParams {
 /// Sets up the scene using different build phases.
 #[derive(Clone, Debug)]
 pub struct SceneBuilder {
-    pub(crate) device: Arc<wgpu::Device>,
-    pub(crate) queue: Arc<wgpu::Queue>,
-    pub(crate) projection: Mat4,
-    pub(crate) view: Mat4,
-    pub(crate) images: Vec<RgbaImage>,
-    pub(crate) textures: Vec<TextureParams>,
-    pub(crate) materials: Vec<GpuMaterial>,
-    pub(crate) vertices: Vec<GpuVertex>,
-    pub(crate) entities: Vec<GpuEntity>,
-    pub(crate) lights: Vec<GpuLight>,
+    pub device: Arc<wgpu::Device>,
+    pub queue: Arc<wgpu::Queue>,
+    pub projection: Mat4,
+    pub view: Mat4,
+    pub images: Vec<RgbaImage>,
+    pub textures: Vec<TextureParams>,
+    pub materials: Vec<GpuMaterial>,
+    pub vertices: Vec<GpuVertex>,
+    pub entities: Vec<GpuEntity>,
+    pub lights: Vec<GpuLight>,
 }
 
 impl SceneBuilder {
@@ -121,7 +121,7 @@ impl SceneBuilder {
         img: RgbaImage,
         mode_s: TextureAddressMode,
         mode_t: TextureAddressMode,
-    ) -> u32 {
+    ) -> Id<GpuTexture> {
         let image_index = self.images.len();
         self.images.push(img);
         self.add_texture(TextureParams{image_index, mode_s, mode_t})
@@ -130,7 +130,7 @@ impl SceneBuilder {
     /// Add an image and return a texture id for it.
     ///
     /// The texture sampling mode defaults to "repeat".
-    pub fn add_image_texture(&mut self, img: RgbaImage) -> u32 {
+    pub fn add_image_texture(&mut self, img: RgbaImage) -> Id<GpuTexture> {
         self.add_image_texture_mode(
             img,
             TextureAddressMode::CLAMP_TO_EDGE,
@@ -151,10 +151,10 @@ impl SceneBuilder {
     pub fn add_texture(
         &mut self,
         params: TextureParams,
-    ) -> u32 {
+    ) -> Id<GpuTexture> {
         let texture_id = self.textures.len();
         self.textures.push(params);
-        texture_id as u32
+        Id::new(texture_id as u32)
     }
 
     pub fn with_camera(mut self, projection: Mat4, view: Mat4) -> Self {
@@ -183,19 +183,6 @@ impl SceneBuilder {
         let id = self.materials.len();
         self.materials.push(material);
         id as u32
-    }
-
-    pub fn get_material(&self, material_id: u32) -> Option<GpuMaterial> {
-        self.materials.get(material_id as usize).copied()
-    }
-
-    pub fn get_material_mut(&mut self, material_id: u32) -> Option<&mut GpuMaterial> {
-        self.materials.get_mut(material_id as usize)
-    }
-
-
-    pub fn entities(&self) -> &[GpuEntity] {
-        &self.entities
     }
 
     /// Add a meshlet.
@@ -227,15 +214,6 @@ impl SceneBuilder {
             scene: self,
             entity: GpuEntity::default(),
         }
-    }
-
-    pub fn update_entity(&mut self, entity: GpuEntity) -> Result<(), SceneError> {
-        let here = self
-            .entities
-            .get_mut(entity.id as usize)
-            .context(MissingEntitySnafu { id: entity.id })?;
-        *here = entity;
-        Ok(())
     }
 
     pub fn build(self) -> Result<Scene, SceneError> {
@@ -494,9 +472,9 @@ impl Scene {
     pub fn update_entity(&mut self, entity: GpuEntity) -> Result<(), SceneError> {
         let (i, n) = self
             .entities
-            .overwrite(entity.id as usize, std::iter::once(entity))
+            .overwrite(entity.id.index(), std::iter::once(entity))
             .context(BufferSnafu)?;
-        debug_assert_eq!((entity.id as usize, 1), (i, n));
+        debug_assert_eq!((entity.id.index(), 1), (i, n));
         Ok(())
     }
 

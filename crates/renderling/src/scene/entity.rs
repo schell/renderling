@@ -1,7 +1,7 @@
 //! Entity builder.
 
 use glam::{Quat, Vec3};
-use renderling_shader::scene::{GpuEntity, GpuVertex};
+use renderling_shader::scene::{GpuEntity, GpuVertex, GpuMaterial, Id};
 
 use crate::SceneBuilder;
 
@@ -44,23 +44,19 @@ impl<'a> EntityBuilder<'a> {
         self
     }
 
-    pub fn with_material(mut self, material_id: u32) -> Self {
+    pub fn with_material(mut self, material_id: Id<GpuMaterial>) -> Self {
         self.entity.material = material_id;
         self
     }
 
-    pub fn with_parent(mut self, parent: &GpuEntity) -> Self {
-        if let Some(parent) = self.scene.entities.get_mut(parent.id as usize) {
-            self.entity.parent = parent.id;
-        } else {
-            log::error!("no such parent entity {}", parent.id);
-        }
+    pub fn with_parent(mut self, parent: impl Into<Id<GpuEntity>>) -> Self {
+        self.entity.parent = parent.into();
         self
     }
 
     pub fn build(self) -> GpuEntity {
         let EntityBuilder { scene, mut entity } = self;
-        entity.id = scene.entities.len() as u32;
+        entity.id = Id::new(scene.entities.len() as u32);
         scene.entities.push(entity.clone());
         entity
     }

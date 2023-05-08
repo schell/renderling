@@ -14,7 +14,7 @@ use glyph_brush::*;
 pub use ::ab_glyph::FontArc;
 pub use glyph_brush::{Color, Section, Text};
 use renderling_shader::scene::{
-    GpuMaterial, GpuVertex, LightingModel, TextureAddressMode, ID_NONE,
+    GpuMaterial, GpuVertex, LightingModel, TextureAddressMode, Id,
 };
 
 use crate::{Renderling, Texture, TextureParams};
@@ -242,15 +242,15 @@ pub const TEXT_TEXTURE_PARAMS: TextureParams = TextureParams {
 };
 
 pub const TEXT_MATERIAL: GpuMaterial = GpuMaterial {
-    texture0: 0,
+    texture0: Id::new(0),
     texture0_tex_coord: 0,
     lighting_model: LightingModel::TEXT_LIGHTING,
 
     factor0: Vec4::ZERO,
     factor1: Vec4::ZERO,
-    texture1: ID_NONE,
-    texture2: ID_NONE,
-    texture3: ID_NONE,
+    texture1: Id::NONE,
+    texture2: Id::NONE,
+    texture3: Id::NONE,
     texture1_tex_coord: 0,
     texture2_tex_coord: 0,
     texture3_tex_coord: 0,

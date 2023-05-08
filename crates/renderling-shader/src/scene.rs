@@ -160,9 +160,6 @@ impl GpuTexture {
     }
 }
 
-/// `u32` representing "null" or "none".
-pub const ID_NONE: u32 = u32::MAX;
-
 /// Determines the lighting to use in an ubershader.
 #[repr(transparent)]
 #[derive(
@@ -189,10 +186,10 @@ pub struct GpuMaterial {
     pub factor0: Vec4,
     pub factor1: Vec4,
 
-    pub texture0: u32,
-    pub texture1: u32,
-    pub texture2: u32,
-    pub texture3: u32,
+    pub texture0: Id<GpuTexture>,
+    pub texture1: Id<GpuTexture>,
+    pub texture2: Id<GpuTexture>,
+    pub texture3: Id<GpuTexture>,
 
     pub texture0_tex_coord: u32,
     pub texture1_tex_coord: u32,
@@ -208,10 +205,10 @@ impl Default for GpuMaterial {
         Self {
             factor0: Vec4::ONE,
             factor1: Vec4::ONE,
-            texture0: ID_NONE,
-            texture1: ID_NONE,
-            texture2: ID_NONE,
-            texture3: ID_NONE,
+            texture0: Id::NONE,
+            texture1: Id::NONE,
+            texture2: Id::NONE,
+            texture3: Id::NONE,
             texture0_tex_coord: 0,
             texture1_tex_coord: 0,
             texture2_tex_coord: 0,
@@ -227,16 +224,16 @@ impl Default for GpuMaterial {
 #[repr(C)]
 #[derive(Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct GpuEntity {
-    // The id of this entity. `ID_MAX` means this entity is not in use.
-    pub id: u32,
+    // The id of this entity. `Id::NONE` means this entity is not in use.
+    pub id: Id<GpuEntity>,
     // The index of the first vertex in this entity's mesh.
     pub mesh_first_vertex: u32,
     // The number of vertices in this entity's mesh.
     pub mesh_vertex_count: u32,
     // The index/id of this entity's material in the material buffer.
-    pub material: u32,
-    // The id of this entity's parent, if it exists. `ID_NONE` means "no parent".
-    pub parent: u32,
+    pub material: Id<GpuMaterial>,
+    // The id of this entity's parent, if it exists. `Id::NONE` means "no parent".
+    pub parent: Id<GpuEntity>,
     // Whether this entity is visible. `0` is "not visible", any other value is "visible".
     pub visible: u32,
     pub padding0: [u32; 2],
@@ -251,23 +248,35 @@ pub struct GpuEntity {
 impl Default for GpuEntity {
     fn default() -> Self {
         Self {
-            id: ID_NONE,
+            id: Id::NONE,
             mesh_first_vertex: 0,
             mesh_vertex_count: 0,
-            material: ID_NONE,
+            material: Id::NONE,
             position: Vec4::ZERO,
             scale: Vec4::ONE,
             rotation: Quat::IDENTITY,
             visible: 1,
             padding0: [0, 0],
-            parent: ID_NONE,
+            parent: Id::NONE,
         }
+    }
+}
+
+impl From<&GpuEntity> for Id<GpuEntity> {
+    fn from(value: &GpuEntity) -> Self {
+        value.id
+    }
+}
+
+impl From<GpuEntity> for Id<GpuEntity> {
+    fn from(value: GpuEntity) -> Self {
+        value.id
     }
 }
 
 impl GpuEntity {
     pub fn is_alive(&self) -> bool {
-        self.id != ID_NONE
+        !self.id.is_none()
     }
 
     /// Return the position, rotation and scale that describe this entity's
@@ -276,14 +285,14 @@ impl GpuEntity {
         let mut position = Vec3::ZERO;
         let mut scale = Vec3::ONE;
         let mut rotation = Quat::IDENTITY;
-        let mut index = self.id as usize;
+        let mut id = self.id;
         loop {
-            let entity = entities[index];
+            let entity = entities[id.index()];
             position += entity.position.xyz();
             scale *= entity.scale.xyz();
             rotation = entity.rotation * rotation;
-            index = entity.parent as usize;
-            if index >= entities.len() {
+            id = entity.parent;
+            if id.index() >= entities.len() {
                 break;
             }
         }
@@ -313,22 +322,22 @@ pub struct DrawIndirect {
 }
 
 fn texture_color(
-    texture_id: u32,
+    texture_id: Id<GpuTexture>,
     uv: Vec2,
     atlas: &Image2d,
     sampler: &Sampler,
     atlas_size: UVec2,
     textures: &[GpuTexture],
 ) -> Vec4 {
-    let texture = if texture_id == ID_NONE {
+    let texture = if texture_id.is_some() {
         GpuTexture::default()
     } else {
-        textures[texture_id as usize]
+        textures[texture_id.index()]
     };
 
     let uv = texture.uv(uv, atlas_size);
     let mut color: Vec4 = atlas.sample_by_lod(*sampler, uv, 0.0);
-    if texture_id == ID_NONE {
+    if texture_id.is_none() {
         color = Vec4::splat(1.0);
     }
     color
@@ -363,7 +372,7 @@ pub fn main_vertex_scene(
     let model_matrix =
         Mat4::from_translation(position) * Mat4::from_quat(rotation) * Mat4::from_scale(scale);
 
-    *out_material = entity.material;
+    *out_material = entity.material.into();
     *out_color = vertex.color;
     *out_uv0 = vertex.uv.xy();
     *out_uv1 = vertex.uv.zw();
@@ -452,7 +461,7 @@ pub fn main_fragment_scene(
         textures,
     );
 
-    let norm = if material.texture2 == ID_NONE {
+    let norm = if material.texture2.is_none() {
         // there is no normal map, use the normal normal ;)
         in_norm
     } else {
@@ -466,7 +475,7 @@ pub fn main_fragment_scene(
     *output = match material.lighting_model {
         LightingModel::PBR_LIGHTING => {
             let albedo = tex_color0 * material.factor0 * in_color;
-            let (metallic, roughness) = if material.texture1 == ID_NONE {
+            let (metallic, roughness) = if material.texture1.is_none() {
                 (material.factor1.y, material.factor1.z)
             } else {
                 (tex_color1.y, tex_color1.z)

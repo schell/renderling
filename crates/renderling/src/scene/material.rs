@@ -1,7 +1,7 @@
 //! Material builders.
 
 use glam::Vec4;
-use renderling_shader::scene::{GpuMaterial, LightingModel};
+use renderling_shader::scene::{GpuMaterial, LightingModel, GpuTexture, Id};
 
 use crate::SceneBuilder;
 
@@ -17,20 +17,20 @@ impl<'a> PhongMaterialBuilder<'a> {
         Self { builder, material }
     }
 
-    pub fn with_diffuse_texture(mut self, texture_id: u32) -> Self {
+    pub fn with_diffuse_texture(mut self, texture_id: Id<GpuTexture>) -> Self {
         self.material.texture0 = texture_id;
         self
     }
 
-    pub fn with_specular_texture(mut self, texture_id: u32) -> Self {
+    pub fn with_specular_texture(mut self, texture_id: Id<GpuTexture>) -> Self {
         self.material.texture1 = texture_id;
         self
     }
 
-    pub fn build(self) -> u32 {
+    pub fn build(self) -> Id<GpuMaterial> {
         let id = self.builder.materials.len();
         self.builder.materials.push(self.material);
-        id as u32
+        Id::new(id as u32)
     }
 }
 
@@ -50,20 +50,20 @@ impl<'a> UnlitMaterialBuilder<'a> {
         self
     }
 
-    pub fn with_texture0(mut self, texture_id: u32) -> Self {
+    pub fn with_texture0(mut self, texture_id: Id<GpuTexture>) -> Self {
         self.material.texture0 = texture_id;
         self
     }
 
-    pub fn with_texture2(mut self, texture_id: u32) -> Self {
+    pub fn with_texture2(mut self, texture_id: Id<GpuTexture>) -> Self {
         self.material.texture1 = texture_id;
         self
     }
 
-    pub fn build(self) -> u32 {
+    pub fn build(self) -> Id<GpuMaterial> {
         let id = self.builder.materials.len();
         self.builder.materials.push(self.material);
-        id as u32
+        Id::new(id as u32)
     }
 }
 
@@ -84,7 +84,7 @@ impl<'a> PbrMaterialBuilder<'a> {
         self
     }
 
-    pub fn with_base_color_texture(mut self, texture_id: u32) -> Self {
+    pub fn with_base_color_texture(mut self, texture_id: Id<GpuTexture>) -> Self {
         self.material.texture0 = texture_id;
         self
     }
@@ -104,7 +104,7 @@ impl<'a> PbrMaterialBuilder<'a> {
         self
     }
 
-    pub fn with_metallic_roughness_texture(mut self, texture_id: u32) -> Self {
+    pub fn with_metallic_roughness_texture(mut self, texture_id: Id<GpuTexture>) -> Self {
         self.material.texture1 = texture_id;
         self
     }
@@ -114,9 +114,9 @@ impl<'a> PbrMaterialBuilder<'a> {
         self
     }
 
-    pub fn build(self) -> u32 {
+    pub fn build(self) -> Id<GpuMaterial> {
         let id = self.builder.materials.len();
         self.builder.materials.push(self.material);
-        id as u32
+        Id::new(id as u32)
     }
 }

@@ -1,10 +1,20 @@
 //! Light builders.
 
 use glam::{Vec4, Vec3};
-use renderling_shader::scene::{GpuLight, LightType};
+use renderling_shader::scene::{GpuLight, LightType, Id};
+
+#[cfg(feature = "gltf")]
+pub fn from_gltf_light_kind(kind: gltf::khr_lights_punctual::Kind) -> LightType {
+    match kind {
+        gltf::khr_lights_punctual::Kind::Directional => LightType::DIRECTIONAL_LIGHT,
+        gltf::khr_lights_punctual::Kind::Point => LightType::POINT_LIGHT,
+        gltf::khr_lights_punctual::Kind::Spot { .. } => LightType::SPOT_LIGHT,
+    }
+}
 
 /// A builder for a spot light.
 pub struct GpuSpotLightBuilder<'a> {
+    id: Id<GpuLight>,
     inner: &'a mut GpuLight,
 }
 
@@ -14,11 +24,12 @@ impl<'a> GpuSpotLightBuilder<'a> {
             light_type: LightType::SPOT_LIGHT,
             ..Default::default()
         };
-        let index = lights.len();
+        let id = Id::new(lights.len() as u32);
         lights.push(inner);
         let white = Vec4::splat(1.0);
         Self {
-            inner: &mut lights[index],
+            inner: &mut lights[id.index()],
+            id
         }
         .with_cutoff(std::f32::consts::PI / 3.0, std::f32::consts::PI / 2.0)
         .with_attenuation(1.0, 0.014, 0.007)
@@ -64,8 +75,8 @@ impl<'a> GpuSpotLightBuilder<'a> {
         self
     }
 
-    pub fn build(self) -> GpuLight {
-        self.inner.clone()
+    pub fn build(self) -> Id<GpuLight> {
+        self.id
     }
 }
 
@@ -76,6 +87,7 @@ impl<'a> GpuSpotLightBuilder<'a> {
 ///
 /// This is like the sun, or the moon.
 pub struct GpuDirectionalLightBuilder<'a> {
+    id: Id<GpuLight>,
     inner: &'a mut GpuLight,
 }
 
@@ -85,10 +97,11 @@ impl<'a> GpuDirectionalLightBuilder<'a> {
             light_type: LightType::DIRECTIONAL_LIGHT,
             ..Default::default()
         };
-        let index = lights.len();
+        let id = Id::new(lights.len() as u32);
         lights.push(inner);
         Self {
-            inner: &mut lights[index],
+            id,
+            inner: &mut lights[id.index()],
         }
         .with_direction(Vec3::new(0.0, -1.0, 0.0))
         .with_ambient_color(Vec4::splat(1.0))
@@ -116,12 +129,13 @@ impl<'a> GpuDirectionalLightBuilder<'a> {
         self
     }
 
-    pub fn build(self) -> GpuLight {
-        *self.inner
+    pub fn build(self) -> Id<GpuLight> {
+        self.id
     }
 }
 
 pub struct GpuPointLightBuilder<'a> {
+    id: Id<GpuLight>,
     inner: &'a mut GpuLight,
 }
 
@@ -131,11 +145,12 @@ impl<'a> GpuPointLightBuilder<'a> {
             light_type: LightType::POINT_LIGHT,
             ..Default::default()
         };
-        let index = lights.len();
+        let id = Id::new(lights.len() as u32);
         lights.push(inner);
         let white = Vec4::splat(1.0);
         GpuPointLightBuilder {
-            inner: &mut lights[index],
+            id,
+            inner: &mut lights[id.index()],
         }
         .with_attenuation(1.0, 0.14, 0.07)
         .with_ambient_color(white)
@@ -168,7 +183,7 @@ impl<'a> GpuPointLightBuilder<'a> {
         self
     }
 
-    pub fn build(self) -> GpuLight {
-        *self.inner
+    pub fn build(self) -> Id<GpuLight> {
+        self.id
     }
 }

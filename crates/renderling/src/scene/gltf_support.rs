@@ -41,6 +41,11 @@ pub enum GltfLoaderError {
         index: Option<usize>,
         name: Option<String>,
     },
+
+    #[snafu(display("Missing entity {id:?}"))]
+    MissingEntity {
+        id: Id<GpuEntity>
+    }
 }
 
 fn _image_data_format_to_wgpu(
@@ -138,26 +143,37 @@ impl<T> GltfStore<T> {
 pub enum GltfNode {
     Camera(usize),
     Light(usize),
-    Mesh(GpuEntity, Vec<GpuEntity>),
-    Container(GpuEntity),
+    Mesh(Id<GpuEntity>, Vec<Id<GpuEntity>>),
+    Container(Id<GpuEntity>),
 }
 
 impl GltfNode {
+    /// Attempt to return this node's entity id.
+    ///
+    /// Cameras and lights are not represented by entities in a renderling
+    /// scene and so nodes of those types will return `None`.
+    pub fn as_entity(&self) -> Option<Id<GpuEntity>> {
+        match self {
+            GltfNode::Mesh(id, _) => Some(*id),
+            GltfNode::Container(id) => Some(*id),
+            _ => None
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
 pub struct GltfMeshPrim {
     vertex_start: u32,
     vertex_count: u32,
-    material_id: u32,
+    material_id: Id<GpuMaterial>,
 }
 
 #[derive(Default)]
 pub struct GltfLoader {
     pub cameras: GltfStore<(Mat4, Mat4)>,
-    pub lights: GltfStore<GpuLight>,
-    pub textures: GltfStore<u32>,
-    pub materials: GltfStore<(u32, GpuMaterial)>,
+    pub lights: GltfStore<Id<GpuLight>>,
+    pub textures: GltfStore<Id<GpuTexture>>,
+    pub materials: GltfStore<Id<GpuMaterial>>,
     pub meshes: GltfStore<Vec<GltfMeshPrim>>,
     pub nodes: GltfStore<GltfNode>,
 }
@@ -267,7 +283,7 @@ impl GltfLoader {
 
         let texture_id = builder.add_texture(params);
         log::trace!(
-            "adding texture index:{index} name:{name:?} id:{texture_id} with wrapping \
+            "adding texture index:{index} name:{name:?} id:{texture_id:?} with wrapping \
              s:{mode_s:?} t:{mode_t:?}"
         );
         let _ = self.textures.insert(index, name, texture_id);
@@ -298,8 +314,8 @@ impl GltfLoader {
                 .with_base_color(pbr.base_color_factor())
                 .with_texture0(
                     pbr.base_color_texture()
-                        .map(|info| info.texture().index() as u32)
-                        .unwrap_or(ID_NONE),
+                        .map(|info| Id::new(info.texture().index() as u32))
+                        .unwrap_or(Id::NONE),
                 )
                 .build()
         } else {
@@ -307,21 +323,21 @@ impl GltfLoader {
             let base_color = pbr.base_color_factor();
             let (base_color_tex_id, base_color_tex_coord) = pbr
                 .base_color_texture()
-                .map(|info| (info.texture().index() as u32, info.tex_coord()))
-                .unwrap_or((ID_NONE, 0));
+                .map(|info| (Id::new(info.texture().index() as u32), info.tex_coord()))
+                .unwrap_or((Id::NONE, 0));
             let metallic = pbr.metallic_factor();
             let roughness = pbr.roughness_factor();
             let (metallic_roughness_tex_id, metallic_roughness_tex_coord) = pbr
                 .metallic_roughness_texture()
-                .map(|info| (info.texture().index() as u32, info.tex_coord()))
-                .unwrap_or((ID_NONE, 0));
+                .map(|info| (Id::new(info.texture().index() as u32), info.tex_coord()))
+                .unwrap_or((Id::NONE, 0));
 
             log::trace!("  base_color: {base_color:?}");
-            log::trace!("  base_color_tex_id: {base_color_tex_id}");
+            log::trace!("  base_color_tex_id: {base_color_tex_id:?}");
             log::trace!("  base_color_tex_coord: {base_color_tex_coord}");
             log::trace!("  metallic: {metallic}");
             log::trace!("  roughness: {roughness}");
-            log::trace!("  metallic_roughness_tex_id: {metallic_roughness_tex_id}");
+            log::trace!("  metallic_roughness_tex_id: {metallic_roughness_tex_id:?}");
             log::trace!("  metallic_roughness_tex_coord: {metallic_roughness_tex_coord}");
             builder
                 .new_pbr_material()
@@ -336,26 +352,24 @@ impl GltfLoader {
         };
 
         // UNWRAP: ok because we just stored this material above
-        let gpu_material = builder.get_material_mut(gpu_material_id).unwrap();
+        let gpu_material = builder.materials.get_mut(gpu_material_id.index()).unwrap();
         if let Some(norm_tex) = material.normal_texture() {
-            gpu_material.texture2 = norm_tex.texture().index() as u32;
+            gpu_material.texture2 = Id::new(norm_tex.texture().index() as u32);
             gpu_material.texture2_tex_coord = norm_tex.tex_coord();
             log::trace!("  using normal map");
-            log::trace!("    texture_id:        {}", gpu_material.texture2);
+            log::trace!("    texture_id:        {:?}", gpu_material.texture2);
             log::trace!("    texture_tex_coord: {}", gpu_material.texture2_tex_coord);
         }
         if let Some(occlusion_tex) = material.occlusion_texture() {
-            gpu_material.texture3 = occlusion_tex.texture().index() as u32;
+            gpu_material.texture3 = Id::new(occlusion_tex.texture().index() as u32);
             gpu_material.texture3_tex_coord = occlusion_tex.tex_coord();
             log::trace!("  using occlusion map");
-            log::trace!("    texture_id:        {}", gpu_material.texture3);
+            log::trace!("    texture_id:        {:?}", gpu_material.texture3);
             log::trace!("    texture_tex_coord: {}", gpu_material.texture3_tex_coord);
         }
         // TODO: figure out why a material would not have an index
         if let Some(index) = index {
-            let _ = self
-                .materials
-                .insert(index, name, (gpu_material_id, *gpu_material));
+            let _ = self.materials.insert(index, name, gpu_material_id);
         }
     }
 
@@ -436,7 +450,7 @@ impl GltfLoader {
                     color,
                     uv,
                     normal: normal.extend(0.0),
-                    tangent
+                    tangent,
                 })
                 .collect::<Vec<_>>();
             // we don't yet support indices, so we'll just repeat vertices
@@ -474,7 +488,9 @@ impl GltfLoader {
                                 d_uv1.x * ac.y - d_uv2.x * ab.y,
                                 d_uv1.x * ac.z - d_uv2.x * ab.z,
                             );
-                            let tangent = (s - s.dot(n) * n).normalize_or_zero().extend(n.cross(s).dot(t).signum());
+                            let tangent = (s - s.dot(n) * n)
+                                .normalize_or_zero()
+                                .extend(n.cross(s).dot(t).signum());
                             a.tangent = tangent;
                             b.tangent = tangent;
                             c.tangent = tangent;
@@ -488,8 +504,8 @@ impl GltfLoader {
             let material_id = primitive
                 .material()
                 .index()
-                .map(|i| i as u32)
-                .unwrap_or(ID_NONE);
+                .map(|i| Id::new(i as u32))
+                .unwrap_or(Id::NONE);
             mesh_primitives.push(GltfMeshPrim {
                 vertex_start,
                 vertex_count,
@@ -596,11 +612,12 @@ impl GltfLoader {
                             prims[0].vertex_count,
                         )
                         .with_material(prims[0].material_id)
-                        .build(),
+                        .build()
+                        .id,
                     vec![],
                 )
             } else {
-                let parent = parent.build();
+                let parent = parent.build().id;
                 let children = prims
                     .iter()
                     .map(|child_prim| {
@@ -611,8 +628,9 @@ impl GltfLoader {
                                 child_prim.vertex_count,
                             )
                             .with_material(child_prim.material_id)
-                            .with_parent(&parent)
+                            .with_parent(parent)
                             .build()
+                            .id
                     })
                     .collect::<Vec<_>>();
                 (parent, children)
@@ -646,7 +664,7 @@ impl GltfLoader {
                     .with_cutoff(inner_cone_angle, outer_cone_angle)
                     .build(),
             };
-            log::trace!("  node is {}", gpu_light.light_type);
+            log::trace!("  node is {}", from_gltf_light_kind(light.kind()));
             let _ = self.lights.insert(light.index(), None, gpu_light);
             GltfNode::Light(light.index())
         } else {
@@ -657,32 +675,25 @@ impl GltfLoader {
                 .with_rotation(rotation)
                 .with_scale(scale)
                 .build();
-            GltfNode::Container(entity)
+            GltfNode::Container(entity.id)
         };
 
         let may_parent_id = match &gltf_node {
             GltfNode::Camera(_) => None,
             GltfNode::Light(_) => None,
-            GltfNode::Mesh(parent, _) => Some(parent.id),
-            GltfNode::Container(parent) => Some(parent.id),
+            GltfNode::Mesh(parent, _) => Some(parent),
+            GltfNode::Container(parent) => Some(parent),
         };
 
         if let Some(parent) = may_parent_id {
             for child in node.children() {
-                let mut child_node = self.load_node(child, builder)?;
-                let updated = match &mut child_node {
-                    GltfNode::Mesh(child_entity, _) => {
-                        child_entity.parent = parent;
-                        Some(*child_entity)
-                    }
-                    GltfNode::Container(child_entity) => {
-                        child_entity.parent = parent;
-                        Some(*child_entity)
-                    }
-                    _ => None,
-                };
-                if let Some(e) = updated {
-                    builder.update_entity(e).context(SceneSnafu)?;
+                let child_node = self.load_node(child, builder)?;
+                if let Some(child_id) = child_node.as_entity() {
+                    let child_entity = builder
+                        .entities
+                        .get_mut(child_id.index())
+                        .context(MissingEntitySnafu { id: child_id })?;
+                    child_entity.parent = *parent;
                 }
             }
         }
