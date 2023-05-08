@@ -329,7 +329,7 @@ fn texture_color(
     atlas_size: UVec2,
     textures: &[GpuTexture],
 ) -> Vec4 {
-    let texture = if texture_id.is_some() {
+    let texture = if texture_id.is_none() {
         GpuTexture::default()
     } else {
         textures[texture_id.index()]
