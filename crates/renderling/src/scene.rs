@@ -1,7 +1,7 @@
 //! The CPU side of [`renderling_shader::scene`] module.
 use std::sync::Arc;
 
-use glam::{Mat4, Quat, Vec2, Vec3, Vec4};
+use glam::{Mat4, Vec2, Vec3};
 use image::RgbaImage;
 use moongraph::{IsGraphNode, Read, Write};
 use snafu::prelude::*;
@@ -14,10 +14,19 @@ use crate::{
     Renderling,
 };
 
+mod entity;
+pub use entity::*;
+
+mod light;
+pub use light::*;
+
 #[cfg(feature = "gltf")]
 mod gltf_support;
 #[cfg(feature = "gltf")]
 pub use gltf_support::*;
+
+mod material;
+pub use material::*;
 
 #[derive(Debug, Snafu)]
 pub enum SceneError {
@@ -51,8 +60,8 @@ pub enum SceneError {
     #[snafu(display("Missing the glyph.cache"))]
     MissingCache,
 
-    #[snafu(display("Missing entity {id}"))]
-    MissingEntity { id: u32 },
+    #[snafu(display("Missing entity {id:?}"))]
+    MissingEntity { id: Id<GpuEntity> },
 }
 
 pub(crate) fn scene_render_usage() -> wgpu::BufferUsages {
@@ -64,353 +73,6 @@ pub(crate) fn scene_indirect_usage() -> wgpu::BufferUsages {
         | wgpu::BufferUsages::COPY_DST
         | wgpu::BufferUsages::COPY_SRC
         | wgpu::BufferUsages::INDIRECT
-}
-
-/// A builder for a spot light.
-pub struct GpuSpotLightBuilder<'a> {
-    inner: &'a mut GpuLight,
-}
-
-impl<'a> GpuSpotLightBuilder<'a> {
-    pub fn new(lights: &'a mut Vec<GpuLight>) -> GpuSpotLightBuilder<'a> {
-        let inner = GpuLight {
-            light_type: LightType::SPOT_LIGHT,
-            ..Default::default()
-        };
-        let index = lights.len();
-        lights.push(inner);
-        let white = Vec4::splat(1.0);
-        Self {
-            inner: &mut lights[index],
-        }
-        .with_cutoff(std::f32::consts::PI / 3.0, std::f32::consts::PI / 2.0)
-        .with_attenuation(1.0, 0.014, 0.007)
-        .with_direction(Vec3::new(0.0, -1.0, 0.0))
-        .with_ambient_color(white)
-        .with_diffuse_color(white)
-        .with_specular_color(white)
-    }
-
-    pub fn with_position(mut self, position: impl Into<Vec3>) -> Self {
-        self.inner.position = position.into().extend(1.0);
-        self
-    }
-
-    pub fn with_direction(mut self, direction: impl Into<Vec3>) -> Self {
-        self.inner.direction = direction.into().extend(1.0);
-        self
-    }
-
-    pub fn with_attenuation(mut self, constant: f32, linear: f32, quadratic: f32) -> Self {
-        self.inner.attenuation = Vec4::new(constant, linear, quadratic, 0.0);
-        self
-    }
-
-    pub fn with_cutoff(mut self, inner: f32, outer: f32) -> Self {
-        self.inner.inner_cutoff = inner;
-        self.inner.outer_cutoff = outer;
-        self
-    }
-
-    pub fn with_ambient_color(mut self, color: impl Into<Vec4>) -> Self {
-        self.inner.ambient_color = color.into();
-        self
-    }
-
-    pub fn with_diffuse_color(mut self, color: impl Into<Vec4>) -> Self {
-        self.inner.diffuse_color = color.into();
-        self
-    }
-
-    pub fn with_specular_color(mut self, color: impl Into<Vec4>) -> Self {
-        self.inner.specular_color = color.into();
-        self
-    }
-
-    pub fn build(self) -> GpuLight {
-        self.inner.clone()
-    }
-}
-
-/// A builder for a directional light.
-///
-/// Directional lights illuminate all geometry from a certain direction,
-/// without attenuation.
-///
-/// This is like the sun, or the moon.
-pub struct GpuDirectionalLightBuilder<'a> {
-    inner: &'a mut GpuLight,
-}
-
-impl<'a> GpuDirectionalLightBuilder<'a> {
-    pub fn new(lights: &'a mut Vec<GpuLight>) -> GpuDirectionalLightBuilder<'a> {
-        let inner = GpuLight {
-            light_type: LightType::DIRECTIONAL_LIGHT,
-            ..Default::default()
-        };
-        let index = lights.len();
-        lights.push(inner);
-        Self {
-            inner: &mut lights[index],
-        }
-        .with_direction(Vec3::new(0.0, -1.0, 0.0))
-        .with_ambient_color(Vec4::splat(1.0))
-        .with_diffuse_color(Vec4::splat(1.0))
-        .with_specular_color(Vec4::splat(1.0))
-    }
-
-    pub fn with_direction(mut self, direction: impl Into<Vec3>) -> Self {
-        self.inner.direction = direction.into().extend(1.0);
-        self
-    }
-
-    pub fn with_ambient_color(mut self, color: impl Into<Vec4>) -> Self {
-        self.inner.ambient_color = color.into();
-        self
-    }
-
-    pub fn with_diffuse_color(mut self, color: impl Into<Vec4>) -> Self {
-        self.inner.diffuse_color = color.into();
-        self
-    }
-
-    pub fn with_specular_color(mut self, color: impl Into<Vec4>) -> Self {
-        self.inner.specular_color = color.into();
-        self
-    }
-
-    pub fn build(self) -> GpuLight {
-        *self.inner
-    }
-}
-
-pub struct GpuPointLightBuilder<'a> {
-    inner: &'a mut GpuLight,
-}
-
-impl<'a> GpuPointLightBuilder<'a> {
-    pub fn new(lights: &mut Vec<GpuLight>) -> GpuPointLightBuilder<'_> {
-        let inner = GpuLight {
-            light_type: LightType::POINT_LIGHT,
-            ..Default::default()
-        };
-        let index = lights.len();
-        lights.push(inner);
-        let white = Vec4::splat(1.0);
-        GpuPointLightBuilder {
-            inner: &mut lights[index],
-        }
-        .with_attenuation(1.0, 0.14, 0.07)
-        .with_ambient_color(white)
-        .with_diffuse_color(white)
-        .with_specular_color(white)
-    }
-
-    pub fn with_position(mut self, position: impl Into<Vec3>) -> Self {
-        self.inner.position = position.into().extend(0.0);
-        self
-    }
-
-    pub fn with_attenuation(mut self, constant: f32, linear: f32, quadratic: f32) -> Self {
-        self.inner.attenuation = Vec4::new(constant, linear, quadratic, 0.0);
-        self
-    }
-
-    pub fn with_ambient_color(mut self, color: impl Into<Vec4>) -> Self {
-        self.inner.ambient_color = color.into();
-        self
-    }
-
-    pub fn with_diffuse_color(mut self, color: impl Into<Vec4>) -> Self {
-        self.inner.diffuse_color = color.into();
-        self
-    }
-
-    pub fn with_specular_color(mut self, color: impl Into<Vec4>) -> Self {
-        self.inner.specular_color = color.into();
-        self
-    }
-
-    pub fn build(self) -> GpuLight {
-        *self.inner
-    }
-}
-
-pub struct PhongMaterialBuilder<'a> {
-    builder: &'a mut SceneBuilder,
-    material: GpuMaterial,
-}
-
-impl<'a> PhongMaterialBuilder<'a> {
-    pub fn new(builder: &'a mut SceneBuilder) -> Self {
-        let mut material = GpuMaterial::default();
-        material.lighting_model = LightingModel::PHONG_LIGHTING;
-        Self { builder, material }
-    }
-
-    pub fn with_diffuse_texture(mut self, texture_id: u32) -> Self {
-        self.material.texture0 = texture_id;
-        self
-    }
-
-    pub fn with_specular_texture(mut self, texture_id: u32) -> Self {
-        self.material.texture1 = texture_id;
-        self
-    }
-
-    pub fn build(self) -> u32 {
-        let id = self.builder.materials.len();
-        self.builder.materials.push(self.material);
-        id as u32
-    }
-}
-
-pub struct UnlitMaterialBuilder<'a> {
-    builder: &'a mut SceneBuilder,
-    material: GpuMaterial,
-}
-
-impl<'a> UnlitMaterialBuilder<'a> {
-    pub fn new(builder: &'a mut SceneBuilder) -> Self {
-        let material = GpuMaterial::default();
-        Self { builder, material }
-    }
-
-    pub fn with_base_color(mut self, color: impl Into<Vec4>) -> Self {
-        self.material.factor0 = color.into();
-        self
-    }
-
-    pub fn with_texture0(mut self, texture_id: u32) -> Self {
-        self.material.texture0 = texture_id;
-        self
-    }
-
-    pub fn with_texture2(mut self, texture_id: u32) -> Self {
-        self.material.texture1 = texture_id;
-        self
-    }
-
-    pub fn build(self) -> u32 {
-        let id = self.builder.materials.len();
-        self.builder.materials.push(self.material);
-        id as u32
-    }
-}
-
-pub struct PbrMaterialBuilder<'a> {
-    builder: &'a mut SceneBuilder,
-    material: GpuMaterial,
-}
-
-impl<'a> PbrMaterialBuilder<'a> {
-    pub fn new(builder: &'a mut SceneBuilder) -> Self {
-        let mut material = GpuMaterial::default();
-        material.lighting_model = LightingModel::PBR_LIGHTING;
-        Self { builder, material }
-    }
-
-    pub fn with_base_color_factor(mut self, factor: impl Into<Vec4>) -> Self {
-        self.material.factor0 = factor.into();
-        self
-    }
-
-    pub fn with_base_color_texture(mut self, texture_id: u32) -> Self {
-        self.material.texture0 = texture_id;
-        self
-    }
-
-    pub fn with_base_color_texture_coord(mut self, tex_coord: u32) -> Self {
-        self.material.texture0_tex_coord = tex_coord;
-        self
-    }
-
-    pub fn with_metallic_factor(mut self, metallic: f32) -> Self {
-        self.material.factor1.y = metallic;
-        self
-    }
-
-    pub fn with_roughness_factor(mut self, roughness: f32) -> Self {
-        self.material.factor1.z = roughness;
-        self
-    }
-
-    pub fn with_metallic_roughness_texture(mut self, texture_id: u32) -> Self {
-        self.material.texture1 = texture_id;
-        self
-    }
-
-    pub fn with_metallic_roughness_texture_coord(mut self, tex_coord: u32) -> Self {
-        self.material.texture1_tex_coord = tex_coord;
-        self
-    }
-
-    pub fn build(self) -> u32 {
-        let id = self.builder.materials.len();
-        self.builder.materials.push(self.material);
-        id as u32
-    }
-}
-
-pub struct EntityBuilder<'a> {
-    scene: &'a mut SceneBuilder,
-    entity: GpuEntity,
-}
-
-impl<'a> EntityBuilder<'a> {
-    pub fn with_visible(mut self, is_visible: bool) -> Self {
-        self.entity.visible = if is_visible { 1 } else { 0 };
-        self
-    }
-
-    pub fn with_meshlet(mut self, vertices: impl IntoIterator<Item = GpuVertex>) -> Self {
-        let (start, len) = self.scene.add_meshlet(vertices);
-        self.entity.mesh_first_vertex = start;
-        self.entity.mesh_vertex_count = len;
-        self
-    }
-
-    pub fn with_starting_vertex_and_count(mut self, first_vertex: u32, count: u32) -> Self {
-        self.entity.mesh_first_vertex = first_vertex;
-        self.entity.mesh_vertex_count = count;
-        self
-    }
-
-    pub fn with_position(mut self, position: impl Into<Vec3>) -> Self {
-        self.entity.position = position.into().extend(0.0);
-        self
-    }
-
-    pub fn with_scale(mut self, scale: impl Into<Vec3>) -> Self {
-        self.entity.scale = scale.into().extend(0.0);
-        self
-    }
-
-    pub fn with_rotation(mut self, rotation: impl Into<Quat>) -> Self {
-        self.entity.rotation = rotation.into();
-        self
-    }
-
-    pub fn with_material(mut self, material_id: u32) -> Self {
-        self.entity.material = material_id;
-        self
-    }
-
-    pub fn with_parent(mut self, parent: &GpuEntity) -> Self {
-        if let Some(parent) = self.scene.entities.get_mut(parent.id as usize) {
-            self.entity.parent = parent.id;
-        } else {
-            log::error!("no such parent entity {}", parent.id);
-        }
-        self
-    }
-
-    pub fn build(self) -> GpuEntity {
-        let EntityBuilder { scene, mut entity } = self;
-        entity.id = scene.entities.len() as u32;
-        scene.entities.push(entity.clone());
-        entity
-    }
 }
 
 /// Helps build textures, storing texture parameters before images are packed
@@ -425,16 +87,16 @@ pub struct TextureParams {
 /// Sets up the scene using different build phases.
 #[derive(Clone, Debug)]
 pub struct SceneBuilder {
-    pub(crate) device: Arc<wgpu::Device>,
-    pub(crate) queue: Arc<wgpu::Queue>,
-    pub(crate) projection: Mat4,
-    pub(crate) view: Mat4,
-    pub(crate) images: Vec<RgbaImage>,
-    pub(crate) textures: Vec<TextureParams>,
-    pub(crate) materials: Vec<GpuMaterial>,
-    pub(crate) vertices: Vec<GpuVertex>,
-    pub(crate) entities: Vec<GpuEntity>,
-    pub(crate) lights: Vec<GpuLight>,
+    pub device: Arc<wgpu::Device>,
+    pub queue: Arc<wgpu::Queue>,
+    pub projection: Mat4,
+    pub view: Mat4,
+    pub images: Vec<RgbaImage>,
+    pub textures: Vec<TextureParams>,
+    pub materials: Vec<GpuMaterial>,
+    pub vertices: Vec<GpuVertex>,
+    pub entities: Vec<GpuEntity>,
+    pub lights: Vec<GpuLight>,
 }
 
 impl SceneBuilder {
@@ -459,7 +121,7 @@ impl SceneBuilder {
         img: RgbaImage,
         mode_s: TextureAddressMode,
         mode_t: TextureAddressMode,
-    ) -> u32 {
+    ) -> Id<GpuTexture> {
         let image_index = self.images.len();
         self.images.push(img);
         self.add_texture(TextureParams{image_index, mode_s, mode_t})
@@ -468,7 +130,7 @@ impl SceneBuilder {
     /// Add an image and return a texture id for it.
     ///
     /// The texture sampling mode defaults to "repeat".
-    pub fn add_image_texture(&mut self, img: RgbaImage) -> u32 {
+    pub fn add_image_texture(&mut self, img: RgbaImage) -> Id<GpuTexture> {
         self.add_image_texture_mode(
             img,
             TextureAddressMode::CLAMP_TO_EDGE,
@@ -489,10 +151,10 @@ impl SceneBuilder {
     pub fn add_texture(
         &mut self,
         params: TextureParams,
-    ) -> u32 {
+    ) -> Id<GpuTexture> {
         let texture_id = self.textures.len();
         self.textures.push(params);
-        texture_id as u32
+        Id::new(texture_id as u32)
     }
 
     pub fn with_camera(mut self, projection: Mat4, view: Mat4) -> Self {
@@ -521,19 +183,6 @@ impl SceneBuilder {
         let id = self.materials.len();
         self.materials.push(material);
         id as u32
-    }
-
-    pub fn get_material(&self, material_id: u32) -> Option<GpuMaterial> {
-        self.materials.get(material_id as usize).copied()
-    }
-
-    pub fn get_material_mut(&mut self, material_id: u32) -> Option<&mut GpuMaterial> {
-        self.materials.get_mut(material_id as usize)
-    }
-
-
-    pub fn entities(&self) -> &[GpuEntity] {
-        &self.entities
     }
 
     /// Add a meshlet.
@@ -565,15 +214,6 @@ impl SceneBuilder {
             scene: self,
             entity: GpuEntity::default(),
         }
-    }
-
-    pub fn update_entity(&mut self, entity: GpuEntity) -> Result<(), SceneError> {
-        let here = self
-            .entities
-            .get_mut(entity.id as usize)
-            .context(MissingEntitySnafu { id: entity.id })?;
-        *here = entity;
-        Ok(())
     }
 
     pub fn build(self) -> Result<Scene, SceneError> {
@@ -832,9 +472,9 @@ impl Scene {
     pub fn update_entity(&mut self, entity: GpuEntity) -> Result<(), SceneError> {
         let (i, n) = self
             .entities
-            .overwrite(entity.id as usize, std::iter::once(entity))
+            .overwrite(entity.id.index(), std::iter::once(entity))
             .context(BufferSnafu)?;
-        debug_assert_eq!((entity.id as usize, 1), (i, n));
+        debug_assert_eq!((entity.id.index(), 1), (i, n));
         Ok(())
     }
 
