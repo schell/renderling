@@ -110,16 +110,6 @@ pub struct BackgroundColor(pub Vec4);
 
 /// A graph-based renderer that manages GPU resources for cameras, materials and
 /// meshes.
-// TODO: Think about adding a phantom type variable to Renderling, and then
-// using adjoint types that include specific functionality:
-// ```rust
-// pub struct Renderling<T> {
-//     ...
-// }
-// impl<T: Has<ForwardRenderNode>> Renderling<T> {
-//     pub fn forward_render(&self) -> Result<(), RenderlingError> {...}
-// }
-// ```
 pub struct Renderling {
     // The inner render graph
     pub graph: Graph,
