@@ -142,6 +142,9 @@ pub enum GltfNode {
     Container(GpuEntity),
 }
 
+impl GltfNode {
+}
+
 #[derive(Clone, Copy)]
 pub struct GltfMeshPrim {
     vertex_start: u32,

@@ -43,9 +43,9 @@ mod atlas;
 mod buffer_array;
 mod camera;
 // mod gltf_support;
+//mod id;
 pub mod node;
 mod renderer;
-// mod resources;
 mod scene;
 mod state;
 #[cfg(feature = "text")]
@@ -55,8 +55,7 @@ mod texture;
 pub use atlas::*;
 pub use buffer_array::*;
 pub use camera::*;
-//#[cfg(feature = "gltf")]
-// pub use gltf_support::*;
+//pub use id::*;
 pub use renderer::*;
 // pub use resources::*;
 pub use scene::*;
@@ -760,13 +759,11 @@ mod test {
             .unwrap()
             .into_rgba8();
         let texels_index = builder.add_image(texels);
-        let texture_id = builder.add_texture(
-            TextureParams {
-                image_index: texels_index,
-                mode_s: TextureAddressMode::CLAMP_TO_EDGE,
-                mode_t: TextureAddressMode::CLAMP_TO_EDGE,
-            }
-        );
+        let texture_id = builder.add_texture(TextureParams {
+            image_index: texels_index,
+            mode_s: TextureAddressMode::CLAMP_TO_EDGE,
+            mode_t: TextureAddressMode::CLAMP_TO_EDGE,
+        });
         let material_id = builder
             .new_unlit_material()
             .with_texture0(texture_id)
@@ -897,7 +894,6 @@ mod test {
         let img = r.render_image().unwrap();
         crate::img_diff::assert_img_eq("uv_wrapping.png", img);
     }
-
 
     #[test]
     fn negative_uv_wrapping() {
@@ -1518,26 +1514,8 @@ mod test {
 
         let img = r.render_image().unwrap();
         println!("saving frame");
-        //crate::img_diff::save("gltf_normal_mapping_brick_sphere.png", img.clone());
+        // crate::img_diff::save("gltf_normal_mapping_brick_sphere.png", img.clone());
         crate::img_diff::assert_img_eq("gltf_normal_mapping_brick_sphere.png", img);
-
-//        println!("saving atlas");
-//        let atlas_img = r
-//            .graph
-//            .visit(
-//                |(scene, device, queue): (Read<Scene>, Read<Device>, Read<Queue>)| {
-//                    let s = scene.atlas.size;
-//                    let copied_texture =
-//                        scene
-//                            .atlas
-//                            .texture
-//                            .read(&device, &queue, s.x as usize, s.y as usize);
-//                    copied_texture.into_rgba(&device).unwrap()
-//                },
-//            )
-//            .unwrap();
-
-        //crate::img_diff::save("gltf_normal_mapping_atlas.png", atlas_img);
     }
 
     //#[cfg(feature = "gltf")]
@@ -1572,27 +1550,25 @@ mod test {
 
     //#[cfg(feature = "gltf")]
     //#[test]
-    // fn gltf_simple_animation() {
-    //    use moongraph::Read;
+    //fn gltf_simple_animation() {
+    //    use moongraph::{Read, IsGraphNode};
 
     //    use crate::node::FrameTextureView;
 
     //    _init_logging();
-    //    let (mut r, cam) = forward_renderling(50, 50);
-    //    r.set_background_color(Vec4::splat(1.0));
+    //    let mut r = Renderling::headless(50, 50)
+    //        .unwrap()
+    //        .with_background_color(Vec4::splat(1.0));
 
-    //    let (proj, view) = camera::default_ortho2d(50.0, 50.0);
-    //    cam.set_projection(proj);
-    //    cam.set_view(view);
-    //    // render once to get the right background color
-    //    r.render().unwrap();
+    //    let (projection, view) = camera::default_ortho2d(50.0, 50.0);
+    //    let mut builder = r.new_scene()
+    //        .with_camera(projection, view);
 
-    //    // after this point we don't want to clear the frame before every
-    // rendering    // because we're going to composite different frames of an
-    // animation into one,    // so we'll replace the clear_frame_and_depth node
-    // with our own node    // that only clears the depth.
-    //    let clear_frame_and_depth_node =
-    // r.graph.remove_node("clear_frame_and_depth").unwrap();
+    //    // after this point we don't want to clear the frame before every rendering
+    //    // because we're going to composite different frames of an animation into one,
+    //    // so we'll replace the clear_frame_and_depth node with our own node
+    //    // that only clears the depth.
+    //    let clear_frame_and_depth_node = r.graph.remove_node("clear_frame_and_depth").unwrap();
     //    pub fn clear_only_depth(
     //        (device, queue, _frame_view, depth, color): (
     //            Read<Device>,
@@ -1610,7 +1586,7 @@ mod test {
     //            b: b.into(),
     //            a: a.into(),
     //        };
-    //        crate::linkage::conduct_clear_pass(
+    //        crate::node::conduct_clear_pass(
     //            &device,
     //            &queue,
     //            Some("clear_only_depth"),
@@ -1626,12 +1602,12 @@ mod test {
     //        .runs_after_barrier(clear_frame_and_depth_node.get_barrier());
     //    r.graph.add_node(clear_only_depth_node);
 
-    //    let mut loader = r.new_gltf_loader();
     //    let (document, buffers, images) =
     //        gltf::import("../../gltf/animated_triangle.gltf").unwrap();
-    //    loader.load(&mut r, &document, &buffers, &images).unwrap();
+    //    let (device, queue) = r.get_device_and_queue();
+    //    let (loader, scene_builder) = crate::GltfLoader::load(device, queue, &document, &buffers, &images).unwrap();
 
-    //    let tri_node = loader.get_node(0).unwrap();
+    //    let tri_node = loader.nodes.get(0).unwrap();
     //    let tri = tri_node.variant.as_object().unwrap();
     //    tri.set_scale(Vec3::splat(25.0));
     //    tri.set_position(Vec3::new(25.0, 25.0, 0.0));

@@ -10,6 +10,9 @@ use spirv_std::{image::Image2d, Sampler};
 
 use crate::{math::Vec3ColorSwizzles, pbr, phong};
 
+mod id;
+pub use id::*;
+
 mod wrap;
 pub use wrap::*;
 
