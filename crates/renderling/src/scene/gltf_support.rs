@@ -7,7 +7,9 @@ use snafu::prelude::*;
 
 use super::*;
 
+mod anime;
 mod img;
+pub use anime::*;
 
 #[derive(Debug, Snafu)]
 pub enum GltfLoaderError {
@@ -50,6 +52,12 @@ pub enum GltfLoaderError {
 
     #[snafu(display("Missing entity {id:?}"))]
     MissingEntity { id: Id<GpuEntity> },
+
+    #[snafu(display("Missing animation channel inputs"))]
+    MissingInputs,
+
+    #[snafu(display("Missing animation channel outputs"))]
+    MissingOutputs,
 }
 
 pub struct GltfStore<T> {
@@ -112,6 +120,10 @@ impl<T> GltfStore<T> {
             Box::new(std::iter::empty()) as Box<dyn Iterator<Item = &T>>
         }
     }
+
+    pub fn len(&self) -> usize {
+        self.dense.len()
+    }
 }
 
 #[derive(Clone)]
@@ -165,6 +177,7 @@ pub struct GltfLoader {
     pub materials: GltfStore<Id<GpuMaterial>>,
     pub meshes: GltfStore<Vec<GltfMeshPrim>>,
     pub nodes: GltfStore<GltfNode>,
+    pub animations: GltfStore<GltfAnimation>,
 }
 
 impl GltfLoader {
@@ -202,6 +215,9 @@ impl GltfLoader {
         for node in document.nodes() {
             loader.load_node(node, builder)?;
         }
+
+        log::debug!("adding animations");
+        loader.load_animations(&document, &buffers)?;
 
         Ok(loader)
     }
@@ -258,7 +274,12 @@ impl GltfLoader {
         Ok(texture_id)
     }
 
-    fn texture_at(
+    /// Return the scene `Id<GpuTexture>` for the gltf texture at the given
+    /// index, if possible.
+    ///
+    /// If the texture at the given index has not been loaded into the
+    /// [`SceneBuilder`], it will be.
+    pub fn texture_at(
         &mut self,
         index: usize,
         builder: &mut SceneBuilder,
@@ -386,7 +407,15 @@ impl GltfLoader {
         Ok(gpu_material_id)
     }
 
-    fn material_at(
+    /// Return the scene `Id<GpuMaterial>` for the gltf material at the given
+    /// index, if possible.
+    ///
+    /// If the material at the given index has not been loaded into the
+    /// [`SceneBuilder`], it will be.
+    ///
+    /// Providing `None` returns the id of the default material, or `Id::NONE`
+    /// if there is none.
+    pub fn material_at(
         &mut self,
         may_index: Option<usize>,
         builder: &mut SceneBuilder,
@@ -725,6 +754,70 @@ impl GltfLoader {
 
         Ok(gltf_node)
     }
+
+    pub fn load_animation(
+        &mut self,
+        animation: gltf::Animation,
+        buffers: &[gltf::buffer::Data],
+    ) -> Result<(), GltfLoaderError> {
+        let index = animation.index();
+        let name = animation.name().map(String::from);
+        log::trace!("loading animation {index} {name:?}");
+        let mut r_animation = GltfAnimation::default();
+        for (i, channel) in animation.channels().enumerate() {
+            log::trace!("  channel {i}");
+            let reader = channel.reader(|buffer| Some(&buffers[buffer.index()]));
+            let inputs = reader.read_inputs().context(MissingInputsSnafu)?;
+            let outputs = reader.read_outputs().context(MissingOutputsSnafu)?;
+            let keyframes = inputs.map(|t| Keyframe(t)).collect::<Vec<_>>();
+            log::trace!("    with {} keyframes", keyframes.len());
+            let interpolation = channel.sampler().interpolation().into();
+            log::trace!("    using {interpolation} interpolation");
+            let tween = Tween {
+                keyframes,
+                properties: match outputs {
+                    gltf::animation::util::ReadOutputs::Translations(ts) => {
+                        log::trace!("    tweens translations");
+                        TweenProperties::Translations(ts.map(Vec3::from).collect())
+                    }
+                    gltf::animation::util::ReadOutputs::Rotations(rs) => {
+                        log::trace!("    tweens rotations");
+                        TweenProperties::Rotations(rs.into_f32().map(Quat::from_array).collect())
+                    }
+                    gltf::animation::util::ReadOutputs::Scales(ss) => {
+                        log::trace!("    tweens scales");
+                        TweenProperties::Scales(ss.map(Vec3::from).collect())
+                    }
+                    gltf::animation::util::ReadOutputs::MorphTargetWeights(_) => {
+                        log::trace!("    tweens morph target weights");
+                        todo!("morph targets unsupported")
+                    }
+                },
+                interpolation,
+                target_node_index: channel.target().node().index(),
+            };
+            r_animation.tweens.push(tween);
+        }
+
+        self.animations.insert(
+            animation.index(),
+            animation.name().map(String::from),
+            r_animation,
+        );
+        Ok(())
+    }
+
+    pub fn load_animations(
+        &mut self,
+        document: &gltf::Document,
+        buffers: &[gltf::buffer::Data],
+    ) -> Result<(), GltfLoaderError> {
+        for animation in document.animations() {
+            self.load_animation(animation, buffers)?;
+        }
+
+        Ok(())
+    }
 }
 
 #[cfg(all(test, feature = "gltf"))]
@@ -946,9 +1039,7 @@ mod test {
 
         let projection = camera::perspective(50.0, 50.0);
         let view = camera::look_at(Vec3::Z * 3.0, Vec3::ZERO, Vec3::Y);
-        let mut builder = r
-            .new_scene()
-            .with_camera(projection, view);
+        let mut builder = r.new_scene().with_camera(projection, view);
         let default_material = builder
             .new_unlit_material()
             .with_base_color([0.0, 0.0, 0.0, 0.5])
@@ -962,10 +1053,13 @@ mod test {
             let entity = builder.entities.get_mut(tri_id.index()).unwrap();
             entity.material = default_material;
         }
+        let mut entities = builder.entities.clone();
         let scene = builder.build().unwrap();
         setup_scene_render_graph(scene, &mut r, true);
         let img = r.render_image().unwrap();
         crate::img_diff::assert_img_eq("gltf_simple_animation.png", img);
+
+        assert_eq!(1, loader.animations.len());
 
         // after this point we don't want to clear the frame before every rendering
         // because we're going to composite different frames of an animation into one,
@@ -1005,32 +1099,37 @@ mod test {
             .runs_after_barrier(clear_frame_and_depth_node.get_barrier());
         r.graph.add_node(clear_only_depth_node);
 
-        // loader.load_animations(&document, &buffers).unwrap();
+        let anime = loader.animations.get(0).unwrap();
+        println!("anime: {:?}", anime);
+        assert_eq!(1.0, anime.tweens[0].length_in_seconds());
 
-        // assert_eq!(1, loader.animations().count());
+        let num = 8;
+        for i in 0..8 {
+            let t = i as f32 / num as f32;
+            let transforms = anime.get_properties_at_time(&loader, t).unwrap();
+            let scene = r.graph.get_resource_mut::<crate::Scene>().unwrap().unwrap();
+            for (id, transform) in transforms.into_iter() {
+                let entity = entities.get_mut(id.index()).unwrap();
+                entity.position += transform.translate.extend(0.0);
+                entity.scale *= transform.scale.extend(1.0);
+                entity.rotation *= transform.rotate;
+                scene.update_entity(*entity).unwrap();
+            }
+            drop(scene);
+            r.render().unwrap();
+        }
 
-        // let anime = loader.get_animation(0).unwrap();
-        // println!("anime: {:?}", anime);
-        // assert_eq!(1.0, anime.tweens[0].length_in_seconds());
-
-        // let num = 8;
-        // for i in 0..num {
-        //    let t = i as f32 / num as f32;
-        //    for tween in anime.tweens.iter() {
-        //        let property = tween.interpolate(t).unwrap().unwrap();
-        //        let node = loader.get_node(tween.target_node_index).unwrap();
-        //        node.set_tween_property(property);
-        //    }
-        //    r.render().unwrap();
-        //}
-
-        // let img = r.render_image().unwrap();
-        // crate::img_diff::assert_img_eq_save(
-        //    Save::No,
-        //    "gltf_simple_animation_after",
-        //    "gltf_simple_animation_after.png",
-        //    img,
-        //)
-        //.unwrap();
+        {
+            let entity = entities.get_mut(0).unwrap();
+            entity.visible = 0;
+            r.graph
+                .get_resource_mut::<crate::Scene>()
+                .unwrap()
+                .unwrap()
+                .update_entity(*entity)
+                .unwrap();
+        }
+        let img = r.render_image().unwrap();
+        crate::img_diff::assert_img_eq("gltf_simple_animation_after.png", img);
     }
 }
