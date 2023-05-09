@@ -67,14 +67,14 @@ pub fn gltf_image_data_to_dyn(
         gltf::image::Format::R16 => image::ImageBuffer::<image::Luma<u16>, Vec<u16>>::from_raw(
             image.width,
             image.height,
-            bytemuck::cast_vec(image.pixels),
+            bytemuck::cast_slice(&image.pixels).to_vec(),
         )
         .context(super::InvalidImageSnafu)?
         .into(),
         gltf::image::Format::R16G16 => image::ImageBuffer::<image::LumaA<u16>, Vec<u16>>::from_raw(
             image.width,
             image.height,
-            bytemuck::cast_vec(image.pixels),
+            bytemuck::cast_slice(&image.pixels).to_vec(),
         )
         .context(super::InvalidImageSnafu)?
         .into(),
@@ -82,7 +82,7 @@ pub fn gltf_image_data_to_dyn(
             image::ImageBuffer::<image::Rgb<u16>, Vec<u16>>::from_vec(
                 image.width,
                 image.height,
-                bytemuck::cast_vec(image.pixels),
+                bytemuck::cast_slice(&image.pixels).to_vec(),
             )
             .context(super::InvalidImageSnafu)?
             .into()
@@ -91,7 +91,7 @@ pub fn gltf_image_data_to_dyn(
             image::ImageBuffer::<image::Rgba<u16>, Vec<u16>>::from_vec(
                 image.width,
                 image.height,
-                bytemuck::cast_vec(image.pixels),
+                bytemuck::cast_slice(&image.pixels).to_vec(),
             )
             .context(super::InvalidImageSnafu)?
             .into()

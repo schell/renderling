@@ -218,6 +218,10 @@ impl SceneBuilder {
     }
 
     #[cfg(feature = "gltf")]
+    /// Load the gltf file at the given path.
+    ///
+    /// The first material in `self` will be used as the default material for
+    /// the gltf or none if not available.
     pub fn gltf_load(
         &mut self,
         path: impl AsRef<std::path::Path>,
@@ -225,7 +229,7 @@ impl SceneBuilder {
         log::trace!("loading gltf file '{}'", path.as_ref().display());
         let (document, buffers, images) =
             gltf::import(path).map_err(|source| gltf_support::GltfLoaderError::Gltf { source })?;
-        gltf_support::GltfLoader::load(self, &document, &buffers, &images)
+        gltf_support::GltfLoader::load(self, document, buffers, images)
     }
 
     pub fn build(self) -> Result<Scene, SceneError> {
