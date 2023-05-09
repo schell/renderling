@@ -475,11 +475,8 @@ pub fn main_fragment_scene(
     *output = match material.lighting_model {
         LightingModel::PBR_LIGHTING => {
             let albedo = tex_color0 * material.factor0 * in_color;
-            let (metallic, roughness) = if material.texture1.is_none() {
-                (material.factor1.y, material.factor1.z)
-            } else {
-                (tex_color1.y, tex_color1.z)
-            };
+            let metallic = tex_color1.y * material.factor1.y;
+            let roughness = tex_color1.z * material.factor1.z;
             let ao = 1.0;
             pbr::shade_fragment(
                 constants.camera_pos.xyz(),

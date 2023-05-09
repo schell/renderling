@@ -33,6 +33,17 @@ pub fn clamp(input: f32) -> f32 {
 #[derive(Clone, Copy, PartialEq, Eq, Default, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct TextureAddressMode(u32);
 
+impl core::fmt::Display for TextureAddressMode {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(match self {
+            &TextureAddressMode::CLAMP_TO_EDGE => "clamp to edge",
+            &TextureAddressMode::REPEAT =>"repeat",
+            &TextureAddressMode::MIRRORED_REPEAT => "mirrored repeat",
+            _ => "unknown"
+        })
+    }
+}
+
 impl TextureAddressMode {
     /// Clamp the value to the edge of the texture.
     pub const CLAMP_TO_EDGE: TextureAddressMode = TextureAddressMode(0);

@@ -42,8 +42,6 @@ mod atlas;
 // mod bank;
 mod buffer_array;
 mod camera;
-// mod gltf_support;
-//mod id;
 pub mod node;
 mod renderer;
 mod scene;
@@ -55,9 +53,7 @@ mod texture;
 pub use atlas::*;
 pub use buffer_array::*;
 pub use camera::*;
-//pub use id::*;
 pub use renderer::*;
-// pub use resources::*;
 pub use scene::*;
 pub use state::*;
 #[cfg(feature = "text")]
@@ -118,7 +114,7 @@ mod test {
         ]
     }
 
-    fn _init_logging() {
+    pub fn _init_logging() {
         let _ = env_logger::builder()
             .is_test(true)
             //.filter_level(log::LevelFilter::Trace)
@@ -1361,161 +1357,6 @@ mod test {
 
         let img = r.render_image().unwrap();
         crate::img_diff::assert_img_eq("pbr_point_lights_metallic_roughness_side.png", img);
-    }
-
-    #[cfg(feature = "gltf")]
-    #[test]
-    // tests importing a gltf file and rendering the first image as a 2d object
-    // ensures we are decoding images correctly
-    fn gltf_images() {
-        let (document, buffers, images) = gltf::import("../../gltf/cheetah_cone.glb").unwrap();
-        let mut r = Renderling::headless(100, 100)
-            .unwrap()
-            .with_background_color(Vec4::splat(1.0));
-        let (device, queue) = r.get_device_and_queue();
-        let (_loader, mut builder) =
-            crate::GltfLoader::load(device.clone(), queue.clone(), &document, &buffers, &images)
-                .unwrap();
-        let (projection, view) = camera::default_ortho2d(100.0, 100.0);
-        builder.set_camera(projection, view);
-        let material_id = builder.new_unlit_material().with_texture0(Id::new(0)).build();
-        let _img = builder
-            .new_entity()
-            .with_meshlet({
-                let vs = vec![
-                    GpuVertex::default()
-                        .with_position([0.0, 0.0, 0.0])
-                        .with_uv0([0.0, 0.0]),
-                    GpuVertex::default()
-                        .with_position([1.0, 0.0, 0.0])
-                        .with_uv0([1.0, 0.0]),
-                    GpuVertex::default()
-                        .with_position([1.0, 1.0, 0.0])
-                        .with_uv0([1.0, 1.0]),
-                    GpuVertex::default()
-                        .with_position([0.0, 1.0, 0.0])
-                        .with_uv0([0.0, 1.0]),
-                ];
-                [0, 3, 2, 0, 2, 1].map(|i| vs[i])
-            })
-            .with_material(material_id)
-            .with_scale(Vec3::new(100.0, 100.0, 1.0))
-            .build();
-        let scene = builder.build().unwrap();
-        let texture = scene.textures.read(&device, &queue, 0, 1).unwrap()[0];
-        println!("{texture:?}");
-        crate::setup_scene_render_graph(scene, &mut r, true);
-        let img = r.render_image().unwrap();
-        crate::img_diff::assert_img_eq("gltf_images.png", img);
-    }
-
-    #[cfg(feature = "gltf")]
-    #[test]
-    // ensures we can read a minimal gltf file with a simple triangle mesh
-    fn gltf_minimal_mesh() {
-        let (document, buffers, images) =
-            gltf::import("../../gltf/gltfTutorial_003_MinimalGltfFile.gltf").unwrap();
-        let mut r = Renderling::headless(20, 20)
-            .unwrap()
-            .with_background_color(Vec3::splat(0.0).extend(1.0));
-        let (device, queue) = r.get_device_and_queue();
-        let (_loader, mut builder) =
-            crate::GltfLoader::load(device.clone(), queue.clone(), &document, &buffers, &images)
-                .unwrap();
-        let projection = camera::perspective(20.0, 20.0);
-        let view = camera::look_at(Vec3::new(0.5, 0.5, 2.0), Vec3::new(0.5, 0.5, 0.0), Vec3::Y);
-        builder.set_camera(projection, view);
-        let scene = builder.build().unwrap();
-        crate::setup_scene_render_graph(scene, &mut r, true);
-
-        let img = r.render_image().unwrap();
-        crate::img_diff::assert_img_eq("gltf_minimal_mesh.png", img);
-    }
-
-    #[cfg(feature = "gltf")]
-    #[test]
-    // ensures we can
-    // * read simple meshes
-    // * support multiple nodes that reference the same mesh
-    // * support primitives w/ positions and normal attributes
-    // * support transforming nodes (T * R * S)
-    fn gltf_simple_meshes() {
-        _init_logging();
-        let (document, buffers, images) =
-            gltf::import("../../gltf/gltfTutorial_008_SimpleMeshes.gltf").unwrap();
-        let mut r = Renderling::headless(100, 50)
-            .unwrap()
-            .with_background_color(Vec3::splat(0.0).extend(1.0));
-        let (device, queue) = r.get_device_and_queue();
-        let (_loader, mut builder) =
-            crate::GltfLoader::load(device.clone(), queue.clone(), &document, &buffers, &images)
-                .unwrap();
-        let projection = camera::perspective(100.0, 50.0);
-        let view = camera::look_at(Vec3::new(1.0, 0.5, 1.5), Vec3::new(1.0, 0.5, 0.0), Vec3::Y);
-        builder.set_camera(projection, view);
-        let scene = builder.build().unwrap();
-        crate::setup_scene_render_graph(scene, &mut r, true);
-
-        let img = r.render_image().unwrap();
-        crate::img_diff::assert_img_eq("gltf_simple_meshes.png", img);
-    }
-
-    #[cfg(feature = "gltf")]
-    #[test]
-    fn gltf_simple_texture() {
-        _init_logging();
-        let (document, buffers, images) =
-            gltf::import("../../gltf/gltfTutorial_013_SimpleTexture.gltf").unwrap();
-        let size = 100;
-        let mut r = Renderling::headless(size, size)
-            .unwrap()
-            .with_background_color(Vec3::splat(0.0).extend(1.0));
-        let (device, queue) = r.get_device_and_queue();
-        let (_loader, mut builder) =
-            crate::GltfLoader::load(device.clone(), queue.clone(), &document, &buffers, &images)
-                .unwrap();
-
-        let projection = camera::perspective(size as f32, size as f32);
-        let view = camera::look_at(Vec3::new(0.5, 0.5, 1.25), Vec3::new(0.5, 0.5, 0.0), Vec3::Y);
-        builder.set_camera(projection, view);
-
-        // there are no lights in the scene and the material isn't marked as "unlit", so
-        // let's force it to be unlit.
-        let mut material = builder.materials.get(0).copied().unwrap();
-        material.lighting_model = LightingModel::NO_LIGHTING;
-        builder.materials[0] = material;
-
-        let scene = builder.build().unwrap();
-        crate::setup_scene_render_graph(scene, &mut r, true);
-
-        let img = r.render_image().unwrap();
-        crate::img_diff::assert_img_eq("gltf_simple_texture.png", img);
-    }
-
-    #[cfg(feature = "gltf")]
-    #[test]
-    fn gltf_normal_mapping_brick_sphere() {
-        _init_logging();
-        let (document, buffers, images) = gltf::import("../../gltf/red_brick_03_1k.glb").unwrap();
-        let size = 600;
-        let mut r = Renderling::headless(size, size)
-            .unwrap()
-            .with_background_color(Vec3::splat(1.0).extend(1.0));
-        let (device, queue) = r.get_device_and_queue();
-        let (loader, mut builder) =
-            crate::GltfLoader::load(device.clone(), queue.clone(), &document, &buffers, &images)
-                .unwrap();
-
-        let (projection, view) = loader.cameras.get(0).copied().unwrap();
-        builder.set_camera(projection, view);
-
-        let scene = builder.build().unwrap();
-        crate::setup_scene_render_graph(scene, &mut r, true);
-
-        let img = r.render_image().unwrap();
-        println!("saving frame");
-        // crate::img_diff::save("gltf_normal_mapping_brick_sphere.png", img.clone());
-        crate::img_diff::assert_img_eq("gltf_normal_mapping_brick_sphere.png", img);
     }
 
     //#[cfg(feature = "gltf")]
