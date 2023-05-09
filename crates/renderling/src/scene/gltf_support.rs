@@ -104,11 +104,12 @@ impl<T> GltfStore<T> {
         self.dense.get_mut(index)?.as_mut()
     }
 
-    pub fn get_by_name(&self, name: &str) -> Option<Result<&T, impl Iterator<Item = &T> + '_>> {
-        let indices = self.names.get(name)?;
-        match indices.as_slice() {
-            [index] => self.get(*index).map(|t| Ok(t)),
-            indices => Some(Err(indices.iter().flat_map(|index| self.get(*index)))),
+    pub fn get_by_name(&self, name: &str) -> impl Iterator<Item = &T> + '_ {
+        if let Some(indices) = self.names.get(name) {
+            Box::new(indices.iter().flat_map(|index| self.get(*index)))
+                as Box<dyn Iterator<Item = &T>>
+        } else {
+            Box::new(std::iter::empty()) as Box<dyn Iterator<Item = &T>>
         }
     }
 }
@@ -170,11 +171,14 @@ impl GltfLoader {
     /// Load everything into a scene builder and return the loader.
     pub fn load(
         builder: &mut SceneBuilder,
-        document: &gltf::Document,
-        buffers: &[gltf::buffer::Data],
+        document: gltf::Document,
+        buffers: Vec<gltf::buffer::Data>,
         images: Vec<gltf::image::Data>,
     ) -> Result<GltfLoader, GltfLoaderError> {
         let mut loader = GltfLoader::default();
+        if !builder.materials.is_empty() {
+            loader.default_material = Id::new(0);
+        }
 
         for (i, image) in images.into_iter().enumerate() {
             // let format = image_data_format_to_wgpu(image.format)?;
@@ -186,12 +190,12 @@ impl GltfLoader {
             log::trace!("  with index={image_index} in the scene builder");
         }
 
-        loader.load_textures(builder, document)?;
-        loader.load_materials(builder, document)?;
+        loader.load_textures(builder, &document)?;
+        loader.load_materials(builder, &document)?;
 
         log::debug!("adding meshlets");
         for mesh in document.meshes() {
-            loader.load_mesh(mesh, builder, document, buffers)?;
+            loader.load_mesh(mesh, builder, &document, &buffers)?;
         }
 
         log::debug!("adding nodes");
@@ -421,6 +425,7 @@ impl GltfLoader {
         let mut mesh_primitives = vec![];
         for primitive in mesh.primitives() {
             log::trace!("  reading primitive {}", primitive.index());
+            log::trace!("    bounds: {:?}", primitive.bounding_box());
             snafu::ensure!(
                 primitive.mode() == gltf::mesh::Mode::Triangles,
                 PrimitiveModeSnafu {
@@ -460,18 +465,18 @@ impl GltfLoader {
             };
             let uv0: Box<dyn Iterator<Item = Vec2>> = if let Some(uvs) = reader.read_tex_coords(0) {
                 let uvs = uvs.into_f32().map(Vec2::from);
-                log::trace!("--uvs: {} vertices", uvs.len());
+                log::trace!("    uvs: {} vertices", uvs.len());
                 Box::new(uvs)
             } else {
-                log::trace!("--uvs: none");
+                log::trace!("    uvs: none");
                 Box::new(std::iter::repeat(Vec2::ZERO))
             };
             let uv1: Box<dyn Iterator<Item = Vec2>> = if let Some(uvs) = reader.read_tex_coords(1) {
                 let uvs = uvs.into_f32().map(Vec2::from);
-                log::trace!("--uvs: {} vertices", uvs.len());
+                log::trace!("    uvs: {} vertices", uvs.len());
                 Box::new(uvs)
             } else {
-                log::trace!("--uvs: none");
+                log::trace!("    uvs: none");
                 Box::new(std::iter::repeat(Vec2::ZERO))
             };
             let uvs = uv0
@@ -550,27 +555,6 @@ impl GltfLoader {
         Ok(())
     }
 
-    // fn get_entity_of_node<'a>(
-    //    &'a mut self,
-    //    gltf_node: &'a mut GltfNode,
-    //) -> Result<Option<&'a mut GpuEntity>, GltfLoaderError> {
-    //    match gltf_node {
-    //        GltfNode::Camera(_) => Ok(None),
-    //        GltfNode::Light(_) => Ok(None),
-    //        GltfNode::Mesh(index) => Ok(Some(
-    //            &mut self
-    //                .meshes
-    //                .get_mut(*index)
-    //                .context(MissingMeshSnafu {
-    //                    index: *index,
-    //                    name: "some node".to_string(),
-    //                })?
-    //                .0,
-    //        )),
-    //        GltfNode::Container(e) => Ok(Some(e)),
-    //    }
-    //}
-
     fn load_node(
         &mut self,
         node: gltf::Node<'_>,
@@ -585,6 +569,9 @@ impl GltfLoader {
         let position = Vec3::from(position);
         let rotation = Quat::from_array(rotation);
         let scale = Vec3::from(scale);
+        log::trace!("  position: {position:?}");
+        log::trace!("  rotation: {rotation:?}");
+        log::trace!("  scale: {scale:?}");
 
         let gltf_node = if let Some(camera) = node.camera() {
             log::trace!("  node is a camera");
@@ -900,14 +887,150 @@ mod test {
         let brick_loader = builder.gltf_load("../../gltf/red_brick_03_1k.glb").unwrap();
         let (projection, view) = brick_loader.cameras.get(0).copied().unwrap();
         builder.set_camera(projection, view);
-        let _bust_loader = builder.gltf_load("../../gltf/marble_bust_1k.glb").unwrap();
+
+        let _another_sun = builder
+            .new_directional_light()
+            .with_ambient_color(Vec4::ONE)
+            .with_direction(Vec3::NEG_Z)
+            .build();
+
+        let brick_sphere_id = brick_loader
+            .nodes
+            .get_by_name("Sphere")
+            .next()
+            .unwrap()
+            .as_entity()
+            .unwrap();
+        {
+            // move the sphere over so we can see both models
+            let brick_sphere = builder.entities.get_mut(brick_sphere_id.index()).unwrap();
+            brick_sphere.position = Vec4::new(-0.2, 0.0, 0.0, 0.0);
+        }
+
+        let bust_loader = builder.gltf_load("../../gltf/marble_bust_1k.glb").unwrap();
+        let bust_id = bust_loader
+            .nodes
+            .get_by_name("marble_bust_01")
+            .next()
+            .unwrap()
+            .as_entity()
+            .unwrap();
+        {
+            // move the bust over too
+            let bust = builder.entities.get_mut(bust_id.index()).unwrap();
+            bust.position = Vec4::new(0.2, -0.1, 0.2, 0.0);
+        }
 
         let scene = builder.build().unwrap();
         crate::setup_scene_render_graph(scene, &mut r, true);
 
         let img = r.render_image().unwrap();
         println!("saving frame");
-        crate::img_diff::save("gltf_normal_mapping_brick_sphere.png", img.clone());
-        crate::img_diff::assert_img_eq("gltf_normal_mapping_brick_sphere.png", img);
+        crate::img_diff::save("gltf_can_load_multiple.png", img.clone());
+    }
+
+    #[cfg(feature = "gltf")]
+    #[test]
+    fn simple_animation() {
+        use moongraph::{IsGraphNode, Read};
+
+        use crate::{
+            node::FrameTextureView, setup_scene_render_graph, BackgroundColor, DepthTexture,
+            Device, Queue, WgpuStateError,
+        };
+
+        _init_logging();
+        let mut r = Renderling::headless(50, 50)
+            .unwrap()
+            .with_background_color(Vec4::ONE);
+
+        let projection = camera::perspective(50.0, 50.0);
+        let view = camera::look_at(Vec3::Z * 3.0, Vec3::ZERO, Vec3::Y);
+        let mut builder = r
+            .new_scene()
+            .with_camera(projection, view);
+        let default_material = builder
+            .new_unlit_material()
+            .with_base_color([0.0, 0.0, 0.0, 0.5])
+            .build();
+
+        let loader = builder
+            .gltf_load("../../gltf/animated_triangle.gltf")
+            .unwrap();
+        let tri_id = loader.nodes.get(0).unwrap().as_entity().unwrap();
+        {
+            let entity = builder.entities.get_mut(tri_id.index()).unwrap();
+            entity.material = default_material;
+        }
+        let scene = builder.build().unwrap();
+        setup_scene_render_graph(scene, &mut r, true);
+        let img = r.render_image().unwrap();
+        crate::img_diff::assert_img_eq("gltf_simple_animation.png", img);
+
+        // after this point we don't want to clear the frame before every rendering
+        // because we're going to composite different frames of an animation into one,
+        // so we'll replace the clear_frame_and_depth node with our own node
+        // that only clears the depth.
+        let clear_frame_and_depth_node = r.graph.remove_node("clear_frame_and_depth").unwrap();
+        pub fn clear_only_depth(
+            (device, queue, _frame_view, depth, color): (
+                Read<Device>,
+                Read<Queue>,
+                Read<FrameTextureView>,
+                Read<DepthTexture>,
+                Read<BackgroundColor>,
+            ),
+        ) -> Result<(), WgpuStateError> {
+            let depth_view = &depth.view;
+            let [r, g, b, a] = color.0.to_array();
+            let color = wgpu::Color {
+                r: r.into(),
+                g: g.into(),
+                b: b.into(),
+                a: a.into(),
+            };
+            crate::node::conduct_clear_pass(
+                &device,
+                &queue,
+                Some("clear_only_depth"),
+                None,
+                Some(&depth_view),
+                color,
+            );
+            Ok(())
+        }
+        let clear_only_depth_node = clear_only_depth
+            .into_node()
+            .with_name("clear_only_depth_node")
+            .runs_after_barrier(clear_frame_and_depth_node.get_barrier());
+        r.graph.add_node(clear_only_depth_node);
+
+        // loader.load_animations(&document, &buffers).unwrap();
+
+        // assert_eq!(1, loader.animations().count());
+
+        // let anime = loader.get_animation(0).unwrap();
+        // println!("anime: {:?}", anime);
+        // assert_eq!(1.0, anime.tweens[0].length_in_seconds());
+
+        // let num = 8;
+        // for i in 0..num {
+        //    let t = i as f32 / num as f32;
+        //    for tween in anime.tweens.iter() {
+        //        let property = tween.interpolate(t).unwrap().unwrap();
+        //        let node = loader.get_node(tween.target_node_index).unwrap();
+        //        node.set_tween_property(property);
+        //    }
+        //    r.render().unwrap();
+        //}
+
+        // let img = r.render_image().unwrap();
+        // crate::img_diff::assert_img_eq_save(
+        //    Save::No,
+        //    "gltf_simple_animation_after",
+        //    "gltf_simple_animation_after.png",
+        //    img,
+        //)
+        //.unwrap();
     }
 }
