@@ -43,6 +43,13 @@ impl<T> From<Id<T>> for u32 {
     }
 }
 
+/// `Id::NONE` is the default.
+impl<T> Default for Id<T> {
+    fn default() -> Self {
+        Id::NONE
+    }
+}
+
 #[cfg(not(target_arch = "spirv"))]
 impl<T> std::fmt::Debug for Id<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

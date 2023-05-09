@@ -1,4 +1,4 @@
-//! The CPU side of [`renderling_shader::scene`] module.
+//! Build GPU scenes from the CPU.
 use std::sync::Arc;
 
 use glam::{Mat4, Vec2, Vec3};
@@ -124,7 +124,11 @@ impl SceneBuilder {
     ) -> Id<GpuTexture> {
         let image_index = self.images.len();
         self.images.push(img);
-        self.add_texture(TextureParams{image_index, mode_s, mode_t})
+        self.add_texture(TextureParams {
+            image_index,
+            mode_s,
+            mode_t,
+        })
     }
 
     /// Add an image and return a texture id for it.
@@ -148,10 +152,7 @@ impl SceneBuilder {
     }
 
     /// Add a texture referencing an image.
-    pub fn add_texture(
-        &mut self,
-        params: TextureParams,
-    ) -> Id<GpuTexture> {
+    pub fn add_texture(&mut self, params: TextureParams) -> Id<GpuTexture> {
         let texture_id = self.textures.len();
         self.textures.push(params);
         Id::new(texture_id as u32)
@@ -214,6 +215,17 @@ impl SceneBuilder {
             scene: self,
             entity: GpuEntity::default(),
         }
+    }
+
+    #[cfg(feature = "gltf")]
+    pub fn gltf_load(
+        &mut self,
+        path: impl AsRef<std::path::Path>,
+    ) -> Result<gltf_support::GltfLoader, gltf_support::GltfLoaderError> {
+        log::trace!("loading gltf file '{}'", path.as_ref().display());
+        let (document, buffers, images) =
+            gltf::import(path).map_err(|source| gltf_support::GltfLoaderError::Gltf { source })?;
+        gltf_support::GltfLoader::load(self, &document, &buffers, &images)
     }
 
     pub fn build(self) -> Result<Scene, SceneError> {
@@ -316,7 +328,13 @@ impl Scene {
 
         let frames = textures.into_iter();
         let mut textures = vec![];
-        for TextureParams{image_index, mode_s, mode_t, ..} in frames {
+        for TextureParams {
+            image_index,
+            mode_s,
+            mode_t,
+            ..
+        } in frames
+        {
             let (offset_px, size_px) = atlas
                 .get_frame(image_index)
                 .context(MissingImageSnafu { index: image_index })?;

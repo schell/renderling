@@ -7,8 +7,13 @@ use snafu::prelude::*;
 
 use super::*;
 
+mod img;
+
 #[derive(Debug, Snafu)]
 pub enum GltfLoaderError {
+    #[snafu(display("{source}"))]
+    Gltf { source: gltf::Error },
+
     #[snafu(display("Unsupported gltf image format: {:?}", format))]
     UnsupportedImageFormat { format: gltf::image::Format },
 
@@ -21,8 +26,8 @@ pub enum GltfLoaderError {
     #[snafu(display("Error during scene building phase: {source}"))]
     Scene { source: crate::SceneError },
 
-    #[snafu(display("Scene builder is missing a texture"))]
-    MissingTexture { index: usize },
+    #[snafu(display("{what} is missing texture={index}"))]
+    MissingTexture { what: &'static str, index: usize },
 
     #[snafu(display("Unsupported primitive mode: {:?}", mode))]
     PrimitiveMode { mode: gltf::mesh::Mode },
@@ -30,8 +35,9 @@ pub enum GltfLoaderError {
     #[snafu(display("No {} attribute for mesh", attribute.to_string()))]
     MissingAttribute { attribute: gltf::Semantic },
 
-    #[snafu(display("Missing material {:?} {:?}", index, name))]
+    #[snafu(display("{what} is missing material {:?} {:?}", index, name))]
     MissingMaterial {
+        what: &'static str,
         index: Option<usize>,
         name: Option<String>,
     },
@@ -43,39 +49,7 @@ pub enum GltfLoaderError {
     },
 
     #[snafu(display("Missing entity {id:?}"))]
-    MissingEntity {
-        id: Id<GpuEntity>
-    }
-}
-
-fn _image_data_format_to_wgpu(
-    gltf_format: gltf::image::Format,
-) -> Result<wgpu::TextureFormat, GltfLoaderError> {
-    let format = match gltf_format {
-        gltf::image::Format::R8 => wgpu::TextureFormat::R8Unorm,
-        gltf::image::Format::R8G8 => wgpu::TextureFormat::Rg8Unorm,
-        // wgpu doesn't have an rgb8unorm texture format 🤷
-        gltf::image::Format::R8G8B8 => wgpu::TextureFormat::Rgba8UnormSrgb,
-        gltf::image::Format::R8G8B8A8 => wgpu::TextureFormat::Rgba8UnormSrgb,
-        format => return Err(GltfLoaderError::UnsupportedImageFormat { format }),
-    };
-    Ok(format)
-}
-
-fn _image_data_format_num_channels(gltf_format: gltf::image::Format) -> u32 {
-    match gltf_format {
-        gltf::image::Format::R8 => 1,
-        gltf::image::Format::R8G8 => 2,
-        // wgpu doesn't have an rgb8unorm texture format 🤷, so we map to rgba8unormsrgb
-        gltf::image::Format::R8G8B8 => 4,
-        gltf::image::Format::R8G8B8A8 => 4,
-        gltf::image::Format::R16 => 1,
-        gltf::image::Format::R16G16 => 2,
-        gltf::image::Format::R16G16B16 => 3,
-        gltf::image::Format::R16G16B16A16 => 4,
-        gltf::image::Format::R32G32B32FLOAT => 3,
-        gltf::image::Format::R32G32B32A32FLOAT => 4,
-    }
+    MissingEntity { id: Id<GpuEntity> },
 }
 
 pub struct GltfStore<T> {
@@ -141,9 +115,13 @@ impl<T> GltfStore<T> {
 
 #[derive(Clone)]
 pub enum GltfNode {
+    // Contains an index into the GltfLoader.cameras field.
     Camera(usize),
+    // Contains an index into the GltfLoader.lights field.
     Light(usize),
+    // Contains the id of the entity and the ids of its children.
     Mesh(Id<GpuEntity>, Vec<Id<GpuEntity>>),
+    // Contains the id of the entity.
     Container(Id<GpuEntity>),
 }
 
@@ -156,7 +134,7 @@ impl GltfNode {
         match self {
             GltfNode::Mesh(id, _) => Some(*id),
             GltfNode::Container(id) => Some(*id),
-            _ => None
+            _ => None,
         }
     }
 }
@@ -168,103 +146,89 @@ pub struct GltfMeshPrim {
     material_id: Id<GpuMaterial>,
 }
 
+/// The result of loading a gltf file into a [`SceneBuilder`].
+///
+/// Contains indexed and named lookups for resources contained within the loaded
+/// gltf file.
+///
+/// To load a gltf file into a scene thereby creating a `GltfLoader` you can use
+/// [`SceneBuilder::gltf_load`].
 #[derive(Default)]
 pub struct GltfLoader {
+    // Contains the indices of SceneBuilder images loaded
+    pub images: Vec<usize>,
     pub cameras: GltfStore<(Mat4, Mat4)>,
     pub lights: GltfStore<Id<GpuLight>>,
     pub textures: GltfStore<Id<GpuTexture>>,
+    pub default_material: Id<GpuMaterial>,
     pub materials: GltfStore<Id<GpuMaterial>>,
     pub meshes: GltfStore<Vec<GltfMeshPrim>>,
     pub nodes: GltfStore<GltfNode>,
 }
 
 impl GltfLoader {
-    /// Load everything into a scene builder
+    /// Load everything into a scene builder and return the loader.
     pub fn load(
-        device: crate::Device,
-        queue: crate::Queue,
+        builder: &mut SceneBuilder,
         document: &gltf::Document,
         buffers: &[gltf::buffer::Data],
-        images: &[gltf::image::Data],
-    ) -> Result<(GltfLoader, SceneBuilder), GltfLoaderError> {
+        images: Vec<gltf::image::Data>,
+    ) -> Result<GltfLoader, GltfLoaderError> {
         let mut loader = GltfLoader::default();
-        let mut builder = SceneBuilder::new(device.0, queue.0);
 
-        for (i, image) in images.iter().enumerate() {
+        for (i, image) in images.into_iter().enumerate() {
             // let format = image_data_format_to_wgpu(image.format)?;
             // let num_channels = image_data_format_num_channels(image.format);
             log::trace!("adding image {} with format {:?}", i, image.format);
-            let dyn_img: image::DynamicImage = match image.format {
-                gltf::image::Format::R8 => todo!(),
-                gltf::image::Format::R8G8 => todo!(),
-                gltf::image::Format::R8G8B8 => {
-                    image::RgbImage::from_vec(image.width, image.height, image.pixels.clone())
-                        .context(InvalidImageSnafu)?
-                        .into()
-                }
-                gltf::image::Format::R8G8B8A8 => {
-                    image::RgbaImage::from_vec(image.width, image.height, image.pixels.clone())
-                        .context(InvalidImageSnafu)?
-                        .into()
-                }
-                gltf::image::Format::R16 => todo!(),
-                gltf::image::Format::R16G16 => todo!(),
-                gltf::image::Format::R16G16B16 => {
-                    image::ImageBuffer::<image::Rgb<u16>, Vec<u16>>::from_vec(
-                        image.width,
-                        image.height,
-                        bytemuck::cast_slice(&image.pixels).to_vec(),
-                    )
-                    .context(InvalidImageSnafu)?
-                    .into()
-                }
-                gltf::image::Format::R16G16B16A16 => {
-                    image::ImageBuffer::<image::Rgba<u16>, Vec<u16>>::from_vec(
-                        image.width,
-                        image.height,
-                        bytemuck::cast_slice(&image.pixels).to_vec(),
-                    )
-                    .context(InvalidImageSnafu)?
-                    .into()
-                }
-                gltf::image::Format::R32G32B32FLOAT => todo!(),
-                gltf::image::Format::R32G32B32A32FLOAT => todo!(),
-            };
-            let _ = builder.add_image(dyn_img.to_rgba8());
+            let dyn_img = img::gltf_image_data_to_dyn(image)?;
+            let image_index = builder.add_image(dyn_img.to_rgba8());
+            loader.images.push(image_index);
+            log::trace!("  with index={image_index} in the scene builder");
         }
 
-        loader.load_textures(document, &mut builder)?;
-        loader.load_materials(document, &mut builder)?;
+        loader.load_textures(builder, document)?;
+        loader.load_materials(builder, document)?;
 
         log::debug!("adding meshlets");
         for mesh in document.meshes() {
-            loader.load_mesh(mesh, buffers, &mut builder)?;
+            loader.load_mesh(mesh, builder, document, buffers)?;
         }
 
         log::debug!("adding nodes");
         for node in document.nodes() {
-            loader.load_node(node, &mut builder)?;
+            loader.load_node(node, builder)?;
         }
 
-        Ok((loader, builder))
+        Ok(loader)
     }
 
     fn load_textures(
         &mut self,
-        document: &gltf::Document,
         builder: &mut SceneBuilder,
+        document: &gltf::Document,
     ) -> Result<(), GltfLoaderError> {
         log::debug!("loading textures");
         for texture in document.textures() {
-            self.load_texture(texture, builder);
+            self.load_texture(texture, builder)?;
         }
         Ok(())
     }
 
-    fn load_texture(&mut self, texture: gltf::Texture<'_>, builder: &mut SceneBuilder) {
+    fn load_texture(
+        &mut self,
+        texture: gltf::Texture<'_>,
+        builder: &mut SceneBuilder,
+    ) -> Result<Id<GpuTexture>, GltfLoaderError> {
         let index = texture.index();
         let name = texture.name().map(String::from);
-        let image_index = texture.source().index();
+        let image_loader_index = texture.source().index();
+        let image_index =
+            self.images
+                .get(image_loader_index)
+                .copied()
+                .context(MissingImageSnafu {
+                    index: image_loader_index,
+                })?;
         fn mode(mode: gltf::texture::WrappingMode) -> TextureAddressMode {
             match mode {
                 gltf::texture::WrappingMode::ClampToEdge => TextureAddressMode::CLAMP_TO_EDGE,
@@ -284,24 +248,51 @@ impl GltfLoader {
         let texture_id = builder.add_texture(params);
         log::trace!(
             "adding texture index:{index} name:{name:?} id:{texture_id:?} with wrapping \
-             s:{mode_s:?} t:{mode_t:?}"
+             s:{mode_s} t:{mode_t}"
         );
         let _ = self.textures.insert(index, name, texture_id);
+        Ok(texture_id)
+    }
+
+    fn texture_at(
+        &mut self,
+        index: usize,
+        builder: &mut SceneBuilder,
+        document: &gltf::Document,
+    ) -> Result<Id<GpuTexture>, GltfLoaderError> {
+        if let Some(id) = self.textures.get(index) {
+            Ok(*id)
+        } else {
+            let texture =
+                document
+                    .textures()
+                    .find(|t| t.index() == index)
+                    .context(MissingTextureSnafu {
+                        what: "document",
+                        index,
+                    })?;
+            self.load_texture(texture, builder)
+        }
     }
 
     fn load_materials(
         &mut self,
-        document: &gltf::Document,
         builder: &mut SceneBuilder,
+        document: &gltf::Document,
     ) -> Result<(), GltfLoaderError> {
         log::debug!("loading materials");
         for material in document.materials() {
-            self.load_material(material, builder);
+            self.load_material(material, builder, document)?;
         }
         Ok(())
     }
 
-    fn load_material(&mut self, material: gltf::Material<'_>, builder: &mut SceneBuilder) {
+    fn load_material(
+        &mut self,
+        material: gltf::Material<'_>,
+        builder: &mut SceneBuilder,
+        document: &gltf::Document,
+    ) -> Result<Id<GpuMaterial>, GltfLoaderError> {
         let index = material.index();
         let name = material.name().map(String::from);
         log::trace!("loading material {index:?} {name:?}");
@@ -309,28 +300,37 @@ impl GltfLoader {
         let gpu_material_id = if material.unlit() {
             log::trace!("  is unlit");
             // TODO: add tex_coord params to the unlit materials
+            let tex_id = if let Some(info) = pbr.base_color_texture() {
+                let index = info.texture().index();
+                self.texture_at(index, builder, document)?
+            } else {
+                Id::NONE
+            };
             builder
                 .new_unlit_material()
                 .with_base_color(pbr.base_color_factor())
-                .with_texture0(
-                    pbr.base_color_texture()
-                        .map(|info| Id::new(info.texture().index() as u32))
-                        .unwrap_or(Id::NONE),
-                )
+                .with_texture0(tex_id)
                 .build()
         } else {
             log::trace!("  is pbr");
             let base_color = pbr.base_color_factor();
-            let (base_color_tex_id, base_color_tex_coord) = pbr
-                .base_color_texture()
-                .map(|info| (Id::new(info.texture().index() as u32), info.tex_coord()))
-                .unwrap_or((Id::NONE, 0));
-            let metallic = pbr.metallic_factor();
-            let roughness = pbr.roughness_factor();
-            let (metallic_roughness_tex_id, metallic_roughness_tex_coord) = pbr
-                .metallic_roughness_texture()
-                .map(|info| (Id::new(info.texture().index() as u32), info.tex_coord()))
-                .unwrap_or((Id::NONE, 0));
+            let (base_color_tex_id, base_color_tex_coord) =
+                if let Some(info) = pbr.base_color_texture() {
+                    let index = info.texture().index();
+                    let tex_id = self.texture_at(index, builder, document)?;
+                    (tex_id, info.tex_coord())
+                } else {
+                    (Id::NONE, 0)
+                };
+
+            let (metallic, roughness, metallic_roughness_tex_id, metallic_roughness_tex_coord) =
+                if let Some(info) = pbr.metallic_roughness_texture() {
+                    let index = info.texture().index();
+                    let tex_id = self.texture_at(index, builder, document)?;
+                    (1.0, 1.0, tex_id, info.tex_coord())
+                } else {
+                    (pbr.metallic_factor(), pbr.roughness_factor(), Id::NONE, 0)
+                };
 
             log::trace!("  base_color: {base_color:?}");
             log::trace!("  base_color_tex_id: {base_color_tex_id:?}");
@@ -351,33 +351,68 @@ impl GltfLoader {
                 .build()
         };
 
-        // UNWRAP: ok because we just stored this material above
-        let gpu_material = builder.materials.get_mut(gpu_material_id.index()).unwrap();
         if let Some(norm_tex) = material.normal_texture() {
-            gpu_material.texture2 = Id::new(norm_tex.texture().index() as u32);
+            let tex_id = self.texture_at(norm_tex.texture().index(), builder, document)?;
+            // UNWRAP: ok because we just stored this material above
+            let gpu_material = builder.materials.get_mut(gpu_material_id.index()).unwrap();
+            gpu_material.texture2 = tex_id;
             gpu_material.texture2_tex_coord = norm_tex.tex_coord();
             log::trace!("  using normal map");
             log::trace!("    texture_id:        {:?}", gpu_material.texture2);
             log::trace!("    texture_tex_coord: {}", gpu_material.texture2_tex_coord);
         }
         if let Some(occlusion_tex) = material.occlusion_texture() {
-            gpu_material.texture3 = Id::new(occlusion_tex.texture().index() as u32);
+            let tex_id = self.texture_at(occlusion_tex.texture().index(), builder, document)?;
+            // UNWRAP: ok because we just stored this material above
+            let gpu_material = builder.materials.get_mut(gpu_material_id.index()).unwrap();
+            gpu_material.texture3 = tex_id;
             gpu_material.texture3_tex_coord = occlusion_tex.tex_coord();
             log::trace!("  using occlusion map");
             log::trace!("    texture_id:        {:?}", gpu_material.texture3);
             log::trace!("    texture_tex_coord: {}", gpu_material.texture3_tex_coord);
         }
-        // TODO: figure out why a material would not have an index
+
+        // If this material doesn't have an index it's because it's the default material
+        // for this gltf file.
         if let Some(index) = index {
             let _ = self.materials.insert(index, name, gpu_material_id);
+        } else {
+            self.default_material = gpu_material_id;
+        }
+        Ok(gpu_material_id)
+    }
+
+    fn material_at(
+        &mut self,
+        may_index: Option<usize>,
+        builder: &mut SceneBuilder,
+        document: &gltf::Document,
+    ) -> Result<Id<GpuMaterial>, GltfLoaderError> {
+        if let Some(index) = may_index {
+            if let Some(material_id) = self.materials.get(index) {
+                Ok(*material_id)
+            } else {
+                let material = document
+                    .materials()
+                    .find(|material| material.index() == Some(index))
+                    .context(MissingMaterialSnafu {
+                        what: "document",
+                        name: None,
+                        index: Some(index),
+                    })?;
+                self.load_material(material, builder, document)
+            }
+        } else {
+            Ok(self.default_material)
         }
     }
 
     fn load_mesh(
         &mut self,
         mesh: gltf::Mesh<'_>,
-        buffers: &[gltf::buffer::Data],
         builder: &mut SceneBuilder,
+        document: &gltf::Document,
+        buffers: &[gltf::buffer::Data],
     ) -> Result<(), GltfLoaderError> {
         let mesh_index = mesh.index();
         let mesh_name = mesh.name().map(String::from);
@@ -501,11 +536,8 @@ impl GltfLoader {
             }
 
             let (vertex_start, vertex_count) = builder.add_meshlet(vertices);
-            let material_id = primitive
-                .material()
-                .index()
-                .map(|i| Id::new(i as u32))
-                .unwrap_or(Id::NONE);
+            let material_index = primitive.material().index();
+            let material_id = self.material_at(material_index, builder, document)?;
             mesh_primitives.push(GltfMeshPrim {
                 vertex_start,
                 vertex_count,
@@ -705,5 +737,177 @@ impl GltfLoader {
         );
 
         Ok(gltf_node)
+    }
+}
+
+#[cfg(all(test, feature = "gltf"))]
+mod test {
+    use glam::{Vec3, Vec4};
+
+    use crate::{camera, test::_init_logging, GpuVertex, Id, LightingModel, Renderling};
+
+    #[test]
+    // tests importing a gltf file and rendering the first image as a 2d object
+    // ensures we are decoding images correctly
+    fn images() {
+        let mut r = Renderling::headless(100, 100)
+            .unwrap()
+            .with_background_color(Vec4::splat(1.0));
+        let mut builder = r.new_scene();
+        let _loader = builder.gltf_load("../../gltf/cheetah_cone.glb").unwrap();
+        let (projection, view) = camera::default_ortho2d(100.0, 100.0);
+        builder.set_camera(projection, view);
+        let material_id = builder
+            .new_unlit_material()
+            .with_texture0(Id::new(0))
+            .build();
+        let _img = builder
+            .new_entity()
+            .with_meshlet({
+                let vs = vec![
+                    GpuVertex::default()
+                        .with_position([0.0, 0.0, 0.0])
+                        .with_uv0([0.0, 0.0]),
+                    GpuVertex::default()
+                        .with_position([1.0, 0.0, 0.0])
+                        .with_uv0([1.0, 0.0]),
+                    GpuVertex::default()
+                        .with_position([1.0, 1.0, 0.0])
+                        .with_uv0([1.0, 1.0]),
+                    GpuVertex::default()
+                        .with_position([0.0, 1.0, 0.0])
+                        .with_uv0([0.0, 1.0]),
+                ];
+                [0, 3, 2, 0, 2, 1].map(|i| vs[i])
+            })
+            .with_material(material_id)
+            .with_scale(Vec3::new(100.0, 100.0, 1.0))
+            .build();
+        let scene = builder.build().unwrap();
+        let (device, queue) = r.get_device_and_queue();
+        let texture = scene.textures.read(&device, &queue, 0, 1).unwrap()[0];
+        println!("{texture:?}");
+        crate::setup_scene_render_graph(scene, &mut r, true);
+        let img = r.render_image().unwrap();
+        crate::img_diff::assert_img_eq("gltf_images.png", img);
+    }
+
+    #[test]
+    // ensures we can read a minimal gltf file with a simple triangle mesh
+    fn minimal_mesh() {
+        let mut r = Renderling::headless(20, 20)
+            .unwrap()
+            .with_background_color(Vec3::splat(0.0).extend(1.0));
+        let mut builder = r.new_scene();
+        let _loader = builder
+            .gltf_load("../../gltf/gltfTutorial_003_MinimalGltfFile.gltf")
+            .unwrap();
+        let projection = camera::perspective(20.0, 20.0);
+        let view = camera::look_at(Vec3::new(0.5, 0.5, 2.0), Vec3::new(0.5, 0.5, 0.0), Vec3::Y);
+        builder.set_camera(projection, view);
+        let scene = builder.build().unwrap();
+        crate::setup_scene_render_graph(scene, &mut r, true);
+
+        let img = r.render_image().unwrap();
+        crate::img_diff::assert_img_eq("gltf_minimal_mesh.png", img);
+    }
+
+    #[test]
+    // ensures we can
+    // * read simple meshes
+    // * support multiple nodes that reference the same mesh
+    // * support primitives w/ positions and normal attributes
+    // * support transforming nodes (T * R * S)
+    fn simple_meshes() {
+        _init_logging();
+        let mut r = Renderling::headless(100, 50)
+            .unwrap()
+            .with_background_color(Vec3::splat(0.0).extend(1.0));
+        let mut builder = r.new_scene();
+        let _loader = builder
+            .gltf_load("../../gltf/gltfTutorial_008_SimpleMeshes.gltf")
+            .unwrap();
+        let projection = camera::perspective(100.0, 50.0);
+        let view = camera::look_at(Vec3::new(1.0, 0.5, 1.5), Vec3::new(1.0, 0.5, 0.0), Vec3::Y);
+        builder.set_camera(projection, view);
+        let scene = builder.build().unwrap();
+        crate::setup_scene_render_graph(scene, &mut r, true);
+
+        let img = r.render_image().unwrap();
+        crate::img_diff::assert_img_eq("gltf_simple_meshes.png", img);
+    }
+
+    #[test]
+    fn simple_texture() {
+        _init_logging();
+        let size = 100;
+        let mut r = Renderling::headless(size, size)
+            .unwrap()
+            .with_background_color(Vec3::splat(0.0).extend(1.0));
+        let mut builder = r.new_scene();
+        let _loader = builder
+            .gltf_load("../../gltf/gltfTutorial_013_SimpleTexture.gltf")
+            .unwrap();
+
+        let projection = camera::perspective(size as f32, size as f32);
+        let view = camera::look_at(Vec3::new(0.5, 0.5, 1.25), Vec3::new(0.5, 0.5, 0.0), Vec3::Y);
+        builder.set_camera(projection, view);
+
+        // there are no lights in the scene and the material isn't marked as "unlit", so
+        // let's force it to be unlit.
+        let mut material = builder.materials.get(0).copied().unwrap();
+        material.lighting_model = LightingModel::NO_LIGHTING;
+        builder.materials[0] = material;
+
+        let scene = builder.build().unwrap();
+        crate::setup_scene_render_graph(scene, &mut r, true);
+
+        let img = r.render_image().unwrap();
+        crate::img_diff::assert_img_eq("gltf_simple_texture.png", img);
+    }
+
+    #[test]
+    fn normal_mapping_brick_sphere() {
+        _init_logging();
+        let size = 600;
+        let mut r = Renderling::headless(size, size)
+            .unwrap()
+            .with_background_color(Vec3::splat(1.0).extend(1.0));
+        let mut builder = r.new_scene();
+        let loader = builder.gltf_load("../../gltf/red_brick_03_1k.glb").unwrap();
+        let (projection, view) = loader.cameras.get(0).copied().unwrap();
+        builder.set_camera(projection, view);
+
+        let scene = builder.build().unwrap();
+        crate::setup_scene_render_graph(scene, &mut r, true);
+
+        let img = r.render_image().unwrap();
+        println!("saving frame");
+        // crate::img_diff::save("gltf_normal_mapping_brick_sphere.png", img.clone());
+        crate::img_diff::assert_img_eq("gltf_normal_mapping_brick_sphere.png", img);
+    }
+
+    #[test]
+    // Tests that we can reuse the same builder for multiple loaders, building
+    // up a scene of multiple gltf documents.
+    fn can_load_multiple_gltfs_into_one_builder() {
+        _init_logging();
+        let size = 600;
+        let mut r = Renderling::headless(size, size)
+            .unwrap()
+            .with_background_color(Vec3::splat(1.0).extend(1.0));
+        let mut builder = r.new_scene();
+        let brick_loader = builder.gltf_load("../../gltf/red_brick_03_1k.glb").unwrap();
+        let (projection, view) = brick_loader.cameras.get(0).copied().unwrap();
+        builder.set_camera(projection, view);
+        let _bust_loader = builder.gltf_load("../../gltf/marble_bust_1k.glb").unwrap();
+
+        let scene = builder.build().unwrap();
+        crate::setup_scene_render_graph(scene, &mut r, true);
+
+        let img = r.render_image().unwrap();
+        println!("saving frame");
+        crate::img_diff::save("gltf_normal_mapping_brick_sphere.png", img.clone());
+        crate::img_diff::assert_img_eq("gltf_normal_mapping_brick_sphere.png", img);
     }
 }
