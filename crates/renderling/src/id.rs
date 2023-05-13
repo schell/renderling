@@ -1,13 +1,5 @@
 //! Typed identifiers.
-use std::{
-    marker::PhantomData,
-    //sync::{
-    //    atomic::{AtomicUsize, AtomicU32},
-    //    Arc,
-    //},
-};
-
-//use async_channel::{Sender, Receiver, unbounded};
+use std::marker::PhantomData;
 
 /// An identifier.
 #[derive(Ord)]
@@ -51,6 +43,7 @@ impl<T> std::fmt::Debug for Id<T> {
 }
 
 impl<T> Id<T> {
+    /// Create a new identifier.
     pub fn new(i: u32) -> Self {
         Id(i, PhantomData)
     }

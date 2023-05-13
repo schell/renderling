@@ -1,4 +1,4 @@
-//! Types used to store and update an entire scene on the GPU.
+//! Types used to store and update an entire 3d scene on the GPU.
 //!
 //! This is roughly what the [vulkan guide](https://vkguide.dev/docs/gpudriven)
 //! calls "gpu driven rendering".

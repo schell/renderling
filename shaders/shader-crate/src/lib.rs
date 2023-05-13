@@ -1,8 +1,41 @@
 //! Shader entry points.
 #![no_std]
 #![feature(lang_items)]
-use renderling_shader::scene;
+use renderling_shader::{scene, ui};
 use spirv_std::{glam, image::Image2d, spirv, Sampler};
+
+#[spirv(vertex)]
+pub fn ui_vertex(
+    #[spirv(uniform, descriptor_set = 0, binding = 0)] constants: &ui::UiConstants,
+    #[spirv(uniform, descriptor_set = 2, binding = 0)] params: &ui::UiDrawParams,
+
+    in_pos: glam::Vec2,
+    in_uv: glam::Vec2,
+    in_color: glam::Vec4,
+
+    #[spirv(flat)] out_mode: &mut u32,
+    out_color: &mut glam::Vec4,
+    out_uv: &mut glam::Vec2,
+    #[spirv(position)] gl_pos: &mut glam::Vec4,
+) {
+    ui::vertex(
+        constants, params, in_pos, in_uv, in_color, out_mode, out_color, out_uv, gl_pos,
+    )
+}
+
+#[spirv(fragment)]
+pub fn ui_fragment(
+    #[spirv(descriptor_set = 1, binding = 0)] texture: &Image2d,
+    #[spirv(descriptor_set = 1, binding = 1)] sampler: &Sampler,
+
+    #[spirv(flat)] in_mode: u32,
+    in_color: glam::Vec4,
+    in_uv: glam::Vec2,
+
+    output: &mut glam::Vec4,
+) {
+    ui::fragment(texture, sampler, in_mode, in_color, in_uv, output)
+}
 
 #[spirv(vertex)]
 pub fn main_vertex_scene(
@@ -96,10 +129,10 @@ pub fn compute_cull_entities(
 
 ///// Just a test for atomics in Naga.
 //#[spirv(compute(threads(32)))]
-//pub fn compute_atomics(
-//    #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] data: &mut [u32],
-//    #[spirv(storage_buffer, descriptor_set = 0, binding = 1)] sum: &mut u32,
-//    #[spirv(global_invocation_id)] global_id: glam::UVec3,
+// pub fn compute_atomics(
+//    #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] data: &mut
+// [u32],    #[spirv(storage_buffer, descriptor_set = 0, binding = 1)] sum: &mut
+// u32,    #[spirv(global_invocation_id)] global_id: glam::UVec3,
 //) {
 //    let index = global_id.x as usize;
 //    if index > data.len() {

@@ -4,7 +4,7 @@ use snafu::prelude::*;
 use std::{ops::Deref, sync::Arc};
 
 use crate::{
-    CreateSurfaceFn, Graph, Read, RenderTarget, SceneBuilder, TextureError,
+    CreateSurfaceFn, Graph, Read, RenderTarget, SceneBuilder, TextureError, UiSceneBuilder,
     WgpuStateError, Write,
 };
 
@@ -298,6 +298,19 @@ impl Renderling {
             .0
             .clone();
         SceneBuilder::new(device, queue)
+    }
+
+    // TODO: make `new_ui_scene` return a `UiSceneBuilder`.
+    pub fn new_ui_scene(&self) -> UiSceneBuilder<'_> {
+        let device = self.get_device();
+        let queue = self.get_queue();
+        UiSceneBuilder::new(device, queue)
+    }
+
+    #[cfg(feature = "text")]
+    /// Create a new `GlyphCache` used to cache text rendering info.
+    pub fn new_glyph_cache(&self, fonts: Vec<crate::FontArc>) -> crate::GlyphCache {
+        crate::GlyphCache::new(self, fonts)
     }
 
     #[cfg(feature = "image")]

@@ -1,38 +1,22 @@
-//! Runs through all the gltf sample models to test and show-off renderling's gltf capabilities.
+//! Runs through all the gltf sample models to test and show-off renderling's
+//! gltf capabilities.
 //!
 //! This demo requires an internet connection to download the samples.
-use core::f32;
 use std::time::Instant;
 
 use renderling::{
     math::{Mat4, Vec3},
-    Camera, FontArc, ForwardPipeline, GltfLoader, GlyphCache, Object, Renderling, Section, Text,
-    UiPipeline, WgpuState,
+    FontArc, GltfLoader, GlyphCache, GpuEntity, Id, Renderling, Scene, Section, Text,
+    TEXT_MATERIAL,
 };
 use winit::event::KeyboardInput;
 
 const RADIUS_SCROLL_DAMPENING: f32 = 0.001;
 const DX_DY_DRAG_DAMPENING: f32 = 0.01;
 
-#[derive(Default)]
-struct Ui {
-    title_text: String,
-}
-
 struct App {
-    renderling_ui: Renderling,
-    renderling_forward: Renderling,
-
-    ui: Ui,
-
-    text_title: Object,
-    text_camera: Object,
-    ui_camera: Camera,
-    cache: GlyphCache,
-
-    forward_camera: Camera,
-
-    loader: GltfLoader,
+    scene: Option<Scene>,
+    loader: Option<GltfLoader>,
     last_frame_instant: Instant,
     timestamp: f32,
 
@@ -51,58 +35,52 @@ struct App {
 }
 
 impl App {
-    fn new(gpu: &mut WgpuState) -> Self {
+    fn new(r: &mut Renderling) -> Self {
         let radius = 6.0;
         let phi = 0.0;
         let theta = std::f32::consts::FRAC_PI_4;
         let left_mb_down: bool = false;
         let last_cursor_position: Option<winit::dpi::PhysicalPosition<f64>> = None;
-        let window_size = gpu.get_size();
-        let mut ui: Renderling = gpu.new_ui_renderling();
-        let ui_camera = ui.new_camera().with_projection_ortho2d().build();
-        let text = ui.new_object().build().unwrap();
-        let text_camera = ui.new_object().build().unwrap();
+        let (ww, wh) = r.get_screen_size();
+
+        let (projection, view) = renderling::default_ortho2d(ww as f32, wh as f32);
+        let mut ui_builder = r.new_scene().with_camera(projection, view);
+
         // get the font for the UI
         let bytes: Vec<u8> =
             std::fs::read("fonts/Recursive Mn Lnr St Med Nerd Font Complete.ttf").unwrap();
-
         let font = FontArc::try_from_vec(bytes).unwrap();
-        let cache = gpu.new_glyph_cache(vec![font]);
+        let mut cache = r.new_glyph_cache(vec![font]);
+        cache.queue(
+            Section::default().add_text(Text::new("hello").with_color([1.0, 1.0, 0.0, 1.0])),
+        );
 
-        let mut forward = gpu.new_forward_renderling_with(Some(wgpu::PrimitiveState {
-            topology: wgpu::PrimitiveTopology::TriangleList,
-            strip_index_format: None,
-            front_face: wgpu::FrontFace::Ccw,
-            cull_mode: None, //Some(wgpu::Face::Back),
-            polygon_mode: wgpu::PolygonMode::Fill,
-            conservative: false,
-            unclipped_depth: false,
-        }));
-        let forward_camera = forward
-            .new_camera()
-            .with_projection(Mat4::perspective_infinite_rh(
+        let text = ui_builder
+            .new_entity()
+            .with_material(Id::new(0))
+            .with_meshlet(cache.get_updated().unwrap())
+            .build()
+            .id;
+        let ui_scene = ui_builder.build().unwrap();
+
+        let builder = r.new_scene().with_camera(
+            Mat4::perspective_infinite_rh(
                 std::f32::consts::FRAC_PI_4,
-                window_size.0 as f32 / window_size.1 as f32,
+                ww as f32 / wh as f32,
                 0.01,
-            ))
-            .with_view(Mat4::look_at_rh(
+            ),
+            Mat4::look_at_rh(
                 Self::camera_position(radius, phi, theta),
                 Vec3::ZERO,
                 Vec3::Y,
-            ))
-            .build();
-        let loader = gpu.new_gltf_loader();
+            ),
+        );
 
         let mut app = Self {
             timestamp: 0.0,
-            renderling_ui: ui,
-            text_title: text,
-            text_camera,
-            ui_camera,
-            cache,
-            renderling_forward: forward,
-            forward_camera,
-            loader,
+            scene: None,
+            loader: None,
+
             last_frame_instant: Instant::now(),
             radius,
             eye: Vec3::ZERO,
@@ -110,9 +88,9 @@ impl App {
             theta,
             left_mb_down,
             last_cursor_position,
-            ui: Ui {
-                title_text: "drag and drop a `.gltf` or `.glb` file to load".to_string(),
-            },
+            //ui: Ui {
+            //    title_text: "drag and drop a `.gltf` or `.glb` file to load".to_string(),
+            //},
         };
         app.update_ui();
         app
@@ -126,33 +104,35 @@ impl App {
         Vec3::new(x, z, y)
     }
 
-    fn update_ui(&mut self) {
-        self.cache.queue(
-            Section::default()
-                .add_text(
-                    Text::new(&self.ui.title_text)
-                        .with_color([1.0, 1.0, 1.0, 1.0])
-                        .with_scale(46.0),
-                )
-                .add_text(Text::new("\n"))
-                .add_text(
-                    Text::new(&format!("distance: {}, center: {}", self.radius, self.eye))
-                        .with_color([0.8, 0.8, 0.8, 1.0])
-                        .with_scale(32.0),
-                ),
-        );
+    //fn update_ui(&mut self) {
+    //    self.cache.queue(
+    //        Section::default()
+    //            .add_text(
+    //                Text::new(&self.ui.title_text)
+    //                    .with_color([1.0, 1.0, 1.0, 1.0])
+    //                    .with_scale(46.0),
+    //            )
+    //            .add_text(Text::new("\n"))
+    //            .add_text(
+    //                Text::new(&format!("distance: {}, center: {}", self.radius, self.eye))
+    //                    .with_color([0.8, 0.8, 0.8, 1.0])
+    //                    .with_scale(32.0),
+    //            ),
+    //    );
 
-        let (material, mesh) = self.cache.get_updated();
+    //    let mesh = self.cache.get_updated();
 
-        if let Some(material) = material {
-            self.text_title.set_material(material);
-        }
-        if let Some(mesh) = mesh {
-            self.text_title.set_mesh(mesh);
-        }
-    }
+    //    let scene = self.r
+
+    //    if let Some(mesh) = mesh {
+    //        self.text_title.set_mesh(mesh);
+    //    }
+    //}
 
     fn update_camera(&mut self) {
+        if let Some(scene) = self.scene.as_mut() {
+            scene.set_camera(proj, view)
+        }
         self.forward_camera.set_view(Mat4::look_at_rh(
             Self::camera_position(self.radius, self.phi, self.theta),
             self.eye,
@@ -306,7 +286,8 @@ impl App {
         self.renderling_forward.update().unwrap();
         self.renderling_forward.render(&frame, &depth).unwrap();
 
-        // just clear the depth texture, because we want to render the 2d UI over the 3d background
+        // just clear the depth texture, because we want to render the 2d UI over the 3d
+        // background
         gpu.clear(None, Some(&depth));
         self.renderling_ui.update().unwrap();
         self.renderling_ui.render(&frame, &depth).unwrap();
@@ -323,10 +304,10 @@ fn get_name(path: impl AsRef<std::path::Path>) -> String {
 
 /// Sets up the demo for a given model
 pub fn demo(
-    gpu: &mut WgpuState,
+    r: &mut Renderling,
     start: Option<impl AsRef<str>>,
 ) -> impl FnMut(&mut WgpuState, Option<&winit::event::WindowEvent>) {
-    let mut app = App::new(gpu);
+    let mut app = App::new(r);
 
     if let Some(file) = start {
         app.load(file.as_ref());

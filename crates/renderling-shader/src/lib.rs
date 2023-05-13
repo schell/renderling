@@ -5,3 +5,4 @@ pub mod math;
 pub mod scene;
 pub mod pbr;
 pub mod phong;
+pub mod ui;

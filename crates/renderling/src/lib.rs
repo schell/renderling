@@ -49,6 +49,7 @@ mod state;
 #[cfg(feature = "text")]
 mod text;
 mod texture;
+mod ui;
 
 pub use atlas::*;
 pub use buffer_array::*;
@@ -59,6 +60,7 @@ pub use state::*;
 #[cfg(feature = "text")]
 pub use text::*;
 pub use texture::*;
+pub use ui::*;
 
 pub mod math;
 
