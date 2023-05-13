@@ -1,6 +1,8 @@
-use renderling::WgpuState;
+//! Main entry point for the gltf viewer.
 
-mod demo;
+use renderling::Renderling;
+
+//mod demo;
 mod gltf;
 
 fn run() -> Result<(), anyhow::Error> {
@@ -21,11 +23,11 @@ fn run() -> Result<(), anyhow::Error> {
         .with_title("renderling gltf viewer");
     let window = window_builder.build(&event_loop)?;
 
-    // Set up wgpu
-    let mut gpu = WgpuState::from_window(&window).unwrap();
+    // Set up a new renderling
+    let mut r = Renderling::try_from_window(&window).unwrap();
     let model = std::env::args().skip(1).next();
-    let mut run_current_frame: Box<dyn FnMut(&mut WgpuState, Option<&winit::event::WindowEvent>)> =
-        Box::new(gltf::demo(&mut gpu, model));
+    let mut run_current_frame: Box<dyn FnMut(&mut Renderling, Option<&winit::event::WindowEvent>)> =
+        Box::new(gltf::demo(&mut r, model));
     event_loop.run(move |event, _target, control_flow| {
         *control_flow = winit::event_loop::ControlFlow::Poll;
 
@@ -40,16 +42,16 @@ fn run() -> Result<(), anyhow::Error> {
                         },
                     ..
                 } => *control_flow = winit::event_loop::ControlFlow::Exit,
-                _ => (run_current_frame)(&mut gpu, Some(event)),
+                _ => (run_current_frame)(&mut r, Some(event)),
             },
             winit::event::Event::MainEventsCleared => {
                 window.request_redraw();
             }
             winit::event::Event::RedrawEventsCleared => {
-                gpu.device.poll(wgpu::Maintain::Wait);
+                r.get_device().poll(wgpu::Maintain::Wait);
             }
             winit::event::Event::RedrawRequested(_) => {
-                (run_current_frame)(&mut gpu, None);
+                (run_current_frame)(&mut r, None);
             }
             _ => {}
         }

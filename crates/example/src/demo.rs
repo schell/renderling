@@ -3,7 +3,6 @@ use std::time::Instant;
 
 use renderling::{
     math::{Quat, Vec3, Vec4},
-    ForwardVertex, MeshBuilder, Renderling, Transform, UiPipeline, WgpuState,
 };
 
 /// Sets up the historical renderling demo and returns a closure that iterates it frame by frame.

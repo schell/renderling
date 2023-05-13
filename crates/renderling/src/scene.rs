@@ -736,7 +736,7 @@ fn scene_render(
     render_pass.set_bind_group(0, &scene.render_buffers_bindgroup, &[]);
     render_pass.set_bind_group(1, &scene.render_atlas_bindgroup, &[]);
     // TODO: use RenderPass::multi_draw_indirect_count after atomics are added to
-    // naga's spirv frontend @see
+    // naga's spirv frontend
     render_pass.multi_draw_indirect(
         scene.indirect_draws.get_buffer(),
         0,
