@@ -160,6 +160,65 @@ impl Texture {
     }
 
     #[cfg(feature = "image")]
+    pub fn from_dynamic_image(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        dyn_img: image::DynamicImage,
+        label: Option<&str>,
+        usage: Option<wgpu::TextureUsages>,
+    ) -> Self {
+        let dimensions = dyn_img.dimensions();
+
+        let size = wgpu::Extent3d {
+            width: dimensions.0,
+            height: dimensions.1,
+            depth_or_array_layers: 1,
+        };
+
+        let (img, format, channels) = match dyn_img {
+            img @ DynamicImage::ImageLuma8(_) => (img, wgpu::TextureFormat::R8Unorm, 1),
+            img @ DynamicImage::ImageRgba8(_) => (img, wgpu::TextureFormat::Rgba8UnormSrgb, 4),
+            img @ DynamicImage::ImageLuma16(_) => (img, wgpu::TextureFormat::R16Unorm, 1),
+            img @ DynamicImage::ImageRgba16(_) => (img, wgpu::TextureFormat::Rgba16Unorm, 4),
+            img @ DynamicImage::ImageRgba32F(_) => (img, wgpu::TextureFormat::Rgba32Float, 4),
+            img => {
+                let rgba8 = DynamicImage::ImageRgba8(img.into_rgba8());
+                (rgba8, wgpu::TextureFormat::Rgba8UnormSrgb, 4)
+            }
+        };
+
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label,
+            size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format,
+            usage: usage
+                .unwrap_or(wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST),
+            view_formats: &[],
+        });
+
+        queue.write_texture(
+            wgpu::ImageCopyTextureBase {
+                texture: &texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            img.as_bytes(),
+            wgpu::ImageDataLayout {
+                offset: 0,
+                bytes_per_row: Some(channels * dimensions.0),
+                rows_per_image: Some(dimensions.1),
+            },
+            size,
+        );
+
+        Self::from_wgpu_tex(device, texture, None)
+    }
+
+    #[cfg(feature = "image")]
     pub fn from_image_buffer<P>(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
@@ -289,15 +348,18 @@ impl Texture {
 
     /// Read the texture from the GPU.
     ///
-    /// To read the texture you must provide the width and height.
+    /// To read the texture you must provide the width, height, the number of color/alpha channels
+    /// and the number of bytes in the underlying subpixel type (usually u8, u16 or f32).
     pub fn read(
         &self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         width: usize,
         height: usize,
+        channels: usize,
+        subpixel_bytes: usize,
     ) -> CopiedTextureBuffer {
-        let dimensions = BufferDimensions::new(width, height);
+        let dimensions = BufferDimensions::new(channels, subpixel_bytes, width, height);
         // The output buffer lets us retrieve the self as an array
         let buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("Texture::read buffer"),
@@ -340,8 +402,8 @@ pub struct BufferDimensions {
 }
 
 impl BufferDimensions {
-    pub fn new(width: usize, height: usize) -> Self {
-        let bytes_per_pixel = std::mem::size_of::<u32>();
+    pub fn new(channels: usize, subpixel_bytes: usize, width: usize, height: usize) -> Self {
+        let bytes_per_pixel = channels * subpixel_bytes;
         let unpadded_bytes_per_row = width * bytes_per_pixel;
         let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT as usize;
         let padded_bytes_per_row_padding = (align - unpadded_bytes_per_row % align) % align;
@@ -400,7 +462,11 @@ impl CopiedTextureBuffer {
 
     #[cfg(feature = "image")]
     /// Convert the post render buffer into an RgbaImage.
-    pub fn into_rgba(self, device: &wgpu::Device) -> Result<image::RgbaImage, TextureError> {
+    pub fn into_image<P>(self, device: &wgpu::Device) -> Result<image::DynamicImage, TextureError>
+    where
+        P: image::Pixel<Subpixel = u8>,
+        image::DynamicImage: From<image::ImageBuffer<P, Vec<u8>>>,
+    {
         let buffer_slice = self.buffer.slice(..);
         buffer_slice.map_async(wgpu::MapMode::Read, |_| {});
         device.poll(wgpu::Maintain::Wait);
@@ -412,13 +478,18 @@ impl CopiedTextureBuffer {
         for chunk in padded_buffer.chunks(self.dimensions.padded_bytes_per_row) {
             unpadded_buffer.extend_from_slice(&chunk[..self.dimensions.unpadded_bytes_per_row]);
         }
-        let img_buffer: image::ImageBuffer<image::Rgba<u8>, Vec<u8>> =
-            image::ImageBuffer::from_raw(
-                self.dimensions.width as u32,
-                self.dimensions.height as u32,
-                unpadded_buffer,
-            )
-            .context(CouldNotConvertImageBufferSnafu)?;
-        Ok(image::DynamicImage::ImageRgba8(img_buffer).to_rgba8())
+        let img_buffer: image::ImageBuffer<P, Vec<u8>> = image::ImageBuffer::from_raw(
+            self.dimensions.width as u32,
+            self.dimensions.height as u32,
+            unpadded_buffer,
+        )
+        .context(CouldNotConvertImageBufferSnafu)?;
+        Ok(image::DynamicImage::from(img_buffer))
+    }
+
+    #[cfg(feature = "image")]
+    /// Convert the post render buffer into an RgbaImage.
+    pub fn into_rgba(self, device: &wgpu::Device) -> Result<image::RgbaImage, TextureError> {
+        Ok(self.into_image::<image::Rgba<u8>>(device)?.into_rgba8())
     }
 }

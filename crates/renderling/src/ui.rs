@@ -6,13 +6,14 @@ use std::ops::{Deref, DerefMut};
 
 use glam::{UVec2, Vec2, Vec4};
 use moongraph::IsGraphNode;
-use renderling_shader::ui::{UiConstants, UiDrawParams, UiMode, UiVertex};
 use snafu::prelude::*;
 use wgpu::util::DeviceExt;
 
 use crate::{
     node::FrameTextureView, Device, Queue, Read, RenderTarget, Renderling, Texture, Write,
 };
+
+pub use renderling_shader::ui::{UiConstants, UiDrawParams, UiMode, UiVertex};
 
 #[derive(Debug, Snafu)]
 pub enum UiSceneError {
@@ -119,18 +120,20 @@ pub fn create_ui_pipeline(
         vertex: wgpu::VertexState {
             module: &vertex_shader,
             entry_point: "ui_vertex",
-            buffers: &[
-                wgpu::VertexBufferLayout {
-                        array_stride: {
-                            let position_size = std::mem::size_of::<Vec2>();
-                            let color_size = std::mem::size_of::<Vec4>();
-                            let uv_size = std::mem::size_of::<Vec2>();
-                            (position_size + color_size + uv_size) as wgpu::BufferAddress
-                        },
-                        step_mode: wgpu::VertexStepMode::Vertex,
-                        attributes: &wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x4, 2 => Float32x2],
-                    }
-            ],
+            buffers: &[wgpu::VertexBufferLayout {
+                array_stride: {
+                    let position_size = std::mem::size_of::<Vec2>();
+                    let color_size = std::mem::size_of::<Vec4>();
+                    let uv_size = std::mem::size_of::<Vec2>();
+                    (position_size + color_size + uv_size) as wgpu::BufferAddress
+                },
+                step_mode: wgpu::VertexStepMode::Vertex,
+                attributes: &wgpu::vertex_attr_array![
+                    0 => Float32x2,
+                    1 => Float32x2,
+                    2 => Float32x4
+                ],
+            }],
         },
         primitive: wgpu::PrimitiveState {
             topology: wgpu::PrimitiveTopology::TriangleList,
@@ -345,13 +348,13 @@ impl<'a> UiDrawObjectBuilder<'a> {
         self
     }
 
-    pub fn with_vertices(mut self, vertices: Vec<UiVertex>) -> Self {
-        self.vertices = vertices;
+    pub fn with_vertices(mut self, vertices: impl IntoIterator<Item = UiVertex>) -> Self {
+        self.vertices = vertices.into_iter().collect();
         self
     }
 
-    pub fn with_indices(mut self, indices: Vec<u16>) -> Self {
-        self.indices = Some(indices);
+    pub fn with_indices(mut self, indices: impl IntoIterator<Item = u16>) -> Self {
+        self.indices = Some(indices.into_iter().collect());
         self
     }
 
@@ -375,7 +378,7 @@ impl<'a> UiDrawObjectBuilder<'a> {
 
 pub struct UiScene {
     constants: UiBuffer<UiConstants>,
-    default_texture: Texture,
+    _default_texture: Texture,
     default_texture_bindgroup: wgpu::BindGroup,
 }
 
@@ -408,7 +411,7 @@ impl UiScene {
         let default_texture_bindgroup = ui_texture_bindgroup(device, &texture);
         UiScene {
             constants,
-            default_texture: texture,
+            _default_texture: texture,
             default_texture_bindgroup,
         }
     }
@@ -455,6 +458,17 @@ impl<'a> UiSceneBuilder<'a> {
 
     pub fn new_object(&self) -> UiDrawObjectBuilder<'a> {
         UiDrawObjectBuilder::new(self.device)
+    }
+
+    #[cfg(feature = "image")]
+    pub fn new_texture_from_dynamic_image(&self, img: image::DynamicImage) -> Texture {
+        Texture::from_dynamic_image(
+            self.device,
+            self.queue,
+            img,
+            Some("UiSceneBuilder::new_texture_from_dynamic_image"),
+            None,
+        )
     }
 
     pub fn build(self) -> UiScene {
@@ -513,9 +527,9 @@ fn ui_scene_render(
         render_pass.set_vertex_buffer(0, object.vertex_buffer.slice(..));
         if let Some((index_buffer, len)) = object.vertex_indices.as_ref() {
             render_pass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-            render_pass.draw_indexed(0..*len as u32, 0, 0..0);
+            render_pass.draw_indexed(0..*len as u32, 0, 0..1);
         } else {
-            render_pass.draw(0..object.vertex_buffer_len as u32, 0..0);
+            render_pass.draw(0..object.vertex_buffer_len as u32, 0..1);
         }
     }
     drop(render_pass);
@@ -579,29 +593,124 @@ mod test {
     use super::*;
 
     #[test]
-    fn hello_triangle() {
+    fn ui_tri() {
         let mut r = Renderling::headless(50, 50).unwrap();
         let builder = r.new_ui_scene().with_canvas_size(50, 50);
         let tri = builder
             .new_object()
-            .with_draw_mode(UiMode::COLOR)
             .with_vertices(vec![
                 UiVertex::default()
                     .with_position(Vec2::ZERO)
-                    .with_color(Vec4::new(1.0, 1.0, 0.0, 1.0)),
+                    .with_color(Vec4::new(1.0, 0.0, 0.0, 1.0)),
                 UiVertex::default()
                     .with_position(Vec2::new(0.0, 1.0))
-                    .with_color(Vec4::new(0.0, 1.0, 1.0, 1.0)),
+                    .with_color(Vec4::new(0.0, 0.0, 1.0, 1.0)),
                 UiVertex::default()
-                    .with_position(Vec2::new(1.0, 1.0))
-                    .with_color(Vec4::new(1.0, 0.0, 1.0, 1.0)),
+                    .with_position(Vec2::new(1.0, 0.0))
+                    .with_color(Vec4::new(0.0, 1.0, 0.0, 1.0)),
             ])
-            .with_scale([25.0, 25.0])
+            .with_scale(Vec2::splat(50.0))
             .build();
         let scene = builder.build();
         setup_ui_render_graph(scene, vec![tri], &mut r, true);
 
         let img = r.render_image().unwrap();
-        crate::img_diff::save("ui_tri.png", img);
+        crate::img_diff::assert_img_eq("ui_tri.png", img);
+    }
+
+    #[cfg(feature = "image")]
+    #[test]
+    fn ui_image() {
+        let mut r = Renderling::headless(100, 100)
+            .unwrap()
+            .with_background_color(Vec4::splat(0.0));
+        let builder = r.new_ui_scene().with_canvas_size(100, 100);
+        let img = image::open("../../img/dirt.jpg").unwrap();
+        let texture = builder.new_texture_from_dynamic_image(img);
+        let tl = UiVertex::default()
+            .with_position(Vec2::ZERO)
+            .with_uv(Vec2::ZERO)
+            .with_color(Vec4::new(1.0, 0.0, 0.0, 1.0));
+        let tr = UiVertex::default()
+            .with_position(Vec2::X)
+            .with_uv(Vec2::X)
+            .with_color(Vec4::new(0.0, 1.0, 0.0, 1.0));
+        let bl = UiVertex::default()
+            .with_position(Vec2::Y)
+            .with_uv(Vec2::Y)
+            .with_color(Vec4::new(0.0, 0.0, 1.0, 1.0));
+        let br = UiVertex::default()
+            .with_position(Vec2::ONE)
+            .with_uv(Vec2::ONE)
+            .with_color(Vec4::new(1.0, 1.0, 1.0, 1.0));
+        let obj = builder.new_object()
+            .with_texture(&texture)
+            .with_vertices(vec![
+                tl, bl, br,
+                tl, br, tr
+            ])
+            .with_scale(Vec2::splat(100.0))
+            .build();
+        let scene = builder.build();
+        setup_ui_render_graph(scene, vec![obj], &mut r, true);
+
+        let img = r.render_image().unwrap();
+        crate::img_diff::assert_img_eq("ui_image.png", img);
+    }
+
+    #[cfg(feature = "text")]
+    #[test]
+    fn ui_text() {
+        use crate::{FontArc, GlyphCache, Section, Text};
+        let mut r = Renderling::headless(100, 50)
+            .unwrap()
+            .with_background_color(Vec4::splat(0.0));
+
+        let bytes: Vec<u8> =
+            std::fs::read("../../fonts/Font Awesome 6 Free-Regular-400.otf").unwrap();
+
+        let font = FontArc::try_from_vec(bytes).unwrap();
+        let mut glyph_cache = GlyphCache::new(&r, vec![font]);
+        glyph_cache.brush.queue(
+            Section::default()
+                .add_text(
+                    Text::new("")
+                        .with_color([1.0, 1.0, 0.0, 1.0])
+                        .with_scale(32.0),
+                )
+                .add_text(
+                    Text::new("")
+                        .with_color([1.0, 0.0, 1.0, 1.0])
+                        .with_scale(32.0),
+                )
+                .add_text(
+                    Text::new("")
+                        .with_color([0.0, 1.0, 1.0, 1.0])
+                        .with_scale(32.0),
+                ),
+        );
+        let (may_mesh, may_texture) = glyph_cache.get_updated();
+        let mesh = may_mesh.unwrap();
+        let texture = may_texture.unwrap();
+
+        let builder = r.new_ui_scene().with_canvas_size(100, 50);
+        let obj_a = builder
+            .new_object()
+            .with_draw_mode(UiMode::TEXT)
+            .with_texture(&texture)
+            .with_vertices(mesh.iter().copied())
+            .build();
+        let obj_b = builder
+            .new_object()
+            .with_draw_mode(UiMode::TEXT)
+            .with_texture(&texture)
+            .with_vertices(mesh)
+            .with_position([15.0, 15.0])
+            .build();
+        let scene = builder.build();
+        setup_ui_render_graph(scene, vec![obj_a, obj_b], &mut r, true);
+
+        let img = r.render_image().unwrap();
+        crate::img_diff::save("ui_text.png", img);
     }
 }
