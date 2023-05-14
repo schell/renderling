@@ -448,58 +448,6 @@ mod test {
     }
 
     #[test]
-    fn ui_text() {
-        let mut r = Renderling::headless(100, 50)
-            .unwrap()
-            .with_background_color(Vec4::splat(0.0));
-
-        let bytes: Vec<u8> =
-            std::fs::read("../../fonts/Font Awesome 6 Free-Regular-400.otf").unwrap();
-
-        let font = FontArc::try_from_vec(bytes).unwrap();
-        let mut glyph_cache = GlyphCache::new(&r, vec![font]);
-        glyph_cache.queue(
-            Section::default()
-                .add_text(
-                    Text::new("")
-                        .with_color([1.0, 1.0, 0.0, 1.0])
-                        .with_scale(32.0),
-                )
-                .add_text(
-                    Text::new("")
-                        .with_color([1.0, 0.0, 1.0, 1.0])
-                        .with_scale(32.0),
-                )
-                .add_text(
-                    Text::new("")
-                        .with_color([0.0, 1.0, 1.0, 1.0])
-                        .with_scale(32.0),
-                ),
-        );
-        let (projection, view) = default_ortho2d(100.0, 50.0);
-        let mut builder = r.new_scene().with_camera(projection, view);
-        let mesh = glyph_cache.get_updated().unwrap();
-        let (mesh_start, mesh_count) = builder.add_meshlet(mesh);
-        let _obj_a = builder
-            .new_entity()
-            .with_material(Id::new(0))
-            .with_starting_vertex_and_count(mesh_start, mesh_count)
-            .build();
-        let _obj_b = builder
-            .new_entity()
-            .with_material(Id::new(0))
-            .with_starting_vertex_and_count(mesh_start, mesh_count)
-            .with_position(Vec3::new(15.0, 15.0, 0.5))
-            .build();
-
-        let scene = builder.build_text_scene(&glyph_cache).unwrap();
-        crate::setup_scene_render_graph(scene, &mut r, true);
-        // we should see three different colored check icons
-        let img = r.render_image().unwrap();
-        crate::img_diff::assert_img_eq("ui_text.png", img);
-    }
-
-    #[test]
     fn gpu_array_update() {
         _init_logging();
         let (device, queue, _) = futures_lite::future::block_on(
@@ -792,6 +740,8 @@ mod test {
             r.get_queue(),
             scene.atlas.size.x as usize,
             scene.atlas.size.y as usize,
+            4,
+            1,
         );
         let atlas_img = atlas_img.into_rgba(r.get_device()).unwrap();
         crate::img_diff::save("atlas.png", atlas_img);

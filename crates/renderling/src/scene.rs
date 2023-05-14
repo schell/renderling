@@ -10,7 +10,7 @@ use wgpu::util::DeviceExt;
 pub use renderling_shader::scene::*;
 
 use crate::{
-    node::FrameTextureView, Atlas, DepthTexture, Device, GlyphCache, GpuArray, Queue, RenderTarget,
+    node::FrameTextureView, Atlas, DepthTexture, Device, GpuArray, Queue, RenderTarget,
     Renderling,
 };
 
@@ -235,12 +235,6 @@ impl SceneBuilder {
     pub fn build(self) -> Result<Scene, SceneError> {
         Scene::new(self)
     }
-
-    #[cfg(feature = "text")]
-    /// Creates a new text scene on the GPU.
-    pub fn build_text_scene(self, glyph_cache: &GlyphCache) -> Result<Scene, SceneError> {
-        Scene::new_text_scene(self, glyph_cache)
-    }
 }
 
 pub struct Scene {
@@ -259,49 +253,6 @@ pub struct Scene {
 }
 
 impl Scene {
-    #[cfg(feature = "text")]
-    /// Creates a new scene on the GPU.
-    pub fn new_text_scene(
-        mut scene_builder: SceneBuilder,
-        glyph_cache: &GlyphCache,
-    ) -> Result<Self, SceneError> {
-        snafu::ensure!(
-            scene_builder.images.is_empty(),
-            TextSceneSingletonSnafu { name: "image" }
-        );
-
-        if scene_builder.textures.is_empty() {
-            scene_builder.textures.push(crate::TEXT_TEXTURE_PARAMS);
-        } else {
-            snafu::ensure!(
-                scene_builder.textures.len() == 1
-                    && scene_builder.textures[0] == crate::TEXT_TEXTURE_PARAMS,
-                TextSceneSingletonSnafu { name: "texture" }
-            );
-        }
-
-        if scene_builder.materials.is_empty() {
-            scene_builder.materials.push(crate::TEXT_MATERIAL);
-        } else {
-            snafu::ensure!(
-                scene_builder.materials.len() == 1
-                    && scene_builder.materials[0] == crate::TEXT_MATERIAL,
-                TextSceneSingletonSnafu { name: "material" }
-            );
-        }
-
-        let (w, h) = glyph_cache.brush.texture_dimensions();
-        let cache = glyph_cache.cache.as_ref().context(MissingCacheSnafu)?;
-        let mut atlas = Atlas::new_with_texture(cache.texture.clone(), w, h);
-        atlas.rects = vec![crunch::Rect {
-            x: 0,
-            y: 0,
-            w: w as usize,
-            h: h as usize,
-        }];
-        Self::new_with_atlas(scene_builder, atlas)
-    }
-
     /// Creates a new scene with the given atlas.
     pub fn new(mut scene_builder: SceneBuilder) -> Result<Self, SceneError> {
         let atlas = Atlas::pack(

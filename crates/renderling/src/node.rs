@@ -133,7 +133,7 @@ impl PostRenderBufferCreate {
     /// before presentation.
     pub fn create(self) -> Result<(PostRenderBuffer,), WgpuStateError> {
         let ScreenSize { width, height } = *self.size;
-        let dimensions = BufferDimensions::new(width as usize, height as usize);
+        let dimensions = BufferDimensions::new(4, 1, width as usize, height as usize);
         // The output buffer lets us retrieve the self as an array
         let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("screen capture buffer"),

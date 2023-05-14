@@ -2,7 +2,7 @@
 //!
 //! This is mostly for rendering text.
 
-use glam::{Mat4, UVec2, Vec2, Vec4, Vec4Swizzles};
+use glam::{Mat4, UVec2, Vec2, Vec4};
 use spirv_std::{image::Image2d, Sampler};
 
 /// A vertex in a mesh.
@@ -54,9 +54,7 @@ pub struct UiConstants {
 pub struct UiMode(u32);
 
 impl UiMode {
-    pub const COLOR: Self = UiMode(0);
-    pub const TEXTURE: Self = UiMode(1);
-    pub const COLOR_TEXTURE: Self = UiMode(2);
+    pub const DEFAULT: Self = UiMode(0);
     pub const TEXT: Self = UiMode(3);
 }
 
@@ -73,9 +71,9 @@ impl Default for UiDrawParams {
     fn default() -> Self {
         Self {
             translation: Default::default(),
-            scale: Default::default(),
+            scale: Vec2::ONE,
             rotation: Default::default(),
-            mode: UiMode::COLOR,
+            mode: Default::default(),
         }
     }
 }
@@ -107,8 +105,8 @@ pub fn vertex(
         constants.canvas_size.x as f32,
         constants.canvas_size.y as f32,
         0.0,
-        1.0,
         -1.0,
+        1.0,
     );
 
     *gl_pos = proj * view * model * Vec4::new(in_pos.x, in_pos.y, 0.0, 1.0);
@@ -127,10 +125,7 @@ pub fn fragment(
     let mode = UiMode(in_mode);
     let uv_color: Vec4 = texture.sample(*sampler, in_uv);
     *output = match mode {
-        UiMode::COLOR => in_color,
-        UiMode::TEXTURE => uv_color,
-        UiMode::COLOR_TEXTURE => uv_color * in_color,
-        UiMode::TEXT => in_color.xyz().extend(uv_color.x * in_color.z),
-        _ => in_color,
+        UiMode::TEXT => in_color * Vec4::new(1.0, 1.0, 1.0, uv_color.x),
+        _ => in_color * uv_color,
     }
 }
