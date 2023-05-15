@@ -54,6 +54,7 @@ mod ui;
 pub use atlas::*;
 pub use buffer_array::*;
 pub use camera::*;
+use moongraph::IsGraphNode;
 pub use renderer::*;
 pub use scene::*;
 pub use state::*;
@@ -76,6 +77,94 @@ pub use graph::{Graph, Move, Read, Write};
 
 #[cfg(test)]
 mod img_diff;
+
+pub fn setup_ui_and_scene_render_graph(
+    r: &mut Renderling,
+    ui_scene: UiScene,
+    ui_objects: impl IntoIterator<Item = UiDrawObject>,
+    scene: Scene,
+    with_screen_capture: bool,
+) {
+    let ui_objects = UiDrawObjects(ui_objects.into_iter().collect::<Vec<_>>());
+    r.graph.add_resource(ui_scene);
+    r.graph.add_resource(ui_objects);
+    r.graph.add_resource(scene);
+    let ui_pipeline = UiRenderPipeline(
+        r.graph
+            .visit(|(device, target): (Read<Device>, Read<RenderTarget>)| {
+                create_ui_pipeline(&device, target.format())
+            })
+            .unwrap(),
+    );
+    r.graph.add_resource(ui_pipeline);
+    let scene_cull_pipeline = SceneComputeCullPipeline(
+        r.graph
+            .visit(|device: Read<Device>| create_scene_compute_cull_pipeline(&device))
+            .unwrap(),
+    );
+    r.graph.add_resource(scene_cull_pipeline);
+    let scene_pipeline = SceneRenderPipeline(
+        r.graph
+            .visit(|(device, target): (Read<Device>, Read<RenderTarget>)| {
+                create_scene_render_pipeline(&device, target.format())
+            })
+            .unwrap(),
+    );
+    r.graph.add_resource(scene_pipeline);
+
+    r.graph
+        .add_node(scene_update.into_node().with_name("scene_update"));
+    r.graph.add_node(
+        scene_cull
+            .into_node()
+            .with_name("scene_cull")
+            .run_after("scene_update"),
+    );
+    r.graph.add_node(
+        crate::node::create_frame
+            .into_node()
+            .with_name("create_frame"),
+    );
+    r.graph.add_node(
+        crate::node::clear_frame_and_depth
+            .into_node()
+            .with_name("clear_frame_and_depth"),
+    );
+    r.graph
+        .add_node(ui_scene_update.into_node().with_name("ui_scene_update"));
+
+    r.graph.add_barrier();
+
+    r.graph
+        .add_node(scene_render.into_node().with_name("scene_render"));
+    r.graph.add_node(
+        crate::node::clear_depth
+            .into_node()
+            .with_name("clear_depth")
+            .run_after("scene_render"),
+    );
+
+    r.graph.add_node(
+        ui_scene_render
+            .into_node()
+            .with_name("ui_scene_render")
+            .run_after("clear_depth"),
+    );
+
+    r.graph.add_barrier();
+
+    if with_screen_capture {
+        r.graph.add_node(
+            crate::node::PostRenderBufferCreate::create
+                .into_node()
+                .with_name("copy_frame_to_post")
+                .run_before("present"),
+        );
+    }
+
+    r.graph
+        .add_node(crate::node::present.into_node().with_name("present"));
+}
 
 #[cfg(test)]
 mod test {
@@ -535,9 +624,14 @@ mod test {
             .graph
             .visit(
                 |(scene, device, queue): (Read<Scene>, Read<Device>, Read<Queue>)| {
-                    let constants =
-                        crate::read_buffer::<GpuConstants>(&device, &queue, &scene.constants, 0, 1)
-                            .unwrap();
+                    let constants = crate::read_buffer::<GpuConstants>(
+                        &device,
+                        &queue,
+                        &scene.constants_buffer,
+                        0,
+                        1,
+                    )
+                    .unwrap();
                     let vertices = scene.vertices.read(&device, &queue, 0, 3).unwrap();
                     let entities = scene
                         .entities
@@ -672,7 +766,7 @@ mod test {
             draws
         );
         let constants: GpuConstants =
-            read_buffer(r.get_device(), r.get_queue(), &scene.constants, 0, 1).unwrap()[0];
+            read_buffer(r.get_device(), r.get_queue(), &scene.constants_buffer, 0, 1).unwrap()[0];
         assert_eq!(UVec2::splat(256), constants.atlas_size);
 
         let materials = scene

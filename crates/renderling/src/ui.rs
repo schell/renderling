@@ -10,7 +10,8 @@ use snafu::prelude::*;
 use wgpu::util::DeviceExt;
 
 use crate::{
-    node::FrameTextureView, Device, Queue, Read, RenderTarget, Renderling, Texture, Write,
+    node::FrameTextureView, DepthTexture, Device, Queue, Read, RenderTarget, Renderling, Texture,
+    Write,
 };
 
 pub use renderling_shader::ui::{UiConstants, UiDrawParams, UiMode, UiVertex};
@@ -123,8 +124,8 @@ pub fn create_ui_pipeline(
             buffers: &[wgpu::VertexBufferLayout {
                 array_stride: {
                     let position_size = std::mem::size_of::<Vec2>();
-                    let color_size = std::mem::size_of::<Vec4>();
                     let uv_size = std::mem::size_of::<Vec2>();
+                    let color_size = std::mem::size_of::<Vec4>();
                     (position_size + color_size + uv_size) as wgpu::BufferAddress
                 },
                 step_mode: wgpu::VertexStepMode::Vertex,
@@ -144,7 +145,13 @@ pub fn create_ui_pipeline(
             polygon_mode: wgpu::PolygonMode::Fill,
             conservative: false,
         },
-        depth_stencil: None,
+        depth_stencil: Some(wgpu::DepthStencilState {
+            format: wgpu::TextureFormat::Depth32Float,
+            depth_write_enabled: true,
+            depth_compare: wgpu::CompareFunction::Less,
+            stencil: wgpu::StencilState::default(),
+            bias: wgpu::DepthBiasState::default(),
+        }),
         multisample: wgpu::MultisampleState {
             mask: !0,
             alpha_to_coverage_enabled: false,
@@ -164,7 +171,7 @@ pub fn create_ui_pipeline(
     pipeline
 }
 
-pub struct UiRenderPipeline(wgpu::RenderPipeline);
+pub struct UiRenderPipeline(pub wgpu::RenderPipeline);
 
 pub struct UiBuffer<T> {
     inner: T,
@@ -242,6 +249,7 @@ impl<T> DerefMut for UiBuffer<T> {
 pub struct UiDrawObject {
     draw_params: UiBuffer<UiDrawParams>,
     texture_bindgroup: Option<wgpu::BindGroup>,
+    updated_texture: Option<Texture>,
     updated_vertices: Option<(Vec<UiVertex>, Option<Vec<u16>>)>,
     vertex_buffer: wgpu::Buffer,
     vertex_buffer_len: usize,
@@ -272,9 +280,10 @@ impl UiDrawObject {
             draw_params: UiBuffer::new(
                 device,
                 draw_params,
-                wgpu::BufferUsages::UNIFORM,
+                wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
                 wgpu::ShaderStages::VERTEX,
             ),
+            updated_texture: None,
             updated_vertices: None,
             vertex_buffer: device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("UiDrawObject"),
@@ -287,15 +296,53 @@ impl UiDrawObject {
         }
     }
 
-    pub fn update(&mut self, queue: &wgpu::Queue) -> Result<(), UiSceneError> {
+    pub fn set_vertices_and_indices(
+        &mut self,
+        vertices: impl IntoIterator<Item = UiVertex>,
+        indices: Option<impl IntoIterator<Item = u16>>,
+    ) {
+        let vertices = vertices.into_iter().collect();
+        let indices = indices.map(|is| is.into_iter().collect());
+        self.updated_vertices = Some((vertices, indices));
+    }
+
+    pub fn set_vertices(&mut self, vertices: impl IntoIterator<Item = UiVertex>) {
+        let vertices = vertices.into_iter().collect();
+        self.updated_vertices = Some((vertices, None));
+    }
+
+    pub fn set_texture(&mut self, texture: &Texture) {
+        self.updated_texture = Some(texture.clone());
+    }
+
+    pub fn remove_texture(&mut self) {
+        self.texture_bindgroup = None;
+    }
+
+    pub fn update(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> Result<(), UiSceneError> {
         self.draw_params.update(queue);
+        if let Some(texture) = self.updated_texture.take() {
+            self.texture_bindgroup = Some(ui_texture_bindgroup(device, &texture))
+        }
         if let Some((vertices, may_indices)) = self.updated_vertices.take() {
-            queue.write_buffer(&self.vertex_buffer, 0, bytemuck::cast_slice(&vertices));
+            self.vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("UiDrawObject::update vertices"),
+                contents: bytemuck::cast_slice(&vertices),
+                usage: wgpu::BufferUsages::VERTEX,
+            });
             self.vertex_buffer_len = vertices.len();
             if let Some(indices) = may_indices {
                 let (index_buffer, size) =
                     self.vertex_indices.as_mut().context(NoIndexBufferSnafu)?;
-                queue.write_buffer(index_buffer, 0, bytemuck::cast_slice(&indices));
+                *index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("UiDrawObject::update indices"),
+                    contents: bytemuck::cast_slice(&indices),
+                    usage: wgpu::BufferUsages::VERTEX,
+                });
                 *size = indices.len();
             }
         }
@@ -304,8 +351,8 @@ impl UiDrawObject {
 }
 
 pub struct UiDrawObjectBuilder<'a> {
-    draw_params: UiDrawParams,
-    vertices: Vec<UiVertex>,
+    draw_params: Option<UiDrawParams>,
+    vertices: Option<Vec<UiVertex>>,
     indices: Option<Vec<u16>>,
     device: &'a wgpu::Device,
     texture_bindgroup: Option<wgpu::BindGroup>,
@@ -314,8 +361,8 @@ pub struct UiDrawObjectBuilder<'a> {
 impl<'a> UiDrawObjectBuilder<'a> {
     pub fn new(device: &'a wgpu::Device) -> Self {
         UiDrawObjectBuilder {
-            draw_params: UiDrawParams::default(),
-            vertices: vec![],
+            draw_params: None,
+            vertices: None,
             indices: None,
             texture_bindgroup: None,
             device,
@@ -323,22 +370,26 @@ impl<'a> UiDrawObjectBuilder<'a> {
     }
 
     pub fn with_draw_mode(mut self, mode: UiMode) -> Self {
-        self.draw_params.mode = mode;
+        let mut params = self.draw_params.get_or_insert(UiDrawParams::default());
+        params.mode = mode;
         self
     }
 
     pub fn with_position(mut self, p: impl Into<Vec2>) -> Self {
-        self.draw_params.translation = p.into();
+        let mut params = self.draw_params.get_or_insert(UiDrawParams::default());
+        params.translation = p.into();
         self
     }
 
     pub fn with_scale(mut self, s: impl Into<Vec2>) -> Self {
-        self.draw_params.scale = s.into();
+        let mut params = self.draw_params.get_or_insert(UiDrawParams::default());
+        params.scale = s.into();
         self
     }
 
     pub fn with_rotation(mut self, r: f32) -> Self {
-        self.draw_params.rotation = r;
+        let mut params = self.draw_params.get_or_insert(UiDrawParams::default());
+        params.rotation = r;
         self
     }
 
@@ -349,7 +400,7 @@ impl<'a> UiDrawObjectBuilder<'a> {
     }
 
     pub fn with_vertices(mut self, vertices: impl IntoIterator<Item = UiVertex>) -> Self {
-        self.vertices = vertices.into_iter().collect();
+        self.vertices = Some(vertices.into_iter().collect());
         self
     }
 
@@ -368,8 +419,8 @@ impl<'a> UiDrawObjectBuilder<'a> {
         } = self;
         UiDrawObject::new(
             device,
-            draw_params,
-            vertices,
+            draw_params.unwrap_or_default(),
+            vertices.unwrap_or_default(),
             may_indices,
             texture_bindgroup,
         )
@@ -395,7 +446,7 @@ impl UiScene {
                 canvas_size,
                 camera_translation,
             },
-            wgpu::BufferUsages::UNIFORM,
+            wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             wgpu::ShaderStages::VERTEX,
         );
         let texture = Texture::new(
@@ -416,14 +467,19 @@ impl UiScene {
         }
     }
 
+    pub fn set_canvas_size(&mut self, width: u32, height: u32) {
+        self.constants.deref_mut().canvas_size = UVec2::new(width, height);
+    }
+
     pub fn update<'a>(
         &mut self,
+        device: &wgpu::Device,
         queue: &wgpu::Queue,
         draw_objects: impl IntoIterator<Item = &'a mut UiDrawObject>,
     ) -> Result<(), UiSceneError> {
         self.constants.update(queue);
         for obj in draw_objects.into_iter() {
-            obj.update(queue)?;
+            obj.update(device, queue)?;
         }
         Ok(())
     }
@@ -485,20 +541,40 @@ impl<'a> UiSceneBuilder<'a> {
 #[repr(transparent)]
 pub struct UiDrawObjects(pub Vec<UiDrawObject>);
 
-pub fn ui_scene_update(
-    (queue, mut scene, mut objects): (Read<crate::Queue>, Write<UiScene>, Write<UiDrawObjects>),
-) -> Result<(), UiSceneError> {
-    scene.update(&queue, &mut objects.0)
+impl Deref for UiDrawObjects {
+    type Target = Vec<UiDrawObject>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
 }
 
-fn ui_scene_render(
-    (device, queue, scene, objects, pipeline, frame): (
+impl DerefMut for UiDrawObjects {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+pub fn ui_scene_update(
+    (device, queue, mut scene, mut objects): (
+        Read<crate::Device>,
+        Read<crate::Queue>,
+        Write<UiScene>,
+        Write<UiDrawObjects>,
+    ),
+) -> Result<(), UiSceneError> {
+    scene.update(&device, &queue, &mut objects.0)
+}
+
+pub fn ui_scene_render(
+    (device, queue, scene, objects, pipeline, frame, depth): (
         Read<Device>,
         Read<Queue>,
         Read<UiScene>,
         Read<UiDrawObjects>,
         Read<UiRenderPipeline>,
         Read<FrameTextureView>,
+        Read<DepthTexture>,
     ),
 ) -> Result<(), UiSceneError> {
     let label = Some("ui scene render");
@@ -513,7 +589,14 @@ fn ui_scene_render(
                 store: true,
             },
         })],
-        depth_stencil_attachment: None,
+        depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+            view: &depth.view,
+            depth_ops: Some(wgpu::Operations {
+                load: wgpu::LoadOp::Load,
+                store: true,
+            }),
+            stencil_ops: None,
+        }),
     });
     render_pass.set_pipeline(&pipeline.0);
     render_pass.set_bind_group(0, &scene.constants.bindgroup, &[]);
@@ -643,12 +726,10 @@ mod test {
             .with_position(Vec2::ONE)
             .with_uv(Vec2::ONE)
             .with_color(Vec4::new(1.0, 1.0, 1.0, 1.0));
-        let obj = builder.new_object()
+        let obj = builder
+            .new_object()
             .with_texture(&texture)
-            .with_vertices(vec![
-                tl, bl, br,
-                tl, br, tr
-            ])
+            .with_vertices(vec![tl, bl, br, tl, br, tr])
             .with_scale(Vec2::splat(100.0))
             .build();
         let scene = builder.build();

@@ -125,7 +125,7 @@ pub fn fragment(
     let mode = UiMode(in_mode);
     let uv_color: Vec4 = texture.sample(*sampler, in_uv);
     *output = match mode {
-        UiMode::TEXT => in_color * Vec4::new(1.0, 1.0, 1.0, uv_color.x),
+        UiMode::TEXT => Vec4::new(in_color.x, in_color.y, in_color.z, in_color.w * uv_color.x),
         _ => in_color * uv_color,
     }
 }

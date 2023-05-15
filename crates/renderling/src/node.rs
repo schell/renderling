@@ -114,6 +114,22 @@ pub fn clear_frame_and_depth(
     Ok(())
 }
 
+/// Conduct a clear pass on **only the depth texture**.
+pub fn clear_depth(
+    (device, queue, depth): (Read<Device>, Read<Queue>, Read<DepthTexture>),
+) -> Result<(), WgpuStateError> {
+    let depth_view = &depth.view;
+    conduct_clear_pass(
+        &device,
+        &queue,
+        Some("clear_depth"),
+        None,
+        Some(&depth_view),
+        Default::default(),
+    );
+    Ok(())
+}
+
 /// A buffer holding a copy of the last frame's buffer/texture.
 pub struct PostRenderBuffer(pub CopiedTextureBuffer);
 
@@ -154,9 +170,7 @@ impl PostRenderBufferCreate {
                 buffer: &buffer,
                 layout: wgpu::ImageDataLayout {
                     offset: 0,
-                    bytes_per_row: Some(
-                        dimensions.padded_bytes_per_row as u32,
-                    ),
+                    bytes_per_row: Some(dimensions.padded_bytes_per_row as u32),
                     rows_per_image: None,
                 },
             },

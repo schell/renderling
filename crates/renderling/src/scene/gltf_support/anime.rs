@@ -218,7 +218,6 @@ impl Tween {
     }
 
     fn interpolate_step(&self, time: f32) -> Result<Option<TweenProperty>, InterpolationError> {
-        log::trace!("step");
         if let Some((prev_keyframe_ndx, _)) = self.get_previous_keyframe(time)? {
             self.properties
                 .get(prev_keyframe_ndx)
@@ -232,7 +231,6 @@ impl Tween {
     }
 
     fn interpolate_cubic(&self, time: f32) -> Result<Option<TweenProperty>, InterpolationError> {
-        log::trace!("cubic");
         snafu::ensure!(self.keyframes.len() >= 2, NotEnoughKeyframesSnafu);
 
         let (prev_keyframe_ndx, prev_keyframe) =
@@ -293,11 +291,9 @@ impl Tween {
     }
 
     fn interpolate_linear(&self, time: f32) -> Result<Option<TweenProperty>, InterpolationError> {
-        log::trace!("linear");
         let last_keyframe = self.keyframes.len() - 1;
         let last_time = self.keyframes[last_keyframe].0;
         let time = time.min(last_time);
-        log::trace!("time: {}", time);
         let (prev_keyframe_ndx, prev_keyframe) =
             if let Some(prev) = self.get_previous_keyframe(time)? {
                 prev
@@ -305,7 +301,6 @@ impl Tween {
                 return Ok(None);
             };
         let prev_time = prev_keyframe.0;
-        log::trace!("prev_time: {}", prev_time);
 
         let (next_keyframe_ndx, next_keyframe) = if let Some(next) = self.get_next_keyframe(time)? {
             next
@@ -313,19 +308,15 @@ impl Tween {
             return Ok(None);
         };
         let next_time = next_keyframe.0;
-        log::trace!("next_time: {}", next_time);
 
         // UNWRAP: safe because we know this was found above
         let from = self.properties.get(prev_keyframe_ndx).unwrap();
-        log::trace!("from: {} {:?}", prev_keyframe_ndx, from);
 
         // UNWRAP: safe because we know this is either the first index or was found
         // above
         let to = self.properties.get(next_keyframe_ndx).unwrap();
-        log::trace!("to: {} {:?}", next_keyframe_ndx, to);
 
         let amount = (time - prev_time) / (next_time - prev_time);
-        log::trace!("amount: {:?}", amount);
         Ok(Some(match from {
             TweenProperty::Translation(a) => {
                 let b = to.as_translation().context(MismatchedPropertiesSnafu)?;

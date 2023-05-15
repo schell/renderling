@@ -126,6 +126,21 @@ impl<T> GltfStore<T> {
     }
 }
 
+#[derive(Clone, Copy)]
+pub struct GltfBoundingBox {
+    pub min: Vec3,
+    pub max: Vec3,
+}
+
+impl From<gltf::mesh::Bounds<[f32; 3]>> for GltfBoundingBox {
+    fn from(gltf::mesh::Bounds { min, max }: gltf::mesh::Bounds<[f32; 3]>) -> Self {
+        GltfBoundingBox {
+            min: min.into(),
+            max: max.into(),
+        }
+    }
+}
+
 #[derive(Clone)]
 pub enum GltfNode {
     // Contains an index into the GltfLoader.cameras field.
@@ -154,9 +169,10 @@ impl GltfNode {
 
 #[derive(Clone, Copy)]
 pub struct GltfMeshPrim {
-    vertex_start: u32,
-    vertex_count: u32,
-    material_id: Id<GpuMaterial>,
+    pub vertex_start: u32,
+    pub vertex_count: u32,
+    pub material_id: Id<GpuMaterial>,
+    pub bounding_box: GltfBoundingBox,
 }
 
 /// The result of loading a gltf file into a [`SceneBuilder`].
@@ -572,10 +588,12 @@ impl GltfLoader {
             let (vertex_start, vertex_count) = builder.add_meshlet(vertices);
             let material_index = primitive.material().index();
             let material_id = self.material_at(material_index, builder, document)?;
+            let bounding_box = primitive.bounding_box().into();
             mesh_primitives.push(GltfMeshPrim {
                 vertex_start,
                 vertex_count,
                 material_id,
+                bounding_box,
             });
         }
         let _ = self
@@ -653,6 +671,7 @@ impl GltfLoader {
                 .with_rotation(rotation)
                 .with_scale(scale);
             let (parent, children) = if prims.len() == 1 {
+                log::trace!("    with only 1 primitive, so no children needed");
                 (
                     parent
                         .with_starting_vertex_and_count(
@@ -666,6 +685,7 @@ impl GltfLoader {
                 )
             } else {
                 let parent = parent.build().id;
+                log::trace!("    with {} child primitives", prims.len());
                 let children = prims
                     .iter()
                     .map(|child_prim| {
@@ -794,7 +814,11 @@ impl GltfLoader {
                     }
                 },
                 interpolation,
-                target_node_index: channel.target().node().index(),
+                target_node_index: {
+                    let index = channel.target().node().index();
+                    log::trace!("    of node {index}");
+                    index
+                }
             };
             r_animation.tweens.push(tween);
         }
