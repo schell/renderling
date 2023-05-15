@@ -5,20 +5,23 @@
 use std::time::Instant;
 
 use renderling::{
-    math::{Mat4, Vec3},
+    math::{Mat4, Vec3, Vec4},
     FontArc, GltfLoader, GlyphCache, GpuEntity, Id, Renderling, Scene, Section, Text,
-    TEXT_MATERIAL,
+    TweenTransform, UiDrawObjects, UiMode, UiScene, Write,
 };
+use rustc_hash::FxHashMap;
 use winit::event::KeyboardInput;
 
 const RADIUS_SCROLL_DAMPENING: f32 = 0.001;
 const DX_DY_DRAG_DAMPENING: f32 = 0.01;
 
 struct App {
-    scene: Option<Scene>,
     loader: Option<GltfLoader>,
+    entities: Vec<GpuEntity>,
     last_frame_instant: Instant,
     timestamp: f32,
+    title_text_cache: GlyphCache,
+    camera_text_cache: GlyphCache,
 
     // look at
     eye: Vec3,
@@ -43,43 +46,39 @@ impl App {
         let last_cursor_position: Option<winit::dpi::PhysicalPosition<f64>> = None;
         let (ww, wh) = r.get_screen_size();
 
-        let (projection, view) = renderling::default_ortho2d(ww as f32, wh as f32);
-        let mut ui_builder = r.new_scene().with_camera(projection, view);
-
         // get the font for the UI
         let bytes: Vec<u8> =
             std::fs::read("fonts/Recursive Mn Lnr St Med Nerd Font Complete.ttf").unwrap();
         let font = FontArc::try_from_vec(bytes).unwrap();
-        let mut cache = r.new_glyph_cache(vec![font]);
-        cache.queue(
-            Section::default().add_text(Text::new("hello").with_color([1.0, 1.0, 0.0, 1.0])),
-        );
+        let title_text_cache = r.new_glyph_cache(vec![font.clone()]);
+        let camera_text_cache = r.new_glyph_cache(vec![font]);
 
-        let text = ui_builder
-            .new_entity()
-            .with_material(Id::new(0))
-            .with_meshlet(cache.get_updated().unwrap())
-            .build()
-            .id;
-        let ui_scene = ui_builder.build().unwrap();
+        let builder = r.new_ui_scene().with_canvas_size(ww, wh);
+        let title_text = builder.new_object().with_draw_mode(UiMode::TEXT).build();
+        let camera_text = builder
+            .new_object()
+            .with_draw_mode(UiMode::TEXT)
+            .with_position([0.0, 46.0])
+            .build();
+        let ui_scene = builder.build();
 
-        let builder = r.new_scene().with_camera(
-            Mat4::perspective_infinite_rh(
-                std::f32::consts::FRAC_PI_4,
-                ww as f32 / wh as f32,
-                0.01,
-            ),
-            Mat4::look_at_rh(
-                Self::camera_position(radius, phi, theta),
-                Vec3::ZERO,
-                Vec3::Y,
-            ),
+        // Create a placeholder scene
+        let scene = r.new_scene().build().unwrap();
+
+        renderling::setup_ui_and_scene_render_graph(
+            r,
+            ui_scene,
+            [title_text, camera_text],
+            scene,
+            false,
         );
 
         let mut app = Self {
             timestamp: 0.0,
-            scene: None,
             loader: None,
+            entities: vec![],
+            title_text_cache,
+            camera_text_cache,
 
             last_frame_instant: Instant::now(),
             radius,
@@ -88,11 +87,9 @@ impl App {
             theta,
             left_mb_down,
             last_cursor_position,
-            //ui: Ui {
-            //    title_text: "drag and drop a `.gltf` or `.glb` file to load".to_string(),
-            //},
         };
-        app.update_ui();
+        app.update_title_text(r, "Drag and drop a GLTF file to view...");
+        app.update_camera_text(r);
         app
     }
 
@@ -104,100 +101,121 @@ impl App {
         Vec3::new(x, z, y)
     }
 
-    //fn update_ui(&mut self) {
-    //    self.cache.queue(
-    //        Section::default()
-    //            .add_text(
-    //                Text::new(&self.ui.title_text)
-    //                    .with_color([1.0, 1.0, 1.0, 1.0])
-    //                    .with_scale(46.0),
-    //            )
-    //            .add_text(Text::new("\n"))
-    //            .add_text(
-    //                Text::new(&format!("distance: {}, center: {}", self.radius, self.eye))
-    //                    .with_color([0.8, 0.8, 0.8, 1.0])
-    //                    .with_scale(32.0),
-    //            ),
-    //    );
-
-    //    let mesh = self.cache.get_updated();
-
-    //    let scene = self.r
-
-    //    if let Some(mesh) = mesh {
-    //        self.text_title.set_mesh(mesh);
-    //    }
-    //}
-
-    fn update_camera(&mut self) {
-        if let Some(scene) = self.scene.as_mut() {
-            scene.set_camera(proj, view)
+    fn update_title_text(&mut self, r: &mut Renderling, text: &str) {
+        self.title_text_cache.queue(
+            Section::default().add_text(
+                Text::new(text)
+                    .with_color([1.0, 1.0, 1.0, 1.0])
+                    .with_scale(46.0),
+            ),
+        );
+        let (may_mesh, may_texture) = self.title_text_cache.get_updated();
+        let objects = r
+            .graph
+            .get_resource_mut::<UiDrawObjects>()
+            .unwrap()
+            .unwrap();
+        let title_text = objects.get_mut(0).unwrap();
+        if let Some(mesh) = may_mesh {
+            title_text.set_vertices(mesh);
         }
-        self.forward_camera.set_view(Mat4::look_at_rh(
-            Self::camera_position(self.radius, self.phi, self.theta),
-            self.eye,
-            Vec3::Y,
-        ));
+        if let Some(texture) = may_texture {
+            title_text.set_texture(&texture);
+        }
     }
 
-    fn update(&mut self) {
-        self.animate();
-        self.update_camera();
-        self.update_ui();
+    fn update_camera_text(&mut self, r: &mut Renderling) {
+        self.camera_text_cache.queue(
+            Section::default().add_text(
+                Text::new(&format!(
+                    "radius: {}\nlooking at: {}\ntheta: {}\nphi: {}",
+                    self.radius, self.eye, self.theta, self.phi
+                ))
+                .with_color([0.8, 0.8, 0.8, 1.0])
+                .with_scale(32.0),
+            ),
+        );
+        let (may_mesh, may_texture) = self.camera_text_cache.get_updated();
+        let objects = r
+            .graph
+            .get_resource_mut::<UiDrawObjects>()
+            .unwrap()
+            .unwrap();
+        let camera_text = objects.get_mut(1).unwrap();
+        if let Some(mesh) = may_mesh {
+            camera_text.set_vertices(mesh);
+        }
+        if let Some(texture) = may_texture {
+            camera_text.set_texture(&texture);
+        }
     }
 
-    fn load(&mut self, file: impl AsRef<std::path::Path>) {
-        self.loader.unload();
+    fn update_camera_view(&self, r: &mut Renderling) {
+        let (w, h) = r.get_screen_size();
+        let scene = r.graph.get_resource_mut::<Scene>().unwrap().unwrap();
+        scene.set_camera(
+            Mat4::perspective_infinite_rh(std::f32::consts::FRAC_PI_4, w as f32 / h as f32, 0.01),
+            Mat4::look_at_rh(
+                Self::camera_position(self.radius, self.phi, self.theta),
+                self.eye,
+                Vec3::Y,
+            ),
+        );
+    }
 
+    fn load(&mut self, r: &mut Renderling, file: impl AsRef<std::path::Path>) {
+        log::info!("loading '{}'", file.as_ref().display());
         self.phi = 0.0;
         self.theta = std::f32::consts::FRAC_PI_4;
         self.left_mb_down = false;
         self.last_cursor_position = None;
 
-        let (document, buffers, images) = gltf::import(&file).unwrap();
-        self.loader
-            .load(&mut self.renderling_forward, &document, &buffers, &images)
-            .unwrap();
-
-        if self.loader.lights().count() == 0 {
-            let name = get_name(file);
-            self.ui.title_text = format!("{name} (unlit)");
-        }
-
+        let mut builder = r.new_scene();
+        let loader = builder.gltf_load(&file).unwrap();
+        self.entities = builder.entities.clone();
         // find the bounding box of the model so we can display it correctly
         let mut min = Vec3::splat(f32::INFINITY);
         let mut max = Vec3::splat(f32::NEG_INFINITY);
-        for node in document.nodes() {
-            if let Some(mesh) = node.mesh() {
-                for primitive in mesh.primitives() {
-                    let aabb = primitive.bounding_box();
-                    min.x = min.x.min(aabb.min[0]);
-                    min.y = min.y.min(aabb.min[1]);
-                    min.z = min.z.min(aabb.min[2]);
-                    max.x = max.x.max(aabb.max[0]);
-                    max.y = max.y.max(aabb.max[1]);
-                    max.z = max.z.max(aabb.max[2]);
-                }
-            }
+        for primitive in loader.meshes.iter().flat_map(|meshes| meshes.iter()) {
+            min = min.min(primitive.bounding_box.min);
+            max = max.max(primitive.bounding_box.max);
         }
 
         let halfway_point = min + ((max - min).normalize() * ((max - min).length() / 2.0));
         let length = min.distance(max);
         let radius = length * 1.25;
 
+        if loader.lights.len() == 0 {
+            let _ = builder
+                .new_directional_light()
+                .with_diffuse_color(Vec4::ONE)
+                .with_direction(Vec3::new(0.0, -1.0, 1.0))
+                .build();
+        }
+
+        let name = get_name(file);
+        self.update_title_text(r, &format!("{name}"));
+
         self.radius = radius;
         self.eye = halfway_point;
         self.last_frame_instant = Instant::now();
         self.timestamp = 0.0;
-        self.update();
+        self.loader = Some(loader);
+
+        r.graph.add_resource(builder.build().unwrap());
+
+        self.update_camera_view(r);
+        self.update_camera_text(r);
+        self.animate(r);
     }
 
-    fn zoom(&mut self, delta: f32) {
+    fn zoom(&mut self, r: &mut Renderling, delta: f32) {
         self.radius = (self.radius - (delta * RADIUS_SCROLL_DAMPENING)).max(0.0);
-        self.update();
+        self.update_camera_view(r);
+        self.update_camera_text(r);
     }
 
-    fn pan(&mut self, position: winit::dpi::PhysicalPosition<f64>) {
+    fn pan(&mut self, r: &mut Renderling, position: winit::dpi::PhysicalPosition<f64>) {
         if self.left_mb_down {
             if let Some(last_cursor_position) = self.last_cursor_position.as_ref() {
                 let dx = position.x - last_cursor_position.x;
@@ -208,9 +226,11 @@ impl App {
                 let next_theta = self.theta - dy as f32 * DX_DY_DRAG_DAMPENING;
                 self.theta = next_theta.max(0.0001).min(std::f32::consts::PI);
 
-                self.update();
+                self.update_camera_text(r);
             }
             self.last_cursor_position = Some(position);
+            self.update_camera_view(r);
+            self.update_camera_text(r);
         }
     }
 
@@ -229,7 +249,7 @@ impl App {
 
     fn key_input(
         &mut self,
-        _: &mut WgpuState,
+        r: &mut Renderling,
         KeyboardInput {
             state,
             virtual_keycode,
@@ -242,57 +262,53 @@ impl App {
         match virtual_keycode {
             Some(winit::event::VirtualKeyCode::Space) => {
                 // clear all objects, cameras and lights
-                self.loader.unload();
-                self.ui.title_text = "awaiting drag and dropped `.gltf` or `.glb` file".to_string();
-                self.update();
+                let scene = r.new_scene().build().unwrap();
+                r.graph.add_resource(scene);
+                self.loader = None;
+                self.update_title_text(r, "awaiting drag and dropped `.gltf` or `.glb` file");
             }
             _ => {}
         };
     }
 
-    fn resize(&mut self, gpu: &mut WgpuState, width: u32, height: u32) {
-        gpu.resize((width, height));
-        self.ui_camera.set_projection(Mat4::orthographic_rh(
-            0.0,
-            width as f32,
-            height as f32,
-            0.0,
-            1.0,
-            -1.0,
-        ));
-        self.forward_camera
-            .set_projection(Mat4::perspective_infinite_rh(
-                std::f32::consts::FRAC_PI_4,
-                width as f32 / height as f32,
-                0.01,
-            ));
+    fn resize(&mut self, r: &mut Renderling, width: u32, height: u32) {
+        r.resize(width, height);
+        r.graph
+            .visit(
+                |(mut ui_scene, mut scene): (Write<UiScene>, Write<Scene>)| {
+                    ui_scene.set_canvas_size(width, height);
+                    scene.set_camera_projection(Mat4::perspective_infinite_rh(
+                        std::f32::consts::FRAC_PI_4,
+                        width as f32 / height as f32,
+                        0.01,
+                    ));
+                },
+            )
+            .unwrap();
     }
 
-    fn animate(&mut self) {
+    fn animate(&mut self, r: &mut Renderling) {
         let now = Instant::now();
         let dt = now - self.last_frame_instant;
         self.last_frame_instant = now;
         self.timestamp += dt.as_secs_f32();
 
-        for animation in self.loader.animations() {
-            let time = self.timestamp % animation.length_in_seconds();
-            animation.set_time(&self.loader, time).unwrap();
+        if let Some(loader) = self.loader.as_ref() {
+            for animation in loader.animations.iter() {
+                let time = self.timestamp % animation.length_in_seconds();
+                for (id, tfrm) in animation.get_properties_at_time(loader, time).unwrap() {
+                    let mut ent = self.entities.get_mut(id.index()).unwrap();
+                    ent.position = tfrm.translate.extend(0.0);
+                    ent.scale = tfrm.scale.extend(0.0);
+                    ent.rotation = tfrm.rotate;
+                    r.graph
+                        .visit(|mut scene: Write<Scene>| {
+                            scene.update_entity(*ent).unwrap();
+                        })
+                        .unwrap();
+                }
+            }
         }
-    }
-
-    fn render(&mut self, gpu: &mut WgpuState) {
-        let (frame, depth) = gpu.next_frame_cleared().unwrap();
-
-        self.renderling_forward.update().unwrap();
-        self.renderling_forward.render(&frame, &depth).unwrap();
-
-        // just clear the depth texture, because we want to render the 2d UI over the 3d
-        // background
-        gpu.clear(None, Some(&depth));
-        self.renderling_ui.update().unwrap();
-        self.renderling_ui.render(&frame, &depth).unwrap();
-
-        gpu.present().unwrap();
     }
 }
 
@@ -306,14 +322,14 @@ fn get_name(path: impl AsRef<std::path::Path>) -> String {
 pub fn demo(
     r: &mut Renderling,
     start: Option<impl AsRef<str>>,
-) -> impl FnMut(&mut WgpuState, Option<&winit::event::WindowEvent>) {
+) -> impl FnMut(&mut Renderling, Option<&winit::event::WindowEvent>) {
     let mut app = App::new(r);
 
     if let Some(file) = start {
-        app.load(file.as_ref());
+        app.load(r, file.as_ref());
     }
 
-    move |gpu, ev: Option<&winit::event::WindowEvent>| {
+    move |r, ev: Option<&winit::event::WindowEvent>| {
         if let Some(ev) = ev {
             match ev {
                 winit::event::WindowEvent::MouseWheel { delta, .. } => {
@@ -322,30 +338,29 @@ pub fn demo(
                         winit::event::MouseScrollDelta::PixelDelta(pos) => pos.y as f32,
                     };
 
-                    app.zoom(delta);
+                    app.zoom(r, delta);
                 }
                 winit::event::WindowEvent::CursorMoved { position, .. } => {
-                    app.pan(*position);
+                    app.pan(r, *position);
                 }
                 winit::event::WindowEvent::MouseInput { state, button, .. } => {
                     app.mouse_button(*state, *button);
                 }
                 winit::event::WindowEvent::KeyboardInput { input, .. } => {
-                    app.key_input(gpu, *input);
+                    app.key_input(r, *input);
                 }
                 winit::event::WindowEvent::Resized(size) => {
-                    app.resize(gpu, size.width, size.height);
+                    app.resize(r, size.width, size.height);
                 }
                 winit::event::WindowEvent::DroppedFile(path) => {
-                    app.ui.title_text = get_name(&path);
-                    app.update_ui();
-                    app.load(path);
+                    app.load(r, path);
                 }
                 _ => {}
             }
         } else {
-            app.update();
-            app.render(gpu);
+            app.update_camera_view(r);
+            app.animate(r);
+            r.render().unwrap();
         }
     }
 }

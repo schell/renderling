@@ -32,35 +32,41 @@ By default it uses a single uber-shader with a configurable lighting model per m
 
 This means each model may be shaded separately, with a different lighting style.
 
-- [x] Built-in support for common lighting/material workflows
-  - [x] physically based shading
-  - [x] blinn-phong shading
-  - [x] user interface "colored text" shading (uses opacity glyphs in an atlas)
-  - [x] unlit
-- [ ] skybox
-- [ ] image based lighting
-  - [ ] diffuse
-  - [ ] specular
-- [ ] msaa
-- [ ] high definition rendering
-- [ ] bloom
-- [ ] ssao
-- [ ] depth of field
-- [ ] gltf support
-  - [ ] scenes
-  - [x] nodes
-  - [x] cameras
-  - [x] meshes
-  - [x] materials
-    - [x] pbr metallic roughness (factors + textures)
-    - [x] normal mapping
-    - [ ] occlusion textures
-    - [ ] pbr specular glosiness
-    - [ ] parallax mapping
-  - [x] textures, images, samplers
-  - [ ] animations
-  - [ ] morph targets
-  - [ ] skins
+- 3d
+  - [x] Built-in support for common lighting/material workflows
+    - [x] physically based shading
+    - [x] blinn-phong shading
+    - [x] unlit
+  - [ ] skybox
+  - [ ] image based lighting
+    - [ ] diffuse
+    - [ ] specular
+  - [ ] msaa
+  - [ ] high definition rendering
+  - [ ] bloom
+  - [ ] ssao
+  - [ ] depth of field
+  - [ ] gltf support
+    - [ ] scenes
+    - [x] nodes
+    - [x] cameras
+    - [x] meshes
+    - [x] materials
+      - [x] pbr metallic roughness (factors + textures)
+      - [x] normal mapping
+      - [ ] occlusion textures
+      - [ ] pbr specular glosiness
+      - [ ] parallax mapping
+    - [x] textures, images, samplers
+    - [ ] animations
+    - [ ] morph targets
+    - [ ] skins
+- 2d
+  - [x] colored, textured vertices
+  - [x] text rendering mode
+  - [ ] gpu-driven 2d
+    - [ ] SDF-based primitives
+      - [ ] text
 
 ## Definition
 **renderling** noun

@@ -243,8 +243,9 @@ pub struct Scene {
     pub lights: GpuArray<GpuLight>,
     pub materials: GpuArray<GpuMaterial>,
     pub textures: GpuArray<GpuTexture>,
-    pub constants: wgpu::Buffer,
     pub indirect_draws: GpuArray<DrawIndirect>,
+    pub constants_buffer: wgpu::Buffer,
+    constants: GpuConstants,
     constants_update: Option<GpuConstants>,
     cull_bindgroup: wgpu::BindGroup,
     render_buffers_bindgroup: wgpu::BindGroup,
@@ -311,15 +312,16 @@ impl Scene {
         let entities = GpuArray::new(&device, &entities, entities.len(), scene_render_usage());
         let lights = GpuArray::new(&device, &lights, lights.len(), scene_render_usage());
         let materials = GpuArray::new(&device, &materials, materials.len(), scene_render_usage());
-        let constants = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        let constants = GpuConstants {
+            camera_projection: projection,
+            camera_pos: view.inverse().transform_point3(Vec3::ZERO).extend(0.0),
+            camera_view: view,
+            atlas_size: atlas.size,
+            padding: Vec2::ZERO,
+        };
+        let constants_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Scene::new constants"),
-            contents: bytemuck::cast_slice(&[GpuConstants {
-                camera_projection: projection,
-                camera_pos: view.inverse().transform_point3(Vec3::ZERO).extend(0.0),
-                camera_view: view,
-                atlas_size: atlas.size,
-                padding: Vec2::ZERO,
-            }]),
+            contents: bytemuck::cast_slice(&[constants]),
             usage: wgpu::BufferUsages::UNIFORM
                 | wgpu::BufferUsages::COPY_DST
                 | wgpu::BufferUsages::COPY_SRC,
@@ -340,7 +342,7 @@ impl Scene {
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: constants.as_entire_binding(),
+                    resource: constants_buffer.as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
@@ -389,6 +391,7 @@ impl Scene {
             entities,
             constants_update: None,
             constants,
+            constants_buffer,
             indirect_draws,
             cull_bindgroup,
             atlas,
@@ -403,7 +406,8 @@ impl Scene {
     /// This uploads changed data to the GPU and submits the queue.
     pub fn update(&mut self, queue: &wgpu::Queue) {
         let Self {
-            constants: _,
+            constants_buffer: _,
+            constants,
             render_buffers_bindgroup: _,
             render_atlas_bindgroup: _,
             indirect_draws: _,
@@ -422,7 +426,8 @@ impl Scene {
         textures.update(queue);
         lights.update(queue);
         if let Some(camera) = camera_update.take() {
-            queue.write_buffer(&self.constants, 0, bytemuck::cast_slice(&[camera]));
+            *constants = camera;
+            queue.write_buffer(&self.constants_buffer, 0, bytemuck::cast_slice(&[camera]));
         }
         queue.submit(std::iter::empty());
     }
@@ -432,13 +437,35 @@ impl Scene {
     /// The data is not uploaded to the cpu until [`Scene::update`] has been
     /// called.
     pub fn set_camera(&mut self, proj: Mat4, view: Mat4) {
-        self.constants_update = Some(GpuConstants {
+        let constants = GpuConstants {
             camera_projection: proj,
             camera_pos: view.inverse().transform_point3(Vec3::ZERO).extend(0.0),
             camera_view: view,
             atlas_size: self.atlas.size,
             padding: Vec2::ZERO,
-        });
+        };
+        if self.constants != constants {
+            self.constants = constants;
+            self.constants_update = Some(constants);
+        }
+    }
+
+    /// Set the camera projection.
+    ///
+    /// The data is not uploaded to the cpu until [`Scene::update`] has been
+    /// called.
+    pub fn set_camera_projection(&mut self, proj: Mat4) {
+        let view = self.constants.camera_view;
+        self.set_camera(proj, view);
+    }
+
+    /// Set the camera view.
+    ///
+    /// The data is not uploaded to the cpu until [`Scene::update`] has been
+    /// called.
+    pub fn set_camera_view(&mut self, view: Mat4) {
+        let proj = self.constants.camera_projection;
+        self.set_camera(proj, view);
     }
 
     /// Update/set an entity.
@@ -620,9 +647,9 @@ pub fn create_scene_compute_cull_pipeline(device: &wgpu::Device) -> wgpu::Comput
     pipeline
 }
 
-pub struct SceneRenderPipeline(wgpu::RenderPipeline);
+pub struct SceneRenderPipeline(pub wgpu::RenderPipeline);
 
-pub struct SceneComputeCullPipeline(wgpu::ComputePipeline);
+pub struct SceneComputeCullPipeline(pub wgpu::ComputePipeline);
 
 pub fn scene_update((queue, mut scene): (Read<Queue>, Write<Scene>)) -> Result<(), SceneError> {
     scene.update(&queue);
@@ -652,7 +679,7 @@ pub fn scene_cull(
     Ok(())
 }
 
-fn scene_render(
+pub fn scene_render(
     (device, queue, scene, pipeline, frame, depth): (
         Read<Device>,
         Read<Queue>,

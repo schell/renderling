@@ -206,11 +206,6 @@ impl<T: Any + Clone + Copy + bytemuck::Pod + bytemuck::Zeroable> GpuArray<T> {
     /// been submitted.
     pub fn update(&self, queue: &wgpu::Queue) {
         while let Ok((starting_index, items)) = self.updates.1.try_recv() {
-            log::trace!(
-                "{} updating {} items",
-                std::any::type_name::<Self>(),
-                items.len()
-            );
             queue.write_buffer(
                 &self.buffer.buffer,
                 (starting_index * std::mem::size_of::<T>()) as u64,

@@ -2,6 +2,10 @@
 
 Just pro-cons on tech choices and little things I don't want to forget whil implementing `renderling`.
 
+# gltf
+
+* why are there repeats of nodes in document.nodes?
+
 # rust-gpu
 
 ## pros

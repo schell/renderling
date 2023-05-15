@@ -257,11 +257,6 @@ impl GlyphCache {
                 |rect, tex_data| {
                     let offset = [rect.min[0] as u16, rect.min[1] as u16];
                     let size = [rect.width() as u16, rect.height() as u16];
-                    log::trace!(
-                        "updating texture atlas (offset: {:?}) (size:{:?})",
-                        offset,
-                        size
-                    );
                     cache.update(&self.queue, offset, size, tex_data)
                 },
                 to_vertex,
@@ -299,7 +294,6 @@ impl GlyphCache {
 
         match brush_action.unwrap() {
             BrushAction::Draw(all_vertices) => {
-                log::trace!("updating text mesh");
                 may_mesh = Some(
                     all_vertices
                         .into_iter()

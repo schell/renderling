@@ -1,6 +1,6 @@
 //! Main entry point for the gltf viewer.
 
-use renderling::Renderling;
+use renderling::{math::Vec4, Renderling};
 
 //mod demo;
 mod gltf;
@@ -8,7 +8,7 @@ mod gltf;
 fn run() -> Result<(), anyhow::Error> {
     env_logger::Builder::default()
         .filter_module("example", log::LevelFilter::Trace)
-        .filter_module("renderling", log::LevelFilter::Debug)
+        .filter_module("renderling", log::LevelFilter::Trace)
         //.filter_module("naga", log::LevelFilter::Warn)
         .filter_module("wgpu", log::LevelFilter::Warn)
         .init();
@@ -24,7 +24,9 @@ fn run() -> Result<(), anyhow::Error> {
     let window = window_builder.build(&event_loop)?;
 
     // Set up a new renderling
-    let mut r = Renderling::try_from_window(&window).unwrap();
+    let mut r = Renderling::try_from_window(&window)
+        .unwrap()
+        .with_background_color(renderling::math::Vec3::splat(0x33 as f32 / 255.0).extend(1.0));
     let model = std::env::args().skip(1).next();
     let mut run_current_frame: Box<dyn FnMut(&mut Renderling, Option<&winit::event::WindowEvent>)> =
         Box::new(gltf::demo(&mut r, model));
