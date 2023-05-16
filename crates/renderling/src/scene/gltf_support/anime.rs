@@ -1,11 +1,9 @@
 //! Animation helpers for gltf.
 
 use glam::{Quat, Vec3};
-use rustc_hash::FxHashMap;
 use snafu::prelude::*;
-use splines::Interpolate;
 
-use crate::{Id, GpuEntity, GltfLoader};
+use crate::{GltfLoader, GpuEntity, Id};
 
 #[derive(Debug, Snafu)]
 pub enum InterpolationError {
@@ -52,6 +50,12 @@ impl From<gltf::animation::Interpolation> for GltfInterpolation {
             gltf::animation::Interpolation::Step => GltfInterpolation::Step,
             gltf::animation::Interpolation::CubicSpline => GltfInterpolation::CubicSpline,
         }
+    }
+}
+
+impl GltfInterpolation {
+    fn is_cubic_spline(&self) -> bool {
+        matches!(self, GltfInterpolation::CubicSpline)
     }
 }
 
@@ -264,7 +268,26 @@ impl Tween {
                     index: next_keyframe_ndx,
                 })?;
 
+        let delta_time = next_time - prev_time;
         let amount = (time - prev_time) / (next_time - prev_time);
+
+        fn cubic_spline<T>(
+            previous_point: T,
+            previous_tangent: T,
+            next_point: T,
+            next_tangent: T,
+            t: f32,
+        ) -> T
+        where
+            T: std::ops::Mul<f32, Output = T> + std::ops::Add<Output = T>,
+        {
+            let t2 = t * t;
+            let t3 = t2 * t;
+            previous_point * (2.0 * t3 - 3.0 * t2 + 1.0)
+                + previous_tangent * (t3 - 2.0 * t2 + t)
+                + next_point * (-2.0 * t3 + 3.0 * t2)
+                + next_tangent * (t3 - t2)
+        }
 
         Ok(Some(match from {
             TweenProperty::Translation(from) => {
@@ -273,19 +296,43 @@ impl Tween {
                     .context(MismatchedPropertiesSnafu)?;
                 let to_in = *to_in.as_translation().context(MismatchedPropertiesSnafu)?;
                 let to = *to.as_translation().context(MismatchedPropertiesSnafu)?;
-                TweenProperty::Translation(Vec3::cubic_bezier(amount, from, from_out, to_in, to))
+                let previous_tangent = delta_time * from_out;
+                let next_tangent = delta_time * to_in;
+                TweenProperty::Translation(cubic_spline(
+                    from,
+                    previous_tangent,
+                    to,
+                    next_tangent,
+                    amount,
+                ))
             }
             TweenProperty::Rotation(from) => {
                 let from_out = *from_out.as_rotation().context(MismatchedPropertiesSnafu)?;
                 let to_in = *to_in.as_rotation().context(MismatchedPropertiesSnafu)?;
                 let to = *to.as_rotation().context(MismatchedPropertiesSnafu)?;
-                TweenProperty::Rotation(Quat::cubic_bezier(amount, from, from_out, to_in, to))
+                let previous_tangent = from_out * delta_time;
+                let next_tangent = to_in * delta_time;
+                TweenProperty::Rotation(cubic_spline(
+                    from,
+                    previous_tangent,
+                    to,
+                    next_tangent,
+                    amount,
+                ))
             }
             TweenProperty::Scale(from) => {
                 let from_out = *from_out.as_scale().context(MismatchedPropertiesSnafu)?;
                 let to_in = *to_in.as_scale().context(MismatchedPropertiesSnafu)?;
                 let to = *to.as_scale().context(MismatchedPropertiesSnafu)?;
-                TweenProperty::Scale(Vec3::cubic_bezier(amount, from, from_out, to_in, to))
+                let previous_tangent = from_out * delta_time;
+                let next_tangent = to_in * delta_time;
+                TweenProperty::Scale(cubic_spline(
+                    from,
+                    previous_tangent,
+                    to,
+                    next_tangent,
+                    amount,
+                ))
             }
         }))
     }
@@ -350,18 +397,55 @@ impl Tween {
     pub fn get_first_keyframe_property(&self) -> Option<TweenProperty> {
         match &self.properties {
             TweenProperties::Translations(ts) => {
-                ts.first().copied().map(TweenProperty::Translation)
+                if self.interpolation.is_cubic_spline() {
+                    ts.iter().nth(1).copied().map(TweenProperty::Translation)
+                } else {
+                    ts.first().copied().map(TweenProperty::Translation)
+                }
             }
-            TweenProperties::Rotations(rs) => rs.first().copied().map(TweenProperty::Rotation),
-            TweenProperties::Scales(ss) => ss.first().copied().map(TweenProperty::Scale),
+            TweenProperties::Rotations(rs) => {
+                if self.interpolation.is_cubic_spline() {
+                    rs.iter().nth(1).copied().map(TweenProperty::Rotation)
+                } else {
+                    rs.first().copied().map(TweenProperty::Rotation)
+                }
+            }
+            TweenProperties::Scales(ss) => {
+                if self.interpolation.is_cubic_spline() {
+                    ss.iter().nth(1).copied().map(TweenProperty::Scale)
+                } else {
+                    ss.first().copied().map(TweenProperty::Scale)
+                }
+            }
         }
     }
 
     pub fn get_last_keyframe_property(&self) -> Option<TweenProperty> {
         match &self.properties {
-            TweenProperties::Translations(ts) => ts.last().copied().map(TweenProperty::Translation),
-            TweenProperties::Rotations(rs) => rs.last().copied().map(TweenProperty::Rotation),
-            TweenProperties::Scales(ss) => ss.last().copied().map(TweenProperty::Scale),
+            TweenProperties::Translations(ts) => {
+                if self.interpolation.is_cubic_spline() {
+                    let second_last = ts.len() - 2;
+                    ts.get(second_last).copied().map(TweenProperty::Translation)
+                } else {
+                    ts.last().copied().map(TweenProperty::Translation)
+                }
+            }
+            TweenProperties::Rotations(rs) => {
+                if self.interpolation.is_cubic_spline() {
+                    let second_last = rs.len() - 2;
+                    rs.get(second_last).copied().map(TweenProperty::Rotation)
+                } else {
+                    rs.last().copied().map(TweenProperty::Rotation)
+                }
+            }
+            TweenProperties::Scales(ss) => {
+                if self.interpolation.is_cubic_spline() {
+                    let second_last = ss.len() - 2;
+                    ss.get(second_last).copied().map(TweenProperty::Scale)
+                } else {
+                    ss.last().copied().map(TweenProperty::Scale)
+                }
+            }
         }
     }
 }
@@ -374,19 +458,6 @@ pub enum AnimationError {
     MissingNode { index: usize },
     #[snafu(display("node is not an entity (might be a light or camera)"))]
     ExpectedEntity,
-}
-
-#[derive(Debug)]
-pub struct TweenTransform {
-    pub translate: Vec3,
-    pub scale: Vec3,
-    pub rotate: Quat
-}
-
-impl Default for TweenTransform {
-    fn default() -> Self {
-        Self { translate: Vec3::ZERO, scale: Vec3::ONE, rotate: Quat::IDENTITY }
-    }
 }
 
 #[derive(Default, Debug)]
@@ -407,8 +478,8 @@ impl GltfAnimation {
         &self,
         loader: &GltfLoader,
         t: f32,
-    ) -> Result<Vec<(Id<GpuEntity>, TweenTransform)>, AnimationError> {
-        let mut tweens = FxHashMap::<Id<GpuEntity>, TweenTransform>::default();
+    ) -> Result<Vec<(Id<GpuEntity>, TweenProperty)>, AnimationError> {
+        let mut tweens = vec![];
         for tween in self.tweens.iter() {
             let prop = if let Some(prop) = tween.interpolate(t).context(InterpolationSnafu)? {
                 prop
@@ -425,12 +496,7 @@ impl GltfAnimation {
                 })?
                 .as_entity()
                 .context(ExpectedEntitySnafu)?;
-            let entry = tweens.entry(id).or_default();
-            match prop {
-                TweenProperty::Translation(t) => entry.translate += t,
-                TweenProperty::Rotation(r) => entry.rotate *= r,
-                TweenProperty::Scale(s) => entry.scale *= s,
-            }
+            tweens.push((id, prop));
         }
 
         Ok(tweens.into_iter().collect())

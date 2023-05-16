@@ -1,8 +1,8 @@
 //! Arrays of elements living on the GPU as an array.
 
-use std::{marker::PhantomData, any::Any};
+use std::{any::Any, marker::PhantomData};
 
-use async_channel::{Sender, Receiver};
+use async_channel::{Receiver, Sender};
 use snafu::prelude::*;
 use wgpu::util::DeviceExt;
 
@@ -22,7 +22,7 @@ pub enum BufferError {
     OutOfBounds { index: usize, length: usize },
 
     #[snafu(display("Read error"))]
-    Read
+    Read,
 }
 
 /// Read a vector from the GPU corresponding to the given range.

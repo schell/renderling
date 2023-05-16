@@ -18,9 +18,7 @@ fn main() {
         .unwrap()
         .with_background_color(Vec3::splat(0.0).extend(1.0));
     let (projection, view) = renderling::default_ortho2d(100.0, 100.0);
-    let mut builder = r
-        .new_scene()
-        .with_camera(projection, view);
+    let mut builder = r.new_scene().with_camera(projection, view);
     let size = 1.0;
     let cyan_tri = builder
         .new_entity()

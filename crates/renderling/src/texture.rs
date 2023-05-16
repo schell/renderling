@@ -348,8 +348,9 @@ impl Texture {
 
     /// Read the texture from the GPU.
     ///
-    /// To read the texture you must provide the width, height, the number of color/alpha channels
-    /// and the number of bytes in the underlying subpixel type (usually u8, u16 or f32).
+    /// To read the texture you must provide the width, height, the number of
+    /// color/alpha channels and the number of bytes in the underlying
+    /// subpixel type (usually u8, u16 or f32).
     pub fn read(
         &self,
         device: &wgpu::Device,

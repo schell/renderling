@@ -5,7 +5,7 @@
 //!
 //! To read more about the technique, check out these resources:
 //! * https://stackoverflow.com/questions/59686151/what-is-gpu-driven-rendering
-use glam::{Mat3, Mat4, Quat, UVec2, UVec3, Vec2, Vec3, Vec4, Vec4Swizzles, mat3};
+use glam::{mat3, Mat3, Mat4, Quat, UVec2, UVec3, Vec2, Vec3, Vec4, Vec4Swizzles};
 use spirv_std::{image::Image2d, Sampler};
 
 use crate::{math::Vec3ColorSwizzles, pbr, phong};
@@ -25,7 +25,7 @@ pub struct GpuVertex {
     pub color: Vec4,
     pub uv: Vec4,
     pub normal: Vec4,
-    pub tangent: Vec4
+    pub tangent: Vec4,
 }
 
 impl Default for GpuVertex {
@@ -35,7 +35,7 @@ impl Default for GpuVertex {
             color: Vec4::splat(1.0),
             uv: Vec4::splat(0.0),
             normal: Vec4::Z,
-            tangent: Vec4::Y
+            tangent: Vec4::Y,
         }
     }
 }
@@ -197,7 +197,7 @@ pub struct GpuMaterial {
     pub texture3_tex_coord: u32,
 
     pub lighting_model: LightingModel,
-    pub padding: [u32; 3]
+    pub padding: [u32; 3],
 }
 
 impl Default for GpuMaterial {
@@ -214,7 +214,7 @@ impl Default for GpuMaterial {
             texture2_tex_coord: 0,
             texture3_tex_coord: 0,
             lighting_model: LightingModel::NO_LIGHTING,
-            padding: [0; 3]
+            padding: [0; 3],
         }
     }
 }

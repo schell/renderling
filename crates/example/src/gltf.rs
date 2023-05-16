@@ -6,10 +6,9 @@ use std::time::Instant;
 
 use renderling::{
     math::{Mat4, Vec3, Vec4},
-    FontArc, GltfLoader, GlyphCache, GpuEntity, Id, Renderling, Scene, Section, Text,
-    TweenTransform, UiDrawObjects, UiMode, UiScene, Write,
+    FontArc, GltfLoader, GlyphCache, GpuEntity, Renderling, Scene, Section, Text, TweenProperty,
+    UiDrawObjects, UiMode, UiScene, Write,
 };
-use rustc_hash::FxHashMap;
 use winit::event::KeyboardInput;
 
 const RADIUS_SCROLL_DAMPENING: f32 = 0.001;
@@ -206,7 +205,6 @@ impl App {
 
         self.update_camera_view(r);
         self.update_camera_text(r);
-        self.animate(r);
     }
 
     fn zoom(&mut self, r: &mut Renderling, delta: f32) {
@@ -296,11 +294,23 @@ impl App {
         if let Some(loader) = self.loader.as_ref() {
             for animation in loader.animations.iter() {
                 let time = self.timestamp % animation.length_in_seconds();
-                for (id, tfrm) in animation.get_properties_at_time(loader, time).unwrap() {
+                for (id, tween_prop) in animation.get_properties_at_time(loader, time).unwrap() {
                     let mut ent = self.entities.get_mut(id.index()).unwrap();
-                    ent.position = tfrm.translate.extend(0.0);
-                    ent.scale = tfrm.scale.extend(0.0);
-                    ent.rotation = tfrm.rotate;
+                    match tween_prop {
+                        TweenProperty::Translation(t) => {
+                            ent.position = t.extend(0.0);
+                        }
+                        TweenProperty::Rotation(r) => {
+                            ent.rotation = r;
+                        }
+                        TweenProperty::Scale(s) => {
+                            if s == Vec3::ZERO {
+                                log::trace!("scale is zero at time: {time:?}");
+                                panic!("animation: {animation:#?}");
+                            }
+                            ent.scale = s.extend(0.0);
+                        }
+                    }
                     r.graph
                         .visit(|mut scene: Write<Scene>| {
                             scene.update_entity(*ent).unwrap();

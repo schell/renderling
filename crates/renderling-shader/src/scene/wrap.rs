@@ -37,9 +37,9 @@ impl core::fmt::Display for TextureAddressMode {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.write_str(match self {
             &TextureAddressMode::CLAMP_TO_EDGE => "clamp to edge",
-            &TextureAddressMode::REPEAT =>"repeat",
+            &TextureAddressMode::REPEAT => "repeat",
             &TextureAddressMode::MIRRORED_REPEAT => "mirrored repeat",
-            _ => "unknown"
+            _ => "unknown",
         })
     }
 }
@@ -64,7 +64,7 @@ pub fn wrap(input: f32, mode: TextureAddressMode) -> f32 {
             } else {
                 1.0 - input
             }
-        },
+        }
         TextureAddressMode::MIRRORED_REPEAT => {
             let sign = input.signum();
             let i = input.abs();
@@ -84,7 +84,7 @@ pub fn wrap(input: f32, mode: TextureAddressMode) -> f32 {
                 }
             }
         }
-        _ => clamp(input)
+        _ => clamp(input),
     }
 }
 

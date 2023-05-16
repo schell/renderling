@@ -67,7 +67,7 @@ fn fresnel_schlick(
 }
 
 fn outgoing_radiance(
-    light: &GpuLight,
+    diffuse_color: Vec4,
     albedo: Vec3,
     attenuation: f32,
     v: Vec3,
@@ -77,7 +77,7 @@ fn outgoing_radiance(
     roughness: f32,
 ) -> Vec3 {
     let f0 = Vec3::splat(0.4).lerp(albedo, metalness);
-    let radiance = light.diffuse_color.rgb() * attenuation;
+    let radiance = diffuse_color.rgb() * attenuation;
     let h = (v + l).normalize_or_zero();
     // cook-torrance brdf
     let ndf: f32 = normal_distribution_ggx(n, h, roughness);
@@ -138,7 +138,16 @@ pub fn shade_fragment(
                 }
                 let l = frag_to_light.normalize_or_zero();
                 let attenuation = 1.0 / (distance * distance);
-                lo += outgoing_radiance(&light, albedo, attenuation, v, l, n, metalness, roughness);
+                lo += outgoing_radiance(
+                    light.diffuse_color,
+                    albedo,
+                    attenuation,
+                    v,
+                    l,
+                    n,
+                    metalness,
+                    roughness,
+                );
             }
 
             LightType::SPOT_LIGHT => {
@@ -152,13 +161,31 @@ pub fn shade_fragment(
                 let epsilon: f32 = light.inner_cutoff - light.outer_cutoff;
                 let intensity: f32 = ((theta - light.outer_cutoff) / epsilon).clamp(0.0, 1.0);
                 let attenuation = intensity;
-                lo += outgoing_radiance(&light, albedo, attenuation, v, l, n, metalness, roughness);
+                lo += outgoing_radiance(
+                    light.diffuse_color,
+                    albedo,
+                    attenuation,
+                    v,
+                    l,
+                    n,
+                    metalness,
+                    roughness,
+                );
             }
 
             LightType::DIRECTIONAL_LIGHT => {
                 let l = -light.direction.xyz().normalize_or_zero();
                 let attenuation = 1.0;
-                lo += outgoing_radiance(&light, albedo, attenuation, v, l, n, metalness, roughness);
+                lo += outgoing_radiance(
+                    light.diffuse_color,
+                    albedo,
+                    attenuation,
+                    v,
+                    l,
+                    n,
+                    metalness,
+                    roughness,
+                );
             }
             _ => {}
         }

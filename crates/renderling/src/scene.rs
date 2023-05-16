@@ -10,8 +10,7 @@ use wgpu::util::DeviceExt;
 pub use renderling_shader::scene::*;
 
 use crate::{
-    node::FrameTextureView, Atlas, DepthTexture, Device, GpuArray, Queue, RenderTarget,
-    Renderling,
+    node::FrameTextureView, Atlas, DepthTexture, Device, GpuArray, Queue, RenderTarget, Renderling,
 };
 
 mod entity;
