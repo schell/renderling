@@ -1,7 +1,7 @@
 //! Material builders.
 
 use glam::Vec4;
-use renderling_shader::scene::{GpuMaterial, LightingModel, GpuTexture, Id};
+use renderling_shader::scene::{GpuMaterial, GpuTexture, Id, LightingModel};
 
 use crate::SceneBuilder;
 

@@ -1,7 +1,7 @@
 //! Entity builder.
 
 use glam::{Quat, Vec3};
-use renderling_shader::scene::{GpuEntity, GpuVertex, GpuMaterial, Id};
+use renderling_shader::scene::{GpuEntity, GpuMaterial, GpuVertex, Id};
 
 use crate::SceneBuilder;
 

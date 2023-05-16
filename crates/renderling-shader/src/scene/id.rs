@@ -89,6 +89,10 @@ mod test {
 
     #[test]
     fn id_size() {
-        assert_eq!(std::mem::size_of::<u32>(), std::mem::size_of::<Id<GpuEntity>>(), "id is not u32");
+        assert_eq!(
+            std::mem::size_of::<u32>(),
+            std::mem::size_of::<Id<GpuEntity>>(),
+            "id is not u32"
+        );
     }
 }

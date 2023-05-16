@@ -22,6 +22,9 @@ pub enum GltfLoaderError {
     #[snafu(display("Missing image {}", index))]
     MissingImage { index: usize },
 
+    #[snafu(display("Missing node {}", index))]
+    MissingNode { index: usize },
+
     #[snafu(display("Invalid image"))]
     InvalidImage,
 
@@ -229,7 +232,10 @@ impl GltfLoader {
 
         log::debug!("adding nodes");
         for node in document.nodes() {
-            loader.load_node(node, builder)?;
+            // We don't call GltfLoader::load_node here because that function will
+            // also load any children of this node, which will lead to doubles when
+            // we encounter those children in this loop.
+            let _ = loader.node_at(node.index(), builder, &document)?;
         }
 
         log::debug!("adding animations");
@@ -602,10 +608,28 @@ impl GltfLoader {
         Ok(())
     }
 
+    fn node_at(
+        &mut self,
+        index: usize,
+        builder: &mut SceneBuilder,
+        document: &gltf::Document,
+    ) -> Result<GltfNode, GltfLoaderError> {
+        if let Some(node) = self.nodes.get(index) {
+            Ok(node.clone())
+        } else {
+            let node = document
+                .nodes()
+                .find(|n| n.index() == index)
+                .context(MissingNodeSnafu { index })?;
+            self.load_node(node, builder, document)
+        }
+    }
+
     fn load_node(
         &mut self,
         node: gltf::Node<'_>,
         builder: &mut SceneBuilder,
+        document: &gltf::Document,
     ) -> Result<GltfNode, GltfLoaderError> {
         log::trace!(
             "loading node {} {:?}",
@@ -737,6 +761,7 @@ impl GltfLoader {
             GltfNode::Light(light.index())
         } else {
             // this node is just a parent/container of other nodes
+            log::trace!("  node is just a container (or empty)");
             let entity = builder
                 .new_entity()
                 .with_position(position)
@@ -746,31 +771,30 @@ impl GltfLoader {
             GltfNode::Container(entity.id)
         };
 
-        let may_parent_id = match &gltf_node {
-            GltfNode::Camera(_) => None,
-            GltfNode::Light(_) => None,
-            GltfNode::Mesh(parent, _) => Some(parent),
-            GltfNode::Container(parent) => Some(parent),
-        };
-
-        if let Some(parent) = may_parent_id {
-            for child in node.children() {
-                let child_node = self.load_node(child, builder)?;
-                if let Some(child_id) = child_node.as_entity() {
-                    let child_entity = builder
-                        .entities
-                        .get_mut(child_id.index())
-                        .context(MissingEntitySnafu { id: child_id })?;
-                    child_entity.parent = *parent;
-                }
-            }
-        }
-
+        // Insert this node before we traverse into its children.
         let _ = self.nodes.insert(
             node.index(),
             node.name().map(String::from),
             gltf_node.clone(),
         );
+
+        for child in node.children() {
+            let child_node = self.node_at(child.index(), builder, document)?;
+            log::trace!("    with child node {} {:?}", child.index(), child.name());
+            let ids = child_node.as_entity().and_then(|child| {
+                let parent = gltf_node.as_entity()?;
+                Some((child, parent))
+            });
+            if let Some((child_id, parent_id)) = ids {
+                let child_entity = builder
+                    .entities
+                    .get_mut(child_id.index())
+                    .context(MissingEntitySnafu { id: child_id })?;
+                child_entity.parent = parent_id;
+            } else {
+                log::trace!("    but either the child or itself is not an entity");
+            }
+        }
 
         Ok(gltf_node)
     }
@@ -816,12 +840,16 @@ impl GltfLoader {
                 interpolation,
                 target_node_index: {
                     let index = channel.target().node().index();
-                    log::trace!("    of node {index}");
+                    let name = channel.target().node().name();
+                    log::trace!("    of node {index} {name:?}");
                     index
-                }
+                },
             };
             r_animation.tweens.push(tween);
         }
+
+        let total_time = r_animation.length_in_seconds();
+        log::trace!("  taking {total_time} seconds in total");
 
         self.animations.insert(
             animation.index(),
@@ -1132,11 +1160,19 @@ mod test {
             let t = i as f32 / num as f32;
             let transforms = anime.get_properties_at_time(&loader, t).unwrap();
             let scene = r.graph.get_resource_mut::<crate::Scene>().unwrap().unwrap();
-            for (id, transform) in transforms.into_iter() {
+            for (id, tween_prop) in transforms.into_iter() {
                 let entity = entities.get_mut(id.index()).unwrap();
-                entity.position += transform.translate.extend(0.0);
-                entity.scale *= transform.scale.extend(1.0);
-                entity.rotation *= transform.rotate;
+                match tween_prop {
+                    crate::TweenProperty::Translation(t) => {
+                        entity.position = t.extend(0.0);
+                    }
+                    crate::TweenProperty::Rotation(r) => {
+                        entity.rotation = r;
+                    }
+                    crate::TweenProperty::Scale(s) => {
+                        entity.scale = s.extend(0.0);
+                    }
+                }
                 scene.update_entity(*entity).unwrap();
             }
             drop(scene);

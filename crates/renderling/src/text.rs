@@ -143,8 +143,7 @@ impl DerefMut for GlyphCache {
     }
 }
 
-impl GlyphCache {
-}
+impl GlyphCache {}
 
 #[inline]
 fn to_vertex(

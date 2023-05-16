@@ -1,7 +1,8 @@
 //! Camera projections and utilities.
 use glam::{Mat4, Vec3};
 
-/// Returns the projection and view matrices for a camera with default perspective.
+/// Returns the projection and view matrices for a camera with default
+/// perspective.
 pub fn default_perspective(width: f32, height: f32) -> (Mat4, Mat4) {
     let projection = perspective(width, height);
     let eye = Vec3::new(0.0, 12.0, 20.0);

@@ -1,8 +1,8 @@
 //! Main entry point for the gltf viewer.
 
-use renderling::{math::Vec4, Renderling};
+use renderling::Renderling;
 
-//mod demo;
+// mod demo;
 mod gltf;
 
 fn run() -> Result<(), anyhow::Error> {

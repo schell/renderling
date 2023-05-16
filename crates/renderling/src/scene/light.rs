@@ -1,7 +1,7 @@
 //! Light builders.
 
-use glam::{Vec4, Vec3};
-use renderling_shader::scene::{GpuLight, LightType, Id};
+use glam::{Vec3, Vec4};
+use renderling_shader::scene::{GpuLight, Id, LightType};
 
 #[cfg(feature = "gltf")]
 pub fn from_gltf_light_kind(kind: gltf::khr_lights_punctual::Kind) -> LightType {
@@ -29,7 +29,7 @@ impl<'a> GpuSpotLightBuilder<'a> {
         let white = Vec4::splat(1.0);
         Self {
             inner: &mut lights[id.index()],
-            id
+            id,
         }
         .with_cutoff(std::f32::consts::PI / 3.0, std::f32::consts::PI / 2.0)
         .with_attenuation(1.0, 0.014, 0.007)

@@ -2,7 +2,10 @@
 #[cfg(target_arch = "spirv")]
 use spirv_std::num_traits::Float;
 
-use crate::{math::Vec3ColorSwizzles, scene::{GpuLight, LightType}};
+use crate::{
+    math::Vec3ColorSwizzles,
+    scene::{GpuLight, LightType},
+};
 use glam::{Mat4, Vec3, Vec4, Vec4Swizzles};
 
 /// Calculate attenuation
