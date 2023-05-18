@@ -498,9 +498,9 @@ mod test {
             .with_background_color(Vec4::splat(0.0));
         let (proj, view) = camera::default_perspective(100.0, 100.0);
         let mut builder = r.new_scene().with_camera(proj, view);
-        let sandstone = image::open("../../img/sandstone.png").unwrap().to_rgba8();
+        let sandstone = SceneImage::from(image::open("../../img/sandstone.png").unwrap());
         let sandstone_id = builder.add_image_texture(sandstone);
-        let dirt = image::open("../../img/dirt.jpg").unwrap().to_rgba8();
+        let dirt = SceneImage::from(image::open("../../img/dirt.jpg").unwrap());
         let dirt_id = builder.add_image_texture(dirt);
 
         let material_id = builder
@@ -681,7 +681,6 @@ mod test {
             .unwrap()
             .decode()
             .unwrap();
-        let img = img.to_rgba8();
         let tex_id = builder.add_image_texture(img);
         assert_eq!(Id::new(0), tex_id);
         let material = builder.new_unlit_material().with_texture0(tex_id).build();
@@ -791,13 +790,12 @@ mod test {
             .with_background_color(Vec3::splat(0.0).extend(1.0));
         let (projection, view) = camera::default_ortho2d(32.0, 32.0);
         let mut builder = r.new_scene().with_camera(projection, view);
-        let dirt = image::open("../../img/dirt.jpg").unwrap().into_rgba8();
+        let dirt = image::open("../../img/dirt.jpg").unwrap();
         builder.add_image(dirt);
-        let sandstone = image::open("../../img/sandstone.png").unwrap().into_rgba8();
+        let sandstone = image::open("../../img/sandstone.png").unwrap();
         builder.add_image(sandstone);
         let texels = image::open("../../test_img/atlas_uv_mapping.png")
-            .unwrap()
-            .into_rgba8();
+            .unwrap();
         let texels_index = builder.add_image(texels);
         let texture_id = builder.add_texture(TextureParams {
             image_index: texels_index,
@@ -829,16 +827,16 @@ mod test {
             .with_scale([32.0, 32.0, 1.0])
             .build();
         let scene = builder.build().unwrap();
-        let atlas_img = scene.atlas.texture.read(
-            r.get_device(),
-            r.get_queue(),
-            scene.atlas.size.x as usize,
-            scene.atlas.size.y as usize,
-            4,
-            1,
-        );
-        let atlas_img = atlas_img.into_rgba(r.get_device()).unwrap();
-        crate::img_diff::save("atlas.png", atlas_img);
+        //let atlas_img = scene.atlas.texture.read(
+        //    r.get_device(),
+        //    r.get_queue(),
+        //    scene.atlas.size.x as usize,
+        //    scene.atlas.size.y as usize,
+        //    4,
+        //    1,
+        //);
+        //let atlas_img = atlas_img.into_rgba(r.get_device()).unwrap();
+        //crate::img_diff::save("atlas.png", atlas_img);
         crate::setup_scene_render_graph(scene, &mut r, true);
 
         let img = r.render_image().unwrap();
@@ -858,11 +856,11 @@ mod test {
             .with_background_color(Vec4::new(1.0, 1.0, 0.0, 1.0));
         let (projection, view) = camera::default_ortho2d(w as f32, h as f32);
         let mut builder = r.new_scene().with_camera(projection, view);
-        let dirt = image::open("../../img/dirt.jpg").unwrap().into_rgba8();
+        let dirt = image::open("../../img/dirt.jpg").unwrap();
         builder.add_image(dirt);
-        let sandstone = image::open("../../img/sandstone.png").unwrap().into_rgba8();
+        let sandstone = image::open("../../img/sandstone.png").unwrap();
         builder.add_image(sandstone);
-        let texels = image::open("../../img/happy_mac.png").unwrap().into_rgba8();
+        let texels = image::open("../../img/happy_mac.png").unwrap();
         let texels_index = builder.add_image(texels);
         let clamp_texture_id = builder.add_texture(TextureParams {
             image_index: texels_index,
@@ -950,11 +948,11 @@ mod test {
             .with_background_color(Vec4::new(1.0, 1.0, 0.0, 1.0));
         let (projection, view) = camera::default_ortho2d(w as f32, h as f32);
         let mut builder = r.new_scene().with_camera(projection, view);
-        let dirt = image::open("../../img/dirt.jpg").unwrap().into_rgba8();
+        let dirt = image::open("../../img/dirt.jpg").unwrap();
         builder.add_image(dirt);
-        let sandstone = image::open("../../img/sandstone.png").unwrap().into_rgba8();
+        let sandstone = image::open("../../img/sandstone.png").unwrap();
         builder.add_image(sandstone);
-        let texels = image::open("../../img/happy_mac.png").unwrap().into_rgba8();
+        let texels = image::open("../../img/happy_mac.png").unwrap();
         let texels_index = builder.add_image(texels);
         let clamp_texture_id = builder.add_texture(TextureParams {
             image_index: texels_index,
@@ -1034,8 +1032,13 @@ mod test {
         let mut tex = GpuTexture {
             offset_px: UVec2::ZERO,
             size_px: UVec2::ONE,
-            mode_s: TextureAddressMode::CLAMP_TO_EDGE,
-            mode_t: TextureAddressMode::CLAMP_TO_EDGE,
+            modes: {
+                let mut modes = TextureModes::default();
+                modes.set_wrap_s(TextureAddressMode::CLAMP_TO_EDGE);
+                modes.set_wrap_t(TextureAddressMode::CLAMP_TO_EDGE);
+                modes
+            },
+            ..Default::default()
         };
         assert_eq!(Vec2::ZERO, tex.uv(Vec2::ZERO, UVec2::splat(100)));
         assert_eq!(Vec2::ZERO, tex.uv(Vec2::ZERO, UVec2::splat(1)));
@@ -1056,30 +1059,26 @@ mod test {
         let red = Vec3::X.extend(1.0);
         let green = Vec3::Y.extend(1.0);
         let blue = Vec3::Z.extend(1.0);
-        let transparent = Vec4::ZERO;
         let _dir_red = builder
             .new_directional_light()
             .with_direction(Vec3::NEG_Y)
-            .with_diffuse_color(red)
-            .with_specular_color(red)
-            .with_ambient_color(transparent)
+            .with_color(red)
+            .with_intensity(10.0)
             .build();
         let _dir_green = builder
             .new_directional_light()
             .with_direction(Vec3::NEG_X)
-            .with_diffuse_color(green)
-            .with_specular_color(green)
-            .with_ambient_color(transparent)
+            .with_color(green)
+            .with_intensity(10.0)
             .build();
         let _dir_blue = builder
             .new_directional_light()
             .with_direction(Vec3::NEG_Z)
-            .with_diffuse_color(blue)
-            .with_specular_color(blue)
-            .with_ambient_color(transparent)
+            .with_color(blue)
+            .with_intensity(10.0)
             .build();
 
-        let material = builder.new_phong_material().build();
+        let material = builder.new_pbr_material().build();
 
         let _cube = builder
             .new_entity()
@@ -1354,7 +1353,7 @@ mod test {
             let _light = builder
                 .new_point_light()
                 .with_position(position)
-                .with_diffuse_color(Vec4::ONE)
+                .with_color(Vec4::ONE)
                 .build();
             let light_material_id = builder
                 .new_unlit_material()

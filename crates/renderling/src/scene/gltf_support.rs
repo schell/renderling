@@ -3,12 +3,10 @@ use glam::{Mat4, Quat, Vec3, Vec4, Vec4Swizzles};
 use gltf::khr_lights_punctual::Kind;
 use rustc_hash::FxHashMap;
 use snafu::prelude::*;
-// use splines::Interpolate;
 
 use super::*;
 
 mod anime;
-mod img;
 pub use anime::*;
 
 #[derive(Debug, Snafu)]
@@ -21,6 +19,9 @@ pub enum GltfLoaderError {
 
     #[snafu(display("Missing image {}", index))]
     MissingImage { index: usize },
+
+    #[snafu(display("Missing image for texture {tex_id:?}"))]
+    MissingTextureImage { tex_id: Id<GpuTexture> },
 
     #[snafu(display("Missing node {}", index))]
     MissingNode { index: usize },
@@ -216,8 +217,8 @@ impl GltfLoader {
             // let format = image_data_format_to_wgpu(image.format)?;
             // let num_channels = image_data_format_num_channels(image.format);
             log::trace!("adding image {} with format {:?}", i, image.format);
-            let dyn_img = img::gltf_image_data_to_dyn(image)?;
-            let image_index = builder.add_image(dyn_img.to_rgba8());
+            let scene_img = SceneImage::from(image);
+            let image_index = builder.add_image(scene_img);
             loader.images.push(image_index);
             log::trace!("  with index={image_index} in the scene builder");
         }
@@ -284,7 +285,6 @@ impl GltfLoader {
             image_index,
             mode_s,
             mode_t,
-            ..Default::default()
         };
 
         let texture_id = builder.add_texture(params);
@@ -354,6 +354,10 @@ impl GltfLoader {
                 Id::NONE
             };
             builder
+                .get_image_for_texture_id_mut(&tex_id)
+                .context(MissingTextureImageSnafu { tex_id })?
+                .apply_linear_transfer = true;
+            builder
                 .new_unlit_material()
                 .with_base_color(pbr.base_color_factor())
                 .with_texture0(tex_id)
@@ -365,6 +369,10 @@ impl GltfLoader {
                 if let Some(info) = pbr.base_color_texture() {
                     let index = info.texture().index();
                     let tex_id = self.texture_at(index, builder, document)?;
+                    builder
+                        .get_image_for_texture_id_mut(&tex_id)
+                        .context(MissingTextureImageSnafu { tex_id })?
+                        .apply_linear_transfer = true;
                     (tex_id, info.tex_coord())
                 } else {
                     (Id::NONE, 0)
@@ -494,40 +502,46 @@ impl GltfLoader {
             let mut gen_normals = false;
             let normals: Box<dyn Iterator<Item = Vec3>> =
                 if let Some(normals) = reader.read_normals() {
+                    log::trace!("    with normals");
                     Box::new(normals.map(Vec3::from))
                 } else {
+                    log::trace!("    no normals (will generate)");
                     gen_normals = true;
                     Box::new(std::iter::repeat(Vec3::ZERO))
                 };
             let mut gen_tangents = false;
             let tangents: Box<dyn Iterator<Item = Vec4>> =
                 if let Some(tangents) = reader.read_tangents() {
+                    log::trace!("    with tangents");
                     Box::new(tangents.map(Vec4::from))
                 } else {
+                    log::trace!("    no tangents (will generate)");
                     gen_tangents = true;
                     Box::new(std::iter::repeat(Vec4::ZERO))
                 };
             let colors: Box<dyn Iterator<Item = Vec4>> = if let Some(colors) = reader.read_colors(0)
             {
+                log::trace!("    colored");
                 let colors = colors.into_rgba_f32();
                 Box::new(colors.map(Vec4::from))
             } else {
+                log::trace!("    not colored");
                 Box::new(std::iter::repeat(Vec4::splat(1.0)))
             };
             let uv0: Box<dyn Iterator<Item = Vec2>> = if let Some(uvs) = reader.read_tex_coords(0) {
                 let uvs = uvs.into_f32().map(Vec2::from);
-                log::trace!("    uvs: {} vertices", uvs.len());
+                log::trace!("    uv0: {} vertices", uvs.len());
                 Box::new(uvs)
             } else {
-                log::trace!("    uvs: none");
+                log::trace!("    uv0: none");
                 Box::new(std::iter::repeat(Vec2::ZERO))
             };
             let uv1: Box<dyn Iterator<Item = Vec2>> = if let Some(uvs) = reader.read_tex_coords(1) {
                 let uvs = uvs.into_f32().map(Vec2::from);
-                log::trace!("    uvs: {} vertices", uvs.len());
+                log::trace!("    uv1: {} vertices", uvs.len());
                 Box::new(uvs)
             } else {
-                log::trace!("    uvs: none");
+                log::trace!("    uv1: none");
                 Box::new(std::iter::repeat(Vec2::ZERO))
             };
             let uvs = uv0
@@ -730,20 +744,19 @@ impl GltfLoader {
             GltfNode::Mesh(parent, children)
         } else if let Some(light) = node.light() {
             let color = Vec3::from(light.color()).extend(1.0);
-            let transparent = Vec4::splat(0.0);
             let direction = Mat4::from_quat(rotation).transform_vector3(Vec3::NEG_Z);
             let gpu_light = match light.kind() {
                 Kind::Directional => builder
                     .new_directional_light()
                     .with_direction(direction)
-                    .with_diffuse_color(color)
-                    .with_specular_color(color)
-                    .with_ambient_color(transparent)
+                    .with_color(color)
+                    .with_intensity(light.intensity())
                     .build(),
                 Kind::Point => builder
                     .new_point_light()
                     .with_position(position)
-                    .with_diffuse_color(color)
+                    .with_color(color)
+                    .with_intensity(light.intensity())
                     .build(),
                 Kind::Spot {
                     inner_cone_angle,
@@ -752,7 +765,8 @@ impl GltfLoader {
                     .new_spot_light()
                     .with_position(position)
                     .with_direction(direction)
-                    .with_diffuse_color(color)
+                    .with_color(color)
+                    .with_intensity(light.intensity())
                     .with_cutoff(inner_cone_angle, outer_cone_angle)
                     .build(),
             };
@@ -882,6 +896,7 @@ mod test {
     // tests importing a gltf file and rendering the first image as a 2d object
     // ensures we are decoding images correctly
     fn images() {
+        _init_logging();
         let mut r = Renderling::headless(100, 100)
             .unwrap()
             .with_background_color(Vec4::splat(1.0));
@@ -916,7 +931,7 @@ mod test {
             .with_scale(Vec3::new(100.0, 100.0, 1.0))
             .build();
         let scene = builder.build().unwrap();
-        let (device, queue) = r.get_device_and_queue();
+        let (device, queue) = r.get_device_and_queue_owned();
         let texture = scene.textures.read(&device, &queue, 0, 1).unwrap()[0];
         println!("{texture:?}");
         crate::setup_scene_render_graph(scene, &mut r, true);
@@ -1035,7 +1050,7 @@ mod test {
 
         let _another_sun = builder
             .new_directional_light()
-            .with_ambient_color(Vec4::ONE)
+            .with_color(Vec4::ONE)
             .with_direction(Vec3::NEG_Z)
             .build();
 

@@ -14,7 +14,7 @@ use moongraph::*;
 
 use crate::{
     BackgroundColor, BufferDimensions, CopiedTextureBuffer, DepthTexture, Device, Frame, Queue,
-    RenderTarget, ScreenSize, WgpuStateError,
+    RenderTarget, ScreenSize, WgpuStateError, Texture,
 };
 
 fn default_frame_texture_view(frame_texture: &wgpu::Texture) -> wgpu::TextureView {
@@ -129,6 +129,13 @@ pub fn clear_depth(
     );
     Ok(())
 }
+
+/// A buffer used for high dynamic range rendering.
+///
+/// See https://learnopengl.com/Advanced-Lighting/HDR.
+pub struct HdrRenderBuffer(pub Texture);
+
+//pub fn create_hdr_render_buffer
 
 /// A buffer holding a copy of the last frame's buffer/texture.
 pub struct PostRenderBuffer(pub CopiedTextureBuffer);
