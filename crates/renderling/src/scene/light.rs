@@ -12,6 +12,15 @@ pub fn from_gltf_light_kind(kind: gltf::khr_lights_punctual::Kind) -> LightType 
     }
 }
 
+#[cfg(feature = "gltf")]
+pub fn gltf_light_intensity_units(kind: gltf::khr_lights_punctual::Kind) -> &'static str {
+    match kind {
+        gltf::khr_lights_punctual::Kind::Directional => "lux (lm/m^2)",
+        // sr is "steradian"
+        _ => "candelas (lm/sr)",
+    }
+}
+
 /// A builder for a spot light.
 pub struct GpuSpotLightBuilder<'a> {
     id: Id<GpuLight>,
@@ -34,9 +43,8 @@ impl<'a> GpuSpotLightBuilder<'a> {
         .with_cutoff(std::f32::consts::PI / 3.0, std::f32::consts::PI / 2.0)
         .with_attenuation(1.0, 0.014, 0.007)
         .with_direction(Vec3::new(0.0, -1.0, 0.0))
-        .with_ambient_color(white)
-        .with_diffuse_color(white)
-        .with_specular_color(white)
+        .with_color(white)
+        .with_intensity(1.0)
     }
 
     pub fn with_position(mut self, position: impl Into<Vec3>) -> Self {
@@ -60,18 +68,13 @@ impl<'a> GpuSpotLightBuilder<'a> {
         self
     }
 
-    pub fn with_ambient_color(mut self, color: impl Into<Vec4>) -> Self {
-        self.inner.ambient_color = color.into();
+    pub fn with_color(mut self, color: impl Into<Vec4>) -> Self {
+        self.inner.color = color.into();
         self
     }
 
-    pub fn with_diffuse_color(mut self, color: impl Into<Vec4>) -> Self {
-        self.inner.diffuse_color = color.into();
-        self
-    }
-
-    pub fn with_specular_color(mut self, color: impl Into<Vec4>) -> Self {
-        self.inner.specular_color = color.into();
+    pub fn with_intensity(mut self, i: f32) -> Self {
+        self.inner.intensity = i;
         self
     }
 
@@ -104,9 +107,8 @@ impl<'a> GpuDirectionalLightBuilder<'a> {
             inner: &mut lights[id.index()],
         }
         .with_direction(Vec3::new(0.0, -1.0, 0.0))
-        .with_ambient_color(Vec4::splat(1.0))
-        .with_diffuse_color(Vec4::splat(1.0))
-        .with_specular_color(Vec4::splat(1.0))
+        .with_color(Vec4::splat(1.0))
+        .with_intensity(1.0)
     }
 
     pub fn with_direction(mut self, direction: impl Into<Vec3>) -> Self {
@@ -114,18 +116,13 @@ impl<'a> GpuDirectionalLightBuilder<'a> {
         self
     }
 
-    pub fn with_ambient_color(mut self, color: impl Into<Vec4>) -> Self {
-        self.inner.ambient_color = color.into();
+    pub fn with_color(mut self, color: impl Into<Vec4>) -> Self {
+        self.inner.color = color.into();
         self
     }
 
-    pub fn with_diffuse_color(mut self, color: impl Into<Vec4>) -> Self {
-        self.inner.diffuse_color = color.into();
-        self
-    }
-
-    pub fn with_specular_color(mut self, color: impl Into<Vec4>) -> Self {
-        self.inner.specular_color = color.into();
+    pub fn with_intensity(mut self, intensity: f32) -> Self {
+        self.inner.intensity = intensity;
         self
     }
 
@@ -153,9 +150,8 @@ impl<'a> GpuPointLightBuilder<'a> {
             inner: &mut lights[id.index()],
         }
         .with_attenuation(1.0, 0.14, 0.07)
-        .with_ambient_color(white)
-        .with_diffuse_color(white)
-        .with_specular_color(white)
+        .with_color(white)
+        .with_intensity(1.0)
     }
 
     pub fn with_position(mut self, position: impl Into<Vec3>) -> Self {
@@ -168,18 +164,13 @@ impl<'a> GpuPointLightBuilder<'a> {
         self
     }
 
-    pub fn with_ambient_color(mut self, color: impl Into<Vec4>) -> Self {
-        self.inner.ambient_color = color.into();
+    pub fn with_color(mut self, color: impl Into<Vec4>) -> Self {
+        self.inner.color = color.into();
         self
     }
 
-    pub fn with_diffuse_color(mut self, color: impl Into<Vec4>) -> Self {
-        self.inner.diffuse_color = color.into();
-        self
-    }
-
-    pub fn with_specular_color(mut self, color: impl Into<Vec4>) -> Self {
-        self.inner.specular_color = color.into();
+    pub fn with_intensity(mut self, i: f32) -> Self {
+        self.inner.intensity = i;
         self
     }
 

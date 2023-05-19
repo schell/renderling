@@ -5,16 +5,45 @@
 //!
 //! To read more about the technique, check out these resources:
 //! * https://stackoverflow.com/questions/59686151/what-is-gpu-driven-rendering
-use glam::{mat3, Mat3, Mat4, Quat, UVec2, UVec3, Vec2, Vec3, Vec4, Vec4Swizzles};
+use glam::{mat3, Mat4, Quat, UVec2, UVec3, Vec2, Vec3, Vec4, Vec4Swizzles};
 use spirv_std::{image::Image2d, Sampler};
 
-use crate::{math::Vec3ColorSwizzles, pbr, phong};
+#[cfg(target_arch = "spirv")]
+use spirv_std::num_traits::*;
+
+use crate::{GpuToggles, math::Vec3ColorSwizzles, pbr};
 
 mod id;
 pub use id::*;
 
-mod wrap;
-pub use wrap::*;
+mod texture;
+pub use texture::*;
+
+/// Used to debug shaders by displaying different colors.
+#[repr(transparent)]
+#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
+#[derive(Default, Clone, Copy, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct DebugMode(u32);
+
+impl DebugMode {
+    pub const NONE: Self = DebugMode(0);
+
+    /// Displays normals after normal mapping, in world space
+    pub const NORMALS: Self = DebugMode(1);
+
+    /// Displays vertex normals.
+    pub const VERTEX_NORMALS: Self = DebugMode(2);
+
+    /// Displays uv normals. These are normals coming from a normal map texture.
+    /// These are the normals in tangent space.
+    pub const UV_NORMALS: Self = DebugMode(3);
+
+    /// Displays vertex normals.
+    pub const TANGENTS: Self = DebugMode(4);
+
+    /// Displays bitangents as calculated from normals and tangents.
+    pub const BITANGENTS: Self = DebugMode(5);
+}
 
 /// A vertex in a mesh.
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
@@ -110,54 +139,11 @@ pub struct GpuLight {
     pub position: Vec4,
     pub direction: Vec4,
     pub attenuation: Vec4,
-    pub ambient_color: Vec4,
-    pub diffuse_color: Vec4,
-    pub specular_color: Vec4,
+    pub color: Vec4,
     pub inner_cutoff: f32,
     pub outer_cutoff: f32,
+    pub intensity: f32,
     pub light_type: LightType,
-    pub _padding0: u32,
-}
-
-/// A GPU texture.
-#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
-#[repr(C)]
-#[derive(Clone, Copy, Default, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct GpuTexture {
-    // The top left offset of texture in the atlas
-    pub offset_px: UVec2,
-    // The size of texture in the atlas
-    pub size_px: UVec2,
-    // How `s` edges should be handled in texture addressing.
-    pub mode_s: TextureAddressMode,
-    // How `t` edges should be handled in texture addressing.
-    pub mode_t: TextureAddressMode,
-}
-
-impl GpuTexture {
-    /// Transform the given `uv` coordinates for this texture's address mode
-    /// and placement in the atlas of the given size.
-    pub fn uv(&self, mut uv: Vec2, atlas_size: UVec2) -> Vec2 {
-        uv.x = wrap::wrap(uv.x, self.mode_s);
-        uv.y = wrap::wrap(uv.y, self.mode_t);
-
-        // get the pixel index of the uv coordinate in terms of the original image
-        let mut px_index_s = (uv.x * self.size_px.x as f32) as u32;
-        let mut px_index_t = (uv.y * self.size_px.y as f32) as u32;
-
-        // convert the pixel index from image to atlas space
-        px_index_s += self.offset_px.x;
-        px_index_t += self.offset_px.y;
-
-        let sx = atlas_size.x as f32;
-        let sy = atlas_size.y as f32;
-        // normalize the pixels by dividing by the atlas size
-        let uv_s = px_index_s as f32 / sx;
-        let uv_t = px_index_t as f32 / sy;
-
-        let st = Vec2::new(uv_s, uv_t);
-        st
-    }
 }
 
 /// Determines the lighting to use in an ubershader.
@@ -169,9 +155,7 @@ pub struct LightingModel(u32);
 
 impl LightingModel {
     pub const NO_LIGHTING: Self = LightingModel(0);
-    pub const TEXT_LIGHTING: Self = LightingModel(1);
-    pub const PHONG_LIGHTING: Self = LightingModel(2);
-    pub const PBR_LIGHTING: Self = LightingModel(3);
+    pub const PBR_LIGHTING: Self = LightingModel(1);
 }
 
 /// Represents a material on the GPU.
@@ -309,7 +293,8 @@ pub struct GpuConstants {
     pub camera_view: Mat4,
     pub camera_pos: Vec4,
     pub atlas_size: UVec2,
-    pub padding: Vec2,
+    pub debug_mode: DebugMode,
+    pub toggles: GpuToggles,
 }
 
 #[repr(C)]
@@ -371,21 +356,20 @@ pub fn main_vertex_scene(
     let (position, rotation, scale) = entity.get_world_transform(entities);
     let model_matrix =
         Mat4::from_translation(position) * Mat4::from_quat(rotation) * Mat4::from_scale(scale);
-
     *out_material = entity.material.into();
     *out_color = vertex.color;
     *out_uv0 = vertex.uv.xy();
     *out_uv1 = vertex.uv.zw();
 
     let scale2 = scale * scale;
-    let model_matrix3 = Mat3::from_mat4(model_matrix);
-    let t = (model_matrix3 * (vertex.tangent.xyz() / scale2)).normalize_or_zero();
-    let n = (model_matrix3 * (vertex.normal.xyz() / scale2)).normalize_or_zero();
-    let b = t.cross(n) * vertex.tangent.w;
-
-    *out_tangent = t;
-    *out_bitangent = b;
-    *out_norm = n;
+    let normal = vertex.normal.xyz().normalize_or_zero();
+    let tangent = vertex.tangent.xyz().normalize_or_zero();
+    let normal_w = (model_matrix * (normal / scale2).extend(0.0)).xyz().normalize_or_zero();
+    let tangent_w = (model_matrix * tangent.extend(0.0)).xyz().normalize_or_zero();
+    let bitangent_w = normal_w.cross(tangent_w) * vertex.tangent.w.signum();
+    *out_tangent = tangent_w;
+    *out_bitangent = bitangent_w;
+    *out_norm = normal_w;
 
     let view_pos = model_matrix * vertex.position.xyz().extend(1.0);
     *out_pos = view_pos.xyz();
@@ -461,16 +445,49 @@ pub fn main_fragment_scene(
         textures,
     );
 
-    let norm = if material.texture2.is_none() {
+    let (norm, uv_norm) = if material.texture2.is_none() {
         // there is no normal map, use the normal normal ;)
-        in_norm
+        (in_norm, Vec3::ZERO)
     } else {
-        let tbn = mat3(in_tangent, in_bitangent, in_norm);
         // convert the normal from color coords to tangent space -1,1
-        let norm = tex_color2.xyz() * 2.0 - 1.0;
+        let sampled_norm = (tex_color2.xyz() * 2.0 - Vec3::splat(1.0)).normalize_or_zero();
+        let tbn = mat3(
+            in_tangent.normalize_or_zero(),
+            in_bitangent.normalize_or_zero(),
+            in_norm.normalize_or_zero(),
+        );
         // convert the normal from tangent space to world space
-        (tbn * norm).normalize_or_zero()
+        let norm = (tbn * sampled_norm).normalize_or_zero();
+        (norm, sampled_norm)
     };
+
+    fn colorize(u: Vec3) -> Vec4 {
+        ((u.normalize_or_zero() + Vec3::splat(1.0)) / 2.0).extend(1.0)
+    }
+
+    match constants.debug_mode {
+        DebugMode::NORMALS => {
+            *output = colorize(norm);
+            return;
+        }
+        DebugMode::VERTEX_NORMALS => {
+            *output = colorize(in_norm);
+            return;
+        }
+        DebugMode::UV_NORMALS => {
+            *output = colorize(uv_norm);
+            return;
+        }
+        DebugMode::TANGENTS => {
+            *output = colorize(in_tangent);
+            return;
+        }
+        DebugMode::BITANGENTS => {
+            *output = colorize(in_bitangent);
+            return;
+        }
+        _ => {}
+    }
 
     *output = match material.lighting_model {
         LightingModel::PBR_LIGHTING => {
@@ -489,20 +506,9 @@ pub fn main_fragment_scene(
                 lights,
             )
         }
-        LightingModel::PHONG_LIGHTING => {
-            let diffuse_color: Vec4 = tex_color0 * in_color;
-            let specular_color: Vec4 = tex_color1 * in_color;
-            phong::shade_fragment(
-                &constants.camera_view,
-                lights,
-                diffuse_color,
-                specular_color,
-                in_pos,
-                norm,
-            )
+        _unlit => {
+            in_color * tex_color0 * material.factor0 * tex_color1
         }
-        LightingModel::TEXT_LIGHTING => in_color * Vec3::splat(1.0).extend(tex_color0.x),
-        _unlit => in_color * tex_color0 * material.factor0 * tex_color1,
     };
 }
 

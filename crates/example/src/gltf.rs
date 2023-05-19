@@ -6,8 +6,8 @@ use std::time::Instant;
 
 use renderling::{
     math::{Mat4, Vec3, Vec4},
-    FontArc, GltfLoader, GlyphCache, GpuEntity, Renderling, Scene, Section, Text, TweenProperty,
-    UiDrawObjects, UiMode, UiScene, Write,
+    DebugMode, FontArc, GltfLoader, GlyphCache, GpuEntity, Renderling, Scene, Section, Text,
+    TweenProperty, UiDrawObjects, UiMode, UiScene, Write,
 };
 use winit::event::KeyboardInput;
 
@@ -38,6 +38,12 @@ struct App {
 
 impl App {
     fn new(r: &mut Renderling) -> Self {
+        r.set_background_color([
+            0x30 as f32 / 255.0,
+            0x35 as f32 / 255.0,
+            0x42 as f32 / 255.0,
+            1.0,
+        ]);
         let radius = 6.0;
         let phi = 0.0;
         let theta = std::f32::consts::FRAC_PI_4;
@@ -127,8 +133,9 @@ impl App {
         self.camera_text_cache.queue(
             Section::default().add_text(
                 Text::new(&format!(
-                    "radius: {}\nlooking at: {}\ntheta: {}\nphi: {}",
-                    self.radius, self.eye, self.theta, self.phi
+                    "position: {}\nlooking at: {}",
+                    Self::camera_position(self.radius, self.phi, self.theta),
+                    self.eye,
                 ))
                 .with_color([0.8, 0.8, 0.8, 1.0])
                 .with_scale(32.0),
@@ -169,7 +176,7 @@ impl App {
         self.left_mb_down = false;
         self.last_cursor_position = None;
 
-        let mut builder = r.new_scene();
+        let mut builder = r.new_scene().with_debug_mode(DebugMode::NONE);
         let loader = builder.gltf_load(&file).unwrap();
         self.entities = builder.entities.clone();
         // find the bounding box of the model so we can display it correctly
@@ -185,10 +192,20 @@ impl App {
         let radius = length * 1.25;
 
         if loader.lights.len() == 0 {
-            let _ = builder
+            // These values were taken from the Khronos gltf-Sample-Viewer, which is a bit
+            // of a reference implementation as far as GLTF viewers go.
+            // See https://github.com/KhronosGroup/glTF-Sample-Viewer/blob/5b1b7f48a8cb2b7aaef00d08fdba18ccc8dd331b/source/Renderer/renderer.js#L72
+            let _key_light = builder
                 .new_directional_light()
-                .with_diffuse_color(Vec4::ONE)
-                .with_direction(Vec3::new(0.0, -1.0, 1.0))
+                .with_color(Vec4::ONE)
+                .with_direction(Vec3::new(0.5, -0.7071, -0.5))
+                .with_intensity(1.0)
+                .build();
+            let _fill_light = builder
+                .new_directional_light()
+                .with_color(Vec4::ONE)
+                .with_direction(Vec3::new(-0.5, 0.7071, 0.5))
+                .with_intensity(0.5)
                 .build();
         }
 

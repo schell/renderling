@@ -2,8 +2,8 @@
 use std::sync::Arc;
 
 use glam::{Mat4, Vec2, Vec3};
-use image::RgbaImage;
 use moongraph::{IsGraphNode, Read, Write};
+use renderling_shader::GpuToggles;
 use snafu::prelude::*;
 use wgpu::util::DeviceExt;
 
@@ -15,6 +15,9 @@ use crate::{
 
 mod entity;
 pub use entity::*;
+
+mod img;
+pub use img::*;
 
 mod light;
 pub use light::*;
@@ -76,11 +79,24 @@ pub(crate) fn scene_indirect_usage() -> wgpu::BufferUsages {
 
 /// Helps build textures, storing texture parameters before images are packed
 /// into the atlas.
-#[derive(Clone, Copy, Default, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TextureParams {
+    // The index of the image this texture references.
     pub image_index: usize,
+    // The wrapping in S.
     pub mode_s: TextureAddressMode,
+    // The wrapping in T.
     pub mode_t: TextureAddressMode,
+}
+
+impl Default for TextureParams {
+    fn default() -> Self {
+        Self {
+            image_index: Default::default(),
+            mode_s: Default::default(),
+            mode_t: Default::default(),
+        }
+    }
 }
 
 /// Sets up the scene using different build phases.
@@ -88,9 +104,11 @@ pub struct TextureParams {
 pub struct SceneBuilder {
     pub device: Arc<wgpu::Device>,
     pub queue: Arc<wgpu::Queue>,
+    pub toggles: GpuToggles,
+    pub debug_mode: DebugMode,
     pub projection: Mat4,
     pub view: Mat4,
-    pub images: Vec<RgbaImage>,
+    pub images: Vec<SceneImage>,
     pub textures: Vec<TextureParams>,
     pub materials: Vec<GpuMaterial>,
     pub vertices: Vec<GpuVertex>,
@@ -103,6 +121,8 @@ impl SceneBuilder {
         Self {
             device,
             queue,
+            toggles: GpuToggles::default(),
+            debug_mode: DebugMode::NONE,
             projection: Mat4::IDENTITY,
             view: Mat4::IDENTITY,
             images: vec![],
@@ -114,15 +134,24 @@ impl SceneBuilder {
         }
     }
 
+    pub fn set_gamma_correction(&mut self, gamma_correction_on: bool) {
+        self.toggles.set_gamma_correct(gamma_correction_on);
+    }
+
+    pub fn with_gamma_correction(mut self, gamma_correction_on: bool) -> Self {
+        self.set_gamma_correction(gamma_correction_on);
+        self
+    }
+
     /// Add an image and return a texture id for it.
     pub fn add_image_texture_mode(
         &mut self,
-        img: RgbaImage,
+        img: impl Into<SceneImage>,
         mode_s: TextureAddressMode,
         mode_t: TextureAddressMode,
     ) -> Id<GpuTexture> {
         let image_index = self.images.len();
-        self.images.push(img);
+        self.images.push(img.into());
         self.add_texture(TextureParams {
             image_index,
             mode_s,
@@ -133,7 +162,7 @@ impl SceneBuilder {
     /// Add an image and return a texture id for it.
     ///
     /// The texture sampling mode defaults to "repeat".
-    pub fn add_image_texture(&mut self, img: RgbaImage) -> Id<GpuTexture> {
+    pub fn add_image_texture(&mut self, img: impl Into<SceneImage>) -> Id<GpuTexture> {
         self.add_image_texture_mode(
             img,
             TextureAddressMode::CLAMP_TO_EDGE,
@@ -144,9 +173,9 @@ impl SceneBuilder {
     /// Add an image, without adding an explicit texture.
     ///
     /// Returns the index of the image.
-    pub fn add_image(&mut self, img: RgbaImage) -> usize {
+    pub fn add_image(&mut self, img: impl Into<SceneImage>) -> usize {
         let index = self.images.len();
-        self.images.push(img);
+        self.images.push(img.into());
         index
     }
 
@@ -165,6 +194,15 @@ impl SceneBuilder {
     pub fn set_camera(&mut self, projection: Mat4, view: Mat4) {
         self.projection = projection;
         self.view = view;
+    }
+
+    pub fn set_debug_mode(&mut self, debug_mode: DebugMode) {
+        self.debug_mode = debug_mode;
+    }
+
+    pub fn with_debug_mode(mut self, debug_mode: DebugMode) -> Self {
+        self.set_debug_mode(debug_mode);
+        self
     }
 
     pub fn new_directional_light(&mut self) -> GpuDirectionalLightBuilder<'_> {
@@ -201,10 +239,6 @@ impl SceneBuilder {
         UnlitMaterialBuilder::new(self)
     }
 
-    pub fn new_phong_material(&mut self) -> PhongMaterialBuilder<'_> {
-        PhongMaterialBuilder::new(self)
-    }
-
     pub fn new_pbr_material(&mut self) -> PbrMaterialBuilder<'_> {
         PbrMaterialBuilder::new(self)
     }
@@ -214,6 +248,11 @@ impl SceneBuilder {
             scene: self,
             entity: GpuEntity::default(),
         }
+    }
+
+    pub fn get_image_for_texture_id_mut(&mut self, tex_id: &Id<GpuTexture>) -> Option<&mut SceneImage> {
+        let texture = self.textures.get(tex_id.index())?;
+        self.images.get_mut(texture.image_index)
     }
 
     #[cfg(feature = "gltf")]
@@ -270,6 +309,8 @@ impl Scene {
         let SceneBuilder {
             device,
             queue,
+            toggles,
+            debug_mode,
             projection,
             view,
             images,
@@ -287,7 +328,6 @@ impl Scene {
             image_index,
             mode_s,
             mode_t,
-            ..
         } in frames
         {
             let (offset_px, size_px) = atlas
@@ -296,8 +336,12 @@ impl Scene {
             textures.push(GpuTexture {
                 offset_px,
                 size_px,
-                mode_s,
-                mode_t,
+                modes: {
+                    let mut modes = TextureModes::default();
+                    modes.set_wrap_s(mode_s);
+                    modes.set_wrap_t(mode_t);
+                    modes
+                },
                 ..Default::default()
             });
         }
@@ -316,7 +360,8 @@ impl Scene {
             camera_pos: view.inverse().transform_point3(Vec3::ZERO).extend(0.0),
             camera_view: view,
             atlas_size: atlas.size,
-            padding: Vec2::ZERO,
+            debug_mode,
+            toggles,
         };
         let constants_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Scene::new constants"),
@@ -436,16 +481,11 @@ impl Scene {
     /// The data is not uploaded to the cpu until [`Scene::update`] has been
     /// called.
     pub fn set_camera(&mut self, proj: Mat4, view: Mat4) {
-        let constants = GpuConstants {
-            camera_projection: proj,
-            camera_pos: view.inverse().transform_point3(Vec3::ZERO).extend(0.0),
-            camera_view: view,
-            atlas_size: self.atlas.size,
-            padding: Vec2::ZERO,
-        };
-        if self.constants != constants {
-            self.constants = constants;
-            self.constants_update = Some(constants);
+        if self.constants.camera_projection != proj || self.constants.camera_view != view {
+            self.constants.camera_projection = proj;
+            self.constants.camera_view = view;
+            self.constants.camera_pos = view.inverse().transform_point3(Vec3::ZERO).extend(0.0);
+            self.constants_update = Some(self.constants);
         }
     }
 
@@ -475,6 +515,11 @@ impl Scene {
             .context(BufferSnafu)?;
         debug_assert_eq!((entity.id.index(), 1), (i, n));
         Ok(())
+    }
+
+    pub fn set_debug_mode(&mut self, debug_mode: DebugMode) {
+        self.constants.debug_mode = debug_mode;
+        self.constants_update = Some(self.constants);
     }
 
     /// Return a reference to the inner texture Atlas.

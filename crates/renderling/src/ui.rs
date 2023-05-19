@@ -10,7 +10,7 @@ use snafu::prelude::*;
 use wgpu::util::DeviceExt;
 
 use crate::{
-    node::FrameTextureView, DepthTexture, Device, Queue, Read, RenderTarget, Renderling, Texture,
+    node::FrameTextureView, Device, Queue, Read, RenderTarget, Renderling, Texture,
     Write,
 };
 
@@ -145,13 +145,7 @@ pub fn create_ui_pipeline(
             polygon_mode: wgpu::PolygonMode::Fill,
             conservative: false,
         },
-        depth_stencil: Some(wgpu::DepthStencilState {
-            format: wgpu::TextureFormat::Depth32Float,
-            depth_write_enabled: true,
-            depth_compare: wgpu::CompareFunction::Less,
-            stencil: wgpu::StencilState::default(),
-            bias: wgpu::DepthBiasState::default(),
-        }),
+        depth_stencil: None,
         multisample: wgpu::MultisampleState {
             mask: !0,
             alpha_to_coverage_enabled: false,
@@ -567,14 +561,13 @@ pub fn ui_scene_update(
 }
 
 pub fn ui_scene_render(
-    (device, queue, scene, objects, pipeline, frame, depth): (
+    (device, queue, scene, objects, pipeline, frame): (
         Read<Device>,
         Read<Queue>,
         Read<UiScene>,
         Read<UiDrawObjects>,
         Read<UiRenderPipeline>,
         Read<FrameTextureView>,
-        Read<DepthTexture>,
     ),
 ) -> Result<(), UiSceneError> {
     let label = Some("ui scene render");
@@ -589,14 +582,7 @@ pub fn ui_scene_render(
                 store: true,
             },
         })],
-        depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-            view: &depth.view,
-            depth_ops: Some(wgpu::Operations {
-                load: wgpu::LoadOp::Load,
-                store: true,
-            }),
-            stencil_ops: None,
-        }),
+        depth_stencil_attachment: None,
     });
     render_pass.set_pipeline(&pipeline.0);
     render_pass.set_bind_group(0, &scene.constants.bindgroup, &[]);
@@ -792,6 +778,6 @@ mod test {
         setup_ui_render_graph(scene, vec![obj_a, obj_b], &mut r, true);
 
         let img = r.render_image().unwrap();
-        crate::img_diff::save("ui_text.png", img);
+        crate::img_diff::assert_img_eq("ui_text.png", img);
     }
 }
