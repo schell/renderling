@@ -5,35 +5,6 @@ use renderling_shader::scene::{GpuMaterial, GpuTexture, Id, LightingModel};
 
 use crate::SceneBuilder;
 
-pub struct PhongMaterialBuilder<'a> {
-    builder: &'a mut SceneBuilder,
-    material: GpuMaterial,
-}
-
-impl<'a> PhongMaterialBuilder<'a> {
-    pub fn new(builder: &'a mut SceneBuilder) -> Self {
-        let mut material = GpuMaterial::default();
-        material.lighting_model = LightingModel::PHONG_LIGHTING;
-        Self { builder, material }
-    }
-
-    pub fn with_diffuse_texture(mut self, texture_id: Id<GpuTexture>) -> Self {
-        self.material.texture0 = texture_id;
-        self
-    }
-
-    pub fn with_specular_texture(mut self, texture_id: Id<GpuTexture>) -> Self {
-        self.material.texture1 = texture_id;
-        self
-    }
-
-    pub fn build(self) -> Id<GpuMaterial> {
-        let id = self.builder.materials.len();
-        self.builder.materials.push(self.material);
-        Id::new(id as u32)
-    }
-}
-
 pub struct UnlitMaterialBuilder<'a> {
     builder: &'a mut SceneBuilder,
     material: GpuMaterial,

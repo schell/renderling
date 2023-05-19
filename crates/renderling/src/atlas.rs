@@ -11,6 +11,8 @@ use glam::UVec2;
 use image::{EncodableLayout, RgbaImage};
 use snafu::prelude::*;
 
+use crate::SceneImage;
+
 fn gpu_frame_from_rect(r: crunch::Rect) -> (UVec2, UVec2) {
     (
         UVec2::new(r.x as u32, r.y as u32),
@@ -54,7 +56,7 @@ impl Atlas {
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            format: wgpu::TextureFormat::Rgba8Unorm,
             usage: wgpu::TextureUsages::TEXTURE_BINDING
                 | wgpu::TextureUsages::COPY_DST
                 | wgpu::TextureUsages::COPY_SRC,
@@ -98,15 +100,15 @@ impl Atlas {
     pub fn pack(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        images: impl IntoIterator<Item = RgbaImage>,
+        images: impl IntoIterator<Item = SceneImage>,
     ) -> Result<Self, AtlasError> {
-        let images = images.into_iter().collect::<Vec<_>>();
+        let mut images = images.into_iter().collect::<Vec<_>>();
         let len = images.len();
         let crunch::PackedItems { w, h, items } = crunch::pack_into_po2(
             8192,
             images.iter().enumerate().map(|(i, img)| {
-                let w = img.width();
-                let h = img.height();
+                let w = img.width;
+                let h = img.height;
                 crunch::Item::new(i, w as usize, h as usize, crunch::Rotation::None)
             }),
         )
@@ -117,7 +119,12 @@ impl Atlas {
         atlas.rects = vec![crunch::Rect::default(); len];
 
         for crunch::PackedItem { data: i, rect } in items.into_iter() {
-            let img = &images[i];
+            let img = &mut images[i];
+            let bytes = crate::convert_to_rgba8_bytes(
+                std::mem::take(&mut img.pixels),
+                img.format,
+                img.apply_linear_transfer,
+            );
             queue.write_texture(
                 wgpu::ImageCopyTextureBase {
                     texture: &atlas.texture.texture,
@@ -129,15 +136,15 @@ impl Atlas {
                     },
                     aspect: wgpu::TextureAspect::All,
                 },
-                img.as_bytes(),
+                &bytes,
                 wgpu::ImageDataLayout {
                     offset: 0,
-                    bytes_per_row: Some(4 * img.width()),
-                    rows_per_image: Some(img.height()),
+                    bytes_per_row: Some(4 * img.width),
+                    rows_per_image: Some(img.height),
                 },
                 wgpu::Extent3d {
-                    width: img.width(),
-                    height: img.height(),
+                    width: img.width,
+                    height: img.height,
                     depth_or_array_layers: 1,
                 },
             );

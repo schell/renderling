@@ -24,9 +24,7 @@ fn run() -> Result<(), anyhow::Error> {
     let window = window_builder.build(&event_loop)?;
 
     // Set up a new renderling
-    let mut r = Renderling::try_from_window(&window)
-        .unwrap()
-        .with_background_color(renderling::math::Vec3::splat(0x33 as f32 / 255.0).extend(1.0));
+    let mut r = Renderling::try_from_window(&window).unwrap();
     let model = std::env::args().skip(1).next();
     let mut run_current_frame: Box<dyn FnMut(&mut Renderling, Option<&winit::event::WindowEvent>)> =
         Box::new(gltf::demo(&mut r, model));

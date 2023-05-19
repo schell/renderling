@@ -265,7 +265,8 @@ impl Renderling {
         &self.graph.get_resource::<Queue>().unwrap().unwrap().0
     }
 
-    pub fn get_device_and_queue(&self) -> (crate::Device, crate::Queue) {
+    /// Returns a pair of the device and queue in an owned wrapper.
+    pub fn get_device_and_queue_owned(&self) -> (crate::Device, crate::Queue) {
         // UNWRAP: safe because we always have device and queue
         let device = self
             .graph
@@ -282,22 +283,16 @@ impl Renderling {
         (device, queue)
     }
 
+    pub fn get_render_target(&self) -> &RenderTarget {
+        // UNWRAP: safe because we always have a render target, or we need to panic
+        self.graph.get_resource().unwrap().unwrap()
+    }
+
     pub fn new_scene(&self) -> SceneBuilder {
-        let device = self
-            .graph
-            .get_resource::<Device>()
-            .unwrap()
-            .unwrap()
-            .0
-            .clone();
-        let queue = self
-            .graph
-            .get_resource::<Queue>()
-            .unwrap()
-            .unwrap()
-            .0
-            .clone();
-        SceneBuilder::new(device, queue)
+        let (device, queue) = self.get_device_and_queue_owned();
+        let gamma_correct = self.get_render_target().format().is_srgb();
+        SceneBuilder::new(device.0, queue.0)
+            .with_gamma_correction(gamma_correct)
     }
 
     // TODO: make `new_ui_scene` return a `UiSceneBuilder`.

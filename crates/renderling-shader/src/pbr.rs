@@ -1,6 +1,9 @@
 //! Physically based renderer shader code.
 //!
-//! Thanks to https://learnopengl.com/PBR/Theory.
+//! ## References
+//! * https://learnopengl.com/PBR/Theory
+//! * https://github.com/KhronosGroup/glTF-Sample-Viewer/blob/5b1b7f48a8cb2b7aaef00d08fdba18ccc8dd331b/source/Renderer/shaders/pbr.frag
+//! * https://github.khronos.org/glTF-Sample-Viewer-Release/
 #[cfg(target_arch = "spirv")]
 use spirv_std::num_traits::Float;
 
@@ -67,7 +70,7 @@ fn fresnel_schlick(
 }
 
 fn outgoing_radiance(
-    diffuse_color: Vec4,
+    light_color: Vec4,
     albedo: Vec3,
     attenuation: f32,
     v: Vec3,
@@ -77,7 +80,7 @@ fn outgoing_radiance(
     roughness: f32,
 ) -> Vec3 {
     let f0 = Vec3::splat(0.4).lerp(albedo, metalness);
-    let radiance = diffuse_color.rgb() * attenuation;
+    let radiance = light_color.rgb() * attenuation;
     let h = (v + l).normalize_or_zero();
     // cook-torrance brdf
     let ndf: f32 = normal_distribution_ggx(n, h, roughness);
@@ -110,12 +113,6 @@ pub fn shade_fragment(
 
     lights: &[GpuLight],
 ) -> Vec4 {
-    if lights.is_empty() || lights[0].light_type == LightType::END_OF_LIGHTS {
-        // the scene is unlit, so we should provide some default
-        let desaturated_norm = in_norm.abs().dot(Vec3::new(0.2126, 0.7152, 0.0722));
-        return (albedo * desaturated_norm).extend(1.0);
-    }
-
     let n = in_norm.normalize_or_zero();
     let v = (camera_pos - in_pos).normalize_or_zero();
 
@@ -137,9 +134,9 @@ pub fn shade_fragment(
                     continue;
                 }
                 let l = frag_to_light.normalize_or_zero();
-                let attenuation = 1.0 / (distance * distance);
+                let attenuation = light.intensity * 1.0 / (distance * distance);
                 lo += outgoing_radiance(
-                    light.diffuse_color,
+                    light.color,
                     albedo,
                     attenuation,
                     v,
@@ -159,10 +156,10 @@ pub fn shade_fragment(
                 let l = frag_to_light.normalize_or_zero();
                 let theta: f32 = l.dot(light.direction.xyz().normalize_or_zero());
                 let epsilon: f32 = light.inner_cutoff - light.outer_cutoff;
-                let intensity: f32 = ((theta - light.outer_cutoff) / epsilon).clamp(0.0, 1.0);
-                let attenuation = intensity;
+                let attenuation: f32 =
+                    light.intensity * ((theta - light.outer_cutoff) / epsilon).clamp(0.0, 1.0);
                 lo += outgoing_radiance(
-                    light.diffuse_color,
+                    light.color,
                     albedo,
                     attenuation,
                     v,
@@ -175,9 +172,9 @@ pub fn shade_fragment(
 
             LightType::DIRECTIONAL_LIGHT => {
                 let l = -light.direction.xyz().normalize_or_zero();
-                let attenuation = 1.0;
+                let attenuation = light.intensity;
                 lo += outgoing_radiance(
-                    light.diffuse_color,
+                    light.color,
                     albedo,
                     attenuation,
                     v,
@@ -191,12 +188,13 @@ pub fn shade_fragment(
         }
     }
 
-    let ambient = Vec3::splat(0.03) * albedo * ao;
-    let color = lo + ambient;
+    let color = lo * ao;
+    // let ambient = Vec3::ZERO; //Vec3::splat(0.03) * albedo * ao;
+    // let color = lo + ambient;
 
     // This is built in gamma correction
-    let color = color / (color + Vec3::ONE);
-    let color = color.powf(1.0 / 2.2);
+    // let color = color / (color + Vec3::ONE);
+    // let color = color.powf(1.0 / 2.2);
 
     color.extend(1.0)
 }
