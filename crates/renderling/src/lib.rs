@@ -241,7 +241,6 @@ mod test {
     fn cmy_triangle_sanity() {
         let mut c = cmy_triangle_setup();
         let img = c.ui.render_image().unwrap();
-        c.ui.graph.save_graph_dot("cmy_triangle_renderer.dot");
         crate::img_diff::assert_img_eq("cmy_triangle.png", img);
     }
 
