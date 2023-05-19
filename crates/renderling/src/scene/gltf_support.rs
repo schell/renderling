@@ -1034,7 +1034,6 @@ mod test {
 
         let img = r.render_image().unwrap();
         println!("saving frame");
-        // crate::img_diff::save("gltf_normal_mapping_brick_sphere.png", img.clone());
         crate::img_diff::assert_img_eq("gltf_normal_mapping_brick_sphere.png", img);
     }
 

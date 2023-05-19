@@ -13,8 +13,9 @@ use std::{ops::Deref, sync::Arc};
 use moongraph::*;
 
 use crate::{
+    math::Vec4,
     BackgroundColor, BufferDimensions, CopiedTextureBuffer, DepthTexture, Device, Frame, Queue,
-    RenderTarget, ScreenSize, WgpuStateError, Texture,
+    RenderTarget, ScreenSize, Texture, WgpuStateError,
 };
 
 fn default_frame_texture_view(frame_texture: &wgpu::Texture) -> wgpu::TextureView {
@@ -30,13 +31,16 @@ fn default_frame_texture_view(frame_texture: &wgpu::Texture) -> wgpu::TextureVie
     })
 }
 
-pub struct FrameTextureView(Arc<wgpu::TextureView>);
+pub struct FrameTextureView {
+    view: Arc<wgpu::TextureView>,
+    format: wgpu::TextureFormat,
+}
 
 impl Deref for FrameTextureView {
     type Target = wgpu::TextureView;
 
     fn deref(&self) -> &Self::Target {
-        &self.0
+        &self.view
     }
 }
 
@@ -45,8 +49,15 @@ pub fn create_frame(
     render_target: Read<RenderTarget>,
 ) -> Result<(Frame, FrameTextureView), WgpuStateError> {
     let frame = render_target.get_current_frame()?;
+    let format = render_target.format();
     let frame_view = default_frame_texture_view(frame.texture());
-    Ok((frame, FrameTextureView(frame_view.into())))
+    Ok((
+        frame,
+        FrameTextureView {
+            view: frame_view.into(),
+            format,
+        },
+    ))
 }
 
 /// Perform a clearing render pass on a frame and/or a depth texture.
@@ -96,7 +107,12 @@ pub fn clear_frame_and_depth(
     ),
 ) -> Result<(), WgpuStateError> {
     let depth_view = &depth.view;
-    let [r, g, b, a] = color.0.to_array();
+    let color: Vec4 = if frame_view.format.is_srgb() {
+        color.0.powf(2.2)
+    } else {
+        color.0
+    };
+    let [r, g, b, a] = color.to_array();
     let color = wgpu::Color {
         r: r.into(),
         g: g.into(),
@@ -135,7 +151,7 @@ pub fn clear_depth(
 /// See https://learnopengl.com/Advanced-Lighting/HDR.
 pub struct HdrRenderBuffer(pub Texture);
 
-//pub fn create_hdr_render_buffer
+// pub fn create_hdr_render_buffer
 
 /// A buffer holding a copy of the last frame's buffer/texture.
 pub struct PostRenderBuffer(pub CopiedTextureBuffer);
