@@ -12,6 +12,15 @@ pub fn from_gltf_light_kind(kind: gltf::khr_lights_punctual::Kind) -> LightType 
     }
 }
 
+#[cfg(feature = "gltf")]
+pub fn gltf_light_intensity_units(kind: gltf::khr_lights_punctual::Kind) -> &'static str {
+    match kind {
+        gltf::khr_lights_punctual::Kind::Directional => "lux (lm/m^2)",
+        // sr is "steradian"
+        _ => "candelas (lm/sr)",
+    }
+}
+
 /// A builder for a spot light.
 pub struct GpuSpotLightBuilder<'a> {
     id: Id<GpuLight>,

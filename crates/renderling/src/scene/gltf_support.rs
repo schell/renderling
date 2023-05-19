@@ -595,7 +595,7 @@ impl GltfLoader {
                             );
                             let tangent = (s - s.dot(n) * n)
                                 .normalize_or_zero()
-                                .extend(n.cross(s).dot(t).signum());
+                                .extend(n.cross(t).dot(s).signum());
                             a.tangent = tangent;
                             b.tangent = tangent;
                             c.tangent = tangent;
@@ -745,18 +745,19 @@ impl GltfLoader {
         } else if let Some(light) = node.light() {
             let color = Vec3::from(light.color()).extend(1.0);
             let direction = Mat4::from_quat(rotation).transform_vector3(Vec3::NEG_Z);
+            let intensity = light.intensity();
             let gpu_light = match light.kind() {
                 Kind::Directional => builder
                     .new_directional_light()
                     .with_direction(direction)
                     .with_color(color)
-                    .with_intensity(light.intensity())
+                    .with_intensity(intensity)
                     .build(),
                 Kind::Point => builder
                     .new_point_light()
                     .with_position(position)
                     .with_color(color)
-                    .with_intensity(light.intensity())
+                    .with_intensity(intensity)
                     .build(),
                 Kind::Spot {
                     inner_cone_angle,
@@ -766,11 +767,14 @@ impl GltfLoader {
                     .with_position(position)
                     .with_direction(direction)
                     .with_color(color)
-                    .with_intensity(light.intensity())
+                    .with_intensity(intensity)
                     .with_cutoff(inner_cone_angle, outer_cone_angle)
                     .build(),
             };
             log::trace!("  node is {}", from_gltf_light_kind(light.kind()));
+            log::trace!("    with color    : {color:?}");
+            log::trace!("    with direction: {direction:?}");
+            log::trace!("    with intensity: {intensity:?} {}", gltf_light_intensity_units(light.kind()));
             let _ = self.lights.insert(light.index(), None, gpu_light);
             GltfNode::Light(light.index())
         } else {

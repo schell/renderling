@@ -1,6 +1,9 @@
 //! Physically based renderer shader code.
 //!
-//! Thanks to https://learnopengl.com/PBR/Theory.
+//! ## References
+//! * https://learnopengl.com/PBR/Theory
+//! * https://github.com/KhronosGroup/glTF-Sample-Viewer/blob/5b1b7f48a8cb2b7aaef00d08fdba18ccc8dd331b/source/Renderer/shaders/pbr.frag
+//! * https://github.khronos.org/glTF-Sample-Viewer-Release/
 #[cfg(target_arch = "spirv")]
 use spirv_std::num_traits::Float;
 
@@ -153,7 +156,8 @@ pub fn shade_fragment(
                 let l = frag_to_light.normalize_or_zero();
                 let theta: f32 = l.dot(light.direction.xyz().normalize_or_zero());
                 let epsilon: f32 = light.inner_cutoff - light.outer_cutoff;
-                let attenuation: f32 = light.intensity * ((theta - light.outer_cutoff) / epsilon).clamp(0.0, 1.0);
+                let attenuation: f32 =
+                    light.intensity * ((theta - light.outer_cutoff) / epsilon).clamp(0.0, 1.0);
                 lo += outgoing_radiance(
                     light.color,
                     albedo,
@@ -185,12 +189,12 @@ pub fn shade_fragment(
     }
 
     let color = lo * ao;
-    //let ambient = Vec3::ZERO; //Vec3::splat(0.03) * albedo * ao;
-    //let color = lo + ambient;
+    // let ambient = Vec3::ZERO; //Vec3::splat(0.03) * albedo * ao;
+    // let color = lo + ambient;
 
     // This is built in gamma correction
-    //let color = color / (color + Vec3::ONE);
-    //let color = color.powf(1.0 / 2.2);
+    // let color = color / (color + Vec3::ONE);
+    // let color = color.powf(1.0 / 2.2);
 
     color.extend(1.0)
 }

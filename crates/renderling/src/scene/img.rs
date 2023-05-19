@@ -70,6 +70,8 @@ impl From<image::DynamicImage> for SceneImage {
         let (pixels, format) = match value {
             image::DynamicImage::ImageLuma8(img) => (img.into_vec(), R8),
             i @ image::DynamicImage::ImageLumaA8(_) => (i.into_rgba8().into_vec(), R8G8B8A8),
+            // TODO: do we have to apply the linear transfer to Rgb8 images from `image`?
+            // I think `image` may have already converted to linear space for us.
             image::DynamicImage::ImageRgb8(img) => (img.into_vec(), R8G8B8),
             image::DynamicImage::ImageRgba8(img) => (img.into_vec(), R8G8B8A8),
             image::DynamicImage::ImageLuma16(img) => (img.as_bytes().to_vec(), R16),

@@ -791,12 +791,15 @@ mod test {
         let (projection, view) = camera::default_ortho2d(32.0, 32.0);
         let mut builder = r.new_scene().with_camera(projection, view);
         let dirt = image::open("../../img/dirt.jpg").unwrap();
-        builder.add_image(dirt);
+        let dirt = builder.add_image(dirt);
+        println!("dirt: {dirt}");
         let sandstone = image::open("../../img/sandstone.png").unwrap();
-        builder.add_image(sandstone);
+        let sandstone = builder.add_image(sandstone);
+        println!("sandstone: {sandstone}");
         let texels = image::open("../../test_img/atlas_uv_mapping.png")
             .unwrap();
         let texels_index = builder.add_image(texels);
+        println!("atlas_uv_mapping: {texels_index}");
         let texture_id = builder.add_texture(TextureParams {
             image_index: texels_index,
             mode_s: TextureAddressMode::CLAMP_TO_EDGE,

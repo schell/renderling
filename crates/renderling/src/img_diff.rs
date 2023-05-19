@@ -28,7 +28,10 @@ pub fn assert_img_eq_with_testname(testname: &str, filename: &'static str, seen:
     if let Some((diffs, diff_image)) = dify::diff::get_results(
         left_image.clone(),
         right_image.clone(),
-        0.1,
+        // this threshold is how different to the pixels are based on first
+        // converting each to Yiq (luminance, hue and saturation) and then adding
+        // a * Y^2 + b * i^2 + c * q^2
+        11.0,
         false,
         None,
         &None,
@@ -36,17 +39,17 @@ pub fn assert_img_eq_with_testname(testname: &str, filename: &'static str, seen:
     ) {
         let dir = Path::new(TEST_OUTPUT_DIR).join(testname);
         std::fs::create_dir_all(&dir).expect("cannot create test output dir");
-        let expected = dir.join("expected.jpg");
-        let seen = dir.join("seen.jpg");
-        let diff = dir.join("diff.jpg");
+        let expected = dir.join("expected.png");
+        let seen = dir.join("seen.png");
+        let diff = dir.join("diff.png");
         left_image
-            .save_with_format(&expected, image::ImageFormat::Jpeg)
+            .save_with_format(&expected, image::ImageFormat::Png)
             .expect("can't save expected");
         right_image
-            .save_with_format(&seen, image::ImageFormat::Jpeg)
+            .save_with_format(&seen, image::ImageFormat::Png)
             .expect("can't save seen");
         diff_image
-            .save_with_format(&diff, image::ImageFormat::Jpeg)
+            .save_with_format(&diff, image::ImageFormat::Png)
             .expect("can't save diff");
         panic!(
             "{} has >= {} differences above the threshold\nexpected: {}\nseen: {}\ndiff: {}",

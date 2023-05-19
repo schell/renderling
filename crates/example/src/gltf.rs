@@ -133,8 +133,9 @@ impl App {
         self.camera_text_cache.queue(
             Section::default().add_text(
                 Text::new(&format!(
-                    "radius: {}\nlooking at: {}\ntheta: {}\nphi: {}",
-                    self.radius, self.eye, self.theta, self.phi
+                    "position: {}\nlooking at: {}",
+                    Self::camera_position(self.radius, self.phi, self.theta),
+                    self.eye,
                 ))
                 .with_color([0.8, 0.8, 0.8, 1.0])
                 .with_scale(32.0),
