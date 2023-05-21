@@ -10,7 +10,8 @@ use wgpu::util::DeviceExt;
 pub use renderling_shader::scene::*;
 
 use crate::{
-    node::FrameTextureView, Atlas, DepthTexture, Device, GpuArray, Queue, RenderTarget, Renderling,
+    node::{self, FrameTextureView, HdrSurface},
+    Atlas, DepthTexture, Device, GpuArray, Queue, Renderling,
 };
 
 mod entity;
@@ -250,7 +251,10 @@ impl SceneBuilder {
         }
     }
 
-    pub fn get_image_for_texture_id_mut(&mut self, tex_id: &Id<GpuTexture>) -> Option<&mut SceneImage> {
+    pub fn get_image_for_texture_id_mut(
+        &mut self,
+        tex_id: &Id<GpuTexture>,
+    ) -> Option<&mut SceneImage> {
         let texture = self.textures.get(tex_id.index())?;
         self.images.get_mut(texture.image_index)
     }
@@ -616,6 +620,7 @@ pub fn create_scene_render_pipeline(
     device: &wgpu::Device,
     format: wgpu::TextureFormat,
 ) -> wgpu::RenderPipeline {
+    log::trace!("creating scene render pipeline with format '{format:?}'");
     let label = Some("scene render pipeline");
     let vertex_shader =
         device.create_shader_module(wgpu::include_spirv!("linkage/main_vertex_scene.spv"));
@@ -724,21 +729,21 @@ pub fn scene_cull(
 }
 
 pub fn scene_render(
-    (device, queue, scene, pipeline, frame, depth): (
+    (device, queue, scene, pipeline, hdr_frame, depth): (
         Read<Device>,
         Read<Queue>,
         Read<Scene>,
         Read<SceneRenderPipeline>,
-        Read<FrameTextureView>,
+        Read<HdrSurface>,
         Read<DepthTexture>,
     ),
 ) -> Result<(), SceneError> {
-    let label = Some("scene render");
+    let label = Some("scene hdr render");
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label });
     let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
         label,
         color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-            view: &frame,
+            view: &hdr_frame.texture.view,
             resolve_target: None,
             ops: wgpu::Operations {
                 load: wgpu::LoadOp::Load,
@@ -765,6 +770,49 @@ pub fn scene_render(
         scene.entities.len() as u32,
     );
     drop(render_pass);
+
+    queue.submit(std::iter::once(encoder.finish()));
+    Ok(())
+}
+
+/// Conducts the HDR tone mapping, writing the HDR surface texture to the (most
+/// likely) sRGB window surface.
+pub fn scene_tonemapping(
+    (device, queue, frame, hdr_frame, depth): (
+        Read<Device>,
+        Read<Queue>,
+        Read<FrameTextureView>,
+        Read<HdrSurface>,
+        Read<DepthTexture>,
+    ),
+) -> Result<(), SceneError> {
+    let label = Some("scene tonemapping");
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label });
+    let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+        label,
+        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+            view: &frame,
+            resolve_target: None,
+            ops: wgpu::Operations {
+                load: wgpu::LoadOp::Load,
+                store: true,
+            },
+        })],
+        depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+            view: &depth.view,
+            depth_ops: Some(wgpu::Operations {
+                load: wgpu::LoadOp::Load,
+                store: true,
+            }),
+            stencil_ops: None,
+        }),
+    });
+    render_pass.set_pipeline(&hdr_frame.pipeline);
+    render_pass.set_bind_group(0, &hdr_frame.texture_bindgroup, &[]);
+    render_pass.set_bind_group(1, hdr_frame.constants.bindgroup(), &[]);
+    render_pass.draw(0..6, 0..1);
+    drop(render_pass);
+
     queue.submit(std::iter::once(encoder.finish()));
     Ok(())
 }
@@ -772,26 +820,31 @@ pub fn scene_render(
 pub fn setup_scene_render_graph(scene: Scene, r: &mut Renderling, with_screen_capture: bool) {
     r.graph.add_resource(scene);
 
-    let pipeline = SceneRenderPipeline(
-        r.graph
-            .visit(|(device, target): (Read<Device>, Read<RenderTarget>)| {
-                create_scene_render_pipeline(&device, target.format())
-            })
-            .unwrap(),
-    );
+    let (hdr_surface,) = r
+        .graph
+        .visit(node::create_hdr_render_surface)
+        .unwrap()
+        .unwrap();
+    let pipeline = SceneRenderPipeline({
+        let device = r.get_device();
+        create_scene_render_pipeline(&device, hdr_surface.texture.texture.format())
+    });
     r.graph.add_resource(pipeline);
+    r.graph.add_resource(hdr_surface);
 
+    r.graph
+        .add_node(node::create_frame.into_node().with_name("create_frame"));
     r.graph.add_node(
-        crate::node::create_frame
+        node::clear_surface_hdr_and_depth
             .into_node()
-            .with_name("create_frame"),
-    );
-    r.graph.add_node(
-        crate::node::clear_frame_and_depth
-            .into_node()
-            .with_name("clear_frame_and_depth"),
+            .with_name("clear_hdr_frame_and_depth"),
     );
 
+    r.graph.add_node(
+        node::hdr_surface_update
+            .into_node()
+            .with_name("hdr_surface_update"),
+    );
     r.graph
         .add_node(scene_update.into_node().with_name("scene_update"));
 
@@ -812,6 +865,13 @@ pub fn setup_scene_render_graph(scene: Scene, r: &mut Renderling, with_screen_ca
 
     r.graph
         .add_node(scene_render.into_node().with_name("scene_render"));
+    r.graph.add_node(
+        scene_tonemapping
+            .into_node()
+            .with_name("scene_tonemapping")
+            .run_after("scene_render")
+            .run_before("present"),
+    );
     r.graph
         .add_node(crate::node::present.into_node().with_name("present"));
     if with_screen_capture {

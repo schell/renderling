@@ -11,7 +11,7 @@ use wgpu::util::DeviceExt;
 
 use crate::{
     node::FrameTextureView, Device, Queue, Read, RenderTarget, Renderling, Texture,
-    Write,
+    Write, Uniform,
 };
 
 pub use renderling_shader::ui::{UiConstants, UiDrawParams, UiMode, UiVertex};
@@ -167,81 +167,8 @@ pub fn create_ui_pipeline(
 
 pub struct UiRenderPipeline(pub wgpu::RenderPipeline);
 
-pub struct UiBuffer<T> {
-    inner: T,
-    inner_updated: bool,
-    bindgroup: wgpu::BindGroup,
-    buffer: wgpu::Buffer,
-}
-
-impl<T> UiBuffer<T>
-where
-    T: Clone + bytemuck::Pod + bytemuck::Zeroable,
-{
-    pub fn new(
-        device: &wgpu::Device,
-        inner: T,
-        usage: wgpu::BufferUsages,
-        visibility: wgpu::ShaderStages,
-    ) -> Self {
-        let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some(std::any::type_name::<Self>()),
-            contents: bytemuck::cast_slice(&[inner.clone()]),
-            usage,
-        });
-        let bindgroup = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some(std::any::type_name::<Self>()),
-            layout: &device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                label: Some(std::any::type_name::<Self>()),
-                entries: &[wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                }],
-            }),
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: wgpu::BindingResource::Buffer(buffer.as_entire_buffer_binding()),
-            }],
-        });
-        Self {
-            inner,
-            inner_updated: false,
-            bindgroup,
-            buffer,
-        }
-    }
-
-    pub fn update(&mut self, queue: &wgpu::Queue) {
-        if self.inner_updated {
-            self.inner_updated = false;
-            queue.write_buffer(&self.buffer, 0, bytemuck::cast_slice(&[self.inner.clone()]));
-        }
-    }
-}
-
-impl<T> Deref for UiBuffer<T> {
-    type Target = T;
-
-    fn deref(&self) -> &Self::Target {
-        &self.inner
-    }
-}
-
-impl<T> DerefMut for UiBuffer<T> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        self.inner_updated = true;
-        &mut self.inner
-    }
-}
-
 pub struct UiDrawObject {
-    draw_params: UiBuffer<UiDrawParams>,
+    draw_params: Uniform<UiDrawParams>,
     texture_bindgroup: Option<wgpu::BindGroup>,
     updated_texture: Option<Texture>,
     updated_vertices: Option<(Vec<UiVertex>, Option<Vec<u16>>)>,
@@ -271,7 +198,7 @@ impl UiDrawObject {
             None
         };
         Self {
-            draw_params: UiBuffer::new(
+            draw_params: Uniform::new(
                 device,
                 draw_params,
                 wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
@@ -422,7 +349,7 @@ impl<'a> UiDrawObjectBuilder<'a> {
 }
 
 pub struct UiScene {
-    constants: UiBuffer<UiConstants>,
+    constants: Uniform<UiConstants>,
     _default_texture: Texture,
     default_texture_bindgroup: wgpu::BindGroup,
 }
@@ -434,7 +361,7 @@ impl UiScene {
         canvas_size: UVec2,
         camera_translation: Vec2,
     ) -> Self {
-        let constants = UiBuffer::new(
+        let constants = Uniform::new(
             device,
             UiConstants {
                 canvas_size,
@@ -585,14 +512,14 @@ pub fn ui_scene_render(
         depth_stencil_attachment: None,
     });
     render_pass.set_pipeline(&pipeline.0);
-    render_pass.set_bind_group(0, &scene.constants.bindgroup, &[]);
+    render_pass.set_bind_group(0, scene.constants.bindgroup(), &[]);
     for object in objects.0.iter() {
         let bindgroup = object
             .texture_bindgroup
             .as_ref()
             .unwrap_or(&scene.default_texture_bindgroup);
         render_pass.set_bind_group(1, bindgroup, &[]);
-        render_pass.set_bind_group(2, &object.draw_params.bindgroup, &[]);
+        render_pass.set_bind_group(2, object.draw_params.bindgroup(), &[]);
         render_pass.set_vertex_buffer(0, object.vertex_buffer.slice(..));
         if let Some((index_buffer, len)) = object.vertex_indices.as_ref() {
             render_pass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint16);

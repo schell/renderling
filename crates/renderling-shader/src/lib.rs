@@ -4,6 +4,7 @@
 pub mod math;
 pub mod pbr;
 pub mod scene;
+pub mod tonemapping;
 pub mod ui;
 
 /// Boolean toggles that cause the renderer to turn on/off certain features.
