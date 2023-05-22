@@ -68,21 +68,23 @@ impl Texture {
             view_formats: &[],
         });
 
-        queue.write_texture(
-            wgpu::ImageCopyTextureBase {
-                texture: &texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            data,
-            wgpu::ImageDataLayout {
-                offset: 0,
-                bytes_per_row: Some(color_channels * width),
-                rows_per_image: None,
-            },
-            size,
-        );
+        if !data.is_empty() {
+            queue.write_texture(
+                wgpu::ImageCopyTextureBase {
+                    texture: &texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                data,
+                wgpu::ImageDataLayout {
+                    offset: 0,
+                    bytes_per_row: Some(color_channels * width),
+                    rows_per_image: None,
+                },
+                size,
+            );
+        }
 
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
         let sampler = sampler.unwrap_or_else(|| {

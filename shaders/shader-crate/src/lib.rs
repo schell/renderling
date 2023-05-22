@@ -1,7 +1,7 @@
 //! Shader entry points.
 #![no_std]
 #![feature(lang_items)]
-use renderling_shader::{scene, ui};
+use renderling_shader::{scene, ui, tonemapping};
 use spirv_std::{glam, image::Image2d, spirv, Sampler};
 
 #[spirv(vertex)]
@@ -125,6 +125,27 @@ pub fn compute_cull_entities(
     #[spirv(global_invocation_id)] global_id: glam::UVec3,
 ) {
     scene::compute_cull_entities(entities, draws, global_id)
+}
+
+#[spirv(vertex)]
+pub fn vertex_tonemapping(
+    #[spirv(vertex_index)] vertex_id: u32,
+    out_uv: &mut glam::Vec2,
+    #[spirv(position)] gl_pos: &mut glam::Vec4,
+) {
+    tonemapping::vertex(vertex_id, out_uv, gl_pos)
+}
+
+#[spirv(fragment)]
+pub fn fragment_tonemapping(
+    #[spirv(descriptor_set = 0, binding = 0)] texture: &Image2d,
+    #[spirv(descriptor_set = 0, binding = 1)] sampler: &Sampler,
+    #[spirv(uniform, descriptor_set = 1, binding = 0)] constants: &tonemapping::TonemapConstants,
+    in_uv: glam::Vec2,
+
+    output: &mut glam::Vec4
+) {
+    tonemapping::fragment(texture, sampler, constants, in_uv, output)
 }
 
 ///// Just a test for atomics in Naga.
