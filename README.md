@@ -35,32 +35,32 @@ This means each model may be shaded separately, with a different lighting style.
 - 3d
   - [x] Built-in support for common lighting/material workflows
     - [x] physically based shading
-    - [x] blinn-phong shading
     - [x] unlit
+  - [x] high dynamic range
   - [ ] skybox
-  - [ ] image based lighting
+  - image based lighting
     - [ ] diffuse
     - [ ] specular
   - [ ] msaa
-  - [ ] high definition rendering
   - [ ] bloom
   - [ ] ssao
   - [ ] depth of field
-  - [ ] gltf support
+  - gltf support
     - [ ] scenes
     - [x] nodes
     - [x] cameras
     - [x] meshes
-    - [x] materials
+    - materials
       - [x] pbr metallic roughness (factors + textures)
       - [x] normal mapping
-      - [ ] occlusion textures
+      - [x] occlusion textures
       - [ ] pbr specular glosiness
       - [ ] parallax mapping
     - [x] textures, images, samplers
-    - [ ] animations
-    - [ ] morph targets
-    - [ ] skins
+    - animation
+      - [x] interpolation
+      - [ ] morph targets
+      - [ ] skins
 - 2d
   - [x] colored, textured vertices
   - [x] text rendering mode
