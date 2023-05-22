@@ -1034,7 +1034,6 @@ mod test {
 
         let img = r.render_image().unwrap();
         println!("saving frame");
-        // crate::img_diff::save("gltf_normal_mapping_brick_sphere.png", img.clone());
         crate::img_diff::assert_img_eq("gltf_normal_mapping_brick_sphere.png", img);
     }
 
@@ -1096,13 +1095,6 @@ mod test {
     #[cfg(feature = "gltf")]
     #[test]
     fn simple_animation() {
-        use moongraph::{IsGraphNode, Read};
-
-        use crate::{
-            node::FrameTextureView, setup_scene_render_graph, BackgroundColor, DepthTexture,
-            Device, Queue, WgpuStateError,
-        };
-
         _init_logging();
         let mut r = Renderling::headless(50, 50)
             .unwrap()
@@ -1126,49 +1118,11 @@ mod test {
         }
         let mut entities = builder.entities.clone();
         let scene = builder.build().unwrap();
-        setup_scene_render_graph(scene, &mut r, true);
+        crate::setup_scene_render_graph(scene, &mut r, true);
         let img = r.render_image().unwrap();
         crate::img_diff::assert_img_eq("gltf_simple_animation.png", img);
 
         assert_eq!(1, loader.animations.len());
-
-        // after this point we don't want to clear the frame before every rendering
-        // because we're going to composite different frames of an animation into one,
-        // so we'll replace the clear_frame_and_depth node with our own node
-        // that only clears the depth.
-        let clear_frame_and_depth_node = r.graph.remove_node("clear_frame_and_depth").unwrap();
-        pub fn clear_only_depth(
-            (device, queue, _frame_view, depth, color): (
-                Read<Device>,
-                Read<Queue>,
-                Read<FrameTextureView>,
-                Read<DepthTexture>,
-                Read<BackgroundColor>,
-            ),
-        ) -> Result<(), WgpuStateError> {
-            let depth_view = &depth.view;
-            let [r, g, b, a] = color.0.to_array();
-            let color = wgpu::Color {
-                r: r.into(),
-                g: g.into(),
-                b: b.into(),
-                a: a.into(),
-            };
-            crate::node::conduct_clear_pass(
-                &device,
-                &queue,
-                Some("clear_only_depth"),
-                None,
-                Some(&depth_view),
-                color,
-            );
-            Ok(())
-        }
-        let clear_only_depth_node = clear_only_depth
-            .into_node()
-            .with_name("clear_only_depth_node")
-            .runs_after_barrier(clear_frame_and_depth_node.get_barrier());
-        r.graph.add_node(clear_only_depth_node);
 
         let anime = loader.animations.get(0).unwrap();
         println!("anime: {:?}", anime);
@@ -1195,20 +1149,9 @@ mod test {
                 scene.update_entity(*entity).unwrap();
             }
             drop(scene);
-            r.render().unwrap();
+            let img = r.render_image().unwrap();
+            crate::img_diff::assert_img_eq(&format!("gltf_simple_animation_after/{i}.png"), img);
         }
 
-        {
-            let entity = entities.get_mut(0).unwrap();
-            entity.visible = 0;
-            r.graph
-                .get_resource_mut::<crate::Scene>()
-                .unwrap()
-                .unwrap()
-                .update_entity(*entity)
-                .unwrap();
-        }
-        let img = r.render_image().unwrap();
-        crate::img_diff::assert_img_eq("gltf_simple_animation_after.png", img);
     }
 }
