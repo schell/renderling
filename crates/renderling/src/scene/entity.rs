@@ -1,7 +1,7 @@
 //! Entity builder.
 
 use glam::{Quat, Vec3};
-use renderling_shader::scene::{GpuEntity, GpuMaterial, GpuVertex, Id};
+use renderling_shader::scene::{GpuEntity, GpuMaterial, GpuVertex, Id, MorphTargetsInfo};
 
 use crate::SceneBuilder;
 
@@ -26,6 +26,18 @@ impl<'a> EntityBuilder<'a> {
     pub fn with_starting_vertex_and_count(mut self, first_vertex: u32, count: u32) -> Self {
         self.entity.mesh_first_vertex = first_vertex;
         self.entity.mesh_vertex_count = count;
+        self
+    }
+
+    pub fn with_morph_targets_info(mut self, info: MorphTargetsInfo) -> Self {
+        self.entity.morph_targets_info = info;
+        self
+    }
+
+    pub fn with_weights(mut self, weights: impl IntoIterator<Item = f32>) -> Self {
+        for (i, weight) in weights.into_iter().take(8).enumerate() {
+            self.entity.morph_targets_weights[i] = weight;
+        }
         self
     }
 
