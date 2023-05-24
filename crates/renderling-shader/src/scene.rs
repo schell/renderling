@@ -109,16 +109,6 @@ impl GpuVertex {
     }
 }
 
-/// A morph target for a vertex in a mesh.
-#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
-#[repr(C)]
-#[derive(Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct GpuMorphTargetVertex {
-    pub position: Vec4,
-    pub normal: Vec4,
-    pub tangent: Vec4,
-}
-
 #[repr(transparent)]
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[derive(Copy, Clone, Default, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable)]
