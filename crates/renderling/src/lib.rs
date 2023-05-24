@@ -99,6 +99,17 @@ pub fn setup_ui_and_scene_render_graph(
             .unwrap(),
     );
     r.graph.add_resource(ui_pipeline);
+
+    let (hdr_surface,) = r
+        .graph
+        .visit(node::create_hdr_render_surface)
+        .unwrap()
+        .unwrap();
+    let pipeline = SceneRenderPipeline({
+        let device = r.get_device();
+        create_scene_render_pipeline(&device, hdr_surface.texture.texture.format())
+    });
+    r.graph.add_resource(pipeline);
     let scene_cull_pipeline = SceneComputeCullPipeline(
         r.graph
             .visit(|device: Read<Device>| create_scene_compute_cull_pipeline(&device))
@@ -107,13 +118,29 @@ pub fn setup_ui_and_scene_render_graph(
     r.graph.add_resource(scene_cull_pipeline);
     let scene_pipeline = SceneRenderPipeline(
         r.graph
-            .visit(|(device, target): (Read<Device>, Read<RenderTarget>)| {
-                create_scene_render_pipeline(&device, target.format())
+            .visit(|device: Read<Device>| {
+                create_scene_render_pipeline(&device, hdr_surface.texture.texture.format())
             })
             .unwrap(),
     );
     r.graph.add_resource(scene_pipeline);
+    r.graph.add_resource(hdr_surface);
+    r.graph.add_node(
+        crate::node::create_frame
+            .into_node()
+            .with_name("create_frame"),
+    );
+    r.graph.add_node(
+        node::clear_surface_hdr_and_depth
+            .into_node()
+            .with_name("clear_hdr_frame_and_depth"),
+    );
 
+    r.graph.add_node(
+        node::hdr_surface_update
+            .into_node()
+            .with_name("hdr_surface_update"),
+    );
     r.graph
         .add_node(scene_update.into_node().with_name("scene_update"));
     r.graph.add_node(
@@ -122,30 +149,25 @@ pub fn setup_ui_and_scene_render_graph(
             .with_name("scene_cull")
             .run_after("scene_update"),
     );
-    r.graph.add_node(
-        crate::node::create_frame
-            .into_node()
-            .with_name("create_frame"),
-    );
-    r.graph.add_node(
-        crate::node::clear_frame_and_depth
-            .into_node()
-            .with_name("clear_frame_and_depth"),
-    );
     r.graph
         .add_node(ui_scene_update.into_node().with_name("ui_scene_update"));
-
     r.graph.add_barrier();
 
     r.graph
         .add_node(scene_render.into_node().with_name("scene_render"));
     r.graph.add_node(
+        scene_tonemapping
+            .into_node()
+            .with_name("scene_tonemapping")
+            .run_after("scene_render")
+            .run_before("present"),
+    );
+    r.graph.add_node(
         crate::node::clear_depth
             .into_node()
             .with_name("clear_depth")
-            .run_after("scene_render"),
+            .run_after("scene_tonemapping"),
     );
-
     r.graph.add_node(
         ui_scene_render
             .into_node()

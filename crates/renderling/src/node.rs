@@ -315,17 +315,21 @@ pub fn clear_surface_hdr_and_depth(
     ),
 ) -> Result<(), WgpuStateError> {
     let depth_view = &depth.view;
-    let [r, g, b, a] = color.0.to_array();
+    let c: Vec4 = if frame.format.is_srgb() {
+        color.0.powf(2.2)
+    } else {
+        color.0
+    };
     let color = wgpu::Color {
-        r: r.into(),
-        g: g.into(),
-        b: b.into(),
-        a: a.into(),
+        r: c.x.into(),
+        g: c.y.into(),
+        b: c.z.into(),
+        a: c.w.into(),
     };
     conduct_clear_pass(
         &device,
         &queue,
-        Some("clear_window_hdr_and_depth"),
+        Some("clear_frame_and_depth"),
         vec![&frame.view, &hdr.texture.view],
         Some(&depth_view),
         color,
