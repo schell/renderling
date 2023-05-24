@@ -1,7 +1,7 @@
 //! GPU textures.
-use core::ops::RangeInclusive;
-
 use glam::{UVec2, Vec2};
+
+use crate::bits::{bits, pack, unpack};
 
 #[cfg(target_arch = "spirv")]
 use spirv_std::num_traits::*;
@@ -12,49 +12,23 @@ use spirv_std::num_traits::*;
 pub struct TextureModes(u32);
 
 impl TextureModes {
-    const fn bits(range: RangeInclusive<u32>) -> (u32, u32) {
-        let mut start = *range.start();
-        let end = *range.end();
-        let mut mask = 0;
-        while start <= end {
-            mask = (mask << 1) | 1;
-            start += 1;
-        }
-        (*range.start(), mask)
-    }
-
-    const BITS_WRAP_S: (u32, u32) = Self::bits(0..=1);
-    const BITS_WRAP_T: (u32, u32) = Self::bits(2..=3);
-
-    fn set(&mut self, (shift, mask): (u32, u32), value: u32) {
-        // rotate
-        self.0 = self.0.rotate_right(shift);
-        // unset
-        self.0 &= !mask;
-        // set
-        self.0 |= value & mask;
-        // unrotate
-        self.0 = self.0.rotate_left(shift);
-    }
-
-    fn get(&self, (shift, mask): (u32, u32)) -> u32 {
-        self.0.rotate_right(shift) & mask
-    }
+    const BITS_WRAP_S: (u32, u32) = bits(0..=1);
+    const BITS_WRAP_T: (u32, u32) = bits(2..=3);
 
     pub fn get_wrap_s(&self) -> TextureAddressMode {
-        TextureAddressMode(self.get(Self::BITS_WRAP_S))
+        TextureAddressMode(unpack(self.0, Self::BITS_WRAP_S))
     }
 
     pub fn set_wrap_s(&mut self, wrap_s: TextureAddressMode) {
-        self.set(Self::BITS_WRAP_S, wrap_s.0)
+        pack(&mut self.0, Self::BITS_WRAP_S, wrap_s.0)
     }
 
     pub fn get_wrap_t(&self) -> TextureAddressMode {
-        TextureAddressMode(self.get(Self::BITS_WRAP_T))
+        TextureAddressMode(unpack(self.0, Self::BITS_WRAP_T))
     }
 
     pub fn set_wrap_t(&mut self, wrap_t: TextureAddressMode) {
-        self.set(Self::BITS_WRAP_T, wrap_t.0)
+        pack(&mut self.0, Self::BITS_WRAP_T, wrap_t.0)
     }
 }
 

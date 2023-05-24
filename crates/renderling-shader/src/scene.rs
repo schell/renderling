@@ -11,7 +11,11 @@ use spirv_std::{image::Image2d, Sampler};
 #[cfg(target_arch = "spirv")]
 use spirv_std::num_traits::*;
 
-use crate::{GpuToggles, math::Vec3ColorSwizzles, pbr};
+use crate::{
+    bits::{bits, pack, unpack},
+    math::Vec3ColorSwizzles,
+    pbr, GpuToggles,
+};
 
 mod id;
 pub use id::*;
@@ -103,6 +107,16 @@ impl GpuVertex {
         self.tangent = t.into();
         self
     }
+}
+
+/// A morph target for a vertex in a mesh.
+#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
+#[repr(C)]
+#[derive(Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct GpuMorphTargetVertex {
+    pub position: Vec4,
+    pub normal: Vec4,
+    pub tangent: Vec4,
 }
 
 #[repr(transparent)]
@@ -203,6 +217,51 @@ impl Default for GpuMaterial {
     }
 }
 
+#[repr(transparent)]
+#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
+#[derive(Clone, Copy, Default, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct MorphTargetsInfo(u32);
+
+impl MorphTargetsInfo {
+    const BITS_NUM_TARGETS: (u32, u32) = bits(0..=7);
+    const BITS_HAS_POSITIONS: (u32, u32) = bits(8..=8);
+    const BITS_HAS_NORMALS: (u32, u32) = bits(9..=9);
+    const BITS_HAS_TANGENTS: (u32, u32) = bits(10..=10);
+
+    pub fn num_targets(&self) -> u32 {
+        unpack(self.0, Self::BITS_NUM_TARGETS)
+    }
+
+    #[cfg(not(target_arch = "spirv"))]
+    pub fn set_num_targets(&mut self, num_targets: u8) {
+        pack(&mut self.0, Self::BITS_NUM_TARGETS, num_targets as u32)
+    }
+
+    pub fn has_positions(&self) -> bool {
+        unpack(self.0, Self::BITS_HAS_POSITIONS) == 1
+    }
+
+    pub fn set_has_positions(&mut self, has: bool) {
+        pack(&mut self.0, Self::BITS_HAS_POSITIONS, if has { 1 } else { 0 })
+    }
+
+    pub fn has_normals(&self) -> bool {
+        unpack(self.0, Self::BITS_HAS_NORMALS) == 1
+    }
+
+    pub fn set_has_normals(&mut self, has: bool) {
+        pack(&mut self.0, Self::BITS_HAS_NORMALS, if has { 1 } else { 0 })
+    }
+
+    pub fn has_tangents(&self) -> bool {
+        unpack(self.0, Self::BITS_HAS_TANGENTS) == 1
+    }
+
+    pub fn set_has_tangents(&mut self, has: bool) {
+        pack(&mut self.0, Self::BITS_HAS_TANGENTS, if has { 1 } else { 0 })
+    }
+}
+
 /// A bundle of GPU components.
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[repr(C)]
@@ -214,13 +273,16 @@ pub struct GpuEntity {
     pub mesh_first_vertex: u32,
     // The number of vertices in this entity's mesh.
     pub mesh_vertex_count: u32,
+    // Info about mesh morph targets
+    pub morph_targets_info: MorphTargetsInfo,
+    pub morph_targets_weights: [f32; 8],
+    pub padding: u32,
     // The index/id of this entity's material in the material buffer.
     pub material: Id<GpuMaterial>,
     // The id of this entity's parent, if it exists. `Id::NONE` means "no parent".
     pub parent: Id<GpuEntity>,
     // Whether this entity is visible. `0` is "not visible", any other value is "visible".
     pub visible: u32,
-    pub padding0: [u32; 2],
     // The local translation of this entity
     pub position: Vec4,
     // The local scale of this entity
@@ -235,12 +297,14 @@ impl Default for GpuEntity {
             id: Id::NONE,
             mesh_first_vertex: 0,
             mesh_vertex_count: 0,
+            morph_targets_info: MorphTargetsInfo::default(),
+            morph_targets_weights: [0.0; 8],
+            padding: 0,
             material: Id::NONE,
             position: Vec4::ZERO,
             scale: Vec4::ONE,
             rotation: Quat::IDENTITY,
             visible: 1,
-            padding0: [0, 0],
             parent: Id::NONE,
         }
     }
@@ -281,6 +345,29 @@ impl GpuEntity {
             }
         }
         (position, rotation, scale)
+    }
+
+    #[cfg(not(target_arch = "spirv"))]
+    pub fn set_morph_target_weights(&mut self, weights: impl IntoIterator<Item = f32>) {
+        for (i, weight) in weights.into_iter().take(self.morph_targets_weights.len()).enumerate() {
+            self.morph_targets_weights[i] = weight;
+        }
+    }
+
+    pub fn get_vertex(&self, vertex_index: u32, vertices: &[GpuVertex]) -> GpuVertex {
+        let index = vertex_index as usize;
+        let mut vertex = vertices[index];
+        let targets = self.morph_targets_info.num_targets() as usize;
+        let vertex_count = self.mesh_vertex_count as usize;
+        for i in 1..=targets {
+            let target_weight = self.morph_targets_weights[i-1];
+            let target_index = index + (i * vertex_count);
+            let target = vertices[target_index];
+            vertex.position += (target_weight * target.position.xyz()).extend(0.0);
+            vertex.normal += (target_weight * target.normal.xyz()).extend(0.0);
+            vertex.tangent += (target_weight * target.tangent.xyz()).extend(0.0);
+        }
+        vertex
     }
 }
 
@@ -352,7 +439,7 @@ pub fn main_vertex_scene(
     gl_pos: &mut Vec4,
 ) {
     let entity = entities[instance_index as usize];
-    let vertex = vertices[vertex_index as usize];
+    let vertex = entity.get_vertex(vertex_index, vertices);
     let (position, rotation, scale) = entity.get_world_transform(entities);
     let model_matrix =
         Mat4::from_translation(position) * Mat4::from_quat(rotation) * Mat4::from_scale(scale);
@@ -364,8 +451,12 @@ pub fn main_vertex_scene(
     let scale2 = scale * scale;
     let normal = vertex.normal.xyz().normalize_or_zero();
     let tangent = vertex.tangent.xyz().normalize_or_zero();
-    let normal_w = (model_matrix * (normal / scale2).extend(0.0)).xyz().normalize_or_zero();
-    let tangent_w = (model_matrix * tangent.extend(0.0)).xyz().normalize_or_zero();
+    let normal_w = (model_matrix * (normal / scale2).extend(0.0))
+        .xyz()
+        .normalize_or_zero();
+    let tangent_w = (model_matrix * tangent.extend(0.0))
+        .xyz()
+        .normalize_or_zero();
     let bitangent_w = normal_w.cross(tangent_w) * vertex.tangent.w.signum();
     *out_tangent = tangent_w;
     *out_bitangent = bitangent_w;
@@ -506,9 +597,7 @@ pub fn main_fragment_scene(
                 lights,
             )
         }
-        _unlit => {
-            in_color * tex_color0 * material.factor0 * tex_color1
-        }
+        _unlit => in_color * tex_color0 * material.factor0 * tex_color1,
     };
 }
 

@@ -327,6 +327,10 @@ impl App {
                             }
                             ent.scale = s.extend(0.0);
                         }
+                        TweenProperty::MorphTargetWeights(ws) => {
+                            ent.set_morph_target_weights(ws);
+                        }
+
                     }
                     r.graph
                         .visit(|mut scene: Write<Scene>| {

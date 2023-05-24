@@ -1,6 +1,7 @@
 //! Shader code for `renderling`.
 #![cfg_attr(target_arch = "spirv", no_std)]
 
+pub mod bits;
 pub mod math;
 pub mod pbr;
 pub mod scene;

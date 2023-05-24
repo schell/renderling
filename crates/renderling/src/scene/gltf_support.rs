@@ -171,12 +171,14 @@ impl GltfNode {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct GltfMeshPrim {
     pub vertex_start: u32,
     pub vertex_count: u32,
     pub material_id: Id<GpuMaterial>,
     pub bounding_box: GltfBoundingBox,
+    pub morph_targets_info: MorphTargetsInfo,
+    pub weights: Vec<f32>,
 }
 
 /// The result of loading a gltf file into a [`SceneBuilder`].
@@ -499,6 +501,13 @@ impl GltfLoader {
                 })?
                 .map(Vec3::from)
                 .collect::<Vec<_>>();
+            log::trace!("    {} vertices", positions.len());
+            if positions.len() <= 10 {
+                log::trace!("    positions:");
+                for (i, p) in positions.iter().enumerate() {
+                    log::trace!("      {i}: {p:?}");
+                }
+            }
             let mut gen_normals = false;
             let normals: Box<dyn Iterator<Item = Vec3>> =
                 if let Some(normals) = reader.read_normals() {
@@ -547,27 +556,73 @@ impl GltfLoader {
             let uvs = uv0
                 .zip(uv1)
                 .map(|(uv0, uv1)| Vec4::new(uv0.x, uv0.y, uv1.x, uv1.y));
+
+            // See the GLTF spec on morph targets
+            // https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html#morph-targets
+            let mut num_morph_targets_positions = 0;
+            let mut num_morph_targets_normals = 0;
+            let mut num_morph_targets_tangents = 0;
+            let morph_targets = reader
+                .read_morph_targets()
+                .map(|(may_ps, may_ns, may_ts)| {
+                    let may_ps = may_ps.map(|ps| ps.collect::<Vec<_>>());
+                    let may_ns = may_ns.map(|ns| ns.collect::<Vec<_>>());
+                    let may_ts = may_ts.map(|ts| ts.collect::<Vec<_>>());
+                    num_morph_targets_positions = num_morph_targets_positions
+                        .max(may_ps.as_ref().map(Vec::len).unwrap_or_default());
+                    num_morph_targets_normals = num_morph_targets_normals
+                        .max(may_ps.as_ref().map(Vec::len).unwrap_or_default());
+                    num_morph_targets_tangents = num_morph_targets_tangents
+                        .max(may_ps.as_ref().map(Vec::len).unwrap_or_default());
+                    (may_ps, may_ns, may_ts)
+                })
+                .collect::<Vec<_>>();
+            let num_morph_targets = morph_targets.len();
+            log::trace!("    {num_morph_targets} morph targets");
+            let has_morph_targets = num_morph_targets_positions > 0
+                || num_morph_targets_normals > 0
+                || num_morph_targets_tangents > 0;
+
             let vertices = positions
                 .iter()
                 .zip(colors.zip(uvs.zip(normals.zip(tangents))))
-                .map(|(position, (color, (uv, (normal, tangent))))| GpuVertex {
-                    position: position.extend(0.0),
-                    color,
-                    uv,
-                    normal: normal.extend(0.0),
-                    tangent,
+                .enumerate()
+                .map(|(i, (position, (color, (uv, (normal, tangent)))))| {
+                    (
+                        GpuVertex {
+                            position: position.extend(0.0),
+                            color,
+                            uv,
+                            normal: normal.extend(0.0),
+                            tangent,
+                        },
+                        morph_targets
+                            .iter()
+                            .map(|(mps, mns, mts)| {
+                                (
+                                    mps.as_ref().map(|ps| ps[i]),
+                                    mns.as_ref().map(|ns| ns[i]),
+                                    mts.as_ref().map(|ts| ts[i]),
+                                )
+                            })
+                            .collect::<Vec<_>>(),
+                    )
                 })
                 .collect::<Vec<_>>();
-            // we don't yet support indices, so we'll just repeat vertices
+            drop(morph_targets);
+
+            // We don't yet support indices, so we'll just repeat vertices
             let mut vertices = if let Some(indices) = reader.read_indices() {
                 let indices = indices.into_u32();
-                indices.map(|i| vertices[i as usize]).collect::<Vec<_>>()
+                indices
+                    .map(|i| vertices[i as usize].clone())
+                    .collect::<Vec<_>>()
             } else {
                 vertices
             };
             if gen_normals || gen_tangents {
                 vertices.chunks_mut(3).for_each(|t| match t {
-                    [a, b, c] => {
+                    [(a, _), (b, _), (c, _)] => {
                         let ab = b.position.xyz() - a.position.xyz();
                         let ac = c.position.xyz() - a.position.xyz();
                         let n = if gen_normals {
@@ -605,15 +660,68 @@ impl GltfLoader {
                 });
             }
 
-            let (vertex_start, vertex_count) = builder.add_meshlet(vertices);
+            // If we have morph targets we'll represent them by creating separate meshlets
+            // after the first "original" meshlet. That way we can index into them by using
+            // the vertex count, which MUST be the same according to the spec.
+            let (original_meshlet, morph_target_meshlets) = if has_morph_targets {
+                if num_morph_targets_positions > 0 {
+                    log::trace!("      {num_morph_targets_positions} positions");
+                }
+                if num_morph_targets_normals > 0 {
+                    log::trace!("      {num_morph_targets_normals} normals");
+                }
+                if num_morph_targets_tangents > 0 {
+                    log::trace!("      {num_morph_targets_tangents} tangents");
+                }
+
+                // TODO: Optimization - preset capacity on these arrays.
+                let mut morph_target_meshlets = vec![vec![]; num_morph_targets];
+                let mut original_meshlet = vec![];
+                for (vert, targets) in vertices.into_iter() {
+                    original_meshlet.push(vert);
+                    for (i, (may_ps, may_ns, may_ts)) in targets.into_iter().enumerate() {
+                        let p = may_ps.map(Vec3::from).unwrap_or_default().extend(0.0);
+                        let n = may_ns.map(Vec3::from).unwrap_or_default().extend(0.0);
+                        let t = may_ts.map(Vec3::from).unwrap_or_default().extend(0.0);
+                        let mut v = GpuVertex::default();
+                        v.position = p;
+                        v.normal = n;
+                        v.tangent = t;
+                        morph_target_meshlets[i].push(v);
+                    }
+                }
+                (original_meshlet, morph_target_meshlets)
+            } else {
+                (vertices.into_iter().map(|(v, _)| v).collect(), vec![])
+            };
+
+            let (vertex_start, vertex_count) = builder.add_meshlet(original_meshlet);
+            for morph_target_meshlet in morph_target_meshlets.into_iter() {
+                let _ = builder.add_meshlet(morph_target_meshlet);
+            }
+            let weights = mesh.weights().map(|ws| ws.to_vec()).unwrap_or_default();
+            log::trace!("    weights:");
+            for (i, w) in weights.iter().enumerate() {
+                log::trace!("      {i}: {w}");
+            }
             let material_index = primitive.material().index();
             let material_id = self.material_at(material_index, builder, document)?;
             let bounding_box = primitive.bounding_box().into();
             mesh_primitives.push(GltfMeshPrim {
+                weights,
                 vertex_start,
                 vertex_count,
                 material_id,
                 bounding_box,
+                morph_targets_info: {
+                    // TODO: Create the info further up
+                    let mut info = MorphTargetsInfo::default();
+                    info.set_num_targets(num_morph_targets as u8);
+                    info.set_has_positions(num_morph_targets_positions > 0);
+                    info.set_has_normals(num_morph_targets_normals > 0);
+                    info.set_has_tangents(num_morph_targets_tangents > 0);
+                    info
+                },
             });
         }
         let _ = self
@@ -703,6 +811,13 @@ impl GltfLoader {
                     .unwrap_or("unknown".to_string()),
             })?;
 
+            let node_weights = node.weights().map(|ws| ws.to_vec());
+            if let Some(ws) = node_weights.as_ref() {
+                log::trace!("    node weights:");
+                for (i, w) in ws.iter().enumerate() {
+                    log::trace!("    {i}: {w}");
+                }
+            }
             let parent = builder
                 .new_entity()
                 .with_position(position)
@@ -710,34 +825,59 @@ impl GltfLoader {
                 .with_scale(scale);
             let (parent, children) = if prims.len() == 1 {
                 log::trace!("    with only 1 primitive, so no children needed");
+                let GltfMeshPrim {
+                    vertex_start,
+                    vertex_count,
+                    material_id,
+                    bounding_box: _,
+                    morph_targets_info,
+                    weights,
+                } = &prims[0];
                 (
-                    parent
-                        .with_starting_vertex_and_count(
-                            prims[0].vertex_start,
-                            prims[0].vertex_count,
-                        )
-                        .with_material(prims[0].material_id)
-                        .build()
-                        .id,
+                    {
+                        parent
+                            .with_starting_vertex_and_count(*vertex_start, *vertex_count)
+                            .with_material(*material_id)
+                            .with_morph_targets_info(*morph_targets_info)
+                            .with_weights(weights.clone())
+                            .build()
+                            .id
+                    },
                     vec![],
                 )
             } else {
                 let parent = parent.build().id;
+                log::trace!("    with {parent:?}");
                 log::trace!("    with {} child primitives", prims.len());
                 let children = prims
                     .iter()
-                    .map(|child_prim| {
-                        builder
-                            .new_entity()
-                            .with_starting_vertex_and_count(
-                                child_prim.vertex_start,
-                                child_prim.vertex_count,
-                            )
-                            .with_material(child_prim.material_id)
-                            .with_parent(parent)
-                            .build()
-                            .id
-                    })
+                    .map(
+                        |GltfMeshPrim {
+                             vertex_start,
+                             vertex_count,
+                             material_id,
+                             bounding_box: _,
+                             morph_targets_info,
+                             weights,
+                         }| {
+                            let child = builder
+                                .new_entity()
+                                .with_starting_vertex_and_count(*vertex_start, *vertex_count)
+                                .with_material(*material_id)
+                                .with_morph_targets_info(*morph_targets_info)
+                                .with_weights(weights.clone())
+                                .with_parent(parent)
+                                .build()
+                                .id;
+                            log::trace!("      child {child:?}");
+                            log::trace!("        weights {weights:?}");
+                            log::trace!(
+                                "        num_morph_targets {}",
+                                morph_targets_info.num_targets()
+                            );
+                            child
+                        },
+                    )
                     .collect::<Vec<_>>();
                 (parent, children)
             };
@@ -774,7 +914,10 @@ impl GltfLoader {
             log::trace!("  node is {}", from_gltf_light_kind(light.kind()));
             log::trace!("    with color    : {color:?}");
             log::trace!("    with direction: {direction:?}");
-            log::trace!("    with intensity: {intensity:?} {}", gltf_light_intensity_units(light.kind()));
+            log::trace!(
+                "    with intensity: {intensity:?} {}",
+                gltf_light_intensity_units(light.kind())
+            );
             let _ = self.lights.insert(light.index(), None, gpu_light);
             GltfNode::Light(light.index())
         } else {
@@ -797,8 +940,17 @@ impl GltfLoader {
         );
 
         for child in node.children() {
+            if child.index() == node.index() {
+                continue;
+            }
+            log::trace!(
+                "    current node {} {:?} contains child node {} {:?}",
+                node.index(),
+                node.name(),
+                child.index(),
+                child.name()
+            );
             let child_node = self.node_at(child.index(), builder, document)?;
-            log::trace!("    with child node {} {:?}", child.index(), child.name());
             let ids = child_node.as_entity().and_then(|child| {
                 let parent = gltf_node.as_entity()?;
                 Some((child, parent))
@@ -836,7 +988,6 @@ impl GltfLoader {
             let interpolation = channel.sampler().interpolation().into();
             log::trace!("    using {interpolation} interpolation");
             let tween = Tween {
-                keyframes,
                 properties: match outputs {
                     gltf::animation::util::ReadOutputs::Translations(ts) => {
                         log::trace!("    tweens translations");
@@ -850,11 +1001,21 @@ impl GltfLoader {
                         log::trace!("    tweens scales");
                         TweenProperties::Scales(ss.map(Vec3::from).collect())
                     }
-                    gltf::animation::util::ReadOutputs::MorphTargetWeights(_) => {
+                    gltf::animation::util::ReadOutputs::MorphTargetWeights(ws) => {
                         log::trace!("    tweens morph target weights");
-                        todo!("morph targets unsupported")
+                        let ws = ws.into_f32().collect::<Vec<_>>();
+                        let num_morph_targets = ws.len() / keyframes.len();
+                        log::trace!("      weights length  : {}", ws.len());
+                        log::trace!("      keyframes length: {}", keyframes.len());
+                        log::trace!("      morph targets   : {}", num_morph_targets);
+                        TweenProperties::MorphTargetWeights(
+                            ws.chunks_exact(num_morph_targets)
+                                .map(|chunk| chunk.iter().copied().collect::<Vec<_>>())
+                                .collect(),
+                        )
                     }
                 },
+                keyframes,
                 interpolation,
                 target_node_index: {
                     let index = channel.target().node().index();
@@ -1145,6 +1306,9 @@ mod test {
                     crate::TweenProperty::Scale(s) => {
                         entity.scale = s.extend(0.0);
                     }
+                    crate::TweenProperty::MorphTargetWeights(ws) => {
+                        entity.set_morph_target_weights(ws);
+                    }
                 }
                 scene.update_entity(*entity).unwrap();
             }
@@ -1152,6 +1316,5 @@ mod test {
             let img = r.render_image().unwrap();
             crate::img_diff::assert_img_eq(&format!("gltf_simple_animation_after/{i}.png"), img);
         }
-
     }
 }
