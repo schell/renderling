@@ -32,6 +32,9 @@ By default it uses a single uber-shader with a configurable lighting model per m
 
 This means each model may be shaded separately, with a different lighting style.
 
+- [ ] frustum culling
+- [ ] occlusion culling
+- [ ] light tiling
 - 3d
   - [x] Built-in support for common lighting/material workflows
     - [x] physically based shading
