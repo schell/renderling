@@ -232,7 +232,11 @@ impl MorphTargetsInfo {
     }
 
     pub fn set_has_positions(&mut self, has: bool) {
-        pack(&mut self.0, Self::BITS_HAS_POSITIONS, if has { 1 } else { 0 })
+        pack(
+            &mut self.0,
+            Self::BITS_HAS_POSITIONS,
+            if has { 1 } else { 0 },
+        )
     }
 
     pub fn has_normals(&self) -> bool {
@@ -248,7 +252,11 @@ impl MorphTargetsInfo {
     }
 
     pub fn set_has_tangents(&mut self, has: bool) {
-        pack(&mut self.0, Self::BITS_HAS_TANGENTS, if has { 1 } else { 0 })
+        pack(
+            &mut self.0,
+            Self::BITS_HAS_TANGENTS,
+            if has { 1 } else { 0 },
+        )
     }
 }
 
@@ -339,7 +347,11 @@ impl GpuEntity {
 
     #[cfg(not(target_arch = "spirv"))]
     pub fn set_morph_target_weights(&mut self, weights: impl IntoIterator<Item = f32>) {
-        for (i, weight) in weights.into_iter().take(self.morph_targets_weights.len()).enumerate() {
+        for (i, weight) in weights
+            .into_iter()
+            .take(self.morph_targets_weights.len())
+            .enumerate()
+        {
             self.morph_targets_weights[i] = weight;
         }
     }
@@ -350,7 +362,7 @@ impl GpuEntity {
         let targets = self.morph_targets_info.num_targets() as usize;
         let vertex_count = self.mesh_vertex_count as usize;
         for i in 1..=targets {
-            let target_weight = self.morph_targets_weights[i-1];
+            let target_weight = self.morph_targets_weights[i - 1];
             let target_index = index + (i * vertex_count);
             let target = vertices[target_index];
             vertex.position += (target_weight * target.position.xyz()).extend(0.0);

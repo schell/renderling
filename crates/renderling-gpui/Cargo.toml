@@ -1,0 +1,17 @@
+[package]
+name = "renderling-gpui"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+glam = { version = "^0.22", default-features = false, features = ["bytemuck", "libm"] }
+image = { version = "^0.24" }
+log = "^0.4"
+renderling = { path = "../renderling" }
+wgpu = "0.16"
+
+[dev-dependencies]
+env_logger = "^0.10"
+img-diff = { path = "../img-diff" }

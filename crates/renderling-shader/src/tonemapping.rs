@@ -6,8 +6,8 @@
 
 // uniform float u_Exposure;
 
+use glam::{mat3, Mat3, Vec2, Vec3, Vec4, Vec4Swizzles};
 use spirv_std::{image::Image2d, Sampler};
-use glam::{mat3, Mat3, Vec3, Vec4, Vec4Swizzles, Vec2};
 
 const GAMMA: f32 = 2.2;
 const INV_GAMMA: f32 = 1.0 / GAMMA;
@@ -96,7 +96,10 @@ pub struct TonemapConstants {
 
 impl Default for TonemapConstants {
     fn default() -> Self {
-        Self { tonemap: Tonemap::NONE, exposure: 1.0 }
+        Self {
+            tonemap: Tonemap::NONE,
+            exposure: 1.0,
+        }
     }
 }
 
@@ -123,21 +126,14 @@ pub fn tonemap(mut color: Vec4, constants: &TonemapConstants) -> Vec4 {
 }
 
 const QUAD_2D_POINTS: [(Vec2, Vec2); 6] = {
-    let tl =  (Vec2::new(-1.0, 1.0), Vec2::new(0.0, 0.0));
-    let tr =  (Vec2::new(1.0, 1.0), Vec2::new(1.0, 0.0));
-    let bl =  (Vec2::new(-1.0, -1.0), Vec2::new(0.0, 1.0));
-    let br =  (Vec2::new(1.0, -1.0), Vec2::new(1.0, 1.0));
-    [
-        tl, bl, br,
-        tl, br, tr
-    ]
+    let tl = (Vec2::new(-1.0, 1.0), Vec2::new(0.0, 0.0));
+    let tr = (Vec2::new(1.0, 1.0), Vec2::new(1.0, 0.0));
+    let bl = (Vec2::new(-1.0, -1.0), Vec2::new(0.0, 1.0));
+    let br = (Vec2::new(1.0, -1.0), Vec2::new(1.0, 1.0));
+    [tl, bl, br, tl, br, tr]
 };
 
-pub fn vertex(
-    vertex_id: u32,
-    out_uv: &mut glam::Vec2,
-    gl_pos: &mut glam::Vec4,
-) {
+pub fn vertex(vertex_id: u32, out_uv: &mut glam::Vec2, gl_pos: &mut glam::Vec4) {
     let (pos, uv) = QUAD_2D_POINTS[vertex_id as usize];
     *out_uv = uv;
     *gl_pos = pos.extend(0.0).extend(1.0);
@@ -148,7 +144,7 @@ pub fn fragment(
     sampler: &Sampler,
     constants: &TonemapConstants,
     in_uv: glam::Vec2,
-    output: &mut glam::Vec4
+    output: &mut glam::Vec4,
 ) {
     let color: Vec4 = texture.sample(*sampler, in_uv);
     let color = tonemap(color, constants);

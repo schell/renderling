@@ -5,13 +5,12 @@
 use std::ops::{Deref, DerefMut};
 
 use glam::{UVec2, Vec2, Vec4};
-use moongraph::IsGraphNode;
 use snafu::prelude::*;
 use wgpu::util::DeviceExt;
 
 use crate::{
-    node::FrameTextureView, Device, Queue, Read, RenderTarget, Renderling, Texture,
-    Write, Uniform,
+    node::FrameTextureView, Device, IsGraphNode, Queue, Read, RenderTarget, Renderling, Texture,
+    Uniform, Write,
 };
 
 pub use renderling_shader::ui::{UiConstants, UiDrawParams, UiMode, UiVertex};
@@ -217,6 +216,30 @@ impl UiDrawObject {
         }
     }
 
+    pub fn get_position(&self) -> Vec2 {
+        self.draw_params.translation
+    }
+
+    pub fn get_scale(&self) -> Vec2 {
+        self.draw_params.scale
+    }
+
+    pub fn get_rotation(&self) -> f32 {
+        self.draw_params.rotation
+    }
+
+    pub fn set_position(&mut self, p: impl Into<Vec2>) {
+        self.draw_params.deref_mut().translation = p.into();
+    }
+
+    pub fn set_scale(&mut self, s: impl Into<Vec2>) {
+        self.draw_params.deref_mut().scale = s.into();
+    }
+
+    pub fn set_rotation(&mut self, r: impl Into<f32>) {
+        self.draw_params.deref_mut().rotation = r.into();
+    }
+
     pub fn set_vertices_and_indices(
         &mut self,
         vertices: impl IntoIterator<Item = UiVertex>,
@@ -247,9 +270,11 @@ impl UiDrawObject {
     ) -> Result<(), UiSceneError> {
         self.draw_params.update(queue);
         if let Some(texture) = self.updated_texture.take() {
+            log::trace!("updating UiDrawObject texture");
             self.texture_bindgroup = Some(ui_texture_bindgroup(device, &texture))
         }
         if let Some((vertices, may_indices)) = self.updated_vertices.take() {
+            log::trace!("updating UiDrawObject vertices");
             self.vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("UiDrawObject::update vertices"),
                 contents: bytemuck::cast_slice(&vertices),
@@ -257,6 +282,7 @@ impl UiDrawObject {
             });
             self.vertex_buffer_len = vertices.len();
             if let Some(indices) = may_indices {
+                log::trace!("updating UiDrawObject indices");
                 let (index_buffer, size) =
                     self.vertex_indices.as_mut().context(NoIndexBufferSnafu)?;
                 *index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -404,6 +430,14 @@ impl UiScene {
         }
         Ok(())
     }
+
+    pub fn constants_bindgroup(&self) -> &wgpu::BindGroup {
+        self.constants.bindgroup()
+    }
+
+    pub fn default_texture_bindgroup(&self) -> &wgpu::BindGroup {
+        &self.default_texture_bindgroup
+    }
 }
 
 pub struct UiSceneBuilder<'a> {
@@ -487,6 +521,31 @@ pub fn ui_scene_update(
     scene.update(&device, &queue, &mut objects.0)
 }
 
+impl UiDrawObject {
+    pub fn draw<'a, 'b, 'c>(
+        &'a self,
+        render_pass: &'c mut wgpu::RenderPass<'b>,
+        default_texture_bindgroup: &'a wgpu::BindGroup,
+    ) where
+        'a: 'b,
+        'a: 'c,
+    {
+        let bindgroup = self
+            .texture_bindgroup
+            .as_ref()
+            .unwrap_or(default_texture_bindgroup);
+        render_pass.set_bind_group(1, bindgroup, &[]);
+        render_pass.set_bind_group(2, self.draw_params.bindgroup(), &[]);
+        render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
+        if let Some((index_buffer, len)) = self.vertex_indices.as_ref() {
+            render_pass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint16);
+            render_pass.draw_indexed(0..*len as u32, 0, 0..1);
+        } else {
+            render_pass.draw(0..self.vertex_buffer_len as u32, 0..1);
+        }
+    }
+}
+
 pub fn ui_scene_render(
     (device, queue, scene, objects, pipeline, frame): (
         Read<Device>,
@@ -514,19 +573,7 @@ pub fn ui_scene_render(
     render_pass.set_pipeline(&pipeline.0);
     render_pass.set_bind_group(0, scene.constants.bindgroup(), &[]);
     for object in objects.0.iter() {
-        let bindgroup = object
-            .texture_bindgroup
-            .as_ref()
-            .unwrap_or(&scene.default_texture_bindgroup);
-        render_pass.set_bind_group(1, bindgroup, &[]);
-        render_pass.set_bind_group(2, object.draw_params.bindgroup(), &[]);
-        render_pass.set_vertex_buffer(0, object.vertex_buffer.slice(..));
-        if let Some((index_buffer, len)) = object.vertex_indices.as_ref() {
-            render_pass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-            render_pass.draw_indexed(0..*len as u32, 0, 0..1);
-        } else {
-            render_pass.draw(0..object.vertex_buffer_len as u32, 0..1);
-        }
+        object.draw(&mut render_pass, &scene.default_texture_bindgroup);
     }
     drop(render_pass);
     queue.submit(std::iter::once(encoder.finish()));
@@ -611,7 +658,7 @@ mod test {
         setup_ui_render_graph(scene, vec![tri], &mut r, true);
 
         let img = r.render_image().unwrap();
-        crate::img_diff::assert_img_eq("ui_tri.png", img);
+        img_diff::assert_img_eq("ui_tri.png", img);
     }
 
     #[cfg(feature = "image")]
@@ -649,7 +696,7 @@ mod test {
         setup_ui_render_graph(scene, vec![obj], &mut r, true);
 
         let img = r.render_image().unwrap();
-        crate::img_diff::assert_img_eq("ui_image.png", img);
+        img_diff::assert_img_eq("ui_image.png", img);
     }
 
     #[cfg(feature = "text")]
@@ -705,6 +752,6 @@ mod test {
         setup_ui_render_graph(scene, vec![obj_a, obj_b], &mut r, true);
 
         let img = r.render_image().unwrap();
-        crate::img_diff::assert_img_eq("ui_text.png", img);
+        img_diff::assert_img_eq("ui_text.png", img);
     }
 }

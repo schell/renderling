@@ -11,7 +11,7 @@ use ::ab_glyph::Rect;
 use glyph_brush::*;
 
 pub use ::ab_glyph::FontArc;
-pub use glyph_brush::{Color, Section, Text};
+pub use glyph_brush::{Color, FontId, GlyphCruncher, OwnedSection, OwnedText, Section, Text};
 
 use crate::{Renderling, Texture, UiVertex};
 

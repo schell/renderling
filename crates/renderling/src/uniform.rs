@@ -81,6 +81,7 @@ where
 
     pub fn update(&mut self, queue: &wgpu::Queue) {
         if self.inner_updated {
+            log::trace!("updating {}", std::any::type_name::<T>());
             self.inner_updated = false;
             queue.write_buffer(&self.buffer, 0, bytemuck::cast_slice(&[self.inner.clone()]));
         }

@@ -14,8 +14,8 @@ use moongraph::*;
 use renderling_shader::tonemapping::TonemapConstants;
 
 use crate::{
-    math::Vec4, BackgroundColor, BufferDimensions, CopiedTextureBuffer, DepthTexture, Device,
-    Frame, Queue, RenderTarget, ScreenSize, Uniform, WgpuStateError,
+    math::Vec4, BackgroundColor, CopiedTextureBuffer, DepthTexture, Device, Frame, Queue,
+    RenderTarget, ScreenSize, Uniform, WgpuStateError,
 };
 
 fn default_frame_texture_view(frame_texture: &wgpu::Texture) -> wgpu::TextureView {
@@ -73,14 +73,19 @@ pub fn conduct_clear_pass(
         label: Some("renderling clear pass"),
     });
 
-    let frame_views = frame_views.into_iter().map(|view| Some(wgpu::RenderPassColorAttachment {
-        view,
-        resolve_target: None,
-        ops: wgpu::Operations {
-            load: wgpu::LoadOp::Clear(clear_color),
-            store: true,
-        },
-    })).collect::<Vec<_>>();
+    let frame_views = frame_views
+        .into_iter()
+        .map(|view| {
+            Some(wgpu::RenderPassColorAttachment {
+                view,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(clear_color),
+                    store: true,
+                },
+            })
+        })
+        .collect::<Vec<_>>();
     let _ = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
         label,
         color_attachments: &frame_views,
@@ -184,7 +189,12 @@ fn scene_hdr_surface_bindgroup_layout(device: &wgpu::Device) -> wgpu::BindGroupL
 }
 
 pub fn create_hdr_render_surface(
-    (device, queue, size, target): (Read<Device>, Read<Queue>, Read<ScreenSize>, Read<RenderTarget>),
+    (device, queue, size, target): (
+        Read<Device>,
+        Read<Queue>,
+        Read<ScreenSize>,
+        Read<RenderTarget>,
+    ),
 ) -> Result<(HdrSurface,), WgpuStateError> {
     let (constants, constants_layout) = Uniform::new_and_layout(
         &device,
@@ -303,7 +313,8 @@ pub fn hdr_surface_update(
     Ok(())
 }
 
-/// Conduct a clear pass on the window surface, the hdr surface and the depth texture.
+/// Conduct a clear pass on the window surface, the hdr surface and the depth
+/// texture.
 pub fn clear_surface_hdr_and_depth(
     (device, queue, frame, hdr, depth, color): (
         Read<Device>,
@@ -358,41 +369,10 @@ impl PostRenderBufferCreate {
     /// before presentation.
     pub fn create(self) -> Result<(PostRenderBuffer,), WgpuStateError> {
         let ScreenSize { width, height } = *self.size;
-        let dimensions = BufferDimensions::new(4, 1, width as usize, height as usize);
-        // The output buffer lets us retrieve the self as an array
-        let buffer = self.device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("screen capture buffer"),
-            size: (dimensions.padded_bytes_per_row * dimensions.height) as u64,
-            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        let mut encoder = self
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("post render screen capture encoder"),
-            });
-        let texture = self.frame.texture();
-        // Copy the data from the surface texture to the buffer
-        encoder.copy_texture_to_buffer(
-            texture.as_image_copy(),
-            wgpu::ImageCopyBuffer {
-                buffer: &buffer,
-                layout: wgpu::ImageDataLayout {
-                    offset: 0,
-                    bytes_per_row: Some(dimensions.padded_bytes_per_row as u32),
-                    rows_per_image: None,
-                },
-            },
-            wgpu::Extent3d {
-                width: dimensions.width as u32,
-                height: dimensions.height as u32,
-                depth_or_array_layers: 1,
-            },
-        );
-
-        self.queue.submit(std::iter::once(encoder.finish()));
-
-        Ok((PostRenderBuffer(CopiedTextureBuffer { dimensions, buffer }),))
+        let copied_texture_buffer =
+            self.frame
+                .copy_to_buffer(&self.device, &self.queue, width, height);
+        Ok((PostRenderBuffer(copied_texture_buffer),))
     }
 }
 

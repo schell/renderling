@@ -5,6 +5,8 @@
 use snafu::prelude::*;
 use std::sync::Arc;
 
+use crate::{BufferDimensions, CopiedTextureBuffer};
+
 #[derive(Debug, Snafu)]
 pub enum WgpuStateError {
     #[snafu(display("cannot create adaptor"))]
@@ -123,6 +125,48 @@ impl Frame {
             Frame::Surface(s) => &s.texture,
             Frame::Texture(t) => &t,
         }
+    }
+
+    pub fn copy_to_buffer(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        width: u32,
+        height: u32,
+    ) -> CopiedTextureBuffer {
+        let dimensions = BufferDimensions::new(4, 1, width as usize, height as usize);
+        // The output buffer lets us retrieve the self as an array
+        let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("RenderTarget::copy_to_buffer"),
+            size: (dimensions.padded_bytes_per_row * dimensions.height) as u64,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("post render screen capture encoder"),
+        });
+        let texture = self.texture();
+        // Copy the data from the surface texture to the buffer
+        encoder.copy_texture_to_buffer(
+            texture.as_image_copy(),
+            wgpu::ImageCopyBuffer {
+                buffer: &buffer,
+                layout: wgpu::ImageDataLayout {
+                    offset: 0,
+                    bytes_per_row: Some(dimensions.padded_bytes_per_row as u32),
+                    rows_per_image: None,
+                },
+            },
+            wgpu::Extent3d {
+                width: dimensions.width as u32,
+                height: dimensions.height as u32,
+                depth_or_array_layers: 1,
+            },
+        );
+
+        queue.submit(std::iter::once(encoder.finish()));
+
+        CopiedTextureBuffer { dimensions, buffer }
     }
 
     /// If self is `TargetFrame::Surface` this presents the surface frame.
