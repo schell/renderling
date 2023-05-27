@@ -7,10 +7,9 @@ const TEST_IMG_DIR: &'static str = "../../test_img";
 const TEST_OUTPUT_DIR: &'static str = "../../test_output";
 
 pub fn save(filename: &str, seen: impl Into<DynamicImage>) {
-    std::fs::create_dir_all(TEST_OUTPUT_DIR).unwrap();
-    seen.into()
-        .save(Path::new(TEST_OUTPUT_DIR).join(filename))
-        .unwrap();
+    let path = Path::new(TEST_OUTPUT_DIR).join(filename);
+    std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+    seen.into().save(path).unwrap();
 }
 
 pub fn assert_img_eq(filename: &str, seen: impl Into<DynamicImage>) {

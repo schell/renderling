@@ -12,7 +12,7 @@ use renderling::{UiRenderPipeline, UiSceneError};
 
 pub use renderling::math::{UVec2, Vec2, Vec4};
 
-#[derive(Clone, Copy, Default)]
+#[derive(Clone, Copy, Default, Debug, PartialEq)]
 pub struct Size {
     width: u32,
     height: u32,
@@ -24,12 +24,86 @@ impl From<Size> for Vec2 {
     }
 }
 
+impl std::ops::Add<UVec2> for Size {
+    type Output = Self;
+
+    fn add(mut self, rhs: UVec2) -> Self::Output {
+        self.width += rhs.x;
+        self.height += rhs.y;
+        self
+    }
+}
+
+impl std::ops::Sub<UVec2> for Size {
+    type Output = Self;
+
+    fn sub(mut self, rhs: UVec2) -> Self::Output {
+        self.width = self.width.saturating_sub(rhs.x);
+        self.height = self.height.saturating_sub(rhs.y);
+        self
+    }
+}
+
+impl std::ops::SubAssign<UVec2> for Size {
+    fn sub_assign(&mut self, rhs: UVec2) {
+        self.width = self.width.saturating_sub(rhs.x);
+        self.height = self.height.saturating_sub(rhs.y);
+    }
+}
+
+#[derive(Clone, Copy, Default, Debug, PartialEq)]
 pub struct SizeConstraint {
     min: Size,
     max: Size,
 }
 
+impl std::ops::Sub<UVec2> for SizeConstraint {
+    type Output = Self;
+
+    fn sub(mut self, rhs: UVec2) -> Self::Output {
+        self.min -= rhs;
+        self.max -= rhs;
+        self
+    }
+}
+
+impl std::ops::SubAssign<UVec2> for SizeConstraint {
+    fn sub_assign(&mut self, rhs: UVec2) {
+        self.min -= rhs;
+        self.max -= rhs;
+    }
+}
+
+impl From<Size> for SizeConstraint {
+    fn from(value: Size) -> Self {
+        SizeConstraint {
+            min: value,
+            max: value,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Default, Debug)]
+pub struct AABB {
+    pub min: Vec2,
+    pub max: Vec2
+}
+
+impl AABB {
+    pub fn contains(&self, p: impl Into<Vec2>) -> bool {
+        let p = p.into();
+        p.x >= self.min.x && p.x <= self.max.x
+            && p.y >= self.min.y && p.y <= self.max.y
+    }
+}
+
+pub enum Event {
+    MouseMoved(UVec2),
+}
+
 pub trait Element {
+    type OutputEvent;
+
     fn layout(&mut self, constraint: SizeConstraint) -> Size;
     fn paint<'a, 'b: 'a>(
         &'b mut self,
@@ -40,6 +114,7 @@ pub trait Element {
         render_pass: &mut wgpu::RenderPass<'a>,
         default_texture_bindgroup: &'a wgpu::BindGroup,
     );
+    fn event(&mut self, event: Event) -> Option<Self::OutputEvent>;
 }
 
 #[derive(Default)]
@@ -99,6 +174,8 @@ impl Rectangle {
 }
 
 impl Element for Rectangle {
+    type OutputEvent = ();
+
     fn paint<'a, 'b: 'a>(
         &'b mut self,
         origin: Vec2,
@@ -147,6 +224,10 @@ impl Element for Rectangle {
                 .clamp(constraint.min.height, constraint.max.height),
         }
     }
+
+    fn event(&mut self, _event: Event) -> Option<()> {
+        None
+    }
 }
 
 pub struct Text {
@@ -176,6 +257,7 @@ impl Text {
 }
 
 impl Element for Text {
+    type OutputEvent = ();
     fn layout(&mut self, constraint: SizeConstraint) -> Size {
         use renderling::GlyphCruncher;
         let max_size = (constraint.max.width as f32, constraint.max.height as f32);
@@ -233,6 +315,133 @@ impl Element for Text {
 
         draw_obj.update(device, queue).unwrap();
         draw_obj.draw(render_pass, default_texture_bindgroup);
+    }
+
+    fn event(&mut self, _: Event) -> Option<()> {
+        None
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub enum ButtonState {
+    #[default]
+    Normal,
+    Over,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ButtonEvent {
+    Over,
+    Out,
+}
+
+pub struct Button {
+    foreground: Rectangle,
+    background: Rectangle,
+    text: Text,
+    aabb: AABB,
+    state: ButtonState
+}
+
+impl Button {
+    pub fn add_text(
+        &mut self,
+        text: impl Into<String>,
+        scale: f32,
+        color: impl Into<Vec4>,
+        font_id: Id<FontArc>,
+    ) {
+        self.text.add_text(text, scale, color, font_id)
+    }
+
+    fn set_over(&mut self) {
+        self.state = ButtonState::Over;
+        self.text.section.text.iter_mut().for_each(|text| {
+            *text = std::mem::take(text).with_color(Vec4::new(1.0, 1.0, 0.0, 1.0));
+        });
+        self.text.updated = true;
+    }
+
+    fn set_normal(&mut self) {
+        self.state = ButtonState::Normal;
+        self.text.section.text.iter_mut().for_each(|text| {
+            *text = std::mem::take(text).with_color(Vec4::new(0.2, 0.2, 0.2, 1.0));
+        });
+        self.text.updated = true;
+    }
+}
+
+impl Element for Button {
+    type OutputEvent = ButtonEvent;
+
+    fn layout(&mut self, constraint: SizeConstraint) -> Size {
+        let border = 2;
+        let offset = 2;
+        let text_size = self
+            .text
+            .layout(constraint - UVec2::splat(border) - UVec2::splat(offset));
+        let bg_constraint = (text_size + UVec2::splat(border)).into();
+        let fg_size = self.foreground.layout(bg_constraint);
+        let bg_size = self.background.layout(bg_constraint);
+        debug_assert_eq!(fg_size, bg_size);
+        fg_size + UVec2::splat(offset)
+    }
+
+    fn paint<'a, 'b: 'a>(
+        &'b mut self,
+        origin: Vec2,
+        size: Vec2,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        render_pass: &mut wgpu::RenderPass<'a>,
+        default_texture_bindgroup: &'a wgpu::BindGroup,
+    ) {
+        let offset = 2.0;
+        let border = 2.0;
+        self.background.paint(
+            origin + Vec2::splat(offset),
+            size - Vec2::splat(offset),
+            device,
+            queue,
+            render_pass,
+            default_texture_bindgroup,
+        );
+        self.foreground.paint(
+            origin,
+            size - Vec2::splat(offset),
+            device,
+            queue,
+            render_pass,
+            default_texture_bindgroup,
+        );
+        self.text.paint(
+            origin + Vec2::splat(border),
+            size - Vec2::splat(border) - Vec2::splat(offset),
+            device,
+            queue,
+            render_pass,
+            default_texture_bindgroup,
+        );
+        self.aabb.min = origin;
+        self.aabb.max = origin + size;
+    }
+
+    fn event(&mut self, event: Event) -> Option<ButtonEvent> {
+        let from_state = self.state;
+        match event {
+            Event::MouseMoved(pos) => {
+                if self.aabb.contains(Vec2::new(pos.x as f32, pos.y as f32)) {
+                    self.set_over();
+                } else {
+                    self.set_normal();
+                }
+            }
+        };
+        match (from_state, self.state) {
+            (ButtonState::Normal, ButtonState::Over) => Some(ButtonEvent::Over),
+            (ButtonState::Over, ButtonState::Normal) => Some(ButtonEvent::Out),
+            _ => None,
+        }
     }
 }
 
@@ -408,6 +617,16 @@ impl Gpui {
             draw_object: None,
         }
     }
+
+    pub fn new_button(&self) -> Button {
+        Button {
+            foreground: self.new_rectangle(Size{width: 50, height: 25}, Vec4::ONE),
+            background: self.new_rectangle(Size{width: 50, height: 25}, Vec4::new(0.0, 0.0, 0.0, 0.5)),
+            text: self.new_text(),
+            aabb: AABB::default(),
+            state: ButtonState::default(),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -467,5 +686,39 @@ mod test {
         );
         let img = ui.render_image(&mut text);
         img_diff::assert_img_eq("gpui_text.png", img);
+    }
+
+    #[test]
+    fn button() {
+        _init_logging();
+        let mut ui = Gpui::new(160, 40);
+        ui.set_background_color(Vec4::new(0.5, 0.5, 0.5, 1.0));
+
+        // We MUST load a font first
+        let bytes: Vec<u8> =
+            std::fs::read("../../fonts/Recursive Mn Lnr St Med Nerd Font Complete.ttf").unwrap();
+        let font = FontArc::try_from_vec(bytes).unwrap();
+        let font_id = ui.add_font(font);
+
+        let mut btn = ui.new_button();
+        btn.add_text(
+            "Click me!",
+            32.0,
+            Vec4::new(0.2, 0.2, 0.2, 1.0),
+            font_id,
+        );
+        let img = ui.render_image(&mut btn);
+        img_diff::assert_img_eq("gpui_button/normal.png", img);
+
+        let may_ev_out = btn.event(Event::MouseMoved(UVec2::splat(10)));
+        assert_eq!(Some(ButtonEvent::Over), may_ev_out);
+        let img = ui.render_image(&mut btn);
+        img_diff::assert_img_eq("gpui_button/over.png", img);
+
+        let may_ev_out = btn.event(Event::MouseMoved(UVec2::splat(1000)));
+        assert_eq!(Some(ButtonEvent::Out), may_ev_out);
+        let img = ui.render_image(&mut btn);
+        img_diff::assert_img_eq("gpui_button/normal.png", img);
+
     }
 }
