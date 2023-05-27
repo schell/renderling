@@ -240,6 +240,9 @@ impl GlyphCache {
     ///
     /// The texture and mesh are meant to be used to build or update an object
     /// to display.
+    // TODO: Add device and queue as parameters to `GlyphCache::get_updated` so they
+    // can be removed from `GlyphCache`.
+    // This would simplify things in the UI quite a bit.
     pub fn get_updated(&mut self) -> (Option<Vec<UiVertex>>, Option<Texture>) {
         let mut may_mesh: Option<Vec<UiVertex>> = None;
         let mut may_texture: Option<Texture> = None;

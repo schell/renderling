@@ -1,5 +1,5 @@
 //! Provides image diffing for testing.
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use image::DynamicImage;
 
@@ -13,11 +13,6 @@ pub fn save(filename: &str, seen: impl Into<DynamicImage>) {
 }
 
 pub fn assert_img_eq(filename: &str, seen: impl Into<DynamicImage>) {
-    let testname = Path::new(filename).file_stem().unwrap().to_str().unwrap();
-    assert_img_eq_with_testname(testname, filename, seen)
-}
-
-pub fn assert_img_eq_with_testname(testname: &str, filename: &str, seen: impl Into<DynamicImage>) {
     let cwd = std::env::current_dir().expect("no cwd");
     let left_image = image::open(Path::new(TEST_IMG_DIR).join(filename))
         .expect(&format!(
@@ -39,7 +34,9 @@ pub fn assert_img_eq_with_testname(testname: &str, filename: &str, seen: impl In
         &None,
         &None,
     ) {
-        let dir = Path::new(TEST_OUTPUT_DIR).join(testname);
+        let right_image_path = Path::new(TEST_OUTPUT_DIR).join(filename);
+        let mut dir = PathBuf::from(right_image_path);
+        dir.set_extension("");
         std::fs::create_dir_all(&dir).expect("cannot create test output dir");
         let expected = dir.join("expected.png");
         let seen = dir.join("seen.png");
@@ -55,7 +52,7 @@ pub fn assert_img_eq_with_testname(testname: &str, filename: &str, seen: impl In
             .expect("can't save diff");
         panic!(
             "{} has >= {} differences above the threshold\nexpected: {}\nseen: {}\ndiff: {}",
-            testname,
+            filename,
             diffs,
             expected.display(),
             seen.display(),
