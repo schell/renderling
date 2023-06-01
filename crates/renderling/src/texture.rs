@@ -284,11 +284,20 @@ impl Texture {
 
     pub fn from_wgpu_tex(
         device: &wgpu::Device,
-        texture: wgpu::Texture,
+        texture: impl Into<Arc<wgpu::Texture>>,
         sampler: Option<wgpu::SamplerDescriptor>,
     ) -> Self {
-        let texture = Arc::new(texture);
-        let view = Arc::new(texture.create_view(&wgpu::TextureViewDescriptor::default()));
+        let texture = texture.into();
+        let view = Arc::new(texture.create_view(&wgpu::TextureViewDescriptor {
+            label: Some("texture view"),
+            format: None,
+            dimension: None,
+            aspect: wgpu::TextureAspect::All,
+            base_mip_level: 0,
+            mip_level_count: None,
+            base_array_layer: 0,
+            array_layer_count: None,
+        }));
         let sampler_descriptor = sampler.unwrap_or_else(|| wgpu::SamplerDescriptor {
             address_mode_u: wgpu::AddressMode::ClampToEdge,
             address_mode_v: wgpu::AddressMode::ClampToEdge,
@@ -392,7 +401,7 @@ impl Texture {
         );
         queue.submit(std::iter::once(encoder.finish()));
 
-        CopiedTextureBuffer { dimensions, buffer }
+        CopiedTextureBuffer { dimensions, buffer, format: self.texture.format() }
     }
 }
 
@@ -422,6 +431,7 @@ impl BufferDimensions {
 
 /// Helper for retreiving a rendered frame.
 pub struct CopiedTextureBuffer {
+    pub format: wgpu::TextureFormat,
     pub dimensions: BufferDimensions,
     pub buffer: wgpu::Buffer,
 }
@@ -430,6 +440,9 @@ impl CopiedTextureBuffer {
     #[cfg(feature = "image")]
     /// Convert the post render buffer into an RgbaImage.
     pub async fn convert_to_rgba(self) -> Result<image::RgbaImage, TextureError> {
+        use glam::Vec4;
+        use image::Rgba;
+
         let buffer_slice = self.buffer.slice(..);
         let (tx, rx) = std::sync::mpsc::channel();
         buffer_slice.map_async(wgpu::MapMode::Read, {
@@ -453,13 +466,23 @@ impl CopiedTextureBuffer {
         for chunk in padded_buffer.chunks(self.dimensions.padded_bytes_per_row) {
             unpadded_buffer.extend_from_slice(&chunk[..self.dimensions.unpadded_bytes_per_row]);
         }
-        let img_buffer: image::ImageBuffer<image::Rgba<u8>, Vec<u8>> =
+        let mut img_buffer: image::ImageBuffer<image::Rgba<u8>, Vec<u8>> =
             image::ImageBuffer::from_raw(
                 self.dimensions.width as u32,
                 self.dimensions.height as u32,
                 unpadded_buffer,
             )
             .context(CouldNotConvertImageBufferSnafu)?;
+        if self.format.is_srgb() {
+            log::trace!("converting applying linear transfer to srgb pixels");
+            // Convert back to linear
+            img_buffer.pixels_mut().for_each(|p| {
+                crate::color::linear_xfer_u8(&mut p.0[0]);
+                crate::color::linear_xfer_u8(&mut p.0[1]);
+                crate::color::linear_xfer_u8(&mut p.0[2]);
+                crate::color::linear_xfer_u8(&mut p.0[3]);
+            });
+        }
         Ok(image::DynamicImage::ImageRgba8(img_buffer).to_rgba8())
     }
 
@@ -492,7 +515,23 @@ impl CopiedTextureBuffer {
 
     #[cfg(feature = "image")]
     /// Convert the post render buffer into an RgbaImage.
+    ///
+    /// Ensures that the pixels are in a linear color space by applying the linear transfer
+    /// if the texture this buffer was copied from was sRGB.
     pub fn into_rgba(self, device: &wgpu::Device) -> Result<image::RgbaImage, TextureError> {
-        Ok(self.into_image::<image::Rgba<u8>>(device)?.into_rgba8())
+        let format = self.format;
+        let mut img_buffer = self.into_image::<image::Rgba<u8>>(device)?.into_rgba8();
+        if format.is_srgb() {
+            log::trace!("converting applying linear transfer to srgb pixels");
+            // Convert back to linear
+            img_buffer.pixels_mut().for_each(|p| {
+                crate::color::linear_xfer_u8(&mut p.0[0]);
+                crate::color::linear_xfer_u8(&mut p.0[1]);
+                crate::color::linear_xfer_u8(&mut p.0[2]);
+                crate::color::linear_xfer_u8(&mut p.0[3]);
+            });
+        }
+
+        Ok(img_buffer)
     }
 }

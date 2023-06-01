@@ -55,38 +55,6 @@ impl std::ops::SubAssign<UVec2> for Size {
 }
 
 #[derive(Clone, Copy, Default, Debug, PartialEq)]
-pub struct SizeConstraint {
-    min: Size,
-    max: Size,
-}
-
-impl std::ops::Sub<UVec2> for SizeConstraint {
-    type Output = Self;
-
-    fn sub(mut self, rhs: UVec2) -> Self::Output {
-        self.min -= rhs;
-        self.max -= rhs;
-        self
-    }
-}
-
-impl std::ops::SubAssign<UVec2> for SizeConstraint {
-    fn sub_assign(&mut self, rhs: UVec2) {
-        self.min -= rhs;
-        self.max -= rhs;
-    }
-}
-
-impl From<Size> for SizeConstraint {
-    fn from(value: Size) -> Self {
-        SizeConstraint {
-            min: value,
-            max: value,
-        }
-    }
-}
-
-#[derive(Clone, Copy, Default, Debug)]
 pub struct AABB {
     pub min: Vec2,
     pub max: Vec2,
@@ -97,30 +65,70 @@ impl AABB {
         let p = p.into();
         p.x >= self.min.x && p.x <= self.max.x && p.y >= self.min.y && p.y <= self.max.y
     }
-}
 
-pub enum Event {
-    MouseMoved { position: UVec2 },
-    MouseButton {
-        position: UVec2,
-        is_down: bool
+    pub fn size(&self) -> Vec2 {
+        self.max - self.min
+    }
+
+    pub fn union(self, other: Self) -> Self {
+        AABB {
+            min: self.min.min(other.min),
+            max: self.max.max(other.max),
+        }
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+pub enum Event {
+    MouseMoved { position: UVec2 },
+    MouseButton { position: UVec2, is_down: bool },
+}
+
+/// Implemented by every user interface element.
 pub trait Element {
     type OutputEvent;
 
-    fn layout(&mut self, constraint: SizeConstraint) -> Size;
+    /// Layout the element within the constraining bounding box, returning the
+    /// element's actual bounding box.
+    fn layout(&mut self, constraint: AABB) -> AABB;
+
+    /// 'Paint' the element into the given render pass.
     fn paint<'a, 'b: 'a>(
         &'b mut self,
-        origin: Vec2,
-        size: Vec2,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         render_pass: &mut wgpu::RenderPass<'a>,
         default_texture_bindgroup: &'a wgpu::BindGroup,
     );
-    fn event(&mut self, event: Event) -> Option<Self::OutputEvent>;
+
+    /// Handle a global event and react with a local event.
+    fn event(&mut self, event: Event) -> Self::OutputEvent;
+}
+
+impl<A: Element, B: Element> Element for (A, B) {
+    type OutputEvent = (A::OutputEvent, B::OutputEvent);
+
+    fn layout(&mut self, constraint: AABB) -> AABB {
+        let mut aabb = AABB::default();
+        aabb = aabb.union(self.0.layout(constraint));
+        aabb = aabb.union(self.1.layout(constraint));
+        aabb
+    }
+
+    fn paint<'a, 'b: 'a>(
+        &'b mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        render_pass: &mut wgpu::RenderPass<'a>,
+        default_texture_bindgroup: &'a wgpu::BindGroup,
+    ) {
+        self.0.paint(device, queue, render_pass, default_texture_bindgroup);
+        self.1.paint(device, queue, render_pass, default_texture_bindgroup);
+    }
+
+    fn event(&mut self, event: Event) -> Self::OutputEvent {
+        (self.0.event(event), self.1.event(event))
+    }
 }
 
 type RenderParams = (
@@ -137,7 +145,45 @@ pub struct Gpui(Renderling);
 impl Gpui {
     /// Create a new UI renderer.
     pub fn new(width: u32, height: u32) -> Self {
-        let mut r = renderling::Renderling::headless(width, height).unwrap();
+        let r = Renderling::headless(width, height).unwrap();
+        Self::new_from(&r)
+    }
+
+    /// Create a new UI renderer linked to the device and queue of another
+    /// [`Renderling`].
+    pub fn new_from(r: &renderling::Renderling) -> Self {
+        let (device, queue) = r.get_device_and_queue_owned();
+        let (width, height) = r.get_screen_size();
+        let target = RenderTarget::Texture {
+            texture: device
+                .create_texture(&wgpu::TextureDescriptor {
+                    size: wgpu::Extent3d {
+                        width,
+                        height,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                    usage: wgpu::TextureUsages::COPY_SRC
+                        | wgpu::TextureUsages::RENDER_ATTACHMENT
+                        | wgpu::TextureUsages::TEXTURE_BINDING,
+                    label: None,
+                    view_formats: &[],
+                })
+                .into(),
+        };
+        drop(r);
+        let depth_texture = renderling::Texture::create_depth_texture(&device, width, height);
+        let mut r = Renderling::new(
+            target,
+            depth_texture,
+            device.0.clone(),
+            queue.0.clone(),
+            (width, height),
+        );
+
         r.graph.add_resource({
             let fonts: Vec<FontArc> = vec![];
             fonts
@@ -184,28 +230,50 @@ impl Gpui {
         self.0.set_background_color(color)
     }
 
+    pub fn with_background_color(mut self, color: impl Into<Vec4>) -> Self {
+        self.set_background_color(color);
+        self
+    }
+
     /// Render to an image.
     pub fn render_image(&mut self, root: &mut impl Element) -> image::DynamicImage {
+        self.render_image_with_srgb(root, false)
+    }
+
+    /// Render to an image.
+    pub fn render_image_srgb(&mut self, root: &mut impl Element) -> image::DynamicImage {
+        self.render_image_with_srgb(root, true)
+    }
+
+    /// Render to an image.
+    pub fn render_image_with_srgb(&mut self, root: &mut impl Element, as_srgb: bool) -> image::DynamicImage {
         self.render(root);
         let (width, height) = self.0.get_screen_size();
         let frame = self.0.graph.remove_resource::<Frame>().unwrap().unwrap();
         let device = self.0.get_device();
         let buffer = frame.copy_to_buffer(device, self.0.get_queue(), width, height);
-        buffer.into_image::<image::Rgba<u8>>(device).unwrap()
+        if as_srgb {
+            // pack as srgb8
+            buffer.into_image::<image::Rgba<u8>>(device).unwrap().into()
+        } else {
+            // pack as linear rgba8
+            buffer.into_rgba(device).unwrap().into()
+        }
+    }
+
+    /// Layout the root element with the internal screen size.
+    pub fn layout(&self, root: &mut impl Element) {
+        let (ww, wh) = self.0.get_screen_size();
+        let _ = root.layout(AABB {
+            min: Vec2::ZERO,
+            max: Vec2::new(ww as f32, wh as f32),
+        });
     }
 
     /// Render to the internal texture.
     pub fn render(&mut self, root: &mut impl Element) {
         log::trace!("rendering");
         let _ = self.0.graph.remove_resource::<Frame>();
-        let (width, height) = self.0.get_screen_size();
-        let size = root.layout(SizeConstraint {
-            min: Size {
-                width: 0,
-                height: 0,
-            },
-            max: Size { width, height },
-        });
 
         self.0.graph.run_with_local(
             |(device, queue, scene, pipeline, frame): RenderParams| -> Result<(), UiSceneError> {
@@ -227,8 +295,6 @@ impl Gpui {
                 render_pass.set_bind_group(0, scene.constants_bindgroup(), &[]);
 
                 root.paint(
-                    Vec2::ZERO,
-                    size.into(),
                     &device,
                     &queue,
                     &mut render_pass,
@@ -277,8 +343,8 @@ impl Gpui {
         id
     }
 
-    pub fn new_rectangle(&self, size: Size, color: Vec4) -> Rectangle {
-        Rectangle::new(size, color)
+    pub fn new_rectangle(&self) -> Rectangle {
+        Rectangle::new()
     }
 
     pub fn new_text(&self) -> Text {
@@ -292,6 +358,8 @@ impl Gpui {
 
 #[cfg(test)]
 mod test {
+    use glam::Vec3;
+
     use super::*;
 
     pub fn _init_logging() {
@@ -312,18 +380,60 @@ mod test {
         _init_logging();
         let mut ui = Gpui::new(50, 50);
         ui.set_background_color(Vec4::new(0.0, 0.0, 0.0, 1.0));
-        let mut rect = ui.new_rectangle(
-            Size {
-                width: 25,
-                height: 25,
-            },
-            Vec4::ONE,
-        );
+        let mut rect = ui.new_rectangle()
+            .with_color(Vec4::ONE);
+        rect.layout(AABB {
+            min: Vec2::ZERO,
+            max: Vec2::new(25.0, 25.0),
+        });
         let img = ui.render_image(&mut rect);
         img_diff::assert_img_eq("gpui_rectangle.png", img);
         rect.set_color(Vec4::new(1.0, 0.0, 0.0, 1.0));
         let img = ui.render_image(&mut rect);
         img_diff::assert_img_eq("gpui_rectangle2.png", img);
+    }
+
+    #[test]
+    fn srgb_pixel() {
+        // This tests that the process of creating an image, saving it and reading
+        // back with `image` results in identical pixels.
+        let lhs = image::Rgba([0.2, 0.2, 0.2, 1.0]);
+        let image = image::Rgba32FImage::from_pixel(1, 1, lhs);
+        let image = image::DynamicImage::from(image).into_rgb8();
+        image.save_with_format("../../test_img/srgb_pixel.png", image::ImageFormat::Png).unwrap();
+        let image = image::open("../../test_img/srgb_pixel.png").unwrap();
+        let image = image.into_rgba32f();
+        let rhs = *image.get_pixel(0, 0);
+        assert_eq!(lhs, rhs);
+    }
+
+    #[test]
+    fn srgb_rectangle() {
+        // This tests that the roundtrip of a color through our pipeline and back stays true.
+        // It does this by creating a rectangle, painting to a texture,
+        // reading the texture to a buffer, converting to an image and extracting the pixel,
+        // then camparing the resulting pixel.
+        _init_logging();
+        let mut ui = Gpui::new(1, 1);
+        ui.set_background_color(Vec4::new(0.0, 0.0, 0.0, 1.0));
+        let lhs = image::Rgba([0.2, 0.2, 0.2, 1.0]);
+        let mut rect = ui.new_rectangle()
+            .with_color(lhs.0)
+            .with_size(Vec2::splat(1.0));
+        ui.layout(&mut rect);
+        // render_image creates an Rgba8 image
+        let img = ui.render_image(&mut rect);
+        let img = img.into_rgba32f();
+        let rhs = *img.get_pixel(0, 0);
+        // Converting from the sRGB space of the ui's surface texture introduces some error
+        // so we'll compare within a margin.
+        fn roughly_equal(a: f32, b: f32) -> bool {
+            (a - b).abs() < 0.005
+        }
+        assert!(roughly_equal(lhs.0[0], rhs.0[0]));
+        assert!(roughly_equal(lhs.0[1], rhs.0[1]));
+        assert!(roughly_equal(lhs.0[2], rhs.0[2]));
+        assert!(roughly_equal(lhs.0[3], rhs.0[3]));
     }
 
     #[test]
@@ -345,6 +455,12 @@ mod test {
             Vec4::ONE,
             font_id,
         );
+        ui.layout(&mut text);
+        let img = ui.render_image(&mut text);
+        img_diff::assert_img_eq("gpui_text.png", img);
+
+        // do it again to ensure re-layout works as expected
+        ui.layout(&mut text);
         let img = ui.render_image(&mut text);
         img_diff::assert_img_eq("gpui_text.png", img);
     }
@@ -359,10 +475,10 @@ mod test {
         let bytes: Vec<u8> =
             std::fs::read("../../fonts/Recursive Mn Lnr St Med Nerd Font Complete.ttf").unwrap();
         let font = FontArc::try_from_vec(bytes).unwrap();
-        let font_id = ui.add_font(font);
+        let _font_id = ui.add_font(font);
 
-        let mut btn = ui.new_button();
-        btn.add_text("Click me!", 32.0, font_id);
+        let mut btn = ui.new_button().with_text("Click me!").with_scale(32.0);
+        ui.layout(&mut btn);
         let img = ui.render_image(&mut btn);
         img_diff::assert_img_eq("gpui_button/normal.png", img);
 
@@ -370,11 +486,16 @@ mod test {
             position: UVec2::splat(10),
         });
         assert_eq!(Some(ButtonEvent::Over), may_ev_over);
+        ui.layout(&mut btn);
         let img = ui.render_image(&mut btn);
         img_diff::assert_img_eq("gpui_button/over.png", img);
 
-        let may_ev_down = btn.event(Event::MouseButton { position: UVec2::splat(10), is_down: true });
+        let may_ev_down = btn.event(Event::MouseButton {
+            position: UVec2::splat(10),
+            is_down: true,
+        });
         assert_eq!(Some(ButtonEvent::Down), may_ev_down);
+        ui.layout(&mut btn);
         let img = ui.render_image(&mut btn);
         img_diff::assert_img_eq("gpui_button/down.png", img);
 
@@ -382,6 +503,7 @@ mod test {
             position: UVec2::splat(10),
         });
         assert_eq!(Some(ButtonEvent::Up), may_ev_up);
+        ui.layout(&mut btn);
         let img = ui.render_image(&mut btn);
         img_diff::assert_img_eq("gpui_button/over.png", img);
 
@@ -389,7 +511,35 @@ mod test {
             position: UVec2::splat(1000),
         });
         assert_eq!(Some(ButtonEvent::Out), may_ev_out);
+        ui.layout(&mut btn);
         let img = ui.render_image(&mut btn);
         img_diff::assert_img_eq("gpui_button/normal.png", img);
+    }
+
+    #[test]
+    fn transparent_rectangles() {
+        // This tests the quad geometry and blending by ensuring that a partially
+        // transparent rectangle is uniformly transparent and layers correctly
+        _init_logging();
+        let mut gpui = Gpui::new(50, 50)
+            .with_background_color(Vec4::ONE);
+        let rect1 = gpui.new_rectangle()
+            .with_color(Vec3::splat(0.0).extend(0.5))
+            .with_size(Vec2::splat(25.0))
+            .with_origin(Vec2::splat(10.0));
+        let rect2 = gpui.new_rectangle()
+            .with_color(Vec3::splat(0.0).extend(0.5))
+            .with_size(Vec2::splat(25.0))
+            .with_origin(Vec2::splat(15.0));
+        let mut ui = (rect2, rect1);
+
+        gpui.layout(&mut ui);
+        let img = gpui.render_image(&mut ui);
+        img_diff::assert_img_eq("gpui_transparent_rectangle.png", img);
+
+        // do it again to make sure re-layout works as expected
+        gpui.layout(&mut ui);
+        let img = gpui.render_image(&mut ui);
+        img_diff::assert_img_eq("gpui_transparent_rectangle.png", img);
     }
 }

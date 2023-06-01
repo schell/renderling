@@ -3,27 +3,51 @@ pub use super::*;
 
 #[derive(Default)]
 pub struct Rectangle {
-    size: Size,
+    aabb: AABB,
     color: Vec4,
     draw_object: Option<UiDrawObject>,
 }
 
 impl Rectangle {
     // Create a new rectangle.
-    pub fn new(size: Size, color: Vec4) -> Self {
+    pub fn new() -> Self {
         Self {
-            size,
-            color,
+            aabb: AABB {
+                min: Vec2::ZERO,
+                max: Vec2::splat(100.0),
+            },
+            color: Vec4::ONE,
             draw_object: None,
         }
     }
 
-    // Set the size of the rectangle.
-    pub fn set_size(&mut self, width: u32, height: u32) {
-        self.size = Size { width, height };
+    pub fn set_origin(&mut self, origin: impl Into<Vec2>) {
+        let origin = origin.into();
+        let delta = origin - self.aabb.min;
+        self.aabb.min += delta;
+        self.aabb.max += delta;
         if let Some(obj) = self.draw_object.as_mut() {
-            obj.set_scale(self.size);
+            obj.set_position(self.aabb.min);
         }
+    }
+
+    pub fn with_origin(mut self, origin: impl Into<Vec2>) -> Self {
+        self.set_origin(origin);
+        self
+    }
+
+    // Set the size of the rectangle.
+    pub fn set_size(&mut self, size: impl Into<Vec2>) {
+        let size = size.into();
+        self.aabb.max = self.aabb.min + size;
+        if let Some(obj) = self.draw_object.as_mut() {
+            obj.set_scale(size);
+        }
+    }
+
+    pub fn with_size(mut self, size: impl Into<Vec2>) -> Self {
+        self.set_size(size);
+        self
     }
 
     // Get the color of the rectangle.
@@ -32,12 +56,17 @@ impl Rectangle {
     }
 
     // Set the color of the rectangle.
-    pub fn set_color(&mut self, color: Vec4) {
-        self.color = color;
+    pub fn set_color(&mut self, color: impl Into<Vec4>) {
+        self.color = color.into();
         let vertices = self.vertices();
         if let Some(obj) = self.draw_object.as_mut() {
             obj.set_vertices(vertices);
         }
+    }
+
+    pub fn with_color(mut self, color: impl Into<Vec4>) -> Self {
+        self.set_color(color);
+        self
     }
 
     fn vertices(&self) -> [UiVertex; 6] {
@@ -60,15 +89,26 @@ impl Rectangle {
 impl Element for Rectangle {
     type OutputEvent = ();
 
+    fn layout(&mut self, constraint: AABB) -> AABB {
+        log::trace!("constraint: {constraint:?}");
+        self.aabb = AABB {
+            min: self.aabb.min.max(constraint.min),
+            max: self.aabb.max.min(constraint.max),
+        };
+        log::trace!("aabb: {:?}", self.aabb);
+
+        self.aabb
+    }
+
     fn paint<'a, 'b: 'a>(
         &'b mut self,
-        origin: Vec2,
-        size: Vec2,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         render_pass: &mut wgpu::RenderPass<'a>,
         default_texture_bindgroup: &'a wgpu::BindGroup,
     ) {
+        let origin = self.aabb.min;
+        let size = self.aabb.size();
         if self.draw_object.is_none() {
             log::trace!(
                 "creating rectangle origin: {origin:?} size: {size:?} color: {:?}",
@@ -96,27 +136,13 @@ impl Element for Rectangle {
         draw_obj.draw(render_pass, default_texture_bindgroup);
     }
 
-    fn layout(&mut self, constraint: SizeConstraint) -> Size {
-        Size {
-            width: self
-                .size
-                .width
-                .clamp(constraint.min.width, constraint.max.width),
-            height: self
-                .size
-                .height
-                .clamp(constraint.min.height, constraint.max.height),
-        }
-    }
-
-    fn event(&mut self, _event: Event) -> Option<()> {
-        None
-    }
+    fn event(&mut self, _event: Event) {}
 }
 
 pub struct Text {
     cache: GlyphCache,
     section: OwnedSection,
+    aabb: AABB,
     updated: bool,
     draw_object: Option<UiDrawObject>,
 }
@@ -126,8 +152,9 @@ impl Text {
         let fonts = fonts.into_iter().collect::<Vec<_>>();
         let cache = GlyphCache::new(renderling, fonts);
         Text {
-            section: OwnedSection::default(),
+            section: OwnedSection::default().add_text(OwnedText::new("").with_scale(12.0)),
             cache,
+            aabb: AABB::default(),
             updated: true,
             draw_object: None,
         }
@@ -149,41 +176,87 @@ impl Text {
         self.section = section;
         self.updated = true;
     }
+
+    pub fn set_text(&mut self, text: impl Into<String>) {
+        self.section.text.resize_with(1, Default::default);
+        self.section.text[0].text = text.into();
+        self.updated = true;
+    }
+
+    pub fn with_text(mut self, text: impl Into<String>) -> Self {
+        self.set_text(text);
+        self
+    }
+
+    pub fn set_scale(&mut self, scale: f32) {
+        self.section
+            .text
+            .iter_mut()
+            .for_each(|t| t.scale = scale.into());
+        self.updated = true;
+    }
+
+    pub fn with_scale(mut self, scale: f32) -> Self {
+        self.set_scale(scale);
+        self
+    }
+
+    pub fn set_color(&mut self, color: impl Into<Vec4>) {
+        let color: Vec4 = color.into();
+        self.section
+            .text
+            .iter_mut()
+            .for_each(|t| t.extra.color = color.to_array());
+        self.updated = true;
+    }
+
+    pub fn with_color(mut self, color: impl Into<Vec4>) -> Self {
+        self.set_color(color);
+        self
+    }
+
+    /// Return the bounding box for this text.
+    ///
+    /// This will return `AABB::default` until [`Rectangle::layout`] is called.
+    pub fn aabb(&self) -> AABB {
+        self.aabb
+    }
 }
 
 impl Element for Text {
     type OutputEvent = ();
-    fn layout(&mut self, constraint: SizeConstraint) -> Size {
+
+    fn layout(&mut self, constraint: AABB) -> AABB {
         use renderling::GlyphCruncher;
-        let max_size = (constraint.max.width as f32, constraint.max.height as f32);
+        let max_size = constraint.size();
+        let max_size: (f32, f32) = max_size.into();
         if self.section.bounds != max_size {
             self.section.bounds = max_size;
             self.updated = true;
         }
-        if let Some(rect) = self.cache.brush.glyph_bounds(&self.section) {
-            Size {
-                width: rect.width().ceil() as u32,
-                height: rect.height().ceil() as u32,
-            }
-        } else {
-            Size {
-                width: 0,
-                height: 0,
+
+        if self.updated {
+            self.aabb = AABB {
+                min: constraint.min,
+                max: constraint.min,
+            };
+            if let Some(rect) = self.cache.brush.glyph_bounds(&self.section) {
+                self.aabb.max = self.aabb.min + Vec2::new(rect.width(), rect.height());
             }
         }
+        self.aabb
     }
 
     fn paint<'a, 'b: 'a>(
         &'b mut self,
-        origin: Vec2,
-        size: Vec2,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         render_pass: &mut wgpu::RenderPass<'a>,
         default_texture_bindgroup: &'a wgpu::BindGroup,
     ) {
+        let origin = self.aabb.min;
+        let size = self.aabb.size();
         if self.draw_object.is_none() {
-            log::trace!("creating text origin: {origin:?} size: {size:?}");
             self.draw_object = Some(
                 UiDrawObjectBuilder::new(device)
                     .with_draw_mode(UiMode::TEXT)
@@ -212,9 +285,7 @@ impl Element for Text {
         draw_obj.draw(render_pass, default_texture_bindgroup);
     }
 
-    fn event(&mut self, _: Event) -> Option<()> {
-        None
-    }
+    fn event(&mut self, _: Event) {}
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -230,7 +301,7 @@ pub enum ButtonEvent {
     Over,
     Out,
     Down,
-    Up
+    Up,
 }
 
 pub struct Button {
@@ -242,7 +313,7 @@ pub struct Button {
 }
 
 impl Button {
-    const TEXT_COLOR_NORMAL: Vec4 = Vec4::new(0.2, 0.2, 0.2, 1.0);
+    const TEXT_COLOR_NORMAL: Vec4 = Vec4::new(0.0, 0.0, 0.0, 0.5);
     const TEXT_COLOR_OVER: Vec4 = Vec4::new(0.0, 0.0, 0.0, 1.0);
     const TEXT_COLOR_DOWN: Vec4 = Vec4::new(1.0, 1.0, 0.2, 1.0);
     const PX_OFFSET: f32 = 8.0;
@@ -250,33 +321,34 @@ impl Button {
 
     pub fn new(renderling: &Renderling, fonts: impl IntoIterator<Item = FontArc>) -> Self {
         Button {
-            foreground: Rectangle::new(
-                Size {
-                    width: 50,
-                    height: 25,
-                },
-                Vec4::ONE,
-            ),
-            background: Rectangle::new(
-                Size {
-                    width: 50,
-                    height: 25,
-                },
-                Vec4::new(0.0, 0.0, 0.0, 0.5),
-            ),
-            text: Text::new(renderling, fonts),
+            foreground: Rectangle::new(),
+            background: Rectangle::new().with_color(Vec4::new(0.0, 0.0, 0.0, 0.5)),
+            text: {
+                let mut text = Text::new(renderling, fonts);
+                text.add_text("Button", 16.0, Self::TEXT_COLOR_NORMAL, Id::new(0));
+                text
+            },
             aabb: AABB::default(),
             state: ButtonState::default(),
         }
     }
 
-    pub fn add_text(
-        &mut self,
-        text: impl Into<String>,
-        scale: f32,
-        font_id: Id<FontArc>,
-    ) {
-        self.text.add_text(text, scale, Self::TEXT_COLOR_NORMAL, font_id)
+    pub fn set_text(&mut self, text: impl Into<String>) {
+        self.text.set_text(text);
+    }
+
+    pub fn with_text(mut self, text: impl Into<String>) -> Self {
+        self.text.set_text(text);
+        self
+    }
+
+    pub fn set_scale(&mut self, scale: f32) {
+        self.text.set_scale(scale)
+    }
+
+    pub fn with_scale(mut self, scale: f32) -> Self {
+        self.text.set_scale(scale);
+        self
     }
 
     fn set_over(&mut self) {
@@ -314,63 +386,49 @@ impl Button {
 }
 
 impl Element for Button {
-    type OutputEvent = ButtonEvent;
+    type OutputEvent = Option<ButtonEvent>;
 
-    fn layout(&mut self, constraint: SizeConstraint) -> Size {
-        let border = UVec2::splat(Self::PX_BORDER as u32);
-        let offset = UVec2::splat(Self::PX_OFFSET as u32);
-        let text_size = self
-            .text
-            .layout(constraint - (border * 2) - offset);
-        let bg_constraint = (text_size + (border * 2)).into();
-        let fg_size = self.foreground.layout(bg_constraint);
-        let bg_size = self.background.layout(bg_constraint);
-        debug_assert_eq!(fg_size, bg_size);
-        fg_size + offset
+    fn layout(&mut self, constraint: AABB) -> AABB {
+        let border = Vec2::splat(Self::PX_BORDER);
+        let offset = Vec2::splat(Self::PX_OFFSET);
+        let down_offset = if self.state == ButtonState::Down {
+            offset * 2.0 / 3.0
+        } else {
+            Vec2::ZERO
+        };
+        let text_aabb = self.text.layout(AABB {
+            min: constraint.min + border + down_offset,
+            max: constraint.max,
+        });
+
+        let bg_size = text_aabb.size() + border * 2.0;
+        self.foreground.set_origin(constraint.min + down_offset);
+        self.foreground.set_size(bg_size);
+        self.background.set_origin(self.foreground.aabb.min + offset);
+        self.background.set_size(bg_size);
+
+        let fg_aabb = self.foreground.layout(constraint);
+        let bg_aabb = self.background.layout(constraint);
+        log::trace!(
+            "layout button text_aabb:{text_aabb:?} fg_aabb:{fg_aabb:?} bg_aabb:{bg_aabb:?}"
+        );
+        self.aabb = text_aabb.union(fg_aabb).union(bg_aabb);
+        self.aabb
     }
 
     fn paint<'a, 'b: 'a>(
         &'b mut self,
-        origin: Vec2,
-        size: Vec2,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         render_pass: &mut wgpu::RenderPass<'a>,
         default_texture_bindgroup: &'a wgpu::BindGroup,
     ) {
-        let offset = Vec2::splat(Self::PX_OFFSET);
-        self.background.paint(
-            origin + offset,
-            size - offset,
-            device,
-            queue,
-            render_pass,
-            default_texture_bindgroup,
-        );
-        let down_offset = if self.state == ButtonState::Down {
-            offset - 1.0
-        } else {
-            Vec2::ZERO
-        };
-        self.foreground.paint(
-            origin + down_offset,
-            size - offset,
-            device,
-            queue,
-            render_pass,
-            default_texture_bindgroup,
-        );
-        let border = Vec2::splat(Self::PX_BORDER);
-        self.text.paint(
-            origin + border + down_offset,
-            size - (border * 2.0) - offset,
-            device,
-            queue,
-            render_pass,
-            default_texture_bindgroup,
-        );
-        self.aabb.min = origin;
-        self.aabb.max = origin + size;
+        self.background
+            .paint(device, queue, render_pass, default_texture_bindgroup);
+        self.foreground
+            .paint(device, queue, render_pass, default_texture_bindgroup);
+        self.text
+            .paint(device, queue, render_pass, default_texture_bindgroup);
     }
 
     fn event(&mut self, event: Event) -> Option<ButtonEvent> {
@@ -392,7 +450,6 @@ impl Element for Button {
                     self.set_over();
                 }
             }
-
         };
         match (from_state, self.state) {
             (ButtonState::Normal, ButtonState::Normal) => None,

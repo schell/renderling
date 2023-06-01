@@ -119,8 +119,8 @@ impl Renderling {
     pub fn new(
         target: RenderTarget,
         depth_texture: crate::Texture,
-        device: wgpu::Device,
-        queue: wgpu::Queue,
+        device: impl Into<Arc<wgpu::Device>>,
+        queue: impl Into<Arc<wgpu::Queue>>,
         (width, height): (u32, u32),
     ) -> Self {
         Self {
@@ -255,6 +255,14 @@ impl Renderling {
         .context(TextureSnafu)
     }
 
+    pub fn texture_from_wgpu_tex(
+        &self,
+        texture: impl Into<Arc<wgpu::Texture>>,
+        sampler: Option<wgpu::SamplerDescriptor>,
+    ) -> crate::Texture {
+        crate::Texture::from_wgpu_tex(self.get_device(), texture, sampler)
+    }
+
     pub fn get_device(&self) -> &wgpu::Device {
         // UNWRAP: safe because invariant - Renderer always has Device
         &self.graph.get_resource::<Device>().unwrap().unwrap().0
@@ -296,9 +304,9 @@ impl Renderling {
 
     // TODO: make `new_ui_scene` return a `UiSceneBuilder`.
     pub fn new_ui_scene(&self) -> UiSceneBuilder<'_> {
-        let device = self.get_device();
+        let (device, _) = self.get_device_and_queue_owned();
         let queue = self.get_queue();
-        UiSceneBuilder::new(device, queue)
+        UiSceneBuilder::new(device.0.clone(), queue)
     }
 
     #[cfg(feature = "text")]

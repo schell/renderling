@@ -295,7 +295,7 @@ impl GlyphCache {
         self.cache = Some(cache);
 
         match brush_action.unwrap() {
-            BrushAction::Draw(all_vertices) => {
+            BrushAction::Draw(all_vertices) => if !all_vertices.is_empty() {
                 may_mesh = Some(
                     all_vertices
                         .into_iter()

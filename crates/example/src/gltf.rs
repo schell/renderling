@@ -6,21 +6,33 @@ use std::time::Instant;
 
 use renderling::{
     math::{Mat4, Vec3, Vec4},
-    DebugMode, FontArc, GltfLoader, GlyphCache, GpuEntity, Renderling, Scene, Section, Text,
-    TweenProperty, UiDrawObjects, UiMode, UiScene, Write,
+    DebugMode, FontArc, GltfLoader, GpuEntity, Renderling, Scene, TweenProperty, UiMode, UiScene,
+    UiVertex, Write,
 };
+use renderling_gpui::{Element, Gpui, Vec2, AABB};
 use winit::event::KeyboardInput;
 
 const RADIUS_SCROLL_DAMPENING: f32 = 0.001;
 const DX_DY_DRAG_DAMPENING: f32 = 0.01;
+
+mod ui;
+use ui::Ui;
+
+const DARK_BLUE_BG_COLOR: Vec4 = Vec4::new(
+    0x30 as f32 / 255.0,
+    0x35 as f32 / 255.0,
+    0x42 as f32 / 255.0,
+    1.0,
+);
 
 struct App {
     loader: Option<GltfLoader>,
     entities: Vec<GpuEntity>,
     last_frame_instant: Instant,
     timestamp: f32,
-    title_text_cache: GlyphCache,
-    camera_text_cache: GlyphCache,
+
+    ui: Ui,
+    gpui: Gpui,
 
     // look at
     eye: Vec3,
@@ -38,53 +50,47 @@ struct App {
 
 impl App {
     fn new(r: &mut Renderling) -> Self {
-        r.set_background_color([
-            0x30 as f32 / 255.0,
-            0x35 as f32 / 255.0,
-            0x42 as f32 / 255.0,
-            1.0,
-        ]);
+        r.set_background_color(DARK_BLUE_BG_COLOR);
         let radius = 6.0;
         let phi = 0.0;
         let theta = std::f32::consts::FRAC_PI_4;
         let left_mb_down: bool = false;
         let last_cursor_position: Option<winit::dpi::PhysicalPosition<f64>> = None;
         let (ww, wh) = r.get_screen_size();
+        let mut gpui = renderling_gpui::Gpui::new_from(r);
 
         // get the font for the UI
         let bytes: Vec<u8> =
             std::fs::read("fonts/Recursive Mn Lnr St Med Nerd Font Complete.ttf").unwrap();
         let font = FontArc::try_from_vec(bytes).unwrap();
-        let title_text_cache = r.new_glyph_cache(vec![font.clone()]);
-        let camera_text_cache = r.new_glyph_cache(vec![font]);
+        gpui.add_font(font);
 
-        let builder = r.new_ui_scene().with_canvas_size(ww, wh);
-        let title_text = builder.new_object().with_draw_mode(UiMode::TEXT).build();
-        let camera_text = builder
+        let ui = Ui::new(&mut gpui);
+        let ui_texture = r.texture_from_wgpu_tex(gpui.get_frame_texture(), None);
+
+        let ui_scene = r.new_ui_scene().with_canvas_size(1, 1).build();
+        let ui_obj = ui_scene
             .new_object()
-            .with_draw_mode(UiMode::TEXT)
-            .with_position([0.0, 46.0])
+            .with_draw_mode(UiMode::DEFAULT)
+            .with_texture(&ui_texture)
+            .with_vertices(
+                renderling::math::POINTS_2D_TEX_QUAD
+                    .into_iter()
+                    .map(|v2| UiVertex::default().with_position(*v2).with_uv(*v2)),
+            )
             .build();
-        let ui_scene = builder.build();
 
         // Create a placeholder scene
         let scene = r.new_scene().build().unwrap();
 
-        renderling::setup_ui_and_scene_render_graph(
-            r,
-            ui_scene,
-            [title_text, camera_text],
-            scene,
-            false,
-        );
+        renderling::setup_ui_and_scene_render_graph(r, ui_scene, [ui_obj], scene, false);
 
         let mut app = Self {
             timestamp: 0.0,
             loader: None,
             entities: vec![],
-            title_text_cache,
-            camera_text_cache,
-
+            ui,
+            gpui,
             last_frame_instant: Instant::now(),
             radius,
             eye: Vec3::ZERO,
@@ -93,8 +99,9 @@ impl App {
             left_mb_down,
             last_cursor_position,
         };
-        app.update_title_text(r, "Drag and drop a GLTF file to view...");
-        app.update_camera_text(r);
+        app.ui
+            .set_text_title("Drag and drop a GLTF file to view...");
+        app.ui.set_text_camera(app.get_updated_camera_text());
         app
     }
 
@@ -106,54 +113,12 @@ impl App {
         Vec3::new(x, z, y)
     }
 
-    fn update_title_text(&mut self, r: &mut Renderling, text: &str) {
-        self.title_text_cache.queue(
-            Section::default().add_text(
-                Text::new(text)
-                    .with_color([1.0, 1.0, 1.0, 1.0])
-                    .with_scale(46.0),
-            ),
-        );
-        let (may_mesh, may_texture) = self.title_text_cache.get_updated();
-        let objects = r
-            .graph
-            .get_resource_mut::<UiDrawObjects>()
-            .unwrap()
-            .unwrap();
-        let title_text = objects.get_mut(0).unwrap();
-        if let Some(mesh) = may_mesh {
-            title_text.set_vertices(mesh);
-        }
-        if let Some(texture) = may_texture {
-            title_text.set_texture(&texture);
-        }
-    }
-
-    fn update_camera_text(&mut self, r: &mut Renderling) {
-        self.camera_text_cache.queue(
-            Section::default().add_text(
-                Text::new(&format!(
-                    "position: {}\nlooking at: {}",
-                    Self::camera_position(self.radius, self.phi, self.theta),
-                    self.eye,
-                ))
-                .with_color([0.8, 0.8, 0.8, 1.0])
-                .with_scale(32.0),
-            ),
-        );
-        let (may_mesh, may_texture) = self.camera_text_cache.get_updated();
-        let objects = r
-            .graph
-            .get_resource_mut::<UiDrawObjects>()
-            .unwrap()
-            .unwrap();
-        let camera_text = objects.get_mut(1).unwrap();
-        if let Some(mesh) = may_mesh {
-            camera_text.set_vertices(mesh);
-        }
-        if let Some(texture) = may_texture {
-            camera_text.set_texture(&texture);
-        }
+    fn get_updated_camera_text(&self) -> String {
+        format!(
+            "position: {}\nlooking at: {}",
+            Self::camera_position(self.radius, self.phi, self.theta),
+            self.eye,
+        )
     }
 
     fn update_camera_view(&self, r: &mut Renderling) {
@@ -210,7 +175,7 @@ impl App {
         }
 
         let name = get_name(file);
-        self.update_title_text(r, &format!("{name}"));
+        self.ui.set_text_title(format!("{name}"));
 
         self.radius = radius;
         self.eye = halfway_point;
@@ -221,13 +186,13 @@ impl App {
         r.graph.add_resource(builder.build().unwrap());
 
         self.update_camera_view(r);
-        self.update_camera_text(r);
+        self.ui.set_text_camera(self.get_updated_camera_text());
     }
 
     fn zoom(&mut self, r: &mut Renderling, delta: f32) {
         self.radius = (self.radius - (delta * RADIUS_SCROLL_DAMPENING)).max(0.0);
         self.update_camera_view(r);
-        self.update_camera_text(r);
+        self.ui.set_text_camera(self.get_updated_camera_text());
     }
 
     fn pan(&mut self, r: &mut Renderling, position: winit::dpi::PhysicalPosition<f64>) {
@@ -240,12 +205,10 @@ impl App {
 
                 let next_theta = self.theta - dy as f32 * DX_DY_DRAG_DAMPENING;
                 self.theta = next_theta.max(0.0001).min(std::f32::consts::PI);
-
-                self.update_camera_text(r);
             }
             self.last_cursor_position = Some(position);
             self.update_camera_view(r);
-            self.update_camera_text(r);
+            self.ui.set_text_camera(self.get_updated_camera_text());
         }
     }
 
@@ -280,7 +243,8 @@ impl App {
                 let scene = r.new_scene().build().unwrap();
                 r.graph.add_resource(scene);
                 self.loader = None;
-                self.update_title_text(r, "awaiting drag and dropped `.gltf` or `.glb` file");
+                self.ui
+                    .set_text_title("awaiting drag and dropped `.gltf` or `.glb` file");
             }
             _ => {}
         };
@@ -289,16 +253,13 @@ impl App {
     fn resize(&mut self, r: &mut Renderling, width: u32, height: u32) {
         r.resize(width, height);
         r.graph
-            .visit(
-                |(mut ui_scene, mut scene): (Write<UiScene>, Write<Scene>)| {
-                    ui_scene.set_canvas_size(width, height);
-                    scene.set_camera_projection(Mat4::perspective_infinite_rh(
-                        std::f32::consts::FRAC_PI_4,
-                        width as f32 / height as f32,
-                        0.01,
-                    ));
-                },
-            )
+            .visit(|mut scene: Write<Scene>| {
+                scene.set_camera_projection(Mat4::perspective_infinite_rh(
+                    std::f32::consts::FRAC_PI_4,
+                    width as f32 / height as f32,
+                    0.01,
+                ));
+            })
             .unwrap();
     }
 
@@ -390,7 +351,35 @@ pub fn demo(
         } else {
             app.update_camera_view(r);
             app.animate(r);
+            app.gpui.layout(&mut app.ui);
+            app.gpui.render(&mut app.ui);
             r.render().unwrap();
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn sanity() {
+        let mut gpui =
+            renderling_gpui::Gpui::new(600, 300); //.with_background_color(DARK_BLUE_BG_COLOR);
+
+        // get the font for the UI
+        let bytes: Vec<u8> =
+            std::fs::read("../../fonts/Recursive Mn Lnr St Med Nerd Font Complete.ttf").unwrap();
+        let font = FontArc::try_from_vec(bytes).unwrap();
+        gpui.add_font(font);
+
+        let mut ui = Ui::new(&mut gpui);
+        ui.set_text_title("This is the title text");
+        ui.set_text_camera("This is the camera text");
+        gpui.layout(&mut ui);
+        let _ = gpui.render_image_srgb(&mut ui);
+        gpui.layout(&mut ui);
+        let img = gpui.render_image_srgb(&mut ui);
+        img_diff::save("example_gltf_viewer_ui_sanity.png", img);
     }
 }

@@ -8,6 +8,14 @@ pub fn triangle_face_normal(p1: Vec3, p2: Vec3, p3: Vec3) -> Vec3 {
     n
 }
 
+pub const POINTS_2D_TEX_QUAD: &[Vec2] = {
+    let tl = Vec2::new(0.0, 0.0);
+    let tr = Vec2::new(1.0, 0.0);
+    let bl = Vec2::new(0.0, 1.0);
+    let br = Vec2::new(1.0, 1.0);
+    &[tl, bl, tr, tl, br, tr]
+};
+
 /// Points around the unit cube.
 ///
 ///    yb          1_____2     _____

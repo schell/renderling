@@ -65,6 +65,7 @@ pub use texture::*;
 pub use ui::*;
 pub use uniform::*;
 
+pub mod color;
 pub mod math;
 
 pub mod graph {
@@ -394,7 +395,8 @@ mod test {
 
         // we should see two colored cubes
         let img = r.render_image().unwrap();
-        img_diff::assert_img_eq("cmy_cube_visible_before.png", img);
+        img_diff::assert_img_eq("cmy_cube_visible_before.png", img.clone());
+        let img_before = img;
 
         // update cube two making in invisible
         r.graph
@@ -418,9 +420,9 @@ mod test {
 
         // we should see two colored cubes again
         let img = r.render_image().unwrap();
-        img_diff::assert_img_eq_with_testname(
-            "cmy_cube_visible_before_again",
-            "cmy_cube_visible_before.png",
+        img_diff::assert_eq(
+            "cmy_cube_visible_before_again.png",
+            img_before,
             img,
         );
     }

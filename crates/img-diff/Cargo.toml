@@ -6,5 +6,6 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-dify = { git = "https://github.com/schell/dify", branch = "patch-1" }
+glam = "^0.22"
 image = { version = "^0.24" }
+snafu = "^0.7"

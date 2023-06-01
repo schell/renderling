@@ -166,7 +166,7 @@ impl Frame {
 
         queue.submit(std::iter::once(encoder.finish()));
 
-        CopiedTextureBuffer { dimensions, buffer }
+        CopiedTextureBuffer { dimensions, buffer, format: texture.format() }
     }
 
     /// If self is `TargetFrame::Surface` this presents the surface frame.
@@ -261,7 +261,9 @@ pub async fn new_device_queue_and_target<'a>(
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: wgpu::TextureFormat::Rgba8UnormSrgb,
-            usage: wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::RENDER_ATTACHMENT,
+            usage: wgpu::TextureUsages::COPY_SRC
+                | wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::TEXTURE_BINDING,
             label: None,
             view_formats: &[],
         };

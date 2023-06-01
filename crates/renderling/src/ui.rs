@@ -2,7 +2,7 @@
 //!
 //! This is traditional 2d rendering.
 
-use std::ops::{Deref, DerefMut};
+use std::{ops::{Deref, DerefMut}, sync::Arc};
 
 use glam::{UVec2, Vec2, Vec4};
 use snafu::prelude::*;
@@ -79,7 +79,7 @@ pub fn ui_texture_bindgroup_layout(device: &wgpu::Device) -> wgpu::BindGroupLayo
 
 pub fn ui_texture_bindgroup(device: &wgpu::Device, texture: &Texture) -> wgpu::BindGroup {
     device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("UiDrawObject.texture_bindgroup"),
+        label: Some("UiDrawObject texture_bindgroup"),
         layout: &ui_texture_bindgroup_layout(device),
         entries: &[
             wgpu::BindGroupEntry {
@@ -375,6 +375,7 @@ impl<'a> UiDrawObjectBuilder<'a> {
 }
 
 pub struct UiScene {
+    device: Arc<wgpu::Device>,
     constants: Uniform<UiConstants>,
     _default_texture: Texture,
     default_texture_bindgroup: wgpu::BindGroup,
@@ -382,13 +383,13 @@ pub struct UiScene {
 
 impl UiScene {
     pub fn new(
-        device: &wgpu::Device,
+        device: Arc<wgpu::Device>,
         queue: &wgpu::Queue,
         canvas_size: UVec2,
         camera_translation: Vec2,
     ) -> Self {
         let constants = Uniform::new(
-            device,
+            &device,
             UiConstants {
                 canvas_size,
                 camera_translation,
@@ -397,7 +398,7 @@ impl UiScene {
             wgpu::ShaderStages::VERTEX,
         );
         let texture = Texture::new(
-            device,
+            &device,
             queue,
             Some("UiScene.default_texture"),
             None,
@@ -406,8 +407,9 @@ impl UiScene {
             1,
             &[255, 255, 255, 255],
         );
-        let default_texture_bindgroup = ui_texture_bindgroup(device, &texture);
+        let default_texture_bindgroup = ui_texture_bindgroup(&device, &texture);
         UiScene {
+            device,
             constants,
             _default_texture: texture,
             default_texture_bindgroup,
@@ -438,17 +440,21 @@ impl UiScene {
     pub fn default_texture_bindgroup(&self) -> &wgpu::BindGroup {
         &self.default_texture_bindgroup
     }
+
+    pub fn new_object(&self) -> UiDrawObjectBuilder<'_> {
+        UiDrawObjectBuilder::new(&self.device)
+    }
 }
 
 pub struct UiSceneBuilder<'a> {
-    device: &'a wgpu::Device,
+    device: Arc<wgpu::Device>,
     queue: &'a wgpu::Queue,
     canvas_size: UVec2,
     camera_translation: Vec2,
 }
 
 impl<'a> UiSceneBuilder<'a> {
-    pub fn new(device: &'a wgpu::Device, queue: &'a wgpu::Queue) -> Self {
+    pub fn new(device: Arc<wgpu::Device>, queue: &'a wgpu::Queue) -> Self {
         Self {
             device,
             queue,
@@ -467,14 +473,14 @@ impl<'a> UiSceneBuilder<'a> {
         self
     }
 
-    pub fn new_object(&self) -> UiDrawObjectBuilder<'a> {
-        UiDrawObjectBuilder::new(self.device)
+    pub fn new_object(&self) -> UiDrawObjectBuilder<'_> {
+        UiDrawObjectBuilder::new(&self.device)
     }
 
     #[cfg(feature = "image")]
     pub fn new_texture_from_dynamic_image(&self, img: image::DynamicImage) -> Texture {
         Texture::from_dynamic_image(
-            self.device,
+            &self.device,
             self.queue,
             img,
             Some("UiSceneBuilder::new_texture_from_dynamic_image"),
@@ -489,7 +495,7 @@ impl<'a> UiSceneBuilder<'a> {
             canvas_size,
             camera_translation,
         } = self;
-        UiScene::new(device, queue, canvas_size, camera_translation)
+        UiScene::new(device.clone(), queue, canvas_size, camera_translation)
     }
 }
 
