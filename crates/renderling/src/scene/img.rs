@@ -96,18 +96,6 @@ impl From<image::DynamicImage> for SceneImage {
     }
 }
 
-fn linear_xfer_u8(c: &mut u8) {
-    *c = ((*c as f32 / 255.0).powf(2.2) * 255.0) as u8;
-}
-
-fn linear_xfer_u16(c: &mut u16) {
-    *c = ((*c as f32 / 65535.0).powf(2.2) * 65535.0) as u16;
-}
-
-fn linear_xfer_f32(c: &mut f32) {
-    *c = c.powf(2.2);
-}
-
 fn u16_to_u8(c: u16) -> u8 {
     ((c as f32 / 65535.0) * 255.0) as u8
 }
@@ -125,6 +113,7 @@ pub fn convert_to_rgba8_bytes(
     format: SceneImageFormat,
     apply_linear_transfer: bool,
 ) -> Vec<u8> {
+    use crate::color::*;
     log::trace!("converting image of format {format:?}");
     // Convert using linear transfer, if needed
     if apply_linear_transfer {

@@ -11,7 +11,7 @@ use ::ab_glyph::Rect;
 use glyph_brush::*;
 
 pub use ::ab_glyph::FontArc;
-pub use glyph_brush::{Color, Section, Text};
+pub use glyph_brush::{Color, FontId, GlyphCruncher, OwnedSection, OwnedText, Section, Text};
 
 use crate::{Renderling, Texture, UiVertex};
 
@@ -240,6 +240,9 @@ impl GlyphCache {
     ///
     /// The texture and mesh are meant to be used to build or update an object
     /// to display.
+    // TODO: Add device and queue as parameters to `GlyphCache::get_updated` so they
+    // can be removed from `GlyphCache`.
+    // This would simplify things in the UI quite a bit.
     pub fn get_updated(&mut self) -> (Option<Vec<UiVertex>>, Option<Texture>) {
         let mut may_mesh: Option<Vec<UiVertex>> = None;
         let mut may_texture: Option<Texture> = None;
@@ -292,7 +295,7 @@ impl GlyphCache {
         self.cache = Some(cache);
 
         match brush_action.unwrap() {
-            BrushAction::Draw(all_vertices) => {
+            BrushAction::Draw(all_vertices) => if !all_vertices.is_empty() {
                 may_mesh = Some(
                     all_vertices
                         .into_iter()

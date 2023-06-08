@@ -1101,7 +1101,7 @@ mod test {
         println!("{texture:?}");
         crate::setup_scene_render_graph(scene, &mut r, true);
         let img = r.render_image().unwrap();
-        crate::img_diff::assert_img_eq("gltf_images.png", img);
+        img_diff::assert_img_eq("gltf_images.png", img);
     }
 
     #[test]
@@ -1121,7 +1121,7 @@ mod test {
         crate::setup_scene_render_graph(scene, &mut r, true);
 
         let img = r.render_image().unwrap();
-        crate::img_diff::assert_img_eq("gltf_minimal_mesh.png", img);
+        img_diff::assert_img_eq("gltf_minimal_mesh.png", img);
     }
 
     #[test]
@@ -1146,7 +1146,7 @@ mod test {
         crate::setup_scene_render_graph(scene, &mut r, true);
 
         let img = r.render_image().unwrap();
-        crate::img_diff::assert_img_eq("gltf_simple_meshes.png", img);
+        img_diff::assert_img_eq("gltf_simple_meshes.png", img);
     }
 
     #[test]
@@ -1175,7 +1175,7 @@ mod test {
         crate::setup_scene_render_graph(scene, &mut r, true);
 
         let img = r.render_image().unwrap();
-        crate::img_diff::assert_img_eq("gltf_simple_texture.png", img);
+        img_diff::assert_img_eq("gltf_simple_texture.png", img);
     }
 
     #[test]
@@ -1195,7 +1195,7 @@ mod test {
 
         let img = r.render_image().unwrap();
         println!("saving frame");
-        crate::img_diff::assert_img_eq("gltf_normal_mapping_brick_sphere.png", img);
+        img_diff::assert_img_eq("gltf_normal_mapping_brick_sphere.png", img);
     }
 
     #[test]
@@ -1250,7 +1250,7 @@ mod test {
 
         let img = r.render_image().unwrap();
         println!("saving frame");
-        crate::img_diff::save("gltf_can_load_multiple.png", img.clone());
+        img_diff::save("gltf_can_load_multiple.png", img.clone());
     }
 
     #[cfg(feature = "gltf")]
@@ -1281,7 +1281,7 @@ mod test {
         let scene = builder.build().unwrap();
         crate::setup_scene_render_graph(scene, &mut r, true);
         let img = r.render_image().unwrap();
-        crate::img_diff::assert_img_eq("gltf_simple_animation.png", img);
+        img_diff::assert_img_eq("gltf_simple_animation.png", img);
 
         assert_eq!(1, loader.animations.len());
 
@@ -1314,7 +1314,7 @@ mod test {
             }
             drop(scene);
             let img = r.render_image().unwrap();
-            crate::img_diff::assert_img_eq(&format!("gltf_simple_animation_after/{i}.png"), img);
+            img_diff::assert_img_eq(&format!("gltf_simple_animation_after/{i}.png"), img);
         }
     }
 }

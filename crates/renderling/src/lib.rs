@@ -42,7 +42,6 @@ mod atlas;
 // mod bank;
 mod buffer_array;
 mod camera;
-mod uniform;
 pub mod node;
 mod renderer;
 mod scene;
@@ -51,11 +50,11 @@ mod state;
 mod text;
 mod texture;
 mod ui;
+mod uniform;
 
 pub use atlas::*;
 pub use buffer_array::*;
 pub use camera::*;
-pub use uniform::*;
 use moongraph::IsGraphNode;
 pub use renderer::*;
 pub use scene::*;
@@ -64,21 +63,19 @@ pub use state::*;
 pub use text::*;
 pub use texture::*;
 pub use ui::*;
+pub use uniform::*;
 
+pub mod color;
 pub mod math;
 
 pub mod graph {
     //! Re-exports of [`moongraph`].
-
     pub use moongraph::*;
 
     pub type RenderNode = Node<Function, TypeKey>;
 }
 
 pub use graph::{Graph, Move, Read, Write};
-
-#[cfg(test)]
-mod img_diff;
 
 pub fn setup_ui_and_scene_render_graph(
     r: &mut Renderling,
@@ -265,7 +262,7 @@ mod test {
     fn cmy_triangle_sanity() {
         let mut c = cmy_triangle_setup();
         let img = c.ui.render_image().unwrap();
-        crate::img_diff::assert_img_eq("cmy_triangle.png", img);
+        img_diff::assert_img_eq("cmy_triangle.png", img);
     }
 
     #[test]
@@ -284,7 +281,7 @@ mod test {
             .unwrap();
 
         let img = c.ui.render_image().unwrap();
-        crate::img_diff::assert_img_eq("cmy_triangle_update_transform.png", img);
+        img_diff::assert_img_eq("cmy_triangle_update_transform.png", img);
     }
 
     /// Points around a pyramid height=1 with the base around the origin.
@@ -365,7 +362,7 @@ mod test {
 
         crate::setup_scene_render_graph(scene, &mut r, true);
         let img = r.render_image().unwrap();
-        crate::img_diff::assert_img_eq("cmy_cube.png", img);
+        img_diff::assert_img_eq("cmy_cube.png", img);
     }
 
     #[test]
@@ -398,7 +395,8 @@ mod test {
 
         // we should see two colored cubes
         let img = r.render_image().unwrap();
-        crate::img_diff::assert_img_eq("cmy_cube_visible_before.png", img);
+        img_diff::assert_img_eq("cmy_cube_visible_before.png", img.clone());
+        let img_before = img;
 
         // update cube two making in invisible
         r.graph
@@ -410,7 +408,7 @@ mod test {
 
         // we should see one colored cube
         let img = r.render_image().unwrap();
-        crate::img_diff::assert_img_eq("cmy_cube_visible_after.png", img);
+        img_diff::assert_img_eq("cmy_cube_visible_after.png", img);
 
         // update cube two making in visible again
         r.graph
@@ -422,9 +420,9 @@ mod test {
 
         // we should see two colored cubes again
         let img = r.render_image().unwrap();
-        crate::img_diff::assert_img_eq_with_testname(
-            "cmy_cube_visible_before_again",
-            "cmy_cube_visible_before.png",
+        img_diff::assert_eq(
+            "cmy_cube_visible_before_again.png",
+            img_before,
             img,
         );
     }
@@ -450,7 +448,7 @@ mod test {
 
         // we should see a cube
         let img = r.render_image().unwrap();
-        crate::img_diff::assert_img_eq("cmy_cube_remesh_before.png", img);
+        img_diff::assert_img_eq("cmy_cube_remesh_before.png", img);
 
         // update the cube mesh to a pyramid
         r.graph
@@ -463,7 +461,7 @@ mod test {
 
         // we should see a pyramid
         let img = r.render_image().unwrap();
-        crate::img_diff::assert_img_eq("cmy_cube_remesh_after.png", img);
+        img_diff::assert_img_eq("cmy_cube_remesh_after.png", img);
     }
 
     fn gpu_uv_unit_cube() -> Vec<GpuVertex> {
@@ -541,7 +539,7 @@ mod test {
         crate::setup_scene_render_graph(scene, &mut r, true);
         // we should see a cube with a stoney texture
         let img = r.render_image().unwrap();
-        crate::img_diff::assert_img_eq("unlit_textured_cube_material_before.png", img);
+        img_diff::assert_img_eq("unlit_textured_cube_material_before.png", img);
 
         // update the material's texture on the GPU
         r.graph
@@ -556,7 +554,7 @@ mod test {
 
         // we should see a cube with a dirty texture
         let img = r.render_image().unwrap();
-        crate::img_diff::assert_img_eq("unlit_textured_cube_material_after.png", img);
+        img_diff::assert_img_eq("unlit_textured_cube_material_after.png", img);
     }
 
     #[test]
@@ -687,7 +685,7 @@ mod test {
         );
 
         let img = r.render_image().unwrap();
-        crate::img_diff::assert_img_eq("gpu_scene_sanity.png", img);
+        img_diff::assert_img_eq("gpu_scene_sanity.png", img);
     }
 
     #[test]
@@ -803,7 +801,7 @@ mod test {
             materials
         );
 
-        crate::img_diff::assert_img_eq("gpu_scene_sanity2.png", img);
+        img_diff::assert_img_eq("gpu_scene_sanity2.png", img);
     }
 
     #[test]
@@ -819,8 +817,7 @@ mod test {
         let sandstone = image::open("../../img/sandstone.png").unwrap();
         let sandstone = builder.add_image(sandstone);
         println!("sandstone: {sandstone}");
-        let texels = image::open("../../test_img/atlas_uv_mapping.png")
-            .unwrap();
+        let texels = image::open("../../test_img/atlas_uv_mapping.png").unwrap();
         let texels_index = builder.add_image(texels);
         println!("atlas_uv_mapping: {texels_index}");
         let texture_id = builder.add_texture(TextureParams {
@@ -853,7 +850,7 @@ mod test {
             .with_scale([32.0, 32.0, 1.0])
             .build();
         let scene = builder.build().unwrap();
-        //let atlas_img = scene.atlas.texture.read(
+        // let atlas_img = scene.atlas.texture.read(
         //    r.get_device(),
         //    r.get_queue(),
         //    scene.atlas.size.x as usize,
@@ -861,12 +858,12 @@ mod test {
         //    4,
         //    1,
         //);
-        //let atlas_img = atlas_img.into_rgba(r.get_device()).unwrap();
-        //crate::img_diff::save("atlas.png", atlas_img);
+        // let atlas_img = atlas_img.into_rgba(r.get_device()).unwrap();
+        // img_diff::save("atlas.png", atlas_img);
         crate::setup_scene_render_graph(scene, &mut r, true);
 
         let img = r.render_image().unwrap();
-        crate::img_diff::assert_img_eq("atlas_uv_mapping.png", img);
+        img_diff::assert_img_eq("atlas_uv_mapping.png", img);
     }
 
     #[test]
@@ -958,7 +955,7 @@ mod test {
         crate::setup_scene_render_graph(scene, &mut r, true);
 
         let img = r.render_image().unwrap();
-        crate::img_diff::assert_img_eq("uv_wrapping.png", img);
+        img_diff::assert_img_eq("uv_wrapping.png", img);
     }
 
     #[test]
@@ -1050,7 +1047,7 @@ mod test {
         crate::setup_scene_render_graph(scene, &mut r, true);
 
         let img = r.render_image().unwrap();
-        crate::img_diff::assert_img_eq("negative_uv_wrapping.png", img);
+        img_diff::assert_img_eq("negative_uv_wrapping.png", img);
     }
 
     #[test]
@@ -1133,7 +1130,7 @@ mod test {
         setup_scene_render_graph(scene, &mut r, true);
 
         let img = r.render_image().unwrap();
-        crate::img_diff::assert_img_eq("scene_cube_directional.png", img);
+        img_diff::assert_img_eq("scene_cube_directional.png", img);
     }
 
     #[test]
@@ -1304,7 +1301,7 @@ mod test {
         assert_eq!(entities, gpu_entities);
 
         let img = r.render_image().unwrap();
-        crate::img_diff::assert_img_eq("scene_parent_sanity.png", img);
+        img_diff::assert_img_eq("scene_parent_sanity.png", img);
     }
 
     #[test]
@@ -1419,7 +1416,7 @@ mod test {
         crate::setup_scene_render_graph(scene, &mut r, true);
 
         let img = r.render_image().unwrap();
-        crate::img_diff::assert_img_eq("pbr_point_lights_metallic_roughness.png", img);
+        img_diff::assert_img_eq("pbr_point_lights_metallic_roughness.png", img);
 
         let view = camera::look_at([-len, len, len], [half, half, 0.0], Vec3::Y);
         r.graph
@@ -1427,126 +1424,6 @@ mod test {
             .unwrap();
 
         let img = r.render_image().unwrap();
-        crate::img_diff::assert_img_eq("pbr_point_lights_metallic_roughness_side.png", img);
+        img_diff::assert_img_eq("pbr_point_lights_metallic_roughness_side.png", img);
     }
-
-    //#[cfg(feature = "gltf")]
-    //#[test]
-    // fn gltf_load_scene() {
-    //    _init_logging();
-    //    let (mut r, cam) = forward_renderling(177, 100);
-    //    cam.destroy();
-
-    //    let mut loader = r.new_gltf_loader();
-    //    let (document, buffers, images) =
-    // gltf::import("../../gltf/cheetah_cone.glb").unwrap();    loader.load(&mut
-    // r, &document, &buffers, &images).unwrap();    let cam = loader
-    //        .cameras()
-    //        .next()
-    //        .unwrap()
-    //        .variant
-    //        .as_camera()
-    //        .unwrap()
-    //        .clone();
-    //    r.graph.add_resource(ForwardRenderCamera(cam.id));
-
-    //    let img = r.render_image().unwrap();
-    //    crate::img_diff::assert_img_eq_save(
-    //        Save::No,
-    //        "gltf_load_scene",
-    //        "gltf_load_scene.png",
-    //        img,
-    //    )
-    //    .unwrap();
-    //}
-
-    //#[cfg(feature = "gltf")]
-    //#[test]
-    // fn gltf_box_animated() {
-    //    _init_logging();
-
-    //    let (mut r, cam) = forward_renderling_with(
-    //        100,
-    //        100,
-    //        Some(wgpu::PrimitiveState {
-    //            topology: wgpu::PrimitiveTopology::TriangleList,
-    //            strip_index_format: None,
-    //            front_face: wgpu::FrontFace::Ccw,
-    //            cull_mode: Some(wgpu::Face::Back),
-    //            polygon_mode: wgpu::PolygonMode::Fill,
-    //            conservative: false,
-    //            unclipped_depth: false,
-    //        }),
-    //    );
-    //    r.set_background_color(Vec4::splat(1.0));
-    //    cam.set_view(Mat4::look_at_rh(
-    //        Vec3::new(0.0, 2.0, 2.0),
-    //        Vec3::ZERO,
-    //        Vec3::Y,
-    //    ));
-
-    //    let mut loader = r.new_gltf_loader();
-    //    let (document, buffers, images) =
-    // gltf::import("../../gltf/box_animated.glb").unwrap();    loader.load(&mut
-    // r, &document, &buffers, &images).unwrap();
-
-    //    let img = r.render_image().unwrap();
-    //    crate::img_diff::assert_img_eq_save(
-    //        Save::No,
-    //        "gltf_box_animated",
-    //        "gltf_box_animated.png",
-    //        img,
-    //    )
-    //    .unwrap();
-
-    //    loader.load_animations(&document, &buffers).unwrap();
-    //    assert_eq!(1, loader.animations().count());
-
-    //    let anime = loader.get_animation(0).unwrap();
-    //    println!("anime: {:?}", anime);
-    //    assert_eq!(3.70833, anime.length_in_seconds());
-    //    assert_eq!(2, anime.tweens[0].target_node_index);
-    //    assert_eq!(0, anime.tweens[1].target_node_index);
-    //}
-
-    // fn big_scene_cube_builder() -> MeshBuilder<UiVertex> {
-    //    let vertices = crate::math::unit_points();
-    //    let indices: [([u16; 3], [u16; 3], Vec4); 6] = [
-    //        ([0, 1, 2], [0, 2, 3], Vec4::Y),     // top
-    //        ([0, 3, 4], [4, 3, 5], Vec4::Z),     // front
-    //        ([3, 2, 6], [3, 6, 5], Vec4::X),     // right
-    //        ([1, 0, 7], [7, 0, 4], Vec4::NEG_X), // left
-    //        ([4, 5, 6], [4, 6, 7], Vec4::NEG_Y), // bottom
-    //        ([2, 1, 7], [2, 7, 6], Vec4::NEG_Z), // back
-    //    ];
-    //    MeshBuilder::default()
-    //        .with_vertices(indices.flat_map(|ui_vert| GpuVertex {
-    //            position: Vec3::from_array(ui_vert.position).extend(0.0),
-    //            color: Vec4::from_array(ui_vert.color),
-    //            uv: Vec4::ZERO,
-    //            norm: Vec4::ZERO,
-    //        }))
-    //        .with_indices(indices)
-    //}
-
-    ////#[cfg(feature = "gltf")]
-    ////#[test]
-    //// fn gltf_simple_morph_triangle() {
-    ////    let (document, buffers, images) =
-    //// gltf::import("../../gltf/simple_morph_triangle.gltf").unwrap();
-    ////    let mesh = document.meshes().next().unwrap();
-    ////    let primitive = mesh.primitives().next().unwrap();
-    ////    let reader = primitive.reader(|buffer|
-    //// Some(&buffers[buffer.index()]));    let positions: Vec<_> =
-    //// reader.read_positions().unwrap().collect();    let morphs: Vec<(_, _,
-    //// _)> = reader.read_morph_targets().collect();    println!("positions.
-    //// len(): {}", positions.len());    println!("morphs.len(): {}",
-    //// morphs.len());    for (i, (ps, ns, ts)) in
-    //// morphs.into_iter().enumerate() {        println!("{i}");
-    ////        println!("ps: {:?}", ps.map(|vs| vs.collect::<Vec<_>>()));
-    ////        println!("ns: {:?}", ns.map(|vs| vs.collect::<Vec<_>>()));
-    ////        println!("ts: {:?}", ts.map(|vs| vs.collect::<Vec<_>>()));
-    ////    }
-    ////    panic!("blah")
-    //// }
 }

@@ -369,11 +369,13 @@ impl Tween {
                     .as_morph_target_weights()
                     .context(MismatchedPropertiesSnafu)?;
 
-                let weights =
-                    from.into_iter().zip(
+                let weights = from
+                    .into_iter()
+                    .zip(
                         from_out
                             .into_iter()
-                            .zip(to_in.into_iter().zip(to.into_iter())))
+                            .zip(to_in.into_iter().zip(to.into_iter())),
+                    )
                     .map(|(from, (from_out, (to_in, to)))| -> f32 {
                         let previous_tangent = from_out * delta_time;
                         let next_tangent = to_in * delta_time;
@@ -429,10 +431,15 @@ impl Tween {
                 TweenProperty::Scale(a.lerp(*b, amount))
             }
             TweenProperty::MorphTargetWeights(a) => {
-                let b = to.as_morph_target_weights().context(MismatchedPropertiesSnafu)?;
-                TweenProperty::MorphTargetWeights(a.into_iter().zip(b).map(|(a, b)| {
-                    a + (b - a) * amount
-                }).collect())
+                let b = to
+                    .as_morph_target_weights()
+                    .context(MismatchedPropertiesSnafu)?;
+                TweenProperty::MorphTargetWeights(
+                    a.into_iter()
+                        .zip(b)
+                        .map(|(a, b)| a + (b - a) * amount)
+                        .collect(),
+                )
             }
         }))
     }
@@ -472,7 +479,10 @@ impl Tween {
             }
             TweenProperties::MorphTargetWeights(ws) => {
                 if self.interpolation.is_cubic_spline() {
-                    ws.iter().nth(1).cloned().map(TweenProperty::MorphTargetWeights)
+                    ws.iter()
+                        .nth(1)
+                        .cloned()
+                        .map(TweenProperty::MorphTargetWeights)
                 } else {
                     ws.first().cloned().map(TweenProperty::MorphTargetWeights)
                 }
@@ -509,7 +519,9 @@ impl Tween {
             TweenProperties::MorphTargetWeights(ws) => {
                 if self.interpolation.is_cubic_spline() {
                     let second_last = ws.len() - 2;
-                    ws.get(second_last).cloned().map(TweenProperty::MorphTargetWeights)
+                    ws.get(second_last)
+                        .cloned()
+                        .map(TweenProperty::MorphTargetWeights)
                 } else {
                     ws.last().cloned().map(TweenProperty::MorphTargetWeights)
                 }
