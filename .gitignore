@@ -15,3 +15,4 @@ Cargo.lock
 *~undo-tree~
 
 test_output
+cmy_triangle_renderer.svg
