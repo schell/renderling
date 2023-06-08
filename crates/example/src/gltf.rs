@@ -352,16 +352,23 @@ pub fn demo(
             }
 
             if let Some(ev) = event_state.event_from_winit(ev) {
+                let scene = r.graph.get_resource_mut::<Scene>().unwrap().unwrap();
+                let debug_mode = scene.get_debug_mode();
+                let mut set_debug_mode = |mode| {
+                    if debug_mode != mode {
+                        scene.set_debug_mode(mode);
+                    } else {
+                        scene.set_debug_mode(DebugMode::NONE);
+                    }
+                };
                 match app.ui.event(ev) {
                     None => {}
-                    Some(UiEvent::ToggleDebugNormals) => {
-                        let scene = r.graph.get_resource_mut::<Scene>().unwrap().unwrap();
-                        let debug_mode = scene.get_debug_mode();
-                        if debug_mode == DebugMode::NORMALS {
-                            scene.set_debug_mode(DebugMode::NONE);
-                        } else {
-                            scene.set_debug_mode(DebugMode::NORMALS);
-                        }
+                    Some(ev) => match ev {
+                        UiEvent::ToggleDebugNormals => set_debug_mode(DebugMode::NORMALS),
+                        UiEvent::ToggleDebugVertexNormals => set_debug_mode(DebugMode::VERTEX_NORMALS),
+                        UiEvent::ToggleDebugUvNormals => set_debug_mode(DebugMode::UV_NORMALS),
+                        UiEvent::ToggleDebugTangents => set_debug_mode(DebugMode::TANGENTS),
+                        UiEvent::ToggleDebugBitangents => set_debug_mode(DebugMode::BITANGENTS),
                     }
                 }
             }
