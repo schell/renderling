@@ -1,5 +1,5 @@
 //! GPU user interface.
-
+use snafu::prelude::*;
 use std::sync::Arc;
 
 use renderling::node::FrameTextureView;
@@ -14,6 +14,9 @@ pub use renderling::math::{UVec2, Vec2, Vec4};
 
 mod elements;
 pub use elements::*;
+
+#[derive(Debug, Snafu)]
+pub enum GpuiError {}
 
 #[derive(Clone, Copy, Default, Debug, PartialEq)]
 pub struct Size {
@@ -80,8 +83,97 @@ impl AABB {
 
 #[derive(Clone, Copy, Debug)]
 pub enum Event {
-    MouseMoved { position: UVec2 },
+    WindowResized { width: u32, height: u32 },
+    MouseMoved { position: UVec2, is_down: bool },
     MouseButton { position: UVec2, is_down: bool },
+}
+
+#[derive(Default)]
+pub struct EventState {
+    last_mouse_cursor_position: UVec2,
+    mouse_button_is_down: bool,
+}
+
+#[cfg(feature = "winit")]
+impl EventState {
+    pub fn event_from_winit(&mut self, value: &winit::event::WindowEvent) -> Option<Event> {
+        #[allow(deprecated)]
+        match value {
+            winit::event::WindowEvent::Resized(size) => Some(Event::WindowResized {
+                width: size.width,
+                height: size.height,
+            }),
+            winit::event::WindowEvent::Moved(_) => None,
+            winit::event::WindowEvent::CloseRequested => None,
+            winit::event::WindowEvent::Destroyed => None,
+            winit::event::WindowEvent::DroppedFile(_) => None,
+            winit::event::WindowEvent::HoveredFile(_) => None,
+            winit::event::WindowEvent::HoveredFileCancelled => None,
+            winit::event::WindowEvent::ReceivedCharacter(_) => None,
+            winit::event::WindowEvent::Focused(_) => None,
+            winit::event::WindowEvent::KeyboardInput {
+                device_id: _,
+                input: _,
+                is_synthetic: _,
+            } => None,
+            winit::event::WindowEvent::ModifiersChanged(_) => None,
+            winit::event::WindowEvent::Ime(_) => None,
+            winit::event::WindowEvent::CursorMoved {
+                device_id: _,
+                position,
+                modifiers: _,
+            } => {
+                self.last_mouse_cursor_position = UVec2::new(position.x as u32, position.y as u32);
+                Some(Event::MouseMoved {
+                    position: self.last_mouse_cursor_position,
+                    is_down: self.mouse_button_is_down
+                })
+            }
+            winit::event::WindowEvent::CursorEntered { device_id: _ } => None,
+            winit::event::WindowEvent::CursorLeft { device_id: _ } => None,
+            winit::event::WindowEvent::MouseWheel {
+                device_id: _,
+                delta: _,
+                phase: _,
+                modifiers: _,
+            } => None,
+            winit::event::WindowEvent::MouseInput {
+                device_id: _,
+                state,
+                button,
+                modifiers: _,
+            } => {
+                match button {
+                    winit::event::MouseButton::Left => Some(()),
+                    winit::event::MouseButton::Right => None,
+                    winit::event::MouseButton::Middle => None,
+                    winit::event::MouseButton::Other(_) => None,
+                }?;
+                self.mouse_button_is_down = *state == winit::event::ElementState::Pressed;
+                Some(Event::MouseButton {
+                    position: self.last_mouse_cursor_position,
+                    is_down: self.mouse_button_is_down
+                })
+            }
+            winit::event::WindowEvent::TouchpadPressure {
+                device_id: _,
+                pressure: _,
+                stage: _,
+            } => None,
+            winit::event::WindowEvent::AxisMotion {
+                device_id: _,
+                axis: _,
+                value: _,
+            } => None,
+            winit::event::WindowEvent::Touch(_) => None,
+            winit::event::WindowEvent::ScaleFactorChanged {
+                scale_factor: _,
+                new_inner_size: _,
+            } => None,
+            winit::event::WindowEvent::ThemeChanged(_) => None,
+            winit::event::WindowEvent::Occluded(_) => None,
+        }
+    }
 }
 
 /// Implemented by every user interface element.
@@ -122,8 +214,10 @@ impl<A: Element, B: Element> Element for (A, B) {
         render_pass: &mut wgpu::RenderPass<'a>,
         default_texture_bindgroup: &'a wgpu::BindGroup,
     ) {
-        self.0.paint(device, queue, render_pass, default_texture_bindgroup);
-        self.1.paint(device, queue, render_pass, default_texture_bindgroup);
+        self.0
+            .paint(device, queue, render_pass, default_texture_bindgroup);
+        self.1
+            .paint(device, queue, render_pass, default_texture_bindgroup);
     }
 
     fn event(&mut self, event: Event) -> Self::OutputEvent {
@@ -246,7 +340,11 @@ impl Gpui {
     }
 
     /// Render to an image.
-    pub fn render_image_with_srgb(&mut self, root: &mut impl Element, as_srgb: bool) -> image::DynamicImage {
+    pub fn render_image_with_srgb(
+        &mut self,
+        root: &mut impl Element,
+        as_srgb: bool,
+    ) -> image::DynamicImage {
         self.render(root);
         let (width, height) = self.0.get_screen_size();
         let frame = self.0.graph.remove_resource::<Frame>().unwrap().unwrap();
@@ -272,7 +370,6 @@ impl Gpui {
 
     /// Render to the internal texture.
     pub fn render(&mut self, root: &mut impl Element) {
-        log::trace!("rendering");
         let _ = self.0.graph.remove_resource::<Frame>();
 
         self.0.graph.run_with_local(
@@ -380,8 +477,7 @@ mod test {
         _init_logging();
         let mut ui = Gpui::new(50, 50);
         ui.set_background_color(Vec4::new(0.0, 0.0, 0.0, 1.0));
-        let mut rect = ui.new_rectangle()
-            .with_color(Vec4::ONE);
+        let mut rect = ui.new_rectangle().with_color(Vec4::ONE);
         rect.layout(AABB {
             min: Vec2::ZERO,
             max: Vec2::new(25.0, 25.0),
@@ -400,7 +496,9 @@ mod test {
         let lhs = image::Rgba([0.2, 0.2, 0.2, 1.0]);
         let image = image::Rgba32FImage::from_pixel(1, 1, lhs);
         let image = image::DynamicImage::from(image).into_rgb8();
-        image.save_with_format("../../test_img/srgb_pixel.png", image::ImageFormat::Png).unwrap();
+        image
+            .save_with_format("../../test_img/srgb_pixel.png", image::ImageFormat::Png)
+            .unwrap();
         let image = image::open("../../test_img/srgb_pixel.png").unwrap();
         let image = image.into_rgba32f();
         let rhs = *image.get_pixel(0, 0);
@@ -417,7 +515,8 @@ mod test {
         let mut ui = Gpui::new(1, 1);
         ui.set_background_color(Vec4::new(0.0, 0.0, 0.0, 1.0));
         let lhs = image::Rgba([0.2, 0.2, 0.2, 1.0]);
-        let mut rect = ui.new_rectangle()
+        let mut rect = ui
+            .new_rectangle()
             .with_color(lhs.0)
             .with_size(Vec2::splat(1.0));
         ui.layout(&mut rect);
@@ -484,6 +583,7 @@ mod test {
 
         let may_ev_over = btn.event(Event::MouseMoved {
             position: UVec2::splat(10),
+            is_down: false
         });
         assert_eq!(Some(ButtonEvent::Over), may_ev_over);
         ui.layout(&mut btn);
@@ -501,6 +601,7 @@ mod test {
 
         let may_ev_up = btn.event(Event::MouseMoved {
             position: UVec2::splat(10),
+            is_down: false
         });
         assert_eq!(Some(ButtonEvent::Up), may_ev_up);
         ui.layout(&mut btn);
@@ -509,6 +610,7 @@ mod test {
 
         let may_ev_out = btn.event(Event::MouseMoved {
             position: UVec2::splat(1000),
+            is_down: false
         });
         assert_eq!(Some(ButtonEvent::Out), may_ev_out);
         ui.layout(&mut btn);
@@ -521,13 +623,14 @@ mod test {
         // This tests the quad geometry and blending by ensuring that a partially
         // transparent rectangle is uniformly transparent and layers correctly
         _init_logging();
-        let mut gpui = Gpui::new(50, 50)
-            .with_background_color(Vec4::ONE);
-        let rect1 = gpui.new_rectangle()
+        let mut gpui = Gpui::new(50, 50).with_background_color(Vec4::ONE);
+        let rect1 = gpui
+            .new_rectangle()
             .with_color(Vec3::splat(0.0).extend(0.5))
             .with_size(Vec2::splat(25.0))
             .with_origin(Vec2::splat(10.0));
-        let rect2 = gpui.new_rectangle()
+        let rect2 = gpui
+            .new_rectangle()
             .with_color(Vec3::splat(0.0).extend(0.5))
             .with_size(Vec2::splat(25.0))
             .with_origin(Vec2::splat(15.0));

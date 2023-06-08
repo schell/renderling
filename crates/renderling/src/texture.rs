@@ -440,9 +440,6 @@ impl CopiedTextureBuffer {
     #[cfg(feature = "image")]
     /// Convert the post render buffer into an RgbaImage.
     pub async fn convert_to_rgba(self) -> Result<image::RgbaImage, TextureError> {
-        use glam::Vec4;
-        use image::Rgba;
-
         let buffer_slice = self.buffer.slice(..);
         let (tx, rx) = std::sync::mpsc::channel();
         buffer_slice.map_async(wgpu::MapMode::Read, {

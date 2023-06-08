@@ -1,7 +1,9 @@
 //! User interface for the gltf viewer.
 use renderling_gpui::{Button, Element, Gpui, Text, Vec2, Vec4, AABB};
 
-pub enum UiEvent {}
+pub enum UiEvent {
+    ToggleDebugNormals
+}
 
 pub struct Ui {
     text_title: Text,
@@ -16,7 +18,7 @@ impl Ui {
             text_title: gpui
                 .new_text()
                 .with_text("Title")
-                .with_scale(32.0)
+                .with_scale(64.0)
                 .with_color(Vec4::ONE),
             text_camera: gpui
                 .new_text()
@@ -42,17 +44,20 @@ impl Ui {
 impl Element for Ui {
     type OutputEvent = Option<UiEvent>;
 
-    fn layout(&mut self, constraint: AABB) -> AABB {
+    fn layout(&mut self, mut constraint: AABB) -> AABB {
+        let border = 16.0;
+        let space = 8.0;
+        constraint.min += Vec2::splat(border);
         let aabb_title = self.text_title.layout(constraint);
         let aabb_camera = self.text_camera.layout({
             let mut aabb = aabb_title;
-            aabb.min.y = aabb_title.max.y;
+            aabb.min.y = aabb_title.max.y + space;
             aabb.max = constraint.max;
             aabb
         });
         let aabb_btn_debug_normal = self.btn_debug_normal.layout({
             let mut aabb = constraint;
-            aabb.min.y = aabb_camera.max.y;
+            aabb.min.y = aabb_camera.max.y + space;
             aabb
         });
         aabb_title.union(aabb_camera).union(aabb_btn_debug_normal)
@@ -74,10 +79,13 @@ impl Element for Ui {
     }
 
     fn event(&mut self, event: renderling_gpui::Event) -> Self::OutputEvent {
+        use renderling_gpui::ButtonEvent;
         match self.btn_debug_normal.event(event) {
-            Some(_) => {}
-            None => {}
+            Some(ev) => match ev {
+                ButtonEvent::Down => Some(UiEvent::ToggleDebugNormals),
+                _ => None
+            }
+            None => None
         }
-        None
     }
 }

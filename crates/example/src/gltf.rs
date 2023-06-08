@@ -6,10 +6,10 @@ use std::time::Instant;
 
 use renderling::{
     math::{Mat4, Vec3, Vec4},
-    DebugMode, FontArc, GltfLoader, GpuEntity, Renderling, Scene, TweenProperty, UiMode, UiScene,
+    DebugMode, FontArc, GltfLoader, GpuEntity, Renderling, Scene, TweenProperty, UiMode,
     UiVertex, Write,
 };
-use renderling_gpui::{Element, Gpui, Vec2, AABB};
+use renderling_gpui::{Element, Gpui};
 use winit::event::KeyboardInput;
 
 const RADIUS_SCROLL_DAMPENING: f32 = 0.001;
@@ -17,6 +17,8 @@ const DX_DY_DRAG_DAMPENING: f32 = 0.01;
 
 mod ui;
 use ui::Ui;
+
+use self::ui::UiEvent;
 
 const DARK_BLUE_BG_COLOR: Vec4 = Vec4::new(
     0x30 as f32 / 255.0,
@@ -56,7 +58,6 @@ impl App {
         let theta = std::f32::consts::FRAC_PI_4;
         let left_mb_down: bool = false;
         let last_cursor_position: Option<winit::dpi::PhysicalPosition<f64>> = None;
-        let (ww, wh) = r.get_screen_size();
         let mut gpui = renderling_gpui::Gpui::new_from(r);
 
         // get the font for the UI
@@ -320,6 +321,7 @@ pub fn demo(
         app.load(r, file.as_ref());
     }
 
+    let mut event_state = renderling_gpui::EventState::default();
     move |r, ev: Option<&winit::event::WindowEvent>| {
         if let Some(ev) = ev {
             match ev {
@@ -347,6 +349,21 @@ pub fn demo(
                     app.load(r, path);
                 }
                 _ => {}
+            }
+
+            if let Some(ev) = event_state.event_from_winit(ev) {
+                match app.ui.event(ev) {
+                    None => {}
+                    Some(UiEvent::ToggleDebugNormals) => {
+                        let scene = r.graph.get_resource_mut::<Scene>().unwrap().unwrap();
+                        let debug_mode = scene.get_debug_mode();
+                        if debug_mode == DebugMode::NORMALS {
+                            scene.set_debug_mode(DebugMode::NONE);
+                        } else {
+                            scene.set_debug_mode(DebugMode::NORMALS);
+                        }
+                    }
+                }
             }
         } else {
             app.update_camera_view(r);

@@ -23,11 +23,13 @@ impl Rectangle {
 
     pub fn set_origin(&mut self, origin: impl Into<Vec2>) {
         let origin = origin.into();
-        let delta = origin - self.aabb.min;
-        self.aabb.min += delta;
-        self.aabb.max += delta;
-        if let Some(obj) = self.draw_object.as_mut() {
-            obj.set_position(self.aabb.min);
+        if self.aabb.min != origin {
+            let delta = origin - self.aabb.min;
+            self.aabb.min += delta;
+            self.aabb.max += delta;
+            if let Some(obj) = self.draw_object.as_mut() {
+                obj.set_position(self.aabb.min);
+            }
         }
     }
 
@@ -39,9 +41,11 @@ impl Rectangle {
     // Set the size of the rectangle.
     pub fn set_size(&mut self, size: impl Into<Vec2>) {
         let size = size.into();
-        self.aabb.max = self.aabb.min + size;
-        if let Some(obj) = self.draw_object.as_mut() {
-            obj.set_scale(size);
+        if self.aabb.size() != size {
+            self.aabb.max = self.aabb.min + size;
+            if let Some(obj) = self.draw_object.as_mut() {
+                obj.set_scale(size);
+            }
         }
     }
 
@@ -57,10 +61,13 @@ impl Rectangle {
 
     // Set the color of the rectangle.
     pub fn set_color(&mut self, color: impl Into<Vec4>) {
-        self.color = color.into();
-        let vertices = self.vertices();
-        if let Some(obj) = self.draw_object.as_mut() {
-            obj.set_vertices(vertices);
+        let color = color.into();
+        if self.color != color {
+            self.color = color;
+            let vertices = self.vertices();
+            if let Some(obj) = self.draw_object.as_mut() {
+                obj.set_vertices(vertices);
+            }
         }
     }
 
@@ -90,12 +97,10 @@ impl Element for Rectangle {
     type OutputEvent = ();
 
     fn layout(&mut self, constraint: AABB) -> AABB {
-        log::trace!("constraint: {constraint:?}");
         self.aabb = AABB {
             min: self.aabb.min.max(constraint.min),
             max: self.aabb.max.min(constraint.max),
         };
-        log::trace!("aabb: {:?}", self.aabb);
 
         self.aabb
     }
@@ -110,10 +115,6 @@ impl Element for Rectangle {
         let origin = self.aabb.min;
         let size = self.aabb.size();
         if self.draw_object.is_none() {
-            log::trace!(
-                "creating rectangle origin: {origin:?} size: {size:?} color: {:?}",
-                self.color
-            );
             let obj = UiDrawObjectBuilder::new(device)
                 .with_draw_mode(UiMode::DEFAULT)
                 .with_position(origin)
@@ -132,7 +133,6 @@ impl Element for Rectangle {
         }
 
         draw_obj.update(device, queue).unwrap();
-        log::trace!("drawing rectangle");
         draw_obj.draw(render_pass, default_texture_bindgroup);
     }
 
@@ -255,7 +255,6 @@ impl Element for Text {
         default_texture_bindgroup: &'a wgpu::BindGroup,
     ) {
         let origin = self.aabb.min;
-        let size = self.aabb.size();
         if self.draw_object.is_none() {
             self.draw_object = Some(
                 UiDrawObjectBuilder::new(device)
@@ -313,14 +312,14 @@ pub struct Button {
 }
 
 impl Button {
-    const TEXT_COLOR_NORMAL: Vec4 = Vec4::new(0.0, 0.0, 0.0, 0.5);
-    const TEXT_COLOR_OVER: Vec4 = Vec4::new(0.0, 0.0, 0.0, 1.0);
-    const TEXT_COLOR_DOWN: Vec4 = Vec4::new(1.0, 1.0, 0.2, 1.0);
+    const TEXT_COLOR_NORMAL: Vec4 = Vec4::new(0.1, 0.1, 0.1, 1.0);
+    const TEXT_COLOR_OVER: Vec4 = Vec4::new(0.7, 0.13, 0.13, 1.0);
+    const TEXT_COLOR_DOWN: Vec4 = Vec4::new(1.0, 0.0, 0.0, 1.0);
     const PX_OFFSET: f32 = 8.0;
     const PX_BORDER: f32 = 4.0;
 
     pub fn new(renderling: &Renderling, fonts: impl IntoIterator<Item = FontArc>) -> Self {
-        Button {
+        let mut btn = Button {
             foreground: Rectangle::new(),
             background: Rectangle::new().with_color(Vec4::new(0.0, 0.0, 0.0, 0.5)),
             text: {
@@ -330,7 +329,9 @@ impl Button {
             },
             aabb: AABB::default(),
             state: ButtonState::default(),
-        }
+        };
+        btn.set_normal();
+        btn
     }
 
     pub fn set_text(&mut self, text: impl Into<String>) {
@@ -392,7 +393,7 @@ impl Element for Button {
         let border = Vec2::splat(Self::PX_BORDER);
         let offset = Vec2::splat(Self::PX_OFFSET);
         let down_offset = if self.state == ButtonState::Down {
-            offset * 2.0 / 3.0
+            offset * 0.5
         } else {
             Vec2::ZERO
         };
@@ -404,14 +405,12 @@ impl Element for Button {
         let bg_size = text_aabb.size() + border * 2.0;
         self.foreground.set_origin(constraint.min + down_offset);
         self.foreground.set_size(bg_size);
-        self.background.set_origin(self.foreground.aabb.min + offset);
+        self.background
+            .set_origin(self.foreground.aabb.min - down_offset + offset);
         self.background.set_size(bg_size);
 
         let fg_aabb = self.foreground.layout(constraint);
         let bg_aabb = self.background.layout(constraint);
-        log::trace!(
-            "layout button text_aabb:{text_aabb:?} fg_aabb:{fg_aabb:?} bg_aabb:{bg_aabb:?}"
-        );
         self.aabb = text_aabb.union(fg_aabb).union(bg_aabb);
         self.aabb
     }
@@ -434,22 +433,31 @@ impl Element for Button {
     fn event(&mut self, event: Event) -> Option<ButtonEvent> {
         let from_state = self.state;
         match event {
-            Event::MouseMoved { position } => {
+            Event::MouseMoved { position, is_down } => {
                 let position = Vec2::new(position.x as f32, position.y as f32);
                 if self.aabb.contains(position) {
-                    self.set_over();
+                    if is_down {
+                        self.set_down();
+                    } else {
+                        self.set_over();
+                    }
                 } else {
                     self.set_normal();
                 }
             }
             Event::MouseButton { position, is_down } => {
                 let position = Vec2::new(position.x as f32, position.y as f32);
-                if self.aabb.contains(position) && is_down {
-                    self.set_down();
+                if self.aabb.contains(position) {
+                    if is_down {
+                        self.set_down();
+                    } else {
+                        self.set_over();
+                    }
                 } else {
-                    self.set_over();
+                    self.set_normal();
                 }
             }
+            Event::WindowResized { .. } => {}
         };
         match (from_state, self.state) {
             (ButtonState::Normal, ButtonState::Normal) => None,

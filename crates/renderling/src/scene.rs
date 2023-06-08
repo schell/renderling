@@ -521,6 +521,10 @@ impl Scene {
         Ok(())
     }
 
+    pub fn get_debug_mode(&self) -> DebugMode {
+        self.constants.debug_mode
+    }
+
     pub fn set_debug_mode(&mut self, debug_mode: DebugMode) {
         self.constants.debug_mode = debug_mode;
         self.constants_update = Some(self.constants);
