@@ -3,6 +3,7 @@ members = [
     "crates/example",
     "crates/renderling",
     "crates/renderling-shader",
+    "crates/renderling-gpui",
     "crates/sandbox",
 ]
 

@@ -32,7 +32,7 @@ gltf = { version = "^1.1", optional = true, features = ["KHR_lights_punctual", "
 glyph_brush = { version = "^0.7", optional = true }
 image = { version = "0.24.4", optional = true }
 log = "^0.4"
-moongraph = { version = "^0.1", features = ["dot"] }
+moongraph = { version = "^0.2", features = ["dot"] }
 raw-window-handle = { version = "^0.5", optional = true }
 renderling-shader = { path = "../renderling-shader" }
 rustc-hash = "^1.1"
@@ -46,5 +46,5 @@ features = ["forward", "ui", "image", "raw-window-handle", "winit"]
 
 [dev-dependencies]
 env_logger = "0.10.0"
-dify = { git = "https://github.com/schell/dify", branch = "patch-1" }
 icosahedron = "^0.1"
+img-diff = { path = "../img-diff" }

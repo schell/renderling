@@ -23,21 +23,20 @@ impl GpuToggles {
         self.0 |= if on {
             1 << Self::SHIFT_GAMMA_CORRECT
         } else {
-            ! (1 << Self::SHIFT_GAMMA_CORRECT)
+            !(1 << Self::SHIFT_GAMMA_CORRECT)
         };
     }
 
     pub fn gamma_correct(&self) -> bool {
         ((self.0 >> Self::SHIFT_GAMMA_CORRECT) & 0xb1) == 1u32
     }
-
 }
 
 #[cfg(test)]
 mod toggles {
     use super::GpuToggles;
 
-    const GAMMA:u32 = 0b10000000000000000000000000000000;
+    const GAMMA: u32 = 0b10000000000000000000000000000000;
 
     #[test]
     fn toggle() {
