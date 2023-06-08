@@ -2,7 +2,11 @@
 use renderling_gpui::{Button, Element, Gpui, Text, Vec2, Vec4, AABB};
 
 pub enum UiEvent {
-    ToggleDebugNormals
+    ToggleDebugNormals,
+    ToggleDebugVertexNormals,
+    ToggleDebugUvNormals,
+    ToggleDebugTangents,
+    ToggleDebugBitangents
 }
 
 pub struct Ui {
@@ -10,6 +14,10 @@ pub struct Ui {
     text_camera: Text,
 
     btn_debug_normal: Button,
+    btn_debug_vertex_normals: Button,
+    btn_debug_uv_normals: Button,
+    btn_debug_tangents: Button,
+    btn_debug_bitangents: Button,
 }
 
 impl Ui {
@@ -28,7 +36,23 @@ impl Ui {
             btn_debug_normal: gpui
                 .new_button()
                 .with_text("Debug Normals")
-                .with_scale(32.0)
+                .with_scale(32.0),
+            btn_debug_vertex_normals: gpui
+                .new_button()
+                .with_text("Debug Vertex Normals")
+                .with_scale(32.0),
+            btn_debug_uv_normals: gpui
+                .new_button()
+                .with_text("Debug UV Normals")
+                .with_scale(32.0),
+            btn_debug_tangents: gpui
+                .new_button()
+                .with_text("Debug Tangents")
+                .with_scale(32.0),
+            btn_debug_bitangents: gpui
+                .new_button()
+                .with_text("Debug Bitangents")
+                .with_scale(32.0),
         }
     }
 
@@ -60,7 +84,33 @@ impl Element for Ui {
             aabb.min.y = aabb_camera.max.y + space;
             aabb
         });
-        aabb_title.union(aabb_camera).union(aabb_btn_debug_normal)
+        let aabb_btn_debug_vertex_normal = self.btn_debug_vertex_normals.layout({
+            let mut aabb = constraint;
+            aabb.min.y = aabb_btn_debug_normal.max.y + space;
+            aabb
+        });
+        let aabb_btn_debug_uv_normal = self.btn_debug_uv_normals.layout({
+            let mut aabb = constraint;
+            aabb.min.y = aabb_btn_debug_vertex_normal.max.y + space;
+            aabb
+        });
+        let aabb_btn_debug_tangents = self.btn_debug_tangents.layout({
+            let mut aabb = constraint;
+            aabb.min.y = aabb_btn_debug_uv_normal.max.y + space;
+            aabb
+        });
+        let aabb_btn_debug_bitangents = self.btn_debug_bitangents.layout({
+            let mut aabb = constraint;
+            aabb.min.y = aabb_btn_debug_tangents.max.y + space;
+            aabb
+        });
+        aabb_title
+            .union(aabb_camera)
+            .union(aabb_btn_debug_normal)
+            .union(aabb_btn_debug_uv_normal)
+            .union(aabb_btn_debug_vertex_normal)
+            .union(aabb_btn_debug_tangents)
+            .union(aabb_btn_debug_bitangents)
     }
 
     fn paint<'a, 'b: 'a>(
@@ -76,16 +126,30 @@ impl Element for Ui {
             .paint(device, queue, render_pass, default_texture_bindgroup);
         self.btn_debug_normal
             .paint(device, queue, render_pass, default_texture_bindgroup);
+        self.btn_debug_uv_normals
+            .paint(device, queue, render_pass, default_texture_bindgroup);
+        self.btn_debug_vertex_normals
+            .paint(device, queue, render_pass, default_texture_bindgroup);
+        self.btn_debug_tangents
+            .paint(device, queue, render_pass, default_texture_bindgroup);
+        self.btn_debug_bitangents
+            .paint(device, queue, render_pass, default_texture_bindgroup);
     }
 
     fn event(&mut self, event: renderling_gpui::Event) -> Self::OutputEvent {
         use renderling_gpui::ButtonEvent;
-        match self.btn_debug_normal.event(event) {
-            Some(ev) => match ev {
-                ButtonEvent::Down => Some(UiEvent::ToggleDebugNormals),
-                _ => None
+        let btns = [
+            (&mut self.btn_debug_normal, UiEvent::ToggleDebugNormals),
+            (&mut self.btn_debug_vertex_normals, UiEvent::ToggleDebugVertexNormals),
+            (&mut self.btn_debug_uv_normals, UiEvent::ToggleDebugUvNormals),
+            (&mut self.btn_debug_tangents, UiEvent::ToggleDebugTangents),
+            (&mut self.btn_debug_bitangents, UiEvent::ToggleDebugBitangents),
+        ];
+        for (btn, ev) in btns.into_iter() {
+            if btn.event(event) == Some(ButtonEvent::Down) {
+                return Some(ev);
             }
-            None => None
         }
+        None
     }
 }
