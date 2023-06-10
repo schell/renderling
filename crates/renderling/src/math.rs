@@ -13,7 +13,7 @@ pub const POINTS_2D_TEX_QUAD: &[Vec2] = {
     let tr = Vec2::new(1.0, 0.0);
     let bl = Vec2::new(0.0, 1.0);
     let br = Vec2::new(1.0, 1.0);
-    &[tl, bl, tr, tl, br, tr]
+    &[tl, bl, tr, tr, bl, br]
 };
 
 /// Points around the unit cube.
