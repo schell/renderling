@@ -355,7 +355,7 @@ pub fn demo(
                 let scene = r.graph.get_resource_mut::<Scene>().unwrap().unwrap();
                 let debug_mode = scene.get_debug_mode();
                 let mut set_debug_mode = |mode| {
-                    if debug_mode != mode {
+                    if debug_mode != DebugMode::NONE {
                         scene.set_debug_mode(mode);
                     } else {
                         scene.set_debug_mode(DebugMode::NONE);

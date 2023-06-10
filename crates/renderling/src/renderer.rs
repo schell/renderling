@@ -302,7 +302,6 @@ impl Renderling {
         SceneBuilder::new(device.0, queue.0).with_gamma_correction(gamma_correct)
     }
 
-    // TODO: make `new_ui_scene` return a `UiSceneBuilder`.
     pub fn new_ui_scene(&self) -> UiSceneBuilder<'_> {
         let (device, _) = self.get_device_and_queue_owned();
         let queue = self.get_queue();
