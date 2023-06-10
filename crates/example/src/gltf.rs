@@ -363,12 +363,13 @@ pub fn demo(
                 let debug_mode = scene.get_debug_mode();
                 let mut set_debug_mode = |mode| {
                     log::debug!("setting debug mode to {mode}");
-                    if debug_mode != DebugMode::NONE && debug_mode != mode {
+                    if debug_mode != mode {
                         scene.set_debug_mode(mode);
                     } else {
                         scene.set_debug_mode(DebugMode::NONE);
                     }
                 };
+
                 match app.ui.event(ev) {
                     None => {}
                     Some(ev) => match ev {

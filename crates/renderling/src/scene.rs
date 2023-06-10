@@ -369,7 +369,7 @@ impl Scene {
             wgpu::BufferUsages::UNIFORM
                 | wgpu::BufferUsages::COPY_DST
                 | wgpu::BufferUsages::COPY_SRC,
-            wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT
+            wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
         );
 
         let cull_bindgroup = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -515,8 +515,11 @@ impl Scene {
     }
 
     pub fn set_debug_mode(&mut self, debug_mode: DebugMode) {
-        log::trace!("setting debug mode to '{debug_mode}'");
         if self.constants.debug_mode != debug_mode {
+            log::debug!(
+                "setting debug mode from '{}' to '{debug_mode}'",
+                self.constants.debug_mode
+            );
             self.constants.debug_mode = debug_mode;
         }
     }
