@@ -67,6 +67,8 @@ impl RenderTarget {
                 surface.configure(&device, &surface_config);
             }
             RenderTarget::Texture { texture } => {
+                let usage = texture.usage();
+                let format = texture.format();
                 let texture_desc = wgpu::TextureDescriptor {
                     size: wgpu::Extent3d {
                         width,
@@ -76,9 +78,9 @@ impl RenderTarget {
                     mip_level_count: 1,
                     sample_count: 1,
                     dimension: wgpu::TextureDimension::D2,
-                    format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                    usage: wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::RENDER_ATTACHMENT,
-                    label: None,
+                    format,
+                    usage,
+                    label: Some("RenderTarget texture"),
                     view_formats: &[],
                 };
                 *texture = Arc::new(device.create_texture(&texture_desc));
@@ -89,7 +91,7 @@ impl RenderTarget {
     pub fn format(&self) -> wgpu::TextureFormat {
         match self {
             RenderTarget::Surface { surface_config, .. } => surface_config.format,
-            RenderTarget::Texture { .. } => wgpu::TextureFormat::Rgba8UnormSrgb,
+            RenderTarget::Texture { texture } => texture.format(),
         }
     }
 

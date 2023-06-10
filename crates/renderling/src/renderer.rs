@@ -5,7 +5,7 @@ use std::{ops::Deref, sync::Arc};
 
 use crate::{
     CreateSurfaceFn, Graph, Read, RenderTarget, SceneBuilder, TextureError, UiSceneBuilder,
-    WgpuStateError, Write,
+    WgpuStateError, Write, node::HdrSurface,
 };
 
 #[derive(Debug, Snafu)]
@@ -222,6 +222,16 @@ impl Renderling {
                 },
             )
             .unwrap();
+        // The renderer doesn't _always_ have an HrdSurface, so we don't unwrap this one.
+        let _ = self.graph.visit(
+            |(device, queue, mut hdr): (
+                Read<Device>,
+                Read<Queue>,
+                Write<HdrSurface>,
+            )| {
+                hdr.texture = HdrSurface::create_texture(&device, &queue, width, height);
+                hdr.texture_bindgroup = HdrSurface::create_texture_bindgroup(&device, &hdr.texture);
+            });
     }
 
     #[cfg(feature = "image")]
