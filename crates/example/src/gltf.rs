@@ -7,7 +7,7 @@ use std::time::Instant;
 use renderling::{
     math::{Mat4, Vec3, Vec4},
     DebugMode, FontArc, GltfLoader, GpuEntity, Renderling, Scene, TweenProperty, UiMode,
-    UiVertex, Write,
+    UiVertex, Write, UiDrawObjects, ScreenSize,
 };
 use renderling_gpui::{Element, Gpui};
 use winit::event::KeyboardInput;
@@ -68,7 +68,6 @@ impl App {
 
         let ui = Ui::new(&mut gpui);
         let ui_texture = r.texture_from_wgpu_tex(gpui.get_frame_texture(), None);
-
         let ui_scene = r.new_ui_scene().with_canvas_size(1, 1).build();
         let ui_obj = ui_scene
             .new_object()
@@ -259,14 +258,19 @@ impl App {
     }
 
     fn resize(&mut self, r: &mut Renderling, width: u32, height: u32) {
+        let ui_obj_tex = self.gpui.resize(width, height);
         r.resize(width, height);
         r.graph
-            .visit(|mut scene: Write<Scene>| {
+            .visit(|(mut scene, mut ui_objs): (Write<Scene>, Write<UiDrawObjects>)| {
                 scene.set_camera_projection(Mat4::perspective_infinite_rh(
                     std::f32::consts::FRAC_PI_4,
                     width as f32 / height as f32,
                     0.01,
                 ));
+                // UNWRAP: safe because we always have one object to represent the UI "surface".
+                // Otherwise the app is useless.
+                let ui_obj = ui_objs.get_mut(0).unwrap();
+                ui_obj.set_texture(&ui_obj_tex);
             })
             .unwrap();
     }
@@ -350,7 +354,9 @@ pub fn demo(
                     app.key_input(r, *input);
                 }
                 winit::event::WindowEvent::Resized(size) => {
+                    log::trace!("resizing to {size:?}");
                     app.resize(r, size.width, size.height);
+                    let _ = app.gpui.0.graph.get_resource::<ScreenSize>().unwrap().unwrap();
                 }
                 winit::event::WindowEvent::DroppedFile(path) => {
                     app.load(r, path);

@@ -234,7 +234,7 @@ type RenderParams = (
 );
 
 /// User interface renderer.
-pub struct Gpui(Renderling);
+pub struct Gpui(pub Renderling);
 
 impl Gpui {
     /// Create a new UI renderer.
@@ -318,6 +318,18 @@ impl Gpui {
 
         r.graph.add_local::<RenderParams, ()>();
         Self(r)
+    }
+
+    /// Resize the interface's "surface" texture.
+    ///
+    /// Returns the new interface texture.
+    pub fn resize(&mut self, width: u32, height: u32) -> renderling::Texture {
+        self.0.resize(width, height);
+        self.0.graph.visit(|mut ui_scene: Write<UiScene>| {
+            ui_scene.set_canvas_size(width, height);
+        }).unwrap();
+        let wgpu_tex = self.get_frame_texture();
+        self.0.texture_from_wgpu_tex(wgpu_tex, None)
     }
 
     pub fn set_background_color(&mut self, color: impl Into<Vec4>) {
@@ -410,11 +422,8 @@ impl Gpui {
     pub fn get_frame_texture(&self) -> Arc<wgpu::Texture> {
         let target = self.0.get_render_target();
         match target {
-            RenderTarget::Surface {
-                surface: _,
-                surface_config: _,
-            } => unreachable!("renderling-gpui does not render to a surface"),
             RenderTarget::Texture { texture } => texture.clone(),
+            _ => unreachable!("renderling-gpui always renders to a texture"),
         }
     }
 

@@ -164,6 +164,51 @@ pub struct HdrSurface {
     pub constants: Uniform<TonemapConstants>,
 }
 
+impl HdrSurface {
+    pub fn create_texture(device: &wgpu::Device, queue: &wgpu::Queue, width: u32, height: u32) -> crate::Texture {
+        crate::Texture::new_with(
+            &device,
+            &queue,
+            Some("HdrRenderBuffer"),
+            Some(wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING),
+            Some({
+                device.create_sampler(&wgpu::SamplerDescriptor {
+                    address_mode_u: wgpu::AddressMode::ClampToEdge,
+                    address_mode_v: wgpu::AddressMode::ClampToEdge,
+                    address_mode_w: wgpu::AddressMode::ClampToEdge,
+                    mag_filter: wgpu::FilterMode::Nearest,
+                    min_filter: wgpu::FilterMode::Nearest,
+                    mipmap_filter: wgpu::FilterMode::Nearest,
+                    ..Default::default()
+                })
+            }),
+            wgpu::TextureFormat::Rgba16Float,
+            4,
+            width,
+            height,
+            &[],
+        )
+    }
+
+    pub fn create_texture_bindgroup(device: &wgpu::Device, texture: &crate::Texture) -> wgpu::BindGroup {
+        let hdr_texture_layout = scene_hdr_surface_bindgroup_layout(&device);
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("HdrSurface texture bindgroup"),
+            layout: &hdr_texture_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&texture.view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&texture.sampler),
+                },
+            ],
+        })
+    }
+}
+
 fn scene_hdr_surface_bindgroup_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
     device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some("hdr buffer bindgroup"),
@@ -207,29 +252,7 @@ pub fn create_hdr_render_surface(
         height: size.height,
         depth_or_array_layers: 1,
     };
-    let hdr_format = wgpu::TextureFormat::Rgba16Float;
-    let texture = crate::Texture::new_with(
-        &device,
-        &queue,
-        Some("HdrRenderBuffer"),
-        Some(wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING),
-        Some({
-            device.create_sampler(&wgpu::SamplerDescriptor {
-                address_mode_u: wgpu::AddressMode::ClampToEdge,
-                address_mode_v: wgpu::AddressMode::ClampToEdge,
-                address_mode_w: wgpu::AddressMode::ClampToEdge,
-                mag_filter: wgpu::FilterMode::Nearest,
-                min_filter: wgpu::FilterMode::Nearest,
-                mipmap_filter: wgpu::FilterMode::Nearest,
-                ..Default::default()
-            })
-        }),
-        hdr_format,
-        4,
-        size.width,
-        size.height,
-        &[],
-    );
+    let texture = HdrSurface::create_texture(&device, &queue, size.width, size.height);
     let label = Some("scene render pipeline");
     let vertex_shader =
         device.create_shader_module(wgpu::include_spirv!("linkage/vertex_tonemapping.spv"));
@@ -282,24 +305,9 @@ pub fn create_hdr_render_surface(
         multiview: None,
     });
 
-    let texture_bindgroup = device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label: Some("hdr surface texture bindgroup"),
-        layout: &hdr_texture_layout,
-        entries: &[
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: wgpu::BindingResource::TextureView(&texture.view),
-            },
-            wgpu::BindGroupEntry {
-                binding: 1,
-                resource: wgpu::BindingResource::Sampler(&texture.sampler),
-            },
-        ],
-    });
-
     Ok((HdrSurface {
+        texture_bindgroup: HdrSurface::create_texture_bindgroup(&device, &texture),
         texture,
-        texture_bindgroup,
         pipeline,
         constants,
     },))
