@@ -1,5 +1,4 @@
 //! Types that share data across CPU/GPU.
-// TODO: move from data.rs to uniform.rs
 
 use std::ops::{Deref, DerefMut};
 

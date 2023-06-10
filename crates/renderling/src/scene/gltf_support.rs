@@ -714,7 +714,6 @@ impl GltfLoader {
                 material_id,
                 bounding_box,
                 morph_targets_info: {
-                    // TODO: Create the info further up
                     let mut info = MorphTargetsInfo::default();
                     info.set_num_targets(num_morph_targets as u8);
                     info.set_has_positions(num_morph_targets_positions > 0);

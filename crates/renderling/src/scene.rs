@@ -529,12 +529,6 @@ impl Scene {
         self.constants.debug_mode = debug_mode;
         self.constants_update = Some(self.constants);
     }
-
-    /// Return a reference to the inner texture Atlas.
-    // TODO: remove this as the `atlas` field is public now
-    pub fn atlas(&self) -> &Atlas {
-        &self.atlas
-    }
 }
 
 pub fn scene_buffers_bindgroup_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
