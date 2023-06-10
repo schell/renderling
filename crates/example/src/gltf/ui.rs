@@ -2,6 +2,8 @@
 use renderling_gpui::{Button, Element, Gpui, Text, Vec2, Vec4, AABB};
 
 pub enum UiEvent {
+    ToggleDebugUv0,
+    ToggleDebugUv1,
     ToggleDebugNormals,
     ToggleDebugVertexNormals,
     ToggleDebugUvNormals,
@@ -13,6 +15,8 @@ pub struct Ui {
     text_title: Text,
     text_camera: Text,
 
+    btn_debug_uv0: Button,
+    btn_debug_uv1: Button,
     btn_debug_normal: Button,
     btn_debug_vertex_normals: Button,
     btn_debug_uv_normals: Button,
@@ -33,6 +37,14 @@ impl Ui {
                 .with_text("Camera")
                 .with_scale(32.0)
                 .with_color(Vec4::ONE),
+            btn_debug_uv0: gpui
+                .new_button()
+                .with_text("Debug UV0")
+                .with_scale(32.0),
+            btn_debug_uv1: gpui
+                .new_button()
+                .with_text("Debug UV1")
+                .with_scale(32.0),
             btn_debug_normal: gpui
                 .new_button()
                 .with_text("Debug Normals")
@@ -79,9 +91,20 @@ impl Element for Ui {
             aabb.max = constraint.max;
             aabb
         });
-        let aabb_btn_debug_normal = self.btn_debug_normal.layout({
+        let aabb_btn_debug_uv0 = self.btn_debug_uv0.layout({
             let mut aabb = constraint;
             aabb.min.y = aabb_camera.max.y + space;
+            aabb
+        });
+        let aabb_btn_debug_uv1 = self.btn_debug_uv1.layout({
+            let mut aabb = constraint;
+            aabb.min.y = aabb_btn_debug_uv0.max.y + space;
+            aabb
+        });
+
+        let aabb_btn_debug_normal = self.btn_debug_normal.layout({
+            let mut aabb = constraint;
+            aabb.min.y = aabb_btn_debug_uv1.max.y + space;
             aabb
         });
         let aabb_btn_debug_vertex_normal = self.btn_debug_vertex_normals.layout({
@@ -106,6 +129,8 @@ impl Element for Ui {
         });
         aabb_title
             .union(aabb_camera)
+            .union(aabb_btn_debug_uv0)
+            .union(aabb_btn_debug_uv1)
             .union(aabb_btn_debug_normal)
             .union(aabb_btn_debug_uv_normal)
             .union(aabb_btn_debug_vertex_normal)
@@ -124,6 +149,10 @@ impl Element for Ui {
             .paint(device, queue, render_pass, default_texture_bindgroup);
         self.text_camera
             .paint(device, queue, render_pass, default_texture_bindgroup);
+        self.btn_debug_uv0
+            .paint(device, queue, render_pass, default_texture_bindgroup);
+        self.btn_debug_uv1
+            .paint(device, queue, render_pass, default_texture_bindgroup);
         self.btn_debug_normal
             .paint(device, queue, render_pass, default_texture_bindgroup);
         self.btn_debug_uv_normals
@@ -139,6 +168,8 @@ impl Element for Ui {
     fn event(&mut self, event: renderling_gpui::Event) -> Self::OutputEvent {
         use renderling_gpui::ButtonEvent;
         let btns = [
+            (&mut self.btn_debug_uv0, UiEvent::ToggleDebugUv0),
+            (&mut self.btn_debug_uv1, UiEvent::ToggleDebugUv1),
             (&mut self.btn_debug_normal, UiEvent::ToggleDebugNormals),
             (&mut self.btn_debug_vertex_normals, UiEvent::ToggleDebugVertexNormals),
             (&mut self.btn_debug_uv_normals, UiEvent::ToggleDebugUvNormals),
