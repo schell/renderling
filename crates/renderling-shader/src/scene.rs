@@ -29,7 +29,7 @@ pub use texture::*;
 #[derive(Default, Clone, Copy, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct DebugMode(u32);
 
-impl std::fmt::Display for DebugMode {
+impl core::fmt::Display for DebugMode {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.write_str(match self {
             &DebugMode::NONE => "none",
@@ -46,21 +46,27 @@ impl std::fmt::Display for DebugMode {
 impl DebugMode {
     pub const NONE: Self = DebugMode(0);
 
+    /// Displays the first set of UV coordinates as a color.
+    pub const UV_COORDS_0: Self = DebugMode(1);
+
+    /// Displays the second set of UV coordinates as a color.
+    pub const UV_COORDS_1: Self = DebugMode(2);
+
     /// Displays normals after normal mapping, in world space
-    pub const NORMALS: Self = DebugMode(1);
+    pub const NORMALS: Self = DebugMode(3);
 
     /// Displays vertex normals.
-    pub const VERTEX_NORMALS: Self = DebugMode(2);
+    pub const VERTEX_NORMALS: Self = DebugMode(4);
 
     /// Displays uv normals. These are normals coming from a normal map texture.
     /// These are the normals in tangent space.
-    pub const UV_NORMALS: Self = DebugMode(3);
+    pub const UV_NORMALS: Self = DebugMode(5);
 
     /// Displays vertex normals.
-    pub const TANGENTS: Self = DebugMode(4);
+    pub const TANGENTS: Self = DebugMode(6);
 
     /// Displays bitangents as calculated from normals and tangents.
-    pub const BITANGENTS: Self = DebugMode(5);
+    pub const BITANGENTS: Self = DebugMode(7);
 }
 
 /// A vertex in a mesh.
@@ -573,6 +579,14 @@ pub fn main_fragment_scene(
     }
 
     match constants.debug_mode {
+        DebugMode::UV_COORDS_0 => {
+            *output = colorize(Vec3::new(in_uv0.x, in_uv0.y, 0.0));
+            return;
+        }
+        DebugMode::UV_COORDS_1 => {
+            *output = colorize(Vec3::new(in_uv1.x, in_uv1.y, 0.0));
+            return;
+        }
         DebugMode::NORMALS => {
             *output = colorize(norm);
             return;

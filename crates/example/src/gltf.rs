@@ -379,6 +379,8 @@ pub fn demo(
                 match app.ui.event(ev) {
                     None => {}
                     Some(ev) => match ev {
+                        UiEvent::ToggleDebugUv0 => set_debug_mode(DebugMode::UV_COORDS_0),
+                        UiEvent::ToggleDebugUv1 => set_debug_mode(DebugMode::UV_COORDS_1),
                         UiEvent::ToggleDebugNormals => set_debug_mode(DebugMode::NORMALS),
                         UiEvent::ToggleDebugVertexNormals => set_debug_mode(DebugMode::VERTEX_NORMALS),
                         UiEvent::ToggleDebugUvNormals => set_debug_mode(DebugMode::UV_NORMALS),
