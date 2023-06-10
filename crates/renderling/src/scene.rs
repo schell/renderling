@@ -5,13 +5,12 @@ use glam::{Mat4, Vec2, Vec3};
 use moongraph::{IsGraphNode, Read, Write};
 use renderling_shader::GpuToggles;
 use snafu::prelude::*;
-use wgpu::util::DeviceExt;
 
 pub use renderling_shader::scene::*;
 
 use crate::{
     node::{self, FrameTextureView, HdrSurface},
-    Atlas, DepthTexture, Device, GpuArray, Queue, Renderling,
+    Atlas, DepthTexture, Device, GpuArray, Queue, Renderling, Uniform,
 };
 
 mod entity;
@@ -286,9 +285,7 @@ pub struct Scene {
     pub materials: GpuArray<GpuMaterial>,
     pub textures: GpuArray<GpuTexture>,
     pub indirect_draws: GpuArray<DrawIndirect>,
-    pub constants_buffer: wgpu::Buffer,
-    constants: GpuConstants,
-    constants_update: Option<GpuConstants>,
+    pub constants: Uniform<GpuConstants>,
     cull_bindgroup: wgpu::BindGroup,
     render_buffers_bindgroup: wgpu::BindGroup,
     render_atlas_bindgroup: wgpu::BindGroup,
@@ -359,21 +356,21 @@ impl Scene {
         let entities = GpuArray::new(&device, &entities, entities.len(), scene_render_usage());
         let lights = GpuArray::new(&device, &lights, lights.len(), scene_render_usage());
         let materials = GpuArray::new(&device, &materials, materials.len(), scene_render_usage());
-        let constants = GpuConstants {
-            camera_projection: projection,
-            camera_pos: view.inverse().transform_point3(Vec3::ZERO).extend(0.0),
-            camera_view: view,
-            atlas_size: atlas.size,
-            debug_mode,
-            toggles,
-        };
-        let constants_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-            label: Some("Scene::new constants"),
-            contents: bytemuck::cast_slice(&[constants]),
-            usage: wgpu::BufferUsages::UNIFORM
+        let constants = Uniform::new(
+            &device,
+            GpuConstants {
+                camera_projection: projection,
+                camera_pos: view.inverse().transform_point3(Vec3::ZERO).extend(0.0),
+                camera_view: view,
+                atlas_size: atlas.size,
+                debug_mode,
+                toggles,
+            },
+            wgpu::BufferUsages::UNIFORM
                 | wgpu::BufferUsages::COPY_DST
                 | wgpu::BufferUsages::COPY_SRC,
-        });
+            wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT
+        );
 
         let cull_bindgroup = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Scene::new cull_bindgroup"),
@@ -390,7 +387,7 @@ impl Scene {
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: constants_buffer.as_entire_binding(),
+                    resource: constants.buffer().as_entire_binding(),
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
@@ -437,9 +434,7 @@ impl Scene {
             textures,
             materials,
             entities,
-            constants_update: None,
             constants,
-            constants_buffer,
             indirect_draws,
             cull_bindgroup,
             atlas,
@@ -454,7 +449,6 @@ impl Scene {
     /// This uploads changed data to the GPU and submits the queue.
     pub fn update(&mut self, queue: &wgpu::Queue) {
         let Self {
-            constants_buffer: _,
             constants,
             render_buffers_bindgroup: _,
             render_atlas_bindgroup: _,
@@ -465,7 +459,6 @@ impl Scene {
             entities,
             materials,
             textures,
-            constants_update: camera_update,
             lights,
         } = self;
         vertices.update(queue);
@@ -473,10 +466,7 @@ impl Scene {
         materials.update(queue);
         textures.update(queue);
         lights.update(queue);
-        if let Some(camera) = camera_update.take() {
-            *constants = camera;
-            queue.write_buffer(&self.constants_buffer, 0, bytemuck::cast_slice(&[camera]));
-        }
+        constants.update(queue);
         queue.submit(std::iter::empty());
     }
 
@@ -489,7 +479,6 @@ impl Scene {
             self.constants.camera_projection = proj;
             self.constants.camera_view = view;
             self.constants.camera_pos = view.inverse().transform_point3(Vec3::ZERO).extend(0.0);
-            self.constants_update = Some(self.constants);
         }
     }
 
@@ -526,8 +515,10 @@ impl Scene {
     }
 
     pub fn set_debug_mode(&mut self, debug_mode: DebugMode) {
-        self.constants.debug_mode = debug_mode;
-        self.constants_update = Some(self.constants);
+        log::trace!("setting debug mode to '{debug_mode}'");
+        if self.constants.debug_mode != debug_mode {
+            self.constants.debug_mode = debug_mode;
+        }
     }
 }
 

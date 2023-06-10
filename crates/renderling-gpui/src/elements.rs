@@ -343,6 +343,16 @@ impl Button {
         self
     }
 
+    pub fn get_text(&self) -> String {
+        self.text
+            .section
+            .text
+            .iter()
+            .map(|t| t.text.clone())
+            .collect::<Vec<_>>()
+            .concat()
+    }
+
     pub fn set_scale(&mut self, scale: f32) {
         self.text.set_scale(scale)
     }

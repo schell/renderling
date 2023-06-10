@@ -143,7 +143,14 @@ impl App {
         self.last_cursor_position = None;
 
         let mut builder = r.new_scene().with_debug_mode(DebugMode::NONE);
-        let loader = builder.gltf_load(&file).unwrap();
+        let loader = match builder.gltf_load(&file) {
+            Ok(loader) => loader,
+            Err(msg) => {
+                self.ui.set_text_title(format!("Error: {}", msg));
+                return;
+            }
+        };
+
         self.entities = builder.entities.clone();
         // find the bounding box of the model so we can display it correctly
         let mut min = Vec3::splat(f32::INFINITY);
@@ -355,7 +362,8 @@ pub fn demo(
                 let scene = r.graph.get_resource_mut::<Scene>().unwrap().unwrap();
                 let debug_mode = scene.get_debug_mode();
                 let mut set_debug_mode = |mode| {
-                    if debug_mode != DebugMode::NONE {
+                    log::debug!("setting debug mode to {mode}");
+                    if debug_mode != DebugMode::NONE && debug_mode != mode {
                         scene.set_debug_mode(mode);
                     } else {
                         scene.set_debug_mode(DebugMode::NONE);

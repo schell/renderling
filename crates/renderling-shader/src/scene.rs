@@ -29,6 +29,20 @@ pub use texture::*;
 #[derive(Default, Clone, Copy, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct DebugMode(u32);
 
+impl std::fmt::Display for DebugMode {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(match self {
+            &DebugMode::NONE => "none",
+            &DebugMode::NORMALS => "normals",
+            &DebugMode::VERTEX_NORMALS => "vertex normals",
+            &DebugMode::UV_NORMALS => "UV normals",
+            &DebugMode::TANGENTS => "tangents",
+            &DebugMode::BITANGENTS => "bitangents",
+            _ => "unknown",
+        })
+    }
+}
+
 impl DebugMode {
     pub const NONE: Self = DebugMode(0);
 
