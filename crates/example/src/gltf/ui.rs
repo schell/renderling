@@ -147,6 +147,7 @@ impl Element for Ui {
         ];
         for (btn, ev) in btns.into_iter() {
             if btn.event(event) == Some(ButtonEvent::Down) {
+                log::trace!("Button '{}' down", btn.get_text());
                 return Some(ev);
             }
         }

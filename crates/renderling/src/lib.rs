@@ -648,7 +648,7 @@ mod test {
                     let constants = crate::read_buffer::<GpuConstants>(
                         &device,
                         &queue,
-                        &scene.constants_buffer,
+                        &scene.constants.buffer(),
                         0,
                         1,
                     )
@@ -754,7 +754,7 @@ mod test {
         let scene = builder.build().unwrap();
         assert_eq!(2, scene.entities.len());
 
-        let textures = scene.atlas().frames().collect::<Vec<_>>();
+        let textures = scene.atlas.frames().collect::<Vec<_>>();
         assert_eq!(1, textures.len());
         assert_eq!(0, textures[0].0);
         assert_eq!(UVec2::splat(170), textures[0].1 .1);
@@ -786,7 +786,7 @@ mod test {
             draws
         );
         let constants: GpuConstants =
-            read_buffer(r.get_device(), r.get_queue(), &scene.constants_buffer, 0, 1).unwrap()[0];
+            read_buffer(r.get_device(), r.get_queue(), &scene.constants.buffer(), 0, 1).unwrap()[0];
         assert_eq!(UVec2::splat(256), constants.atlas_size);
 
         let materials = scene

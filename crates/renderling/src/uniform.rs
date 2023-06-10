@@ -1,4 +1,4 @@
-//! Types that share data across CPU/GPU.
+//! Uniforms share data across CPU/GPU.
 
 use std::ops::{Deref, DerefMut};
 
