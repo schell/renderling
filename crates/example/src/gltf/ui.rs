@@ -1,14 +1,9 @@
 //! User interface for the gltf viewer.
+use renderling::debug::DebugChannel;
 use renderling_gpui::{Button, Element, Gpui, Text, Vec2, Vec4, AABB};
 
 pub enum UiEvent {
-    ToggleDebugUv0,
-    ToggleDebugUv1,
-    ToggleDebugNormals,
-    ToggleDebugVertexNormals,
-    ToggleDebugUvNormals,
-    ToggleDebugTangents,
-    ToggleDebugBitangents
+    ToggleDebugChannel(DebugChannel)
 }
 
 pub struct Ui {
@@ -168,13 +163,13 @@ impl Element for Ui {
     fn event(&mut self, event: renderling_gpui::Event) -> Self::OutputEvent {
         use renderling_gpui::ButtonEvent;
         let btns = [
-            (&mut self.btn_debug_uv0, UiEvent::ToggleDebugUv0),
-            (&mut self.btn_debug_uv1, UiEvent::ToggleDebugUv1),
-            (&mut self.btn_debug_normal, UiEvent::ToggleDebugNormals),
-            (&mut self.btn_debug_vertex_normals, UiEvent::ToggleDebugVertexNormals),
-            (&mut self.btn_debug_uv_normals, UiEvent::ToggleDebugUvNormals),
-            (&mut self.btn_debug_tangents, UiEvent::ToggleDebugTangents),
-            (&mut self.btn_debug_bitangents, UiEvent::ToggleDebugBitangents),
+            (&mut self.btn_debug_uv0, UiEvent::ToggleDebugChannel(DebugChannel::UvCoords0)),
+            (&mut self.btn_debug_uv1, UiEvent::ToggleDebugChannel(DebugChannel::UvCoords1)),
+            (&mut self.btn_debug_normal, UiEvent::ToggleDebugChannel(DebugChannel::Normals)),
+            (&mut self.btn_debug_vertex_normals, UiEvent::ToggleDebugChannel(DebugChannel::VertexNormals)),
+            (&mut self.btn_debug_uv_normals, UiEvent::ToggleDebugChannel(DebugChannel::UvNormals)),
+            (&mut self.btn_debug_tangents, UiEvent::ToggleDebugChannel(DebugChannel::Tangents)),
+            (&mut self.btn_debug_bitangents, UiEvent::ToggleDebugChannel(DebugChannel::Bitangents)),
         ];
         for (btn, ev) in btns.into_iter() {
             if btn.event(event) == Some(ButtonEvent::Down) {

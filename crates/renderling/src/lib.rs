@@ -68,6 +68,12 @@ pub use uniform::*;
 pub mod color;
 pub mod math;
 
+pub mod debug {
+    //! Re-exports of [`renderling_shader::debug`].
+
+    pub use renderling_shader::debug::*;
+}
+
 pub mod graph {
     //! Re-exports of [`moongraph`].
     pub use moongraph::*;
