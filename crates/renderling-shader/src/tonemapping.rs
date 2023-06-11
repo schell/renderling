@@ -4,8 +4,6 @@
 //! * https://github.com/KhronosGroup/glTF-Sample-Viewer/blob/5b1b7f48a8cb2b7aaef00d08fdba18ccc8dd331b/source/Renderer/shaders/tonemapping.glsl
 //! * https://64.github.io/tonemapping
 
-// uniform float u_Exposure;
-
 use glam::{mat3, Mat3, Vec2, Vec3, Vec4, Vec4Swizzles};
 use spirv_std::{image::Image2d, Sampler};
 
