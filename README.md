@@ -62,7 +62,7 @@ This means each model may be shaded separately, with a different lighting style.
     - [x] textures, images, samplers
     - animation
       - [x] interpolation
-      - [ ] morph targets
+      - [x] morph targets
       - [ ] skins
 - 2d
   - [x] colored, textured vertices
