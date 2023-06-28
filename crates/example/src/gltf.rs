@@ -5,9 +5,10 @@
 use std::time::Instant;
 
 use renderling::{
+    debug::DebugChannel,
     math::{Mat4, Vec3, Vec4},
-    DebugMode, FontArc, GltfLoader, GpuEntity, Renderling, Scene, TweenProperty, UiMode,
-    UiVertex, Write, UiDrawObjects, ScreenSize,
+    FontArc, GltfLoader, GpuEntity, Renderling, Scene, ScreenSize, TweenProperty, UiDrawObjects,
+    UiMode, UiVertex, Write,
 };
 use renderling_gpui::{Element, Gpui};
 use winit::event::KeyboardInput;
@@ -60,11 +61,17 @@ impl App {
         let last_cursor_position: Option<winit::dpi::PhysicalPosition<f64>> = None;
         let mut gpui = renderling_gpui::Gpui::new_from(r);
 
-        // get the font for the UI
-        let bytes: Vec<u8> =
-            std::fs::read("fonts/Recursive Mn Lnr St Med Nerd Font Complete.ttf").unwrap();
-        let font = FontArc::try_from_vec(bytes).unwrap();
-        gpui.add_font(font);
+        // get the fonts for the UI
+        let font_paths = [
+            "fonts/Recursive Mn Lnr St Med Nerd Font Complete.ttf",
+            "fonts/Font Awesome 6 Free-Regular-400.otf"
+        ];
+        for path in font_paths {
+            let bytes: Vec<u8> =
+                std::fs::read(path).unwrap();
+            let font = FontArc::try_from_vec(bytes).unwrap();
+            gpui.add_font(font);
+        }
 
         let ui = Ui::new(&mut gpui);
         let ui_texture = r.texture_from_wgpu_tex(gpui.get_frame_texture(), None);
@@ -141,7 +148,7 @@ impl App {
         self.left_mb_down = false;
         self.last_cursor_position = None;
 
-        let mut builder = r.new_scene().with_debug_mode(DebugMode::NONE);
+        let mut builder = r.new_scene().with_debug_channel(DebugChannel::None);
         let loader = match builder.gltf_load(&file) {
             Ok(loader) => loader,
             Err(msg) => {
@@ -261,17 +268,19 @@ impl App {
         let ui_obj_tex = self.gpui.resize(width, height);
         r.resize(width, height);
         r.graph
-            .visit(|(mut scene, mut ui_objs): (Write<Scene>, Write<UiDrawObjects>)| {
-                scene.set_camera_projection(Mat4::perspective_infinite_rh(
-                    std::f32::consts::FRAC_PI_4,
-                    width as f32 / height as f32,
-                    0.01,
-                ));
-                // UNWRAP: safe because we always have one object to represent the UI "surface".
-                // Otherwise the app is useless.
-                let ui_obj = ui_objs.get_mut(0).unwrap();
-                ui_obj.set_texture(&ui_obj_tex);
-            })
+            .visit(
+                |(mut scene, mut ui_objs): (Write<Scene>, Write<UiDrawObjects>)| {
+                    scene.set_camera_projection(Mat4::perspective_infinite_rh(
+                        std::f32::consts::FRAC_PI_4,
+                        width as f32 / height as f32,
+                        0.01,
+                    ));
+                    // UNWRAP: safe because we always have one object to represent the UI "surface".
+                    // Otherwise the app is useless.
+                    let ui_obj = ui_objs.get_mut(0).unwrap();
+                    ui_obj.set_texture(&ui_obj_tex);
+                },
+            )
             .unwrap();
     }
 
@@ -356,7 +365,13 @@ pub fn demo(
                 winit::event::WindowEvent::Resized(size) => {
                     log::trace!("resizing to {size:?}");
                     app.resize(r, size.width, size.height);
-                    let _ = app.gpui.0.graph.get_resource::<ScreenSize>().unwrap().unwrap();
+                    let _ = app
+                        .gpui
+                        .0
+                        .graph
+                        .get_resource::<ScreenSize>()
+                        .unwrap()
+                        .unwrap();
                 }
                 winit::event::WindowEvent::DroppedFile(path) => {
                     app.load(r, path);
@@ -366,27 +381,21 @@ pub fn demo(
 
             if let Some(ev) = event_state.event_from_winit(ev) {
                 let scene = r.graph.get_resource_mut::<Scene>().unwrap().unwrap();
-                let debug_mode = scene.get_debug_mode();
-                let mut set_debug_mode = |mode| {
-                    log::debug!("setting debug mode to {mode}");
-                    if debug_mode != mode {
-                        scene.set_debug_mode(mode);
+                let channel = scene.get_debug_channel();
+                let mut set_debug_channel = |mode| {
+                    log::debug!("setting debug mode to {mode:?}");
+                    if channel != mode {
+                        scene.set_debug_channel(mode);
                     } else {
-                        scene.set_debug_mode(DebugMode::NONE);
+                        scene.set_debug_channel(DebugChannel::None);
                     }
                 };
 
                 match app.ui.event(ev) {
                     None => {}
                     Some(ev) => match ev {
-                        UiEvent::ToggleDebugUv0 => set_debug_mode(DebugMode::UV_COORDS_0),
-                        UiEvent::ToggleDebugUv1 => set_debug_mode(DebugMode::UV_COORDS_1),
-                        UiEvent::ToggleDebugNormals => set_debug_mode(DebugMode::NORMALS),
-                        UiEvent::ToggleDebugVertexNormals => set_debug_mode(DebugMode::VERTEX_NORMALS),
-                        UiEvent::ToggleDebugUvNormals => set_debug_mode(DebugMode::UV_NORMALS),
-                        UiEvent::ToggleDebugTangents => set_debug_mode(DebugMode::TANGENTS),
-                        UiEvent::ToggleDebugBitangents => set_debug_mode(DebugMode::BITANGENTS),
-                    }
+                        UiEvent::ToggleDebugChannel(channel) => set_debug_channel(channel),
+                    },
                 }
             }
         } else {
@@ -405,8 +414,7 @@ mod test {
 
     #[test]
     fn sanity() {
-        let mut gpui =
-            renderling_gpui::Gpui::new(600, 300); //.with_background_color(DARK_BLUE_BG_COLOR);
+        let mut gpui = renderling_gpui::Gpui::new(600, 300); //.with_background_color(DARK_BLUE_BG_COLOR);
 
         // get the font for the UI
         let bytes: Vec<u8> =

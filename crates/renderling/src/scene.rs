@@ -1,9 +1,9 @@
 //! Build GPU scenes from the CPU.
 use std::sync::Arc;
 
-use glam::{Mat4, Vec2, Vec3};
+use glam::{Mat4, Vec3};
 use moongraph::{IsGraphNode, Read, Write};
-use renderling_shader::GpuToggles;
+use renderling_shader::{GpuToggles, debug::DebugChannel};
 use snafu::prelude::*;
 
 pub use renderling_shader::scene::*;
@@ -105,7 +105,7 @@ pub struct SceneBuilder {
     pub device: Arc<wgpu::Device>,
     pub queue: Arc<wgpu::Queue>,
     pub toggles: GpuToggles,
-    pub debug_mode: DebugMode,
+    pub debug_channel: DebugChannel,
     pub projection: Mat4,
     pub view: Mat4,
     pub images: Vec<SceneImage>,
@@ -122,7 +122,7 @@ impl SceneBuilder {
             device,
             queue,
             toggles: GpuToggles::default(),
-            debug_mode: DebugMode::NONE,
+            debug_channel: DebugChannel::None.into(),
             projection: Mat4::IDENTITY,
             view: Mat4::IDENTITY,
             images: vec![],
@@ -196,12 +196,12 @@ impl SceneBuilder {
         self.view = view;
     }
 
-    pub fn set_debug_mode(&mut self, debug_mode: DebugMode) {
-        self.debug_mode = debug_mode;
+    pub fn set_debug_channel(&mut self, channel: DebugChannel) {
+        self.debug_channel = channel.into();
     }
 
-    pub fn with_debug_mode(mut self, debug_mode: DebugMode) -> Self {
-        self.set_debug_mode(debug_mode);
+    pub fn with_debug_channel(mut self, channel: DebugChannel) -> Self {
+        self.set_debug_channel(channel);
         self
     }
 
@@ -311,7 +311,7 @@ impl Scene {
             device,
             queue,
             toggles,
-            debug_mode,
+            debug_channel,
             projection,
             view,
             images,
@@ -322,6 +322,7 @@ impl Scene {
             lights,
         } = scene_builder;
         snafu::ensure!(images.is_empty(), AlreadyPackedAtlasSnafu);
+        let debug_mode = debug_channel.into();
 
         let frames = textures.into_iter();
         let mut textures = vec![];
@@ -510,17 +511,15 @@ impl Scene {
         Ok(())
     }
 
-    pub fn get_debug_mode(&self) -> DebugMode {
-        self.constants.debug_mode
+    pub fn get_debug_channel(&self) -> DebugChannel {
+        self.constants.debug_mode.into()
     }
 
-    pub fn set_debug_mode(&mut self, debug_mode: DebugMode) {
-        if self.constants.debug_mode != debug_mode {
-            log::debug!(
-                "setting debug mode from '{}' to '{debug_mode}'",
-                self.constants.debug_mode
-            );
-            self.constants.debug_mode = debug_mode;
+    pub fn set_debug_channel(&mut self, channel: DebugChannel) {
+        let current: DebugChannel = self.constants.debug_mode.into();
+        if current != channel {
+            log::debug!("setting debug mode from '{current:?}' to '{channel:?}'");
+            self.constants.debug_mode = channel.into();
         }
     }
 }

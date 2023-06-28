@@ -73,11 +73,14 @@ impl AABB {
         self.max - self.min
     }
 
-    pub fn union(self, other: Self) -> Self {
-        AABB {
-            min: self.min.min(other.min),
-            max: self.max.max(other.max),
-        }
+    pub fn union(mut self, other: Self) -> Self {
+        self.add(other);
+        self
+    }
+
+    pub fn add(&mut self, other: Self) {
+        self.min = self.min.min(other.min);
+        self.max = self.max.max(other.max);
     }
 }
 
@@ -126,7 +129,7 @@ impl EventState {
                 self.last_mouse_cursor_position = UVec2::new(position.x as u32, position.y as u32);
                 Some(Event::MouseMoved {
                     position: self.last_mouse_cursor_position,
-                    is_down: self.mouse_button_is_down
+                    is_down: self.mouse_button_is_down,
                 })
             }
             winit::event::WindowEvent::CursorEntered { device_id: _ } => None,
@@ -152,7 +155,7 @@ impl EventState {
                 self.mouse_button_is_down = *state == winit::event::ElementState::Pressed;
                 Some(Event::MouseButton {
                     position: self.last_mouse_cursor_position,
-                    is_down: self.mouse_button_is_down
+                    is_down: self.mouse_button_is_down,
                 })
             }
             winit::event::WindowEvent::TouchpadPressure {
@@ -176,6 +179,32 @@ impl EventState {
     }
 }
 
+pub enum Paint<'a, 'b> {
+    Drawing(Box<dyn FnOnce(&mut wgpu::RenderPass<'a>, &'a wgpu::BindGroup) + 'b>),
+    Overlay(Box<dyn FnOnce(&mut wgpu::RenderPass<'a>, &'a wgpu::BindGroup) + 'b>),
+}
+
+impl<'a, 'b> Paint<'a, 'b> {
+    pub fn drawing(f: impl FnOnce(&mut wgpu::RenderPass<'a>, &'a wgpu::BindGroup) + 'b) -> Self {
+        Paint::Drawing(Box::new(f))
+    }
+
+    pub fn overlay(f: impl FnOnce(&mut wgpu::RenderPass<'a>, &'a wgpu::BindGroup) + 'b) -> Self {
+        Paint::Overlay(Box::new(f))
+    }
+
+    fn draw(
+        self,
+        render_pass: &mut wgpu::RenderPass<'a>,
+        default_texture_bindgroup: &'a wgpu::BindGroup,
+    ) {
+        (match self {
+            Paint::Drawing(f) => f,
+            Paint::Overlay(f) => f,
+        })(render_pass, default_texture_bindgroup)
+    }
+}
+
 /// Implemented by every user interface element.
 pub trait Element {
     type OutputEvent;
@@ -189,9 +218,9 @@ pub trait Element {
         &'b mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        render_pass: &mut wgpu::RenderPass<'a>,
-        default_texture_bindgroup: &'a wgpu::BindGroup,
-    );
+        // render_pass: &mut wgpu::RenderPass<'a>,
+        // default_texture_bindgroup: &'a wgpu::BindGroup,
+    ) -> Vec<Paint<'a, 'b>>;
 
     /// Handle a global event and react with a local event.
     fn event(&mut self, event: Event) -> Self::OutputEvent;
@@ -211,13 +240,12 @@ impl<A: Element, B: Element> Element for (A, B) {
         &'b mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        render_pass: &mut wgpu::RenderPass<'a>,
-        default_texture_bindgroup: &'a wgpu::BindGroup,
-    ) {
-        self.0
-            .paint(device, queue, render_pass, default_texture_bindgroup);
-        self.1
-            .paint(device, queue, render_pass, default_texture_bindgroup);
+        // render_pass: &mut wgpu::RenderPass<'a>,
+        // default_texture_bindgroup: &'a wgpu::BindGroup,
+    ) -> Vec<Paint<'a, 'b>> {
+        let mut ps = self.0.paint(device, queue);
+        ps.extend(self.1.paint(device, queue));
+        ps
     }
 
     fn event(&mut self, event: Event) -> Self::OutputEvent {
@@ -325,9 +353,12 @@ impl Gpui {
     /// Returns the new interface texture.
     pub fn resize(&mut self, width: u32, height: u32) -> renderling::Texture {
         self.0.resize(width, height);
-        self.0.graph.visit(|mut ui_scene: Write<UiScene>| {
-            ui_scene.set_canvas_size(width, height);
-        }).unwrap();
+        self.0
+            .graph
+            .visit(|mut ui_scene: Write<UiScene>| {
+                ui_scene.set_canvas_size(width, height);
+            })
+            .unwrap();
         let wgpu_tex = self.get_frame_texture();
         self.0.texture_from_wgpu_tex(wgpu_tex, None)
     }
@@ -403,12 +434,20 @@ impl Gpui {
                 render_pass.set_pipeline(&pipeline.0);
                 render_pass.set_bind_group(0, scene.constants_bindgroup(), &[]);
 
-                root.paint(
+                let paintings = root.paint(
                     &device,
                     &queue,
-                    &mut render_pass,
-                    scene.default_texture_bindgroup()
+                    //&mut render_pass,
+                    //scene.default_texture_bindgroup()
                 );
+
+                let (paintings, overlaid_paintings): (Vec<_>, Vec<_>) = paintings.into_iter().partition(|p| match p {
+                    Paint::Drawing(_) => true,
+                    Paint::Overlay(_) => false,
+                });
+
+                paintings.into_iter().for_each(|p| p.draw(&mut render_pass, scene.default_texture_bindgroup()));
+                overlaid_paintings.into_iter().for_each(|p| p.draw(&mut render_pass, scene.default_texture_bindgroup()));
 
                 drop(render_pass);
                 queue.submit(std::iter::once(encoder.finish()));
@@ -427,14 +466,14 @@ impl Gpui {
         }
     }
 
-    fn get_fonts(&self) -> Vec<FontArc> {
+    fn get_fonts(&self) -> &[FontArc] {
         let fonts = self
             .0
             .graph
             .get_resource::<Vec<FontArc>>()
             .unwrap()
             .unwrap();
-        fonts.clone()
+        &fonts
     }
 
     pub fn add_font(&mut self, font: FontArc) -> Id<FontArc> {
@@ -454,11 +493,16 @@ impl Gpui {
     }
 
     pub fn new_text(&self) -> Text {
-        Text::new(&self.0, self.get_fonts())
+        Text::new(&self.get_fonts()[0])
     }
 
     pub fn new_button(&self) -> Button {
-        Button::new(&self.0, self.get_fonts())
+        Button::new(&self.get_fonts()[0])
+    }
+
+    pub fn new_dropdown<T: Clone + PartialEq>(&self) -> Dropdown<T> {
+        let fonts = self.get_fonts();
+        Dropdown::new(&fonts[0], &fonts[1])
     }
 }
 
@@ -516,10 +560,10 @@ mod test {
 
     #[test]
     fn srgb_rectangle() {
-        // This tests that the roundtrip of a color through our pipeline and back stays true.
-        // It does this by creating a rectangle, painting to a texture,
-        // reading the texture to a buffer, converting to an image and extracting the pixel,
-        // then camparing the resulting pixel.
+        // This tests that the roundtrip of a color through our pipeline and back stays
+        // true. It does this by creating a rectangle, painting to a texture,
+        // reading the texture to a buffer, converting to an image and extracting the
+        // pixel, then camparing the resulting pixel.
         _init_logging();
         let mut ui = Gpui::new(1, 1);
         ui.set_background_color(Vec4::new(0.0, 0.0, 0.0, 1.0));
@@ -533,8 +577,8 @@ mod test {
         let img = ui.render_image(&mut rect);
         let img = img.into_rgba32f();
         let rhs = *img.get_pixel(0, 0);
-        // Converting from the sRGB space of the ui's surface texture introduces some error
-        // so we'll compare within a margin.
+        // Converting from the sRGB space of the ui's surface texture introduces some
+        // error so we'll compare within a margin.
         fn roughly_equal(a: f32, b: f32) -> bool {
             (a - b).abs() < 0.005
         }
@@ -592,7 +636,7 @@ mod test {
 
         let may_ev_over = btn.event(Event::MouseMoved {
             position: UVec2::splat(10),
-            is_down: false
+            is_down: false,
         });
         assert_eq!(Some(ButtonEvent::Over), may_ev_over);
         ui.layout(&mut btn);
@@ -610,7 +654,7 @@ mod test {
 
         let may_ev_up = btn.event(Event::MouseMoved {
             position: UVec2::splat(10),
-            is_down: false
+            is_down: false,
         });
         assert_eq!(Some(ButtonEvent::Up), may_ev_up);
         ui.layout(&mut btn);
@@ -619,7 +663,7 @@ mod test {
 
         let may_ev_out = btn.event(Event::MouseMoved {
             position: UVec2::splat(1000),
-            is_down: false
+            is_down: false,
         });
         assert_eq!(Some(ButtonEvent::Out), may_ev_out);
         ui.layout(&mut btn);

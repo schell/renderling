@@ -2,7 +2,6 @@
 use snafu::prelude::*;
 use std::{ops::Deref, sync::Arc};
 
-#[cfg(feature = "image")]
 use image::{
     load_from_memory, ColorType, DynamicImage, GenericImage, GenericImageView, ImageBuffer,
     ImageError, PixelWithColorType,
@@ -133,7 +132,6 @@ impl Texture {
         )
     }
 
-    #[cfg(feature = "image")]
     pub fn from_image_bytes(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
@@ -161,7 +159,6 @@ impl Texture {
         }
     }
 
-    #[cfg(feature = "image")]
     pub fn from_dynamic_image(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
@@ -220,7 +217,6 @@ impl Texture {
         Self::from_wgpu_tex(device, texture, None)
     }
 
-    #[cfg(feature = "image")]
     pub fn from_image_buffer<P>(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
@@ -437,7 +433,6 @@ pub struct CopiedTextureBuffer {
 }
 
 impl CopiedTextureBuffer {
-    #[cfg(feature = "image")]
     /// Convert the post render buffer into an RgbaImage.
     pub async fn convert_to_rgba(self) -> Result<image::RgbaImage, TextureError> {
         let buffer_slice = self.buffer.slice(..);
@@ -483,7 +478,6 @@ impl CopiedTextureBuffer {
         Ok(image::DynamicImage::ImageRgba8(img_buffer).to_rgba8())
     }
 
-    #[cfg(feature = "image")]
     /// Convert the post render buffer into an RgbaImage.
     pub fn into_image<P>(self, device: &wgpu::Device) -> Result<image::DynamicImage, TextureError>
     where
@@ -510,7 +504,6 @@ impl CopiedTextureBuffer {
         Ok(image::DynamicImage::from(img_buffer))
     }
 
-    #[cfg(feature = "image")]
     /// Convert the post render buffer into an RgbaImage.
     ///
     /// Ensures that the pixels are in a linear color space by applying the linear transfer

@@ -4,7 +4,6 @@
 use std::{
     borrow::Cow,
     ops::{Deref, DerefMut},
-    sync::Arc,
 };
 
 use ::ab_glyph::Rect;
@@ -13,7 +12,7 @@ use glyph_brush::*;
 pub use ::ab_glyph::FontArc;
 pub use glyph_brush::{Color, FontId, GlyphCruncher, OwnedSection, OwnedText, Section, Text};
 
-use crate::{Renderling, Texture, UiVertex};
+use crate::{Texture, UiVertex};
 
 /// A text cache maintained mostly by ab_glyph.
 pub struct Cache {
@@ -124,8 +123,6 @@ impl Cache {
 /// scale the text entity and add other components.
 pub struct GlyphCache {
     pub(crate) cache: Option<Cache>,
-    pub(crate) device: Arc<wgpu::Device>,
-    pub(crate) queue: Arc<wgpu::Queue>,
     pub brush: GlyphBrush<Vec<UiVertex>>,
 }
 
@@ -205,26 +202,9 @@ fn to_vertex(
 }
 
 impl GlyphCache {
-    pub fn new(r: &Renderling, fonts: Vec<FontArc>) -> Self {
+    pub fn new(fonts: Vec<FontArc>) -> Self {
         let brush = GlyphBrushBuilder::using_fonts(fonts).build();
-        GlyphCache {
-            cache: None,
-            device: r
-                .graph
-                .get_resource::<crate::Device>()
-                .unwrap()
-                .unwrap()
-                .0
-                .clone(),
-            queue: r
-                .graph
-                .get_resource::<crate::Queue>()
-                .unwrap()
-                .unwrap()
-                .0
-                .clone(),
-            brush,
-        }
+        GlyphCache { cache: None, brush }
     }
 
     pub fn bounds<'a, S>(&mut self, section: S) -> Option<ab_glyph::Rect>
@@ -240,15 +220,16 @@ impl GlyphCache {
     ///
     /// The texture and mesh are meant to be used to build or update an object
     /// to display.
-    // TODO: Add device and queue as parameters to `GlyphCache::get_updated` so they
-    // can be removed from `GlyphCache`.
-    // This would simplify things in the UI quite a bit.
-    pub fn get_updated(&mut self) -> (Option<Vec<UiVertex>>, Option<Texture>) {
+    pub fn get_updated(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> (Option<Vec<UiVertex>>, Option<Texture>) {
         let mut may_mesh: Option<Vec<UiVertex>> = None;
         let mut may_texture: Option<Texture> = None;
         let mut cache = self.cache.take().unwrap_or_else(|| {
             let (width, height) = self.brush.texture_dimensions();
-            let cache = Cache::new(&self.device, width, height);
+            let cache = Cache::new(device, width, height);
             may_texture = Some(cache.texture.clone());
             cache
         });
@@ -259,7 +240,7 @@ impl GlyphCache {
                 |rect, tex_data| {
                     let offset = [rect.min[0] as u16, rect.min[1] as u16];
                     let size = [rect.width() as u16, rect.height() as u16];
-                    cache.update(&self.queue, offset, size, tex_data)
+                    cache.update(queue, offset, size, tex_data)
                 },
                 to_vertex,
             );
@@ -286,7 +267,7 @@ impl GlyphCache {
                         new = (new_width, new_height),
                     );
 
-                    cache = Cache::new(&self.device, new_width, new_height);
+                    cache = Cache::new(device, new_width, new_height);
                     self.brush.resize_texture(new_width, new_height);
                     may_texture = Some(cache.texture.clone());
                 }
@@ -295,13 +276,15 @@ impl GlyphCache {
         self.cache = Some(cache);
 
         match brush_action.unwrap() {
-            BrushAction::Draw(all_vertices) => if !all_vertices.is_empty() {
-                may_mesh = Some(
-                    all_vertices
-                        .into_iter()
-                        .flat_map(|vs| vs.into_iter())
-                        .collect(),
-                );
+            BrushAction::Draw(all_vertices) => {
+                if !all_vertices.is_empty() {
+                    may_mesh = Some(
+                        all_vertices
+                            .into_iter()
+                            .flat_map(|vs| vs.into_iter())
+                            .collect(),
+                    );
+                }
             }
             BrushAction::ReDraw => {}
         }

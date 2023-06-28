@@ -2,6 +2,7 @@
 #![cfg_attr(target_arch = "spirv", no_std)]
 
 pub mod bits;
+pub mod debug;
 pub mod math;
 pub mod pbr;
 pub mod scene;

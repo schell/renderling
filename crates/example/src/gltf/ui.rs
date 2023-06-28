@@ -1,27 +1,15 @@
 //! User interface for the gltf viewer.
-use renderling_gpui::{Button, Element, Gpui, Text, Vec2, Vec4, AABB};
+use renderling::debug::DebugChannel;
+use renderling_gpui::{Button, Element, Gpui, Text, Vec2, Vec4, AABB, Paint, Dropdown, DropdownEvent};
 
 pub enum UiEvent {
-    ToggleDebugUv0,
-    ToggleDebugUv1,
-    ToggleDebugNormals,
-    ToggleDebugVertexNormals,
-    ToggleDebugUvNormals,
-    ToggleDebugTangents,
-    ToggleDebugBitangents
+    ToggleDebugChannel(DebugChannel)
 }
 
 pub struct Ui {
     text_title: Text,
     text_camera: Text,
-
-    btn_debug_uv0: Button,
-    btn_debug_uv1: Button,
-    btn_debug_normal: Button,
-    btn_debug_vertex_normals: Button,
-    btn_debug_uv_normals: Button,
-    btn_debug_tangents: Button,
-    btn_debug_bitangents: Button,
+    dropdown_debug: Dropdown<DebugChannel>,
 }
 
 impl Ui {
@@ -37,34 +25,11 @@ impl Ui {
                 .with_text("Camera")
                 .with_scale(32.0)
                 .with_color(Vec4::ONE),
-            btn_debug_uv0: gpui
-                .new_button()
-                .with_text("Debug UV0")
-                .with_scale(32.0),
-            btn_debug_uv1: gpui
-                .new_button()
-                .with_text("Debug UV1")
-                .with_scale(32.0),
-            btn_debug_normal: gpui
-                .new_button()
-                .with_text("Debug Normals")
-                .with_scale(32.0),
-            btn_debug_vertex_normals: gpui
-                .new_button()
-                .with_text("Debug Vertex Normals")
-                .with_scale(32.0),
-            btn_debug_uv_normals: gpui
-                .new_button()
-                .with_text("Debug UV Normals")
-                .with_scale(32.0),
-            btn_debug_tangents: gpui
-                .new_button()
-                .with_text("Debug Tangents")
-                .with_scale(32.0),
-            btn_debug_bitangents: gpui
-                .new_button()
-                .with_text("Debug Bitangents")
-                .with_scale(32.0),
+            dropdown_debug: gpui
+                .new_dropdown()
+                .with_scale(32.0)
+                .with_selections(DebugChannel::all().map(|c| (format!("{c:?}"), c)))
+                .with_label_builder(|label| label.set_color(Vec4::ONE))
         }
     }
 
@@ -91,97 +56,32 @@ impl Element for Ui {
             aabb.max = constraint.max;
             aabb
         });
-        let aabb_btn_debug_uv0 = self.btn_debug_uv0.layout({
+        let aabb_dropdown = self.dropdown_debug.layout({
             let mut aabb = constraint;
-            aabb.min.y = aabb_camera.max.y + space;
-            aabb
-        });
-        let aabb_btn_debug_uv1 = self.btn_debug_uv1.layout({
-            let mut aabb = constraint;
-            aabb.min.y = aabb_btn_debug_uv0.max.y + space;
-            aabb
-        });
-
-        let aabb_btn_debug_normal = self.btn_debug_normal.layout({
-            let mut aabb = constraint;
-            aabb.min.y = aabb_btn_debug_uv1.max.y + space;
-            aabb
-        });
-        let aabb_btn_debug_vertex_normal = self.btn_debug_vertex_normals.layout({
-            let mut aabb = constraint;
-            aabb.min.y = aabb_btn_debug_normal.max.y + space;
-            aabb
-        });
-        let aabb_btn_debug_uv_normal = self.btn_debug_uv_normals.layout({
-            let mut aabb = constraint;
-            aabb.min.y = aabb_btn_debug_vertex_normal.max.y + space;
-            aabb
-        });
-        let aabb_btn_debug_tangents = self.btn_debug_tangents.layout({
-            let mut aabb = constraint;
-            aabb.min.y = aabb_btn_debug_uv_normal.max.y + space;
-            aabb
-        });
-        let aabb_btn_debug_bitangents = self.btn_debug_bitangents.layout({
-            let mut aabb = constraint;
-            aabb.min.y = aabb_btn_debug_tangents.max.y + space;
+            aabb.min.y = aabb_camera.max.y;
             aabb
         });
         aabb_title
             .union(aabb_camera)
-            .union(aabb_btn_debug_uv0)
-            .union(aabb_btn_debug_uv1)
-            .union(aabb_btn_debug_normal)
-            .union(aabb_btn_debug_uv_normal)
-            .union(aabb_btn_debug_vertex_normal)
-            .union(aabb_btn_debug_tangents)
-            .union(aabb_btn_debug_bitangents)
+            .union(aabb_dropdown)
     }
 
     fn paint<'a, 'b: 'a>(
         &'b mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        render_pass: &mut wgpu::RenderPass<'a>,
-        default_texture_bindgroup: &'a wgpu::BindGroup,
-    ) {
-        self.text_title
-            .paint(device, queue, render_pass, default_texture_bindgroup);
-        self.text_camera
-            .paint(device, queue, render_pass, default_texture_bindgroup);
-        self.btn_debug_uv0
-            .paint(device, queue, render_pass, default_texture_bindgroup);
-        self.btn_debug_uv1
-            .paint(device, queue, render_pass, default_texture_bindgroup);
-        self.btn_debug_normal
-            .paint(device, queue, render_pass, default_texture_bindgroup);
-        self.btn_debug_uv_normals
-            .paint(device, queue, render_pass, default_texture_bindgroup);
-        self.btn_debug_vertex_normals
-            .paint(device, queue, render_pass, default_texture_bindgroup);
-        self.btn_debug_tangents
-            .paint(device, queue, render_pass, default_texture_bindgroup);
-        self.btn_debug_bitangents
-            .paint(device, queue, render_pass, default_texture_bindgroup);
+    ) -> Vec<Paint<'a, 'b>> {
+        let mut ps = self.text_title.paint(device, queue);
+        ps.extend(self.text_camera.paint(device, queue));
+        ps.extend(self.dropdown_debug.paint(device, queue));
+        ps
     }
 
     fn event(&mut self, event: renderling_gpui::Event) -> Self::OutputEvent {
-        use renderling_gpui::ButtonEvent;
-        let btns = [
-            (&mut self.btn_debug_uv0, UiEvent::ToggleDebugUv0),
-            (&mut self.btn_debug_uv1, UiEvent::ToggleDebugUv1),
-            (&mut self.btn_debug_normal, UiEvent::ToggleDebugNormals),
-            (&mut self.btn_debug_vertex_normals, UiEvent::ToggleDebugVertexNormals),
-            (&mut self.btn_debug_uv_normals, UiEvent::ToggleDebugUvNormals),
-            (&mut self.btn_debug_tangents, UiEvent::ToggleDebugTangents),
-            (&mut self.btn_debug_bitangents, UiEvent::ToggleDebugBitangents),
-        ];
-        for (btn, ev) in btns.into_iter() {
-            if btn.event(event) == Some(ButtonEvent::Down) {
-                log::trace!("Button '{}' down", btn.get_text());
-                return Some(ev);
-            }
+        if let Some(DropdownEvent::Selected(channel)) = self.dropdown_debug.event(event) {
+            Some(UiEvent::ToggleDebugChannel(channel))
+        } else {
+            None
         }
-        None
     }
 }
