@@ -13,6 +13,7 @@ use spirv_std::num_traits::*;
 
 use crate::{
     bits::{bits, pack, unpack},
+    debug::*,
     math::Vec3ColorSwizzles,
     pbr, GpuToggles,
 };
@@ -22,52 +23,6 @@ pub use id::*;
 
 mod texture;
 pub use texture::*;
-
-/// Used to debug shaders by displaying different colors.
-#[repr(transparent)]
-#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
-#[derive(Default, Clone, Copy, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct DebugMode(u32);
-
-impl core::fmt::Display for DebugMode {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.write_str(match self {
-            &DebugMode::NONE => "none",
-            &DebugMode::NORMALS => "normals",
-            &DebugMode::VERTEX_NORMALS => "vertex normals",
-            &DebugMode::UV_NORMALS => "UV normals",
-            &DebugMode::TANGENTS => "tangents",
-            &DebugMode::BITANGENTS => "bitangents",
-            _ => "unknown",
-        })
-    }
-}
-
-impl DebugMode {
-    pub const NONE: Self = DebugMode(0);
-
-    /// Displays the first set of UV coordinates as a color.
-    pub const UV_COORDS_0: Self = DebugMode(1);
-
-    /// Displays the second set of UV coordinates as a color.
-    pub const UV_COORDS_1: Self = DebugMode(2);
-
-    /// Displays normals after normal mapping, in world space
-    pub const NORMALS: Self = DebugMode(3);
-
-    /// Displays vertex normals.
-    pub const VERTEX_NORMALS: Self = DebugMode(4);
-
-    /// Displays uv normals. These are normals coming from a normal map texture.
-    /// These are the normals in tangent space.
-    pub const UV_NORMALS: Self = DebugMode(5);
-
-    /// Displays vertex normals.
-    pub const TANGENTS: Self = DebugMode(6);
-
-    /// Displays bitangents as calculated from normals and tangents.
-    pub const BITANGENTS: Self = DebugMode(7);
-}
 
 /// A vertex in a mesh.
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
@@ -227,6 +182,12 @@ impl Default for GpuMaterial {
     }
 }
 
+/// Provides information about what attributes are provided by a morph target.
+///
+/// In `renderling` morph targets' geometry are meshlets - they are assumed to
+/// come directly after the base mesh in the `GpuVertex` buffer, that way they
+/// can be indexed from the base mesh using only the `GpuEntity` struct (through
+/// `MorphTargetsInfo::num_targets`). See [`GpuEntity::get_vertex`] for more info.
 #[repr(transparent)]
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[derive(Clone, Copy, Default, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
@@ -376,6 +337,9 @@ impl GpuEntity {
         }
     }
 
+    /// Return the `GpuVertex` at the given index.
+    ///
+    /// This takes into consideration any morph targets the base mesh may reference.
     pub fn get_vertex(&self, vertex_index: u32, vertices: &[GpuVertex]) -> GpuVertex {
         let index = vertex_index as usize;
         let mut vertex = vertices[index];
@@ -578,36 +542,36 @@ pub fn main_fragment_scene(
         ((u.normalize_or_zero() + Vec3::splat(1.0)) / 2.0).extend(1.0)
     }
 
-    match constants.debug_mode {
-        DebugMode::UV_COORDS_0 => {
+    match constants.debug_mode.into() {
+        DebugChannel::None => {}
+        DebugChannel::UvCoords0 => {
             *output = colorize(Vec3::new(in_uv0.x, in_uv0.y, 0.0));
             return;
         }
-        DebugMode::UV_COORDS_1 => {
+        DebugChannel::UvCoords1 => {
             *output = colorize(Vec3::new(in_uv1.x, in_uv1.y, 0.0));
             return;
         }
-        DebugMode::NORMALS => {
+        DebugChannel::Normals => {
             *output = colorize(norm);
             return;
         }
-        DebugMode::VERTEX_NORMALS => {
+        DebugChannel::VertexNormals => {
             *output = colorize(in_norm);
             return;
         }
-        DebugMode::UV_NORMALS => {
+        DebugChannel::UvNormals => {
             *output = colorize(uv_norm);
             return;
         }
-        DebugMode::TANGENTS => {
+        DebugChannel::Tangents => {
             *output = colorize(in_tangent);
             return;
         }
-        DebugMode::BITANGENTS => {
+        DebugChannel::Bitangents => {
             *output = colorize(in_bitangent);
             return;
         }
-        _ => {}
     }
 
     *output = match material.lighting_model {

@@ -1,5 +1,5 @@
 //! GLTF support for renderling GPU scenes.
-use glam::{Mat4, Quat, Vec3, Vec4, Vec4Swizzles};
+use glam::{Mat4, Quat, Vec2, Vec3, Vec4, Vec4Swizzles};
 use gltf::khr_lights_punctual::Kind;
 use rustc_hash::FxHashMap;
 use snafu::prelude::*;

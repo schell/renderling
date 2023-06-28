@@ -13,7 +13,7 @@ winit = ["renderling/winit", "dep:winit"]
 glam = { version = "^0.22", default-features = false, features = ["bytemuck", "libm"] }
 image = { version = "^0.24" }
 log = "^0.4"
-renderling = { path = "../renderling", default-features = false, features = ["ui", "text"] }
+renderling = { path = "../renderling", default-features = false, features = ["text"] }
 snafu = "^0.7"
 winit = { version = "^0.27", optional = true }
 wgpu = "0.16"

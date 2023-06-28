@@ -109,9 +109,7 @@ impl Element for Rectangle {
         &'b mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        render_pass: &mut wgpu::RenderPass<'a>,
-        default_texture_bindgroup: &'a wgpu::BindGroup,
-    ) {
+    ) -> Vec<Paint<'a, 'b>> {
         let origin = self.aabb.min;
         let size = self.aabb.size();
         if self.draw_object.is_none() {
@@ -133,7 +131,9 @@ impl Element for Rectangle {
         }
 
         draw_obj.update(device, queue).unwrap();
-        draw_obj.draw(render_pass, default_texture_bindgroup);
+        vec![Paint::drawing(|render_pass, default_texture_bindgroup| {
+            draw_obj.draw(render_pass, default_texture_bindgroup);
+        })]
     }
 
     fn event(&mut self, _event: Event) {}
@@ -148,9 +148,8 @@ pub struct Text {
 }
 
 impl Text {
-    pub fn new(renderling: &Renderling, fonts: impl IntoIterator<Item = FontArc>) -> Self {
-        let fonts = fonts.into_iter().collect::<Vec<_>>();
-        let cache = GlyphCache::new(renderling, fonts);
+    pub fn new(font: &FontArc) -> Self {
+        let cache = GlyphCache::new(vec![font.clone()]);
         Text {
             section: OwnedSection::default().add_text(OwnedText::new("").with_scale(12.0)),
             cache,
@@ -160,21 +159,20 @@ impl Text {
         }
     }
 
-    pub fn add_text(
+    pub fn set_font(
         &mut self,
-        text: impl Into<String>,
-        scale: f32,
-        color: impl Into<Vec4>,
-        font_id: Id<FontArc>,
+        font: FontArc,
     ) {
-        let section = std::mem::take(&mut self.section).add_text(
-            OwnedText::new(&text.into())
-                .with_scale(scale)
-                .with_color(color.into())
-                .with_font_id(FontId(font_id.index())),
-        );
-        self.section = section;
+        self.cache = GlyphCache::new(vec![font]);
         self.updated = true;
+    }
+
+    pub fn with_font(
+        mut self,
+        font: FontArc
+    ) -> Self {
+        self.set_font(font);
+        self
     }
 
     pub fn set_text(&mut self, text: impl Into<String>) {
@@ -251,9 +249,7 @@ impl Element for Text {
         &'b mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        render_pass: &mut wgpu::RenderPass<'a>,
-        default_texture_bindgroup: &'a wgpu::BindGroup,
-    ) {
+    ) -> Vec<Paint<'a, 'b>> {
         let origin = self.aabb.min;
         if self.draw_object.is_none() {
             self.draw_object = Some(
@@ -269,7 +265,7 @@ impl Element for Text {
             self.cache.queue(&self.section);
         }
 
-        let (may_vertices, may_texture) = self.cache.get_updated();
+        let (may_vertices, may_texture) = self.cache.get_updated(device, queue);
         if let Some(verts) = may_vertices {
             draw_obj.set_vertices(verts);
         }
@@ -281,7 +277,9 @@ impl Element for Text {
         }
 
         draw_obj.update(device, queue).unwrap();
-        draw_obj.draw(render_pass, default_texture_bindgroup);
+        vec![Paint::drawing(|render_pass, default_texture_bindgroup| {
+            draw_obj.draw(render_pass, default_texture_bindgroup);
+        })]
     }
 
     fn event(&mut self, _: Event) {}
@@ -318,15 +316,16 @@ impl Button {
     const PX_OFFSET: f32 = 8.0;
     const PX_BORDER: f32 = 4.0;
 
-    pub fn new(renderling: &Renderling, fonts: impl IntoIterator<Item = FontArc>) -> Self {
+    pub fn new(font: &FontArc) -> Self {
         let mut btn = Button {
             foreground: Rectangle::new(),
             background: Rectangle::new().with_color(Vec4::new(0.0, 0.0, 0.0, 0.5)),
-            text: {
-                let mut text = Text::new(renderling, fonts);
-                text.add_text("Button", 16.0, Self::TEXT_COLOR_NORMAL, Id::new(0));
-                text
-            },
+            text:
+                Text::new(font)
+                    .with_text("Button")
+                    .with_scale(16.0)
+                    .with_color(Self::TEXT_COLOR_NORMAL)
+            ,
             aabb: AABB::default(),
             state: ButtonState::default(),
         };
@@ -351,6 +350,14 @@ impl Button {
             .map(|t| t.text.clone())
             .collect::<Vec<_>>()
             .concat()
+    }
+
+    pub fn get_text_field(&self) -> &Text {
+        &self.text
+    }
+
+    pub fn get_text_field_mut(&mut self) -> &mut Text {
+        &mut self.text
     }
 
     pub fn set_scale(&mut self, scale: f32) {
@@ -429,15 +436,12 @@ impl Element for Button {
         &'b mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        render_pass: &mut wgpu::RenderPass<'a>,
-        default_texture_bindgroup: &'a wgpu::BindGroup,
-    ) {
-        self.background
-            .paint(device, queue, render_pass, default_texture_bindgroup);
-        self.foreground
-            .paint(device, queue, render_pass, default_texture_bindgroup);
-        self.text
-            .paint(device, queue, render_pass, default_texture_bindgroup);
+    ) -> Vec<Paint<'a, 'b>> {
+        let mut ps = vec![];
+        ps.extend(self.background.paint(device, queue));
+        ps.extend(self.foreground.paint(device, queue));
+        ps.extend(self.text.paint(device, queue));
+        ps
     }
 
     fn event(&mut self, event: Event) -> Option<ButtonEvent> {
@@ -480,5 +484,174 @@ impl Element for Button {
             (ButtonState::Down, ButtonState::Over) => Some(ButtonEvent::Up),
             (ButtonState::Down, ButtonState::Down) => None,
         }
+    }
+}
+
+pub struct Dropdown<T> {
+    selections: Vec<(String, T)>,
+    label_font: FontArc,
+    scale: f32,
+    is_open: bool,
+    text_label: Text,
+    button_open: Button,
+    buttons: Vec<Button>,
+}
+
+impl<T> Dropdown<T> {
+    pub fn new(label_font: &FontArc, icon_font: &FontArc) -> Self {
+        let mut dropdown = Self {
+            selections: vec![],
+            is_open: false,
+            scale: 32.0,
+            button_open: Button::new(icon_font)
+                .with_scale(32.0)
+                .with_text("  "),
+            text_label: Text::new(label_font)
+                .with_scale(32.0)
+                .with_text("No selection"),
+            buttons: vec![],
+            label_font: label_font.clone(),
+        };
+        dropdown.set_selected_index(None);
+        dropdown
+    }
+
+    pub fn get_label(&self) -> &Text {
+        &self.text_label
+    }
+
+    pub fn get_label_mut(&mut self) -> &mut Text {
+        &mut self.text_label
+    }
+
+    pub fn with_label_builder(mut self, f: impl FnOnce(&mut Text)) -> Self {
+        f(&mut self.text_label);
+        self
+    }
+
+    pub fn set_scale(&mut self, scale: f32) {
+        self.button_open.set_scale(scale);
+        self.text_label.set_scale(scale);
+        for button in self.buttons.iter_mut() {
+            button.set_scale(scale);
+        }
+    }
+
+    pub fn with_scale(mut self, scale: f32) -> Self {
+        self.set_scale(scale);
+        self
+    }
+
+    pub fn set_selections(&mut self, selections: impl IntoIterator<Item = (String, T)>) {
+        self.selections = selections.into_iter().collect();
+        self.buttons = self
+            .selections
+            .iter()
+            .map(|(name, _)| {
+                Button::new(&self.label_font)
+                    .with_scale(self.scale)
+                    .with_text(name)
+            })
+            .collect();
+        self.text_label.set_text("");
+    }
+
+    pub fn with_selections(mut self, selections: impl IntoIterator<Item = (String, T)>) -> Self {
+        self.set_selections(selections);
+        self
+    }
+
+    pub fn set_selected_index(&mut self, may_index: Option<usize>) {
+        if let Some(index) = may_index {
+            if let Some((name, _)) = self.selections.get(index) {
+                self.text_label.set_text(name);
+            }
+        } else {
+            self.text_label.set_text("No selection");
+        }
+    }
+
+    pub fn with_selected_index(mut self, may_index: Option<usize>) -> Self {
+        self.set_selected_index(may_index);
+        self
+    }
+}
+
+pub enum DropdownEvent<T> {
+    Selected(T),
+}
+
+impl<T: Clone> Element for Dropdown<T> {
+    type OutputEvent = Option<DropdownEvent<T>>;
+
+    fn layout(&mut self, mut constraint: AABB) -> AABB {
+        let spacing = 4.0;
+
+        let btn_aabb = self.button_open.layout(constraint);
+
+        constraint.min.x += btn_aabb.max.x + spacing;
+        let label_aabb = self.text_label.layout(constraint);
+
+        let mut out = btn_aabb.union(label_aabb);
+        if self.is_open {
+            constraint.min.y = out.max.y + spacing;
+            for button in self.buttons.iter_mut() {
+                out.add(button.layout(constraint));
+                constraint.min.y = out.max.y + spacing;
+            }
+        }
+        out
+    }
+
+    fn paint<'a, 'b: 'a>(
+        &'b mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> Vec<Paint<'a, 'b>> {
+        let mut ps = self.button_open.paint(device, queue);
+        ps.extend(self.text_label.paint(device, queue));
+        if self.is_open {
+            for button in self.buttons.iter_mut() {
+                ps.extend(button.paint(device, queue));
+            }
+        }
+        ps
+    }
+
+    fn event(&mut self, event: Event) -> Self::OutputEvent {
+        match self.button_open.event(event) {
+            Some(ev) => match ev {
+                ButtonEvent::Over => {}
+                ButtonEvent::Out => {}
+                ButtonEvent::Down => {
+                    self.is_open = !self.is_open;
+                }
+                ButtonEvent::Up => {}
+            },
+            None => {}
+        }
+
+        if self.is_open {
+            let may_selected: Option<(usize, T)> = self
+                .buttons
+                .iter_mut()
+                .zip(self.selections.iter())
+                .enumerate()
+                .find_map(|(i, (button, (_, t)))| {
+                    button.event(event).map(|ev| {
+                        if let ButtonEvent::Down = ev {
+                            Some((i, t.clone()))
+                        } else {
+                            None
+                        }
+                    })?
+                });
+            if let Some((i, t)) = may_selected {
+                self.set_selected_index(Some(i));
+                self.is_open = false;
+                return Some(DropdownEvent::Selected(t));
+            }
+        }
+        None
     }
 }

@@ -2,7 +2,10 @@
 //!
 //! This is traditional 2d rendering.
 
-use std::{ops::{Deref, DerefMut}, sync::Arc};
+use std::{
+    ops::{Deref, DerefMut},
+    sync::Arc,
+};
 
 use glam::{UVec2, Vec2, Vec4};
 use snafu::prelude::*;
@@ -477,7 +480,6 @@ impl<'a> UiSceneBuilder<'a> {
         UiDrawObjectBuilder::new(&self.device)
     }
 
-    #[cfg(feature = "image")]
     pub fn new_texture_from_dynamic_image(&self, img: image::DynamicImage) -> Texture {
         Texture::from_dynamic_image(
             &self.device,
@@ -667,7 +669,6 @@ mod test {
         img_diff::assert_img_eq("ui_tri.png", img);
     }
 
-    #[cfg(feature = "image")]
     #[test]
     fn ui_image() {
         let mut r = Renderling::headless(100, 100)
@@ -717,7 +718,7 @@ mod test {
             std::fs::read("../../fonts/Font Awesome 6 Free-Regular-400.otf").unwrap();
 
         let font = FontArc::try_from_vec(bytes).unwrap();
-        let mut glyph_cache = GlyphCache::new(&r, vec![font]);
+        let mut glyph_cache = GlyphCache::new(vec![font]);
         glyph_cache.brush.queue(
             Section::default()
                 .add_text(
@@ -736,7 +737,7 @@ mod test {
                         .with_scale(32.0),
                 ),
         );
-        let (may_mesh, may_texture) = glyph_cache.get_updated();
+        let (may_mesh, may_texture) = glyph_cache.get_updated(r.get_device(), r.get_queue());
         let mesh = may_mesh.unwrap();
         let texture = may_texture.unwrap();
 
