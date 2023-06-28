@@ -60,7 +60,6 @@ impl From<gltf::image::Data> for SceneImage {
     }
 }
 
-#[cfg(feature = "image")]
 impl From<image::DynamicImage> for SceneImage {
     fn from(value: image::DynamicImage) -> Self {
         let width = value.width();

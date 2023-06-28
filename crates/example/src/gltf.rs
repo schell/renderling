@@ -61,11 +61,17 @@ impl App {
         let last_cursor_position: Option<winit::dpi::PhysicalPosition<f64>> = None;
         let mut gpui = renderling_gpui::Gpui::new_from(r);
 
-        // get the font for the UI
-        let bytes: Vec<u8> =
-            std::fs::read("fonts/Recursive Mn Lnr St Med Nerd Font Complete.ttf").unwrap();
-        let font = FontArc::try_from_vec(bytes).unwrap();
-        gpui.add_font(font);
+        // get the fonts for the UI
+        let font_paths = [
+            "fonts/Recursive Mn Lnr St Med Nerd Font Complete.ttf",
+            "fonts/Font Awesome 6 Free-Regular-400.otf"
+        ];
+        for path in font_paths {
+            let bytes: Vec<u8> =
+                std::fs::read(path).unwrap();
+            let font = FontArc::try_from_vec(bytes).unwrap();
+            gpui.add_font(font);
+        }
 
         let ui = Ui::new(&mut gpui);
         let ui_texture = r.texture_from_wgpu_tex(gpui.get_frame_texture(), None);

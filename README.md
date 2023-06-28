@@ -2,12 +2,23 @@
 
 This aspires to be a modern "GPU-driven" renderer. It is alpha software. I'm still learning, but quickly!
 
-`renderling` holds entire scenes of geometry, textures, materials and lighting in GPU buffers.
-Most of the rendering operations happen on the GPU.
-The CPU is used to interact with the filesystem to marshall data to the GPU and to bind buffers.
+## What
+
+`renderling` holds entire scenes of geometry, textures, materials, lighting, even the scene graph itself - in GPU buffers.
+All but a few of the rendering operations happen on the GPU.
+The CPU is used to interact with the filesystem to marshall data to the GPU and to update transforms.
+
+## Why
+
 This makes `renderling` very effective at rendering certain types of scenes.
-Specifically `renderling` aims to be good at rendering scenes with a moderate level of geometry,
-with a moderate number of textures (or small textures) and lots of lighting effects.
+Specifically `renderling` aims to be good at rendering scenes with a moderate level of unique geometry,
+(possibly a large amount of repeated geometry), with a small number of large textures (or large number of small textures),
+and lots of lighting effects.
+
+## General Aspirations
+
+- Very fast loading times for GLTF files
+- Supports very large scenes
 
 ![renderling pbr](test_img/pbr_point_lights_metallic_roughness.png)
 

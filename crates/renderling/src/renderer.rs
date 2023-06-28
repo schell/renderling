@@ -180,7 +180,7 @@ impl Renderling {
         futures_lite::future::block_on(Self::try_from_raw_window(width, height, window_handle))
     }
 
-    #[cfg(feature = "winit")]
+    #[cfg(all(feature = "winit", feature = "raw-window-handle"))]
     pub fn try_from_window(window: &winit::window::Window) -> Result<Self, RenderlingError> {
         let inner_size = window.inner_size();
         Self::try_from_raw_window_handle(window, inner_size.width, inner_size.height)
@@ -234,7 +234,6 @@ impl Renderling {
             });
     }
 
-    #[cfg(feature = "image")]
     pub fn create_texture<P>(
         &self,
         label: Option<&str>,
@@ -321,10 +320,9 @@ impl Renderling {
     #[cfg(feature = "text")]
     /// Create a new `GlyphCache` used to cache text rendering info.
     pub fn new_glyph_cache(&self, fonts: Vec<crate::FontArc>) -> crate::GlyphCache {
-        crate::GlyphCache::new(self, fonts)
+        crate::GlyphCache::new(fonts)
     }
 
-    #[cfg(feature = "image")]
     /// Render into an image.
     ///
     /// This should be called after rendering, before presentation.
