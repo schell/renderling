@@ -34,6 +34,8 @@ pub struct GpuVertex {
     pub uv: Vec4,
     pub normal: Vec4,
     pub tangent: Vec4,
+    pub joints: [u32; 4],
+    pub weights: [f32; 4],
 }
 
 impl Default for GpuVertex {
@@ -44,6 +46,8 @@ impl Default for GpuVertex {
             uv: Vec4::splat(0.0),
             normal: Vec4::Z,
             tangent: Vec4::Y,
+            joints: [0; 4],
+            weights: [0.0; 4]
         }
     }
 }

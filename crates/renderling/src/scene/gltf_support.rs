@@ -583,31 +583,55 @@ impl GltfLoader {
                 || num_morph_targets_normals > 0
                 || num_morph_targets_tangents > 0;
 
+            let joints = reader
+                .read_joints(0)
+                .map(|joints| {
+                    let joints: Box<dyn Iterator<Item = [u32; 4]>> = Box::new(
+                        joints
+                            .into_u16()
+                            .map(|[a, b, c, d]| [a as u32, b as u32, c as u32, d as u32]),
+                    );
+                    joints
+                })
+                .unwrap_or_else(|| Box::new(std::iter::repeat([0u32, 0, 0, 0])));
+
+            let weights = reader
+                .read_weights(0)
+                .map(|weights| {
+                    let weights: Box<dyn Iterator<Item = [f32; 4]>> = Box::new(weights.into_f32());
+                    weights
+                })
+                .unwrap_or_else(|| Box::new(std::iter::repeat([0.0, 0.0, 0.0, 0.0])));
+
             let vertices = positions
                 .iter()
-                .zip(colors.zip(uvs.zip(normals.zip(tangents))))
+                .zip(colors.zip(uvs.zip(normals.zip(tangents.zip(joints.zip(weights))))))
                 .enumerate()
-                .map(|(i, (position, (color, (uv, (normal, tangent)))))| {
-                    (
-                        GpuVertex {
-                            position: position.extend(0.0),
-                            color,
-                            uv,
-                            normal: normal.extend(0.0),
-                            tangent,
-                        },
-                        morph_targets
-                            .iter()
-                            .map(|(mps, mns, mts)| {
-                                (
-                                    mps.as_ref().map(|ps| ps[i]),
-                                    mns.as_ref().map(|ns| ns[i]),
-                                    mts.as_ref().map(|ts| ts[i]),
-                                )
-                            })
-                            .collect::<Vec<_>>(),
-                    )
-                })
+                .map(
+                    |(i, (position, (color, (uv, (normal, (tangent, (joints, weights)))))))| {
+                        (
+                            GpuVertex {
+                                position: position.extend(0.0),
+                                color,
+                                uv,
+                                normal: normal.extend(0.0),
+                                tangent,
+                                joints,
+                                weights,
+                            },
+                            morph_targets
+                                .iter()
+                                .map(|(mps, mns, mts)| {
+                                    (
+                                        mps.as_ref().map(|ps| ps[i]),
+                                        mns.as_ref().map(|ns| ns[i]),
+                                        mts.as_ref().map(|ts| ts[i]),
+                                    )
+                                })
+                                .collect::<Vec<_>>(),
+                        )
+                    },
+                )
                 .collect::<Vec<_>>();
             drop(morph_targets);
 
