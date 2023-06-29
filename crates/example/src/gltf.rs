@@ -7,8 +7,8 @@ use std::time::Instant;
 use renderling::{
     debug::DebugChannel,
     math::{Mat4, Vec3, Vec4},
-    FontArc, GltfLoader, GpuEntity, Renderling, Scene, ScreenSize, TweenProperty, UiDrawObjects,
-    UiMode, UiVertex, Write,
+    GltfLoader, GpuEntity, Renderling, Scene, ScreenSize, TweenProperty, UiDrawObjects, UiMode,
+    UiVertex, Write,
 };
 use renderling_gpui::{Element, Gpui};
 use winit::event::KeyboardInput;
@@ -60,20 +60,7 @@ impl App {
         let left_mb_down: bool = false;
         let last_cursor_position: Option<winit::dpi::PhysicalPosition<f64>> = None;
         let mut gpui = renderling_gpui::Gpui::new_from(r);
-
-        // get the fonts for the UI
-        let font_paths = [
-            "fonts/Recursive Mn Lnr St Med Nerd Font Complete.ttf",
-            "fonts/Font Awesome 6 Free-Regular-400.otf"
-        ];
-        for path in font_paths {
-            let bytes: Vec<u8> =
-                std::fs::read(path).unwrap();
-            let font = FontArc::try_from_vec(bytes).unwrap();
-            gpui.add_font(font);
-        }
-
-        let ui = Ui::new(&mut gpui);
+        let ui = Ui::new(&mut gpui, "fonts");
         let ui_texture = r.texture_from_wgpu_tex(gpui.get_frame_texture(), None);
         let ui_scene = r.new_ui_scene().with_canvas_size(1, 1).build();
         let ui_obj = ui_scene
@@ -415,14 +402,7 @@ mod test {
     #[test]
     fn sanity() {
         let mut gpui = renderling_gpui::Gpui::new(600, 300); //.with_background_color(DARK_BLUE_BG_COLOR);
-
-        // get the font for the UI
-        let bytes: Vec<u8> =
-            std::fs::read("../../fonts/Recursive Mn Lnr St Med Nerd Font Complete.ttf").unwrap();
-        let font = FontArc::try_from_vec(bytes).unwrap();
-        gpui.add_font(font);
-
-        let mut ui = Ui::new(&mut gpui);
+        let mut ui = Ui::new(&mut gpui, "../../fonts");
         ui.set_text_title("This is the title text");
         ui.set_text_camera("This is the camera text");
         gpui.layout(&mut ui);

@@ -5,7 +5,7 @@ use std::sync::Arc;
 use renderling::node::FrameTextureView;
 use renderling::{graph::IsGraphNode, Device, Read, RenderTarget};
 use renderling::{
-    FontArc, FontId, Frame, GlyphCache, Id, OwnedSection, OwnedText, Queue, Renderling,
+    FontArc, Frame, GlyphCache, Id, OwnedSection, OwnedText, Queue, Renderling,
     UiDrawObject, UiDrawObjectBuilder, UiMode, UiScene, UiVertex, WgpuStateError, Write,
 };
 use renderling::{UiRenderPipeline, UiSceneError};
@@ -492,14 +492,17 @@ impl Gpui {
         Rectangle::new()
     }
 
+    /// Create a new default Text with the first font (added with [`Gpui::add_font`]) pre-selected.
     pub fn new_text(&self) -> Text {
         Text::new(&self.get_fonts()[0])
     }
 
+    /// Create a new default [`Button`] with the first font (added with [`Gpui::add_font`]) pre-selected.
     pub fn new_button(&self) -> Button {
         Button::new(&self.get_fonts()[0])
     }
 
+    /// Create a new default [`Dropdown`] with the first font (added with [`Gpui::add_font`]) pre-selected.
     pub fn new_dropdown<T: Clone + PartialEq>(&self) -> Dropdown<T> {
         let fonts = self.get_fonts();
         Dropdown::new(&fonts[0], &fonts[1])
@@ -598,15 +601,13 @@ mod test {
         let bytes: Vec<u8> =
             std::fs::read("../../fonts/Recursive Mn Lnr St Med Nerd Font Complete.ttf").unwrap();
         let font = FontArc::try_from_vec(bytes).unwrap();
-        let font_id = ui.add_font(font);
+        let _font_id = ui.add_font(font);
 
-        let mut text = ui.new_text();
-        text.add_text(
-            "Hello! This is a pretty long sentence. It should wrap.",
-            32.0,
-            Vec4::ONE,
-            font_id,
-        );
+        let mut text = ui
+            .new_text()
+            .with_text("Hello! This is a pretty long sentence. It should wrap.")
+            .with_scale(32.0)
+            .with_color(Vec4::ONE);
         ui.layout(&mut text);
         let img = ui.render_image(&mut text);
         img_diff::assert_img_eq("gpui_text.png", img);

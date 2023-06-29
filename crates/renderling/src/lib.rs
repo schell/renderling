@@ -232,7 +232,8 @@ mod test {
         ]
     }
 
-    pub fn _init_logging() {
+    #[ctor::ctor]
+    fn init_logging() {
         let _ = env_logger::builder()
             .is_test(true)
             //.filter_level(log::LevelFilter::Trace)
@@ -349,7 +350,6 @@ mod test {
 
     #[test]
     fn cmy_cube_sanity() {
-        _init_logging();
         let mut r = Renderling::headless(100, 100)
             .unwrap()
             .with_background_color(Vec4::splat(1.0));
@@ -565,7 +565,6 @@ mod test {
 
     #[test]
     fn gpu_array_update() {
-        _init_logging();
         let (device, queue, _) = futures_lite::future::block_on(
             crate::state::new_device_queue_and_target(100, 100, None as Option<CreateSurfaceFn>),
         );
@@ -611,7 +610,6 @@ mod test {
 
     #[test]
     fn gpu_scene_sanity1() {
-        _init_logging();
         let mut r = Renderling::headless(100, 100)
             .unwrap()
             .with_background_color(Vec3::splat(0.0).extend(1.0));
@@ -696,7 +694,6 @@ mod test {
 
     #[test]
     fn gpu_scene_sanity2() {
-        _init_logging();
 
         let mut r = Renderling::headless(100, 100)
             .unwrap()
@@ -1079,7 +1076,6 @@ mod test {
     #[test]
     /// Ensures that the directional light coloring works.
     fn scene_cube_directional() {
-        _init_logging();
         let mut r = Renderling::headless(100, 100)
             .unwrap()
             .with_background_color(Vec3::splat(0.0).extend(1.0));
@@ -1326,7 +1322,6 @@ mod test {
     //
     // see https://learnopengl.com/PBR/Lighting
     fn pbr_point_lights_metallic_roughness_spheres() {
-        _init_logging();
         let ss = 600;
         let mut r = Renderling::headless(ss, ss)
             .unwrap()

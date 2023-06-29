@@ -1054,13 +1054,12 @@ impl GltfLoader {
 mod test {
     use glam::{Vec3, Vec4};
 
-    use crate::{camera, test::_init_logging, GpuVertex, Id, LightingModel, Renderling};
+    use crate::{camera, GpuVertex, Id, LightingModel, Renderling};
 
     #[test]
     // tests importing a gltf file and rendering the first image as a 2d object
     // ensures we are decoding images correctly
     fn images() {
-        _init_logging();
         let mut r = Renderling::headless(100, 100)
             .unwrap()
             .with_background_color(Vec4::splat(1.0));
@@ -1130,7 +1129,6 @@ mod test {
     // * support primitives w/ positions and normal attributes
     // * support transforming nodes (T * R * S)
     fn simple_meshes() {
-        _init_logging();
         let mut r = Renderling::headless(100, 50)
             .unwrap()
             .with_background_color(Vec3::splat(0.0).extend(1.0));
@@ -1150,7 +1148,6 @@ mod test {
 
     #[test]
     fn simple_texture() {
-        _init_logging();
         let size = 100;
         let mut r = Renderling::headless(size, size)
             .unwrap()
@@ -1179,7 +1176,6 @@ mod test {
 
     #[test]
     fn normal_mapping_brick_sphere() {
-        _init_logging();
         let size = 600;
         let mut r = Renderling::headless(size, size)
             .unwrap()
@@ -1201,7 +1197,6 @@ mod test {
     // Tests that we can reuse the same builder for multiple loaders, building
     // up a scene of multiple gltf documents.
     fn can_load_multiple_gltfs_into_one_builder() {
-        _init_logging();
         let size = 600;
         let mut r = Renderling::headless(size, size)
             .unwrap()
@@ -1255,7 +1250,6 @@ mod test {
     #[cfg(feature = "gltf")]
     #[test]
     fn simple_animation() {
-        _init_logging();
         let mut r = Renderling::headless(50, 50)
             .unwrap()
             .with_background_color(Vec4::ONE);
@@ -1315,5 +1309,24 @@ mod test {
             let img = r.render_image().unwrap();
             img_diff::assert_img_eq(&format!("gltf_simple_animation_after/{i}.png"), img);
         }
+    }
+
+    #[cfg(feature = "gltf")]
+    #[test]
+    fn simple_skin() {
+        let size = 100;
+        let mut r = Renderling::headless(size, size)
+            .unwrap()
+            .with_background_color(Vec3::splat(0.0).extend(1.0));
+        let projection = camera::perspective(50.0, 50.0);
+        let view = camera::look_at(Vec3::Z * 4.0, Vec3::ZERO, Vec3::Y);
+        let mut builder = r.new_scene().with_camera(projection, view);
+        let _loader = builder
+            .gltf_load("../../gltf/gltfTutorial_019_SimpleSkin.gltf")
+            .unwrap();
+        let scene = builder.build().unwrap();
+        crate::setup_scene_render_graph(scene, &mut r, true);
+        let img = r.render_image().unwrap();
+        img_diff::save("gltf_simple_skin.png", img);
     }
 }
