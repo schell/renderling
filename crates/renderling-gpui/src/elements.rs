@@ -159,18 +159,12 @@ impl Text {
         }
     }
 
-    pub fn set_font(
-        &mut self,
-        font: FontArc,
-    ) {
+    pub fn set_font(&mut self, font: FontArc) {
         self.cache = GlyphCache::new(vec![font]);
         self.updated = true;
     }
 
-    pub fn with_font(
-        mut self,
-        font: FontArc
-    ) -> Self {
+    pub fn with_font(mut self, font: FontArc) -> Self {
         self.set_font(font);
         self
     }
@@ -320,12 +314,10 @@ impl Button {
         let mut btn = Button {
             foreground: Rectangle::new(),
             background: Rectangle::new().with_color(Vec4::new(0.0, 0.0, 0.0, 0.5)),
-            text:
-                Text::new(font)
-                    .with_text("Button")
-                    .with_scale(16.0)
-                    .with_color(Self::TEXT_COLOR_NORMAL)
-            ,
+            text: Text::new(font)
+                .with_text("Button")
+                .with_scale(16.0)
+                .with_color(Self::TEXT_COLOR_NORMAL),
             aabb: AABB::default(),
             state: ButtonState::default(),
         };
@@ -503,9 +495,7 @@ impl<T> Dropdown<T> {
             selections: vec![],
             is_open: false,
             scale: 32.0,
-            button_open: Button::new(icon_font)
-                .with_scale(32.0)
-                .with_text("  "),
+            button_open: Button::new(icon_font).with_scale(32.0).with_text("  "),
             text_label: Text::new(label_font)
                 .with_scale(32.0)
                 .with_text("No selection"),

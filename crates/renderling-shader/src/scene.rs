@@ -47,7 +47,7 @@ impl Default for GpuVertex {
             normal: Vec4::Z,
             tangent: Vec4::Y,
             joints: [Id::NONE; 4],
-            weights: [0.0; 4]
+            weights: [0.0; 4],
         }
     }
 }
@@ -191,7 +191,8 @@ impl Default for GpuMaterial {
 /// In `renderling` morph targets' geometry are meshlets - they are assumed to
 /// come directly after the base mesh in the `GpuVertex` buffer, that way they
 /// can be indexed from the base mesh using only the `GpuEntity` struct (through
-/// `MorphTargetsInfo::num_targets`). See [`GpuEntity::get_vertex`] for more info.
+/// `MorphTargetsInfo::num_targets`). See [`GpuEntity::get_vertex`] for more
+/// info.
 #[repr(transparent)]
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[derive(Clone, Copy, Default, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
@@ -259,6 +260,7 @@ pub struct GpuEntity {
     // Info about mesh morph targets
     pub morph_targets_info: MorphTargetsInfo,
     pub morph_targets_weights: [f32; 8],
+    //
     pub padding: u32,
     // The index/id of this entity's material in the material buffer.
     pub material: Id<GpuMaterial>,
@@ -272,6 +274,9 @@ pub struct GpuEntity {
     pub scale: Vec4,
     // The local rotation of this entity
     pub rotation: Quat,
+    // A joint inverse-bind-matrix
+    // TODO: restructure the buffers so we don't need this
+    pub inverse_bind_matrix: Mat4,
 }
 
 impl Default for GpuEntity {
@@ -289,6 +294,7 @@ impl Default for GpuEntity {
             rotation: Quat::IDENTITY,
             visible: 1,
             parent: Id::NONE,
+            inverse_bind_matrix: Mat4::IDENTITY,
         }
     }
 }
@@ -343,7 +349,8 @@ impl GpuEntity {
 
     /// Return the `GpuVertex` at the given index.
     ///
-    /// This takes into consideration any morph targets the base mesh may reference.
+    /// This takes into consideration any morph targets the base mesh may
+    /// reference.
     pub fn get_vertex(&self, vertex_index: u32, vertices: &[GpuVertex]) -> GpuVertex {
         let index = vertex_index as usize;
         let mut vertex = vertices[index];

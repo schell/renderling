@@ -426,11 +426,7 @@ mod test {
 
         // we should see two colored cubes again
         let img = r.render_image().unwrap();
-        img_diff::assert_eq(
-            "cmy_cube_visible_before_again.png",
-            img_before,
-            img,
-        );
+        img_diff::assert_eq("cmy_cube_visible_before_again.png", img_before, img);
     }
 
     #[test]
@@ -694,7 +690,6 @@ mod test {
 
     #[test]
     fn gpu_scene_sanity2() {
-
         let mut r = Renderling::headless(100, 100)
             .unwrap()
             .with_background_color(Vec3::splat(0.0).extend(1.0));
@@ -788,8 +783,14 @@ mod test {
             ],
             draws
         );
-        let constants: GpuConstants =
-            read_buffer(r.get_device(), r.get_queue(), &scene.constants.buffer(), 0, 1).unwrap()[0];
+        let constants: GpuConstants = read_buffer(
+            r.get_device(),
+            r.get_queue(),
+            &scene.constants.buffer(),
+            0,
+            1,
+        )
+        .unwrap()[0];
         assert_eq!(UVec2::splat(256), constants.atlas_size);
 
         let materials = scene

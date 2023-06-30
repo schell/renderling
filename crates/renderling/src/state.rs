@@ -168,7 +168,11 @@ impl Frame {
 
         queue.submit(std::iter::once(encoder.finish()));
 
-        CopiedTextureBuffer { dimensions, buffer, format: texture.format() }
+        CopiedTextureBuffer {
+            dimensions,
+            buffer,
+            format: texture.format(),
+        }
     }
 
     /// If self is `TargetFrame::Surface` this presents the surface frame.

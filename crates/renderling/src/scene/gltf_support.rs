@@ -145,20 +145,14 @@ impl From<gltf::mesh::Bounds<[f32; 3]>> for GltfBoundingBox {
     }
 }
 
-#[derive(Clone, Copy)]
-pub enum NodeType {
-    Camera,
-    Light,
-    Mesh,
-    Other
-}
-
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct GltfNode {
     entity_id: Id<GpuEntity>,
     // Contains an index into the GltfLoader.cameras, lights or meshes fields.
-    gltf_index: Option<usize>,
-    node_type: NodeType,
+    gltf_camera_index: Option<usize>,
+    gltf_light_index: Option<usize>,
+    gltf_mesh_index: Option<usize>,
+    gltf_skin_index: Option<usize>,
     child_ids: Vec<Id<GpuEntity>>,
 }
 
@@ -261,7 +255,7 @@ impl GltfLoader {
             // We don't call GltfLoader::load_node here because that function will
             // also load any children of this node, which will lead to doubles when
             // we encounter those children in this loop.
-            let _ = loader.load_node(node, builder)?;
+            let _ = loader.load_node(node, builder, &buffers)?;
         }
 
         log::debug!("adding animations");
@@ -804,35 +798,32 @@ impl GltfLoader {
         log::trace!("  rotation: {rotation:?}");
         log::trace!("  scale: {scale:?}");
 
+        let mut gltf_node = GltfNode::default();
+
+        if let Some(camera) = node.camera() {
+            log::trace!("  is camera");
+            gltf_node.gltf_camera_index = Some(camera.index());
+        }
+        if let Some(mesh) = node.mesh() {
+            log::trace!("  is mesh");
+            gltf_node.gltf_mesh_index = Some(mesh.index());
+        }
+        if let Some(light) = node.light() {
+            log::trace!("  is light");
+            gltf_node.gltf_light_index = Some(light.index());
+        }
+        if let Some(skin) = node.skin() {
+            log::trace!("  is skin");
+            gltf_node.gltf_skin_index = Some(skin.index());
+        }
+
         let entity = builder
             .new_entity()
             .with_position(position)
             .with_rotation(rotation)
             .with_scale(scale)
             .build();
-
-        let mut gltf_node = GltfNode {
-            entity_id: entity.id,
-            gltf_index: None,
-            node_type: NodeType::Other,
-            child_ids: vec![],
-        };
-        if let Some(camera) = node.camera() {
-            log::trace!("  is camera");
-            gltf_node.gltf_index = Some(camera.index());
-            gltf_node.node_type = NodeType::Camera;
-        } else if let Some(mesh) = node.mesh() {
-            log::trace!("  is mesh");
-            gltf_node.gltf_index = Some(mesh.index());
-            gltf_node.node_type = NodeType::Mesh;
-        } else if let Some(light) = node.light() {
-            log::trace!("  is light");
-            gltf_node.gltf_index = Some(light.index());
-            gltf_node.node_type = NodeType::Mesh;
-        } else {
-            log::trace!("  is other");
-        }
-
+        gltf_node.entity_id = entity.id;
         let _ = self.nodes.insert(index, name, gltf_node);
 
         Ok(entity.id)
@@ -842,15 +833,20 @@ impl GltfLoader {
         &mut self,
         node: gltf::Node<'_>,
         builder: &mut SceneBuilder,
+        buffers: &[gltf::buffer::Data],
     ) -> Result<(), GltfLoaderError> {
         let index = node.index();
         let name = node.name().map(String::from);
         log::trace!("fleshing out node {index} {name:?}");
         let gltf_node = self.nodes.get_mut(node.index()).unwrap();
         let (position, rotation, _scale) = {
-            let entity = builder.entities.get_mut(gltf_node.entity_id.index()).unwrap();
+            let entity = builder
+                .entities
+                .get_mut(gltf_node.entity_id.index())
+                .unwrap();
             (entity.position, entity.rotation, entity.scale)
         };
+
         if let Some(camera) = node.camera() {
             let projection = match camera.projection() {
                 gltf::camera::Projection::Orthographic(o) => Mat4::orthographic_rh(
@@ -882,7 +878,9 @@ impl GltfLoader {
                 camera.name().map(String::from),
                 (projection, view),
             );
-        } else if let Some(mesh) = node.mesh() {
+        }
+
+        if let Some(mesh) = node.mesh() {
             let index = mesh.index();
             log::trace!("  node is mesh {index}");
             let prims = self.meshes.get(index).context(MissingMeshSnafu {
@@ -911,7 +909,10 @@ impl GltfLoader {
                     weights,
                 } = &prims[0];
 
-                let entity = builder.entities.get_mut(gltf_node.entity_id.index()).unwrap();
+                let entity = builder
+                    .entities
+                    .get_mut(gltf_node.entity_id.index())
+                    .unwrap();
                 entity.mesh_first_vertex = *vertex_start;
                 entity.mesh_vertex_count = *vertex_count;
                 entity.material = *material_id;
@@ -952,7 +953,9 @@ impl GltfLoader {
                     .collect::<Vec<_>>()
             };
             gltf_node.child_ids = children;
-        } else if let Some(light) = node.light() {
+        }
+
+        if let Some(light) = node.light() {
             let color = Vec3::from(light.color()).extend(1.0);
             let direction = Mat4::from_quat(rotation).transform_vector3(Vec3::NEG_Z);
             let intensity = light.intensity();
@@ -989,6 +992,24 @@ impl GltfLoader {
                 gltf_light_intensity_units(light.kind())
             );
             let _ = self.lights.insert(light.index(), None, gpu_light);
+        }
+
+        if let Some(skin) = node.skin() {
+            log::trace!("  node is a skin");
+            if let Some(matrices) = skin
+                .reader(|buffer| Some(&buffers[buffer.index()]))
+                .read_inverse_bind_matrices()
+            {
+                for (matrix, joint_node) in matrices.zip(skin.joints()) {
+                    let index = joint_node.index();
+                    let name = joint_node.name().map(String::from);
+                    let gltf_node = self.nodes.get(index).unwrap();
+                    let id = gltf_node.entity_id;
+                    log::trace!("    with joint {index} {name:?} {id:?}");
+                    let entity = builder.entities.get_mut(id.index()).unwrap();
+                    entity.inverse_bind_matrix = Mat4::from_cols_array_2d(&matrix);
+                }
+            }
         }
 
         Ok(())

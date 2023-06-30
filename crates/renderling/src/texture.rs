@@ -397,7 +397,11 @@ impl Texture {
         );
         queue.submit(std::iter::once(encoder.finish()));
 
-        CopiedTextureBuffer { dimensions, buffer, format: self.texture.format() }
+        CopiedTextureBuffer {
+            dimensions,
+            buffer,
+            format: self.texture.format(),
+        }
     }
 }
 
@@ -506,8 +510,8 @@ impl CopiedTextureBuffer {
 
     /// Convert the post render buffer into an RgbaImage.
     ///
-    /// Ensures that the pixels are in a linear color space by applying the linear transfer
-    /// if the texture this buffer was copied from was sRGB.
+    /// Ensures that the pixels are in a linear color space by applying the
+    /// linear transfer if the texture this buffer was copied from was sRGB.
     pub fn into_rgba(self, device: &wgpu::Device) -> Result<image::RgbaImage, TextureError> {
         let format = self.format;
         let mut img_buffer = self.into_image::<image::Rgba<u8>>(device)?.into_rgba8();

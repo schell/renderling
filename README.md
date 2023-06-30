@@ -18,7 +18,8 @@ and lots of lighting effects.
 ## General Aspirations
 
 - Very fast loading times for GLTF files
-- Supports very large scenes
+- Support for very large scenes
+- Support for many lights
 
 ![renderling pbr](test_img/pbr_point_lights_metallic_roughness.png)
 

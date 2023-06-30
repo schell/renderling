@@ -5,8 +5,8 @@ use std::sync::Arc;
 use renderling::node::FrameTextureView;
 use renderling::{graph::IsGraphNode, Device, Read, RenderTarget};
 use renderling::{
-    FontArc, Frame, GlyphCache, Id, OwnedSection, OwnedText, Queue, Renderling,
-    UiDrawObject, UiDrawObjectBuilder, UiMode, UiScene, UiVertex, WgpuStateError, Write,
+    FontArc, Frame, GlyphCache, Id, OwnedSection, OwnedText, Queue, Renderling, UiDrawObject,
+    UiDrawObjectBuilder, UiMode, UiScene, UiVertex, WgpuStateError, Write,
 };
 use renderling::{UiRenderPipeline, UiSceneError};
 
@@ -492,17 +492,20 @@ impl Gpui {
         Rectangle::new()
     }
 
-    /// Create a new default Text with the first font (added with [`Gpui::add_font`]) pre-selected.
+    /// Create a new default Text with the first font (added with
+    /// [`Gpui::add_font`]) pre-selected.
     pub fn new_text(&self) -> Text {
         Text::new(&self.get_fonts()[0])
     }
 
-    /// Create a new default [`Button`] with the first font (added with [`Gpui::add_font`]) pre-selected.
+    /// Create a new default [`Button`] with the first font (added with
+    /// [`Gpui::add_font`]) pre-selected.
     pub fn new_button(&self) -> Button {
         Button::new(&self.get_fonts()[0])
     }
 
-    /// Create a new default [`Dropdown`] with the first font (added with [`Gpui::add_font`]) pre-selected.
+    /// Create a new default [`Dropdown`] with the first font (added with
+    /// [`Gpui::add_font`]) pre-selected.
     pub fn new_dropdown<T: Clone + PartialEq>(&self) -> Dropdown<T> {
         let fonts = self.get_fonts();
         Dropdown::new(&fonts[0], &fonts[1])
