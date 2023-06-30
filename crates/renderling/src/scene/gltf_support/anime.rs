@@ -574,8 +574,7 @@ impl GltfAnimation {
                 .context(MissingNodeSnafu {
                     index: tween.target_node_index,
                 })?
-                .as_entity()
-                .context(ExpectedEntitySnafu)?;
+                .entity_id;
             tweens.push((id, prop));
         }
 

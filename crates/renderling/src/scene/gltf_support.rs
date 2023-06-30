@@ -145,30 +145,21 @@ impl From<gltf::mesh::Bounds<[f32; 3]>> for GltfBoundingBox {
     }
 }
 
-#[derive(Clone)]
-pub enum GltfNode {
-    // Contains an index into the GltfLoader.cameras field.
-    Camera(usize),
-    // Contains an index into the GltfLoader.lights field.
-    Light(usize),
-    // Contains the id of the entity and the ids of its children.
-    Mesh(Id<GpuEntity>, Vec<Id<GpuEntity>>),
-    // Contains the id of the entity.
-    Container(Id<GpuEntity>),
+#[derive(Clone, Copy)]
+pub enum NodeType {
+    Camera,
+    Light,
+    Mesh,
+    Other
 }
 
-impl GltfNode {
-    /// Attempt to return this node's entity id.
-    ///
-    /// Cameras and lights are not represented by entities in a renderling
-    /// scene and so nodes of those types will return `None`.
-    pub fn as_entity(&self) -> Option<Id<GpuEntity>> {
-        match self {
-            GltfNode::Mesh(id, _) => Some(*id),
-            GltfNode::Container(id) => Some(*id),
-            _ => None,
-        }
-    }
+#[derive(Clone)]
+pub struct GltfNode {
+    entity_id: Id<GpuEntity>,
+    // Contains an index into the GltfLoader.cameras, lights or meshes fields.
+    gltf_index: Option<usize>,
+    node_type: NodeType,
+    child_ids: Vec<Id<GpuEntity>>,
 }
 
 #[derive(Clone)]
@@ -211,6 +202,39 @@ impl GltfLoader {
         images: Vec<gltf::image::Data>,
     ) -> Result<GltfLoader, GltfLoaderError> {
         let mut loader = GltfLoader::default();
+
+        log::trace!("node hierarchy:");
+        for node in document.nodes() {
+            // This associates the node with a GpuEntity and transform, which
+            // we need in order to load meshes, because mesh vertices may reference
+            // GpuEntity ids in the 'joints' field.
+            let _ = loader.load_shallow_node(node, builder)?;
+        }
+        for node in document.nodes() {
+            let index = node.index();
+            let name = node.name().map(String::from);
+            // UNWRAP: safe because we already created and stored all the nodes
+            let parent_id = loader.nodes.get(index).unwrap().entity_id;
+            log::trace!("node {index} {name:?}");
+            let mut printed = false;
+            for child in node.children() {
+                let child_index = child.index();
+                let child_name = child.name().map(String::from);
+                if index == child_index {
+                    continue;
+                }
+                if !printed {
+                    printed = true;
+                    log::trace!("contains children:");
+                }
+                log::trace!("  node {child_index} {child_name:?}");
+                // UNWRAP: safe because we already created and stored all the nodes
+                let child_id = loader.nodes.get(child_index).unwrap().entity_id;
+                let child_entity = builder.entities.get_mut(child_id.index()).unwrap();
+                child_entity.parent = parent_id;
+            }
+        }
+
         if !builder.materials.is_empty() {
             loader.default_material = Id::new(0);
         }
@@ -233,12 +257,11 @@ impl GltfLoader {
             loader.load_mesh(mesh, builder, &document, &buffers)?;
         }
 
-        log::debug!("adding nodes");
         for node in document.nodes() {
             // We don't call GltfLoader::load_node here because that function will
             // also load any children of this node, which will lead to doubles when
             // we encounter those children in this loop.
-            let _ = loader.node_at(node.index(), builder, &document)?;
+            let _ = loader.load_node(node, builder)?;
         }
 
         log::debug!("adding animations");
@@ -586,16 +609,20 @@ impl GltfLoader {
             let joints = reader
                 .read_joints(0)
                 .map(|joints| {
-                    let joints: Box<dyn Iterator<Item = [u32; 4]>> = Box::new(
-                        joints
-                            .into_u16()
-                            .map(|[a, b, c, d]| [a as u32, b as u32, c as u32, d as u32]),
-                    );
+                    let joints: Box<dyn Iterator<Item = [Id<GpuEntity>; 4]>> =
+                        Box::new(joints.into_u16().map(|[a, b, c, d]| {
+                            log::trace!("    resolving joints: [{a}, {b}, {c}, {d}]");
+                            let a_id = self.nodes.get(a as usize).unwrap().entity_id;
+                            let b_id = self.nodes.get(b as usize).unwrap().entity_id;
+                            let c_id = self.nodes.get(c as usize).unwrap().entity_id;
+                            let d_id = self.nodes.get(d as usize).unwrap().entity_id;
+                            [a_id, b_id, c_id, d_id]
+                        }));
                     joints
                 })
-                .unwrap_or_else(|| Box::new(std::iter::repeat([0u32, 0, 0, 0])));
+                .unwrap_or_else(|| Box::new(std::iter::repeat([Id::NONE; 4])));
 
-            let weights = reader
+            let joint_weights = reader
                 .read_weights(0)
                 .map(|weights| {
                     let weights: Box<dyn Iterator<Item = [f32; 4]>> = Box::new(weights.into_f32());
@@ -605,7 +632,7 @@ impl GltfLoader {
 
             let vertices = positions
                 .iter()
-                .zip(colors.zip(uvs.zip(normals.zip(tangents.zip(joints.zip(weights))))))
+                .zip(colors.zip(uvs.zip(normals.zip(tangents.zip(joints.zip(joint_weights))))))
                 .enumerate()
                 .map(
                     |(i, (position, (color, (uv, (normal, (tangent, (joints, weights)))))))| {
@@ -719,12 +746,19 @@ impl GltfLoader {
                 (vertices.into_iter().map(|(v, _)| v).collect(), vec![])
             };
 
+            // Here we add the morph targets as contiguous meshlets occurring directly after
+            // the original. This is because the GpuEntity has an array of 8 possible morph
+            // target weights, where each weight's index in the array maps to
+            // this contiguous meshlet. See GpuEntity::get_vertex
+            // for that indexing operation.
             let (vertex_start, vertex_count) = builder.add_meshlet(original_meshlet);
             for morph_target_meshlet in morph_target_meshlets.into_iter() {
                 let _ = builder.add_meshlet(morph_target_meshlet);
             }
             let weights = mesh.weights().map(|ws| ws.to_vec()).unwrap_or_default();
-            log::trace!("    weights:");
+            if !weights.is_empty() {
+                log::trace!("    weights:");
+            }
             for (i, w) in weights.iter().enumerate() {
                 log::trace!("      {i}: {w}");
             }
@@ -753,34 +787,15 @@ impl GltfLoader {
         Ok(())
     }
 
-    fn node_at(
-        &mut self,
-        index: usize,
-        builder: &mut SceneBuilder,
-        document: &gltf::Document,
-    ) -> Result<GltfNode, GltfLoaderError> {
-        if let Some(node) = self.nodes.get(index) {
-            Ok(node.clone())
-        } else {
-            let node = document
-                .nodes()
-                .find(|n| n.index() == index)
-                .context(MissingNodeSnafu { index })?;
-            self.load_node(node, builder, document)
-        }
-    }
-
-    fn load_node(
+    /// Load a node, setting its transform and type.
+    fn load_shallow_node(
         &mut self,
         node: gltf::Node<'_>,
         builder: &mut SceneBuilder,
-        document: &gltf::Document,
-    ) -> Result<GltfNode, GltfLoaderError> {
-        log::trace!(
-            "loading node {} {:?}",
-            node.index(),
-            node.name().map(String::from)
-        );
+    ) -> Result<Id<GpuEntity>, GltfLoaderError> {
+        let index = node.index();
+        let name = node.name().map(String::from);
+        log::trace!("loading node {index} {name:?}",);
         let (position, rotation, scale) = node.transform().decomposed();
         let position = Vec3::from(position);
         let rotation = Quat::from_array(rotation);
@@ -789,8 +804,54 @@ impl GltfLoader {
         log::trace!("  rotation: {rotation:?}");
         log::trace!("  scale: {scale:?}");
 
-        let gltf_node = if let Some(camera) = node.camera() {
-            log::trace!("  node is a camera");
+        let entity = builder
+            .new_entity()
+            .with_position(position)
+            .with_rotation(rotation)
+            .with_scale(scale)
+            .build();
+
+        let mut gltf_node = GltfNode {
+            entity_id: entity.id,
+            gltf_index: None,
+            node_type: NodeType::Other,
+            child_ids: vec![],
+        };
+        if let Some(camera) = node.camera() {
+            log::trace!("  is camera");
+            gltf_node.gltf_index = Some(camera.index());
+            gltf_node.node_type = NodeType::Camera;
+        } else if let Some(mesh) = node.mesh() {
+            log::trace!("  is mesh");
+            gltf_node.gltf_index = Some(mesh.index());
+            gltf_node.node_type = NodeType::Mesh;
+        } else if let Some(light) = node.light() {
+            log::trace!("  is light");
+            gltf_node.gltf_index = Some(light.index());
+            gltf_node.node_type = NodeType::Mesh;
+        } else {
+            log::trace!("  is other");
+        }
+
+        let _ = self.nodes.insert(index, name, gltf_node);
+
+        Ok(entity.id)
+    }
+
+    fn load_node(
+        &mut self,
+        node: gltf::Node<'_>,
+        builder: &mut SceneBuilder,
+    ) -> Result<(), GltfLoaderError> {
+        let index = node.index();
+        let name = node.name().map(String::from);
+        log::trace!("fleshing out node {index} {name:?}");
+        let gltf_node = self.nodes.get_mut(node.index()).unwrap();
+        let (position, rotation, _scale) = {
+            let entity = builder.entities.get_mut(gltf_node.entity_id.index()).unwrap();
+            (entity.position, entity.rotation, entity.scale)
+        };
+        if let Some(camera) = node.camera() {
             let projection = match camera.projection() {
                 gltf::camera::Projection::Orthographic(o) => Mat4::orthographic_rh(
                     -o.xmag(),
@@ -821,8 +882,6 @@ impl GltfLoader {
                 camera.name().map(String::from),
                 (projection, view),
             );
-
-            GltfNode::Camera(camera.index())
         } else if let Some(mesh) = node.mesh() {
             let index = mesh.index();
             log::trace!("  node is mesh {index}");
@@ -841,12 +900,7 @@ impl GltfLoader {
                     log::trace!("    {i}: {w}");
                 }
             }
-            let parent = builder
-                .new_entity()
-                .with_position(position)
-                .with_rotation(rotation)
-                .with_scale(scale);
-            let (parent, children) = if prims.len() == 1 {
+            let children = if prims.len() == 1 {
                 log::trace!("    with only 1 primitive, so no children needed");
                 let GltfMeshPrim {
                     vertex_start,
@@ -856,23 +910,17 @@ impl GltfLoader {
                     morph_targets_info,
                     weights,
                 } = &prims[0];
-                (
-                    {
-                        parent
-                            .with_starting_vertex_and_count(*vertex_start, *vertex_count)
-                            .with_material(*material_id)
-                            .with_morph_targets_info(*morph_targets_info)
-                            .with_weights(weights.clone())
-                            .build()
-                            .id
-                    },
-                    vec![],
-                )
+
+                let entity = builder.entities.get_mut(gltf_node.entity_id.index()).unwrap();
+                entity.mesh_first_vertex = *vertex_start;
+                entity.mesh_vertex_count = *vertex_count;
+                entity.material = *material_id;
+                entity.morph_targets_info = *morph_targets_info;
+                entity.set_morph_target_weights(weights.iter().copied());
+                vec![]
             } else {
-                let parent = parent.build().id;
-                log::trace!("    with {parent:?}");
-                log::trace!("    with {} child primitives", prims.len());
-                let children = prims
+                log::trace!("    with {} child primitives:", prims.len());
+                prims
                     .iter()
                     .map(
                         |GltfMeshPrim {
@@ -889,7 +937,7 @@ impl GltfLoader {
                                 .with_material(*material_id)
                                 .with_morph_targets_info(*morph_targets_info)
                                 .with_weights(weights.clone())
-                                .with_parent(parent)
+                                .with_parent(gltf_node.entity_id)
                                 .build()
                                 .id;
                             log::trace!("      child {child:?}");
@@ -901,10 +949,9 @@ impl GltfLoader {
                             child
                         },
                     )
-                    .collect::<Vec<_>>();
-                (parent, children)
+                    .collect::<Vec<_>>()
             };
-            GltfNode::Mesh(parent, children)
+            gltf_node.child_ids = children;
         } else if let Some(light) = node.light() {
             let color = Vec3::from(light.color()).extend(1.0);
             let direction = Mat4::from_quat(rotation).transform_vector3(Vec3::NEG_Z);
@@ -918,7 +965,7 @@ impl GltfLoader {
                     .build(),
                 Kind::Point => builder
                     .new_point_light()
-                    .with_position(position)
+                    .with_position(position.xyz())
                     .with_color(color)
                     .with_intensity(intensity)
                     .build(),
@@ -927,7 +974,7 @@ impl GltfLoader {
                     outer_cone_angle,
                 } => builder
                     .new_spot_light()
-                    .with_position(position)
+                    .with_position(position.xyz())
                     .with_direction(direction)
                     .with_color(color)
                     .with_intensity(intensity)
@@ -942,54 +989,9 @@ impl GltfLoader {
                 gltf_light_intensity_units(light.kind())
             );
             let _ = self.lights.insert(light.index(), None, gpu_light);
-            GltfNode::Light(light.index())
-        } else {
-            // this node is just a parent/container of other nodes
-            log::trace!("  node is just a container (or empty)");
-            let entity = builder
-                .new_entity()
-                .with_position(position)
-                .with_rotation(rotation)
-                .with_scale(scale)
-                .build();
-            GltfNode::Container(entity.id)
-        };
-
-        // Insert this node before we traverse into its children.
-        let _ = self.nodes.insert(
-            node.index(),
-            node.name().map(String::from),
-            gltf_node.clone(),
-        );
-
-        for child in node.children() {
-            if child.index() == node.index() {
-                continue;
-            }
-            log::trace!(
-                "    current node {} {:?} contains child node {} {:?}",
-                node.index(),
-                node.name(),
-                child.index(),
-                child.name()
-            );
-            let child_node = self.node_at(child.index(), builder, document)?;
-            let ids = child_node.as_entity().and_then(|child| {
-                let parent = gltf_node.as_entity()?;
-                Some((child, parent))
-            });
-            if let Some((child_id, parent_id)) = ids {
-                let child_entity = builder
-                    .entities
-                    .get_mut(child_id.index())
-                    .context(MissingEntitySnafu { id: child_id })?;
-                child_entity.parent = parent_id;
-            } else {
-                log::trace!("    but either the child or itself is not an entity");
-            }
         }
 
-        Ok(gltf_node)
+        Ok(())
     }
 
     pub fn load_animation(
@@ -1241,8 +1243,7 @@ mod test {
             .get_by_name("Sphere")
             .next()
             .unwrap()
-            .as_entity()
-            .unwrap();
+            .entity_id;
         {
             // move the sphere over so we can see both models
             let brick_sphere = builder.entities.get_mut(brick_sphere_id.index()).unwrap();
@@ -1255,8 +1256,7 @@ mod test {
             .get_by_name("marble_bust_01")
             .next()
             .unwrap()
-            .as_entity()
-            .unwrap();
+            .entity_id;
         {
             // move the bust over too
             let bust = builder.entities.get_mut(bust_id.index()).unwrap();
@@ -1289,7 +1289,7 @@ mod test {
         let loader = builder
             .gltf_load("../../gltf/animated_triangle.gltf")
             .unwrap();
-        let tri_id = loader.nodes.get(0).unwrap().as_entity().unwrap();
+        let tri_id = loader.nodes.get(0).unwrap().entity_id;
         {
             let entity = builder.entities.get_mut(tri_id.index()).unwrap();
             entity.material = default_material;

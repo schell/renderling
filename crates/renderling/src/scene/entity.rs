@@ -1,5 +1,4 @@
 //! Entity builder.
-
 use glam::{Quat, Vec3};
 use renderling_shader::scene::{GpuEntity, GpuMaterial, GpuVertex, Id, MorphTargetsInfo};
 
