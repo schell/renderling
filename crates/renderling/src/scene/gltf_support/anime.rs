@@ -547,7 +547,9 @@ pub struct GltfAnimation {
     pub tweens: Vec<Tween>,
     // A time to use as the current amount of seconds elapsed in the running
     // of this animation.
-    pub stored_timestamp: f32
+    pub stored_timestamp: f32,
+    // The name of this animation, if any.
+    pub name: Option<String>
 }
 
 impl GltfAnimation {

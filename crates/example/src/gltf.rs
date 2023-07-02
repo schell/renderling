@@ -284,7 +284,7 @@ impl App {
                 animation.stored_timestamp += dt_secs;
                 if animation.stored_timestamp > animation_len {
                     //let name = loader.animations.get_name(index).to_owned();
-                    log::trace!("animation {index} is starting looping");
+                    log::trace!("animation {index} {:?} has looped", animation.name);
                 }
                 let time = animation.stored_timestamp % animation.length_in_seconds();
                 for (id, tween_prop) in animation.get_properties_at_time(time).unwrap() {

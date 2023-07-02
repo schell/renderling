@@ -1036,6 +1036,7 @@ impl GltfLoader {
         let name = animation.name().map(String::from);
         log::trace!("loading animation {index} {name:?}");
         let mut r_animation = GltfAnimation::default();
+        r_animation.name = name;
         for (i, channel) in animation.channels().enumerate() {
             log::trace!("  channel {i}");
             let reader = channel.reader(|buffer| Some(&buffers[buffer.index()]));
