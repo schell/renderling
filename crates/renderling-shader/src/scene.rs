@@ -34,7 +34,9 @@ pub struct GpuVertex {
     pub uv: Vec4,
     pub normal: Vec4,
     pub tangent: Vec4,
+    // Ids that point to this vertex's joints by indexing into the [GpuEntity] buffer
     pub joints: [Id<GpuEntity>; 4],
+    // The weights of influence that each joint has over this vertex
     pub weights: [f32; 4],
 }
 
@@ -85,6 +87,40 @@ impl GpuVertex {
     pub fn with_tangent(mut self, t: impl Into<Vec4>) -> Self {
         self.tangent = t.into();
         self
+    }
+
+    /// Return the matrix needed to bring vertices into the coordinate space of
+    /// the joint node.
+    pub fn get_joint_matrix(&self, i: usize, entities: &[GpuEntity]) -> Mat4 {
+        if i > self.joints.len() - 1 {
+            return Mat4::IDENTITY;
+        }
+        let joint_id = self.joints[i];
+        if joint_id.is_none() {
+            return Mat4::IDENTITY;
+        }
+        let entity_index = joint_id.index();
+        if entity_index > entities.len() - 1 {
+            return Mat4::IDENTITY;
+        }
+        let joint_entity = &entities[entity_index];
+        let (t, r, s) = joint_entity.get_world_transform(entities);
+        let trs = Mat4::from_scale_rotation_translation(s, r, t);
+        trs * joint_entity.inverse_bind_matrix
+    }
+
+    /// Return the result of adding all joint matrices multiplied by their
+    /// weights for the given vertex.
+    // See the [khronos gltf viewer reference](https://github.com/KhronosGroup/glTF-Sample-Viewer/blob/47a191931461a6f2e14de48d6da0f0eb6ec2d147/source/Renderer/shaders/animation.glsl#L47)
+    pub fn get_skin_matrix(&self, entities: &[GpuEntity]) -> Mat4 {
+        let mut mat = Mat4::ZERO;
+        for i in 0..self.joints.len() {
+            mat += self.weights[i] * self.get_joint_matrix(i, entities);
+        }
+        if mat == Mat4::ZERO {
+            return Mat4::IDENTITY;
+        }
+        mat
     }
 }
 
@@ -351,9 +387,11 @@ impl GpuEntity {
     ///
     /// This takes into consideration any morph targets the base mesh may
     /// reference.
-    pub fn get_vertex(&self, vertex_index: u32, vertices: &[GpuVertex]) -> GpuVertex {
+    pub fn get_vertex(&self, vertex_index: u32, entities: &[GpuEntity], vertices: &[GpuVertex]) -> GpuVertex {
         let index = vertex_index as usize;
         let mut vertex = vertices[index];
+
+        // Apply target morphing
         let targets = self.morph_targets_info.num_targets() as usize;
         let vertex_count = self.mesh_vertex_count as usize;
         for i in 1..=targets {
@@ -364,6 +402,22 @@ impl GpuEntity {
             vertex.normal += (target_weight * target.normal.xyz()).extend(0.0);
             vertex.tangent += (target_weight * target.tangent.xyz()).extend(0.0);
         }
+
+        // Apply skinning without assuming anything about the `w` components
+        let skin_matrix = vertex.get_skin_matrix(entities);
+        let position = skin_matrix.transform_point3(vertex.position.xyz());
+        vertex.position.x = position.x;
+        vertex.position.y = position.y;
+        vertex.position.z = position.z;
+        let normal = skin_matrix.transform_point3(vertex.normal.xyz());
+        vertex.normal.x = normal.x;
+        vertex.normal.y = normal.y;
+        vertex.normal.z = normal.z;
+        let tangent = skin_matrix.transform_point3(vertex.tangent.xyz());
+        vertex.tangent.x = tangent.x;
+        vertex.tangent.y = tangent.y;
+        vertex.tangent.z = tangent.z;
+
         vertex
     }
 }
@@ -436,7 +490,7 @@ pub fn main_vertex_scene(
     gl_pos: &mut Vec4,
 ) {
     let entity = entities[instance_index as usize];
-    let vertex = entity.get_vertex(vertex_index, vertices);
+    let vertex = entity.get_vertex(vertex_index, entities, vertices);
     let (position, rotation, scale) = entity.get_world_transform(entities);
     let model_matrix =
         Mat4::from_translation(position) * Mat4::from_quat(rotation) * Mat4::from_scale(scale);

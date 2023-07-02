@@ -83,6 +83,10 @@ impl<T> GltfStore<T> {
         self.dense.iter().flatten()
     }
 
+    pub fn iter_mut(&mut self) -> impl Iterator<Item = &mut T> {
+        self.dense.iter_mut().flatten()
+    }
+
     pub fn remove(&mut self, index: usize, name: Option<String>) -> Option<T> {
         if let Some(name) = name {
             if let Some(indices) = self.names.get_mut(&name) {
@@ -106,6 +110,14 @@ impl<T> GltfStore<T> {
             indices.push(index);
         }
         existing
+    }
+
+    pub fn get_name(&self, index: usize) -> Option<&String> {
+        self.names.iter().find_map(|(name, indices)| if indices.contains(&index) {
+            Some(name)
+        } else {
+            None
+        })
     }
 
     pub fn get(&self, index: usize) -> Option<&T> {
@@ -1033,6 +1045,9 @@ impl GltfLoader {
             log::trace!("    with {} keyframes", keyframes.len());
             let interpolation = channel.sampler().interpolation().into();
             log::trace!("    using {interpolation} interpolation");
+            let index = channel.target().node().index();
+            let name = channel.target().node().name();
+            log::trace!("    of node {index} {name:?}");
             let tween = Tween {
                 properties: match outputs {
                     gltf::animation::util::ReadOutputs::Translations(ts) => {
@@ -1063,12 +1078,11 @@ impl GltfLoader {
                 },
                 keyframes,
                 interpolation,
-                target_node_index: {
-                    let index = channel.target().node().index();
-                    let name = channel.target().node().name();
-                    log::trace!("    of node {index} {name:?}");
-                    index
-                },
+                target_node_index: index,
+                target_entity_id: {
+                    let node = self.nodes.get(index).context(MissingNodeSnafu{ index })?;
+                    node.entity_id
+                }
             };
             r_animation.tweens.push(tween);
         }
@@ -1330,7 +1344,7 @@ mod test {
         let num = 8;
         for i in 0..8 {
             let t = i as f32 / num as f32;
-            let transforms = anime.get_properties_at_time(&loader, t).unwrap();
+            let transforms = anime.get_properties_at_time(t).unwrap();
             let scene = r.graph.get_resource_mut::<crate::Scene>().unwrap().unwrap();
             for (id, tween_prop) in transforms.into_iter() {
                 let entity = entities.get_mut(id.index()).unwrap();

@@ -275,12 +275,19 @@ impl App {
         let now = Instant::now();
         let dt = now - self.last_frame_instant;
         self.last_frame_instant = now;
-        self.timestamp += dt.as_secs_f32();
+        let dt_secs = dt.as_secs_f32();
+        self.timestamp += dt_secs;
 
-        if let Some(loader) = self.loader.as_ref() {
-            for animation in loader.animations.iter() {
-                let time = self.timestamp % animation.length_in_seconds();
-                for (id, tween_prop) in animation.get_properties_at_time(loader, time).unwrap() {
+        if let Some(loader) = self.loader.as_mut() {
+            for (index, animation) in loader.animations.iter_mut().enumerate() {
+                let animation_len = animation.length_in_seconds();
+                animation.stored_timestamp += dt_secs;
+                if animation.stored_timestamp > animation_len {
+                    //let name = loader.animations.get_name(index).to_owned();
+                    log::trace!("animation {index} is starting looping");
+                }
+                let time = animation.stored_timestamp % animation.length_in_seconds();
+                for (id, tween_prop) in animation.get_properties_at_time(time).unwrap() {
                     let mut ent = self.entities.get_mut(id.index()).unwrap();
                     match tween_prop {
                         TweenProperty::Translation(t) => {
@@ -306,6 +313,7 @@ impl App {
                         })
                         .unwrap();
                 }
+                animation.stored_timestamp = time;
             }
         }
     }
