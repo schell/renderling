@@ -34,8 +34,9 @@ pub struct GpuVertex {
     pub uv: Vec4,
     pub normal: Vec4,
     pub tangent: Vec4,
-    // Ids that point to this vertex's joints by indexing into the [GpuEntity] buffer
-    pub joints: [Id<GpuEntity>; 4],
+    // Indices that point to this vertex's joints by indexing into an array of Id<GpuEntity>
+    // provided by the GpuEntity that is using this vertex
+    pub joints: [u32; 4],
     // The weights of influence that each joint has over this vertex
     pub weights: [f32; 4],
 }
@@ -48,7 +49,7 @@ impl Default for GpuVertex {
             uv: Vec4::splat(0.0),
             normal: Vec4::Z,
             tangent: Vec4::Y,
-            joints: [Id::NONE; 4],
+            joints: [0; 4],
             weights: [0.0; 4],
         }
     }
@@ -91,16 +92,26 @@ impl GpuVertex {
 
     /// Return the matrix needed to bring vertices into the coordinate space of
     /// the joint node.
-    pub fn get_joint_matrix(&self, i: usize, entities: &[GpuEntity]) -> Mat4 {
+    pub fn get_joint_matrix(
+        &self,
+        i: usize,
+        joint_ids: &[Id<GpuEntity>; 4],
+        entities: &[GpuEntity],
+    ) -> Mat4 {
         if i > self.joints.len() - 1 {
             return Mat4::IDENTITY;
         }
-        let joint_id = self.joints[i];
+        let joint_index = self.joints[i];
+        let joint_id = if joint_index as usize >= joint_ids.len() {
+            Id::NONE
+        } else {
+            joint_ids[joint_index as usize]
+        };
         if joint_id.is_none() {
             return Mat4::IDENTITY;
         }
         let entity_index = joint_id.index();
-        if entity_index > entities.len() - 1 {
+        if entity_index >= entities.len() {
             return Mat4::IDENTITY;
         }
         let joint_entity = &entities[entity_index];
@@ -112,10 +123,10 @@ impl GpuVertex {
     /// Return the result of adding all joint matrices multiplied by their
     /// weights for the given vertex.
     // See the [khronos gltf viewer reference](https://github.com/KhronosGroup/glTF-Sample-Viewer/blob/47a191931461a6f2e14de48d6da0f0eb6ec2d147/source/Renderer/shaders/animation.glsl#L47)
-    pub fn get_skin_matrix(&self, entities: &[GpuEntity]) -> Mat4 {
+    pub fn get_skin_matrix(&self, joint_ids: &[Id<GpuEntity>; 4], entities: &[GpuEntity]) -> Mat4 {
         let mut mat = Mat4::ZERO;
         for i in 0..self.joints.len() {
-            mat += self.weights[i] * self.get_joint_matrix(i, entities);
+            mat += self.weights[i] * self.get_joint_matrix(i, joint_ids, entities);
         }
         if mat == Mat4::ZERO {
             return Mat4::IDENTITY;
@@ -310,6 +321,7 @@ pub struct GpuEntity {
     pub scale: Vec4,
     // The local rotation of this entity
     pub rotation: Quat,
+    pub skin_joint_ids: [Id<GpuEntity>; 4],
     // A joint inverse-bind-matrix
     // TODO: restructure the buffers so we don't need this
     pub inverse_bind_matrix: Mat4,
@@ -330,6 +342,7 @@ impl Default for GpuEntity {
             rotation: Quat::IDENTITY,
             visible: 1,
             parent: Id::NONE,
+            skin_joint_ids: [Id::NONE; 4],
             inverse_bind_matrix: Mat4::IDENTITY,
         }
     }
@@ -386,8 +399,13 @@ impl GpuEntity {
     /// Return the `GpuVertex` at the given index.
     ///
     /// This takes into consideration any morph targets the base mesh may
-    /// reference.
-    pub fn get_vertex(&self, vertex_index: u32, entities: &[GpuEntity], vertices: &[GpuVertex]) -> GpuVertex {
+    /// reference as well as any joints.
+    pub fn get_vertex(
+        &self,
+        vertex_index: u32,
+        entities: &[GpuEntity],
+        vertices: &[GpuVertex],
+    ) -> GpuVertex {
         let index = vertex_index as usize;
         let mut vertex = vertices[index];
 
@@ -404,7 +422,7 @@ impl GpuEntity {
         }
 
         // Apply skinning without assuming anything about the `w` components
-        let skin_matrix = vertex.get_skin_matrix(entities);
+        let skin_matrix = vertex.get_skin_matrix(&self.skin_joint_ids, entities);
         let position = skin_matrix.transform_point3(vertex.position.xyz());
         vertex.position.x = position.x;
         vertex.position.y = position.y;
@@ -419,6 +437,20 @@ impl GpuEntity {
         vertex.tangent.z = tangent.z;
 
         vertex
+    }
+
+    #[cfg(not(target_arch = "spirv"))]
+    /// Return all the vertices of this entity.
+    ///
+    /// This takes into consideration any morph targets the base mesh may
+    /// reference as well as any joints.
+    pub fn get_vertices(&self, entities: &[GpuEntity], vertices: &[GpuVertex]) -> Vec<GpuVertex> {
+        let mut mesh_vertices = vec![];
+        for vertex_index in self.mesh_first_vertex..self.mesh_first_vertex + self.mesh_vertex_count
+        {
+            mesh_vertices.push(self.get_vertex(vertex_index, entities, vertices));
+        }
+        mesh_vertices
     }
 }
 
