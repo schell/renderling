@@ -134,6 +134,7 @@ impl App {
         self.last_cursor_position = None;
 
         let mut builder = r.new_scene().with_debug_channel(DebugChannel::None);
+        let cross_loader = builder.gltf_load("/Users/schell/code/renderling/gltf/origin_cross.glb").unwrap();
         let loader = match builder.gltf_load(&file) {
             Ok(loader) => loader,
             Err(msg) => {
@@ -146,9 +147,18 @@ impl App {
         // find the bounding box of the model so we can display it correctly
         let mut min = Vec3::splat(f32::INFINITY);
         let mut max = Vec3::splat(f32::NEG_INFINITY);
-        for primitive in loader.meshes.iter().flat_map(|meshes| meshes.iter()) {
-            min = min.min(primitive.bounding_box.min);
-            max = max.max(primitive.bounding_box.max);
+        for node in loader.nodes.iter() {
+            let entity = self.entities.get(node.entity_id.index()).unwrap();
+            let (translation, rotation, scale) = entity.get_world_transform(&self.entities);
+            let tfrm = Mat4::from_scale_rotation_translation(scale, rotation, translation);
+            if let Some(mesh_index) = node.gltf_mesh_index {
+                for primitive in loader.meshes.get(mesh_index).unwrap().iter() {
+                    let bbmin = tfrm.transform_point3(primitive.bounding_box.min);
+                    let bbmax = tfrm.transform_point3(primitive.bounding_box.max);
+                    min = min.min(bbmin);
+                    max = max.max(bbmax);
+                }
+            }
         }
 
         let halfway_point = min + ((max - min).normalize() * ((max - min).length() / 2.0));
@@ -308,6 +318,7 @@ impl App {
                         .unwrap();
                 }
                 animation.stored_timestamp = time;
+                break;
             }
         }
     }

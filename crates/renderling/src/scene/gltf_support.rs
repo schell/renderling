@@ -161,13 +161,13 @@ impl From<gltf::mesh::Bounds<[f32; 3]>> for GltfBoundingBox {
 
 #[derive(Clone, Default)]
 pub struct GltfNode {
-    entity_id: Id<GpuEntity>,
+    pub entity_id: Id<GpuEntity>,
     // Contains an index into the GltfLoader.cameras, lights or meshes fields.
-    gltf_camera_index: Option<usize>,
-    gltf_light_index: Option<usize>,
-    gltf_mesh_index: Option<usize>,
-    gltf_skin_index: Option<usize>,
-    child_ids: Vec<Id<GpuEntity>>,
+    pub gltf_camera_index: Option<usize>,
+    pub gltf_light_index: Option<usize>,
+    pub gltf_mesh_index: Option<usize>,
+    pub gltf_skin_index: Option<usize>,
+    pub child_ids: Vec<Id<GpuEntity>>,
 }
 
 #[derive(Clone)]
@@ -176,7 +176,10 @@ pub struct GltfMeshPrim {
     pub vertex_count: u32,
     pub material_id: Id<GpuMaterial>,
     pub bounding_box: GltfBoundingBox,
-    pub morph_targets_info: MorphTargetsInfo,
+    pub num_morph_targets: u32,
+    pub morph_targets_have_positions: bool,
+    pub morph_targets_have_normals: bool,
+    pub morph_targets_have_tangents: bool,
     pub weights: Vec<f32>,
 }
 
@@ -630,10 +633,7 @@ impl GltfLoader {
                 .read_weights(0)
                 .map(|weights| {
                     let weights: Box<dyn Iterator<Item = [f32; 4]>> =
-                        Box::new(weights.into_f32().map(|[a, b, c, d]| {
-                            log::trace!("    joint weights: [{a}, {b}, {c}, {d}]");
-                            [a, b, c, d]
-                        }));
+                        Box::new(weights.into_f32().map(|[a, b, c, d]| [a, b, c, d]));
                     weights
                 })
                 .unwrap_or_else(|| Box::new(std::iter::repeat([0.0, 0.0, 0.0, 0.0])));
@@ -781,14 +781,10 @@ impl GltfLoader {
                 vertex_count,
                 material_id,
                 bounding_box,
-                morph_targets_info: {
-                    let mut info = MorphTargetsInfo::default();
-                    info.set_num_targets(num_morph_targets as u8);
-                    info.set_has_positions(num_morph_targets_positions > 0);
-                    info.set_has_normals(num_morph_targets_normals > 0);
-                    info.set_has_tangents(num_morph_targets_tangents > 0);
-                    info
-                },
+                num_morph_targets: num_morph_targets as u32,
+                morph_targets_have_positions: num_morph_targets_positions > 0,
+                morph_targets_have_normals: num_morph_targets_normals > 0,
+                morph_targets_have_tangents: num_morph_targets_tangents > 0,
             });
         }
         let _ = self
@@ -918,15 +914,27 @@ impl GltfLoader {
                     vertex_count,
                     material_id,
                     bounding_box: _,
-                    morph_targets_info,
                     weights,
+                    num_morph_targets,
+                    morph_targets_have_positions,
+                    morph_targets_have_normals,
+                    morph_targets_have_tangents,
                 } = &prims[0];
 
                 let entity = builder.entities.get_mut(entity_id.index()).unwrap();
                 entity.mesh_first_vertex = *vertex_start;
                 entity.mesh_vertex_count = *vertex_count;
                 entity.material = *material_id;
-                entity.morph_targets_info = *morph_targets_info;
+                entity.info.set_num_morph_targets(*num_morph_targets as u8);
+                entity
+                    .info
+                    .set_morph_targets_have_positions(*morph_targets_have_positions);
+                entity
+                    .info
+                    .set_morph_targets_have_normals(*morph_targets_have_normals);
+                entity
+                    .info
+                    .set_morph_targets_have_tangents(*morph_targets_have_tangents);
                 entity.set_morph_target_weights(weights.iter().copied());
                 vec![]
             } else {
@@ -939,15 +947,21 @@ impl GltfLoader {
                              vertex_count,
                              material_id,
                              bounding_box: _,
-                             morph_targets_info,
                              weights,
+                             num_morph_targets,
+                             morph_targets_have_positions,
+                             morph_targets_have_normals,
+                             morph_targets_have_tangents,
                          }| {
                             let child = builder
                                 .new_entity()
                                 .with_starting_vertex_and_count(*vertex_start, *vertex_count)
                                 .with_material(*material_id)
-                                .with_morph_targets_info(*morph_targets_info)
-                                .with_weights(weights.clone())
+                                .with_num_morph_targets(*num_morph_targets as u8)
+                                .with_morph_targets_have_positions(*morph_targets_have_positions)
+                                .with_morph_targets_have_normals(*morph_targets_have_normals)
+                                .with_morph_targets_have_tangents(*morph_targets_have_tangents)
+                                .with_morph_target_weights(weights.clone())
                                 .with_parent(entity_id)
                                 .build()
                                 .id;
@@ -955,7 +969,7 @@ impl GltfLoader {
                             log::trace!("        weights {weights:?}");
                             log::trace!(
                                 "        num_morph_targets {}",
-                                morph_targets_info.num_targets()
+                                num_morph_targets
                             );
                             child
                         },
@@ -1010,20 +1024,33 @@ impl GltfLoader {
                 .reader(|buffer| Some(&buffers[buffer.index()]))
                 .read_inverse_bind_matrices()
             {
-                // TODO: Support more than 4 joints in a skin
-                let mut joint_ids = [Id::NONE; 4];
-                for (i, (matrix, joint_node)) in matrices.zip(skin.joints()).take(4).enumerate() {
+                let mut joint_ids = vec![];
+                for (matrix, joint_node) in matrices.zip(skin.joints()) {
                     let index = joint_node.index();
                     let name = joint_node.name().map(String::from);
                     let gltf_node = self.nodes.get(index).unwrap();
                     let id = gltf_node.entity_id;
-                    joint_ids[i] = id;
+                    joint_ids.push(id);
                     log::trace!("    with joint {index} {name:?} {id:?}");
                     let joint_entity = builder.entities.get_mut(id.index()).unwrap();
                     joint_entity.inverse_bind_matrix = Mat4::from_cols_array_2d(&matrix);
                 }
-                let entity = builder.entities.get_mut(entity_id.index()).unwrap();
-                entity.skin_joint_ids = joint_ids;
+                let skin_entity = builder.entities.get_mut(entity_id.index()).unwrap();
+                skin_entity.info.set_is_skin(true);
+                assert!(
+                    joint_ids.len() <= skin_entity.skin_joint_ids.len(),
+                    "renderling only supports {} joints for skinning, which is less than the \
+                     required {} for this model",
+                    skin_entity.skin_joint_ids.len(),
+                    joint_ids.len()
+                );
+                for (i, id) in joint_ids
+                    .into_iter()
+                    .take(skin_entity.skin_joint_ids.len())
+                    .enumerate()
+                {
+                    skin_entity.skin_joint_ids[i] = id;
+                }
             }
         }
 

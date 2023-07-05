@@ -1,6 +1,6 @@
 //! Entity builder.
 use glam::{Quat, Vec3};
-use renderling_shader::scene::{GpuEntity, GpuMaterial, GpuVertex, Id, MorphTargetsInfo};
+use renderling_shader::scene::{GpuEntity, GpuMaterial, GpuVertex, Id, GpuEntityInfo};
 
 use crate::SceneBuilder;
 
@@ -12,6 +12,11 @@ pub struct EntityBuilder<'a> {
 impl<'a> EntityBuilder<'a> {
     pub fn with_visible(mut self, is_visible: bool) -> Self {
         self.entity.visible = if is_visible { 1 } else { 0 };
+        self
+    }
+
+    pub fn with_is_skin(mut self, is_skin: bool) -> Self {
+        self.entity.info.set_is_skin(is_skin);
         self
     }
 
@@ -28,12 +33,32 @@ impl<'a> EntityBuilder<'a> {
         self
     }
 
-    pub fn with_morph_targets_info(mut self, info: MorphTargetsInfo) -> Self {
-        self.entity.morph_targets_info = info;
+    pub fn with_info(mut self, info: GpuEntityInfo) -> Self {
+        self.entity.info = info;
         self
     }
 
-    pub fn with_weights(mut self, weights: impl IntoIterator<Item = f32>) -> Self {
+    pub fn with_num_morph_targets(mut self, num_morph_targets: u8) -> Self {
+        self.entity.info.set_num_morph_targets(num_morph_targets);
+        self
+    }
+
+    pub fn with_morph_targets_have_positions(mut self, has: bool) -> Self {
+        self.entity.info.set_morph_targets_have_positions(has);
+        self
+    }
+
+    pub fn with_morph_targets_have_normals(mut self, has: bool) -> Self {
+        self.entity.info.set_morph_targets_have_normals(has);
+        self
+    }
+
+    pub fn with_morph_targets_have_tangents(mut self, has: bool) -> Self {
+        self.entity.info.set_morph_targets_have_tangents(has);
+        self
+    }
+
+    pub fn with_morph_target_weights(mut self, weights: impl IntoIterator<Item = f32>) -> Self {
         for (i, weight) in weights.into_iter().take(8).enumerate() {
             self.entity.morph_targets_weights[i] = weight;
         }
