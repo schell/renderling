@@ -190,7 +190,7 @@ pub struct Tween {
     // The gltf "nodes" index of the target node this tween applies to
     pub target_node_index: usize,
     // The entity id of the target node this tween applies to
-    pub target_entity_id: Id<GpuEntity>
+    pub target_entity_id: Id<GpuEntity>,
 }
 
 impl Tween {
@@ -549,7 +549,7 @@ pub struct GltfAnimation {
     // of this animation.
     pub stored_timestamp: f32,
     // The name of this animation, if any.
-    pub name: Option<String>
+    pub name: Option<String>,
 }
 
 impl GltfAnimation {

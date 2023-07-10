@@ -34,8 +34,9 @@ pub struct GpuVertex {
     pub uv: Vec4,
     pub normal: Vec4,
     pub tangent: Vec4,
-    // Ids that point to this vertex's joints by indexing into the [GpuEntity] buffer
-    pub joints: [Id<GpuEntity>; 4],
+    // Indices that point to this vertex's joints by indexing into an array of Id<GpuEntity>
+    // provided by the GpuEntity that is using this vertex
+    pub joints: [u32; 4],
     // The weights of influence that each joint has over this vertex
     pub weights: [f32; 4],
 }
@@ -48,7 +49,7 @@ impl Default for GpuVertex {
             uv: Vec4::splat(0.0),
             normal: Vec4::Z,
             tangent: Vec4::Y,
-            joints: [Id::NONE; 4],
+            joints: [0; 4],
             weights: [0.0; 4],
         }
     }
@@ -91,16 +92,26 @@ impl GpuVertex {
 
     /// Return the matrix needed to bring vertices into the coordinate space of
     /// the joint node.
-    pub fn get_joint_matrix(&self, i: usize, entities: &[GpuEntity]) -> Mat4 {
-        if i > self.joints.len() - 1 {
+    pub fn get_joint_matrix(
+        &self,
+        i: usize,
+        joint_ids: &[Id<GpuEntity>; 32],
+        entities: &[GpuEntity],
+    ) -> Mat4 {
+        if i >= self.joints.len() {
             return Mat4::IDENTITY;
         }
-        let joint_id = self.joints[i];
+        let joint_index = self.joints[i];
+        let joint_id = if joint_index as usize >= joint_ids.len() {
+            Id::NONE
+        } else {
+            joint_ids[joint_index as usize]
+        };
         if joint_id.is_none() {
             return Mat4::IDENTITY;
         }
         let entity_index = joint_id.index();
-        if entity_index > entities.len() - 1 {
+        if entity_index >= entities.len() {
             return Mat4::IDENTITY;
         }
         let joint_entity = &entities[entity_index];
@@ -112,10 +123,10 @@ impl GpuVertex {
     /// Return the result of adding all joint matrices multiplied by their
     /// weights for the given vertex.
     // See the [khronos gltf viewer reference](https://github.com/KhronosGroup/glTF-Sample-Viewer/blob/47a191931461a6f2e14de48d6da0f0eb6ec2d147/source/Renderer/shaders/animation.glsl#L47)
-    pub fn get_skin_matrix(&self, entities: &[GpuEntity]) -> Mat4 {
+    pub fn get_skin_matrix(&self, joint_ids: &[Id<GpuEntity>; 32], entities: &[GpuEntity]) -> Mat4 {
         let mut mat = Mat4::ZERO;
         for i in 0..self.joints.len() {
-            mat += self.weights[i] * self.get_joint_matrix(i, entities);
+            mat += self.weights[i] * self.get_joint_matrix(i, joint_ids, entities);
         }
         if mat == Mat4::ZERO {
             return Mat4::IDENTITY;
@@ -222,38 +233,43 @@ impl Default for GpuMaterial {
     }
 }
 
-/// Provides information about what attributes are provided by a morph target.
+/// Provides information about an entity.
+///
+/// ### Provides what attributes are provided by a morph target.
 ///
 /// In `renderling` morph targets' geometry are meshlets - they are assumed to
 /// come directly after the base mesh in the `GpuVertex` buffer, that way they
 /// can be indexed from the base mesh using only the `GpuEntity` struct (through
 /// `MorphTargetsInfo::num_targets`). See [`GpuEntity::get_vertex`] for more
 /// info.
+///
+/// ### Provides info about if the entity is a skin.
 #[repr(transparent)]
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[derive(Clone, Copy, Default, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct MorphTargetsInfo(u32);
+pub struct GpuEntityInfo(pub u32);
 
-impl MorphTargetsInfo {
+impl GpuEntityInfo {
     const BITS_NUM_TARGETS: (u32, u32) = bits(0..=7);
     const BITS_HAS_POSITIONS: (u32, u32) = bits(8..=8);
     const BITS_HAS_NORMALS: (u32, u32) = bits(9..=9);
     const BITS_HAS_TANGENTS: (u32, u32) = bits(10..=10);
+    const BITS_IS_SKIN: (u32, u32) = bits(11..=11);
 
-    pub fn num_targets(&self) -> u32 {
+    pub fn num_morph_targets(&self) -> u32 {
         unpack(self.0, Self::BITS_NUM_TARGETS)
     }
 
     #[cfg(not(target_arch = "spirv"))]
-    pub fn set_num_targets(&mut self, num_targets: u8) {
+    pub fn set_num_morph_targets(&mut self, num_targets: u8) {
         pack(&mut self.0, Self::BITS_NUM_TARGETS, num_targets as u32)
     }
 
-    pub fn has_positions(&self) -> bool {
+    pub fn morph_targets_have_positions(&self) -> bool {
         unpack(self.0, Self::BITS_HAS_POSITIONS) == 1
     }
 
-    pub fn set_has_positions(&mut self, has: bool) {
+    pub fn set_morph_targets_have_positions(&mut self, has: bool) {
         pack(
             &mut self.0,
             Self::BITS_HAS_POSITIONS,
@@ -261,24 +277,32 @@ impl MorphTargetsInfo {
         )
     }
 
-    pub fn has_normals(&self) -> bool {
+    pub fn morph_targets_have_normals(&self) -> bool {
         unpack(self.0, Self::BITS_HAS_NORMALS) == 1
     }
 
-    pub fn set_has_normals(&mut self, has: bool) {
+    pub fn set_morph_targets_have_normals(&mut self, has: bool) {
         pack(&mut self.0, Self::BITS_HAS_NORMALS, if has { 1 } else { 0 })
     }
 
-    pub fn has_tangents(&self) -> bool {
+    pub fn morph_targets_have_tangents(&self) -> bool {
         unpack(self.0, Self::BITS_HAS_TANGENTS) == 1
     }
 
-    pub fn set_has_tangents(&mut self, has: bool) {
+    pub fn set_morph_targets_have_tangents(&mut self, has: bool) {
         pack(
             &mut self.0,
             Self::BITS_HAS_TANGENTS,
             if has { 1 } else { 0 },
         )
+    }
+
+    pub fn is_skin(&self) -> bool {
+        unpack(self.0, Self::BITS_IS_SKIN) == 1
+    }
+
+    pub fn set_is_skin(&mut self, is_skin: bool) {
+        pack(&mut self.0, Self::BITS_IS_SKIN, if is_skin { 1 } else { 0 })
     }
 }
 
@@ -289,14 +313,13 @@ impl MorphTargetsInfo {
 pub struct GpuEntity {
     // The id of this entity. `Id::NONE` means this entity is not in use.
     pub id: Id<GpuEntity>,
+    // Info about the entity.
+    pub info: GpuEntityInfo,
     // The index of the first vertex in this entity's mesh.
     pub mesh_first_vertex: u32,
     // The number of vertices in this entity's mesh.
     pub mesh_vertex_count: u32,
-    // Info about mesh morph targets
-    pub morph_targets_info: MorphTargetsInfo,
-    pub morph_targets_weights: [f32; 8],
-    //
+    // Nothing to see here
     pub padding: u32,
     // The index/id of this entity's material in the material buffer.
     pub material: Id<GpuMaterial>,
@@ -313,6 +336,9 @@ pub struct GpuEntity {
     // A joint inverse-bind-matrix
     // TODO: restructure the buffers so we don't need this
     pub inverse_bind_matrix: Mat4,
+    pub skin_joint_ids: [Id<GpuEntity>; 32],
+    // Morph target weights for this entity, if it has morph targets
+    pub morph_targets_weights: [f32; 8],
 }
 
 impl Default for GpuEntity {
@@ -321,7 +347,7 @@ impl Default for GpuEntity {
             id: Id::NONE,
             mesh_first_vertex: 0,
             mesh_vertex_count: 0,
-            morph_targets_info: MorphTargetsInfo::default(),
+            info: GpuEntityInfo::default(),
             morph_targets_weights: [0.0; 8],
             padding: 0,
             material: Id::NONE,
@@ -330,6 +356,7 @@ impl Default for GpuEntity {
             rotation: Quat::IDENTITY,
             visible: 1,
             parent: Id::NONE,
+            skin_joint_ids: [Id::NONE; 32],
             inverse_bind_matrix: Mat4::IDENTITY,
         }
     }
@@ -355,21 +382,22 @@ impl GpuEntity {
     /// Return the position, rotation and scale that describe this entity's
     /// transform in world space.
     pub fn get_world_transform(&self, entities: &[GpuEntity]) -> (Vec3, Quat, Vec3) {
-        let mut position = Vec3::ZERO;
-        let mut scale = Vec3::ONE;
-        let mut rotation = Quat::IDENTITY;
+        let mut mat = Mat4::IDENTITY;
         let mut id = self.id;
         loop {
             let entity = entities[id.index()];
-            position += entity.position.xyz();
-            scale *= entity.scale.xyz();
-            rotation = entity.rotation * rotation;
+            mat = Mat4::from_scale_rotation_translation(
+                entity.scale.xyz(),
+                entity.rotation,
+                entity.position.xyz(),
+            ) * mat;
             id = entity.parent;
             if id.index() >= entities.len() {
                 break;
             }
         }
-        (position, rotation, scale)
+        let (s, r, t) = mat.to_scale_rotation_translation();
+        (t, r, s)
     }
 
     #[cfg(not(target_arch = "spirv"))]
@@ -386,13 +414,13 @@ impl GpuEntity {
     /// Return the `GpuVertex` at the given index.
     ///
     /// This takes into consideration any morph targets the base mesh may
-    /// reference.
-    pub fn get_vertex(&self, vertex_index: u32, entities: &[GpuEntity], vertices: &[GpuVertex]) -> GpuVertex {
+    /// reference as well as any joints.
+    pub fn get_vertex(&self, vertex_index: u32, vertices: &[GpuVertex]) -> GpuVertex {
         let index = vertex_index as usize;
         let mut vertex = vertices[index];
 
         // Apply target morphing
-        let targets = self.morph_targets_info.num_targets() as usize;
+        let targets = self.info.num_morph_targets() as usize;
         let vertex_count = self.mesh_vertex_count as usize;
         for i in 1..=targets {
             let target_weight = self.morph_targets_weights[i - 1];
@@ -403,22 +431,21 @@ impl GpuEntity {
             vertex.tangent += (target_weight * target.tangent.xyz()).extend(0.0);
         }
 
-        // Apply skinning without assuming anything about the `w` components
-        let skin_matrix = vertex.get_skin_matrix(entities);
-        let position = skin_matrix.transform_point3(vertex.position.xyz());
-        vertex.position.x = position.x;
-        vertex.position.y = position.y;
-        vertex.position.z = position.z;
-        let normal = skin_matrix.transform_point3(vertex.normal.xyz());
-        vertex.normal.x = normal.x;
-        vertex.normal.y = normal.y;
-        vertex.normal.z = normal.z;
-        let tangent = skin_matrix.transform_point3(vertex.tangent.xyz());
-        vertex.tangent.x = tangent.x;
-        vertex.tangent.y = tangent.y;
-        vertex.tangent.z = tangent.z;
-
         vertex
+    }
+
+    #[cfg(not(target_arch = "spirv"))]
+    /// Return all the vertices of this entity.
+    ///
+    /// This takes into consideration any morph targets the base mesh may
+    /// reference as well as any joints.
+    pub fn get_vertices(&self, vertices: &[GpuVertex]) -> Vec<GpuVertex> {
+        let mut mesh_vertices = vec![];
+        for vertex_index in self.mesh_first_vertex..self.mesh_first_vertex + self.mesh_vertex_count
+        {
+            mesh_vertices.push(self.get_vertex(vertex_index, vertices));
+        }
+        mesh_vertices
     }
 }
 
@@ -490,10 +517,16 @@ pub fn main_vertex_scene(
     gl_pos: &mut Vec4,
 ) {
     let entity = entities[instance_index as usize];
-    let vertex = entity.get_vertex(vertex_index, entities, vertices);
-    let (position, rotation, scale) = entity.get_world_transform(entities);
-    let model_matrix =
-        Mat4::from_translation(position) * Mat4::from_quat(rotation) * Mat4::from_scale(scale);
+    let vertex = entity.get_vertex(vertex_index, vertices);
+
+    let (position, rotation, scale) = if entity.info.is_skin() {
+        let skin_mat = vertex.get_skin_matrix(&entity.skin_joint_ids, entities);
+        let (s, r, t) = skin_mat.to_scale_rotation_translation();
+        (t, r, s)
+    } else {
+        entity.get_world_transform(entities)
+    };
+    let model_matrix = Mat4::from_scale_rotation_translation(scale, rotation, position);
     *out_material = entity.material.into();
     *out_color = vertex.color;
     *out_uv0 = vertex.uv.xy();

@@ -34,14 +34,14 @@ Just pro-cons on tech choices and little things I don't want to forget whil impl
 * works on all platforms with the same API
 * much more configurable than OpenGL
 * much better error messages than OpenGL
-* much less verbose than Vulkan
+* less verbose than Vulkan
 * the team is very responsive
 
 ## cons
 
 * no support for arrays of textures on web, yet
 * not yet 1.0 (on by default in chrome beta)
-* what happens if WebGPU the standard fails? (everyone doubts it will)
+* ~~what happens if WebGPU the standard fails? (everyone doubts it will)~~
 * atomics are not supported in the Naga SPIRV frontend, which limits the capabilities of compute
   - see [the related Naga issue](https://github.com/gfx-rs/naga/issues/2301)
 
@@ -63,3 +63,4 @@ Just pro-cons on tech choices and little things I don't want to forget whil impl
   * break up the frame into tiles
   * for each tile compute which lights contribute to the pixels in the tile
   * during shading, iterate over the lights for each pixel according to its tile
+- [**Help inspecting buffers in Xcode** ](https://developer.apple.com/documentation/xcode/inspecting-buffers?changes=__9)

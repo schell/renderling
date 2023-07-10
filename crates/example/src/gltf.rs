@@ -32,7 +32,6 @@ struct App {
     loader: Option<GltfLoader>,
     entities: Vec<GpuEntity>,
     last_frame_instant: Instant,
-    timestamp: f32,
 
     ui: Ui,
     gpui: Gpui,
@@ -80,7 +79,6 @@ impl App {
         renderling::setup_ui_and_scene_render_graph(r, ui_scene, [ui_obj], scene, false);
 
         let mut app = Self {
-            timestamp: 0.0,
             loader: None,
             entities: vec![],
             ui,
@@ -136,6 +134,7 @@ impl App {
         self.last_cursor_position = None;
 
         let mut builder = r.new_scene().with_debug_channel(DebugChannel::None);
+        //let cross_loader = builder.gltf_load("/Users/schell/code/renderling/gltf/origin_cross.glb").unwrap();
         let loader = match builder.gltf_load(&file) {
             Ok(loader) => loader,
             Err(msg) => {
@@ -148,9 +147,18 @@ impl App {
         // find the bounding box of the model so we can display it correctly
         let mut min = Vec3::splat(f32::INFINITY);
         let mut max = Vec3::splat(f32::NEG_INFINITY);
-        for primitive in loader.meshes.iter().flat_map(|meshes| meshes.iter()) {
-            min = min.min(primitive.bounding_box.min);
-            max = max.max(primitive.bounding_box.max);
+        for node in loader.nodes.iter() {
+            let entity = self.entities.get(node.entity_id.index()).unwrap();
+            let (translation, rotation, scale) = entity.get_world_transform(&self.entities);
+            let tfrm = Mat4::from_scale_rotation_translation(scale, rotation, translation);
+            if let Some(mesh_index) = node.gltf_mesh_index {
+                for primitive in loader.meshes.get(mesh_index).unwrap().iter() {
+                    let bbmin = tfrm.transform_point3(primitive.bounding_box.min);
+                    let bbmax = tfrm.transform_point3(primitive.bounding_box.max);
+                    min = min.min(bbmin);
+                    max = max.max(bbmax);
+                }
+            }
         }
 
         let halfway_point = min + ((max - min).normalize() * ((max - min).length() / 2.0));
@@ -181,7 +189,6 @@ impl App {
         self.radius = radius;
         self.eye = halfway_point;
         self.last_frame_instant = Instant::now();
-        self.timestamp = 0.0;
         self.loader = Some(loader);
 
         r.graph.add_resource(builder.build().unwrap());
@@ -276,14 +283,11 @@ impl App {
         let dt = now - self.last_frame_instant;
         self.last_frame_instant = now;
         let dt_secs = dt.as_secs_f32();
-        self.timestamp += dt_secs;
-
         if let Some(loader) = self.loader.as_mut() {
             for (index, animation) in loader.animations.iter_mut().enumerate() {
                 let animation_len = animation.length_in_seconds();
                 animation.stored_timestamp += dt_secs;
                 if animation.stored_timestamp > animation_len {
-                    //let name = loader.animations.get_name(index).to_owned();
                     log::trace!("animation {index} {:?} has looped", animation.name);
                 }
                 let time = animation.stored_timestamp % animation.length_in_seconds();
@@ -291,7 +295,7 @@ impl App {
                     let mut ent = self.entities.get_mut(id.index()).unwrap();
                     match tween_prop {
                         TweenProperty::Translation(t) => {
-                            ent.position = t.extend(0.0);
+                            ent.position = t.extend(ent.position.w);
                         }
                         TweenProperty::Rotation(r) => {
                             ent.rotation = r;
@@ -301,7 +305,7 @@ impl App {
                                 log::trace!("scale is zero at time: {time:?}");
                                 panic!("animation: {animation:#?}");
                             }
-                            ent.scale = s.extend(0.0);
+                            ent.scale = s.extend(ent.scale.w);
                         }
                         TweenProperty::MorphTargetWeights(ws) => {
                             ent.set_morph_target_weights(ws);
@@ -314,6 +318,7 @@ impl App {
                         .unwrap();
                 }
                 animation.stored_timestamp = time;
+                break;
             }
         }
     }

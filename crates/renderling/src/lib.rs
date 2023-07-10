@@ -1288,6 +1288,10 @@ mod test {
             ),
             tfrm
         );
+        // while we're at it let's also check that skinning doesn't affect entities/vertices that aren't skins
+        let vertex = &builder.vertices[yellow_tri.mesh_first_vertex as usize];
+        let skin_matrix = vertex.get_skin_matrix(&yellow_tri.skin_joint_ids, &builder.entities);
+        assert_eq!(Mat4::IDENTITY, skin_matrix);
 
         let entities = builder.entities.clone();
         let scene = builder.build().unwrap();
@@ -1427,5 +1431,11 @@ mod test {
 
         let img = r.render_image().unwrap();
         img_diff::assert_img_eq("pbr_point_lights_metallic_roughness_side.png", img);
+    }
+
+    #[test]
+    fn is_skin_sanity() {
+        let info = GpuEntityInfo(2048);
+        assert!(info.is_skin());
     }
 }

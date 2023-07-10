@@ -113,10 +113,12 @@ impl<T> GltfStore<T> {
     }
 
     pub fn get_name(&self, index: usize) -> Option<&String> {
-        self.names.iter().find_map(|(name, indices)| if indices.contains(&index) {
-            Some(name)
-        } else {
-            None
+        self.names.iter().find_map(|(name, indices)| {
+            if indices.contains(&index) {
+                Some(name)
+            } else {
+                None
+            }
         })
     }
 
@@ -159,13 +161,13 @@ impl From<gltf::mesh::Bounds<[f32; 3]>> for GltfBoundingBox {
 
 #[derive(Clone, Default)]
 pub struct GltfNode {
-    entity_id: Id<GpuEntity>,
+    pub entity_id: Id<GpuEntity>,
     // Contains an index into the GltfLoader.cameras, lights or meshes fields.
-    gltf_camera_index: Option<usize>,
-    gltf_light_index: Option<usize>,
-    gltf_mesh_index: Option<usize>,
-    gltf_skin_index: Option<usize>,
-    child_ids: Vec<Id<GpuEntity>>,
+    pub gltf_camera_index: Option<usize>,
+    pub gltf_light_index: Option<usize>,
+    pub gltf_mesh_index: Option<usize>,
+    pub gltf_skin_index: Option<usize>,
+    pub child_ids: Vec<Id<GpuEntity>>,
 }
 
 #[derive(Clone)]
@@ -174,7 +176,10 @@ pub struct GltfMeshPrim {
     pub vertex_count: u32,
     pub material_id: Id<GpuMaterial>,
     pub bounding_box: GltfBoundingBox,
-    pub morph_targets_info: MorphTargetsInfo,
+    pub num_morph_targets: u32,
+    pub morph_targets_have_positions: bool,
+    pub morph_targets_have_normals: bool,
+    pub morph_targets_have_tangents: bool,
     pub weights: Vec<f32>,
 }
 
@@ -612,26 +617,54 @@ impl GltfLoader {
                 || num_morph_targets_normals > 0
                 || num_morph_targets_tangents > 0;
 
+            let joint_weights_normalized = primitive
+                .attributes()
+                .find_map(|att| match att {
+                    (gltf::Semantic::Weights(_), acc) => {
+                        let n = acc.normalized();
+                        let ns = if n { "normalized" } else { "unnormalized" };
+                        let dt = acc.data_type();
+                        log::trace!("    joint weights {ns} {dt:?}");
+                        Some(n)
+                    }
+                    _ => None,
+                })
+                .unwrap_or_default();
+
             let joints = reader
                 .read_joints(0)
                 .map(|joints| {
-                    let joints: Box<dyn Iterator<Item = [Id<GpuEntity>; 4]>> =
-                        Box::new(joints.into_u16().map(|[a, b, c, d]| {
-                            log::trace!("    resolving joints: [{a}, {b}, {c}, {d}]");
-                            let a_id = self.nodes.get(a as usize).unwrap().entity_id;
-                            let b_id = self.nodes.get(b as usize).unwrap().entity_id;
-                            let c_id = self.nodes.get(c as usize).unwrap().entity_id;
-                            let d_id = self.nodes.get(d as usize).unwrap().entity_id;
-                            [a_id, b_id, c_id, d_id]
-                        }));
+                    let joints: Box<dyn Iterator<Item = [u32; 4]>> = Box::new(
+                        joints
+                            .into_u16()
+                            .map(|[a, b, c, d]| [a as u32, b as u32, c as u32, d as u32]),
+                    );
                     joints
                 })
-                .unwrap_or_else(|| Box::new(std::iter::repeat([Id::NONE; 4])));
+                .unwrap_or_else(|| Box::new(std::iter::repeat([0; 4])));
+
+            fn normalize_weights([a, b, c, d]: [f32; 4]) -> [f32; 4] {
+                let v = Vec4::new(a, b, c, d);
+                let manhatten = v.x.abs() + v.y.abs() + v.z.abs() + v.w.abs();
+                let v = if manhatten <= f32::EPSILON {
+                    Vec4::X
+                } else {
+                    v / manhatten
+                };
+                v.to_array()
+            }
 
             let joint_weights = reader
                 .read_weights(0)
                 .map(|weights| {
-                    let weights: Box<dyn Iterator<Item = [f32; 4]>> = Box::new(weights.into_f32());
+                    let weights: Box<dyn Iterator<Item = [f32; 4]>> =
+                        Box::new(weights.into_f32().map(|w| {
+                            if joint_weights_normalized {
+                                w
+                            } else {
+                                normalize_weights(w)
+                            }
+                        }));
                     weights
                 })
                 .unwrap_or_else(|| Box::new(std::iter::repeat([0.0, 0.0, 0.0, 0.0])));
@@ -694,7 +727,7 @@ impl GltfLoader {
                         if gen_tangents {
                             let d_uv1 = b.uv.xy() - a.uv.xy();
                             let d_uv2 = c.uv.xy() - a.uv.xy();
-                            let f = 1.0 / (d_uv1.x * d_uv2.y - d_uv2.x * d_uv1.y);
+                            let f = 1.0 / (d_uv1.x * d_uv2.y - d_uv2.x * d_uv1.y).max(f32::EPSILON);
                             let s = f * Vec3::new(
                                 d_uv2.y * ab.x - d_uv1.y * ac.x,
                                 d_uv2.y * ab.y - d_uv1.y * ac.y,
@@ -708,6 +741,8 @@ impl GltfLoader {
                             let tangent = (s - s.dot(n) * n)
                                 .normalize_or_zero()
                                 .extend(n.cross(t).dot(s).signum());
+                            debug_assert!(!tangent.w.is_nan(), "tangent is NaN n:{n} t:{t} s:{s}");
+
                             a.tangent = tangent;
                             b.tangent = tangent;
                             c.tangent = tangent;
@@ -777,14 +812,10 @@ impl GltfLoader {
                 vertex_count,
                 material_id,
                 bounding_box,
-                morph_targets_info: {
-                    let mut info = MorphTargetsInfo::default();
-                    info.set_num_targets(num_morph_targets as u8);
-                    info.set_has_positions(num_morph_targets_positions > 0);
-                    info.set_has_normals(num_morph_targets_normals > 0);
-                    info.set_has_tangents(num_morph_targets_tangents > 0);
-                    info
-                },
+                num_morph_targets: num_morph_targets as u32,
+                morph_targets_have_positions: num_morph_targets_positions > 0,
+                morph_targets_have_normals: num_morph_targets_normals > 0,
+                morph_targets_have_tangents: num_morph_targets_tangents > 0,
             });
         }
         let _ = self
@@ -828,6 +859,18 @@ impl GltfLoader {
             log::trace!("  is skin");
             gltf_node.gltf_skin_index = Some(skin.index());
         }
+        let mut printed = false;
+        for child in node.children() {
+            if !printed {
+                log::trace!("  is parent");
+                printed = true;
+            }
+            log::trace!(
+                "    child {} {:?}",
+                child.index(),
+                child.name().map(String::from)
+            );
+        }
 
         let entity = builder
             .new_entity()
@@ -849,13 +892,10 @@ impl GltfLoader {
     ) -> Result<(), GltfLoaderError> {
         let index = node.index();
         let name = node.name().map(String::from);
-        log::trace!("fleshing out node {index} {name:?}");
-        let gltf_node = self.nodes.get_mut(node.index()).unwrap();
+        let entity_id = self.nodes.get(node.index()).unwrap().entity_id;
+        log::trace!("fleshing out node {index} {name:?} {entity_id:?}");
         let (position, rotation, _scale) = {
-            let entity = builder
-                .entities
-                .get_mut(gltf_node.entity_id.index())
-                .unwrap();
+            let entity = builder.entities.get_mut(entity_id.index()).unwrap();
             (entity.position, entity.rotation, entity.scale)
         };
 
@@ -917,18 +957,27 @@ impl GltfLoader {
                     vertex_count,
                     material_id,
                     bounding_box: _,
-                    morph_targets_info,
                     weights,
+                    num_morph_targets,
+                    morph_targets_have_positions,
+                    morph_targets_have_normals,
+                    morph_targets_have_tangents,
                 } = &prims[0];
 
-                let entity = builder
-                    .entities
-                    .get_mut(gltf_node.entity_id.index())
-                    .unwrap();
+                let entity = builder.entities.get_mut(entity_id.index()).unwrap();
                 entity.mesh_first_vertex = *vertex_start;
                 entity.mesh_vertex_count = *vertex_count;
                 entity.material = *material_id;
-                entity.morph_targets_info = *morph_targets_info;
+                entity.info.set_num_morph_targets(*num_morph_targets as u8);
+                entity
+                    .info
+                    .set_morph_targets_have_positions(*morph_targets_have_positions);
+                entity
+                    .info
+                    .set_morph_targets_have_normals(*morph_targets_have_normals);
+                entity
+                    .info
+                    .set_morph_targets_have_tangents(*morph_targets_have_tangents);
                 entity.set_morph_target_weights(weights.iter().copied());
                 vec![]
             } else {
@@ -941,30 +990,33 @@ impl GltfLoader {
                              vertex_count,
                              material_id,
                              bounding_box: _,
-                             morph_targets_info,
                              weights,
+                             num_morph_targets,
+                             morph_targets_have_positions,
+                             morph_targets_have_normals,
+                             morph_targets_have_tangents,
                          }| {
                             let child = builder
                                 .new_entity()
                                 .with_starting_vertex_and_count(*vertex_start, *vertex_count)
                                 .with_material(*material_id)
-                                .with_morph_targets_info(*morph_targets_info)
-                                .with_weights(weights.clone())
-                                .with_parent(gltf_node.entity_id)
+                                .with_num_morph_targets(*num_morph_targets as u8)
+                                .with_morph_targets_have_positions(*morph_targets_have_positions)
+                                .with_morph_targets_have_normals(*morph_targets_have_normals)
+                                .with_morph_targets_have_tangents(*morph_targets_have_tangents)
+                                .with_morph_target_weights(weights.clone())
+                                .with_parent(entity_id)
                                 .build()
                                 .id;
                             log::trace!("      child {child:?}");
                             log::trace!("        weights {weights:?}");
-                            log::trace!(
-                                "        num_morph_targets {}",
-                                morph_targets_info.num_targets()
-                            );
+                            log::trace!("        num_morph_targets {}", num_morph_targets);
                             child
                         },
                     )
                     .collect::<Vec<_>>()
             };
-            gltf_node.child_ids = children;
+            self.nodes.get_mut(index).unwrap().child_ids = children;
         }
 
         if let Some(light) = node.light() {
@@ -1012,14 +1064,32 @@ impl GltfLoader {
                 .reader(|buffer| Some(&buffers[buffer.index()]))
                 .read_inverse_bind_matrices()
             {
+                let mut joint_ids = vec![];
                 for (matrix, joint_node) in matrices.zip(skin.joints()) {
                     let index = joint_node.index();
                     let name = joint_node.name().map(String::from);
                     let gltf_node = self.nodes.get(index).unwrap();
                     let id = gltf_node.entity_id;
+                    joint_ids.push(id);
                     log::trace!("    with joint {index} {name:?} {id:?}");
-                    let entity = builder.entities.get_mut(id.index()).unwrap();
-                    entity.inverse_bind_matrix = Mat4::from_cols_array_2d(&matrix);
+                    let joint_entity = builder.entities.get_mut(id.index()).unwrap();
+                    joint_entity.inverse_bind_matrix = Mat4::from_cols_array_2d(&matrix);
+                }
+                let skin_entity = builder.entities.get_mut(entity_id.index()).unwrap();
+                skin_entity.info.set_is_skin(true);
+                assert!(
+                    joint_ids.len() <= skin_entity.skin_joint_ids.len(),
+                    "renderling only supports {} joints for skinning, which is less than the \
+                     required {} for this model",
+                    skin_entity.skin_joint_ids.len(),
+                    joint_ids.len()
+                );
+                for (i, id) in joint_ids
+                    .into_iter()
+                    .take(skin_entity.skin_joint_ids.len())
+                    .enumerate()
+                {
+                    skin_entity.skin_joint_ids[i] = id;
                 }
             }
         }
@@ -1081,9 +1151,9 @@ impl GltfLoader {
                 interpolation,
                 target_node_index: index,
                 target_entity_id: {
-                    let node = self.nodes.get(index).context(MissingNodeSnafu{ index })?;
+                    let node = self.nodes.get(index).context(MissingNodeSnafu { index })?;
                     node.entity_id
-                }
+                },
             };
             r_animation.tweens.push(tween);
         }
@@ -1374,6 +1444,8 @@ mod test {
     #[cfg(feature = "gltf")]
     #[test]
     fn simple_skin() {
+        use crate::{Scene, TweenProperty, Write};
+
         let size = 100;
         let mut r = Renderling::headless(size, size)
             .unwrap()
@@ -1381,12 +1453,54 @@ mod test {
         let projection = camera::perspective(50.0, 50.0);
         let view = camera::look_at(Vec3::Z * 4.0, Vec3::ZERO, Vec3::Y);
         let mut builder = r.new_scene().with_camera(projection, view);
-        let _loader = builder
+        let loader = builder
             .gltf_load("../../gltf/gltfTutorial_019_SimpleSkin.gltf")
             .unwrap();
+        let skin_animation = loader.animations.get(0).unwrap();
+        let skin_animation_duration = skin_animation.length_in_seconds();
+        let mut entities = builder.entities.clone();
+        assert!(entities[0].info.is_skin());
         let scene = builder.build().unwrap();
         crate::setup_scene_render_graph(scene, &mut r, true);
         let img = r.render_image().unwrap();
-        img_diff::save("gltf_simple_skin.png", img);
+        img_diff::save("gltf_simple_skin0.png", img);
+
+        let frames = 4;
+        for i in 0..=frames {
+            let time = if i == 0 {
+                0.0
+            } else {
+                i as f32 / frames as f32 * skin_animation_duration
+            };
+            r.graph
+                .visit(|mut scene: Write<Scene>| {
+                    for (id, tween_prop) in skin_animation.get_properties_at_time(time).unwrap() {
+                        let mut ent = entities.get_mut(id.index()).unwrap();
+                        match tween_prop {
+                            TweenProperty::Translation(t) => {
+                                ent.position = t.extend(ent.position.w);
+                            }
+                            TweenProperty::Rotation(r) => {
+                                ent.rotation = r;
+                            }
+                            TweenProperty::Scale(s) => {
+                                if s == Vec3::ZERO {
+                                    log::trace!("scale is zero at time: {time:?}");
+                                    panic!("animation: {skin_animation:#?}");
+                                }
+                                ent.scale = s.extend(ent.scale.w);
+                            }
+                            TweenProperty::MorphTargetWeights(ws) => {
+                                ent.set_morph_target_weights(ws);
+                            }
+                        }
+                        scene.update_entity(*ent).unwrap();
+                    }
+                })
+                .unwrap();
+
+            let img = r.render_image().unwrap();
+            img_diff::assert_img_eq(&format!("gltf_simple_skin/{i}.png"), img);
+        }
     }
 }
