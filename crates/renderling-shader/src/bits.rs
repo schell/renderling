@@ -17,15 +17,17 @@ pub const fn bits(range: RangeInclusive<u32>) -> (u32, u32) {
 /// Pack the value of the bits defined by the shift/mask range.
 pub fn pack(bits: &mut u32, (shift, mask): (u32, u32), value: u32) {
     // rotate right
-    //*bits = (*bits >> shift) | (*bits << (32 - shift));
-    *bits = bits.rotate_right(shift);
+    if shift >= 1 {
+        *bits = (*bits >> shift) | (*bits << (32 - shift));
+    }
     // unset
     *bits &= !mask;
     // set
     *bits |= value & mask;
     // unrotate (rotate left)
-    *bits = bits.rotate_left(shift);
-    //*bits = (*bits << shift) | (*bits >> (32 - shift));
+    if shift >= 1 {
+        *bits = (*bits << shift) | (*bits >> (32 - shift));
+    }
 }
 
 /// Unpack the value of the bits defined by the shift/mask range.
