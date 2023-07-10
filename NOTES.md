@@ -11,6 +11,7 @@ Just pro-cons on tech choices and little things I don't want to forget whil impl
 ## pros
 
 * sharing code on CPU and GPU
+  - sanity testing GPU code on CPU using regular tests
 * it's Rust
   - using cargo and Rust module system
   - expressions!
@@ -23,9 +24,11 @@ Just pro-cons on tech choices and little things I don't want to forget whil impl
 * don't use `while let` or `while` loops
 * for loops are hit or miss, sometimes they work and sometimes they don't
   - see [this rust-gpu issue](https://github.com/EmbarkStudios/rust-gpu/issues/739)
-  - see [conversation with edyyb on discord](https://discord.com/channels/750717012564770887/750717499737243679/threads/1092283362217046066)
+  - see [conversation with eddyb on discord](https://discord.com/channels/750717012564770887/750717499737243679/threads/1092283362217046066)
 * meh, but no support for dynamically sized arrays (how would that work in no-std?)
   - see [conversation on discord](https://discord.com/channels/750717012564770887/750717499737243679/1091813590400516106)
+* can't use bitwise rotate_left or rotate_right
+  - see [the issue on github](https://github.com/EmbarkStudios/rust-gpu/issues/1062)
 
 # wgpu
 
@@ -49,18 +52,15 @@ Just pro-cons on tech choices and little things I don't want to forget whil impl
 
 * bindless - wth exactly is it
 
-# tips and gotchas
+# tips, gotchas, links and further reading
 
 * `location[...] is provided by the previous stage output but is not consumed as input by this stage.`
   - rust-gpu has optimized away the shader input, you must use the input parameter in your downstream shader
   - sometimes the optimization is pretty agressive, so you really gotta _use_ the input
-
-# links
-
-- [Forward+ shading (as opposed to deferred)](https://takahiroharada.files.wordpress.com/2015/04/forward_plus.pdf)
+* [Forward+ shading (as opposed to deferred)](https://takahiroharada.files.wordpress.com/2015/04/forward_plus.pdf)
   **tl;dr**
   In a compute shader before the vertex pass:
   * break up the frame into tiles
-  * for each tile compute which lights contribute to the pixels in the tile
-  * during shading, iterate over the lights for each pixel according to its tile
-- [**Help inspecting buffers in Xcode** ](https://developer.apple.com/documentation/xcode/inspecting-buffers?changes=__9)
+  * for each tile compute which lights' contribution to the pixels in the tile
+  * during shading, iterate over _only_ the lights for each pixel according to its tile
+* [**Help inspecting buffers in Xcode** ](https://developer.apple.com/documentation/xcode/inspecting-buffers?changes=__9)
