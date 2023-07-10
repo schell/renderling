@@ -11,7 +11,7 @@ default = []
 
 [dependencies]
 bytemuck = { version = "1.13.0", features = ["derive"] }
-spirv-std = "^0.7"
+spirv-std = "^0.8"
 
 [target.'cfg(not(target_arch = "spirv"))'.dependencies]
 glam = { version = "0.22", features = ["bytemuck"] }
