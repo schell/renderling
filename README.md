@@ -75,7 +75,7 @@ This means each model may be shaded separately, with a different lighting style.
     - animation
       - [x] interpolation
       - [x] morph targets
-      - [ ] skins
+      - [x] skinning
 - 2d
   - [x] colored, textured vertices
   - [x] text rendering mode
