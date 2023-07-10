@@ -1,6 +1,6 @@
 //! Entity builder.
 use glam::{Quat, Vec3};
-use renderling_shader::scene::{GpuEntity, GpuMaterial, GpuVertex, Id, GpuEntityInfo};
+use renderling_shader::scene::{GpuEntity, GpuMaterial, GpuVertex, Id};
 
 use crate::SceneBuilder;
 
@@ -30,11 +30,6 @@ impl<'a> EntityBuilder<'a> {
     pub fn with_starting_vertex_and_count(mut self, first_vertex: u32, count: u32) -> Self {
         self.entity.mesh_first_vertex = first_vertex;
         self.entity.mesh_vertex_count = count;
-        self
-    }
-
-    pub fn with_info(mut self, info: GpuEntityInfo) -> Self {
-        self.entity.info = info;
         self
     }
 

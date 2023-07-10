@@ -617,6 +617,20 @@ impl GltfLoader {
                 || num_morph_targets_normals > 0
                 || num_morph_targets_tangents > 0;
 
+            let joint_weights_normalized = primitive
+                .attributes()
+                .find_map(|att| match att {
+                    (gltf::Semantic::Weights(_), acc) => {
+                        let n = acc.normalized();
+                        let ns = if n { "normalized" } else { "unnormalized" };
+                        let dt = acc.data_type();
+                        log::trace!("    joint weights {ns} {dt:?}");
+                        Some(n)
+                    }
+                    _ => None,
+                })
+                .unwrap_or_default();
+
             let joints = reader
                 .read_joints(0)
                 .map(|joints| {
@@ -629,11 +643,28 @@ impl GltfLoader {
                 })
                 .unwrap_or_else(|| Box::new(std::iter::repeat([0; 4])));
 
+            fn normalize_weights([a, b, c, d]: [f32; 4]) -> [f32; 4] {
+                let v = Vec4::new(a, b, c, d);
+                let manhatten = v.x.abs() + v.y.abs() + v.z.abs() + v.w.abs();
+                let v = if manhatten <= f32::EPSILON {
+                    Vec4::X
+                } else {
+                    v / manhatten
+                };
+                v.to_array()
+            }
+
             let joint_weights = reader
                 .read_weights(0)
                 .map(|weights| {
                     let weights: Box<dyn Iterator<Item = [f32; 4]>> =
-                        Box::new(weights.into_f32().map(|[a, b, c, d]| [a, b, c, d]));
+                        Box::new(weights.into_f32().map(|w| {
+                            if joint_weights_normalized {
+                                w
+                            } else {
+                                normalize_weights(w)
+                            }
+                        }));
                     weights
                 })
                 .unwrap_or_else(|| Box::new(std::iter::repeat([0.0, 0.0, 0.0, 0.0])));
@@ -828,6 +859,18 @@ impl GltfLoader {
             log::trace!("  is skin");
             gltf_node.gltf_skin_index = Some(skin.index());
         }
+        let mut printed = false;
+        for child in node.children() {
+            if !printed {
+                log::trace!("  is parent");
+                printed = true;
+            }
+            log::trace!(
+                "    child {} {:?}",
+                child.index(),
+                child.name().map(String::from)
+            );
+        }
 
         let entity = builder
             .new_entity()
@@ -967,10 +1010,7 @@ impl GltfLoader {
                                 .id;
                             log::trace!("      child {child:?}");
                             log::trace!("        weights {weights:?}");
-                            log::trace!(
-                                "        num_morph_targets {}",
-                                num_morph_targets
-                            );
+                            log::trace!("        num_morph_targets {}", num_morph_targets);
                             child
                         },
                     )
@@ -1419,6 +1459,7 @@ mod test {
         let skin_animation = loader.animations.get(0).unwrap();
         let skin_animation_duration = skin_animation.length_in_seconds();
         let mut entities = builder.entities.clone();
+        assert!(entities[0].info.is_skin());
         let scene = builder.build().unwrap();
         crate::setup_scene_render_graph(scene, &mut r, true);
         let img = r.render_image().unwrap();

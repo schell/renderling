@@ -28,5 +28,5 @@ pub fn pack(bits: &mut u32, (shift, mask): (u32, u32), value: u32) {
 
 /// Unpack the value of the bits defined by the shift/mask range.
 pub fn unpack(bits: u32, (shift, mask): (u32, u32)) -> u32 {
-    bits.rotate_right(shift) & mask
+    (bits >> shift) & mask
 }

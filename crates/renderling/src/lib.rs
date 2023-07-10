@@ -1432,4 +1432,10 @@ mod test {
         let img = r.render_image().unwrap();
         img_diff::assert_img_eq("pbr_point_lights_metallic_roughness_side.png", img);
     }
+
+    #[test]
+    fn is_skin_sanity() {
+        let info = GpuEntityInfo(2048);
+        assert!(info.is_skin());
+    }
 }

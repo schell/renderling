@@ -247,7 +247,7 @@ impl Default for GpuMaterial {
 #[repr(transparent)]
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[derive(Clone, Copy, Default, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct GpuEntityInfo(u32);
+pub struct GpuEntityInfo(pub u32);
 
 impl GpuEntityInfo {
     const BITS_NUM_TARGETS: (u32, u32) = bits(0..=7);
@@ -319,8 +319,6 @@ pub struct GpuEntity {
     pub mesh_first_vertex: u32,
     // The number of vertices in this entity's mesh.
     pub mesh_vertex_count: u32,
-    // Morph target weights for this entity, if it has morph targets
-    pub morph_targets_weights: [f32; 8],
     // Nothing to see here
     pub padding: u32,
     // The index/id of this entity's material in the material buffer.
@@ -335,10 +333,12 @@ pub struct GpuEntity {
     pub scale: Vec4,
     // The local rotation of this entity
     pub rotation: Quat,
-    pub skin_joint_ids: [Id<GpuEntity>; 32],
     // A joint inverse-bind-matrix
     // TODO: restructure the buffers so we don't need this
     pub inverse_bind_matrix: Mat4,
+    pub skin_joint_ids: [Id<GpuEntity>; 32],
+    // Morph target weights for this entity, if it has morph targets
+    pub morph_targets_weights: [f32; 8],
 }
 
 impl Default for GpuEntity {
@@ -382,21 +382,22 @@ impl GpuEntity {
     /// Return the position, rotation and scale that describe this entity's
     /// transform in world space.
     pub fn get_world_transform(&self, entities: &[GpuEntity]) -> (Vec3, Quat, Vec3) {
-        let mut position = Vec3::ZERO;
-        let mut scale = Vec3::ONE;
-        let mut rotation = Quat::IDENTITY;
+        let mut mat = Mat4::IDENTITY;
         let mut id = self.id;
         loop {
             let entity = entities[id.index()];
-            position += entity.position.xyz();
-            scale *= entity.scale.xyz();
-            rotation = entity.rotation * rotation;
+            mat = Mat4::from_scale_rotation_translation(
+                entity.scale.xyz(),
+                entity.rotation,
+                entity.position.xyz(),
+            ) * mat;
             id = entity.parent;
             if id.index() >= entities.len() {
                 break;
             }
         }
-        (position, rotation, scale)
+        let (s, r, t) = mat.to_scale_rotation_translation();
+        (t, r, s)
     }
 
     #[cfg(not(target_arch = "spirv"))]
@@ -414,12 +415,7 @@ impl GpuEntity {
     ///
     /// This takes into consideration any morph targets the base mesh may
     /// reference as well as any joints.
-    pub fn get_vertex(
-        &self,
-        vertex_index: u32,
-        entities: &[GpuEntity],
-        vertices: &[GpuVertex],
-    ) -> GpuVertex {
+    pub fn get_vertex(&self, vertex_index: u32, vertices: &[GpuVertex]) -> GpuVertex {
         let index = vertex_index as usize;
         let mut vertex = vertices[index];
 
@@ -435,21 +431,6 @@ impl GpuEntity {
             vertex.tangent += (target_weight * target.tangent.xyz()).extend(0.0);
         }
 
-        //// Apply skinning without assuming anything about the `w` components
-        //let skin_matrix = vertex.get_skin_matrix(&self.skin_joint_ids, entities);
-        //let position = skin_matrix.transform_point3(vertex.position.xyz());
-        //vertex.position.x = position.x;
-        //vertex.position.y = position.y;
-        //vertex.position.z = position.z;
-        //let normal = skin_matrix.transform_point3(vertex.normal.xyz());
-        //vertex.normal.x = normal.x;
-        //vertex.normal.y = normal.y;
-        //vertex.normal.z = normal.z;
-        //let tangent = skin_matrix.transform_point3(vertex.tangent.xyz());
-        //vertex.tangent.x = tangent.x;
-        //vertex.tangent.y = tangent.y;
-        //vertex.tangent.z = tangent.z;
-
         vertex
     }
 
@@ -458,11 +439,11 @@ impl GpuEntity {
     ///
     /// This takes into consideration any morph targets the base mesh may
     /// reference as well as any joints.
-    pub fn get_vertices(&self, entities: &[GpuEntity], vertices: &[GpuVertex]) -> Vec<GpuVertex> {
+    pub fn get_vertices(&self, vertices: &[GpuVertex]) -> Vec<GpuVertex> {
         let mut mesh_vertices = vec![];
         for vertex_index in self.mesh_first_vertex..self.mesh_first_vertex + self.mesh_vertex_count
         {
-            mesh_vertices.push(self.get_vertex(vertex_index, entities, vertices));
+            mesh_vertices.push(self.get_vertex(vertex_index, vertices));
         }
         mesh_vertices
     }
@@ -536,8 +517,15 @@ pub fn main_vertex_scene(
     gl_pos: &mut Vec4,
 ) {
     let entity = entities[instance_index as usize];
-    let vertex = entity.get_vertex(vertex_index, entities, vertices);
-    let (position, rotation, scale) = entity.get_world_transform(entities);
+    let vertex = entity.get_vertex(vertex_index, vertices);
+
+    let (position, rotation, scale) = if entity.info.is_skin() {
+        let skin_mat = vertex.get_skin_matrix(&entity.skin_joint_ids, entities);
+        let (s, r, t) = skin_mat.to_scale_rotation_translation();
+        (t, r, s)
+    } else {
+        entity.get_world_transform(entities)
+    };
     let model_matrix = Mat4::from_scale_rotation_translation(scale, rotation, position);
     *out_material = entity.material.into();
     *out_color = vertex.color;

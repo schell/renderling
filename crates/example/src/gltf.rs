@@ -134,7 +134,7 @@ impl App {
         self.last_cursor_position = None;
 
         let mut builder = r.new_scene().with_debug_channel(DebugChannel::None);
-        let cross_loader = builder.gltf_load("/Users/schell/code/renderling/gltf/origin_cross.glb").unwrap();
+        //let cross_loader = builder.gltf_load("/Users/schell/code/renderling/gltf/origin_cross.glb").unwrap();
         let loader = match builder.gltf_load(&file) {
             Ok(loader) => loader,
             Err(msg) => {
