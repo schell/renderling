@@ -3,7 +3,7 @@
 use glam::{Quat, Vec3};
 use snafu::prelude::*;
 
-use crate::{GltfLoader, GpuEntity, Id};
+use crate::{GpuEntity, Id};
 
 #[derive(Debug, Snafu)]
 pub enum InterpolationError {
@@ -181,14 +181,16 @@ impl TweenProperties {
 
 #[derive(Debug)]
 pub struct Tween {
-    // times (inputs)
+    // Times (inputs)
     pub keyframes: Vec<Keyframe>,
-    // properties (outputs)
+    // Properties (outputs)
     pub properties: TweenProperties,
-    // the type of interpolation
+    // The type of interpolation
     pub interpolation: GltfInterpolation,
-    // the index of target node this tween applies to
+    // The gltf "nodes" index of the target node this tween applies to
     pub target_node_index: usize,
+    // The entity id of the target node this tween applies to
+    pub target_entity_id: Id<GpuEntity>,
 }
 
 impl Tween {
@@ -543,6 +545,11 @@ pub enum AnimationError {
 #[derive(Default, Debug)]
 pub struct GltfAnimation {
     pub tweens: Vec<Tween>,
+    // A time to use as the current amount of seconds elapsed in the running
+    // of this animation.
+    pub stored_timestamp: f32,
+    // The name of this animation, if any.
+    pub name: Option<String>,
 }
 
 impl GltfAnimation {
@@ -556,7 +563,6 @@ impl GltfAnimation {
 
     pub fn get_properties_at_time(
         &self,
-        loader: &GltfLoader,
         t: f32,
     ) -> Result<Vec<(Id<GpuEntity>, TweenProperty)>, AnimationError> {
         let mut tweens = vec![];
@@ -568,15 +574,7 @@ impl GltfAnimation {
             } else {
                 tween.get_first_keyframe_property().unwrap()
             };
-            let id = loader
-                .nodes
-                .get(tween.target_node_index)
-                .context(MissingNodeSnafu {
-                    index: tween.target_node_index,
-                })?
-                .as_entity()
-                .context(ExpectedEntitySnafu)?;
-            tweens.push((id, prop));
+            tweens.push((tween.target_entity_id, prop));
         }
 
         Ok(tweens.into_iter().collect())

@@ -86,6 +86,7 @@ pub fn main_fragment_scene(
     #[spirv(storage_buffer, descriptor_set = 0, binding = 4)] materials: &[scene::GpuMaterial],
     #[spirv(storage_buffer, descriptor_set = 1, binding = 2)] textures: &[scene::GpuTexture],
 
+    //// which entity are we drawing
     #[spirv(flat)] in_material: u32,
     in_color: glam::Vec4,
     in_uv0: glam::Vec2,

@@ -165,7 +165,12 @@ pub struct HdrSurface {
 }
 
 impl HdrSurface {
-    pub fn create_texture(device: &wgpu::Device, queue: &wgpu::Queue, width: u32, height: u32) -> crate::Texture {
+    pub fn create_texture(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        width: u32,
+        height: u32,
+    ) -> crate::Texture {
         crate::Texture::new_with(
             &device,
             &queue,
@@ -190,7 +195,10 @@ impl HdrSurface {
         )
     }
 
-    pub fn create_texture_bindgroup(device: &wgpu::Device, texture: &crate::Texture) -> wgpu::BindGroup {
+    pub fn create_texture_bindgroup(
+        device: &wgpu::Device,
+        texture: &crate::Texture,
+    ) -> wgpu::BindGroup {
         let hdr_texture_layout = scene_hdr_surface_bindgroup_layout(&device);
         device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("HdrSurface texture bindgroup"),

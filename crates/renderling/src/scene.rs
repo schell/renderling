@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use glam::{Mat4, Vec3};
 use moongraph::{IsGraphNode, Read, Write};
-use renderling_shader::{GpuToggles, debug::DebugChannel};
+use renderling_shader::{debug::DebugChannel, GpuToggles};
 use snafu::prelude::*;
 
 pub use renderling_shader::scene::*;
