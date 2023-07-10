@@ -42,7 +42,7 @@ impl DebugChannel {
             Self::VertexNormals,
             Self::UvNormals,
             Self::Tangents,
-            Self::Bitangents
+            Self::Bitangents,
         ]
     }
 }

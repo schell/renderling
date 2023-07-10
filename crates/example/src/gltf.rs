@@ -7,8 +7,8 @@ use std::time::Instant;
 use renderling::{
     debug::DebugChannel,
     math::{Mat4, Vec3, Vec4},
-    FontArc, GltfLoader, GpuEntity, Renderling, Scene, ScreenSize, TweenProperty, UiDrawObjects,
-    UiMode, UiVertex, Write,
+    GltfLoader, GpuEntity, Renderling, Scene, ScreenSize, TweenProperty, UiDrawObjects, UiMode,
+    UiVertex, Write,
 };
 use renderling_gpui::{Element, Gpui};
 use winit::event::KeyboardInput;
@@ -32,7 +32,6 @@ struct App {
     loader: Option<GltfLoader>,
     entities: Vec<GpuEntity>,
     last_frame_instant: Instant,
-    timestamp: f32,
 
     ui: Ui,
     gpui: Gpui,
@@ -60,20 +59,7 @@ impl App {
         let left_mb_down: bool = false;
         let last_cursor_position: Option<winit::dpi::PhysicalPosition<f64>> = None;
         let mut gpui = renderling_gpui::Gpui::new_from(r);
-
-        // get the fonts for the UI
-        let font_paths = [
-            "fonts/Recursive Mn Lnr St Med Nerd Font Complete.ttf",
-            "fonts/Font Awesome 6 Free-Regular-400.otf"
-        ];
-        for path in font_paths {
-            let bytes: Vec<u8> =
-                std::fs::read(path).unwrap();
-            let font = FontArc::try_from_vec(bytes).unwrap();
-            gpui.add_font(font);
-        }
-
-        let ui = Ui::new(&mut gpui);
+        let ui = Ui::new(&mut gpui, "fonts");
         let ui_texture = r.texture_from_wgpu_tex(gpui.get_frame_texture(), None);
         let ui_scene = r.new_ui_scene().with_canvas_size(1, 1).build();
         let ui_obj = ui_scene
@@ -93,7 +79,6 @@ impl App {
         renderling::setup_ui_and_scene_render_graph(r, ui_scene, [ui_obj], scene, false);
 
         let mut app = Self {
-            timestamp: 0.0,
             loader: None,
             entities: vec![],
             ui,
@@ -149,6 +134,7 @@ impl App {
         self.last_cursor_position = None;
 
         let mut builder = r.new_scene().with_debug_channel(DebugChannel::None);
+        //let cross_loader = builder.gltf_load("/Users/schell/code/renderling/gltf/origin_cross.glb").unwrap();
         let loader = match builder.gltf_load(&file) {
             Ok(loader) => loader,
             Err(msg) => {
@@ -161,9 +147,18 @@ impl App {
         // find the bounding box of the model so we can display it correctly
         let mut min = Vec3::splat(f32::INFINITY);
         let mut max = Vec3::splat(f32::NEG_INFINITY);
-        for primitive in loader.meshes.iter().flat_map(|meshes| meshes.iter()) {
-            min = min.min(primitive.bounding_box.min);
-            max = max.max(primitive.bounding_box.max);
+        for node in loader.nodes.iter() {
+            let entity = self.entities.get(node.entity_id.index()).unwrap();
+            let (translation, rotation, scale) = entity.get_world_transform(&self.entities);
+            let tfrm = Mat4::from_scale_rotation_translation(scale, rotation, translation);
+            if let Some(mesh_index) = node.gltf_mesh_index {
+                for primitive in loader.meshes.get(mesh_index).unwrap().iter() {
+                    let bbmin = tfrm.transform_point3(primitive.bounding_box.min);
+                    let bbmax = tfrm.transform_point3(primitive.bounding_box.max);
+                    min = min.min(bbmin);
+                    max = max.max(bbmax);
+                }
+            }
         }
 
         let halfway_point = min + ((max - min).normalize() * ((max - min).length() / 2.0));
@@ -194,7 +189,6 @@ impl App {
         self.radius = radius;
         self.eye = halfway_point;
         self.last_frame_instant = Instant::now();
-        self.timestamp = 0.0;
         self.loader = Some(loader);
 
         r.graph.add_resource(builder.build().unwrap());
@@ -288,16 +282,20 @@ impl App {
         let now = Instant::now();
         let dt = now - self.last_frame_instant;
         self.last_frame_instant = now;
-        self.timestamp += dt.as_secs_f32();
-
-        if let Some(loader) = self.loader.as_ref() {
-            for animation in loader.animations.iter() {
-                let time = self.timestamp % animation.length_in_seconds();
-                for (id, tween_prop) in animation.get_properties_at_time(loader, time).unwrap() {
+        let dt_secs = dt.as_secs_f32();
+        if let Some(loader) = self.loader.as_mut() {
+            for (index, animation) in loader.animations.iter_mut().enumerate() {
+                let animation_len = animation.length_in_seconds();
+                animation.stored_timestamp += dt_secs;
+                if animation.stored_timestamp > animation_len {
+                    log::trace!("animation {index} {:?} has looped", animation.name);
+                }
+                let time = animation.stored_timestamp % animation.length_in_seconds();
+                for (id, tween_prop) in animation.get_properties_at_time(time).unwrap() {
                     let mut ent = self.entities.get_mut(id.index()).unwrap();
                     match tween_prop {
                         TweenProperty::Translation(t) => {
-                            ent.position = t.extend(0.0);
+                            ent.position = t.extend(ent.position.w);
                         }
                         TweenProperty::Rotation(r) => {
                             ent.rotation = r;
@@ -307,7 +305,7 @@ impl App {
                                 log::trace!("scale is zero at time: {time:?}");
                                 panic!("animation: {animation:#?}");
                             }
-                            ent.scale = s.extend(0.0);
+                            ent.scale = s.extend(ent.scale.w);
                         }
                         TweenProperty::MorphTargetWeights(ws) => {
                             ent.set_morph_target_weights(ws);
@@ -319,6 +317,8 @@ impl App {
                         })
                         .unwrap();
                 }
+                animation.stored_timestamp = time;
+                break;
             }
         }
     }
@@ -415,14 +415,7 @@ mod test {
     #[test]
     fn sanity() {
         let mut gpui = renderling_gpui::Gpui::new(600, 300); //.with_background_color(DARK_BLUE_BG_COLOR);
-
-        // get the font for the UI
-        let bytes: Vec<u8> =
-            std::fs::read("../../fonts/Recursive Mn Lnr St Med Nerd Font Complete.ttf").unwrap();
-        let font = FontArc::try_from_vec(bytes).unwrap();
-        gpui.add_font(font);
-
-        let mut ui = Ui::new(&mut gpui);
+        let mut ui = Ui::new(&mut gpui, "../../fonts");
         ui.set_text_title("This is the title text");
         ui.set_text_camera("This is the camera text");
         gpui.layout(&mut ui);

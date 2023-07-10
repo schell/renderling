@@ -1,9 +1,9 @@
 //! User interface for the gltf viewer.
-use renderling::debug::DebugChannel;
-use renderling_gpui::{Button, Element, Gpui, Text, Vec2, Vec4, AABB, Paint, Dropdown, DropdownEvent};
+use renderling::{debug::DebugChannel, FontArc};
+use renderling_gpui::{Dropdown, DropdownEvent, Element, Gpui, Paint, Text, Vec2, Vec4, AABB};
 
 pub enum UiEvent {
-    ToggleDebugChannel(DebugChannel)
+    ToggleDebugChannel(DebugChannel),
 }
 
 pub struct Ui {
@@ -13,7 +13,29 @@ pub struct Ui {
 }
 
 impl Ui {
-    pub fn new(gpui: &mut Gpui) -> Self {
+    pub fn new(gpui: &mut Gpui, font_dir: impl AsRef<std::path::Path>) -> Self {
+        // get the fonts for the UI
+        let fonts = [
+            "Recursive Mn Lnr St Med Nerd Font Complete.ttf",
+            "Font Awesome 6 Free-Regular-400.otf",
+        ];
+        for path in fonts {
+            let path = font_dir.as_ref().join(path);
+            let bytes: Vec<u8> = match std::fs::read(&path) {
+                Err(e) => {
+                    let cwd = std::env::current_dir().unwrap();
+                    panic!(
+                        "Could not load path '{}' from current directory '{}':\n {e}",
+                        path.display(),
+                        cwd.display()
+                    );
+                }
+                Ok(bytes) => bytes,
+            };
+            let font = FontArc::try_from_vec(bytes).unwrap();
+            gpui.add_font(font);
+        }
+
         Ui {
             text_title: gpui
                 .new_text()
@@ -29,7 +51,7 @@ impl Ui {
                 .new_dropdown()
                 .with_scale(32.0)
                 .with_selections(DebugChannel::all().map(|c| (format!("{c:?}"), c)))
-                .with_label_builder(|label| label.set_color(Vec4::ONE))
+                .with_label_builder(|label| label.set_color(Vec4::ONE)),
         }
     }
 
@@ -61,9 +83,7 @@ impl Element for Ui {
             aabb.min.y = aabb_camera.max.y;
             aabb
         });
-        aabb_title
-            .union(aabb_camera)
-            .union(aabb_dropdown)
+        aabb_title.union(aabb_camera).union(aabb_dropdown)
     }
 
     fn paint<'a, 'b: 'a>(

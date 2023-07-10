@@ -232,7 +232,8 @@ mod test {
         ]
     }
 
-    pub fn _init_logging() {
+    #[ctor::ctor]
+    fn init_logging() {
         let _ = env_logger::builder()
             .is_test(true)
             //.filter_level(log::LevelFilter::Trace)
@@ -349,7 +350,6 @@ mod test {
 
     #[test]
     fn cmy_cube_sanity() {
-        _init_logging();
         let mut r = Renderling::headless(100, 100)
             .unwrap()
             .with_background_color(Vec4::splat(1.0));
@@ -426,11 +426,7 @@ mod test {
 
         // we should see two colored cubes again
         let img = r.render_image().unwrap();
-        img_diff::assert_eq(
-            "cmy_cube_visible_before_again.png",
-            img_before,
-            img,
-        );
+        img_diff::assert_eq("cmy_cube_visible_before_again.png", img_before, img);
     }
 
     #[test]
@@ -565,7 +561,6 @@ mod test {
 
     #[test]
     fn gpu_array_update() {
-        _init_logging();
         let (device, queue, _) = futures_lite::future::block_on(
             crate::state::new_device_queue_and_target(100, 100, None as Option<CreateSurfaceFn>),
         );
@@ -611,7 +606,6 @@ mod test {
 
     #[test]
     fn gpu_scene_sanity1() {
-        _init_logging();
         let mut r = Renderling::headless(100, 100)
             .unwrap()
             .with_background_color(Vec3::splat(0.0).extend(1.0));
@@ -696,8 +690,6 @@ mod test {
 
     #[test]
     fn gpu_scene_sanity2() {
-        _init_logging();
-
         let mut r = Renderling::headless(100, 100)
             .unwrap()
             .with_background_color(Vec3::splat(0.0).extend(1.0));
@@ -791,8 +783,14 @@ mod test {
             ],
             draws
         );
-        let constants: GpuConstants =
-            read_buffer(r.get_device(), r.get_queue(), &scene.constants.buffer(), 0, 1).unwrap()[0];
+        let constants: GpuConstants = read_buffer(
+            r.get_device(),
+            r.get_queue(),
+            &scene.constants.buffer(),
+            0,
+            1,
+        )
+        .unwrap()[0];
         assert_eq!(UVec2::splat(256), constants.atlas_size);
 
         let materials = scene
@@ -1079,7 +1077,6 @@ mod test {
     #[test]
     /// Ensures that the directional light coloring works.
     fn scene_cube_directional() {
-        _init_logging();
         let mut r = Renderling::headless(100, 100)
             .unwrap()
             .with_background_color(Vec3::splat(0.0).extend(1.0));
@@ -1291,6 +1288,10 @@ mod test {
             ),
             tfrm
         );
+        // while we're at it let's also check that skinning doesn't affect entities/vertices that aren't skins
+        let vertex = &builder.vertices[yellow_tri.mesh_first_vertex as usize];
+        let skin_matrix = vertex.get_skin_matrix(&yellow_tri.skin_joint_ids, &builder.entities);
+        assert_eq!(Mat4::IDENTITY, skin_matrix);
 
         let entities = builder.entities.clone();
         let scene = builder.build().unwrap();
@@ -1326,7 +1327,6 @@ mod test {
     //
     // see https://learnopengl.com/PBR/Lighting
     fn pbr_point_lights_metallic_roughness_spheres() {
-        _init_logging();
         let ss = 600;
         let mut r = Renderling::headless(ss, ss)
             .unwrap()
@@ -1431,5 +1431,11 @@ mod test {
 
         let img = r.render_image().unwrap();
         img_diff::assert_img_eq("pbr_point_lights_metallic_roughness_side.png", img);
+    }
+
+    #[test]
+    fn is_skin_sanity() {
+        let info = GpuEntityInfo(2048);
+        assert!(info.is_skin());
     }
 }
