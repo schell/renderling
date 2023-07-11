@@ -64,3 +64,11 @@ Just pro-cons on tech choices and little things I don't want to forget whil impl
   * for each tile compute which lights' contribution to the pixels in the tile
   * during shading, iterate over _only_ the lights for each pixel according to its tile
 * [**Help inspecting buffers in Xcode** ](https://developer.apple.com/documentation/xcode/inspecting-buffers?changes=__9)
+
+## PBR reference implementations
+* [khronos sample viewer](https://github.khronos.org/glTF-Sample-Viewer-Release/)
+  - [vertex shader code](https://github.com/KhronosGroup/glTF-Sample-Viewer/blob/main/source/Renderer/shaders/primitive.vert)
+  - [fragment shader code](https://github.com/KhronosGroup/glTF-Sample-Viewer/blob/main/source/Renderer/shaders/pbr.frag)
+* [babylonjs](https://sandbox.babylonjs.com/)
+  - [vertex shader code](https://github.com/BabylonJS/Babylon.js/blob/master/packages/dev/core/src/Shaders/pbr.vertex.fx)
+  - [fragment shader code](https://github.com/BabylonJS/Babylon.js/blob/master/packages/dev/core/src/Shaders/pbr.fragment.fx)
