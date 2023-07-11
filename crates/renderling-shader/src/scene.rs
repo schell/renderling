@@ -12,7 +12,7 @@ use spirv_std::{image::Image2d, Sampler};
 use spirv_std::num_traits::*;
 
 use crate::{
-    bits::{bits, pack, unpack},
+    bits::{bits, insert, extract},
     debug::*,
     math::Vec3ColorSwizzles,
     pbr, GpuToggles,
@@ -257,20 +257,20 @@ impl GpuEntityInfo {
     const BITS_IS_SKIN: (u32, u32) = bits(11..=11);
 
     pub fn num_morph_targets(&self) -> u32 {
-        unpack(self.0, Self::BITS_NUM_TARGETS)
+        extract(self.0, Self::BITS_NUM_TARGETS)
     }
 
     #[cfg(not(target_arch = "spirv"))]
     pub fn set_num_morph_targets(&mut self, num_targets: u8) {
-        pack(&mut self.0, Self::BITS_NUM_TARGETS, num_targets as u32)
+        insert(&mut self.0, Self::BITS_NUM_TARGETS, num_targets as u32)
     }
 
     pub fn morph_targets_have_positions(&self) -> bool {
-        unpack(self.0, Self::BITS_HAS_POSITIONS) == 1
+        extract(self.0, Self::BITS_HAS_POSITIONS) == 1
     }
 
     pub fn set_morph_targets_have_positions(&mut self, has: bool) {
-        pack(
+        insert(
             &mut self.0,
             Self::BITS_HAS_POSITIONS,
             if has { 1 } else { 0 },
@@ -278,19 +278,19 @@ impl GpuEntityInfo {
     }
 
     pub fn morph_targets_have_normals(&self) -> bool {
-        unpack(self.0, Self::BITS_HAS_NORMALS) == 1
+        extract(self.0, Self::BITS_HAS_NORMALS) == 1
     }
 
     pub fn set_morph_targets_have_normals(&mut self, has: bool) {
-        pack(&mut self.0, Self::BITS_HAS_NORMALS, if has { 1 } else { 0 })
+        insert(&mut self.0, Self::BITS_HAS_NORMALS, if has { 1 } else { 0 })
     }
 
     pub fn morph_targets_have_tangents(&self) -> bool {
-        unpack(self.0, Self::BITS_HAS_TANGENTS) == 1
+        extract(self.0, Self::BITS_HAS_TANGENTS) == 1
     }
 
     pub fn set_morph_targets_have_tangents(&mut self, has: bool) {
-        pack(
+        insert(
             &mut self.0,
             Self::BITS_HAS_TANGENTS,
             if has { 1 } else { 0 },
@@ -298,11 +298,11 @@ impl GpuEntityInfo {
     }
 
     pub fn is_skin(&self) -> bool {
-        unpack(self.0, Self::BITS_IS_SKIN) == 1
+        extract(self.0, Self::BITS_IS_SKIN) == 1
     }
 
     pub fn set_is_skin(&mut self, is_skin: bool) {
-        pack(&mut self.0, Self::BITS_IS_SKIN, if is_skin { 1 } else { 0 })
+        insert(&mut self.0, Self::BITS_IS_SKIN, if is_skin { 1 } else { 0 })
     }
 }
 
