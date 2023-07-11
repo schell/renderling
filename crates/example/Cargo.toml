@@ -7,14 +7,12 @@ edition = "2021"
 
 [dependencies]
 anyhow = "^1.0"
-bytemuck = { version = "1.7.3", features = ["derive"] }
 env_logger = "0.10.0"
 gltf = "1.1.0"
 icosahedron = "^0.1"
 log = "0.4.17"
 renderling = { path = "../renderling" }
 renderling-gpui = { path = "../renderling-gpui" }
-rustc-hash = "^1.1"
 winit = "^0.27"
 wgpu = "^0.16"
 
