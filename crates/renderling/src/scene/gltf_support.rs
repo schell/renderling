@@ -727,7 +727,9 @@ impl GltfLoader {
                         if gen_tangents {
                             let d_uv1 = b.uv.xy() - a.uv.xy();
                             let d_uv2 = c.uv.xy() - a.uv.xy();
-                            let f = 1.0 / (d_uv1.x * d_uv2.y - d_uv2.x * d_uv1.y).max(f32::EPSILON);
+                            let denom = d_uv1.x * d_uv2.y - d_uv2.x * d_uv1.y;
+                            let denom = denom.abs().max(f32::EPSILON) * denom.signum();
+                            let f = 1.0 / denom;
                             let s = f * Vec3::new(
                                 d_uv2.y * ab.x - d_uv1.y * ac.x,
                                 d_uv2.y * ab.y - d_uv1.y * ac.y,
