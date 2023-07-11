@@ -1,7 +1,7 @@
 //! GPU textures.
 use glam::{UVec2, Vec2};
 
-use crate::bits::{bits, pack, unpack};
+use crate::bits::{bits, insert, extract};
 
 #[cfg(target_arch = "spirv")]
 use spirv_std::num_traits::*;
@@ -16,19 +16,19 @@ impl TextureModes {
     const BITS_WRAP_T: (u32, u32) = bits(2..=3);
 
     pub fn get_wrap_s(&self) -> TextureAddressMode {
-        TextureAddressMode(unpack(self.0, Self::BITS_WRAP_S))
+        TextureAddressMode(extract(self.0, Self::BITS_WRAP_S))
     }
 
     pub fn set_wrap_s(&mut self, wrap_s: TextureAddressMode) {
-        pack(&mut self.0, Self::BITS_WRAP_S, wrap_s.0)
+        insert(&mut self.0, Self::BITS_WRAP_S, wrap_s.0)
     }
 
     pub fn get_wrap_t(&self) -> TextureAddressMode {
-        TextureAddressMode(unpack(self.0, Self::BITS_WRAP_T))
+        TextureAddressMode(extract(self.0, Self::BITS_WRAP_T))
     }
 
     pub fn set_wrap_t(&mut self, wrap_t: TextureAddressMode) {
-        pack(&mut self.0, Self::BITS_WRAP_T, wrap_t.0)
+        insert(&mut self.0, Self::BITS_WRAP_T, wrap_t.0)
     }
 }
 

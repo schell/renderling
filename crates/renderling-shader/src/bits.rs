@@ -14,8 +14,8 @@ pub const fn bits(range: RangeInclusive<u32>) -> (u32, u32) {
     (*range.start(), mask)
 }
 
-/// Pack the value of the bits defined by the shift/mask range.
-pub fn pack(bits: &mut u32, (shift, mask): (u32, u32), value: u32) {
+/// Insert the value of the bits defined by the shift/mask range.
+pub fn insert(bits: &mut u32, (shift, mask): (u32, u32), value: u32) {
     // rotate right
     if shift >= 1 {
         *bits = (*bits >> shift) | (*bits << (32 - shift));
@@ -30,7 +30,7 @@ pub fn pack(bits: &mut u32, (shift, mask): (u32, u32), value: u32) {
     }
 }
 
-/// Unpack the value of the bits defined by the shift/mask range.
-pub fn unpack(bits: u32, (shift, mask): (u32, u32)) -> u32 {
+/// Extract the value of the bits defined by the shift/mask range.
+pub fn extract(bits: u32, (shift, mask): (u32, u32)) -> u32 {
     (bits >> shift) & mask
 }
