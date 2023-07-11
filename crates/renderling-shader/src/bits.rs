@@ -1,4 +1,4 @@
-//! Helpers for bit packing/squashing.
+//! Helpers for bitwise operations.
 
 use core::ops::RangeInclusive;
 
