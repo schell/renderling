@@ -6,12 +6,14 @@ pub mod debug;
 pub mod math;
 pub mod pbr;
 pub mod scene;
+pub mod skybox;
 pub mod tonemapping;
 pub mod ui;
 
 /// Boolean toggles that cause the renderer to turn on/off certain features.
 ///
 /// CURRENTLY UNUSED.
+// TODO: Remove GpuToggles
 #[repr(transparent)]
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[derive(Default, Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]

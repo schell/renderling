@@ -45,6 +45,7 @@ mod camera;
 pub mod node;
 mod renderer;
 mod scene;
+mod skybox;
 mod state;
 #[cfg(feature = "text")]
 mod text;
@@ -58,6 +59,7 @@ pub use camera::*;
 use moongraph::IsGraphNode;
 pub use renderer::*;
 pub use scene::*;
+pub use skybox::*;
 pub use state::*;
 #[cfg(feature = "text")]
 pub use text::*;
