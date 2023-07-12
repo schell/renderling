@@ -713,38 +713,15 @@ impl GltfLoader {
             if gen_normals || gen_tangents {
                 vertices.chunks_mut(3).for_each(|t| match t {
                     [(a, _), (b, _), (c, _)] => {
-                        let ab = b.position.xyz() - a.position.xyz();
-                        let ac = c.position.xyz() - a.position.xyz();
-                        let n = if gen_normals {
-                            let n = ab.cross(ac).extend(0.0);
-                            a.normal = n;
-                            b.normal = n;
-                            c.normal = n;
-                            n.xyz()
-                        } else {
-                            a.normal.xyz()
-                        };
+                        if gen_normals {
+                            let n = GpuVertex::generate_normal(*a, *b, *c);
+                            a.normal = n.extend(a.normal.w);
+                            b.normal = n.extend(b.normal.w);
+                            c.normal = n.extend(c.normal.w);
+                        }
                         if gen_tangents {
-                            let d_uv1 = b.uv.xy() - a.uv.xy();
-                            let d_uv2 = c.uv.xy() - a.uv.xy();
-                            let denom = d_uv1.x * d_uv2.y - d_uv2.x * d_uv1.y;
-                            let denom = denom.abs().max(f32::EPSILON) * denom.signum();
-                            let f = 1.0 / denom;
-                            let s = f * Vec3::new(
-                                d_uv2.y * ab.x - d_uv1.y * ac.x,
-                                d_uv2.y * ab.y - d_uv1.y * ac.y,
-                                d_uv2.y * ab.z - d_uv1.y * ac.z,
-                            );
-                            let t = f * Vec3::new(
-                                d_uv1.x * ac.x - d_uv2.x * ab.x,
-                                d_uv1.x * ac.y - d_uv2.x * ab.y,
-                                d_uv1.x * ac.z - d_uv2.x * ab.z,
-                            );
-                            let tangent = (s - s.dot(n) * n)
-                                .normalize_or_zero()
-                                .extend(n.cross(t).dot(s).signum());
-                            debug_assert!(!tangent.w.is_nan(), "tangent is NaN n:{n} t:{t} s:{s}");
-
+                            let tangent = GpuVertex::generate_tangent(*a, *b, *c);
+                            debug_assert!(!tangent.w.is_nan(), "tangent is NaN");
                             a.tangent = tangent;
                             b.tangent = tangent;
                             c.tangent = tangent;
