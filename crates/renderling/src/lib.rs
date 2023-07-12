@@ -199,6 +199,7 @@ mod test {
     use glam::{Mat3, Mat4, Quat, UVec2, Vec2, Vec3, Vec4};
     use moongraph::Read;
     use renderling_shader::scene::{DrawIndirect, GpuEntity, GpuVertex};
+    use pretty_assertions::{assert_eq};
 
     #[test]
     fn sanity_transmute() {
@@ -740,7 +741,7 @@ mod test {
                 mesh_vertex_count: 3,
                 material: Id::new(0),
                 position: Vec4::new(15.0, 35.0, 0.5, 0.0),
-                scale: Vec4::new(0.5, 0.5, 1.0, 0.0),
+                scale: Vec4::new(0.5, 0.5, 1.0, 1.0),
                 ..Default::default()
             },
             ent
@@ -1181,6 +1182,10 @@ mod test {
         let (projection, view) = camera::default_ortho2d(100.0, 100.0);
         let mut builder = r.new_scene().with_camera(projection, view);
         let size = 1.0;
+        let root = builder
+            .new_entity()
+            .with_scale([25.0, 25.0, 1.0])
+            .build();
         let cyan_tri = builder
             .new_entity()
             .with_meshlet(vec![
@@ -1200,10 +1205,10 @@ mod test {
                     ..Default::default()
                 },
             ])
-            .with_position(Vec3::new(25.0, 25.0, 0.0))
-            .with_scale(Vec3::new(25.0, 25.0, 1.0))
+            .with_position([1.0, 1.0, 0.0])
+            .with_parent(root)
             .build();
-        let yellow_tri = builder
+        let yellow_tri = builder //
             .new_entity()
             .with_meshlet(vec![
                 GpuVertex {
@@ -1222,7 +1227,7 @@ mod test {
                     ..Default::default()
                 },
             ])
-            .with_position(Vec3::new(25.0, 25.0, 0.1))
+            .with_position([1.0, 1.0, 0.0])
             .with_parent(&cyan_tri)
             .build();
         let _red_tri = builder
@@ -1244,7 +1249,7 @@ mod test {
                     ..Default::default()
                 },
             ])
-            .with_position(Vec3::new(25.0, 25.0, 0.1))
+            .with_position([1.0, 1.0, 0.0])
             .with_parent(&yellow_tri)
             .build();
 
@@ -1252,25 +1257,32 @@ mod test {
             vec![
                 GpuEntity {
                     id: Id::new(0),
-                    position: Vec4::new(25.0, 25.0, 0.0, 0.0),
-                    scale: Vec4::new(25.0, 25.0, 1.0, 0.0),
-                    mesh_first_vertex: 0,
-                    mesh_vertex_count: 3,
+                    position: Vec4::new(0.0, 0.0, 0.0, 0.0),
+                    scale: Vec4::new(25.0, 25.0, 1.0, 1.0),
                     ..Default::default()
                 },
                 GpuEntity {
                     id: Id::new(1),
                     parent: Id::new(0),
-                    position: Vec4::new(25.0, 25.0, 0.1, 0.0),
+                    position: Vec4::new(1.0, 1.0, 0.0, 0.0),
                     scale: Vec4::new(1.0, 1.0, 1.0, 1.0),
-                    mesh_first_vertex: 3,
+                    mesh_first_vertex: 0,
                     mesh_vertex_count: 3,
                     ..Default::default()
                 },
                 GpuEntity {
                     id: Id::new(2),
                     parent: Id::new(1),
-                    position: Vec4::new(25.0, 25.0, 0.1, 0.0),
+                    position: Vec4::new(1.0, 1.0, 0.0, 0.0),
+                    scale: Vec4::new(1.0, 1.0, 1.0, 1.0),
+                    mesh_first_vertex: 3,
+                    mesh_vertex_count: 3,
+                    ..Default::default()
+                },
+                GpuEntity {
+                    id: Id::new(3),
+                    parent: Id::new(2),
+                    position: Vec4::new(1.0, 1.0, 0.0, 0.0),
                     scale: Vec4::new(1.0, 1.0, 1.0, 1.0),
                     mesh_first_vertex: 6,
                     mesh_vertex_count: 3,
@@ -1282,7 +1294,7 @@ mod test {
         let tfrm = yellow_tri.get_world_transform(&builder.entities);
         assert_eq!(
             (
-                Vec3::new(50.0, 50.0, 0.1),
+                Vec3::new(50.0, 50.0, 0.0),
                 Quat::IDENTITY,
                 Vec3::new(25.0, 25.0, 1.0),
             ),
