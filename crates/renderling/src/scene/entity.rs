@@ -66,7 +66,7 @@ impl<'a> EntityBuilder<'a> {
     }
 
     pub fn with_scale(mut self, scale: impl Into<Vec3>) -> Self {
-        self.entity.scale = scale.into().extend(0.0);
+        self.entity.scale = scale.into().extend(self.entity.scale.w);
         self
     }
 

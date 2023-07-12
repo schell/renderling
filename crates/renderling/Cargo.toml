@@ -43,3 +43,4 @@ ctor = "0.2.2"
 env_logger = "0.10.0"
 icosahedron = "^0.1"
 img-diff = { path = "../img-diff" }
+pretty_assertions = "1.4.0"
