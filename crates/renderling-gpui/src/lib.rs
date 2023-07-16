@@ -3,10 +3,10 @@ use snafu::prelude::*;
 use std::sync::Arc;
 
 use renderling::node::FrameTextureView;
-use renderling::{graph::IsGraphNode, Device, Read, RenderTarget};
+use renderling::{Device, View, RenderTarget};
 use renderling::{
     FontArc, Frame, GlyphCache, Id, OwnedSection, OwnedText, Queue, Renderling, UiDrawObject,
-    UiDrawObjectBuilder, UiMode, UiScene, UiVertex, WgpuStateError, Write,
+    UiDrawObjectBuilder, UiMode, UiScene, UiVertex, WgpuStateError, ViewMut,
 };
 use renderling::{UiRenderPipeline, UiSceneError};
 
@@ -254,11 +254,11 @@ impl<A: Element, B: Element> Element for (A, B) {
 }
 
 type RenderParams = (
-    Read<Device>,
-    Read<Queue>,
-    Read<UiScene>,
-    Read<UiRenderPipeline>,
-    Read<FrameTextureView>,
+    View<Device>,
+    View<Queue>,
+    View<UiScene>,
+    View<UiRenderPipeline>,
+    View<FrameTextureView>,
 );
 
 /// User interface renderer.
@@ -315,36 +315,24 @@ impl Gpui {
 
         let pipeline = renderling::UiRenderPipeline(
             r.graph
-                .visit(|(device, target): (Read<Device>, Read<RenderTarget>)| {
+                .visit(|(device, target): (View<Device>, View<RenderTarget>)| {
                     renderling::create_ui_pipeline(&device, target.format())
                 })
                 .unwrap(),
         );
         r.graph.add_resource(pipeline);
 
-        r.graph.add_node(
-            renderling::node::create_frame
-                .into_node()
-                .with_name("create_frame"),
-        );
-        r.graph.add_node(
-            renderling::node::clear_frame_and_depth
-                .into_node()
-                .with_name("clear_frame_and_depth"),
-        );
-
         fn update_scene(
-            (mut scene, device, queue): (Write<UiScene>, Read<Device>, Read<Queue>),
+            (mut scene, device, queue): (ViewMut<UiScene>, View<Device>, View<Queue>),
         ) -> Result<(), WgpuStateError> {
             scene.update(&device, &queue, []).unwrap();
             Ok(())
         }
-        r.graph
-            .add_node(update_scene.into_node().with_name("ui_scene_update"));
 
+        use renderling::{Graph, graph, node::{create_frame, clear_frame_and_depth}};
+        r.graph.add_subgraph(graph!(create_frame, clear_frame_and_depth, update_scene));
         r.graph.add_barrier();
-
-        r.graph.add_local::<RenderParams, ()>();
+        r.graph.add_local::<RenderParams, ()>("render");
         Self(r)
     }
 
@@ -355,7 +343,7 @@ impl Gpui {
         self.0.resize(width, height);
         self.0
             .graph
-            .visit(|mut ui_scene: Write<UiScene>| {
+            .visit(|mut ui_scene: ViewMut<UiScene>| {
                 ui_scene.set_canvas_size(width, height);
             })
             .unwrap();

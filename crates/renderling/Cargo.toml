@@ -1,6 +1,6 @@
 [package]
 name = "renderling"
-version = "0.3.0"
+version = "0.3.2"
 edition = "2021"
 description = "User-friendly real-time rendering. 🍖"
 repository = "https://github.com/schell/renderling"
@@ -27,7 +27,7 @@ gltf = { version = "^1.1", optional = true, features = ["KHR_lights_punctual", "
 glyph_brush = { version = "^0.7", optional = true }
 image = "0.24.4"
 log = "^0.4"
-moongraph = { version = "^0.2", features = ["dot"] }
+moongraph = { version = "^0.3.4", features = ["dot"] }
 raw-window-handle = { version = "^0.5", optional = true }
 renderling-shader = { path = "../renderling-shader" }
 rustc-hash = "^1.1"

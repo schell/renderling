@@ -45,7 +45,7 @@ mod camera;
 pub mod node;
 mod renderer;
 mod scene;
-mod skybox;
+// mod skybox;
 mod state;
 #[cfg(feature = "text")]
 mod text;
@@ -59,7 +59,7 @@ pub use camera::*;
 use moongraph::IsGraphNode;
 pub use renderer::*;
 pub use scene::*;
-pub use skybox::*;
+// pub use skybox::*;
 pub use state::*;
 #[cfg(feature = "text")]
 pub use text::*;
@@ -83,7 +83,7 @@ pub mod graph {
     pub type RenderNode = Node<Function, TypeKey>;
 }
 
-pub use graph::{Graph, Move, Read, Write};
+pub use graph::{graph, Graph, GraphError, Move, View, ViewMut};
 
 pub fn setup_ui_and_scene_render_graph(
     r: &mut Renderling,
@@ -92,19 +92,19 @@ pub fn setup_ui_and_scene_render_graph(
     scene: Scene,
     with_screen_capture: bool,
 ) {
+    // add resources
     let ui_objects = UiDrawObjects(ui_objects.into_iter().collect::<Vec<_>>());
     r.graph.add_resource(ui_scene);
     r.graph.add_resource(ui_objects);
     r.graph.add_resource(scene);
     let ui_pipeline = UiRenderPipeline(
         r.graph
-            .visit(|(device, target): (Read<Device>, Read<RenderTarget>)| {
+            .visit(|(device, target): (View<Device>, View<RenderTarget>)| {
                 create_ui_pipeline(&device, target.format())
             })
             .unwrap(),
     );
     r.graph.add_resource(ui_pipeline);
-
     let (hdr_surface,) = r
         .graph
         .visit(node::create_hdr_render_surface)
@@ -117,91 +117,54 @@ pub fn setup_ui_and_scene_render_graph(
     r.graph.add_resource(pipeline);
     let scene_cull_pipeline = SceneComputeCullPipeline(
         r.graph
-            .visit(|device: Read<Device>| create_scene_compute_cull_pipeline(&device))
+            .visit(|device: View<Device>| create_scene_compute_cull_pipeline(&device))
             .unwrap(),
     );
     r.graph.add_resource(scene_cull_pipeline);
     let scene_pipeline = SceneRenderPipeline(
         r.graph
-            .visit(|device: Read<Device>| {
+            .visit(|device: View<Device>| {
                 create_scene_render_pipeline(&device, hdr_surface.texture.texture.format())
             })
             .unwrap(),
     );
     r.graph.add_resource(scene_pipeline);
     r.graph.add_resource(hdr_surface);
-    r.graph.add_node(
-        crate::node::create_frame
-            .into_node()
-            .with_name("create_frame"),
-    );
-    r.graph.add_node(
-        node::clear_surface_hdr_and_depth
-            .into_node()
-            .with_name("clear_hdr_frame_and_depth"),
-    );
 
-    r.graph.add_node(
-        node::hdr_surface_update
-            .into_node()
-            .with_name("hdr_surface_update"),
-    );
-    r.graph
-        .add_node(scene_update.into_node().with_name("scene_update"));
-    r.graph.add_node(
-        scene_cull
-            .into_node()
-            .with_name("scene_cull")
-            .run_after("scene_update"),
-    );
-    r.graph
-        .add_node(ui_scene_update.into_node().with_name("ui_scene_update"));
-    r.graph.add_barrier();
+    // add nodes
+    use node::{
+        clear_depth, clear_surface_hdr_and_depth, create_frame, hdr_surface_update, present,
+    };
+    let pre_render = graph!(
+        create_frame,
+        clear_surface_hdr_and_depth,
+        hdr_surface_update,
+        scene_update < scene_cull,
+        ui_scene_update
+    ).with_barrier();
+    let render = graph!(
+        scene_render < scene_tonemapping < clear_depth,
+        clear_depth < ui_scene_render
+    ).with_barrier();
+    let copy_frame_to_post = crate::node::PostRenderBufferCreate::create;
+    let present = if with_screen_capture {
+        graph!(copy_frame_to_post < present)
+    } else {
+        graph!(present)
+    };
 
-    r.graph
-        .add_node(scene_render.into_node().with_name("scene_render"));
-    r.graph.add_node(
-        scene_tonemapping
-            .into_node()
-            .with_name("scene_tonemapping")
-            .run_after("scene_render")
-            .run_before("present"),
-    );
-    r.graph.add_node(
-        crate::node::clear_depth
-            .into_node()
-            .with_name("clear_depth")
-            .run_after("scene_tonemapping"),
-    );
-    r.graph.add_node(
-        ui_scene_render
-            .into_node()
-            .with_name("ui_scene_render")
-            .run_after("clear_depth"),
-    );
-
-    r.graph.add_barrier();
-
-    if with_screen_capture {
-        r.graph.add_node(
-            crate::node::PostRenderBufferCreate::create
-                .into_node()
-                .with_name("copy_frame_to_post")
-                .run_before("present"),
-        );
-    }
-
-    r.graph
-        .add_node(crate::node::present.into_node().with_name("present"));
+    r.graph.add_subgraph(pre_render);
+    r.graph.add_subgraph(render);
+    r.graph.add_subgraph(present);
 }
 
 #[cfg(test)]
 mod test {
     use super::*;
     use glam::{Mat3, Mat4, Quat, UVec2, Vec2, Vec3, Vec4};
-    use moongraph::Read;
+    use moongraph::View;
+    use pretty_assertions::assert_eq;
     use renderling_shader::scene::{DrawIndirect, GpuEntity, GpuVertex};
-    use pretty_assertions::{assert_eq};
 
     #[test]
     fn sanity_transmute() {
@@ -240,6 +203,7 @@ mod test {
         let _ = env_logger::builder()
             .is_test(true)
             //.filter_level(log::LevelFilter::Trace)
+            .filter_module("moongraph", log::LevelFilter::Trace)
             .filter_module("renderling", log::LevelFilter::Trace)
             //.filter_module("naga", log::LevelFilter::Debug)
             //.filter_module("wgpu", log::LevelFilter::Debug)
@@ -285,7 +249,7 @@ mod test {
         tri.rotation = Quat::from_axis_angle(Vec3::Z, std::f32::consts::FRAC_PI_2);
         tri.scale = Vec4::new(0.5, 0.5, 1.0, 0.0);
         c.ui.graph
-            .visit(|mut scene: Write<Scene>| {
+            .visit(|mut scene: ViewMut<Scene>| {
                 scene.update_entity(tri).unwrap();
             })
             .unwrap();
@@ -327,7 +291,8 @@ mod test {
     }
 
     fn gpu_cube_vertices() -> Vec<GpuVertex> {
-        let vertices = crate::math::unit_points();
+        let vertices = renderling_shader::math::UNIT_POINTS;
+        // TODO: change this to use math::UNIT_INDICES
         let indices: [u16; 12 * 3] = [
             0, 2, 1, 0, 3, 2, // top
             0, 4, 3, 4, 5, 3, // front
@@ -409,7 +374,7 @@ mod test {
 
         // update cube two making in invisible
         r.graph
-            .visit(|mut scene: Write<Scene>| {
+            .visit(|mut scene: ViewMut<Scene>| {
                 cube_two.visible = 0;
                 scene.update_entity(cube_two).unwrap();
             })
@@ -421,7 +386,7 @@ mod test {
 
         // update cube two making in visible again
         r.graph
-            .visit(|mut scene: Write<Scene>| {
+            .visit(|mut scene: ViewMut<Scene>| {
                 cube_two.visible = 1;
                 scene.update_entity(cube_two).unwrap();
             })
@@ -457,7 +422,7 @@ mod test {
 
         // update the cube mesh to a pyramid
         r.graph
-            .visit(|mut scene: Write<Scene>| {
+            .visit(|mut scene: ViewMut<Scene>| {
                 cube.mesh_first_vertex = pyramid_start;
                 cube.mesh_vertex_count = pyramid_count;
                 scene.update_entity(cube).unwrap();
@@ -470,7 +435,7 @@ mod test {
     }
 
     fn gpu_uv_unit_cube() -> Vec<GpuVertex> {
-        let p: [Vec3; 8] = crate::math::unit_points();
+        let p: [Vec3; 8] = renderling_shader::math::UNIT_POINTS;
         let tl = Vec2::new(0.0, 0.0);
         let tr = Vec2::new(1.0, 0.0);
         let bl = Vec2::new(0.0, 1.0);
@@ -548,7 +513,7 @@ mod test {
 
         // update the material's texture on the GPU
         r.graph
-            .visit(|mut scene: Write<Scene>| {
+            .visit(|mut scene: ViewMut<Scene>| {
                 material.texture0 = dirt_id;
                 let _ = scene
                     .materials
@@ -647,7 +612,7 @@ mod test {
         let (constants, gpu_verts, ents, indirect) = r
             .graph
             .visit(
-                |(scene, device, queue): (Read<Scene>, Read<Device>, Read<Queue>)| {
+                |(scene, device, queue): (View<Scene>, View<Device>, View<Queue>)| {
                     let constants = crate::read_buffer::<GpuConstants>(
                         &device,
                         &queue,
@@ -1184,10 +1149,7 @@ mod test {
         let (projection, view) = camera::default_ortho2d(100.0, 100.0);
         let mut builder = r.new_scene().with_camera(projection, view);
         let size = 1.0;
-        let root = builder
-            .new_entity()
-            .with_scale([25.0, 25.0, 1.0])
-            .build();
+        let root = builder.new_entity().with_scale([25.0, 25.0, 1.0]).build();
         let cyan_tri = builder
             .new_entity()
             .with_meshlet(vec![
@@ -1302,7 +1264,8 @@ mod test {
             ),
             tfrm
         );
-        // while we're at it let's also check that skinning doesn't affect entities/vertices that aren't skins
+        // while we're at it let's also check that skinning doesn't affect
+        // entities/vertices that aren't skins
         let vertex = &builder.vertices[yellow_tri.mesh_first_vertex as usize];
         let skin_matrix = vertex.get_skin_matrix(&yellow_tri.skin_joint_ids, &builder.entities);
         assert_eq!(Mat4::IDENTITY, skin_matrix);
@@ -1440,7 +1403,7 @@ mod test {
 
         let view = camera::look_at([-len, len, len], [half, half, 0.0], Vec3::Y);
         r.graph
-            .visit(|mut scene: Write<Scene>| scene.set_camera(projection, view))
+            .visit(|mut scene: ViewMut<Scene>| scene.set_camera(projection, view))
             .unwrap();
 
         let img = r.render_image().unwrap();

@@ -4,8 +4,8 @@ use snafu::prelude::*;
 use std::{ops::Deref, sync::Arc};
 
 use crate::{
-    node::HdrSurface, CreateSurfaceFn, Graph, Read, RenderTarget, SceneBuilder, TextureError,
-    UiSceneBuilder, WgpuStateError, Write,
+    node::HdrSurface, CreateSurfaceFn, Graph, View, RenderTarget, SceneBuilder, TextureError,
+    UiSceneBuilder, WgpuStateError, ViewMut,
 };
 
 #[derive(Debug, Snafu)]
@@ -211,10 +211,10 @@ impl Renderling {
         self.graph
             .visit(
                 |(device, mut screen_size, mut target, mut depth_texture): (
-                    Read<Device>,
-                    Write<ScreenSize>,
-                    Write<RenderTarget>,
-                    Write<DepthTexture>,
+                    View<Device>,
+                    ViewMut<ScreenSize>,
+                    ViewMut<RenderTarget>,
+                    ViewMut<DepthTexture>,
                 )| {
                     *screen_size = ScreenSize { width, height };
                     target.resize(width, height, &device.0);
@@ -225,7 +225,7 @@ impl Renderling {
         // The renderer doesn't _always_ have an HrdSurface, so we don't unwrap this
         // one.
         let _ = self.graph.visit(
-            |(device, queue, mut hdr): (Read<Device>, Read<Queue>, Write<HdrSurface>)| {
+            |(device, queue, mut hdr): (View<Device>, View<Queue>, ViewMut<HdrSurface>)| {
                 hdr.texture = HdrSurface::create_texture(&device, &queue, width, height);
                 hdr.texture_bindgroup = HdrSurface::create_texture_bindgroup(&device, &hdr.texture);
             },

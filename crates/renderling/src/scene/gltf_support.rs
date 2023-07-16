@@ -1423,7 +1423,7 @@ mod test {
     #[cfg(feature = "gltf")]
     #[test]
     fn simple_skin() {
-        use crate::{Scene, TweenProperty, Write};
+        use crate::{Scene, TweenProperty, ViewMut};
 
         let size = 100;
         let mut r = Renderling::headless(size, size)
@@ -1452,7 +1452,7 @@ mod test {
                 i as f32 / frames as f32 * skin_animation_duration
             };
             r.graph
-                .visit(|mut scene: Write<Scene>| {
+                .visit(|mut scene: ViewMut<Scene>| {
                     for (id, tween_prop) in skin_animation.get_properties_at_time(time).unwrap() {
                         let mut ent = entities.get_mut(id.index()).unwrap();
                         match tween_prop {

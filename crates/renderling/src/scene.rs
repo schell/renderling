@@ -2,13 +2,15 @@
 use std::sync::Arc;
 
 use glam::{Mat4, Vec3};
-use moongraph::{IsGraphNode, Read, Write};
+use moongraph::{IsGraphNode, View, ViewMut};
 use renderling_shader::{debug::DebugChannel, GpuToggles};
 use snafu::prelude::*;
 
 pub use renderling_shader::scene::*;
 
 use crate::{
+    Graph,
+    graph,
     node::{self, FrameTextureView, HdrSurface},
     Atlas, DepthTexture, Device, GpuArray, Queue, Renderling, Uniform,
 };
@@ -691,17 +693,17 @@ pub struct SceneRenderPipeline(pub wgpu::RenderPipeline);
 
 pub struct SceneComputeCullPipeline(pub wgpu::ComputePipeline);
 
-pub fn scene_update((queue, mut scene): (Read<Queue>, Write<Scene>)) -> Result<(), SceneError> {
+pub fn scene_update((queue, mut scene): (View<Queue>, ViewMut<Scene>)) -> Result<(), SceneError> {
     scene.update(&queue);
     Ok(())
 }
 
 pub fn scene_cull(
     (device, queue, scene, pipeline): (
-        Read<Device>,
-        Read<Queue>,
-        Read<Scene>,
-        Read<SceneComputeCullPipeline>,
+        View<Device>,
+        View<Queue>,
+        View<Scene>,
+        View<SceneComputeCullPipeline>,
     ),
 ) -> Result<(), SceneError> {
     let label = Some("scene cull");
@@ -721,12 +723,12 @@ pub fn scene_cull(
 
 pub fn scene_render(
     (device, queue, scene, pipeline, hdr_frame, depth): (
-        Read<Device>,
-        Read<Queue>,
-        Read<Scene>,
-        Read<SceneRenderPipeline>,
-        Read<HdrSurface>,
-        Read<DepthTexture>,
+        View<Device>,
+        View<Queue>,
+        View<Scene>,
+        View<SceneRenderPipeline>,
+        View<HdrSurface>,
+        View<DepthTexture>,
     ),
 ) -> Result<(), SceneError> {
     let label = Some("scene hdr render");
@@ -770,11 +772,11 @@ pub fn scene_render(
 /// likely) sRGB window surface.
 pub fn scene_tonemapping(
     (device, queue, frame, hdr_frame, depth): (
-        Read<Device>,
-        Read<Queue>,
-        Read<FrameTextureView>,
-        Read<HdrSurface>,
-        Read<DepthTexture>,
+        View<Device>,
+        View<Queue>,
+        View<FrameTextureView>,
+        View<HdrSurface>,
+        View<DepthTexture>,
     ),
 ) -> Result<(), SceneError> {
     let label = Some("scene tonemapping");
@@ -810,68 +812,40 @@ pub fn scene_tonemapping(
 
 pub fn setup_scene_render_graph(scene: Scene, r: &mut Renderling, with_screen_capture: bool) {
     r.graph.add_resource(scene);
-
     let (hdr_surface,) = r
         .graph
         .visit(node::create_hdr_render_surface)
         .unwrap()
         .unwrap();
-    let pipeline = SceneRenderPipeline({
-        let device = r.get_device();
+    let device = r.get_device();
+    let scene_render_pipeline = SceneRenderPipeline({
         create_scene_render_pipeline(&device, hdr_surface.texture.texture.format())
     });
-    r.graph.add_resource(pipeline);
+    let compute_cull_pipeline = SceneComputeCullPipeline(
+        create_scene_compute_cull_pipeline(device)
+    );
+    drop(device);
+    r.graph.add_resource(scene_render_pipeline);
     r.graph.add_resource(hdr_surface);
+    r.graph.add_resource(compute_cull_pipeline);
 
+    use node::{clear_surface_hdr_and_depth, create_frame, hdr_surface_update, present};
+    // pre-render subgraph
     r.graph
-        .add_node(node::create_frame.into_node().with_name("create_frame"));
-    r.graph.add_node(
-        node::clear_surface_hdr_and_depth
-            .into_node()
-            .with_name("clear_hdr_frame_and_depth"),
-    );
+        .add_subgraph(graph!(
+            create_frame,
+            clear_surface_hdr_and_depth,
+            hdr_surface_update,
+            scene_update < scene_cull
+        ))
+        .add_barrier();
 
-    r.graph.add_node(
-        node::hdr_surface_update
-            .into_node()
-            .with_name("hdr_surface_update"),
-    );
+    // render and post-render subgraph
     r.graph
-        .add_node(scene_update.into_node().with_name("scene_update"));
-
-    let pipeline = SceneComputeCullPipeline(
-        r.graph
-            .visit(|device: Read<Device>| create_scene_compute_cull_pipeline(&device))
-            .unwrap(),
-    );
-    r.graph.add_resource(pipeline);
-
-    r.graph.add_node(
-        scene_cull
-            .into_node()
-            .with_name("scene_cull")
-            .run_after("scene_update"),
-    );
-    r.graph.add_barrier();
-
-    r.graph
-        .add_node(scene_render.into_node().with_name("scene_render"));
-    r.graph.add_node(
-        scene_tonemapping
-            .into_node()
-            .with_name("scene_tonemapping")
-            .run_after("scene_render")
-            .run_before("present"),
-    );
-    r.graph
-        .add_node(crate::node::present.into_node().with_name("present"));
-    if with_screen_capture {
-        r.graph.add_node(
-            crate::node::PostRenderBufferCreate::create
-                .into_node()
-                .with_name("copy_frame_to_post")
-                .run_after("scene_render")
-                .run_before("present"),
-        );
-    }
+        .add_subgraph(if with_screen_capture {
+            let copy_frame_to_post = crate::node::PostRenderBufferCreate::create;
+            graph!(scene_render < scene_tonemapping < copy_frame_to_post < present)
+        } else {
+            graph!(scene_render < scene_tonemapping < present)
+        });
 }

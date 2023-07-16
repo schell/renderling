@@ -8,7 +8,7 @@ use renderling::{
     debug::DebugChannel,
     math::{Mat4, Vec3, Vec4},
     GltfLoader, GpuEntity, Renderling, Scene, ScreenSize, TweenProperty, UiDrawObjects, UiMode,
-    UiVertex, Write,
+    UiVertex, ViewMut,
 };
 use renderling_gpui::{Element, Gpui};
 use winit::event::KeyboardInput;
@@ -263,7 +263,7 @@ impl App {
         r.resize(width, height);
         r.graph
             .visit(
-                |(mut scene, mut ui_objs): (Write<Scene>, Write<UiDrawObjects>)| {
+                |(mut scene, mut ui_objs): (ViewMut<Scene>, ViewMut<UiDrawObjects>)| {
                     scene.set_camera_projection(Mat4::perspective_infinite_rh(
                         std::f32::consts::FRAC_PI_4,
                         width as f32 / height as f32,
@@ -312,7 +312,7 @@ impl App {
                         }
                     }
                     r.graph
-                        .visit(|mut scene: Write<Scene>| {
+                        .visit(|mut scene: ViewMut<Scene>| {
                             scene.update_entity(*ent).unwrap();
                         })
                         .unwrap();
