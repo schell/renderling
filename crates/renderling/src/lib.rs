@@ -15,8 +15,7 @@
 //! ## Features
 //!
 //! - forward+ style pipeline, configurable lighting model per material
-//!   - [ ] physically based shading
-//!   - [x] blinn-phong shading
+//!   - [x] physically based shading
 //!   - [x] user interface "colored text" shading (uses opacity glyphs in an
 //!     atlas)
 //!   - [x] no shading
@@ -26,11 +25,11 @@
 //!   - [x] meshes
 //!   - [x] materials
 //!   - [x] textures, images, samplers
-//!   - [ ] skins
-//!   - [ ] animations
-//! - [ ] high definition rendering
-//! - [ ] bloom
+//!   - [x] skins
+//!   - [x] animations
+//! - [x] high definition rendering
 //! - [ ] image based lighting
+//! - [ ] bloom
 //! - [ ] ssao
 //! - [ ] depth of field
 //!

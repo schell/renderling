@@ -1,6 +1,7 @@
 //! Skybox shader.
 
-use glam::{Vec3, Vec4, Vec2, Mat4, Mat3, Vec4Swizzles};
+use glam::{Vec3, Vec4, Mat4, Mat3, Vec4Swizzles};
+use spirv_std::{image::Image3d, Sampler};
 
 use crate::{scene::GpuConstants, math};
 
@@ -19,8 +20,11 @@ pub fn vertex(
 }
 
 pub fn fragment(
+    environment_map: &Image3d,
+    sampler: &Sampler,
     local_pos: Vec3,
     out_color: &mut Vec4,
 ) {
-
+    let env_color = environment_map.sample_by_lod(*sampler, local_pos, 1.2).xyz();
+    *out_color = env_color.extend(1.0);
 }
