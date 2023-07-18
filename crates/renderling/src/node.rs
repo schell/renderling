@@ -189,6 +189,7 @@ impl HdrSurface {
             }),
             wgpu::TextureFormat::Rgba16Float,
             4,
+            1,
             width,
             height,
             &[],

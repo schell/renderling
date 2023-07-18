@@ -12,7 +12,7 @@ use snafu::prelude::*;
 use wgpu::util::DeviceExt;
 
 use crate::{
-    node::FrameTextureView, Device, IsGraphNode, Queue, RenderTarget, Renderling, Texture, Uniform,
+    node::FrameTextureView, Device, Queue, RenderTarget, Renderling, Texture, Uniform,
     View, ViewMut,
 };
 

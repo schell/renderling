@@ -1,11 +1,12 @@
 //! Builds the UI pipeline and manages resources.
 use glam::Vec4;
+use moongraph::TypeKey;
 use snafu::prelude::*;
 use std::{ops::Deref, sync::Arc};
 
 use crate::{
-    node::HdrSurface, CreateSurfaceFn, Graph, View, RenderTarget, SceneBuilder, TextureError,
-    UiSceneBuilder, WgpuStateError, ViewMut,
+    node::HdrSurface, CreateSurfaceFn, Graph, RenderTarget, SceneBuilder, TextureError,
+    UiSceneBuilder, View, ViewMut, WgpuStateError,
 };
 
 #[derive(Debug, Snafu)]
@@ -40,7 +41,7 @@ pub enum RenderlingError {
     //#[snafu(display("could not create scene: {}", source))]
     // Scene { source: crate::GltfError },
     #[snafu(display("missing resource"))]
-    Resource,
+    Resource { key: TypeKey },
 
     #[snafu(display("{source}"))]
     Graph { source: moongraph::GraphError },
@@ -63,7 +64,7 @@ pub enum RenderlingError {
     State { source: WgpuStateError },
 }
 
-/// A thread-safe wrapper around `wgpu::Device`.
+/// A thread-safe, clonable wrapper around `wgpu::Device`.
 #[derive(Clone)]
 pub struct Device(pub Arc<wgpu::Device>);
 
@@ -75,12 +76,24 @@ impl Deref for Device {
     }
 }
 
-/// A thread-safe wrapper around `wgpu::Queue`.
+/// A thread-safe, clonable wrapper around `wgpu::Queue`.
 #[derive(Clone)]
 pub struct Queue(pub Arc<wgpu::Queue>);
 
 impl Deref for Queue {
     type Target = wgpu::Queue;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+/// A thread-safe, clonable wrapper around `wgpu::Adapter`.
+#[derive(Clone)]
+pub struct Adapter(pub Arc<wgpu::Adapter>);
+
+impl Deref for Adapter {
+    type Target = wgpu::Adapter;
 
     fn deref(&self) -> &Self::Target {
         &self.0
@@ -119,6 +132,7 @@ impl Renderling {
     pub fn new(
         target: RenderTarget,
         depth_texture: crate::Texture,
+        adapter: impl Into<Arc<wgpu::Adapter>>,
         device: impl Into<Arc<wgpu::Device>>,
         queue: impl Into<Arc<wgpu::Queue>>,
         (width, height): (u32, u32),
@@ -127,6 +141,7 @@ impl Renderling {
             graph: Graph::default()
                 .with_resource(target)
                 .with_resource(DepthTexture(depth_texture))
+                .with_resource(Adapter(adapter.into()))
                 .with_resource(Device(device.into()))
                 .with_resource(Queue(queue.into()))
                 .with_resource(ScreenSize { width, height })
@@ -136,14 +151,21 @@ impl Renderling {
 
     pub async fn try_new_headless(width: u32, height: u32) -> Result<Self, RenderlingError> {
         let size = (width, height);
-        let (device, queue, target) = crate::state::new_device_queue_and_target(
+        let (adapter, device, queue, target) = crate::state::new_adapter_device_queue_and_target(
             width,
             height,
             None as Option<CreateSurfaceFn>,
         )
         .await;
         let depth_texture = crate::Texture::create_depth_texture(&device, width, height);
-        Ok(Self::new(target, depth_texture, device, queue, size))
+        Ok(Self::new(
+            target,
+            depth_texture,
+            adapter,
+            device,
+            queue,
+            size,
+        ))
     }
 
     #[cfg(feature = "raw-window-handle")]
@@ -156,7 +178,7 @@ impl Renderling {
         W: raw_window_handle::HasRawWindowHandle + raw_window_handle::HasRawDisplayHandle,
     {
         let size = (width, height);
-        let (device, queue, target) = crate::state::new_device_queue_and_target(
+        let (adapter, device, queue, target) = crate::state::new_adapter_device_queue_and_target(
             width,
             height,
             Some(Box::new(|instance: &wgpu::Instance| {
@@ -167,7 +189,14 @@ impl Renderling {
         .await;
         let depth_texture = crate::Texture::create_depth_texture(&device, width, height);
 
-        Ok(Self::new(target, depth_texture, device, queue, size))
+        Ok(Self::new(
+            target,
+            depth_texture,
+            adapter,
+            device,
+            queue,
+            size,
+        ))
     }
 
     #[cfg(feature = "raw-window-handle")]
@@ -246,12 +275,16 @@ impl Renderling {
             .graph
             .get_resource::<Device>()
             .context(GraphSnafu)?
-            .context(ResourceSnafu)?;
+            .context(ResourceSnafu {
+                key: TypeKey::new::<Device>(),
+            })?;
         let queue = self
             .graph
             .get_resource::<Queue>()
             .context(GraphSnafu)?
-            .context(ResourceSnafu)?;
+            .context(ResourceSnafu {
+                key: TypeKey::new::<Queue>(),
+            })?;
         crate::Texture::from_image_buffer(
             device,
             queue,
@@ -278,6 +311,21 @@ impl Renderling {
     pub fn get_queue(&self) -> &wgpu::Queue {
         // UNWRAP: safe because invariant - Renderer always has Queue
         &self.graph.get_resource::<Queue>().unwrap().unwrap().0
+    }
+
+    pub fn get_adapter(&self) -> &wgpu::Adapter {
+        // UNWRAP: safe because invariant - Renderer always has Adapter
+        &self.graph.get_resource::<Adapter>().unwrap().unwrap().0
+    }
+
+    /// Returns a the adapter in an owned wrapper.
+    pub fn get_adapter_owned(&self) -> crate::Adapter {
+        // UNWRAP: safe because invariant - Renderer always has Adapter
+        self.graph
+            .get_resource::<Adapter>()
+            .unwrap()
+            .unwrap()
+            .clone()
     }
 
     /// Returns a pair of the device and queue in an owned wrapper.
@@ -339,7 +387,9 @@ impl Renderling {
             .graph
             .remove_resource::<PostRenderBuffer>()
             .context(MissingPostRenderBufferSnafu)?
-            .context(ResourceSnafu)?;
+            .context(ResourceSnafu {
+                key: TypeKey::new::<PostRenderBuffer>(),
+            })?;
         let device = self.get_device();
         let img = buffer.0.into_rgba(device).context(TextureSnafu)?;
         Ok(img)

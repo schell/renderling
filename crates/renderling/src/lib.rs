@@ -10,7 +10,7 @@
 //! # renderlings 🍖
 //!
 //! Render graphs and all their resources are called "renderlings" for maximum
-//! cuteness. Renderlings are configurable DAGs.
+//! cuteness. Renderlings are configurable DAGs that draw something to a screen or texture.
 //!
 //! ## Features
 //!
@@ -44,7 +44,7 @@ mod camera;
 pub mod node;
 mod renderer;
 mod scene;
-// mod skybox;
+mod skybox;
 mod state;
 #[cfg(feature = "text")]
 mod text;
@@ -58,7 +58,7 @@ pub use camera::*;
 use moongraph::IsGraphNode;
 pub use renderer::*;
 pub use scene::*;
-// pub use skybox::*;
+pub use skybox::*;
 pub use state::*;
 #[cfg(feature = "text")]
 pub use text::*;
@@ -158,6 +158,20 @@ pub fn setup_ui_and_scene_render_graph(
 }
 
 #[cfg(test)]
+#[ctor::ctor]
+fn init_logging() {
+    let _ = env_logger::builder()
+        .is_test(true)
+    //.filter_level(log::LevelFilter::Trace)
+        .filter_module("moongraph", log::LevelFilter::Trace)
+        .filter_module("renderling", log::LevelFilter::Trace)
+    //.filter_module("naga", log::LevelFilter::Debug)
+    //.filter_module("wgpu", log::LevelFilter::Debug)
+    //.filter_module("wgpu_hal", log::LevelFilter::Warn)
+        .try_init();
+}
+
+#[cfg(test)]
 mod test {
     use super::*;
     use glam::{Mat3, Mat4, Quat, UVec2, Vec2, Vec3, Vec4};
@@ -195,19 +209,6 @@ mod test {
                 .with_position([100.0, 0.0, 0.5])
                 .with_color([1.0, 0.0, 1.0, 1.0]),
         ]
-    }
-
-    #[ctor::ctor]
-    fn init_logging() {
-        let _ = env_logger::builder()
-            .is_test(true)
-            //.filter_level(log::LevelFilter::Trace)
-            .filter_module("moongraph", log::LevelFilter::Trace)
-            .filter_module("renderling", log::LevelFilter::Trace)
-            //.filter_module("naga", log::LevelFilter::Debug)
-            //.filter_module("wgpu", log::LevelFilter::Debug)
-            //.filter_module("wgpu_hal", log::LevelFilter::Warn)
-            .try_init();
     }
 
     struct CmyTri {
@@ -528,8 +529,8 @@ mod test {
 
     #[test]
     fn gpu_array_update() {
-        let (device, queue, _) = futures_lite::future::block_on(
-            crate::state::new_device_queue_and_target(100, 100, None as Option<CreateSurfaceFn>),
+        let (_, device, queue, _) = futures_lite::future::block_on(
+            crate::state::new_adapter_device_queue_and_target(100, 100, None as Option<CreateSurfaceFn>),
         );
 
         let points = vec![

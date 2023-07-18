@@ -274,6 +274,7 @@ impl Gpui {
     /// Create a new UI renderer linked to the device and queue of another
     /// [`Renderling`].
     pub fn new_from(r: &renderling::Renderling) -> Self {
+        let adapter = r.get_adapter_owned();
         let (device, queue) = r.get_device_and_queue_owned();
         let (width, height) = r.get_screen_size();
         let target = RenderTarget::Texture {
@@ -301,6 +302,7 @@ impl Gpui {
         let mut r = Renderling::new(
             target,
             depth_texture,
+            adapter.0.clone(),
             device.0.clone(),
             queue.0.clone(),
             (width, height),
