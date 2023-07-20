@@ -32,7 +32,7 @@ raw-window-handle = { version = "^0.5", optional = true }
 renderling-shader = { path = "../renderling-shader" }
 rustc-hash = "^1.1"
 snafu = "^0.7"
-wgpu = { version = "^0.16", features = ["spirv"] }
+wgpu = { version = "^0.16", features = ["spirv", "vulkan-portability"] }
 winit = { version = "^0.27", optional = true }
 
 [package.metadata.docs.rs]

@@ -8,12 +8,12 @@ pub fn triangle_face_normal(p1: Vec3, p2: Vec3, p3: Vec3) -> Vec3 {
     n
 }
 
-pub const POINTS_2D_TEX_QUAD: &[Vec2] = {
+pub const POINTS_2D_TEX_QUAD: [Vec2; 6] = {
     let tl = Vec2::new(0.0, 0.0);
     let tr = Vec2::new(1.0, 0.0);
     let bl = Vec2::new(0.0, 1.0);
     let br = Vec2::new(1.0, 1.0);
-    &[tl, bl, tr, tr, bl, br]
+    [tl, bl, tr, tr, bl, br]
 };
 
 /// Points around the unit cube.
@@ -47,6 +47,7 @@ pub const UNIT_INDICES: [usize; 36] = [
     2, 7, 1, 2, 6, 7, // back
 ];
 
+#[cfg(not(target_arch = "spirv"))]
 pub fn unit_cube() -> Vec<(Vec3, Vec3)> {
     UNIT_INDICES
         .chunks_exact(3)
@@ -56,7 +57,7 @@ pub fn unit_cube() -> Vec<(Vec3, Vec3)> {
                 let b = UNIT_POINTS[*b];
                 let c = UNIT_POINTS[*c];
                 let n = triangle_face_normal(a, b, c);
-                vec![(a, n), (b, n), (c, n)]
+                [(a, n), (b, n), (c, n)]
             }
             _ => unreachable!()
         })

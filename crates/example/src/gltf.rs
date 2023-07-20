@@ -69,7 +69,7 @@ impl App {
             .with_vertices(
                 renderling::math::POINTS_2D_TEX_QUAD
                     .into_iter()
-                    .map(|v2| UiVertex::default().with_position(*v2).with_uv(*v2)),
+                    .map(|v2| UiVertex::default().with_position(v2).with_uv(v2)),
             )
             .build();
 

@@ -1,89 +1,235 @@
 //! An HDR skybox.
+use renderling_shader::scene::GpuConstants;
 
-use glam::{Mat4, Vec3};
+use crate::{SceneImage, Uniform};
 
-use crate::SceneImage;
+/// Render pipeline used to draw a skybox.
+pub struct SkyboxRenderPipeline(pub wgpu::RenderPipeline);
+
+pub fn skybox_bindgroup_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+    device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("skybox bindgroup"),
+        entries: &[
+            wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::VERTEX,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 1,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Texture {
+                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    multisampled: false,
+                },
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 2,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                count: None,
+            },
+        ],
+    })
+}
+
+pub fn create_skybox_bindgroup(
+    device: &wgpu::Device,
+    constants: &Uniform<GpuConstants>,
+    texture: &crate::Texture,
+) -> wgpu::BindGroup {
+    device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("skybox"),
+        layout: &skybox_bindgroup_layout(device),
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: constants.buffer().as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::TextureView(&texture.view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: wgpu::BindingResource::Sampler(&texture.sampler),
+            },
+        ],
+    })
+}
+
+/// Create the skybox rendering pipeline.
+pub fn create_skybox_render_pipeline(
+    device: &wgpu::Device,
+    format: wgpu::TextureFormat,
+) -> SkyboxRenderPipeline {
+    log::trace!("creating skybox render pipeline with format '{format:?}'");
+    let vertex_shader =
+        unsafe { device.create_shader_module_spirv(&wgpu::include_spirv_raw!("linkage/vertex_skybox.spv")) };
+    let fragment_shader =
+        device.create_shader_module(wgpu::include_spirv!("linkage/fragment_skybox.spv"));
+    let bg_layout = skybox_bindgroup_layout(device);
+    let pp_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: Some("skybox pipeline layout"),
+        bind_group_layouts: &[&bg_layout],
+        push_constant_ranges: &[],
+    });
+    SkyboxRenderPipeline(
+        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("skybox pipeline"),
+            layout: Some(&pp_layout),
+            vertex: wgpu::VertexState {
+                module: &vertex_shader,
+                entry_point: "vertex_skybox",
+                buffers: &[],
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                unclipped_depth: false,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                conservative: false,
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: wgpu::TextureFormat::Depth32Float,
+                depth_write_enabled: true,
+                depth_compare: wgpu::CompareFunction::Always,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState {
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+                count: 1,
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &fragment_shader,
+                entry_point: "fragment_skybox",
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            multiview: None,
+        }),
+    )
+}
 
 /// An HDR skybox.
 pub struct Skybox {
-    pub environment_texture: crate::Texture,
-    pub irradiance_map: crate::Texture,
-    pub prefiltered_environment_map: crate::Texture,
-    pub brdf_lut: crate::Texture,
+    // Texture of the equirectangular environment map
+    pub equirectangular_texture: crate::Texture,
+    // pub environment_texture: crate::Texture,
+    // pub irradiance_map: crate::Texture,
+    // pub prefiltered_environment_map: crate::Texture,
+    // pub brdf_lut: crate::Texture,
 }
 
 impl Skybox {
-    ///// Create a new `Skybox`.
-    // pub fn new(device: &wgpu::Device, queue: &wgpu::Queue, hdr_data: &[u8]) ->
-    // Self {    let hdr_texture = Skybox::create_hdr_texture(device, queue,
-    // hdr_data);    let proj = Mat4::perspective_rh(std::f32::consts::PI /
-    // 180.0 * 90.0, 1.0, 0.1, 10.0);    let views = [
-    //        Mat4::look_at_rh(
-    //            Vec3::new(0.0, 0.0, 0.0),
-    //            Vec3::new(1.0, 0.0, 0.0),
-    //            Vec3::new(0.0, -1.0, 0.0),
-    //        ),
-    //        Mat4::look_at_rh(
-    //            Vec3::new(0.0, 0.0, 0.0),
-    //            Vec3::new(-1.0, 0.0, 0.0),
-    //            Vec3::new(0.0, -1.0, 0.0),
-    //        ),
-    //        Mat4::look_at_rh(
-    //            Vec3::new(0.0, 0.0, 0.0),
-    //            Vec3::new(0.0, -1.0, 0.0),
-    //            Vec3::new(0.0, 0.0, -1.0),
-    //        ),
-    //        Mat4::look_at_rh(
-    //            Vec3::new(0.0, 0.0, 0.0),
-    //            Vec3::new(0.0, 1.0, 0.0),
-    //            Vec3::new(0.0, 0.0, 1.0),
-    //        ),
-    //        Mat4::look_at_rh(
-    //            Vec3::new(0.0, 0.0, 0.0),
-    //            Vec3::new(0.0, 0.0, 1.0),
-    //            Vec3::new(0.0, -1.0, 0.0),
-    //        ),
-    //        Mat4::look_at_rh(
-    //            Vec3::new(0.0, 0.0, 0.0),
-    //            Vec3::new(0.0, 0.0, -1.0),
-    //            Vec3::new(0.0, -1.0, 0.0),
-    //        ),
-    //    ];
+    /// Create an empty, transparent skybox.
+    pub fn empty(device: &wgpu::Device, queue: &wgpu::Queue) -> Self {
+        let pixels = [0u8; 4 * 4];
+        let equirectangular_texture = crate::Texture::new_with(
+            device,
+            queue,
+            Some("empty skybox equirectangular environment texture"),
+            None,
+            None,
+            wgpu::TextureFormat::Rgba32Float,
+            4,
+            4,
+            1,
+            1,
+            &pixels,
+        );
+        Skybox {
+            equirectangular_texture,
+        }
+    }
 
-    //    // Create environment map.
-    //    let environment_texture =
-    //        Skybox::create_environment_map_from_hdr(device, queue, &hdr_texture,
-    // &proj, &views);
+    /// Create a new `Skybox`.
+    pub fn new(device: &wgpu::Device, queue: &wgpu::Queue, hdr_img: SceneImage) -> Self {
+        let equirectangular_texture = Skybox::hdr_texture_from_scene_image(device, queue, hdr_img);
+        // let proj = Mat4::perspective_rh(std::f32::consts::PI / 180.0 * 90.0, 1.0,
+        // 0.1, 10.0); let views = [
+        //    Mat4::look_at_rh(
+        //        Vec3::new(0.0, 0.0, 0.0),
+        //        Vec3::new(1.0, 0.0, 0.0),
+        //        Vec3::new(0.0, -1.0, 0.0),
+        //    ),
+        //    Mat4::look_at_rh(
+        //        Vec3::new(0.0, 0.0, 0.0),
+        //        Vec3::new(-1.0, 0.0, 0.0),
+        //        Vec3::new(0.0, -1.0, 0.0),
+        //    ),
+        //    Mat4::look_at_rh(
+        //        Vec3::new(0.0, 0.0, 0.0),
+        //        Vec3::new(0.0, -1.0, 0.0),
+        //        Vec3::new(0.0, 0.0, -1.0),
+        //    ),
+        //    Mat4::look_at_rh(
+        //        Vec3::new(0.0, 0.0, 0.0),
+        //        Vec3::new(0.0, 1.0, 0.0),
+        //        Vec3::new(0.0, 0.0, 1.0),
+        //    ),
+        //    Mat4::look_at_rh(
+        //        Vec3::new(0.0, 0.0, 0.0),
+        //        Vec3::new(0.0, 0.0, 1.0),
+        //        Vec3::new(0.0, -1.0, 0.0),
+        //    ),
+        //    Mat4::look_at_rh(
+        //        Vec3::new(0.0, 0.0, 0.0),
+        //        Vec3::new(0.0, 0.0, -1.0),
+        //        Vec3::new(0.0, -1.0, 0.0),
+        //    ),
+        //];
 
-    //    // Convolve the environment map.
-    //    let irradiance_map =
-    //        Skybox::create_irradiance_map(device, queue, &environment_texture,
-    // &proj, &views);
+        //// Create environment map.
+        // let environment_texture =
+        //    Skybox::create_environment_map_from_hdr(device, queue, &hdr_texture,
+        // &proj, &views);
 
-    //    // Generate specular IBL pre-filtered environment map.
-    //    let prefiltered_environment_map =
-    // Skybox::create_prefiltered_environment_map(        device,
-    //        queue,
-    //        &environment_texture,
-    //        &proj,
-    //        &views,
-    //    );
+        //// Convolve the environment map.
+        // let irradiance_map =
+        //    Skybox::create_irradiance_map(device, queue, &environment_texture, &proj,
+        // &views);
 
-    //    Skybox {
-    //        environment_texture,
-    //        irradiance_map,
-    //        prefiltered_environment_map,
-    //        brdf_lut: Skybox::create_precomputed_brdf_texture(device, queue),
-    //    }
-    //}
+        //// Generate specular IBL pre-filtered environment map.
+        // let prefiltered_environment_map = Skybox::create_prefiltered_environment_map(
+        //    device,
+        //    queue,
+        //    &environment_texture,
+        //    &proj,
+        //    &views,
+        //);
 
-    /// Create an HDR equirectangular texture.
-    pub fn create_hdr_texture(
+        // Skybox {
+        //    environment_texture,
+        //    irradiance_map,
+        //    prefiltered_environment_map,
+        //    brdf_lut: Skybox::create_precomputed_brdf_texture(device, queue),
+        //}
+        Skybox {
+            equirectangular_texture,
+        }
+    }
+
+    /// Convert an HDR [`SceneImage`] into a texture.
+    pub fn hdr_texture_from_scene_image(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        hdr_data: &[u8],
+        img: SceneImage,
     ) -> crate::Texture {
-        let img = SceneImage::from_hdr_bytes(hdr_data).unwrap();
         crate::Texture::new_with(
             device,
             queue,
@@ -97,6 +243,16 @@ impl Skybox {
             img.height,
             &img.pixels,
         )
+    }
+
+    /// Create an HDR equirectangular texture from bytes.
+    pub fn create_hdr_texture(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        hdr_data: &[u8],
+    ) -> crate::Texture {
+        let img = SceneImage::from_hdr_bytes(hdr_data).unwrap();
+        Self::hdr_texture_from_scene_image(device, queue, img)
     }
 
     // fn create_environment_map_from_hdr(
@@ -458,7 +614,8 @@ impl Skybox {
 
 #[cfg(test)]
 mod test {
-    use glam::{Vec2, Vec4};
+    use glam::{Mat4, Vec2, Vec3, Vec4};
+    use pretty_assertions::assert_eq;
     use renderling_shader::{
         scene::LightingModel,
         ui::{UiMode, UiVertex},
@@ -512,30 +669,28 @@ mod test {
     #[test]
     fn hdr_skybox_scene() {
         let mut r = Renderling::headless(600, 400).unwrap();
-        let hdr_data = std::fs::read("../../img/hdr/helipad.hdr").unwrap();
-        let tex = Skybox::create_hdr_texture(r.get_device(), r.get_queue(), &hdr_data);
-
-        let (proj, view) = crate::camera::default_perspective(600.0, 400.0);
+        let proj = crate::camera::perspective(600.0, 400.0);
+        let view = crate::camera::look_at(Vec3::new(0.0, 0.0, 4.0), Vec3::ZERO, Vec3::Y);
+        let constants = GpuConstants {
+            camera_projection: proj,
+            camera_view: view,
+            ..Default::default()
+        };
+        let works = (0..36).map(|id| {
+            let mut local_pos = Vec3::ZERO;
+            let mut gl_pos = Vec4::ZERO;
+            renderling_shader::skybox::vertex_works(id, &constants, &mut local_pos, &mut gl_pos);
+            (local_pos, gl_pos)
+        }).collect::<Vec<_>>();
+        let no_works = (0..36).map(|id| {
+            let mut local_pos = Vec3::ZERO;
+            let mut gl_pos = Vec4::ZERO;
+            renderling_shader::skybox::vertex_no_works(id, &constants, &mut local_pos, &mut gl_pos);
+            (local_pos, gl_pos)
+        }).collect::<Vec<_>>();
+        assert_eq!(works, no_works);
         let mut builder = r.new_scene().with_camera(proj, view);
-        for m in builder.materials.iter_mut() {
-            m.lighting_model = LightingModel::NO_LIGHTING;
-        }
-        for v in builder.vertices.iter_mut() {
-            v.color = Vec4::ONE;
-        }
-        let _key_light = builder
-            .new_directional_light()
-            .with_color(Vec4::ONE)
-            .with_direction(Vec3::new(0.5, -0.7071, -0.5))
-            .with_intensity(1.0)
-            .build();
-        let _fill_light = builder
-            .new_directional_light()
-            .with_color(Vec4::ONE)
-            .with_direction(Vec3::new(-0.5, 0.7071, 0.5))
-            .with_intensity(0.5)
-            .build();
-        let _loader = builder.gltf_load("../../gltf/cube.glb").unwrap();
+        builder.add_skybox_image_from_path("../../img/hdr/helipad.hdr");
         let scene = builder.build().unwrap();
         setup_scene_render_graph(scene, &mut r, true);
         let img = r.render_image().unwrap();

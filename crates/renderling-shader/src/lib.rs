@@ -1,6 +1,8 @@
 //! Shader code for `renderling`.
 #![cfg_attr(target_arch = "spirv", no_std)]
 
+use bits::{bits, extract, insert};
+
 pub mod bits;
 pub mod debug;
 pub mod math;
@@ -11,41 +13,19 @@ pub mod tonemapping;
 pub mod ui;
 
 /// Boolean toggles that cause the renderer to turn on/off certain features.
-///
-/// CURRENTLY UNUSED.
-// TODO: Remove GpuToggles
 #[repr(transparent)]
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[derive(Default, Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct GpuToggles(pub u32);
 
 impl GpuToggles {
-    const SHIFT_GAMMA_CORRECT: u32 = 31;
+    const BITS_HAS_SKYBOX: (u32, u32) = bits(0..=0);
 
-    pub fn set_gamma_correct(&mut self, on: bool) {
-        self.0 |= if on {
-            1 << Self::SHIFT_GAMMA_CORRECT
-        } else {
-            !(1 << Self::SHIFT_GAMMA_CORRECT)
-        };
+    pub fn get_has_skybox(&self) -> bool {
+        extract(self.0, Self::BITS_HAS_SKYBOX) == 1
     }
 
-    pub fn gamma_correct(&self) -> bool {
-        ((self.0 >> Self::SHIFT_GAMMA_CORRECT) & 0xb1) == 1u32
-    }
-}
-
-#[cfg(test)]
-mod toggles {
-    use super::GpuToggles;
-
-    const GAMMA: u32 = 0b10000000000000000000000000000000;
-
-    #[test]
-    fn toggle() {
-        let mut t = GpuToggles::default();
-        t.set_gamma_correct(true);
-        assert_eq!(GAMMA, t.0, "0b{GAMMA:32b} != 0b{:32b}", t.0);
-        assert!(t.gamma_correct());
+    pub fn set_has_skybox(&mut self, has: bool) {
+        insert(&mut self.0, Self::BITS_HAS_SKYBOX, if has { 1 } else { 0 })
     }
 }

@@ -10,7 +10,8 @@
 //! # renderlings 🍖
 //!
 //! Render graphs and all their resources are called "renderlings" for maximum
-//! cuteness. Renderlings are configurable DAGs that draw something to a screen or texture.
+//! cuteness. Renderlings are configurable DAGs that draw something to a screen
+//! or texture.
 //!
 //! ## Features
 //!
@@ -41,6 +42,7 @@ mod atlas;
 // mod bank;
 mod buffer_array;
 mod camera;
+pub mod math;
 pub mod node;
 mod renderer;
 mod scene;
@@ -55,7 +57,6 @@ mod uniform;
 pub use atlas::*;
 pub use buffer_array::*;
 pub use camera::*;
-use moongraph::IsGraphNode;
 pub use renderer::*;
 pub use scene::*;
 pub use skybox::*;
@@ -67,7 +68,6 @@ pub use ui::*;
 pub use uniform::*;
 
 pub mod color;
-pub mod math;
 
 pub mod debug {
     //! Re-exports of [`renderling_shader::debug`].
@@ -140,11 +140,13 @@ pub fn setup_ui_and_scene_render_graph(
         hdr_surface_update,
         scene_update < scene_cull,
         ui_scene_update
-    ).with_barrier();
+    )
+    .with_barrier();
     let render = graph!(
         scene_render < scene_tonemapping < clear_depth,
         clear_depth < ui_scene_render
-    ).with_barrier();
+    )
+    .with_barrier();
     let copy_frame_to_post = crate::node::PostRenderBufferCreate::create;
     let present = if with_screen_capture {
         graph!(copy_frame_to_post < present)
@@ -162,12 +164,12 @@ pub fn setup_ui_and_scene_render_graph(
 fn init_logging() {
     let _ = env_logger::builder()
         .is_test(true)
-    //.filter_level(log::LevelFilter::Trace)
+        //.filter_level(log::LevelFilter::Trace)
         .filter_module("moongraph", log::LevelFilter::Trace)
         .filter_module("renderling", log::LevelFilter::Trace)
-    //.filter_module("naga", log::LevelFilter::Debug)
-    //.filter_module("wgpu", log::LevelFilter::Debug)
-    //.filter_module("wgpu_hal", log::LevelFilter::Warn)
+        //.filter_module("naga", log::LevelFilter::Debug)
+        .filter_module("wgpu", log::LevelFilter::Debug)
+        //.filter_module("wgpu_hal", log::LevelFilter::Warn)
         .try_init();
 }
 
@@ -291,19 +293,9 @@ mod test {
     }
 
     fn gpu_cube_vertices() -> Vec<GpuVertex> {
-        let vertices = renderling_shader::math::UNIT_POINTS;
-        // TODO: change this to use math::UNIT_INDICES
-        let indices: [u16; 12 * 3] = [
-            0, 2, 1, 0, 3, 2, // top
-            0, 4, 3, 4, 5, 3, // front
-            3, 6, 2, 3, 5, 6, // right
-            1, 7, 0, 7, 4, 0, // left
-            4, 6, 5, 4, 7, 6, // bottom
-            2, 7, 1, 2, 6, 7, // back
-        ];
-        indices
+        renderling_shader::math::UNIT_INDICES
             .iter()
-            .map(|i| cmy_gpu_vertex(vertices[*i as usize]))
+            .map(|i| cmy_gpu_vertex(renderling_shader::math::UNIT_POINTS[*i as usize]))
             .collect()
     }
 
@@ -529,9 +521,12 @@ mod test {
 
     #[test]
     fn gpu_array_update() {
-        let (_, device, queue, _) = futures_lite::future::block_on(
-            crate::state::new_adapter_device_queue_and_target(100, 100, None as Option<CreateSurfaceFn>),
-        );
+        let (_, device, queue, _) =
+            futures_lite::future::block_on(crate::state::new_adapter_device_queue_and_target(
+                100,
+                100,
+                None as Option<CreateSurfaceFn>,
+            ));
 
         let points = vec![
             Vec4::new(0.0, 0.0, 0.0, 0.0),
@@ -1077,7 +1072,7 @@ mod test {
         let _cube = builder
             .new_entity()
             .with_meshlet(
-                crate::math::unit_cube()
+                renderling_shader::math::unit_cube()
                     .into_iter()
                     .map(|(p, n)| GpuVertex {
                         position: p.extend(1.0),

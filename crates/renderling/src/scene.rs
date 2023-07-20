@@ -2,17 +2,17 @@
 use std::sync::Arc;
 
 use glam::{Mat4, Vec3};
-use moongraph::{IsGraphNode, View, ViewMut};
+use moongraph::{View, ViewMut};
 use renderling_shader::{debug::DebugChannel, GpuToggles};
 use snafu::prelude::*;
 
 pub use renderling_shader::scene::*;
 
 use crate::{
-    Graph,
     graph,
     node::{self, FrameTextureView, HdrSurface},
-    Atlas, DepthTexture, Device, GpuArray, Queue, Renderling, Uniform,
+    Atlas, DepthTexture, Device, GpuArray, Graph, Queue, Renderling, Skybox, SkyboxRenderPipeline,
+    Uniform,
 };
 
 mod entity;
@@ -106,7 +106,6 @@ impl Default for TextureParams {
 pub struct SceneBuilder {
     pub device: Arc<wgpu::Device>,
     pub queue: Arc<wgpu::Queue>,
-    pub toggles: GpuToggles,
     pub debug_channel: DebugChannel,
     pub projection: Mat4,
     pub view: Mat4,
@@ -124,7 +123,6 @@ impl SceneBuilder {
         Self {
             device,
             queue,
-            toggles: GpuToggles::default(),
             debug_channel: DebugChannel::None.into(),
             projection: Mat4::IDENTITY,
             view: Mat4::IDENTITY,
@@ -136,15 +134,6 @@ impl SceneBuilder {
             entities: vec![],
             lights: vec![],
         }
-    }
-
-    pub fn set_gamma_correction(&mut self, gamma_correction_on: bool) {
-        self.toggles.set_gamma_correct(gamma_correction_on);
-    }
-
-    pub fn with_gamma_correction(mut self, gamma_correction_on: bool) -> Self {
-        self.set_gamma_correction(gamma_correction_on);
-        self
     }
 
     /// Add an image and return a texture id for it.
@@ -188,6 +177,46 @@ impl SceneBuilder {
         let texture_id = self.textures.len();
         self.textures.push(params);
         Id::new(texture_id as u32)
+    }
+
+    /// Add a skybox image from bytes.
+    ///
+    /// Currently only one skybox image is supported, so this function returns
+    /// nothing.
+    ///
+    /// ## Panics
+    /// This function panics if there is an error decoding the HDR image data.
+    pub fn add_skybox_image_from_bytes(&mut self, hdr_data: &[u8]) {
+        self.skybox_image = Some(SceneImage::from_hdr_bytes(hdr_data).unwrap());
+    }
+
+    /// Add a skybox image from bytes.
+    ///
+    /// Currently only one skybox image is supported, so this function returns
+    /// nothing.
+    pub fn with_skybox_image_from_bytes(mut self, hdr_data: &[u8]) -> Self {
+        self.add_skybox_image_from_bytes(hdr_data);
+        self
+    }
+
+    /// Add a skybox image from path.
+    ///
+    /// Currently only one skybox image is supported, so this function returns
+    /// nothing.
+    ///
+    /// ## Panics
+    /// This function panics if there is an error decoding the HDR image data.
+    pub fn add_skybox_image_from_path(&mut self, hdr_path: impl AsRef<std::path::Path>) {
+        self.skybox_image = Some(SceneImage::from_hdr_path(hdr_path).unwrap());
+    }
+
+    /// Add a skybox image from path.
+    ///
+    /// Currently only one skybox image is supported, so this function returns
+    /// nothing.
+    pub fn with_skybox_image_from_path(mut self, hdr_path: impl AsRef<std::path::Path>) -> Self {
+        self.add_skybox_image_from_path(hdr_path);
+        self
     }
 
     pub fn with_camera(mut self, projection: Mat4, view: Mat4) -> Self {
@@ -290,10 +319,12 @@ pub struct Scene {
     pub textures: GpuArray<GpuTexture>,
     pub indirect_draws: GpuArray<DrawIndirect>,
     pub constants: Uniform<GpuConstants>,
+    pub skybox: Skybox,
+    pub atlas: Atlas,
     cull_bindgroup: wgpu::BindGroup,
     render_buffers_bindgroup: wgpu::BindGroup,
     render_atlas_bindgroup: wgpu::BindGroup,
-    pub atlas: Atlas,
+    skybox_bindgroup: wgpu::BindGroup,
 }
 
 impl Scene {
@@ -314,12 +345,11 @@ impl Scene {
         let SceneBuilder {
             device,
             queue,
-            toggles,
             debug_channel,
             projection,
             view,
             images,
-            skybox_image: _,
+            skybox_image,
             textures,
             materials,
             vertices,
@@ -327,8 +357,8 @@ impl Scene {
             lights,
         } = scene_builder;
         snafu::ensure!(images.is_empty(), AlreadyPackedAtlasSnafu);
+        let mut toggles = GpuToggles::default();
         let debug_mode = debug_channel.into();
-
         let frames = textures.into_iter();
         let mut textures = vec![];
         for TextureParams {
@@ -352,6 +382,12 @@ impl Scene {
                 ..Default::default()
             });
         }
+        let skybox = if let Some(skybox_img) = skybox_image {
+            toggles.set_has_skybox(true);
+            Skybox::new(&device, &queue, skybox_img)
+        } else {
+            Skybox::empty(&device, &queue)
+        };
         let textures = GpuArray::new(&device, &textures, textures.len(), scene_render_usage());
         let vertices = GpuArray::new(&device, &vertices, vertices.len(), scene_render_usage());
         let draws = entities
@@ -433,6 +469,12 @@ impl Scene {
             ],
         });
 
+        let skybox_bindgroup = crate::skybox::create_skybox_bindgroup(
+            &device,
+            &constants,
+            &skybox.equirectangular_texture,
+        );
+
         let mut scene = Self {
             render_buffers_bindgroup,
             render_atlas_bindgroup,
@@ -445,6 +487,8 @@ impl Scene {
             cull_bindgroup,
             atlas,
             lights,
+            skybox,
+            skybox_bindgroup,
         };
         scene.update(&queue);
         Ok(scene)
@@ -461,6 +505,8 @@ impl Scene {
             indirect_draws: _,
             cull_bindgroup: _,
             atlas: _,
+            skybox_bindgroup: _,
+            skybox: _,
             vertices,
             entities,
             materials,
@@ -724,6 +770,51 @@ pub fn scene_cull(
     Ok(())
 }
 
+pub fn skybox_render(
+    (device, queue, scene, pipeline, hdr_frame, depth): (
+        View<Device>,
+        View<Queue>,
+        View<Scene>,
+        View<SkyboxRenderPipeline>,
+        View<HdrSurface>,
+        View<DepthTexture>,
+    ),
+) -> Result<(), SceneError> {
+    if !scene.constants.toggles.get_has_skybox() {
+        // there is no skybox, so don't bother
+        return Ok(());
+    }
+
+    let label = Some("skybox render");
+    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label });
+    let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+        label,
+        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+            view: &hdr_frame.texture.view,
+            resolve_target: None,
+            ops: wgpu::Operations {
+                load: wgpu::LoadOp::Load,
+                store: true,
+            },
+        })],
+        depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+            view: &depth.view,
+            depth_ops: Some(wgpu::Operations {
+                load: wgpu::LoadOp::Load,
+                store: true,
+            }),
+            stencil_ops: None,
+        }),
+    });
+    render_pass.set_pipeline(&pipeline.0);
+    render_pass.set_bind_group(0, &scene.skybox_bindgroup, &[]);
+    render_pass.draw(0..36, 0..1);
+    drop(render_pass);
+
+    queue.submit(std::iter::once(encoder.finish()));
+    Ok(())
+}
+
 pub fn scene_render(
     (device, queue, scene, pipeline, hdr_frame, depth): (
         View<Device>,
@@ -814,6 +905,7 @@ pub fn scene_tonemapping(
 }
 
 pub fn setup_scene_render_graph(scene: Scene, r: &mut Renderling, with_screen_capture: bool) {
+    let has_skybox = scene.constants.toggles.get_has_skybox();
     r.graph.add_resource(scene);
     let (hdr_surface,) = r
         .graph
@@ -821,16 +913,21 @@ pub fn setup_scene_render_graph(scene: Scene, r: &mut Renderling, with_screen_ca
         .unwrap()
         .unwrap();
     let device = r.get_device();
-    let scene_render_pipeline = SceneRenderPipeline({
-        create_scene_render_pipeline(&device, hdr_surface.texture.texture.format())
-    });
-    let compute_cull_pipeline = SceneComputeCullPipeline(
-        create_scene_compute_cull_pipeline(device)
-    );
+    let hdr_texture_format = hdr_surface.texture.texture.format();
+    let scene_render_pipeline =
+        SceneRenderPipeline(create_scene_render_pipeline(&device, hdr_texture_format));
+    let compute_cull_pipeline =
+        SceneComputeCullPipeline(create_scene_compute_cull_pipeline(device));
     drop(device);
     r.graph.add_resource(scene_render_pipeline);
     r.graph.add_resource(hdr_surface);
     r.graph.add_resource(compute_cull_pipeline);
+
+    if has_skybox {
+        let pipeline =
+            crate::skybox::create_skybox_render_pipeline(r.get_device(), hdr_texture_format);
+        r.graph.add_resource(pipeline);
+    }
 
     use node::{clear_surface_hdr_and_depth, create_frame, hdr_surface_update, present};
     // pre-render subgraph
@@ -843,12 +940,20 @@ pub fn setup_scene_render_graph(scene: Scene, r: &mut Renderling, with_screen_ca
         ))
         .add_barrier();
 
-    // render and post-render subgraph
+    // render subgraph
     r.graph
-        .add_subgraph(if with_screen_capture {
-            let copy_frame_to_post = crate::node::PostRenderBufferCreate::create;
-            graph!(scene_render < scene_tonemapping < copy_frame_to_post < present)
+        .add_subgraph(if has_skybox {
+            graph!(skybox_render < scene_render)
         } else {
-            graph!(scene_render < scene_tonemapping < present)
-        });
+            graph!(scene_render)
+        })
+        .add_barrier();
+
+    // post-render subgraph
+    r.graph.add_subgraph(if with_screen_capture {
+        let copy_frame_to_post = crate::node::PostRenderBufferCreate::create;
+        graph!(scene_tonemapping < copy_frame_to_post < present)
+    } else {
+        graph!(scene_tonemapping < present)
+    });
 }

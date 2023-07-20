@@ -1,7 +1,7 @@
 //! Shader entry points.
 #![no_std]
 #![feature(lang_items)]
-use renderling_shader::{scene, ui, tonemapping};
+use renderling_shader::{scene, ui, tonemapping, skybox};
 use spirv_std::{glam, image::Image2d, spirv, Sampler};
 
 #[spirv(vertex)]
@@ -147,6 +147,26 @@ pub fn fragment_tonemapping(
     output: &mut glam::Vec4
 ) {
     tonemapping::fragment(texture, sampler, constants, in_uv, output)
+}
+
+#[spirv(vertex)]
+pub fn vertex_skybox(
+    #[spirv(vertex_index)] vertex_id: u32,
+    #[spirv(uniform, descriptor_set = 0, binding = 0)] constants: &scene::GpuConstants,
+    local_pos: &mut glam::Vec3,
+    #[spirv(position)] gl_pos: &mut glam::Vec4
+) {
+    skybox::vertex(vertex_id, constants, local_pos, gl_pos)
+}
+
+#[spirv(fragment)]
+pub fn fragment_skybox(
+    #[spirv(descriptor_set = 0, binding = 1)] texture: &Image2d,
+    #[spirv(descriptor_set = 0, binding = 2)] sampler: &Sampler,
+    in_local_pos: glam::Vec3,
+    out_color: &mut glam::Vec4
+) {
+    skybox::fragment_equirectangular(texture, sampler, in_local_pos, out_color)
 }
 
 ///// Just a test for atomics in Naga.

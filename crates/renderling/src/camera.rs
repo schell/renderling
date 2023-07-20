@@ -20,6 +20,16 @@ pub fn perspective(width: f32, height: f32) -> Mat4 {
     Mat4::perspective_rh(fovy, aspect, znear, zfar)
 }
 
+pub fn ortho(width: f32, height: f32) -> Mat4 {
+    let left = 0.0;
+    let right = width;
+    let bottom = height;
+    let top = 0.0;
+    let near = -1.0;
+    let far = 1.0;
+    Mat4::orthographic_rh(left, right, bottom, top, near, far)
+}
+
 pub fn look_at(eye: impl Into<Vec3>, target: impl Into<Vec3>, up: impl Into<Vec3>) -> Mat4 {
     Mat4::look_at_rh(eye.into(), target.into(), up.into())
 }

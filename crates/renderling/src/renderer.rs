@@ -215,6 +215,7 @@ impl Renderling {
         Self::try_from_raw_window_handle(window, inner_size.width, inner_size.height)
     }
 
+    // TODO: No reason for `headless` to return Result
     pub fn headless(width: u32, height: u32) -> Result<Self, RenderlingError> {
         futures_lite::future::block_on(Self::try_new_headless(width, height))
     }
@@ -353,8 +354,7 @@ impl Renderling {
 
     pub fn new_scene(&self) -> SceneBuilder {
         let (device, queue) = self.get_device_and_queue_owned();
-        let gamma_correct = self.get_render_target().format().is_srgb();
-        SceneBuilder::new(device.0, queue.0).with_gamma_correction(gamma_correct)
+        SceneBuilder::new(device.0, queue.0)
     }
 
     pub fn new_ui_scene(&self) -> UiSceneBuilder<'_> {

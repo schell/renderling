@@ -6,7 +6,7 @@
 //! To read more about the technique, check out these resources:
 //! * https://stackoverflow.com/questions/59686151/what-is-gpu-driven-rendering
 use glam::{mat3, Mat4, Quat, UVec2, UVec3, Vec2, Vec3, Vec4, Vec4Swizzles};
-use spirv_std::{image::{Image2d, Image3d}, Sampler};
+use spirv_std::{image::Image2d, Sampler};
 
 #[cfg(target_arch = "spirv")]
 use spirv_std::num_traits::*;
@@ -587,8 +587,6 @@ pub fn main_vertex_scene(
 pub fn main_fragment_scene(
     atlas: &Image2d,
     sampler: &Sampler,
-    skybox: &Image3d,
-    skybox_sampler: &Sampler,
 
     constants: &GpuConstants,
     lights: &[GpuLight],

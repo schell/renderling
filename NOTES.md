@@ -29,6 +29,8 @@ Just pro-cons on tech choices and little things I don't want to forget whil impl
   - see [conversation on discord](https://discord.com/channels/750717012564770887/750717499737243679/1091813590400516106)
 * can't use bitwise rotate_left or rotate_right
   - see [the issue on github](https://github.com/EmbarkStudios/rust-gpu/issues/1062)
+* sometimes things like indexing are just funky-joe-monkey:
+  - see [this comment on discord](https://discord.com/channels/750717012564770887/750717499737243679/1131395331368693770)
 
 # wgpu
 

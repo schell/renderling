@@ -216,6 +216,9 @@ pub async fn new_adapter_device_queue_and_target<'a>(
         instance: &wgpu::Instance,
         compatible_surface: Option<&wgpu::Surface>,
     ) -> wgpu::Adapter {
+        instance.enumerate_adapters(wgpu::Backends::all()).for_each(|adapter| {
+            log::trace!("adapter: {:#?}", adapter.get_info());
+        });
         instance
             .request_adapter(&wgpu::RequestAdapterOptions {
                 power_preference: wgpu::PowerPreference::default(),
@@ -236,7 +239,8 @@ pub async fn new_adapter_device_queue_and_target<'a>(
                         // this one is a funny requirement, it seems it is needed if using storage buffers in
                         // vertex shaders, even if those shaders are read-only
                         | wgpu::Features::VERTEX_WRITABLE_STORAGE
-                        | wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES,
+                        | wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES
+                        | wgpu::Features::SPIRV_SHADER_PASSTHROUGH,
                     limits: limits(&adapter),
                     label: None,
                 },
