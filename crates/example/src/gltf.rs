@@ -8,7 +8,7 @@ use renderling::{
     debug::DebugChannel,
     math::{Mat4, Vec3, Vec4},
     GltfLoader, GpuEntity, Renderling, Scene, ScreenSize, TweenProperty, UiDrawObjects, UiMode,
-    UiVertex, Write,
+    UiVertex, ViewMut, SceneImage,
 };
 use renderling_gpui::{Element, Gpui};
 use winit::event::KeyboardInput;
@@ -69,14 +69,13 @@ impl App {
             .with_vertices(
                 renderling::math::POINTS_2D_TEX_QUAD
                     .into_iter()
-                    .map(|v2| UiVertex::default().with_position(*v2).with_uv(*v2)),
+                    .map(|v2| UiVertex::default().with_position(v2).with_uv(v2)),
             )
             .build();
 
         // Create a placeholder scene
         let scene = r.new_scene().build().unwrap();
-
-        renderling::setup_ui_and_scene_render_graph(r, ui_scene, [ui_obj], scene, false);
+        r.setup_render_graph(Some(scene), Some(ui_scene), [ui_obj], false);
 
         let mut app = Self {
             loader: None,
@@ -128,6 +127,24 @@ impl App {
 
     fn load(&mut self, r: &mut Renderling, file: impl AsRef<std::path::Path>) {
         log::info!("loading '{}'", file.as_ref().display());
+        if let Some(ext) = file.as_ref().extension() {
+            match ext.to_str() {
+                None => {
+                    self.ui.set_text_title("funky extension");
+                }
+                Some("hdr") => self.load_hdr_skybox(r, file),
+                Some(_) => self.load_gltf_model(r, file),
+            }
+        }
+    }
+
+    fn load_hdr_skybox(&mut self, r: &mut Renderling, file: impl AsRef<std::path::Path>) {
+        let img = SceneImage::from_hdr_path(file).unwrap();
+        let scene = r.graph.get_resource_mut::<Scene>().unwrap().unwrap();
+        scene.set_skybox_img(Some(img));
+    }
+
+    fn load_gltf_model(&mut self, r: &mut Renderling, file: impl AsRef<std::path::Path>) {
         self.phi = 0.0;
         self.theta = std::f32::consts::FRAC_PI_4;
         self.left_mb_down = false;
@@ -263,7 +280,7 @@ impl App {
         r.resize(width, height);
         r.graph
             .visit(
-                |(mut scene, mut ui_objs): (Write<Scene>, Write<UiDrawObjects>)| {
+                |(mut scene, mut ui_objs): (ViewMut<Scene>, ViewMut<UiDrawObjects>)| {
                     scene.set_camera_projection(Mat4::perspective_infinite_rh(
                         std::f32::consts::FRAC_PI_4,
                         width as f32 / height as f32,
@@ -312,7 +329,7 @@ impl App {
                         }
                     }
                     r.graph
-                        .visit(|mut scene: Write<Scene>| {
+                        .visit(|mut scene: ViewMut<Scene>| {
                             scene.update_entity(*ent).unwrap();
                         })
                         .unwrap();
@@ -333,12 +350,16 @@ fn get_name(path: impl AsRef<std::path::Path>) -> String {
 /// Sets up the demo for a given model
 pub fn demo(
     r: &mut Renderling,
-    start: Option<impl AsRef<str>>,
+    model: Option<std::path::PathBuf>,
+    skybox: Option<std::path::PathBuf>,
 ) -> impl FnMut(&mut Renderling, Option<&winit::event::WindowEvent>) {
     let mut app = App::new(r);
 
-    if let Some(file) = start {
-        app.load(r, file.as_ref());
+    if let Some(file) = model {
+        app.load_gltf_model(r, file);
+    }
+    if let Some(file) = skybox {
+        app.load_hdr_skybox(r, file);
     }
 
     let mut event_state = renderling_gpui::EventState::default();

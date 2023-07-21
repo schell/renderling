@@ -189,13 +189,13 @@ impl Frame {
 pub type CreateSurfaceFn<'a> =
     Box<dyn FnOnce(&wgpu::Instance) -> Result<wgpu::Surface, WgpuStateError> + 'a>;
 
-pub async fn new_device_queue_and_target<'a>(
+pub async fn new_adapter_device_queue_and_target<'a>(
     width: u32,
     height: u32,
     create_surface: Option<
         impl FnOnce(&wgpu::Instance) -> Result<wgpu::Surface, WgpuStateError> + 'a,
     >,
-) -> (wgpu::Device, wgpu::Queue, RenderTarget) {
+) -> (wgpu::Adapter, wgpu::Device, wgpu::Queue, RenderTarget) {
     // The instance is a handle to our GPU
     // BackendBit::PRIMARY => Vulkan + Metal + DX12 + Browser WebGPU
     let backends = wgpu::Backends::all();
@@ -217,6 +217,11 @@ pub async fn new_device_queue_and_target<'a>(
         compatible_surface: Option<&wgpu::Surface>,
     ) -> wgpu::Adapter {
         instance
+            .enumerate_adapters(wgpu::Backends::all())
+            .for_each(|adapter| {
+                log::trace!("adapter: {:#?}", adapter.get_info());
+            });
+        instance
             .request_adapter(&wgpu::RequestAdapterOptions {
                 power_preference: wgpu::PowerPreference::default(),
                 compatible_surface,
@@ -230,11 +235,17 @@ pub async fn new_device_queue_and_target<'a>(
         adapter
             .request_device(
                 &wgpu::DeviceDescriptor {
+                    // TODO: WASM: Review device features
                     features: wgpu::Features::INDIRECT_FIRST_INSTANCE
                         | wgpu::Features::MULTI_DRAW_INDIRECT
                         // this one is a funny requirement, it seems it is needed if using storage buffers in
                         // vertex shaders, even if those shaders are read-only
-                        | wgpu::Features::VERTEX_WRITABLE_STORAGE,
+                        | wgpu::Features::VERTEX_WRITABLE_STORAGE
+                        | wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES
+                        //// when debugging rust-gpu shader miscompilation it's nice to have this, but since currently
+                        //// `wgpu` can't select the vulkan backend on macos
+                        //| wgpu::Features::SPIRV_SHADER_PASSTHROUGH
+                        ,
                     limits: limits(&adapter),
                     label: None,
                 },
@@ -254,7 +265,7 @@ pub async fn new_device_queue_and_target<'a>(
             surface,
             surface_config,
         };
-        (device, queue, target)
+        (adapter, device, queue, target)
     } else {
         let adapter = adapter(&instance, None).await;
         let texture_desc = wgpu::TextureDescriptor {
@@ -276,6 +287,6 @@ pub async fn new_device_queue_and_target<'a>(
         let (device, queue) = device(&adapter).await;
         let texture = Arc::new(device.create_texture(&texture_desc));
         let target = RenderTarget::Texture { texture };
-        (device, queue, target)
+        (adapter, device, queue, target)
     }
 }

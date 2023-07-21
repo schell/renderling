@@ -45,6 +45,7 @@ impl Texture {
         sampler: Option<wgpu::Sampler>,
         format: wgpu::TextureFormat,
         color_channels: u32,
+        color_channel_bytes: u32,
         width: u32,
         height: u32,
         data: &[u8],
@@ -78,7 +79,7 @@ impl Texture {
                 data,
                 wgpu::ImageDataLayout {
                     offset: 0,
-                    bytes_per_row: Some(color_channels * width),
+                    bytes_per_row: Some(color_channels * color_channel_bytes * width),
                     rows_per_image: None,
                 },
                 size,
@@ -107,7 +108,7 @@ impl Texture {
 
     /// Create a new texture.
     ///
-    /// This defaults the format to `Rgba8UnormSrgb`.
+    /// This defaults the format to `Rgba8UnormSrgb` and assumes a pixel is 1 byte per channel.
     pub fn new(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
@@ -126,6 +127,7 @@ impl Texture {
             None,
             wgpu::TextureFormat::Rgba8UnormSrgb,
             color_channels,
+            1,
             width,
             height,
             data,

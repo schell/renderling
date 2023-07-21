@@ -46,7 +46,7 @@ impl Deref for FrameTextureView {
 
 /// Create the next screen frame texture, frame texture view and depth texture.
 pub fn create_frame(
-    render_target: Read<RenderTarget>,
+    render_target: View<RenderTarget>,
 ) -> Result<(Frame, FrameTextureView), WgpuStateError> {
     let frame = render_target.get_current_frame()?;
     let format = render_target.format();
@@ -105,11 +105,11 @@ pub fn conduct_clear_pass(
 /// Conduct a clear pass on the global frame and depth textures.
 pub fn clear_frame_and_depth(
     (device, queue, frame_view, depth, color): (
-        Read<Device>,
-        Read<Queue>,
-        Read<FrameTextureView>,
-        Read<DepthTexture>,
-        Read<BackgroundColor>,
+        View<Device>,
+        View<Queue>,
+        View<FrameTextureView>,
+        View<DepthTexture>,
+        View<BackgroundColor>,
     ),
 ) -> Result<(), WgpuStateError> {
     let depth_view = &depth.view;
@@ -139,7 +139,7 @@ pub fn clear_frame_and_depth(
 
 /// Conduct a clear pass on **only the depth texture**.
 pub fn clear_depth(
-    (device, queue, depth): (Read<Device>, Read<Queue>, Read<DepthTexture>),
+    (device, queue, depth): (View<Device>, View<Queue>, View<DepthTexture>),
 ) -> Result<(), WgpuStateError> {
     let depth_view = &depth.view;
     conduct_clear_pass(
@@ -189,6 +189,7 @@ impl HdrSurface {
             }),
             wgpu::TextureFormat::Rgba16Float,
             4,
+            1,
             width,
             height,
             &[],
@@ -243,10 +244,10 @@ fn scene_hdr_surface_bindgroup_layout(device: &wgpu::Device) -> wgpu::BindGroupL
 
 pub fn create_hdr_render_surface(
     (device, queue, size, target): (
-        Read<Device>,
-        Read<Queue>,
-        Read<ScreenSize>,
-        Read<RenderTarget>,
+        View<Device>,
+        View<Queue>,
+        View<ScreenSize>,
+        View<RenderTarget>,
     ),
 ) -> Result<(HdrSurface,), WgpuStateError> {
     let (constants, constants_layout) = Uniform::new_and_layout(
@@ -323,7 +324,7 @@ pub fn create_hdr_render_surface(
 
 /// Update the `HdrSurface` uniforms.
 pub fn hdr_surface_update(
-    (queue, mut hdr_surface): (Read<Queue>, Write<HdrSurface>),
+    (queue, mut hdr_surface): (View<Queue>, ViewMut<HdrSurface>),
 ) -> Result<(), WgpuStateError> {
     hdr_surface.constants.update(&queue);
     Ok(())
@@ -333,12 +334,12 @@ pub fn hdr_surface_update(
 /// texture.
 pub fn clear_surface_hdr_and_depth(
     (device, queue, frame, hdr, depth, color): (
-        Read<Device>,
-        Read<Queue>,
-        Read<FrameTextureView>,
-        Read<HdrSurface>,
-        Read<DepthTexture>,
-        Read<BackgroundColor>,
+        View<Device>,
+        View<Queue>,
+        View<FrameTextureView>,
+        View<HdrSurface>,
+        View<DepthTexture>,
+        View<BackgroundColor>,
     ),
 ) -> Result<(), WgpuStateError> {
     let depth_view = &depth.view;
@@ -372,10 +373,10 @@ pub struct PostRenderBuffer(pub CopiedTextureBuffer);
 /// Render node that copies the current frame into a buffer.
 #[derive(Edges)]
 pub struct PostRenderBufferCreate {
-    device: Read<Device>,
-    queue: Read<Queue>,
-    size: Read<ScreenSize>,
-    frame: Read<Frame>,
+    device: View<Device>,
+    queue: View<Queue>,
+    size: View<ScreenSize>,
+    frame: View<Frame>,
 }
 
 impl PostRenderBufferCreate {
