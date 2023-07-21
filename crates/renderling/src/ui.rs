@@ -12,8 +12,8 @@ use snafu::prelude::*;
 use wgpu::util::DeviceExt;
 
 use crate::{
-    node::FrameTextureView, Device, IsGraphNode, Queue, Read, RenderTarget, Renderling, Texture,
-    Uniform, Write,
+    node::FrameTextureView, Device, Queue, RenderTarget, Renderling, Texture, Uniform,
+    View, ViewMut,
 };
 
 pub use renderling_shader::ui::{UiConstants, UiDrawParams, UiMode, UiVertex};
@@ -520,10 +520,10 @@ impl DerefMut for UiDrawObjects {
 
 pub fn ui_scene_update(
     (device, queue, mut scene, mut objects): (
-        Read<crate::Device>,
-        Read<crate::Queue>,
-        Write<UiScene>,
-        Write<UiDrawObjects>,
+        View<crate::Device>,
+        View<crate::Queue>,
+        ViewMut<UiScene>,
+        ViewMut<UiDrawObjects>,
     ),
 ) -> Result<(), UiSceneError> {
     scene.update(&device, &queue, &mut objects.0)
@@ -556,12 +556,12 @@ impl UiDrawObject {
 
 pub fn ui_scene_render(
     (device, queue, scene, objects, pipeline, frame): (
-        Read<Device>,
-        Read<Queue>,
-        Read<UiScene>,
-        Read<UiDrawObjects>,
-        Read<UiRenderPipeline>,
-        Read<FrameTextureView>,
+        View<Device>,
+        View<Queue>,
+        View<UiScene>,
+        View<UiDrawObjects>,
+        View<UiRenderPipeline>,
+        View<FrameTextureView>,
     ),
 ) -> Result<(), UiSceneError> {
     let label = Some("ui scene render");
@@ -595,46 +595,31 @@ pub fn setup_ui_render_graph(
     with_screen_capture: bool,
 ) {
     let objects = UiDrawObjects(objects.into_iter().collect::<Vec<_>>());
-    r.graph.add_resource(scene);
-    r.graph.add_resource(objects);
-
     let pipeline = UiRenderPipeline(
         r.graph
-            .visit(|(device, target): (Read<Device>, Read<RenderTarget>)| {
+            .visit(|(device, target): (View<Device>, View<RenderTarget>)| {
                 create_ui_pipeline(&device, target.format())
             })
             .unwrap(),
     );
+    r.graph.add_resource(scene);
+    r.graph.add_resource(objects);
     r.graph.add_resource(pipeline);
 
-    r.graph.add_node(
-        crate::node::create_frame
-            .into_node()
-            .with_name("create_frame"),
-    );
-    r.graph.add_node(
-        crate::node::clear_frame_and_depth
-            .into_node()
-            .with_name("clear_frame_and_depth"),
-    );
+    use crate::{Graph, graph, node::{clear_frame_and_depth, create_frame, present}};
+    let pre_render =
+        crate::graph!(create_frame, clear_frame_and_depth, ui_scene_update).with_barrier();
+    let render = crate::graph!(ui_scene_render).with_barrier();
+    let post_render = if with_screen_capture {
+        let copy_frame_to_post = crate::node::PostRenderBufferCreate::create;
+        crate::graph!(copy_frame_to_post < present)
+    } else {
+        crate::graph!(present)
+    };
     r.graph
-        .add_node(ui_scene_update.into_node().with_name("ui_scene_update"));
-
-    r.graph.add_barrier();
-
-    r.graph
-        .add_node(ui_scene_render.into_node().with_name("ui_scene_render"));
-    r.graph
-        .add_node(crate::node::present.into_node().with_name("present"));
-    if with_screen_capture {
-        r.graph.add_node(
-            crate::node::PostRenderBufferCreate::create
-                .into_node()
-                .with_name("copy_frame_to_post")
-                .run_after("scene_render")
-                .run_before("present"),
-        );
-    }
+        .add_subgraph(pre_render)
+        .add_subgraph(render)
+        .add_subgraph(post_render);
 }
 
 #[cfg(test)]
