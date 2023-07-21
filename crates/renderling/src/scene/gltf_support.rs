@@ -1208,7 +1208,7 @@ mod test {
         let (device, queue) = r.get_device_and_queue_owned();
         let texture = scene.textures.read(&device, &queue, 0, 1).unwrap()[0];
         println!("{texture:?}");
-        crate::setup_scene_render_graph(scene, &mut r, true);
+        r.setup_render_graph(Some(scene), None, [], true);
         let img = r.render_image().unwrap();
         img_diff::assert_img_eq("gltf_images.png", img);
     }
@@ -1227,7 +1227,7 @@ mod test {
         let view = camera::look_at(Vec3::new(0.5, 0.5, 2.0), Vec3::new(0.5, 0.5, 0.0), Vec3::Y);
         builder.set_camera(projection, view);
         let scene = builder.build().unwrap();
-        crate::setup_scene_render_graph(scene, &mut r, true);
+        r.setup_render_graph(Some(scene), None, [], true);
 
         let img = r.render_image().unwrap();
         img_diff::assert_img_eq("gltf_minimal_mesh.png", img);
@@ -1251,7 +1251,7 @@ mod test {
         let view = camera::look_at(Vec3::new(1.0, 0.5, 1.5), Vec3::new(1.0, 0.5, 0.0), Vec3::Y);
         builder.set_camera(projection, view);
         let scene = builder.build().unwrap();
-        crate::setup_scene_render_graph(scene, &mut r, true);
+        r.setup_render_graph(Some(scene), None, [], true);
 
         let img = r.render_image().unwrap();
         img_diff::assert_img_eq("gltf_simple_meshes.png", img);
@@ -1279,7 +1279,7 @@ mod test {
         builder.materials[0] = material;
 
         let scene = builder.build().unwrap();
-        crate::setup_scene_render_graph(scene, &mut r, true);
+        r.setup_render_graph(Some(scene), None, [], true);
 
         let img = r.render_image().unwrap();
         img_diff::assert_img_eq("gltf_simple_texture.png", img);
@@ -1297,7 +1297,7 @@ mod test {
         builder.set_camera(projection, view);
 
         let scene = builder.build().unwrap();
-        crate::setup_scene_render_graph(scene, &mut r, true);
+        r.setup_render_graph(Some(scene), None, [], true);
 
         let img = r.render_image().unwrap();
         println!("saving frame");
@@ -1349,7 +1349,7 @@ mod test {
         }
 
         let scene = builder.build().unwrap();
-        crate::setup_scene_render_graph(scene, &mut r, true);
+        r.setup_render_graph(Some(scene), None, [], true);
 
         let img = r.render_image().unwrap();
         println!("saving frame");
@@ -1381,7 +1381,7 @@ mod test {
         }
         let mut entities = builder.entities.clone();
         let scene = builder.build().unwrap();
-        crate::setup_scene_render_graph(scene, &mut r, true);
+        r.setup_render_graph(Some(scene), None, [], true);
         let img = r.render_image().unwrap();
         img_diff::assert_img_eq("gltf_simple_animation.png", img);
 
@@ -1440,7 +1440,7 @@ mod test {
         let mut entities = builder.entities.clone();
         assert!(entities[0].info.is_skin());
         let scene = builder.build().unwrap();
-        crate::setup_scene_render_graph(scene, &mut r, true);
+        r.setup_render_graph(Some(scene), None, [], true);
         let img = r.render_image().unwrap();
         img_diff::save("gltf_simple_skin0.png", img);
 

@@ -71,8 +71,12 @@ pub fn create_skybox_render_pipeline(
     format: wgpu::TextureFormat,
 ) -> SkyboxRenderPipeline {
     log::trace!("creating skybox render pipeline with format '{format:?}'");
+    // let shader =
+    // device.create_shader_module(wgpu::include_wgsl!("linkage/skybox.wgsl"));
     let vertex_shader =
-        unsafe { device.create_shader_module_spirv(&wgpu::include_spirv_raw!("linkage/vertex_skybox.spv")) };
+        device.create_shader_module(wgpu::include_spirv!("linkage/vertex_skybox.spv"));
+    // )); unsafe { device.create_shader_module_spirv(&wgpu::include_spirv_raw!
+    // (" linkage/vertex_skybox.spv")) };
     let fragment_shader =
         device.create_shader_module(wgpu::include_spirv!("linkage/fragment_skybox.spv"));
     let bg_layout = skybox_bindgroup_layout(device);
@@ -102,7 +106,7 @@ pub fn create_skybox_render_pipeline(
             depth_stencil: Some(wgpu::DepthStencilState {
                 format: wgpu::TextureFormat::Depth32Float,
                 depth_write_enabled: true,
-                depth_compare: wgpu::CompareFunction::Always,
+                depth_compare: wgpu::CompareFunction::LessEqual,
                 stencil: wgpu::StencilState::default(),
                 bias: wgpu::DepthBiasState::default(),
             }),
@@ -129,6 +133,8 @@ pub fn create_skybox_render_pipeline(
 pub struct Skybox {
     // Texture of the equirectangular environment map
     pub equirectangular_texture: crate::Texture,
+    // Bindgroup used in the skybox render pipeline
+    pub bindgroup: wgpu::BindGroup,
     // pub environment_texture: crate::Texture,
     // pub irradiance_map: crate::Texture,
     // pub prefiltered_environment_map: crate::Texture,
@@ -137,7 +143,12 @@ pub struct Skybox {
 
 impl Skybox {
     /// Create an empty, transparent skybox.
-    pub fn empty(device: &wgpu::Device, queue: &wgpu::Queue) -> Self {
+    pub fn empty(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        constants: &Uniform<GpuConstants>,
+    ) -> Self {
+        log::trace!("creating empty skybox");
         let pixels = [0u8; 4 * 4];
         let equirectangular_texture = crate::Texture::new_with(
             device,
@@ -153,12 +164,23 @@ impl Skybox {
             &pixels,
         );
         Skybox {
+            bindgroup: crate::skybox::create_skybox_bindgroup(
+                &device,
+                &constants,
+                &equirectangular_texture,
+            ),
             equirectangular_texture,
         }
     }
 
     /// Create a new `Skybox`.
-    pub fn new(device: &wgpu::Device, queue: &wgpu::Queue, hdr_img: SceneImage) -> Self {
+    pub fn new(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        constants: &Uniform<GpuConstants>,
+        hdr_img: SceneImage,
+    ) -> Self {
+        log::trace!("creating skybox");
         let equirectangular_texture = Skybox::hdr_texture_from_scene_image(device, queue, hdr_img);
         // let proj = Mat4::perspective_rh(std::f32::consts::PI / 180.0 * 90.0, 1.0,
         // 0.1, 10.0); let views = [
@@ -220,6 +242,11 @@ impl Skybox {
         //    brdf_lut: Skybox::create_precomputed_brdf_texture(device, queue),
         //}
         Skybox {
+            bindgroup: crate::skybox::create_skybox_bindgroup(
+                &device,
+                &constants,
+                &equirectangular_texture,
+            ),
             equirectangular_texture,
         }
     }
@@ -614,15 +641,11 @@ impl Skybox {
 
 #[cfg(test)]
 mod test {
-    use glam::{Mat4, Vec2, Vec3, Vec4};
-    use pretty_assertions::assert_eq;
-    use renderling_shader::{
-        scene::LightingModel,
-        ui::{UiMode, UiVertex},
-    };
+    use glam::{Vec2, Vec3, Vec4};
+    use renderling_shader::ui::{UiMode, UiVertex};
 
     use super::*;
-    use crate::{setup_scene_render_graph, setup_ui_render_graph, Renderling};
+    use crate::{setup_render_graph, setup_ui_render_graph, Renderling};
 
     #[test]
     fn hdr_texture() {
@@ -670,29 +693,11 @@ mod test {
     fn hdr_skybox_scene() {
         let mut r = Renderling::headless(600, 400).unwrap();
         let proj = crate::camera::perspective(600.0, 400.0);
-        let view = crate::camera::look_at(Vec3::new(0.0, 0.0, 4.0), Vec3::ZERO, Vec3::Y);
-        let constants = GpuConstants {
-            camera_projection: proj,
-            camera_view: view,
-            ..Default::default()
-        };
-        let works = (0..36).map(|id| {
-            let mut local_pos = Vec3::ZERO;
-            let mut gl_pos = Vec4::ZERO;
-            renderling_shader::skybox::vertex_works(id, &constants, &mut local_pos, &mut gl_pos);
-            (local_pos, gl_pos)
-        }).collect::<Vec<_>>();
-        let no_works = (0..36).map(|id| {
-            let mut local_pos = Vec3::ZERO;
-            let mut gl_pos = Vec4::ZERO;
-            renderling_shader::skybox::vertex_no_works(id, &constants, &mut local_pos, &mut gl_pos);
-            (local_pos, gl_pos)
-        }).collect::<Vec<_>>();
-        assert_eq!(works, no_works);
+        let view = crate::camera::look_at(Vec3::new(0.0, 0.0, 2.0), Vec3::ZERO, Vec3::Y);
         let mut builder = r.new_scene().with_camera(proj, view);
         builder.add_skybox_image_from_path("../../img/hdr/helipad.hdr");
         let scene = builder.build().unwrap();
-        setup_scene_render_graph(scene, &mut r, true);
+        r.setup_render_graph(Some(scene), None, [], true);
         let img = r.render_image().unwrap();
         img_diff::save("hdr_skybox_scene.png", img);
     }

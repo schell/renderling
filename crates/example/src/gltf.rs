@@ -8,7 +8,7 @@ use renderling::{
     debug::DebugChannel,
     math::{Mat4, Vec3, Vec4},
     GltfLoader, GpuEntity, Renderling, Scene, ScreenSize, TweenProperty, UiDrawObjects, UiMode,
-    UiVertex, ViewMut,
+    UiVertex, ViewMut, SceneImage,
 };
 use renderling_gpui::{Element, Gpui};
 use winit::event::KeyboardInput;
@@ -75,8 +75,7 @@ impl App {
 
         // Create a placeholder scene
         let scene = r.new_scene().build().unwrap();
-
-        renderling::setup_ui_and_scene_render_graph(r, ui_scene, [ui_obj], scene, false);
+        r.setup_render_graph(Some(scene), Some(ui_scene), [ui_obj], false);
 
         let mut app = Self {
             loader: None,
@@ -128,6 +127,24 @@ impl App {
 
     fn load(&mut self, r: &mut Renderling, file: impl AsRef<std::path::Path>) {
         log::info!("loading '{}'", file.as_ref().display());
+        if let Some(ext) = file.as_ref().extension() {
+            match ext.to_str() {
+                None => {
+                    self.ui.set_text_title("funky extension");
+                }
+                Some("hdr") => self.load_hdr_skybox(r, file),
+                Some(_) => self.load_gltf_model(r, file),
+            }
+        }
+    }
+
+    fn load_hdr_skybox(&mut self, r: &mut Renderling, file: impl AsRef<std::path::Path>) {
+        let img = SceneImage::from_hdr_path(file).unwrap();
+        let scene = r.graph.get_resource_mut::<Scene>().unwrap().unwrap();
+        scene.set_skybox_img(Some(img));
+    }
+
+    fn load_gltf_model(&mut self, r: &mut Renderling, file: impl AsRef<std::path::Path>) {
         self.phi = 0.0;
         self.theta = std::f32::consts::FRAC_PI_4;
         self.left_mb_down = false;
@@ -333,12 +350,16 @@ fn get_name(path: impl AsRef<std::path::Path>) -> String {
 /// Sets up the demo for a given model
 pub fn demo(
     r: &mut Renderling,
-    start: Option<impl AsRef<str>>,
+    model: Option<std::path::PathBuf>,
+    skybox: Option<std::path::PathBuf>,
 ) -> impl FnMut(&mut Renderling, Option<&winit::event::WindowEvent>) {
     let mut app = App::new(r);
 
-    if let Some(file) = start {
-        app.load(r, file.as_ref());
+    if let Some(file) = model {
+        app.load_gltf_model(r, file);
+    }
+    if let Some(file) = skybox {
+        app.load_hdr_skybox(r, file);
     }
 
     let mut event_state = renderling_gpui::EventState::default();

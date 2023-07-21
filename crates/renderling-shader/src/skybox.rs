@@ -1,66 +1,47 @@
 //! Skybox shader.
 
-use glam::{Mat3, Mat4, Vec2, Vec3, Vec3Swizzles, Vec4, Vec4Swizzles};
+use glam::{Mat3, Mat4, Vec2, Vec3, Vec4, Vec4Swizzles};
 use spirv_std::{image::Image2d, Sampler};
 
 #[cfg(target_arch = "spirv")]
 use spirv_std::num_traits::Float;
 
-use crate::{
-    math::{self, UNIT_INDICES},
-    scene::GpuConstants,
+use crate::scene::GpuConstants;
+
+const CUBE: [Vec3; 36] = {
+    let p0 = Vec3::new(-0.5, 0.5, 0.5);
+    let p1 = Vec3::new(-0.5, 0.5, -0.5);
+    let p2 = Vec3::new(0.5, 0.5, -0.5);
+    let p3 = Vec3::new(0.5, 0.5, 0.5);
+    let p4 = Vec3::new(-0.5, -0.5, 0.5);
+    let p7 = Vec3::new(-0.5, -0.5, -0.5);
+    let p6 = Vec3::new(0.5, -0.5, -0.5);
+    let p5 = Vec3::new(0.5, -0.5, 0.5);
+
+    let points = [
+        p0, p2, p1, p0, p3, p2, // top
+        p0, p4, p3, p4, p5, p3, // front
+        p3, p6, p2, p3, p5, p6, // right
+        p1, p7, p0, p7, p4, p0, // left
+        p4, p6, p5, p4, p7, p6, // bottom
+        p2, p7, p1, p2, p6, p7, // back
+    ];
+
+    points
 };
-
-pub fn vertex_old(
-    vertex_id: u32,
-    constants: &GpuConstants,
-    local_pos: &mut Vec3,
-    gl_pos: &mut Vec4,
-) {
-    let index = math::UNIT_INDICES[vertex_id as usize];
-    *local_pos = math::UNIT_POINTS[index];
-    // let camera_view_without_translation = Mat3::from_mat4(constants.camera_view);
-    // let rot_view = Mat4::from_mat3(camera_view_without_translation);
-    let clip_pos = (constants.camera_projection * constants.camera_view)
-        .transform_point3(*local_pos)
-        .extend(1.0);
-    //*gl_pos = clip_pos.xyww();
-    *gl_pos = clip_pos;
-}
-
-const POINTS: [Vec3; 6] = {
-    [
-        math::UNIT_POINTS[math::UNIT_INDICES[6+0]],
-        math::UNIT_POINTS[math::UNIT_INDICES[6+1]],
-        math::UNIT_POINTS[math::UNIT_INDICES[6+2]],
-        math::UNIT_POINTS[math::UNIT_INDICES[6+3]],
-        math::UNIT_POINTS[math::UNIT_INDICES[6+4]],
-        math::UNIT_POINTS[math::UNIT_INDICES[6+5]],
-    ]
-};
-
-pub fn vertex_works(vertex_id: u32, constants: &GpuConstants, local_pos: &mut Vec3, gl_pos: &mut Vec4) {
-    let index = vertex_id as usize % 6;
-    let point = POINTS[index];
-    *local_pos = point;
-    *gl_pos = constants.camera_projection * constants.camera_view * point.extend(1.0);
-}
-
-pub fn vertex_no_works(vertex_id: u32, constants: &GpuConstants, local_pos: &mut Vec3, gl_pos: &mut Vec4) {
-    let index = vertex_id as usize % 6;
-    // doesn't work
-    let point = math::UNIT_POINTS[math::UNIT_INDICES[6+index]];
-    *local_pos = point;
-    *gl_pos = constants.camera_projection * constants.camera_view * point.extend(1.0);
-}
 
 pub fn vertex(vertex_id: u32, constants: &GpuConstants, local_pos: &mut Vec3, gl_pos: &mut Vec4) {
-    vertex_no_works(vertex_id, constants, local_pos, gl_pos)
+    let point = CUBE[vertex_id as usize];
+    *local_pos = point;
+    let camera_view_without_translation = Mat3::from_mat4(constants.camera_view);
+    let rot_view = Mat4::from_mat3(camera_view_without_translation);
+    let clip_pos = constants.camera_projection * rot_view * point.extend(1.0);
+    *gl_pos = clip_pos.xyww();
 }
 
 const INV_ATAN: Vec2 = Vec2::new(0.1591, 0.3183);
 pub fn sample_spherical_map(pos: Vec3) -> Vec2 {
-    let mut uv = Vec2::new(f32::atan2(pos.z, pos.x), f32::asin(pos.y));
+    let mut uv = Vec2::new(f32::atan2(pos.z, pos.x), f32::asin(-pos.y));
     uv *= INV_ATAN;
     uv += 0.5;
     uv
@@ -72,17 +53,7 @@ pub fn fragment_equirectangular(
     local_pos: Vec3,
     out_color: &mut Vec4,
 ) {
-    // let uv = sample_spherical_map(local_pos.normalize_or_zero());
-    let uv = local_pos.xy();
-    let mut env_color: Vec3 = texture.sample(*sampler, uv).xyz();
-    if env_color.x != 1.0 {
-        env_color.x = 1.0;
-    }
-    if env_color.y != 0.0 {
-        env_color.y = 0.0;
-    }
-    if env_color.z != 0.0 {
-        env_color.z = 0.0;
-    }
+    let uv = sample_spherical_map(local_pos.normalize_or_zero());
+    let env_color: Vec3 = texture.sample(*sampler, uv).xyz();
     *out_color = env_color.extend(1.0);
 }

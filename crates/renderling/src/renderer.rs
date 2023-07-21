@@ -5,8 +5,8 @@ use snafu::prelude::*;
 use std::{ops::Deref, sync::Arc};
 
 use crate::{
-    node::HdrSurface, CreateSurfaceFn, Graph, RenderTarget, SceneBuilder, TextureError,
-    UiSceneBuilder, View, ViewMut, WgpuStateError,
+    node::HdrSurface, CreateSurfaceFn, Graph, RenderTarget, Scene, SceneBuilder, TextureError,
+    UiDrawObject, UiScene, UiSceneBuilder, View, ViewMut, WgpuStateError,
 };
 
 #[derive(Debug, Snafu)]
@@ -357,16 +357,39 @@ impl Renderling {
         SceneBuilder::new(device.0, queue.0)
     }
 
+    pub fn empty_scene(&self) -> Scene {
+        self.new_scene().build().unwrap()
+    }
+
     pub fn new_ui_scene(&self) -> UiSceneBuilder<'_> {
         let (device, _) = self.get_device_and_queue_owned();
         let queue = self.get_queue();
         UiSceneBuilder::new(device.0.clone(), queue)
     }
 
+    pub fn empty_ui_scene(&self) -> UiScene {
+        self.new_ui_scene().build()
+    }
+
     #[cfg(feature = "text")]
     /// Create a new `GlyphCache` used to cache text rendering info.
     pub fn new_glyph_cache(&self, fonts: Vec<crate::FontArc>) -> crate::GlyphCache {
         crate::GlyphCache::new(fonts)
+    }
+
+    /// Sets up the render graph with the given scenes and objects.
+    ///
+    /// The scenes and objects may be "visited" later, or even retrieved.
+    pub fn setup_render_graph(
+        &mut self,
+        scene: Option<Scene>,
+        ui: Option<UiScene>,
+        objs: impl IntoIterator<Item = UiDrawObject>,
+        with_screen_capture: bool,
+    ) {
+        let scene = scene.unwrap_or_else(|| self.empty_scene());
+        let ui = ui.unwrap_or_else(|| self.empty_ui_scene());
+        crate::setup_render_graph(self, scene, ui, objs, with_screen_capture)
     }
 
     /// Render into an image.
