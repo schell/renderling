@@ -9,10 +9,7 @@ use spirv_std::num_traits::Float;
 
 use glam::{Vec3, Vec4, Vec4Swizzles};
 
-use crate::{
-    math::Vec3ColorSwizzles,
-    scene::{GpuLight, LightType},
-};
+use crate::scene::{GpuLight, LightType};
 
 /// Trowbridge-Reitz GGX normal distribution function (NDF).
 ///
@@ -80,7 +77,7 @@ fn outgoing_radiance(
     roughness: f32,
 ) -> Vec3 {
     let f0 = Vec3::splat(0.4).lerp(albedo, metalness);
-    let radiance = light_color.rgb() * attenuation;
+    let radiance = light_color.xyz() * attenuation;
     let h = (v + l).normalize_or_zero();
     // cook-torrance brdf
     let ndf: f32 = normal_distribution_ggx(n, h, roughness);

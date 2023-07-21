@@ -4,6 +4,19 @@
 //! [`SceneBuilder`].
 
 use image::EncodableLayout;
+use snafu::prelude::*;
+
+#[derive(Debug, Snafu)]
+pub enum SceneImageError {
+    #[snafu(display("Cannot load image '{}' from cwd '{:?}': {source}", path.display(), std::env::current_dir()))]
+    CannotLoad {
+        source: std::io::Error,
+        path: std::path::PathBuf,
+    },
+
+    #[snafu(display("Image error: {source}"))]
+    Image { source: image::error::ImageError },
+}
 
 #[derive(Clone, Copy, Debug)]
 pub enum SceneImageFormat {
@@ -90,6 +103,42 @@ impl From<image::DynamicImage> for SceneImage {
             width,
             height,
         }
+    }
+}
+
+impl SceneImage {
+    pub fn from_hdr_path(p: impl AsRef<std::path::Path>) -> Result<Self, SceneImageError> {
+        let bytes = std::fs::read(p.as_ref()).with_context(|_| CannotLoadSnafu {
+            path: std::path::PathBuf::from(p.as_ref()),
+        })?;
+        Self::from_hdr_bytes(&bytes)
+    }
+
+    pub fn from_hdr_bytes(bytes: &[u8]) -> Result<Self, SceneImageError> {
+        // Decode HDR data.
+        let decoder = image::codecs::hdr::HdrDecoder::new(bytes).context(ImageSnafu)?;
+        let width = decoder.metadata().width;
+        let height = decoder.metadata().height;
+        let pixels = decoder.read_image_hdr().unwrap();
+
+        // Add alpha data.
+        let mut pixel_data: Vec<f32> = Vec::new();
+        for pixel in pixels {
+            pixel_data.push(pixel[0]);
+            pixel_data.push(pixel[1]);
+            pixel_data.push(pixel[2]);
+            pixel_data.push(1.0);
+        }
+        let mut pixels = vec![];
+        pixels.extend_from_slice(bytemuck::cast_slice(pixel_data.as_slice()));
+
+        Ok(Self {
+            pixels,
+            width,
+            height,
+            format: SceneImageFormat::R32G32B32A32FLOAT,
+            apply_linear_transfer: false,
+        })
     }
 }
 
