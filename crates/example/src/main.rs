@@ -1,11 +1,27 @@
 //! Main entry point for the gltf viewer.
 
 use renderling::Renderling;
+use clap::Parser;
+
+#[derive(Parser)]
+#[command(author, version, about)]
+struct Cli {
+    /// Optional gltf model to load at startup
+    #[arg(short, long)]
+    model: Option<std::path::PathBuf>,
+
+    /// Optional HDR image to use as skybox at startup
+    #[arg(short, long)]
+    skybox: Option<std::path::PathBuf>
+}
 
 // mod demo;
 mod gltf;
 
+
 fn run() -> Result<(), anyhow::Error> {
+    let cli = Cli::parse();
+
     env_logger::Builder::default()
         .filter_module("example", log::LevelFilter::Trace)
         .filter_module("renderling", log::LevelFilter::Trace)
@@ -25,9 +41,8 @@ fn run() -> Result<(), anyhow::Error> {
 
     // Set up a new renderling
     let mut r = Renderling::try_from_window(&window).unwrap();
-    let model = std::env::args().skip(1).next();
     let mut run_current_frame: Box<dyn FnMut(&mut Renderling, Option<&winit::event::WindowEvent>)> =
-        Box::new(gltf::demo(&mut r, model));
+        Box::new(gltf::demo(&mut r, cli.model, cli.skybox));
     event_loop.run(move |event, _target, control_flow| {
         *control_flow = winit::event_loop::ControlFlow::Poll;
 

@@ -14,7 +14,6 @@ use spirv_std::num_traits::*;
 use crate::{
     bits::{bits, extract, insert},
     debug::*,
-    math::Vec3ColorSwizzles,
     pbr, GpuToggles,
 };
 
@@ -135,9 +134,10 @@ impl GpuVertex {
     }
 
     pub fn generate_normal(a: GpuVertex, b: GpuVertex, c: GpuVertex) -> Vec3 {
-        let ab = b.position.xyz() - a.position.xyz();
-        let ac = c.position.xyz() - a.position.xyz();
-        ab.cross(ac)
+
+        let ab = a.position.xyz() - b.position.xyz();
+        let ac = a.position.xyz() - c.position.xyz();
+        ab.cross(ac).normalize()
     }
 
     pub fn generate_tangent(a: GpuVertex, b: GpuVertex, c: GpuVertex) -> Vec4 {
@@ -714,7 +714,7 @@ pub fn main_fragment_scene(
                 constants.camera_pos.xyz(),
                 norm,
                 in_pos,
-                albedo.rgb(),
+                albedo.xyz(),
                 metallic,
                 roughness,
                 ao,

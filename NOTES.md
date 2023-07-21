@@ -29,6 +29,9 @@ Just pro-cons on tech choices and little things I don't want to forget whil impl
   - see [conversation on discord](https://discord.com/channels/750717012564770887/750717499737243679/1091813590400516106)
 * can't use bitwise rotate_left or rotate_right
   - see [the issue on github](https://github.com/EmbarkStudios/rust-gpu/issues/1062)
+* sometimes things like indexing are just funky-joe-monkey:
+  - see [this comment on discord](https://discord.com/channels/750717012564770887/750717499737243679/1131395331368693770)
+  - see [this comment on matrix](https://matrix.to/#/!XFRnMvAfptAHthwBCx:matrix.org/$f4RmQGzq4Ulmmd4bEFOvP0LzLZei8lrHCF--s71Zcxs?via=matrix.org&via=mozilla.org&via=kyju.org)
 
 # wgpu
 
@@ -64,6 +67,8 @@ Just pro-cons on tech choices and little things I don't want to forget whil impl
   * for each tile compute which lights' contribution to the pixels in the tile
   * during shading, iterate over _only_ the lights for each pixel according to its tile
 * [**Help inspecting buffers in Xcode** ](https://developer.apple.com/documentation/xcode/inspecting-buffers?changes=__9)
+* command that includes some vulkan debugging stuff
+  - VK_LOADER_LAYERS_ENABLE='*validation' VK_LAYER_ENABLES=VK_VALIDATION_FEATURE_ENABLE_DEBUG_PRINTF_EXT DEBUG_PRINTF_TO_STDOUT=1
 
 ## PBR reference implementations
 * [khronos sample viewer](https://github.khronos.org/glTF-Sample-Viewer-Release/)
