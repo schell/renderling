@@ -159,8 +159,18 @@ pub fn vertex_skybox(
     skybox::vertex(vertex_id, constants, local_pos, gl_pos)
 }
 
+#[spirv(vertex)]
+pub fn vertex_cubemap_making(
+    #[spirv(uniform, descriptor_set = 0, binding = 0)] constants: &scene::GpuConstants,
+    in_pos: glam::Vec3,
+    local_pos: &mut glam::Vec3,
+    #[spirv(position)] gl_pos: &mut glam::Vec4
+) {
+    skybox::vertex_cubemap_making(constants, in_pos, local_pos, gl_pos)
+}
+
 #[spirv(fragment)]
-pub fn fragment_skybox(
+pub fn fragment_equirectangular(
     #[spirv(descriptor_set = 0, binding = 1)] texture: &Image2d,
     #[spirv(descriptor_set = 0, binding = 2)] sampler: &Sampler,
     in_local_pos: glam::Vec3,
@@ -168,33 +178,3 @@ pub fn fragment_skybox(
 ) {
     skybox::fragment_equirectangular(texture, sampler, in_local_pos, out_color)
 }
-
-///// Just a test for atomics in Naga.
-//#[spirv(compute(threads(32)))]
-// pub fn compute_atomics(
-//    #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] data: &mut
-// [u32],    #[spirv(storage_buffer, descriptor_set = 0, binding = 1)] sum: &mut
-// u32,    #[spirv(global_invocation_id)] global_id: glam::UVec3,
-//) {
-//    let index = global_id.x as usize;
-//    if index > data.len() {
-//        return;
-//    }
-//
-//    let n =
-//        unsafe {
-//            spirv_std::arch::atomic_load::<
-//                    u32,
-//                { spirv_std::memory::Scope::Device as u32 },
-//                { spirv_std::memory::Semantics::NONE.bits() as u32 },
-//                >(&data[index])
-//        };
-//    *sum = n;
-//    //unsafe {
-//    //    spirv_std::arch::atomic_i_add::<
-//    //        u32,
-//    //        { spirv_std::memory::Scope::Device as u32 },
-//    //        { spirv_std::memory::Semantics::NONE.bits() as u32 },
-//    //    >(sum, n)
-//    //};
-//}

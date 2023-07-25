@@ -39,10 +39,11 @@
 //! and manage your own resources for maximum flexibility.
 
 mod atlas;
-// mod bank;
 mod buffer_array;
 mod camera;
+pub mod cubemap;
 pub mod math;
+pub mod mesh;
 pub mod node;
 mod renderer;
 mod scene;
@@ -122,7 +123,7 @@ pub fn setup_render_graph(
     let compute_cull_pipeline =
         SceneComputeCullPipeline(create_scene_compute_cull_pipeline(device));
     let skybox_pipeline =
-        crate::skybox::create_skybox_render_pipeline(r.get_device(), hdr_texture_format);
+        crate::skybox::create_skybox_equirectangular_render_pipeline(r.get_device(), hdr_texture_format);
     drop(device);
     r.graph.add_resource(scene_render_pipeline);
     r.graph.add_resource(hdr_surface);

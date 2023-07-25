@@ -174,6 +174,7 @@ pub struct UiDrawObject {
     texture_bindgroup: Option<wgpu::BindGroup>,
     updated_texture: Option<Texture>,
     updated_vertices: Option<(Vec<UiVertex>, Option<Vec<u16>>)>,
+    // TODO: replace UiDrawObject's vertex_buffer, vertex_buffer_len and vertex_indices with crate::Mesh
     vertex_buffer: wgpu::Buffer,
     vertex_buffer_len: usize,
     vertex_indices: Option<(wgpu::Buffer, usize)>,

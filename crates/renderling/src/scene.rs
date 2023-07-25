@@ -8,11 +8,10 @@ use snafu::prelude::*;
 
 pub use renderling_shader::scene::*;
 
+use crate::DepthTexture;
 use crate::{
-    graph,
-    node::{self, FrameTextureView, HdrSurface},
-    Atlas, DepthTexture, Device, GpuArray, Graph, Queue, Renderling, Skybox, SkyboxRenderPipeline,
-    Uniform,
+    node::{FrameTextureView, HdrSurface},
+    Atlas, Device, GpuArray, Queue, Skybox, SkyboxRenderPipeline, Uniform,
 };
 
 mod entity;
@@ -403,7 +402,7 @@ impl Scene {
                     let mut toggles = GpuToggles::default();
                     toggles.set_has_skybox(skybox_image.is_some());
                     toggles
-                }
+                },
             },
             wgpu::BufferUsages::UNIFORM
                 | wgpu::BufferUsages::COPY_DST
