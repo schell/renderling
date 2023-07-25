@@ -41,22 +41,6 @@ impl Mesh {
         }
     }
 
-    pub fn vertex_count(&self) -> usize {
-        self.vertex_buffer_len
-    }
-
-    pub fn index_count(&self) -> usize {
-        self.vertex_indices.map(|(_, len)| len).unwrap_or_default()
-    }
-
-    pub fn buffer(&self) -> &wgpu::Buffer {
-        &self.vertex_buffer
-    }
-
-    pub fn index_buffer(&self) -> Option<&wgpu::Buffer> {
-        self.vertex_indices.as_ref().map(|(b, _)| b)
-    }
-
     pub fn draw<'a>(&'a self, render_pass: &mut wgpu::RenderPass<'a>) {
         render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
         match &self.vertex_indices {

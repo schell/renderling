@@ -12,7 +12,7 @@ use snafu::prelude::*;
 use wgpu::util::DeviceExt;
 
 use crate::{
-    node::FrameTextureView, Device, Queue, RenderTarget, Renderling, Texture, Uniform,
+    mesh::Mesh, node::FrameTextureView, Device, Queue, RenderTarget, Renderling, Texture, Uniform,
     View, ViewMut,
 };
 
@@ -174,10 +174,7 @@ pub struct UiDrawObject {
     texture_bindgroup: Option<wgpu::BindGroup>,
     updated_texture: Option<Texture>,
     updated_vertices: Option<(Vec<UiVertex>, Option<Vec<u16>>)>,
-    // TODO: replace UiDrawObject's vertex_buffer, vertex_buffer_len and vertex_indices with crate::Mesh
-    vertex_buffer: wgpu::Buffer,
-    vertex_buffer_len: usize,
-    vertex_indices: Option<(wgpu::Buffer, usize)>,
+    mesh: Mesh,
 }
 
 impl UiDrawObject {
@@ -188,18 +185,6 @@ impl UiDrawObject {
         may_indices: Option<impl IntoIterator<Item = u16>>,
         texture_bindgroup: Option<wgpu::BindGroup>,
     ) -> Self {
-        let vertices = vertices.into_iter().collect::<Vec<_>>();
-        let vertex_indices = if let Some(indices) = may_indices {
-            let indices = indices.into_iter().collect::<Vec<_>>();
-            let index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("UiDrawObject index"),
-                contents: bytemuck::cast_slice(&indices),
-                usage: wgpu::BufferUsages::VERTEX,
-            });
-            Some((index_buffer, indices.len()))
-        } else {
-            None
-        };
         Self {
             draw_params: Uniform::new(
                 device,
@@ -209,14 +194,8 @@ impl UiDrawObject {
             ),
             updated_texture: None,
             updated_vertices: None,
-            vertex_buffer: device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("UiDrawObject"),
-                contents: bytemuck::cast_slice(&vertices),
-                usage: wgpu::BufferUsages::VERTEX,
-            }),
-            vertex_buffer_len: vertices.len(),
-            vertex_indices,
             texture_bindgroup,
+            mesh: Mesh::new(device, Some("UiDrawObject index"), vertices, may_indices),
         }
     }
 
@@ -279,23 +258,13 @@ impl UiDrawObject {
         }
         if let Some((vertices, may_indices)) = self.updated_vertices.take() {
             log::trace!("updating UiDrawObject vertices");
-            self.vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                label: Some("UiDrawObject::update vertices"),
-                contents: bytemuck::cast_slice(&vertices),
-                usage: wgpu::BufferUsages::VERTEX,
-            });
-            self.vertex_buffer_len = vertices.len();
-            if let Some(indices) = may_indices {
-                log::trace!("updating UiDrawObject indices");
-                let (index_buffer, size) =
-                    self.vertex_indices.as_mut().context(NoIndexBufferSnafu)?;
-                *index_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
-                    label: Some("UiDrawObject::update indices"),
-                    contents: bytemuck::cast_slice(&indices),
-                    usage: wgpu::BufferUsages::VERTEX,
-                });
-                *size = indices.len();
-            }
+            self.mesh.update(
+                device,
+                queue,
+                Some("UiDrawObject::update mesh"),
+                vertices,
+                may_indices,
+            );
         }
         Ok(())
     }
@@ -545,13 +514,7 @@ impl UiDrawObject {
             .unwrap_or(default_texture_bindgroup);
         render_pass.set_bind_group(1, bindgroup, &[]);
         render_pass.set_bind_group(2, self.draw_params.bindgroup(), &[]);
-        render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-        if let Some((index_buffer, len)) = self.vertex_indices.as_ref() {
-            render_pass.set_index_buffer(index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-            render_pass.draw_indexed(0..*len as u32, 0, 0..1);
-        } else {
-            render_pass.draw(0..self.vertex_buffer_len as u32, 0..1);
-        }
+        self.mesh.draw(render_pass);
     }
 }
 
@@ -607,7 +570,11 @@ pub fn setup_ui_render_graph(
     r.graph.add_resource(objects);
     r.graph.add_resource(pipeline);
 
-    use crate::{Graph, graph, node::{clear_frame_and_depth, create_frame, present}};
+    use crate::{
+        graph,
+        node::{clear_frame_and_depth, create_frame, present},
+        Graph,
+    };
     let pre_render =
         crate::graph!(create_frame, clear_frame_and_depth, ui_scene_update).with_barrier();
     let render = crate::graph!(ui_scene_render).with_barrier();

@@ -115,7 +115,7 @@ pub fn create_skybox_equirectangular_render_pipeline(
             },
             fragment: Some(wgpu::FragmentState {
                 module: &fragment_shader,
-                entry_point: "fragment_skybox",
+                entry_point: "fragment_equirectangular",
                 targets: &[Some(wgpu::ColorTargetState {
                     format,
                     blend: Some(wgpu::BlendState::ALPHA_BLENDING),
