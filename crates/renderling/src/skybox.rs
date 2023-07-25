@@ -134,12 +134,8 @@ pub fn create_skybox_render_pipeline(
     format: wgpu::TextureFormat,
 ) -> SkyboxRenderPipeline {
     log::trace!("creating skybox render pipeline with format '{format:?}'");
-    // let shader =
-    // device.create_shader_module(wgpu::include_wgsl!("linkage/skybox.wgsl"));
     let vertex_shader =
         device.create_shader_module(wgpu::include_spirv!("linkage/vertex_skybox.spv"));
-    // )); unsafe { device.create_shader_module_spirv(&wgpu::include_spirv_raw!
-    // (" linkage/vertex_skybox.spv")) };
     let fragment_shader =
         device.create_shader_module(wgpu::include_spirv!("linkage/fragment_equirectangular.spv"));
     let bg_layout = skybox_bindgroup_layout(device);
@@ -198,46 +194,11 @@ pub struct Skybox {
     pub equirectangular_texture: crate::Texture,
     // Bindgroup used in the skybox render pipeline
     pub bindgroup: wgpu::BindGroup,
-    // pub environment_texture: crate::Texture,
+    //pub environment_texture: crate::Texture,
     // pub irradiance_map: crate::Texture,
     // pub prefiltered_environment_map: crate::Texture,
     // pub brdf_lut: crate::Texture,
 }
-
-// let projection = Mat4::perspective_rh(core::f32::consts::FRAC_PI_2, 1.0, 0.1,
-// 10.0); Views of the insides of the unit cube.
-// let capture_views = [
-//    Mat4::look_at_rh(
-//        Vec3::new(0.0, 0.0, 0.0),
-//        Vec3::new(1.0, 0.0, 0.0),
-//        Vec3::new(0.0, -1.0, 0.0),
-//    ),
-//    Mat4::look_at_rh(
-//        Vec3::new(0.0, 0.0, 0.0),
-//        Vec3::new(-1.0, 0.0, 0.0),
-//        Vec3::new(0.0, -1.0, 0.0),
-//    ),
-//    Mat4::look_at_rh(
-//        Vec3::new(0.0, 0.0, 0.0),
-//        Vec3::new(0.0, 1.0, 0.0),
-//        Vec3::new(0.0, 0.0, 1.0),
-//    ),
-//    Mat4::look_at_rh(
-//        Vec3::new(0.0, 0.0, 0.0),
-//        Vec3::new(0.0, -1.0, 0.0),
-//        Vec3::new(0.0, 0.0, -1.0),
-//    ),
-//    Mat4::look_at_rh(
-//        Vec3::new(0.0, 0.0, 0.0),
-//        Vec3::new(0.0, 0.0, 1.0),
-//        Vec3::new(0.0, -1.0, 0.0),
-//    ),
-//    Mat4::look_at_rh(
-//        Vec3::new(0.0, 0.0, 0.0),
-//        Vec3::new(0.0, 0.0, -1.0),
-//        Vec3::new(0.0, -1.0, 0.0),
-//    ),
-//];
 
 impl Skybox {
     /// Create an empty, transparent skybox.
