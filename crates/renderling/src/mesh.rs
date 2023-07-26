@@ -1,5 +1,4 @@
 //! Sometimes you just need a mesh.
-use snafu::prelude::*;
 use wgpu::util::DeviceExt;
 
 /// A vertex buffer.
@@ -57,7 +56,6 @@ impl Mesh {
     pub fn update<V: bytemuck::Pod>(
         &mut self,
         device: &wgpu::Device,
-        queue: &wgpu::Queue,
         label: Option<&str>,
         vertices: impl IntoIterator<Item = V>,
         may_indices: Option<impl IntoIterator<Item = u16>>,

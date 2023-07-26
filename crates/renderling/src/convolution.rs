@@ -1,12 +1,11 @@
-//! Render pipelines and layouts for creating cubemaps.
-
+//! Pipelines for convolution shaders.
 use renderling_shader::scene::GpuConstants;
 
 use crate::Uniform;
 
-pub fn cubemap_making_bindgroup_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+pub fn convolution_bindgroup_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
     device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        label: Some("cubemap-making bindgroup"),
+        label: Some("convolution bindgroup"),
         entries: &[
             wgpu::BindGroupLayoutEntry {
                 binding: 0,
@@ -23,7 +22,7 @@ pub fn cubemap_making_bindgroup_layout(device: &wgpu::Device) -> wgpu::BindGroup
                 visibility: wgpu::ShaderStages::FRAGMENT,
                 ty: wgpu::BindingType::Texture {
                     sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                    view_dimension: wgpu::TextureViewDimension::D2,
+                    view_dimension: wgpu::TextureViewDimension::Cube,
                     multisampled: false,
                 },
                 count: None,
@@ -38,7 +37,7 @@ pub fn cubemap_making_bindgroup_layout(device: &wgpu::Device) -> wgpu::BindGroup
     })
 }
 
-pub fn cubemap_making_bindgroup(
+pub fn convolution_bindgroup(
     device: &wgpu::Device,
     label: Option<&str>,
     constants: &Uniform<GpuConstants>,
@@ -47,7 +46,7 @@ pub fn cubemap_making_bindgroup(
 ) -> wgpu::BindGroup {
     device.create_bind_group(&wgpu::BindGroupDescriptor {
         label,
-        layout: &cubemap_making_bindgroup_layout(device),
+        layout: &&convolution_bindgroup_layout(device),
         entries: &[
             wgpu::BindGroupEntry {
                 binding: 0,
@@ -67,26 +66,25 @@ pub fn cubemap_making_bindgroup(
     })
 }
 
-pub struct CubemapMakingRenderPipeline(pub wgpu::RenderPipeline);
+pub struct ConvolutionRenderPipeline(pub wgpu::RenderPipeline);
 
-impl CubemapMakingRenderPipeline {
-    /// Create the rendering pipeline that creates cubemaps from equirectangular
-    /// images.
+impl ConvolutionRenderPipeline {
+    /// Create the rendering pipeline that performs a convolution.
     pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat) -> Self {
-        log::trace!("creating cubemap-making render pipeline with format '{format:?}'");
+        log::trace!("creating convolution render pipeline with format '{format:?}'");
         let vertex_shader =
             device.create_shader_module(wgpu::include_spirv!("linkage/vertex_position_passthru.spv"));
         let fragment_shader = device
-            .create_shader_module(wgpu::include_spirv!("linkage/fragment_equirectangular.spv"));
-        let bg_layout = cubemap_making_bindgroup_layout(device);
+            .create_shader_module(wgpu::include_spirv!("linkage/fragment_convolve_diffuse_irradiance.spv"));
+        let bg_layout = convolution_bindgroup_layout(device);
         let pp_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("cubemap-making pipeline layout"),
+            label: Some("convolution pipeline layout"),
             bind_group_layouts: &[&bg_layout],
             push_constant_ranges: &[],
         });
-        CubemapMakingRenderPipeline(device.create_render_pipeline(
+        ConvolutionRenderPipeline(device.create_render_pipeline(
             &wgpu::RenderPipelineDescriptor {
-                label: Some("cubemap-making pipeline"),
+                label: Some("convolution pipeline"),
                 layout: Some(&pp_layout),
                 vertex: wgpu::VertexState {
                     module: &vertex_shader,
@@ -119,7 +117,7 @@ impl CubemapMakingRenderPipeline {
                 },
                 fragment: Some(wgpu::FragmentState {
                     module: &fragment_shader,
-                    entry_point: "fragment_equirectangular",
+                    entry_point: "fragment_convolve_diffuse_irradiance",
                     targets: &[Some(wgpu::ColorTargetState {
                         format,
                         blend: Some(wgpu::BlendState::ALPHA_BLENDING),

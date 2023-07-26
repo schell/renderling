@@ -9,7 +9,6 @@ use std::{
 
 use glam::{UVec2, Vec2, Vec4};
 use snafu::prelude::*;
-use wgpu::util::DeviceExt;
 
 use crate::{
     mesh::Mesh, node::FrameTextureView, Device, Queue, RenderTarget, Renderling, Texture, Uniform,
@@ -260,7 +259,6 @@ impl UiDrawObject {
             log::trace!("updating UiDrawObject vertices");
             self.mesh.update(
                 device,
-                queue,
                 Some("UiDrawObject::update mesh"),
                 vertices,
                 may_indices,

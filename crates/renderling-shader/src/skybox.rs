@@ -1,7 +1,7 @@
 //! Skybox shader.
 
 use glam::{Mat3, Mat4, Vec2, Vec3, Vec4, Vec4Swizzles};
-use spirv_std::{image::{Image2d, Image3d, Cubemap}, Sampler};
+use spirv_std::{image::{Image2d, Cubemap}, Sampler};
 
 #[cfg(target_arch = "spirv")]
 use spirv_std::num_traits::Float;
@@ -39,10 +39,11 @@ pub fn fragment_cubemap(
     *out_color = env_color.extend(1.0);
 }
 
-/// Used to create a cubemap from an equirectangular image.
+/// Passes the singular `Vec3` position attribute to the fragment shader unchanged,
+/// while transforming `gl_pos` by the camera projection*view;
 ///
-/// This is paired with [`fragment_equirectangular`].
-pub fn vertex_cubemap_making(
+/// Used to create a cubemap from an equirectangular image as well as cubemap convolutions.
+pub fn vertex_position_passthru(
     constants: &GpuConstants,
     in_pos: Vec3,
     local_pos: &mut Vec3,

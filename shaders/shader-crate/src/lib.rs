@@ -1,8 +1,12 @@
 //! Shader entry points.
 #![no_std]
 #![feature(lang_items)]
-use renderling_shader::{scene, ui, tonemapping, skybox};
-use spirv_std::{glam, image::{Image2d, Cubemap}, spirv, Sampler};
+use renderling_shader::{convolution, scene, skybox, tonemapping, ui};
+use spirv_std::{
+    glam,
+    image::{Cubemap, Image2d},
+    spirv, Sampler,
+};
 
 #[spirv(vertex)]
 pub fn ui_vertex(
@@ -144,7 +148,7 @@ pub fn fragment_tonemapping(
     #[spirv(uniform, descriptor_set = 1, binding = 0)] constants: &tonemapping::TonemapConstants,
     in_uv: glam::Vec2,
 
-    output: &mut glam::Vec4
+    output: &mut glam::Vec4,
 ) {
     tonemapping::fragment(texture, sampler, constants, in_uv, output)
 }
@@ -154,19 +158,19 @@ pub fn vertex_skybox(
     #[spirv(vertex_index)] vertex_id: u32,
     #[spirv(uniform, descriptor_set = 0, binding = 0)] constants: &scene::GpuConstants,
     local_pos: &mut glam::Vec3,
-    #[spirv(position)] gl_pos: &mut glam::Vec4
+    #[spirv(position)] gl_pos: &mut glam::Vec4,
 ) {
     skybox::vertex(vertex_id, constants, local_pos, gl_pos)
 }
 
 #[spirv(vertex)]
-pub fn vertex_cubemap_making(
+pub fn vertex_position_passthru(
     #[spirv(uniform, descriptor_set = 0, binding = 0)] constants: &scene::GpuConstants,
     in_pos: glam::Vec3,
     local_pos: &mut glam::Vec3,
-    #[spirv(position)] gl_pos: &mut glam::Vec4
+    #[spirv(position)] gl_pos: &mut glam::Vec4,
 ) {
-    skybox::vertex_cubemap_making(constants, in_pos, local_pos, gl_pos)
+    skybox::vertex_position_passthru(constants, in_pos, local_pos, gl_pos)
 }
 
 #[spirv(fragment)]
@@ -174,18 +178,27 @@ pub fn fragment_equirectangular(
     #[spirv(descriptor_set = 0, binding = 1)] texture: &Image2d,
     #[spirv(descriptor_set = 0, binding = 2)] sampler: &Sampler,
     in_local_pos: glam::Vec3,
-    out_color: &mut glam::Vec4
+    out_color: &mut glam::Vec4,
 ) {
     skybox::fragment_equirectangular(texture, sampler, in_local_pos, out_color)
 }
-
 
 #[spirv(fragment)]
 pub fn fragment_cubemap(
     #[spirv(descriptor_set = 0, binding = 1)] texture: &Cubemap,
     #[spirv(descriptor_set = 0, binding = 2)] sampler: &Sampler,
     in_local_pos: glam::Vec3,
-    out_color: &mut glam::Vec4
+    out_color: &mut glam::Vec4,
 ) {
     skybox::fragment_cubemap(texture, sampler, in_local_pos, out_color)
+}
+
+#[spirv(fragment)]
+pub fn fragment_convolve_diffuse_irradiance(
+    #[spirv(descriptor_set = 0, binding = 1)] texture: &Cubemap,
+    #[spirv(descriptor_set = 0, binding = 2)] sampler: &Sampler,
+    in_local_pos: glam::Vec3,
+    out_color: &mut glam::Vec4,
+) {
+    convolution::fragment_convolve_diffuse_irradiance(texture, sampler, in_local_pos, out_color)
 }

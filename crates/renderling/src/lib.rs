@@ -41,6 +41,7 @@
 mod atlas;
 mod buffer_array;
 mod camera;
+pub mod convolution;
 pub mod cubemap;
 pub mod math;
 pub mod mesh;
