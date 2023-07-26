@@ -123,7 +123,7 @@ pub fn setup_render_graph(
     let compute_cull_pipeline =
         SceneComputeCullPipeline(create_scene_compute_cull_pipeline(device));
     let skybox_pipeline =
-        crate::skybox::create_skybox_equirectangular_render_pipeline(r.get_device(), hdr_texture_format);
+        crate::skybox::create_skybox_render_pipeline(r.get_device(), hdr_texture_format);
     drop(device);
     r.graph.add_resource(scene_render_pipeline);
     r.graph.add_resource(hdr_surface);
@@ -170,8 +170,8 @@ fn init_logging() {
         .filter_module("moongraph", log::LevelFilter::Trace)
         .filter_module("renderling", log::LevelFilter::Trace)
         //.filter_module("naga", log::LevelFilter::Debug)
-        //.filter_module("wgpu", log::LevelFilter::Debug)
-        //.filter_module("wgpu_hal", log::LevelFilter::Warn)
+        .filter_module("wgpu", log::LevelFilter::Warn)
+        .filter_module("wgpu_hal", log::LevelFilter::Warn)
         .try_init();
 }
 

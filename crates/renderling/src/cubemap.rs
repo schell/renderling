@@ -90,7 +90,7 @@ impl CubemapMakingRenderPipeline {
                 layout: Some(&pp_layout),
                 vertex: wgpu::VertexState {
                     module: &vertex_shader,
-                    entry_point: "vertex_equirectangular",
+                    entry_point: "vertex_cubemap_making",
                     buffers: &[wgpu::VertexBufferLayout {
                         array_stride: {
                             let position_size = std::mem::size_of::<glam::Vec3>();
@@ -111,13 +111,7 @@ impl CubemapMakingRenderPipeline {
                     polygon_mode: wgpu::PolygonMode::Fill,
                     conservative: false,
                 },
-                depth_stencil: Some(wgpu::DepthStencilState {
-                    format: wgpu::TextureFormat::Depth32Float,
-                    depth_write_enabled: true,
-                    depth_compare: wgpu::CompareFunction::LessEqual,
-                    stencil: wgpu::StencilState::default(),
-                    bias: wgpu::DepthBiasState::default(),
-                }),
+                depth_stencil: None,
                 multisample: wgpu::MultisampleState {
                     mask: !0,
                     alpha_to_coverage_enabled: false,

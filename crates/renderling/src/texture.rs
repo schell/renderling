@@ -52,7 +52,7 @@ impl Texture {
             height,
             depth_or_array_layers: 6,
         };
-        let texture = device.create_texture(&wgpu::TextureDescriptor {
+        let cubemap_texture = device.create_texture(&wgpu::TextureDescriptor {
             label: None,
             size,
             mip_level_count: mip_levels,
@@ -67,25 +67,33 @@ impl Texture {
             label: Some("texture_buffer_copy_encoder"),
         });
 
+        log::trace!("copying face textures to cubemap texture");
         for mip_level in 0..mip_levels as usize {
+            log::trace!("  mip_level: {mip_level}");
             for i in 0..6 {
+                log::trace!("  face:{i}");
+                let texture = &face_textures[mip_level * 6 + i].texture;
                 encoder.copy_texture_to_texture(
                     wgpu::ImageCopyTexture {
-                        texture: &face_textures[mip_level * 6 + i].texture,
+                        texture,
                         mip_level: 0,
                         origin: wgpu::Origin3d::ZERO,
                         aspect: wgpu::TextureAspect::All,
                     },
                     wgpu::ImageCopyTexture {
-                        texture: &texture,
-                        mip_level: mip_level as u32,
-                        origin: wgpu::Origin3d::ZERO,
+                        texture: &cubemap_texture,
+                        mip_level: 0,
+                        origin: wgpu::Origin3d {
+                            x: 0,
+                            y: 0,
+                            z: i as u32,
+                        },
                         aspect: wgpu::TextureAspect::All,
                     },
                     wgpu::Extent3d {
-                        width: width >> mip_level,
-                        height: height >> mip_level,
-                        depth_or_array_layers: i as u32,
+                        width,
+                        height,
+                        depth_or_array_layers: 1,
                     },
                 );
             }
@@ -93,15 +101,10 @@ impl Texture {
 
         queue.submit([encoder.finish()]);
 
-        let view = texture.create_view(&wgpu::TextureViewDescriptor {
-            format: None,
+        let view = cubemap_texture.create_view(&wgpu::TextureViewDescriptor {
             dimension: Some(wgpu::TextureViewDimension::Cube),
-            aspect: wgpu::TextureAspect::All,
-            base_mip_level: 0,
-            mip_level_count: Some(mip_levels),
-            base_array_layer: 0,
-            array_layer_count: Some(6),
             label,
+            ..Default::default()
         });
 
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
@@ -111,15 +114,12 @@ impl Texture {
             mag_filter: wgpu::FilterMode::Linear,
             min_filter: wgpu::FilterMode::Linear,
             mipmap_filter: wgpu::FilterMode::Linear,
-            lod_min_clamp: -100.0,
-            lod_max_clamp: 100.0,
-            compare: Some(wgpu::CompareFunction::LessEqual),
             label,
             ..Default::default()
         });
 
         Texture {
-            texture: texture.into(),
+            texture: cubemap_texture.into(),
             view: view.into(),
             sampler: sampler.into(),
         }

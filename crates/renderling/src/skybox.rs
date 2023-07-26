@@ -26,7 +26,7 @@ pub fn skybox_bindgroup_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
                 visibility: wgpu::ShaderStages::FRAGMENT,
                 ty: wgpu::BindingType::Texture {
                     sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                    view_dimension: wgpu::TextureViewDimension::D2,
+                    view_dimension: wgpu::TextureViewDimension::Cube,
                     multisampled: false,
                 },
                 count: None,
@@ -66,69 +66,7 @@ pub fn create_skybox_bindgroup(
     })
 }
 
-/// Create the skybox rendering pipeline that uses an equirectangular
-/// environment texture.
-pub fn create_skybox_equirectangular_render_pipeline(
-    device: &wgpu::Device,
-    format: wgpu::TextureFormat,
-) -> SkyboxRenderPipeline {
-    log::trace!("creating equirectangular skybox render pipeline with format '{format:?}'");
-    let vertex_shader =
-        device.create_shader_module(wgpu::include_spirv!("linkage/vertex_skybox.spv"));
-    let fragment_shader =
-        device.create_shader_module(wgpu::include_spirv!("linkage/fragment_equirectangular.spv"));
-    let bg_layout = skybox_bindgroup_layout(device);
-    let pp_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-        label: Some("skybox pipeline layout"),
-        bind_group_layouts: &[&bg_layout],
-        push_constant_ranges: &[],
-    });
-    SkyboxRenderPipeline(
-        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("skybox pipeline"),
-            layout: Some(&pp_layout),
-            vertex: wgpu::VertexState {
-                module: &vertex_shader,
-                entry_point: "vertex_skybox",
-                buffers: &[],
-            },
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw,
-                cull_mode: None,
-                unclipped_depth: false,
-                polygon_mode: wgpu::PolygonMode::Fill,
-                conservative: false,
-            },
-            depth_stencil: Some(wgpu::DepthStencilState {
-                format: wgpu::TextureFormat::Depth32Float,
-                depth_write_enabled: true,
-                depth_compare: wgpu::CompareFunction::LessEqual,
-                stencil: wgpu::StencilState::default(),
-                bias: wgpu::DepthBiasState::default(),
-            }),
-            multisample: wgpu::MultisampleState {
-                mask: !0,
-                alpha_to_coverage_enabled: false,
-                count: 1,
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &fragment_shader,
-                entry_point: "fragment_equirectangular",
-                targets: &[Some(wgpu::ColorTargetState {
-                    format,
-                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            multiview: None,
-        }),
-    )
-}
-
-/// Create the skybox rendering pipeline that uses a cubemap environment
-/// texture.
+/// Create the skybox rendering pipeline.
 pub fn create_skybox_render_pipeline(
     device: &wgpu::Device,
     format: wgpu::TextureFormat,
@@ -137,7 +75,7 @@ pub fn create_skybox_render_pipeline(
     let vertex_shader =
         device.create_shader_module(wgpu::include_spirv!("linkage/vertex_skybox.spv"));
     let fragment_shader =
-        device.create_shader_module(wgpu::include_spirv!("linkage/fragment_equirectangular.spv"));
+        device.create_shader_module(wgpu::include_spirv!("linkage/fragment_cubemap.spv"));
     let bg_layout = skybox_bindgroup_layout(device);
     let pp_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("skybox pipeline layout"),
@@ -176,7 +114,7 @@ pub fn create_skybox_render_pipeline(
             },
             fragment: Some(wgpu::FragmentState {
                 module: &fragment_shader,
-                entry_point: "fragment_equirectangular",
+                entry_point: "fragment_cubemap",
                 targets: &[Some(wgpu::ColorTargetState {
                     format,
                     blend: Some(wgpu::BlendState::ALPHA_BLENDING),
@@ -190,11 +128,12 @@ pub fn create_skybox_render_pipeline(
 
 /// An HDR skybox.
 pub struct Skybox {
-    // Texture of the equirectangular environment map
+    // Texture of the equirectangular environment
     pub equirectangular_texture: crate::Texture,
+    // Texture of the environment cubmap
+    pub environment_texture: crate::Texture,
     // Bindgroup used in the skybox render pipeline
     pub bindgroup: wgpu::BindGroup,
-    //pub environment_texture: crate::Texture,
     // pub irradiance_map: crate::Texture,
     // pub prefiltered_environment_map: crate::Texture,
     // pub brdf_lut: crate::Texture,
@@ -208,28 +147,14 @@ impl Skybox {
         constants: &Uniform<GpuConstants>,
     ) -> Self {
         log::trace!("creating empty skybox");
-        let pixels = [0u8; 4 * 4];
-        let equirectangular_texture = crate::Texture::new_with(
-            device,
-            queue,
-            Some("empty skybox equirectangular environment texture"),
-            None,
-            None,
-            wgpu::TextureFormat::Rgba32Float,
-            4,
-            4,
-            1,
-            1,
-            &pixels,
-        );
-        Skybox {
-            bindgroup: crate::skybox::create_skybox_bindgroup(
-                &device,
-                &constants,
-                &equirectangular_texture,
-            ),
-            equirectangular_texture,
-        }
+        let hdr_img = SceneImage {
+            pixels: vec![0u8; 4 * 4],
+            width: 1,
+            height: 1,
+            format: crate::SceneImageFormat::R32G32B32A32FLOAT,
+            apply_linear_transfer: false,
+        };
+        Self::new(device, queue, constants, hdr_img)
     }
 
     /// Create a new `Skybox`.
@@ -338,9 +263,10 @@ impl Skybox {
             bindgroup: crate::skybox::create_skybox_bindgroup(
                 &device,
                 &constants,
-                &equirectangular_texture,
+                &environment_texture,
             ),
             equirectangular_texture,
+            environment_texture,
         }
     }
 
@@ -403,18 +329,20 @@ impl Skybox {
             &constants,
             hdr_texture,
         );
-        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("create cubemap from equirectangular"),
-        });
         let mut cubemap_faces = Vec::new();
 
         // Render every cube face.
         for i in 0..6 {
+            let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("create cubemap from equirectangular"),
+            });
+
+            log::trace!("rendering cubemap face {i}");
             let cubemap_face = crate::Texture::new_with(
                 device,
                 queue,
                 Some(&format!("cubemap{i}")),
-                Some(wgpu::TextureUsages::RENDER_ATTACHMENT),
+                Some(wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC),
                 None,
                 wgpu::TextureFormat::Rgba16Float,
                 4,
@@ -447,9 +375,9 @@ impl Skybox {
                 unit_cube_mesh.draw(&mut render_pass);
             }
 
+            queue.submit([encoder.finish()]);
             cubemap_faces.push(cubemap_face);
         }
-        queue.submit([encoder.finish()]);
 
         crate::Texture::new_cubemap_texture(
             device,

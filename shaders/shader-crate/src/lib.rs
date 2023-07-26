@@ -2,7 +2,7 @@
 #![no_std]
 #![feature(lang_items)]
 use renderling_shader::{scene, ui, tonemapping, skybox};
-use spirv_std::{glam, image::Image2d, spirv, Sampler};
+use spirv_std::{glam, image::{Image2d, Cubemap}, spirv, Sampler};
 
 #[spirv(vertex)]
 pub fn ui_vertex(
@@ -177,4 +177,15 @@ pub fn fragment_equirectangular(
     out_color: &mut glam::Vec4
 ) {
     skybox::fragment_equirectangular(texture, sampler, in_local_pos, out_color)
+}
+
+
+#[spirv(fragment)]
+pub fn fragment_cubemap(
+    #[spirv(descriptor_set = 0, binding = 1)] texture: &Cubemap,
+    #[spirv(descriptor_set = 0, binding = 2)] sampler: &Sampler,
+    in_local_pos: glam::Vec3,
+    out_color: &mut glam::Vec4
+) {
+    skybox::fragment_cubemap(texture, sampler, in_local_pos, out_color)
 }
