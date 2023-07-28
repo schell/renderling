@@ -1,8 +1,12 @@
 //! Shader entry points.
 #![no_std]
 #![feature(lang_items)]
-use renderling_shader::{scene, ui, tonemapping, skybox};
-use spirv_std::{glam, image::Image2d, spirv, Sampler};
+use renderling_shader::{scene, skybox, tonemapping, ui};
+use spirv_std::{
+    glam,
+    image::{Cubemap, Image2d},
+    spirv, Sampler,
+};
 
 #[spirv(vertex)]
 pub fn ui_vertex(
@@ -86,6 +90,9 @@ pub fn main_fragment_scene(
     #[spirv(storage_buffer, descriptor_set = 0, binding = 4)] materials: &[scene::GpuMaterial],
     #[spirv(storage_buffer, descriptor_set = 1, binding = 2)] textures: &[scene::GpuTexture],
 
+    #[spirv(descriptor_set = 0, binding = 5)] irradiance: &Cubemap,
+    #[spirv(descriptor_set = 0, binding = 6)] irradiance_sampler: &Sampler,
+
     //// which entity are we drawing
     #[spirv(flat)] in_material: u32,
     in_color: glam::Vec4,
@@ -101,6 +108,8 @@ pub fn main_fragment_scene(
     scene::main_fragment_scene(
         atlas,
         sampler,
+        irradiance,
+        irradiance_sampler,
         constants,
         lights,
         materials,
@@ -144,7 +153,7 @@ pub fn fragment_tonemapping(
     #[spirv(uniform, descriptor_set = 1, binding = 0)] constants: &tonemapping::TonemapConstants,
     in_uv: glam::Vec2,
 
-    output: &mut glam::Vec4
+    output: &mut glam::Vec4,
 ) {
     tonemapping::fragment(texture, sampler, constants, in_uv, output)
 }
@@ -154,47 +163,47 @@ pub fn vertex_skybox(
     #[spirv(vertex_index)] vertex_id: u32,
     #[spirv(uniform, descriptor_set = 0, binding = 0)] constants: &scene::GpuConstants,
     local_pos: &mut glam::Vec3,
-    #[spirv(position)] gl_pos: &mut glam::Vec4
+    #[spirv(position)] gl_pos: &mut glam::Vec4,
 ) {
     skybox::vertex(vertex_id, constants, local_pos, gl_pos)
 }
 
+#[spirv(vertex)]
+pub fn vertex_position_passthru(
+    #[spirv(uniform, descriptor_set = 0, binding = 0)] constants: &scene::GpuConstants,
+    in_pos: glam::Vec3,
+    local_pos: &mut glam::Vec3,
+    #[spirv(position)] gl_pos: &mut glam::Vec4,
+) {
+    skybox::vertex_position_passthru(constants, in_pos, local_pos, gl_pos)
+}
+
 #[spirv(fragment)]
-pub fn fragment_skybox(
+pub fn fragment_equirectangular(
     #[spirv(descriptor_set = 0, binding = 1)] texture: &Image2d,
     #[spirv(descriptor_set = 0, binding = 2)] sampler: &Sampler,
     in_local_pos: glam::Vec3,
-    out_color: &mut glam::Vec4
+    out_color: &mut glam::Vec4,
 ) {
     skybox::fragment_equirectangular(texture, sampler, in_local_pos, out_color)
 }
 
-///// Just a test for atomics in Naga.
-//#[spirv(compute(threads(32)))]
-// pub fn compute_atomics(
-//    #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] data: &mut
-// [u32],    #[spirv(storage_buffer, descriptor_set = 0, binding = 1)] sum: &mut
-// u32,    #[spirv(global_invocation_id)] global_id: glam::UVec3,
+#[spirv(fragment)]
+pub fn fragment_cubemap(
+    #[spirv(descriptor_set = 0, binding = 1)] texture: &Cubemap,
+    #[spirv(descriptor_set = 0, binding = 2)] sampler: &Sampler,
+    in_local_pos: glam::Vec3,
+    out_color: &mut glam::Vec4,
+) {
+    skybox::fragment_cubemap(texture, sampler, in_local_pos, out_color)
+}
+
+//#[spirv(fragment)]
+//pub fn fragment_convolve_diffuse_irradiance(
+//    #[spirv(descriptor_set = 0, binding = 1)] texture: &Cubemap,
+//    #[spirv(descriptor_set = 0, binding = 2)] sampler: &Sampler,
+//    in_local_pos: glam::Vec3,
+//    out_color: &mut glam::Vec4,
 //) {
-//    let index = global_id.x as usize;
-//    if index > data.len() {
-//        return;
-//    }
-//
-//    let n =
-//        unsafe {
-//            spirv_std::arch::atomic_load::<
-//                    u32,
-//                { spirv_std::memory::Scope::Device as u32 },
-//                { spirv_std::memory::Semantics::NONE.bits() as u32 },
-//                >(&data[index])
-//        };
-//    *sum = n;
-//    //unsafe {
-//    //    spirv_std::arch::atomic_i_add::<
-//    //        u32,
-//    //        { spirv_std::memory::Scope::Device as u32 },
-//    //        { spirv_std::memory::Semantics::NONE.bits() as u32 },
-//    //    >(sum, n)
-//    //};
+//    convolution::fragment_convolve_diffuse_irradiance(texture, sampler, in_local_pos, out_color)
 //}

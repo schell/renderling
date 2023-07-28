@@ -6,7 +6,7 @@
 //! To read more about the technique, check out these resources:
 //! * https://stackoverflow.com/questions/59686151/what-is-gpu-driven-rendering
 use glam::{mat3, Mat4, Quat, UVec2, UVec3, Vec2, Vec3, Vec4, Vec4Swizzles};
-use spirv_std::{image::Image2d, Sampler};
+use spirv_std::{image::{Image2d, Cubemap}, Sampler};
 
 #[cfg(target_arch = "spirv")]
 use spirv_std::num_traits::*;
@@ -586,7 +586,10 @@ pub fn main_vertex_scene(
 /// Scene fragment shader.
 pub fn main_fragment_scene(
     atlas: &Image2d,
-    sampler: &Sampler,
+    atlas_sampler: &Sampler,
+
+    irradiance: &Cubemap,
+    irradiance_sampler: &Sampler,
 
     constants: &GpuConstants,
     lights: &[GpuLight],
@@ -619,7 +622,7 @@ pub fn main_fragment_scene(
         material.texture0,
         texture0_uv,
         atlas,
-        sampler,
+        atlas_sampler,
         constants.atlas_size,
         textures,
     );
@@ -633,7 +636,7 @@ pub fn main_fragment_scene(
         material.texture1,
         texture1_uv,
         atlas,
-        sampler,
+        atlas_sampler,
         constants.atlas_size,
         textures,
     );
@@ -647,7 +650,7 @@ pub fn main_fragment_scene(
         material.texture2,
         texture2_uv,
         atlas,
-        sampler,
+        atlas_sampler,
         constants.atlas_size,
         textures,
     );
@@ -667,6 +670,10 @@ pub fn main_fragment_scene(
         let norm = (tbn * sampled_norm).normalize_or_zero();
         (norm, sampled_norm)
     };
+
+    // TODO: Check convolution shader - cubemaps seem to come out upside-down
+    // Fixing that would keep us from having to switch the normal direction
+    let irradiance = irradiance.sample_by_lod(*irradiance_sampler, -1.0 * norm, 0.0).xyz();
 
     fn colorize(u: Vec3) -> Vec4 {
         ((u.normalize_or_zero() + Vec3::splat(1.0)) / 2.0).extend(1.0)
@@ -702,22 +709,29 @@ pub fn main_fragment_scene(
             *output = colorize(in_bitangent);
             return;
         }
+        DebugChannel::Irradiance => {
+            *output = irradiance.extend(1.0);
+            return;
+        }
     }
 
     *output = match material.lighting_model {
         LightingModel::PBR_LIGHTING => {
+            let n = norm;
             let albedo = tex_color0 * material.factor0 * in_color;
             let metallic = tex_color1.y * material.factor1.y;
             let roughness = tex_color1.z * material.factor1.z;
+            // TODO: add ambient occlusion from texture
             let ao = 1.0;
             pbr::shade_fragment(
                 constants.camera_pos.xyz(),
-                norm,
+                n,
                 in_pos,
                 albedo.xyz(),
                 metallic,
                 roughness,
                 ao,
+                irradiance,
                 lights,
             )
         }
