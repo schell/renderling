@@ -741,7 +741,7 @@ mod test {
         );
         let hdr_img = SceneImage::from_hdr_path("../../img/hdr/helipad.hdr").unwrap();
         let skybox = Skybox::new(&device, &queue, &constants, hdr_img);
-        let dimensions = BufferDimensions::new(4, 2, 512, 512);
+        let dimensions = BufferDimensions::new(4, 2, 32, 32);
         let buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("read skybox irradiance"),
             size: (dimensions.padded_bytes_per_row * dimensions.height) as u64,
