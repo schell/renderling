@@ -1,7 +1,7 @@
 //! Shader entry points.
 #![no_std]
 #![feature(lang_items)]
-use renderling_shader::{convolution, scene, skybox, tonemapping, ui};
+use renderling_shader::{scene, skybox, tonemapping, ui};
 use spirv_std::{
     glam,
     image::{Cubemap, Image2d},
@@ -90,6 +90,9 @@ pub fn main_fragment_scene(
     #[spirv(storage_buffer, descriptor_set = 0, binding = 4)] materials: &[scene::GpuMaterial],
     #[spirv(storage_buffer, descriptor_set = 1, binding = 2)] textures: &[scene::GpuTexture],
 
+    #[spirv(descriptor_set = 0, binding = 5)] irradiance: &Cubemap,
+    #[spirv(descriptor_set = 0, binding = 6)] irradiance_sampler: &Sampler,
+
     //// which entity are we drawing
     #[spirv(flat)] in_material: u32,
     in_color: glam::Vec4,
@@ -105,6 +108,8 @@ pub fn main_fragment_scene(
     scene::main_fragment_scene(
         atlas,
         sampler,
+        irradiance,
+        irradiance_sampler,
         constants,
         lights,
         materials,
@@ -193,12 +198,12 @@ pub fn fragment_cubemap(
     skybox::fragment_cubemap(texture, sampler, in_local_pos, out_color)
 }
 
-#[spirv(fragment)]
-pub fn fragment_convolve_diffuse_irradiance(
-    #[spirv(descriptor_set = 0, binding = 1)] texture: &Cubemap,
-    #[spirv(descriptor_set = 0, binding = 2)] sampler: &Sampler,
-    in_local_pos: glam::Vec3,
-    out_color: &mut glam::Vec4,
-) {
-    convolution::fragment_convolve_diffuse_irradiance(texture, sampler, in_local_pos, out_color)
-}
+//#[spirv(fragment)]
+//pub fn fragment_convolve_diffuse_irradiance(
+//    #[spirv(descriptor_set = 0, binding = 1)] texture: &Cubemap,
+//    #[spirv(descriptor_set = 0, binding = 2)] sampler: &Sampler,
+//    in_local_pos: glam::Vec3,
+//    out_color: &mut glam::Vec4,
+//) {
+//    convolution::fragment_convolve_diffuse_irradiance(texture, sampler, in_local_pos, out_color)
+//}

@@ -46,7 +46,7 @@ pub fn convolution_bindgroup(
 ) -> wgpu::BindGroup {
     device.create_bind_group(&wgpu::BindGroupDescriptor {
         label,
-        layout: &&convolution_bindgroup_layout(device),
+        layout: &convolution_bindgroup_layout(device),
         entries: &[
             wgpu::BindGroupEntry {
                 binding: 0,
@@ -72,17 +72,21 @@ impl ConvolutionRenderPipeline {
     /// Create the rendering pipeline that performs a convolution.
     pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat) -> Self {
         log::trace!("creating convolution render pipeline with format '{format:?}'");
-        let vertex_shader =
-            device.create_shader_module(wgpu::include_spirv!("linkage/vertex_position_passthru.spv"));
-        let fragment_shader = device
-            .create_shader_module(wgpu::include_spirv!("linkage/fragment_convolve_diffuse_irradiance.spv"));
+        let vertex_shader = device
+            .create_shader_module(wgpu::include_spirv!("linkage/vertex_position_passthru.spv"));
+        log::trace!("creating fragment shader");
+        let fragment_shader = device.create_shader_module(wgpu::include_wgsl!(
+            "wgsl/diffuse_irradiance_convolution.wgsl"
+        ));
+        log::trace!("  done.");
+        //.create_shader_module(wgpu::include_spirv!("linkage/fragment_convolve_diffuse_irradiance.spv"));
         let bg_layout = convolution_bindgroup_layout(device);
         let pp_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("convolution pipeline layout"),
             bind_group_layouts: &[&bg_layout],
             push_constant_ranges: &[],
         });
-        ConvolutionRenderPipeline(device.create_render_pipeline(
+        let pipeline = ConvolutionRenderPipeline(device.create_render_pipeline(
             &wgpu::RenderPipelineDescriptor {
                 label: Some("convolution pipeline"),
                 layout: Some(&pp_layout),
@@ -126,6 +130,8 @@ impl ConvolutionRenderPipeline {
                 }),
                 multiview: None,
             },
-        ))
+        ));
+        log::trace!("  completed pipeline creation");
+        pipeline
     }
 }

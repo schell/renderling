@@ -132,10 +132,10 @@ pub struct Skybox {
     pub equirectangular_texture: crate::Texture,
     // Texture of the environment cubemap
     pub environment_texture: crate::Texture,
+    pub environment_bindgroup: wgpu::BindGroup,
     // Texture of the pre-computed irradiance cubemap
     pub irradiance_texture: crate::Texture,
-    // Bindgroup used in the skybox render pipeline
-    pub bindgroup: wgpu::BindGroup,
+    pub irradiance_bindgroup: wgpu::BindGroup,
     // pub prefiltered_environment_map: crate::Texture,
     // pub brdf_lut: crate::Texture,
 }
@@ -265,15 +265,21 @@ impl Skybox {
         //    prefiltered_environment_map,
         //    brdf_lut: Skybox::create_precomputed_brdf_texture(device, queue),
         //}
+        log::trace!("returning skybox");
         Skybox {
-            bindgroup: crate::skybox::create_skybox_bindgroup(
+            environment_bindgroup: crate::skybox::create_skybox_bindgroup(
                 &device,
                 &constants,
                 &environment_texture,
             ),
+            irradiance_bindgroup: crate::skybox::create_skybox_bindgroup(
+                &device,
+                &constants,
+                &irradiance_texture,
+            ),
             equirectangular_texture,
             environment_texture,
-            irradiance_texture
+            irradiance_texture,
         }
     }
 
@@ -460,7 +466,7 @@ impl Skybox {
             &bindgroup,
             unit_cube_mesh,
             views,
-            512, // TODO: change to 32
+            32,
         )
     }
 
@@ -669,7 +675,7 @@ mod test {
     use renderling_shader::ui::{UiMode, UiVertex};
 
     use super::*;
-    use crate::Renderling;
+    use crate::{BufferDimensions, CopiedTextureBuffer, Renderling};
 
     #[test]
     fn hdr_texture() {
@@ -711,6 +717,64 @@ mod test {
 
         let img = r.render_image().unwrap();
         img_diff::assert_img_eq("hdr_texture.png", img);
+    }
+
+    #[test]
+    fn skybox_irradiance_map() {
+        let mut r = Renderling::headless(600, 400).unwrap();
+        let (device, queue) = r.get_device_and_queue_owned();
+        let constants = Uniform::new(
+            &device,
+            GpuConstants {
+                camera_projection: Mat4::perspective_rh(
+                    std::f32::consts::FRAC_PI_4,
+                    6.0 / 4.0,
+                    0.01,
+                    10.0,
+                ),
+                ..Default::default()
+            },
+            wgpu::BufferUsages::UNIFORM
+                | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::COPY_SRC,
+            wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+        );
+        let hdr_img = SceneImage::from_hdr_path("../../img/hdr/helipad.hdr").unwrap();
+        let skybox = Skybox::new(&device, &queue, &constants, hdr_img);
+        let dimensions = BufferDimensions::new(4, 2, 512, 512);
+        let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("read skybox irradiance"),
+            size: (dimensions.padded_bytes_per_row * dimensions.height) as u64,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+        let source = skybox.irradiance_texture.texture.as_image_copy();
+        encoder.copy_texture_to_buffer(
+            source,
+            wgpu::ImageCopyBuffer {
+                buffer: &buffer,
+                layout: wgpu::ImageDataLayout {
+                    offset: 0,
+                    bytes_per_row: Some(dimensions.padded_bytes_per_row as u32),
+                    rows_per_image: None,
+                },
+            },
+            wgpu::Extent3d {
+                width: dimensions.width as u32,
+                height: dimensions.height as u32,
+                depth_or_array_layers: 1,
+            },
+        );
+        queue.submit(std::iter::once(encoder.finish()));
+        let copied = CopiedTextureBuffer {
+            dimensions,
+            buffer,
+            format: skybox.irradiance_texture.texture.format(),
+        };
+        let scene_img = copied.into_scene_image(&device).unwrap();
+        let img = scene_img.into_rgba8().unwrap();
+        img_diff::save("skybox_irradiance0.png", img);
     }
 
     #[test]

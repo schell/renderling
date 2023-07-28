@@ -425,32 +425,10 @@ impl Scene {
             }],
         });
 
-        let render_buffers_bindgroup = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("Scene::new render_buffers_bindgroup"),
-            layout: &scene_buffers_bindgroup_layout(&device),
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: constants.buffer().as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: vertices.get_buffer().as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: entities.get_buffer().as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 3,
-                    resource: lights.get_buffer().as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 4,
-                    resource: materials.get_buffer().as_entire_binding(),
-                },
-            ],
-        });
+        // TODO: rename this or regroup the bindgroups
+        let render_buffers_bindgroup = create_scene_buffers_bindgroup(
+            &device, &constants, &vertices, &entities, &lights, &materials, &skybox,
+        );
 
         let render_atlas_bindgroup = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Scene::new render_atlas_bindgroup"),
@@ -496,12 +474,12 @@ impl Scene {
     pub fn update(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) {
         let Self {
             constants,
-            render_buffers_bindgroup: _,
+            render_buffers_bindgroup,
             render_atlas_bindgroup: _,
             indirect_draws: _,
             cull_bindgroup: _,
             atlas: _,
-            skybox: _,
+            skybox,
             skybox_update,
             vertices,
             entities,
@@ -521,13 +499,18 @@ impl Scene {
             }
             Some(None) => {
                 // skybox should be "removed"
-                self.constants.toggles.set_has_skybox(false);
+                constants.toggles.set_has_skybox(false);
             }
             Some(Some(img)) => {
                 // skybox should change image
                 log::trace!("skybox changed");
-                self.constants.toggles.set_has_skybox(true);
-                self.skybox = Skybox::new(device, queue, &self.constants, img);
+                constants.toggles.set_has_skybox(true);
+                *skybox = Skybox::new(device, queue, constants, img);
+                // we also have to create a new render buffers bindgroup because irradiance is
+                // part of that
+                *render_buffers_bindgroup = create_scene_buffers_bindgroup(
+                    device, constants, vertices, entities, lights, materials, &self.skybox,
+                );
             }
         }
         queue.submit(std::iter::empty());
@@ -594,6 +577,51 @@ impl Scene {
     }
 }
 
+pub fn create_scene_buffers_bindgroup(
+    device: &wgpu::Device,
+    constants: &Uniform<GpuConstants>,
+    vertices: &GpuArray<GpuVertex>,
+    entities: &GpuArray<GpuEntity>,
+    lights: &GpuArray<GpuLight>,
+    materials: &GpuArray<GpuMaterial>,
+    skybox: &Skybox,
+) -> wgpu::BindGroup {
+    device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("Scene::new render_buffers_bindgroup"),
+        layout: &scene_buffers_bindgroup_layout(&device),
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: constants.buffer().as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: vertices.get_buffer().as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: entities.get_buffer().as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 3,
+                resource: lights.get_buffer().as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 4,
+                resource: materials.get_buffer().as_entire_binding(),
+            },
+            wgpu::BindGroupEntry {
+                binding: 5,
+                resource: wgpu::BindingResource::TextureView(&skybox.irradiance_texture.view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 6,
+                resource: wgpu::BindingResource::Sampler(&skybox.irradiance_texture.sampler),
+            },
+        ],
+    })
+}
+
 pub fn scene_buffers_bindgroup_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
     let visibility =
         wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT | wgpu::ShaderStages::COMPUTE;
@@ -621,8 +649,26 @@ pub fn scene_buffers_bindgroup_layout(device: &wgpu::Device) -> wgpu::BindGroupL
         })
         .collect::<Vec<_>>();
     entries.extend(buffers);
+    entries.extend([
+        wgpu::BindGroupLayoutEntry {
+            binding: 5,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Texture {
+                sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                view_dimension: wgpu::TextureViewDimension::Cube,
+                multisampled: false,
+            },
+            count: None,
+        },
+        wgpu::BindGroupLayoutEntry {
+            binding: 6,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+            count: None,
+        },
+    ]);
     device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        label: Some("scene buffers"),
+        label: Some("scene buffers and lighting"),
         entries: &entries,
     })
 }
@@ -826,7 +872,7 @@ pub fn skybox_render(
         }),
     });
     render_pass.set_pipeline(&pipeline.0);
-    render_pass.set_bind_group(0, &scene.skybox.bindgroup, &[]);
+    render_pass.set_bind_group(0, &scene.skybox.environment_bindgroup, &[]);
     render_pass.draw(0..36, 0..1);
     drop(render_pass);
 

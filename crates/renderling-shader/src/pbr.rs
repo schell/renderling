@@ -66,6 +66,10 @@ fn fresnel_schlick(
     f0 + (1.0 - f0) * (1.0 - cos_theta).clamp(0.0, 1.0).powf(5.0)
 }
 
+fn fresnel_schlick_roughness(cos_theta: f32, f0: Vec3, roughness: f32) -> Vec3 {
+    f0 + (Vec3::splat(1.0 - roughness).max(f0) - f0) * (1.0 - cos_theta).clamp(0.0, 1.0).powf(5.0)
+}
+
 fn outgoing_radiance(
     light_color: Vec4,
     albedo: Vec3,
@@ -104,9 +108,10 @@ pub fn shade_fragment(
     in_pos: Vec3,
     // base color of the fragment
     albedo: Vec3,
-    metalness: f32,
+    metallic: f32,
     roughness: f32,
     ao: f32,
+    irradiance: Vec3,
 
     lights: &[GpuLight],
 ) -> Vec4 {
@@ -139,7 +144,7 @@ pub fn shade_fragment(
                     v,
                     l,
                     n,
-                    metalness,
+                    metallic,
                     roughness,
                 );
             }
@@ -162,7 +167,7 @@ pub fn shade_fragment(
                     v,
                     l,
                     n,
-                    metalness,
+                    metallic,
                     roughness,
                 );
             }
@@ -177,7 +182,7 @@ pub fn shade_fragment(
                     v,
                     l,
                     n,
-                    metalness,
+                    metallic,
                     roughness,
                 );
             }
@@ -185,13 +190,16 @@ pub fn shade_fragment(
         }
     }
 
-    let color = lo * ao;
-    // let ambient = Vec3::ZERO; //Vec3::splat(0.03) * albedo * ao;
-    // let color = lo + ambient;
-
-    // This is built in gamma correction
-    // let color = color / (color + Vec3::ONE);
-    // let color = color.powf(1.0 / 2.2);
-
+    // calculate reflectance at normal incidence; if dia-electric (like plastic) use F0
+    // of 0.04 and if it's a metal, use the albedo color as F0 (metallic workflow)
+    let f0: Vec3 = Vec3::splat(0.04).lerp(albedo, metallic);
+    let ambient = {
+        let cos_theta = n.dot(v).max(0.0);
+        let ks = fresnel_schlick_roughness(cos_theta, f0, roughness);
+        let kd = (1.0 - ks) * (1.0 - metallic);
+        let diffuse = irradiance * albedo;
+        kd * diffuse
+    };
+    let color = (lo + ambient) * ao;
     color.extend(1.0)
 }

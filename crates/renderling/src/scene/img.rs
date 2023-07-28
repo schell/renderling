@@ -28,8 +28,23 @@ pub enum SceneImageFormat {
     R16G16,
     R16G16B16,
     R16G16B16A16,
+    R16G16B16A16FLOAT,
     R32G32B32FLOAT,
     R32G32B32A32FLOAT,
+}
+
+impl SceneImageFormat {
+    pub fn from_wgpu_texture_format(value: wgpu::TextureFormat) -> Option<Self> {
+        // TODO: implement more SceneImageFormat conversions from wgpu::TetxureFormat
+        match value {
+            wgpu::TextureFormat::R8Uint => Some(SceneImageFormat::R8),
+            wgpu::TextureFormat::R16Uint => Some(SceneImageFormat::R16),
+            wgpu::TextureFormat::Rg8Uint => Some(SceneImageFormat::R8G8),
+            wgpu::TextureFormat::Rg16Uint => Some(SceneImageFormat::R16G16),
+            wgpu::TextureFormat::Rgba16Float => Some(SceneImageFormat::R16G16B16A16FLOAT),
+            _ => None,
+        }
+    }
 }
 
 /// Image data in transit from CPU to GPU.
@@ -140,6 +155,11 @@ impl SceneImage {
             apply_linear_transfer: false,
         })
     }
+
+    pub fn into_rgba8(self) -> Option<image::RgbaImage> {
+        let pixels = convert_to_rgba8_bytes(self.pixels, self.format, self.apply_linear_transfer);
+        image::RgbaImage::from_vec(self.width, self.height, pixels)
+    }
 }
 
 fn u16_to_u8(c: u16) -> u8 {
@@ -150,7 +170,7 @@ fn f32_to_u8(c: f32) -> u8 {
     (c / 255.0) as u8
 }
 
-/// Interpret/convert the pixel data into rgba8 pixels in linear color space.
+/// Interpret/convert the pixel data into rgba8 pixels.
 ///
 /// This applies the linear transfer function if `apply_linear_transfer` is
 /// `true`.
@@ -177,6 +197,10 @@ pub fn convert_to_rgba8_bytes(
             | SceneImageFormat::R16G16B16A16 => {
                 let bytes: &mut [u16] = bytemuck::cast_slice_mut(&mut bytes);
                 bytes.into_iter().for_each(linear_xfer_u16);
+            }
+            SceneImageFormat::R16G16B16A16FLOAT => {
+                let bytes: &mut [u16] = bytemuck::cast_slice_mut(&mut bytes);
+                bytes.into_iter().for_each(linear_xfer_f16);
             }
             SceneImageFormat::R32G32B32FLOAT | SceneImageFormat::R32G32B32A32FLOAT => {
                 let bytes: &mut [f32] = bytemuck::cast_slice_mut(&mut bytes);
@@ -238,6 +262,19 @@ pub fn convert_to_rgba8_bytes(
             .into_iter()
             .copied()
             .map(u16_to_u8)
+            .collect(),
+        SceneImageFormat::R16G16B16A16FLOAT => bytemuck::cast_slice::<u8, u16>(&bytes)
+            .into_iter()
+            .map(|bits| half::f16::from_bits(*bits).to_f32())
+            .collect::<Vec<_>>()
+            .chunks_exact(4)
+            .flat_map(|p| {
+                if let [r, g, b, a] = p {
+                    [f32_to_u8(*r), f32_to_u8(*g), f32_to_u8(*b), f32_to_u8(*a)]
+                } else {
+                    unreachable!()
+                }
+            })
             .collect(),
         SceneImageFormat::R32G32B32FLOAT => bytemuck::cast_slice::<u8, f32>(&bytes)
             .chunks_exact(3)
