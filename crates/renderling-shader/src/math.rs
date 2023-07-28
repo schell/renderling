@@ -63,3 +63,27 @@ pub fn unit_cube() -> Vec<(Vec3, Vec3)> {
         })
         .collect::<Vec<_>>()
 }
+
+/// `rust-gpu` doesn't like nested/double indexing so we do this here.
+/// See [this comment on discord](https://discord.com/channels/750717012564770887/750717499737243679/1131395331368693770)
+pub const CUBE: [Vec3; 36] = {
+    let p0 = Vec3::new(-0.5, 0.5, 0.5);
+    let p1 = Vec3::new(-0.5, 0.5, -0.5);
+    let p2 = Vec3::new(0.5, 0.5, -0.5);
+    let p3 = Vec3::new(0.5, 0.5, 0.5);
+    let p4 = Vec3::new(-0.5, -0.5, 0.5);
+    let p7 = Vec3::new(-0.5, -0.5, -0.5);
+    let p6 = Vec3::new(0.5, -0.5, -0.5);
+    let p5 = Vec3::new(0.5, -0.5, 0.5);
+
+    let points = [
+        p0, p2, p1, p0, p3, p2, // top
+        p0, p4, p3, p4, p5, p3, // front
+        p3, p6, p2, p3, p5, p6, // right
+        p1, p7, p0, p7, p4, p0, // left
+        p4, p6, p5, p4, p7, p6, // bottom
+        p2, p7, p1, p2, p6, p7, // back
+    ];
+
+    points
+};

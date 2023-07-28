@@ -7,5 +7,5 @@ edition = "2021"
 
 [dependencies]
 renderling = { path = "../renderling" }
-wgpu = "^0.16"
+wgpu = { workspace = true }
 winit = "^0.27"

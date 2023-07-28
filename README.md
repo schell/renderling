@@ -8,6 +8,8 @@ This aspires to be a modern "GPU-driven" renderer. It is alpha software. I'm sti
 All but a few of the rendering operations happen on the GPU.
 The CPU is used to interact with the filesystem to marshall data to the GPU and to update transforms.
 
+Shaders are written in Rust, via `rust-gpu`.
+
 ## Why
 
 This makes `renderling` very effective at rendering certain types of scenes.
@@ -52,7 +54,7 @@ This means each model may be shaded separately, with a different lighting style.
     - [x] physically based shading
     - [x] unlit
   - [x] high dynamic range
-  - [ ] skybox
+  - [x] skybox
   - image based lighting
     - [ ] diffuse
     - [ ] specular
