@@ -65,7 +65,7 @@ fn main() {
         .with_parent(&cyan_tri)
         .build();
     let scene = builder.build().unwrap();
-    renderling::setup_scene_render_graph(scene, &mut r, false);
+    r.setup_render_graph(Some(scene), None, [], false);
 
     event_loop.run(move |event, _target, control_flow| {
         *control_flow = winit::event_loop::ControlFlow::Poll;

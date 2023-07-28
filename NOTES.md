@@ -77,3 +77,10 @@ Just pro-cons on tech choices and little things I don't want to forget whil impl
 * [babylonjs](https://sandbox.babylonjs.com/)
   - [vertex shader code](https://github.com/BabylonJS/Babylon.js/blob/master/packages/dev/core/src/Shaders/pbr.vertex.fx)
   - [fragment shader code](https://github.com/BabylonJS/Babylon.js/blob/master/packages/dev/core/src/Shaders/pbr.fragment.fx)
+
+# contributions made during the course of this project
+* wrote an NLNet grant proposal to add atomics to `naga`'s spv frontend
+  - roughly to complete this PR https://github.com/gfx-rs/naga/pull/2304
+* fixing `wgpu`'s vulkan backend selection on macOS
+  - https://github.com/gfx-rs/wgpu/pull/3958
+  - https://github.com/gfx-rs/wgpu/pull/3962

@@ -29,7 +29,11 @@ where
         mut usage: wgpu::BufferUsages,
         visibility: wgpu::ShaderStages,
     ) -> (Self, wgpu::BindGroupLayout) {
-        usage |= wgpu::BufferUsages::UNIFORM;
+        usage |=
+            // We use this buffer as a uniform
+            wgpu::BufferUsages::UNIFORM
+            // We copy data to this buffer on update
+            | wgpu::BufferUsages::COPY_DST;
 
         let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some(std::any::type_name::<Self>()),

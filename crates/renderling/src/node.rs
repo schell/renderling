@@ -265,8 +265,10 @@ pub fn create_hdr_render_surface(
     let label = Some("scene render pipeline");
     let vertex_shader =
         device.create_shader_module(wgpu::include_spirv!("linkage/vertex_tonemapping.spv"));
+        //unsafe{ device.create_shader_module_spirv(&wgpu::include_spirv_raw!("linkage/vertex_tonemapping.spv"))};
     let fragment_shader =
         device.create_shader_module(wgpu::include_spirv!("linkage/fragment_tonemapping.spv"));
+        //unsafe{ device.create_shader_module_spirv(&wgpu::include_spirv_raw!("linkage/fragment_tonemapping.spv"))};
     let hdr_texture_layout = scene_hdr_surface_bindgroup_layout(&device);
     let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label,
