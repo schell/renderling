@@ -1414,7 +1414,6 @@ mod test {
                 }
                 scene.update_entity(*entity).unwrap();
             }
-            drop(scene);
             let img = r.render_image().unwrap();
             img_diff::assert_img_eq(&format!("gltf_simple_animation_after/{i}.png"), img);
         }
@@ -1454,7 +1453,7 @@ mod test {
             r.graph
                 .visit(|mut scene: ViewMut<Scene>| {
                     for (id, tween_prop) in skin_animation.get_properties_at_time(time).unwrap() {
-                        let mut ent = entities.get_mut(id.index()).unwrap();
+                        let ent = entities.get_mut(id.index()).unwrap();
                         match tween_prop {
                             TweenProperty::Translation(t) => {
                                 ent.position = t.extend(ent.position.w);

@@ -453,7 +453,7 @@ impl Texture {
     ///
     /// To read the texture you must provide the width, height, the number of
     /// color/alpha channels and the number of bytes in the underlying
-    /// subpixel type (usually u8, u16 or f32).
+    /// subpixel type (usually u8=1, u16=2 or f32=4).
     pub fn read(
         &self,
         device: &wgpu::Device,
@@ -462,6 +462,24 @@ impl Texture {
         height: usize,
         channels: usize,
         subpixel_bytes: usize,
+    ) -> CopiedTextureBuffer {
+        self.read_from(device, queue, width, height, channels, subpixel_bytes, None)
+    }
+
+    /// Read the texture from the GPU.
+    ///
+    /// To read the texture you must provide the width, height, the number of
+    /// color/alpha channels and the number of bytes in the underlying
+    /// subpixel type (usually u8=1, u16=2 or f32=4).
+    pub fn read_from(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        width: usize,
+        height: usize,
+        channels: usize,
+        subpixel_bytes: usize,
+        origin: Option<wgpu::Origin3d>
     ) -> CopiedTextureBuffer {
         let dimensions = BufferDimensions::new(channels, subpixel_bytes, width, height);
         // The output buffer lets us retrieve the self as an array
@@ -474,9 +492,13 @@ impl Texture {
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("post render screen capture encoder"),
         });
+        let mut source = self.texture.as_image_copy();
+        if let Some(origin) = origin {
+            source.origin = origin;
+        }
         // Copy the data from the surface texture to the buffer
         encoder.copy_texture_to_buffer(
-            self.texture.as_image_copy(),
+            source,
             wgpu::ImageCopyBuffer {
                 buffer: &buffer,
                 layout: wgpu::ImageDataLayout {

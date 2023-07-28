@@ -21,3 +21,7 @@ glam = { version = "0.22", features = ["debug-glam-assert", "bytemuck"] }
 
 [target.'cfg(target_arch = "spirv")'.dependencies]
 glam = { version = "0.22", default-features = false, features = ["libm", "bytemuck"] }
+
+[dev-dependencies]
+image = "^0.24"
+img-diff = { path = "../img-diff" }

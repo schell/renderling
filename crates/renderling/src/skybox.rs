@@ -132,12 +132,13 @@ pub struct Skybox {
     pub equirectangular_texture: crate::Texture,
     // Texture of the environment cubemap
     pub environment_texture: crate::Texture,
+    // Bindgroup to use with the default skybox shader
     pub environment_bindgroup: wgpu::BindGroup,
     // Texture of the pre-computed irradiance cubemap
     pub irradiance_texture: crate::Texture,
-    pub irradiance_bindgroup: wgpu::BindGroup,
     // pub prefiltered_environment_map: crate::Texture,
-    // pub brdf_lut: crate::Texture,
+    // Texture of the pre-computed brdf integration
+    pub brdf_lut: crate::Texture,
 }
 
 impl Skybox {
@@ -259,6 +260,8 @@ impl Skybox {
         //    &views,
         //);
 
+        let brdf_lut = Skybox::create_precomputed_brdf_texture(device, queue);
+
         // Skybox {
         //    environment_texture,
         //    irradiance_map,
@@ -272,14 +275,10 @@ impl Skybox {
                 &constants,
                 &environment_texture,
             ),
-            irradiance_bindgroup: crate::skybox::create_skybox_bindgroup(
-                &device,
-                &constants,
-                &irradiance_texture,
-            ),
             equirectangular_texture,
             environment_texture,
             irradiance_texture,
+            brdf_lut
         }
     }
 
@@ -578,95 +577,136 @@ impl Skybox {
     //    )
     //}
 
-    // fn create_precomputed_brdf_texture(
-    //    device: &wgpu::Device,
-    //    queue: &wgpu::Queue,
-    //) -> crate::Texture {
-    //    let screen_space_quad_vertices: [[f32; 3]; 4] = [
-    //        [-1.0, -1.0, 0.0],
-    //        [-1.0, 1.0, 0.0],
-    //        [1.0, 1.0, 0.0],
-    //        [1.0, -1.0, 0.0],
-    //    ];
+    fn create_precomputed_brdf_texture(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> crate::Texture {
+        #[repr(C)]
+        #[derive(Clone, Copy, bytemuck::Zeroable, bytemuck::Pod)]
+        struct Vert {
+            pos: [f32; 3],
+            uv: [f32; 2],
+        }
 
-    //    let screen_space_quad_tex_coords: [[f32; 2]; 4] =
-    //        [[0.0, 0.0], [0.0, 1.0], [1.0, 1.0], [1.0, 0.0]];
+        let bl = Vert {
+            pos: [-1.0, -1.0, 0.0],
+            uv: [0.0, 1.0],
+        };
+        let br = Vert {
+            pos: [1.0, -1.0, 0.0],
+            uv: [1.0, 1.0],
+        };
+        let tl = Vert {
+            pos: [-1.0, 1.0, 0.0],
+            uv: [0.0, 0.0],
+        };
+        let tr = Vert {
+            pos: [1.0, 1.0, 0.0],
+            uv: [1.0, 0.0]
+        };
 
-    //    let screen_space_quad_elements: [u32; 6] = [0, 1, 2, 2, 3, 0];
+        let vertices = [
+            bl, br, tr,
+            bl, tr, tl
+        ];
 
-    //    let screen_space_quad_vertex_array = screen_space_quad_vertices
-    //        .iter()
-    //        .zip(screen_space_quad_tex_coords.iter())
-    //        .map(|(&pos, &tex_coord)| Vertex {
-    //            position: pos,
-    //            normal: [0.0, 0.0, 0.0],
-    //            tangent: [0.0, 0.0, 0.0, 0.0],
-    //            tex_coord: tex_coord,
-    //        })
-    //        .collect::<Vec<Vertex>>();
+        let screen_space_quad_mesh = crate::mesh::Mesh::from_vertices(
+            device,
+            Some("brdf_lut"),
+            vertices,
+        );
 
-    //    let screen_space_quad_mesh = Mesh::new(
-    //        device,
-    //        &screen_space_quad_vertex_array,
-    //        Some(&screen_space_quad_elements),
-    //    );
+        let vertex_module = device.create_shader_module(wgpu::include_spirv!(
+            "linkage/vertex_brdf_lut_convolution.spv"
+        ));
+        let fragment_module = device.create_shader_module(wgpu::include_spirv!(
+            "linkage/fragment_brdf_lut_convolution.spv"
+        ));
 
-    //    let brdf_mat = HdrConvolveBrdfMaterial::new(device);
+        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("brdf_lut_convolution"),
+            layout: None,
+            vertex: wgpu::VertexState {
+                module: &vertex_module,
+                entry_point: "vertex_brdf_lut_convolution",
+                buffers: &[wgpu::VertexBufferLayout {
+                    array_stride: (3 + 2) * std::mem::size_of::<f32>() as u64,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &wgpu::vertex_attr_array![
+                        0 => Float32x3,
+                        1 => Float32x2
+                    ],
+                }],
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                unclipped_depth: false,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                conservative: false,
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState {
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+                count: 1,
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &fragment_module,
+                entry_point: "fragment_brdf_lut_convolution",
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: wgpu::TextureFormat::Rg16Float,
+                    blend: Some(wgpu::BlendState {
+                        color: wgpu::BlendComponent::REPLACE,
+                        alpha: wgpu::BlendComponent::REPLACE,
+                    }),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            multiview: None,
+        });
 
-    //    let mut encoder =
-    // device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-    //        label: Some("brdf_precompute"),
-    //    });
+        let framebuffer = crate::Texture::new_with(
+            device,
+            queue,
+            Some("brdf_lut"),
+            Some(
+                wgpu::TextureUsages::RENDER_ATTACHMENT
+                    | wgpu::TextureUsages::TEXTURE_BINDING
+                    | wgpu::TextureUsages::COPY_SRC,
+            ),
+            None,
+            wgpu::TextureFormat::Rg16Float,
+            2,
+            2,
+            512,
+            512,
+            &[],
+        );
 
-    //    let transforms = HdrTransformBindGroup {
-    //        proj_matrix: Matrix3::identity().to_homogeneous(),
-    //        view_matrix: Similarity3::identity().to_homogeneous(),
-    //    };
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+        {
+            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("brdf_lut_convolution"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &framebuffer.view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::RED),
+                        store: true,
+                    },
+                })],
+                depth_stencil_attachment: None,
+            });
 
-    //    material_base::update_uniform_buffer(
-    //        device,
-    //        &brdf_mat.transform_bind_group_buffer,
-    //        &mut encoder,
-    //        &transforms,
-    //    );
-
-    //    let framebuffer =
-    //        Texture::new_framebuffer_texture(device, 512, 512,
-    // wgpu::TextureFormat::Rg16Float);
-
-    //    {
-    //        let mut render_pass =
-    // encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-    // color_attachments: &[wgpu::RenderPassColorAttachmentDescriptor {
-    //                attachment: &framebuffer.view,
-    //                resolve_target: None,
-    //                load_op: wgpu::LoadOp::Clear,
-    //                store_op: wgpu::StoreOp::Store,
-    //                clear_color: wgpu::Color::BLACK,
-    //            }],
-    //            depth_stencil_attachment: None,
-    //        });
-
-    //        render_pass.set_pipeline(&brdf_mat.render_pipeline);
-    //        render_pass.set_bind_group(0, &brdf_mat.transform_bind_group, &[]);
-
-    //        screen_space_quad_mesh.draw(&mut render_pass);
-    //    }
-
-    //    let cmd_buffer = encoder.finish();
-
-    //    queue.submit(&[cmd_buffer]);
-
-    //    Texture::new_texture_from_framebuffer(
-    //        device,
-    //        queue,
-    //        512,
-    //        512,
-    //        &framebuffer,
-    //        wgpu::TextureFormat::Rg16Float,
-    //        wgpu::AddressMode::ClampToEdge,
-    //    )
-    //}
+            render_pass.set_pipeline(&pipeline);
+            screen_space_quad_mesh.draw(&mut render_pass);
+        }
+        queue.submit([encoder.finish()]);
+        framebuffer
+    }
 }
 
 #[cfg(test)]
@@ -675,14 +715,14 @@ mod test {
     use renderling_shader::ui::{UiMode, UiVertex};
 
     use super::*;
-    use crate::{BufferDimensions, CopiedTextureBuffer, Renderling};
+    use crate::Renderling;
 
     #[test]
     fn hdr_texture() {
-        let mut r = Renderling::headless(600, 400).unwrap();
+        let mut r = Renderling::headless(400, 400).unwrap();
         let hdr_data = std::fs::read("../../img/hdr/helipad.hdr").unwrap();
         let tex = Skybox::create_hdr_texture(r.get_device(), r.get_queue(), &hdr_data);
-        let builder = r.new_ui_scene().with_canvas_size(600, 400);
+        let builder = r.new_ui_scene().with_canvas_size(400, 400);
         let obj = builder
             .new_object()
             .with_draw_mode(UiMode::DEFAULT)
@@ -716,65 +756,7 @@ mod test {
         r.setup_render_graph(None, Some(scene), [obj], true);
 
         let img = r.render_image().unwrap();
-        img_diff::assert_img_eq("hdr_texture.png", img);
-    }
-
-    #[test]
-    fn skybox_irradiance_map() {
-        let mut r = Renderling::headless(600, 400).unwrap();
-        let (device, queue) = r.get_device_and_queue_owned();
-        let constants = Uniform::new(
-            &device,
-            GpuConstants {
-                camera_projection: Mat4::perspective_rh(
-                    std::f32::consts::FRAC_PI_4,
-                    6.0 / 4.0,
-                    0.01,
-                    10.0,
-                ),
-                ..Default::default()
-            },
-            wgpu::BufferUsages::UNIFORM
-                | wgpu::BufferUsages::COPY_DST
-                | wgpu::BufferUsages::COPY_SRC,
-            wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
-        );
-        let hdr_img = SceneImage::from_hdr_path("../../img/hdr/helipad.hdr").unwrap();
-        let skybox = Skybox::new(&device, &queue, &constants, hdr_img);
-        let dimensions = BufferDimensions::new(4, 2, 32, 32);
-        let buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("read skybox irradiance"),
-            size: (dimensions.padded_bytes_per_row * dimensions.height) as u64,
-            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
-        let source = skybox.irradiance_texture.texture.as_image_copy();
-        encoder.copy_texture_to_buffer(
-            source,
-            wgpu::ImageCopyBuffer {
-                buffer: &buffer,
-                layout: wgpu::ImageDataLayout {
-                    offset: 0,
-                    bytes_per_row: Some(dimensions.padded_bytes_per_row as u32),
-                    rows_per_image: None,
-                },
-            },
-            wgpu::Extent3d {
-                width: dimensions.width as u32,
-                height: dimensions.height as u32,
-                depth_or_array_layers: 1,
-            },
-        );
-        queue.submit(std::iter::once(encoder.finish()));
-        let copied = CopiedTextureBuffer {
-            dimensions,
-            buffer,
-            format: skybox.irradiance_texture.texture.format(),
-        };
-        let scene_img = copied.into_scene_image(&device).unwrap();
-        let img = scene_img.into_rgba8().unwrap();
-        img_diff::save("skybox_irradiance0.png", img);
+        img_diff::assert_img_eq("skybox/environment.png", img);
     }
 
     #[test]
@@ -783,10 +765,67 @@ mod test {
         let proj = crate::camera::perspective(600.0, 400.0);
         let view = crate::camera::look_at(Vec3::new(0.0, 0.0, 2.0), Vec3::ZERO, Vec3::Y);
         let mut builder = r.new_scene().with_camera(proj, view);
-        builder.add_skybox_image_from_path("../../img/hdr/helipad.hdr");
+        builder.add_skybox_image_from_path("../../img/hdr/resting_place.hdr");
         let scene = builder.build().unwrap();
+
+        assert_eq!(
+            wgpu::TextureFormat::Rgba16Float,
+            scene.skybox.irradiance_texture.texture.format()
+        );
+
+        for i in 0..6 {
+            let copied_buffer = scene.skybox.irradiance_texture.read_from(
+                r.get_device(),
+                r.get_queue(),
+                32,
+                32,
+                4,
+                2,
+                Some(wgpu::Origin3d { x: 0, y: 0, z: i }),
+            );
+            let pixels = copied_buffer.pixels(r.get_device());
+            let pixels = bytemuck::cast_slice::<u8, u16>(pixels.as_slice())
+                .iter()
+                .map(|p| half::f16::from_bits(*p).to_f32())
+                .collect::<Vec<_>>();
+            assert_eq!(32 * 32 * 4, pixels.len());
+            let img: image::Rgba32FImage = image::ImageBuffer::from_vec(32, 32, pixels).unwrap();
+            let img = image::DynamicImage::from(img);
+            let img = img.to_rgba8();
+            img_diff::assert_img_eq(&format!("skybox/irradiance{i}.png"), img);
+        }
+
         r.setup_render_graph(Some(scene), None, [], true);
         let img = r.render_image().unwrap();
-        img_diff::assert_img_eq("hdr_skybox_scene.png", img);
+        img_diff::assert_img_eq("skybox/hdr.png", img);
+    }
+
+    #[test]
+    fn precomputed_brdf() {
+        assert_eq!(2, std::mem::size_of::<u16>());
+        let r = Renderling::headless(32, 32).unwrap();
+        let (device, queue) = r.get_device_and_queue_owned();
+        let brdf_lut = Skybox::create_precomputed_brdf_texture(&device, &queue);
+        assert_eq!(wgpu::TextureFormat::Rg16Float, brdf_lut.texture.format());
+        let copied_buffer = brdf_lut.read(&device, &queue, 512, 512, 2, 2);
+        let pixels = copied_buffer.pixels(&device);
+        let pixels: Vec<f32> = bytemuck::cast_slice::<u8, u16>(pixels.as_slice())
+            .iter()
+            .copied()
+            .map(|bits| half::f16::from_bits(bits).to_f32())
+            .collect();
+        assert_eq!(512 * 512 * 2, pixels.len());
+        let pixels: Vec<f32> = pixels.chunks_exact(2).flat_map(|pixel| match pixel {
+            [r, g] => {
+                [*r, *g, 0.0, 1.0]
+            },
+            _ => unreachable!()
+        }).collect();
+
+        let img: image::ImageBuffer<image::Rgba<f32>, Vec<f32>> =
+            image::ImageBuffer::from_vec(512, 512, pixels).unwrap();
+        let img = image::DynamicImage::from(img);
+        let img = img.into_rgba8();
+        img_diff::assert_img_eq("skybox/brdf_lut.png", img);
     }
 }

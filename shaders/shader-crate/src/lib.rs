@@ -1,7 +1,7 @@
 //! Shader entry points.
 #![no_std]
 #![feature(lang_items)]
-use renderling_shader::{scene, skybox, tonemapping, ui};
+use renderling_shader::{convolution, scene, skybox, tonemapping, ui};
 use spirv_std::{
     glam,
     image::{Cubemap, Image2d},
@@ -198,12 +198,29 @@ pub fn fragment_cubemap(
     skybox::fragment_cubemap(texture, sampler, in_local_pos, out_color)
 }
 
+#[spirv(vertex)]
+pub fn vertex_brdf_lut_convolution(
+    in_pos: glam::Vec3,
+    in_uv: glam::Vec2,
+    out_uv: &mut glam::Vec2,
+    #[spirv(position)] gl_pos: &mut glam::Vec4,
+) {
+    *out_uv = in_uv;
+    *gl_pos = in_pos.extend(1.0);
+}
+
+#[spirv(fragment)]
+pub fn fragment_brdf_lut_convolution(in_uv: glam::Vec2, out_color: &mut glam::Vec2) {
+    *out_color = convolution::integrate_brdf(in_uv.x, in_uv.y);
+}
+
 //#[spirv(fragment)]
-//pub fn fragment_convolve_diffuse_irradiance(
+// pub fn fragment_convolve_diffuse_irradiance(
 //    #[spirv(descriptor_set = 0, binding = 1)] texture: &Cubemap,
 //    #[spirv(descriptor_set = 0, binding = 2)] sampler: &Sampler,
 //    in_local_pos: glam::Vec3,
 //    out_color: &mut glam::Vec4,
 //) {
-//    convolution::fragment_convolve_diffuse_irradiance(texture, sampler, in_local_pos, out_color)
+//    convolution::fragment_convolve_diffuse_irradiance(texture, sampler,
+// in_local_pos, out_color)
 //}

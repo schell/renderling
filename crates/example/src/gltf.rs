@@ -309,7 +309,7 @@ impl App {
                 }
                 let time = animation.stored_timestamp % animation.length_in_seconds();
                 for (id, tween_prop) in animation.get_properties_at_time(time).unwrap() {
-                    let mut ent = self.entities.get_mut(id.index()).unwrap();
+                    let ent = self.entities.get_mut(id.index()).unwrap();
                     match tween_prop {
                         TweenProperty::Translation(t) => {
                             ent.position = t.extend(ent.position.w);

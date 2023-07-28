@@ -288,25 +288,25 @@ impl<'a> UiDrawObjectBuilder<'a> {
     }
 
     pub fn with_draw_mode(mut self, mode: UiMode) -> Self {
-        let mut params = self.draw_params.get_or_insert(UiDrawParams::default());
+        let params = self.draw_params.get_or_insert(UiDrawParams::default());
         params.mode = mode;
         self
     }
 
     pub fn with_position(mut self, p: impl Into<Vec2>) -> Self {
-        let mut params = self.draw_params.get_or_insert(UiDrawParams::default());
+        let params = self.draw_params.get_or_insert(UiDrawParams::default());
         params.translation = p.into();
         self
     }
 
     pub fn with_scale(mut self, s: impl Into<Vec2>) -> Self {
-        let mut params = self.draw_params.get_or_insert(UiDrawParams::default());
+        let params = self.draw_params.get_or_insert(UiDrawParams::default());
         params.scale = s.into();
         self
     }
 
     pub fn with_rotation(mut self, r: f32) -> Self {
-        let mut params = self.draw_params.get_or_insert(UiDrawParams::default());
+        let params = self.draw_params.get_or_insert(UiDrawParams::default());
         params.rotation = r;
         self
     }

@@ -54,7 +54,7 @@ This means each model may be shaded separately, with a different lighting style.
   - [x] high dynamic range
   - [x] skybox
   - image based lighting
-    - [ ] diffuse
+    - [x] diffuse
     - [ ] specular
   - [ ] msaa
   - [ ] bloom

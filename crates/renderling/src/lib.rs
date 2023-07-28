@@ -120,12 +120,11 @@ pub fn setup_render_graph(
     let device = r.get_device();
     let hdr_texture_format = hdr_surface.texture.texture.format();
     let scene_render_pipeline =
-        SceneRenderPipeline(create_scene_render_pipeline(&device, hdr_texture_format));
+        SceneRenderPipeline(create_scene_render_pipeline(device, hdr_texture_format));
     let compute_cull_pipeline =
         SceneComputeCullPipeline(create_scene_compute_cull_pipeline(device));
     let skybox_pipeline =
-        crate::skybox::create_skybox_render_pipeline(r.get_device(), hdr_texture_format);
-    drop(device);
+        crate::skybox::create_skybox_render_pipeline(device, hdr_texture_format);
     r.graph.add_resource(scene_render_pipeline);
     r.graph.add_resource(hdr_surface);
     r.graph.add_resource(compute_cull_pipeline);
