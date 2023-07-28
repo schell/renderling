@@ -39,10 +39,12 @@
 //! and manage your own resources for maximum flexibility.
 
 mod atlas;
-// mod bank;
 mod buffer_array;
 mod camera;
+pub mod convolution;
+pub mod cubemap;
 pub mod math;
+pub mod mesh;
 pub mod node;
 mod renderer;
 mod scene;
@@ -169,8 +171,8 @@ fn init_logging() {
         .filter_module("moongraph", log::LevelFilter::Trace)
         .filter_module("renderling", log::LevelFilter::Trace)
         //.filter_module("naga", log::LevelFilter::Debug)
-        //.filter_module("wgpu", log::LevelFilter::Debug)
-        //.filter_module("wgpu_hal", log::LevelFilter::Warn)
+        .filter_module("wgpu", log::LevelFilter::Warn)
+        .filter_module("wgpu_hal", log::LevelFilter::Warn)
         .try_init();
 }
 

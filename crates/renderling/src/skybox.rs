@@ -1,4 +1,5 @@
 //! An HDR skybox.
+use glam::{Mat4, Vec3};
 use renderling_shader::scene::GpuConstants;
 
 use crate::{SceneImage, Uniform};
@@ -25,7 +26,7 @@ pub fn skybox_bindgroup_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
                 visibility: wgpu::ShaderStages::FRAGMENT,
                 ty: wgpu::BindingType::Texture {
                     sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                    view_dimension: wgpu::TextureViewDimension::D2,
+                    view_dimension: wgpu::TextureViewDimension::Cube,
                     multisampled: false,
                 },
                 count: None,
@@ -71,14 +72,10 @@ pub fn create_skybox_render_pipeline(
     format: wgpu::TextureFormat,
 ) -> SkyboxRenderPipeline {
     log::trace!("creating skybox render pipeline with format '{format:?}'");
-    // let shader =
-    // device.create_shader_module(wgpu::include_wgsl!("linkage/skybox.wgsl"));
     let vertex_shader =
         device.create_shader_module(wgpu::include_spirv!("linkage/vertex_skybox.spv"));
-    // )); unsafe { device.create_shader_module_spirv(&wgpu::include_spirv_raw!
-    // (" linkage/vertex_skybox.spv")) };
     let fragment_shader =
-        device.create_shader_module(wgpu::include_spirv!("linkage/fragment_skybox.spv"));
+        device.create_shader_module(wgpu::include_spirv!("linkage/fragment_cubemap.spv"));
     let bg_layout = skybox_bindgroup_layout(device);
     let pp_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("skybox pipeline layout"),
@@ -117,7 +114,7 @@ pub fn create_skybox_render_pipeline(
             },
             fragment: Some(wgpu::FragmentState {
                 module: &fragment_shader,
-                entry_point: "fragment_skybox",
+                entry_point: "fragment_cubemap",
                 targets: &[Some(wgpu::ColorTargetState {
                     format,
                     blend: Some(wgpu::BlendState::ALPHA_BLENDING),
@@ -131,12 +128,14 @@ pub fn create_skybox_render_pipeline(
 
 /// An HDR skybox.
 pub struct Skybox {
-    // Texture of the equirectangular environment map
+    // Texture of the equirectangular environment
     pub equirectangular_texture: crate::Texture,
-    // Bindgroup used in the skybox render pipeline
-    pub bindgroup: wgpu::BindGroup,
-    // pub environment_texture: crate::Texture,
-    // pub irradiance_map: crate::Texture,
+    // Texture of the environment cubemap
+    pub environment_texture: crate::Texture,
+    pub environment_bindgroup: wgpu::BindGroup,
+    // Texture of the pre-computed irradiance cubemap
+    pub irradiance_texture: crate::Texture,
+    pub irradiance_bindgroup: wgpu::BindGroup,
     // pub prefiltered_environment_map: crate::Texture,
     // pub brdf_lut: crate::Texture,
 }
@@ -149,28 +148,14 @@ impl Skybox {
         constants: &Uniform<GpuConstants>,
     ) -> Self {
         log::trace!("creating empty skybox");
-        let pixels = [0u8; 4 * 4];
-        let equirectangular_texture = crate::Texture::new_with(
-            device,
-            queue,
-            Some("empty skybox equirectangular environment texture"),
-            None,
-            None,
-            wgpu::TextureFormat::Rgba32Float,
-            4,
-            4,
-            1,
-            1,
-            &pixels,
-        );
-        Skybox {
-            bindgroup: crate::skybox::create_skybox_bindgroup(
-                &device,
-                &constants,
-                &equirectangular_texture,
-            ),
-            equirectangular_texture,
-        }
+        let hdr_img = SceneImage {
+            pixels: vec![0u8; 4 * 4],
+            width: 1,
+            height: 1,
+            format: crate::SceneImageFormat::R32G32B32A32FLOAT,
+            apply_linear_transfer: false,
+        };
+        Self::new(device, queue, constants, hdr_img)
     }
 
     /// Create a new `Skybox`.
@@ -182,49 +167,88 @@ impl Skybox {
     ) -> Self {
         log::trace!("creating skybox");
         let equirectangular_texture = Skybox::hdr_texture_from_scene_image(device, queue, hdr_img);
-        // let proj = Mat4::perspective_rh(std::f32::consts::PI / 180.0 * 90.0, 1.0,
-        // 0.1, 10.0); let views = [
-        //    Mat4::look_at_rh(
-        //        Vec3::new(0.0, 0.0, 0.0),
-        //        Vec3::new(1.0, 0.0, 0.0),
-        //        Vec3::new(0.0, -1.0, 0.0),
-        //    ),
-        //    Mat4::look_at_rh(
-        //        Vec3::new(0.0, 0.0, 0.0),
-        //        Vec3::new(-1.0, 0.0, 0.0),
-        //        Vec3::new(0.0, -1.0, 0.0),
-        //    ),
-        //    Mat4::look_at_rh(
-        //        Vec3::new(0.0, 0.0, 0.0),
-        //        Vec3::new(0.0, -1.0, 0.0),
-        //        Vec3::new(0.0, 0.0, -1.0),
-        //    ),
-        //    Mat4::look_at_rh(
-        //        Vec3::new(0.0, 0.0, 0.0),
-        //        Vec3::new(0.0, 1.0, 0.0),
-        //        Vec3::new(0.0, 0.0, 1.0),
-        //    ),
-        //    Mat4::look_at_rh(
-        //        Vec3::new(0.0, 0.0, 0.0),
-        //        Vec3::new(0.0, 0.0, 1.0),
-        //        Vec3::new(0.0, -1.0, 0.0),
-        //    ),
-        //    Mat4::look_at_rh(
-        //        Vec3::new(0.0, 0.0, 0.0),
-        //        Vec3::new(0.0, 0.0, -1.0),
-        //        Vec3::new(0.0, -1.0, 0.0),
-        //    ),
-        //];
+        let proj = Mat4::perspective_rh(std::f32::consts::FRAC_PI_2, 1.0, 0.1, 10.0);
+        let views = [
+            Mat4::look_at_rh(
+                Vec3::new(0.0, 0.0, 0.0),
+                Vec3::new(1.0, 0.0, 0.0),
+                Vec3::new(0.0, -1.0, 0.0),
+            ),
+            Mat4::look_at_rh(
+                Vec3::new(0.0, 0.0, 0.0),
+                Vec3::new(-1.0, 0.0, 0.0),
+                Vec3::new(0.0, -1.0, 0.0),
+            ),
+            Mat4::look_at_rh(
+                Vec3::new(0.0, 0.0, 0.0),
+                Vec3::new(0.0, -1.0, 0.0),
+                Vec3::new(0.0, 0.0, -1.0),
+            ),
+            Mat4::look_at_rh(
+                Vec3::new(0.0, 0.0, 0.0),
+                Vec3::new(0.0, 1.0, 0.0),
+                Vec3::new(0.0, 0.0, 1.0),
+            ),
+            Mat4::look_at_rh(
+                Vec3::new(0.0, 0.0, 0.0),
+                Vec3::new(0.0, 0.0, 1.0),
+                Vec3::new(0.0, -1.0, 0.0),
+            ),
+            Mat4::look_at_rh(
+                Vec3::new(0.0, 0.0, 0.0),
+                Vec3::new(0.0, 0.0, -1.0),
+                Vec3::new(0.0, -1.0, 0.0),
+            ),
+        ];
+        // Create unit cube for projections.
+        let cube_vertices: [[f32; 3]; 8] = [
+            // front
+            [-1.0, -1.0, 1.0],
+            [1.0, -1.0, 1.0],
+            [1.0, 1.0, 1.0],
+            [-1.0, 1.0, 1.0],
+            // back
+            [-1.0, -1.0, -1.0],
+            [1.0, -1.0, -1.0],
+            [1.0, 1.0, -1.0],
+            [-1.0, 1.0, -1.0],
+        ];
+        let cube_elements: [u16; 36] = [
+            // front
+            0, 1, 2, 2, 3, 0, // right
+            1, 5, 6, 6, 2, 1, // back
+            7, 6, 5, 5, 4, 7, // left
+            4, 0, 3, 3, 7, 4, // bottom
+            4, 5, 1, 1, 0, 4, // top
+            3, 2, 6, 6, 7, 3,
+        ];
 
-        //// Create environment map.
-        // let environment_texture =
-        //    Skybox::create_environment_map_from_hdr(device, queue, &hdr_texture,
-        // &proj, &views);
+        let unit_cube_mesh = crate::mesh::Mesh::new(
+            device,
+            Some("unit cube"),
+            cube_vertices,
+            Some(cube_elements),
+        );
 
-        //// Convolve the environment map.
-        // let irradiance_map =
-        //    Skybox::create_irradiance_map(device, queue, &environment_texture, &proj,
-        // &views);
+        // Create environment map.
+        let environment_texture = Skybox::create_environment_map_from_hdr(
+            device,
+            queue,
+            &equirectangular_texture,
+            &unit_cube_mesh,
+            proj,
+            views,
+        );
+
+        // Convolve the environment map.
+        let irradiance_texture = Skybox::create_irradiance_map(
+            device,
+            queue,
+            &environment_texture,
+            &unit_cube_mesh,
+            proj,
+            views,
+        );
 
         //// Generate specular IBL pre-filtered environment map.
         // let prefiltered_environment_map = Skybox::create_prefiltered_environment_map(
@@ -241,13 +265,21 @@ impl Skybox {
         //    prefiltered_environment_map,
         //    brdf_lut: Skybox::create_precomputed_brdf_texture(device, queue),
         //}
+        log::trace!("returning skybox");
         Skybox {
-            bindgroup: crate::skybox::create_skybox_bindgroup(
+            environment_bindgroup: crate::skybox::create_skybox_bindgroup(
                 &device,
                 &constants,
-                &equirectangular_texture,
+                &environment_texture,
+            ),
+            irradiance_bindgroup: crate::skybox::create_skybox_bindgroup(
+                &device,
+                &constants,
+                &irradiance_texture,
             ),
             equirectangular_texture,
+            environment_texture,
+            irradiance_texture,
         }
     }
 
@@ -282,163 +314,161 @@ impl Skybox {
         Self::hdr_texture_from_scene_image(device, queue, img)
     }
 
-    // fn create_environment_map_from_hdr(
-    //    device: &wgpu::Device,
-    //    queue: &wgpu::Queue,
-    //    hdr_texture: &crate::Texture,
-    //    proj: &Mat4,
-    //    views: &[Mat4; 6],
-    //) -> crate::Texture {
-    //    // Create HDR material.
-    //    let hdr_material_params = hdr_texture;
+    fn create_environment_map_from_hdr(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        hdr_texture: &crate::Texture,
+        unit_cube_mesh: &crate::mesh::Mesh,
+        proj: Mat4,
+        views: [Mat4; 6],
+    ) -> crate::Texture {
+        // Create the cubemap-making pipeline.
+        let pipeline = crate::cubemap::CubemapMakingRenderPipeline::new(
+            device,
+            wgpu::TextureFormat::Rgba16Float,
+        );
+        let mut constants = crate::uniform::Uniform::new(
+            device,
+            GpuConstants {
+                camera_projection: proj,
+                ..Default::default()
+            },
+            wgpu::BufferUsages::VERTEX,
+            wgpu::ShaderStages::VERTEX,
+        );
+        let bindgroup = crate::cubemap::cubemap_making_bindgroup(
+            device,
+            Some("cubemap"),
+            &constants,
+            hdr_texture,
+        );
 
-    //    let hdr_material = Box::new(HdrCvtMaterial::new(device,
-    // &hdr_material_params));
+        Self::render_cubemap(
+            device,
+            queue,
+            "from_equirectangular",
+            &pipeline.0,
+            &mut constants,
+            &bindgroup,
+            unit_cube_mesh,
+            views,
+            512,
+        )
+    }
 
-    //    let mut encoder =
-    // device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-    //        label: Some("HDR convert"),
-    //    });
+    fn render_cubemap(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        label_prefix: &str,
+        pipeline: &wgpu::RenderPipeline,
+        constants: &mut Uniform<GpuConstants>,
+        bindgroup: &wgpu::BindGroup,
+        unit_cube_mesh: &crate::mesh::Mesh,
+        views: [Mat4; 6],
+        texture_size: u32,
+    ) -> crate::Texture {
+        let mut cubemap_faces = Vec::new();
 
-    //    let mut cubemap_faces = Vec::new();
+        // Render every cube face.
+        for i in 0..6 {
+            let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some(&format!("create cubemap {label_prefix}")),
+            });
 
-    //    // Render every cube face.
-    //    for i in 0..6 {
-    //        let cubemap_face = Texture::new_framebuffer_texture(
-    //            device,
-    //            512,
-    //            512,
-    //            wgpu::TextureFormat::Rgba16Float,
-    //        );
+            log::trace!("rendering cubemap face {i}");
+            let cubemap_face = crate::Texture::new_with(
+                device,
+                queue,
+                Some(&format!("cubemap{i}{label_prefix}")),
+                Some(wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC),
+                None,
+                wgpu::TextureFormat::Rgba16Float,
+                4,
+                2,
+                texture_size,
+                texture_size,
+                &[],
+            );
 
-    //        let transforms = HdrTransformBindGroup {
-    //            proj_matrix: proj.to_homogeneous(),
-    //            view_matrix: views[i].to_homogeneous(),
-    //        };
+            // update the view to point at one of the cube faces
+            constants.camera_view = views[i];
+            constants.update(queue);
 
-    //        material_base::update_uniform_buffer(
-    //            device,
-    //            &hdr_material.transform_bind_group_buffer,
-    //            &mut encoder,
-    //            &transforms,
-    //        );
+            {
+                let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some(&format!("cubemap{i}")),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &cubemap_face.view,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                            store: true,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                });
 
-    //        {
-    //            let mut render_pass =
-    // encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-    // color_attachments: &[wgpu::RenderPassColorAttachmentDescriptor {
-    //                    attachment: &cubemap_face.view,
-    //                    resolve_target: None,
-    //                    load_op: wgpu::LoadOp::Clear,
-    //                    store_op: wgpu::StoreOp::Store,
-    //                    clear_color: wgpu::Color::BLACK,
-    //                }],
-    //                depth_stencil_attachment: None,
-    //            });
+                render_pass.set_pipeline(pipeline);
+                render_pass.set_bind_group(0, &bindgroup, &[]);
+                unit_cube_mesh.draw(&mut render_pass);
+            }
 
-    //            render_pass.set_pipeline(&hdr_material.render_pipeline);
-    //            render_pass.set_bind_group(0, &hdr_material.transform_bind_group,
-    // &[]);            render_pass.set_bind_group(1,
-    // &hdr_material.cvt_bind_group, &[]);
+            queue.submit([encoder.finish()]);
+            cubemap_faces.push(cubemap_face);
+        }
 
-    //            unit_cube_mesh.draw(&mut render_pass);
-    //        }
+        crate::Texture::new_cubemap_texture(
+            device,
+            queue,
+            Some(&format!("{label_prefix} cubemap")),
+            texture_size,
+            texture_size,
+            cubemap_faces.as_slice(),
+            wgpu::TextureFormat::Rgba16Float,
+            1,
+        )
+    }
 
-    //        cubemap_faces.push(cubemap_face);
-    //    }
+    fn create_irradiance_map(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        environment_texture: &crate::Texture,
+        unit_cube_mesh: &crate::mesh::Mesh,
+        proj: Mat4,
+        views: [Mat4; 6],
+    ) -> crate::Texture {
+        let pipeline = crate::convolution::ConvolutionRenderPipeline::new(
+            device,
+            wgpu::TextureFormat::Rgba16Float,
+        );
+        let mut constants = crate::uniform::Uniform::new(
+            device,
+            GpuConstants {
+                camera_projection: proj,
+                ..Default::default()
+            },
+            wgpu::BufferUsages::VERTEX,
+            wgpu::ShaderStages::VERTEX,
+        );
+        let bindgroup = crate::convolution::convolution_bindgroup(
+            device,
+            Some("irradiance"),
+            &constants,
+            environment_texture,
+        );
 
-    //    let cmd_buffer = encoder.finish();
-
-    //    queue.submit(&[cmd_buffer]);
-
-    //    // Create environment cubemap.
-    //    Texture::new_cubemap_texture(
-    //        device,
-    //        queue,
-    //        512,
-    //        512,
-    //        cubemap_faces.as_slice(),
-    //        wgpu::TextureFormat::Rgba16Float,
-    //        1,
-    //    )
-    //}
-
-    // fn create_irradiance_map(
-    //    device: &wgpu::Device,
-    //    queue: &wgpu::Queue,
-    //    environment_texture: &crate::Texture,
-    //    proj: &Mat4,
-    //    views: &[Mat4; 6],
-    //) -> crate::Texture {
-    //    let mut encoder =
-    // device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-    //        label: Some("HDR convolve"),
-    //    });
-
-    //    let convolve_params = HdrConvolveDiffuseBindGroup {
-    //        environment_texture: environment_texture,
-    //    };
-
-    //    let convolve_material = HdrConvolveDiffuseMaterial::new(device,
-    // &convolve_params);
-
-    //    let mut cubemap_faces = Vec::new();
-
-    //    for i in 0..6 {
-    //        let cubemap_face =
-    //            Texture::new_framebuffer_texture(device, 32, 32,
-    // wgpu::TextureFormat::Rgba16Float);
-
-    //        let transforms = HdrTransformBindGroup {
-    //            proj_matrix: proj.to_homogeneous(),
-    //            view_matrix: views[i].to_homogeneous(),
-    //        };
-
-    //        material_base::update_uniform_buffer(
-    //            device,
-    //            &convolve_material.transform_bind_group_buffer,
-    //            &mut encoder,
-    //            &transforms,
-    //        );
-
-    //        {
-    //            let mut render_pass =
-    // encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-    // color_attachments: &[wgpu::RenderPassColorAttachmentDescriptor {
-    //                    attachment: &cubemap_face.view,
-    //                    resolve_target: None,
-    //                    load_op: wgpu::LoadOp::Clear,
-    //                    store_op: wgpu::StoreOp::Store,
-    //                    clear_color: wgpu::Color::BLACK,
-    //                }],
-    //                depth_stencil_attachment: None,
-    //            });
-
-    //            render_pass.set_pipeline(&convolve_material.render_pipeline);
-    //            render_pass.set_bind_group(0,
-    // &convolve_material.transform_bind_group, &[]);
-    // render_pass.set_bind_group(1, &convolve_material.convolve_bind_group, &[]);
-
-    //            unit_cube_mesh.draw(&mut render_pass);
-    //        }
-
-    //        cubemap_faces.push(cubemap_face);
-    //    }
-
-    //    let cmd_buffer = encoder.finish();
-
-    //    queue.submit(&[cmd_buffer]);
-
-    //    Texture::new_cubemap_texture(
-    //        device,
-    //        queue,
-    //        32,
-    //        32,
-    //        cubemap_faces.as_slice(),
-    //        wgpu::TextureFormat::Rgba16Float,
-    //        1,
-    //    )
-    //}
+        Self::render_cubemap(
+            device,
+            queue,
+            "irradiance",
+            &pipeline.0,
+            &mut constants,
+            &bindgroup,
+            unit_cube_mesh,
+            views,
+            32,
+        )
+    }
 
     // fn create_prefiltered_environment_map(
     //    device: &wgpu::Device,
@@ -645,7 +675,7 @@ mod test {
     use renderling_shader::ui::{UiMode, UiVertex};
 
     use super::*;
-    use crate::{setup_render_graph, setup_ui_render_graph, Renderling};
+    use crate::{BufferDimensions, CopiedTextureBuffer, Renderling};
 
     #[test]
     fn hdr_texture() {
@@ -683,10 +713,68 @@ mod test {
             .with_scale([400.0, 400.0])
             .build();
         let scene = builder.build();
-        setup_ui_render_graph(scene, [obj], &mut r, true);
+        r.setup_render_graph(None, Some(scene), [obj], true);
 
         let img = r.render_image().unwrap();
         img_diff::assert_img_eq("hdr_texture.png", img);
+    }
+
+    #[test]
+    fn skybox_irradiance_map() {
+        let mut r = Renderling::headless(600, 400).unwrap();
+        let (device, queue) = r.get_device_and_queue_owned();
+        let constants = Uniform::new(
+            &device,
+            GpuConstants {
+                camera_projection: Mat4::perspective_rh(
+                    std::f32::consts::FRAC_PI_4,
+                    6.0 / 4.0,
+                    0.01,
+                    10.0,
+                ),
+                ..Default::default()
+            },
+            wgpu::BufferUsages::UNIFORM
+                | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::COPY_SRC,
+            wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+        );
+        let hdr_img = SceneImage::from_hdr_path("../../img/hdr/helipad.hdr").unwrap();
+        let skybox = Skybox::new(&device, &queue, &constants, hdr_img);
+        let dimensions = BufferDimensions::new(4, 2, 512, 512);
+        let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("read skybox irradiance"),
+            size: (dimensions.padded_bytes_per_row * dimensions.height) as u64,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+        let source = skybox.irradiance_texture.texture.as_image_copy();
+        encoder.copy_texture_to_buffer(
+            source,
+            wgpu::ImageCopyBuffer {
+                buffer: &buffer,
+                layout: wgpu::ImageDataLayout {
+                    offset: 0,
+                    bytes_per_row: Some(dimensions.padded_bytes_per_row as u32),
+                    rows_per_image: None,
+                },
+            },
+            wgpu::Extent3d {
+                width: dimensions.width as u32,
+                height: dimensions.height as u32,
+                depth_or_array_layers: 1,
+            },
+        );
+        queue.submit(std::iter::once(encoder.finish()));
+        let copied = CopiedTextureBuffer {
+            dimensions,
+            buffer,
+            format: skybox.irradiance_texture.texture.format(),
+        };
+        let scene_img = copied.into_scene_image(&device).unwrap();
+        let img = scene_img.into_rgba8().unwrap();
+        img_diff::save("skybox_irradiance0.png", img);
     }
 
     #[test]
@@ -699,6 +787,6 @@ mod test {
         let scene = builder.build().unwrap();
         r.setup_render_graph(Some(scene), None, [], true);
         let img = r.render_image().unwrap();
-        img_diff::save("hdr_skybox_scene.png", img);
+        img_diff::assert_img_eq("hdr_skybox_scene.png", img);
     }
 }

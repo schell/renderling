@@ -30,10 +30,13 @@ pub enum DebugChannel {
 
     /// Displays bitangents as calculated from normals and tangents.
     Bitangents = 7,
+
+    /// Displays only the diffuse irradiance value.
+    Irradiance = 8,
 }
 
 impl DebugChannel {
-    pub fn all() -> [Self; 8] {
+    pub fn all() -> [Self; 9] {
         [
             Self::None,
             Self::UvCoords0,
@@ -43,6 +46,7 @@ impl DebugChannel {
             Self::UvNormals,
             Self::Tangents,
             Self::Bitangents,
+            Self::Irradiance,
         ]
     }
 }

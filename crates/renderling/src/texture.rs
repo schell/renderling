@@ -23,6 +23,9 @@ pub enum TextureError {
 
     #[snafu(display("Could not convert image buffer"))]
     CouldNotConvertImageBuffer,
+
+    #[snafu(display("Unsupported format"))]
+    UnsupportedFormat,
 }
 
 type Result<T, E = TextureError> = std::result::Result<T, E>;
@@ -36,6 +39,96 @@ pub struct Texture {
 }
 
 impl Texture {
+    /// Create a cubemap texture from 6 faces.
+    pub fn new_cubemap_texture(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        label: Option<&str>,
+        width: u32,
+        height: u32,
+        face_textures: &[Texture],
+        image_format: wgpu::TextureFormat,
+        mip_levels: u32,
+    ) -> Self {
+        let size = wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 6,
+        };
+        let cubemap_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: None,
+            size,
+            mip_level_count: mip_levels,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: image_format,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_DST
+                | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("texture_buffer_copy_encoder"),
+        });
+
+        log::trace!("copying face textures to cubemap texture");
+        for mip_level in 0..mip_levels as usize {
+            log::trace!("  mip_level: {mip_level}");
+            for i in 0..6 {
+                log::trace!("  face:{i}");
+                let texture = &face_textures[mip_level * 6 + i].texture;
+                encoder.copy_texture_to_texture(
+                    wgpu::ImageCopyTexture {
+                        texture,
+                        mip_level: 0,
+                        origin: wgpu::Origin3d::ZERO,
+                        aspect: wgpu::TextureAspect::All,
+                    },
+                    wgpu::ImageCopyTexture {
+                        texture: &cubemap_texture,
+                        mip_level: 0,
+                        origin: wgpu::Origin3d {
+                            x: 0,
+                            y: 0,
+                            z: i as u32,
+                        },
+                        aspect: wgpu::TextureAspect::All,
+                    },
+                    wgpu::Extent3d {
+                        width,
+                        height,
+                        depth_or_array_layers: 1,
+                    },
+                );
+            }
+        }
+        queue.submit([encoder.finish()]);
+
+        let view = cubemap_texture.create_view(&wgpu::TextureViewDescriptor {
+            dimension: Some(wgpu::TextureViewDimension::Cube),
+            label,
+            ..Default::default()
+        });
+
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::FilterMode::Linear,
+            label,
+            ..Default::default()
+        });
+
+        Texture {
+            texture: cubemap_texture.into(),
+            view: view.into(),
+            sampler: sampler.into(),
+        }
+    }
+
     /// Create a new texture.
     pub fn new_with(
         device: &wgpu::Device,
@@ -108,7 +201,8 @@ impl Texture {
 
     /// Create a new texture.
     ///
-    /// This defaults the format to `Rgba8UnormSrgb` and assumes a pixel is 1 byte per channel.
+    /// This defaults the format to `Rgba8UnormSrgb` and assumes a pixel is 1
+    /// byte per channel.
     pub fn new(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
@@ -439,6 +533,22 @@ pub struct CopiedTextureBuffer {
 }
 
 impl CopiedTextureBuffer {
+    /// Access the raw unpadded pixels of the buffer.
+    pub fn pixels(&self, device: &wgpu::Device) -> Vec<u8> {
+        let buffer_slice = self.buffer.slice(..);
+        buffer_slice.map_async(wgpu::MapMode::Read, |_| {});
+        device.poll(wgpu::Maintain::Wait);
+
+        let padded_buffer = buffer_slice.get_mapped_range();
+        let mut unpadded_buffer = vec![];
+        // from the padded_buffer we write just the unpadded bytes into the
+        // unpadded_buffer
+        for chunk in padded_buffer.chunks(self.dimensions.padded_bytes_per_row) {
+            unpadded_buffer.extend_from_slice(&chunk[..self.dimensions.unpadded_bytes_per_row]);
+        }
+        unpadded_buffer
+    }
+
     /// Convert the post render buffer into an RgbaImage.
     pub async fn convert_to_rgba(self) -> Result<image::RgbaImage, TextureError> {
         let buffer_slice = self.buffer.slice(..);
@@ -484,30 +594,37 @@ impl CopiedTextureBuffer {
         Ok(image::DynamicImage::ImageRgba8(img_buffer).to_rgba8())
     }
 
-    /// Convert the post render buffer into an RgbaImage.
+    /// Convert the post render buffer into an image.
     pub fn into_image<P>(self, device: &wgpu::Device) -> Result<image::DynamicImage, TextureError>
     where
         P: image::Pixel<Subpixel = u8>,
         image::DynamicImage: From<image::ImageBuffer<P, Vec<u8>>>,
     {
-        let buffer_slice = self.buffer.slice(..);
-        buffer_slice.map_async(wgpu::MapMode::Read, |_| {});
-        device.poll(wgpu::Maintain::Wait);
-
-        let padded_buffer = buffer_slice.get_mapped_range();
-        let mut unpadded_buffer = vec![];
-        // from the padded_buffer we write just the unpadded bytes into the
-        // unpadded_buffer
-        for chunk in padded_buffer.chunks(self.dimensions.padded_bytes_per_row) {
-            unpadded_buffer.extend_from_slice(&chunk[..self.dimensions.unpadded_bytes_per_row]);
-        }
+        let pixels = self.pixels(device);
         let img_buffer: image::ImageBuffer<P, Vec<u8>> = image::ImageBuffer::from_raw(
             self.dimensions.width as u32,
             self.dimensions.height as u32,
-            unpadded_buffer,
+            pixels,
         )
         .context(CouldNotConvertImageBufferSnafu)?;
         Ok(image::DynamicImage::from(img_buffer))
+    }
+
+    /// Convert the post render buffer into an internal-format [`SceneImage`].
+    pub fn into_scene_image(
+        self,
+        device: &wgpu::Device,
+    ) -> Result<crate::SceneImage, TextureError> {
+        let pixels = self.pixels(device);
+        let img = crate::SceneImage {
+            pixels,
+            width: self.dimensions.width as u32,
+            height: self.dimensions.height as u32,
+            format: crate::SceneImageFormat::from_wgpu_texture_format(self.format)
+                .context(UnsupportedFormatSnafu)?,
+            apply_linear_transfer: false,
+        };
+        Ok(img)
     }
 
     /// Convert the post render buffer into an RgbaImage.

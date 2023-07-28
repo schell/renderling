@@ -219,16 +219,30 @@ pub async fn new_adapter_device_queue_and_target<'a>(
         instance
             .enumerate_adapters(wgpu::Backends::all())
             .for_each(|adapter| {
-                log::trace!("adapter: {:#?}", adapter.get_info());
+                let info = adapter.get_info();
+                log::trace!(
+                    "found adapter: '{}' backend:{:?} driver:'{}'",
+                    info.name,
+                    info.backend,
+                    info.driver
+                );
             });
-        instance
+        let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
                 power_preference: wgpu::PowerPreference::default(),
                 compatible_surface,
                 force_fallback_adapter: false,
             })
             .await
-            .unwrap()
+            .unwrap();
+        let info = adapter.get_info();
+        log::trace!(
+            "using adapter: '{}' backend:{:?} driver:'{}'",
+            info.name,
+            info.backend,
+            info.driver
+        );
+        adapter
     }
 
     async fn device(adapter: &wgpu::Adapter) -> (wgpu::Device, wgpu::Queue) {
@@ -242,8 +256,7 @@ pub async fn new_adapter_device_queue_and_target<'a>(
                         // vertex shaders, even if those shaders are read-only
                         | wgpu::Features::VERTEX_WRITABLE_STORAGE
                         | wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES
-                        //// when debugging rust-gpu shader miscompilation it's nice to have this, but since currently
-                        //// `wgpu` can't select the vulkan backend on macos
+                        //// when debugging rust-gpu shader miscompilation it's nice to have this
                         //| wgpu::Features::SPIRV_SHADER_PASSTHROUGH
                         ,
                     limits: limits(&adapter),
