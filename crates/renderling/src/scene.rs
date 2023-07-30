@@ -612,11 +612,27 @@ pub fn create_scene_buffers_bindgroup(
             },
             wgpu::BindGroupEntry {
                 binding: 5,
-                resource: wgpu::BindingResource::TextureView(&skybox.irradiance_texture.view),
+                resource: wgpu::BindingResource::TextureView(&skybox.irradiance_cubemap.view),
             },
             wgpu::BindGroupEntry {
                 binding: 6,
-                resource: wgpu::BindingResource::Sampler(&skybox.irradiance_texture.sampler),
+                resource: wgpu::BindingResource::Sampler(&skybox.irradiance_cubemap.sampler),
+            },
+            wgpu::BindGroupEntry {
+                binding: 7,
+                resource: wgpu::BindingResource::TextureView(&skybox.prefiltered_environment_cubemap.view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 8,
+                resource: wgpu::BindingResource::Sampler(&skybox.prefiltered_environment_cubemap.sampler),
+            },
+            wgpu::BindGroupEntry {
+                binding: 9,
+                resource: wgpu::BindingResource::TextureView(&skybox.brdf_lut.view),
+            },
+            wgpu::BindGroupEntry {
+                binding: 10,
+                resource: wgpu::BindingResource::Sampler(&skybox.brdf_lut.sampler),
             },
         ],
     })
@@ -662,6 +678,38 @@ pub fn scene_buffers_bindgroup_layout(device: &wgpu::Device) -> wgpu::BindGroupL
         },
         wgpu::BindGroupLayoutEntry {
             binding: 6,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+            count: None,
+        },
+        wgpu::BindGroupLayoutEntry {
+            binding: 7,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Texture {
+                sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                view_dimension: wgpu::TextureViewDimension::Cube,
+                multisampled: false,
+            },
+            count: None,
+        },
+        wgpu::BindGroupLayoutEntry {
+            binding: 8,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+            count: None,
+        },
+        wgpu::BindGroupLayoutEntry {
+            binding: 9,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Texture {
+                sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                view_dimension: wgpu::TextureViewDimension::D2,
+                multisampled: false,
+            },
+            count: None,
+        },
+        wgpu::BindGroupLayoutEntry {
+            binding: 10,
             visibility: wgpu::ShaderStages::FRAGMENT,
             ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
             count: None,

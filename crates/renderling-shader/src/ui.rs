@@ -2,7 +2,7 @@
 //!
 //! This is mostly for rendering text.
 
-use glam::{Mat4, UVec2, Vec2, Vec4};
+use glam::{Mat4, UVec2, Vec2, Vec4, Vec4Swizzles, Vec2Swizzles};
 use spirv_std::{image::Image2d, Sampler};
 
 /// A vertex in a mesh.
@@ -51,7 +51,7 @@ pub struct UiConstants {
 
 #[repr(transparent)]
 #[derive(Clone, Copy, Default, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct UiMode(u32);
+pub struct UiMode(pub u32);
 
 impl UiMode {
     pub const DEFAULT: Self = UiMode(0);

@@ -6,7 +6,10 @@
 //! To read more about the technique, check out these resources:
 //! * https://stackoverflow.com/questions/59686151/what-is-gpu-driven-rendering
 use glam::{mat3, Mat4, Quat, UVec2, UVec3, Vec2, Vec3, Vec4, Vec4Swizzles};
-use spirv_std::{image::{Image2d, Cubemap}, Sampler};
+use spirv_std::{
+    image::{Cubemap, Image2d},
+    Sampler,
+};
 
 #[cfg(target_arch = "spirv")]
 use spirv_std::num_traits::*;
@@ -14,7 +17,8 @@ use spirv_std::num_traits::*;
 use crate::{
     bits::{bits, extract, insert},
     debug::*,
-    pbr, GpuToggles,
+    pbr,
+    GpuToggles,
 };
 
 mod id;
@@ -134,7 +138,6 @@ impl GpuVertex {
     }
 
     pub fn generate_normal(a: GpuVertex, b: GpuVertex, c: GpuVertex) -> Vec3 {
-
         let ab = a.position.xyz() - b.position.xyz();
         let ac = a.position.xyz() - c.position.xyz();
         ab.cross(ac).normalize()
@@ -590,6 +593,10 @@ pub fn main_fragment_scene(
 
     irradiance: &Cubemap,
     irradiance_sampler: &Sampler,
+    prefiltered: &Cubemap,
+    prefiltered_sampler: &Sampler,
+    brdf: &Image2d,
+    brdf_sampler: &Sampler,
 
     constants: &GpuConstants,
     lights: &[GpuLight],
@@ -671,9 +678,27 @@ pub fn main_fragment_scene(
         (norm, sampled_norm)
     };
 
-    // TODO: Check convolution shader - cubemaps seem to come out upside-down
-    // Fixing that would keep us from having to switch the normal direction
-    let irradiance = irradiance.sample_by_lod(*irradiance_sampler, -1.0 * norm, 0.0).xyz();
+    let n = norm;
+    let albedo = tex_color0 * material.factor0 * in_color;
+    let roughness = tex_color1.y * material.factor1.y;
+    let metallic = tex_color1.z * material.factor1.z;
+    let irradiance = pbr::sample_irradiance(irradiance, irradiance_sampler, norm);
+    let specular = pbr::sample_specular_reflection(
+        prefiltered,
+        prefiltered_sampler,
+        constants.camera_pos.xyz(),
+        in_pos,
+        n,
+        roughness,
+    );
+    let brdf = pbr::sample_brdf(
+        brdf,
+        brdf_sampler,
+        constants.camera_pos.xyz(),
+        in_pos,
+        n,
+        roughness,
+    );
 
     fn colorize(u: Vec3) -> Vec4 {
         ((u.normalize_or_zero() + Vec3::splat(1.0)) / 2.0).extend(1.0)
@@ -709,18 +734,34 @@ pub fn main_fragment_scene(
             *output = colorize(in_bitangent);
             return;
         }
-        DebugChannel::Irradiance => {
+        DebugChannel::DiffuseIrradiance => {
             *output = irradiance.extend(1.0);
+            return;
+        }
+        DebugChannel::SpecularReflection => {
+            *output = specular.extend(1.0);
+            return;
+        }
+        DebugChannel::Brdf => {
+            *output = brdf.extend(1.0).extend(1.0);
+            return;
+        }
+        DebugChannel::Roughness => {
+            *output = Vec3::splat(roughness).extend(1.0);
+            return;
+        }
+        DebugChannel::Metallic => {
+            *output = Vec3::splat(metallic).extend(1.0);
+            return;
+        }
+        DebugChannel::Albedo => {
+            *output = albedo;
             return;
         }
     }
 
     *output = match material.lighting_model {
         LightingModel::PBR_LIGHTING => {
-            let n = norm;
-            let albedo = tex_color0 * material.factor0 * in_color;
-            let metallic = tex_color1.y * material.factor1.y;
-            let roughness = tex_color1.z * material.factor1.z;
             // TODO: add ambient occlusion from texture
             let ao = 1.0;
             pbr::shade_fragment(
@@ -732,6 +773,8 @@ pub fn main_fragment_scene(
                 roughness,
                 ao,
                 irradiance,
+                specular,
+                brdf,
                 lights,
             )
         }

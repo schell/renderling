@@ -292,6 +292,7 @@ impl Renderling {
             img,
             Some(&format!("Renderling::create_texture {}", name)),
             None,
+            None,
         )
         .context(TextureSnafu)
     }
@@ -301,7 +302,7 @@ impl Renderling {
         texture: impl Into<Arc<wgpu::Texture>>,
         sampler: Option<wgpu::SamplerDescriptor>,
     ) -> crate::Texture {
-        crate::Texture::from_wgpu_tex(self.get_device(), texture, sampler)
+        crate::Texture::from_wgpu_tex(self.get_device(), texture, sampler, None)
     }
 
     pub fn get_device(&self) -> &wgpu::Device {

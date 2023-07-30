@@ -123,8 +123,7 @@ pub fn setup_render_graph(
         SceneRenderPipeline(create_scene_render_pipeline(device, hdr_texture_format));
     let compute_cull_pipeline =
         SceneComputeCullPipeline(create_scene_compute_cull_pipeline(device));
-    let skybox_pipeline =
-        crate::skybox::create_skybox_render_pipeline(device, hdr_texture_format);
+    let skybox_pipeline = crate::skybox::create_skybox_render_pipeline(device, hdr_texture_format);
     r.graph.add_resource(scene_render_pipeline);
     r.graph.add_resource(hdr_surface);
     r.graph.add_resource(compute_cull_pipeline);
@@ -1342,34 +1341,38 @@ mod test {
             Vec3::Y,
         );
 
-        let mut builder = r.new_scene().with_camera(projection, view);
+        let mut builder = r
+            .new_scene()
+            .with_camera(projection, view)
+            .with_skybox_image_from_path("../../img/hdr/resting_place.hdr");
         let (start, count) = builder.add_meshlet(sphere_vertices);
 
-        let light_z = 3.0 * radius;
-        let light_positions = [
-            [0.0, 0.0, light_z],
-            [len, 0.0, light_z],
-            [0.0, len, light_z],
-            [len, len, light_z],
-        ];
-        for position in light_positions.into_iter() {
-            let _light = builder
-                .new_point_light()
-                .with_position(position)
-                .with_color(Vec4::ONE)
-                .build();
-            let light_material_id = builder
-                .new_unlit_material()
-                .with_base_color(Vec4::splat(1.0))
-                .build();
-            let _light_entity = builder
-                .new_entity()
-                .with_starting_vertex_and_count(start, count)
-                .with_position(position)
-                .with_scale(Vec3::splat(0.5))
-                .with_material(light_material_id)
-                .build();
-        }
+        //let light_z = 3.0 * radius;
+        //let light_positions = [
+        //    [0.0, 0.0, light_z],
+        //    [len, 0.0, light_z],
+        //    [0.0, len, light_z],
+        //    [len, len, light_z],
+        //];
+        //for position in light_positions.into_iter() {
+        //    let _light = builder
+        //        .new_point_light()
+        //        .with_position(position)
+        //        .with_color(Vec4::ONE)
+        //        .with_intensity(5.0)
+        //        .build();
+        //    let light_material_id = builder
+        //        .new_unlit_material()
+        //        .with_base_color(Vec4::splat(1.0))
+        //        .build();
+        //    let _light_entity = builder
+        //        .new_entity()
+        //        .with_starting_vertex_and_count(start, count)
+        //        .with_position(position)
+        //        .with_scale(Vec3::splat(0.5))
+        //        .with_material(light_material_id)
+        //        .build();
+        //}
 
         for i in 0..k {
             let roughness = i as f32 / (k - 1) as f32;
@@ -1379,7 +1382,7 @@ mod test {
                 let y = (diameter + spacing) * j as f32;
                 let material_id = builder
                     .new_pbr_material()
-                    .with_base_color_factor(Vec4::new(1.0, 0.0, 0.0, 1.0))
+                    .with_base_color_factor(Vec4::new(1.0, 1.0, 1.0, 1.0))
                     .with_metallic_factor(metallic)
                     .with_roughness_factor(roughness)
                     .build();

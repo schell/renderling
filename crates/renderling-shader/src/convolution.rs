@@ -1,11 +1,13 @@
 //! Convolution shaders.
 //!
 //! These shaders convolve various functions to produce cached maps.
-use glam::{Vec2, Vec3, };
-use spirv_std::num_traits::Zero;
+use glam::{Vec2, Vec3, Vec4, Vec4Swizzles};
+use spirv_std::{num_traits::Zero, image::Cubemap, Sampler};
 
 #[cfg(target_arch = "spirv")]
 use spirv_std::num_traits::Float;
+
+use crate::scene::GpuConstants;
 
 fn radical_inverse_vdc(mut bits: u32) -> f32 {
     bits = (bits << 16u32) | (bits >> 16u32);
@@ -66,6 +68,8 @@ fn geometry_smith(normal: Vec3, view_dir: Vec3, light_dir: Vec3, roughness: f32)
     ggx1 * ggx2
 }
 
+const SAMPLE_COUNT: u32 = 1024;
+
 pub fn integrate_brdf(mut n_dot_v: f32, roughness: f32) -> Vec2 {
     n_dot_v = n_dot_v.max(f32::EPSILON);
     let v = Vec3::new(f32::sqrt(1.0 - n_dot_v * n_dot_v), 0.0, n_dot_v);
@@ -75,9 +79,8 @@ pub fn integrate_brdf(mut n_dot_v: f32, roughness: f32) -> Vec2 {
 
     let n = Vec3::Z;
 
-    let sample_count: u32 = 1024;
-    for i in 1..sample_count {
-        let xi = hammersley(i, sample_count);
+    for i in 1..SAMPLE_COUNT {
+        let xi = hammersley(i, SAMPLE_COUNT);
         let h = importance_sample_ggx(xi, n, roughness);
         let l = (2.0 * v.dot(h) * h - v).normalize_or_zero();
 
@@ -96,8 +99,8 @@ pub fn integrate_brdf(mut n_dot_v: f32, roughness: f32) -> Vec2 {
         }
     }
 
-    a /= sample_count as f32;
-    b /= sample_count as f32;
+    a /= SAMPLE_COUNT as f32;
+    b /= SAMPLE_COUNT as f32;
 
     Vec2::new(a, b)
 }
@@ -112,12 +115,11 @@ pub fn integrate_brdf_doesnt_work(mut n_dot_v: f32, roughness: f32) -> Vec2 {
 
     let n = Vec3::Z;
 
-    let sample_count: u32 = 1024;
     let mut i = 0u32;
-    while i < sample_count {
+    while i < SAMPLE_COUNT {
         i += 1;
 
-        let xi = hammersley(i, sample_count);
+        let xi = hammersley(i, SAMPLE_COUNT);
         let h = importance_sample_ggx(xi, n, roughness);
         let l = (2.0 * v.dot(h) * h - v).normalize_or_zero();
 
@@ -136,10 +138,54 @@ pub fn integrate_brdf_doesnt_work(mut n_dot_v: f32, roughness: f32) -> Vec2 {
         }
     }
 
-    a /= sample_count as f32;
-    b /= sample_count as f32;
+    a /= SAMPLE_COUNT as f32;
+    b /= SAMPLE_COUNT as f32;
 
     Vec2::new(a, b)
+}
+
+pub fn vertex_prefilter_environment_cubemap(
+    constants: &GpuConstants,
+    in_pos: Vec3,
+    out_pos: &mut Vec3,
+    gl_pos: &mut Vec4,
+) {
+    *out_pos = in_pos;
+    *gl_pos = constants.camera_projection * constants.camera_view * in_pos.extend(1.0);
+}
+
+pub fn fragment_prefilter_environment_cubemap(
+    roughness: &f32,
+    environment_cubemap: &Cubemap,
+    sampler: &Sampler,
+    in_pos: Vec3,
+    frag_color: &mut Vec4
+) {
+    let mut n = in_pos.normalize_or_zero();
+    // TODO: ensure that flipping y is what we want (pretty sure it is as `wgpu` and vulkan's y coords
+    // are flipped from opengl)
+    n.y *= -1.0;
+    // These moves are redundant but the names have connections to the PBR equations.
+    let r = n;
+    let v = r;
+
+    let mut total_weight = 0.0f32;
+    let mut prefiltered_color = Vec3::ZERO;
+
+    for i in 0..SAMPLE_COUNT {
+        let xi = hammersley(i, SAMPLE_COUNT);
+        let h = importance_sample_ggx(xi, n, *roughness);
+        let l = (2.0 * v.dot(h) * h - v).normalize_or_zero();
+
+        let n_dot_l = n.dot(l).max(0.0);
+        if n_dot_l > 0.0 {
+            prefiltered_color += environment_cubemap.sample_by_lod(*sampler, l, 0.0).xyz() * n_dot_l;
+            total_weight += n_dot_l;
+        }
+    }
+
+    prefiltered_color /= total_weight;
+    *frag_color = prefiltered_color.extend(1.0);
 }
 
 #[cfg(test)]

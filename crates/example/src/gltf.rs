@@ -97,6 +97,7 @@ impl App {
     }
 
     fn camera_position(radius: f32, phi: f32, theta: f32) -> Vec3 {
+        // convert from spherical to cartesian
         let x = radius * theta.sin() * phi.cos();
         let y = radius * theta.sin() * phi.sin();
         let z = radius * theta.cos();

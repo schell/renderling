@@ -455,6 +455,7 @@ impl<'a> UiSceneBuilder<'a> {
             img,
             Some("UiSceneBuilder::new_texture_from_dynamic_image"),
             None,
+            1
         )
     }
 

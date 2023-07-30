@@ -87,3 +87,8 @@ pub const CUBE: [Vec3; 36] = {
 
     points
 };
+
+pub fn reflect(i: Vec3, n: Vec3) -> Vec3 {
+    let n = n.normalize_or_zero();
+    i - 2.0 * n.dot(i) * n
+}

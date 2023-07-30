@@ -32,11 +32,26 @@ pub enum DebugChannel {
     Bitangents = 7,
 
     /// Displays only the diffuse irradiance value.
-    Irradiance = 8,
+    DiffuseIrradiance = 8,
+
+    /// Displays only the specular reflection value.
+    SpecularReflection = 9,
+
+    /// Displays only the BRDF value for the fragment
+    Brdf = 10,
+
+    /// Displays only the roughness value for the fragment
+    Roughness = 11,
+
+    /// Displays only the metallic value for the fragment
+    Metallic = 12,
+
+    /// Displays only the albedo color for the fragment
+    Albedo = 13,
 }
 
 impl DebugChannel {
-    pub fn all() -> [Self; 9] {
+    pub fn all() -> [Self; 14] {
         [
             Self::None,
             Self::UvCoords0,
@@ -46,7 +61,12 @@ impl DebugChannel {
             Self::UvNormals,
             Self::Tangents,
             Self::Bitangents,
-            Self::Irradiance,
+            Self::DiffuseIrradiance,
+            Self::SpecularReflection,
+            Self::Brdf,
+            Self::Roughness,
+            Self::Metallic,
+            Self::Albedo,
         ]
     }
 }
