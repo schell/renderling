@@ -101,7 +101,7 @@ impl Default for TextureParams {
 }
 
 /// Sets up the scene using different build phases.
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct SceneBuilder {
     pub device: Arc<wgpu::Device>,
     pub queue: Arc<wgpu::Queue>,
@@ -110,6 +110,7 @@ pub struct SceneBuilder {
     pub view: Mat4,
     pub images: Vec<SceneImage>,
     pub skybox_image: Option<SceneImage>,
+    pub skybox: Option<Skybox>,
     pub textures: Vec<TextureParams>,
     pub materials: Vec<GpuMaterial>,
     pub vertices: Vec<GpuVertex>,
@@ -127,6 +128,7 @@ impl SceneBuilder {
             view: Mat4::IDENTITY,
             images: vec![],
             skybox_image: None,
+            skybox: None,
             vertices: vec![],
             textures: vec![],
             materials: vec![],
@@ -209,12 +211,27 @@ impl SceneBuilder {
         self.skybox_image = Some(SceneImage::from_hdr_path(hdr_path).unwrap());
     }
 
+    /// Add a pre-made [`Skybox`].
+    ///
+    /// This overrides any path or image given to use for the skybox.
+    pub fn add_skybox(&mut self, skybox: Skybox) {
+        self.skybox = Some(skybox);
+    }
+
     /// Add a skybox image from path.
     ///
     /// Currently only one skybox image is supported, so this function returns
     /// nothing.
     pub fn with_skybox_image_from_path(mut self, hdr_path: impl AsRef<std::path::Path>) -> Self {
         self.add_skybox_image_from_path(hdr_path);
+        self
+    }
+
+    /// Add a pre-made [`Skybox`].
+    ///
+    /// This overrides any path or image given to use for the skybox.
+    pub fn with_skybox(mut self, skybox: Skybox) -> Self {
+        self.add_skybox(skybox);
         self
     }
 
@@ -349,6 +366,7 @@ impl Scene {
             view,
             images,
             skybox_image,
+            skybox,
             textures,
             materials,
             vertices,
@@ -400,7 +418,7 @@ impl Scene {
                 debug_mode,
                 toggles: {
                     let mut toggles = GpuToggles::default();
-                    toggles.set_has_skybox(skybox_image.is_some());
+                    toggles.set_has_skybox(skybox_image.is_some() || skybox.is_some());
                     toggles
                 },
             },
@@ -409,11 +427,22 @@ impl Scene {
                 | wgpu::BufferUsages::COPY_SRC,
             wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
         );
-        let skybox = if let Some(skybox_img) = skybox_image {
+        let skybox = if let Some(mut skybox) = skybox {
             log::trace!("scene has skybox");
-            Skybox::new(&device, &queue, &constants, skybox_img)
+            skybox.environment_bindgroup = crate::skybox::create_skybox_bindgroup(
+                &device,
+                &constants,
+                &skybox.environment_cubemap,
+            );
+            skybox
         } else {
-            Skybox::empty(&device, &queue, &constants)
+            if let Some(skybox_img) = skybox_image {
+                log::trace!("scene will build a skybox");
+                Skybox::new(&device, &queue, &constants, skybox_img)
+            } else {
+                log::trace!("skybox is empty");
+                Skybox::empty(&device, &queue, &constants)
+            }
         };
 
         let cull_bindgroup = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -509,7 +538,13 @@ impl Scene {
                 // we also have to create a new render buffers bindgroup because irradiance is
                 // part of that
                 *render_buffers_bindgroup = create_scene_buffers_bindgroup(
-                    device, constants, vertices, entities, lights, materials, &self.skybox,
+                    device,
+                    constants,
+                    vertices,
+                    entities,
+                    lights,
+                    materials,
+                    &self.skybox,
                 );
             }
         }
@@ -620,11 +655,15 @@ pub fn create_scene_buffers_bindgroup(
             },
             wgpu::BindGroupEntry {
                 binding: 7,
-                resource: wgpu::BindingResource::TextureView(&skybox.prefiltered_environment_cubemap.view),
+                resource: wgpu::BindingResource::TextureView(
+                    &skybox.prefiltered_environment_cubemap.view,
+                ),
             },
             wgpu::BindGroupEntry {
                 binding: 8,
-                resource: wgpu::BindingResource::Sampler(&skybox.prefiltered_environment_cubemap.sampler),
+                resource: wgpu::BindingResource::Sampler(
+                    &skybox.prefiltered_environment_cubemap.sampler,
+                ),
             },
             wgpu::BindGroupEntry {
                 binding: 9,

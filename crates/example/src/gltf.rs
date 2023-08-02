@@ -7,8 +7,8 @@ use std::time::Instant;
 use renderling::{
     debug::DebugChannel,
     math::{Mat4, Vec3, Vec4},
-    GltfLoader, GpuEntity, Renderling, Scene, ScreenSize, TweenProperty, UiDrawObjects, UiMode,
-    UiVertex, ViewMut, SceneImage,
+    GltfLoader, GpuEntity, Renderling, Scene, SceneImage, ScreenSize, TweenProperty, UiDrawObjects,
+    UiMode, UiVertex, View, ViewMut,
 };
 use renderling_gpui::{Element, Gpui};
 use winit::event::KeyboardInput;
@@ -151,8 +151,13 @@ impl App {
         self.left_mb_down = false;
         self.last_cursor_position = None;
 
-        let mut builder = r.new_scene().with_debug_channel(DebugChannel::None);
-        //let cross_loader = builder.gltf_load("/Users/schell/code/renderling/gltf/origin_cross.glb").unwrap();
+        let mut builder = r
+            .new_scene()
+            .with_skybox_image_from_path("img/hdr/night.hdr")
+            .with_debug_channel(DebugChannel::None);
+        // let cross_loader =
+        // builder.gltf_load("/Users/schell/code/renderling/gltf/origin_cross.glb").
+        // unwrap();
         let loader = match builder.gltf_load(&file) {
             Ok(loader) => loader,
             Err(msg) => {
@@ -182,24 +187,6 @@ impl App {
         let halfway_point = min + ((max - min).normalize() * ((max - min).length() / 2.0));
         let length = min.distance(max);
         let radius = length * 1.25;
-
-        if loader.lights.len() == 0 {
-            // These values were taken from the Khronos gltf-Sample-Viewer, which is a bit
-            // of a reference implementation as far as GLTF viewers go.
-            // See https://github.com/KhronosGroup/glTF-Sample-Viewer/blob/5b1b7f48a8cb2b7aaef00d08fdba18ccc8dd331b/source/Renderer/renderer.js#L72
-            let _key_light = builder
-                .new_directional_light()
-                .with_color(Vec4::ONE)
-                .with_direction(Vec3::new(0.5, -0.7071, -0.5))
-                .with_intensity(1.0)
-                .build();
-            let _fill_light = builder
-                .new_directional_light()
-                .with_color(Vec4::ONE)
-                .with_direction(Vec3::new(-0.5, 0.7071, 0.5))
-                .with_intensity(0.5)
-                .build();
-        }
 
         let name = get_name(file);
         self.ui.set_text_title(format!("{name}"));
@@ -355,14 +342,12 @@ pub fn demo(
     skybox: Option<std::path::PathBuf>,
 ) -> impl FnMut(&mut Renderling, Option<&winit::event::WindowEvent>) {
     let mut app = App::new(r);
-
     if let Some(file) = model {
         app.load_gltf_model(r, file);
     }
     if let Some(file) = skybox {
         app.load_hdr_skybox(r, file);
     }
-
     let mut event_state = renderling_gpui::EventState::default();
     move |r, ev: Option<&winit::event::WindowEvent>| {
         if let Some(ev) = ev {

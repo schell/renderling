@@ -16,7 +16,8 @@ fn fragment_convolve_diffuse_irradiance(input: Input) -> @location(0) vec4<f32> 
     let pi = 3.1415927;
     let frac_pi_2 = pi / 2.0;
 
-    let normal = normalize(input.local_pos);
+    var normal = normalize(input.local_pos);
+    normal.y *= -1.0;
     var irradiance = vec3f(0.0, 0.0, 0.0);
     let right = normalize(cross(vec3f(0.0, 1.0, 0.0), normal));
     let up = normalize(cross(normal, right));

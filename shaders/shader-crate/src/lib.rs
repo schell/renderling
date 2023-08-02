@@ -249,6 +249,25 @@ pub fn fragment_prefilter_environment_cubemap(
     )
 }
 
+#[spirv(vertex)]
+pub fn vertex_generate_mipmap(
+    #[spirv(vertex_index)] vertex_id: u32,
+    out_uv: &mut glam::Vec2,
+    #[spirv(position)] gl_pos: &mut glam::Vec4,
+) {
+    convolution::vertex_generate_mipmap(vertex_id, out_uv, gl_pos)
+}
+
+#[spirv(fragment)]
+pub fn fragment_generate_mipmap(
+    #[spirv(descriptor_set = 0, binding = 0)] texture: &Image2d,
+    #[spirv(descriptor_set = 0, binding = 1)] sampler: &Sampler,
+    in_uv: glam::Vec2,
+    frag_color: &mut glam::Vec4
+) {
+    convolution::fragment_generate_mipmap(texture, sampler, in_uv, frag_color)
+}
+
 //#[spirv(fragment)]
 // pub fn fragment_convolve_diffuse_irradiance(
 //    #[spirv(descriptor_set = 0, binding = 1)] texture: &Cubemap,

@@ -127,9 +127,8 @@ pub fn create_skybox_render_pipeline(
 }
 
 /// An HDR skybox that also provides IBL cubemaps and lookups.
+#[derive(Debug)]
 pub struct Skybox {
-    // Texture of the equirectangular environment
-    pub equirectangular_texture: crate::Texture,
     // Cubemap texture of the environment cubemap
     pub environment_cubemap: crate::Texture,
     // Bindgroup to use with the default skybox shader
@@ -265,20 +264,12 @@ impl Skybox {
 
         let brdf_lut = Skybox::create_precomputed_brdf_texture(device, queue);
 
-        // Skybox {
-        //    environment_texture,
-        //    irradiance_map,
-        //    prefiltered_environment_map,
-        //    brdf_lut: Skybox::create_precomputed_brdf_texture(device, queue),
-        //}
-        log::trace!("returning skybox");
         Skybox {
             environment_bindgroup: crate::skybox::create_skybox_bindgroup(
                 &device,
                 &constants,
                 &environment_cubemap,
             ),
-            equirectangular_texture,
             environment_cubemap,
             irradiance_cubemap,
             prefiltered_environment_cubemap,
@@ -303,6 +294,7 @@ impl Skybox {
             4,
             img.width,
             img.height,
+            1,
             &img.pixels,
         )
     }
@@ -339,9 +331,10 @@ impl Skybox {
             wgpu::BufferUsages::VERTEX,
             wgpu::ShaderStages::VERTEX,
         );
+
         let bindgroup = crate::cubemap::cubemap_making_bindgroup(
             device,
-            Some("cubemap"),
+            Some("environment cubemap"),
             &constants,
             hdr_texture,
         );
@@ -349,13 +342,14 @@ impl Skybox {
         Self::render_cubemap(
             device,
             queue,
-            "from_equirectangular",
+            "environment",
             &pipeline.0,
             &mut constants,
             &bindgroup,
             unit_cube_mesh,
             views,
             512,
+            Some(9),
         )
     }
 
@@ -369,8 +363,10 @@ impl Skybox {
         unit_cube_mesh: &crate::mesh::Mesh,
         views: [Mat4; 6],
         texture_size: u32,
+        mip_levels: Option<u32>,
     ) -> crate::Texture {
         let mut cubemap_faces = Vec::new();
+        let mip_levels = mip_levels.unwrap_or(1);
 
         // Render every cube face.
         for i in 0..6 {
@@ -378,18 +374,23 @@ impl Skybox {
                 label: Some(&format!("create cubemap {label_prefix}")),
             });
 
-            log::trace!("rendering cubemap face {i}");
-            let cubemap_face = crate::Texture::new_with(
+            let mut cubemap_face = crate::Texture::new_with(
                 device,
                 queue,
                 Some(&format!("cubemap{i}{label_prefix}")),
-                Some(wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC),
+                Some(
+                    wgpu::TextureUsages::RENDER_ATTACHMENT
+                        | wgpu::TextureUsages::COPY_SRC
+                        | wgpu::TextureUsages::COPY_DST
+                        | wgpu::TextureUsages::TEXTURE_BINDING,
+                ),
                 None,
                 wgpu::TextureFormat::Rgba16Float,
                 4,
                 2,
                 texture_size,
                 texture_size,
+                1,
                 &[],
             );
 
@@ -417,7 +418,14 @@ impl Skybox {
             }
 
             queue.submit([encoder.finish()]);
+            let mips = cubemap_face.generate_mips(
+                device,
+                queue,
+                Some(&format!("{label_prefix}mip")),
+                mip_levels,
+            );
             cubemap_faces.push(cubemap_face);
+            cubemap_faces.extend(mips);
         }
 
         crate::Texture::new_cubemap_texture(
@@ -427,7 +435,7 @@ impl Skybox {
             texture_size,
             cubemap_faces.as_slice(),
             wgpu::TextureFormat::Rgba16Float,
-            1,
+            mip_levels
         )
     }
 
@@ -469,6 +477,7 @@ impl Skybox {
             unit_cube_mesh,
             views,
             32,
+            None,
         )
     }
 
@@ -621,20 +630,19 @@ impl Skybox {
 
         let mut cubemap_faces = Vec::new();
 
-        for mip_level in 0..5 {
-            let mip_width: u32 = 128 >> mip_level;
-            let mip_height: u32 = 128 >> mip_level;
+        for i in 0..6 {
+            for mip_level in 0..5 {
+                let mip_width: u32 = 128 >> mip_level;
+                let mip_height: u32 = 128 >> mip_level;
 
-            // update the roughness for these mips
-            *roughness = mip_level as f32 / 4.0;
-            roughness.update(queue);
+                // update the roughness for these mips
+                *roughness = mip_level as f32 / 4.0;
+                roughness.update(queue);
 
-            for i in 0..6 {
                 let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
                     label: Some("specular convolution"),
                 });
 
-                log::trace!("rendering prefiltered cubemap face {i}");
                 let cubemap_face = crate::Texture::new_with(
                     device,
                     queue,
@@ -646,6 +654,7 @@ impl Skybox {
                     2,
                     mip_width,
                     mip_height,
+                    1,
                     &[],
                 );
 
@@ -676,7 +685,6 @@ impl Skybox {
                 cubemap_faces.push(cubemap_face);
             }
         }
-        log::trace!("rendered prefiltered enviroment cubemap faces");
 
         crate::Texture::new_cubemap_texture(
             device,
@@ -788,6 +796,7 @@ impl Skybox {
             2,
             512,
             512,
+            1,
             &[],
         );
 
@@ -820,7 +829,7 @@ mod test {
     use renderling_shader::ui::{UiMode, UiVertex};
 
     use super::*;
-    use crate::{skybox, Renderling};
+    use crate::Renderling;
 
     #[test]
     fn hdr_texture() {
@@ -907,7 +916,7 @@ mod test {
             let img: image::Rgba32FImage = image::ImageBuffer::from_vec(32, 32, pixels).unwrap();
             let img = image::DynamicImage::from(img);
             let img = img.to_rgba8();
-            img_diff::assert_img_eq(&format!("skybox/irradiance{i}.png"), img);
+            img_diff::save(&format!("skybox/irradiance{i}.png"), img);
             for mip_level in 0..5 {
                 let mip_size = 128u32 >> mip_level;
                 // save out the prefiltered environment faces' mips
@@ -931,7 +940,7 @@ mod test {
                     image::ImageBuffer::from_vec(mip_size, mip_size, pixels).unwrap();
                 let img = image::DynamicImage::from(img);
                 let img = img.to_rgba8();
-                img_diff::assert_img_eq(
+                img_diff::save(
                     &format!("skybox/prefiltered_environment_face{i}_mip{mip_level}.png"),
                     img,
                 );

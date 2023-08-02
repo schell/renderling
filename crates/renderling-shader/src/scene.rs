@@ -682,7 +682,7 @@ pub fn main_fragment_scene(
     let albedo = tex_color0 * material.factor0 * in_color;
     let roughness = tex_color1.y * material.factor1.y;
     let metallic = tex_color1.z * material.factor1.z;
-    let irradiance = pbr::sample_irradiance(irradiance, irradiance_sampler, norm);
+    let irradiance = pbr::sample_irradiance(irradiance, irradiance_sampler, n);
     let specular = pbr::sample_specular_reflection(
         prefiltered,
         prefiltered_sampler,

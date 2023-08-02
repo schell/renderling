@@ -2,7 +2,7 @@
 //!
 //! This is mostly for rendering text.
 
-use glam::{Mat4, UVec2, Vec2, Vec4, Vec4Swizzles, Vec2Swizzles};
+use glam::{Mat4, UVec2, Vec2, Vec4};
 use spirv_std::{image::Image2d, Sampler};
 
 /// A vertex in a mesh.

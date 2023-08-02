@@ -192,6 +192,7 @@ impl HdrSurface {
             1,
             width,
             height,
+            1,
             &[],
         )
     }
@@ -299,11 +300,6 @@ pub fn create_hdr_render_surface(
             stencil: wgpu::StencilState::default(),
             bias: wgpu::DepthBiasState::default(),
         }),
-        multisample: wgpu::MultisampleState {
-            mask: !0,
-            alpha_to_coverage_enabled: false,
-            count: 1,
-        },
         fragment: Some(wgpu::FragmentState {
             module: &fragment_shader,
             entry_point: "fragment_tonemapping",
@@ -313,6 +309,7 @@ pub fn create_hdr_render_surface(
                 write_mask: wgpu::ColorWrites::ALL,
             })],
         }),
+        multisample: wgpu::MultisampleState::default(),
         multiview: None,
     });
 

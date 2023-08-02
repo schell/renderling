@@ -2,12 +2,16 @@
 //!
 //! These shaders convolve various functions to produce cached maps.
 use glam::{Vec2, Vec3, Vec4, Vec4Swizzles};
-use spirv_std::{num_traits::Zero, image::Cubemap, Sampler};
+use spirv_std::{
+    image::{Cubemap, Image2d},
+    num_traits::Zero,
+    Sampler,
+};
 
 #[cfg(target_arch = "spirv")]
 use spirv_std::num_traits::Float;
 
-use crate::scene::GpuConstants;
+use crate::{pbr, scene::GpuConstants};
 
 fn radical_inverse_vdc(mut bits: u32) -> f32 {
     bits = (bits << 16u32) | (bits >> 16u32);
@@ -154,18 +158,19 @@ pub fn vertex_prefilter_environment_cubemap(
     *gl_pos = constants.camera_projection * constants.camera_view * in_pos.extend(1.0);
 }
 
+/// Lambertian prefilter.
 pub fn fragment_prefilter_environment_cubemap(
     roughness: &f32,
     environment_cubemap: &Cubemap,
     sampler: &Sampler,
     in_pos: Vec3,
-    frag_color: &mut Vec4
+    frag_color: &mut Vec4,
 ) {
     let mut n = in_pos.normalize_or_zero();
-    // TODO: ensure that flipping y is what we want (pretty sure it is as `wgpu` and vulkan's y coords
-    // are flipped from opengl)
+    // `wgpu` and vulkan's y coords are flipped from opengl
     n.y *= -1.0;
-    // These moves are redundant but the names have connections to the PBR equations.
+    // These moves are redundant but the names have connections to the PBR
+    // equations.
     let r = n;
     let v = r;
 
@@ -179,13 +184,53 @@ pub fn fragment_prefilter_environment_cubemap(
 
         let n_dot_l = n.dot(l).max(0.0);
         if n_dot_l > 0.0 {
-            prefiltered_color += environment_cubemap.sample_by_lod(*sampler, l, 0.0).xyz() * n_dot_l;
+            let mip_level = if *roughness == 0.0 {
+                0.0
+            } else {
+                calc_lod(n_dot_l)
+            };
+            prefiltered_color += environment_cubemap.sample_by_lod(*sampler, l, mip_level).xyz() * n_dot_l;
             total_weight += n_dot_l;
         }
     }
 
     prefiltered_color /= total_weight;
     *frag_color = prefiltered_color.extend(1.0);
+}
+
+pub fn calc_lod_old(n: Vec3, v: Vec3, h: Vec3, roughness: f32) -> f32 {
+    // sample from the environment's mip level based on roughness/pdf
+    let d = pbr::normal_distribution_ggx(n, h, roughness);
+    let n_dot_h = n.dot(h).max(0.0);
+    let h_dot_v = h.dot(v).max(0.0);
+    let pdf = (d * n_dot_h / (4.0 * h_dot_v)).max(core::f32::EPSILON);
+
+    let resolution = 512.0; // resolution of source cubemap (per face)
+    let sa_texel = 4.0 * core::f32::consts::PI / (6.0 * resolution * resolution);
+    let sa_sample = 1.0 / (SAMPLE_COUNT as f32 * pdf + core::f32::EPSILON);
+
+    0.5 * (sa_sample / sa_texel).log2()
+}
+
+pub fn calc_lod(n_dot_l: f32) -> f32 {
+    let cube_width = 512.0;
+    let pdf = (n_dot_l * core::f32::consts::FRAC_1_PI).max(0.0);
+    0.5 * (6.0 * cube_width * cube_width / (SAMPLE_COUNT as f32 * pdf).max(core::f32::EPSILON)).log2()
+}
+
+pub fn vertex_generate_mipmap(vertex_id: u32, out_uv: &mut Vec2, gl_pos: &mut Vec4) {
+    let i = vertex_id as usize;
+    *out_uv = crate::math::UV_COORD_QUAD_CCW[i];
+    *gl_pos = crate::math::CLIP_SPACE_COORD_QUAD_CCW[i];
+}
+
+pub fn fragment_generate_mipmap(
+    texture: &Image2d,
+    sampler: &Sampler,
+    in_uv: Vec2,
+    frag_color: &mut Vec4,
+) {
+    *frag_color = texture.sample(*sampler, in_uv);
 }
 
 #[cfg(test)]
@@ -196,7 +241,7 @@ mod test {
     fn integrate_brdf_sanity() {
         let points = [(0.0, 0.0), (1.0, 0.0), (0.0, 1.0), (1.0, 1.0)];
         for (x, y) in points.into_iter() {
-            assert!(!integrate_brdf(x, y).is_nan(), "brdf is NaN at {x},{y}"); //
+            assert!(!integrate_brdf(x, y).is_nan(), "brdf is NaN at {x},{y}");
         }
         let size = 32;
         let mut img = image::RgbaImage::new(size, size);

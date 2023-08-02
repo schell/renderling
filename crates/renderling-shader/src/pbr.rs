@@ -16,7 +16,7 @@ use crate::{scene::{GpuLight, LightType}, math};
 ///
 /// The normal distribution function D statistically approximates the relative
 /// surface area of microfacets exactly aligned to the (halfway) vector h.
-fn normal_distribution_ggx(n: Vec3, h: Vec3, roughness: f32) -> f32 {
+pub fn normal_distribution_ggx(n: Vec3, h: Vec3, roughness: f32) -> f32 {
     let a = roughness * roughness;
     let a2 = a * a;
     let ndot_h = n.dot(h).max(0.0);
@@ -106,9 +106,7 @@ pub fn sample_irradiance (
     // Normal vector
     n: Vec3
 ) -> Vec3 {
-    // TODO: Check convolution shader - cubemaps seem to come out upside-down
-    // Fixing that would keep us from having to switch the normal direction
-    irradiance.sample_by_lod(*irradiance_sampler, -1.0 * n, 0.0).xyz()
+    irradiance.sample_by_lod(*irradiance_sampler, n, 0.0).xyz()
 }
 
 pub fn sample_specular_reflection (
