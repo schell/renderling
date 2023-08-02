@@ -2,6 +2,8 @@
 
 This aspires to be a modern "GPU-driven" renderer. It is alpha software. I'm still learning, but quickly!
 
+<img width="912" alt="ibl_environment_test" src="https://github.com/schell/renderling/assets/24942/297d6150-64b2-45b8-9760-12b27dc8cc3e">
+
 ## What
 
 `renderling` holds entire scenes of geometry, textures, materials, lighting, even the scene graph itself - in GPU buffers.
@@ -22,10 +24,6 @@ and lots of lighting effects.
 - Very fast loading times for GLTF files
 - Support for very large scenes
 - Support for many lights
-
-![renderling pbr](test_img/pbr_point_lights_metallic_roughness.png)
-
-![renderling pbr](test_img/pbr_point_lights_metallic_roughness_side.png)
 
 ## API Features
 
