@@ -69,6 +69,7 @@ Just pro-cons on tech choices and little things I don't want to forget whil impl
 * [**Help inspecting buffers in Xcode** ](https://developer.apple.com/documentation/xcode/inspecting-buffers?changes=__9)
 * command that includes some vulkan debugging stuff
   - VK_LOADER_LAYERS_ENABLE='*validation' VK_LAYER_ENABLES=VK_VALIDATION_FEATURE_ENABLE_DEBUG_PRINTF_EXT DEBUG_PRINTF_TO_STDOUT=1
+* When generating mipmaps I ran into a problem where sampling the original texture was always coming up [0.0, 0.0 0.0, 0.0]. It turns out that the sampler was trying to read from the mipmap at level 1, and of course it didn't exist yet as that was the one I was trying to generate. The fix was to sample a different texture - one without slots for the mipmaps, then throw away that texture.
 
 ## PBR reference implementations
 * [khronos sample viewer](https://github.khronos.org/glTF-Sample-Viewer-Release/)

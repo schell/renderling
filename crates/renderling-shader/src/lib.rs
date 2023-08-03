@@ -4,7 +4,7 @@
 use bits::{bits, extract, insert};
 
 pub mod bits;
-//pub mod convolution;
+pub mod convolution;
 pub mod debug;
 pub mod math;
 pub mod pbr;

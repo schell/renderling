@@ -297,7 +297,6 @@ impl Gpui {
                 })
                 .into(),
         };
-        drop(r);
         let depth_texture = renderling::Texture::create_depth_texture(&device, width, height);
         let mut r = Renderling::new(
             target,

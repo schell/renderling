@@ -8,6 +8,22 @@ pub fn triangle_face_normal(p1: Vec3, p2: Vec3, p3: Vec3) -> Vec3 {
     n
 }
 
+pub const CLIP_SPACE_COORD_QUAD_CCW: [Vec4; 6] = {
+    let tl = Vec4::new(-1.0, 1.0, 0.5, 1.0);
+    let tr = Vec4::new(1.0, 1.0, 0.5, 1.0);
+    let bl = Vec4::new(-1.0, -1.0, 0.5, 1.0);
+    let br = Vec4::new(1.0, -1.0, 0.5, 1.0);
+    [bl, br, tr, tr, tl, bl]
+};
+
+pub const UV_COORD_QUAD_CCW: [Vec2; 6] = {
+    let tl = Vec2::new(0.0, 0.0);
+    let tr = Vec2::new(1.0, 0.0);
+    let bl = Vec2::new(0.0, 1.0);
+    let br = Vec2::new(1.0, 1.0);
+    [bl, br, tr, tr, tl, bl]
+};
+
 pub const POINTS_2D_TEX_QUAD: [Vec2; 6] = {
     let tl = Vec2::new(0.0, 0.0);
     let tr = Vec2::new(1.0, 0.0);
@@ -87,3 +103,8 @@ pub const CUBE: [Vec3; 36] = {
 
     points
 };
+
+pub fn reflect(i: Vec3, n: Vec3) -> Vec3 {
+    let n = n.normalize_or_zero();
+    i - 2.0 * n.dot(i) * n
+}

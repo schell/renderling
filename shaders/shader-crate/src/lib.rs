@@ -1,7 +1,7 @@
 //! Shader entry points.
 #![no_std]
 #![feature(lang_items)]
-use renderling_shader::{scene, skybox, tonemapping, ui};
+use renderling_shader::{convolution, scene, skybox, tonemapping, ui};
 use spirv_std::{
     glam,
     image::{Cubemap, Image2d},
@@ -92,6 +92,10 @@ pub fn main_fragment_scene(
 
     #[spirv(descriptor_set = 0, binding = 5)] irradiance: &Cubemap,
     #[spirv(descriptor_set = 0, binding = 6)] irradiance_sampler: &Sampler,
+    #[spirv(descriptor_set = 0, binding = 7)] prefiltered: &Cubemap,
+    #[spirv(descriptor_set = 0, binding = 8)] prefiltered_sampler: &Sampler,
+    #[spirv(descriptor_set = 0, binding = 9)] brdf: &Image2d,
+    #[spirv(descriptor_set = 0, binding = 10)] brdf_sampler: &Sampler,
 
     //// which entity are we drawing
     #[spirv(flat)] in_material: u32,
@@ -110,6 +114,10 @@ pub fn main_fragment_scene(
         sampler,
         irradiance,
         irradiance_sampler,
+        prefiltered,
+        prefiltered_sampler,
+        brdf,
+        brdf_sampler,
         constants,
         lights,
         materials,
@@ -198,12 +206,75 @@ pub fn fragment_cubemap(
     skybox::fragment_cubemap(texture, sampler, in_local_pos, out_color)
 }
 
+#[spirv(vertex)]
+pub fn vertex_brdf_lut_convolution(
+    in_pos: glam::Vec3,
+    in_uv: glam::Vec2,
+    out_uv: &mut glam::Vec2,
+    #[spirv(position)] gl_pos: &mut glam::Vec4,
+) {
+    *out_uv = in_uv;
+    *gl_pos = in_pos.extend(1.0);
+}
+
+#[spirv(fragment)]
+pub fn fragment_brdf_lut_convolution(in_uv: glam::Vec2, out_color: &mut glam::Vec2) {
+    *out_color = convolution::integrate_brdf(in_uv.x, in_uv.y);
+}
+
+#[spirv(vertex)]
+pub fn vertex_prefilter_environment_cubemap(
+    #[spirv(uniform, descriptor_set = 0, binding = 0)] constants: &scene::GpuConstants,
+    in_pos: glam::Vec3,
+    out_pos: &mut glam::Vec3,
+    #[spirv(position)] gl_pos: &mut glam::Vec4,
+) {
+    convolution::vertex_prefilter_environment_cubemap(constants, in_pos, out_pos, gl_pos)
+}
+
+#[spirv(fragment)]
+pub fn fragment_prefilter_environment_cubemap(
+    #[spirv(uniform, descriptor_set = 0, binding = 1)] roughness: &f32,
+    #[spirv(descriptor_set = 0, binding = 2)] environment_cubemap: &Cubemap,
+    #[spirv(descriptor_set = 0, binding = 3)] sampler: &Sampler,
+    in_pos: glam::Vec3,
+    frag_color: &mut glam::Vec4,
+) {
+    convolution::fragment_prefilter_environment_cubemap(
+        roughness,
+        environment_cubemap,
+        sampler,
+        in_pos,
+        frag_color,
+    )
+}
+
+#[spirv(vertex)]
+pub fn vertex_generate_mipmap(
+    #[spirv(vertex_index)] vertex_id: u32,
+    out_uv: &mut glam::Vec2,
+    #[spirv(position)] gl_pos: &mut glam::Vec4,
+) {
+    convolution::vertex_generate_mipmap(vertex_id, out_uv, gl_pos)
+}
+
+#[spirv(fragment)]
+pub fn fragment_generate_mipmap(
+    #[spirv(descriptor_set = 0, binding = 0)] texture: &Image2d,
+    #[spirv(descriptor_set = 0, binding = 1)] sampler: &Sampler,
+    in_uv: glam::Vec2,
+    frag_color: &mut glam::Vec4
+) {
+    convolution::fragment_generate_mipmap(texture, sampler, in_uv, frag_color)
+}
+
 //#[spirv(fragment)]
-//pub fn fragment_convolve_diffuse_irradiance(
+// pub fn fragment_convolve_diffuse_irradiance(
 //    #[spirv(descriptor_set = 0, binding = 1)] texture: &Cubemap,
 //    #[spirv(descriptor_set = 0, binding = 2)] sampler: &Sampler,
 //    in_local_pos: glam::Vec3,
 //    out_color: &mut glam::Vec4,
 //) {
-//    convolution::fragment_convolve_diffuse_irradiance(texture, sampler, in_local_pos, out_color)
+//    convolution::fragment_convolve_diffuse_irradiance(texture, sampler,
+// in_local_pos, out_color)
 //}
