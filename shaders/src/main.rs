@@ -7,10 +7,6 @@ use spirv_builder::{CompileResult, MetadataPrintout, ModuleResult, SpirvBuilder}
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::builder()
         .filter_level(log::LevelFilter::Trace)
-        //.filter_module("renderling", log::LevelFilter::Trace)
-        //.filter_module("naga", log::LevelFilter::Warn)
-        //.filter_module("wgpu", log::LevelFilter::Debug)
-        //.filter_module("wgpu_hal", log::LevelFilter::Warn)
         .try_init()
         .unwrap();
 
