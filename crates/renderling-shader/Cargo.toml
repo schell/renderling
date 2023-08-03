@@ -10,18 +10,18 @@ description = "Shared types and functions for renderling shaders compiled w/ rus
 default = []
 
 [dependencies]
-bytemuck = { version = "1.13.0", features = ["derive"] }
-spirv-std = "^0.8"
+bytemuck = { workspace = true }
+spirv-std = "^0.9"
 
 [target.'cfg(not(target_arch = "spirv"))'.dependencies]
-glam = { version = "0.22", features = ["bytemuck"] }
+glam = { workspace = true, features = ["bytemuck"] }
 
 [target.'cfg(not(target_arch = "spirv"))'.dev-dependencies]
-glam = { version = "0.22", features = ["debug-glam-assert", "bytemuck"] }
+glam = { workspace = true, features = ["debug-glam-assert", "bytemuck"] }
 
 [target.'cfg(target_arch = "spirv")'.dependencies]
-glam = { version = "0.22", default-features = false, features = ["libm", "bytemuck"] }
+glam = { version = "^0.24", default-features = false, features = ["libm", "bytemuck"] }
 
 [dev-dependencies]
-image = "^0.24"
+image = { workspace = true }
 img-diff = { path = "../img-diff" }

@@ -13,4 +13,5 @@ crate-type = ["dylib"]
 
 [dependencies]
 renderling-shader = { path = "../../crates/renderling-shader" }
-spirv-std = "^0.8"
+spirv-std = "^0.9"
+glam = { version = "0.24.1", default-features = false, features = ["libm"]}

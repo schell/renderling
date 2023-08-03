@@ -11,12 +11,13 @@ clap = { version = "^4.3", features = ["derive"] }
 env_logger = "0.10.0"
 gltf = "1.1.0"
 icosahedron = "^0.1"
-log = "0.4.17"
 renderling = { path = "../renderling" }
 renderling-gpui = { path = "../renderling-gpui" }
-winit = "^0.27"
+
+log = { workspace = true }
+winit = { workspace = true }
 wgpu = { workspace = true }
 
 [dev-dependencies]
-image = { version = "^0.24" }
+image = { workspace = true }
 img-diff = { path = "../img-diff" }
