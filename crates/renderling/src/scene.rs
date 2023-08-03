@@ -1037,16 +1037,9 @@ pub fn scene_tonemapping(
                 store: true,
             },
         })],
-        depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-            view: &depth.view,
-            depth_ops: Some(wgpu::Operations {
-                load: wgpu::LoadOp::Load,
-                store: true,
-            }),
-            stencil_ops: None,
-        }),
+        depth_stencil_attachment: None,
     });
-    render_pass.set_pipeline(&hdr_frame.pipeline);
+    render_pass.set_pipeline(&hdr_frame.tonemapping_pipeline);
     render_pass.set_bind_group(0, &hdr_frame.texture_bindgroup, &[]);
     render_pass.set_bind_group(1, hdr_frame.constants.bindgroup(), &[]);
     render_pass.draw(0..6, 0..1);
