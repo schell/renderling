@@ -11,7 +11,7 @@ use glam::{UVec2, Vec2, Vec4};
 use snafu::prelude::*;
 
 use crate::{
-    mesh::Mesh, node::FrameTextureView, Device, Queue, RenderTarget, Renderling, Texture, Uniform,
+    mesh::Mesh, frame::FrameTextureView, Device, Queue, RenderTarget, Renderling, Texture, Uniform,
     View, ViewMut,
 };
 
@@ -571,14 +571,14 @@ pub fn setup_ui_render_graph(
 
     use crate::{
         graph,
-        node::{clear_frame_and_depth, create_frame, present},
+        frame::{clear_frame_and_depth, create_frame, present},
         Graph,
     };
     let pre_render =
         crate::graph!(create_frame, clear_frame_and_depth, ui_scene_update).with_barrier();
     let render = crate::graph!(ui_scene_render).with_barrier();
     let post_render = if with_screen_capture {
-        let copy_frame_to_post = crate::node::PostRenderBufferCreate::create;
+        let copy_frame_to_post = crate::frame::PostRenderBufferCreate::create;
         crate::graph!(copy_frame_to_post < present)
     } else {
         crate::graph!(present)
