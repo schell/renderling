@@ -10,7 +10,8 @@ pub use renderling_shader::scene::*;
 
 use crate::DepthTexture;
 use crate::{
-    node::{FrameTextureView, HdrSurface},
+    frame::FrameTextureView,
+    hdr::HdrSurface,
     Atlas, Device, GpuArray, Queue, Skybox, SkyboxRenderPipeline, Uniform,
 };
 
@@ -1017,12 +1018,11 @@ pub fn scene_render(
 /// Conducts the HDR tone mapping, writing the HDR surface texture to the (most
 /// likely) sRGB window surface.
 pub fn scene_tonemapping(
-    (device, queue, frame, hdr_frame, depth): (
+    (device, queue, frame, hdr_frame): (
         View<Device>,
         View<Queue>,
         View<FrameTextureView>,
         View<HdrSurface>,
-        View<DepthTexture>,
     ),
 ) -> Result<(), SceneError> {
     let label = Some("scene tonemapping");

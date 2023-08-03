@@ -5,7 +5,7 @@ use snafu::prelude::*;
 use std::{ops::Deref, sync::Arc};
 
 use crate::{
-    node::HdrSurface, CreateSurfaceFn, Graph, RenderTarget, Scene, SceneBuilder, TextureError,
+    hdr::HdrSurface, CreateSurfaceFn, Graph, RenderTarget, Scene, SceneBuilder, TextureError,
     UiDrawObject, UiScene, UiSceneBuilder, View, ViewMut, WgpuStateError,
 };
 
@@ -404,7 +404,7 @@ impl Renderling {
     /// ## Note
     /// This operation can take a long time, depending on how big the screen is.
     pub fn render_image(&mut self) -> Result<image::RgbaImage, RenderlingError> {
-        use crate::node::PostRenderBuffer;
+        use crate::frame::PostRenderBuffer;
 
         self.render()?;
         let buffer = self

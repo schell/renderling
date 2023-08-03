@@ -8,7 +8,7 @@ use renderling::{
     debug::DebugChannel,
     math::{Mat4, Vec3, Vec4},
     GltfLoader, GpuEntity, Renderling, Scene, SceneImage, ScreenSize, TweenProperty, UiDrawObjects,
-    UiMode, UiVertex, View, ViewMut,
+    UiMode, UiVertex, ViewMut,
 };
 use renderling_gpui::{Element, Gpui};
 use winit::event::KeyboardInput;

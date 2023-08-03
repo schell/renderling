@@ -43,9 +43,10 @@ mod buffer_array;
 mod camera;
 pub mod convolution;
 pub mod cubemap;
+mod hdr;
 pub mod math;
 pub mod mesh;
-pub mod node;
+pub mod frame;
 mod renderer;
 mod scene;
 mod skybox;
@@ -59,6 +60,7 @@ mod uniform;
 pub use atlas::*;
 pub use buffer_array::*;
 pub use camera::*;
+pub use hdr::*;
 pub use renderer::*;
 pub use scene::*;
 pub use skybox::*;
@@ -114,7 +116,7 @@ pub fn setup_render_graph(
 
     let (hdr_surface,) = r
         .graph
-        .visit(node::create_hdr_render_surface)
+        .visit(hdr::create_hdr_render_surface)
         .unwrap()
         .unwrap();
     let device = r.get_device();
@@ -129,8 +131,8 @@ pub fn setup_render_graph(
     r.graph.add_resource(compute_cull_pipeline);
     r.graph.add_resource(skybox_pipeline);
 
-    use node::{
-        clear_depth, clear_surface_hdr_and_depth, create_frame, hdr_surface_update, present,
+    use frame::{
+        clear_depth, create_frame, present
     };
 
     // pre-render subgraph
@@ -153,7 +155,7 @@ pub fn setup_render_graph(
 
     // post-render subgraph
     r.graph.add_subgraph(if with_screen_capture {
-        let copy_frame_to_post = crate::node::PostRenderBufferCreate::create;
+        let copy_frame_to_post = crate::frame::PostRenderBufferCreate::create;
         graph!(copy_frame_to_post < present)
     } else {
         graph!(present)

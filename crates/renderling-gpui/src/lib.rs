@@ -2,7 +2,7 @@
 use snafu::prelude::*;
 use std::sync::Arc;
 
-use renderling::node::FrameTextureView;
+use renderling::frame::FrameTextureView;
 use renderling::{Device, View, RenderTarget};
 use renderling::{
     FontArc, Frame, GlyphCache, Id, OwnedSection, OwnedText, Queue, Renderling, UiDrawObject,
@@ -330,7 +330,7 @@ impl Gpui {
             Ok(())
         }
 
-        use renderling::{Graph, graph, node::{create_frame, clear_frame_and_depth}};
+        use renderling::{Graph, graph, frame::{create_frame, clear_frame_and_depth}};
         r.graph.add_subgraph(graph!(create_frame, clear_frame_and_depth, update_scene));
         r.graph.add_barrier();
         r.graph.add_local::<RenderParams, ()>("render");
