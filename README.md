@@ -40,9 +40,7 @@ Shaders are written in Rust via `rust-gpu` where possible, falling back to `wgsl
 
 Renderling takes a [forward+](https://takahiroharada.files.wordpress.com/2015/04/forward_plus.pdf) approach to rendering.
 
-By default it uses a single uber-shader with a configurable lighting model per material.
-
-This means each model may be shaded separately, with a different lighting style.
+By default it uses a single uber-shader for rendering.
 
 - [ ] frustum culling
 - [ ] occlusion culling
@@ -54,8 +52,8 @@ This means each model may be shaded separately, with a different lighting style.
   - [x] high dynamic range
   - [x] skybox
   - image based lighting
-    - [ ] diffuse
-    - [ ] specular
+    - [x] diffuse
+    - [x] specular
   - [ ] msaa
   - [ ] bloom
   - [ ] ssao

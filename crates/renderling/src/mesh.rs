@@ -40,6 +40,14 @@ impl Mesh {
         }
     }
 
+    pub fn from_vertices<V: bytemuck::Pod>(
+        device: &wgpu::Device,
+        label: Option<&str>,
+        vertices: impl IntoIterator<Item = V>,
+    ) -> Self {
+        Self::new(device, label, vertices, None as Option<Vec<u16>>)
+    }
+
     pub fn draw<'a>(&'a self, render_pass: &mut wgpu::RenderPass<'a>) {
         render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
         match &self.vertex_indices {

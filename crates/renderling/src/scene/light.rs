@@ -47,33 +47,33 @@ impl<'a> GpuSpotLightBuilder<'a> {
         .with_intensity(1.0)
     }
 
-    pub fn with_position(mut self, position: impl Into<Vec3>) -> Self {
+    pub fn with_position(self, position: impl Into<Vec3>) -> Self {
         self.inner.position = position.into().extend(1.0);
         self
     }
 
-    pub fn with_direction(mut self, direction: impl Into<Vec3>) -> Self {
+    pub fn with_direction(self, direction: impl Into<Vec3>) -> Self {
         self.inner.direction = direction.into().extend(1.0);
         self
     }
 
-    pub fn with_attenuation(mut self, constant: f32, linear: f32, quadratic: f32) -> Self {
+    pub fn with_attenuation(self, constant: f32, linear: f32, quadratic: f32) -> Self {
         self.inner.attenuation = Vec4::new(constant, linear, quadratic, 0.0);
         self
     }
 
-    pub fn with_cutoff(mut self, inner: f32, outer: f32) -> Self {
+    pub fn with_cutoff(self, inner: f32, outer: f32) -> Self {
         self.inner.inner_cutoff = inner;
         self.inner.outer_cutoff = outer;
         self
     }
 
-    pub fn with_color(mut self, color: impl Into<Vec4>) -> Self {
+    pub fn with_color(self, color: impl Into<Vec4>) -> Self {
         self.inner.color = color.into();
         self
     }
 
-    pub fn with_intensity(mut self, i: f32) -> Self {
+    pub fn with_intensity(self, i: f32) -> Self {
         self.inner.intensity = i;
         self
     }
@@ -111,17 +111,17 @@ impl<'a> GpuDirectionalLightBuilder<'a> {
         .with_intensity(1.0)
     }
 
-    pub fn with_direction(mut self, direction: impl Into<Vec3>) -> Self {
+    pub fn with_direction(self, direction: impl Into<Vec3>) -> Self {
         self.inner.direction = direction.into().extend(1.0);
         self
     }
 
-    pub fn with_color(mut self, color: impl Into<Vec4>) -> Self {
+    pub fn with_color(self, color: impl Into<Vec4>) -> Self {
         self.inner.color = color.into();
         self
     }
 
-    pub fn with_intensity(mut self, intensity: f32) -> Self {
+    pub fn with_intensity(self, intensity: f32) -> Self {
         self.inner.intensity = intensity;
         self
     }
@@ -154,22 +154,22 @@ impl<'a> GpuPointLightBuilder<'a> {
         .with_intensity(1.0)
     }
 
-    pub fn with_position(mut self, position: impl Into<Vec3>) -> Self {
+    pub fn with_position(self, position: impl Into<Vec3>) -> Self {
         self.inner.position = position.into().extend(0.0);
         self
     }
 
-    pub fn with_attenuation(mut self, constant: f32, linear: f32, quadratic: f32) -> Self {
+    pub fn with_attenuation(self, constant: f32, linear: f32, quadratic: f32) -> Self {
         self.inner.attenuation = Vec4::new(constant, linear, quadratic, 0.0);
         self
     }
 
-    pub fn with_color(mut self, color: impl Into<Vec4>) -> Self {
+    pub fn with_color(self, color: impl Into<Vec4>) -> Self {
         self.inner.color = color.into();
         self
     }
 
-    pub fn with_intensity(mut self, i: f32) -> Self {
+    pub fn with_intensity(self, i: f32) -> Self {
         self.inner.intensity = i;
         self
     }

@@ -51,7 +51,7 @@ pub struct UiConstants {
 
 #[repr(transparent)]
 #[derive(Clone, Copy, Default, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct UiMode(u32);
+pub struct UiMode(pub u32);
 
 impl UiMode {
     pub const DEFAULT: Self = UiMode(0);

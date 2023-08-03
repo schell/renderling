@@ -4,18 +4,19 @@
 //! * https://learnopengl.com/PBR/Theory
 //! * https://github.com/KhronosGroup/glTF-Sample-Viewer/blob/5b1b7f48a8cb2b7aaef00d08fdba18ccc8dd331b/source/Renderer/shaders/pbr.frag
 //! * https://github.khronos.org/glTF-Sample-Viewer-Release/
+use spirv_std::{image::{Cubemap, Image2d}, Sampler};
 #[cfg(target_arch = "spirv")]
 use spirv_std::num_traits::Float;
 
-use glam::{Vec3, Vec4, Vec4Swizzles};
+use glam::{Vec3, Vec4, Vec4Swizzles, Vec2};
 
-use crate::scene::{GpuLight, LightType};
+use crate::{scene::{GpuLight, LightType}, math};
 
 /// Trowbridge-Reitz GGX normal distribution function (NDF).
 ///
 /// The normal distribution function D statistically approximates the relative
 /// surface area of microfacets exactly aligned to the (halfway) vector h.
-fn normal_distribution_ggx(n: Vec3, h: Vec3, roughness: f32) -> f32 {
+pub fn normal_distribution_ggx(n: Vec3, h: Vec3, roughness: f32) -> f32 {
     let a = roughness * roughness;
     let a2 = a * a;
     let ndot_h = n.dot(h).max(0.0);
@@ -99,6 +100,46 @@ fn outgoing_radiance(
     (k_d * albedo / core::f32::consts::PI + specular) * radiance * n_dot_l
 }
 
+pub fn sample_irradiance (
+    irradiance: &Cubemap,
+    irradiance_sampler: &Sampler,
+    // Normal vector
+    n: Vec3
+) -> Vec3 {
+    irradiance.sample_by_lod(*irradiance_sampler, n, 0.0).xyz()
+}
+
+pub fn sample_specular_reflection (
+    prefiltered: &Cubemap,
+    prefiltered_sampler: &Sampler,
+    // camera position in world space
+    camera_pos: Vec3,
+    // fragment position in world space
+    in_pos: Vec3,
+    // normal vector
+    n: Vec3,
+    roughness: f32
+) -> Vec3 {
+    let v = (camera_pos - in_pos).normalize_or_zero();
+    let reflect_dir = math::reflect(-v, n);
+    prefiltered.sample_by_lod(*prefiltered_sampler, reflect_dir, roughness * 4.0).xyz()
+}
+
+pub fn sample_brdf(
+    brdf: &Image2d,
+    brdf_sampler: &Sampler,
+    // camera position in world space
+    camera_pos: Vec3,
+    // fragment position in world space
+    in_pos: Vec3,
+    // normal vector
+    n: Vec3,
+    roughness: f32
+) -> Vec2 {
+    let v = (camera_pos - in_pos).normalize_or_zero();
+    brdf.sample_by_lod(*brdf_sampler, Vec2::new(n.dot(v).max(0.0), roughness), 0.0).xy()
+}
+
 pub fn shade_fragment(
     // camera's position in world space
     camera_pos: Vec3,
@@ -111,7 +152,10 @@ pub fn shade_fragment(
     metallic: f32,
     roughness: f32,
     ao: f32,
+
     irradiance: Vec3,
+    prefiltered: Vec3,
+    brdf: Vec2,
 
     lights: &[GpuLight],
 ) -> Vec4 {
@@ -193,13 +237,12 @@ pub fn shade_fragment(
     // calculate reflectance at normal incidence; if dia-electric (like plastic) use F0
     // of 0.04 and if it's a metal, use the albedo color as F0 (metallic workflow)
     let f0: Vec3 = Vec3::splat(0.04).lerp(albedo, metallic);
-    let ambient = {
-        let cos_theta = n.dot(v).max(0.0);
-        let ks = fresnel_schlick_roughness(cos_theta, f0, roughness);
-        let kd = (1.0 - ks) * (1.0 - metallic);
-        let diffuse = irradiance * albedo;
-        kd * diffuse
-    };
-    let color = (lo + ambient) * ao;
+    let cos_theta = n.dot(v).max(0.0);
+    let fresnel = fresnel_schlick_roughness(cos_theta, f0, roughness);
+    let ks = fresnel;
+    let kd = (1.0 - ks) * (1.0 - metallic);
+    let diffuse = irradiance * albedo;
+    let specular = prefiltered * (fresnel * brdf.x + brdf.y);
+    let color = (kd * diffuse + specular) * ao + lo;
     color.extend(1.0)
 }

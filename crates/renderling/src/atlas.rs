@@ -87,7 +87,7 @@ impl Atlas {
             mipmap_filter: wgpu::FilterMode::Nearest,
             ..Default::default()
         };
-        let gpu_texture = crate::Texture::from_wgpu_tex(device, texture, Some(sampler_desc));
+        let gpu_texture = crate::Texture::from_wgpu_tex(device, texture, Some(sampler_desc), None);
         Self::new_with_texture(gpu_texture, width, height)
     }
 
