@@ -160,7 +160,7 @@ pub fn clear_depth(
 pub struct HdrSurface {
     pub texture: crate::Texture,
     pub texture_bindgroup: wgpu::BindGroup,
-    pub pipeline: wgpu::RenderPipeline,
+    pub tonemapping_pipeline: wgpu::RenderPipeline,
     pub constants: Uniform<TonemapConstants>,
 }
 
@@ -263,20 +263,18 @@ pub fn create_hdr_render_surface(
         depth_or_array_layers: 1,
     };
     let texture = HdrSurface::create_texture(&device, &queue, size.width, size.height);
-    let label = Some("scene render pipeline");
+    let label = Some("hdr tonemapping");
     let vertex_shader =
         device.create_shader_module(wgpu::include_spirv!("linkage/vertex_tonemapping.spv"));
-        //unsafe{ device.create_shader_module_spirv(&wgpu::include_spirv_raw!("linkage/vertex_tonemapping.spv"))};
     let fragment_shader =
         device.create_shader_module(wgpu::include_spirv!("linkage/fragment_tonemapping.spv"));
-        //unsafe{ device.create_shader_module_spirv(&wgpu::include_spirv_raw!("linkage/fragment_tonemapping.spv"))};
     let hdr_texture_layout = scene_hdr_surface_bindgroup_layout(&device);
     let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label,
         bind_group_layouts: &[&hdr_texture_layout, &constants_layout],
         push_constant_ranges: &[],
     });
-    let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+    let tonemapping_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label,
         layout: Some(&layout),
         vertex: wgpu::VertexState {
@@ -293,13 +291,7 @@ pub fn create_hdr_render_surface(
             polygon_mode: wgpu::PolygonMode::Fill,
             conservative: false,
         },
-        depth_stencil: Some(wgpu::DepthStencilState {
-            format: wgpu::TextureFormat::Depth32Float,
-            depth_write_enabled: true,
-            depth_compare: wgpu::CompareFunction::Less,
-            stencil: wgpu::StencilState::default(),
-            bias: wgpu::DepthBiasState::default(),
-        }),
+        depth_stencil: None,
         fragment: Some(wgpu::FragmentState {
             module: &fragment_shader,
             entry_point: "fragment_tonemapping",
@@ -316,7 +308,7 @@ pub fn create_hdr_render_surface(
     Ok((HdrSurface {
         texture_bindgroup: HdrSurface::create_texture_bindgroup(&device, &texture),
         texture,
-        pipeline,
+        tonemapping_pipeline,
         constants,
     },))
 }
