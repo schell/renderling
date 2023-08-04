@@ -228,6 +228,7 @@ impl LightingModel {
 /// `GpuMaterial` is capable of representing many material types.
 /// Use the appropriate builder for your material type from
 /// [`SceneBuilder`](crate::SceneBuilder).
+// TODO: Concretize GpuMaterial so its fields are not ambiguous.
 #[repr(C)]
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[derive(Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
@@ -246,7 +247,8 @@ pub struct GpuMaterial {
     pub texture3_tex_coord: u32,
 
     pub lighting_model: LightingModel,
-    pub padding: [u32; 3],
+    pub ao_strength: f32,
+    pub padding: [u32; 2],
 }
 
 impl Default for GpuMaterial {
@@ -263,7 +265,8 @@ impl Default for GpuMaterial {
             texture2_tex_coord: 0,
             texture3_tex_coord: 0,
             lighting_model: LightingModel::NO_LIGHTING,
-            padding: [0; 3],
+            ao_strength: 0.0,
+            padding: [0; 2],
         }
     }
 }
@@ -662,6 +665,20 @@ pub fn main_fragment_scene(
         textures,
     );
 
+    let texture3_uv = if material.texture3_tex_coord == 0 {
+        in_uv0
+    } else {
+        in_uv1
+    };
+    let tex_color3 = texture_color(
+        material.texture3,
+        texture3_uv,
+        atlas,
+        atlas_sampler,
+        constants.atlas_size,
+        textures,
+    );
+
     let (norm, uv_norm) = if material.texture2.is_none() {
         // there is no normal map, use the normal normal ;)
         (in_norm, Vec3::ZERO)
@@ -682,6 +699,7 @@ pub fn main_fragment_scene(
     let albedo = tex_color0 * material.factor0 * in_color;
     let roughness = tex_color1.y * material.factor1.y;
     let metallic = tex_color1.z * material.factor1.z;
+    let ao = 1.0 + material.ao_strength * (tex_color3.x - 1.0);
     let irradiance = pbr::sample_irradiance(irradiance, irradiance_sampler, n);
     let specular = pbr::sample_specular_reflection(
         prefiltered,
@@ -758,12 +776,14 @@ pub fn main_fragment_scene(
             *output = albedo;
             return;
         }
+        DebugChannel::Occlusion => {
+            *output = Vec3::splat(ao).extend(1.0);
+            return;
+        }
     }
 
     *output = match material.lighting_model {
         LightingModel::PBR_LIGHTING => {
-            // TODO: add ambient occlusion from texture
-            let ao = 1.0;
             pbr::shade_fragment(
                 constants.camera_pos.xyz(),
                 n,

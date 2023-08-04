@@ -458,6 +458,7 @@ impl GltfLoader {
             let gpu_material = builder.materials.get_mut(gpu_material_id.index()).unwrap();
             gpu_material.texture3 = tex_id;
             gpu_material.texture3_tex_coord = occlusion_tex.tex_coord();
+            gpu_material.ao_strength = occlusion_tex.strength();
             log::trace!("  using occlusion map");
             log::trace!("    texture_id:        {:?}", gpu_material.texture3);
             log::trace!("    texture_tex_coord: {}", gpu_material.texture3_tex_coord);

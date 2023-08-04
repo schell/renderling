@@ -37,21 +37,24 @@ pub enum DebugChannel {
     /// Displays only the specular reflection value.
     SpecularReflection = 9,
 
-    /// Displays only the BRDF value for the fragment
+    /// Displays only the BRDF value for the fragment.
     Brdf = 10,
 
-    /// Displays only the roughness value for the fragment
+    /// Displays only the roughness value for the fragment.
     Roughness = 11,
 
-    /// Displays only the metallic value for the fragment
+    /// Displays only the metallic value for the fragment.
     Metallic = 12,
 
-    /// Displays only the albedo color for the fragment
+    /// Displays only the albedo color for the fragment.
     Albedo = 13,
+
+    /// Displays only the occlusion color for the fragment.
+    Occlusion = 14,
 }
 
 impl DebugChannel {
-    pub fn all() -> [Self; 14] {
+    pub fn all() -> [Self; 15] {
         [
             Self::None,
             Self::UvCoords0,
@@ -67,6 +70,7 @@ impl DebugChannel {
             Self::Roughness,
             Self::Metallic,
             Self::Albedo,
+            Self::Occlusion,
         ]
     }
 }
