@@ -22,8 +22,8 @@ fn gpu_frame_from_rect(r: crunch::Rect) -> (UVec2, UVec2) {
 
 #[derive(Debug, Snafu)]
 pub enum AtlasError {
-    #[snafu(display("Cannot pack textures"))]
-    CannotPackTextures,
+    #[snafu(display("Cannot pack textures. {len} textures took up too much space."))]
+    CannotPackTextures{ len: usize },
 }
 
 /// A texture atlas, used to store all the textures in a scene.
@@ -113,7 +113,7 @@ impl Atlas {
             }),
         )
         .ok()
-        .context(CannotPackTexturesSnafu)?;
+        .context(CannotPackTexturesSnafu{len})?;
 
         let mut atlas = Atlas::new(device, queue, w as u32, h as u32);
         atlas.rects = vec![crunch::Rect::default(); len];
