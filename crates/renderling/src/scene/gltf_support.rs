@@ -438,7 +438,7 @@ impl GltfLoader {
                     (Id::NONE, 0)
                 };
 
-            let (ao_strength, texture3, texture3_tex_coord) = if let Some(occlusion_tex) =
+            let (ao_strength, ao_texture, ao_tex_coord) = if let Some(occlusion_tex) =
                 material.occlusion_texture()
             {
                 let tex_id = self.texture_at(occlusion_tex.texture().index(), builder, document)?;
@@ -454,11 +454,11 @@ impl GltfLoader {
                 albedo_texture,
                 metallic_roughness_texture,
                 normal_texture,
-                texture3,
+                ao_texture,
                 albedo_tex_coord,
                 metallic_roughness_tex_coord,
                 normal_tex_coord,
-                texture3_tex_coord,
+                ao_tex_coord,
                 ao_strength,
                 lighting_model: LightingModel::PBR_LIGHTING,
                 ..Default::default()
