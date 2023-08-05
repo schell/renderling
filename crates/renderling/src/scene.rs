@@ -6,10 +6,11 @@ use moongraph::{View, ViewMut};
 use renderling_shader::{debug::DebugChannel, GpuToggles};
 use snafu::prelude::*;
 
-pub use renderling_shader::scene::*;
+pub use renderling_shader::{scene::*, pbr::PbrMaterial};
 
-use crate::DepthTexture;
 use crate::{
+    DepthTexture,
+    Id,
     frame::FrameTextureView,
     hdr::HdrSurface,
     Atlas, Device, GpuArray, Queue, Skybox, SkyboxRenderPipeline, Uniform,
@@ -113,7 +114,7 @@ pub struct SceneBuilder {
     pub skybox_image: Option<SceneImage>,
     pub skybox: Option<Skybox>,
     pub textures: Vec<TextureParams>,
-    pub materials: Vec<GpuMaterial>,
+    pub materials: Vec<PbrMaterial>,
     pub vertices: Vec<GpuVertex>,
     pub entities: Vec<GpuEntity>,
     pub lights: Vec<GpuLight>,
@@ -267,7 +268,7 @@ impl SceneBuilder {
         GpuPointLightBuilder::new(&mut self.lights)
     }
 
-    pub fn add_material(&mut self, material: GpuMaterial) -> u32 {
+    pub fn add_material(&mut self, material: PbrMaterial) -> u32 {
         let id = self.materials.len();
         self.materials.push(material);
         id as u32
@@ -332,7 +333,7 @@ pub struct Scene {
     pub vertices: GpuArray<GpuVertex>,
     pub entities: GpuArray<GpuEntity>,
     pub lights: GpuArray<GpuLight>,
-    pub materials: GpuArray<GpuMaterial>,
+    pub materials: GpuArray<PbrMaterial>,
     pub textures: GpuArray<GpuTexture>,
     pub indirect_draws: GpuArray<DrawIndirect>,
     pub constants: Uniform<GpuConstants>,
@@ -619,7 +620,7 @@ pub fn create_scene_buffers_bindgroup(
     vertices: &GpuArray<GpuVertex>,
     entities: &GpuArray<GpuEntity>,
     lights: &GpuArray<GpuLight>,
-    materials: &GpuArray<GpuMaterial>,
+    materials: &GpuArray<PbrMaterial>,
     skybox: &Skybox,
 ) -> wgpu::BindGroup {
     device.create_bind_group(&wgpu::BindGroupDescriptor {

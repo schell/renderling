@@ -5,6 +5,7 @@ use rustc_hash::FxHashMap;
 use snafu::prelude::*;
 
 use super::*;
+use crate::Id;
 
 mod anime;
 pub use anime::*;
@@ -174,7 +175,7 @@ pub struct GltfNode {
 pub struct GltfMeshPrim {
     pub vertex_start: u32,
     pub vertex_count: u32,
-    pub material_id: Id<GpuMaterial>,
+    pub material_id: Id<PbrMaterial>,
     pub bounding_box: GltfBoundingBox,
     pub num_morph_targets: u32,
     pub morph_targets_have_positions: bool,
@@ -197,8 +198,8 @@ pub struct GltfLoader {
     pub cameras: GltfStore<(Mat4, Mat4)>,
     pub lights: GltfStore<Id<GpuLight>>,
     pub textures: GltfStore<Id<GpuTexture>>,
-    pub default_material: Id<GpuMaterial>,
-    pub materials: GltfStore<Id<GpuMaterial>>,
+    pub default_material: Id<PbrMaterial>,
+    pub materials: GltfStore<Id<PbrMaterial>>,
     pub meshes: GltfStore<Vec<GltfMeshPrim>>,
     pub nodes: GltfStore<GltfNode>,
     pub animations: GltfStore<GltfAnimation>,
@@ -375,7 +376,7 @@ impl GltfLoader {
         material: gltf::Material<'_>,
         builder: &mut SceneBuilder,
         document: &gltf::Document,
-    ) -> Result<Id<GpuMaterial>, GltfLoaderError> {
+    ) -> Result<Id<PbrMaterial>, GltfLoaderError> {
         let index = material.index();
         let name = material.name().map(String::from);
         log::trace!("loading material {index:?} {name:?}");
@@ -474,7 +475,7 @@ impl GltfLoader {
         Ok(gpu_material_id)
     }
 
-    /// Return the scene `Id<GpuMaterial>` for the gltf material at the given
+    /// Return the scene `Id<PbrMaterial>` for the gltf material at the given
     /// index, if possible.
     ///
     /// If the material at the given index has not been loaded into the
@@ -487,7 +488,7 @@ impl GltfLoader {
         may_index: Option<usize>,
         builder: &mut SceneBuilder,
         document: &gltf::Document,
-    ) -> Result<Id<GpuMaterial>, GltfLoaderError> {
+    ) -> Result<Id<PbrMaterial>, GltfLoaderError> {
         if let Some(index) = may_index {
             if let Some(material_id) = self.materials.get(index) {
                 Ok(*material_id)

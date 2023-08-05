@@ -4,13 +4,68 @@
 //! * https://learnopengl.com/PBR/Theory
 //! * https://github.com/KhronosGroup/glTF-Sample-Viewer/blob/5b1b7f48a8cb2b7aaef00d08fdba18ccc8dd331b/source/Renderer/shaders/pbr.frag
 //! * https://github.khronos.org/glTF-Sample-Viewer-Release/
-use spirv_std::{image::{Cubemap, Image2d}, Sampler};
 #[cfg(target_arch = "spirv")]
 use spirv_std::num_traits::Float;
+use spirv_std::{
+    image::{Cubemap, Image2d},
+    Sampler,
+};
 
-use glam::{Vec3, Vec4, Vec4Swizzles, Vec2};
+use glam::{Vec2, Vec3, Vec4, Vec4Swizzles};
 
-use crate::{scene::{GpuLight, LightType}, math};
+use crate::{
+    math,
+    scene::{GpuLight, GpuTexture, LightType, LightingModel},
+    Id,
+};
+
+/// Represents a material on the GPU.
+///
+/// `PbrMaterial` is capable of representing many material types.
+/// Use the appropriate builder for your material type from
+/// [`SceneBuilder`](crate::SceneBuilder).
+// TODO: Concretize PbrMaterial so its fields are not ambiguous.
+#[repr(C)]
+#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
+#[derive(Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct PbrMaterial {
+    pub factor0: Vec4,
+    pub factor1: Vec4,
+
+    pub texture0: Id<GpuTexture>,
+    pub texture1: Id<GpuTexture>,
+    pub texture2: Id<GpuTexture>,
+    pub texture3: Id<GpuTexture>,
+
+    pub texture0_tex_coord: u32,
+    pub texture1_tex_coord: u32,
+    pub texture2_tex_coord: u32,
+    pub texture3_tex_coord: u32,
+
+    pub lighting_model: LightingModel,
+    pub ao_strength: f32,
+    pub padding: [u32; 2],
+}
+
+impl Default for PbrMaterial {
+    fn default() -> Self {
+        Self {
+            factor0: Vec4::ONE,
+            factor1: Vec4::ONE,
+            texture0: Id::NONE,
+            texture1: Id::NONE,
+            texture2: Id::NONE,
+            texture3: Id::NONE,
+            texture0_tex_coord: 0,
+            texture1_tex_coord: 0,
+            texture2_tex_coord: 0,
+            texture3_tex_coord: 0,
+            lighting_model: LightingModel::NO_LIGHTING,
+            ao_strength: 0.0,
+            padding: [0; 2],
+        }
+    }
+}
 
 /// Trowbridge-Reitz GGX normal distribution function (NDF).
 ///
@@ -100,16 +155,16 @@ fn outgoing_radiance(
     (k_d * albedo / core::f32::consts::PI + specular) * radiance * n_dot_l
 }
 
-pub fn sample_irradiance (
+pub fn sample_irradiance(
     irradiance: &Cubemap,
     irradiance_sampler: &Sampler,
     // Normal vector
-    n: Vec3
+    n: Vec3,
 ) -> Vec3 {
     irradiance.sample_by_lod(*irradiance_sampler, n, 0.0).xyz()
 }
 
-pub fn sample_specular_reflection (
+pub fn sample_specular_reflection(
     prefiltered: &Cubemap,
     prefiltered_sampler: &Sampler,
     // camera position in world space
@@ -118,11 +173,13 @@ pub fn sample_specular_reflection (
     in_pos: Vec3,
     // normal vector
     n: Vec3,
-    roughness: f32
+    roughness: f32,
 ) -> Vec3 {
     let v = (camera_pos - in_pos).normalize_or_zero();
     let reflect_dir = math::reflect(-v, n);
-    prefiltered.sample_by_lod(*prefiltered_sampler, reflect_dir, roughness * 4.0).xyz()
+    prefiltered
+        .sample_by_lod(*prefiltered_sampler, reflect_dir, roughness * 4.0)
+        .xyz()
 }
 
 pub fn sample_brdf(
@@ -134,10 +191,11 @@ pub fn sample_brdf(
     in_pos: Vec3,
     // normal vector
     n: Vec3,
-    roughness: f32
+    roughness: f32,
 ) -> Vec2 {
     let v = (camera_pos - in_pos).normalize_or_zero();
-    brdf.sample_by_lod(*brdf_sampler, Vec2::new(n.dot(v).max(0.0), roughness), 0.0).xy()
+    brdf.sample_by_lod(*brdf_sampler, Vec2::new(n.dot(v).max(0.0), roughness), 0.0)
+        .xy()
 }
 
 pub fn shade_fragment(
@@ -234,8 +292,9 @@ pub fn shade_fragment(
         }
     }
 
-    // calculate reflectance at normal incidence; if dia-electric (like plastic) use F0
-    // of 0.04 and if it's a metal, use the albedo color as F0 (metallic workflow)
+    // calculate reflectance at normal incidence; if dia-electric (like plastic) use
+    // F0 of 0.04 and if it's a metal, use the albedo color as F0 (metallic
+    // workflow)
     let f0: Vec3 = Vec3::splat(0.04).lerp(albedo, metallic);
     let cos_theta = n.dot(v).max(0.0);
     let fresnel = fresnel_schlick_roughness(cos_theta, f0, roughness);

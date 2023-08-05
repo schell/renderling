@@ -16,6 +16,8 @@
 //! ## Features
 //!
 //! - forward+ style pipeline, configurable lighting model per material
+//!   - [ ] light tiling
+//!   - [ ] occlusion culling
 //!   - [x] physically based shading
 //!   - [x] user interface "colored text" shading (uses opacity glyphs in an
 //!     atlas)
@@ -29,7 +31,7 @@
 //!   - [x] skins
 //!   - [x] animations
 //! - [x] high definition rendering
-//! - [ ] image based lighting
+//! - [x] image based lighting
 //! - [ ] bloom
 //! - [ ] ssao
 //! - [ ] depth of field
@@ -87,6 +89,7 @@ pub mod graph {
 }
 
 pub use graph::{graph, Graph, GraphError, Move, View, ViewMut};
+pub use renderling_shader::{Id, ID_NONE};
 
 /// Set up the render graph, including:
 /// * 3d scene objects
@@ -764,7 +767,7 @@ mod test {
             .read(r.get_device(), r.get_queue(), 0, 1)
             .unwrap();
         assert_eq!(
-            vec![GpuMaterial {
+            vec![PbrMaterial {
                 texture0: Id::new(0),
                 ..Default::default()
             },],

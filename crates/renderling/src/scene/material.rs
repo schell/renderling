@@ -1,18 +1,18 @@
 //! Material builders.
 
 use glam::Vec4;
-use renderling_shader::scene::{GpuMaterial, GpuTexture, Id, LightingModel};
+use renderling_shader::{pbr::PbrMaterial, scene::{GpuTexture, LightingModel}};
 
-use crate::SceneBuilder;
+use crate::{Id, SceneBuilder};
 
 pub struct UnlitMaterialBuilder<'a> {
     builder: &'a mut SceneBuilder,
-    material: GpuMaterial,
+    material: PbrMaterial,
 }
 
 impl<'a> UnlitMaterialBuilder<'a> {
     pub fn new(builder: &'a mut SceneBuilder) -> Self {
-        let material = GpuMaterial::default();
+        let material = PbrMaterial::default();
         Self { builder, material }
     }
 
@@ -31,7 +31,7 @@ impl<'a> UnlitMaterialBuilder<'a> {
         self
     }
 
-    pub fn build(self) -> Id<GpuMaterial> {
+    pub fn build(self) -> Id<PbrMaterial> {
         let id = self.builder.materials.len();
         self.builder.materials.push(self.material);
         Id::new(id as u32)
@@ -40,12 +40,12 @@ impl<'a> UnlitMaterialBuilder<'a> {
 
 pub struct PbrMaterialBuilder<'a> {
     builder: &'a mut SceneBuilder,
-    material: GpuMaterial,
+    material: PbrMaterial,
 }
 
 impl<'a> PbrMaterialBuilder<'a> {
     pub fn new(builder: &'a mut SceneBuilder) -> Self {
-        let mut material = GpuMaterial::default();
+        let mut material = PbrMaterial::default();
         material.lighting_model = LightingModel::PBR_LIGHTING;
         Self { builder, material }
     }
@@ -85,7 +85,7 @@ impl<'a> PbrMaterialBuilder<'a> {
         self
     }
 
-    pub fn build(self) -> Id<GpuMaterial> {
+    pub fn build(self) -> Id<PbrMaterial> {
         let id = self.builder.materials.len();
         self.builder.materials.push(self.material);
         Id::new(id as u32)

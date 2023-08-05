@@ -1,7 +1,7 @@
 //! Shader entry points.
 #![no_std]
 #![feature(lang_items)]
-use renderling_shader::{convolution, scene, skybox, tonemapping, ui};
+use renderling_shader::{convolution, scene, skybox, tonemapping, ui, pbr};
 use spirv_std::{
     glam,
     image::{Cubemap, Image2d},
@@ -87,7 +87,7 @@ pub fn main_fragment_scene(
 
     #[spirv(uniform, descriptor_set = 0, binding = 0)] constants: &scene::GpuConstants,
     #[spirv(storage_buffer, descriptor_set = 0, binding = 3)] lights: &[scene::GpuLight],
-    #[spirv(storage_buffer, descriptor_set = 0, binding = 4)] materials: &[scene::GpuMaterial],
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 4)] materials: &[pbr::PbrMaterial],
     #[spirv(storage_buffer, descriptor_set = 1, binding = 2)] textures: &[scene::GpuTexture],
 
     #[spirv(descriptor_set = 0, binding = 5)] irradiance: &Cubemap,
