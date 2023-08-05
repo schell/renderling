@@ -29,6 +29,7 @@ use crate::{
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[derive(Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct PbrMaterial {
+    pub emissive_factor: Vec4,
     pub albedo_factor: Vec4,
     pub metallic_factor: f32,
     pub roughness_factor: f32,
@@ -38,20 +39,22 @@ pub struct PbrMaterial {
     pub metallic_roughness_texture: Id<GpuTexture>,
     pub normal_texture: Id<GpuTexture>,
     pub ao_texture: Id<GpuTexture>,
+    pub emissive_texture: Id<GpuTexture>,
 
     pub albedo_tex_coord: u32,
     pub metallic_roughness_tex_coord: u32,
     pub normal_tex_coord: u32,
     pub ao_tex_coord: u32,
+    pub emissive_tex_coord: u32,
 
     pub lighting_model: LightingModel,
     pub ao_strength: f32,
-    pub padding: [u32; 2],
 }
 
 impl Default for PbrMaterial {
     fn default() -> Self {
         Self {
+            emissive_factor: Vec4::ZERO,
             albedo_factor: Vec4::ONE,
             metallic_factor: 1.0,
             roughness_factor: 1.0,
@@ -66,7 +69,8 @@ impl Default for PbrMaterial {
             ao_tex_coord: 0,
             lighting_model: LightingModel::NO_LIGHTING,
             ao_strength: 0.0,
-            padding: [0; 2],
+            emissive_texture: Id::NONE,
+            emissive_tex_coord: 0,
         }
     }
 }
@@ -214,7 +218,7 @@ pub fn shade_fragment(
     metallic: f32,
     roughness: f32,
     ao: f32,
-
+    emissive: Vec3,
     irradiance: Vec3,
     prefiltered: Vec3,
     brdf: Vec2,
@@ -306,6 +310,6 @@ pub fn shade_fragment(
     let kd = (1.0 - ks) * (1.0 - metallic);
     let diffuse = irradiance * albedo;
     let specular = prefiltered * (fresnel * brdf.x + brdf.y);
-    let color = (kd * diffuse + specular) * ao + lo;
+    let color = (kd * diffuse + specular) * ao + lo + emissive;
     color.extend(1.0)
 }

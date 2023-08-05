@@ -571,56 +571,70 @@ pub fn main_fragment_scene(
         materials[in_material as usize]
     };
 
-    let texture0_uv = if material.albedo_tex_coord == 0 {
+    let albedo_tex_uv = if material.albedo_tex_coord == 0 {
         in_uv0
     } else {
         in_uv1
     };
-    let tex_color0 = texture_color(
+    let albedo_tex_color = texture_color(
         material.albedo_texture,
-        texture0_uv,
+        albedo_tex_uv,
         atlas,
         atlas_sampler,
         constants.atlas_size,
         textures,
     );
 
-    let texture1_uv = if material.metallic_roughness_tex_coord == 0 {
+    let metallic_roughness_uv = if material.metallic_roughness_tex_coord == 0 {
         in_uv0
     } else {
         in_uv1
     };
-    let tex_color1 = texture_color(
+    let metallic_roughness_tex_color = texture_color(
         material.metallic_roughness_texture,
-        texture1_uv,
+        metallic_roughness_uv,
         atlas,
         atlas_sampler,
         constants.atlas_size,
         textures,
     );
 
-    let texture2_uv = if material.normal_tex_coord == 0 {
+    let normal_tex_uv = if material.normal_tex_coord == 0 {
         in_uv0
     } else {
         in_uv1
     };
-    let tex_color2 = texture_color(
+    let normal_tex_color = texture_color(
         material.normal_texture,
-        texture2_uv,
+        normal_tex_uv,
         atlas,
         atlas_sampler,
         constants.atlas_size,
         textures,
     );
 
-    let texture3_uv = if material.texture3_tex_coord == 0 {
+    let ao_tex_uv = if material.ao_tex_coord == 0 {
         in_uv0
     } else {
         in_uv1
     };
-    let tex_color3 = texture_color(
-        material.texture3,
-        texture3_uv,
+    let ao_tex_color = texture_color(
+        material.ao_texture,
+        ao_tex_uv,
+        atlas,
+        atlas_sampler,
+        constants.atlas_size,
+        textures,
+    );
+
+    let emissive_tex_uv = if material.emissive_tex_coord == 0 {
+        in_uv0
+    } else {
+        in_uv1
+    };
+    let emissive_tex_color = texture_color(
+        material.emissive_texture,
+        emissive_tex_uv,
         atlas,
         atlas_sampler,
         constants.atlas_size,
@@ -632,7 +646,7 @@ pub fn main_fragment_scene(
         (in_norm, Vec3::ZERO)
     } else {
         // convert the normal from color coords to tangent space -1,1
-        let sampled_norm = (tex_color2.xyz() * 2.0 - Vec3::splat(1.0)).normalize_or_zero();
+        let sampled_norm = (normal_tex_color.xyz() * 2.0 - Vec3::splat(1.0)).normalize_or_zero();
         let tbn = mat3(
             in_tangent.normalize_or_zero(),
             in_bitangent.normalize_or_zero(),
@@ -644,10 +658,11 @@ pub fn main_fragment_scene(
     };
 
     let n = norm;
-    let albedo = tex_color0 * material.albedo_factor * in_color;
-    let roughness = tex_color1.y * material.roughness_factor;
-    let metallic = tex_color1.z * material.metallic_factor;
-    let ao = 1.0 + material.ao_strength * (tex_color3.x - 1.0);
+    let albedo = albedo_tex_color * material.albedo_factor * in_color;
+    let roughness = metallic_roughness_tex_color.y * material.roughness_factor;
+    let metallic = metallic_roughness_tex_color.z * material.metallic_factor;
+    let ao = 1.0 + material.ao_strength * (ao_tex_color.x - 1.0);
+    let emissive = emissive_tex_color * material.emissive_factor;
     let irradiance = pbr::sample_irradiance(irradiance, irradiance_sampler, n);
     let specular = pbr::sample_specular_reflection(
         prefiltered,
@@ -728,6 +743,10 @@ pub fn main_fragment_scene(
             *output = Vec3::splat(ao).extend(1.0);
             return;
         }
+        DebugChannel::Emissive => {
+            *output = emissive.xyz().extend(1.0);
+            return;
+        }
     }
 
     *output = match material.lighting_model {
@@ -739,12 +758,13 @@ pub fn main_fragment_scene(
             metallic,
             roughness,
             ao,
+            emissive.xyz(),
             irradiance,
             specular,
             brdf,
             lights,
         ),
-        _unlit => in_color * tex_color0 * material.albedo_factor * tex_color1,
+        _unlit => in_color * albedo_tex_color * material.albedo_factor * metallic_roughness_tex_color,
     };
 }
 
