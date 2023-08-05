@@ -1,8 +1,8 @@
 //! Entity builder.
 use glam::{Quat, Vec3};
-use renderling_shader::scene::{GpuEntity, GpuMaterial, GpuVertex, Id};
+use renderling_shader::{pbr::PbrMaterial, scene::{GpuEntity, GpuVertex}};
 
-use crate::SceneBuilder;
+use crate::{Id, SceneBuilder};
 
 pub struct EntityBuilder<'a> {
     pub(crate) scene: &'a mut SceneBuilder,
@@ -75,7 +75,7 @@ impl<'a> EntityBuilder<'a> {
         self
     }
 
-    pub fn with_material(mut self, material_id: Id<GpuMaterial>) -> Self {
+    pub fn with_material(mut self, material_id: Id<PbrMaterial>) -> Self {
         self.entity.material = material_id;
         self
     }

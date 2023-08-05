@@ -6,6 +6,8 @@ use bits::{bits, extract, insert};
 pub mod bits;
 pub mod convolution;
 pub mod debug;
+mod id;
+pub use id::*;
 pub mod math;
 pub mod pbr;
 pub mod scene;

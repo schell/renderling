@@ -4,13 +4,76 @@
 //! * https://learnopengl.com/PBR/Theory
 //! * https://github.com/KhronosGroup/glTF-Sample-Viewer/blob/5b1b7f48a8cb2b7aaef00d08fdba18ccc8dd331b/source/Renderer/shaders/pbr.frag
 //! * https://github.khronos.org/glTF-Sample-Viewer-Release/
-use spirv_std::{image::{Cubemap, Image2d}, Sampler};
 #[cfg(target_arch = "spirv")]
 use spirv_std::num_traits::Float;
+use spirv_std::{
+    image::{Cubemap, Image2d},
+    Sampler,
+};
 
-use glam::{Vec3, Vec4, Vec4Swizzles, Vec2};
+use glam::{Vec2, Vec3, Vec4, Vec4Swizzles};
 
-use crate::{scene::{GpuLight, LightType}, math};
+use crate::{
+    math,
+    scene::{GpuLight, GpuTexture, LightType, LightingModel},
+    Id,
+};
+
+/// Represents a material on the GPU.
+///
+/// `PbrMaterial` is capable of representing many material types.
+/// Use the appropriate builder for your material type from
+/// [`SceneBuilder`](crate::SceneBuilder).
+// TODO: Concretize PbrMaterial so its fields are not ambiguous.
+#[repr(C)]
+#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
+#[derive(Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct PbrMaterial {
+    pub emissive_factor: Vec4,
+    pub albedo_factor: Vec4,
+    pub metallic_factor: f32,
+    pub roughness_factor: f32,
+    pub factor_padding: [f32; 2],
+
+    pub albedo_texture: Id<GpuTexture>,
+    pub metallic_roughness_texture: Id<GpuTexture>,
+    pub normal_texture: Id<GpuTexture>,
+    pub ao_texture: Id<GpuTexture>,
+    pub emissive_texture: Id<GpuTexture>,
+
+    pub albedo_tex_coord: u32,
+    pub metallic_roughness_tex_coord: u32,
+    pub normal_tex_coord: u32,
+    pub ao_tex_coord: u32,
+    pub emissive_tex_coord: u32,
+
+    pub lighting_model: LightingModel,
+    pub ao_strength: f32,
+}
+
+impl Default for PbrMaterial {
+    fn default() -> Self {
+        Self {
+            emissive_factor: Vec4::ZERO,
+            albedo_factor: Vec4::ONE,
+            metallic_factor: 1.0,
+            roughness_factor: 1.0,
+            factor_padding: [0.0; 2],
+            albedo_texture: Id::NONE,
+            metallic_roughness_texture: Id::NONE,
+            normal_texture: Id::NONE,
+            ao_texture: Id::NONE,
+            albedo_tex_coord: 0,
+            metallic_roughness_tex_coord: 0,
+            normal_tex_coord: 0,
+            ao_tex_coord: 0,
+            lighting_model: LightingModel::NO_LIGHTING,
+            ao_strength: 0.0,
+            emissive_texture: Id::NONE,
+            emissive_tex_coord: 0,
+        }
+    }
+}
 
 /// Trowbridge-Reitz GGX normal distribution function (NDF).
 ///
@@ -100,16 +163,16 @@ fn outgoing_radiance(
     (k_d * albedo / core::f32::consts::PI + specular) * radiance * n_dot_l
 }
 
-pub fn sample_irradiance (
+pub fn sample_irradiance(
     irradiance: &Cubemap,
     irradiance_sampler: &Sampler,
     // Normal vector
-    n: Vec3
+    n: Vec3,
 ) -> Vec3 {
     irradiance.sample_by_lod(*irradiance_sampler, n, 0.0).xyz()
 }
 
-pub fn sample_specular_reflection (
+pub fn sample_specular_reflection(
     prefiltered: &Cubemap,
     prefiltered_sampler: &Sampler,
     // camera position in world space
@@ -118,11 +181,13 @@ pub fn sample_specular_reflection (
     in_pos: Vec3,
     // normal vector
     n: Vec3,
-    roughness: f32
+    roughness: f32,
 ) -> Vec3 {
     let v = (camera_pos - in_pos).normalize_or_zero();
     let reflect_dir = math::reflect(-v, n);
-    prefiltered.sample_by_lod(*prefiltered_sampler, reflect_dir, roughness * 4.0).xyz()
+    prefiltered
+        .sample_by_lod(*prefiltered_sampler, reflect_dir, roughness * 4.0)
+        .xyz()
 }
 
 pub fn sample_brdf(
@@ -134,10 +199,11 @@ pub fn sample_brdf(
     in_pos: Vec3,
     // normal vector
     n: Vec3,
-    roughness: f32
+    roughness: f32,
 ) -> Vec2 {
     let v = (camera_pos - in_pos).normalize_or_zero();
-    brdf.sample_by_lod(*brdf_sampler, Vec2::new(n.dot(v).max(0.0), roughness), 0.0).xy()
+    brdf.sample_by_lod(*brdf_sampler, Vec2::new(n.dot(v).max(0.0), roughness), 0.0)
+        .xy()
 }
 
 pub fn shade_fragment(
@@ -152,7 +218,7 @@ pub fn shade_fragment(
     metallic: f32,
     roughness: f32,
     ao: f32,
-
+    emissive: Vec3,
     irradiance: Vec3,
     prefiltered: Vec3,
     brdf: Vec2,
@@ -234,8 +300,9 @@ pub fn shade_fragment(
         }
     }
 
-    // calculate reflectance at normal incidence; if dia-electric (like plastic) use F0
-    // of 0.04 and if it's a metal, use the albedo color as F0 (metallic workflow)
+    // calculate reflectance at normal incidence; if dia-electric (like plastic) use
+    // F0 of 0.04 and if it's a metal, use the albedo color as F0 (metallic
+    // workflow)
     let f0: Vec3 = Vec3::splat(0.04).lerp(albedo, metallic);
     let cos_theta = n.dot(v).max(0.0);
     let fresnel = fresnel_schlick_roughness(cos_theta, f0, roughness);
@@ -243,6 +310,6 @@ pub fn shade_fragment(
     let kd = (1.0 - ks) * (1.0 - metallic);
     let diffuse = irradiance * albedo;
     let specular = prefiltered * (fresnel * brdf.x + brdf.y);
-    let color = (kd * diffuse + specular) * ao + lo;
+    let color = (kd * diffuse + specular) * ao + lo + emissive;
     color.extend(1.0)
 }
