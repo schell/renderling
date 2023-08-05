@@ -6,10 +6,11 @@ use moongraph::{View, ViewMut};
 use renderling_shader::{debug::DebugChannel, GpuToggles};
 use snafu::prelude::*;
 
-pub use renderling_shader::scene::*;
+pub use renderling_shader::{scene::*, pbr::PbrMaterial};
 
-use crate::DepthTexture;
 use crate::{
+    DepthTexture,
+    Id,
     frame::FrameTextureView,
     hdr::HdrSurface,
     Atlas, Device, GpuArray, Queue, Skybox, SkyboxRenderPipeline, Uniform,
@@ -28,9 +29,6 @@ pub use light::*;
 mod gltf_support;
 #[cfg(feature = "gltf")]
 pub use gltf_support::*;
-
-mod material;
-pub use material::*;
 
 #[derive(Debug, Snafu)]
 pub enum SceneError {
@@ -113,7 +111,7 @@ pub struct SceneBuilder {
     pub skybox_image: Option<SceneImage>,
     pub skybox: Option<Skybox>,
     pub textures: Vec<TextureParams>,
-    pub materials: Vec<GpuMaterial>,
+    pub materials: Vec<PbrMaterial>,
     pub vertices: Vec<GpuVertex>,
     pub entities: Vec<GpuEntity>,
     pub lights: Vec<GpuLight>,
@@ -136,6 +134,13 @@ impl SceneBuilder {
             entities: vec![],
             lights: vec![],
         }
+    }
+
+    /// Add a material.
+    pub fn add_material(&mut self, material: PbrMaterial) -> Id<PbrMaterial> {
+        let id = self.materials.len();
+        self.materials.push(material);
+        Id::new(id as u32)
     }
 
     /// Add an image and return a texture id for it.
@@ -267,12 +272,6 @@ impl SceneBuilder {
         GpuPointLightBuilder::new(&mut self.lights)
     }
 
-    pub fn add_material(&mut self, material: GpuMaterial) -> u32 {
-        let id = self.materials.len();
-        self.materials.push(material);
-        id as u32
-    }
-
     /// Add a meshlet.
     ///
     /// Returns the index of the first vertex of the newly created meshlet and
@@ -283,14 +282,6 @@ impl SceneBuilder {
         let len = vertices.len();
         self.vertices.extend(vertices);
         (start as u32, len as u32)
-    }
-
-    pub fn new_unlit_material(&mut self) -> UnlitMaterialBuilder<'_> {
-        UnlitMaterialBuilder::new(self)
-    }
-
-    pub fn new_pbr_material(&mut self) -> PbrMaterialBuilder<'_> {
-        PbrMaterialBuilder::new(self)
     }
 
     pub fn new_entity(&mut self) -> EntityBuilder<'_> {
@@ -332,7 +323,7 @@ pub struct Scene {
     pub vertices: GpuArray<GpuVertex>,
     pub entities: GpuArray<GpuEntity>,
     pub lights: GpuArray<GpuLight>,
-    pub materials: GpuArray<GpuMaterial>,
+    pub materials: GpuArray<PbrMaterial>,
     pub textures: GpuArray<GpuTexture>,
     pub indirect_draws: GpuArray<DrawIndirect>,
     pub constants: Uniform<GpuConstants>,
@@ -619,7 +610,7 @@ pub fn create_scene_buffers_bindgroup(
     vertices: &GpuArray<GpuVertex>,
     entities: &GpuArray<GpuEntity>,
     lights: &GpuArray<GpuLight>,
-    materials: &GpuArray<GpuMaterial>,
+    materials: &GpuArray<PbrMaterial>,
     skybox: &Skybox,
 ) -> wgpu::BindGroup {
     device.create_bind_group(&wgpu::BindGroupDescriptor {

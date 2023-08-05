@@ -17,12 +17,8 @@ use spirv_std::num_traits::*;
 use crate::{
     bits::{bits, extract, insert},
     debug::*,
-    pbr,
-    GpuToggles,
+    pbr, GpuToggles, Id, ID_NONE,
 };
-
-mod id;
-pub use id::*;
 
 mod texture;
 pub use texture::*;
@@ -223,54 +219,6 @@ impl LightingModel {
     pub const PBR_LIGHTING: Self = LightingModel(1);
 }
 
-/// Represents a material on the GPU.
-///
-/// `GpuMaterial` is capable of representing many material types.
-/// Use the appropriate builder for your material type from
-/// [`SceneBuilder`](crate::SceneBuilder).
-// TODO: Concretize GpuMaterial so its fields are not ambiguous.
-#[repr(C)]
-#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
-#[derive(Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct GpuMaterial {
-    pub factor0: Vec4,
-    pub factor1: Vec4,
-
-    pub texture0: Id<GpuTexture>,
-    pub texture1: Id<GpuTexture>,
-    pub texture2: Id<GpuTexture>,
-    pub texture3: Id<GpuTexture>,
-
-    pub texture0_tex_coord: u32,
-    pub texture1_tex_coord: u32,
-    pub texture2_tex_coord: u32,
-    pub texture3_tex_coord: u32,
-
-    pub lighting_model: LightingModel,
-    pub ao_strength: f32,
-    pub padding: [u32; 2],
-}
-
-impl Default for GpuMaterial {
-    fn default() -> Self {
-        Self {
-            factor0: Vec4::ONE,
-            factor1: Vec4::ONE,
-            texture0: Id::NONE,
-            texture1: Id::NONE,
-            texture2: Id::NONE,
-            texture3: Id::NONE,
-            texture0_tex_coord: 0,
-            texture1_tex_coord: 0,
-            texture2_tex_coord: 0,
-            texture3_tex_coord: 0,
-            lighting_model: LightingModel::NO_LIGHTING,
-            ao_strength: 0.0,
-            padding: [0; 2],
-        }
-    }
-}
-
 /// Provides information about an entity.
 ///
 /// ### Provides what attributes are provided by a morph target.
@@ -360,7 +308,7 @@ pub struct GpuEntity {
     // Nothing to see here
     pub padding: u32,
     // The index/id of this entity's material in the material buffer.
-    pub material: Id<GpuMaterial>,
+    pub material: Id<pbr::PbrMaterial>,
     // The id of this entity's parent, if it exists. `Id::NONE` means "no parent".
     pub parent: Id<GpuEntity>,
     // Whether this entity is visible. `0` is "not visible", any other value is "visible".
@@ -603,7 +551,7 @@ pub fn main_fragment_scene(
 
     constants: &GpuConstants,
     lights: &[GpuLight],
-    materials: &[GpuMaterial],
+    materials: &[pbr::PbrMaterial],
     textures: &[GpuTexture],
 
     in_material: u32,
@@ -618,73 +566,87 @@ pub fn main_fragment_scene(
     output: &mut Vec4,
 ) {
     let material = if in_material == ID_NONE {
-        GpuMaterial::default()
+        pbr::PbrMaterial::default()
     } else {
         materials[in_material as usize]
     };
 
-    let texture0_uv = if material.texture0_tex_coord == 0 {
+    let albedo_tex_uv = if material.albedo_tex_coord == 0 {
         in_uv0
     } else {
         in_uv1
     };
-    let tex_color0 = texture_color(
-        material.texture0,
-        texture0_uv,
+    let albedo_tex_color = texture_color(
+        material.albedo_texture,
+        albedo_tex_uv,
         atlas,
         atlas_sampler,
         constants.atlas_size,
         textures,
     );
 
-    let texture1_uv = if material.texture1_tex_coord == 0 {
+    let metallic_roughness_uv = if material.metallic_roughness_tex_coord == 0 {
         in_uv0
     } else {
         in_uv1
     };
-    let tex_color1 = texture_color(
-        material.texture1,
-        texture1_uv,
+    let metallic_roughness_tex_color = texture_color(
+        material.metallic_roughness_texture,
+        metallic_roughness_uv,
         atlas,
         atlas_sampler,
         constants.atlas_size,
         textures,
     );
 
-    let texture2_uv = if material.texture2_tex_coord == 0 {
+    let normal_tex_uv = if material.normal_tex_coord == 0 {
         in_uv0
     } else {
         in_uv1
     };
-    let tex_color2 = texture_color(
-        material.texture2,
-        texture2_uv,
+    let normal_tex_color = texture_color(
+        material.normal_texture,
+        normal_tex_uv,
         atlas,
         atlas_sampler,
         constants.atlas_size,
         textures,
     );
 
-    let texture3_uv = if material.texture3_tex_coord == 0 {
+    let ao_tex_uv = if material.ao_tex_coord == 0 {
         in_uv0
     } else {
         in_uv1
     };
-    let tex_color3 = texture_color(
-        material.texture3,
-        texture3_uv,
+    let ao_tex_color = texture_color(
+        material.ao_texture,
+        ao_tex_uv,
         atlas,
         atlas_sampler,
         constants.atlas_size,
         textures,
     );
 
-    let (norm, uv_norm) = if material.texture2.is_none() {
+    let emissive_tex_uv = if material.emissive_tex_coord == 0 {
+        in_uv0
+    } else {
+        in_uv1
+    };
+    let emissive_tex_color = texture_color(
+        material.emissive_texture,
+        emissive_tex_uv,
+        atlas,
+        atlas_sampler,
+        constants.atlas_size,
+        textures,
+    );
+
+    let (norm, uv_norm) = if material.normal_texture.is_none() {
         // there is no normal map, use the normal normal ;)
         (in_norm, Vec3::ZERO)
     } else {
         // convert the normal from color coords to tangent space -1,1
-        let sampled_norm = (tex_color2.xyz() * 2.0 - Vec3::splat(1.0)).normalize_or_zero();
+        let sampled_norm = (normal_tex_color.xyz() * 2.0 - Vec3::splat(1.0)).normalize_or_zero();
         let tbn = mat3(
             in_tangent.normalize_or_zero(),
             in_bitangent.normalize_or_zero(),
@@ -696,10 +658,11 @@ pub fn main_fragment_scene(
     };
 
     let n = norm;
-    let albedo = tex_color0 * material.factor0 * in_color;
-    let roughness = tex_color1.y * material.factor1.y;
-    let metallic = tex_color1.z * material.factor1.z;
-    let ao = 1.0 + material.ao_strength * (tex_color3.x - 1.0);
+    let albedo = albedo_tex_color * material.albedo_factor * in_color;
+    let roughness = metallic_roughness_tex_color.y * material.roughness_factor;
+    let metallic = metallic_roughness_tex_color.z * material.metallic_factor;
+    let ao = 1.0 + material.ao_strength * (ao_tex_color.x - 1.0);
+    let emissive = emissive_tex_color * material.emissive_factor;
     let irradiance = pbr::sample_irradiance(irradiance, irradiance_sampler, n);
     let specular = pbr::sample_specular_reflection(
         prefiltered,
@@ -780,25 +743,28 @@ pub fn main_fragment_scene(
             *output = Vec3::splat(ao).extend(1.0);
             return;
         }
+        DebugChannel::Emissive => {
+            *output = emissive.xyz().extend(1.0);
+            return;
+        }
     }
 
     *output = match material.lighting_model {
-        LightingModel::PBR_LIGHTING => {
-            pbr::shade_fragment(
-                constants.camera_pos.xyz(),
-                n,
-                in_pos,
-                albedo.xyz(),
-                metallic,
-                roughness,
-                ao,
-                irradiance,
-                specular,
-                brdf,
-                lights,
-            )
-        }
-        _unlit => in_color * tex_color0 * material.factor0 * tex_color1,
+        LightingModel::PBR_LIGHTING => pbr::shade_fragment(
+            constants.camera_pos.xyz(),
+            n,
+            in_pos,
+            albedo.xyz(),
+            metallic,
+            roughness,
+            ao,
+            emissive.xyz(),
+            irradiance,
+            specular,
+            brdf,
+            lights,
+        ),
+        _unlit => in_color * albedo_tex_color * material.albedo_factor * metallic_roughness_tex_color,
     };
 }
 

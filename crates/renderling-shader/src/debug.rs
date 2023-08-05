@@ -51,10 +51,13 @@ pub enum DebugChannel {
 
     /// Displays only the occlusion color for the fragment.
     Occlusion = 14,
+
+    /// Displays only the emissive color for the fragment.
+    Emissive = 15,
 }
 
 impl DebugChannel {
-    pub fn all() -> [Self; 15] {
+    pub fn all() -> [Self; 16] {
         [
             Self::None,
             Self::UvCoords0,
@@ -71,6 +74,7 @@ impl DebugChannel {
             Self::Metallic,
             Self::Albedo,
             Self::Occlusion,
+            Self::Emissive,
         ]
     }
 }

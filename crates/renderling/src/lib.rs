@@ -16,6 +16,8 @@
 //! ## Features
 //!
 //! - forward+ style pipeline, configurable lighting model per material
+//!   - [ ] light tiling
+//!   - [ ] occlusion culling
 //!   - [x] physically based shading
 //!   - [x] user interface "colored text" shading (uses opacity glyphs in an
 //!     atlas)
@@ -29,7 +31,7 @@
 //!   - [x] skins
 //!   - [x] animations
 //! - [x] high definition rendering
-//! - [ ] image based lighting
+//! - [x] image based lighting
 //! - [ ] bloom
 //! - [ ] ssao
 //! - [ ] depth of field
@@ -87,6 +89,7 @@ pub mod graph {
 }
 
 pub use graph::{graph, Graph, GraphError, Move, View, ViewMut};
+pub use renderling_shader::{Id, ID_NONE};
 
 /// Set up the render graph, including:
 /// * 3d scene objects
@@ -509,7 +512,7 @@ mod test {
         // update the material's texture on the GPU
         r.graph
             .visit(|mut scene: ViewMut<Scene>| {
-                material.texture0 = dirt_id;
+                material.albedo_texture = dirt_id;
                 let _ = scene
                     .materials
                     .overwrite(material_id.index(), vec![material])
@@ -764,8 +767,8 @@ mod test {
             .read(r.get_device(), r.get_queue(), 0, 1)
             .unwrap();
         assert_eq!(
-            vec![GpuMaterial {
-                texture0: Id::new(0),
+            vec![PbrMaterial {
+                albedo_texture: Id::new(0),
                 ..Default::default()
             },],
             materials
@@ -1357,7 +1360,7 @@ mod test {
                 let y = (diameter + spacing) * j as f32;
                 let material_id = builder
                     .new_pbr_material()
-                    .with_base_color_factor(Vec4::new(1.0, 1.0, 1.0, 1.0))
+                    .with_albedo_factor(Vec4::new(1.0, 1.0, 1.0, 1.0))
                     .with_metallic_factor(metallic)
                     .with_roughness_factor(roughness)
                     .build();

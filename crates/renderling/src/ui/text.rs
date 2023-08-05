@@ -14,7 +14,7 @@ use glyph_brush::*;
 
 pub use ::ab_glyph::FontArc;
 pub use glyph_brush::{Color, Section, Text};
-use renderling_shader::scene::{GpuMaterial, GpuMaterialConfig, GpuTexture, GpuVertex};
+use renderling_shader::scene::{PbrMaterial, PbrMaterialConfig, GpuTexture, GpuVertex};
 
 use crate::{Renderling, Texture};
 
@@ -222,13 +222,13 @@ fn to_vertex(
     data
 }
 
-fn material_with_size(w: u32, h: u32) -> GpuMaterial {
-    let mut material = GpuMaterial::default();
+fn material_with_size(w: u32, h: u32) -> PbrMaterial {
+    let mut material = PbrMaterial::default();
     material.texture0 = GpuTexture {
         offset_px: Vec2::ZERO,
         size_px: Vec2::new(w as f32, h as f32),
     };
-    material.set_config(GpuMaterialConfig::TEXTURE0 | GpuMaterialConfig::LIGHTING | GpuMaterialConfig::TEXT);
+    material.set_config(PbrMaterialConfig::TEXTURE0 | PbrMaterialConfig::LIGHTING | PbrMaterialConfig::TEXT);
     material
 }
 
@@ -241,7 +241,7 @@ impl GlyphCache {
     /// Get the cache's material.
     ///
     /// This is used to build an object to display text.
-    pub fn get_material(&mut self) -> GpuMaterial {
+    pub fn get_material(&mut self) -> PbrMaterial {
         // ensure we have a cache
         if self.cache.is_none() {
             self.cache = Some(self.new_cache());
@@ -257,8 +257,8 @@ impl GlyphCache {
     ///
     /// The material and mesh are meant to be used to build or update an object
     /// to display.
-    pub fn get_updated(&mut self) -> (Option<GpuMaterial>, Option<Vec<GpuVertex>>) {
-        let mut may_material: Option<GpuMaterial> = if self.cache.is_none() {
+    pub fn get_updated(&mut self) -> (Option<PbrMaterial>, Option<Vec<GpuVertex>>) {
+        let mut may_material: Option<PbrMaterial> = if self.cache.is_none() {
             Some(self.get_material())
         } else {
             None

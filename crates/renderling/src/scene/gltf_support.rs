@@ -5,6 +5,7 @@ use rustc_hash::FxHashMap;
 use snafu::prelude::*;
 
 use super::*;
+use crate::Id;
 
 mod anime;
 pub use anime::*;
@@ -174,7 +175,7 @@ pub struct GltfNode {
 pub struct GltfMeshPrim {
     pub vertex_start: u32,
     pub vertex_count: u32,
-    pub material_id: Id<GpuMaterial>,
+    pub material_id: Id<PbrMaterial>,
     pub bounding_box: GltfBoundingBox,
     pub num_morph_targets: u32,
     pub morph_targets_have_positions: bool,
@@ -197,8 +198,8 @@ pub struct GltfLoader {
     pub cameras: GltfStore<(Mat4, Mat4)>,
     pub lights: GltfStore<Id<GpuLight>>,
     pub textures: GltfStore<Id<GpuTexture>>,
-    pub default_material: Id<GpuMaterial>,
-    pub materials: GltfStore<Id<GpuMaterial>>,
+    pub default_material: Id<PbrMaterial>,
+    pub materials: GltfStore<Id<PbrMaterial>>,
     pub meshes: GltfStore<Vec<GltfMeshPrim>>,
     pub nodes: GltfStore<GltfNode>,
     pub animations: GltfStore<GltfAnimation>,
@@ -375,106 +376,128 @@ impl GltfLoader {
         material: gltf::Material<'_>,
         builder: &mut SceneBuilder,
         document: &gltf::Document,
-    ) -> Result<Id<GpuMaterial>, GltfLoaderError> {
+    ) -> Result<Id<PbrMaterial>, GltfLoaderError> {
         let index = material.index();
         let name = material.name().map(String::from);
         log::trace!("loading material {index:?} {name:?}");
         let pbr = material.pbr_metallic_roughness();
-        let gpu_material_id = if material.unlit() {
+        let material = if material.unlit() {
             log::trace!("  is unlit");
-            // TODO: add tex_coord params to the unlit materials
-            let tex_id = if let Some(info) = pbr.base_color_texture() {
+            let (albedo_texture, albedo_tex_coord) = if let Some(info) = pbr.base_color_texture() {
                 let index = info.texture().index();
-                self.texture_at(index, builder, document)?
+                let tex_id = self.texture_at(index, builder, document)?;
+                (tex_id, info.tex_coord())
             } else {
-                Id::NONE
+                (Id::NONE, 0)
             };
             builder
-                .get_image_for_texture_id_mut(&tex_id)
-                .context(MissingTextureImageSnafu { tex_id })?
+                .get_image_for_texture_id_mut(&albedo_texture)
+                .context(MissingTextureImageSnafu {
+                    tex_id: albedo_texture,
+                })?
                 .apply_linear_transfer = true;
-            builder
-                .new_unlit_material()
-                .with_base_color(pbr.base_color_factor())
-                .with_texture0(tex_id)
-                .build()
+            PbrMaterial {
+                albedo_texture,
+                albedo_tex_coord,
+                albedo_factor: pbr.base_color_factor().into(),
+                ..Default::default()
+            }
         } else {
             log::trace!("  is pbr");
-            let base_color = pbr.base_color_factor();
-            let (base_color_tex_id, base_color_tex_coord) =
-                if let Some(info) = pbr.base_color_texture() {
-                    let index = info.texture().index();
-                    let tex_id = self.texture_at(index, builder, document)?;
-                    builder
-                        .get_image_for_texture_id_mut(&tex_id)
-                        .context(MissingTextureImageSnafu { tex_id })?
-                        .apply_linear_transfer = true;
-                    (tex_id, info.tex_coord())
+            let albedo_factor: Vec4 = pbr.base_color_factor().into();
+            let (albedo_texture, albedo_tex_coord) = if let Some(info) = pbr.base_color_texture() {
+                let index = info.texture().index();
+                let tex_id = self.texture_at(index, builder, document)?;
+                builder
+                    .get_image_for_texture_id_mut(&tex_id)
+                    .context(MissingTextureImageSnafu { tex_id })?
+                    .apply_linear_transfer = true;
+                (tex_id, info.tex_coord())
+            } else {
+                (Id::NONE, 0)
+            };
+
+            let (
+                metallic_factor,
+                roughness_factor,
+                metallic_roughness_texture,
+                metallic_roughness_tex_coord,
+            ) = if let Some(info) = pbr.metallic_roughness_texture() {
+                let index = info.texture().index();
+                let tex_id = self.texture_at(index, builder, document)?;
+                (1.0, 1.0, tex_id, info.tex_coord())
+            } else {
+                (pbr.metallic_factor(), pbr.roughness_factor(), Id::NONE, 0)
+            };
+
+            let (normal_texture, normal_tex_coord) =
+                if let Some(norm_tex) = material.normal_texture() {
+                    let tex_id = self.texture_at(norm_tex.texture().index(), builder, document)?;
+                    (tex_id, norm_tex.tex_coord())
                 } else {
                     (Id::NONE, 0)
                 };
 
-            let (metallic, roughness, metallic_roughness_tex_id, metallic_roughness_tex_coord) =
-                if let Some(info) = pbr.metallic_roughness_texture() {
-                    let index = info.texture().index();
-                    let tex_id = self.texture_at(index, builder, document)?;
-                    (1.0, 1.0, tex_id, info.tex_coord())
+            let (ao_strength, ao_texture, ao_tex_coord) = if let Some(occlusion_tex) =
+                material.occlusion_texture()
+            {
+                let tex_id = self.texture_at(occlusion_tex.texture().index(), builder, document)?;
+                (occlusion_tex.strength(), tex_id, occlusion_tex.tex_coord())
+            } else {
+                (0.0, Id::NONE, 0)
+            };
+
+            let (emissive_factor, emissive_texture, emissive_tex_coord) =
+                if let Some(emissive_tex) = material.emissive_texture() {
+                    let tex_id =
+                        self.texture_at(emissive_tex.texture().index(), builder, document)?;
+                    builder
+                        .get_image_for_texture_id_mut(&tex_id)
+                        .context(MissingTextureImageSnafu { tex_id })?
+                        .apply_linear_transfer = true;
+                    (
+                        Vec3::from(material.emissive_factor()).extend(0.0),
+                        tex_id,
+                        emissive_tex.tex_coord(),
+                    )
                 } else {
-                    (pbr.metallic_factor(), pbr.roughness_factor(), Id::NONE, 0)
+                    (Vec4::ZERO, Id::NONE, 0)
                 };
 
-            log::trace!("  base_color: {base_color:?}");
-            log::trace!("  base_color_tex_id: {base_color_tex_id:?}");
-            log::trace!("  base_color_tex_coord: {base_color_tex_coord}");
-            log::trace!("  metallic: {metallic}");
-            log::trace!("  roughness: {roughness}");
-            log::trace!("  metallic_roughness_tex_id: {metallic_roughness_tex_id:?}");
-            log::trace!("  metallic_roughness_tex_coord: {metallic_roughness_tex_coord}");
-            builder
-                .new_pbr_material()
-                .with_base_color_factor(base_color)
-                .with_base_color_texture(base_color_tex_id)
-                .with_base_color_texture_coord(base_color_tex_coord)
-                .with_metallic_factor(metallic)
-                .with_roughness_factor(roughness)
-                .with_metallic_roughness_texture(metallic_roughness_tex_id)
-                .with_metallic_roughness_texture_coord(metallic_roughness_tex_coord)
-                .build()
+            PbrMaterial {
+                albedo_factor,
+                metallic_factor,
+                roughness_factor,
+                albedo_texture,
+                metallic_roughness_texture,
+                normal_texture,
+                ao_texture,
+                albedo_tex_coord,
+                metallic_roughness_tex_coord,
+                normal_tex_coord,
+                ao_tex_coord,
+                ao_strength,
+                emissive_factor,
+                emissive_texture,
+                emissive_tex_coord,
+                lighting_model: LightingModel::PBR_LIGHTING,
+                ..Default::default()
+            }
         };
 
-        if let Some(norm_tex) = material.normal_texture() {
-            let tex_id = self.texture_at(norm_tex.texture().index(), builder, document)?;
-            // UNWRAP: ok because we just stored this material above
-            let gpu_material = builder.materials.get_mut(gpu_material_id.index()).unwrap();
-            gpu_material.texture2 = tex_id;
-            gpu_material.texture2_tex_coord = norm_tex.tex_coord();
-            log::trace!("  using normal map");
-            log::trace!("    texture_id:        {:?}", gpu_material.texture2);
-            log::trace!("    texture_tex_coord: {}", gpu_material.texture2_tex_coord);
-        }
-        if let Some(occlusion_tex) = material.occlusion_texture() {
-            let tex_id = self.texture_at(occlusion_tex.texture().index(), builder, document)?;
-            // UNWRAP: ok because we just stored this material above
-            let gpu_material = builder.materials.get_mut(gpu_material_id.index()).unwrap();
-            gpu_material.texture3 = tex_id;
-            gpu_material.texture3_tex_coord = occlusion_tex.tex_coord();
-            gpu_material.ao_strength = occlusion_tex.strength();
-            log::trace!("  using occlusion map");
-            log::trace!("    texture_id:        {:?}", gpu_material.texture3);
-            log::trace!("    texture_tex_coord: {}", gpu_material.texture3_tex_coord);
-        }
+        let material_id = builder.add_material(material);
 
         // If this material doesn't have an index it's because it's the default material
         // for this gltf file.
         if let Some(index) = index {
-            let _ = self.materials.insert(index, name, gpu_material_id);
+            let _ = self.materials.insert(index, name, material_id);
         } else {
-            self.default_material = gpu_material_id;
+            self.default_material = material_id;
         }
-        Ok(gpu_material_id)
+        Ok(material_id)
     }
 
-    /// Return the scene `Id<GpuMaterial>` for the gltf material at the given
+    /// Return the scene `Id<PbrMaterial>` for the gltf material at the given
     /// index, if possible.
     ///
     /// If the material at the given index has not been loaded into the
@@ -487,7 +510,7 @@ impl GltfLoader {
         may_index: Option<usize>,
         builder: &mut SceneBuilder,
         document: &gltf::Document,
-    ) -> Result<Id<GpuMaterial>, GltfLoaderError> {
+    ) -> Result<Id<PbrMaterial>, GltfLoaderError> {
         if let Some(index) = may_index {
             if let Some(material_id) = self.materials.get(index) {
                 Ok(*material_id)
