@@ -29,17 +29,19 @@ use crate::{
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[derive(Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct PbrMaterial {
-    pub factor0: Vec4,
-    pub factor1: Vec4,
+    pub albedo_factor: Vec4,
+    pub metallic_factor: f32,
+    pub roughness_factor: f32,
+    pub factor_padding: [f32; 2],
 
-    pub texture0: Id<GpuTexture>,
-    pub texture1: Id<GpuTexture>,
-    pub texture2: Id<GpuTexture>,
+    pub albedo_texture: Id<GpuTexture>,
+    pub metallic_roughness_texture: Id<GpuTexture>,
+    pub normal_texture: Id<GpuTexture>,
     pub texture3: Id<GpuTexture>,
 
-    pub texture0_tex_coord: u32,
-    pub texture1_tex_coord: u32,
-    pub texture2_tex_coord: u32,
+    pub albedo_tex_coord: u32,
+    pub metallic_roughness_tex_coord: u32,
+    pub normal_tex_coord: u32,
     pub texture3_tex_coord: u32,
 
     pub lighting_model: LightingModel,
@@ -50,15 +52,17 @@ pub struct PbrMaterial {
 impl Default for PbrMaterial {
     fn default() -> Self {
         Self {
-            factor0: Vec4::ONE,
-            factor1: Vec4::ONE,
-            texture0: Id::NONE,
-            texture1: Id::NONE,
-            texture2: Id::NONE,
+            albedo_factor: Vec4::ONE,
+            metallic_factor: 1.0,
+            roughness_factor: 1.0,
+            factor_padding: [0.0; 2],
+            albedo_texture: Id::NONE,
+            metallic_roughness_texture: Id::NONE,
+            normal_texture: Id::NONE,
             texture3: Id::NONE,
-            texture0_tex_coord: 0,
-            texture1_tex_coord: 0,
-            texture2_tex_coord: 0,
+            albedo_tex_coord: 0,
+            metallic_roughness_tex_coord: 0,
+            normal_tex_coord: 0,
             texture3_tex_coord: 0,
             lighting_model: LightingModel::NO_LIGHTING,
             ao_strength: 0.0,

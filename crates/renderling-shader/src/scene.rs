@@ -571,13 +571,13 @@ pub fn main_fragment_scene(
         materials[in_material as usize]
     };
 
-    let texture0_uv = if material.texture0_tex_coord == 0 {
+    let texture0_uv = if material.albedo_tex_coord == 0 {
         in_uv0
     } else {
         in_uv1
     };
     let tex_color0 = texture_color(
-        material.texture0,
+        material.albedo_texture,
         texture0_uv,
         atlas,
         atlas_sampler,
@@ -585,13 +585,13 @@ pub fn main_fragment_scene(
         textures,
     );
 
-    let texture1_uv = if material.texture1_tex_coord == 0 {
+    let texture1_uv = if material.metallic_roughness_tex_coord == 0 {
         in_uv0
     } else {
         in_uv1
     };
     let tex_color1 = texture_color(
-        material.texture1,
+        material.metallic_roughness_texture,
         texture1_uv,
         atlas,
         atlas_sampler,
@@ -599,13 +599,13 @@ pub fn main_fragment_scene(
         textures,
     );
 
-    let texture2_uv = if material.texture2_tex_coord == 0 {
+    let texture2_uv = if material.normal_tex_coord == 0 {
         in_uv0
     } else {
         in_uv1
     };
     let tex_color2 = texture_color(
-        material.texture2,
+        material.normal_texture,
         texture2_uv,
         atlas,
         atlas_sampler,
@@ -627,7 +627,7 @@ pub fn main_fragment_scene(
         textures,
     );
 
-    let (norm, uv_norm) = if material.texture2.is_none() {
+    let (norm, uv_norm) = if material.normal_texture.is_none() {
         // there is no normal map, use the normal normal ;)
         (in_norm, Vec3::ZERO)
     } else {
@@ -644,9 +644,9 @@ pub fn main_fragment_scene(
     };
 
     let n = norm;
-    let albedo = tex_color0 * material.factor0 * in_color;
-    let roughness = tex_color1.y * material.factor1.y;
-    let metallic = tex_color1.z * material.factor1.z;
+    let albedo = tex_color0 * material.albedo_factor * in_color;
+    let roughness = tex_color1.y * material.roughness_factor;
+    let metallic = tex_color1.z * material.metallic_factor;
     let ao = 1.0 + material.ao_strength * (tex_color3.x - 1.0);
     let irradiance = pbr::sample_irradiance(irradiance, irradiance_sampler, n);
     let specular = pbr::sample_specular_reflection(
@@ -744,7 +744,7 @@ pub fn main_fragment_scene(
             brdf,
             lights,
         ),
-        _unlit => in_color * tex_color0 * material.factor0 * tex_color1,
+        _unlit => in_color * tex_color0 * material.albedo_factor * tex_color1,
     };
 }
 

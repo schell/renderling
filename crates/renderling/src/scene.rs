@@ -30,9 +30,6 @@ mod gltf_support;
 #[cfg(feature = "gltf")]
 pub use gltf_support::*;
 
-mod material;
-pub use material::*;
-
 #[derive(Debug, Snafu)]
 pub enum SceneError {
     #[snafu(display("{source}"))]
@@ -137,6 +134,13 @@ impl SceneBuilder {
             entities: vec![],
             lights: vec![],
         }
+    }
+
+    /// Add a material.
+    pub fn add_material(&mut self, material: PbrMaterial) -> Id<PbrMaterial> {
+        let id = self.materials.len();
+        self.materials.push(material);
+        Id::new(id as u32)
     }
 
     /// Add an image and return a texture id for it.
@@ -268,12 +272,6 @@ impl SceneBuilder {
         GpuPointLightBuilder::new(&mut self.lights)
     }
 
-    pub fn add_material(&mut self, material: PbrMaterial) -> u32 {
-        let id = self.materials.len();
-        self.materials.push(material);
-        id as u32
-    }
-
     /// Add a meshlet.
     ///
     /// Returns the index of the first vertex of the newly created meshlet and
@@ -284,14 +282,6 @@ impl SceneBuilder {
         let len = vertices.len();
         self.vertices.extend(vertices);
         (start as u32, len as u32)
-    }
-
-    pub fn new_unlit_material(&mut self) -> UnlitMaterialBuilder<'_> {
-        UnlitMaterialBuilder::new(self)
-    }
-
-    pub fn new_pbr_material(&mut self) -> PbrMaterialBuilder<'_> {
-        PbrMaterialBuilder::new(self)
     }
 
     pub fn new_entity(&mut self) -> EntityBuilder<'_> {
