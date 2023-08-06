@@ -1,10 +1,12 @@
 //! High definition rendering types and techniques.
+//!
+//! Also includes bloom effect.
 use moongraph::*;
 use renderling_shader::tonemapping::TonemapConstants;
 
 use crate::{
-    math::Vec4, DepthTexture, Device, Queue,
-    RenderTarget, ScreenSize, Uniform, WgpuStateError, frame::FrameTextureView, BackgroundColor,
+    frame::FrameTextureView, math::Vec4, BackgroundColor, DepthTexture, Device, Queue,
+    RenderTarget, ScreenSize, Uniform, WgpuStateError,
 };
 
 /// A texture, tonemapping pipeline and uniform used for high dynamic range
@@ -12,7 +14,8 @@ use crate::{
 ///
 /// See https://learnopengl.com/Advanced-Lighting/HDR.
 pub struct HdrSurface {
-    pub texture: crate::Texture,
+    pub hdr_texture: crate::Texture,
+    pub bloom_texture: Option<crate::Texture>,
     pub texture_bindgroup: wgpu::BindGroup,
     pub tonemapping_pipeline: wgpu::RenderPipeline,
     pub constants: Uniform<TonemapConstants>,
@@ -71,6 +74,29 @@ impl HdrSurface {
             ],
         })
     }
+
+    pub fn color_attachments(&self) -> [Option<wgpu::RenderPassColorAttachment>; 2] {
+        [
+            Some(wgpu::RenderPassColorAttachment {
+                view: &self.hdr_texture.view,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Load,
+                    store: true,
+                },
+            }),
+            self.bloom_texture.as_ref().map(|tex| {
+                wgpu::RenderPassColorAttachment {
+                    view: &tex.view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: true,
+                    },
+                }
+            })
+        ]
+    }
 }
 
 fn scene_hdr_surface_bindgroup_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
@@ -116,7 +142,8 @@ pub fn create_hdr_render_surface(
         height: size.height,
         depth_or_array_layers: 1,
     };
-    let texture = HdrSurface::create_texture(&device, &queue, size.width, size.height);
+    let hdr_texture = HdrSurface::create_texture(&device, &queue, size.width, size.height);
+    let bloom_texture = Some(HdrSurface::create_texture(&device, &queue, size.width, size.height));
     let label = Some("hdr tonemapping");
     let vertex_shader =
         device.create_shader_module(wgpu::include_spirv!("linkage/vertex_tonemapping.spv"));
@@ -160,8 +187,9 @@ pub fn create_hdr_render_surface(
     });
 
     Ok((HdrSurface {
-        texture_bindgroup: HdrSurface::create_texture_bindgroup(&device, &texture),
-        texture,
+        texture_bindgroup: HdrSurface::create_texture_bindgroup(&device, &hdr_texture),
+        bloom_texture,
+        hdr_texture,
         tonemapping_pipeline,
         constants,
     },))
@@ -203,7 +231,13 @@ pub fn clear_surface_hdr_and_depth(
         &device,
         &queue,
         Some("clear_frame_and_depth"),
-        vec![&frame.view, &hdr.texture.view],
+        {
+            let mut frames: Vec<&wgpu::TextureView> = vec![&frame.view, &hdr.hdr_texture.view];
+            if let Some(bloom_tex) = hdr.bloom_texture.as_ref() {
+                frames.push(&bloom_tex.view);
+            }
+            frames
+        },
         Some(&depth_view),
         color,
     );
