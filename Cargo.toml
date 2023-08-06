@@ -13,6 +13,7 @@ resolver = "2"
 
 [workspace.dependencies]
 bytemuck = { version = "1.13.0", features = ["derive"] }
+gltf = { git = 'https://github.com/gltf-rs/gltf.git', features = ["KHR_lights_punctual", "KHR_materials_unlit", "KHR_materials_emissive_strength", "extras"] }
 image = "^0.24"
 log = "^0.4"
 glam = "^0.24"

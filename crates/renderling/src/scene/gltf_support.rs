@@ -447,22 +447,20 @@ impl GltfLoader {
                 (0.0, Id::NONE, 0)
             };
 
-            let (emissive_factor, emissive_texture, emissive_tex_coord) =
-                if let Some(emissive_tex) = material.emissive_texture() {
-                    let tex_id =
-                        self.texture_at(emissive_tex.texture().index(), builder, document)?;
-                    builder
-                        .get_image_for_texture_id_mut(&tex_id)
-                        .context(MissingTextureImageSnafu { tex_id })?
-                        .apply_linear_transfer = true;
-                    (
-                        Vec3::from(material.emissive_factor()).extend(0.0),
-                        tex_id,
-                        emissive_tex.tex_coord(),
-                    )
-                } else {
-                    (Vec4::ZERO, Id::NONE, 0)
-                };
+            let (emissive_texture, emissive_tex_coord) = if let Some(emissive_tex) =
+                material.emissive_texture()
+            {
+                let tex_id = self.texture_at(emissive_tex.texture().index(), builder, document)?;
+                builder
+                    .get_image_for_texture_id_mut(&tex_id)
+                    .context(MissingTextureImageSnafu { tex_id })?
+                    .apply_linear_transfer = true;
+                (tex_id, emissive_tex.tex_coord())
+            } else {
+                (Id::NONE, 0)
+            };
+            let emissive_factor = Vec3::from(material.emissive_factor())
+                .extend(material.emissive_strength().unwrap_or(1.0));
 
             PbrMaterial {
                 albedo_factor,
