@@ -1186,6 +1186,7 @@ impl GltfLoader {
 #[cfg(all(test, feature = "gltf"))]
 mod test {
     use glam::{Vec3, Vec4};
+    use renderling_shader::pbr::PbrMaterial;
 
     use crate::{camera, GpuVertex, Id, LightingModel, Renderling};
 
@@ -1200,10 +1201,11 @@ mod test {
         let _loader = builder.gltf_load("../../gltf/cheetah_cone.glb").unwrap();
         let (projection, view) = camera::default_ortho2d(100.0, 100.0);
         builder.set_camera(projection, view);
-        let material_id = builder
-            .new_unlit_material()
-            .with_texture0(Id::new(0))
-            .build();
+        let material_id = builder.add_material(PbrMaterial {
+            albedo_texture: Id::new(0),
+            lighting_model: LightingModel::NO_LIGHTING,
+            ..Default::default()
+        });
         let _img = builder
             .new_entity()
             .with_meshlet({
@@ -1388,10 +1390,10 @@ mod test {
         let projection = camera::perspective(50.0, 50.0);
         let view = camera::look_at(Vec3::Z * 3.0, Vec3::ZERO, Vec3::Y);
         let mut builder = r.new_scene().with_camera(projection, view);
-        let default_material = builder
-            .new_unlit_material()
-            .with_base_color([0.0, 0.0, 0.0, 0.5])
-            .build();
+        let default_material = builder.add_material(PbrMaterial {
+            albedo_factor: Vec4::new(0.0, 0.0, 0.0, 0.5),
+            ..Default::default()
+        });
 
         let loader = builder
             .gltf_load("../../gltf/animated_triangle.gltf")
