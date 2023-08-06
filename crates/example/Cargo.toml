@@ -6,14 +6,15 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-anyhow = "^1.0"
-clap = { version = "^4.3", features = ["derive"] }
-env_logger = "0.10.0"
-gltf = "1.1.0"
-icosahedron = "^0.1"
 renderling = { path = "../renderling" }
 renderling-gpui = { path = "../renderling-gpui" }
 
+anyhow = "^1.0"
+clap = { version = "^4.3", features = ["derive"] }
+env_logger = "0.10.0"
+icosahedron = "^0.1"
+
+gltf = { workspace = true }
 log = { workspace = true }
 winit = { workspace = true }
 wgpu = { workspace = true }

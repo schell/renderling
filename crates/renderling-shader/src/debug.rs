@@ -7,74 +7,90 @@
 #[derive(Clone, Copy, PartialEq, PartialOrd)]
 pub enum DebugChannel {
     /// aoeusntahoeunsth
-    None = 0,
+    None,
 
     /// Displays the first set of UV coordinates as a color.
-    UvCoords0 = 1,
+    UvCoords0,
 
     /// Displays the second set of UV coordinates as a color.
-    UvCoords1 = 2,
+    UvCoords1,
 
     /// Displays normals after normal mapping, in world space
-    Normals = 3,
+    Normals,
+
+    /// Displays only the vertex color for the fragment.
+    VertexColor,
 
     /// Displays vertex normals.
-    VertexNormals = 4,
+    VertexNormals,
 
     /// Displays uv normals. These are normals coming from a normal map texture.
     /// These are the normals in tangent space.
-    UvNormals = 5,
+    UvNormals,
 
     /// Displays vertex normals.
-    Tangents = 6,
+    Tangents,
 
     /// Displays bitangents as calculated from normals and tangents.
-    Bitangents = 7,
+    Bitangents,
 
     /// Displays only the diffuse irradiance value.
-    DiffuseIrradiance = 8,
+    DiffuseIrradiance,
 
     /// Displays only the specular reflection value.
-    SpecularReflection = 9,
+    SpecularReflection,
 
     /// Displays only the BRDF value for the fragment.
-    Brdf = 10,
-
-    /// Displays only the roughness value for the fragment.
-    Roughness = 11,
-
-    /// Displays only the metallic value for the fragment.
-    Metallic = 12,
+    Brdf,
 
     /// Displays only the albedo color for the fragment.
-    Albedo = 13,
+    Albedo,
+
+    /// Displays only the roughness value for the fragment.
+    Roughness,
+
+    /// Displays only the metallic value for the fragment.
+    Metallic,
 
     /// Displays only the occlusion color for the fragment.
-    Occlusion = 14,
+    Occlusion,
 
-    /// Displays only the emissive color for the fragment.
-    Emissive = 15,
+    /// Displays only the calculated emissive effect (emissive_tex_color * emissive_factor * emissive_strength) of the fragment.
+    Emissive,
+
+    /// Displays only the emissive color (from the emissive map texture) of the fragment.
+    UvEmissive,
+
+    /// Displays only teh emissive factor of the fragment.
+    EmissiveFactor,
+
+    /// Displays only the emissive strength of the fragment (KHR_materials_emissive_strength).
+    EmissiveStrength,
 }
 
 impl DebugChannel {
-    pub fn all() -> [Self; 16] {
+    pub fn all() -> [Self; 20] {
         [
             Self::None,
             Self::UvCoords0,
             Self::UvCoords1,
+            Self::VertexColor,
             Self::Normals,
             Self::VertexNormals,
             Self::UvNormals,
             Self::Tangents,
             Self::Bitangents,
+            Self::Albedo,
+            Self::Roughness,
+            Self::Metallic,
             Self::DiffuseIrradiance,
             Self::SpecularReflection,
             Self::Brdf,
-            Self::Roughness,
-            Self::Metallic,
-            Self::Albedo,
             Self::Occlusion,
             Self::Emissive,
+            Self::UvEmissive,
+            Self::EmissiveFactor,
+            Self::EmissiveStrength
         ]
     }
 }

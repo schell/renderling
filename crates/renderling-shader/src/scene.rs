@@ -662,7 +662,8 @@ pub fn main_fragment_scene(
     let roughness = metallic_roughness_tex_color.y * material.roughness_factor;
     let metallic = metallic_roughness_tex_color.z * material.metallic_factor;
     let ao = 1.0 + material.ao_strength * (ao_tex_color.x - 1.0);
-    let emissive = emissive_tex_color * material.emissive_factor;
+    let emissive =
+        emissive_tex_color.xyz() * material.emissive_factor.xyz() * material.emissive_factor.w;
     let irradiance = pbr::sample_irradiance(irradiance, irradiance_sampler, n);
     let specular = pbr::sample_specular_reflection(
         prefiltered,
@@ -697,6 +698,10 @@ pub fn main_fragment_scene(
         }
         DebugChannel::Normals => {
             *output = colorize(norm);
+            return;
+        }
+        DebugChannel::VertexColor => {
+            *output = in_color;
             return;
         }
         DebugChannel::VertexNormals => {
@@ -744,7 +749,19 @@ pub fn main_fragment_scene(
             return;
         }
         DebugChannel::Emissive => {
-            *output = emissive.xyz().extend(1.0);
+            *output = emissive.extend(1.0);
+            return;
+        }
+        DebugChannel::UvEmissive => {
+            *output = emissive_tex_color.xyz().extend(1.0);
+            return;
+        }
+        DebugChannel::EmissiveFactor => {
+            *output = material.emissive_factor.xyz().extend(1.0);
+            return;
+        }
+        DebugChannel::EmissiveStrength => {
+            *output = Vec3::splat(material.emissive_factor.w).extend(1.0);
             return;
         }
     }
@@ -758,13 +775,15 @@ pub fn main_fragment_scene(
             metallic,
             roughness,
             ao,
-            emissive.xyz(),
+            emissive,
             irradiance,
             specular,
             brdf,
             lights,
         ),
-        _unlit => in_color * albedo_tex_color * material.albedo_factor * metallic_roughness_tex_color,
+        _unlit => {
+            in_color * albedo_tex_color * material.albedo_factor * metallic_roughness_tex_color
+        }
     };
 }
 

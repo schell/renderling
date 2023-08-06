@@ -21,7 +21,6 @@ ab_glyph = { version = "^0.2", optional = true }
 async-channel = "^1.8"
 crunch = "^0.5"
 futures-lite = "^1.12"
-gltf = { version = "^1.1", optional = true, features = ["KHR_lights_punctual", "KHR_materials_unlit", "extras"] }
 glyph_brush = { version = "^0.7", optional = true }
 half = "^2.3"
 moongraph = { version = "^0.3.4", features = ["dot"] }
@@ -31,6 +30,7 @@ rustc-hash = "^1.1"
 snafu = "^0.7"
 
 image = { workspace = true, features = ["hdr"] }
+gltf = { workspace = true, optional = true }
 bytemuck = { workspace = true }
 log = { workspace = true }
 glam = { workspace = true, default-features = false, features = ["bytemuck", "libm"] }

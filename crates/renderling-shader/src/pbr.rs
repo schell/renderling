@@ -24,11 +24,12 @@ use crate::{
 /// `PbrMaterial` is capable of representing many material types.
 /// Use the appropriate builder for your material type from
 /// [`SceneBuilder`](crate::SceneBuilder).
-// TODO: Concretize PbrMaterial so its fields are not ambiguous.
 #[repr(C)]
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[derive(Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct PbrMaterial {
+    // x, y, z is emissive factor, default [0.0, 0.0, 0.0]
+    // w is emissive strength multiplier (gltf's KHR_materials_emissive_strength extension), default 1.0
     pub emissive_factor: Vec4,
     pub albedo_factor: Vec4,
     pub metallic_factor: f32,
@@ -54,7 +55,7 @@ pub struct PbrMaterial {
 impl Default for PbrMaterial {
     fn default() -> Self {
         Self {
-            emissive_factor: Vec4::ZERO,
+            emissive_factor: Vec3::ZERO.extend(1.0),
             albedo_factor: Vec4::ONE,
             metallic_factor: 1.0,
             roughness_factor: 1.0,
