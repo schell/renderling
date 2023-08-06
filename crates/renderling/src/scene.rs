@@ -6,14 +6,11 @@ use moongraph::{View, ViewMut};
 use renderling_shader::{debug::DebugChannel, GpuToggles};
 use snafu::prelude::*;
 
-pub use renderling_shader::{scene::*, pbr::PbrMaterial};
+pub use renderling_shader::{pbr::PbrMaterial, scene::*};
 
 use crate::{
-    DepthTexture,
-    Id,
-    frame::FrameTextureView,
-    hdr::HdrSurface,
-    Atlas, Device, GpuArray, Queue, Skybox, SkyboxRenderPipeline, Uniform,
+    frame::FrameTextureView, hdr::HdrSurface, Atlas, DepthTexture, Device, GpuArray, Id, Queue,
+    Skybox, SkyboxRenderPipeline, Uniform,
 };
 
 mod entity;
@@ -851,11 +848,18 @@ pub fn create_scene_render_pipeline(
         fragment: Some(wgpu::FragmentState {
             module: &fragment_shader,
             entry_point: "main_fragment_scene",
-            targets: &[Some(wgpu::ColorTargetState {
-                format,
-                blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                write_mask: wgpu::ColorWrites::ALL,
-            })],
+            targets: &[
+                Some(wgpu::ColorTargetState {
+                    format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                }),
+                Some(wgpu::ColorTargetState {
+                    format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                }),
+            ],
         }),
         multiview: None,
     });
@@ -934,7 +938,7 @@ pub fn skybox_render(
     let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
         label,
         color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-            view: &hdr_frame.texture.view,
+            view: &hdr_frame.hdr_texture.view,
             resolve_target: None,
             ops: wgpu::Operations {
                 load: wgpu::LoadOp::Load,
@@ -973,14 +977,7 @@ pub fn scene_render(
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label });
     let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
         label,
-        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-            view: &hdr_frame.texture.view,
-            resolve_target: None,
-            ops: wgpu::Operations {
-                load: wgpu::LoadOp::Load,
-                store: true,
-            },
-        })],
+        color_attachments: &hdr_frame.color_attachments(),
         depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
             view: &depth.view,
             depth_ops: Some(wgpu::Operations {

@@ -123,7 +123,7 @@ pub fn setup_render_graph(
         .unwrap()
         .unwrap();
     let device = r.get_device();
-    let hdr_texture_format = hdr_surface.texture.texture.format();
+    let hdr_texture_format = hdr_surface.hdr_texture.texture.format();
     let scene_render_pipeline =
         SceneRenderPipeline(create_scene_render_pipeline(device, hdr_texture_format));
     let compute_cull_pipeline =

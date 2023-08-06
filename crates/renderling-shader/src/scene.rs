@@ -564,6 +564,7 @@ pub fn main_fragment_scene(
     in_pos: Vec3,
 
     output: &mut Vec4,
+    brigtness: &mut Vec4,
 ) {
     let material = if in_material == ID_NONE {
         pbr::PbrMaterial::default()
@@ -785,6 +786,15 @@ pub fn main_fragment_scene(
             in_color * albedo_tex_color * material.albedo_factor * metallic_roughness_tex_color
         }
     };
+
+    // write the brightest colors for the bloom effect
+    let brightness_value = output.xyz().dot(Vec3::new(0.2126, 0.7152, 0.0722));
+    *brigtness = if brightness_value > 1.0 {
+        output.xyz()
+    } else {
+        Vec3::ZERO
+    }
+    .extend(1.0);
 }
 
 /// Compute the draw calls for this frame.

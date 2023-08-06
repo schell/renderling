@@ -108,6 +108,7 @@ pub fn main_fragment_scene(
     in_pos: glam::Vec3,
 
     output: &mut glam::Vec4,
+    brightness: &mut glam::Vec4,
 ) {
     scene::main_fragment_scene(
         atlas,
@@ -131,6 +132,7 @@ pub fn main_fragment_scene(
         in_bitangent,
         in_pos,
         output,
+        brightness,
     )
 }
 
