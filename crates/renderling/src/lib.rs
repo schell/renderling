@@ -1373,7 +1373,6 @@ mod test {
                         albedo_factor: Vec4::new(1.0, 1.0, 1.0, 1.0),
                         metallic_factor: metallic,
                         roughness_factor: roughness,
-                        lighting_model: LightingModel::NO_LIGHTING,
                         ..Default::default()
                     });
                 let _entity = builder
