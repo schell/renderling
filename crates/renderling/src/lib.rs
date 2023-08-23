@@ -45,10 +45,10 @@ mod buffer_array;
 mod camera;
 pub mod convolution;
 pub mod cubemap;
+pub mod frame;
 mod hdr;
 pub mod math;
 pub mod mesh;
-pub mod frame;
 mod renderer;
 mod scene;
 mod skybox;
@@ -134,9 +134,7 @@ pub fn setup_render_graph(
     r.graph.add_resource(compute_cull_pipeline);
     r.graph.add_resource(skybox_pipeline);
 
-    use frame::{
-        clear_depth, create_frame, present
-    };
+    use frame::{clear_depth, create_frame, present};
 
     // pre-render subgraph
     r.graph
@@ -492,10 +490,11 @@ mod test {
         let dirt = SceneImage::from(image::open("../../img/dirt.jpg").unwrap());
         let dirt_id = builder.add_image_texture(dirt);
 
-        let material_id = builder
-            .new_unlit_material()
-            .with_texture0(sandstone_id)
-            .build();
+        let material_id = builder.add_material(PbrMaterial {
+            albedo_texture: sandstone_id,
+            lighting_model: LightingModel::NO_LIGHTING,
+            ..Default::default()
+        });
         let mut material = builder.materials.get(material_id.index()).copied().unwrap();
         let _cube = builder
             .new_entity()
@@ -671,7 +670,11 @@ mod test {
             .unwrap();
         let tex_id = builder.add_image_texture(img);
         assert_eq!(Id::new(0), tex_id);
-        let material = builder.new_unlit_material().with_texture0(tex_id).build();
+        let material = builder.add_material(PbrMaterial {
+            albedo_texture: tex_id,
+            lighting_model: LightingModel::NO_LIGHTING,
+            ..Default::default()
+        });
 
         let verts = vec![
             GpuVertex {
@@ -798,10 +801,11 @@ mod test {
             mode_s: TextureAddressMode::CLAMP_TO_EDGE,
             mode_t: TextureAddressMode::CLAMP_TO_EDGE,
         });
-        let material_id = builder
-            .new_unlit_material()
-            .with_texture0(texture_id)
-            .build();
+        let material_id = builder.add_material(PbrMaterial {
+            albedo_texture: texture_id,
+            lighting_model: LightingModel::NO_LIGHTING,
+            ..Default::default()
+        });
         let _ = builder
             .new_entity()
             .with_material(material_id)
@@ -874,18 +878,21 @@ mod test {
             mode_t: TextureAddressMode::MIRRORED_REPEAT,
         });
 
-        let clamp_material_id = builder
-            .new_unlit_material()
-            .with_texture0(clamp_texture_id)
-            .build();
-        let repeat_material_id = builder
-            .new_unlit_material()
-            .with_texture0(repeat_texture_id)
-            .build();
-        let mirror_material_id = builder
-            .new_unlit_material()
-            .with_texture0(mirror_texture_id)
-            .build();
+        let clamp_material_id = builder.add_material(PbrMaterial {
+            albedo_texture: clamp_texture_id,
+            lighting_model: LightingModel::NO_LIGHTING,
+            ..Default::default()
+        });
+        let repeat_material_id = builder.add_material(PbrMaterial {
+            albedo_texture: repeat_texture_id,
+            lighting_model: LightingModel::NO_LIGHTING,
+            ..Default::default()
+        });
+        let mirror_material_id = builder.add_material(PbrMaterial {
+            albedo_texture: mirror_texture_id,
+            lighting_model: LightingModel::NO_LIGHTING,
+            ..Default::default()
+        });
 
         let sheet_w = sheet_w as f32;
         let sheet_h = sheet_h as f32;
@@ -966,18 +973,21 @@ mod test {
             mode_t: TextureAddressMode::MIRRORED_REPEAT,
         });
 
-        let clamp_material_id = builder
-            .new_unlit_material()
-            .with_texture0(clamp_texture_id)
-            .build();
-        let repeat_material_id = builder
-            .new_unlit_material()
-            .with_texture0(repeat_texture_id)
-            .build();
-        let mirror_material_id = builder
-            .new_unlit_material()
-            .with_texture0(mirror_texture_id)
-            .build();
+        let clamp_material_id = builder.add_material(PbrMaterial {
+            albedo_texture: clamp_texture_id,
+            lighting_model: LightingModel::NO_LIGHTING,
+            ..Default::default()
+        });
+        let repeat_material_id = builder.add_material(PbrMaterial {
+            albedo_texture: repeat_texture_id,
+            lighting_model: LightingModel::NO_LIGHTING,
+            ..Default::default()
+        });
+        let mirror_material_id = builder.add_material(PbrMaterial {
+            albedo_texture: mirror_texture_id,
+            lighting_model: LightingModel::NO_LIGHTING,
+            ..Default::default()
+        });
 
         let sheet_w = sheet_w as f32;
         let sheet_h = sheet_h as f32;
@@ -1073,7 +1083,7 @@ mod test {
             .with_intensity(10.0)
             .build();
 
-        let material = builder.new_pbr_material().build();
+        let material = builder.add_material(PbrMaterial::default());
 
         let _cube = builder
             .new_entity()
@@ -1359,11 +1369,13 @@ mod test {
                 let metallic = j as f32 / (k - 1) as f32;
                 let y = (diameter + spacing) * j as f32;
                 let material_id = builder
-                    .new_pbr_material()
-                    .with_albedo_factor(Vec4::new(1.0, 1.0, 1.0, 1.0))
-                    .with_metallic_factor(metallic)
-                    .with_roughness_factor(roughness)
-                    .build();
+                    .add_material(PbrMaterial {
+                        albedo_factor: Vec4::new(1.0, 1.0, 1.0, 1.0),
+                        metallic_factor: metallic,
+                        roughness_factor: roughness,
+                        lighting_model: LightingModel::NO_LIGHTING,
+                        ..Default::default()
+                    });
                 let _entity = builder
                     .new_entity()
                     .with_starting_vertex_and_count(start, count)

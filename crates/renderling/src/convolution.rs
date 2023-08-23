@@ -3,7 +3,7 @@ use renderling_shader::scene::GpuConstants;
 
 use crate::Uniform;
 
-pub fn convolution_bindgroup_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+pub fn diffuse_irradiance_convolution_bindgroup_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
     device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some("convolution bindgroup"),
         entries: &[
@@ -37,7 +37,7 @@ pub fn convolution_bindgroup_layout(device: &wgpu::Device) -> wgpu::BindGroupLay
     })
 }
 
-pub fn convolution_bindgroup(
+pub fn diffuse_irradiance_convolution_bindgroup(
     device: &wgpu::Device,
     label: Option<&str>,
     constants: &Uniform<GpuConstants>,
@@ -46,7 +46,7 @@ pub fn convolution_bindgroup(
 ) -> wgpu::BindGroup {
     device.create_bind_group(&wgpu::BindGroupDescriptor {
         label,
-        layout: &convolution_bindgroup_layout(device),
+        layout: &diffuse_irradiance_convolution_bindgroup_layout(device),
         entries: &[
             wgpu::BindGroupEntry {
                 binding: 0,
@@ -66,9 +66,9 @@ pub fn convolution_bindgroup(
     })
 }
 
-pub struct ConvolutionRenderPipeline(pub wgpu::RenderPipeline);
+pub struct DiffuseIrradianceConvolutionRenderPipeline(pub wgpu::RenderPipeline);
 
-impl ConvolutionRenderPipeline {
+impl DiffuseIrradianceConvolutionRenderPipeline {
     /// Create the rendering pipeline that performs a convolution.
     pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat) -> Self {
         log::trace!("creating convolution render pipeline with format '{format:?}'");
@@ -80,13 +80,13 @@ impl ConvolutionRenderPipeline {
         ));
         log::trace!("  done.");
         //.create_shader_module(wgpu::include_spirv!("linkage/fragment_convolve_diffuse_irradiance.spv"));
-        let bg_layout = convolution_bindgroup_layout(device);
+        let bg_layout = diffuse_irradiance_convolution_bindgroup_layout(device);
         let pp_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("convolution pipeline layout"),
             bind_group_layouts: &[&bg_layout],
             push_constant_ranges: &[],
         });
-        let pipeline = ConvolutionRenderPipeline(device.create_render_pipeline(
+        let pipeline = DiffuseIrradianceConvolutionRenderPipeline(device.create_render_pipeline(
             &wgpu::RenderPipelineDescriptor {
                 label: Some("convolution pipeline"),
                 layout: Some(&pp_layout),
