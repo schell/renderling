@@ -1,7 +1,7 @@
 //! Convolution shaders.
 //!
 //! These shaders convolve various functions to produce cached maps.
-use glam::{Vec2, Vec3, Vec4, Vec4Swizzles};
+use glam::{UVec2, Vec2, Vec3, Vec4, Vec4Swizzles};
 use spirv_std::{
     image::{Cubemap, Image2d},
     num_traits::Zero,
@@ -189,7 +189,10 @@ pub fn fragment_prefilter_environment_cubemap(
             } else {
                 calc_lod(n_dot_l)
             };
-            prefiltered_color += environment_cubemap.sample_by_lod(*sampler, l, mip_level).xyz() * n_dot_l;
+            prefiltered_color += environment_cubemap
+                .sample_by_lod(*sampler, l, mip_level)
+                .xyz()
+                * n_dot_l;
             total_weight += n_dot_l;
         }
     }
@@ -215,7 +218,8 @@ pub fn calc_lod_old(n: Vec3, v: Vec3, h: Vec3, roughness: f32) -> f32 {
 pub fn calc_lod(n_dot_l: f32) -> f32 {
     let cube_width = 512.0;
     let pdf = (n_dot_l * core::f32::consts::FRAC_1_PI).max(0.0);
-    0.5 * (6.0 * cube_width * cube_width / (SAMPLE_COUNT as f32 * pdf).max(core::f32::EPSILON)).log2()
+    0.5 * (6.0 * cube_width * cube_width / (SAMPLE_COUNT as f32 * pdf).max(core::f32::EPSILON))
+        .log2()
 }
 
 pub fn vertex_generate_mipmap(vertex_id: u32, out_uv: &mut Vec2, gl_pos: &mut Vec4) {
@@ -231,6 +235,31 @@ pub fn fragment_generate_mipmap(
     frag_color: &mut Vec4,
 ) {
     *frag_color = texture.sample(*sampler, in_uv);
+}
+
+pub fn fragment_bloom(
+    horizontal: bool,
+    UVec2{x, y}: &UVec2,
+    texture: &Image2d,
+    sampler: &Sampler,
+    in_uv: Vec2,
+    frag_color: &mut Vec4,
+) {
+    let weight = [0.227027f32, 0.1945946, 0.1216216, 0.054054, 0.016216];
+    let texel_offset = 1.0 / Vec2::new(*x as f32, *y as f32);
+    let mut result = texture.sample(*sampler, in_uv).xyz() * weight[0];
+    let sample_offset = if horizontal {
+        Vec2::new(1.0, 0.0)
+    } else {
+        Vec2::new(0.0, 1.0)
+    };
+
+    for i in 1..5 {
+        let offset = sample_offset * texel_offset * i as f32;
+        result += texture.sample(*sampler, in_uv + offset).xyz() * weight[i];
+        result += texture.sample(*sampler, in_uv - offset).xyz() * weight[i];
+    }
+    *frag_color = result.extend(1.0);
 }
 
 #[cfg(test)]

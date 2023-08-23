@@ -280,3 +280,15 @@ pub fn fragment_generate_mipmap(
 //    convolution::fragment_convolve_diffuse_irradiance(texture, sampler,
 // in_local_pos, out_color)
 //}
+
+#[spirv(fragment)]
+pub fn fragment_bloom(
+    #[spirv(uniform, descriptor_set = 0, binding = 0)] horizontal: &u32,
+    #[spirv(uniform, descriptor_set = 0, binding = 1)] size: &glam::UVec2,
+    #[spirv(descriptor_set = 0, binding = 2)] texture: &Image2d,
+    #[spirv(descriptor_set = 0, binding = 3)] sampler: &Sampler,
+    in_uv: glam::Vec2,
+    frag_color: &mut glam::Vec4
+) {
+    convolution::fragment_bloom(*horizontal == 0, size, texture, sampler, in_uv, frag_color)
+}
