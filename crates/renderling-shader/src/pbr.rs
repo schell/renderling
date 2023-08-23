@@ -68,7 +68,7 @@ impl Default for PbrMaterial {
             metallic_roughness_tex_coord: 0,
             normal_tex_coord: 0,
             ao_tex_coord: 0,
-            lighting_model: LightingModel::NO_LIGHTING,
+            lighting_model: LightingModel::PBR_LIGHTING,
             ao_strength: 0.0,
             emissive_texture: Id::NONE,
             emissive_tex_coord: 0,
