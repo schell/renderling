@@ -772,6 +772,7 @@ mod test {
         assert_eq!(
             vec![PbrMaterial {
                 albedo_texture: Id::new(0),
+                lighting_model: LightingModel::NO_LIGHTING,
                 ..Default::default()
             },],
             materials
@@ -1368,13 +1369,12 @@ mod test {
             for j in 0..k {
                 let metallic = j as f32 / (k - 1) as f32;
                 let y = (diameter + spacing) * j as f32;
-                let material_id = builder
-                    .add_material(PbrMaterial {
-                        albedo_factor: Vec4::new(1.0, 1.0, 1.0, 1.0),
-                        metallic_factor: metallic,
-                        roughness_factor: roughness,
-                        ..Default::default()
-                    });
+                let material_id = builder.add_material(PbrMaterial {
+                    albedo_factor: Vec4::new(1.0, 1.0, 1.0, 1.0),
+                    metallic_factor: metallic,
+                    roughness_factor: roughness,
+                    ..Default::default()
+                });
                 let _entity = builder
                     .new_entity()
                     .with_starting_vertex_and_count(start, count)

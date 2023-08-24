@@ -1392,6 +1392,7 @@ mod test {
         let mut builder = r.new_scene().with_camera(projection, view);
         let default_material = builder.add_material(PbrMaterial {
             albedo_factor: Vec4::new(0.0, 0.0, 0.0, 0.5),
+            lighting_model: LightingModel::NO_LIGHTING,
             ..Default::default()
         });
 
