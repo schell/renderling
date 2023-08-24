@@ -1,4 +1,4 @@
-//! Pipelines for convolution shaders.
+//! Pipeline and bindings for for diffuse irradiance convolution shaders.
 use renderling_shader::scene::GpuConstants;
 
 use crate::Uniform;

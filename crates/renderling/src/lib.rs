@@ -43,7 +43,7 @@
 mod atlas;
 mod buffer_array;
 mod camera;
-pub mod convolution;
+pub mod diffuse_irradiance;
 pub mod cubemap;
 pub mod frame;
 mod hdr;
