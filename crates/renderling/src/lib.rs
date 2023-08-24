@@ -44,6 +44,7 @@ mod atlas;
 mod buffer_array;
 mod camera;
 pub mod diffuse_irradiance;
+pub mod prefiltered_environment;
 pub mod cubemap;
 pub mod frame;
 mod hdr;
