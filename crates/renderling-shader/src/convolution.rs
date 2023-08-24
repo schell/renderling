@@ -256,8 +256,8 @@ pub fn fragment_bloom(
 
     for i in 1..5 {
         let offset = sample_offset * texel_offset * i as f32;
-        result += texture.sample(*sampler, in_uv + offset).xyz() * weight[i];
-        result += texture.sample(*sampler, in_uv - offset).xyz() * weight[i];
+        result += texture.sample_by_lod(*sampler, in_uv + offset, 0.0).xyz() * weight[i];
+        result += texture.sample_by_lod(*sampler, in_uv - offset, 0.0).xyz() * weight[i];
     }
     *frag_color = result.extend(1.0);
 }

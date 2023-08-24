@@ -141,10 +141,13 @@ pub fn fragment(
     texture: &Image2d,
     sampler: &Sampler,
     constants: &TonemapConstants,
+    bloom_texture: &Image2d,
+    bloom_sampler: &Sampler,
     in_uv: glam::Vec2,
     output: &mut glam::Vec4,
 ) {
     let color: Vec4 = texture.sample(*sampler, in_uv);
-    let color = tonemap(color, constants);
+    let bloom: Vec4 = bloom_texture.sample(*bloom_sampler, in_uv);
+    let color = tonemap(color + bloom, constants);
     *output = color;
 }

@@ -46,6 +46,7 @@ impl HdrSurface {
             }),
             wgpu::TextureFormat::Rgba16Float,
             4,
+            // TODO: pretty sure this should be `2`
             1,
             width,
             height,
@@ -99,9 +100,9 @@ impl HdrSurface {
     }
 }
 
-fn scene_hdr_surface_bindgroup_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+pub fn texture_and_sampler_layout(device: &wgpu::Device, label: Option<&str>) -> wgpu::BindGroupLayout {
     device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        label: Some("hdr buffer bindgroup"),
+        label,
         entries: &[
             wgpu::BindGroupLayoutEntry {
                 binding: 0,
@@ -123,6 +124,15 @@ fn scene_hdr_surface_bindgroup_layout(device: &wgpu::Device) -> wgpu::BindGroupL
     })
 }
 
+fn scene_hdr_surface_bindgroup_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+    texture_and_sampler_layout(device, Some("hdr buffer bindgroup"))
+}
+
+/// Layout for the bloom texture+sampler that get added to the color before tonemapping.
+fn blend_bloom_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+    texture_and_sampler_layout(device, Some("blend bloom"))
+}
+
 pub fn create_hdr_render_surface(
     (device, queue, size, target): (
         View<Device>,
@@ -137,6 +147,7 @@ pub fn create_hdr_render_surface(
         wgpu::BufferUsages::UNIFORM,
         wgpu::ShaderStages::FRAGMENT,
     );
+    let bloom_layout = blend_bloom_layout(&device);
     let size = wgpu::Extent3d {
         width: size.width,
         height: size.height,
@@ -152,7 +163,7 @@ pub fn create_hdr_render_surface(
     let hdr_texture_layout = scene_hdr_surface_bindgroup_layout(&device);
     let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label,
-        bind_group_layouts: &[&hdr_texture_layout, &constants_layout],
+        bind_group_layouts: &[&hdr_texture_layout, &constants_layout, &bloom_layout],
         push_constant_ranges: &[],
     });
     let tonemapping_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {

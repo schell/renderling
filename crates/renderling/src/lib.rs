@@ -41,13 +41,13 @@
 //! and manage your own resources for maximum flexibility.
 
 mod atlas;
+pub mod bloom;
 mod buffer_array;
 mod camera;
-pub mod diffuse_irradiance;
-pub mod prefiltered_environment;
 pub mod cubemap;
 pub mod frame;
 mod hdr;
+pub mod ibl;
 pub mod math;
 pub mod mesh;
 mod renderer;
@@ -95,6 +95,7 @@ pub use renderling_shader::{Id, ID_NONE};
 /// Set up the render graph, including:
 /// * 3d scene objects
 /// * skybox
+/// * bloom filter
 /// * hdr tonemapping
 /// * UI
 pub fn setup_render_graph(
@@ -124,20 +125,23 @@ pub fn setup_render_graph(
         .unwrap()
         .unwrap();
     let device = r.get_device();
+    let queue = r.get_queue();
     let hdr_texture_format = hdr_surface.hdr_texture.texture.format();
+    let size = hdr_surface.hdr_texture.texture.size();
     let scene_render_pipeline =
         SceneRenderPipeline(create_scene_render_pipeline(device, hdr_texture_format));
     let compute_cull_pipeline =
         SceneComputeCullPipeline(create_scene_compute_cull_pipeline(device));
     let skybox_pipeline = crate::skybox::create_skybox_render_pipeline(device, hdr_texture_format);
+    let bloom = crate::bloom::BloomFilter::new(device, queue, size.width, size.height);
     r.graph.add_resource(scene_render_pipeline);
     r.graph.add_resource(hdr_surface);
     r.graph.add_resource(compute_cull_pipeline);
     r.graph.add_resource(skybox_pipeline);
-
-    use frame::{clear_depth, create_frame, present};
+    r.graph.add_resource(bloom);
 
     // pre-render subgraph
+    use frame::{clear_depth, create_frame, present};
     r.graph
         .add_subgraph(graph!(
             create_frame,
@@ -149,9 +153,15 @@ pub fn setup_render_graph(
         .add_barrier();
 
     // render subgraph
+    use crate::bloom::bloom_filter;
     r.graph
         .add_subgraph(graph!(
-            scene_render < skybox_render < scene_tonemapping < clear_depth < ui_scene_render
+            scene_render
+                < skybox_render
+                < bloom_filter
+                < scene_tonemapping
+                < clear_depth
+                < ui_scene_render
         ))
         .add_barrier();
 

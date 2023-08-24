@@ -447,10 +447,11 @@ impl Skybox {
         proj: Mat4,
         views: [Mat4; 6],
     ) -> crate::Texture {
-        let pipeline = crate::diffuse_irradiance::DiffuseIrradianceConvolutionRenderPipeline::new(
-            device,
-            wgpu::TextureFormat::Rgba16Float,
-        );
+        let pipeline =
+            crate::ibl::diffuse_irradiance::DiffuseIrradianceConvolutionRenderPipeline::new(
+                device,
+                wgpu::TextureFormat::Rgba16Float,
+            );
         let mut constants = crate::uniform::Uniform::new(
             device,
             GpuConstants {
@@ -460,7 +461,7 @@ impl Skybox {
             wgpu::BufferUsages::VERTEX,
             wgpu::ShaderStages::VERTEX,
         );
-        let bindgroup = crate::diffuse_irradiance::diffuse_irradiance_convolution_bindgroup(
+        let bindgroup = crate::ibl::diffuse_irradiance::diffuse_irradiance_convolution_bindgroup(
             device,
             Some("irradiance"),
             &constants,
@@ -505,7 +506,7 @@ impl Skybox {
             wgpu::ShaderStages::VERTEX_FRAGMENT,
         );
         let (pipeline, bindgroup) =
-            crate::prefiltered_environment::prefiltered_environment_pipeline_and_bindgroup(
+            crate::ibl::prefiltered_environment::create_pipeline_and_bindgroup(
                 device,
                 &constants,
                 &roughness,

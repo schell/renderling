@@ -2,7 +2,7 @@
 use std::sync::Arc;
 
 use glam::{Mat4, Vec3};
-use moongraph::{View, ViewMut};
+use moongraph::{View, ViewMut, Move};
 use renderling_shader::{debug::DebugChannel, GpuToggles};
 use snafu::prelude::*;
 
@@ -10,7 +10,7 @@ pub use renderling_shader::{pbr::PbrMaterial, scene::*};
 
 use crate::{
     frame::FrameTextureView, hdr::HdrSurface, Atlas, DepthTexture, Device, GpuArray, Id, Queue,
-    Skybox, SkyboxRenderPipeline, Uniform,
+    Skybox, SkyboxRenderPipeline, Uniform, bloom::BloomResult,
 };
 
 mod entity;
@@ -1006,11 +1006,12 @@ pub fn scene_render(
 /// Conducts the HDR tone mapping, writing the HDR surface texture to the (most
 /// likely) sRGB window surface.
 pub fn scene_tonemapping(
-    (device, queue, frame, hdr_frame): (
+    (device, queue, frame, hdr_frame, bloom_result): (
         View<Device>,
         View<Queue>,
         View<FrameTextureView>,
         View<HdrSurface>,
+        Move<BloomResult>
     ),
 ) -> Result<(), SceneError> {
     let label = Some("scene tonemapping");
@@ -1030,6 +1031,7 @@ pub fn scene_tonemapping(
     render_pass.set_pipeline(&hdr_frame.tonemapping_pipeline);
     render_pass.set_bind_group(0, &hdr_frame.texture_bindgroup, &[]);
     render_pass.set_bind_group(1, hdr_frame.constants.bindgroup(), &[]);
+    render_pass.set_bind_group(2, &bloom_result.0, &[]);
     render_pass.draw(0..6, 0..1);
     drop(render_pass);
 
