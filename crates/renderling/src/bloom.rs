@@ -159,7 +159,7 @@ fn create_bindgroup(
 
 pub struct BloomFilter {
     // A plain transparent texture to use as a default in case of "no bloom"
-    default_texture: crate::Texture,
+    _default_texture: crate::Texture,
     default_texture_bindgroup: Arc<wgpu::BindGroup>,
     textures: [crate::Texture; 2],
     tonemap_bindgroup: Arc<wgpu::BindGroup>,
@@ -252,7 +252,7 @@ impl BloomFilter {
             textures,
             initial_bindgroup: None,
             bindgroups,
-            default_texture,
+            _default_texture: default_texture,
             default_texture_bindgroup: default_texture_bindgroup.into(),
             tonemap_bindgroup: tonemap_bindgroup.into(),
         }
