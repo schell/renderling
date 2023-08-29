@@ -1,6 +1,6 @@
 use renderling::{
     math::{Vec3, Vec4},
-    GpuVertex, Renderling,
+    GpuVertex, Renderling, RenderGraphConfig,
 };
 
 fn main() {
@@ -65,7 +65,11 @@ fn main() {
         .with_parent(&cyan_tri)
         .build();
     let scene = builder.build().unwrap();
-    r.setup_render_graph(Some(scene), None, [], false);
+    //r.setup_render_graph(Some(scene), None, [], false);
+    r.setup_render_graph(RenderGraphConfig {
+        scene: Some(scene),
+        ..Default::default()
+    });
 
     event_loop.run(move |event, _target, control_flow| {
         *control_flow = winit::event_loop::ControlFlow::Poll;

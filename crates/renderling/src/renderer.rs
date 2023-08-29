@@ -121,6 +121,30 @@ impl Deref for DepthTexture {
 /// The global background color.
 pub struct BackgroundColor(pub Vec4);
 
+/// A helper struct for configuring calls to `Renderling::setup_render_graph`.
+pub struct RenderGraphConfig {
+    pub scene: Option<Scene>,
+    pub ui: Option<UiScene>,
+    pub objs: Vec<UiDrawObject>,
+    // Whether or not to use the screen capture node.
+    // You probably want this to be `true` if you are rendering headless.
+    pub with_screen_capture: bool,
+    // Whether or not to use bloom filter in post-processing.
+    pub with_bloom: bool,
+}
+
+impl Default for RenderGraphConfig {
+    fn default() -> Self {
+        Self {
+            scene: Default::default(),
+            ui: Default::default(),
+            objs: Default::default(),
+            with_screen_capture: false,
+            with_bloom: true,
+        }
+    }
+}
+
 /// A graph-based renderer that manages GPU resources for cameras, materials and
 /// meshes.
 pub struct Renderling {
@@ -257,7 +281,8 @@ impl Renderling {
         let _ = self.graph.visit(
             |(device, queue, mut hdr): (View<Device>, View<Queue>, ViewMut<HdrSurface>)| {
                 hdr.hdr_texture = HdrSurface::create_texture(&device, &queue, width, height);
-                hdr.texture_bindgroup = HdrSurface::create_texture_bindgroup(&device, &hdr.hdr_texture);
+                hdr.texture_bindgroup =
+                    HdrSurface::create_texture_bindgroup(&device, &hdr.hdr_texture);
             },
         );
     }
@@ -383,14 +408,12 @@ impl Renderling {
     /// The scenes and objects may be "visited" later, or even retrieved.
     pub fn setup_render_graph(
         &mut self,
-        scene: Option<Scene>,
-        ui: Option<UiScene>,
-        objs: impl IntoIterator<Item = UiDrawObject>,
-        with_screen_capture: bool,
+        config: RenderGraphConfig,
     ) {
+        let RenderGraphConfig { scene, ui, objs, with_screen_capture, with_bloom } = config;
         let scene = scene.unwrap_or_else(|| self.empty_scene());
         let ui = ui.unwrap_or_else(|| self.empty_ui_scene());
-        crate::setup_render_graph(self, scene, ui, objs, with_screen_capture)
+        crate::setup_render_graph(self, scene, ui, objs, with_screen_capture, with_bloom)
     }
 
     /// Render into an image.

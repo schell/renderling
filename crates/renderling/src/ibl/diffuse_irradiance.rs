@@ -1,9 +1,11 @@
-//! Pipelines for convolution shaders.
+//! Pipeline and bindings for for diffuse irradiance convolution shaders.
 use renderling_shader::scene::GpuConstants;
 
 use crate::Uniform;
 
-pub fn diffuse_irradiance_convolution_bindgroup_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+pub fn diffuse_irradiance_convolution_bindgroup_layout(
+    device: &wgpu::Device,
+) -> wgpu::BindGroupLayout {
     device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some("convolution bindgroup"),
         entries: &[
@@ -72,11 +74,12 @@ impl DiffuseIrradianceConvolutionRenderPipeline {
     /// Create the rendering pipeline that performs a convolution.
     pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat) -> Self {
         log::trace!("creating convolution render pipeline with format '{format:?}'");
-        let vertex_shader = device
-            .create_shader_module(wgpu::include_spirv!("linkage/vertex_position_passthru.spv"));
+        let vertex_shader = device.create_shader_module(wgpu::include_spirv!(
+            "../linkage/vertex_position_passthru.spv"
+        ));
         log::trace!("creating fragment shader");
         let fragment_shader = device.create_shader_module(wgpu::include_wgsl!(
-            "wgsl/diffuse_irradiance_convolution.wgsl"
+            "../wgsl/diffuse_irradiance_convolution.wgsl"
         ));
         log::trace!("  done.");
         //.create_shader_module(wgpu::include_spirv!("linkage/fragment_convolve_diffuse_irradiance.spv"));

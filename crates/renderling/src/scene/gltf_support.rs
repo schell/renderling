@@ -13,7 +13,7 @@ pub use anime::*;
 #[derive(Debug, Snafu)]
 pub enum GltfLoaderError {
     #[snafu(display("{source}"))]
-    Gltf { source: gltf::Error },
+    Gltf { source: gltf::Error, cwd: String },
 
     #[snafu(display("Unsupported gltf image format: {:?}", format))]
     UnsupportedImageFormat { format: gltf::image::Format },
@@ -365,9 +365,12 @@ impl GltfLoader {
         document: &gltf::Document,
     ) -> Result<(), GltfLoaderError> {
         log::debug!("loading materials");
+        let mut total = 0;
         for material in document.materials() {
             self.load_material(material, builder, document)?;
+            total += 1;
         }
+        log::debug!("  {total} materials");
         Ok(())
     }
 
@@ -1188,7 +1191,7 @@ mod test {
     use glam::{Vec3, Vec4};
     use renderling_shader::pbr::PbrMaterial;
 
-    use crate::{camera, GpuVertex, Id, LightingModel, Renderling};
+    use crate::{camera, GpuVertex, Id, LightingModel, RenderGraphConfig, Renderling};
 
     #[test]
     // tests importing a gltf file and rendering the first image as a 2d object
@@ -1232,13 +1235,17 @@ mod test {
         let (device, queue) = r.get_device_and_queue_owned();
         let texture = scene.textures.read(&device, &queue, 0, 1).unwrap()[0];
         println!("{texture:?}");
-        r.setup_render_graph(Some(scene), None, [], true);
+        r.setup_render_graph(RenderGraphConfig {
+            scene: Some(scene),
+            with_screen_capture: true,
+            ..Default::default()
+        });
         let img = r.render_image().unwrap();
         img_diff::assert_img_eq("gltf_images.png", img);
     }
 
     #[test]
-    // ensures we can read a minimal gltf file with a simple triangle mesh
+    // Ensures we can read a minimal gltf file with a simple triangle mesh.
     fn minimal_mesh() {
         let mut r = Renderling::headless(20, 20)
             .unwrap()
@@ -1251,7 +1258,11 @@ mod test {
         let view = camera::look_at(Vec3::new(0.5, 0.5, 2.0), Vec3::new(0.5, 0.5, 0.0), Vec3::Y);
         builder.set_camera(projection, view);
         let scene = builder.build().unwrap();
-        r.setup_render_graph(Some(scene), None, [], true);
+        r.setup_render_graph(RenderGraphConfig {
+            scene: Some(scene),
+            with_screen_capture: true,
+            ..Default::default()
+        });
 
         let img = r.render_image().unwrap();
         img_diff::assert_img_eq("gltf_minimal_mesh.png", img);
@@ -1275,7 +1286,11 @@ mod test {
         let view = camera::look_at(Vec3::new(1.0, 0.5, 1.5), Vec3::new(1.0, 0.5, 0.0), Vec3::Y);
         builder.set_camera(projection, view);
         let scene = builder.build().unwrap();
-        r.setup_render_graph(Some(scene), None, [], true);
+        r.setup_render_graph(RenderGraphConfig {
+            scene: Some(scene),
+            with_screen_capture: true,
+            ..Default::default()
+        });
 
         let img = r.render_image().unwrap();
         img_diff::assert_img_eq("gltf_simple_meshes.png", img);
@@ -1303,7 +1318,11 @@ mod test {
         builder.materials[0] = material;
 
         let scene = builder.build().unwrap();
-        r.setup_render_graph(Some(scene), None, [], true);
+        r.setup_render_graph(RenderGraphConfig {
+            scene: Some(scene),
+            with_screen_capture: true,
+            ..Default::default()
+        });
 
         let img = r.render_image().unwrap();
         img_diff::assert_img_eq("gltf_simple_texture.png", img);
@@ -1321,7 +1340,11 @@ mod test {
         builder.set_camera(projection, view);
 
         let scene = builder.build().unwrap();
-        r.setup_render_graph(Some(scene), None, [], true);
+        r.setup_render_graph(RenderGraphConfig {
+            scene: Some(scene),
+            with_screen_capture: true,
+            ..Default::default()
+        });
 
         let img = r.render_image().unwrap();
         println!("saving frame");
@@ -1373,11 +1396,16 @@ mod test {
         }
 
         let scene = builder.build().unwrap();
-        r.setup_render_graph(Some(scene), None, [], true);
+        r.setup_render_graph(RenderGraphConfig {
+            scene: Some(scene),
+            with_screen_capture: true,
+            with_bloom: false,
+            ..Default::default()
+        });
 
         let img = r.render_image().unwrap();
         println!("saving frame");
-        img_diff::save("gltf_can_load_multiple.png", img.clone());
+        img_diff::assert_img_eq("gltf_can_load_multiple.png", img.clone());
     }
 
     #[cfg(feature = "gltf")]
@@ -1406,7 +1434,11 @@ mod test {
         }
         let mut entities = builder.entities.clone();
         let scene = builder.build().unwrap();
-        r.setup_render_graph(Some(scene), None, [], true);
+        r.setup_render_graph(RenderGraphConfig {
+            scene: Some(scene),
+            with_screen_capture: true,
+            ..Default::default()
+        });
         let img = r.render_image().unwrap();
         img_diff::assert_img_eq("gltf_simple_animation.png", img);
 
@@ -1464,9 +1496,11 @@ mod test {
         let mut entities = builder.entities.clone();
         assert!(entities[0].info.is_skin());
         let scene = builder.build().unwrap();
-        r.setup_render_graph(Some(scene), None, [], true);
-        let img = r.render_image().unwrap();
-        img_diff::save("gltf_simple_skin0.png", img);
+        r.setup_render_graph(RenderGraphConfig {
+            scene: Some(scene),
+            with_screen_capture: true,
+            ..Default::default()
+        });
 
         let frames = 4;
         for i in 0..=frames {
