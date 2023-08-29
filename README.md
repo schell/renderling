@@ -55,7 +55,8 @@ By default it uses a single uber-shader for rendering.
     - [x] diffuse
     - [x] specular
   - [ ] msaa
-  - [ ] bloom
+  - [x] bloom (oldschool ping-pong gaussian)
+    - [ ] switch out for PBB (newschool up+downsampling blur)
   - [ ] ssao
   - [ ] depth of field
   - gltf support

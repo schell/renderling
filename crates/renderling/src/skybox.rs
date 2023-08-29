@@ -435,7 +435,7 @@ impl Skybox {
             texture_size,
             cubemap_faces.as_slice(),
             wgpu::TextureFormat::Rgba16Float,
-            mip_levels
+            mip_levels,
         )
     }
 
@@ -447,10 +447,11 @@ impl Skybox {
         proj: Mat4,
         views: [Mat4; 6],
     ) -> crate::Texture {
-        let pipeline = crate::convolution::DiffuseIrradianceConvolutionRenderPipeline::new(
-            device,
-            wgpu::TextureFormat::Rgba16Float,
-        );
+        let pipeline =
+            crate::ibl::diffuse_irradiance::DiffuseIrradianceConvolutionRenderPipeline::new(
+                device,
+                wgpu::TextureFormat::Rgba16Float,
+            );
         let mut constants = crate::uniform::Uniform::new(
             device,
             GpuConstants {
@@ -460,7 +461,7 @@ impl Skybox {
             wgpu::BufferUsages::VERTEX,
             wgpu::ShaderStages::VERTEX,
         );
-        let bindgroup = crate::convolution::diffuse_irradiance_convolution_bindgroup(
+        let bindgroup = crate::ibl::diffuse_irradiance::diffuse_irradiance_convolution_bindgroup(
             device,
             Some("irradiance"),
             &constants,
@@ -504,129 +505,13 @@ impl Skybox {
             wgpu::BufferUsages::empty(),
             wgpu::ShaderStages::VERTEX_FRAGMENT,
         );
-        let label = Some("prefiltered environment");
-        let bindgroup_layout_desc = wgpu::BindGroupLayoutDescriptor {
-            label,
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Uniform,
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        view_dimension: wgpu::TextureViewDimension::Cube,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 3,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                    count: None,
-                },
-            ],
-        };
-        let bg_layout = device.create_bind_group_layout(&bindgroup_layout_desc);
-        let bindgroup = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label,
-            layout: &bg_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::Buffer(
-                        constants.buffer().as_entire_buffer_binding(),
-                    ),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Buffer(
-                        roughness.buffer().as_entire_buffer_binding(),
-                    ),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: wgpu::BindingResource::TextureView(&environment_texture.view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 3,
-                    resource: wgpu::BindingResource::Sampler(&environment_texture.sampler),
-                },
-            ],
-        });
-        let pp_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label,
-            bind_group_layouts: &[&bg_layout],
-            push_constant_ranges: &[],
-        });
-        let vertex_shader = device.create_shader_module(wgpu::include_spirv!(
-            "linkage/vertex_prefilter_environment_cubemap.spv"
-        ));
-        let fragment_shader = device.create_shader_module(wgpu::include_spirv!(
-            "linkage/fragment_prefilter_environment_cubemap.spv"
-        ));
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("prefiltered environment"),
-            layout: Some(&pp_layout),
-            vertex: wgpu::VertexState {
-                module: &vertex_shader,
-                entry_point: "vertex_prefilter_environment_cubemap",
-                buffers: &[wgpu::VertexBufferLayout {
-                    array_stride: 3 * std::mem::size_of::<f32>() as u64,
-                    step_mode: wgpu::VertexStepMode::Vertex,
-                    attributes: &wgpu::vertex_attr_array![
-                        0 => Float32x3
-                    ],
-                }],
-            },
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw,
-                cull_mode: None,
-                unclipped_depth: false,
-                polygon_mode: wgpu::PolygonMode::Fill,
-                conservative: false,
-            },
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState {
-                mask: !0,
-                alpha_to_coverage_enabled: false,
-                count: 1,
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &fragment_shader,
-                entry_point: "fragment_prefilter_environment_cubemap",
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: wgpu::TextureFormat::Rgba16Float,
-                    blend: Some(wgpu::BlendState {
-                        color: wgpu::BlendComponent::REPLACE,
-                        alpha: wgpu::BlendComponent::REPLACE,
-                    }),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            multiview: None,
-        });
+        let (pipeline, bindgroup) =
+            crate::ibl::prefiltered_environment::create_pipeline_and_bindgroup(
+                device,
+                &constants,
+                &roughness,
+                environment_texture,
+            );
 
         let mut cubemap_faces = Vec::new();
 
@@ -829,7 +714,7 @@ mod test {
     use renderling_shader::ui::{UiMode, UiVertex};
 
     use super::*;
-    use crate::Renderling;
+    use crate::{RenderGraphConfig, Renderling};
 
     #[test]
     fn hdr_texture() {
@@ -867,7 +752,12 @@ mod test {
             .with_scale([400.0, 400.0])
             .build();
         let scene = builder.build();
-        r.setup_render_graph(None, Some(scene), [obj], true);
+        r.setup_render_graph(RenderGraphConfig {
+            ui: Some(scene),
+            objs: vec![obj],
+            with_screen_capture: true,
+            ..Default::default()
+        });
 
         let img = r.render_image().unwrap();
         img_diff::assert_img_eq("skybox/environment.png", img);
@@ -916,7 +806,7 @@ mod test {
             let img: image::Rgba32FImage = image::ImageBuffer::from_vec(32, 32, pixels).unwrap();
             let img = image::DynamicImage::from(img);
             let img = img.to_rgba8();
-            img_diff::save(&format!("skybox/irradiance{i}.png"), img);
+            img_diff::assert_img_eq(&format!("skybox/irradiance{i}.png"), img);
             for mip_level in 0..5 {
                 let mip_size = 128u32 >> mip_level;
                 // save out the prefiltered environment faces' mips
@@ -940,14 +830,18 @@ mod test {
                     image::ImageBuffer::from_vec(mip_size, mip_size, pixels).unwrap();
                 let img = image::DynamicImage::from(img);
                 let img = img.to_rgba8();
-                img_diff::save(
+                img_diff::assert_img_eq(
                     &format!("skybox/prefiltered_environment_face{i}_mip{mip_level}.png"),
                     img,
                 );
             }
         }
 
-        r.setup_render_graph(Some(scene), None, [], true);
+        r.setup_render_graph(RenderGraphConfig {
+            scene: Some(scene),
+            with_screen_capture: true,
+            ..Default::default()
+        });
         let img = r.render_image().unwrap();
         img_diff::assert_img_eq("skybox/hdr.png", img);
     }

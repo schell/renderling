@@ -1,7 +1,7 @@
 //! Shader entry points.
 #![no_std]
 #![feature(lang_items)]
-use renderling_shader::{convolution, scene, skybox, tonemapping, ui, pbr};
+use renderling_shader::{convolution, pbr, scene, skybox, tonemapping, ui};
 use spirv_std::{
     glam,
     image::{Cubemap, Image2d},
@@ -161,11 +161,21 @@ pub fn fragment_tonemapping(
     #[spirv(descriptor_set = 0, binding = 0)] texture: &Image2d,
     #[spirv(descriptor_set = 0, binding = 1)] sampler: &Sampler,
     #[spirv(uniform, descriptor_set = 1, binding = 0)] constants: &tonemapping::TonemapConstants,
+    #[spirv(descriptor_set = 2, binding = 0)] bloom_texture: &Image2d,
+    #[spirv(descriptor_set = 2, binding = 1)] bloom_sampler: &Sampler,
     in_uv: glam::Vec2,
 
     output: &mut glam::Vec4,
 ) {
-    tonemapping::fragment(texture, sampler, constants, in_uv, output)
+    tonemapping::fragment(
+        texture,
+        sampler,
+        constants,
+        bloom_texture,
+        bloom_sampler,
+        in_uv,
+        output,
+    )
 }
 
 #[spirv(vertex)]
@@ -265,7 +275,7 @@ pub fn fragment_generate_mipmap(
     #[spirv(descriptor_set = 0, binding = 0)] texture: &Image2d,
     #[spirv(descriptor_set = 0, binding = 1)] sampler: &Sampler,
     in_uv: glam::Vec2,
-    frag_color: &mut glam::Vec4
+    frag_color: &mut glam::Vec4,
 ) {
     convolution::fragment_generate_mipmap(texture, sampler, in_uv, frag_color)
 }
@@ -288,7 +298,7 @@ pub fn fragment_bloom(
     #[spirv(descriptor_set = 0, binding = 2)] texture: &Image2d,
     #[spirv(descriptor_set = 0, binding = 3)] sampler: &Sampler,
     in_uv: glam::Vec2,
-    frag_color: &mut glam::Vec4
+    frag_color: &mut glam::Vec4,
 ) {
     convolution::fragment_bloom(*horizontal == 0, size, texture, sampler, in_uv, frag_color)
 }

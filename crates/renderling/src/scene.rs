@@ -2,15 +2,15 @@
 use std::sync::Arc;
 
 use glam::{Mat4, Vec3};
-use moongraph::{View, ViewMut};
+use moongraph::{Move, View, ViewMut};
 use renderling_shader::{debug::DebugChannel, GpuToggles};
 use snafu::prelude::*;
 
 pub use renderling_shader::{pbr::PbrMaterial, scene::*};
 
 use crate::{
-    frame::FrameTextureView, hdr::HdrSurface, Atlas, DepthTexture, Device, GpuArray, Id, Queue,
-    Skybox, SkyboxRenderPipeline, Uniform,
+    bloom::BloomResult, frame::FrameTextureView, hdr::HdrSurface, Atlas, DepthTexture, Device,
+    GpuArray, Id, Queue, Skybox, SkyboxRenderPipeline, Uniform,
 };
 
 mod entity;
@@ -112,6 +112,7 @@ pub struct SceneBuilder {
     pub vertices: Vec<GpuVertex>,
     pub entities: Vec<GpuEntity>,
     pub lights: Vec<GpuLight>,
+    pub use_lighting: bool,
 }
 
 impl SceneBuilder {
@@ -130,7 +131,21 @@ impl SceneBuilder {
             materials: vec![],
             entities: vec![],
             lights: vec![],
+            use_lighting: true,
         }
+    }
+
+    /// Set whether or not to use **ANY** lighting.
+    /// If set to false, this will overide model and material settings.
+    pub fn set_use_lighting(&mut self, use_lighting: bool) {
+        self.use_lighting = use_lighting;
+    }
+
+    /// Set whether or not to use **ANY** lighting.
+    /// If set to false, this will overide model and material settings.
+    pub fn with_lighting(mut self, use_lighting: bool) -> Self {
+        self.set_use_lighting(use_lighting);
+        self
     }
 
     /// Add a material.
@@ -307,7 +322,12 @@ impl SceneBuilder {
     ) -> Result<gltf_support::GltfLoader, gltf_support::GltfLoaderError> {
         log::trace!("loading gltf file '{}'", path.as_ref().display());
         let (document, buffers, images) =
-            gltf::import(path).map_err(|source| gltf_support::GltfLoaderError::Gltf { source })?;
+            gltf::import(path).map_err(|source| gltf_support::GltfLoaderError::Gltf {
+                source,
+                cwd: std::env::current_dir()
+                    .map(|p| format!("{}", p.display()))
+                    .unwrap_or("?".to_string()),
+            })?;
         gltf_support::GltfLoader::load(self, document, buffers, images)
     }
 
@@ -361,6 +381,7 @@ impl Scene {
             vertices,
             entities,
             lights,
+            use_lighting,
         } = scene_builder;
         snafu::ensure!(images.is_empty(), AlreadyPackedAtlasSnafu);
         let debug_mode = debug_channel.into();
@@ -408,6 +429,7 @@ impl Scene {
                 toggles: {
                     let mut toggles = GpuToggles::default();
                     toggles.set_has_skybox(skybox_image.is_some() || skybox.is_some());
+                    toggles.set_use_lighting(use_lighting);
                     toggles
                 },
             },
@@ -1006,11 +1028,12 @@ pub fn scene_render(
 /// Conducts the HDR tone mapping, writing the HDR surface texture to the (most
 /// likely) sRGB window surface.
 pub fn scene_tonemapping(
-    (device, queue, frame, hdr_frame): (
+    (device, queue, frame, hdr_frame, bloom_result): (
         View<Device>,
         View<Queue>,
         View<FrameTextureView>,
         View<HdrSurface>,
+        Move<BloomResult>,
     ),
 ) -> Result<(), SceneError> {
     let label = Some("scene tonemapping");
@@ -1030,6 +1053,11 @@ pub fn scene_tonemapping(
     render_pass.set_pipeline(&hdr_frame.tonemapping_pipeline);
     render_pass.set_bind_group(0, &hdr_frame.texture_bindgroup, &[]);
     render_pass.set_bind_group(1, hdr_frame.constants.bindgroup(), &[]);
+    let bloom_bg = bloom_result
+        .0
+        .as_deref()
+        .unwrap_or(&hdr_frame.no_bloom_bindgroup);
+    render_pass.set_bind_group(2, bloom_bg, &[]);
     render_pass.draw(0..6, 0..1);
     drop(render_pass);
 
