@@ -98,12 +98,15 @@ pub use renderling_shader::{Id, ID_NONE};
 /// * bloom filter
 /// * hdr tonemapping
 /// * UI
+///
+/// This is mostly for internal use. See [`Renderling::setup_render_graph`].
 pub fn setup_render_graph(
     r: &mut Renderling,
     scene: Scene,
     ui_scene: UiScene,
     ui_objects: impl IntoIterator<Item = UiDrawObject>,
     with_screen_capture: bool,
+    with_bloom: bool,
 ) {
     // add resources
     let ui_objects = UiDrawObjects(ui_objects.into_iter().collect::<Vec<_>>());
@@ -133,7 +136,8 @@ pub fn setup_render_graph(
     let compute_cull_pipeline =
         SceneComputeCullPipeline(create_scene_compute_cull_pipeline(device));
     let skybox_pipeline = crate::skybox::create_skybox_render_pipeline(device, hdr_texture_format);
-    let bloom = crate::bloom::BloomFilter::new(device, queue, size.width, size.height);
+    let mut bloom = crate::bloom::BloomFilter::new(device, queue, size.width, size.height);
+    bloom.on = with_bloom;
     r.graph.add_resource(scene_render_pipeline);
     r.graph.add_resource(hdr_surface);
     r.graph.add_resource(compute_cull_pipeline);
@@ -244,7 +248,12 @@ mod test {
             .with_meshlet(right_tri_vertices())
             .build();
         let scene = builder.build().unwrap();
-        r.setup_render_graph(Some(scene), None, [], true);
+        r.setup_render_graph(RenderGraphConfig {
+            scene: Some(scene),
+            with_screen_capture: true,
+            with_bloom: false,
+            ..Default::default()
+        });
 
         CmyTri { ui: r, tri }
     }
@@ -341,7 +350,12 @@ mod test {
             .build();
         let scene = builder.build().unwrap();
 
-        r.setup_render_graph(Some(scene), None, [], true);
+        r.setup_render_graph(RenderGraphConfig {
+            scene: Some(scene),
+            with_screen_capture: true,
+            with_bloom: false,
+            ..Default::default()
+        });
         let img = r.render_image().unwrap();
         img_diff::assert_img_eq("cmy_cube.png", img);
     }
@@ -372,7 +386,12 @@ mod test {
             .build();
 
         let scene = builder.build().unwrap();
-        r.setup_render_graph(Some(scene), None, [], true);
+        r.setup_render_graph(RenderGraphConfig {
+            scene: Some(scene),
+            with_screen_capture: true,
+            with_bloom: false,
+            ..Default::default()
+        });
 
         // we should see two colored cubes
         let img = r.render_image().unwrap();
@@ -408,9 +427,12 @@ mod test {
     fn cmy_cube_remesh() {
         let mut r = Renderling::headless(100, 100)
             .unwrap()
-            .with_background_color(Vec4::splat(0.0));
+            .with_background_color(Vec4::splat(1.0));
         let (projection, view) = camera::default_perspective(100.0, 100.0);
-        let mut builder = r.new_scene().with_camera(projection, view);
+        let mut builder = r
+            .new_scene()
+            .with_camera(projection, view)
+            .with_lighting(false);
 
         let (pyramid_start, pyramid_count) = builder.add_meshlet(gpu_pyramid_vertices());
 
@@ -421,7 +443,12 @@ mod test {
             .build();
 
         let scene = builder.build().unwrap();
-        r.setup_render_graph(Some(scene), None, [], true);
+        r.setup_render_graph(RenderGraphConfig {
+            scene: Some(scene),
+            with_screen_capture: true,
+            with_bloom: false,
+            ..Default::default()
+        });
 
         // we should see a cube
         let img = r.render_image().unwrap();
@@ -514,7 +541,12 @@ mod test {
             .with_scale(Vec3::new(10.0, 10.0, 10.0))
             .build();
         let scene = builder.build().unwrap();
-        r.setup_render_graph(Some(scene), None, [], true);
+        r.setup_render_graph(RenderGraphConfig {
+            scene: Some(scene),
+            with_screen_capture: true,
+            with_bloom: false,
+            ..Default::default()
+        });
         // we should see a cube with a stoney texture
         let img = r.render_image().unwrap();
         img_diff::assert_img_eq("unlit_textured_cube_material_before.png", img);
@@ -615,7 +647,11 @@ mod test {
         let (projection, view) = camera::default_ortho2d(100.0, 100.0);
         scene.set_camera(projection, view);
 
-        r.setup_render_graph(Some(scene), None, [], true);
+        r.setup_render_graph(RenderGraphConfig {
+            scene: Some(scene),
+            with_screen_capture: true,
+            ..Default::default()
+        });
 
         r.graph.visit(scene::scene_update).unwrap().unwrap();
         r.graph.visit(scene::scene_cull).unwrap().unwrap();
@@ -740,7 +776,11 @@ mod test {
         assert_eq!(0, textures[0].0);
         assert_eq!(UVec2::splat(170), textures[0].1 .1);
 
-        r.setup_render_graph(Some(scene), None, [], true);
+        r.setup_render_graph(RenderGraphConfig {
+            scene: Some(scene),
+            with_screen_capture: true,
+            ..Default::default()
+        });
 
         let img = r.render_image().unwrap();
 
@@ -849,7 +889,11 @@ mod test {
         //);
         // let atlas_img = atlas_img.into_rgba(r.get_device()).unwrap();
         // img_diff::save("atlas.png", atlas_img);
-        r.setup_render_graph(Some(scene), None, [], true);
+        r.setup_render_graph(RenderGraphConfig {
+            scene: Some(scene),
+            with_screen_capture: true,
+            ..Default::default()
+        });
 
         let img = r.render_image().unwrap();
         img_diff::assert_img_eq("atlas_uv_mapping.png", img);
@@ -944,7 +988,11 @@ mod test {
             .build();
 
         let scene = builder.build().unwrap();
-        r.setup_render_graph(Some(scene), None, [], true);
+        r.setup_render_graph(RenderGraphConfig {
+            scene: Some(scene),
+            with_screen_capture: true,
+            ..Default::default()
+        });
 
         let img = r.render_image().unwrap();
         img_diff::assert_img_eq("uv_wrapping.png", img);
@@ -1039,7 +1087,11 @@ mod test {
             .build();
 
         let scene = builder.build().unwrap();
-        r.setup_render_graph(Some(scene), None, [], true);
+        r.setup_render_graph(RenderGraphConfig {
+            scene: Some(scene),
+            with_screen_capture: true,
+            ..Default::default()
+        });
 
         let img = r.render_image().unwrap();
         img_diff::assert_img_eq("negative_uv_wrapping.png", img);
@@ -1121,7 +1173,11 @@ mod test {
         );
         scene.set_camera(projection, view);
 
-        r.setup_render_graph(Some(scene), None, [], true);
+        r.setup_render_graph(RenderGraphConfig {
+            scene: Some(scene),
+            with_screen_capture: true,
+            ..Default::default()
+        });
 
         let img = r.render_image().unwrap();
         img_diff::assert_img_eq("scene_cube_directional.png", img);
@@ -1295,7 +1351,12 @@ mod test {
 
         let entities = builder.entities.clone();
         let scene = builder.build().unwrap();
-        r.setup_render_graph(Some(scene), None, [], true);
+        r.setup_render_graph(RenderGraphConfig {
+            scene: Some(scene),
+            with_screen_capture: true,
+            with_bloom: false,
+            ..Default::default()
+        });
 
         let gpu_entities = r
             .graph
@@ -1396,7 +1457,11 @@ mod test {
         }
 
         let scene = builder.build().unwrap();
-        r.setup_render_graph(Some(scene), None, [], true);
+        r.setup_render_graph(RenderGraphConfig {
+            scene: Some(scene),
+            with_screen_capture: true,
+            ..Default::default()
+        });
 
         let img = r.render_image().unwrap();
         img_diff::assert_img_eq("pbr_metallic_roughness_spheres.png", img);

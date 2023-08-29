@@ -83,6 +83,7 @@ impl Tonemap {
     pub const ACES_NARKOWICZ: Self = Tonemap(1);
     pub const ACES_HILL: Self = Tonemap(2);
     pub const ACES_HILL_EXPOSURE_BOOST: Self = Tonemap(3);
+    pub const REINHARD: Self = Tonemap(4);
 }
 
 #[repr(C)]
@@ -113,13 +114,11 @@ pub fn tonemap(mut color: Vec4, constants: &TonemapConstants) -> Vec4 {
             // implemetation of ACES tone mapping
             tone_map_aces_hill(color.xyz() / 0.6).extend(color.w)
         }
-        _ => {
-            //// Use Reinhard tone mapping
-            // color / (color + Vec3::ONE)
-
-            // use none
-            color
+        Tonemap::REINHARD => {
+            // Use Reinhard tone mapping
+            color / (color + Vec4::ONE)
         }
+        _ => color
     }
 }
 

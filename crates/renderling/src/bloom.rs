@@ -158,9 +158,7 @@ fn create_bindgroup(
 }
 
 pub struct BloomFilter {
-    // A plain transparent texture to use as a default in case of "no bloom"
-    _default_texture: crate::Texture,
-    default_texture_bindgroup: Arc<wgpu::BindGroup>,
+    pub on: bool,
     textures: [crate::Texture; 2],
     tonemap_bindgroup: Arc<wgpu::BindGroup>,
     pipeline: wgpu::RenderPipeline,
@@ -172,42 +170,7 @@ pub struct BloomFilter {
 
 impl BloomFilter {
     pub fn new(device: &wgpu::Device, queue: &wgpu::Queue, width: u32, height: u32) -> Self {
-        let default_texture = crate::Texture::new_with(
-            device,
-            queue,
-            Some("BloomFilter.default_texture"),
-            None,
-            Some(device.create_sampler(&wgpu::SamplerDescriptor {
-                label: Some("BloomFilter.default_texture"),
-                mag_filter: wgpu::FilterMode::Nearest,
-                min_filter: wgpu::FilterMode::Nearest,
-                mipmap_filter: wgpu::FilterMode::Nearest,
-                ..Default::default()
-            })),
-            wgpu::TextureFormat::Rgba8Unorm,
-            4,
-            1,
-            1,
-            1,
-            1,
-            &[0, 0, 0, 0],
-        );
         let tonemap_bg_layout = crate::hdr::texture_and_sampler_layout(device, Some("bloom"));
-        let default_texture_bindgroup = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("no-bloom"),
-            layout: &tonemap_bg_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&default_texture.view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&default_texture.sampler),
-                },
-            ],
-        });
-
         let textures = [
             create_bloom_texture(device, queue, width, height),
             create_bloom_texture(device, queue, width, height),
@@ -226,7 +189,6 @@ impl BloomFilter {
                 },
             ],
         });
-
         let size_uniform = Uniform::new(
             device,
             UVec2::new(width, height),
@@ -246,14 +208,13 @@ impl BloomFilter {
             create_bindgroup(device, &horizontal_uniform, &size_uniform, &textures[0]),
         ];
         BloomFilter {
+            on: true,
             pipeline: create_pipeline(device),
             size_uniform,
             horizontal_uniform,
             textures,
             initial_bindgroup: None,
             bindgroups,
-            _default_texture: default_texture,
-            default_texture_bindgroup: default_texture_bindgroup.into(),
             tonemap_bindgroup: tonemap_bindgroup.into(),
         }
     }
@@ -264,12 +225,7 @@ impl BloomFilter {
         queue: &wgpu::Queue,
         hdr_surface: &crate::HdrSurface,
     ) -> Arc<wgpu::BindGroup> {
-        let brightness_texture = if let Some(tex) = hdr_surface.bloom_texture.as_ref() {
-            tex
-        } else {
-            return self.default_texture_bindgroup.clone();
-        };
-
+        let brightness_texture = &hdr_surface.brightness_texture;
         // update the size if the size has changed
         let size = brightness_texture.texture.size();
         let size = UVec2::new(size.width, size.height);
@@ -371,7 +327,7 @@ impl BloomFilter {
     }
 }
 
-pub struct BloomResult(pub Arc<wgpu::BindGroup>);
+pub struct BloomResult(pub Option<Arc<wgpu::BindGroup>>);
 
 pub fn bloom_filter(
     (device, queue, mut bloom, hdr): (
@@ -381,6 +337,68 @@ pub fn bloom_filter(
         View<HdrSurface>,
     ),
 ) -> Result<(BloomResult,), crate::WgpuStateError> {
-    let bg = bloom.run(&device, &queue, &hdr);
-    Ok((BloomResult(bg),))
+    let may_bg = if bloom.on {
+        let bg = bloom.run(&device, &queue, &hdr);
+        Some(bg)
+    } else {
+        None
+    };
+    Ok((BloomResult(may_bg),))
+}
+
+#[cfg(test)]
+mod test {
+    use glam::{Mat4, Vec3};
+
+    use crate::Renderling;
+
+    use super::BloomFilter;
+
+    #[test]
+    fn bloom_on_off() {
+        let mut renderling = Renderling::headless(100, 100)
+            .unwrap()
+            .with_background_color(glam::Vec4::splat(1.0));
+        let mut builder = renderling.new_scene();
+        let loader = builder
+            .gltf_load("../../gltf/EmissiveStrengthTest.glb")
+            .unwrap();
+        // find the bounding box of the model so we can display it correctly
+        let mut min = Vec3::splat(f32::INFINITY);
+        let mut max = Vec3::splat(f32::NEG_INFINITY);
+        for node in loader.nodes.iter() {
+            let entity = builder.entities.get(node.entity_id.index()).unwrap();
+            let (translation, rotation, scale) = entity.get_world_transform(&builder.entities);
+            let tfrm = Mat4::from_scale_rotation_translation(scale, rotation, translation);
+            if let Some(mesh_index) = node.gltf_mesh_index {
+                for primitive in loader.meshes.get(mesh_index).unwrap().iter() {
+                    let bbmin = tfrm.transform_point3(primitive.bounding_box.min);
+                    let bbmax = tfrm.transform_point3(primitive.bounding_box.max);
+                    min = min.min(bbmin);
+                    max = max.max(bbmax);
+                }
+            }
+        }
+
+        let length = min.distance(max);
+        let (projection, _) = crate::camera::default_perspective(100.0, 100.0);
+        let view = crate::camera::look_at(Vec3::new(0.0, 0.0, length), Vec3::ZERO, Vec3::Y);
+        builder.set_camera(projection, view);
+        let scene = builder.build().unwrap();
+
+        renderling.setup_render_graph(crate::RenderGraphConfig {
+            scene: Some(scene),
+            with_screen_capture: true,
+            ..Default::default()
+        });
+        let img = renderling.render_image().unwrap();
+        img_diff::assert_img_eq("bloom/on.png", img);
+
+        {
+            let bloom = renderling.graph.get_resource_mut::<BloomFilter>().unwrap().unwrap();
+            bloom.on = false;
+        }
+        let img = renderling.render_image().unwrap();
+        img_diff::assert_img_eq("bloom/off.png", img);
+    }
 }

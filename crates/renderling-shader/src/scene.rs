@@ -566,8 +566,13 @@ pub fn main_fragment_scene(
     output: &mut Vec4,
     brigtness: &mut Vec4,
 ) {
-    let material = if in_material == ID_NONE {
-        pbr::PbrMaterial::default()
+    let material = if in_material == ID_NONE || !constants.toggles.get_use_lighting() {
+        // without an explicit material (or if the entire render has no lighting)
+        // the entity will not participate in any lighting calculations
+        pbr::PbrMaterial {
+            lighting_model: LightingModel::NO_LIGHTING,
+            ..Default::default()
+        }
     } else {
         materials[in_material as usize]
     };
@@ -783,7 +788,7 @@ pub fn main_fragment_scene(
             lights,
         ),
         _unlit => {
-            in_color * albedo_tex_color * material.albedo_factor * metallic_roughness_tex_color
+            in_color * albedo_tex_color * material.albedo_factor
         }
     };
 

@@ -714,7 +714,7 @@ mod test {
     use renderling_shader::ui::{UiMode, UiVertex};
 
     use super::*;
-    use crate::Renderling;
+    use crate::{RenderGraphConfig, Renderling};
 
     #[test]
     fn hdr_texture() {
@@ -752,7 +752,12 @@ mod test {
             .with_scale([400.0, 400.0])
             .build();
         let scene = builder.build();
-        r.setup_render_graph(None, Some(scene), [obj], true);
+        r.setup_render_graph(RenderGraphConfig {
+            ui: Some(scene),
+            objs: vec![obj],
+            with_screen_capture: true,
+            ..Default::default()
+        });
 
         let img = r.render_image().unwrap();
         img_diff::assert_img_eq("skybox/environment.png", img);
@@ -801,7 +806,7 @@ mod test {
             let img: image::Rgba32FImage = image::ImageBuffer::from_vec(32, 32, pixels).unwrap();
             let img = image::DynamicImage::from(img);
             let img = img.to_rgba8();
-            img_diff::save(&format!("skybox/irradiance{i}.png"), img);
+            img_diff::assert_img_eq(&format!("skybox/irradiance{i}.png"), img);
             for mip_level in 0..5 {
                 let mip_size = 128u32 >> mip_level;
                 // save out the prefiltered environment faces' mips
@@ -825,14 +830,18 @@ mod test {
                     image::ImageBuffer::from_vec(mip_size, mip_size, pixels).unwrap();
                 let img = image::DynamicImage::from(img);
                 let img = img.to_rgba8();
-                img_diff::save(
+                img_diff::assert_img_eq(
                     &format!("skybox/prefiltered_environment_face{i}_mip{mip_level}.png"),
                     img,
                 );
             }
         }
 
-        r.setup_render_graph(Some(scene), None, [], true);
+        r.setup_render_graph(RenderGraphConfig {
+            scene: Some(scene),
+            with_screen_capture: true,
+            ..Default::default()
+        });
         let img = r.render_image().unwrap();
         img_diff::assert_img_eq("skybox/hdr.png", img);
     }

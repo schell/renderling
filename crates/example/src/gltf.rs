@@ -8,7 +8,7 @@ use renderling::{
     debug::DebugChannel,
     math::{Mat4, Vec3, Vec4},
     GltfLoader, GpuEntity, Renderling, Scene, SceneImage, ScreenSize, TweenProperty, UiDrawObjects,
-    UiMode, UiVertex, ViewMut,
+    UiMode, UiVertex, ViewMut, RenderGraphConfig,
 };
 use renderling_gpui::{Element, Gpui};
 use winit::event::KeyboardInput;
@@ -75,7 +75,13 @@ impl App {
 
         // Create a placeholder scene
         let scene = r.new_scene().build().unwrap();
-        r.setup_render_graph(Some(scene), Some(ui_scene), [ui_obj], false);
+        //r.setup_render_graph(Some(scene), Some(ui_scene), [ui_obj], false);
+        r.setup_render_graph(RenderGraphConfig {
+            scene: Some(scene),
+            ui: Some(ui_scene),
+            objs: vec![ui_obj],
+            ..Default::default()
+        });
 
         let mut app = Self {
             loader: None,
