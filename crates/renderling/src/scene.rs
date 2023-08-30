@@ -9,8 +9,8 @@ use snafu::prelude::*;
 pub use renderling_shader::{pbr::PbrMaterial, scene::*};
 
 use crate::{
-    bloom::BloomResult, frame::FrameTextureView, hdr::HdrSurface, Atlas, DepthTexture, Device,
-    GpuArray, Id, Queue, Skybox, SkyboxRenderPipeline, Uniform,
+    bloom::BloomResult, frame::FrameTextureView, hdr::HdrSurface, Atlas, BufferArray, DepthTexture,
+    Device, HasWgpuBuffer, Id, Queue, Skybox, SkyboxRenderPipeline, Uniform,
 };
 
 mod entity;
@@ -218,7 +218,10 @@ impl SceneBuilder {
         self
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Add a skybox image from path.
+    ///
+    /// Not available on WASM.
     ///
     /// Currently only one skybox image is supported, so this function returns
     /// nothing.
@@ -236,7 +239,10 @@ impl SceneBuilder {
         self.skybox = Some(skybox);
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     /// Add a skybox image from path.
+    ///
+    /// Not available on WASM.
     ///
     /// Currently only one skybox image is supported, so this function returns
     /// nothing.
@@ -311,7 +317,7 @@ impl SceneBuilder {
         self.images.get_mut(texture.image_index)
     }
 
-    #[cfg(feature = "gltf")]
+    #[cfg(all(feature = "gltf", not(target_arch = "wasm32")))]
     /// Load the gltf file at the given path.
     ///
     /// The first material in `self` will be used as the default material for
@@ -331,18 +337,40 @@ impl SceneBuilder {
         gltf_support::GltfLoader::load(self, document, buffers, images)
     }
 
+    #[cfg(feature = "gltf")]
+    /// Load the gltf file of the given bytes.
+    ///
+    /// The first material in `self` will be used as the default material for
+    /// the gltf or none if not available.
+    pub fn gltf_load_bytes(
+        &mut self,
+        bytes: Vec<u8>,
+    ) -> Result<gltf_support::GltfLoader, gltf_support::GltfLoaderError> {
+        let (document, buffers, images) =
+            gltf::import_slice(&bytes).map_err(|source| gltf_support::GltfLoaderError::Gltf {
+                source,
+                cwd: "{bytes}".to_string(),
+            })?;
+        gltf_support::GltfLoader::load(self, document, buffers, images)
+    }
+
     pub fn build(self) -> Result<Scene, SceneError> {
         Scene::new(self)
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+pub type MutableBufferArray<T> = BufferArray<T>;
+#[cfg(target_arch = "wasm32")]
+pub type MutableBufferArray<T> = BufferArray<T, crate::CpuAndGpuBuffer>;
+
 pub struct Scene {
-    pub vertices: GpuArray<GpuVertex>,
-    pub entities: GpuArray<GpuEntity>,
-    pub lights: GpuArray<GpuLight>,
-    pub materials: GpuArray<PbrMaterial>,
-    pub textures: GpuArray<GpuTexture>,
-    pub indirect_draws: GpuArray<DrawIndirect>,
+    pub vertices: BufferArray<GpuVertex>,
+    pub entities: MutableBufferArray<GpuEntity>,
+    pub lights: BufferArray<GpuLight>,
+    pub materials: BufferArray<PbrMaterial>,
+    pub textures: BufferArray<GpuTexture>,
+    pub indirect_draws: MutableBufferArray<DrawIndirect>,
     pub constants: Uniform<GpuConstants>,
     pub skybox: Skybox,
     pub atlas: Atlas,
@@ -408,16 +436,19 @@ impl Scene {
                 ..Default::default()
             });
         }
-        let textures = GpuArray::new(&device, &textures, textures.len(), scene_render_usage());
-        let vertices = GpuArray::new(&device, &vertices, vertices.len(), scene_render_usage());
+        let textures = BufferArray::new(&device, &textures, textures.len(), scene_render_usage());
+        let vertices = BufferArray::new(&device, &vertices, vertices.len(), scene_render_usage());
         let draws = entities
             .iter()
             .map(|_| DrawIndirect::default())
             .collect::<Vec<_>>();
-        let indirect_draws = GpuArray::new(&device, &draws, draws.len(), scene_indirect_usage());
-        let entities = GpuArray::new(&device, &entities, entities.len(), scene_render_usage());
-        let lights = GpuArray::new(&device, &lights, lights.len(), scene_render_usage());
-        let materials = GpuArray::new(&device, &materials, materials.len(), scene_render_usage());
+        let indirect_draws: MutableBufferArray<_> =
+            BufferArray::new(&device, &draws, draws.len(), scene_indirect_usage());
+        let entities: MutableBufferArray<_> =
+            BufferArray::new(&device, &entities, entities.len(), scene_render_usage());
+        let lights = BufferArray::new(&device, &lights, lights.len(), scene_render_usage());
+        let materials =
+            BufferArray::new(&device, &materials, materials.len(), scene_render_usage());
         let constants = Uniform::new(
             &device,
             GpuConstants {
@@ -461,13 +492,19 @@ impl Scene {
             layout: &scene_draw_indirect_bindgroup_layout(&device),
             entries: &[wgpu::BindGroupEntry {
                 binding: 0,
-                resource: indirect_draws.get_buffer().as_entire_binding(),
+                resource: indirect_draws.buffer.get_wgpu_buffer().as_entire_binding(),
             }],
         });
 
         // TODO: rename this or regroup the bindgroups
         let render_buffers_bindgroup = create_scene_buffers_bindgroup(
-            &device, &constants, &vertices, &entities, &lights, &materials, &skybox,
+            &device,
+            &constants,
+            &vertices,
+            &entities.buffer.get_wgpu_buffer(),
+            &lights,
+            &materials,
+            &skybox,
         );
 
         let render_atlas_bindgroup = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -552,7 +589,7 @@ impl Scene {
                     device,
                     constants,
                     vertices,
-                    entities,
+                    entities.buffer.get_wgpu_buffer(),
                     lights,
                     materials,
                     &self.skybox,
@@ -626,10 +663,10 @@ impl Scene {
 pub fn create_scene_buffers_bindgroup(
     device: &wgpu::Device,
     constants: &Uniform<GpuConstants>,
-    vertices: &GpuArray<GpuVertex>,
-    entities: &GpuArray<GpuEntity>,
-    lights: &GpuArray<GpuLight>,
-    materials: &GpuArray<PbrMaterial>,
+    vertices: &BufferArray<GpuVertex>,
+    entities: &wgpu::Buffer,
+    lights: &BufferArray<GpuLight>,
+    materials: &BufferArray<PbrMaterial>,
     skybox: &Skybox,
 ) -> wgpu::BindGroup {
     device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -646,7 +683,7 @@ pub fn create_scene_buffers_bindgroup(
             },
             wgpu::BindGroupEntry {
                 binding: 2,
-                resource: entities.get_buffer().as_entire_binding(),
+                resource: entities.as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 3,
@@ -1012,13 +1049,30 @@ pub fn scene_render(
     render_pass.set_pipeline(&pipeline.0);
     render_pass.set_bind_group(0, &scene.render_buffers_bindgroup, &[]);
     render_pass.set_bind_group(1, &scene.render_atlas_bindgroup, &[]);
-    // TODO: use RenderPass::multi_draw_indirect_count after atomics are added to
-    // naga's spirv frontend
+    // We should use multi_draw_indirect_count after (actually) culling
+    #[cfg(not(target_arch = "wasm32"))]
     render_pass.multi_draw_indirect(
         scene.indirect_draws.get_buffer(),
         0,
         scene.entities.len() as u32,
     );
+    #[cfg(target_arch = "wasm32")]
+    {
+        let indirect_buffer = scene
+            .indirect_draws
+            .buffer
+            .cpu_buffer
+            .read::<DrawIndirect>(0, scene.indirect_draws.len())
+            .context(BufferSnafu)?;
+        for indirect in indirect_buffer.into_iter() {
+            if indirect.instance_count == 0 || indirect.vertex_count == 0 {
+                continue;
+            }
+            let id = indirect.base_instance;
+            render_pass.draw(0..indirect.vertex_count, id..id + 1);
+        }
+    }
+
     drop(render_pass);
 
     queue.submit(std::iter::once(encoder.finish()));

@@ -4,8 +4,8 @@ use image::{DynamicImage, Rgba, Rgba32FImage};
 use snafu::prelude::*;
 use std::path::{Path, PathBuf};
 
-const TEST_IMG_DIR: &'static str = "../../test_img";
-const TEST_OUTPUT_DIR: &'static str = "../../test_output";
+const TEST_IMG_DIR: &str = "../../test_img";
+const TEST_OUTPUT_DIR: &str = "../../test_output";
 
 #[derive(Debug, Snafu)]
 enum ImgDiffError {

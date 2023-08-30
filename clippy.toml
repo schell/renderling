@@ -1,0 +1,4 @@
+disallowed-methods = [
+    "glam::Vec3::normalize_or_zero",
+    "glam::Vec4::normalize_or_zero"
+]

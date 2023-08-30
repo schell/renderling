@@ -13,7 +13,7 @@ pub struct Ui {
 }
 
 impl Ui {
-    pub fn new(gpui: &mut Gpui, font_dir: impl AsRef<std::path::Path>) -> Self {
+    pub async fn new(gpui: &mut Gpui, font_dir: impl AsRef<std::path::Path>) -> Self {
         // get the fonts for the UI
         let fonts = [
             "Recursive Mn Lnr St Med Nerd Font Complete.ttf",
@@ -21,17 +21,8 @@ impl Ui {
         ];
         for path in fonts {
             let path = font_dir.as_ref().join(path);
-            let bytes: Vec<u8> = match std::fs::read(&path) {
-                Err(e) => {
-                    let cwd = std::env::current_dir().unwrap();
-                    panic!(
-                        "Could not load path '{}' from current directory '{}':\n {e}",
-                        path.display(),
-                        cwd.display()
-                    );
-                }
-                Ok(bytes) => bytes,
-            };
+            let path = format!("{}", path.display());
+            let bytes: Vec<u8> = loading_bytes::load(&path).await.unwrap();
             let font = FontArc::try_from_vec(bytes).unwrap();
             gpui.add_font(font);
         }

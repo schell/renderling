@@ -1,14 +1,17 @@
 //! Runs through all the gltf sample models to test and show-off renderling's
 //! gltf capabilities.
-//!
-//! This demo requires an internet connection to download the samples.
-use std::time::Instant;
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+};
+
+use instant::Instant;
 
 use renderling::{
     debug::DebugChannel,
     math::{Mat4, Vec3, Vec4},
-    GltfLoader, GpuEntity, Renderling, Scene, SceneImage, ScreenSize, TweenProperty, UiDrawObjects,
-    UiMode, UiVertex, ViewMut, RenderGraphConfig,
+    GltfLoader, GpuEntity, RenderGraphConfig, Renderling, Scene, SceneImage, ScreenSize,
+    TweenProperty, UiDrawObjects, UiMode, UiVertex, ViewMut,
 };
 use renderling_gpui::{Element, Gpui};
 use winit::event::KeyboardInput;
@@ -28,10 +31,26 @@ const DARK_BLUE_BG_COLOR: Vec4 = Vec4::new(
     1.0,
 );
 
+pub enum SupportedFileType {
+    Gltf,
+    Hdr,
+}
+
+pub fn is_file_supported(file: impl AsRef<std::path::Path>) -> Option<SupportedFileType> {
+    log::info!("loading '{}'", file.as_ref().display());
+    let ext = file.as_ref().extension()?;
+    Some(match ext.to_str()? {
+        "hdr" => SupportedFileType::Hdr,
+        _ => SupportedFileType::Gltf,
+    })
+}
+
 struct App {
     loader: Option<GltfLoader>,
     entities: Vec<GpuEntity>,
     last_frame_instant: Instant,
+    default_skybox_image_bytes: Vec<u8>,
+    loads: Arc<Mutex<HashMap<std::path::PathBuf, Vec<u8>>>>,
 
     ui: Ui,
     gpui: Gpui,
@@ -51,7 +70,8 @@ struct App {
 }
 
 impl App {
-    fn new(r: &mut Renderling) -> Self {
+    async fn new(r: &mut Renderling) -> Self {
+        let default_skybox_image_bytes = loading_bytes::load("img/hdr/night.hdr").await.unwrap();
         r.set_background_color(DARK_BLUE_BG_COLOR);
         let radius = 6.0;
         let phi = 0.0;
@@ -59,7 +79,7 @@ impl App {
         let left_mb_down: bool = false;
         let last_cursor_position: Option<winit::dpi::PhysicalPosition<f64>> = None;
         let mut gpui = renderling_gpui::Gpui::new_from(r);
-        let ui = Ui::new(&mut gpui, "fonts");
+        let ui = Ui::new(&mut gpui, "fonts").await;
         let ui_texture = r.texture_from_wgpu_tex(gpui.get_frame_texture(), None);
         let ui_scene = r.new_ui_scene().with_canvas_size(1, 1).build();
         let ui_obj = ui_scene
@@ -75,7 +95,7 @@ impl App {
 
         // Create a placeholder scene
         let scene = r.new_scene().build().unwrap();
-        //r.setup_render_graph(Some(scene), Some(ui_scene), [ui_obj], false);
+        // r.setup_render_graph(Some(scene), Some(ui_scene), [ui_obj], false);
         r.setup_render_graph(RenderGraphConfig {
             scene: Some(scene),
             ui: Some(ui_scene),
@@ -86,6 +106,8 @@ impl App {
         let mut app = Self {
             loader: None,
             entities: vec![],
+            default_skybox_image_bytes,
+            loads: Arc::new(Mutex::new(HashMap::default())),
             ui,
             gpui,
             last_frame_instant: Instant::now(),
@@ -132,26 +154,19 @@ impl App {
         );
     }
 
-    fn load(&mut self, r: &mut Renderling, file: impl AsRef<std::path::Path>) {
-        log::info!("loading '{}'", file.as_ref().display());
-        if let Some(ext) = file.as_ref().extension() {
-            match ext.to_str() {
-                None => {
-                    self.ui.set_text_title("funky extension");
-                }
-                Some("hdr") => self.load_hdr_skybox(r, file),
-                Some(_) => self.load_gltf_model(r, file),
-            }
-        }
-    }
-
-    fn load_hdr_skybox(&mut self, r: &mut Renderling, file: impl AsRef<std::path::Path>) {
-        let img = SceneImage::from_hdr_path(file).unwrap();
+    fn load_hdr_skybox(&mut self, r: &mut Renderling, bytes: Vec<u8>) {
+        let img = SceneImage::from_hdr_bytes(&bytes).unwrap();
         let scene = r.graph.get_resource_mut::<Scene>().unwrap().unwrap();
         scene.set_skybox_img(Some(img));
+        self.default_skybox_image_bytes = bytes;
     }
 
-    fn load_gltf_model(&mut self, r: &mut Renderling, file: impl AsRef<std::path::Path>) {
+    fn load_gltf_model(
+        &mut self,
+        r: &mut Renderling,
+        path: impl AsRef<std::path::Path>,
+        bytes: Vec<u8>,
+    ) {
         self.phi = 0.0;
         self.theta = std::f32::consts::FRAC_PI_4;
         self.left_mb_down = false;
@@ -159,12 +174,12 @@ impl App {
 
         let mut builder = r
             .new_scene()
-            .with_skybox_image_from_path("img/hdr/night.hdr")
+            .with_skybox_image_from_bytes(&self.default_skybox_image_bytes)
             .with_debug_channel(DebugChannel::None);
         // let cross_loader =
         // builder.gltf_load("/Users/schell/code/renderling/gltf/origin_cross.glb").
         // unwrap();
-        let loader = match builder.gltf_load(&file) {
+        let loader = match builder.gltf_load_bytes(bytes) {
             Ok(loader) => loader,
             Err(msg) => {
                 self.ui.set_text_title(format!("Error: {}", msg));
@@ -194,7 +209,7 @@ impl App {
         let length = min.distance(max);
         let radius = length * 1.25;
 
-        let name = get_name(file);
+        let name = get_name(path);
         self.ui.set_text_title(format!("{name}"));
 
         self.radius = radius;
@@ -206,6 +221,17 @@ impl App {
 
         self.update_camera_view(r);
         self.ui.set_text_camera(self.get_updated_camera_text());
+    }
+
+    fn tick_loads(&mut self, r: &mut Renderling) {
+        let loaded = std::mem::take(&mut *self.loads.lock().unwrap());
+        for (path, bytes) in loaded.into_iter() {
+            match is_file_supported(&path) {
+                Some(SupportedFileType::Gltf) => self.load_gltf_model(r, path, bytes),
+                Some(SupportedFileType::Hdr) => self.load_hdr_skybox(r, bytes),
+                None => {}
+            }
+        }
     }
 
     fn zoom(&mut self, r: &mut Renderling, delta: f32) {
@@ -267,6 +293,31 @@ impl App {
             }
             _ => {}
         };
+    }
+
+    /// Queues a load operation.
+    fn load(&mut self, path: &str) {
+        let path = std::path::PathBuf::from(path);
+        let loads = self.loads.clone();
+
+        #[cfg(target_arch = "wasm32")]
+        {
+            wasm_bindgen_futures::spawn_local(async move {
+                let path_str = format!("{}", path.display());
+                let bytes = loading_bytes::load(&path_str).await.unwrap();
+                let mut loads = loads.lock().unwrap();
+                loads.insert(path, bytes);
+                log::debug!("loaded {path_str}");
+            });
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let _ = std::thread::spawn(move || {
+                let bytes = std::fs::read(&path).unwrap();
+                let mut loads = loads.lock().unwrap();
+                loads.insert(path, bytes);
+            });
+        }
     }
 
     fn resize(&mut self, r: &mut Renderling, width: u32, height: u32) {
@@ -342,17 +393,17 @@ fn get_name(path: impl AsRef<std::path::Path>) -> String {
 }
 
 /// Sets up the demo for a given model
-pub fn demo(
+pub async fn demo(
     r: &mut Renderling,
-    model: Option<std::path::PathBuf>,
-    skybox: Option<std::path::PathBuf>,
+    model: Option<impl AsRef<str>>,
+    skybox: Option<impl AsRef<str>>,
 ) -> impl FnMut(&mut Renderling, Option<&winit::event::WindowEvent>) {
-    let mut app = App::new(r);
+    let mut app = App::new(r).await;
     if let Some(file) = model {
-        app.load_gltf_model(r, file);
+        app.load(file.as_ref());
     }
     if let Some(file) = skybox {
-        app.load_hdr_skybox(r, file);
+        app.load(file.as_ref());
     }
     let mut event_state = renderling_gpui::EventState::default();
     move |r, ev: Option<&winit::event::WindowEvent>| {
@@ -387,7 +438,9 @@ pub fn demo(
                         .unwrap();
                 }
                 winit::event::WindowEvent::DroppedFile(path) => {
-                    app.load(r, path);
+                    log::trace!("got dropped file event: {}", path.display());
+                    let path = format!("{}", path.display());
+                    app.load(&path);
                 }
                 _ => {}
             }
@@ -412,6 +465,7 @@ pub fn demo(
                 }
             }
         } else {
+            app.tick_loads(r);
             app.update_camera_view(r);
             app.animate(r);
             app.gpui.layout(&mut app.ui);
@@ -428,7 +482,7 @@ mod test {
     #[test]
     fn sanity() {
         let mut gpui = renderling_gpui::Gpui::new(600, 300); //.with_background_color(DARK_BLUE_BG_COLOR);
-        let mut ui = Ui::new(&mut gpui, "../../fonts");
+        let mut ui = futures_lite::future::block_on(Ui::new(&mut gpui, "../../fonts"));
         ui.set_text_title("This is the title text");
         ui.set_text_camera("This is the camera text");
         gpui.layout(&mut ui);

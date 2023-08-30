@@ -1233,7 +1233,9 @@ mod test {
             .build();
         let scene = builder.build().unwrap();
         let (device, queue) = r.get_device_and_queue_owned();
-        let texture = scene.textures.read(&device, &queue, 0, 1).unwrap()[0];
+        let texture =
+            futures_lite::future::block_on(scene.textures.read_gpu(&device, &queue, 0, 1))
+                .unwrap()[0];
         println!("{texture:?}");
         r.setup_render_graph(RenderGraphConfig {
             scene: Some(scene),

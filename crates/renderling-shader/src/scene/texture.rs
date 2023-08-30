@@ -146,12 +146,10 @@ pub fn wrap(input: f32, mode: TextureAddressMode) -> f32 {
                 } else {
                     1.0 - t
                 }
-            } else {
-                if flip {
+            } else if flip {
                     1.0 - t
-                } else {
-                    t
-                }
+            } else {
+                t
             }
         }
         _ => clamp(input),

@@ -14,10 +14,11 @@ readme = "../../README.md"
 [features]
 default = ["gltf", "text", "raw-window-handle", "winit"]
 text = ["ab_glyph", "glyph_brush"]
-wasm = ["wgpu/webgl"]
+wasm = ["wgpu/fragile-send-sync-non-atomic-wasm"]
 
 [dependencies]
 ab_glyph = { version = "^0.2", optional = true }
+any_vec = "^0.13"
 async-channel = "^1.8"
 crunch = "^0.5"
 futures-lite = "^1.12"
@@ -27,6 +28,7 @@ moongraph = { version = "^0.3.4", features = ["dot"] }
 raw-window-handle = { version = "^0.5", optional = true }
 renderling-shader = { path = "../renderling-shader" }
 rustc-hash = "^1.1"
+send_wrapper = "0.6"
 snafu = "^0.7"
 
 image = { workspace = true, features = ["hdr"] }
@@ -45,4 +47,5 @@ ctor = "0.2.2"
 env_logger = "0.10.0"
 icosahedron = "^0.1"
 img-diff = { path = "../img-diff" }
+naga = { version = "^0.13", features = ["spv-in", "wgsl-out", "wgsl-in", "msl-out"] }
 pretty_assertions = "1.4.0"

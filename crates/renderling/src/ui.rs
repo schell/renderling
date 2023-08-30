@@ -252,11 +252,9 @@ impl UiDrawObject {
     ) -> Result<(), UiSceneError> {
         self.draw_params.update(queue);
         if let Some(texture) = self.updated_texture.take() {
-            log::trace!("updating UiDrawObject texture");
             self.texture_bindgroup = Some(ui_texture_bindgroup(device, &texture))
         }
         if let Some((vertices, may_indices)) = self.updated_vertices.take() {
-            log::trace!("updating UiDrawObject vertices");
             self.mesh.update(
                 device,
                 Some("UiDrawObject::update mesh"),

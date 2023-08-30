@@ -1,7 +1,9 @@
 //! Shader code for `renderling`.
 #![cfg_attr(target_arch = "spirv", no_std)]
+#![deny(clippy::disallowed_methods)]
 
 use bits::{bits, extract, insert};
+use spirv_std::num_traits::Zero;
 
 pub mod bits;
 pub mod convolution;
@@ -14,6 +16,32 @@ pub mod scene;
 pub mod skybox;
 pub mod tonemapping;
 pub mod ui;
+
+/// Additional methods for vector types.
+pub trait IsVector {
+    /// Normalize or return zero.
+    ///
+    /// This is required instead of using [`glam::Vec3::normalize_or_zero`],
+    /// because that compares against `f32::INFINITY`, which causes an error
+    /// in naga's WGSL output.
+    ///
+    /// See [this issue](https://github.com/gfx-rs/naga/issues/2461) and `crate::linkage::test`
+    /// for more info.
+    fn alt_norm_or_zero(&self) -> Self;
+}
+
+impl IsVector for glam::Vec3 {
+    fn alt_norm_or_zero(&self) -> Self {
+        let n = self.normalize();
+        if n.length().is_zero() {
+            glam::Vec3::ZERO
+        } else {
+            n
+        }
+    }
+}
+
+
 
 /// Boolean toggles that cause the renderer to turn on/off certain features.
 #[repr(transparent)]

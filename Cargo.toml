@@ -1,6 +1,8 @@
 [workspace]
 members = [
     "crates/example",
+    "crates/example-wasm",
+    "crates/loading-bytes",
     "crates/renderling",
     "crates/renderling-shader",
     "crates/renderling-gpui",
@@ -18,4 +20,4 @@ image = "^0.24"
 log = "^0.4"
 glam = "^0.24"
 winit = { version = "^0.27" }
-wgpu = { git = 'https://github.com/gfx-rs/wgpu.git' }
+wgpu = { version = "^0.17" }

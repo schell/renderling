@@ -216,17 +216,6 @@ pub async fn new_adapter_device_queue_and_target<'a>(
         instance: &wgpu::Instance,
         compatible_surface: Option<&wgpu::Surface>,
     ) -> wgpu::Adapter {
-        instance
-            .enumerate_adapters(wgpu::Backends::all())
-            .for_each(|adapter| {
-                let info = adapter.get_info();
-                log::trace!(
-                    "found adapter: '{}' backend:{:?} driver:'{}'",
-                    info.name,
-                    info.backend,
-                    info.driver
-                );
-            });
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
                 power_preference: wgpu::PowerPreference::default(),
@@ -249,7 +238,6 @@ pub async fn new_adapter_device_queue_and_target<'a>(
         adapter
             .request_device(
                 &wgpu::DeviceDescriptor {
-                    // TODO: WASM: Review device features
                     features: wgpu::Features::INDIRECT_FIRST_INSTANCE
                         | wgpu::Features::MULTI_DRAW_INDIRECT
                         // this one is a funny requirement, it seems it is needed if using storage buffers in

@@ -68,7 +68,6 @@ impl Mesh {
         vertices: impl IntoIterator<Item = V>,
         may_indices: Option<impl IntoIterator<Item = u16>>,
     ) {
-        log::trace!("updating mesh vertices");
         let vertices = vertices.into_iter().collect::<Vec<_>>();
         self.vertex_buffer_len = vertices.len();
         self.vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -78,7 +77,6 @@ impl Mesh {
         });
         self.vertex_indices = if let Some(indices) = may_indices {
             let indices = indices.into_iter().collect::<Vec<_>>();
-            log::trace!("updating mesh indices");
             let buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label,
                 contents: bytemuck::cast_slice(&indices),
