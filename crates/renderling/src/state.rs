@@ -259,7 +259,28 @@ pub async fn new_adapter_device_queue_and_target<'a>(
     if let Some(create_surface) = create_surface {
         let surface = (create_surface)(&instance).unwrap();
         let adapter = adapter(&instance, Some(&surface)).await;
-        let surface_config = surface.get_default_config(&adapter, width, height).unwrap();
+        let surface_caps = surface.get_capabilities(&adapter);
+        let fmt = if surface_caps
+            .formats
+            .contains(&wgpu::TextureFormat::Rgba8UnormSrgb)
+        {
+            wgpu::TextureFormat::Rgba8UnormSrgb
+        } else {
+            surface_caps
+                .formats
+                .iter()
+                .copied()
+                .find(|f| f.is_srgb())
+                .unwrap_or(surface_caps.formats[0])
+        };
+        let view_fmts = if fmt.is_srgb() {
+           vec![]
+        } else {
+            vec![fmt.add_srgb_suffix()]
+        };
+        log::debug!("surface capabilities: {surface_caps:#?}");
+        let mut surface_config = surface.get_default_config(&adapter, width, height).unwrap();
+        surface_config.view_formats = view_fmts;
         let (device, queue) = device(&adapter).await;
         surface.configure(&device, &surface_config);
         let target = RenderTarget::Surface {

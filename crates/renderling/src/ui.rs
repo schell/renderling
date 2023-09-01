@@ -156,7 +156,7 @@ pub fn create_ui_pipeline(
             module: &fragment_shader,
             entry_point: "ui_fragment",
             targets: &[Some(wgpu::ColorTargetState {
-                format,
+                format: format.add_srgb_suffix(),
                 blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                 write_mask: wgpu::ColorWrites::ALL,
             })],
