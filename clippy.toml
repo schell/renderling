@@ -1,0 +1,7 @@
+disallowed-methods = [
+    "glam::Vec2::normalize_or_zero",
+    "glam::Vec3::normalize_or_zero",
+    "glam::Vec4::normalize_or_zero",
+    "glam::Mat4::to_scale_rotation_translation",
+    "f32::signum"
+]

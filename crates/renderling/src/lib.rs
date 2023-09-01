@@ -32,7 +32,7 @@
 //!   - [x] animations
 //! - [x] high definition rendering
 //! - [x] image based lighting
-//! - [ ] bloom
+//! - [x] bloom
 //! - [ ] ssao
 //! - [ ] depth of field
 //!
@@ -48,6 +48,7 @@ pub mod cubemap;
 pub mod frame;
 mod hdr;
 pub mod ibl;
+mod linkage;
 pub mod math;
 pub mod mesh;
 mod renderer;
@@ -146,6 +147,11 @@ pub fn setup_render_graph(
 
     // pre-render subgraph
     use frame::{clear_depth, create_frame, present};
+
+    #[cfg(not(target_arch = "wasm32"))]
+    let scene_cull = scene_cull_gpu;
+    #[cfg(target_arch = "wasm32")]
+    let scene_cull = scene_cull_cpu;
     r.graph
         .add_subgraph(graph!(
             create_frame,
@@ -581,7 +587,7 @@ mod test {
             Vec4::new(1.0, 0.0, 0.0, 0.0),
             Vec4::new(1.0, 1.0, 0.0, 0.0),
         ];
-        let mut array = GpuArray::new(
+        let mut array = BufferArray::new_gpu(
             &device,
             &points,
             6,
@@ -593,7 +599,7 @@ mod test {
         // send them to the GPU
         array.update(&queue);
         // read them back
-        let verts = array.read(&device, &queue, 0, 3).unwrap();
+        let verts = futures_lite::future::block_on(array.read_gpu(&device, &queue, 0, 3)).unwrap();
 
         println!("{verts:#?}");
         assert_eq!(points, verts);
@@ -603,7 +609,7 @@ mod test {
         assert_eq!((2, 2), (start_index, len));
 
         array.update(&queue);
-        let verts = array.read(&device, &queue, 0, 4).unwrap();
+        let verts = futures_lite::future::block_on(array.read_gpu(&device, &queue, 0, 4)).unwrap();
         let all_points = points[0..2]
             .into_iter()
             .copied()
@@ -654,30 +660,40 @@ mod test {
         });
 
         r.graph.visit(scene::scene_update).unwrap().unwrap();
-        r.graph.visit(scene::scene_cull).unwrap().unwrap();
+        r.graph.visit(scene::scene_cull_gpu).unwrap().unwrap();
 
         let (constants, gpu_verts, ents, indirect) = r
             .graph
             .visit(
                 |(scene, device, queue): (View<Scene>, View<Device>, View<Queue>)| {
-                    let constants = crate::read_buffer::<GpuConstants>(
-                        &device,
-                        &queue,
-                        &scene.constants.buffer(),
-                        0,
-                        1,
+                    let constants =
+                        futures_lite::future::block_on(crate::read_buffer::<GpuConstants>(
+                            &device,
+                            &queue,
+                            &scene.constants.buffer(),
+                            0,
+                            1,
+                        ))
+                        .unwrap();
+                    let vertices = futures_lite::future::block_on(
+                        scene.vertices.read_gpu(&device, &queue, 0, 3),
                     )
                     .unwrap();
-                    let vertices = scene.vertices.read(&device, &queue, 0, 3).unwrap();
-                    let entities = scene
-                        .entities
-                        .read(&device, &queue, 0, scene.entities.capacity())
-                        .unwrap();
+                    let entities = futures_lite::future::block_on(scene.entities.read_gpu(
+                        &device,
+                        &queue,
+                        0,
+                        scene.entities.capacity(),
+                    ))
+                    .unwrap();
                     let indirect = if scene.entities.capacity() > 0 {
-                        scene
-                            .indirect_draws
-                            .read(&device, &queue, 0, scene.entities.capacity())
-                            .unwrap()
+                        futures_lite::future::block_on(scene.indirect_draws.read_gpu(
+                            &device,
+                            &queue,
+                            0,
+                            scene.entities.capacity(),
+                        ))
+                        .unwrap()
                     } else {
                         vec![]
                     };
@@ -785,10 +801,13 @@ mod test {
         let img = r.render_image().unwrap();
 
         let scene = r.graph.get_resource::<Scene>().unwrap().unwrap();
-        let draws = scene
-            .indirect_draws
-            .read(r.get_device(), r.get_queue(), 0, 2)
-            .unwrap();
+        let draws = futures_lite::future::block_on(scene.indirect_draws.read_gpu(
+            r.get_device(),
+            r.get_queue(),
+            0,
+            2,
+        ))
+        .unwrap();
         assert_eq!(
             vec![
                 DrawIndirect {
@@ -806,20 +825,23 @@ mod test {
             ],
             draws
         );
-        let constants: GpuConstants = read_buffer(
+        let constants: GpuConstants = futures_lite::future::block_on(read_buffer(
             r.get_device(),
             r.get_queue(),
             &scene.constants.buffer(),
             0,
             1,
-        )
+        ))
         .unwrap()[0];
         assert_eq!(UVec2::splat(256), constants.atlas_size);
 
-        let materials = scene
-            .materials
-            .read(r.get_device(), r.get_queue(), 0, 1)
-            .unwrap();
+        let materials = futures_lite::future::block_on(scene.materials.read_gpu(
+            r.get_device(),
+            r.get_queue(),
+            0,
+            1,
+        ))
+        .unwrap();
         assert_eq!(
             vec![PbrMaterial {
                 albedo_texture: Id::new(0),
@@ -1358,14 +1380,15 @@ mod test {
             ..Default::default()
         });
 
-        let gpu_entities = r
-            .graph
-            .get_resource::<Scene>()
-            .unwrap()
-            .unwrap()
-            .entities
-            .read(r.get_device(), r.get_queue(), 0, entities.len())
-            .unwrap();
+        let gpu_entities = futures_lite::future::block_on(
+            r.graph
+                .get_resource::<Scene>()
+                .unwrap()
+                .unwrap()
+                .entities
+                .read_gpu(r.get_device(), r.get_queue(), 0, entities.len()),
+        )
+        .unwrap();
         assert_eq!(entities, gpu_entities);
 
         let img = r.render_image().unwrap();

@@ -17,7 +17,7 @@ use spirv_std::num_traits::*;
 use crate::{
     bits::{bits, extract, insert},
     debug::*,
-    pbr, GpuToggles, Id, ID_NONE,
+    pbr, GpuToggles, Id, IsMatrix, IsVector, ID_NONE,
 };
 
 mod texture;
@@ -146,7 +146,8 @@ impl GpuVertex {
         let d_uv1 = b.uv.xy() - a.uv.xy();
         let d_uv2 = c.uv.xy() - a.uv.xy();
         let denom = d_uv1.x * d_uv2.y - d_uv2.x * d_uv1.y;
-        let denom = denom.abs().max(f32::EPSILON) * denom.signum();
+        let denom_sign = if denom >= 0.0 { 1.0 } else { -1.0 };
+        let denom = denom.abs().max(f32::EPSILON) * denom_sign;
         let f = 1.0 / denom;
         let s = f * Vec3::new(
             d_uv2.y * ab.x - d_uv1.y * ac.x,
@@ -158,11 +159,10 @@ impl GpuVertex {
             d_uv1.x * ac.y - d_uv2.x * ab.y,
             d_uv1.x * ac.z - d_uv2.x * ab.z,
         );
-        let tangent = (s - s.dot(n) * n)
-            .normalize_or_zero()
-            .extend(n.cross(t).dot(s).signum());
-
-        tangent
+        let n_cross_t_dot_s_sign = if n.cross(t).dot(s) >= 0.0 { 1.0 } else { -1.0 };
+        (s - s.dot(n) * n)
+            .alt_norm_or_zero()
+            .extend(n_cross_t_dot_s_sign)
     }
 }
 
@@ -174,11 +174,11 @@ pub struct LightType(u32);
 #[cfg(not(target_arch = "spirv"))]
 impl core::fmt::Display for LightType {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        let s = match self {
-            &Self::END_OF_LIGHTS => "end of lights",
-            &Self::POINT_LIGHT => "point light",
-            &Self::SPOT_LIGHT => "spot light",
-            &Self::DIRECTIONAL_LIGHT => "directional light",
+        let s = match *self {
+            Self::END_OF_LIGHTS => "end of lights",
+            Self::POINT_LIGHT => "point light",
+            Self::SPOT_LIGHT => "spot light",
+            Self::DIRECTIONAL_LIGHT => "directional light",
             _ => "unsupported light",
         };
         f.write_str(s)
@@ -382,7 +382,7 @@ impl GpuEntity {
                 break;
             }
         }
-        let (s, r, t) = mat.to_scale_rotation_translation();
+        let (s, r, t) = mat.to_scale_rotation_translation_or_id();
         (t, r, s)
     }
 
@@ -479,6 +479,7 @@ fn texture_color(
     color
 }
 
+#[allow(clippy::too_many_arguments)]
 /// Scene vertex shader.
 pub fn main_vertex_scene(
     // which entity are we drawing
@@ -507,7 +508,7 @@ pub fn main_vertex_scene(
 
     let (position, rotation, scale) = if entity.info.is_skin() {
         let skin_mat = vertex.get_skin_matrix(&entity.skin_joint_ids, entities);
-        let (s, r, t) = skin_mat.to_scale_rotation_translation();
+        let (s, r, t) = skin_mat.to_scale_rotation_translation_or_id();
         (t, r, s)
     } else {
         entity.get_world_transform(entities)
@@ -519,15 +520,15 @@ pub fn main_vertex_scene(
     *out_uv1 = vertex.uv.zw();
 
     let scale2 = scale * scale;
-    let normal = vertex.normal.xyz().normalize_or_zero();
-    let tangent = vertex.tangent.xyz().normalize_or_zero();
+    let normal = vertex.normal.xyz().alt_norm_or_zero();
+    let tangent = vertex.tangent.xyz().alt_norm_or_zero();
     let normal_w = (model_matrix * (normal / scale2).extend(0.0))
         .xyz()
-        .normalize_or_zero();
+        .alt_norm_or_zero();
     let tangent_w = (model_matrix * tangent.extend(0.0))
         .xyz()
-        .normalize_or_zero();
-    let bitangent_w = normal_w.cross(tangent_w) * vertex.tangent.w.signum();
+        .alt_norm_or_zero();
+    let bitangent_w = normal_w.cross(tangent_w) * if vertex.tangent.w >= 0.0 { 1.0 } else { -1.0 };
     *out_tangent = tangent_w;
     *out_bitangent = bitangent_w;
     *out_norm = normal_w;
@@ -537,6 +538,7 @@ pub fn main_vertex_scene(
     *gl_pos = constants.camera_projection * constants.camera_view * view_pos;
 }
 
+#[allow(clippy::too_many_arguments)]
 /// Scene fragment shader.
 pub fn main_fragment_scene(
     atlas: &Image2d,
@@ -652,14 +654,14 @@ pub fn main_fragment_scene(
         (in_norm, Vec3::ZERO)
     } else {
         // convert the normal from color coords to tangent space -1,1
-        let sampled_norm = (normal_tex_color.xyz() * 2.0 - Vec3::splat(1.0)).normalize_or_zero();
+        let sampled_norm = (normal_tex_color.xyz() * 2.0 - Vec3::splat(1.0)).alt_norm_or_zero();
         let tbn = mat3(
-            in_tangent.normalize_or_zero(),
-            in_bitangent.normalize_or_zero(),
-            in_norm.normalize_or_zero(),
+            in_tangent.alt_norm_or_zero(),
+            in_bitangent.alt_norm_or_zero(),
+            in_norm.alt_norm_or_zero(),
         );
         // convert the normal from tangent space to world space
-        let norm = (tbn * sampled_norm).normalize_or_zero();
+        let norm = (tbn * sampled_norm).alt_norm_or_zero();
         (norm, sampled_norm)
     };
 
@@ -689,7 +691,7 @@ pub fn main_fragment_scene(
     );
 
     fn colorize(u: Vec3) -> Vec4 {
-        ((u.normalize_or_zero() + Vec3::splat(1.0)) / 2.0).extend(1.0)
+        ((u.alt_norm_or_zero() + Vec3::splat(1.0)) / 2.0).extend(1.0)
     }
 
     match constants.debug_mode.into() {
@@ -787,9 +789,7 @@ pub fn main_fragment_scene(
             brdf,
             lights,
         ),
-        _unlit => {
-            in_color * albedo_tex_color * material.albedo_factor
-        }
+        _unlit => in_color * albedo_tex_color * material.albedo_factor,
     };
 
     // write the brightest colors for the bloom effect

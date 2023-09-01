@@ -11,7 +11,7 @@ use spirv_std::{
 #[cfg(target_arch = "spirv")]
 use spirv_std::num_traits::Float;
 
-use crate::{pbr, scene::GpuConstants};
+use crate::{pbr, scene::GpuConstants, IsVector};
 
 fn radical_inverse_vdc(mut bits: u32) -> f32 {
     bits = (bits << 16u32) | (bits >> 16u32);
@@ -19,7 +19,7 @@ fn radical_inverse_vdc(mut bits: u32) -> f32 {
     bits = ((bits & 0x33333333u32) << 2u32) | ((bits & 0xCCCCCCCCu32) >> 2u32);
     bits = ((bits & 0x0F0F0F0Fu32) << 4u32) | ((bits & 0xF0F0F0F0u32) >> 4u32);
     bits = ((bits & 0x00FF00FFu32) << 8u32) | ((bits & 0xFF00FF00u32) >> 8u32);
-    (bits as f32) * 2.3283064365386963e-10 // / 0x100000000
+    (bits as f32) * 2.328_306_4e-10 // / 0x100000000
 }
 
 fn hammersley(i: u32, n: u32) -> Vec2 {
@@ -42,11 +42,11 @@ fn importance_sample_ggx(xi: Vec2, n: Vec3, roughness: f32) -> Vec3 {
     } else {
         Vec3::new(1.0, 0.0, 0.0)
     };
-    let tangent = up.cross(n).normalize_or_zero();
+    let tangent = up.cross(n).alt_norm_or_zero();
     let bitangent = n.cross(tangent);
 
     let result = tangent * h.x + bitangent * h.y + n * h.z;
-    result.normalize_or_zero()
+    result.alt_norm_or_zero()
 }
 
 fn geometry_schlick_ggx(n_dot_v: f32, roughness: f32) -> f32 {
@@ -86,7 +86,7 @@ pub fn integrate_brdf(mut n_dot_v: f32, roughness: f32) -> Vec2 {
     for i in 1..SAMPLE_COUNT {
         let xi = hammersley(i, SAMPLE_COUNT);
         let h = importance_sample_ggx(xi, n, roughness);
-        let l = (2.0 * v.dot(h) * h - v).normalize_or_zero();
+        let l = (2.0 * v.dot(h) * h - v).alt_norm_or_zero();
 
         let n_dot_l = l.z.max(0.0);
         let n_dot_h = h.z.max(0.0);
@@ -125,7 +125,7 @@ pub fn integrate_brdf_doesnt_work(mut n_dot_v: f32, roughness: f32) -> Vec2 {
 
         let xi = hammersley(i, SAMPLE_COUNT);
         let h = importance_sample_ggx(xi, n, roughness);
-        let l = (2.0 * v.dot(h) * h - v).normalize_or_zero();
+        let l = (2.0 * v.dot(h) * h - v).alt_norm_or_zero();
 
         let n_dot_l = l.z.max(0.0);
         let n_dot_h = h.z.max(0.0);
@@ -166,7 +166,7 @@ pub fn fragment_prefilter_environment_cubemap(
     in_pos: Vec3,
     frag_color: &mut Vec4,
 ) {
-    let mut n = in_pos.normalize_or_zero();
+    let mut n = in_pos.alt_norm_or_zero();
     // `wgpu` and vulkan's y coords are flipped from opengl
     n.y *= -1.0;
     // These moves are redundant but the names have connections to the PBR
@@ -180,7 +180,7 @@ pub fn fragment_prefilter_environment_cubemap(
     for i in 0..SAMPLE_COUNT {
         let xi = hammersley(i, SAMPLE_COUNT);
         let h = importance_sample_ggx(xi, n, *roughness);
-        let l = (2.0 * v.dot(h) * h - v).normalize_or_zero();
+        let l = (2.0 * v.dot(h) * h - v).alt_norm_or_zero();
 
         let n_dot_l = n.dot(l).max(0.0);
         if n_dot_l > 0.0 {
@@ -254,6 +254,7 @@ pub fn fragment_bloom(
         Vec2::new(0.0, 1.0)
     };
 
+    #[allow(clippy::needless_range_loop)]
     for i in 1..5 {
         let offset = sample_offset * texel_offset * i as f32;
         result += texture.sample_by_lod(*sampler, in_uv + offset, 0.0).xyz() * weight[i];

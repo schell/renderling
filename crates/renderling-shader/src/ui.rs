@@ -78,6 +78,7 @@ impl Default for UiDrawParams {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn vertex(
     constants: &UiConstants,
     params: &UiDrawParams,

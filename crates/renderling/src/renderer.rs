@@ -224,6 +224,12 @@ impl Renderling {
     }
 
     #[cfg(feature = "raw-window-handle")]
+    pub async fn from_window_async(window: &winit::window::Window) -> Self {
+        let inner_size = window.inner_size();
+        Self::try_from_raw_window(inner_size.width, inner_size.height, window).await.unwrap()
+    }
+
+    #[cfg(all(feature = "raw-window-handle", not(target_arch = "wasm32")))]
     pub fn try_from_raw_window_handle(
         window_handle: &(impl raw_window_handle::HasRawWindowHandle
               + raw_window_handle::HasRawDisplayHandle),
@@ -233,7 +239,7 @@ impl Renderling {
         futures_lite::future::block_on(Self::try_from_raw_window(width, height, window_handle))
     }
 
-    #[cfg(all(feature = "winit", feature = "raw-window-handle"))]
+    #[cfg(all(feature = "winit", feature = "raw-window-handle", not(target_arch = "wasm32")))]
     pub fn try_from_window(window: &winit::window::Window) -> Result<Self, RenderlingError> {
         let inner_size = window.inner_size();
         Self::try_from_raw_window_handle(window, inner_size.width, inner_size.height)

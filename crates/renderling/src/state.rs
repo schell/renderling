@@ -216,17 +216,6 @@ pub async fn new_adapter_device_queue_and_target<'a>(
         instance: &wgpu::Instance,
         compatible_surface: Option<&wgpu::Surface>,
     ) -> wgpu::Adapter {
-        instance
-            .enumerate_adapters(wgpu::Backends::all())
-            .for_each(|adapter| {
-                let info = adapter.get_info();
-                log::trace!(
-                    "found adapter: '{}' backend:{:?} driver:'{}'",
-                    info.name,
-                    info.backend,
-                    info.driver
-                );
-            });
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
                 power_preference: wgpu::PowerPreference::default(),
@@ -249,13 +238,12 @@ pub async fn new_adapter_device_queue_and_target<'a>(
         adapter
             .request_device(
                 &wgpu::DeviceDescriptor {
-                    // TODO: WASM: Review device features
                     features: wgpu::Features::INDIRECT_FIRST_INSTANCE
                         | wgpu::Features::MULTI_DRAW_INDIRECT
                         // this one is a funny requirement, it seems it is needed if using storage buffers in
                         // vertex shaders, even if those shaders are read-only
                         | wgpu::Features::VERTEX_WRITABLE_STORAGE
-                        | wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES
+                        //| wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES
                         //// when debugging rust-gpu shader miscompilation it's nice to have this
                         //| wgpu::Features::SPIRV_SHADER_PASSTHROUGH
                         ,
@@ -271,7 +259,28 @@ pub async fn new_adapter_device_queue_and_target<'a>(
     if let Some(create_surface) = create_surface {
         let surface = (create_surface)(&instance).unwrap();
         let adapter = adapter(&instance, Some(&surface)).await;
-        let surface_config = surface.get_default_config(&adapter, width, height).unwrap();
+        let surface_caps = surface.get_capabilities(&adapter);
+        let fmt = if surface_caps
+            .formats
+            .contains(&wgpu::TextureFormat::Rgba8UnormSrgb)
+        {
+            wgpu::TextureFormat::Rgba8UnormSrgb
+        } else {
+            surface_caps
+                .formats
+                .iter()
+                .copied()
+                .find(|f| f.is_srgb())
+                .unwrap_or(surface_caps.formats[0])
+        };
+        let view_fmts = if fmt.is_srgb() {
+           vec![]
+        } else {
+            vec![fmt.add_srgb_suffix()]
+        };
+        log::debug!("surface capabilities: {surface_caps:#?}");
+        let mut surface_config = surface.get_default_config(&adapter, width, height).unwrap();
+        surface_config.view_formats = view_fmts;
         let (device, queue) = device(&adapter).await;
         surface.configure(&device, &surface_config);
         let target = RenderTarget::Surface {

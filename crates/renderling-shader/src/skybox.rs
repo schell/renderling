@@ -6,9 +6,9 @@ use spirv_std::{image::{Image2d, Cubemap}, Sampler};
 #[cfg(target_arch = "spirv")]
 use spirv_std::num_traits::Float;
 
-use crate::{math, scene::GpuConstants};
+use crate::{math, scene::GpuConstants, IsVector};
 
-const INV_ATAN: Vec2 = Vec2::new(0.1591, 0.3183);
+const INV_ATAN: Vec2 = Vec2::new(0.1591, core::f32::consts::FRAC_1_PI);
 
 /// Takes a unit direction and converts it to a uv lookup in an equirectangular
 /// map.
@@ -35,7 +35,7 @@ pub fn fragment_cubemap(
     local_pos: Vec3,
     out_color: &mut Vec4,
 ) {
-    let env_color: Vec3 = texture.sample(*sampler, local_pos.normalize_or_zero()).xyz();
+    let env_color: Vec3 = texture.sample(*sampler, local_pos.alt_norm_or_zero()).xyz();
     *out_color = env_color.extend(1.0);
 }
 
@@ -60,7 +60,7 @@ pub fn fragment_equirectangular(
     local_pos: Vec3,
     out_color: &mut Vec4,
 ) {
-    let uv = direction_to_equirectangular_uv(local_pos.normalize_or_zero());
+    let uv = direction_to_equirectangular_uv(local_pos.alt_norm_or_zero());
     let env_color: Vec3 = texture.sample(*sampler, uv).xyz();
     *out_color = env_color.extend(1.0);
 }
