@@ -4,14 +4,19 @@ use core::marker::PhantomData;
 pub const ID_NONE: u32 = u32::MAX;
 
 /// An identifier.
-#[derive(Ord)]
 #[repr(transparent)]
 #[derive(bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Id<T>(pub(crate) u32, PhantomData<T>);
 
 impl<T> PartialOrd for Id<T> {
     fn partial_cmp(&self, other: &Self) -> Option<core::cmp::Ordering> {
-        self.0.partial_cmp(&other.0)
+        Some(self.0.cmp(&other.0))
+    }
+}
+
+impl<T> Ord for Id<T> {
+    fn cmp(&self, other: &Self) -> core::cmp::Ordering {
+        self.0.cmp(&other.0)
     }
 }
 
@@ -19,7 +24,7 @@ impl<T> Copy for Id<T> {}
 
 impl<T> Clone for Id<T> {
     fn clone(&self) -> Self {
-        Self(self.0.clone(), PhantomData)
+        *self
     }
 }
 

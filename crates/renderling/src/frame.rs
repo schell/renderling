@@ -8,17 +8,21 @@ use crate::{
     RenderTarget, ScreenSize, WgpuStateError,
 };
 
-fn default_frame_texture_view(frame_texture: &wgpu::Texture) -> wgpu::TextureView {
-    frame_texture.create_view(&wgpu::TextureViewDescriptor {
+fn default_frame_texture_view(
+    frame_texture: &wgpu::Texture,
+) -> (wgpu::TextureView, wgpu::TextureFormat) {
+    let format = frame_texture.format().add_srgb_suffix();
+    let view = frame_texture.create_view(&wgpu::TextureViewDescriptor {
         label: Some("WgpuState::default_frame_texture_view"),
-        format: None,
+        format: Some(format),
         dimension: None,
         aspect: wgpu::TextureAspect::All,
         base_mip_level: 0,
         mip_level_count: None,
         base_array_layer: 0,
         array_layer_count: None,
-    })
+    });
+    (view, format)
 }
 
 pub struct FrameTextureView {
@@ -39,8 +43,7 @@ pub fn create_frame(
     render_target: View<RenderTarget>,
 ) -> Result<(Frame, FrameTextureView), WgpuStateError> {
     let frame = render_target.get_current_frame()?;
-    let format = render_target.format();
-    let frame_view = default_frame_texture_view(frame.texture());
+    let (frame_view, format) = default_frame_texture_view(frame.texture());
     Ok((
         frame,
         FrameTextureView {

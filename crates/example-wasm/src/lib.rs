@@ -1,44 +1,49 @@
-//! Main entry point for the gltf viewer.
-use renderling::Renderling;
-use clap::Parser;
 use example::gltf;
+use renderling::Renderling;
+use wasm_bindgen::prelude::*;
+#[cfg(target_arch = "wasm32")]
+use winit::platform::web::WindowExtWebSys;
 
-#[derive(Parser)]
-#[command(author, version, about)]
-struct Cli {
-    /// Optional gltf model to load at startup
-    #[arg(short, long)]
-    model: Option<String>,
+#[wasm_bindgen(start)]
+pub async fn main() {
+    std::panic::set_hook(Box::new(console_error_panic_hook::hook));
+    fern::Dispatch::new()
+        .level(log::LevelFilter::Debug)
+        .level_for("wgpu", log::LevelFilter::Error)
+        .level_for("naga", log::LevelFilter::Error)
+        .chain(fern::Output::call(console_log::log))
+        .apply()
+        .unwrap();
 
-    /// Optional HDR image to use as skybox at startup
-    #[arg(short, long)]
-    skybox: Option<String>
-}
-
-fn run() -> Result<(), anyhow::Error> {
-    let cli = Cli::parse();
-
-    env_logger::Builder::default()
-        .filter_module("example", log::LevelFilter::Trace)
-        .filter_module("renderling", log::LevelFilter::Trace)
-        //.filter_module("naga", log::LevelFilter::Warn)
-        .filter_module("wgpu", log::LevelFilter::Warn)
-        .init();
-
-    let event_loop = winit::event_loop::EventLoop::new();
+        let event_loop = winit::event_loop::EventLoop::new();
     let window_size = winit::dpi::LogicalSize {
         width: 800,
         height: 600,
     };
-    let window_builder = winit::window::WindowBuilder::new()
+    let window = winit::window::WindowBuilder::new()
         .with_inner_size::<winit::dpi::LogicalSize<u32>>(window_size)
-        .with_title("renderling gltf viewer");
-    let window = window_builder.build(&event_loop)?;
-
-    // Set up a new renderling
-    let mut r = Renderling::try_from_window(&window).unwrap();
+        .with_title("renderling gltf viewer")
+        .build(&event_loop)
+        .unwrap();
+    #[cfg(target_arch = "wasm32")]
+    {
+        let dom_window = web_sys::window().unwrap();
+        let dom_doc = dom_window.document().unwrap();
+        let dom_body = dom_doc.body().unwrap();
+        let dom_canvas = web_sys::Element::from(window.canvas());
+        dom_body.append_child(&dom_canvas).unwrap();
+    }
+    let mut r = Renderling::from_window_async(&window).await;
     let mut run_current_frame: Box<dyn FnMut(&mut Renderling, Option<&winit::event::WindowEvent>)> =
-        Box::new(futures_lite::future::block_on(gltf::demo(&mut r, cli.model, cli.skybox)));
+        Box::new(
+            gltf::demo(
+                &mut r,
+                Some("gltf/cube.glb"),
+                Some("img/hdr/resting_place.hdr"),
+            )
+            .await,
+        );
+
     event_loop.run(move |event, _target, control_flow| {
         *control_flow = winit::event_loop::ControlFlow::Poll;
 
@@ -67,8 +72,4 @@ fn run() -> Result<(), anyhow::Error> {
             _ => {}
         }
     })
-}
-
-fn main() {
-    run().unwrap();
 }

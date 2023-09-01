@@ -112,6 +112,7 @@ impl From<DebugChannel> for DebugMode {
 impl From<DebugMode> for DebugChannel {
     fn from(value: DebugMode) -> DebugChannel {
         let all = DebugChannel::all();
+        #[allow(clippy::needless_range_loop)]
         for i in 0..all.len() {
             let channel = all[i];
             if channel as u32 == value.0 {

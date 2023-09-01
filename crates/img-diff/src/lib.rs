@@ -2,10 +2,10 @@
 use glam::{Vec4, Vec4Swizzles};
 use image::{DynamicImage, Rgba, Rgba32FImage};
 use snafu::prelude::*;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-const TEST_IMG_DIR: &'static str = "../../test_img";
-const TEST_OUTPUT_DIR: &'static str = "../../test_output";
+const TEST_IMG_DIR: &str = "../../test_img";
+const TEST_OUTPUT_DIR: &str = "../../test_output";
 
 #[derive(Debug, Snafu)]
 enum ImgDiffError {
@@ -66,8 +66,7 @@ pub fn assert_eq(filename: &str, lhs: impl Into<DynamicImage>, rhs: impl Into<Dy
     let lhs = lhs.into_rgba32f();
     let rhs = rhs.into().into_rgba32f();
     if let Some((diffs, diff_image)) = get_results(&lhs, &rhs, 0.5).unwrap() {
-        let right_image_path = Path::new(TEST_OUTPUT_DIR).join(filename);
-        let mut dir = PathBuf::from(right_image_path);
+        let mut dir = Path::new(TEST_OUTPUT_DIR).join(filename);
         dir.set_extension("");
         std::fs::create_dir_all(&dir).expect("cannot create test output dir");
         let expected = dir.join("expected.png");
@@ -96,9 +95,11 @@ pub fn assert_eq(filename: &str, lhs: impl Into<DynamicImage>, rhs: impl Into<Dy
 
 pub fn assert_img_eq(filename: &str, seen: impl Into<DynamicImage>) {
     let cwd = std::env::current_dir().expect("no cwd");
-    let lhs = image::open(Path::new(TEST_IMG_DIR).join(filename)).expect(&format!(
-        "can't open expected image '{}'",
-        cwd.join(filename).display()
-    ));
+    let lhs = image::open(Path::new(TEST_IMG_DIR).join(filename)).unwrap_or_else(|_| {
+        panic!(
+            "can't open expected image '{}'",
+            cwd.join(filename).display()
+        )
+    });
     assert_eq(filename, lhs, seen)
 }

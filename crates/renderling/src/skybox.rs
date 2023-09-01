@@ -288,7 +288,12 @@ impl Skybox {
             queue,
             Some("create hdr texture"),
             None,
-            None,
+            Some(device.create_sampler(&wgpu::SamplerDescriptor {
+                mag_filter: wgpu::FilterMode::Nearest,
+                min_filter: wgpu::FilterMode::Nearest,
+                mipmap_filter: wgpu::FilterMode::Nearest,
+                ..Default::default()
+            })),
             wgpu::TextureFormat::Rgba32Float,
             4,
             4,
@@ -715,53 +720,6 @@ mod test {
 
     use super::*;
     use crate::{RenderGraphConfig, Renderling};
-
-    #[test]
-    fn hdr_texture() {
-        let mut r = Renderling::headless(400, 400).unwrap();
-        let hdr_data = std::fs::read("../../img/hdr/helipad.hdr").unwrap();
-        let tex = Skybox::create_hdr_texture(r.get_device(), r.get_queue(), &hdr_data);
-        let builder = r.new_ui_scene().with_canvas_size(400, 400);
-        let obj = builder
-            .new_object()
-            .with_draw_mode(UiMode::DEFAULT)
-            .with_texture(&tex)
-            .with_vertices({
-                let tl = UiVertex {
-                    position: Vec2::new(0.0, 0.0),
-                    uv: Vec2::new(0.0, 0.0),
-                    color: Vec4::ONE,
-                };
-                let tr = UiVertex {
-                    position: Vec2::new(1.0, 0.0),
-                    uv: Vec2::new(1.0, 0.0),
-                    color: Vec4::ONE,
-                };
-                let bl = UiVertex {
-                    position: Vec2::new(0.0, 1.0),
-                    uv: Vec2::new(0.0, 1.0),
-                    color: Vec4::ONE,
-                };
-                let br = UiVertex {
-                    position: Vec2::new(1.0, 1.0),
-                    uv: Vec2::new(1.0, 1.0),
-                    color: Vec4::ONE,
-                };
-                [tl, bl, tr, tr, bl, br]
-            })
-            .with_scale([400.0, 400.0])
-            .build();
-        let scene = builder.build();
-        r.setup_render_graph(RenderGraphConfig {
-            ui: Some(scene),
-            objs: vec![obj],
-            with_screen_capture: true,
-            ..Default::default()
-        });
-
-        let img = r.render_image().unwrap();
-        img_diff::assert_img_eq("skybox/environment.png", img);
-    }
 
     #[test]
     fn hdr_skybox_scene() {

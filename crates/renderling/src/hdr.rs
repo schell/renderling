@@ -191,7 +191,7 @@ pub fn create_hdr_render_surface(
             module: &fragment_shader,
             entry_point: "fragment_tonemapping",
             targets: &[Some(wgpu::ColorTargetState {
-                format: target.format(),
+                format: target.format().add_srgb_suffix(),
                 blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                 write_mask: wgpu::ColorWrites::ALL,
             })],

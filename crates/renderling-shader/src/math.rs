@@ -1,4 +1,6 @@
 //! Mathematical helper types and functions.
+use crate::IsVector;
+
 pub use glam::*;
 
 pub fn triangle_face_normal(p1: Vec3, p2: Vec3, p3: Vec3) -> Vec3 {
@@ -92,19 +94,17 @@ pub const CUBE: [Vec3; 36] = {
     let p6 = Vec3::new(0.5, -0.5, -0.5);
     let p5 = Vec3::new(0.5, -0.5, 0.5);
 
-    let points = [
+    [
         p0, p2, p1, p0, p3, p2, // top
         p0, p4, p3, p4, p5, p3, // front
         p3, p6, p2, p3, p5, p6, // right
         p1, p7, p0, p7, p4, p0, // left
         p4, p6, p5, p4, p7, p6, // bottom
         p2, p7, p1, p2, p6, p7, // back
-    ];
-
-    points
+    ]
 };
 
 pub fn reflect(i: Vec3, n: Vec3) -> Vec3 {
-    let n = n.normalize_or_zero();
+    let n = n.alt_norm_or_zero();
     i - 2.0 * n.dot(i) * n
 }
