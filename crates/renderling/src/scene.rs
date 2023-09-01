@@ -10,7 +10,7 @@ pub use renderling_shader::{pbr::PbrMaterial, scene::*};
 
 use crate::{
     bloom::BloomResult, frame::FrameTextureView, hdr::HdrSurface, Atlas, BufferArray, DepthTexture,
-    Device, HasWgpuBuffer, Id, Queue, Skybox, SkyboxRenderPipeline, Uniform, BufferError,
+    Device, HasWgpuBuffer, Id, Queue, Skybox, SkyboxRenderPipeline, Uniform,
 };
 
 mod entity;
@@ -977,11 +977,13 @@ pub fn scene_cull_gpu(
 }
 
 #[cfg(target_arch = "wasm32")]
-pub fn scene_cull_cpu(
-    mut scene: ViewMut<Scene>,
-) -> Result<(), SceneError> {
+pub fn scene_cull_cpu(mut scene: ViewMut<Scene>) -> Result<(), SceneError> {
     use std::ops::DerefMut;
-    let Scene { entities, indirect_draws, .. } = scene.deref_mut();
+    let Scene {
+        entities,
+        indirect_draws,
+        ..
+    } = scene.deref_mut();
     entities
         .buffer
         .cpu_buffer
@@ -992,9 +994,7 @@ pub fn scene_cull_cpu(
                 .with_mut_slice::<DrawIndirect, _>(|draws: &mut [DrawIndirect]| {
                     for id in entities.iter().map(|e| e.id) {
                         let global_id = glam::UVec3::new(id.into(), 0, 0);
-                        renderling_shader::scene::compute_cull_entities(
-                            entities, draws, global_id,
-                        );
+                        renderling_shader::scene::compute_cull_entities(entities, draws, global_id);
                     }
                 })
         })
