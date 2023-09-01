@@ -147,6 +147,11 @@ pub fn setup_render_graph(
 
     // pre-render subgraph
     use frame::{clear_depth, create_frame, present};
+
+    #[cfg(not(target_arch = "wasm32"))]
+    let scene_cull = scene_cull_gpu;
+    #[cfg(target_arch = "wasm32")]
+    let scene_cull = scene_cull_cpu;
     r.graph
         .add_subgraph(graph!(
             create_frame,

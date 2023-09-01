@@ -12,6 +12,7 @@ crate-type = ["cdylib", "rlib"]
 console_log = "^0.2"
 console_error_panic_hook = "^0.1"
 example = { path = "../example" }
+fern = "0.6"
 renderling = { path = "../renderling", features = ["wasm"] }
 renderling-gpui = { path = "../renderling-gpui" }
 wasm-bindgen = "^0.2"

@@ -7,9 +7,15 @@ use winit::platform::web::WindowExtWebSys;
 #[wasm_bindgen(start)]
 pub async fn main() {
     std::panic::set_hook(Box::new(console_error_panic_hook::hook));
-    console_log::init_with_level(log::Level::Info).unwrap();
+    fern::Dispatch::new()
+        .level(log::LevelFilter::Debug)
+        .level_for("wgpu", log::LevelFilter::Error)
+        .level_for("naga", log::LevelFilter::Error)
+        .chain(fern::Output::call(console_log::log))
+        .apply()
+        .unwrap();
 
-    let event_loop = winit::event_loop::EventLoop::new();
+        let event_loop = winit::event_loop::EventLoop::new();
     let window_size = winit::dpi::LogicalSize {
         width: 800,
         height: 600,
