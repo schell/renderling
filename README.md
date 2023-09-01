@@ -146,6 +146,12 @@ It compiles into a program that can be run to generate the shaders:
 cd shaders/ && cargo run --release
 ```
 
+## Building on WASM
+
+```
+RUSTFLAGS=--cfg=web_sys_unstable_apis trunk build crates/example-wasm/index.html && basic-http-server -a 127.0.0.1:8080 crates/example-wasm/dist
+```
+
 ## 🫶 Sponsor this!
 
 This work will always be free and open source. If you use it (outright or for inspiration), please consider donating.
@@ -165,5 +171,6 @@ Unless you explicitly state otherwise, any contribution intentionally submitted 
 in the work by you, as defined in the Apache-2.0 license, shall be dual licensed as above,
 without any additional terms or conditions.
 
-## Notes
-I keep a list of (un)organized notes about this project [here](NOTES.md)
+## Notes & Devlog
+I keep a list of (un)organized notes about this project [here](NOTES.md).
+I keep a devlog [here](DEVLOG.md).

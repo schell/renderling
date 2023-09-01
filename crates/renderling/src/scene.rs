@@ -978,12 +978,7 @@ pub fn scene_cull_gpu(
 
 #[cfg(target_arch = "wasm32")]
 pub fn scene_cull_cpu(
-    (device, queue, mut scene, pipeline): (
-        View<Device>,
-        View<Queue>,
-        ViewMut<Scene>,
-        View<SceneComputeCullPipeline>,
-    ),
+    mut scene: ViewMut<Scene>,
 ) -> Result<(), SceneError> {
     use std::ops::DerefMut;
     let Scene { entities, indirect_draws, .. } = scene.deref_mut();
