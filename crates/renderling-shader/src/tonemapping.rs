@@ -58,7 +58,7 @@ fn tone_map_aces_narkowicz(color: Vec3) -> Vec3 {
 /// see https://github.com/TheRealMJP/BakingLab/blob/master/BakingLab/ACES.hlsl
 fn rrt_and_odtfit(color: Vec3) -> Vec3 {
     let a: Vec3 = color * (color + 0.0245786) - 0.000090537;
-    let b: Vec3 = color * (0.983729 * color + 0.4329510) + 0.238081;
+    let b: Vec3 = color * (0.983729 * color + 0.432951) + 0.238081;
     a / b
 }
 

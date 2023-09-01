@@ -655,7 +655,7 @@ mod test {
         });
 
         r.graph.visit(scene::scene_update).unwrap().unwrap();
-        r.graph.visit(scene::scene_cull).unwrap().unwrap();
+        r.graph.visit(scene::scene_cull_gpu).unwrap().unwrap();
 
         let (constants, gpu_verts, ents, indirect) = r
             .graph

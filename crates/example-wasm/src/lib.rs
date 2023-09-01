@@ -32,7 +32,7 @@ pub async fn main() {
         Box::new(
             gltf::demo(
                 &mut r,
-                Some("gltf/DamagedHelmet.glb"),
+                Some("gltf/cube.glb"),
                 Some("img/hdr/resting_place.hdr"),
             )
             .await,

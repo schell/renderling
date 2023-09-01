@@ -10,7 +10,7 @@ pub use renderling_shader::{pbr::PbrMaterial, scene::*};
 
 use crate::{
     bloom::BloomResult, frame::FrameTextureView, hdr::HdrSurface, Atlas, BufferArray, DepthTexture,
-    Device, HasWgpuBuffer, Id, Queue, Skybox, SkyboxRenderPipeline, Uniform,
+    Device, HasWgpuBuffer, Id, Queue, Skybox, SkyboxRenderPipeline, Uniform, BufferError,
 };
 
 mod entity;
@@ -477,14 +477,12 @@ impl Scene {
                 &skybox.environment_cubemap,
             );
             skybox
+        } else if let Some(skybox_img) = skybox_image {
+            log::trace!("scene will build a skybox");
+            Skybox::new(&device, &queue, &constants, skybox_img)
         } else {
-            if let Some(skybox_img) = skybox_image {
-                log::trace!("scene will build a skybox");
-                Skybox::new(&device, &queue, &constants, skybox_img)
-            } else {
-                log::trace!("skybox is empty");
-                Skybox::empty(&device, &queue, &constants)
-            }
+            log::trace!("skybox is empty");
+            Skybox::empty(&device, &queue, &constants)
         };
 
         let cull_bindgroup = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -957,24 +955,51 @@ pub fn scene_update(
 }
 
 pub fn scene_cull(
-    (device, queue, scene, pipeline): (
+    (device, queue, mut scene, pipeline): (
         View<Device>,
         View<Queue>,
-        View<Scene>,
+        ViewMut<Scene>,
         View<SceneComputeCullPipeline>,
     ),
 ) -> Result<(), SceneError> {
-    let label = Some("scene cull");
-    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label });
-    let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label });
-    compute_pass.set_pipeline(&pipeline.0);
-    compute_pass.set_bind_group(0, &scene.render_buffers_bindgroup, &[]);
-    compute_pass.set_bind_group(1, &scene.cull_bindgroup, &[]);
-    let num_entities = scene.entities.capacity();
-    let groups = num_entities / 32 + 1;
-    compute_pass.dispatch_workgroups(groups as u32, 1, 1);
-    drop(compute_pass);
-    queue.submit(std::iter::once(encoder.finish()));
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let label = Some("scene cull");
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label });
+        let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor { label });
+        compute_pass.set_pipeline(&pipeline.0);
+        compute_pass.set_bind_group(0, &scene.render_buffers_bindgroup, &[]);
+        compute_pass.set_bind_group(1, &scene.cull_bindgroup, &[]);
+        let num_entities = scene.entities.capacity();
+        let groups = num_entities / 32 + 1;
+        compute_pass.dispatch_workgroups(groups as u32, 1, 1);
+        drop(compute_pass);
+        queue.submit(std::iter::once(encoder.finish()));
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    {
+        use std::ops::DerefMut;
+        let Scene { entities, indirect_draws, .. } = scene.deref_mut();
+        entities
+            .buffer
+            .cpu_buffer
+            .with_slice(|entities: &[GpuEntity]| -> Result<(), BufferError> {
+                indirect_draws
+                    .buffer
+                    .cpu_buffer
+                    .with_mut_slice::<DrawIndirect, _>(|draws: &mut [DrawIndirect]| {
+                        for id in entities.iter().map(|e| e.id) {
+                            let global_id = glam::UVec3::new(id.into(), 0, 0);
+                            renderling_shader::scene::compute_cull_entities(
+                                entities, draws, global_id,
+                            );
+                        }
+                    })
+            })
+            .context(BufferSnafu)?
+            .context(BufferSnafu)?;
+    }
 
     Ok(())
 }
@@ -1064,13 +1089,16 @@ pub fn scene_render(
             .cpu_buffer
             .read::<DrawIndirect>(0, scene.indirect_draws.len())
             .context(BufferSnafu)?;
+        let mut drawn = 0;
         for indirect in indirect_buffer.into_iter() {
             if indirect.instance_count == 0 || indirect.vertex_count == 0 {
                 continue;
             }
+            drawn += 1;
             let id = indirect.base_instance;
             render_pass.draw(0..indirect.vertex_count, id..id + 1);
         }
+        log::info!("drawn: {drawn}");
     }
 
     drop(render_pass);

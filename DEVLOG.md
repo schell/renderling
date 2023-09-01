@@ -1,5 +1,12 @@
 # devlog
 
+## Fri Sep 1, 2023
+
+While adding WASM support I found that my shaders were not validating in the browser.
+Apparently this is because of an extra traspilation step from spv -> wgsl - because when targeting WebGPU in the browser, shaders must be written in WGSL, and naga's WGSL backend doesn't like infinities or NaNs.
+Here's [the related ticket](https://github.com/gfx-rs/naga/issues/2461).
+I ended up having to track down all the infinity and NaN comparisons and replace the functions that have those comparisons in their call trees. I then created a clippy lint to disallow those functions.
+
 ## Fri Aug 4, 2023
 
 I tried to bump `rust-gpu` to 0.9 but ran into [an issue](https://github.com/EmbarkStudios/rust-gpu/issues/1089) where shaders that previously compiled no longer compile.

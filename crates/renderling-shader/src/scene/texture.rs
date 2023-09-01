@@ -1,7 +1,7 @@
 //! GPU textures.
 use glam::{UVec2, Vec2};
 
-use crate::bits::{bits, insert, extract};
+use crate::bits::{bits, extract, insert};
 
 #[cfg(target_arch = "spirv")]
 use spirv_std::num_traits::*;
@@ -68,8 +68,7 @@ impl GpuTexture {
         let uv_s = px_index_s as f32 / sx;
         let uv_t = px_index_t as f32 / sy;
 
-        let st = Vec2::new(uv_s, uv_t);
-        st
+        Vec2::new(uv_s, uv_t)
     }
 }
 
@@ -78,7 +77,7 @@ impl GpuTexture {
 /// Only handles `input` >= 0.0.
 pub fn repeat(mut input: f32) -> f32 {
     let gto = input >= 1.0;
-    input = input % 1.0;
+    input %= 1.0;
     if gto && input == 0.0 {
         1.0
     } else {
@@ -105,10 +104,10 @@ pub struct TextureAddressMode(u32);
 
 impl core::fmt::Display for TextureAddressMode {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.write_str(match self {
-            &TextureAddressMode::CLAMP_TO_EDGE => "clamp to edge",
-            &TextureAddressMode::REPEAT => "repeat",
-            &TextureAddressMode::MIRRORED_REPEAT => "mirrored repeat",
+        f.write_str(match *self {
+            TextureAddressMode::CLAMP_TO_EDGE => "clamp to edge",
+            TextureAddressMode::REPEAT => "repeat",
+            TextureAddressMode::MIRRORED_REPEAT => "mirrored repeat",
             _ => "unknown",
         })
     }
@@ -127,7 +126,7 @@ impl TextureAddressMode {
 pub fn wrap(input: f32, mode: TextureAddressMode) -> f32 {
     match mode {
         TextureAddressMode::REPEAT => {
-            let sign = input.signum();
+            let sign = if input >= 0.0 { 1.0f32 } else { -1.0 };
             let input = repeat(input.abs());
             if sign > 0.0 {
                 input
@@ -136,7 +135,7 @@ pub fn wrap(input: f32, mode: TextureAddressMode) -> f32 {
             }
         }
         TextureAddressMode::MIRRORED_REPEAT => {
-            let sign = input.signum();
+            let sign = if input >= 0.0 { 1.0f32 } else { -1.0 };
             let i = input.abs();
             let flip = i as u32 % 2 == 0;
             let t = repeat(i);
@@ -147,7 +146,7 @@ pub fn wrap(input: f32, mode: TextureAddressMode) -> f32 {
                     1.0 - t
                 }
             } else if flip {
-                    1.0 - t
+                1.0 - t
             } else {
                 t
             }

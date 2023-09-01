@@ -8,7 +8,7 @@ use spirv_std::num_traits::Float;
 
 use crate::{math, scene::GpuConstants, IsVector};
 
-const INV_ATAN: Vec2 = Vec2::new(0.1591, 0.3183);
+const INV_ATAN: Vec2 = Vec2::new(0.1591, core::f32::consts::FRAC_1_PI);
 
 /// Takes a unit direction and converts it to a uv lookup in an equirectangular
 /// map.

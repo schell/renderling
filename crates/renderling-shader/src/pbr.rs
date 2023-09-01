@@ -16,7 +16,7 @@ use glam::{Vec2, Vec3, Vec4, Vec4Swizzles};
 use crate::{
     math,
     scene::{GpuLight, GpuTexture, LightType, LightingModel},
-    Id,
+    Id, IsVector,
 };
 
 /// Represents a material on the GPU.
@@ -29,7 +29,8 @@ use crate::{
 #[derive(Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct PbrMaterial {
     // x, y, z is emissive factor, default [0.0, 0.0, 0.0]
-    // w is emissive strength multiplier (gltf's KHR_materials_emissive_strength extension), default 1.0
+    // w is emissive strength multiplier (gltf's KHR_materials_emissive_strength extension),
+    // default 1.0
     pub emissive_factor: Vec4,
     pub albedo_factor: Vec4,
     pub metallic_factor: f32,
@@ -135,6 +136,7 @@ fn fresnel_schlick_roughness(cos_theta: f32, f0: Vec3, roughness: f32) -> Vec3 {
     f0 + (Vec3::splat(1.0 - roughness).max(f0) - f0) * (1.0 - cos_theta).clamp(0.0, 1.0).powf(5.0)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn outgoing_radiance(
     light_color: Vec4,
     albedo: Vec3,
@@ -147,7 +149,7 @@ fn outgoing_radiance(
 ) -> Vec3 {
     let f0 = Vec3::splat(0.4).lerp(albedo, metalness);
     let radiance = light_color.xyz() * attenuation;
-    let h = (v + l).normalize_or_zero();
+    let h = (v + l).alt_norm_or_zero();
     // cook-torrance brdf
     let ndf: f32 = normal_distribution_ggx(n, h, roughness);
     let g: f32 = geometry_smith(n, v, l, roughness);
@@ -184,7 +186,7 @@ pub fn sample_specular_reflection(
     n: Vec3,
     roughness: f32,
 ) -> Vec3 {
-    let v = (camera_pos - in_pos).normalize_or_zero();
+    let v = (camera_pos - in_pos).alt_norm_or_zero();
     let reflect_dir = math::reflect(-v, n);
     prefiltered
         .sample_by_lod(*prefiltered_sampler, reflect_dir, roughness * 4.0)
@@ -202,11 +204,12 @@ pub fn sample_brdf(
     n: Vec3,
     roughness: f32,
 ) -> Vec2 {
-    let v = (camera_pos - in_pos).normalize_or_zero();
+    let v = (camera_pos - in_pos).alt_norm_or_zero();
     brdf.sample_by_lod(*brdf_sampler, Vec2::new(n.dot(v).max(0.0), roughness), 0.0)
         .xy()
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn shade_fragment(
     // camera's position in world space
     camera_pos: Vec3,
@@ -226,11 +229,12 @@ pub fn shade_fragment(
 
     lights: &[GpuLight],
 ) -> Vec4 {
-    let n = in_norm.normalize_or_zero();
-    let v = (camera_pos - in_pos).normalize_or_zero();
+    let n = in_norm.alt_norm_or_zero();
+    let v = (camera_pos - in_pos).alt_norm_or_zero();
 
     // reflectance
     let mut lo = Vec3::ZERO;
+    #[allow(clippy::needless_range_loop)]
     for i in 0..lights.len() {
         // calculate per-light radiance
         let light = lights[i];
@@ -246,7 +250,7 @@ pub fn shade_fragment(
                 if distance == 0.0 {
                     continue;
                 }
-                let l = frag_to_light.normalize_or_zero();
+                let l = frag_to_light.alt_norm_or_zero();
                 let attenuation = light.intensity * 1.0 / (distance * distance);
                 lo += outgoing_radiance(
                     light.color,
@@ -266,8 +270,8 @@ pub fn shade_fragment(
                 if distance == 0.0 {
                     continue;
                 }
-                let l = frag_to_light.normalize_or_zero();
-                let theta: f32 = l.dot(light.direction.xyz().normalize_or_zero());
+                let l = frag_to_light.alt_norm_or_zero();
+                let theta: f32 = l.dot(light.direction.xyz().alt_norm_or_zero());
                 let epsilon: f32 = light.inner_cutoff - light.outer_cutoff;
                 let attenuation: f32 =
                     light.intensity * ((theta - light.outer_cutoff) / epsilon).clamp(0.0, 1.0);
@@ -284,7 +288,7 @@ pub fn shade_fragment(
             }
 
             LightType::DIRECTIONAL_LIGHT => {
-                let l = -light.direction.xyz().normalize_or_zero();
+                let l = -light.direction.xyz().alt_norm_or_zero();
                 let attenuation = light.intensity;
                 lo += outgoing_radiance(
                     light.color,

@@ -71,8 +71,7 @@ pub async fn read_buffer<T: bytemuck::Pod + bytemuck::Zeroable>(
     let (tx, rx) = async_channel::bounded(1);
     buffer_slice.map_async(wgpu::MapMode::Read, move |res| tx.try_send(res).unwrap());
     device.poll(wgpu::Maintain::Wait);
-    let () = rx
-        .recv()
+    rx.recv()
         .await
         .context(AsyncRecvSnafu)?
         .context(AsyncSnafu)?;
@@ -120,6 +119,7 @@ impl GpuBuffer {
     }
 }
 
+#[allow(clippy::len_without_is_empty)]
 pub trait IsBuffer<T: bytemuck::Zeroable + bytemuck::Pod> {
     fn new(
         device: &wgpu::Device,
@@ -214,7 +214,11 @@ impl CpuBuffer {
         }
     }
 
-    pub fn read<T: bytemuck::Pod>(&self, start: usize, length: usize) -> Result<Vec<T>, BufferError> {
+    pub fn read<T: bytemuck::Pod>(
+        &self,
+        start: usize,
+        length: usize,
+    ) -> Result<Vec<T>, BufferError> {
         let mut output = Vec::with_capacity(length);
         let vec = self
             .buffer
@@ -224,16 +228,38 @@ impl CpuBuffer {
             })?;
         let len = vec.len();
         for i in start..start + length {
-            output.push(
-                vec.get(i)
-                    .with_context(|| OutOfBoundsSnafu {
-                        index: i,
-                        length: len,
-                    })?
-                    .clone(),
-            );
+            output.push(*vec.get(i).with_context(|| OutOfBoundsSnafu {
+                index: i,
+                length: len,
+            })?);
         }
         Ok(output)
+    }
+
+    pub fn with_slice<T: bytemuck::Pod, A>(
+        &self,
+        f: impl FnOnce(&[T]) -> A,
+    ) -> Result<A, BufferError> {
+        let vec = self
+            .buffer
+            .downcast_ref::<T>()
+            .with_context(|| WrongTypeSnafu {
+                wrong_type: std::any::type_name::<T>(),
+            })?;
+        Ok(f(vec.as_slice()))
+    }
+
+    pub fn with_mut_slice<T: bytemuck::Pod, A>(
+        &mut self,
+        f: impl FnOnce(&mut [T]) -> A,
+    ) -> Result<A, BufferError> {
+        let mut vec = self
+            .buffer
+            .downcast_mut::<T>()
+            .with_context(|| WrongTypeSnafu {
+                wrong_type: std::any::type_name::<T>(),
+            })?;
+        Ok(f(vec.as_mut_slice()))
     }
 }
 
@@ -257,7 +283,7 @@ impl<T: bytemuck::Zeroable + bytemuck::Pod + Send + Sync> IsBuffer<T> for CpuBuf
     fn write(&mut self, _: &wgpu::Queue, starting_index: usize, items: Vec<T>) {
         // UNWRAP: safe because we know `T` is the type (if not we want to panic!).
         let mut vec = self.buffer.downcast_mut::<T>().unwrap();
-        for (i, item) in (starting_index..).zip(items.into_iter()) {
+        for (i, item) in (starting_index..).zip(items) {
             *vec.get_mut(i).unwrap() = item;
         }
     }
@@ -277,7 +303,10 @@ impl CpuAndGpuBuffer {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
     ) -> Result<(), BufferError> {
-        let items = self.gpu_buffer.read::<T>(device, queue, 0, self.cpu_buffer.len).await?;
+        let items = self
+            .gpu_buffer
+            .read::<T>(device, queue, 0, self.cpu_buffer.len)
+            .await?;
         self.cpu_buffer.write(queue, 0, items);
         Ok(())
     }
@@ -297,7 +326,7 @@ impl<T: bytemuck::Zeroable + bytemuck::Pod + Send + Sync> IsBuffer<T> for CpuAnd
     }
 
     fn len(&self) -> usize {
-        debug_assert_eq!(self.gpu_buffer.len, self.gpu_buffer.len);
+        debug_assert_eq!(self.cpu_buffer.len, self.gpu_buffer.len);
         self.cpu_buffer.len
     }
 
@@ -321,6 +350,7 @@ impl<T: bytemuck::Zeroable + bytemuck::Pod + Send + Sync> IsBuffer<T> for CpuAnd
 /// buffer or a `Vec`.
 pub struct BufferArray<T: bytemuck::Pod + bytemuck::Zeroable, Storage: IsBuffer<T> = GpuBuffer> {
     pub buffer: Storage,
+    #[allow(clippy::type_complexity)]
     updates: (Sender<(usize, Vec<T>)>, Receiver<(usize, Vec<T>)>),
     _phantom: PhantomData<T>,
 }
