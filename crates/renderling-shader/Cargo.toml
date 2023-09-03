@@ -11,7 +11,7 @@ default = []
 
 [dependencies]
 bytemuck = { workspace = true }
-spirv-std = "^0.8"
+spirv-std = "^0.9"
 
 [target.'cfg(not(target_arch = "spirv"))'.dependencies]
 glam = { workspace = true, features = ["bytemuck"] }
