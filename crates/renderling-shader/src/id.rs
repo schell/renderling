@@ -77,8 +77,7 @@ impl<T> Id<T> {
     }
 
     pub fn is_none(&self) -> bool {
-        // `u32` representing "null" or "none".
-        self == &Id::NONE
+        *self == Id::NONE
     }
 
     pub fn is_some(&self) -> bool {
