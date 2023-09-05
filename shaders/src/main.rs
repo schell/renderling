@@ -24,7 +24,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             for (entry, filepath) in modules.into_iter() {
                 let path = dir.join(filepath.file_name().unwrap());
                 println!(
-                    "copying '{entry}' from {} to {}",
+                    "copying '{entry}':\n  from {}\n  to {}\n",
                     filepath.display(),
                     path.display()
                 );

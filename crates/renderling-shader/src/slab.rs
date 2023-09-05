@@ -1,115 +1,81 @@
 //! Slab storage and ops used for storing on CPU and extracting on GPU.
+
 use core::marker::PhantomData;
 
-pub trait FromSlab: Sized {
-    fn read_slab(&mut self, index: usize, slab: &[u32]) -> usize;
+pub trait FromSlab<const N: usize>: Sized {
+    fn read_slab(&mut self, slab: [u32; N]);
 }
 
-impl FromSlab for u32 {
-    fn read_slab(&mut self, index: usize, slab: &[u32]) -> usize {
-        if slab.len() > index {
-            *self = slab[index];
-            index + 1
-        } else {
-            index
-        }
+impl FromSlab<16> for glam::Mat4 {
+    fn read_slab(&mut self, slab: [u32; 16]) {
+        let slab = slab.map(f32::from_bits);
+        *self = glam::Mat4::from_cols_array(&slab);
     }
 }
 
-impl FromSlab for f32 {
-    fn read_slab(&mut self, index: usize, slab: &[u32]) -> usize {
-        if slab.len() > index {
-            *self = f32::from_bits(slab[index]);
-            index + 1
-        } else {
-            index
-        }
+impl FromSlab<4> for glam::Vec4 {
+    fn read_slab(&mut self, [x, y, z, w]: [u32; 4]) {
+        self.x = f32::from_bits(x);
+        self.y = f32::from_bits(y);
+        self.z = f32::from_bits(z);
+        self.w = f32::from_bits(w);
     }
 }
 
-impl<T: FromSlab, const N: usize> FromSlab for [T; N] {
-    fn read_slab(&mut self, mut index: usize, slab: &[u32]) -> usize {
-        for i in 0..N {
-            index = self[i].read_slab(index, slab);
-        }
-        index
+impl FromSlab<4> for glam::Quat {
+    fn read_slab(&mut self, [x, y, z, w]: [u32; 4]) {
+        self.x = f32::from_bits(x);
+        self.y = f32::from_bits(y);
+        self.z = f32::from_bits(z);
+        self.w = f32::from_bits(w);
     }
 }
 
-impl<T> FromSlab for crate::id::Id<T> {
-    fn read_slab(&mut self, index: usize, slab: &[u32]) -> usize {
-        self.0.read_slab(index, slab)
+impl FromSlab<1> for u32 {
+    fn read_slab(&mut self, [n]: [u32; 1]) {
+        *self = n;
     }
 }
 
-impl FromSlab for glam::Mat4 {
-    fn read_slab(&mut self, index: usize, slab: &[u32]) -> usize {
-        if slab.len() < index + 16 {
-            return index;
-        }
+impl FromSlab<1> for f32 {
+    fn read_slab(&mut self, [n]: [u32; 1]) {
+        *self = f32::from_bits(n);
+    }
+}
+
+impl<T: FromSlab<N>, const N: usize> FromSlab<2> for Array<T, N> {
+    fn read_slab(&mut self, [index, len]: [u32; 2]) {
         let Self {
-            x_axis,
-            y_axis,
-            z_axis,
-            w_axis,
+            index: i,
+            len: l,
+            _phantom: _,
         } = self;
-        let index = x_axis.read_slab(index, slab);
-        let index = y_axis.read_slab(index, slab);
-        let index = z_axis.read_slab(index, slab);
-        w_axis.read_slab(index, slab)
+        *i = index;
+        *l = len;
     }
 }
 
-impl FromSlab for glam::Vec4 {
-    fn read_slab(&mut self, index: usize, slab: &[u32]) -> usize {
-        if slab.len() < index + 4 {
-            return index;
-        }
-        let Self { x, y, z, w } = self;
-        let index = x.read_slab(index, slab);
-        let index = y.read_slab(index, slab);
-        let index = z.read_slab(index, slab);
-        w.read_slab(index, slab)
-    }
-}
-
-impl FromSlab for glam::Quat {
-    fn read_slab(&mut self, index: usize, slab: &[u32]) -> usize {
-        if slab.len() < index + 4 {
-            return index;
-        }
-        let Self { x, y, z, w } = self;
-        let index = x.read_slab(index, slab);
-        let index = y.read_slab(index, slab);
-        let index = z.read_slab(index, slab);
-        w.read_slab(index, slab)
-    }
-}
-
-impl<T: FromSlab> FromSlab for Array<T> {
-    fn read_slab(&mut self, index: usize, slab: &[u32]) -> usize {
-        if slab.len() < index + 2 {
-            return index;
-        }
-
-        let Self { index: ndx, len, _phantom: _ } = self;
-        let index = ndx.read_slab(index, slab);
-        len.read_slab(index, slab)
+impl<T> FromSlab<1> for crate::id::Id<T> {
+    fn read_slab(&mut self, [n]: [u32; 1]) {
+        self.0 = n;
     }
 }
 
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[repr(C)]
 #[derive(Clone, Copy, PartialEq, bytemuck::Zeroable)]
-pub struct Array<T: FromSlab> {
+pub struct Array<T: FromSlab<N>, const N: usize> {
     index: u32,
     len: u32,
     _phantom: PhantomData<T>,
 }
 
-unsafe impl<T: FromSlab + bytemuck::Pod + bytemuck::Zeroable> bytemuck::Pod for Array<T> {}
+unsafe impl<T: FromSlab<N> + bytemuck::Pod + bytemuck::Zeroable, const N: usize> bytemuck::Pod
+    for Array<T, N>
+{
+}
 
-impl<T: FromSlab> Default for Array<T> {
+impl<T: FromSlab<N>, const N: usize> Default for Array<T, N> {
     fn default() -> Self {
         Self {
             index: u32::MAX,
@@ -119,7 +85,10 @@ impl<T: FromSlab> Default for Array<T> {
     }
 }
 
-impl<T: FromSlab> Array<T> {
+impl<const N: usize, T> Array<T, N>
+where
+    T: FromSlab<N>,
+{
     pub fn len(&self) -> usize {
         self.len as usize
     }
@@ -128,31 +97,29 @@ impl<T: FromSlab> Array<T> {
         self.len == 0
     }
 
-    pub fn contains_index(&self, index: usize) -> bool {
-        index >= self.index as usize
-            && index < (self.index + self.len) as usize
+    pub fn read(&self, into_item: &mut T, nth_item: usize, slab: &[u32]) {
+        let offset = nth_item as usize * N;
+        read::<N, T>(into_item, self.index as usize + offset, slab)
     }
 }
 
-impl<T: FromSlab + SlabSized> Array<T> {
-    pub fn extract(&self, item: &mut T, index: usize, slab: &[u32]) {
-        if self.len() <= index {
-            return;
-        }
-
-        let size = T::slab_size();
-        let start = self.index as usize + size * index;
-        let end = item.read_slab(start, slab);
-        debug_assert_eq!(size, end - start);
+pub fn read<const N: usize, T: FromSlab<N>>(thing: &mut T, start: usize, slab: &[u32]) {
+    let end = start + N;
+    if slab.len() < end {
+        return;
     }
+
+    let mut array = [0u32; N];
+    for i in 0..N {
+        let storage_index = i + start;
+        array[i] = slab[storage_index];
+    }
+
+    thing.read_slab(array);
 }
 
-pub trait SlabSized {
-    fn slab_size() -> usize;
-}
-
-impl<T> SlabSized for crate::id::Id<T> {
-    fn slab_size() -> usize {
-        1
-    }
+/// An index into the slab.
+pub struct Slabbed<T> {
+    pub index: u32,
+    _phantom: PhantomData<T>,
 }

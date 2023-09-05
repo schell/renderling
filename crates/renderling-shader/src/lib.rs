@@ -13,6 +13,7 @@ use spirv_std::num_traits::Float;
 pub mod bits;
 pub mod convolution;
 pub mod debug;
+//pub mod gltf;
 mod id;
 pub use id::*;
 pub mod math;

@@ -9,6 +9,15 @@ use spirv_std::{
 };
 
 #[spirv(vertex)]
+pub fn slab_vertex(
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] storage: &[u32],
+    out_pos: &mut glam::Vec3,
+    #[spirv(position)] gl_pos: &mut glam::Vec4,
+) {
+    scene::slab_vertex_scene(storage, out_pos, gl_pos)
+}
+
+#[spirv(vertex)]
 pub fn ui_vertex(
     #[spirv(uniform, descriptor_set = 0, binding = 0)] constants: &ui::UiConstants,
     #[spirv(uniform, descriptor_set = 2, binding = 0)] params: &ui::UiDrawParams,
