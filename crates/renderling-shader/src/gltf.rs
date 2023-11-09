@@ -1,18 +1,4 @@
 //! GLTF assets storable on the GPU.
-//!
-//! Storage buffers:
-//! - assets
-//! - scenes
-//! - animations
-//! - cameras
-//! - lights
-//! - skins
-//! - meshes
-//! - primitives
-//! - materials
-//! - vertices
-//! - nodes
-//! - slab
 use glam::{Mat4, Quat, Vec4};
 
 use crate::{
@@ -28,15 +14,40 @@ pub type Material = crate::pbr::PbrMaterial;
 #[repr(C)]
 #[derive(Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Document {
-    pub scenes: slab::Array<Id<Scene>, 1>,
-    pub cameras: slab::Array<Id<Camera>, 1>,
-    pub lights: slab::Array<Id<Light>, 1>,
-    pub skins: slab::Array<Id<Skin>, 1>,
-    pub materials: slab::Array<Id<Material>, 1>,
-    pub meshes: slab::Array<Id<Mesh>, 1>,
-    pub nodes: slab::Array<Id<Node>, 1>,
-    pub animations: slab::Array<Id<Animation>, 1>,
+    pub scenes: slab::Array<Id<Scene>>,
+    pub cameras: slab::Array<Id<Camera>>,
+    pub lights: slab::Array<Id<Light>>,
+    pub skins: slab::Array<Id<Skin>>,
+    pub materials: slab::Array<Id<Material>>,
+    pub meshes: slab::Array<Id<Mesh>>,
+    pub nodes: slab::Array<Id<Node>>,
+    pub animations: slab::Array<Id<Animation>>,
     pub default_scene: Id<Scene>,
+}
+
+impl FromSlab for Document {
+    fn read_slab(&mut self, index: usize, slab: &[u32]) -> usize {
+        let Self {
+            scenes,
+            cameras,
+            lights,
+            skins,
+            materials,
+            meshes,
+            nodes,
+            animations,
+            default_scene,
+        } = self;
+        let index = scenes.read_slab(index, slab);
+        let index = cameras.read_slab(index, slab);
+        let index = lights.read_slab(index, slab);
+        let index = skins.read_slab(index, slab);
+        let index = materials.read_slab(index, slab);
+        let index = meshes.read_slab(index, slab);
+        let index = nodes.read_slab(index, slab);
+        let index = animations.read_slab(index, slab);
+        default_scene.read_slab(index, slab)
+    }
 }
 
 #[repr(u32)]
@@ -74,16 +85,16 @@ pub struct Target {
     pub property: Property,
 }
 
-impl FromSlab<3> for Target {
-    fn read_slab(&mut self, [a, n, p]: [u32; 3]) {
+impl FromSlab for Target {
+    fn read_slab(&mut self, index: usize, slab: &[u32]) -> usize {
         let Self {
             animation,
             node,
             property,
         } = self;
-        *animation = Id::new(a);
-        *node = Id::new(n);
-        *property = Property(p);
+        let index = animation.read_slab(index, slab);
+        let index = node.read_slab(index, slab);
+        property.0.read_slab(index, slab)
     }
 }
 
@@ -117,16 +128,16 @@ impl Interpolation {
 pub struct Sampler {
     pub animation: Id<Animation>,
     // keyframe times
-    pub input: slab::Array<f32, 1>,
+    pub input: slab::Array<f32>,
     pub interpolation: Interpolation,
-    pub output_translation: slab::Array<Vec4, 4>,
-    pub output_rotation: slab::Array<Quat, 4>,
-    pub output_scale: slab::Array<Vec4, 4>,
-    pub output_morph_target_weights: slab::Array<slab::Array<f32, 1>, 2>,
+    pub output_translation: slab::Array<Vec4>,
+    pub output_rotation: slab::Array<Quat>,
+    pub output_scale: slab::Array<Vec4>,
+    pub output_morph_target_weights: slab::Array<slab::Array<f32>>,
 }
 
-impl FromSlab<12> for Sampler {
-    fn read_slab(&mut self, [n0, n1, n2, n3, n4, n5, n6, n7, n8, n9, n10, n11]: [u32; 12]) {
+impl FromSlab for Sampler {
+    fn read_slab(&mut self, index: usize, slab: &[u32]) -> usize {
         let Self {
             animation,
             input,
@@ -136,13 +147,13 @@ impl FromSlab<12> for Sampler {
             output_scale,
             output_morph_target_weights,
         } = self;
-        Id::read_slab(animation, [n0]);
-        slab::Array::read_slab(input, [n1, n2]);
-        *interpolation = Interpolation(n3);
-        slab::Array::read_slab(output_translation, [n4, n5]);
-        slab::Array::read_slab(output_rotation, [n6, n7]);
-        slab::Array::read_slab(output_scale, [n8, n9]);
-        slab::Array::read_slab(output_morph_target_weights, [n10, n11]);
+        let index = animation.read_slab(index, slab);
+        let index = input.read_slab(index, slab);
+        let index = interpolation.0.read_slab(index, slab);
+        let index = output_translation.read_slab(index, slab);
+        let index = output_rotation.read_slab(index, slab);
+        let index = output_scale.read_slab(index, slab);
+        output_morph_target_weights.read_slab(index, slab)
     }
 }
 
@@ -156,15 +167,16 @@ pub struct Channel {
     pub sampler: Sampler,
 }
 
-impl FromSlab<16> for Channel {
-    fn read_slab(
-        &mut self,
-        [n0, n1, n2, n3, n4, n5, n6, n7, n8, n9, n10, n11, n12, n13, n14, n15]: [u32; 16],
-    ) {
-        let Self { animation, target, sampler } = self;
-        Id::read_slab(animation, [n0]);
-        Target::read_slab(target, [n1, n2, n3]);
-        Sampler::read_slab(sampler, [n4, n5, n6, n7, n8, n9, n10, n11]);
+impl FromSlab for Channel {
+    fn read_slab(&mut self, index: usize, slab: &[u32]) -> usize {
+        let Self {
+            animation,
+            target,
+            sampler,
+        } = self;
+        let index = animation.read_slab(index, slab);
+        let index = target.read_slab(index, slab);
+        sampler.read_slab(index, slab)
     }
 }
 
@@ -173,8 +185,8 @@ impl FromSlab<16> for Channel {
 #[derive(Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Animation {
     pub id: Id<Animation>,
-    pub channels: slab::Array<Channel, 16>,
-    pub samplers: slab::Array<Sampler, 12>,
+    pub channels: slab::Array<Channel>,
+    pub samplers: slab::Array<Sampler>,
 }
 
 #[repr(u32)]
@@ -232,8 +244,8 @@ pub struct Light {
 pub struct Skin {
     pub id: Id<Skin>,
     pub skeleton: Id<Node>,
-    pub joints: slab::Array<Id<Node>, 1>,
-    pub inverse_bind_matrices: slab::Array<Mat4, 16>,
+    pub joints: slab::Array<Id<Node>>,
+    pub inverse_bind_matrices: slab::Array<Mat4>,
 }
 
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
@@ -245,8 +257,8 @@ pub struct Vertex {
     pub uv: Vec4,
     pub normal: Vec4,
     pub tangent: Vec4,
-    pub joints: slab::Array<Id<Node>, 1>,
-    pub weights: slab::Array<f32, 1>,
+    pub joints: slab::Array<Id<Node>>,
+    pub weights: slab::Array<f32>,
 }
 
 impl Default for Vertex {
@@ -263,10 +275,24 @@ impl Default for Vertex {
     }
 }
 
-impl FromSlab<24> for Vertex {
-    fn read_slab(&mut self, slab: [u32; 24]) {
-        let Self { position, color, uv, normal, tangent, joints, weights } = self;
-        //Vec4::read_slab(position, slab)
+impl FromSlab for Vertex {
+    fn read_slab(&mut self, index: usize, slab: &[u32]) -> usize {
+        let Self {
+            position,
+            color,
+            uv,
+            normal,
+            tangent,
+            joints,
+            weights,
+        } = self;
+        let index = position.read_slab(index, slab);
+        let index = color.read_slab(index, slab);
+        let index = uv.read_slab(index, slab);
+        let index = normal.read_slab(index, slab);
+        let index = tangent.read_slab(index, slab);
+        let index = joints.read_slab(index, slab);
+        weights.read_slab(index, slab)
     }
 }
 
@@ -357,31 +383,77 @@ pub struct MorphTarget {
     pub tangent: Vec4,
 }
 
+impl FromSlab for MorphTarget {
+    fn read_slab(&mut self, index: usize, slab: &[u32]) -> usize {
+        let Self {
+            position,
+            normal,
+            tangent,
+        } = self;
+        let index = position.read_slab(index, slab);
+        let index = normal.read_slab(index, slab);
+        tangent.read_slab(index, slab)
+    }
+}
+
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[repr(C)]
-#[derive(Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(Clone, Copy, Default, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Primitive {
     pub id: Id<Primitive>,
     pub material: Id<Material>,
     pub padding: [u32; 2],
-    pub attributes: slab::Array<Vertex, 24>,
-    //pub morph_targets: slab::Array<MorphTarget, 12>,
+    pub vertices: slab::Array<Vertex>,
+    pub morph_targets: slab::Array<MorphTarget>,
     // bounds of the POSITION attribute, uses only xyz
     pub bounding_box: Vec4,
 }
 
-#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
-#[repr(C)]
-#[derive(Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct Mesh {
-    pub id: Id<Mesh>,
-    pub primitives: slab::Array<Id<Primitive>, 1>,
-    pub weights: slab::Array<f32, 1>,
+impl FromSlab for Primitive {
+    fn read_slab(&mut self, index: usize, slab: &[u32]) -> usize {
+        let Self {
+            id,
+            material,
+            padding,
+            vertices,
+            morph_targets,
+            bounding_box,
+        } = self;
+
+        let index = id.read_slab(index, slab);
+        let index = material.read_slab(index, slab);
+        let index = padding.read_slab(index, slab);
+        let index = vertices.read_slab(index, slab);
+        let index = morph_targets.read_slab(index, slab);
+        bounding_box.read_slab(index, slab)
+    }
 }
 
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[repr(C)]
-#[derive(Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(Clone, Copy, Default, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct Mesh {
+    pub id: Id<Mesh>,
+    pub primitives: slab::Array<Id<Primitive>>,
+    pub weights: slab::Array<f32>,
+}
+
+impl FromSlab for Mesh {
+    fn read_slab(&mut self, index: usize, slab: &[u32]) -> usize {
+        let Self {
+            id,
+            primitives,
+            weights,
+        } = self;
+        let index = id.read_slab(index, slab);
+        let index = primitives.read_slab(index, slab);
+        weights.read_slab(index, slab)
+    }
+}
+
+#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
+#[repr(C)]
+#[derive(Clone, Copy, Default, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Node {
     pub id: Id<Node>,
     // index of possible camera
@@ -394,11 +466,36 @@ pub struct Node {
     pub mesh: Id<Mesh>,
     pub padding: [u32; 3],
     // indices of children
-    pub children: slab::Array<Id<Node>, 1>,
+    pub children: slab::Array<Id<Node>>,
     // Weights of the instantiated morph target
-    pub weights: slab::Array<f32, 1>,
+    pub weights: slab::Array<f32>,
     // transform of this node
     pub transform: Mat4,
+}
+
+impl FromSlab for Node {
+    fn read_slab(&mut self, index: usize, slab: &[u32]) -> usize {
+        let Self {
+            id,
+            camera,
+            light,
+            skin,
+            mesh,
+            padding,
+            children,
+            weights,
+            transform,
+        } = self;
+        let index = id.read_slab(index, slab);
+        let index = camera.read_slab(index, slab);
+        let index = light.read_slab(index, slab);
+        let index = skin.read_slab(index, slab);
+        let index = mesh.read_slab(index, slab);
+        let index = padding.read_slab(index, slab);
+        let index = children.read_slab(index, slab);
+        let index = weights.read_slab(index, slab);
+        transform.read_slab(index, slab)
+    }
 }
 
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
@@ -407,5 +504,5 @@ pub struct Node {
 pub struct Scene {
     pub id: Id<Scene>,
     // indices of contiguous nodes
-    pub nodes: slab::Array<Id<Node>, 1>,
+    pub nodes: slab::Array<Id<Node>>,
 }
