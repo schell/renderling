@@ -6,7 +6,7 @@ use spirv_std::{image::{Image2d, Cubemap}, Sampler};
 #[cfg(target_arch = "spirv")]
 use spirv_std::num_traits::Float;
 
-use crate::{math, scene::GpuConstants, IsVector};
+use crate::{math, stage::GpuConstants, IsVector};
 
 const INV_ATAN: Vec2 = Vec2::new(0.1591, core::f32::consts::FRAC_1_PI);
 

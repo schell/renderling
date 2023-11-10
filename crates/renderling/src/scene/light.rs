@@ -1,7 +1,7 @@
 //! Light builders.
 
 use glam::{Vec3, Vec4};
-use renderling_shader::scene::{GpuLight, LightType};
+use renderling_shader::stage::{GpuLight, LightType};
 use crate::Id;
 
 #[cfg(feature = "gltf")]

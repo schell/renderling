@@ -15,7 +15,7 @@ use glam::{Vec2, Vec3, Vec4, Vec4Swizzles};
 
 use crate::{
     math,
-    scene::{GpuLight, GpuTexture, LightType, LightingModel},
+    stage::{GpuLight, GpuTexture, LightType, LightingModel},
     Id, IsVector,
 };
 

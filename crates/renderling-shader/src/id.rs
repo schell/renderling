@@ -87,7 +87,7 @@ impl<T> Id<T> {
 
 #[cfg(test)]
 mod test {
-    use crate::scene::GpuEntity;
+    use crate::stage::GpuEntity;
 
     use super::*;
 

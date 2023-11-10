@@ -204,7 +204,7 @@ mod test {
     use glam::{Mat3, Mat4, Quat, UVec2, Vec2, Vec3, Vec4};
     use moongraph::View;
     use pretty_assertions::assert_eq;
-    use renderling_shader::scene::{DrawIndirect, GpuEntity, GpuVertex};
+    use renderling_shader::stage::{DrawIndirect, GpuEntity, GpuVertex};
 
     #[test]
     fn sanity_transmute() {

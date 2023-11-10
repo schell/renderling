@@ -2,7 +2,7 @@
 //! environment cubemap.
 
 use crate::Uniform;
-use renderling_shader::scene::GpuConstants;
+use renderling_shader::stage::GpuConstants;
 
 pub fn create_pipeline_and_bindgroup(
     device: &wgpu::Device,
