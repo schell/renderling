@@ -1,5 +1,20 @@
 # devlog
 
+## Sat Nov 11, 2023
+
+### NLNet Grant Progress
+
+I made a lot of progress on a grant from NLNet to work on renderling/naga.
+Ultimately I missed the funding deadline after expanding the scope of work a bit,
+but they encouraged me to apply for the December 1st 2023 round. I'll be working on
+that over the next few weeks and hopefully can start diving into that work in
+Q2 2024.
+
+### Slab
+
+I'm transitioning from using one GPU buffer for each array of items (Vertices, Entities, etc)
+to using one or two for the whole system, based on a bespoke slab-allocator.
+
 ## Mon Sep 4, 2023
 
 I bumped `rust-gpu` to 0.9.
