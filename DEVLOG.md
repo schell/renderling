@@ -1,5 +1,19 @@
 # devlog
 
+## Mon Sep 4, 2023
+
+I bumped `rust-gpu` to 0.9.
+There was an issue that was preventing me from doing this earlier and I was avoiding dealing with it.
+It turned out to be a pretty simple fix, though I don't actually understand _why_ it fixed it.
+See the [related issue](https://github.com/EmbarkStudios/rust-gpu/issues/1089) for more info.
+
+Quite a big refactor looms overhead. I'm going to have to really think about how to represent the geometry on the GPU, as some of my earlier assumptions about nodes/entities doesn't hold.
+Specifically it seems obvious to me now that I'd like to draw duplicate nodes without duplicating the data, and also that nodes/entities may be the child of more than one parent.
+
+## Sat Sep 2, 2023
+
+I added WASM support! Most of the work was ensuring that the shaders validate (see below).
+
 ## Fri Sep 1, 2023
 
 While adding WASM support I found that my shaders were not validating in the browser.
@@ -14,7 +28,7 @@ I tried to bump `rust-gpu` to 0.9 but ran into [an issue](https://github.com/Emb
 I'm working with @eddyb to figure out what the problem is.
 Here's a link to the start of the [conversation](https://discord.com/channels/750717012564770887/750717499737243679/1136766077330796595).
 
-I also fixed an issue where two versions of `glam` were being built - `0.22` by `spirv-std` and `0.24` by `rendeling-shader`, which was causing CI to fail.
+I also fixed an issue where two versions of `glam` were being built - `0.22` by `spirv-std` and `0.24` by `renderling-shader`, which was causing CI to fail.
 
 ## Thur Aug 3, 2023
 

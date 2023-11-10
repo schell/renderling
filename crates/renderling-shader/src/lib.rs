@@ -19,6 +19,7 @@ pub mod math;
 pub mod pbr;
 pub mod scene;
 pub mod skybox;
+pub mod slab;
 pub mod tonemapping;
 pub mod ui;
 
