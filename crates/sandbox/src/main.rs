@@ -1,6 +1,6 @@
 use renderling::{
     math::{Vec3, Vec4},
-    GpuVertex, Renderling, RenderGraphConfig,
+    Vertex, Renderling, RenderGraphConfig,
 };
 
 fn main() {
@@ -23,17 +23,17 @@ fn main() {
     let cyan_tri = builder
         .new_entity()
         .with_meshlet(vec![
-            GpuVertex {
+            Vertex {
                 position: Vec4::new(0.0, 0.0, 0.0, 0.0),
                 color: Vec4::new(0.0, 1.0, 1.0, 1.0),
                 ..Default::default()
             },
-            GpuVertex {
+            Vertex {
                 position: Vec4::new(size, 0.0, 0.0, 0.0),
                 color: Vec4::new(0.0, 1.0, 1.0, 1.0),
                 ..Default::default()
             },
-            GpuVertex {
+            Vertex {
                 position: Vec4::new(size, size, 0.0, 0.0),
                 color: Vec4::new(0.0, 1.0, 1.0, 1.0),
                 ..Default::default()
@@ -45,17 +45,17 @@ fn main() {
     let _yellow_tri = builder
         .new_entity()
         .with_meshlet(vec![
-            GpuVertex {
+            Vertex {
                 position: Vec4::new(0.0, 0.0, 0.0, 0.0),
                 color: Vec4::new(1.0, 1.0, 0.0, 1.0),
                 ..Default::default()
             },
-            GpuVertex {
+            Vertex {
                 position: Vec4::new(size, 0.0, 0.0, 0.0),
                 color: Vec4::new(1.0, 1.0, 0.0, 1.0),
                 ..Default::default()
             },
-            GpuVertex {
+            Vertex {
                 position: Vec4::new(size, size, 0.0, 0.0),
                 color: Vec4::new(1.0, 1.0, 0.0, 1.0),
                 ..Default::default()
