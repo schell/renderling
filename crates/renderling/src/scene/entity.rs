@@ -1,6 +1,6 @@
 //! Entity builder.
 use glam::{Quat, Vec3};
-use renderling_shader::{pbr::PbrMaterial, scene::{GpuEntity, GpuVertex}};
+use renderling_shader::{pbr::PbrMaterial, stage::{GpuEntity, GpuVertex}};
 
 use crate::{Id, SceneBuilder};
 

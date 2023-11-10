@@ -17,7 +17,7 @@ mod id;
 pub use id::*;
 pub mod math;
 pub mod pbr;
-pub mod scene;
+pub mod stage;
 pub mod skybox;
 pub mod slab;
 pub mod tonemapping;

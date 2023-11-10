@@ -6,7 +6,7 @@ use moongraph::{Move, View, ViewMut};
 use renderling_shader::{debug::DebugChannel, GpuToggles};
 use snafu::prelude::*;
 
-pub use renderling_shader::{pbr::PbrMaterial, scene::*};
+pub use renderling_shader::{pbr::PbrMaterial, stage::*};
 
 use crate::{
     bloom::BloomResult, frame::FrameTextureView, hdr::HdrSurface, Atlas, BufferArray, DepthTexture,
@@ -994,7 +994,7 @@ pub fn scene_cull_cpu(mut scene: ViewMut<Scene>) -> Result<(), SceneError> {
                 .with_mut_slice::<DrawIndirect, _>(|draws: &mut [DrawIndirect]| {
                     for id in entities.iter().map(|e| e.id) {
                         let global_id = glam::UVec3::new(id.into(), 0, 0);
-                        renderling_shader::scene::compute_cull_entities(entities, draws, global_id);
+                        renderling_shader::stage::compute_cull_entities(entities, draws, global_id);
                     }
                 })
         })

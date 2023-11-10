@@ -1,5 +1,5 @@
 //! Pipeline and bindings for for diffuse irradiance convolution shaders.
-use renderling_shader::scene::GpuConstants;
+use renderling_shader::stage::GpuConstants;
 
 use crate::Uniform;
 

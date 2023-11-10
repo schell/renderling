@@ -11,7 +11,7 @@ use spirv_std::{
 #[cfg(target_arch = "spirv")]
 use spirv_std::num_traits::Float;
 
-use crate::{pbr, scene::GpuConstants, IsVector};
+use crate::{pbr, stage::GpuConstants, IsVector};
 
 fn radical_inverse_vdc(mut bits: u32) -> f32 {
     bits = (bits << 16u32) | (bits >> 16u32);

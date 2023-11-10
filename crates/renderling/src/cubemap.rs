@@ -1,6 +1,6 @@
 //! Render pipelines and layouts for creating cubemaps.
 
-use renderling_shader::scene::GpuConstants;
+use renderling_shader::stage::GpuConstants;
 
 use crate::Uniform;
 

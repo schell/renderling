@@ -1,6 +1,6 @@
 //! An HDR skybox.
 use glam::{Mat4, Vec3};
-use renderling_shader::scene::GpuConstants;
+use renderling_shader::stage::GpuConstants;
 
 use crate::{SceneImage, Uniform};
 
