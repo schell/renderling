@@ -204,7 +204,7 @@ mod test {
     use glam::{Mat3, Mat4, Quat, UVec2, Vec2, Vec3, Vec4};
     use moongraph::View;
     use pretty_assertions::assert_eq;
-    use renderling_shader::stage::{DrawIndirect, GpuEntity, GpuVertex};
+    use renderling_shader::stage::{DrawIndirect, GpuEntity, Vertex};
 
     #[test]
     fn sanity_transmute() {
@@ -224,15 +224,15 @@ mod test {
         assert_eq!(u32::MAX, u32max);
     }
 
-    fn right_tri_vertices() -> Vec<GpuVertex> {
+    fn right_tri_vertices() -> Vec<Vertex> {
         vec![
-            GpuVertex::default()
+            Vertex::default()
                 .with_position([0.0, 0.0, 0.5])
                 .with_color([0.0, 1.0, 1.0, 1.0]),
-            GpuVertex::default()
+            Vertex::default()
                 .with_position([0.0, 100.0, 0.5])
                 .with_color([1.0, 1.0, 0.0, 1.0]),
-            GpuVertex::default()
+            Vertex::default()
                 .with_position([100.0, 0.0, 0.5])
                 .with_color([1.0, 0.0, 1.0, 1.0]),
         ]
@@ -313,23 +313,23 @@ mod test {
         ]
     }
 
-    fn cmy_gpu_vertex(p: Vec3) -> GpuVertex {
+    fn cmy_gpu_vertex(p: Vec3) -> Vertex {
         let r: f32 = p.z + 0.5;
         let g: f32 = p.x + 0.5;
         let b: f32 = p.y + 0.5;
-        GpuVertex::default()
+        Vertex::default()
             .with_position([p.x.min(1.0), p.y.min(1.0), p.z.min(1.0)])
             .with_color([r, g, b, 1.0])
     }
 
-    fn gpu_cube_vertices() -> Vec<GpuVertex> {
+    fn gpu_cube_vertices() -> Vec<Vertex> {
         renderling_shader::math::UNIT_INDICES
             .iter()
             .map(|i| cmy_gpu_vertex(renderling_shader::math::UNIT_POINTS[*i as usize]))
             .collect()
     }
 
-    fn gpu_pyramid_vertices() -> Vec<GpuVertex> {
+    fn gpu_pyramid_vertices() -> Vec<Vertex> {
         let vertices = pyramid_points();
         let indices = pyramid_indices();
         indices
@@ -474,7 +474,7 @@ mod test {
         img_diff::assert_img_eq("cmy_cube_remesh_after.png", img);
     }
 
-    fn gpu_uv_unit_cube() -> Vec<GpuVertex> {
+    fn gpu_uv_unit_cube() -> Vec<Vertex> {
         let p: [Vec3; 8] = renderling_shader::math::UNIT_POINTS;
         let tl = Vec2::new(0.0, 0.0);
         let tr = Vec2::new(1.0, 0.0);
@@ -483,40 +483,40 @@ mod test {
 
         vec![
             // top
-            GpuVertex::default().with_position(p[0]).with_uv0(bl),
-            GpuVertex::default().with_position(p[2]).with_uv0(tr),
-            GpuVertex::default().with_position(p[1]).with_uv0(tl),
-            GpuVertex::default().with_position(p[0]).with_uv0(bl),
-            GpuVertex::default().with_position(p[3]).with_uv0(br),
-            GpuVertex::default().with_position(p[2]).with_uv0(tr),
+            Vertex::default().with_position(p[0]).with_uv0(bl),
+            Vertex::default().with_position(p[2]).with_uv0(tr),
+            Vertex::default().with_position(p[1]).with_uv0(tl),
+            Vertex::default().with_position(p[0]).with_uv0(bl),
+            Vertex::default().with_position(p[3]).with_uv0(br),
+            Vertex::default().with_position(p[2]).with_uv0(tr),
             // bottom
-            GpuVertex::default().with_position(p[4]).with_uv0(bl),
-            GpuVertex::default().with_position(p[6]).with_uv0(tr),
-            GpuVertex::default().with_position(p[5]).with_uv0(tl),
-            GpuVertex::default().with_position(p[4]).with_uv0(bl),
-            GpuVertex::default().with_position(p[7]).with_uv0(br),
-            GpuVertex::default().with_position(p[6]).with_uv0(tr),
+            Vertex::default().with_position(p[4]).with_uv0(bl),
+            Vertex::default().with_position(p[6]).with_uv0(tr),
+            Vertex::default().with_position(p[5]).with_uv0(tl),
+            Vertex::default().with_position(p[4]).with_uv0(bl),
+            Vertex::default().with_position(p[7]).with_uv0(br),
+            Vertex::default().with_position(p[6]).with_uv0(tr),
             // left
-            GpuVertex::default().with_position(p[7]).with_uv0(bl),
-            GpuVertex::default().with_position(p[0]).with_uv0(tr),
-            GpuVertex::default().with_position(p[1]).with_uv0(tl),
-            GpuVertex::default().with_position(p[7]).with_uv0(bl),
-            GpuVertex::default().with_position(p[4]).with_uv0(br),
-            GpuVertex::default().with_position(p[0]).with_uv0(tr),
+            Vertex::default().with_position(p[7]).with_uv0(bl),
+            Vertex::default().with_position(p[0]).with_uv0(tr),
+            Vertex::default().with_position(p[1]).with_uv0(tl),
+            Vertex::default().with_position(p[7]).with_uv0(bl),
+            Vertex::default().with_position(p[4]).with_uv0(br),
+            Vertex::default().with_position(p[0]).with_uv0(tr),
             // right
-            GpuVertex::default().with_position(p[5]).with_uv0(bl),
-            GpuVertex::default().with_position(p[2]).with_uv0(tr),
-            GpuVertex::default().with_position(p[3]).with_uv0(tl),
-            GpuVertex::default().with_position(p[5]).with_uv0(bl),
-            GpuVertex::default().with_position(p[6]).with_uv0(br),
-            GpuVertex::default().with_position(p[2]).with_uv0(tr),
+            Vertex::default().with_position(p[5]).with_uv0(bl),
+            Vertex::default().with_position(p[2]).with_uv0(tr),
+            Vertex::default().with_position(p[3]).with_uv0(tl),
+            Vertex::default().with_position(p[5]).with_uv0(bl),
+            Vertex::default().with_position(p[6]).with_uv0(br),
+            Vertex::default().with_position(p[2]).with_uv0(tr),
             // front
-            GpuVertex::default().with_position(p[4]).with_uv0(bl),
-            GpuVertex::default().with_position(p[3]).with_uv0(tr),
-            GpuVertex::default().with_position(p[0]).with_uv0(tl),
-            GpuVertex::default().with_position(p[4]).with_uv0(bl),
-            GpuVertex::default().with_position(p[5]).with_uv0(br),
-            GpuVertex::default().with_position(p[3]).with_uv0(tr),
+            Vertex::default().with_position(p[4]).with_uv0(bl),
+            Vertex::default().with_position(p[3]).with_uv0(tr),
+            Vertex::default().with_position(p[0]).with_uv0(tl),
+            Vertex::default().with_position(p[4]).with_uv0(bl),
+            Vertex::default().with_position(p[5]).with_uv0(br),
+            Vertex::default().with_position(p[3]).with_uv0(tr),
         ]
     }
 
@@ -629,17 +629,17 @@ mod test {
         let mut builder = r.new_scene();
 
         let verts = vec![
-            GpuVertex {
+            Vertex {
                 position: Vec4::new(0.0, 0.0, 0.0, 1.0),
                 color: Vec4::new(1.0, 1.0, 0.0, 1.0),
                 ..Default::default()
             },
-            GpuVertex {
+            Vertex {
                 position: Vec4::new(100.0, 100.0, 0.0, 1.0),
                 color: Vec4::new(0.0, 1.0, 1.0, 1.0),
                 ..Default::default()
             },
-            GpuVertex {
+            Vertex {
                 position: Vec4::new(100.0, 0.0, 0.0, 1.0),
                 color: Vec4::new(1.0, 0.0, 1.0, 1.0),
                 ..Default::default()
@@ -740,19 +740,19 @@ mod test {
         });
 
         let verts = vec![
-            GpuVertex {
+            Vertex {
                 position: Vec4::new(0.0, 0.0, 0.0, 0.0),
                 color: Vec4::new(1.0, 1.0, 0.0, 1.0),
                 uv: Vec4::new(0.0, 0.0, 0.0, 0.0),
                 ..Default::default()
             },
-            GpuVertex {
+            Vertex {
                 position: Vec4::new(100.0, 100.0, 0.0, 0.0),
                 color: Vec4::new(0.0, 1.0, 1.0, 1.0),
                 uv: Vec4::new(1.0, 1.0, 1.0, 1.0),
                 ..Default::default()
             },
-            GpuVertex {
+            Vertex {
                 position: Vec4::new(100.0, 0.0, 0.0, 0.0),
                 color: Vec4::new(1.0, 0.0, 1.0, 1.0),
                 uv: Vec4::new(1.0, 0.0, 1.0, 0.0),
@@ -884,16 +884,16 @@ mod test {
             .new_entity()
             .with_material(material_id)
             .with_meshlet({
-                let tl = GpuVertex::default()
+                let tl = Vertex::default()
                     .with_position(Vec3::ZERO)
                     .with_uv0(Vec2::ZERO);
-                let tr = GpuVertex::default()
+                let tr = Vertex::default()
                     .with_position(Vec3::new(1.0, 0.0, 0.0))
                     .with_uv0(Vec2::new(1.0, 0.0));
-                let bl = GpuVertex::default()
+                let bl = Vertex::default()
                     .with_position(Vec3::new(0.0, 1.0, 0.0))
                     .with_uv0(Vec2::new(0.0, 1.0));
-                let br = GpuVertex::default()
+                let br = Vertex::default()
                     .with_position(Vec3::new(1.0, 1.0, 0.0))
                     .with_uv0(Vec2::splat(1.0));
                 vec![tl, bl, br, tl, br, tr]
@@ -976,16 +976,16 @@ mod test {
         let sheet_h = sheet_h as f32;
 
         let (start, count) = builder.add_meshlet({
-            let tl = GpuVertex::default()
+            let tl = Vertex::default()
                 .with_position(Vec3::ZERO)
                 .with_uv0(Vec2::ZERO);
-            let tr = GpuVertex::default()
+            let tr = Vertex::default()
                 .with_position(Vec3::new(sheet_w, 0.0, 0.0))
                 .with_uv0(Vec2::new(3.0, 0.0));
-            let bl = GpuVertex::default()
+            let bl = Vertex::default()
                 .with_position(Vec3::new(0.0, sheet_h, 0.0))
                 .with_uv0(Vec2::new(0.0, 3.0));
-            let br = GpuVertex::default()
+            let br = Vertex::default()
                 .with_position(Vec3::new(sheet_w, sheet_h, 0.0))
                 .with_uv0(Vec2::splat(3.0));
             vec![tl, bl, br, tl, br, tr]
@@ -1075,16 +1075,16 @@ mod test {
         let sheet_h = sheet_h as f32;
 
         let (start, count) = builder.add_meshlet({
-            let tl = GpuVertex::default()
+            let tl = Vertex::default()
                 .with_position(Vec3::ZERO)
                 .with_uv0(Vec2::ZERO);
-            let tr = GpuVertex::default()
+            let tr = Vertex::default()
                 .with_position(Vec3::new(sheet_w, 0.0, 0.0))
                 .with_uv0(Vec2::new(-3.0, 0.0));
-            let bl = GpuVertex::default()
+            let bl = Vertex::default()
                 .with_position(Vec3::new(0.0, sheet_h, 0.0))
                 .with_uv0(Vec2::new(0.0, -3.0));
-            let br = GpuVertex::default()
+            let br = Vertex::default()
                 .with_position(Vec3::new(sheet_w, sheet_h, 0.0))
                 .with_uv0(Vec2::splat(-3.0));
             vec![tl, bl, br, tl, br, tr]
@@ -1176,7 +1176,7 @@ mod test {
             .with_meshlet(
                 renderling_shader::math::unit_cube()
                     .into_iter()
-                    .map(|(p, n)| GpuVertex {
+                    .map(|(p, n)| Vertex {
                         position: p.extend(1.0),
                         normal: n.extend(0.0),
                         ..Default::default()
@@ -1254,17 +1254,17 @@ mod test {
         let cyan_tri = builder
             .new_entity()
             .with_meshlet(vec![
-                GpuVertex {
+                Vertex {
                     position: Vec4::new(0.0, 0.0, 0.0, 0.0),
                     color: Vec4::new(0.0, 1.0, 1.0, 1.0),
                     ..Default::default()
                 },
-                GpuVertex {
+                Vertex {
                     position: Vec4::new(size, size, 0.0, 0.0),
                     color: Vec4::new(0.0, 1.0, 1.0, 1.0),
                     ..Default::default()
                 },
-                GpuVertex {
+                Vertex {
                     position: Vec4::new(size, 0.0, 0.0, 0.0),
                     color: Vec4::new(0.0, 1.0, 1.0, 1.0),
                     ..Default::default()
@@ -1276,17 +1276,17 @@ mod test {
         let yellow_tri = builder //
             .new_entity()
             .with_meshlet(vec![
-                GpuVertex {
+                Vertex {
                     position: Vec4::new(0.0, 0.0, 0.0, 0.0),
                     color: Vec4::new(1.0, 1.0, 0.0, 1.0),
                     ..Default::default()
                 },
-                GpuVertex {
+                Vertex {
                     position: Vec4::new(size, size, 0.0, 0.0),
                     color: Vec4::new(1.0, 1.0, 0.0, 1.0),
                     ..Default::default()
                 },
-                GpuVertex {
+                Vertex {
                     position: Vec4::new(size, 0.0, 0.0, 0.0),
                     color: Vec4::new(1.0, 1.0, 0.0, 1.0),
                     ..Default::default()
@@ -1298,17 +1298,17 @@ mod test {
         let _red_tri = builder
             .new_entity()
             .with_meshlet(vec![
-                GpuVertex {
+                Vertex {
                     position: Vec4::new(0.0, 0.0, 0.0, 0.0),
                     color: Vec4::new(1.0, 0.0, 0.0, 1.0),
                     ..Default::default()
                 },
-                GpuVertex {
+                Vertex {
                     position: Vec4::new(size, size, 0.0, 0.0),
                     color: Vec4::new(1.0, 0.0, 0.0, 1.0),
                     ..Default::default()
                 },
-                GpuVertex {
+                Vertex {
                     position: Vec4::new(size, 0.0, 0.0, 0.0),
                     color: Vec4::new(1.0, 0.0, 0.0, 1.0),
                     ..Default::default()
@@ -1427,10 +1427,10 @@ mod test {
         } = icosphere;
         log::info!("icosphere created");
 
-        let to_vertex = |ndx: &usize| -> GpuVertex {
+        let to_vertex = |ndx: &usize| -> Vertex {
             let p: [f32; 3] = positions[*ndx].0.into();
             let n: [f32; 3] = normals[*ndx].0.into();
-            GpuVertex::default().with_position(p).with_normal(n)
+            Vertex::default().with_position(p).with_normal(n)
         };
         let sphere_vertices = cells.iter().flat_map(|icosahedron::Triangle { a, b, c }| {
             let p0 = to_vertex(&a);

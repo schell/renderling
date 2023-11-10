@@ -109,7 +109,7 @@ pub struct SceneBuilder {
     pub skybox: Option<Skybox>,
     pub textures: Vec<TextureParams>,
     pub materials: Vec<PbrMaterial>,
-    pub vertices: Vec<GpuVertex>,
+    pub vertices: Vec<Vertex>,
     pub entities: Vec<GpuEntity>,
     pub lights: Vec<GpuLight>,
     pub use_lighting: bool,
@@ -294,7 +294,7 @@ impl SceneBuilder {
     ///
     /// Returns the index of the first vertex of the newly created meshlet and
     /// the vertex count.
-    pub fn add_meshlet(&mut self, vertices: impl IntoIterator<Item = GpuVertex>) -> (u32, u32) {
+    pub fn add_meshlet(&mut self, vertices: impl IntoIterator<Item = Vertex>) -> (u32, u32) {
         let vertices = vertices.into_iter().collect::<Vec<_>>();
         let start = self.vertices.len();
         let len = vertices.len();
@@ -365,7 +365,7 @@ pub type MutableBufferArray<T> = BufferArray<T>;
 pub type MutableBufferArray<T> = BufferArray<T, crate::CpuAndGpuBuffer>;
 
 pub struct Scene {
-    pub vertices: BufferArray<GpuVertex>,
+    pub vertices: BufferArray<Vertex>,
     pub entities: MutableBufferArray<GpuEntity>,
     pub lights: BufferArray<GpuLight>,
     pub materials: BufferArray<PbrMaterial>,
@@ -661,7 +661,7 @@ impl Scene {
 pub fn create_scene_buffers_bindgroup(
     device: &wgpu::Device,
     constants: &Uniform<GpuConstants>,
-    vertices: &BufferArray<GpuVertex>,
+    vertices: &BufferArray<Vertex>,
     entities: &wgpu::Buffer,
     lights: &BufferArray<GpuLight>,
     materials: &BufferArray<PbrMaterial>,

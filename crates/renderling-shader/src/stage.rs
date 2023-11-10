@@ -27,7 +27,7 @@ pub use texture::*;
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[repr(C)]
 #[derive(Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
-pub struct GpuVertex {
+pub struct Vertex {
     pub position: Vec4,
     pub color: Vec4,
     pub uv: Vec4,
@@ -40,7 +40,7 @@ pub struct GpuVertex {
     pub weights: [f32; 4],
 }
 
-impl Default for GpuVertex {
+impl Default for Vertex {
     fn default() -> Self {
         Self {
             position: Default::default(),
@@ -54,7 +54,7 @@ impl Default for GpuVertex {
     }
 }
 
-impl GpuVertex {
+impl Vertex {
     pub fn with_position(mut self, p: impl Into<Vec3>) -> Self {
         self.position = p.into().extend(0.0);
         self
@@ -133,13 +133,13 @@ impl GpuVertex {
         mat
     }
 
-    pub fn generate_normal(a: GpuVertex, b: GpuVertex, c: GpuVertex) -> Vec3 {
+    pub fn generate_normal(a: Vertex, b: Vertex, c: Vertex) -> Vec3 {
         let ab = a.position.xyz() - b.position.xyz();
         let ac = a.position.xyz() - c.position.xyz();
         ab.cross(ac).normalize()
     }
 
-    pub fn generate_tangent(a: GpuVertex, b: GpuVertex, c: GpuVertex) -> Vec4 {
+    pub fn generate_tangent(a: Vertex, b: Vertex, c: Vertex) -> Vec4 {
         let ab = b.position.xyz() - a.position.xyz();
         let ac = c.position.xyz() - a.position.xyz();
         let n = ab.cross(ac);
@@ -401,7 +401,7 @@ impl GpuEntity {
     ///
     /// This takes into consideration any morph targets the base mesh may
     /// reference as well as any joints.
-    pub fn get_vertex(&self, vertex_index: u32, vertices: &[GpuVertex]) -> GpuVertex {
+    pub fn get_vertex(&self, vertex_index: u32, vertices: &[Vertex]) -> Vertex {
         let index = vertex_index as usize;
         let mut vertex = vertices[index];
 
@@ -425,7 +425,7 @@ impl GpuEntity {
     ///
     /// This takes into consideration any morph targets the base mesh may
     /// reference as well as any joints.
-    pub fn get_vertices(&self, vertices: &[GpuVertex]) -> Vec<GpuVertex> {
+    pub fn get_vertices(&self, vertices: &[Vertex]) -> Vec<Vertex> {
         let mut mesh_vertices = vec![];
         for vertex_index in self.mesh_first_vertex..self.mesh_first_vertex + self.mesh_vertex_count
         {
@@ -488,7 +488,7 @@ pub fn main_vertex_scene(
     vertex_index: u32,
 
     constants: &GpuConstants,
-    vertices: &[GpuVertex],
+    vertices: &[Vertex],
     entities: &[GpuEntity],
 
     out_material: &mut u32,

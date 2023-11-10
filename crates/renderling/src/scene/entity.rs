@@ -1,6 +1,6 @@
 //! Entity builder.
 use glam::{Quat, Vec3};
-use renderling_shader::{pbr::PbrMaterial, stage::{GpuEntity, GpuVertex}};
+use renderling_shader::{pbr::PbrMaterial, stage::{GpuEntity, Vertex}};
 
 use crate::{Id, SceneBuilder};
 
@@ -20,7 +20,7 @@ impl<'a> EntityBuilder<'a> {
         self
     }
 
-    pub fn with_meshlet(mut self, vertices: impl IntoIterator<Item = GpuVertex>) -> Self {
+    pub fn with_meshlet(mut self, vertices: impl IntoIterator<Item = Vertex>) -> Self {
         let (start, len) = self.scene.add_meshlet(vertices);
         self.entity.mesh_first_vertex = start;
         self.entity.mesh_vertex_count = len;

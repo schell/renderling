@@ -701,7 +701,7 @@ impl GltfLoader {
                 .map(
                     |(i, (position, (color, (uv, (normal, (tangent, (joints, weights)))))))| {
                         (
-                            GpuVertex {
+                            Vertex {
                                 position: position.extend(0.0),
                                 color,
                                 uv,
@@ -739,13 +739,13 @@ impl GltfLoader {
                 vertices.chunks_mut(3).for_each(|t| match t {
                     [(a, _), (b, _), (c, _)] => {
                         if gen_normals {
-                            let n = GpuVertex::generate_normal(*a, *b, *c);
+                            let n = Vertex::generate_normal(*a, *b, *c);
                             a.normal = n.extend(a.normal.w);
                             b.normal = n.extend(b.normal.w);
                             c.normal = n.extend(c.normal.w);
                         }
                         if gen_tangents {
-                            let tangent = GpuVertex::generate_tangent(*a, *b, *c);
+                            let tangent = Vertex::generate_tangent(*a, *b, *c);
                             debug_assert!(!tangent.w.is_nan(), "tangent is NaN");
                             a.tangent = tangent;
                             b.tangent = tangent;
@@ -779,7 +779,7 @@ impl GltfLoader {
                         let p = may_ps.map(Vec3::from).unwrap_or_default().extend(0.0);
                         let n = may_ns.map(Vec3::from).unwrap_or_default().extend(0.0);
                         let t = may_ts.map(Vec3::from).unwrap_or_default().extend(0.0);
-                        let mut v = GpuVertex::default();
+                        let mut v = Vertex::default();
                         v.position = p;
                         v.normal = n;
                         v.tangent = t;
@@ -1191,7 +1191,7 @@ mod test {
     use glam::{Vec3, Vec4};
     use renderling_shader::pbr::PbrMaterial;
 
-    use crate::{camera, GpuVertex, Id, LightingModel, RenderGraphConfig, Renderling};
+    use crate::{camera, Vertex, Id, LightingModel, RenderGraphConfig, Renderling};
 
     #[test]
     // tests importing a gltf file and rendering the first image as a 2d object
@@ -1213,16 +1213,16 @@ mod test {
             .new_entity()
             .with_meshlet({
                 let vs = vec![
-                    GpuVertex::default()
+                    Vertex::default()
                         .with_position([0.0, 0.0, 0.0])
                         .with_uv0([0.0, 0.0]),
-                    GpuVertex::default()
+                    Vertex::default()
                         .with_position([1.0, 0.0, 0.0])
                         .with_uv0([1.0, 0.0]),
-                    GpuVertex::default()
+                    Vertex::default()
                         .with_position([1.0, 1.0, 0.0])
                         .with_uv0([1.0, 1.0]),
-                    GpuVertex::default()
+                    Vertex::default()
                         .with_position([0.0, 1.0, 0.0])
                         .with_uv0([0.0, 1.0]),
                 ];
