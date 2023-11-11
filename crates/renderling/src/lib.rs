@@ -91,7 +91,7 @@ pub mod graph {
 }
 
 pub use graph::{graph, Graph, GraphError, Move, View, ViewMut};
-pub use renderling_shader::{Id, ID_NONE};
+pub use renderling_shader::id::{Id, ID_NONE};
 
 /// Set up the render graph, including:
 /// * 3d scene objects

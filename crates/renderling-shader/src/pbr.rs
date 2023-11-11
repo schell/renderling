@@ -16,7 +16,7 @@ use glam::{Vec2, Vec3, Vec4, Vec4Swizzles};
 use crate::{
     math,
     stage::{GpuLight, GpuTexture, LightType, LightingModel},
-    Id, IsVector,
+    id::Id, IsVector,
 };
 
 /// Represents a material on the GPU.

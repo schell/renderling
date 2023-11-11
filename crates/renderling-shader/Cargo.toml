@@ -11,6 +11,7 @@ default = []
 
 [dependencies]
 bytemuck = { workspace = true }
+renderling-derive = { version = "0.1.0", path = "../renderling-derive" }
 spirv-std = "^0.9"
 
 [target.'cfg(not(target_arch = "spirv"))'.dependencies]
