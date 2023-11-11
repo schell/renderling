@@ -1,13 +1,13 @@
 //! Typed identifiers that can also be used as indices.
 use core::marker::PhantomData;
 
-use crate::{self as renderling_shader, slab::FromSlab};
+use crate::{self as renderling_shader, slab::Slabbed};
 
 pub const ID_NONE: u32 = u32::MAX;
 
 /// An identifier.
 #[repr(transparent)]
-#[derive(bytemuck::Pod, bytemuck::Zeroable, FromSlab)]
+#[derive(bytemuck::Pod, bytemuck::Zeroable, Slabbed)]
 pub struct Id<T>(pub(crate) u32, PhantomData<T>);
 
 impl<T> PartialOrd for Id<T> {
@@ -47,6 +47,18 @@ impl<T> Eq for Id<T> {}
 impl<T> From<Id<T>> for u32 {
     fn from(value: Id<T>) -> Self {
         value.0
+    }
+}
+
+impl<T> From<usize> for Id<T> {
+    fn from(value: usize) -> Self {
+        Id::new(value as u32)
+    }
+}
+
+impl<T> From<u32> for Id<T> {
+    fn from(value: u32) -> Self {
+        Id::new(value)
     }
 }
 

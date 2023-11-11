@@ -1,6 +1,6 @@
 //! Debugging helpers.
 use crate as renderling_shader;
-use crate::slab::FromSlab;
+use crate::slab::Slabbed;
 
 /// Used to debug shaders by early exiting the shader and attempting to display
 /// the value as shaded colors.
@@ -102,7 +102,7 @@ impl DebugChannel {
 /// Create one using `DebugChannel::into`.
 #[repr(transparent)]
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
-#[derive(Default, Clone, Copy, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable, FromSlab)]
+#[derive(Default, Clone, Copy, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable, Slabbed)]
 pub struct DebugMode(u32);
 
 impl From<DebugChannel> for DebugMode {

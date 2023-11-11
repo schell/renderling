@@ -16,11 +16,12 @@ use spirv_std::num_traits::*;
 
 use crate::{
     self as renderling_shader,
+    array::Array,
     bits::{bits, extract, insert},
     debug::*,
     id::{Id, ID_NONE},
-    pbr,
-    slab::FromSlab,
+    pbr::{self, PbrMaterial},
+    slab::{Slabbed, Slab},
     IsMatrix, IsVector,
 };
 
@@ -30,7 +31,7 @@ pub use texture::*;
 /// A vertex in a mesh.
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[repr(C)]
-#[derive(Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable, FromSlab)]
+#[derive(Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable, Slabbed)]
 pub struct Vertex {
     pub position: Vec4,
     pub color: Vec4,
@@ -172,7 +173,7 @@ impl Vertex {
 
 #[repr(transparent)]
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
-#[derive(Copy, Clone, Default, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable, FromSlab)]
+#[derive(Copy, Clone, Default, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable, Slabbed)]
 pub struct LightType(u32);
 
 #[cfg(not(target_arch = "spirv"))]
@@ -199,7 +200,7 @@ impl LightType {
 /// A light capable of representing a directional, point or spotlight.
 #[repr(C)]
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
-#[derive(Copy, Clone, Default, bytemuck::Pod, bytemuck::Zeroable, FromSlab)]
+#[derive(Copy, Clone, Default, bytemuck::Pod, bytemuck::Zeroable, Slabbed)]
 pub struct GpuLight {
     pub position: Vec4,
     pub direction: Vec4,
@@ -224,7 +225,7 @@ pub struct GpuLight {
     Debug,
     bytemuck::Pod,
     bytemuck::Zeroable,
-    FromSlab,
+    Slabbed,
 )]
 pub struct LightingModel(u32);
 
@@ -246,7 +247,7 @@ impl LightingModel {
 /// ### Provides info about if the entity is a skin.
 #[repr(transparent)]
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
-#[derive(Clone, Copy, Default, PartialEq, bytemuck::Pod, bytemuck::Zeroable, FromSlab)]
+#[derive(Clone, Copy, Default, PartialEq, bytemuck::Pod, bytemuck::Zeroable, Slabbed)]
 pub struct GpuEntityInfo(pub u32);
 
 impl GpuEntityInfo {
@@ -309,7 +310,7 @@ impl GpuEntityInfo {
 /// A bundle of GPU components.
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[repr(C)]
-#[derive(Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable, FromSlab)]
+#[derive(Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable, Slabbed)]
 pub struct GpuEntity {
     // The id of this entity. `Id::NONE` means this entity is not in use.
     pub id: Id<GpuEntity>,
@@ -452,7 +453,7 @@ impl GpuEntity {
 /// Boolean toggles that cause the renderer to turn on/off certain features.
 #[repr(transparent)]
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
-#[derive(Default, Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable, FromSlab)]
+#[derive(Default, Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable, Slabbed)]
 pub struct GpuToggles(pub u32);
 
 impl GpuToggles {
@@ -482,11 +483,10 @@ impl GpuToggles {
     }
 }
 
-
 /// Unforms/constants for a scene's worth of rendering.
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[repr(C)]
-#[derive(Default, Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable, FromSlab)]
+#[derive(Default, Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable, Slabbed)]
 pub struct GpuConstants {
     pub camera_projection: Mat4,
     pub camera_view: Mat4,
@@ -497,7 +497,7 @@ pub struct GpuConstants {
 }
 
 #[repr(C)]
-#[derive(Default, Debug, Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable, FromSlab)]
+#[derive(Default, Debug, Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable, Slabbed)]
 pub struct DrawIndirect {
     pub vertex_count: u32,
     pub instance_count: u32,
@@ -848,6 +848,72 @@ pub fn main_fragment_scene(
         Vec3::ZERO
     }
     .extend(1.0);
+}
+
+#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
+#[repr(C)]
+#[derive(Default, Clone, Copy, PartialEq, Slabbed)]
+pub struct RenderUnit {
+    pub id: Id<RenderUnit>,
+    pub vertices: Array<Vertex>,
+    pub material: Id<PbrMaterial>,
+    pub position: Vec3,
+    pub rotation: Quat,
+    pub scale: Vec3,
+    pub camera_projection: Id<Mat4>,
+    pub camera_view: Id<Mat4>,
+}
+
+pub fn stage_vertex(
+    // Which render unit are we rendering
+    instance_index: u32,
+    // Which vertex within the render unit are we rendering
+    vertex_index: u32,
+    slab: &[u32],
+
+    out_material: &mut u32,
+    out_color: &mut Vec4,
+    out_uv0: &mut Vec2,
+    out_uv1: &mut Vec2,
+    out_norm: &mut Vec3,
+    out_tangent: &mut Vec3,
+    out_bitangent: &mut Vec3,
+    // position of the vertex/fragment in world space
+    out_pos: &mut Vec3,
+
+    gl_pos: &mut Vec4,
+) {
+    let unit_id: Id<RenderUnit> = Id::from(instance_index);
+    let unit = slab.read(unit_id);
+    let vertex = slab.read(unit.vertices.at(vertex_index as usize));
+
+    let model_matrix =
+        Mat4::from_scale_rotation_translation(unit.scale, unit.rotation, unit.position);
+    *out_material = unit.material.into();
+    *out_color = vertex.color;
+    *out_uv0 = vertex.uv.xy();
+    *out_uv1 = vertex.uv.zw();
+
+    let scale2 = unit.scale * unit.scale;
+    let normal = vertex.normal.xyz().alt_norm_or_zero();
+    let tangent = vertex.tangent.xyz().alt_norm_or_zero();
+    let normal_w = (model_matrix * (normal / scale2).extend(0.0))
+        .xyz()
+        .alt_norm_or_zero();
+    let tangent_w = (model_matrix * tangent.extend(0.0))
+        .xyz()
+        .alt_norm_or_zero();
+    let bitangent_w = normal_w.cross(tangent_w) * if vertex.tangent.w >= 0.0 { 1.0 } else { -1.0 };
+    *out_tangent = tangent_w;
+    *out_bitangent = bitangent_w;
+    *out_norm = normal_w;
+
+    let view_pos = model_matrix * vertex.position.xyz().extend(1.0);
+    *out_pos = view_pos.xyz();
+
+    let camera_projection = slab.read(unit.camera_projection);
+    let camera_view = slab.read(unit.camera_view);
+    *gl_pos = camera_projection * camera_view * view_pos;
 }
 
 /// Compute the draw calls for this frame.
