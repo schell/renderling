@@ -715,8 +715,7 @@ impl Skybox {
 
 #[cfg(test)]
 mod test {
-    use glam::{Vec2, Vec3, Vec4};
-    use renderling_shader::ui::{UiMode, UiVertex};
+    use glam::Vec3;
 
     use super::*;
     use crate::{RenderGraphConfig, Renderling};

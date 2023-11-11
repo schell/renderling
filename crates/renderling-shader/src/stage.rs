@@ -15,9 +15,13 @@ use spirv_std::{
 use spirv_std::num_traits::*;
 
 use crate::{
+    self as renderling_shader,
     bits::{bits, extract, insert},
     debug::*,
-    pbr, GpuToggles, Id, IsMatrix, IsVector, ID_NONE,
+    id::{Id, ID_NONE},
+    pbr,
+    slab::FromSlab,
+    IsMatrix, IsVector,
 };
 
 mod texture;
@@ -26,7 +30,7 @@ pub use texture::*;
 /// A vertex in a mesh.
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[repr(C)]
-#[derive(Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable, FromSlab)]
 pub struct Vertex {
     pub position: Vec4,
     pub color: Vec4,
@@ -168,7 +172,7 @@ impl Vertex {
 
 #[repr(transparent)]
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
-#[derive(Copy, Clone, Default, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(Copy, Clone, Default, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable, FromSlab)]
 pub struct LightType(u32);
 
 #[cfg(not(target_arch = "spirv"))]
@@ -195,7 +199,7 @@ impl LightType {
 /// A light capable of representing a directional, point or spotlight.
 #[repr(C)]
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
-#[derive(Copy, Clone, Default, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(Copy, Clone, Default, bytemuck::Pod, bytemuck::Zeroable, FromSlab)]
 pub struct GpuLight {
     pub position: Vec4,
     pub direction: Vec4,
@@ -210,7 +214,17 @@ pub struct GpuLight {
 /// Determines the lighting to use in an ubershader.
 #[repr(transparent)]
 #[derive(
-    Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Debug, bytemuck::Pod, bytemuck::Zeroable,
+    Clone,
+    Copy,
+    Default,
+    PartialEq,
+    Eq,
+    PartialOrd,
+    Ord,
+    Debug,
+    bytemuck::Pod,
+    bytemuck::Zeroable,
+    FromSlab,
 )]
 pub struct LightingModel(u32);
 
@@ -232,7 +246,7 @@ impl LightingModel {
 /// ### Provides info about if the entity is a skin.
 #[repr(transparent)]
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
-#[derive(Clone, Copy, Default, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(Clone, Copy, Default, PartialEq, bytemuck::Pod, bytemuck::Zeroable, FromSlab)]
 pub struct GpuEntityInfo(pub u32);
 
 impl GpuEntityInfo {
@@ -295,7 +309,7 @@ impl GpuEntityInfo {
 /// A bundle of GPU components.
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[repr(C)]
-#[derive(Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable, FromSlab)]
 pub struct GpuEntity {
     // The id of this entity. `Id::NONE` means this entity is not in use.
     pub id: Id<GpuEntity>,
@@ -435,10 +449,44 @@ impl GpuEntity {
     }
 }
 
+/// Boolean toggles that cause the renderer to turn on/off certain features.
+#[repr(transparent)]
+#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
+#[derive(Default, Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable, FromSlab)]
+pub struct GpuToggles(pub u32);
+
+impl GpuToggles {
+    const BITS_HAS_SKYBOX: (u32, u32) = bits(0..=0);
+    const BITS_USE_LIGHTING: (u32, u32) = bits(1..=1);
+
+    pub fn get_has_skybox(&self) -> bool {
+        extract(self.0, Self::BITS_HAS_SKYBOX) == 1
+    }
+
+    pub fn set_has_skybox(&mut self, has: bool) {
+        insert(&mut self.0, Self::BITS_HAS_SKYBOX, if has { 1 } else { 0 })
+    }
+
+    pub fn get_use_lighting(&self) -> bool {
+        extract(self.0, Self::BITS_USE_LIGHTING) == 1
+    }
+
+    /// Setting this to `false` causes all models to be rendered "unlit", as
+    /// if each used a material with `lighting_model = LightModel::NO_LIGHTING`.
+    pub fn set_use_lighting(&mut self, use_lighting: bool) {
+        insert(
+            &mut self.0,
+            Self::BITS_USE_LIGHTING,
+            if use_lighting { 1 } else { 0 },
+        )
+    }
+}
+
+
 /// Unforms/constants for a scene's worth of rendering.
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[repr(C)]
-#[derive(Default, Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(Default, Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable, FromSlab)]
 pub struct GpuConstants {
     pub camera_projection: Mat4,
     pub camera_view: Mat4,
@@ -449,7 +497,7 @@ pub struct GpuConstants {
 }
 
 #[repr(C)]
-#[derive(Default, Debug, Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(Default, Debug, Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable, FromSlab)]
 pub struct DrawIndirect {
     pub vertex_count: u32,
     pub instance_count: u32,

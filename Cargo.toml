@@ -6,7 +6,7 @@ members = [
     "crates/renderling",
     "crates/renderling-shader",
     "crates/renderling-gpui",
-    "crates/sandbox",
+    "crates/sandbox", "crates/renderling-derive",
 ]
 
 exclude = ["./shaders"]
