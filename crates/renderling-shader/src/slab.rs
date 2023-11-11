@@ -1,22 +1,32 @@
 //! Slab storage and ops used for storing on CPU and extracting on GPU.
 use core::marker::PhantomData;
 
-pub use renderling_derive::FromSlab;
+pub use renderling_derive::Slabbed;
+
+use crate::id::Id;
 
 /// Determines the "size" of a type when stored in a slab of `&[u32]`,
 /// and how to read it from the slab.
-pub trait FromSlab: Sized {
+pub trait Slabbed: Sized {
     /// The number of `u32`s this type occupies in a slab of `&[u32]`.
     fn slab_size() -> usize;
+
     /// Read the type out of the slab at starting `index` and return
     /// the new index.
     ///
-    /// If the type cannot be read, The returned index will be equal
+    /// If the type cannot be read, the returned index will be equal
     /// to `index`.
     fn read_slab(&mut self, index: usize, slab: &[u32]) -> usize;
+
+    /// Write the type into the slab at starting `index` and return
+    /// the new index.
+    ///
+    /// If the type cannot be written, the returned index will be equal
+    /// to `index`.
+    fn write_slab(&self, index: usize, slab: &mut [u32]) -> usize;
 }
 
-impl FromSlab for u32 {
+impl Slabbed for u32 {
     fn slab_size() -> usize {
         1
     }
@@ -29,9 +39,18 @@ impl FromSlab for u32 {
             index
         }
     }
+
+    fn write_slab(&self, index: usize, slab: &mut [u32]) -> usize {
+        if slab.len() > index {
+            slab[index] = *self;
+            index + 1
+        } else {
+            index
+        }
+    }
 }
 
-impl FromSlab for f32 {
+impl Slabbed for f32 {
     fn slab_size() -> usize {
         1
     }
@@ -44,11 +63,20 @@ impl FromSlab for f32 {
             index
         }
     }
+
+    fn write_slab(&self, index: usize, slab: &mut [u32]) -> usize {
+        if slab.len() > index {
+            slab[index] = self.to_bits();
+            index + 1
+        } else {
+            index
+        }
+    }
 }
 
-impl<T: FromSlab, const N: usize> FromSlab for [T; N] {
+impl<T: Slabbed, const N: usize> Slabbed for [T; N] {
     fn slab_size() -> usize {
-        <T as FromSlab>::slab_size() * N
+        <T as Slabbed>::slab_size() * N
     }
 
     fn read_slab(&mut self, mut index: usize, slab: &[u32]) -> usize {
@@ -57,10 +85,16 @@ impl<T: FromSlab, const N: usize> FromSlab for [T; N] {
         }
         index
     }
+
+    fn write_slab(&self, mut index: usize, slab: &mut [u32]) -> usize {
+        for i in 0..N {
+            index = self[i].write_slab(index, slab);
+        }
+        index
+    }
 }
 
-impl FromSlab for glam::Mat4 {
-
+impl Slabbed for glam::Mat4 {
     fn read_slab(&mut self, index: usize, slab: &[u32]) -> usize {
         if slab.len() < index + 16 {
             return index;
@@ -80,12 +114,57 @@ impl FromSlab for glam::Mat4 {
     fn slab_size() -> usize {
         16
     }
+
+    fn write_slab(&self, index: usize, slab: &mut [u32]) -> usize {
+        if slab.len() < index + 16 {
+            return index;
+        }
+        let Self {
+            x_axis,
+            y_axis,
+            z_axis,
+            w_axis,
+        } = self;
+        let index = x_axis.write_slab(index, slab);
+        let index = y_axis.write_slab(index, slab);
+        let index = z_axis.write_slab(index, slab);
+        w_axis.write_slab(index, slab)
+    }
 }
 
-impl FromSlab for glam::Vec4 {
+impl Slabbed for glam::Vec3 {
+    fn slab_size() -> usize {
+        3
+    }
+
+    fn read_slab(&mut self, index: usize, slab: &[u32]) -> usize {
+        if slab.len() < index + 3 {
+            return index;
+        }
+        let Self { x, y, z } = self;
+        let index = x.read_slab(index, slab);
+        let index = y.read_slab(index, slab);
+        let index = z.read_slab(index, slab);
+        index
+    }
+
+    fn write_slab(&self, index: usize, slab: &mut [u32]) -> usize {
+        if slab.len() < index + 3 {
+            return index;
+        }
+        let Self { x, y, z } = self;
+        let index = x.write_slab(index, slab);
+        let index = y.write_slab(index, slab);
+        let index = z.write_slab(index, slab);
+        index
+    }
+}
+
+impl Slabbed for glam::Vec4 {
     fn slab_size() -> usize {
         4
     }
+
     fn read_slab(&mut self, index: usize, slab: &[u32]) -> usize {
         if slab.len() < index + 4 {
             return index;
@@ -96,9 +175,20 @@ impl FromSlab for glam::Vec4 {
         let index = z.read_slab(index, slab);
         w.read_slab(index, slab)
     }
+
+    fn write_slab(&self, index: usize, slab: &mut [u32]) -> usize {
+        if slab.len() < index + 4 {
+            return index;
+        }
+        let Self { x, y, z, w } = self;
+        let index = x.write_slab(index, slab);
+        let index = y.write_slab(index, slab);
+        let index = z.write_slab(index, slab);
+        w.write_slab(index, slab)
+    }
 }
 
-impl FromSlab for glam::Quat {
+impl Slabbed for glam::Quat {
     fn slab_size() -> usize {
         16
     }
@@ -112,9 +202,21 @@ impl FromSlab for glam::Quat {
         let index = z.read_slab(index, slab);
         w.read_slab(index, slab)
     }
+
+    fn write_slab(&self, index: usize, slab: &mut [u32]) -> usize {
+        if slab.len() < index + 4 {
+            return index;
+        }
+        let Self { x, y, z, w } = self;
+        let index = x.write_slab(index, slab);
+        let index = y.write_slab(index, slab);
+        let index = z.write_slab(index, slab);
+        w.write_slab(index, slab)
+    }
+
 }
 
-impl FromSlab for glam::UVec2 {
+impl Slabbed for glam::UVec2 {
     fn slab_size() -> usize {
         2
     }
@@ -127,9 +229,20 @@ impl FromSlab for glam::UVec2 {
         let index = self.y.read_slab(index, slab);
         index
     }
+
+    fn write_slab(&self, index: usize, slab: &mut [u32]) -> usize {
+        if slab.len() < index + 2 {
+            return index;
+        }
+        let index = self.x.write_slab(index, slab);
+        let index = self.y.write_slab(index, slab);
+        index
+    }
+
+
 }
 
-impl FromSlab for glam::UVec3 {
+impl Slabbed for glam::UVec3 {
     fn slab_size() -> usize {
         3
     }
@@ -143,9 +256,19 @@ impl FromSlab for glam::UVec3 {
         let index = self.z.read_slab(index, slab);
         index
     }
+
+    fn write_slab(&self, index: usize, slab: &mut [u32]) -> usize {
+        if slab.len() < index + 3 {
+            return index;
+        }
+        let index = self.x.write_slab(index, slab);
+        let index = self.y.write_slab(index, slab);
+        let index = self.z.write_slab(index, slab);
+        index
+    }
 }
 
-impl FromSlab for glam::UVec4 {
+impl Slabbed for glam::UVec4 {
     fn slab_size() -> usize {
         4
     }
@@ -160,14 +283,52 @@ impl FromSlab for glam::UVec4 {
         let index = self.w.read_slab(index, slab);
         index
     }
+
+    fn write_slab(&self, index: usize, slab: &mut [u32]) -> usize {
+        if slab.len() < index + 4 {
+            return index;
+        }
+        let index = self.x.write_slab(index, slab);
+        let index = self.y.write_slab(index, slab);
+        let index = self.z.write_slab(index, slab);
+        let index = self.w.write_slab(index, slab);
+        index
+    }
 }
 
-impl<T> FromSlab for PhantomData<T> {
+impl<T> Slabbed for PhantomData<T> {
     fn slab_size() -> usize {
         0
     }
 
     fn read_slab(&mut self, index: usize, _: &[u32]) -> usize {
         index
+    }
+
+    fn write_slab(&self, index: usize, _: &mut [u32]) -> usize {
+        index
+    }
+
+}
+
+pub trait Slab {
+    /// Read the type from the slab using the Id as the index.
+    fn read<T: Slabbed + Default>(&self, id: Id<T>) -> T;
+
+    /// Write the type into the slab at the index.
+    ///
+    /// Return the next index, or the same index.
+    fn write<T: Slabbed + Default>(&mut self, t: T, index: usize) -> usize;
+}
+
+impl Slab for [u32] {
+    fn read<T: Slabbed + Default>(&self, id: Id<T>) -> T {
+        let mut t = T::default();
+        let _ = t.read_slab(id.index(), self);
+        t
+    }
+
+    fn write<T: Slabbed + Default>(&mut self, t: T, index: usize) -> usize {
+        t.write_slab(index, self)
     }
 }
