@@ -132,6 +132,30 @@ impl Slabbed for glam::Mat4 {
     }
 }
 
+impl Slabbed for glam::Vec2 {
+    fn slab_size() -> usize {
+        2
+    }
+
+    fn read_slab(&mut self, index: usize, slab: &[u32]) -> usize {
+        if slab.len() < index + 2 {
+            return index;
+        }
+        let index = self.x.read_slab(index, slab);
+        let index = self.y.read_slab(index, slab);
+        index
+    }
+
+    fn write_slab(&self, index: usize, slab: &mut [u32]) -> usize {
+        if slab.len() < index + 2 {
+            return index;
+        }
+        let index = self.x.write_slab(index, slab);
+        let index = self.y.write_slab(index, slab);
+        index
+    }
+}
+
 impl Slabbed for glam::Vec3 {
     fn slab_size() -> usize {
         3
@@ -238,8 +262,6 @@ impl Slabbed for glam::UVec2 {
         let index = self.y.write_slab(index, slab);
         index
     }
-
-
 }
 
 impl Slabbed for glam::UVec3 {
@@ -318,7 +340,7 @@ pub trait Slab {
     /// Write the type into the slab at the index.
     ///
     /// Return the next index, or the same index.
-    fn write<T: Slabbed + Default>(&mut self, t: T, index: usize) -> usize;
+    fn write<T: Slabbed + Default>(&mut self, t: &T, index: usize) -> usize;
 }
 
 impl Slab for [u32] {
@@ -328,7 +350,7 @@ impl Slab for [u32] {
         t
     }
 
-    fn write<T: Slabbed + Default>(&mut self, t: T, index: usize) -> usize {
+    fn write<T: Slabbed + Default>(&mut self, t: &T, index: usize) -> usize {
         t.write_slab(index, self)
     }
 }

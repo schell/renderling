@@ -951,3 +951,30 @@ pub fn compute_cull_entities(entities: &[GpuEntity], draws: &mut [DrawIndirect],
     }
     draws[i] = call;
 }
+
+#[cfg(test)]
+mod test {
+    use crate::{self as renderling_shader, slab::Slab, id::Id};
+    use renderling_shader::slab::Slabbed;
+
+    #[derive(Default, Debug, PartialEq, Slabbed)]
+    struct TheType {
+        a: glam::Vec3,
+        b: glam::Vec2,
+        c: glam::Vec4,
+    }
+
+    #[test]
+    fn slabbed_roundtrip() {
+        let mut slab = [0u32; 100];
+        let the = TheType {
+            a: glam::Vec3::new(0.0, 1.0, 2.0),
+            b: glam::Vec2::new(3.0, 4.0),
+            c: glam::Vec4::new(5.0, 6.0, 7.0, 8.0),
+        };
+        let index = slab.write(&the, 0);
+        assert_eq!(9, index);
+        let the2 = slab.read(Id::<TheType>::new(0));
+        assert_eq!(the, the2);
+    }
+}
