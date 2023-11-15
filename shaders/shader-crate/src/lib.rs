@@ -1,7 +1,7 @@
 //! Shader entry points.
 #![no_std]
 #![feature(lang_items)]
-use renderling_shader::{convolution, pbr, scene, skybox, tonemapping, ui};
+use renderling_shader::{convolution, pbr, skybox, stage, tonemapping, ui};
 use spirv_std::{
     glam,
     image::{Cubemap, Image2d},
@@ -43,9 +43,9 @@ pub fn ui_fragment(
 
 #[spirv(vertex)]
 pub fn main_vertex_scene(
-    #[spirv(uniform, descriptor_set = 0, binding = 0)] constants: &scene::GpuConstants,
-    #[spirv(storage_buffer, descriptor_set = 0, binding = 1)] vertices: &[scene::GpuVertex],
-    #[spirv(storage_buffer, descriptor_set = 0, binding = 2)] entities: &[scene::GpuEntity],
+    #[spirv(uniform, descriptor_set = 0, binding = 0)] constants: &stage::GpuConstants,
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 1)] vertices: &[stage::Vertex],
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 2)] entities: &[stage::GpuEntity],
 
     //// which entity are we drawing
     #[spirv(instance_index)] instance_id: u32,
@@ -62,7 +62,7 @@ pub fn main_vertex_scene(
     out_pos: &mut glam::Vec3,
     #[spirv(position)] gl_pos: &mut glam::Vec4,
 ) {
-    scene::main_vertex_scene(
+    stage::main_vertex_scene(
         instance_id,
         vertex_id,
         constants,
@@ -85,10 +85,10 @@ pub fn main_fragment_scene(
     #[spirv(descriptor_set = 1, binding = 0)] atlas: &Image2d,
     #[spirv(descriptor_set = 1, binding = 1)] sampler: &Sampler,
 
-    #[spirv(uniform, descriptor_set = 0, binding = 0)] constants: &scene::GpuConstants,
-    #[spirv(storage_buffer, descriptor_set = 0, binding = 3)] lights: &[scene::GpuLight],
+    #[spirv(uniform, descriptor_set = 0, binding = 0)] constants: &stage::GpuConstants,
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 3)] lights: &[stage::GpuLight],
     #[spirv(storage_buffer, descriptor_set = 0, binding = 4)] materials: &[pbr::PbrMaterial],
-    #[spirv(storage_buffer, descriptor_set = 1, binding = 2)] textures: &[scene::GpuTexture],
+    #[spirv(storage_buffer, descriptor_set = 1, binding = 2)] textures: &[stage::GpuTexture],
 
     #[spirv(descriptor_set = 0, binding = 5)] irradiance: &Cubemap,
     #[spirv(descriptor_set = 0, binding = 6)] irradiance_sampler: &Sampler,
@@ -110,7 +110,7 @@ pub fn main_fragment_scene(
     output: &mut glam::Vec4,
     brightness: &mut glam::Vec4,
 ) {
-    scene::main_fragment_scene(
+    stage::main_fragment_scene(
         atlas,
         sampler,
         irradiance,
@@ -138,13 +138,13 @@ pub fn main_fragment_scene(
 
 #[spirv(compute(threads(32)))]
 pub fn compute_cull_entities(
-    #[spirv(storage_buffer, descriptor_set = 0, binding = 2)] entities: &[scene::GpuEntity],
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 2)] entities: &[stage::GpuEntity],
 
-    #[spirv(storage_buffer, descriptor_set = 1, binding = 0)] draws: &mut [scene::DrawIndirect],
+    #[spirv(storage_buffer, descriptor_set = 1, binding = 0)] draws: &mut [stage::DrawIndirect],
 
     #[spirv(global_invocation_id)] global_id: glam::UVec3,
 ) {
-    scene::compute_cull_entities(entities, draws, global_id)
+    stage::compute_cull_entities(entities, draws, global_id)
 }
 
 #[spirv(vertex)]
@@ -181,7 +181,7 @@ pub fn fragment_tonemapping(
 #[spirv(vertex)]
 pub fn vertex_skybox(
     #[spirv(vertex_index)] vertex_id: u32,
-    #[spirv(uniform, descriptor_set = 0, binding = 0)] constants: &scene::GpuConstants,
+    #[spirv(uniform, descriptor_set = 0, binding = 0)] constants: &stage::GpuConstants,
     local_pos: &mut glam::Vec3,
     #[spirv(position)] gl_pos: &mut glam::Vec4,
 ) {
@@ -190,7 +190,7 @@ pub fn vertex_skybox(
 
 #[spirv(vertex)]
 pub fn vertex_position_passthru(
-    #[spirv(uniform, descriptor_set = 0, binding = 0)] constants: &scene::GpuConstants,
+    #[spirv(uniform, descriptor_set = 0, binding = 0)] constants: &stage::GpuConstants,
     in_pos: glam::Vec3,
     local_pos: &mut glam::Vec3,
     #[spirv(position)] gl_pos: &mut glam::Vec4,
@@ -236,7 +236,7 @@ pub fn fragment_brdf_lut_convolution(in_uv: glam::Vec2, out_color: &mut glam::Ve
 
 #[spirv(vertex)]
 pub fn vertex_prefilter_environment_cubemap(
-    #[spirv(uniform, descriptor_set = 0, binding = 0)] constants: &scene::GpuConstants,
+    #[spirv(uniform, descriptor_set = 0, binding = 0)] constants: &stage::GpuConstants,
     in_pos: glam::Vec3,
     out_pos: &mut glam::Vec3,
     #[spirv(position)] gl_pos: &mut glam::Vec4,
@@ -301,4 +301,104 @@ pub fn fragment_bloom(
     frag_color: &mut glam::Vec4,
 ) {
     convolution::fragment_bloom(*horizontal == 0, size, texture, sampler, in_uv, frag_color)
+}
+
+#[spirv(vertex)]
+pub fn stage_vertex(
+    // Which render unit are we rendering
+    #[spirv(instance_index)] instance_index: u32,
+    // Which vertex within the render unit are we rendering
+    #[spirv(vertex_index)] vertex_index: u32,
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] unit_slab: &[u32],
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 1)] stage_slab: &[u32],
+
+    #[spirv(flat)] out_material: &mut u32,
+    out_color: &mut glam::Vec4,
+    out_uv0: &mut glam::Vec2,
+    out_uv1: &mut glam::Vec2,
+    out_norm: &mut glam::Vec3,
+    out_tangent: &mut glam::Vec3,
+    out_bitangent: &mut glam::Vec3,
+
+    // position of the vertex/fragment in world space
+    out_pos: &mut glam::Vec3,
+
+    #[spirv(position)] gl_pos: &mut glam::Vec4,
+) {
+    renderling_shader::stage::stage_vertex(
+        instance_index,
+        vertex_index,
+        unit_slab,
+        stage_slab,
+        out_material,
+        out_color,
+        out_uv0,
+        out_uv1,
+        out_norm,
+        out_tangent,
+        out_bitangent,
+        out_pos,
+        gl_pos,
+    )
+}
+
+#[spirv(fragment)]
+pub fn stage_fragment(
+    #[spirv(descriptor_set = 1, binding = 0)]
+    atlas: &Image2d,
+    #[spirv(descriptor_set = 1, binding = 1)]
+    atlas_sampler: &Sampler,
+
+    #[spirv(descriptor_set = 1, binding = 2)]
+    irradiance: &Cubemap,
+    #[spirv(descriptor_set = 1, binding = 3)]
+    irradiance_sampler: &Sampler,
+
+    #[spirv(descriptor_set = 1, binding = 4)]
+    prefiltered: &Cubemap,
+    #[spirv(descriptor_set = 1, binding = 5)]
+    prefiltered_sampler: &Sampler,
+
+    #[spirv(descriptor_set = 1, binding = 6)]
+    brdf: &Image2d,
+    #[spirv(descriptor_set = 1, binding = 7)]
+    brdf_sampler: &Sampler,
+
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 8)]
+    slab: &[u32],
+
+    #[spirv(flat)]
+    in_material: u32,
+    in_color: glam::Vec4,
+    in_uv0: glam::Vec2,
+    in_uv1: glam::Vec2,
+    in_norm: glam::Vec3,
+    in_tangent: glam::Vec3,
+    in_bitangent: glam::Vec3,
+    in_pos: glam::Vec3,
+
+    output: &mut glam::Vec4,
+    brigtness: &mut glam::Vec4,
+) {
+    renderling_shader::stage::stage_fragment(
+        atlas,
+        atlas_sampler,
+        irradiance,
+        irradiance_sampler,
+        prefiltered,
+        prefiltered_sampler,
+        brdf,
+        brdf_sampler,
+        slab,
+        in_material,
+        in_color,
+        in_uv0,
+        in_uv1,
+        in_norm,
+        in_tangent,
+        in_bitangent,
+        in_pos,
+        output,
+        brigtness,
+    )
 }
