@@ -1,20 +1,43 @@
 //! A slab-allocated array.
 use core::marker::PhantomData;
 
-use crate as renderling_shader;
 use crate::id::Id;
 use crate::slab::Slabbed;
 
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[repr(C)]
-#[derive(Clone, Copy, PartialEq, bytemuck::Zeroable, Slabbed)]
+#[derive(Clone, Copy, PartialEq)]
 pub struct Array<T: Slabbed> {
     index: u32,
     len: u32,
     _phantom: PhantomData<T>,
 }
 
-unsafe impl<T: Slabbed + bytemuck::Pod + bytemuck::Zeroable> bytemuck::Pod for Array<T> {}
+impl<T: Slabbed> Slabbed for Array<T> {
+    fn slab_size() -> usize {
+        2
+    }
+
+    fn read_slab(&mut self, index: usize, slab: &[u32]) -> usize {
+        if index + Self::slab_size() >= slab.len() {
+            index
+        } else {
+            let index = self.index.read_slab(index, slab);
+            let index = self.len.read_slab(index, slab);
+            index
+        }
+    }
+
+    fn write_slab(&self, index: usize, slab: &mut [u32]) -> usize {
+        if index + Self::slab_size() >= slab.len() {
+            index
+        } else {
+            let index = self.index.write_slab(index, slab);
+            let index = self.len.write_slab(index, slab);
+            index
+        }
+    }
+}
 
 impl<T: Slabbed> Default for Array<T> {
     fn default() -> Self {

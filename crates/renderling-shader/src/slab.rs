@@ -6,7 +6,12 @@ pub use renderling_derive::Slabbed;
 use crate::id::Id;
 
 /// Determines the "size" of a type when stored in a slab of `&[u32]`,
-/// and how to read it from the slab.
+/// and how to read/write it from/to the slab.
+///
+/// `Slabbed` can be automatically derived for struct and tuple types,
+/// so long as those types are relatively simple. So far, autoderiving
+/// fields with these types will **not compile** on one or more targets:
+/// * `PhantomData<T>` - will not compile on `target_arch = "spirv"`
 pub trait Slabbed: Sized {
     /// The number of `u32`s this type occupies in a slab of `&[u32]`.
     fn slab_size() -> usize;

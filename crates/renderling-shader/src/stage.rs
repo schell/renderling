@@ -527,6 +527,23 @@ fn texture_color(
     color
 }
 
+fn stage_texture_color(
+    texture_id: Id<GpuTexture>,
+    uv: Vec2,
+    atlas: &Image2d,
+    sampler: &Sampler,
+    atlas_size: UVec2,
+    slab: &[u32],
+) -> Vec4 {
+    let texture = slab.read(texture_id);
+    let uv = texture.uv(uv, atlas_size);
+    let mut color: Vec4 = atlas.sample_by_lod(*sampler, uv, 0.0);
+    if texture_id.is_none() {
+        color = Vec4::splat(1.0);
+    }
+    color
+}
+
 #[allow(clippy::too_many_arguments)]
 /// Scene vertex shader.
 pub fn main_vertex_scene(
@@ -850,18 +867,26 @@ pub fn main_fragment_scene(
     .extend(1.0);
 }
 
+/// A fully-computed unit of rendering, roughly meaning a mesh with model matrix
+/// transformations.
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[repr(C)]
 #[derive(Default, Clone, Copy, PartialEq, Slabbed)]
 pub struct RenderUnit {
+    // Points to an index in the `RenderUnit` slab.
     pub id: Id<RenderUnit>,
+    // Points to an array of `Vertex` in the stage's slab.
     pub vertices: Array<Vertex>,
+    // Points to a `PbrMaterial` the stage's slab.
     pub material: Id<PbrMaterial>,
+    // Points to a `Mat4` the stage's slab.
+    pub camera_projection: Id<Mat4>,
+    // Points to a `Mat4` the stage's slab.
+    pub camera_view: Id<Mat4>,
+
     pub position: Vec3,
     pub rotation: Quat,
     pub scale: Vec3,
-    pub camera_projection: Id<Mat4>,
-    pub camera_view: Id<Mat4>,
 }
 
 pub fn stage_vertex(
@@ -869,7 +894,8 @@ pub fn stage_vertex(
     instance_index: u32,
     // Which vertex within the render unit are we rendering
     vertex_index: u32,
-    slab: &[u32],
+    unit_slab: &[u32],
+    stage_slab: &[u32],
 
     out_material: &mut u32,
     out_color: &mut Vec4,
@@ -884,16 +910,14 @@ pub fn stage_vertex(
     gl_pos: &mut Vec4,
 ) {
     let unit_id: Id<RenderUnit> = Id::from(instance_index);
-    let unit = slab.read(unit_id);
-    let vertex = slab.read(unit.vertices.at(vertex_index as usize));
-
+    let unit = unit_slab.read(unit_id);
+    let vertex = stage_slab.read(unit.vertices.at(vertex_index as usize));
     let model_matrix =
         Mat4::from_scale_rotation_translation(unit.scale, unit.rotation, unit.position);
     *out_material = unit.material.into();
     *out_color = vertex.color;
     *out_uv0 = vertex.uv.xy();
     *out_uv1 = vertex.uv.zw();
-
     let scale2 = unit.scale * unit.scale;
     let normal = vertex.normal.xyz().alt_norm_or_zero();
     let tangent = vertex.tangent.xyz().alt_norm_or_zero();
@@ -907,13 +931,284 @@ pub fn stage_vertex(
     *out_tangent = tangent_w;
     *out_bitangent = bitangent_w;
     *out_norm = normal_w;
-
     let view_pos = model_matrix * vertex.position.xyz().extend(1.0);
     *out_pos = view_pos.xyz();
-
-    let camera_projection = slab.read(unit.camera_projection);
-    let camera_view = slab.read(unit.camera_view);
+    let camera_projection = stage_slab.read(unit.camera_projection);
+    let camera_view = stage_slab.read(unit.camera_view);
     *gl_pos = camera_projection * camera_view * view_pos;
+}
+
+/// Represents a "legend" of various stage buffers.
+#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
+#[derive(Copy, Clone, Default, Slabbed)]
+pub struct Legend {
+    pub constants: GpuConstants,
+    pub lights: Array<GpuLight>,
+}
+
+#[allow(clippy::too_many_arguments)]
+/// Scene fragment shader.
+pub fn stage_fragment(
+    atlas: &Image2d,
+    atlas_sampler: &Sampler,
+
+    irradiance: &Cubemap,
+    irradiance_sampler: &Sampler,
+
+    prefiltered: &Cubemap,
+    prefiltered_sampler: &Sampler,
+
+    brdf: &Image2d,
+    brdf_sampler: &Sampler,
+
+    slab: &[u32],
+
+    in_material: u32,
+    in_color: Vec4,
+    in_uv0: Vec2,
+    in_uv1: Vec2,
+    in_norm: Vec3,
+    in_tangent: Vec3,
+    in_bitangent: Vec3,
+    in_pos: Vec3,
+
+    output: &mut Vec4,
+    brigtness: &mut Vec4,
+) {
+    let Legend { constants, lights } = slab.read(Id::new(0));
+    let material = if in_material == ID_NONE || !constants.toggles.get_use_lighting() {
+        // without an explicit material (or if the entire render has no lighting)
+        // the entity will not participate in any lighting calculations
+        pbr::PbrMaterial {
+            lighting_model: LightingModel::NO_LIGHTING,
+            ..Default::default()
+        }
+    } else {
+        slab.read(Id::<PbrMaterial>::new(in_material))
+    };
+
+    let albedo_tex_uv = if material.albedo_tex_coord == 0 {
+        in_uv0
+    } else {
+        in_uv1
+    };
+    let albedo_tex_color = stage_texture_color(
+        material.albedo_texture,
+        albedo_tex_uv,
+        atlas,
+        atlas_sampler,
+        constants.atlas_size,
+        slab,
+    );
+
+    let metallic_roughness_uv = if material.metallic_roughness_tex_coord == 0 {
+        in_uv0
+    } else {
+        in_uv1
+    };
+    let metallic_roughness_tex_color = stage_texture_color(
+        material.metallic_roughness_texture,
+        metallic_roughness_uv,
+        atlas,
+        atlas_sampler,
+        constants.atlas_size,
+        slab,
+    );
+
+    let normal_tex_uv = if material.normal_tex_coord == 0 {
+        in_uv0
+    } else {
+        in_uv1
+    };
+    let normal_tex_color = stage_texture_color(
+        material.normal_texture,
+        normal_tex_uv,
+        atlas,
+        atlas_sampler,
+        constants.atlas_size,
+        slab,
+    );
+
+    let ao_tex_uv = if material.ao_tex_coord == 0 {
+        in_uv0
+    } else {
+        in_uv1
+    };
+    let ao_tex_color = stage_texture_color(
+        material.ao_texture,
+        ao_tex_uv,
+        atlas,
+        atlas_sampler,
+        constants.atlas_size,
+        slab,
+    );
+
+    let emissive_tex_uv = if material.emissive_tex_coord == 0 {
+        in_uv0
+    } else {
+        in_uv1
+    };
+    let emissive_tex_color = stage_texture_color(
+        material.emissive_texture,
+        emissive_tex_uv,
+        atlas,
+        atlas_sampler,
+        constants.atlas_size,
+        slab,
+    );
+
+    let (norm, uv_norm) = if material.normal_texture.is_none() {
+        // there is no normal map, use the normal normal ;)
+        (in_norm, Vec3::ZERO)
+    } else {
+        // convert the normal from color coords to tangent space -1,1
+        let sampled_norm = (normal_tex_color.xyz() * 2.0 - Vec3::splat(1.0)).alt_norm_or_zero();
+        let tbn = mat3(
+            in_tangent.alt_norm_or_zero(),
+            in_bitangent.alt_norm_or_zero(),
+            in_norm.alt_norm_or_zero(),
+        );
+        // convert the normal from tangent space to world space
+        let norm = (tbn * sampled_norm).alt_norm_or_zero();
+        (norm, sampled_norm)
+    };
+
+    let n = norm;
+    let albedo = albedo_tex_color * material.albedo_factor * in_color;
+    let roughness = metallic_roughness_tex_color.y * material.roughness_factor;
+    let metallic = metallic_roughness_tex_color.z * material.metallic_factor;
+    let ao = 1.0 + material.ao_strength * (ao_tex_color.x - 1.0);
+    let emissive =
+        emissive_tex_color.xyz() * material.emissive_factor.xyz() * material.emissive_factor.w;
+    let irradiance = pbr::sample_irradiance(irradiance, irradiance_sampler, n);
+    let specular = pbr::sample_specular_reflection(
+        prefiltered,
+        prefiltered_sampler,
+        constants.camera_pos.xyz(),
+        in_pos,
+        n,
+        roughness,
+    );
+    let brdf = pbr::sample_brdf(
+        brdf,
+        brdf_sampler,
+        constants.camera_pos.xyz(),
+        in_pos,
+        n,
+        roughness,
+    );
+
+    fn colorize(u: Vec3) -> Vec4 {
+        ((u.alt_norm_or_zero() + Vec3::splat(1.0)) / 2.0).extend(1.0)
+    }
+
+    match constants.debug_mode.into() {
+        DebugChannel::None => {}
+        DebugChannel::UvCoords0 => {
+            *output = colorize(Vec3::new(in_uv0.x, in_uv0.y, 0.0));
+            return;
+        }
+        DebugChannel::UvCoords1 => {
+            *output = colorize(Vec3::new(in_uv1.x, in_uv1.y, 0.0));
+            return;
+        }
+        DebugChannel::Normals => {
+            *output = colorize(norm);
+            return;
+        }
+        DebugChannel::VertexColor => {
+            *output = in_color;
+            return;
+        }
+        DebugChannel::VertexNormals => {
+            *output = colorize(in_norm);
+            return;
+        }
+        DebugChannel::UvNormals => {
+            *output = colorize(uv_norm);
+            return;
+        }
+        DebugChannel::Tangents => {
+            *output = colorize(in_tangent);
+            return;
+        }
+        DebugChannel::Bitangents => {
+            *output = colorize(in_bitangent);
+            return;
+        }
+        DebugChannel::DiffuseIrradiance => {
+            *output = irradiance.extend(1.0);
+            return;
+        }
+        DebugChannel::SpecularReflection => {
+            *output = specular.extend(1.0);
+            return;
+        }
+        DebugChannel::Brdf => {
+            *output = brdf.extend(1.0).extend(1.0);
+            return;
+        }
+        DebugChannel::Roughness => {
+            *output = Vec3::splat(roughness).extend(1.0);
+            return;
+        }
+        DebugChannel::Metallic => {
+            *output = Vec3::splat(metallic).extend(1.0);
+            return;
+        }
+        DebugChannel::Albedo => {
+            *output = albedo;
+            return;
+        }
+        DebugChannel::Occlusion => {
+            *output = Vec3::splat(ao).extend(1.0);
+            return;
+        }
+        DebugChannel::Emissive => {
+            *output = emissive.extend(1.0);
+            return;
+        }
+        DebugChannel::UvEmissive => {
+            *output = emissive_tex_color.xyz().extend(1.0);
+            return;
+        }
+        DebugChannel::EmissiveFactor => {
+            *output = material.emissive_factor.xyz().extend(1.0);
+            return;
+        }
+        DebugChannel::EmissiveStrength => {
+            *output = Vec3::splat(material.emissive_factor.w).extend(1.0);
+            return;
+        }
+    }
+
+    *output = match material.lighting_model {
+        LightingModel::PBR_LIGHTING => pbr::stage_shade_fragment(
+            constants.camera_pos.xyz(),
+            n,
+            in_pos,
+            albedo.xyz(),
+            metallic,
+            roughness,
+            ao,
+            emissive,
+            irradiance,
+            specular,
+            brdf,
+            lights,
+            slab,
+        ),
+        _unlit => in_color * albedo_tex_color * material.albedo_factor,
+    };
+
+    // write the brightest colors for the bloom effect
+    let brightness_value = output.xyz().dot(Vec3::new(0.2126, 0.7152, 0.0722));
+    *brigtness = if brightness_value > 1.0 {
+        output.xyz()
+    } else {
+        Vec3::ZERO
+    }
+    .extend(1.0);
 }
 
 /// Compute the draw calls for this frame.
