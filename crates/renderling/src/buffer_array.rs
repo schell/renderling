@@ -1,5 +1,4 @@
 //! Arrays of elements living on the GPU as an array.
-
 use std::{any::Any, marker::PhantomData};
 
 use async_channel::{Receiver, Sender};
@@ -100,7 +99,7 @@ fn gpu_storage_buffer<T: bytemuck::Pod + bytemuck::Zeroable>(
 pub struct GpuBuffer {
     // The gpu-side buffer
     pub buffer: wgpu::Buffer,
-    // The number of elements stored in the buffer
+    // The number of elements currently stored in the buffer
     len: usize,
     // The total number of elements that can be stored in the buffer
     capacity: usize,
@@ -289,6 +288,7 @@ impl<T: bytemuck::Zeroable + bytemuck::Pod + Send + Sync> IsBuffer<T> for CpuBuf
     }
 }
 
+/// A buffer that lives on both the CPU and GPU.
 pub struct CpuAndGpuBuffer {
     pub cpu_buffer: CpuBuffer,
     pub gpu_buffer: GpuBuffer,

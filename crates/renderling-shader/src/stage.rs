@@ -1260,7 +1260,7 @@ mod test {
     }
 
     #[test]
-    fn slabbed_roundtrip() {
+    fn slabbed_writeread() {
         let mut slab = [0u32; 100];
         let the = TheType {
             a: glam::Vec3::new(0.0, 1.0, 2.0),

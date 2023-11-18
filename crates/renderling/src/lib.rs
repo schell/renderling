@@ -53,7 +53,9 @@ pub mod math;
 pub mod mesh;
 mod renderer;
 mod scene;
+mod slab;
 mod skybox;
+mod stage;
 mod state;
 #[cfg(feature = "text")]
 mod text;
@@ -67,7 +69,9 @@ pub use camera::*;
 pub use hdr::*;
 pub use renderer::*;
 pub use scene::*;
+pub use slab::*;
 pub use skybox::*;
+pub use stage::*;
 pub use state::*;
 #[cfg(feature = "text")]
 pub use text::*;
