@@ -1,5 +1,10 @@
 # devlog
 
+## Wed Nov 15, 2023
+
+I resubmitted the NLNet grant proposal with expanded scope to take care of [the
+`naga` atomics issue](https://github.com/gfx-rs/naga/issues/2301).
+
 ## Sat Nov 11, 2023
 
 ### NLNet Grant Progress

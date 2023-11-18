@@ -1,7 +1,6 @@
 //! Ensures our shaders are valid.
 //!
 //! This module exists just for testing. It doesn't export anything.
-
 #[cfg(test)]
 mod test {
     use snafu::prelude::*;

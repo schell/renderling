@@ -12,7 +12,7 @@ use crate::id::Id;
 /// so long as those types are relatively simple. So far, autoderiving
 /// fields with these types will **not compile** on one or more targets:
 /// * `PhantomData<T>` - will not compile on `target_arch = "spirv"`
-pub trait Slabbed: Sized {
+pub trait Slabbed: std::any::Any + std::fmt::Debug + Sized {
     /// The number of `u32`s this type occupies in a slab of `&[u32]`.
     fn slab_size() -> usize;
 
@@ -21,6 +21,9 @@ pub trait Slabbed: Sized {
     ///
     /// If the type cannot be read, the returned index will be equal
     /// to `index`.
+    // TODO: recondsider the mutability of `self` here.
+    // We could make this a `&self` and that might help with using it
+    // from multiple threads.
     fn read_slab(&mut self, index: usize, slab: &[u32]) -> usize;
 
     /// Write the type into the slab at starting `index` and return
@@ -323,7 +326,7 @@ impl Slabbed for glam::UVec4 {
     }
 }
 
-impl<T> Slabbed for PhantomData<T> {
+impl<T: std::any::Any> Slabbed for PhantomData<T> {
     fn slab_size() -> usize {
         0
     }
@@ -344,8 +347,14 @@ pub trait Slab {
 
     /// Write the type into the slab at the index.
     ///
-    /// Return the next index, or the same index.
+    /// Return the next index, or the same index if writing would overlap the slab.
     fn write<T: Slabbed + Default>(&mut self, t: &T, index: usize) -> usize;
+
+
+    /// Write a slice of the type into the slab at the index.
+    ///
+    /// Return the next index, or the same index if writing would overlap the slab.
+    fn write_slice<T: Slabbed + Default>(&mut self, t: &[T], index: usize) -> usize;
 }
 
 impl Slab for [u32] {
@@ -357,5 +366,27 @@ impl Slab for [u32] {
 
     fn write<T: Slabbed + Default>(&mut self, t: &T, index: usize) -> usize {
         t.write_slab(index, self)
+    }
+
+    fn write_slice<T: Slabbed + Default>(&mut self, t: &[T], index: usize) -> usize {
+        let mut index = index;
+        for item in t {
+            index = item.write_slab(index, self);
+        }
+        index
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn slab_array_readwrite() {
+        let mut slab = [0u32; 16];
+        slab.write(&42, 0);
+        slab.write(&666, 1);
+        let t = slab.read(Id::<[u32; 2]>::new(0));
+        assert_eq!([42, 666], t);
     }
 }

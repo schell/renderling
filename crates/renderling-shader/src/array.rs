@@ -50,6 +50,13 @@ impl<T: Slabbed> Default for Array<T> {
 }
 
 impl<T: Slabbed> Array<T> {
+    pub fn new(index: u32, len: u32) -> Self {
+        Self {
+            index,
+            len,
+            _phantom: PhantomData,
+        }
+    }
     pub fn len(&self) -> usize {
         self.len as usize
     }
