@@ -52,4 +52,9 @@ impl StageSlab {
     pub fn append_slice<T: Slabbed + Default>(&mut self, objects: &[T]) -> Array<T> {
         self.slab.append_slice(&self.device, &self.queue, objects)
     }
+
+    /// Create a new spot light and return its builder.
+    pub fn new_spot_light(&mut self) -> light::GpuSpotLightBuilder {
+        light::GpuSpotLightBuilder::new(self)
+    }
 }
