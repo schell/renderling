@@ -62,4 +62,9 @@ impl StageSlab {
     pub fn new_directional_light(&mut self) -> light::GpuDirectionalLightBuilder {
         light::GpuDirectionalLightBuilder::new(self)
     }
+
+    /// Create a new point light and return its builder.
+    pub fn new_point_light(&mut self) -> light::GpuPointLightBuilder {
+        light::GpuPointLightBuilder::new(self)
+    }
 }
