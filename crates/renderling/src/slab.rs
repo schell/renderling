@@ -143,7 +143,7 @@ impl SlabBuffer {
         queue: &wgpu::Queue,
         t: &T,
     ) -> Id<T> {
-        if T::slab_size() + self.len >= self.capacity {
+        if T::slab_size() + self.len > self.capacity {
             self.resize(device, queue, self.capacity * 2);
         }
         let id = Id::<T>::from(self.len);
@@ -162,7 +162,7 @@ impl SlabBuffer {
     ) -> Array<T> {
         let len = ts.len();
         let size = T::slab_size();
-        if size * len + self.len >= self.capacity {
+        if size * len + self.len > self.capacity {
             self.resize(device, queue, self.capacity * 2);
         }
         let index = self.len as u32;
@@ -210,9 +210,8 @@ mod test {
         let device = r.get_device();
         let queue = r.get_queue();
         let mut slab = SlabBuffer::new(device, 2);
-        let id = Id::<u32>::new(0);
-        slab.append(device, queue, &42).unwrap();
-        slab.append(device, queue, &1).unwrap();
+        slab.append(device, queue, &42);
+        slab.append(device, queue, &1);
         let id = Id::<[u32; 2]>::new(0);
         let t = futures_lite::future::block_on(slab.read(device, queue, id)).unwrap();
         assert_eq!([42, 1], t, "read back what we wrote");
@@ -223,7 +222,7 @@ mod test {
             err.to_string()
         );
         assert_eq!(2, slab.len);
-        slab.append(device, queue, &666).unwrap();
+        slab.append(device, queue, &666);
         let id = Id::<[u32; 3]>::new(0);
         let t = futures_lite::future::block_on(slab.read(device, queue, id)).unwrap();
         assert_eq!([42, 1, 666], t);
