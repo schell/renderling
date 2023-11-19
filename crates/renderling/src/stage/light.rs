@@ -1,4 +1,7 @@
 //! Light builders for the stage.
+use renderling_shader::id::Id;
+use renderling_shader::stage::{GpuLight, LightType};
+use glam::{Vec3, Vec4};
 
 /// A builder for a spot light.
 pub struct GpuSpotLightBuilder<'a> {
