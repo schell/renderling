@@ -90,21 +90,19 @@ impl<'a> GpuSpotLightBuilder<'a> {
 ///
 /// This is like the sun, or the moon.
 pub struct GpuDirectionalLightBuilder<'a> {
-    id: Id<GpuLight>,
-    inner: &'a mut GpuLight,
+    inner: GpuLight,
+    stage: &'a mut StageSlab,
 }
 
 impl<'a> GpuDirectionalLightBuilder<'a> {
-    pub fn new(lights: &'a mut Vec<GpuLight>) -> GpuDirectionalLightBuilder<'a> {
+    pub fn new(stage: &'a mut StageSlab) -> GpuDirectionalLightBuilder<'a> {
         let inner = GpuLight {
             light_type: LightType::DIRECTIONAL_LIGHT,
             ..Default::default()
         };
-        let id = Id::new(lights.len() as u32);
-        lights.push(inner);
         Self {
-            id,
-            inner: &mut lights[id.index()],
+            inner,
+            stage,
         }
         .with_direction(Vec3::new(0.0, -1.0, 0.0))
         .with_color(Vec4::splat(1.0))
@@ -127,6 +125,6 @@ impl<'a> GpuDirectionalLightBuilder<'a> {
     }
 
     pub fn build(self) -> Id<GpuLight> {
-        self.id
+        self.stage.append(&self.inner)
     }
 }
