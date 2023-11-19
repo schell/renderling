@@ -6,21 +6,22 @@ use glam::{Vec3, Vec4};
 /// A builder for a spot light.
 pub struct GpuSpotLightBuilder<'a> {
     id: Id<GpuLight>,
-    inner: &'a mut GpuLight,
+    inner: GpuLight,
+    stage: &'a StageSlab,
 }
 
 impl<'a> GpuSpotLightBuilder<'a> {
-    pub fn new(lights: &'a mut Vec<GpuLight>) -> GpuSpotLightBuilder<'a> {
+    pub fn new(stage: &'a mut StageSlab) -> GpuSpotLightBuilder<'a> {
         let inner = GpuLight {
             light_type: LightType::SPOT_LIGHT,
             ..Default::default()
         };
-        let id = Id::new(lights.len() as u32);
-        lights.push(inner);
+        let id = stage.append(&inner);
         let white = Vec4::splat(1.0);
         Self {
-            inner: &mut lights[id.index()],
+            inner,
             id,
+            stage,
         }
         .with_cutoff(std::f32::consts::PI / 3.0, std::f32::consts::PI / 2.0)
         .with_attenuation(1.0, 0.014, 0.007)
@@ -61,6 +62,6 @@ impl<'a> GpuSpotLightBuilder<'a> {
     }
 
     pub fn build(self) -> Id<GpuLight> {
-        self.id
+        self.stage.append(&self.inner)
     }
 }
