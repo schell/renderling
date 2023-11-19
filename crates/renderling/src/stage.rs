@@ -1,17 +1,16 @@
 //! Rendering objects in the scene graph.
 //!
 //! Provides a `Stage` object that can be used to render a scene graph.
-use std::{collections::HashMap, ops::Deref};
-
 use renderling_shader::{
     id::Id,
-    pbr::PbrMaterial,
-    slab::{Slab, Slabbed},
-    stage::{GpuConstants, GpuTexture, TextureAddressMode}, array::Array,
+    slab::Slabbed,
+    stage::GpuConstants, array::Array,
 };
-use snafu::{ResultExt, Snafu};
+use snafu::Snafu;
 
-use crate::{SceneImage, SlabBuffer, Device, Queue};
+use crate::{SlabBuffer, Device, Queue};
+
+pub mod light;
 
 #[derive(Debug, Snafu)]
 pub enum StageError<T: std::fmt::Debug> {
