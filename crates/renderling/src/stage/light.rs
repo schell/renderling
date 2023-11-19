@@ -130,49 +130,47 @@ impl<'a> GpuDirectionalLightBuilder<'a> {
 }
 
 pub struct GpuPointLightBuilder<'a> {
-    id: Id<GpuLight>,
-    inner: &'a mut GpuLight,
+    inner: GpuLight,
+    stage: &'a mut StageSlab,
 }
 
 impl<'a> GpuPointLightBuilder<'a> {
-    pub fn new(lights: &mut Vec<GpuLight>) -> GpuPointLightBuilder<'_> {
+    pub fn new(stage: &mut StageSlab) -> GpuPointLightBuilder<'_> {
         let inner = GpuLight {
             light_type: LightType::POINT_LIGHT,
             ..Default::default()
         };
-        let id = Id::new(lights.len() as u32);
-        lights.push(inner);
         let white = Vec4::splat(1.0);
         GpuPointLightBuilder {
-            id,
-            inner: &mut lights[id.index()],
+            stage,
+            inner,
         }
         .with_attenuation(1.0, 0.14, 0.07)
         .with_color(white)
         .with_intensity(1.0)
     }
 
-    pub fn with_position(self, position: impl Into<Vec3>) -> Self {
+    pub fn with_position(mut self, position: impl Into<Vec3>) -> Self {
         self.inner.position = position.into().extend(0.0);
         self
     }
 
-    pub fn with_attenuation(self, constant: f32, linear: f32, quadratic: f32) -> Self {
+    pub fn with_attenuation(mut self, constant: f32, linear: f32, quadratic: f32) -> Self {
         self.inner.attenuation = Vec4::new(constant, linear, quadratic, 0.0);
         self
     }
 
-    pub fn with_color(self, color: impl Into<Vec4>) -> Self {
+    pub fn with_color(mut self, color: impl Into<Vec4>) -> Self {
         self.inner.color = color.into();
         self
     }
 
-    pub fn with_intensity(self, i: f32) -> Self {
+    pub fn with_intensity(mut self, i: f32) -> Self {
         self.inner.intensity = i;
         self
     }
 
     pub fn build(self) -> Id<GpuLight> {
-        self.id
+        self.stage.append(&self.inner)
     }
 }
