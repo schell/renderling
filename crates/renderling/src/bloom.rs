@@ -89,9 +89,10 @@ fn create_pipeline(device: &wgpu::Device) -> wgpu::RenderPipeline {
         label: Some("bloom filter"),
         layout: Some(&pp_layout),
         vertex: wgpu::VertexState {
-            module: &device
-                .create_shader_module(wgpu::include_spirv!("linkage/vertex_generate_mipmap.spv")),
-            entry_point: "vertex_generate_mipmap",
+            module: &device.create_shader_module(wgpu::include_spirv!(
+                "linkage/convolution-vertex_generate_mipmap.spv"
+            )),
+            entry_point: "convolution::vertex_generate_mipmap",
             buffers: &[],
         },
         primitive: wgpu::PrimitiveState {
@@ -105,9 +106,10 @@ fn create_pipeline(device: &wgpu::Device) -> wgpu::RenderPipeline {
         },
         depth_stencil: None,
         fragment: Some(wgpu::FragmentState {
-            module: &device
-                .create_shader_module(wgpu::include_spirv!("linkage/fragment_bloom.spv")),
-            entry_point: "fragment_bloom",
+            module: &device.create_shader_module(wgpu::include_spirv!(
+                "linkage/convolution-fragment_bloom.spv"
+            )),
+            entry_point: "convolution::fragment_bloom",
             targets: &[Some(wgpu::ColorTargetState {
                 format: wgpu::TextureFormat::Rgba16Float,
                 blend: Some(wgpu::BlendState::ALPHA_BLENDING),
@@ -395,7 +397,11 @@ mod test {
         img_diff::assert_img_eq("bloom/on.png", img);
 
         {
-            let bloom = renderling.graph.get_resource_mut::<BloomFilter>().unwrap().unwrap();
+            let bloom = renderling
+                .graph
+                .get_resource_mut::<BloomFilter>()
+                .unwrap()
+                .unwrap();
             bloom.on = false;
         }
         let img = renderling.render_image().unwrap();

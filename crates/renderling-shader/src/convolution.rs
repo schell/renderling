@@ -5,7 +5,7 @@ use glam::{UVec2, Vec2, Vec3, Vec4, Vec4Swizzles};
 use spirv_std::{
     image::{Cubemap, Image2d},
     num_traits::Zero,
-    Sampler,
+    spirv, Sampler,
 };
 
 #[cfg(target_arch = "spirv")]
@@ -148,21 +148,23 @@ pub fn integrate_brdf_doesnt_work(mut n_dot_v: f32, roughness: f32) -> Vec2 {
     Vec2::new(a, b)
 }
 
+#[spirv(vertex)]
 pub fn vertex_prefilter_environment_cubemap(
-    constants: &GpuConstants,
+    #[spirv(uniform, descriptor_set = 0, binding = 0)] constants: &GpuConstants,
     in_pos: Vec3,
     out_pos: &mut Vec3,
-    gl_pos: &mut Vec4,
+    #[spirv(position)] gl_pos: &mut Vec4,
 ) {
     *out_pos = in_pos;
     *gl_pos = constants.camera_projection * constants.camera_view * in_pos.extend(1.0);
 }
 
 /// Lambertian prefilter.
+#[spirv(fragment)]
 pub fn fragment_prefilter_environment_cubemap(
-    roughness: &f32,
-    environment_cubemap: &Cubemap,
-    sampler: &Sampler,
+    #[spirv(uniform, descriptor_set = 0, binding = 1)] roughness: &f32,
+    #[spirv(descriptor_set = 0, binding = 2)] environment_cubemap: &Cubemap,
+    #[spirv(descriptor_set = 0, binding = 3)] sampler: &Sampler,
     in_pos: Vec3,
     frag_color: &mut Vec4,
 ) {
@@ -222,29 +224,37 @@ pub fn calc_lod(n_dot_l: f32) -> f32 {
         .log2()
 }
 
-pub fn vertex_generate_mipmap(vertex_id: u32, out_uv: &mut Vec2, gl_pos: &mut Vec4) {
+#[spirv(vertex)]
+pub fn vertex_generate_mipmap(
+    #[spirv(vertex_index)] vertex_id: u32,
+    out_uv: &mut Vec2,
+    #[spirv(position)] gl_pos: &mut Vec4,
+) {
     let i = vertex_id as usize;
     *out_uv = crate::math::UV_COORD_QUAD_CCW[i];
     *gl_pos = crate::math::CLIP_SPACE_COORD_QUAD_CCW[i];
 }
 
+#[spirv(fragment)]
 pub fn fragment_generate_mipmap(
-    texture: &Image2d,
-    sampler: &Sampler,
+    #[spirv(descriptor_set = 0, binding = 0)] texture: &Image2d,
+    #[spirv(descriptor_set = 0, binding = 1)] sampler: &Sampler,
     in_uv: Vec2,
     frag_color: &mut Vec4,
 ) {
     *frag_color = texture.sample(*sampler, in_uv);
 }
 
+#[spirv(fragment)]
 pub fn fragment_bloom(
-    horizontal: bool,
-    UVec2{x, y}: &UVec2,
-    texture: &Image2d,
-    sampler: &Sampler,
+    #[spirv(uniform, descriptor_set = 0, binding = 0)] horizontal: &u32,
+    #[spirv(uniform, descriptor_set = 0, binding = 1)] UVec2 { x, y }: &UVec2,
+    #[spirv(descriptor_set = 0, binding = 2)] texture: &Image2d,
+    #[spirv(descriptor_set = 0, binding = 3)] sampler: &Sampler,
     in_uv: Vec2,
     frag_color: &mut Vec4,
 ) {
+    let horizontal = *horizontal != 0;
     let weight = [0.227027f32, 0.1945946, 0.1216216, 0.054054, 0.016216];
     let texel_offset = 1.0 / Vec2::new(*x as f32, *y as f32);
     let mut result = texture.sample(*sampler, in_uv).xyz() * weight[0];
@@ -261,6 +271,22 @@ pub fn fragment_bloom(
         result += texture.sample_by_lod(*sampler, in_uv - offset, 0.0).xyz() * weight[i];
     }
     *frag_color = result.extend(1.0);
+}
+
+#[spirv(vertex)]
+pub fn vertex_brdf_lut_convolution(
+    in_pos: glam::Vec3,
+    in_uv: glam::Vec2,
+    out_uv: &mut glam::Vec2,
+    #[spirv(position)] gl_pos: &mut glam::Vec4,
+) {
+    *out_uv = in_uv;
+    *gl_pos = in_pos.extend(1.0);
+}
+
+#[spirv(fragment)]
+pub fn fragment_brdf_lut_convolution(in_uv: glam::Vec2, out_color: &mut glam::Vec2) {
+    *out_color = integrate_brdf(in_uv.x, in_uv.y);
 }
 
 #[cfg(test)]

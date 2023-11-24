@@ -8,7 +8,7 @@
 use glam::{mat3, Mat4, Quat, UVec2, UVec3, Vec2, Vec3, Vec4, Vec4Swizzles};
 use spirv_std::{
     image::{Cubemap, Image2d},
-    Sampler,
+    spirv, Sampler,
 };
 
 #[cfg(target_arch = "spirv")]
@@ -21,7 +21,7 @@ use crate::{
     debug::*,
     id::{Id, ID_NONE},
     pbr::{self, PbrMaterial},
-    slab::{Slabbed, Slab},
+    slab::{Slab, Slabbed},
     IsMatrix, IsVector,
 };
 
@@ -545,18 +545,19 @@ fn stage_texture_color(
 }
 
 #[allow(clippy::too_many_arguments)]
+#[spirv(vertex)]
 /// Scene vertex shader.
 pub fn main_vertex_scene(
     // which entity are we drawing
-    instance_index: u32,
+    #[spirv(instance_index)] instance_index: u32,
     // which vertex are we drawing
-    vertex_index: u32,
+    #[spirv(vertex_index)] vertex_index: u32,
 
-    constants: &GpuConstants,
-    vertices: &[Vertex],
-    entities: &[GpuEntity],
+    #[spirv(uniform, descriptor_set = 0, binding = 0)] constants: &GpuConstants,
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 1)] vertices: &[Vertex],
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 2)] entities: &[GpuEntity],
 
-    out_material: &mut u32,
+    #[spirv(flat)] out_material: &mut u32,
     out_color: &mut Vec4,
     out_uv0: &mut Vec2,
     out_uv1: &mut Vec2,
@@ -566,7 +567,7 @@ pub fn main_vertex_scene(
     // position of the vertex/fragment in world space
     out_pos: &mut Vec3,
 
-    gl_pos: &mut Vec4,
+    #[spirv(position)] gl_pos: &mut Vec4,
 ) {
     let entity = entities[instance_index as usize];
     let vertex = entity.get_vertex(vertex_index, vertices);
@@ -604,24 +605,25 @@ pub fn main_vertex_scene(
 }
 
 #[allow(clippy::too_many_arguments)]
+#[spirv(fragment)]
 /// Scene fragment shader.
 pub fn main_fragment_scene(
-    atlas: &Image2d,
-    atlas_sampler: &Sampler,
+    #[spirv(descriptor_set = 1, binding = 0)] atlas: &Image2d,
+    #[spirv(descriptor_set = 1, binding = 1)] atlas_sampler: &Sampler,
 
-    irradiance: &Cubemap,
-    irradiance_sampler: &Sampler,
-    prefiltered: &Cubemap,
-    prefiltered_sampler: &Sampler,
-    brdf: &Image2d,
-    brdf_sampler: &Sampler,
+    #[spirv(descriptor_set = 0, binding = 5)] irradiance: &Cubemap,
+    #[spirv(descriptor_set = 0, binding = 6)] irradiance_sampler: &Sampler,
+    #[spirv(descriptor_set = 0, binding = 7)] prefiltered: &Cubemap,
+    #[spirv(descriptor_set = 0, binding = 8)] prefiltered_sampler: &Sampler,
+    #[spirv(descriptor_set = 0, binding = 9)] brdf: &Image2d,
+    #[spirv(descriptor_set = 0, binding = 10)] brdf_sampler: &Sampler,
 
-    constants: &GpuConstants,
-    lights: &[GpuLight],
-    materials: &[pbr::PbrMaterial],
-    textures: &[GpuTexture],
+    #[spirv(uniform, descriptor_set = 0, binding = 0)] constants: &GpuConstants,
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 3)] lights: &[GpuLight],
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 4)] materials: &[pbr::PbrMaterial],
+    #[spirv(storage_buffer, descriptor_set = 1, binding = 2)] textures: &[GpuTexture],
 
-    in_material: u32,
+    #[spirv(flat)] in_material: u32,
     in_color: Vec4,
     in_uv0: Vec2,
     in_uv1: Vec2,
@@ -867,6 +869,30 @@ pub fn main_fragment_scene(
     .extend(1.0);
 }
 
+/// A camera used for transforming the stage during rendering.
+#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
+#[repr(C)]
+#[derive(Default, Clone, Copy, PartialEq, Slabbed)]
+pub struct Camera {
+    pub projection: Mat4,
+    pub view: Mat4,
+    pub position: Vec3,
+}
+
+/// Holds important info about the stage.
+///
+/// This should be the first struct in the stage's slab.
+#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
+#[repr(C)]
+#[derive(Default, Clone, Copy, PartialEq, Slabbed)]
+pub struct StageLegend {
+    pub atlas_size: UVec2,
+    pub debug_mode: DebugMode,
+    pub has_skybox: bool,
+    pub has_lighting: bool,
+    pub light_array: Array<GpuLight>,
+}
+
 /// A fully-computed unit of rendering, roughly meaning a mesh with model matrix
 /// transformations.
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
@@ -877,27 +903,26 @@ pub struct RenderUnit {
     pub id: Id<RenderUnit>,
     // Points to an array of `Vertex` in the stage's slab.
     pub vertices: Array<Vertex>,
-    // Points to a `PbrMaterial` the stage's slab.
+    // Points to a `PbrMaterial` in the stage's slab.
     pub material: Id<PbrMaterial>,
-    // Points to a `Mat4` the stage's slab.
-    pub camera_projection: Id<Mat4>,
-    // Points to a `Mat4` the stage's slab.
-    pub camera_view: Id<Mat4>,
+    // Points to a `Camera` in the stage's slab.
+    pub camera: Id<Camera>,
 
     pub position: Vec3,
     pub rotation: Quat,
     pub scale: Vec3,
 }
 
-pub fn stage_vertex(
+#[spirv(vertex)]
+pub fn new_stage_vertex(
     // Which render unit are we rendering
-    instance_index: u32,
+    #[spirv(instance_index)] instance_index: u32,
     // Which vertex within the render unit are we rendering
-    vertex_index: u32,
-    unit_slab: &[u32],
-    stage_slab: &[u32],
-
-    out_material: &mut u32,
+    #[spirv(vertex_index)] vertex_index: u32,
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] unit_slab: &[u32],
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 1)] stage_slab: &[u32],
+    #[spirv(flat)] out_camera: &mut u32,
+    #[spirv(flat)] out_material: &mut u32,
     out_color: &mut Vec4,
     out_uv0: &mut Vec2,
     out_uv1: &mut Vec2,
@@ -906,8 +931,7 @@ pub fn stage_vertex(
     out_bitangent: &mut Vec3,
     // position of the vertex/fragment in world space
     out_pos: &mut Vec3,
-
-    gl_pos: &mut Vec4,
+    #[spirv(position)] gl_pos: &mut Vec4,
 ) {
     let unit_id: Id<RenderUnit> = Id::from(instance_index);
     let unit = unit_slab.read(unit_id);
@@ -933,17 +957,9 @@ pub fn stage_vertex(
     *out_norm = normal_w;
     let view_pos = model_matrix * vertex.position.xyz().extend(1.0);
     *out_pos = view_pos.xyz();
-    let camera_projection = stage_slab.read(unit.camera_projection);
-    let camera_view = stage_slab.read(unit.camera_view);
-    *gl_pos = camera_projection * camera_view * view_pos;
-}
-
-/// Represents a "legend" of various stage buffers.
-#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
-#[derive(Copy, Clone, Default, Slabbed)]
-pub struct Legend {
-    pub constants: GpuConstants,
-    pub lights: Array<GpuLight>,
+    let camera = stage_slab.read(unit.camera);
+    *out_camera = unit.camera.into();
+    *gl_pos = camera.projection * camera.view * view_pos;
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -963,6 +979,7 @@ pub fn stage_fragment(
 
     slab: &[u32],
 
+    in_camera: u32,
     in_material: u32,
     in_color: Vec4,
     in_uv0: Vec2,
@@ -975,8 +992,14 @@ pub fn stage_fragment(
     output: &mut Vec4,
     brigtness: &mut Vec4,
 ) {
-    let Legend { constants, lights } = slab.read(Id::new(0));
-    let material = if in_material == ID_NONE || !constants.toggles.get_use_lighting() {
+    let StageLegend {
+        atlas_size,
+        debug_mode,
+        has_skybox: _,
+        has_lighting,
+        light_array,
+    } = slab.read(Id::new(0));
+    let material = if in_material == ID_NONE || !has_lighting {
         // without an explicit material (or if the entire render has no lighting)
         // the entity will not participate in any lighting calculations
         pbr::PbrMaterial {
@@ -997,7 +1020,7 @@ pub fn stage_fragment(
         albedo_tex_uv,
         atlas,
         atlas_sampler,
-        constants.atlas_size,
+        atlas_size,
         slab,
     );
 
@@ -1011,7 +1034,7 @@ pub fn stage_fragment(
         metallic_roughness_uv,
         atlas,
         atlas_sampler,
-        constants.atlas_size,
+        atlas_size,
         slab,
     );
 
@@ -1025,7 +1048,7 @@ pub fn stage_fragment(
         normal_tex_uv,
         atlas,
         atlas_sampler,
-        constants.atlas_size,
+        atlas_size,
         slab,
     );
 
@@ -1039,7 +1062,7 @@ pub fn stage_fragment(
         ao_tex_uv,
         atlas,
         atlas_sampler,
-        constants.atlas_size,
+        atlas_size,
         slab,
     );
 
@@ -1053,7 +1076,7 @@ pub fn stage_fragment(
         emissive_tex_uv,
         atlas,
         atlas_sampler,
-        constants.atlas_size,
+        atlas_size,
         slab,
     );
 
@@ -1081,28 +1104,22 @@ pub fn stage_fragment(
     let emissive =
         emissive_tex_color.xyz() * material.emissive_factor.xyz() * material.emissive_factor.w;
     let irradiance = pbr::sample_irradiance(irradiance, irradiance_sampler, n);
+    let camera = slab.read(Id::<Camera>::new(in_camera));
     let specular = pbr::sample_specular_reflection(
         prefiltered,
         prefiltered_sampler,
-        constants.camera_pos.xyz(),
+        camera.position,
         in_pos,
         n,
         roughness,
     );
-    let brdf = pbr::sample_brdf(
-        brdf,
-        brdf_sampler,
-        constants.camera_pos.xyz(),
-        in_pos,
-        n,
-        roughness,
-    );
+    let brdf = pbr::sample_brdf(brdf, brdf_sampler, camera.position, in_pos, n, roughness);
 
     fn colorize(u: Vec3) -> Vec4 {
         ((u.alt_norm_or_zero() + Vec3::splat(1.0)) / 2.0).extend(1.0)
     }
 
-    match constants.debug_mode.into() {
+    match debug_mode.into() {
         DebugChannel::None => {}
         DebugChannel::UvCoords0 => {
             *output = colorize(Vec3::new(in_uv0.x, in_uv0.y, 0.0));
@@ -1184,7 +1201,7 @@ pub fn stage_fragment(
 
     *output = match material.lighting_model {
         LightingModel::PBR_LIGHTING => pbr::stage_shade_fragment(
-            constants.camera_pos.xyz(),
+            camera.position,
             n,
             in_pos,
             albedo.xyz(),
@@ -1195,7 +1212,7 @@ pub fn stage_fragment(
             irradiance,
             specular,
             brdf,
-            lights,
+            light_array,
             slab,
         ),
         _unlit => in_color * albedo_tex_color * material.albedo_factor,
@@ -1211,10 +1228,15 @@ pub fn stage_fragment(
     .extend(1.0);
 }
 
+#[spirv(compute(threads(32)))]
 /// Compute the draw calls for this frame.
 ///
 /// This should be called with `groupcount = (entities.len() / threads) + 1`.
-pub fn compute_cull_entities(entities: &[GpuEntity], draws: &mut [DrawIndirect], global_id: UVec3) {
+pub fn compute_cull_entities(
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 2)] entities: &[GpuEntity],
+    #[spirv(storage_buffer, descriptor_set = 1, binding = 0)] draws: &mut [DrawIndirect],
+    #[spirv(global_invocation_id)] global_id: UVec3,
+) {
     let i = global_id.x as usize;
 
     if i > entities.len() {
@@ -1249,7 +1271,7 @@ pub fn compute_cull_entities(entities: &[GpuEntity], draws: &mut [DrawIndirect],
 
 #[cfg(test)]
 mod test {
-    use crate::{self as renderling_shader, slab::Slab, id::Id};
+    use crate::{self as renderling_shader, id::Id, slab::Slab};
     use renderling_shader::slab::Slabbed;
 
     #[derive(Default, Debug, PartialEq, Slabbed)]

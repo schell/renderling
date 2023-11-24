@@ -4,13 +4,28 @@ use core::marker::PhantomData;
 use crate::id::Id;
 use crate::slab::Slabbed;
 
-#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[repr(C)]
-#[derive(Clone, Copy, PartialEq)]
+#[derive(Clone, Copy)]
 pub struct Array<T: Slabbed> {
     index: u32,
     len: u32,
     _phantom: PhantomData<T>,
+}
+
+impl<T: Slabbed> core::fmt::Debug for Array<T> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("Array")
+            .field("index", &self.index)
+            .field("len", &self.len)
+            .field("_phantom", &self._phantom)
+            .finish()
+    }
+}
+
+impl<T: Slabbed> PartialEq for Array<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.index == other.index && self.len == other.len
+    }
 }
 
 impl<T: Slabbed> Slabbed for Array<T> {

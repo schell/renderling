@@ -595,9 +595,9 @@ impl Texture {
             layout: Some(&pp_layout),
             vertex: wgpu::VertexState {
                 module: &device.create_shader_module(wgpu::include_spirv!(
-                    "linkage/vertex_generate_mipmap.spv"
+                    "linkage/convolution-vertex_generate_mipmap.spv"
                 )),
-                entry_point: "vertex_generate_mipmap",
+                entry_point: "convolution::vertex_generate_mipmap",
                 buffers: &[],
             },
             primitive: wgpu::PrimitiveState {
@@ -608,9 +608,9 @@ impl Texture {
             },
             fragment: Some(wgpu::FragmentState {
                 module: &device.create_shader_module(wgpu::include_spirv!(
-                    "linkage/fragment_generate_mipmap.spv"
+                    "linkage/convolution-fragment_generate_mipmap.spv"
                 )),
-                entry_point: "fragment_generate_mipmap",
+                entry_point: "convolution::fragment_generate_mipmap",
                 targets: &[Some(wgpu::ColorTargetState {
                     format: self.texture.format(),
                     blend: None,

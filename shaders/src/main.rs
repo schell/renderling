@@ -1,14 +1,37 @@
 //! This program builds the rust-gpu shaders and writes the spv files into the
 //! main source repo.
-//!
-//! See the crates/renderling/src/shaders/mod.rs for more info.
+use clap::Parser;
 use spirv_builder::{CompileResult, MetadataPrintout, ModuleResult, SpirvBuilder};
 
+#[derive(Parser)]
+#[clap(author, version, about)]
+struct Cli {
+    /// Sets the verbosity level
+    #[clap(short, action = clap::ArgAction::Count)]
+    verbosity: u8,
+
+    /// Path to the output directory for the compiled shaders.
+    #[clap(long, short, default_value = "shaders")]
+    output_dir: std::path::PathBuf,
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let Cli {
+        verbosity,
+        output_dir,
+    } = Cli::parse();
+    let level = match verbosity {
+        0 => log::LevelFilter::Warn,
+        1 => log::LevelFilter::Info,
+        2 => log::LevelFilter::Debug,
+        _ => log::LevelFilter::Trace,
+    };
     env_logger::builder()
-        .filter_level(log::LevelFilter::Trace)
+        .filter_level(level)
         .try_init()
         .unwrap();
+
+    std::fs::create_dir_all(&output_dir).unwrap();
 
     let CompileResult {
         entry_points,
@@ -18,7 +41,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .multimodule(true)
         .build()?;
 
-    let dir = std::path::PathBuf::from("../crates/renderling/src/linkage");
+    let dir = output_dir;
     match module {
         ModuleResult::MultiModule(modules) => {
             for (entry, filepath) in modules.into_iter() {

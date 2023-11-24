@@ -3,7 +3,9 @@ use renderling_shader::scene::GpuConstants;
 
 use crate::Uniform;
 
-pub fn diffuse_irradiance_convolution_bindgroup_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+pub fn diffuse_irradiance_convolution_bindgroup_layout(
+    device: &wgpu::Device,
+) -> wgpu::BindGroupLayout {
     device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some("convolution bindgroup"),
         entries: &[
@@ -92,7 +94,7 @@ impl DiffuseIrradianceConvolutionRenderPipeline {
                 layout: Some(&pp_layout),
                 vertex: wgpu::VertexState {
                     module: &vertex_shader,
-                    entry_point: "vertex_position_passthru",
+                    entry_point: "skybox::vertex_position_passthru",
                     buffers: &[wgpu::VertexBufferLayout {
                         array_stride: {
                             let position_size = std::mem::size_of::<glam::Vec3>();
