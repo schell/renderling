@@ -160,9 +160,9 @@ pub fn create_hdr_render_surface(
     let hdr_texture = HdrSurface::create_texture(&device, &queue, size.width, size.height);
     let label = Some("hdr tonemapping");
     let vertex_shader =
-        device.create_shader_module(wgpu::include_spirv!("linkage/vertex_tonemapping.spv"));
+        device.create_shader_module(wgpu::include_spirv!("linkage/tonemapping-vertex.spv"));
     let fragment_shader =
-        device.create_shader_module(wgpu::include_spirv!("linkage/fragment_tonemapping.spv"));
+        device.create_shader_module(wgpu::include_spirv!("linkage/tonemapping-fragment.spv"));
     let hdr_texture_layout = scene_hdr_surface_bindgroup_layout(&device);
     let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label,
@@ -174,7 +174,7 @@ pub fn create_hdr_render_surface(
         layout: Some(&layout),
         vertex: wgpu::VertexState {
             module: &vertex_shader,
-            entry_point: "vertex_tonemapping",
+            entry_point: "tonemapping::vertex",
             buffers: &[],
         },
         primitive: wgpu::PrimitiveState {
@@ -189,7 +189,7 @@ pub fn create_hdr_render_surface(
         depth_stencil: None,
         fragment: Some(wgpu::FragmentState {
             module: &fragment_shader,
-            entry_point: "fragment_tonemapping",
+            entry_point: "tonemapping::fragment",
             targets: &[Some(wgpu::ColorTargetState {
                 format: target.format().add_srgb_suffix(),
                 blend: Some(wgpu::BlendState::ALPHA_BLENDING),
@@ -250,7 +250,11 @@ pub fn clear_surface_hdr_and_depth(
         &device,
         &queue,
         Some("clear_frame_and_depth"),
-        vec![&frame.view, &hdr.hdr_texture.view, &hdr.brightness_texture.view],
+        vec![
+            &frame.view,
+            &hdr.hdr_texture.view,
+            &hdr.brightness_texture.view,
+        ],
         Some(&depth_view),
         color,
     );

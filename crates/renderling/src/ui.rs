@@ -11,7 +11,7 @@ use glam::{UVec2, Vec2, Vec4};
 use snafu::prelude::*;
 
 use crate::{
-    mesh::Mesh, frame::FrameTextureView, Device, Queue, RenderTarget, Renderling, Texture, Uniform,
+    frame::FrameTextureView, mesh::Mesh, Device, Queue, RenderTarget, Renderling, Texture, Uniform,
     View, ViewMut,
 };
 
@@ -101,9 +101,9 @@ pub fn create_ui_pipeline(
     format: wgpu::TextureFormat,
 ) -> wgpu::RenderPipeline {
     let label = Some("ui render pipeline");
-    let vertex_shader = device.create_shader_module(wgpu::include_spirv!("linkage/ui_vertex.spv"));
+    let vertex_shader = device.create_shader_module(wgpu::include_spirv!("linkage/ui-vertex.spv"));
     let fragment_shader =
-        device.create_shader_module(wgpu::include_spirv!("linkage/ui_fragment.spv"));
+        device.create_shader_module(wgpu::include_spirv!("linkage/ui-fragment.spv"));
     let constants_bindgroup_layout = constants_bindgroup_layout(device);
     let draw_params_bindgroup_layout = draw_params_bindgroup_layout(device);
     let texture_bindgroup_layout = ui_texture_bindgroup_layout(device);
@@ -121,7 +121,7 @@ pub fn create_ui_pipeline(
         layout: Some(&layout),
         vertex: wgpu::VertexState {
             module: &vertex_shader,
-            entry_point: "ui_vertex",
+            entry_point: "ui::vertex",
             buffers: &[wgpu::VertexBufferLayout {
                 array_stride: {
                     let position_size = std::mem::size_of::<Vec2>();
@@ -154,7 +154,7 @@ pub fn create_ui_pipeline(
         },
         fragment: Some(wgpu::FragmentState {
             module: &fragment_shader,
-            entry_point: "ui_fragment",
+            entry_point: "ui::fragment",
             targets: &[Some(wgpu::ColorTargetState {
                 format: format.add_srgb_suffix(),
                 blend: Some(wgpu::BlendState::ALPHA_BLENDING),
@@ -453,7 +453,7 @@ impl<'a> UiSceneBuilder<'a> {
             img,
             Some("UiSceneBuilder::new_texture_from_dynamic_image"),
             None,
-            1
+            1,
         )
     }
 
@@ -568,9 +568,8 @@ pub fn setup_ui_render_graph(
     r.graph.add_resource(pipeline);
 
     use crate::{
-        graph,
         frame::{clear_frame_and_depth, create_frame, present},
-        Graph,
+        graph, Graph,
     };
     let pre_render =
         crate::graph!(create_frame, clear_frame_and_depth, ui_scene_update).with_barrier();

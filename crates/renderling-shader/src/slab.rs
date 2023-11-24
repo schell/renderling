@@ -12,7 +12,7 @@ use crate::id::Id;
 /// so long as those types are relatively simple. So far, autoderiving
 /// fields with these types will **not compile** on one or more targets:
 /// * `PhantomData<T>` - will not compile on `target_arch = "spirv"`
-pub trait Slabbed: std::any::Any + std::fmt::Debug + Sized {
+pub trait Slabbed: core::any::Any + Sized {
     /// The number of `u32`s this type occupies in a slab of `&[u32]`.
     fn slab_size() -> usize;
 
@@ -32,6 +32,23 @@ pub trait Slabbed: std::any::Any + std::fmt::Debug + Sized {
     /// If the type cannot be written, the returned index will be equal
     /// to `index`.
     fn write_slab(&self, index: usize, slab: &mut [u32]) -> usize;
+}
+
+impl Slabbed for bool {
+    fn slab_size() -> usize {
+        1
+    }
+
+    fn read_slab(&mut self, index: usize, slab: &[u32]) -> usize {
+        let mut proxy = 0u32;
+        let index = proxy.read_slab(index, slab);
+        *self = proxy == 1;
+        index
+    }
+
+    fn write_slab(&self, index: usize, slab: &mut [u32]) -> usize {
+        if *self { 1u32 } else { 0u32 }.write_slab(index, slab)
+    }
 }
 
 impl Slabbed for u32 {
@@ -245,7 +262,6 @@ impl Slabbed for glam::Quat {
         let index = z.write_slab(index, slab);
         w.write_slab(index, slab)
     }
-
 }
 
 impl Slabbed for glam::UVec2 {
@@ -326,7 +342,7 @@ impl Slabbed for glam::UVec4 {
     }
 }
 
-impl<T: std::any::Any> Slabbed for PhantomData<T> {
+impl<T: core::any::Any> Slabbed for PhantomData<T> {
     fn slab_size() -> usize {
         0
     }
@@ -338,7 +354,6 @@ impl<T: std::any::Any> Slabbed for PhantomData<T> {
     fn write_slab(&self, index: usize, _: &mut [u32]) -> usize {
         index
     }
-
 }
 
 pub trait Slab {
@@ -349,7 +364,6 @@ pub trait Slab {
     ///
     /// Return the next index, or the same index if writing would overlap the slab.
     fn write<T: Slabbed + Default>(&mut self, t: &T, index: usize) -> usize;
-
 
     /// Write a slice of the type into the slab at the index.
     ///

@@ -12,14 +12,15 @@ Just pro-cons on tech choices and little things I don't want to forget whil impl
 
 * sharing code on CPU and GPU
   - sanity testing GPU code on CPU using regular tests
+  - ability to run shaders on either CPU or GPU and profile
 * it's Rust
   - using cargo and Rust module system
   - expressions!
 
 ## cons / limititions
 
-* can't use enums (but you can't in glsl or hlsl or msl or wgsl either)
-* struct layout size/alignment errors can be really tricky
+* ~~can't use enums (but you can't in glsl or hlsl or msl or wgsl either)~~ you _can_ but they must be simple
+* ~~struct layout size/alignment errors can be really tricky~~ solved by using a slab
 * rust code must be no-std
 * don't use `while let` or `while` loops
 * for loops are hit or miss, sometimes they work and sometimes they don't
@@ -46,8 +47,6 @@ Just pro-cons on tech choices and little things I don't want to forget whil impl
 ## cons
 
 * no support for arrays of textures on web, yet
-* not yet 1.0 (on by default in chrome beta)
-* ~~what happens if WebGPU the standard fails? (everyone doubts it will)~~
 * atomics are not supported in the Naga SPIRV frontend, which limits the capabilities of compute
   - see [the related Naga issue](https://github.com/gfx-rs/naga/issues/2301)
 

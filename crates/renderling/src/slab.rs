@@ -2,8 +2,9 @@
 use std::ops::Deref;
 
 use renderling_shader::{
+    array::Array,
     id::Id,
-    slab::{Slab, Slabbed}, array::Array,
+    slab::{Slab, Slabbed},
 };
 use snafu::{ResultExt, Snafu};
 
@@ -92,7 +93,7 @@ impl SlabBuffer {
         Ok(())
     }
 
-    pub async fn read<T: Slabbed + Default>(
+    pub async fn read<T: Slabbed + Default + std::fmt::Debug>(
         &self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
@@ -137,7 +138,7 @@ impl SlabBuffer {
     }
 
     /// Append to the end of the buffer.
-    pub fn append<T: Slabbed + Default>(
+    pub fn append<T: Slabbed + Default + std::fmt::Debug>(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
@@ -154,7 +155,7 @@ impl SlabBuffer {
     }
 
     /// Append a slice to the end of the buffer, returning a slab array.
-    pub fn append_slice<T: Slabbed + Default>(
+    pub fn append_slice<T: Slabbed + Default + std::fmt::Debug>(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
@@ -169,7 +170,8 @@ impl SlabBuffer {
         for t in ts.iter() {
             // UNWRAP: Safe because we just checked that there is enough capacity,
             // and added some if not.
-            self.write(device, queue, Id::<T>::from(self.len), t).unwrap();
+            self.write(device, queue, Id::<T>::from(self.len), t)
+                .unwrap();
         }
         self.len += size * len;
         Array::new(index, len as u32)

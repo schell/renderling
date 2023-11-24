@@ -3,7 +3,7 @@ use renderling_shader::id::Id;
 use renderling_shader::stage::{GpuLight, LightType};
 use glam::{Vec3, Vec4};
 
-use crate::StageSlab;
+use crate::Stage;
 
 #[cfg(feature = "gltf")]
 pub fn from_gltf_light_kind(kind: gltf::khr_lights_punctual::Kind) -> LightType {
@@ -26,11 +26,11 @@ pub fn gltf_light_intensity_units(kind: gltf::khr_lights_punctual::Kind) -> &'st
 /// A builder for a spot light.
 pub struct GpuSpotLightBuilder<'a> {
     inner: GpuLight,
-    stage: &'a mut StageSlab,
+    stage: &'a mut Stage,
 }
 
 impl<'a> GpuSpotLightBuilder<'a> {
-    pub fn new(stage: &'a mut StageSlab) -> GpuSpotLightBuilder<'a> {
+    pub fn new(stage: &'a mut Stage) -> GpuSpotLightBuilder<'a> {
         let inner = GpuLight {
             light_type: LightType::SPOT_LIGHT,
             ..Default::default()
@@ -91,11 +91,11 @@ impl<'a> GpuSpotLightBuilder<'a> {
 /// This is like the sun, or the moon.
 pub struct GpuDirectionalLightBuilder<'a> {
     inner: GpuLight,
-    stage: &'a mut StageSlab,
+    stage: &'a mut Stage,
 }
 
 impl<'a> GpuDirectionalLightBuilder<'a> {
-    pub fn new(stage: &'a mut StageSlab) -> GpuDirectionalLightBuilder<'a> {
+    pub fn new(stage: &'a mut Stage) -> GpuDirectionalLightBuilder<'a> {
         let inner = GpuLight {
             light_type: LightType::DIRECTIONAL_LIGHT,
             ..Default::default()
@@ -131,11 +131,11 @@ impl<'a> GpuDirectionalLightBuilder<'a> {
 
 pub struct GpuPointLightBuilder<'a> {
     inner: GpuLight,
-    stage: &'a mut StageSlab,
+    stage: &'a mut Stage,
 }
 
 impl<'a> GpuPointLightBuilder<'a> {
-    pub fn new(stage: &mut StageSlab) -> GpuPointLightBuilder<'_> {
+    pub fn new(stage: &mut Stage) -> GpuPointLightBuilder<'_> {
         let inner = GpuLight {
             light_type: LightType::POINT_LIGHT,
             ..Default::default()

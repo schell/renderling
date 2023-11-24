@@ -75,10 +75,11 @@ impl DiffuseIrradianceConvolutionRenderPipeline {
     pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat) -> Self {
         log::trace!("creating convolution render pipeline with format '{format:?}'");
         let vertex_shader = device.create_shader_module(wgpu::include_spirv!(
-            "../linkage/vertex_position_passthru.spv"
+            "../linkage/skybox-vertex_position_passthru.spv"
         ));
         log::trace!("creating fragment shader");
         let fragment_shader = device.create_shader_module(wgpu::include_wgsl!(
+            // TODO: rewrite this shader in Rust after atomics are added to naga spv
             "../wgsl/diffuse_irradiance_convolution.wgsl"
         ));
         log::trace!("  done.");
@@ -95,7 +96,7 @@ impl DiffuseIrradianceConvolutionRenderPipeline {
                 layout: Some(&pp_layout),
                 vertex: wgpu::VertexState {
                     module: &vertex_shader,
-                    entry_point: "vertex_position_passthru",
+                    entry_point: "skybox::vertex_position_passthru",
                     buffers: &[wgpu::VertexBufferLayout {
                         array_stride: {
                             let position_size = std::mem::size_of::<glam::Vec3>();
