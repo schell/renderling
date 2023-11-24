@@ -5,7 +5,7 @@
 //! * https://64.github.io/tonemapping
 
 use glam::{mat3, Mat3, Vec2, Vec3, Vec4, Vec4Swizzles};
-use spirv_std::{image::Image2d, Sampler};
+use spirv_std::{image::Image2d, spirv, Sampler};
 
 const GAMMA: f32 = 2.2;
 const INV_GAMMA: f32 = 1.0 / GAMMA;
@@ -118,7 +118,7 @@ pub fn tonemap(mut color: Vec4, constants: &TonemapConstants) -> Vec4 {
             // Use Reinhard tone mapping
             color / (color + Vec4::ONE)
         }
-        _ => color
+        _ => color,
     }
 }
 
@@ -130,18 +130,24 @@ const QUAD_2D_POINTS: [(Vec2, Vec2); 6] = {
     [tl, bl, br, tl, br, tr]
 };
 
-pub fn vertex(vertex_id: u32, out_uv: &mut glam::Vec2, gl_pos: &mut glam::Vec4) {
+#[spirv(vertex)]
+pub fn vertex(
+    #[spirv(vertex_index)] vertex_id: u32,
+    out_uv: &mut glam::Vec2,
+    #[spirv(position)] gl_pos: &mut glam::Vec4,
+) {
     let (pos, uv) = QUAD_2D_POINTS[vertex_id as usize];
     *out_uv = uv;
     *gl_pos = pos.extend(0.0).extend(1.0);
 }
 
+#[spirv(fragment)]
 pub fn fragment(
-    texture: &Image2d,
-    sampler: &Sampler,
-    constants: &TonemapConstants,
-    bloom_texture: &Image2d,
-    bloom_sampler: &Sampler,
+    #[spirv(descriptor_set = 0, binding = 0)] texture: &Image2d,
+    #[spirv(descriptor_set = 0, binding = 1)] sampler: &Sampler,
+    #[spirv(uniform, descriptor_set = 1, binding = 0)] constants: &TonemapConstants,
+    #[spirv(descriptor_set = 2, binding = 0)] bloom_texture: &Image2d,
+    #[spirv(descriptor_set = 2, binding = 1)] bloom_sampler: &Sampler,
     in_uv: glam::Vec2,
     output: &mut glam::Vec4,
 ) {

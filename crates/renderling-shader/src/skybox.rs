@@ -1,7 +1,10 @@
 //! Skybox shader.
 
 use glam::{Mat3, Mat4, Vec2, Vec3, Vec4, Vec4Swizzles};
-use spirv_std::{image::{Image2d, Cubemap}, Sampler};
+use spirv_std::{
+    image::{Cubemap, Image2d},
+    spirv, Sampler,
+};
 
 #[cfg(target_arch = "spirv")]
 use spirv_std::num_traits::Float;
@@ -19,7 +22,13 @@ pub fn direction_to_equirectangular_uv(dir: Vec3) -> Vec2 {
     uv
 }
 
-pub fn vertex(vertex_id: u32, constants: &GpuConstants, local_pos: &mut Vec3, gl_pos: &mut Vec4) {
+#[spirv(vertex)]
+pub fn vertex(
+    #[spirv(vertex_index)] vertex_id: u32,
+    #[spirv(uniform, descriptor_set = 0, binding = 0)] constants: &GpuConstants,
+    local_pos: &mut Vec3,
+    #[spirv(position)] gl_pos: &mut Vec4,
+) {
     let point = math::CUBE[vertex_id as usize];
     *local_pos = point;
     let camera_view_without_translation = Mat3::from_mat4(constants.camera_view);
@@ -29,9 +38,10 @@ pub fn vertex(vertex_id: u32, constants: &GpuConstants, local_pos: &mut Vec3, gl
 }
 
 /// Colors a skybox using a cubemap texture.
+#[spirv(fragment)]
 pub fn fragment_cubemap(
-    texture: &Cubemap,
-    sampler: &Sampler,
+    #[spirv(descriptor_set = 0, binding = 1)] texture: &Cubemap,
+    #[spirv(descriptor_set = 0, binding = 2)] sampler: &Sampler,
     local_pos: Vec3,
     out_color: &mut Vec4,
 ) {
@@ -43,20 +53,22 @@ pub fn fragment_cubemap(
 /// while transforming `gl_pos` by the camera projection*view;
 ///
 /// Used to create a cubemap from an equirectangular image as well as cubemap convolutions.
+#[spirv(vertex)]
 pub fn vertex_position_passthru(
-    constants: &GpuConstants,
+    #[spirv(uniform, descriptor_set = 0, binding = 0)] constants: &GpuConstants,
     in_pos: Vec3,
     local_pos: &mut Vec3,
-    gl_pos: &mut Vec4,
+    #[spirv(position)] gl_pos: &mut Vec4,
 ) {
     *local_pos = in_pos;
     *gl_pos = constants.camera_projection * constants.camera_view * in_pos.extend(1.0);
 }
 
 /// Colors a skybox using an equirectangular texture.
+#[spirv(fragment)]
 pub fn fragment_equirectangular(
-    texture: &Image2d,
-    sampler: &Sampler,
+    #[spirv(descriptor_set = 0, binding = 1)] texture: &Image2d,
+    #[spirv(descriptor_set = 0, binding = 2)] sampler: &Sampler,
     local_pos: Vec3,
     out_color: &mut Vec4,
 ) {

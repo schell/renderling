@@ -73,9 +73,9 @@ pub fn create_skybox_render_pipeline(
 ) -> SkyboxRenderPipeline {
     log::trace!("creating skybox render pipeline with format '{format:?}'");
     let vertex_shader =
-        device.create_shader_module(wgpu::include_spirv!("linkage/vertex_skybox.spv"));
+        device.create_shader_module(wgpu::include_spirv!("linkage/skybox-vertex.spv"));
     let fragment_shader =
-        device.create_shader_module(wgpu::include_spirv!("linkage/fragment_cubemap.spv"));
+        device.create_shader_module(wgpu::include_spirv!("linkage/skybox-fragment_cubemap.spv"));
     let bg_layout = skybox_bindgroup_layout(device);
     let pp_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("skybox pipeline layout"),
@@ -88,7 +88,7 @@ pub fn create_skybox_render_pipeline(
             layout: Some(&pp_layout),
             vertex: wgpu::VertexState {
                 module: &vertex_shader,
-                entry_point: "vertex_skybox",
+                entry_point: "skybox::vertex",
                 buffers: &[],
             },
             primitive: wgpu::PrimitiveState {
@@ -114,7 +114,7 @@ pub fn create_skybox_render_pipeline(
             },
             fragment: Some(wgpu::FragmentState {
                 module: &fragment_shader,
-                entry_point: "fragment_cubemap",
+                entry_point: "skybox::fragment_cubemap",
                 targets: &[Some(wgpu::ColorTargetState {
                     format,
                     blend: Some(wgpu::BlendState::ALPHA_BLENDING),
@@ -621,17 +621,17 @@ impl Skybox {
             crate::mesh::Mesh::from_vertices(device, Some("brdf_lut"), vertices);
 
         let vertex_module = device.create_shader_module(wgpu::include_spirv!(
-            "linkage/vertex_brdf_lut_convolution.spv"
+            "linkage/convolution-vertex_brdf_lut_convolution.spv"
         ));
         let fragment_module = device.create_shader_module(wgpu::include_spirv!(
-            "linkage/fragment_brdf_lut_convolution.spv"
+            "linkage/convolution-fragment_brdf_lut_convolution.spv"
         ));
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("brdf_lut_convolution"),
             layout: None,
             vertex: wgpu::VertexState {
                 module: &vertex_module,
-                entry_point: "vertex_brdf_lut_convolution",
+                entry_point: "convolution::vertex_brdf_lut_convolution",
                 buffers: &[wgpu::VertexBufferLayout {
                     array_stride: (3 + 2) * std::mem::size_of::<f32>() as u64,
                     step_mode: wgpu::VertexStepMode::Vertex,
@@ -658,7 +658,7 @@ impl Skybox {
             },
             fragment: Some(wgpu::FragmentState {
                 module: &fragment_module,
-                entry_point: "fragment_brdf_lut_convolution",
+                entry_point: "convolution::fragment_brdf_lut_convolution",
                 targets: &[Some(wgpu::ColorTargetState {
                     format: wgpu::TextureFormat::Rg16Float,
                     blend: Some(wgpu::BlendState {

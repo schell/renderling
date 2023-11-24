@@ -78,6 +78,38 @@ impl<T> std::fmt::Debug for Id<T> {
     }
 }
 
+impl<T> core::ops::Add<usize> for Id<T> {
+    type Output = Self;
+
+    fn add(self, rhs: usize) -> Self::Output {
+        Id::new(self.0 + rhs as u32)
+    }
+}
+
+impl<T> core::ops::Add<Id<T>> for usize {
+    type Output = Id<T>;
+
+    fn add(self, rhs: Id<T>) -> Self::Output {
+        Id::new(self as u32 + rhs.0 as u32)
+    }
+}
+
+impl<T> core::ops::Add<u32> for Id<T> {
+    type Output = Self;
+
+    fn add(self, rhs: u32) -> Self::Output {
+        Id::new(self.0 + rhs)
+    }
+}
+
+impl<T> core::ops::Add<Id<T>> for u32 {
+    type Output = Id<T>;
+
+    fn add(self, rhs: Id<T>) -> Self::Output {
+        Id::new(self + rhs.0)
+    }
+}
+
 impl<T> Id<T> {
     pub const NONE: Self = Id::new(ID_NONE);
 

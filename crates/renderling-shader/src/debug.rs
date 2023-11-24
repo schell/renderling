@@ -92,7 +92,7 @@ impl DebugChannel {
             Self::Emissive,
             Self::UvEmissive,
             Self::EmissiveFactor,
-            Self::EmissiveStrength
+            Self::EmissiveStrength,
         ]
     }
 }
@@ -101,9 +101,14 @@ impl DebugChannel {
 ///
 /// Create one using `DebugChannel::into`.
 #[repr(transparent)]
-#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[derive(Default, Clone, Copy, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable, Slabbed)]
 pub struct DebugMode(u32);
+
+impl core::fmt::Debug for DebugMode {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_tuple("DebugMode").field(&self.0).finish()
+    }
+}
 
 impl From<DebugChannel> for DebugMode {
     fn from(value: DebugChannel) -> Self {

@@ -863,9 +863,10 @@ pub fn create_scene_render_pipeline(
     log::trace!("creating scene render pipeline with format '{format:?}'");
     let label = Some("scene render pipeline");
     let vertex_shader =
-        device.create_shader_module(wgpu::include_spirv!("linkage/main_vertex_scene.spv"));
-    let fragment_shader =
-        device.create_shader_module(wgpu::include_spirv!("linkage/main_fragment_scene.spv"));
+        device.create_shader_module(wgpu::include_spirv!("linkage/stage-main_vertex_scene.spv"));
+    let fragment_shader = device.create_shader_module(wgpu::include_spirv!(
+        "linkage/stage-main_fragment_scene.spv"
+    ));
     let scene_buffers_layout = scene_buffers_bindgroup_layout(device);
     let scene_atlas_layout = scene_atlas_bindgroup_layout(device);
     let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -878,7 +879,7 @@ pub fn create_scene_render_pipeline(
         layout: Some(&layout),
         vertex: wgpu::VertexState {
             module: &vertex_shader,
-            entry_point: "main_vertex_scene",
+            entry_point: "stage::main_vertex_scene",
             buffers: &[],
         },
         primitive: wgpu::PrimitiveState {
@@ -904,7 +905,7 @@ pub fn create_scene_render_pipeline(
         },
         fragment: Some(wgpu::FragmentState {
             module: &fragment_shader,
-            entry_point: "main_fragment_scene",
+            entry_point: "stage::main_fragment_scene",
             targets: &[
                 Some(wgpu::ColorTargetState {
                     format,
@@ -925,8 +926,9 @@ pub fn create_scene_render_pipeline(
 
 pub fn create_scene_compute_cull_pipeline(device: &wgpu::Device) -> wgpu::ComputePipeline {
     let label = Some("scene compute cull pipeline");
-    let shader_crate =
-        device.create_shader_module(wgpu::include_spirv!("linkage/compute_cull_entities.spv"));
+    let shader_crate = device.create_shader_module(wgpu::include_spirv!(
+        "linkage/stage-compute_cull_entities.spv"
+    ));
     let scene_buffers_layout = scene_buffers_bindgroup_layout(device);
     let indirect_buffers_layout = scene_draw_indirect_bindgroup_layout(device);
     let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -938,7 +940,7 @@ pub fn create_scene_compute_cull_pipeline(device: &wgpu::Device) -> wgpu::Comput
         label,
         layout: Some(&layout),
         module: &shader_crate,
-        entry_point: "compute_cull_entities",
+        entry_point: "stage::compute_cull_entities",
     });
     pipeline
 }

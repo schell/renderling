@@ -3,7 +3,7 @@
 //! This is mostly for rendering text.
 
 use glam::{Mat4, UVec2, Vec2, Vec4};
-use spirv_std::{image::Image2d, Sampler};
+use spirv_std::{image::Image2d, spirv, Sampler};
 
 /// A vertex in a mesh.
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
@@ -79,19 +79,20 @@ impl Default for UiDrawParams {
 }
 
 #[allow(clippy::too_many_arguments)]
+#[spirv(vertex)]
 pub fn vertex(
-    constants: &UiConstants,
-    params: &UiDrawParams,
+    #[spirv(uniform, descriptor_set = 0, binding = 0)] constants: &UiConstants,
+    #[spirv(uniform, descriptor_set = 2, binding = 0)] params: &UiDrawParams,
 
     in_pos: Vec2,
     in_uv: Vec2,
     in_color: Vec4,
 
-    out_mode: &mut u32,
+    #[spirv(flat)] out_mode: &mut u32,
     out_color: &mut Vec4,
     out_uv: &mut Vec2,
 
-    gl_pos: &mut Vec4,
+    #[spirv(position)] gl_pos: &mut Vec4,
 ) {
     *out_mode = params.mode.0;
     *out_color = in_color;
@@ -113,11 +114,12 @@ pub fn vertex(
     *gl_pos = proj * view * model * Vec4::new(in_pos.x, in_pos.y, 0.0, 1.0);
 }
 
+#[spirv(fragment)]
 pub fn fragment(
-    texture: &Image2d,
-    sampler: &Sampler,
+    #[spirv(descriptor_set = 1, binding = 0)] texture: &Image2d,
+    #[spirv(descriptor_set = 1, binding = 1)] sampler: &Sampler,
 
-    in_mode: u32,
+    #[spirv(flat)] in_mode: u32,
     in_color: Vec4,
     in_uv: Vec2,
 
