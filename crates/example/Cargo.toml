@@ -12,7 +12,7 @@ renderling-gpui = { path = "../renderling-gpui" }
 anyhow = "^1.0"
 clap = { version = "^4.3", features = ["derive"] }
 env_logger = "0.10.0"
-futures-lite = "^1.13"
+futures-lite = {workspace=true}
 icosahedron = "^0.1"
 instant = "^0.1"
 loading-bytes = { path = "../loading-bytes" }

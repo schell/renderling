@@ -357,8 +357,26 @@ impl<T: core::any::Any> Slabbed for PhantomData<T> {
 }
 
 pub trait Slab {
+    /// Return the number of u32 elements in the slab.
+    fn len(&self) -> usize;
+
+    /// Returns whether the slab may contain the value with the given id.
+    fn contains<T: Slabbed>(&self, id: Id<T>) -> bool {
+        id.index() + T::slab_size() <= self.len()
+    }
+
     /// Read the type from the slab using the Id as the index.
     fn read<T: Slabbed + Default>(&self, id: Id<T>) -> T;
+
+    #[cfg(not(target_arch = "spirv"))]
+    fn read_vec<T: Slabbed + Default>(&self, array: crate::array::Array<T>) -> Vec<T> {
+        let mut vec = Vec::with_capacity(array.len());
+        for i in 0..array.len() {
+            let id = array.at(i);
+            vec.push(self.read(id));
+        }
+        vec
+    }
 
     /// Write the type into the slab at the index.
     ///
@@ -372,6 +390,10 @@ pub trait Slab {
 }
 
 impl Slab for [u32] {
+    fn len(&self) -> usize {
+        self.len()
+    }
+
     fn read<T: Slabbed + Default>(&self, id: Id<T>) -> T {
         let mut t = T::default();
         let _ = t.read_slab(id.index(), self);
@@ -391,8 +413,31 @@ impl Slab for [u32] {
     }
 }
 
+#[cfg(not(target_arch = "spirv"))]
+impl Slab for Vec<u32> {
+    fn len(&self) -> usize {
+        self.len()
+    }
+
+    fn read<T: Slabbed + Default>(&self, id: Id<T>) -> T {
+        self.as_slice().read(id)
+    }
+
+    fn write<T: Slabbed + Default>(&mut self, t: &T, index: usize) -> usize {
+        self.as_mut_slice().write(t, index)
+    }
+
+    fn write_slice<T: Slabbed + Default>(&mut self, t: &[T], index: usize) -> usize {
+        self.as_mut_slice().write_slice(t, index)
+    }
+}
+
 #[cfg(test)]
 mod test {
+    use glam::Vec4;
+
+    use crate::{array::Array, stage::Vertex};
+
     use super::*;
 
     #[test]
@@ -402,5 +447,64 @@ mod test {
         slab.write(&666, 1);
         let t = slab.read(Id::<[u32; 2]>::new(0));
         assert_eq!([42, 666], t);
+        let t: Vec<u32> = slab.read_vec(Array::new(0, 2));
+        assert_eq!([42, 666], t[..]);
+        slab.write_slice(&[1, 2, 3, 4], 2);
+        let t: Vec<u32> = slab.read_vec(Array::new(2, 4));
+        assert_eq!([1, 2, 3, 4], t[..]);
+        slab.write_slice(&[[1.0, 2.0, 3.0, 4.0], [5.5, 6.5, 7.5, 8.5]], 0);
+
+        let arr = Array::<[f32; 4]>::new(0, 2);
+        assert_eq!(Id::new(0), arr.at(0));
+        assert_eq!(Id::new(4), arr.at(1));
+        assert_eq!([1.0, 2.0, 3.0, 4.0], slab.read(arr.at(0)));
+        assert_eq!([5.5, 6.5, 7.5, 8.5], slab.read(arr.at(1)));
+
+        let geometry = vec![
+            Vertex {
+                position: Vec4::new(0.5, -0.5, 0.0, 1.0),
+                color: Vec4::new(1.0, 0.0, 0.0, 1.0),
+                ..Default::default()
+            },
+            Vertex {
+                position: Vec4::new(0.0, 0.5, 0.0, 1.0),
+                color: Vec4::new(0.0, 1.0, 0.0, 1.0),
+                ..Default::default()
+            },
+            Vertex {
+                position: Vec4::new(-0.5, -0.5, 0.0, 1.0),
+                color: Vec4::new(0.0, 0.0, 1.0, 1.0),
+                ..Default::default()
+            },
+            Vertex {
+                position: Vec4::new(-1.0, 1.0, 0.0, 1.0),
+                color: Vec4::new(1.0, 0.0, 0.0, 1.0),
+                ..Default::default()
+            },
+            Vertex {
+                position: Vec4::new(-1.0, 0.0, 0.0, 1.0),
+                color: Vec4::new(0.0, 1.0, 0.0, 1.0),
+                ..Default::default()
+            },
+            Vertex {
+                position: Vec4::new(0.0, 1.0, 0.0, 1.0),
+                color: Vec4::new(0.0, 0.0, 1.0, 1.0),
+                ..Default::default()
+            },
+        ];
+        let geometry_slab_size = Vertex::slab_size() * geometry.len();
+        let mut slab = vec![0u32; geometry_slab_size + Array::<Vertex>::slab_size()];
+        let index = 0usize;
+        let vertices = Array::<Vertex>::new(index as u32, geometry.len() as u32);
+        let index = slab.write_slice(&geometry, index);
+        assert_eq!(geometry_slab_size, index);
+        let vertices_id = Id::<Array<Vertex>>::from(index);
+        let index = slab.write(&vertices, index);
+        assert_eq!(geometry_slab_size + Array::<Vertex>::slab_size(), index);
+        assert_eq!(Vertex::slab_size() * 6, vertices_id.index());
+        assert!(slab.contains(vertices_id),);
+
+        let array = slab.read(vertices_id);
+        assert_eq!(vertices, array);
     }
 }

@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "crates/example",
+    "crates/example-debugging",
     "crates/example-wasm",
     "crates/loading-bytes",
     "crates/renderling",
@@ -16,6 +17,7 @@ resolver = "2"
 
 [workspace.dependencies]
 bytemuck = { version = "1.13.0", features = ["derive"] }
+futures-lite = "^1.13"
 gltf = { git = 'https://github.com/gltf-rs/gltf.git', features = ["KHR_lights_punctual", "KHR_materials_unlit", "KHR_materials_emissive_strength", "extras"] }
 image = "^0.24"
 log = "^0.4"

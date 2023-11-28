@@ -127,12 +127,12 @@ pub fn create_skybox_render_pipeline(
 }
 
 /// An HDR skybox that also provides IBL cubemaps and lookups.
-#[derive(Debug)]
+///
+/// A clone of a skybox is a reference to the same skybox.
+#[derive(Debug, Clone)]
 pub struct Skybox {
     // Cubemap texture of the environment cubemap
     pub environment_cubemap: crate::Texture,
-    // Bindgroup to use with the default skybox shader
-    pub environment_bindgroup: wgpu::BindGroup,
     // Cubemap texture of the pre-computed irradiance cubemap
     pub irradiance_cubemap: crate::Texture,
     // Cubemap texture and mip maps of the specular highlights,
@@ -144,11 +144,7 @@ pub struct Skybox {
 
 impl Skybox {
     /// Create an empty, transparent skybox.
-    pub fn empty(
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        constants: &Uniform<GpuConstants>,
-    ) -> Self {
+    pub fn empty(device: &wgpu::Device, queue: &wgpu::Queue) -> Self {
         log::trace!("creating empty skybox");
         let hdr_img = SceneImage {
             pixels: vec![0u8; 4 * 4],
@@ -157,16 +153,11 @@ impl Skybox {
             format: crate::SceneImageFormat::R32G32B32A32FLOAT,
             apply_linear_transfer: false,
         };
-        Self::new(device, queue, constants, hdr_img)
+        Self::new(device, queue, hdr_img)
     }
 
     /// Create a new `Skybox`.
-    pub fn new(
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        constants: &Uniform<GpuConstants>,
-        hdr_img: SceneImage,
-    ) -> Self {
+    pub fn new(device: &wgpu::Device, queue: &wgpu::Queue, hdr_img: SceneImage) -> Self {
         log::trace!("creating skybox");
         let equirectangular_texture = Skybox::hdr_texture_from_scene_image(device, queue, hdr_img);
         let proj = Mat4::perspective_rh(std::f32::consts::FRAC_PI_2, 1.0, 0.1, 10.0);
@@ -265,11 +256,6 @@ impl Skybox {
         let brdf_lut = Skybox::create_precomputed_brdf_texture(device, queue);
 
         Skybox {
-            environment_bindgroup: crate::skybox::create_skybox_bindgroup(
-                &device,
-                &constants,
-                &environment_cubemap,
-            ),
             environment_cubemap,
             irradiance_cubemap,
             prefiltered_environment_cubemap,
@@ -744,7 +730,8 @@ mod test {
 
         for i in 0..6 {
             // save out the irradiance face
-            let copied_buffer = scene.skybox.irradiance_cubemap.read_from(
+            let copied_buffer = crate::Texture::read_from(
+                &scene.skybox.irradiance_cubemap.texture,
                 r.get_device(),
                 r.get_queue(),
                 32,
@@ -767,7 +754,8 @@ mod test {
             for mip_level in 0..5 {
                 let mip_size = 128u32 >> mip_level;
                 // save out the prefiltered environment faces' mips
-                let copied_buffer = scene.skybox.prefiltered_environment_cubemap.read_from(
+                let copied_buffer = crate::Texture::read_from(
+                    &scene.skybox.prefiltered_environment_cubemap.texture,
                     r.get_device(),
                     r.get_queue(),
                     mip_size as usize,
@@ -810,7 +798,8 @@ mod test {
         let (device, queue) = r.get_device_and_queue_owned();
         let brdf_lut = Skybox::create_precomputed_brdf_texture(&device, &queue);
         assert_eq!(wgpu::TextureFormat::Rg16Float, brdf_lut.texture.format());
-        let copied_buffer = brdf_lut.read(&device, &queue, 512, 512, 2, 2);
+        let copied_buffer =
+            crate::Texture::read(&brdf_lut.texture, &device, &queue, 512, 512, 2, 2);
         let pixels = copied_buffer.pixels(&device);
         let pixels: Vec<f32> = bytemuck::cast_slice::<u8, u16>(pixels.as_slice())
             .iter()

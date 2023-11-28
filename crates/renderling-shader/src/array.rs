@@ -34,7 +34,7 @@ impl<T: Slabbed> Slabbed for Array<T> {
     }
 
     fn read_slab(&mut self, index: usize, slab: &[u32]) -> usize {
-        if index + Self::slab_size() >= slab.len() {
+        if index + Self::slab_size() > slab.len() {
             index
         } else {
             let index = self.index.read_slab(index, slab);
@@ -44,7 +44,7 @@ impl<T: Slabbed> Slabbed for Array<T> {
     }
 
     fn write_slab(&self, index: usize, slab: &mut [u32]) -> usize {
-        if index + Self::slab_size() >= slab.len() {
+        if index + Self::slab_size() > slab.len() {
             index
         } else {
             let index = self.index.write_slab(index, slab);
@@ -72,6 +72,7 @@ impl<T: Slabbed> Array<T> {
             _phantom: PhantomData,
         }
     }
+
     pub fn len(&self) -> usize {
         self.len as usize
     }
@@ -88,19 +89,7 @@ impl<T: Slabbed> Array<T> {
         if index >= self.len() {
             Id::NONE
         } else {
-            Id::new(self.index + index as u32)
+            Id::new(self.index + (T::slab_size() * index) as u32)
         }
-    }
-}
-
-impl<T: Slabbed> Array<T> {
-    fn slab_size() -> usize {
-        2
-    }
-
-    pub fn read(&self, item: &mut T, item_index: usize, slab: &[u32]) {
-        let size = T::slab_size();
-        let start = self.index as usize + size * item_index;
-        let _ = item.read_slab(start, slab);
     }
 }

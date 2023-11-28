@@ -373,6 +373,7 @@ pub struct Scene {
     pub indirect_draws: MutableBufferArray<DrawIndirect>,
     pub constants: Uniform<GpuConstants>,
     pub skybox: Skybox,
+    pub environment_bindgroup: wgpu::BindGroup,
     pub atlas: Atlas,
     skybox_update: Option<Option<SceneImage>>,
     cull_bindgroup: wgpu::BindGroup,
@@ -469,21 +470,21 @@ impl Scene {
                 | wgpu::BufferUsages::COPY_SRC,
             wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
         );
-        let skybox = if let Some(mut skybox) = skybox {
+        let skybox = if let Some(skybox) = skybox {
             log::trace!("scene has skybox");
-            skybox.environment_bindgroup = crate::skybox::create_skybox_bindgroup(
-                &device,
-                &constants,
-                &skybox.environment_cubemap,
-            );
             skybox
         } else if let Some(skybox_img) = skybox_image {
             log::trace!("scene will build a skybox");
-            Skybox::new(&device, &queue, &constants, skybox_img)
+            Skybox::new(&device, &queue, skybox_img)
         } else {
             log::trace!("skybox is empty");
-            Skybox::empty(&device, &queue, &constants)
+            Skybox::empty(&device, &queue)
         };
+        let environment_bindgroup = crate::skybox::create_skybox_bindgroup(
+            &device,
+            &constants,
+            &skybox.environment_cubemap,
+        );
 
         let cull_bindgroup = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("Scene::new cull_bindgroup"),
@@ -538,6 +539,7 @@ impl Scene {
             lights,
             skybox,
             skybox_update: None,
+            environment_bindgroup,
         };
         scene.update(&device, &queue);
         Ok(scene)
@@ -556,6 +558,7 @@ impl Scene {
             atlas: _,
             skybox,
             skybox_update,
+            environment_bindgroup,
             vertices,
             entities,
             materials,
@@ -580,7 +583,12 @@ impl Scene {
                 // skybox should change image
                 log::trace!("skybox changed");
                 constants.toggles.set_has_skybox(true);
-                *skybox = Skybox::new(device, queue, constants, img);
+                *skybox = Skybox::new(device, queue, img);
+                *environment_bindgroup = crate::skybox::create_skybox_bindgroup(
+                    device,
+                    constants,
+                    &skybox.environment_cubemap,
+                );
                 // we also have to create a new render buffers bindgroup because irradiance is
                 // part of that
                 *render_buffers_bindgroup = create_scene_buffers_bindgroup(
@@ -1041,7 +1049,7 @@ pub fn skybox_render(
         }),
     });
     render_pass.set_pipeline(&pipeline.0);
-    render_pass.set_bind_group(0, &scene.skybox.environment_bindgroup, &[]);
+    render_pass.set_bind_group(0, &scene.environment_bindgroup, &[]);
     render_pass.draw(0..36, 0..1);
     drop(render_pass);
 
@@ -1108,7 +1116,7 @@ pub fn scene_render(
 
 /// Conducts the HDR tone mapping, writing the HDR surface texture to the (most
 /// likely) sRGB window surface.
-pub fn scene_tonemapping(
+pub fn tonemapping(
     (device, queue, frame, hdr_frame, bloom_result): (
         View<Device>,
         View<Queue>,
@@ -1117,7 +1125,7 @@ pub fn scene_tonemapping(
         Move<BloomResult>,
     ),
 ) -> Result<(), SceneError> {
-    let label = Some("scene tonemapping");
+    let label = Some("tonemapping");
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label });
     let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
         label,
