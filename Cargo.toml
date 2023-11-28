@@ -1,7 +1,6 @@
 [workspace]
 members = [
     "crates/example",
-    "crates/example-debugging",
     "crates/example-wasm",
     "crates/loading-bytes",
     "crates/renderling",
