@@ -121,9 +121,6 @@ impl<T: Slabbed, const N: usize> Slabbed for [T; N] {
 
 impl Slabbed for glam::Mat4 {
     fn read_slab(&mut self, index: usize, slab: &[u32]) -> usize {
-        if slab.len() < index + 16 {
-            return index;
-        }
         let Self {
             x_axis,
             y_axis,
@@ -218,11 +215,10 @@ impl Slabbed for glam::Vec4 {
         if slab.len() < index + 4 {
             return index;
         }
-        let Self { x, y, z, w } = self;
-        let index = x.read_slab(index, slab);
-        let index = y.read_slab(index, slab);
-        let index = z.read_slab(index, slab);
-        w.read_slab(index, slab)
+        let index = self.x.read_slab(index, slab);
+        let index = self.y.read_slab(index, slab);
+        let index = self.z.read_slab(index, slab);
+        self.w.read_slab(index, slab)
     }
 
     fn write_slab(&self, index: usize, slab: &mut [u32]) -> usize {
