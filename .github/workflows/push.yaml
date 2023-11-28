@@ -3,14 +3,20 @@ on: [push]
 name: push
 
 jobs:
-  renderling-build:
+  renderling-build-shaders:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
-      - run: cd shaders && cargo run --release && cd .. && cargo build
+      - run: |
+          rm -rf crates/renderling/src/linkage/*.spv
+          cd shaders && cargo run --release && cd ..
+          # ensure the shader binaries were properly checked in
+          git diff --exit-code --no-ext-diff crates/renderling/src/linkage
+          # ensure the shaders are valid for our uses (see renderling::linkage::validate_shaders)
+          cargo test -p renderling -- --nocapture linkage
 
   #renderling-test:
   #  runs-on: [ubuntu-latest, gpu]
