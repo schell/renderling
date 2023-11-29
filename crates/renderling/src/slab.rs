@@ -4,12 +4,10 @@ use std::{
     sync::{atomic::AtomicUsize, Arc, RwLock},
 };
 
-use renderling_shader::{
-    array::Array,
-    id::Id,
-    slab::{Slab, Slabbed},
-};
+use renderling_shader::{array::Array, id::Id};
 use snafu::{ResultExt, Snafu};
+
+pub use renderling_shader::slab::{Slab, Slabbed};
 
 #[derive(Debug, Snafu)]
 pub enum SlabError<T: Slabbed> {
@@ -176,7 +174,7 @@ impl SlabBuffer {
     }
 
     /// Append to the end of the buffer.
-    pub fn append<T: Slabbed + Default + std::fmt::Debug>(
+    pub fn append<T: Slabbed + Default>(
         &self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
@@ -188,15 +186,15 @@ impl SlabBuffer {
             self.resize(device, queue, capacity * 2);
         }
         let id = Id::<T>::from(len);
-        // UNWRAP: We just checked that there is enough capacity, and added some if not.
-        self.write(device, queue, id, t).unwrap();
+        // IGNORED: We just checked that there is enough capacity, and added some if not.
+        let _ = self.write(device, queue, id, t);
         self.len
             .store(len + T::slab_size(), std::sync::atomic::Ordering::Relaxed);
         id
     }
 
     /// Append a slice to the end of the buffer, returning a slab array.
-    pub fn append_slice<T: Slabbed + Default + std::fmt::Debug>(
+    pub fn append_slice<T: Slabbed + Default>(
         &self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
@@ -220,15 +218,14 @@ impl SlabBuffer {
         }
         let starting_index = len as u32;
         for (i, t) in ts.iter().enumerate() {
-            // UNWRAP: Safe because we just checked that there is enough capacity,
+            // IGNORED: Safe because we just checked that there is enough capacity,
             // and added some if not.
-            self.write(
+            let _ = self.write(
                 device,
                 queue,
                 Id::<T>::from(starting_index + (size * i) as u32),
                 t,
-            )
-            .unwrap();
+            );
         }
         self.len
             .store(len + size * ts_len, std::sync::atomic::Ordering::Relaxed);

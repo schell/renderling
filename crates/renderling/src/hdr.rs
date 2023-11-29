@@ -24,6 +24,8 @@ pub struct HdrSurface {
 }
 
 impl HdrSurface {
+    pub const TEXTURE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
+
     pub fn create_texture(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
@@ -46,7 +48,7 @@ impl HdrSurface {
                     ..Default::default()
                 })
             }),
-            wgpu::TextureFormat::Rgba16Float,
+            Self::TEXTURE_FORMAT,
             4,
             // TODO: pretty sure this should be `2`
             1,
