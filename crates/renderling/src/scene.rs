@@ -1,7 +1,7 @@
 //! Build GPU scenes from the CPU.
 use std::sync::Arc;
 
-use glam::{Mat4, UVec2, Vec3};
+use glam::{Mat4, Vec3};
 use moongraph::{Move, View, ViewMut};
 use renderling_shader::debug::DebugChannel;
 use snafu::prelude::*;

@@ -14,28 +14,18 @@ use renderling_shader::{
     slab::Slabbed,
     stage::{GpuLight, RenderUnit, StageLegend},
 };
-use snafu::Snafu;
 
 use crate::{
     bloom::{BloomFilter, BloomResult},
-    Atlas, DepthTexture, Device, HdrSurface, Queue, Skybox, SlabBuffer,
+    Atlas, DepthTexture, Device, HdrSurface, Queue, Skybox, SlabBuffer, SlabError,
 };
 
 #[cfg(feature = "gltf")]
-pub mod gltf_support;
+mod gltf_support;
 pub mod light;
 
-#[derive(Debug, Snafu)]
-pub enum StageError<T: std::fmt::Debug> {
-    #[snafu(display("Out of capacity. Tried to write {:?} but capacity is {capacity}"))]
-    Capacity { id: Id<T>, capacity: usize },
-
-    #[snafu(display("Async recv error: {source}"))]
-    AsyncRecv { source: async_channel::RecvError },
-
-    #[snafu(display("Async error: {source}"))]
-    Async { source: wgpu::BufferAsyncError },
-}
+#[cfg(feature = "gltf")]
+pub use gltf_support::*;
 
 /// Represents an entire scene worth of rendering data.
 ///
@@ -43,7 +33,7 @@ pub enum StageError<T: std::fmt::Debug> {
 #[derive(Clone)]
 pub struct Stage {
     pub(crate) slab: SlabBuffer,
-    pub(crate) atlas: Arc<Mutex<Atlas>>,
+    pub(crate) atlas: Arc<RwLock<Atlas>>,
     pub(crate) skybox: Arc<Mutex<Skybox>>,
     pub(crate) pipeline: Arc<Mutex<Option<Arc<wgpu::RenderPipeline>>>>,
     pub(crate) skybox_pipeline: Arc<RwLock<Option<Arc<wgpu::RenderPipeline>>>>,
@@ -59,11 +49,11 @@ pub struct Stage {
 
 impl Stage {
     /// Create a new stage.
-    pub fn new(device: Device, queue: Queue, legend: StageLegend) -> Self {
+    pub fn new(device: Device, queue: Queue) -> Self {
         let s = Self {
             slab: SlabBuffer::new(&device, 256),
             pipeline: Default::default(),
-            atlas: Arc::new(Mutex::new(Atlas::empty(&device, &queue))),
+            atlas: Arc::new(RwLock::new(Atlas::empty(&device, &queue))),
             skybox: Arc::new(Mutex::new(Skybox::empty(&device, &queue))),
             skybox_pipeline: Default::default(),
             has_skybox: Arc::new(AtomicBool::new(false)),
@@ -75,18 +65,46 @@ impl Stage {
             device,
             queue,
         };
-        let _ = s.append(&legend);
+        let _ = s.append(&StageLegend::default());
         s
     }
 
+    /// Allocate some storage for a type on the slab, but don't write it.
+    pub fn allocate<T: Slabbed>(&self) -> Id<T> {
+        self.slab.allocate(&self.device, &self.queue)
+    }
+
+    /// Allocate contiguous storage for `len` elements of a type on the slab, but don't write them.
+    pub fn allocate_array<T: Slabbed>(&self, len: usize) -> Array<T> {
+        self.slab.allocate_array(&self.device, &self.queue, len)
+    }
+
+    /// Write an object to the slab.
+    pub fn write<T: Slabbed + Default>(&self, id: Id<T>, object: &T) -> Result<(), SlabError> {
+        let () = self.slab.write(&self.device, &self.queue, id, object)?;
+        Ok(())
+    }
+
+    /// Write many objects to the slab.
+    pub fn write_array<T: Slabbed + Default>(
+        &self,
+        array: Array<T>,
+        objects: &[T],
+    ) -> Result<(), SlabError> {
+        let () = self
+            .slab
+            .write_array(&self.device, &self.queue, array, objects)?;
+        Ok(())
+    }
+
     /// Add an object to the slab and return its ID.
-    pub fn append<T: Slabbed + Default + std::fmt::Debug>(&self, object: &T) -> Id<T> {
+    pub fn append<T: Slabbed + Default>(&self, object: &T) -> Id<T> {
         self.slab.append(&self.device, &self.queue, object)
     }
 
     /// Add a slice of objects to the slab and return an [`Array`].
-    pub fn append_slice<T: Slabbed + Default>(&self, objects: &[T]) -> Array<T> {
-        self.slab.append_slice(&self.device, &self.queue, objects)
+    pub fn append_array<T: Slabbed + Default>(&self, objects: &[T]) -> Array<T> {
+        self.slab.append_array(&self.device, &self.queue, objects)
     }
 
     /// Set the debug mode.
@@ -163,7 +181,7 @@ impl Stage {
         lights: impl IntoIterator<Item = Id<GpuLight>>,
     ) -> Array<Id<GpuLight>> {
         let lights = lights.into_iter().collect::<Vec<_>>();
-        let light_array = self.append_slice(&lights);
+        let light_array = self.append_array(&lights);
         let id = Id::<Array<Id<GpuLight>>>::from(StageLegend::offset_of_light_array());
         // UNWRAP: safe because we just appended the array, and the light array offset is
         // guaranteed to be valid.
@@ -523,8 +541,8 @@ impl Stage {
             let b = Arc::new(create_textures_bindgroup(
                 &self.device,
                 &self.get_pipeline(),
-                // UNWRAP: we can't acquire locks we want to panic
-                &self.atlas.lock().unwrap(),
+                // UNWRAP: if we can't acquire locks we want to panic
+                &self.atlas.read().unwrap(),
                 &self.skybox.lock().unwrap(),
             ));
             *bindgroup = Some(b.clone());
@@ -605,7 +623,7 @@ pub(crate) enum StageDrawStrategy {
 /// Render the stage.
 pub fn stage_render(
     (stage, hdr_frame, depth): (ViewMut<Stage>, View<HdrSurface>, View<DepthTexture>),
-) -> Result<(BloomResult,), StageError<RenderUnit>> {
+) -> Result<(BloomResult,), SlabError> {
     let label = Some("stage render");
     let pipeline = stage.get_pipeline();
     let slab_buffers_bindgroup = stage.get_slab_buffers_bindgroup();
@@ -700,7 +718,7 @@ mod test {
             .unwrap()
             .with_background_color(glam::Vec4::splat(1.0));
         let (device, queue) = r.get_device_and_queue_owned();
-        let stage = Stage::new(device.clone(), queue.clone(), StageLegend::default())
+        let stage = Stage::new(device.clone(), queue.clone())
             .with_lighting(true)
             .with_bloom(true);
         let (projection, view) = default_ortho2d(100.0, 100.0);
@@ -710,14 +728,14 @@ mod test {
             position: Vec3::ZERO,
         };
         let camera_id = stage.append(&camera);
-        let vertices = stage.append_slice(&right_tri_vertices());
+        let vertices = stage.append_array(&right_tri_vertices());
         println!("vertices: {vertices:?}");
         let _ = stage.draw_unit(&RenderUnit {
             camera: camera_id,
             vertices,
             ..Default::default()
         });
-        let stage_slab = futures_lite::future::block_on(stage.slab.read_raw::<u32>(
+        let stage_slab = futures_lite::future::block_on(stage.slab.read_raw(
             &stage.device,
             &stage.queue,
             0,

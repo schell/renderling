@@ -8,10 +8,8 @@ mod test {
         frame::FrameTextureView,
         graph::{graph, Graph, GraphError, View},
         shader::{
-            self,
             array::Array,
             id::Id,
-            slab::{Slab, Slabbed},
             stage::{Camera, RenderUnit, Vertex},
         },
         DepthTexture, Device, Queue, Renderling,
@@ -128,7 +126,7 @@ mod test {
         // Create our geometry on the slab.
         // Don't worry too much about capacity, it can grow.
         let slab = crate::slab::SlabBuffer::new(&device, 16);
-        let vertices = slab.append_slice(
+        let vertices = slab.append_array(
             &device,
             &queue,
             &[
@@ -332,7 +330,7 @@ mod test {
                 ..Default::default()
             },
         ];
-        let vertices = slab.append_slice(&device, &queue, &geometry);
+        let vertices = slab.append_array(&device, &queue, &geometry);
         let vertices_id = slab.append(&device, &queue, &vertices);
 
         // Create a bindgroup for the slab so our shader can read out the types.
@@ -521,7 +519,7 @@ mod test {
                 ..Default::default()
             },
         ];
-        let vertices = slab.append_slice(&device, &queue, &geometry);
+        let vertices = slab.append_array(&device, &queue, &geometry);
         let unit = RenderUnit {
             vertices,
             ..Default::default()
@@ -714,7 +712,7 @@ mod test {
                 ..Default::default()
             },
         ];
-        let vertices = slab.append_slice(&device, &queue, &geometry);
+        let vertices = slab.append_array(&device, &queue, &geometry);
         let (projection, view) = crate::default_ortho2d(100.0, 100.0);
         let camera_id = slab.append(
             &device,

@@ -36,6 +36,16 @@ impl TextureModes {
     pub fn set_wrap_t(&mut self, wrap_t: TextureAddressMode) {
         insert(&mut self.0, Self::BITS_WRAP_T, wrap_t.0)
     }
+
+    pub fn with_wrap_s(mut self, wrap_s: TextureAddressMode) -> Self {
+        self.set_wrap_s(wrap_s);
+        self
+    }
+
+    pub fn with_wrap_t(mut self, wrap_t: TextureAddressMode) -> Self {
+        self.set_wrap_t(wrap_t);
+        self
+    }
 }
 
 /// A GPU texture.
@@ -49,8 +59,8 @@ pub struct GpuTexture {
     pub size_px: UVec2,
     // Various toggles of texture modes.
     pub modes: TextureModes,
-
-    pub padding: u32,
+    // The index of the image in the atlas.
+    pub atlas_index: u32,
 }
 
 impl GpuTexture {
