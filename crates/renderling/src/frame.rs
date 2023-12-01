@@ -1,4 +1,7 @@
 //! Frame creation and clearing.
+//!
+//! Contains graph nodes for creating and clearing frames, as well as a
+//! `PostRenderBuffer` resource that holds a copy of the last frame's buffer.
 use std::{ops::Deref, sync::Arc};
 
 use moongraph::*;
@@ -8,7 +11,7 @@ use crate::{
     RenderTarget, ScreenSize, WgpuStateError,
 };
 
-fn default_frame_texture_view(
+pub fn default_frame_texture_view(
     frame_texture: &wgpu::Texture,
 ) -> (wgpu::TextureView, wgpu::TextureFormat) {
     let format = frame_texture.format().add_srgb_suffix();
@@ -95,7 +98,8 @@ pub fn conduct_clear_pass(
     queue.submit(std::iter::once(encoder.finish()));
 }
 
-/// Conduct a clear pass on the global frame and depth textures.
+/// Render graph node to conduct a clear pass on the global frame and depth
+/// textures.
 pub fn clear_frame_and_depth(
     (device, queue, frame_view, depth, color): (
         View<Device>,
@@ -160,18 +164,19 @@ pub struct PostRenderBufferCreate {
     frame: View<Frame>,
 }
 
-impl PostRenderBufferCreate {
-    /// Copies the current frame into a `PostRenderBuffer` resource.
-    ///
-    /// If rendering to a window surface, this should be called after rendering,
-    /// before presentation.
-    pub fn create(self) -> Result<(PostRenderBuffer,), WgpuStateError> {
-        let ScreenSize { width, height } = *self.size;
-        let copied_texture_buffer =
-            self.frame
-                .copy_to_buffer(&self.device, &self.queue, width, height);
-        Ok((PostRenderBuffer(copied_texture_buffer),))
-    }
+/// Copies the current frame into a `PostRenderBuffer` resource.
+///
+/// If rendering to a window surface, this should be called after rendering,
+/// before presentation.
+pub fn copy_frame_to_post(
+    create: PostRenderBufferCreate,
+) -> Result<(PostRenderBuffer,), WgpuStateError> {
+    let ScreenSize { width, height } = *create.size;
+    let copied_texture_buffer =
+        create
+            .frame
+            .copy_to_buffer(&create.device, &create.queue, width, height);
+    Ok((PostRenderBuffer(copied_texture_buffer),))
 }
 
 /// Consume and present the screen frame to the screen.

@@ -12,7 +12,7 @@ default = []
 [dependencies]
 bytemuck = { workspace = true }
 renderling-derive = { version = "0.1.0", path = "../renderling-derive" }
-spirv-std = "^0.9"
+spirv-std = "0.9"
 
 [target.'cfg(not(target_arch = "spirv"))'.dependencies]
 glam = { workspace = true, features = ["bytemuck"] }
@@ -21,7 +21,7 @@ glam = { workspace = true, features = ["bytemuck"] }
 glam = { workspace = true, features = ["debug-glam-assert", "bytemuck"] }
 
 [target.'cfg(target_arch = "spirv")'.dependencies]
-glam = { version = "^0.24", default-features = false, features = ["libm", "bytemuck"] }
+glam = { version = "0.24.2", default-features = false, features = ["libm", "bytemuck"] }
 
 [dev-dependencies]
 image = { workspace = true }

@@ -27,7 +27,7 @@ mod test {
     #[test]
     // Ensure that the shaders can be converted to WGSL.
     // This is necessary for WASM using WebGPU, because WebGPU only accepts
-    // WGSL as a shading language.:w
+    // WGSL as a shading language.
     fn validate_shaders() {
         fn validate_src(path: &std::path::PathBuf) -> Result<(), SrcError> {
             let bytes = std::fs::read(path).context(ReadSnafu)?;

@@ -16,6 +16,8 @@ Just pro-cons on tech choices and little things I don't want to forget whil impl
 * it's Rust
   - using cargo and Rust module system
   - expressions!
+  - type checking!
+  - editor tooling!
 
 ## cons / limititions
 

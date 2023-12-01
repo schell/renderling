@@ -1,4 +1,4 @@
-//! Types used to store and update an entire 3d scene on the GPU.
+//! Types used to store and update an entire scene on the GPU.
 //!
 //! This is roughly what the [vulkan guide](https://vkguide.dev/docs/gpudriven)
 //! calls "gpu driven rendering".
@@ -897,10 +897,8 @@ pub struct StageLegend {
 /// transformations.
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[repr(C)]
-#[derive(Default, Clone, Copy, PartialEq, Slabbed)]
+#[derive(Clone, Copy, PartialEq, Slabbed)]
 pub struct RenderUnit {
-    // Points to an index in the `RenderUnit` slab.
-    pub id: Id<RenderUnit>,
     // Points to an array of `Vertex` in the stage's slab.
     pub vertices: Array<Vertex>,
     // Points to a `PbrMaterial` in the stage's slab.
@@ -913,14 +911,26 @@ pub struct RenderUnit {
     pub scale: Vec3,
 }
 
+impl Default for RenderUnit {
+    fn default() -> Self {
+        Self {
+            vertices: Default::default(),
+            material: Default::default(),
+            camera: Default::default(),
+            position: Vec3::ZERO,
+            rotation: Quat::IDENTITY,
+            scale: Vec3::ONE,
+        }
+    }
+}
+
 #[spirv(vertex)]
 pub fn new_stage_vertex(
     // Which render unit are we rendering
     #[spirv(instance_index)] instance_index: u32,
     // Which vertex within the render unit are we rendering
     #[spirv(vertex_index)] vertex_index: u32,
-    #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] unit_slab: &[u32],
-    #[spirv(storage_buffer, descriptor_set = 0, binding = 1)] stage_slab: &[u32],
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] slab: &[u32],
     #[spirv(flat)] out_camera: &mut u32,
     #[spirv(flat)] out_material: &mut u32,
     out_color: &mut Vec4,
@@ -934,8 +944,8 @@ pub fn new_stage_vertex(
     #[spirv(position)] gl_pos: &mut Vec4,
 ) {
     let unit_id: Id<RenderUnit> = Id::from(instance_index);
-    let unit = unit_slab.read(unit_id);
-    let vertex = stage_slab.read(unit.vertices.at(vertex_index as usize));
+    let unit = slab.read(unit_id);
+    let vertex = slab.read(unit.vertices.at(vertex_index as usize));
     let model_matrix =
         Mat4::from_scale_rotation_translation(unit.scale, unit.rotation, unit.position);
     *out_material = unit.material.into();
@@ -957,30 +967,31 @@ pub fn new_stage_vertex(
     *out_norm = normal_w;
     let view_pos = model_matrix * vertex.position.xyz().extend(1.0);
     *out_pos = view_pos.xyz();
-    let camera = stage_slab.read(unit.camera);
+    let camera = slab.read(unit.camera);
     *out_camera = unit.camera.into();
     *gl_pos = camera.projection * camera.view * view_pos;
 }
 
 #[allow(clippy::too_many_arguments)]
+#[spirv(fragment)]
 /// Scene fragment shader.
 pub fn stage_fragment(
-    atlas: &Image2d,
-    atlas_sampler: &Sampler,
+    #[spirv(descriptor_set = 1, binding = 0)] atlas: &Image2d,
+    #[spirv(descriptor_set = 1, binding = 1)] atlas_sampler: &Sampler,
 
-    irradiance: &Cubemap,
-    irradiance_sampler: &Sampler,
+    #[spirv(descriptor_set = 1, binding = 2)] irradiance: &Cubemap,
+    #[spirv(descriptor_set = 1, binding = 3)] irradiance_sampler: &Sampler,
 
-    prefiltered: &Cubemap,
-    prefiltered_sampler: &Sampler,
+    #[spirv(descriptor_set = 1, binding = 4)] prefiltered: &Cubemap,
+    #[spirv(descriptor_set = 1, binding = 5)] prefiltered_sampler: &Sampler,
 
-    brdf: &Image2d,
-    brdf_sampler: &Sampler,
+    #[spirv(descriptor_set = 1, binding = 6)] brdf: &Image2d,
+    #[spirv(descriptor_set = 1, binding = 7)] brdf_sampler: &Sampler,
 
-    slab: &[u32],
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] slab: &[u32],
 
-    in_camera: u32,
-    in_material: u32,
+    #[spirv(flat)] in_camera: u32,
+    #[spirv(flat)] in_material: u32,
     in_color: Vec4,
     in_uv0: Vec2,
     in_uv1: Vec2,

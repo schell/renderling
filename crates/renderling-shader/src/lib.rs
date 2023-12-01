@@ -4,10 +4,10 @@
 
 use core::ops::Mul;
 
-use glam::{Vec4Swizzles, Vec3, Quat};
-use spirv_std::num_traits::Zero;
+use glam::{Quat, Vec3, Vec4Swizzles};
 #[cfg(target_arch = "spirv")]
 use spirv_std::num_traits::Float;
+use spirv_std::num_traits::Zero;
 
 pub mod array;
 pub mod bits;
@@ -16,10 +16,11 @@ pub mod debug;
 pub mod id;
 pub mod math;
 pub mod pbr;
-pub mod stage;
 pub mod skybox;
 pub mod slab;
+pub mod stage;
 pub mod tonemapping;
+pub mod tutorial;
 pub mod ui;
 
 /// Additional methods for vector types.
@@ -138,11 +139,7 @@ impl IsMatrix for glam::Mat4 {
             return srt_id();
         }
 
-        let det_sign = if det >= 0.0 {
-            1.0
-        } else {
-            -1.0
-        };
+        let det_sign = if det >= 0.0 { 1.0 } else { -1.0 };
 
         let scale = glam::Vec3::new(
             self.x_axis.length() * det_sign,

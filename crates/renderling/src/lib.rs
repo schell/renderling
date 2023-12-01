@@ -53,13 +53,14 @@ pub mod math;
 pub mod mesh;
 mod renderer;
 mod scene;
-mod slab;
 mod skybox;
+mod slab;
 mod stage;
 mod state;
 #[cfg(feature = "text")]
 mod text;
 mod texture;
+mod tutorial;
 mod ui;
 mod uniform;
 
@@ -69,8 +70,8 @@ pub use camera::*;
 pub use hdr::*;
 pub use renderer::*;
 pub use scene::*;
-pub use slab::*;
 pub use skybox::*;
+pub use slab::*;
 pub use stage::*;
 pub use state::*;
 #[cfg(feature = "text")]
@@ -96,6 +97,10 @@ pub mod graph {
 
 pub use graph::{graph, Graph, GraphError, Move, View, ViewMut};
 pub use renderling_shader::id::{Id, ID_NONE};
+pub mod shader {
+    //! Re-exports of [`renderling_shader`].
+    pub use renderling_shader::*;
+}
 
 /// Set up the render graph, including:
 /// * 3d scene objects
@@ -173,7 +178,7 @@ pub fn setup_render_graph(
             scene_render
                 < skybox_render
                 < bloom_filter
-                < scene_tonemapping
+                < tonemapping
                 < clear_depth
                 < ui_scene_render
         ))
@@ -181,7 +186,7 @@ pub fn setup_render_graph(
 
     // post-render subgraph
     r.graph.add_subgraph(if with_screen_capture {
-        let copy_frame_to_post = crate::frame::PostRenderBufferCreate::create;
+        use crate::frame::copy_frame_to_post;
         graph!(copy_frame_to_post < present)
     } else {
         graph!(present)
