@@ -69,11 +69,11 @@ impl<T> Default for Id<T> {
     }
 }
 
-#[cfg(not(target_arch = "spirv"))]
-impl<T> std::fmt::Debug for Id<T> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_tuple(&format!("Id<{}>", std::any::type_name::<T>()))
-            .field(&self.0)
+impl<T> core::fmt::Debug for Id<T> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("Id")
+            .field("type", &core::any::type_name::<T>())
+            .field("index", &self.0)
             .finish()
     }
 }
@@ -120,6 +120,11 @@ impl<T> Id<T> {
     /// Convert this id into a usize for use as an index.
     pub fn index(&self) -> usize {
         self.0 as usize
+    }
+
+    /// The raw u32 value of this id.
+    pub fn inner(&self) -> u32 {
+        self.0
     }
 
     pub fn is_none(&self) -> bool {

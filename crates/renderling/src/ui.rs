@@ -568,14 +568,13 @@ pub fn setup_ui_render_graph(
     r.graph.add_resource(pipeline);
 
     use crate::{
-        frame::{clear_frame_and_depth, create_frame, present},
+        frame::{clear_frame_and_depth, copy_frame_to_post, create_frame, present},
         graph, Graph,
     };
     let pre_render =
         crate::graph!(create_frame, clear_frame_and_depth, ui_scene_update).with_barrier();
     let render = crate::graph!(ui_scene_render).with_barrier();
     let post_render = if with_screen_capture {
-        let copy_frame_to_post = crate::frame::PostRenderBufferCreate::create;
         crate::graph!(copy_frame_to_post < present)
     } else {
         crate::graph!(present)

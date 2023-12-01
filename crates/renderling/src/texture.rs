@@ -470,7 +470,7 @@ impl Texture {
     /// color/alpha channels and the number of bytes in the underlying
     /// subpixel type (usually u8=1, u16=2 or f32=4).
     pub fn read(
-        &self,
+        texture: &wgpu::Texture,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         width: usize,
@@ -478,7 +478,8 @@ impl Texture {
         channels: usize,
         subpixel_bytes: usize,
     ) -> CopiedTextureBuffer {
-        self.read_from(
+        Self::read_from(
+            texture,
             device,
             queue,
             width,
@@ -496,7 +497,7 @@ impl Texture {
     /// color/alpha channels and the number of bytes in the underlying
     /// subpixel type (usually u8=1, u16=2 or f32=4).
     pub fn read_from(
-        &self,
+        texture: &wgpu::Texture,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         width: usize,
@@ -517,7 +518,7 @@ impl Texture {
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("post render screen capture encoder"),
         });
-        let mut source = self.texture.as_image_copy();
+        let mut source = texture.as_image_copy();
         source.mip_level = mip_level;
         if let Some(origin) = origin {
             source.origin = origin;
@@ -544,7 +545,7 @@ impl Texture {
         CopiedTextureBuffer {
             dimensions,
             buffer,
-            format: self.texture.format(),
+            format: texture.format(),
         }
     }
 
@@ -876,7 +877,8 @@ mod test {
             let mip_width = width >> mip_level;
             let mip_height = height >> mip_level;
             // save out the mips
-            let copied_buffer = mip.read_from(
+            let copied_buffer = crate::Texture::read_from(
+                &mip.texture,
                 r.get_device(),
                 r.get_queue(),
                 mip_width as usize,

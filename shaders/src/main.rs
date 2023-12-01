@@ -11,7 +11,7 @@ struct Cli {
     verbosity: u8,
 
     /// Path to the output directory for the compiled shaders.
-    #[clap(long, short, default_value = "shaders")]
+    #[clap(long, short, default_value = "../crates/renderling/src/linkage")]
     output_dir: std::path::PathBuf,
 }
 
