@@ -1,8 +1,8 @@
 //! Light builders.
 
+use crate::Id;
 use glam::{Vec3, Vec4};
 use renderling_shader::stage::{GpuLight, LightType};
-use crate::Id;
 
 #[cfg(feature = "gltf")]
 pub fn from_gltf_light_kind(kind: gltf::khr_lights_punctual::Kind) -> LightType {

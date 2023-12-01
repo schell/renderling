@@ -121,6 +121,15 @@ impl From<image::DynamicImage> for SceneImage {
     }
 }
 
+impl TryFrom<std::path::PathBuf> for SceneImage {
+    type Error = SceneImageError;
+
+    fn try_from(value: std::path::PathBuf) -> Result<Self, Self::Error> {
+        let img = image::open(value).context(ImageSnafu)?;
+        Ok(img.into())
+    }
+}
+
 impl SceneImage {
     pub fn from_hdr_path(p: impl AsRef<std::path::Path>) -> Result<Self, SceneImageError> {
         let bytes = std::fs::read(p.as_ref()).with_context(|_| CannotLoadSnafu {
@@ -154,6 +163,10 @@ impl SceneImage {
             format: SceneImageFormat::R32G32B32A32FLOAT,
             apply_linear_transfer: false,
         })
+    }
+
+    pub fn from_path(p: impl AsRef<std::path::Path>) -> Result<Self, SceneImageError> {
+        Self::try_from(p.as_ref().to_path_buf())
     }
 
     pub fn into_rgba8(self) -> Option<image::RgbaImage> {

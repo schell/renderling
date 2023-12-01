@@ -128,14 +128,12 @@ pub fn derive_from_slab(input: proc_macro::TokenStream) -> proc_macro::TokenStre
             FieldName::Index(i) => Ident::new(&format!("offset_of_{}", i.index), i.span),
             FieldName::Ident(field) => Ident::new(&format!("offset_of_{}", field), field.span()),
         };
-        offsets.push(
-            quote!{
-                pub fn #ident() -> usize {
-                    #(<#offset_tys as renderling_shader::slab::Slabbed>::slab_size()+)*
-                    0
-                }
+        offsets.push(quote! {
+            pub fn #ident() -> usize {
+                #(<#offset_tys as renderling_shader::slab::Slabbed>::slab_size()+)*
+                0
             }
-        );
+        });
         offset_tys.push(ty.clone());
     }
 

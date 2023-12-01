@@ -17,9 +17,12 @@ use glam::{Vec2, Vec3, Vec4, Vec4Swizzles};
 
 use crate::{
     self as renderling_shader,
+    array::Array,
+    id::Id,
     math,
+    slab::Slab,
     stage::{GpuLight, GpuTexture, LightType, LightingModel},
-    id::Id, IsVector, array::Array, slab::Slab,
+    IsVector,
 };
 
 /// Represents a material on the GPU.

@@ -5,14 +5,25 @@ use crate::id::Id;
 use crate::slab::Slabbed;
 
 #[repr(C)]
-#[derive(Clone, Copy)]
-pub struct Array<T: Slabbed> {
+pub struct Array<T> {
     index: u32,
     len: u32,
     _phantom: PhantomData<T>,
 }
 
-impl<T: Slabbed> core::fmt::Debug for Array<T> {
+impl<T> Clone for Array<T> {
+    fn clone(&self) -> Self {
+        Self {
+            index: self.index,
+            len: self.len,
+            _phantom: PhantomData,
+        }
+    }
+}
+
+impl<T> Copy for Array<T> {}
+
+impl<T> core::fmt::Debug for Array<T> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("Array")
             .field("index", &self.index)
@@ -22,7 +33,7 @@ impl<T: Slabbed> core::fmt::Debug for Array<T> {
     }
 }
 
-impl<T: Slabbed> PartialEq for Array<T> {
+impl<T> PartialEq for Array<T> {
     fn eq(&self, other: &Self) -> bool {
         self.index == other.index && self.len == other.len
     }
@@ -91,5 +102,9 @@ impl<T: Slabbed> Array<T> {
         } else {
             Id::new(self.index + (T::slab_size() * index) as u32)
         }
+    }
+
+    pub fn starting_index(&self) -> usize {
+        self.index as usize
     }
 }

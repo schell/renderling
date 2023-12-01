@@ -1,7 +1,7 @@
 //! Main entry point for the gltf viewer.
-use renderling::Renderling;
 use clap::Parser;
 use example::gltf;
+use renderling::Renderling;
 
 #[derive(Parser)]
 #[command(author, version, about)]
@@ -12,7 +12,7 @@ struct Cli {
 
     /// Optional HDR image to use as skybox at startup
     #[arg(short, long)]
-    skybox: Option<String>
+    skybox: Option<String>,
 }
 
 fn run() -> Result<(), anyhow::Error> {
@@ -38,7 +38,9 @@ fn run() -> Result<(), anyhow::Error> {
     // Set up a new renderling
     let mut r = Renderling::try_from_window(&window).unwrap();
     let mut run_current_frame: Box<dyn FnMut(&mut Renderling, Option<&winit::event::WindowEvent>)> =
-        Box::new(futures_lite::future::block_on(gltf::demo(&mut r, cli.model, cli.skybox)));
+        Box::new(futures_lite::future::block_on(gltf::demo(
+            &mut r, cli.model, cli.skybox,
+        )));
     event_loop.run(move |event, _target, control_flow| {
         *control_flow = winit::event_loop::ControlFlow::Poll;
 

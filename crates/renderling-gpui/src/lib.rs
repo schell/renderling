@@ -3,10 +3,10 @@ use snafu::prelude::*;
 use std::sync::Arc;
 
 use renderling::frame::FrameTextureView;
-use renderling::{Device, View, RenderTarget};
+use renderling::{Device, RenderTarget, View};
 use renderling::{
     FontArc, Frame, GlyphCache, Id, OwnedSection, OwnedText, Queue, Renderling, UiDrawObject,
-    UiDrawObjectBuilder, UiMode, UiScene, UiVertex, WgpuStateError, ViewMut,
+    UiDrawObjectBuilder, UiMode, UiScene, UiVertex, ViewMut, WgpuStateError,
 };
 use renderling::{UiRenderPipeline, UiSceneError};
 
@@ -330,8 +330,12 @@ impl Gpui {
             Ok(())
         }
 
-        use renderling::{Graph, graph, frame::{create_frame, clear_frame_and_depth}};
-        r.graph.add_subgraph(graph!(create_frame, clear_frame_and_depth, update_scene));
+        use renderling::{
+            frame::{clear_frame_and_depth, create_frame},
+            graph, Graph,
+        };
+        r.graph
+            .add_subgraph(graph!(create_frame, clear_frame_and_depth, update_scene));
         r.graph.add_barrier();
         r.graph.add_local::<RenderParams, ()>("render");
         Self(r)

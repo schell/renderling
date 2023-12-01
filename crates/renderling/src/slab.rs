@@ -4,21 +4,46 @@ use std::{
     sync::{atomic::AtomicUsize, Arc, RwLock},
 };
 
-use renderling_shader::{
-    array::Array,
-    id::Id,
-    slab::{Slab, Slabbed},
-};
+use renderling_shader::{array::Array, id::Id};
 use snafu::{ResultExt, Snafu};
 
+pub use renderling_shader::slab::{Slab, Slabbed};
+
 #[derive(Debug, Snafu)]
-pub enum SlabError<T: Slabbed> {
+pub enum SlabError {
     #[snafu(display(
-        "Out of capacity. Tried to write {}(slab size={}) \
-         at {} but capacity is {capacity}",
-        std::any::type_name::<T>(), T::slab_size(), id.index()
+        "Out of capacity. Tried to write {type_is}(slab size={slab_size}) \
+         at {index} but capacity is {capacity}",
     ))]
-    Capacity { id: Id<T>, capacity: usize },
+    Capacity {
+        type_is: &'static str,
+        slab_size: usize,
+        index: usize,
+        capacity: usize,
+    },
+
+    #[snafu(display(
+        "Out of capacity. Tried to write an array of {elements} {type_is}\
+         (each of slab size={slab_size}) \
+         at {index} but capacity is {capacity}",
+    ))]
+    ArrayCapacity {
+        type_is: &'static str,
+        elements: usize,
+        slab_size: usize,
+        index: usize,
+        capacity: usize,
+    },
+
+    #[snafu(display(
+        "Array({type_is}) length mismatch. Tried to write {data_len} elements \
+         into array of length {array_len}",
+    ))]
+    ArrayLen {
+        type_is: &'static str,
+        array_len: usize,
+        data_len: usize,
+    },
 
     #[snafu(display("Async recv error: {source}"))]
     AsyncRecv { source: async_channel::RecvError },
@@ -82,6 +107,64 @@ impl SlabBuffer {
         self.capacity.load(std::sync::atomic::Ordering::Relaxed)
     }
 
+    fn maybe_expand_to_fit<T: Slabbed>(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        len: usize,
+    ) {
+        let size = T::slab_size();
+        let capacity = self.capacity();
+        //log::trace!(
+        //    "append_slice: {size} * {ts_len} + {len} ({}) >= {capacity}",
+        //    size * ts_len + len
+        //);
+        let capacity_needed = self.len() + size * len;
+        if capacity_needed > capacity {
+            let mut new_capacity = capacity * 2;
+            while new_capacity < capacity_needed {
+                new_capacity *= 2;
+            }
+            self.resize(device, queue, new_capacity);
+        }
+    }
+
+    /// Preallocate space for one `T` element, but don't write anything to the buffer.
+    ///
+    /// This can be used to write later with [`Self::write`].
+    ///
+    /// NOTE: This changes the next available buffer index and may change the buffer capacity.
+    pub fn allocate<T: Slabbed>(&self, device: &wgpu::Device, queue: &wgpu::Queue) -> Id<T> {
+        self.maybe_expand_to_fit::<T>(device, queue, 1);
+        let index = self
+            .len
+            .fetch_add(T::slab_size(), std::sync::atomic::Ordering::Relaxed);
+        Id::from(index)
+    }
+
+    /// Preallocate space for `len` `T` elements, but don't write to
+    /// the buffer.
+    ///
+    /// This can be used to allocate space for a bunch of elements that get written
+    /// later with [`Self::write_array`].
+    ///
+    /// NOTE: This changes the length of the buffer and may change the capacity.
+    pub fn allocate_array<T: Slabbed>(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        len: usize,
+    ) -> Array<T> {
+        if len == 0 {
+            return Array::default();
+        }
+        self.maybe_expand_to_fit::<T>(device, queue, len);
+        let index = self
+            .len
+            .fetch_add(T::slab_size() * len, std::sync::atomic::Ordering::Relaxed);
+        Array::new(index as u32, len as u32)
+    }
+
     /// Write into the slab buffer, modifying in place.
     ///
     /// NOTE: This has no effect on the length of the buffer.
@@ -91,7 +174,7 @@ impl SlabBuffer {
         queue: &wgpu::Queue,
         id: Id<T>,
         data: &T,
-    ) -> Result<(), SlabError<T>> {
+    ) -> Result<(), SlabError> {
         let byte_offset = id.index() * std::mem::size_of::<u32>();
         let size = T::slab_size();
         let mut bytes = vec![0u32; size];
@@ -99,7 +182,12 @@ impl SlabBuffer {
         let capacity = self.capacity();
         snafu::ensure!(
             id.index() + size <= capacity,
-            CapacitySnafu { id, capacity }
+            CapacitySnafu {
+                type_is: std::any::type_name::<T>(),
+                slab_size: T::slab_size(),
+                index: id.index(),
+                capacity
+            }
         );
         let encoder =
             device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
@@ -113,21 +201,69 @@ impl SlabBuffer {
         Ok(())
     }
 
+    /// Write elements into the slab buffer, modifying in place.
+    ///
+    /// NOTE: This has no effect on the length of the buffer.
+    ///
+    /// ## Errors
+    /// Errors if the capacity is exceeded.
+    pub fn write_array<T: Slabbed + Default>(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        array: Array<T>,
+        data: &[T],
+    ) -> Result<(), SlabError> {
+        snafu::ensure!(
+            array.len() == data.len(),
+            ArrayLenSnafu {
+                type_is: std::any::type_name::<T>(),
+                array_len: array.len(),
+                data_len: data.len()
+            }
+        );
+        let capacity = self.capacity();
+        let size = T::slab_size() * array.len();
+        snafu::ensure!(
+            array.starting_index() + size <= capacity,
+            ArrayCapacitySnafu {
+                capacity,
+                type_is: std::any::type_name::<T>(),
+                elements: array.len(),
+                slab_size: T::slab_size(),
+                index: array.at(0).index()
+            }
+        );
+        let encoder =
+            device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        let mut u32_data = vec![0u32; size];
+        let _ = u32_data.write_slice(data, 0);
+        let byte_offset = array.starting_index() * std::mem::size_of::<u32>();
+        queue.write_buffer(
+            // UNWRAP: if we can't lock we want to panic
+            &self.buffer.read().unwrap(),
+            byte_offset as u64,
+            bytemuck::cast_slice(&u32_data),
+        );
+        queue.submit(std::iter::once(encoder.finish()));
+        Ok(())
+    }
+
     /// Read from the slab buffer.
     ///
     /// `T` is only for the error message.
-    pub async fn read_raw<T: Slabbed + Default + std::fmt::Debug>(
+    pub async fn read_raw(
         &self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         start: usize,
         len: usize,
-    ) -> Result<Vec<u32>, SlabError<T>> {
+    ) -> Result<Vec<u32>, SlabError> {
         let byte_offset = start * std::mem::size_of::<u32>();
         let length = len * std::mem::size_of::<u32>();
         let output_buffer_size = length as u64;
         let output_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some(&format!("SlabBuffer::read<{}>", std::any::type_name::<T>())),
+            label: Some("SlabBuffer::read_raw"),
             size: output_buffer_size,
             usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
             mapped_at_creation: false,
@@ -167,7 +303,7 @@ impl SlabBuffer {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         id: Id<T>,
-    ) -> Result<T, SlabError<T>> {
+    ) -> Result<T, SlabError> {
         let vec = self
             .read_raw(device, queue, id.index(), T::slab_size())
             .await?;
@@ -176,63 +312,30 @@ impl SlabBuffer {
     }
 
     /// Append to the end of the buffer.
-    pub fn append<T: Slabbed + Default + std::fmt::Debug>(
+    pub fn append<T: Slabbed + Default>(
         &self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         t: &T,
     ) -> Id<T> {
-        let len = self.len();
-        let capacity = self.capacity();
-        if T::slab_size() + len > capacity {
-            self.resize(device, queue, capacity * 2);
-        }
-        let id = Id::<T>::from(len);
-        // UNWRAP: We just checked that there is enough capacity, and added some if not.
-        self.write(device, queue, id, t).unwrap();
-        self.len
-            .store(len + T::slab_size(), std::sync::atomic::Ordering::Relaxed);
+        let id = self.allocate::<T>(device, queue);
+        // IGNORED: safe because we just allocated the id
+        let _ = self.write(device, queue, id, t);
         id
     }
 
-    /// Append a slice to the end of the buffer, returning a slab array.
-    pub fn append_slice<T: Slabbed + Default + std::fmt::Debug>(
+    /// Append a slice to the end of the buffer, resizing if necessary
+    /// and returning a slabbed array.
+    pub fn append_array<T: Slabbed + Default>(
         &self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         ts: &[T],
     ) -> Array<T> {
-        let ts_len = ts.len();
-        let size = T::slab_size();
-        let capacity = self.capacity();
-        let len = self.len();
-        //log::trace!(
-        //    "append_slice: {size} * {ts_len} + {len} ({}) >= {capacity}",
-        //    size * ts_len + len
-        //);
-        let capacity_needed = size * ts_len + len;
-        if capacity_needed >= capacity {
-            let mut new_capacity = capacity * 2;
-            while new_capacity < capacity_needed {
-                new_capacity *= 2;
-            }
-            self.resize(device, queue, new_capacity);
-        }
-        let starting_index = len as u32;
-        for (i, t) in ts.iter().enumerate() {
-            // UNWRAP: Safe because we just checked that there is enough capacity,
-            // and added some if not.
-            self.write(
-                device,
-                queue,
-                Id::<T>::from(starting_index + (size * i) as u32),
-                t,
-            )
-            .unwrap();
-        }
-        self.len
-            .store(len + size * ts_len, std::sync::atomic::Ordering::Relaxed);
-        Array::new(starting_index, ts_len as u32)
+        let array = self.allocate_array::<T>(device, queue, ts.len());
+        // IGNORED: safe because we just allocated the array
+        let _ = self.write_array(device, queue, array, ts);
+        array
     }
 
     /// Resize the slab buffer.
@@ -309,19 +412,17 @@ mod test {
         let b = glam::Vec3::new(1.0, 1.0, 1.0);
         let c = glam::Vec3::new(2.0, 2.0, 2.0);
         let points = vec![a, b, c];
-        let array = slab.append_slice(device, queue, &points);
+        let array = slab.append_array(device, queue, &points);
         let slab_u32 =
-            futures_lite::future::block_on(slab.read_raw::<u32>(device, queue, 0, slab.len()))
-                .unwrap();
+            futures_lite::future::block_on(slab.read_raw(device, queue, 0, slab.len())).unwrap();
         let points_out = slab_u32.read_vec::<glam::Vec3>(array);
         assert_eq!(points, points_out);
 
         println!("append slice 2");
         let points = vec![a, a, a, a, b, b, b, c, c];
-        let array = slab.append_slice(device, queue, &points);
+        let array = slab.append_array(device, queue, &points);
         let slab_u32 =
-            futures_lite::future::block_on(slab.read_raw::<u32>(device, queue, 0, slab.len()))
-                .unwrap();
+            futures_lite::future::block_on(slab.read_raw(device, queue, 0, slab.len())).unwrap();
         let points_out = slab_u32.read_vec::<glam::Vec3>(array);
         assert_eq!(points, points_out);
     }
