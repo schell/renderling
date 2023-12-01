@@ -382,7 +382,7 @@ mod test {
     fn slab_buffer_roundtrip() {
         println!("write");
         let _ = env_logger::builder().is_test(true).try_init();
-        let r = Renderling::headless(10, 10).unwrap();
+        let r = Renderling::headless(10, 10);
         let device = r.get_device();
         let queue = r.get_queue();
         let slab = SlabBuffer::new(device, 2);

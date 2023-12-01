@@ -267,7 +267,7 @@ pub struct Gpui(pub Renderling);
 impl Gpui {
     /// Create a new UI renderer.
     pub fn new(width: u32, height: u32) -> Self {
-        let r = Renderling::headless(width, height).unwrap();
+        let r = Renderling::headless(width, height);
         Self::new_from(&r)
     }
 

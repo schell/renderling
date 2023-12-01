@@ -22,11 +22,9 @@ use crate::{
     id::{Id, ID_NONE},
     pbr::{self, PbrMaterial},
     slab::{Slab, Slabbed},
+    texture::GpuTexture,
     IsMatrix, IsVector,
 };
-
-mod texture;
-pub use texture::*;
 
 /// A vertex in a mesh.
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]

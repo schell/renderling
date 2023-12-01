@@ -17,7 +17,7 @@ mod test {
 
     #[test]
     fn implicit_isosceles_triangle() {
-        let mut r = Renderling::headless(100, 100).unwrap();
+        let mut r = Renderling::headless(100, 100);
         let (device, _queue) = r.get_device_and_queue_owned();
         let label = Some("implicit isosceles triangle");
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -120,7 +120,7 @@ mod test {
 
     #[test]
     fn slabbed_isosceles_triangle_no_instance() {
-        let mut r = Renderling::headless(100, 100).unwrap();
+        let mut r = Renderling::headless(100, 100);
         let (device, queue) = r.get_device_and_queue_owned();
 
         // Create our geometry on the slab.
@@ -292,7 +292,7 @@ mod test {
 
     #[test]
     fn slabbed_isosceles_triangle() {
-        let mut r = Renderling::headless(100, 100).unwrap();
+        let mut r = Renderling::headless(100, 100);
         let (device, queue) = r.get_device_and_queue_owned();
 
         // Create our geometry on the slab.
@@ -481,7 +481,7 @@ mod test {
 
     #[test]
     fn slabbed_render_unit() {
-        let mut r = Renderling::headless(100, 100).unwrap();
+        let mut r = Renderling::headless(100, 100);
         let (device, queue) = r.get_device_and_queue_owned();
 
         // Create our geometry on the slab.
@@ -674,7 +674,7 @@ mod test {
 
     #[test]
     fn slabbed_render_unit_camera() {
-        let mut r = Renderling::headless(100, 100).unwrap();
+        let mut r = Renderling::headless(100, 100);
         let (device, queue) = r.get_device_and_queue_owned();
 
         // Create our geometry on the slab.

@@ -21,9 +21,6 @@ pub trait Slabbed: core::any::Any + Sized {
     ///
     /// If the type cannot be read, the returned index will be equal
     /// to `index`.
-    // TODO: recondsider the mutability of `self` here.
-    // We could make this a `&self` and that might help with using it
-    // from multiple threads.
     fn read_slab(&mut self, index: usize, slab: &[u32]) -> usize;
 
     /// Write the type into the slab at starting `index` and return

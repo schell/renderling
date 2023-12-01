@@ -6,7 +6,7 @@ use moongraph::{Move, View, ViewMut};
 use renderling_shader::debug::DebugChannel;
 use snafu::prelude::*;
 
-pub use renderling_shader::{pbr::PbrMaterial, stage::*};
+pub use renderling_shader::{pbr::PbrMaterial, stage::*, texture::*};
 
 use crate::{
     bloom::BloomResult, frame::FrameTextureView, hdr::HdrSurface, Atlas, BufferArray, DepthTexture,
@@ -495,7 +495,6 @@ impl Scene {
             }],
         });
 
-        // TODO: rename this or regroup the bindgroups
         let render_buffers_bindgroup = create_scene_buffers_bindgroup(
             &device,
             &constants,

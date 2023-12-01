@@ -20,6 +20,7 @@ pub mod pbr;
 pub mod skybox;
 pub mod slab;
 pub mod stage;
+pub mod texture;
 pub mod tonemapping;
 pub mod tutorial;
 pub mod ui;

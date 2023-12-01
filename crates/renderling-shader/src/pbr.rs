@@ -21,7 +21,8 @@ use crate::{
     id::Id,
     math,
     slab::Slab,
-    stage::{GpuLight, GpuTexture, LightType, LightingModel},
+    stage::{GpuLight, LightType, LightingModel},
+    texture::GpuTexture,
     IsVector,
 };
 
