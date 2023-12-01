@@ -1,6 +1,4 @@
 //! GPU textures.
-//!
-// TODO: move this (stage/texture.rs) to lib/texture.rs
 use glam::{UVec2, Vec2};
 use renderling_derive::Slabbed;
 

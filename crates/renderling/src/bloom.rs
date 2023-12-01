@@ -358,9 +358,8 @@ mod test {
 
     #[test]
     fn bloom_on_off() {
-        let mut renderling = Renderling::headless(100, 100)
-            .unwrap()
-            .with_background_color(glam::Vec4::splat(1.0));
+        let mut renderling =
+            Renderling::headless(100, 100).with_background_color(glam::Vec4::splat(1.0));
         let mut builder = renderling.new_scene();
         let loader = builder
             .gltf_load("../../gltf/EmissiveStrengthTest.glb")

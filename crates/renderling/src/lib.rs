@@ -253,9 +253,7 @@ mod test {
     }
 
     fn cmy_triangle_setup() -> CmyTri {
-        let mut r = Renderling::headless(100, 100)
-            .unwrap()
-            .with_background_color(Vec4::splat(1.0));
+        let mut r = Renderling::headless(100, 100).with_background_color(Vec4::splat(1.0));
         let (projection, view) = default_ortho2d(100.0, 100.0);
         let mut builder = r.new_scene().with_camera(projection, view);
         let tri = builder
@@ -349,9 +347,7 @@ mod test {
 
     #[test]
     fn cmy_cube_sanity() {
-        let mut r = Renderling::headless(100, 100)
-            .unwrap()
-            .with_background_color(Vec4::splat(1.0));
+        let mut r = Renderling::headless(100, 100).with_background_color(Vec4::splat(1.0));
         let mut builder = r.new_scene().with_camera(
             Mat4::perspective_rh(std::f32::consts::PI / 4.0, 1.0, 0.1, 100.0),
             Mat4::look_at_rh(Vec3::new(0.0, 12.0, 20.0), Vec3::ZERO, Vec3::Y),
@@ -377,9 +373,7 @@ mod test {
 
     #[test]
     fn cmy_cube_visible() {
-        let mut r = Renderling::headless(100, 100)
-            .unwrap()
-            .with_background_color(Vec4::splat(1.0));
+        let mut r = Renderling::headless(100, 100).with_background_color(Vec4::splat(1.0));
 
         let (projection, view) = camera::default_perspective(100.0, 100.0);
         let mut builder = r.new_scene().with_camera(projection, view);
@@ -440,9 +434,7 @@ mod test {
 
     #[test]
     fn cmy_cube_remesh() {
-        let mut r = Renderling::headless(100, 100)
-            .unwrap()
-            .with_background_color(Vec4::splat(1.0));
+        let mut r = Renderling::headless(100, 100).with_background_color(Vec4::splat(1.0));
         let (projection, view) = camera::default_perspective(100.0, 100.0);
         let mut builder = r
             .new_scene()
@@ -533,9 +525,7 @@ mod test {
     // tests that updating the material actually updates the rendering of an unlit
     // mesh
     fn unlit_textured_cube_material() {
-        let mut r = Renderling::headless(100, 100)
-            .unwrap()
-            .with_background_color(Vec4::splat(0.0));
+        let mut r = Renderling::headless(100, 100).with_background_color(Vec4::splat(0.0));
         let (proj, view) = camera::default_perspective(100.0, 100.0);
         let mut builder = r.new_scene().with_camera(proj, view);
         let sandstone = SceneImage::from(image::open("../../img/sandstone.png").unwrap());
@@ -589,7 +579,8 @@ mod test {
                 100,
                 100,
                 None as Option<CreateSurfaceFn>,
-            ));
+            ))
+            .unwrap();
 
         let points = vec![
             Vec4::new(0.0, 0.0, 0.0, 0.0),
@@ -632,9 +623,8 @@ mod test {
 
     #[test]
     fn gpu_scene_sanity1() {
-        let mut r = Renderling::headless(100, 100)
-            .unwrap()
-            .with_background_color(Vec3::splat(0.0).extend(1.0));
+        let mut r =
+            Renderling::headless(100, 100).with_background_color(Vec3::splat(0.0).extend(1.0));
         let mut builder = r.new_scene();
 
         let verts = vec![
@@ -730,9 +720,8 @@ mod test {
 
     #[test]
     fn gpu_scene_sanity2() {
-        let mut r = Renderling::headless(100, 100)
-            .unwrap()
-            .with_background_color(Vec3::splat(0.0).extend(1.0));
+        let mut r =
+            Renderling::headless(100, 100).with_background_color(Vec3::splat(0.0).extend(1.0));
         let (projection, view) = camera::default_ortho2d(100.0, 100.0);
         let mut builder = r.new_scene().with_camera(projection, view);
         // now test the textures functionality
@@ -865,9 +854,8 @@ mod test {
 
     #[test]
     fn atlas_uv_mapping() {
-        let mut r = Renderling::headless(32, 32)
-            .unwrap()
-            .with_background_color(Vec3::splat(0.0).extend(1.0));
+        let mut r =
+            Renderling::headless(32, 32).with_background_color(Vec3::splat(0.0).extend(1.0));
         let (projection, view) = camera::default_ortho2d(32.0, 32.0);
         let mut builder = r.new_scene().with_camera(projection, view);
         let dirt = image::open("../../img/dirt.jpg").unwrap();
@@ -938,9 +926,7 @@ mod test {
         let sheet_h = icon_h * 3;
         let w = sheet_w * 3 + 2;
         let h = sheet_h;
-        let mut r = Renderling::headless(w, h)
-            .unwrap()
-            .with_background_color(Vec4::new(1.0, 1.0, 0.0, 1.0));
+        let mut r = Renderling::headless(w, h).with_background_color(Vec4::new(1.0, 1.0, 0.0, 1.0));
         let (projection, view) = camera::default_ortho2d(w as f32, h as f32);
         let mut builder = r.new_scene().with_camera(projection, view);
         let dirt = image::open("../../img/dirt.jpg").unwrap();
@@ -1037,9 +1023,7 @@ mod test {
         let sheet_h = icon_h * 3;
         let w = sheet_w * 3 + 2;
         let h = sheet_h;
-        let mut r = Renderling::headless(w, h)
-            .unwrap()
-            .with_background_color(Vec4::new(1.0, 1.0, 0.0, 1.0));
+        let mut r = Renderling::headless(w, h).with_background_color(Vec4::new(1.0, 1.0, 0.0, 1.0));
         let (projection, view) = camera::default_ortho2d(w as f32, h as f32);
         let mut builder = r.new_scene().with_camera(projection, view);
         let dirt = image::open("../../img/dirt.jpg").unwrap();
@@ -1151,9 +1135,8 @@ mod test {
     #[test]
     /// Ensures that the directional light coloring works.
     fn scene_cube_directional() {
-        let mut r = Renderling::headless(100, 100)
-            .unwrap()
-            .with_background_color(Vec3::splat(0.0).extend(1.0));
+        let mut r =
+            Renderling::headless(100, 100).with_background_color(Vec3::splat(0.0).extend(1.0));
 
         let mut builder = r.new_scene();
         let red = Vec3::X.extend(1.0);
@@ -1254,7 +1237,7 @@ mod test {
     #[test]
     // tests that nested children are transformed by their parent's transform
     fn scene_parent_sanity() {
-        let mut r = Renderling::headless(100, 100).unwrap();
+        let mut r = Renderling::headless(100, 100);
         r.set_background_color(Vec4::splat(0.0));
         let (projection, view) = camera::default_ortho2d(100.0, 100.0);
         let mut builder = r.new_scene().with_camera(projection, view);
@@ -1421,9 +1404,8 @@ mod test {
     // see https://learnopengl.com/PBR/Lighting
     fn pbr_metallic_roughness_spheres() {
         let ss = 600;
-        let mut r = Renderling::headless(ss, ss)
-            .unwrap()
-            .with_background_color(Vec3::splat(0.0).extend(1.0));
+        let mut r =
+            Renderling::headless(ss, ss).with_background_color(Vec3::splat(0.0).extend(1.0));
 
         let radius = 0.5;
         let mut icosphere = icosahedron::Polyhedron::new_isocahedron(radius, 5);

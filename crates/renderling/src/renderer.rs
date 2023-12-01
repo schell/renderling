@@ -64,6 +64,12 @@ pub enum RenderlingError {
     State { source: WgpuStateError },
 }
 
+impl From<WgpuStateError> for RenderlingError {
+    fn from(source: WgpuStateError) -> Self {
+        Self::State { source }
+    }
+}
+
 /// A thread-safe, clonable wrapper around `wgpu::Device`.
 #[derive(Clone)]
 pub struct Device(pub Arc<wgpu::Device>);
@@ -180,7 +186,7 @@ impl Renderling {
             height,
             None as Option<CreateSurfaceFn>,
         )
-        .await;
+        .await?;
         let depth_texture = crate::Texture::create_depth_texture(&device, width, height);
         Ok(Self::new(
             target,
@@ -210,7 +216,7 @@ impl Renderling {
                     .map_err(|e| WgpuStateError::CreateSurface { source: e })
             }) as crate::CreateSurfaceFn),
         )
-        .await;
+        .await?;
         let depth_texture = crate::Texture::create_depth_texture(&device, width, height);
 
         Ok(Self::new(
@@ -251,9 +257,13 @@ impl Renderling {
         Self::try_from_raw_window_handle(window, inner_size.width, inner_size.height)
     }
 
-    // TODO: No reason for `headless` to return Result
-    pub fn headless(width: u32, height: u32) -> Result<Self, RenderlingError> {
-        futures_lite::future::block_on(Self::try_new_headless(width, height))
+    /// Create a new headless renderer.
+    ///
+    /// ## Panics
+    /// This function will panic if an adapter cannot be found. For example this would
+    /// happen on machines without a GPU.
+    pub fn headless(width: u32, height: u32) -> Self {
+        futures_lite::future::block_on(Self::try_new_headless(width, height)).unwrap()
     }
 
     pub fn set_background_color(&mut self, color: impl Into<Vec4>) {

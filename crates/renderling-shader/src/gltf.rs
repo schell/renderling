@@ -1,7 +1,7 @@
 //! Gltf types that are used in shaders.
 use crate::{
     self as renderling_shader, array::Array, id::Id, pbr::PbrMaterial, slab::Slabbed,
-    stage::GpuTexture,
+    texture::GpuTexture,
 };
 #[repr(transparent)]
 #[derive(Default, Clone, Copy, Slabbed)]

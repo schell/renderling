@@ -714,9 +714,7 @@ mod test {
 
     #[test]
     fn stage_new() {
-        let mut r = Renderling::headless(100, 100)
-            .unwrap()
-            .with_background_color(glam::Vec4::splat(1.0));
+        let mut r = Renderling::headless(100, 100).with_background_color(glam::Vec4::splat(1.0));
         let (device, queue) = r.get_device_and_queue_owned();
         let stage = Stage::new(device.clone(), queue.clone())
             .with_lighting(true)

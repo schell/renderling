@@ -504,7 +504,7 @@ mod test {
 
     #[test]
     fn can_merge_atlas() {
-        let r = Renderling::headless(100, 100).unwrap();
+        let r = Renderling::headless(100, 100);
         let (device, queue) = r.get_device_and_queue_owned();
         println!("{}", std::env::current_dir().unwrap().display());
         let cheetah = SceneImage::from_path("../../img/cheetah.jpg").unwrap();

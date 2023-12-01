@@ -5,7 +5,10 @@ use rustc_hash::FxHashMap;
 use snafu::prelude::*;
 
 use super::*;
-use crate::Id;
+use crate::{
+    shader::texture::{GpuTexture, TextureAddressMode},
+    Id,
+};
 
 mod anime;
 pub use anime::*;
@@ -1197,9 +1200,7 @@ mod test {
     // tests importing a gltf file and rendering the first image as a 2d object
     // ensures we are decoding images correctly
     fn images() {
-        let mut r = Renderling::headless(100, 100)
-            .unwrap()
-            .with_background_color(Vec4::splat(1.0));
+        let mut r = Renderling::headless(100, 100).with_background_color(Vec4::splat(1.0));
         let mut builder = r.new_scene();
         let _loader = builder.gltf_load("../../gltf/cheetah_cone.glb").unwrap();
         let (projection, view) = camera::default_ortho2d(100.0, 100.0);
@@ -1249,9 +1250,8 @@ mod test {
     #[test]
     // Ensures we can read a minimal gltf file with a simple triangle mesh.
     fn minimal_mesh() {
-        let mut r = Renderling::headless(20, 20)
-            .unwrap()
-            .with_background_color(Vec3::splat(0.0).extend(1.0));
+        let mut r =
+            Renderling::headless(20, 20).with_background_color(Vec3::splat(0.0).extend(1.0));
         let mut builder = r.new_scene();
         let _loader = builder
             .gltf_load("../../gltf/gltfTutorial_003_MinimalGltfFile.gltf")
@@ -1277,9 +1277,8 @@ mod test {
     // * support primitives w/ positions and normal attributes
     // * support transforming nodes (T * R * S)
     fn simple_meshes() {
-        let mut r = Renderling::headless(100, 50)
-            .unwrap()
-            .with_background_color(Vec3::splat(0.0).extend(1.0));
+        let mut r =
+            Renderling::headless(100, 50).with_background_color(Vec3::splat(0.0).extend(1.0));
         let mut builder = r.new_scene();
         let _loader = builder
             .gltf_load("../../gltf/gltfTutorial_008_SimpleMeshes.gltf")
@@ -1301,9 +1300,8 @@ mod test {
     #[test]
     fn simple_texture() {
         let size = 100;
-        let mut r = Renderling::headless(size, size)
-            .unwrap()
-            .with_background_color(Vec3::splat(0.0).extend(1.0));
+        let mut r =
+            Renderling::headless(size, size).with_background_color(Vec3::splat(0.0).extend(1.0));
         let mut builder = r.new_scene();
         let _loader = builder
             .gltf_load("../../gltf/gltfTutorial_013_SimpleTexture.gltf")
@@ -1333,9 +1331,8 @@ mod test {
     #[test]
     fn normal_mapping_brick_sphere() {
         let size = 600;
-        let mut r = Renderling::headless(size, size)
-            .unwrap()
-            .with_background_color(Vec3::splat(1.0).extend(1.0));
+        let mut r =
+            Renderling::headless(size, size).with_background_color(Vec3::splat(1.0).extend(1.0));
         let mut builder = r.new_scene();
         let loader = builder.gltf_load("../../gltf/red_brick_03_1k.glb").unwrap();
         let (projection, view) = loader.cameras.get(0).copied().unwrap();
@@ -1358,9 +1355,8 @@ mod test {
     // up a scene of multiple gltf documents.
     fn can_load_multiple_gltfs_into_one_builder() {
         let size = 600;
-        let mut r = Renderling::headless(size, size)
-            .unwrap()
-            .with_background_color(Vec3::splat(1.0).extend(1.0));
+        let mut r =
+            Renderling::headless(size, size).with_background_color(Vec3::splat(1.0).extend(1.0));
         let mut builder = r.new_scene();
         let brick_loader = builder.gltf_load("../../gltf/red_brick_03_1k.glb").unwrap();
         let (projection, view) = brick_loader.cameras.get(0).copied().unwrap();
@@ -1413,9 +1409,7 @@ mod test {
     #[cfg(feature = "gltf")]
     #[test]
     fn simple_animation() {
-        let mut r = Renderling::headless(50, 50)
-            .unwrap()
-            .with_background_color(Vec4::ONE);
+        let mut r = Renderling::headless(50, 50).with_background_color(Vec4::ONE);
 
         let projection = camera::perspective(50.0, 50.0);
         let view = camera::look_at(Vec3::Z * 3.0, Vec3::ZERO, Vec3::Y);
@@ -1484,9 +1478,8 @@ mod test {
         use crate::{Scene, TweenProperty, ViewMut};
 
         let size = 100;
-        let mut r = Renderling::headless(size, size)
-            .unwrap()
-            .with_background_color(Vec3::splat(0.0).extend(1.0));
+        let mut r =
+            Renderling::headless(size, size).with_background_color(Vec3::splat(0.0).extend(1.0));
         let projection = camera::perspective(50.0, 50.0);
         let view = camera::look_at(Vec3::Z * 4.0, Vec3::ZERO, Vec3::Y);
         let mut builder = r.new_scene().with_camera(projection, view);

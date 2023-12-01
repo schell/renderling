@@ -593,7 +593,7 @@ mod test {
 
     #[test]
     fn ui_tri() {
-        let mut r = Renderling::headless(50, 50).unwrap();
+        let mut r = Renderling::headless(50, 50);
         let builder = r.new_ui_scene().with_canvas_size(50, 50);
         let tri = builder
             .new_object()
@@ -619,9 +619,7 @@ mod test {
 
     #[test]
     fn ui_image() {
-        let mut r = Renderling::headless(100, 100)
-            .unwrap()
-            .with_background_color(Vec4::splat(0.0));
+        let mut r = Renderling::headless(100, 100).with_background_color(Vec4::splat(0.0));
         let builder = r.new_ui_scene().with_canvas_size(100, 100);
         let img = image::open("../../img/dirt.jpg").unwrap();
         let texture = builder.new_texture_from_dynamic_image(img);
@@ -658,9 +656,7 @@ mod test {
     #[test]
     fn ui_text() {
         use crate::{FontArc, GlyphCache, Section, Text};
-        let mut r = Renderling::headless(100, 50)
-            .unwrap()
-            .with_background_color(Vec4::splat(0.0));
+        let mut r = Renderling::headless(100, 50).with_background_color(Vec4::splat(0.0));
 
         let bytes: Vec<u8> =
             std::fs::read("../../fonts/Font Awesome 6 Free-Regular-400.otf").unwrap();

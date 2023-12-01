@@ -4,7 +4,8 @@ use crate::{
     shader::{
         gltf::*,
         pbr::PbrMaterial,
-        stage::{GpuTexture, LightingModel, TextureAddressMode, TextureModes},
+        stage::LightingModel,
+        texture::{GpuTexture, TextureAddressMode, TextureModes},
     },
     SceneImage,
 };
@@ -657,9 +658,8 @@ mod test {
     fn stage_normal_mapping_brick_sphere() {
         crate::init_logging();
         let size = 600;
-        let mut r = Renderling::headless(size, size)
-            .unwrap()
-            .with_background_color(Vec3::splat(1.0).extend(1.0));
+        let mut r =
+            Renderling::headless(size, size).with_background_color(Vec3::splat(1.0).extend(1.0));
         let (device, queue) = r.get_device_and_queue_owned();
         let stage = Stage::new(device, queue);
         stage.configure_graph(&mut r, true);

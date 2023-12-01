@@ -708,7 +708,7 @@ mod test {
 
     #[test]
     fn hdr_skybox_scene() {
-        let mut r = Renderling::headless(600, 400).unwrap();
+        let mut r = Renderling::headless(600, 400);
         let proj = crate::camera::perspective(600.0, 400.0);
         let view = crate::camera::look_at(Vec3::new(0.0, 0.0, 2.0), Vec3::ZERO, Vec3::Y);
         let mut builder = r.new_scene().with_camera(proj, view);
@@ -794,7 +794,7 @@ mod test {
     #[test]
     fn precomputed_brdf() {
         assert_eq!(2, std::mem::size_of::<u16>());
-        let r = Renderling::headless(32, 32).unwrap();
+        let r = Renderling::headless(32, 32);
         let (device, queue) = r.get_device_and_queue_owned();
         let brdf_lut = Skybox::create_precomputed_brdf_texture(&device, &queue);
         assert_eq!(wgpu::TextureFormat::Rg16Float, brdf_lut.texture.format());
