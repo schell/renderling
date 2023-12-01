@@ -226,7 +226,9 @@ impl Renderling {
     #[cfg(feature = "raw-window-handle")]
     pub async fn from_window_async(window: &winit::window::Window) -> Self {
         let inner_size = window.inner_size();
-        Self::try_from_raw_window(inner_size.width, inner_size.height, window).await.unwrap()
+        Self::try_from_raw_window(inner_size.width, inner_size.height, window)
+            .await
+            .unwrap()
     }
 
     #[cfg(all(feature = "raw-window-handle", not(target_arch = "wasm32")))]
@@ -239,7 +241,11 @@ impl Renderling {
         futures_lite::future::block_on(Self::try_from_raw_window(width, height, window_handle))
     }
 
-    #[cfg(all(feature = "winit", feature = "raw-window-handle", not(target_arch = "wasm32")))]
+    #[cfg(all(
+        feature = "winit",
+        feature = "raw-window-handle",
+        not(target_arch = "wasm32")
+    ))]
     pub fn try_from_window(window: &winit::window::Window) -> Result<Self, RenderlingError> {
         let inner_size = window.inner_size();
         Self::try_from_raw_window_handle(window, inner_size.width, inner_size.height)
@@ -412,11 +418,14 @@ impl Renderling {
     /// Sets up the render graph with the given scenes and objects.
     ///
     /// The scenes and objects may be "visited" later, or even retrieved.
-    pub fn setup_render_graph(
-        &mut self,
-        config: RenderGraphConfig,
-    ) {
-        let RenderGraphConfig { scene, ui, objs, with_screen_capture, with_bloom } = config;
+    pub fn setup_render_graph(&mut self, config: RenderGraphConfig) {
+        let RenderGraphConfig {
+            scene,
+            ui,
+            objs,
+            with_screen_capture,
+            with_bloom,
+        } = config;
         let scene = scene.unwrap_or_else(|| self.empty_scene());
         let ui = ui.unwrap_or_else(|| self.empty_ui_scene());
         crate::setup_render_graph(self, scene, ui, objs, with_screen_capture, with_bloom)

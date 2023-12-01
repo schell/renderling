@@ -242,11 +242,9 @@ pub async fn new_adapter_device_queue_and_target<'a>(
                         | wgpu::Features::MULTI_DRAW_INDIRECT
                         // this one is a funny requirement, it seems it is needed if using storage buffers in
                         // vertex shaders, even if those shaders are read-only
-                        | wgpu::Features::VERTEX_WRITABLE_STORAGE
-                        //| wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES
-                        //// when debugging rust-gpu shader miscompilation it's nice to have this
-                        //| wgpu::Features::SPIRV_SHADER_PASSTHROUGH
-                        ,
+                        | wgpu::Features::VERTEX_WRITABLE_STORAGE, //| wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES
+                                                                   //// when debugging rust-gpu shader miscompilation it's nice to have this
+                                                                   //| wgpu::Features::SPIRV_SHADER_PASSTHROUGH
                     limits: limits(&adapter),
                     label: None,
                 },
@@ -274,7 +272,7 @@ pub async fn new_adapter_device_queue_and_target<'a>(
                 .unwrap_or(surface_caps.formats[0])
         };
         let view_fmts = if fmt.is_srgb() {
-           vec![]
+            vec![]
         } else {
             vec![fmt.add_srgb_suffix()]
         };

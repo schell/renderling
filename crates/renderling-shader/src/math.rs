@@ -77,7 +77,7 @@ pub fn unit_cube() -> Vec<(Vec3, Vec3)> {
                 let n = triangle_face_normal(a, b, c);
                 [(a, n), (b, n), (c, n)]
             }
-            _ => unreachable!()
+            _ => unreachable!(),
         })
         .collect::<Vec<_>>()
 }
