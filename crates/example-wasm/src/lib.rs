@@ -15,7 +15,7 @@ pub async fn main() {
         .apply()
         .unwrap();
 
-        let event_loop = winit::event_loop::EventLoop::new();
+    let event_loop = winit::event_loop::EventLoop::new();
     let window_size = winit::dpi::LogicalSize {
         width: 800,
         height: 600,

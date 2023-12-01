@@ -9,7 +9,13 @@ use spirv_std::{
 #[cfg(target_arch = "spirv")]
 use spirv_std::num_traits::Float;
 
-use crate::{math, stage::GpuConstants, IsVector};
+use crate::{
+    id::Id,
+    math,
+    slab::Slab,
+    stage::{Camera, GpuConstants},
+    IsVector,
+};
 
 const INV_ATAN: Vec2 = Vec2::new(0.1591, core::f32::consts::FRAC_1_PI);
 
@@ -35,6 +41,36 @@ pub fn vertex(
     let rot_view = Mat4::from_mat3(camera_view_without_translation);
     let clip_pos = constants.camera_projection * rot_view * point.extend(1.0);
     *gl_pos = clip_pos.xyww();
+}
+
+#[spirv(vertex)]
+pub fn slabbed_vertex(
+    #[spirv(instance_index)] camera_index: u32,
+    #[spirv(vertex_index)] vertex_index: u32,
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] slab: &[u32],
+    local_pos: &mut Vec3,
+    #[spirv(position)] clip_pos: &mut Vec4,
+) {
+    let camera_id = Id::<Camera>::from(camera_index);
+    let camera = slab.read(camera_id);
+    let point = math::CUBE[vertex_index as usize];
+    *local_pos = point;
+    let camera_view_without_translation = Mat3::from_mat4(camera.view);
+    let rot_view = Mat4::from_mat3(camera_view_without_translation);
+    let position = camera.projection * rot_view * point.extend(1.0);
+    *clip_pos = position.xyww();
+}
+
+/// Colors a skybox using a cubemap texture.
+#[spirv(fragment)]
+pub fn stage_skybox_cubemap(
+    #[spirv(descriptor_set = 1, binding = 8)] texture: &Cubemap,
+    #[spirv(descriptor_set = 1, binding = 9)] sampler: &Sampler,
+    local_pos: Vec3,
+    out_color: &mut Vec4,
+) {
+    let env_color: Vec3 = texture.sample(*sampler, local_pos.alt_norm_or_zero()).xyz();
+    *out_color = env_color.extend(1.0);
 }
 
 /// Colors a skybox using a cubemap texture.

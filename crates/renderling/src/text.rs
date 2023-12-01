@@ -50,7 +50,7 @@ impl Cache {
                 mipmap_filter: wgpu::FilterMode::Nearest,
                 ..Default::default()
             }),
-            None
+            None,
         );
 
         Cache { texture }

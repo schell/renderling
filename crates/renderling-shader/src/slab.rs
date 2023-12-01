@@ -99,6 +99,36 @@ impl Slabbed for f32 {
     }
 }
 
+impl<T: Slabbed + Default> Slabbed for Option<T> {
+    fn slab_size() -> usize {
+        1 + T::slab_size()
+    }
+
+    fn read_slab(&mut self, index: usize, slab: &[u32]) -> usize {
+        let mut proxy = 0u32;
+        let index = proxy.read_slab(index, slab);
+        if proxy == 1 {
+            let mut t = T::default();
+            let index = t.read_slab(index, slab);
+            *self = Some(t);
+            index
+        } else {
+            *self = None;
+            index + T::slab_size()
+        }
+    }
+
+    fn write_slab(&self, index: usize, slab: &mut [u32]) -> usize {
+        if let Some(t) = self {
+            let index = 1u32.write_slab(index, slab);
+            t.write_slab(index, slab)
+        } else {
+            let index = 0u32.write_slab(index, slab);
+            index + T::slab_size()
+        }
+    }
+}
+
 impl<T: Slabbed, const N: usize> Slabbed for [T; N] {
     fn slab_size() -> usize {
         <T as Slabbed>::slab_size() * N
@@ -138,9 +168,6 @@ impl Slabbed for glam::Mat4 {
     }
 
     fn write_slab(&self, index: usize, slab: &mut [u32]) -> usize {
-        if slab.len() < index + 16 {
-            return index;
-        }
         let Self {
             x_axis,
             y_axis,
@@ -160,9 +187,6 @@ impl Slabbed for glam::Vec2 {
     }
 
     fn read_slab(&mut self, index: usize, slab: &[u32]) -> usize {
-        if slab.len() < index + 2 {
-            return index;
-        }
         let index = self.x.read_slab(index, slab);
         let index = self.y.read_slab(index, slab);
         index
@@ -184,9 +208,6 @@ impl Slabbed for glam::Vec3 {
     }
 
     fn read_slab(&mut self, index: usize, slab: &[u32]) -> usize {
-        if slab.len() < index + 3 {
-            return index;
-        }
         let Self { x, y, z } = self;
         let index = x.read_slab(index, slab);
         let index = y.read_slab(index, slab);
@@ -195,9 +216,6 @@ impl Slabbed for glam::Vec3 {
     }
 
     fn write_slab(&self, index: usize, slab: &mut [u32]) -> usize {
-        if slab.len() < index + 3 {
-            return index;
-        }
         let Self { x, y, z } = self;
         let index = x.write_slab(index, slab);
         let index = y.write_slab(index, slab);
@@ -212,9 +230,6 @@ impl Slabbed for glam::Vec4 {
     }
 
     fn read_slab(&mut self, index: usize, slab: &[u32]) -> usize {
-        if slab.len() < index + 4 {
-            return index;
-        }
         let index = self.x.read_slab(index, slab);
         let index = self.y.read_slab(index, slab);
         let index = self.z.read_slab(index, slab);
@@ -222,9 +237,6 @@ impl Slabbed for glam::Vec4 {
     }
 
     fn write_slab(&self, index: usize, slab: &mut [u32]) -> usize {
-        if slab.len() < index + 4 {
-            return index;
-        }
         let Self { x, y, z, w } = self;
         let index = x.write_slab(index, slab);
         let index = y.write_slab(index, slab);
@@ -237,10 +249,8 @@ impl Slabbed for glam::Quat {
     fn slab_size() -> usize {
         16
     }
+
     fn read_slab(&mut self, index: usize, slab: &[u32]) -> usize {
-        if slab.len() < index + 4 {
-            return index;
-        }
         let Self { x, y, z, w } = self;
         let index = x.read_slab(index, slab);
         let index = y.read_slab(index, slab);
@@ -249,9 +259,6 @@ impl Slabbed for glam::Quat {
     }
 
     fn write_slab(&self, index: usize, slab: &mut [u32]) -> usize {
-        if slab.len() < index + 4 {
-            return index;
-        }
         let Self { x, y, z, w } = self;
         let index = x.write_slab(index, slab);
         let index = y.write_slab(index, slab);
@@ -266,18 +273,12 @@ impl Slabbed for glam::UVec2 {
     }
 
     fn read_slab(&mut self, index: usize, slab: &[u32]) -> usize {
-        if slab.len() < index + 2 {
-            return index;
-        }
         let index = self.x.read_slab(index, slab);
         let index = self.y.read_slab(index, slab);
         index
     }
 
     fn write_slab(&self, index: usize, slab: &mut [u32]) -> usize {
-        if slab.len() < index + 2 {
-            return index;
-        }
         let index = self.x.write_slab(index, slab);
         let index = self.y.write_slab(index, slab);
         index
@@ -290,9 +291,6 @@ impl Slabbed for glam::UVec3 {
     }
 
     fn read_slab(&mut self, index: usize, slab: &[u32]) -> usize {
-        if slab.len() < index + 3 {
-            return index;
-        }
         let index = self.x.read_slab(index, slab);
         let index = self.y.read_slab(index, slab);
         let index = self.z.read_slab(index, slab);
@@ -300,9 +298,6 @@ impl Slabbed for glam::UVec3 {
     }
 
     fn write_slab(&self, index: usize, slab: &mut [u32]) -> usize {
-        if slab.len() < index + 3 {
-            return index;
-        }
         let index = self.x.write_slab(index, slab);
         let index = self.y.write_slab(index, slab);
         let index = self.z.write_slab(index, slab);
@@ -316,9 +311,6 @@ impl Slabbed for glam::UVec4 {
     }
 
     fn read_slab(&mut self, index: usize, slab: &[u32]) -> usize {
-        if slab.len() < index + 4 {
-            return index;
-        }
         let index = self.x.read_slab(index, slab);
         let index = self.y.read_slab(index, slab);
         let index = self.z.read_slab(index, slab);

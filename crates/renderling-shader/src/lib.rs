@@ -13,6 +13,7 @@ pub mod array;
 pub mod bits;
 pub mod convolution;
 pub mod debug;
+pub mod gltf;
 pub mod id;
 pub mod math;
 pub mod pbr;
