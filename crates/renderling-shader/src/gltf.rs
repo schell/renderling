@@ -1,6 +1,12 @@
 //! Gltf types that are used in shaders.
+use glam::Vec4;
+
 use crate::{
-    self as renderling_shader, array::Array, id::Id, pbr::PbrMaterial, slab::Slabbed,
+    self as renderling_shader,
+    array::Array,
+    id::Id,
+    pbr::PbrMaterial,
+    slab::{Slab, Slabbed},
     texture::GpuTexture,
 };
 #[repr(transparent)]
@@ -118,8 +124,47 @@ pub struct GltfAccessor {
     pub normalized: bool,
 }
 
+impl GltfAccessor {
+    pub fn get_scalar_u32(&self, index: usize, slab: &[u32]) -> u32 {
+        let byte_offset = self.view_offset + index as u32 * self.view_stride;
+        let u32_offset = byte_offset / 4;
+        let mut scalar = 0u32;
+        let _ = scalar.read_slab(u32_offset as usize, slab);
+        scalar
+    }
+
+    pub fn get_vec4(&self, vertex_index: usize, slab: &[u32]) -> glam::Vec4 {
+        let byte_offset = self.view_offset as usize + vertex_index * self.view_stride as usize;
+        let u32_offset = byte_offset / 4;
+        let mut vec4 = glam::Vec4::ZERO;
+        match self.dimensions {
+            Dimensions::Scalar => {
+                vec4.x.read_slab(u32_offset + 0, slab);
+            }
+            Dimensions::Vec2 => {
+                vec4.x.read_slab(u32_offset + 0, slab);
+                vec4.y.read_slab(u32_offset + 1, slab);
+            }
+            Dimensions::Vec3 => {
+                vec4.x.read_slab(u32_offset + 0, slab);
+                vec4.y.read_slab(u32_offset + 1, slab);
+                vec4.z.read_slab(u32_offset + 2, slab);
+            }
+            Dimensions::Vec4 => {
+                vec4.x.read_slab(u32_offset + 0, slab);
+                vec4.y.read_slab(u32_offset + 1, slab);
+                vec4.z.read_slab(u32_offset + 2, slab);
+                vec4.w.read_slab(u32_offset + 3, slab);
+            }
+            _ => {}
+        }
+        vec4
+    }
+}
+
 #[derive(Default, Clone, Copy, Slabbed)]
 pub struct GltfPrimitive {
+    pub vertex_count: u32,
     pub material: Id<PbrMaterial>,
     pub indices: Id<GltfAccessor>,
     pub positions: Id<GltfAccessor>,
@@ -130,6 +175,52 @@ pub struct GltfPrimitive {
     pub tex_coords1: Id<GltfAccessor>,
     pub joints: Id<GltfAccessor>,
     pub weights: Id<GltfAccessor>,
+}
+
+impl GltfPrimitive {
+    pub fn get_vertex(&self, index: usize, slab: &[u32]) -> crate::stage::Vertex {
+        let index = if self.indices.is_some() {
+            let indices = slab.read(self.indices);
+            let index = indices.get_scalar_u32(index, slab);
+            index as usize
+        } else {
+            index
+        };
+        let positions = slab.read(self.positions);
+        let position = positions.get_vec4(index, slab);
+        let normals = slab.read(self.normals);
+        let normal = normals.get_vec4(index, slab);
+        // TODO: If tangents are not present, calculate them.
+        let tangents = slab.read(self.tangents);
+        let tangent = tangents.get_vec4(index, slab);
+        let colors = slab.read(self.colors);
+        let color = colors.get_vec4(index, slab);
+        let tex_coords0 = slab.read(self.tex_coords0);
+        let tex_coords0 = tex_coords0.get_vec4(index, slab);
+        let tex_coords1 = slab.read(self.tex_coords1);
+        let tex_coords1 = tex_coords1.get_vec4(index, slab);
+        let uv = Vec4::new(tex_coords0.x, tex_coords0.y, tex_coords1.x, tex_coords1.y);
+        let joints = slab.read(self.joints);
+        let joints = joints.get_vec4(index, slab);
+        let joints = [
+            joints.x.to_bits(),
+            joints.y.to_bits(),
+            joints.z.to_bits(),
+            joints.w.to_bits(),
+        ];
+        let weights = slab.read(self.weights);
+        let weights = weights.get_vec4(index, slab);
+        let weights = [weights.x, weights.y, weights.z, weights.w];
+        crate::stage::Vertex {
+            position,
+            color,
+            uv,
+            normal,
+            tangent,
+            joints,
+            weights,
+        }
+    }
 }
 
 #[derive(Default, Clone, Copy, Slabbed)]

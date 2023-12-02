@@ -374,6 +374,8 @@ impl SlabBuffer {
 
 #[cfg(test)]
 mod test {
+    use renderling_shader::stage::{NativeVertexData, RenderUnit, Vertex, VertexData};
+
     use crate::Renderling;
 
     use super::*;
@@ -425,5 +427,37 @@ mod test {
             futures_lite::future::block_on(slab.read_raw(device, queue, 0, slab.len())).unwrap();
         let points_out = slab_u32.read_vec::<glam::Vec3>(array);
         assert_eq!(points, points_out);
+    }
+
+    #[test]
+    fn slab_buffer_unit_roundtrip() {
+        let _ = env_logger::builder().is_test(true).try_init();
+        let r = Renderling::headless(10, 10);
+        let device = r.get_device();
+        let queue = r.get_queue();
+        let slab = SlabBuffer::new(device, 2);
+        let vertices = vec![
+            Vertex::default().with_position([0.0, 0.0, 0.0]),
+            Vertex::default().with_position([1.0, 1.0, 1.0]),
+            Vertex::default().with_position([2.0, 2.0, 2.0]),
+        ];
+        let vertices = slab.append_array(device, queue, &vertices);
+        let data_id = slab.append(
+            device,
+            queue,
+            &NativeVertexData {
+                vertices,
+                material: Id::new(666),
+            },
+        );
+        let unit = RenderUnit {
+            vertex_data: VertexData::Native(data_id),
+            camera: Id::new(42),
+            transform: Id::new(1337),
+            vertex_count: vertices.len() as u32,
+        };
+        let unit_id = slab.append(device, queue, &unit);
+        let t = futures_lite::future::block_on(slab.read(device, queue, unit_id)).unwrap();
+        assert_eq!(unit, t, "read back what we wrote");
     }
 }

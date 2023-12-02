@@ -51,10 +51,22 @@ impl From<crate::slab::SlabError> for StageGltfError {
     }
 }
 
+pub fn get_vertex_count(primitive: &gltf::Primitive<'_>) -> u32 {
+    if let Some(indices) = primitive.indices() {
+        indices.count() as u32
+    } else {
+        if let Some(positions) = primitive.get(&gltf::Semantic::Positions) {
+            positions.count() as u32
+        } else {
+            0
+        }
+    }
+}
+
 impl Stage {
     pub fn load_gltf_document(
         &self,
-        document: gltf::Document,
+        document: &gltf::Document,
         buffer_data: Vec<gltf::buffer::Data>,
         images: Vec<gltf::image::Data>,
     ) -> Result<GltfDocument, StageGltfError> {
@@ -376,6 +388,7 @@ impl Stage {
             let primitives = self.allocate_array::<GltfPrimitive>(mesh.primitives().len());
             for (j, primitive) in mesh.primitives().enumerate() {
                 debug_assert_eq!(j, primitive.index());
+                let vertex_count = get_vertex_count(&primitive);
                 let material = primitive
                     .material()
                     .index()
@@ -421,6 +434,7 @@ impl Stage {
                 self.write(
                     primitives.at(primitive.index()),
                     &GltfPrimitive {
+                        vertex_count: vertex_count as u32,
                         material,
                         indices,
                         positions,
@@ -652,21 +666,112 @@ impl Stage {
 mod test {
     use glam::Vec3;
 
-    use crate::{Renderling, Stage};
+    use crate::{
+        shader::{
+            gltf::*,
+            id::Id,
+            pbr::PbrMaterial,
+            stage::{Camera, GltfVertexData, RenderUnit, VertexData},
+        },
+        Renderling, Stage,
+    };
 
     #[test]
-    fn stage_normal_mapping_brick_sphere() {
-        crate::init_logging();
-        let size = 600;
+    fn get_vertex_count_primitive_sanity() {
+        _
+    }
+
+    #[test]
+    // ensures we can
+    // * read simple meshes
+    // * support multiple nodes that reference the same mesh
+    // * support primitives w/ positions and normal attributes
+    // * support transforming nodes (T * R * S)
+    fn simple_meshes() {
         let mut r =
-            Renderling::headless(size, size).with_background_color(Vec3::splat(1.0).extend(1.0));
+            Renderling::headless(100, 50).with_background_color(Vec3::splat(0.0).extend(1.0));
         let (device, queue) = r.get_device_and_queue_owned();
+        let (document, buffers, images) =
+            gltf::import("../../gltf/gltfTutorial_008_SimpleMeshes.gltf").unwrap();
+        let projection = crate::camera::perspective(100.0, 50.0);
+        let position = Vec3::new(1.0, 0.5, 1.5);
+        let view = crate::camera::look_at(position, Vec3::new(1.0, 0.5, 0.0), Vec3::Y);
         let stage = Stage::new(device, queue);
         stage.configure_graph(&mut r, true);
+        let gpu_doc = stage
+            .load_gltf_document(&document, buffers, images)
+            .unwrap();
+        let camera = Camera {
+            projection,
+            view,
+            position,
+        };
+        let camera_id = stage.append(&camera);
+        // For now we have to keep the original document around to figure out
+        // what to draw.
+        fn draw_node<'a>(
+            stage: &Stage,
+            gpu_doc: &GltfDocument,
+            camera_id: Id<Camera>,
+            node: gltf::Node<'a>,
+            parents: Vec<Id<GltfNode>>,
+        ) -> Vec<Id<RenderUnit>> {
+            let mut units = if let Some(mesh) = node.mesh() {
+                let primitives = mesh.primitives();
+                let mesh = gpu_doc.meshes.at(mesh.index());
+                primitives
+                    .map(|primitive| {
+                        let parent_node_path = stage.append_array(&parents);
+                        let vertex_data_id = stage.append(&GltfVertexData {
+                            parent_node_path,
+                            mesh,
+                            primitive_index: primitive.index() as u32,
+                        });
+                        let render_unit = RenderUnit {
+                            vertex_data: VertexData::Gltf(vertex_data_id),
+                            vertex_count: super::get_vertex_count(&primitive),
+                            transform: Id::NONE,
+                            camera: camera_id,
+                        };
+                        stage.draw_unit(&render_unit)
+                    })
+                    .collect::<Vec<_>>()
+            } else {
+                vec![]
+            };
+            for child in node.children() {
+                let mut parents = parents.clone();
+                parents.push(gpu_doc.nodes.at(child.index()));
+                units.extend(draw_node(stage, gpu_doc, camera_id, child, parents));
+            }
+            units
+        }
 
-        log::trace!("Reading gltf");
-        let (document, buffers, images) = gltf::import("../../gltf/red_brick_03_1k.glb").unwrap();
-        log::trace!("Loading gltf");
-        let _doc = stage.load_gltf_document(document, buffers, images).unwrap();
+        for scene in document.scenes() {
+            for node in scene.nodes() {
+                let _units = draw_node(&stage, &gpu_doc, camera_id, node, vec![]);
+            }
+        }
+
+        let img = r.render_image().unwrap();
+        img_diff::assert_img_eq("gltf_simple_meshes.png", img);
     }
+
+    //#[test]
+    //fn stage_normal_mapping_brick_sphere() {
+    //    crate::init_logging();
+    //    let size = 600;
+    //    let mut r =
+    //        Renderling::headless(size, size).with_background_color(Vec3::splat(1.0).extend(1.0));
+    //    let (device, queue) = r.get_device_and_queue_owned();
+    //    let stage = Stage::new(device, queue);
+    //    stage.configure_graph(&mut r, true);
+
+    //    log::trace!("Reading gltf");
+    //    let (document, buffers, images) = gltf::import("../../gltf/red_brick_03_1k.glb").unwrap();
+    //    log::trace!("Loading gltf");
+    //    let gpu_doc = stage
+    //        .load_gltf_document(&document, buffers, images)
+    //        .unwrap();
+    //}
 }

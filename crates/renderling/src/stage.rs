@@ -550,13 +550,12 @@ impl Stage {
         }
     }
 
-    /// Append the [`RenderUnit`] and return a [`DrawUnit`] that can be used
-    /// to draw it.
+    /// Draw the [`RenderUnit`] each frame, and immediately return its `Id`.
     pub fn draw_unit(&self, unit: &RenderUnit) -> Id<RenderUnit> {
         let id = self.slab.append(&self.device, &self.queue, unit);
         let draw = DrawUnit {
             id,
-            vertex_count: unit.vertices.len() as u32,
+            vertex_count: unit.vertex_count,
         };
         // UNWRAP: if we can't acquire the lock we want to panic.
         let mut draws = self.draws.write().unwrap();
@@ -566,6 +565,16 @@ impl Stage {
             }
         }
         id
+    }
+
+    /// Erase the [`RenderUnit`] with the given `Id` from the stage.
+    pub fn erase_unit(&self, id: Id<RenderUnit>) {
+        let mut draws = self.draws.write().unwrap();
+        match draws.deref_mut() {
+            StageDrawStrategy::Direct(units) => {
+                units.retain(|unit| unit.id != id);
+            }
+        }
     }
 
     /// Configure [`Renderling`] to render this stage.
@@ -691,7 +700,7 @@ mod test {
 
     use crate::{
         default_ortho2d,
-        shader::stage::{Camera, RenderUnit, Vertex},
+        shader::stage::{Camera, NativeVertexData, RenderUnit, Vertex, VertexData},
         slab::Slab,
         Renderling,
     };
@@ -728,9 +737,14 @@ mod test {
         let camera_id = stage.append(&camera);
         let vertices = stage.append_array(&right_tri_vertices());
         println!("vertices: {vertices:?}");
+        let vertex_data_id = stage.append(&NativeVertexData {
+            vertices,
+            ..Default::default()
+        });
         let _ = stage.draw_unit(&RenderUnit {
             camera: camera_id,
-            vertices,
+            vertex_data: VertexData::Native(vertex_data_id),
+            vertex_count: 3,
             ..Default::default()
         });
         let stage_slab = futures_lite::future::block_on(stage.slab.read_raw(
