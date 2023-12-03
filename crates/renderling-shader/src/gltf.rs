@@ -14,7 +14,7 @@ use crate::{
 pub struct GltfBuffer(pub Array<u32>);
 
 #[repr(u32)]
-#[derive(Default, Clone, Copy)]
+#[derive(Default, Clone, Copy, PartialEq, Debug)]
 pub enum DataType {
     I8,
     U8,
@@ -102,9 +102,27 @@ impl Slabbed for Dimensions {
     }
 }
 
+/// Reads a u8 from the slab at the given **byte** offset.
+fn get_u8_at_offset(offset: usize, slab: &[u32]) -> u8 {
+    let u32_offset = offset / 4;
+    let mut u32 = 0u32;
+    let _ = u32.read_slab(u32_offset, slab);
+    let byte_offset = offset % 4;
+    match byte_offset {
+        0 => u32.to_le_bytes()[0],
+        1 => u32.to_le_bytes()[1],
+        2 => u32.to_le_bytes()[2],
+        3 => u32.to_le_bytes()[3],
+        _ => 0, // unreachable
+    }
+}
+
 #[derive(Default, Clone, Copy, Slabbed)]
 pub struct GltfAccessor {
-    // The byte size of each component that this accessor describes.
+    // The byte size of each element that this accessor describes.
+    //
+    /// For example, if the accessor describes a `Vec3` of F32s, then
+    // the size is 3 * 4 = 12.
     pub size: u32,
     pub buffer: Id<GltfBuffer>,
     // Returns the offset relative to the start of the parent buffer view in bytes.
@@ -117,7 +135,7 @@ pub struct GltfAccessor {
     // number of bytes in the buffer view.
     pub count: u32,
     // The data type of components in the attribute.
-    pub component_type: DataType,
+    pub data_type: DataType,
     // Specifies if the attribute is a scalar, vector, or matrix.
     pub dimensions: Dimensions,
     // Whether or not the attribute is normalized.
@@ -125,6 +143,34 @@ pub struct GltfAccessor {
 }
 
 impl GltfAccessor {
+    /// Retreive the nth element.
+    pub fn get1(&self, index: usize, slab: &[u32]) -> u32 {
+        let buffer = slab.read(self.buffer);
+        let buffer_start = buffer.0.at(0);
+        let byte_offset =
+            buffer_start.index() * 4 + self.view_offset as usize + index * self.size as usize;
+        let u32_offset = byte_offset / 4;
+        let mut t = 0u32;
+        t.read_slab(u32_offset, slab);
+        let byte_mod = byte_offset as u32 % 4;
+        let mask = match self.data_type {
+            DataType::I8 => 0xF,
+            DataType::U8 => 0xF,
+            DataType::I16 => 0xFF,
+            DataType::U16 => 0xFF,
+            DataType::U32 => 0xFFFF,
+            DataType::F32 => 0xFFFF,
+        };
+        let shift = match byte_mod {
+            0 => 0,
+            1 => 8,
+            2 => 16,
+            3 => 24,
+            _ => 0, // unreachable
+        };
+        crate::bits::extract(t, (shift, mask))
+    }
+
     pub fn get_scalar_u32(&self, index: usize, slab: &[u32]) -> u32 {
         let byte_offset = self.view_offset + index as u32 * self.view_stride;
         let u32_offset = byte_offset / 4;
@@ -178,13 +224,13 @@ pub struct GltfPrimitive {
 }
 
 impl GltfPrimitive {
-    pub fn get_vertex(&self, index: usize, slab: &[u32]) -> crate::stage::Vertex {
+    pub fn get_vertex(&self, vertex_index: usize, slab: &[u32]) -> crate::stage::Vertex {
         let index = if self.indices.is_some() {
             let indices = slab.read(self.indices);
-            let index = indices.get_scalar_u32(index, slab);
+            let index = indices.get1(vertex_index, slab);
             index as usize
         } else {
-            index
+            vertex_index
         };
         let positions = slab.read(self.positions);
         let position = positions.get_vec4(index, slab);
