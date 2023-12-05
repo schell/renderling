@@ -6,7 +6,9 @@ use crate::slab::Slabbed;
 
 #[repr(C)]
 pub struct Array<T> {
+    // u32 offset in the slab
     index: u32,
+    // number of `T` elements in the array
     len: u32,
     _phantom: PhantomData<T>,
 }
@@ -25,11 +27,15 @@ impl<T> Copy for Array<T> {}
 
 impl<T> core::fmt::Debug for Array<T> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("Array")
-            .field("index", &self.index)
-            .field("len", &self.len)
-            .field("_phantom", &self._phantom)
-            .finish()
+        f.debug_struct(if self.is_null() {
+            "Array (null)"
+        } else {
+            "Array"
+        })
+        .field("index", &self.index)
+        .field("len", &self.len)
+        .field("_phantom", &self._phantom)
+        .finish()
     }
 }
 
@@ -75,7 +81,7 @@ impl<T: Slabbed> Default for Array<T> {
     }
 }
 
-impl<T: Slabbed> Array<T> {
+impl<T> Array<T> {
     pub fn new(index: u32, len: u32) -> Self {
         Self {
             index,
@@ -92,11 +98,18 @@ impl<T: Slabbed> Array<T> {
         self.len == 0
     }
 
+    pub fn is_null(&self) -> bool {
+        self.index == u32::MAX
+    }
+
     pub fn contains_index(&self, index: usize) -> bool {
         index >= self.index as usize && index < (self.index + self.len) as usize
     }
 
-    pub fn at(&self, index: usize) -> Id<T> {
+    pub fn at(&self, index: usize) -> Id<T>
+    where
+        T: Slabbed,
+    {
         if index >= self.len() {
             Id::NONE
         } else {
@@ -106,5 +119,17 @@ impl<T: Slabbed> Array<T> {
 
     pub fn starting_index(&self) -> usize {
         self.index as usize
+    }
+
+    /// Convert this array into a `u32` array.
+    pub fn into_u32_array(self) -> Array<u32>
+    where
+        T: Slabbed,
+    {
+        Array {
+            index: self.index,
+            len: self.len * T::slab_size() as u32,
+            _phantom: PhantomData,
+        }
     }
 }

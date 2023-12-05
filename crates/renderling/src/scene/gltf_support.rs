@@ -742,13 +742,24 @@ impl GltfLoader {
                 vertices.chunks_mut(3).for_each(|t| match t {
                     [(a, _), (b, _), (c, _)] => {
                         if gen_normals {
-                            let n = Vertex::generate_normal(*a, *b, *c);
+                            let n = Vertex::generate_normal(
+                                a.position.xyz(),
+                                b.position.xyz(),
+                                c.position.xyz(),
+                            );
                             a.normal = n.extend(a.normal.w);
                             b.normal = n.extend(b.normal.w);
                             c.normal = n.extend(c.normal.w);
                         }
                         if gen_tangents {
-                            let tangent = Vertex::generate_tangent(*a, *b, *c);
+                            let tangent = Vertex::generate_tangent(
+                                a.position.xyz(),
+                                a.uv.xy(),
+                                b.position.xyz(),
+                                b.uv.xy(),
+                                c.position.xyz(),
+                                c.position.xy(),
+                            );
                             debug_assert!(!tangent.w.is_nan(), "tangent is NaN");
                             a.tangent = tangent;
                             b.tangent = tangent;

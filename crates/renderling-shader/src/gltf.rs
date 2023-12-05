@@ -10,11 +10,13 @@ use crate::{
     texture::GpuTexture,
 };
 #[repr(transparent)]
+#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[derive(Default, Clone, Copy, Slabbed)]
 pub struct GltfBuffer(pub Array<u32>);
 
 #[repr(u32)]
-#[derive(Default, Clone, Copy, PartialEq, Debug)]
+#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
+#[derive(Default, Clone, Copy, PartialEq)]
 pub enum DataType {
     I8,
     U8,
@@ -54,6 +56,7 @@ impl Slabbed for DataType {
 }
 
 #[repr(u32)]
+#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[derive(Default, Clone, Copy)]
 pub enum Dimensions {
     #[default]
@@ -102,21 +105,7 @@ impl Slabbed for Dimensions {
     }
 }
 
-/// Reads a u8 from the slab at the given **byte** offset.
-fn get_u8_at_offset(offset: usize, slab: &[u32]) -> u8 {
-    let u32_offset = offset / 4;
-    let mut u32 = 0u32;
-    let _ = u32.read_slab(u32_offset, slab);
-    let byte_offset = offset % 4;
-    match byte_offset {
-        0 => u32.to_le_bytes()[0],
-        1 => u32.to_le_bytes()[1],
-        2 => u32.to_le_bytes()[2],
-        3 => u32.to_le_bytes()[3],
-        _ => 0, // unreachable
-    }
-}
-
+#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[derive(Default, Clone, Copy, Slabbed)]
 pub struct GltfAccessor {
     // The byte size of each element that this accessor describes.
@@ -131,7 +120,7 @@ pub struct GltfAccessor {
     pub view_offset: u32,
     // The stride in bytes between vertex attributes or other interleavable data.
     pub view_stride: u32,
-    // The number of components within the buffer view - not to be confused with the
+    // The number of elements within the buffer view - not to be confused with the
     // number of bytes in the buffer view.
     pub count: u32,
     // The data type of components in the attribute.
@@ -142,25 +131,44 @@ pub struct GltfAccessor {
     pub normalized: bool,
 }
 
+macro_rules! println {
+    ($($arg:tt)*) => {
+        #[cfg(not(target_arch = "spirv"))]
+        {
+            std::println!($($arg)*);
+        }
+    }
+}
+
 impl GltfAccessor {
-    /// Retreive the nth element.
-    pub fn get1(&self, index: usize, slab: &[u32]) -> u32 {
+    /// Retreive one component of the nth element.
+    pub fn get(&self, index: usize, component_index: usize, slab: &[u32]) -> u32 {
+        println!("get {index} {component_index}");
         let buffer = slab.read(self.buffer);
+        println!("buffer: {buffer:?}");
         let buffer_start = buffer.0.at(0);
-        let byte_offset =
-            buffer_start.index() * 4 + self.view_offset as usize + index * self.size as usize;
+        let buffer_start_bytes = buffer_start.index() * 4;
+        let (mask, component_bytes, mut component_shift) = match self.data_type {
+            DataType::I8 => (0xF, 1, 8),
+            DataType::U8 => (0xF, 1, 8),
+            DataType::I16 => (0xFF, 2, 16),
+            DataType::U16 => (0xFF, 2, 16),
+            DataType::U32 => (0xFFFF, 4, 0),
+            DataType::F32 => (0xFFFF, 4, 0),
+        };
+        component_shift *= component_index as u32;
+        let component_byte_offset = component_bytes * component_index;
+        let byte_offset = buffer_start_bytes
+            + self.view_offset as usize
+            + index * self.size as usize
+            + component_byte_offset;
+        println!("byte_offset: {byte_offset}");
         let u32_offset = byte_offset / 4;
+        println!("u32_offset: {u32_offset}");
         let mut t = 0u32;
         t.read_slab(u32_offset, slab);
         let byte_mod = byte_offset as u32 % 4;
-        let mask = match self.data_type {
-            DataType::I8 => 0xF,
-            DataType::U8 => 0xF,
-            DataType::I16 => 0xFF,
-            DataType::U16 => 0xFF,
-            DataType::U32 => 0xFFFF,
-            DataType::F32 => 0xFFFF,
-        };
+        println!("byte_mod: {byte_mod}");
         let shift = match byte_mod {
             0 => 0,
             1 => 8,
@@ -168,46 +176,70 @@ impl GltfAccessor {
             3 => 24,
             _ => 0, // unreachable
         };
-        crate::bits::extract(t, (shift, mask))
+        println!("mask: {mask:04x}");
+        println!("shift: {shift}");
+        println!("component_shift: {component_shift}");
+        let u = crate::bits::extract(t, (shift + component_shift, mask));
+        println!("u: {u}");
+        u
     }
 
-    pub fn get_scalar_u32(&self, index: usize, slab: &[u32]) -> u32 {
-        let byte_offset = self.view_offset + index as u32 * self.view_stride;
-        let u32_offset = byte_offset / 4;
-        let mut scalar = 0u32;
-        let _ = scalar.read_slab(u32_offset as usize, slab);
-        scalar
+    pub fn get_u32(&self, vertex_index: usize, slab: &[u32]) -> u32 {
+        self.get(vertex_index, 0, slab)
+    }
+
+    pub fn get_f32(&self, vertex_index: usize, slab: &[u32]) -> f32 {
+        f32::from_bits(self.get(vertex_index, 0, slab))
+    }
+
+    pub fn get_vec2(&self, vertex_index: usize, slab: &[u32]) -> glam::Vec2 {
+        let x = f32::from_bits(self.get(vertex_index, 0, slab));
+        let y = f32::from_bits(self.get(vertex_index, 1, slab));
+        match self.dimensions {
+            Dimensions::Scalar => glam::Vec2::new(x, 0.0),
+            _ => glam::Vec2::new(x, y),
+        }
+    }
+
+    pub fn get_vec3(&self, vertex_index: usize, slab: &[u32]) -> glam::Vec3 {
+        let x = f32::from_bits(self.get(vertex_index, 0, slab));
+        let y = f32::from_bits(self.get(vertex_index, 1, slab));
+        let z = f32::from_bits(self.get(vertex_index, 2, slab));
+        match self.dimensions {
+            Dimensions::Scalar => glam::Vec3::new(x, 0.0, 0.0),
+            Dimensions::Vec2 => glam::Vec3::new(x, y, 0.0),
+            _ => glam::Vec3::new(x, y, z),
+        }
     }
 
     pub fn get_vec4(&self, vertex_index: usize, slab: &[u32]) -> glam::Vec4 {
-        let byte_offset = self.view_offset as usize + vertex_index * self.view_stride as usize;
-        let u32_offset = byte_offset / 4;
-        let mut vec4 = glam::Vec4::ZERO;
+        let x = f32::from_bits(self.get(vertex_index, 0, slab));
+        let y = f32::from_bits(self.get(vertex_index, 1, slab));
+        let z = f32::from_bits(self.get(vertex_index, 2, slab));
+        let w = f32::from_bits(self.get(vertex_index, 3, slab));
         match self.dimensions {
-            Dimensions::Scalar => {
-                vec4.x.read_slab(u32_offset + 0, slab);
-            }
-            Dimensions::Vec2 => {
-                vec4.x.read_slab(u32_offset + 0, slab);
-                vec4.y.read_slab(u32_offset + 1, slab);
-            }
-            Dimensions::Vec3 => {
-                vec4.x.read_slab(u32_offset + 0, slab);
-                vec4.y.read_slab(u32_offset + 1, slab);
-                vec4.z.read_slab(u32_offset + 2, slab);
-            }
-            Dimensions::Vec4 => {
-                vec4.x.read_slab(u32_offset + 0, slab);
-                vec4.y.read_slab(u32_offset + 1, slab);
-                vec4.z.read_slab(u32_offset + 2, slab);
-                vec4.w.read_slab(u32_offset + 3, slab);
-            }
-            _ => {}
+            Dimensions::Scalar => glam::Vec4::new(x, 0.0, 0.0, 0.0),
+            Dimensions::Vec2 => glam::Vec4::new(x, y, 0.0, 0.0),
+            Dimensions::Vec3 => glam::Vec4::new(x, y, z, 0.0),
+            _ => glam::Vec4::new(x, y, z, w),
         }
-        vec4
+    }
+
+    pub fn get_uvec4(&self, vertex_index: usize, slab: &[u32]) -> glam::UVec4 {
+        let x = self.get_u32(vertex_index, slab);
+        let y = self.get_u32(vertex_index, slab);
+        let z = self.get_u32(vertex_index, slab);
+        let w = self.get_u32(vertex_index, slab);
+        match self.dimensions {
+            Dimensions::Scalar => glam::UVec4::new(x, 0, 0, 0),
+            Dimensions::Vec2 => glam::UVec4::new(x, y, 0, 0),
+            Dimensions::Vec3 => glam::UVec4::new(x, y, z, 0),
+            _ => glam::UVec4::new(x, y, z, w),
+        }
     }
 }
 
+#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[derive(Default, Clone, Copy, Slabbed)]
 pub struct GltfPrimitive {
     pub vertex_count: u32,
@@ -227,41 +259,35 @@ impl GltfPrimitive {
     pub fn get_vertex(&self, vertex_index: usize, slab: &[u32]) -> crate::stage::Vertex {
         let index = if self.indices.is_some() {
             let indices = slab.read(self.indices);
-            let index = indices.get1(vertex_index, slab);
+            let index = indices.get_u32(vertex_index, slab);
             index as usize
         } else {
             vertex_index
         };
         let positions = slab.read(self.positions);
-        let position = positions.get_vec4(index, slab);
+        let position = positions.get_vec3(index, slab);
         let normals = slab.read(self.normals);
-        let normal = normals.get_vec4(index, slab);
-        // TODO: If tangents are not present, calculate them.
+        let normal = normals.get_vec3(index, slab);
         let tangents = slab.read(self.tangents);
         let tangent = tangents.get_vec4(index, slab);
         let colors = slab.read(self.colors);
         let color = colors.get_vec4(index, slab);
         let tex_coords0 = slab.read(self.tex_coords0);
-        let tex_coords0 = tex_coords0.get_vec4(index, slab);
+        let tex_coords0 = tex_coords0.get_vec2(index, slab);
         let tex_coords1 = slab.read(self.tex_coords1);
-        let tex_coords1 = tex_coords1.get_vec4(index, slab);
+        let tex_coords1 = tex_coords1.get_vec2(index, slab);
         let uv = Vec4::new(tex_coords0.x, tex_coords0.y, tex_coords1.x, tex_coords1.y);
         let joints = slab.read(self.joints);
-        let joints = joints.get_vec4(index, slab);
-        let joints = [
-            joints.x.to_bits(),
-            joints.y.to_bits(),
-            joints.z.to_bits(),
-            joints.w.to_bits(),
-        ];
+        let joints = joints.get_uvec4(index, slab);
+        let joints = [joints.x, joints.y, joints.z, joints.w];
         let weights = slab.read(self.weights);
         let weights = weights.get_vec4(index, slab);
         let weights = [weights.x, weights.y, weights.z, weights.w];
         crate::stage::Vertex {
-            position,
+            position: position.extend(0.0),
             color,
             uv,
-            normal,
+            normal: normal.extend(0.0),
             tangent,
             joints,
             weights,
@@ -269,12 +295,14 @@ impl GltfPrimitive {
     }
 }
 
+#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[derive(Default, Clone, Copy, Slabbed)]
 pub struct GltfMesh {
     pub primitives: Array<GltfPrimitive>,
     pub weights: Array<f32>,
 }
 
+#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[derive(Clone, Copy)]
 pub enum GltfCamera {
     Orthographic {
@@ -581,6 +609,7 @@ pub struct GltfScene {
     pub nodes: Array<Id<GltfNode>>,
 }
 
+#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[derive(Default, Clone, Copy, Slabbed)]
 pub struct GltfBufferView {
     pub buffer: Id<GltfBuffer>,

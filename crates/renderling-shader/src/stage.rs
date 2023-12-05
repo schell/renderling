@@ -137,18 +137,18 @@ impl Vertex {
         mat
     }
 
-    pub fn generate_normal(a: Vertex, b: Vertex, c: Vertex) -> Vec3 {
-        let ab = a.position.xyz() - b.position.xyz();
-        let ac = a.position.xyz() - c.position.xyz();
+    pub fn generate_normal(a: Vec3, b: Vec3, c: Vec3) -> Vec3 {
+        let ab = a - b;
+        let ac = a - c;
         ab.cross(ac).normalize()
     }
 
-    pub fn generate_tangent(a: Vertex, b: Vertex, c: Vertex) -> Vec4 {
-        let ab = b.position.xyz() - a.position.xyz();
-        let ac = c.position.xyz() - a.position.xyz();
+    pub fn generate_tangent(a: Vec3, a_uv: Vec2, b: Vec3, b_uv: Vec2, c: Vec3, c_uv: Vec2) -> Vec4 {
+        let ab = b - a;
+        let ac = c - a;
         let n = ab.cross(ac);
-        let d_uv1 = b.uv.xy() - a.uv.xy();
-        let d_uv2 = c.uv.xy() - a.uv.xy();
+        let d_uv1 = b_uv - a_uv;
+        let d_uv2 = c_uv - a_uv;
         let denom = d_uv1.x * d_uv2.y - d_uv2.x * d_uv1.y;
         let denom_sign = if denom >= 0.0 { 1.0 } else { -1.0 };
         let denom = denom.abs().max(f32::EPSILON) * denom_sign;
@@ -1385,6 +1385,23 @@ pub fn compute_cull_entities(
         call.vertex_count = entity.mesh_vertex_count;
     }
     draws[i] = call;
+}
+
+#[spirv(compute(threads(32)))]
+/// A shader to ensure that we can extract i8 and i16 values from a storage buffer.
+pub fn test_i8_i16_extraction(
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] slab: &mut [u32],
+    #[spirv(global_invocation_id)] global_id: UVec3,
+) {
+    let index = global_id.x as usize;
+    let (value, _, _) = crate::bits::extract_i8(2, index, slab);
+    if value > 0 {
+        slab[index] = value as u32;
+    }
+    let (value, _, _) = crate::bits::extract_i16(2, index, slab);
+    if value > 0 {
+        slab[index] = value as u32;
+    }
 }
 
 #[cfg(test)]

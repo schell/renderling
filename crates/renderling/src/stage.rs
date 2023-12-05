@@ -81,7 +81,7 @@ impl Stage {
 
     /// Write an object to the slab.
     pub fn write<T: Slabbed + Default>(&self, id: Id<T>, object: &T) -> Result<(), SlabError> {
-        let () = self.slab.write(&self.device, &self.queue, id, object)?;
+        self.slab.write(&self.device, &self.queue, id, object)?;
         Ok(())
     }
 
@@ -567,6 +567,15 @@ impl Stage {
         id
     }
 
+    /// Returns all the draw operations on the stage.
+    pub(crate) fn get_draws(&self) -> Vec<DrawUnit> {
+        // UNWRAP: if we can't acquire the lock we want to panic.
+        let draws = self.draws.read().unwrap();
+        match draws.deref() {
+            StageDrawStrategy::Direct(units) => units.clone(),
+        }
+    }
+
     /// Erase the [`RenderUnit`] with the given `Id` from the stage.
     pub fn erase_unit(&self, id: Id<RenderUnit>) {
         let mut draws = self.draws.write().unwrap();
@@ -619,6 +628,7 @@ impl Stage {
 }
 
 /// A unit of work to be drawn.
+#[derive(Clone, Copy, Debug, Default)]
 pub(crate) struct DrawUnit {
     pub id: Id<RenderUnit>,
     pub vertex_count: u32,
