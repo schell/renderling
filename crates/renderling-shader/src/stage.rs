@@ -898,6 +898,8 @@ pub struct StageLegend {
 pub struct NativeVertexData {
     // Points to an array of `Vertex` in the stage's slab.
     pub vertices: Array<Vertex>,
+    // Points to an array of `Indices` in the stage's slab.
+    pub indices: Array<u32>,
     // Points to a `PbrMaterial` in the stage's slab.
     pub material: Id<PbrMaterial>,
 }
@@ -914,57 +916,29 @@ pub struct GltfVertexData {
     pub primitive_index: u32,
 }
 
-#[repr(u32)]
+#[repr(C)]
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
-#[derive(Clone, Copy, PartialEq)]
-pub enum VertexData {
-    Native(Id<NativeVertexData>),
-    Gltf(Id<GltfVertexData>),
+#[derive(Clone, Copy, PartialEq, Slabbed)]
+pub struct VertexData {
+    // The hash of the vertex data. This is used to determine how to read
+    // the vertex data from the slab.
+    pub hash: u32,
+    // The first index of the vertex data in the slab.
+    pub index: u32,
 }
 
 impl Default for VertexData {
     fn default() -> Self {
-        VertexData::Native(Id::NONE)
+        VertexData {
+            hash: 0,
+            index: u32::MAX,
+        }
     }
 }
 
-impl Slabbed for VertexData {
-    fn slab_size() -> usize {
-        2
-    }
-
-    fn read_slab(&mut self, index: usize, slab: &[u32]) -> usize {
-        let mut proxy = 0u32;
-        let index = proxy.read_slab(index, slab);
-        match proxy {
-            0 => {
-                let mut native = Id::default();
-                let index = native.read_slab(index, slab);
-                *self = Self::Native(native);
-                index
-            }
-            1 => {
-                let mut gltf = Id::default();
-                let index = gltf.read_slab(index, slab);
-                *self = Self::Gltf(gltf);
-                index
-            }
-            _ => index,
-        }
-    }
-
-    fn write_slab(&self, index: usize, slab: &mut [u32]) -> usize {
-        match self {
-            Self::Native(native) => {
-                let index = 0u32.write_slab(index, slab);
-                native.write_slab(index, slab)
-            }
-            Self::Gltf(gltf) => {
-                let index = 1u32.write_slab(index, slab);
-                gltf.write_slab(index, slab)
-            }
-        }
-    }
+impl VertexData {
+    pub const NATIVE: u32 = 0;
+    pub const GLTF: u32 = 1;
 }
 
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
@@ -1008,13 +982,24 @@ impl RenderUnit {
         slab: &[u32],
     ) -> (Vertex, Transform, Id<PbrMaterial>) {
         let transform = slab.read(self.transform);
-        match self.vertex_data {
-            VertexData::Native(id) => {
-                let NativeVertexData { vertices, material } = slab.read(id);
-                let vertex = slab.read(vertices.at(vertex_index as usize));
+        match self.vertex_data.hash {
+            VertexData::NATIVE => {
+                let id = Id::<NativeVertexData>::from(self.vertex_data.index);
+                let NativeVertexData {
+                    vertices,
+                    indices,
+                    material,
+                } = slab.read(id);
+                let index = if indices.is_empty() {
+                    vertex_index
+                } else {
+                    slab.read(indices.at(vertex_index as usize))
+                };
+                let vertex = slab.read(vertices.at(index as usize));
                 (vertex, transform, material)
             }
-            VertexData::Gltf(id) => {
+            VertexData::GLTF => {
+                let id = Id::<GltfVertexData>::from(self.vertex_data.index);
                 let GltfVertexData {
                     parent_node_path: _,
                     mesh,
@@ -1027,6 +1012,7 @@ impl RenderUnit {
                 let vertex = primitive.get_vertex(vertex_index as usize, slab);
                 (vertex, transform, material)
             }
+            _ => Default::default(),
         }
     }
 }

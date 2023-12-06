@@ -1208,57 +1208,6 @@ mod test {
     use crate::{camera, Id, LightingModel, RenderGraphConfig, Renderling, Vertex};
 
     #[test]
-    // tests importing a gltf file and rendering the first image as a 2d object
-    // ensures we are decoding images correctly
-    fn images() {
-        let mut r = Renderling::headless(100, 100).with_background_color(Vec4::splat(1.0));
-        let mut builder = r.new_scene();
-        let _loader = builder.gltf_load("../../gltf/cheetah_cone.glb").unwrap();
-        let (projection, view) = camera::default_ortho2d(100.0, 100.0);
-        builder.set_camera(projection, view);
-        let material_id = builder.add_material(PbrMaterial {
-            albedo_texture: Id::new(0),
-            lighting_model: LightingModel::NO_LIGHTING,
-            ..Default::default()
-        });
-        let _img = builder
-            .new_entity()
-            .with_meshlet({
-                let vs = vec![
-                    Vertex::default()
-                        .with_position([0.0, 0.0, 0.0])
-                        .with_uv0([0.0, 0.0]),
-                    Vertex::default()
-                        .with_position([1.0, 0.0, 0.0])
-                        .with_uv0([1.0, 0.0]),
-                    Vertex::default()
-                        .with_position([1.0, 1.0, 0.0])
-                        .with_uv0([1.0, 1.0]),
-                    Vertex::default()
-                        .with_position([0.0, 1.0, 0.0])
-                        .with_uv0([0.0, 1.0]),
-                ];
-                [0, 3, 2, 0, 2, 1].map(|i| vs[i])
-            })
-            .with_material(material_id)
-            .with_scale(Vec3::new(100.0, 100.0, 1.0))
-            .build();
-        let scene = builder.build().unwrap();
-        let (device, queue) = r.get_device_and_queue_owned();
-        let texture =
-            futures_lite::future::block_on(scene.textures.read_gpu(&device, &queue, 0, 1)).unwrap()
-                [0];
-        println!("{texture:?}");
-        r.setup_render_graph(RenderGraphConfig {
-            scene: Some(scene),
-            with_screen_capture: true,
-            ..Default::default()
-        });
-        let img = r.render_image().unwrap();
-        img_diff::assert_img_eq("gltf_images.png", img);
-    }
-
-    #[test]
     fn simple_texture() {
         let size = 100;
         let mut r =

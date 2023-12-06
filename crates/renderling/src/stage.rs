@@ -732,6 +732,7 @@ mod test {
     }
 
     #[test]
+    // Tests that we can create a stage and draw a triangle on it.
     fn stage_new() {
         let mut r = Renderling::headless(100, 100).with_background_color(glam::Vec4::splat(1.0));
         let (device, queue) = r.get_device_and_queue_owned();

@@ -876,6 +876,7 @@ impl Stage {
                         vertex_count: super::get_vertex_count(&primitive),
                         transform,
                         camera: camera_id,
+                        ..Default::default()
                     };
                     self.draw_unit(&render_unit)
                 })
@@ -920,6 +921,10 @@ impl Stage {
 #[cfg(test)]
 mod test {
     use glam::{Vec2, Vec3, Vec4};
+    use renderling_shader::{
+        pbr::PbrMaterial,
+        stage::{LightingModel, NativeVertexData, Transform, Vertex, VertexData},
+    };
 
     use crate::{
         shader::{
@@ -1171,5 +1176,63 @@ mod test {
 
         let img = r.render_image().unwrap();
         img_diff::assert_img_eq("gltf_minimal_mesh.png", img);
+    }
+
+    #[test]
+    // Tests importing a gltf file and rendering the first image as a 2d object.
+    //
+    // This ensures we are decoding images correctly.
+    fn stage_gltf_images() {
+        let mut r = Renderling::headless(100, 100).with_background_color(Vec4::splat(1.0));
+        let (device, queue) = r.get_device_and_queue_owned();
+        let stage = Stage::new(device, queue).with_lighting(false);
+        stage.configure_graph(&mut r, true);
+        let (document, buffers, images) = gltf::import("../../gltf/cheetah_cone.glb").unwrap();
+        let (projection, view) = crate::camera::default_ortho2d(100.0, 100.0);
+        let camera_id = stage.append(&Camera {
+            projection,
+            view,
+            position: Vec3::ZERO,
+        });
+        let material_id = stage.append(&PbrMaterial {
+            albedo_texture: Id::new(0),
+            lighting_model: LightingModel::NO_LIGHTING,
+            ..Default::default()
+        });
+        let vertices = stage.append_array(&vec![
+            Vertex::default()
+                .with_position([0.0, 0.0, 0.0])
+                .with_color([1.0, 0.0, 0.0, 1.0])
+                .with_uv0([0.0, 0.0]),
+            Vertex::default()
+                .with_position([1.0, 0.0, 0.0])
+                .with_color([0.0, 1.0, 0.0, 1.0])
+                .with_uv0([1.0, 0.0]),
+            Vertex::default()
+                .with_position([1.0, 1.0, 0.0])
+                .with_color([0.0, 0.0, 1.0, 1.0])
+                .with_uv0([1.0, 1.0]),
+            Vertex::default()
+                .with_position([0.0, 1.0, 0.0])
+                .with_uv0([0.0, 1.0]),
+        ]);
+        let indices = stage.append_array(&[0, 3, 2, 0, 2, 1]);
+        let native_data = stage.append(&NativeVertexData {
+            vertices,
+            indices,
+            material: material_id,
+        });
+        let transform = stage.append(&Transform {
+            scale: Vec3::new(100.0, 100.0, 1.0),
+            ..Default::default()
+        });
+        let unit_id = stage.draw_unit(&RenderUnit {
+            vertex_data: VertexData::Native(native_data),
+            camera: camera_id,
+            transform,
+            vertex_count: indices.len() as u32,
+        });
+        let img = r.render_image().unwrap();
+        img_diff::assert_img_eq("gltf_images.png", img);
     }
 }

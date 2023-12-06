@@ -448,6 +448,7 @@ mod test {
             &NativeVertexData {
                 vertices,
                 material: Id::new(666),
+                ..Default::default()
             },
         );
         let unit = RenderUnit {
