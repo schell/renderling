@@ -758,7 +758,7 @@ impl GltfLoader {
                                 b.position.xyz(),
                                 b.uv.xy(),
                                 c.position.xyz(),
-                                c.position.xy(),
+                                c.uv.xy(),
                             );
                             debug_assert!(!tangent.w.is_nan(), "tangent is NaN");
                             a.tangent = tangent;
