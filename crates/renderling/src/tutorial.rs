@@ -2,7 +2,8 @@
 
 #[cfg(test)]
 mod test {
-    use glam::{Vec3, Vec4};
+    use glam::{Mat4, Quat, Vec3, Vec4};
+    use renderling_shader::slab::Slab;
 
     use crate::{
         frame::FrameTextureView,
@@ -10,7 +11,7 @@ mod test {
         shader::{
             array::Array,
             id::Id,
-            stage::{Camera, RenderUnit, Vertex},
+            stage::{Camera, NativeVertexData, RenderUnit, Transform, Vertex, VertexData},
         },
         DepthTexture, Device, Queue, Renderling,
     };
@@ -520,14 +521,32 @@ mod test {
             },
         ];
         let vertices = slab.append_array(&device, &queue, &geometry);
+        let vertex_data_id = slab.append(
+            &device,
+            &queue,
+            &NativeVertexData {
+                vertices,
+                ..Default::default()
+            },
+        );
         let unit = RenderUnit {
-            vertices,
+            vertex_data: VertexData::Native(vertex_data_id),
             ..Default::default()
         };
         let unit_id = slab.append(&device, &queue, &unit);
+        let data =
+            futures_lite::future::block_on(slab.read_raw(&device, &queue, 0, slab.len())).unwrap();
+        let (vertex, t, _) = unit.get_vertex_details(0, &data);
+        assert_eq!(geometry[0], vertex);
+        assert_eq!(Vec3::ZERO, t.translation);
+        assert_eq!(Quat::IDENTITY, t.rotation);
+        assert_eq!(Vec3::ONE, t.scale);
+        let camera = data.read(unit.camera);
+        assert_eq!(Mat4::IDENTITY, camera.projection);
+        assert_eq!(Mat4::IDENTITY, camera.view);
 
         // Create a bindgroup for the slab so our shader can read out the types.
-        let label = Some("slabbed isosceles triangle");
+        let label = Some("slabbed render unit");
         let bindgroup_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label,
             entries: &[wgpu::BindGroupLayoutEntry {
@@ -605,14 +624,14 @@ mod test {
             pipeline: wgpu::RenderPipeline,
             bindgroup: wgpu::BindGroup,
             unit_id: Id<RenderUnit>,
-            unit: RenderUnit,
+            unit_vertex_count: u32,
         }
 
         let app = App {
             pipeline,
             bindgroup,
             unit_id,
-            unit,
+            unit_vertex_count: vertices.len() as u32,
         };
         r.graph.add_resource(app);
 
@@ -651,7 +670,7 @@ mod test {
                 render_pass.set_pipeline(&app.pipeline);
                 render_pass.set_bind_group(0, &app.bindgroup, &[]);
                 render_pass.draw(
-                    0..app.unit.vertices.len() as u32,
+                    0..app.unit_vertex_count,
                     app.unit_id.inner()..app.unit_id.inner() + 1,
                 );
             }
@@ -723,12 +742,28 @@ mod test {
                 ..Default::default()
             },
         );
+        let transform_id = slab.append(
+            &device,
+            &queue,
+            &Transform {
+                translation: Vec3::new(50.0, 50.0, 0.0),
+                scale: Vec3::new(50.0, 50.0, 1.0),
+                ..Default::default()
+            },
+        );
+        let vertex_data_id = slab.append(
+            &device,
+            &queue,
+            &NativeVertexData {
+                vertices,
+                ..Default::default()
+            },
+        );
         let unit = RenderUnit {
-            vertices,
+            vertex_data: renderling_shader::stage::VertexData::Native(vertex_data_id),
             camera: camera_id,
-            position: Vec3::new(50.0, 50.0, 0.0),
-            scale: Vec3::new(50.0, 50.0, 1.0),
-            ..Default::default()
+            transform: transform_id,
+            vertex_count: vertices.len() as u32,
         };
         let unit_id = slab.append(&device, &queue, &unit);
 
@@ -811,14 +846,14 @@ mod test {
             pipeline: wgpu::RenderPipeline,
             bindgroup: wgpu::BindGroup,
             unit_id: Id<RenderUnit>,
-            unit: RenderUnit,
+            unit_vertex_count: u32,
         }
 
         let app = App {
             pipeline,
             bindgroup,
             unit_id,
-            unit,
+            unit_vertex_count: vertices.len() as u32,
         };
         r.graph.add_resource(app);
 
@@ -857,7 +892,7 @@ mod test {
                 render_pass.set_pipeline(&app.pipeline);
                 render_pass.set_bind_group(0, &app.bindgroup, &[]);
                 render_pass.draw(
-                    0..app.unit.vertices.len() as u32,
+                    0..app.unit_vertex_count,
                     app.unit_id.inner()..app.unit_id.inner() + 1,
                 );
             }

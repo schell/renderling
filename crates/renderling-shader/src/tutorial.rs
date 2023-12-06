@@ -99,10 +99,9 @@ pub fn slabbed_render_unit(
 ) {
     let unit_id = Id::<RenderUnit>::from(instance_index);
     let unit = slab.read(unit_id);
-    let vertex_id = unit.vertices.at(vertex_index as usize);
-    let vertex = slab.read(vertex_id);
+    let (vertex, tfrm, _) = unit.get_vertex_details(vertex_index, slab);
     let camera = slab.read(unit.camera);
-    let model = Mat4::from_scale_rotation_translation(unit.scale, unit.rotation, unit.position);
+    let model = Mat4::from_scale_rotation_translation(tfrm.scale, tfrm.rotation, tfrm.translation);
     *clip_pos = camera.projection * camera.view * model * vertex.position.xyz().extend(1.0);
     *out_color = vertex.color;
 }

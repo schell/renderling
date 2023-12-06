@@ -742,13 +742,24 @@ impl GltfLoader {
                 vertices.chunks_mut(3).for_each(|t| match t {
                     [(a, _), (b, _), (c, _)] => {
                         if gen_normals {
-                            let n = Vertex::generate_normal(*a, *b, *c);
+                            let n = Vertex::generate_normal(
+                                a.position.xyz(),
+                                b.position.xyz(),
+                                c.position.xyz(),
+                            );
                             a.normal = n.extend(a.normal.w);
                             b.normal = n.extend(b.normal.w);
                             c.normal = n.extend(c.normal.w);
                         }
                         if gen_tangents {
-                            let tangent = Vertex::generate_tangent(*a, *b, *c);
+                            let tangent = Vertex::generate_tangent(
+                                a.position.xyz(),
+                                a.uv.xy(),
+                                b.position.xyz(),
+                                b.uv.xy(),
+                                c.position.xyz(),
+                                c.uv.xy(),
+                            );
                             debug_assert!(!tangent.w.is_nan(), "tangent is NaN");
                             a.tangent = tangent;
                             b.tangent = tangent;
@@ -1245,56 +1256,6 @@ mod test {
         });
         let img = r.render_image().unwrap();
         img_diff::assert_img_eq("gltf_images.png", img);
-    }
-
-    #[test]
-    // Ensures we can read a minimal gltf file with a simple triangle mesh.
-    fn minimal_mesh() {
-        let mut r =
-            Renderling::headless(20, 20).with_background_color(Vec3::splat(0.0).extend(1.0));
-        let mut builder = r.new_scene();
-        let _loader = builder
-            .gltf_load("../../gltf/gltfTutorial_003_MinimalGltfFile.gltf")
-            .unwrap();
-        let projection = camera::perspective(20.0, 20.0);
-        let view = camera::look_at(Vec3::new(0.5, 0.5, 2.0), Vec3::new(0.5, 0.5, 0.0), Vec3::Y);
-        builder.set_camera(projection, view);
-        let scene = builder.build().unwrap();
-        r.setup_render_graph(RenderGraphConfig {
-            scene: Some(scene),
-            with_screen_capture: true,
-            ..Default::default()
-        });
-
-        let img = r.render_image().unwrap();
-        img_diff::assert_img_eq("gltf_minimal_mesh.png", img);
-    }
-
-    #[test]
-    // ensures we can
-    // * read simple meshes
-    // * support multiple nodes that reference the same mesh
-    // * support primitives w/ positions and normal attributes
-    // * support transforming nodes (T * R * S)
-    fn simple_meshes() {
-        let mut r =
-            Renderling::headless(100, 50).with_background_color(Vec3::splat(0.0).extend(1.0));
-        let mut builder = r.new_scene();
-        let _loader = builder
-            .gltf_load("../../gltf/gltfTutorial_008_SimpleMeshes.gltf")
-            .unwrap();
-        let projection = camera::perspective(100.0, 50.0);
-        let view = camera::look_at(Vec3::new(1.0, 0.5, 1.5), Vec3::new(1.0, 0.5, 0.0), Vec3::Y);
-        builder.set_camera(projection, view);
-        let scene = builder.build().unwrap();
-        r.setup_render_graph(RenderGraphConfig {
-            scene: Some(scene),
-            with_screen_capture: true,
-            ..Default::default()
-        });
-
-        let img = r.render_image().unwrap();
-        img_diff::assert_img_eq("gltf_simple_meshes.png", img);
     }
 
     #[test]

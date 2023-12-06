@@ -19,6 +19,7 @@ use crate::{
     array::Array,
     bits::{bits, extract, insert},
     debug::*,
+    gltf::{GltfMesh, GltfNode},
     id::{Id, ID_NONE},
     pbr::{self, PbrMaterial},
     slab::{Slab, Slabbed},
@@ -136,18 +137,18 @@ impl Vertex {
         mat
     }
 
-    pub fn generate_normal(a: Vertex, b: Vertex, c: Vertex) -> Vec3 {
-        let ab = a.position.xyz() - b.position.xyz();
-        let ac = a.position.xyz() - c.position.xyz();
+    pub fn generate_normal(a: Vec3, b: Vec3, c: Vec3) -> Vec3 {
+        let ab = a - b;
+        let ac = a - c;
         ab.cross(ac).normalize()
     }
 
-    pub fn generate_tangent(a: Vertex, b: Vertex, c: Vertex) -> Vec4 {
-        let ab = b.position.xyz() - a.position.xyz();
-        let ac = c.position.xyz() - a.position.xyz();
+    pub fn generate_tangent(a: Vec3, a_uv: Vec2, b: Vec3, b_uv: Vec2, c: Vec3, c_uv: Vec2) -> Vec4 {
+        let ab = b - a;
+        let ac = c - a;
         let n = ab.cross(ac);
-        let d_uv1 = b.uv.xy() - a.uv.xy();
-        let d_uv2 = c.uv.xy() - a.uv.xy();
+        let d_uv1 = b_uv - a_uv;
+        let d_uv2 = c_uv - a_uv;
         let denom = d_uv1.x * d_uv2.y - d_uv2.x * d_uv1.y;
         let denom_sign = if denom >= 0.0 { 1.0 } else { -1.0 };
         let denom = denom.abs().max(f32::EPSILON) * denom_sign;
@@ -891,33 +892,141 @@ pub struct StageLegend {
     pub light_array: Array<GpuLight>,
 }
 
-/// A fully-computed unit of rendering, roughly meaning a mesh with model matrix
-/// transformations.
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[repr(C)]
-#[derive(Clone, Copy, PartialEq, Slabbed)]
-pub struct RenderUnit {
+#[derive(Default, Clone, Copy, PartialEq, Slabbed)]
+pub struct NativeVertexData {
     // Points to an array of `Vertex` in the stage's slab.
     pub vertices: Array<Vertex>,
     // Points to a `PbrMaterial` in the stage's slab.
     pub material: Id<PbrMaterial>,
-    // Points to a `Camera` in the stage's slab.
-    pub camera: Id<Camera>,
+}
 
-    pub position: Vec3,
+#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
+#[repr(C)]
+#[derive(Default, Clone, Copy, PartialEq, Slabbed)]
+pub struct GltfVertexData {
+    // A path of node ids that leads to the node that contains the mesh.
+    pub parent_node_path: Array<Id<GltfNode>>,
+    // Points to a `GltfMesh` in the stage's slab.
+    pub mesh: Id<GltfMesh>,
+    // The index of the primitive within the mesh that this unit draws.
+    pub primitive_index: u32,
+}
+
+#[repr(u32)]
+#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
+#[derive(Clone, Copy, PartialEq)]
+pub enum VertexData {
+    Native(Id<NativeVertexData>),
+    Gltf(Id<GltfVertexData>),
+}
+
+impl Default for VertexData {
+    fn default() -> Self {
+        VertexData::Native(Id::NONE)
+    }
+}
+
+impl Slabbed for VertexData {
+    fn slab_size() -> usize {
+        2
+    }
+
+    fn read_slab(&mut self, index: usize, slab: &[u32]) -> usize {
+        let mut proxy = 0u32;
+        let index = proxy.read_slab(index, slab);
+        match proxy {
+            0 => {
+                let mut native = Id::default();
+                let index = native.read_slab(index, slab);
+                *self = Self::Native(native);
+                index
+            }
+            1 => {
+                let mut gltf = Id::default();
+                let index = gltf.read_slab(index, slab);
+                *self = Self::Gltf(gltf);
+                index
+            }
+            _ => index,
+        }
+    }
+
+    fn write_slab(&self, index: usize, slab: &mut [u32]) -> usize {
+        match self {
+            Self::Native(native) => {
+                let index = 0u32.write_slab(index, slab);
+                native.write_slab(index, slab)
+            }
+            Self::Gltf(gltf) => {
+                let index = 1u32.write_slab(index, slab);
+                gltf.write_slab(index, slab)
+            }
+        }
+    }
+}
+
+#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
+#[repr(C)]
+#[derive(Clone, Copy, PartialEq, Slabbed)]
+pub struct Transform {
+    pub translation: Vec3,
     pub rotation: Quat,
     pub scale: Vec3,
 }
 
-impl Default for RenderUnit {
+impl Default for Transform {
     fn default() -> Self {
         Self {
-            vertices: Default::default(),
-            material: Default::default(),
-            camera: Default::default(),
-            position: Vec3::ZERO,
+            translation: Vec3::ZERO,
             rotation: Quat::IDENTITY,
             scale: Vec3::ONE,
+        }
+    }
+}
+
+/// A fully-computed unit of rendering, roughly meaning a mesh with model matrix
+/// transformations.
+#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
+#[repr(C)]
+#[derive(Default, Clone, Copy, PartialEq, Slabbed)]
+pub struct RenderUnit {
+    pub vertex_data: VertexData,
+    // Points to a `Camera` in the stage's slab.
+    pub camera: Id<Camera>,
+    // Points to a `Transform` in the stage's slab.
+    pub transform: Id<Transform>,
+    // Number of vertices to draw for this unit.
+    pub vertex_count: u32,
+}
+
+impl RenderUnit {
+    pub fn get_vertex_details(
+        &self,
+        vertex_index: u32,
+        slab: &[u32],
+    ) -> (Vertex, Transform, Id<PbrMaterial>) {
+        let transform = slab.read(self.transform);
+        match self.vertex_data {
+            VertexData::Native(id) => {
+                let NativeVertexData { vertices, material } = slab.read(id);
+                let vertex = slab.read(vertices.at(vertex_index as usize));
+                (vertex, transform, material)
+            }
+            VertexData::Gltf(id) => {
+                let GltfVertexData {
+                    parent_node_path: _,
+                    mesh,
+                    primitive_index,
+                } = slab.read(id);
+                // TODO: check nodes for skinning
+                let mesh = slab.read(mesh);
+                let primitive = slab.read(mesh.primitives.at(primitive_index as usize));
+                let material = primitive.material;
+                let vertex = primitive.get_vertex(vertex_index as usize, slab);
+                (vertex, transform, material)
+            }
         }
     }
 }
@@ -939,24 +1048,24 @@ pub fn new_stage_vertex(
     out_bitangent: &mut Vec3,
     // position of the vertex/fragment in world space
     out_pos: &mut Vec3,
-    #[spirv(position)] gl_pos: &mut Vec4,
+    #[spirv(position)] clip_pos: &mut Vec4,
 ) {
     let unit_id: Id<RenderUnit> = Id::from(instance_index);
     let unit = slab.read(unit_id);
-    let vertex = slab.read(unit.vertices.at(vertex_index as usize));
+    let (vertex, tfrm, material) = unit.get_vertex_details(vertex_index, slab);
     let model_matrix =
-        Mat4::from_scale_rotation_translation(unit.scale, unit.rotation, unit.position);
-    *out_material = unit.material.into();
+        Mat4::from_scale_rotation_translation(tfrm.scale, tfrm.rotation, tfrm.translation);
+    *out_material = material.into();
     *out_color = vertex.color;
     *out_uv0 = vertex.uv.xy();
     *out_uv1 = vertex.uv.zw();
-    let scale2 = unit.scale * unit.scale;
+    let scale2 = tfrm.scale * tfrm.scale;
     let normal = vertex.normal.xyz().alt_norm_or_zero();
     let tangent = vertex.tangent.xyz().alt_norm_or_zero();
-    let normal_w = (model_matrix * (normal / scale2).extend(0.0))
+    let normal_w: Vec3 = (model_matrix * (normal / scale2).extend(0.0))
         .xyz()
         .alt_norm_or_zero();
-    let tangent_w = (model_matrix * tangent.extend(0.0))
+    let tangent_w: Vec3 = (model_matrix * tangent.extend(0.0))
         .xyz()
         .alt_norm_or_zero();
     let bitangent_w = normal_w.cross(tangent_w) * if vertex.tangent.w >= 0.0 { 1.0 } else { -1.0 };
@@ -967,7 +1076,7 @@ pub fn new_stage_vertex(
     *out_pos = view_pos.xyz();
     let camera = slab.read(unit.camera);
     *out_camera = unit.camera.into();
-    *gl_pos = camera.projection * camera.view * view_pos;
+    *clip_pos = camera.projection * camera.view * view_pos;
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1276,6 +1385,23 @@ pub fn compute_cull_entities(
         call.vertex_count = entity.mesh_vertex_count;
     }
     draws[i] = call;
+}
+
+#[spirv(compute(threads(32)))]
+/// A shader to ensure that we can extract i8 and i16 values from a storage buffer.
+pub fn test_i8_i16_extraction(
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] slab: &mut [u32],
+    #[spirv(global_invocation_id)] global_id: UVec3,
+) {
+    let index = global_id.x as usize;
+    let (value, _, _) = crate::bits::extract_i8(index, 2, slab);
+    if value > 0 {
+        slab[index] = value as u32;
+    }
+    let (value, _, _) = crate::bits::extract_i16(index, 2, slab);
+    if value > 0 {
+        slab[index] = value as u32;
+    }
 }
 
 #[cfg(test)]

@@ -4,12 +4,13 @@ use crate::{
     shader::{
         gltf::*,
         pbr::PbrMaterial,
-        stage::LightingModel,
+        stage::{Camera, GltfVertexData, LightingModel, VertexData},
         texture::{GpuTexture, TextureAddressMode, TextureModes},
     },
     SceneImage,
 };
-use glam::{Quat, Vec3, Vec4};
+use glam::{Quat, Vec2, Vec3, Vec4};
+use renderling_shader::stage::{Transform, Vertex};
 use snafu::{OptionExt, ResultExt, Snafu};
 
 #[derive(Debug, Snafu)]
@@ -51,10 +52,66 @@ impl From<crate::slab::SlabError> for StageGltfError {
     }
 }
 
+pub fn get_vertex_count(primitive: &gltf::Primitive<'_>) -> u32 {
+    if let Some(indices) = primitive.indices() {
+        let count = indices.count() as u32;
+        log::trace!("    has {count} indices");
+        count
+    } else {
+        if let Some(positions) = primitive.get(&gltf::Semantic::Positions) {
+            let count = positions.count() as u32;
+            log::trace!("    has {count} positions");
+            count
+        } else {
+            log::trace!("    has no indices nor positions");
+            0
+        }
+    }
+}
+
+pub fn make_accessor(accessor: gltf::Accessor<'_>, buffers: &Array<GltfBuffer>) -> GltfAccessor {
+    let size = accessor.size() as u32;
+    let buffer_view = accessor.view().unwrap();
+    let view_buffer = buffer_view.buffer();
+    let buffer_index = view_buffer.index();
+    let buffer = buffers.at(buffer_index);
+    let count = accessor.count() as u32;
+    let view_offset = buffer_view.offset() as u32;
+    let view_stride = buffer_view.stride().unwrap_or(0) as u32;
+    let component_type = match accessor.data_type() {
+        gltf::accessor::DataType::I8 => DataType::I8,
+        gltf::accessor::DataType::U8 => DataType::U8,
+        gltf::accessor::DataType::I16 => DataType::I16,
+        gltf::accessor::DataType::U16 => DataType::U16,
+        gltf::accessor::DataType::U32 => DataType::U32,
+        gltf::accessor::DataType::F32 => DataType::F32,
+    };
+    let dimensions = match accessor.dimensions() {
+        gltf::accessor::Dimensions::Scalar => Dimensions::Scalar,
+        gltf::accessor::Dimensions::Vec2 => Dimensions::Vec2,
+        gltf::accessor::Dimensions::Vec3 => Dimensions::Vec3,
+        gltf::accessor::Dimensions::Vec4 => Dimensions::Vec4,
+        gltf::accessor::Dimensions::Mat2 => Dimensions::Mat2,
+        gltf::accessor::Dimensions::Mat3 => Dimensions::Mat3,
+        gltf::accessor::Dimensions::Mat4 => Dimensions::Mat4,
+    };
+    let normalized = accessor.normalized();
+    GltfAccessor {
+        size,
+        count,
+        buffer,
+        view_offset,
+        view_stride,
+        data_type: component_type,
+        dimensions,
+        normalized,
+    }
+}
+
 impl Stage {
     pub fn load_gltf_document(
         &self,
-        document: gltf::Document,
+        document: &gltf::Document,
         buffer_data: Vec<gltf::buffer::Data>,
         images: Vec<gltf::image::Data>,
     ) -> Result<GltfDocument, StageGltfError> {
@@ -69,64 +126,28 @@ impl Stage {
 
         log::trace!("Loading views into the GPU");
         let views = self.allocate_array(document.views().len());
-        for view in document.views() {
+        log::trace!("  reserved array: {views:?}");
+        for (i, view) in document.views().enumerate() {
             let buffer = buffers.at(view.buffer().index());
             let offset = view.offset() as u32;
             let length = view.length() as u32;
             let stride = view.stride().unwrap_or_default() as u32;
-            self.write(
-                views.at(view.index()),
-                &GltfBufferView {
-                    buffer,
-                    offset,
-                    length,
-                    stride,
-                },
-            )?;
+            let id = views.at(view.index());
+            let gltf_view = GltfBufferView {
+                buffer,
+                offset,
+                length,
+                stride,
+            };
+            log::trace!("  view {i} id: {id:#?}");
+            log::trace!("  writing view: {gltf_view:#?}");
+            self.write(id, &gltf_view)?;
         }
 
         log::trace!("Loading accessors into the GPU");
         let accessors = document
             .accessors()
-            .map(|accessor| {
-                let size = accessor.size() as u32;
-                let buffer_view = accessor.view().unwrap();
-                let view_buffer = buffer_view.buffer();
-                let buffer_index = view_buffer.index();
-                let buffer = buffers.at(buffer_index);
-                let count = accessor.count() as u32;
-                let view_offset = buffer_view.offset() as u32;
-                let view_stride = buffer_view.stride().unwrap_or(0) as u32;
-                let component_type = match accessor.data_type() {
-                    gltf::accessor::DataType::I8 => DataType::I8,
-                    gltf::accessor::DataType::U8 => DataType::U8,
-                    gltf::accessor::DataType::I16 => DataType::I16,
-                    gltf::accessor::DataType::U16 => DataType::U16,
-                    gltf::accessor::DataType::U32 => DataType::U32,
-                    gltf::accessor::DataType::F32 => DataType::F32,
-                };
-                let dimensions = match accessor.dimensions() {
-                    gltf::accessor::Dimensions::Scalar => Dimensions::Scalar,
-                    gltf::accessor::Dimensions::Vec2 => Dimensions::Vec2,
-                    gltf::accessor::Dimensions::Vec3 => Dimensions::Vec3,
-                    gltf::accessor::Dimensions::Vec4 => Dimensions::Vec4,
-                    gltf::accessor::Dimensions::Mat2 => Dimensions::Mat2,
-                    gltf::accessor::Dimensions::Mat3 => Dimensions::Mat3,
-                    gltf::accessor::Dimensions::Mat4 => Dimensions::Mat4,
-                };
-                let normalized = accessor.normalized();
-                let accessor = GltfAccessor {
-                    size,
-                    count,
-                    buffer,
-                    view_offset,
-                    view_stride,
-                    component_type,
-                    dimensions,
-                    normalized,
-                };
-                accessor
-            })
+            .map(|accessor| make_accessor(accessor, &buffers))
             .collect::<Vec<_>>();
         let accessors = self.append_array(&accessors);
 
@@ -370,12 +391,22 @@ impl Stage {
             *atlas = new_atlas;
         }
 
+        fn log_accessor(gltf_accessor: gltf::Accessor<'_>) {
+            log::trace!("      count: {}", gltf_accessor.count());
+            log::trace!("      size: {}", gltf_accessor.size());
+            log::trace!("      data_type: {:?}", gltf_accessor.data_type());
+            log::trace!("     dimensions: {:?}", gltf_accessor.dimensions());
+        }
         log::trace!("Loading meshes");
         let meshes = self.allocate_array::<GltfMesh>(document.meshes().len());
+        log::trace!("  reserved array: {meshes:#?}");
         for mesh in document.meshes() {
             let primitives = self.allocate_array::<GltfPrimitive>(mesh.primitives().len());
+            log::trace!("    reserved array: {primitives:#?}");
             for (j, primitive) in mesh.primitives().enumerate() {
+                log::trace!("  primitive {j}");
                 debug_assert_eq!(j, primitive.index());
+                let vertex_count = get_vertex_count(&primitive);
                 let material = primitive
                     .material()
                     .index()
@@ -383,56 +414,223 @@ impl Stage {
                     .unwrap_or(Id::NONE);
                 let indices = primitive
                     .indices()
-                    .map(|acc| accessors.at(acc.index()))
+                    .map(|acc| {
+                        let gltf_accessor = document.accessors().nth(acc.index()).unwrap();
+                        log::trace!("    indices:");
+                        log_accessor(gltf_accessor);
+                        accessors.at(acc.index())
+                    })
                     .unwrap_or_default();
                 let positions = primitive
                     .get(&gltf::Semantic::Positions)
-                    .map(|acc| accessors.at(acc.index()))
+                    .map(|acc| {
+                        let gltf_accessor = document.accessors().nth(acc.index()).unwrap();
+                        log::trace!("    positions:");
+                        log_accessor(gltf_accessor);
+                        accessors.at(acc.index())
+                    })
                     .unwrap_or_default();
+
+                // We may need the positions and uvs in-memory if we need
+                // to generate normals or tangents, so we'll keep them in
+                // a vec, if necessary, and access them through a function.
+                let mut position_vec: Option<Vec<Vec3>> = None;
+                fn get_positions<'a>(
+                    buffer_data: &[gltf::buffer::Data],
+                    primitive: &gltf::Primitive<'_>,
+                    position_vec: &'a mut Option<Vec<Vec3>>,
+                ) -> &'a Vec<Vec3> {
+                    if position_vec.is_none() {
+                        let reader = primitive.reader(|buffer| {
+                            let data = buffer_data.get(buffer.index())?;
+                            Some(data.0.as_slice())
+                        });
+                        let positions = reader
+                            .read_positions()
+                            .map(|ps| ps.map(Vec3::from).collect::<Vec<_>>())
+                            .unwrap_or_default();
+                        *position_vec = Some(positions);
+                    }
+                    // UNWRAP: safe because we just set it to `Some` if previously `None`
+                    position_vec.as_ref().unwrap()
+                }
+
+                let mut positions_and_uv_vec: Option<Vec<(Vec3, Vec2)>> = None;
+                fn get_uvs<'a>(
+                    buffer_data: &[gltf::buffer::Data],
+                    primitive: &gltf::Primitive<'_>,
+                    positions: &'a mut Option<Vec<Vec3>>,
+                    positions_and_uv_vec: &'a mut Option<Vec<(Vec3, Vec2)>>,
+                ) -> &'a Vec<(Vec3, Vec2)> {
+                    // ensures we have position
+                    if positions_and_uv_vec.is_none() {
+                        let positions = get_positions(buffer_data, primitive, positions);
+                        let reader = primitive.reader(|buffer| {
+                            let data = buffer_data.get(buffer.index())?;
+                            Some(data.0.as_slice())
+                        });
+                        let puvs: Vec<(Vec3, Vec2)> = reader
+                            .read_tex_coords(0)
+                            .map(|uvs| {
+                                positions
+                                    .iter()
+                                    .copied()
+                                    .zip(uvs.into_f32().map(Vec2::from))
+                                    .collect()
+                            })
+                            .unwrap_or_else(|| {
+                                positions
+                                    .iter()
+                                    .copied()
+                                    .zip(std::iter::repeat(Vec2::ZERO))
+                                    .collect()
+                            });
+                        *positions_and_uv_vec = Some(puvs);
+                    }
+                    // UNWRAP: safe because we just set it to `Some`
+                    positions_and_uv_vec.as_ref().unwrap()
+                }
+
                 let normals = primitive
                     .get(&gltf::Semantic::Normals)
-                    .map(|acc| accessors.at(acc.index()))
-                    .unwrap_or_default();
+                    .map(|acc| {
+                        let gltf_accessor = document.accessors().nth(acc.index()).unwrap();
+                        log::trace!("    normals:");
+                        log_accessor(gltf_accessor);
+                        accessors.at(acc.index())
+                    })
+                    .unwrap_or_else(|| {
+                        log::trace!("    generating normals");
+                        // Generate the normals
+                        let normals = get_positions(&buffer_data, &primitive, &mut position_vec)
+                            .chunks(3)
+                            .flat_map(|chunk| match chunk {
+                                [a, b, c] => {
+                                    let n = Vertex::generate_normal(*a, *b, *c);
+                                    [n, n, n]
+                                }
+                                _ => panic!("not triangles!"),
+                            })
+                            .collect::<Vec<_>>();
+                        let normals_array = self.append_array(&normals);
+                        let buffer = GltfBuffer(normals_array.into_u32_array());
+                        let buffer_id = self.append(&buffer);
+                        let accessor = GltfAccessor {
+                            size: 12,
+                            buffer: buffer_id,
+                            view_offset: 0,
+                            view_stride: 12,
+                            count: normals.len() as u32,
+                            data_type: DataType::F32,
+                            dimensions: Dimensions::Vec3,
+                            normalized: true,
+                        };
+                        self.append(&accessor)
+                    });
                 let tangents = primitive
                     .get(&gltf::Semantic::Tangents)
-                    .map(|acc| accessors.at(acc.index()))
-                    .unwrap_or_default();
+                    .map(|acc| {
+                        let gltf_accessor = document.accessors().nth(acc.index()).unwrap();
+                        log::trace!("    tangents:");
+                        log_accessor(gltf_accessor);
+                        accessors.at(acc.index())
+                    })
+                    .unwrap_or_else(|| {
+                        log::trace!("    generating tangents");
+                        let p_uvs = get_uvs(
+                            &buffer_data,
+                            &primitive,
+                            &mut position_vec,
+                            &mut positions_and_uv_vec,
+                        );
+                        let tangents = p_uvs
+                            .chunks(3)
+                            .flat_map(|chunk| match chunk {
+                                [(a, a_uv), (b, b_uv), (c, c_uv)] => {
+                                    let t =
+                                        Vertex::generate_tangent(*a, *a_uv, *b, *b_uv, *c, *c_uv);
+                                    [t, t, t]
+                                }
+                                _ => panic!("not triangles!"),
+                            })
+                            .collect::<Vec<_>>();
+                        let tangents_array = self.append_array(&tangents);
+                        let buffer = GltfBuffer(tangents_array.into_u32_array());
+                        let buffer_id = self.append(&buffer);
+                        let accessor = GltfAccessor {
+                            size: 12,
+                            buffer: buffer_id,
+                            view_offset: 0,
+                            view_stride: 12,
+                            count: tangents.len() as u32,
+                            data_type: DataType::F32,
+                            dimensions: Dimensions::Vec3,
+                            normalized: true,
+                        };
+                        self.append(&accessor)
+                    });
                 let colors = primitive
                     .get(&gltf::Semantic::Colors(0))
-                    .map(|acc| accessors.at(acc.index()))
+                    .map(|acc| {
+                        let gltf_accessor = document.accessors().nth(acc.index()).unwrap();
+                        log::trace!("    colors:");
+                        log_accessor(gltf_accessor);
+                        accessors.at(acc.index())
+                    })
                     .unwrap_or_default();
                 let tex_coords0 = primitive
                     .get(&gltf::Semantic::TexCoords(0))
-                    .map(|acc| accessors.at(acc.index()))
+                    .map(|acc| {
+                        let gltf_accessor = document.accessors().nth(acc.index()).unwrap();
+                        log::trace!("    tex_coords0:");
+                        log_accessor(gltf_accessor);
+                        accessors.at(acc.index())
+                    })
                     .unwrap_or_default();
                 let tex_coords1 = primitive
                     .get(&gltf::Semantic::TexCoords(1))
-                    .map(|acc| accessors.at(acc.index()))
+                    .map(|acc| {
+                        let gltf_accessor = document.accessors().nth(acc.index()).unwrap();
+                        log::trace!("    tex_coords1:");
+                        log_accessor(gltf_accessor);
+                        accessors.at(acc.index())
+                    })
                     .unwrap_or_default();
                 let joints = primitive
                     .get(&gltf::Semantic::Joints(0))
-                    .map(|acc| accessors.at(acc.index()))
+                    .map(|acc| {
+                        let gltf_accessor = document.accessors().nth(acc.index()).unwrap();
+                        log::trace!("    joints:");
+                        log_accessor(gltf_accessor);
+                        accessors.at(acc.index())
+                    })
                     .unwrap_or_default();
                 let weights = primitive
                     .get(&gltf::Semantic::Weights(0))
-                    .map(|acc| accessors.at(acc.index()))
+                    .map(|acc| {
+                        let gltf_accessor = document.accessors().nth(acc.index()).unwrap();
+                        log::trace!("    weights:");
+                        log_accessor(gltf_accessor);
+                        accessors.at(acc.index())
+                    })
                     .unwrap_or_default();
 
-                self.write(
-                    primitives.at(primitive.index()),
-                    &GltfPrimitive {
-                        material,
-                        indices,
-                        positions,
-                        normals,
-                        tangents,
-                        colors,
-                        tex_coords0,
-                        tex_coords1,
-                        joints,
-                        weights,
-                    },
-                )?;
+                let id = primitives.at(primitive.index());
+                let prim = GltfPrimitive {
+                    vertex_count: vertex_count as u32,
+                    material,
+                    indices,
+                    positions,
+                    normals,
+                    tangents,
+                    colors,
+                    tex_coords0,
+                    tex_coords1,
+                    joints,
+                    weights,
+                };
+                log::trace!("    writing primitive {id:?}:\n{prim:#?}");
+                self.write(id, &prim)?;
             }
             let weights = mesh.weights().unwrap_or(&[]);
             let weights = self.append_array(weights);
@@ -646,27 +844,332 @@ impl Stage {
             views,
         })
     }
+
+    // For now we have to keep the original document around to figure out
+    // what to draw.
+    fn draw_gltf_node_with<'a>(
+        &self,
+        gpu_doc: &GltfDocument,
+        camera_id: Id<Camera>,
+        node: gltf::Node<'a>,
+        parents: Vec<Id<GltfNode>>,
+    ) -> Vec<Id<RenderUnit>> {
+        let mut units = if let Some(mesh) = node.mesh() {
+            let primitives = mesh.primitives();
+            let mesh = gpu_doc.meshes.at(mesh.index());
+            primitives
+                .map(|primitive| {
+                    let parent_node_path = self.append_array(&parents);
+                    let vertex_data_id = self.append(&GltfVertexData {
+                        parent_node_path,
+                        mesh,
+                        primitive_index: primitive.index() as u32,
+                    });
+                    let (t, r, s) = node.transform().decomposed();
+                    let transform = self.append(&Transform {
+                        translation: Vec3::from(t),
+                        rotation: Quat::from_array(r),
+                        scale: Vec3::from(s),
+                    });
+                    let render_unit = RenderUnit {
+                        vertex_data: VertexData::Gltf(vertex_data_id),
+                        vertex_count: super::get_vertex_count(&primitive),
+                        transform,
+                        camera: camera_id,
+                    };
+                    self.draw_unit(&render_unit)
+                })
+                .collect::<Vec<_>>()
+        } else {
+            vec![]
+        };
+        for child in node.children() {
+            let mut parents = parents.clone();
+            parents.push(gpu_doc.nodes.at(child.index()));
+            units.extend(self.draw_gltf_node_with(gpu_doc, camera_id, child, parents));
+        }
+        units
+    }
+
+    /// Draw the given [`gltf::Node`] using the given [`Camera`] and return the ids of the
+    /// render units that were created.
+    pub fn draw_gltf_node(
+        &self,
+        gpu_doc: &GltfDocument,
+        camera_id: Id<Camera>,
+        node: gltf::Node<'_>,
+    ) -> Vec<Id<RenderUnit>> {
+        self.draw_gltf_node_with(gpu_doc, camera_id, node, vec![])
+    }
+
+    /// Draw the given [`gltf::Scene`] using the given [`Camera`] and return the ids of the
+    /// render units that were created.
+    pub fn draw_gltf_scene(
+        &self,
+        gpu_doc: &GltfDocument,
+        camera_id: Id<Camera>,
+        scene: gltf::Scene<'_>,
+    ) -> Vec<Id<RenderUnit>> {
+        scene
+            .nodes()
+            .flat_map(|node| self.draw_gltf_node(gpu_doc, camera_id, node))
+            .collect()
+    }
 }
 
 #[cfg(test)]
 mod test {
-    use glam::Vec3;
+    use glam::{Vec2, Vec3, Vec4};
 
-    use crate::{Renderling, Stage};
+    use crate::{
+        shader::{
+            array::Array,
+            gltf::*,
+            slab::Slab,
+            stage::{Camera, RenderUnit},
+        },
+        DrawUnit, Id, Renderling, Stage,
+    };
 
     #[test]
-    fn stage_normal_mapping_brick_sphere() {
-        crate::init_logging();
-        let size = 600;
-        let mut r =
-            Renderling::headless(size, size).with_background_color(Vec3::splat(1.0).extend(1.0));
-        let (device, queue) = r.get_device_and_queue_owned();
-        let stage = Stage::new(device, queue);
-        stage.configure_graph(&mut r, true);
+    fn get_vertex_count_primitive_sanity() {
+        let (document, _, _) =
+            gltf::import("../../gltf/gltfTutorial_008_SimpleMeshes.gltf").unwrap();
+        let prim = document
+            .meshes()
+            .next()
+            .unwrap()
+            .primitives()
+            .next()
+            .unwrap();
+        let vertex_count = super::get_vertex_count(&prim);
+        assert_eq!(3, vertex_count);
+    }
 
-        log::trace!("Reading gltf");
-        let (document, buffers, images) = gltf::import("../../gltf/red_brick_03_1k.glb").unwrap();
-        log::trace!("Loading gltf");
-        let _doc = stage.load_gltf_document(document, buffers, images).unwrap();
+    #[test]
+    fn accessor_sanity() {
+        println!("{:08b}", 1u8);
+        println!("{:08b}", 1i8);
+        println!("{:08b}", -1i8);
+        println!("{} {}", u8::MAX, i8::MAX);
+        let u16buffer = [1u16, 1u16, 1u16, 1u16];
+        for chunk in u16buffer.chunks(2) {
+            match chunk {
+                [a, b] => {
+                    println!("{a:016b} {b:016b}");
+                }
+                _ => panic!("bad chunk"),
+            }
+        }
+        let u32buffer = bytemuck::cast_slice::<u16, u32>(&u16buffer).to_vec(); //
+        for u in u32buffer.iter() {
+            println!("{u:032b}");
+        }
+        println!("u32buffer: {u32buffer:?}");
+        assert_eq!(2, u32buffer.len());
+        let mut data = [0u32; 256];
+        let buffer_index = data.write_slice(&u32buffer, 0);
+        assert_eq!(2, buffer_index);
+        let buffer = GltfBuffer(Array::new(0, buffer_index as u32));
+        let _ = data.write(&buffer, buffer_index);
+        let accessor = GltfAccessor {
+            size: 2,
+            count: 3,
+            buffer: Id::from(buffer_index),
+            view_offset: 0,
+            view_stride: 0,
+            data_type: DataType::U16,
+            dimensions: Dimensions::Scalar,
+            normalized: false,
+        };
+        let i0 = accessor.get_u32(0, &data);
+        assert_eq!(1, i0);
+        let i1 = accessor.get_u32(1, &data);
+        assert_eq!(1, i1);
+        let i2 = accessor.get_u32(2, &data);
+        assert_eq!(1, i2);
+    }
+
+    #[test]
+    // ensures we can
+    // * read simple meshes
+    // * support multiple nodes that reference the same mesh
+    // * support primitives w/ positions and normal attributes
+    // * support transforming nodes (T * R * S)
+    fn stage_gltf_simple_meshes() {
+        let mut r =
+            Renderling::headless(100, 50).with_background_color(Vec3::splat(0.0).extend(1.0));
+        let (device, queue) = r.get_device_and_queue_owned();
+        let (document, buffers, images) =
+            gltf::import("../../gltf/gltfTutorial_008_SimpleMeshes.gltf").unwrap();
+        let projection = crate::camera::perspective(100.0, 50.0);
+        let position = Vec3::new(1.0, 0.5, 1.5);
+        let view = crate::camera::look_at(position, Vec3::new(1.0, 0.5, 0.0), Vec3::Y);
+        let stage = Stage::new(device.clone(), queue.clone()).with_lighting(false);
+        stage.configure_graph(&mut r, true);
+        let gpu_doc = stage
+            .load_gltf_document(&document, buffers.clone(), images)
+            .unwrap();
+        let camera = Camera {
+            projection,
+            view,
+            position,
+        };
+        let camera_id = stage.append(&camera);
+
+        let default_scene = document.default_scene().unwrap();
+        let unit_ids = stage.draw_gltf_scene(&gpu_doc, camera_id, default_scene);
+        assert_eq!(2, unit_ids.len());
+
+        let data = futures_lite::future::block_on(stage.slab.read_raw(
+            &device,
+            &queue,
+            0,
+            stage.slab.len(),
+        ))
+        .unwrap();
+
+        #[allow(unused)]
+        #[derive(Debug, Default)]
+        struct VertexInvocation {
+            draw: DrawUnit,
+            instance_index: u32,
+            vertex_index: u32,
+            render_unit_id: Id<RenderUnit>,
+            render_unit: RenderUnit,
+            out_camera: u32,
+            out_material: u32,
+            out_color: Vec4,
+            out_uv0: Vec2,
+            out_uv1: Vec2,
+            out_norm: Vec3,
+            out_tangent: Vec3,
+            out_bitangent: Vec3,
+            out_pos: Vec3,
+            clip_pos: Vec4,
+        }
+
+        let draws = stage.get_draws();
+        let slab = &data;
+
+        for i in 0..gpu_doc.accessors.len() {
+            let accessor = slab.read(gpu_doc.accessors.at(i));
+            println!("accessor {i}: {accessor:#?}", i = i, accessor = accessor);
+            let buffer = slab.read(accessor.buffer);
+            println!("buffer: {buffer:#?}");
+            let buffer_data = slab.read_vec(buffer.0);
+            println!("buffer_data: {buffer_data:#?}");
+        }
+
+        let indices = draws
+            .iter()
+            .map(|draw| {
+                let unit_id = draw.id;
+                let unit = slab.read(unit_id);
+                let vertex_data_id = match unit.vertex_data {
+                    renderling_shader::stage::VertexData::Native(_) => panic!("should be gltf"),
+                    renderling_shader::stage::VertexData::Gltf(id) => id,
+                };
+                let vertex_data = slab.read(vertex_data_id);
+                let mesh = slab.read(vertex_data.mesh);
+                let primitive_id = mesh.primitives.at(vertex_data.primitive_index as usize);
+                let primitive = slab.read(primitive_id);
+                if primitive.indices.is_some() {
+                    let indices_accessor = slab.read(primitive.indices);
+                    (0..draw.vertex_count)
+                        .map(|i| {
+                            let index = indices_accessor.get_u32(i as usize, slab);
+                            index
+                        })
+                        .collect::<Vec<_>>()
+                } else {
+                    (0..draw.vertex_count).collect::<Vec<_>>()
+                }
+            })
+            .collect::<Vec<_>>();
+        assert_eq!([0, 1, 2], indices[0].as_slice());
+        assert_eq!([0, 1, 2], indices[1].as_slice());
+
+        let invocations = draws
+            .into_iter()
+            .flat_map(|draw| {
+                let render_unit_id = draw.id;
+                let instance_index = render_unit_id.inner();
+                let render_unit = data.read(render_unit_id);
+                let data = &data;
+                (0..draw.vertex_count).map(move |vertex_index| {
+                    let mut invocation = VertexInvocation {
+                        draw,
+                        render_unit_id,
+                        render_unit,
+                        instance_index,
+                        vertex_index,
+                        ..Default::default()
+                    };
+                    renderling_shader::stage::new_stage_vertex(
+                        instance_index,
+                        vertex_index,
+                        data,
+                        &mut invocation.out_camera,
+                        &mut invocation.out_material,
+                        &mut invocation.out_color,
+                        &mut invocation.out_uv0,
+                        &mut invocation.out_uv1,
+                        &mut invocation.out_norm,
+                        &mut invocation.out_tangent,
+                        &mut invocation.out_bitangent,
+                        &mut invocation.out_pos,
+                        &mut invocation.clip_pos,
+                    );
+                    invocation
+                })
+            })
+            .collect::<Vec<_>>();
+        let seen_positions = invocations
+            .iter()
+            .map(|inv| inv.out_pos)
+            .take(3)
+            .collect::<Vec<_>>();
+        let mesh = document.meshes().next().unwrap();
+        let prim = mesh.primitives().next().unwrap();
+        let expected_positions_reader = prim.reader(|buffer| Some(&buffers[buffer.index()]));
+        let expected_positions = expected_positions_reader
+            .read_positions()
+            .unwrap()
+            .map(|pos| Vec3::from(pos))
+            .collect::<Vec<_>>();
+        assert_eq!(expected_positions, seen_positions);
+
+        let img = r.render_image().unwrap();
+        img_diff::assert_img_eq("gltf_simple_meshes.png", img);
+    }
+
+    #[test]
+    // Ensures we can read a minimal gltf file with a simple triangle mesh.
+    fn minimal_mesh() {
+        let mut r =
+            Renderling::headless(20, 20).with_background_color(Vec3::splat(0.0).extend(1.0));
+        let (device, queue) = r.get_device_and_queue_owned();
+        let stage = Stage::new(device, queue).with_lighting(false);
+        stage.configure_graph(&mut r, true);
+        let (document, buffers, images) =
+            gltf::import("../../gltf/gltfTutorial_003_MinimalGltfFile.gltf").unwrap();
+        let gpu_doc = stage
+            .load_gltf_document(&document, buffers, images)
+            .unwrap();
+        let projection = crate::camera::perspective(20.0, 20.0);
+        let eye = Vec3::new(0.5, 0.5, 2.0);
+        let view = crate::camera::look_at(eye, Vec3::new(0.5, 0.5, 0.0), Vec3::Y);
+        let camera = Camera {
+            projection,
+            view,
+            position: Vec3::new(0.5, 0.5, 2.0),
+        };
+        let camera_id = stage.append(&camera);
+        let default_scene = document.default_scene().unwrap();
+        let _unit_ids = stage.draw_gltf_scene(&gpu_doc, camera_id, default_scene);
+
+        let img = r.render_image().unwrap();
+        img_diff::assert_img_eq("gltf_minimal_mesh.png", img);
     }
 }
