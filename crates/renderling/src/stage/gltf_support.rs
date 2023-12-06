@@ -10,7 +10,7 @@ use crate::{
     SceneImage,
 };
 use glam::{Quat, Vec2, Vec3, Vec4};
-use renderling_shader::stage::Vertex;
+use renderling_shader::stage::{Transform, Vertex};
 use snafu::{OptionExt, ResultExt, Snafu};
 
 #[derive(Debug, Snafu)]
@@ -515,12 +515,11 @@ impl Stage {
                         let normals_array = self.append_array(&normals);
                         let buffer = GltfBuffer(normals_array.into_u32_array());
                         let buffer_id = self.append(&buffer);
-                        debug_assert_eq!(8 * 3, std::mem::size_of::<[f32; 3]>());
                         let accessor = GltfAccessor {
-                            size: 8 * 3,
+                            size: 12,
                             buffer: buffer_id,
                             view_offset: 0,
-                            view_stride: 8 * 3,
+                            view_stride: 12,
                             count: normals.len() as u32,
                             data_type: DataType::F32,
                             dimensions: Dimensions::Vec3,
@@ -558,12 +557,11 @@ impl Stage {
                         let tangents_array = self.append_array(&tangents);
                         let buffer = GltfBuffer(tangents_array.into_u32_array());
                         let buffer_id = self.append(&buffer);
-                        debug_assert_eq!(4 * 3, std::mem::size_of::<[f32; 3]>());
                         let accessor = GltfAccessor {
-                            size: 8 * 3,
+                            size: 12,
                             buffer: buffer_id,
                             view_offset: 0,
-                            view_stride: 8 * 3,
+                            view_stride: 12,
                             count: tangents.len() as u32,
                             data_type: DataType::F32,
                             dimensions: Dimensions::Vec3,
@@ -867,10 +865,16 @@ impl Stage {
                         mesh,
                         primitive_index: primitive.index() as u32,
                     });
+                    let (t, r, s) = node.transform().decomposed();
+                    let transform = self.append(&Transform {
+                        translation: Vec3::from(t),
+                        rotation: Quat::from_array(r),
+                        scale: Vec3::from(s),
+                    });
                     let render_unit = RenderUnit {
                         vertex_data: VertexData::Gltf(vertex_data_id),
                         vertex_count: super::get_vertex_count(&primitive),
-                        transform: Id::NONE,
+                        transform,
                         camera: camera_id,
                     };
                     self.draw_unit(&render_unit)
@@ -978,11 +982,11 @@ mod test {
             dimensions: Dimensions::Scalar,
             normalized: false,
         };
-        let i0 = accessor.get(0, 0, &data);
+        let i0 = accessor.get_u32(0, &data);
         assert_eq!(1, i0);
-        let i1 = accessor.get(1, 0, &data);
+        let i1 = accessor.get_u32(1, &data);
         assert_eq!(1, i1);
-        let i2 = accessor.get(2, 0, &data);
+        let i2 = accessor.get_u32(2, &data);
         assert_eq!(1, i2);
     }
 
@@ -1001,10 +1005,10 @@ mod test {
         let projection = crate::camera::perspective(100.0, 50.0);
         let position = Vec3::new(1.0, 0.5, 1.5);
         let view = crate::camera::look_at(position, Vec3::new(1.0, 0.5, 0.0), Vec3::Y);
-        let stage = Stage::new(device.clone(), queue.clone());
+        let stage = Stage::new(device.clone(), queue.clone()).with_lighting(false);
         stage.configure_graph(&mut r, true);
         let gpu_doc = stage
-            .load_gltf_document(&document, buffers, images)
+            .load_gltf_document(&document, buffers.clone(), images)
             .unwrap();
         let camera = Camera {
             projection,
@@ -1025,6 +1029,7 @@ mod test {
         ))
         .unwrap();
 
+        #[allow(unused)]
         #[derive(Debug, Default)]
         struct VertexInvocation {
             draw: DrawUnit,
@@ -1046,6 +1051,15 @@ mod test {
 
         let draws = stage.get_draws();
         let slab = &data;
+
+        for i in 0..gpu_doc.accessors.len() {
+            let accessor = slab.read(gpu_doc.accessors.at(i));
+            println!("accessor {i}: {accessor:#?}", i = i, accessor = accessor);
+            let buffer = slab.read(accessor.buffer);
+            println!("buffer: {buffer:#?}");
+            let buffer_data = slab.read_vec(buffer.0);
+            println!("buffer_data: {buffer_data:#?}");
+        }
 
         let indices = draws
             .iter()
@@ -1075,80 +1089,87 @@ mod test {
             .collect::<Vec<_>>();
         assert_eq!([0, 1, 2], indices[0].as_slice());
         assert_eq!([0, 1, 2], indices[1].as_slice());
-        let clip_positions = draws
-            .iter()
-            .map(|draw| {
-                let unit_id = draw.id;
-                let unit = slab.read(unit_id);
-                let vertex_data_id = match unit.vertex_data {
-                    renderling_shader::stage::VertexData::Native(_) => panic!("should be gltf"),
-                    renderling_shader::stage::VertexData::Gltf(id) => id,
-                };
-                let vertex_data = slab.read(vertex_data_id);
-                let mesh = slab.read(vertex_data.mesh);
-                let primitive_id = mesh.primitives.at(vertex_data.primitive_index as usize);
-                let primitive = slab.read(primitive_id);
-                let indices = if primitive.indices.is_some() {
-                    let indices_accessor = slab.read(primitive.indices);
-                    (0..draw.vertex_count)
-                        .map(|i| {
-                            let index = indices_accessor.get_u32(i as usize, slab);
-                            index
-                        })
-                        .collect::<Vec<_>>()
-                } else {
-                    (0..draw.vertex_count).collect::<Vec<_>>()
-                };
-                println!("positions\n\n");
-                let pos_accessor = slab.read(primitive.positions);
-                indices
-                    .into_iter()
-                    .map(|index| pos_accessor.get_vec3(index as usize, slab))
-                    .collect::<Vec<_>>()
+
+        let invocations = draws
+            .into_iter()
+            .flat_map(|draw| {
+                let render_unit_id = draw.id;
+                let instance_index = render_unit_id.inner();
+                let render_unit = data.read(render_unit_id);
+                let data = &data;
+                (0..draw.vertex_count).map(move |vertex_index| {
+                    let mut invocation = VertexInvocation {
+                        draw,
+                        render_unit_id,
+                        render_unit,
+                        instance_index,
+                        vertex_index,
+                        ..Default::default()
+                    };
+                    renderling_shader::stage::new_stage_vertex(
+                        instance_index,
+                        vertex_index,
+                        data,
+                        &mut invocation.out_camera,
+                        &mut invocation.out_material,
+                        &mut invocation.out_color,
+                        &mut invocation.out_uv0,
+                        &mut invocation.out_uv1,
+                        &mut invocation.out_norm,
+                        &mut invocation.out_tangent,
+                        &mut invocation.out_bitangent,
+                        &mut invocation.out_pos,
+                        &mut invocation.clip_pos,
+                    );
+                    invocation
+                })
             })
             .collect::<Vec<_>>();
-        panic!("clip_positions: {clip_positions:#?}");
-
-        //let invocations = draws
-        //    .into_iter()
-        //    .map(|draw| {
-        //        let render_unit_id = draw.id;
-        //        let instance_index = render_unit_id.inner();
-        //        let render_unit = data.read(render_unit_id);
-        //        let data = &data;
-        //        (0..draw.vertex_count)
-        //            .map(move |vertex_index| {
-        //                let mut invocation = VertexInvocation {
-        //                    draw,
-        //                    render_unit_id,
-        //                    render_unit,
-        //                    instance_index,
-        //                    vertex_index,
-        //                    ..Default::default()
-        //                };
-        //                renderling_shader::stage::new_stage_vertex(
-        //                    instance_index,
-        //                    vertex_index,
-        //                    data,
-        //                    &mut invocation.out_camera,
-        //                    &mut invocation.out_material,
-        //                    &mut invocation.out_color,
-        //                    &mut invocation.out_uv0,
-        //                    &mut invocation.out_uv1,
-        //                    &mut invocation.out_norm,
-        //                    &mut invocation.out_tangent,
-        //                    &mut invocation.out_bitangent,
-        //                    &mut invocation.out_pos,
-        //                    &mut invocation.clip_pos,
-        //                );
-        //                invocation
-        //            })
-        //            .collect::<Vec<_>>()
-        //    })
-        //    .collect::<Vec<_>>();
-        //panic!("vertex_invocations: {invocations:#?}");
+        let seen_positions = invocations
+            .iter()
+            .map(|inv| inv.out_pos)
+            .take(3)
+            .collect::<Vec<_>>();
+        let mesh = document.meshes().next().unwrap();
+        let prim = mesh.primitives().next().unwrap();
+        let expected_positions_reader = prim.reader(|buffer| Some(&buffers[buffer.index()]));
+        let expected_positions = expected_positions_reader
+            .read_positions()
+            .unwrap()
+            .map(|pos| Vec3::from(pos))
+            .collect::<Vec<_>>();
+        assert_eq!(expected_positions, seen_positions);
 
         let img = r.render_image().unwrap();
-        img_diff::save("gltf_simple_meshes.png", img);
+        img_diff::assert_img_eq("gltf_simple_meshes.png", img);
+    }
+
+    #[test]
+    // Ensures we can read a minimal gltf file with a simple triangle mesh.
+    fn minimal_mesh() {
+        let mut r =
+            Renderling::headless(20, 20).with_background_color(Vec3::splat(0.0).extend(1.0));
+        let (device, queue) = r.get_device_and_queue_owned();
+        let stage = Stage::new(device, queue).with_lighting(false);
+        stage.configure_graph(&mut r, true);
+        let (document, buffers, images) =
+            gltf::import("../../gltf/gltfTutorial_003_MinimalGltfFile.gltf").unwrap();
+        let gpu_doc = stage
+            .load_gltf_document(&document, buffers, images)
+            .unwrap();
+        let projection = crate::camera::perspective(20.0, 20.0);
+        let eye = Vec3::new(0.5, 0.5, 2.0);
+        let view = crate::camera::look_at(eye, Vec3::new(0.5, 0.5, 0.0), Vec3::Y);
+        let camera = Camera {
+            projection,
+            view,
+            position: Vec3::new(0.5, 0.5, 2.0),
+        };
+        let camera_id = stage.append(&camera);
+        let default_scene = document.default_scene().unwrap();
+        let _unit_ids = stage.draw_gltf_scene(&gpu_doc, camera_id, default_scene);
+
+        let img = r.render_image().unwrap();
+        img_diff::assert_img_eq("gltf_minimal_mesh.png", img);
     }
 }

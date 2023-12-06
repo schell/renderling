@@ -1394,11 +1394,11 @@ pub fn test_i8_i16_extraction(
     #[spirv(global_invocation_id)] global_id: UVec3,
 ) {
     let index = global_id.x as usize;
-    let (value, _, _) = crate::bits::extract_i8(2, index, slab);
+    let (value, _, _) = crate::bits::extract_i8(index, 2, slab);
     if value > 0 {
         slab[index] = value as u32;
     }
-    let (value, _, _) = crate::bits::extract_i16(2, index, slab);
+    let (value, _, _) = crate::bits::extract_i16(index, 2, slab);
     if value > 0 {
         slab[index] = value as u32;
     }

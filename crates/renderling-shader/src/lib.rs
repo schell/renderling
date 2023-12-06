@@ -25,6 +25,18 @@ pub mod tonemapping;
 pub mod tutorial;
 pub mod ui;
 
+#[allow(unused_macros)]
+macro_rules! println {
+    ($($arg:tt)*) => {
+        #[cfg(not(target_arch = "spirv"))]
+        {
+            std::println!($($arg)*);
+        }
+    }
+}
+
+pub(crate) use println;
+
 /// Additional methods for vector types.
 pub trait IsVector {
     /// Normalize or return zero.

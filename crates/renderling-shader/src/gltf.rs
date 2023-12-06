@@ -1,5 +1,5 @@
 //! Gltf types that are used in shaders.
-use glam::Vec4;
+use glam::{Vec2, Vec3, Vec4};
 
 use crate::{
     self as renderling_shader,
@@ -131,70 +131,258 @@ pub struct GltfAccessor {
     pub normalized: bool,
 }
 
-macro_rules! println {
-    ($($arg:tt)*) => {
-        #[cfg(not(target_arch = "spirv"))]
-        {
-            std::println!($($arg)*);
-        }
+/// Used to access contiguous u8 components from a buffer, contained in u32s.
+pub struct IncU8 {
+    slab_index: usize,
+    byte_offset: usize,
+}
+
+impl IncU8 {
+    pub fn extract(self, slab: &[u32]) -> (u32, Self) {
+        let (value, slab_index, byte_offset) =
+            crate::bits::extract_u8(self.slab_index, self.byte_offset, slab);
+        (
+            value,
+            Self {
+                slab_index,
+                byte_offset,
+            },
+        )
+    }
+}
+
+/// Used to access contiguous i8 components from a buffer, contained in u32s.
+pub struct IncI8 {
+    slab_index: usize,
+    byte_offset: usize,
+}
+
+impl IncI8 {
+    pub fn extract(self, slab: &[u32]) -> (i32, Self) {
+        let (value, slab_index, byte_offset) =
+            crate::bits::extract_i8(self.slab_index, self.byte_offset, slab);
+        (
+            value,
+            Self {
+                slab_index,
+                byte_offset,
+            },
+        )
+    }
+}
+
+/// Used to access contiguous u16 components from a buffer, contained in u32s.
+pub struct IncU16 {
+    slab_index: usize,
+    byte_offset: usize,
+}
+
+impl IncU16 {
+    pub fn extract(self, slab: &[u32]) -> (u32, Self) {
+        let (value, slab_index, byte_offset) =
+            crate::bits::extract_u16(self.slab_index, self.byte_offset, slab);
+        crate::println!("value: {value:?}");
+        (
+            value,
+            Self {
+                slab_index,
+                byte_offset,
+            },
+        )
+    }
+}
+
+/// Used to access contiguous i16 components from a buffer, contained in u32s.
+pub struct IncI16 {
+    slab_index: usize,
+    byte_offset: usize,
+}
+
+impl IncI16 {
+    pub fn extract(self, slab: &[u32]) -> (i32, Self) {
+        let (value, slab_index, byte_offset) =
+            crate::bits::extract_i16(self.slab_index, self.byte_offset, slab);
+        (
+            value,
+            Self {
+                slab_index,
+                byte_offset,
+            },
+        )
     }
 }
 
 impl GltfAccessor {
-    /// Retreive one component of the nth element.
-    pub fn get(&self, index: usize, component_index: usize, slab: &[u32]) -> u32 {
-        println!("get {index} {component_index}");
+    fn slab_index_and_byte_offset(&self, element_index: usize, slab: &[u32]) -> (usize, usize) {
+        crate::println!("index: {element_index:?}");
+        let buffer_id = self.buffer;
+        crate::println!("buffer_id: {buffer_id:?}");
         let buffer = slab.read(self.buffer);
-        println!("buffer: {buffer:?}");
-        let buffer_start = buffer.0.at(0);
-        let buffer_start_bytes = buffer_start.index() * 4;
-        let (mask, component_bytes, mut component_shift) = match self.data_type {
-            DataType::I8 => (0xF, 1, 8),
-            DataType::U8 => (0xF, 1, 8),
-            DataType::I16 => (0xFF, 2, 16),
-            DataType::U16 => (0xFF, 2, 16),
-            DataType::U32 => (0xFFFF, 4, 0),
-            DataType::F32 => (0xFFFF, 4, 0),
-        };
-        component_shift *= component_index as u32;
-        let component_byte_offset = component_bytes * component_index;
+        crate::println!("buffer: {:?}", buffer);
+        let buffer_start = buffer.0.starting_index();
+        crate::println!("buffer_start: {buffer_start:?}");
+        let buffer_start_bytes = buffer_start * 4;
+        crate::println!("buffer_start_bytes: {buffer_start_bytes:?}");
         let byte_offset = buffer_start_bytes
             + self.view_offset as usize
-            + index * self.size as usize
-            + component_byte_offset;
-        println!("byte_offset: {byte_offset}");
-        let u32_offset = byte_offset / 4;
-        println!("u32_offset: {u32_offset}");
-        let mut t = 0u32;
-        t.read_slab(u32_offset, slab);
-        let byte_mod = byte_offset as u32 % 4;
-        println!("byte_mod: {byte_mod}");
-        let shift = match byte_mod {
-            0 => 0,
-            1 => 8,
-            2 => 16,
-            3 => 24,
-            _ => 0, // unreachable
-        };
-        println!("mask: {mask:04x}");
-        println!("shift: {shift}");
-        println!("component_shift: {component_shift}");
-        let u = crate::bits::extract(t, (shift + component_shift, mask));
-        println!("u: {u}");
-        u
+            + element_index as usize
+                * if self.size > self.view_stride {
+                    self.size
+                } else {
+                    self.view_stride
+                } as usize;
+        crate::println!("byte_offset: {byte_offset:?}");
+        let slab_index = byte_offset / 4;
+        crate::println!("slab_index: {slab_index:?}");
+        let byte_offset = byte_offset % 4;
+        (slab_index, byte_offset)
+    }
+
+    pub fn inc_u8(&self, index: usize, slab: &[u32]) -> IncU8 {
+        let (slab_index, byte_offset) = self.slab_index_and_byte_offset(index, slab);
+        IncU8 {
+            slab_index,
+            byte_offset,
+        }
+    }
+
+    pub fn inc_i8(&self, index: usize, slab: &[u32]) -> IncI8 {
+        let (slab_index, byte_offset) = self.slab_index_and_byte_offset(index, slab);
+        IncI8 {
+            slab_index,
+            byte_offset,
+        }
+    }
+
+    pub fn inc_u16(&self, index: usize, slab: &[u32]) -> IncU16 {
+        let (slab_index, byte_offset) = self.slab_index_and_byte_offset(index, slab);
+        IncU16 {
+            slab_index,
+            byte_offset,
+        }
+    }
+
+    pub fn inc_i16(&self, index: usize, slab: &[u32]) -> IncI16 {
+        let (slab_index, byte_offset) = self.slab_index_and_byte_offset(index, slab);
+        IncI16 {
+            slab_index,
+            byte_offset,
+        }
     }
 
     pub fn get_u32(&self, vertex_index: usize, slab: &[u32]) -> u32 {
-        self.get(vertex_index, 0, slab)
+        let x;
+        match self.data_type {
+            DataType::I8 => {
+                let inc = self.inc_i8(vertex_index, slab);
+                let (ix, _) = inc.extract(slab);
+                x = ix as u32;
+            }
+            DataType::U8 => {
+                let inc = self.inc_u8(vertex_index, slab);
+                let (ix, _) = inc.extract(slab);
+                x = ix;
+            }
+            DataType::I16 => {
+                let inc = self.inc_i16(vertex_index, slab);
+                let (ix, _) = inc.extract(slab);
+                x = ix as u32;
+            }
+            DataType::U16 => {
+                let inc = self.inc_u16(vertex_index, slab);
+                let (ix, _) = inc.extract(slab);
+                x = ix;
+            }
+            DataType::U32 => {
+                let (slab_index, _) = self.slab_index_and_byte_offset(vertex_index, slab);
+                x = crate::bits::extract_u32(slab_index, 0, slab).0;
+            }
+            DataType::F32 => {
+                let (slab_index, _) = self.slab_index_and_byte_offset(vertex_index, slab);
+                x = crate::bits::extract_f32(slab_index, 0, slab).0 as u32;
+            }
+        }
+        x
     }
 
     pub fn get_f32(&self, vertex_index: usize, slab: &[u32]) -> f32 {
-        f32::from_bits(self.get(vertex_index, 0, slab))
+        let x;
+        match self.data_type {
+            DataType::I8 => {
+                let inc = self.inc_i8(vertex_index, slab);
+                let (ix, _) = inc.extract(slab);
+                x = ix as f32;
+            }
+            DataType::U8 => {
+                let inc = self.inc_u8(vertex_index, slab);
+                let (ix, _) = inc.extract(slab);
+                x = ix as f32;
+            }
+            DataType::I16 => {
+                let inc = self.inc_i16(vertex_index, slab);
+                let (ix, _) = inc.extract(slab);
+                x = ix as f32;
+            }
+            DataType::U16 => {
+                let inc = self.inc_u16(vertex_index, slab);
+                let (ix, _) = inc.extract(slab);
+                x = ix as f32;
+            }
+            DataType::U32 => {
+                let (slab_index, _) = self.slab_index_and_byte_offset(vertex_index, slab);
+                x = crate::bits::extract_u32(slab_index, 0, slab).0 as f32;
+            }
+            DataType::F32 => {
+                let (slab_index, _) = self.slab_index_and_byte_offset(vertex_index, slab);
+                x = crate::bits::extract_f32(slab_index, 0, slab).0;
+            }
+        }
+        x
     }
 
     pub fn get_vec2(&self, vertex_index: usize, slab: &[u32]) -> glam::Vec2 {
-        let x = f32::from_bits(self.get(vertex_index, 0, slab));
-        let y = f32::from_bits(self.get(vertex_index, 1, slab));
+        let x;
+        let y;
+        match self.data_type {
+            DataType::I8 => {
+                let inc = self.inc_i8(vertex_index, slab);
+                let (ix, inc) = inc.extract(slab);
+                let (iy, _) = inc.extract(slab);
+                x = ix as f32;
+                y = iy as f32;
+            }
+            DataType::U8 => {
+                let inc = self.inc_u8(vertex_index, slab);
+                let (ix, inc) = inc.extract(slab);
+                let (iy, _) = inc.extract(slab);
+                x = ix as f32;
+                y = iy as f32;
+            }
+            DataType::I16 => {
+                let inc = self.inc_i16(vertex_index, slab);
+                let (ix, inc) = inc.extract(slab);
+                let (iy, _) = inc.extract(slab);
+                x = ix as f32;
+                y = iy as f32;
+            }
+            DataType::U16 => {
+                let inc = self.inc_u16(vertex_index, slab);
+                let (ix, inc) = inc.extract(slab);
+                let (iy, _) = inc.extract(slab);
+                x = ix as f32;
+                y = iy as f32;
+            }
+            DataType::U32 => {
+                let (slab_index, _) = self.slab_index_and_byte_offset(vertex_index, slab);
+                x = crate::bits::extract_u32(slab_index, 0, slab).0 as f32;
+                y = crate::bits::extract_u32(slab_index + 1, 0, slab).0 as f32;
+            }
+            DataType::F32 => {
+                let (slab_index, _) = self.slab_index_and_byte_offset(vertex_index, slab);
+                x = crate::bits::extract_f32(slab_index, 0, slab).0;
+                y = crate::bits::extract_f32(slab_index + 1, 0, slab).0;
+            }
+        }
         match self.dimensions {
             Dimensions::Scalar => glam::Vec2::new(x, 0.0),
             _ => glam::Vec2::new(x, y),
@@ -202,9 +390,59 @@ impl GltfAccessor {
     }
 
     pub fn get_vec3(&self, vertex_index: usize, slab: &[u32]) -> glam::Vec3 {
-        let x = f32::from_bits(self.get(vertex_index, 0, slab));
-        let y = f32::from_bits(self.get(vertex_index, 1, slab));
-        let z = f32::from_bits(self.get(vertex_index, 2, slab));
+        let x;
+        let y;
+        let z;
+        match self.data_type {
+            DataType::I8 => {
+                let inc = self.inc_i8(vertex_index, slab);
+                let (ix, inc) = inc.extract(slab);
+                let (iy, inc) = inc.extract(slab);
+                let (iz, _) = inc.extract(slab);
+                x = ix as f32;
+                y = iy as f32;
+                z = iz as f32;
+            }
+            DataType::U8 => {
+                let inc = self.inc_u8(vertex_index, slab);
+                let (ix, inc) = inc.extract(slab);
+                let (iy, inc) = inc.extract(slab);
+                let (iz, _) = inc.extract(slab);
+                x = ix as f32;
+                y = iy as f32;
+                z = iz as f32;
+            }
+            DataType::I16 => {
+                let inc = self.inc_i16(vertex_index, slab);
+                let (ix, inc) = inc.extract(slab);
+                let (iy, inc) = inc.extract(slab);
+                let (iz, _) = inc.extract(slab);
+                x = ix as f32;
+                y = iy as f32;
+                z = iz as f32;
+            }
+            DataType::U16 => {
+                let inc = self.inc_u16(vertex_index, slab);
+                let (ix, inc) = inc.extract(slab);
+                let (iy, inc) = inc.extract(slab);
+                let (iz, _) = inc.extract(slab);
+                x = ix as f32;
+                y = iy as f32;
+                z = iz as f32;
+            }
+            DataType::U32 => {
+                let (slab_index, _) = self.slab_index_and_byte_offset(vertex_index, slab);
+                x = crate::bits::extract_u32(slab_index, 0, slab).0 as f32;
+                y = crate::bits::extract_u32(slab_index + 1, 0, slab).0 as f32;
+                z = crate::bits::extract_u32(slab_index + 2, 0, slab).0 as f32;
+            }
+            DataType::F32 => {
+                let (slab_index, _) = self.slab_index_and_byte_offset(vertex_index, slab);
+                x = crate::bits::extract_f32(slab_index, 0, slab).0;
+                y = crate::bits::extract_f32(slab_index + 1, 0, slab).0;
+                z = crate::bits::extract_f32(slab_index + 2, 0, slab).0;
+            }
+        }
         match self.dimensions {
             Dimensions::Scalar => glam::Vec3::new(x, 0.0, 0.0),
             Dimensions::Vec2 => glam::Vec3::new(x, y, 0.0),
@@ -213,10 +451,70 @@ impl GltfAccessor {
     }
 
     pub fn get_vec4(&self, vertex_index: usize, slab: &[u32]) -> glam::Vec4 {
-        let x = f32::from_bits(self.get(vertex_index, 0, slab));
-        let y = f32::from_bits(self.get(vertex_index, 1, slab));
-        let z = f32::from_bits(self.get(vertex_index, 2, slab));
-        let w = f32::from_bits(self.get(vertex_index, 3, slab));
+        let x;
+        let y;
+        let z;
+        let w;
+        match self.data_type {
+            DataType::I8 => {
+                let inc = self.inc_i8(vertex_index, slab);
+                let (ix, inc) = inc.extract(slab);
+                let (iy, inc) = inc.extract(slab);
+                let (iz, inc) = inc.extract(slab);
+                let (iw, _) = inc.extract(slab);
+                x = ix as f32;
+                y = iy as f32;
+                z = iz as f32;
+                w = iw as f32;
+            }
+            DataType::U8 => {
+                let inc = self.inc_u8(vertex_index, slab);
+                let (ix, inc) = inc.extract(slab);
+                let (iy, inc) = inc.extract(slab);
+                let (iz, inc) = inc.extract(slab);
+                let (iw, _) = inc.extract(slab);
+                x = ix as f32;
+                y = iy as f32;
+                z = iz as f32;
+                w = iw as f32;
+            }
+            DataType::I16 => {
+                let inc = self.inc_i16(vertex_index, slab);
+                let (ix, inc) = inc.extract(slab);
+                let (iy, inc) = inc.extract(slab);
+                let (iz, inc) = inc.extract(slab);
+                let (iw, _) = inc.extract(slab);
+                x = ix as f32;
+                y = iy as f32;
+                z = iz as f32;
+                w = iw as f32;
+            }
+            DataType::U16 => {
+                let inc = self.inc_u16(vertex_index, slab);
+                let (ix, inc) = inc.extract(slab);
+                let (iy, inc) = inc.extract(slab);
+                let (iz, inc) = inc.extract(slab);
+                let (iw, _) = inc.extract(slab);
+                x = ix as f32;
+                y = iy as f32;
+                z = iz as f32;
+                w = iw as f32;
+            }
+            DataType::U32 => {
+                let (slab_index, _) = self.slab_index_and_byte_offset(vertex_index, slab);
+                x = crate::bits::extract_u32(slab_index, 0, slab).0 as f32;
+                y = crate::bits::extract_u32(slab_index + 1, 0, slab).0 as f32;
+                z = crate::bits::extract_u32(slab_index + 2, 0, slab).0 as f32;
+                w = crate::bits::extract_u32(slab_index + 3, 0, slab).0 as f32;
+            }
+            DataType::F32 => {
+                let (slab_index, _) = self.slab_index_and_byte_offset(vertex_index, slab);
+                x = crate::bits::extract_f32(slab_index, 0, slab).0;
+                y = crate::bits::extract_f32(slab_index + 1, 0, slab).0;
+                z = crate::bits::extract_f32(slab_index + 2, 0, slab).0;
+                w = crate::bits::extract_f32(slab_index + 3, 0, slab).0;
+            }
+        }
         match self.dimensions {
             Dimensions::Scalar => glam::Vec4::new(x, 0.0, 0.0, 0.0),
             Dimensions::Vec2 => glam::Vec4::new(x, y, 0.0, 0.0),
@@ -226,10 +524,70 @@ impl GltfAccessor {
     }
 
     pub fn get_uvec4(&self, vertex_index: usize, slab: &[u32]) -> glam::UVec4 {
-        let x = self.get_u32(vertex_index, slab);
-        let y = self.get_u32(vertex_index, slab);
-        let z = self.get_u32(vertex_index, slab);
-        let w = self.get_u32(vertex_index, slab);
+        let x;
+        let y;
+        let z;
+        let w;
+        match self.data_type {
+            DataType::I8 => {
+                let inc = self.inc_i8(vertex_index, slab);
+                let (ix, inc) = inc.extract(slab);
+                let (iy, inc) = inc.extract(slab);
+                let (iz, inc) = inc.extract(slab);
+                let (iw, _) = inc.extract(slab);
+                x = ix as u32;
+                y = iy as u32;
+                z = iz as u32;
+                w = iw as u32;
+            }
+            DataType::U8 => {
+                let inc = self.inc_u8(vertex_index, slab);
+                let (ix, inc) = inc.extract(slab);
+                let (iy, inc) = inc.extract(slab);
+                let (iz, inc) = inc.extract(slab);
+                let (iw, _) = inc.extract(slab);
+                x = ix;
+                y = iy;
+                z = iz;
+                w = iw;
+            }
+            DataType::I16 => {
+                let inc = self.inc_i16(vertex_index, slab);
+                let (ix, inc) = inc.extract(slab);
+                let (iy, inc) = inc.extract(slab);
+                let (iz, inc) = inc.extract(slab);
+                let (iw, _) = inc.extract(slab);
+                x = ix as u32;
+                y = iy as u32;
+                z = iz as u32;
+                w = iw as u32;
+            }
+            DataType::U16 => {
+                let inc = self.inc_u16(vertex_index, slab);
+                let (ix, inc) = inc.extract(slab);
+                let (iy, inc) = inc.extract(slab);
+                let (iz, inc) = inc.extract(slab);
+                let (iw, _) = inc.extract(slab);
+                x = ix;
+                y = iy;
+                z = iz;
+                w = iw;
+            }
+            DataType::U32 => {
+                let (slab_index, _) = self.slab_index_and_byte_offset(vertex_index, slab);
+                x = crate::bits::extract_u32(slab_index, 0, slab).0;
+                y = crate::bits::extract_u32(slab_index + 1, 0, slab).0;
+                z = crate::bits::extract_u32(slab_index + 2, 0, slab).0;
+                w = crate::bits::extract_u32(slab_index + 3, 0, slab).0;
+            }
+            DataType::F32 => {
+                let (slab_index, _) = self.slab_index_and_byte_offset(vertex_index, slab);
+                x = crate::bits::extract_f32(slab_index, 0, slab).0 as u32;
+                y = crate::bits::extract_f32(slab_index + 1, 0, slab).0 as u32;
+                z = crate::bits::extract_f32(slab_index + 2, 0, slab).0 as u32;
+                w = crate::bits::extract_f32(slab_index + 3, 0, slab).0 as u32;
+            }
+        }
         match self.dimensions {
             Dimensions::Scalar => glam::UVec4::new(x, 0, 0, 0),
             Dimensions::Vec2 => glam::UVec4::new(x, y, 0, 0),
@@ -264,25 +622,87 @@ impl GltfPrimitive {
         } else {
             vertex_index
         };
-        let positions = slab.read(self.positions);
-        let position = positions.get_vec3(index, slab);
-        let normals = slab.read(self.normals);
-        let normal = normals.get_vec3(index, slab);
-        let tangents = slab.read(self.tangents);
-        let tangent = tangents.get_vec4(index, slab);
-        let colors = slab.read(self.colors);
-        let color = colors.get_vec4(index, slab);
-        let tex_coords0 = slab.read(self.tex_coords0);
-        let tex_coords0 = tex_coords0.get_vec2(index, slab);
-        let tex_coords1 = slab.read(self.tex_coords1);
-        let tex_coords1 = tex_coords1.get_vec2(index, slab);
+        crate::println!("index: {index:?}");
+
+        let position = if self.positions.is_none() {
+            Vec3::ZERO
+        } else {
+            let positions = slab.read(self.positions);
+            crate::println!("positions: {positions:?}");
+            positions.get_vec3(index, slab)
+        };
+        crate::println!("position: {position:?}");
+
+        let normal = if self.normals.is_none() {
+            Vec3::Z
+        } else {
+            let normals = slab.read(self.normals);
+            crate::println!("normals: {normals:?}");
+            normals.get_vec3(index, slab)
+        };
+        crate::println!("normal: {normal:?}");
+
+        let tangent = if self.tangents.is_none() {
+            Vec4::Y
+        } else {
+            let tangents = slab.read(self.tangents);
+            crate::println!("tangents: {tangents:?}");
+            tangents.get_vec4(index, slab)
+        };
+        crate::println!("tangent: {tangent:?}");
+
+        let color = if self.colors.is_none() {
+            Vec4::ONE
+        } else {
+            let colors = slab.read(self.colors);
+            crate::println!("colors: {colors:?}");
+            colors.get_vec4(index, slab)
+        };
+        crate::println!("color: {color:?}");
+
+        let tex_coords0 = if self.tex_coords0.is_none() {
+            Vec2::ZERO
+        } else {
+            let tex_coords0 = slab.read(self.tex_coords0);
+            crate::println!("tex_coords0: {tex_coords0:?}");
+            tex_coords0.get_vec2(index, slab)
+        };
+        crate::println!("tex_coords0: {tex_coords0:?}");
+
+        let tex_coords1 = if self.tex_coords1.is_none() {
+            Vec2::ZERO
+        } else {
+            let tex_coords1 = slab.read(self.tex_coords1);
+            crate::println!("tex_coords1: {tex_coords1:?}");
+            tex_coords1.get_vec2(index, slab)
+        };
+        crate::println!("tex_coords1: {tex_coords1:?}");
+
         let uv = Vec4::new(tex_coords0.x, tex_coords0.y, tex_coords1.x, tex_coords1.y);
-        let joints = slab.read(self.joints);
-        let joints = joints.get_uvec4(index, slab);
-        let joints = [joints.x, joints.y, joints.z, joints.w];
-        let weights = slab.read(self.weights);
-        let weights = weights.get_vec4(index, slab);
-        let weights = [weights.x, weights.y, weights.z, weights.w];
+        crate::println!("uv: {uv:?}");
+
+        let joints = if self.joints.is_none() {
+            [0; 4]
+        } else {
+            let joints = slab.read(self.joints);
+            crate::println!("joints: {joints:?}");
+            let joints = joints.get_uvec4(index, slab);
+            crate::println!("joints: {joints:?}");
+            [joints.x, joints.y, joints.z, joints.w]
+        };
+        crate::println!("joints: {joints:?}");
+
+        let weights = if self.weights.is_none() {
+            [0.0; 4]
+        } else {
+            let weights = slab.read(self.weights);
+            crate::println!("weights: {weights:?}");
+            let weights = weights.get_vec4(index, slab);
+            crate::println!("weights: {weights:?}");
+            [weights.x, weights.y, weights.z, weights.w]
+        };
+        crate::println!("weights: {weights:?}");
+
         crate::stage::Vertex {
             position: position.extend(0.0),
             color,
@@ -636,4 +1056,36 @@ pub struct GltfDocument {
     // TODO: Think about making a `GltfTexture`
     pub textures: Array<GpuTexture>,
     pub views: Array<GltfBufferView>,
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn indices_accessor_sanity() {
+        // Taken from the indices accessor in the "simple meshes" gltf sample,
+        // but with the buffer changed to match where we write it here.
+        let buffer_id = Id::new(20);
+        let accessor = GltfAccessor {
+            size: 2,
+            buffer: buffer_id,
+            view_offset: 0,
+            view_stride: 0,
+            count: 3,
+            data_type: DataType::U16,
+            dimensions: Dimensions::Scalar,
+            normalized: false,
+        };
+        let buffer = GltfBuffer(Array::new(0, 11));
+        let mut slab: [u32; 22] = [
+            65536, 2, 0, 0, 0, 1065353216, 0, 0, 0, 1065353216, 0, 0, 0, 1065353216, 0, 0,
+            1065353216, 0, 0, 1065353216, 0, 0,
+        ];
+        slab.write(&buffer, buffer_id.index());
+        let i0 = accessor.get_u32(0, &slab);
+        let i1 = accessor.get_u32(1, &slab);
+        let i2 = accessor.get_u32(2, &slab);
+        assert_eq!([0, 1, 2], [i0, i1, i2]);
+    }
 }

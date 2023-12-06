@@ -1259,56 +1259,6 @@ mod test {
     }
 
     #[test]
-    // Ensures we can read a minimal gltf file with a simple triangle mesh.
-    fn minimal_mesh() {
-        let mut r =
-            Renderling::headless(20, 20).with_background_color(Vec3::splat(0.0).extend(1.0));
-        let mut builder = r.new_scene();
-        let _loader = builder
-            .gltf_load("../../gltf/gltfTutorial_003_MinimalGltfFile.gltf")
-            .unwrap();
-        let projection = camera::perspective(20.0, 20.0);
-        let view = camera::look_at(Vec3::new(0.5, 0.5, 2.0), Vec3::new(0.5, 0.5, 0.0), Vec3::Y);
-        builder.set_camera(projection, view);
-        let scene = builder.build().unwrap();
-        r.setup_render_graph(RenderGraphConfig {
-            scene: Some(scene),
-            with_screen_capture: true,
-            ..Default::default()
-        });
-
-        let img = r.render_image().unwrap();
-        img_diff::assert_img_eq("gltf_minimal_mesh.png", img);
-    }
-
-    #[test]
-    // ensures we can
-    // * read simple meshes
-    // * support multiple nodes that reference the same mesh
-    // * support primitives w/ positions and normal attributes
-    // * support transforming nodes (T * R * S)
-    fn simple_meshes() {
-        let mut r =
-            Renderling::headless(100, 50).with_background_color(Vec3::splat(0.0).extend(1.0));
-        let mut builder = r.new_scene();
-        let _loader = builder
-            .gltf_load("../../gltf/gltfTutorial_008_SimpleMeshes.gltf")
-            .unwrap();
-        let projection = camera::perspective(100.0, 50.0);
-        let view = camera::look_at(Vec3::new(1.0, 0.5, 1.5), Vec3::new(1.0, 0.5, 0.0), Vec3::Y);
-        builder.set_camera(projection, view);
-        let scene = builder.build().unwrap();
-        r.setup_render_graph(RenderGraphConfig {
-            scene: Some(scene),
-            with_screen_capture: true,
-            ..Default::default()
-        });
-
-        let img = r.render_image().unwrap();
-        img_diff::assert_img_eq("gltf_simple_meshes.png", img);
-    }
-
-    #[test]
     fn simple_texture() {
         let size = 100;
         let mut r =
