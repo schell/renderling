@@ -452,7 +452,7 @@ mod test {
             },
         );
         let unit = RenderUnit {
-            vertex_data: VertexData::Native(data_id),
+            vertex_data: VertexData::new_native(data_id),
             camera: Id::new(42),
             transform: Id::new(1337),
             vertex_count: vertices.len() as u32,

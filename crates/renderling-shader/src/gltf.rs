@@ -605,7 +605,9 @@ pub struct GltfPrimitive {
     pub indices: Id<GltfAccessor>,
     pub positions: Id<GltfAccessor>,
     pub normals: Id<GltfAccessor>,
+    pub normals_were_generated: bool,
     pub tangents: Id<GltfAccessor>,
+    pub tangents_were_generated: bool,
     pub colors: Id<GltfAccessor>,
     pub tex_coords0: Id<GltfAccessor>,
     pub tex_coords1: Id<GltfAccessor>,
@@ -638,7 +640,13 @@ impl GltfPrimitive {
         } else {
             let normals = slab.read(self.normals);
             crate::println!("normals: {normals:?}");
-            normals.get_vec3(index, slab)
+            // If the normals were generated on the CPU, the index from
+            // `indices` won't be the same as the index from `normals`.
+            if self.normals_were_generated {
+                normals.get_vec3(vertex_index, slab)
+            } else {
+                normals.get_vec3(index, slab)
+            }
         };
         crate::println!("normal: {normal:?}");
 
@@ -647,7 +655,13 @@ impl GltfPrimitive {
         } else {
             let tangents = slab.read(self.tangents);
             crate::println!("tangents: {tangents:?}");
-            tangents.get_vec4(index, slab)
+            // If the tangents were generated on the CPU, the index from
+            // `indices` won't be the same as the index from `tangents`.
+            if self.tangents_were_generated {
+                tangents.get_vec4(vertex_index, slab)
+            } else {
+                tangents.get_vec4(index, slab)
+            }
         };
         crate::println!("tangent: {tangent:?}");
 

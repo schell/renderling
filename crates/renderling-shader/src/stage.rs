@@ -939,6 +939,28 @@ impl Default for VertexData {
 impl VertexData {
     pub const NATIVE: u32 = 0;
     pub const GLTF: u32 = 1;
+
+    pub fn new_native(id: Id<NativeVertexData>) -> Self {
+        Self {
+            hash: Self::NATIVE,
+            index: id.into(),
+        }
+    }
+
+    pub fn new_gltf(id: Id<GltfVertexData>) -> Self {
+        Self {
+            hash: Self::GLTF,
+            index: id.into(),
+        }
+    }
+
+    pub fn is_native(&self) -> bool {
+        self.hash == Self::NATIVE
+    }
+
+    pub fn is_gltf(&self) -> bool {
+        self.hash == Self::GLTF
+    }
 }
 
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]

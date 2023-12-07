@@ -1,5 +1,10 @@
 # devlog
 
+## Thu Dec 7, 2023
+
+Ongoing work to get GLTF files on-the-slab working. When this work is done GLTF
+file imports should be lightening fast.
+
 ## Wed Nov 15, 2023
 
 I resubmitted the NLNet grant proposal with expanded scope to take care of [the

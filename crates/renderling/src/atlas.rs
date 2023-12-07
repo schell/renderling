@@ -75,6 +75,13 @@ impl Packing {
             Packing::AtlasImg { .. } => None,
         }
     }
+
+    pub fn as_scene_img(&self) -> Option<&SceneImage> {
+        match self {
+            Packing::Img { image, .. } => Some(image),
+            Packing::AtlasImg { .. } => None,
+        }
+    }
 }
 
 /// A preview of the packed atlas.
@@ -98,6 +105,14 @@ impl RepackPreview {
 
     pub fn get_mut(&mut self, index: usize) -> Option<&mut Packing> {
         self.items.items.get_mut(index).map(|item| &mut item.data)
+    }
+
+    pub fn new_images_len(&self) -> usize {
+        self.items
+            .items
+            .iter()
+            .filter(|item| item.data.as_scene_img().is_some())
+            .count()
     }
 }
 

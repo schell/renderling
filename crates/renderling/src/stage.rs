@@ -754,7 +754,7 @@ mod test {
         });
         let _ = stage.draw_unit(&RenderUnit {
             camera: camera_id,
-            vertex_data: VertexData::Native(vertex_data_id),
+            vertex_data: VertexData::new_native(vertex_data_id),
             vertex_count: 3,
             ..Default::default()
         });

@@ -118,7 +118,6 @@ impl Stage {
         log::trace!("Loading buffers into the GPU");
         let buffers = self.allocate_array::<GltfBuffer>(buffer_data.len());
         for (i, buffer) in buffer_data.iter().enumerate() {
-            log::trace!("  Loading buffer {i} size: {} bytes", buffer.len());
             let slice: &[u32] = bytemuck::cast_slice(&buffer);
             let buffer = self.append_array(slice);
             self.write(buffers.at(i), &GltfBuffer(buffer))?;
@@ -126,7 +125,6 @@ impl Stage {
 
         log::trace!("Loading views into the GPU");
         let views = self.allocate_array(document.views().len());
-        log::trace!("  reserved array: {views:?}");
         for (i, view) in document.views().enumerate() {
             let buffer = buffers.at(view.buffer().index());
             let offset = view.offset() as u32;
@@ -139,8 +137,6 @@ impl Stage {
                 length,
                 stride,
             };
-            log::trace!("  view {i} id: {id:#?}");
-            log::trace!("  writing view: {gltf_view:#?}");
             self.write(id, &gltf_view)?;
         }
 
@@ -187,8 +183,8 @@ impl Stage {
 
         // We need the (re)packing of the atlas before we marshal the images into the GPU
         // because we need their frames for textures and materials, but we need to know
-        // if the materials are require us to apply a linear transfer. So we'll get the
-        // preview repacking first, then update the frames in the textures.
+        // if the materials require us to apply a linear transfer. So we'll get the preview
+        // repacking first, then update the frames in the textures.
         let (mut repacking, atlas_offset) = {
             // UNWRAP: if we can't lock the atlas, we want to panic.
             let atlas = self.atlas.read().unwrap();
@@ -225,16 +221,18 @@ impl Stage {
                         index: image_index,
                         offset: atlas_offset,
                     })?;
-            gpu_textures.push(GpuTexture {
+            let texture = GpuTexture {
                 offset_px,
                 size_px,
                 modes: TextureModes::default()
                     .with_wrap_s(mode_s)
                     .with_wrap_t(mode_t),
                 atlas_index: (image_index + atlas_offset) as u32,
-            });
+            };
+            gpu_textures.push(texture);
         }
         let gpu_textures = gpu_textures;
+
         let textures = self.append_array(&gpu_textures);
 
         log::trace!("Creating materials");
@@ -253,6 +251,7 @@ impl Stage {
                         let tex_id = textures.at(index);
                         // The index of the image in the original gltf document
                         let image_index = texture.source().index();
+                        // Update the image to ensure it gets transferred correctly
                         let image = repacking
                             .get_mut(atlas_offset + image_index)
                             .context(MissingImageSnafu {
@@ -285,6 +284,7 @@ impl Stage {
                         let index = texture.index();
                         let tex_id = textures.at(index);
                         let image_index = texture.source().index();
+                        // Update the image to ensure it gets transferred correctly
                         let image = repacking
                             .get_mut(image_index + atlas_offset)
                             .context(MissingImageSnafu {
@@ -337,6 +337,7 @@ impl Stage {
                         let index = texture.index();
                         let tex_id = textures.at(index);
                         let image_index = texture.source().index();
+                        // Update the image to ensure it gets transferred correctly
                         let image = repacking
                             .get_mut(image_index + atlas_offset)
                             .context(MissingImageSnafu {
@@ -381,14 +382,18 @@ impl Stage {
         let gpu_materials = gpu_materials;
         let materials = self.append_array(&gpu_materials);
 
-        log::trace!("Packing the atlas");
-        {
+        let number_of_new_images = repacking.new_images_len();
+        if number_of_new_images > 0 {
+            log::trace!("Packing the atlas");
+            log::trace!("  adding {number_of_new_images} new images",);
             // UNWRAP: if we can't lock the atlas, we want to panic.
             let mut atlas = self.atlas.write().unwrap();
             let new_atlas = atlas
                 .commit_repack_preview(&self.device, &self.queue, repacking)
                 .context(AtlasSnafu)?;
             *atlas = new_atlas;
+            // The bindgroup will have to be remade
+            let _ = self.textures_bindgroup.lock().unwrap().take();
         }
 
         fn log_accessor(gltf_accessor: gltf::Accessor<'_>) {
@@ -431,6 +436,27 @@ impl Stage {
                     })
                     .unwrap_or_default();
 
+                let mut indices_vec: Option<Vec<u32>> = None;
+                fn get_indices<'a>(
+                    buffer_data: &[gltf::buffer::Data],
+                    primitive: &gltf::Primitive<'_>,
+                    indicies_vec: &'a mut Option<Vec<u32>>,
+                ) -> &'a Vec<u32> {
+                    if indicies_vec.is_none() {
+                        let reader = primitive.reader(|buffer| {
+                            let data = buffer_data.get(buffer.index())?;
+                            Some(data.0.as_slice())
+                        });
+                        let indices = reader
+                            .read_indices()
+                            .map(|is| is.into_u32().collect::<Vec<_>>())
+                            .unwrap_or_default();
+                        *indicies_vec = Some(indices);
+                    }
+                    // UNWRAP: safe because we just set it to `Some` if previously `None`
+                    indicies_vec.as_ref().unwrap()
+                }
+
                 // We may need the positions and uvs in-memory if we need
                 // to generate normals or tangents, so we'll keep them in
                 // a vec, if necessary, and access them through a function.
@@ -438,6 +464,7 @@ impl Stage {
                 fn get_positions<'a>(
                     buffer_data: &[gltf::buffer::Data],
                     primitive: &gltf::Primitive<'_>,
+                    indices_vec: &'a mut Option<Vec<u32>>,
                     position_vec: &'a mut Option<Vec<Vec3>>,
                 ) -> &'a Vec<Vec3> {
                     if position_vec.is_none() {
@@ -449,48 +476,54 @@ impl Stage {
                             .read_positions()
                             .map(|ps| ps.map(Vec3::from).collect::<Vec<_>>())
                             .unwrap_or_default();
-                        *position_vec = Some(positions);
+                        let indices = get_indices(buffer_data, primitive, indices_vec);
+                        if indices.is_empty() {
+                            *position_vec = Some(positions);
+                        } else {
+                            let mut new_positions = Vec::with_capacity(indices.len());
+                            for index in indices {
+                                new_positions.push(positions[*index as usize]);
+                            }
+                            *position_vec = Some(new_positions);
+                        }
                     }
                     // UNWRAP: safe because we just set it to `Some` if previously `None`
                     position_vec.as_ref().unwrap()
                 }
 
-                let mut positions_and_uv_vec: Option<Vec<(Vec3, Vec2)>> = None;
+                let mut uv_vec: Option<Vec<Vec2>> = None;
                 fn get_uvs<'a>(
                     buffer_data: &[gltf::buffer::Data],
                     primitive: &gltf::Primitive<'_>,
-                    positions: &'a mut Option<Vec<Vec3>>,
-                    positions_and_uv_vec: &'a mut Option<Vec<(Vec3, Vec2)>>,
-                ) -> &'a Vec<(Vec3, Vec2)> {
+                    indices: &'a mut Option<Vec<u32>>,
+                    uv_vec: &'a mut Option<Vec<Vec2>>,
+                ) -> &'a Vec<Vec2> {
                     // ensures we have position
-                    if positions_and_uv_vec.is_none() {
-                        let positions = get_positions(buffer_data, primitive, positions);
+                    if uv_vec.is_none() {
                         let reader = primitive.reader(|buffer| {
                             let data = buffer_data.get(buffer.index())?;
                             Some(data.0.as_slice())
                         });
-                        let puvs: Vec<(Vec3, Vec2)> = reader
+                        let uvs: Vec<Vec2> = reader
                             .read_tex_coords(0)
-                            .map(|uvs| {
-                                positions
-                                    .iter()
-                                    .copied()
-                                    .zip(uvs.into_f32().map(Vec2::from))
-                                    .collect()
-                            })
-                            .unwrap_or_else(|| {
-                                positions
-                                    .iter()
-                                    .copied()
-                                    .zip(std::iter::repeat(Vec2::ZERO))
-                                    .collect()
-                            });
-                        *positions_and_uv_vec = Some(puvs);
+                            .map(|coords| coords.into_f32().map(Vec2::from).collect::<Vec<_>>())
+                            .unwrap_or_default();
+                        let indices = get_indices(buffer_data, primitive, indices);
+                        if indices.is_empty() {
+                            *uv_vec = Some(uvs);
+                        } else {
+                            let mut new_uvs = Vec::with_capacity(indices.len());
+                            for index in indices {
+                                new_uvs.push(uvs[*index as usize]);
+                            }
+                            *uv_vec = Some(new_uvs);
+                        }
                     }
                     // UNWRAP: safe because we just set it to `Some`
-                    positions_and_uv_vec.as_ref().unwrap()
+                    uv_vec.as_ref().unwrap()
                 }
 
+                let mut normals_were_generated = false;
                 let normals = primitive
                     .get(&gltf::Semantic::Normals)
                     .map(|acc| {
@@ -502,16 +535,22 @@ impl Stage {
                     .unwrap_or_else(|| {
                         log::trace!("    generating normals");
                         // Generate the normals
-                        let normals = get_positions(&buffer_data, &primitive, &mut position_vec)
-                            .chunks(3)
-                            .flat_map(|chunk| match chunk {
-                                [a, b, c] => {
-                                    let n = Vertex::generate_normal(*a, *b, *c);
-                                    [n, n, n]
-                                }
-                                _ => panic!("not triangles!"),
-                            })
-                            .collect::<Vec<_>>();
+                        normals_were_generated = true;
+                        let normals = get_positions(
+                            &buffer_data,
+                            &primitive,
+                            &mut indices_vec,
+                            &mut position_vec,
+                        )
+                        .chunks(3)
+                        .flat_map(|chunk| match chunk {
+                            [a, b, c] => {
+                                let n = Vertex::generate_normal(*a, *b, *c);
+                                [n, n, n]
+                            }
+                            _ => panic!("not triangles!"),
+                        })
+                        .collect::<Vec<_>>();
                         let normals_array = self.append_array(&normals);
                         let buffer = GltfBuffer(normals_array.into_u32_array());
                         let buffer_id = self.append(&buffer);
@@ -527,6 +566,7 @@ impl Stage {
                         };
                         self.append(&accessor)
                     });
+                let mut tangents_were_generated = false;
                 let tangents = primitive
                     .get(&gltf::Semantic::Tangents)
                     .map(|acc| {
@@ -537,12 +577,20 @@ impl Stage {
                     })
                     .unwrap_or_else(|| {
                         log::trace!("    generating tangents");
-                        let p_uvs = get_uvs(
+                        tangents_were_generated = true;
+                        let positions = get_positions(
                             &buffer_data,
                             &primitive,
+                            &mut indices_vec,
                             &mut position_vec,
-                            &mut positions_and_uv_vec,
-                        );
+                        )
+                        .clone();
+                        let uvs = get_uvs(&buffer_data, &primitive, &mut indices_vec, &mut uv_vec)
+                            .clone();
+                        let p_uvs = positions
+                            .into_iter()
+                            .zip(uvs.into_iter().chain(std::iter::repeat(Vec2::ZERO).cycle()))
+                            .collect::<Vec<_>>();
                         let tangents = p_uvs
                             .chunks(3)
                             .flat_map(|chunk| match chunk {
@@ -558,13 +606,13 @@ impl Stage {
                         let buffer = GltfBuffer(tangents_array.into_u32_array());
                         let buffer_id = self.append(&buffer);
                         let accessor = GltfAccessor {
-                            size: 12,
+                            size: 16,
                             buffer: buffer_id,
                             view_offset: 0,
-                            view_stride: 12,
+                            view_stride: 16,
                             count: tangents.len() as u32,
                             data_type: DataType::F32,
-                            dimensions: Dimensions::Vec3,
+                            dimensions: Dimensions::Vec4,
                             normalized: true,
                         };
                         self.append(&accessor)
@@ -622,7 +670,9 @@ impl Stage {
                     indices,
                     positions,
                     normals,
+                    normals_were_generated,
                     tangents,
+                    tangents_were_generated,
                     colors,
                     tex_coords0,
                     tex_coords1,
@@ -788,6 +838,9 @@ impl Stage {
                 self.write(samplers.at(i), &sampler)?;
                 // Store it later so we can figure out the index of the sampler
                 // used by the channel.
+                //
+                // TODO: Remove `stored_samplers` once `gltf` provides `.index()`
+                // @see https://github.com/gltf-rs/gltf/issues/398
                 stored_samplers.push(sampler);
             }
             let channels = self.allocate_array::<GltfChannel>(animation.channels().count());
@@ -872,7 +925,7 @@ impl Stage {
                         scale: Vec3::from(s),
                     });
                     let render_unit = RenderUnit {
-                        vertex_data: VertexData::Gltf(vertex_data_id),
+                        vertex_data: VertexData::new_gltf(vertex_data_id),
                         vertex_count: super::get_vertex_count(&primitive),
                         transform,
                         camera: camera_id,
@@ -921,17 +974,17 @@ impl Stage {
 #[cfg(test)]
 mod test {
     use glam::{Vec2, Vec3, Vec4};
-    use renderling_shader::{
-        pbr::PbrMaterial,
-        stage::{LightingModel, NativeVertexData, Transform, Vertex, VertexData},
-    };
 
     use crate::{
         shader::{
             array::Array,
             gltf::*,
+            pbr::PbrMaterial,
             slab::Slab,
-            stage::{Camera, RenderUnit},
+            stage::{
+                Camera, GltfVertexData, LightingModel, NativeVertexData, RenderUnit, Transform,
+                Vertex, VertexData,
+            },
         },
         DrawUnit, Id, Renderling, Stage,
     };
@@ -1071,10 +1124,8 @@ mod test {
             .map(|draw| {
                 let unit_id = draw.id;
                 let unit = slab.read(unit_id);
-                let vertex_data_id = match unit.vertex_data {
-                    renderling_shader::stage::VertexData::Native(_) => panic!("should be gltf"),
-                    renderling_shader::stage::VertexData::Gltf(id) => id,
-                };
+                assert_eq!(unit.vertex_data.is_gltf(), true);
+                let vertex_data_id = Id::<GltfVertexData>::from(unit.vertex_data.index);
                 let vertex_data = slab.read(vertex_data_id);
                 let mesh = slab.read(vertex_data.mesh);
                 let primitive_id = mesh.primitives.at(vertex_data.primitive_index as usize);
@@ -1188,14 +1239,20 @@ mod test {
         let stage = Stage::new(device, queue).with_lighting(false);
         stage.configure_graph(&mut r, true);
         let (document, buffers, images) = gltf::import("../../gltf/cheetah_cone.glb").unwrap();
+        let gpu_doc = stage
+            .load_gltf_document(&document, buffers, images)
+            .unwrap();
         let (projection, view) = crate::camera::default_ortho2d(100.0, 100.0);
         let camera_id = stage.append(&Camera {
             projection,
             view,
             position: Vec3::ZERO,
         });
+        assert!(!gpu_doc.textures.is_empty());
+        let albedo_texture_id = gpu_doc.textures.at(0);
+        assert!(albedo_texture_id.is_some());
         let material_id = stage.append(&PbrMaterial {
-            albedo_texture: Id::new(0),
+            albedo_texture: albedo_texture_id,
             lighting_model: LightingModel::NO_LIGHTING,
             ..Default::default()
         });
@@ -1217,7 +1274,7 @@ mod test {
                 .with_uv0([0.0, 1.0]),
         ]);
         let indices = stage.append_array(&[0, 3, 2, 0, 2, 1]);
-        let native_data = stage.append(&NativeVertexData {
+        let native_data_id = stage.append(&NativeVertexData {
             vertices,
             indices,
             material: material_id,
@@ -1226,8 +1283,8 @@ mod test {
             scale: Vec3::new(100.0, 100.0, 1.0),
             ..Default::default()
         });
-        let unit_id = stage.draw_unit(&RenderUnit {
-            vertex_data: VertexData::Native(native_data),
+        let _unit_id = stage.draw_unit(&RenderUnit {
+            vertex_data: VertexData::new_native(native_data_id),
             camera: camera_id,
             transform,
             vertex_count: indices.len() as u32,
