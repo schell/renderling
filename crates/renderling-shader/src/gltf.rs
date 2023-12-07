@@ -215,8 +215,6 @@ impl IncI16 {
 impl GltfAccessor {
     fn slab_index_and_byte_offset(&self, element_index: usize, slab: &[u32]) -> (usize, usize) {
         crate::println!("index: {element_index:?}");
-        let buffer_id = self.buffer;
-        crate::println!("buffer_id: {buffer_id:?}");
         let buffer = slab.read(self.buffer);
         crate::println!("buffer: {:?}", buffer);
         let buffer_start = buffer.0.starting_index();
@@ -1063,6 +1061,7 @@ pub struct GltfDocument {
     pub cameras: Array<GltfCamera>,
     // TODO: Think about making a `GltfMaterial`
     pub materials: Array<PbrMaterial>,
+    pub default_material: Id<PbrMaterial>,
     pub meshes: Array<GltfMesh>,
     pub nodes: Array<GltfNode>,
     pub scenes: Array<GltfScene>,

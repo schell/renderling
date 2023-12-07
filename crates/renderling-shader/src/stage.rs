@@ -1125,7 +1125,7 @@ pub fn stage_fragment(
         has_lighting,
         light_array,
     } = slab.read(Id::new(0));
-    let material = if in_material == ID_NONE || !has_lighting {
+    let material = if in_material == ID_NONE {
         // without an explicit material (or if the entire render has no lighting)
         // the entity will not participate in any lighting calculations
         pbr::PbrMaterial {
@@ -1133,7 +1133,11 @@ pub fn stage_fragment(
             ..Default::default()
         }
     } else {
-        slab.read(Id::<PbrMaterial>::new(in_material))
+        let mut material = slab.read(Id::<PbrMaterial>::new(in_material));
+        if !has_lighting {
+            material.lighting_model = LightingModel::NO_LIGHTING;
+        }
+        material
     };
 
     let albedo_tex_uv = if material.albedo_tex_coord == 0 {

@@ -568,7 +568,7 @@ impl Stage {
     }
 
     /// Returns all the draw operations on the stage.
-    pub(crate) fn get_draws(&self) -> Vec<DrawUnit> {
+    pub fn get_draws(&self) -> Vec<DrawUnit> {
         // UNWRAP: if we can't acquire the lock we want to panic.
         let draws = self.draws.read().unwrap();
         match draws.deref() {
@@ -629,7 +629,7 @@ impl Stage {
 
 /// A unit of work to be drawn.
 #[derive(Clone, Copy, Debug, Default)]
-pub(crate) struct DrawUnit {
+pub struct DrawUnit {
     pub id: Id<RenderUnit>,
     pub vertex_count: u32,
 }

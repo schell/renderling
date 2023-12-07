@@ -125,7 +125,7 @@ impl Stage {
 
         log::trace!("Loading views into the GPU");
         let views = self.allocate_array(document.views().len());
-        for (i, view) in document.views().enumerate() {
+        for view in document.views() {
             let buffer = buffers.at(view.buffer().index());
             let offset = view.offset() as u32;
             let length = view.length() as u32;
@@ -198,8 +198,8 @@ impl Stage {
         };
 
         log::trace!("Creating GPU textures");
-        let mut gpu_textures = vec![];
-        for texture in document.textures() {
+        let textures = self.allocate_array::<GpuTexture>(document.textures().len());
+        for (i, texture) in document.textures().enumerate() {
             let image_index = texture.source().index();
 
             fn mode(mode: gltf::texture::WrappingMode) -> TextureAddressMode {
@@ -229,18 +229,24 @@ impl Stage {
                     .with_wrap_t(mode_t),
                 atlas_index: (image_index + atlas_offset) as u32,
             };
-            gpu_textures.push(texture);
+            let texture_id = textures.at(i);
+            log::trace!("  texture {i} {texture_id:?}: {texture:#?}");
+            self.write(texture_id, &texture)?;
         }
-        let gpu_textures = gpu_textures;
-
-        let textures = self.append_array(&gpu_textures);
 
         log::trace!("Creating materials");
-        let mut gpu_materials = vec![];
+        let mut default_material = Id::<PbrMaterial>::NONE;
+        let materials = self.allocate_array::<PbrMaterial>(document.materials().len());
         for material in document.materials() {
-            let index = material.index();
+            let material_id = if let Some(index) = material.index() {
+                materials.at(index)
+            } else {
+                // Allocate some extra space for this default material
+                default_material = self.allocate::<PbrMaterial>();
+                default_material
+            };
             let name = material.name().map(String::from);
-            log::trace!("loading material {index:?} {name:?}");
+            log::trace!("loading material {:?} {name:?}", material.index());
             let pbr = material.pbr_metallic_roughness();
             let material = if material.unlit() {
                 log::trace!("  is unlit");
@@ -377,10 +383,9 @@ impl Stage {
                     ..Default::default()
                 }
             };
-            gpu_materials.push(material);
+            log::trace!("  material {material_id:?}: {material:#?}",);
+            self.write(material_id, &material)?;
         }
-        let gpu_materials = gpu_materials;
-        let materials = self.append_array(&gpu_materials);
 
         let number_of_new_images = repacking.new_images_len();
         if number_of_new_images > 0 {
@@ -889,6 +894,7 @@ impl Stage {
             buffers,
             cameras,
             materials,
+            default_material,
             meshes,
             nodes,
             scenes,
@@ -1019,7 +1025,7 @@ mod test {
                 _ => panic!("bad chunk"),
             }
         }
-        let u32buffer = bytemuck::cast_slice::<u16, u32>(&u16buffer).to_vec(); //
+        let u32buffer = bytemuck::cast_slice::<u16, u32>(&u16buffer).to_vec();
         for u in u32buffer.iter() {
             println!("{u:032b}");
         }
@@ -1046,6 +1052,26 @@ mod test {
         assert_eq!(1, i1);
         let i2 = accessor.get_u32(2, &data);
         assert_eq!(1, i2);
+    }
+
+    #[allow(unused)]
+    #[derive(Debug, Default)]
+    struct VertexInvocation {
+        draw: DrawUnit,
+        instance_index: u32,
+        vertex_index: u32,
+        render_unit_id: Id<RenderUnit>,
+        render_unit: RenderUnit,
+        out_camera: u32,
+        out_material: u32,
+        out_color: Vec4,
+        out_uv0: Vec2,
+        out_uv1: Vec2,
+        out_norm: Vec3,
+        out_tangent: Vec3,
+        out_bitangent: Vec3,
+        out_pos: Vec3,
+        clip_pos: Vec4,
     }
 
     #[test]
@@ -1086,26 +1112,6 @@ mod test {
             stage.slab.len(),
         ))
         .unwrap();
-
-        #[allow(unused)]
-        #[derive(Debug, Default)]
-        struct VertexInvocation {
-            draw: DrawUnit,
-            instance_index: u32,
-            vertex_index: u32,
-            render_unit_id: Id<RenderUnit>,
-            render_unit: RenderUnit,
-            out_camera: u32,
-            out_material: u32,
-            out_color: Vec4,
-            out_uv0: Vec2,
-            out_uv1: Vec2,
-            out_norm: Vec3,
-            out_tangent: Vec3,
-            out_bitangent: Vec3,
-            out_pos: Vec3,
-            clip_pos: Vec4,
-        }
 
         let draws = stage.get_draws();
         let slab = &data;
@@ -1236,7 +1242,7 @@ mod test {
     fn stage_gltf_images() {
         let mut r = Renderling::headless(100, 100).with_background_color(Vec4::splat(1.0));
         let (device, queue) = r.get_device_and_queue_owned();
-        let stage = Stage::new(device, queue).with_lighting(false);
+        let stage = Stage::new(device.clone(), queue.clone()).with_lighting(false);
         stage.configure_graph(&mut r, true);
         let (document, buffers, images) = gltf::import("../../gltf/cheetah_cone.glb").unwrap();
         let gpu_doc = stage
@@ -1256,6 +1262,7 @@ mod test {
             lighting_model: LightingModel::NO_LIGHTING,
             ..Default::default()
         });
+        println!("material_id: {:#?}", material_id);
         let vertices = stage.append_array(&vec![
             Vertex::default()
                 .with_position([0.0, 0.0, 0.0])
@@ -1290,6 +1297,51 @@ mod test {
             vertex_count: indices.len() as u32,
         });
         let img = r.render_image().unwrap();
-        img_diff::assert_img_eq("gltf_images.png", img);
+        img_diff::save("gltf_images.png", img);
+
+        let data = futures_lite::future::block_on(stage.slab.read_raw(
+            &device,
+            &queue,
+            0,
+            stage.slab.len(),
+        ))
+        .unwrap();
+        let draws = stage.get_draws();
+        let invocations = draws
+            .into_iter()
+            .flat_map(|draw| {
+                let render_unit_id = draw.id;
+                let instance_index = render_unit_id.inner();
+                let render_unit = data.read(render_unit_id);
+                let data = &data;
+                (0..draw.vertex_count).map(move |vertex_index| {
+                    let mut invocation = VertexInvocation {
+                        draw,
+                        render_unit_id,
+                        render_unit,
+                        instance_index,
+                        vertex_index,
+                        ..Default::default()
+                    };
+                    renderling_shader::stage::new_stage_vertex(
+                        instance_index,
+                        vertex_index,
+                        data,
+                        &mut invocation.out_camera,
+                        &mut invocation.out_material,
+                        &mut invocation.out_color,
+                        &mut invocation.out_uv0,
+                        &mut invocation.out_uv1,
+                        &mut invocation.out_norm,
+                        &mut invocation.out_tangent,
+                        &mut invocation.out_bitangent,
+                        &mut invocation.out_pos,
+                        &mut invocation.clip_pos,
+                    );
+                    invocation
+                })
+            })
+            .collect::<Vec<_>>();
+        panic!("invocations: {:#?}", invocations);
     }
 }

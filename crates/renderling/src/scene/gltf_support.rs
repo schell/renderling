@@ -1203,9 +1203,8 @@ impl GltfLoader {
 #[cfg(all(test, feature = "gltf"))]
 mod test {
     use glam::{Vec3, Vec4};
-    use renderling_shader::pbr::PbrMaterial;
 
-    use crate::{camera, Id, LightingModel, RenderGraphConfig, Renderling, Vertex};
+    use crate::{camera, shader::pbr::PbrMaterial, LightingModel, RenderGraphConfig, Renderling};
 
     #[test]
     fn simple_texture() {
