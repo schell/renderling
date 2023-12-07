@@ -396,9 +396,13 @@ impl Stage {
             let new_atlas = atlas
                 .commit_repack_preview(&self.device, &self.queue, repacking)
                 .context(AtlasSnafu)?;
+            let size = new_atlas.size;
             *atlas = new_atlas;
             // The bindgroup will have to be remade
             let _ = self.textures_bindgroup.lock().unwrap().take();
+            // The atlas size must be reset
+            let size_id = Id::new(0) + StageLegend::offset_of_atlas_size();
+            self.write(size_id, &size)?;
         }
 
         fn log_accessor(gltf_accessor: gltf::Accessor<'_>) {
@@ -455,7 +459,15 @@ impl Stage {
                         let indices = reader
                             .read_indices()
                             .map(|is| is.into_u32().collect::<Vec<_>>())
-                            .unwrap_or_default();
+                            .unwrap_or_else(|| {
+                                let count = primitive
+                                    .get(&gltf::Semantic::Positions)
+                                    .map(|ps| ps.count())
+                                    .unwrap_or_default()
+                                    as u32;
+                                (0u32..count).collect::<Vec<_>>()
+                            });
+                        assert_eq!(indices.len() % 3, 0, "indices do not form triangles");
                         *indicies_vec = Some(indices);
                     }
                     // UNWRAP: safe because we just set it to `Some` if previously `None`
@@ -477,20 +489,25 @@ impl Stage {
                             let data = buffer_data.get(buffer.index())?;
                             Some(data.0.as_slice())
                         });
-                        let positions = reader
+                        let indices = get_indices(buffer_data, primitive, indices_vec);
+                        let mut positions = reader
                             .read_positions()
                             .map(|ps| ps.map(Vec3::from).collect::<Vec<_>>())
-                            .unwrap_or_default();
-                        let indices = get_indices(buffer_data, primitive, indices_vec);
-                        if indices.is_empty() {
-                            *position_vec = Some(positions);
-                        } else {
+                            .unwrap_or_else(|| vec![Vec3::ZERO; indices.len()]);
+                        if positions.len() != indices.len() {
                             let mut new_positions = Vec::with_capacity(indices.len());
                             for index in indices {
                                 new_positions.push(positions[*index as usize]);
                             }
-                            *position_vec = Some(new_positions);
+                            positions = new_positions;
                         }
+                        assert_eq!(
+                            positions.len() % 3,
+                            0,
+                            "{} positions do not form triangles",
+                            positions.len()
+                        );
+                        *position_vec = Some(positions);
                     }
                     // UNWRAP: safe because we just set it to `Some` if previously `None`
                     position_vec.as_ref().unwrap()
@@ -509,20 +526,12 @@ impl Stage {
                             let data = buffer_data.get(buffer.index())?;
                             Some(data.0.as_slice())
                         });
+                        let indices = get_indices(buffer_data, primitive, indices);
                         let uvs: Vec<Vec2> = reader
                             .read_tex_coords(0)
                             .map(|coords| coords.into_f32().map(Vec2::from).collect::<Vec<_>>())
-                            .unwrap_or_default();
-                        let indices = get_indices(buffer_data, primitive, indices);
-                        if indices.is_empty() {
-                            *uv_vec = Some(uvs);
-                        } else {
-                            let mut new_uvs = Vec::with_capacity(indices.len());
-                            for index in indices {
-                                new_uvs.push(uvs[*index as usize]);
-                            }
-                            *uv_vec = Some(new_uvs);
-                        }
+                            .unwrap_or_else(|| vec![Vec2::ZERO; indices.len()]);
+                        *uv_vec = Some(uvs);
                     }
                     // UNWRAP: safe because we just set it to `Some`
                     uv_vec.as_ref().unwrap()
@@ -1266,15 +1275,12 @@ mod test {
         let vertices = stage.append_array(&vec![
             Vertex::default()
                 .with_position([0.0, 0.0, 0.0])
-                .with_color([1.0, 0.0, 0.0, 1.0])
                 .with_uv0([0.0, 0.0]),
             Vertex::default()
                 .with_position([1.0, 0.0, 0.0])
-                .with_color([0.0, 1.0, 0.0, 1.0])
                 .with_uv0([1.0, 0.0]),
             Vertex::default()
                 .with_position([1.0, 1.0, 0.0])
-                .with_color([0.0, 0.0, 1.0, 1.0])
                 .with_uv0([1.0, 1.0]),
             Vertex::default()
                 .with_position([0.0, 1.0, 0.0])
@@ -1297,51 +1303,6 @@ mod test {
             vertex_count: indices.len() as u32,
         });
         let img = r.render_image().unwrap();
-        img_diff::save("gltf_images.png", img);
-
-        let data = futures_lite::future::block_on(stage.slab.read_raw(
-            &device,
-            &queue,
-            0,
-            stage.slab.len(),
-        ))
-        .unwrap();
-        let draws = stage.get_draws();
-        let invocations = draws
-            .into_iter()
-            .flat_map(|draw| {
-                let render_unit_id = draw.id;
-                let instance_index = render_unit_id.inner();
-                let render_unit = data.read(render_unit_id);
-                let data = &data;
-                (0..draw.vertex_count).map(move |vertex_index| {
-                    let mut invocation = VertexInvocation {
-                        draw,
-                        render_unit_id,
-                        render_unit,
-                        instance_index,
-                        vertex_index,
-                        ..Default::default()
-                    };
-                    renderling_shader::stage::new_stage_vertex(
-                        instance_index,
-                        vertex_index,
-                        data,
-                        &mut invocation.out_camera,
-                        &mut invocation.out_material,
-                        &mut invocation.out_color,
-                        &mut invocation.out_uv0,
-                        &mut invocation.out_uv1,
-                        &mut invocation.out_norm,
-                        &mut invocation.out_tangent,
-                        &mut invocation.out_bitangent,
-                        &mut invocation.out_pos,
-                        &mut invocation.clip_pos,
-                    );
-                    invocation
-                })
-            })
-            .collect::<Vec<_>>();
-        panic!("invocations: {:#?}", invocations);
+        img_diff::assert_img_eq("gltf_images.png", img);
     }
 }

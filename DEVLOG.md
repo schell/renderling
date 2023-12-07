@@ -1,5 +1,12 @@
 # devlog
 
+## Fri Dec 8, 2023
+
+I've been having trouble getting the new GLTF files on-the-slab method to pass my
+previous tests. Mainly because of little things I had forgotten. Little bits of
+state that need to be updated to run the shaders. The most recent was that the
+size of the atlas needs to be updated on the GPU when the atlas changes.
+
 ## Thu Dec 7, 2023
 
 Ongoing work to get GLTF files on-the-slab working. When this work is done GLTF
