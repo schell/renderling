@@ -784,62 +784,60 @@ mod test {
     fn atlas_uv_mapping() {
         let mut r =
             Renderling::headless(32, 32).with_background_color(Vec3::splat(0.0).extend(1.0));
+        let stage = r.new_stage();
+        stage.configure_graph(&mut r, true);
         let (projection, view) = camera::default_ortho2d(32.0, 32.0);
-        let mut builder = r.new_scene().with_camera(projection, view);
-        let dirt = image::open("../../img/dirt.jpg").unwrap();
-        let dirt = builder.add_image(dirt);
-        println!("dirt: {dirt}");
-        let sandstone = image::open("../../img/sandstone.png").unwrap();
-        let sandstone = builder.add_image(sandstone);
-        println!("sandstone: {sandstone}");
-        let texels = image::open("../../test_img/atlas_uv_mapping.png").unwrap();
-        let texels_index = builder.add_image(texels);
-        println!("atlas_uv_mapping: {texels_index}");
-        let texture_id = builder.add_texture(TextureParams {
-            image_index: texels_index,
-            mode_s: TextureAddressMode::CLAMP_TO_EDGE,
-            mode_t: TextureAddressMode::CLAMP_TO_EDGE,
+        let camera = stage.append(&Camera {
+            projection,
+            view,
+            ..Default::default()
         });
-        let material_id = builder.add_material(PbrMaterial {
-            albedo_texture: texture_id,
+        let dirt = SceneImage::from_path("../../img/dirt.jpg").unwrap();
+        let sandstone = SceneImage::from_path("../../img/sandstone.png").unwrap();
+        let texels = SceneImage::from_path("../../test_img/atlas_uv_mapping.png").unwrap();
+        let textures = stage.set_images([dirt, sandstone, texels]).unwrap();
+        let mut texels_tex = textures[2];
+        texels_tex
+            .modes
+            .set_wrap_s(TextureAddressMode::CLAMP_TO_EDGE);
+        texels_tex
+            .modes
+            .set_wrap_t(TextureAddressMode::CLAMP_TO_EDGE);
+        let texels_tex_id = stage.append(&texels_tex);
+        let material_id = stage.append(&PbrMaterial {
+            albedo_texture: texels_tex_id,
             lighting_model: LightingModel::NO_LIGHTING,
             ..Default::default()
         });
-        let _ = builder
-            .new_entity()
-            .with_material(material_id)
-            .with_meshlet({
-                let tl = Vertex::default()
-                    .with_position(Vec3::ZERO)
-                    .with_uv0(Vec2::ZERO);
-                let tr = Vertex::default()
-                    .with_position(Vec3::new(1.0, 0.0, 0.0))
-                    .with_uv0(Vec2::new(1.0, 0.0));
-                let bl = Vertex::default()
-                    .with_position(Vec3::new(0.0, 1.0, 0.0))
-                    .with_uv0(Vec2::new(0.0, 1.0));
-                let br = Vertex::default()
-                    .with_position(Vec3::new(1.0, 1.0, 0.0))
-                    .with_uv0(Vec2::splat(1.0));
-                vec![tl, bl, br, tl, br, tr]
-            })
-            .with_scale([32.0, 32.0, 1.0])
-            .build();
-        let scene = builder.build().unwrap();
-        // let atlas_img = scene.atlas.texture.read(
-        //    r.get_device(),
-        //    r.get_queue(),
-        //    scene.atlas.size.x as usize,
-        //    scene.atlas.size.y as usize,
-        //    4,
-        //    1,
-        //);
-        // let atlas_img = atlas_img.into_rgba(r.get_device()).unwrap();
-        // img_diff::save("atlas.png", atlas_img);
-        r.setup_render_graph(RenderGraphConfig {
-            scene: Some(scene),
-            with_screen_capture: true,
+        let vertices = stage.append_array(&{
+            let tl = Vertex::default()
+                .with_position(Vec3::ZERO)
+                .with_uv0(Vec2::ZERO);
+            let tr = Vertex::default()
+                .with_position(Vec3::new(1.0, 0.0, 0.0))
+                .with_uv0(Vec2::new(1.0, 0.0));
+            let bl = Vertex::default()
+                .with_position(Vec3::new(0.0, 1.0, 0.0))
+                .with_uv0(Vec2::new(0.0, 1.0));
+            let br = Vertex::default()
+                .with_position(Vec3::new(1.0, 1.0, 0.0))
+                .with_uv0(Vec2::splat(1.0));
+            vec![tl, bl, br, tl, br, tr]
+        });
+        let vertex_data = stage.append(&NativeVertexData {
+            vertices,
+            material: material_id,
             ..Default::default()
+        });
+        let transform = stage.append(&Transform {
+            scale: Vec3::new(32.0, 32.0, 1.0),
+            ..Default::default()
+        });
+        let _unit = stage.draw_unit(&RenderUnit {
+            camera,
+            transform,
+            vertex_data: VertexData::new_native(vertex_data),
+            vertex_count: vertices.len() as u32,
         });
 
         let img = r.render_image().unwrap();
