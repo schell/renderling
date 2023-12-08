@@ -16,6 +16,9 @@ use snafu::{OptionExt, ResultExt, Snafu};
 #[derive(Debug, Snafu)]
 pub enum StageGltfError {
     #[snafu(display("{source}"))]
+    Gltf { source: gltf::Error },
+
+    #[snafu(display("{source}"))]
     Atlas { source: crate::atlas::AtlasError },
 
     #[snafu(display("Missing image at index {index} atlas offset {offset}"))]
@@ -42,6 +45,9 @@ pub enum StageGltfError {
     #[snafu(display("Missing sampler"))]
     MissingSampler,
 
+    #[snafu(display("Missing gltf camera at index {index}"))]
+    MissingCamera { index: usize },
+
     #[snafu(display("{source}"))]
     Slab { source: crate::slab::SlabError },
 }
@@ -49,6 +55,12 @@ pub enum StageGltfError {
 impl From<crate::slab::SlabError> for StageGltfError {
     fn from(source: crate::slab::SlabError) -> Self {
         Self::Slab { source }
+    }
+}
+
+impl From<gltf::Error> for StageGltfError {
+    fn from(source: gltf::Error) -> Self {
+        Self::Gltf { source }
     }
 }
 
@@ -109,6 +121,15 @@ pub fn make_accessor(accessor: gltf::Accessor<'_>, buffers: &Array<GltfBuffer>) 
 }
 
 impl Stage {
+    pub fn load_gltf_document_from_path(
+        &self,
+        path: impl AsRef<std::path::Path>,
+    ) -> Result<(gltf::Document, GltfDocument), StageGltfError> {
+        let (document, buffers, images) = gltf::import(path)?;
+        let gpu_doc = self.load_gltf_document(&document, buffers, images)?;
+        Ok((document, gpu_doc))
+    }
+
     pub fn load_gltf_document(
         &self,
         document: &gltf::Document,
@@ -527,10 +548,17 @@ impl Stage {
                             Some(data.0.as_slice())
                         });
                         let indices = get_indices(buffer_data, primitive, indices);
-                        let uvs: Vec<Vec2> = reader
+                        let mut uvs: Vec<Vec2> = reader
                             .read_tex_coords(0)
                             .map(|coords| coords.into_f32().map(Vec2::from).collect::<Vec<_>>())
                             .unwrap_or_else(|| vec![Vec2::ZERO; indices.len()]);
+                        if uvs.len() != indices.len() {
+                            let mut new_uvs = Vec::with_capacity(indices.len());
+                            for index in indices {
+                                new_uvs.push(uvs[*index as usize]);
+                            }
+                            uvs = new_uvs;
+                        }
                         *uv_vec = Some(uvs);
                     }
                     // UNWRAP: safe because we just set it to `Some`
@@ -910,6 +938,56 @@ impl Stage {
             skins,
             textures,
             views,
+        })
+    }
+
+    /// Create a native camera for the gltf camera with the given index.
+    pub fn create_camera_from_gltf(
+        &self,
+        cpu_doc: &gltf::Document,
+        index: usize,
+    ) -> Result<Camera, StageGltfError> {
+        let gltf_camera = cpu_doc
+            .cameras()
+            .nth(index)
+            .context(MissingCameraSnafu { index })?;
+        let projection = match gltf_camera.projection() {
+            gltf::camera::Projection::Orthographic(o) => glam::Mat4::orthographic_rh(
+                -o.xmag(),
+                o.xmag(),
+                -o.ymag(),
+                o.ymag(),
+                o.znear(),
+                o.zfar(),
+            ),
+            gltf::camera::Projection::Perspective(p) => {
+                let fovy = p.yfov();
+                let aspect = p.aspect_ratio().unwrap_or(1.0);
+                if let Some(zfar) = p.zfar() {
+                    glam::Mat4::perspective_rh(fovy, aspect, p.znear(), zfar)
+                } else {
+                    glam::Mat4::perspective_infinite_rh(
+                        p.yfov(),
+                        p.aspect_ratio().unwrap_or(1.0),
+                        p.znear(),
+                    )
+                }
+            }
+        };
+        let view = cpu_doc
+            .nodes()
+            .find_map(|node| {
+                if node.camera().map(|c| c.index()) == Some(index) {
+                    Some(glam::Mat4::from_cols_array_2d(&node.transform().matrix()).inverse())
+                } else {
+                    None
+                }
+            })
+            .unwrap_or_default();
+        Ok(Camera {
+            projection,
+            view,
+            ..Default::default()
         })
     }
 
@@ -1304,5 +1382,54 @@ mod test {
         });
         let img = r.render_image().unwrap();
         img_diff::assert_img_eq("gltf_images.png", img);
+    }
+
+    #[test]
+    fn simple_texture() {
+        let size = 100;
+        let mut r =
+            Renderling::headless(size, size).with_background_color(Vec3::splat(0.0).extend(1.0));
+        let (device, queue) = r.get_device_and_queue_owned();
+        let stage = Stage::new(device.clone(), queue.clone())
+            // There are no lights in the scene and the material isn't marked as "unlit", so
+            // let's force it to be unlit.
+            .with_lighting(false);
+        stage.configure_graph(&mut r, true);
+        let (cpu_doc, gpu_doc) = stage
+            .load_gltf_document_from_path("../../gltf/gltfTutorial_013_SimpleTexture.gltf")
+            .unwrap();
+
+        let position = Vec3::new(0.5, 0.5, 1.25);
+        let projection = crate::camera::perspective(size as f32, size as f32);
+        let view = crate::camera::look_at(position, Vec3::new(0.5, 0.5, 0.0), Vec3::Y);
+        let camera = stage.append(&Camera {
+            projection,
+            view,
+            position,
+        });
+        let _unit_ids = stage.draw_gltf_scene(&gpu_doc, camera, cpu_doc.default_scene().unwrap());
+
+        let img = r.render_image().unwrap();
+        img_diff::assert_img_eq("gltf_simple_texture.png", img);
+    }
+
+    #[test]
+    fn normal_mapping_brick_sphere() {
+        let size = 600;
+        let mut r =
+            Renderling::headless(size, size).with_background_color(Vec3::splat(1.0).extend(1.0));
+        let stage = r.new_stage();
+        stage.configure_graph(&mut r, true);
+        let (cpu_doc, gpu_doc) = stage
+            .load_gltf_document_from_path("../../gltf/red_brick_03_1k.glb")
+            .unwrap();
+        let camera = stage.create_camera_from_gltf(&cpu_doc, 0).unwrap();
+        let camera_id = stage.append(&camera);
+        let _unit_ids =
+            stage.draw_gltf_scene(&gpu_doc, camera_id, cpu_doc.default_scene().unwrap());
+
+        let img = r.render_image().unwrap();
+        println!("saving frame");
+        img_diff::assert_img_eq("gltf_normal_mapping_brick_sphere.png", img);
     }
 }

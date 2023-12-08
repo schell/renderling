@@ -7,6 +7,9 @@ previous tests. Mainly because of little things I had forgotten. Little bits of
 state that need to be updated to run the shaders. The most recent was that the
 size of the atlas needs to be updated on the GPU when the atlas changes.
 
+I'm moving over tests from `renderling/scene/gltf_support.rs` to
+`renderling/stage/gltf_support.rs` one at a time.
+
 ## Thu Dec 7, 2023
 
 Ongoing work to get GLTF files on-the-slab working. When this work is done GLTF

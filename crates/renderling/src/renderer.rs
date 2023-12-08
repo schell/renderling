@@ -5,8 +5,8 @@ use snafu::prelude::*;
 use std::{ops::Deref, sync::Arc};
 
 use crate::{
-    hdr::HdrSurface, CreateSurfaceFn, Graph, RenderTarget, Scene, SceneBuilder, TextureError,
-    UiDrawObject, UiScene, UiSceneBuilder, View, ViewMut, WgpuStateError,
+    hdr::HdrSurface, CreateSurfaceFn, Graph, RenderTarget, Scene, SceneBuilder, Stage,
+    TextureError, UiDrawObject, UiScene, UiSceneBuilder, View, ViewMut, WgpuStateError,
 };
 
 #[derive(Debug, Snafu)]
@@ -398,6 +398,11 @@ impl Renderling {
     pub fn get_render_target(&self) -> &RenderTarget {
         // UNWRAP: safe because we always have a render target, or we need to panic
         self.graph.get_resource().unwrap().unwrap()
+    }
+
+    pub fn new_stage(&self) -> Stage {
+        let (device, queue) = self.get_device_and_queue_owned();
+        Stage::new(device, queue)
     }
 
     pub fn new_scene(&self) -> SceneBuilder {

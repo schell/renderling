@@ -71,10 +71,11 @@ impl<T> Default for Id<T> {
 
 impl<T> core::fmt::Debug for Id<T> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct("Id")
-            .field("type", &core::any::type_name::<T>())
-            .field("index", &self.0)
-            .finish()
+        f.write_fmt(format_args!(
+            "Id<{}>({})",
+            &core::any::type_name::<T>(),
+            &self.0
+        ))
     }
 }
 

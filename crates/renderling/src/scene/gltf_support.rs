@@ -1207,37 +1207,6 @@ mod test {
     use crate::{camera, shader::pbr::PbrMaterial, LightingModel, RenderGraphConfig, Renderling};
 
     #[test]
-    fn simple_texture() {
-        let size = 100;
-        let mut r =
-            Renderling::headless(size, size).with_background_color(Vec3::splat(0.0).extend(1.0));
-        let mut builder = r.new_scene();
-        let _loader = builder
-            .gltf_load("../../gltf/gltfTutorial_013_SimpleTexture.gltf")
-            .unwrap();
-
-        let projection = camera::perspective(size as f32, size as f32);
-        let view = camera::look_at(Vec3::new(0.5, 0.5, 1.25), Vec3::new(0.5, 0.5, 0.0), Vec3::Y);
-        builder.set_camera(projection, view);
-
-        // there are no lights in the scene and the material isn't marked as "unlit", so
-        // let's force it to be unlit.
-        let mut material = builder.materials.get(0).copied().unwrap();
-        material.lighting_model = LightingModel::NO_LIGHTING;
-        builder.materials[0] = material;
-
-        let scene = builder.build().unwrap();
-        r.setup_render_graph(RenderGraphConfig {
-            scene: Some(scene),
-            with_screen_capture: true,
-            ..Default::default()
-        });
-
-        let img = r.render_image().unwrap();
-        img_diff::assert_img_eq("gltf_simple_texture.png", img);
-    }
-
-    #[test]
     fn normal_mapping_brick_sphere() {
         let size = 600;
         let mut r =

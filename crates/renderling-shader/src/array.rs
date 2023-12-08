@@ -27,15 +27,16 @@ impl<T> Copy for Array<T> {}
 
 impl<T> core::fmt::Debug for Array<T> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct(if self.is_null() {
-            "Array (null)"
+        if self.is_null() {
+            f.write_fmt(format_args!("Array<{}>(null)", core::any::type_name::<T>()))
         } else {
-            "Array"
-        })
-        .field("index", &self.index)
-        .field("len", &self.len)
-        .field("_phantom", &self._phantom)
-        .finish()
+            f.write_fmt(format_args!(
+                "Array<{}>({}, {})",
+                core::any::type_name::<T>(),
+                self.index,
+                self.len
+            ))
+        }
     }
 }
 
