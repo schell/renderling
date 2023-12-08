@@ -210,7 +210,7 @@ fn init_logging() {
 #[cfg(test)]
 mod test {
     use super::*;
-    use glam::{Mat3, Mat4, Quat, UVec2, Vec2, Vec3, Vec4};
+    use glam::{Mat3, Mat4, Quat, UVec2, Vec2, Vec3, Vec4, Vec4Swizzles};
     use moongraph::View;
     use pretty_assertions::assert_eq;
     use renderling_shader::stage::{DrawIndirect, GpuEntity, Vertex};
@@ -247,53 +247,78 @@ mod test {
         ]
     }
 
-    struct CmyTri {
-        ui: Renderling,
-        tri: GpuEntity,
-    }
-
-    fn cmy_triangle_setup() -> CmyTri {
+    #[test]
+    // This tests our ability to draw a CMYK triangle in the top left corner.
+    fn cmy_triangle_sanity() {
         let mut r = Renderling::headless(100, 100).with_background_color(Vec4::splat(1.0));
+        let stage = r.new_stage();
+        stage.configure_graph(&mut r, true);
         let (projection, view) = default_ortho2d(100.0, 100.0);
-        let mut builder = r.new_scene().with_camera(projection, view);
-        let tri = builder
-            .new_entity()
-            .with_meshlet(right_tri_vertices())
-            .build();
-        let scene = builder.build().unwrap();
-        r.setup_render_graph(RenderGraphConfig {
-            scene: Some(scene),
-            with_screen_capture: true,
-            with_bloom: false,
+        let camera = stage.append(&Camera {
+            projection,
+            view,
             ..Default::default()
         });
+        let vertices = stage.append_array(&right_tri_vertices());
+        let native_vertex_data = stage.append(&NativeVertexData {
+            vertices,
+            ..Default::default()
+        });
+        let vertex_data = VertexData::new_native(native_vertex_data);
+        let transform = stage.append(&Transform::default());
+        let _tri = stage.draw_unit(&RenderUnit {
+            vertex_data,
+            camera,
+            vertex_count: vertices.len() as u32,
+            transform,
+        });
 
-        CmyTri { ui: r, tri }
-    }
-
-    #[test]
-    fn cmy_triangle_sanity() {
-        let mut c = cmy_triangle_setup();
-        let img = c.ui.render_image().unwrap();
+        let img = r.render_image().unwrap();
         img_diff::assert_img_eq("cmy_triangle.png", img);
     }
 
     #[test]
+    // This tests our ability to update the transform of a `RenderUnit` after it
+    // has already been sent to the GPU.
+    // We do this by writing over the previous transform in the stage.
     fn cmy_triangle_update_transform() {
-        let mut c = cmy_triangle_setup();
-        let _ = c.ui.render_image().unwrap();
+        let mut r = Renderling::headless(100, 100).with_background_color(Vec4::splat(1.0));
+        let stage = r.new_stage();
+        stage.configure_graph(&mut r, true);
+        let (projection, view) = default_ortho2d(100.0, 100.0);
+        let camera = stage.append(&Camera {
+            projection,
+            view,
+            ..Default::default()
+        });
+        let vertices = stage.append_array(&right_tri_vertices());
+        let native_vertex_data = stage.append(&NativeVertexData {
+            vertices,
+            ..Default::default()
+        });
+        let vertex_data = VertexData::new_native(native_vertex_data);
+        let transform = stage.append(&Transform::default());
+        let _tri = stage.draw_unit(&RenderUnit {
+            vertex_data,
+            camera,
+            vertex_count: vertices.len() as u32,
+            transform,
+        });
 
-        let mut tri = c.tri;
-        tri.position = Vec4::new(100.0, 0.0, 0.0, 0.0);
-        tri.rotation = Quat::from_axis_angle(Vec3::Z, std::f32::consts::FRAC_PI_2);
-        tri.scale = Vec4::new(0.5, 0.5, 1.0, 0.0);
-        c.ui.graph
-            .visit(|mut scene: ViewMut<Scene>| {
-                scene.update_entity(tri).unwrap();
-            })
+        let _ = r.render_image().unwrap();
+
+        stage
+            .write(
+                transform,
+                &Transform {
+                    translation: Vec3::new(100.0, 0.0, 0.0),
+                    rotation: Quat::from_axis_angle(Vec3::Z, std::f32::consts::FRAC_PI_2),
+                    scale: Vec3::new(0.5, 0.5, 1.0),
+                },
+            )
             .unwrap();
 
-        let img = c.ui.render_image().unwrap();
+        let img = r.render_image().unwrap();
         img_diff::assert_img_eq("cmy_triangle_update_transform.png", img);
     }
 
@@ -336,70 +361,75 @@ mod test {
             .collect()
     }
 
-    fn gpu_pyramid_vertices() -> Vec<Vertex> {
-        let vertices = pyramid_points();
-        let indices = pyramid_indices();
-        indices
-            .into_iter()
-            .map(|i| cmy_gpu_vertex(vertices[i as usize]))
-            .collect()
-    }
-
     #[test]
+    // Tests our ability to draw a CMYK cube.
     fn cmy_cube_sanity() {
         let mut r = Renderling::headless(100, 100).with_background_color(Vec4::splat(1.0));
-        let mut builder = r.new_scene().with_camera(
-            Mat4::perspective_rh(std::f32::consts::PI / 4.0, 1.0, 0.1, 100.0),
-            Mat4::look_at_rh(Vec3::new(0.0, 12.0, 20.0), Vec3::ZERO, Vec3::Y),
-        );
-
-        let _cube = builder
-            .new_entity()
-            .with_meshlet(gpu_cube_vertices())
-            .with_scale(Vec3::new(6.0, 6.0, 6.0))
-            .with_rotation(Quat::from_axis_angle(Vec3::Y, -std::f32::consts::FRAC_PI_4))
-            .build();
-        let scene = builder.build().unwrap();
-
-        r.setup_render_graph(RenderGraphConfig {
-            scene: Some(scene),
-            with_screen_capture: true,
-            with_bloom: false,
+        let stage = r.new_stage();
+        stage.configure_graph(&mut r, true);
+        let camera_position = Vec3::new(0.0, 12.0, 20.0);
+        let camera = stage.append(&Camera {
+            projection: Mat4::perspective_rh(std::f32::consts::PI / 4.0, 1.0, 0.1, 100.0),
+            view: Mat4::look_at_rh(camera_position, Vec3::ZERO, Vec3::Y),
+            position: camera_position,
+        });
+        let vertices = stage.append_array(&gpu_cube_vertices());
+        let native_vertex_data = stage.append(&NativeVertexData {
+            vertices,
             ..Default::default()
+        });
+        let transform = Transform {
+            scale: Vec3::new(6.0, 6.0, 6.0),
+            rotation: Quat::from_axis_angle(Vec3::Y, -std::f32::consts::FRAC_PI_4),
+            ..Default::default()
+        };
+        let _cube = stage.draw_unit(&RenderUnit {
+            vertex_data: VertexData::new_native(native_vertex_data),
+            camera,
+            vertex_count: vertices.len() as u32,
+            transform: stage.append(&transform),
         });
         let img = r.render_image().unwrap();
         img_diff::assert_img_eq("cmy_cube.png", img);
     }
 
     #[test]
+    // Test our ability to create two cubes and toggle the visibility of one of
+    // them.
     fn cmy_cube_visible() {
         let mut r = Renderling::headless(100, 100).with_background_color(Vec4::splat(1.0));
-
+        let stage = r.new_stage();
+        stage.configure_graph(&mut r, true);
         let (projection, view) = camera::default_perspective(100.0, 100.0);
-        let mut builder = r.new_scene().with_camera(projection, view);
-
-        let _cube_one = builder
-            .new_entity()
-            .with_meshlet(gpu_cube_vertices())
-            .with_position(Vec3::new(-4.5, 0.0, 0.0))
-            .with_scale(Vec3::new(6.0, 6.0, 6.0))
-            .with_rotation(Quat::from_axis_angle(Vec3::Y, -std::f32::consts::FRAC_PI_4))
-            .build();
-
-        let mut cube_two = builder
-            .new_entity()
-            .with_meshlet(gpu_cube_vertices())
-            .with_position(Vec3::new(4.5, 0.0, 0.0))
-            .with_scale(Vec3::new(6.0, 6.0, 6.0))
-            .with_rotation(Quat::from_axis_angle(Vec3::Y, std::f32::consts::FRAC_PI_4))
-            .build();
-
-        let scene = builder.build().unwrap();
-        r.setup_render_graph(RenderGraphConfig {
-            scene: Some(scene),
-            with_screen_capture: true,
-            with_bloom: false,
+        let camera = stage.append(&Camera {
+            projection,
+            view,
             ..Default::default()
+        });
+        let vertices = stage.append_array(&gpu_cube_vertices());
+        let native_vertex_data = stage.append(&NativeVertexData {
+            vertices,
+            ..Default::default()
+        });
+        let _cube_one = stage.draw_unit(&RenderUnit {
+            vertex_data: VertexData::new_native(native_vertex_data),
+            camera,
+            vertex_count: vertices.len() as u32,
+            transform: stage.append(&Transform {
+                translation: Vec3::new(-4.5, 0.0, 0.0),
+                scale: Vec3::new(6.0, 6.0, 6.0),
+                rotation: Quat::from_axis_angle(Vec3::Y, -std::f32::consts::FRAC_PI_4),
+            }),
+        });
+        let cube_two = stage.draw_unit(&RenderUnit {
+            vertex_data: VertexData::new_native(native_vertex_data),
+            camera,
+            vertex_count: vertices.len() as u32,
+            transform: stage.append(&Transform {
+                translation: Vec3::new(4.5, 0.0, 0.0),
+                scale: Vec3::new(6.0, 6.0, 6.0),
+                rotation: Quat::from_axis_angle(Vec3::Y, std::f32::consts::FRAC_PI_4),
+            }),
         });
 
         // we should see two colored cubes
@@ -407,25 +437,15 @@ mod test {
         img_diff::assert_img_eq("cmy_cube_visible_before.png", img.clone());
         let img_before = img;
 
-        // update cube two making in invisible
-        r.graph
-            .visit(|mut scene: ViewMut<Scene>| {
-                cube_two.visible = 0;
-                scene.update_entity(cube_two).unwrap();
-            })
-            .unwrap();
+        // update cube two making it invisible
+        stage.hide_unit(cube_two);
 
-        // we should see one colored cube
+        // we should see only one colored cube
         let img = r.render_image().unwrap();
         img_diff::assert_img_eq("cmy_cube_visible_after.png", img);
 
         // update cube two making in visible again
-        r.graph
-            .visit(|mut scene: ViewMut<Scene>| {
-                cube_two.visible = 1;
-                scene.update_entity(cube_two).unwrap();
-            })
-            .unwrap();
+        stage.show_unit(cube_two);
 
         // we should see two colored cubes again
         let img = r.render_image().unwrap();
@@ -433,41 +453,61 @@ mod test {
     }
 
     #[test]
+    // Tests the ability to specify indexed vertices, as well as the ability to update
+    // the vertex data of a RenderUnit.
     fn cmy_cube_remesh() {
         let mut r = Renderling::headless(100, 100).with_background_color(Vec4::splat(1.0));
+        let stage = r.new_stage().with_lighting(false);
+        stage.configure_graph(&mut r, true);
         let (projection, view) = camera::default_perspective(100.0, 100.0);
-        let mut builder = r
-            .new_scene()
-            .with_camera(projection, view)
-            .with_lighting(false);
-
-        let (pyramid_start, pyramid_count) = builder.add_meshlet(gpu_pyramid_vertices());
-
-        let mut cube = builder
-            .new_entity()
-            .with_meshlet(gpu_cube_vertices())
-            .with_scale(Vec3::new(10.0, 10.0, 10.0))
-            .build();
-
-        let scene = builder.build().unwrap();
-        r.setup_render_graph(RenderGraphConfig {
-            scene: Some(scene),
-            with_screen_capture: true,
-            with_bloom: false,
+        let camera = stage.append(&Camera {
+            projection,
+            view,
             ..Default::default()
+        });
+
+        let pyramid_vertices = stage.append_array(&pyramid_points().map(cmy_gpu_vertex));
+        let pyramid_indices = stage.append_array(&pyramid_indices().map(|i| i as u32));
+        let pyramid_vertex_data = stage.append(&NativeVertexData {
+            vertices: pyramid_vertices,
+            indices: pyramid_indices,
+            ..Default::default()
+        });
+        let cube_vertices =
+            stage.append_array(&renderling_shader::math::UNIT_POINTS.map(cmy_gpu_vertex));
+        let cube_indices =
+            stage.append_array(&renderling_shader::math::UNIT_INDICES.map(|i| i as u32));
+        let cube_vertex_data = stage.append(&NativeVertexData {
+            vertices: cube_vertices,
+            indices: cube_indices,
+            ..Default::default()
+        });
+        let transform = stage.append(&Transform {
+            scale: Vec3::new(10.0, 10.0, 10.0),
+            ..Default::default()
+        });
+        let cube = stage.draw_unit(&RenderUnit {
+            vertex_data: VertexData::new_native(cube_vertex_data),
+            camera,
+            transform,
+            vertex_count: cube_indices.len() as u32,
         });
 
         // we should see a cube
         let img = r.render_image().unwrap();
         img_diff::assert_img_eq("cmy_cube_remesh_before.png", img);
 
-        // update the cube mesh to a pyramid
-        r.graph
-            .visit(|mut scene: ViewMut<Scene>| {
-                cube.mesh_first_vertex = pyramid_start;
-                cube.mesh_vertex_count = pyramid_count;
-                scene.update_entity(cube).unwrap();
-            })
+        // update the cube mesh to a pyramid by writing over the `RenderUnit`
+        stage
+            .write(
+                cube,
+                &RenderUnit {
+                    vertex_data: VertexData::new_native(pyramid_vertex_data),
+                    vertex_count: pyramid_indices.len() as u32,
+                    camera,
+                    transform,
+                },
+            )
             .unwrap();
 
         // we should see a pyramid
@@ -521,51 +561,113 @@ mod test {
         ]
     }
 
+    /// A helper struct that contains all outputs of the vertex shader.
+    #[allow(unused)]
+    #[derive(Debug, Default)]
+    pub struct VertexInvocation {
+        pub instance_index: u32,
+        pub vertex_index: u32,
+        pub render_unit_id: Id<RenderUnit>,
+        pub render_unit: RenderUnit,
+        pub out_camera: u32,
+        pub out_material: u32,
+        pub out_color: Vec4,
+        pub out_uv0: Vec2,
+        pub out_uv1: Vec2,
+        pub out_norm: Vec3,
+        pub out_tangent: Vec3,
+        pub out_bitangent: Vec3,
+        pub out_pos: Vec3,
+        // output clip coordinates
+        pub clip_pos: Vec4,
+        // output normalized device coordinates
+        pub ndc_pos: Vec3,
+    }
+
+    impl VertexInvocation {
+        pub fn call(&mut self, slab: &[u32]) {
+            self.render_unit_id = Id::from(self.instance_index);
+            self.render_unit = slab.read(self.render_unit_id);
+            new_stage_vertex(
+                self.instance_index,
+                self.vertex_index,
+                slab,
+                &mut self.out_camera,
+                &mut self.out_material,
+                &mut self.out_color,
+                &mut self.out_uv0,
+                &mut self.out_uv1,
+                &mut self.out_norm,
+                &mut self.out_tangent,
+                &mut self.out_bitangent,
+                &mut self.out_pos,
+                &mut self.clip_pos,
+            );
+            self.ndc_pos = self.clip_pos.xyz() / self.clip_pos.w;
+        }
+    }
+
     #[test]
-    // tests that updating the material actually updates the rendering of an unlit
-    // mesh
+    // Tests that updating the material actually updates the rendering of an unlit mesh
     fn unlit_textured_cube_material() {
         let mut r = Renderling::headless(100, 100).with_background_color(Vec4::splat(0.0));
-        let (proj, view) = camera::default_perspective(100.0, 100.0);
-        let mut builder = r.new_scene().with_camera(proj, view);
+        let stage = r.new_stage();
+        stage.configure_graph(&mut r, true);
+        let (projection, view) = camera::default_perspective(100.0, 100.0);
+        let camera = stage.append(&Camera {
+            projection,
+            view,
+            ..Default::default()
+        });
         let sandstone = SceneImage::from(image::open("../../img/sandstone.png").unwrap());
-        let sandstone_id = builder.add_image_texture(sandstone);
         let dirt = SceneImage::from(image::open("../../img/dirt.jpg").unwrap());
-        let dirt_id = builder.add_image_texture(dirt);
-
-        let material_id = builder.add_material(PbrMaterial {
-            albedo_texture: sandstone_id,
+        let textures = stage.set_images([sandstone, dirt]).unwrap();
+        let sandstone_tex = textures[0];
+        let dirt_tex = textures[1];
+        let sandstone_tex_id = stage.append(&sandstone_tex);
+        let material_id = stage.append(&PbrMaterial {
+            albedo_texture: sandstone_tex_id,
             lighting_model: LightingModel::NO_LIGHTING,
             ..Default::default()
         });
-        let mut material = builder.materials.get(material_id.index()).copied().unwrap();
-        let _cube = builder
-            .new_entity()
-            .with_material(material_id)
-            .with_meshlet(gpu_uv_unit_cube())
-            .with_scale(Vec3::new(10.0, 10.0, 10.0))
-            .build();
-        let scene = builder.build().unwrap();
-        r.setup_render_graph(RenderGraphConfig {
-            scene: Some(scene),
-            with_screen_capture: true,
-            with_bloom: false,
+        let vertices = stage.append_array(&gpu_uv_unit_cube());
+        let vertex_data = stage.append(&NativeVertexData {
+            vertices,
+            material: material_id,
             ..Default::default()
         });
+        let cube = stage.draw_unit(&RenderUnit {
+            camera,
+            vertex_data: VertexData::new_native(vertex_data),
+            transform: stage.append(&Transform {
+                scale: Vec3::new(10.0, 10.0, 10.0),
+                ..Default::default()
+            }),
+            vertex_count: vertices.len() as u32,
+        });
+        println!("cube: {cube:?}");
+
+        let data = stage.read_all_raw().unwrap();
+        let mut vertex_invocation = VertexInvocation {
+            instance_index: cube.inner(),
+            vertex_index: 0,
+            ..Default::default()
+        };
+        vertex_invocation.call(&data);
+        println!("{:#?}", vertex_invocation);
+
+        let stage_legend = crate::shader::stage::get_stage_legend(&data);
+        println!("stage_legend: {stage_legend:#?}");
+        let material =
+            crate::shader::stage::get_material(vertex_invocation.out_material, true, &data);
+        println!("material: {material:#?}");
+
         // we should see a cube with a stoney texture
         let img = r.render_image().unwrap();
         img_diff::assert_img_eq("unlit_textured_cube_material_before.png", img);
 
         // update the material's texture on the GPU
-        r.graph
-            .visit(|mut scene: ViewMut<Scene>| {
-                material.albedo_texture = dirt_id;
-                let _ = scene
-                    .materials
-                    .overwrite(material_id.index(), vec![material])
-                    .unwrap();
-            })
-            .unwrap();
+        stage.write(sandstone_tex_id, &dirt_tex).unwrap();
 
         // we should see a cube with a dirty texture
         let img = r.render_image().unwrap();

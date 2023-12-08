@@ -397,7 +397,6 @@ impl Atlas {
     /// Returns a vector of ids that determine the locations of the given images
     /// within the atlas.
     ///
-    /// This invalidates any pointers to previous textures in this atlas.
     pub fn pack(
         device: &wgpu::Device,
         queue: &wgpu::Queue,

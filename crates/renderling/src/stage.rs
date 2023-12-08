@@ -1,6 +1,7 @@
-//! Rendering objects in the scene graph.
+//! GPU staging area.
 //!
-//! Provides a `Stage` object that can be used to render a scene graph.
+//! The `Stage` object contains a slab buffer and a render pipeline.
+//! It is used to stage objects for rendering.
 use std::{
     ops::{Deref, DerefMut},
     sync::{atomic::AtomicBool, Arc, Mutex, RwLock},
@@ -13,11 +14,14 @@ use renderling_shader::{
     id::Id,
     slab::Slabbed,
     stage::{GpuLight, RenderUnit, StageLegend},
+    texture::GpuTexture,
 };
+use snafu::Snafu;
 
 use crate::{
     bloom::{BloomFilter, BloomResult},
-    Atlas, DepthTexture, Device, HdrSurface, Queue, Skybox, SlabBuffer, SlabError,
+    Atlas, AtlasError, DepthTexture, Device, HdrSurface, Queue, SceneImage, Skybox, SlabBuffer,
+    SlabError,
 };
 
 #[cfg(feature = "gltf")]
@@ -26,6 +30,27 @@ pub mod light;
 
 #[cfg(feature = "gltf")]
 pub use gltf_support::*;
+
+#[derive(Debug, Snafu)]
+pub enum StageError {
+    #[snafu(display("{source}"))]
+    Atlas { source: AtlasError },
+
+    #[snafu(display("{source}"))]
+    Slab { source: SlabError },
+}
+
+impl From<AtlasError> for StageError {
+    fn from(source: AtlasError) -> Self {
+        Self::Atlas { source }
+    }
+}
+
+impl From<SlabError> for StageError {
+    fn from(source: SlabError) -> Self {
+        Self::Slab { source }
+    }
+}
 
 /// Represents an entire scene worth of rendering data.
 ///
@@ -137,6 +162,39 @@ impl Stage {
         self
     }
 
+    /// Set the images to use for the atlas.
+    ///
+    /// Resets the atlas, packing it with the given images and returning a vector of the textures
+    /// ready to be staged.
+    ///
+    /// ## WARNING
+    /// This invalidates any currently staged `GpuTextures`.
+    pub fn set_images(
+        &self,
+        images: impl IntoIterator<Item = SceneImage>,
+    ) -> Result<Vec<GpuTexture>, StageError> {
+        // UNWRAP: if we can't write the atlas we want to panic
+        let mut atlas = self.atlas.write().unwrap();
+        *atlas = Atlas::pack(&self.device, &self.queue, images)?;
+
+        // The textures bindgroup will have to be remade
+        let _ = self.textures_bindgroup.lock().unwrap().take();
+        // The atlas size must be reset
+        let size_id = Id::new(0) + StageLegend::offset_of_atlas_size();
+        self.write(size_id, &atlas.size)?;
+
+        let textures = atlas
+            .frames()
+            .map(|(i, (offset_px, size_px))| GpuTexture {
+                offset_px,
+                size_px,
+                atlas_index: i,
+                ..Default::default()
+            })
+            .collect();
+        Ok(textures)
+    }
+
     /// Set the skybox.
     pub fn set_skybox(&self, skybox: Skybox) {
         // UNWRAP: if we can't acquire the lock we want to panic.
@@ -197,6 +255,14 @@ impl Stage {
     pub fn with_light_array(self, lights: impl IntoIterator<Item = Id<GpuLight>>) -> Self {
         self.set_light_array(lights);
         self
+    }
+
+    /// Read all the data from the stage.
+    ///
+    /// This blocks until the GPU buffer is mappable, and then copies the data into a vector.
+    pub fn read_all_raw(&self) -> Result<Vec<u32>, SlabError> {
+        self.slab
+            .block_on_read_raw(&self.device, &self.queue, 0, self.slab.len())
     }
 
     fn buffers_bindgroup_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
@@ -556,6 +622,7 @@ impl Stage {
         let draw = DrawUnit {
             id,
             vertex_count: unit.vertex_count,
+            visible: true,
         };
         // UNWRAP: if we can't acquire the lock we want to panic.
         let mut draws = self.draws.write().unwrap();
@@ -582,6 +649,34 @@ impl Stage {
         match draws.deref_mut() {
             StageDrawStrategy::Direct(units) => {
                 units.retain(|unit| unit.id != id);
+            }
+        }
+    }
+
+    /// Show the [`RenderUnit`] with the given `Id` for rendering.
+    pub fn show_unit(&self, id: Id<RenderUnit>) {
+        let mut draws = self.draws.write().unwrap();
+        match draws.deref_mut() {
+            StageDrawStrategy::Direct(units) => {
+                for unit in units.iter_mut() {
+                    if unit.id == id {
+                        unit.visible = true;
+                    }
+                }
+            }
+        }
+    }
+
+    /// Hide the [`RenderUnit`] with the given `Id` from rendering.
+    pub fn hide_unit(&self, id: Id<RenderUnit>) {
+        let mut draws = self.draws.write().unwrap();
+        match draws.deref_mut() {
+            StageDrawStrategy::Direct(units) => {
+                for unit in units.iter_mut() {
+                    if unit.id == id {
+                        unit.visible = false;
+                    }
+                }
             }
         }
     }
@@ -632,6 +727,7 @@ impl Stage {
 pub struct DrawUnit {
     pub id: Id<RenderUnit>,
     pub vertex_count: u32,
+    pub visible: bool,
 }
 
 /// Provides a way to communicate with the stage about how you'd like your objects drawn.
@@ -683,7 +779,10 @@ pub fn stage_render(
         match draws.deref() {
             StageDrawStrategy::Direct(units) => {
                 for unit in units {
-                    render_pass.draw(0..unit.vertex_count, unit.id.inner()..unit.id.inner() + 1);
+                    if unit.visible {
+                        render_pass
+                            .draw(0..unit.vertex_count, unit.id.inner()..unit.id.inner() + 1);
+                    }
                 }
             } //render_pass.multi_draw_indirect(&indirect_buffer, 0, stage.number_of_indirect_draws());
         }

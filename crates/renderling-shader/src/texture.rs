@@ -10,6 +10,7 @@ use crate::{
 #[cfg(target_arch = "spirv")]
 use spirv_std::num_traits::*;
 
+// TODO: Completely rework the way we represent texture modes.
 #[repr(transparent)]
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[derive(Clone, Copy, Default, PartialEq, bytemuck::Pod, bytemuck::Zeroable, Slabbed)]
@@ -124,6 +125,17 @@ impl core::fmt::Display for TextureAddressMode {
             TextureAddressMode::MIRRORED_REPEAT => "mirrored repeat",
             _ => "unknown",
         })
+    }
+}
+
+#[cfg(feature = "gltf")]
+impl From<gltf::texture::WrappingMode> for TextureAddressMode {
+    fn from(mode: gltf::texture::WrappingMode) -> Self {
+        match mode {
+            gltf::texture::WrappingMode::ClampToEdge => TextureAddressMode::CLAMP_TO_EDGE,
+            gltf::texture::WrappingMode::MirroredRepeat => TextureAddressMode::MIRRORED_REPEAT,
+            gltf::texture::WrappingMode::Repeat => TextureAddressMode::REPEAT,
+        }
     }
 }
 

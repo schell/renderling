@@ -1066,7 +1066,7 @@ impl Stage {
 
 #[cfg(test)]
 mod test {
-    use glam::{Vec2, Vec3, Vec4};
+    use glam::{Vec3, Vec4};
 
     use crate::{
         shader::{
@@ -1079,7 +1079,7 @@ mod test {
                 Vertex, VertexData,
             },
         },
-        DrawUnit, Id, Renderling, Stage,
+        Id, Renderling, Stage,
     };
 
     #[test]
@@ -1139,26 +1139,6 @@ mod test {
         assert_eq!(1, i1);
         let i2 = accessor.get_u32(2, &data);
         assert_eq!(1, i2);
-    }
-
-    #[allow(unused)]
-    #[derive(Debug, Default)]
-    struct VertexInvocation {
-        draw: DrawUnit,
-        instance_index: u32,
-        vertex_index: u32,
-        render_unit_id: Id<RenderUnit>,
-        render_unit: RenderUnit,
-        out_camera: u32,
-        out_material: u32,
-        out_color: Vec4,
-        out_uv0: Vec2,
-        out_uv1: Vec2,
-        out_norm: Vec3,
-        out_tangent: Vec3,
-        out_bitangent: Vec3,
-        out_pos: Vec3,
-        clip_pos: Vec4,
     }
 
     #[test]
@@ -1247,8 +1227,7 @@ mod test {
                 let render_unit = data.read(render_unit_id);
                 let data = &data;
                 (0..draw.vertex_count).map(move |vertex_index| {
-                    let mut invocation = VertexInvocation {
-                        draw,
+                    let mut invocation = crate::test::VertexInvocation {
                         render_unit_id,
                         render_unit,
                         instance_index,
@@ -1418,7 +1397,7 @@ mod test {
         let size = 600;
         let mut r =
             Renderling::headless(size, size).with_background_color(Vec3::splat(1.0).extend(1.0));
-        let stage = r.new_stage();
+        let stage = r.new_stage().with_lighting(true).with_bloom(true);
         stage.configure_graph(&mut r, true);
         let (cpu_doc, gpu_doc) = stage
             .load_gltf_document_from_path("../../gltf/red_brick_03_1k.glb")

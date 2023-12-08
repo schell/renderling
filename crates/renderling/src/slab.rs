@@ -249,9 +249,18 @@ impl SlabBuffer {
         Ok(())
     }
 
+    /// Read from the slab buffer synchronously.
+    pub fn block_on_read_raw(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        start: usize,
+        len: usize,
+    ) -> Result<Vec<u32>, SlabError> {
+        futures_lite::future::block_on(self.read_raw(device, queue, start, len))
+    }
+
     /// Read from the slab buffer.
-    ///
-    /// `T` is only for the error message.
     pub async fn read_raw(
         &self,
         device: &wgpu::Device,

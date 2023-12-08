@@ -1087,6 +1087,31 @@ pub fn new_stage_vertex(
     *clip_pos = camera.projection * camera.view * view_pos;
 }
 
+/// Returns the `StageLegend` from the stage's slab.
+///
+/// The `StageLegend` should be the first struct in the slab, always.
+pub fn get_stage_legend(slab: &[u32]) -> StageLegend {
+    slab.read(Id::new(0))
+}
+
+/// Returns the `PbrMaterial` from the stage's slab.
+pub fn get_material(material_index: u32, has_lighting: bool, slab: &[u32]) -> pbr::PbrMaterial {
+    if material_index == ID_NONE {
+        // without an explicit material (or if the entire render has no lighting)
+        // the entity will not participate in any lighting calculations
+        pbr::PbrMaterial {
+            lighting_model: LightingModel::NO_LIGHTING,
+            ..Default::default()
+        }
+    } else {
+        let mut material = slab.read(Id::<PbrMaterial>::new(material_index));
+        if !has_lighting {
+            material.lighting_model = LightingModel::NO_LIGHTING;
+        }
+        material
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 #[spirv(fragment)]
 /// Scene fragment shader.
@@ -1124,21 +1149,8 @@ pub fn stage_fragment(
         has_skybox: _,
         has_lighting,
         light_array,
-    } = slab.read(Id::new(0));
-    let material = if in_material == ID_NONE {
-        // without an explicit material (or if the entire render has no lighting)
-        // the entity will not participate in any lighting calculations
-        pbr::PbrMaterial {
-            lighting_model: LightingModel::NO_LIGHTING,
-            ..Default::default()
-        }
-    } else {
-        let mut material = slab.read(Id::<PbrMaterial>::new(in_material));
-        if !has_lighting {
-            material.lighting_model = LightingModel::NO_LIGHTING;
-        }
-        material
-    };
+    } = get_stage_legend(slab);
+    let material = get_material(in_material, has_lighting, slab);
 
     let albedo_tex_uv = if material.albedo_tex_coord == 0 {
         in_uv0
