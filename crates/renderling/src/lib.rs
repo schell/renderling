@@ -211,7 +211,6 @@ fn init_logging() {
 mod test {
     use super::*;
     use glam::{Mat3, Mat4, Quat, UVec2, Vec2, Vec3, Vec4, Vec4Swizzles};
-    use moongraph::View;
     use pretty_assertions::assert_eq;
     use renderling_shader::stage::{DrawIndirect, GpuEntity, Vertex};
 
@@ -647,21 +646,6 @@ mod test {
         });
         println!("cube: {cube:?}");
 
-        let data = stage.read_all_raw().unwrap();
-        let mut vertex_invocation = VertexInvocation {
-            instance_index: cube.inner(),
-            vertex_index: 0,
-            ..Default::default()
-        };
-        vertex_invocation.call(&data);
-        println!("{:#?}", vertex_invocation);
-
-        let stage_legend = crate::shader::stage::get_stage_legend(&data);
-        println!("stage_legend: {stage_legend:#?}");
-        let material =
-            crate::shader::stage::get_material(vertex_invocation.out_material, true, &data);
-        println!("material: {material:#?}");
-
         // we should see a cube with a stoney texture
         let img = r.render_image().unwrap();
         img_diff::assert_img_eq("unlit_textured_cube_material_before.png", img);
@@ -675,61 +659,21 @@ mod test {
     }
 
     #[test]
-    fn gpu_array_update() {
-        let (_, device, queue, _) =
-            futures_lite::future::block_on(crate::state::new_adapter_device_queue_and_target(
-                100,
-                100,
-                None as Option<CreateSurfaceFn>,
-            ))
-            .unwrap();
-
-        let points = vec![
-            Vec4::new(0.0, 0.0, 0.0, 0.0),
-            Vec4::new(1.0, 0.0, 0.0, 0.0),
-            Vec4::new(1.0, 1.0, 0.0, 0.0),
-        ];
-        let mut array = BufferArray::new_gpu(
-            &device,
-            &points,
-            6,
-            wgpu::BufferUsages::STORAGE
-                | wgpu::BufferUsages::COPY_DST
-                | wgpu::BufferUsages::COPY_SRC,
-        );
-
-        // send them to the GPU
-        array.update(&queue);
-        // read them back
-        let verts = futures_lite::future::block_on(array.read_gpu(&device, &queue, 0, 3)).unwrap();
-
-        println!("{verts:#?}");
-        assert_eq!(points, verts);
-
-        let additions = vec![Vec4::splat(1.0), Vec4::splat(2.0)];
-        let (start_index, len) = array.overwrite(2, additions.clone()).unwrap();
-        assert_eq!((2, 2), (start_index, len));
-
-        array.update(&queue);
-        let verts = futures_lite::future::block_on(array.read_gpu(&device, &queue, 0, 4)).unwrap();
-        let all_points = points[0..2]
-            .into_iter()
-            .copied()
-            .chain(additions)
-            .collect::<Vec<_>>();
-        assert_eq!(all_points, verts);
-
-        let (start, len) = array.extend(vec![Vec4::Y, Vec4::Z]).unwrap();
-        assert_eq!((4, 2), (start, len));
-    }
-
-    #[test]
+    // Tests setting up a 2d scene with one CMY triangle.
     fn gpu_scene_sanity1() {
         let mut r =
             Renderling::headless(100, 100).with_background_color(Vec3::splat(0.0).extend(1.0));
-        let mut builder = r.new_scene();
+        let stage = r.new_stage();
+        stage.configure_graph(&mut r, true);
 
-        let verts = vec![
+        let (projection, view) = camera::default_ortho2d(100.0, 100.0);
+        let camera = stage.append(&Camera {
+            projection,
+            view,
+            ..Default::default()
+        });
+
+        let vertices = stage.append_array(&vec![
             Vertex {
                 position: Vec4::new(0.0, 0.0, 0.0, 1.0),
                 color: Vec4::new(1.0, 1.0, 0.0, 1.0),
@@ -745,76 +689,17 @@ mod test {
                 color: Vec4::new(1.0, 0.0, 1.0, 1.0),
                 ..Default::default()
             },
-        ];
-
-        let ent = builder.new_entity().with_meshlet(verts.clone()).build();
-
-        let mut scene = builder.build().unwrap();
-
-        let (projection, view) = camera::default_ortho2d(100.0, 100.0);
-        scene.set_camera(projection, view);
-
-        r.setup_render_graph(RenderGraphConfig {
-            scene: Some(scene),
-            with_screen_capture: true,
+        ]);
+        let vertex_data = stage.append(&NativeVertexData {
+            vertices,
             ..Default::default()
         });
-
-        r.graph.visit(scene::scene_update).unwrap().unwrap();
-        r.graph.visit(scene::scene_cull_gpu).unwrap().unwrap();
-
-        let (constants, gpu_verts, ents, indirect) = r
-            .graph
-            .visit(
-                |(scene, device, queue): (View<Scene>, View<Device>, View<Queue>)| {
-                    let constants =
-                        futures_lite::future::block_on(crate::read_buffer::<GpuConstants>(
-                            &device,
-                            &queue,
-                            &scene.constants.buffer(),
-                            0,
-                            1,
-                        ))
-                        .unwrap();
-                    let vertices = futures_lite::future::block_on(
-                        scene.vertices.read_gpu(&device, &queue, 0, 3),
-                    )
-                    .unwrap();
-                    let entities = futures_lite::future::block_on(scene.entities.read_gpu(
-                        &device,
-                        &queue,
-                        0,
-                        scene.entities.capacity(),
-                    ))
-                    .unwrap();
-                    let indirect = if scene.entities.capacity() > 0 {
-                        futures_lite::future::block_on(scene.indirect_draws.read_gpu(
-                            &device,
-                            &queue,
-                            0,
-                            scene.entities.capacity(),
-                        ))
-                        .unwrap()
-                    } else {
-                        vec![]
-                    };
-                    (constants[0], vertices, entities, indirect)
-                },
-            )
-            .unwrap();
-        assert_eq!(constants.camera_projection, projection);
-        assert_eq!(constants.camera_view, view);
-        assert_eq!(verts, gpu_verts);
-        assert_eq!(vec![ent], ents);
-        assert_eq!(
-            vec![DrawIndirect {
-                vertex_count: 3,
-                instance_count: 1,
-                base_vertex: 0,
-                base_instance: 0
-            },],
-            indirect
-        );
+        let _unit = stage.draw_unit(&RenderUnit {
+            camera,
+            vertex_data: VertexData::new_native(vertex_data),
+            vertex_count: vertices.len() as u32,
+            ..Default::default()
+        });
 
         let img = r.render_image().unwrap();
         img_diff::assert_img_eq("gpu_scene_sanity.png", img);
@@ -824,22 +709,26 @@ mod test {
     fn gpu_scene_sanity2() {
         let mut r =
             Renderling::headless(100, 100).with_background_color(Vec3::splat(0.0).extend(1.0));
+        let stage = r.new_stage();
+        stage.configure_graph(&mut r, true);
+
         let (projection, view) = camera::default_ortho2d(100.0, 100.0);
-        let mut builder = r.new_scene().with_camera(projection, view);
+        let camera = stage.append(&Camera {
+            projection,
+            view,
+            ..Default::default()
+        });
+
         // now test the textures functionality
-        let img = image::io::Reader::open("../../img/cheetah.jpg")
-            .unwrap()
-            .decode()
-            .unwrap();
-        let tex_id = builder.add_image_texture(img);
-        assert_eq!(Id::new(0), tex_id);
-        let material = builder.add_material(PbrMaterial {
-            albedo_texture: tex_id,
+        let img = SceneImage::from_path("../../img/cheetah.jpg").unwrap();
+        let textures = stage.append_array(&stage.set_images([img]).unwrap());
+        let material = stage.append(&PbrMaterial {
+            albedo_texture: textures.at(0),
             lighting_model: LightingModel::NO_LIGHTING,
             ..Default::default()
         });
 
-        let verts = vec![
+        let vertices = stage.append_array(&vec![
             Vertex {
                 position: Vec4::new(0.0, 0.0, 0.0, 0.0),
                 color: Vec4::new(1.0, 1.0, 0.0, 1.0),
@@ -858,98 +747,35 @@ mod test {
                 uv: Vec4::new(1.0, 0.0, 1.0, 0.0),
                 ..Default::default()
             },
-        ];
-        let ent = builder
-            .new_entity()
-            .with_meshlet(verts.clone())
-            .with_material(material)
-            .with_position(Vec3::new(15.0, 35.0, 0.5))
-            .with_scale(Vec3::new(0.5, 0.5, 1.0))
-            .build();
-
-        assert_eq!(Id::new(0), ent.id);
-        assert_eq!(
-            GpuEntity {
-                id: Id::new(0),
-                mesh_first_vertex: 0,
-                mesh_vertex_count: 3,
-                material: Id::new(0),
-                position: Vec4::new(15.0, 35.0, 0.5, 0.0),
-                scale: Vec4::new(0.5, 0.5, 1.0, 1.0),
-                ..Default::default()
-            },
-            ent
-        );
-
-        let ent = builder.new_entity().with_meshlet(verts.clone()).build();
-        assert_eq!(Id::new(1), ent.id);
-
-        let scene = builder.build().unwrap();
-        assert_eq!(2, scene.entities.len());
-
-        let textures = scene.atlas.frames().collect::<Vec<_>>();
-        assert_eq!(1, textures.len());
-        assert_eq!(0, textures[0].0);
-        assert_eq!(UVec2::splat(170), textures[0].1 .1);
-
-        r.setup_render_graph(RenderGraphConfig {
-            scene: Some(scene),
-            with_screen_capture: true,
+        ]);
+        let cheetah_vertex_data = stage.append(&NativeVertexData {
+            vertices,
+            material,
+            ..Default::default()
+        });
+        let transform = stage.append(&Transform {
+            translation: Vec3::new(15.0, 35.0, 0.5),
+            scale: Vec3::new(0.5, 0.5, 1.0),
+            ..Default::default()
+        });
+        let _cheetah_unit = stage.draw_unit(&RenderUnit {
+            camera,
+            transform,
+            vertex_data: VertexData::new_native(cheetah_vertex_data),
+            vertex_count: vertices.len() as u32,
+        });
+        let vertex_data = stage.append(&NativeVertexData {
+            vertices,
+            ..Default::default()
+        });
+        let _unit = stage.draw_unit(&RenderUnit {
+            camera,
+            vertex_count: vertices.len() as u32,
+            vertex_data: VertexData::new_native(vertex_data),
             ..Default::default()
         });
 
         let img = r.render_image().unwrap();
-
-        let scene = r.graph.get_resource::<Scene>().unwrap().unwrap();
-        let draws = futures_lite::future::block_on(scene.indirect_draws.read_gpu(
-            r.get_device(),
-            r.get_queue(),
-            0,
-            2,
-        ))
-        .unwrap();
-        assert_eq!(
-            vec![
-                DrawIndirect {
-                    vertex_count: 3,
-                    instance_count: 1,
-                    base_vertex: 0,
-                    base_instance: 0
-                },
-                DrawIndirect {
-                    vertex_count: 3,
-                    instance_count: 1,
-                    base_vertex: 3,
-                    base_instance: 1
-                }
-            ],
-            draws
-        );
-        let constants: GpuConstants = futures_lite::future::block_on(read_buffer(
-            r.get_device(),
-            r.get_queue(),
-            &scene.constants.buffer(),
-            0,
-            1,
-        ))
-        .unwrap()[0];
-        assert_eq!(UVec2::splat(256), constants.atlas_size);
-
-        let materials = futures_lite::future::block_on(scene.materials.read_gpu(
-            r.get_device(),
-            r.get_queue(),
-            0,
-            1,
-        ))
-        .unwrap();
-        assert_eq!(
-            vec![PbrMaterial {
-                albedo_texture: Id::new(0),
-                lighting_model: LightingModel::NO_LIGHTING,
-                ..Default::default()
-            },],
-            materials
-        );
 
         img_diff::assert_img_eq("gpu_scene_sanity2.png", img);
     }
