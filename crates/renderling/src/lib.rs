@@ -853,50 +853,58 @@ mod test {
         let w = sheet_w * 3 + 2;
         let h = sheet_h;
         let mut r = Renderling::headless(w, h).with_background_color(Vec4::new(1.0, 1.0, 0.0, 1.0));
+        let stage = r.new_stage();
+        stage.configure_graph(&mut r, true);
+
         let (projection, view) = camera::default_ortho2d(w as f32, h as f32);
-        let mut builder = r.new_scene().with_camera(projection, view);
-        let dirt = image::open("../../img/dirt.jpg").unwrap();
-        builder.add_image(dirt);
-        let sandstone = image::open("../../img/sandstone.png").unwrap();
-        builder.add_image(sandstone);
-        let texels = image::open("../../img/happy_mac.png").unwrap();
-        let texels_index = builder.add_image(texels);
-        let clamp_texture_id = builder.add_texture(TextureParams {
-            image_index: texels_index,
-            mode_s: TextureAddressMode::CLAMP_TO_EDGE,
-            mode_t: TextureAddressMode::CLAMP_TO_EDGE,
-        });
-        let repeat_texture_id = builder.add_texture(TextureParams {
-            image_index: texels_index,
-            mode_s: TextureAddressMode::REPEAT,
-            mode_t: TextureAddressMode::REPEAT,
-        });
-        let mirror_texture_id = builder.add_texture(TextureParams {
-            image_index: texels_index,
-            mode_s: TextureAddressMode::MIRRORED_REPEAT,
-            mode_t: TextureAddressMode::MIRRORED_REPEAT,
+        let camera = stage.append(&Camera {
+            projection,
+            view,
+            ..Default::default()
         });
 
-        let clamp_material_id = builder.add_material(PbrMaterial {
-            albedo_texture: clamp_texture_id,
+        let dirt = SceneImage::from_path("../../img/dirt.jpg").unwrap();
+        let sandstone = SceneImage::from_path("../../img/sandstone.png").unwrap();
+        let texels = SceneImage::from_path("../../img/happy_mac.png").unwrap();
+        let textures = stage.set_images([dirt, sandstone, texels]).unwrap();
+        let texel_tex = textures[2];
+        let mut clamp_tex = texel_tex;
+        clamp_tex
+            .modes
+            .set_wrap_s(TextureAddressMode::CLAMP_TO_EDGE);
+        clamp_tex
+            .modes
+            .set_wrap_t(TextureAddressMode::CLAMP_TO_EDGE);
+        let mut repeat_tex = texel_tex;
+        repeat_tex.modes.set_wrap_s(TextureAddressMode::REPEAT);
+        repeat_tex.modes.set_wrap_t(TextureAddressMode::REPEAT);
+        let mut mirror_tex = texel_tex;
+        mirror_tex
+            .modes
+            .set_wrap_s(TextureAddressMode::MIRRORED_REPEAT);
+        mirror_tex
+            .modes
+            .set_wrap_t(TextureAddressMode::MIRRORED_REPEAT);
+
+        let clamp_material_id = stage.append(&PbrMaterial {
+            albedo_texture: stage.append(&clamp_tex),
             lighting_model: LightingModel::NO_LIGHTING,
             ..Default::default()
         });
-        let repeat_material_id = builder.add_material(PbrMaterial {
-            albedo_texture: repeat_texture_id,
+        let repeat_material_id = stage.append(&PbrMaterial {
+            albedo_texture: stage.append(&repeat_tex),
             lighting_model: LightingModel::NO_LIGHTING,
             ..Default::default()
         });
-        let mirror_material_id = builder.add_material(PbrMaterial {
-            albedo_texture: mirror_texture_id,
+        let mirror_material_id = stage.append(&PbrMaterial {
+            albedo_texture: stage.append(&mirror_tex),
             lighting_model: LightingModel::NO_LIGHTING,
             ..Default::default()
         });
 
         let sheet_w = sheet_w as f32;
         let sheet_h = sheet_h as f32;
-
-        let (start, count) = builder.add_meshlet({
+        let vertices = stage.append_array(&{
             let tl = Vertex::default()
                 .with_position(Vec3::ZERO)
                 .with_uv0(Vec2::ZERO);
@@ -911,30 +919,45 @@ mod test {
                 .with_uv0(Vec2::splat(3.0));
             vec![tl, bl, br, tl, br, tr]
         });
-
-        let _clamp = builder
-            .new_entity()
-            .with_material(clamp_material_id)
-            .with_starting_vertex_and_count(start, count)
-            .build();
-        let _repeat = builder
-            .new_entity()
-            .with_material(repeat_material_id)
-            .with_starting_vertex_and_count(start, count)
-            .with_position([sheet_w as f32 + 1.0, 0.0, 0.0])
-            .build();
-        let _mirror = builder
-            .new_entity()
-            .with_material(mirror_material_id)
-            .with_starting_vertex_and_count(start, count)
-            .with_position([sheet_w as f32 * 2.0 + 2.0, 0.0, 0.0])
-            .build();
-
-        let scene = builder.build().unwrap();
-        r.setup_render_graph(RenderGraphConfig {
-            scene: Some(scene),
-            with_screen_capture: true,
+        let clamp_vertex_data = stage.append(&NativeVertexData {
+            vertices,
+            material: clamp_material_id,
             ..Default::default()
+        });
+        let repeat_vertex_data = stage.append(&NativeVertexData {
+            vertices,
+            material: repeat_material_id,
+            ..Default::default()
+        });
+        let mirror_vertex_data = stage.append(&NativeVertexData {
+            vertices,
+            material: mirror_material_id,
+            ..Default::default()
+        });
+
+        let _clamp = stage.draw_unit(&RenderUnit {
+            camera,
+            vertex_data: VertexData::new_native(clamp_vertex_data),
+            vertex_count: vertices.len() as u32,
+            ..Default::default()
+        });
+        let _repeat = stage.draw_unit(&RenderUnit {
+            camera,
+            vertex_data: VertexData::new_native(repeat_vertex_data),
+            vertex_count: vertices.len() as u32,
+            transform: stage.append(&Transform {
+                translation: Vec3::new(sheet_w + 1.0, 0.0, 0.0),
+                ..Default::default()
+            }),
+        });
+        let _mirror = stage.draw_unit(&RenderUnit {
+            camera,
+            vertex_data: VertexData::new_native(mirror_vertex_data),
+            vertex_count: vertices.len() as u32,
+            transform: stage.append(&Transform {
+                translation: Vec3::new(sheet_w as f32 * 2.0 + 2.0, 0.0, 0.0),
+                ..Default::default()
+            }),
         });
 
         let img = r.render_image().unwrap();
