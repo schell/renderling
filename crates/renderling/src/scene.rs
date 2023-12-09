@@ -6,7 +6,10 @@ use moongraph::{Move, View, ViewMut};
 use renderling_shader::debug::DebugChannel;
 use snafu::prelude::*;
 
-pub use renderling_shader::{pbr::PbrMaterial, stage::*, texture::*};
+pub use renderling_shader::stage::{
+    DrawIndirect, GpuConstants, GpuEntity, GpuLight, GpuToggles, Vertex,
+};
+pub use renderling_shader::{pbr::PbrMaterial, texture::*};
 
 use crate::{
     bloom::BloomResult, frame::FrameTextureView, hdr::HdrSurface, Atlas, BufferArray, DepthTexture,

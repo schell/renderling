@@ -27,6 +27,8 @@ use crate::{
     IsMatrix, IsVector,
 };
 
+pub mod light;
+
 /// A vertex in a mesh.
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[repr(C)]
@@ -883,13 +885,25 @@ pub struct Camera {
 /// This should be the first struct in the stage's slab.
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[repr(C)]
-#[derive(Default, Clone, Copy, PartialEq, Slabbed)]
+#[derive(Clone, Copy, PartialEq, Slabbed)]
 pub struct StageLegend {
     pub atlas_size: UVec2,
     pub debug_mode: DebugMode,
     pub has_skybox: bool,
     pub has_lighting: bool,
-    pub light_array: Array<GpuLight>,
+    pub light_array: Array<light::Light>,
+}
+
+impl Default for StageLegend {
+    fn default() -> Self {
+        Self {
+            atlas_size: Default::default(),
+            debug_mode: Default::default(),
+            has_skybox: Default::default(),
+            has_lighting: true,
+            light_array: Default::default(),
+        }
+    }
 }
 
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]

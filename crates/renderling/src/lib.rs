@@ -40,6 +40,8 @@
 //! You can also use the [shaders module](crate::shaders) without renderlings
 //! and manage your own resources for maximum flexibility.
 
+// TODO: Audit the API and make it more ergonomic/predictable.
+
 mod atlas;
 pub mod bloom;
 mod buffer_array;
@@ -101,6 +103,8 @@ pub mod shader {
     //! Re-exports of [`renderling_shader`].
     pub use renderling_shader::*;
 }
+
+pub use renderling_shader::stage::{GpuEntityInfo, LightingModel};
 
 /// Set up the render graph, including:
 /// * 3d scene objects
@@ -212,7 +216,10 @@ mod test {
     use super::*;
     use glam::{Mat3, Mat4, Quat, UVec2, Vec2, Vec3, Vec4, Vec4Swizzles};
     use pretty_assertions::assert_eq;
-    use renderling_shader::stage::{DrawIndirect, GpuEntity, Vertex};
+    use renderling_shader::stage::{
+        light::*, new_stage_vertex, Camera, GpuEntity, NativeVertexData, RenderUnit, Transform,
+        Vertex, VertexData,
+    };
 
     #[test]
     fn sanity_transmute() {
@@ -1108,8 +1115,8 @@ mod test {
     }
 
     #[test]
-    /// Ensures that the directional light coloring works.
-    fn scene_cube_directional() {
+    /// Tests shading with directional light.
+    fn old_scene_cube_directional() {
         let mut r =
             Renderling::headless(100, 100).with_background_color(Vec3::splat(0.0).extend(1.0));
 
@@ -1165,6 +1172,75 @@ mod test {
         r.setup_render_graph(RenderGraphConfig {
             scene: Some(scene),
             with_screen_capture: true,
+            ..Default::default()
+        });
+
+        let img = r.render_image().unwrap();
+        img_diff::assert_img_eq("scene_cube_directional.png", img);
+    }
+
+    #[test]
+    /// Tests shading with directional light.
+    fn scene_cube_directional() {
+        let mut r =
+            Renderling::headless(100, 100).with_background_color(Vec3::splat(0.0).extend(1.0));
+        let stage = r.new_stage();
+        stage.configure_graph(&mut r, true);
+
+        let (projection, _) = camera::default_perspective(100.0, 100.0);
+        let view = Mat4::look_at_rh(
+            Vec3::new(1.8, 1.8, 1.8),
+            Vec3::ZERO,
+            Vec3::new(0.0, 1.0, 0.0),
+        );
+        let camera = stage.append(&Camera {
+            projection,
+            view,
+            ..Default::default()
+        });
+
+        let red = Vec3::X.extend(1.0);
+        let green = Vec3::Y.extend(1.0);
+        let blue = Vec3::Z.extend(1.0);
+        let dir_red = stage.append(&DirectionalLight {
+            direction: Vec3::NEG_Y,
+            color: red,
+            intensity: 10.0,
+        });
+        let dir_green = stage.append(&DirectionalLight {
+            direction: Vec3::NEG_X,
+            color: green,
+            intensity: 10.0,
+        });
+        let dir_blue = stage.append(&DirectionalLight {
+            direction: Vec3::NEG_Z,
+            color: blue,
+            intensity: 10.0,
+        });
+        let lights = stage.append_array(&[dir_red.into(), dir_green.into(), dir_blue.into()]);
+        stage.set_lights(lights);
+
+        let material = stage.append(&PbrMaterial::default());
+        let vertices = stage.append_array(
+            &renderling_shader::math::unit_cube()
+                .into_iter()
+                .map(|(p, n)| Vertex {
+                    position: p.extend(1.0),
+                    normal: n.extend(0.0),
+                    ..Default::default()
+                })
+                .collect::<Vec<_>>(),
+        );
+        let vertex_data = stage.append(&NativeVertexData {
+            vertices,
+            material,
+            ..Default::default()
+        });
+
+        let _cube = stage.draw_unit(&RenderUnit {
+            vertex_data: VertexData::new_native(vertex_data),
+            vertex_count: vertices.len() as u32,
+            camera,
             ..Default::default()
         });
 

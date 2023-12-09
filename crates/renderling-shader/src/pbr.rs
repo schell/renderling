@@ -21,7 +21,7 @@ use crate::{
     id::Id,
     math,
     slab::Slab,
-    stage::{GpuLight, LightType, LightingModel},
+    stage::{light::LightStyle, GpuLight, LightType, LightingModel},
     texture::GpuTexture,
     IsVector,
 };
@@ -344,7 +344,7 @@ pub fn stage_shade_fragment(
     prefiltered: Vec3,
     brdf: Vec2,
 
-    lights: Array<GpuLight>,
+    lights: Array<crate::stage::light::Light>,
     slab: &[u32],
 ) -> Vec4 {
     let n = in_norm.alt_norm_or_zero();
@@ -358,19 +358,17 @@ pub fn stage_shade_fragment(
 
         // determine the light ray and the radiance
         match light.light_type {
-            LightType::END_OF_LIGHTS => {
-                break;
-            }
-            LightType::POINT_LIGHT => {
-                let frag_to_light = light.position.xyz() - in_pos;
+            LightStyle::Point => {
+                let point_light = slab.read(light.into_point_id());
+                let frag_to_light = point_light.position - in_pos;
                 let distance = frag_to_light.length();
                 if distance == 0.0 {
                     continue;
                 }
                 let l = frag_to_light.alt_norm_or_zero();
-                let attenuation = light.intensity * 1.0 / (distance * distance);
+                let attenuation = point_light.intensity * 1.0 / (distance * distance);
                 lo += outgoing_radiance(
-                    light.color,
+                    point_light.color,
                     albedo,
                     attenuation,
                     v,
@@ -381,19 +379,20 @@ pub fn stage_shade_fragment(
                 );
             }
 
-            LightType::SPOT_LIGHT => {
-                let frag_to_light = light.position.xyz() - in_pos;
+            LightStyle::Spot => {
+                let spot_light = slab.read(light.into_spot_id());
+                let frag_to_light = spot_light.position - in_pos;
                 let distance = frag_to_light.length();
                 if distance == 0.0 {
                     continue;
                 }
                 let l = frag_to_light.alt_norm_or_zero();
-                let theta: f32 = l.dot(light.direction.xyz().alt_norm_or_zero());
-                let epsilon: f32 = light.inner_cutoff - light.outer_cutoff;
-                let attenuation: f32 =
-                    light.intensity * ((theta - light.outer_cutoff) / epsilon).clamp(0.0, 1.0);
+                let theta: f32 = l.dot(spot_light.direction.alt_norm_or_zero());
+                let epsilon: f32 = spot_light.inner_cutoff - spot_light.outer_cutoff;
+                let attenuation: f32 = spot_light.intensity
+                    * ((theta - spot_light.outer_cutoff) / epsilon).clamp(0.0, 1.0);
                 lo += outgoing_radiance(
-                    light.color,
+                    spot_light.color,
                     albedo,
                     attenuation,
                     v,
@@ -404,11 +403,12 @@ pub fn stage_shade_fragment(
                 );
             }
 
-            LightType::DIRECTIONAL_LIGHT => {
-                let l = -light.direction.xyz().alt_norm_or_zero();
-                let attenuation = light.intensity;
+            LightStyle::Directional => {
+                let dir_light = slab.read(light.into_directional_id());
+                let l = -dir_light.direction.alt_norm_or_zero();
+                let attenuation = dir_light.intensity;
                 lo += outgoing_radiance(
-                    light.color,
+                    dir_light.color,
                     albedo,
                     attenuation,
                     v,
@@ -418,7 +418,6 @@ pub fn stage_shade_fragment(
                     roughness,
                 );
             }
-            _ => {}
         }
     }
 

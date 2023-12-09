@@ -484,7 +484,7 @@ impl GltfLoader {
                 emissive_factor,
                 emissive_texture,
                 emissive_tex_coord,
-                lighting_model: LightingModel::PBR_LIGHTING,
+                lighting_model: crate::shader::stage::LightingModel::PBR_LIGHTING,
                 ..Default::default()
             }
         };

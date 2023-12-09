@@ -13,7 +13,7 @@ use renderling_shader::{
     debug::DebugMode,
     id::Id,
     slab::Slabbed,
-    stage::{GpuLight, RenderUnit, StageLegend},
+    stage::{light::Light, RenderUnit, StageLegend},
     texture::GpuTexture,
 };
 use snafu::Snafu;
@@ -26,7 +26,6 @@ use crate::{
 
 #[cfg(feature = "gltf")]
 mod gltf_support;
-pub mod light;
 
 #[cfg(feature = "gltf")]
 pub use gltf_support::*;
@@ -162,6 +161,15 @@ impl Stage {
         self
     }
 
+    /// Set the lights to use for shading.
+    pub fn set_lights(&self, lights: Array<Light>) {
+        let id = Id::<Array<Light>>::from(StageLegend::offset_of_light_array());
+        // UNWRAP: safe because light array offset is guaranteed to be valid.
+        self.slab
+            .write(&self.device, &self.queue, id, &lights)
+            .unwrap();
+    }
+
     /// Set the images to use for the atlas.
     ///
     /// Resets the atlas, packing it with the given images and returning a vector of the textures
@@ -213,47 +221,6 @@ impl Stage {
     /// Turn the bloom effect on or off.
     pub fn with_bloom(self, has_bloom: bool) -> Self {
         self.set_has_bloom(has_bloom);
-        self
-    }
-
-    /// Create a new spot light and return its builder.
-    pub fn new_spot_light(&self) -> light::GpuSpotLightBuilder {
-        light::GpuSpotLightBuilder::new(self)
-    }
-
-    /// Create a new directional light and return its builder.
-    pub fn new_directional_light(&self) -> light::GpuDirectionalLightBuilder {
-        light::GpuDirectionalLightBuilder::new(self)
-    }
-
-    /// Create a new point light and return its builder.
-    pub fn new_point_light(&self) -> light::GpuPointLightBuilder {
-        light::GpuPointLightBuilder::new(self)
-    }
-
-    /// Set the light array.
-    ///
-    /// This should be an iterator over the ids of all the lights on the stage.
-    pub fn set_light_array(
-        &self,
-        lights: impl IntoIterator<Item = Id<GpuLight>>,
-    ) -> Array<Id<GpuLight>> {
-        let lights = lights.into_iter().collect::<Vec<_>>();
-        let light_array = self.append_array(&lights);
-        let id = Id::<Array<Id<GpuLight>>>::from(StageLegend::offset_of_light_array());
-        // UNWRAP: safe because we just appended the array, and the light array offset is
-        // guaranteed to be valid.
-        self.slab
-            .write(&self.device, &self.queue, id, &light_array)
-            .unwrap();
-        light_array
-    }
-
-    /// Set the light array.
-    ///
-    /// This should be an iterator over the ids of all the lights on the stage.
-    pub fn with_light_array(self, lights: impl IntoIterator<Item = Id<GpuLight>>) -> Self {
-        self.set_light_array(lights);
         self
     }
 
