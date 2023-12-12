@@ -24,7 +24,7 @@ use crate::{
     pbr::{self, PbrMaterial},
     slab::{Slab, Slabbed},
     texture::GpuTexture,
-    IsMatrix, IsVector,
+    IsMatrix, IsSampler, IsVector, Sample2d, SampleCube,
 };
 
 pub mod light;
@@ -528,11 +528,11 @@ fn texture_color(
     color
 }
 
-fn stage_texture_color(
+fn stage_texture_color<T: Sample2d<Sampler = S>, S: IsSampler>(
     texture_id: Id<GpuTexture>,
     uv: Vec2,
-    atlas: &Image2d,
-    sampler: &Sampler,
+    atlas: &T,
+    sampler: &S,
     atlas_size: UVec2,
     slab: &[u32],
 ) -> Vec4 {
@@ -1157,6 +1157,61 @@ pub fn stage_fragment(
     output: &mut Vec4,
     brigtness: &mut Vec4,
 ) {
+    stage_fragment_impl(
+        atlas,
+        atlas_sampler,
+        irradiance,
+        irradiance_sampler,
+        prefiltered,
+        prefiltered_sampler,
+        brdf,
+        brdf_sampler,
+        slab,
+        in_camera,
+        in_material,
+        in_color,
+        in_uv0,
+        in_uv1,
+        in_norm,
+        in_tangent,
+        in_bitangent,
+        in_pos,
+        output,
+        brigtness,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+/// Scene fragment shader.
+pub fn stage_fragment_impl<T, C, S>(
+    atlas: &T,
+    atlas_sampler: &S,
+    irradiance: &C,
+    irradiance_sampler: &S,
+    prefiltered: &C,
+    prefiltered_sampler: &S,
+    brdf: &T,
+    brdf_sampler: &S,
+
+    slab: &[u32],
+
+    in_camera: u32,
+    in_material: u32,
+    in_color: Vec4,
+    in_uv0: Vec2,
+    in_uv1: Vec2,
+    in_norm: Vec3,
+    in_tangent: Vec3,
+    in_bitangent: Vec3,
+    in_pos: Vec3,
+
+    output: &mut Vec4,
+    brigtness: &mut Vec4,
+) where
+    T: Sample2d<Sampler = S>,
+    C: SampleCube<Sampler = S>,
+    S: IsSampler,
+{
     let StageLegend {
         atlas_size,
         debug_mode,

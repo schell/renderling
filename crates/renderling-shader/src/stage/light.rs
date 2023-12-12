@@ -105,7 +105,7 @@ pub fn gltf_light_intensity_units(kind: gltf::khr_lights_punctual::Kind) -> &'st
 
 #[repr(u32)]
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, PartialEq)]
 pub enum LightStyle {
     Directional = 0,
     Point = 1,
@@ -138,7 +138,7 @@ impl Slabbed for LightStyle {
 /// A type-erased light Id that is used as a slab pointer to any light type.
 #[repr(C)]
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
-#[derive(Copy, Clone, Slabbed)]
+#[derive(Copy, Clone, PartialEq, Slabbed)]
 pub struct Light {
     // The type of the light
     pub light_type: LightStyle,

@@ -7,7 +7,11 @@ use core::ops::Mul;
 use glam::{Quat, Vec3, Vec4Swizzles};
 #[cfg(target_arch = "spirv")]
 use spirv_std::num_traits::Float;
-use spirv_std::num_traits::Zero;
+use spirv_std::{
+    image::{Cubemap, Image2d},
+    num_traits::Zero,
+    Sampler,
+};
 
 pub mod array;
 pub mod bits;
@@ -176,5 +180,37 @@ impl IsMatrix for glam::Mat4 {
         let translation = self.w_axis.xyz();
 
         (scale, rotation, translation)
+    }
+}
+
+pub trait IsSampler: Copy + Clone {}
+
+impl IsSampler for Sampler {}
+
+pub trait Sample2d {
+    type Sampler: IsSampler;
+
+    fn sample_by_lod(&self, sampler: Self::Sampler, uv: glam::Vec2, lod: f32) -> glam::Vec4;
+}
+
+impl Sample2d for Image2d {
+    type Sampler = Sampler;
+
+    fn sample_by_lod(&self, sampler: Self::Sampler, uv: glam::Vec2, lod: f32) -> glam::Vec4 {
+        self.sample_by_lod(sampler, uv, lod)
+    }
+}
+
+pub trait SampleCube {
+    type Sampler: IsSampler;
+
+    fn sample_by_lod(&self, sampler: Self::Sampler, uv: Vec3, lod: f32) -> glam::Vec4;
+}
+
+impl SampleCube for Cubemap {
+    type Sampler = Sampler;
+
+    fn sample_by_lod(&self, sampler: Self::Sampler, uv: Vec3, lod: f32) -> glam::Vec4 {
+        self.sample_by_lod(sampler, uv, lod)
     }
 }

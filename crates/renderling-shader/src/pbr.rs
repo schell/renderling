@@ -23,7 +23,7 @@ use crate::{
     slab::Slab,
     stage::{light::LightStyle, GpuLight, LightType, LightingModel},
     texture::GpuTexture,
-    IsVector,
+    IsSampler, IsVector, Sample2d, SampleCube,
 };
 
 /// Represents a material on the GPU.
@@ -173,18 +173,18 @@ fn outgoing_radiance(
     (k_d * albedo / core::f32::consts::PI + specular) * radiance * n_dot_l
 }
 
-pub fn sample_irradiance(
-    irradiance: &Cubemap,
-    irradiance_sampler: &Sampler,
+pub fn sample_irradiance<T: SampleCube<Sampler = S>, S: IsSampler>(
+    irradiance: &T,
+    irradiance_sampler: &S,
     // Normal vector
     n: Vec3,
 ) -> Vec3 {
     irradiance.sample_by_lod(*irradiance_sampler, n, 0.0).xyz()
 }
 
-pub fn sample_specular_reflection(
-    prefiltered: &Cubemap,
-    prefiltered_sampler: &Sampler,
+pub fn sample_specular_reflection<T: SampleCube<Sampler = S>, S: IsSampler>(
+    prefiltered: &T,
+    prefiltered_sampler: &S,
     // camera position in world space
     camera_pos: Vec3,
     // fragment position in world space
@@ -200,9 +200,9 @@ pub fn sample_specular_reflection(
         .xyz()
 }
 
-pub fn sample_brdf(
-    brdf: &Image2d,
-    brdf_sampler: &Sampler,
+pub fn sample_brdf<T: Sample2d<Sampler = S>, S: IsSampler>(
+    brdf: &T,
+    brdf_sampler: &S,
     // camera position in world space
     camera_pos: Vec3,
     // fragment position in world space
@@ -405,7 +405,7 @@ pub fn stage_shade_fragment(
 
             LightStyle::Directional => {
                 let dir_light = slab.read(light.into_directional_id());
-                let l = -dir_light.direction.alt_norm_or_zero();
+                let l = (-dir_light.direction).alt_norm_or_zero();
                 let attenuation = dir_light.intensity;
                 lo += outgoing_radiance(
                     dir_light.color,

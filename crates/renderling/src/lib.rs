@@ -70,6 +70,7 @@ pub use atlas::*;
 pub use buffer_array::*;
 pub use camera::*;
 pub use hdr::*;
+use image::GenericImageView;
 pub use renderer::*;
 pub use scene::*;
 pub use skybox::*;
@@ -105,6 +106,48 @@ pub mod shader {
 }
 
 pub use renderling_shader::stage::{GpuEntityInfo, LightingModel};
+
+/// A CPU-side texture sampler.
+///
+/// Provided primarily for testing purposes.
+#[derive(Debug, Clone, Copy)]
+pub struct CpuSampler;
+
+impl crate::shader::IsSampler for CpuSampler {}
+
+#[derive(Debug)]
+pub struct CpuTexture2d {
+    pub image: image::DynamicImage,
+}
+
+impl crate::shader::Sample2d for CpuTexture2d {
+    type Sampler = CpuSampler;
+
+    fn sample_by_lod(&self, _sampler: Self::Sampler, uv: glam::Vec2, _lod: f32) -> glam::Vec4 {
+        // TODO: lerp the CPU texture sampling
+        let image::Rgba([r, g, b, a]) = self.image.get_pixel(uv.x as u32, uv.y as u32);
+        glam::Vec4::new(
+            r as f32 / 255.0,
+            g as f32 / 255.0,
+            b as f32 / 255.0,
+            a as f32 / 255.0,
+        )
+    }
+}
+
+/// A CPU-side cubemap texture.
+///
+/// Provided primarily for testing purposes.
+pub struct CpuCubemap;
+
+impl crate::shader::SampleCube for CpuCubemap {
+    type Sampler = CpuSampler;
+
+    fn sample_by_lod(&self, _sampler: Self::Sampler, _uv: glam::Vec3, _lod: f32) -> glam::Vec4 {
+        // TODO: implement CPU-side cubemap sampling
+        glam::Vec4::ONE
+    }
+}
 
 /// Set up the render graph, including:
 /// * 3d scene objects
@@ -591,25 +634,31 @@ mod test {
     }
 
     impl VertexInvocation {
-        pub fn call(&mut self, slab: &[u32]) {
-            self.render_unit_id = Id::from(self.instance_index);
-            self.render_unit = slab.read(self.render_unit_id);
+        pub fn invoke(instance_index: u32, vertex_index: u32, slab: &[u32]) -> Self {
+            let mut v = Self {
+                instance_index,
+                vertex_index,
+                ..Default::default()
+            };
+            v.render_unit_id = Id::from(v.instance_index);
+            v.render_unit = slab.read(v.render_unit_id);
             new_stage_vertex(
-                self.instance_index,
-                self.vertex_index,
+                v.instance_index,
+                v.vertex_index,
                 slab,
-                &mut self.out_camera,
-                &mut self.out_material,
-                &mut self.out_color,
-                &mut self.out_uv0,
-                &mut self.out_uv1,
-                &mut self.out_norm,
-                &mut self.out_tangent,
-                &mut self.out_bitangent,
-                &mut self.out_pos,
-                &mut self.clip_pos,
+                &mut v.out_camera,
+                &mut v.out_material,
+                &mut v.out_color,
+                &mut v.out_uv0,
+                &mut v.out_uv1,
+                &mut v.out_norm,
+                &mut v.out_tangent,
+                &mut v.out_bitangent,
+                &mut v.out_pos,
+                &mut v.clip_pos,
             );
-            self.ndc_pos = self.clip_pos.xyz() / self.clip_pos.w;
+            v.ndc_pos = v.clip_pos.xyz() / v.clip_pos.w;
+            v
         }
     }
 
@@ -1217,6 +1266,13 @@ mod test {
             color: blue,
             intensity: 10.0,
         });
+        assert_eq!(
+            Light {
+                light_type: LightStyle::Directional,
+                index: dir_red.inner()
+            },
+            dir_red.into()
+        );
         let lights = stage.append_array(&[dir_red.into(), dir_green.into(), dir_blue.into()]);
         stage.set_lights(lights);
 
@@ -1237,12 +1293,20 @@ mod test {
             ..Default::default()
         });
 
-        let _cube = stage.draw_unit(&RenderUnit {
+        let cube = stage.draw_unit(&RenderUnit {
             vertex_data: VertexData::new_native(vertex_data),
             vertex_count: vertices.len() as u32,
             camera,
             ..Default::default()
         });
+
+        let data = stage.read_all_raw().unwrap();
+        let invocation = VertexInvocation::invoke(cube.inner(), 0, &data);
+        println!("vertex invocation: {:#?}", invocation);
+
+        let atlas: image::DynamicImage = stage.atlas.read().unwrap().atlas_img().into();
+        let atlas = CpuTexture2d { image: atlas };
+        let _ = crate::shader::stage_fragment_impl(&atlas, &CpuSampler);
 
         let img = r.render_image().unwrap();
         img_diff::assert_img_eq("scene_cube_directional.png", img);

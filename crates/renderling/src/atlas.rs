@@ -496,25 +496,26 @@ impl Atlas {
 }
 
 #[cfg(test)]
+impl Atlas {
+    fn atlas_img(&self, device: &wgpu::Device, queue: &wgpu::Queue) -> RgbaImage {
+        let buffer = crate::Texture::read(
+            &self.texture.texture,
+            device,
+            queue,
+            self.size.x as usize,
+            self.size.y as usize,
+            4,
+            1,
+        );
+        buffer.into_rgba(device).unwrap()
+    }
+}
+
+#[cfg(test)]
 mod test {
     use crate::Renderling;
 
     use super::*;
-
-    impl Atlas {
-        fn atlas_img(&self, device: &wgpu::Device, queue: &wgpu::Queue) -> RgbaImage {
-            let buffer = crate::Texture::read(
-                &self.texture.texture,
-                device,
-                queue,
-                self.size.x as usize,
-                self.size.y as usize,
-                4,
-                1,
-            );
-            buffer.into_rgba(device).unwrap()
-        }
-    }
 
     #[test]
     fn can_merge_atlas() {

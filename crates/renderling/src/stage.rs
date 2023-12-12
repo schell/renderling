@@ -74,10 +74,15 @@ pub struct Stage {
 impl Stage {
     /// Create a new stage.
     pub fn new(device: Device, queue: Queue) -> Self {
+        let atlas = Atlas::empty(&device, &queue);
+        let legend = StageLegend {
+            atlas_size: atlas.size,
+            ..Default::default()
+        };
         let s = Self {
             slab: SlabBuffer::new(&device, 256),
             pipeline: Default::default(),
-            atlas: Arc::new(RwLock::new(Atlas::empty(&device, &queue))),
+            atlas: Arc::new(RwLock::new(atlas)),
             skybox: Arc::new(Mutex::new(Skybox::empty(&device, &queue))),
             skybox_pipeline: Default::default(),
             has_skybox: Arc::new(AtomicBool::new(false)),
@@ -89,7 +94,7 @@ impl Stage {
             device,
             queue,
         };
-        let _ = s.append(&StageLegend::default());
+        let _ = s.append(&legend);
         s
     }
 
@@ -188,7 +193,7 @@ impl Stage {
         // The textures bindgroup will have to be remade
         let _ = self.textures_bindgroup.lock().unwrap().take();
         // The atlas size must be reset
-        let size_id = Id::new(0) + StageLegend::offset_of_atlas_size();
+        let size_id = Id::<glam::UVec2>::from(StageLegend::offset_of_atlas_size());
         self.write(size_id, &atlas.size)?;
 
         let textures = atlas
