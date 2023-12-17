@@ -506,14 +506,18 @@ pub struct DrawIndirect {
     pub base_instance: u32,
 }
 
-fn texture_color(
+fn texture_color<T, S>(
     texture_id: Id<GpuTexture>,
     uv: Vec2,
-    atlas: &Image2d,
-    sampler: &Sampler,
+    atlas: &T,
+    sampler: &S,
     atlas_size: UVec2,
     textures: &[GpuTexture],
-) -> Vec4 {
+) -> Vec4
+where
+    T: Sample2d<Sampler = S>,
+    S: IsSampler,
+{
     let texture = if texture_id.is_none() {
         GpuTexture::default()
     } else {
@@ -636,6 +640,65 @@ pub fn main_fragment_scene(
     output: &mut Vec4,
     brigtness: &mut Vec4,
 ) {
+    main_fragment_impl(
+        atlas,
+        atlas_sampler,
+        irradiance,
+        irradiance_sampler,
+        prefiltered,
+        prefiltered_sampler,
+        brdf,
+        brdf_sampler,
+        constants,
+        lights,
+        materials,
+        textures,
+        in_material,
+        in_color,
+        in_uv0,
+        in_uv1,
+        in_norm,
+        in_tangent,
+        in_bitangent,
+        in_pos,
+        output,
+        brigtness,
+    );
+}
+
+/// Scene fragment shader, callable from the CPU or GPU.
+pub fn main_fragment_impl<T, C, S>(
+    atlas: &T,
+    atlas_sampler: &S,
+
+    irradiance: &C,
+    irradiance_sampler: &S,
+    prefiltered: &C,
+    prefiltered_sampler: &S,
+    brdf: &T,
+    brdf_sampler: &S,
+
+    constants: &GpuConstants,
+    lights: &[GpuLight],
+    materials: &[pbr::PbrMaterial],
+    textures: &[GpuTexture],
+
+    in_material: u32,
+    in_color: Vec4,
+    in_uv0: Vec2,
+    in_uv1: Vec2,
+    in_norm: Vec3,
+    in_tangent: Vec3,
+    in_bitangent: Vec3,
+    in_pos: Vec3,
+
+    output: &mut Vec4,
+    brigtness: &mut Vec4,
+) where
+    T: Sample2d<Sampler = S>,
+    C: SampleCube<Sampler = S>,
+    S: IsSampler,
+{
     let material = if in_material == ID_NONE || !constants.toggles.get_use_lighting() {
         // without an explicit material (or if the entire render has no lighting)
         // the entity will not participate in any lighting calculations
@@ -871,6 +934,12 @@ pub fn main_fragment_scene(
 }
 
 /// A camera used for transforming the stage during rendering.
+///
+/// Use `Camera::new(projection, view)` to create a new camera.
+/// Or use `Camera::default` followed by `Camera::with_projection_and_view`
+/// to set the projection and view matrices. Using the `with_*` or `set_*`
+/// methods is preferred over setting the fields directly because they will
+/// also update the camera's position.
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[repr(C)]
 #[derive(Default, Clone, Copy, PartialEq, Slabbed)]
@@ -878,6 +947,41 @@ pub struct Camera {
     pub projection: Mat4,
     pub view: Mat4,
     pub position: Vec3,
+}
+
+impl Camera {
+    pub fn new(projection: Mat4, view: Mat4) -> Self {
+        Camera::default().with_projection_and_view(projection, view)
+    }
+
+    pub fn set_projection_and_view(&mut self, projection: Mat4, view: Mat4) {
+        self.projection = projection;
+        self.view = view;
+        self.position = view.inverse().transform_point3(Vec3::ZERO);
+    }
+
+    pub fn with_projection_and_view(mut self, projection: Mat4, view: Mat4) -> Self {
+        self.set_projection_and_view(projection, view);
+        self
+    }
+
+    pub fn set_projection(&mut self, projection: Mat4) {
+        self.set_projection_and_view(projection, self.view);
+    }
+
+    pub fn with_projection(mut self, projection: Mat4) -> Self {
+        self.set_projection(projection);
+        self
+    }
+
+    pub fn set_view(&mut self, view: Mat4) {
+        self.set_projection_and_view(self.projection, view);
+    }
+
+    pub fn with_view(mut self, view: Mat4) -> Self {
+        self.set_view(view);
+        self
+    }
 }
 
 /// Holds important info about the stage.
@@ -1212,14 +1316,18 @@ pub fn stage_fragment_impl<T, C, S>(
     C: SampleCube<Sampler = S>,
     S: IsSampler,
 {
+    let legend = get_stage_legend(slab);
+    crate::println!("legend: {:?}", legend);
     let StageLegend {
         atlas_size,
         debug_mode,
         has_skybox: _,
         has_lighting,
         light_array,
-    } = get_stage_legend(slab);
+    } = legend;
+
     let material = get_material(in_material, has_lighting, slab);
+    crate::println!("material: {:?}", material);
 
     let albedo_tex_uv = if material.albedo_tex_coord == 0 {
         in_uv0
@@ -1234,6 +1342,7 @@ pub fn stage_fragment_impl<T, C, S>(
         atlas_size,
         slab,
     );
+    crate::println!("albedo_tex_color: {:?}", albedo_tex_color);
 
     let metallic_roughness_uv = if material.metallic_roughness_tex_coord == 0 {
         in_uv0
@@ -1247,6 +1356,10 @@ pub fn stage_fragment_impl<T, C, S>(
         atlas_sampler,
         atlas_size,
         slab,
+    );
+    crate::println!(
+        "metallic_roughness_tex_color: {:?}",
+        metallic_roughness_tex_color
     );
 
     let normal_tex_uv = if material.normal_tex_coord == 0 {
@@ -1262,6 +1375,7 @@ pub fn stage_fragment_impl<T, C, S>(
         atlas_size,
         slab,
     );
+    crate::println!("normal_tex_color: {:?}", normal_tex_color);
 
     let ao_tex_uv = if material.ao_tex_coord == 0 {
         in_uv0

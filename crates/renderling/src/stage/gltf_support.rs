@@ -1378,14 +1378,10 @@ mod test {
             .load_gltf_document_from_path("../../gltf/gltfTutorial_013_SimpleTexture.gltf")
             .unwrap();
 
-        let position = Vec3::new(0.5, 0.5, 1.25);
         let projection = crate::camera::perspective(size as f32, size as f32);
-        let view = crate::camera::look_at(position, Vec3::new(0.5, 0.5, 0.0), Vec3::Y);
-        let camera = stage.append(&Camera {
-            projection,
-            view,
-            position,
-        });
+        let view =
+            crate::camera::look_at(Vec3::new(0.5, 0.5, 1.25), Vec3::new(0.5, 0.5, 0.0), Vec3::Y);
+        let camera = stage.append(&Camera::new(projection, view));
         let _unit_ids = stage.draw_gltf_scene(&gpu_doc, camera, cpu_doc.default_scene().unwrap());
 
         let img = r.render_image().unwrap();

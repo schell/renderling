@@ -4,6 +4,7 @@ use crate::slab::Slabbed;
 
 /// Used to debug shaders by early exiting the shader and attempting to display
 /// the value as shaded colors.
+// TODO: Change DebugChannel to DebugMode and remove the previous DebugMode.
 #[repr(u32)]
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[derive(Clone, Copy, PartialEq, PartialOrd)]

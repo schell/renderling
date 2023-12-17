@@ -71,11 +71,15 @@ impl<T> Default for Id<T> {
 
 impl<T> core::fmt::Debug for Id<T> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.write_fmt(format_args!(
-            "Id<{}>({})",
-            &core::any::type_name::<T>(),
-            &self.0
-        ))
+        if self.is_none() {
+            f.write_fmt(format_args!("Id<{}>(null)", &core::any::type_name::<T>(),))
+        } else {
+            f.write_fmt(format_args!(
+                "Id<{}>({})",
+                &core::any::type_name::<T>(),
+                &self.0
+            ))
+        }
     }
 }
 

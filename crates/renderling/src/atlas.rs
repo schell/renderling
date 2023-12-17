@@ -497,7 +497,7 @@ impl Atlas {
 
 #[cfg(test)]
 impl Atlas {
-    fn atlas_img(&self, device: &wgpu::Device, queue: &wgpu::Queue) -> RgbaImage {
+    pub fn atlas_img(&self, device: &wgpu::Device, queue: &wgpu::Queue) -> RgbaImage {
         let buffer = crate::Texture::read(
             &self.texture.texture,
             device,

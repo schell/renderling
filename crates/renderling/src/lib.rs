@@ -612,7 +612,7 @@ mod test {
 
     /// A helper struct that contains all outputs of the vertex shader.
     #[allow(unused)]
-    #[derive(Debug, Default)]
+    #[derive(Clone, Debug, Default, PartialEq)]
     pub struct VertexInvocation {
         pub instance_index: u32,
         pub vertex_index: u32,
@@ -634,6 +634,7 @@ mod test {
     }
 
     impl VertexInvocation {
+        #[allow(dead_code)]
         pub fn invoke(instance_index: u32, vertex_index: u32, slab: &[u32]) -> Self {
             let mut v = Self {
                 instance_index,
@@ -1163,12 +1164,7 @@ mod test {
         assert_eq!(Vec2::splat(0.1), tex.uv(Vec2::ZERO, UVec2::splat(100)));
     }
 
-    #[test]
-    /// Tests shading with directional light.
-    fn old_scene_cube_directional() {
-        let mut r =
-            Renderling::headless(100, 100).with_background_color(Vec3::splat(0.0).extend(1.0));
-
+    fn old_scene_cube_directional_builder(r: &Renderling) -> SceneBuilder {
         let mut builder = r.new_scene();
         let red = Vec3::X.extend(1.0);
         let green = Vec3::Y.extend(1.0);
@@ -1208,14 +1204,29 @@ mod test {
             .with_material(material)
             .build();
 
-        let mut scene = builder.build().unwrap();
+        builder
+    }
 
+    fn old_scene_cube_directional_camera() -> (Mat4, Mat4) {
         let (projection, _) = camera::default_perspective(100.0, 100.0);
         let view = Mat4::look_at_rh(
             Vec3::new(1.8, 1.8, 1.8),
             Vec3::ZERO,
             Vec3::new(0.0, 1.0, 0.0),
         );
+        (projection, view)
+    }
+
+    #[test]
+    /// Tests shading with directional light.
+    fn old_scene_cube_directional() {
+        let mut r =
+            Renderling::headless(100, 100).with_background_color(Vec3::splat(0.0).extend(1.0));
+
+        let builder = old_scene_cube_directional_builder(&r);
+        let mut scene = builder.build().unwrap();
+
+        let (projection, view) = old_scene_cube_directional_camera();
         scene.set_camera(projection, view);
 
         r.setup_render_graph(RenderGraphConfig {
@@ -1242,11 +1253,7 @@ mod test {
             Vec3::ZERO,
             Vec3::new(0.0, 1.0, 0.0),
         );
-        let camera = stage.append(&Camera {
-            projection,
-            view,
-            ..Default::default()
-        });
+        let camera = stage.append(&Camera::default().with_projection_and_view(projection, view));
 
         let red = Vec3::X.extend(1.0);
         let green = Vec3::Y.extend(1.0);
@@ -1293,21 +1300,12 @@ mod test {
             ..Default::default()
         });
 
-        let cube = stage.draw_unit(&RenderUnit {
+        let _cube = stage.draw_unit(&RenderUnit {
             vertex_data: VertexData::new_native(vertex_data),
             vertex_count: vertices.len() as u32,
             camera,
             ..Default::default()
         });
-
-        let data = stage.read_all_raw().unwrap();
-        let invocation = VertexInvocation::invoke(cube.inner(), 0, &data);
-        println!("vertex invocation: {:#?}", invocation);
-
-        let atlas: image::DynamicImage = stage.atlas.read().unwrap().atlas_img().into();
-        let atlas = CpuTexture2d { image: atlas };
-        let _ = crate::shader::stage_fragment_impl(&atlas, &CpuSampler);
-
         let img = r.render_image().unwrap();
         img_diff::assert_img_eq("scene_cube_directional.png", img);
     }

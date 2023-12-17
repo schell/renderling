@@ -4,16 +4,11 @@
 //! * https://learnopengl.com/PBR/Theory
 //! * https://github.com/KhronosGroup/glTF-Sample-Viewer/blob/5b1b7f48a8cb2b7aaef00d08fdba18ccc8dd331b/source/Renderer/shaders/pbr.frag
 //! * https://github.khronos.org/glTF-Sample-Viewer-Release/
-use renderling_derive::Slabbed;
-
-#[cfg(target_arch = "spirv")]
-use spirv_std::num_traits::Float;
-use spirv_std::{
-    image::{Cubemap, Image2d},
-    Sampler,
-};
 
 use glam::{Vec2, Vec3, Vec4, Vec4Swizzles};
+use renderling_derive::Slabbed;
+#[cfg(target_arch = "spirv")]
+use spirv_std::num_traits::Float;
 
 use crate::{
     self as renderling_shader,
@@ -154,21 +149,42 @@ fn outgoing_radiance(
     metalness: f32,
     roughness: f32,
 ) -> Vec3 {
+    crate::println!("outgoing_radiance");
+    crate::println!("    light_color: {light_color:?}");
+    crate::println!("    albedo: {albedo:?}");
+    crate::println!("    attenuation: {attenuation:?}");
+    crate::println!("    v: {v:?}");
+    crate::println!("    l: {l:?}");
+    crate::println!("    n: {n:?}");
+    crate::println!("    metalness: {metalness:?}");
+    crate::println!("    roughness: {roughness:?}");
+
     let f0 = Vec3::splat(0.4).lerp(albedo, metalness);
+    crate::println!("    f0: {f0:?}");
     let radiance = light_color.xyz() * attenuation;
+    crate::println!("    radiance: {radiance:?}");
     let h = (v + l).alt_norm_or_zero();
+    crate::println!("    h: {h:?}");
     // cook-torrance brdf
     let ndf: f32 = normal_distribution_ggx(n, h, roughness);
+    crate::println!("    ndf: {ndf:?}");
     let g: f32 = geometry_smith(n, v, l, roughness);
+    crate::println!("    g: {g:?}");
     let f: Vec3 = fresnel_schlick(h.dot(v).max(0.0), f0);
+    crate::println!("    f: {f:?}");
 
     let k_s = f;
     let k_d = (Vec3::splat(1.0) - k_s) * (1.0 - metalness);
+    crate::println!("    k_s: {k_s:?}");
 
     let numerator: Vec3 = ndf * g * f;
+    crate::println!("    numerator: {numerator:?}");
     let n_dot_l = n.dot(l).max(0.0);
+    crate::println!("    n_dot_l: {n_dot_l:?}");
     let denominator: f32 = 4.0 * n.dot(v).max(0.0) * n_dot_l + 0.0001;
+    crate::println!("    denominator: {denominator:?}");
     let specular: Vec3 = numerator / denominator;
+    crate::println!("    specular: {specular:?}");
 
     (k_d * albedo / core::f32::consts::PI + specular) * radiance * n_dot_l
 }
@@ -349,7 +365,9 @@ pub fn stage_shade_fragment(
 ) -> Vec4 {
     let n = in_norm.alt_norm_or_zero();
     let v = (camera_pos - in_pos).alt_norm_or_zero();
-
+    crate::println!("lights: {lights:?}");
+    crate::println!("n: {n:?}");
+    crate::println!("v: {v:?}");
     // reflectance
     let mut lo = Vec3::ZERO;
     for i in 0..lights.len() {
@@ -405,9 +423,12 @@ pub fn stage_shade_fragment(
 
             LightStyle::Directional => {
                 let dir_light = slab.read(light.into_directional_id());
-                let l = (-dir_light.direction).alt_norm_or_zero();
+                let l = -dir_light.direction.alt_norm_or_zero();
                 let attenuation = dir_light.intensity;
-                lo += outgoing_radiance(
+                crate::println!("dir_light: {dir_light:?}");
+                crate::println!("l: {l:?}");
+                crate::println!("attenuation: {attenuation:?}");
+                let radiance = outgoing_radiance(
                     dir_light.color,
                     albedo,
                     attenuation,
@@ -417,10 +438,13 @@ pub fn stage_shade_fragment(
                     metallic,
                     roughness,
                 );
+                crate::println!("radiance: {radiance:?}");
+                lo += radiance;
             }
         }
     }
 
+    crate::println!("lo: {lo:?}");
     // calculate reflectance at normal incidence; if dia-electric (like plastic) use
     // F0 of 0.04 and if it's a metal, use the albedo color as F0 (metallic
     // workflow)
