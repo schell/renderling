@@ -10,7 +10,7 @@ use instant::Instant;
 use renderling::{
     debug::DebugChannel,
     math::{Mat4, Vec3, Vec4},
-    GltfLoader, GpuEntity, RenderGraphConfig, Renderling, Scene, SceneImage, ScreenSize,
+    GltfLoader, GpuEntity, RenderGraphConfig, Renderling, Scene, SceneImage, ScreenSize, Stage,
     TweenProperty, UiDrawObjects, UiMode, UiVertex, ViewMut,
 };
 use renderling_gpui::{Element, Gpui};

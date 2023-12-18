@@ -1140,6 +1140,7 @@ impl RenderUnit {
             }
             VertexData::GLTF => {
                 let id = Id::<GltfVertexData>::from(self.vertex_data.index);
+                // TODO: Take the GLTF parent node's transform into account
                 let GltfVertexData {
                     parent_node_path: _,
                     mesh,

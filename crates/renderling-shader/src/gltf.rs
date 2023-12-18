@@ -118,6 +118,10 @@ pub struct GltfAccessor {
     //
     // This will be 0 if the corresponding accessor is sparse.
     pub view_offset: u32,
+    // Returns the offset relative to the start of the parent buffer view in bytes.
+    //
+    //  This will be 0 if the corresponding accessor is sparse.
+    pub offset: u32,
     // The stride in bytes between vertex attributes or other interleavable data.
     pub view_stride: u32,
     // The number of elements within the buffer view - not to be confused with the
@@ -221,19 +225,21 @@ impl GltfAccessor {
         crate::println!("buffer_start: {buffer_start:?}");
         let buffer_start_bytes = buffer_start * 4;
         crate::println!("buffer_start_bytes: {buffer_start_bytes:?}");
+        let stride = if self.size > self.view_stride {
+            self.size
+        } else {
+            self.view_stride
+        } as usize;
         let byte_offset = buffer_start_bytes
             + self.view_offset as usize
-            + element_index as usize
-                * if self.size > self.view_stride {
-                    self.size
-                } else {
-                    self.view_stride
-                } as usize;
-        crate::println!("byte_offset: {byte_offset:?}");
+            + self.offset as usize
+            + element_index as usize * stride;
+        crate::println!("byte_offset: buffer_start_bytes({buffer_start_bytes}) + view_offset({view_offset}) + accessor.offset({offset}) + element_index({element_index}) * stride({stride}) = {byte_offset:?}", view_offset = self.view_offset, offset = self.offset);
         let slab_index = byte_offset / 4;
         crate::println!("slab_index: {slab_index:?}");
-        let byte_offset = byte_offset % 4;
-        (slab_index, byte_offset)
+        let relative_byte_offset = byte_offset % 4;
+        crate::println!("relative_byte_offset: {relative_byte_offset:?}");
+        (slab_index, relative_byte_offset)
     }
 
     pub fn inc_u8(&self, index: usize, slab: &[u32]) -> IncU8 {
@@ -376,9 +382,13 @@ impl GltfAccessor {
                 y = crate::bits::extract_u32(slab_index + 1, 0, slab).0 as f32;
             }
             DataType::F32 => {
+                crate::println!("get_vec2 f32: vertex_index={vertex_index}");
                 let (slab_index, _) = self.slab_index_and_byte_offset(vertex_index, slab);
+                crate::println!("  slab_index: {slab_index:?}");
                 x = crate::bits::extract_f32(slab_index, 0, slab).0;
                 y = crate::bits::extract_f32(slab_index + 1, 0, slab).0;
+                crate::println!("  x: {x:?}");
+                crate::println!("  y: {y:?}");
             }
         }
         match self.dimensions {
@@ -616,10 +626,12 @@ pub struct GltfPrimitive {
 impl GltfPrimitive {
     pub fn get_vertex(&self, vertex_index: usize, slab: &[u32]) -> crate::stage::Vertex {
         let index = if self.indices.is_some() {
+            crate::println!("has indices");
             let indices = slab.read(self.indices);
             let index = indices.get_u32(vertex_index, slab);
             index as usize
         } else {
+            crate::println!("no indices");
             vertex_index
         };
         crate::println!("index: {index:?}");
@@ -673,6 +685,7 @@ impl GltfPrimitive {
         crate::println!("color: {color:?}");
 
         let tex_coords0 = if self.tex_coords0.is_none() {
+            crate::println!("tex_coords0 are none");
             Vec2::ZERO
         } else {
             let tex_coords0 = slab.read(self.tex_coords0);
@@ -1084,6 +1097,7 @@ mod test {
             size: 2,
             buffer: buffer_id,
             view_offset: 0,
+            offset: 0,
             view_stride: 0,
             count: 3,
             data_type: DataType::U16,

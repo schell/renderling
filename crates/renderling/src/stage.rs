@@ -229,14 +229,6 @@ impl Stage {
         self
     }
 
-    /// Read all the data from the stage.
-    ///
-    /// This blocks until the GPU buffer is mappable, and then copies the data into a vector.
-    pub fn read_all_raw(&self) -> Result<Vec<u32>, SlabError> {
-        self.slab
-            .block_on_read_raw(&self.device, &self.queue, 0, self.slab.len())
-    }
-
     fn buffers_bindgroup_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
         let visibility =
             wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT | wgpu::ShaderStages::COMPUTE;
@@ -691,6 +683,30 @@ impl Stage {
                     < present
             ));
         }
+    }
+
+    /// Read the atlas image from the GPU.
+    ///
+    /// This is primarily used for debugging.
+    ///
+    /// ## Panics
+    /// Panics if the pixels read from the GPU cannot be converted into an `RgbaImage`.
+    pub fn read_atlas_image(&self) -> image::RgbaImage {
+        // UNWRAP: if we can't acquire the lock we want to panic.
+        self.atlas
+            .read()
+            .unwrap()
+            .atlas_img(&self.device, &self.queue)
+    }
+
+    /// Read all the data from the stage.
+    ///
+    /// This blocks until the GPU buffer is mappable, and then copies the data into a vector.
+    ///
+    /// This is primarily used for debugging.
+    pub fn read_slab(&self) -> Result<Vec<u32>, SlabError> {
+        self.slab
+            .block_on_read_raw(&self.device, &self.queue, 0, self.slab.len())
     }
 }
 

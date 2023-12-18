@@ -52,6 +52,12 @@ pub enum SlabError {
     Async { source: wgpu::BufferAsyncError },
 }
 
+pub fn print_slab(slab: &[u32], starting_index: usize) {
+    for (u, i) in slab.iter().zip(starting_index..) {
+        println!("{i:02}: {u:032b} {u:010} {:?}", f32::from_bits(*u));
+    }
+}
+
 /// A slab buffer used by the stage to store heterogeneous objects.
 ///
 /// A clone of a buffer is a reference to the same buffer.

@@ -1,5 +1,31 @@
 # devlog
 
+## Mon Dec 18, 2023
+
+### Simple Texture GLTF Example
+* The `simple_texture` test is rendering the texture upside-down.
+* There are _no rotation transformations_ in its node's hierarchy.
+* What does the atlas look like?
+  - It's not the atlas, the two tests (slabbed and the previous non-slabbed) have
+    identical atlas images.
+* So what about UV coords?
+  - Comparing runs of the vertex shaders shows that the UV coords' Y components are flipped.
+  - So, 0.0 is 1.0 and 1.0 is 0.0
+* So is there something doing this intentionally?
+  - Nothing that I can easily see in the `gltf_support` modules...
+  - It has something to do with the accessor.
+  - I can see in the GLTF file that the accessor's byte offset is 48, but somehow in
+    my code it comes out 12...
+  - It was because the accessor's offset was not being taken into account.
+
+### Analytical Directional Lights
+I got analytical lighting working (at least for directional lights) on the stage.
+The problem I was having was that the shaders use `Camera.position` in lighting
+equations, but that was defaulting to `Vec3::ZERO`. Previously in the "scene"
+version of the renderer (which I'm porting over to "stage") the camera's position
+was set automatically when setting the projection and/or view.
+I had to run both versions of the vertex AND fragement shaders to track this down. Ugh!
+
 ## Fri Dec 8, 2023
 
 I've been having trouble getting the new GLTF files on-the-slab method to pass my

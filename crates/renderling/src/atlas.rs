@@ -493,10 +493,13 @@ impl Atlas {
         queue.submit(std::iter::once(encoder.finish()));
         Ok(atlas)
     }
-}
 
-#[cfg(test)]
-impl Atlas {
+    /// Read the atlas image from the GPU.
+    ///
+    /// This is primarily for testing.
+    ///
+    /// ## Panics
+    /// Panics if the pixels read from the GPU cannot be converted into an `RgbaImage`.
     pub fn atlas_img(&self, device: &wgpu::Device, queue: &wgpu::Queue) -> RgbaImage {
         let buffer = crate::Texture::read(
             &self.texture.texture,

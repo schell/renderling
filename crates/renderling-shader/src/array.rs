@@ -133,4 +133,14 @@ impl<T> Array<T> {
             _phantom: PhantomData,
         }
     }
+
+    #[cfg(not(target_arch = "spirv"))]
+    /// Return the slice of the slab that this array represents.
+    pub fn sub_slab<'a>(&'a self, slab: &'a [u32]) -> &[u32]
+    where
+        T: Slabbed,
+    {
+        let arr = self.into_u32_array();
+        &slab[arr.index as usize..(arr.index + arr.len) as usize]
+    }
 }
