@@ -1,5 +1,20 @@
 # devlog
 
+## Tue Dec 19, 2023
+
+### Thoughts on GLTF
+GLTF on-the-slab has been a boon to this project and I'm tempted to make it the main way we do
+rendering. I just want to write this down somewhere so I don't forget. Currently when loading
+a GLTF file we traverse the GLTF document and store the whole thing on the GPU's slab. Then
+the user has to specify which nodes (or a scene) to draw, which traverses one more time, linking
+the `RenderUnit`s to the primitives within the GLTF. I _think_ it might be cognitively easier
+to have GLTF nodes somehow be the base unit of rendering ... but I also have plans for supporting
+SDFs and I'm not sure how that all fits together.
+
+* [At least one other person is thinking about putting SDFs in GLTF using an extension](https://community.khronos.org/t/signed-distance-field-representation-of-geometry-extension/109575)
+
+Anyway - I'll keep going with the momentum I have and think about refactoring towards this in the future.
+
 ## Mon Dec 18, 2023
 
 ### Simple Texture GLTF Example

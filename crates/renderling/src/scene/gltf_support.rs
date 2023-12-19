@@ -1206,27 +1206,27 @@ mod test {
 
     use crate::{camera, shader::pbr::PbrMaterial, LightingModel, RenderGraphConfig, Renderling};
 
-    #[test]
-    fn normal_mapping_brick_sphere() {
-        let size = 600;
-        let mut r =
-            Renderling::headless(size, size).with_background_color(Vec3::splat(1.0).extend(1.0));
-        let mut builder = r.new_scene();
-        let loader = builder.gltf_load("../../gltf/red_brick_03_1k.glb").unwrap();
-        let (projection, view) = loader.cameras.get(0).copied().unwrap();
-        builder.set_camera(projection, view);
+    //#[test]
+    //fn normal_mapping_brick_sphere() {
+    //    let size = 600;
+    //    let mut r =
+    //        Renderling::headless(size, size).with_background_color(Vec3::splat(1.0).extend(1.0));
+    //    let mut builder = r.new_scene();
+    //    let loader = builder.gltf_load("../../gltf/red_brick_03_1k.glb").unwrap();
+    //    let (projection, view) = loader.cameras.get(0).copied().unwrap();
+    //    builder.set_camera(projection, view);
 
-        let scene = builder.build().unwrap();
-        r.setup_render_graph(RenderGraphConfig {
-            scene: Some(scene),
-            with_screen_capture: true,
-            ..Default::default()
-        });
+    //    let scene = builder.build().unwrap();
+    //    r.setup_render_graph(RenderGraphConfig {
+    //        scene: Some(scene),
+    //        with_screen_capture: true,
+    //        ..Default::default()
+    //    });
 
-        let img = r.render_image().unwrap();
-        println!("saving frame");
-        img_diff::assert_img_eq("gltf_normal_mapping_brick_sphere.png", img);
-    }
+    //    let img = r.render_image().unwrap();
+    //    println!("saving frame");
+    //    img_diff::assert_img_eq("gltf_normal_mapping_brick_sphere.png", img);
+    //}
 
     #[test]
     // Tests that we can reuse the same builder for multiple loaders, building

@@ -14,6 +14,21 @@ use crate::{
 #[derive(Default, Clone, Copy, Slabbed)]
 pub struct GltfBuffer(pub Array<u32>);
 
+#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
+#[derive(Default, Clone, Copy, Slabbed)]
+pub struct GltfBufferView {
+    // Pointer to the parent buffer.
+    pub buffer: Id<GltfBuffer>,
+    // The offset relative to the start of the parent buffer in bytes.
+    pub offset: u32,
+    // The length of the buffer view in bytes.
+    pub length: u32,
+    // The stride in bytes between vertex attributes or other interleavable data.
+    //
+    // When 0, data is assumed to be tightly packed.
+    pub stride: u32,
+}
+
 #[repr(u32)]
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[derive(Default, Clone, Copy, PartialEq)]
@@ -113,17 +128,14 @@ pub struct GltfAccessor {
     /// For example, if the accessor describes a `Vec3` of F32s, then
     // the size is 3 * 4 = 12.
     pub size: u32,
-    pub buffer: Id<GltfBuffer>,
-    // Returns the offset relative to the start of the parent buffer view in bytes.
+    // A point to the parent view this accessor reads from.
+    //
+    /// This may be Id::NONE if the corresponding accessor is sparse.
+    pub view: Id<GltfBufferView>,
+    // The offset relative to the start of the parent buffer view in bytes.
     //
     // This will be 0 if the corresponding accessor is sparse.
-    pub view_offset: u32,
-    // Returns the offset relative to the start of the parent buffer view in bytes.
-    //
-    //  This will be 0 if the corresponding accessor is sparse.
     pub offset: u32,
-    // The stride in bytes between vertex attributes or other interleavable data.
-    pub view_stride: u32,
     // The number of elements within the buffer view - not to be confused with the
     // number of bytes in the buffer view.
     pub count: u32,
@@ -219,22 +231,24 @@ impl IncI16 {
 impl GltfAccessor {
     fn slab_index_and_byte_offset(&self, element_index: usize, slab: &[u32]) -> (usize, usize) {
         crate::println!("index: {element_index:?}");
-        let buffer = slab.read(self.buffer);
+        let view = slab.read(self.view);
+        crate::println!("view: {view:?}");
+        let buffer = slab.read(view.buffer);
         crate::println!("buffer: {:?}", buffer);
         let buffer_start = buffer.0.starting_index();
         crate::println!("buffer_start: {buffer_start:?}");
         let buffer_start_bytes = buffer_start * 4;
         crate::println!("buffer_start_bytes: {buffer_start_bytes:?}");
-        let stride = if self.size > self.view_stride {
+        let stride = if self.size > view.stride {
             self.size
         } else {
-            self.view_stride
+            view.stride
         } as usize;
         let byte_offset = buffer_start_bytes
-            + self.view_offset as usize
+            + view.offset as usize
             + self.offset as usize
             + element_index as usize * stride;
-        crate::println!("byte_offset: buffer_start_bytes({buffer_start_bytes}) + view_offset({view_offset}) + accessor.offset({offset}) + element_index({element_index}) * stride({stride}) = {byte_offset:?}", view_offset = self.view_offset, offset = self.offset);
+        crate::println!("byte_offset: buffer_start_bytes({buffer_start_bytes}) + view_offset({view_offset}) + accessor.offset({offset}) + element_index({element_index}) * stride({stride}) = {byte_offset:?}", view_offset = view.offset, offset = self.offset);
         let slab_index = byte_offset / 4;
         crate::println!("slab_index: {slab_index:?}");
         let relative_byte_offset = byte_offset % 4;
@@ -1054,15 +1068,6 @@ pub struct GltfScene {
     pub nodes: Array<Id<GltfNode>>,
 }
 
-#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
-#[derive(Default, Clone, Copy, Slabbed)]
-pub struct GltfBufferView {
-    pub buffer: Id<GltfBuffer>,
-    pub offset: u32,
-    pub length: u32,
-    pub stride: u32,
-}
-
 /// A document of Gltf data.
 ///
 /// This tells where certain parts of the Gltf document are stored in the [`Stage`]'s slab.
@@ -1082,37 +1087,4 @@ pub struct GltfDocument {
     // TODO: Think about making a `GltfTexture`
     pub textures: Array<GpuTexture>,
     pub views: Array<GltfBufferView>,
-}
-
-#[cfg(test)]
-mod test {
-    use super::*;
-
-    #[test]
-    fn indices_accessor_sanity() {
-        // Taken from the indices accessor in the "simple meshes" gltf sample,
-        // but with the buffer changed to match where we write it here.
-        let buffer_id = Id::new(20);
-        let accessor = GltfAccessor {
-            size: 2,
-            buffer: buffer_id,
-            view_offset: 0,
-            offset: 0,
-            view_stride: 0,
-            count: 3,
-            data_type: DataType::U16,
-            dimensions: Dimensions::Scalar,
-            normalized: false,
-        };
-        let buffer = GltfBuffer(Array::new(0, 11));
-        let mut slab: [u32; 22] = [
-            65536, 2, 0, 0, 0, 1065353216, 0, 0, 0, 1065353216, 0, 0, 0, 1065353216, 0, 0,
-            1065353216, 0, 0, 1065353216, 0, 0,
-        ];
-        slab.write(&buffer, buffer_id.index());
-        let i0 = accessor.get_u32(0, &slab);
-        let i1 = accessor.get_u32(1, &slab);
-        let i2 = accessor.get_u32(2, &slab);
-        assert_eq!([0, 1, 2], [i0, i1, i2]);
-    }
 }

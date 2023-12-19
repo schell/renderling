@@ -135,7 +135,7 @@ impl Slabbed for LightStyle {
     }
 }
 
-/// A type-erased light Id that is used as a slab pointer to any light type.
+/// A type-erased linked-list-of-lights that is used as a slab pointer to any light type.
 #[repr(C)]
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[derive(Copy, Clone, PartialEq, Slabbed)]
@@ -144,6 +144,8 @@ pub struct Light {
     pub light_type: LightStyle,
     // The index of the light in the slab
     pub index: u32,
+    //// The id of the next light
+    //pub next: Id<Light>,
 }
 
 impl Default for Light {
@@ -151,6 +153,7 @@ impl Default for Light {
         Self {
             light_type: LightStyle::Directional,
             index: Id::<()>::NONE.inner(),
+            //next: Id::NONE,
         }
     }
 }
@@ -160,6 +163,7 @@ impl From<Id<DirectionalLight>> for Light {
         Self {
             light_type: LightStyle::Directional,
             index: id.inner(),
+            //next: Id::NONE,
         }
     }
 }
@@ -169,6 +173,7 @@ impl From<Id<SpotLight>> for Light {
         Self {
             light_type: LightStyle::Spot,
             index: id.inner(),
+            //next: Id::NONE,
         }
     }
 }
@@ -178,6 +183,7 @@ impl From<Id<PointLight>> for Light {
         Self {
             light_type: LightStyle::Point,
             index: id.inner(),
+            //next: Id::NONE,
         }
     }
 }

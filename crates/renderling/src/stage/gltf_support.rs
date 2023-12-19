@@ -81,15 +81,12 @@ pub fn get_vertex_count(primitive: &gltf::Primitive<'_>) -> u32 {
     }
 }
 
-pub fn make_accessor(accessor: gltf::Accessor<'_>, buffers: &Array<GltfBuffer>) -> GltfAccessor {
+pub fn make_accessor(accessor: gltf::Accessor<'_>, views: &Array<GltfBufferView>) -> GltfAccessor {
     let size = accessor.size() as u32;
     let buffer_view = accessor.view().unwrap();
-    let buffer_index = buffer_view.buffer().index();
-    let buffer = buffers.at(buffer_index);
     let offset = accessor.offset() as u32;
     let count = accessor.count() as u32;
-    let view_offset = buffer_view.offset() as u32;
-    let view_stride = buffer_view.stride().unwrap_or(0) as u32;
+    let view = views.at(buffer_view.index());
     let component_type = match accessor.data_type() {
         gltf::accessor::DataType::I8 => DataType::I8,
         gltf::accessor::DataType::U8 => DataType::U8,
@@ -110,11 +107,9 @@ pub fn make_accessor(accessor: gltf::Accessor<'_>, buffers: &Array<GltfBuffer>) 
     let normalized = accessor.normalized();
     GltfAccessor {
         size,
+        view,
         count,
-        buffer,
-        view_offset,
         offset,
-        view_stride,
         data_type: component_type,
         dimensions,
         normalized,
@@ -167,7 +162,7 @@ impl Stage {
             .accessors()
             .enumerate()
             .map(|(i, accessor)| {
-                let a = make_accessor(accessor, &buffers);
+                let a = make_accessor(accessor, &views);
                 log::trace!("  accessor {i}: {a:#?}",);
                 a
             })
@@ -601,13 +596,17 @@ impl Stage {
                         .collect::<Vec<_>>();
                         let normals_array = self.append_array(&normals);
                         let buffer = GltfBuffer(normals_array.into_u32_array());
-                        let buffer_id = self.append(&buffer);
+                        let buffer = self.append(&buffer);
+                        let view = self.append(&GltfBufferView {
+                            buffer,
+                            offset: 0,
+                            length: normals.len() as u32 * 3 * 4, // 3 components * 4 bytes each
+                            stride: 12,
+                        });
                         let accessor = GltfAccessor {
                             size: 12,
-                            buffer: buffer_id,
-                            view_offset: 0,
+                            view,
                             offset: 0,
-                            view_stride: 12,
                             count: normals.len() as u32,
                             data_type: DataType::F32,
                             dimensions: Dimensions::Vec3,
@@ -653,13 +652,17 @@ impl Stage {
                             .collect::<Vec<_>>();
                         let tangents_array = self.append_array(&tangents);
                         let buffer = GltfBuffer(tangents_array.into_u32_array());
-                        let buffer_id = self.append(&buffer);
+                        let buffer = self.append(&buffer);
+                        let view = self.append(&GltfBufferView {
+                            buffer,
+                            offset: 0,
+                            length: tangents.len() as u32 * 4 * 4, // 4 components * 4 bytes each
+                            stride: 16,
+                        });
                         let accessor = GltfAccessor {
                             size: 16,
-                            buffer: buffer_id,
-                            view_offset: 0,
+                            view,
                             offset: 0,
-                            view_stride: 16,
                             count: tangents.len() as u32,
                             data_type: DataType::F32,
                             dimensions: Dimensions::Vec4,
@@ -1008,6 +1011,36 @@ impl Stage {
         node: gltf::Node<'a>,
         parents: Vec<Id<GltfNode>>,
     ) -> Vec<Id<RenderUnit>> {
+        if let Some(_light) = node.light() {
+            // TODO: Support transforming lights based on node transforms
+            ////let light = gpu_doc.lights.at(light.index());
+            //let t = Mat4::from_cols_array_2d(&node.transform().matrix());
+            //let position = t.transform_point3(Vec3::ZERO);
+
+            //let light_index = light.index();
+            //let color = Vec3::from(light.color());
+            //let range = light.range().unwrap_or(f32::MAX);
+            //let intensity = light.intensity();
+            //match light.kind() {
+            //    gltf::khr_lights_punctual::Kind::Directional => GltfLightKind::Directional,
+            //    gltf::khr_lights_punctual::Kind::Point => GltfLightKind::Point,
+            //    gltf::khr_lights_punctual::Kind::Spot {
+            //        inner_cone_angle,
+            //        outer_cone_angle,
+            //    } => GltfLightKind::Spot {
+            //        inner_cone_angle,
+            //        outer_cone_angle,
+            //    },
+            //};
+
+            //let transform = self.append(&transform);
+            //let render_unit = RenderUnit {
+            //    light,
+            //    transform,
+            //    ..Default::default()
+            //};
+            //return vec![self.draw_unit(&render_unit)];
+        }
         let mut units = if let Some(mesh) = node.mesh() {
             let primitives = mesh.primitives();
             let mesh = gpu_doc.meshes.at(mesh.index());
@@ -1131,14 +1164,21 @@ mod test {
         let buffer_index = data.write_slice(&u32buffer, 0);
         assert_eq!(2, buffer_index);
         let buffer = GltfBuffer(Array::new(0, buffer_index as u32));
-        let _ = data.write(&buffer, buffer_index);
+        let view_index = data.write(&buffer, buffer_index);
+        let _ = data.write(
+            &GltfBufferView {
+                buffer: Id::from(buffer_index),
+                offset: 0,
+                length: 4 * 2, // 4 elements * 2 bytes each
+                stride: 2,
+            },
+            view_index,
+        );
         let accessor = GltfAccessor {
             size: 2,
             count: 3,
-            buffer: Id::from(buffer_index),
-            view_offset: 0,
+            view: Id::from(view_index),
             offset: 0,
-            view_stride: 0,
             data_type: DataType::U16,
             dimensions: Dimensions::Scalar,
             normalized: false,
@@ -1192,15 +1232,6 @@ mod test {
 
         let draws = stage.get_draws();
         let slab = &data;
-
-        for i in 0..gpu_doc.accessors.len() {
-            let accessor = slab.read(gpu_doc.accessors.at(i));
-            println!("accessor {i}: {accessor:#?}", i = i, accessor = accessor);
-            let buffer = slab.read(accessor.buffer);
-            println!("buffer: {buffer:#?}");
-            let buffer_data = slab.read_vec(buffer.0);
-            println!("buffer_data: {buffer_data:#?}");
-        }
 
         let indices = draws
             .iter()
@@ -1398,23 +1429,132 @@ mod test {
         img_diff::assert_img_eq("gltf_simple_texture.png", img);
     }
 
-    //#[test]
-    //fn normal_mapping_brick_sphere() {
-    //    let size = 600;
-    //    let mut r =
-    //        Renderling::headless(size, size).with_background_color(Vec3::splat(1.0).extend(1.0));
-    //    let stage = r.new_stage().with_lighting(true).with_bloom(true);
-    //    stage.configure_graph(&mut r, true);
-    //    let (cpu_doc, gpu_doc) = stage
-    //        .load_gltf_document_from_path("../../gltf/red_brick_03_1k.glb")
-    //        .unwrap();
-    //    let camera = stage.create_camera_from_gltf(&cpu_doc, 0).unwrap();
-    //    let camera_id = stage.append(&camera);
-    //    let _unit_ids =
-    //        stage.draw_gltf_scene(&gpu_doc, camera_id, cpu_doc.default_scene().unwrap());
+    #[test]
+    fn normal_mapping_brick_sphere() {
+        let size = 600;
+        let mut r =
+            Renderling::headless(size, size).with_background_color(Vec3::splat(1.0).extend(1.0));
+        let stage = r.new_stage().with_lighting(true).with_bloom(true);
+        stage.configure_graph(&mut r, true);
+        let (cpu_doc, gpu_doc) = stage
+            .load_gltf_document_from_path("../../gltf/red_brick_03_1k.glb")
+            .unwrap();
+        let camera = stage.create_camera_from_gltf(&cpu_doc, 0).unwrap();
+        let camera_id = stage.append(&camera);
+        let _unit_ids =
+            stage.draw_gltf_scene(&gpu_doc, camera_id, cpu_doc.default_scene().unwrap());
 
-    //    let img = r.render_image().unwrap();
-    //    println!("saving frame");
-    //    img_diff::assert_img_eq("gltf_normal_mapping_brick_sphere.png", img);
-    //}
+        let img = r.render_image().unwrap();
+        img_diff::assert_img_eq("gltf_normal_mapping_brick_sphere.png", img);
+    }
+
+    #[test]
+    // Demonstrates how to generate a mesh primitive on the CPU.
+    fn generate_gltf_cmy_tri() {
+        let size = 100;
+        let mut r =
+            Renderling::headless(size, size).with_background_color(Vec3::splat(0.0).extend(1.0));
+        let (device, queue) = r.get_device_and_queue_owned();
+        let stage = Stage::new(device.clone(), queue.clone())
+            // There are no lights in the scene and the material isn't marked as "unlit", so
+            // let's force it to be unlit.
+            .with_lighting(false);
+        stage.configure_graph(&mut r, true);
+
+        // buffers
+        let positions =
+            stage.append_array(&[[0.0, 0.0, 0.5], [0.0, 100.0, 0.5], [100.0, 0.0, 0.5]]);
+        let positions_buffer = GltfBuffer(positions.into_u32_array());
+        let cyan = [0.0, 1.0, 1.0, 1.0];
+        let magenta = [1.0, 0.0, 1.0, 1.0];
+        let yellow = [1.0, 1.0, 0.0, 1.0];
+        let colors = stage.append_array(&[cyan, magenta, yellow]);
+        let colors_buffer = GltfBuffer(colors.into_u32_array());
+        let buffers = stage.append_array(&[positions_buffer, colors_buffer]);
+
+        // views
+        let positions_view = GltfBufferView {
+            buffer: buffers.at(0),
+            offset: 0,
+            length: 3 * 3 * 4, // 3 vertices * 3 components * 4 bytes each
+            stride: 3 * 4,
+        };
+        let colors_view = GltfBufferView {
+            buffer: buffers.at(1),
+            offset: 0,
+            length: 3 * 4 * 4, // 3 vertices * 4 components * 4 bytes each
+            stride: 4 * 4,
+        };
+        let views = stage.append_array(&[positions_view, colors_view]);
+
+        // accessors
+        let positions_accessor = GltfAccessor {
+            size: 3 * 4, // 3 components * 4 bytes each
+            view: views.at(0),
+            offset: 0,
+            count: 3,
+            data_type: DataType::F32,
+            dimensions: Dimensions::Vec3,
+            normalized: false,
+        };
+        let colors_accessor = GltfAccessor {
+            size: 4 * 4,
+            view: views.at(1),
+            offset: 0,
+            count: 3,
+            data_type: DataType::F32,
+            dimensions: Dimensions::Vec4,
+            normalized: false,
+        };
+        let accessors = stage.append_array(&[positions_accessor, colors_accessor]);
+
+        // meshes
+        let primitive = GltfPrimitive {
+            vertex_count: 3,
+            positions: accessors.at(0),
+            colors: accessors.at(1),
+            ..Default::default()
+        };
+        let primitives = stage.append_array(&[primitive]);
+        let mesh = GltfMesh {
+            primitives,
+            ..Default::default()
+        };
+        let meshes = stage.append_array(&[mesh]);
+
+        // nodes
+        let node = GltfNode {
+            mesh: meshes.at(0),
+            ..Default::default()
+        };
+        let nodes = stage.append_array(&[node]);
+
+        // doc
+        let _doc = stage.append(&GltfDocument {
+            accessors,
+            buffers,
+            meshes,
+            nodes,
+            ..Default::default()
+        });
+
+        // render unit
+        let gltf_vertex_data = stage.append(&GltfVertexData {
+            mesh: meshes.at(0),
+            primitive_index: 0,
+            ..Default::default()
+        });
+        let vertex_data = VertexData::new_gltf(gltf_vertex_data);
+        let (projection, view) = crate::camera::default_ortho2d(100.0, 100.0);
+        let camera = stage.append(&Camera::new(projection, view));
+        let _unit_id = stage.draw_unit(&RenderUnit {
+            vertex_data,
+            camera,
+            vertex_count: 3,
+            ..Default::default()
+        });
+
+        let img = r.render_image().unwrap();
+        img_diff::assert_img_eq("gltf/cmy_tri.png", img);
+    }
 }
