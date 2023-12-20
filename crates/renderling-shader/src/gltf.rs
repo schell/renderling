@@ -132,7 +132,7 @@ pub struct GltfAccessor {
     //
     /// This may be Id::NONE if the corresponding accessor is sparse.
     pub view: Id<GltfBufferView>,
-    // The offset relative to the start of the parent buffer view in bytes.
+    // The offset relative to the start of the parent **buffer view** in bytes.
     //
     // This will be 0 if the corresponding accessor is sparse.
     pub offset: u32,

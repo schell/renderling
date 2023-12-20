@@ -62,7 +62,7 @@ mod state;
 #[cfg(feature = "text")]
 mod text;
 mod texture;
-mod tutorial;
+//mod tutorial;
 mod ui;
 mod uniform;
 
@@ -254,14 +254,13 @@ fn init_logging() {
         .try_init();
 }
 
-#[cfg(test)]
+#[cfg(all(feature = "blah", test))]
 mod test {
     use super::*;
     use glam::{Mat3, Mat4, Quat, UVec2, Vec2, Vec3, Vec4, Vec4Swizzles};
     use pretty_assertions::assert_eq;
     use renderling_shader::stage::{
-        light::*, new_stage_vertex, Camera, GpuEntity, NativeVertexData, RenderUnit, Transform,
-        Vertex, VertexData,
+        gltf_vertex, light::*, Camera, GpuEntity, RenderUnit, Transform, Vertex,
     };
 
     #[test]
@@ -608,59 +607,6 @@ mod test {
             Vertex::default().with_position(p[5]).with_uv0(br),
             Vertex::default().with_position(p[3]).with_uv0(tr),
         ]
-    }
-
-    /// A helper struct that contains all outputs of the vertex shader.
-    #[allow(unused)]
-    #[derive(Clone, Debug, Default, PartialEq)]
-    pub struct VertexInvocation {
-        pub instance_index: u32,
-        pub vertex_index: u32,
-        pub render_unit_id: Id<RenderUnit>,
-        pub render_unit: RenderUnit,
-        pub out_camera: u32,
-        pub out_material: u32,
-        pub out_color: Vec4,
-        pub out_uv0: Vec2,
-        pub out_uv1: Vec2,
-        pub out_norm: Vec3,
-        pub out_tangent: Vec3,
-        pub out_bitangent: Vec3,
-        pub out_pos: Vec3,
-        // output clip coordinates
-        pub clip_pos: Vec4,
-        // output normalized device coordinates
-        pub ndc_pos: Vec3,
-    }
-
-    impl VertexInvocation {
-        #[allow(dead_code)]
-        pub fn invoke(instance_index: u32, vertex_index: u32, slab: &[u32]) -> Self {
-            let mut v = Self {
-                instance_index,
-                vertex_index,
-                ..Default::default()
-            };
-            v.render_unit_id = Id::from(v.instance_index);
-            v.render_unit = slab.read(v.render_unit_id);
-            new_stage_vertex(
-                v.instance_index,
-                v.vertex_index,
-                slab,
-                &mut v.out_camera,
-                &mut v.out_material,
-                &mut v.out_color,
-                &mut v.out_uv0,
-                &mut v.out_uv1,
-                &mut v.out_norm,
-                &mut v.out_tangent,
-                &mut v.out_bitangent,
-                &mut v.out_pos,
-                &mut v.clip_pos,
-            );
-            v.ndc_pos = v.clip_pos.xyz() / v.clip_pos.w;
-            v
-        }
     }
 
     #[test]

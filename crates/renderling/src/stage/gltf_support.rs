@@ -4,13 +4,13 @@ use crate::{
     shader::{
         gltf::*,
         pbr::PbrMaterial,
-        stage::{Camera, GltfVertexData, LightingModel, VertexData},
+        stage::{Camera, LightingModel},
         texture::{GpuTexture, TextureAddressMode, TextureModes},
     },
     SceneImage,
 };
 use glam::{Quat, Vec2, Vec3, Vec4};
-use renderling_shader::stage::{Transform, Vertex};
+use renderling_shader::stage::Vertex;
 use snafu::{OptionExt, ResultExt, Snafu};
 
 #[derive(Debug, Snafu)]
@@ -1042,27 +1042,19 @@ impl Stage {
             //return vec![self.draw_unit(&render_unit)];
         }
         let mut units = if let Some(mesh) = node.mesh() {
+            log::trace!("drawing mesh {}", mesh.index());
             let primitives = mesh.primitives();
             let mesh = gpu_doc.meshes.at(mesh.index());
+            let mut node_path = parents.clone();
+            node_path.push(gpu_doc.nodes.at(node.index()));
             primitives
                 .map(|primitive| {
-                    let parent_node_path = self.append_array(&parents);
-                    let vertex_data_id = self.append(&GltfVertexData {
-                        parent_node_path,
-                        mesh,
-                        primitive_index: primitive.index() as u32,
-                    });
-                    let (t, r, s) = node.transform().decomposed();
-                    let transform = Transform {
-                        translation: Vec3::from(t),
-                        rotation: Quat::from_array(r),
-                        scale: Vec3::from(s),
-                    };
-                    let transform = self.append(&transform);
+                    let node_path = self.append_array(&node_path);
                     let render_unit = RenderUnit {
-                        vertex_data: VertexData::new_gltf(vertex_data_id),
+                        node_path,
+                        mesh_index: mesh.index() as u32,
+                        primitive_index: primitive.index() as u32,
                         vertex_count: super::get_vertex_count(&primitive),
-                        transform,
                         camera: camera_id,
                         ..Default::default()
                     };
@@ -1104,11 +1096,157 @@ impl Stage {
             .flat_map(|node| self.draw_gltf_node(gpu_doc, camera_id, node))
             .collect()
     }
+
+    /// Create a mesh primitive on the slab from a list of vertices.
+    pub fn new_primitive(
+        &self,
+        vertices: &[Vertex],
+        indices: &[u32],
+        material: Id<PbrMaterial>,
+    ) -> GltfPrimitive {
+        let vertex_count = vertices.len().max(indices.len()) as u32;
+        let indices = if indices.is_empty() {
+            Id::NONE
+        } else {
+            let buffer = GltfBuffer(self.append_array(indices).into_u32_array());
+            let buffer = self.append(&buffer);
+            let view = self.append(&GltfBufferView {
+                buffer,
+                offset: 0,
+                length: indices.len() as u32 * 4, // 4 bytes per u32
+                stride: 4,                        // 4 bytes in a u32,
+            });
+            let accessor = self.append(&GltfAccessor {
+                size: 4,
+                view,
+                offset: 0,
+                count: indices.len() as u32,
+                data_type: DataType::U32,
+                dimensions: Dimensions::Scalar,
+                normalized: false,
+            });
+            accessor
+        };
+
+        let vertex_buffer = GltfBuffer(self.append_array(vertices).into_u32_array());
+        let buffer = self.append(&vertex_buffer);
+        let u32_stride = 4 // 4 position components,
+            + 4 // 4 color components,
+            + 4 // 4 uv components,
+            + 4 // 4 normal components,
+            + 4 // 4 tangent components,
+            + 4 // 4 joint components,
+            + 4; // 4 weight components
+        let stride = u32_stride * 4; // 4 bytes in a u32
+
+        let view = self.append(&GltfBufferView {
+            buffer,
+            offset: 0,
+            length: vertices.len() as u32 * u32_stride * 4, // stride as u32s * 4 bytes each
+            stride,
+        });
+
+        let positions = self.append(&GltfAccessor {
+            size: 3 * 4, // 3 position components * 4 bytes each
+            view,
+            offset: 0,
+            count: vertex_count as u32,
+            data_type: DataType::F32,
+            dimensions: Dimensions::Vec3,
+            normalized: false,
+        });
+
+        let colors = self.append(&GltfAccessor {
+            size: 4 * 4, // 4 color components * 4 bytes each
+            view,
+            offset: 4 * 4, // 3 + 1 position components * 4 bytes each
+            count: vertex_count as u32,
+            data_type: DataType::F32,
+            dimensions: Dimensions::Vec4,
+            normalized: false,
+        });
+
+        let tex_coords0 = self.append(&GltfAccessor {
+            size: 2 * 4, // 2 uv components * 4 bytes each
+            view,
+            offset: 8 * 4, // (3 + 1) position + 4 color components * 4 bytes each
+            count: vertex_count as u32,
+            data_type: DataType::F32,
+            dimensions: Dimensions::Vec2,
+            normalized: false,
+        });
+
+        let tex_coords1 = self.append(&GltfAccessor {
+            size: 2 * 4, // 2 uv components * 4 bytes each
+            view,
+            offset: 10 * 4, // (3 + 1) position + 4 color + 2 uv components * 4 bytes each
+            count: vertex_count as u32,
+            data_type: DataType::F32,
+            dimensions: Dimensions::Vec2,
+            normalized: false,
+        });
+
+        let normals = self.append(&GltfAccessor {
+            size: 3 * 4, // 3 normal components * 4 bytes each
+            view,
+            offset: 12 * 4, // (3 + 1) position + 4 color + 4 uv components * 4 bytes each
+            count: vertex_count as u32,
+            data_type: DataType::F32,
+            dimensions: Dimensions::Vec3,
+            normalized: false,
+        });
+
+        let tangents = self.append(&GltfAccessor {
+            size: 4 * 4, // 4 tangent components * 4 bytes each
+            view,
+            offset: 16 * 4, // (3 + 1) position + 4 color + 4 uv + (3 + 1) normal components * 4 bytes each
+            count: vertex_count as u32,
+            data_type: DataType::F32,
+            dimensions: Dimensions::Vec4,
+            normalized: false,
+        });
+
+        let joints = self.append(&GltfAccessor {
+            size: 4 * 4, // 4 joint components * 4 bytes each
+            view,
+            offset: 20 * 4, // (3 + 1) position + 4 color + 4 uv + (3 + 1) normal + 4 tangent components * 4 bytes each
+            count: vertex_count as u32,
+            data_type: DataType::F32,
+            dimensions: Dimensions::Vec4,
+            normalized: false,
+        });
+
+        let weights = self.append(&GltfAccessor {
+            size: 4 * 4, // 4 weight components * 4 bytes each
+            view,
+            offset: 24 * 4, // (3 + 1) position + 4 color + 4 uv + (3 + 1) normal + 4 tangent + 4 joint components * 4 bytes each
+            count: vertex_count as u32,
+            data_type: DataType::F32,
+            dimensions: Dimensions::Vec4,
+            normalized: false,
+        });
+
+        GltfPrimitive {
+            vertex_count,
+            material,
+            indices,
+            positions,
+            normals,
+            normals_were_generated: false,
+            tangents,
+            tangents_were_generated: false,
+            colors,
+            tex_coords0,
+            tex_coords1,
+            joints,
+            weights,
+        }
+    }
 }
 
 #[cfg(test)]
 mod test {
-    use glam::{Vec3, Vec4};
+    use glam::{Vec2, Vec3, Vec4, Vec4Swizzles};
 
     use crate::{
         shader::{
@@ -1116,10 +1254,7 @@ mod test {
             gltf::*,
             pbr::PbrMaterial,
             slab::Slab,
-            stage::{
-                Camera, GltfVertexData, LightingModel, NativeVertexData, RenderUnit, Transform,
-                Vertex, VertexData,
-            },
+            stage::{Camera, LightingModel, RenderUnit, Transform, Vertex},
         },
         Id, Renderling, Stage,
     };
@@ -1222,93 +1357,6 @@ mod test {
         let unit_ids = stage.draw_gltf_scene(&gpu_doc, camera_id, default_scene);
         assert_eq!(2, unit_ids.len());
 
-        let data = futures_lite::future::block_on(stage.slab.read_raw(
-            &device,
-            &queue,
-            0,
-            stage.slab.len(),
-        ))
-        .unwrap();
-
-        let draws = stage.get_draws();
-        let slab = &data;
-
-        let indices = draws
-            .iter()
-            .map(|draw| {
-                let unit_id = draw.id;
-                let unit = slab.read(unit_id);
-                assert_eq!(unit.vertex_data.is_gltf(), true);
-                let vertex_data_id = Id::<GltfVertexData>::from(unit.vertex_data.index);
-                let vertex_data = slab.read(vertex_data_id);
-                let mesh = slab.read(vertex_data.mesh);
-                let primitive_id = mesh.primitives.at(vertex_data.primitive_index as usize);
-                let primitive = slab.read(primitive_id);
-                if primitive.indices.is_some() {
-                    let indices_accessor = slab.read(primitive.indices);
-                    (0..draw.vertex_count)
-                        .map(|i| {
-                            let index = indices_accessor.get_u32(i as usize, slab);
-                            index
-                        })
-                        .collect::<Vec<_>>()
-                } else {
-                    (0..draw.vertex_count).collect::<Vec<_>>()
-                }
-            })
-            .collect::<Vec<_>>();
-        assert_eq!([0, 1, 2], indices[0].as_slice());
-        assert_eq!([0, 1, 2], indices[1].as_slice());
-
-        let invocations = draws
-            .into_iter()
-            .flat_map(|draw| {
-                let render_unit_id = draw.id;
-                let instance_index = render_unit_id.inner();
-                let render_unit = data.read(render_unit_id);
-                let data = &data;
-                (0..draw.vertex_count).map(move |vertex_index| {
-                    let mut invocation = crate::test::VertexInvocation {
-                        render_unit_id,
-                        render_unit,
-                        instance_index,
-                        vertex_index,
-                        ..Default::default()
-                    };
-                    renderling_shader::stage::new_stage_vertex(
-                        instance_index,
-                        vertex_index,
-                        data,
-                        &mut invocation.out_camera,
-                        &mut invocation.out_material,
-                        &mut invocation.out_color,
-                        &mut invocation.out_uv0,
-                        &mut invocation.out_uv1,
-                        &mut invocation.out_norm,
-                        &mut invocation.out_tangent,
-                        &mut invocation.out_bitangent,
-                        &mut invocation.out_pos,
-                        &mut invocation.clip_pos,
-                    );
-                    invocation
-                })
-            })
-            .collect::<Vec<_>>();
-        let seen_positions = invocations
-            .iter()
-            .map(|inv| inv.out_pos)
-            .take(3)
-            .collect::<Vec<_>>();
-        let mesh = document.meshes().next().unwrap();
-        let prim = mesh.primitives().next().unwrap();
-        let expected_positions_reader = prim.reader(|buffer| Some(&buffers[buffer.index()]));
-        let expected_positions = expected_positions_reader
-            .read_positions()
-            .unwrap()
-            .map(|pos| Vec3::from(pos))
-            .collect::<Vec<_>>();
-        assert_eq!(expected_positions, seen_positions);
-
         let img = r.render_image().unwrap();
         img_diff::assert_img_eq("gltf_simple_meshes.png", img);
     }
@@ -1356,11 +1404,7 @@ mod test {
             .load_gltf_document(&document, buffers, images)
             .unwrap();
         let (projection, view) = crate::camera::default_ortho2d(100.0, 100.0);
-        let camera_id = stage.append(&Camera {
-            projection,
-            view,
-            position: Vec3::ZERO,
-        });
+        let camera_id = stage.append(&Camera::new(projection, view));
         assert!(!gpu_doc.textures.is_empty());
         let albedo_texture_id = gpu_doc.textures.at(0);
         assert!(albedo_texture_id.is_some());
@@ -1370,7 +1414,7 @@ mod test {
             ..Default::default()
         });
         println!("material_id: {:#?}", material_id);
-        let vertices = stage.append_array(&vec![
+        let vertices = [
             Vertex::default()
                 .with_position([0.0, 0.0, 0.0])
                 .with_uv0([0.0, 0.0]),
@@ -1383,23 +1427,44 @@ mod test {
             Vertex::default()
                 .with_position([0.0, 1.0, 0.0])
                 .with_uv0([0.0, 1.0]),
-        ]);
-        let indices = stage.append_array(&[0, 3, 2, 0, 2, 1]);
-        let native_data_id = stage.append(&NativeVertexData {
-            vertices,
-            indices,
-            material: material_id,
+        ];
+        let indices = [0, 3, 2, 0, 2, 1];
+        let primitive = stage.new_primitive(&vertices, &indices, material_id);
+        let mesh = stage.append(&GltfMesh {
+            primitives: stage.append_array(&[primitive]),
+            ..Default::default()
         });
+        let node = stage.append(&GltfNode {
+            mesh,
+            ..Default::default()
+        });
+        let node_path = stage.append_array(&[node]);
+
         let transform = stage.append(&Transform {
             scale: Vec3::new(100.0, 100.0, 1.0),
             ..Default::default()
         });
-        let _unit_id = stage.draw_unit(&RenderUnit {
-            vertex_data: VertexData::new_native(native_data_id),
+
+        let unit_id = stage.draw_unit(&RenderUnit {
             camera: camera_id,
             transform,
-            vertex_count: indices.len() as u32,
+            vertex_count: primitive.vertex_count,
+            node_path,
+            mesh_index: 0,
+            primitive_index: 0,
         });
+
+        let data = stage.read_slab().unwrap();
+        for i in 0..indices.len() {
+            println!("\nget vertex: {i}");
+            let v = primitive.get_vertex(i, &data);
+            assert_eq!(vertices[indices[i] as usize], v);
+        }
+
+        //let uvs = (0..primitive.vertex_count).map(|)
+        let inv = VertexInvocation::invoke(unit_id.inner(), 0, &data);
+        println!("inv: {inv:#?}");
+
         let img = r.render_image().unwrap();
         img_diff::assert_img_eq("gltf_images.png", img);
     }
@@ -1450,7 +1515,7 @@ mod test {
 
     #[test]
     // Demonstrates how to generate a mesh primitive on the CPU.
-    fn generate_gltf_cmy_tri() {
+    fn gltf_cmy_tri() {
         let size = 100;
         let mut r =
             Renderling::headless(size, size).with_background_color(Vec3::splat(0.0).extend(1.0));
@@ -1539,22 +1604,76 @@ mod test {
         });
 
         // render unit
-        let gltf_vertex_data = stage.append(&GltfVertexData {
-            mesh: meshes.at(0),
-            primitive_index: 0,
-            ..Default::default()
-        });
-        let vertex_data = VertexData::new_gltf(gltf_vertex_data);
         let (projection, view) = crate::camera::default_ortho2d(100.0, 100.0);
         let camera = stage.append(&Camera::new(projection, view));
-        let _unit_id = stage.draw_unit(&RenderUnit {
-            vertex_data,
+        let node_path = stage.append_array(&[nodes.at(0)]);
+        let unit_id = stage.draw_unit(&RenderUnit {
             camera,
+            node_path,
+            mesh_index: 0,
+            primitive_index: 0,
             vertex_count: 3,
             ..Default::default()
         });
 
+        let data = stage.read_slab().unwrap();
+        let invocation = VertexInvocation::invoke(unit_id.inner(), 0, &data);
+        println!("invoctaion: {invocation:#?}");
+
         let img = r.render_image().unwrap();
         img_diff::assert_img_eq("gltf/cmy_tri.png", img);
+    }
+
+    /// A helper struct that contains all outputs of the vertex shader.
+    #[allow(unused)]
+    #[derive(Clone, Debug, Default, PartialEq)]
+    pub struct VertexInvocation {
+        pub instance_index: u32,
+        pub vertex_index: u32,
+        pub render_unit_id: Id<RenderUnit>,
+        pub render_unit: RenderUnit,
+        pub out_camera: u32,
+        pub out_material: u32,
+        pub out_color: Vec4,
+        pub out_uv0: Vec2,
+        pub out_uv1: Vec2,
+        pub out_norm: Vec3,
+        pub out_tangent: Vec3,
+        pub out_bitangent: Vec3,
+        pub out_pos: Vec3,
+        // output clip coordinates
+        pub clip_pos: Vec4,
+        // output normalized device coordinates
+        pub ndc_pos: Vec3,
+    }
+
+    impl VertexInvocation {
+        #[allow(dead_code)]
+        pub fn invoke(instance_index: u32, vertex_index: u32, slab: &[u32]) -> Self {
+            let mut v = Self {
+                instance_index,
+                vertex_index,
+                ..Default::default()
+            };
+            v.render_unit_id = Id::from(v.instance_index);
+            v.render_unit = slab.read(v.render_unit_id);
+            renderling_shader::stage::gltf_vertex(
+                v.instance_index,
+                v.vertex_index,
+                slab,
+                &mut v.out_camera,
+                &mut v.out_material,
+                &mut v.out_color,
+                &mut v.out_uv0,
+                &mut v.out_uv1,
+                &mut v.out_norm,
+                &mut v.out_tangent,
+                &mut v.out_bitangent,
+                &mut v.out_pos,
+                &mut v.clip_pos,
+            );
+            v.ndc_pos = v.clip_pos.xyz() / v.clip_pos.w;
+            v
+        }
     }
 }

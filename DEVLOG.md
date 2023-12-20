@@ -1,5 +1,10 @@
 # devlog
 
+## Wed Dec 20, 2023
+
+I think I'm going to keep going with this idea of making GLTF the internal representation of the
+renderer.
+
 ## Tue Dec 19, 2023
 
 ### Thoughts on GLTF

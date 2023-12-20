@@ -4,6 +4,26 @@ use core::marker::PhantomData;
 use crate::id::Id;
 use crate::slab::Slabbed;
 
+#[derive(Clone, Copy)]
+pub struct ArrayIter<T> {
+    array: Array<T>,
+    index: usize,
+}
+
+impl<T: Slabbed> Iterator for ArrayIter<T> {
+    type Item = Id<T>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.index >= self.array.len() {
+            None
+        } else {
+            let id = self.array.at(self.index);
+            self.index += 1;
+            Some(id)
+        }
+    }
+}
+
 #[repr(C)]
 pub struct Array<T> {
     // u32 offset in the slab
@@ -24,6 +44,17 @@ impl<T> Clone for Array<T> {
 }
 
 impl<T> Copy for Array<T> {}
+
+/// An `Id<T>` is an `Array<T>` with a length of 1.
+impl<T> From<Id<T>> for Array<T> {
+    fn from(id: Id<T>) -> Self {
+        Self {
+            index: id.inner(),
+            len: 1,
+            _phantom: PhantomData,
+        }
+    }
+}
 
 impl<T> core::fmt::Debug for Array<T> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
@@ -120,6 +151,13 @@ impl<T> Array<T> {
 
     pub fn starting_index(&self) -> usize {
         self.index as usize
+    }
+
+    pub fn iter(&self) -> ArrayIter<T> {
+        ArrayIter {
+            array: *self,
+            index: 0,
+        }
     }
 
     /// Convert this array into a `u32` array.

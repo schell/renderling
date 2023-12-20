@@ -1013,18 +1013,6 @@ impl Default for StageLegend {
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[repr(C)]
 #[derive(Default, Clone, Copy, PartialEq, Slabbed)]
-pub struct NativeVertexData {
-    // Points to an array of `Vertex` in the stage's slab.
-    pub vertices: Array<Vertex>,
-    // Points to an array of `Indices` in the stage's slab.
-    pub indices: Array<u32>,
-    // Points to a `PbrMaterial` in the stage's slab.
-    pub material: Id<PbrMaterial>,
-}
-
-#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
-#[repr(C)]
-#[derive(Default, Clone, Copy, PartialEq, Slabbed)]
 pub struct GltfVertexData {
     // A path of node ids that leads to the node that contains the mesh.
     pub parent_node_path: Array<Id<GltfNode>>,
@@ -1032,53 +1020,6 @@ pub struct GltfVertexData {
     pub mesh: Id<GltfMesh>,
     // The index of the primitive within the mesh that this unit draws.
     pub primitive_index: u32,
-}
-
-#[repr(C)]
-#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
-#[derive(Clone, Copy, PartialEq, Slabbed)]
-pub struct VertexData {
-    // The hash of the vertex data. This is used to determine how to read
-    // the vertex data from the slab.
-    pub hash: u32,
-    // The first index of the vertex data in the slab.
-    pub index: u32,
-}
-
-impl Default for VertexData {
-    fn default() -> Self {
-        VertexData {
-            hash: 0,
-            index: u32::MAX,
-        }
-    }
-}
-
-impl VertexData {
-    pub const NATIVE: u32 = 0;
-    pub const GLTF: u32 = 1;
-
-    pub fn new_native(id: Id<NativeVertexData>) -> Self {
-        Self {
-            hash: Self::NATIVE,
-            index: id.into(),
-        }
-    }
-
-    pub fn new_gltf(id: Id<GltfVertexData>) -> Self {
-        Self {
-            hash: Self::GLTF,
-            index: id.into(),
-        }
-    }
-
-    pub fn is_native(&self) -> bool {
-        self.hash == Self::NATIVE
-    }
-
-    pub fn is_gltf(&self) -> bool {
-        self.hash == Self::GLTF
-    }
 }
 
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
@@ -1100,18 +1041,27 @@ impl Default for Transform {
     }
 }
 
-/// A fully-computed unit of rendering, roughly meaning a mesh with model matrix
-/// transformations.
+/// A rendering "command" that draws a single mesh from a top-level node.
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[repr(C)]
 #[derive(Default, Clone, Copy, PartialEq, Slabbed)]
 pub struct RenderUnit {
-    pub vertex_data: VertexData,
+    // Which node are we rendering, and what is the path through its
+    // ancestors to get to it.
+    pub node_path: Array<Id<GltfNode>>,
+    // Index of the mesh within the child node that we're rendering.
+    pub mesh_index: u32,
+    // Index of the primitive within the mesh that we're rendering.
+    pub primitive_index: u32,
     // Points to a `Camera` in the stage's slab.
     pub camera: Id<Camera>,
-    // Points to a `Transform` in the stage's slab.
+    // Points to a top-level `Transform` in the stage's slab.
+    //
+    // This is used to transform your GLTF models.
     pub transform: Id<Transform>,
     // Number of vertices to draw for this unit.
+    //
+    // This is a cache for convenience on CPU.
     pub vertex_count: u32,
 }
 
@@ -1121,45 +1071,34 @@ impl RenderUnit {
         vertex_index: u32,
         slab: &[u32],
     ) -> (Vertex, Transform, Id<PbrMaterial>) {
-        let transform = slab.read(self.transform);
-        match self.vertex_data.hash {
-            VertexData::NATIVE => {
-                let id = Id::<NativeVertexData>::from(self.vertex_data.index);
-                let NativeVertexData {
-                    vertices,
-                    indices,
-                    material,
-                } = slab.read(id);
-                let index = if indices.is_empty() {
-                    vertex_index
-                } else {
-                    slab.read(indices.at(vertex_index as usize))
-                };
-                let vertex = slab.read(vertices.at(index as usize));
-                (vertex, transform, material)
-            }
-            VertexData::GLTF => {
-                let id = Id::<GltfVertexData>::from(self.vertex_data.index);
-                // TODO: Take the GLTF parent node's transform into account
-                let GltfVertexData {
-                    parent_node_path: _,
-                    mesh,
-                    primitive_index,
-                } = slab.read(id);
-                // TODO: check nodes for skinning
-                let mesh = slab.read(mesh);
-                let primitive = slab.read(mesh.primitives.at(primitive_index as usize));
-                let material = primitive.material;
-                let vertex = primitive.get_vertex(vertex_index as usize, slab);
-                (vertex, transform, material)
-            }
-            _ => Default::default(),
+        let t = slab.read(self.transform);
+        let mut model = Mat4::from_scale_rotation_translation(t.scale, t.rotation, t.translation);
+        let mut node = GltfNode::default();
+        for id_id in self.node_path.iter() {
+            let node_id = slab.read(id_id);
+            node = slab.read(node_id);
+            let node_transform =
+                Mat4::from_scale_rotation_translation(node.scale, node.rotation, node.translation);
+            model = model * node_transform;
         }
+        // TODO: check nodes for skinning
+        let mesh = slab.read(node.mesh);
+        let primitive_id = mesh.primitives.at(self.primitive_index as usize);
+        let primitive = slab.read(primitive_id);
+        let material = primitive.material;
+        let vertex = primitive.get_vertex(vertex_index as usize, slab);
+        let (s, r, t) = model.to_scale_rotation_translation_or_id();
+        let transform = Transform {
+            translation: t,
+            rotation: r,
+            scale: s,
+        };
+        (vertex, transform, material)
     }
 }
 
 #[spirv(vertex)]
-pub fn new_stage_vertex(
+pub fn gltf_vertex(
     // Which render unit are we rendering
     #[spirv(instance_index)] instance_index: u32,
     // Which vertex within the render unit are we rendering
@@ -1234,7 +1173,7 @@ pub fn get_material(material_index: u32, has_lighting: bool, slab: &[u32]) -> pb
 #[allow(clippy::too_many_arguments)]
 #[spirv(fragment)]
 /// Scene fragment shader.
-pub fn stage_fragment(
+pub fn gltf_fragment(
     #[spirv(descriptor_set = 1, binding = 0)] atlas: &Image2d,
     #[spirv(descriptor_set = 1, binding = 1)] atlas_sampler: &Sampler,
 
@@ -1262,7 +1201,7 @@ pub fn stage_fragment(
     output: &mut Vec4,
     brigtness: &mut Vec4,
 ) {
-    stage_fragment_impl(
+    gltf_fragment_impl(
         atlas,
         atlas_sampler,
         irradiance,
@@ -1288,7 +1227,7 @@ pub fn stage_fragment(
 
 #[allow(clippy::too_many_arguments)]
 /// Scene fragment shader.
-pub fn stage_fragment_impl<T, C, S>(
+pub fn gltf_fragment_impl<T, C, S>(
     atlas: &T,
     atlas_sampler: &S,
     irradiance: &C,

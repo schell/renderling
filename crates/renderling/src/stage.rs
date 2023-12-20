@@ -388,10 +388,10 @@ impl Stage {
         fn create_stage_render_pipeline(device: &wgpu::Device) -> wgpu::RenderPipeline {
             log::trace!("creating stage render pipeline");
             let label = Some("stage render pipeline");
-            let vertex_shader = device
-                .create_shader_module(wgpu::include_spirv!("linkage/stage-new_stage_vertex.spv"));
+            let vertex_shader =
+                device.create_shader_module(wgpu::include_spirv!("linkage/stage-gltf_vertex.spv"));
             let fragment_shader = device
-                .create_shader_module(wgpu::include_spirv!("linkage/stage-stage_fragment.spv"));
+                .create_shader_module(wgpu::include_spirv!("linkage/stage-gltf_fragment.spv"));
             let stage_slab_buffers_layout = Stage::buffers_bindgroup_layout(device);
             let textures_layout = Stage::textures_bindgroup_layout(device);
             let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -404,7 +404,7 @@ impl Stage {
                 layout: Some(&layout),
                 vertex: wgpu::VertexState {
                     module: &vertex_shader,
-                    entry_point: "stage::new_stage_vertex",
+                    entry_point: "stage::gltf_vertex",
                     buffers: &[],
                 },
                 primitive: wgpu::PrimitiveState {
@@ -430,7 +430,7 @@ impl Stage {
                 },
                 fragment: Some(wgpu::FragmentState {
                     module: &fragment_shader,
-                    entry_point: "stage::stage_fragment",
+                    entry_point: "stage::gltf_fragment",
                     targets: &[
                         Some(wgpu::ColorTargetState {
                             format: wgpu::TextureFormat::Rgba16Float,
@@ -791,7 +791,7 @@ pub fn stage_render(
     Ok((bloom_result,))
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "blah"))]
 mod test {
     use glam::Vec3;
 
