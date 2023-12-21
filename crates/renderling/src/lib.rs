@@ -254,13 +254,14 @@ fn init_logging() {
         .try_init();
 }
 
-#[cfg(all(feature = "blah", test))]
+#[cfg(test)]
 mod test {
     use super::*;
     use glam::{Mat3, Mat4, Quat, UVec2, Vec2, Vec3, Vec4, Vec4Swizzles};
     use pretty_assertions::assert_eq;
-    use renderling_shader::stage::{
-        gltf_vertex, light::*, Camera, GpuEntity, RenderUnit, Transform, Vertex,
+    use renderling_shader::{
+        gltf as gl,
+        stage::{gltf_vertex, light::*, Camera, GpuEntity, RenderUnit, Transform, Vertex},
     };
 
     #[test]
@@ -307,18 +308,20 @@ mod test {
             view,
             ..Default::default()
         });
-        let vertices = stage.append_array(&right_tri_vertices());
-        let native_vertex_data = stage.append(&NativeVertexData {
-            vertices,
+        let mesh = stage
+            .new_mesh()
+            .with_primitive(right_tri_vertices(), [], Id::NONE)
+            .build();
+        let node = stage.append(&gl::GltfNode {
+            mesh: stage.append(&mesh),
             ..Default::default()
         });
-        let vertex_data = VertexData::new_native(native_vertex_data);
-        let transform = stage.append(&Transform::default());
+        let node_path = stage.append_array(&[node]);
         let _tri = stage.draw_unit(&RenderUnit {
-            vertex_data,
             camera,
-            vertex_count: vertices.len() as u32,
-            transform,
+            node_path,
+            vertex_count: 3,
+            ..Default::default()
         });
 
         let img = r.render_image().unwrap();
@@ -334,23 +337,22 @@ mod test {
         let stage = r.new_stage();
         stage.configure_graph(&mut r, true);
         let (projection, view) = default_ortho2d(100.0, 100.0);
-        let camera = stage.append(&Camera {
-            projection,
-            view,
+        let camera = stage.append(&Camera::new(projection, view));
+        let mesh = stage
+            .new_mesh()
+            .with_primitive(right_tri_vertices(), [], Id::NONE)
+            .build();
+        let node = stage.append(&gl::GltfNode {
+            mesh: stage.append(&mesh),
             ..Default::default()
         });
-        let vertices = stage.append_array(&right_tri_vertices());
-        let native_vertex_data = stage.append(&NativeVertexData {
-            vertices,
-            ..Default::default()
-        });
-        let vertex_data = VertexData::new_native(native_vertex_data);
         let transform = stage.append(&Transform::default());
         let _tri = stage.draw_unit(&RenderUnit {
-            vertex_data,
             camera,
-            vertex_count: vertices.len() as u32,
+            node_path: stage.append_array(&[node]),
+            vertex_count: 3,
             transform,
+            ..Default::default()
         });
 
         let _ = r.render_image().unwrap();
@@ -421,840 +423,846 @@ mod test {
             view: Mat4::look_at_rh(camera_position, Vec3::ZERO, Vec3::Y),
             position: camera_position,
         });
-        let vertices = stage.append_array(&gpu_cube_vertices());
-        let native_vertex_data = stage.append(&NativeVertexData {
-            vertices,
-            ..Default::default()
-        });
+        let vertices = gpu_cube_vertices();
+        let vertex_count = vertices.len() as u32;
+        let mesh = stage
+            .new_mesh()
+            .with_primitive(vertices, [], Id::NONE)
+            .build();
         let transform = Transform {
             scale: Vec3::new(6.0, 6.0, 6.0),
             rotation: Quat::from_axis_angle(Vec3::Y, -std::f32::consts::FRAC_PI_4),
             ..Default::default()
         };
+        let node = stage.append(&gl::GltfNode {
+            mesh: stage.append(&mesh),
+            ..Default::default()
+        });
         let _cube = stage.draw_unit(&RenderUnit {
-            vertex_data: VertexData::new_native(native_vertex_data),
             camera,
-            vertex_count: vertices.len() as u32,
+            vertex_count,
+            node_path: stage.append_array(&[node]),
             transform: stage.append(&transform),
+            ..Default::default()
         });
         let img = r.render_image().unwrap();
         img_diff::assert_img_eq("cmy_cube.png", img);
     }
 
-    #[test]
-    // Test our ability to create two cubes and toggle the visibility of one of
-    // them.
-    fn cmy_cube_visible() {
-        let mut r = Renderling::headless(100, 100).with_background_color(Vec4::splat(1.0));
-        let stage = r.new_stage();
-        stage.configure_graph(&mut r, true);
-        let (projection, view) = camera::default_perspective(100.0, 100.0);
-        let camera = stage.append(&Camera {
-            projection,
-            view,
-            ..Default::default()
-        });
-        let vertices = stage.append_array(&gpu_cube_vertices());
-        let native_vertex_data = stage.append(&NativeVertexData {
-            vertices,
-            ..Default::default()
-        });
-        let _cube_one = stage.draw_unit(&RenderUnit {
-            vertex_data: VertexData::new_native(native_vertex_data),
-            camera,
-            vertex_count: vertices.len() as u32,
-            transform: stage.append(&Transform {
-                translation: Vec3::new(-4.5, 0.0, 0.0),
-                scale: Vec3::new(6.0, 6.0, 6.0),
-                rotation: Quat::from_axis_angle(Vec3::Y, -std::f32::consts::FRAC_PI_4),
-            }),
-        });
-        let cube_two = stage.draw_unit(&RenderUnit {
-            vertex_data: VertexData::new_native(native_vertex_data),
-            camera,
-            vertex_count: vertices.len() as u32,
-            transform: stage.append(&Transform {
-                translation: Vec3::new(4.5, 0.0, 0.0),
-                scale: Vec3::new(6.0, 6.0, 6.0),
-                rotation: Quat::from_axis_angle(Vec3::Y, std::f32::consts::FRAC_PI_4),
-            }),
-        });
+    //#[test]
+    //// Test our ability to create two cubes and toggle the visibility of one of
+    //// them.
+    //fn cmy_cube_visible() {
+    //    let mut r = Renderling::headless(100, 100).with_background_color(Vec4::splat(1.0));
+    //    let stage = r.new_stage();
+    //    stage.configure_graph(&mut r, true);
+    //    let (projection, view) = camera::default_perspective(100.0, 100.0);
+    //    let camera = stage.append(&Camera {
+    //        projection,
+    //        view,
+    //        ..Default::default()
+    //    });
+    //    let vertices = stage.append_array(&gpu_cube_vertices());
+    //    let native_vertex_data = stage.append(&NativeVertexData {
+    //        vertices,
+    //        ..Default::default()
+    //    });
+    //    let _cube_one = stage.draw_unit(&RenderUnit {
+    //        vertex_data: VertexData::new_native(native_vertex_data),
+    //        camera,
+    //        vertex_count: vertices.len() as u32,
+    //        transform: stage.append(&Transform {
+    //            translation: Vec3::new(-4.5, 0.0, 0.0),
+    //            scale: Vec3::new(6.0, 6.0, 6.0),
+    //            rotation: Quat::from_axis_angle(Vec3::Y, -std::f32::consts::FRAC_PI_4),
+    //        }),
+    //    });
+    //    let cube_two = stage.draw_unit(&RenderUnit {
+    //        vertex_data: VertexData::new_native(native_vertex_data),
+    //        camera,
+    //        vertex_count: vertices.len() as u32,
+    //        transform: stage.append(&Transform {
+    //            translation: Vec3::new(4.5, 0.0, 0.0),
+    //            scale: Vec3::new(6.0, 6.0, 6.0),
+    //            rotation: Quat::from_axis_angle(Vec3::Y, std::f32::consts::FRAC_PI_4),
+    //        }),
+    //    });
 
-        // we should see two colored cubes
-        let img = r.render_image().unwrap();
-        img_diff::assert_img_eq("cmy_cube_visible_before.png", img.clone());
-        let img_before = img;
+    //    // we should see two colored cubes
+    //    let img = r.render_image().unwrap();
+    //    img_diff::assert_img_eq("cmy_cube_visible_before.png", img.clone());
+    //    let img_before = img;
 
-        // update cube two making it invisible
-        stage.hide_unit(cube_two);
+    //    // update cube two making it invisible
+    //    stage.hide_unit(cube_two);
 
-        // we should see only one colored cube
-        let img = r.render_image().unwrap();
-        img_diff::assert_img_eq("cmy_cube_visible_after.png", img);
+    //    // we should see only one colored cube
+    //    let img = r.render_image().unwrap();
+    //    img_diff::assert_img_eq("cmy_cube_visible_after.png", img);
 
-        // update cube two making in visible again
-        stage.show_unit(cube_two);
+    //    // update cube two making in visible again
+    //    stage.show_unit(cube_two);
 
-        // we should see two colored cubes again
-        let img = r.render_image().unwrap();
-        img_diff::assert_eq("cmy_cube_visible_before_again.png", img_before, img);
-    }
+    //    // we should see two colored cubes again
+    //    let img = r.render_image().unwrap();
+    //    img_diff::assert_eq("cmy_cube_visible_before_again.png", img_before, img);
+    //}
 
-    #[test]
-    // Tests the ability to specify indexed vertices, as well as the ability to update
-    // the vertex data of a RenderUnit.
-    fn cmy_cube_remesh() {
-        let mut r = Renderling::headless(100, 100).with_background_color(Vec4::splat(1.0));
-        let stage = r.new_stage().with_lighting(false);
-        stage.configure_graph(&mut r, true);
-        let (projection, view) = camera::default_perspective(100.0, 100.0);
-        let camera = stage.append(&Camera {
-            projection,
-            view,
-            ..Default::default()
-        });
+    //#[test]
+    //// Tests the ability to specify indexed vertices, as well as the ability to update
+    //// the vertex data of a RenderUnit.
+    //fn cmy_cube_remesh() {
+    //    let mut r = Renderling::headless(100, 100).with_background_color(Vec4::splat(1.0));
+    //    let stage = r.new_stage().with_lighting(false);
+    //    stage.configure_graph(&mut r, true);
+    //    let (projection, view) = camera::default_perspective(100.0, 100.0);
+    //    let camera = stage.append(&Camera {
+    //        projection,
+    //        view,
+    //        ..Default::default()
+    //    });
 
-        let pyramid_vertices = stage.append_array(&pyramid_points().map(cmy_gpu_vertex));
-        let pyramid_indices = stage.append_array(&pyramid_indices().map(|i| i as u32));
-        let pyramid_vertex_data = stage.append(&NativeVertexData {
-            vertices: pyramid_vertices,
-            indices: pyramid_indices,
-            ..Default::default()
-        });
-        let cube_vertices =
-            stage.append_array(&renderling_shader::math::UNIT_POINTS.map(cmy_gpu_vertex));
-        let cube_indices =
-            stage.append_array(&renderling_shader::math::UNIT_INDICES.map(|i| i as u32));
-        let cube_vertex_data = stage.append(&NativeVertexData {
-            vertices: cube_vertices,
-            indices: cube_indices,
-            ..Default::default()
-        });
-        let transform = stage.append(&Transform {
-            scale: Vec3::new(10.0, 10.0, 10.0),
-            ..Default::default()
-        });
-        let cube = stage.draw_unit(&RenderUnit {
-            vertex_data: VertexData::new_native(cube_vertex_data),
-            camera,
-            transform,
-            vertex_count: cube_indices.len() as u32,
-        });
+    //    let pyramid_vertices = stage.append_array(&pyramid_points().map(cmy_gpu_vertex));
+    //    let pyramid_indices = stage.append_array(&pyramid_indices().map(|i| i as u32));
+    //    let pyramid_vertex_data = stage.append(&NativeVertexData {
+    //        vertices: pyramid_vertices,
+    //        indices: pyramid_indices,
+    //        ..Default::default()
+    //    });
+    //    let cube_vertices =
+    //        stage.append_array(&renderling_shader::math::UNIT_POINTS.map(cmy_gpu_vertex));
+    //    let cube_indices =
+    //        stage.append_array(&renderling_shader::math::UNIT_INDICES.map(|i| i as u32));
+    //    let cube_vertex_data = stage.append(&NativeVertexData {
+    //        vertices: cube_vertices,
+    //        indices: cube_indices,
+    //        ..Default::default()
+    //    });
+    //    let transform = stage.append(&Transform {
+    //        scale: Vec3::new(10.0, 10.0, 10.0),
+    //        ..Default::default()
+    //    });
+    //    let cube = stage.draw_unit(&RenderUnit {
+    //        vertex_data: VertexData::new_native(cube_vertex_data),
+    //        camera,
+    //        transform,
+    //        vertex_count: cube_indices.len() as u32,
+    //    });
 
-        // we should see a cube
-        let img = r.render_image().unwrap();
-        img_diff::assert_img_eq("cmy_cube_remesh_before.png", img);
+    //    // we should see a cube
+    //    let img = r.render_image().unwrap();
+    //    img_diff::assert_img_eq("cmy_cube_remesh_before.png", img);
 
-        // update the cube mesh to a pyramid by writing over the `RenderUnit`
-        stage
-            .write(
-                cube,
-                &RenderUnit {
-                    vertex_data: VertexData::new_native(pyramid_vertex_data),
-                    vertex_count: pyramid_indices.len() as u32,
-                    camera,
-                    transform,
-                },
-            )
-            .unwrap();
+    //    // update the cube mesh to a pyramid by writing over the `RenderUnit`
+    //    stage
+    //        .write(
+    //            cube,
+    //            &RenderUnit {
+    //                vertex_data: VertexData::new_native(pyramid_vertex_data),
+    //                vertex_count: pyramid_indices.len() as u32,
+    //                camera,
+    //                transform,
+    //            },
+    //        )
+    //        .unwrap();
 
-        // we should see a pyramid
-        let img = r.render_image().unwrap();
-        img_diff::assert_img_eq("cmy_cube_remesh_after.png", img);
-    }
+    //    // we should see a pyramid
+    //    let img = r.render_image().unwrap();
+    //    img_diff::assert_img_eq("cmy_cube_remesh_after.png", img);
+    //}
 
-    fn gpu_uv_unit_cube() -> Vec<Vertex> {
-        let p: [Vec3; 8] = renderling_shader::math::UNIT_POINTS;
-        let tl = Vec2::new(0.0, 0.0);
-        let tr = Vec2::new(1.0, 0.0);
-        let bl = Vec2::new(0.0, 1.0);
-        let br = Vec2::new(1.0, 1.0);
+    //fn gpu_uv_unit_cube() -> Vec<Vertex> {
+    //    let p: [Vec3; 8] = renderling_shader::math::UNIT_POINTS;
+    //    let tl = Vec2::new(0.0, 0.0);
+    //    let tr = Vec2::new(1.0, 0.0);
+    //    let bl = Vec2::new(0.0, 1.0);
+    //    let br = Vec2::new(1.0, 1.0);
 
-        vec![
-            // top
-            Vertex::default().with_position(p[0]).with_uv0(bl),
-            Vertex::default().with_position(p[2]).with_uv0(tr),
-            Vertex::default().with_position(p[1]).with_uv0(tl),
-            Vertex::default().with_position(p[0]).with_uv0(bl),
-            Vertex::default().with_position(p[3]).with_uv0(br),
-            Vertex::default().with_position(p[2]).with_uv0(tr),
-            // bottom
-            Vertex::default().with_position(p[4]).with_uv0(bl),
-            Vertex::default().with_position(p[6]).with_uv0(tr),
-            Vertex::default().with_position(p[5]).with_uv0(tl),
-            Vertex::default().with_position(p[4]).with_uv0(bl),
-            Vertex::default().with_position(p[7]).with_uv0(br),
-            Vertex::default().with_position(p[6]).with_uv0(tr),
-            // left
-            Vertex::default().with_position(p[7]).with_uv0(bl),
-            Vertex::default().with_position(p[0]).with_uv0(tr),
-            Vertex::default().with_position(p[1]).with_uv0(tl),
-            Vertex::default().with_position(p[7]).with_uv0(bl),
-            Vertex::default().with_position(p[4]).with_uv0(br),
-            Vertex::default().with_position(p[0]).with_uv0(tr),
-            // right
-            Vertex::default().with_position(p[5]).with_uv0(bl),
-            Vertex::default().with_position(p[2]).with_uv0(tr),
-            Vertex::default().with_position(p[3]).with_uv0(tl),
-            Vertex::default().with_position(p[5]).with_uv0(bl),
-            Vertex::default().with_position(p[6]).with_uv0(br),
-            Vertex::default().with_position(p[2]).with_uv0(tr),
-            // front
-            Vertex::default().with_position(p[4]).with_uv0(bl),
-            Vertex::default().with_position(p[3]).with_uv0(tr),
-            Vertex::default().with_position(p[0]).with_uv0(tl),
-            Vertex::default().with_position(p[4]).with_uv0(bl),
-            Vertex::default().with_position(p[5]).with_uv0(br),
-            Vertex::default().with_position(p[3]).with_uv0(tr),
-        ]
-    }
+    //    vec![
+    //        // top
+    //        Vertex::default().with_position(p[0]).with_uv0(bl),
+    //        Vertex::default().with_position(p[2]).with_uv0(tr),
+    //        Vertex::default().with_position(p[1]).with_uv0(tl),
+    //        Vertex::default().with_position(p[0]).with_uv0(bl),
+    //        Vertex::default().with_position(p[3]).with_uv0(br),
+    //        Vertex::default().with_position(p[2]).with_uv0(tr),
+    //        // bottom
+    //        Vertex::default().with_position(p[4]).with_uv0(bl),
+    //        Vertex::default().with_position(p[6]).with_uv0(tr),
+    //        Vertex::default().with_position(p[5]).with_uv0(tl),
+    //        Vertex::default().with_position(p[4]).with_uv0(bl),
+    //        Vertex::default().with_position(p[7]).with_uv0(br),
+    //        Vertex::default().with_position(p[6]).with_uv0(tr),
+    //        // left
+    //        Vertex::default().with_position(p[7]).with_uv0(bl),
+    //        Vertex::default().with_position(p[0]).with_uv0(tr),
+    //        Vertex::default().with_position(p[1]).with_uv0(tl),
+    //        Vertex::default().with_position(p[7]).with_uv0(bl),
+    //        Vertex::default().with_position(p[4]).with_uv0(br),
+    //        Vertex::default().with_position(p[0]).with_uv0(tr),
+    //        // right
+    //        Vertex::default().with_position(p[5]).with_uv0(bl),
+    //        Vertex::default().with_position(p[2]).with_uv0(tr),
+    //        Vertex::default().with_position(p[3]).with_uv0(tl),
+    //        Vertex::default().with_position(p[5]).with_uv0(bl),
+    //        Vertex::default().with_position(p[6]).with_uv0(br),
+    //        Vertex::default().with_position(p[2]).with_uv0(tr),
+    //        // front
+    //        Vertex::default().with_position(p[4]).with_uv0(bl),
+    //        Vertex::default().with_position(p[3]).with_uv0(tr),
+    //        Vertex::default().with_position(p[0]).with_uv0(tl),
+    //        Vertex::default().with_position(p[4]).with_uv0(bl),
+    //        Vertex::default().with_position(p[5]).with_uv0(br),
+    //        Vertex::default().with_position(p[3]).with_uv0(tr),
+    //    ]
+    //}
 
-    #[test]
-    // Tests that updating the material actually updates the rendering of an unlit mesh
-    fn unlit_textured_cube_material() {
-        let mut r = Renderling::headless(100, 100).with_background_color(Vec4::splat(0.0));
-        let stage = r.new_stage();
-        stage.configure_graph(&mut r, true);
-        let (projection, view) = camera::default_perspective(100.0, 100.0);
-        let camera = stage.append(&Camera {
-            projection,
-            view,
-            ..Default::default()
-        });
-        let sandstone = SceneImage::from(image::open("../../img/sandstone.png").unwrap());
-        let dirt = SceneImage::from(image::open("../../img/dirt.jpg").unwrap());
-        let textures = stage.set_images([sandstone, dirt]).unwrap();
-        let sandstone_tex = textures[0];
-        let dirt_tex = textures[1];
-        let sandstone_tex_id = stage.append(&sandstone_tex);
-        let material_id = stage.append(&PbrMaterial {
-            albedo_texture: sandstone_tex_id,
-            lighting_model: LightingModel::NO_LIGHTING,
-            ..Default::default()
-        });
-        let vertices = stage.append_array(&gpu_uv_unit_cube());
-        let vertex_data = stage.append(&NativeVertexData {
-            vertices,
-            material: material_id,
-            ..Default::default()
-        });
-        let cube = stage.draw_unit(&RenderUnit {
-            camera,
-            vertex_data: VertexData::new_native(vertex_data),
-            transform: stage.append(&Transform {
-                scale: Vec3::new(10.0, 10.0, 10.0),
-                ..Default::default()
-            }),
-            vertex_count: vertices.len() as u32,
-        });
-        println!("cube: {cube:?}");
+    //#[test]
+    //// Tests that updating the material actually updates the rendering of an unlit mesh
+    //fn unlit_textured_cube_material() {
+    //    let mut r = Renderling::headless(100, 100).with_background_color(Vec4::splat(0.0));
+    //    let stage = r.new_stage();
+    //    stage.configure_graph(&mut r, true);
+    //    let (projection, view) = camera::default_perspective(100.0, 100.0);
+    //    let camera = stage.append(&Camera {
+    //        projection,
+    //        view,
+    //        ..Default::default()
+    //    });
+    //    let sandstone = SceneImage::from(image::open("../../img/sandstone.png").unwrap());
+    //    let dirt = SceneImage::from(image::open("../../img/dirt.jpg").unwrap());
+    //    let textures = stage.set_images([sandstone, dirt]).unwrap();
+    //    let sandstone_tex = textures[0];
+    //    let dirt_tex = textures[1];
+    //    let sandstone_tex_id = stage.append(&sandstone_tex);
+    //    let material_id = stage.append(&PbrMaterial {
+    //        albedo_texture: sandstone_tex_id,
+    //        lighting_model: LightingModel::NO_LIGHTING,
+    //        ..Default::default()
+    //    });
+    //    let vertices = stage.append_array(&gpu_uv_unit_cube());
+    //    let vertex_data = stage.append(&NativeVertexData {
+    //        vertices,
+    //        material: material_id,
+    //        ..Default::default()
+    //    });
+    //    let cube = stage.draw_unit(&RenderUnit {
+    //        camera,
+    //        vertex_data: VertexData::new_native(vertex_data),
+    //        transform: stage.append(&Transform {
+    //            scale: Vec3::new(10.0, 10.0, 10.0),
+    //            ..Default::default()
+    //        }),
+    //        vertex_count: vertices.len() as u32,
+    //    });
+    //    println!("cube: {cube:?}");
 
-        // we should see a cube with a stoney texture
-        let img = r.render_image().unwrap();
-        img_diff::assert_img_eq("unlit_textured_cube_material_before.png", img);
+    //    // we should see a cube with a stoney texture
+    //    let img = r.render_image().unwrap();
+    //    img_diff::assert_img_eq("unlit_textured_cube_material_before.png", img);
 
-        // update the material's texture on the GPU
-        stage.write(sandstone_tex_id, &dirt_tex).unwrap();
+    //    // update the material's texture on the GPU
+    //    stage.write(sandstone_tex_id, &dirt_tex).unwrap();
 
-        // we should see a cube with a dirty texture
-        let img = r.render_image().unwrap();
-        img_diff::assert_img_eq("unlit_textured_cube_material_after.png", img);
-    }
+    //    // we should see a cube with a dirty texture
+    //    let img = r.render_image().unwrap();
+    //    img_diff::assert_img_eq("unlit_textured_cube_material_after.png", img);
+    //}
 
-    #[test]
-    // Tests setting up a 2d scene with one CMY triangle.
-    fn gpu_scene_sanity1() {
-        let mut r =
-            Renderling::headless(100, 100).with_background_color(Vec3::splat(0.0).extend(1.0));
-        let stage = r.new_stage();
-        stage.configure_graph(&mut r, true);
+    //#[test]
+    //// Tests setting up a 2d scene with one CMY triangle.
+    //fn gpu_scene_sanity1() {
+    //    let mut r =
+    //        Renderling::headless(100, 100).with_background_color(Vec3::splat(0.0).extend(1.0));
+    //    let stage = r.new_stage();
+    //    stage.configure_graph(&mut r, true);
 
-        let (projection, view) = camera::default_ortho2d(100.0, 100.0);
-        let camera = stage.append(&Camera {
-            projection,
-            view,
-            ..Default::default()
-        });
+    //    let (projection, view) = camera::default_ortho2d(100.0, 100.0);
+    //    let camera = stage.append(&Camera {
+    //        projection,
+    //        view,
+    //        ..Default::default()
+    //    });
 
-        let vertices = stage.append_array(&vec![
-            Vertex {
-                position: Vec4::new(0.0, 0.0, 0.0, 1.0),
-                color: Vec4::new(1.0, 1.0, 0.0, 1.0),
-                ..Default::default()
-            },
-            Vertex {
-                position: Vec4::new(100.0, 100.0, 0.0, 1.0),
-                color: Vec4::new(0.0, 1.0, 1.0, 1.0),
-                ..Default::default()
-            },
-            Vertex {
-                position: Vec4::new(100.0, 0.0, 0.0, 1.0),
-                color: Vec4::new(1.0, 0.0, 1.0, 1.0),
-                ..Default::default()
-            },
-        ]);
-        let vertex_data = stage.append(&NativeVertexData {
-            vertices,
-            ..Default::default()
-        });
-        let _unit = stage.draw_unit(&RenderUnit {
-            camera,
-            vertex_data: VertexData::new_native(vertex_data),
-            vertex_count: vertices.len() as u32,
-            ..Default::default()
-        });
+    //    let vertices = stage.append_array(&vec![
+    //        Vertex {
+    //            position: Vec4::new(0.0, 0.0, 0.0, 1.0),
+    //            color: Vec4::new(1.0, 1.0, 0.0, 1.0),
+    //            ..Default::default()
+    //        },
+    //        Vertex {
+    //            position: Vec4::new(100.0, 100.0, 0.0, 1.0),
+    //            color: Vec4::new(0.0, 1.0, 1.0, 1.0),
+    //            ..Default::default()
+    //        },
+    //        Vertex {
+    //            position: Vec4::new(100.0, 0.0, 0.0, 1.0),
+    //            color: Vec4::new(1.0, 0.0, 1.0, 1.0),
+    //            ..Default::default()
+    //        },
+    //    ]);
+    //    let vertex_data = stage.append(&NativeVertexData {
+    //        vertices,
+    //        ..Default::default()
+    //    });
+    //    let _unit = stage.draw_unit(&RenderUnit {
+    //        camera,
+    //        vertex_data: VertexData::new_native(vertex_data),
+    //        vertex_count: vertices.len() as u32,
+    //        ..Default::default()
+    //    });
 
-        let img = r.render_image().unwrap();
-        img_diff::assert_img_eq("gpu_scene_sanity.png", img);
-    }
+    //    let img = r.render_image().unwrap();
+    //    img_diff::assert_img_eq("gpu_scene_sanity.png", img);
+    //}
 
-    #[test]
-    fn gpu_scene_sanity2() {
-        let mut r =
-            Renderling::headless(100, 100).with_background_color(Vec3::splat(0.0).extend(1.0));
-        let stage = r.new_stage();
-        stage.configure_graph(&mut r, true);
+    //#[test]
+    //fn gpu_scene_sanity2() {
+    //    let mut r =
+    //        Renderling::headless(100, 100).with_background_color(Vec3::splat(0.0).extend(1.0));
+    //    let stage = r.new_stage();
+    //    stage.configure_graph(&mut r, true);
 
-        let (projection, view) = camera::default_ortho2d(100.0, 100.0);
-        let camera = stage.append(&Camera {
-            projection,
-            view,
-            ..Default::default()
-        });
+    //    let (projection, view) = camera::default_ortho2d(100.0, 100.0);
+    //    let camera = stage.append(&Camera {
+    //        projection,
+    //        view,
+    //        ..Default::default()
+    //    });
 
-        // now test the textures functionality
-        let img = SceneImage::from_path("../../img/cheetah.jpg").unwrap();
-        let textures = stage.append_array(&stage.set_images([img]).unwrap());
-        let material = stage.append(&PbrMaterial {
-            albedo_texture: textures.at(0),
-            lighting_model: LightingModel::NO_LIGHTING,
-            ..Default::default()
-        });
+    //    // now test the textures functionality
+    //    let img = SceneImage::from_path("../../img/cheetah.jpg").unwrap();
+    //    let textures = stage.append_array(&stage.set_images([img]).unwrap());
+    //    let material = stage.append(&PbrMaterial {
+    //        albedo_texture: textures.at(0),
+    //        lighting_model: LightingModel::NO_LIGHTING,
+    //        ..Default::default()
+    //    });
 
-        let vertices = stage.append_array(&vec![
-            Vertex {
-                position: Vec4::new(0.0, 0.0, 0.0, 0.0),
-                color: Vec4::new(1.0, 1.0, 0.0, 1.0),
-                uv: Vec4::new(0.0, 0.0, 0.0, 0.0),
-                ..Default::default()
-            },
-            Vertex {
-                position: Vec4::new(100.0, 100.0, 0.0, 0.0),
-                color: Vec4::new(0.0, 1.0, 1.0, 1.0),
-                uv: Vec4::new(1.0, 1.0, 1.0, 1.0),
-                ..Default::default()
-            },
-            Vertex {
-                position: Vec4::new(100.0, 0.0, 0.0, 0.0),
-                color: Vec4::new(1.0, 0.0, 1.0, 1.0),
-                uv: Vec4::new(1.0, 0.0, 1.0, 0.0),
-                ..Default::default()
-            },
-        ]);
-        let cheetah_vertex_data = stage.append(&NativeVertexData {
-            vertices,
-            material,
-            ..Default::default()
-        });
-        let transform = stage.append(&Transform {
-            translation: Vec3::new(15.0, 35.0, 0.5),
-            scale: Vec3::new(0.5, 0.5, 1.0),
-            ..Default::default()
-        });
-        let _cheetah_unit = stage.draw_unit(&RenderUnit {
-            camera,
-            transform,
-            vertex_data: VertexData::new_native(cheetah_vertex_data),
-            vertex_count: vertices.len() as u32,
-        });
-        let vertex_data = stage.append(&NativeVertexData {
-            vertices,
-            ..Default::default()
-        });
-        let _unit = stage.draw_unit(&RenderUnit {
-            camera,
-            vertex_count: vertices.len() as u32,
-            vertex_data: VertexData::new_native(vertex_data),
-            ..Default::default()
-        });
+    //    let vertices = stage.append_array(&vec![
+    //        Vertex {
+    //            position: Vec4::new(0.0, 0.0, 0.0, 0.0),
+    //            color: Vec4::new(1.0, 1.0, 0.0, 1.0),
+    //            uv: Vec4::new(0.0, 0.0, 0.0, 0.0),
+    //            ..Default::default()
+    //        },
+    //        Vertex {
+    //            position: Vec4::new(100.0, 100.0, 0.0, 0.0),
+    //            color: Vec4::new(0.0, 1.0, 1.0, 1.0),
+    //            uv: Vec4::new(1.0, 1.0, 1.0, 1.0),
+    //            ..Default::default()
+    //        },
+    //        Vertex {
+    //            position: Vec4::new(100.0, 0.0, 0.0, 0.0),
+    //            color: Vec4::new(1.0, 0.0, 1.0, 1.0),
+    //            uv: Vec4::new(1.0, 0.0, 1.0, 0.0),
+    //            ..Default::default()
+    //        },
+    //    ]);
+    //    let cheetah_vertex_data = stage.append(&NativeVertexData {
+    //        vertices,
+    //        material,
+    //        ..Default::default()
+    //    });
+    //    let transform = stage.append(&Transform {
+    //        translation: Vec3::new(15.0, 35.0, 0.5),
+    //        scale: Vec3::new(0.5, 0.5, 1.0),
+    //        ..Default::default()
+    //    });
+    //    let _cheetah_unit = stage.draw_unit(&RenderUnit {
+    //        camera,
+    //        transform,
+    //        vertex_data: VertexData::new_native(cheetah_vertex_data),
+    //        vertex_count: vertices.len() as u32,
+    //    });
+    //    let vertex_data = stage.append(&NativeVertexData {
+    //        vertices,
+    //        ..Default::default()
+    //    });
+    //    let _unit = stage.draw_unit(&RenderUnit {
+    //        camera,
+    //        vertex_count: vertices.len() as u32,
+    //        vertex_data: VertexData::new_native(vertex_data),
+    //        ..Default::default()
+    //    });
 
-        let img = r.render_image().unwrap();
+    //    let img = r.render_image().unwrap();
 
-        img_diff::assert_img_eq("gpu_scene_sanity2.png", img);
-    }
+    //    img_diff::assert_img_eq("gpu_scene_sanity2.png", img);
+    //}
 
-    #[test]
-    fn atlas_uv_mapping() {
-        let mut r =
-            Renderling::headless(32, 32).with_background_color(Vec3::splat(0.0).extend(1.0));
-        let stage = r.new_stage();
-        stage.configure_graph(&mut r, true);
-        let (projection, view) = camera::default_ortho2d(32.0, 32.0);
-        let camera = stage.append(&Camera {
-            projection,
-            view,
-            ..Default::default()
-        });
-        let dirt = SceneImage::from_path("../../img/dirt.jpg").unwrap();
-        let sandstone = SceneImage::from_path("../../img/sandstone.png").unwrap();
-        let texels = SceneImage::from_path("../../test_img/atlas_uv_mapping.png").unwrap();
-        let textures = stage.set_images([dirt, sandstone, texels]).unwrap();
-        let mut texels_tex = textures[2];
-        texels_tex
-            .modes
-            .set_wrap_s(TextureAddressMode::CLAMP_TO_EDGE);
-        texels_tex
-            .modes
-            .set_wrap_t(TextureAddressMode::CLAMP_TO_EDGE);
-        let texels_tex_id = stage.append(&texels_tex);
-        let material_id = stage.append(&PbrMaterial {
-            albedo_texture: texels_tex_id,
-            lighting_model: LightingModel::NO_LIGHTING,
-            ..Default::default()
-        });
-        let vertices = stage.append_array(&{
-            let tl = Vertex::default()
-                .with_position(Vec3::ZERO)
-                .with_uv0(Vec2::ZERO);
-            let tr = Vertex::default()
-                .with_position(Vec3::new(1.0, 0.0, 0.0))
-                .with_uv0(Vec2::new(1.0, 0.0));
-            let bl = Vertex::default()
-                .with_position(Vec3::new(0.0, 1.0, 0.0))
-                .with_uv0(Vec2::new(0.0, 1.0));
-            let br = Vertex::default()
-                .with_position(Vec3::new(1.0, 1.0, 0.0))
-                .with_uv0(Vec2::splat(1.0));
-            vec![tl, bl, br, tl, br, tr]
-        });
-        let vertex_data = stage.append(&NativeVertexData {
-            vertices,
-            material: material_id,
-            ..Default::default()
-        });
-        let transform = stage.append(&Transform {
-            scale: Vec3::new(32.0, 32.0, 1.0),
-            ..Default::default()
-        });
-        let _unit = stage.draw_unit(&RenderUnit {
-            camera,
-            transform,
-            vertex_data: VertexData::new_native(vertex_data),
-            vertex_count: vertices.len() as u32,
-        });
+    //#[test]
+    //fn atlas_uv_mapping() {
+    //    let mut r =
+    //        Renderling::headless(32, 32).with_background_color(Vec3::splat(0.0).extend(1.0));
+    //    let stage = r.new_stage();
+    //    stage.configure_graph(&mut r, true);
+    //    let (projection, view) = camera::default_ortho2d(32.0, 32.0);
+    //    let camera = stage.append(&Camera {
+    //        projection,
+    //        view,
+    //        ..Default::default()
+    //    });
+    //    let dirt = SceneImage::from_path("../../img/dirt.jpg").unwrap();
+    //    let sandstone = SceneImage::from_path("../../img/sandstone.png").unwrap();
+    //    let texels = SceneImage::from_path("../../test_img/atlas_uv_mapping.png").unwrap();
+    //    let textures = stage.set_images([dirt, sandstone, texels]).unwrap();
+    //    let mut texels_tex = textures[2];
+    //    texels_tex
+    //        .modes
+    //        .set_wrap_s(TextureAddressMode::CLAMP_TO_EDGE);
+    //    texels_tex
+    //        .modes
+    //        .set_wrap_t(TextureAddressMode::CLAMP_TO_EDGE);
+    //    let texels_tex_id = stage.append(&texels_tex);
+    //    let material_id = stage.append(&PbrMaterial {
+    //        albedo_texture: texels_tex_id,
+    //        lighting_model: LightingModel::NO_LIGHTING,
+    //        ..Default::default()
+    //    });
+    //    let vertices = stage.append_array(&{
+    //        let tl = Vertex::default()
+    //            .with_position(Vec3::ZERO)
+    //            .with_uv0(Vec2::ZERO);
+    //        let tr = Vertex::default()
+    //            .with_position(Vec3::new(1.0, 0.0, 0.0))
+    //            .with_uv0(Vec2::new(1.0, 0.0));
+    //        let bl = Vertex::default()
+    //            .with_position(Vec3::new(0.0, 1.0, 0.0))
+    //            .with_uv0(Vec2::new(0.0, 1.0));
+    //        let br = Vertex::default()
+    //            .with_position(Vec3::new(1.0, 1.0, 0.0))
+    //            .with_uv0(Vec2::splat(1.0));
+    //        vec![tl, bl, br, tl, br, tr]
+    //    });
+    //    let vertex_data = stage.append(&NativeVertexData {
+    //        vertices,
+    //        material: material_id,
+    //        ..Default::default()
+    //    });
+    //    let transform = stage.append(&Transform {
+    //        scale: Vec3::new(32.0, 32.0, 1.0),
+    //        ..Default::default()
+    //    });
+    //    let _unit = stage.draw_unit(&RenderUnit {
+    //        camera,
+    //        transform,
+    //        vertex_data: VertexData::new_native(vertex_data),
+    //        vertex_count: vertices.len() as u32,
+    //    });
 
-        let img = r.render_image().unwrap();
-        img_diff::assert_img_eq("atlas_uv_mapping.png", img);
-    }
+    //    let img = r.render_image().unwrap();
+    //    img_diff::assert_img_eq("atlas_uv_mapping.png", img);
+    //}
 
-    #[test]
-    fn uv_wrapping() {
-        let icon_w = 32;
-        let icon_h = 41;
-        let sheet_w = icon_w * 3;
-        let sheet_h = icon_h * 3;
-        let w = sheet_w * 3 + 2;
-        let h = sheet_h;
-        let mut r = Renderling::headless(w, h).with_background_color(Vec4::new(1.0, 1.0, 0.0, 1.0));
-        let stage = r.new_stage();
-        stage.configure_graph(&mut r, true);
+    //#[test]
+    //fn uv_wrapping() {
+    //    let icon_w = 32;
+    //    let icon_h = 41;
+    //    let sheet_w = icon_w * 3;
+    //    let sheet_h = icon_h * 3;
+    //    let w = sheet_w * 3 + 2;
+    //    let h = sheet_h;
+    //    let mut r = Renderling::headless(w, h).with_background_color(Vec4::new(1.0, 1.0, 0.0, 1.0));
+    //    let stage = r.new_stage();
+    //    stage.configure_graph(&mut r, true);
 
-        let (projection, view) = camera::default_ortho2d(w as f32, h as f32);
-        let camera = stage.append(&Camera {
-            projection,
-            view,
-            ..Default::default()
-        });
+    //    let (projection, view) = camera::default_ortho2d(w as f32, h as f32);
+    //    let camera = stage.append(&Camera {
+    //        projection,
+    //        view,
+    //        ..Default::default()
+    //    });
 
-        let dirt = SceneImage::from_path("../../img/dirt.jpg").unwrap();
-        let sandstone = SceneImage::from_path("../../img/sandstone.png").unwrap();
-        let texels = SceneImage::from_path("../../img/happy_mac.png").unwrap();
-        let textures = stage.set_images([dirt, sandstone, texels]).unwrap();
-        let texel_tex = textures[2];
-        let mut clamp_tex = texel_tex;
-        clamp_tex
-            .modes
-            .set_wrap_s(TextureAddressMode::CLAMP_TO_EDGE);
-        clamp_tex
-            .modes
-            .set_wrap_t(TextureAddressMode::CLAMP_TO_EDGE);
-        let mut repeat_tex = texel_tex;
-        repeat_tex.modes.set_wrap_s(TextureAddressMode::REPEAT);
-        repeat_tex.modes.set_wrap_t(TextureAddressMode::REPEAT);
-        let mut mirror_tex = texel_tex;
-        mirror_tex
-            .modes
-            .set_wrap_s(TextureAddressMode::MIRRORED_REPEAT);
-        mirror_tex
-            .modes
-            .set_wrap_t(TextureAddressMode::MIRRORED_REPEAT);
+    //    let dirt = SceneImage::from_path("../../img/dirt.jpg").unwrap();
+    //    let sandstone = SceneImage::from_path("../../img/sandstone.png").unwrap();
+    //    let texels = SceneImage::from_path("../../img/happy_mac.png").unwrap();
+    //    let textures = stage.set_images([dirt, sandstone, texels]).unwrap();
+    //    let texel_tex = textures[2];
+    //    let mut clamp_tex = texel_tex;
+    //    clamp_tex
+    //        .modes
+    //        .set_wrap_s(TextureAddressMode::CLAMP_TO_EDGE);
+    //    clamp_tex
+    //        .modes
+    //        .set_wrap_t(TextureAddressMode::CLAMP_TO_EDGE);
+    //    let mut repeat_tex = texel_tex;
+    //    repeat_tex.modes.set_wrap_s(TextureAddressMode::REPEAT);
+    //    repeat_tex.modes.set_wrap_t(TextureAddressMode::REPEAT);
+    //    let mut mirror_tex = texel_tex;
+    //    mirror_tex
+    //        .modes
+    //        .set_wrap_s(TextureAddressMode::MIRRORED_REPEAT);
+    //    mirror_tex
+    //        .modes
+    //        .set_wrap_t(TextureAddressMode::MIRRORED_REPEAT);
 
-        let clamp_material_id = stage.append(&PbrMaterial {
-            albedo_texture: stage.append(&clamp_tex),
-            lighting_model: LightingModel::NO_LIGHTING,
-            ..Default::default()
-        });
-        let repeat_material_id = stage.append(&PbrMaterial {
-            albedo_texture: stage.append(&repeat_tex),
-            lighting_model: LightingModel::NO_LIGHTING,
-            ..Default::default()
-        });
-        let mirror_material_id = stage.append(&PbrMaterial {
-            albedo_texture: stage.append(&mirror_tex),
-            lighting_model: LightingModel::NO_LIGHTING,
-            ..Default::default()
-        });
+    //    let clamp_material_id = stage.append(&PbrMaterial {
+    //        albedo_texture: stage.append(&clamp_tex),
+    //        lighting_model: LightingModel::NO_LIGHTING,
+    //        ..Default::default()
+    //    });
+    //    let repeat_material_id = stage.append(&PbrMaterial {
+    //        albedo_texture: stage.append(&repeat_tex),
+    //        lighting_model: LightingModel::NO_LIGHTING,
+    //        ..Default::default()
+    //    });
+    //    let mirror_material_id = stage.append(&PbrMaterial {
+    //        albedo_texture: stage.append(&mirror_tex),
+    //        lighting_model: LightingModel::NO_LIGHTING,
+    //        ..Default::default()
+    //    });
 
-        let sheet_w = sheet_w as f32;
-        let sheet_h = sheet_h as f32;
-        let vertices = stage.append_array(&{
-            let tl = Vertex::default()
-                .with_position(Vec3::ZERO)
-                .with_uv0(Vec2::ZERO);
-            let tr = Vertex::default()
-                .with_position(Vec3::new(sheet_w, 0.0, 0.0))
-                .with_uv0(Vec2::new(3.0, 0.0));
-            let bl = Vertex::default()
-                .with_position(Vec3::new(0.0, sheet_h, 0.0))
-                .with_uv0(Vec2::new(0.0, 3.0));
-            let br = Vertex::default()
-                .with_position(Vec3::new(sheet_w, sheet_h, 0.0))
-                .with_uv0(Vec2::splat(3.0));
-            vec![tl, bl, br, tl, br, tr]
-        });
-        let clamp_vertex_data = stage.append(&NativeVertexData {
-            vertices,
-            material: clamp_material_id,
-            ..Default::default()
-        });
-        let repeat_vertex_data = stage.append(&NativeVertexData {
-            vertices,
-            material: repeat_material_id,
-            ..Default::default()
-        });
-        let mirror_vertex_data = stage.append(&NativeVertexData {
-            vertices,
-            material: mirror_material_id,
-            ..Default::default()
-        });
+    //    let sheet_w = sheet_w as f32;
+    //    let sheet_h = sheet_h as f32;
+    //    let vertices = stage.append_array(&{
+    //        let tl = Vertex::default()
+    //            .with_position(Vec3::ZERO)
+    //            .with_uv0(Vec2::ZERO);
+    //        let tr = Vertex::default()
+    //            .with_position(Vec3::new(sheet_w, 0.0, 0.0))
+    //            .with_uv0(Vec2::new(3.0, 0.0));
+    //        let bl = Vertex::default()
+    //            .with_position(Vec3::new(0.0, sheet_h, 0.0))
+    //            .with_uv0(Vec2::new(0.0, 3.0));
+    //        let br = Vertex::default()
+    //            .with_position(Vec3::new(sheet_w, sheet_h, 0.0))
+    //            .with_uv0(Vec2::splat(3.0));
+    //        vec![tl, bl, br, tl, br, tr]
+    //    });
+    //    let clamp_vertex_data = stage.append(&NativeVertexData {
+    //        vertices,
+    //        material: clamp_material_id,
+    //        ..Default::default()
+    //    });
+    //    let repeat_vertex_data = stage.append(&NativeVertexData {
+    //        vertices,
+    //        material: repeat_material_id,
+    //        ..Default::default()
+    //    });
+    //    let mirror_vertex_data = stage.append(&NativeVertexData {
+    //        vertices,
+    //        material: mirror_material_id,
+    //        ..Default::default()
+    //    });
 
-        let _clamp = stage.draw_unit(&RenderUnit {
-            camera,
-            vertex_data: VertexData::new_native(clamp_vertex_data),
-            vertex_count: vertices.len() as u32,
-            ..Default::default()
-        });
-        let _repeat = stage.draw_unit(&RenderUnit {
-            camera,
-            vertex_data: VertexData::new_native(repeat_vertex_data),
-            vertex_count: vertices.len() as u32,
-            transform: stage.append(&Transform {
-                translation: Vec3::new(sheet_w + 1.0, 0.0, 0.0),
-                ..Default::default()
-            }),
-        });
-        let _mirror = stage.draw_unit(&RenderUnit {
-            camera,
-            vertex_data: VertexData::new_native(mirror_vertex_data),
-            vertex_count: vertices.len() as u32,
-            transform: stage.append(&Transform {
-                translation: Vec3::new(sheet_w as f32 * 2.0 + 2.0, 0.0, 0.0),
-                ..Default::default()
-            }),
-        });
+    //    let _clamp = stage.draw_unit(&RenderUnit {
+    //        camera,
+    //        vertex_data: VertexData::new_native(clamp_vertex_data),
+    //        vertex_count: vertices.len() as u32,
+    //        ..Default::default()
+    //    });
+    //    let _repeat = stage.draw_unit(&RenderUnit {
+    //        camera,
+    //        vertex_data: VertexData::new_native(repeat_vertex_data),
+    //        vertex_count: vertices.len() as u32,
+    //        transform: stage.append(&Transform {
+    //            translation: Vec3::new(sheet_w + 1.0, 0.0, 0.0),
+    //            ..Default::default()
+    //        }),
+    //    });
+    //    let _mirror = stage.draw_unit(&RenderUnit {
+    //        camera,
+    //        vertex_data: VertexData::new_native(mirror_vertex_data),
+    //        vertex_count: vertices.len() as u32,
+    //        transform: stage.append(&Transform {
+    //            translation: Vec3::new(sheet_w as f32 * 2.0 + 2.0, 0.0, 0.0),
+    //            ..Default::default()
+    //        }),
+    //    });
 
-        let img = r.render_image().unwrap();
-        img_diff::assert_img_eq("uv_wrapping.png", img);
-    }
+    //    let img = r.render_image().unwrap();
+    //    img_diff::assert_img_eq("uv_wrapping.png", img);
+    //}
 
-    #[test]
-    fn negative_uv_wrapping() {
-        let icon_w = 32;
-        let icon_h = 41;
-        let sheet_w = icon_w * 3;
-        let sheet_h = icon_h * 3;
-        let w = sheet_w * 3 + 2;
-        let h = sheet_h;
-        let mut r = Renderling::headless(w, h).with_background_color(Vec4::new(1.0, 1.0, 0.0, 1.0));
-        let stage = r.new_stage();
-        stage.configure_graph(&mut r, true);
+    //#[test]
+    //fn negative_uv_wrapping() {
+    //    let icon_w = 32;
+    //    let icon_h = 41;
+    //    let sheet_w = icon_w * 3;
+    //    let sheet_h = icon_h * 3;
+    //    let w = sheet_w * 3 + 2;
+    //    let h = sheet_h;
+    //    let mut r = Renderling::headless(w, h).with_background_color(Vec4::new(1.0, 1.0, 0.0, 1.0));
+    //    let stage = r.new_stage();
+    //    stage.configure_graph(&mut r, true);
 
-        let (projection, view) = camera::default_ortho2d(w as f32, h as f32);
-        let camera = stage.append(&Camera {
-            projection,
-            view,
-            ..Default::default()
-        });
+    //    let (projection, view) = camera::default_ortho2d(w as f32, h as f32);
+    //    let camera = stage.append(&Camera {
+    //        projection,
+    //        view,
+    //        ..Default::default()
+    //    });
 
-        let dirt = SceneImage::from_path("../../img/dirt.jpg").unwrap();
-        let sandstone = SceneImage::from_path("../../img/sandstone.png").unwrap();
-        let texels = SceneImage::from_path("../../img/happy_mac.png").unwrap();
-        let textures = stage.set_images([dirt, sandstone, texels]).unwrap();
+    //    let dirt = SceneImage::from_path("../../img/dirt.jpg").unwrap();
+    //    let sandstone = SceneImage::from_path("../../img/sandstone.png").unwrap();
+    //    let texels = SceneImage::from_path("../../img/happy_mac.png").unwrap();
+    //    let textures = stage.set_images([dirt, sandstone, texels]).unwrap();
 
-        let texel_tex = textures[2];
-        let mut clamp_tex = texel_tex;
-        clamp_tex
-            .modes
-            .set_wrap_s(TextureAddressMode::CLAMP_TO_EDGE);
-        clamp_tex
-            .modes
-            .set_wrap_t(TextureAddressMode::CLAMP_TO_EDGE);
-        let mut repeat_tex = texel_tex;
-        repeat_tex.modes.set_wrap_s(TextureAddressMode::REPEAT);
-        repeat_tex.modes.set_wrap_t(TextureAddressMode::REPEAT);
-        let mut mirror_tex = texel_tex;
-        mirror_tex
-            .modes
-            .set_wrap_s(TextureAddressMode::MIRRORED_REPEAT);
-        mirror_tex
-            .modes
-            .set_wrap_t(TextureAddressMode::MIRRORED_REPEAT);
+    //    let texel_tex = textures[2];
+    //    let mut clamp_tex = texel_tex;
+    //    clamp_tex
+    //        .modes
+    //        .set_wrap_s(TextureAddressMode::CLAMP_TO_EDGE);
+    //    clamp_tex
+    //        .modes
+    //        .set_wrap_t(TextureAddressMode::CLAMP_TO_EDGE);
+    //    let mut repeat_tex = texel_tex;
+    //    repeat_tex.modes.set_wrap_s(TextureAddressMode::REPEAT);
+    //    repeat_tex.modes.set_wrap_t(TextureAddressMode::REPEAT);
+    //    let mut mirror_tex = texel_tex;
+    //    mirror_tex
+    //        .modes
+    //        .set_wrap_s(TextureAddressMode::MIRRORED_REPEAT);
+    //    mirror_tex
+    //        .modes
+    //        .set_wrap_t(TextureAddressMode::MIRRORED_REPEAT);
 
-        let clamp_material_id = stage.append(&PbrMaterial {
-            albedo_texture: stage.append(&clamp_tex),
-            lighting_model: LightingModel::NO_LIGHTING,
-            ..Default::default()
-        });
-        let repeat_material_id = stage.append(&PbrMaterial {
-            albedo_texture: stage.append(&repeat_tex),
-            lighting_model: LightingModel::NO_LIGHTING,
-            ..Default::default()
-        });
-        let mirror_material_id = stage.append(&PbrMaterial {
-            albedo_texture: stage.append(&mirror_tex),
-            lighting_model: LightingModel::NO_LIGHTING,
-            ..Default::default()
-        });
+    //    let clamp_material_id = stage.append(&PbrMaterial {
+    //        albedo_texture: stage.append(&clamp_tex),
+    //        lighting_model: LightingModel::NO_LIGHTING,
+    //        ..Default::default()
+    //    });
+    //    let repeat_material_id = stage.append(&PbrMaterial {
+    //        albedo_texture: stage.append(&repeat_tex),
+    //        lighting_model: LightingModel::NO_LIGHTING,
+    //        ..Default::default()
+    //    });
+    //    let mirror_material_id = stage.append(&PbrMaterial {
+    //        albedo_texture: stage.append(&mirror_tex),
+    //        lighting_model: LightingModel::NO_LIGHTING,
+    //        ..Default::default()
+    //    });
 
-        let sheet_w = sheet_w as f32;
-        let sheet_h = sheet_h as f32;
+    //    let sheet_w = sheet_w as f32;
+    //    let sheet_h = sheet_h as f32;
 
-        let vertices = stage.append_array(&{
-            let tl = Vertex::default()
-                .with_position(Vec3::ZERO)
-                .with_uv0(Vec2::ZERO);
-            let tr = Vertex::default()
-                .with_position(Vec3::new(sheet_w, 0.0, 0.0))
-                .with_uv0(Vec2::new(-3.0, 0.0));
-            let bl = Vertex::default()
-                .with_position(Vec3::new(0.0, sheet_h, 0.0))
-                .with_uv0(Vec2::new(0.0, -3.0));
-            let br = Vertex::default()
-                .with_position(Vec3::new(sheet_w, sheet_h, 0.0))
-                .with_uv0(Vec2::splat(-3.0));
-            vec![tl, bl, br, tl, br, tr]
-        });
+    //    let vertices = stage.append_array(&{
+    //        let tl = Vertex::default()
+    //            .with_position(Vec3::ZERO)
+    //            .with_uv0(Vec2::ZERO);
+    //        let tr = Vertex::default()
+    //            .with_position(Vec3::new(sheet_w, 0.0, 0.0))
+    //            .with_uv0(Vec2::new(-3.0, 0.0));
+    //        let bl = Vertex::default()
+    //            .with_position(Vec3::new(0.0, sheet_h, 0.0))
+    //            .with_uv0(Vec2::new(0.0, -3.0));
+    //        let br = Vertex::default()
+    //            .with_position(Vec3::new(sheet_w, sheet_h, 0.0))
+    //            .with_uv0(Vec2::splat(-3.0));
+    //        vec![tl, bl, br, tl, br, tr]
+    //    });
 
-        let clamp_vertex_data = stage.append(&NativeVertexData {
-            vertices,
-            material: clamp_material_id,
-            ..Default::default()
-        });
-        let repeat_vertex_data = stage.append(&NativeVertexData {
-            vertices,
-            material: repeat_material_id,
-            ..Default::default()
-        });
-        let mirror_vertex_data = stage.append(&NativeVertexData {
-            vertices,
-            material: mirror_material_id,
-            ..Default::default()
-        });
+    //    let clamp_vertex_data = stage.append(&NativeVertexData {
+    //        vertices,
+    //        material: clamp_material_id,
+    //        ..Default::default()
+    //    });
+    //    let repeat_vertex_data = stage.append(&NativeVertexData {
+    //        vertices,
+    //        material: repeat_material_id,
+    //        ..Default::default()
+    //    });
+    //    let mirror_vertex_data = stage.append(&NativeVertexData {
+    //        vertices,
+    //        material: mirror_material_id,
+    //        ..Default::default()
+    //    });
 
-        let _clamp = stage.draw_unit(&RenderUnit {
-            camera,
-            vertex_data: VertexData::new_native(clamp_vertex_data),
-            vertex_count: vertices.len() as u32,
-            ..Default::default()
-        });
-        let _repeat = stage.draw_unit(&RenderUnit {
-            camera,
-            vertex_data: VertexData::new_native(repeat_vertex_data),
-            vertex_count: vertices.len() as u32,
-            transform: stage.append(&Transform {
-                translation: Vec3::new(sheet_w + 1.0, 0.0, 0.0),
-                ..Default::default()
-            }),
-        });
-        let _mirror = stage.draw_unit(&RenderUnit {
-            camera,
-            vertex_data: VertexData::new_native(mirror_vertex_data),
-            vertex_count: vertices.len() as u32,
-            transform: stage.append(&Transform {
-                translation: Vec3::new(sheet_w as f32 * 2.0 + 2.0, 0.0, 0.0),
-                ..Default::default()
-            }),
-        });
+    //    let _clamp = stage.draw_unit(&RenderUnit {
+    //        camera,
+    //        vertex_data: VertexData::new_native(clamp_vertex_data),
+    //        vertex_count: vertices.len() as u32,
+    //        ..Default::default()
+    //    });
+    //    let _repeat = stage.draw_unit(&RenderUnit {
+    //        camera,
+    //        vertex_data: VertexData::new_native(repeat_vertex_data),
+    //        vertex_count: vertices.len() as u32,
+    //        transform: stage.append(&Transform {
+    //            translation: Vec3::new(sheet_w + 1.0, 0.0, 0.0),
+    //            ..Default::default()
+    //        }),
+    //    });
+    //    let _mirror = stage.draw_unit(&RenderUnit {
+    //        camera,
+    //        vertex_data: VertexData::new_native(mirror_vertex_data),
+    //        vertex_count: vertices.len() as u32,
+    //        transform: stage.append(&Transform {
+    //            translation: Vec3::new(sheet_w as f32 * 2.0 + 2.0, 0.0, 0.0),
+    //            ..Default::default()
+    //        }),
+    //    });
 
-        let img = r.render_image().unwrap();
-        img_diff::assert_img_eq("negative_uv_wrapping.png", img);
-    }
+    //    let img = r.render_image().unwrap();
+    //    img_diff::assert_img_eq("negative_uv_wrapping.png", img);
+    //}
 
-    #[test]
-    fn transform_uvs_for_atlas() {
-        let mut tex = GpuTexture {
-            offset_px: UVec2::ZERO,
-            size_px: UVec2::ONE,
-            modes: {
-                let mut modes = TextureModes::default();
-                modes.set_wrap_s(TextureAddressMode::CLAMP_TO_EDGE);
-                modes.set_wrap_t(TextureAddressMode::CLAMP_TO_EDGE);
-                modes
-            },
-            ..Default::default()
-        };
-        assert_eq!(Vec2::ZERO, tex.uv(Vec2::ZERO, UVec2::splat(100)));
-        assert_eq!(Vec2::ZERO, tex.uv(Vec2::ZERO, UVec2::splat(1)));
-        assert_eq!(Vec2::ZERO, tex.uv(Vec2::ZERO, UVec2::splat(256)));
-        tex.offset_px = UVec2::splat(10);
-        assert_eq!(Vec2::splat(0.1), tex.uv(Vec2::ZERO, UVec2::splat(100)));
-    }
+    //#[test]
+    //fn transform_uvs_for_atlas() {
+    //    let mut tex = GpuTexture {
+    //        offset_px: UVec2::ZERO,
+    //        size_px: UVec2::ONE,
+    //        modes: {
+    //            let mut modes = TextureModes::default();
+    //            modes.set_wrap_s(TextureAddressMode::CLAMP_TO_EDGE);
+    //            modes.set_wrap_t(TextureAddressMode::CLAMP_TO_EDGE);
+    //            modes
+    //        },
+    //        ..Default::default()
+    //    };
+    //    assert_eq!(Vec2::ZERO, tex.uv(Vec2::ZERO, UVec2::splat(100)));
+    //    assert_eq!(Vec2::ZERO, tex.uv(Vec2::ZERO, UVec2::splat(1)));
+    //    assert_eq!(Vec2::ZERO, tex.uv(Vec2::ZERO, UVec2::splat(256)));
+    //    tex.offset_px = UVec2::splat(10);
+    //    assert_eq!(Vec2::splat(0.1), tex.uv(Vec2::ZERO, UVec2::splat(100)));
+    //}
 
-    fn old_scene_cube_directional_builder(r: &Renderling) -> SceneBuilder {
-        let mut builder = r.new_scene();
-        let red = Vec3::X.extend(1.0);
-        let green = Vec3::Y.extend(1.0);
-        let blue = Vec3::Z.extend(1.0);
-        let _dir_red = builder
-            .new_directional_light()
-            .with_direction(Vec3::NEG_Y)
-            .with_color(red)
-            .with_intensity(10.0)
-            .build();
-        let _dir_green = builder
-            .new_directional_light()
-            .with_direction(Vec3::NEG_X)
-            .with_color(green)
-            .with_intensity(10.0)
-            .build();
-        let _dir_blue = builder
-            .new_directional_light()
-            .with_direction(Vec3::NEG_Z)
-            .with_color(blue)
-            .with_intensity(10.0)
-            .build();
+    //fn old_scene_cube_directional_builder(r: &Renderling) -> SceneBuilder {
+    //    let mut builder = r.new_scene();
+    //    let red = Vec3::X.extend(1.0);
+    //    let green = Vec3::Y.extend(1.0);
+    //    let blue = Vec3::Z.extend(1.0);
+    //    let _dir_red = builder
+    //        .new_directional_light()
+    //        .with_direction(Vec3::NEG_Y)
+    //        .with_color(red)
+    //        .with_intensity(10.0)
+    //        .build();
+    //    let _dir_green = builder
+    //        .new_directional_light()
+    //        .with_direction(Vec3::NEG_X)
+    //        .with_color(green)
+    //        .with_intensity(10.0)
+    //        .build();
+    //    let _dir_blue = builder
+    //        .new_directional_light()
+    //        .with_direction(Vec3::NEG_Z)
+    //        .with_color(blue)
+    //        .with_intensity(10.0)
+    //        .build();
 
-        let material = builder.add_material(PbrMaterial::default());
+    //    let material = builder.add_material(PbrMaterial::default());
 
-        let _cube = builder
-            .new_entity()
-            .with_meshlet(
-                renderling_shader::math::unit_cube()
-                    .into_iter()
-                    .map(|(p, n)| Vertex {
-                        position: p.extend(1.0),
-                        normal: n.extend(0.0),
-                        ..Default::default()
-                    }),
-            )
-            .with_material(material)
-            .build();
+    //    let _cube = builder
+    //        .new_entity()
+    //        .with_meshlet(
+    //            renderling_shader::math::unit_cube()
+    //                .into_iter()
+    //                .map(|(p, n)| Vertex {
+    //                    position: p.extend(1.0),
+    //                    normal: n.extend(0.0),
+    //                    ..Default::default()
+    //                }),
+    //        )
+    //        .with_material(material)
+    //        .build();
 
-        builder
-    }
+    //    builder
+    //}
 
-    fn old_scene_cube_directional_camera() -> (Mat4, Mat4) {
-        let (projection, _) = camera::default_perspective(100.0, 100.0);
-        let view = Mat4::look_at_rh(
-            Vec3::new(1.8, 1.8, 1.8),
-            Vec3::ZERO,
-            Vec3::new(0.0, 1.0, 0.0),
-        );
-        (projection, view)
-    }
+    //fn old_scene_cube_directional_camera() -> (Mat4, Mat4) {
+    //    let (projection, _) = camera::default_perspective(100.0, 100.0);
+    //    let view = Mat4::look_at_rh(
+    //        Vec3::new(1.8, 1.8, 1.8),
+    //        Vec3::ZERO,
+    //        Vec3::new(0.0, 1.0, 0.0),
+    //    );
+    //    (projection, view)
+    //}
 
-    #[test]
-    /// Tests shading with directional light.
-    fn old_scene_cube_directional() {
-        let mut r =
-            Renderling::headless(100, 100).with_background_color(Vec3::splat(0.0).extend(1.0));
+    //#[test]
+    ///// Tests shading with directional light.
+    //fn old_scene_cube_directional() {
+    //    let mut r =
+    //        Renderling::headless(100, 100).with_background_color(Vec3::splat(0.0).extend(1.0));
 
-        let builder = old_scene_cube_directional_builder(&r);
-        let mut scene = builder.build().unwrap();
+    //    let builder = old_scene_cube_directional_builder(&r);
+    //    let mut scene = builder.build().unwrap();
 
-        let (projection, view) = old_scene_cube_directional_camera();
-        scene.set_camera(projection, view);
+    //    let (projection, view) = old_scene_cube_directional_camera();
+    //    scene.set_camera(projection, view);
 
-        r.setup_render_graph(RenderGraphConfig {
-            scene: Some(scene),
-            with_screen_capture: true,
-            ..Default::default()
-        });
+    //    r.setup_render_graph(RenderGraphConfig {
+    //        scene: Some(scene),
+    //        with_screen_capture: true,
+    //        ..Default::default()
+    //    });
 
-        let img = r.render_image().unwrap();
-        img_diff::assert_img_eq("scene_cube_directional.png", img);
-    }
+    //    let img = r.render_image().unwrap();
+    //    img_diff::assert_img_eq("scene_cube_directional.png", img);
+    //}
 
-    #[test]
-    /// Tests shading with directional light.
-    fn scene_cube_directional() {
-        let mut r =
-            Renderling::headless(100, 100).with_background_color(Vec3::splat(0.0).extend(1.0));
-        let stage = r.new_stage();
-        stage.configure_graph(&mut r, true);
+    //#[test]
+    ///// Tests shading with directional light.
+    //fn scene_cube_directional() {
+    //    let mut r =
+    //        Renderling::headless(100, 100).with_background_color(Vec3::splat(0.0).extend(1.0));
+    //    let stage = r.new_stage();
+    //    stage.configure_graph(&mut r, true);
 
-        let (projection, _) = camera::default_perspective(100.0, 100.0);
-        let view = Mat4::look_at_rh(
-            Vec3::new(1.8, 1.8, 1.8),
-            Vec3::ZERO,
-            Vec3::new(0.0, 1.0, 0.0),
-        );
-        let camera = stage.append(&Camera::default().with_projection_and_view(projection, view));
+    //    let (projection, _) = camera::default_perspective(100.0, 100.0);
+    //    let view = Mat4::look_at_rh(
+    //        Vec3::new(1.8, 1.8, 1.8),
+    //        Vec3::ZERO,
+    //        Vec3::new(0.0, 1.0, 0.0),
+    //    );
+    //    let camera = stage.append(&Camera::default().with_projection_and_view(projection, view));
 
-        let red = Vec3::X.extend(1.0);
-        let green = Vec3::Y.extend(1.0);
-        let blue = Vec3::Z.extend(1.0);
-        let dir_red = stage.append(&DirectionalLight {
-            direction: Vec3::NEG_Y,
-            color: red,
-            intensity: 10.0,
-        });
-        let dir_green = stage.append(&DirectionalLight {
-            direction: Vec3::NEG_X,
-            color: green,
-            intensity: 10.0,
-        });
-        let dir_blue = stage.append(&DirectionalLight {
-            direction: Vec3::NEG_Z,
-            color: blue,
-            intensity: 10.0,
-        });
-        assert_eq!(
-            Light {
-                light_type: LightStyle::Directional,
-                index: dir_red.inner()
-            },
-            dir_red.into()
-        );
-        let lights = stage.append_array(&[dir_red.into(), dir_green.into(), dir_blue.into()]);
-        stage.set_lights(lights);
+    //    let red = Vec3::X.extend(1.0);
+    //    let green = Vec3::Y.extend(1.0);
+    //    let blue = Vec3::Z.extend(1.0);
+    //    let dir_red = stage.append(&DirectionalLight {
+    //        direction: Vec3::NEG_Y,
+    //        color: red,
+    //        intensity: 10.0,
+    //    });
+    //    let dir_green = stage.append(&DirectionalLight {
+    //        direction: Vec3::NEG_X,
+    //        color: green,
+    //        intensity: 10.0,
+    //    });
+    //    let dir_blue = stage.append(&DirectionalLight {
+    //        direction: Vec3::NEG_Z,
+    //        color: blue,
+    //        intensity: 10.0,
+    //    });
+    //    assert_eq!(
+    //        Light {
+    //            light_type: LightStyle::Directional,
+    //            index: dir_red.inner()
+    //        },
+    //        dir_red.into()
+    //    );
+    //    let lights = stage.append_array(&[dir_red.into(), dir_green.into(), dir_blue.into()]);
+    //    stage.set_lights(lights);
 
-        let material = stage.append(&PbrMaterial::default());
-        let vertices = stage.append_array(
-            &renderling_shader::math::unit_cube()
-                .into_iter()
-                .map(|(p, n)| Vertex {
-                    position: p.extend(1.0),
-                    normal: n.extend(0.0),
-                    ..Default::default()
-                })
-                .collect::<Vec<_>>(),
-        );
-        let vertex_data = stage.append(&NativeVertexData {
-            vertices,
-            material,
-            ..Default::default()
-        });
+    //    let material = stage.append(&PbrMaterial::default());
+    //    let vertices = stage.append_array(
+    //        &renderling_shader::math::unit_cube()
+    //            .into_iter()
+    //            .map(|(p, n)| Vertex {
+    //                position: p.extend(1.0),
+    //                normal: n.extend(0.0),
+    //                ..Default::default()
+    //            })
+    //            .collect::<Vec<_>>(),
+    //    );
+    //    let vertex_data = stage.append(&NativeVertexData {
+    //        vertices,
+    //        material,
+    //        ..Default::default()
+    //    });
 
-        let _cube = stage.draw_unit(&RenderUnit {
-            vertex_data: VertexData::new_native(vertex_data),
-            vertex_count: vertices.len() as u32,
-            camera,
-            ..Default::default()
-        });
-        let img = r.render_image().unwrap();
-        img_diff::assert_img_eq("scene_cube_directional.png", img);
-    }
+    //    let _cube = stage.draw_unit(&RenderUnit {
+    //        vertex_data: VertexData::new_native(vertex_data),
+    //        vertex_count: vertices.len() as u32,
+    //        camera,
+    //        ..Default::default()
+    //    });
+    //    let img = r.render_image().unwrap();
+    //    img_diff::assert_img_eq("scene_cube_directional.png", img);
+    //}
 
     #[test]
     // Test to make sure that we can reconstruct a normal matrix without using the

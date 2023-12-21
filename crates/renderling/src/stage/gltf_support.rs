@@ -1097,18 +1097,24 @@ impl Stage {
             .collect()
     }
 
-    /// Create a mesh primitive on the slab from a list of vertices.
+    /// Convenience method for creating a `GltfPrimitive` along with all its
+    /// `GltfAccessor`s, `GltfBufferView`s and a `GltfBuffer`.
+    ///
+    /// ## Note
+    /// This does **not** generate tangents or normals.
     pub fn new_primitive(
         &self,
-        vertices: &[Vertex],
-        indices: &[u32],
+        vertices: impl IntoIterator<Item = Vertex>,
+        indices: impl IntoIterator<Item = u32>,
         material: Id<PbrMaterial>,
     ) -> GltfPrimitive {
+        let vertices: Vec<Vertex> = vertices.into_iter().collect();
+        let indices: Vec<u32> = indices.into_iter().collect();
         let vertex_count = vertices.len().max(indices.len()) as u32;
         let indices = if indices.is_empty() {
             Id::NONE
         } else {
-            let buffer = GltfBuffer(self.append_array(indices).into_u32_array());
+            let buffer = GltfBuffer(self.append_array(&indices).into_u32_array());
             let buffer = self.append(&buffer);
             let view = self.append(&GltfBufferView {
                 buffer,
@@ -1128,7 +1134,7 @@ impl Stage {
             accessor
         };
 
-        let vertex_buffer = GltfBuffer(self.append_array(vertices).into_u32_array());
+        let vertex_buffer = GltfBuffer(self.append_array(&vertices).into_u32_array());
         let buffer = self.append(&vertex_buffer);
         let u32_stride = 4 // 4 position components,
             + 4 // 4 color components,
@@ -1242,11 +1248,114 @@ impl Stage {
             weights,
         }
     }
+
+    /// Convenience method for creating a [`GltfMesh`] without having a
+    /// [`gltf::Document`].
+    ///
+    /// This is useful if you have non-GLTF assets that you want to render.
+    pub fn new_mesh(&self) -> GltfMeshBuilder {
+        GltfMeshBuilder::new(self)
+    }
+}
+
+/// Convenience builder for creating a [`GltfMesh`] without having a
+/// [`gltf::Document`].
+///
+/// This is useful if you have non-GLTF assets that you want to render.
+pub struct GltfMeshBuilder<'a> {
+    stage: &'a Stage,
+    primitives: Vec<GltfPrimitive>,
+}
+
+impl<'a> GltfMeshBuilder<'a> {
+    pub fn new(stage: &'a Stage) -> Self {
+        Self {
+            stage,
+            primitives: vec![],
+        }
+    }
+
+    pub fn add_primitive(
+        &mut self,
+        vertices: impl IntoIterator<Item = Vertex>,
+        indices: impl IntoIterator<Item = u32>,
+        material_id: Id<PbrMaterial>,
+    ) {
+        let primitive = self.stage.new_primitive(vertices, indices, material_id);
+        self.primitives.push(primitive);
+    }
+
+    pub fn with_primitive(
+        mut self,
+        vertices: impl IntoIterator<Item = Vertex>,
+        indices: impl IntoIterator<Item = u32>,
+        material_id: Id<PbrMaterial>,
+    ) -> Self {
+        self.add_primitive(vertices, indices, material_id);
+        self
+    }
+
+    pub fn build(self) -> GltfMesh {
+        let weights = Array::default();
+        let primitives = self.stage.append_array(&self.primitives);
+        GltfMesh {
+            primitives,
+            weights,
+        }
+    }
+}
+
+/// Convenience builder for creating a [`GltfDocument`] without having a
+/// [`gltf::Document`].
+///
+/// This is useful if you have non-GLTF assets that you want to render.
+pub struct GltfDocumentBuilder<'a> {
+    stage: &'a Stage,
+}
+
+impl<'a> GltfDocumentBuilder<'a> {
+    pub fn new(stage: &'a Stage) -> Self {
+        Self { stage }
+    }
+
+    pub fn new_mesh(&self) -> GltfMeshBuilder<'a> {
+        GltfMeshBuilder::new(self.stage)
+    }
+
+    pub fn build(self) -> GltfDocument {
+        let accessors = Array::default();
+        let animations = Array::default();
+        let buffers = Array::default();
+        let cameras = Array::default();
+        let materials = Array::default();
+        let default_material = Id::NONE;
+        let meshes = Array::default();
+        let nodes = Array::default();
+        let scenes = Array::default();
+        let skins = Array::default();
+        let textures = Array::default();
+        let views = Array::default();
+        GltfDocument {
+            accessors,
+            animations,
+            buffers,
+            cameras,
+            materials,
+            default_material,
+            meshes,
+            nodes,
+            scenes,
+            skins,
+            textures,
+            views,
+        }
+    }
 }
 
 #[cfg(test)]
 mod test {
     use glam::{Vec2, Vec3, Vec4, Vec4Swizzles};
+    use renderling_shader::stage::{GpuConstants, GpuEntity};
 
     use crate::{
         shader::{
@@ -1391,10 +1500,62 @@ mod test {
     }
 
     #[test]
+    // Test that the top-level transform on `RenderUnit` transforms their
+    // child primitive's geometry correctly.
+    fn render_unit_transforms_primitive_geometry() {
+        let mut r = Renderling::headless(50, 50).with_background_color(Vec4::splat(1.0));
+        let stage = r.new_stage().with_lighting(false);
+        stage.configure_graph(&mut r, true);
+        let (projection, view) = crate::camera::default_ortho2d(50.0, 50.0);
+        let camera = stage.append(&Camera::new(projection, view));
+        let cyan = [0.0, 1.0, 1.0, 1.0];
+        let magenta = [1.0, 0.0, 1.0, 1.0];
+        let yellow = [1.0, 1.0, 0.0, 1.0];
+        let white = [1.0, 1.0, 1.0, 1.0];
+        let vertices = [
+            Vertex::default()
+                .with_position([0.0, 0.0, 0.0])
+                .with_color(cyan),
+            Vertex::default()
+                .with_position([1.0, 0.0, 0.0])
+                .with_color(magenta),
+            Vertex::default()
+                .with_position([1.0, 1.0, 0.0])
+                .with_color(yellow),
+            Vertex::default()
+                .with_position([0.0, 1.0, 0.0])
+                .with_color(white),
+        ];
+        let primitive = stage.new_primitive(vertices, [0, 3, 2, 0, 2, 1], Id::NONE);
+        let mesh = stage.append(&GltfMesh {
+            primitives: stage.append_array(&[primitive]),
+            ..Default::default()
+        });
+        let node = stage.append(&GltfNode {
+            mesh,
+            ..Default::default()
+        });
+        let node_path = stage.append_array(&[node]);
+        let transform = stage.append(&Transform {
+            scale: Vec3::new(50.0, 50.0, 1.0),
+            ..Default::default()
+        });
+        let _unit_id = stage.draw_unit(&RenderUnit {
+            camera,
+            transform,
+            vertex_count: primitive.vertex_count,
+            node_path,
+            ..Default::default()
+        });
+        let img = r.render_image().unwrap();
+        img_diff::assert_img_eq("gltf/render_unit_transforms_primitive_geometry.png", img);
+    }
+
+    #[test]
     // Tests importing a gltf file and rendering the first image as a 2d object.
     //
     // This ensures we are decoding images correctly.
-    fn stage_gltf_images() {
+    fn gltf_images() {
         let mut r = Renderling::headless(100, 100).with_background_color(Vec4::splat(1.0));
         let (device, queue) = r.get_device_and_queue_owned();
         let stage = Stage::new(device.clone(), queue.clone()).with_lighting(false);
@@ -1414,26 +1575,29 @@ mod test {
             ..Default::default()
         });
         println!("material_id: {:#?}", material_id);
-        let vertices = [
-            Vertex::default()
-                .with_position([0.0, 0.0, 0.0])
-                .with_uv0([0.0, 0.0]),
-            Vertex::default()
-                .with_position([1.0, 0.0, 0.0])
-                .with_uv0([1.0, 0.0]),
-            Vertex::default()
-                .with_position([1.0, 1.0, 0.0])
-                .with_uv0([1.0, 1.0]),
-            Vertex::default()
-                .with_position([0.0, 1.0, 0.0])
-                .with_uv0([0.0, 1.0]),
-        ];
-        let indices = [0, 3, 2, 0, 2, 1];
-        let primitive = stage.new_primitive(&vertices, &indices, material_id);
-        let mesh = stage.append(&GltfMesh {
-            primitives: stage.append_array(&[primitive]),
-            ..Default::default()
-        });
+        let mesh = stage.append(
+            &stage
+                .new_mesh()
+                .with_primitive(
+                    [
+                        Vertex::default()
+                            .with_position([0.0, 0.0, 0.0])
+                            .with_uv0([0.0, 0.0]),
+                        Vertex::default()
+                            .with_position([1.0, 0.0, 0.0])
+                            .with_uv0([1.0, 0.0]),
+                        Vertex::default()
+                            .with_position([1.0, 1.0, 0.0])
+                            .with_uv0([1.0, 1.0]),
+                        Vertex::default()
+                            .with_position([0.0, 1.0, 0.0])
+                            .with_uv0([0.0, 1.0]),
+                    ],
+                    [0, 3, 2, 0, 2, 1],
+                    material_id,
+                )
+                .build(),
+        );
         let node = stage.append(&GltfNode {
             mesh,
             ..Default::default()
@@ -1445,25 +1609,14 @@ mod test {
             ..Default::default()
         });
 
-        let unit_id = stage.draw_unit(&RenderUnit {
+        let _unit_id = stage.draw_unit(&RenderUnit {
             camera: camera_id,
             transform,
-            vertex_count: primitive.vertex_count,
+            vertex_count: 6,
             node_path,
             mesh_index: 0,
             primitive_index: 0,
         });
-
-        let data = stage.read_slab().unwrap();
-        for i in 0..indices.len() {
-            println!("\nget vertex: {i}");
-            let v = primitive.get_vertex(i, &data);
-            assert_eq!(vertices[indices[i] as usize], v);
-        }
-
-        //let uvs = (0..primitive.vertex_count).map(|)
-        let inv = VertexInvocation::invoke(unit_id.inner(), 0, &data);
-        println!("inv: {inv:#?}");
 
         let img = r.render_image().unwrap();
         img_diff::assert_img_eq("gltf_images.png", img);
@@ -1514,7 +1667,7 @@ mod test {
     }
 
     #[test]
-    // Demonstrates how to generate a mesh primitive on the CPU.
+    // Demonstrates how to generate a mesh primitive on the CPU, long hand.
     fn gltf_cmy_tri() {
         let size = 100;
         let mut r =
@@ -1662,6 +1815,39 @@ mod test {
                 v.vertex_index,
                 slab,
                 &mut v.out_camera,
+                &mut v.out_material,
+                &mut v.out_color,
+                &mut v.out_uv0,
+                &mut v.out_uv1,
+                &mut v.out_norm,
+                &mut v.out_tangent,
+                &mut v.out_bitangent,
+                &mut v.out_pos,
+                &mut v.clip_pos,
+            );
+            v.ndc_pos = v.clip_pos.xyz() / v.clip_pos.w;
+            v
+        }
+
+        #[allow(dead_code)]
+        pub fn invoke_legacy(
+            instance_index: u32,
+            vertex_index: u32,
+            constants: &GpuConstants,
+            vertices: &[Vertex],
+            entities: &[GpuEntity],
+        ) -> Self {
+            let mut v = Self {
+                instance_index,
+                vertex_index,
+                ..Default::default()
+            };
+            renderling_shader::stage::main_vertex_scene(
+                v.instance_index,
+                v.vertex_index,
+                &constants,
+                &vertices,
+                &entities,
                 &mut v.out_material,
                 &mut v.out_color,
                 &mut v.out_uv0,

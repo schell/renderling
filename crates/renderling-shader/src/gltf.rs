@@ -197,7 +197,6 @@ impl IncU16 {
     pub fn extract(self, slab: &[u32]) -> (u32, Self) {
         let (value, slab_index, byte_offset) =
             crate::bits::extract_u16(self.slab_index, self.byte_offset, slab);
-        crate::println!("value: {value:?}");
         (
             value,
             Self {
@@ -230,15 +229,10 @@ impl IncI16 {
 
 impl GltfAccessor {
     fn slab_index_and_byte_offset(&self, element_index: usize, slab: &[u32]) -> (usize, usize) {
-        crate::println!("index: {element_index:?}");
         let view = slab.read(self.view);
-        crate::println!("view: {view:?}");
         let buffer = slab.read(view.buffer);
-        crate::println!("buffer: {:?}", buffer);
         let buffer_start = buffer.0.starting_index();
-        crate::println!("buffer_start: {buffer_start:?}");
         let buffer_start_bytes = buffer_start * 4;
-        crate::println!("buffer_start_bytes: {buffer_start_bytes:?}");
         let stride = if self.size > view.stride {
             self.size
         } else {
@@ -248,11 +242,8 @@ impl GltfAccessor {
             + view.offset as usize
             + self.offset as usize
             + element_index as usize * stride;
-        crate::println!("byte_offset: buffer_start_bytes({buffer_start_bytes}) + view_offset({view_offset}) + accessor.offset({offset}) + element_index({element_index}) * stride({stride}) = {byte_offset:?}", view_offset = view.offset, offset = self.offset);
         let slab_index = byte_offset / 4;
-        crate::println!("slab_index: {slab_index:?}");
         let relative_byte_offset = byte_offset % 4;
-        crate::println!("relative_byte_offset: {relative_byte_offset:?}");
         (slab_index, relative_byte_offset)
     }
 
@@ -396,13 +387,9 @@ impl GltfAccessor {
                 y = crate::bits::extract_u32(slab_index + 1, 0, slab).0 as f32;
             }
             DataType::F32 => {
-                crate::println!("get_vec2 f32: vertex_index={vertex_index}");
                 let (slab_index, _) = self.slab_index_and_byte_offset(vertex_index, slab);
-                crate::println!("  slab_index: {slab_index:?}");
                 x = crate::bits::extract_f32(slab_index, 0, slab).0;
                 y = crate::bits::extract_f32(slab_index + 1, 0, slab).0;
-                crate::println!("  x: {x:?}");
-                crate::println!("  y: {y:?}");
             }
         }
         match self.dimensions {
@@ -640,30 +627,24 @@ pub struct GltfPrimitive {
 impl GltfPrimitive {
     pub fn get_vertex(&self, vertex_index: usize, slab: &[u32]) -> crate::stage::Vertex {
         let index = if self.indices.is_some() {
-            crate::println!("has indices");
             let indices = slab.read(self.indices);
             let index = indices.get_u32(vertex_index, slab);
             index as usize
         } else {
-            crate::println!("no indices");
             vertex_index
         };
-        crate::println!("index: {index:?}");
 
         let position = if self.positions.is_none() {
             Vec3::ZERO
         } else {
             let positions = slab.read(self.positions);
-            crate::println!("positions: {positions:?}");
             positions.get_vec3(index, slab)
         };
-        crate::println!("position: {position:?}");
 
         let normal = if self.normals.is_none() {
             Vec3::Z
         } else {
             let normals = slab.read(self.normals);
-            crate::println!("normals: {normals:?}");
             // If the normals were generated on the CPU, the index from
             // `indices` won't be the same as the index from `normals`.
             if self.normals_were_generated {
@@ -672,13 +653,11 @@ impl GltfPrimitive {
                 normals.get_vec3(index, slab)
             }
         };
-        crate::println!("normal: {normal:?}");
 
         let tangent = if self.tangents.is_none() {
             Vec4::Y
         } else {
             let tangents = slab.read(self.tangents);
-            crate::println!("tangents: {tangents:?}");
             // If the tangents were generated on the CPU, the index from
             // `indices` won't be the same as the index from `tangents`.
             if self.tangents_were_generated {
@@ -687,60 +666,45 @@ impl GltfPrimitive {
                 tangents.get_vec4(index, slab)
             }
         };
-        crate::println!("tangent: {tangent:?}");
 
         let color = if self.colors.is_none() {
             Vec4::ONE
         } else {
             let colors = slab.read(self.colors);
-            crate::println!("colors: {colors:?}");
             colors.get_vec4(index, slab)
         };
-        crate::println!("color: {color:?}");
 
         let tex_coords0 = if self.tex_coords0.is_none() {
-            crate::println!("tex_coords0 are none");
             Vec2::ZERO
         } else {
             let tex_coords0 = slab.read(self.tex_coords0);
-            crate::println!("tex_coords0: {tex_coords0:?}");
             tex_coords0.get_vec2(index, slab)
         };
-        crate::println!("tex_coords0: {tex_coords0:?}");
 
         let tex_coords1 = if self.tex_coords1.is_none() {
             Vec2::ZERO
         } else {
             let tex_coords1 = slab.read(self.tex_coords1);
-            crate::println!("tex_coords1: {tex_coords1:?}");
             tex_coords1.get_vec2(index, slab)
         };
-        crate::println!("tex_coords1: {tex_coords1:?}");
 
         let uv = Vec4::new(tex_coords0.x, tex_coords0.y, tex_coords1.x, tex_coords1.y);
-        crate::println!("uv: {uv:?}");
 
         let joints = if self.joints.is_none() {
             [0; 4]
         } else {
             let joints = slab.read(self.joints);
-            crate::println!("joints: {joints:?}");
             let joints = joints.get_uvec4(index, slab);
-            crate::println!("joints: {joints:?}");
             [joints.x, joints.y, joints.z, joints.w]
         };
-        crate::println!("joints: {joints:?}");
 
         let weights = if self.weights.is_none() {
             [0.0; 4]
         } else {
             let weights = slab.read(self.weights);
-            crate::println!("weights: {weights:?}");
             let weights = weights.get_vec4(index, slab);
-            crate::println!("weights: {weights:?}");
             [weights.x, weights.y, weights.z, weights.w]
         };
-        crate::println!("weights: {weights:?}");
 
         crate::stage::Vertex {
             position: position.extend(0.0),
@@ -948,7 +912,7 @@ pub struct GltfSkin {
     pub skeleton: Id<GltfNode>,
 }
 
-#[derive(Default, Clone, Copy, Slabbed)]
+#[derive(Clone, Copy, Slabbed)]
 pub struct GltfNode {
     pub camera: Id<GltfCamera>,
     pub children: Array<Id<GltfNode>>,
@@ -959,6 +923,22 @@ pub struct GltfNode {
     pub translation: glam::Vec3,
     pub rotation: glam::Quat,
     pub scale: glam::Vec3,
+}
+
+impl Default for GltfNode {
+    fn default() -> Self {
+        Self {
+            camera: Default::default(),
+            children: Default::default(),
+            mesh: Default::default(),
+            light: Default::default(),
+            skin: Default::default(),
+            weights: Default::default(),
+            translation: Default::default(),
+            rotation: Default::default(),
+            scale: glam::Vec3::ONE,
+        }
+    }
 }
 
 #[repr(u32)]

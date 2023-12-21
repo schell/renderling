@@ -1072,15 +1072,23 @@ impl RenderUnit {
         slab: &[u32],
     ) -> (Vertex, Transform, Id<PbrMaterial>) {
         let t = slab.read(self.transform);
+        crate::println!("t: {t:#?}");
         let mut model = Mat4::from_scale_rotation_translation(t.scale, t.rotation, t.translation);
+        crate::println!("model: {model:#?}");
         let mut node = GltfNode::default();
         for id_id in self.node_path.iter() {
             let node_id = slab.read(id_id);
+            crate::println!("  node_id: {node_id:?}");
             node = slab.read(node_id);
+            crate::println!("  node.scale: {:?}", node.scale);
+            crate::println!("  node.rotation: {:?}", node.rotation);
+            crate::println!("  node.translation: {:?}", node.translation);
             let node_transform =
                 Mat4::from_scale_rotation_translation(node.scale, node.rotation, node.translation);
             model = model * node_transform;
         }
+
+        crate::println!("model(after): {model:#?}");
         // TODO: check nodes for skinning
         let mesh = slab.read(node.mesh);
         let primitive_id = mesh.primitives.at(self.primitive_index as usize);

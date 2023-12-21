@@ -154,6 +154,7 @@ impl IsMatrix for glam::Mat4 {
     fn to_scale_rotation_translation_or_id(&self) -> (glam::Vec3, glam::Quat, glam::Vec3) {
         let det = self.determinant();
         if det == 0.0 {
+            crate::println!("det == 0.0, returning identity");
             return srt_id();
         }
 

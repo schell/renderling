@@ -1,5 +1,28 @@
 # devlog
 
+## Thu Dec 21, 2023
+
+It's the solstice! My Dad's birthday, and another bug hunt in `renderling`.
+
+### Porting gltf_images test
+The test `gltf_images` tests our image decoding by loading a GLTF file and then
+creating a new staged object that uses the image's texture.
+
+It's currently coming out all black, and it should come out like
+![gltf_images test](test_img/gltf_images.png).
+
+I recently got rid of the distinction between "native" vertex data and GLTF vertex
+data. Now there is only GLTF vertex data and the "native" `Vertex` meshes can be
+conveniently staged (marshalled to the GPU) using a helper function that creates
+a `GltfPrimitive` complete with `GltfAccessors` etc.
+
+Debbuging rabbit hole:
+* Let's compare old vs new vertex shaders
+  - It doesn't seem to be the vertices, because the staged vertices (read from the GPU) are equal to the original mesh.
+  - The staged vertices are equal to the original CPU-side mesh, but the computed vertex values are different from legacy.
+    - It looks like transforms on `RenderUnits` are not transforming their child primitive's geometry
+      - Got it! It was because `GltfNode`'s `Default` instance was setting `scale` to `Vec3::ZERO`.
+
 ## Wed Dec 20, 2023
 
 I think I'm going to keep going with this idea of making GLTF the internal representation of the
