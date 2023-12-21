@@ -43,9 +43,14 @@ wgpu = { workspace = true, features = ["spirv"] }
 features = ["gltf", "text", "raw-window-handle", "winit"]
 
 [dev-dependencies]
+criterion = "0.4"
 ctor = "0.2.2"
 env_logger = "0.10.0"
 icosahedron = "0.1"
 img-diff = { path = "../img-diff" }
 naga = { version = "0.13", features = ["spv-in", "wgsl-out", "wgsl-in", "msl-out"] }
 pretty_assertions = "1.4.0"
+
+[[bench]]
+name = "benchmarks"
+harness = false
