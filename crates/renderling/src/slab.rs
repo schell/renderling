@@ -184,7 +184,7 @@ impl SlabBuffer {
         let byte_offset = id.index() * std::mem::size_of::<u32>();
         let size = T::slab_size();
         let mut bytes = vec![0u32; size];
-        let _ = bytes.write(data, 0);
+        let _ = bytes.write_indexed(data, 0);
         let capacity = self.capacity();
         snafu::ensure!(
             id.index() + size <= capacity,
@@ -243,7 +243,7 @@ impl SlabBuffer {
         let encoder =
             device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
         let mut u32_data = vec![0u32; size];
-        let _ = u32_data.write_slice(data, 0);
+        let _ = u32_data.write_indexed_slice(data, 0);
         let byte_offset = array.starting_index() * std::mem::size_of::<u32>();
         queue.write_buffer(
             // UNWRAP: if we can't lock we want to panic

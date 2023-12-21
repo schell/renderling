@@ -423,7 +423,7 @@ impl Stage {
             // The bindgroup will have to be remade
             let _ = self.textures_bindgroup.lock().unwrap().take();
             // The atlas size must be reset
-            let size_id = Id::new(0) + StageLegend::offset_of_atlas_size();
+            let size_id = StageLegend::offset_of_atlas_size().into();
             self.write(size_id, &size)?;
         }
 
@@ -1405,11 +1405,11 @@ mod test {
         println!("u32buffer: {u32buffer:?}");
         assert_eq!(2, u32buffer.len());
         let mut data = [0u32; 256];
-        let buffer_index = data.write_slice(&u32buffer, 0);
+        let buffer_index = data.write_indexed_slice(&u32buffer, 0);
         assert_eq!(2, buffer_index);
         let buffer = GltfBuffer(Array::new(0, buffer_index as u32));
-        let view_index = data.write(&buffer, buffer_index);
-        let _ = data.write(
+        let view_index = data.write_indexed(&buffer, buffer_index);
+        let _ = data.write_indexed(
             &GltfBufferView {
                 buffer: Id::from(buffer_index),
                 offset: 0,

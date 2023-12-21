@@ -141,6 +141,66 @@ impl<T> Id<T> {
     }
 }
 
+/// The offset of a field relative a parent's `Id`.
+///
+/// Offset functions are automatically derived for `Slabbed` structs.
+///
+/// ```rust
+/// use renderling_shader::{id::{Id, Offset}, slab::{Slab, Slabbed}};
+///
+/// #[derive(Debug, Default, PartialEq, Slabbed)]
+/// pub struct Parent {
+///     pub child_a: u32,
+///     pub child_b: u32,
+/// }
+///
+/// let mut slab = [0u32; 10];
+///
+/// let parent_id = Id::new(3);
+/// let parent = Parent{ child_a: 0, child_b: 1 };
+/// slab.write(parent_id, &parent);
+/// assert_eq!(parent, slab.read(parent_id));
+///
+/// slab.write(parent_id + Parent::offset_of_child_a(), &42);
+/// let a = slab.read(parent_id + Parent::offset_of_child_a());
+/// assert_eq!(42, a);
+/// ```
+pub struct Offset<T> {
+    pub offset: u32,
+    _phantom: PhantomData<T>,
+}
+
+impl<F, T> core::ops::Add<Id<T>> for Offset<F> {
+    type Output = Id<F>;
+
+    fn add(self, rhs: Id<T>) -> Self::Output {
+        Id::new(self.offset + rhs.0)
+    }
+}
+
+impl<F, T> core::ops::Add<Offset<F>> for Id<T> {
+    type Output = Id<F>;
+
+    fn add(self, rhs: Offset<F>) -> Self::Output {
+        Id::new(self.0 + rhs.offset)
+    }
+}
+
+impl<T> From<Offset<T>> for Id<T> {
+    fn from(value: Offset<T>) -> Self {
+        Id::new(value.offset)
+    }
+}
+
+impl<T> Offset<T> {
+    pub const fn new(offset: usize) -> Self {
+        Self {
+            offset: offset as u32,
+            _phantom: PhantomData,
+        }
+    }
+}
+
 #[cfg(test)]
 mod test {
     use crate::stage::GpuEntity;

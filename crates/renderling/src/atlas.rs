@@ -516,7 +516,16 @@ impl Atlas {
 
 #[cfg(test)]
 mod test {
-    use crate::Renderling;
+    use crate::{
+        shader::{
+            gltf::*,
+            pbr::PbrMaterial,
+            stage::{Camera, LightingModel, RenderUnit, Transform, Vertex},
+            texture::{GpuTexture, TextureAddressMode, TextureModes},
+        },
+        Renderling,
+    };
+    use glam::{Vec2, Vec3, Vec4};
 
     use super::*;
 
@@ -533,5 +542,379 @@ mod test {
         let atlas2 = Atlas::pack(&device, &queue, vec![happy_mac, sandstone]).unwrap();
         let atlas3 = atlas1.merge(&device, &queue, &atlas2).unwrap();
         img_diff::assert_img_eq("atlas/merge3.png", atlas3.atlas_img(&device, &queue));
+    }
+
+    #[test]
+    // Ensures that textures are packed and rendered correctly.
+    fn atlas_uv_mapping() {
+        let mut r =
+            Renderling::headless(32, 32).with_background_color(Vec3::splat(0.0).extend(1.0));
+        let stage = r.new_stage();
+        stage.configure_graph(&mut r, true);
+        let (projection, view) = crate::camera::default_ortho2d(32.0, 32.0);
+        let camera = stage.append(&Camera {
+            projection,
+            view,
+            ..Default::default()
+        });
+        let dirt = SceneImage::from_path("../../img/dirt.jpg").unwrap();
+        let sandstone = SceneImage::from_path("../../img/sandstone.png").unwrap();
+        let texels = SceneImage::from_path("../../test_img/atlas/uv_mapping.png").unwrap();
+        let textures = stage.set_images([dirt, sandstone, texels]).unwrap();
+        let mut texels_tex = textures[2];
+        texels_tex
+            .modes
+            .set_wrap_s(TextureAddressMode::CLAMP_TO_EDGE);
+        texels_tex
+            .modes
+            .set_wrap_t(TextureAddressMode::CLAMP_TO_EDGE);
+        let texels_tex_id = stage.append(&texels_tex);
+        let material_id = stage.append(&PbrMaterial {
+            albedo_texture: texels_tex_id,
+            lighting_model: LightingModel::NO_LIGHTING,
+            ..Default::default()
+        });
+        let mesh = stage
+            .new_mesh()
+            .with_primitive(
+                {
+                    let tl = Vertex::default()
+                        .with_position(Vec3::ZERO)
+                        .with_uv0(Vec2::ZERO);
+                    let tr = Vertex::default()
+                        .with_position(Vec3::new(1.0, 0.0, 0.0))
+                        .with_uv0(Vec2::new(1.0, 0.0));
+                    let bl = Vertex::default()
+                        .with_position(Vec3::new(0.0, 1.0, 0.0))
+                        .with_uv0(Vec2::new(0.0, 1.0));
+                    let br = Vertex::default()
+                        .with_position(Vec3::new(1.0, 1.0, 0.0))
+                        .with_uv0(Vec2::splat(1.0));
+                    vec![tl, bl, br, tl, br, tr]
+                },
+                [],
+                material_id,
+            )
+            .build();
+        let node = stage.append(&GltfNode {
+            mesh: stage.append(&mesh),
+            ..Default::default()
+        });
+        let transform = stage.append(&Transform {
+            scale: Vec3::new(32.0, 32.0, 1.0),
+            ..Default::default()
+        });
+        let _unit = stage.draw_unit(&RenderUnit {
+            camera,
+            transform,
+            node_path: stage.append_array(&[node]),
+            vertex_count: 6,
+            ..Default::default()
+        });
+
+        let img = r.render_image().unwrap();
+        img_diff::assert_img_eq("atlas/uv_mapping.png", img);
+    }
+
+    #[test]
+    // Ensures that textures with different wrapping modes are rendered correctly.
+    fn uv_wrapping() {
+        let icon_w = 32;
+        let icon_h = 41;
+        let sheet_w = icon_w * 3;
+        let sheet_h = icon_h * 3;
+        let w = sheet_w * 3 + 2;
+        let h = sheet_h;
+        let mut r = Renderling::headless(w, h).with_background_color(Vec4::new(1.0, 1.0, 0.0, 1.0));
+        let stage = r.new_stage();
+        stage.configure_graph(&mut r, true);
+
+        let (projection, view) = crate::camera::default_ortho2d(w as f32, h as f32);
+        let camera = stage.append(&Camera {
+            projection,
+            view,
+            ..Default::default()
+        });
+
+        let dirt = SceneImage::from_path("../../img/dirt.jpg").unwrap();
+        let sandstone = SceneImage::from_path("../../img/sandstone.png").unwrap();
+        let texels = SceneImage::from_path("../../img/happy_mac.png").unwrap();
+        let textures = stage.set_images([dirt, sandstone, texels]).unwrap();
+        let texel_tex = textures[2];
+        let mut clamp_tex = texel_tex;
+        clamp_tex
+            .modes
+            .set_wrap_s(TextureAddressMode::CLAMP_TO_EDGE);
+        clamp_tex
+            .modes
+            .set_wrap_t(TextureAddressMode::CLAMP_TO_EDGE);
+        let mut repeat_tex = texel_tex;
+        repeat_tex.modes.set_wrap_s(TextureAddressMode::REPEAT);
+        repeat_tex.modes.set_wrap_t(TextureAddressMode::REPEAT);
+        let mut mirror_tex = texel_tex;
+        mirror_tex
+            .modes
+            .set_wrap_s(TextureAddressMode::MIRRORED_REPEAT);
+        mirror_tex
+            .modes
+            .set_wrap_t(TextureAddressMode::MIRRORED_REPEAT);
+
+        let clamp_material_id = stage.append(&PbrMaterial {
+            albedo_texture: stage.append(&clamp_tex),
+            lighting_model: LightingModel::NO_LIGHTING,
+            ..Default::default()
+        });
+        let repeat_material_id = stage.append(&PbrMaterial {
+            albedo_texture: stage.append(&repeat_tex),
+            lighting_model: LightingModel::NO_LIGHTING,
+            ..Default::default()
+        });
+        let mirror_material_id = stage.append(&PbrMaterial {
+            albedo_texture: stage.append(&mirror_tex),
+            lighting_model: LightingModel::NO_LIGHTING,
+            ..Default::default()
+        });
+
+        let sheet_w = sheet_w as f32;
+        let sheet_h = sheet_h as f32;
+        let clamp_prim = stage.new_primitive(
+            {
+                let tl = Vertex::default()
+                    .with_position(Vec3::ZERO)
+                    .with_uv0(Vec2::ZERO);
+                let tr = Vertex::default()
+                    .with_position(Vec3::new(sheet_w, 0.0, 0.0))
+                    .with_uv0(Vec2::new(3.0, 0.0));
+                let bl = Vertex::default()
+                    .with_position(Vec3::new(0.0, sheet_h, 0.0))
+                    .with_uv0(Vec2::new(0.0, 3.0));
+                let br = Vertex::default()
+                    .with_position(Vec3::new(sheet_w, sheet_h, 0.0))
+                    .with_uv0(Vec2::splat(3.0));
+                vec![tl, bl, br, tl, br, tr]
+            },
+            [],
+            clamp_material_id,
+        );
+        let repeat_prim = {
+            let mut p = clamp_prim;
+            p.material = repeat_material_id;
+            p
+        };
+        let mirror_prim = {
+            let mut p = clamp_prim;
+            p.material = mirror_material_id;
+            p
+        };
+
+        let _clamp = stage.draw_unit(&RenderUnit {
+            camera,
+            node_path: stage.append_array(&[stage.append(&GltfNode {
+                mesh: stage.append(&GltfMesh {
+                    primitives: stage.append_array(&[clamp_prim]),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            })]),
+            vertex_count: 6,
+            ..Default::default()
+        });
+        let _repeat = stage.draw_unit(&RenderUnit {
+            camera,
+            node_path: stage.append_array(&[stage.append(&GltfNode {
+                mesh: stage.append(&GltfMesh {
+                    primitives: stage.append_array(&[repeat_prim]),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            })]),
+            vertex_count: 6,
+            transform: stage.append(&Transform {
+                translation: Vec3::new(sheet_w + 1.0, 0.0, 0.0),
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
+        let _mirror = stage.draw_unit(&RenderUnit {
+            camera,
+            node_path: stage.append_array(&[stage.append(&GltfNode {
+                mesh: stage.append(&GltfMesh {
+                    primitives: stage.append_array(&[mirror_prim]),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            })]),
+            vertex_count: 6,
+            transform: stage.append(&Transform {
+                translation: Vec3::new(sheet_w as f32 * 2.0 + 2.0, 0.0, 0.0),
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
+
+        let img = r.render_image().unwrap();
+        img_diff::assert_img_eq("atlas/uv_wrapping.png", img);
+    }
+
+    #[test]
+    // Ensures that textures with negative uv coords wrap correctly
+    fn negative_uv_wrapping() {
+        let icon_w = 32;
+        let icon_h = 41;
+        let sheet_w = icon_w * 3;
+        let sheet_h = icon_h * 3;
+        let w = sheet_w * 3 + 2;
+        let h = sheet_h;
+        let mut r = Renderling::headless(w, h).with_background_color(Vec4::new(1.0, 1.0, 0.0, 1.0));
+        let stage = r.new_stage();
+        stage.configure_graph(&mut r, true);
+
+        let (projection, view) = crate::camera::default_ortho2d(w as f32, h as f32);
+        let camera = stage.append(&Camera {
+            projection,
+            view,
+            ..Default::default()
+        });
+
+        let dirt = SceneImage::from_path("../../img/dirt.jpg").unwrap();
+        let sandstone = SceneImage::from_path("../../img/sandstone.png").unwrap();
+        let texels = SceneImage::from_path("../../img/happy_mac.png").unwrap();
+        let textures = stage.set_images([dirt, sandstone, texels]).unwrap();
+
+        let texel_tex = textures[2];
+        let mut clamp_tex = texel_tex;
+        clamp_tex
+            .modes
+            .set_wrap_s(TextureAddressMode::CLAMP_TO_EDGE);
+        clamp_tex
+            .modes
+            .set_wrap_t(TextureAddressMode::CLAMP_TO_EDGE);
+        let mut repeat_tex = texel_tex;
+        repeat_tex.modes.set_wrap_s(TextureAddressMode::REPEAT);
+        repeat_tex.modes.set_wrap_t(TextureAddressMode::REPEAT);
+        let mut mirror_tex = texel_tex;
+        mirror_tex
+            .modes
+            .set_wrap_s(TextureAddressMode::MIRRORED_REPEAT);
+        mirror_tex
+            .modes
+            .set_wrap_t(TextureAddressMode::MIRRORED_REPEAT);
+
+        let clamp_material_id = stage.append(&PbrMaterial {
+            albedo_texture: stage.append(&clamp_tex),
+            lighting_model: LightingModel::NO_LIGHTING,
+            ..Default::default()
+        });
+        let repeat_material_id = stage.append(&PbrMaterial {
+            albedo_texture: stage.append(&repeat_tex),
+            lighting_model: LightingModel::NO_LIGHTING,
+            ..Default::default()
+        });
+        let mirror_material_id = stage.append(&PbrMaterial {
+            albedo_texture: stage.append(&mirror_tex),
+            lighting_model: LightingModel::NO_LIGHTING,
+            ..Default::default()
+        });
+
+        let sheet_w = sheet_w as f32;
+        let sheet_h = sheet_h as f32;
+
+        let clamp_prim = stage.new_primitive(
+            {
+                let tl = Vertex::default()
+                    .with_position(Vec3::ZERO)
+                    .with_uv0(Vec2::ZERO);
+                let tr = Vertex::default()
+                    .with_position(Vec3::new(sheet_w, 0.0, 0.0))
+                    .with_uv0(Vec2::new(-3.0, 0.0));
+                let bl = Vertex::default()
+                    .with_position(Vec3::new(0.0, sheet_h, 0.0))
+                    .with_uv0(Vec2::new(0.0, -3.0));
+                let br = Vertex::default()
+                    .with_position(Vec3::new(sheet_w, sheet_h, 0.0))
+                    .with_uv0(Vec2::splat(-3.0));
+                vec![tl, bl, br, tl, br, tr]
+            },
+            [],
+            clamp_material_id,
+        );
+        let repeat_prim = {
+            let mut p = clamp_prim;
+            p.material = repeat_material_id;
+            p
+        };
+        let mirror_prim = {
+            let mut p = clamp_prim;
+            p.material = mirror_material_id;
+            p
+        };
+
+        let _clamp = stage.draw_unit(&RenderUnit {
+            camera,
+            node_path: stage.append_array(&[stage.append(&GltfNode {
+                mesh: stage.append(&GltfMesh {
+                    primitives: stage.append_array(&[clamp_prim]),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            })]),
+            vertex_count: 6,
+            ..Default::default()
+        });
+        let _repeat = stage.draw_unit(&RenderUnit {
+            camera,
+            node_path: stage.append_array(&[stage.append(&GltfNode {
+                mesh: stage.append(&GltfMesh {
+                    primitives: stage.append_array(&[repeat_prim]),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            })]),
+            vertex_count: 6,
+            transform: stage.append(&Transform {
+                translation: Vec3::new(sheet_w + 1.0, 0.0, 0.0),
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
+        let _mirror = stage.draw_unit(&RenderUnit {
+            camera,
+            node_path: stage.append_array(&[stage.append(&GltfNode {
+                mesh: stage.append(&GltfMesh {
+                    primitives: stage.append_array(&[mirror_prim]),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            })]),
+            vertex_count: 6,
+            transform: stage.append(&Transform {
+                translation: Vec3::new(sheet_w as f32 * 2.0 + 2.0, 0.0, 0.0),
+                ..Default::default()
+            }),
+            ..Default::default()
+        });
+
+        let img = r.render_image().unwrap();
+        img_diff::assert_img_eq("atlas/negative_uv_wrapping.png", img);
+    }
+
+    #[test]
+    fn transform_uvs_for_atlas() {
+        let mut tex = GpuTexture {
+            offset_px: UVec2::ZERO,
+            size_px: UVec2::ONE,
+            modes: {
+                let mut modes = TextureModes::default();
+                modes.set_wrap_s(TextureAddressMode::CLAMP_TO_EDGE);
+                modes.set_wrap_t(TextureAddressMode::CLAMP_TO_EDGE);
+                modes
+            },
+            ..Default::default()
+        };
+        assert_eq!(Vec2::ZERO, tex.uv(Vec2::ZERO, UVec2::splat(100)));
+        assert_eq!(Vec2::ZERO, tex.uv(Vec2::ZERO, UVec2::splat(1)));
+        assert_eq!(Vec2::ZERO, tex.uv(Vec2::ZERO, UVec2::splat(256)));
+        tex.offset_px = UVec2::splat(10);
+        assert_eq!(Vec2::splat(0.1), tex.uv(Vec2::ZERO, UVec2::splat(100)));
     }
 }

@@ -340,17 +340,4 @@ mod test {
             [a, b, c, d, e, f, g]
         );
     }
-
-    #[test]
-    fn indices_sanity() {
-        let slab: [u32; 20] = [
-            65536, 2, 0, 0, 0, 1065353216, 0, 0, 0, 1065353216, 0, 0, 0, 1065353216, 0, 0,
-            1065353216, 0, 0, 1065353216,
-        ];
-        let u32_index = 9usize;
-        let byte_offset = 0usize;
-        let (a, u32_index, byte_offset) = extract_u32(u32_index, byte_offset, &slab);
-        let (b, u32_index, byte_offset) = extract_u32(u32_index, byte_offset, &slab);
-        let (c, u32_index, byte_offset) = extract_u32(u32_index, byte_offset, &slab);
-    }
 }

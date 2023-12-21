@@ -598,15 +598,6 @@ impl Stage {
         id
     }
 
-    /// Returns all the draw operations on the stage.
-    pub fn get_draws(&self) -> Vec<DrawUnit> {
-        // UNWRAP: if we can't acquire the lock we want to panic.
-        let draws = self.draws.read().unwrap();
-        match draws.deref() {
-            StageDrawStrategy::Direct(units) => units.clone(),
-        }
-    }
-
     /// Erase the [`RenderUnit`] with the given `Id` from the stage.
     pub fn erase_unit(&self, id: Id<RenderUnit>) {
         let mut draws = self.draws.write().unwrap();
@@ -614,6 +605,15 @@ impl Stage {
             StageDrawStrategy::Direct(units) => {
                 units.retain(|unit| unit.id != id);
             }
+        }
+    }
+
+    /// Returns all the draw operations on the stage.
+    pub fn get_draws(&self) -> Vec<DrawUnit> {
+        // UNWRAP: if we can't acquire the lock we want to panic.
+        let draws = self.draws.read().unwrap();
+        match draws.deref() {
+            StageDrawStrategy::Direct(units) => units.clone(),
         }
     }
 
@@ -789,75 +789,4 @@ pub fn stage_render(
             .map(|bloom| bloom.run(&stage.device, &stage.queue, &hdr_frame)),
     );
     Ok((bloom_result,))
-}
-
-#[cfg(all(test, feature = "blah"))]
-mod test {
-    use glam::Vec3;
-
-    use crate::{
-        default_ortho2d,
-        shader::stage::{Camera, NativeVertexData, RenderUnit, Vertex, VertexData},
-        slab::Slab,
-        Renderling,
-    };
-
-    use super::*;
-
-    fn right_tri_vertices() -> Vec<Vertex> {
-        vec![
-            Vertex::default()
-                .with_position([0.0, 0.0, 0.5])
-                .with_color([0.0, 1.0, 1.0, 1.0]),
-            Vertex::default()
-                .with_position([0.0, 100.0, 0.5])
-                .with_color([1.0, 1.0, 0.0, 1.0]),
-            Vertex::default()
-                .with_position([100.0, 0.0, 0.5])
-                .with_color([1.0, 0.0, 1.0, 1.0]),
-        ]
-    }
-
-    #[test]
-    // Tests that we can create a stage and draw a triangle on it.
-    fn stage_new() {
-        let mut r = Renderling::headless(100, 100).with_background_color(glam::Vec4::splat(1.0));
-        let (device, queue) = r.get_device_and_queue_owned();
-        let stage = Stage::new(device.clone(), queue.clone())
-            .with_lighting(true)
-            .with_bloom(true);
-        let (projection, view) = default_ortho2d(100.0, 100.0);
-        let camera = Camera {
-            projection,
-            view,
-            position: Vec3::ZERO,
-        };
-        let camera_id = stage.append(&camera);
-        let vertices = stage.append_array(&right_tri_vertices());
-        println!("vertices: {vertices:?}");
-        let vertex_data_id = stage.append(&NativeVertexData {
-            vertices,
-            ..Default::default()
-        });
-        let _ = stage.draw_unit(&RenderUnit {
-            camera: camera_id,
-            vertex_data: VertexData::new_native(vertex_data_id),
-            vertex_count: 3,
-            ..Default::default()
-        });
-        let stage_slab = futures_lite::future::block_on(stage.slab.read_raw(
-            &stage.device,
-            &stage.queue,
-            0,
-            stage.slab.len(),
-        ))
-        .unwrap();
-        assert_eq!(camera, stage_slab.read(camera_id));
-        assert_eq!(right_tri_vertices(), stage_slab.read_vec(vertices));
-
-        stage.configure_graph(&mut r, true);
-
-        let img = r.render_image().unwrap();
-        img_diff::assert_img_eq("stage/stage_cmyk_tri.png", img);
-    }
 }

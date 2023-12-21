@@ -1,9 +1,9 @@
-//! Slab storage and ops used for storing on CPU and extracting on GPU.
+//! Slab storage and operations.
 use core::marker::PhantomData;
 
 pub use renderling_derive::Slabbed;
 
-use crate::id::Id;
+use crate::{array::Array, id::Id};
 
 /// Determines the "size" of a type when stored in a slab of `&[u32]`,
 /// and how to read/write it from/to the slab.
@@ -341,6 +341,7 @@ impl<T: core::any::Any> Slabbed for PhantomData<T> {
     }
 }
 
+/// Trait for slabs of `u32`s that can store many types.
 pub trait Slab {
     /// Return the number of u32 elements in the slab.
     fn len(&self) -> usize;
@@ -366,12 +367,32 @@ pub trait Slab {
     /// Write the type into the slab at the index.
     ///
     /// Return the next index, or the same index if writing would overlap the slab.
-    fn write<T: Slabbed + Default>(&mut self, t: &T, index: usize) -> usize;
+    fn write_indexed<T: Slabbed>(&mut self, t: &T, index: usize) -> usize;
 
     /// Write a slice of the type into the slab at the index.
     ///
     /// Return the next index, or the same index if writing would overlap the slab.
-    fn write_slice<T: Slabbed + Default>(&mut self, t: &[T], index: usize) -> usize;
+    fn write_indexed_slice<T: Slabbed>(&mut self, t: &[T], index: usize) -> usize;
+
+    /// Write the type into the slab at the position of the given `Id`.
+    ///
+    /// This likely performs a partial write if the given `Id` is out of bounds.
+    fn write<T: Slabbed>(&mut self, id: Id<T>, t: &T) {
+        let _ = self.write_indexed(t, id.index());
+    }
+
+    /// Write contiguous elements into the slab at the position of the given `Array`.
+    ///
+    /// ## NOTE
+    /// This does nothing if the length of `Array` is greater than the length of `data`.
+    fn write_array<T: Slabbed>(&mut self, array: Array<T>, data: &[T]) {
+        if array.len() > data.len() {
+            return;
+        }
+        for i in 0..array.len() {
+            let _ = self.write(array.at(i), &data[i]);
+        }
+    }
 }
 
 impl Slab for [u32] {
@@ -385,11 +406,11 @@ impl Slab for [u32] {
         t
     }
 
-    fn write<T: Slabbed + Default>(&mut self, t: &T, index: usize) -> usize {
+    fn write_indexed<T: Slabbed>(&mut self, t: &T, index: usize) -> usize {
         t.write_slab(index, self)
     }
 
-    fn write_slice<T: Slabbed + Default>(&mut self, t: &[T], index: usize) -> usize {
+    fn write_indexed_slice<T: Slabbed>(&mut self, t: &[T], index: usize) -> usize {
         let mut index = index;
         for item in t {
             index = item.write_slab(index, self);
@@ -408,12 +429,12 @@ impl Slab for Vec<u32> {
         self.as_slice().read(id)
     }
 
-    fn write<T: Slabbed + Default>(&mut self, t: &T, index: usize) -> usize {
-        self.as_mut_slice().write(t, index)
+    fn write_indexed<T: Slabbed>(&mut self, t: &T, index: usize) -> usize {
+        self.as_mut_slice().write_indexed(t, index)
     }
 
-    fn write_slice<T: Slabbed + Default>(&mut self, t: &[T], index: usize) -> usize {
-        self.as_mut_slice().write_slice(t, index)
+    fn write_indexed_slice<T: Slabbed>(&mut self, t: &[T], index: usize) -> usize {
+        self.as_mut_slice().write_indexed_slice(t, index)
     }
 }
 
@@ -428,16 +449,16 @@ mod test {
     #[test]
     fn slab_array_readwrite() {
         let mut slab = [0u32; 16];
-        slab.write(&42, 0);
-        slab.write(&666, 1);
+        slab.write_indexed(&42, 0);
+        slab.write_indexed(&666, 1);
         let t = slab.read(Id::<[u32; 2]>::new(0));
         assert_eq!([42, 666], t);
         let t: Vec<u32> = slab.read_vec(Array::new(0, 2));
         assert_eq!([42, 666], t[..]);
-        slab.write_slice(&[1, 2, 3, 4], 2);
+        slab.write_indexed_slice(&[1, 2, 3, 4], 2);
         let t: Vec<u32> = slab.read_vec(Array::new(2, 4));
         assert_eq!([1, 2, 3, 4], t[..]);
-        slab.write_slice(&[[1.0, 2.0, 3.0, 4.0], [5.5, 6.5, 7.5, 8.5]], 0);
+        slab.write_indexed_slice(&[[1.0, 2.0, 3.0, 4.0], [5.5, 6.5, 7.5, 8.5]], 0);
 
         let arr = Array::<[f32; 4]>::new(0, 2);
         assert_eq!(Id::new(0), arr.at(0));
@@ -481,10 +502,10 @@ mod test {
         let mut slab = vec![0u32; geometry_slab_size + Array::<Vertex>::slab_size()];
         let index = 0usize;
         let vertices = Array::<Vertex>::new(index as u32, geometry.len() as u32);
-        let index = slab.write_slice(&geometry, index);
+        let index = slab.write_indexed_slice(&geometry, index);
         assert_eq!(geometry_slab_size, index);
         let vertices_id = Id::<Array<Vertex>>::from(index);
-        let index = slab.write(&vertices, index);
+        let index = slab.write_indexed(&vertices, index);
         assert_eq!(geometry_slab_size + Array::<Vertex>::slab_size(), index);
         assert_eq!(Vertex::slab_size() * 6, vertices_id.index());
         assert!(slab.contains(vertices_id),);

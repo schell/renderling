@@ -1579,7 +1579,7 @@ mod test {
             b: glam::Vec2::new(3.0, 4.0),
             c: glam::Vec4::new(5.0, 6.0, 7.0, 8.0),
         };
-        let index = slab.write(&the, 0);
+        let index = slab.write_indexed(&the, 0);
         assert_eq!(9, index);
         let the2 = slab.read(Id::<TheType>::new(0));
         assert_eq!(the, the2);
