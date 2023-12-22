@@ -19,11 +19,9 @@
 //!   - [ ] light tiling
 //!   - [ ] occlusion culling
 //!   - [x] physically based shading
-//!   - [x] user interface "colored text" shading (uses opacity glyphs in an
 //!     atlas)
-//!   - [x] no shading
-//! - [ ] gltf support
-//!   - [ ] scenes, nodes
+//! - [x] gltf support
+//!   - [x] scenes, nodes
 //!   - [x] cameras
 //!   - [x] meshes
 //!   - [x] materials
@@ -261,7 +259,7 @@ mod test {
     use pretty_assertions::assert_eq;
     use renderling_shader::{
         gltf as gl,
-        stage::{gltf_vertex, light::*, Camera, GpuEntity, RenderUnit, Transform, Vertex},
+        stage::{light::*, Camera, RenderUnit, Transform, Vertex},
     };
 
     #[test]
@@ -876,149 +874,123 @@ mod test {
     fn scene_parent_sanity() {
         let mut r = Renderling::headless(100, 100);
         r.set_background_color(Vec4::splat(0.0));
+        let stage = r.new_stage();
+        stage.configure_graph(&mut r, true);
         let (projection, view) = camera::default_ortho2d(100.0, 100.0);
-        let mut builder = r.new_scene().with_camera(projection, view);
+        let camera = stage.append(&Camera::new(projection, view));
         let size = 1.0;
-        let root = builder.new_entity().with_scale([25.0, 25.0, 1.0]).build();
-        let cyan_tri = builder
-            .new_entity()
-            .with_meshlet(vec![
-                Vertex {
-                    position: Vec4::new(0.0, 0.0, 0.0, 0.0),
-                    color: Vec4::new(0.0, 1.0, 1.0, 1.0),
-                    ..Default::default()
-                },
-                Vertex {
-                    position: Vec4::new(size, size, 0.0, 0.0),
-                    color: Vec4::new(0.0, 1.0, 1.0, 1.0),
-                    ..Default::default()
-                },
-                Vertex {
-                    position: Vec4::new(size, 0.0, 0.0, 0.0),
-                    color: Vec4::new(0.0, 1.0, 1.0, 1.0),
-                    ..Default::default()
-                },
-            ])
-            .with_position([1.0, 1.0, 0.0])
-            .with_parent(root)
-            .build();
-        let yellow_tri = builder //
-            .new_entity()
-            .with_meshlet(vec![
-                Vertex {
-                    position: Vec4::new(0.0, 0.0, 0.0, 0.0),
-                    color: Vec4::new(1.0, 1.0, 0.0, 1.0),
-                    ..Default::default()
-                },
-                Vertex {
-                    position: Vec4::new(size, size, 0.0, 0.0),
-                    color: Vec4::new(1.0, 1.0, 0.0, 1.0),
-                    ..Default::default()
-                },
-                Vertex {
-                    position: Vec4::new(size, 0.0, 0.0, 0.0),
-                    color: Vec4::new(1.0, 1.0, 0.0, 1.0),
-                    ..Default::default()
-                },
-            ])
-            .with_position([1.0, 1.0, 0.0])
-            .with_parent(&cyan_tri)
-            .build();
-        let _red_tri = builder
-            .new_entity()
-            .with_meshlet(vec![
-                Vertex {
-                    position: Vec4::new(0.0, 0.0, 0.0, 0.0),
-                    color: Vec4::new(1.0, 0.0, 0.0, 1.0),
-                    ..Default::default()
-                },
-                Vertex {
-                    position: Vec4::new(size, size, 0.0, 0.0),
-                    color: Vec4::new(1.0, 0.0, 0.0, 1.0),
-                    ..Default::default()
-                },
-                Vertex {
-                    position: Vec4::new(size, 0.0, 0.0, 0.0),
-                    color: Vec4::new(1.0, 0.0, 0.0, 1.0),
-                    ..Default::default()
-                },
-            ])
-            .with_position([1.0, 1.0, 0.0])
-            .with_parent(&yellow_tri)
-            .build();
-
-        assert_eq!(
-            vec![
-                GpuEntity {
-                    id: Id::new(0),
-                    position: Vec4::new(0.0, 0.0, 0.0, 0.0),
-                    scale: Vec4::new(25.0, 25.0, 1.0, 1.0),
-                    ..Default::default()
-                },
-                GpuEntity {
-                    id: Id::new(1),
-                    parent: Id::new(0),
-                    position: Vec4::new(1.0, 1.0, 0.0, 0.0),
-                    scale: Vec4::new(1.0, 1.0, 1.0, 1.0),
-                    mesh_first_vertex: 0,
-                    mesh_vertex_count: 3,
-                    ..Default::default()
-                },
-                GpuEntity {
-                    id: Id::new(2),
-                    parent: Id::new(1),
-                    position: Vec4::new(1.0, 1.0, 0.0, 0.0),
-                    scale: Vec4::new(1.0, 1.0, 1.0, 1.0),
-                    mesh_first_vertex: 3,
-                    mesh_vertex_count: 3,
-                    ..Default::default()
-                },
-                GpuEntity {
-                    id: Id::new(3),
-                    parent: Id::new(2),
-                    position: Vec4::new(1.0, 1.0, 0.0, 0.0),
-                    scale: Vec4::new(1.0, 1.0, 1.0, 1.0),
-                    mesh_first_vertex: 6,
-                    mesh_vertex_count: 3,
-                    ..Default::default()
-                }
-            ],
-            builder.entities
-        );
-        let tfrm = yellow_tri.get_world_transform(&builder.entities);
-        assert_eq!(
-            (
-                Vec3::new(50.0, 50.0, 0.0),
-                Quat::IDENTITY,
-                Vec3::new(25.0, 25.0, 1.0),
-            ),
-            tfrm
-        );
-        // while we're at it let's also check that skinning doesn't affect
-        // entities/vertices that aren't skins
-        let vertex = &builder.vertices[yellow_tri.mesh_first_vertex as usize];
-        let skin_matrix = vertex.get_skin_matrix(&yellow_tri.skin_joint_ids, &builder.entities);
-        assert_eq!(Mat4::IDENTITY, skin_matrix);
-
-        let entities = builder.entities.clone();
-        let scene = builder.build().unwrap();
-        r.setup_render_graph(RenderGraphConfig {
-            scene: Some(scene),
-            with_screen_capture: true,
-            with_bloom: false,
+        let cyan_material = stage.append(&PbrMaterial {
+            albedo_factor: Vec4::new(0.0, 1.0, 1.0, 1.0),
+            lighting_model: LightingModel::NO_LIGHTING,
+            ..Default::default()
+        });
+        let yellow_material = stage.append(&PbrMaterial {
+            albedo_factor: Vec4::new(1.0, 1.0, 0.0, 1.0),
+            lighting_model: LightingModel::NO_LIGHTING,
+            ..Default::default()
+        });
+        let red_material = stage.append(&PbrMaterial {
+            albedo_factor: Vec4::new(1.0, 0.0, 0.0, 1.0),
+            lighting_model: LightingModel::NO_LIGHTING,
             ..Default::default()
         });
 
-        let gpu_entities = futures_lite::future::block_on(
-            r.graph
-                .get_resource::<Scene>()
-                .unwrap()
-                .unwrap()
-                .entities
-                .read_gpu(r.get_device(), r.get_queue(), 0, entities.len()),
-        )
-        .unwrap();
-        assert_eq!(entities, gpu_entities);
+        let cyan_primitive = stage.new_primitive(
+            [
+                Vertex::default().with_position([0.0, 0.0, 0.0]),
+                Vertex::default().with_position([size, size, 0.0]),
+                Vertex::default().with_position([size, 0.0, 0.0]),
+            ],
+            [],
+            cyan_material,
+        );
+        let yellow_primitive = {
+            let mut p = cyan_primitive;
+            p.material = yellow_material;
+            p
+        };
+        let red_primitive = {
+            let mut p = cyan_primitive;
+            p.material = red_material;
+            p
+        };
+
+        let root_node = stage.allocate::<gl::GltfNode>();
+        let cyan_node = stage.allocate::<gl::GltfNode>();
+        let yellow_node = stage.allocate::<gl::GltfNode>();
+        let red_node = stage.allocate::<gl::GltfNode>();
+
+        // Write the nodes now that we have references to them all
+        stage
+            .write(
+                root_node,
+                &gl::GltfNode {
+                    children: stage.append_array(&[cyan_node]),
+                    scale: Vec3::new(25.0, 25.0, 1.0),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        stage
+            .write(
+                cyan_node,
+                &gl::GltfNode {
+                    mesh: stage.append(&gl::GltfMesh {
+                        primitives: stage.append_array(&[cyan_primitive]),
+                        ..Default::default()
+                    }),
+                    children: stage.append_array(&[yellow_node]),
+                    translation: Vec3::new(1.0, 1.0, 0.0),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        stage
+            .write(
+                yellow_node,
+                &gl::GltfNode {
+                    mesh: stage.append(&gl::GltfMesh {
+                        primitives: stage.append_array(&[yellow_primitive]),
+                        ..Default::default()
+                    }),
+                    children: stage.append_array(&[red_node]),
+                    translation: Vec3::new(1.0, 1.0, 0.0),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        stage
+            .write(
+                red_node,
+                &gl::GltfNode {
+                    mesh: stage.append(&gl::GltfMesh {
+                        primitives: stage.append_array(&[red_primitive]),
+                        ..Default::default()
+                    }),
+                    translation: Vec3::new(1.0, 1.0, 0.0),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+
+        let _cyan_unit = stage.draw_unit(&RenderUnit {
+            camera,
+            vertex_count: 3,
+            node_path: stage.append_array(&[root_node, cyan_node]),
+            ..Default::default()
+        });
+        let _yellow_unit = stage.draw_unit(&RenderUnit {
+            camera,
+            vertex_count: 3,
+            node_path: stage.append_array(&[root_node, cyan_node, yellow_node]),
+            ..Default::default()
+        });
+        let _red_unit = stage.draw_unit(&RenderUnit {
+            camera,
+            vertex_count: 3,
+            node_path: stage.append_array(&[root_node, cyan_node, yellow_node, red_node]),
+            ..Default::default()
+        });
 
         let img = r.render_image().unwrap();
         img_diff::assert_img_eq("scene_parent_sanity.png", img);
