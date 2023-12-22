@@ -1,5 +1,34 @@
 # devlog
 
+## Sat Dec 23, 2023
+
+I've ported over a majority of the tests to the GLTF-on-the-slab implementation.
+I'm currently working on the big PBR test and having trouble with the skybox, which
+is rendering all black...
+
+Debugging rabbit hole:
+* So is it even running?
+  - Yes, logging shows that it's running.
+* Could it be it needs to be run in its own render pass?
+* Before I even check that, I see that the skybox's vertex shader uses the `instance_index` as the `Id` of the camera, and I'm passing `0..1` as the instance range in the draw call.
+  - So we need a way to pass the camera's `Id` to the skybox.
+    - I just added it as a field on `Skybox`
+    - Using that new field fixed that issue. Now I have an issue with bloom.
+
+After fixing the skybox rendering it seems bloom isn't running.
+
+Debugging rabbit hole:
+* So is it even running?
+  - Yes, logging shows that it's running.
+* Is the result being used downstream during tonemapping?
+  - It seems to be.
+* Let's check to see that there isn't something funky when configuring the graph.
+  - Nothing I can tell there.
+* Maybe print out the brightness texture and make sure it's populated?
+* Losing steam here, especially since bloom needs to be re-done as "physically based".
+
+TODO: Part out the
+
 ## Thu Dec 21, 2023
 
 It's the solstice! My Dad's birthday, and another bug hunt in `renderling`.

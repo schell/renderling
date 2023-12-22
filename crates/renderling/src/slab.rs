@@ -1,4 +1,6 @@
 //! CPU side of slab storage.
+// TODO: part out Id, Slab, etc into new "slab" libs.
+// https://discord.com/channels/750717012564770887/750717499737243679/1187537792910229544
 use std::{
     ops::Deref,
     sync::{atomic::AtomicUsize, Arc, RwLock},

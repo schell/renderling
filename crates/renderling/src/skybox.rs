@@ -140,6 +140,10 @@ pub struct Skybox {
     pub prefiltered_environment_cubemap: crate::Texture,
     // Texture of the pre-computed brdf integration
     pub brdf_lut: crate::Texture,
+    // `Id` of the camera to use for rendering the skybox.
+    //
+    // The camera is used to determine the orientation of the skybox.
+    pub camera: crate::shader::id::Id<crate::shader::stage::Camera>,
 }
 
 impl Skybox {
@@ -153,11 +157,16 @@ impl Skybox {
             format: crate::SceneImageFormat::R32G32B32A32FLOAT,
             apply_linear_transfer: false,
         };
-        Self::new(device, queue, hdr_img)
+        Self::new(device, queue, hdr_img, crate::shader::id::Id::NONE)
     }
 
     /// Create a new `Skybox`.
-    pub fn new(device: &wgpu::Device, queue: &wgpu::Queue, hdr_img: SceneImage) -> Self {
+    pub fn new(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        hdr_img: SceneImage,
+        camera: crate::shader::id::Id<crate::shader::stage::Camera>,
+    ) -> Self {
         log::trace!("creating skybox");
         let equirectangular_texture = Skybox::hdr_texture_from_scene_image(device, queue, hdr_img);
         let proj = Mat4::perspective_rh(std::f32::consts::FRAC_PI_2, 1.0, 0.1, 10.0);
@@ -260,6 +269,7 @@ impl Skybox {
             irradiance_cubemap,
             prefiltered_environment_cubemap,
             brdf_lut,
+            camera,
         }
     }
 

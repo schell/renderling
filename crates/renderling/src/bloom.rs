@@ -227,16 +227,20 @@ impl BloomFilter {
         queue: &wgpu::Queue,
         hdr_surface: &crate::HdrSurface,
     ) -> Arc<wgpu::BindGroup> {
+        log::trace!("bloom running");
         let brightness_texture = &hdr_surface.brightness_texture;
         // update the size if the size has changed
         let size = brightness_texture.texture.size();
         let size = UVec2::new(size.width, size.height);
-        if size != *self.size_uniform {
+        let prev_size = *self.size_uniform;
+        if size != prev_size {
+            log::trace!("  bloom size changed from: {size:?}");
             *self.size_uniform = size;
             self.size_uniform.update(queue);
         }
 
         if brightness_texture.texture.size() != self.textures[0].texture.size() {
+            log::trace!("  brightness size changed");
             let width = size.x;
             let height = size.y;
             self.textures = [
@@ -261,6 +265,7 @@ impl BloomFilter {
 
         // if the brightness texture is not
         if self.initial_bindgroup.is_none() {
+            log::trace!("  creating initial bindgroup");
             self.initial_bindgroup = Some(
                 // initial bindgroup reads from brightness texture
                 create_bindgroup(

@@ -58,7 +58,7 @@ impl From<SlabError> for StageError {
 pub struct Stage {
     pub(crate) slab: SlabBuffer,
     pub(crate) atlas: Arc<RwLock<Atlas>>,
-    pub(crate) skybox: Arc<Mutex<Skybox>>,
+    pub(crate) skybox: Arc<RwLock<Skybox>>,
     pub(crate) pipeline: Arc<Mutex<Option<Arc<wgpu::RenderPipeline>>>>,
     pub(crate) skybox_pipeline: Arc<RwLock<Option<Arc<wgpu::RenderPipeline>>>>,
     pub(crate) has_skybox: Arc<AtomicBool>,
@@ -83,7 +83,7 @@ impl Stage {
             slab: SlabBuffer::new(&device, 256),
             pipeline: Default::default(),
             atlas: Arc::new(RwLock::new(atlas)),
-            skybox: Arc::new(Mutex::new(Skybox::empty(&device, &queue))),
+            skybox: Arc::new(RwLock::new(Skybox::empty(&device, &queue))),
             skybox_pipeline: Default::default(),
             has_skybox: Arc::new(AtomicBool::new(false)),
             bloom: Arc::new(RwLock::new(BloomFilter::new(&device, &queue, 1, 1))),
@@ -211,7 +211,7 @@ impl Stage {
     /// Set the skybox.
     pub fn set_skybox(&self, skybox: Skybox) {
         // UNWRAP: if we can't acquire the lock we want to panic.
-        let mut guard = self.skybox.lock().unwrap();
+        let mut guard = self.skybox.write().unwrap();
         *guard = skybox;
         self.has_skybox
             .store(true, std::sync::atomic::Ordering::Relaxed);
@@ -335,7 +335,7 @@ impl Stage {
                 layout: Some(&layout),
                 vertex: wgpu::VertexState {
                     module: &vertex_shader,
-                    entry_point: "skybox::vertex",
+                    entry_point: "skybox::slabbed_vertex",
                     buffers: &[],
                 },
                 primitive: wgpu::PrimitiveState {
@@ -361,12 +361,21 @@ impl Stage {
                 },
                 fragment: Some(wgpu::FragmentState {
                     module: &fragment_shader,
-                    entry_point: "skybox::fragment_cubemap",
-                    targets: &[Some(wgpu::ColorTargetState {
-                        format: crate::hdr::HdrSurface::TEXTURE_FORMAT,
-                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                        write_mask: wgpu::ColorWrites::ALL,
-                    })],
+                    // TODO: remove renderling_shader::skybox::fragment_cubemap after porting
+                    // to GLTF
+                    entry_point: "skybox::stage_skybox_cubemap",
+                    targets: &[
+                        Some(wgpu::ColorTargetState {
+                            format: crate::hdr::HdrSurface::TEXTURE_FORMAT,
+                            blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                            write_mask: wgpu::ColorWrites::ALL,
+                        }),
+                        Some(wgpu::ColorTargetState {
+                            format: crate::hdr::HdrSurface::TEXTURE_FORMAT,
+                            blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                            write_mask: wgpu::ColorWrites::ALL,
+                        }),
+                    ],
                 }),
                 multiview: None,
             })
@@ -573,7 +582,7 @@ impl Stage {
                 &self.get_pipeline(),
                 // UNWRAP: if we can't acquire locks we want to panic
                 &self.atlas.read().unwrap(),
-                &self.skybox.lock().unwrap(),
+                &self.skybox.read().unwrap(),
             ));
             *bindgroup = Some(b.clone());
             b
@@ -776,9 +785,11 @@ pub fn stage_render(
         }
 
         if let Some(pipeline) = may_skybox_pipeline.as_ref() {
+            log::trace!("rendering skybox");
+            // UNWRAP: if we can't acquire the lock we want to panic.
+            let skybox = stage.skybox.read().unwrap();
             render_pass.set_pipeline(pipeline);
-            render_pass.set_bind_group(0, &textures_bindgroup, &[]);
-            render_pass.draw(0..36, 0..1);
+            render_pass.draw(0..36, skybox.camera.inner()..skybox.camera.inner() + 1);
         }
     }
     stage.queue.submit(std::iter::once(encoder.finish()));

@@ -1011,7 +1011,95 @@ mod test {
     // spheres with different metallic roughnesses lit by an environment map.
     //
     // see https://learnopengl.com/PBR/Lighting
-    fn pbr_metallic_roughness_spheres() {
+    fn gltf_pbr_metallic_roughness_spheres() {
+        let ss = 600;
+        let mut r =
+            Renderling::headless(ss, ss).with_background_color(Vec3::splat(0.0).extend(1.0));
+        let stage = r.new_stage();
+        stage.configure_graph(&mut r, true);
+
+        let radius = 0.5;
+        let ss = ss as f32;
+        let projection = camera::perspective(ss, ss);
+        let k = 7;
+        let diameter = 2.0 * radius;
+        let spacing = radius * 0.25;
+        let len = (k - 1) as f32 * (diameter + spacing);
+        let half = len / 2.0;
+        let view = camera::look_at(
+            Vec3::new(half, half, 1.6 * len),
+            Vec3::new(half, half, 0.0),
+            Vec3::Y,
+        );
+        let camera = stage.append(&Camera::new(projection, view));
+
+        let mut icosphere = icosahedron::Polyhedron::new_isocahedron(radius, 5);
+        icosphere.compute_triangle_normals();
+        let icosahedron::Polyhedron {
+            positions,
+            normals,
+            cells,
+            ..
+        } = icosphere;
+        log::info!("icosphere created on CPU");
+
+        let to_vertex = |ndx: &usize| -> Vertex {
+            let p: [f32; 3] = positions[*ndx].0.into();
+            let n: [f32; 3] = normals[*ndx].0.into();
+            Vertex::default().with_position(p).with_normal(n)
+        };
+        let sphere_vertices = cells.iter().flat_map(|icosahedron::Triangle { a, b, c }| {
+            let p0 = to_vertex(&a);
+            let p1 = to_vertex(&b);
+            let p2 = to_vertex(&c);
+            vec![p0, p1, p2]
+        });
+        let sphere_primitive = stage.new_primitive(sphere_vertices, [], Id::NONE);
+        for i in 0..k {
+            let roughness = i as f32 / (k - 1) as f32;
+            let x = (diameter + spacing) * i as f32;
+            for j in 0..k {
+                let metallic = j as f32 / (k - 1) as f32;
+                let y = (diameter + spacing) * j as f32;
+                let mut prim = sphere_primitive;
+                prim.material = stage.append(&PbrMaterial {
+                    albedo_factor: Vec4::new(1.0, 1.0, 1.0, 1.0),
+                    metallic_factor: metallic,
+                    roughness_factor: roughness,
+                    ..Default::default()
+                });
+                let _entity = stage.draw_unit(&RenderUnit {
+                    camera,
+                    vertex_count: prim.vertex_count,
+                    node_path: stage.append_array(&[stage.append(&gl::GltfNode {
+                        mesh: stage.append(&gl::GltfMesh {
+                            primitives: stage.append_array(&[prim]),
+                            ..Default::default()
+                        }),
+                        translation: Vec3::new(x, y, 0.0),
+                        ..Default::default()
+                    })]),
+                    ..Default::default()
+                });
+            }
+        }
+
+        let (device, queue) = r.get_device_and_queue_owned();
+        let hdr_image = SceneImage::from_hdr_path("../../img/hdr/resting_place.hdr").unwrap();
+        let skybox = crate::skybox::Skybox::new(&device, &queue, hdr_image, camera);
+        stage.set_skybox(skybox);
+        stage.set_has_bloom(true);
+
+        let img = r.render_image().unwrap();
+        img_diff::assert_img_eq("pbr_metallic_roughness_spheres.png", img);
+    }
+
+    #[test]
+    // Tests the initial implementation of pbr metallic roughness on an array of
+    // spheres with different metallic roughnesses lit by an environment map.
+    //
+    // see https://learnopengl.com/PBR/Lighting
+    fn legacy_pbr_metallic_roughness_spheres() {
         let ss = 600;
         let mut r =
             Renderling::headless(ss, ss).with_background_color(Vec3::splat(0.0).extend(1.0));
@@ -1083,6 +1171,7 @@ mod test {
         r.setup_render_graph(RenderGraphConfig {
             scene: Some(scene),
             with_screen_capture: true,
+            with_bloom: false,
             ..Default::default()
         });
 
