@@ -342,8 +342,6 @@ mod test {
 
     #[test]
     fn slab_buffer_roundtrip() {
-        println!("write");
-
         let (device, queue) = get_device_and_queue();
         let buffer = WgpuBuffer::new(device, queue, 2);
         let mut slab = CpuSlab::new(buffer);
