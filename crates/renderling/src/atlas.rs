@@ -1,17 +1,19 @@
 //! Texture atlas.
 //!
-//! All images are packed into an atlas at scene build time.
+//! All images are packed into an atlas at staging time.
 //! Texture descriptors describing where in the atlas an image is,
 //! and how callsites should sample pixels is packed into a buffer
 //! on the GPU. This makes the number of texture binds _very_ low.
 //!
-//! An atlas should be temporary until we can use bindless techniques
+//! ## NOTE:
+//! `Atlas` is a temporary work around until we can use bindless techniques
 //! on web.
 use glam::UVec2;
 use image::{EncodableLayout, RgbaImage};
 use snafu::prelude::*;
 
-use crate::SceneImage;
+mod atlas_image;
+pub use atlas_image::*;
 
 fn gpu_frame_from_rect(r: crunch::Rect) -> (UVec2, UVec2) {
     (
@@ -31,9 +33,9 @@ pub enum AtlasError {
 pub enum Packing {
     Img {
         index: usize,
-        image: SceneImage,
+        image: AtlasImage,
     },
-    AtlasImg {
+    GpuImg {
         index: usize,
         offset_px: UVec2,
         size_px: UVec2,
@@ -44,42 +46,42 @@ impl Packing {
     pub fn width(&self) -> u32 {
         match self {
             Packing::Img { image, .. } => image.width,
-            Packing::AtlasImg { size_px, .. } => size_px.x,
+            Packing::GpuImg { size_px, .. } => size_px.x,
         }
     }
 
     pub fn height(&self) -> u32 {
         match self {
             Packing::Img { image, .. } => image.height,
-            Packing::AtlasImg { size_px, .. } => size_px.y,
+            Packing::GpuImg { size_px, .. } => size_px.y,
         }
     }
 
     pub fn index(&self) -> usize {
         match self {
             Packing::Img { index, .. } => *index,
-            Packing::AtlasImg { index, .. } => *index,
+            Packing::GpuImg { index, .. } => *index,
         }
     }
 
     pub fn set_index(&mut self, index: usize) {
         match self {
             Packing::Img { index: i, .. } => *i = index,
-            Packing::AtlasImg { index: i, .. } => *i = index,
+            Packing::GpuImg { index: i, .. } => *i = index,
         }
     }
 
-    pub fn as_scene_img_mut(&mut self) -> Option<&mut SceneImage> {
+    pub fn as_scene_img_mut(&mut self) -> Option<&mut AtlasImage> {
         match self {
             Packing::Img { image, .. } => Some(image),
-            Packing::AtlasImg { .. } => None,
+            Packing::GpuImg { .. } => None,
         }
     }
 
-    pub fn as_scene_img(&self) -> Option<&SceneImage> {
+    pub fn as_scene_img(&self) -> Option<&AtlasImage> {
         match self {
             Packing::Img { image, .. } => Some(image),
-            Packing::AtlasImg { .. } => None,
+            Packing::GpuImg { .. } => None,
         }
     }
 }
@@ -155,7 +157,8 @@ impl Atlas {
                 | wgpu::TextureUsages::COPY_SRC,
             view_formats: &[],
         });
-        let img = RgbaImage::from_pixel(extent.width, extent.height, image::Rgba([0, 0, 0, 0]));
+        let img =
+            RgbaImage::from_pixel(extent.width, extent.height, atlas_image::Rgba([0, 0, 0, 0]));
         queue.write_texture(
             wgpu::ImageCopyTextureBase {
                 texture: &texture,
@@ -199,8 +202,8 @@ impl Atlas {
     /// but doesn't send any data to the GPU.
     pub fn pack_preview<'a>(
         device: &wgpu::Device,
-        images: impl IntoIterator<Item = SceneImage>,
-    ) -> Result<crunch::PackedItems<SceneImage>, AtlasError> {
+        images: impl IntoIterator<Item = AtlasImage>,
+    ) -> Result<crunch::PackedItems<AtlasImage>, AtlasError> {
         let images = images.into_iter().collect::<Vec<_>>();
         let len = images.len();
         let limit = device.limits().max_texture_dimension_1d;
@@ -220,7 +223,7 @@ impl Atlas {
     pub fn commit_preview(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        crunch::PackedItems { w, h, items }: crunch::PackedItems<SceneImage>,
+        crunch::PackedItems { w, h, items }: crunch::PackedItems<AtlasImage>,
     ) -> Result<Self, AtlasError> {
         let mut atlas = Atlas::new(device, queue, UVec2::new(w as u32, h as u32));
         atlas.rects = items
@@ -269,7 +272,7 @@ impl Atlas {
     pub fn repack_preview(
         &self,
         device: &wgpu::Device,
-        images: impl IntoIterator<Item = SceneImage>,
+        images: impl IntoIterator<Item = AtlasImage>,
     ) -> Result<RepackPreview, AtlasError> {
         let mut images = images.into_iter().collect::<Vec<_>>();
         let len = images.len() + self.rects.len();
@@ -277,7 +280,7 @@ impl Atlas {
             device.limits().max_texture_dimension_1d as usize,
             self.rects
                 .iter()
-                .map(|r| Packing::AtlasImg {
+                .map(|r| Packing::GpuImg {
                     index: 0,
                     offset_px: UVec2::new(r.x as u32, r.y as u32),
                     size_px: UVec2::new(r.w as u32, r.y as u32),
@@ -352,7 +355,7 @@ impl Atlas {
                     );
                     atlas.rects[index] = rect;
                 }
-                Packing::AtlasImg {
+                Packing::GpuImg {
                     index,
                     offset_px,
                     size_px,
@@ -400,7 +403,7 @@ impl Atlas {
     pub fn pack(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        images: impl IntoIterator<Item = SceneImage>,
+        images: impl IntoIterator<Item = AtlasImage>,
     ) -> Result<Self, AtlasError> {
         let images = images.into_iter().collect::<Vec<_>>();
         let items = Self::pack_preview(device, images)?;
@@ -411,7 +414,7 @@ impl Atlas {
         &self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        images: impl IntoIterator<Item = SceneImage>,
+        images: impl IntoIterator<Item = AtlasImage>,
     ) -> Result<Self, AtlasError> {
         let images = images.into_iter().collect::<Vec<_>>();
         let items = self.repack_preview(device, images)?;
@@ -534,10 +537,10 @@ mod test {
         let r = Renderling::headless(100, 100);
         let (device, queue) = r.get_device_and_queue_owned();
         println!("{}", std::env::current_dir().unwrap().display());
-        let cheetah = SceneImage::from_path("../../img/cheetah.jpg").unwrap();
-        let dirt = SceneImage::from_path("../../img/dirt.jpg").unwrap();
-        let happy_mac = SceneImage::from_path("../../img/happy_mac.png").unwrap();
-        let sandstone = SceneImage::from_path("../../img/sandstone.png").unwrap();
+        let cheetah = AtlasImage::from_path("../../img/cheetah.jpg").unwrap();
+        let dirt = AtlasImage::from_path("../../img/dirt.jpg").unwrap();
+        let happy_mac = AtlasImage::from_path("../../img/happy_mac.png").unwrap();
+        let sandstone = AtlasImage::from_path("../../img/sandstone.png").unwrap();
         let atlas1 = Atlas::pack(&device, &queue, vec![cheetah, dirt]).unwrap();
         let atlas2 = Atlas::pack(&device, &queue, vec![happy_mac, sandstone]).unwrap();
         let atlas3 = atlas1.merge(&device, &queue, &atlas2).unwrap();
@@ -557,9 +560,9 @@ mod test {
             view,
             ..Default::default()
         });
-        let dirt = SceneImage::from_path("../../img/dirt.jpg").unwrap();
-        let sandstone = SceneImage::from_path("../../img/sandstone.png").unwrap();
-        let texels = SceneImage::from_path("../../test_img/atlas/uv_mapping.png").unwrap();
+        let dirt = AtlasImage::from_path("../../img/dirt.jpg").unwrap();
+        let sandstone = AtlasImage::from_path("../../img/sandstone.png").unwrap();
+        let texels = AtlasImage::from_path("../../test_img/atlas/uv_mapping.png").unwrap();
         let textures = stage.set_images([dirt, sandstone, texels]).unwrap();
         let mut texels_tex = textures[2];
         texels_tex
@@ -636,9 +639,9 @@ mod test {
             ..Default::default()
         });
 
-        let dirt = SceneImage::from_path("../../img/dirt.jpg").unwrap();
-        let sandstone = SceneImage::from_path("../../img/sandstone.png").unwrap();
-        let texels = SceneImage::from_path("../../img/happy_mac.png").unwrap();
+        let dirt = AtlasImage::from_path("../../img/dirt.jpg").unwrap();
+        let sandstone = AtlasImage::from_path("../../img/sandstone.png").unwrap();
+        let texels = AtlasImage::from_path("../../img/happy_mac.png").unwrap();
         let textures = stage.set_images([dirt, sandstone, texels]).unwrap();
         let texel_tex = textures[2];
         let mut clamp_tex = texel_tex;
@@ -776,9 +779,9 @@ mod test {
             ..Default::default()
         });
 
-        let dirt = SceneImage::from_path("../../img/dirt.jpg").unwrap();
-        let sandstone = SceneImage::from_path("../../img/sandstone.png").unwrap();
-        let texels = SceneImage::from_path("../../img/happy_mac.png").unwrap();
+        let dirt = AtlasImage::from_path("../../img/dirt.jpg").unwrap();
+        let sandstone = AtlasImage::from_path("../../img/sandstone.png").unwrap();
+        let texels = AtlasImage::from_path("../../img/happy_mac.png").unwrap();
         let textures = stage.set_images([dirt, sandstone, texels]).unwrap();
 
         let texel_tex = textures[2];

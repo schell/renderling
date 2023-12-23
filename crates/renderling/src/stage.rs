@@ -12,7 +12,7 @@ use renderling_shader::{
     array::Array,
     debug::DebugMode,
     id::Id,
-    slab::Slabbed,
+    slab::SlabItem,
     stage::{light::Light, RenderUnit, StageLegend},
     texture::GpuTexture,
 };
@@ -99,23 +99,23 @@ impl Stage {
     }
 
     /// Allocate some storage for a type on the slab, but don't write it.
-    pub fn allocate<T: Slabbed>(&self) -> Id<T> {
+    pub fn allocate<T: SlabItem>(&self) -> Id<T> {
         self.slab.allocate(&self.device, &self.queue)
     }
 
     /// Allocate contiguous storage for `len` elements of a type on the slab, but don't write them.
-    pub fn allocate_array<T: Slabbed>(&self, len: usize) -> Array<T> {
+    pub fn allocate_array<T: SlabItem>(&self, len: usize) -> Array<T> {
         self.slab.allocate_array(&self.device, &self.queue, len)
     }
 
     /// Write an object to the slab.
-    pub fn write<T: Slabbed + Default>(&self, id: Id<T>, object: &T) -> Result<(), SlabError> {
+    pub fn write<T: SlabItem + Default>(&self, id: Id<T>, object: &T) -> Result<(), SlabError> {
         self.slab.write(&self.device, &self.queue, id, object)?;
         Ok(())
     }
 
     /// Write many objects to the slab.
-    pub fn write_array<T: Slabbed + Default>(
+    pub fn write_array<T: SlabItem + Default>(
         &self,
         array: Array<T>,
         objects: &[T],
@@ -127,12 +127,12 @@ impl Stage {
     }
 
     /// Add an object to the slab and return its ID.
-    pub fn append<T: Slabbed + Default>(&self, object: &T) -> Id<T> {
+    pub fn append<T: SlabItem + Default>(&self, object: &T) -> Id<T> {
         self.slab.append(&self.device, &self.queue, object)
     }
 
     /// Add a slice of objects to the slab and return an [`Array`].
-    pub fn append_array<T: Slabbed + Default>(&self, objects: &[T]) -> Array<T> {
+    pub fn append_array<T: SlabItem + Default>(&self, objects: &[T]) -> Array<T> {
         self.slab.append_array(&self.device, &self.queue, objects)
     }
 

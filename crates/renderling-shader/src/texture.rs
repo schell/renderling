@@ -1,6 +1,6 @@
 //! GPU textures.
 use glam::{UVec2, Vec2};
-use renderling_derive::Slabbed;
+use renderling_derive::SlabItem;
 
 use crate::{
     self as renderling_shader,
@@ -13,7 +13,7 @@ use spirv_std::num_traits::*;
 // TODO: Completely rework the way we represent texture modes.
 #[repr(transparent)]
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
-#[derive(Clone, Copy, Default, PartialEq, bytemuck::Pod, bytemuck::Zeroable, Slabbed)]
+#[derive(Clone, Copy, Default, PartialEq, SlabItem)]
 pub struct TextureModes(u32);
 
 impl TextureModes {
@@ -50,7 +50,7 @@ impl TextureModes {
 /// A GPU texture.
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[repr(C)]
-#[derive(Clone, Copy, Default, PartialEq, bytemuck::Pod, bytemuck::Zeroable, Slabbed)]
+#[derive(Clone, Copy, Default, PartialEq, SlabItem)]
 pub struct GpuTexture {
     // The top left offset of texture in the atlas.
     pub offset_px: UVec2,
@@ -114,7 +114,7 @@ pub fn clamp(input: f32) -> f32 {
 /// How edges should be handled in texture addressing/wrapping.
 #[repr(transparent)]
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
-#[derive(Clone, Copy, PartialEq, Eq, Default, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(Clone, Copy, PartialEq, Eq, Default)]
 pub struct TextureAddressMode(u32);
 
 impl core::fmt::Display for TextureAddressMode {

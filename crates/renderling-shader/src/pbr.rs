@@ -6,7 +6,7 @@
 //! * https://github.khronos.org/glTF-Sample-Viewer-Release/
 
 use glam::{Vec2, Vec3, Vec4, Vec4Swizzles};
-use renderling_derive::Slabbed;
+use renderling_derive::SlabItem;
 #[cfg(target_arch = "spirv")]
 use spirv_std::num_traits::Float;
 
@@ -28,7 +28,7 @@ use crate::{
 /// [`SceneBuilder`](crate::SceneBuilder).
 #[repr(C)]
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
-#[derive(Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable, Slabbed)]
+#[derive(Clone, Copy, PartialEq, SlabItem)]
 pub struct PbrMaterial {
     // x, y, z is emissive factor, default [0.0, 0.0, 0.0]
     // w is emissive strength multiplier (gltf's KHR_materials_emissive_strength extension),

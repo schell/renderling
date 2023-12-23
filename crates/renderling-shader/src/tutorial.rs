@@ -5,7 +5,7 @@ use spirv_std::spirv;
 use crate::{
     array::Array,
     id::Id,
-    slab::{Slab, Slabbed},
+    slab::{Slab, SlabItem},
     stage::{RenderUnit, Vertex},
 };
 

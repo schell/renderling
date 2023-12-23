@@ -22,7 +22,7 @@ use crate::{
     gltf::{GltfMesh, GltfNode},
     id::{Id, ID_NONE},
     pbr::{self, PbrMaterial},
-    slab::{Slab, Slabbed},
+    slab::{Slab, SlabItem},
     texture::GpuTexture,
     IsMatrix, IsSampler, IsVector, Sample2d, SampleCube,
 };
@@ -32,7 +32,7 @@ pub mod light;
 /// A vertex in a mesh.
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[repr(C)]
-#[derive(Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable, Slabbed)]
+#[derive(Clone, Copy, PartialEq, SlabItem)]
 pub struct Vertex {
     pub position: Vec4,
     pub color: Vec4,
@@ -174,7 +174,7 @@ impl Vertex {
 
 #[repr(transparent)]
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
-#[derive(Copy, Clone, Default, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable, Slabbed)]
+#[derive(Copy, Clone, Default, PartialEq, Eq, SlabItem)]
 pub struct LightType(u32);
 
 #[cfg(not(target_arch = "spirv"))]
@@ -201,7 +201,7 @@ impl LightType {
 /// A light capable of representing a directional, point or spotlight.
 #[repr(C)]
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
-#[derive(Copy, Clone, Default, bytemuck::Pod, bytemuck::Zeroable, Slabbed)]
+#[derive(Copy, Clone, Default, SlabItem)]
 pub struct GpuLight {
     pub position: Vec4,
     pub direction: Vec4,
@@ -215,19 +215,7 @@ pub struct GpuLight {
 
 /// Determines the lighting to use in an ubershader.
 #[repr(transparent)]
-#[derive(
-    Clone,
-    Copy,
-    Default,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Debug,
-    bytemuck::Pod,
-    bytemuck::Zeroable,
-    Slabbed,
-)]
+#[derive(Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Debug, SlabItem)]
 pub struct LightingModel(u32);
 
 impl LightingModel {
@@ -248,7 +236,7 @@ impl LightingModel {
 /// ### Provides info about if the entity is a skin.
 #[repr(transparent)]
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
-#[derive(Clone, Copy, Default, PartialEq, bytemuck::Pod, bytemuck::Zeroable, Slabbed)]
+#[derive(Clone, Copy, Default, PartialEq, SlabItem)]
 pub struct GpuEntityInfo(pub u32);
 
 impl GpuEntityInfo {
@@ -311,7 +299,7 @@ impl GpuEntityInfo {
 /// A bundle of GPU components.
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[repr(C)]
-#[derive(Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable, Slabbed)]
+#[derive(Clone, Copy, PartialEq, SlabItem)]
 pub struct GpuEntity {
     // The id of this entity. `Id::NONE` means this entity is not in use.
     pub id: Id<GpuEntity>,
@@ -454,7 +442,7 @@ impl GpuEntity {
 /// Boolean toggles that cause the renderer to turn on/off certain features.
 #[repr(transparent)]
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
-#[derive(Default, Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable, Slabbed)]
+#[derive(Default, Clone, Copy, PartialEq, SlabItem)]
 pub struct GpuToggles(pub u32);
 
 impl GpuToggles {
@@ -487,7 +475,7 @@ impl GpuToggles {
 /// Unforms/constants for a scene's worth of rendering.
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[repr(C)]
-#[derive(Default, Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable, Slabbed)]
+#[derive(Default, Clone, Copy, PartialEq, SlabItem)]
 pub struct GpuConstants {
     pub camera_projection: Mat4,
     pub camera_view: Mat4,
@@ -498,7 +486,7 @@ pub struct GpuConstants {
 }
 
 #[repr(C)]
-#[derive(Default, Debug, Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable, Slabbed)]
+#[derive(Default, Debug, Clone, Copy, PartialEq, SlabItem)]
 pub struct DrawIndirect {
     pub vertex_count: u32,
     pub instance_count: u32,
@@ -942,7 +930,7 @@ pub fn main_fragment_impl<T, C, S>(
 /// also update the camera's position.
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[repr(C)]
-#[derive(Default, Clone, Copy, PartialEq, Slabbed)]
+#[derive(Default, Clone, Copy, PartialEq, SlabItem)]
 pub struct Camera {
     pub projection: Mat4,
     pub view: Mat4,
@@ -989,7 +977,7 @@ impl Camera {
 /// This should be the first struct in the stage's slab.
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[repr(C)]
-#[derive(Clone, Copy, PartialEq, Slabbed)]
+#[derive(Clone, Copy, PartialEq, SlabItem)]
 pub struct StageLegend {
     pub atlas_size: UVec2,
     pub debug_mode: DebugMode,
@@ -1012,7 +1000,7 @@ impl Default for StageLegend {
 
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[repr(C)]
-#[derive(Default, Clone, Copy, PartialEq, Slabbed)]
+#[derive(Default, Clone, Copy, PartialEq, SlabItem)]
 pub struct GltfVertexData {
     // A path of node ids that leads to the node that contains the mesh.
     pub parent_node_path: Array<Id<GltfNode>>,
@@ -1024,7 +1012,7 @@ pub struct GltfVertexData {
 
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[repr(C)]
-#[derive(Clone, Copy, PartialEq, Slabbed)]
+#[derive(Clone, Copy, PartialEq, SlabItem)]
 pub struct Transform {
     pub translation: Vec3,
     pub rotation: Quat,
@@ -1044,7 +1032,7 @@ impl Default for Transform {
 /// A rendering "command" that draws a single mesh from a top-level node.
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[repr(C)]
-#[derive(Default, Clone, Copy, PartialEq, Slabbed)]
+#[derive(Default, Clone, Copy, PartialEq, SlabItem)]
 pub struct RenderUnit {
     // Which node are we rendering, and what is the path through its
     // ancestors to get to it.
@@ -1562,9 +1550,9 @@ pub fn test_i8_i16_extraction(
 #[cfg(test)]
 mod test {
     use crate::{self as renderling_shader, id::Id, slab::Slab};
-    use renderling_shader::slab::Slabbed;
+    use renderling_shader::slab::SlabItem;
 
-    #[derive(Default, Debug, PartialEq, Slabbed)]
+    #[derive(Default, Debug, PartialEq, SlabItem)]
     struct TheType {
         a: glam::Vec3,
         b: glam::Vec2,

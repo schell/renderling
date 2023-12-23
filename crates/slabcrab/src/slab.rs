@@ -1,6 +1,5 @@
 //! Slab traits.
 use core::marker::PhantomData;
-
 pub use crabslab_derive::SlabItem;
 
 use crate::{array::Array, id::Id};
@@ -146,6 +145,7 @@ impl<T: SlabItem, const N: usize> SlabItem for [T; N] {
     }
 }
 
+#[cfg(feature = "glam")]
 impl SlabItem for glam::Mat4 {
     fn read_slab(&mut self, index: usize, slab: &[u32]) -> usize {
         let Self {
@@ -178,6 +178,7 @@ impl SlabItem for glam::Mat4 {
     }
 }
 
+#[cfg(feature = "glam")]
 impl SlabItem for glam::Vec2 {
     fn slab_size() -> usize {
         2
@@ -221,6 +222,7 @@ impl SlabItem for glam::Vec3 {
     }
 }
 
+#[cfg(feature = "glam")]
 impl SlabItem for glam::Vec4 {
     fn slab_size() -> usize {
         4
@@ -264,6 +266,7 @@ impl SlabItem for glam::Quat {
     }
 }
 
+#[cfg(feature = "glam")]
 impl SlabItem for glam::UVec2 {
     fn slab_size() -> usize {
         2
@@ -282,6 +285,7 @@ impl SlabItem for glam::UVec2 {
     }
 }
 
+#[cfg(feature = "glam")]
 impl SlabItem for glam::UVec3 {
     fn slab_size() -> usize {
         3
@@ -302,6 +306,7 @@ impl SlabItem for glam::UVec3 {
     }
 }
 
+#[cfg(feature = "glam")]
 impl SlabItem for glam::UVec4 {
     fn slab_size() -> usize {
         4
@@ -445,18 +450,80 @@ pub trait GrowableSlab: Slab {
     /// Return the current capacity of the slab.
     fn capacity(&self) -> usize;
 
-    /// Resize the slab to the given capacity.
-    fn resize(&mut self, capacity: usize);
+    /// Reserve enough space on the slab to fit the given capacity.
+    fn reserve_capacity(&mut self, capacity: usize);
 
     /// Increment the length of the slab by `n` u32s.
     ///
     /// Returns the previous length.
     fn increment_len(&mut self, n: usize) -> usize;
+}
+
+/// A wrapper around a `GrowableSlab` that provides convenience methods for
+/// working with CPU-side slabs.
+///
+/// Working with slabs on the CPU is much more convenient because the underlying
+/// buffer `B` is often a growable type, like `Vec<u32>`. This wrapper provides
+/// methods for appending to the end of the buffer with automatic resizing and
+/// for preallocating space for elements that will be written later.
+pub struct CpuSlab<B> {
+    slab: B,
+}
+
+impl<B> AsRef<B> for CpuSlab<B> {
+    fn as_ref(&self) -> &B {
+        &self.slab
+    }
+}
+
+impl<B> AsMut<B> for CpuSlab<B> {
+    fn as_mut(&mut self) -> &mut B {
+        &mut self.slab
+    }
+}
+
+impl<B: Slab> Slab for CpuSlab<B> {
+    fn len(&self) -> usize {
+        self.slab.len()
+    }
+
+    fn read<T: SlabItem + Default>(&self, id: Id<T>) -> T {
+        self.slab.read(id)
+    }
+
+    fn write_indexed<T: SlabItem>(&mut self, t: &T, index: usize) -> usize {
+        self.slab.write_indexed(t, index)
+    }
+
+    fn write_indexed_slice<T: SlabItem>(&mut self, t: &[T], index: usize) -> usize {
+        self.slab.write_indexed_slice(t, index)
+    }
+}
+
+impl<B: GrowableSlab> GrowableSlab for CpuSlab<B> {
+    fn capacity(&self) -> usize {
+        self.slab.capacity()
+    }
+
+    fn reserve_capacity(&mut self, capacity: usize) {
+        self.slab.reserve_capacity(capacity);
+    }
+
+    fn increment_len(&mut self, n: usize) -> usize {
+        self.slab.increment_len(n)
+    }
+}
+
+impl<B: GrowableSlab> CpuSlab<B> {
+    /// Create a new `SlabBuffer` with the given slab.
+    pub fn new(slab: B) -> Self {
+        Self { slab }
+    }
 
     /// Expands the slab to fit the given number of `T`s, if necessary.
     fn maybe_expand_to_fit<T: SlabItem>(&mut self, len: usize) {
         let size = T::slab_size();
-        let capacity = self.capacity();
+        let capacity = self.slab.capacity();
         //log::trace!(
         //    "append_slice: {size} * {ts_len} + {len} ({}) >= {capacity}",
         //    size * ts_len + len
@@ -465,9 +532,9 @@ pub trait GrowableSlab: Slab {
         if capacity_needed > capacity {
             let mut new_capacity = capacity * 2;
             while new_capacity < capacity_needed {
-                new_capacity *= 2;
+                new_capacity = (new_capacity * 2).max(2);
             }
-            self.resize(new_capacity);
+            self.reserve_capacity(new_capacity);
         }
     }
 
@@ -478,7 +545,7 @@ pub trait GrowableSlab: Slab {
     ///
     /// NOTE: This changes the next available buffer index and may change the
     /// buffer capacity.
-    fn allocate<T: SlabItem>(&mut self) -> Id<T> {
+    pub fn allocate<T: SlabItem>(&mut self) -> Id<T> {
         self.maybe_expand_to_fit::<T>(1);
         let index = self.increment_len(T::slab_size());
         Id::from(index)
@@ -491,7 +558,7 @@ pub trait GrowableSlab: Slab {
     /// written later with [`Self::write_array`].
     ///
     /// NOTE: This changes the length of the buffer and may change the capacity.
-    fn allocate_array<T: SlabItem>(&mut self, len: usize) -> Array<T> {
+    pub fn allocate_array<T: SlabItem>(&mut self, len: usize) -> Array<T> {
         if len == 0 {
             return Array::default();
         }
@@ -501,16 +568,20 @@ pub trait GrowableSlab: Slab {
     }
 
     /// Append to the end of the buffer.
-    fn append<T: SlabItem + Default>(&mut self, t: &T) -> Id<T> {
+    ///
+    /// Returns the `Id` of the written element.
+    pub fn append<T: SlabItem + Default>(&mut self, t: &T) -> Id<T> {
         let id = self.allocate::<T>();
         // IGNORED: safe because we just allocated the id
-        let _ = self.write(id, t);
+        let _ = self.slab.write(id, t);
         id
     }
 
     /// Append a slice to the end of the buffer, resizing if necessary
     /// and returning a slabbed array.
-    fn append_array<T: SlabItem + Default>(&mut self, ts: &[T]) -> Array<T> {
+    ///
+    /// Returns the `Array` of the written elements.
+    pub fn append_array<T: SlabItem + Default>(&mut self, ts: &[T]) -> Array<T> {
         let array = self.allocate_array::<T>(ts.len());
         // IGNORED: safe because we just allocated the array
         let _ = self.write_array(array, ts);
@@ -518,13 +589,37 @@ pub trait GrowableSlab: Slab {
     }
 }
 
+#[cfg(not(target_arch = "spirv"))]
+impl GrowableSlab for Vec<u32> {
+    fn capacity(&self) -> usize {
+        Vec::capacity(self)
+    }
+
+    fn reserve_capacity(&mut self, capacity: usize) {
+        Vec::reserve(self, capacity - self.capacity());
+    }
+
+    fn increment_len(&mut self, n: usize) -> usize {
+        let index = self.len();
+        self.extend(core::iter::repeat(0).take(n));
+        index
+    }
+}
+
 #[cfg(test)]
 mod test {
     use glam::Vec4;
 
-    use crate::{array::Array, stage::Vertex};
+    use crate::{self as crabslab, Array, CpuSlab, SlabItem};
 
     use super::*;
+
+    #[derive(Debug, Default, PartialEq, SlabItem)]
+    struct Vertex {
+        position: Vec4,
+        color: Vec4,
+        uv: glam::Vec2,
+    }
 
     #[test]
     fn slab_array_readwrite() {
@@ -592,5 +687,28 @@ mod test {
 
         let array = slab.read(vertices_id);
         assert_eq!(vertices, array);
+    }
+
+    #[test]
+    fn cpuslab_sanity() {
+        let mut slab = CpuSlab::new(vec![]);
+        let v = Vertex {
+            position: Vec4::new(0.5, -0.5, 0.0, 1.0),
+            color: Vec4::new(1.0, 0.0, 0.0, 1.0),
+            ..Default::default()
+        };
+        let id = slab.append(&v);
+        assert_eq!(Id::new(0), id);
+        assert_eq!(v, slab.read(id));
+
+        let f32s = [1.1, 2.2, 3.3, 4.4f32];
+        let array = slab.append_array(&f32s);
+        assert_eq!(1.1, slab.read(array.at(0)));
+        assert_eq!(2.2, slab.read(array.at(1)));
+        assert_eq!(3.3, slab.read(array.at(2)));
+        assert_eq!(4.4, slab.read(array.at(3)));
+
+        let f32_vec = slab.read_vec(array);
+        assert_eq!(f32s, f32_vec[..]);
     }
 }

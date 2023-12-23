@@ -357,7 +357,7 @@ pub fn bloom_filter(
 mod test {
     use glam::{Mat4, Vec3};
 
-    use crate::Renderling;
+    use crate::{shader::stage::Camera, Renderling};
 
     use super::BloomFilter;
 
@@ -409,6 +409,52 @@ mod test {
             bloom.on = false;
         }
         let img = renderling.render_image().unwrap();
+        img_diff::assert_img_eq("bloom/off.png", img);
+    }
+
+    #[test]
+    fn physically_based_bloom() {
+        let mut r = Renderling::headless(100, 100).with_background_color(glam::Vec4::splat(1.0));
+        let stage = r.new_stage().with_bloom(true);
+        stage.configure_graph(&mut r, true);
+        let (doc, gpu_doc) = stage
+            .load_gltf_document_from_path("../../gltf/EmissiveStrengthTest.glb")
+            .unwrap();
+        // find the bounding box of the model so we can display it correctly
+        let mut min = Vec3::splat(f32::INFINITY);
+        let mut max = Vec3::splat(f32::NEG_INFINITY);
+        let scene = doc.default_scene().unwrap();
+        for top_level_node in scene.nodes() {
+            fn descend(node: gltf::Node, parent_tfrm: Mat4, min: &mut Vec3, max: &mut Vec3) {
+                let node_tfrm = Mat4::from_cols_array_2d(&node.transform().matrix());
+                let tfrm = parent_tfrm * node_tfrm;
+
+                if let Some(mesh) = node.mesh() {
+                    for primitive in mesh.primitives() {
+                        let aabb = primitive.bounding_box();
+                        let bbmin = aabb.min;
+                        let bbmax = aabb.max;
+                        let bbmin = tfrm.transform_point3(bbmin.into());
+                        let bbmax = tfrm.transform_point3(bbmax.into());
+                        *min = min.min(bbmin);
+                        *max = max.max(bbmax);
+                    }
+                }
+
+                for child in node.children() {
+                    descend(child, tfrm, min, max);
+                }
+            }
+            descend(top_level_node, Mat4::IDENTITY, &mut min, &mut max);
+        }
+
+        let length = min.distance(max);
+        let (projection, _) = crate::camera::default_perspective(100.0, 100.0);
+        let view = crate::camera::look_at(Vec3::new(0.0, 0.0, length), Vec3::ZERO, Vec3::Y);
+        let camera = stage.append(&Camera::new(projection, view));
+        let _draws = stage.draw_gltf_scene(&gpu_doc, camera, scene);
+
+        let img = r.render_image().unwrap();
         img_diff::assert_img_eq("bloom/off.png", img);
     }
 }

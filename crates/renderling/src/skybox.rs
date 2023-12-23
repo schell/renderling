@@ -1,8 +1,8 @@
 //! An HDR skybox.
 use glam::{Mat4, Vec3};
-use renderling_shader::stage::GpuConstants;
+use renderling_shader::{slab::Slab, stage::GpuConstants};
 
-use crate::{SceneImage, Uniform};
+use crate::{atlas::AtlasImage, Uniform};
 
 /// Render pipeline used to draw a skybox.
 pub struct SkyboxRenderPipeline(pub wgpu::RenderPipeline);
@@ -150,11 +150,11 @@ impl Skybox {
     /// Create an empty, transparent skybox.
     pub fn empty(device: &wgpu::Device, queue: &wgpu::Queue) -> Self {
         log::trace!("creating empty skybox");
-        let hdr_img = SceneImage {
+        let hdr_img = AtlasImage {
             pixels: vec![0u8; 4 * 4],
             width: 1,
             height: 1,
-            format: crate::SceneImageFormat::R32G32B32A32FLOAT,
+            format: crate::AtlasImageFormat::R32G32B32A32FLOAT,
             apply_linear_transfer: false,
         };
         Self::new(device, queue, hdr_img, crate::shader::id::Id::NONE)
@@ -164,11 +164,11 @@ impl Skybox {
     pub fn new(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        hdr_img: SceneImage,
+        hdr_img: AtlasImage,
         camera: crate::shader::id::Id<crate::shader::stage::Camera>,
     ) -> Self {
         log::trace!("creating skybox");
-        let equirectangular_texture = Skybox::hdr_texture_from_scene_image(device, queue, hdr_img);
+        let equirectangular_texture = Skybox::hdr_texture_from_atlas_image(device, queue, hdr_img);
         let proj = Mat4::perspective_rh(std::f32::consts::FRAC_PI_2, 1.0, 0.1, 10.0);
         let views = [
             Mat4::look_at_rh(
@@ -273,11 +273,11 @@ impl Skybox {
         }
     }
 
-    /// Convert an HDR [`SceneImage`] into a texture.
-    pub fn hdr_texture_from_scene_image(
+    /// Convert an HDR [`AtlasImage`] into a texture.
+    pub fn hdr_texture_from_atlas_image(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        img: SceneImage,
+        img: AtlasImage,
     ) -> crate::Texture {
         crate::Texture::new_with(
             device,
@@ -306,8 +306,8 @@ impl Skybox {
         queue: &wgpu::Queue,
         hdr_data: &[u8],
     ) -> crate::Texture {
-        let img = SceneImage::from_hdr_bytes(hdr_data).unwrap();
-        Self::hdr_texture_from_scene_image(device, queue, img)
+        let img = AtlasImage::from_hdr_bytes(hdr_data).unwrap();
+        Self::hdr_texture_from_atlas_image(device, queue, img)
     }
 
     fn create_environment_map_from_hdr(
@@ -323,15 +323,14 @@ impl Skybox {
             device,
             wgpu::TextureFormat::Rgba16Float,
         );
-        let mut constants = crate::uniform::Uniform::new(
+
+        let slab = Slab::new(
             device,
-            GpuConstants {
-                camera_projection: proj,
-                ..Default::default()
-            },
+            1,
             wgpu::BufferUsages::VERTEX,
             wgpu::ShaderStages::VERTEX,
         );
+        slab.write(0, &Camera::default().with_projection(proj));
 
         let bindgroup = crate::cubemap::cubemap_making_bindgroup(
             device,

@@ -5,8 +5,8 @@ use snafu::prelude::*;
 use std::{ops::Deref, sync::Arc};
 
 use crate::{
-    hdr::HdrSurface, CreateSurfaceFn, Graph, RenderTarget, Scene, SceneBuilder, Stage,
-    TextureError, UiDrawObject, UiScene, UiSceneBuilder, View, ViewMut, WgpuStateError,
+    hdr::HdrSurface, CreateSurfaceFn, Graph, RenderTarget, Stage, TextureError, UiScene,
+    UiSceneBuilder, View, ViewMut, WgpuStateError,
 };
 
 #[derive(Debug, Snafu)]
@@ -38,19 +38,12 @@ pub enum RenderlingError {
     #[snafu(display("gltf import failed: {}", source))]
     GltfImport { source: gltf::Error },
 
-    //#[snafu(display("could not create scene: {}", source))]
-    // Scene { source: crate::GltfError },
     #[snafu(display("missing resource"))]
     Resource { key: TypeKey },
 
     #[snafu(display("{source}"))]
     Graph { source: moongraph::GraphError },
 
-    //#[snafu(display("{source}"))]
-    // Lights { source: crate::light::LightsError },
-
-    //#[snafu(display("{source}"))]
-    // Object { source: crate::object::ObjectError },
     #[snafu(display(
         "Missing PostRenderBuffer resource. Ensure a node that creates PostRenderBuffer (like \
          PostRenderbufferCreate) is present in the graph: {source}"
@@ -126,30 +119,6 @@ impl Deref for DepthTexture {
 
 /// The global background color.
 pub struct BackgroundColor(pub Vec4);
-
-/// A helper struct for configuring calls to `Renderling::setup_render_graph`.
-pub struct RenderGraphConfig {
-    pub scene: Option<Scene>,
-    pub ui: Option<UiScene>,
-    pub objs: Vec<UiDrawObject>,
-    // Whether or not to use the screen capture node.
-    // You probably want this to be `true` if you are rendering headless.
-    pub with_screen_capture: bool,
-    // Whether or not to use bloom filter in post-processing.
-    pub with_bloom: bool,
-}
-
-impl Default for RenderGraphConfig {
-    fn default() -> Self {
-        Self {
-            scene: Default::default(),
-            ui: Default::default(),
-            objs: Default::default(),
-            with_screen_capture: false,
-            with_bloom: true,
-        }
-    }
-}
 
 /// A graph-based renderer that manages GPU resources for cameras, materials and
 /// meshes.
@@ -405,15 +374,6 @@ impl Renderling {
         Stage::new(device, queue)
     }
 
-    pub fn new_scene(&self) -> SceneBuilder {
-        let (device, queue) = self.get_device_and_queue_owned();
-        SceneBuilder::new(device.0, queue.0)
-    }
-
-    pub fn empty_scene(&self) -> Scene {
-        self.new_scene().build().unwrap()
-    }
-
     pub fn new_ui_scene(&self) -> UiSceneBuilder<'_> {
         let (device, _) = self.get_device_and_queue_owned();
         let queue = self.get_queue();
@@ -428,22 +388,6 @@ impl Renderling {
     /// Create a new `GlyphCache` used to cache text rendering info.
     pub fn new_glyph_cache(&self, fonts: Vec<crate::FontArc>) -> crate::GlyphCache {
         crate::GlyphCache::new(fonts)
-    }
-
-    /// Sets up the render graph with the given scenes and objects.
-    ///
-    /// The scenes and objects may be "visited" later, or even retrieved.
-    pub fn setup_render_graph(&mut self, config: RenderGraphConfig) {
-        let RenderGraphConfig {
-            scene,
-            ui,
-            objs,
-            with_screen_capture,
-            with_bloom,
-        } = config;
-        let scene = scene.unwrap_or_else(|| self.empty_scene());
-        let ui = ui.unwrap_or_else(|| self.empty_ui_scene());
-        crate::setup_render_graph(self, scene, ui, objs, with_screen_capture, with_bloom)
     }
 
     /// Render into an image.

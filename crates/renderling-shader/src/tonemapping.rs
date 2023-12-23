@@ -75,7 +75,7 @@ fn tone_map_aces_hill(mut color: Vec3) -> Vec3 {
 
 #[repr(transparent)]
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
-#[derive(Clone, Copy, Default, PartialEq, Eq, bytemuck::Zeroable, bytemuck::Pod)]
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
 pub struct Tonemap(u32);
 
 impl Tonemap {
@@ -87,7 +87,7 @@ impl Tonemap {
 }
 
 #[repr(C)]
-#[derive(Clone, Copy, PartialEq, bytemuck::Zeroable, bytemuck::Pod)]
+#[derive(Clone, Copy, PartialEq)]
 pub struct TonemapConstants {
     pub tonemap: Tonemap,
     pub exposure: f32,

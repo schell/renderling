@@ -6,16 +6,16 @@ use crate::{
     array::Array,
     id::Id,
     pbr::PbrMaterial,
-    slab::{Slab, Slabbed},
+    slab::{Slab, SlabItem},
     texture::GpuTexture,
 };
 #[repr(transparent)]
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
-#[derive(Default, Clone, Copy, Slabbed)]
+#[derive(Default, Clone, Copy, SlabItem)]
 pub struct GltfBuffer(pub Array<u32>);
 
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
-#[derive(Default, Clone, Copy, Slabbed)]
+#[derive(Default, Clone, Copy, SlabItem)]
 pub struct GltfBufferView {
     // Pointer to the parent buffer.
     pub buffer: Id<GltfBuffer>,
@@ -42,7 +42,7 @@ pub enum DataType {
     F32,
 }
 
-impl Slabbed for DataType {
+impl SlabItem for DataType {
     fn slab_size() -> usize {
         // 1
         u32::slab_size()
@@ -84,7 +84,7 @@ pub enum Dimensions {
     Mat4,
 }
 
-impl Slabbed for Dimensions {
+impl SlabItem for Dimensions {
     fn slab_size() -> usize {
         1
     }
@@ -121,7 +121,7 @@ impl Slabbed for Dimensions {
 }
 
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
-#[derive(Default, Clone, Copy, Slabbed)]
+#[derive(Default, Clone, Copy, SlabItem)]
 pub struct GltfAccessor {
     // The byte size of each element that this accessor describes.
     //
@@ -607,7 +607,7 @@ impl GltfAccessor {
 }
 
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
-#[derive(Default, Clone, Copy, Slabbed)]
+#[derive(Default, Clone, Copy, SlabItem)]
 pub struct GltfPrimitive {
     pub vertex_count: u32,
     pub material: Id<PbrMaterial>,
@@ -719,7 +719,7 @@ impl GltfPrimitive {
 }
 
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
-#[derive(Default, Clone, Copy, Slabbed)]
+#[derive(Default, Clone, Copy, SlabItem)]
 pub struct GltfMesh {
     pub primitives: Array<GltfPrimitive>,
     pub weights: Array<f32>,
@@ -758,7 +758,7 @@ impl Default for GltfCamera {
     }
 }
 
-impl Slabbed for GltfCamera {
+impl SlabItem for GltfCamera {
     fn slab_size() -> usize {
         1 + 4
     }
@@ -847,7 +847,7 @@ pub enum GltfLightKind {
     },
 }
 
-impl Slabbed for GltfLightKind {
+impl SlabItem for GltfLightKind {
     fn slab_size() -> usize {
         1 // hash
             + 2 // inner_cone_angle, outer_cone_angle
@@ -896,7 +896,7 @@ impl Slabbed for GltfLightKind {
     }
 }
 
-#[derive(Default, Clone, Copy, Slabbed)]
+#[derive(Default, Clone, Copy, SlabItem)]
 pub struct GltfLight {
     pub color: glam::Vec3,
     pub intensity: f32,
@@ -905,14 +905,14 @@ pub struct GltfLight {
     pub kind: GltfLightKind,
 }
 
-#[derive(Default, Clone, Copy, Slabbed)]
+#[derive(Default, Clone, Copy, SlabItem)]
 pub struct GltfSkin {
     pub joints: Array<Id<GltfNode>>,
     pub inverse_bind_matrices: Id<GltfAccessor>,
     pub skeleton: Id<GltfNode>,
 }
 
-#[derive(Clone, Copy, Slabbed)]
+#[derive(Clone, Copy, SlabItem)]
 pub struct GltfNode {
     pub camera: Id<GltfCamera>,
     pub children: Array<Id<GltfNode>>,
@@ -950,7 +950,7 @@ pub enum GltfInterpolation {
     CubicSpline,
 }
 
-impl Slabbed for GltfInterpolation {
+impl SlabItem for GltfInterpolation {
     fn slab_size() -> usize {
         1
     }
@@ -978,7 +978,7 @@ impl Slabbed for GltfInterpolation {
     }
 }
 
-#[derive(Default, Clone, Copy, PartialEq, Slabbed)]
+#[derive(Default, Clone, Copy, PartialEq, SlabItem)]
 pub struct GltfAnimationSampler {
     pub input: Id<GltfAccessor>,
     pub output: Id<GltfAccessor>,
@@ -995,7 +995,7 @@ pub enum GltfTargetProperty {
     MorphTargetWeights,
 }
 
-impl Slabbed for GltfTargetProperty {
+impl SlabItem for GltfTargetProperty {
     fn slab_size() -> usize {
         1
     }
@@ -1025,25 +1025,25 @@ impl Slabbed for GltfTargetProperty {
     }
 }
 
-#[derive(Default, Clone, Copy, Slabbed)]
+#[derive(Default, Clone, Copy, SlabItem)]
 pub struct GltfTarget {
     pub node: Id<GltfNode>,
     pub property: GltfTargetProperty,
 }
 
-#[derive(Default, Clone, Copy, Slabbed)]
+#[derive(Default, Clone, Copy, SlabItem)]
 pub struct GltfChannel {
     pub sampler: Id<GltfAnimationSampler>,
     pub target: GltfTarget,
 }
 
-#[derive(Default, Clone, Copy, Slabbed)]
+#[derive(Default, Clone, Copy, SlabItem)]
 pub struct GltfAnimation {
     pub channels: Array<GltfChannel>,
     pub samplers: Array<GltfAnimationSampler>,
 }
 
-#[derive(Default, Clone, Copy, Slabbed)]
+#[derive(Default, Clone, Copy, SlabItem)]
 pub struct GltfScene {
     pub nodes: Array<Id<GltfNode>>,
 }
@@ -1051,7 +1051,7 @@ pub struct GltfScene {
 /// A document of Gltf data.
 ///
 /// This tells where certain parts of the Gltf document are stored in the [`Stage`]'s slab.
-#[derive(Default, Clone, Copy, Slabbed)]
+#[derive(Default, Clone, Copy, SlabItem)]
 pub struct GltfDocument {
     pub accessors: Array<GltfAccessor>,
     pub animations: Array<GltfAnimation>,

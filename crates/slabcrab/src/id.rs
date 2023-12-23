@@ -1,11 +1,11 @@
 //! Typed identifiers that can also be used as indices.
 use core::marker::PhantomData;
 
-use crate::{self as renderling_shader, slab::SlabItem};
+use crate::{self as crabslab, slab::SlabItem};
 
 pub const ID_NONE: u32 = u32::MAX;
 
-/// An identifier.
+/// An identifier that can be used to read or write a type from/into the slab.
 #[repr(transparent)]
 #[derive(SlabItem)]
 pub struct Id<T>(pub(crate) u32, PhantomData<T>);
@@ -146,7 +146,7 @@ impl<T> Id<T> {
 /// Offset functions are automatically derived for `SlabItem` structs.
 ///
 /// ```rust
-/// use renderling_shader::{id::{Id, Offset}, slab::{Slab, SlabItem}};
+/// use crabslab::{Id, Offset, Slab, SlabItem};
 ///
 /// #[derive(Debug, Default, PartialEq, SlabItem)]
 /// pub struct Parent {
@@ -157,7 +157,10 @@ impl<T> Id<T> {
 /// let mut slab = [0u32; 10];
 ///
 /// let parent_id = Id::new(3);
-/// let parent = Parent{ child_a: 0, child_b: 1 };
+/// let parent = Parent {
+///     child_a: 0,
+///     child_b: 1,
+/// };
 /// slab.write(parent_id, &parent);
 /// assert_eq!(parent, slab.read(parent_id));
 ///
@@ -203,15 +206,20 @@ impl<T> Offset<T> {
 
 #[cfg(test)]
 mod test {
-    use crate::stage::GpuEntity;
-
     use super::*;
+
+    #[derive(SlabItem)]
+    struct MyEntity {
+        name: u32,
+        age: f32,
+        destiny: [u32; 3],
+    }
 
     #[test]
     fn id_size() {
         assert_eq!(
             std::mem::size_of::<u32>(),
-            std::mem::size_of::<Id<GpuEntity>>(),
+            std::mem::size_of::<Id<MyEntity>>(),
             "id is not u32"
         );
     }

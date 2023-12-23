@@ -19,7 +19,7 @@ wasm = ["wgpu/fragile-send-sync-non-atomic-wasm"]
 [dependencies]
 ab_glyph = { version = "0.2", optional = true }
 any_vec = "0.13"
-async-channel = "1.8"
+async-channel = {workspace=true}
 crunch = "0.5"
 futures-lite = {workspace=true}
 glyph_brush = { version = "0.7", optional = true }

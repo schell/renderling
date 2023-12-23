@@ -9,13 +9,7 @@ use spirv_std::{
 #[cfg(target_arch = "spirv")]
 use spirv_std::num_traits::Float;
 
-use crate::{
-    id::Id,
-    math,
-    slab::Slab,
-    stage::{Camera, GpuConstants},
-    IsVector,
-};
+use crate::{id::Id, math, slab::Slab, stage::Camera, IsVector};
 
 const INV_ATAN: Vec2 = Vec2::new(0.1591, core::f32::consts::FRAC_1_PI);
 
@@ -26,21 +20,6 @@ pub fn direction_to_equirectangular_uv(dir: Vec3) -> Vec2 {
     uv *= INV_ATAN;
     uv += 0.5;
     uv
-}
-
-#[spirv(vertex)]
-pub fn vertex(
-    #[spirv(vertex_index)] vertex_id: u32,
-    #[spirv(uniform, descriptor_set = 0, binding = 0)] constants: &GpuConstants,
-    local_pos: &mut Vec3,
-    #[spirv(position)] gl_pos: &mut Vec4,
-) {
-    let point = math::CUBE[vertex_id as usize];
-    *local_pos = point;
-    let camera_view_without_translation = Mat3::from_mat4(constants.camera_view);
-    let rot_view = Mat4::from_mat3(camera_view_without_translation);
-    let clip_pos = constants.camera_projection * rot_view * point.extend(1.0);
-    *gl_pos = clip_pos.xyww();
 }
 
 #[spirv(vertex)]
@@ -88,16 +67,19 @@ pub fn fragment_cubemap(
 /// Passes the singular `Vec3` position attribute to the fragment shader unchanged,
 /// while transforming `gl_pos` by the camera projection*view;
 ///
+/// Expects there to be a [`Camera`] in the slab at index 0.
+///
 /// Used to create a cubemap from an equirectangular image as well as cubemap convolutions.
 #[spirv(vertex)]
 pub fn vertex_position_passthru(
-    #[spirv(uniform, descriptor_set = 0, binding = 0)] constants: &GpuConstants,
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] slab: &[u32],
     in_pos: Vec3,
     local_pos: &mut Vec3,
     #[spirv(position)] gl_pos: &mut Vec4,
 ) {
+    let camera = slab.read(Id::<Camera>::new(0));
     *local_pos = in_pos;
-    *gl_pos = constants.camera_projection * constants.camera_view * in_pos.extend(1.0);
+    *gl_pos = camera.projection * camera.view * in_pos.extend(1.0);
 }
 
 /// Colors a skybox using an equirectangular texture.
