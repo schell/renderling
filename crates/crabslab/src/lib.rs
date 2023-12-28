@@ -1,3 +1,4 @@
+#![cfg_attr(target_arch = "spirv", no_std)]
 //! Creating and crafting a tasty slab of memory.
 
 mod array;

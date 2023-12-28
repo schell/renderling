@@ -1,5 +1,6 @@
 //! Skybox shader.
 
+use crabslab::{Id, Slab};
 use glam::{Mat3, Mat4, Vec2, Vec3, Vec4, Vec4Swizzles};
 use spirv_std::{
     image::{Cubemap, Image2d},
@@ -9,7 +10,7 @@ use spirv_std::{
 #[cfg(target_arch = "spirv")]
 use spirv_std::num_traits::Float;
 
-use crate::{id::Id, math, slab::Slab, stage::Camera, IsVector};
+use crate::{math, stage::Camera, IsVector};
 
 const INV_ATAN: Vec2 = Vec2::new(0.1591, core::f32::consts::FRAC_1_PI);
 
@@ -22,8 +23,9 @@ pub fn direction_to_equirectangular_uv(dir: Vec3) -> Vec2 {
     uv
 }
 
+/// Vertex shader for a skybox.
 #[spirv(vertex)]
-pub fn slabbed_vertex(
+pub fn vertex(
     #[spirv(instance_index)] camera_index: u32,
     #[spirv(vertex_index)] vertex_index: u32,
     #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] slab: &[u32],
@@ -42,18 +44,6 @@ pub fn slabbed_vertex(
 
 /// Colors a skybox using a cubemap texture.
 #[spirv(fragment)]
-pub fn stage_skybox_cubemap(
-    #[spirv(descriptor_set = 1, binding = 8)] texture: &Cubemap,
-    #[spirv(descriptor_set = 1, binding = 9)] sampler: &Sampler,
-    local_pos: Vec3,
-    out_color: &mut Vec4,
-) {
-    let env_color: Vec3 = texture.sample(*sampler, local_pos.alt_norm_or_zero()).xyz();
-    *out_color = env_color.extend(1.0);
-}
-
-/// Colors a skybox using a cubemap texture.
-#[spirv(fragment)]
 pub fn fragment_cubemap(
     #[spirv(descriptor_set = 0, binding = 1)] texture: &Cubemap,
     #[spirv(descriptor_set = 0, binding = 2)] sampler: &Sampler,
@@ -64,12 +54,13 @@ pub fn fragment_cubemap(
     *out_color = env_color.extend(1.0);
 }
 
-/// Passes the singular `Vec3` position attribute to the fragment shader unchanged,
-/// while transforming `gl_pos` by the camera projection*view;
+/// Passes the singular `Vec3` position attribute to the fragment shader
+/// unchanged, while transforming `gl_pos` by the camera projection*view;
 ///
 /// Expects there to be a [`Camera`] in the slab at index 0.
 ///
-/// Used to create a cubemap from an equirectangular image as well as cubemap convolutions.
+/// Used to create a cubemap from an equirectangular image as well as cubemap
+/// convolutions.
 #[spirv(vertex)]
 pub fn vertex_position_passthru(
     #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] slab: &[u32],

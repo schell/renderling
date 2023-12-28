@@ -1,11 +1,8 @@
 //! GPU textures.
+use crabslab::SlabItem;
 use glam::{UVec2, Vec2};
-use renderling_derive::SlabItem;
 
-use crate::{
-    self as renderling_shader,
-    bits::{bits, extract, insert},
-};
+use crate::bits::{bits, extract, insert};
 
 #[cfg(target_arch = "spirv")]
 use spirv_std::num_traits::*;

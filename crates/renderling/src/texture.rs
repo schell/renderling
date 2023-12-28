@@ -552,8 +552,8 @@ impl Texture {
     /// Generate `mipmap_levels - 1` mipmaps for the given texture.
     ///
     /// ## Note
-    /// Ensure that `self` only has one mip level. If not it will try to sample from
-    /// an empty mip.
+    /// Ensure that `self` only has one mip level. If not it will try to sample
+    /// from an empty mip.
     pub fn generate_mips(
         &mut self,
         device: &wgpu::Device,
@@ -805,17 +805,17 @@ impl CopiedTextureBuffer {
         Ok(image::DynamicImage::from(img_buffer))
     }
 
-    /// Convert the post render buffer into an internal-format [`SceneImage`].
+    /// Convert the post render buffer into an internal-format [`AtlasImage`].
     pub fn into_scene_image(
         self,
         device: &wgpu::Device,
-    ) -> Result<crate::SceneImage, TextureError> {
+    ) -> Result<crate::AtlasImage, TextureError> {
         let pixels = self.pixels(device);
-        let img = crate::SceneImage {
+        let img = crate::AtlasImage {
             pixels,
             width: self.dimensions.width as u32,
             height: self.dimensions.height as u32,
-            format: crate::SceneImageFormat::from_wgpu_texture_format(self.format)
+            format: crate::AtlasImageFormat::from_wgpu_texture_format(self.format)
                 .context(UnsupportedFormatSnafu)?,
             apply_linear_transfer: false,
         };

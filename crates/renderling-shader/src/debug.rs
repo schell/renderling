@@ -1,6 +1,5 @@
 //! Debugging helpers.
-use crate as renderling_shader;
-use crate::slab::SlabItem;
+use crabslab::SlabItem;
 
 /// Used to debug shaders by early exiting the shader and attempting to display
 /// the value as shaded colors.
@@ -58,16 +57,19 @@ pub enum DebugChannel {
     /// Displays only the occlusion color for the fragment.
     Occlusion,
 
-    /// Displays only the calculated emissive effect (emissive_tex_color * emissive_factor * emissive_strength) of the fragment.
+    /// Displays only the calculated emissive effect (emissive_tex_color *
+    /// emissive_factor * emissive_strength) of the fragment.
     Emissive,
 
-    /// Displays only the emissive color (from the emissive map texture) of the fragment.
+    /// Displays only the emissive color (from the emissive map texture) of the
+    /// fragment.
     UvEmissive,
 
     /// Displays only teh emissive factor of the fragment.
     EmissiveFactor,
 
-    /// Displays only the emissive strength of the fragment (KHR_materials_emissive_strength).
+    /// Displays only the emissive strength of the fragment
+    /// (KHR_materials_emissive_strength).
     EmissiveStrength,
 }
 

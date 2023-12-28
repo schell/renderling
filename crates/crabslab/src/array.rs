@@ -1,8 +1,7 @@
 //! A slab-allocated array.
 use core::marker::PhantomData;
 
-use crate::id::Id;
-use crate::slab::SlabItem;
+use crate::{id::Id, slab::SlabItem};
 
 #[derive(Clone, Copy)]
 pub struct ArrayIter<T> {
@@ -60,9 +59,12 @@ impl<T> From<Id<T>> for Array<T> {
 impl<T> core::fmt::Debug for Array<T> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         if self.is_null() {
-            f.write_fmt(format_args!("Array<{}>(null)", core::any::type_name::<T>()))
+            f.write_fmt(core::format_args!(
+                "Array<{}>(null)",
+                core::any::type_name::<T>()
+            ))
         } else {
-            f.write_fmt(format_args!(
+            f.write_fmt(core::format_args!(
                 "Array<{}>({}, {})",
                 core::any::type_name::<T>(),
                 self.index,

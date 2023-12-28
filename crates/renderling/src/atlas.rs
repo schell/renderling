@@ -157,8 +157,7 @@ impl Atlas {
                 | wgpu::TextureUsages::COPY_SRC,
             view_formats: &[],
         });
-        let img =
-            RgbaImage::from_pixel(extent.width, extent.height, atlas_image::Rgba([0, 0, 0, 0]));
+        let img = RgbaImage::from_pixel(extent.width, extent.height, image::Rgba([0, 0, 0, 0]));
         queue.write_texture(
             wgpu::ImageCopyTextureBase {
                 texture: &texture,
@@ -399,7 +398,6 @@ impl Atlas {
     ///
     /// Returns a vector of ids that determine the locations of the given images
     /// within the atlas.
-    ///
     pub fn pack(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
@@ -502,7 +500,8 @@ impl Atlas {
     /// This is primarily for testing.
     ///
     /// ## Panics
-    /// Panics if the pixels read from the GPU cannot be converted into an `RgbaImage`.
+    /// Panics if the pixels read from the GPU cannot be converted into an
+    /// `RgbaImage`.
     pub fn atlas_img(&self, device: &wgpu::Device, queue: &wgpu::Queue) -> RgbaImage {
         let buffer = crate::Texture::read(
             &self.texture.texture,

@@ -18,8 +18,7 @@
 //! - forward+ style pipeline, configurable lighting model per material
 //!   - [ ] light tiling
 //!   - [ ] occlusion culling
-//!   - [x] physically based shading
-//!     atlas)
+//!   - [x] physically based shading atlas)
 //! - [x] gltf support
 //!   - [x] scenes, nodes
 //!   - [x] cameras
@@ -30,7 +29,7 @@
 //!   - [x] animations
 //! - [x] high definition rendering
 //! - [x] image based lighting
-//! - [x] bloom
+//! - [ ] bloom
 //! - [ ] ssao
 //! - [ ] depth of field
 //!
@@ -41,7 +40,6 @@
 // TODO: Audit the API and make it more ergonomic/predictable.
 
 mod atlas;
-pub mod bloom;
 mod buffer_array;
 mod camera;
 pub mod cubemap;
@@ -53,12 +51,12 @@ pub mod math;
 pub mod mesh;
 mod renderer;
 mod skybox;
-mod slab;
 mod stage;
 mod state;
 #[cfg(feature = "text")]
 mod text;
 mod texture;
+mod tonemapping;
 //mod tutorial;
 mod ui;
 mod uniform;
@@ -70,12 +68,12 @@ pub use hdr::*;
 use image::GenericImageView;
 pub use renderer::*;
 pub use skybox::*;
-pub use slab::*;
 pub use stage::*;
 pub use state::*;
 #[cfg(feature = "text")]
 pub use text::*;
 pub use texture::*;
+pub use tonemapping::*;
 pub use ui::*;
 pub use uniform::*;
 
@@ -94,8 +92,8 @@ pub mod graph {
     pub type RenderNode = Node<Function, TypeKey>;
 }
 
+pub use crabslab::*;
 pub use graph::{graph, Graph, GraphError, Move, View, ViewMut};
-pub use renderling_shader::id::{Id, ID_NONE};
 pub mod shader {
     //! Re-exports of [`renderling_shader`].
     pub use renderling_shader::*;
@@ -145,97 +143,6 @@ impl crate::shader::SampleCube for CpuCubemap {
     }
 }
 
-/// Set up the render graph, including:
-/// * 3d scene objects
-/// * skybox
-/// * bloom filter
-/// * hdr tonemapping
-/// * UI
-///
-/// This is mostly for internal use. See [`Renderling::setup_render_graph`].
-pub fn setup_render_graph(
-    r: &mut Renderling,
-    scene: Scene,
-    ui_scene: UiScene,
-    ui_objects: impl IntoIterator<Item = UiDrawObject>,
-    with_screen_capture: bool,
-    with_bloom: bool,
-) {
-    // add resources
-    let ui_objects = UiDrawObjects(ui_objects.into_iter().collect::<Vec<_>>());
-    r.graph.add_resource(ui_scene);
-    r.graph.add_resource(ui_objects);
-    r.graph.add_resource(scene);
-    let ui_pipeline = UiRenderPipeline(
-        r.graph
-            .visit(|(device, target): (View<Device>, View<RenderTarget>)| {
-                create_ui_pipeline(&device, target.format())
-            })
-            .unwrap(),
-    );
-    r.graph.add_resource(ui_pipeline);
-
-    let (hdr_surface,) = r
-        .graph
-        .visit(hdr::create_hdr_render_surface)
-        .unwrap()
-        .unwrap();
-    let device = r.get_device();
-    let queue = r.get_queue();
-    let hdr_texture_format = hdr_surface.hdr_texture.texture.format();
-    let size = hdr_surface.hdr_texture.texture.size();
-    let scene_render_pipeline =
-        SceneRenderPipeline(create_scene_render_pipeline(device, hdr_texture_format));
-    let compute_cull_pipeline =
-        SceneComputeCullPipeline(create_scene_compute_cull_pipeline(device));
-    let skybox_pipeline = crate::skybox::create_skybox_render_pipeline(device, hdr_texture_format);
-    let mut bloom = crate::bloom::BloomFilter::new(device, queue, size.width, size.height);
-    bloom.on = with_bloom;
-    r.graph.add_resource(scene_render_pipeline);
-    r.graph.add_resource(hdr_surface);
-    r.graph.add_resource(compute_cull_pipeline);
-    r.graph.add_resource(skybox_pipeline);
-    r.graph.add_resource(bloom);
-
-    // pre-render subgraph
-    use frame::{clear_depth, create_frame, present};
-
-    #[cfg(not(target_arch = "wasm32"))]
-    let scene_cull = scene_cull_gpu;
-    #[cfg(target_arch = "wasm32")]
-    let scene_cull = scene_cull_cpu;
-    r.graph
-        .add_subgraph(graph!(
-            create_frame,
-            clear_surface_hdr_and_depth,
-            hdr_surface_update,
-            scene_update < scene_cull,
-            ui_scene_update
-        ))
-        .add_barrier();
-
-    // render subgraph
-    use crate::bloom::bloom_filter;
-    r.graph
-        .add_subgraph(graph!(
-            scene_render
-                < skybox_render
-                < bloom_filter
-                < tonemapping
-                < clear_depth
-                < ui_scene_render
-        ))
-        .add_barrier();
-
-    // post-render subgraph
-    r.graph.add_subgraph(if with_screen_capture {
-        use crate::frame::copy_frame_to_post;
-        graph!(copy_frame_to_post < present)
-    } else {
-        graph!(present)
-    });
-}
-
 #[cfg(test)]
 #[ctor::ctor]
 fn init_logging() {
@@ -253,10 +160,11 @@ fn init_logging() {
 #[cfg(test)]
 mod test {
     use super::*;
-    use glam::{Mat3, Mat4, Quat, UVec2, Vec2, Vec3, Vec4, Vec4Swizzles};
+    use glam::{Mat3, Mat4, Quat, Vec2, Vec3, Vec4};
     use pretty_assertions::assert_eq;
     use renderling_shader::{
         gltf as gl,
+        pbr::PbrMaterial,
         stage::{light::*, Camera, RenderUnit, Transform, Vertex},
     };
 
@@ -296,7 +204,7 @@ mod test {
     // This tests our ability to draw a CMYK triangle in the top left corner.
     fn cmy_triangle_sanity() {
         let mut r = Renderling::headless(100, 100).with_background_color(Vec4::splat(1.0));
-        let stage = r.new_stage();
+        let mut stage = r.new_stage();
         stage.configure_graph(&mut r, true);
         let (projection, view) = default_ortho2d(100.0, 100.0);
         let camera = stage.append(&Camera {
@@ -411,7 +319,7 @@ mod test {
     // Tests our ability to draw a CMYK cube.
     fn cmy_cube_sanity() {
         let mut r = Renderling::headless(100, 100).with_background_color(Vec4::splat(1.0));
-        let stage = r.new_stage();
+        let mut stage = r.new_stage();
         stage.configure_graph(&mut r, true);
         let camera_position = Vec3::new(0.0, 12.0, 20.0);
         let camera = stage.append(&Camera {
@@ -450,7 +358,7 @@ mod test {
     // them.
     fn cmy_cube_visible() {
         let mut r = Renderling::headless(100, 100).with_background_color(Vec4::splat(1.0));
-        let stage = r.new_stage();
+        let mut stage = r.new_stage();
         stage.configure_graph(&mut r, true);
         let (projection, view) = camera::default_perspective(100.0, 100.0);
         let camera = stage.append(&Camera {
@@ -508,8 +416,8 @@ mod test {
     }
 
     #[test]
-    // Tests the ability to specify indexed vertices, as well as the ability to update
-    // a field within a struct stored on the slab by offset.
+    // Tests the ability to specify indexed vertices, as well as the ability to
+    // update a field within a struct stored on the slab by offset.
     fn cmy_cube_remesh() {
         let mut r = Renderling::headless(100, 100).with_background_color(Vec4::splat(1.0));
         let stage = r.new_stage().with_lighting(false);
@@ -617,7 +525,8 @@ mod test {
     }
 
     #[test]
-    // Tests that updating the material actually updates the rendering of an unlit mesh
+    // Tests that updating the material actually updates the rendering of an unlit
+    // mesh
     fn unlit_textured_cube_material() {
         let mut r = Renderling::headless(100, 100).with_background_color(Vec4::splat(0.0));
         let stage = r.new_stage();
@@ -628,8 +537,8 @@ mod test {
             view,
             ..Default::default()
         });
-        let sandstone = SceneImage::from(image::open("../../img/sandstone.png").unwrap());
-        let dirt = SceneImage::from(image::open("../../img/dirt.jpg").unwrap());
+        let sandstone = AtlasImage::from(image::open("../../img/sandstone.png").unwrap());
+        let dirt = AtlasImage::from(image::open("../../img/dirt.jpg").unwrap());
         let textures = stage.set_images([sandstone, dirt]).unwrap();
         let sandstone_tex = textures[0];
         let dirt_tex = textures[1];
@@ -679,7 +588,7 @@ mod test {
     fn multi_node_scene() {
         let mut r =
             Renderling::headless(100, 100).with_background_color(Vec3::splat(0.0).extend(1.0));
-        let stage = r.new_stage();
+        let mut stage = r.new_stage();
         stage.configure_graph(&mut r, true);
 
         let (projection, view) = camera::default_ortho2d(100.0, 100.0);
@@ -690,7 +599,7 @@ mod test {
         });
 
         // now test the textures functionality
-        let img = SceneImage::from_path("../../img/cheetah.jpg").unwrap();
+        let img = AtlasImage::from_path("../../img/cheetah.jpg").unwrap();
         let textures = stage.append_array(&stage.set_images([img]).unwrap());
         let cheetah_material = stage.append(&PbrMaterial {
             albedo_texture: textures.at(0),
@@ -767,7 +676,7 @@ mod test {
     fn scene_cube_directional() {
         let mut r =
             Renderling::headless(100, 100).with_background_color(Vec3::splat(0.0).extend(1.0));
-        let stage = r.new_stage();
+        let mut stage = r.new_stage();
         stage.configure_graph(&mut r, true);
 
         let (projection, _) = camera::default_perspective(100.0, 100.0);
@@ -1013,7 +922,7 @@ mod test {
         let ss = 600;
         let mut r =
             Renderling::headless(ss, ss).with_background_color(Vec3::splat(0.0).extend(1.0));
-        let stage = r.new_stage();
+        let mut stage = r.new_stage();
         stage.configure_graph(&mut r, true);
 
         let radius = 0.5;
@@ -1083,7 +992,7 @@ mod test {
         }
 
         let (device, queue) = r.get_device_and_queue_owned();
-        let hdr_image = SceneImage::from_hdr_path("../../img/hdr/resting_place.hdr").unwrap();
+        let hdr_image = AtlasImage::from_hdr_path("../../img/hdr/resting_place.hdr").unwrap();
         let skybox = crate::skybox::Skybox::new(&device, &queue, hdr_image, camera);
         stage.set_skybox(skybox);
 

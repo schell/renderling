@@ -1,9 +1,5 @@
 //! Render pipelines and layouts for creating cubemaps.
 
-use renderling_shader::stage::GpuConstants;
-
-use crate::Uniform;
-
 pub fn cubemap_making_bindgroup_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
     device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some("cubemap-making bindgroup"),
@@ -12,7 +8,7 @@ pub fn cubemap_making_bindgroup_layout(device: &wgpu::Device) -> wgpu::BindGroup
                 binding: 0,
                 visibility: wgpu::ShaderStages::VERTEX,
                 ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
+                    ty: wgpu::BufferBindingType::Storage { read_only: true },
                     has_dynamic_offset: false,
                     min_binding_size: None,
                 },
@@ -41,7 +37,7 @@ pub fn cubemap_making_bindgroup_layout(device: &wgpu::Device) -> wgpu::BindGroup
 pub fn cubemap_making_bindgroup(
     device: &wgpu::Device,
     label: Option<&str>,
-    constants: &Uniform<GpuConstants>,
+    buffer: &wgpu::Buffer,
     // The texture to sample the environment from
     texture: &crate::Texture,
 ) -> wgpu::BindGroup {
@@ -51,9 +47,7 @@ pub fn cubemap_making_bindgroup(
         entries: &[
             wgpu::BindGroupEntry {
                 binding: 0,
-                resource: wgpu::BindingResource::Buffer(
-                    constants.buffer().as_entire_buffer_binding(),
-                ),
+                resource: wgpu::BindingResource::Buffer(buffer.as_entire_buffer_binding()),
             },
             wgpu::BindGroupEntry {
                 binding: 1,

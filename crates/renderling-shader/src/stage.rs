@@ -5,6 +5,7 @@
 //!
 //! To read more about the technique, check out these resources:
 //! * https://stackoverflow.com/questions/59686151/what-is-gpu-driven-rendering
+use crabslab::{Array, Id, Slab, SlabItem, ID_NONE};
 use glam::{mat3, Mat4, Quat, UVec2, UVec3, Vec2, Vec3, Vec4, Vec4Swizzles};
 use spirv_std::{
     image::{Cubemap, Image2d},
@@ -15,14 +16,10 @@ use spirv_std::{
 use spirv_std::num_traits::*;
 
 use crate::{
-    self as renderling_shader,
-    array::Array,
     bits::{bits, extract, insert},
     debug::*,
     gltf::{GltfMesh, GltfNode},
-    id::{Id, ID_NONE},
     pbr::{self, PbrMaterial},
-    slab::{Slab, SlabItem},
     texture::GpuTexture,
     IsMatrix, IsSampler, IsVector, Sample2d, SampleCube,
 };
@@ -1531,7 +1528,8 @@ pub fn compute_cull_entities(
 }
 
 #[spirv(compute(threads(32)))]
-/// A shader to ensure that we can extract i8 and i16 values from a storage buffer.
+/// A shader to ensure that we can extract i8 and i16 values from a storage
+/// buffer.
 pub fn test_i8_i16_extraction(
     #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] slab: &mut [u32],
     #[spirv(global_invocation_id)] global_id: UVec3,
@@ -1544,32 +1542,5 @@ pub fn test_i8_i16_extraction(
     let (value, _, _) = crate::bits::extract_i16(index, 2, slab);
     if value > 0 {
         slab[index] = value as u32;
-    }
-}
-
-#[cfg(test)]
-mod test {
-    use crate::{self as renderling_shader, id::Id, slab::Slab};
-    use renderling_shader::slab::SlabItem;
-
-    #[derive(Default, Debug, PartialEq, SlabItem)]
-    struct TheType {
-        a: glam::Vec3,
-        b: glam::Vec2,
-        c: glam::Vec4,
-    }
-
-    #[test]
-    fn slabbed_writeread() {
-        let mut slab = [0u32; 100];
-        let the = TheType {
-            a: glam::Vec3::new(0.0, 1.0, 2.0),
-            b: glam::Vec2::new(3.0, 4.0),
-            c: glam::Vec4::new(5.0, 6.0, 7.0, 8.0),
-        };
-        let index = slab.write_indexed(&the, 0);
-        assert_eq!(9, index);
-        let the2 = slab.read(Id::<TheType>::new(0));
-        assert_eq!(the, the2);
     }
 }

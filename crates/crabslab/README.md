@@ -9,6 +9,15 @@
 ### Opinion
 Working with shaders is much easier using a slab.
 
+### rust-gpu
+This crate was made to work with [`rust-gpu`](https://github.com/EmbarkStudios/rust-gpu/).
+Specifically, using this crate it is possible to pack your types into a buffer on the CPU
+and then read your types from the slab on the GPU (in Rust).
+
+### Other no-std platforms
+Even though this crate was written with `rust-gpu` in mind, it should work in other `no-std`
+contexts.
+
 ## how
 `crabslab` includes:
 * a few traits:

@@ -1,14 +1,8 @@
 //! Gltf types that are used in shaders.
+use crabslab::{Array, Id, Slab, SlabItem};
 use glam::{Vec2, Vec3, Vec4};
 
-use crate::{
-    self as renderling_shader,
-    array::Array,
-    id::Id,
-    pbr::PbrMaterial,
-    slab::{Slab, SlabItem},
-    texture::GpuTexture,
-};
+use crate::{pbr::PbrMaterial, texture::GpuTexture};
 #[repr(transparent)]
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[derive(Default, Clone, Copy, SlabItem)]
@@ -124,12 +118,10 @@ impl SlabItem for Dimensions {
 #[derive(Default, Clone, Copy, SlabItem)]
 pub struct GltfAccessor {
     // The byte size of each element that this accessor describes.
-    //
     /// For example, if the accessor describes a `Vec3` of F32s, then
     // the size is 3 * 4 = 12.
     pub size: u32,
     // A point to the parent view this accessor reads from.
-    //
     /// This may be Id::NONE if the corresponding accessor is sparse.
     pub view: Id<GltfBufferView>,
     // The offset relative to the start of the parent **buffer view** in bytes.
@@ -1050,7 +1042,8 @@ pub struct GltfScene {
 
 /// A document of Gltf data.
 ///
-/// This tells where certain parts of the Gltf document are stored in the [`Stage`]'s slab.
+/// This tells where certain parts of the Gltf document are stored in the
+/// [`Stage`]'s slab.
 #[derive(Default, Clone, Copy, SlabItem)]
 pub struct GltfDocument {
     pub accessors: Array<GltfAccessor>,

@@ -1,7 +1,7 @@
 //! CPU side of slab storage using `wgpu`.
 use std::{
     ops::Deref,
-    sync::{atomic::AtomicUsize, Arc, RwLock},
+    sync::{atomic::AtomicUsize, Arc},
 };
 
 use crate::{GrowableSlab, Id, Slab, SlabItem};
@@ -56,19 +56,16 @@ pub fn print_slab(slab: &[u32], starting_index: usize) {
 }
 
 /// A slab buffer used by the stage to store heterogeneous objects.
-///
-/// A clone of a buffer is a reference to the same buffer.
-#[derive(Clone)]
 pub struct WgpuBuffer {
-    pub(crate) buffer: Arc<RwLock<wgpu::Buffer>>,
+    pub(crate) buffer: wgpu::Buffer,
     device: Arc<wgpu::Device>,
     queue: Arc<wgpu::Queue>,
     // The number of u32 elements currently stored in the buffer.
     //
     // This is the next index to write into.
-    len: Arc<AtomicUsize>,
+    len: AtomicUsize,
     // The total number of u32 elements that can be stored in the buffer.
-    capacity: Arc<AtomicUsize>,
+    capacity: AtomicUsize,
 }
 
 impl Slab for WgpuBuffer {
@@ -103,8 +100,7 @@ impl Slab for WgpuBuffer {
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
         self.queue.write_buffer(
-            // UNWRAP: if we can't lock we want to panic
-            &self.buffer.read().unwrap(),
+            &self.buffer,
             byte_offset as u64,
             bytemuck::cast_slice(bytes.as_slice()),
         );
@@ -137,8 +133,7 @@ impl Slab for WgpuBuffer {
         let _ = u32_data.write_indexed_slice(t, 0);
         let byte_offset = index * std::mem::size_of::<u32>();
         self.queue.write_buffer(
-            // UNWRAP: if we can't lock we want to panic
-            &self.buffer.read().unwrap(),
+            &self.buffer,
             byte_offset as u64,
             bytemuck::cast_slice(&u32_data),
         );
@@ -161,21 +156,20 @@ impl GrowableSlab for WgpuBuffer {
         if new_capacity > capacity {
             log::trace!("resizing buffer from {capacity} to {new_capacity}");
             let len = self.len();
-            let mut buffer = self.buffer.write().unwrap();
-            let new_buffer = Self::new_buffer(&self.device, new_capacity, buffer.usage());
+            let new_buffer = Self::new_buffer(&self.device, new_capacity, self.buffer.usage());
             let mut encoder = self
                 .device
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
             // UNWRAP: if we can't lock we want to panic
             encoder.copy_buffer_to_buffer(
-                &buffer,
+                &self.buffer,
                 0,
                 &new_buffer,
                 0,
                 (len * std::mem::size_of::<u32>()) as u64,
             );
             self.queue.submit(std::iter::once(encoder.finish()));
-            *buffer = new_buffer;
+            self.buffer = new_buffer;
             self.capacity
                 .store(new_capacity, std::sync::atomic::Ordering::Relaxed);
         }
@@ -222,7 +216,7 @@ impl WgpuBuffer {
         let device = device.into();
         let queue = queue.into();
         Self {
-            buffer: RwLock::new(Self::new_buffer(&device, capacity, usage)).into(),
+            buffer: Self::new_buffer(&device, capacity, usage),
             len: AtomicUsize::new(0).into(),
             capacity: AtomicUsize::new(capacity).into(),
             device,
@@ -256,8 +250,7 @@ impl WgpuBuffer {
              output_buffer_size:{output_buffer_size}",
         );
         encoder.copy_buffer_to_buffer(
-            // UNWRAP: if we can't lock we want to panic
-            &self.buffer.read().unwrap(),
+            &self.buffer,
             byte_offset as u64,
             &output_buffer,
             0,
@@ -285,9 +278,8 @@ impl WgpuBuffer {
     }
 
     /// Get the underlying buffer.
-    pub fn get_buffer(&self) -> impl Deref<Target = wgpu::Buffer> + '_ {
-        // UNWRAP: if we can't lock we want to panic
-        self.buffer.read().unwrap()
+    pub fn get_buffer(&self) -> &wgpu::Buffer {
+        &self.buffer
     }
 }
 

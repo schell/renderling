@@ -7,7 +7,7 @@ use crate::{
         stage::{Camera, LightingModel},
         texture::{GpuTexture, TextureAddressMode, TextureModes},
     },
-    SceneImage,
+    AtlasImage,
 };
 use glam::{Quat, Vec2, Vec3, Vec4};
 use renderling_shader::stage::Vertex;
@@ -49,11 +49,11 @@ pub enum StageGltfError {
     MissingCamera { index: usize },
 
     #[snafu(display("{source}"))]
-    Slab { source: crate::slab::SlabError },
+    Slab { source: crabslab::SlabError },
 }
 
-impl From<crate::slab::SlabError> for StageGltfError {
-    fn from(source: crate::slab::SlabError) -> Self {
+impl From<crabslab::SlabError> for StageGltfError {
+    fn from(source: crabslab::SlabError) -> Self {
         Self::Slab { source }
     }
 }
@@ -203,17 +203,18 @@ impl Stage {
             .collect::<Vec<_>>();
         let cameras = self.append_array(&cameras);
 
-        // We need the (re)packing of the atlas before we marshal the images into the GPU
-        // because we need their frames for textures and materials, but we need to know
-        // if the materials require us to apply a linear transfer. So we'll get the preview
-        // repacking first, then update the frames in the textures.
+        // We need the (re)packing of the atlas before we marshal the images into the
+        // GPU because we need their frames for textures and materials, but we
+        // need to know if the materials require us to apply a linear transfer.
+        // So we'll get the preview repacking first, then update the frames in
+        // the textures.
         let (mut repacking, atlas_offset) = {
             // UNWRAP: if we can't lock the atlas, we want to panic.
             let atlas = self.atlas.read().unwrap();
             let atlas_offset = atlas.rects.len();
             (
                 atlas
-                    .repack_preview(&self.device, images.into_iter().map(SceneImage::from))
+                    .repack_preview(&self.device, images.into_iter().map(AtlasImage::from))
                     .context(AtlasSnafu)?,
                 atlas_offset,
             )
@@ -1022,8 +1023,10 @@ impl Stage {
             //let range = light.range().unwrap_or(f32::MAX);
             //let intensity = light.intensity();
             //match light.kind() {
-            //    gltf::khr_lights_punctual::Kind::Directional => GltfLightKind::Directional,
-            //    gltf::khr_lights_punctual::Kind::Point => GltfLightKind::Point,
+            //    gltf::khr_lights_punctual::Kind::Directional =>
+            // GltfLightKind::Directional,
+            //    gltf::khr_lights_punctual::Kind::Point =>
+            // GltfLightKind::Point,
             //    gltf::khr_lights_punctual::Kind::Spot {
             //        inner_cone_angle,
             //        outer_cone_angle,
@@ -1072,8 +1075,8 @@ impl Stage {
         units
     }
 
-    /// Draw the given [`gltf::Node`] using the given [`Camera`] and return the ids of the
-    /// render units that were created.
+    /// Draw the given [`gltf::Node`] using the given [`Camera`] and return the
+    /// ids of the render units that were created.
     pub fn draw_gltf_node(
         &self,
         gpu_doc: &GltfDocument,
@@ -1083,8 +1086,8 @@ impl Stage {
         self.draw_gltf_node_with(gpu_doc, camera_id, node, vec![])
     }
 
-    /// Draw the given [`gltf::Scene`] using the given [`Camera`] and return the ids of the
-    /// render units that were created.
+    /// Draw the given [`gltf::Scene`] using the given [`Camera`] and return the
+    /// ids of the render units that were created.
     pub fn draw_gltf_scene(
         &self,
         gpu_doc: &GltfDocument,
@@ -1205,7 +1208,8 @@ impl Stage {
         let tangents = self.append(&GltfAccessor {
             size: 4 * 4, // 4 tangent components * 4 bytes each
             view,
-            offset: 16 * 4, // (3 + 1) position + 4 color + 4 uv + (3 + 1) normal components * 4 bytes each
+            offset: 16 * 4, /* (3 + 1) position + 4 color + 4 uv + (3 + 1) normal components * 4
+                             * bytes each */
             count: vertex_count as u32,
             data_type: DataType::F32,
             dimensions: Dimensions::Vec4,
@@ -1354,19 +1358,17 @@ impl<'a> GltfDocumentBuilder<'a> {
 
 #[cfg(test)]
 mod test {
-    use glam::{Vec2, Vec3, Vec4, Vec4Swizzles};
-    use renderling_shader::stage::{GpuConstants, GpuEntity};
-
     use crate::{
         shader::{
-            array::Array,
             gltf::*,
             pbr::PbrMaterial,
-            slab::Slab,
             stage::{Camera, LightingModel, RenderUnit, Transform, Vertex},
         },
-        Id, Renderling, Stage,
+        Renderling, Stage,
     };
+    use crabslab::{Array, Id, Slab};
+    use glam::{Vec2, Vec3, Vec4, Vec4Swizzles};
+    use renderling_shader::stage::{GpuConstants, GpuEntity};
 
     #[test]
     fn get_vertex_count_primitive_sanity() {

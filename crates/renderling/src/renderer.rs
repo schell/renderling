@@ -75,6 +75,12 @@ impl Deref for Device {
     }
 }
 
+impl Into<Arc<wgpu::Device>> for &Device {
+    fn into(self) -> Arc<wgpu::Device> {
+        self.0.clone()
+    }
+}
+
 /// A thread-safe, clonable wrapper around `wgpu::Queue`.
 #[derive(Clone)]
 pub struct Queue(pub Arc<wgpu::Queue>);
@@ -84,6 +90,12 @@ impl Deref for Queue {
 
     fn deref(&self) -> &Self::Target {
         &self.0
+    }
+}
+
+impl Into<Arc<wgpu::Queue>> for &Queue {
+    fn into(self) -> Arc<wgpu::Queue> {
+        self.0.clone()
     }
 }
 
@@ -229,8 +241,8 @@ impl Renderling {
     /// Create a new headless renderer.
     ///
     /// ## Panics
-    /// This function will panic if an adapter cannot be found. For example this would
-    /// happen on machines without a GPU.
+    /// This function will panic if an adapter cannot be found. For example this
+    /// would happen on machines without a GPU.
     pub fn headless(width: u32, height: u32) -> Self {
         futures_lite::future::block_on(Self::try_new_headless(width, height)).unwrap()
     }
@@ -269,13 +281,7 @@ impl Renderling {
             .unwrap();
         // The renderer doesn't _always_ have an HrdSurface, so we don't unwrap this
         // one.
-        let _ = self.graph.visit(
-            |(device, queue, mut hdr): (View<Device>, View<Queue>, ViewMut<HdrSurface>)| {
-                hdr.hdr_texture = HdrSurface::create_texture(&device, &queue, width, height);
-                hdr.texture_bindgroup =
-                    HdrSurface::create_texture_bindgroup(&device, &hdr.hdr_texture);
-            },
-        );
+        let _ = self.graph.visit(crate::hdr::resize_hdr_surface);
     }
 
     pub fn create_texture<P>(

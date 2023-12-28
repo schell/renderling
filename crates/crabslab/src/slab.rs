@@ -1,5 +1,5 @@
 //! Slab traits.
-use core::marker::PhantomData;
+use core::{default::Default, marker::PhantomData};
 pub use crabslab_derive::SlabItem;
 
 use crate::{array::Array, id::Id};
@@ -457,6 +457,75 @@ pub trait GrowableSlab: Slab {
     ///
     /// Returns the previous length.
     fn increment_len(&mut self, n: usize) -> usize;
+
+
+    /// Expands the slab to fit the given number of `T`s, if necessary.
+    fn maybe_expand_to_fit<T: SlabItem>(&mut self, len: usize) {
+        let size = T::slab_size();
+        let capacity = self.capacity();
+        //log::trace!(
+        //    "append_slice: {size} * {ts_len} + {len} ({}) >= {capacity}",
+        //    size * ts_len + len
+        //);
+        let capacity_needed = self.len() + size * len;
+        if capacity_needed > capacity {
+            let mut new_capacity = capacity * 2;
+            while new_capacity < capacity_needed {
+                new_capacity = (new_capacity * 2).max(2);
+            }
+            self.reserve_capacity(new_capacity);
+        }
+    }
+
+    /// Preallocate space for one `T` element, but don't write anything to the
+    /// buffer.
+    ///
+    /// The returned `Id` can be used to write later with [`Self::write`].
+    ///
+    /// NOTE: This changes the next available buffer index and may change the
+    /// buffer capacity.
+    fn allocate<T: SlabItem>(&mut self) -> Id<T> {
+        self.maybe_expand_to_fit::<T>(1);
+        let index = self.increment_len(T::slab_size());
+        Id::from(index)
+    }
+
+    /// Preallocate space for `len` `T` elements, but don't write to
+    /// the buffer.
+    ///
+    /// This can be used to allocate space for a bunch of elements that get
+    /// written later with [`Self::write_array`].
+    ///
+    /// NOTE: This changes the length of the buffer and may change the capacity.
+    fn allocate_array<T: SlabItem>(&mut self, len: usize) -> Array<T> {
+        if len == 0 {
+            return Array::default();
+        }
+        self.maybe_expand_to_fit::<T>(len);
+        let index = self.increment_len(T::slab_size() * len);
+        Array::new(index as u32, len as u32)
+    }
+
+    /// Append to the end of the buffer.
+    ///
+    /// Returns the `Id` of the written element.
+    fn append<T: SlabItem + Default>(&mut self, t: &T) -> Id<T> {
+        let id = self.allocate::<T>();
+        // IGNORED: safe because we just allocated the id
+        let _ = self.write(id, t);
+        id
+    }
+
+    /// Append a slice to the end of the buffer, resizing if necessary
+    /// and returning a slabbed array.
+    ///
+    /// Returns the `Array` of the written elements.
+    fn append_array<T: SlabItem + Default>(&mut self, ts: &[T]) -> Array<T> {
+        let array = self.allocate_array::<T>(ts.len());
+        // IGNORED: safe because we just allocated the array
+        let _ = self.write_array(array, ts);
+        array
+    }
 }
 
 /// A wrapper around a `GrowableSlab` that provides convenience methods for
@@ -518,74 +587,6 @@ impl<B: GrowableSlab> CpuSlab<B> {
     /// Create a new `SlabBuffer` with the given slab.
     pub fn new(slab: B) -> Self {
         Self { slab }
-    }
-
-    /// Expands the slab to fit the given number of `T`s, if necessary.
-    fn maybe_expand_to_fit<T: SlabItem>(&mut self, len: usize) {
-        let size = T::slab_size();
-        let capacity = self.slab.capacity();
-        //log::trace!(
-        //    "append_slice: {size} * {ts_len} + {len} ({}) >= {capacity}",
-        //    size * ts_len + len
-        //);
-        let capacity_needed = self.len() + size * len;
-        if capacity_needed > capacity {
-            let mut new_capacity = capacity * 2;
-            while new_capacity < capacity_needed {
-                new_capacity = (new_capacity * 2).max(2);
-            }
-            self.reserve_capacity(new_capacity);
-        }
-    }
-
-    /// Preallocate space for one `T` element, but don't write anything to the
-    /// buffer.
-    ///
-    /// The returned `Id` can be used to write later with [`Self::write`].
-    ///
-    /// NOTE: This changes the next available buffer index and may change the
-    /// buffer capacity.
-    pub fn allocate<T: SlabItem>(&mut self) -> Id<T> {
-        self.maybe_expand_to_fit::<T>(1);
-        let index = self.increment_len(T::slab_size());
-        Id::from(index)
-    }
-
-    /// Preallocate space for `len` `T` elements, but don't write to
-    /// the buffer.
-    ///
-    /// This can be used to allocate space for a bunch of elements that get
-    /// written later with [`Self::write_array`].
-    ///
-    /// NOTE: This changes the length of the buffer and may change the capacity.
-    pub fn allocate_array<T: SlabItem>(&mut self, len: usize) -> Array<T> {
-        if len == 0 {
-            return Array::default();
-        }
-        self.maybe_expand_to_fit::<T>(len);
-        let index = self.increment_len(T::slab_size() * len);
-        Array::new(index as u32, len as u32)
-    }
-
-    /// Append to the end of the buffer.
-    ///
-    /// Returns the `Id` of the written element.
-    pub fn append<T: SlabItem + Default>(&mut self, t: &T) -> Id<T> {
-        let id = self.allocate::<T>();
-        // IGNORED: safe because we just allocated the id
-        let _ = self.slab.write(id, t);
-        id
-    }
-
-    /// Append a slice to the end of the buffer, resizing if necessary
-    /// and returning a slabbed array.
-    ///
-    /// Returns the `Array` of the written elements.
-    pub fn append_array<T: SlabItem + Default>(&mut self, ts: &[T]) -> Array<T> {
-        let array = self.allocate_array::<T>(ts.len());
-        // IGNORED: safe because we just allocated the array
-        let _ = self.write_array(array, ts);
-        array
     }
 }
 

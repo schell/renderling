@@ -1,5 +1,5 @@
 //! Stage lighting.
-use crate::{self as renderling_shader, id::Id, slab::SlabItem};
+use crabslab::{Id, SlabItem};
 use glam::{Vec3, Vec4};
 
 #[repr(C)]
@@ -135,7 +135,8 @@ impl SlabItem for LightStyle {
     }
 }
 
-/// A type-erased linked-list-of-lights that is used as a slab pointer to any light type.
+/// A type-erased linked-list-of-lights that is used as a slab pointer to any
+/// light type.
 #[repr(C)]
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[derive(Copy, Clone, PartialEq, SlabItem)]

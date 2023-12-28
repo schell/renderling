@@ -6,10 +6,11 @@ use moongraph::{Move, View, ViewMut};
 use renderling_shader::debug::DebugChannel;
 use snafu::prelude::*;
 
-pub use renderling_shader::stage::{
-    DrawIndirect, GpuConstants, GpuEntity, GpuLight, GpuToggles, Vertex,
+pub use renderling_shader::{
+    pbr::PbrMaterial,
+    stage::{DrawIndirect, GpuConstants, GpuEntity, GpuLight, GpuToggles, Vertex},
+    texture::*,
 };
-pub use renderling_shader::{pbr::PbrMaterial, texture::*};
 
 use crate::{
     bloom::BloomResult, frame::FrameTextureView, hdr::HdrSurface, Atlas, BufferArray, DepthTexture,
@@ -1110,47 +1111,6 @@ pub fn scene_render(
         }
     }
 
-    drop(render_pass);
-
-    queue.submit(std::iter::once(encoder.finish()));
-    Ok(())
-}
-
-/// Conducts the HDR tone mapping, writing the HDR surface texture to the (most
-/// likely) sRGB window surface.
-pub fn tonemapping(
-    (device, queue, frame, hdr_frame, bloom_result): (
-        View<Device>,
-        View<Queue>,
-        View<FrameTextureView>,
-        View<HdrSurface>,
-        Move<BloomResult>,
-    ),
-) -> Result<(), SceneError> {
-    log::trace!("tonemapping");
-    let label = Some("tonemapping");
-    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label });
-    let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-        label,
-        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-            view: &frame,
-            resolve_target: None,
-            ops: wgpu::Operations {
-                load: wgpu::LoadOp::Load,
-                store: true,
-            },
-        })],
-        depth_stencil_attachment: None,
-    });
-    render_pass.set_pipeline(&hdr_frame.tonemapping_pipeline);
-    render_pass.set_bind_group(0, &hdr_frame.texture_bindgroup, &[]);
-    render_pass.set_bind_group(1, hdr_frame.constants.bindgroup(), &[]);
-    let bloom_bg = bloom_result.0.as_deref().unwrap_or_else(|| {
-        log::trace!("  no bloom bindgroup");
-        &hdr_frame.no_bloom_bindgroup
-    });
-    render_pass.set_bind_group(2, bloom_bg, &[]);
-    render_pass.draw(0..6, 0..1);
     drop(render_pass);
 
     queue.submit(std::iter::once(encoder.finish()));
