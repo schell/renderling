@@ -69,9 +69,8 @@ impl DiffuseIrradianceConvolutionRenderPipeline {
     /// Create the rendering pipeline that performs a convolution.
     pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat) -> Self {
         log::trace!("creating convolution render pipeline with format '{format:?}'");
-        let vertex_shader = device.create_shader_module(wgpu::include_spirv!(
-            "../linkage/skybox-vertex_position_passthru.spv"
-        ));
+        let vertex_shader = device
+            .create_shader_module(wgpu::include_spirv!("../linkage/skybox-vertex_cubemap.spv"));
         log::trace!("creating fragment shader");
         let fragment_shader = device.create_shader_module(wgpu::include_wgsl!(
             // TODO: rewrite this shader in Rust after atomics are added to naga spv
@@ -85,23 +84,15 @@ impl DiffuseIrradianceConvolutionRenderPipeline {
             bind_group_layouts: &[&bg_layout],
             push_constant_ranges: &[],
         });
+        // TODO: merge irradiance pipeline with cubemap
         let pipeline = DiffuseIrradianceConvolutionRenderPipeline(device.create_render_pipeline(
             &wgpu::RenderPipelineDescriptor {
                 label: Some("convolution pipeline"),
                 layout: Some(&pp_layout),
                 vertex: wgpu::VertexState {
                     module: &vertex_shader,
-                    entry_point: "skybox::vertex_position_passthru",
-                    buffers: &[wgpu::VertexBufferLayout {
-                        array_stride: {
-                            let position_size = std::mem::size_of::<glam::Vec3>();
-                            position_size as wgpu::BufferAddress
-                        },
-                        step_mode: wgpu::VertexStepMode::Vertex,
-                        attributes: &wgpu::vertex_attr_array![
-                            0 => Float32x3
-                        ],
-                    }],
+                    entry_point: "skybox::vertex_cubemap",
+                    buffers: &[],
                 },
                 primitive: wgpu::PrimitiveState {
                     topology: wgpu::PrimitiveTopology::TriangleList,

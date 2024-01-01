@@ -527,6 +527,7 @@ mod test {
         },
         Renderling,
     };
+    use crabslab::GrowableSlab;
     use glam::{Vec2, Vec3, Vec4};
 
     use super::*;
@@ -551,7 +552,7 @@ mod test {
     fn atlas_uv_mapping() {
         let mut r =
             Renderling::headless(32, 32).with_background_color(Vec3::splat(0.0).extend(1.0));
-        let stage = r.new_stage();
+        let mut stage = r.new_stage();
         stage.configure_graph(&mut r, true);
         let (projection, view) = crate::camera::default_ortho2d(32.0, 32.0);
         let camera = stage.append(&Camera {
@@ -598,18 +599,20 @@ mod test {
                 material_id,
             )
             .build();
+        let mesh = stage.append(&mesh);
         let node = stage.append(&GltfNode {
-            mesh: stage.append(&mesh),
+            mesh,
             ..Default::default()
         });
         let transform = stage.append(&Transform {
             scale: Vec3::new(32.0, 32.0, 1.0),
             ..Default::default()
         });
+        let node_path = stage.append_array(&[node]);
         let _unit = stage.draw_unit(&RenderUnit {
             camera,
             transform,
-            node_path: stage.append_array(&[node]),
+            node_path,
             vertex_count: 6,
             ..Default::default()
         });
@@ -628,7 +631,7 @@ mod test {
         let w = sheet_w * 3 + 2;
         let h = sheet_h;
         let mut r = Renderling::headless(w, h).with_background_color(Vec4::new(1.0, 1.0, 0.0, 1.0));
-        let stage = r.new_stage();
+        let mut stage = r.new_stage();
         stage.configure_graph(&mut r, true);
 
         let (projection, view) = crate::camera::default_ortho2d(w as f32, h as f32);
@@ -661,18 +664,21 @@ mod test {
             .modes
             .set_wrap_t(TextureAddressMode::MIRRORED_REPEAT);
 
+        let albedo_texture = stage.append(&clamp_tex);
         let clamp_material_id = stage.append(&PbrMaterial {
-            albedo_texture: stage.append(&clamp_tex),
+            albedo_texture,
             lighting_model: LightingModel::NO_LIGHTING,
             ..Default::default()
         });
+        let albedo_texture = stage.append(&repeat_tex);
         let repeat_material_id = stage.append(&PbrMaterial {
-            albedo_texture: stage.append(&repeat_tex),
+            albedo_texture,
             lighting_model: LightingModel::NO_LIGHTING,
             ..Default::default()
         });
+        let albedo_texture = stage.append(&mirror_tex);
         let mirror_material_id = stage.append(&PbrMaterial {
-            albedo_texture: stage.append(&mirror_tex),
+            albedo_texture,
             lighting_model: LightingModel::NO_LIGHTING,
             ..Default::default()
         });
@@ -709,50 +715,70 @@ mod test {
             p
         };
 
-        let _clamp = stage.draw_unit(&RenderUnit {
-            camera,
-            node_path: stage.append_array(&[stage.append(&GltfNode {
-                mesh: stage.append(&GltfMesh {
-                    primitives: stage.append_array(&[clamp_prim]),
-                    ..Default::default()
-                }),
+        let _clamp = {
+            let primitives = stage.append_array(&[clamp_prim]);
+            let mesh = stage.append(&GltfMesh {
+                primitives,
                 ..Default::default()
-            })]),
-            vertex_count: 6,
-            ..Default::default()
-        });
-        let _repeat = stage.draw_unit(&RenderUnit {
-            camera,
-            node_path: stage.append_array(&[stage.append(&GltfNode {
-                mesh: stage.append(&GltfMesh {
-                    primitives: stage.append_array(&[repeat_prim]),
-                    ..Default::default()
-                }),
+            });
+            let node = stage.append(&GltfNode {
+                mesh,
                 ..Default::default()
-            })]),
-            vertex_count: 6,
-            transform: stage.append(&Transform {
+            });
+            let node_path = stage.append_array(&[node]);
+            stage.draw_unit(&RenderUnit {
+                camera,
+                node_path,
+                vertex_count: 6,
+                ..Default::default()
+            })
+        };
+        let _repeat = {
+            let primitives = stage.append_array(&[repeat_prim]);
+            let mesh = stage.append(&GltfMesh {
+                primitives,
+                ..Default::default()
+            });
+            let node = stage.append(&GltfNode {
+                mesh,
+                ..Default::default()
+            });
+            let node_path = stage.append_array(&[node]);
+            let transform = stage.append(&Transform {
                 translation: Vec3::new(sheet_w + 1.0, 0.0, 0.0),
                 ..Default::default()
-            }),
-            ..Default::default()
-        });
-        let _mirror = stage.draw_unit(&RenderUnit {
-            camera,
-            node_path: stage.append_array(&[stage.append(&GltfNode {
-                mesh: stage.append(&GltfMesh {
-                    primitives: stage.append_array(&[mirror_prim]),
-                    ..Default::default()
-                }),
+            });
+            stage.draw_unit(&RenderUnit {
+                camera,
+                node_path,
+                vertex_count: 6,
+                transform,
                 ..Default::default()
-            })]),
-            vertex_count: 6,
-            transform: stage.append(&Transform {
+            })
+        };
+        let _mirror = {
+            let primitives = stage.append_array(&[mirror_prim]);
+            let mesh = stage.append(&GltfMesh {
+                primitives,
+                ..Default::default()
+            });
+            let node = stage.append(&GltfNode {
+                mesh,
+                ..Default::default()
+            });
+            let node_path = stage.append_array(&[node]);
+            let transform = stage.append(&Transform {
                 translation: Vec3::new(sheet_w as f32 * 2.0 + 2.0, 0.0, 0.0),
                 ..Default::default()
-            }),
-            ..Default::default()
-        });
+            });
+            stage.draw_unit(&RenderUnit {
+                camera,
+                node_path,
+                vertex_count: 6,
+                transform,
+                ..Default::default()
+            })
+        };
 
         let img = r.render_image().unwrap();
         img_diff::assert_img_eq("atlas/uv_wrapping.png", img);
@@ -768,7 +794,7 @@ mod test {
         let w = sheet_w * 3 + 2;
         let h = sheet_h;
         let mut r = Renderling::headless(w, h).with_background_color(Vec4::new(1.0, 1.0, 0.0, 1.0));
-        let stage = r.new_stage();
+        let mut stage = r.new_stage();
         stage.configure_graph(&mut r, true);
 
         let (projection, view) = crate::camera::default_ortho2d(w as f32, h as f32);
@@ -802,18 +828,23 @@ mod test {
             .modes
             .set_wrap_t(TextureAddressMode::MIRRORED_REPEAT);
 
+        let albedo_texture = stage.append(&clamp_tex);
         let clamp_material_id = stage.append(&PbrMaterial {
-            albedo_texture: stage.append(&clamp_tex),
+            albedo_texture,
             lighting_model: LightingModel::NO_LIGHTING,
             ..Default::default()
         });
+
+        let albedo_texture = stage.append(&repeat_tex);
         let repeat_material_id = stage.append(&PbrMaterial {
-            albedo_texture: stage.append(&repeat_tex),
+            albedo_texture,
             lighting_model: LightingModel::NO_LIGHTING,
             ..Default::default()
         });
+
+        let albedo_texture = stage.append(&mirror_tex);
         let mirror_material_id = stage.append(&PbrMaterial {
-            albedo_texture: stage.append(&mirror_tex),
+            albedo_texture,
             lighting_model: LightingModel::NO_LIGHTING,
             ..Default::default()
         });
@@ -851,50 +882,70 @@ mod test {
             p
         };
 
-        let _clamp = stage.draw_unit(&RenderUnit {
-            camera,
-            node_path: stage.append_array(&[stage.append(&GltfNode {
-                mesh: stage.append(&GltfMesh {
-                    primitives: stage.append_array(&[clamp_prim]),
-                    ..Default::default()
-                }),
+        let _clamp = {
+            let primitives = stage.append_array(&[clamp_prim]);
+            let mesh = stage.append(&GltfMesh {
+                primitives,
                 ..Default::default()
-            })]),
-            vertex_count: 6,
-            ..Default::default()
-        });
-        let _repeat = stage.draw_unit(&RenderUnit {
-            camera,
-            node_path: stage.append_array(&[stage.append(&GltfNode {
-                mesh: stage.append(&GltfMesh {
-                    primitives: stage.append_array(&[repeat_prim]),
-                    ..Default::default()
-                }),
+            });
+            let node = stage.append(&GltfNode {
+                mesh,
                 ..Default::default()
-            })]),
-            vertex_count: 6,
-            transform: stage.append(&Transform {
+            });
+            let node_path = stage.append_array(&[node]);
+            stage.draw_unit(&RenderUnit {
+                camera,
+                node_path,
+                vertex_count: 6,
+                ..Default::default()
+            })
+        };
+        let _repeat = {
+            let primitives = stage.append_array(&[repeat_prim]);
+            let mesh = stage.append(&GltfMesh {
+                primitives,
+                ..Default::default()
+            });
+            let node = stage.append(&GltfNode {
+                mesh,
+                ..Default::default()
+            });
+            let node_path = stage.append_array(&[node]);
+            let transform = stage.append(&Transform {
                 translation: Vec3::new(sheet_w + 1.0, 0.0, 0.0),
                 ..Default::default()
-            }),
-            ..Default::default()
-        });
-        let _mirror = stage.draw_unit(&RenderUnit {
-            camera,
-            node_path: stage.append_array(&[stage.append(&GltfNode {
-                mesh: stage.append(&GltfMesh {
-                    primitives: stage.append_array(&[mirror_prim]),
-                    ..Default::default()
-                }),
+            });
+            stage.draw_unit(&RenderUnit {
+                camera,
+                node_path,
+                transform,
+                vertex_count: 6,
                 ..Default::default()
-            })]),
-            vertex_count: 6,
-            transform: stage.append(&Transform {
+            })
+        };
+        let _mirror = {
+            let primitives = stage.append_array(&[mirror_prim]);
+            let mesh = stage.append(&GltfMesh {
+                primitives,
+                ..Default::default()
+            });
+            let node = stage.append(&GltfNode {
+                mesh,
+                ..Default::default()
+            });
+            let node_path = stage.append_array(&[node]);
+            let transform = stage.append(&Transform {
                 translation: Vec3::new(sheet_w as f32 * 2.0 + 2.0, 0.0, 0.0),
                 ..Default::default()
-            }),
-            ..Default::default()
-        });
+            });
+            stage.draw_unit(&RenderUnit {
+                camera,
+                node_path,
+                vertex_count: 6,
+                transform,
+                ..Default::default()
+            })
+        };
 
         let img = r.render_image().unwrap();
         img_diff::assert_img_eq("atlas/negative_uv_wrapping.png", img);

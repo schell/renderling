@@ -5,8 +5,8 @@ use snafu::prelude::*;
 use std::{ops::Deref, sync::Arc};
 
 use crate::{
-    hdr::HdrSurface, CreateSurfaceFn, Graph, RenderTarget, Stage, TextureError, UiScene,
-    UiSceneBuilder, View, ViewMut, WgpuStateError,
+    CreateSurfaceFn, Graph, RenderTarget, Stage, TextureError,
+    /* UiScene, UiSceneBuilder, */ View, ViewMut, WgpuStateError,
 };
 
 #[derive(Debug, Snafu)]
@@ -380,21 +380,21 @@ impl Renderling {
         Stage::new(device, queue)
     }
 
-    pub fn new_ui_scene(&self) -> UiSceneBuilder<'_> {
-        let (device, _) = self.get_device_and_queue_owned();
-        let queue = self.get_queue();
-        UiSceneBuilder::new(device.0.clone(), queue)
-    }
+    //pub fn new_ui_scene(&self) -> UiSceneBuilder<'_> {
+    //    let (device, _) = self.get_device_and_queue_owned();
+    //    let queue = self.get_queue();
+    //    UiSceneBuilder::new(device.0.clone(), queue)
+    //}
 
-    pub fn empty_ui_scene(&self) -> UiScene {
-        self.new_ui_scene().build()
-    }
+    //pub fn empty_ui_scene(&self) -> UiScene {
+    //    self.new_ui_scene().build()
+    //}
 
-    #[cfg(feature = "text")]
-    /// Create a new `GlyphCache` used to cache text rendering info.
-    pub fn new_glyph_cache(&self, fonts: Vec<crate::FontArc>) -> crate::GlyphCache {
-        crate::GlyphCache::new(fonts)
-    }
+    //#[cfg(feature = "text")]
+    ///// Create a new `GlyphCache` used to cache text rendering info.
+    //pub fn new_glyph_cache(&self, fonts: Vec<crate::FontArc>) ->
+    // crate::GlyphCache {    crate::GlyphCache::new(fonts)
+    //}
 
     /// Render into an image.
     ///

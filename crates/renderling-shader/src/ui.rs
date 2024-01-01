@@ -2,6 +2,7 @@
 //!
 //! This is mostly for rendering text.
 
+use crabslab::SlabItem;
 use glam::{Mat4, UVec2, Vec2, Vec4};
 use spirv_std::{image::Image2d, spirv, Sampler};
 
@@ -43,7 +44,7 @@ impl UiVertex {
 }
 
 #[repr(C)]
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, SlabItem)]
 pub struct UiConstants {
     pub canvas_size: UVec2,
     pub camera_translation: Vec2,

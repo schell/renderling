@@ -68,9 +68,8 @@ impl CubemapMakingRenderPipeline {
     /// images.
     pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat) -> Self {
         log::trace!("creating cubemap-making render pipeline with format '{format:?}'");
-        let vertex_shader = device.create_shader_module(wgpu::include_spirv!(
-            "linkage/skybox-vertex_position_passthru.spv"
-        ));
+        let vertex_shader =
+            device.create_shader_module(wgpu::include_spirv!("linkage/skybox-vertex_cubemap.spv"));
         let fragment_shader = device.create_shader_module(wgpu::include_spirv!(
             "linkage/skybox-fragment_equirectangular.spv"
         ));
@@ -86,17 +85,8 @@ impl CubemapMakingRenderPipeline {
                 layout: Some(&pp_layout),
                 vertex: wgpu::VertexState {
                     module: &vertex_shader,
-                    entry_point: "skybox::vertex_position_passthru",
-                    buffers: &[wgpu::VertexBufferLayout {
-                        array_stride: {
-                            let position_size = std::mem::size_of::<glam::Vec3>();
-                            position_size as wgpu::BufferAddress
-                        },
-                        step_mode: wgpu::VertexStepMode::Vertex,
-                        attributes: &wgpu::vertex_attr_array![
-                            0 => Float32x3
-                        ],
-                    }],
+                    entry_point: "skybox::vertex_cubemap",
+                    buffers: &[],
                 },
                 primitive: wgpu::PrimitiveState {
                     topology: wgpu::PrimitiveTopology::TriangleList,

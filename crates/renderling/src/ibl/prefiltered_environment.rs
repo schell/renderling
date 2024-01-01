@@ -21,7 +21,7 @@ pub fn create_pipeline_and_bindgroup(
                 count: None,
             },
             wgpu::BindGroupLayoutEntry {
-                binding: 2,
+                binding: 1,
                 visibility: wgpu::ShaderStages::FRAGMENT,
                 ty: wgpu::BindingType::Texture {
                     sample_type: wgpu::TextureSampleType::Float { filterable: true },
@@ -31,7 +31,7 @@ pub fn create_pipeline_and_bindgroup(
                 count: None,
             },
             wgpu::BindGroupLayoutEntry {
-                binding: 3,
+                binding: 2,
                 visibility: wgpu::ShaderStages::FRAGMENT,
                 ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                 count: None,
@@ -74,13 +74,7 @@ pub fn create_pipeline_and_bindgroup(
         vertex: wgpu::VertexState {
             module: &vertex_shader,
             entry_point: "convolution::vertex_prefilter_environment_cubemap",
-            buffers: &[wgpu::VertexBufferLayout {
-                array_stride: 3 * std::mem::size_of::<f32>() as u64,
-                step_mode: wgpu::VertexStepMode::Vertex,
-                attributes: &wgpu::vertex_attr_array![
-                    0 => Float32x3
-                ],
-            }],
+            buffers: &[],
         },
         primitive: wgpu::PrimitiveState {
             topology: wgpu::PrimitiveTopology::TriangleList,

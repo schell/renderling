@@ -11,13 +11,14 @@ use crabslab::{Array, CpuSlab, GrowableSlab, Id, Slab, SlabItem, WgpuBuffer};
 use moongraph::{View, ViewMut};
 use renderling_shader::{
     debug::DebugMode,
-    stage::{light::Light, RenderUnit, StageLegend},
+    stage::{light::Light, Camera, RenderUnit, StageLegend},
     texture::GpuTexture,
 };
 use snafu::Snafu;
 
 use crate::{
-    Atlas, AtlasError, AtlasImage, DepthTexture, Device, HdrSurface, Queue, Skybox, SlabError,
+    Atlas, AtlasError, AtlasImage, AtlasImageError, DepthTexture, Device, HdrSurface, Queue,
+    Skybox, SlabError,
 };
 
 #[cfg(feature = "gltf")]
@@ -79,12 +80,12 @@ impl Slab for Stage {
 
     fn write_indexed<T: SlabItem>(&mut self, t: &T, index: usize) -> usize {
         // UNWRAP: if we can't acquire the lock we want to panic.
-        self.slab.read().unwrap().write_indexed(t, index)
+        self.slab.write().unwrap().write_indexed(t, index)
     }
 
     fn write_indexed_slice<T: SlabItem>(&mut self, t: &[T], index: usize) -> usize {
         // UNWRAP: if we can't acquire the lock we want to panic.
-        self.slab.read().unwrap().write_indexed_slice(t, index)
+        self.slab.write().unwrap().write_indexed_slice(t, index)
     }
 }
 
@@ -121,7 +122,7 @@ impl Stage {
             )))),
             pipeline: Default::default(),
             atlas: Arc::new(RwLock::new(atlas)),
-            skybox: Arc::new(RwLock::new(Skybox::empty(&device, &queue))),
+            skybox: Arc::new(RwLock::new(Skybox::empty(device.clone(), queue.clone()))),
             skybox_pipeline: Default::default(),
             has_skybox: Arc::new(AtomicBool::new(false)),
             has_bloom: Arc::new(AtomicBool::new(false)),
@@ -136,31 +137,31 @@ impl Stage {
     }
 
     /// Set the debug mode.
-    pub fn set_debug_mode(&self, debug_mode: DebugMode) {
+    pub fn set_debug_mode(&mut self, debug_mode: DebugMode) {
         let id = Id::<DebugMode>::from(StageLegend::offset_of_debug_mode());
         self.write(id, &debug_mode);
     }
 
     /// Set the debug mode.
-    pub fn with_debug_mode(self, debug_mode: DebugMode) -> Self {
+    pub fn with_debug_mode(mut self, debug_mode: DebugMode) -> Self {
         self.set_debug_mode(debug_mode);
         self
     }
 
     /// Set whether the stage uses lighting.
-    pub fn set_has_lighting(&self, use_lighting: bool) {
+    pub fn set_has_lighting(&mut self, use_lighting: bool) {
         let id = Id::<bool>::from(StageLegend::offset_of_has_lighting());
         self.write(id, &use_lighting);
     }
 
     /// Set whether the stage uses lighting.
-    pub fn with_lighting(self, use_lighting: bool) -> Self {
+    pub fn with_lighting(mut self, use_lighting: bool) -> Self {
         self.set_has_lighting(use_lighting);
         self
     }
 
     /// Set the lights to use for shading.
-    pub fn set_lights(&self, lights: Array<Light>) {
+    pub fn set_lights(&mut self, lights: Array<Light>) {
         let id = Id::<Array<Light>>::from(StageLegend::offset_of_light_array());
         self.write(id, &lights);
     }
@@ -173,7 +174,7 @@ impl Stage {
     /// ## WARNING
     /// This invalidates any currently staged `GpuTextures`.
     pub fn set_images(
-        &self,
+        &mut self,
         images: impl IntoIterator<Item = AtlasImage>,
     ) -> Result<Vec<GpuTexture>, StageError> {
         // UNWRAP: if we can't write the atlas we want to panic
@@ -184,7 +185,8 @@ impl Stage {
         let _ = self.textures_bindgroup.lock().unwrap().take();
         // The atlas size must be reset
         let size_id = Id::<glam::UVec2>::from(StageLegend::offset_of_atlas_size());
-        self.write(size_id, &atlas.size);
+        // UNWRAP: if we can't write to the stage legend we want to panic
+        self.slab.write().unwrap().write(size_id, &atlas.size);
 
         let textures = atlas
             .frames()
@@ -354,18 +356,11 @@ impl Stage {
                     // TODO: remove renderling_shader::skybox::fragment_cubemap after porting
                     // to GLTF
                     entry_point: "skybox::stage_skybox_cubemap",
-                    targets: &[
-                        Some(wgpu::ColorTargetState {
-                            format: crate::hdr::HdrSurface::TEXTURE_FORMAT,
-                            blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                            write_mask: wgpu::ColorWrites::ALL,
-                        }),
-                        Some(wgpu::ColorTargetState {
-                            format: crate::hdr::HdrSurface::TEXTURE_FORMAT,
-                            blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                            write_mask: wgpu::ColorWrites::ALL,
-                        }),
-                    ],
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: crate::hdr::HdrSurface::TEXTURE_FORMAT,
+                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
                 }),
                 multiview: None,
             })
@@ -430,18 +425,11 @@ impl Stage {
                 fragment: Some(wgpu::FragmentState {
                     module: &fragment_shader,
                     entry_point: "stage::gltf_fragment",
-                    targets: &[
-                        Some(wgpu::ColorTargetState {
-                            format: wgpu::TextureFormat::Rgba16Float,
-                            blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                            write_mask: wgpu::ColorWrites::ALL,
-                        }),
-                        Some(wgpu::ColorTargetState {
-                            format: wgpu::TextureFormat::Rgba16Float,
-                            blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                            write_mask: wgpu::ColorWrites::ALL,
-                        }),
-                    ],
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: wgpu::TextureFormat::Rgba16Float,
+                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
                 }),
                 multiview: None,
             });
@@ -468,7 +456,6 @@ impl Stage {
             let b = Arc::new({
                 let device: &wgpu::Device = &self.device;
                 let pipeline: &wgpu::RenderPipeline = &self.get_pipeline();
-                let slab_buffer = self.slab.as_ref();
                 let label = Some("stage slab buffer");
                 let stage_slab_buffers_bindgroup =
                     device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -579,7 +566,7 @@ impl Stage {
     }
 
     /// Draw the [`RenderUnit`] each frame, and immediately return its `Id`.
-    pub fn draw_unit(&self, unit: &RenderUnit) -> Id<RenderUnit> {
+    pub fn draw_unit(&mut self, unit: &RenderUnit) -> Id<RenderUnit> {
         let id = self.append(unit);
         let draw = DrawUnit {
             id,
@@ -707,6 +694,21 @@ impl Stage {
             .unwrap()
             .as_ref()
             .block_on_read_raw(0, self.len())
+    }
+
+
+    pub fn new_skybox_from_path(
+        &self,
+        path: impl AsRef<std::path::Path>,
+        camera: Id<Camera>,
+    ) -> Result<Skybox, AtlasImageError> {
+        let hdr = AtlasImage::from_hdr_path(path)?;
+        Ok(Skybox::new(
+            self.device.clone(),
+            self.queue.clone(),
+            hdr,
+            camera,
+        ))
     }
 }
 
