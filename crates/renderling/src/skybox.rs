@@ -639,6 +639,7 @@ impl Skybox {
 mod test {
     use crabslab::GrowableSlab;
     use glam::Vec3;
+    use img_diff::DiffCfg;
 
     use super::*;
     use crate::Renderling;
