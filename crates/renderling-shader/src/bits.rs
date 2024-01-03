@@ -2,7 +2,7 @@
 
 use core::ops::RangeInclusive;
 
-use crate::{id::Id, slab::Slab};
+use crabslab::{Id, Slab};
 
 /// Statically define a shift/mask range as a literal range of bits.
 pub const fn bits(range: RangeInclusive<u32>) -> (u32, u32) {
@@ -102,9 +102,9 @@ pub fn extract_u16(
     // slab of u32s
     slab: &[u32],
 ) -> (u32, usize, usize) {
-    // NOTE: This should only have two entries, but we'll still handle the case where
-    // the extraction is not aligned to a u32 boundary by reading as if it were, and then
-    // re-aligning.
+    // NOTE: This should only have two entries, but we'll still handle the case
+    // where the extraction is not aligned to a u32 boundary by reading as if it
+    // were, and then re-aligning.
     const SHIFT_MASKS: [((u32, u32), usize, usize); 4] = [
         (U16_0_BITS, 2, 0),
         (U16_0_BITS, 2, 0),
@@ -339,18 +339,5 @@ mod test {
             [0f32, -1f32, -2f32, -3f32, 4f32, 5f32, -12345f32],
             [a, b, c, d, e, f, g]
         );
-    }
-
-    #[test]
-    fn indices_sanity() {
-        let slab: [u32; 20] = [
-            65536, 2, 0, 0, 0, 1065353216, 0, 0, 0, 1065353216, 0, 0, 0, 1065353216, 0, 0,
-            1065353216, 0, 0, 1065353216,
-        ];
-        let u32_index = 9usize;
-        let byte_offset = 0usize;
-        let (a, u32_index, byte_offset) = extract_u32(u32_index, byte_offset, &slab);
-        let (b, u32_index, byte_offset) = extract_u32(u32_index, byte_offset, &slab);
-        let (c, u32_index, byte_offset) = extract_u32(u32_index, byte_offset, &slab);
     }
 }

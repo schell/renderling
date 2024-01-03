@@ -1,8 +1,13 @@
 //! An HDR skybox.
-use glam::{Mat4, Vec3};
-use renderling_shader::stage::GpuConstants;
+use std::sync::Arc;
 
-use crate::{SceneImage, Uniform};
+use crabslab::{CpuSlab, GrowableSlab, Slab, SlabItem, WgpuBuffer};
+use glam::{Mat4, Vec3};
+
+use crate::{
+    atlas::AtlasImage,
+    shader::{convolution::VertexPrefilterEnvironmentCubemapIds, stage::Camera},
+};
 
 /// Render pipeline used to draw a skybox.
 pub struct SkyboxRenderPipeline(pub wgpu::RenderPipeline);
@@ -15,7 +20,7 @@ pub fn skybox_bindgroup_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
                 binding: 0,
                 visibility: wgpu::ShaderStages::VERTEX,
                 ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
+                    ty: wgpu::BufferBindingType::Storage { read_only: true },
                     has_dynamic_offset: false,
                     min_binding_size: None,
                 },
@@ -43,7 +48,7 @@ pub fn skybox_bindgroup_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
 
 pub fn create_skybox_bindgroup(
     device: &wgpu::Device,
-    constants: &Uniform<GpuConstants>,
+    slab_buffer: &wgpu::Buffer,
     texture: &crate::Texture,
 ) -> wgpu::BindGroup {
     device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -52,7 +57,7 @@ pub fn create_skybox_bindgroup(
         entries: &[
             wgpu::BindGroupEntry {
                 binding: 0,
-                resource: constants.buffer().as_entire_binding(),
+                resource: slab_buffer.as_entire_binding(),
             },
             wgpu::BindGroupEntry {
                 binding: 1,
@@ -84,7 +89,7 @@ pub fn create_skybox_render_pipeline(
     });
     SkyboxRenderPipeline(
         device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("skybox pipeline"),
+            label: Some("skybox render pipeline"),
             layout: Some(&pp_layout),
             vertex: wgpu::VertexState {
                 module: &vertex_shader,
@@ -140,26 +145,36 @@ pub struct Skybox {
     pub prefiltered_environment_cubemap: crate::Texture,
     // Texture of the pre-computed brdf integration
     pub brdf_lut: crate::Texture,
+    // `Id` of the camera to use for rendering the skybox.
+    //
+    // The camera is used to determine the orientation of the skybox.
+    pub camera: crabslab::Id<Camera>,
 }
 
 impl Skybox {
     /// Create an empty, transparent skybox.
-    pub fn empty(device: &wgpu::Device, queue: &wgpu::Queue) -> Self {
+    pub fn empty(device: crate::Device, queue: crate::Queue) -> Self {
         log::trace!("creating empty skybox");
-        let hdr_img = SceneImage {
+        let hdr_img = AtlasImage {
             pixels: vec![0u8; 4 * 4],
             width: 1,
             height: 1,
-            format: crate::SceneImageFormat::R32G32B32A32FLOAT,
+            format: crate::AtlasImageFormat::R32G32B32A32FLOAT,
             apply_linear_transfer: false,
         };
-        Self::new(device, queue, hdr_img)
+        Self::new(device, queue, hdr_img, crabslab::Id::<Camera>::NONE)
     }
 
     /// Create a new `Skybox`.
-    pub fn new(device: &wgpu::Device, queue: &wgpu::Queue, hdr_img: SceneImage) -> Self {
+    pub fn new(
+        device: crate::Device,
+        queue: crate::Queue,
+        hdr_img: AtlasImage,
+        camera: crabslab::Id<Camera>,
+    ) -> Self {
         log::trace!("creating skybox");
-        let equirectangular_texture = Skybox::hdr_texture_from_scene_image(device, queue, hdr_img);
+        let equirectangular_texture =
+            Skybox::hdr_texture_from_atlas_image(&device, &queue, hdr_img);
         let proj = Mat4::perspective_rh(std::f32::consts::FRAC_PI_2, 1.0, 0.1, 10.0);
         let views = [
             Mat4::look_at_rh(
@@ -193,81 +208,45 @@ impl Skybox {
                 Vec3::new(0.0, -1.0, 0.0),
             ),
         ];
-        // Create unit cube for projections.
-        let cube_vertices: [[f32; 3]; 8] = [
-            // front
-            [-1.0, -1.0, 1.0],
-            [1.0, -1.0, 1.0],
-            [1.0, 1.0, 1.0],
-            [-1.0, 1.0, 1.0],
-            // back
-            [-1.0, -1.0, -1.0],
-            [1.0, -1.0, -1.0],
-            [1.0, 1.0, -1.0],
-            [-1.0, 1.0, -1.0],
-        ];
-        let cube_elements: [u16; 36] = [
-            // front
-            0, 1, 2, 2, 3, 0, // right
-            1, 5, 6, 6, 2, 1, // back
-            7, 6, 5, 5, 4, 7, // left
-            4, 0, 3, 3, 7, 4, // bottom
-            4, 5, 1, 1, 0, 4, // top
-            3, 2, 6, 6, 7, 3,
-        ];
-
-        let unit_cube_mesh = crate::mesh::Mesh::new(
-            device,
-            Some("unit cube"),
-            cube_vertices,
-            Some(cube_elements),
-        );
 
         // Create environment map.
         let environment_cubemap = Skybox::create_environment_map_from_hdr(
-            device,
-            queue,
+            device.clone(),
+            queue.clone(),
             &equirectangular_texture,
-            &unit_cube_mesh,
             proj,
             views,
         );
 
         // Convolve the environment map.
-        let irradiance_cubemap = Skybox::create_irradiance_map(
-            device,
-            queue,
-            &environment_cubemap,
-            &unit_cube_mesh,
-            proj,
-            views,
-        );
+        let irradiance_cubemap =
+            Skybox::create_irradiance_map(&device, &queue, &environment_cubemap, proj, views);
 
         // Generate specular IBL pre-filtered environment map.
         let prefiltered_environment_cubemap = Skybox::create_prefiltered_environment_map(
-            device,
-            queue,
+            &device,
+            &queue,
             &environment_cubemap,
-            &unit_cube_mesh,
             proj,
             views,
         );
 
-        let brdf_lut = Skybox::create_precomputed_brdf_texture(device, queue);
+        let brdf_lut = Skybox::create_precomputed_brdf_texture(&device, &queue);
 
         Skybox {
             environment_cubemap,
             irradiance_cubemap,
             prefiltered_environment_cubemap,
             brdf_lut,
+            camera,
         }
     }
 
-    /// Convert an HDR [`SceneImage`] into a texture.
-    pub fn hdr_texture_from_scene_image(
+    /// Convert an HDR [`AtlasImage`] into a texture.
+    pub fn hdr_texture_from_atlas_image(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        img: SceneImage,
+        img: AtlasImage,
     ) -> crate::Texture {
         crate::Texture::new_with(
             device,
@@ -296,48 +275,50 @@ impl Skybox {
         queue: &wgpu::Queue,
         hdr_data: &[u8],
     ) -> crate::Texture {
-        let img = SceneImage::from_hdr_bytes(hdr_data).unwrap();
-        Self::hdr_texture_from_scene_image(device, queue, img)
+        let img = AtlasImage::from_hdr_bytes(hdr_data).unwrap();
+        Self::hdr_texture_from_atlas_image(device, queue, img)
     }
 
     fn create_environment_map_from_hdr(
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
+        device: crate::Device,
+        queue: crate::Queue,
         hdr_texture: &crate::Texture,
-        unit_cube_mesh: &crate::mesh::Mesh,
         proj: Mat4,
         views: [Mat4; 6],
     ) -> crate::Texture {
         // Create the cubemap-making pipeline.
         let pipeline = crate::cubemap::CubemapMakingRenderPipeline::new(
-            device,
+            &device,
             wgpu::TextureFormat::Rgba16Float,
         );
-        let mut constants = crate::uniform::Uniform::new(
-            device,
-            GpuConstants {
-                camera_projection: proj,
-                ..Default::default()
-            },
+
+        let buffer = WgpuBuffer::new_usage(
+            device.0.clone(),
+            queue.0.clone(),
+            Camera::slab_size(),
             wgpu::BufferUsages::VERTEX,
-            wgpu::ShaderStages::VERTEX,
+        );
+        let mut slab = CpuSlab::new(buffer);
+        slab.write(
+            crabslab::Id::new(0),
+            &Camera::default().with_projection(proj),
         );
 
         let bindgroup = crate::cubemap::cubemap_making_bindgroup(
-            device,
+            &device,
             Some("environment cubemap"),
-            &constants,
+            &slab.as_ref().get_buffer(),
             hdr_texture,
         );
 
         Self::render_cubemap(
-            device,
-            queue,
+            &device,
+            &queue,
             "environment",
             &pipeline.0,
-            &mut constants,
+            &mut slab,
+            proj,
             &bindgroup,
-            unit_cube_mesh,
             views,
             512,
             Some(9),
@@ -349,9 +330,9 @@ impl Skybox {
         queue: &wgpu::Queue,
         label_prefix: &str,
         pipeline: &wgpu::RenderPipeline,
-        constants: &mut Uniform<GpuConstants>,
+        slab: &mut CpuSlab<WgpuBuffer>,
+        projection: Mat4,
         bindgroup: &wgpu::BindGroup,
-        unit_cube_mesh: &crate::mesh::Mesh,
         views: [Mat4; 6],
         texture_size: u32,
         mip_levels: Option<u32>,
@@ -386,8 +367,7 @@ impl Skybox {
             );
 
             // update the view to point at one of the cube faces
-            constants.camera_view = views[i];
-            constants.update(queue);
+            slab.write(0u32.into(), &Camera::new(projection, views[i]));
 
             {
                 let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -405,7 +385,7 @@ impl Skybox {
 
                 render_pass.set_pipeline(pipeline);
                 render_pass.set_bind_group(0, &bindgroup, &[]);
-                unit_cube_mesh.draw(&mut render_pass);
+                render_pass.draw(0..36, 0..1);
             }
 
             queue.submit([encoder.finish()]);
@@ -431,42 +411,43 @@ impl Skybox {
     }
 
     fn create_irradiance_map(
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
+        device: impl Into<Arc<wgpu::Device>>,
+        queue: impl Into<Arc<wgpu::Queue>>,
         environment_texture: &crate::Texture,
-        unit_cube_mesh: &crate::mesh::Mesh,
         proj: Mat4,
         views: [Mat4; 6],
     ) -> crate::Texture {
+        let device = device.into();
+        let queue = queue.into();
         let pipeline =
             crate::ibl::diffuse_irradiance::DiffuseIrradianceConvolutionRenderPipeline::new(
-                device,
+                &device,
                 wgpu::TextureFormat::Rgba16Float,
             );
-        let mut constants = crate::uniform::Uniform::new(
-            device,
-            GpuConstants {
-                camera_projection: proj,
-                ..Default::default()
-            },
+        let buffer = WgpuBuffer::new_usage(
+            device.clone(),
+            queue.clone(),
+            Camera::slab_size(),
             wgpu::BufferUsages::VERTEX,
-            wgpu::ShaderStages::VERTEX,
         );
+        let mut slab = CpuSlab::new(buffer);
+        slab.write(0u32.into(), &Camera::default().with_projection(proj));
+
         let bindgroup = crate::ibl::diffuse_irradiance::diffuse_irradiance_convolution_bindgroup(
-            device,
+            &device,
             Some("irradiance"),
-            &constants,
+            &slab.as_ref().get_buffer(),
             environment_texture,
         );
 
         Self::render_cubemap(
-            device,
-            queue,
+            &device,
+            &queue,
             "irradiance",
             &pipeline.0,
-            &mut constants,
+            &mut slab,
+            proj,
             &bindgroup,
-            unit_cube_mesh,
             views,
             32,
             None,
@@ -474,33 +455,29 @@ impl Skybox {
     }
 
     fn create_prefiltered_environment_map(
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
+        device: impl Into<Arc<wgpu::Device>>,
+        queue: impl Into<Arc<wgpu::Queue>>,
         environment_texture: &crate::Texture,
-        unit_cube_mesh: &crate::mesh::Mesh,
         proj: Mat4,
         views: [Mat4; 6],
     ) -> crate::Texture {
-        let mut constants = crate::uniform::Uniform::new(
-            device,
-            GpuConstants {
-                camera_projection: proj,
-                ..Default::default()
-            },
+        let device = device.into();
+        let queue = queue.into();
+        let buffer = WgpuBuffer::new_usage(
+            device.clone(),
+            queue.clone(),
+            Camera::slab_size(),
             wgpu::BufferUsages::VERTEX,
-            wgpu::ShaderStages::VERTEX,
         );
-        let mut roughness = Uniform::<f32>::new(
-            device,
-            0.0,
-            wgpu::BufferUsages::empty(),
-            wgpu::ShaderStages::VERTEX_FRAGMENT,
-        );
+        let mut slab = CpuSlab::new(buffer);
+        // Write the camera at 0 and then the roughness
+        let camera = slab.append(&Camera::default().with_projection(proj));
+        let roughness = slab.append(&0.0f32);
+        let id = slab.append(&VertexPrefilterEnvironmentCubemapIds { camera, roughness });
         let (pipeline, bindgroup) =
             crate::ibl::prefiltered_environment::create_pipeline_and_bindgroup(
-                device,
-                &constants,
-                &roughness,
+                &device,
+                &slab.as_ref().get_buffer(),
                 environment_texture,
             );
 
@@ -512,16 +489,15 @@ impl Skybox {
                 let mip_height: u32 = 128 >> mip_level;
 
                 // update the roughness for these mips
-                *roughness = mip_level as f32 / 4.0;
-                roughness.update(queue);
+                slab.write(roughness, &(mip_level as f32 / 4.0));
 
                 let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
                     label: Some("specular convolution"),
                 });
 
                 let cubemap_face = crate::Texture::new_with(
-                    device,
-                    queue,
+                    &device,
+                    &queue,
                     Some(&format!("cubemap{i}{mip_level}prefiltered_environment")),
                     Some(wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC),
                     None,
@@ -535,8 +511,7 @@ impl Skybox {
                 );
 
                 // update the view to point at one of the cube faces
-                constants.camera_view = views[i];
-                constants.update(queue);
+                slab.write(camera, &Camera::new(proj, views[i]));
 
                 {
                     let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -554,7 +529,7 @@ impl Skybox {
 
                     render_pass.set_pipeline(&pipeline);
                     render_pass.set_bind_group(0, &bindgroup, &[]);
-                    unit_cube_mesh.draw(&mut render_pass);
+                    render_pass.draw(0..36, id.inner()..id.inner() + 1);
                 }
 
                 queue.submit([encoder.finish()]);
@@ -563,8 +538,8 @@ impl Skybox {
         }
 
         crate::Texture::new_cubemap_texture(
-            device,
-            queue,
+            &device,
+            &queue,
             Some(&format!("prefiltered environment cubemap")),
             128,
             cubemap_faces.as_slice(),
@@ -577,35 +552,6 @@ impl Skybox {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
     ) -> crate::Texture {
-        #[repr(C)]
-        #[derive(Clone, Copy, bytemuck::Zeroable, bytemuck::Pod)]
-        struct Vert {
-            pos: [f32; 3],
-            uv: [f32; 2],
-        }
-
-        let bl = Vert {
-            pos: [-1.0, -1.0, 0.0],
-            uv: [0.0, 1.0],
-        };
-        let br = Vert {
-            pos: [1.0, -1.0, 0.0],
-            uv: [1.0, 1.0],
-        };
-        let tl = Vert {
-            pos: [-1.0, 1.0, 0.0],
-            uv: [0.0, 0.0],
-        };
-        let tr = Vert {
-            pos: [1.0, 1.0, 0.0],
-            uv: [1.0, 0.0],
-        };
-
-        let vertices = [bl, br, tr, bl, tr, tl];
-
-        let screen_space_quad_mesh =
-            crate::mesh::Mesh::from_vertices(device, Some("brdf_lut"), vertices);
-
         let vertex_module = device.create_shader_module(wgpu::include_spirv!(
             "linkage/convolution-vertex_brdf_lut_convolution.spv"
         ));
@@ -618,14 +564,7 @@ impl Skybox {
             vertex: wgpu::VertexState {
                 module: &vertex_module,
                 entry_point: "convolution::vertex_brdf_lut_convolution",
-                buffers: &[wgpu::VertexBufferLayout {
-                    array_stride: (3 + 2) * std::mem::size_of::<f32>() as u64,
-                    step_mode: wgpu::VertexStepMode::Vertex,
-                    attributes: &wgpu::vertex_attr_array![
-                        0 => Float32x3,
-                        1 => Float32x2
-                    ],
-                }],
+                buffers: &[],
             },
             primitive: wgpu::PrimitiveState {
                 topology: wgpu::PrimitiveTopology::TriangleList,
@@ -692,7 +631,7 @@ impl Skybox {
             });
 
             render_pass.set_pipeline(&pipeline);
-            screen_space_quad_mesh.draw(&mut render_pass);
+            render_pass.draw(0..6, 0..1);
         }
         queue.submit([encoder.finish()]);
         framebuffer
@@ -701,37 +640,39 @@ impl Skybox {
 
 #[cfg(test)]
 mod test {
+    use crabslab::GrowableSlab;
     use glam::Vec3;
 
     use super::*;
-    use crate::{RenderGraphConfig, Renderling};
+    use crate::Renderling;
 
     #[test]
     fn hdr_skybox_scene() {
         let mut r = Renderling::headless(600, 400);
         let proj = crate::camera::perspective(600.0, 400.0);
         let view = crate::camera::look_at(Vec3::new(0.0, 0.0, 2.0), Vec3::ZERO, Vec3::Y);
-        let mut builder = r.new_scene().with_camera(proj, view);
-        builder.add_skybox_image_from_path("../../img/hdr/resting_place.hdr");
-        let scene = builder.build().unwrap();
+
+        let mut stage = r.new_stage();
+        stage.configure_graph(&mut r, true);
+
+        let camera = stage.append(&Camera::new(proj, view));
+        let skybox = stage
+            .new_skybox_from_path("../../img/hdr/resting_place.hdr", camera)
+            .unwrap();
 
         assert_eq!(
             wgpu::TextureFormat::Rgba16Float,
-            scene.skybox.irradiance_cubemap.texture.format()
+            skybox.irradiance_cubemap.texture.format()
         );
         assert_eq!(
             wgpu::TextureFormat::Rgba16Float,
-            scene
-                .skybox
-                .prefiltered_environment_cubemap
-                .texture
-                .format()
+            skybox.prefiltered_environment_cubemap.texture.format()
         );
 
         for i in 0..6 {
             // save out the irradiance face
             let copied_buffer = crate::Texture::read_from(
-                &scene.skybox.irradiance_cubemap.texture,
+                &skybox.irradiance_cubemap.texture,
                 r.get_device(),
                 r.get_queue(),
                 32,
@@ -755,7 +696,7 @@ mod test {
                 let mip_size = 128u32 >> mip_level;
                 // save out the prefiltered environment faces' mips
                 let copied_buffer = crate::Texture::read_from(
-                    &scene.skybox.prefiltered_environment_cubemap.texture,
+                    &skybox.prefiltered_environment_cubemap.texture,
                     r.get_device(),
                     r.get_queue(),
                     mip_size as usize,
@@ -782,12 +723,9 @@ mod test {
             }
         }
 
-        r.setup_render_graph(RenderGraphConfig {
-            scene: Some(scene),
-            with_screen_capture: true,
-            ..Default::default()
-        });
-        let img = r.render_image().unwrap();
+        stage.set_skybox(skybox);
+
+        let img = r.render_linear_image().unwrap();
         img_diff::assert_img_eq("skybox/hdr.png", img);
     }
 

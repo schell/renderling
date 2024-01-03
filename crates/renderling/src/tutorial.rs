@@ -530,7 +530,7 @@ mod test {
             },
         );
         let unit = RenderUnit {
-            vertex_data: VertexData::Native(vertex_data_id),
+            vertex_data: VertexData::new_native(vertex_data_id),
             ..Default::default()
         };
         let unit_id = slab.append(&device, &queue, &unit);
@@ -760,7 +760,7 @@ mod test {
             },
         );
         let unit = RenderUnit {
-            vertex_data: renderling_shader::stage::VertexData::Native(vertex_data_id),
+            vertex_data: renderling_shader::stage::VertexData::new_native(vertex_data_id),
             camera: camera_id,
             transform: transform_id,
             vertex_count: vertices.len() as u32,

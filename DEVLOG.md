@@ -1,5 +1,118 @@
 # devlog
 
+## Sat Dec 23, 2023
+
+I've ported over a majority of the tests to the GLTF-on-the-slab implementation.
+I'm currently working on the big PBR test and having trouble with the skybox, which
+is rendering all black...
+
+Debugging rabbit hole:
+* So is it even running?
+  - Yes, logging shows that it's running.
+* Could it be it needs to be run in its own render pass?
+* Before I even check that, I see that the skybox's vertex shader uses the `instance_index` as the `Id` of the camera, and I'm passing `0..1` as the instance range in the draw call.
+  - So we need a way to pass the camera's `Id` to the skybox.
+    - I just added it as a field on `Skybox`
+    - Using that new field fixed that issue. Now I have an issue with bloom.
+
+After fixing the skybox rendering it seems bloom isn't running.
+
+Debugging rabbit hole:
+* So is it even running?
+  - Yes, logging shows that it's running.
+* Is the result being used downstream during tonemapping?
+  - It seems to be.
+* Let's check to see that there isn't something funky when configuring the graph.
+  - Nothing I can tell there.
+* Maybe print out the brightness texture and make sure it's populated?
+* Losing steam here, especially since bloom needs to be re-done as "physically based".
+
+### Physically Based Bloom
+
+## Thu Dec 21, 2023
+
+It's the solstice! My Dad's birthday, and another bug hunt in `renderling`.
+
+### Porting gltf_images test
+The test `gltf_images` tests our image decoding by loading a GLTF file and then
+creating a new staged object that uses the image's texture.
+
+It's currently coming out all black, and it should come out like
+![gltf_images test](test_img/gltf_images.png).
+
+I recently got rid of the distinction between "native" vertex data and GLTF vertex
+data. Now there is only GLTF vertex data and the "native" `Vertex` meshes can be
+conveniently staged (marshalled to the GPU) using a helper function that creates
+a `GltfPrimitive` complete with `GltfAccessors` etc.
+
+Debbuging rabbit hole:
+* Let's compare old vs new vertex shaders
+  - It doesn't seem to be the vertices, because the staged vertices (read from the GPU) are equal to the original mesh.
+  - The staged vertices are equal to the original CPU-side mesh, but the computed vertex values are different from legacy.
+    - It looks like transforms on `RenderUnits` are not transforming their child primitive's geometry
+      - Got it! It was because `GltfNode`'s `Default` instance was setting `scale` to `Vec3::ZERO`.
+
+## Wed Dec 20, 2023
+
+I think I'm going to keep going with this idea of making GLTF the internal representation of the
+renderer.
+
+## Tue Dec 19, 2023
+
+### Thoughts on GLTF
+GLTF on-the-slab has been a boon to this project and I'm tempted to make it the main way we do
+rendering. I just want to write this down somewhere so I don't forget. Currently when loading
+a GLTF file we traverse the GLTF document and store the whole thing on the GPU's slab. Then
+the user has to specify which nodes (or a scene) to draw, which traverses one more time, linking
+the `RenderUnit`s to the primitives within the GLTF. I _think_ it might be cognitively easier
+to have GLTF nodes somehow be the base unit of rendering ... but I also have plans for supporting
+SDFs and I'm not sure how that all fits together.
+
+* [At least one other person is thinking about putting SDFs in GLTF using an extension](https://community.khronos.org/t/signed-distance-field-representation-of-geometry-extension/109575)
+
+Anyway - I'll keep going with the momentum I have and think about refactoring towards this in the future.
+
+## Mon Dec 18, 2023
+
+### Simple Texture GLTF Example
+* The `simple_texture` test is rendering the texture upside-down.
+* There are _no rotation transformations_ in its node's hierarchy.
+* What does the atlas look like?
+  - It's not the atlas, the two tests (slabbed and the previous non-slabbed) have
+    identical atlas images.
+* So what about UV coords?
+  - Comparing runs of the vertex shaders shows that the UV coords' Y components are flipped.
+  - So, 0.0 is 1.0 and 1.0 is 0.0
+* So is there something doing this intentionally?
+  - Nothing that I can easily see in the `gltf_support` modules...
+  - It has something to do with the accessor.
+  - I can see in the GLTF file that the accessor's byte offset is 48, but somehow in
+    my code it comes out 12...
+  - It was because the accessor's offset was not being taken into account.
+
+### Analytical Directional Lights
+I got analytical lighting working (at least for directional lights) on the stage.
+The problem I was having was that the shaders use `Camera.position` in lighting
+equations, but that was defaulting to `Vec3::ZERO`. Previously in the "scene"
+version of the renderer (which I'm porting over to "stage") the camera's position
+was set automatically when setting the projection and/or view.
+I had to run both versions of the vertex AND fragement shaders to track this down. Ugh!
+
+## Fri Dec 8, 2023
+
+I've been having trouble getting the new GLTF files on-the-slab method to pass my
+previous tests. Mainly because of little things I had forgotten. Little bits of
+state that need to be updated to run the shaders. The most recent was that the
+size of the atlas needs to be updated on the GPU when the atlas changes.
+
+I'm moving over tests from `renderling/scene/gltf_support.rs` to
+`renderling/stage/gltf_support.rs` one at a time.
+
+## Thu Dec 7, 2023
+
+Ongoing work to get GLTF files on-the-slab working. When this work is done GLTF
+file imports should be lightening fast.
+
 ## Wed Nov 15, 2023
 
 I resubmitted the NLNet grant proposal with expanded scope to take care of [the

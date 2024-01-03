@@ -1,13 +1,9 @@
 //! Pipeline for creating a prefiltered environment map from an existing
 //! environment cubemap.
 
-use crate::Uniform;
-use renderling_shader::stage::GpuConstants;
-
 pub fn create_pipeline_and_bindgroup(
     device: &wgpu::Device,
-    constants: &Uniform<GpuConstants>,
-    roughness: &Uniform<f32>,
+    buffer: &wgpu::Buffer,
     environment_texture: &crate::Texture,
 ) -> (wgpu::RenderPipeline, wgpu::BindGroup) {
     let label = Some("prefiltered environment");
@@ -16,9 +12,9 @@ pub fn create_pipeline_and_bindgroup(
         entries: &[
             wgpu::BindGroupLayoutEntry {
                 binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX,
+                visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
                 ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
+                    ty: wgpu::BufferBindingType::Storage { read_only: true },
                     has_dynamic_offset: false,
                     min_binding_size: None,
                 },
@@ -26,16 +22,6 @@ pub fn create_pipeline_and_bindgroup(
             },
             wgpu::BindGroupLayoutEntry {
                 binding: 1,
-                visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-            wgpu::BindGroupLayoutEntry {
-                binding: 2,
                 visibility: wgpu::ShaderStages::FRAGMENT,
                 ty: wgpu::BindingType::Texture {
                     sample_type: wgpu::TextureSampleType::Float { filterable: true },
@@ -45,7 +31,7 @@ pub fn create_pipeline_and_bindgroup(
                 count: None,
             },
             wgpu::BindGroupLayoutEntry {
-                binding: 3,
+                binding: 2,
                 visibility: wgpu::ShaderStages::FRAGMENT,
                 ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                 count: None,
@@ -59,22 +45,14 @@ pub fn create_pipeline_and_bindgroup(
         entries: &[
             wgpu::BindGroupEntry {
                 binding: 0,
-                resource: wgpu::BindingResource::Buffer(
-                    constants.buffer().as_entire_buffer_binding(),
-                ),
+                resource: wgpu::BindingResource::Buffer(buffer.as_entire_buffer_binding()),
             },
             wgpu::BindGroupEntry {
                 binding: 1,
-                resource: wgpu::BindingResource::Buffer(
-                    roughness.buffer().as_entire_buffer_binding(),
-                ),
-            },
-            wgpu::BindGroupEntry {
-                binding: 2,
                 resource: wgpu::BindingResource::TextureView(&environment_texture.view),
             },
             wgpu::BindGroupEntry {
-                binding: 3,
+                binding: 2,
                 resource: wgpu::BindingResource::Sampler(&environment_texture.sampler),
             },
         ],
@@ -96,13 +74,7 @@ pub fn create_pipeline_and_bindgroup(
         vertex: wgpu::VertexState {
             module: &vertex_shader,
             entry_point: "convolution::vertex_prefilter_environment_cubemap",
-            buffers: &[wgpu::VertexBufferLayout {
-                array_stride: 3 * std::mem::size_of::<f32>() as u64,
-                step_mode: wgpu::VertexStepMode::Vertex,
-                attributes: &wgpu::vertex_attr_array![
-                    0 => Float32x3
-                ],
-            }],
+            buffers: &[],
         },
         primitive: wgpu::PrimitiveState {
             topology: wgpu::PrimitiveTopology::TriangleList,

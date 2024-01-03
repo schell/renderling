@@ -31,7 +31,7 @@ fn get_params(input: &DeriveInput) -> syn::Result<Params> {
         _ => {
             return Err(syn::Error::new(
                 name.span(),
-                "deriving Slabbed only supports structs".to_string(),
+                "deriving SlabItem only supports structs".to_string(),
             ))
         }
     };
@@ -41,7 +41,7 @@ fn get_params(input: &DeriveInput) -> syn::Result<Params> {
         .map(|field| {
             let ty = &field.ty;
             quote! {
-                <#ty as renderling_shader::slab::Slabbed>::slab_size()
+                <#ty as crabslab::SlabItem>::slab_size()
             }
         })
         .collect();
@@ -69,7 +69,7 @@ fn get_params(input: &DeriveInput) -> syn::Result<Params> {
     })
 }
 
-#[proc_macro_derive(Slabbed)]
+#[proc_macro_derive(SlabItem)]
 pub fn derive_from_slab(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let input: DeriveInput = syn::parse_macro_input!(input);
     let name = &input.ident;
@@ -88,8 +88,7 @@ pub fn derive_from_slab(input: proc_macro::TokenStream) -> proc_macro::TokenStre
         /// Adds a `CanFetch<'lt>` bound on each of the system data types.
         fn constrain_system_data_types(clause: &mut WhereClause, tys: &[Type]) {
             for ty in tys.iter() {
-                let where_predicate: WherePredicate =
-                    syn::parse_quote!(#ty : renderling_shader::slab::Slabbed);
+                let where_predicate: WherePredicate = syn::parse_quote!(#ty : crabslab::SlabItem);
                 clause.predicates.push(where_predicate);
             }
         }
@@ -129,9 +128,11 @@ pub fn derive_from_slab(input: proc_macro::TokenStream) -> proc_macro::TokenStre
             FieldName::Ident(field) => Ident::new(&format!("offset_of_{}", field), field.span()),
         };
         offsets.push(quote! {
-            pub fn #ident() -> usize {
-                #(<#offset_tys as renderling_shader::slab::Slabbed>::slab_size()+)*
-                0
+            pub fn #ident() -> crabslab::Offset<#ty> {
+                crabslab::Offset::new(
+                    #(<#offset_tys as crabslab::SlabItem>::slab_size()+)*
+                    0
+                )
             }
         });
         offset_tys.push(ty.clone());
@@ -145,7 +146,7 @@ pub fn derive_from_slab(input: proc_macro::TokenStream) -> proc_macro::TokenStre
         }
 
         #[automatically_derived]
-        impl #impl_generics renderling_shader::slab::Slabbed for #name #ty_generics #where_clause
+        impl #impl_generics crabslab::SlabItem for #name #ty_generics #where_clause
         {
             fn slab_size() -> usize {
                 #(#sizes)+*

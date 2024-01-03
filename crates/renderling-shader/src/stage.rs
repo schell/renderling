@@ -5,6 +5,7 @@
 //!
 //! To read more about the technique, check out these resources:
 //! * https://stackoverflow.com/questions/59686151/what-is-gpu-driven-rendering
+use crabslab::{Array, Id, Slab, SlabItem, ID_NONE};
 use glam::{mat3, Mat4, Quat, UVec2, UVec3, Vec2, Vec3, Vec4, Vec4Swizzles};
 use spirv_std::{
     image::{Cubemap, Image2d},
@@ -15,22 +16,20 @@ use spirv_std::{
 use spirv_std::num_traits::*;
 
 use crate::{
-    self as renderling_shader,
-    array::Array,
     bits::{bits, extract, insert},
     debug::*,
     gltf::{GltfMesh, GltfNode},
-    id::{Id, ID_NONE},
     pbr::{self, PbrMaterial},
-    slab::{Slab, Slabbed},
     texture::GpuTexture,
-    IsMatrix, IsVector,
+    IsMatrix, IsSampler, IsVector, Sample2d, SampleCube,
 };
+
+pub mod light;
 
 /// A vertex in a mesh.
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[repr(C)]
-#[derive(Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable, Slabbed)]
+#[derive(Clone, Copy, PartialEq, SlabItem)]
 pub struct Vertex {
     pub position: Vec4,
     pub color: Vec4,
@@ -172,7 +171,7 @@ impl Vertex {
 
 #[repr(transparent)]
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
-#[derive(Copy, Clone, Default, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable, Slabbed)]
+#[derive(Copy, Clone, Default, PartialEq, Eq, SlabItem)]
 pub struct LightType(u32);
 
 #[cfg(not(target_arch = "spirv"))]
@@ -199,7 +198,7 @@ impl LightType {
 /// A light capable of representing a directional, point or spotlight.
 #[repr(C)]
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
-#[derive(Copy, Clone, Default, bytemuck::Pod, bytemuck::Zeroable, Slabbed)]
+#[derive(Copy, Clone, Default, SlabItem)]
 pub struct GpuLight {
     pub position: Vec4,
     pub direction: Vec4,
@@ -213,19 +212,7 @@ pub struct GpuLight {
 
 /// Determines the lighting to use in an ubershader.
 #[repr(transparent)]
-#[derive(
-    Clone,
-    Copy,
-    Default,
-    PartialEq,
-    Eq,
-    PartialOrd,
-    Ord,
-    Debug,
-    bytemuck::Pod,
-    bytemuck::Zeroable,
-    Slabbed,
-)]
+#[derive(Clone, Copy, Default, PartialEq, Eq, PartialOrd, Ord, Debug, SlabItem)]
 pub struct LightingModel(u32);
 
 impl LightingModel {
@@ -246,7 +233,7 @@ impl LightingModel {
 /// ### Provides info about if the entity is a skin.
 #[repr(transparent)]
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
-#[derive(Clone, Copy, Default, PartialEq, bytemuck::Pod, bytemuck::Zeroable, Slabbed)]
+#[derive(Clone, Copy, Default, PartialEq, SlabItem)]
 pub struct GpuEntityInfo(pub u32);
 
 impl GpuEntityInfo {
@@ -309,7 +296,7 @@ impl GpuEntityInfo {
 /// A bundle of GPU components.
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[repr(C)]
-#[derive(Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable, Slabbed)]
+#[derive(Clone, Copy, PartialEq, SlabItem)]
 pub struct GpuEntity {
     // The id of this entity. `Id::NONE` means this entity is not in use.
     pub id: Id<GpuEntity>,
@@ -452,7 +439,7 @@ impl GpuEntity {
 /// Boolean toggles that cause the renderer to turn on/off certain features.
 #[repr(transparent)]
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
-#[derive(Default, Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable, Slabbed)]
+#[derive(Default, Clone, Copy, PartialEq, SlabItem)]
 pub struct GpuToggles(pub u32);
 
 impl GpuToggles {
@@ -485,7 +472,7 @@ impl GpuToggles {
 /// Unforms/constants for a scene's worth of rendering.
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[repr(C)]
-#[derive(Default, Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable, Slabbed)]
+#[derive(Default, Clone, Copy, PartialEq, SlabItem)]
 pub struct GpuConstants {
     pub camera_projection: Mat4,
     pub camera_view: Mat4,
@@ -496,7 +483,7 @@ pub struct GpuConstants {
 }
 
 #[repr(C)]
-#[derive(Default, Debug, Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable, Slabbed)]
+#[derive(Default, Debug, Clone, Copy, PartialEq, SlabItem)]
 pub struct DrawIndirect {
     pub vertex_count: u32,
     pub instance_count: u32,
@@ -504,14 +491,18 @@ pub struct DrawIndirect {
     pub base_instance: u32,
 }
 
-fn texture_color(
+fn texture_color<T, S>(
     texture_id: Id<GpuTexture>,
     uv: Vec2,
-    atlas: &Image2d,
-    sampler: &Sampler,
+    atlas: &T,
+    sampler: &S,
     atlas_size: UVec2,
     textures: &[GpuTexture],
-) -> Vec4 {
+) -> Vec4
+where
+    T: Sample2d<Sampler = S>,
+    S: IsSampler,
+{
     let texture = if texture_id.is_none() {
         GpuTexture::default()
     } else {
@@ -526,11 +517,11 @@ fn texture_color(
     color
 }
 
-fn stage_texture_color(
+fn stage_texture_color<T: Sample2d<Sampler = S>, S: IsSampler>(
     texture_id: Id<GpuTexture>,
     uv: Vec2,
-    atlas: &Image2d,
-    sampler: &Sampler,
+    atlas: &T,
+    sampler: &S,
     atlas_size: UVec2,
     slab: &[u32],
 ) -> Vec4 {
@@ -634,6 +625,65 @@ pub fn main_fragment_scene(
     output: &mut Vec4,
     brigtness: &mut Vec4,
 ) {
+    main_fragment_impl(
+        atlas,
+        atlas_sampler,
+        irradiance,
+        irradiance_sampler,
+        prefiltered,
+        prefiltered_sampler,
+        brdf,
+        brdf_sampler,
+        constants,
+        lights,
+        materials,
+        textures,
+        in_material,
+        in_color,
+        in_uv0,
+        in_uv1,
+        in_norm,
+        in_tangent,
+        in_bitangent,
+        in_pos,
+        output,
+        brigtness,
+    );
+}
+
+/// Scene fragment shader, callable from the CPU or GPU.
+pub fn main_fragment_impl<T, C, S>(
+    atlas: &T,
+    atlas_sampler: &S,
+
+    irradiance: &C,
+    irradiance_sampler: &S,
+    prefiltered: &C,
+    prefiltered_sampler: &S,
+    brdf: &T,
+    brdf_sampler: &S,
+
+    constants: &GpuConstants,
+    lights: &[GpuLight],
+    materials: &[pbr::PbrMaterial],
+    textures: &[GpuTexture],
+
+    in_material: u32,
+    in_color: Vec4,
+    in_uv0: Vec2,
+    in_uv1: Vec2,
+    in_norm: Vec3,
+    in_tangent: Vec3,
+    in_bitangent: Vec3,
+    in_pos: Vec3,
+
+    output: &mut Vec4,
+    brigtness: &mut Vec4,
+) where
+    T: Sample2d<Sampler = S>,
+    C: SampleCube<Sampler = S>,
+    S: IsSampler,
+{
     let material = if in_material == ID_NONE || !constants.toggles.get_use_lighting() {
         // without an explicit material (or if the entire render has no lighting)
         // the entity will not participate in any lighting calculations
@@ -869,13 +919,54 @@ pub fn main_fragment_scene(
 }
 
 /// A camera used for transforming the stage during rendering.
+///
+/// Use `Camera::new(projection, view)` to create a new camera.
+/// Or use `Camera::default` followed by `Camera::with_projection_and_view`
+/// to set the projection and view matrices. Using the `with_*` or `set_*`
+/// methods is preferred over setting the fields directly because they will
+/// also update the camera's position.
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[repr(C)]
-#[derive(Default, Clone, Copy, PartialEq, Slabbed)]
+#[derive(Default, Clone, Copy, PartialEq, SlabItem)]
 pub struct Camera {
     pub projection: Mat4,
     pub view: Mat4,
     pub position: Vec3,
+}
+
+impl Camera {
+    pub fn new(projection: Mat4, view: Mat4) -> Self {
+        Camera::default().with_projection_and_view(projection, view)
+    }
+
+    pub fn set_projection_and_view(&mut self, projection: Mat4, view: Mat4) {
+        self.projection = projection;
+        self.view = view;
+        self.position = view.inverse().transform_point3(Vec3::ZERO);
+    }
+
+    pub fn with_projection_and_view(mut self, projection: Mat4, view: Mat4) -> Self {
+        self.set_projection_and_view(projection, view);
+        self
+    }
+
+    pub fn set_projection(&mut self, projection: Mat4) {
+        self.set_projection_and_view(projection, self.view);
+    }
+
+    pub fn with_projection(mut self, projection: Mat4) -> Self {
+        self.set_projection(projection);
+        self
+    }
+
+    pub fn set_view(&mut self, view: Mat4) {
+        self.set_projection_and_view(self.projection, view);
+    }
+
+    pub fn with_view(mut self, view: Mat4) -> Self {
+        self.set_view(view);
+        self
+    }
 }
 
 /// Holds important info about the stage.
@@ -883,28 +974,30 @@ pub struct Camera {
 /// This should be the first struct in the stage's slab.
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[repr(C)]
-#[derive(Default, Clone, Copy, PartialEq, Slabbed)]
+#[derive(Clone, Copy, PartialEq, SlabItem)]
 pub struct StageLegend {
     pub atlas_size: UVec2,
     pub debug_mode: DebugMode,
     pub has_skybox: bool,
     pub has_lighting: bool,
-    pub light_array: Array<GpuLight>,
+    pub light_array: Array<light::Light>,
+}
+
+impl Default for StageLegend {
+    fn default() -> Self {
+        Self {
+            atlas_size: Default::default(),
+            debug_mode: Default::default(),
+            has_skybox: Default::default(),
+            has_lighting: true,
+            light_array: Default::default(),
+        }
+    }
 }
 
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[repr(C)]
-#[derive(Default, Clone, Copy, PartialEq, Slabbed)]
-pub struct NativeVertexData {
-    // Points to an array of `Vertex` in the stage's slab.
-    pub vertices: Array<Vertex>,
-    // Points to a `PbrMaterial` in the stage's slab.
-    pub material: Id<PbrMaterial>,
-}
-
-#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
-#[repr(C)]
-#[derive(Default, Clone, Copy, PartialEq, Slabbed)]
+#[derive(Default, Clone, Copy, PartialEq, SlabItem)]
 pub struct GltfVertexData {
     // A path of node ids that leads to the node that contains the mesh.
     pub parent_node_path: Array<Id<GltfNode>>,
@@ -914,62 +1007,9 @@ pub struct GltfVertexData {
     pub primitive_index: u32,
 }
 
-#[repr(u32)]
-#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
-#[derive(Clone, Copy, PartialEq)]
-pub enum VertexData {
-    Native(Id<NativeVertexData>),
-    Gltf(Id<GltfVertexData>),
-}
-
-impl Default for VertexData {
-    fn default() -> Self {
-        VertexData::Native(Id::NONE)
-    }
-}
-
-impl Slabbed for VertexData {
-    fn slab_size() -> usize {
-        2
-    }
-
-    fn read_slab(&mut self, index: usize, slab: &[u32]) -> usize {
-        let mut proxy = 0u32;
-        let index = proxy.read_slab(index, slab);
-        match proxy {
-            0 => {
-                let mut native = Id::default();
-                let index = native.read_slab(index, slab);
-                *self = Self::Native(native);
-                index
-            }
-            1 => {
-                let mut gltf = Id::default();
-                let index = gltf.read_slab(index, slab);
-                *self = Self::Gltf(gltf);
-                index
-            }
-            _ => index,
-        }
-    }
-
-    fn write_slab(&self, index: usize, slab: &mut [u32]) -> usize {
-        match self {
-            Self::Native(native) => {
-                let index = 0u32.write_slab(index, slab);
-                native.write_slab(index, slab)
-            }
-            Self::Gltf(gltf) => {
-                let index = 1u32.write_slab(index, slab);
-                gltf.write_slab(index, slab)
-            }
-        }
-    }
-}
-
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[repr(C)]
-#[derive(Clone, Copy, PartialEq, Slabbed)]
+#[derive(Clone, Copy, PartialEq, SlabItem)]
 pub struct Transform {
     pub translation: Vec3,
     pub rotation: Quat,
@@ -986,18 +1026,27 @@ impl Default for Transform {
     }
 }
 
-/// A fully-computed unit of rendering, roughly meaning a mesh with model matrix
-/// transformations.
+/// A rendering "command" that draws a single mesh from a top-level node.
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[repr(C)]
-#[derive(Default, Clone, Copy, PartialEq, Slabbed)]
+#[derive(Default, Clone, Copy, PartialEq, SlabItem)]
 pub struct RenderUnit {
-    pub vertex_data: VertexData,
+    // Which node are we rendering, and what is the path through its
+    // ancestors to get to it.
+    pub node_path: Array<Id<GltfNode>>,
+    // Index of the mesh within the child node that we're rendering.
+    pub mesh_index: u32,
+    // Index of the primitive within the mesh that we're rendering.
+    pub primitive_index: u32,
     // Points to a `Camera` in the stage's slab.
     pub camera: Id<Camera>,
-    // Points to a `Transform` in the stage's slab.
+    // Points to a top-level `Transform` in the stage's slab.
+    //
+    // This is used to transform your GLTF models.
     pub transform: Id<Transform>,
     // Number of vertices to draw for this unit.
+    //
+    // This is a cache for convenience on CPU.
     pub vertex_count: u32,
 }
 
@@ -1007,32 +1056,42 @@ impl RenderUnit {
         vertex_index: u32,
         slab: &[u32],
     ) -> (Vertex, Transform, Id<PbrMaterial>) {
-        let transform = slab.read(self.transform);
-        match self.vertex_data {
-            VertexData::Native(id) => {
-                let NativeVertexData { vertices, material } = slab.read(id);
-                let vertex = slab.read(vertices.at(vertex_index as usize));
-                (vertex, transform, material)
-            }
-            VertexData::Gltf(id) => {
-                let GltfVertexData {
-                    parent_node_path: _,
-                    mesh,
-                    primitive_index,
-                } = slab.read(id);
-                // TODO: check nodes for skinning
-                let mesh = slab.read(mesh);
-                let primitive = slab.read(mesh.primitives.at(primitive_index as usize));
-                let material = primitive.material;
-                let vertex = primitive.get_vertex(vertex_index as usize, slab);
-                (vertex, transform, material)
-            }
+        let t = slab.read(self.transform);
+        crate::println!("t: {t:#?}");
+        let mut model = Mat4::from_scale_rotation_translation(t.scale, t.rotation, t.translation);
+        crate::println!("model: {model:#?}");
+        let mut node = GltfNode::default();
+        for id_id in self.node_path.iter() {
+            let node_id = slab.read(id_id);
+            crate::println!("  node_id: {node_id:?}");
+            node = slab.read(node_id);
+            crate::println!("  node.scale: {:?}", node.scale);
+            crate::println!("  node.rotation: {:?}", node.rotation);
+            crate::println!("  node.translation: {:?}", node.translation);
+            let node_transform =
+                Mat4::from_scale_rotation_translation(node.scale, node.rotation, node.translation);
+            model = model * node_transform;
         }
+
+        crate::println!("model(after): {model:#?}");
+        // TODO: check nodes for skinning
+        let mesh = slab.read(node.mesh);
+        let primitive_id = mesh.primitives.at(self.primitive_index as usize);
+        let primitive = slab.read(primitive_id);
+        let material = primitive.material;
+        let vertex = primitive.get_vertex(vertex_index as usize, slab);
+        let (s, r, t) = model.to_scale_rotation_translation_or_id();
+        let transform = Transform {
+            translation: t,
+            rotation: r,
+            scale: s,
+        };
+        (vertex, transform, material)
     }
 }
 
 #[spirv(vertex)]
-pub fn new_stage_vertex(
+pub fn gltf_vertex(
     // Which render unit are we rendering
     #[spirv(instance_index)] instance_index: u32,
     // Which vertex within the render unit are we rendering
@@ -1079,10 +1138,35 @@ pub fn new_stage_vertex(
     *clip_pos = camera.projection * camera.view * view_pos;
 }
 
+/// Returns the `StageLegend` from the stage's slab.
+///
+/// The `StageLegend` should be the first struct in the slab, always.
+pub fn get_stage_legend(slab: &[u32]) -> StageLegend {
+    slab.read(Id::new(0))
+}
+
+/// Returns the `PbrMaterial` from the stage's slab.
+pub fn get_material(material_index: u32, has_lighting: bool, slab: &[u32]) -> pbr::PbrMaterial {
+    if material_index == ID_NONE {
+        // without an explicit material (or if the entire render has no lighting)
+        // the entity will not participate in any lighting calculations
+        pbr::PbrMaterial {
+            lighting_model: LightingModel::NO_LIGHTING,
+            ..Default::default()
+        }
+    } else {
+        let mut material = slab.read(Id::<PbrMaterial>::new(material_index));
+        if !has_lighting {
+            material.lighting_model = LightingModel::NO_LIGHTING;
+        }
+        material
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 #[spirv(fragment)]
 /// Scene fragment shader.
-pub fn stage_fragment(
+pub fn gltf_fragment(
     #[spirv(descriptor_set = 1, binding = 0)] atlas: &Image2d,
     #[spirv(descriptor_set = 1, binding = 1)] atlas_sampler: &Sampler,
 
@@ -1110,23 +1194,73 @@ pub fn stage_fragment(
     output: &mut Vec4,
     brigtness: &mut Vec4,
 ) {
+    gltf_fragment_impl(
+        atlas,
+        atlas_sampler,
+        irradiance,
+        irradiance_sampler,
+        prefiltered,
+        prefiltered_sampler,
+        brdf,
+        brdf_sampler,
+        slab,
+        in_camera,
+        in_material,
+        in_color,
+        in_uv0,
+        in_uv1,
+        in_norm,
+        in_tangent,
+        in_bitangent,
+        in_pos,
+        output,
+        brigtness,
+    );
+}
+
+#[allow(clippy::too_many_arguments)]
+/// Scene fragment shader.
+pub fn gltf_fragment_impl<T, C, S>(
+    atlas: &T,
+    atlas_sampler: &S,
+    irradiance: &C,
+    irradiance_sampler: &S,
+    prefiltered: &C,
+    prefiltered_sampler: &S,
+    brdf: &T,
+    brdf_sampler: &S,
+
+    slab: &[u32],
+
+    in_camera: u32,
+    in_material: u32,
+    in_color: Vec4,
+    in_uv0: Vec2,
+    in_uv1: Vec2,
+    in_norm: Vec3,
+    in_tangent: Vec3,
+    in_bitangent: Vec3,
+    in_pos: Vec3,
+
+    output: &mut Vec4,
+    brigtness: &mut Vec4,
+) where
+    T: Sample2d<Sampler = S>,
+    C: SampleCube<Sampler = S>,
+    S: IsSampler,
+{
+    let legend = get_stage_legend(slab);
+    crate::println!("legend: {:?}", legend);
     let StageLegend {
         atlas_size,
         debug_mode,
         has_skybox: _,
         has_lighting,
         light_array,
-    } = slab.read(Id::new(0));
-    let material = if in_material == ID_NONE || !has_lighting {
-        // without an explicit material (or if the entire render has no lighting)
-        // the entity will not participate in any lighting calculations
-        pbr::PbrMaterial {
-            lighting_model: LightingModel::NO_LIGHTING,
-            ..Default::default()
-        }
-    } else {
-        slab.read(Id::<PbrMaterial>::new(in_material))
-    };
+    } = legend;
+
+    let material = get_material(in_material, has_lighting, slab);
+    crate::println!("material: {:?}", material);
 
     let albedo_tex_uv = if material.albedo_tex_coord == 0 {
         in_uv0
@@ -1141,6 +1275,7 @@ pub fn stage_fragment(
         atlas_size,
         slab,
     );
+    crate::println!("albedo_tex_color: {:?}", albedo_tex_color);
 
     let metallic_roughness_uv = if material.metallic_roughness_tex_coord == 0 {
         in_uv0
@@ -1154,6 +1289,10 @@ pub fn stage_fragment(
         atlas_sampler,
         atlas_size,
         slab,
+    );
+    crate::println!(
+        "metallic_roughness_tex_color: {:?}",
+        metallic_roughness_tex_color
     );
 
     let normal_tex_uv = if material.normal_tex_coord == 0 {
@@ -1169,6 +1308,7 @@ pub fn stage_fragment(
         atlas_size,
         slab,
     );
+    crate::println!("normal_tex_color: {:?}", normal_tex_color);
 
     let ao_tex_uv = if material.ao_tex_coord == 0 {
         in_uv0
@@ -1388,7 +1528,8 @@ pub fn compute_cull_entities(
 }
 
 #[spirv(compute(threads(32)))]
-/// A shader to ensure that we can extract i8 and i16 values from a storage buffer.
+/// A shader to ensure that we can extract i8 and i16 values from a storage
+/// buffer.
 pub fn test_i8_i16_extraction(
     #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] slab: &mut [u32],
     #[spirv(global_invocation_id)] global_id: UVec3,
@@ -1401,32 +1542,5 @@ pub fn test_i8_i16_extraction(
     let (value, _, _) = crate::bits::extract_i16(index, 2, slab);
     if value > 0 {
         slab[index] = value as u32;
-    }
-}
-
-#[cfg(test)]
-mod test {
-    use crate::{self as renderling_shader, id::Id, slab::Slab};
-    use renderling_shader::slab::Slabbed;
-
-    #[derive(Default, Debug, PartialEq, Slabbed)]
-    struct TheType {
-        a: glam::Vec3,
-        b: glam::Vec2,
-        c: glam::Vec4,
-    }
-
-    #[test]
-    fn slabbed_writeread() {
-        let mut slab = [0u32; 100];
-        let the = TheType {
-            a: glam::Vec3::new(0.0, 1.0, 2.0),
-            b: glam::Vec2::new(3.0, 4.0),
-            c: glam::Vec4::new(5.0, 6.0, 7.0, 8.0),
-        };
-        let index = slab.write(&the, 0);
-        assert_eq!(9, index);
-        let the2 = slab.read(Id::<TheType>::new(0));
-        assert_eq!(the, the2);
     }
 }

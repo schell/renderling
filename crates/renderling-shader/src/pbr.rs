@@ -4,26 +4,17 @@
 //! * https://learnopengl.com/PBR/Theory
 //! * https://github.com/KhronosGroup/glTF-Sample-Viewer/blob/5b1b7f48a8cb2b7aaef00d08fdba18ccc8dd331b/source/Renderer/shaders/pbr.frag
 //! * https://github.khronos.org/glTF-Sample-Viewer-Release/
-use renderling_derive::Slabbed;
 
+use crabslab::{Array, Id, Slab, SlabItem};
+use glam::{Vec2, Vec3, Vec4, Vec4Swizzles};
 #[cfg(target_arch = "spirv")]
 use spirv_std::num_traits::Float;
-use spirv_std::{
-    image::{Cubemap, Image2d},
-    Sampler,
-};
-
-use glam::{Vec2, Vec3, Vec4, Vec4Swizzles};
 
 use crate::{
-    self as renderling_shader,
-    array::Array,
-    id::Id,
     math,
-    slab::Slab,
-    stage::{GpuLight, LightType, LightingModel},
+    stage::{light::LightStyle, GpuLight, LightType, LightingModel},
     texture::GpuTexture,
-    IsVector,
+    IsSampler, IsVector, Sample2d, SampleCube,
 };
 
 /// Represents a material on the GPU.
@@ -33,7 +24,7 @@ use crate::{
 /// [`SceneBuilder`](crate::SceneBuilder).
 #[repr(C)]
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
-#[derive(Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable, Slabbed)]
+#[derive(Clone, Copy, PartialEq, SlabItem)]
 pub struct PbrMaterial {
     // x, y, z is emissive factor, default [0.0, 0.0, 0.0]
     // w is emissive strength multiplier (gltf's KHR_materials_emissive_strength extension),
@@ -154,37 +145,58 @@ fn outgoing_radiance(
     metalness: f32,
     roughness: f32,
 ) -> Vec3 {
+    crate::println!("outgoing_radiance");
+    crate::println!("    light_color: {light_color:?}");
+    crate::println!("    albedo: {albedo:?}");
+    crate::println!("    attenuation: {attenuation:?}");
+    crate::println!("    v: {v:?}");
+    crate::println!("    l: {l:?}");
+    crate::println!("    n: {n:?}");
+    crate::println!("    metalness: {metalness:?}");
+    crate::println!("    roughness: {roughness:?}");
+
     let f0 = Vec3::splat(0.4).lerp(albedo, metalness);
+    crate::println!("    f0: {f0:?}");
     let radiance = light_color.xyz() * attenuation;
+    crate::println!("    radiance: {radiance:?}");
     let h = (v + l).alt_norm_or_zero();
+    crate::println!("    h: {h:?}");
     // cook-torrance brdf
     let ndf: f32 = normal_distribution_ggx(n, h, roughness);
+    crate::println!("    ndf: {ndf:?}");
     let g: f32 = geometry_smith(n, v, l, roughness);
+    crate::println!("    g: {g:?}");
     let f: Vec3 = fresnel_schlick(h.dot(v).max(0.0), f0);
+    crate::println!("    f: {f:?}");
 
     let k_s = f;
     let k_d = (Vec3::splat(1.0) - k_s) * (1.0 - metalness);
+    crate::println!("    k_s: {k_s:?}");
 
     let numerator: Vec3 = ndf * g * f;
+    crate::println!("    numerator: {numerator:?}");
     let n_dot_l = n.dot(l).max(0.0);
+    crate::println!("    n_dot_l: {n_dot_l:?}");
     let denominator: f32 = 4.0 * n.dot(v).max(0.0) * n_dot_l + 0.0001;
+    crate::println!("    denominator: {denominator:?}");
     let specular: Vec3 = numerator / denominator;
+    crate::println!("    specular: {specular:?}");
 
     (k_d * albedo / core::f32::consts::PI + specular) * radiance * n_dot_l
 }
 
-pub fn sample_irradiance(
-    irradiance: &Cubemap,
-    irradiance_sampler: &Sampler,
+pub fn sample_irradiance<T: SampleCube<Sampler = S>, S: IsSampler>(
+    irradiance: &T,
+    irradiance_sampler: &S,
     // Normal vector
     n: Vec3,
 ) -> Vec3 {
     irradiance.sample_by_lod(*irradiance_sampler, n, 0.0).xyz()
 }
 
-pub fn sample_specular_reflection(
-    prefiltered: &Cubemap,
-    prefiltered_sampler: &Sampler,
+pub fn sample_specular_reflection<T: SampleCube<Sampler = S>, S: IsSampler>(
+    prefiltered: &T,
+    prefiltered_sampler: &S,
     // camera position in world space
     camera_pos: Vec3,
     // fragment position in world space
@@ -200,9 +212,9 @@ pub fn sample_specular_reflection(
         .xyz()
 }
 
-pub fn sample_brdf(
-    brdf: &Image2d,
-    brdf_sampler: &Sampler,
+pub fn sample_brdf<T: Sample2d<Sampler = S>, S: IsSampler>(
+    brdf: &T,
+    brdf_sampler: &S,
     // camera position in world space
     camera_pos: Vec3,
     // fragment position in world space
@@ -344,12 +356,14 @@ pub fn stage_shade_fragment(
     prefiltered: Vec3,
     brdf: Vec2,
 
-    lights: Array<GpuLight>,
+    lights: Array<crate::stage::light::Light>,
     slab: &[u32],
 ) -> Vec4 {
     let n = in_norm.alt_norm_or_zero();
     let v = (camera_pos - in_pos).alt_norm_or_zero();
-
+    crate::println!("lights: {lights:?}");
+    crate::println!("n: {n:?}");
+    crate::println!("v: {v:?}");
     // reflectance
     let mut lo = Vec3::ZERO;
     for i in 0..lights.len() {
@@ -358,19 +372,17 @@ pub fn stage_shade_fragment(
 
         // determine the light ray and the radiance
         match light.light_type {
-            LightType::END_OF_LIGHTS => {
-                break;
-            }
-            LightType::POINT_LIGHT => {
-                let frag_to_light = light.position.xyz() - in_pos;
+            LightStyle::Point => {
+                let point_light = slab.read(light.into_point_id());
+                let frag_to_light = point_light.position - in_pos;
                 let distance = frag_to_light.length();
                 if distance == 0.0 {
                     continue;
                 }
                 let l = frag_to_light.alt_norm_or_zero();
-                let attenuation = light.intensity * 1.0 / (distance * distance);
+                let attenuation = point_light.intensity * 1.0 / (distance * distance);
                 lo += outgoing_radiance(
-                    light.color,
+                    point_light.color,
                     albedo,
                     attenuation,
                     v,
@@ -381,19 +393,20 @@ pub fn stage_shade_fragment(
                 );
             }
 
-            LightType::SPOT_LIGHT => {
-                let frag_to_light = light.position.xyz() - in_pos;
+            LightStyle::Spot => {
+                let spot_light = slab.read(light.into_spot_id());
+                let frag_to_light = spot_light.position - in_pos;
                 let distance = frag_to_light.length();
                 if distance == 0.0 {
                     continue;
                 }
                 let l = frag_to_light.alt_norm_or_zero();
-                let theta: f32 = l.dot(light.direction.xyz().alt_norm_or_zero());
-                let epsilon: f32 = light.inner_cutoff - light.outer_cutoff;
-                let attenuation: f32 =
-                    light.intensity * ((theta - light.outer_cutoff) / epsilon).clamp(0.0, 1.0);
+                let theta: f32 = l.dot(spot_light.direction.alt_norm_or_zero());
+                let epsilon: f32 = spot_light.inner_cutoff - spot_light.outer_cutoff;
+                let attenuation: f32 = spot_light.intensity
+                    * ((theta - spot_light.outer_cutoff) / epsilon).clamp(0.0, 1.0);
                 lo += outgoing_radiance(
-                    light.color,
+                    spot_light.color,
                     albedo,
                     attenuation,
                     v,
@@ -404,11 +417,15 @@ pub fn stage_shade_fragment(
                 );
             }
 
-            LightType::DIRECTIONAL_LIGHT => {
-                let l = -light.direction.xyz().alt_norm_or_zero();
-                let attenuation = light.intensity;
-                lo += outgoing_radiance(
-                    light.color,
+            LightStyle::Directional => {
+                let dir_light = slab.read(light.into_directional_id());
+                let l = -dir_light.direction.alt_norm_or_zero();
+                let attenuation = dir_light.intensity;
+                crate::println!("dir_light: {dir_light:?}");
+                crate::println!("l: {l:?}");
+                crate::println!("attenuation: {attenuation:?}");
+                let radiance = outgoing_radiance(
+                    dir_light.color,
                     albedo,
                     attenuation,
                     v,
@@ -417,11 +434,13 @@ pub fn stage_shade_fragment(
                     metallic,
                     roughness,
                 );
+                crate::println!("radiance: {radiance:?}");
+                lo += radiance;
             }
-            _ => {}
         }
     }
 
+    crate::println!("lo: {lo:?}");
     // calculate reflectance at normal incidence; if dia-electric (like plastic) use
     // F0 of 0.04 and if it's a metal, use the albedo color as F0 (metallic
     // workflow)

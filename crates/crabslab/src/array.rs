@@ -1,9 +1,29 @@
 //! A slab-allocated array.
 use core::marker::PhantomData;
 
-use crate::id::Id;
-use crate::slab::Slabbed;
+use crate::{id::Id, slab::SlabItem};
 
+#[derive(Clone, Copy)]
+pub struct ArrayIter<T> {
+    array: Array<T>,
+    index: usize,
+}
+
+impl<T: SlabItem> Iterator for ArrayIter<T> {
+    type Item = Id<T>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.index >= self.array.len() {
+            None
+        } else {
+            let id = self.array.at(self.index);
+            self.index += 1;
+            Some(id)
+        }
+    }
+}
+
+/// A pointer to contiguous `T` elements in a slab.
 #[repr(C)]
 pub struct Array<T> {
     // u32 offset in the slab
@@ -25,17 +45,32 @@ impl<T> Clone for Array<T> {
 
 impl<T> Copy for Array<T> {}
 
+/// An `Id<T>` is an `Array<T>` with a length of 1.
+impl<T> From<Id<T>> for Array<T> {
+    fn from(id: Id<T>) -> Self {
+        Self {
+            index: id.inner(),
+            len: 1,
+            _phantom: PhantomData,
+        }
+    }
+}
+
 impl<T> core::fmt::Debug for Array<T> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct(if self.is_null() {
-            "Array (null)"
+        if self.is_null() {
+            f.write_fmt(core::format_args!(
+                "Array<{}>(null)",
+                core::any::type_name::<T>()
+            ))
         } else {
-            "Array"
-        })
-        .field("index", &self.index)
-        .field("len", &self.len)
-        .field("_phantom", &self._phantom)
-        .finish()
+            f.write_fmt(core::format_args!(
+                "Array<{}>({}, {})",
+                core::any::type_name::<T>(),
+                self.index,
+                self.len
+            ))
+        }
     }
 }
 
@@ -45,7 +80,7 @@ impl<T> PartialEq for Array<T> {
     }
 }
 
-impl<T: Slabbed> Slabbed for Array<T> {
+impl<T: SlabItem> SlabItem for Array<T> {
     fn slab_size() -> usize {
         2
     }
@@ -71,7 +106,7 @@ impl<T: Slabbed> Slabbed for Array<T> {
     }
 }
 
-impl<T: Slabbed> Default for Array<T> {
+impl<T: SlabItem> Default for Array<T> {
     fn default() -> Self {
         Self {
             index: u32::MAX,
@@ -108,7 +143,7 @@ impl<T> Array<T> {
 
     pub fn at(&self, index: usize) -> Id<T>
     where
-        T: Slabbed,
+        T: SlabItem,
     {
         if index >= self.len() {
             Id::NONE
@@ -121,15 +156,32 @@ impl<T> Array<T> {
         self.index as usize
     }
 
+    pub fn iter(&self) -> ArrayIter<T> {
+        ArrayIter {
+            array: *self,
+            index: 0,
+        }
+    }
+
     /// Convert this array into a `u32` array.
     pub fn into_u32_array(self) -> Array<u32>
     where
-        T: Slabbed,
+        T: SlabItem,
     {
         Array {
             index: self.index,
             len: self.len * T::slab_size() as u32,
             _phantom: PhantomData,
         }
+    }
+
+    #[cfg(not(target_arch = "spirv"))]
+    /// Return the slice of the slab that this array represents.
+    pub fn sub_slab<'a>(&'a self, slab: &'a [u32]) -> &[u32]
+    where
+        T: SlabItem,
+    {
+        let arr = self.into_u32_array();
+        &slab[arr.index as usize..(arr.index + arr.len) as usize]
     }
 }

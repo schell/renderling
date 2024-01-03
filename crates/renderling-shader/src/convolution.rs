@@ -1,6 +1,7 @@
 //! Convolution shaders.
 //!
 //! These shaders convolve various functions to produce cached maps.
+use crabslab::{Id, Slab, SlabItem};
 use glam::{UVec2, Vec2, Vec3, Vec4, Vec4Swizzles};
 use spirv_std::{
     image::{Cubemap, Image2d},
@@ -11,7 +12,7 @@ use spirv_std::{
 #[cfg(target_arch = "spirv")]
 use spirv_std::num_traits::Float;
 
-use crate::{pbr, stage::GpuConstants, IsVector};
+use crate::{pbr, stage::Camera, IsVector};
 
 fn radical_inverse_vdc(mut bits: u32) -> f32 {
     bits = (bits << 16u32) | (bits >> 16u32);
@@ -148,31 +149,46 @@ pub fn integrate_brdf_doesnt_work(mut n_dot_v: f32, roughness: f32) -> Vec2 {
     Vec2::new(a, b)
 }
 
+/// Used by [`vertex_prefilter_environment_cubemap`] to read the camera and
+/// roughness values from the slab.
+#[derive(Default, SlabItem)]
+pub struct VertexPrefilterEnvironmentCubemapIds {
+    pub camera: Id<Camera>,
+    pub roughness: Id<f32>,
+}
+
+/// Uses the `instance_index` as the [`Id`] of a [`PrefilterEnvironmentIds`].
+/// roughness value.
 #[spirv(vertex)]
 pub fn vertex_prefilter_environment_cubemap(
-    #[spirv(uniform, descriptor_set = 0, binding = 0)] constants: &GpuConstants,
-    in_pos: Vec3,
+    #[spirv(instance_index)] instance_index: u32,
+    #[spirv(vertex_index)] vertex_id: u32,
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] slab: &[u32],
     out_pos: &mut Vec3,
+    out_roughness: &mut f32,
     #[spirv(position)] gl_pos: &mut Vec4,
 ) {
+    let in_pos = crate::math::CUBE[vertex_id as usize];
+    let VertexPrefilterEnvironmentCubemapIds { camera, roughness } =
+        slab.read(Id::new(instance_index));
+    let camera = slab.read(camera);
+    *out_roughness = slab.read(roughness);
     *out_pos = in_pos;
-    *gl_pos = constants.camera_projection * constants.camera_view * in_pos.extend(1.0);
+    *gl_pos = camera.projection * camera.view * in_pos.extend(1.0);
 }
 
 /// Lambertian prefilter.
 #[spirv(fragment)]
 pub fn fragment_prefilter_environment_cubemap(
-    #[spirv(uniform, descriptor_set = 0, binding = 1)] roughness: &f32,
-    #[spirv(descriptor_set = 0, binding = 2)] environment_cubemap: &Cubemap,
-    #[spirv(descriptor_set = 0, binding = 3)] sampler: &Sampler,
+    #[spirv(descriptor_set = 0, binding = 1)] environment_cubemap: &Cubemap,
+    #[spirv(descriptor_set = 0, binding = 2)] sampler: &Sampler,
     in_pos: Vec3,
+    in_roughness: f32,
     frag_color: &mut Vec4,
 ) {
     let mut n = in_pos.alt_norm_or_zero();
     // `wgpu` and vulkan's y coords are flipped from opengl
     n.y *= -1.0;
-    // These moves are redundant but the names have connections to the PBR
-    // equations.
     let r = n;
     let v = r;
 
@@ -181,12 +197,12 @@ pub fn fragment_prefilter_environment_cubemap(
 
     for i in 0..SAMPLE_COUNT {
         let xi = hammersley(i, SAMPLE_COUNT);
-        let h = importance_sample_ggx(xi, n, *roughness);
+        let h = importance_sample_ggx(xi, n, in_roughness);
         let l = (2.0 * v.dot(h) * h - v).alt_norm_or_zero();
 
         let n_dot_l = n.dot(l).max(0.0);
         if n_dot_l > 0.0 {
-            let mip_level = if *roughness == 0.0 {
+            let mip_level = if in_roughness == 0.0 {
                 0.0
             } else {
                 calc_lod(n_dot_l)
@@ -273,15 +289,44 @@ pub fn fragment_bloom(
     *frag_color = result.extend(1.0);
 }
 
+#[repr(C)]
+#[derive(Clone, Copy)]
+struct Vert {
+    pos: [f32; 3],
+    uv: [f32; 2],
+}
+
+/// A screen-space quad.
+const BRDF_VERTS: [Vert; 6] = {
+    let bl = Vert {
+        pos: [-1.0, -1.0, 0.0],
+        uv: [0.0, 1.0],
+    };
+    let br = Vert {
+        pos: [1.0, -1.0, 0.0],
+        uv: [1.0, 1.0],
+    };
+    let tl = Vert {
+        pos: [-1.0, 1.0, 0.0],
+        uv: [0.0, 0.0],
+    };
+    let tr = Vert {
+        pos: [1.0, 1.0, 0.0],
+        uv: [1.0, 0.0],
+    };
+
+    [bl, br, tr, bl, tr, tl]
+};
+
 #[spirv(vertex)]
 pub fn vertex_brdf_lut_convolution(
-    in_pos: glam::Vec3,
-    in_uv: glam::Vec2,
+    #[spirv(vertex_index)] vertex_id: u32,
     out_uv: &mut glam::Vec2,
     #[spirv(position)] gl_pos: &mut glam::Vec4,
 ) {
-    *out_uv = in_uv;
-    *gl_pos = in_pos.extend(1.0);
+    let Vert { pos, uv } = BRDF_VERTS[vertex_id as usize];
+    *out_uv = Vec2::from(uv);
+    *gl_pos = Vec3::from(pos).extend(1.0);
 }
 
 #[spirv(fragment)]

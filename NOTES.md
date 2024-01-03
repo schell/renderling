@@ -17,6 +17,7 @@ Just pro-cons on tech choices and little things I don't want to forget whil impl
   - using cargo and Rust module system
   - expressions!
   - type checking!
+  - traits!
   - editor tooling!
 
 ## cons / limititions
@@ -28,6 +29,7 @@ Just pro-cons on tech choices and little things I don't want to forget whil impl
 * for loops are hit or miss, sometimes they work and sometimes they don't
   - see [this rust-gpu issue](https://github.com/EmbarkStudios/rust-gpu/issues/739)
   - see [conversation with eddyb on discord](https://discord.com/channels/750717012564770887/750717499737243679/threads/1092283362217046066)
+* can't use `.max` or `.min`
 * meh, but no support for dynamically sized arrays (how would that work in no-std?)
   - see [conversation on discord](https://discord.com/channels/750717012564770887/750717499737243679/1091813590400516106)
 * can't use bitwise rotate_left or rotate_right
