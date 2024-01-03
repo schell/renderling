@@ -18,7 +18,7 @@ use snafu::Snafu;
 
 use crate::{
     Atlas, AtlasError, AtlasImage, AtlasImageError, DepthTexture, Device, HdrSurface, Queue,
-    Skybox, SlabError,
+    Skybox, WgpuSlabError,
 };
 
 #[cfg(feature = "gltf")]
@@ -33,7 +33,7 @@ pub enum StageError {
     Atlas { source: AtlasError },
 
     #[snafu(display("{source}"))]
-    Slab { source: SlabError },
+    Slab { source: WgpuSlabError },
 }
 
 impl From<AtlasError> for StageError {
@@ -42,8 +42,8 @@ impl From<AtlasError> for StageError {
     }
 }
 
-impl From<SlabError> for StageError {
-    fn from(source: SlabError) -> Self {
+impl From<WgpuSlabError> for StageError {
+    fn from(source: WgpuSlabError) -> Self {
         Self::Slab { source }
     }
 }
@@ -652,7 +652,7 @@ impl Stage {
     /// into a vector.
     ///
     /// This is primarily used for debugging.
-    pub fn read_slab(&self) -> Result<Vec<u32>, SlabError> {
+    pub fn read_slab(&self) -> Result<Vec<u32>, WgpuSlabError> {
         // UNWRAP: if we can't acquire the lock we want to panic.
         self.slab
             .read()
@@ -694,7 +694,7 @@ pub(crate) enum StageDrawStrategy {
 /// Render the stage.
 pub fn stage_render(
     (stage, hdr_frame, depth): (ViewMut<Stage>, View<HdrSurface>, View<DepthTexture>),
-) -> Result<(), SlabError> {
+) -> Result<(), WgpuSlabError> {
     let label = Some("stage render");
     let pipeline = stage.get_pipeline();
     let slab_buffers_bindgroup = stage.get_slab_buffers_bindgroup();

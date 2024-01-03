@@ -1,11 +1,11 @@
 [workspace]
 members = [
-    "crates/example",
-    "crates/example-wasm",
+    #"crates/example",
+    #"crates/example-wasm",
     "crates/loading-bytes",
     "crates/renderling",
     "crates/renderling-shader",
-    "crates/renderling-gpui",
+    #"crates/renderling-gpui",
     "crates/crabslab",
     "crates/crabslab-derive",
 ]

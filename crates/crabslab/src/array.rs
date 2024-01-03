@@ -3,6 +3,7 @@ use core::marker::PhantomData;
 
 use crate::{id::Id, slab::SlabItem};
 
+/// Iterator over [`Id`]s in an [`Array`].
 #[derive(Clone, Copy)]
 pub struct ArrayIter<T> {
     array: Array<T>,

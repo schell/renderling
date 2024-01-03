@@ -3,6 +3,7 @@ use core::marker::PhantomData;
 
 use crate::{self as crabslab, slab::SlabItem};
 
+/// `u32` value of an [`Id`] that does not point to any item.
 pub const ID_NONE: u32 = u32::MAX;
 
 /// An identifier that can be used to read or write a type from/into the slab.
@@ -144,9 +145,9 @@ impl<T> Id<T> {
     }
 }
 
-/// The offset of a field relative a parent's `Id`.
+/// The slab offset of a struct's field.
 ///
-/// Offset functions are automatically derived for `SlabItem` structs.
+/// Offset functions are automatically derived for [`SlabItem`] structs.
 ///
 /// ```rust
 /// use crabslab::{Id, Offset, Slab, SlabItem};
