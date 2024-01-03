@@ -1,4 +1,4 @@
-//! Provides derive macros for `renderling`.
+//! Provides derive macros for `crabslab`.
 use quote::quote;
 use syn::{
     spanned::Spanned, Data, DataStruct, DeriveInput, Fields, FieldsNamed, FieldsUnnamed, Ident,
@@ -69,6 +69,7 @@ fn get_params(input: &DeriveInput) -> syn::Result<Params> {
     })
 }
 
+/// Derives [`SlabItem`] for a struct.
 #[proc_macro_derive(SlabItem)]
 pub fn derive_from_slab(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     let input: DeriveInput = syn::parse_macro_input!(input);
