@@ -1,17 +1,19 @@
 //! Texture atlas.
 //!
-//! All images are packed into an atlas at scene build time.
+//! All images are packed into an atlas at staging time.
 //! Texture descriptors describing where in the atlas an image is,
 //! and how callsites should sample pixels is packed into a buffer
 //! on the GPU. This makes the number of texture binds _very_ low.
 //!
-//! An atlas should be temporary until we can use bindless techniques
+//! ## NOTE:
+//! `Atlas` is a temporary work around until we can use bindless techniques
 //! on web.
 use glam::UVec2;
 use image::{EncodableLayout, RgbaImage};
 use snafu::prelude::*;
 
-use crate::SceneImage;
+mod atlas_image;
+pub use atlas_image::*;
 
 fn gpu_frame_from_rect(r: crunch::Rect) -> (UVec2, UVec2) {
     (
@@ -31,9 +33,9 @@ pub enum AtlasError {
 pub enum Packing {
     Img {
         index: usize,
-        image: SceneImage,
+        image: AtlasImage,
     },
-    AtlasImg {
+    GpuImg {
         index: usize,
         offset_px: UVec2,
         size_px: UVec2,
@@ -44,42 +46,42 @@ impl Packing {
     pub fn width(&self) -> u32 {
         match self {
             Packing::Img { image, .. } => image.width,
-            Packing::AtlasImg { size_px, .. } => size_px.x,
+            Packing::GpuImg { size_px, .. } => size_px.x,
         }
     }
 
     pub fn height(&self) -> u32 {
         match self {
             Packing::Img { image, .. } => image.height,
-            Packing::AtlasImg { size_px, .. } => size_px.y,
+            Packing::GpuImg { size_px, .. } => size_px.y,
         }
     }
 
     pub fn index(&self) -> usize {
         match self {
             Packing::Img { index, .. } => *index,
-            Packing::AtlasImg { index, .. } => *index,
+            Packing::GpuImg { index, .. } => *index,
         }
     }
 
     pub fn set_index(&mut self, index: usize) {
         match self {
             Packing::Img { index: i, .. } => *i = index,
-            Packing::AtlasImg { index: i, .. } => *i = index,
+            Packing::GpuImg { index: i, .. } => *i = index,
         }
     }
 
-    pub fn as_scene_img_mut(&mut self) -> Option<&mut SceneImage> {
+    pub fn as_scene_img_mut(&mut self) -> Option<&mut AtlasImage> {
         match self {
             Packing::Img { image, .. } => Some(image),
-            Packing::AtlasImg { .. } => None,
+            Packing::GpuImg { .. } => None,
         }
     }
 
-    pub fn as_scene_img(&self) -> Option<&SceneImage> {
+    pub fn as_scene_img(&self) -> Option<&AtlasImage> {
         match self {
             Packing::Img { image, .. } => Some(image),
-            Packing::AtlasImg { .. } => None,
+            Packing::GpuImg { .. } => None,
         }
     }
 }
@@ -199,8 +201,8 @@ impl Atlas {
     /// but doesn't send any data to the GPU.
     pub fn pack_preview<'a>(
         device: &wgpu::Device,
-        images: impl IntoIterator<Item = SceneImage>,
-    ) -> Result<crunch::PackedItems<SceneImage>, AtlasError> {
+        images: impl IntoIterator<Item = AtlasImage>,
+    ) -> Result<crunch::PackedItems<AtlasImage>, AtlasError> {
         let images = images.into_iter().collect::<Vec<_>>();
         let len = images.len();
         let limit = device.limits().max_texture_dimension_1d;
@@ -220,7 +222,7 @@ impl Atlas {
     pub fn commit_preview(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        crunch::PackedItems { w, h, items }: crunch::PackedItems<SceneImage>,
+        crunch::PackedItems { w, h, items }: crunch::PackedItems<AtlasImage>,
     ) -> Result<Self, AtlasError> {
         let mut atlas = Atlas::new(device, queue, UVec2::new(w as u32, h as u32));
         atlas.rects = items
@@ -269,7 +271,7 @@ impl Atlas {
     pub fn repack_preview(
         &self,
         device: &wgpu::Device,
-        images: impl IntoIterator<Item = SceneImage>,
+        images: impl IntoIterator<Item = AtlasImage>,
     ) -> Result<RepackPreview, AtlasError> {
         let mut images = images.into_iter().collect::<Vec<_>>();
         let len = images.len() + self.rects.len();
@@ -277,7 +279,7 @@ impl Atlas {
             device.limits().max_texture_dimension_1d as usize,
             self.rects
                 .iter()
-                .map(|r| Packing::AtlasImg {
+                .map(|r| Packing::GpuImg {
                     index: 0,
                     offset_px: UVec2::new(r.x as u32, r.y as u32),
                     size_px: UVec2::new(r.w as u32, r.y as u32),
@@ -352,7 +354,7 @@ impl Atlas {
                     );
                     atlas.rects[index] = rect;
                 }
-                Packing::AtlasImg {
+                Packing::GpuImg {
                     index,
                     offset_px,
                     size_px,
@@ -396,11 +398,10 @@ impl Atlas {
     ///
     /// Returns a vector of ids that determine the locations of the given images
     /// within the atlas.
-    ///
     pub fn pack(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        images: impl IntoIterator<Item = SceneImage>,
+        images: impl IntoIterator<Item = AtlasImage>,
     ) -> Result<Self, AtlasError> {
         let images = images.into_iter().collect::<Vec<_>>();
         let items = Self::pack_preview(device, images)?;
@@ -411,7 +412,7 @@ impl Atlas {
         &self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        images: impl IntoIterator<Item = SceneImage>,
+        images: impl IntoIterator<Item = AtlasImage>,
     ) -> Result<Self, AtlasError> {
         let images = images.into_iter().collect::<Vec<_>>();
         let items = self.repack_preview(device, images)?;
@@ -498,8 +499,11 @@ impl Atlas {
     ///
     /// This is primarily for testing.
     ///
+    /// The resulting image will be in a **linear** color space.
+    ///
     /// ## Panics
-    /// Panics if the pixels read from the GPU cannot be converted into an `RgbaImage`.
+    /// Panics if the pixels read from the GPU cannot be converted into an
+    /// `RgbaImage`.
     pub fn atlas_img(&self, device: &wgpu::Device, queue: &wgpu::Queue) -> RgbaImage {
         let buffer = crate::Texture::read(
             &self.texture.texture,
@@ -510,7 +514,7 @@ impl Atlas {
             4,
             1,
         );
-        buffer.into_rgba(device).unwrap()
+        buffer.into_linear_rgba(device).unwrap()
     }
 }
 
@@ -525,6 +529,7 @@ mod test {
         },
         Renderling,
     };
+    use crabslab::GrowableSlab;
     use glam::{Vec2, Vec3, Vec4};
 
     use super::*;
@@ -534,10 +539,10 @@ mod test {
         let r = Renderling::headless(100, 100);
         let (device, queue) = r.get_device_and_queue_owned();
         println!("{}", std::env::current_dir().unwrap().display());
-        let cheetah = SceneImage::from_path("../../img/cheetah.jpg").unwrap();
-        let dirt = SceneImage::from_path("../../img/dirt.jpg").unwrap();
-        let happy_mac = SceneImage::from_path("../../img/happy_mac.png").unwrap();
-        let sandstone = SceneImage::from_path("../../img/sandstone.png").unwrap();
+        let cheetah = AtlasImage::from_path("../../img/cheetah.jpg").unwrap();
+        let dirt = AtlasImage::from_path("../../img/dirt.jpg").unwrap();
+        let happy_mac = AtlasImage::from_path("../../img/happy_mac.png").unwrap();
+        let sandstone = AtlasImage::from_path("../../img/sandstone.png").unwrap();
         let atlas1 = Atlas::pack(&device, &queue, vec![cheetah, dirt]).unwrap();
         let atlas2 = Atlas::pack(&device, &queue, vec![happy_mac, sandstone]).unwrap();
         let atlas3 = atlas1.merge(&device, &queue, &atlas2).unwrap();
@@ -549,7 +554,7 @@ mod test {
     fn atlas_uv_mapping() {
         let mut r =
             Renderling::headless(32, 32).with_background_color(Vec3::splat(0.0).extend(1.0));
-        let stage = r.new_stage();
+        let mut stage = r.new_stage();
         stage.configure_graph(&mut r, true);
         let (projection, view) = crate::camera::default_ortho2d(32.0, 32.0);
         let camera = stage.append(&Camera {
@@ -557,9 +562,9 @@ mod test {
             view,
             ..Default::default()
         });
-        let dirt = SceneImage::from_path("../../img/dirt.jpg").unwrap();
-        let sandstone = SceneImage::from_path("../../img/sandstone.png").unwrap();
-        let texels = SceneImage::from_path("../../test_img/atlas/uv_mapping.png").unwrap();
+        let dirt = AtlasImage::from_path("../../img/dirt.jpg").unwrap();
+        let sandstone = AtlasImage::from_path("../../img/sandstone.png").unwrap();
+        let texels = AtlasImage::from_path("../../test_img/atlas/uv_mapping.png").unwrap();
         let textures = stage.set_images([dirt, sandstone, texels]).unwrap();
         let mut texels_tex = textures[2];
         texels_tex
@@ -596,18 +601,20 @@ mod test {
                 material_id,
             )
             .build();
+        let mesh = stage.append(&mesh);
         let node = stage.append(&GltfNode {
-            mesh: stage.append(&mesh),
+            mesh,
             ..Default::default()
         });
         let transform = stage.append(&Transform {
             scale: Vec3::new(32.0, 32.0, 1.0),
             ..Default::default()
         });
+        let node_path = stage.append_array(&[node]);
         let _unit = stage.draw_unit(&RenderUnit {
             camera,
             transform,
-            node_path: stage.append_array(&[node]),
+            node_path,
             vertex_count: 6,
             ..Default::default()
         });
@@ -626,7 +633,7 @@ mod test {
         let w = sheet_w * 3 + 2;
         let h = sheet_h;
         let mut r = Renderling::headless(w, h).with_background_color(Vec4::new(1.0, 1.0, 0.0, 1.0));
-        let stage = r.new_stage();
+        let mut stage = r.new_stage();
         stage.configure_graph(&mut r, true);
 
         let (projection, view) = crate::camera::default_ortho2d(w as f32, h as f32);
@@ -636,9 +643,9 @@ mod test {
             ..Default::default()
         });
 
-        let dirt = SceneImage::from_path("../../img/dirt.jpg").unwrap();
-        let sandstone = SceneImage::from_path("../../img/sandstone.png").unwrap();
-        let texels = SceneImage::from_path("../../img/happy_mac.png").unwrap();
+        let dirt = AtlasImage::from_path("../../img/dirt.jpg").unwrap();
+        let sandstone = AtlasImage::from_path("../../img/sandstone.png").unwrap();
+        let texels = AtlasImage::from_path("../../img/happy_mac.png").unwrap();
         let textures = stage.set_images([dirt, sandstone, texels]).unwrap();
         let texel_tex = textures[2];
         let mut clamp_tex = texel_tex;
@@ -659,18 +666,21 @@ mod test {
             .modes
             .set_wrap_t(TextureAddressMode::MIRRORED_REPEAT);
 
+        let albedo_texture = stage.append(&clamp_tex);
         let clamp_material_id = stage.append(&PbrMaterial {
-            albedo_texture: stage.append(&clamp_tex),
+            albedo_texture,
             lighting_model: LightingModel::NO_LIGHTING,
             ..Default::default()
         });
+        let albedo_texture = stage.append(&repeat_tex);
         let repeat_material_id = stage.append(&PbrMaterial {
-            albedo_texture: stage.append(&repeat_tex),
+            albedo_texture,
             lighting_model: LightingModel::NO_LIGHTING,
             ..Default::default()
         });
+        let albedo_texture = stage.append(&mirror_tex);
         let mirror_material_id = stage.append(&PbrMaterial {
-            albedo_texture: stage.append(&mirror_tex),
+            albedo_texture,
             lighting_model: LightingModel::NO_LIGHTING,
             ..Default::default()
         });
@@ -707,50 +717,70 @@ mod test {
             p
         };
 
-        let _clamp = stage.draw_unit(&RenderUnit {
-            camera,
-            node_path: stage.append_array(&[stage.append(&GltfNode {
-                mesh: stage.append(&GltfMesh {
-                    primitives: stage.append_array(&[clamp_prim]),
-                    ..Default::default()
-                }),
+        let _clamp = {
+            let primitives = stage.append_array(&[clamp_prim]);
+            let mesh = stage.append(&GltfMesh {
+                primitives,
                 ..Default::default()
-            })]),
-            vertex_count: 6,
-            ..Default::default()
-        });
-        let _repeat = stage.draw_unit(&RenderUnit {
-            camera,
-            node_path: stage.append_array(&[stage.append(&GltfNode {
-                mesh: stage.append(&GltfMesh {
-                    primitives: stage.append_array(&[repeat_prim]),
-                    ..Default::default()
-                }),
+            });
+            let node = stage.append(&GltfNode {
+                mesh,
                 ..Default::default()
-            })]),
-            vertex_count: 6,
-            transform: stage.append(&Transform {
+            });
+            let node_path = stage.append_array(&[node]);
+            stage.draw_unit(&RenderUnit {
+                camera,
+                node_path,
+                vertex_count: 6,
+                ..Default::default()
+            })
+        };
+        let _repeat = {
+            let primitives = stage.append_array(&[repeat_prim]);
+            let mesh = stage.append(&GltfMesh {
+                primitives,
+                ..Default::default()
+            });
+            let node = stage.append(&GltfNode {
+                mesh,
+                ..Default::default()
+            });
+            let node_path = stage.append_array(&[node]);
+            let transform = stage.append(&Transform {
                 translation: Vec3::new(sheet_w + 1.0, 0.0, 0.0),
                 ..Default::default()
-            }),
-            ..Default::default()
-        });
-        let _mirror = stage.draw_unit(&RenderUnit {
-            camera,
-            node_path: stage.append_array(&[stage.append(&GltfNode {
-                mesh: stage.append(&GltfMesh {
-                    primitives: stage.append_array(&[mirror_prim]),
-                    ..Default::default()
-                }),
+            });
+            stage.draw_unit(&RenderUnit {
+                camera,
+                node_path,
+                vertex_count: 6,
+                transform,
                 ..Default::default()
-            })]),
-            vertex_count: 6,
-            transform: stage.append(&Transform {
+            })
+        };
+        let _mirror = {
+            let primitives = stage.append_array(&[mirror_prim]);
+            let mesh = stage.append(&GltfMesh {
+                primitives,
+                ..Default::default()
+            });
+            let node = stage.append(&GltfNode {
+                mesh,
+                ..Default::default()
+            });
+            let node_path = stage.append_array(&[node]);
+            let transform = stage.append(&Transform {
                 translation: Vec3::new(sheet_w as f32 * 2.0 + 2.0, 0.0, 0.0),
                 ..Default::default()
-            }),
-            ..Default::default()
-        });
+            });
+            stage.draw_unit(&RenderUnit {
+                camera,
+                node_path,
+                vertex_count: 6,
+                transform,
+                ..Default::default()
+            })
+        };
 
         let img = r.render_image().unwrap();
         img_diff::assert_img_eq("atlas/uv_wrapping.png", img);
@@ -766,7 +796,7 @@ mod test {
         let w = sheet_w * 3 + 2;
         let h = sheet_h;
         let mut r = Renderling::headless(w, h).with_background_color(Vec4::new(1.0, 1.0, 0.0, 1.0));
-        let stage = r.new_stage();
+        let mut stage = r.new_stage();
         stage.configure_graph(&mut r, true);
 
         let (projection, view) = crate::camera::default_ortho2d(w as f32, h as f32);
@@ -776,9 +806,9 @@ mod test {
             ..Default::default()
         });
 
-        let dirt = SceneImage::from_path("../../img/dirt.jpg").unwrap();
-        let sandstone = SceneImage::from_path("../../img/sandstone.png").unwrap();
-        let texels = SceneImage::from_path("../../img/happy_mac.png").unwrap();
+        let dirt = AtlasImage::from_path("../../img/dirt.jpg").unwrap();
+        let sandstone = AtlasImage::from_path("../../img/sandstone.png").unwrap();
+        let texels = AtlasImage::from_path("../../img/happy_mac.png").unwrap();
         let textures = stage.set_images([dirt, sandstone, texels]).unwrap();
 
         let texel_tex = textures[2];
@@ -800,18 +830,23 @@ mod test {
             .modes
             .set_wrap_t(TextureAddressMode::MIRRORED_REPEAT);
 
+        let albedo_texture = stage.append(&clamp_tex);
         let clamp_material_id = stage.append(&PbrMaterial {
-            albedo_texture: stage.append(&clamp_tex),
+            albedo_texture,
             lighting_model: LightingModel::NO_LIGHTING,
             ..Default::default()
         });
+
+        let albedo_texture = stage.append(&repeat_tex);
         let repeat_material_id = stage.append(&PbrMaterial {
-            albedo_texture: stage.append(&repeat_tex),
+            albedo_texture,
             lighting_model: LightingModel::NO_LIGHTING,
             ..Default::default()
         });
+
+        let albedo_texture = stage.append(&mirror_tex);
         let mirror_material_id = stage.append(&PbrMaterial {
-            albedo_texture: stage.append(&mirror_tex),
+            albedo_texture,
             lighting_model: LightingModel::NO_LIGHTING,
             ..Default::default()
         });
@@ -849,50 +884,70 @@ mod test {
             p
         };
 
-        let _clamp = stage.draw_unit(&RenderUnit {
-            camera,
-            node_path: stage.append_array(&[stage.append(&GltfNode {
-                mesh: stage.append(&GltfMesh {
-                    primitives: stage.append_array(&[clamp_prim]),
-                    ..Default::default()
-                }),
+        let _clamp = {
+            let primitives = stage.append_array(&[clamp_prim]);
+            let mesh = stage.append(&GltfMesh {
+                primitives,
                 ..Default::default()
-            })]),
-            vertex_count: 6,
-            ..Default::default()
-        });
-        let _repeat = stage.draw_unit(&RenderUnit {
-            camera,
-            node_path: stage.append_array(&[stage.append(&GltfNode {
-                mesh: stage.append(&GltfMesh {
-                    primitives: stage.append_array(&[repeat_prim]),
-                    ..Default::default()
-                }),
+            });
+            let node = stage.append(&GltfNode {
+                mesh,
                 ..Default::default()
-            })]),
-            vertex_count: 6,
-            transform: stage.append(&Transform {
+            });
+            let node_path = stage.append_array(&[node]);
+            stage.draw_unit(&RenderUnit {
+                camera,
+                node_path,
+                vertex_count: 6,
+                ..Default::default()
+            })
+        };
+        let _repeat = {
+            let primitives = stage.append_array(&[repeat_prim]);
+            let mesh = stage.append(&GltfMesh {
+                primitives,
+                ..Default::default()
+            });
+            let node = stage.append(&GltfNode {
+                mesh,
+                ..Default::default()
+            });
+            let node_path = stage.append_array(&[node]);
+            let transform = stage.append(&Transform {
                 translation: Vec3::new(sheet_w + 1.0, 0.0, 0.0),
                 ..Default::default()
-            }),
-            ..Default::default()
-        });
-        let _mirror = stage.draw_unit(&RenderUnit {
-            camera,
-            node_path: stage.append_array(&[stage.append(&GltfNode {
-                mesh: stage.append(&GltfMesh {
-                    primitives: stage.append_array(&[mirror_prim]),
-                    ..Default::default()
-                }),
+            });
+            stage.draw_unit(&RenderUnit {
+                camera,
+                node_path,
+                transform,
+                vertex_count: 6,
                 ..Default::default()
-            })]),
-            vertex_count: 6,
-            transform: stage.append(&Transform {
+            })
+        };
+        let _mirror = {
+            let primitives = stage.append_array(&[mirror_prim]);
+            let mesh = stage.append(&GltfMesh {
+                primitives,
+                ..Default::default()
+            });
+            let node = stage.append(&GltfNode {
+                mesh,
+                ..Default::default()
+            });
+            let node_path = stage.append_array(&[node]);
+            let transform = stage.append(&Transform {
                 translation: Vec3::new(sheet_w as f32 * 2.0 + 2.0, 0.0, 0.0),
                 ..Default::default()
-            }),
-            ..Default::default()
-        });
+            });
+            stage.draw_unit(&RenderUnit {
+                camera,
+                node_path,
+                vertex_count: 6,
+                transform,
+                ..Default::default()
+            })
+        };
 
         let img = r.render_image().unwrap();
         img_diff::assert_img_eq("atlas/negative_uv_wrapping.png", img);

@@ -27,7 +27,7 @@ Debugging rabbit hole:
 * Maybe print out the brightness texture and make sure it's populated?
 * Losing steam here, especially since bloom needs to be re-done as "physically based".
 
-TODO: Part out the
+### Physically Based Bloom
 
 ## Thu Dec 21, 2023
 

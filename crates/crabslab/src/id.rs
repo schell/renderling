@@ -1,13 +1,13 @@
 //! Typed identifiers that can also be used as indices.
 use core::marker::PhantomData;
 
-use crate::{self as renderling_shader, slab::Slabbed};
+use crate::{self as crabslab, slab::SlabItem};
 
 pub const ID_NONE: u32 = u32::MAX;
 
-/// An identifier.
+/// An identifier that can be used to read or write a type from/into the slab.
 #[repr(transparent)]
-#[derive(bytemuck::Pod, bytemuck::Zeroable, Slabbed)]
+#[derive(SlabItem)]
 pub struct Id<T>(pub(crate) u32, PhantomData<T>);
 
 impl<T> PartialOrd for Id<T> {
@@ -72,9 +72,12 @@ impl<T> Default for Id<T> {
 impl<T> core::fmt::Debug for Id<T> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         if self.is_none() {
-            f.write_fmt(format_args!("Id<{}>(null)", &core::any::type_name::<T>(),))
+            f.write_fmt(core::format_args!(
+                "Id<{}>(null)",
+                &core::any::type_name::<T>(),
+            ))
         } else {
-            f.write_fmt(format_args!(
+            f.write_fmt(core::format_args!(
                 "Id<{}>({})",
                 &core::any::type_name::<T>(),
                 &self.0
@@ -143,12 +146,12 @@ impl<T> Id<T> {
 
 /// The offset of a field relative a parent's `Id`.
 ///
-/// Offset functions are automatically derived for `Slabbed` structs.
+/// Offset functions are automatically derived for `SlabItem` structs.
 ///
 /// ```rust
-/// use renderling_shader::{id::{Id, Offset}, slab::{Slab, Slabbed}};
+/// use crabslab::{Id, Offset, Slab, SlabItem};
 ///
-/// #[derive(Debug, Default, PartialEq, Slabbed)]
+/// #[derive(Debug, Default, PartialEq, SlabItem)]
 /// pub struct Parent {
 ///     pub child_a: u32,
 ///     pub child_b: u32,
@@ -157,7 +160,10 @@ impl<T> Id<T> {
 /// let mut slab = [0u32; 10];
 ///
 /// let parent_id = Id::new(3);
-/// let parent = Parent{ child_a: 0, child_b: 1 };
+/// let parent = Parent {
+///     child_a: 0,
+///     child_b: 1,
+/// };
 /// slab.write(parent_id, &parent);
 /// assert_eq!(parent, slab.read(parent_id));
 ///
@@ -203,15 +209,20 @@ impl<T> Offset<T> {
 
 #[cfg(test)]
 mod test {
-    use crate::stage::GpuEntity;
-
     use super::*;
+
+    #[derive(SlabItem)]
+    struct MyEntity {
+        name: u32,
+        age: f32,
+        destiny: [u32; 3],
+    }
 
     #[test]
     fn id_size() {
         assert_eq!(
             std::mem::size_of::<u32>(),
-            std::mem::size_of::<Id<GpuEntity>>(),
+            std::mem::size_of::<Id<MyEntity>>(),
             "id is not u32"
         );
     }

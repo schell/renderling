@@ -5,8 +5,8 @@ use snafu::prelude::*;
 use std::{ops::Deref, sync::Arc};
 
 use crate::{
-    hdr::HdrSurface, CreateSurfaceFn, Graph, RenderTarget, Scene, SceneBuilder, Stage,
-    TextureError, UiDrawObject, UiScene, UiSceneBuilder, View, ViewMut, WgpuStateError,
+    CreateSurfaceFn, Graph, RenderTarget, Stage, TextureError,
+    /* UiScene, UiSceneBuilder, */ View, ViewMut, WgpuStateError,
 };
 
 #[derive(Debug, Snafu)]
@@ -38,19 +38,12 @@ pub enum RenderlingError {
     #[snafu(display("gltf import failed: {}", source))]
     GltfImport { source: gltf::Error },
 
-    //#[snafu(display("could not create scene: {}", source))]
-    // Scene { source: crate::GltfError },
     #[snafu(display("missing resource"))]
     Resource { key: TypeKey },
 
     #[snafu(display("{source}"))]
     Graph { source: moongraph::GraphError },
 
-    //#[snafu(display("{source}"))]
-    // Lights { source: crate::light::LightsError },
-
-    //#[snafu(display("{source}"))]
-    // Object { source: crate::object::ObjectError },
     #[snafu(display(
         "Missing PostRenderBuffer resource. Ensure a node that creates PostRenderBuffer (like \
          PostRenderbufferCreate) is present in the graph: {source}"
@@ -82,6 +75,12 @@ impl Deref for Device {
     }
 }
 
+impl Into<Arc<wgpu::Device>> for &Device {
+    fn into(self) -> Arc<wgpu::Device> {
+        self.0.clone()
+    }
+}
+
 /// A thread-safe, clonable wrapper around `wgpu::Queue`.
 #[derive(Clone)]
 pub struct Queue(pub Arc<wgpu::Queue>);
@@ -91,6 +90,12 @@ impl Deref for Queue {
 
     fn deref(&self) -> &Self::Target {
         &self.0
+    }
+}
+
+impl Into<Arc<wgpu::Queue>> for &Queue {
+    fn into(self) -> Arc<wgpu::Queue> {
+        self.0.clone()
     }
 }
 
@@ -126,30 +131,6 @@ impl Deref for DepthTexture {
 
 /// The global background color.
 pub struct BackgroundColor(pub Vec4);
-
-/// A helper struct for configuring calls to `Renderling::setup_render_graph`.
-pub struct RenderGraphConfig {
-    pub scene: Option<Scene>,
-    pub ui: Option<UiScene>,
-    pub objs: Vec<UiDrawObject>,
-    // Whether or not to use the screen capture node.
-    // You probably want this to be `true` if you are rendering headless.
-    pub with_screen_capture: bool,
-    // Whether or not to use bloom filter in post-processing.
-    pub with_bloom: bool,
-}
-
-impl Default for RenderGraphConfig {
-    fn default() -> Self {
-        Self {
-            scene: Default::default(),
-            ui: Default::default(),
-            objs: Default::default(),
-            with_screen_capture: false,
-            with_bloom: true,
-        }
-    }
-}
 
 /// A graph-based renderer that manages GPU resources for cameras, materials and
 /// meshes.
@@ -260,8 +241,8 @@ impl Renderling {
     /// Create a new headless renderer.
     ///
     /// ## Panics
-    /// This function will panic if an adapter cannot be found. For example this would
-    /// happen on machines without a GPU.
+    /// This function will panic if an adapter cannot be found. For example this
+    /// would happen on machines without a GPU.
     pub fn headless(width: u32, height: u32) -> Self {
         futures_lite::future::block_on(Self::try_new_headless(width, height)).unwrap()
     }
@@ -300,13 +281,7 @@ impl Renderling {
             .unwrap();
         // The renderer doesn't _always_ have an HrdSurface, so we don't unwrap this
         // one.
-        let _ = self.graph.visit(
-            |(device, queue, mut hdr): (View<Device>, View<Queue>, ViewMut<HdrSurface>)| {
-                hdr.hdr_texture = HdrSurface::create_texture(&device, &queue, width, height);
-                hdr.texture_bindgroup =
-                    HdrSurface::create_texture_bindgroup(&device, &hdr.hdr_texture);
-            },
-        );
+        let _ = self.graph.visit(crate::hdr::resize_hdr_surface);
     }
 
     pub fn create_texture<P>(
@@ -405,46 +380,21 @@ impl Renderling {
         Stage::new(device, queue)
     }
 
-    pub fn new_scene(&self) -> SceneBuilder {
-        let (device, queue) = self.get_device_and_queue_owned();
-        SceneBuilder::new(device.0, queue.0)
-    }
+    //pub fn new_ui_scene(&self) -> UiSceneBuilder<'_> {
+    //    let (device, _) = self.get_device_and_queue_owned();
+    //    let queue = self.get_queue();
+    //    UiSceneBuilder::new(device.0.clone(), queue)
+    //}
 
-    pub fn empty_scene(&self) -> Scene {
-        self.new_scene().build().unwrap()
-    }
+    //pub fn empty_ui_scene(&self) -> UiScene {
+    //    self.new_ui_scene().build()
+    //}
 
-    pub fn new_ui_scene(&self) -> UiSceneBuilder<'_> {
-        let (device, _) = self.get_device_and_queue_owned();
-        let queue = self.get_queue();
-        UiSceneBuilder::new(device.0.clone(), queue)
-    }
-
-    pub fn empty_ui_scene(&self) -> UiScene {
-        self.new_ui_scene().build()
-    }
-
-    #[cfg(feature = "text")]
-    /// Create a new `GlyphCache` used to cache text rendering info.
-    pub fn new_glyph_cache(&self, fonts: Vec<crate::FontArc>) -> crate::GlyphCache {
-        crate::GlyphCache::new(fonts)
-    }
-
-    /// Sets up the render graph with the given scenes and objects.
-    ///
-    /// The scenes and objects may be "visited" later, or even retrieved.
-    pub fn setup_render_graph(&mut self, config: RenderGraphConfig) {
-        let RenderGraphConfig {
-            scene,
-            ui,
-            objs,
-            with_screen_capture,
-            with_bloom,
-        } = config;
-        let scene = scene.unwrap_or_else(|| self.empty_scene());
-        let ui = ui.unwrap_or_else(|| self.empty_ui_scene());
-        crate::setup_render_graph(self, scene, ui, objs, with_screen_capture, with_bloom)
-    }
+    //#[cfg(feature = "text")]
+    ///// Create a new `GlyphCache` used to cache text rendering info.
+    //pub fn new_glyph_cache(&self, fonts: Vec<crate::FontArc>) ->
+    // crate::GlyphCache {    crate::GlyphCache::new(fonts)
+    //}
 
     /// Render into an image.
     ///
@@ -453,6 +403,9 @@ impl Renderling {
     ///
     /// For this call to succeed, the `PostRenderBufferCreate::create` node must
     /// be present in the graph.
+    ///
+    /// The resulting image will be in the color space of the internal
+    /// [`RenderTarget`].
     ///
     /// ## Note
     /// This operation can take a long time, depending on how big the screen is.
@@ -468,7 +421,40 @@ impl Renderling {
                 key: TypeKey::new::<PostRenderBuffer>(),
             })?;
         let device = self.get_device();
-        let img = buffer.0.into_rgba(device).context(TextureSnafu)?;
+        let is_srgb = self.get_render_target().format().is_srgb();
+        let img = if is_srgb {
+            buffer.0.into_srgba(device).context(TextureSnafu)?
+        } else {
+            buffer.0.into_linear_rgba(device).context(TextureSnafu)?
+        };
+        Ok(img)
+    }
+
+    /// Render into an image.
+    ///
+    /// This should be called after rendering, before presentation.
+    /// Good for getting headless screen grabs.
+    ///
+    /// For this call to succeed, the `PostRenderBufferCreate::create` node must
+    /// be present in the graph.
+    ///
+    /// The resulting image will be in a linear color space.
+    ///
+    /// ## Note
+    /// This operation can take a long time, depending on how big the screen is.
+    pub fn render_linear_image(&mut self) -> Result<image::RgbaImage, RenderlingError> {
+        use crate::frame::PostRenderBuffer;
+
+        self.render()?;
+        let buffer = self
+            .graph
+            .remove_resource::<PostRenderBuffer>()
+            .context(MissingPostRenderBufferSnafu)?
+            .context(ResourceSnafu {
+                key: TypeKey::new::<PostRenderBuffer>(),
+            })?;
+        let device = self.get_device();
+        let img = buffer.0.into_linear_rgba(device).context(TextureSnafu)?;
         Ok(img)
     }
 

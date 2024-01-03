@@ -2,7 +2,7 @@
 
 use core::ops::RangeInclusive;
 
-use crate::{id::Id, slab::Slab};
+use crabslab::{Id, Slab};
 
 /// Statically define a shift/mask range as a literal range of bits.
 pub const fn bits(range: RangeInclusive<u32>) -> (u32, u32) {
@@ -102,9 +102,9 @@ pub fn extract_u16(
     // slab of u32s
     slab: &[u32],
 ) -> (u32, usize, usize) {
-    // NOTE: This should only have two entries, but we'll still handle the case where
-    // the extraction is not aligned to a u32 boundary by reading as if it were, and then
-    // re-aligning.
+    // NOTE: This should only have two entries, but we'll still handle the case
+    // where the extraction is not aligned to a u32 boundary by reading as if it
+    // were, and then re-aligning.
     const SHIFT_MASKS: [((u32, u32), usize, usize); 4] = [
         (U16_0_BITS, 2, 0),
         (U16_0_BITS, 2, 0),

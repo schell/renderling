@@ -18,8 +18,7 @@
 //! - forward+ style pipeline, configurable lighting model per material
 //!   - [ ] light tiling
 //!   - [ ] occlusion culling
-//!   - [x] physically based shading
-//!     atlas)
+//!   - [x] physically based shading atlas)
 //! - [x] gltf support
 //!   - [x] scenes, nodes
 //!   - [x] cameras
@@ -30,7 +29,7 @@
 //!   - [x] animations
 //! - [x] high definition rendering
 //! - [x] image based lighting
-//! - [x] bloom
+//! - [ ] bloom
 //! - [ ] ssao
 //! - [ ] depth of field
 //!
@@ -41,7 +40,6 @@
 // TODO: Audit the API and make it more ergonomic/predictable.
 
 mod atlas;
-pub mod bloom;
 mod buffer_array;
 mod camera;
 pub mod cubemap;
@@ -52,16 +50,15 @@ mod linkage;
 pub mod math;
 pub mod mesh;
 mod renderer;
-mod scene;
 mod skybox;
-mod slab;
 mod stage;
 mod state;
-#[cfg(feature = "text")]
-mod text;
+//#[cfg(feature = "text")]
+//mod text;
 mod texture;
+mod tonemapping;
 //mod tutorial;
-mod ui;
+//mod ui;
 mod uniform;
 
 pub use atlas::*;
@@ -70,15 +67,14 @@ pub use camera::*;
 pub use hdr::*;
 use image::GenericImageView;
 pub use renderer::*;
-pub use scene::*;
 pub use skybox::*;
-pub use slab::*;
 pub use stage::*;
 pub use state::*;
-#[cfg(feature = "text")]
-pub use text::*;
+//#[cfg(feature = "text")]
+//pub use text::*;
 pub use texture::*;
-pub use ui::*;
+pub use tonemapping::*;
+//pub use ui::*;
 pub use uniform::*;
 
 pub mod color;
@@ -96,8 +92,8 @@ pub mod graph {
     pub type RenderNode = Node<Function, TypeKey>;
 }
 
+pub use crabslab::*;
 pub use graph::{graph, Graph, GraphError, Move, View, ViewMut};
-pub use renderling_shader::id::{Id, ID_NONE};
 pub mod shader {
     //! Re-exports of [`renderling_shader`].
     pub use renderling_shader::*;
@@ -147,97 +143,6 @@ impl crate::shader::SampleCube for CpuCubemap {
     }
 }
 
-/// Set up the render graph, including:
-/// * 3d scene objects
-/// * skybox
-/// * bloom filter
-/// * hdr tonemapping
-/// * UI
-///
-/// This is mostly for internal use. See [`Renderling::setup_render_graph`].
-pub fn setup_render_graph(
-    r: &mut Renderling,
-    scene: Scene,
-    ui_scene: UiScene,
-    ui_objects: impl IntoIterator<Item = UiDrawObject>,
-    with_screen_capture: bool,
-    with_bloom: bool,
-) {
-    // add resources
-    let ui_objects = UiDrawObjects(ui_objects.into_iter().collect::<Vec<_>>());
-    r.graph.add_resource(ui_scene);
-    r.graph.add_resource(ui_objects);
-    r.graph.add_resource(scene);
-    let ui_pipeline = UiRenderPipeline(
-        r.graph
-            .visit(|(device, target): (View<Device>, View<RenderTarget>)| {
-                create_ui_pipeline(&device, target.format())
-            })
-            .unwrap(),
-    );
-    r.graph.add_resource(ui_pipeline);
-
-    let (hdr_surface,) = r
-        .graph
-        .visit(hdr::create_hdr_render_surface)
-        .unwrap()
-        .unwrap();
-    let device = r.get_device();
-    let queue = r.get_queue();
-    let hdr_texture_format = hdr_surface.hdr_texture.texture.format();
-    let size = hdr_surface.hdr_texture.texture.size();
-    let scene_render_pipeline =
-        SceneRenderPipeline(create_scene_render_pipeline(device, hdr_texture_format));
-    let compute_cull_pipeline =
-        SceneComputeCullPipeline(create_scene_compute_cull_pipeline(device));
-    let skybox_pipeline = crate::skybox::create_skybox_render_pipeline(device, hdr_texture_format);
-    let mut bloom = crate::bloom::BloomFilter::new(device, queue, size.width, size.height);
-    bloom.on = with_bloom;
-    r.graph.add_resource(scene_render_pipeline);
-    r.graph.add_resource(hdr_surface);
-    r.graph.add_resource(compute_cull_pipeline);
-    r.graph.add_resource(skybox_pipeline);
-    r.graph.add_resource(bloom);
-
-    // pre-render subgraph
-    use frame::{clear_depth, create_frame, present};
-
-    #[cfg(not(target_arch = "wasm32"))]
-    let scene_cull = scene_cull_gpu;
-    #[cfg(target_arch = "wasm32")]
-    let scene_cull = scene_cull_cpu;
-    r.graph
-        .add_subgraph(graph!(
-            create_frame,
-            clear_surface_hdr_and_depth,
-            hdr_surface_update,
-            scene_update < scene_cull,
-            ui_scene_update
-        ))
-        .add_barrier();
-
-    // render subgraph
-    use crate::bloom::bloom_filter;
-    r.graph
-        .add_subgraph(graph!(
-            scene_render
-                < skybox_render
-                < bloom_filter
-                < tonemapping
-                < clear_depth
-                < ui_scene_render
-        ))
-        .add_barrier();
-
-    // post-render subgraph
-    r.graph.add_subgraph(if with_screen_capture {
-        use crate::frame::copy_frame_to_post;
-        graph!(copy_frame_to_post < present)
-    } else {
-        graph!(present)
-    });
-}
-
 #[cfg(test)]
 #[ctor::ctor]
 fn init_logging() {
@@ -255,10 +160,11 @@ fn init_logging() {
 #[cfg(test)]
 mod test {
     use super::*;
-    use glam::{Mat3, Mat4, Quat, UVec2, Vec2, Vec3, Vec4, Vec4Swizzles};
+    use glam::{Mat3, Mat4, Quat, Vec2, Vec3, Vec4};
     use pretty_assertions::assert_eq;
     use renderling_shader::{
         gltf as gl,
+        pbr::PbrMaterial,
         stage::{light::*, Camera, RenderUnit, Transform, Vertex},
     };
 
@@ -298,7 +204,7 @@ mod test {
     // This tests our ability to draw a CMYK triangle in the top left corner.
     fn cmy_triangle_sanity() {
         let mut r = Renderling::headless(100, 100).with_background_color(Vec4::splat(1.0));
-        let stage = r.new_stage();
+        let mut stage = r.new_stage();
         stage.configure_graph(&mut r, true);
         let (projection, view) = default_ortho2d(100.0, 100.0);
         let camera = stage.append(&Camera {
@@ -310,8 +216,9 @@ mod test {
             .new_mesh()
             .with_primitive(right_tri_vertices(), [], Id::NONE)
             .build();
+        let mesh = stage.append(&mesh);
         let node = stage.append(&gl::GltfNode {
-            mesh: stage.append(&mesh),
+            mesh,
             ..Default::default()
         });
         let node_path = stage.append_array(&[node]);
@@ -332,7 +239,7 @@ mod test {
     // We do this by writing over the previous transform in the stage.
     fn cmy_triangle_update_transform() {
         let mut r = Renderling::headless(100, 100).with_background_color(Vec4::splat(1.0));
-        let stage = r.new_stage();
+        let mut stage = r.new_stage();
         stage.configure_graph(&mut r, true);
         let (projection, view) = default_ortho2d(100.0, 100.0);
         let camera = stage.append(&Camera::new(projection, view));
@@ -340,14 +247,16 @@ mod test {
             .new_mesh()
             .with_primitive(right_tri_vertices(), [], Id::NONE)
             .build();
+        let mesh = stage.append(&mesh);
         let node = stage.append(&gl::GltfNode {
-            mesh: stage.append(&mesh),
+            mesh,
             ..Default::default()
         });
         let transform = stage.append(&Transform::default());
+        let node_path = stage.append_array(&[node]);
         let _tri = stage.draw_unit(&RenderUnit {
             camera,
-            node_path: stage.append_array(&[node]),
+            node_path,
             vertex_count: 3,
             transform,
             ..Default::default()
@@ -355,16 +264,14 @@ mod test {
 
         let _ = r.render_image().unwrap();
 
-        stage
-            .write(
-                transform,
-                &Transform {
-                    translation: Vec3::new(100.0, 0.0, 0.0),
-                    rotation: Quat::from_axis_angle(Vec3::Z, std::f32::consts::FRAC_PI_2),
-                    scale: Vec3::new(0.5, 0.5, 1.0),
-                },
-            )
-            .unwrap();
+        stage.write(
+            transform,
+            &Transform {
+                translation: Vec3::new(100.0, 0.0, 0.0),
+                rotation: Quat::from_axis_angle(Vec3::Z, std::f32::consts::FRAC_PI_2),
+                scale: Vec3::new(0.5, 0.5, 1.0),
+            },
+        );
 
         let img = r.render_image().unwrap();
         img_diff::assert_img_eq("cmy_triangle_update_transform.png", img);
@@ -413,7 +320,7 @@ mod test {
     // Tests our ability to draw a CMYK cube.
     fn cmy_cube_sanity() {
         let mut r = Renderling::headless(100, 100).with_background_color(Vec4::splat(1.0));
-        let stage = r.new_stage();
+        let mut stage = r.new_stage();
         stage.configure_graph(&mut r, true);
         let camera_position = Vec3::new(0.0, 12.0, 20.0);
         let camera = stage.append(&Camera {
@@ -427,24 +334,27 @@ mod test {
             .new_mesh()
             .with_primitive(vertices, [], Id::NONE)
             .build();
+        let mesh = stage.append(&mesh);
+        let node = stage.append(&gl::GltfNode {
+            mesh,
+            ..Default::default()
+        });
+        let node_path = stage.append_array(&[node]);
         let transform = Transform {
             scale: Vec3::new(6.0, 6.0, 6.0),
             rotation: Quat::from_axis_angle(Vec3::Y, -std::f32::consts::FRAC_PI_4),
             ..Default::default()
         };
-        let node = stage.append(&gl::GltfNode {
-            mesh: stage.append(&mesh),
-            ..Default::default()
-        });
+        let transform = stage.append(&transform);
         let _cube = stage.draw_unit(&RenderUnit {
             camera,
             vertex_count,
-            node_path: stage.append_array(&[node]),
-            transform: stage.append(&transform),
+            node_path,
+            transform,
             ..Default::default()
         });
         let img = r.render_image().unwrap();
-        img_diff::assert_img_eq("cmy_cube.png", img);
+        img_diff::assert_img_eq("cmy_cube/sanity.png", img);
     }
 
     #[test]
@@ -452,7 +362,7 @@ mod test {
     // them.
     fn cmy_cube_visible() {
         let mut r = Renderling::headless(100, 100).with_background_color(Vec4::splat(1.0));
-        let stage = r.new_stage();
+        let mut stage = r.new_stage();
         stage.configure_graph(&mut r, true);
         let (projection, view) = camera::default_perspective(100.0, 100.0);
         let camera = stage.append(&Camera {
@@ -466,8 +376,9 @@ mod test {
             .new_mesh()
             .with_primitive(vertices, [], Id::NONE)
             .build();
+        let mesh = stage.append(&mesh);
         let node = stage.append(&gl::GltfNode {
-            mesh: stage.append(&mesh),
+            mesh,
             ..Default::default()
         });
         let mut render_unit = RenderUnit {
@@ -491,7 +402,7 @@ mod test {
 
         // we should see two colored cubes
         let img = r.render_image().unwrap();
-        img_diff::assert_img_eq("cmy_cube_visible_before.png", img.clone());
+        img_diff::assert_img_eq("cmy_cube/visible_before.png", img.clone());
         let img_before = img;
 
         // update cube two making it invisible
@@ -499,22 +410,22 @@ mod test {
 
         // we should see only one colored cube
         let img = r.render_image().unwrap();
-        img_diff::assert_img_eq("cmy_cube_visible_after.png", img);
+        img_diff::assert_img_eq("cmy_cube/visible_after.png", img);
 
         // update cube two making in visible again
         stage.show_unit(cube_two);
 
         // we should see two colored cubes again
         let img = r.render_image().unwrap();
-        img_diff::assert_eq("cmy_cube_visible_before_again.png", img_before, img);
+        img_diff::assert_eq("cmy_cube/visible_before_again.png", img_before, img);
     }
 
     #[test]
-    // Tests the ability to specify indexed vertices, as well as the ability to update
-    // a field within a struct stored on the slab by offset.
+    // Tests the ability to specify indexed vertices, as well as the ability to
+    // update a field within a struct stored on the slab by offset.
     fn cmy_cube_remesh() {
         let mut r = Renderling::headless(100, 100).with_background_color(Vec4::splat(1.0));
-        let stage = r.new_stage().with_lighting(false);
+        let mut stage = r.new_stage().with_lighting(false);
         stage.configure_graph(&mut r, true);
         let (projection, view) = camera::default_perspective(100.0, 100.0);
         let camera = stage.append(&Camera {
@@ -529,8 +440,9 @@ mod test {
             .new_mesh()
             .with_primitive(pyramid_vertices, pyramid_indices, Id::NONE)
             .build();
+        let mesh = stage.append(&pyramid_mesh);
         let pyramid_node = stage.append(&gl::GltfNode {
-            mesh: stage.append(&pyramid_mesh),
+            mesh,
             ..Default::default()
         });
         let pyramid_node_path = stage.append_array(&[pyramid_node]);
@@ -542,34 +454,36 @@ mod test {
             .new_mesh()
             .with_primitive(cube_vertices, cube_indices, Id::NONE)
             .build();
+        let mesh = stage.append(&cube_mesh);
         let cube_node = stage.append(&gl::GltfNode {
-            mesh: stage.append(&cube_mesh),
+            mesh,
             ..Default::default()
         });
+        let node_path = stage.append_array(&[cube_node]);
+        let transform = stage.append(&Transform {
+            scale: Vec3::new(10.0, 10.0, 10.0),
+            ..Default::default()
+        });
+
         let cube = stage.draw_unit(&RenderUnit {
             camera,
             vertex_count: cube_vertex_count as u32,
-            node_path: stage.append_array(&[cube_node]),
-            transform: stage.append(&Transform {
-                scale: Vec3::new(10.0, 10.0, 10.0),
-                ..Default::default()
-            }),
+            node_path,
+            transform,
             ..Default::default()
         });
 
-        // we should see a cube
+        // we should see a cube (in sRGB color space)
         let img = r.render_image().unwrap();
-        img_diff::assert_img_eq("cmy_cube_remesh_before.png", img);
+        img_diff::assert_img_eq("cmy_cube/remesh_before.png", img);
 
         // Update the cube mesh to a pyramid by overwriting the `.node_path` field
         // of `RenderUnit`
-        stage
-            .write(cube + RenderUnit::offset_of_node_path(), &pyramid_node_path)
-            .unwrap();
+        stage.write(cube + RenderUnit::offset_of_node_path(), &pyramid_node_path);
 
-        // we should see a pyramid
+        // we should see a pyramid (in sRGB color space)
         let img = r.render_image().unwrap();
-        img_diff::assert_img_eq("cmy_cube_remesh_after.png", img);
+        img_diff::assert_img_eq("cmy_cube/remesh_after.png", img);
     }
 
     fn gpu_uv_unit_cube() -> Vec<Vertex> {
@@ -619,10 +533,11 @@ mod test {
     }
 
     #[test]
-    // Tests that updating the material actually updates the rendering of an unlit mesh
+    // Tests that updating the material actually updates the rendering of an unlit
+    // mesh
     fn unlit_textured_cube_material() {
         let mut r = Renderling::headless(100, 100).with_background_color(Vec4::splat(0.0));
-        let stage = r.new_stage();
+        let mut stage = r.new_stage();
         stage.configure_graph(&mut r, true);
         let (projection, view) = camera::default_perspective(100.0, 100.0);
         let camera = stage.append(&Camera {
@@ -630,8 +545,8 @@ mod test {
             view,
             ..Default::default()
         });
-        let sandstone = SceneImage::from(image::open("../../img/sandstone.png").unwrap());
-        let dirt = SceneImage::from(image::open("../../img/dirt.jpg").unwrap());
+        let sandstone = AtlasImage::from(image::open("../../img/sandstone.png").unwrap());
+        let dirt = AtlasImage::from(image::open("../../img/dirt.jpg").unwrap());
         let textures = stage.set_images([sandstone, dirt]).unwrap();
         let sandstone_tex = textures[0];
         let dirt_tex = textures[1];
@@ -647,17 +562,20 @@ mod test {
             .new_mesh()
             .with_primitive(vertices, [], material_id)
             .build();
+        let mesh = stage.append(&mesh);
         let node = stage.append(&gl::GltfNode {
-            mesh: stage.append(&mesh),
+            mesh,
+            ..Default::default()
+        });
+        let node_path = stage.append_array(&[node]);
+        let transform = stage.append(&Transform {
+            scale: Vec3::new(10.0, 10.0, 10.0),
             ..Default::default()
         });
         let cube = stage.draw_unit(&RenderUnit {
             camera,
-            node_path: stage.append_array(&[node]),
-            transform: stage.append(&Transform {
-                scale: Vec3::new(10.0, 10.0, 10.0),
-                ..Default::default()
-            }),
+            node_path,
+            transform,
             vertex_count,
             ..Default::default()
         });
@@ -668,7 +586,7 @@ mod test {
         img_diff::assert_img_eq("unlit_textured_cube_material_before.png", img);
 
         // update the material's texture on the GPU
-        stage.write(sandstone_tex_id, &dirt_tex).unwrap();
+        stage.write(sandstone_tex_id, &dirt_tex);
 
         // we should see a cube with a dirty texture
         let img = r.render_image().unwrap();
@@ -681,7 +599,7 @@ mod test {
     fn multi_node_scene() {
         let mut r =
             Renderling::headless(100, 100).with_background_color(Vec3::splat(0.0).extend(1.0));
-        let stage = r.new_stage();
+        let mut stage = r.new_stage();
         stage.configure_graph(&mut r, true);
 
         let (projection, view) = camera::default_ortho2d(100.0, 100.0);
@@ -692,8 +610,9 @@ mod test {
         });
 
         // now test the textures functionality
-        let img = SceneImage::from_path("../../img/cheetah.jpg").unwrap();
-        let textures = stage.append_array(&stage.set_images([img]).unwrap());
+        let img = AtlasImage::from_path("../../img/cheetah.jpg").unwrap();
+        let textures = stage.set_images([img]).unwrap();
+        let textures = stage.append_array(&textures);
         let cheetah_material = stage.append(&PbrMaterial {
             albedo_texture: textures.at(0),
             lighting_model: LightingModel::NO_LIGHTING,
@@ -729,35 +648,49 @@ mod test {
             prim.material = Id::NONE;
             prim
         };
-        let _unit = stage.draw_unit(&RenderUnit {
-            camera,
-            vertex_count: cheetah_primitive.vertex_count,
-            node_path: stage.append_array(&[stage.append(&gl::GltfNode {
-                mesh: stage.append(&gl::GltfMesh {
-                    primitives: stage.append_array(&[color_primitive]),
-                    ..Default::default()
-                }),
+        let _unit = {
+            let primitives = stage.append_array(&[color_primitive]);
+            let mesh = stage.append(&gl::GltfMesh {
+                primitives,
                 ..Default::default()
-            })]),
-            ..Default::default()
-        });
-        let _cheetah_unit = stage.draw_unit(&RenderUnit {
-            camera,
-            transform: stage.append(&Transform {
+            });
+            let node = stage.append(&gl::GltfNode {
+                mesh,
+                ..Default::default()
+            });
+            let node_path = stage.append_array(&[node]);
+
+            stage.draw_unit(&RenderUnit {
+                camera,
+                vertex_count: cheetah_primitive.vertex_count,
+                node_path,
+                ..Default::default()
+            })
+        };
+        let _cheetah_unit = {
+            let primitives = stage.append_array(&[cheetah_primitive]);
+            let mesh = stage.append(&gl::GltfMesh {
+                primitives,
+                ..Default::default()
+            });
+            let node = stage.append(&gl::GltfNode {
+                mesh,
+                ..Default::default()
+            });
+            let node_path = stage.append_array(&[node]);
+            let transform = stage.append(&Transform {
                 translation: Vec3::new(15.0, 35.0, 0.5),
                 scale: Vec3::new(0.5, 0.5, 1.0),
                 ..Default::default()
-            }),
-            vertex_count: cheetah_primitive.vertex_count,
-            node_path: stage.append_array(&[stage.append(&gl::GltfNode {
-                mesh: stage.append(&gl::GltfMesh {
-                    primitives: stage.append_array(&[cheetah_primitive]),
-                    ..Default::default()
-                }),
+            });
+            stage.draw_unit(&RenderUnit {
+                camera,
+                transform,
+                vertex_count: cheetah_primitive.vertex_count,
+                node_path,
                 ..Default::default()
-            })]),
-            ..Default::default()
-        });
+            })
+        };
 
         let img = r.render_image().unwrap();
 
@@ -769,7 +702,7 @@ mod test {
     fn scene_cube_directional() {
         let mut r =
             Renderling::headless(100, 100).with_background_color(Vec3::splat(0.0).extend(1.0));
-        let stage = r.new_stage();
+        let mut stage = r.new_stage();
         stage.configure_graph(&mut r, true);
 
         let (projection, _) = camera::default_perspective(100.0, 100.0);
@@ -819,13 +752,16 @@ mod test {
             .collect::<Vec<_>>();
         let vertex_count = verts.len() as u32;
         let mesh = stage.new_mesh().with_primitive(verts, [], material).build();
+        let mesh = stage.append(&mesh);
+        let node = stage.append(&gl::GltfNode {
+            mesh,
+            ..Default::default()
+        });
+        let node_path = stage.append_array(&[node]);
         let _cube = stage.draw_unit(&RenderUnit {
             camera,
             vertex_count,
-            node_path: stage.append_array(&[stage.append(&gl::GltfNode {
-                mesh: stage.append(&mesh),
-                ..Default::default()
-            })]),
+            node_path,
             ..Default::default()
         });
         let img = r.render_image().unwrap();
@@ -874,7 +810,7 @@ mod test {
     fn scene_parent_sanity() {
         let mut r = Renderling::headless(100, 100);
         r.set_background_color(Vec4::splat(0.0));
-        let stage = r.new_stage();
+        let mut stage = r.new_stage();
         stage.configure_graph(&mut r, true);
         let (projection, view) = camera::default_ortho2d(100.0, 100.0);
         let camera = stage.append(&Camera::new(projection, view));
@@ -921,74 +857,83 @@ mod test {
         let red_node = stage.allocate::<gl::GltfNode>();
 
         // Write the nodes now that we have references to them all
-        stage
-            .write(
-                root_node,
-                &gl::GltfNode {
-                    children: stage.append_array(&[cyan_node]),
-                    scale: Vec3::new(25.0, 25.0, 1.0),
-                    ..Default::default()
-                },
-            )
-            .unwrap();
-        stage
-            .write(
-                cyan_node,
-                &gl::GltfNode {
-                    mesh: stage.append(&gl::GltfMesh {
-                        primitives: stage.append_array(&[cyan_primitive]),
-                        ..Default::default()
-                    }),
-                    children: stage.append_array(&[yellow_node]),
-                    translation: Vec3::new(1.0, 1.0, 0.0),
-                    ..Default::default()
-                },
-            )
-            .unwrap();
-        stage
-            .write(
-                yellow_node,
-                &gl::GltfNode {
-                    mesh: stage.append(&gl::GltfMesh {
-                        primitives: stage.append_array(&[yellow_primitive]),
-                        ..Default::default()
-                    }),
-                    children: stage.append_array(&[red_node]),
-                    translation: Vec3::new(1.0, 1.0, 0.0),
-                    ..Default::default()
-                },
-            )
-            .unwrap();
-        stage
-            .write(
-                red_node,
-                &gl::GltfNode {
-                    mesh: stage.append(&gl::GltfMesh {
-                        primitives: stage.append_array(&[red_primitive]),
-                        ..Default::default()
-                    }),
-                    translation: Vec3::new(1.0, 1.0, 0.0),
-                    ..Default::default()
-                },
-            )
-            .unwrap();
+        let children = stage.append_array(&[cyan_node]);
+        stage.write(
+            root_node,
+            &gl::GltfNode {
+                children,
+                scale: Vec3::new(25.0, 25.0, 1.0),
+                ..Default::default()
+            },
+        );
 
+        let primitives = stage.append_array(&[cyan_primitive]);
+        let children = stage.append_array(&[yellow_node]);
+        let mesh = stage.append(&gl::GltfMesh {
+            primitives,
+            ..Default::default()
+        });
+        stage.write(
+            cyan_node,
+            &gl::GltfNode {
+                mesh,
+                children,
+                translation: Vec3::new(1.0, 1.0, 0.0),
+                ..Default::default()
+            },
+        );
+
+        let primitives = stage.append_array(&[yellow_primitive]);
+        let children = stage.append_array(&[red_node]);
+        let mesh = stage.append(&gl::GltfMesh {
+            primitives,
+            ..Default::default()
+        });
+        stage.write(
+            yellow_node,
+            &gl::GltfNode {
+                mesh,
+                children,
+                translation: Vec3::new(1.0, 1.0, 0.0),
+                ..Default::default()
+            },
+        );
+
+        let primitives = stage.append_array(&[red_primitive]);
+        let mesh = stage.append(&gl::GltfMesh {
+            primitives,
+            ..Default::default()
+        });
+        stage.write(
+            red_node,
+            &gl::GltfNode {
+                mesh,
+                translation: Vec3::new(1.0, 1.0, 0.0),
+                ..Default::default()
+            },
+        );
+
+        let node_path = stage.append_array(&[root_node, cyan_node]);
         let _cyan_unit = stage.draw_unit(&RenderUnit {
             camera,
             vertex_count: 3,
-            node_path: stage.append_array(&[root_node, cyan_node]),
+            node_path,
             ..Default::default()
         });
+
+        let node_path = stage.append_array(&[root_node, cyan_node, yellow_node]);
         let _yellow_unit = stage.draw_unit(&RenderUnit {
             camera,
             vertex_count: 3,
-            node_path: stage.append_array(&[root_node, cyan_node, yellow_node]),
+            node_path,
             ..Default::default()
         });
+
+        let node_path = stage.append_array(&[root_node, cyan_node, yellow_node, red_node]);
         let _red_unit = stage.draw_unit(&RenderUnit {
             camera,
             vertex_count: 3,
-            node_path: stage.append_array(&[root_node, cyan_node, yellow_node, red_node]),
+            node_path,
             ..Default::default()
         });
 
@@ -1015,7 +960,7 @@ mod test {
         let ss = 600;
         let mut r =
             Renderling::headless(ss, ss).with_background_color(Vec3::splat(0.0).extend(1.0));
-        let stage = r.new_stage();
+        let mut stage = r.new_stage();
         stage.configure_graph(&mut r, true);
 
         let radius = 0.5;
@@ -1068,28 +1013,32 @@ mod test {
                     roughness_factor: roughness,
                     ..Default::default()
                 });
+                let primitives = stage.append_array(&[prim]);
+                let mesh = stage.append(&gl::GltfMesh {
+                    primitives,
+                    ..Default::default()
+                });
+                let node = stage.append(&gl::GltfNode {
+                    mesh,
+                    translation: Vec3::new(x, y, 0.0),
+                    ..Default::default()
+                });
+                let node_path = stage.append_array(&[node]);
                 let _entity = stage.draw_unit(&RenderUnit {
                     camera,
                     vertex_count: prim.vertex_count,
-                    node_path: stage.append_array(&[stage.append(&gl::GltfNode {
-                        mesh: stage.append(&gl::GltfMesh {
-                            primitives: stage.append_array(&[prim]),
-                            ..Default::default()
-                        }),
-                        translation: Vec3::new(x, y, 0.0),
-                        ..Default::default()
-                    })]),
+                    node_path,
                     ..Default::default()
                 });
             }
         }
 
         let (device, queue) = r.get_device_and_queue_owned();
-        let hdr_image = SceneImage::from_hdr_path("../../img/hdr/resting_place.hdr").unwrap();
-        let skybox = crate::skybox::Skybox::new(&device, &queue, hdr_image, camera);
+        let hdr_image = AtlasImage::from_hdr_path("../../img/hdr/resting_place.hdr").unwrap();
+        let skybox = crate::skybox::Skybox::new(device, queue, hdr_image, camera);
         stage.set_skybox(skybox);
 
-        let img = r.render_image().unwrap();
+        let img = r.render_linear_image().unwrap();
         img_diff::assert_img_eq("pbr/metallic_roughness_spheres.png", img);
     }
 

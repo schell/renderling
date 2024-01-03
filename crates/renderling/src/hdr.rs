@@ -1,12 +1,13 @@
 //! High definition rendering types and techniques.
 //!
 //! Also includes bloom effect.
+use crabslab::{CpuSlab, Slab, SlabItem, WgpuBuffer};
 use moongraph::*;
 use renderling_shader::tonemapping::TonemapConstants;
 
 use crate::{
     frame::FrameTextureView, math::Vec4, BackgroundColor, DepthTexture, Device, Queue,
-    RenderTarget, ScreenSize, Uniform, WgpuStateError,
+    RenderTarget, ScreenSize, WgpuStateError,
 };
 
 /// A texture, tonemapping pipeline and uniform used for high dynamic range
@@ -15,12 +16,9 @@ use crate::{
 /// See https://learnopengl.com/Advanced-Lighting/HDR.
 pub struct HdrSurface {
     pub hdr_texture: crate::Texture,
-    pub brightness_texture: crate::Texture,
-    pub texture_bindgroup: wgpu::BindGroup,
-    pub no_bloom_texture: crate::Texture,
-    pub no_bloom_bindgroup: wgpu::BindGroup,
+    pub bindgroup: wgpu::BindGroup,
     pub tonemapping_pipeline: wgpu::RenderPipeline,
-    pub constants: Uniform<TonemapConstants>,
+    pub slab: CpuSlab<WgpuBuffer>,
 }
 
 impl HdrSurface {
@@ -59,58 +57,65 @@ impl HdrSurface {
         )
     }
 
-    pub fn create_texture_bindgroup(
+    pub fn create_bindgroup(
         device: &wgpu::Device,
-        texture: &crate::Texture,
+        hdr_texture: &crate::Texture,
+        slab_buffer: &wgpu::Buffer,
     ) -> wgpu::BindGroup {
-        let hdr_texture_layout = scene_hdr_surface_bindgroup_layout(&device);
         device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("HdrSurface texture bindgroup"),
-            layout: &hdr_texture_layout,
+            label: Some("HdrSurface bindgroup"),
+            layout: &bindgroup_layout(&device, Some("HdrSurface bindgroup")),
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&texture.view),
+                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                        buffer: slab_buffer,
+                        offset: 0,
+                        size: None,
+                    }),
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&texture.sampler),
+                    resource: wgpu::BindingResource::TextureView(&hdr_texture.view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(&hdr_texture.sampler),
                 },
             ],
         })
     }
 
-    pub fn color_attachments(&self) -> [Option<wgpu::RenderPassColorAttachment>; 2] {
-        [
-            Some(wgpu::RenderPassColorAttachment {
-                view: &self.hdr_texture.view,
-                resolve_target: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Load,
-                    store: true,
-                },
-            }),
-            Some(wgpu::RenderPassColorAttachment {
-                view: &self.brightness_texture.view,
-                resolve_target: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Load,
-                    store: true,
-                },
-            }),
-        ]
+    pub fn color_attachments(&self) -> [Option<wgpu::RenderPassColorAttachment>; 1] {
+        [Some(wgpu::RenderPassColorAttachment {
+            view: &self.hdr_texture.view,
+            resolve_target: None,
+            ops: wgpu::Operations {
+                load: wgpu::LoadOp::Load,
+                store: true,
+            },
+        })]
     }
 }
 
-pub fn texture_and_sampler_layout(
-    device: &wgpu::Device,
-    label: Option<&str>,
-) -> wgpu::BindGroupLayout {
+pub fn bindgroup_layout(device: &wgpu::Device, label: Option<&str>) -> wgpu::BindGroupLayout {
     device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label,
         entries: &[
+            // slab
             wgpu::BindGroupLayoutEntry {
                 binding: 0,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: true },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
+            // hdr texture
+            wgpu::BindGroupLayoutEntry {
+                binding: 1,
                 visibility: wgpu::ShaderStages::FRAGMENT,
                 ty: wgpu::BindingType::Texture {
                     sample_type: wgpu::TextureSampleType::Float { filterable: false },
@@ -119,24 +124,15 @@ pub fn texture_and_sampler_layout(
                 },
                 count: None,
             },
+            // hdr sampler
             wgpu::BindGroupLayoutEntry {
-                binding: 1,
+                binding: 2,
                 visibility: wgpu::ShaderStages::FRAGMENT,
                 ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
                 count: None,
             },
         ],
     })
-}
-
-fn scene_hdr_surface_bindgroup_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
-    texture_and_sampler_layout(device, Some("hdr buffer bindgroup"))
-}
-
-/// Layout for the bloom texture+sampler that get added to the color before
-/// tonemapping.
-fn blend_bloom_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
-    texture_and_sampler_layout(device, Some("blend bloom"))
 }
 
 pub fn create_hdr_render_surface(
@@ -147,13 +143,10 @@ pub fn create_hdr_render_surface(
         View<RenderTarget>,
     ),
 ) -> Result<(HdrSurface,), WgpuStateError> {
-    let (constants, constants_layout) = Uniform::new_and_layout(
-        &device,
-        TonemapConstants::default(),
-        wgpu::BufferUsages::UNIFORM,
-        wgpu::ShaderStages::FRAGMENT,
-    );
-    let bloom_layout = blend_bloom_layout(&device);
+    let buffer = WgpuBuffer::new(&*device, &*queue, TonemapConstants::slab_size());
+    let mut slab = CpuSlab::new(buffer);
+    // TODO: make the tonemapping configurable
+    slab.write(0u32.into(), &TonemapConstants::default());
     let size = wgpu::Extent3d {
         width: size.width,
         height: size.height,
@@ -165,10 +158,10 @@ pub fn create_hdr_render_surface(
         device.create_shader_module(wgpu::include_spirv!("linkage/tonemapping-vertex.spv"));
     let fragment_shader =
         device.create_shader_module(wgpu::include_spirv!("linkage/tonemapping-fragment.spv"));
-    let hdr_texture_layout = scene_hdr_surface_bindgroup_layout(&device);
+    let hdr_layout = bindgroup_layout(&device, Some("hdr tonemapping"));
     let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label,
-        bind_group_layouts: &[&hdr_texture_layout, &constants_layout, &bloom_layout],
+        bind_group_layouts: &[&hdr_layout],
         push_constant_ranges: &[],
     });
     let tonemapping_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -202,26 +195,12 @@ pub fn create_hdr_render_surface(
         multiview: None,
     });
 
-    let no_bloom_texture = HdrSurface::create_texture(&device, &queue, 1, 1);
-    let no_bloom_bindgroup = HdrSurface::create_texture_bindgroup(&device, &no_bloom_texture);
-
     Ok((HdrSurface {
-        texture_bindgroup: HdrSurface::create_texture_bindgroup(&device, &hdr_texture),
-        brightness_texture: HdrSurface::create_texture(&device, &queue, size.width, size.height),
-        no_bloom_texture,
-        no_bloom_bindgroup,
+        bindgroup: HdrSurface::create_bindgroup(&device, &hdr_texture, slab.as_ref().get_buffer()),
         hdr_texture,
         tonemapping_pipeline,
-        constants,
+        slab,
     },))
-}
-
-/// Update the `HdrSurface` uniforms.
-pub fn hdr_surface_update(
-    (queue, mut hdr_surface): (View<Queue>, ViewMut<HdrSurface>),
-) -> Result<(), WgpuStateError> {
-    hdr_surface.constants.update(&queue);
-    Ok(())
 }
 
 /// Conduct a clear pass on the window surface, the hdr surface and the depth
@@ -252,13 +231,25 @@ pub fn clear_surface_hdr_and_depth(
         &device,
         &queue,
         Some("clear_frame_and_depth"),
-        vec![
-            &frame.view,
-            &hdr.hdr_texture.view,
-            &hdr.brightness_texture.view,
-        ],
+        vec![&frame.view, &hdr.hdr_texture.view],
         Some(&depth_view),
         color,
     );
+    Ok(())
+}
+
+/// Resize the HDR surface to match [`ScreenSize`].
+pub fn resize_hdr_surface(
+    (device, queue, size, mut hdr): (
+        View<Device>,
+        View<Queue>,
+        View<ScreenSize>,
+        ViewMut<HdrSurface>,
+    ),
+) -> Result<(), WgpuStateError> {
+    let ScreenSize { width, height } = *size;
+    hdr.hdr_texture = HdrSurface::create_texture(&device, &queue, width, height);
+    hdr.bindgroup =
+        HdrSurface::create_bindgroup(&device, &hdr.hdr_texture, hdr.slab.as_ref().get_buffer());
     Ok(())
 }

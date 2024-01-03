@@ -1,8 +1,7 @@
 //! A slab-allocated array.
 use core::marker::PhantomData;
 
-use crate::id::Id;
-use crate::slab::Slabbed;
+use crate::{id::Id, slab::SlabItem};
 
 #[derive(Clone, Copy)]
 pub struct ArrayIter<T> {
@@ -10,7 +9,7 @@ pub struct ArrayIter<T> {
     index: usize,
 }
 
-impl<T: Slabbed> Iterator for ArrayIter<T> {
+impl<T: SlabItem> Iterator for ArrayIter<T> {
     type Item = Id<T>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -24,6 +23,7 @@ impl<T: Slabbed> Iterator for ArrayIter<T> {
     }
 }
 
+/// A pointer to contiguous `T` elements in a slab.
 #[repr(C)]
 pub struct Array<T> {
     // u32 offset in the slab
@@ -59,9 +59,12 @@ impl<T> From<Id<T>> for Array<T> {
 impl<T> core::fmt::Debug for Array<T> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         if self.is_null() {
-            f.write_fmt(format_args!("Array<{}>(null)", core::any::type_name::<T>()))
+            f.write_fmt(core::format_args!(
+                "Array<{}>(null)",
+                core::any::type_name::<T>()
+            ))
         } else {
-            f.write_fmt(format_args!(
+            f.write_fmt(core::format_args!(
                 "Array<{}>({}, {})",
                 core::any::type_name::<T>(),
                 self.index,
@@ -77,7 +80,7 @@ impl<T> PartialEq for Array<T> {
     }
 }
 
-impl<T: Slabbed> Slabbed for Array<T> {
+impl<T: SlabItem> SlabItem for Array<T> {
     fn slab_size() -> usize {
         2
     }
@@ -103,7 +106,7 @@ impl<T: Slabbed> Slabbed for Array<T> {
     }
 }
 
-impl<T: Slabbed> Default for Array<T> {
+impl<T: SlabItem> Default for Array<T> {
     fn default() -> Self {
         Self {
             index: u32::MAX,
@@ -140,7 +143,7 @@ impl<T> Array<T> {
 
     pub fn at(&self, index: usize) -> Id<T>
     where
-        T: Slabbed,
+        T: SlabItem,
     {
         if index >= self.len() {
             Id::NONE
@@ -163,7 +166,7 @@ impl<T> Array<T> {
     /// Convert this array into a `u32` array.
     pub fn into_u32_array(self) -> Array<u32>
     where
-        T: Slabbed,
+        T: SlabItem,
     {
         Array {
             index: self.index,
@@ -176,7 +179,7 @@ impl<T> Array<T> {
     /// Return the slice of the slab that this array represents.
     pub fn sub_slab<'a>(&'a self, slab: &'a [u32]) -> &[u32]
     where
-        T: Slabbed,
+        T: SlabItem,
     {
         let arr = self.into_u32_array();
         &slab[arr.index as usize..(arr.index + arr.len) as usize]

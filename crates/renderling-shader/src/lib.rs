@@ -13,16 +13,13 @@ use spirv_std::{
     Sampler,
 };
 
-pub mod array;
 pub mod bits;
 pub mod convolution;
 pub mod debug;
 pub mod gltf;
-pub mod id;
 pub mod math;
 pub mod pbr;
 pub mod skybox;
-pub mod slab;
 pub mod stage;
 pub mod texture;
 pub mod tonemapping;
@@ -69,9 +66,9 @@ pub trait IsMatrix {
     /// matrix is expected to be a 3D affine transformation matrix otherwise
     /// the output will be invalid.
     ///
-    /// Will return `(Vec3::ONE, Quat::IDENTITY, Vec3::ZERO)` if the determinant of
-    /// `self` is zero or if the resulting scale vector contains any zero elements
-    /// when `glam_assert` is enabled.
+    /// Will return `(Vec3::ONE, Quat::IDENTITY, Vec3::ZERO)` if the determinant
+    /// of `self` is zero or if the resulting scale vector contains any zero
+    /// elements when `glam_assert` is enabled.
     ///
     /// This is required instead of using
     /// [`glam::Mat4::to_scale_rotation_translation`], because that uses

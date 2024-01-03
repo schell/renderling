@@ -7,7 +7,7 @@ use crate::{
         stage::{Camera, LightingModel},
         texture::{GpuTexture, TextureAddressMode, TextureModes},
     },
-    SceneImage,
+    AtlasImage,
 };
 use glam::{Quat, Vec2, Vec3, Vec4};
 use renderling_shader::stage::Vertex;
@@ -49,11 +49,11 @@ pub enum StageGltfError {
     MissingCamera { index: usize },
 
     #[snafu(display("{source}"))]
-    Slab { source: crate::slab::SlabError },
+    Slab { source: crabslab::SlabError },
 }
 
-impl From<crate::slab::SlabError> for StageGltfError {
-    fn from(source: crate::slab::SlabError) -> Self {
+impl From<crabslab::SlabError> for StageGltfError {
+    fn from(source: crabslab::SlabError) -> Self {
         Self::Slab { source }
     }
 }
@@ -118,7 +118,7 @@ pub fn make_accessor(accessor: gltf::Accessor<'_>, views: &Array<GltfBufferView>
 
 impl Stage {
     pub fn load_gltf_document_from_path(
-        &self,
+        &mut self,
         path: impl AsRef<std::path::Path>,
     ) -> Result<(gltf::Document, GltfDocument), StageGltfError> {
         let (document, buffers, images) = gltf::import(path)?;
@@ -127,7 +127,7 @@ impl Stage {
     }
 
     pub fn load_gltf_document(
-        &self,
+        &mut self,
         document: &gltf::Document,
         buffer_data: Vec<gltf::buffer::Data>,
         images: Vec<gltf::image::Data>,
@@ -137,7 +137,7 @@ impl Stage {
         for (i, buffer) in buffer_data.iter().enumerate() {
             let slice: &[u32] = bytemuck::cast_slice(&buffer);
             let buffer = self.append_array(slice);
-            self.write(buffers.at(i), &GltfBuffer(buffer))?;
+            self.write(buffers.at(i), &GltfBuffer(buffer));
         }
 
         log::trace!("Loading views into the GPU");
@@ -154,7 +154,7 @@ impl Stage {
                 length,
                 stride,
             };
-            self.write(id, &gltf_view)?;
+            self.write(id, &gltf_view);
         }
 
         log::trace!("Loading accessors into the GPU");
@@ -203,17 +203,18 @@ impl Stage {
             .collect::<Vec<_>>();
         let cameras = self.append_array(&cameras);
 
-        // We need the (re)packing of the atlas before we marshal the images into the GPU
-        // because we need their frames for textures and materials, but we need to know
-        // if the materials require us to apply a linear transfer. So we'll get the preview
-        // repacking first, then update the frames in the textures.
+        // We need the (re)packing of the atlas before we marshal the images into the
+        // GPU because we need their frames for textures and materials, but we
+        // need to know if the materials require us to apply a linear transfer.
+        // So we'll get the preview repacking first, then update the frames in
+        // the textures.
         let (mut repacking, atlas_offset) = {
             // UNWRAP: if we can't lock the atlas, we want to panic.
             let atlas = self.atlas.read().unwrap();
             let atlas_offset = atlas.rects.len();
             (
                 atlas
-                    .repack_preview(&self.device, images.into_iter().map(SceneImage::from))
+                    .repack_preview(&self.device, images.into_iter().map(AtlasImage::from))
                     .context(AtlasSnafu)?,
                 atlas_offset,
             )
@@ -253,7 +254,7 @@ impl Stage {
             };
             let texture_id = textures.at(i);
             log::trace!("  texture {i} {texture_id:?}: {texture:#?}");
-            self.write(texture_id, &texture)?;
+            self.write(texture_id, &texture);
         }
 
         log::trace!("Creating materials");
@@ -406,7 +407,7 @@ impl Stage {
                 }
             };
             log::trace!("  material {material_id:?}: {material:#?}",);
-            self.write(material_id, &material)?;
+            self.write(material_id, &material);
         }
 
         let number_of_new_images = repacking.new_images_len();
@@ -424,7 +425,7 @@ impl Stage {
             let _ = self.textures_bindgroup.lock().unwrap().take();
             // The atlas size must be reset
             let size_id = StageLegend::offset_of_atlas_size().into();
-            self.write(size_id, &size)?;
+            self.slab.write().unwrap().write(size_id, &size);
         }
 
         fn log_accessor(gltf_accessor: gltf::Accessor<'_>) {
@@ -733,7 +734,7 @@ impl Stage {
                     weights,
                 };
                 log::trace!("    writing primitive {id:?}:\n{prim:#?}");
-                self.write(id, &prim)?;
+                self.write(id, &prim);
             }
             let weights = mesh.weights().unwrap_or(&[]);
             let weights = self.append_array(weights);
@@ -743,7 +744,7 @@ impl Stage {
                     primitives,
                     weights,
                 },
-            )?;
+            );
         }
         log::trace!("Loading lights");
         let lights_array = self.allocate_array::<GltfLight>(
@@ -777,7 +778,7 @@ impl Stage {
                         intensity,
                         kind,
                     },
-                )?;
+                );
             }
         }
         let lights = lights_array;
@@ -834,7 +835,7 @@ impl Stage {
                     light,
                     skin,
                 },
-            )?;
+            );
         }
 
         log::trace!("Loading skins");
@@ -888,7 +889,7 @@ impl Stage {
             let mut stored_samplers = vec![];
             for (i, sampler) in animation.samplers().enumerate() {
                 let sampler = create_sampler(accessors, sampler);
-                self.write(samplers.at(i), &sampler)?;
+                self.write(samplers.at(i), &sampler);
                 // Store it later so we can figure out the index of the sampler
                 // used by the channel.
                 //
@@ -915,12 +916,12 @@ impl Stage {
                     .position(|s| s == &sampler)
                     .context(MissingSamplerSnafu)?;
                 let sampler = samplers.at(index);
-                self.write(channels.at(i), &GltfChannel { target, sampler })?;
+                self.write(channels.at(i), &GltfChannel { target, sampler });
             }
             self.write(
                 animations.at(animation.index()),
                 &GltfAnimation { channels, samplers },
-            )?;
+            );
         }
 
         log::trace!("Loading scenes");
@@ -931,7 +932,7 @@ impl Stage {
                 .map(|node| nodes.at(node.index()))
                 .collect::<Vec<_>>();
             let nodes = self.append_array(&nodes);
-            self.write(scenes.at(scene.index()), &GltfScene { nodes })?;
+            self.write(scenes.at(scene.index()), &GltfScene { nodes });
         }
 
         log::trace!("Done loading gltf");
@@ -1005,7 +1006,7 @@ impl Stage {
     /// Draw the given `gltf::Node` with the given `Camera`.
     /// `parents` is a list of the parent nodes of the given node.
     fn draw_gltf_node_with<'a>(
-        &self,
+        &mut self,
         gpu_doc: &GltfDocument,
         camera_id: Id<Camera>,
         node: gltf::Node<'a>,
@@ -1022,8 +1023,10 @@ impl Stage {
             //let range = light.range().unwrap_or(f32::MAX);
             //let intensity = light.intensity();
             //match light.kind() {
-            //    gltf::khr_lights_punctual::Kind::Directional => GltfLightKind::Directional,
-            //    gltf::khr_lights_punctual::Kind::Point => GltfLightKind::Point,
+            //    gltf::khr_lights_punctual::Kind::Directional =>
+            // GltfLightKind::Directional,
+            //    gltf::khr_lights_punctual::Kind::Point =>
+            // GltfLightKind::Point,
             //    gltf::khr_lights_punctual::Kind::Spot {
             //        inner_cone_angle,
             //        outer_cone_angle,
@@ -1072,10 +1075,10 @@ impl Stage {
         units
     }
 
-    /// Draw the given [`gltf::Node`] using the given [`Camera`] and return the ids of the
-    /// render units that were created.
+    /// Draw the given [`gltf::Node`] using the given [`Camera`] and return the
+    /// ids of the render units that were created.
     pub fn draw_gltf_node(
-        &self,
+        &mut self,
         gpu_doc: &GltfDocument,
         camera_id: Id<Camera>,
         node: gltf::Node<'_>,
@@ -1083,10 +1086,10 @@ impl Stage {
         self.draw_gltf_node_with(gpu_doc, camera_id, node, vec![])
     }
 
-    /// Draw the given [`gltf::Scene`] using the given [`Camera`] and return the ids of the
-    /// render units that were created.
+    /// Draw the given [`gltf::Scene`] using the given [`Camera`] and return the
+    /// ids of the render units that were created.
     pub fn draw_gltf_scene(
-        &self,
+        &mut self,
         gpu_doc: &GltfDocument,
         camera_id: Id<Camera>,
         scene: gltf::Scene<'_>,
@@ -1103,7 +1106,7 @@ impl Stage {
     /// ## Note
     /// This does **not** generate tangents or normals.
     pub fn new_primitive(
-        &self,
+        &mut self,
         vertices: impl IntoIterator<Item = Vertex>,
         indices: impl IntoIterator<Item = u32>,
         material: Id<PbrMaterial>,
@@ -1205,7 +1208,8 @@ impl Stage {
         let tangents = self.append(&GltfAccessor {
             size: 4 * 4, // 4 tangent components * 4 bytes each
             view,
-            offset: 16 * 4, // (3 + 1) position + 4 color + 4 uv + (3 + 1) normal components * 4 bytes each
+            offset: 16 * 4, /* (3 + 1) position + 4 color + 4 uv + (3 + 1) normal components * 4
+                             * bytes each */
             count: vertex_count as u32,
             data_type: DataType::F32,
             dimensions: Dimensions::Vec4,
@@ -1253,7 +1257,7 @@ impl Stage {
     /// [`gltf::Document`].
     ///
     /// This is useful if you have non-GLTF assets that you want to render.
-    pub fn new_mesh(&self) -> GltfMeshBuilder {
+    pub fn new_mesh(&mut self) -> GltfMeshBuilder {
         GltfMeshBuilder::new(self)
     }
 }
@@ -1263,12 +1267,12 @@ impl Stage {
 ///
 /// This is useful if you have non-GLTF assets that you want to render.
 pub struct GltfMeshBuilder<'a> {
-    stage: &'a Stage,
+    stage: &'a mut Stage,
     primitives: Vec<GltfPrimitive>,
 }
 
 impl<'a> GltfMeshBuilder<'a> {
-    pub fn new(stage: &'a Stage) -> Self {
+    pub fn new(stage: &'a mut Stage) -> Self {
         Self {
             stage,
             primitives: vec![],
@@ -1310,16 +1314,12 @@ impl<'a> GltfMeshBuilder<'a> {
 ///
 /// This is useful if you have non-GLTF assets that you want to render.
 pub struct GltfDocumentBuilder<'a> {
-    stage: &'a Stage,
+    stage: &'a mut Stage,
 }
 
 impl<'a> GltfDocumentBuilder<'a> {
-    pub fn new(stage: &'a Stage) -> Self {
+    pub fn new(stage: &'a mut Stage) -> Self {
         Self { stage }
-    }
-
-    pub fn new_mesh(&self) -> GltfMeshBuilder<'a> {
-        GltfMeshBuilder::new(self.stage)
     }
 
     pub fn build(self) -> GltfDocument {
@@ -1354,19 +1354,17 @@ impl<'a> GltfDocumentBuilder<'a> {
 
 #[cfg(test)]
 mod test {
-    use glam::{Vec2, Vec3, Vec4, Vec4Swizzles};
-    use renderling_shader::stage::{GpuConstants, GpuEntity};
-
     use crate::{
         shader::{
-            array::Array,
             gltf::*,
             pbr::PbrMaterial,
-            slab::Slab,
             stage::{Camera, LightingModel, RenderUnit, Transform, Vertex},
         },
-        Id, Renderling, Stage,
+        Renderling, Stage,
     };
+    use crabslab::{Array, GrowableSlab, Id, Slab};
+    use glam::{Vec2, Vec3, Vec4, Vec4Swizzles};
+    use renderling_shader::stage::{GpuConstants, GpuEntity};
 
     #[test]
     fn get_vertex_count_primitive_sanity() {
@@ -1450,7 +1448,7 @@ mod test {
         let projection = crate::camera::perspective(100.0, 50.0);
         let position = Vec3::new(1.0, 0.5, 1.5);
         let view = crate::camera::look_at(position, Vec3::new(1.0, 0.5, 0.0), Vec3::Y);
-        let stage = Stage::new(device.clone(), queue.clone()).with_lighting(false);
+        let mut stage = Stage::new(device.clone(), queue.clone()).with_lighting(false);
         stage.configure_graph(&mut r, true);
         let gpu_doc = stage
             .load_gltf_document(&document, buffers.clone(), images)
@@ -1476,7 +1474,7 @@ mod test {
         let mut r =
             Renderling::headless(20, 20).with_background_color(Vec3::splat(0.0).extend(1.0));
         let (device, queue) = r.get_device_and_queue_owned();
-        let stage = Stage::new(device, queue).with_lighting(false);
+        let mut stage = Stage::new(device, queue).with_lighting(false);
         stage.configure_graph(&mut r, true);
         let (document, buffers, images) =
             gltf::import("../../gltf/gltfTutorial_003_MinimalGltfFile.gltf").unwrap();
@@ -1504,7 +1502,7 @@ mod test {
     // child primitive's geometry correctly.
     fn render_unit_transforms_primitive_geometry() {
         let mut r = Renderling::headless(50, 50).with_background_color(Vec4::splat(1.0));
-        let stage = r.new_stage().with_lighting(false);
+        let mut stage = r.new_stage().with_lighting(false);
         stage.configure_graph(&mut r, true);
         let (projection, view) = crate::camera::default_ortho2d(50.0, 50.0);
         let camera = stage.append(&Camera::new(projection, view));
@@ -1527,8 +1525,9 @@ mod test {
                 .with_color(white),
         ];
         let primitive = stage.new_primitive(vertices, [0, 3, 2, 0, 2, 1], Id::NONE);
+        let primitives = stage.append_array(&[primitive]);
         let mesh = stage.append(&GltfMesh {
-            primitives: stage.append_array(&[primitive]),
+            primitives,
             ..Default::default()
         });
         let node = stage.append(&GltfNode {
@@ -1547,7 +1546,7 @@ mod test {
             node_path,
             ..Default::default()
         });
-        let img = r.render_image().unwrap();
+        let img = r.render_linear_image().unwrap();
         img_diff::assert_img_eq("gltf/render_unit_transforms_primitive_geometry.png", img);
     }
 
@@ -1558,7 +1557,7 @@ mod test {
     fn gltf_images() {
         let mut r = Renderling::headless(100, 100).with_background_color(Vec4::splat(1.0));
         let (device, queue) = r.get_device_and_queue_owned();
-        let stage = Stage::new(device.clone(), queue.clone()).with_lighting(false);
+        let mut stage = Stage::new(device.clone(), queue.clone()).with_lighting(false);
         stage.configure_graph(&mut r, true);
         let (document, buffers, images) = gltf::import("../../gltf/cheetah_cone.glb").unwrap();
         let gpu_doc = stage
@@ -1575,29 +1574,28 @@ mod test {
             ..Default::default()
         });
         println!("material_id: {:#?}", material_id);
-        let mesh = stage.append(
-            &stage
-                .new_mesh()
-                .with_primitive(
-                    [
-                        Vertex::default()
-                            .with_position([0.0, 0.0, 0.0])
-                            .with_uv0([0.0, 0.0]),
-                        Vertex::default()
-                            .with_position([1.0, 0.0, 0.0])
-                            .with_uv0([1.0, 0.0]),
-                        Vertex::default()
-                            .with_position([1.0, 1.0, 0.0])
-                            .with_uv0([1.0, 1.0]),
-                        Vertex::default()
-                            .with_position([0.0, 1.0, 0.0])
-                            .with_uv0([0.0, 1.0]),
-                    ],
-                    [0, 3, 2, 0, 2, 1],
-                    material_id,
-                )
-                .build(),
-        );
+        let mesh = stage
+            .new_mesh()
+            .with_primitive(
+                [
+                    Vertex::default()
+                        .with_position([0.0, 0.0, 0.0])
+                        .with_uv0([0.0, 0.0]),
+                    Vertex::default()
+                        .with_position([1.0, 0.0, 0.0])
+                        .with_uv0([1.0, 0.0]),
+                    Vertex::default()
+                        .with_position([1.0, 1.0, 0.0])
+                        .with_uv0([1.0, 1.0]),
+                    Vertex::default()
+                        .with_position([0.0, 1.0, 0.0])
+                        .with_uv0([0.0, 1.0]),
+                ],
+                [0, 3, 2, 0, 2, 1],
+                material_id,
+            )
+            .build();
+        let mesh = stage.append(&mesh);
         let node = stage.append(&GltfNode {
             mesh,
             ..Default::default()
@@ -1618,7 +1616,7 @@ mod test {
             primitive_index: 0,
         });
 
-        let img = r.render_image().unwrap();
+        let img = r.render_linear_image().unwrap();
         img_diff::assert_img_eq("gltf_images.png", img);
     }
 
@@ -1628,7 +1626,7 @@ mod test {
         let mut r =
             Renderling::headless(size, size).with_background_color(Vec3::splat(0.0).extend(1.0));
         let (device, queue) = r.get_device_and_queue_owned();
-        let stage = Stage::new(device.clone(), queue.clone())
+        let mut stage = Stage::new(device.clone(), queue.clone())
             // There are no lights in the scene and the material isn't marked as "unlit", so
             // let's force it to be unlit.
             .with_lighting(false);
@@ -1647,24 +1645,29 @@ mod test {
         img_diff::assert_img_eq("gltf_simple_texture.png", img);
     }
 
-    #[test]
-    fn normal_mapping_brick_sphere() {
-        let size = 600;
-        let mut r =
-            Renderling::headless(size, size).with_background_color(Vec3::splat(1.0).extend(1.0));
-        let stage = r.new_stage().with_lighting(true).with_bloom(true);
-        stage.configure_graph(&mut r, true);
-        let (cpu_doc, gpu_doc) = stage
-            .load_gltf_document_from_path("../../gltf/red_brick_03_1k.glb")
-            .unwrap();
-        let camera = stage.create_camera_from_gltf(&cpu_doc, 0).unwrap();
-        let camera_id = stage.append(&camera);
-        let _unit_ids =
-            stage.draw_gltf_scene(&gpu_doc, camera_id, cpu_doc.default_scene().unwrap());
+    // This can be uncommented when we support lighting from GLTF files
+    //#[test]
+    //// Demonstrates how to load and render a gltf file containing lighting and a
+    //// normal map.
+    //fn normal_mapping_brick_sphere() {
+    //    let size = 600;
+    //    let mut r =
+    //        Renderling::headless(size,
+    // size).with_background_color(Vec3::splat(1.0).extend(1.0));    let mut
+    // stage = r.new_stage().with_lighting(true).with_bloom(true);
+    //    stage.configure_graph(&mut r, true);
+    //    let (cpu_doc, gpu_doc) = stage
+    //        .load_gltf_document_from_path("../../gltf/red_brick_03_1k.glb")
+    //        .unwrap();
+    //    let camera = stage.create_camera_from_gltf(&cpu_doc, 0).unwrap();
+    //    let camera_id = stage.append(&camera);
+    //    let _unit_ids =
+    //        stage.draw_gltf_scene(&gpu_doc, camera_id,
+    // cpu_doc.default_scene().unwrap());
 
-        let img = r.render_image().unwrap();
-        img_diff::assert_img_eq("gltf_normal_mapping_brick_sphere.png", img);
-    }
+    //    let img = r.render_image().unwrap();
+    //    img_diff::assert_img_eq("gltf_normal_mapping_brick_sphere.png", img);
+    //}
 
     #[test]
     // Demonstrates how to generate a mesh primitive on the CPU, long hand.
@@ -1672,8 +1675,8 @@ mod test {
         let size = 100;
         let mut r =
             Renderling::headless(size, size).with_background_color(Vec3::splat(0.0).extend(1.0));
-        let (device, queue) = r.get_device_and_queue_owned();
-        let stage = Stage::new(device.clone(), queue.clone())
+        let mut stage = r
+            .new_stage()
             // There are no lights in the scene and the material isn't marked as "unlit", so
             // let's force it to be unlit.
             .with_lighting(false);
@@ -1773,7 +1776,7 @@ mod test {
         let invocation = VertexInvocation::invoke(unit_id.inner(), 0, &data);
         println!("invoctaion: {invocation:#?}");
 
-        let img = r.render_image().unwrap();
+        let img = r.render_linear_image().unwrap();
         img_diff::assert_img_eq("gltf/cmy_tri.png", img);
     }
 

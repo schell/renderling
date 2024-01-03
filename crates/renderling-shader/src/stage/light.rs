@@ -1,10 +1,10 @@
 //! Stage lighting.
-use crate::{self as renderling_shader, id::Id, slab::Slabbed};
+use crabslab::{Id, SlabItem};
 use glam::{Vec3, Vec4};
 
 #[repr(C)]
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
-#[derive(Copy, Clone, Slabbed)]
+#[derive(Copy, Clone, SlabItem)]
 pub struct SpotLight {
     pub position: Vec3,
     pub direction: Vec3,
@@ -39,7 +39,7 @@ impl Default for SpotLight {
 
 #[repr(C)]
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
-#[derive(Copy, Clone, Slabbed)]
+#[derive(Copy, Clone, SlabItem)]
 pub struct DirectionalLight {
     pub direction: Vec3,
     pub color: Vec4,
@@ -62,7 +62,7 @@ impl Default for DirectionalLight {
 
 #[repr(C)]
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
-#[derive(Copy, Clone, Slabbed)]
+#[derive(Copy, Clone, SlabItem)]
 pub struct PointLight {
     pub position: Vec3,
     pub attenuation: Vec3,
@@ -112,7 +112,7 @@ pub enum LightStyle {
     Spot = 2,
 }
 
-impl Slabbed for LightStyle {
+impl SlabItem for LightStyle {
     fn slab_size() -> usize {
         1
     }
@@ -135,10 +135,11 @@ impl Slabbed for LightStyle {
     }
 }
 
-/// A type-erased linked-list-of-lights that is used as a slab pointer to any light type.
+/// A type-erased linked-list-of-lights that is used as a slab pointer to any
+/// light type.
 #[repr(C)]
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
-#[derive(Copy, Clone, PartialEq, Slabbed)]
+#[derive(Copy, Clone, PartialEq, SlabItem)]
 pub struct Light {
     // The type of the light
     pub light_type: LightStyle,

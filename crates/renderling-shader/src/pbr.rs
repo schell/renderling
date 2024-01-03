@@ -5,17 +5,13 @@
 //! * https://github.com/KhronosGroup/glTF-Sample-Viewer/blob/5b1b7f48a8cb2b7aaef00d08fdba18ccc8dd331b/source/Renderer/shaders/pbr.frag
 //! * https://github.khronos.org/glTF-Sample-Viewer-Release/
 
+use crabslab::{Array, Id, Slab, SlabItem};
 use glam::{Vec2, Vec3, Vec4, Vec4Swizzles};
-use renderling_derive::Slabbed;
 #[cfg(target_arch = "spirv")]
 use spirv_std::num_traits::Float;
 
 use crate::{
-    self as renderling_shader,
-    array::Array,
-    id::Id,
     math,
-    slab::Slab,
     stage::{light::LightStyle, GpuLight, LightType, LightingModel},
     texture::GpuTexture,
     IsSampler, IsVector, Sample2d, SampleCube,
@@ -28,7 +24,7 @@ use crate::{
 /// [`SceneBuilder`](crate::SceneBuilder).
 #[repr(C)]
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
-#[derive(Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable, Slabbed)]
+#[derive(Clone, Copy, PartialEq, SlabItem)]
 pub struct PbrMaterial {
     // x, y, z is emissive factor, default [0.0, 0.0, 0.0]
     // w is emissive strength multiplier (gltf's KHR_materials_emissive_strength extension),
