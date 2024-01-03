@@ -2,13 +2,14 @@
 //!
 //! This is mostly for rendering text.
 
+use crabslab::SlabItem;
 use glam::{Mat4, UVec2, Vec2, Vec4};
 use spirv_std::{image::Image2d, spirv, Sampler};
 
 /// A vertex in a mesh.
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[repr(C)]
-#[derive(Clone, Copy, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(Clone, Copy, PartialEq)]
 pub struct UiVertex {
     pub position: Vec2,
     pub uv: Vec2,
@@ -43,14 +44,14 @@ impl UiVertex {
 }
 
 #[repr(C)]
-#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(Clone, Copy, SlabItem)]
 pub struct UiConstants {
     pub canvas_size: UVec2,
     pub camera_translation: Vec2,
 }
 
 #[repr(transparent)]
-#[derive(Clone, Copy, Default, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
 pub struct UiMode(pub u32);
 
 impl UiMode {
@@ -59,7 +60,7 @@ impl UiMode {
 }
 
 #[repr(C)]
-#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
+#[derive(Clone, Copy)]
 pub struct UiDrawParams {
     pub translation: Vec2,
     pub scale: Vec2,

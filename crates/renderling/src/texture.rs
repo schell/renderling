@@ -552,8 +552,8 @@ impl Texture {
     /// Generate `mipmap_levels - 1` mipmaps for the given texture.
     ///
     /// ## Note
-    /// Ensure that `self` only has one mip level. If not it will try to sample from
-    /// an empty mip.
+    /// Ensure that `self` only has one mip level. If not it will try to sample
+    /// from an empty mip.
     pub fn generate_mips(
         &mut self,
         device: &wgpu::Device,
@@ -805,17 +805,17 @@ impl CopiedTextureBuffer {
         Ok(image::DynamicImage::from(img_buffer))
     }
 
-    /// Convert the post render buffer into an internal-format [`SceneImage`].
+    /// Convert the post render buffer into an internal-format [`AtlasImage`].
     pub fn into_scene_image(
         self,
         device: &wgpu::Device,
-    ) -> Result<crate::SceneImage, TextureError> {
+    ) -> Result<crate::AtlasImage, TextureError> {
         let pixels = self.pixels(device);
-        let img = crate::SceneImage {
+        let img = crate::AtlasImage {
             pixels,
             width: self.dimensions.width as u32,
             height: self.dimensions.height as u32,
-            format: crate::SceneImageFormat::from_wgpu_texture_format(self.format)
+            format: crate::AtlasImageFormat::from_wgpu_texture_format(self.format)
                 .context(UnsupportedFormatSnafu)?,
             apply_linear_transfer: false,
         };
@@ -826,17 +826,42 @@ impl CopiedTextureBuffer {
     ///
     /// Ensures that the pixels are in a linear color space by applying the
     /// linear transfer if the texture this buffer was copied from was sRGB.
-    pub fn into_rgba(self, device: &wgpu::Device) -> Result<image::RgbaImage, TextureError> {
+    pub fn into_linear_rgba(self, device: &wgpu::Device) -> Result<image::RgbaImage, TextureError> {
         let format = self.format;
         let mut img_buffer = self.into_image::<image::Rgba<u8>>(device)?.into_rgba8();
         if format.is_srgb() {
-            log::trace!("converting applying linear transfer to srgb pixels");
+            log::trace!(
+                "converting by applying linear transfer fn to srgb pixels (sRGB -> linear)"
+            );
             // Convert back to linear
             img_buffer.pixels_mut().for_each(|p| {
                 crate::color::linear_xfer_u8(&mut p.0[0]);
                 crate::color::linear_xfer_u8(&mut p.0[1]);
                 crate::color::linear_xfer_u8(&mut p.0[2]);
                 crate::color::linear_xfer_u8(&mut p.0[3]);
+            });
+        }
+
+        Ok(img_buffer)
+    }
+
+    /// Convert the post render buffer into an RgbaImage.
+    ///
+    /// Ensures that the pixels are in a linear color space by applying the
+    /// linear transfer if the texture this buffer was copied from was sRGB.
+    pub fn into_srgba(self, device: &wgpu::Device) -> Result<image::RgbaImage, TextureError> {
+        let format = self.format;
+        let mut img_buffer = self.into_image::<image::Rgba<u8>>(device)?.into_rgba8();
+        if !format.is_srgb() {
+            log::trace!(
+                "converting by applying opto transfer fn to linear pixels (linear -> sRGB)"
+            );
+            // Convert back to linear
+            img_buffer.pixels_mut().for_each(|p| {
+                crate::color::opto_xfer_u8(&mut p.0[0]);
+                crate::color::opto_xfer_u8(&mut p.0[1]);
+                crate::color::opto_xfer_u8(&mut p.0[2]);
+                crate::color::opto_xfer_u8(&mut p.0[3]);
             });
         }
 

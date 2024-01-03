@@ -10,6 +10,10 @@ struct Cli {
     #[clap(short, action = clap::ArgAction::Count)]
     verbosity: u8,
 
+    /// Directory containing the shader crate to compile.
+    #[clap(long, short, default_value = "renderling-shader")]
+    shader_crate: std::path::PathBuf,
+
     /// Path to the output directory for the compiled shaders.
     #[clap(long, short, default_value = "../crates/renderling/src/linkage")]
     output_dir: std::path::PathBuf,
@@ -18,6 +22,7 @@ struct Cli {
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let Cli {
         verbosity,
+        shader_crate,
         output_dir,
     } = Cli::parse();
     let level = match verbosity {
@@ -33,10 +38,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     std::fs::create_dir_all(&output_dir).unwrap();
 
+    let shader_crate = std::path::Path::new("../crates/").join(shader_crate);
+    assert!(
+        shader_crate.exists(),
+        "shader crate '{}' does not exist. Current dir is {}",
+        shader_crate.display(),
+        std::env::current_dir().unwrap().display()
+    );
+
     let CompileResult {
         entry_points,
         module,
-    } = SpirvBuilder::new("shader-crate", "spirv-unknown-vulkan1.2")
+    } = SpirvBuilder::new(shader_crate, "spirv-unknown-vulkan1.2")
         .print_metadata(MetadataPrintout::None)
         .multimodule(true)
         .build()?;

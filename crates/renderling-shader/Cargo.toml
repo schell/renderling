@@ -6,22 +6,25 @@ description = "Shared types and functions for renderling shaders compiled w/ rus
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[lib]
+crate-type = ["lib", "dylib"]
+
 [features]
 default = []
 
 [dependencies]
-bytemuck = { workspace = true }
-renderling-derive = { version = "0.1.0", path = "../renderling-derive" }
 spirv-std = "0.9"
 
 [target.'cfg(not(target_arch = "spirv"))'.dependencies]
-glam = { workspace = true, features = ["bytemuck"] }
+glam = { workspace = true, features = ["std"] }
+crabslab = { version = "0.1.0", path = "../crabslab" }
 
 [target.'cfg(not(target_arch = "spirv"))'.dev-dependencies]
-glam = { workspace = true, features = ["debug-glam-assert", "bytemuck"] }
+glam = { workspace = true, features = ["std", "debug-glam-assert"] }
 
 [target.'cfg(target_arch = "spirv")'.dependencies]
-glam = { version = "0.24.2", default-features = false, features = ["libm", "bytemuck"] }
+glam = { version = "0.24.2", default-features = false, features = ["libm"] }
+crabslab = { version = "0.1.0", path = "../crabslab", default-features = false, features = ["glam"] }
 
 [dev-dependencies]
 image = { workspace = true }

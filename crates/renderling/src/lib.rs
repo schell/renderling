@@ -18,12 +18,9 @@
 //! - forward+ style pipeline, configurable lighting model per material
 //!   - [ ] light tiling
 //!   - [ ] occlusion culling
-//!   - [x] physically based shading
-//!   - [x] user interface "colored text" shading (uses opacity glyphs in an
-//!     atlas)
-//!   - [x] no shading
-//! - [ ] gltf support
-//!   - [ ] scenes, nodes
+//!   - [x] physically based shading atlas)
+//! - [x] gltf support
+//!   - [x] scenes, nodes
 //!   - [x] cameras
 //!   - [x] meshes
 //!   - [x] materials
@@ -32,7 +29,7 @@
 //!   - [x] animations
 //! - [x] high definition rendering
 //! - [x] image based lighting
-//! - [x] bloom
+//! - [ ] bloom
 //! - [ ] ssao
 //! - [ ] depth of field
 //!
@@ -40,8 +37,9 @@
 //! You can also use the [shaders module](crate::shaders) without renderlings
 //! and manage your own resources for maximum flexibility.
 
+// TODO: Audit the API and make it more ergonomic/predictable.
+
 mod atlas;
-pub mod bloom;
 mod buffer_array;
 mod camera;
 pub mod cubemap;
@@ -52,32 +50,31 @@ mod linkage;
 pub mod math;
 pub mod mesh;
 mod renderer;
-mod scene;
 mod skybox;
-mod slab;
 mod stage;
 mod state;
-#[cfg(feature = "text")]
-mod text;
+//#[cfg(feature = "text")]
+//mod text;
 mod texture;
-mod tutorial;
-mod ui;
+mod tonemapping;
+//mod tutorial;
+//mod ui;
 mod uniform;
 
 pub use atlas::*;
 pub use buffer_array::*;
 pub use camera::*;
 pub use hdr::*;
+use image::GenericImageView;
 pub use renderer::*;
-pub use scene::*;
 pub use skybox::*;
-pub use slab::*;
 pub use stage::*;
 pub use state::*;
-#[cfg(feature = "text")]
-pub use text::*;
+//#[cfg(feature = "text")]
+//pub use text::*;
 pub use texture::*;
-pub use ui::*;
+pub use tonemapping::*;
+//pub use ui::*;
 pub use uniform::*;
 
 pub mod color;
@@ -95,102 +92,55 @@ pub mod graph {
     pub type RenderNode = Node<Function, TypeKey>;
 }
 
+pub use crabslab::*;
 pub use graph::{graph, Graph, GraphError, Move, View, ViewMut};
-pub use renderling_shader::id::{Id, ID_NONE};
 pub mod shader {
     //! Re-exports of [`renderling_shader`].
     pub use renderling_shader::*;
 }
 
-/// Set up the render graph, including:
-/// * 3d scene objects
-/// * skybox
-/// * bloom filter
-/// * hdr tonemapping
-/// * UI
+pub use renderling_shader::stage::{GpuEntityInfo, LightingModel};
+
+/// A CPU-side texture sampler.
 ///
-/// This is mostly for internal use. See [`Renderling::setup_render_graph`].
-pub fn setup_render_graph(
-    r: &mut Renderling,
-    scene: Scene,
-    ui_scene: UiScene,
-    ui_objects: impl IntoIterator<Item = UiDrawObject>,
-    with_screen_capture: bool,
-    with_bloom: bool,
-) {
-    // add resources
-    let ui_objects = UiDrawObjects(ui_objects.into_iter().collect::<Vec<_>>());
-    r.graph.add_resource(ui_scene);
-    r.graph.add_resource(ui_objects);
-    r.graph.add_resource(scene);
-    let ui_pipeline = UiRenderPipeline(
-        r.graph
-            .visit(|(device, target): (View<Device>, View<RenderTarget>)| {
-                create_ui_pipeline(&device, target.format())
-            })
-            .unwrap(),
-    );
-    r.graph.add_resource(ui_pipeline);
+/// Provided primarily for testing purposes.
+#[derive(Debug, Clone, Copy)]
+pub struct CpuSampler;
 
-    let (hdr_surface,) = r
-        .graph
-        .visit(hdr::create_hdr_render_surface)
-        .unwrap()
-        .unwrap();
-    let device = r.get_device();
-    let queue = r.get_queue();
-    let hdr_texture_format = hdr_surface.hdr_texture.texture.format();
-    let size = hdr_surface.hdr_texture.texture.size();
-    let scene_render_pipeline =
-        SceneRenderPipeline(create_scene_render_pipeline(device, hdr_texture_format));
-    let compute_cull_pipeline =
-        SceneComputeCullPipeline(create_scene_compute_cull_pipeline(device));
-    let skybox_pipeline = crate::skybox::create_skybox_render_pipeline(device, hdr_texture_format);
-    let mut bloom = crate::bloom::BloomFilter::new(device, queue, size.width, size.height);
-    bloom.on = with_bloom;
-    r.graph.add_resource(scene_render_pipeline);
-    r.graph.add_resource(hdr_surface);
-    r.graph.add_resource(compute_cull_pipeline);
-    r.graph.add_resource(skybox_pipeline);
-    r.graph.add_resource(bloom);
+impl crate::shader::IsSampler for CpuSampler {}
 
-    // pre-render subgraph
-    use frame::{clear_depth, create_frame, present};
+#[derive(Debug)]
+pub struct CpuTexture2d {
+    pub image: image::DynamicImage,
+}
 
-    #[cfg(not(target_arch = "wasm32"))]
-    let scene_cull = scene_cull_gpu;
-    #[cfg(target_arch = "wasm32")]
-    let scene_cull = scene_cull_cpu;
-    r.graph
-        .add_subgraph(graph!(
-            create_frame,
-            clear_surface_hdr_and_depth,
-            hdr_surface_update,
-            scene_update < scene_cull,
-            ui_scene_update
-        ))
-        .add_barrier();
+impl crate::shader::Sample2d for CpuTexture2d {
+    type Sampler = CpuSampler;
 
-    // render subgraph
-    use crate::bloom::bloom_filter;
-    r.graph
-        .add_subgraph(graph!(
-            scene_render
-                < skybox_render
-                < bloom_filter
-                < tonemapping
-                < clear_depth
-                < ui_scene_render
-        ))
-        .add_barrier();
+    fn sample_by_lod(&self, _sampler: Self::Sampler, uv: glam::Vec2, _lod: f32) -> glam::Vec4 {
+        // TODO: lerp the CPU texture sampling
+        let image::Rgba([r, g, b, a]) = self.image.get_pixel(uv.x as u32, uv.y as u32);
+        glam::Vec4::new(
+            r as f32 / 255.0,
+            g as f32 / 255.0,
+            b as f32 / 255.0,
+            a as f32 / 255.0,
+        )
+    }
+}
 
-    // post-render subgraph
-    r.graph.add_subgraph(if with_screen_capture {
-        use crate::frame::copy_frame_to_post;
-        graph!(copy_frame_to_post < present)
-    } else {
-        graph!(present)
-    });
+/// A CPU-side cubemap texture.
+///
+/// Provided primarily for testing purposes.
+pub struct CpuCubemap;
+
+impl crate::shader::SampleCube for CpuCubemap {
+    type Sampler = CpuSampler;
+
+    fn sample_by_lod(&self, _sampler: Self::Sampler, _uv: glam::Vec3, _lod: f32) -> glam::Vec4 {
+        // TODO: implement CPU-side cubemap sampling
+        glam::Vec4::ONE
+    }
 }
 
 #[cfg(test)]
@@ -210,10 +160,13 @@ fn init_logging() {
 #[cfg(test)]
 mod test {
     use super::*;
-    use glam::{Mat3, Mat4, Quat, UVec2, Vec2, Vec3, Vec4};
-    use moongraph::View;
+    use glam::{Mat3, Mat4, Quat, Vec2, Vec3, Vec4};
     use pretty_assertions::assert_eq;
-    use renderling_shader::stage::{DrawIndirect, GpuEntity, Vertex};
+    use renderling_shader::{
+        gltf as gl,
+        pbr::PbrMaterial,
+        stage::{light::*, Camera, RenderUnit, Transform, Vertex},
+    };
 
     #[test]
     fn sanity_transmute() {
@@ -247,53 +200,80 @@ mod test {
         ]
     }
 
-    struct CmyTri {
-        ui: Renderling,
-        tri: GpuEntity,
-    }
-
-    fn cmy_triangle_setup() -> CmyTri {
+    #[test]
+    // This tests our ability to draw a CMYK triangle in the top left corner.
+    fn cmy_triangle_sanity() {
         let mut r = Renderling::headless(100, 100).with_background_color(Vec4::splat(1.0));
+        let mut stage = r.new_stage();
+        stage.configure_graph(&mut r, true);
         let (projection, view) = default_ortho2d(100.0, 100.0);
-        let mut builder = r.new_scene().with_camera(projection, view);
-        let tri = builder
-            .new_entity()
-            .with_meshlet(right_tri_vertices())
+        let camera = stage.append(&Camera {
+            projection,
+            view,
+            ..Default::default()
+        });
+        let mesh = stage
+            .new_mesh()
+            .with_primitive(right_tri_vertices(), [], Id::NONE)
             .build();
-        let scene = builder.build().unwrap();
-        r.setup_render_graph(RenderGraphConfig {
-            scene: Some(scene),
-            with_screen_capture: true,
-            with_bloom: false,
+        let mesh = stage.append(&mesh);
+        let node = stage.append(&gl::GltfNode {
+            mesh,
+            ..Default::default()
+        });
+        let node_path = stage.append_array(&[node]);
+        let _tri = stage.draw_unit(&RenderUnit {
+            camera,
+            node_path,
+            vertex_count: 3,
             ..Default::default()
         });
 
-        CmyTri { ui: r, tri }
-    }
-
-    #[test]
-    fn cmy_triangle_sanity() {
-        let mut c = cmy_triangle_setup();
-        let img = c.ui.render_image().unwrap();
+        let img = r.render_image().unwrap();
         img_diff::assert_img_eq("cmy_triangle.png", img);
     }
 
     #[test]
+    // This tests our ability to update the transform of a `RenderUnit` after it
+    // has already been sent to the GPU.
+    // We do this by writing over the previous transform in the stage.
     fn cmy_triangle_update_transform() {
-        let mut c = cmy_triangle_setup();
-        let _ = c.ui.render_image().unwrap();
+        let mut r = Renderling::headless(100, 100).with_background_color(Vec4::splat(1.0));
+        let mut stage = r.new_stage();
+        stage.configure_graph(&mut r, true);
+        let (projection, view) = default_ortho2d(100.0, 100.0);
+        let camera = stage.append(&Camera::new(projection, view));
+        let mesh = stage
+            .new_mesh()
+            .with_primitive(right_tri_vertices(), [], Id::NONE)
+            .build();
+        let mesh = stage.append(&mesh);
+        let node = stage.append(&gl::GltfNode {
+            mesh,
+            ..Default::default()
+        });
+        let transform = stage.append(&Transform::default());
+        let node_path = stage.append_array(&[node]);
+        let _tri = stage.draw_unit(&RenderUnit {
+            camera,
+            node_path,
+            vertex_count: 3,
+            transform,
+            ..Default::default()
+        });
 
-        let mut tri = c.tri;
-        tri.position = Vec4::new(100.0, 0.0, 0.0, 0.0);
-        tri.rotation = Quat::from_axis_angle(Vec3::Z, std::f32::consts::FRAC_PI_2);
-        tri.scale = Vec4::new(0.5, 0.5, 1.0, 0.0);
-        c.ui.graph
-            .visit(|mut scene: ViewMut<Scene>| {
-                scene.update_entity(tri).unwrap();
-            })
-            .unwrap();
+        let _ = r.render_image().unwrap();
 
-        let img = c.ui.render_image().unwrap();
+        stage.write(
+            transform,
+            &Transform {
+                translation: Vec3::new(100.0, 0.0, 0.0),
+                rotation: Quat::from_axis_angle(Vec3::Z, std::f32::consts::FRAC_PI_2),
+                scale: Vec3::new(0.5, 0.5, 1.0),
+            },
+        );
+
+        let img = r.render_image().unwrap();
         img_diff::assert_img_eq("cmy_triangle_update_transform.png", img);
     }
 
@@ -336,143 +316,174 @@ mod test {
             .collect()
     }
 
-    fn gpu_pyramid_vertices() -> Vec<Vertex> {
-        let vertices = pyramid_points();
-        let indices = pyramid_indices();
-        indices
-            .into_iter()
-            .map(|i| cmy_gpu_vertex(vertices[i as usize]))
-            .collect()
-    }
-
     #[test]
+    // Tests our ability to draw a CMYK cube.
     fn cmy_cube_sanity() {
         let mut r = Renderling::headless(100, 100).with_background_color(Vec4::splat(1.0));
-        let mut builder = r.new_scene().with_camera(
-            Mat4::perspective_rh(std::f32::consts::PI / 4.0, 1.0, 0.1, 100.0),
-            Mat4::look_at_rh(Vec3::new(0.0, 12.0, 20.0), Vec3::ZERO, Vec3::Y),
-        );
-
-        let _cube = builder
-            .new_entity()
-            .with_meshlet(gpu_cube_vertices())
-            .with_scale(Vec3::new(6.0, 6.0, 6.0))
-            .with_rotation(Quat::from_axis_angle(Vec3::Y, -std::f32::consts::FRAC_PI_4))
+        let mut stage = r.new_stage();
+        stage.configure_graph(&mut r, true);
+        let camera_position = Vec3::new(0.0, 12.0, 20.0);
+        let camera = stage.append(&Camera {
+            projection: Mat4::perspective_rh(std::f32::consts::PI / 4.0, 1.0, 0.1, 100.0),
+            view: Mat4::look_at_rh(camera_position, Vec3::ZERO, Vec3::Y),
+            position: camera_position,
+        });
+        let vertices = gpu_cube_vertices();
+        let vertex_count = vertices.len() as u32;
+        let mesh = stage
+            .new_mesh()
+            .with_primitive(vertices, [], Id::NONE)
             .build();
-        let scene = builder.build().unwrap();
-
-        r.setup_render_graph(RenderGraphConfig {
-            scene: Some(scene),
-            with_screen_capture: true,
-            with_bloom: false,
+        let mesh = stage.append(&mesh);
+        let node = stage.append(&gl::GltfNode {
+            mesh,
+            ..Default::default()
+        });
+        let node_path = stage.append_array(&[node]);
+        let transform = Transform {
+            scale: Vec3::new(6.0, 6.0, 6.0),
+            rotation: Quat::from_axis_angle(Vec3::Y, -std::f32::consts::FRAC_PI_4),
+            ..Default::default()
+        };
+        let transform = stage.append(&transform);
+        let _cube = stage.draw_unit(&RenderUnit {
+            camera,
+            vertex_count,
+            node_path,
+            transform,
             ..Default::default()
         });
         let img = r.render_image().unwrap();
-        img_diff::assert_img_eq("cmy_cube.png", img);
+        img_diff::assert_img_eq("cmy_cube/sanity.png", img);
     }
 
     #[test]
+    // Test our ability to create two cubes and toggle the visibility of one of
+    // them.
     fn cmy_cube_visible() {
         let mut r = Renderling::headless(100, 100).with_background_color(Vec4::splat(1.0));
-
+        let mut stage = r.new_stage();
+        stage.configure_graph(&mut r, true);
         let (projection, view) = camera::default_perspective(100.0, 100.0);
-        let mut builder = r.new_scene().with_camera(projection, view);
-
-        let _cube_one = builder
-            .new_entity()
-            .with_meshlet(gpu_cube_vertices())
-            .with_position(Vec3::new(-4.5, 0.0, 0.0))
-            .with_scale(Vec3::new(6.0, 6.0, 6.0))
-            .with_rotation(Quat::from_axis_angle(Vec3::Y, -std::f32::consts::FRAC_PI_4))
-            .build();
-
-        let mut cube_two = builder
-            .new_entity()
-            .with_meshlet(gpu_cube_vertices())
-            .with_position(Vec3::new(4.5, 0.0, 0.0))
-            .with_scale(Vec3::new(6.0, 6.0, 6.0))
-            .with_rotation(Quat::from_axis_angle(Vec3::Y, std::f32::consts::FRAC_PI_4))
-            .build();
-
-        let scene = builder.build().unwrap();
-        r.setup_render_graph(RenderGraphConfig {
-            scene: Some(scene),
-            with_screen_capture: true,
-            with_bloom: false,
+        let camera = stage.append(&Camera {
+            projection,
+            view,
             ..Default::default()
         });
+        let vertices = gpu_cube_vertices();
+        let vertex_count = vertices.len() as u32;
+        let mesh = stage
+            .new_mesh()
+            .with_primitive(vertices, [], Id::NONE)
+            .build();
+        let mesh = stage.append(&mesh);
+        let node = stage.append(&gl::GltfNode {
+            mesh,
+            ..Default::default()
+        });
+        let mut render_unit = RenderUnit {
+            camera,
+            vertex_count,
+            node_path: stage.append_array(&[node]),
+            transform: stage.append(&Transform {
+                translation: Vec3::new(-4.5, 0.0, 0.0),
+                scale: Vec3::new(6.0, 6.0, 6.0),
+                rotation: Quat::from_axis_angle(Vec3::Y, -std::f32::consts::FRAC_PI_4),
+            }),
+            ..Default::default()
+        };
+        let _cube_one = stage.draw_unit(&render_unit);
+        render_unit.transform = stage.append(&Transform {
+            translation: Vec3::new(4.5, 0.0, 0.0),
+            scale: Vec3::new(6.0, 6.0, 6.0),
+            rotation: Quat::from_axis_angle(Vec3::Y, std::f32::consts::FRAC_PI_4),
+        });
+        let cube_two = stage.draw_unit(&render_unit);
 
         // we should see two colored cubes
         let img = r.render_image().unwrap();
-        img_diff::assert_img_eq("cmy_cube_visible_before.png", img.clone());
+        img_diff::assert_img_eq("cmy_cube/visible_before.png", img.clone());
         let img_before = img;
 
-        // update cube two making in invisible
-        r.graph
-            .visit(|mut scene: ViewMut<Scene>| {
-                cube_two.visible = 0;
-                scene.update_entity(cube_two).unwrap();
-            })
-            .unwrap();
+        // update cube two making it invisible
+        stage.hide_unit(cube_two);
 
-        // we should see one colored cube
+        // we should see only one colored cube
         let img = r.render_image().unwrap();
-        img_diff::assert_img_eq("cmy_cube_visible_after.png", img);
+        img_diff::assert_img_eq("cmy_cube/visible_after.png", img);
 
         // update cube two making in visible again
-        r.graph
-            .visit(|mut scene: ViewMut<Scene>| {
-                cube_two.visible = 1;
-                scene.update_entity(cube_two).unwrap();
-            })
-            .unwrap();
+        stage.show_unit(cube_two);
 
         // we should see two colored cubes again
         let img = r.render_image().unwrap();
-        img_diff::assert_eq("cmy_cube_visible_before_again.png", img_before, img);
+        img_diff::assert_eq("cmy_cube/visible_before_again.png", img_before, img);
     }
 
     #[test]
+    // Tests the ability to specify indexed vertices, as well as the ability to
+    // update a field within a struct stored on the slab by offset.
     fn cmy_cube_remesh() {
         let mut r = Renderling::headless(100, 100).with_background_color(Vec4::splat(1.0));
+        let mut stage = r.new_stage().with_lighting(false);
+        stage.configure_graph(&mut r, true);
         let (projection, view) = camera::default_perspective(100.0, 100.0);
-        let mut builder = r
-            .new_scene()
-            .with_camera(projection, view)
-            .with_lighting(false);
-
-        let (pyramid_start, pyramid_count) = builder.add_meshlet(gpu_pyramid_vertices());
-
-        let mut cube = builder
-            .new_entity()
-            .with_meshlet(gpu_cube_vertices())
-            .with_scale(Vec3::new(10.0, 10.0, 10.0))
+        let camera = stage.append(&Camera {
+            projection,
+            view,
+            ..Default::default()
+        });
+        let pyramid_vertices = pyramid_points().map(cmy_gpu_vertex);
+        let pyramid_indices = pyramid_indices().map(|i| i as u32);
+        let _pyramid_vertex_count = pyramid_indices.len();
+        let pyramid_mesh = stage
+            .new_mesh()
+            .with_primitive(pyramid_vertices, pyramid_indices, Id::NONE)
             .build();
+        let mesh = stage.append(&pyramid_mesh);
+        let pyramid_node = stage.append(&gl::GltfNode {
+            mesh,
+            ..Default::default()
+        });
+        let pyramid_node_path = stage.append_array(&[pyramid_node]);
 
-        let scene = builder.build().unwrap();
-        r.setup_render_graph(RenderGraphConfig {
-            scene: Some(scene),
-            with_screen_capture: true,
-            with_bloom: false,
+        let cube_vertices = renderling_shader::math::UNIT_POINTS.map(cmy_gpu_vertex);
+        let cube_indices = renderling_shader::math::UNIT_INDICES.map(|i| i as u32);
+        let cube_vertex_count = cube_indices.len();
+        let cube_mesh = stage
+            .new_mesh()
+            .with_primitive(cube_vertices, cube_indices, Id::NONE)
+            .build();
+        let mesh = stage.append(&cube_mesh);
+        let cube_node = stage.append(&gl::GltfNode {
+            mesh,
+            ..Default::default()
+        });
+        let node_path = stage.append_array(&[cube_node]);
+        let transform = stage.append(&Transform {
+            scale: Vec3::new(10.0, 10.0, 10.0),
             ..Default::default()
         });
 
-        // we should see a cube
-        let img = r.render_image().unwrap();
-        img_diff::assert_img_eq("cmy_cube_remesh_before.png", img);
+        let cube = stage.draw_unit(&RenderUnit {
+            camera,
+            vertex_count: cube_vertex_count as u32,
+            node_path,
+            transform,
+            ..Default::default()
+        });
 
-        // update the cube mesh to a pyramid
-        r.graph
-            .visit(|mut scene: ViewMut<Scene>| {
-                cube.mesh_first_vertex = pyramid_start;
-                cube.mesh_vertex_count = pyramid_count;
-                scene.update_entity(cube).unwrap();
-            })
-            .unwrap();
-
-        // we should see a pyramid
+        // we should see a cube (in sRGB color space)
         let img = r.render_image().unwrap();
-        img_diff::assert_img_eq("cmy_cube_remesh_after.png", img);
+        img_diff::assert_img_eq("cmy_cube/remesh_before.png", img);
+
+        // Update the cube mesh to a pyramid by overwriting the `.node_path` field
+        // of `RenderUnit`
+        stage.write(cube + RenderUnit::offset_of_node_path(), &pyramid_node_path);
+
+        // we should see a pyramid (in sRGB color space)
+        let img = r.render_image().unwrap();
+        img_diff::assert_img_eq("cmy_cube/remesh_after.png", img);
     }
 
     fn gpu_uv_unit_cube() -> Vec<Vertex> {
@@ -522,50 +533,60 @@ mod test {
     }
 
     #[test]
-    // tests that updating the material actually updates the rendering of an unlit
+    // Tests that updating the material actually updates the rendering of an unlit
     // mesh
     fn unlit_textured_cube_material() {
         let mut r = Renderling::headless(100, 100).with_background_color(Vec4::splat(0.0));
-        let (proj, view) = camera::default_perspective(100.0, 100.0);
-        let mut builder = r.new_scene().with_camera(proj, view);
-        let sandstone = SceneImage::from(image::open("../../img/sandstone.png").unwrap());
-        let sandstone_id = builder.add_image_texture(sandstone);
-        let dirt = SceneImage::from(image::open("../../img/dirt.jpg").unwrap());
-        let dirt_id = builder.add_image_texture(dirt);
-
-        let material_id = builder.add_material(PbrMaterial {
-            albedo_texture: sandstone_id,
+        let mut stage = r.new_stage();
+        stage.configure_graph(&mut r, true);
+        let (projection, view) = camera::default_perspective(100.0, 100.0);
+        let camera = stage.append(&Camera {
+            projection,
+            view,
+            ..Default::default()
+        });
+        let sandstone = AtlasImage::from(image::open("../../img/sandstone.png").unwrap());
+        let dirt = AtlasImage::from(image::open("../../img/dirt.jpg").unwrap());
+        let textures = stage.set_images([sandstone, dirt]).unwrap();
+        let sandstone_tex = textures[0];
+        let dirt_tex = textures[1];
+        let sandstone_tex_id = stage.append(&sandstone_tex);
+        let material_id = stage.append(&PbrMaterial {
+            albedo_texture: sandstone_tex_id,
             lighting_model: LightingModel::NO_LIGHTING,
             ..Default::default()
         });
-        let mut material = builder.materials.get(material_id.index()).copied().unwrap();
-        let _cube = builder
-            .new_entity()
-            .with_material(material_id)
-            .with_meshlet(gpu_uv_unit_cube())
-            .with_scale(Vec3::new(10.0, 10.0, 10.0))
+        let vertices = gpu_uv_unit_cube();
+        let vertex_count = vertices.len() as u32;
+        let mesh = stage
+            .new_mesh()
+            .with_primitive(vertices, [], material_id)
             .build();
-        let scene = builder.build().unwrap();
-        r.setup_render_graph(RenderGraphConfig {
-            scene: Some(scene),
-            with_screen_capture: true,
-            with_bloom: false,
+        let mesh = stage.append(&mesh);
+        let node = stage.append(&gl::GltfNode {
+            mesh,
             ..Default::default()
         });
+        let node_path = stage.append_array(&[node]);
+        let transform = stage.append(&Transform {
+            scale: Vec3::new(10.0, 10.0, 10.0),
+            ..Default::default()
+        });
+        let cube = stage.draw_unit(&RenderUnit {
+            camera,
+            node_path,
+            transform,
+            vertex_count,
+            ..Default::default()
+        });
+        println!("cube: {cube:?}");
+
         // we should see a cube with a stoney texture
         let img = r.render_image().unwrap();
         img_diff::assert_img_eq("unlit_textured_cube_material_before.png", img);
 
         // update the material's texture on the GPU
-        r.graph
-            .visit(|mut scene: ViewMut<Scene>| {
-                material.albedo_texture = dirt_id;
-                let _ = scene
-                    .materials
-                    .overwrite(material_id.index(), vec![material])
-                    .unwrap();
-            })
-            .unwrap();
+        stage.write(sandstone_tex_id, &dirt_tex);
 
         // we should see a cube with a dirty texture
         let img = r.render_image().unwrap();
@@ -573,611 +594,116 @@ mod test {
     }
 
     #[test]
-    fn gpu_array_update() {
-        let (_, device, queue, _) =
-            futures_lite::future::block_on(crate::state::new_adapter_device_queue_and_target(
-                100,
-                100,
-                None as Option<CreateSurfaceFn>,
-            ))
-            .unwrap();
-
-        let points = vec![
-            Vec4::new(0.0, 0.0, 0.0, 0.0),
-            Vec4::new(1.0, 0.0, 0.0, 0.0),
-            Vec4::new(1.0, 1.0, 0.0, 0.0),
-        ];
-        let mut array = BufferArray::new_gpu(
-            &device,
-            &points,
-            6,
-            wgpu::BufferUsages::STORAGE
-                | wgpu::BufferUsages::COPY_DST
-                | wgpu::BufferUsages::COPY_SRC,
-        );
-
-        // send them to the GPU
-        array.update(&queue);
-        // read them back
-        let verts = futures_lite::future::block_on(array.read_gpu(&device, &queue, 0, 3)).unwrap();
-
-        println!("{verts:#?}");
-        assert_eq!(points, verts);
-
-        let additions = vec![Vec4::splat(1.0), Vec4::splat(2.0)];
-        let (start_index, len) = array.overwrite(2, additions.clone()).unwrap();
-        assert_eq!((2, 2), (start_index, len));
-
-        array.update(&queue);
-        let verts = futures_lite::future::block_on(array.read_gpu(&device, &queue, 0, 4)).unwrap();
-        let all_points = points[0..2]
-            .into_iter()
-            .copied()
-            .chain(additions)
-            .collect::<Vec<_>>();
-        assert_eq!(all_points, verts);
-
-        let (start, len) = array.extend(vec![Vec4::Y, Vec4::Z]).unwrap();
-        assert_eq!((4, 2), (start, len));
-    }
-
-    #[test]
-    fn gpu_scene_sanity1() {
+    // Ensures that we can render multiple nodes with mesh primitives
+    // that share the same buffer and geometry but have different materials.
+    fn multi_node_scene() {
         let mut r =
             Renderling::headless(100, 100).with_background_color(Vec3::splat(0.0).extend(1.0));
-        let mut builder = r.new_scene();
-
-        let verts = vec![
-            Vertex {
-                position: Vec4::new(0.0, 0.0, 0.0, 1.0),
-                color: Vec4::new(1.0, 1.0, 0.0, 1.0),
-                ..Default::default()
-            },
-            Vertex {
-                position: Vec4::new(100.0, 100.0, 0.0, 1.0),
-                color: Vec4::new(0.0, 1.0, 1.0, 1.0),
-                ..Default::default()
-            },
-            Vertex {
-                position: Vec4::new(100.0, 0.0, 0.0, 1.0),
-                color: Vec4::new(1.0, 0.0, 1.0, 1.0),
-                ..Default::default()
-            },
-        ];
-
-        let ent = builder.new_entity().with_meshlet(verts.clone()).build();
-
-        let mut scene = builder.build().unwrap();
+        let mut stage = r.new_stage();
+        stage.configure_graph(&mut r, true);
 
         let (projection, view) = camera::default_ortho2d(100.0, 100.0);
-        scene.set_camera(projection, view);
-
-        r.setup_render_graph(RenderGraphConfig {
-            scene: Some(scene),
-            with_screen_capture: true,
+        let camera = stage.append(&Camera {
+            projection,
+            view,
             ..Default::default()
         });
 
-        r.graph.visit(scene::scene_update).unwrap().unwrap();
-        r.graph.visit(scene::scene_cull_gpu).unwrap().unwrap();
-
-        let (constants, gpu_verts, ents, indirect) = r
-            .graph
-            .visit(
-                |(scene, device, queue): (View<Scene>, View<Device>, View<Queue>)| {
-                    let constants =
-                        futures_lite::future::block_on(crate::read_buffer::<GpuConstants>(
-                            &device,
-                            &queue,
-                            &scene.constants.buffer(),
-                            0,
-                            1,
-                        ))
-                        .unwrap();
-                    let vertices = futures_lite::future::block_on(
-                        scene.vertices.read_gpu(&device, &queue, 0, 3),
-                    )
-                    .unwrap();
-                    let entities = futures_lite::future::block_on(scene.entities.read_gpu(
-                        &device,
-                        &queue,
-                        0,
-                        scene.entities.capacity(),
-                    ))
-                    .unwrap();
-                    let indirect = if scene.entities.capacity() > 0 {
-                        futures_lite::future::block_on(scene.indirect_draws.read_gpu(
-                            &device,
-                            &queue,
-                            0,
-                            scene.entities.capacity(),
-                        ))
-                        .unwrap()
-                    } else {
-                        vec![]
-                    };
-                    (constants[0], vertices, entities, indirect)
-                },
-            )
-            .unwrap();
-        assert_eq!(constants.camera_projection, projection);
-        assert_eq!(constants.camera_view, view);
-        assert_eq!(verts, gpu_verts);
-        assert_eq!(vec![ent], ents);
-        assert_eq!(
-            vec![DrawIndirect {
-                vertex_count: 3,
-                instance_count: 1,
-                base_vertex: 0,
-                base_instance: 0
-            },],
-            indirect
-        );
-
-        let img = r.render_image().unwrap();
-        img_diff::assert_img_eq("gpu_scene_sanity.png", img);
-    }
-
-    #[test]
-    fn gpu_scene_sanity2() {
-        let mut r =
-            Renderling::headless(100, 100).with_background_color(Vec3::splat(0.0).extend(1.0));
-        let (projection, view) = camera::default_ortho2d(100.0, 100.0);
-        let mut builder = r.new_scene().with_camera(projection, view);
         // now test the textures functionality
-        let img = image::io::Reader::open("../../img/cheetah.jpg")
-            .unwrap()
-            .decode()
-            .unwrap();
-        let tex_id = builder.add_image_texture(img);
-        assert_eq!(Id::new(0), tex_id);
-        let material = builder.add_material(PbrMaterial {
-            albedo_texture: tex_id,
+        let img = AtlasImage::from_path("../../img/cheetah.jpg").unwrap();
+        let textures = stage.set_images([img]).unwrap();
+        let textures = stage.append_array(&textures);
+        let cheetah_material = stage.append(&PbrMaterial {
+            albedo_texture: textures.at(0),
             lighting_model: LightingModel::NO_LIGHTING,
             ..Default::default()
         });
 
-        let verts = vec![
-            Vertex {
-                position: Vec4::new(0.0, 0.0, 0.0, 0.0),
-                color: Vec4::new(1.0, 1.0, 0.0, 1.0),
-                uv: Vec4::new(0.0, 0.0, 0.0, 0.0),
-                ..Default::default()
-            },
-            Vertex {
-                position: Vec4::new(100.0, 100.0, 0.0, 0.0),
-                color: Vec4::new(0.0, 1.0, 1.0, 1.0),
-                uv: Vec4::new(1.0, 1.0, 1.0, 1.0),
-                ..Default::default()
-            },
-            Vertex {
-                position: Vec4::new(100.0, 0.0, 0.0, 0.0),
-                color: Vec4::new(1.0, 0.0, 1.0, 1.0),
-                uv: Vec4::new(1.0, 0.0, 1.0, 0.0),
-                ..Default::default()
-            },
-        ];
-        let ent = builder
-            .new_entity()
-            .with_meshlet(verts.clone())
-            .with_material(material)
-            .with_position(Vec3::new(15.0, 35.0, 0.5))
-            .with_scale(Vec3::new(0.5, 0.5, 1.0))
-            .build();
-
-        assert_eq!(Id::new(0), ent.id);
-        assert_eq!(
-            GpuEntity {
-                id: Id::new(0),
-                mesh_first_vertex: 0,
-                mesh_vertex_count: 3,
-                material: Id::new(0),
-                position: Vec4::new(15.0, 35.0, 0.5, 0.0),
-                scale: Vec4::new(0.5, 0.5, 1.0, 1.0),
-                ..Default::default()
-            },
-            ent
+        let cheetah_primitive = stage.new_primitive(
+            vec![
+                Vertex {
+                    position: Vec4::new(0.0, 0.0, 0.0, 0.0),
+                    color: Vec4::new(1.0, 1.0, 0.0, 1.0),
+                    uv: Vec4::new(0.0, 0.0, 0.0, 0.0),
+                    ..Default::default()
+                },
+                Vertex {
+                    position: Vec4::new(100.0, 100.0, 0.0, 0.0),
+                    color: Vec4::new(0.0, 1.0, 1.0, 1.0),
+                    uv: Vec4::new(1.0, 1.0, 1.0, 1.0),
+                    ..Default::default()
+                },
+                Vertex {
+                    position: Vec4::new(100.0, 0.0, 0.0, 0.0),
+                    color: Vec4::new(1.0, 0.0, 1.0, 1.0),
+                    uv: Vec4::new(1.0, 0.0, 1.0, 0.0),
+                    ..Default::default()
+                },
+            ],
+            [],
+            cheetah_material,
         );
+        let color_primitive = {
+            let mut prim = cheetah_primitive;
+            prim.material = Id::NONE;
+            prim
+        };
+        let _unit = {
+            let primitives = stage.append_array(&[color_primitive]);
+            let mesh = stage.append(&gl::GltfMesh {
+                primitives,
+                ..Default::default()
+            });
+            let node = stage.append(&gl::GltfNode {
+                mesh,
+                ..Default::default()
+            });
+            let node_path = stage.append_array(&[node]);
 
-        let ent = builder.new_entity().with_meshlet(verts.clone()).build();
-        assert_eq!(Id::new(1), ent.id);
-
-        let scene = builder.build().unwrap();
-        assert_eq!(2, scene.entities.len());
-
-        let textures = scene.atlas.frames().collect::<Vec<_>>();
-        assert_eq!(1, textures.len());
-        assert_eq!(0, textures[0].0);
-        assert_eq!(UVec2::splat(170), textures[0].1 .1);
-
-        r.setup_render_graph(RenderGraphConfig {
-            scene: Some(scene),
-            with_screen_capture: true,
-            ..Default::default()
-        });
+            stage.draw_unit(&RenderUnit {
+                camera,
+                vertex_count: cheetah_primitive.vertex_count,
+                node_path,
+                ..Default::default()
+            })
+        };
+        let _cheetah_unit = {
+            let primitives = stage.append_array(&[cheetah_primitive]);
+            let mesh = stage.append(&gl::GltfMesh {
+                primitives,
+                ..Default::default()
+            });
+            let node = stage.append(&gl::GltfNode {
+                mesh,
+                ..Default::default()
+            });
+            let node_path = stage.append_array(&[node]);
+            let transform = stage.append(&Transform {
+                translation: Vec3::new(15.0, 35.0, 0.5),
+                scale: Vec3::new(0.5, 0.5, 1.0),
+                ..Default::default()
+            });
+            stage.draw_unit(&RenderUnit {
+                camera,
+                transform,
+                vertex_count: cheetah_primitive.vertex_count,
+                node_path,
+                ..Default::default()
+            })
+        };
 
         let img = r.render_image().unwrap();
-
-        let scene = r.graph.get_resource::<Scene>().unwrap().unwrap();
-        let draws = futures_lite::future::block_on(scene.indirect_draws.read_gpu(
-            r.get_device(),
-            r.get_queue(),
-            0,
-            2,
-        ))
-        .unwrap();
-        assert_eq!(
-            vec![
-                DrawIndirect {
-                    vertex_count: 3,
-                    instance_count: 1,
-                    base_vertex: 0,
-                    base_instance: 0
-                },
-                DrawIndirect {
-                    vertex_count: 3,
-                    instance_count: 1,
-                    base_vertex: 3,
-                    base_instance: 1
-                }
-            ],
-            draws
-        );
-        let constants: GpuConstants = futures_lite::future::block_on(read_buffer(
-            r.get_device(),
-            r.get_queue(),
-            &scene.constants.buffer(),
-            0,
-            1,
-        ))
-        .unwrap()[0];
-        assert_eq!(UVec2::splat(256), constants.atlas_size);
-
-        let materials = futures_lite::future::block_on(scene.materials.read_gpu(
-            r.get_device(),
-            r.get_queue(),
-            0,
-            1,
-        ))
-        .unwrap();
-        assert_eq!(
-            vec![PbrMaterial {
-                albedo_texture: Id::new(0),
-                lighting_model: LightingModel::NO_LIGHTING,
-                ..Default::default()
-            },],
-            materials
-        );
 
         img_diff::assert_img_eq("gpu_scene_sanity2.png", img);
     }
 
     #[test]
-    fn atlas_uv_mapping() {
-        let mut r =
-            Renderling::headless(32, 32).with_background_color(Vec3::splat(0.0).extend(1.0));
-        let (projection, view) = camera::default_ortho2d(32.0, 32.0);
-        let mut builder = r.new_scene().with_camera(projection, view);
-        let dirt = image::open("../../img/dirt.jpg").unwrap();
-        let dirt = builder.add_image(dirt);
-        println!("dirt: {dirt}");
-        let sandstone = image::open("../../img/sandstone.png").unwrap();
-        let sandstone = builder.add_image(sandstone);
-        println!("sandstone: {sandstone}");
-        let texels = image::open("../../test_img/atlas_uv_mapping.png").unwrap();
-        let texels_index = builder.add_image(texels);
-        println!("atlas_uv_mapping: {texels_index}");
-        let texture_id = builder.add_texture(TextureParams {
-            image_index: texels_index,
-            mode_s: TextureAddressMode::CLAMP_TO_EDGE,
-            mode_t: TextureAddressMode::CLAMP_TO_EDGE,
-        });
-        let material_id = builder.add_material(PbrMaterial {
-            albedo_texture: texture_id,
-            lighting_model: LightingModel::NO_LIGHTING,
-            ..Default::default()
-        });
-        let _ = builder
-            .new_entity()
-            .with_material(material_id)
-            .with_meshlet({
-                let tl = Vertex::default()
-                    .with_position(Vec3::ZERO)
-                    .with_uv0(Vec2::ZERO);
-                let tr = Vertex::default()
-                    .with_position(Vec3::new(1.0, 0.0, 0.0))
-                    .with_uv0(Vec2::new(1.0, 0.0));
-                let bl = Vertex::default()
-                    .with_position(Vec3::new(0.0, 1.0, 0.0))
-                    .with_uv0(Vec2::new(0.0, 1.0));
-                let br = Vertex::default()
-                    .with_position(Vec3::new(1.0, 1.0, 0.0))
-                    .with_uv0(Vec2::splat(1.0));
-                vec![tl, bl, br, tl, br, tr]
-            })
-            .with_scale([32.0, 32.0, 1.0])
-            .build();
-        let scene = builder.build().unwrap();
-        // let atlas_img = scene.atlas.texture.read(
-        //    r.get_device(),
-        //    r.get_queue(),
-        //    scene.atlas.size.x as usize,
-        //    scene.atlas.size.y as usize,
-        //    4,
-        //    1,
-        //);
-        // let atlas_img = atlas_img.into_rgba(r.get_device()).unwrap();
-        // img_diff::save("atlas.png", atlas_img);
-        r.setup_render_graph(RenderGraphConfig {
-            scene: Some(scene),
-            with_screen_capture: true,
-            ..Default::default()
-        });
-
-        let img = r.render_image().unwrap();
-        img_diff::assert_img_eq("atlas_uv_mapping.png", img);
-    }
-
-    #[test]
-    fn uv_wrapping() {
-        let icon_w = 32;
-        let icon_h = 41;
-        let sheet_w = icon_w * 3;
-        let sheet_h = icon_h * 3;
-        let w = sheet_w * 3 + 2;
-        let h = sheet_h;
-        let mut r = Renderling::headless(w, h).with_background_color(Vec4::new(1.0, 1.0, 0.0, 1.0));
-        let (projection, view) = camera::default_ortho2d(w as f32, h as f32);
-        let mut builder = r.new_scene().with_camera(projection, view);
-        let dirt = image::open("../../img/dirt.jpg").unwrap();
-        builder.add_image(dirt);
-        let sandstone = image::open("../../img/sandstone.png").unwrap();
-        builder.add_image(sandstone);
-        let texels = image::open("../../img/happy_mac.png").unwrap();
-        let texels_index = builder.add_image(texels);
-        let clamp_texture_id = builder.add_texture(TextureParams {
-            image_index: texels_index,
-            mode_s: TextureAddressMode::CLAMP_TO_EDGE,
-            mode_t: TextureAddressMode::CLAMP_TO_EDGE,
-        });
-        let repeat_texture_id = builder.add_texture(TextureParams {
-            image_index: texels_index,
-            mode_s: TextureAddressMode::REPEAT,
-            mode_t: TextureAddressMode::REPEAT,
-        });
-        let mirror_texture_id = builder.add_texture(TextureParams {
-            image_index: texels_index,
-            mode_s: TextureAddressMode::MIRRORED_REPEAT,
-            mode_t: TextureAddressMode::MIRRORED_REPEAT,
-        });
-
-        let clamp_material_id = builder.add_material(PbrMaterial {
-            albedo_texture: clamp_texture_id,
-            lighting_model: LightingModel::NO_LIGHTING,
-            ..Default::default()
-        });
-        let repeat_material_id = builder.add_material(PbrMaterial {
-            albedo_texture: repeat_texture_id,
-            lighting_model: LightingModel::NO_LIGHTING,
-            ..Default::default()
-        });
-        let mirror_material_id = builder.add_material(PbrMaterial {
-            albedo_texture: mirror_texture_id,
-            lighting_model: LightingModel::NO_LIGHTING,
-            ..Default::default()
-        });
-
-        let sheet_w = sheet_w as f32;
-        let sheet_h = sheet_h as f32;
-
-        let (start, count) = builder.add_meshlet({
-            let tl = Vertex::default()
-                .with_position(Vec3::ZERO)
-                .with_uv0(Vec2::ZERO);
-            let tr = Vertex::default()
-                .with_position(Vec3::new(sheet_w, 0.0, 0.0))
-                .with_uv0(Vec2::new(3.0, 0.0));
-            let bl = Vertex::default()
-                .with_position(Vec3::new(0.0, sheet_h, 0.0))
-                .with_uv0(Vec2::new(0.0, 3.0));
-            let br = Vertex::default()
-                .with_position(Vec3::new(sheet_w, sheet_h, 0.0))
-                .with_uv0(Vec2::splat(3.0));
-            vec![tl, bl, br, tl, br, tr]
-        });
-
-        let _clamp = builder
-            .new_entity()
-            .with_material(clamp_material_id)
-            .with_starting_vertex_and_count(start, count)
-            .build();
-        let _repeat = builder
-            .new_entity()
-            .with_material(repeat_material_id)
-            .with_starting_vertex_and_count(start, count)
-            .with_position([sheet_w as f32 + 1.0, 0.0, 0.0])
-            .build();
-        let _mirror = builder
-            .new_entity()
-            .with_material(mirror_material_id)
-            .with_starting_vertex_and_count(start, count)
-            .with_position([sheet_w as f32 * 2.0 + 2.0, 0.0, 0.0])
-            .build();
-
-        let scene = builder.build().unwrap();
-        r.setup_render_graph(RenderGraphConfig {
-            scene: Some(scene),
-            with_screen_capture: true,
-            ..Default::default()
-        });
-
-        let img = r.render_image().unwrap();
-        img_diff::assert_img_eq("uv_wrapping.png", img);
-    }
-
-    #[test]
-    fn negative_uv_wrapping() {
-        let icon_w = 32;
-        let icon_h = 41;
-        let sheet_w = icon_w * 3;
-        let sheet_h = icon_h * 3;
-        let w = sheet_w * 3 + 2;
-        let h = sheet_h;
-        let mut r = Renderling::headless(w, h).with_background_color(Vec4::new(1.0, 1.0, 0.0, 1.0));
-        let (projection, view) = camera::default_ortho2d(w as f32, h as f32);
-        let mut builder = r.new_scene().with_camera(projection, view);
-        let dirt = image::open("../../img/dirt.jpg").unwrap();
-        builder.add_image(dirt);
-        let sandstone = image::open("../../img/sandstone.png").unwrap();
-        builder.add_image(sandstone);
-        let texels = image::open("../../img/happy_mac.png").unwrap();
-        let texels_index = builder.add_image(texels);
-        let clamp_texture_id = builder.add_texture(TextureParams {
-            image_index: texels_index,
-            mode_s: TextureAddressMode::CLAMP_TO_EDGE,
-            mode_t: TextureAddressMode::CLAMP_TO_EDGE,
-        });
-        let repeat_texture_id = builder.add_texture(TextureParams {
-            image_index: texels_index,
-            mode_s: TextureAddressMode::REPEAT,
-            mode_t: TextureAddressMode::REPEAT,
-        });
-        let mirror_texture_id = builder.add_texture(TextureParams {
-            image_index: texels_index,
-            mode_s: TextureAddressMode::MIRRORED_REPEAT,
-            mode_t: TextureAddressMode::MIRRORED_REPEAT,
-        });
-
-        let clamp_material_id = builder.add_material(PbrMaterial {
-            albedo_texture: clamp_texture_id,
-            lighting_model: LightingModel::NO_LIGHTING,
-            ..Default::default()
-        });
-        let repeat_material_id = builder.add_material(PbrMaterial {
-            albedo_texture: repeat_texture_id,
-            lighting_model: LightingModel::NO_LIGHTING,
-            ..Default::default()
-        });
-        let mirror_material_id = builder.add_material(PbrMaterial {
-            albedo_texture: mirror_texture_id,
-            lighting_model: LightingModel::NO_LIGHTING,
-            ..Default::default()
-        });
-
-        let sheet_w = sheet_w as f32;
-        let sheet_h = sheet_h as f32;
-
-        let (start, count) = builder.add_meshlet({
-            let tl = Vertex::default()
-                .with_position(Vec3::ZERO)
-                .with_uv0(Vec2::ZERO);
-            let tr = Vertex::default()
-                .with_position(Vec3::new(sheet_w, 0.0, 0.0))
-                .with_uv0(Vec2::new(-3.0, 0.0));
-            let bl = Vertex::default()
-                .with_position(Vec3::new(0.0, sheet_h, 0.0))
-                .with_uv0(Vec2::new(0.0, -3.0));
-            let br = Vertex::default()
-                .with_position(Vec3::new(sheet_w, sheet_h, 0.0))
-                .with_uv0(Vec2::splat(-3.0));
-            vec![tl, bl, br, tl, br, tr]
-        });
-
-        let _clamp = builder
-            .new_entity()
-            .with_material(clamp_material_id)
-            .with_starting_vertex_and_count(start, count)
-            .build();
-        let _repeat = builder
-            .new_entity()
-            .with_material(repeat_material_id)
-            .with_starting_vertex_and_count(start, count)
-            .with_position([sheet_w as f32 + 1.0, 0.0, 0.0])
-            .build();
-        let _mirror = builder
-            .new_entity()
-            .with_material(mirror_material_id)
-            .with_starting_vertex_and_count(start, count)
-            .with_position([sheet_w as f32 * 2.0 + 2.0, 0.0, 0.0])
-            .build();
-
-        let scene = builder.build().unwrap();
-        r.setup_render_graph(RenderGraphConfig {
-            scene: Some(scene),
-            with_screen_capture: true,
-            ..Default::default()
-        });
-
-        let img = r.render_image().unwrap();
-        img_diff::assert_img_eq("negative_uv_wrapping.png", img);
-    }
-
-    #[test]
-    fn transform_uvs_for_atlas() {
-        let mut tex = GpuTexture {
-            offset_px: UVec2::ZERO,
-            size_px: UVec2::ONE,
-            modes: {
-                let mut modes = TextureModes::default();
-                modes.set_wrap_s(TextureAddressMode::CLAMP_TO_EDGE);
-                modes.set_wrap_t(TextureAddressMode::CLAMP_TO_EDGE);
-                modes
-            },
-            ..Default::default()
-        };
-        assert_eq!(Vec2::ZERO, tex.uv(Vec2::ZERO, UVec2::splat(100)));
-        assert_eq!(Vec2::ZERO, tex.uv(Vec2::ZERO, UVec2::splat(1)));
-        assert_eq!(Vec2::ZERO, tex.uv(Vec2::ZERO, UVec2::splat(256)));
-        tex.offset_px = UVec2::splat(10);
-        assert_eq!(Vec2::splat(0.1), tex.uv(Vec2::ZERO, UVec2::splat(100)));
-    }
-
-    #[test]
-    /// Ensures that the directional light coloring works.
+    /// Tests shading with directional light.
     fn scene_cube_directional() {
         let mut r =
             Renderling::headless(100, 100).with_background_color(Vec3::splat(0.0).extend(1.0));
-
-        let mut builder = r.new_scene();
-        let red = Vec3::X.extend(1.0);
-        let green = Vec3::Y.extend(1.0);
-        let blue = Vec3::Z.extend(1.0);
-        let _dir_red = builder
-            .new_directional_light()
-            .with_direction(Vec3::NEG_Y)
-            .with_color(red)
-            .with_intensity(10.0)
-            .build();
-        let _dir_green = builder
-            .new_directional_light()
-            .with_direction(Vec3::NEG_X)
-            .with_color(green)
-            .with_intensity(10.0)
-            .build();
-        let _dir_blue = builder
-            .new_directional_light()
-            .with_direction(Vec3::NEG_Z)
-            .with_color(blue)
-            .with_intensity(10.0)
-            .build();
-
-        let material = builder.add_material(PbrMaterial::default());
-
-        let _cube = builder
-            .new_entity()
-            .with_meshlet(
-                renderling_shader::math::unit_cube()
-                    .into_iter()
-                    .map(|(p, n)| Vertex {
-                        position: p.extend(1.0),
-                        normal: n.extend(0.0),
-                        ..Default::default()
-                    }),
-            )
-            .with_material(material)
-            .build();
-
-        let mut scene = builder.build().unwrap();
+        let mut stage = r.new_stage();
+        stage.configure_graph(&mut r, true);
 
         let (projection, _) = camera::default_perspective(100.0, 100.0);
         let view = Mat4::look_at_rh(
@@ -1185,14 +711,59 @@ mod test {
             Vec3::ZERO,
             Vec3::new(0.0, 1.0, 0.0),
         );
-        scene.set_camera(projection, view);
+        let camera = stage.append(&Camera::default().with_projection_and_view(projection, view));
 
-        r.setup_render_graph(RenderGraphConfig {
-            scene: Some(scene),
-            with_screen_capture: true,
+        let red = Vec3::X.extend(1.0);
+        let green = Vec3::Y.extend(1.0);
+        let blue = Vec3::Z.extend(1.0);
+        let dir_red = stage.append(&DirectionalLight {
+            direction: Vec3::NEG_Y,
+            color: red,
+            intensity: 10.0,
+        });
+        let dir_green = stage.append(&DirectionalLight {
+            direction: Vec3::NEG_X,
+            color: green,
+            intensity: 10.0,
+        });
+        let dir_blue = stage.append(&DirectionalLight {
+            direction: Vec3::NEG_Z,
+            color: blue,
+            intensity: 10.0,
+        });
+        assert_eq!(
+            Light {
+                light_type: LightStyle::Directional,
+                index: dir_red.inner()
+            },
+            dir_red.into()
+        );
+        let lights = stage.append_array(&[dir_red.into(), dir_green.into(), dir_blue.into()]);
+        stage.set_lights(lights);
+
+        let material = stage.append(&PbrMaterial::default());
+        let verts = renderling_shader::math::unit_cube()
+            .into_iter()
+            .map(|(p, n)| Vertex {
+                position: p.extend(1.0),
+                normal: n.extend(0.0),
+                ..Default::default()
+            })
+            .collect::<Vec<_>>();
+        let vertex_count = verts.len() as u32;
+        let mesh = stage.new_mesh().with_primitive(verts, [], material).build();
+        let mesh = stage.append(&mesh);
+        let node = stage.append(&gl::GltfNode {
+            mesh,
             ..Default::default()
         });
-
+        let node_path = stage.append_array(&[node]);
+        let _cube = stage.draw_unit(&RenderUnit {
+            camera,
+            vertex_count,
+            node_path,
+            ..Default::default()
+        });
         let img = r.render_image().unwrap();
         img_diff::assert_img_eq("scene_cube_directional.png", img);
     }
@@ -1239,149 +810,132 @@ mod test {
     fn scene_parent_sanity() {
         let mut r = Renderling::headless(100, 100);
         r.set_background_color(Vec4::splat(0.0));
+        let mut stage = r.new_stage();
+        stage.configure_graph(&mut r, true);
         let (projection, view) = camera::default_ortho2d(100.0, 100.0);
-        let mut builder = r.new_scene().with_camera(projection, view);
+        let camera = stage.append(&Camera::new(projection, view));
         let size = 1.0;
-        let root = builder.new_entity().with_scale([25.0, 25.0, 1.0]).build();
-        let cyan_tri = builder
-            .new_entity()
-            .with_meshlet(vec![
-                Vertex {
-                    position: Vec4::new(0.0, 0.0, 0.0, 0.0),
-                    color: Vec4::new(0.0, 1.0, 1.0, 1.0),
-                    ..Default::default()
-                },
-                Vertex {
-                    position: Vec4::new(size, size, 0.0, 0.0),
-                    color: Vec4::new(0.0, 1.0, 1.0, 1.0),
-                    ..Default::default()
-                },
-                Vertex {
-                    position: Vec4::new(size, 0.0, 0.0, 0.0),
-                    color: Vec4::new(0.0, 1.0, 1.0, 1.0),
-                    ..Default::default()
-                },
-            ])
-            .with_position([1.0, 1.0, 0.0])
-            .with_parent(root)
-            .build();
-        let yellow_tri = builder //
-            .new_entity()
-            .with_meshlet(vec![
-                Vertex {
-                    position: Vec4::new(0.0, 0.0, 0.0, 0.0),
-                    color: Vec4::new(1.0, 1.0, 0.0, 1.0),
-                    ..Default::default()
-                },
-                Vertex {
-                    position: Vec4::new(size, size, 0.0, 0.0),
-                    color: Vec4::new(1.0, 1.0, 0.0, 1.0),
-                    ..Default::default()
-                },
-                Vertex {
-                    position: Vec4::new(size, 0.0, 0.0, 0.0),
-                    color: Vec4::new(1.0, 1.0, 0.0, 1.0),
-                    ..Default::default()
-                },
-            ])
-            .with_position([1.0, 1.0, 0.0])
-            .with_parent(&cyan_tri)
-            .build();
-        let _red_tri = builder
-            .new_entity()
-            .with_meshlet(vec![
-                Vertex {
-                    position: Vec4::new(0.0, 0.0, 0.0, 0.0),
-                    color: Vec4::new(1.0, 0.0, 0.0, 1.0),
-                    ..Default::default()
-                },
-                Vertex {
-                    position: Vec4::new(size, size, 0.0, 0.0),
-                    color: Vec4::new(1.0, 0.0, 0.0, 1.0),
-                    ..Default::default()
-                },
-                Vertex {
-                    position: Vec4::new(size, 0.0, 0.0, 0.0),
-                    color: Vec4::new(1.0, 0.0, 0.0, 1.0),
-                    ..Default::default()
-                },
-            ])
-            .with_position([1.0, 1.0, 0.0])
-            .with_parent(&yellow_tri)
-            .build();
-
-        assert_eq!(
-            vec![
-                GpuEntity {
-                    id: Id::new(0),
-                    position: Vec4::new(0.0, 0.0, 0.0, 0.0),
-                    scale: Vec4::new(25.0, 25.0, 1.0, 1.0),
-                    ..Default::default()
-                },
-                GpuEntity {
-                    id: Id::new(1),
-                    parent: Id::new(0),
-                    position: Vec4::new(1.0, 1.0, 0.0, 0.0),
-                    scale: Vec4::new(1.0, 1.0, 1.0, 1.0),
-                    mesh_first_vertex: 0,
-                    mesh_vertex_count: 3,
-                    ..Default::default()
-                },
-                GpuEntity {
-                    id: Id::new(2),
-                    parent: Id::new(1),
-                    position: Vec4::new(1.0, 1.0, 0.0, 0.0),
-                    scale: Vec4::new(1.0, 1.0, 1.0, 1.0),
-                    mesh_first_vertex: 3,
-                    mesh_vertex_count: 3,
-                    ..Default::default()
-                },
-                GpuEntity {
-                    id: Id::new(3),
-                    parent: Id::new(2),
-                    position: Vec4::new(1.0, 1.0, 0.0, 0.0),
-                    scale: Vec4::new(1.0, 1.0, 1.0, 1.0),
-                    mesh_first_vertex: 6,
-                    mesh_vertex_count: 3,
-                    ..Default::default()
-                }
-            ],
-            builder.entities
-        );
-        let tfrm = yellow_tri.get_world_transform(&builder.entities);
-        assert_eq!(
-            (
-                Vec3::new(50.0, 50.0, 0.0),
-                Quat::IDENTITY,
-                Vec3::new(25.0, 25.0, 1.0),
-            ),
-            tfrm
-        );
-        // while we're at it let's also check that skinning doesn't affect
-        // entities/vertices that aren't skins
-        let vertex = &builder.vertices[yellow_tri.mesh_first_vertex as usize];
-        let skin_matrix = vertex.get_skin_matrix(&yellow_tri.skin_joint_ids, &builder.entities);
-        assert_eq!(Mat4::IDENTITY, skin_matrix);
-
-        let entities = builder.entities.clone();
-        let scene = builder.build().unwrap();
-        r.setup_render_graph(RenderGraphConfig {
-            scene: Some(scene),
-            with_screen_capture: true,
-            with_bloom: false,
+        let cyan_material = stage.append(&PbrMaterial {
+            albedo_factor: Vec4::new(0.0, 1.0, 1.0, 1.0),
+            lighting_model: LightingModel::NO_LIGHTING,
+            ..Default::default()
+        });
+        let yellow_material = stage.append(&PbrMaterial {
+            albedo_factor: Vec4::new(1.0, 1.0, 0.0, 1.0),
+            lighting_model: LightingModel::NO_LIGHTING,
+            ..Default::default()
+        });
+        let red_material = stage.append(&PbrMaterial {
+            albedo_factor: Vec4::new(1.0, 0.0, 0.0, 1.0),
+            lighting_model: LightingModel::NO_LIGHTING,
             ..Default::default()
         });
 
-        let gpu_entities = futures_lite::future::block_on(
-            r.graph
-                .get_resource::<Scene>()
-                .unwrap()
-                .unwrap()
-                .entities
-                .read_gpu(r.get_device(), r.get_queue(), 0, entities.len()),
-        )
-        .unwrap();
-        assert_eq!(entities, gpu_entities);
+        let cyan_primitive = stage.new_primitive(
+            [
+                Vertex::default().with_position([0.0, 0.0, 0.0]),
+                Vertex::default().with_position([size, size, 0.0]),
+                Vertex::default().with_position([size, 0.0, 0.0]),
+            ],
+            [],
+            cyan_material,
+        );
+        let yellow_primitive = {
+            let mut p = cyan_primitive;
+            p.material = yellow_material;
+            p
+        };
+        let red_primitive = {
+            let mut p = cyan_primitive;
+            p.material = red_material;
+            p
+        };
+
+        let root_node = stage.allocate::<gl::GltfNode>();
+        let cyan_node = stage.allocate::<gl::GltfNode>();
+        let yellow_node = stage.allocate::<gl::GltfNode>();
+        let red_node = stage.allocate::<gl::GltfNode>();
+
+        // Write the nodes now that we have references to them all
+        let children = stage.append_array(&[cyan_node]);
+        stage.write(
+            root_node,
+            &gl::GltfNode {
+                children,
+                scale: Vec3::new(25.0, 25.0, 1.0),
+                ..Default::default()
+            },
+        );
+
+        let primitives = stage.append_array(&[cyan_primitive]);
+        let children = stage.append_array(&[yellow_node]);
+        let mesh = stage.append(&gl::GltfMesh {
+            primitives,
+            ..Default::default()
+        });
+        stage.write(
+            cyan_node,
+            &gl::GltfNode {
+                mesh,
+                children,
+                translation: Vec3::new(1.0, 1.0, 0.0),
+                ..Default::default()
+            },
+        );
+
+        let primitives = stage.append_array(&[yellow_primitive]);
+        let children = stage.append_array(&[red_node]);
+        let mesh = stage.append(&gl::GltfMesh {
+            primitives,
+            ..Default::default()
+        });
+        stage.write(
+            yellow_node,
+            &gl::GltfNode {
+                mesh,
+                children,
+                translation: Vec3::new(1.0, 1.0, 0.0),
+                ..Default::default()
+            },
+        );
+
+        let primitives = stage.append_array(&[red_primitive]);
+        let mesh = stage.append(&gl::GltfMesh {
+            primitives,
+            ..Default::default()
+        });
+        stage.write(
+            red_node,
+            &gl::GltfNode {
+                mesh,
+                translation: Vec3::new(1.0, 1.0, 0.0),
+                ..Default::default()
+            },
+        );
+
+        let node_path = stage.append_array(&[root_node, cyan_node]);
+        let _cyan_unit = stage.draw_unit(&RenderUnit {
+            camera,
+            vertex_count: 3,
+            node_path,
+            ..Default::default()
+        });
+
+        let node_path = stage.append_array(&[root_node, cyan_node, yellow_node]);
+        let _yellow_unit = stage.draw_unit(&RenderUnit {
+            camera,
+            vertex_count: 3,
+            node_path,
+            ..Default::default()
+        });
+
+        let node_path = stage.append_array(&[root_node, cyan_node, yellow_node, red_node]);
+        let _red_unit = stage.draw_unit(&RenderUnit {
+            camera,
+            vertex_count: 3,
+            node_path,
+            ..Default::default()
+        });
 
         let img = r.render_image().unwrap();
         img_diff::assert_img_eq("scene_parent_sanity.png", img);
@@ -1406,30 +960,10 @@ mod test {
         let ss = 600;
         let mut r =
             Renderling::headless(ss, ss).with_background_color(Vec3::splat(0.0).extend(1.0));
+        let mut stage = r.new_stage();
+        stage.configure_graph(&mut r, true);
 
         let radius = 0.5;
-        let mut icosphere = icosahedron::Polyhedron::new_isocahedron(radius, 5);
-        icosphere.compute_triangle_normals();
-        let icosahedron::Polyhedron {
-            positions,
-            normals,
-            cells,
-            ..
-        } = icosphere;
-        log::info!("icosphere created");
-
-        let to_vertex = |ndx: &usize| -> Vertex {
-            let p: [f32; 3] = positions[*ndx].0.into();
-            let n: [f32; 3] = normals[*ndx].0.into();
-            Vertex::default().with_position(p).with_normal(n)
-        };
-        let sphere_vertices = cells.iter().flat_map(|icosahedron::Triangle { a, b, c }| {
-            let p0 = to_vertex(&a);
-            let p1 = to_vertex(&b);
-            let p2 = to_vertex(&c);
-            vec![p0, p1, p2]
-        });
-
         let ss = ss as f32;
         let projection = camera::perspective(ss, ss);
         let k = 7;
@@ -1442,43 +976,70 @@ mod test {
             Vec3::new(half, half, 0.0),
             Vec3::Y,
         );
+        let camera = stage.append(&Camera::new(projection, view));
 
-        let mut builder = r
-            .new_scene()
-            .with_camera(projection, view)
-            .with_skybox_image_from_path("../../img/hdr/resting_place.hdr");
-        let (start, count) = builder.add_meshlet(sphere_vertices);
+        let mut icosphere = icosahedron::Polyhedron::new_isocahedron(radius, 5);
+        icosphere.compute_triangle_normals();
+        let icosahedron::Polyhedron {
+            positions,
+            normals,
+            cells,
+            ..
+        } = icosphere;
+        log::info!("icosphere created on CPU");
 
+        let to_vertex = |ndx: &usize| -> Vertex {
+            let p: [f32; 3] = positions[*ndx].0.into();
+            let n: [f32; 3] = normals[*ndx].0.into();
+            Vertex::default().with_position(p).with_normal(n)
+        };
+        let sphere_vertices = cells.iter().flat_map(|icosahedron::Triangle { a, b, c }| {
+            let p0 = to_vertex(&a);
+            let p1 = to_vertex(&b);
+            let p2 = to_vertex(&c);
+            vec![p0, p1, p2]
+        });
+        let sphere_primitive = stage.new_primitive(sphere_vertices, [], Id::NONE);
         for i in 0..k {
             let roughness = i as f32 / (k - 1) as f32;
             let x = (diameter + spacing) * i as f32;
             for j in 0..k {
                 let metallic = j as f32 / (k - 1) as f32;
                 let y = (diameter + spacing) * j as f32;
-                let material_id = builder.add_material(PbrMaterial {
+                let mut prim = sphere_primitive;
+                prim.material = stage.append(&PbrMaterial {
                     albedo_factor: Vec4::new(1.0, 1.0, 1.0, 1.0),
                     metallic_factor: metallic,
                     roughness_factor: roughness,
                     ..Default::default()
                 });
-                let _entity = builder
-                    .new_entity()
-                    .with_starting_vertex_and_count(start, count)
-                    .with_material(material_id)
-                    .with_position([x, y, 0.0])
-                    .build();
+                let primitives = stage.append_array(&[prim]);
+                let mesh = stage.append(&gl::GltfMesh {
+                    primitives,
+                    ..Default::default()
+                });
+                let node = stage.append(&gl::GltfNode {
+                    mesh,
+                    translation: Vec3::new(x, y, 0.0),
+                    ..Default::default()
+                });
+                let node_path = stage.append_array(&[node]);
+                let _entity = stage.draw_unit(&RenderUnit {
+                    camera,
+                    vertex_count: prim.vertex_count,
+                    node_path,
+                    ..Default::default()
+                });
             }
         }
 
-        let scene = builder.build().unwrap();
-        r.setup_render_graph(RenderGraphConfig {
-            scene: Some(scene),
-            with_screen_capture: true,
-            ..Default::default()
-        });
+        let (device, queue) = r.get_device_and_queue_owned();
+        let hdr_image = AtlasImage::from_hdr_path("../../img/hdr/resting_place.hdr").unwrap();
+        let skybox = crate::skybox::Skybox::new(device, queue, hdr_image, camera);
+        stage.set_skybox(skybox);
 
-        let img = r.render_image().unwrap();
-        img_diff::assert_img_eq("pbr_metallic_roughness_spheres.png", img);
+        let img = r.render_linear_image().unwrap();
+        img_diff::assert_img_eq("pbr/metallic_roughness_spheres.png", img);
     }
 
     #[test]

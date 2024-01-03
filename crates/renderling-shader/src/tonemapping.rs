@@ -4,6 +4,7 @@
 //! * https://github.com/KhronosGroup/glTF-Sample-Viewer/blob/5b1b7f48a8cb2b7aaef00d08fdba18ccc8dd331b/source/Renderer/shaders/tonemapping.glsl
 //! * https://64.github.io/tonemapping
 
+use crabslab::{Slab, SlabItem};
 use glam::{mat3, Mat3, Vec2, Vec3, Vec4, Vec4Swizzles};
 use spirv_std::{image::Image2d, spirv, Sampler};
 
@@ -75,7 +76,7 @@ fn tone_map_aces_hill(mut color: Vec3) -> Vec3 {
 
 #[repr(transparent)]
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
-#[derive(Clone, Copy, Default, PartialEq, Eq, bytemuck::Zeroable, bytemuck::Pod)]
+#[derive(Clone, Copy, Default, PartialEq, Eq, SlabItem)]
 pub struct Tonemap(u32);
 
 impl Tonemap {
@@ -87,7 +88,7 @@ impl Tonemap {
 }
 
 #[repr(C)]
-#[derive(Clone, Copy, PartialEq, bytemuck::Zeroable, bytemuck::Pod)]
+#[derive(Clone, Copy, PartialEq, SlabItem)]
 pub struct TonemapConstants {
     pub tonemap: Tonemap,
     pub exposure: f32,
@@ -102,7 +103,8 @@ impl Default for TonemapConstants {
     }
 }
 
-pub fn tonemap(mut color: Vec4, constants: &TonemapConstants) -> Vec4 {
+pub fn tonemap(mut color: Vec4, slab: &[u32]) -> Vec4 {
+    let constants = slab.read::<TonemapConstants>(0u32.into());
     color *= constants.exposure;
 
     match constants.tonemap {
@@ -143,16 +145,13 @@ pub fn vertex(
 
 #[spirv(fragment)]
 pub fn fragment(
-    #[spirv(descriptor_set = 0, binding = 0)] texture: &Image2d,
-    #[spirv(descriptor_set = 0, binding = 1)] sampler: &Sampler,
-    #[spirv(uniform, descriptor_set = 1, binding = 0)] constants: &TonemapConstants,
-    #[spirv(descriptor_set = 2, binding = 0)] bloom_texture: &Image2d,
-    #[spirv(descriptor_set = 2, binding = 1)] bloom_sampler: &Sampler,
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] slab: &[u32],
+    #[spirv(descriptor_set = 0, binding = 1)] texture: &Image2d,
+    #[spirv(descriptor_set = 0, binding = 2)] sampler: &Sampler,
     in_uv: glam::Vec2,
     output: &mut glam::Vec4,
 ) {
     let color: Vec4 = texture.sample(*sampler, in_uv);
-    let bloom: Vec4 = bloom_texture.sample(*bloom_sampler, in_uv);
-    let color = tonemap(color + bloom, constants);
+    let color = tonemap(color, slab);
     *output = color;
 }

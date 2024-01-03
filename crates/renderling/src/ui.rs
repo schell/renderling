@@ -7,6 +7,7 @@ use std::{
     sync::Arc,
 };
 
+use crabslab::{CpuSlab, Slab, SlabItem, WgpuBuffer};
 use glam::{UVec2, Vec2, Vec4};
 use snafu::prelude::*;
 
@@ -345,7 +346,8 @@ impl<'a> UiDrawObjectBuilder<'a> {
 
 pub struct UiScene {
     device: Arc<wgpu::Device>,
-    constants: Uniform<UiConstants>,
+    /// Slab containing `UiConstants`.
+    slab: CpuSlab<WgpuBuffer>,
     _default_texture: Texture,
     default_texture_bindgroup: wgpu::BindGroup,
 }
@@ -353,22 +355,26 @@ pub struct UiScene {
 impl UiScene {
     pub fn new(
         device: Arc<wgpu::Device>,
-        queue: &wgpu::Queue,
+        queue: Arc<wgpu::Queue>,
         canvas_size: UVec2,
         camera_translation: Vec2,
     ) -> Self {
-        let constants = Uniform::new(
-            &device,
-            UiConstants {
+        let buffer = WgpuBuffer::new(
+            device.clone(),
+            UiConstants::slab_size(),
+            wgpu::BufferUsages::empty(),
+        );
+        let mut slab = CpuSlab::new(buffer);
+        slab.write(
+            0u32.into(),
+            &UiConstants {
                 canvas_size,
                 camera_translation,
             },
-            wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-            wgpu::ShaderStages::VERTEX,
         );
         let texture = Texture::new(
             &device,
-            queue,
+            &queue,
             Some("UiScene.default_texture"),
             None,
             4,
