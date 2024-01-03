@@ -56,18 +56,19 @@ pub fn fragment_cubemap(
 
 /// Draws a cubemap.
 ///
-/// Expects there to be a [`Camera`] in the slab at index 0.
+/// Uses the `instance_index` as the [`Id`] for a [`Camera`].
 ///
 /// Used to create a cubemap from an equirectangular image as well as cubemap
 /// convolutions.
 #[spirv(vertex)]
 pub fn vertex_cubemap(
+    #[spirv(instance_index)] camera_index: u32,
     #[spirv(vertex_index)] vertex_index: u32,
     #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] slab: &[u32],
     local_pos: &mut Vec3,
     #[spirv(position)] gl_pos: &mut Vec4,
 ) {
-    let camera = slab.read(Id::<Camera>::new(0));
+    let camera = slab.read(Id::<Camera>::new(camera_index));
     let pos = crate::math::CUBE[vertex_index as usize];
     *local_pos = pos;
     *gl_pos = camera.projection * camera.view * pos.extend(1.0);

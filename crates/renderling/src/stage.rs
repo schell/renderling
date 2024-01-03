@@ -56,6 +56,7 @@ pub struct Stage {
     pub(crate) slab: Arc<RwLock<CpuSlab<WgpuBuffer>>>,
     pub(crate) atlas: Arc<RwLock<Atlas>>,
     pub(crate) skybox: Arc<RwLock<Skybox>>,
+    pub(crate) skybox_bindgroup: Arc<Mutex<Option<Arc<wgpu::BindGroup>>>>,
     pub(crate) pipeline: Arc<Mutex<Option<Arc<wgpu::RenderPipeline>>>>,
     pub(crate) skybox_pipeline: Arc<RwLock<Option<Arc<wgpu::RenderPipeline>>>>,
     pub(crate) has_skybox: Arc<AtomicBool>,
@@ -123,6 +124,7 @@ impl Stage {
             pipeline: Default::default(),
             atlas: Arc::new(RwLock::new(atlas)),
             skybox: Arc::new(RwLock::new(Skybox::empty(device.clone(), queue.clone()))),
+            skybox_bindgroup: Default::default(),
             skybox_pipeline: Default::default(),
             has_skybox: Arc::new(AtomicBool::new(false)),
             has_bloom: Arc::new(AtomicBool::new(false)),
@@ -305,76 +307,39 @@ impl Stage {
     }
 
     /// Return the skybox render pipeline, creating it if necessary.
-    pub fn get_skybox_pipeline(&self) -> Arc<wgpu::RenderPipeline> {
-        fn create_skybox_render_pipeline(device: &wgpu::Device) -> wgpu::RenderPipeline {
-            log::trace!("creating stage's skybox render pipeline");
-            let vertex_shader = device
-                .create_shader_module(wgpu::include_spirv!("linkage/skybox-slabbed_vertex.spv"));
-            let fragment_shader = device.create_shader_module(wgpu::include_spirv!(
-                "linkage/skybox-stage_skybox_cubemap.spv"
-            ));
-            let stage_slab_buffers_layout = Stage::buffers_bindgroup_layout(&device);
-            let textures_layout = Stage::textures_bindgroup_layout(&device);
-            let label = Some("stage skybox");
-            let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label,
-                bind_group_layouts: &[&stage_slab_buffers_layout, &textures_layout],
-                push_constant_ranges: &[],
-            });
-
-            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some("skybox pipeline"),
-                layout: Some(&layout),
-                vertex: wgpu::VertexState {
-                    module: &vertex_shader,
-                    entry_point: "skybox::slabbed_vertex",
-                    buffers: &[],
-                },
-                primitive: wgpu::PrimitiveState {
-                    topology: wgpu::PrimitiveTopology::TriangleList,
-                    strip_index_format: None,
-                    front_face: wgpu::FrontFace::Ccw,
-                    cull_mode: None,
-                    unclipped_depth: false,
-                    polygon_mode: wgpu::PolygonMode::Fill,
-                    conservative: false,
-                },
-                depth_stencil: Some(wgpu::DepthStencilState {
-                    format: wgpu::TextureFormat::Depth32Float,
-                    depth_write_enabled: true,
-                    depth_compare: wgpu::CompareFunction::LessEqual,
-                    stencil: wgpu::StencilState::default(),
-                    bias: wgpu::DepthBiasState::default(),
-                }),
-                multisample: wgpu::MultisampleState {
-                    mask: !0,
-                    alpha_to_coverage_enabled: false,
-                    count: 1,
-                },
-                fragment: Some(wgpu::FragmentState {
-                    module: &fragment_shader,
-                    // TODO: remove renderling_shader::skybox::fragment_cubemap after porting
-                    // to GLTF
-                    entry_point: "skybox::stage_skybox_cubemap",
-                    targets: &[Some(wgpu::ColorTargetState {
-                        format: crate::hdr::HdrSurface::TEXTURE_FORMAT,
-                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                        write_mask: wgpu::ColorWrites::ALL,
-                    })],
-                }),
-                multiview: None,
-            })
-        }
-
+    pub fn get_skybox_pipeline_and_bindgroup(
+        &self,
+    ) -> (Arc<wgpu::RenderPipeline>, Arc<wgpu::BindGroup>) {
         // UNWRAP: safe because we're only ever called from the render thread.
         let mut pipeline = self.skybox_pipeline.write().unwrap();
-        if let Some(pipeline) = pipeline.as_ref() {
+        let pipeline = if let Some(pipeline) = pipeline.as_ref() {
             pipeline.clone()
         } else {
-            let p = Arc::new(create_skybox_render_pipeline(&self.device));
+            let p = Arc::new(
+                crate::skybox::create_skybox_render_pipeline(
+                    &self.device,
+                    crate::hdr::HdrSurface::TEXTURE_FORMAT,
+                )
+                .0,
+            );
             *pipeline = Some(p.clone());
             p
-        }
+        };
+        // UNWRAP: safe because we're only ever called from the render thread.
+        let mut bindgroup = self.skybox_bindgroup.lock().unwrap();
+        let bindgroup = if let Some(bindgroup) = bindgroup.as_ref() {
+            bindgroup.clone()
+        } else {
+            let slab = self.slab.read().unwrap();
+            let bg = Arc::new(crate::skybox::create_skybox_bindgroup(
+                &self.device,
+                slab.as_ref().get_buffer(),
+                &self.skybox.read().unwrap().environment_cubemap,
+            ));
+            *bindgroup = Some(bg.clone());
+            bg
+        };
+        (pipeline, bindgroup)
     }
 
     /// Return the main render pipeline, creating it if necessary.
@@ -734,8 +699,9 @@ pub fn stage_render(
     let pipeline = stage.get_pipeline();
     let slab_buffers_bindgroup = stage.get_slab_buffers_bindgroup();
     let textures_bindgroup = stage.get_textures_bindgroup();
-    let may_skybox_pipeline = if stage.has_skybox.load(std::sync::atomic::Ordering::Relaxed) {
-        Some(stage.get_skybox_pipeline())
+    let has_skybox = stage.has_skybox.load(std::sync::atomic::Ordering::Relaxed);
+    let may_skybox_pipeline_and_bindgroup = if has_skybox {
+        Some(stage.get_skybox_pipeline_and_bindgroup())
     } else {
         None
     };
@@ -780,11 +746,12 @@ pub fn stage_render(
                * stage.number_of_indirect_draws()); */
         }
 
-        if let Some(pipeline) = may_skybox_pipeline.as_ref() {
+        if let Some((pipeline, bindgroup)) = may_skybox_pipeline_and_bindgroup.as_ref() {
             log::trace!("rendering skybox");
             // UNWRAP: if we can't acquire the lock we want to panic.
             let skybox = stage.skybox.read().unwrap();
             render_pass.set_pipeline(pipeline);
+            render_pass.set_bind_group(0, bindgroup, &[]);
             render_pass.draw(0..36, skybox.camera.inner()..skybox.camera.inner() + 1);
         }
     }

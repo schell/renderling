@@ -1,10 +1,13 @@
 //! An HDR skybox.
 use std::sync::Arc;
 
-use crabslab::{CpuSlab, Slab, SlabItem, WgpuBuffer};
+use crabslab::{CpuSlab, GrowableSlab, Slab, SlabItem, WgpuBuffer};
 use glam::{Mat4, Vec3};
 
-use crate::{atlas::AtlasImage, shader::stage::Camera};
+use crate::{
+    atlas::AtlasImage,
+    shader::{convolution::VertexPrefilterEnvironmentCubemapIds, stage::Camera},
+};
 
 /// Render pipeline used to draw a skybox.
 pub struct SkyboxRenderPipeline(pub wgpu::RenderPipeline);
@@ -17,7 +20,7 @@ pub fn skybox_bindgroup_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
                 binding: 0,
                 visibility: wgpu::ShaderStages::VERTEX,
                 ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
+                    ty: wgpu::BufferBindingType::Storage { read_only: true },
                     has_dynamic_offset: false,
                     min_binding_size: None,
                 },
@@ -86,7 +89,7 @@ pub fn create_skybox_render_pipeline(
     });
     SkyboxRenderPipeline(
         device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("skybox pipeline"),
+            label: Some("skybox render pipeline"),
             layout: Some(&pp_layout),
             vertex: wgpu::VertexState {
                 module: &vertex_shader,
@@ -468,8 +471,9 @@ impl Skybox {
         );
         let mut slab = CpuSlab::new(buffer);
         // Write the camera at 0 and then the roughness
-        slab.write(0u32.into(), &Camera::default().with_projection(proj));
-        slab.write(Camera::slab_size().into(), &0.0f32);
+        let camera = slab.append(&Camera::default().with_projection(proj));
+        let roughness = slab.append(&0.0f32);
+        let id = slab.append(&VertexPrefilterEnvironmentCubemapIds { camera, roughness });
         let (pipeline, bindgroup) =
             crate::ibl::prefiltered_environment::create_pipeline_and_bindgroup(
                 &device,
@@ -485,8 +489,7 @@ impl Skybox {
                 let mip_height: u32 = 128 >> mip_level;
 
                 // update the roughness for these mips
-                let roughness = mip_level as f32 / 4.0;
-                slab.write(Camera::slab_size().into(), &roughness);
+                slab.write(roughness, &(mip_level as f32 / 4.0));
 
                 let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
                     label: Some("specular convolution"),
@@ -508,7 +511,7 @@ impl Skybox {
                 );
 
                 // update the view to point at one of the cube faces
-                slab.write(0u32.into(), &Camera::new(proj, views[i]));
+                slab.write(camera, &Camera::new(proj, views[i]));
 
                 {
                     let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -526,7 +529,7 @@ impl Skybox {
 
                     render_pass.set_pipeline(&pipeline);
                     render_pass.set_bind_group(0, &bindgroup, &[]);
-                    render_pass.draw(0..36, 0..1);
+                    render_pass.draw(0..36, id.inner()..id.inner() + 1);
                 }
 
                 queue.submit([encoder.finish()]);
@@ -639,7 +642,6 @@ impl Skybox {
 mod test {
     use crabslab::GrowableSlab;
     use glam::Vec3;
-    use img_diff::DiffCfg;
 
     use super::*;
     use crate::Renderling;
