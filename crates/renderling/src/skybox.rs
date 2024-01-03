@@ -725,7 +725,7 @@ mod test {
 
         stage.set_skybox(skybox);
 
-        let img = r.render_image().unwrap();
+        let img = r.render_linear_image().unwrap();
         img_diff::assert_img_eq("skybox/hdr.png", img);
     }
 

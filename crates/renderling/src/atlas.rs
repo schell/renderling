@@ -499,6 +499,8 @@ impl Atlas {
     ///
     /// This is primarily for testing.
     ///
+    /// The resulting image will be in a **linear** color space.
+    ///
     /// ## Panics
     /// Panics if the pixels read from the GPU cannot be converted into an
     /// `RgbaImage`.
@@ -512,7 +514,7 @@ impl Atlas {
             4,
             1,
         );
-        buffer.into_rgba(device).unwrap()
+        buffer.into_linear_rgba(device).unwrap()
     }
 }
 

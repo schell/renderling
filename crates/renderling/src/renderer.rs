@@ -404,6 +404,9 @@ impl Renderling {
     /// For this call to succeed, the `PostRenderBufferCreate::create` node must
     /// be present in the graph.
     ///
+    /// The resulting image will be in the color space of the internal
+    /// [`RenderTarget`].
+    ///
     /// ## Note
     /// This operation can take a long time, depending on how big the screen is.
     pub fn render_image(&mut self) -> Result<image::RgbaImage, RenderlingError> {
@@ -418,7 +421,40 @@ impl Renderling {
                 key: TypeKey::new::<PostRenderBuffer>(),
             })?;
         let device = self.get_device();
-        let img = buffer.0.into_rgba(device).context(TextureSnafu)?;
+        let is_srgb = self.get_render_target().format().is_srgb();
+        let img = if is_srgb {
+            buffer.0.into_srgba(device).context(TextureSnafu)?
+        } else {
+            buffer.0.into_linear_rgba(device).context(TextureSnafu)?
+        };
+        Ok(img)
+    }
+
+    /// Render into an image.
+    ///
+    /// This should be called after rendering, before presentation.
+    /// Good for getting headless screen grabs.
+    ///
+    /// For this call to succeed, the `PostRenderBufferCreate::create` node must
+    /// be present in the graph.
+    ///
+    /// The resulting image will be in a linear color space.
+    ///
+    /// ## Note
+    /// This operation can take a long time, depending on how big the screen is.
+    pub fn render_linear_image(&mut self) -> Result<image::RgbaImage, RenderlingError> {
+        use crate::frame::PostRenderBuffer;
+
+        self.render()?;
+        let buffer = self
+            .graph
+            .remove_resource::<PostRenderBuffer>()
+            .context(MissingPostRenderBufferSnafu)?
+            .context(ResourceSnafu {
+                key: TypeKey::new::<PostRenderBuffer>(),
+            })?;
+        let device = self.get_device();
+        let img = buffer.0.into_linear_rgba(device).context(TextureSnafu)?;
         Ok(img)
     }
 

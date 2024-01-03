@@ -354,7 +354,7 @@ mod test {
             ..Default::default()
         });
         let img = r.render_image().unwrap();
-        img_diff::assert_img_eq("cmy_cube.png", img);
+        img_diff::assert_img_eq("cmy_cube/sanity.png", img);
     }
 
     #[test]
@@ -402,7 +402,7 @@ mod test {
 
         // we should see two colored cubes
         let img = r.render_image().unwrap();
-        img_diff::assert_img_eq("cmy_cube_visible_before.png", img.clone());
+        img_diff::assert_img_eq("cmy_cube/visible_before.png", img.clone());
         let img_before = img;
 
         // update cube two making it invisible
@@ -410,14 +410,14 @@ mod test {
 
         // we should see only one colored cube
         let img = r.render_image().unwrap();
-        img_diff::assert_img_eq("cmy_cube_visible_after.png", img);
+        img_diff::assert_img_eq("cmy_cube/visible_after.png", img);
 
         // update cube two making in visible again
         stage.show_unit(cube_two);
 
         // we should see two colored cubes again
         let img = r.render_image().unwrap();
-        img_diff::assert_eq("cmy_cube_visible_before_again.png", img_before, img);
+        img_diff::assert_eq("cmy_cube/visible_before_again.png", img_before, img);
     }
 
     #[test]
@@ -473,17 +473,17 @@ mod test {
             ..Default::default()
         });
 
-        // we should see a cube
+        // we should see a cube (in sRGB color space)
         let img = r.render_image().unwrap();
-        img_diff::assert_img_eq("cmy_cube_remesh_before.png", img);
+        img_diff::assert_img_eq("cmy_cube/remesh_before.png", img);
 
         // Update the cube mesh to a pyramid by overwriting the `.node_path` field
         // of `RenderUnit`
         stage.write(cube + RenderUnit::offset_of_node_path(), &pyramid_node_path);
 
-        // we should see a pyramid
+        // we should see a pyramid (in sRGB color space)
         let img = r.render_image().unwrap();
-        img_diff::assert_img_eq("cmy_cube_remesh_after.png", img);
+        img_diff::assert_img_eq("cmy_cube/remesh_after.png", img);
     }
 
     fn gpu_uv_unit_cube() -> Vec<Vertex> {
@@ -1038,7 +1038,7 @@ mod test {
         let skybox = crate::skybox::Skybox::new(device, queue, hdr_image, camera);
         stage.set_skybox(skybox);
 
-        let img = r.render_image().unwrap();
+        let img = r.render_linear_image().unwrap();
         img_diff::assert_img_eq("pbr/metallic_roughness_spheres.png", img);
     }
 

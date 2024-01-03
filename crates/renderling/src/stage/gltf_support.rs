@@ -1546,7 +1546,7 @@ mod test {
             node_path,
             ..Default::default()
         });
-        let img = r.render_image().unwrap();
+        let img = r.render_linear_image().unwrap();
         img_diff::assert_img_eq("gltf/render_unit_transforms_primitive_geometry.png", img);
     }
 
@@ -1616,7 +1616,7 @@ mod test {
             primitive_index: 0,
         });
 
-        let img = r.render_image().unwrap();
+        let img = r.render_linear_image().unwrap();
         img_diff::assert_img_eq("gltf_images.png", img);
     }
 
@@ -1645,24 +1645,29 @@ mod test {
         img_diff::assert_img_eq("gltf_simple_texture.png", img);
     }
 
-    #[test]
-    fn normal_mapping_brick_sphere() {
-        let size = 600;
-        let mut r =
-            Renderling::headless(size, size).with_background_color(Vec3::splat(1.0).extend(1.0));
-        let mut stage = r.new_stage().with_lighting(true).with_bloom(true);
-        stage.configure_graph(&mut r, true);
-        let (cpu_doc, gpu_doc) = stage
-            .load_gltf_document_from_path("../../gltf/red_brick_03_1k.glb")
-            .unwrap();
-        let camera = stage.create_camera_from_gltf(&cpu_doc, 0).unwrap();
-        let camera_id = stage.append(&camera);
-        let _unit_ids =
-            stage.draw_gltf_scene(&gpu_doc, camera_id, cpu_doc.default_scene().unwrap());
+    // This can be uncommented when we support lighting from GLTF files
+    //#[test]
+    //// Demonstrates how to load and render a gltf file containing lighting and a
+    //// normal map.
+    //fn normal_mapping_brick_sphere() {
+    //    let size = 600;
+    //    let mut r =
+    //        Renderling::headless(size,
+    // size).with_background_color(Vec3::splat(1.0).extend(1.0));    let mut
+    // stage = r.new_stage().with_lighting(true).with_bloom(true);
+    //    stage.configure_graph(&mut r, true);
+    //    let (cpu_doc, gpu_doc) = stage
+    //        .load_gltf_document_from_path("../../gltf/red_brick_03_1k.glb")
+    //        .unwrap();
+    //    let camera = stage.create_camera_from_gltf(&cpu_doc, 0).unwrap();
+    //    let camera_id = stage.append(&camera);
+    //    let _unit_ids =
+    //        stage.draw_gltf_scene(&gpu_doc, camera_id,
+    // cpu_doc.default_scene().unwrap());
 
-        let img = r.render_image().unwrap();
-        img_diff::assert_img_eq("gltf_normal_mapping_brick_sphere.png", img);
-    }
+    //    let img = r.render_image().unwrap();
+    //    img_diff::assert_img_eq("gltf_normal_mapping_brick_sphere.png", img);
+    //}
 
     #[test]
     // Demonstrates how to generate a mesh primitive on the CPU, long hand.
@@ -1771,7 +1776,7 @@ mod test {
         let invocation = VertexInvocation::invoke(unit_id.inner(), 0, &data);
         println!("invoctaion: {invocation:#?}");
 
-        let img = r.render_image().unwrap();
+        let img = r.render_linear_image().unwrap();
         img_diff::assert_img_eq("gltf/cmy_tri.png", img);
     }
 

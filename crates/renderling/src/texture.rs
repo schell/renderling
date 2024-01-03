@@ -826,17 +826,42 @@ impl CopiedTextureBuffer {
     ///
     /// Ensures that the pixels are in a linear color space by applying the
     /// linear transfer if the texture this buffer was copied from was sRGB.
-    pub fn into_rgba(self, device: &wgpu::Device) -> Result<image::RgbaImage, TextureError> {
+    pub fn into_linear_rgba(self, device: &wgpu::Device) -> Result<image::RgbaImage, TextureError> {
         let format = self.format;
         let mut img_buffer = self.into_image::<image::Rgba<u8>>(device)?.into_rgba8();
         if format.is_srgb() {
-            log::trace!("converting applying linear transfer to srgb pixels");
+            log::trace!(
+                "converting by applying linear transfer fn to srgb pixels (sRGB -> linear)"
+            );
             // Convert back to linear
             img_buffer.pixels_mut().for_each(|p| {
                 crate::color::linear_xfer_u8(&mut p.0[0]);
                 crate::color::linear_xfer_u8(&mut p.0[1]);
                 crate::color::linear_xfer_u8(&mut p.0[2]);
                 crate::color::linear_xfer_u8(&mut p.0[3]);
+            });
+        }
+
+        Ok(img_buffer)
+    }
+
+    /// Convert the post render buffer into an RgbaImage.
+    ///
+    /// Ensures that the pixels are in a linear color space by applying the
+    /// linear transfer if the texture this buffer was copied from was sRGB.
+    pub fn into_srgba(self, device: &wgpu::Device) -> Result<image::RgbaImage, TextureError> {
+        let format = self.format;
+        let mut img_buffer = self.into_image::<image::Rgba<u8>>(device)?.into_rgba8();
+        if !format.is_srgb() {
+            log::trace!(
+                "converting by applying opto transfer fn to linear pixels (linear -> sRGB)"
+            );
+            // Convert back to linear
+            img_buffer.pixels_mut().for_each(|p| {
+                crate::color::opto_xfer_u8(&mut p.0[0]);
+                crate::color::opto_xfer_u8(&mut p.0[1]);
+                crate::color::opto_xfer_u8(&mut p.0[2]);
+                crate::color::opto_xfer_u8(&mut p.0[3]);
             });
         }
 
