@@ -7,8 +7,9 @@ use std::{
 use crate::{GrowableSlab, Id, Slab, SlabItem};
 use snafu::{IntoError, ResultExt, Snafu};
 
+/// Errors that can occur when using a [`WgpuBuffer`] as slab storage.
 #[derive(Debug, Snafu)]
-pub enum SlabError {
+pub enum WgpuSlabError {
     #[snafu(display(
         "Out of capacity. Tried to write {type_is}(slab size={slab_size}) at {index} but capacity \
          is {capacity}",
@@ -49,8 +50,28 @@ pub enum SlabError {
     Async { source: wgpu::BufferAsyncError },
 }
 
-pub fn print_slab(slab: &[u32], starting_index: usize) {
-    for (u, i) in slab.iter().zip(starting_index..) {
+/// Print the slab's index, binary representation, integer value, and float
+/// value.
+///
+/// ```rust
+/// use crabslab::{print_slab, CpuSlab, GrowableSlab, Slab, SlabItem};
+///
+/// let mut slab = CpuSlab::new(vec![]);
+/// slab.append(&42u32);
+/// slab.append(&42.0f32);
+/// slab.append_array(&[0.0f32, 1.0f32, 2.0f32]);
+///
+/// print_slab(slab.as_ref().as_slice(), 0..5);
+/// /* stdout:
+/// 00: 00000000000000000000000000101010 0000000042 5.9e-44
+/// 01: 01000010001010000000000000000000 1109917696 42.0
+/// 02: 00000000000000000000000000000000 0000000000 0.0
+/// 03: 00111111100000000000000000000000 1065353216 1.0
+/// 04: 01000000000000000000000000000000 1073741824 2.0
+/// */
+/// ```
+pub fn print_slab(slab: &[u32], indices: impl IntoIterator<Item = usize>) {
+    for (u, i) in slab.iter().zip(indices.into_iter()) {
         println!("{i:02}: {u:032b} {u:010} {:?}", f32::from_bits(*u));
     }
 }
@@ -226,12 +247,12 @@ impl WgpuBuffer {
 
     #[cfg(feature = "futures-lite")]
     /// Read from the slab buffer synchronously.
-    pub fn block_on_read_raw(&self, start: usize, len: usize) -> Result<Vec<u32>, SlabError> {
+    pub fn block_on_read_raw(&self, start: usize, len: usize) -> Result<Vec<u32>, WgpuSlabError> {
         futures_lite::future::block_on(self.read_raw(start, len))
     }
 
     /// Read from the slab buffer.
-    pub async fn read_raw(&self, start: usize, len: usize) -> Result<Vec<u32>, SlabError> {
+    pub async fn read_raw(&self, start: usize, len: usize) -> Result<Vec<u32>, WgpuSlabError> {
         let byte_offset = start * std::mem::size_of::<u32>();
         let length = len * std::mem::size_of::<u32>();
         let output_buffer_size = length as u64;
@@ -271,7 +292,7 @@ impl WgpuBuffer {
     }
 
     /// Read from the slab buffer.
-    pub async fn read_async<T: SlabItem + Default>(&self, id: Id<T>) -> Result<T, SlabError> {
+    pub async fn read_async<T: SlabItem + Default>(&self, id: Id<T>) -> Result<T, WgpuSlabError> {
         let vec = self.read_raw(id.index(), T::slab_size()).await?;
         let t = Slab::read(vec.as_slice(), Id::<T>::new(0));
         Ok(t)

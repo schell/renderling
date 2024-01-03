@@ -49,11 +49,11 @@ pub enum StageGltfError {
     MissingCamera { index: usize },
 
     #[snafu(display("{source}"))]
-    Slab { source: crabslab::SlabError },
+    Slab { source: crabslab::WgpuSlabError },
 }
 
-impl From<crabslab::SlabError> for StageGltfError {
-    fn from(source: crabslab::SlabError) -> Self {
+impl From<crabslab::WgpuSlabError> for StageGltfError {
+    fn from(source: crabslab::WgpuSlabError) -> Self {
         Self::Slab { source }
     }
 }
@@ -1305,49 +1305,6 @@ impl<'a> GltfMeshBuilder<'a> {
         GltfMesh {
             primitives,
             weights,
-        }
-    }
-}
-
-/// Convenience builder for creating a [`GltfDocument`] without having a
-/// [`gltf::Document`].
-///
-/// This is useful if you have non-GLTF assets that you want to render.
-pub struct GltfDocumentBuilder<'a> {
-    stage: &'a mut Stage,
-}
-
-impl<'a> GltfDocumentBuilder<'a> {
-    pub fn new(stage: &'a mut Stage) -> Self {
-        Self { stage }
-    }
-
-    pub fn build(self) -> GltfDocument {
-        let accessors = Array::default();
-        let animations = Array::default();
-        let buffers = Array::default();
-        let cameras = Array::default();
-        let materials = Array::default();
-        let default_material = Id::NONE;
-        let meshes = Array::default();
-        let nodes = Array::default();
-        let scenes = Array::default();
-        let skins = Array::default();
-        let textures = Array::default();
-        let views = Array::default();
-        GltfDocument {
-            accessors,
-            animations,
-            buffers,
-            cameras,
-            materials,
-            default_material,
-            meshes,
-            nodes,
-            scenes,
-            skins,
-            textures,
-            views,
         }
     }
 }

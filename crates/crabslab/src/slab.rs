@@ -480,7 +480,7 @@ pub trait GrowableSlab: Slab {
     /// Preallocate space for one `T` element, but don't write anything to the
     /// buffer.
     ///
-    /// The returned `Id` can be used to write later with [`Self::write`].
+    /// The returned `Id` can be used to write later with [`Slab::write`].
     ///
     /// NOTE: This changes the next available buffer index and may change the
     /// buffer capacity.
@@ -494,7 +494,7 @@ pub trait GrowableSlab: Slab {
     /// the buffer.
     ///
     /// This can be used to allocate space for a bunch of elements that get
-    /// written later with [`Self::write_array`].
+    /// written later with [`Slab::write_array`].
     ///
     /// NOTE: This changes the length of the buffer and may change the capacity.
     fn allocate_array<T: SlabItem>(&mut self, len: usize) -> Array<T> {
@@ -528,7 +528,7 @@ pub trait GrowableSlab: Slab {
     }
 }
 
-/// A wrapper around a `GrowableSlab` that provides convenience methods for
+/// A wrapper around a [`GrowableSlab`] that provides convenience methods for
 /// working with CPU-side slabs.
 ///
 /// Working with slabs on the CPU is much more convenient because the underlying
@@ -587,6 +587,11 @@ impl<B: GrowableSlab> CpuSlab<B> {
     /// Create a new `SlabBuffer` with the given slab.
     pub fn new(slab: B) -> Self {
         Self { slab }
+    }
+
+    /// Consume the [`CpuSlab`], converting it into the underlying buffer.
+    pub fn into_inner(self) -> B {
+        self.slab
     }
 }
 
