@@ -21,7 +21,7 @@ ab_glyph = { version = "0.2", optional = true }
 any_vec = "0.13"
 async-channel = {workspace=true}
 bytemuck = { workspace = true }
-crabslab = { version = "0.1.0", path = "../crabslab" }
+crabslab = { workspace = true, features = ["default"] }
 crunch = "0.5"
 futures-lite = {workspace=true}
 glam = { workspace = true, default-features = false, features = ["bytemuck", "libm"] }

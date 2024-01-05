@@ -201,7 +201,7 @@ pub async fn new_adapter_device_queue_and_target<'a>(
     let backends = wgpu::Backends::all();
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
         backends,
-        dx12_shader_compiler: wgpu::Dx12Compiler::default(),
+        ..Default::default()
     });
 
     fn limits(adapter: &wgpu::Adapter) -> wgpu::Limits {

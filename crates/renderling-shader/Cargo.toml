@@ -17,15 +17,16 @@ spirv-std = "0.9"
 
 [target.'cfg(not(target_arch = "spirv"))'.dependencies]
 glam = { workspace = true, features = ["std"] }
-crabslab = { version = "0.1.0", path = "../crabslab" }
+crabslab = { workspace = true, features = ["default"] }
 
 [target.'cfg(not(target_arch = "spirv"))'.dev-dependencies]
 glam = { workspace = true, features = ["std", "debug-glam-assert"] }
 
 [target.'cfg(target_arch = "spirv")'.dependencies]
 glam = { version = "0.24.2", default-features = false, features = ["libm"] }
-crabslab = { version = "0.1.0", path = "../crabslab", default-features = false, features = ["glam"] }
+crabslab = { workspace = true, features = ["glam"]  }
 
 [dev-dependencies]
-image = { workspace = true }
+bytemuck = {workspace = true}
+image = {workspace = true}
 img-diff = { path = "../img-diff" }

@@ -1039,14 +1039,14 @@ pub fn skybox_render(
             resolve_target: None,
             ops: wgpu::Operations {
                 load: wgpu::LoadOp::Load,
-                store: true,
+                store: wgpu::StoreOp::Store,
             },
         })],
         depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
             view: &depth.view,
             depth_ops: Some(wgpu::Operations {
                 load: wgpu::LoadOp::Load,
-                store: true,
+                store: wgpu::StoreOp::Store,
             }),
             stencil_ops: None,
         }),
@@ -1079,7 +1079,7 @@ pub fn scene_render(
             view: &depth.view,
             depth_ops: Some(wgpu::Operations {
                 load: wgpu::LoadOp::Load,
-                store: true,
+                store: wgpu::StoreOp::Store,
             }),
             stencil_ops: None,
         }),

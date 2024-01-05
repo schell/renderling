@@ -77,7 +77,7 @@ pub fn conduct_clear_pass(
                 resolve_target: None,
                 ops: wgpu::Operations {
                     load: wgpu::LoadOp::Clear(clear_color),
-                    store: true,
+                    store: wgpu::StoreOp::Store,
                 },
             })
         })
@@ -89,10 +89,11 @@ pub fn conduct_clear_pass(
             view,
             depth_ops: Some(wgpu::Operations {
                 load: wgpu::LoadOp::Clear(1.0),
-                store: true,
+                store: wgpu::StoreOp::Store,
             }),
             stencil_ops: None,
         }),
+        ..Default::default()
     });
 
     queue.submit(std::iter::once(encoder.finish()));

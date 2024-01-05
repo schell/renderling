@@ -1,5 +1,15 @@
 # devlog
 
+## Fri Jan 5, 2024
+
+The slab implementation in this repo has been spun off into its own thing.
+[`crabslab`](https://github.com/schell/crabslab) is now live!
+
+## Sometime around new years?
+
+I removed the bloom implementation completely.
+It will be reimplemented later as a physically-based bloom.
+
 ## Sat Dec 23, 2023
 
 I've ported over a majority of the tests to the GLTF-on-the-slab implementation.
