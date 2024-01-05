@@ -22,10 +22,11 @@ pub fn tonemapping(
             resolve_target: None,
             ops: wgpu::Operations {
                 load: wgpu::LoadOp::Load,
-                store: true,
+                store: wgpu::StoreOp::Store,
             },
         })],
         depth_stencil_attachment: None,
+        ..Default::default()
     });
     render_pass.set_pipeline(&hdr_frame.tonemapping_pipeline);
     render_pass.set_bind_group(0, &hdr_frame.bindgroup, &[]);

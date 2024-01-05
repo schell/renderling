@@ -726,10 +726,11 @@ pub fn stage_render(
                 view: &depth.view,
                 depth_ops: Some(wgpu::Operations {
                     load: wgpu::LoadOp::Load,
-                    store: true,
+                    store: wgpu::StoreOp::Store,
                 }),
                 stencil_ops: None,
             }),
+            ..Default::default()
         });
         render_pass.set_pipeline(&pipeline);
         render_pass.set_bind_group(0, &slab_buffers_bindgroup, &[]);

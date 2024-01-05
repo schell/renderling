@@ -2,13 +2,11 @@
 use snafu::prelude::*;
 use std::sync::Arc;
 
-use renderling::frame::FrameTextureView;
-use renderling::{Device, RenderTarget, View};
 use renderling::{
-    FontArc, Frame, GlyphCache, Id, OwnedSection, OwnedText, Queue, Renderling, UiDrawObject,
-    UiDrawObjectBuilder, UiMode, UiScene, UiVertex, ViewMut, WgpuStateError,
+    frame::FrameTextureView, Device, FontArc, Frame, GlyphCache, Id, OwnedSection, OwnedText,
+    Queue, RenderTarget, Renderling, UiDrawObject, UiDrawObjectBuilder, UiMode, UiRenderPipeline,
+    UiScene, UiSceneError, UiVertex, View, ViewMut, WgpuStateError,
 };
-use renderling::{UiRenderPipeline, UiSceneError};
 
 pub use renderling::math::{UVec2, Vec2, Vec4};
 
@@ -419,7 +417,7 @@ impl Gpui {
                         resolve_target: None,
                         ops: wgpu::Operations {
                             load: wgpu::LoadOp::Load,
-                            store: true,
+                            store: wgpu::StoreOp::Store,
                         },
                     })],
                     depth_stencil_attachment: None,

@@ -92,7 +92,7 @@ impl HdrSurface {
             resolve_target: None,
             ops: wgpu::Operations {
                 load: wgpu::LoadOp::Load,
-                store: true,
+                store: wgpu::StoreOp::Store,
             },
         })]
     }
