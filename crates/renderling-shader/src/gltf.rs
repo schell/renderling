@@ -1,8 +1,13 @@
 //! Gltf types that are used in shaders.
 use crabslab::{Array, Id, Slab, SlabItem};
-use glam::{Vec2, Vec3, Vec4};
+use glam::{Mat4, Vec2, Vec3, Vec4};
 
-use crate::{pbr::PbrMaterial, texture::GpuTexture};
+use crate::{
+    pbr::Material,
+    stage::{Camera, Transform, Vertex},
+    texture::GpuTexture,
+    IsMatrix,
+};
 #[repr(transparent)]
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[derive(Default, Clone, Copy, SlabItem)]
@@ -602,7 +607,7 @@ impl GltfAccessor {
 #[derive(Default, Clone, Copy, SlabItem)]
 pub struct GltfPrimitive {
     pub vertex_count: u32,
-    pub material: Id<PbrMaterial>,
+    pub material: Id<Material>,
     pub indices: Id<GltfAccessor>,
     pub positions: Id<GltfAccessor>,
     pub normals: Id<GltfAccessor>,
@@ -1051,8 +1056,8 @@ pub struct GltfDocument {
     pub buffers: Array<GltfBuffer>,
     pub cameras: Array<GltfCamera>,
     // TODO: Think about making a `GltfMaterial`
-    pub materials: Array<PbrMaterial>,
-    pub default_material: Id<PbrMaterial>,
+    pub materials: Array<Material>,
+    pub default_material: Id<Material>,
     pub meshes: Array<GltfMesh>,
     pub nodes: Array<GltfNode>,
     pub scenes: Array<GltfScene>,
@@ -1060,4 +1065,79 @@ pub struct GltfDocument {
     // TODO: Think about making a `GltfTexture`
     pub textures: Array<GpuTexture>,
     pub views: Array<GltfBufferView>,
+}
+
+/// A rendering "command" that draws a single mesh from a top-level node.
+#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
+#[repr(C)]
+#[derive(Default, Clone, Copy, PartialEq, SlabItem)]
+pub struct RenderUnit {
+    // Which node are we rendering, and what is the path through its
+    // ancestors to get to it.
+    pub node_path: Array<Id<GltfNode>>,
+    // Index of the mesh within the child node that we're rendering.
+    pub mesh_index: u32,
+    // Index of the primitive within the mesh that we're rendering.
+    pub primitive_index: u32,
+    // Points to a `Camera` in the stage's slab.
+    pub camera: Id<Camera>,
+    // Points to a top-level `Transform` in the stage's slab.
+    //
+    // This is used to transform your GLTF models.
+    pub transform: Id<Transform>,
+    // Number of vertices to draw for this unit.
+    //
+    // This is a cache for convenience on CPU.
+    pub vertex_count: u32,
+}
+
+impl crate::stage::IsRendering for RenderUnit {
+    fn vertex_count(&self) -> u32 {
+        self.vertex_count
+    }
+
+    fn wrap(id: Id<Self>) -> crate::stage::Rendering {
+        crate::stage::Rendering::Gltf(id)
+    }
+}
+
+impl RenderUnit {
+    pub fn get_vertex_details(
+        &self,
+        vertex_index: u32,
+        slab: &[u32],
+    ) -> (Vertex, Transform, Id<Material>) {
+        let t = slab.read(self.transform);
+        crate::println!("t: {t:#?}");
+        let mut model =
+            glam::Mat4::from_scale_rotation_translation(t.scale, t.rotation, t.translation);
+        crate::println!("model: {model:#?}");
+        let mut node = GltfNode::default();
+        for id_id in self.node_path.iter() {
+            let node_id = slab.read(id_id);
+            crate::println!("  node_id: {node_id:?}");
+            node = slab.read(node_id);
+            crate::println!("  node.scale: {:?}", node.scale);
+            crate::println!("  node.rotation: {:?}", node.rotation);
+            crate::println!("  node.translation: {:?}", node.translation);
+            let node_transform =
+                Mat4::from_scale_rotation_translation(node.scale, node.rotation, node.translation);
+            model = model * node_transform;
+        }
+
+        crate::println!("model(after): {model:#?}");
+        // TODO: check nodes for skinning
+        let mesh = slab.read(node.mesh);
+        let primitive_id = mesh.primitives.at(self.primitive_index as usize);
+        let primitive = slab.read(primitive_id);
+        let material = primitive.material;
+        let vertex = primitive.get_vertex(vertex_index as usize, slab);
+        let (s, r, t) = model.to_scale_rotation_translation_or_id();
+        let transform = Transform {
+            translation: t,
+            rotation: r,
+            scale: s,
+        };
+        (vertex, transform, material)
+    }
 }

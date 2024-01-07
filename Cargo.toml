@@ -15,7 +15,7 @@ resolver = "2"
 [workspace.dependencies]
 async-channel = "1.8"
 bytemuck = { version = "1.13.0", features = ["derive"] }
-crabslab = { version = "0.1.3", default-features = false }
+crabslab = { version = "0.2.0", default-features = false }
 futures-lite = "1.13"
 gltf = { git = 'https://github.com/gltf-rs/gltf.git', features = ["KHR_lights_punctual", "KHR_materials_unlit", "KHR_materials_emissive_strength", "extras"] }
 image = "0.24"

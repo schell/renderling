@@ -11,7 +11,7 @@ use crabslab::{Array, CpuSlab, GrowableSlab, Id, Slab, SlabItem, WgpuBuffer};
 use moongraph::{View, ViewMut};
 use renderling_shader::{
     debug::DebugMode,
-    stage::{light::Light, Camera, RenderUnit, StageLegend},
+    stage::{light::Light, Camera, IsRendering, Rendering, StageLegend},
     texture::GpuTexture,
 };
 use snafu::Snafu;
@@ -348,7 +348,7 @@ impl Stage {
             log::trace!("creating stage render pipeline");
             let label = Some("stage render pipeline");
             let vertex_shader =
-                device.create_shader_module(wgpu::include_spirv!("linkage/stage-gltf_vertex.spv"));
+                device.create_shader_module(wgpu::include_spirv!("linkage/stage-vertex.spv"));
             let fragment_shader = device
                 .create_shader_module(wgpu::include_spirv!("linkage/stage-gltf_fragment.spv"));
             let stage_slab_buffers_layout = Stage::buffers_bindgroup_layout(device);
@@ -363,7 +363,7 @@ impl Stage {
                 layout: Some(&layout),
                 vertex: wgpu::VertexState {
                     module: &vertex_shader,
-                    entry_point: "stage::gltf_vertex",
+                    entry_point: "stage::vertex",
                     buffers: &[],
                 },
                 primitive: wgpu::PrimitiveState {
@@ -530,12 +530,16 @@ impl Stage {
         }
     }
 
-    /// Draw the [`RenderUnit`] each frame, and immediately return its `Id`.
-    pub fn draw_unit(&mut self, unit: &RenderUnit) -> Id<RenderUnit> {
-        let id = self.append(unit);
+    /// Draw a rendering each frame.
+    ///
+    /// Returns the id of the stored `T` and the id of the [`Rendering`].
+    pub fn draw_unit<T: IsRendering>(&mut self, unit: &T) -> (Id<T>, Id<Rendering>) {
+        let unit_id = self.append(unit);
+        let rendering = T::wrap(unit_id);
+        let id = self.append(&rendering);
         let draw = DrawUnit {
             id,
-            vertex_count: unit.vertex_count,
+            vertex_count: unit.vertex_count(),
             visible: true,
         };
         // UNWRAP: if we can't acquire the lock we want to panic.
@@ -545,11 +549,11 @@ impl Stage {
                 units.push(draw);
             }
         }
-        id
+        (unit_id, id)
     }
 
     /// Erase the [`RenderUnit`] with the given `Id` from the stage.
-    pub fn erase_unit(&self, id: Id<RenderUnit>) {
+    pub fn erase_unit(&self, id: Id<Rendering>) {
         let mut draws = self.draws.write().unwrap();
         match draws.deref_mut() {
             StageDrawStrategy::Direct(units) => {
@@ -568,7 +572,7 @@ impl Stage {
     }
 
     /// Show the [`RenderUnit`] with the given `Id` for rendering.
-    pub fn show_unit(&self, id: Id<RenderUnit>) {
+    pub fn show_unit(&self, id: Id<Rendering>) {
         let mut draws = self.draws.write().unwrap();
         match draws.deref_mut() {
             StageDrawStrategy::Direct(units) => {
@@ -582,7 +586,7 @@ impl Stage {
     }
 
     /// Hide the [`RenderUnit`] with the given `Id` from rendering.
-    pub fn hide_unit(&self, id: Id<RenderUnit>) {
+    pub fn hide_unit(&self, id: Id<Rendering>) {
         let mut draws = self.draws.write().unwrap();
         match draws.deref_mut() {
             StageDrawStrategy::Direct(units) => {
@@ -680,7 +684,7 @@ impl Stage {
 /// A unit of work to be drawn.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct DrawUnit {
-    pub id: Id<RenderUnit>,
+    pub id: Id<Rendering>,
     pub vertex_count: u32,
     pub visible: bool,
 }

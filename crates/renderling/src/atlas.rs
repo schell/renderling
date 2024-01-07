@@ -523,8 +523,8 @@ mod test {
     use crate::{
         shader::{
             gltf::*,
-            pbr::PbrMaterial,
-            stage::{Camera, LightingModel, RenderUnit, Transform, Vertex},
+            pbr::Material,
+            stage::{Camera, Transform, Vertex},
             texture::{GpuTexture, TextureAddressMode, TextureModes},
         },
         Renderling,
@@ -574,9 +574,9 @@ mod test {
             .modes
             .set_wrap_t(TextureAddressMode::CLAMP_TO_EDGE);
         let texels_tex_id = stage.append(&texels_tex);
-        let material_id = stage.append(&PbrMaterial {
+        let material_id = stage.append(&Material {
             albedo_texture: texels_tex_id,
-            lighting_model: LightingModel::NO_LIGHTING,
+            has_lighting: false,
             ..Default::default()
         });
         let mesh = stage
@@ -667,21 +667,21 @@ mod test {
             .set_wrap_t(TextureAddressMode::MIRRORED_REPEAT);
 
         let albedo_texture = stage.append(&clamp_tex);
-        let clamp_material_id = stage.append(&PbrMaterial {
+        let clamp_material_id = stage.append(&Material {
             albedo_texture,
-            lighting_model: LightingModel::NO_LIGHTING,
+            has_lighting: false,
             ..Default::default()
         });
         let albedo_texture = stage.append(&repeat_tex);
-        let repeat_material_id = stage.append(&PbrMaterial {
+        let repeat_material_id = stage.append(&Material {
             albedo_texture,
-            lighting_model: LightingModel::NO_LIGHTING,
+            has_lighting: false,
             ..Default::default()
         });
         let albedo_texture = stage.append(&mirror_tex);
-        let mirror_material_id = stage.append(&PbrMaterial {
+        let mirror_material_id = stage.append(&Material {
             albedo_texture,
-            lighting_model: LightingModel::NO_LIGHTING,
+            has_lighting: false,
             ..Default::default()
         });
 
@@ -831,23 +831,23 @@ mod test {
             .set_wrap_t(TextureAddressMode::MIRRORED_REPEAT);
 
         let albedo_texture = stage.append(&clamp_tex);
-        let clamp_material_id = stage.append(&PbrMaterial {
+        let clamp_material_id = stage.append(&Material {
             albedo_texture,
-            lighting_model: LightingModel::NO_LIGHTING,
+            has_lighting: false,
             ..Default::default()
         });
 
         let albedo_texture = stage.append(&repeat_tex);
-        let repeat_material_id = stage.append(&PbrMaterial {
+        let repeat_material_id = stage.append(&Material {
             albedo_texture,
-            lighting_model: LightingModel::NO_LIGHTING,
+            has_lighting: false,
             ..Default::default()
         });
 
         let albedo_texture = stage.append(&mirror_tex);
-        let mirror_material_id = stage.append(&PbrMaterial {
+        let mirror_material_id = stage.append(&Material {
             albedo_texture,
-            lighting_model: LightingModel::NO_LIGHTING,
+            has_lighting: false,
             ..Default::default()
         });
 

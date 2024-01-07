@@ -11,21 +11,18 @@ use glam::{Vec2, Vec3, Vec4, Vec4Swizzles};
 use spirv_std::num_traits::Float;
 
 use crate::{
-    math,
-    stage::{light::LightStyle, GpuLight, LightType, LightingModel},
-    texture::GpuTexture,
-    IsSampler, IsVector, Sample2d, SampleCube,
+    math, stage::light::LightStyle, texture::GpuTexture, IsSampler, IsVector, Sample2d, SampleCube,
 };
 
 /// Represents a material on the GPU.
 ///
-/// `PbrMaterial` is capable of representing many material types.
+/// `Material` is capable of representing many material types.
 /// Use the appropriate builder for your material type from
 /// [`SceneBuilder`](crate::SceneBuilder).
 #[repr(C)]
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[derive(Clone, Copy, PartialEq, SlabItem)]
-pub struct PbrMaterial {
+pub struct Material {
     // x, y, z is emissive factor, default [0.0, 0.0, 0.0]
     // w is emissive strength multiplier (gltf's KHR_materials_emissive_strength extension),
     // default 1.0
@@ -47,11 +44,11 @@ pub struct PbrMaterial {
     pub ao_tex_coord: u32,
     pub emissive_tex_coord: u32,
 
-    pub lighting_model: LightingModel,
+    pub has_lighting: bool,
     pub ao_strength: f32,
 }
 
-impl Default for PbrMaterial {
+impl Default for Material {
     fn default() -> Self {
         Self {
             emissive_factor: Vec3::ZERO.extend(1.0),
@@ -67,7 +64,7 @@ impl Default for PbrMaterial {
             metallic_roughness_tex_coord: 0,
             normal_tex_coord: 0,
             ao_tex_coord: 0,
-            lighting_model: LightingModel::PBR_LIGHTING,
+            has_lighting: true,
             ao_strength: 0.0,
             emissive_texture: Id::NONE,
             emissive_tex_coord: 0,
@@ -226,116 +223,6 @@ pub fn sample_brdf<T: Sample2d<Sampler = S>, S: IsSampler>(
     let v = (camera_pos - in_pos).alt_norm_or_zero();
     brdf.sample_by_lod(*brdf_sampler, Vec2::new(n.dot(v).max(0.0), roughness), 0.0)
         .xy()
-}
-
-#[allow(clippy::too_many_arguments)]
-pub fn shade_fragment(
-    // camera's position in world space
-    camera_pos: Vec3,
-    // normal of the fragment
-    in_norm: Vec3,
-    // position of the fragment in world space
-    in_pos: Vec3,
-    // base color of the fragment
-    albedo: Vec3,
-    metallic: f32,
-    roughness: f32,
-    ao: f32,
-    emissive: Vec3,
-    irradiance: Vec3,
-    prefiltered: Vec3,
-    brdf: Vec2,
-
-    lights: &[GpuLight],
-) -> Vec4 {
-    let n = in_norm.alt_norm_or_zero();
-    let v = (camera_pos - in_pos).alt_norm_or_zero();
-
-    // reflectance
-    let mut lo = Vec3::ZERO;
-    #[allow(clippy::needless_range_loop)]
-    for i in 0..lights.len() {
-        // calculate per-light radiance
-        let light = lights[i];
-
-        // determine the light ray and the radiance
-        match light.light_type {
-            LightType::END_OF_LIGHTS => {
-                break;
-            }
-            LightType::POINT_LIGHT => {
-                let frag_to_light = light.position.xyz() - in_pos;
-                let distance = frag_to_light.length();
-                if distance == 0.0 {
-                    continue;
-                }
-                let l = frag_to_light.alt_norm_or_zero();
-                let attenuation = light.intensity * 1.0 / (distance * distance);
-                lo += outgoing_radiance(
-                    light.color,
-                    albedo,
-                    attenuation,
-                    v,
-                    l,
-                    n,
-                    metallic,
-                    roughness,
-                );
-            }
-
-            LightType::SPOT_LIGHT => {
-                let frag_to_light = light.position.xyz() - in_pos;
-                let distance = frag_to_light.length();
-                if distance == 0.0 {
-                    continue;
-                }
-                let l = frag_to_light.alt_norm_or_zero();
-                let theta: f32 = l.dot(light.direction.xyz().alt_norm_or_zero());
-                let epsilon: f32 = light.inner_cutoff - light.outer_cutoff;
-                let attenuation: f32 =
-                    light.intensity * ((theta - light.outer_cutoff) / epsilon).clamp(0.0, 1.0);
-                lo += outgoing_radiance(
-                    light.color,
-                    albedo,
-                    attenuation,
-                    v,
-                    l,
-                    n,
-                    metallic,
-                    roughness,
-                );
-            }
-
-            LightType::DIRECTIONAL_LIGHT => {
-                let l = -light.direction.xyz().alt_norm_or_zero();
-                let attenuation = light.intensity;
-                lo += outgoing_radiance(
-                    light.color,
-                    albedo,
-                    attenuation,
-                    v,
-                    l,
-                    n,
-                    metallic,
-                    roughness,
-                );
-            }
-            _ => {}
-        }
-    }
-
-    // calculate reflectance at normal incidence; if dia-electric (like plastic) use
-    // F0 of 0.04 and if it's a metal, use the albedo color as F0 (metallic
-    // workflow)
-    let f0: Vec3 = Vec3::splat(0.04).lerp(albedo, metallic);
-    let cos_theta = n.dot(v).max(0.0);
-    let fresnel = fresnel_schlick_roughness(cos_theta, f0, roughness);
-    let ks = fresnel;
-    let kd = (1.0 - ks) * (1.0 - metallic);
-    let diffuse = irradiance * albedo;
-    let specular = prefiltered * (fresnel * brdf.x + brdf.y);
-    let color = (kd * diffuse + specular) * ao + lo + emissive;
-    color.extend(1.0)
 }
 
 #[allow(clippy::too_many_arguments)]

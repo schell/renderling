@@ -12,12 +12,10 @@ readme = "../../README.md"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-default = ["gltf", "text", "raw-window-handle", "winit"]
-text = ["ab_glyph", "glyph_brush"]
+default = ["gltf", "raw-window-handle", "winit"]
 wasm = ["wgpu/fragile-send-sync-non-atomic-wasm"]
 
 [dependencies]
-ab_glyph = { version = "0.2", optional = true }
 any_vec = "0.13"
 async-channel = {workspace=true}
 bytemuck = { workspace = true }
@@ -26,7 +24,6 @@ crunch = "0.5"
 futures-lite = {workspace=true}
 glam = { workspace = true, default-features = false, features = ["bytemuck", "libm"] }
 gltf = { workspace = true, optional = true }
-glyph_brush = { version = "0.7", optional = true }
 half = "2.3"
 image = { workspace = true, features = ["hdr"] }
 log = { workspace = true }

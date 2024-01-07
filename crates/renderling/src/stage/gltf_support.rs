@@ -3,8 +3,8 @@ use super::*;
 use crate::{
     shader::{
         gltf::*,
-        pbr::PbrMaterial,
-        stage::{Camera, LightingModel},
+        pbr::Material,
+        stage::Camera,
         texture::{GpuTexture, TextureAddressMode, TextureModes},
     },
     AtlasImage,
@@ -258,14 +258,14 @@ impl Stage {
         }
 
         log::trace!("Creating materials");
-        let mut default_material = Id::<PbrMaterial>::NONE;
-        let materials = self.allocate_array::<PbrMaterial>(document.materials().len());
+        let mut default_material = Id::<Material>::NONE;
+        let materials = self.allocate_array::<Material>(document.materials().len());
         for material in document.materials() {
             let material_id = if let Some(index) = material.index() {
                 materials.at(index)
             } else {
                 // Allocate some extra space for this default material
-                default_material = self.allocate::<PbrMaterial>();
+                default_material = self.allocate::<Material>();
                 default_material
             };
             let name = material.name().map(String::from);
@@ -298,7 +298,7 @@ impl Stage {
                         (Id::NONE, 0)
                     };
 
-                PbrMaterial {
+                Material {
                     albedo_texture,
                     albedo_tex_coord,
                     albedo_factor: pbr.base_color_factor().into(),
@@ -386,7 +386,7 @@ impl Stage {
                 let emissive_factor = Vec3::from(material.emissive_factor())
                     .extend(material.emissive_strength().unwrap_or(1.0));
 
-                PbrMaterial {
+                Material {
                     albedo_factor,
                     metallic_factor,
                     roughness_factor,
@@ -402,7 +402,7 @@ impl Stage {
                     emissive_factor,
                     emissive_texture,
                     emissive_tex_coord,
-                    lighting_model: LightingModel::PBR_LIGHTING,
+                    has_lighting: true,
                     ..Default::default()
                 }
             };
@@ -1011,7 +1011,7 @@ impl Stage {
         camera_id: Id<Camera>,
         node: gltf::Node<'a>,
         parents: Vec<Id<GltfNode>>,
-    ) -> Vec<Id<RenderUnit>> {
+    ) -> Vec<(Id<RenderUnit>, Id<Rendering>)> {
         if let Some(_light) = node.light() {
             // TODO: Support transforming lights based on node transforms
             ////let light = gpu_doc.lights.at(light.index());
@@ -1082,7 +1082,7 @@ impl Stage {
         gpu_doc: &GltfDocument,
         camera_id: Id<Camera>,
         node: gltf::Node<'_>,
-    ) -> Vec<Id<RenderUnit>> {
+    ) -> Vec<(Id<RenderUnit>, Id<Rendering>)> {
         self.draw_gltf_node_with(gpu_doc, camera_id, node, vec![])
     }
 
@@ -1093,7 +1093,7 @@ impl Stage {
         gpu_doc: &GltfDocument,
         camera_id: Id<Camera>,
         scene: gltf::Scene<'_>,
-    ) -> Vec<Id<RenderUnit>> {
+    ) -> Vec<(Id<RenderUnit>, Id<Rendering>)> {
         scene
             .nodes()
             .flat_map(|node| self.draw_gltf_node(gpu_doc, camera_id, node))
@@ -1109,11 +1109,17 @@ impl Stage {
         &mut self,
         vertices: impl IntoIterator<Item = Vertex>,
         indices: impl IntoIterator<Item = u32>,
-        material: Id<PbrMaterial>,
+        material: Id<Material>,
     ) -> GltfPrimitive {
         let vertices: Vec<Vertex> = vertices.into_iter().collect();
         let indices: Vec<u32> = indices.into_iter().collect();
-        let vertex_count = vertices.len().max(indices.len()) as u32;
+        let indices_len: usize = indices.len();
+        let vertices_len: usize = vertices.len();
+        let vertex_count = if vertices_len > indices_len {
+            vertices_len
+        } else {
+            indices_len
+        } as u32;
         let indices = if indices.is_empty() {
             Id::NONE
         } else {
@@ -1283,7 +1289,7 @@ impl<'a> GltfMeshBuilder<'a> {
         &mut self,
         vertices: impl IntoIterator<Item = Vertex>,
         indices: impl IntoIterator<Item = u32>,
-        material_id: Id<PbrMaterial>,
+        material_id: Id<Material>,
     ) {
         let primitive = self.stage.new_primitive(vertices, indices, material_id);
         self.primitives.push(primitive);
@@ -1293,7 +1299,7 @@ impl<'a> GltfMeshBuilder<'a> {
         mut self,
         vertices: impl IntoIterator<Item = Vertex>,
         indices: impl IntoIterator<Item = u32>,
-        material_id: Id<PbrMaterial>,
+        material_id: Id<Material>,
     ) -> Self {
         self.add_primitive(vertices, indices, material_id);
         self
@@ -1314,14 +1320,13 @@ mod test {
     use crate::{
         shader::{
             gltf::*,
-            pbr::PbrMaterial,
-            stage::{Camera, LightingModel, RenderUnit, Transform, Vertex},
+            pbr::Material,
+            stage::{Camera, Transform, Vertex},
         },
         Renderling, Stage,
     };
     use crabslab::{Array, GrowableSlab, Id, Slab};
     use glam::{Vec2, Vec3, Vec4, Vec4Swizzles};
-    use renderling_shader::stage::{GpuConstants, GpuEntity};
 
     #[test]
     fn get_vertex_count_primitive_sanity() {
@@ -1525,9 +1530,9 @@ mod test {
         assert!(!gpu_doc.textures.is_empty());
         let albedo_texture_id = gpu_doc.textures.at(0);
         assert!(albedo_texture_id.is_some());
-        let material_id = stage.append(&PbrMaterial {
+        let material_id = stage.append(&Material {
             albedo_texture: albedo_texture_id,
-            lighting_model: LightingModel::NO_LIGHTING,
+            has_lighting: false,
             ..Default::default()
         });
         println!("material_id: {:#?}", material_id);
@@ -1720,7 +1725,7 @@ mod test {
         let (projection, view) = crate::camera::default_ortho2d(100.0, 100.0);
         let camera = stage.append(&Camera::new(projection, view));
         let node_path = stage.append_array(&[nodes.at(0)]);
-        let unit_id = stage.draw_unit(&RenderUnit {
+        let (_, rendering_id) = stage.draw_unit(&RenderUnit {
             camera,
             node_path,
             mesh_index: 0,
@@ -1730,7 +1735,7 @@ mod test {
         });
 
         let data = stage.read_slab().unwrap();
-        let invocation = VertexInvocation::invoke(unit_id.inner(), 0, &data);
+        let invocation = VertexInvocation::invoke(rendering_id.inner(), 0, &data);
         println!("invoctaion: {invocation:#?}");
 
         let img = r.render_linear_image().unwrap();
@@ -1775,39 +1780,6 @@ mod test {
                 v.vertex_index,
                 slab,
                 &mut v.out_camera,
-                &mut v.out_material,
-                &mut v.out_color,
-                &mut v.out_uv0,
-                &mut v.out_uv1,
-                &mut v.out_norm,
-                &mut v.out_tangent,
-                &mut v.out_bitangent,
-                &mut v.out_pos,
-                &mut v.clip_pos,
-            );
-            v.ndc_pos = v.clip_pos.xyz() / v.clip_pos.w;
-            v
-        }
-
-        #[allow(dead_code)]
-        pub fn invoke_legacy(
-            instance_index: u32,
-            vertex_index: u32,
-            constants: &GpuConstants,
-            vertices: &[Vertex],
-            entities: &[GpuEntity],
-        ) -> Self {
-            let mut v = Self {
-                instance_index,
-                vertex_index,
-                ..Default::default()
-            };
-            renderling_shader::stage::main_vertex_scene(
-                v.instance_index,
-                v.vertex_index,
-                &constants,
-                &vertices,
-                &entities,
                 &mut v.out_material,
                 &mut v.out_color,
                 &mut v.out_uv0,

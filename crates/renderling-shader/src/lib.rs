@@ -19,6 +19,7 @@ pub mod debug;
 pub mod gltf;
 pub mod math;
 pub mod pbr;
+pub mod sdf;
 pub mod skybox;
 pub mod stage;
 pub mod texture;

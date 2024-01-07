@@ -1,5 +1,15 @@
 # devlog
 
+## Mon Jan 8, 2024
+
+I added another ty var to `crabslab::Offset` to help with pointer math.
+
+I've also added yet another layer of indirection around rendering.
+Now the top level unit of rendering is `Rendering`, which is an enum of
+`Id`s that point to different renderable things. There's an uber-vertex-shader
+that tracks this and proxies to the correct sub-shader. This is in anticipation
+of adding SDF rendering.
+
 ## Fri Jan 5, 2024
 
 The slab implementation in this repo has been spun off into its own thing.
