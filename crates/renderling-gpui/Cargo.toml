@@ -10,14 +10,16 @@ default = ["winit"]
 winit = ["renderling/winit", "dep:winit"]
 
 [dependencies]
+ab_glyph = { version = "0.2" }
+crabslab = "0.1.3"
+glam = { workspace = true, default-features = false, features = ["bytemuck", "libm"] }
+glyph_brush = { version = "0.7" }
 image = { version = "^0.24" }
 log = "^0.4"
-renderling = { path = "../renderling", default-features = false, features = ["text"] }
+renderling = { path = "../renderling" }
 snafu = "^0.7"
-winit = { version = "^0.27", optional = true }
-
-glam = { workspace = true, default-features = false, features = ["bytemuck", "libm"] }
 wgpu = { workspace = true }
+winit = { version = "^0.27", optional = true }
 
 [dev-dependencies]
 env_logger = "^0.10"

@@ -99,8 +99,6 @@ pub mod shader {
     pub use renderling_shader::*;
 }
 
-pub use renderling_shader::stage::{GpuEntityInfo, LightingModel};
-
 /// A CPU-side texture sampler.
 ///
 /// Provided primarily for testing purposes.
@@ -164,8 +162,9 @@ mod test {
     use pretty_assertions::assert_eq;
     use renderling_shader::{
         gltf as gl,
-        pbr::PbrMaterial,
-        stage::{light::*, Camera, RenderUnit, Transform, Vertex},
+        gltf::RenderUnit,
+        pbr::Material,
+        stage::{light::*, Camera, Transform, Vertex},
     };
 
     #[test]
@@ -398,7 +397,7 @@ mod test {
             scale: Vec3::new(6.0, 6.0, 6.0),
             rotation: Quat::from_axis_angle(Vec3::Y, std::f32::consts::FRAC_PI_4),
         });
-        let cube_two = stage.draw_unit(&render_unit);
+        let (_, cube_two_rendering) = stage.draw_unit(&render_unit);
 
         // we should see two colored cubes
         let img = r.render_image().unwrap();
@@ -406,14 +405,14 @@ mod test {
         let img_before = img;
 
         // update cube two making it invisible
-        stage.hide_unit(cube_two);
+        stage.hide_unit(cube_two_rendering);
 
         // we should see only one colored cube
         let img = r.render_image().unwrap();
         img_diff::assert_img_eq("cmy_cube/visible_after.png", img);
 
         // update cube two making in visible again
-        stage.show_unit(cube_two);
+        stage.show_unit(cube_two_rendering);
 
         // we should see two colored cubes again
         let img = r.render_image().unwrap();
@@ -465,7 +464,7 @@ mod test {
             ..Default::default()
         });
 
-        let cube = stage.draw_unit(&RenderUnit {
+        let (cube, _) = stage.draw_unit(&RenderUnit {
             camera,
             vertex_count: cube_vertex_count as u32,
             node_path,
@@ -551,9 +550,9 @@ mod test {
         let sandstone_tex = textures[0];
         let dirt_tex = textures[1];
         let sandstone_tex_id = stage.append(&sandstone_tex);
-        let material_id = stage.append(&PbrMaterial {
+        let material_id = stage.append(&Material {
             albedo_texture: sandstone_tex_id,
-            lighting_model: LightingModel::NO_LIGHTING,
+            has_lighting: false,
             ..Default::default()
         });
         let vertices = gpu_uv_unit_cube();
@@ -613,9 +612,9 @@ mod test {
         let img = AtlasImage::from_path("../../img/cheetah.jpg").unwrap();
         let textures = stage.set_images([img]).unwrap();
         let textures = stage.append_array(&textures);
-        let cheetah_material = stage.append(&PbrMaterial {
+        let cheetah_material = stage.append(&Material {
             albedo_texture: textures.at(0),
-            lighting_model: LightingModel::NO_LIGHTING,
+            has_lighting: false,
             ..Default::default()
         });
 
@@ -741,7 +740,7 @@ mod test {
         let lights = stage.append_array(&[dir_red.into(), dir_green.into(), dir_blue.into()]);
         stage.set_lights(lights);
 
-        let material = stage.append(&PbrMaterial::default());
+        let material = stage.append(&Material::default());
         let verts = renderling_shader::math::unit_cube()
             .into_iter()
             .map(|(p, n)| Vertex {
@@ -815,19 +814,19 @@ mod test {
         let (projection, view) = camera::default_ortho2d(100.0, 100.0);
         let camera = stage.append(&Camera::new(projection, view));
         let size = 1.0;
-        let cyan_material = stage.append(&PbrMaterial {
+        let cyan_material = stage.append(&Material {
             albedo_factor: Vec4::new(0.0, 1.0, 1.0, 1.0),
-            lighting_model: LightingModel::NO_LIGHTING,
+            has_lighting: false,
             ..Default::default()
         });
-        let yellow_material = stage.append(&PbrMaterial {
+        let yellow_material = stage.append(&Material {
             albedo_factor: Vec4::new(1.0, 1.0, 0.0, 1.0),
-            lighting_model: LightingModel::NO_LIGHTING,
+            has_lighting: false,
             ..Default::default()
         });
-        let red_material = stage.append(&PbrMaterial {
+        let red_material = stage.append(&Material {
             albedo_factor: Vec4::new(1.0, 0.0, 0.0, 1.0),
-            lighting_model: LightingModel::NO_LIGHTING,
+            has_lighting: false,
             ..Default::default()
         });
 
@@ -1007,7 +1006,7 @@ mod test {
                 let metallic = j as f32 / (k - 1) as f32;
                 let y = (diameter + spacing) * j as f32;
                 let mut prim = sphere_primitive;
-                prim.material = stage.append(&PbrMaterial {
+                prim.material = stage.append(&Material {
                     albedo_factor: Vec4::new(1.0, 1.0, 1.0, 1.0),
                     metallic_factor: metallic,
                     roughness_factor: roughness,
@@ -1040,11 +1039,5 @@ mod test {
 
         let img = r.render_linear_image().unwrap();
         img_diff::assert_img_eq("pbr/metallic_roughness_spheres.png", img);
-    }
-
-    #[test]
-    fn is_skin_sanity() {
-        let info = GpuEntityInfo(2048);
-        assert!(info.is_skin());
     }
 }

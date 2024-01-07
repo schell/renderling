@@ -1,17 +1,28 @@
 //! GPU user interface.
+use crabslab::{GrowableSlab, Slab, SlabItem};
 use snafu::prelude::*;
-use std::sync::Arc;
+use std::{
+    ops::{Deref, DerefMut},
+    sync::Arc,
+};
 
 use renderling::{
-    frame::FrameTextureView, Device, FontArc, Frame, GlyphCache, Id, OwnedSection, OwnedText,
-    Queue, RenderTarget, Renderling, UiDrawObject, UiDrawObjectBuilder, UiMode, UiRenderPipeline,
-    UiScene, UiSceneError, UiVertex, View, ViewMut, WgpuStateError,
+    shader::stage::{Camera, RenderUnit},
+    Device, Frame, Id, Queue, RenderTarget, Renderling, Stage, View, ViewMut, WgpuStateError,
 };
+
+/*
+UiDrawObject,
+UiDrawObjectBuilder, UiMode, UiRenderPipeline, UiScene, UiSceneError, UiVertex,
+*/
 
 pub use renderling::math::{UVec2, Vec2, Vec4};
 
 mod elements;
 pub use elements::*;
+
+mod text;
+pub use text::*;
 
 #[derive(Debug, Snafu)]
 pub enum GpuiError {}
@@ -177,48 +188,16 @@ impl EventState {
     }
 }
 
-pub enum Paint<'a, 'b> {
-    Drawing(Box<dyn FnOnce(&mut wgpu::RenderPass<'a>, &'a wgpu::BindGroup) + 'b>),
-    Overlay(Box<dyn FnOnce(&mut wgpu::RenderPass<'a>, &'a wgpu::BindGroup) + 'b>),
-}
-
-impl<'a, 'b> Paint<'a, 'b> {
-    pub fn drawing(f: impl FnOnce(&mut wgpu::RenderPass<'a>, &'a wgpu::BindGroup) + 'b) -> Self {
-        Paint::Drawing(Box::new(f))
-    }
-
-    pub fn overlay(f: impl FnOnce(&mut wgpu::RenderPass<'a>, &'a wgpu::BindGroup) + 'b) -> Self {
-        Paint::Overlay(Box::new(f))
-    }
-
-    fn draw(
-        self,
-        render_pass: &mut wgpu::RenderPass<'a>,
-        default_texture_bindgroup: &'a wgpu::BindGroup,
-    ) {
-        (match self {
-            Paint::Drawing(f) => f,
-            Paint::Overlay(f) => f,
-        })(render_pass, default_texture_bindgroup)
-    }
-}
-
 /// Implemented by every user interface element.
 pub trait Element {
     type OutputEvent;
-
-    /// Layout the element within the constraining bounding box, returning the
+    /// Update the element within the constraining bounding box, returning the
     /// element's actual bounding box.
-    fn layout(&mut self, constraint: AABB) -> AABB;
-
-    /// 'Paint' the element into the given render pass.
-    fn paint<'a, 'b: 'a>(
-        &'b mut self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        // render_pass: &mut wgpu::RenderPass<'a>,
-        // default_texture_bindgroup: &'a wgpu::BindGroup,
-    ) -> Vec<Paint<'a, 'b>>;
+    ///
+    /// The element is responsible for updating its own state on the GPU
+    /// and the state of its children.
+    fn update(&mut self, gpui: &mut Gpui, constraint: AABB) -> AABB;
+    //fn delete(self, gpui: &mut Gpui);
 
     /// Handle a global event and react with a local event.
     fn event(&mut self, event: Event) -> Self::OutputEvent;
@@ -227,23 +206,11 @@ pub trait Element {
 impl<A: Element, B: Element> Element for (A, B) {
     type OutputEvent = (A::OutputEvent, B::OutputEvent);
 
-    fn layout(&mut self, constraint: AABB) -> AABB {
+    fn update(&mut self, gpui: &mut Gpui, constraint: AABB) -> AABB {
         let mut aabb = AABB::default();
-        aabb = aabb.union(self.0.layout(constraint));
-        aabb = aabb.union(self.1.layout(constraint));
+        aabb = aabb.union(self.0.update(gpui, constraint));
+        aabb = aabb.union(self.1.update(gpui, constraint));
         aabb
-    }
-
-    fn paint<'a, 'b: 'a>(
-        &'b mut self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        // render_pass: &mut wgpu::RenderPass<'a>,
-        // default_texture_bindgroup: &'a wgpu::BindGroup,
-    ) -> Vec<Paint<'a, 'b>> {
-        let mut ps = self.0.paint(device, queue);
-        ps.extend(self.1.paint(device, queue));
-        ps
     }
 
     fn event(&mut self, event: Event) -> Self::OutputEvent {
@@ -251,199 +218,107 @@ impl<A: Element, B: Element> Element for (A, B) {
     }
 }
 
-type RenderParams = (
-    View<Device>,
-    View<Queue>,
-    View<UiScene>,
-    View<UiRenderPipeline>,
-    View<FrameTextureView>,
-);
+/// Helper for writing new interface elements.
+struct ElementUpdates {
+    writes: Vec<(usize, Vec<u32>)>,
+}
+
+impl ElementUpdates {
+    pub fn write<T: Default + SlabItem>(&mut self, id: Id<T>, t: &T) {
+        self.writes.push((id.index(), {
+            let mut v = vec![0; T::slab_size()];
+            let _index = v.write_indexed(t, 0);
+            v
+        }))
+    }
+
+    pub fn apply(&mut self, slab: &mut impl Slab) {
+        for (index, data) in std::mem::take(&mut self.writes).into_iter() {
+            let _ = slab.write_indexed_slice(data.as_slice(), index);
+        }
+    }
+}
 
 /// User interface renderer.
-pub struct Gpui(pub Renderling);
+pub struct Gpui {
+    pub stage: Stage,
+    pub renderling: Renderling,
+    pub fonts: Vec<FontArc>,
+    pub camera: Id<Camera>,
+}
+
+impl Deref for Gpui {
+    type Target = Renderling;
+
+    fn deref(&self) -> &Self::Target {
+        &self.renderling
+    }
+}
+
+impl DerefMut for Gpui {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.renderling
+    }
+}
+
+impl crabslab::Slab for Gpui {
+    fn len(&self) -> usize {
+        self.stage.len()
+    }
+
+    fn read<T: crabslab::SlabItem + Default>(&self, id: Id<T>) -> T {
+        self.stage.read(id)
+    }
+
+    fn write_indexed<T: crabslab::SlabItem>(&mut self, t: &T, index: usize) -> usize {
+        self.stage.write_indexed(t, index)
+    }
+
+    fn write_indexed_slice<T: crabslab::SlabItem>(&mut self, t: &[T], index: usize) -> usize {
+        self.stage.write_indexed_slice(t, index)
+    }
+}
+
+impl crabslab::GrowableSlab for Gpui {
+    fn capacity(&self) -> usize {
+        self.stage.capacity()
+    }
+
+    fn reserve_capacity(&mut self, capacity: usize) {
+        self.stage.reserve_capacity(capacity)
+    }
+
+    fn increment_len(&mut self, n: usize) -> usize {
+        self.stage.increment_len(n)
+    }
+}
 
 impl Gpui {
     /// Create a new UI renderer.
     pub fn new(width: u32, height: u32) -> Self {
-        let r = Renderling::headless(width, height);
-        Self::new_from(&r)
-    }
-
-    /// Create a new UI renderer linked to the device and queue of another
-    /// [`Renderling`].
-    pub fn new_from(r: &renderling::Renderling) -> Self {
-        let adapter = r.get_adapter_owned();
-        let (device, queue) = r.get_device_and_queue_owned();
-        let (width, height) = r.get_screen_size();
-        let target = RenderTarget::Texture {
-            texture: device
-                .create_texture(&wgpu::TextureDescriptor {
-                    size: wgpu::Extent3d {
-                        width,
-                        height,
-                        depth_or_array_layers: 1,
-                    },
-                    mip_level_count: 1,
-                    sample_count: 1,
-                    dimension: wgpu::TextureDimension::D2,
-                    format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                    usage: wgpu::TextureUsages::COPY_SRC
-                        | wgpu::TextureUsages::RENDER_ATTACHMENT
-                        | wgpu::TextureUsages::TEXTURE_BINDING,
-                    label: None,
-                    view_formats: &[],
-                })
-                .into(),
-        };
-        let depth_texture = renderling::Texture::create_depth_texture(&device, width, height);
-        let mut r = Renderling::new(
-            target,
-            depth_texture,
-            adapter.0.clone(),
-            device.0.clone(),
-            queue.0.clone(),
-            (width, height),
-        );
-
-        r.graph.add_resource({
-            let fonts: Vec<FontArc> = vec![];
-            fonts
-        });
-        let scene = r.new_ui_scene().with_canvas_size(width, height).build();
-        r.graph.add_resource(scene);
-
-        let pipeline = renderling::UiRenderPipeline(
-            r.graph
-                .visit(|(device, target): (View<Device>, View<RenderTarget>)| {
-                    renderling::create_ui_pipeline(&device, target.format())
-                })
-                .unwrap(),
-        );
-        r.graph.add_resource(pipeline);
-
-        fn update_scene(
-            (mut scene, device, queue): (ViewMut<UiScene>, View<Device>, View<Queue>),
-        ) -> Result<(), WgpuStateError> {
-            scene.update(&device, &queue, []).unwrap();
-            Ok(())
-        }
-
-        use renderling::{
-            frame::{clear_frame_and_depth, create_frame},
-            graph, Graph,
-        };
-        r.graph
-            .add_subgraph(graph!(create_frame, clear_frame_and_depth, update_scene));
-        r.graph.add_barrier();
-        r.graph.add_local::<RenderParams, ()>("render");
-        Self(r)
-    }
-
-    /// Resize the interface's "surface" texture.
-    ///
-    /// Returns the new interface texture.
-    pub fn resize(&mut self, width: u32, height: u32) -> renderling::Texture {
-        self.0.resize(width, height);
-        self.0
-            .graph
-            .visit(|mut ui_scene: ViewMut<UiScene>| {
-                ui_scene.set_canvas_size(width, height);
-            })
-            .unwrap();
-        let wgpu_tex = self.get_frame_texture();
-        self.0.texture_from_wgpu_tex(wgpu_tex, None)
-    }
-
-    pub fn set_background_color(&mut self, color: impl Into<Vec4>) {
-        self.0.set_background_color(color)
-    }
-
-    pub fn with_background_color(mut self, color: impl Into<Vec4>) -> Self {
-        self.set_background_color(color);
-        self
-    }
-
-    /// Render to an image.
-    pub fn render_image(&mut self, root: &mut impl Element) -> image::DynamicImage {
-        self.render_image_with_srgb(root, false)
-    }
-
-    /// Render to an image.
-    pub fn render_image_srgb(&mut self, root: &mut impl Element) -> image::DynamicImage {
-        self.render_image_with_srgb(root, true)
-    }
-
-    /// Render to an image.
-    pub fn render_image_with_srgb(
-        &mut self,
-        root: &mut impl Element,
-        as_srgb: bool,
-    ) -> image::DynamicImage {
-        self.render(root);
-        let (width, height) = self.0.get_screen_size();
-        let frame = self.0.graph.remove_resource::<Frame>().unwrap().unwrap();
-        let device = self.0.get_device();
-        let buffer = frame.copy_to_buffer(device, self.0.get_queue(), width, height);
-        if as_srgb {
-            // pack as srgb8
-            buffer.into_image::<image::Rgba<u8>>(device).unwrap().into()
-        } else {
-            // pack as linear rgba8
-            buffer.into_rgba(device).unwrap().into()
+        let mut r = Renderling::headless(width, height);
+        let mut stage = r.new_stage();
+        stage.configure_graph(&mut r, true);
+        let (projection, view) = renderling::default_ortho2d(width as f32, height as f32);
+        let camera = stage.append(&Camera::new(projection, view));
+        Gpui {
+            stage,
+            renderling: r,
+            fonts: vec![],
+            camera,
         }
     }
 
     /// Layout the root element with the internal screen size.
-    pub fn layout(&self, root: &mut impl Element) {
-        let (ww, wh) = self.0.get_screen_size();
-        let _ = root.layout(AABB {
-            min: Vec2::ZERO,
-            max: Vec2::new(ww as f32, wh as f32),
-        });
-    }
-
-    /// Render to the internal texture.
-    pub fn render(&mut self, root: &mut impl Element) {
-        let _ = self.0.graph.remove_resource::<Frame>();
-
-        self.0.graph.run_with_local(
-            |(device, queue, scene, pipeline, frame): RenderParams| -> Result<(), UiSceneError> {
-                let label = Some("gpui scene render");
-                let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label });
-                let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                    label,
-                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                        view: &frame,
-                        resolve_target: None,
-                        ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Load,
-                            store: wgpu::StoreOp::Store,
-                        },
-                    })],
-                    depth_stencil_attachment: None,
-                });
-                render_pass.set_pipeline(&pipeline.0);
-                render_pass.set_bind_group(0, scene.constants_bindgroup(), &[]);
-
-                let paintings = root.paint(
-                    &device,
-                    &queue,
-                    //&mut render_pass,
-                    //scene.default_texture_bindgroup()
-                );
-
-                let (paintings, overlaid_paintings): (Vec<_>, Vec<_>) = paintings.into_iter().partition(|p| match p {
-                    Paint::Drawing(_) => true,
-                    Paint::Overlay(_) => false,
-                });
-
-                paintings.into_iter().for_each(|p| p.draw(&mut render_pass, scene.default_texture_bindgroup()));
-                overlaid_paintings.into_iter().for_each(|p| p.draw(&mut render_pass, scene.default_texture_bindgroup()));
-
-                drop(render_pass);
-                queue.submit(std::iter::once(encoder.finish()));
-                Ok(())
-        }).unwrap();
+    pub fn layout(&mut self, root: &mut impl Element) {
+        let (ww, wh) = self.renderling.get_screen_size();
+        let _ = root.update(
+            self,
+            AABB {
+                min: Vec2::ZERO,
+                max: Vec2::new(ww as f32, wh as f32),
+            },
+        );
     }
 
     /// Get a clone of the internal render target texture.
@@ -458,24 +333,12 @@ impl Gpui {
     }
 
     fn get_fonts(&self) -> &[FontArc] {
-        let fonts = self
-            .0
-            .graph
-            .get_resource::<Vec<FontArc>>()
-            .unwrap()
-            .unwrap();
-        &fonts
+        &self.fonts
     }
 
     pub fn add_font(&mut self, font: FontArc) -> Id<FontArc> {
-        let fonts = self
-            .0
-            .graph
-            .get_resource_mut::<Vec<FontArc>>()
-            .unwrap()
-            .unwrap();
-        let id = Id::new(fonts.len() as u32);
-        fonts.push(font);
+        let id = Id::new(self.fonts.len() as u32);
+        self.fonts.push(font);
         id
     }
 
@@ -528,11 +391,14 @@ mod test {
         let mut ui = Gpui::new(50, 50);
         ui.set_background_color(Vec4::new(0.0, 0.0, 0.0, 1.0));
         let mut rect = ui.new_rectangle().with_color(Vec4::ONE);
-        rect.layout(AABB {
-            min: Vec2::ZERO,
-            max: Vec2::new(25.0, 25.0),
-        });
-        let img = ui.render_image(&mut rect);
+        rect.layout(
+            &mut ui,
+            AABB {
+                min: Vec2::ZERO,
+                max: Vec2::new(25.0, 25.0),
+            },
+        );
+        let img = ui.render_image().unwrap();
         img_diff::assert_img_eq("gpui_rectangle.png", img);
         rect.set_color(Vec4::new(1.0, 0.0, 0.0, 1.0));
         let img = ui.render_image(&mut rect);
