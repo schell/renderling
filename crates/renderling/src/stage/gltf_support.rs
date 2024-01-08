@@ -1735,7 +1735,7 @@ mod test {
         });
 
         let data = stage.read_slab().unwrap();
-        let invocation = VertexInvocation::invoke(rendering_id.inner(), 0, &data);
+        let invocation = GltfVertexInvocation::invoke(rendering_id.inner(), 0, &data);
         println!("invoctaion: {invocation:#?}");
 
         let img = r.render_linear_image().unwrap();
@@ -1745,7 +1745,7 @@ mod test {
     /// A helper struct that contains all outputs of the vertex shader.
     #[allow(unused)]
     #[derive(Clone, Debug, Default, PartialEq)]
-    pub struct VertexInvocation {
+    pub struct GltfVertexInvocation {
         pub instance_index: u32,
         pub vertex_index: u32,
         pub render_unit_id: Id<RenderUnit>,
@@ -1765,7 +1765,7 @@ mod test {
         pub ndc_pos: Vec3,
     }
 
-    impl VertexInvocation {
+    impl GltfVertexInvocation {
         #[allow(dead_code)]
         pub fn invoke(instance_index: u32, vertex_index: u32, slab: &[u32]) -> Self {
             let mut v = Self {
@@ -1775,8 +1775,8 @@ mod test {
             };
             v.render_unit_id = Id::from(v.instance_index);
             v.render_unit = slab.read(v.render_unit_id);
-            renderling_shader::stage::gltf_vertex(
-                v.instance_index,
+            renderling_shader::gltf::vertex(
+                v.render_unit_id,
                 v.vertex_index,
                 slab,
                 &mut v.out_camera,

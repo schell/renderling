@@ -6,7 +6,7 @@
 //! To read more about the technique, check out these resources:
 //! * https://stackoverflow.com/questions/59686151/what-is-gpu-driven-rendering
 use crabslab::{Array, Id, Slab, SlabItem, ID_NONE};
-use glam::{mat3, Mat4, Quat, UVec2, UVec3, Vec2, Vec3, Vec4, Vec4Swizzles};
+use glam::{Mat4, Quat, UVec2, UVec3, Vec2, Vec3, Vec4};
 use spirv_std::{
     image::{Cubemap, Image2d},
     spirv, Sampler,
@@ -19,7 +19,7 @@ use crate::{
     debug::*,
     pbr::{self, Material},
     texture::GpuTexture,
-    IsSampler, IsVector, Sample2d, SampleCube,
+    IsSampler, IsVector, Sample2d,
 };
 
 pub mod light;
@@ -176,7 +176,7 @@ pub struct DrawIndirect {
     pub base_instance: u32,
 }
 
-fn stage_texture_color<T: Sample2d<Sampler = S>, S: IsSampler>(
+pub fn texture_color<T: Sample2d<Sampler = S>, S: IsSampler>(
     texture_id: Id<GpuTexture>,
     uv: Vec2,
     atlas: &T,
@@ -271,7 +271,6 @@ impl Default for StageLegend {
 }
 
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
-#[repr(C)]
 #[derive(Clone, Copy, PartialEq, SlabItem)]
 pub struct Transform {
     pub translation: Vec3,
@@ -296,6 +295,8 @@ pub enum Rendering {
     None,
     /// Render the scene using the gltf vertex and fragment shaders.
     Gltf(Id<crate::gltf::RenderUnit>),
+    /// Render the scene using the sdf vertex and fragment shaders.
+    Sdf(Id<crate::sdf::Sdf>),
 }
 
 pub trait IsRendering: Default + SlabItem + Sized {
@@ -311,11 +312,13 @@ pub trait IsRendering: Default + SlabItem + Sized {
 /// This reads the "instance" by index and proxies to a specific vertex shader.
 #[spirv(vertex)]
 pub fn vertex(
-    // Points at a
+    // Points at a `Rendering`
     #[spirv(instance_index)] instance_index: u32,
     // Which vertex within the render unit are we rendering
     #[spirv(vertex_index)] vertex_index: u32,
     #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] slab: &[u32],
+
+    #[spirv(flat)] out_instance_index: &mut u32,
     #[spirv(flat)] out_camera: &mut u32,
     #[spirv(flat)] out_material: &mut u32,
     out_color: &mut Vec4,
@@ -328,12 +331,30 @@ pub fn vertex(
     out_pos: &mut Vec3,
     #[spirv(position)] clip_pos: &mut Vec4,
 ) {
+    *out_instance_index = instance_index;
     let rendering = slab.read(Id::<Rendering>::new(instance_index));
     match rendering {
         Rendering::None => {}
         Rendering::Gltf(unit_id) => {
-            gltf_vertex(
-                unit_id.inner(),
+            crate::gltf::vertex(
+                unit_id,
+                vertex_index,
+                slab,
+                out_camera,
+                out_material,
+                out_color,
+                out_uv0,
+                out_uv1,
+                out_norm,
+                out_tangent,
+                out_bitangent,
+                out_pos,
+                clip_pos,
+            );
+        }
+        Rendering::Sdf(sdf_id) => {
+            crate::sdf::vertex(
+                sdf_id,
                 vertex_index,
                 slab,
                 out_camera,
@@ -351,53 +372,89 @@ pub fn vertex(
     }
 }
 
-#[spirv(vertex)]
-// TODO: rename `gltf_vertex` to `gltf::vertex`
-pub fn gltf_vertex(
-    // Which render unit are we rendering
-    #[spirv(instance_index)] instance_index: u32,
-    // Which vertex within the render unit are we rendering
-    #[spirv(vertex_index)] vertex_index: u32,
+#[allow(clippy::too_many_arguments)]
+#[spirv(fragment)]
+/// Uber fragment shader.
+///
+/// This reads the "instance" by index and proxies to a specific vertex shader.
+pub fn fragment(
+    #[spirv(descriptor_set = 1, binding = 0)] atlas: &Image2d,
+    #[spirv(descriptor_set = 1, binding = 1)] atlas_sampler: &Sampler,
+
+    #[spirv(descriptor_set = 1, binding = 2)] irradiance: &Cubemap,
+    #[spirv(descriptor_set = 1, binding = 3)] irradiance_sampler: &Sampler,
+
+    #[spirv(descriptor_set = 1, binding = 4)] prefiltered: &Cubemap,
+    #[spirv(descriptor_set = 1, binding = 5)] prefiltered_sampler: &Sampler,
+
+    #[spirv(descriptor_set = 1, binding = 6)] brdf: &Image2d,
+    #[spirv(descriptor_set = 1, binding = 7)] brdf_sampler: &Sampler,
+
     #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] slab: &[u32],
-    #[spirv(flat)] out_camera: &mut u32,
-    #[spirv(flat)] out_material: &mut u32,
-    out_color: &mut Vec4,
-    out_uv0: &mut Vec2,
-    out_uv1: &mut Vec2,
-    out_norm: &mut Vec3,
-    out_tangent: &mut Vec3,
-    out_bitangent: &mut Vec3,
-    // position of the vertex/fragment in world space
-    out_pos: &mut Vec3,
-    #[spirv(position)] clip_pos: &mut Vec4,
+
+    #[spirv(flat)] in_instance_index: u32,
+    #[spirv(flat)] in_camera: u32,
+    #[spirv(flat)] in_material: u32,
+    in_color: Vec4,
+    in_uv0: Vec2,
+    in_uv1: Vec2,
+    in_norm: Vec3,
+    in_tangent: Vec3,
+    in_bitangent: Vec3,
+    in_pos: Vec3,
+
+    output: &mut Vec4,
 ) {
-    let unit_id: Id<crate::gltf::RenderUnit> = Id::from(instance_index);
-    let unit = slab.read(unit_id);
-    let (vertex, tfrm, material) = unit.get_vertex_details(vertex_index, slab);
-    let model_matrix =
-        Mat4::from_scale_rotation_translation(tfrm.scale, tfrm.rotation, tfrm.translation);
-    *out_material = material.into();
-    *out_color = vertex.color;
-    *out_uv0 = vertex.uv.xy();
-    *out_uv1 = vertex.uv.zw();
-    let scale2 = tfrm.scale * tfrm.scale;
-    let normal = vertex.normal.xyz().alt_norm_or_zero();
-    let tangent = vertex.tangent.xyz().alt_norm_or_zero();
-    let normal_w: Vec3 = (model_matrix * (normal / scale2).extend(0.0))
-        .xyz()
-        .alt_norm_or_zero();
-    let tangent_w: Vec3 = (model_matrix * tangent.extend(0.0))
-        .xyz()
-        .alt_norm_or_zero();
-    let bitangent_w = normal_w.cross(tangent_w) * if vertex.tangent.w >= 0.0 { 1.0 } else { -1.0 };
-    *out_tangent = tangent_w;
-    *out_bitangent = bitangent_w;
-    *out_norm = normal_w;
-    let view_pos = model_matrix * vertex.position.xyz().extend(1.0);
-    *out_pos = view_pos.xyz();
-    let camera = slab.read(unit.camera);
-    *out_camera = unit.camera.into();
-    *clip_pos = camera.projection * camera.view * view_pos;
+    let rendering = slab.read(Id::<Rendering>::new(in_instance_index));
+    match rendering {
+        Rendering::None => {}
+        Rendering::Gltf(_) => {
+            crate::pbr::fragment(
+                atlas,
+                atlas_sampler,
+                irradiance,
+                irradiance_sampler,
+                prefiltered,
+                prefiltered_sampler,
+                brdf,
+                brdf_sampler,
+                slab,
+                in_camera,
+                in_material,
+                in_color,
+                in_uv0,
+                in_uv1,
+                in_norm,
+                in_tangent,
+                in_bitangent,
+                in_pos,
+                output,
+            );
+        }
+        Rendering::Sdf(_) => {
+            crate::sdf::fragment(
+                atlas,
+                atlas_sampler,
+                irradiance,
+                irradiance_sampler,
+                prefiltered,
+                prefiltered_sampler,
+                brdf,
+                brdf_sampler,
+                slab,
+                in_camera,
+                in_material,
+                in_color,
+                in_uv0,
+                in_uv1,
+                in_norm,
+                in_tangent,
+                in_bitangent,
+                in_pos,
+                output,
+            );
+        }
+    }
 }
 
 /// Returns the `StageLegend` from the stage's slab.
@@ -423,331 +480,6 @@ pub fn get_material(material_index: u32, has_lighting: bool, slab: &[u32]) -> pb
         }
         material
     }
-}
-
-#[allow(clippy::too_many_arguments)]
-#[spirv(fragment)]
-/// Scene fragment shader.
-// TODO: rename from `gltf_fragment` to `fragment`.
-pub fn gltf_fragment(
-    #[spirv(descriptor_set = 1, binding = 0)] atlas: &Image2d,
-    #[spirv(descriptor_set = 1, binding = 1)] atlas_sampler: &Sampler,
-
-    #[spirv(descriptor_set = 1, binding = 2)] irradiance: &Cubemap,
-    #[spirv(descriptor_set = 1, binding = 3)] irradiance_sampler: &Sampler,
-
-    #[spirv(descriptor_set = 1, binding = 4)] prefiltered: &Cubemap,
-    #[spirv(descriptor_set = 1, binding = 5)] prefiltered_sampler: &Sampler,
-
-    #[spirv(descriptor_set = 1, binding = 6)] brdf: &Image2d,
-    #[spirv(descriptor_set = 1, binding = 7)] brdf_sampler: &Sampler,
-
-    #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] slab: &[u32],
-
-    #[spirv(flat)] in_camera: u32,
-    #[spirv(flat)] in_material: u32,
-    in_color: Vec4,
-    in_uv0: Vec2,
-    in_uv1: Vec2,
-    in_norm: Vec3,
-    in_tangent: Vec3,
-    in_bitangent: Vec3,
-    in_pos: Vec3,
-
-    output: &mut Vec4,
-    brigtness: &mut Vec4,
-) {
-    gltf_fragment_impl(
-        atlas,
-        atlas_sampler,
-        irradiance,
-        irradiance_sampler,
-        prefiltered,
-        prefiltered_sampler,
-        brdf,
-        brdf_sampler,
-        slab,
-        in_camera,
-        in_material,
-        in_color,
-        in_uv0,
-        in_uv1,
-        in_norm,
-        in_tangent,
-        in_bitangent,
-        in_pos,
-        output,
-        brigtness,
-    );
-}
-
-#[allow(clippy::too_many_arguments)]
-/// Scene fragment shader.
-pub fn gltf_fragment_impl<T, C, S>(
-    atlas: &T,
-    atlas_sampler: &S,
-    irradiance: &C,
-    irradiance_sampler: &S,
-    prefiltered: &C,
-    prefiltered_sampler: &S,
-    brdf: &T,
-    brdf_sampler: &S,
-
-    slab: &[u32],
-
-    in_camera: u32,
-    in_material: u32,
-    in_color: Vec4,
-    in_uv0: Vec2,
-    in_uv1: Vec2,
-    in_norm: Vec3,
-    in_tangent: Vec3,
-    in_bitangent: Vec3,
-    in_pos: Vec3,
-
-    output: &mut Vec4,
-    brigtness: &mut Vec4,
-) where
-    T: Sample2d<Sampler = S>,
-    C: SampleCube<Sampler = S>,
-    S: IsSampler,
-{
-    let legend = get_stage_legend(slab);
-    crate::println!("legend: {:?}", legend);
-    let StageLegend {
-        atlas_size,
-        debug_mode,
-        has_skybox: _,
-        has_lighting,
-        light_array,
-    } = legend;
-
-    let material = get_material(in_material, has_lighting, slab);
-    crate::println!("material: {:?}", material);
-
-    let albedo_tex_uv = if material.albedo_tex_coord == 0 {
-        in_uv0
-    } else {
-        in_uv1
-    };
-    let albedo_tex_color = stage_texture_color(
-        material.albedo_texture,
-        albedo_tex_uv,
-        atlas,
-        atlas_sampler,
-        atlas_size,
-        slab,
-    );
-    crate::println!("albedo_tex_color: {:?}", albedo_tex_color);
-
-    let metallic_roughness_uv = if material.metallic_roughness_tex_coord == 0 {
-        in_uv0
-    } else {
-        in_uv1
-    };
-    let metallic_roughness_tex_color = stage_texture_color(
-        material.metallic_roughness_texture,
-        metallic_roughness_uv,
-        atlas,
-        atlas_sampler,
-        atlas_size,
-        slab,
-    );
-    crate::println!(
-        "metallic_roughness_tex_color: {:?}",
-        metallic_roughness_tex_color
-    );
-
-    let normal_tex_uv = if material.normal_tex_coord == 0 {
-        in_uv0
-    } else {
-        in_uv1
-    };
-    let normal_tex_color = stage_texture_color(
-        material.normal_texture,
-        normal_tex_uv,
-        atlas,
-        atlas_sampler,
-        atlas_size,
-        slab,
-    );
-    crate::println!("normal_tex_color: {:?}", normal_tex_color);
-
-    let ao_tex_uv = if material.ao_tex_coord == 0 {
-        in_uv0
-    } else {
-        in_uv1
-    };
-    let ao_tex_color = stage_texture_color(
-        material.ao_texture,
-        ao_tex_uv,
-        atlas,
-        atlas_sampler,
-        atlas_size,
-        slab,
-    );
-
-    let emissive_tex_uv = if material.emissive_tex_coord == 0 {
-        in_uv0
-    } else {
-        in_uv1
-    };
-    let emissive_tex_color = stage_texture_color(
-        material.emissive_texture,
-        emissive_tex_uv,
-        atlas,
-        atlas_sampler,
-        atlas_size,
-        slab,
-    );
-
-    let (norm, uv_norm) = if material.normal_texture.is_none() {
-        // there is no normal map, use the normal normal ;)
-        (in_norm, Vec3::ZERO)
-    } else {
-        // convert the normal from color coords to tangent space -1,1
-        let sampled_norm = (normal_tex_color.xyz() * 2.0 - Vec3::splat(1.0)).alt_norm_or_zero();
-        let tbn = mat3(
-            in_tangent.alt_norm_or_zero(),
-            in_bitangent.alt_norm_or_zero(),
-            in_norm.alt_norm_or_zero(),
-        );
-        // convert the normal from tangent space to world space
-        let norm = (tbn * sampled_norm).alt_norm_or_zero();
-        (norm, sampled_norm)
-    };
-
-    let n = norm;
-    let albedo = albedo_tex_color * material.albedo_factor * in_color;
-    let roughness = metallic_roughness_tex_color.y * material.roughness_factor;
-    let metallic = metallic_roughness_tex_color.z * material.metallic_factor;
-    let ao = 1.0 + material.ao_strength * (ao_tex_color.x - 1.0);
-    let emissive =
-        emissive_tex_color.xyz() * material.emissive_factor.xyz() * material.emissive_factor.w;
-    let irradiance = pbr::sample_irradiance(irradiance, irradiance_sampler, n);
-    let camera = slab.read(Id::<Camera>::new(in_camera));
-    let specular = pbr::sample_specular_reflection(
-        prefiltered,
-        prefiltered_sampler,
-        camera.position,
-        in_pos,
-        n,
-        roughness,
-    );
-    let brdf = pbr::sample_brdf(brdf, brdf_sampler, camera.position, in_pos, n, roughness);
-
-    fn colorize(u: Vec3) -> Vec4 {
-        ((u.alt_norm_or_zero() + Vec3::splat(1.0)) / 2.0).extend(1.0)
-    }
-
-    match debug_mode.into() {
-        DebugChannel::None => {}
-        DebugChannel::UvCoords0 => {
-            *output = colorize(Vec3::new(in_uv0.x, in_uv0.y, 0.0));
-            return;
-        }
-        DebugChannel::UvCoords1 => {
-            *output = colorize(Vec3::new(in_uv1.x, in_uv1.y, 0.0));
-            return;
-        }
-        DebugChannel::Normals => {
-            *output = colorize(norm);
-            return;
-        }
-        DebugChannel::VertexColor => {
-            *output = in_color;
-            return;
-        }
-        DebugChannel::VertexNormals => {
-            *output = colorize(in_norm);
-            return;
-        }
-        DebugChannel::UvNormals => {
-            *output = colorize(uv_norm);
-            return;
-        }
-        DebugChannel::Tangents => {
-            *output = colorize(in_tangent);
-            return;
-        }
-        DebugChannel::Bitangents => {
-            *output = colorize(in_bitangent);
-            return;
-        }
-        DebugChannel::DiffuseIrradiance => {
-            *output = irradiance.extend(1.0);
-            return;
-        }
-        DebugChannel::SpecularReflection => {
-            *output = specular.extend(1.0);
-            return;
-        }
-        DebugChannel::Brdf => {
-            *output = brdf.extend(1.0).extend(1.0);
-            return;
-        }
-        DebugChannel::Roughness => {
-            *output = Vec3::splat(roughness).extend(1.0);
-            return;
-        }
-        DebugChannel::Metallic => {
-            *output = Vec3::splat(metallic).extend(1.0);
-            return;
-        }
-        DebugChannel::Albedo => {
-            *output = albedo;
-            return;
-        }
-        DebugChannel::Occlusion => {
-            *output = Vec3::splat(ao).extend(1.0);
-            return;
-        }
-        DebugChannel::Emissive => {
-            *output = emissive.extend(1.0);
-            return;
-        }
-        DebugChannel::UvEmissive => {
-            *output = emissive_tex_color.xyz().extend(1.0);
-            return;
-        }
-        DebugChannel::EmissiveFactor => {
-            *output = material.emissive_factor.xyz().extend(1.0);
-            return;
-        }
-        DebugChannel::EmissiveStrength => {
-            *output = Vec3::splat(material.emissive_factor.w).extend(1.0);
-            return;
-        }
-    }
-
-    *output = if material.has_lighting {
-        pbr::stage_shade_fragment(
-            camera.position,
-            n,
-            in_pos,
-            albedo.xyz(),
-            metallic,
-            roughness,
-            ao,
-            emissive,
-            irradiance,
-            specular,
-            brdf,
-            light_array,
-            slab,
-        )
-    } else {
-        in_color * albedo_tex_color * material.albedo_factor
-    };
-
-    // write the brightest colors for the bloom effect
-    let brightness_value = output.xyz().dot(Vec3::new(0.2126, 0.7152, 0.0722));
-    *brigtness = if brightness_value > 1.0 {
-        output.xyz()
-    } else {
-        Vec3::ZERO
-    }
-    .extend(1.0);
 }
 
 //#[spirv(compute(threads(32)))]

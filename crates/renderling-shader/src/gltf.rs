@@ -1,12 +1,12 @@
 //! Gltf types that are used in shaders.
 use crabslab::{Array, Id, Slab, SlabItem};
-use glam::{Mat4, Vec2, Vec3, Vec4};
+use glam::{Mat4, Vec2, Vec3, Vec4, Vec4Swizzles};
 
 use crate::{
     pbr::Material,
     stage::{Camera, Transform, Vertex},
     texture::GpuTexture,
-    IsMatrix,
+    IsMatrix, IsVector,
 };
 #[repr(transparent)]
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
@@ -1140,4 +1140,50 @@ impl RenderUnit {
         };
         (vertex, transform, material)
     }
+}
+
+pub fn vertex(
+    // Which render unit are we rendering
+    render_id: Id<RenderUnit>,
+    // Which vertex within the render unit are we rendering
+    vertex_index: u32,
+    slab: &[u32],
+    out_camera: &mut u32,
+    out_material: &mut u32,
+    out_color: &mut Vec4,
+    out_uv0: &mut Vec2,
+    out_uv1: &mut Vec2,
+    out_norm: &mut Vec3,
+    out_tangent: &mut Vec3,
+    out_bitangent: &mut Vec3,
+    // position of the vertex/fragment in world space
+    out_pos: &mut Vec3,
+    clip_pos: &mut Vec4,
+) {
+    let unit = slab.read(render_id);
+    let (vertex, tfrm, material) = unit.get_vertex_details(vertex_index, slab);
+    let model_matrix =
+        Mat4::from_scale_rotation_translation(tfrm.scale, tfrm.rotation, tfrm.translation);
+    *out_material = material.into();
+    *out_color = vertex.color;
+    *out_uv0 = vertex.uv.xy();
+    *out_uv1 = vertex.uv.zw();
+    let scale2 = tfrm.scale * tfrm.scale;
+    let normal = vertex.normal.xyz().alt_norm_or_zero();
+    let tangent = vertex.tangent.xyz().alt_norm_or_zero();
+    let normal_w: Vec3 = (model_matrix * (normal / scale2).extend(0.0))
+        .xyz()
+        .alt_norm_or_zero();
+    let tangent_w: Vec3 = (model_matrix * tangent.extend(0.0))
+        .xyz()
+        .alt_norm_or_zero();
+    let bitangent_w = normal_w.cross(tangent_w) * if vertex.tangent.w >= 0.0 { 1.0 } else { -1.0 };
+    *out_tangent = tangent_w;
+    *out_bitangent = bitangent_w;
+    *out_norm = normal_w;
+    let view_pos = model_matrix * vertex.position.xyz().extend(1.0);
+    *out_pos = view_pos.xyz();
+    let camera = slab.read(unit.camera);
+    *out_camera = unit.camera.into();
+    *clip_pos = camera.projection * camera.view * view_pos;
 }

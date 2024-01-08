@@ -349,8 +349,8 @@ impl Stage {
             let label = Some("stage render pipeline");
             let vertex_shader =
                 device.create_shader_module(wgpu::include_spirv!("linkage/stage-vertex.spv"));
-            let fragment_shader = device
-                .create_shader_module(wgpu::include_spirv!("linkage/stage-gltf_fragment.spv"));
+            let fragment_shader =
+                device.create_shader_module(wgpu::include_spirv!("linkage/stage-fragment.spv"));
             let stage_slab_buffers_layout = Stage::buffers_bindgroup_layout(device);
             let textures_layout = Stage::textures_bindgroup_layout(device);
             let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -389,7 +389,7 @@ impl Stage {
                 },
                 fragment: Some(wgpu::FragmentState {
                     module: &fragment_shader,
-                    entry_point: "stage::gltf_fragment",
+                    entry_point: "stage::fragment",
                     targets: &[Some(wgpu::ColorTargetState {
                         format: wgpu::TextureFormat::Rgba16Float,
                         blend: Some(wgpu::BlendState::ALPHA_BLENDING),
@@ -665,7 +665,6 @@ impl Stage {
             .block_on_read_raw(0, self.len())
     }
 
-
     pub fn new_skybox_from_path(
         &self,
         path: impl AsRef<std::path::Path>,
@@ -763,4 +762,15 @@ pub fn stage_render(
     stage.queue.submit(std::iter::once(encoder.finish()));
 
     Ok(())
+}
+
+#[cfg(test)]
+mod test {
+    use crate::Renderling;
+
+    #[test]
+    fn can_draw_circle_sdf() {
+        let mut r = Renderling::headless(32, 32);
+        let mut stage = r.new_stage();
+    }
 }
