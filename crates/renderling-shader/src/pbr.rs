@@ -12,10 +12,10 @@ use spirv_std::num_traits::Float;
 
 use crate::{
     debug::DebugChannel,
-    math,
-    stage::{light::LightStyle, Camera},
+    math::{self, IsVector},
+    stage::light::LightStyle,
     texture::GpuTexture,
-    IsSampler, IsVector, Sample2d, SampleCube,
+    Camera, IsSampler, Sample2d, SampleCube,
 };
 
 /// Represents a material on the GPU.

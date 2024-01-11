@@ -1,12 +1,16 @@
 //! SDF shaders
 use crabslab::{Id, Slab, SlabItem};
-use glam::{Mat4, Vec2, Vec3, Vec4, Vec4Swizzles};
+use glam::{Mat4, Vec2, Vec3, Vec3Swizzles, Vec4, Vec4Swizzles};
 
 use crate::{
-    pbr::Material,
-    stage::{Camera, Transform, Vertex},
-    IsSampler, IsVector, Sample2d, SampleCube,
+    math::IsVector, pbr::Material, stage::Vertex, Camera, IsSampler, Sample2d, SampleCube,
+    Transform,
 };
+
+fn smoothstep(dist: f32, edge_in: f32, edge_out: f32) -> f32 {
+    let x = ((dist - edge_in) / (edge_out / edge_in)).clamp(0.0, 1.0);
+    x * x * (3.0 - 2.0 * x)
+}
 
 #[derive(Debug, Clone, Copy, SlabItem)]
 pub struct Circle {
@@ -29,7 +33,9 @@ impl Circle {
     /// This [`Vertex`] is one of the points of the quad that makes up a unit square.
     /// It should be transformed by the [`Transform`] of the [`Sdf`] that owns this [`Circle`].
     pub fn get_vertex(&self, index: usize) -> Vertex {
-        Vertex::default().with_position(crate::math::CLIP_SPACE_COORD_QUAD_CCW[index % 6].xyz())
+        Vertex::default()
+            .with_position(crate::math::UNIT_QUAD_CCW[index % 6])
+            .with_uv0(crate::math::UV_COORD_QUAD_CCW[index % 6])
     }
 }
 
@@ -57,6 +63,25 @@ pub struct Sdf {
     pub camera: Id<Camera>,
 }
 
+impl Sdf {
+    pub const fn vertex_count(&self) -> u32 {
+        match self.shape {
+            SdfShape::None => 0,
+            SdfShape::Circle(_) => 6,
+        }
+    }
+
+    pub fn distance(&self, position: Vec2, slab: &[u32]) -> f32 {
+        match self.shape {
+            SdfShape::None => 0.0,
+            SdfShape::Circle(id) => {
+                let _circle = slab.read(id);
+                position.length()
+            }
+        }
+    }
+}
+
 pub fn vertex(
     sdf_id: Id<Sdf>,
     // Which vertex within the render unit are we rendering
@@ -70,8 +95,8 @@ pub fn vertex(
     out_norm: &mut Vec3,
     out_tangent: &mut Vec3,
     out_bitangent: &mut Vec3,
-    // position of the vertex/fragment in world space
-    out_pos: &mut Vec3,
+    local_pos: &mut Vec3,
+    world_pos: &mut Vec3,
     clip_pos: &mut Vec4,
 ) {
     let Sdf {
@@ -82,6 +107,7 @@ pub fn vertex(
     } = slab.read(sdf_id);
 
     let vertex = shape.get_vertex(vertex_index as usize, slab);
+    *local_pos = vertex.position.xyz();
     let model_matrix = Mat4::from_scale_rotation_translation(
         transform.scale,
         transform.rotation,
@@ -101,7 +127,7 @@ pub fn vertex(
     *out_bitangent = bitangent_w;
     *out_norm = normal_w;
     let view_pos = model_matrix * vertex.position.xyz().extend(1.0);
-    *out_pos = view_pos.xyz();
+    *world_pos = view_pos.xyz();
     let camera = slab.read(camera_id);
     *out_camera = camera_id.into();
     *clip_pos = camera.projection * camera.view * view_pos;
@@ -113,6 +139,8 @@ pub fn vertex(
 }
 
 pub fn fragment<T, C, S>(
+    sdf_id: Id<Sdf>,
+
     atlas: &T,
     atlas_sampler: &S,
     irradiance: &C,
@@ -132,7 +160,8 @@ pub fn fragment<T, C, S>(
     in_norm: Vec3,
     in_tangent: Vec3,
     in_bitangent: Vec3,
-    in_pos: Vec3,
+    local_pos: Vec3,
+    world_pos: Vec3,
 
     output: &mut Vec4,
 ) where
@@ -140,6 +169,11 @@ pub fn fragment<T, C, S>(
     C: SampleCube<Sampler = S>,
     S: IsSampler,
 {
+    let sdf = slab.read(Id::<Sdf>::from(sdf_id));
+    let distance = sdf.distance(local_pos.xy(), slab);
+    let change = spirv_std::arch::fwidth(distance) * 0.5;
+    let aa_cutoff = smoothstep(distance, change, -change);
+    let color = Vec4::new(aa_cutoff, aa_cutoff, aa_cutoff, 1.0);
     crate::pbr::fragment(
         atlas,
         atlas_sampler,
@@ -152,13 +186,13 @@ pub fn fragment<T, C, S>(
         slab,
         in_camera,
         in_material,
-        in_color * Vec4::new(1.0, 0.0, 0.0, 1.0),
+        in_color * color,
         in_uv0,
         in_uv1,
         in_norm,
         in_tangent,
         in_bitangent,
-        in_pos,
+        world_pos,
         output,
     );
 }

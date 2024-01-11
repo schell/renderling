@@ -1,19 +1,11 @@
 [package]
-name = "renderling-shader"
+name = "renderling-shader-core"
 version = "0.1.0"
 edition = "2021"
-description = "Shared types and functions for renderling shaders compiled w/ rust-gpu and wgpu linkage"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
-[lib]
-crate-type = ["lib", "dylib"]
-
-[features]
-default = []
-
 [dependencies]
-renderling-shader-core = { version = "0.1.0", path = "../renderling-shader-core" }
 spirv-std = "0.9"
 
 [target.'cfg(not(target_arch = "spirv"))'.dependencies]
@@ -26,8 +18,3 @@ glam = { workspace = true, features = ["std", "debug-glam-assert"] }
 [target.'cfg(target_arch = "spirv")'.dependencies]
 glam = { version = "0.24.2", default-features = false, features = ["libm"] }
 crabslab = { workspace = true, features = ["glam"]  }
-
-[dev-dependencies]
-bytemuck = {workspace = true}
-image = {workspace = true}
-img-diff = { path = "../img-diff" }

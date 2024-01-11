@@ -11,14 +11,17 @@ use crabslab::{Array, CpuSlab, GrowableSlab, Id, Slab, SlabItem, WgpuBuffer};
 use moongraph::{View, ViewMut};
 use renderling_shader::{
     debug::DebugMode,
-    stage::{light::Light, Camera, IsRendering, Rendering, StageLegend},
+    gltf::GltfRendering,
+    sdf::Sdf,
+    stage::{light::Light, Rendering, StageLegend},
     texture::GpuTexture,
+    Camera,
 };
 use snafu::Snafu;
 
 use crate::{
-    Atlas, AtlasError, AtlasImage, AtlasImageError, DepthTexture, Device, HdrSurface, Queue,
-    Skybox, WgpuSlabError,
+    Atlas, AtlasError, AtlasImage, AtlasImageError, CpuCubemap, DepthTexture, Device, HdrSurface,
+    Queue, Skybox, WgpuSlabError,
 };
 
 #[cfg(feature = "gltf")]
@@ -530,16 +533,19 @@ impl Stage {
         }
     }
 
-    /// Draw a rendering each frame.
+    /// Draw a GLTF rendering each frame.
     ///
-    /// Returns the id of the stored `T` and the id of the [`Rendering`].
-    pub fn draw_unit<T: IsRendering>(&mut self, unit: &T) -> (Id<T>, Id<Rendering>) {
+    /// Returns the id of the stored `GltfRendering` and the id of the [`Rendering`].
+    pub fn draw_gltf_rendering(
+        &mut self,
+        unit: &GltfRendering,
+    ) -> (Id<GltfRendering>, Id<Rendering>) {
         let unit_id = self.append(unit);
-        let rendering = T::wrap(unit_id);
+        let rendering = Rendering::Gltf(unit_id);
         let id = self.append(&rendering);
         let draw = DrawUnit {
             id,
-            vertex_count: unit.vertex_count(),
+            vertex_count: unit.vertex_count,
             visible: true,
         };
         // UNWRAP: if we can't acquire the lock we want to panic.
@@ -550,6 +556,28 @@ impl Stage {
             }
         }
         (unit_id, id)
+    }
+
+    /// Draw a signed distance field rendering each frame.
+    ///
+    /// Returns the id of the stored `Sdf` and the id of the [`Rendering`].
+    pub fn draw_sdf_rendering(&mut self, sdf: &Sdf) -> (Id<Sdf>, Id<Rendering>) {
+        let sdf_id = self.append(sdf);
+        let rendering = Rendering::Sdf(sdf_id);
+        let id = self.append(&rendering);
+        let draw = DrawUnit {
+            id,
+            vertex_count: sdf.vertex_count(),
+            visible: true,
+        };
+        // UNWRAP: if we can't acquire the lock we want to panic.
+        let mut draws = self.draws.write().unwrap();
+        match draws.deref_mut() {
+            StageDrawStrategy::Direct(units) => {
+                units.push(draw);
+            }
+        }
+        (sdf_id, id)
     }
 
     /// Erase the [`RenderUnit`] with the given `Id` from the stage.
@@ -650,6 +678,113 @@ impl Stage {
             .atlas_img(&self.device, &self.queue)
     }
 
+    /// Read the brdf image from the GPU.
+    ///
+    /// This is primarily used for debugging.
+    ///
+    /// ## Panics
+    /// Panics if the pixels read from the GPU cannot be converted into an
+    /// `RgbaImage`.
+    pub fn read_brdf_image(&self) -> image::Rgba32FImage {
+        // UNWRAP: if we can't acquire the lock we want to panic.
+        let skybox = self.skybox.read().unwrap();
+        let texture = &skybox.brdf_lut;
+        let extent = texture.texture.size();
+        let buffer = crate::Texture::read(
+            &texture.texture,
+            &self.device,
+            &self.queue,
+            extent.width as usize,
+            extent.height as usize,
+            2,
+            2,
+        );
+        let pixels = buffer.pixels(&self.device);
+        let pixels: Vec<f32> = bytemuck::cast_slice::<u8, u16>(pixels.as_slice())
+            .iter()
+            .copied()
+            .map(|bits| half::f16::from_bits(bits).to_f32())
+            .collect();
+        let pixels: Vec<f32> = pixels
+            .chunks_exact(2)
+            .flat_map(|pixel| match pixel {
+                [r, g] => [*r, *g, 0.0, 1.0],
+                _ => unreachable!(),
+            })
+            .collect();
+        let img: image::ImageBuffer<image::Rgba<f32>, Vec<f32>> =
+            image::ImageBuffer::from_vec(extent.width, extent.height, pixels).unwrap();
+        img
+    }
+
+    fn read_cubemap_mip0(&self, texture: &crate::Texture) -> CpuCubemap {
+        let placeholder_image =
+            image::Rgba32FImage::from_pixel(1, 1, image::Rgba([0.0, 0.0, 0.0, 0.0]));
+        let mut out: [image::Rgba32FImage; 6] = [
+            placeholder_image.clone(),
+            placeholder_image.clone(),
+            placeholder_image.clone(),
+            placeholder_image.clone(),
+            placeholder_image.clone(),
+            placeholder_image.clone(),
+        ];
+        let extent = texture.texture.size();
+        let width = extent.width;
+        let height = extent.height;
+        for i in 0..6 {
+            let copied_buffer = crate::Texture::read_from(
+                &texture.texture,
+                &self.device,
+                &self.queue,
+                width as usize,
+                height as usize,
+                4,
+                2,
+                0,
+                Some(wgpu::Origin3d { x: 0, y: 0, z: i }),
+            );
+            let pixels = copied_buffer.pixels(&self.device);
+            let pixels = bytemuck::cast_slice::<u8, u16>(pixels.as_slice())
+                .iter()
+                .map(|p| half::f16::from_bits(*p).to_f32())
+                .collect::<Vec<_>>();
+            let img: image::Rgba32FImage =
+                image::ImageBuffer::from_vec(width, height, pixels).unwrap();
+            out[i as usize] = img;
+        }
+        CpuCubemap {
+            images: out.map(|img| img.into()),
+        }
+    }
+
+    /// Read the irradiance cubemap images from the GPU.
+    ///
+    /// This only reads the top level of mips. This is primarily used for debugging.
+    ///
+    /// ## Panics
+    /// Panics if the pixels read from the GPU cannot be converted into an
+    /// `RgbaImage`.
+    pub fn read_irradiance_cubemap(&self) -> CpuCubemap {
+        // UNWRAP: if we can't acquire the lock we want to panic.
+        let skybox = self.skybox.read().unwrap();
+        let texture = &skybox.irradiance_cubemap;
+        self.read_cubemap_mip0(texture)
+    }
+
+    /// Read the prefiltered cubemap images from the GPU.
+    ///
+    /// This only reads the top level of mips. This is primarily used for debugging.
+    ///
+    /// ## Panics
+    /// Panics if the pixels read from the GPU cannot be converted into an
+    /// `RgbaImage`.
+    pub fn read_prefiltered_cubemap(&self) -> CpuCubemap {
+        // UNWRAP: if we can't acquire the lock we want to panic.
+        let skybox = self.skybox.read().unwrap();
+        let texture = &skybox.prefiltered_environment_cubemap;
+        self.read_cubemap_mip0(texture)
+    }
+
     /// Read all the data from the stage.
     ///
     /// This blocks until the GPU buffer is mappable, and then copies the data
@@ -691,6 +826,7 @@ pub struct DrawUnit {
 /// Provides a way to communicate with the stage about how you'd like your
 /// objects drawn.
 pub(crate) enum StageDrawStrategy {
+    // TODO: Add `Indirect` to `StageDrawStrategy` which uses `RenderPass::multi_draw_indirect`
     Direct(Vec<DrawUnit>),
 }
 
@@ -767,10 +903,39 @@ pub fn stage_render(
 #[cfg(test)]
 mod test {
     use crate::Renderling;
+    use crabslab::{GrowableSlab, Id};
+    use glam::{Vec2, Vec3, Vec4};
+    use renderling_shader::{
+        sdf::{Circle, Sdf, SdfShape},
+        stage::{Camera, Transform},
+    };
 
     #[test]
     fn can_draw_circle_sdf() {
         let mut r = Renderling::headless(32, 32);
         let mut stage = r.new_stage();
+        stage.configure_graph(&mut r, true);
+        let (projection, view) = crate::default_ortho2d(32.0, 32.0);
+        let camera = stage.append(&Camera::new(projection, view));
+        let circle = stage.append(&Circle { radius: 0.5 });
+        let (_sdf_id, _rendering_id) = stage.draw_sdf_rendering(&Sdf {
+            shape: SdfShape::Circle(circle),
+            transform: Transform {
+                translation: Vec3::new(16.0, 16.0, 0.0),
+                scale: Vec3::new(32.0, 32.0, 1.0),
+                ..Default::default()
+            },
+            material: Id::NONE,
+            camera,
+        });
+
+        let slab = stage.read_slab().unwrap();
+        let atlas = stage.read_atlas_image();
+        let irradiance = stage.read_irradiance_cubemap();
+        let prefiltered = stage.read_prefiltered_cubemap();
+        let brdf = stage.read_brdf_image();
+
+        let img = r.render_linear_image().unwrap();
+        img_diff::save("sdf/can_draw_circle.png", img);
     }
 }

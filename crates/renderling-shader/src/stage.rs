@@ -6,7 +6,7 @@
 //! To read more about the technique, check out these resources:
 //! * https://stackoverflow.com/questions/59686151/what-is-gpu-driven-rendering
 use crabslab::{Array, Id, Slab, SlabItem, ID_NONE};
-use glam::{Mat4, Quat, UVec2, UVec3, Vec2, Vec3, Vec4};
+use glam::{UVec2, UVec3, Vec2, Vec3, Vec4};
 use spirv_std::{
     image::{Cubemap, Image2d},
     spirv, Sampler,
@@ -17,9 +17,10 @@ use spirv_std::num_traits::*;
 
 use crate::{
     debug::*,
+    math::IsVector,
     pbr::{self, Material},
     texture::GpuTexture,
-    IsSampler, IsVector, Sample2d,
+    IsSampler, Sample2d,
 };
 
 pub mod light;
@@ -167,15 +168,6 @@ impl Vertex {
     }
 }
 
-#[repr(C)]
-#[derive(Default, Debug, Clone, Copy, PartialEq, SlabItem)]
-pub struct DrawIndirect {
-    pub vertex_count: u32,
-    pub instance_count: u32,
-    pub base_vertex: u32,
-    pub base_instance: u32,
-}
-
 pub fn texture_color<T: Sample2d<Sampler = S>, S: IsSampler>(
     texture_id: Id<GpuTexture>,
     uv: Vec2,
@@ -191,57 +183,6 @@ pub fn texture_color<T: Sample2d<Sampler = S>, S: IsSampler>(
         color = Vec4::splat(1.0);
     }
     color
-}
-
-/// A camera used for transforming the stage during rendering.
-///
-/// Use `Camera::new(projection, view)` to create a new camera.
-/// Or use `Camera::default` followed by `Camera::with_projection_and_view`
-/// to set the projection and view matrices. Using the `with_*` or `set_*`
-/// methods is preferred over setting the fields directly because they will
-/// also update the camera's position.
-#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
-#[repr(C)]
-#[derive(Default, Clone, Copy, PartialEq, SlabItem)]
-pub struct Camera {
-    pub projection: Mat4,
-    pub view: Mat4,
-    pub position: Vec3,
-}
-
-impl Camera {
-    pub fn new(projection: Mat4, view: Mat4) -> Self {
-        Camera::default().with_projection_and_view(projection, view)
-    }
-
-    pub fn set_projection_and_view(&mut self, projection: Mat4, view: Mat4) {
-        self.projection = projection;
-        self.view = view;
-        self.position = view.inverse().transform_point3(Vec3::ZERO);
-    }
-
-    pub fn with_projection_and_view(mut self, projection: Mat4, view: Mat4) -> Self {
-        self.set_projection_and_view(projection, view);
-        self
-    }
-
-    pub fn set_projection(&mut self, projection: Mat4) {
-        self.set_projection_and_view(projection, self.view);
-    }
-
-    pub fn with_projection(mut self, projection: Mat4) -> Self {
-        self.set_projection(projection);
-        self
-    }
-
-    pub fn set_view(&mut self, view: Mat4) {
-        self.set_projection_and_view(self.projection, view);
-    }
-
-    pub fn with_view(mut self, view: Mat4) -> Self {
-        self.set_view(view);
-        self
-    }
 }
 
 /// Holds important info about the stage.
@@ -270,41 +211,15 @@ impl Default for StageLegend {
     }
 }
 
-#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
-#[derive(Clone, Copy, PartialEq, SlabItem)]
-pub struct Transform {
-    pub translation: Vec3,
-    pub rotation: Quat,
-    pub scale: Vec3,
-}
-
-impl Default for Transform {
-    fn default() -> Self {
-        Self {
-            translation: Vec3::ZERO,
-            rotation: Quat::IDENTITY,
-            scale: Vec3::ONE,
-        }
-    }
-}
-
 /// Pointer to a renderable unit.
 #[derive(Default, SlabItem)]
 pub enum Rendering {
     #[default]
     None,
     /// Render the scene using the gltf vertex and fragment shaders.
-    Gltf(Id<crate::gltf::RenderUnit>),
+    Gltf(Id<crate::gltf::GltfRendering>),
     /// Render the scene using the sdf vertex and fragment shaders.
     Sdf(Id<crate::sdf::Sdf>),
-}
-
-pub trait IsRendering: Default + SlabItem + Sized {
-    /// Returns the number of vertices in the rendering.
-    fn vertex_count(&self) -> u32;
-
-    /// Wraps an `Id` in a `Rendering`.
-    fn wrap(id: Id<Self>) -> Rendering;
 }
 
 /// Uber vertex shader.
@@ -327,8 +242,10 @@ pub fn vertex(
     out_norm: &mut Vec3,
     out_tangent: &mut Vec3,
     out_bitangent: &mut Vec3,
+    // position of the vertex/fragment in local space
+    local_pos: &mut Vec3,
     // position of the vertex/fragment in world space
-    out_pos: &mut Vec3,
+    world_pos: &mut Vec3,
     #[spirv(position)] clip_pos: &mut Vec4,
 ) {
     *out_instance_index = instance_index;
@@ -348,7 +265,7 @@ pub fn vertex(
                 out_norm,
                 out_tangent,
                 out_bitangent,
-                out_pos,
+                world_pos,
                 clip_pos,
             );
         }
@@ -365,7 +282,8 @@ pub fn vertex(
                 out_norm,
                 out_tangent,
                 out_bitangent,
-                out_pos,
+                local_pos,
+                world_pos,
                 clip_pos,
             );
         }
@@ -401,7 +319,8 @@ pub fn fragment(
     in_norm: Vec3,
     in_tangent: Vec3,
     in_bitangent: Vec3,
-    in_pos: Vec3,
+    local_pos: Vec3,
+    world_pos: Vec3,
 
     output: &mut Vec4,
 ) {
@@ -427,12 +346,13 @@ pub fn fragment(
                 in_norm,
                 in_tangent,
                 in_bitangent,
-                in_pos,
+                world_pos,
                 output,
             );
         }
-        Rendering::Sdf(_) => {
+        Rendering::Sdf(sdf_id) => {
             crate::sdf::fragment(
+                sdf_id,
                 atlas,
                 atlas_sampler,
                 irradiance,
@@ -450,7 +370,8 @@ pub fn fragment(
                 in_norm,
                 in_tangent,
                 in_bitangent,
-                in_pos,
+                local_pos,
+                world_pos,
                 output,
             );
         }

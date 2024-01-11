@@ -10,7 +10,7 @@ use spirv_std::{
 #[cfg(target_arch = "spirv")]
 use spirv_std::num_traits::Float;
 
-use crate::{math, stage::Camera, IsVector};
+use crate::{math, math::IsVector, Camera};
 
 const INV_ATAN: Vec2 = Vec2::new(0.1591, core::f32::consts::FRAC_1_PI);
 

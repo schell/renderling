@@ -130,14 +130,55 @@ impl crate::shader::Sample2d for CpuTexture2d {
 /// A CPU-side cubemap texture.
 ///
 /// Provided primarily for testing purposes.
-pub struct CpuCubemap;
+pub struct CpuCubemap {
+    pub images: [image::DynamicImage; 6],
+}
 
 impl crate::shader::SampleCube for CpuCubemap {
     type Sampler = CpuSampler;
 
-    fn sample_by_lod(&self, _sampler: Self::Sampler, _uv: glam::Vec3, _lod: f32) -> glam::Vec4 {
-        // TODO: implement CPU-side cubemap sampling
-        glam::Vec4::ONE
+    fn sample_by_lod(
+        &self,
+        _sampler: Self::Sampler,
+        direction: glam::Vec3,
+        _lod: f32,
+    ) -> glam::Vec4 {
+        // Take the absolute value of the direction vector components
+        let abs_direction = direction.abs();
+        let (max_dim, u, v): (usize, f32, f32);
+
+        // Determine which face of the cubemap the direction vector is pointing towards
+        // by finding the largest component of the vector.
+        // The u and v texture coordinates within that face are calculated by dividing
+        // the other two components of the direction vector by the largest component.
+        if abs_direction.x >= abs_direction.y && abs_direction.x >= abs_direction.z {
+            max_dim = if direction.x >= 0.0 { 0 } else { 1 };
+            u = -direction.z / abs_direction.x;
+            v = -direction.y / abs_direction.x;
+        } else if abs_direction.y >= abs_direction.x && abs_direction.y >= abs_direction.z {
+            max_dim = if direction.y >= 0.0 { 2 } else { 3 };
+            u = direction.x / abs_direction.y;
+            v = -direction.z / abs_direction.y;
+        } else {
+            max_dim = if direction.z >= 0.0 { 4 } else { 5 };
+            u = direction.x / abs_direction.z;
+            v = direction.y / abs_direction.z;
+        }
+
+        // Get the dimensions of the cubemap image
+        let (width, height) = self.images[max_dim].dimensions();
+        // Convert the u and v coordinates from [-1, 1] to [0, width/height]
+        let tex_u = ((u + 1.0) * 0.5 * (width as f32 - 1.0)).round() as u32;
+        let tex_v = ((1.0 - v) * 0.5 * (height as f32 - 1.0)).round() as u32;
+
+        // Sample and return the color from the appropriate image in the cubemap
+        let pixel = self.images[max_dim].get_pixel(tex_u, tex_v);
+        glam::Vec4::new(
+            pixel[0] as f32 / 255.0,
+            pixel[1] as f32 / 255.0,
+            pixel[2] as f32 / 255.0,
+            pixel[3] as f32 / 255.0,
+        )
     }
 }
 
@@ -159,10 +200,11 @@ fn init_logging() {
 mod test {
     use super::*;
     use glam::{Mat3, Mat4, Quat, Vec2, Vec3, Vec4};
+    use img_diff::DiffCfg;
     use pretty_assertions::assert_eq;
     use renderling_shader::{
         gltf as gl,
-        gltf::RenderUnit,
+        gltf::GltfRendering,
         pbr::Material,
         stage::{light::*, Camera, Transform, Vertex},
     };
@@ -221,7 +263,7 @@ mod test {
             ..Default::default()
         });
         let node_path = stage.append_array(&[node]);
-        let _tri = stage.draw_unit(&RenderUnit {
+        let _tri = stage.draw_gltf_rendering(&GltfRendering {
             camera,
             node_path,
             vertex_count: 3,
@@ -230,6 +272,54 @@ mod test {
 
         let img = r.render_image().unwrap();
         img_diff::assert_img_eq("cmy_triangle.png", img);
+    }
+
+    #[test]
+    // This tests our ability to draw a CMYK triangle in the top left corner, using CW geometry.
+    fn cmy_triangle_backface() {
+        let mut r = Renderling::headless(100, 100).with_background_color(Vec4::splat(1.0));
+        let mut stage = r.new_stage();
+        stage.configure_graph(&mut r, true);
+        let (projection, view) = default_ortho2d(100.0, 100.0);
+        let camera = stage.append(&Camera {
+            projection,
+            view,
+            ..Default::default()
+        });
+        let mesh = stage
+            .new_mesh()
+            .with_primitive(
+                {
+                    let mut vs = right_tri_vertices();
+                    vs.reverse();
+                    vs
+                },
+                [],
+                Id::NONE,
+            )
+            .build();
+        let mesh = stage.append(&mesh);
+        let node = stage.append(&gl::GltfNode {
+            mesh,
+            ..Default::default()
+        });
+        let node_path = stage.append_array(&[node]);
+        let _tri = stage.draw_gltf_rendering(&GltfRendering {
+            camera,
+            node_path,
+            vertex_count: 3,
+            ..Default::default()
+        });
+
+        let img = r.render_image().unwrap();
+        img_diff::assert_img_eq_cfg(
+            "cmy_triangle.png",
+            img,
+            DiffCfg {
+                test_name: Some("cmy_triangle_backface.png"),
+                ..Default::default()
+            },
+        );
     }
 
     #[test]
@@ -253,7 +343,7 @@ mod test {
         });
         let transform = stage.append(&Transform::default());
         let node_path = stage.append_array(&[node]);
-        let _tri = stage.draw_unit(&RenderUnit {
+        let _tri = stage.draw_gltf_rendering(&GltfRendering {
             camera,
             node_path,
             vertex_count: 3,
@@ -345,7 +435,7 @@ mod test {
             ..Default::default()
         };
         let transform = stage.append(&transform);
-        let _cube = stage.draw_unit(&RenderUnit {
+        let _cube = stage.draw_gltf_rendering(&GltfRendering {
             camera,
             vertex_count,
             node_path,
@@ -380,7 +470,7 @@ mod test {
             mesh,
             ..Default::default()
         });
-        let mut render_unit = RenderUnit {
+        let mut render_unit = GltfRendering {
             camera,
             vertex_count,
             node_path: stage.append_array(&[node]),
@@ -391,13 +481,13 @@ mod test {
             }),
             ..Default::default()
         };
-        let _cube_one = stage.draw_unit(&render_unit);
+        let _cube_one = stage.draw_gltf_rendering(&render_unit);
         render_unit.transform = stage.append(&Transform {
             translation: Vec3::new(4.5, 0.0, 0.0),
             scale: Vec3::new(6.0, 6.0, 6.0),
             rotation: Quat::from_axis_angle(Vec3::Y, std::f32::consts::FRAC_PI_4),
         });
-        let (_, cube_two_rendering) = stage.draw_unit(&render_unit);
+        let (_, cube_two_rendering) = stage.draw_gltf_rendering(&render_unit);
 
         // we should see two colored cubes
         let img = r.render_image().unwrap();
@@ -464,7 +554,7 @@ mod test {
             ..Default::default()
         });
 
-        let (cube, _) = stage.draw_unit(&RenderUnit {
+        let (cube, _) = stage.draw_gltf_rendering(&GltfRendering {
             camera,
             vertex_count: cube_vertex_count as u32,
             node_path,
@@ -478,7 +568,10 @@ mod test {
 
         // Update the cube mesh to a pyramid by overwriting the `.node_path` field
         // of `RenderUnit`
-        stage.write(cube + RenderUnit::offset_of_node_path(), &pyramid_node_path);
+        stage.write(
+            cube + GltfRendering::offset_of_node_path(),
+            &pyramid_node_path,
+        );
 
         // we should see a pyramid (in sRGB color space)
         let img = r.render_image().unwrap();
@@ -571,7 +664,7 @@ mod test {
             scale: Vec3::new(10.0, 10.0, 10.0),
             ..Default::default()
         });
-        let cube = stage.draw_unit(&RenderUnit {
+        let cube = stage.draw_gltf_rendering(&GltfRendering {
             camera,
             node_path,
             transform,
@@ -659,7 +752,7 @@ mod test {
             });
             let node_path = stage.append_array(&[node]);
 
-            stage.draw_unit(&RenderUnit {
+            stage.draw_gltf_rendering(&GltfRendering {
                 camera,
                 vertex_count: cheetah_primitive.vertex_count,
                 node_path,
@@ -682,7 +775,7 @@ mod test {
                 scale: Vec3::new(0.5, 0.5, 1.0),
                 ..Default::default()
             });
-            stage.draw_unit(&RenderUnit {
+            stage.draw_gltf_rendering(&GltfRendering {
                 camera,
                 transform,
                 vertex_count: cheetah_primitive.vertex_count,
@@ -757,7 +850,7 @@ mod test {
             ..Default::default()
         });
         let node_path = stage.append_array(&[node]);
-        let _cube = stage.draw_unit(&RenderUnit {
+        let _cube = stage.draw_gltf_rendering(&GltfRendering {
             camera,
             vertex_count,
             node_path,
@@ -913,7 +1006,7 @@ mod test {
         );
 
         let node_path = stage.append_array(&[root_node, cyan_node]);
-        let _cyan_unit = stage.draw_unit(&RenderUnit {
+        let _cyan_unit = stage.draw_gltf_rendering(&GltfRendering {
             camera,
             vertex_count: 3,
             node_path,
@@ -921,7 +1014,7 @@ mod test {
         });
 
         let node_path = stage.append_array(&[root_node, cyan_node, yellow_node]);
-        let _yellow_unit = stage.draw_unit(&RenderUnit {
+        let _yellow_unit = stage.draw_gltf_rendering(&GltfRendering {
             camera,
             vertex_count: 3,
             node_path,
@@ -929,7 +1022,7 @@ mod test {
         });
 
         let node_path = stage.append_array(&[root_node, cyan_node, yellow_node, red_node]);
-        let _red_unit = stage.draw_unit(&RenderUnit {
+        let _red_unit = stage.draw_gltf_rendering(&GltfRendering {
             camera,
             vertex_count: 3,
             node_path,
@@ -1023,7 +1116,7 @@ mod test {
                     ..Default::default()
                 });
                 let node_path = stage.append_array(&[node]);
-                let _entity = stage.draw_unit(&RenderUnit {
+                let _entity = stage.draw_gltf_rendering(&GltfRendering {
                     camera,
                     vertex_count: prim.vertex_count,
                     node_path,

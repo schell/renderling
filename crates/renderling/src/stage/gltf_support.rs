@@ -4,8 +4,8 @@ use crate::{
     shader::{
         gltf::*,
         pbr::Material,
-        stage::Camera,
         texture::{GpuTexture, TextureAddressMode, TextureModes},
+        Camera,
     },
     AtlasImage,
 };
@@ -1011,7 +1011,7 @@ impl Stage {
         camera_id: Id<Camera>,
         node: gltf::Node<'a>,
         parents: Vec<Id<GltfNode>>,
-    ) -> Vec<(Id<RenderUnit>, Id<Rendering>)> {
+    ) -> Vec<(Id<GltfRendering>, Id<Rendering>)> {
         if let Some(_light) = node.light() {
             // TODO: Support transforming lights based on node transforms
             ////let light = gpu_doc.lights.at(light.index());
@@ -1053,7 +1053,7 @@ impl Stage {
             primitives
                 .map(|primitive| {
                     let node_path = self.append_array(&node_path);
-                    let render_unit = RenderUnit {
+                    let render_unit = GltfRendering {
                         node_path,
                         mesh_index: mesh.index() as u32,
                         primitive_index: primitive.index() as u32,
@@ -1061,7 +1061,7 @@ impl Stage {
                         camera: camera_id,
                         ..Default::default()
                     };
-                    self.draw_unit(&render_unit)
+                    self.draw_gltf_rendering(&render_unit)
                 })
                 .collect::<Vec<_>>()
         } else {
@@ -1082,7 +1082,7 @@ impl Stage {
         gpu_doc: &GltfDocument,
         camera_id: Id<Camera>,
         node: gltf::Node<'_>,
-    ) -> Vec<(Id<RenderUnit>, Id<Rendering>)> {
+    ) -> Vec<(Id<GltfRendering>, Id<Rendering>)> {
         self.draw_gltf_node_with(gpu_doc, camera_id, node, vec![])
     }
 
@@ -1093,7 +1093,7 @@ impl Stage {
         gpu_doc: &GltfDocument,
         camera_id: Id<Camera>,
         scene: gltf::Scene<'_>,
-    ) -> Vec<(Id<RenderUnit>, Id<Rendering>)> {
+    ) -> Vec<(Id<GltfRendering>, Id<Rendering>)> {
         scene
             .nodes()
             .flat_map(|node| self.draw_gltf_node(gpu_doc, camera_id, node))
@@ -1501,7 +1501,7 @@ mod test {
             scale: Vec3::new(50.0, 50.0, 1.0),
             ..Default::default()
         });
-        let _unit_id = stage.draw_unit(&RenderUnit {
+        let _unit_id = stage.draw_gltf_rendering(&GltfRendering {
             camera,
             transform,
             vertex_count: primitive.vertex_count,
@@ -1569,7 +1569,7 @@ mod test {
             ..Default::default()
         });
 
-        let _unit_id = stage.draw_unit(&RenderUnit {
+        let _unit_id = stage.draw_gltf_rendering(&GltfRendering {
             camera: camera_id,
             transform,
             vertex_count: 6,
@@ -1725,7 +1725,7 @@ mod test {
         let (projection, view) = crate::camera::default_ortho2d(100.0, 100.0);
         let camera = stage.append(&Camera::new(projection, view));
         let node_path = stage.append_array(&[nodes.at(0)]);
-        let (_, rendering_id) = stage.draw_unit(&RenderUnit {
+        let (_, rendering_id) = stage.draw_gltf_rendering(&GltfRendering {
             camera,
             node_path,
             mesh_index: 0,
@@ -1748,8 +1748,8 @@ mod test {
     pub struct GltfVertexInvocation {
         pub instance_index: u32,
         pub vertex_index: u32,
-        pub render_unit_id: Id<RenderUnit>,
-        pub render_unit: RenderUnit,
+        pub render_unit_id: Id<GltfRendering>,
+        pub render_unit: GltfRendering,
         pub out_camera: u32,
         pub out_material: u32,
         pub out_color: Vec4,

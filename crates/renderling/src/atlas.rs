@@ -611,7 +611,7 @@ mod test {
             ..Default::default()
         });
         let node_path = stage.append_array(&[node]);
-        let _unit = stage.draw_unit(&RenderUnit {
+        let _unit = stage.draw_gltf_rendering(&GltfRendering {
             camera,
             transform,
             node_path,
@@ -728,7 +728,7 @@ mod test {
                 ..Default::default()
             });
             let node_path = stage.append_array(&[node]);
-            stage.draw_unit(&RenderUnit {
+            stage.draw_gltf_rendering(&GltfRendering {
                 camera,
                 node_path,
                 vertex_count: 6,
@@ -750,7 +750,7 @@ mod test {
                 translation: Vec3::new(sheet_w + 1.0, 0.0, 0.0),
                 ..Default::default()
             });
-            stage.draw_unit(&RenderUnit {
+            stage.draw_gltf_rendering(&GltfRendering {
                 camera,
                 node_path,
                 vertex_count: 6,
@@ -773,7 +773,7 @@ mod test {
                 translation: Vec3::new(sheet_w as f32 * 2.0 + 2.0, 0.0, 0.0),
                 ..Default::default()
             });
-            stage.draw_unit(&RenderUnit {
+            stage.draw_gltf_rendering(&GltfRendering {
                 camera,
                 node_path,
                 vertex_count: 6,
@@ -895,7 +895,7 @@ mod test {
                 ..Default::default()
             });
             let node_path = stage.append_array(&[node]);
-            stage.draw_unit(&RenderUnit {
+            stage.draw_gltf_rendering(&GltfRendering {
                 camera,
                 node_path,
                 vertex_count: 6,
@@ -917,7 +917,7 @@ mod test {
                 translation: Vec3::new(sheet_w + 1.0, 0.0, 0.0),
                 ..Default::default()
             });
-            stage.draw_unit(&RenderUnit {
+            stage.draw_gltf_rendering(&GltfRendering {
                 camera,
                 node_path,
                 transform,
@@ -940,7 +940,7 @@ mod test {
                 translation: Vec3::new(sheet_w as f32 * 2.0 + 2.0, 0.0, 0.0),
                 ..Default::default()
             });
-            stage.draw_unit(&RenderUnit {
+            stage.draw_gltf_rendering(&GltfRendering {
                 camera,
                 node_path,
                 vertex_count: 6,

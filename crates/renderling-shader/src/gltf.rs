@@ -3,10 +3,11 @@ use crabslab::{Array, Id, Slab, SlabItem};
 use glam::{Mat4, Vec2, Vec3, Vec4, Vec4Swizzles};
 
 use crate::{
+    math::{IsMatrix, IsVector},
     pbr::Material,
-    stage::{Camera, Transform, Vertex},
+    stage::Vertex,
     texture::GpuTexture,
-    IsMatrix, IsVector,
+    Camera, Transform,
 };
 #[repr(transparent)]
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
@@ -1067,11 +1068,11 @@ pub struct GltfDocument {
     pub views: Array<GltfBufferView>,
 }
 
-/// A rendering "command" that draws a single mesh from a top-level node.
+/// A rendering of one gltf primitive from a top-level node.
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[repr(C)]
 #[derive(Default, Clone, Copy, PartialEq, SlabItem)]
-pub struct RenderUnit {
+pub struct GltfRendering {
     // Which node are we rendering, and what is the path through its
     // ancestors to get to it.
     pub node_path: Array<Id<GltfNode>>,
@@ -1091,17 +1092,7 @@ pub struct RenderUnit {
     pub vertex_count: u32,
 }
 
-impl crate::stage::IsRendering for RenderUnit {
-    fn vertex_count(&self) -> u32 {
-        self.vertex_count
-    }
-
-    fn wrap(id: Id<Self>) -> crate::stage::Rendering {
-        crate::stage::Rendering::Gltf(id)
-    }
-}
-
-impl RenderUnit {
+impl GltfRendering {
     pub fn get_vertex_details(
         &self,
         vertex_index: u32,
@@ -1144,7 +1135,7 @@ impl RenderUnit {
 
 pub fn vertex(
     // Which render unit are we rendering
-    render_id: Id<RenderUnit>,
+    render_id: Id<GltfRendering>,
     // Which vertex within the render unit are we rendering
     vertex_index: u32,
     slab: &[u32],
