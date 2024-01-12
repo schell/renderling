@@ -2,7 +2,7 @@
 #![cfg_attr(target_arch = "spirv", no_std)]
 #![deny(clippy::disallowed_methods)]
 
-use crabslab::{Id, Slab, SlabItem};
+use crabslab::{Array, Id, Slab, SlabItem};
 use glam::{vec2, vec3, Vec2, Vec3, Vec3Swizzles, Vec4, Vec4Swizzles};
 
 #[cfg(target_arch = "spirv")]
@@ -154,6 +154,49 @@ impl Bezier {
     }
 }
 
+#[derive(Default, Clone, Copy, SlabItem)]
+pub enum PathItem {
+    #[default]
+    None,
+    Line(Id<Line>),
+    Bezier(Id<Bezier>),
+}
+
+#[derive(Debug, Clone, Copy, SlabItem)]
+pub struct Path {
+    pub items: Array<PathItem>,
+    pub thickness: f32,
+}
+
+impl Default for Path {
+    fn default() -> Self {
+        Self {
+            items: Default::default(),
+            thickness: 0.2,
+        }
+    }
+}
+
+impl Path {
+    pub fn distance(&self, pos: Vec2, slab: &[u32]) -> f32 {
+        let mut distance = f32::MAX;
+        for item_id in self.items.iter() {
+            match slab.read(item_id) {
+                PathItem::None => {}
+                PathItem::Bezier(bez_id) => {
+                    let bez = slab.read(bez_id);
+                    distance = distance.min(bez.distance(pos));
+                }
+                PathItem::Line(line_id) => {
+                    let line = slab.read(line_id);
+                    distance = distance.min(line.distance(pos));
+                }
+            }
+        }
+        distance
+    }
+}
+
 #[derive(Debug, Clone, Copy, SlabItem)]
 pub struct Rectangle {
     pub width: f32,
@@ -187,9 +230,10 @@ pub enum SdfShape {
     #[default]
     None,
     Circle(Id<Circle>),
+    Rectangle(Id<Rectangle>),
     Line(Id<Line>),
     Bezier(Id<Bezier>),
-    Rectangle(Id<Rectangle>),
+    Path(Id<Path>),
 }
 
 impl SdfShape {
@@ -211,6 +255,10 @@ impl SdfShape {
             Self::Rectangle(id) => {
                 let rectangle = slab.read(*id);
                 rectangle.distance(position)
+            }
+            Self::Path(id) => {
+                let path = slab.read(*id);
+                path.distance(position, slab)
             }
         }
     }
@@ -254,25 +302,7 @@ impl Sdf {
     }
 
     pub fn distance(&self, position: Vec2, slab: &[u32]) -> f32 {
-        match self.shape {
-            SdfShape::None => 0.0,
-            SdfShape::Circle(id) => {
-                let circle = slab.read(id);
-                circle.distance(position)
-            }
-            SdfShape::Line(id) => {
-                let line = slab.read(id);
-                line.distance(position)
-            }
-            SdfShape::Bezier(id) => {
-                let bez = slab.read(id);
-                bez.distance(position)
-            }
-            SdfShape::Rectangle(id) => {
-                let rectangle = slab.read(id);
-                rectangle.distance(position)
-            }
-        }
+        self.shape.distance(position, slab)
     }
 }
 
@@ -440,5 +470,37 @@ mod test {
         let _ = r.set_shape(SdfShape::Bezier(bez_id));
         let img = r.render_image();
         img_diff::assert_img_eq("sdf/bez.png", img);
+    }
+
+    #[test]
+    fn sdf_path() {
+        let percent = 0.6;
+        let v0 = Vec2::new(-0.6384547, 0.6263999) * percent;
+        let v1 = Vec2::new(0.9223702, 0.878696) * percent;
+        let v2 = Vec2::new(0.26539552, -0.87759334) * percent;
+
+        let mut r = SdfRenderer::new(256, 256);
+        let bez_id = r.slab.append(&Bezier {
+            start: v0,
+            control: v1,
+            end: v2,
+            thickness: 0.2,
+        });
+        let line_id = r.slab.append(&Line {
+            start: v0,
+            end: v2,
+            thickness: 0.2,
+        });
+
+        let items = r
+            .slab
+            .append_array(&[PathItem::Bezier(bez_id), PathItem::Line(line_id)]);
+        let path_id = r.slab.append(&Path {
+            items,
+            thickness: 0.2,
+        });
+        let _ = r.set_shape(SdfShape::Path(path_id));
+        let img = r.render_image();
+        img_diff::save("sdf/path.png", img);
     }
 }
