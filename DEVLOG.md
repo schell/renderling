@@ -1,5 +1,25 @@
 # devlog
 
+## Sat Jan 13, 2024
+
+`renderling` can now render 2d signed distance fields including circles/points, lines,
+bezier curves, rectangles and paths of line+bezier items.
+
+It's my plan to next use point-in-polygon (modified to include quadratic beziers) to
+determine if a point lies inside or outside the path, which would allow us to properly
+fill the path downstream.
+
+Ultimately I'd like to be able to convert TTF/OTF fonts to path outlines for resolution
+independent rendering.
+
+Oh and [Inigo Quilez](https://iquilezles.org) is my new hero!
+
+### Useful links
+
+* https://iquilezles.org/articles/distfunctions2d/
+* https://stackoverflow.com/questions/68178747/fast-2d-signed-distance
+
+
 ## Mon Jan 8, 2024
 
 I added another ty var to `crabslab::Offset` to help with pointer math.
