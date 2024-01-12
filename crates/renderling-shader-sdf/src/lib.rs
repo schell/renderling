@@ -3,7 +3,7 @@
 #![deny(clippy::disallowed_methods)]
 
 use crabslab::{Id, Slab, SlabItem};
-use glam::{Vec2, Vec3, Vec3Swizzles, Vec4, Vec4Swizzles};
+use glam::{vec2, vec3, Vec2, Vec3, Vec3Swizzles, Vec4, Vec4Swizzles};
 
 #[cfg(target_arch = "spirv")]
 use renderling_shader_core::math::Float;
@@ -93,41 +93,64 @@ impl Default for Bezier {
 }
 
 impl Bezier {
-    pub fn distance(&self, position: Vec2) -> f32 {
-        let a = self.start;
-        let b = self.control;
-        let c = self.end;
-
-        let a = b - a;
-        let b = a - 2.0 * b + c;
+    fn distance(&self, pos: Vec2) -> f32 {
+        let a = self.control - self.start;
+        let b = self.start - 2.0 * self.control + self.end;
         let c = a * 2.0;
-        let d = a - position;
+        let d = self.start - pos;
+
         let kk = 1.0 / b.dot(b);
         let kx = kk * a.dot(b);
-        let ky = kk * (2.0 * a.dot(a) + d.dot(b)) / 3.0;
+        let ky = kk * (2.0 * a.dot2() + d.dot(b)) / 3.0;
         let kz = kk * d.dot(a);
+
         let p = ky - kx * kx;
         let p3 = p * p * p;
         let q = kx * (2.0 * kx * kx - 3.0 * ky) + kz;
-        let h = q * q + 4.0 * p3;
+        let q2 = q * q;
+        let h = q2 + 4.0 * p3;
+
         let res = if h >= 0.0 {
-            let h = math::Float::sqrt(h);
-            let x = (Vec2::new(h, -h) - Vec2::new(q, q)) / 2.0;
-            let uv = x.signum_or_zero() * x.abs().powf(1.0 / 3.0);
-            let t = math::clamp(uv.x + uv.y - kx, 0.0, 1.0);
-            (d + (c + b * t) * t).dot2()
+            let h = h.sqrt();
+            let x = (vec2(h, -h) - q) / 2.0;
+            let uv = x.signum_or_zero() * {
+                let n = x.abs();
+                let e = 1.0 / 3.0;
+                n.powf(e)
+            };
+            let t = {
+                let n = uv.x + uv.y - kx;
+                math::clamp(n, 0.0, 1.0)
+            };
+            let r = d + (c + b * t) * t;
+            r.dot(r)
         } else {
-            let z = (-p).sqrt();
-            let v = (q / (p * z * 2.0)).acos() / 3.0;
+            let z = {
+                let n = -p;
+                n.sqrt()
+            };
+            let v = ({
+                let n = q / (p * z * 2.0);
+                n.acos()
+            }) / 3.0;
             let m = v.cos();
             let n = v.sin() * 1.732050808;
-            let t = Vec3::new(m + m, -n - m, n - m) * z - Vec3::splat(kx);
-            let t = t.clamp(Vec3::ZERO, Vec3::ONE);
-            (d + (c + b * t.x) * t.x)
-                .dot2()
-                .min((d + (c + b * t.y) * t.y).dot2())
+            let t = {
+                let n = vec3(m + m, -n - m, n - m) * z - kx;
+                n.clamp(Vec3::splat(0.0), Vec3::splat(1.0))
+            };
+            {
+                let a = d + (c + b * t.x) * t.x;
+                a.dot(a)
+            }
+            .min({
+                let a = d + (c + b * t.y) * t.y;
+                a.dot(a)
+            })
+            // the third root cannot be the closest
+            // res = min(res,dot2(d+(c+b*t.z)*t.z));
         };
-        res.sqrt()
+        return res.sqrt() - self.thickness * 0.5;
     }
 }
 
@@ -356,7 +379,7 @@ mod test {
         let circle_id = r.slab.append(&Circle { radius: 1.0 });
         let _ = r.set_shape(SdfShape::Circle(circle_id));
         let img = r.render_image();
-        img_diff::save("sdf/circle.png", img);
+        img_diff::assert_img_eq("sdf/circle.png", img);
     }
 
     #[test]
@@ -369,7 +392,7 @@ mod test {
         });
         let _ = r.set_shape(SdfShape::Line(line_id));
         let img = r.render_image();
-        img_diff::save("sdf/line.png", img);
+        img_diff::assert_img_eq("sdf/line.png", img);
     }
 
     #[test]
@@ -394,20 +417,28 @@ mod test {
         });
         let _ = r.set_shape(SdfShape::Rectangle(rect_id));
         let img = r.render_image();
-        img_diff::save("sdf/rect.png", img);
+        img_diff::assert_img_eq("sdf/rect.png", img);
+    }
+
+    #[test]
+    fn bez_sanity() {
+        assert!((-1.0f32).sqrt().is_nan());
     }
 
     #[test]
     fn sdf_bez() {
+        let v0 = Vec2::new(-0.6384547, 0.6263999);
+        let v1 = Vec2::new(0.9223702, 0.878696);
+        let v2 = Vec2::new(0.26539552, -0.87759334);
         let mut r = SdfRenderer::new(256, 256);
         let bez_id = r.slab.append(&Bezier {
-            start: Vec2::new(-1.0, 0.0),
-            control: Vec2::new(0.0, 1.0),
-            end: Vec2::new(1.0, 0.0),
+            start: v0,
+            control: v1,
+            end: v2,
             thickness: 0.2,
         });
         let _ = r.set_shape(SdfShape::Bezier(bez_id));
         let img = r.render_image();
-        img_diff::save("sdf/bez.png", img);
+        img_diff::assert_img_eq("sdf/bez.png", img);
     }
 }
