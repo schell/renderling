@@ -187,7 +187,7 @@ impl crate::shader::SampleCube for CpuCubemap {
 fn init_logging() {
     let _ = env_logger::builder()
         .is_test(true)
-        //.filter_level(log::LevelFilter::Trace)
+        .filter_level(log::LevelFilter::Trace)
         .filter_module("moongraph", log::LevelFilter::Trace)
         .filter_module("renderling", log::LevelFilter::Trace)
         //.filter_module("naga", log::LevelFilter::Debug)
@@ -206,7 +206,8 @@ mod test {
         gltf as gl,
         gltf::GltfRendering,
         pbr::Material,
-        stage::{light::*, Camera, Transform, Vertex},
+        stage::{light::*, Vertex},
+        Camera, Transform,
     };
 
     #[test]
@@ -275,7 +276,8 @@ mod test {
     }
 
     #[test]
-    // This tests our ability to draw a CMYK triangle in the top left corner, using CW geometry.
+    // This tests our ability to draw a CMYK triangle in the top left corner, using
+    // CW geometry.
     fn cmy_triangle_backface() {
         let mut r = Renderling::headless(100, 100).with_background_color(Vec4::splat(1.0));
         let mut stage = r.new_stage();

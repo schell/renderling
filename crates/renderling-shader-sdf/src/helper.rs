@@ -113,11 +113,15 @@ pub struct SdfRenderer {
 
 impl SdfRenderer {
     pub fn new(width: u32, height: u32) -> Self {
+        Self::new_with_capacity(width, height, 256)
+    }
+
+    pub fn new_with_capacity(width: u32, height: u32, cap: usize) -> Self {
         let mut renderling = Renderling::headless(width, height);
         configure_graph(&mut renderling);
         let (d, q) = renderling.get_device_and_queue_owned();
         let pipeline = new_render_pipeline(&d, renderling.get_render_target().format());
-        let mut slab = CpuSlab::new(WgpuBuffer::new(&d, &q, 256));
+        let mut slab = CpuSlab::new(WgpuBuffer::new(&d, &q, cap));
         let legend_id = slab.append::<ShapeLegend>(&ShapeLegend::default());
         let bindgroup_layout = new_bindgroup_layout(&d);
         let bindgroup = new_bindgroup(&d, slab.as_ref().get_buffer(), &bindgroup_layout);
@@ -139,6 +143,13 @@ impl SdfRenderer {
         id
     }
 
+    pub fn set_debug_point(&mut self, point: Vec2) {
+        self.slab.write(
+            self.legend_id + ShapeLegend::offset_of_debug_point(),
+            &point,
+        );
+    }
+
     fn render(
         pipeline: &wgpu::RenderPipeline,
         bindgroup: &wgpu::BindGroup,
@@ -158,7 +169,7 @@ impl SdfRenderer {
                     view: &view.view,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Load,
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
                         store: wgpu::StoreOp::Store,
                     },
                 })],

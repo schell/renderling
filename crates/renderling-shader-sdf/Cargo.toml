@@ -14,7 +14,7 @@ spirv-std = "0.9"
 
 [target.'cfg(not(target_arch = "spirv"))'.dependencies]
 glam = { workspace = true, features = ["std"] }
-crabslab = { workspace = true, features = ["default"] }
+crabslab = { workspace = true, features = ["default", "wgpu"] }
 
 [target.'cfg(not(target_arch = "spirv"))'.dev-dependencies]
 glam = { workspace = true, features = ["std", "debug-glam-assert"] }
@@ -24,7 +24,10 @@ glam = { version = "0.24.2", default-features = false, features = ["libm"] }
 crabslab = { workspace = true, features = ["glam"]  }
 
 [dev-dependencies]
+env_logger = {workspace = true}
 image = { workspace = true }
 img-diff = { path = "../img-diff" }
+log = {workspace = true}
 renderling = { path = "../renderling" }
+ttf-parser = "0.20.0"
 wgpu = { workspace = true }

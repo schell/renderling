@@ -1318,11 +1318,7 @@ impl<'a> GltfMeshBuilder<'a> {
 #[cfg(test)]
 mod test {
     use crate::{
-        shader::{
-            gltf::*,
-            pbr::Material,
-            stage::{Camera, Transform, Vertex},
-        },
+        shader::{gltf::*, pbr::Material, stage::Vertex, Camera, Transform},
         Renderling, Stage,
     };
     use crabslab::{Array, GrowableSlab, Id, Slab};
@@ -1646,9 +1642,9 @@ mod test {
 
         // buffers
         let positions =
-            stage.append_array(&[[0.0, 0.0, 0.5], [0.0, 100.0, 0.5], [100.0, 0.0, 0.5]]);
+            stage.append_array(&[[0.0, 0.0, 0.5f32], [0.0, 100.0, 0.5], [100.0, 0.0, 0.5]]);
         let positions_buffer = GltfBuffer(positions.into_u32_array());
-        let cyan = [0.0, 1.0, 1.0, 1.0];
+        let cyan = [0.0, 1.0, 1.0, 1.0f32];
         let magenta = [1.0, 0.0, 1.0, 1.0];
         let yellow = [1.0, 1.0, 0.0, 1.0];
         let colors = stage.append_array(&[cyan, magenta, yellow]);

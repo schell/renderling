@@ -42,7 +42,7 @@ features = ["gltf", "text", "raw-window-handle", "winit"]
 [dev-dependencies]
 criterion = { version = "0.4", features = ["html_reports"] }
 ctor = "0.2.2"
-env_logger = "0.10.0"
+env_logger = {workspace = true}
 icosahedron = "0.1"
 img-diff = { path = "../img-diff" }
 naga = { version = "0.13", features = ["spv-in", "wgsl-out", "wgsl-in", "msl-out"] }

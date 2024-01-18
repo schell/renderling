@@ -535,7 +535,8 @@ impl Stage {
 
     /// Draw a GLTF rendering each frame.
     ///
-    /// Returns the id of the stored `GltfRendering` and the id of the [`Rendering`].
+    /// Returns the id of the stored `GltfRendering` and the id of the
+    /// [`Rendering`].
     pub fn draw_gltf_rendering(
         &mut self,
         unit: &GltfRendering,
@@ -759,7 +760,8 @@ impl Stage {
 
     /// Read the irradiance cubemap images from the GPU.
     ///
-    /// This only reads the top level of mips. This is primarily used for debugging.
+    /// This only reads the top level of mips. This is primarily used for
+    /// debugging.
     ///
     /// ## Panics
     /// Panics if the pixels read from the GPU cannot be converted into an
@@ -773,7 +775,8 @@ impl Stage {
 
     /// Read the prefiltered cubemap images from the GPU.
     ///
-    /// This only reads the top level of mips. This is primarily used for debugging.
+    /// This only reads the top level of mips. This is primarily used for
+    /// debugging.
     ///
     /// ## Panics
     /// Panics if the pixels read from the GPU cannot be converted into an
@@ -898,44 +901,4 @@ pub fn stage_render(
     stage.queue.submit(std::iter::once(encoder.finish()));
 
     Ok(())
-}
-
-#[cfg(test)]
-mod test {
-    use crate::Renderling;
-    use crabslab::{GrowableSlab, Id};
-    use glam::{Vec2, Vec3, Vec4};
-    use renderling_shader::{
-        sdf::{Circle, Sdf, SdfShape},
-        stage::{Camera, Transform},
-    };
-
-    #[test]
-    fn can_draw_circle_sdf() {
-        let mut r = Renderling::headless(32, 32);
-        let mut stage = r.new_stage();
-        stage.configure_graph(&mut r, true);
-        let (projection, view) = crate::default_ortho2d(32.0, 32.0);
-        let camera = stage.append(&Camera::new(projection, view));
-        let circle = stage.append(&Circle { radius: 0.5 });
-        let (_sdf_id, _rendering_id) = stage.draw_sdf_rendering(&Sdf {
-            shape: SdfShape::Circle(circle),
-            transform: Transform {
-                translation: Vec3::new(16.0, 16.0, 0.0),
-                scale: Vec3::new(32.0, 32.0, 1.0),
-                ..Default::default()
-            },
-            material: Id::NONE,
-            camera,
-        });
-
-        let slab = stage.read_slab().unwrap();
-        let atlas = stage.read_atlas_image();
-        let irradiance = stage.read_irradiance_cubemap();
-        let prefiltered = stage.read_prefiltered_cubemap();
-        let brdf = stage.read_brdf_image();
-
-        let img = r.render_linear_image().unwrap();
-        img_diff::save("sdf/can_draw_circle.png", img);
-    }
 }

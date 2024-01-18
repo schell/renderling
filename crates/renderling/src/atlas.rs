@@ -524,8 +524,9 @@ mod test {
         shader::{
             gltf::*,
             pbr::Material,
-            stage::{Camera, Transform, Vertex},
+            stage::Vertex,
             texture::{GpuTexture, TextureAddressMode, TextureModes},
+            Camera, Transform,
         },
         Renderling,
     };
