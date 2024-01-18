@@ -1,5 +1,33 @@
 # devlog
 
+## Fri Jan 19, 2024
+
+Last night I successfully rendered a font face using 2d SDF path objects (lines and quadratic
+Beziers):
+
+!['!' char rendered with SDFs](test_img/sdf/filled_bez_path_font_face/!.png)
+!['%' char rendered with SDFs](test_img/sdf/filled_bez_path_font_face/%.png)
+!['@' char rendered with SDFs](test_img/sdf/filled_bez_path_font_face/@.png)
+!['a' char rendered with SDFs](test_img/sdf/filled_bez_path_font_face/a.png)
+!['}' char rendered with SDFs](test_img/sdf/filled_bez_path_font_face/}.png)
+
+I'm not sure of the performance characteristics of the path shader yet, so we'll have to see
+if it holds up well enough to render these paths at runtime or if they'll have to be cached
+as textures.
+
+### SDFs
+
+SDFs have turned out to be rather magical and a lot of fun! I think I'll be using them more
+often.
+
+### Crabslab
+
+I got my first pull request on `crabslab` yesterday from @cybersoulk (we both talk in Embark's
+`rust-gpu` channel). Thanks for the PR!
+
+I did notice while working on the SDF font rendering that resizing the slab between renders seemed
+to cause issues - I'll have to look into it and write some tests.
+
 ## Sat Jan 13, 2024
 
 `renderling` can now render 2d signed distance fields including circles/points, lines,
