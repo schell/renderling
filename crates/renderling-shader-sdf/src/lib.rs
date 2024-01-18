@@ -913,7 +913,9 @@ mod test {
                 let img = r.render_image();
                 let filename = format!("{c}")
                     .replace("/", "forward_slash")
-                    .replace("\\", "back_slash");
+                    .replace("\\", "back_slash")
+                    .replace("%", "percent")
+                    .replace("}", "close_brace");
                 img_diff::assert_img_eq(
                     &format!("sdf/filled_bez_path_font_face/{filename}.png"),
                     img,

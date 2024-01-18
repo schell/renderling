@@ -6,10 +6,10 @@ Last night I successfully rendered a font face using 2d SDF path objects (lines 
 Beziers):
 
 !['!' char rendered with SDFs](test_img/sdf/filled_bez_path_font_face/!.png)
-!['%' char rendered with SDFs](test_img/sdf/filled_bez_path_font_face/%.png)
+!['%' char rendered with SDFs](test_img/sdf/filled_bez_path_font_face/percent.png)
 !['@' char rendered with SDFs](test_img/sdf/filled_bez_path_font_face/@.png)
 !['a' char rendered with SDFs](test_img/sdf/filled_bez_path_font_face/a.png)
-!['}' char rendered with SDFs](test_img/sdf/filled_bez_path_font_face/}.png)
+![closing bracket char rendered with SDFs](test_img/sdf/filled_bez_path_font_face/close_brace.png)
 
 I'm not sure of the performance characteristics of the path shader yet, so we'll have to see
 if it holds up well enough to render these paths at runtime or if they'll have to be cached
