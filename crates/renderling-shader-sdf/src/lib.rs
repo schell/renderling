@@ -3,7 +3,7 @@
 #![deny(clippy::disallowed_methods)]
 
 use crabslab::{Array, Id, Slab, SlabItem};
-use glam::{vec2, vec3, BVec3, Vec2, Vec3, Vec3Swizzles, Vec4, Vec4Swizzles};
+use glam::{vec2, vec3, BVec3, Vec2, Vec3, Vec4, Vec4Swizzles};
 
 #[cfg(target_arch = "spirv")]
 use renderling_shader_core::math::Float;
@@ -16,7 +16,6 @@ use spirv_std::spirv;
 
 #[cfg(test)]
 mod helper;
-//mod winding;
 
 /// Returns the implicit position of the given index in clip space.
 pub fn get_clip_position(index: usize) -> Vec3 {
@@ -40,30 +39,30 @@ impl Default for Circle {
 }
 
 impl Circle {
-    pub fn distance(&self, position: Vec2) -> f32 {
+    pub fn distance(&self, position: Vec3) -> f32 {
         position.length() - self.radius
     }
 }
 
 #[derive(Clone, Copy, SlabItem)]
 pub struct Line {
-    pub start: Vec2,
-    pub end: Vec2,
+    pub start: Vec3,
+    pub end: Vec3,
     pub thickness: f32,
 }
 
 impl Default for Line {
     fn default() -> Self {
         Self {
-            start: Vec2::new(-1.0, 0.0),
-            end: Vec2::new(1.0, 0.0),
+            start: Vec3::new(-1.0, 0.0, 0.0),
+            end: Vec3::new(1.0, 0.0, 0.0),
             thickness: 0.2,
         }
     }
 }
 
 impl Line {
-    pub fn distance(&self, position: Vec2) -> f32 {
+    pub fn distance(&self, position: Vec3) -> f32 {
         let p = position;
         let a = self.start;
         let b = self.end;
@@ -76,25 +75,25 @@ impl Line {
 
 #[derive(Clone, Copy, SlabItem)]
 pub struct Bezier {
-    pub start: Vec2,
-    pub control: Vec2,
-    pub end: Vec2,
+    pub start: Vec3,
+    pub control: Vec3,
+    pub end: Vec3,
     pub thickness: f32,
 }
 
 impl Default for Bezier {
     fn default() -> Self {
         Self {
-            start: Vec2::new(-1.0, 0.0),
-            control: Vec2::new(0.0, 1.0),
-            end: Vec2::new(1.0, 0.0),
+            start: Vec3::new(-1.0, 0.0, 0.0),
+            control: Vec3::new(0.0, 1.0, 0.0),
+            end: Vec3::new(1.0, 0.0, 0.0),
             thickness: 0.2,
         }
     }
 }
 
 impl Bezier {
-    fn distance(&self, pos: Vec2) -> f32 {
+    fn distance(&self, pos: Vec3) -> f32 {
         let a = self.control - self.start;
         let b = self.start - 2.0 * self.control + self.end;
         let c = a * 2.0;
@@ -182,9 +181,9 @@ impl Default for Path {
 
 /// DeCasteljau's bezier splitting algorithm.
 pub fn split_bezier(
-    bezier: (Vec2, Vec2, Vec2),
+    bezier: (Vec3, Vec3, Vec3),
     t: f32,
-) -> ((Vec2, Vec2, Vec2), (Vec2, Vec2, Vec2)) {
+) -> ((Vec3, Vec3, Vec3), (Vec3, Vec3, Vec3)) {
     let (p0, p1, p2) = bezier;
 
     let p01 = p0.lerp(p1, t);
@@ -194,15 +193,15 @@ pub fn split_bezier(
     ((p0, p01, p0112), (p0112, p12, p2))
 }
 
-pub fn area_of_triangle(a: Vec2, b: Vec2, c: Vec2) -> f32 {
+pub fn area_of_triangle(a: Vec3, b: Vec3, c: Vec3) -> f32 {
     let ab = b - a;
     let ac = c - a;
-    let cross = ab.x * ac.y - ab.y * ac.x;
-    cross.abs() * 0.5
+    let cross = ab.cross(ac);
+    cross.length() * 0.5
 }
 
 impl Path {
-    fn wind_sign(pos: Vec2, start: Vec2, end: Vec2) -> f32 {
+    fn wind_sign(pos: Vec3, start: Vec3, end: Vec3) -> f32 {
         let e = end - start;
         let w = pos - start;
         let cond = BVec3::new(pos.y >= start.y, pos.y < end.y, e.x * w.y > e.y * w.x);
@@ -213,14 +212,14 @@ impl Path {
         }
     }
 
-    pub fn bez_is_colinear_enough(dxy: Vec2, (a, b, c): (Vec2, Vec2, Vec2)) -> bool {
+    pub fn bez_is_colinear_enough(dxy: Vec2, (a, b, c): (Vec3, Vec3, Vec3)) -> bool {
         let area = area_of_triangle(a, b, c);
         let one_pixel_area = dxy.x * dxy.y;
         let straight_line_area = (a - b).length() * one_pixel_area;
         area <= straight_line_area || area <= f32::EPSILON
     }
 
-    pub fn distance(&self, pos: Vec2, slab: &[u32]) -> f32 {
+    pub fn distance(&self, pos: Vec3, slab: &[u32]) -> f32 {
         let mut distance = f32::MAX;
         let mut sign = 1.0;
         let pos_change = Vec2::new(
@@ -281,31 +280,28 @@ impl Path {
     }
 }
 
-#[derive(Debug, Clone, Copy, SlabItem)]
-pub struct Rectangle {
-    pub width: f32,
-    pub height: f32,
+#[derive(Clone, Copy, SlabItem)]
+#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
+pub struct Cuboid {
+    pub size: Vec3,
 }
 
-impl Default for Rectangle {
+impl Default for Cuboid {
     fn default() -> Self {
         Self {
-            width: 2.0,
-            height: 2.0,
+            size: Vec3::splat(2.0),
         }
     }
 }
 
-impl Rectangle {
-    pub fn distance(&self, position: Vec2) -> f32 {
-        let half_size = Vec2::new(self.width, self.height) * 0.5;
-        let componentwise_edge_distance = position.abs() - half_size;
-        let outside_distance = componentwise_edge_distance.max(Vec2::ZERO).length();
-        let inside_distance = componentwise_edge_distance
-            .x
-            .max(componentwise_edge_distance.y)
-            .min(0.0);
-        outside_distance + inside_distance
+impl Cuboid {
+    pub fn half_size(&self) -> Vec3 {
+        self.size * 0.5
+    }
+
+    pub fn distance(&self, position: Vec3) -> f32 {
+        let q = position.abs() - self.half_size();
+        q.max(Vec3::ZERO).length() + q.x.max(q.y.max(q.z)).min(0.0)
     }
 }
 
@@ -314,14 +310,14 @@ pub enum SdfShape {
     #[default]
     None,
     Circle(Id<Circle>),
-    Rectangle(Id<Rectangle>),
+    Rectangle(Id<Cuboid>),
     Line(Id<Line>),
     Bezier(Id<Bezier>),
     Path(Id<Path>),
 }
 
 impl SdfShape {
-    pub fn distance(&self, position: Vec2, slab: &[u32]) -> f32 {
+    pub fn distance(&self, position: Vec3, slab: &[u32]) -> f32 {
         match self {
             Self::None => 0.0,
             Self::Circle(id) => {
@@ -385,7 +381,7 @@ impl Sdf {
         }
     }
 
-    pub fn distance(&self, position: Vec2, slab: &[u32]) -> f32 {
+    pub fn distance(&self, position: Vec3, slab: &[u32]) -> f32 {
         self.shape.distance(position, slab)
     }
 }
@@ -403,7 +399,7 @@ pub struct ShapeLegend {
     pub inside_color: Vec4,
     pub outside_color: Vec4,
     pub shape: Id<SdfShape>,
-    pub debug_point: Vec2,
+    pub debug_points: Array<Vec3>,
 }
 
 impl Default for ShapeLegend {
@@ -414,7 +410,7 @@ impl Default for ShapeLegend {
             inside_color: math::hex_to_vec4(0x4e83b1ff),
             outside_color: math::hex_to_vec4(0x52b14eff),
             shape: Id::default(),
-            debug_point: Vec2::MAX,
+            debug_points: Array::default(),
         }
     }
 }
@@ -468,7 +464,7 @@ pub fn sdf_shape_fragment(
 ) {
     let legend = slab.read(in_shape_legend);
     let shape = slab.read(legend.shape);
-    let distance = shape.distance(in_local_pos.xy(), slab);
+    let distance = shape.distance(in_local_pos, slab);
     let shape_color = color_distance(
         legend.inside_color,
         legend.outside_color,
@@ -477,16 +473,18 @@ pub fn sdf_shape_fragment(
         distance,
     );
     *output = shape_color;
-    if legend.debug_point != Vec2::MAX {
+    for point_id in legend.debug_points.iter() {
+        let point = slab.read(point_id);
         let adist = distance.abs();
         if adist <= 0.1 {
             *output *= Vec3::splat(adist / 0.1).extend(1.0);
         }
         let radius = 0.05;
-        let distance = in_local_pos.xy().distance(legend.debug_point);
+        let distance = in_local_pos.distance(point);
         let distance = distance - radius;
         if distance <= 0.0 {
             *output *= Vec4::new(1.0, 0.5, 0.5, 1.0);
+            break;
         }
     }
 }
@@ -500,18 +498,17 @@ mod test {
     #[test]
     fn circle_sanity() {
         let circle = Circle { radius: 1.0 };
-        assert_eq!(-circle.radius, circle.distance(Vec2::ZERO));
-        assert_eq!(0.0, circle.distance(Vec2::new(1.0, 0.0)));
+        assert_eq!(-circle.radius, circle.distance(Vec3::ZERO));
+        assert_eq!(0.0, circle.distance(Vec3::new(1.0, 0.0, 0.0)));
         assert_eq!(
             0.0,
-            circle.distance(Vec2::new(
+            circle.distance(Vec3::new(
                 f32::cos(std::f32::consts::FRAC_PI_4),
-                f32::sin(std::f32::consts::FRAC_PI_4)
+                f32::sin(std::f32::consts::FRAC_PI_4),
+                0.0
             ))
         );
-        assert_eq!(1.0, circle.distance(Vec2::new(2.0, 0.0)));
-        //assert_eq!(2.0, Vec2::ONE.length());
-        //assert_eq!(0.0, Circle { radius: 1.0 }.distance(Vec2::ONE));
+        assert_eq!(1.0, circle.distance(Vec3::new(2.0, 0.0, 0.0)));
     }
 
     #[test]
@@ -526,11 +523,12 @@ mod test {
     #[test]
     fn sdf_line() {
         let mut r = SdfRenderer::new(256, 256);
-        let line_id = r.slab.append(&Line {
-            start: Vec2::new(-0.75, -0.75),
-            end: Vec2::new(0.75, 0.75),
+        let line = Line {
+            start: Vec3::new(-0.75, -0.75, 0.0),
+            end: Vec3::new(0.75, 0.75, 0.0),
             thickness: 0.2,
-        });
+        };
+        let line_id = r.slab.append(&line);
         let _ = r.set_shape(SdfShape::Line(line_id));
         let img = r.render_image();
         img_diff::assert_img_eq("sdf/line.png", img);
@@ -538,23 +536,21 @@ mod test {
 
     #[test]
     fn rect_sanity() {
-        let rect = Rectangle {
-            width: 2.0,
-            height: 2.0,
+        let rect = Cuboid {
+            size: Vec3::splat(2.0),
         };
-        assert_eq!(0.0, rect.distance(Vec2::ONE));
-        assert_eq!(0.0, rect.distance(Vec2::new(1.0, 0.0)));
-        assert_eq!(0.0, rect.distance(Vec2::new(0.0, 1.0)));
-        assert_eq!(1.0, rect.distance(Vec2::new(2.0, 0.0)));
-        assert_eq!(-1.0, rect.distance(Vec2::ZERO));
+        assert_eq!(0.0, rect.distance(Vec3::ONE));
+        assert_eq!(0.0, rect.distance(Vec3::new(1.0, 0.0, 0.0)));
+        assert_eq!(0.0, rect.distance(Vec3::new(0.0, 1.0, 0.0)));
+        assert_eq!(1.0, rect.distance(Vec3::new(2.0, 0.0, 0.0)));
+        assert_eq!(-1.0, rect.distance(Vec3::ZERO));
     }
 
     #[test]
     fn sdf_rect() {
         let mut r = SdfRenderer::new(256, 256);
-        let rect_id = r.slab.append(&Rectangle {
-            width: 1.4,
-            height: 0.8,
+        let rect_id = r.slab.append(&Cuboid {
+            size: Vec3::new(1.4, 0.8, 1.0),
         });
         let _ = r.set_shape(SdfShape::Rectangle(rect_id));
         let img = r.render_image();
@@ -568,9 +564,9 @@ mod test {
 
     #[test]
     fn sdf_bez() {
-        let v0 = Vec2::new(-0.6384547, 0.6263999);
-        let v1 = Vec2::new(0.9223702, 0.878696);
-        let v2 = Vec2::new(0.26539552, -0.87759334);
+        let v0 = Vec3::new(-0.6384547, 0.6263999, 0.0);
+        let v1 = Vec3::new(0.9223702, 0.878696, 0.0);
+        let v2 = Vec3::new(0.26539552, -0.87759334, 0.0);
         let mut r = SdfRenderer::new(256, 256);
         let bez_id = r.slab.append(&Bezier {
             start: v0,
@@ -586,9 +582,9 @@ mod test {
     #[test]
     fn sdf_path() {
         let percent = 0.6;
-        let a = Vec2::new(-0.6384547, 0.6263999) * percent;
-        let b = Vec2::new(0.9223702, 0.878696) * percent;
-        let c = Vec2::new(0.26539552, -0.87759334) * percent;
+        let a = Vec3::new(-0.6384547, 0.6263999, 0.0) * percent;
+        let b = Vec3::new(0.9223702, 0.878696, 0.0) * percent;
+        let c = Vec3::new(0.26539552, -0.87759334, 0.0) * percent;
 
         let mut r = SdfRenderer::new(256, 256);
         let ab_id = r.slab.append(&Line {
@@ -624,7 +620,7 @@ mod test {
         let position = position / 256.0; // now x and y are between [0, 1]
         let position = position * 2.0 - 1.0; // now [-1, 1]
         let position = Vec2::new(position.x, -position.y); // flip y
-        r.set_debug_point(position);
+        r.set_debug_points([position.extend(0.0)]);
         let img = r.render_image();
         img_diff::assert_img_eq("sdf/filled_path_thickness_0.png", img);
 
@@ -638,9 +634,9 @@ mod test {
     #[test]
     fn sdf_bez_path() {
         let percent = 0.6;
-        let a = Vec2::new(-0.6384547, 0.6263999) * percent;
-        let b = Vec2::new(0.9223702, 0.878696) * percent;
-        let c = Vec2::new(0.26539552, -0.87759334) * percent;
+        let a = Vec3::new(-0.6384547, 0.6263999, 0.0) * percent;
+        let b = Vec3::new(0.9223702, 0.878696, 0.0) * percent;
+        let c = Vec3::new(0.26539552, -0.87759334, 0.0) * percent;
 
         let mut r = SdfRenderer::new(256, 256);
         let bez_id = r.slab.append(&Bezier {
@@ -670,7 +666,7 @@ mod test {
         let position = position / 256.0; // now x and y are between [0, 1]
         let position = position * 2.0 - 1.0; // now [-1, 1]
         let position = Vec2::new(position.x, -position.y); // flip y
-        r.set_debug_point(position);
+        r.set_debug_points([position.extend(0.0)]);
         let img = r.render_image();
         img_diff::assert_img_eq("sdf/filled_bez_path_thickness_0.png", img);
 
@@ -684,9 +680,9 @@ mod test {
     #[test]
     fn sdf_bez_path_holes() {
         fn get_items(r: &mut SdfRenderer, percent: f32) -> [PathItem; 2] {
-            let a = Vec2::new(-0.6384547, 0.6263999) * percent;
-            let b = Vec2::new(0.9223702, 0.878696) * percent;
-            let c = Vec2::new(0.26539552, -0.87759334) * percent;
+            let a = Vec3::new(-0.6384547, 0.6263999, 0.0) * percent;
+            let b = Vec3::new(0.9223702, 0.878696, 0.0) * percent;
+            let c = Vec3::new(0.26539552, -0.87759334, 0.0) * percent;
             let bez_id = r.slab.append(&Bezier {
                 start: a,
                 control: b,
@@ -702,7 +698,7 @@ mod test {
         }
 
         let mut r = SdfRenderer::new(256, 256);
-        r.set_debug_point(Vec2::ZERO);
+        r.set_debug_points([Vec3::ZERO]);
         let outer = get_items(&mut r, 1.0);
         let inner = get_items(&mut r, 0.4);
 
@@ -747,6 +743,7 @@ mod test {
             Close,
         }
 
+        #[allow(dead_code)]
         struct FaceOutline {
             path_id: Id<Path>,
             shapes: Vec<SdfShape>,
@@ -783,13 +780,13 @@ mod test {
 
             pub fn build(self, r: &mut SdfRenderer) -> FaceOutline {
                 let mut start = None;
-                let mut last = Vec2::ZERO;
+                let mut last = Vec3::ZERO;
                 let mut items = vec![];
 
                 fn add_line(
                     r: &mut SdfRenderer,
-                    p: Vec2,
-                    last: &mut Vec2,
+                    p: Vec3,
+                    last: &mut Vec3,
                     items: &mut Vec<PathItem>,
                 ) -> Option<SdfShape> {
                     let line_id = r.slab.append(&Line {
@@ -800,24 +797,22 @@ mod test {
                     *last = p;
                     items.push(PathItem::Line(line_id));
                     Some(SdfShape::Line(line_id))
-                };
-
+                }
 
                 let shapes = self
                     .items
                     .iter()
                     .filter_map(|item| {
-                        let i = items.len();
                         let shape = match item {
                             Outline::MoveTo(p) => {
-                                last = *p;
+                                last = p.extend(0.0);
                                 None
                             }
-                            Outline::LineTo(p) => add_line(r, *p, &mut last, &mut items),
+                            Outline::LineTo(p) => add_line(r, p.extend(0.0), &mut last, &mut items),
                             Outline::QuadTo(b, c) => {
                                 let a = last;
-                                let b = *b;
-                                let c = *c;
+                                let b = b.extend(0.0);
+                                let c = c.extend(0.0);
                                 if area_of_triangle(a, b, c) <= f32::EPSILON {
                                     add_line(r, c, &mut last, &mut items)
                                 } else {

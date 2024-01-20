@@ -143,10 +143,12 @@ impl SdfRenderer {
         id
     }
 
-    pub fn set_debug_point(&mut self, point: Vec2) {
+    pub fn set_debug_points(&mut self, points: impl IntoIterator<Item = Vec3>) {
+        let points = points.into_iter().collect::<Vec<_>>();
+        let points = self.slab.append_array(&points);
         self.slab.write(
-            self.legend_id + ShapeLegend::offset_of_debug_point(),
-            &point,
+            self.legend_id + ShapeLegend::offset_of_debug_points(),
+            &points,
         );
     }
 
