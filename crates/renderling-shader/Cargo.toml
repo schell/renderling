@@ -10,9 +10,12 @@ description = "Shared types and functions for renderling shaders compiled w/ rus
 crate-type = ["lib", "dylib"]
 
 [features]
-default = []
+default = ["sdf"]
+sdf = ["dep:renderling-shader-sdf"]
 
 [dependencies]
+renderling-shader-core = { version = "0.1.0", path = "../renderling-shader-core" }
+renderling-shader-sdf = { version = "0.1.0", path = "../renderling-shader-sdf", optional = true }
 spirv-std = "0.9"
 
 [target.'cfg(not(target_arch = "spirv"))'.dependencies]

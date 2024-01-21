@@ -3,7 +3,7 @@ use crabslab::{Array, Id, Slab, SlabItem};
 use glam::{Mat4, Vec4, Vec4Swizzles};
 use spirv_std::spirv;
 
-use crate::{gltf::RenderUnit, stage::Vertex};
+use crate::{gltf::GltfRendering, stage::Vertex};
 
 /// Simple fragment shader that writes the input color to the output color.
 #[spirv(fragment)]
@@ -93,7 +93,7 @@ pub fn slabbed_render_unit(
     out_color: &mut Vec4,
     #[spirv(position)] clip_pos: &mut Vec4,
 ) {
-    let unit_id = Id::<RenderUnit>::from(instance_index);
+    let unit_id = Id::<GltfRendering>::from(instance_index);
     let unit = slab.read(unit_id);
     let (vertex, tfrm, _) = unit.get_vertex_details(vertex_index, slab);
     let camera = slab.read(unit.camera);

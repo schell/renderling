@@ -38,6 +38,8 @@ pub struct DiffCfg {
     /// `pixel_threshold`) to "correct" pixels that the image must contain
     /// before it is considered an error.
     pub image_threshold: f32,
+    /// The name of the test.
+    pub test_name: Option<&'static str>,
 }
 
 impl Default for DiffCfg {
@@ -45,6 +47,7 @@ impl Default for DiffCfg {
         Self {
             pixel_threshold: PIXEL_MAGNITUDE_THRESHOLD,
             image_threshold: IMAGE_DIFF_THRESHOLD,
+            test_name: None,
         }
     }
 }
@@ -126,6 +129,7 @@ pub fn assert_eq_cfg(
     let DiffCfg {
         pixel_threshold,
         image_threshold,
+        test_name,
     } = cfg;
     if let Some((diffs, diff_image)) = get_results(&lhs, &rhs, pixel_threshold).unwrap() {
         println!("{filename} has {diffs} pixel differences (threshold={pixel_threshold})");
@@ -135,8 +139,7 @@ pub fn assert_eq_cfg(
             return;
         }
 
-
-        let mut dir = Path::new(TEST_OUTPUT_DIR).join(filename);
+        let mut dir = Path::new(TEST_OUTPUT_DIR).join(test_name.unwrap_or(filename));
         dir.set_extension("");
         std::fs::create_dir_all(&dir).expect("cannot create test output dir");
         let expected = dir.join("expected.png");
