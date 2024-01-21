@@ -270,6 +270,7 @@ pub fn vertex(
             );
         }
         Rendering::Sdf(_sdf_id) => {
+            *local_pos = Vec3::ZERO;
             //crate::sdf::vertex(
             //    sdf_id,
             //    vertex_index,
@@ -351,6 +352,7 @@ pub fn fragment(
             );
         }
         Rendering::Sdf(_sdf_id) => {
+            *output = local_pos.extend(1.0);
             //crate::sdf::fragment(
             //    sdf_id,
             //    atlas,

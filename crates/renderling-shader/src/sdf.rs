@@ -2,13 +2,14 @@
 //!
 //! This module puts together the `renderling-shader-sdf` crate and the
 //! physically-based fragment shader.
-use crabslab::{Id, Slab, SlabItem};
-use glam::{Mat4, Vec2, Vec3, Vec3Swizzles, Vec4, Vec4Swizzles};
-
-use crate::{
-    math::IsVector, pbr::Material, stage::Vertex, Camera, IsSampler, Sample2d, SampleCube,
-    Transform,
-};
+// TODO: re-define and export sdf vertex and fragment shaders
+//use crabslab::{Id, Slab, SlabItem};
+//use glam::{Mat4, Vec2, Vec3, Vec3Swizzles, Vec4, Vec4Swizzles};
+//
+//use crate::{
+//    math::IsVector, pbr::Material, stage::Vertex, Camera, IsSampler, Sample2d, SampleCube,
+//    Transform,
+//};
 
 pub use renderling_shader_sdf::*;
 
