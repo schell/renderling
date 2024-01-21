@@ -396,7 +396,7 @@ impl Renderling {
     // crate::GlyphCache {    crate::GlyphCache::new(fonts)
     //}
 
-    /// Render into an image.
+    /// Read the current render target buffer into an image.
     ///
     /// This should be called after rendering, before presentation.
     /// Good for getting headless screen grabs.
@@ -409,10 +409,9 @@ impl Renderling {
     ///
     /// ## Note
     /// This operation can take a long time, depending on how big the screen is.
-    pub fn render_image(&mut self) -> Result<image::RgbaImage, RenderlingError> {
+    pub fn read_image(&mut self) -> Result<image::RgbaImage, RenderlingError> {
         use crate::frame::PostRenderBuffer;
 
-        self.render()?;
         let buffer = self
             .graph
             .remove_resource::<PostRenderBuffer>()
@@ -430,7 +429,7 @@ impl Renderling {
         Ok(img)
     }
 
-    /// Render into an image.
+    /// Read the render target into an image.
     ///
     /// This should be called after rendering, before presentation.
     /// Good for getting headless screen grabs.
@@ -442,10 +441,9 @@ impl Renderling {
     ///
     /// ## Note
     /// This operation can take a long time, depending on how big the screen is.
-    pub fn render_linear_image(&mut self) -> Result<image::RgbaImage, RenderlingError> {
+    pub fn read_linear_image(&mut self) -> Result<image::RgbaImage, RenderlingError> {
         use crate::frame::PostRenderBuffer;
 
-        self.render()?;
         let buffer = self
             .graph
             .remove_resource::<PostRenderBuffer>()
@@ -458,8 +456,54 @@ impl Renderling {
         Ok(img)
     }
 
+    /// Render and then read the render target into an image.
+    ///
+    /// For this call to succeed, the `PostRenderBufferCreate::create` node must
+    /// be present in the graph.
+    ///
+    /// The resulting image will be in the color space of the internal
+    /// [`RenderTarget`].
+    ///
+    /// ## Note
+    /// This operation can take a long time, depending on how big the screen is.
+    pub fn render_image(&mut self) -> Result<image::RgbaImage, RenderlingError> {
+        self.render()?;
+        self.read_image()
+    }
+
+    /// Render and then read the render target into an image.
+    ///
+    /// This should be called after rendering, before presentation.
+    /// Good for getting headless screen grabs.
+    ///
+    /// For this call to succeed, the `PostRenderBufferCreate::create` node must
+    /// be present in the graph.
+    ///
+    /// The resulting image will be in a linear color space.
+    ///
+    /// ## Note
+    /// This operation can take a long time, depending on how big the screen is.
+    pub fn render_linear_image(&mut self) -> Result<image::RgbaImage, RenderlingError> {
+        self.render()?;
+        self.read_linear_image()
+    }
+
     /// Run the render graph.
     pub fn render(&mut self) -> Result<(), RenderlingError> {
         self.graph.run().context(GraphSnafu)
+    }
+
+    /// Run the render graph with a local render function.
+    pub fn render_local<Input, Output, E>(
+        &mut self,
+        f: impl FnOnce(Input) -> Result<Output, E>,
+    ) -> Result<(), RenderlingError>
+    where
+        Input: moongraph::Edges + std::any::Any + Send + Sync,
+        Output: moongraph::NodeResults + std::any::Any + Send + Sync,
+        E: ToString,
+    {
+        self.graph.run_with_local(f).context(GraphSnafu)?;
+        Ok(())
     }
 }

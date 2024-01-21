@@ -807,7 +807,7 @@ impl CopiedTextureBuffer {
     }
 
     /// Convert the post render buffer into an internal-format [`AtlasImage`].
-    pub fn into_scene_image(
+    pub fn into_atlas_image(
         self,
         device: &wgpu::Device,
     ) -> Result<crate::AtlasImage, TextureError> {

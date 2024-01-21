@@ -6,7 +6,7 @@ use glam::{Mat4, Vec3};
 
 use crate::{
     atlas::AtlasImage,
-    shader::{convolution::VertexPrefilterEnvironmentCubemapIds, stage::Camera},
+    shader::{convolution::VertexPrefilterEnvironmentCubemapIds, Camera},
 };
 
 /// Render pipeline used to draw a skybox.
