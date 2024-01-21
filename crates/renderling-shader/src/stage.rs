@@ -269,23 +269,23 @@ pub fn vertex(
                 clip_pos,
             );
         }
-        Rendering::Sdf(sdf_id) => {
-            crate::sdf::vertex(
-                sdf_id,
-                vertex_index,
-                slab,
-                out_camera,
-                out_material,
-                out_color,
-                out_uv0,
-                out_uv1,
-                out_norm,
-                out_tangent,
-                out_bitangent,
-                local_pos,
-                world_pos,
-                clip_pos,
-            );
+        Rendering::Sdf(_sdf_id) => {
+            //crate::sdf::vertex(
+            //    sdf_id,
+            //    vertex_index,
+            //    slab,
+            //    out_camera,
+            //    out_material,
+            //    out_color,
+            //    out_uv0,
+            //    out_uv1,
+            //    out_norm,
+            //    out_tangent,
+            //    out_bitangent,
+            //    local_pos,
+            //    world_pos,
+            //    clip_pos,
+            //);
         }
     }
 }
@@ -350,30 +350,30 @@ pub fn fragment(
                 output,
             );
         }
-        Rendering::Sdf(sdf_id) => {
-            crate::sdf::fragment(
-                sdf_id,
-                atlas,
-                atlas_sampler,
-                irradiance,
-                irradiance_sampler,
-                prefiltered,
-                prefiltered_sampler,
-                brdf,
-                brdf_sampler,
-                slab,
-                in_camera,
-                in_material,
-                in_color,
-                in_uv0,
-                in_uv1,
-                in_norm,
-                in_tangent,
-                in_bitangent,
-                local_pos,
-                world_pos,
-                output,
-            );
+        Rendering::Sdf(_sdf_id) => {
+            //crate::sdf::fragment(
+            //    sdf_id,
+            //    atlas,
+            //    atlas_sampler,
+            //    irradiance,
+            //    irradiance_sampler,
+            //    prefiltered,
+            //    prefiltered_sampler,
+            //    brdf,
+            //    brdf_sampler,
+            //    slab,
+            //    in_camera,
+            //    in_material,
+            //    in_color,
+            //    in_uv0,
+            //    in_uv1,
+            //    in_norm,
+            //    in_tangent,
+            //    in_bitangent,
+            //    local_pos,
+            //    world_pos,
+            //    output,
+            //);
         }
     }
 }

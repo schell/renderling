@@ -108,7 +108,6 @@ pub struct SdfRenderer {
     pub renderling: Renderling,
     pub slab: CpuSlab<WgpuBuffer>,
     legend_id: Id<ShapeLegend>,
-    vertex_count: u32,
 }
 
 impl SdfRenderer {
@@ -131,12 +130,10 @@ impl SdfRenderer {
             renderling,
             slab,
             legend_id,
-            vertex_count: 0,
         }
     }
 
     pub fn set_shape(&mut self, shape: SdfShape) -> Id<SdfShape> {
-        self.vertex_count = shape.vertex_count();
         let id = self.slab.append(&shape);
         self.slab
             .write(self.legend_id + ShapeLegend::offset_of_shape(), &id);
@@ -156,7 +153,6 @@ impl SdfRenderer {
         pipeline: &wgpu::RenderPipeline,
         bindgroup: &wgpu::BindGroup,
         legend_id: Id<ShapeLegend>,
-        vertex_count: u32,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         view: &FrameTextureView,
@@ -187,7 +183,7 @@ impl SdfRenderer {
             });
             render_pass.set_pipeline(pipeline);
             render_pass.set_bind_group(0, bindgroup, &[]);
-            render_pass.draw(0..vertex_count, legend_id.inner()..legend_id.inner() + 1);
+            render_pass.draw(0..6, legend_id.inner()..legend_id.inner() + 1); //
         }
         queue.submit(std::iter::once(encoder.finish()));
     }
@@ -206,7 +202,6 @@ impl SdfRenderer {
                         &self.pipeline,
                         &self.bindgroup,
                         self.legend_id,
-                        self.vertex_count,
                         &device,
                         &queue,
                         &frame,

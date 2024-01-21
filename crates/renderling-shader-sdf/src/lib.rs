@@ -17,28 +17,31 @@ use spirv_std::spirv;
 #[cfg(test)]
 mod helper;
 
-/// Returns the implicit position of the given index in clip space.
-pub fn get_clip_position(index: usize) -> Vec3 {
+/// Returns the implicit position of the given index in clip space
+/// when being rendered in 2d.
+pub const fn get_2d_clip_position(index: usize) -> Vec3 {
     math::CLIP_QUAD_CCW[index % 6]
 }
 
-/// Returns the implicit uv coords of the given index.
-pub fn get_uvs(index: usize) -> Vec2 {
+/// Returns the implicit uv coords of the given index
+/// when being rendered in 2d.
+pub const fn get_2d_uvs(index: usize) -> Vec2 {
     math::UV_COORD_QUAD_CCW[index % 6]
 }
 
+/// A sphere shape in three dimensions or a circle in two dimensions.
 #[derive(Debug, Clone, Copy, SlabItem)]
-pub struct Circle {
+pub struct Sphere {
     pub radius: f32,
 }
 
-impl Default for Circle {
+impl Default for Sphere {
     fn default() -> Self {
         Self { radius: 1.0 }
     }
 }
 
-impl Circle {
+impl Sphere {
     pub fn distance(&self, position: Vec3) -> f32 {
         position.length() - self.radius
     }
@@ -309,8 +312,8 @@ impl Cuboid {
 pub enum SdfShape {
     #[default]
     None,
-    Circle(Id<Circle>),
-    Rectangle(Id<Cuboid>),
+    Sphere(Id<Sphere>),
+    Cuboid(Id<Cuboid>),
     Line(Id<Line>),
     Bezier(Id<Bezier>),
     Path(Id<Path>),
@@ -320,7 +323,7 @@ impl SdfShape {
     pub fn distance(&self, position: Vec3, slab: &[u32]) -> f32 {
         match self {
             Self::None => 0.0,
-            Self::Circle(id) => {
+            Self::Sphere(id) => {
                 let circle = slab.read(*id);
                 circle.distance(position)
             }
@@ -332,7 +335,7 @@ impl SdfShape {
                 let bez = slab.read(*id);
                 bez.distance(position)
             }
-            Self::Rectangle(id) => {
+            Self::Cuboid(id) => {
                 let rectangle = slab.read(*id);
                 rectangle.distance(position)
             }
@@ -340,27 +343,6 @@ impl SdfShape {
                 let path = slab.read(*id);
                 path.distance(position, slab)
             }
-        }
-    }
-
-    pub fn get_clip_position(&self, index: usize, _slab: &[u32]) -> Vec3 {
-        match self {
-            Self::None => Vec3::ZERO,
-            _ => get_clip_position(index),
-        }
-    }
-
-    pub fn get_uvs(&self, index: usize, _slab: &[u32]) -> Vec2 {
-        match self {
-            Self::None => Vec2::ZERO,
-            _ => get_uvs(index),
-        }
-    }
-
-    pub fn vertex_count(&self) -> u32 {
-        match self {
-            SdfShape::None => 0,
-            _ => 6,
         }
     }
 }
@@ -421,15 +403,13 @@ pub fn sdf_shape_vertex(
     #[spirv(instance_index)] legend_id: Id<ShapeLegend>,
     // Which vertex within the render unit are we rendering
     #[spirv(vertex_index)] vertex_index: u32,
-    #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] slab: &[u32],
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] _slab: &[u32],
     #[spirv(flat)] out_legend_id: &mut Id<ShapeLegend>,
     local_pos: &mut Vec3,
     #[spirv(position)] clip_pos: &mut Vec4,
 ) {
     *out_legend_id = legend_id;
-    let legend = slab.read(legend_id);
-    let shape = slab.read(legend.shape);
-    let position = shape.get_clip_position(vertex_index as usize, slab);
+    let position = get_2d_clip_position(vertex_index as usize);
     *local_pos = position;
     *clip_pos = position.extend(1.0);
 }
@@ -497,7 +477,7 @@ mod test {
 
     #[test]
     fn circle_sanity() {
-        let circle = Circle { radius: 1.0 };
+        let circle = Sphere { radius: 1.0 };
         assert_eq!(-circle.radius, circle.distance(Vec3::ZERO));
         assert_eq!(0.0, circle.distance(Vec3::new(1.0, 0.0, 0.0)));
         assert_eq!(
@@ -514,8 +494,8 @@ mod test {
     #[test]
     fn sdf_circle() {
         let mut r = SdfRenderer::new(256, 256);
-        let circle_id = r.slab.append(&Circle { radius: 1.0 });
-        let _ = r.set_shape(SdfShape::Circle(circle_id));
+        let circle_id = r.slab.append(&Sphere { radius: 1.0 });
+        let _ = r.set_shape(SdfShape::Sphere(circle_id));
         let img = r.render_image();
         img_diff::assert_img_eq("sdf/circle.png", img);
     }
@@ -552,7 +532,7 @@ mod test {
         let rect_id = r.slab.append(&Cuboid {
             size: Vec3::new(1.4, 0.8, 1.0),
         });
-        let _ = r.set_shape(SdfShape::Rectangle(rect_id));
+        let _ = r.set_shape(SdfShape::Cuboid(rect_id));
         let img = r.render_image();
         img_diff::assert_img_eq("sdf/rect.png", img);
     }
