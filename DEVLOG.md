@@ -17,6 +17,9 @@ error: cannot declare renderling_shader_pbr::pbr_fragment as an entry point
 
 I just wish it would tell me _why_ it can't declare the function as an entry point.
 
+Nobody is talking in the `rust-gpu` discord channel so to debug this I'll have to descend
+into the depths of the compiler...
+
 ## Fri Jan 19, 2024
 
 Last night I successfully rendered a font face using 2d SDF path objects (lines and quadratic
