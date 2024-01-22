@@ -5,8 +5,8 @@
 //!
 //! To read more about the technique, check out these resources:
 //! * https://stackoverflow.com/questions/59686151/what-is-gpu-driven-rendering
-use crabslab::{Array, Id, Slab, SlabItem, ID_NONE};
-use glam::{UVec2, UVec3, Vec2, Vec3, Vec4};
+use crabslab::{Id, Slab, SlabItem};
+use glam::{UVec3, Vec2, Vec3, Vec4};
 use spirv_std::{
     image::{Cubemap, Image2d},
     spirv, Sampler,
@@ -15,13 +15,7 @@ use spirv_std::{
 #[cfg(target_arch = "spirv")]
 use spirv_std::num_traits::*;
 
-use crate::{
-    debug::*,
-    math::IsVector,
-    pbr::{self, Material},
-    texture::GpuTexture,
-    IsSampler, Sample2d,
-};
+use crate::math::IsVector;
 
 pub mod light;
 
@@ -168,49 +162,6 @@ impl Vertex {
     }
 }
 
-pub fn texture_color<T: Sample2d<Sampler = S>, S: IsSampler>(
-    texture_id: Id<GpuTexture>,
-    uv: Vec2,
-    atlas: &T,
-    sampler: &S,
-    atlas_size: UVec2,
-    slab: &[u32],
-) -> Vec4 {
-    let texture = slab.read(texture_id);
-    let uv = texture.uv(uv, atlas_size);
-    let mut color: Vec4 = atlas.sample_by_lod(*sampler, uv, 0.0);
-    if texture_id.is_none() {
-        color = Vec4::splat(1.0);
-    }
-    color
-}
-
-/// Holds important info about the stage.
-///
-/// This should be the first struct in the stage's slab.
-#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
-#[repr(C)]
-#[derive(Clone, Copy, PartialEq, SlabItem)]
-pub struct StageLegend {
-    pub atlas_size: UVec2,
-    pub debug_mode: DebugMode,
-    pub has_skybox: bool,
-    pub has_lighting: bool,
-    pub light_array: Array<light::Light>,
-}
-
-impl Default for StageLegend {
-    fn default() -> Self {
-        Self {
-            atlas_size: Default::default(),
-            debug_mode: Default::default(),
-            has_skybox: Default::default(),
-            has_lighting: true,
-            light_array: Default::default(),
-        }
-    }
-}
-
 /// Pointer to a renderable unit.
 #[derive(Default, SlabItem)]
 pub enum Rendering {
@@ -311,7 +262,7 @@ pub fn fragment(
 
     #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] slab: &[u32],
 
-    #[spirv(flat)] in_instance_index: u32,
+    #[spirv(flat)] in_rendering: Id<Rendering>,
     #[spirv(flat)] in_camera: u32,
     #[spirv(flat)] in_material: u32,
     in_color: Vec4,
@@ -325,11 +276,11 @@ pub fn fragment(
 
     output: &mut Vec4,
 ) {
-    let rendering = slab.read(Id::<Rendering>::new(in_instance_index));
+    let rendering = slab.read(in_rendering);
     match rendering {
         Rendering::None => {}
         Rendering::Gltf(_) => {
-            crate::pbr::fragment(
+            renderling_shader_pbr::fragment(
                 atlas,
                 atlas_sampler,
                 irradiance,
@@ -339,6 +290,7 @@ pub fn fragment(
                 brdf,
                 brdf_sampler,
                 slab,
+                0u32.into(),
                 in_camera,
                 in_material,
                 in_color,
@@ -377,31 +329,6 @@ pub fn fragment(
             //    output,
             //);
         }
-    }
-}
-
-/// Returns the `StageLegend` from the stage's slab.
-///
-/// The `StageLegend` should be the first struct in the slab, always.
-pub fn get_stage_legend(slab: &[u32]) -> StageLegend {
-    slab.read(Id::new(0))
-}
-
-/// Returns the `Material` from the stage's slab.
-pub fn get_material(material_index: u32, has_lighting: bool, slab: &[u32]) -> pbr::Material {
-    if material_index == ID_NONE {
-        // without an explicit material (or if the entire render has no lighting)
-        // the entity will not participate in any lighting calculations
-        pbr::Material {
-            has_lighting: false,
-            ..Default::default()
-        }
-    } else {
-        let mut material = slab.read(Id::<Material>::new(material_index));
-        if !has_lighting {
-            material.has_lighting = false;
-        }
-        material
     }
 }
 

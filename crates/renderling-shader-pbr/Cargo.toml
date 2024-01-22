@@ -1,5 +1,5 @@
 [package]
-name = "renderling-shader-sdf"
+name = "renderling-shader-pbr"
 version = "0.1.0"
 edition = "2021"
 
@@ -8,13 +8,16 @@ edition = "2021"
 [lib]
 crate-type = ["lib", "dylib"]
 
+[features]
+default = []
+
 [dependencies]
 renderling-shader-core = { version = "0.1.0", path = "../renderling-shader-core" }
 spirv-std = "0.9"
 
 [target.'cfg(not(target_arch = "spirv"))'.dependencies]
 glam = { workspace = true, features = ["std"] }
-crabslab = { workspace = true, features = ["default", "wgpu"] }
+crabslab = { workspace = true, features = ["default"] }
 
 [target.'cfg(not(target_arch = "spirv"))'.dev-dependencies]
 glam = { workspace = true, features = ["std", "debug-glam-assert"] }
@@ -24,10 +27,6 @@ glam = { version = "0.24.2", default-features = false, features = ["libm"] }
 crabslab = { workspace = true, features = ["glam"]  }
 
 [dev-dependencies]
-env_logger = {workspace = true}
-image = { workspace = true }
+bytemuck = {workspace = true}
+image = {workspace = true}
 img-diff = { path = "../img-diff" }
-log = {workspace = true}
-renderling = { path = "../renderling" }
-ttf-parser = "0.20.0"
-wgpu = { workspace = true }

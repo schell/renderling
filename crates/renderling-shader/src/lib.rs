@@ -10,7 +10,6 @@ pub mod convolution;
 pub mod debug;
 pub mod gltf;
 pub mod pbr;
-#[cfg(feature = "sdf")]
 pub mod sdf;
 pub mod skybox;
 pub mod stage;

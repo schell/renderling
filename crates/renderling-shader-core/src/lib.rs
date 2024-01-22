@@ -10,6 +10,7 @@ use spirv_std::{
 };
 
 pub mod math;
+pub mod texture;
 
 #[macro_export]
 macro_rules! println {

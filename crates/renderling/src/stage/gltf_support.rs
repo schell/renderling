@@ -64,6 +64,14 @@ impl From<gltf::Error> for StageGltfError {
     }
 }
 
+fn texture_address_mode_from_gltf(mode: gltf::texture::WrappingMode) -> TextureAddressMode {
+    match mode {
+        gltf::texture::WrappingMode::ClampToEdge => TextureAddressMode::ClampToEdge,
+        gltf::texture::WrappingMode::MirroredRepeat => TextureAddressMode::MirroredRepeat,
+        gltf::texture::WrappingMode::Repeat => TextureAddressMode::Repeat,
+    }
+}
+
 pub fn get_vertex_count(primitive: &gltf::Primitive<'_>) -> u32 {
     if let Some(indices) = primitive.indices() {
         let count = indices.count() as u32;

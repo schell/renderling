@@ -57,6 +57,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let dir = output_dir;
     match module {
         ModuleResult::MultiModule(modules) => {
+            assert!(!modules.is_empty(), "No shader modules to compile");
             for (entry, filepath) in modules.into_iter() {
                 let path = dir.join(filepath.file_name().unwrap());
                 println!(
