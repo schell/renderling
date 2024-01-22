@@ -280,7 +280,7 @@ pub fn fragment(
     match rendering {
         Rendering::None => {}
         Rendering::Gltf(_) => {
-            renderling_shader_pbr::fragment(
+            renderling_shader_pbr::pbr_fragment(
                 atlas,
                 atlas_sampler,
                 irradiance,

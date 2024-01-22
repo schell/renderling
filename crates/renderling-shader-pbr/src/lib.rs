@@ -296,8 +296,9 @@ pub fn texture_color<T: Sample2d<Sampler = S>, S: IsSampler>(
 }
 
 /// PBR fragment shader.
+#[allow(clippy::too_many_arguments)]
 #[spirv(fragment)]
-pub fn fragment(
+pub fn pbr_fragment(
     #[spirv(descriptor_set = 1, binding = 0)] atlas: &Image2d,
     #[spirv(descriptor_set = 1, binding = 1)] atlas_sampler: &Sampler,
 
