@@ -63,6 +63,7 @@ mod uniform;
 
 pub use atlas::*;
 pub use buffer_array::*;
+pub mod color;
 pub use camera::*;
 pub use hdr::*;
 use image::GenericImageView;
@@ -76,14 +77,6 @@ pub use texture::*;
 pub use tonemapping::*;
 //pub use ui::*;
 pub use uniform::*;
-
-pub mod color;
-
-pub mod debug {
-    //! Re-exports of [`renderling_shader::debug`].
-
-    pub use renderling_shader::debug::*;
-}
 
 pub mod graph {
     //! Re-exports of [`moongraph`].

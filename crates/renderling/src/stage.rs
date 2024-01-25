@@ -10,10 +10,10 @@ use std::{
 use crabslab::{Array, CpuSlab, GrowableSlab, Id, Slab, SlabItem, WgpuBuffer};
 use moongraph::{View, ViewMut};
 use renderling_shader::{
-    debug::DebugMode,
     gltf::GltfRendering,
+    pbr::{debug::DebugMode, light::Light, PbrConfig},
     sdf::Sdf,
-    stage::{light::Light, Rendering, StageLegend},
+    stage::Rendering,
     texture::GpuTexture,
     Camera,
 };
@@ -114,7 +114,7 @@ impl Stage {
     /// Create a new stage.
     pub fn new(device: Device, queue: Queue) -> Self {
         let atlas = Atlas::empty(&device, &queue);
-        let legend = StageLegend {
+        let pbr_config = PbrConfig {
             atlas_size: atlas.size,
             ..Default::default()
         };
@@ -137,13 +137,13 @@ impl Stage {
             device,
             queue,
         };
-        s.append(&legend);
+        s.append(&pbr_config);
         s
     }
 
     /// Set the debug mode.
     pub fn set_debug_mode(&mut self, debug_mode: DebugMode) {
-        let id = Id::<DebugMode>::from(StageLegend::offset_of_debug_mode());
+        let id: Id<DebugMode> = Id::from(PbrConfig::offset_of_debug_mode());
         self.write(id, &debug_mode);
     }
 
@@ -155,7 +155,7 @@ impl Stage {
 
     /// Set whether the stage uses lighting.
     pub fn set_has_lighting(&mut self, use_lighting: bool) {
-        let id = Id::<bool>::from(StageLegend::offset_of_has_lighting());
+        let id = Id::<bool>::from(PbrConfig::offset_of_has_lighting());
         self.write(id, &use_lighting);
     }
 
@@ -167,7 +167,7 @@ impl Stage {
 
     /// Set the lights to use for shading.
     pub fn set_lights(&mut self, lights: Array<Light>) {
-        let id = Id::<Array<Light>>::from(StageLegend::offset_of_light_array());
+        let id = Id::<Array<Light>>::from(PbrConfig::offset_of_light_array());
         self.write(id, &lights);
     }
 
@@ -189,7 +189,7 @@ impl Stage {
         // The textures bindgroup will have to be remade
         let _ = self.textures_bindgroup.lock().unwrap().take();
         // The atlas size must be reset
-        let size_id = Id::<glam::UVec2>::from(StageLegend::offset_of_atlas_size());
+        let size_id = Id::<glam::UVec2>::from(PbrConfig::offset_of_atlas_size());
         // UNWRAP: if we can't write to the stage legend we want to panic
         self.slab.write().unwrap().write(size_id, &atlas.size);
 

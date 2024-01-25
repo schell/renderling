@@ -12,7 +12,7 @@ use spirv_std::{
 #[cfg(target_arch = "spirv")]
 use spirv_std::num_traits::Float;
 
-use crate::{math::IsVector, pbr, Camera};
+use crate::{math::IsVector, Camera};
 
 fn radical_inverse_vdc(mut bits: u32) -> f32 {
     bits = (bits << 16u32) | (bits >> 16u32);
@@ -221,7 +221,7 @@ pub fn fragment_prefilter_environment_cubemap(
 
 pub fn calc_lod_old(n: Vec3, v: Vec3, h: Vec3, roughness: f32) -> f32 {
     // sample from the environment's mip level based on roughness/pdf
-    let d = pbr::normal_distribution_ggx(n, h, roughness);
+    let d = crate::pbr::normal_distribution_ggx(n, h, roughness);
     let n_dot_h = n.dot(h).max(0.0);
     let h_dot_v = h.dot(v).max(0.0);
     let pdf = (d * n_dot_h / (4.0 * h_dot_v)).max(core::f32::EPSILON);

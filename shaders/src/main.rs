@@ -14,6 +14,9 @@ struct Cli {
     #[clap(long, short, default_value = "renderling-shader")]
     shader_crate: std::path::PathBuf,
 
+    ///// Cargo features to be passed to the shader crate compilation invocation.
+    //#[clap(long, short)]
+    //features: Vec<String>,
     /// Path to the output directory for the compiled shaders.
     #[clap(long, short, default_value = "../crates/renderling/src/linkage")]
     output_dir: std::path::PathBuf,
@@ -23,6 +26,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let Cli {
         verbosity,
         shader_crate,
+        //features,
         output_dir,
     } = Cli::parse();
     let level = match verbosity {

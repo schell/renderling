@@ -17,8 +17,6 @@ use spirv_std::num_traits::*;
 
 use crate::math::IsVector;
 
-pub mod light;
-
 /// A vertex in a mesh.
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[repr(C)]
@@ -280,7 +278,7 @@ pub fn fragment(
     match rendering {
         Rendering::None => {}
         Rendering::Gltf(_) => {
-            renderling_shader_pbr::pbr_fragment(
+            crate::pbr::fragment_impl(
                 atlas,
                 atlas_sampler,
                 irradiance,

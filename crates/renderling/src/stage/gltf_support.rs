@@ -10,7 +10,7 @@ use crate::{
     AtlasImage,
 };
 use glam::{Quat, Vec2, Vec3, Vec4};
-use renderling_shader::stage::Vertex;
+use renderling_shader::{pbr::light::LightStyle, stage::Vertex};
 use snafu::{OptionExt, ResultExt, Snafu};
 
 #[derive(Debug, Snafu)]
@@ -61,6 +61,22 @@ impl From<crabslab::WgpuSlabError> for StageGltfError {
 impl From<gltf::Error> for StageGltfError {
     fn from(source: gltf::Error) -> Self {
         Self::Gltf { source }
+    }
+}
+
+pub fn from_gltf_light_kind(kind: gltf::khr_lights_punctual::Kind) -> LightStyle {
+    match kind {
+        gltf::khr_lights_punctual::Kind::Directional => LightStyle::Directional,
+        gltf::khr_lights_punctual::Kind::Point => LightStyle::Point,
+        gltf::khr_lights_punctual::Kind::Spot { .. } => LightStyle::Spot,
+    }
+}
+
+pub fn gltf_light_intensity_units(kind: gltf::khr_lights_punctual::Kind) -> &'static str {
+    match kind {
+        gltf::khr_lights_punctual::Kind::Directional => "lux (lm/m^2)",
+        // sr is "steradian"
+        _ => "candelas (lm/sr)",
     }
 }
 
@@ -232,19 +248,8 @@ impl Stage {
         let textures = self.allocate_array::<GpuTexture>(document.textures().len());
         for (i, texture) in document.textures().enumerate() {
             let image_index = texture.source().index();
-
-            fn mode(mode: gltf::texture::WrappingMode) -> TextureAddressMode {
-                match mode {
-                    gltf::texture::WrappingMode::ClampToEdge => TextureAddressMode::CLAMP_TO_EDGE,
-                    gltf::texture::WrappingMode::MirroredRepeat => {
-                        TextureAddressMode::MIRRORED_REPEAT
-                    }
-                    gltf::texture::WrappingMode::Repeat => TextureAddressMode::REPEAT,
-                }
-            }
-
-            let mode_s = mode(texture.sampler().wrap_s());
-            let mode_t = mode(texture.sampler().wrap_t());
+            let mode_s = texture_address_mode_from_gltf(texture.sampler().wrap_s());
+            let mode_t = texture_address_mode_from_gltf(texture.sampler().wrap_t());
             let (offset_px, size_px) =
                 repacking
                     .get_frame(image_index + atlas_offset)
@@ -255,9 +260,10 @@ impl Stage {
             let texture = GpuTexture {
                 offset_px,
                 size_px,
-                modes: TextureModes::default()
-                    .with_wrap_s(mode_s)
-                    .with_wrap_t(mode_t),
+                modes: TextureModes {
+                    s: mode_s,
+                    t: mode_t,
+                },
                 atlas_index: (image_index + atlas_offset) as u32,
             };
             let texture_id = textures.at(i);
@@ -391,8 +397,8 @@ impl Stage {
                     } else {
                         (Id::NONE, 0)
                     };
-                let emissive_factor = Vec3::from(material.emissive_factor())
-                    .extend(material.emissive_strength().unwrap_or(1.0));
+                let emissive_factor = Vec3::from(material.emissive_factor());
+                let emissive_strength_multiplier = material.emissive_strength().unwrap_or(1.0);
 
                 Material {
                     albedo_factor,
@@ -408,6 +414,7 @@ impl Stage {
                     ao_tex_coord,
                     ao_strength,
                     emissive_factor,
+                    emissive_strength_multiplier,
                     emissive_texture,
                     emissive_tex_coord,
                     has_lighting: true,
@@ -432,7 +439,7 @@ impl Stage {
             // The bindgroup will have to be remade
             let _ = self.textures_bindgroup.lock().unwrap().take();
             // The atlas size must be reset
-            let size_id = StageLegend::offset_of_atlas_size().into();
+            let size_id = PbrConfig::offset_of_atlas_size().into();
             self.slab.write().unwrap().write(size_id, &size);
         }
 

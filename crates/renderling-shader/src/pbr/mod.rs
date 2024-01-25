@@ -4,17 +4,9 @@
 //! * https://learnopengl.com/PBR/Theory
 //! * https://github.com/KhronosGroup/glTF-Sample-Viewer/blob/5b1b7f48a8cb2b7aaef00d08fdba18ccc8dd331b/source/Renderer/shaders/pbr.frag
 //! * https://github.khronos.org/glTF-Sample-Viewer-Release/
-#![cfg_attr(target_arch = "spirv", no_std)]
-
 use crabslab::{Array, Id, Slab, SlabItem, ID_NONE};
 use glam::{Vec2, Vec3, Vec4, Vec4Swizzles};
 use light::Light;
-use renderling_shader_core::{
-    math::{self, IsVector},
-    println as my_println,
-    texture::GpuTexture,
-    Camera, IsSampler, Sample2d, SampleCube,
-};
 use spirv_std::{
     image::{Cubemap, Image2d},
     spirv, Sampler,
@@ -23,10 +15,18 @@ use spirv_std::{
 #[cfg(target_arch = "spirv")]
 use spirv_std::num_traits::Float;
 
-use crate::{debug::DebugMode, light::LightStyle};
+use crate::{
+    math::{self, IsVector},
+    println as my_println,
+    texture::GpuTexture,
+    Camera, IsSampler, Sample2d, SampleCube,
+};
 
 pub mod debug;
+use debug::DebugMode;
+
 pub mod light;
+use light::LightStyle;
 
 /// Represents a material on the GPU.
 ///

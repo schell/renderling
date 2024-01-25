@@ -4,7 +4,10 @@ use renderling::{
     frame::FrameTextureView, DepthTexture, Device, GraphError, Queue, Renderling, View,
 };
 
-use super::*;
+use super::{raymarch::Raymarch, *};
+
+mod sdf_renderer;
+pub use sdf_renderer::SdfRenderer;
 
 pub fn new_bindgroup_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
     let visibility =
@@ -42,17 +45,18 @@ pub fn new_bindgroup(
     })
 }
 
-pub fn new_render_pipeline(
+pub fn new_render_pipeline<'a>(
+    fragment: wgpu::ShaderModuleDescriptor<'a>,
+    fragment_entry_point: &'static str,
     device: &wgpu::Device,
     format: wgpu::TextureFormat,
 ) -> wgpu::RenderPipeline {
-    let label = Some("sdf pipeline");
+    let label = Some("raymarch pipeline");
     let vertex_shader = device.create_shader_module(wgpu::include_spirv!(
-        "../../renderling/src/linkage/sdf_shape_vertex.spv"
+        "../../../renderling/src/linkage/sdf-raymarch-raymarch_vertex.spv"
     ));
-    let fragment_shader = device.create_shader_module(wgpu::include_spirv!(
-        "../../renderling/src/linkage/sdf_shape_fragment.spv"
-    ));
+    let fragment_shader = device.create_shader_module(fragment);
+    //);
     let slab_layout = new_bindgroup_layout(device);
     let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label,
@@ -64,7 +68,7 @@ pub fn new_render_pipeline(
         layout: Some(&layout),
         vertex: wgpu::VertexState {
             module: &vertex_shader,
-            entry_point: "sdf_shape_vertex",
+            entry_point: "sdf::raymarch::raymarch_vertex",
             buffers: &[],
         },
         primitive: wgpu::PrimitiveState {
@@ -90,7 +94,7 @@ pub fn new_render_pipeline(
         },
         fragment: Some(wgpu::FragmentState {
             module: &fragment_shader,
-            entry_point: "sdf_shape_fragment",
+            entry_point: fragment_entry_point,
             targets: &[Some(wgpu::ColorTargetState {
                 format,
                 blend: Some(wgpu::BlendState::ALPHA_BLENDING),
@@ -102,15 +106,15 @@ pub fn new_render_pipeline(
     pipeline
 }
 
-pub struct SdfRenderer {
+pub struct RaymarchingRenderer {
     pub pipeline: wgpu::RenderPipeline,
+    pub rays_pipeline: wgpu::RenderPipeline,
     pub bindgroup: wgpu::BindGroup,
     pub renderling: Renderling,
     pub slab: CpuSlab<WgpuBuffer>,
-    legend_id: Id<ShapeLegend>,
 }
 
-impl SdfRenderer {
+impl RaymarchingRenderer {
     pub fn new(width: u32, height: u32) -> Self {
         Self::new_with_capacity(width, height, 256)
     }
@@ -119,40 +123,36 @@ impl SdfRenderer {
         let mut renderling = Renderling::headless(width, height);
         configure_graph(&mut renderling);
         let (d, q) = renderling.get_device_and_queue_owned();
-        let pipeline = new_render_pipeline(&d, renderling.get_render_target().format());
-        let mut slab = CpuSlab::new(WgpuBuffer::new(&d, &q, cap));
-        let legend_id = slab.append::<ShapeLegend>(&ShapeLegend::default());
+        let pipeline = new_render_pipeline(
+            wgpu::include_spirv!(
+                "../../../renderling/src/linkage/sdf-raymarch-raymarch_fragment.spv"
+            ),
+            "sdf::raymarch::raymarch_fragment",
+            &d,
+            renderling.get_render_target().format(),
+        );
+        let rays_pipeline = new_render_pipeline(
+            wgpu::include_spirv!("../../../renderling/src/linkage/sdf-raymarch-raymarch_rays.spv"),
+            "sdf::raymarch::raymarch_rays",
+            &d,
+            renderling.get_render_target().format(),
+        );
+        let slab = CpuSlab::new(WgpuBuffer::new(&d, &q, cap));
         let bindgroup_layout = new_bindgroup_layout(&d);
         let bindgroup = new_bindgroup(&d, slab.as_ref().get_buffer(), &bindgroup_layout);
         Self {
             pipeline,
+            rays_pipeline,
             bindgroup,
             renderling,
             slab,
-            legend_id,
         }
     }
 
-    pub fn set_shape(&mut self, shape: SdfShape) -> Id<SdfShape> {
-        let id = self.slab.append(&shape);
-        self.slab
-            .write(self.legend_id + ShapeLegend::offset_of_shape(), &id);
-        id
-    }
-
-    pub fn set_debug_points(&mut self, points: impl IntoIterator<Item = Vec3>) {
-        let points = points.into_iter().collect::<Vec<_>>();
-        let points = self.slab.append_array(&points);
-        self.slab.write(
-            self.legend_id + ShapeLegend::offset_of_debug_points(),
-            &points,
-        );
-    }
-
     fn render(
+        id: Id<Raymarch>,
         pipeline: &wgpu::RenderPipeline,
         bindgroup: &wgpu::BindGroup,
-        legend_id: Id<ShapeLegend>,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         view: &FrameTextureView,
@@ -183,12 +183,12 @@ impl SdfRenderer {
             });
             render_pass.set_pipeline(pipeline);
             render_pass.set_bind_group(0, bindgroup, &[]);
-            render_pass.draw(0..6, legend_id.inner()..legend_id.inner() + 1); //
+            render_pass.draw(0..6, id.inner()..id.inner() + 1);
         }
         queue.submit(std::iter::once(encoder.finish()));
     }
 
-    pub fn render_image(&mut self) -> image::RgbaImage {
+    pub fn render_rays(&mut self, raymarch: Id<Raymarch>) -> image::RgbaImage {
         self.renderling
             .render_local(
                 |(device, queue, frame, depth_texture): (
@@ -199,9 +199,35 @@ impl SdfRenderer {
                 )|
                  -> Result<(), GraphError> {
                     Self::render(
+                        raymarch,
+                        &self.rays_pipeline,
+                        &self.bindgroup,
+                        &device,
+                        &queue,
+                        &frame,
+                        &depth_texture,
+                    );
+                    Ok(())
+                },
+            )
+            .unwrap();
+        self.renderling.read_image().unwrap()
+    }
+
+    pub fn render_image(&mut self, raymarch: Id<Raymarch>) -> image::RgbaImage {
+        self.renderling
+            .render_local(
+                |(device, queue, frame, depth_texture): (
+                    View<Device>,
+                    View<Queue>,
+                    View<FrameTextureView>,
+                    View<DepthTexture>,
+                )|
+                 -> Result<(), GraphError> {
+                    Self::render(
+                        raymarch,
                         &self.pipeline,
                         &self.bindgroup,
-                        self.legend_id,
                         &device,
                         &queue,
                         &frame,
@@ -233,7 +259,7 @@ pub fn configure_graph(r: &mut Renderling) {
         View<Queue>,
         View<FrameTextureView>,
         View<DepthTexture>,
-    ), ()>("render");
+    ), ()>("raymarch_render");
     r.graph.add_barrier();
 
     // post

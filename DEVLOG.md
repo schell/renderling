@@ -20,6 +20,10 @@ I just wish it would tell me _why_ it can't declare the function as an entry poi
 Nobody is talking in the `rust-gpu` discord channel so to debug this I'll have to descend
 into the depths of the compiler...
 
+...I figured it out! The problem was that I was using my PBR shader entry point function
+in my uber-shader entry point function. Apprently you **cannot** nest entry points within
+each other.
+
 ## Fri Jan 19, 2024
 
 Last night I successfully rendered a font face using 2d SDF path objects (lines and quadratic

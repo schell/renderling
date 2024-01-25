@@ -4,10 +4,8 @@ use std::sync::Arc;
 use crabslab::{CpuSlab, GrowableSlab, Slab, SlabItem, WgpuBuffer};
 use glam::{Mat4, Vec3};
 
-use crate::{
-    atlas::AtlasImage,
-    shader::{convolution::VertexPrefilterEnvironmentCubemapIds, Camera},
-};
+use crate::atlas::AtlasImage;
+use renderling_shader::{convolution::VertexPrefilterEnvironmentCubemapIds, Camera};
 
 /// Render pipeline used to draw a skybox.
 pub struct SkyboxRenderPipeline(pub wgpu::RenderPipeline);

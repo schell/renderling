@@ -1,4 +1,5 @@
 //! Camera projections and utilities.
+// TODO: remove the renderling::camera module
 use glam::{Mat4, Vec3};
 
 /// Returns the projection and view matrices for a camera with default

@@ -4,9 +4,6 @@ members = [
     #"crates/example-wasm",
     "crates/loading-bytes",
     "crates/renderling",
-    "crates/renderling-shader-core",
-    "crates/renderling-shader-pbr",
-    "crates/renderling-shader-sdf",
     "crates/renderling-shader",
     #"crates/renderling-gpui",
 ]
@@ -16,6 +13,7 @@ exclude = ["./shaders"]
 resolver = "2"
 
 [workspace.dependencies]
+assert_approx_eq = "1.1.0"
 async-channel = "1.8"
 bytemuck = { version = "1.13.0", features = ["derive"] }
 crabslab = { version = "0.2.1", default-features = false }
