@@ -36,27 +36,36 @@
 //! ## Raw shaders
 //! You can also use the [shaders module](crate::shaders) without renderlings
 //! and manage your own resources for maximum flexibility.
+#![cfg_attr(target_arch = "spirv", no_std)]
+#![deny(clippy::disallowed_methods)]
 
 // TODO: Audit the API and make it more ergonomic/predictable.
 
 mod atlas;
+pub mod bits;
 mod buffer_array;
 mod camera;
+pub mod convolution;
 pub mod cubemap;
 pub mod frame;
+#[cfg(feature = "gltf")]
+pub mod gltf;
 mod hdr;
 pub mod ibl;
 mod linkage;
 pub mod math;
 pub mod mesh;
+pub mod pbr;
 mod renderer;
-mod skybox;
+pub mod sdf;
+pub mod skybox;
 mod stage;
 mod state;
 //#[cfg(feature = "text")]
 //mod text;
 mod texture;
-mod tonemapping;
+pub mod tonemapping;
+mod transform;
 //mod tutorial;
 //mod ui;
 mod uniform;
@@ -65,16 +74,17 @@ pub use atlas::*;
 pub use buffer_array::*;
 pub mod color;
 pub use camera::*;
+use glam::Vec3;
 pub use hdr::*;
 use image::GenericImageView;
 pub use renderer::*;
-pub use skybox::*;
+pub use skybox::Skybox;
 pub use stage::*;
 pub use state::*;
 //#[cfg(feature = "text")]
 //pub use text::*;
 pub use texture::*;
-pub use tonemapping::*;
+pub use transform::*;
 //pub use ui::*;
 pub use uniform::*;
 
@@ -87,9 +97,51 @@ pub mod graph {
 
 pub use crabslab::*;
 pub use graph::{graph, Graph, GraphError, Move, View, ViewMut};
-pub mod shader {
-    //! Re-exports of [`renderling_shader`].
-    pub use renderling_shader::*;
+use spirv_std::{
+    image::{Cubemap, Image2d},
+    Sampler,
+};
+
+#[macro_export]
+macro_rules! println {
+    ($($arg:tt)*) => {
+        #[cfg(not(target_arch = "spirv"))]
+        {
+            std::println!($($arg)*);
+        }
+    }
+}
+
+pub trait IsSampler: Copy + Clone {}
+
+impl IsSampler for Sampler {}
+
+pub trait Sample2d {
+    type Sampler: IsSampler;
+
+    fn sample_by_lod(&self, sampler: Self::Sampler, uv: glam::Vec2, lod: f32) -> glam::Vec4;
+}
+
+impl Sample2d for Image2d {
+    type Sampler = Sampler;
+
+    fn sample_by_lod(&self, sampler: Self::Sampler, uv: glam::Vec2, lod: f32) -> glam::Vec4 {
+        self.sample_by_lod(sampler, uv, lod)
+    }
+}
+
+pub trait SampleCube {
+    type Sampler: IsSampler;
+
+    fn sample_by_lod(&self, sampler: Self::Sampler, uv: Vec3, lod: f32) -> glam::Vec4;
+}
+
+impl SampleCube for Cubemap {
+    type Sampler = Sampler;
+
+    fn sample_by_lod(&self, sampler: Self::Sampler, uv: Vec3, lod: f32) -> glam::Vec4 {
+        self.sample_by_lod(sampler, uv, lod)
+    }
 }
 
 /// A CPU-side texture sampler.
@@ -98,14 +150,14 @@ pub mod shader {
 #[derive(Debug, Clone, Copy)]
 pub struct CpuSampler;
 
-impl crate::shader::IsSampler for CpuSampler {}
+impl IsSampler for CpuSampler {}
 
 #[derive(Debug)]
 pub struct CpuTexture2d {
     pub image: image::DynamicImage,
 }
 
-impl crate::shader::Sample2d for CpuTexture2d {
+impl Sample2d for CpuTexture2d {
     type Sampler = CpuSampler;
 
     fn sample_by_lod(&self, _sampler: Self::Sampler, uv: glam::Vec2, _lod: f32) -> glam::Vec4 {
@@ -127,7 +179,7 @@ pub struct CpuCubemap {
     pub images: [image::DynamicImage; 6],
 }
 
-impl crate::shader::SampleCube for CpuCubemap {
+impl SampleCube for CpuCubemap {
     type Sampler = CpuSampler;
 
     fn sample_by_lod(
@@ -192,16 +244,16 @@ fn init_logging() {
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::{
+        gltf as gl,
+        gltf::GltfRendering,
+        pbr::{light::*, Material},
+        stage::Vertex,
+        Camera, Transform,
+    };
     use glam::{Mat3, Mat4, Quat, Vec2, Vec3, Vec4};
     use img_diff::DiffCfg;
     use pretty_assertions::assert_eq;
-    use renderling_shader::{
-        gltf as gl,
-        gltf::GltfRendering,
-        pbr::Material,
-        stage::{light::*, Vertex},
-        Camera, Transform,
-    };
 
     #[test]
     fn sanity_transmute() {
@@ -394,9 +446,9 @@ mod test {
     }
 
     fn gpu_cube_vertices() -> Vec<Vertex> {
-        renderling_shader::math::UNIT_INDICES
+        math::UNIT_INDICES
             .iter()
-            .map(|i| cmy_gpu_vertex(renderling_shader::math::UNIT_POINTS[*i as usize]))
+            .map(|i| cmy_gpu_vertex(math::UNIT_POINTS[*i as usize]))
             .collect()
     }
 
@@ -531,8 +583,8 @@ mod test {
         });
         let pyramid_node_path = stage.append_array(&[pyramid_node]);
 
-        let cube_vertices = renderling_shader::math::UNIT_POINTS.map(cmy_gpu_vertex);
-        let cube_indices = renderling_shader::math::UNIT_INDICES.map(|i| i as u32);
+        let cube_vertices = math::UNIT_POINTS.map(cmy_gpu_vertex);
+        let cube_indices = math::UNIT_INDICES.map(|i| i as u32);
         let cube_vertex_count = cube_indices.len();
         let cube_mesh = stage
             .new_mesh()
@@ -574,7 +626,7 @@ mod test {
     }
 
     fn gpu_uv_unit_cube() -> Vec<Vertex> {
-        let p: [Vec3; 8] = renderling_shader::math::UNIT_POINTS;
+        let p: [Vec3; 8] = math::UNIT_POINTS;
         let tl = Vec2::new(0.0, 0.0);
         let tr = Vec2::new(1.0, 0.0);
         let bl = Vec2::new(0.0, 1.0);
@@ -829,7 +881,7 @@ mod test {
         stage.set_lights(lights);
 
         let material = stage.append(&Material::default());
-        let verts = renderling_shader::math::unit_cube()
+        let verts = math::unit_cube()
             .into_iter()
             .map(|(p, n)| Vertex {
                 position: p.extend(1.0),

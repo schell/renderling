@@ -3,11 +3,10 @@
 //! Also includes bloom effect.
 use crabslab::{CpuSlab, Slab, SlabItem, WgpuBuffer};
 use moongraph::*;
-use renderling_shader::tonemapping::TonemapConstants;
 
 use crate::{
-    frame::FrameTextureView, math::Vec4, BackgroundColor, DepthTexture, Device, Queue,
-    RenderTarget, ScreenSize, WgpuStateError,
+    frame::FrameTextureView, math::Vec4, tonemapping::TonemapConstants, BackgroundColor,
+    DepthTexture, Device, Queue, RenderTarget, ScreenSize, WgpuStateError,
 };
 
 /// A texture, tonemapping pipeline and uniform used for high dynamic range

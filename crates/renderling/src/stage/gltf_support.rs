@@ -1,17 +1,16 @@
 //! Gltf support for the [`Stage`](crate::Stage).
+use glam::{Quat, Vec2, Vec3, Vec4};
+use snafu::{OptionExt, ResultExt, Snafu};
+
 use super::*;
 use crate::{
-    shader::{
-        gltf::*,
-        pbr::Material,
-        texture::{GpuTexture, TextureAddressMode, TextureModes},
-        Camera,
-    },
-    AtlasImage,
+    gltf::*,
+    pbr::light::LightStyle,
+    pbr::Material,
+    stage::Vertex,
+    texture::{GpuTexture, TextureAddressMode, TextureModes},
+    AtlasImage, Camera,
 };
-use glam::{Quat, Vec2, Vec3, Vec4};
-use renderling_shader::{pbr::light::LightStyle, stage::Vertex};
-use snafu::{OptionExt, ResultExt, Snafu};
 
 #[derive(Debug, Snafu)]
 pub enum StageGltfError {
@@ -1332,10 +1331,7 @@ impl<'a> GltfMeshBuilder<'a> {
 
 #[cfg(test)]
 mod test {
-    use crate::{
-        shader::{gltf::*, pbr::Material, stage::Vertex, Camera, Transform},
-        Renderling, Stage,
-    };
+    use crate::{gltf::*, pbr::Material, stage::Vertex, Camera, Renderling, Stage, Transform};
     use crabslab::{Array, GrowableSlab, Id, Slab};
     use glam::{Vec2, Vec3, Vec4, Vec4Swizzles};
 
@@ -1417,7 +1413,7 @@ mod test {
             Renderling::headless(100, 50).with_background_color(Vec3::splat(0.0).extend(1.0));
         let (device, queue) = r.get_device_and_queue_owned();
         let (document, buffers, images) =
-            gltf::import("../../gltf/gltfTutorial_008_SimpleMeshes.gltf").unwrap();
+            ::gltf::import("../../gltf/gltfTutorial_008_SimpleMeshes.gltf").unwrap();
         let projection = crate::camera::perspective(100.0, 50.0);
         let position = Vec3::new(1.0, 0.5, 1.5);
         let view = crate::camera::look_at(position, Vec3::new(1.0, 0.5, 0.0), Vec3::Y);
@@ -1450,7 +1446,7 @@ mod test {
         let mut stage = Stage::new(device, queue).with_lighting(false);
         stage.configure_graph(&mut r, true);
         let (document, buffers, images) =
-            gltf::import("../../gltf/gltfTutorial_003_MinimalGltfFile.gltf").unwrap();
+            ::gltf::import("../../gltf/gltfTutorial_003_MinimalGltfFile.gltf").unwrap();
         let gpu_doc = stage
             .load_gltf_document(&document, buffers, images)
             .unwrap();
@@ -1786,7 +1782,7 @@ mod test {
             };
             v.render_unit_id = Id::from(v.instance_index);
             v.render_unit = slab.read(v.render_unit_id);
-            renderling_shader::gltf::vertex(
+            vertex(
                 v.render_unit_id,
                 v.vertex_index,
                 slab,

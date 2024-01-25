@@ -4,7 +4,6 @@ members = [
     #"crates/example-wasm",
     "crates/loading-bytes",
     "crates/renderling",
-    "crates/renderling-shader",
     #"crates/renderling-gpui",
 ]
 
