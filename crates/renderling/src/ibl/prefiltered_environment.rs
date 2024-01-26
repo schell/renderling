@@ -62,18 +62,15 @@ pub fn create_pipeline_and_bindgroup(
         bind_group_layouts: &[&bg_layout],
         push_constant_ranges: &[],
     });
-    let vertex_shader = device.create_shader_module(wgpu::include_spirv!(
-        "../linkage/convolution-vertex_prefilter_environment_cubemap.spv"
-    ));
-    let fragment_shader = device.create_shader_module(wgpu::include_spirv!(
-        "../linkage/convolution-fragment_prefilter_environment_cubemap.spv"
-    ));
+    let vertex_linkage = crate::linkage::convolution__vertex_prefilter_environment_cubemap(device);
+    let fragment_linkage =
+        crate::linkage::convolution__fragment_prefilter_environment_cubemap(device);
     let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some("prefiltered environment"),
         layout: Some(&pp_layout),
         vertex: wgpu::VertexState {
-            module: &vertex_shader,
-            entry_point: "convolution::vertex_prefilter_environment_cubemap",
+            module: &vertex_linkage.module,
+            entry_point: vertex_linkage.entry_point,
             buffers: &[],
         },
         primitive: wgpu::PrimitiveState {
@@ -92,8 +89,8 @@ pub fn create_pipeline_and_bindgroup(
             count: 1,
         },
         fragment: Some(wgpu::FragmentState {
-            module: &fragment_shader,
-            entry_point: "convolution::fragment_prefilter_environment_cubemap",
+            module: &fragment_linkage.module,
+            entry_point: fragment_linkage.entry_point,
             targets: &[Some(wgpu::ColorTargetState {
                 format: wgpu::TextureFormat::Rgba16Float,
                 blend: Some(wgpu::BlendState {

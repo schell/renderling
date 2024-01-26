@@ -1,9 +1,7 @@
 //! Helper for rendering SDF shapes.
+use crate::{frame::FrameTextureView, DepthTexture, Device, GraphError, Queue, Renderling, View};
 use crabslab::{CpuSlab, GrowableSlab, Id, Slab, WgpuBuffer};
 use glam::Vec3;
-use renderling::{
-    frame::FrameTextureView, DepthTexture, Device, GraphError, Queue, Renderling, View,
-};
 
 use crate::sdf::{SdfShape, ShapeLegend};
 
@@ -48,12 +46,8 @@ pub fn new_render_pipeline(
     format: wgpu::TextureFormat,
 ) -> wgpu::RenderPipeline {
     let label = Some("sdf pipeline");
-    let vertex_shader = device.create_shader_module(wgpu::include_spirv!(
-        "../../../../renderling/src/linkage/sdf-sdf_shape_vertex.spv"
-    ));
-    let fragment_shader = device.create_shader_module(wgpu::include_spirv!(
-        "../../../../renderling/src/linkage/sdf-sdf_shape_fragment.spv"
-    ));
+    let vertex_linkage = crate::linkage::sdf__sdf_shape_vertex(device);
+    let fragment_linkage = crate::linkage::sdf__sdf_shape_fragment(device);
     let slab_layout = new_bindgroup_layout(device);
     let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label,
@@ -64,8 +58,8 @@ pub fn new_render_pipeline(
         label,
         layout: Some(&layout),
         vertex: wgpu::VertexState {
-            module: &vertex_shader,
-            entry_point: "sdf_shape_vertex",
+            module: &vertex_linkage.module,
+            entry_point: vertex_linkage.entry_point,
             buffers: &[],
         },
         primitive: wgpu::PrimitiveState {
@@ -90,8 +84,8 @@ pub fn new_render_pipeline(
             count: 1,
         },
         fragment: Some(wgpu::FragmentState {
-            module: &fragment_shader,
-            entry_point: "sdf_shape_fragment",
+            module: &fragment_linkage.module,
+            entry_point: fragment_linkage.entry_point,
             targets: &[Some(wgpu::ColorTargetState {
                 format,
                 blend: Some(wgpu::BlendState::ALPHA_BLENDING),
@@ -105,7 +99,7 @@ pub fn new_render_pipeline(
 
 pub fn configure_graph(r: &mut Renderling) {
     // set up the render graph
-    use renderling::{
+    use crate::{
         frame::{clear_frame_and_depth, copy_frame_to_post, create_frame, present},
         graph::{graph, Graph},
     };
@@ -209,7 +203,7 @@ impl SdfRenderer {
             });
             render_pass.set_pipeline(pipeline);
             render_pass.set_bind_group(0, bindgroup, &[]);
-            render_pass.draw(0..6, legend_id.inner()..legend_id.inner() + 1); //
+            render_pass.draw(0..6, legend_id.inner()..legend_id.inner() + 1);
         }
         queue.submit(std::iter::once(encoder.finish()));
     }

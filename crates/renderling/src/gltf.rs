@@ -6,8 +6,7 @@ use crate::{
     math::{IsMatrix, IsVector},
     pbr::Material,
     stage::Vertex,
-    texture::GpuTexture,
-    Camera, Transform,
+    AtlasTexture, Camera, Transform,
 };
 
 #[repr(transparent)]
@@ -1065,7 +1064,7 @@ pub struct GltfDocument {
     pub scenes: Array<GltfScene>,
     pub skins: Array<GltfSkin>,
     // TODO: Think about making a `GltfTexture`
-    pub textures: Array<GpuTexture>,
+    pub textures: Array<AtlasTexture>,
     pub views: Array<GltfBufferView>,
 }
 

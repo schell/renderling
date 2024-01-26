@@ -17,9 +17,7 @@ use spirv_std::num_traits::Float;
 
 use crate::{
     math::{self, IsVector},
-    println as my_println,
-    texture::GpuTexture,
-    Camera, IsSampler, Sample2d, SampleCube,
+    println as my_println, AtlasTexture, Camera, IsSampler, Sample2d, SampleCube,
 };
 
 pub mod debug;
@@ -43,11 +41,11 @@ pub struct Material {
     pub metallic_factor: f32,
     pub roughness_factor: f32,
 
-    pub albedo_texture: Id<GpuTexture>,
-    pub metallic_roughness_texture: Id<GpuTexture>,
-    pub normal_texture: Id<GpuTexture>,
-    pub ao_texture: Id<GpuTexture>,
-    pub emissive_texture: Id<GpuTexture>,
+    pub albedo_texture: Id<AtlasTexture>,
+    pub metallic_roughness_texture: Id<AtlasTexture>,
+    pub normal_texture: Id<AtlasTexture>,
+    pub ao_texture: Id<AtlasTexture>,
+    pub emissive_texture: Id<AtlasTexture>,
 
     pub albedo_tex_coord: u32,
     pub metallic_roughness_tex_coord: u32,
@@ -276,7 +274,7 @@ pub fn get_material(material_index: u32, has_lighting: bool, slab: &[u32]) -> Ma
 }
 
 pub fn texture_color<T: Sample2d<Sampler = S>, S: IsSampler>(
-    texture_id: Id<GpuTexture>,
+    texture_id: Id<AtlasTexture>,
     uv: Vec2,
     atlas: &T,
     sampler: &S,
@@ -352,16 +350,12 @@ pub fn pbr_fragment(
 pub fn fragment_impl<T, C, S>(
     atlas: &T,
     atlas_sampler: &S,
-
     irradiance: &C,
     irradiance_sampler: &S,
-
     prefiltered: &C,
     prefiltered_sampler: &S,
-
     brdf: &T,
     brdf_sampler: &S,
-
     slab: &[u32],
 
     in_pbr_config: Id<PbrConfig>,

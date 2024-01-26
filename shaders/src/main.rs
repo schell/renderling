@@ -3,6 +3,8 @@
 use clap::Parser;
 use spirv_builder::{CompileResult, MetadataPrintout, ModuleResult, SpirvBuilder};
 
+mod shader;
+
 #[derive(Parser)]
 #[clap(author, version, about)]
 struct Cli {
@@ -11,7 +13,7 @@ struct Cli {
     verbosity: u8,
 
     /// Directory containing the shader crate to compile.
-    #[clap(long, short, default_value = "renderling-shader")]
+    #[clap(long, short, default_value = "renderling")]
     shader_crate: std::path::PathBuf,
 
     ///// Cargo features to be passed to the shader crate compilation invocation.
@@ -59,6 +61,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .build()?;
 
     let dir = output_dir;
+    let mut shaders = vec![];
     match module {
         ModuleResult::MultiModule(modules) => {
             assert!(!modules.is_empty(), "No shader modules to compile");
@@ -69,7 +72,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     filepath.display(),
                     path.display()
                 );
-                std::fs::copy(filepath, path).unwrap();
+                std::fs::copy(filepath, &path).unwrap();
+                shaders.push((entry, path));
             }
         }
         ModuleResult::SingleModule(filepath) => {
@@ -80,9 +84,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 path.display(),
                 entry_points.join(", ")
             );
-            std::fs::copy(filepath, path).unwrap();
+            std::fs::copy(filepath, &path).unwrap();
+            for entry in entry_points {
+                shaders.push((entry, path.clone()));
+            }
         }
     }
+
+    let tokens = shader::gen_all_shaders(shaders);
+    let tokens = syn::parse_file(&tokens).unwrap_or_else(|e| {
+        panic!(
+            "Failed to parse generated shader.rs: {}\n\n{}",
+            e,
+            tokens.to_string()
+        )
+    });
+    let tokens = prettyplease::unparse(&tokens);
+    println!("\nWriting shaders.rs to {}:\n\n{tokens}", dir.display());
+    std::fs::write(dir.join("shaders.rs"), tokens.to_string()).unwrap();
 
     Ok(())
 }

@@ -197,9 +197,9 @@ pub fn raymarch_fragment(
             cfg.pbr_config,
             cfg.camera.inner(),
             cfg.default_material.inner(),
-            Vec4::ONE,
-            Vec2::ZERO,
-            Vec2::ZERO,
+            Vec4::ONE,  // albedo color
+            Vec2::ZERO, // uv0
+            Vec2::ZERO, // uv1
             result.normal,
             result.tangent,
             result.bitangent,
@@ -207,15 +207,15 @@ pub fn raymarch_fragment(
             out_color,
         );
     } else {
-        let color = Vec3::splat(0.0);
+        let color = prefiltered.sample(*prefiltered_sampler, ray_dir).xyz();
         *out_color = color.extend(1.0);
     }
 }
 
 #[cfg(test)]
 mod test {
-    use super::super::helper::RaymarchingRenderer;
     use super::*;
+    use crate::sdf::helper::RaymarchingRenderer;
     use assert_approx_eq::assert_approx_eq;
     use crabslab::GrowableSlab;
     use glam::{Mat4, Vec3Swizzles};
@@ -326,16 +326,28 @@ mod test {
         let mut r = RaymarchingRenderer::new(width as u32, height as u32);
         let (device, queue) = r.renderling.get_device_and_queue_owned();
         let camera = r.slab.append(&camera(width, height));
-        let hdr = renderling::AtlasImage::from_hdr_path("../img/hdr/helipad.hdr").unwrap();
-        let skybox = renderling::Skybox::new(device, queue, hdr, camera);
+        let hdr =
+            crate::AtlasImage::from_hdr_path("../../img/hdr/helipad.hdr").unwrap_or_else(|e| {
+                panic!(
+                    "Failed to load HDR image: {}\ncwd: {}",
+                    e,
+                    std::env::current_dir().unwrap().display()
+                )
+            });
+        let skybox = crate::Skybox::new(device, queue, hdr, camera);
+        r = r.with_skybox(skybox);
+        let default_material = r.slab.append(&crate::pbr::Material {
+            metallic_factor: 1.0,
+            roughness_factor: 0.0,
+            ..Default::default()
+        });
+        let pbr_config = r.slab.append(&crate::pbr::PbrConfig::default());
         let raymarch = r.slab.append(&Raymarch {
             camera,
             screen_resolution: Vec2::new(width, height),
-            pbr_config: crate::pbr::PbrConfig {
-                atlas_size: todo!(),
-                ..Default::default()
-            },
-            default_material: todo!(),
+            pbr_config,
+            default_material,
+            ..Default::default()
         });
         let img = r.render_image(raymarch);
         img_diff::save("raymarch/sphere.png", img);

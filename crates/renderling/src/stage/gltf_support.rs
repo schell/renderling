@@ -4,12 +4,8 @@ use snafu::{OptionExt, ResultExt, Snafu};
 
 use super::*;
 use crate::{
-    gltf::*,
-    pbr::light::LightStyle,
-    pbr::Material,
-    stage::Vertex,
-    texture::{GpuTexture, TextureAddressMode, TextureModes},
-    AtlasImage, Camera,
+    gltf::*, pbr::light::LightStyle, pbr::Material, stage::Vertex, AtlasImage, AtlasTexture,
+    Camera, TextureAddressMode, TextureModes,
 };
 
 #[derive(Debug, Snafu)]
@@ -29,7 +25,7 @@ pub enum StageGltfError {
     #[snafu(display("Missing texture at gltf index {index} slab index {tex_id:?}"))]
     MissingTexture {
         index: usize,
-        tex_id: Id<GpuTexture>,
+        tex_id: Id<AtlasTexture>,
     },
 
     #[snafu(display("Unsupported primitive mode: {:?}", mode))]
@@ -244,7 +240,7 @@ impl Stage {
         };
 
         log::trace!("Creating GPU textures");
-        let textures = self.allocate_array::<GpuTexture>(document.textures().len());
+        let textures = self.allocate_array::<AtlasTexture>(document.textures().len());
         for (i, texture) in document.textures().enumerate() {
             let image_index = texture.source().index();
             let mode_s = texture_address_mode_from_gltf(texture.sampler().wrap_s());
@@ -256,7 +252,7 @@ impl Stage {
                         index: image_index,
                         offset: atlas_offset,
                     })?;
-            let texture = GpuTexture {
+            let texture = AtlasTexture {
                 offset_px,
                 size_px,
                 modes: TextureModes {

@@ -11,35 +11,49 @@ readme = "../../README.md"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+[lib]
+crate-type = ["lib", "dylib"]
+
 [features]
-default = ["gltf", "raw-window-handle", "winit"]
+default = ["raw-window-handle", "winit"]
+gltf = ["dep:gltf"]
 wasm = ["wgpu/fragile-send-sync-non-atomic-wasm"]
 
+# dependencies for CPU and GPU code
 [dependencies]
-any_vec = "0.13"
-async-channel = {workspace=true}
-bytemuck = { workspace = true }
+spirv-std = "0.9"
+
+# dependencies for GPU code
+[target.'cfg(target_arch = "spirv")'.dependencies]
+crabslab = { workspace = true, features = ["glam"]  }
+half = { version = "2.3", default-features = false }
+glam = { version = "0.24.2", default-features = false, features = ["libm"] }
+
+# dependencies for CPU code
+[target.'cfg(not(target_arch = "spirv"))'.dependencies]
+async-channel = {workspace = true}
+bytemuck = {workspace = true}
 crabslab = { workspace = true, features = ["default"] }
 crunch = "0.5"
 futures-lite = {workspace=true}
-glam = { workspace = true, default-features = false, features = ["bytemuck", "libm"] }
-gltf = { workspace = true, optional = true }
+glam = { workspace = true, features = ["std"] }
+gltf = {workspace = true, optional = true}
 half = "2.3"
-image = { workspace = true, features = ["hdr"] }
-log = { workspace = true }
+image = {workspace = true, features = ["hdr"]}
+log = {workspace = true}
 moongraph = { version = "0.3.5", features = ["dot"] }
 raw-window-handle = { version = "0.5", optional = true }
 rustc-hash = "1.1"
 send_wrapper = "0.6"
-snafu = {workspace=true}
-spirv-std = "0.9"
+snafu = {workspace = true}
 wgpu = { workspace = true, features = ["spirv"] }
 winit = { workspace = true, optional = true }
 
 [package.metadata.docs.rs]
-features = ["gltf", "text", "raw-window-handle", "winit"]
+features = ["gltf", "raw-window-handle", "winit"]
 
 [dev-dependencies]
+assert_approx_eq = {workspace = true}
 criterion = { version = "0.4", features = ["html_reports"] }
 ctor = "0.2.2"
 env_logger = {workspace = true}
@@ -47,6 +61,11 @@ icosahedron = "0.1"
 img-diff = { path = "../img-diff" }
 naga = { version = "0.13", features = ["spv-in", "wgsl-out", "wgsl-in", "msl-out"] }
 pretty_assertions = "1.4.0"
+ttf-parser = "0.20.0"
+
+[target.'cfg(not(target_arch = "spirv"))'.dev-dependencies]
+glam = { workspace = true, features = ["std", "debug-glam-assert"] }
+
 
 [[bench]]
 name = "benchmarks"

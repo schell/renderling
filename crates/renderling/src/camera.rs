@@ -66,7 +66,7 @@ pub fn default_perspective(width: f32, height: f32) -> (Mat4, Mat4) {
 
 pub fn perspective(width: f32, height: f32) -> Mat4 {
     let aspect = width / height;
-    let fovy = std::f32::consts::PI / 4.0;
+    let fovy = core::f32::consts::PI / 4.0;
     let znear = 0.1;
     let zfar = 100.0;
     Mat4::perspective_rh(fovy, aspect, znear, zfar)
