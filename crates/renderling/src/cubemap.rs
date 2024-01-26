@@ -68,11 +68,8 @@ impl CubemapMakingRenderPipeline {
     /// images.
     pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat) -> Self {
         log::trace!("creating cubemap-making render pipeline with format '{format:?}'");
-        let vertex_shader =
-            device.create_shader_module(wgpu::include_spirv!("linkage/skybox-vertex_cubemap.spv"));
-        let fragment_shader = device.create_shader_module(wgpu::include_spirv!(
-            "linkage/skybox-fragment_equirectangular.spv"
-        ));
+        let vertex_linkage = crate::linkage::skybox__vertex_cubemap(device);
+        let fragment_linkage = crate::linkage::skybox__fragment_equirectangular(device);
         let bg_layout = cubemap_making_bindgroup_layout(device);
         let pp_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("cubemap-making pipeline layout"),
@@ -84,8 +81,8 @@ impl CubemapMakingRenderPipeline {
                 label: Some("cubemap-making pipeline"),
                 layout: Some(&pp_layout),
                 vertex: wgpu::VertexState {
-                    module: &vertex_shader,
-                    entry_point: "skybox::vertex_cubemap",
+                    module: &vertex_linkage.module,
+                    entry_point: vertex_linkage.entry_point,
                     buffers: &[],
                 },
                 primitive: wgpu::PrimitiveState {
@@ -104,8 +101,8 @@ impl CubemapMakingRenderPipeline {
                     count: 1,
                 },
                 fragment: Some(wgpu::FragmentState {
-                    module: &fragment_shader,
-                    entry_point: "skybox::fragment_equirectangular",
+                    module: &fragment_linkage.module,
+                    entry_point: fragment_linkage.entry_point,
                     targets: &[Some(wgpu::ColorTargetState {
                         format,
                         blend: Some(wgpu::BlendState::ALPHA_BLENDING),

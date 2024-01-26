@@ -10,7 +10,11 @@ description = "Generates shader .spv files from rust-gpu shader crates"
 clap = { version = "4.4.8", features = ["derive"] }
 env_logger = "^0.10"
 log = "^0.4"
+prettyplease = "0.2"
+proc-macro2 = "1.0"
+quote = "1.0"
 spirv-builder = "^0.9"
+syn = "2.0"
 
 # Enable incremental by default in release mode.
 [profile.release]

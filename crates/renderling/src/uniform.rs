@@ -1,5 +1,4 @@
 //! Uniforms share data across CPU/GPU.
-
 use std::ops::{Deref, DerefMut};
 
 use wgpu::util::DeviceExt;

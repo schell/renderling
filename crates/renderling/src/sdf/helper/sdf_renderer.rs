@@ -1,10 +1,9 @@
-//! `wgpu` helper functions for tests.
-use crabslab::{CpuSlab, GrowableSlab, WgpuBuffer};
-use renderling::{
-    frame::FrameTextureView, DepthTexture, Device, GraphError, Queue, Renderling, View,
-};
+//! Helper for rendering SDF shapes.
+use crate::{frame::FrameTextureView, DepthTexture, Device, GraphError, Queue, Renderling, View};
+use crabslab::{CpuSlab, GrowableSlab, Id, Slab, WgpuBuffer};
+use glam::Vec3;
 
-use super::*;
+use crate::sdf::{SdfShape, ShapeLegend};
 
 pub fn new_bindgroup_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
     let visibility =
@@ -47,12 +46,8 @@ pub fn new_render_pipeline(
     format: wgpu::TextureFormat,
 ) -> wgpu::RenderPipeline {
     let label = Some("sdf pipeline");
-    let vertex_shader = device.create_shader_module(wgpu::include_spirv!(
-        "../../renderling/src/linkage/sdf_shape_vertex.spv"
-    ));
-    let fragment_shader = device.create_shader_module(wgpu::include_spirv!(
-        "../../renderling/src/linkage/sdf_shape_fragment.spv"
-    ));
+    let vertex_linkage = crate::linkage::sdf__sdf_shape_vertex(device);
+    let fragment_linkage = crate::linkage::sdf__sdf_shape_fragment(device);
     let slab_layout = new_bindgroup_layout(device);
     let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label,
@@ -63,8 +58,8 @@ pub fn new_render_pipeline(
         label,
         layout: Some(&layout),
         vertex: wgpu::VertexState {
-            module: &vertex_shader,
-            entry_point: "sdf_shape_vertex",
+            module: &vertex_linkage.module,
+            entry_point: vertex_linkage.entry_point,
             buffers: &[],
         },
         primitive: wgpu::PrimitiveState {
@@ -89,8 +84,8 @@ pub fn new_render_pipeline(
             count: 1,
         },
         fragment: Some(wgpu::FragmentState {
-            module: &fragment_shader,
-            entry_point: "sdf_shape_fragment",
+            module: &fragment_linkage.module,
+            entry_point: fragment_linkage.entry_point,
             targets: &[Some(wgpu::ColorTargetState {
                 format,
                 blend: Some(wgpu::BlendState::ALPHA_BLENDING),
@@ -100,6 +95,31 @@ pub fn new_render_pipeline(
         multiview: None,
     });
     pipeline
+}
+
+pub fn configure_graph(r: &mut Renderling) {
+    // set up the render graph
+    use crate::{
+        frame::{clear_frame_and_depth, copy_frame_to_post, create_frame, present},
+        graph::{graph, Graph},
+    };
+
+    // pre-render
+    r.graph
+        .add_subgraph(graph!(create_frame, clear_frame_and_depth))
+        .add_barrier();
+
+    // render
+    r.graph.add_local::<(
+        View<Device>,
+        View<Queue>,
+        View<FrameTextureView>,
+        View<DepthTexture>,
+    ), ()>("render");
+    r.graph.add_barrier();
+
+    // post
+    r.graph.add_subgraph(graph!(copy_frame_to_post, present));
 }
 
 pub struct SdfRenderer {
@@ -183,7 +203,7 @@ impl SdfRenderer {
             });
             render_pass.set_pipeline(pipeline);
             render_pass.set_bind_group(0, bindgroup, &[]);
-            render_pass.draw(0..6, legend_id.inner()..legend_id.inner() + 1); //
+            render_pass.draw(0..6, legend_id.inner()..legend_id.inner() + 1);
         }
         queue.submit(std::iter::once(encoder.finish()));
     }
@@ -213,29 +233,4 @@ impl SdfRenderer {
             .unwrap();
         self.renderling.read_image().unwrap()
     }
-}
-
-pub fn configure_graph(r: &mut Renderling) {
-    // set up the render graph
-    use renderling::{
-        frame::{clear_frame_and_depth, copy_frame_to_post, create_frame, present},
-        graph::{graph, Graph},
-    };
-
-    // pre-render
-    r.graph
-        .add_subgraph(graph!(create_frame, clear_frame_and_depth))
-        .add_barrier();
-
-    // render
-    r.graph.add_local::<(
-        View<Device>,
-        View<Queue>,
-        View<FrameTextureView>,
-        View<DepthTexture>,
-    ), ()>("render");
-    r.graph.add_barrier();
-
-    // post
-    r.graph.add_subgraph(graph!(copy_frame_to_post, present));
 }

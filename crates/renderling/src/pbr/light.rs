@@ -85,24 +85,6 @@ impl Default for PointLight {
     }
 }
 
-#[cfg(feature = "gltf")]
-pub fn from_gltf_light_kind(kind: gltf::khr_lights_punctual::Kind) -> LightStyle {
-    match kind {
-        gltf::khr_lights_punctual::Kind::Directional => LightStyle::Directional,
-        gltf::khr_lights_punctual::Kind::Point => LightStyle::Point,
-        gltf::khr_lights_punctual::Kind::Spot { .. } => LightStyle::Spot,
-    }
-}
-
-#[cfg(feature = "gltf")]
-pub fn gltf_light_intensity_units(kind: gltf::khr_lights_punctual::Kind) -> &'static str {
-    match kind {
-        gltf::khr_lights_punctual::Kind::Directional => "lux (lm/m^2)",
-        // sr is "steradian"
-        _ => "candelas (lm/sr)",
-    }
-}
-
 #[repr(u32)]
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[derive(Copy, Clone, PartialEq)]

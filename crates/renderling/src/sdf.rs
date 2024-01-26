@@ -1,14 +1,13 @@
 //! Renderling's SDF shaders.
-#![cfg_attr(target_arch = "spirv", no_std)]
 #![deny(clippy::disallowed_methods)]
 
 use crabslab::{Array, Id, Slab, SlabItem};
 use glam::{vec2, vec3, BVec3, Vec2, Vec3, Vec4, Vec4Swizzles};
 
 #[cfg(target_arch = "spirv")]
-use renderling_shader_core::math::Float;
+use crate::math::Float;
 
-use renderling_shader_core::{
+use crate::{
     math::{self, IsVector},
     Camera, Transform,
 };
@@ -16,6 +15,7 @@ use spirv_std::spirv;
 
 #[cfg(test)]
 mod helper;
+pub mod raymarch;
 
 /// Returns the implicit position of the given index in clip space
 /// when being rendered in 2d.
