@@ -15,7 +15,7 @@ readme = "../../README.md"
 crate-type = ["lib", "dylib"]
 
 [features]
-default = ["raw-window-handle", "winit"]
+default = ["gltf", "raw-window-handle", "winit"]
 gltf = ["dep:gltf"]
 wasm = ["wgpu/fragile-send-sync-non-atomic-wasm"]
 
