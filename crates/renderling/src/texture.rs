@@ -1,4 +1,4 @@
-//! Creating and using textures.
+//! Creating and using CPU-side textures.
 use snafu::prelude::*;
 use std::{ops::Deref, sync::Arc};
 
@@ -591,14 +591,14 @@ impl Texture {
             bind_group_layouts: &[&bg_layout],
             push_constant_ranges: &[],
         });
+        let vertex_linkage = crate::linkage::convolution__vertex_generate_mipmap(device);
+        let fragment_linkage = crate::linkage::convolution__fragment_generate_mipmap(device);
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label,
             layout: Some(&pp_layout),
             vertex: wgpu::VertexState {
-                module: &device.create_shader_module(wgpu::include_spirv!(
-                    "linkage/convolution-vertex_generate_mipmap.spv"
-                )),
-                entry_point: "convolution::vertex_generate_mipmap",
+                module: &vertex_linkage.module,
+                entry_point: vertex_linkage.entry_point,
                 buffers: &[],
             },
             primitive: wgpu::PrimitiveState {
@@ -608,10 +608,8 @@ impl Texture {
                 ..Default::default()
             },
             fragment: Some(wgpu::FragmentState {
-                module: &device.create_shader_module(wgpu::include_spirv!(
-                    "linkage/convolution-fragment_generate_mipmap.spv"
-                )),
-                entry_point: "convolution::fragment_generate_mipmap",
+                module: &fragment_linkage.module,
+                entry_point: fragment_linkage.entry_point,
                 targets: &[Some(wgpu::ColorTargetState {
                     format: self.texture.format(),
                     blend: None,
@@ -872,6 +870,7 @@ impl CopiedTextureBuffer {
 
 #[cfg(test)]
 mod test {
+    use super::*;
     use crate::Renderling;
 
     #[test]

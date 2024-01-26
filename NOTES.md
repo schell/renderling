@@ -20,16 +20,16 @@ Just pro-cons on tech choices and little things I don't want to forget whil impl
   - traits!
   - editor tooling!
 
-## cons / limititions
+## cons / limititions / gotchas
 
-* ~~can't use enums (but you can't in glsl or hlsl or msl or wgsl either)~~ you _can_ but they must be simple
+* ~~can't use enums (but you can't in glsl or hlsl or msl or wgsl either)~~ you _can_ but they must be simple (like `#[repr(u32)]`)
 * ~~struct layout size/alignment errors can be really tricky~~ solved by using a slab
 * rust code must be no-std
 * don't use `while let` or `while` loops
 * for loops are hit or miss, sometimes they work and sometimes they don't
   - see [this rust-gpu issue](https://github.com/EmbarkStudios/rust-gpu/issues/739)
   - see [conversation with eddyb on discord](https://discord.com/channels/750717012564770887/750717499737243679/threads/1092283362217046066)
-* can't use `.max` or `.min`
+* can't use `.max` or `.min` on integers
 * meh, but no support for dynamically sized arrays (how would that work in no-std?)
   - see [conversation on discord](https://discord.com/channels/750717012564770887/750717499737243679/1091813590400516106)
 * can't use bitwise rotate_left or rotate_right
@@ -37,6 +37,10 @@ Just pro-cons on tech choices and little things I don't want to forget whil impl
 * sometimes things like indexing are just funky-joe-monkey:
   - see [this comment on discord](https://discord.com/channels/750717012564770887/750717499737243679/1131395331368693770)
   - see [this comment on matrix](https://matrix.to/#/!XFRnMvAfptAHthwBCx:matrix.org/$f4RmQGzq4Ulmmd4bEFOvP0LzLZei8lrHCF--s71Zcxs?via=matrix.org&via=mozilla.org&via=kyju.org)
+* cannot use shader entry point functions nested within each other
+  - see [the discussion on `rust-gpu` discord](https://discord.com/channels/750717012564770887/750717499737243679/1198813817975603251)
+* if your shader crate is just a library and has no entry points it **cannot** have the
+  `crate-type = ["rlib", "dylib"]` Cargo.toml annotation or you will get "Undefined symbols" errors
 
 # wgpu
 

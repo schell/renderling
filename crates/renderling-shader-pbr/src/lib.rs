@@ -1,22 +1,32 @@
-//! Physically based renderer shader code.
+//! Physically-based shading code.
 //!
 //! ## References
 //! * https://learnopengl.com/PBR/Theory
 //! * https://github.com/KhronosGroup/glTF-Sample-Viewer/blob/5b1b7f48a8cb2b7aaef00d08fdba18ccc8dd331b/source/Renderer/shaders/pbr.frag
 //! * https://github.khronos.org/glTF-Sample-Viewer-Release/
+#![cfg_attr(target_arch = "spirv", no_std)]
 
-use crabslab::{Array, Id, Slab, SlabItem};
+use crabslab::{Array, Id, Slab, SlabItem, ID_NONE};
 use glam::{Vec2, Vec3, Vec4, Vec4Swizzles};
-#[cfg(target_arch = "spirv")]
-use spirv_std::num_traits::Float;
-
-use crate::{
-    debug::DebugChannel,
+use light::Light;
+use renderling_shader_core::{
     math::{self, IsVector},
-    stage::light::LightStyle,
+    println as my_println,
     texture::GpuTexture,
     Camera, IsSampler, Sample2d, SampleCube,
 };
+use spirv_std::{
+    image::{Cubemap, Image2d},
+    spirv, Sampler,
+};
+
+#[cfg(target_arch = "spirv")]
+use spirv_std::num_traits::Float;
+
+use crate::{debug::DebugMode, light::LightStyle};
+
+pub mod debug;
+pub mod light;
 
 /// Represents a material on the GPU.
 ///
@@ -27,14 +37,11 @@ use crate::{
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[derive(Clone, Copy, PartialEq, SlabItem)]
 pub struct Material {
-    // x, y, z is emissive factor, default [0.0, 0.0, 0.0]
-    // w is emissive strength multiplier (gltf's KHR_materials_emissive_strength extension),
-    // default 1.0
-    pub emissive_factor: Vec4,
+    pub emissive_factor: Vec3,
+    pub emissive_strength_multiplier: f32,
     pub albedo_factor: Vec4,
     pub metallic_factor: f32,
     pub roughness_factor: f32,
-    pub factor_padding: [f32; 2],
 
     pub albedo_texture: Id<GpuTexture>,
     pub metallic_roughness_texture: Id<GpuTexture>,
@@ -55,11 +62,11 @@ pub struct Material {
 impl Default for Material {
     fn default() -> Self {
         Self {
-            emissive_factor: Vec3::ZERO.extend(1.0),
+            emissive_factor: Vec3::ZERO,
+            emissive_strength_multiplier: 1.0,
             albedo_factor: Vec4::ONE,
             metallic_factor: 1.0,
             roughness_factor: 1.0,
-            factor_padding: [0.0; 2],
             albedo_texture: Id::NONE,
             metallic_roughness_texture: Id::NONE,
             normal_texture: Id::NONE,
@@ -146,42 +153,42 @@ fn outgoing_radiance(
     metalness: f32,
     roughness: f32,
 ) -> Vec3 {
-    crate::println!("outgoing_radiance");
-    crate::println!("    light_color: {light_color:?}");
-    crate::println!("    albedo: {albedo:?}");
-    crate::println!("    attenuation: {attenuation:?}");
-    crate::println!("    v: {v:?}");
-    crate::println!("    l: {l:?}");
-    crate::println!("    n: {n:?}");
-    crate::println!("    metalness: {metalness:?}");
-    crate::println!("    roughness: {roughness:?}");
+    my_println!("outgoing_radiance");
+    my_println!("    light_color: {light_color:?}");
+    my_println!("    albedo: {albedo:?}");
+    my_println!("    attenuation: {attenuation:?}");
+    my_println!("    v: {v:?}");
+    my_println!("    l: {l:?}");
+    my_println!("    n: {n:?}");
+    my_println!("    metalness: {metalness:?}");
+    my_println!("    roughness: {roughness:?}");
 
     let f0 = Vec3::splat(0.4).lerp(albedo, metalness);
-    crate::println!("    f0: {f0:?}");
+    my_println!("    f0: {f0:?}");
     let radiance = light_color.xyz() * attenuation;
-    crate::println!("    radiance: {radiance:?}");
+    my_println!("    radiance: {radiance:?}");
     let h = (v + l).alt_norm_or_zero();
-    crate::println!("    h: {h:?}");
+    my_println!("    h: {h:?}");
     // cook-torrance brdf
     let ndf: f32 = normal_distribution_ggx(n, h, roughness);
-    crate::println!("    ndf: {ndf:?}");
+    my_println!("    ndf: {ndf:?}");
     let g: f32 = geometry_smith(n, v, l, roughness);
-    crate::println!("    g: {g:?}");
+    my_println!("    g: {g:?}");
     let f: Vec3 = fresnel_schlick(h.dot(v).max(0.0), f0);
-    crate::println!("    f: {f:?}");
+    my_println!("    f: {f:?}");
 
     let k_s = f;
     let k_d = (Vec3::splat(1.0) - k_s) * (1.0 - metalness);
-    crate::println!("    k_s: {k_s:?}");
+    my_println!("    k_s: {k_s:?}");
 
     let numerator: Vec3 = ndf * g * f;
-    crate::println!("    numerator: {numerator:?}");
+    my_println!("    numerator: {numerator:?}");
     let n_dot_l = n.dot(l).max(0.0);
-    crate::println!("    n_dot_l: {n_dot_l:?}");
+    my_println!("    n_dot_l: {n_dot_l:?}");
     let denominator: f32 = 4.0 * n.dot(v).max(0.0) * n_dot_l + 0.0001;
-    crate::println!("    denominator: {denominator:?}");
+    my_println!("    denominator: {denominator:?}");
     let specular: Vec3 = numerator / denominator;
-    crate::println!("    specular: {specular:?}");
+    my_println!("    specular: {specular:?}");
 
     (k_d * albedo / core::f32::consts::PI + specular) * radiance * n_dot_l
 }
@@ -229,20 +236,135 @@ pub fn sample_brdf<T: Sample2d<Sampler = S>, S: IsSampler>(
         .xy()
 }
 
+/// Holds PBR configuration info.
+#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
+#[derive(Clone, Copy, PartialEq, SlabItem)]
+pub struct PbrConfig {
+    pub atlas_size: glam::UVec2,
+    pub debug_mode: debug::DebugMode,
+    pub has_lighting: bool,
+    pub light_array: Array<light::Light>,
+}
+
+impl Default for PbrConfig {
+    fn default() -> Self {
+        Self {
+            atlas_size: Default::default(),
+            debug_mode: Default::default(),
+            has_lighting: true,
+            light_array: Default::default(),
+        }
+    }
+}
+
+/// Returns the `Material` from the stage's slab.
+pub fn get_material(material_index: u32, has_lighting: bool, slab: &[u32]) -> Material {
+    if material_index == ID_NONE {
+        // without an explicit material (or if the entire render has no lighting)
+        // the entity will not participate in any lighting calculations
+        Material {
+            has_lighting: false,
+            ..Default::default()
+        }
+    } else {
+        let mut material = slab.read(Id::<Material>::new(material_index));
+        if !has_lighting {
+            material.has_lighting = false;
+        }
+        material
+    }
+}
+
+pub fn texture_color<T: Sample2d<Sampler = S>, S: IsSampler>(
+    texture_id: Id<GpuTexture>,
+    uv: Vec2,
+    atlas: &T,
+    sampler: &S,
+    atlas_size: glam::UVec2,
+    slab: &[u32],
+) -> Vec4 {
+    let texture = slab.read(texture_id);
+    let uv = texture.uv(uv, atlas_size);
+    let mut color: Vec4 = atlas.sample_by_lod(*sampler, uv, 0.0);
+    if texture_id.is_none() {
+        color = Vec4::splat(1.0);
+    }
+    color
+}
+
+/// PBR fragment shader.
 #[allow(clippy::too_many_arguments)]
-/// Scene fragment shader.
-pub fn fragment<T, C, S>(
+#[spirv(fragment)]
+pub fn pbr_fragment(
+    #[spirv(descriptor_set = 1, binding = 0)] atlas: &Image2d,
+    #[spirv(descriptor_set = 1, binding = 1)] atlas_sampler: &Sampler,
+
+    #[spirv(descriptor_set = 1, binding = 2)] irradiance: &Cubemap,
+    #[spirv(descriptor_set = 1, binding = 3)] irradiance_sampler: &Sampler,
+
+    #[spirv(descriptor_set = 1, binding = 4)] prefiltered: &Cubemap,
+    #[spirv(descriptor_set = 1, binding = 5)] prefiltered_sampler: &Sampler,
+
+    #[spirv(descriptor_set = 1, binding = 6)] brdf: &Image2d,
+    #[spirv(descriptor_set = 1, binding = 7)] brdf_sampler: &Sampler,
+
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] slab: &[u32],
+
+    #[spirv(flat)] in_pbr_config: Id<PbrConfig>,
+    #[spirv(flat)] in_camera: u32,
+    #[spirv(flat)] in_material: u32,
+    in_color: Vec4,
+    in_uv0: Vec2,
+    in_uv1: Vec2,
+    in_norm: Vec3,
+    in_tangent: Vec3,
+    in_bitangent: Vec3,
+    in_pos: Vec3,
+
+    output: &mut Vec4,
+) {
+    fragment_impl(
+        atlas,
+        atlas_sampler,
+        irradiance,
+        irradiance_sampler,
+        prefiltered,
+        prefiltered_sampler,
+        brdf,
+        brdf_sampler,
+        slab,
+        in_pbr_config,
+        in_camera,
+        in_material,
+        in_color,
+        in_uv0,
+        in_uv1,
+        in_norm,
+        in_tangent,
+        in_bitangent,
+        in_pos,
+        output,
+    )
+}
+
+/// PBR fragment shader capable of being run on CPU or GPU.
+#[allow(clippy::too_many_arguments)]
+pub fn fragment_impl<T, C, S>(
     atlas: &T,
     atlas_sampler: &S,
+
     irradiance: &C,
     irradiance_sampler: &S,
+
     prefiltered: &C,
     prefiltered_sampler: &S,
+
     brdf: &T,
     brdf_sampler: &S,
 
     slab: &[u32],
 
+    in_pbr_config: Id<PbrConfig>,
     in_camera: u32,
     in_material: u32,
     in_color: Vec4,
@@ -259,25 +381,25 @@ pub fn fragment<T, C, S>(
     C: SampleCube<Sampler = S>,
     S: IsSampler,
 {
-    let legend = crate::stage::get_stage_legend(slab);
-    crate::println!("legend: {:?}", legend);
-    let crate::stage::StageLegend {
+    let pbr = slab.read(in_pbr_config);
+    my_println!("pbr: {:?}", pbr);
+    let PbrConfig {
         atlas_size,
+
         debug_mode,
-        has_skybox: _,
         has_lighting,
         light_array,
-    } = legend;
+    } = pbr;
 
-    let material = crate::stage::get_material(in_material, has_lighting, slab);
-    crate::println!("material: {:?}", material);
+    let material = get_material(in_material, has_lighting, slab);
+    my_println!("material: {:?}", material);
 
     let albedo_tex_uv = if material.albedo_tex_coord == 0 {
         in_uv0
     } else {
         in_uv1
     };
-    let albedo_tex_color = crate::stage::texture_color(
+    let albedo_tex_color = texture_color(
         material.albedo_texture,
         albedo_tex_uv,
         atlas,
@@ -285,14 +407,14 @@ pub fn fragment<T, C, S>(
         atlas_size,
         slab,
     );
-    crate::println!("albedo_tex_color: {:?}", albedo_tex_color);
+    my_println!("albedo_tex_color: {:?}", albedo_tex_color);
 
     let metallic_roughness_uv = if material.metallic_roughness_tex_coord == 0 {
         in_uv0
     } else {
         in_uv1
     };
-    let metallic_roughness_tex_color = crate::stage::texture_color(
+    let metallic_roughness_tex_color = texture_color(
         material.metallic_roughness_texture,
         metallic_roughness_uv,
         atlas,
@@ -300,7 +422,7 @@ pub fn fragment<T, C, S>(
         atlas_size,
         slab,
     );
-    crate::println!(
+    my_println!(
         "metallic_roughness_tex_color: {:?}",
         metallic_roughness_tex_color
     );
@@ -310,7 +432,7 @@ pub fn fragment<T, C, S>(
     } else {
         in_uv1
     };
-    let normal_tex_color = crate::stage::texture_color(
+    let normal_tex_color = texture_color(
         material.normal_texture,
         normal_tex_uv,
         atlas,
@@ -318,14 +440,14 @@ pub fn fragment<T, C, S>(
         atlas_size,
         slab,
     );
-    crate::println!("normal_tex_color: {:?}", normal_tex_color);
+    my_println!("normal_tex_color: {:?}", normal_tex_color);
 
     let ao_tex_uv = if material.ao_tex_coord == 0 {
         in_uv0
     } else {
         in_uv1
     };
-    let ao_tex_color = crate::stage::texture_color(
+    let ao_tex_color = texture_color(
         material.ao_texture,
         ao_tex_uv,
         atlas,
@@ -339,7 +461,7 @@ pub fn fragment<T, C, S>(
     } else {
         in_uv1
     };
-    let emissive_tex_color = crate::stage::texture_color(
+    let emissive_tex_color = texture_color(
         material.emissive_texture,
         emissive_tex_uv,
         atlas,
@@ -370,10 +492,10 @@ pub fn fragment<T, C, S>(
     let metallic = metallic_roughness_tex_color.z * material.metallic_factor;
     let ao = 1.0 + material.ao_strength * (ao_tex_color.x - 1.0);
     let emissive =
-        emissive_tex_color.xyz() * material.emissive_factor.xyz() * material.emissive_factor.w;
-    let irradiance = crate::pbr::sample_irradiance(irradiance, irradiance_sampler, n);
+        emissive_tex_color.xyz() * material.emissive_factor * material.emissive_strength_multiplier;
+    let irradiance = sample_irradiance(irradiance, irradiance_sampler, n);
     let camera = slab.read(Id::<Camera>::new(in_camera));
-    let specular = crate::pbr::sample_specular_reflection(
+    let specular = sample_specular_reflection(
         prefiltered,
         prefiltered_sampler,
         camera.position,
@@ -381,88 +503,88 @@ pub fn fragment<T, C, S>(
         n,
         roughness,
     );
-    let brdf = crate::pbr::sample_brdf(brdf, brdf_sampler, camera.position, in_pos, n, roughness);
+    let brdf = sample_brdf(brdf, brdf_sampler, camera.position, in_pos, n, roughness);
 
     fn colorize(u: Vec3) -> Vec4 {
         ((u.alt_norm_or_zero() + Vec3::splat(1.0)) / 2.0).extend(1.0)
     }
 
-    match debug_mode.into() {
-        DebugChannel::None => {}
-        DebugChannel::UvCoords0 => {
+    match debug_mode {
+        DebugMode::None => {}
+        DebugMode::UvCoords0 => {
             *output = colorize(Vec3::new(in_uv0.x, in_uv0.y, 0.0));
             return;
         }
-        DebugChannel::UvCoords1 => {
+        DebugMode::UvCoords1 => {
             *output = colorize(Vec3::new(in_uv1.x, in_uv1.y, 0.0));
             return;
         }
-        DebugChannel::Normals => {
+        DebugMode::Normals => {
             *output = colorize(norm);
             return;
         }
-        DebugChannel::VertexColor => {
+        DebugMode::VertexColor => {
             *output = in_color;
             return;
         }
-        DebugChannel::VertexNormals => {
+        DebugMode::VertexNormals => {
             *output = colorize(in_norm);
             return;
         }
-        DebugChannel::UvNormals => {
+        DebugMode::UvNormals => {
             *output = colorize(uv_norm);
             return;
         }
-        DebugChannel::Tangents => {
+        DebugMode::Tangents => {
             *output = colorize(in_tangent);
             return;
         }
-        DebugChannel::Bitangents => {
+        DebugMode::Bitangents => {
             *output = colorize(in_bitangent);
             return;
         }
-        DebugChannel::DiffuseIrradiance => {
+        DebugMode::DiffuseIrradiance => {
             *output = irradiance.extend(1.0);
             return;
         }
-        DebugChannel::SpecularReflection => {
+        DebugMode::SpecularReflection => {
             *output = specular.extend(1.0);
             return;
         }
-        DebugChannel::Brdf => {
+        DebugMode::Brdf => {
             *output = brdf.extend(1.0).extend(1.0);
             return;
         }
-        DebugChannel::Roughness => {
+        DebugMode::Roughness => {
             *output = Vec3::splat(roughness).extend(1.0);
             return;
         }
-        DebugChannel::Metallic => {
+        DebugMode::Metallic => {
             *output = Vec3::splat(metallic).extend(1.0);
             return;
         }
-        DebugChannel::Albedo => {
+        DebugMode::Albedo => {
             *output = albedo;
             return;
         }
-        DebugChannel::Occlusion => {
+        DebugMode::Occlusion => {
             *output = Vec3::splat(ao).extend(1.0);
             return;
         }
-        DebugChannel::Emissive => {
+        DebugMode::Emissive => {
             *output = emissive.extend(1.0);
             return;
         }
-        DebugChannel::UvEmissive => {
+        DebugMode::UvEmissive => {
             *output = emissive_tex_color.xyz().extend(1.0);
             return;
         }
-        DebugChannel::EmissiveFactor => {
-            *output = material.emissive_factor.xyz().extend(1.0);
+        DebugMode::EmissiveFactor => {
+            *output = material.emissive_factor.extend(1.0);
             return;
         }
-        DebugChannel::EmissiveStrength => {
-            *output = Vec3::splat(material.emissive_factor.w).extend(1.0);
+        DebugMode::EmissiveStrength => {
+            *output = Vec3::splat(material.emissive_strength_multiplier).extend(1.0);
             return;
         }
     }
@@ -506,14 +628,14 @@ pub fn shade_fragment(
     prefiltered: Vec3,
     brdf: Vec2,
 
-    lights: Array<crate::stage::light::Light>,
+    lights: Array<Light>,
     slab: &[u32],
 ) -> Vec4 {
     let n = in_norm.alt_norm_or_zero();
     let v = (camera_pos - in_pos).alt_norm_or_zero();
-    crate::println!("lights: {lights:?}");
-    crate::println!("n: {n:?}");
-    crate::println!("v: {v:?}");
+    my_println!("lights: {lights:?}");
+    my_println!("n: {n:?}");
+    my_println!("v: {v:?}");
     // reflectance
     let mut lo = Vec3::ZERO;
     for i in 0..lights.len() {
@@ -571,9 +693,9 @@ pub fn shade_fragment(
                 let dir_light = slab.read(light.into_directional_id());
                 let l = -dir_light.direction.alt_norm_or_zero();
                 let attenuation = dir_light.intensity;
-                crate::println!("dir_light: {dir_light:?}");
-                crate::println!("l: {l:?}");
-                crate::println!("attenuation: {attenuation:?}");
+                my_println!("dir_light: {dir_light:?}");
+                my_println!("l: {l:?}");
+                my_println!("attenuation: {attenuation:?}");
                 let radiance = outgoing_radiance(
                     dir_light.color,
                     albedo,
@@ -584,13 +706,13 @@ pub fn shade_fragment(
                     metallic,
                     roughness,
                 );
-                crate::println!("radiance: {radiance:?}");
+                my_println!("radiance: {radiance:?}");
                 lo += radiance;
             }
         }
     }
 
-    crate::println!("lo: {lo:?}");
+    my_println!("lo: {lo:?}");
     // calculate reflectance at normal incidence; if dia-electric (like plastic) use
     // F0 of 0.04 and if it's a metal, use the albedo color as F0 (metallic
     // workflow)

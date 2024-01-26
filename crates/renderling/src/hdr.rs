@@ -3,11 +3,10 @@
 //! Also includes bloom effect.
 use crabslab::{CpuSlab, Slab, SlabItem, WgpuBuffer};
 use moongraph::*;
-use renderling_shader::tonemapping::TonemapConstants;
 
 use crate::{
-    frame::FrameTextureView, math::Vec4, BackgroundColor, DepthTexture, Device, Queue,
-    RenderTarget, ScreenSize, WgpuStateError,
+    frame::FrameTextureView, math::Vec4, tonemapping::TonemapConstants, BackgroundColor,
+    DepthTexture, Device, Queue, RenderTarget, ScreenSize, WgpuStateError,
 };
 
 /// A texture, tonemapping pipeline and uniform used for high dynamic range
@@ -154,10 +153,8 @@ pub fn create_hdr_render_surface(
     };
     let hdr_texture = HdrSurface::create_texture(&device, &queue, size.width, size.height);
     let label = Some("hdr tonemapping");
-    let vertex_shader =
-        device.create_shader_module(wgpu::include_spirv!("linkage/tonemapping-vertex.spv"));
-    let fragment_shader =
-        device.create_shader_module(wgpu::include_spirv!("linkage/tonemapping-fragment.spv"));
+    let vertex_linkage = crate::linkage::tonemapping__vertex(&device);
+    let fragment_linkage = crate::linkage::tonemapping__fragment(&device);
     let hdr_layout = bindgroup_layout(&device, Some("hdr tonemapping"));
     let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label,
@@ -168,8 +165,8 @@ pub fn create_hdr_render_surface(
         label,
         layout: Some(&layout),
         vertex: wgpu::VertexState {
-            module: &vertex_shader,
-            entry_point: "tonemapping::vertex",
+            module: &vertex_linkage.module,
+            entry_point: vertex_linkage.entry_point,
             buffers: &[],
         },
         primitive: wgpu::PrimitiveState {
@@ -183,8 +180,8 @@ pub fn create_hdr_render_surface(
         },
         depth_stencil: None,
         fragment: Some(wgpu::FragmentState {
-            module: &fragment_shader,
-            entry_point: "tonemapping::fragment",
+            module: &fragment_linkage.module,
+            entry_point: fragment_linkage.entry_point,
             targets: &[Some(wgpu::ColorTargetState {
                 format: target.format().add_srgb_suffix(),
                 blend: Some(wgpu::BlendState::ALPHA_BLENDING),
@@ -202,6 +199,8 @@ pub fn create_hdr_render_surface(
         slab,
     },))
 }
+
+// TODO: create a "node"  or "render_graph" module and put all the graph nodes in it
 
 /// Conduct a clear pass on the window surface, the hdr surface and the depth
 /// texture.

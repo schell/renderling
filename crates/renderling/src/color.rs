@@ -1,4 +1,6 @@
-//! Color utils.
+//! Color utils.#[cfg(target_arch = "spirv")]
+#[allow(unused_imports)]
+use spirv_std::num_traits::Float;
 
 pub fn linear_xfer_u8(c: &mut u8) {
     *c = ((*c as f32 / 255.0).powf(2.2) * 255.0) as u8;

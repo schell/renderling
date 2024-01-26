@@ -3,12 +3,11 @@ use crabslab::SlabItem;
 
 /// Used to debug shaders by early exiting the shader and attempting to display
 /// the value as shaded colors.
-// TODO: Change DebugChannel to DebugMode and remove the previous DebugMode.
-#[repr(u32)]
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
-#[derive(Clone, Copy, PartialEq, PartialOrd)]
-pub enum DebugChannel {
-    /// aoeusntahoeunsth
+#[repr(u32)]
+#[derive(Clone, Copy, Default, PartialEq, PartialOrd, SlabItem)]
+pub enum DebugMode {
+    #[default]
     None,
 
     /// Displays the first set of UV coordinates as a color.
@@ -71,64 +70,4 @@ pub enum DebugChannel {
     /// Displays only the emissive strength of the fragment
     /// (KHR_materials_emissive_strength).
     EmissiveStrength,
-}
-
-impl DebugChannel {
-    pub fn all() -> [Self; 20] {
-        [
-            Self::None,
-            Self::UvCoords0,
-            Self::UvCoords1,
-            Self::VertexColor,
-            Self::Normals,
-            Self::VertexNormals,
-            Self::UvNormals,
-            Self::Tangents,
-            Self::Bitangents,
-            Self::Albedo,
-            Self::Roughness,
-            Self::Metallic,
-            Self::DiffuseIrradiance,
-            Self::SpecularReflection,
-            Self::Brdf,
-            Self::Occlusion,
-            Self::Emissive,
-            Self::UvEmissive,
-            Self::EmissiveFactor,
-            Self::EmissiveStrength,
-        ]
-    }
-}
-
-/// Used to debug shaders by displaying different colors.
-///
-/// Create one using `DebugChannel::into`.
-#[repr(transparent)]
-#[derive(Default, Clone, Copy, PartialEq, Eq, SlabItem)]
-pub struct DebugMode(u32);
-
-impl core::fmt::Debug for DebugMode {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_tuple("DebugMode").field(&self.0).finish()
-    }
-}
-
-impl From<DebugChannel> for DebugMode {
-    fn from(value: DebugChannel) -> Self {
-        DebugMode(value as u32)
-    }
-}
-
-impl From<DebugMode> for DebugChannel {
-    fn from(value: DebugMode) -> DebugChannel {
-        let all = DebugChannel::all();
-        #[allow(clippy::needless_range_loop)]
-        for i in 0..all.len() {
-            let channel = all[i];
-            if channel as u32 == value.0 {
-                return channel;
-            }
-        }
-        unreachable!()
-    }
 }
