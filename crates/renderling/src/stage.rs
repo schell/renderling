@@ -176,7 +176,7 @@ pub enum Rendering {
     /// Render the scene using the gltf vertex and fragment shaders.
     Gltf(Id<crate::gltf::GltfRendering>),
     /// Render the scene using the sdf vertex and fragment shaders.
-    Sdf(Id<crate::sdf::Sdf>),
+    Sdf(Id<crate::sdf::Scene>),
 }
 
 /// Uber vertex shader.

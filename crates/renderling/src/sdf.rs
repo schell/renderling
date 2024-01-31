@@ -9,7 +9,7 @@ use crate::math::Float;
 
 use crate::{
     math::{self, IsVector},
-    Camera, Transform,
+    Camera,
 };
 use spirv_std::spirv;
 
@@ -45,6 +45,10 @@ impl Sphere {
     pub fn distance(&self, position: Vec3) -> f32 {
         position.length() - self.radius
     }
+
+    pub fn closest_point(&self, position: Vec3) -> Vec3 {
+        position.normalize() * self.radius
+    }
 }
 
 #[derive(Clone, Copy, SlabItem)]
@@ -73,6 +77,20 @@ impl Line {
         let ba = b - a;
         let h = math::clamp(pa.dot(ba) / ba.dot(ba), 0.0, 1.0);
         (pa - ba * h).length() - self.thickness * 0.5
+    }
+
+    /// Returns the closest point on the line to the given position.
+    pub fn closest_point(&self, position: Vec3) -> Vec3 {
+        let p = position;
+        let a = self.start;
+        let b = self.end;
+        let ap = p - a;
+        let ab = b - a;
+        let h = math::clamp(ap.dot(ab) / ab.dot(ab), 0.0, 1.0);
+        // c = point on line closest to p
+        let c = a + ab * h;
+        let d = (p - c).alt_norm_or_zero();
+        c + d * self.thickness * 0.5
     }
 }
 
@@ -308,70 +326,137 @@ impl Cuboid {
     }
 }
 
-#[derive(Default, Debug, Clone, Copy, SlabItem)]
-pub enum SdfShape {
+#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
+#[derive(Default, Clone, Copy, SlabItem)]
+pub struct Translated {
+    pub shape: Id<SdfShape>,
+    pub translation: Vec3,
+}
+
+#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
+#[derive(Default, Clone, Copy, SlabItem)]
+#[repr(u32)]
+pub enum ShapeType {
     #[default]
     None,
-    Sphere(Id<Sphere>),
-    Cuboid(Id<Cuboid>),
-    Line(Id<Line>),
-    Bezier(Id<Bezier>),
-    Path(Id<Path>),
+    Sphere,
+    Cuboid,
+    Line,
+    Bezier,
+    Path,
+    Translated,
+}
+
+#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
+#[derive(Default, Clone, Copy, SlabItem)]
+pub struct SdfShape {
+    pub shape_type: ShapeType,
+    pub shape_id: u32,
 }
 
 impl SdfShape {
-    pub fn distance(&self, position: Vec3, slab: &[u32]) -> f32 {
-        match self {
-            Self::None => 0.0,
-            Self::Sphere(id) => {
-                let circle = slab.read(*id);
-                circle.distance(position)
-            }
-            Self::Line(id) => {
-                let line = slab.read(*id);
-                line.distance(position)
-            }
-            Self::Bezier(id) => {
-                let bez = slab.read(*id);
-                bez.distance(position)
-            }
-            Self::Cuboid(id) => {
-                let rectangle = slab.read(*id);
-                rectangle.distance(position)
-            }
-            Self::Path(id) => {
-                let path = slab.read(*id);
-                path.distance(position, slab)
-            }
+    pub fn from_sphere(id: Id<Sphere>) -> Self {
+        Self {
+            shape_type: ShapeType::Sphere,
+            shape_id: id.inner(),
+        }
+    }
+
+    pub fn from_cuboid(id: Id<Cuboid>) -> Self {
+        Self {
+            shape_type: ShapeType::Cuboid,
+            shape_id: id.inner(),
+        }
+    }
+
+    pub fn from_line(id: Id<Line>) -> Self {
+        Self {
+            shape_type: ShapeType::Line,
+            shape_id: id.inner(),
+        }
+    }
+
+    pub fn from_bezier(id: Id<Bezier>) -> Self {
+        Self {
+            shape_type: ShapeType::Bezier,
+            shape_id: id.inner(),
+        }
+    }
+
+    pub fn from_path(id: Id<Path>) -> Self {
+        Self {
+            shape_type: ShapeType::Path,
+            shape_id: id.inner(),
+        }
+    }
+
+    pub fn from_translated(id: Id<Translated>) -> Self {
+        Self {
+            shape_type: ShapeType::Translated,
+            shape_id: id.inner(),
+        }
+    }
+
+    pub fn distance(&self, mut position: Vec3, slab: &[u32]) -> f32 {
+        let mut shape = *self;
+        loop {
+            match shape.shape_type {
+                ShapeType::None => return 0.0,
+                ShapeType::Sphere => {
+                    let circle = slab.read(Id::<Sphere>::from(shape.shape_id));
+                    return circle.distance(position);
+                }
+                ShapeType::Line => {
+                    let id = Id::<Line>::from(shape.shape_id);
+                    let line = slab.read(id);
+                    return line.distance(position);
+                }
+                ShapeType::Bezier => {
+                    let id = Id::<Bezier>::from(shape.shape_id);
+                    let bez = slab.read(id);
+                    return bez.distance(position);
+                }
+                ShapeType::Cuboid => {
+                    let id = Id::<Cuboid>::from(shape.shape_id);
+                    let rectangle = slab.read(id);
+                    return rectangle.distance(position);
+                }
+                ShapeType::Path => {
+                    let id = Id::<Path>::from(shape.shape_id);
+                    let path = slab.read(id);
+                    return path.distance(position, slab);
+                }
+                ShapeType::Translated => {
+                    let id = Id::<Translated>::from(shape.shape_id);
+                    let translated = slab.read(id);
+                    shape = slab.read(translated.shape);
+                    position -= translated.translation;
+                    continue;
+                }
+            };
         }
     }
 }
 
 #[derive(Default, Clone, Copy, SlabItem)]
-pub struct Sdf {
-    pub shape: SdfShape,
-    pub transform: Transform,
-    pub material: u32, // likely an Id<pbr::Material>
+pub struct Scene {
+    pub shapes: Array<SdfShape>,
     pub camera: Id<Camera>,
 }
 
-impl Sdf {
+impl Scene {
     pub const fn vertex_count(&self) -> u32 {
-        match self.shape {
-            SdfShape::None => 0,
-            _ => 6,
-        }
+        6
     }
 
     pub fn distance(&self, position: Vec3, slab: &[u32]) -> f32 {
-        self.shape.distance(position, slab)
+        let mut distance = f32::MAX;
+        for id in self.shapes.iter() {
+            let shape = slab.read(id);
+            distance = shape.distance(position, slab).min(distance);
+        }
+        distance
     }
-}
-
-pub fn antialias_distance(distance: f32) -> f32 {
-    let distance_change = spirv_std::arch::fwidth(distance);
-    let opacity = math::smoothstep(distance_change, -distance_change, distance);
-    opacity
 }
 
 #[derive(Clone, Copy, SlabItem)]
@@ -495,7 +580,7 @@ mod test {
     fn sdf_circle() {
         let mut r = SdfRenderer::new(256, 256);
         let circle_id = r.slab.append(&Sphere { radius: 1.0 });
-        let _ = r.set_shape(SdfShape::Sphere(circle_id));
+        let _ = r.set_shape(SdfShape::from_sphere(circle_id));
         let img = r.render_image();
         img_diff::assert_img_eq("sdf/circle.png", img);
     }
@@ -509,7 +594,7 @@ mod test {
             thickness: 0.2,
         };
         let line_id = r.slab.append(&line);
-        let _ = r.set_shape(SdfShape::Line(line_id));
+        let _ = r.set_shape(SdfShape::from_line(line_id));
         let img = r.render_image();
         img_diff::assert_img_eq("sdf/line.png", img);
     }
@@ -532,7 +617,7 @@ mod test {
         let rect_id = r.slab.append(&Cuboid {
             size: Vec3::new(1.4, 0.8, 1.0),
         });
-        let _ = r.set_shape(SdfShape::Cuboid(rect_id));
+        let _ = r.set_shape(SdfShape::from_cuboid(rect_id));
         let img = r.render_image();
         img_diff::assert_img_eq("sdf/rect.png", img);
     }
@@ -554,7 +639,7 @@ mod test {
             end: v2,
             thickness: 0.2,
         });
-        let _ = r.set_shape(SdfShape::Bezier(bez_id));
+        let _ = r.set_shape(SdfShape::from_bezier(bez_id));
         let img = r.render_image();
         img_diff::assert_img_eq("sdf/bez.png", img);
     }
@@ -594,7 +679,7 @@ mod test {
             filled: true,
         };
         let path_id = r.slab.append(&path);
-        let _ = r.set_shape(SdfShape::Path(path_id));
+        let _ = r.set_shape(SdfShape::from_path(path_id));
 
         let position = Vec2::new(166.0, 73.0);
         let position = position / 256.0; // now x and y are between [0, 1]
@@ -640,7 +725,7 @@ mod test {
             filled: true,
         };
         let path_id = r.slab.append(&path);
-        let _ = r.set_shape(SdfShape::Path(path_id));
+        let _ = r.set_shape(SdfShape::from_path(path_id));
 
         let position = Vec2::new(166.0, 73.0);
         let position = position / 256.0; // now x and y are between [0, 1]
@@ -692,7 +777,7 @@ mod test {
             filled: true,
         };
         let path_id = r.slab.append(&path);
-        let _ = r.set_shape(SdfShape::Path(path_id));
+        let _ = r.set_shape(SdfShape::from_path(path_id));
 
         let img = r.render_image();
         img_diff::assert_img_eq("sdf/filled_bez_path_holes_thickness_0.png", img);
@@ -776,7 +861,7 @@ mod test {
                     });
                     *last = p;
                     items.push(PathItem::Line(line_id));
-                    Some(SdfShape::Line(line_id))
+                    Some(SdfShape::from_line(line_id))
                 }
 
                 let shapes = self
@@ -805,7 +890,7 @@ mod test {
                                     let bez_id = r.slab.append(&bez);
                                     last = c;
                                     items.push(PathItem::Bezier(bez_id));
-                                    Some(SdfShape::Bezier(bez_id))
+                                    Some(SdfShape::from_bezier(bez_id))
                                 }
                             }
                             Outline::CubicTo(_, _, _) => {
@@ -819,7 +904,7 @@ mod test {
                                 });
                                 start = None;
                                 items.push(PathItem::Line(line_id));
-                                Some(SdfShape::Line(line_id))
+                                Some(SdfShape::from_line(line_id))
                             }
                         };
                         if start.is_none() && !matches!(item, Outline::Close) {
@@ -883,7 +968,7 @@ mod test {
             let mut builder = Builder::new(&face);
             if let Some(_) = face.outline_glyph(glyph_index, &mut builder) {
                 let outline = builder.build(&mut r);
-                r.set_shape(SdfShape::Path(outline.path_id));
+                r.set_shape(SdfShape::from_path(outline.path_id));
 
                 let img = r.render_image();
                 let filename = format!("{c}")
@@ -905,5 +990,36 @@ mod test {
                 //}
             }
         }
+    }
+
+    #[test]
+    fn sdf_sanity_closest_point() {
+        let sphere = Sphere { radius: 3.2 };
+        let point = Vec3::new(1.0, 2.0, 3.0);
+        let closest_point = sphere.closest_point(point);
+        assert_eq!(0.0, sphere.distance(closest_point));
+        let distance = sphere.distance(point);
+        assert_approx_eq::assert_approx_eq!((point - closest_point).length(), distance, 1e-6);
+
+        let line = Line {
+            start: Vec3::new(-1.0, 0.0, 0.0),
+            end: Vec3::new(1.0, 0.0, 0.0),
+            thickness: 0.0,
+        };
+        let point = Vec3::new(0.0, 1.0, 0.0);
+        let closest_point = line.closest_point(point);
+        assert_eq!(Vec3::new(0.0, 0.0, 0.0), closest_point);
+
+        let line = Line {
+            start: Vec3::new(1.0, 2.0, 0.0),
+            end: Vec3::new(4.0, 4.0, 0.0),
+            thickness: 0.0,
+        };
+        let point = Vec3::new(2.0, 5.0, 0.0);
+        let closest_point = sphere.closest_point(point);
+        println!("closest_point: {:?}", closest_point);
+        assert_eq!(0.0, line.distance(closest_point));
+        let distance = line.distance(point);
+        assert_approx_eq::assert_approx_eq!((point - closest_point).length(), distance, 1e-6);
     }
 }

@@ -1,5 +1,202 @@
 # devlog
 
+## Tue Jan 27, 2024
+
+### Raymarching!
+
+Raymarching is totally cool and fun. I'm trying to set up an AST of SDF types but I'm
+really battling the compile times. I have a theory that recursive enums slow down
+compilation like crazy. Here's an example of my AST:
+
+```rust
+#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
+#[derive(Default, Clone, Copy, SlabItem)]
+pub struct Translated {
+    pub shape: Id<SdfShape>,
+    pub translation: Vec3,
+}
+
+#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
+#[derive(Default, Clone, Copy, SlabItem)]
+pub enum SdfShape {
+    #[default]
+    None,
+    Sphere(Id<Sphere>),
+    Cuboid(Id<Cuboid>),
+    Line(Id<Line>),
+    Bezier(Id<Bezier>),
+    Path(Id<Path>),
+    Translated(Id<Translated>),
+}
+
+impl SdfShape {
+    pub fn distance(&self, mut position: Vec3, slab: &[u32]) -> f32 {
+        let mut shape = *self;
+        loop {
+            match shape {
+                Self::None => return 0.0,
+                Self::Sphere(id) => {
+                    let circle = slab.read(id);
+                    return circle.distance(position);
+                }
+                Self::Line(id) => {
+                    let line = slab.read(id);
+                    return line.distance(position);
+                }
+                Self::Bezier(id) => {
+                    let bez = slab.read(id);
+                    return bez.distance(position);
+                }
+                Self::Cuboid(id) => {
+                    let rectangle = slab.read(id);
+                    return rectangle.distance(position);
+                }
+                Self::Path(id) => {
+                    let path = slab.read(id);
+                    return path.distance(position, slab);
+                }
+                Self::Translated(id) => {
+                    let translated = slab.read(id);
+                    shape = slab.read(translated.shape);
+                    position -= translated.translation;
+                    continue;
+                }
+            };
+        }
+    }
+}
+```
+
+The odd loop in `SdfShape::distance` is to avoid recursion. `rust-gpu` already complained about
+that. This version took **2m 01s** to compile. I've seen it as high as **4m**. I'm going to
+rewrite the AST to be a bit trickier and see how/if that helps.
+
+If I change to this representation:
+```rust
+#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
+#[derive(Default, Clone, Copy, SlabItem)]
+pub struct Translated {
+    pub shape: Id<SdfShape>,
+    pub translation: Vec3,
+}
+
+#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
+#[derive(Default, Clone, Copy, SlabItem)]
+#[repr(u32)]
+pub enum ShapeType {
+    #[default]
+    None,
+    Sphere,
+    Cuboid,
+    Line,
+    Bezier,
+    Path,
+    Translated,
+}
+
+#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
+#[derive(Default, Clone, Copy, SlabItem)]
+pub struct SdfShape {
+    pub shape_type: ShapeType,
+    pub shape_id: u32,
+}
+
+impl SdfShape {
+    pub fn from_sphere(id: Id<Sphere>) -> Self {
+        Self {
+            shape_type: ShapeType::Sphere,
+            shape_id: id.inner(),
+        }
+    }
+
+    pub fn from_cuboid(id: Id<Cuboid>) -> Self {
+        Self {
+            shape_type: ShapeType::Cuboid,
+            shape_id: id.inner(),
+        }
+    }
+
+    pub fn from_line(id: Id<Line>) -> Self {
+        Self {
+            shape_type: ShapeType::Line,
+            shape_id: id.inner(),
+        }
+    }
+
+    pub fn from_bezier(id: Id<Bezier>) -> Self {
+        Self {
+            shape_type: ShapeType::Bezier,
+            shape_id: id.inner(),
+        }
+    }
+
+    pub fn from_path(id: Id<Path>) -> Self {
+        Self {
+            shape_type: ShapeType::Path,
+            shape_id: id.inner(),
+        }
+    }
+
+    pub fn from_translated(id: Id<Translated>) -> Self {
+        Self {
+            shape_type: ShapeType::Translated,
+            shape_id: id.inner(),
+        }
+    }
+
+    pub fn distance(&self, mut position: Vec3, slab: &[u32]) -> f32 {
+        let mut shape = *self;
+        loop {
+            match shape.shape_type {
+                ShapeType::None => return 0.0,
+                ShapeType::Sphere => {
+                    let circle = slab.read(Id::<Sphere>::from(shape.shape_id));
+                    return circle.distance(position);
+                }
+                ShapeType::Line => {
+                    let id = Id::<Line>::from(shape.shape_id);
+                    let line = slab.read(id);
+                    return line.distance(position);
+                }
+                ShapeType::Bezier => {
+                    let id = Id::<Bezier>::from(shape.shape_id);
+                    let bez = slab.read(id);
+                    return bez.distance(position);
+                }
+                ShapeType::Cuboid => {
+                    let id = Id::<Cuboid>::from(shape.shape_id);
+                    let rectangle = slab.read(id);
+                    return rectangle.distance(position);
+                }
+                ShapeType::Path => {
+                    let id = Id::<Path>::from(shape.shape_id);
+                    let path = slab.read(id);
+                    return path.distance(position, slab);
+                }
+                ShapeType::Translated => {
+                    let id = Id::<Translated>::from(shape.shape_id);
+                    let translated = slab.read(id);
+                    shape = slab.read(translated.shape);
+                    position -= translated.translation;
+                    continue;
+                }
+            };
+        }
+    }
+}
+```
+
+It compiles in **1m 37s**. That's an improvement, but it's still too long to be productive.
+
+...le sigh.
+
+### Compile times
+
+I'm going to have to really dig into this soon as the times are just grueling. Here's a log of them:
+
+- `1m 37s`
+- `1m 37s`
+
 ## Tue Jan 23, 2024
 
 I've been extending the use of SDFs. They are now in 3d.

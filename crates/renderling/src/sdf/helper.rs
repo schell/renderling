@@ -142,7 +142,7 @@ impl RaymarchingRenderer {
         }
     }
 
-    fn render(
+    fn render_raymarching(
         id: Id<Raymarch>,
         pipeline: &wgpu::RenderPipeline,
         slab_bindgroup: &wgpu::BindGroup,
@@ -193,7 +193,7 @@ impl RaymarchingRenderer {
                     View<DepthTexture>,
                 )|
                  -> Result<(), GraphError> {
-                    Self::render(
+                    Self::render_raymarching(
                         raymarch,
                         &self.rays_pipeline,
                         &self.slab_bindgroup,
@@ -210,7 +210,7 @@ impl RaymarchingRenderer {
         self.renderling.read_image().unwrap()
     }
 
-    pub fn render_image(&mut self, raymarch: Id<Raymarch>) -> image::RgbaImage {
+    pub fn render(&mut self, raymarch: Id<Raymarch>) {
         self.renderling
             .render_local(
                 |(device, queue, frame, depth_texture): (
@@ -220,7 +220,7 @@ impl RaymarchingRenderer {
                     View<DepthTexture>,
                 )|
                  -> Result<(), GraphError> {
-                    Self::render(
+                    Self::render_raymarching(
                         raymarch,
                         &self.pipeline,
                         &self.slab_bindgroup,
@@ -234,7 +234,27 @@ impl RaymarchingRenderer {
                 },
             )
             .unwrap();
-        self.renderling.read_image().unwrap()
+    }
+
+    pub fn render_image(&mut self, raymarch: Id<Raymarch>) -> image::RgbaImage {
+        let start = std::time::Instant::now();
+        self.render(raymarch);
+        let after_render = std::time::Instant::now();
+        let render_duration = (after_render - start).as_secs_f32();
+        let img = self.renderling.read_image().unwrap();
+        let after_read = std::time::Instant::now();
+        let read_duration = (after_read - after_render).as_secs_f32();
+        let total = (after_read - start).as_secs_f32();
+        println!(
+            "render: {render_duration:?}s {}fps {}%",
+            1.0 / render_duration,
+            render_duration / total * 100.0
+        );
+        println!(
+            "read: {read_duration:?}s {}%",
+            read_duration / total * 100.0
+        );
+        img
     }
 }
 
