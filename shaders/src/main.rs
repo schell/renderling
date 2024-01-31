@@ -22,6 +22,10 @@ struct Cli {
     /// Path to the output directory for the compiled shaders.
     #[clap(long, short, default_value = "../crates/renderling/src/linkage")]
     output_dir: std::path::PathBuf,
+
+    /// If set the shaders will be compiled but not put into place.
+    #[clap(long, short)]
+    dry_run: bool,
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -30,6 +34,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         shader_crate,
         //features,
         output_dir,
+        dry_run,
     } = Cli::parse();
     let level = match verbosity {
         0 => log::LevelFilter::Warn,
@@ -67,24 +72,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             assert!(!modules.is_empty(), "No shader modules to compile");
             for (entry, filepath) in modules.into_iter() {
                 let path = dir.join(filepath.file_name().unwrap());
-                println!(
-                    "copying '{entry}' from {} to {}",
-                    filepath.display(),
-                    path.display()
-                );
-                std::fs::copy(filepath, &path).unwrap();
+                if !dry_run {
+                    std::fs::copy(filepath, &path).unwrap();
+                }
                 shaders.push((entry, path));
             }
         }
         ModuleResult::SingleModule(filepath) => {
             let path = dir.join(filepath.file_name().unwrap());
-            println!(
-                "copying shader from {} to {} for entry points {}",
-                filepath.display(),
-                path.display(),
-                entry_points.join(", ")
-            );
-            std::fs::copy(filepath, &path).unwrap();
+            if !dry_run {
+                std::fs::copy(filepath, &path).unwrap();
+            }
             for entry in entry_points {
                 shaders.push((entry, path.clone()));
             }
@@ -100,8 +98,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         )
     });
     let tokens = prettyplease::unparse(&tokens);
-    println!("\nWriting shaders.rs to {}:\n\n{tokens}", dir.display());
-    std::fs::write(dir.join("shaders.rs"), tokens.to_string()).unwrap();
+    if dry_run {
+        println!("\nNot writing shaders.rs because --dry-run was set.\n");
+    } else {
+        println!("\nWriting shaders.rs to {}", dir.display());
+    };
+    let tokens = tokens.to_string();
+    println!("\n{tokens}");
+    if !dry_run {
+        std::fs::write(dir.join("shaders.rs"), tokens).unwrap();
+    }
 
     Ok(())
 }

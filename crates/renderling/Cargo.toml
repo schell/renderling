@@ -15,7 +15,7 @@ readme = "../../README.md"
 crate-type = ["lib", "dylib"]
 
 [features]
-default = ["gltf", "raw-window-handle", "winit"]
+default = ["raw-window-handle", "winit"]
 gltf = ["dep:gltf"]
 wasm = ["wgpu/fragile-send-sync-non-atomic-wasm"]
 
@@ -67,6 +67,6 @@ ttf-parser = "0.20.0"
 glam = { workspace = true, features = ["std", "debug-glam-assert"] }
 
 
-[[bench]]
-name = "benchmarks"
-harness = false
+# [[bench]]
+# name = "benchmarks"
+# harness = false

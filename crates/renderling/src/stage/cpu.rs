@@ -9,7 +9,7 @@ use std::{
 
 use crate::{
     pbr::{debug::DebugMode, light::Light, PbrConfig},
-    sdf::Sdf,
+    sdf::Scene,
     Atlas, AtlasError, AtlasImage, AtlasImageError, AtlasTexture, Camera, CpuCubemap, DepthTexture,
     Device, HdrSurface, Queue, Skybox, WgpuSlabError,
 };
@@ -397,7 +397,7 @@ impl Stage {
     /// Draw a signed distance field rendering each frame.
     ///
     /// Returns the id of the stored `Sdf` and the id of the [`Rendering`].
-    pub fn draw_sdf_rendering(&mut self, sdf: &Sdf) -> (Id<Sdf>, Id<Rendering>) {
+    pub fn draw_sdf_rendering(&mut self, sdf: &Scene) -> (Id<Scene>, Id<Rendering>) {
         let sdf_id = self.append(sdf);
         let rendering = Rendering::Sdf(sdf_id);
         let id = self.append(&rendering);
@@ -631,11 +631,7 @@ impl Stage {
     /// This is primarily used for debugging.
     pub fn read_slab(&self) -> Result<Vec<u32>, WgpuSlabError> {
         // UNWRAP: if we can't acquire the lock we want to panic.
-        self.slab
-            .read()
-            .unwrap()
-            .as_ref()
-            .block_on_read_raw(0, self.len())
+        self.slab.read().unwrap().as_ref().block_on_read_raw(..)
     }
 
     pub fn new_skybox_from_path(
