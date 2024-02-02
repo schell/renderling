@@ -19,6 +19,7 @@ pub struct Raymarch {
     pub scene: Id<crate::sdf::Scene>,
 }
 
+// TODO: Compute raymarching rays in the raymarching vertex shader
 #[spirv(vertex)]
 pub fn raymarch_vertex(
     #[spirv(vertex_index)] vertex_index: u32,
@@ -59,10 +60,45 @@ fn frag_coord_to_world(frag_coord: Vec3, screen_resolution: Vec2, camera: &Camer
 }
 
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
+#[derive(Clone, Copy, PartialEq)]
+pub struct MarchResult {
+    pub position: Vec3,
+    pub normal: Vec3,
+    pub tangent: Vec3,
+    pub bitangent: Vec3,
+    /// The total distance marched until finding a hit
+    pub distance_marched: f32,
+    /// The minimum step taken during the march
+    pub min_step: f32,
+    /// The total number of steps marched
+    pub step_count: u32,
+    pub hit: bool,
+}
+
+impl Default for MarchResult {
+    fn default() -> Self {
+        MarchResult {
+            position: Vec3::ZERO,
+            normal: Vec3::Z,
+            tangent: Vec3::X,
+            bitangent: Vec3::Y,
+            distance_marched: 0.0,
+            min_step: f32::MAX,
+            step_count: 0,
+            hit: false,
+        }
+    }
+}
+
+#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[derive(Clone, Copy, Default, SlabItem)]
 pub struct Ray {
+    /// Origin of the ray
     pub origin: Vec3,
+    /// Direction of the ray
     pub direction: Vec3,
+    /// Length of the ray (from near to far plane)
+    pub length: f32,
 }
 
 impl Ray {
@@ -73,71 +109,73 @@ impl Ray {
         let frustum_far = frag_coord_to_world(frag_coord.extend(1.0), resolution, camera);
         let vector = frustum_far - frustum_near;
         let direction = vector.alt_norm_or_zero();
+        let length = vector.length();
         Ray {
             origin: frustum_near,
             direction,
+            length,
         }
     }
 
-    pub fn march(&self, scene: &crate::sdf::Scene, slab: &[u32]) -> MarchResult {
-        const MAX_DIST: f32 = 100.0;
-        const MIN_DIST: f32 = 0.001;
-        const NUM_STEPS: u32 = 32;
+    const MAX_STEPS: u32 = 256;
 
-        let mut ray_dist: f32 = 0.0;
-        let mut min_dist: f32 = MIN_DIST;
-        let Ray { origin, direction } = *self;
-        for _ in 0..NUM_STEPS {
-            let current_pos = origin + ray_dist * direction;
-            let current_dist = scene.distance(current_pos, slab);
-            min_dist = min_dist.min(current_dist);
-            if current_dist <= MIN_DIST {
-                let normal = find_normal_by_gradient(current_pos, scene, slab);
-                let (tangent, bitangent) = produce_tangent_and_bitangent(normal);
-                return MarchResult {
-                    position: current_pos,
-                    normal,
-                    tangent,
-                    bitangent,
-                    //total_distance: ray_dist,
-                    //min_distance: min_dist,
-                    hit: true,
-                };
-            } else if current_dist >= MAX_DIST {
+    /// Perform raymarching.
+    pub fn march(
+        &self,
+        scene: &crate::sdf::Scene,
+        slab: &[u32],
+        ray_dx: Ray,
+        ray_dy: Ray,
+    ) -> MarchResult {
+        let mut result = MarchResult::default();
+        let Ray {
+            origin,
+            direction,
+            length: max_dist,
+        } = *self;
+
+        for i in 0..Self::MAX_STEPS {
+            result.step_count = i + 1;
+
+            result.position = origin + result.distance_marched * direction;
+            let current_dist = scene.distance(result.position, slab);
+            // variable minimum distance based on the pixel footprint
+            let min_dist = result
+                .position
+                .distance(ray_dx.origin + result.distance_marched * ray_dx.direction)
+                .min(
+                    result
+                        .position
+                        .distance(ray_dy.origin + result.distance_marched * ray_dy.direction),
+                );
+            if current_dist < min_dist {
+                result.normal = find_normal_by_gradient(result.position, min_dist, scene, slab);
+                let (tangent, bitangent) = produce_tangent_and_bitangent(result.normal);
+                result.tangent = tangent;
+                result.bitangent = bitangent;
+                result.hit = true;
+                break;
+            } else if current_dist >= max_dist {
                 break;
             }
-            ray_dist += current_dist;
+
+            result.distance_marched += current_dist;
+            result.min_step = result.min_step.min(min_dist);
         }
-        MarchResult {
-            position: origin + ray_dist * direction,
-            normal: Vec3::Z,
-            tangent: Vec3::X,
-            bitangent: Vec3::Y,
-            //total_distance: MAX_DIST,
-            //min_distance: min_dist,
-            hit: false,
-        }
+
+        result
     }
 }
 
-#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
-#[derive(Clone, Copy, Default, PartialEq)]
-pub struct MarchResult {
-    pub position: Vec3,
-    pub normal: Vec3,
-    pub tangent: Vec3,
-    pub bitangent: Vec3,
-    //pub total_distance: f32,
-    //pub min_distance: f32,
-    pub hit: bool,
-}
-
-const NORMAL_EPSILON: f32 = 0.0001;
-
-pub fn find_normal_by_gradient(p: Vec3, scene: &crate::sdf::Scene, slab: &[u32]) -> Vec3 {
-    let dx = Vec3::new(NORMAL_EPSILON, 0.0, 0.0);
-    let dy = Vec3::new(0.0, NORMAL_EPSILON, 0.0);
-    let dz = Vec3::new(0.0, 0.0, NORMAL_EPSILON);
+pub fn find_normal_by_gradient(
+    p: Vec3,
+    epsilon: f32,
+    scene: &crate::sdf::Scene,
+    slab: &[u32],
+) -> Vec3 {
+    let dx = Vec3::new(epsilon, 0.0, 0.0);
+    let dy = Vec3::new(0.0, epsilon, 0.0);
+    let dz = Vec3::new(0.0, 0.0, epsilon);
     Vec3::new(
         scene.distance(p + dx, slab) - scene.distance(p - dx, slab),
         scene.distance(p + dy, slab) - scene.distance(p - dy, slab),
@@ -152,15 +190,15 @@ pub fn produce_tangent_and_bitangent(normal: Vec3) -> (Vec3, Vec3) {
     (tangent, bitangent)
 }
 
-pub fn antialias_distance(distance: f32) -> f32 {
+pub fn antialias_distance(_distance: f32) -> f32 {
     #[cfg(not(target_arch = "spirv"))]
     {
         1.0
     }
     #[cfg(target_arch = "spirv")]
     {
-        let distance_change = spirv_std::arch::fwidth(distance);
-        let opacity = math::smoothstep(distance_change, -distance_change, distance);
+        let distance_change = spirv_std::arch::fwidth(_distance);
+        let opacity = math::smoothstep(distance_change, -distance_change, _distance);
         opacity
     }
 }
@@ -178,6 +216,7 @@ pub fn raymarch_rays(
     let Ray {
         origin: _,
         direction,
+        length: _,
     } = Ray::from_fragment(frag_coord.xy(), cfg.screen_resolution, &camera);
     *out_color = direction.extend(1.0);
 }
@@ -205,13 +244,20 @@ pub fn raymarch_fragment(
     let cfg = slab.read(raymarch);
     let scene = slab.read(cfg.scene);
     let camera = slab.read(scene.camera);
-    let ray = Ray::from_fragment(frag_coord.xy(), cfg.screen_resolution, &camera);
-    let background = prefiltered
-        .sample_by_lod(*prefiltered_sampler, ray.direction, 0.0)
-        .xyz();
-    let result = ray.march(&scene, slab);
+    let resolution = cfg.screen_resolution;
+
+    let fragment = frag_coord.xy() + 0.5;
+    let fragment_dx = fragment + Vec2::new(0.5, 0.0);
+    let fragment_dy = fragment + Vec2::new(0.0, 0.5);
+
+    let ray = Ray::from_fragment(fragment, resolution, &camera);
+    let ray_dx = Ray::from_fragment(fragment_dx, resolution, &camera);
+    let ray_dy = Ray::from_fragment(fragment_dy, resolution, &camera);
+
+    let result = ray.march(&scene, slab, ray_dx, ray_dy);
     let mut color = Vec4::ZERO;
     if result.hit {
+        // TODO: use ray differentials (pixel footprint) for anti-aliasing
         crate::pbr::fragment_impl(
             atlas,
             atlas_sampler,
@@ -235,6 +281,9 @@ pub fn raymarch_fragment(
             &mut color,
         );
     } else {
+        let background = prefiltered
+            .sample_by_lod(*prefiltered_sampler, ray.direction, 0.0)
+            .xyz();
         color = background.extend(1.0);
     }
     *out_color = color;
@@ -243,10 +292,10 @@ pub fn raymarch_fragment(
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::{sdf::helper::RaymarchingRenderer, AtlasImage, Skybox};
+    use crate::{sdf::helper::RaymarchingRenderer, AtlasImage, Skybox, Transform};
     use assert_approx_eq::assert_approx_eq;
     use crabslab::GrowableSlab;
-    use glam::{Mat4, Vec3Swizzles};
+    use glam::{Mat4, Quat, Vec3Swizzles};
 
     fn camera(width: f32, height: f32) -> Camera {
         let aspect = width / height;
@@ -308,9 +357,9 @@ mod test {
     }
 
     #[test]
-    fn raymarch_sanity_can_get_ray_origins() {
+    fn raymarch_sanity_ray_from_fragment() {
         // obtain rays along the diagonal of the screen
-        fn diagonal(resolution: Vec2, depth: f32, camera: &Camera) -> [Ray; 3] {
+        fn diagonal(resolution: Vec2, camera: &Camera) -> [Ray; 3] {
             [
                 // top left
                 Ray::from_fragment(Vec2::ZERO, resolution, camera),
@@ -327,7 +376,7 @@ mod test {
             Mat4::perspective_rh(std::f32::consts::FRAC_PI_4, 1.0, 0.1, 100.0),
             Mat4::look_at_rh(Vec3::NEG_Z, Vec3::ZERO, Vec3::Y),
         );
-        let rays = diagonal(resolution, 0.0, &camera);
+        let rays = diagonal(resolution, &camera);
         assert_eq!(
             Vec2::ZERO,
             rays[1].origin.xy(),
@@ -349,12 +398,12 @@ mod test {
             "Perspective top left direction xy is inverse of bottom left direction"
         );
 
-        // ensure orthographic fragments and rays are as expected
+        // ensure orthographic 2d fragments and rays are as expected
         let camera = Camera::new(
             Mat4::orthographic_rh(0.0, 10.0, 10.0, 0.0, 1.0, -1.0),
             Mat4::IDENTITY,
         );
-        let rays = diagonal(resolution, 0.0, &camera);
+        let rays = diagonal(resolution, &camera);
         assert!(
             rays.iter().all(|r| r.direction == Vec3::Z),
             "Orthographic rays are parallel and Z"
@@ -368,6 +417,22 @@ mod test {
         // Orthographic bottom right is 10,10
         assert_approx_eq::assert_approx_eq!(rays[2].origin.x, 10.0, 0.0001);
         assert_approx_eq::assert_approx_eq!(rays[2].origin.y, 10.0, 0.0001);
+
+        // ensure orthographic 3d fragments and rays are as expected
+        let width = 10.0;
+        let height = 10.0;
+        let projection = Mat4::orthographic_rh(
+            -width * 0.5,
+            width * 0.5,
+            -height * 0.5,
+            height * 0.5,
+            -1.0,
+            1.0,
+        );
+        let view = Mat4::look_at_rh(Vec3::new(0.0, 0.0, 3.0), Vec3::ZERO, Vec3::Y);
+        let camera = Camera::new(projection, view);
+        let rays = diagonal(resolution, &camera);
+        assert!(rays.iter().all(|r| r.direction == Vec3::NEG_Z));
     }
 
     #[test]
@@ -472,11 +537,12 @@ mod test {
             width * 0.5,
             -height * 0.5,
             height * 0.5,
-            1.0,
-            -1.0,
+            -height * 0.5,
+            height * 0.5,
         );
-        let view = Mat4::look_at_rh(Vec3::new(0.0, 0.0, 2.0), Vec3::ZERO, Vec3::Y);
+        let view = Mat4::look_at_rh(Vec3::new(0.0, 0.0, 3.0), Vec3::ZERO, Vec3::Y);
         let camera = Camera::new(projection, view);
+
         let camera_id = slab.append(&camera);
         let _default_material = slab.append(&crate::pbr::Material {
             albedo_factor: Vec4::new(1.0, 0.0, 0.0, 1.0),
@@ -493,17 +559,31 @@ mod test {
         };
         let _scene_id = slab.append(&scene);
         let resolution = Vec2::new(width, height);
+
         let middle_fragment = resolution * 0.5;
+
+        let near_point = frag_coord_to_world(middle_fragment.extend(0.0), resolution, &camera);
+        println!("near_point: {near_point}");
+        let far_point = frag_coord_to_world(middle_fragment.extend(1.0), resolution, &camera);
+        println!("far_point: {far_point}");
+
         let ray = Ray::from_fragment(middle_fragment, resolution, &camera);
+        let ray_dx =
+            Ray::from_fragment(middle_fragment + Vec2::new(0.001, 0.0), resolution, &camera);
+        let ray_dy =
+            Ray::from_fragment(middle_fragment + Vec2::new(0.0, 0.001), resolution, &camera);
         println!("ray: {ray:#?}");
-        let result = ray.march(&scene, slab.as_ref());
-        assert_eq!(
+        let result = ray.march(&scene, slab.as_ref(), ray_dx, ray_dy);
+        pretty_assertions::assert_eq!(
             MarchResult {
                 hit: true,
                 position: Vec3::Z,
                 normal: Vec3::Z,
                 tangent: Vec3::NEG_Y,
-                bitangent: Vec3::X
+                bitangent: Vec3::X,
+                distance_marched: 6.5000005,
+                min_step: 0.0009999275,
+                step_count: 2
             },
             result
         );
@@ -550,7 +630,7 @@ mod test {
             ..Default::default()
         });
         let img = r.render_image(raymarch);
-        img_diff::save("raymarch/sphere.png", img);
+        img_diff::assert_img_eq("raymarch/sphere.png", img);
 
         let start = std::time::Instant::now();
         for _ in 0..100 {
@@ -560,5 +640,136 @@ mod test {
         let total = (end - start).as_secs_f32();
         let fps = 100.0 / total;
         println!("fps: {fps}");
+    }
+
+    #[test]
+    fn raymarch_translated_sphere() {
+        let width = 64.0;
+        let height = 36.0;
+        let mut r = RaymarchingRenderer::new(width as u32, height as u32);
+        let projection =
+            Mat4::perspective_rh(std::f32::consts::FRAC_PI_4, width / height, 0.1, 100.0);
+        let view = Mat4::look_at_rh(Vec3::new(0.0, 0.0, 5.0), Vec3::ZERO, Vec3::Y);
+        let camera = Camera::new(projection, view);
+        let camera_id = r.slab.append(&camera);
+        let (device, queue) = r.renderling.get_device_and_queue_owned();
+        let hdr = AtlasImage::from_hdr_path("../../img/hdr/helipad.hdr")
+            .unwrap_or_else(|e| panic!("could not load hdr: {e}\n{:?}", std::env::current_dir()));
+        let skybox = Skybox::new(device, queue, hdr, camera_id);
+        r = r.with_skybox(skybox);
+        let default_material = r.slab.append(&crate::pbr::Material {
+            albedo_factor: Vec4::new(1.0, 1.0, 1.0, 1.0),
+            metallic_factor: 0.7,
+            roughness_factor: 0.3,
+            has_lighting: true,
+            ..Default::default()
+        });
+        let pbr_config = r.slab.append(&crate::pbr::PbrConfig::default());
+        let sphere = r.slab.append(&crate::sdf::Sphere { radius: 1.0 });
+        let sphere_shape = r.slab.append(&crate::sdf::SdfShape::from_sphere(sphere));
+        let translated = r.slab.append(&crate::sdf::Transformed {
+            shape: sphere_shape,
+            transform: Transform {
+                translation: Vec3::new(3.0, 0.0, 0.0),
+                ..Default::default()
+            },
+        });
+        let shapes = r
+            .slab
+            .append_array(&[crate::sdf::SdfShape::from_transformed(translated)]);
+        let scene = r.slab.append(&crate::sdf::Scene {
+            camera: camera_id,
+            shapes,
+            ..Default::default()
+        });
+        let raymarch = r.slab.append(&Raymarch {
+            scene,
+            screen_resolution: Vec2::new(width, height),
+            pbr_config,
+            default_material,
+            ..Default::default()
+        });
+        let img = r.render_image(raymarch);
+        img_diff::assert_img_eq("raymarch/translated_sphere.png", img);
+    }
+
+    #[test]
+    fn raymarch_scene() {
+        let width = 512.0;
+        let height = 288.0;
+        let mut r = RaymarchingRenderer::new(width as u32, height as u32);
+        let projection =
+            Mat4::perspective_rh(std::f32::consts::FRAC_PI_4, width / height, 0.1, 100.0);
+        let view = Mat4::look_at_rh(Vec3::new(0.0, 3.0, 5.0), Vec3::ZERO, Vec3::Y);
+        let camera = Camera::new(projection, view);
+        let camera_id = r.slab.append(&camera);
+        let (device, queue) = r.renderling.get_device_and_queue_owned();
+        let hdr = AtlasImage::from_hdr_path("../../img/hdr/helipad.hdr")
+            .unwrap_or_else(|e| panic!("could not load hdr: {e}\n{:?}", std::env::current_dir()));
+        let skybox = Skybox::new(device, queue, hdr, camera_id);
+        r = r.with_skybox(skybox);
+        let default_material = r.slab.append(&crate::pbr::Material {
+            albedo_factor: Vec4::new(1.0, 1.0, 1.0, 1.0),
+            metallic_factor: 0.7,
+            roughness_factor: 0.3,
+            has_lighting: true,
+            ..Default::default()
+        });
+        let [cyan, canary, magenta] = [
+            Vec4::new(0.0, 1.0, 1.0, 1.0),
+            Vec4::new(1.0, 1.0, 0.0, 1.0),
+            Vec4::new(1.0, 0.0, 1.0, 0.0),
+        ]
+        .map(|albedo_factor| {
+            r.slab.append(&crate::pbr::Material {
+                albedo_factor,
+                metallic_factor: 0.5,
+                roughness_factor: 0.5,
+                ..Default::default()
+            })
+        });
+        let pbr_config = r.slab.append(&crate::pbr::PbrConfig::default());
+
+        let sphere = r.slab.append(&crate::sdf::Sphere { radius: 1.0 });
+        let sphere_shape = r.slab.append(&crate::sdf::SdfShape::from_sphere(sphere));
+        let translated_sphere = r.slab.append(&crate::sdf::Transformed {
+            shape: sphere_shape,
+            transform: Transform {
+                translation: Vec3::new(0.0, 1.0, 0.0),
+                ..Default::default()
+            },
+        });
+
+        let cube = r.slab.append(&crate::sdf::Cuboid {
+            size: Vec3::new(2.0, 0.75, 2.0),
+        });
+        let cube_shape = r.slab.append(&crate::sdf::SdfShape::from_cuboid(cube));
+        let transformed_cube = r.slab.append(&crate::sdf::Transformed {
+            shape: cube_shape,
+            transform: Transform {
+                translation: Vec3::new(0.0, -1.0, 0.0),
+                rotation: Quat::from_rotation_y(std::f32::consts::FRAC_PI_4),
+                ..Default::default()
+            },
+        });
+
+        let shapes = r.slab.append_array(&[
+            crate::sdf::SdfShape::from_transformed(translated_sphere),
+            crate::sdf::SdfShape::from_transformed(transformed_cube),
+        ]);
+        let scene = r.slab.append(&crate::sdf::Scene {
+            camera: camera_id,
+            shapes,
+            ..Default::default()
+        });
+        let raymarch = r.slab.append(&Raymarch {
+            scene,
+            screen_resolution: Vec2::new(width, height),
+            pbr_config,
+            default_material,
+            ..Default::default()
+        });
+        let img = r.render_image(raymarch);
+        img_diff::save("raymarch/scene.png", img);
     }
 }

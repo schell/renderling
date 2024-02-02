@@ -9,7 +9,7 @@ use crate::math::Float;
 
 use crate::{
     math::{self, IsVector},
-    Camera,
+    Camera, Transform,
 };
 use spirv_std::spirv;
 
@@ -326,11 +326,12 @@ impl Cuboid {
     }
 }
 
+/// Translates an [`SdfShape`].
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[derive(Default, Clone, Copy, SlabItem)]
-pub struct Translated {
+pub struct Transformed {
     pub shape: Id<SdfShape>,
-    pub translation: Vec3,
+    pub transform: Transform,
 }
 
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
@@ -344,7 +345,7 @@ pub enum ShapeType {
     Line,
     Bezier,
     Path,
-    Translated,
+    Transformed,
 }
 
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
@@ -390,51 +391,70 @@ impl SdfShape {
         }
     }
 
-    pub fn from_translated(id: Id<Translated>) -> Self {
+    pub fn from_transformed(id: Id<Transformed>) -> Self {
         Self {
-            shape_type: ShapeType::Translated,
+            shape_type: ShapeType::Transformed,
             shape_id: id.inner(),
         }
     }
 
     pub fn distance(&self, mut position: Vec3, slab: &[u32]) -> f32 {
         let mut shape = *self;
+        let mut adjustment = 1.0;
+        let distance;
         loop {
             match shape.shape_type {
                 ShapeType::None => return 0.0,
                 ShapeType::Sphere => {
                     let circle = slab.read(Id::<Sphere>::from(shape.shape_id));
-                    return circle.distance(position);
+                    distance = circle.distance(position);
+                    break;
                 }
                 ShapeType::Line => {
                     let id = Id::<Line>::from(shape.shape_id);
                     let line = slab.read(id);
-                    return line.distance(position);
+                    distance = line.distance(position);
+                    break;
                 }
                 ShapeType::Bezier => {
                     let id = Id::<Bezier>::from(shape.shape_id);
                     let bez = slab.read(id);
-                    return bez.distance(position);
+                    distance = bez.distance(position);
+                    break;
                 }
                 ShapeType::Cuboid => {
                     let id = Id::<Cuboid>::from(shape.shape_id);
                     let rectangle = slab.read(id);
-                    return rectangle.distance(position);
+                    distance = rectangle.distance(position);
+                    break;
                 }
                 ShapeType::Path => {
                     let id = Id::<Path>::from(shape.shape_id);
                     let path = slab.read(id);
-                    return path.distance(position, slab);
+                    distance = path.distance(position, slab);
+                    break;
                 }
-                ShapeType::Translated => {
-                    let id = Id::<Translated>::from(shape.shape_id);
-                    let translated = slab.read(id);
-                    shape = slab.read(translated.shape);
-                    position -= translated.translation;
+                ShapeType::Transformed => {
+                    let id = Id::<Transformed>::from(shape.shape_id);
+                    let Transformed {
+                        shape: shape_id,
+                        transform,
+                    } = slab.read(id);
+                    shape = slab.read(shape_id);
+                    let Transform {
+                        translation,
+                        rotation,
+                        scale,
+                    } = transform;
+                    position = position / scale;
+                    adjustment *= scale.x.min(scale.y).min(scale.z);
+                    position = rotation.inverse().mul_vec3(position);
+                    position -= translation;
                     continue;
                 }
             };
         }
+        distance * adjustment
     }
 }
 

@@ -16,6 +16,14 @@ struct Cli {
     #[clap(long, short, default_value = "renderling")]
     shader_crate: std::path::PathBuf,
 
+    /// Set cargo default-features.
+    #[clap(long)]
+    no_default_features: bool,
+
+    /// Set cargo features.
+    #[clap(long)]
+    features: Vec<String>,
+
     ///// Cargo features to be passed to the shader crate compilation invocation.
     //#[clap(long, short)]
     //features: Vec<String>,
@@ -32,7 +40,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let Cli {
         verbosity,
         shader_crate,
-        //features,
+        no_default_features,
+        features,
         output_dir,
         dry_run,
     } = Cli::parse();
@@ -60,10 +69,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let CompileResult {
         entry_points,
         module,
-    } = SpirvBuilder::new(shader_crate, "spirv-unknown-vulkan1.2")
+    } = {
+        let mut builder = SpirvBuilder::new(shader_crate, "spirv-unknown-vulkan1.2")
         .print_metadata(MetadataPrintout::None)
-        .multimodule(true)
-        .build()?;
+        .multimodule(true);
+
+        if no_default_features {
+            builder = builder.shader_crate_default_features(false);
+        }
+        if !features.is_empty() {
+            builder = builder.shader_crate_features(features);
+        }
+
+        builder.build()?
+    };
 
     let dir = output_dir;
     let mut shaders = vec![];
