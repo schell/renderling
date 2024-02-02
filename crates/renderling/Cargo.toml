@@ -17,6 +17,7 @@ crate-type = ["lib", "dylib"]
 [features]
 default = ["raw-window-handle", "winit"]
 gltf = ["dep:gltf"]
+sdf = []
 wasm = ["wgpu/fragile-send-sync-non-atomic-wasm"]
 
 # dependencies for CPU and GPU code

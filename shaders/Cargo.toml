@@ -13,7 +13,7 @@ log = "^0.4"
 prettyplease = "0.2"
 proc-macro2 = "1.0"
 quote = "1.0"
-spirv-builder = "^0.9"
+spirv-builder = { git = "https://github.com/schell/rust-gpu", branch = "fix/v0.9.1-add-spirv-builder-cargo-features" }
 syn = "2.0"
 
 # Enable incremental by default in release mode.

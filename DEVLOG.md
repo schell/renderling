@@ -1,5 +1,11 @@
 # devlog
 
+## Thu Feb 1, 2024 
+
+I've contributed to `rust-gpu`. 
+Just a small little thing.
+I added the ability to pass cargo features to the shader crate through `spirv-builder`.
+
 ## Tue Jan 27, 2024
 
 ### Raymarching!
