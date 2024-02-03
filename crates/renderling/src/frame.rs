@@ -82,7 +82,7 @@ pub fn conduct_clear_pass(
             })
         })
         .collect::<Vec<_>>();
-    let _ = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+    let render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
         label,
         color_attachments: &frame_views,
         depth_stencil_attachment: depth_view.map(|view| wgpu::RenderPassDepthStencilAttachment {
@@ -95,6 +95,7 @@ pub fn conduct_clear_pass(
         }),
         ..Default::default()
     });
+    drop(render_pass);
 
     queue.submit(std::iter::once(encoder.finish()));
 }

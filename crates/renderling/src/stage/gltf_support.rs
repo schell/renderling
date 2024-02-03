@@ -1021,7 +1021,7 @@ impl Stage {
         camera_id: Id<Camera>,
         node: gltf::Node<'a>,
         parents: Vec<Id<GltfNode>>,
-    ) -> Vec<(Id<GltfRendering>, Id<Rendering>)> {
+    ) -> Vec<Id<GltfRendering>> {
         if let Some(_light) = node.light() {
             // TODO: Support transforming lights based on node transforms
             ////let light = gpu_doc.lights.at(light.index());
@@ -1092,7 +1092,7 @@ impl Stage {
         gpu_doc: &GltfDocument,
         camera_id: Id<Camera>,
         node: gltf::Node<'_>,
-    ) -> Vec<(Id<GltfRendering>, Id<Rendering>)> {
+    ) -> Vec<Id<GltfRendering>> {
         self.draw_gltf_node_with(gpu_doc, camera_id, node, vec![])
     }
 
@@ -1103,7 +1103,7 @@ impl Stage {
         gpu_doc: &GltfDocument,
         camera_id: Id<Camera>,
         scene: gltf::Scene<'_>,
-    ) -> Vec<(Id<GltfRendering>, Id<Rendering>)> {
+    ) -> Vec<Id<GltfRendering>> {
         scene
             .nodes()
             .flat_map(|node| self.draw_gltf_node(gpu_doc, camera_id, node))
@@ -1728,7 +1728,7 @@ mod test {
         let (projection, view) = crate::camera::default_ortho2d(100.0, 100.0);
         let camera = stage.append(&Camera::new(projection, view));
         let node_path = stage.append_array(&[nodes.at(0)]);
-        let (_, rendering_id) = stage.draw_gltf_rendering(&GltfRendering {
+        let rendering_id = stage.draw_gltf_rendering(&GltfRendering {
             camera,
             node_path,
             mesh_index: 0,

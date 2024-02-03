@@ -76,8 +76,8 @@ pub fn create_skybox_render_pipeline(
     format: wgpu::TextureFormat,
 ) -> SkyboxRenderPipeline {
     log::trace!("creating skybox render pipeline with format '{format:?}'");
-    let vertex_linkage = crate::linkage::skybox__vertex(device);
-    let fragment_linkage = crate::linkage::skybox__fragment_cubemap(device);
+    let vertex_linkage = crate::linkage::skybox_vertex::linkage(device);
+    let fragment_linkage = crate::linkage::skybox_cubemap_fragment::linkage(device);
     let bg_layout = skybox_bindgroup_layout(device);
     let pp_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some("skybox pipeline layout"),
@@ -553,8 +553,8 @@ impl Skybox {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
     ) -> crate::Texture {
-        let vertex_linkage = crate::linkage::convolution__vertex_brdf_lut_convolution(device);
-        let fragment_linkage = crate::linkage::convolution__fragment_brdf_lut_convolution(device);
+        let vertex_linkage = crate::linkage::brdf_lut_convolution_vertex::linkage(device);
+        let fragment_linkage = crate::linkage::brdf_lut_convolution_fragment::linkage(device);
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("brdf_lut_convolution"),
             layout: None,

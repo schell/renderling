@@ -45,7 +45,7 @@ pub fn srgba_to_linear(srgb_in: Vec4) -> Vec4 {
 
 /// ACES tone map (faster approximation)
 /// see: https://knarkowicz.wordpress.com/2016/01/06/aces-filmic-tone-mapping-curve/
-fn tone_map_aces_narkowicz(color: Vec3) -> Vec3 {
+pub fn tone_map_aces_narkowicz(color: Vec3) -> Vec3 {
     const A: f32 = 2.51;
     const B: f32 = 0.03;
     const C: f32 = 2.43;
@@ -63,7 +63,7 @@ fn rrt_and_odtfit(color: Vec3) -> Vec3 {
     a / b
 }
 
-fn tone_map_aces_hill(mut color: Vec3) -> Vec3 {
+pub fn tone_map_aces_hill(mut color: Vec3) -> Vec3 {
     color = ACESINPUT_MAT * color;
     // Apply RRT and ODT
     color = rrt_and_odtfit(color);
@@ -72,6 +72,10 @@ fn tone_map_aces_hill(mut color: Vec3) -> Vec3 {
     color = color.clamp(Vec3::ZERO, Vec3::ONE);
 
     color
+}
+
+pub fn tone_map_reinhard(color: Vec3) -> Vec3 {
+    color / (color + Vec3::ONE)
 }
 
 #[repr(transparent)]
@@ -118,7 +122,7 @@ pub fn tonemap(mut color: Vec4, slab: &[u32]) -> Vec4 {
         }
         Tonemap::REINHARD => {
             // Use Reinhard tone mapping
-            color / (color + Vec4::ONE)
+            tone_map_reinhard(color.xyz()).extend(color.w)
         }
         _ => color,
     }
@@ -132,8 +136,9 @@ const QUAD_2D_POINTS: [(Vec2, Vec2); 6] = {
     [tl, bl, br, tl, br, tr]
 };
 
+#[cfg(feature = "tonemapping_vertex")]
 #[spirv(vertex)]
-pub fn vertex(
+pub fn tonemapping_vertex(
     #[spirv(vertex_index)] vertex_id: u32,
     out_uv: &mut glam::Vec2,
     #[spirv(position)] gl_pos: &mut glam::Vec4,
@@ -143,8 +148,9 @@ pub fn vertex(
     *gl_pos = pos.extend(0.0).extend(1.0);
 }
 
+#[cfg(feature = "tonemapping_fragment")]
 #[spirv(fragment)]
-pub fn fragment(
+pub fn tonemapping_fragment(
     #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] slab: &[u32],
     #[spirv(descriptor_set = 0, binding = 1)] texture: &Image2d,
     #[spirv(descriptor_set = 0, binding = 2)] sampler: &Sampler,
@@ -175,7 +181,6 @@ mod cpu {
             View<HdrSurface>,
         ),
     ) -> Result<(), GraphError> {
-        log::trace!("tonemapping");
         let label = Some("tonemapping");
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label });
         let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {

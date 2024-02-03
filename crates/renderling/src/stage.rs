@@ -9,9 +9,9 @@ use spirv_std::{
     spirv, Sampler,
 };
 
-use crate::{math::IsVector, pbr::PbrConfig};
+use crate::{gltf::GltfRendering, math::IsVector, pbr::PbrConfig};
 
-#[cfg(target_arch = "spirv")]
+#[allow(unused_imports)]
 use spirv_std::num_traits::Float;
 
 #[cfg(not(target_arch = "spirv"))]
@@ -167,30 +167,18 @@ impl Vertex {
     }
 }
 
-/// Pointer to a renderable unit.
-#[derive(Default, SlabItem)]
-pub enum Rendering {
-    #[default]
-    None,
-    #[cfg(feature = "gltf")]
-    /// Render the scene using the gltf vertex and fragment shaders.
-    Gltf(Id<crate::gltf::GltfRendering>),
-    /// Render the scene using the sdf vertex and fragment shaders.
-    Sdf(Id<crate::sdf::Scene>),
-}
-
+#[cfg(feature = "stage_vertex")]
 /// Uber vertex shader.
 ///
 /// This reads the "instance" by index and proxies to a specific vertex shader.
 #[spirv(vertex)]
-pub fn vertex(
+pub fn stage_vertex(
     // Points at a `Rendering`
-    #[spirv(instance_index)] instance_index: u32,
+    #[spirv(instance_index)] gltf_id: Id<crate::gltf::GltfRendering>,
     // Which vertex within the render unit are we rendering
     #[spirv(vertex_index)] vertex_index: u32,
     #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] slab: &[u32],
 
-    #[spirv(flat)] out_instance_index: &mut u32,
     #[spirv(flat)] out_camera: &mut u32,
     #[spirv(flat)] out_material: &mut u32,
     out_color: &mut Vec4,
@@ -199,62 +187,34 @@ pub fn vertex(
     out_norm: &mut Vec3,
     out_tangent: &mut Vec3,
     out_bitangent: &mut Vec3,
-    // position of the vertex/fragment in local space
-    local_pos: &mut Vec3,
     // position of the vertex/fragment in world space
     world_pos: &mut Vec3,
     #[spirv(position)] clip_pos: &mut Vec4,
 ) {
-    *out_instance_index = instance_index;
-    let rendering = slab.read(Id::<Rendering>::new(instance_index));
-    match rendering {
-        Rendering::None => {}
-        #[cfg(feature = "gltf")]
-        Rendering::Gltf(unit_id) => {
-            crate::gltf::vertex(
-                unit_id,
-                vertex_index,
-                slab,
-                out_camera,
-                out_material,
-                out_color,
-                out_uv0,
-                out_uv1,
-                out_norm,
-                out_tangent,
-                out_bitangent,
-                world_pos,
-                clip_pos,
-            );
-        }
-        Rendering::Sdf(_sdf_id) => {
-            *local_pos = Vec3::ZERO;
-            //crate::sdf::vertex(
-            //    sdf_id,
-            //    vertex_index,
-            //    slab,
-            //    out_camera,
-            //    out_material,
-            //    out_color,
-            //    out_uv0,
-            //    out_uv1,
-            //    out_norm,
-            //    out_tangent,
-            //    out_bitangent,
-            //    local_pos,
-            //    world_pos,
-            //    clip_pos,
-            //);
-        }
-    }
+    crate::gltf::vertex(
+        gltf_id,
+        vertex_index,
+        slab,
+        out_camera,
+        out_material,
+        out_color,
+        out_uv0,
+        out_uv1,
+        out_norm,
+        out_tangent,
+        out_bitangent,
+        world_pos,
+        clip_pos,
+    );
 }
 
+#[cfg(feature = "stage_fragment")]
 #[allow(clippy::too_many_arguments)]
 #[spirv(fragment)]
 /// Uber fragment shader.
 ///
 /// This reads the "instance" by index and proxies to a specific vertex shader.
-pub fn fragment(
+pub fn stage_fragment(
     #[spirv(descriptor_set = 1, binding = 0)] atlas: &Image2d,
     #[spirv(descriptor_set = 1, binding = 1)] atlas_sampler: &Sampler,
 
@@ -269,7 +229,6 @@ pub fn fragment(
 
     #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] slab: &[u32],
 
-    #[spirv(flat)] in_rendering: Id<Rendering>,
     #[spirv(flat)] in_camera: u32,
     #[spirv(flat)] in_material: u32,
     in_color: Vec4,
@@ -278,66 +237,32 @@ pub fn fragment(
     in_norm: Vec3,
     in_tangent: Vec3,
     in_bitangent: Vec3,
-    local_pos: Vec3,
     world_pos: Vec3,
 
     output: &mut Vec4,
 ) {
-    let rendering = slab.read(in_rendering);
-    match rendering {
-        Rendering::None => {}
-        #[cfg(feature = "gltf")]
-        Rendering::Gltf(_) => {
-            crate::pbr::fragment_impl(
-                atlas,
-                atlas_sampler,
-                irradiance,
-                irradiance_sampler,
-                prefiltered,
-                prefiltered_sampler,
-                brdf,
-                brdf_sampler,
-                slab,
-                0u32.into(),
-                in_camera,
-                in_material,
-                in_color,
-                in_uv0,
-                in_uv1,
-                in_norm,
-                in_tangent,
-                in_bitangent,
-                world_pos,
-                output,
-            );
-        }
-        Rendering::Sdf(_sdf_id) => {
-            *output = local_pos.extend(1.0);
-            //crate::sdf::fragment(
-            //    sdf_id,
-            //    atlas,
-            //    atlas_sampler,
-            //    irradiance,
-            //    irradiance_sampler,
-            //    prefiltered,
-            //    prefiltered_sampler,
-            //    brdf,
-            //    brdf_sampler,
-            //    slab,
-            //    in_camera,
-            //    in_material,
-            //    in_color,
-            //    in_uv0,
-            //    in_uv1,
-            //    in_norm,
-            //    in_tangent,
-            //    in_bitangent,
-            //    local_pos,
-            //    world_pos,
-            //    output,
-            //);
-        }
-    }
+    crate::pbr::fragment_impl(
+        atlas,
+        atlas_sampler,
+        irradiance,
+        irradiance_sampler,
+        prefiltered,
+        prefiltered_sampler,
+        brdf,
+        brdf_sampler,
+        slab,
+        0u32.into(),
+        in_camera,
+        in_material,
+        in_color,
+        in_uv0,
+        in_uv1,
+        in_norm,
+        in_tangent,
+        in_bitangent,
+        world_pos,
+        output,
+    );
 }
 
 //#[spirv(compute(threads(32)))]
@@ -382,6 +307,7 @@ pub fn fragment(
 //    draws[i] = call;
 //}
 
+#[cfg(feature = "test_i8_16_extraction")]
 #[spirv(compute(threads(32)))]
 /// A shader to ensure that we can extract i8 and i16 values from a storage
 /// buffer.
@@ -403,7 +329,7 @@ pub fn test_i8_i16_extraction(
 /// A unit of work to be drawn.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct DrawUnit {
-    pub id: Id<Rendering>,
+    pub id: Id<GltfRendering>,
     pub vertex_count: u32,
     pub visible: bool,
 }

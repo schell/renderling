@@ -8,4 +8,4 @@ edition = "2021"
 [dependencies]
 renderling = { path = "../renderling" }
 wgpu = { workspace = true }
-winit = "^0.27"
+winit = { workspace = true }

@@ -4,7 +4,7 @@ var environment_texture: texture_cube<f32>;
 
 @group(0)
 @binding(2)
-var environment_sampler: sampler;
+var environment_sampler: sampler; 
 
 struct Input {
     @builtin(position) position: vec4<f32>,
@@ -34,11 +34,8 @@ fn fragment_convolve_diffuse_irradiance(input: Input) -> @location(0) vec4<f32> 
                 cos(theta),
             );
             // tangent to world coords
-            let sample_vec =
-                normalize(tangent_sample.x * right + tangent_sample.y * up + tangent_sample.z * normal);
-            let sample = textureSample(environment_texture, environment_sampler, sample_vec)
-                * cos(theta)
-                * sin(theta);
+            let sample_vec = normalize(tangent_sample.x * right + tangent_sample.y * up + tangent_sample.z * normal);
+            let sample = textureSample(environment_texture, environment_sampler, sample_vec) * cos(theta) * sin(theta);
             irradiance += sample.xyz;
             nr_samples += 1.0;
         }

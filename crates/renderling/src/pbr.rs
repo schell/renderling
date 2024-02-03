@@ -290,6 +290,7 @@ pub fn texture_color<T: Sample2d<Sampler = S>, S: IsSampler>(
     color
 }
 
+#[cfg(feature = "pbr_fragment")]
 /// PBR fragment shader.
 #[allow(clippy::too_many_arguments)]
 #[spirv(fragment)]

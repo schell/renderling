@@ -6,7 +6,7 @@ use spirv_std::{
     spirv, Sampler,
 };
 
-#[cfg(target_arch = "spirv")]
+#[allow(unused_imports)]
 use spirv_std::num_traits::Float;
 
 use crate::{
@@ -30,9 +30,10 @@ pub fn direction_to_equirectangular_uv(dir: Vec3) -> Vec2 {
     uv
 }
 
+#[cfg(feature = "skybox_vertex")]
 /// Vertex shader for a skybox.
 #[spirv(vertex)]
-pub fn vertex(
+pub fn skybox_vertex(
     #[spirv(instance_index)] camera_index: u32,
     #[spirv(vertex_index)] vertex_index: u32,
     #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] slab: &[u32],
@@ -49,9 +50,10 @@ pub fn vertex(
     *clip_pos = position.xyww();
 }
 
+#[cfg(feature = "skybox_cubemap_fragment")]
 /// Colors a skybox using a cubemap texture.
 #[spirv(fragment)]
-pub fn fragment_cubemap(
+pub fn skybox_cubemap_fragment(
     #[spirv(descriptor_set = 0, binding = 1)] texture: &Cubemap,
     #[spirv(descriptor_set = 0, binding = 2)] sampler: &Sampler,
     local_pos: Vec3,
@@ -61,6 +63,7 @@ pub fn fragment_cubemap(
     *out_color = env_color.extend(1.0);
 }
 
+#[cfg(feature = "skybox_cubemap_vertex")]
 /// Draws a cubemap.
 ///
 /// Uses the `instance_index` as the [`Id`] for a [`Camera`].
@@ -68,7 +71,7 @@ pub fn fragment_cubemap(
 /// Used to create a cubemap from an equirectangular image as well as cubemap
 /// convolutions.
 #[spirv(vertex)]
-pub fn vertex_cubemap(
+pub fn skybox_cubemap_vertex(
     #[spirv(instance_index)] camera_index: u32,
     #[spirv(vertex_index)] vertex_index: u32,
     #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] slab: &[u32],
@@ -81,9 +84,10 @@ pub fn vertex_cubemap(
     *gl_pos = camera.projection * camera.view * pos.extend(1.0);
 }
 
+#[cfg(feature = "skybox_equirectangular_fragment")]
 /// Colors a skybox using an equirectangular texture.
 #[spirv(fragment)]
-pub fn fragment_equirectangular(
+pub fn skybox_equirectangular_fragment(
     #[spirv(descriptor_set = 0, binding = 1)] texture: &Image2d,
     #[spirv(descriptor_set = 0, binding = 2)] sampler: &Sampler,
     local_pos: Vec3,

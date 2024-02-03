@@ -62,9 +62,8 @@ pub fn create_pipeline_and_bindgroup(
         bind_group_layouts: &[&bg_layout],
         push_constant_ranges: &[],
     });
-    let vertex_linkage = crate::linkage::convolution__vertex_prefilter_environment_cubemap(device);
-    let fragment_linkage =
-        crate::linkage::convolution__fragment_prefilter_environment_cubemap(device);
+    let vertex_linkage = crate::linkage::prefilter_environment_cubemap_vertex::linkage(device);
+    let fragment_linkage = crate::linkage::prefilter_environment_cubemap_fragment::linkage(device);
     let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some("prefiltered environment"),
         layout: Some(&pp_layout),
