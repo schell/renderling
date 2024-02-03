@@ -4,6 +4,7 @@ use crate::{
     View,
 };
 use crabslab::{CpuSlab, WgpuBuffer};
+use ttf_parser::Width;
 
 use super::{raymarch::Raymarch, *};
 
@@ -281,4 +282,29 @@ pub fn configure_graph(r: &mut Renderling) {
 
     // post
     r.graph.add_subgraph(graph!(copy_frame_to_post, present));
+}
+
+pub fn convert_to_pixel(color: Vec4) -> image::Rgb<u8> {
+    // reinhard tonemapping
+    let out_color = crate::tonemapping::tone_map_reinhard(color.xyz() * color.w);
+    let r = (out_color.x * 255.0) as u8;
+    let g = (out_color.y * 255.0) as u8;
+    let b = (out_color.z * 255.0) as u8;
+    image::Rgb([r, g, b])
+}
+
+pub fn render_cpu(
+    width: u32,
+    height: u32,
+    raymarch: Id<Raymarch>,
+    slab: &[u32],
+) -> image::RgbImage {
+    let img = image::ImageBuffer::from_fn(width, height, |x, y| -> image::Rgb<u8> {
+        let frag_coord = Vec4::new(x as f32, y as f32, 0.0, 0.0);
+        let mut out_color = Vec4::ZERO;
+        crate::sdf::raymarch::raymarch_fragment(slab, frag_coord, raymarch, &mut out_color);
+        convert_to_pixel(out_color)
+    });
+
+    img
 }

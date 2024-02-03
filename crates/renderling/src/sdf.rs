@@ -415,12 +415,12 @@ impl SdfShape {
         }
     }
 
-    pub fn color(&self, mut position: Vec3, slab: &[u32]) -> Id<Material> {
+    pub fn color(&self, _position: Vec3, slab: &[u32]) -> Id<Material> {
         let mut shape = *self;
         loop {
-            match self.shape_type {
+            match shape.shape_type {
                 ShapeType::Materialized => {
-                    let id = Id::<Materialized>::from(self.shape_id);
+                    let id = Id::<Materialized>::from(shape.shape_id);
                     let Materialized { shape: _, material } = slab.read(id);
                     return material;
                 }
@@ -428,7 +428,7 @@ impl SdfShape {
                     let id = Id::<Transformed>::from(shape.shape_id);
                     let Transformed {
                         shape: shape_id,
-                        transform,
+                        transform: _,
                     } = slab.read(id);
                     shape = slab.read(shape_id);
                     continue;

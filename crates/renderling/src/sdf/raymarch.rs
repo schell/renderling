@@ -158,6 +158,7 @@ impl Ray {
                 result.tangent = tangent;
                 result.bitangent = bitangent;
                 result.hit = true;
+                result.id = id;
                 break;
             } else if current_dist >= max_dist {
                 break;
@@ -227,18 +228,6 @@ pub fn raymarch_rays(
 
 #[spirv(fragment)]
 pub fn raymarch_fragment(
-    #[spirv(descriptor_set = 1, binding = 0)] atlas: &Image2d,
-    #[spirv(descriptor_set = 1, binding = 1)] atlas_sampler: &Sampler,
-
-    #[spirv(descriptor_set = 1, binding = 2)] irradiance: &Cubemap,
-    #[spirv(descriptor_set = 1, binding = 3)] irradiance_sampler: &Sampler,
-
-    #[spirv(descriptor_set = 1, binding = 4)] prefiltered: &Cubemap,
-    #[spirv(descriptor_set = 1, binding = 5)] prefiltered_sampler: &Sampler,
-
-    #[spirv(descriptor_set = 1, binding = 6)] brdf: &Image2d,
-    #[spirv(descriptor_set = 1, binding = 7)] brdf_sampler: &Sampler,
-
     #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] slab: &[u32],
 
     #[spirv(frag_coord)] frag_coord: Vec4,
@@ -259,38 +248,40 @@ pub fn raymarch_fragment(
     let ray_dy = Ray::from_fragment(fragment_dy, resolution, &camera);
 
     let result = ray.march(&scene, slab, ray_dx, ray_dy);
-    let mut color = Vec4::ZERO;
+    let mut color = Vec4::new(1.0, 0.0, 0.0, 1.0);
     if result.hit {
         // TODO: use ray differentials (pixel footprint) for anti-aliasing
         let shape = slab.read(result.id);
         let material = shape.color(result.position, slab);
-        crate::pbr::fragment_impl(
-            atlas,
-            atlas_sampler,
-            irradiance,
-            irradiance_sampler,
-            prefiltered,
-            prefiltered_sampler,
-            brdf,
-            brdf_sampler,
-            slab,
-            cfg.pbr_config,
-            scene.camera.inner(),
-            material.inner(),
-            Vec4::ONE,  // albedo color
-            Vec2::ZERO, // uv0
-            Vec2::ZERO, // uv1
-            result.normal,
-            result.tangent,
-            result.bitangent,
-            result.position,
-            &mut color,
-        );
+        let material = slab.read(material);
+        color = material.albedo_factor;
+        // crate::pbr::fragment_impl(
+        //     atlas,
+        //     atlas_sampler,
+        //     irradiance,
+        //     irradiance_sampler,
+        //     prefiltered,
+        //     prefiltered_sampler,
+        //     brdf,
+        //     brdf_sampler,
+        //     slab,
+        //     cfg.pbr_config,
+        //     scene.camera.inner(),
+        //     material.inner(),
+        //     Vec4::ONE,  // albedo color
+        //     Vec2::ZERO, // uv0
+        //     Vec2::ZERO, // uv1
+        //     result.normal,
+        //     result.tangent,
+        //     result.bitangent,
+        //     result.position,
+        //     &mut color,
+        // );
     } else {
-        let background = prefiltered
-            .sample_by_lod(*prefiltered_sampler, ray.direction, 0.0)
-            .xyz();
-        color = background.extend(1.0);
+        // let background = prefiltered
+        //     .sample_by_lod(*prefiltered_sampler, ray.direction, 0.0)
+        //     .xyz();
+        // color = background.extend(1.0);
     }
     *out_color = color;
 }
@@ -785,5 +776,121 @@ mod test {
         });
         let img = r.render_image(raymarch);
         img_diff::save("raymarch/scene.png", img);
+    }
+
+    #[test]
+    fn raymarch_scene_cpu() {
+        let width = 512.0;
+        let height = 288.0;
+        let mut slab = crabslab::CpuSlab::new(vec![]);
+        let projection =
+            Mat4::perspective_rh(std::f32::consts::FRAC_PI_4, width / height, 0.1, 100.0);
+        let view = Mat4::look_at_rh(Vec3::new(0.0, 3.0, 5.0), Vec3::ZERO, Vec3::Y);
+        let camera = Camera::new(projection, view);
+
+        let camera_id = slab.append(&camera);
+        let default_material = slab.append(&crate::pbr::Material {
+            albedo_factor: Vec4::new(1.0, 1.0, 1.0, 1.0),
+            metallic_factor: 0.7,
+            roughness_factor: 0.3,
+            has_lighting: true,
+            ..Default::default()
+        });
+        let [cyan, canary, magenta] = [
+            Vec4::new(0.0, 1.0, 1.0, 1.0),
+            Vec4::new(1.0, 1.0, 0.0, 1.0),
+            Vec4::new(1.0, 0.0, 1.0, 1.0),
+        ]
+        .map(|albedo_factor| {
+            slab.append(&crate::pbr::Material {
+                albedo_factor,
+                metallic_factor: 0.5,
+                roughness_factor: 0.5,
+                ..Default::default()
+            })
+        });
+        let pbr_config = slab.append(&crate::pbr::PbrConfig::default());
+
+        let sphere = slab.append(&crate::sdf::Sphere { radius: 1.0 });
+        let sphere_shape = slab.append(&crate::sdf::SdfShape::from_sphere(sphere));
+        let sphere_materialized = slab.append(&crate::sdf::Materialized {
+            shape: sphere_shape,
+            material: magenta,
+        });
+        let sphere_mat = slab.append(&crate::sdf::SdfShape::from_materialized(
+            sphere_materialized,
+        ));
+        let translated_sphere = slab.append(&crate::sdf::Transformed {
+            shape: sphere_mat,
+            transform: Transform {
+                translation: Vec3::new(0.0, 1.0, 0.0),
+                ..Default::default()
+            },
+        });
+
+        let cube = slab.append(&crate::sdf::Cuboid {
+            size: Vec3::new(2.0, 0.75, 2.0),
+        });
+        let cube_shape = slab.append(&crate::sdf::SdfShape::from_cuboid(cube));
+        let cube_material = slab.append(&crate::sdf::Materialized {
+            shape: cube_shape,
+            material: cyan,
+        });
+        let cube_mat = slab.append(&crate::sdf::SdfShape::from_materialized(cube_material));
+        let transformed_cube = slab.append(&crate::sdf::Transformed {
+            shape: cube_mat,
+            transform: Transform {
+                translation: Vec3::new(0.0, -1.0, 0.0),
+                rotation: Quat::from_rotation_y(std::f32::consts::FRAC_PI_4),
+                ..Default::default()
+            },
+        });
+
+        let shapes = slab.append_array(&[
+            crate::sdf::SdfShape::from_transformed(translated_sphere),
+            crate::sdf::SdfShape::from_transformed(transformed_cube),
+        ]);
+        let scene = crate::sdf::Scene {
+            camera: camera_id,
+            shapes,
+            ..Default::default()
+        };
+        let scene_id = slab.append(&scene);
+        let raymarch = slab.append(&Raymarch {
+            scene: scene_id,
+            screen_resolution: Vec2::new(width, height),
+            pbr_config,
+            default_material,
+            ..Default::default()
+        });
+
+        fn make_rays(frag_coord: Vec2, resolution: Vec2, camera: &Camera) -> (Ray, Ray, Ray) {
+            let ray = Ray::from_fragment(frag_coord, resolution, &camera);
+            let ray_dx = Ray::from_fragment(frag_coord + Vec2::new(0.5, 0.0), resolution, &camera);
+            let ray_dy = Ray::from_fragment(frag_coord + Vec2::new(0.0, 0.5), resolution, &camera);
+            (ray, ray_dx, ray_dy)
+        }
+
+        let resolution = Vec2::new(width, height);
+        let sphere_rays = make_rays(Vec2::new(257.0, 84.0), resolution, &camera);
+        let result = sphere_rays.0.march(
+            &scene,
+            slab.as_ref().as_slice(),
+            sphere_rays.1,
+            sphere_rays.2,
+        );
+        assert_eq!(shapes.at(0), result.id, "First ray should hit the sphere");
+        let cube_rays = make_rays(Vec2::new(258.0, 204.0), resolution, &camera);
+        let result = cube_rays
+            .0
+            .march(&scene, slab.as_ref().as_slice(), cube_rays.1, cube_rays.2);
+        assert_eq!(shapes.at(1), result.id, "Second ray should hit the cube");
+        let img = crate::sdf::helper::render_cpu(
+            width as u32,
+            height as u32,
+            raymarch,
+            slab.as_ref().as_slice(),
+        );
+        img_diff::save("raymarch/scene_cpu.png", img);
     }
 }
