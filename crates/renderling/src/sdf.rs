@@ -9,6 +9,7 @@ use crate::math::Float;
 
 use crate::{
     math::{self, IsVector},
+    pbr::Material,
     Camera, Transform,
 };
 use spirv_std::spirv;
@@ -326,12 +327,20 @@ impl Cuboid {
     }
 }
 
-/// Translates an [`SdfShape`].
+/// Translates, rotates and scales a [`SdfShape`].
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[derive(Default, Clone, Copy, SlabItem)]
 pub struct Transformed {
     pub shape: Id<SdfShape>,
     pub transform: Transform,
+}
+
+/// Wraps the SDF in a [`Material`].
+#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
+#[derive(Default, Clone, Copy, SlabItem)]
+pub struct Materialized {
+    pub shape: Id<SdfShape>,
+    pub material: Id<Material>,
 }
 
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
@@ -346,6 +355,7 @@ pub enum ShapeType {
     Bezier,
     Path,
     Transformed,
+    Materialized,
 }
 
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
@@ -398,7 +408,44 @@ impl SdfShape {
         }
     }
 
-    pub fn distance(&self, mut position: Vec3, slab: &[u32]) -> f32 {
+    pub fn from_materialized(id: Id<Materialized>) -> Self {
+        Self {
+            shape_type: ShapeType::Materialized,
+            shape_id: id.inner(),
+        }
+    }
+
+    pub fn color(&self, mut position: Vec3, slab: &[u32]) -> Id<Material> {
+        let mut shape = *self;
+        loop {
+            match self.shape_type {
+                ShapeType::Materialized => {
+                    let id = Id::<Materialized>::from(self.shape_id);
+                    let Materialized { shape: _, material } = slab.read(id);
+                    return material;
+                }
+                ShapeType::Transformed => {
+                    let id = Id::<Transformed>::from(shape.shape_id);
+                    let Transformed {
+                        shape: shape_id,
+                        transform,
+                    } = slab.read(id);
+                    shape = slab.read(shape_id);
+                    continue;
+                }
+                ShapeType::None
+                | ShapeType::Sphere
+                | ShapeType::Cuboid
+                | ShapeType::Line
+                | ShapeType::Bezier
+                | ShapeType::Path => break,
+            }
+        }
+        return Id::NONE;
+    }
+
+    /// Estimates the distance to the nearest surface.
+    pub fn distance_estimate(&self, mut position: Vec3, slab: &[u32]) -> f32 {
         let mut shape = *self;
         let mut adjustment = 1.0;
         let distance;
@@ -452,6 +499,12 @@ impl SdfShape {
                     position -= translation;
                     continue;
                 }
+                ShapeType::Materialized => {
+                    let id = Id::<Materialized>::from(shape.shape_id);
+                    let shape_id = slab.read(id).shape;
+                    shape = slab.read(shape_id);
+                    continue;
+                }
             };
         }
         distance * adjustment
@@ -469,13 +522,18 @@ impl Scene {
         6
     }
 
-    pub fn distance(&self, position: Vec3, slab: &[u32]) -> f32 {
+    pub fn distance_estimate(&self, position: Vec3, slab: &[u32]) -> (f32, Id<SdfShape>) {
         let mut distance = f32::MAX;
-        for id in self.shapes.iter() {
-            let shape = slab.read(id);
-            distance = shape.distance(position, slab).min(distance);
+        let mut id = Id::NONE;
+        for shape_id in self.shapes.iter() {
+            let shape = slab.read(shape_id);
+            let current_distance = shape.distance_estimate(position, slab);
+            if current_distance < distance {
+                distance = current_distance;
+                id = shape_id;
+            }
         }
-        distance
+        (distance, id)
     }
 }
 
@@ -549,7 +607,7 @@ pub fn sdf_shape_fragment(
 ) {
     let legend = slab.read(in_shape_legend);
     let shape = slab.read(legend.shape);
-    let distance = shape.distance(in_local_pos, slab);
+    let distance = shape.distance_estimate(in_local_pos, slab);
     let shape_color = color_distance(
         legend.inside_color,
         legend.outside_color,

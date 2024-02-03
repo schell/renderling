@@ -11,6 +11,8 @@ use crate::{
     Camera,
 };
 
+use super::SdfShape;
+
 #[derive(Clone, Copy, Default, SlabItem)]
 pub struct Raymarch {
     pub screen_resolution: Vec2,
@@ -73,6 +75,7 @@ pub struct MarchResult {
     /// The total number of steps marched
     pub step_count: u32,
     pub hit: bool,
+    pub id: Id<SdfShape>,
 }
 
 impl Default for MarchResult {
@@ -86,6 +89,7 @@ impl Default for MarchResult {
             min_step: f32::MAX,
             step_count: 0,
             hit: false,
+            id: Id::NONE,
         }
     }
 }
@@ -138,7 +142,7 @@ impl Ray {
             result.step_count = i + 1;
 
             result.position = origin + result.distance_marched * direction;
-            let current_dist = scene.distance(result.position, slab);
+            let (current_dist, id) = scene.distance_estimate(result.position, slab);
             // variable minimum distance based on the pixel footprint
             let min_dist = result
                 .position
@@ -177,9 +181,9 @@ pub fn find_normal_by_gradient(
     let dy = Vec3::new(0.0, epsilon, 0.0);
     let dz = Vec3::new(0.0, 0.0, epsilon);
     Vec3::new(
-        scene.distance(p + dx, slab) - scene.distance(p - dx, slab),
-        scene.distance(p + dy, slab) - scene.distance(p - dy, slab),
-        scene.distance(p + dz, slab) - scene.distance(p - dz, slab),
+        scene.distance_estimate(p + dx, slab).0 - scene.distance_estimate(p - dx, slab).0,
+        scene.distance_estimate(p + dy, slab).0 - scene.distance_estimate(p - dy, slab).0,
+        scene.distance_estimate(p + dz, slab).0 - scene.distance_estimate(p - dz, slab).0,
     )
     .alt_norm_or_zero()
 }
@@ -258,6 +262,8 @@ pub fn raymarch_fragment(
     let mut color = Vec4::ZERO;
     if result.hit {
         // TODO: use ray differentials (pixel footprint) for anti-aliasing
+        let shape = slab.read(result.id);
+        let material = shape.color(result.position, slab);
         crate::pbr::fragment_impl(
             atlas,
             atlas_sampler,
@@ -270,7 +276,7 @@ pub fn raymarch_fragment(
             slab,
             cfg.pbr_config,
             scene.camera.inner(),
-            cfg.default_material.inner(),
+            material.inner(),
             Vec4::ONE,  // albedo color
             Vec2::ZERO, // uv0
             Vec2::ZERO, // uv1
@@ -583,7 +589,8 @@ mod test {
                 bitangent: Vec3::X,
                 distance_marched: 6.5000005,
                 min_step: 0.0009999275,
-                step_count: 2
+                step_count: 2,
+                id: Id::NONE
             },
             result
         );
@@ -744,8 +751,15 @@ mod test {
             size: Vec3::new(2.0, 0.75, 2.0),
         });
         let cube_shape = r.slab.append(&crate::sdf::SdfShape::from_cuboid(cube));
-        let transformed_cube = r.slab.append(&crate::sdf::Transformed {
+        let cube_material = r.slab.append(&crate::sdf::Materialized {
             shape: cube_shape,
+            material: cyan,
+        });
+        let cube_mat = r
+            .slab
+            .append(&crate::sdf::SdfShape::from_materialized(cube_material));
+        let transformed_cube = r.slab.append(&crate::sdf::Transformed {
+            shape: cube_mat,
             transform: Transform {
                 translation: Vec3::new(0.0, -1.0, 0.0),
                 rotation: Quat::from_rotation_y(std::f32::consts::FRAC_PI_4),
