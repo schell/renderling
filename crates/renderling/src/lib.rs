@@ -1,41 +1,11 @@
-//! A "GPU driven" renderer  with a focus on simplicity and ease of use.
+//! A few "GPU driven" renderers  with a focus on simplicity and ease of use.
 //! Backed by WebGPU.
-//! Shaders written in rust using `rust-gpu`.
+//! Shaders written in rust using `rust-gpu` (mostly).
 //!
 //! # WARNING
 //! This is very much a work in progress.
 //! YMMV.
 //! PRs are very welcomed :)
-//!
-//! # renderlings 🍖
-//!
-//! Render graphs and all their resources are called "renderlings" for maximum
-//! cuteness. Renderlings are configurable DAGs that draw something to a screen
-//! or texture.
-//!
-//! ## Features
-//!
-//! - forward+ style pipeline, configurable lighting model per material
-//!   - [ ] light tiling
-//!   - [ ] occlusion culling
-//!   - [x] physically based shading atlas)
-//! - [x] gltf support
-//!   - [x] scenes, nodes
-//!   - [x] cameras
-//!   - [x] meshes
-//!   - [x] materials
-//!   - [x] textures, images, samplers
-//!   - [x] skins
-//!   - [x] animations
-//! - [x] high definition rendering
-//! - [x] image based lighting
-//! - [ ] bloom
-//! - [ ] ssao
-//! - [ ] depth of field
-//!
-//! ## Raw shaders
-//! You can also use the [shaders module](crate::shaders) without renderlings
-//! and manage your own resources for maximum flexibility.
 #![cfg_attr(target_arch = "spirv", no_std)]
 #![deny(clippy::disallowed_methods)]
 
