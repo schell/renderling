@@ -272,13 +272,8 @@ pub use cpu::*;
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::{
-        pbr::{light::*, Material},
-        stage::Vertex,
-        Camera, Transform,
-    };
-    use glam::{Mat3, Mat4, Quat, Vec2, Vec3, Vec4};
-    use img_diff::DiffCfg;
+    use crate::stage::Vertex;
+    use glam::{Mat3, Mat4, Quat, Vec2, Vec3};
     use pretty_assertions::assert_eq;
 
     #[test]

@@ -3,7 +3,7 @@ use crate::{frame::FrameTextureView, DepthTexture, Device, GraphError, Queue, Re
 use crabslab::{CpuSlab, GrowableSlab, Id, Slab, WgpuBuffer};
 use glam::Vec3;
 
-use crate::sdf::{SdfShape, ShapeLegend};
+use crate::sdf::{SdfPrim, ShapeLegend};
 
 pub fn new_bindgroup_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
     let visibility =
@@ -153,7 +153,7 @@ impl SdfRenderer {
         }
     }
 
-    pub fn set_shape(&mut self, shape: SdfShape) -> Id<SdfShape> {
+    pub fn set_shape(&mut self, shape: SdfPrim) -> Id<SdfPrim> {
         let id = self.slab.append(&shape);
         self.slab
             .write(self.legend_id + ShapeLegend::offset_of_shape(), &id);

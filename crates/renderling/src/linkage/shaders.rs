@@ -155,6 +155,19 @@ pub fn sdf__raymarch__raymarch_vertex(device: &wgpu::Device) -> ShaderLinkage {
     }
 }
 /// Returns the shader linkage for
+/// [sdf::sdf_prim_fragment_test](crate::sdf::sdf_prim_fragment_test).
+///
+/// **spv path**: `crates/renderling/src/linkage/sdf-sdf_prim_fragment_test.spv`
+pub fn sdf__sdf_prim_fragment_test(device: &wgpu::Device) -> ShaderLinkage {
+    ShaderLinkage {
+        module: device
+            .create_shader_module(
+                wgpu::include_spirv!("sdf-sdf_prim_fragment_test.spv"),
+            ),
+        entry_point: "sdf::sdf_prim_fragment_test",
+    }
+}
+/// Returns the shader linkage for
 /// [sdf::sdf_shape_fragment](crate::sdf::sdf_shape_fragment).
 ///
 /// **spv path**: `crates/renderling/src/linkage/sdf-sdf_shape_fragment.spv`

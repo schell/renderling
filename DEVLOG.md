@@ -1,5 +1,14 @@
 # devlog
 
+## Sun Feb 4, 2024 
+
+Oof, I miss recursion.
+
+In the absence of recursion I'm working on a little stack language evaluator that will 
+evaluate the distance to surfaces using signed distance functions. I figure if it works 
+well I could use it for both raymarching the distance and evaluating the color/material 
+of the object.
+
 ## Thu Feb 1, 2024 
 
 I've contributed to `rust-gpu`. 

@@ -17,3 +17,4 @@ Cargo.lock
 test_output
 cmy_triangle_renderer.svg
 .aider*
+flamegraph.svg
