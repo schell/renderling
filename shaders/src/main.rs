@@ -66,13 +66,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::env::current_dir().unwrap().display()
     );
 
+    let start = std::time::Instant::now();
+
     let CompileResult {
         entry_points,
         module,
     } = {
         let mut builder = SpirvBuilder::new(shader_crate, "spirv-unknown-vulkan1.2")
-        .print_metadata(MetadataPrintout::None)
-        .multimodule(true);
+            .print_metadata(MetadataPrintout::None)
+            .multimodule(true);
 
         if no_default_features {
             builder = builder.shader_crate_default_features(false);
@@ -127,6 +129,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     if !dry_run {
         std::fs::write(dir.join("shaders.rs"), tokens).unwrap();
     }
+
+    let end = std::time::Instant::now();
+    println!("Finished in {:?}", (end - start));
 
     Ok(())
 }

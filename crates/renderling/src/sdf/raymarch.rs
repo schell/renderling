@@ -1,15 +1,14 @@
 //! Raymarching functions and shaders.
 use crabslab::{Id, Slab, SlabItem};
 use glam::{Vec2, Vec3, Vec3Swizzles, Vec4, Vec4Swizzles};
-use spirv_std::{
-    image::{Cubemap, Image2d},
-    spirv, Sampler,
-};
+use spirv_std::spirv;
 
 use crate::{
     math::{self, IsVector},
     Camera,
 };
+
+use super::Sdf;
 
 #[derive(Clone, Copy, Default, SlabItem)]
 pub struct Raymarch {
@@ -73,7 +72,7 @@ pub struct MarchResult {
     /// The total number of steps marched
     pub step_count: u32,
     pub hit: bool,
-    //pub id: Id<SdfShape>,
+    pub id: Id<Sdf>,
 }
 
 impl Default for MarchResult {
@@ -87,7 +86,7 @@ impl Default for MarchResult {
             min_step: f32::MAX,
             step_count: 0,
             hit: false,
-            //id: Id::NONE,
+            id: Id::NONE,
         }
     }
 }
@@ -119,7 +118,7 @@ impl Ray {
         }
     }
 
-    const MAX_STEPS: u32 = 256;
+    const MAX_STEPS: u32 = 2048;
 
     /// Perform raymarching.
     pub fn march(
@@ -140,7 +139,7 @@ impl Ray {
             result.step_count = i + 1;
 
             result.position = origin + result.distance_marched * direction;
-            let current_dist = scene.distance_estimate(result.position, slab);
+            let (current_dist, id) = scene.distance_estimate(result.position, slab);
             // variable minimum distance based on the pixel footprint
             let min_dist = result
                 .position
@@ -156,7 +155,7 @@ impl Ray {
                 result.tangent = tangent;
                 result.bitangent = bitangent;
                 result.hit = true;
-                // result.id = id;
+                result.id = id;
                 break;
             } else if current_dist >= max_dist {
                 break;
@@ -180,9 +179,9 @@ pub fn find_normal_by_gradient(
     let dy = Vec3::new(0.0, epsilon, 0.0);
     let dz = Vec3::new(0.0, 0.0, epsilon);
     Vec3::new(
-        scene.distance_estimate(p + dx, slab) - scene.distance_estimate(p - dx, slab),
-        scene.distance_estimate(p + dy, slab) - scene.distance_estimate(p - dy, slab),
-        scene.distance_estimate(p + dz, slab) - scene.distance_estimate(p - dz, slab),
+        scene.distance_estimate(p + dx, slab).0 - scene.distance_estimate(p - dx, slab).0,
+        scene.distance_estimate(p + dy, slab).0 - scene.distance_estimate(p - dy, slab).0,
+        scene.distance_estimate(p + dz, slab).0 - scene.distance_estimate(p - dz, slab).0,
     )
     .alt_norm_or_zero()
 }
@@ -249,11 +248,12 @@ pub fn raymarch_fragment(
     let mut color = Vec4::new(1.0, 0.0, 0.0, 1.0);
     if result.hit {
         // TODO: use ray differentials (pixel footprint) for anti-aliasing
-        //let shape = slab.read(result.id);
+        let sdf = slab.read(result.id);
+        let albedo = sdf.albedo(slab, result.position);
         //let material = shape.color(result.position, slab);
         //let material = slab.read(material);
         //color = material.albedo_factor;
-        color = result.normal.extend(1.0);
+        color = albedo.extend(1.0);
         // crate::pbr::fragment_impl(
         //     atlas,
         //     atlas_sampler,
@@ -290,7 +290,7 @@ mod test {
     use super::*;
     use crate::{
         sdf::{helper::RaymarchingRenderer, Sdf, StackParam},
-        AtlasImage, Skybox, Transform,
+        AtlasImage, Skybox,
     };
     use assert_approx_eq::assert_approx_eq;
     use crabslab::GrowableSlab;
@@ -520,74 +520,85 @@ mod test {
         img_diff::assert_img_eq("raymarch/ortho_rays.png", img);
     }
 
-    //#[test]
-    // fn raymarch_sanity_sphere_hit() {
-    //     let width = 16.0;
-    //     let height = 9.0;
-    //     let mut slab = crabslab::CpuSlab::new(vec![]);
-    //     // The projection is:
-    //     //      +Y  -Z
-    //     //       ^ /
-    //     // -X <- * -> +X
-    //     //     / v
-    //     //   +Z -Y
-    //     let projection = Mat4::orthographic_rh(
-    //         -width * 0.5,
-    //         width * 0.5,
-    //         -height * 0.5,
-    //         height * 0.5,
-    //         -height * 0.5,
-    //         height * 0.5,
-    //     );
-    //     let view = Mat4::look_at_rh(Vec3::new(0.0, 0.0, 3.0), Vec3::ZERO, Vec3::Y);
-    //     let camera = Camera::new(projection, view);
+    #[test]
+    fn raymarch_sanity_sphere_hit() {
+        let width = 16.0;
+        let height = 9.0;
+        let mut slab = crabslab::CpuSlab::new(vec![]);
+        // The projection is:
+        //      +Y  -Z
+        //       ^ /
+        // -X <- * -> +X
+        //     / v
+        //   +Z -Y
+        let projection = Mat4::orthographic_rh(
+            -width * 0.5,
+            width * 0.5,
+            -height * 0.5,
+            height * 0.5,
+            -height * 0.5,
+            height * 0.5,
+        );
+        let view = Mat4::look_at_rh(Vec3::new(0.0, 0.0, 3.0), Vec3::ZERO, Vec3::Y);
+        let camera = Camera::new(projection, view);
 
-    //     let camera_id = slab.append(&camera);
-    //     let _default_material = slab.append(&crate::pbr::Material {
-    //         albedo_factor: Vec4::new(1.0, 0.0, 0.0, 1.0),
-    //         has_lighting: false,
-    //         ..Default::default()
-    //     });
-    //     let _pbr_config = slab.append(&crate::pbr::PbrConfig::default());
-    //     let sphere = slab.append(&crate::sdf::Sphere { radius: 1.0 });
-    //     let shapes = slab.append_array(&[crate::sdf::SdfPrim::Sphere(sphere)]);
-    //     let scene = crate::sdf::Scene {
-    //         camera: camera_id,
-    //         shapes,
-    //         ..Default::default()
-    //     };
-    //     let _scene_id = slab.append(&scene);
-    //     let resolution = Vec2::new(width, height);
+        let camera_id = slab.append(&camera);
+        let _default_material = slab.append(&crate::pbr::Material {
+            albedo_factor: Vec4::new(1.0, 0.0, 0.0, 1.0),
+            has_lighting: false,
+            ..Default::default()
+        });
+        let _pbr_config = slab.append(&crate::pbr::PbrConfig::default());
+        let sphere = slab.append(&crate::sdf::Sphere { radius: 1.0 });
+        let prim = slab.append(&crate::sdf::SdfPrim::Sphere(sphere));
+        // red
+        let albedo_color = slab.append(&Vec3::X);
+        let sdf = crate::sdf::Sdf {
+            distance: slab.append_array(&[
+                StackParam::InputPosition,
+                StackParam::VarPrim(prim),
+                StackParam::OpDistance,
+            ]),
+            albedo: slab.append_array(&[StackParam::VarVec3(albedo_color)]),
+        };
+        let sdfs = slab.append_array(&[sdf]);
+        let scene = crate::sdf::Scene {
+            camera: camera_id,
+            sdfs,
+            ..Default::default()
+        };
+        let _scene_id = slab.append(&scene);
+        let resolution = Vec2::new(width, height);
 
-    //     let middle_fragment = resolution * 0.5;
+        let middle_fragment = resolution * 0.5;
 
-    //     let near_point = frag_coord_to_world(middle_fragment.extend(0.0), resolution, &camera);
-    //     println!("near_point: {near_point}");
-    //     let far_point = frag_coord_to_world(middle_fragment.extend(1.0), resolution, &camera);
-    //     println!("far_point: {far_point}");
+        let near_point = frag_coord_to_world(middle_fragment.extend(0.0), resolution, &camera);
+        println!("near_point: {near_point}");
+        let far_point = frag_coord_to_world(middle_fragment.extend(1.0), resolution, &camera);
+        println!("far_point: {far_point}");
 
-    //     let ray = Ray::from_fragment(middle_fragment, resolution, &camera);
-    //     let ray_dx =
-    //         Ray::from_fragment(middle_fragment + Vec2::new(0.001, 0.0), resolution, &camera);
-    //     let ray_dy =
-    //         Ray::from_fragment(middle_fragment + Vec2::new(0.0, 0.001), resolution, &camera);
-    //     println!("ray: {ray:#?}");
-    //     let result = ray.march(&scene, slab.as_ref(), ray_dx, ray_dy);
-    //     pretty_assertions::assert_eq!(
-    //         MarchResult {
-    //             hit: true,
-    //             position: Vec3::Z,
-    //             normal: Vec3::Z,
-    //             tangent: Vec3::NEG_Y,
-    //             bitangent: Vec3::X,
-    //             distance_marched: 6.5000005,
-    //             min_step: 0.0009999275,
-    //             step_count: 2,
-    //             //id: Id::NONE
-    //         },
-    //         result
-    //     );
-    // }
+        let ray = Ray::from_fragment(middle_fragment, resolution, &camera);
+        let ray_dx =
+            Ray::from_fragment(middle_fragment + Vec2::new(0.001, 0.0), resolution, &camera);
+        let ray_dy =
+            Ray::from_fragment(middle_fragment + Vec2::new(0.0, 0.001), resolution, &camera);
+        println!("ray: {ray:#?}");
+        let result = ray.march(&scene, slab.as_ref(), ray_dx, ray_dy);
+        pretty_assertions::assert_eq!(
+            MarchResult {
+                hit: true,
+                position: Vec3::Z,
+                normal: Vec3::Z,
+                tangent: Vec3::NEG_Y,
+                bitangent: Vec3::X,
+                distance_marched: 6.5000005,
+                min_step: 0.0009999275,
+                step_count: 2,
+                id: sdfs.at(0)
+            },
+            result
+        );
+    }
 
     #[test]
     fn raymarch_sphere() {
@@ -596,7 +607,7 @@ mod test {
         let mut r = RaymarchingRenderer::new(width as u32, height as u32);
         let projection =
             Mat4::perspective_rh(std::f32::consts::FRAC_PI_4, width / height, 0.1, 100.0);
-        let view = Mat4::look_at_rh(Vec3::new(0.0, 0.0, 5.0), Vec3::ZERO, Vec3::Y);
+        let view = Mat4::look_at_rh(Vec3::new(0.0, 3.0, 5.0), Vec3::ZERO, Vec3::Y);
         let camera = Camera::new(projection, view);
         let camera_id = r.slab.append(&camera);
         let (device, queue) = r.renderling.get_device_and_queue_owned();
@@ -612,16 +623,46 @@ mod test {
             ..Default::default()
         });
         let pbr_config = r.slab.append(&crate::pbr::PbrConfig::default());
+
+        let mut sdfs = vec![];
+
         let sphere = r.slab.append(&crate::sdf::Sphere { radius: 1.0 });
         let prim_id = r.slab.append(&crate::sdf::SdfPrim::Sphere(sphere));
         let sdf = Sdf {
             distance: r.slab.append_array(&[
                 StackParam::InputPosition,
-                StackParam::Sdf(prim_id),
-                StackParam::Op(crate::sdf::StackOp::Distance),
+                StackParam::VarPrim(prim_id),
+                StackParam::OpDistance,
+            ]),
+            albedo: r.slab.append_array(&[
+                StackParam::Float(1.0f32.to_bits()),
+                StackParam::Float(1.0f32.to_bits()),
+                StackParam::Float(0.0f32.to_bits()),
             ]),
         };
-        let sdfs = r.slab.append_array(&[sdf]);
+        sdfs.push(sdf);
+
+        let plane = r.slab.append(&crate::sdf::Plane {
+            normal: Vec3::Y,
+            height: 0.0,
+        });
+        let prim_id = r.slab.append(&crate::sdf::SdfPrim::Plane(plane));
+        let sdf = Sdf {
+            distance: r.slab.append_array(&[
+                StackParam::InputPosition,
+                StackParam::VarPrim(prim_id),
+                StackParam::OpDistance,
+            ]),
+            albedo: r.slab.append_array(&[
+                StackParam::Float(0.0f32.to_bits()),
+                StackParam::Float(1.0f32.to_bits()),
+                StackParam::Float(1.0f32.to_bits()),
+            ]),
+        };
+        sdfs.push(sdf);
+
+        let sdfs = r.slab.append_array(&sdfs);
+
         let scene = r.slab.append(&crate::sdf::Scene {
             camera: camera_id,
             sdfs,

@@ -21,8 +21,14 @@ pub fn gen_all_shaders(shaders: impl IntoIterator<Item = (String, std::path::Pat
                 });
             let quote = quote! {
                 pub fn #fn_name(device: &wgpu::Device) -> ShaderLinkage {
+                    log::debug!("creating shader module for {}", stringify!(#fn_name));
+                    let start = std::time::Instant::now();
+                    let module = device.create_shader_module(wgpu::include_spirv!(#source_path));
+                    let duration = std::time::Instant::now() - start;
+                    log::debug!("...created shader module {} in {duration:?}", stringify!(#fn_name));
+
                     ShaderLinkage {
-                        module: device.create_shader_module(wgpu::include_spirv!(#source_path)),
+                        module,
                         entry_point: #entry_point,
                     }
                 }

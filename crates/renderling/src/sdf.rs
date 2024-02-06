@@ -10,7 +10,7 @@ use crate::math::Float;
 use crate::{
     math::{self, IsVector},
     pbr::Material,
-    Camera, Transform,
+    Camera,
 };
 use spirv_std::spirv;
 
@@ -49,6 +49,27 @@ impl Sphere {
 
     pub fn closest_point(&self, position: Vec3) -> Vec3 {
         position.normalize() * self.radius
+    }
+}
+
+#[derive(Clone, Copy, SlabItem)]
+pub struct Plane {
+    pub normal: Vec3,
+    pub height: f32,
+}
+
+impl Default for Plane {
+    fn default() -> Self {
+        Plane {
+            normal: Vec3::Y,
+            height: 1.0,
+        }
+    }
+}
+
+impl Plane {
+    pub fn distance(&self, position: Vec3) -> f32 {
+        position.dot(self.normal) + self.height
     }
 }
 
@@ -358,6 +379,7 @@ pub fn sdf_union(a: f32, b: f32) -> f32 {
 #[derive(Clone, Copy, SlabItem)]
 pub enum SdfPrim {
     Sphere(Id<Sphere>),
+    Plane(Id<Plane>),
     Cuboid(Id<Cuboid>),
     Line(Id<Line>),
     Bezier(Id<Bezier>),
@@ -374,6 +396,10 @@ impl SdfPrim {
     pub fn distance(&self, slab: &[u32], position: Vec3) -> f32 {
         match self {
             SdfPrim::Sphere(id) => {
+                let sdf = slab.read(*id);
+                sdf.distance(position)
+            }
+            SdfPrim::Plane(id) => {
                 let sdf = slab.read(*id);
                 sdf.distance(position)
             }
@@ -410,34 +436,35 @@ impl SdfPrim {
 //Scale(Id<Scale>),
 //}
 
-#[derive(Clone, Copy, Default, SlabItem)]
-#[repr(u32)]
-pub enum StackOp {
-    #[default]
-    Distance,
-    Translate,
-    Union,
-}
-
 #[derive(Clone, Copy, SlabItem)]
 #[repr(u32)]
 pub enum StackParam {
-    Sdf(Id<SdfPrim>),
-    Op(StackOp),
+    OpDistance,
+    OpTranslate,
+    OpUnion,
+
+    VarFloat(Id<f32>),
+    VarVec3(Id<Vec3>),
+    VarPrim(Id<SdfPrim>),
+
     Float(u32),
+
     InputPosition,
+
+    Error(u32),
 }
 
 impl Default for StackParam {
     fn default() -> Self {
-        StackParam::Float(0.0f32.to_bits())
+        StackParam::Error(0)
     }
 }
 
 impl StackParam {
-    pub fn as_scalar(&self) -> f32 {
+    pub fn as_scalar(&self, slab: &[u32]) -> f32 {
         match self {
-            StackParam::Float(s) => f32::from_bits(*s),
+            StackParam::VarFloat(var) => slab.read(*var),
+            StackParam::Float(f) => f32::from_bits(*f),
             _ => 0.0,
         }
     }
@@ -447,7 +474,7 @@ struct Stack<const T: usize>([StackParam; T], usize);
 
 impl<const T: usize> Default for Stack<T> {
     fn default() -> Self {
-        Stack([StackParam::Float(0); T], 0)
+        Stack([StackParam::Error(0); T], 0)
     }
 }
 
@@ -473,24 +500,26 @@ impl<const T: usize> Stack<T> {
         self.0[self.1]
     }
 
-    fn pop_scalar(&mut self) -> f32 {
-        let param = self.pop();
-        match param {
-            StackParam::Float(f) => f32::from_bits(f),
-            _ => 0.0,
-        }
+    fn pop_scalar(&mut self, slab: &[u32]) -> f32 {
+        self.pop().as_scalar(slab)
     }
 
-    fn pop_vec3(&mut self) -> Vec3 {
-        let z = self.pop_scalar();
-        let y = self.pop_scalar();
-        let x = self.pop_scalar();
-        Vec3::new(z, y, x)
+    fn pop_vec3(&mut self, slab: &[u32]) -> Vec3 {
+        let param = self.pop();
+        match param {
+            StackParam::VarVec3(id) => slab.read(id),
+            p => {
+                let z = p.as_scalar(slab);
+                let y = self.pop_scalar(slab);
+                let x = self.pop_scalar(slab);
+                Vec3::new(z, y, x)
+            }
+        }
     }
 
     fn pop_sdf(&mut self) -> Id<SdfPrim> {
         match self.pop() {
-            StackParam::Sdf(id) => id,
+            StackParam::VarPrim(id) => id,
             _ => Id::NONE,
         }
     }
@@ -507,28 +536,26 @@ impl<const T: usize> Stack<T> {
                 StackParam::InputPosition => {
                     self.push_vec3(input_position);
                 }
-                StackParam::Op(op) => match op {
-                    StackOp::Distance => {
-                        let sdf_id = self.pop_sdf();
-                        let position = self.pop_vec3();
-                        let sdf_prim = slab.read(sdf_id);
-                        let distance = sdf_prim.distance(slab, position);
-                        self.push_scalar(distance);
-                    }
-                    StackOp::Union => {
-                        let right = self.pop_scalar();
-                        let left = self.pop_scalar();
-                        let distance = sdf_union(left, right);
-                        self.push_scalar(distance);
-                    }
-                    StackOp::Translate => {
-                        let translation = self.pop_vec3();
-                        let position = self.pop_vec3();
-                        self.push_vec3(position - translation);
-                    }
-                },
-                StackParam::Sdf(_) | StackParam::Float(_) => {
-                    // push the param onto the stack
+                StackParam::OpDistance => {
+                    let sdf_id = self.pop_sdf();
+                    let position = self.pop_vec3(slab);
+                    let sdf_prim = slab.read(sdf_id);
+                    let distance = sdf_prim.distance(slab, position);
+                    self.push_scalar(distance);
+                }
+                StackParam::OpUnion => {
+                    let right = self.pop_scalar(slab);
+                    let left = self.pop_scalar(slab);
+                    let distance = sdf_union(left, right);
+                    self.push_scalar(distance);
+                }
+                StackParam::OpTranslate => {
+                    let translation = self.pop_vec3(slab);
+                    let position = self.pop_vec3(slab);
+                    self.push_vec3(position - translation);
+                }
+
+                _ => {
                     self.push(param);
                 }
             }
@@ -548,20 +575,29 @@ pub fn sdf_prim_fragment_test(
 ) {
     let params = slab.read(instance_id);
     let mut stack = Stack::<64>::default();
-    let distance = stack.eval(slab, params, Vec3::ZERO).pop_scalar();
+    let distance = stack.eval(slab, params, Vec3::ZERO).pop_scalar(slab);
     *frag_color = Vec3::splat(distance / (distance + 1.0)).extend(1.0);
 }
 
 #[derive(Default, Clone, Copy, SlabItem)]
 pub struct Sdf {
+    /// Describes the surface as f32 distance
     pub distance: Array<StackParam>,
+    /// Describes the albedo color as a rgb Vec3
+    pub albedo: Array<StackParam>,
 }
 
 impl Sdf {
     pub fn distance(&self, slab: &[u32], position: Vec3) -> f32 {
         Stack::<STACK_SIZE>::default()
             .eval(slab, self.distance, position)
-            .pop_scalar()
+            .pop_scalar(slab)
+    }
+
+    pub fn albedo(&self, slab: &[u32], position: Vec3) -> Vec3 {
+        Stack::<STACK_SIZE>::default()
+            .eval(slab, self.albedo, position)
+            .pop_vec3(slab)
     }
 }
 
@@ -576,14 +612,20 @@ impl Scene {
         6
     }
 
-    pub fn distance_estimate(&self, position: Vec3, slab: &[u32]) -> f32 {
+    /// Returns the estimated distance to the nearest surface and the id
+    /// of that surface's [`Sdf`].
+    pub fn distance_estimate(&self, position: Vec3, slab: &[u32]) -> (f32, Id<Sdf>) {
         let mut distance = f32::MAX;
+        let mut id = Id::NONE;
         for shape_id in self.sdfs.iter() {
             let shape = slab.read(shape_id);
             let current_distance = shape.distance(slab, position);
-            distance = current_distance.min(distance);
+            if current_distance < distance {
+                distance = current_distance;
+                id = shape_id;
+            }
         }
-        distance
+        (distance, id)
     }
 }
 
@@ -1160,12 +1202,12 @@ mod test {
         let mut stack = Stack::<64>::default();
         let params = slab.append_array(&[
             StackParam::InputPosition,
-            StackParam::Sdf(prim_id),
-            StackParam::Op(StackOp::Distance),
+            StackParam::VarPrim(prim_id),
+            StackParam::OpDistance,
         ]);
         let distance = stack
             .eval(slab.as_ref().as_slice(), params, Vec3::ZERO)
-            .pop_scalar();
+            .pop_scalar(slab.as_ref().as_slice());
         assert_eq!(-1.0, distance);
     }
 }

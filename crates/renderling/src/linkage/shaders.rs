@@ -8,11 +8,19 @@ use super::ShaderLinkage;
 ///
 /// **spv path**: `crates/renderling/src/linkage/convolution-fragment_bloom.spv`
 pub fn convolution__fragment_bloom(device: &wgpu::Device) -> ShaderLinkage {
+    log::debug!(
+        "creating shader module for {}", stringify!(convolution__fragment_bloom)
+    );
+    let start = std::time::Instant::now();
+    let module = device
+        .create_shader_module(wgpu::include_spirv!("convolution-fragment_bloom.spv"));
+    let duration = std::time::Instant::now() - start;
+    log::debug!(
+        "...created shader module {} in {duration:?}",
+        stringify!(convolution__fragment_bloom)
+    );
     ShaderLinkage {
-        module: device
-            .create_shader_module(
-                wgpu::include_spirv!("convolution-fragment_bloom.spv"),
-            ),
+        module,
         entry_point: "convolution::fragment_bloom",
     }
 }
@@ -23,11 +31,22 @@ pub fn convolution__fragment_bloom(device: &wgpu::Device) -> ShaderLinkage {
 pub fn convolution__fragment_brdf_lut_convolution(
     device: &wgpu::Device,
 ) -> ShaderLinkage {
+    log::debug!(
+        "creating shader module for {}",
+        stringify!(convolution__fragment_brdf_lut_convolution)
+    );
+    let start = std::time::Instant::now();
+    let module = device
+        .create_shader_module(
+            wgpu::include_spirv!("convolution-fragment_brdf_lut_convolution.spv"),
+        );
+    let duration = std::time::Instant::now() - start;
+    log::debug!(
+        "...created shader module {} in {duration:?}",
+        stringify!(convolution__fragment_brdf_lut_convolution)
+    );
     ShaderLinkage {
-        module: device
-            .create_shader_module(
-                wgpu::include_spirv!("convolution-fragment_brdf_lut_convolution.spv"),
-            ),
+        module,
         entry_point: "convolution::fragment_brdf_lut_convolution",
     }
 }
@@ -36,11 +55,22 @@ pub fn convolution__fragment_brdf_lut_convolution(
 ///
 /// **spv path**: `crates/renderling/src/linkage/convolution-fragment_generate_mipmap.spv`
 pub fn convolution__fragment_generate_mipmap(device: &wgpu::Device) -> ShaderLinkage {
+    log::debug!(
+        "creating shader module for {}",
+        stringify!(convolution__fragment_generate_mipmap)
+    );
+    let start = std::time::Instant::now();
+    let module = device
+        .create_shader_module(
+            wgpu::include_spirv!("convolution-fragment_generate_mipmap.spv"),
+        );
+    let duration = std::time::Instant::now() - start;
+    log::debug!(
+        "...created shader module {} in {duration:?}",
+        stringify!(convolution__fragment_generate_mipmap)
+    );
     ShaderLinkage {
-        module: device
-            .create_shader_module(
-                wgpu::include_spirv!("convolution-fragment_generate_mipmap.spv"),
-            ),
+        module,
         entry_point: "convolution::fragment_generate_mipmap",
     }
 }
@@ -51,13 +81,24 @@ pub fn convolution__fragment_generate_mipmap(device: &wgpu::Device) -> ShaderLin
 pub fn convolution__fragment_prefilter_environment_cubemap(
     device: &wgpu::Device,
 ) -> ShaderLinkage {
-    ShaderLinkage {
-        module: device
-            .create_shader_module(
-                wgpu::include_spirv!(
-                    "convolution-fragment_prefilter_environment_cubemap.spv"
-                ),
+    log::debug!(
+        "creating shader module for {}",
+        stringify!(convolution__fragment_prefilter_environment_cubemap)
+    );
+    let start = std::time::Instant::now();
+    let module = device
+        .create_shader_module(
+            wgpu::include_spirv!(
+                "convolution-fragment_prefilter_environment_cubemap.spv"
             ),
+        );
+    let duration = std::time::Instant::now() - start;
+    log::debug!(
+        "...created shader module {} in {duration:?}",
+        stringify!(convolution__fragment_prefilter_environment_cubemap)
+    );
+    ShaderLinkage {
+        module,
         entry_point: "convolution::fragment_prefilter_environment_cubemap",
     }
 }
@@ -66,11 +107,22 @@ pub fn convolution__fragment_prefilter_environment_cubemap(
 ///
 /// **spv path**: `crates/renderling/src/linkage/convolution-vertex_brdf_lut_convolution.spv`
 pub fn convolution__vertex_brdf_lut_convolution(device: &wgpu::Device) -> ShaderLinkage {
+    log::debug!(
+        "creating shader module for {}",
+        stringify!(convolution__vertex_brdf_lut_convolution)
+    );
+    let start = std::time::Instant::now();
+    let module = device
+        .create_shader_module(
+            wgpu::include_spirv!("convolution-vertex_brdf_lut_convolution.spv"),
+        );
+    let duration = std::time::Instant::now() - start;
+    log::debug!(
+        "...created shader module {} in {duration:?}",
+        stringify!(convolution__vertex_brdf_lut_convolution)
+    );
     ShaderLinkage {
-        module: device
-            .create_shader_module(
-                wgpu::include_spirv!("convolution-vertex_brdf_lut_convolution.spv"),
-            ),
+        module,
         entry_point: "convolution::vertex_brdf_lut_convolution",
     }
 }
@@ -79,11 +131,21 @@ pub fn convolution__vertex_brdf_lut_convolution(device: &wgpu::Device) -> Shader
 ///
 /// **spv path**: `crates/renderling/src/linkage/convolution-vertex_generate_mipmap.spv`
 pub fn convolution__vertex_generate_mipmap(device: &wgpu::Device) -> ShaderLinkage {
+    log::debug!(
+        "creating shader module for {}", stringify!(convolution__vertex_generate_mipmap)
+    );
+    let start = std::time::Instant::now();
+    let module = device
+        .create_shader_module(
+            wgpu::include_spirv!("convolution-vertex_generate_mipmap.spv"),
+        );
+    let duration = std::time::Instant::now() - start;
+    log::debug!(
+        "...created shader module {} in {duration:?}",
+        stringify!(convolution__vertex_generate_mipmap)
+    );
     ShaderLinkage {
-        module: device
-            .create_shader_module(
-                wgpu::include_spirv!("convolution-vertex_generate_mipmap.spv"),
-            ),
+        module,
         entry_point: "convolution::vertex_generate_mipmap",
     }
 }
@@ -94,13 +156,22 @@ pub fn convolution__vertex_generate_mipmap(device: &wgpu::Device) -> ShaderLinka
 pub fn convolution__vertex_prefilter_environment_cubemap(
     device: &wgpu::Device,
 ) -> ShaderLinkage {
+    log::debug!(
+        "creating shader module for {}",
+        stringify!(convolution__vertex_prefilter_environment_cubemap)
+    );
+    let start = std::time::Instant::now();
+    let module = device
+        .create_shader_module(
+            wgpu::include_spirv!("convolution-vertex_prefilter_environment_cubemap.spv"),
+        );
+    let duration = std::time::Instant::now() - start;
+    log::debug!(
+        "...created shader module {} in {duration:?}",
+        stringify!(convolution__vertex_prefilter_environment_cubemap)
+    );
     ShaderLinkage {
-        module: device
-            .create_shader_module(
-                wgpu::include_spirv!(
-                    "convolution-vertex_prefilter_environment_cubemap.spv"
-                ),
-            ),
+        module,
         entry_point: "convolution::vertex_prefilter_environment_cubemap",
     }
 }
@@ -109,9 +180,16 @@ pub fn convolution__vertex_prefilter_environment_cubemap(
 ///
 /// **spv path**: `crates/renderling/src/linkage/pbr-pbr_fragment.spv`
 pub fn pbr__pbr_fragment(device: &wgpu::Device) -> ShaderLinkage {
+    log::debug!("creating shader module for {}", stringify!(pbr__pbr_fragment));
+    let start = std::time::Instant::now();
+    let module = device
+        .create_shader_module(wgpu::include_spirv!("pbr-pbr_fragment.spv"));
+    let duration = std::time::Instant::now() - start;
+    log::debug!(
+        "...created shader module {} in {duration:?}", stringify!(pbr__pbr_fragment)
+    );
     ShaderLinkage {
-        module: device
-            .create_shader_module(wgpu::include_spirv!("pbr-pbr_fragment.spv")),
+        module,
         entry_point: "pbr::pbr_fragment",
     }
 }
@@ -120,11 +198,21 @@ pub fn pbr__pbr_fragment(device: &wgpu::Device) -> ShaderLinkage {
 ///
 /// **spv path**: `crates/renderling/src/linkage/sdf-raymarch-raymarch_fragment.spv`
 pub fn sdf__raymarch__raymarch_fragment(device: &wgpu::Device) -> ShaderLinkage {
+    log::debug!(
+        "creating shader module for {}", stringify!(sdf__raymarch__raymarch_fragment)
+    );
+    let start = std::time::Instant::now();
+    let module = device
+        .create_shader_module(
+            wgpu::include_spirv!("sdf-raymarch-raymarch_fragment.spv"),
+        );
+    let duration = std::time::Instant::now() - start;
+    log::debug!(
+        "...created shader module {} in {duration:?}",
+        stringify!(sdf__raymarch__raymarch_fragment)
+    );
     ShaderLinkage {
-        module: device
-            .create_shader_module(
-                wgpu::include_spirv!("sdf-raymarch-raymarch_fragment.spv"),
-            ),
+        module,
         entry_point: "sdf::raymarch::raymarch_fragment",
     }
 }
@@ -133,11 +221,19 @@ pub fn sdf__raymarch__raymarch_fragment(device: &wgpu::Device) -> ShaderLinkage 
 ///
 /// **spv path**: `crates/renderling/src/linkage/sdf-raymarch-raymarch_rays.spv`
 pub fn sdf__raymarch__raymarch_rays(device: &wgpu::Device) -> ShaderLinkage {
+    log::debug!(
+        "creating shader module for {}", stringify!(sdf__raymarch__raymarch_rays)
+    );
+    let start = std::time::Instant::now();
+    let module = device
+        .create_shader_module(wgpu::include_spirv!("sdf-raymarch-raymarch_rays.spv"));
+    let duration = std::time::Instant::now() - start;
+    log::debug!(
+        "...created shader module {} in {duration:?}",
+        stringify!(sdf__raymarch__raymarch_rays)
+    );
     ShaderLinkage {
-        module: device
-            .create_shader_module(
-                wgpu::include_spirv!("sdf-raymarch-raymarch_rays.spv"),
-            ),
+        module,
         entry_point: "sdf::raymarch::raymarch_rays",
     }
 }
@@ -146,11 +242,19 @@ pub fn sdf__raymarch__raymarch_rays(device: &wgpu::Device) -> ShaderLinkage {
 ///
 /// **spv path**: `crates/renderling/src/linkage/sdf-raymarch-raymarch_vertex.spv`
 pub fn sdf__raymarch__raymarch_vertex(device: &wgpu::Device) -> ShaderLinkage {
+    log::debug!(
+        "creating shader module for {}", stringify!(sdf__raymarch__raymarch_vertex)
+    );
+    let start = std::time::Instant::now();
+    let module = device
+        .create_shader_module(wgpu::include_spirv!("sdf-raymarch-raymarch_vertex.spv"));
+    let duration = std::time::Instant::now() - start;
+    log::debug!(
+        "...created shader module {} in {duration:?}",
+        stringify!(sdf__raymarch__raymarch_vertex)
+    );
     ShaderLinkage {
-        module: device
-            .create_shader_module(
-                wgpu::include_spirv!("sdf-raymarch-raymarch_vertex.spv"),
-            ),
+        module,
         entry_point: "sdf::raymarch::raymarch_vertex",
     }
 }
@@ -159,11 +263,19 @@ pub fn sdf__raymarch__raymarch_vertex(device: &wgpu::Device) -> ShaderLinkage {
 ///
 /// **spv path**: `crates/renderling/src/linkage/sdf-sdf_prim_fragment_test.spv`
 pub fn sdf__sdf_prim_fragment_test(device: &wgpu::Device) -> ShaderLinkage {
+    log::debug!(
+        "creating shader module for {}", stringify!(sdf__sdf_prim_fragment_test)
+    );
+    let start = std::time::Instant::now();
+    let module = device
+        .create_shader_module(wgpu::include_spirv!("sdf-sdf_prim_fragment_test.spv"));
+    let duration = std::time::Instant::now() - start;
+    log::debug!(
+        "...created shader module {} in {duration:?}",
+        stringify!(sdf__sdf_prim_fragment_test)
+    );
     ShaderLinkage {
-        module: device
-            .create_shader_module(
-                wgpu::include_spirv!("sdf-sdf_prim_fragment_test.spv"),
-            ),
+        module,
         entry_point: "sdf::sdf_prim_fragment_test",
     }
 }
@@ -172,9 +284,17 @@ pub fn sdf__sdf_prim_fragment_test(device: &wgpu::Device) -> ShaderLinkage {
 ///
 /// **spv path**: `crates/renderling/src/linkage/sdf-sdf_shape_fragment.spv`
 pub fn sdf__sdf_shape_fragment(device: &wgpu::Device) -> ShaderLinkage {
+    log::debug!("creating shader module for {}", stringify!(sdf__sdf_shape_fragment));
+    let start = std::time::Instant::now();
+    let module = device
+        .create_shader_module(wgpu::include_spirv!("sdf-sdf_shape_fragment.spv"));
+    let duration = std::time::Instant::now() - start;
+    log::debug!(
+        "...created shader module {} in {duration:?}",
+        stringify!(sdf__sdf_shape_fragment)
+    );
     ShaderLinkage {
-        module: device
-            .create_shader_module(wgpu::include_spirv!("sdf-sdf_shape_fragment.spv")),
+        module,
         entry_point: "sdf::sdf_shape_fragment",
     }
 }
@@ -183,9 +303,16 @@ pub fn sdf__sdf_shape_fragment(device: &wgpu::Device) -> ShaderLinkage {
 ///
 /// **spv path**: `crates/renderling/src/linkage/sdf-sdf_shape_vertex.spv`
 pub fn sdf__sdf_shape_vertex(device: &wgpu::Device) -> ShaderLinkage {
+    log::debug!("creating shader module for {}", stringify!(sdf__sdf_shape_vertex));
+    let start = std::time::Instant::now();
+    let module = device
+        .create_shader_module(wgpu::include_spirv!("sdf-sdf_shape_vertex.spv"));
+    let duration = std::time::Instant::now() - start;
+    log::debug!(
+        "...created shader module {} in {duration:?}", stringify!(sdf__sdf_shape_vertex)
+    );
     ShaderLinkage {
-        module: device
-            .create_shader_module(wgpu::include_spirv!("sdf-sdf_shape_vertex.spv")),
+        module,
         entry_point: "sdf::sdf_shape_vertex",
     }
 }
@@ -194,9 +321,17 @@ pub fn sdf__sdf_shape_vertex(device: &wgpu::Device) -> ShaderLinkage {
 ///
 /// **spv path**: `crates/renderling/src/linkage/skybox-fragment_cubemap.spv`
 pub fn skybox__fragment_cubemap(device: &wgpu::Device) -> ShaderLinkage {
+    log::debug!("creating shader module for {}", stringify!(skybox__fragment_cubemap));
+    let start = std::time::Instant::now();
+    let module = device
+        .create_shader_module(wgpu::include_spirv!("skybox-fragment_cubemap.spv"));
+    let duration = std::time::Instant::now() - start;
+    log::debug!(
+        "...created shader module {} in {duration:?}",
+        stringify!(skybox__fragment_cubemap)
+    );
     ShaderLinkage {
-        module: device
-            .create_shader_module(wgpu::include_spirv!("skybox-fragment_cubemap.spv")),
+        module,
         entry_point: "skybox::fragment_cubemap",
     }
 }
@@ -205,11 +340,21 @@ pub fn skybox__fragment_cubemap(device: &wgpu::Device) -> ShaderLinkage {
 ///
 /// **spv path**: `crates/renderling/src/linkage/skybox-fragment_equirectangular.spv`
 pub fn skybox__fragment_equirectangular(device: &wgpu::Device) -> ShaderLinkage {
+    log::debug!(
+        "creating shader module for {}", stringify!(skybox__fragment_equirectangular)
+    );
+    let start = std::time::Instant::now();
+    let module = device
+        .create_shader_module(
+            wgpu::include_spirv!("skybox-fragment_equirectangular.spv"),
+        );
+    let duration = std::time::Instant::now() - start;
+    log::debug!(
+        "...created shader module {} in {duration:?}",
+        stringify!(skybox__fragment_equirectangular)
+    );
     ShaderLinkage {
-        module: device
-            .create_shader_module(
-                wgpu::include_spirv!("skybox-fragment_equirectangular.spv"),
-            ),
+        module,
         entry_point: "skybox::fragment_equirectangular",
     }
 }
@@ -218,8 +363,15 @@ pub fn skybox__fragment_equirectangular(device: &wgpu::Device) -> ShaderLinkage 
 ///
 /// **spv path**: `crates/renderling/src/linkage/skybox-vertex.spv`
 pub fn skybox__vertex(device: &wgpu::Device) -> ShaderLinkage {
+    log::debug!("creating shader module for {}", stringify!(skybox__vertex));
+    let start = std::time::Instant::now();
+    let module = device.create_shader_module(wgpu::include_spirv!("skybox-vertex.spv"));
+    let duration = std::time::Instant::now() - start;
+    log::debug!(
+        "...created shader module {} in {duration:?}", stringify!(skybox__vertex)
+    );
     ShaderLinkage {
-        module: device.create_shader_module(wgpu::include_spirv!("skybox-vertex.spv")),
+        module,
         entry_point: "skybox::vertex",
     }
 }
@@ -228,9 +380,16 @@ pub fn skybox__vertex(device: &wgpu::Device) -> ShaderLinkage {
 ///
 /// **spv path**: `crates/renderling/src/linkage/skybox-vertex_cubemap.spv`
 pub fn skybox__vertex_cubemap(device: &wgpu::Device) -> ShaderLinkage {
+    log::debug!("creating shader module for {}", stringify!(skybox__vertex_cubemap));
+    let start = std::time::Instant::now();
+    let module = device
+        .create_shader_module(wgpu::include_spirv!("skybox-vertex_cubemap.spv"));
+    let duration = std::time::Instant::now() - start;
+    log::debug!(
+        "...created shader module {} in {duration:?}", stringify!(skybox__vertex_cubemap)
+    );
     ShaderLinkage {
-        module: device
-            .create_shader_module(wgpu::include_spirv!("skybox-vertex_cubemap.spv")),
+        module,
         entry_point: "skybox::vertex_cubemap",
     }
 }
@@ -239,8 +398,15 @@ pub fn skybox__vertex_cubemap(device: &wgpu::Device) -> ShaderLinkage {
 ///
 /// **spv path**: `crates/renderling/src/linkage/stage-fragment.spv`
 pub fn stage__fragment(device: &wgpu::Device) -> ShaderLinkage {
+    log::debug!("creating shader module for {}", stringify!(stage__fragment));
+    let start = std::time::Instant::now();
+    let module = device.create_shader_module(wgpu::include_spirv!("stage-fragment.spv"));
+    let duration = std::time::Instant::now() - start;
+    log::debug!(
+        "...created shader module {} in {duration:?}", stringify!(stage__fragment)
+    );
     ShaderLinkage {
-        module: device.create_shader_module(wgpu::include_spirv!("stage-fragment.spv")),
+        module,
         entry_point: "stage::fragment",
     }
 }
@@ -249,11 +415,19 @@ pub fn stage__fragment(device: &wgpu::Device) -> ShaderLinkage {
 ///
 /// **spv path**: `crates/renderling/src/linkage/stage-test_i8_i16_extraction.spv`
 pub fn stage__test_i8_i16_extraction(device: &wgpu::Device) -> ShaderLinkage {
+    log::debug!(
+        "creating shader module for {}", stringify!(stage__test_i8_i16_extraction)
+    );
+    let start = std::time::Instant::now();
+    let module = device
+        .create_shader_module(wgpu::include_spirv!("stage-test_i8_i16_extraction.spv"));
+    let duration = std::time::Instant::now() - start;
+    log::debug!(
+        "...created shader module {} in {duration:?}",
+        stringify!(stage__test_i8_i16_extraction)
+    );
     ShaderLinkage {
-        module: device
-            .create_shader_module(
-                wgpu::include_spirv!("stage-test_i8_i16_extraction.spv"),
-            ),
+        module,
         entry_point: "stage::test_i8_i16_extraction",
     }
 }
@@ -262,8 +436,15 @@ pub fn stage__test_i8_i16_extraction(device: &wgpu::Device) -> ShaderLinkage {
 ///
 /// **spv path**: `crates/renderling/src/linkage/stage-vertex.spv`
 pub fn stage__vertex(device: &wgpu::Device) -> ShaderLinkage {
+    log::debug!("creating shader module for {}", stringify!(stage__vertex));
+    let start = std::time::Instant::now();
+    let module = device.create_shader_module(wgpu::include_spirv!("stage-vertex.spv"));
+    let duration = std::time::Instant::now() - start;
+    log::debug!(
+        "...created shader module {} in {duration:?}", stringify!(stage__vertex)
+    );
     ShaderLinkage {
-        module: device.create_shader_module(wgpu::include_spirv!("stage-vertex.spv")),
+        module,
         entry_point: "stage::vertex",
     }
 }
@@ -272,9 +453,16 @@ pub fn stage__vertex(device: &wgpu::Device) -> ShaderLinkage {
 ///
 /// **spv path**: `crates/renderling/src/linkage/tonemapping-fragment.spv`
 pub fn tonemapping__fragment(device: &wgpu::Device) -> ShaderLinkage {
+    log::debug!("creating shader module for {}", stringify!(tonemapping__fragment));
+    let start = std::time::Instant::now();
+    let module = device
+        .create_shader_module(wgpu::include_spirv!("tonemapping-fragment.spv"));
+    let duration = std::time::Instant::now() - start;
+    log::debug!(
+        "...created shader module {} in {duration:?}", stringify!(tonemapping__fragment)
+    );
     ShaderLinkage {
-        module: device
-            .create_shader_module(wgpu::include_spirv!("tonemapping-fragment.spv")),
+        module,
         entry_point: "tonemapping::fragment",
     }
 }
@@ -283,9 +471,16 @@ pub fn tonemapping__fragment(device: &wgpu::Device) -> ShaderLinkage {
 ///
 /// **spv path**: `crates/renderling/src/linkage/tonemapping-vertex.spv`
 pub fn tonemapping__vertex(device: &wgpu::Device) -> ShaderLinkage {
+    log::debug!("creating shader module for {}", stringify!(tonemapping__vertex));
+    let start = std::time::Instant::now();
+    let module = device
+        .create_shader_module(wgpu::include_spirv!("tonemapping-vertex.spv"));
+    let duration = std::time::Instant::now() - start;
+    log::debug!(
+        "...created shader module {} in {duration:?}", stringify!(tonemapping__vertex)
+    );
     ShaderLinkage {
-        module: device
-            .create_shader_module(wgpu::include_spirv!("tonemapping-vertex.spv")),
+        module,
         entry_point: "tonemapping::vertex",
     }
 }
