@@ -15,7 +15,7 @@ readme = "../../README.md"
 crate-type = ["lib", "dylib"]
 
 [features]
-default = ["winit"]
+default = ["winit", "gltf", "sdf"]
 gltf = ["dep:gltf"]
 sdf = []
 wasm = ["wgpu/fragile-send-sync-non-atomic-wasm"]
@@ -59,7 +59,7 @@ ctor = "0.2.2"
 env_logger = {workspace = true}
 icosahedron = "0.1"
 img-diff = { path = "../img-diff" }
-naga = { version = "0.13", features = ["spv-in", "wgsl-out", "wgsl-in", "msl-out"] }
+naga.workspace = true
 pretty_assertions = "1.4.0"
 ttf-parser = "0.20.0"
 

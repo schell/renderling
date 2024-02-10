@@ -403,7 +403,7 @@ impl Stage {
         let id = self.append(&rendering);
         let draw = DrawUnit {
             id,
-            vertex_count: sdf.vertex_count(),
+            vertex_count: Scene::vertex_count(),
             visible: true,
         };
         // UNWRAP: if we can't acquire the lock we want to panic.

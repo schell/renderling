@@ -95,6 +95,13 @@ impl RenderTarget {
         }
     }
 
+    pub fn is_headless(&self) -> bool {
+        match self {
+            RenderTarget::Surface { .. } => false,
+            RenderTarget::Texture { .. } => true,
+        }
+    }
+
     /// Get the current render target frame.
     ///
     /// Errs if the render target is a surface and there was an error getting

@@ -1,5 +1,48 @@
 # devlog
 
+## Wed Feb 7, 2024
+
+### Filesize and compile time woes 
+
+Lots of discussions about file sizes on the `rust-gpu` discord [starting here](https://discord.com/channels/750717012564770887/750717499737243679/1204153056191848618).
+Long story short (go read that thread if you want the long story), inlining happens in a big way in the `rust-gpu` compiler, and my code got hit hard. 
+I was able to reduce the `.spv` filesize of one of my shaders over 50% (from 731kb to 304kb) and the compile time by 85% (266s to 40s) simply by converting six calls of one function into a for loop 6 times over one function call.
+
+I'm also going to audit the `crabslab` API to attempt to reduce filesizes. 
+
+### SlabItem `read_slab` audit
+
+I have a minimal `crabslab` based shader that reads some structs off a the slab. 
+It clocks in at 9756 bytes. 
+
+I also have a baseline shader that does the same by hand, without the `SlabItem` trait.
+It weighs in at 4352 bytes. 
+
+So - just including `crabslab` here increases the `.spv` filesize by 124%!
+
+#### Rundown
+
+* including `Id` and `Array` doesn't change the filesize
+* including `SlabItem` increases it to 4688 bytes, a 7% increase.
+  - using `fn read_slab(&mut self, id: u32, slab: &[u32]) -> u32` is how we get to 4688 bytes
+  - using `fn read_slab(id: u32, slab: &[u32]) -> (u32, Self);` increases it to 4884 bytes
+  - using `fn read_slab(id: u32, slab: &[u32]) -> Self;` reduces it to 4628 bytes
+
+After rewriting the `read_slab` fn to `fn read_slab(id: u32, slab: &[u32]) -> Self;` the minimal 
+`crabslab` based shader is only 4576 bytes, which is only 5% larger than the baseline and 53% 
+smaller than the previous. We'll see how much smaller my shaders get as a result.
+
+### Filesize / compilation time audit result 
+
+After changing the slab reading API, bumping crabslab in `renderling` and recompiling my shader 
+the filesize was further reduced another 40% - from 304kb to 182kb.
+Compilation time reduced a further 35% - from 40s to 26s!
+
+So the total reduction in filesize is 75% - from 731kb to 182kb.
+Total reduction in compilation time is 90% - from 266s to 26s!
+
+What a difference a little tangential work and profiling can make!
+
 ## Sun Feb 4, 2024 
 
 Oof, I miss recursion.

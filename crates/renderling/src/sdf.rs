@@ -2,21 +2,20 @@
 #![deny(clippy::disallowed_methods)]
 
 use crabslab::{Array, Id, Slab, SlabItem};
-use glam::{vec2, vec3, BVec3, Quat, Vec2, Vec3, Vec4, Vec4Swizzles};
+use glam::{vec2, vec3, BVec3, Vec2, Vec3, Vec4, Vec4Swizzles};
 
 #[cfg(target_arch = "spirv")]
 use crate::math::Float;
 
 use crate::{
     math::{self, IsVector},
-    pbr::Material,
     Camera,
 };
 use spirv_std::spirv;
 
-#[cfg(test)]
-mod helper;
 pub mod raymarch;
+#[cfg(not(target_arch = "spirv"))]
+pub mod renderer;
 
 /// Returns the implicit position of the given index in clip space
 /// when being rendered in 2d.
@@ -43,11 +42,11 @@ impl Default for Sphere {
 }
 
 impl Sphere {
-    pub fn distance(&self, position: Vec3) -> f32 {
-        position.length() - self.radius
+    pub fn distance(position: Vec3, radius: f32) -> f32 {
+        position.length() - radius
     }
 
-    pub fn closest_point(&self, position: Vec3) -> Vec3 {
+    pub fn closest_point(self, position: Vec3) -> Vec3 {
         position.normalize() * self.radius
     }
 }
@@ -68,8 +67,8 @@ impl Default for Plane {
 }
 
 impl Plane {
-    pub fn distance(&self, position: Vec3) -> f32 {
-        position.dot(self.normal) + self.height
+    pub fn distance(position: Vec3, normal: Vec3, height: f32) -> f32 {
+        position.dot(normal) + height
     }
 }
 
@@ -91,18 +90,18 @@ impl Default for Line {
 }
 
 impl Line {
-    pub fn distance(&self, position: Vec3) -> f32 {
+    pub fn distance(position: Vec3, start: Vec3, end: Vec3, thickness: f32) -> f32 {
         let p = position;
-        let a = self.start;
-        let b = self.end;
+        let a = start;
+        let b = end;
         let pa = p - a;
         let ba = b - a;
         let h = math::clamp(pa.dot(ba) / ba.dot(ba), 0.0, 1.0);
-        (pa - ba * h).length() - self.thickness * 0.5
+        (pa - ba * h).length() - thickness * 0.5
     }
 
     /// Returns the closest point on the line to the given position.
-    pub fn closest_point(&self, position: Vec3) -> Vec3 {
+    pub fn closest_point(self, position: Vec3) -> Vec3 {
         let p = position;
         let a = self.start;
         let b = self.end;
@@ -136,11 +135,11 @@ impl Default for Bezier {
 }
 
 impl Bezier {
-    fn distance(&self, pos: Vec3) -> f32 {
-        let a = self.control - self.start;
-        let b = self.start - 2.0 * self.control + self.end;
+    fn distance(position: Vec3, start: Vec3, control: Vec3, end: Vec3, thickness: f32) -> f32 {
+        let a = control - start;
+        let b = start - 2.0 * control + end;
         let c = a * 2.0;
-        let d = self.start - pos;
+        let d = start - position;
 
         let kk = 1.0 / b.dot(b);
         let kx = kk * a.dot(b);
@@ -193,7 +192,7 @@ impl Bezier {
             // the third root cannot be the closest
             // res = min(res,dot2(d+(c+b*t.z)*t.z));
         };
-        return res.sqrt() - self.thickness * 0.5;
+        return res.sqrt() - thickness * 0.5;
     }
 }
 
@@ -262,22 +261,29 @@ impl Path {
         area <= straight_line_area || area <= f32::EPSILON
     }
 
-    pub fn distance(&self, pos: Vec3, slab: &[u32]) -> f32 {
+    pub fn distance(
+        slab: &[u32],
+        position: Vec3,
+        items: Array<PathItem>,
+        filled: bool,
+        thickness: f32,
+    ) -> f32 {
         let mut distance = f32::MAX;
         let mut sign = 1.0;
         let pos_change = Vec2::new(
-            spirv_std::arch::ddx(pos.x).abs(),
-            spirv_std::arch::ddy(pos.y).abs(),
+            spirv_std::arch::ddx(position.x).abs(),
+            spirv_std::arch::ddy(position.y).abs(),
         );
-        for item_id in self.items.iter() {
+        for item_id in items.iter() {
             let item_distance = match slab.read(item_id) {
                 PathItem::None => {
                     continue;
                 }
                 PathItem::Bezier(bez_id) => {
                     let bez = slab.read(bez_id);
-                    let distance = bez.distance(pos);
-                    if self.filled {
+                    let distance =
+                        Bezier::distance(position, bez.start, bez.control, bez.end, bez.thickness);
+                    if filled {
                         let mut remaining_bez = (bez.start, bez.control, bez.end);
                         loop {
                             if Self::bez_is_colinear_enough(pos_change, remaining_bez) {
@@ -299,18 +305,18 @@ impl Path {
                             }
                             // Now we know `bez_a` has an area smaller than a pixel, we can update
                             // our winding
-                            sign *= Self::wind_sign(pos, bez_a.0, bez_a.2);
+                            sign *= Self::wind_sign(position, bez_a.0, bez_a.2);
                             remaining_bez = bez_b;
                         }
-                        sign *= Self::wind_sign(pos, remaining_bez.0, remaining_bez.2);
+                        sign *= Self::wind_sign(position, remaining_bez.0, remaining_bez.2);
                     }
                     distance
                 }
                 PathItem::Line(line_id) => {
                     let line = slab.read(line_id);
-                    let distance = line.distance(pos);
-                    if self.filled {
-                        sign *= Self::wind_sign(pos, line.start, line.end);
+                    let distance = Line::distance(position, line.start, line.end, line.thickness);
+                    if filled {
+                        sign *= Self::wind_sign(position, line.start, line.end);
                     }
                     distance
                 }
@@ -318,7 +324,7 @@ impl Path {
             distance = distance.min(item_distance);
         }
 
-        let thickness = self.thickness * 0.5;
+        let thickness = thickness * 0.5;
         sign * distance - thickness
     }
 }
@@ -338,12 +344,8 @@ impl Default for Cuboid {
 }
 
 impl Cuboid {
-    pub fn half_size(&self) -> Vec3 {
-        self.size * 0.5
-    }
-
-    pub fn distance(&self, position: Vec3) -> f32 {
-        let q = position.abs() - self.half_size();
+    pub fn distance(position: Vec3, size: Vec3) -> f32 {
+        let q = position.abs() - size * 0.5;
         q.max(Vec3::ZERO).length() + q.x.max(q.y.max(q.z)).min(0.0)
     }
 }
@@ -377,48 +379,55 @@ pub fn sdf_union(a: f32, b: f32) -> f32 {
 /// See the [Inigo Quilez](http://iquilezles.org/articles/distfunctions/)
 /// article for more info.
 #[derive(Clone, Copy, SlabItem)]
-pub enum SdfPrim {
-    Sphere(Id<Sphere>),
-    Plane(Id<Plane>),
-    Cuboid(Id<Cuboid>),
-    Line(Id<Line>),
-    Bezier(Id<Bezier>),
-    Path(Id<Path>),
+pub struct SdfPrim {
+    pub prim_type: u32,
+    pub id: u32,
 }
 
 impl Default for SdfPrim {
     fn default() -> Self {
-        SdfPrim::Sphere(Id::NONE)
+        SdfPrim {
+            prim_type: Self::SPHERE,
+            id: u32::MAX,
+        }
     }
 }
 
 impl SdfPrim {
-    pub fn distance(&self, slab: &[u32], position: Vec3) -> f32 {
-        match self {
-            SdfPrim::Sphere(id) => {
-                let sdf = slab.read(*id);
-                sdf.distance(position)
+    pub const SPHERE: u32 = 0;
+    pub const PLANE: u32 = 1;
+    pub const CUBOID: u32 = 2;
+    pub const BEZIER: u32 = 3;
+    pub const LINE: u32 = 4;
+    pub const PATH: u32 = 5;
+
+    pub fn distance(self, slab: &[u32], position: Vec3) -> f32 {
+        match self.prim_type {
+            SdfPrim::SPHERE => {
+                let sdf = Sphere::read_slab(self.id as usize, slab);
+                Sphere::distance(position, sdf.radius)
             }
-            SdfPrim::Plane(id) => {
-                let sdf = slab.read(*id);
-                sdf.distance(position)
+            SdfPrim::PLANE => {
+                let sdf = Plane::read_slab(self.id as usize, slab);
+                Plane::distance(position, sdf.normal, sdf.height)
             }
-            SdfPrim::Cuboid(id) => {
-                let sdf = slab.read(*id);
-                sdf.distance(position)
+            SdfPrim::CUBOID => {
+                let sdf = Cuboid::read_slab(self.id as usize, slab);
+                Cuboid::distance(position, sdf.size)
             }
-            SdfPrim::Line(id) => {
-                let sdf = slab.read(*id);
-                sdf.distance(position)
+            SdfPrim::LINE => {
+                let sdf = Line::read_slab(self.id as usize, slab);
+                Line::distance(position, sdf.start, sdf.end, sdf.thickness)
             }
-            SdfPrim::Bezier(id) => {
-                let sdf = slab.read(*id);
-                sdf.distance(position)
+            SdfPrim::BEZIER => {
+                let sdf = Bezier::read_slab(self.id as usize, slab);
+                Bezier::distance(position, sdf.start, sdf.control, sdf.end, sdf.thickness)
             }
-            SdfPrim::Path(id) => {
-                let sdf = slab.read(*id);
-                sdf.distance(position, slab)
+            SdfPrim::PATH => {
+                let sdf = Path::read_slab(self.id as usize, slab);
+                Path::distance(slab, position, sdf.items, sdf.filled, sdf.thickness)
             }
+            _ => 0.0,
         }
     }
 }
@@ -437,15 +446,23 @@ impl SdfPrim {
 //}
 
 #[derive(Clone, Copy, SlabItem)]
+#[cfg_attr(not(target_arch = "spirv"), derive(Debug, PartialEq))]
 #[repr(u32)]
 pub enum StackParam {
-    OpDistance,
-    OpTranslate,
-    OpUnion,
+    OpDistanceSphere,
+    OpDistancePlane,
 
-    VarFloat(Id<f32>),
-    VarVec3(Id<Vec3>),
-    VarPrim(Id<SdfPrim>),
+    OpTranslate,
+    OpRotate,
+    OpUnion,
+    OpDifference,
+    OpIntersection,
+    OpXor,
+    OpSmoothUnion,
+    OpSmoothSubtraction,
+    OpSmoothIntersection,
+
+    Var(u32),
 
     Float(u32),
 
@@ -461,10 +478,10 @@ impl Default for StackParam {
 }
 
 impl StackParam {
-    pub fn as_scalar(&self, slab: &[u32]) -> f32 {
+    pub fn as_scalar(self, slab: &[u32]) -> f32 {
         match self {
-            StackParam::VarFloat(var) => slab.read(*var),
-            StackParam::Float(f) => f32::from_bits(*f),
+            StackParam::Var(var) => slab.read(Id::new(var)),
+            StackParam::Float(f) => f32::from_bits(f),
             _ => 0.0,
         }
     }
@@ -507,20 +524,13 @@ impl<const T: usize> Stack<T> {
     fn pop_vec3(&mut self, slab: &[u32]) -> Vec3 {
         let param = self.pop();
         match param {
-            StackParam::VarVec3(id) => slab.read(id),
+            StackParam::Var(id) => slab.read(Id::new(id)),
             p => {
                 let z = p.as_scalar(slab);
                 let y = self.pop_scalar(slab);
                 let x = self.pop_scalar(slab);
                 Vec3::new(z, y, x)
             }
-        }
-    }
-
-    fn pop_sdf(&mut self) -> Id<SdfPrim> {
-        match self.pop() {
-            StackParam::VarPrim(id) => id,
-            _ => Id::NONE,
         }
     }
 
@@ -536,11 +546,17 @@ impl<const T: usize> Stack<T> {
                 StackParam::InputPosition => {
                     self.push_vec3(input_position);
                 }
-                StackParam::OpDistance => {
-                    let sdf_id = self.pop_sdf();
+                StackParam::OpDistanceSphere => {
+                    let radius = self.pop_scalar(slab);
                     let position = self.pop_vec3(slab);
-                    let sdf_prim = slab.read(sdf_id);
-                    let distance = sdf_prim.distance(slab, position);
+                    let distance = Sphere::distance(position, radius);
+                    self.push_scalar(distance);
+                }
+                StackParam::OpDistancePlane => {
+                    let height = self.pop_scalar(slab);
+                    let normal = self.pop_vec3(slab);
+                    let position = self.pop_vec3(slab);
+                    let distance = Plane::distance(position, normal, height);
                     self.push_scalar(distance);
                 }
                 StackParam::OpUnion => {
@@ -588,13 +604,13 @@ pub struct Sdf {
 }
 
 impl Sdf {
-    pub fn distance(&self, slab: &[u32], position: Vec3) -> f32 {
+    pub fn distance(self, slab: &[u32], position: Vec3) -> f32 {
         Stack::<STACK_SIZE>::default()
             .eval(slab, self.distance, position)
             .pop_scalar(slab)
     }
 
-    pub fn albedo(&self, slab: &[u32], position: Vec3) -> Vec3 {
+    pub fn albedo(self, slab: &[u32], position: Vec3) -> Vec3 {
         Stack::<STACK_SIZE>::default()
             .eval(slab, self.albedo, position)
             .pop_vec3(slab)
@@ -608,13 +624,13 @@ pub struct Scene {
 }
 
 impl Scene {
-    pub const fn vertex_count(&self) -> u32 {
+    pub const fn vertex_count() -> u32 {
         6
     }
 
     /// Returns the estimated distance to the nearest surface and the id
     /// of that surface's [`Sdf`].
-    pub fn distance_estimate(&self, position: Vec3, slab: &[u32]) -> (f32, Id<Sdf>) {
+    pub fn distance_estimate(self, position: Vec3, slab: &[u32]) -> (f32, Id<Sdf>) {
         let mut distance = f32::MAX;
         let mut id = Id::NONE;
         for shape_id in self.sdfs.iter() {
@@ -726,31 +742,35 @@ pub fn sdf_shape_fragment(
 
 #[cfg(test)]
 mod test {
-    use crabslab::{CpuSlab, GrowableSlab};
-
-    use super::{helper::SdfRenderer, *};
+    use super::{renderer::SdfRenderer, *};
+    use crabslab::GrowableSlab;
 
     #[test]
     fn circle_sanity() {
-        let circle = Sphere { radius: 1.0 };
-        assert_eq!(-circle.radius, circle.distance(Vec3::ZERO));
-        assert_eq!(0.0, circle.distance(Vec3::new(1.0, 0.0, 0.0)));
+        assert_eq!(-1.0, Sphere::distance(Vec3::ZERO, 1.0));
+        assert_eq!(0.0, Sphere::distance(Vec3::new(1.0, 0.0, 0.0), 1.0));
         assert_eq!(
             0.0,
-            circle.distance(Vec3::new(
-                f32::cos(std::f32::consts::FRAC_PI_4),
-                f32::sin(std::f32::consts::FRAC_PI_4),
-                0.0
-            ))
+            Sphere::distance(
+                Vec3::new(
+                    f32::cos(std::f32::consts::FRAC_PI_4),
+                    f32::sin(std::f32::consts::FRAC_PI_4),
+                    0.0
+                ),
+                1.0
+            )
         );
-        assert_eq!(1.0, circle.distance(Vec3::new(2.0, 0.0, 0.0)));
+        assert_eq!(1.0, Sphere::distance(Vec3::new(2.0, 0.0, 0.0), 1.0));
     }
 
     #[test]
     fn sdf_circle() {
         let mut r = SdfRenderer::new(256, 256);
         let circle_id = r.slab.append(&Sphere { radius: 1.0 });
-        let _ = r.set_shape(SdfPrim::Sphere(circle_id));
+        let _ = r.set_shape(SdfPrim {
+            prim_type: SdfPrim::SPHERE,
+            id: circle_id.inner(),
+        });
         let img = r.render_image();
         img_diff::assert_img_eq("sdf/circle.png", img);
     }
@@ -764,7 +784,10 @@ mod test {
             thickness: 0.2,
         };
         let line_id = r.slab.append(&line);
-        let _ = r.set_shape(SdfPrim::Line(line_id));
+        let _ = r.set_shape(SdfPrim {
+            prim_type: SdfPrim::LINE,
+            id: line_id.inner(),
+        });
         let img = r.render_image();
         img_diff::assert_img_eq("sdf/line.png", img);
     }
@@ -774,11 +797,20 @@ mod test {
         let rect = Cuboid {
             size: Vec3::splat(2.0),
         };
-        assert_eq!(0.0, rect.distance(Vec3::ONE));
-        assert_eq!(0.0, rect.distance(Vec3::new(1.0, 0.0, 0.0)));
-        assert_eq!(0.0, rect.distance(Vec3::new(0.0, 1.0, 0.0)));
-        assert_eq!(1.0, rect.distance(Vec3::new(2.0, 0.0, 0.0)));
-        assert_eq!(-1.0, rect.distance(Vec3::ZERO));
+        assert_eq!(0.0, Cuboid::distance(Vec3::ONE, Vec3::splat(2.0)));
+        assert_eq!(
+            0.0,
+            Cuboid::distance(Vec3::new(1.0, 0.0, 0.0), Vec3::splat(2.0))
+        );
+        assert_eq!(
+            0.0,
+            Cuboid::distance(Vec3::new(0.0, 1.0, 0.0), Vec3::splat(2.0))
+        );
+        assert_eq!(
+            1.0,
+            Cuboid::distance(Vec3::new(2.0, 0.0, 0.0), Vec3::splat(2.0))
+        );
+        assert_eq!(-1.0, Cuboid::distance(Vec3::ZERO, Vec3::splat(2.0)));
     }
 
     #[test]
@@ -787,7 +819,10 @@ mod test {
         let rect_id = r.slab.append(&Cuboid {
             size: Vec3::new(1.4, 0.8, 1.0),
         });
-        let _ = r.set_shape(SdfPrim::Cuboid(rect_id));
+        let _ = r.set_shape(SdfPrim {
+            prim_type: SdfPrim::CUBOID,
+            id: rect_id.inner(),
+        });
         let img = r.render_image();
         img_diff::assert_img_eq("sdf/rect.png", img);
     }
@@ -809,7 +844,10 @@ mod test {
             end: v2,
             thickness: 0.2,
         });
-        let _ = r.set_shape(SdfPrim::Bezier(bez_id));
+        let _ = r.set_shape(SdfPrim {
+            prim_type: SdfPrim::BEZIER,
+            id: bez_id.inner(),
+        });
         let img = r.render_image();
         img_diff::assert_img_eq("sdf/bez.png", img);
     }
@@ -849,7 +887,10 @@ mod test {
             filled: true,
         };
         let path_id = r.slab.append(&path);
-        let _ = r.set_shape(SdfPrim::Path(path_id));
+        let _ = r.set_shape(SdfPrim {
+            prim_type: SdfPrim::PATH,
+            id: path_id.inner(),
+        });
 
         let position = Vec2::new(166.0, 73.0);
         let position = position / 256.0; // now x and y are between [0, 1]
@@ -895,7 +936,10 @@ mod test {
             filled: true,
         };
         let path_id = r.slab.append(&path);
-        let _ = r.set_shape(SdfPrim::Path(path_id));
+        let _ = r.set_shape(SdfPrim {
+            prim_type: SdfPrim::PATH,
+            id: path_id.inner(),
+        });
 
         let position = Vec2::new(166.0, 73.0);
         let position = position / 256.0; // now x and y are between [0, 1]
@@ -947,7 +991,10 @@ mod test {
             filled: true,
         };
         let path_id = r.slab.append(&path);
-        let _ = r.set_shape(SdfPrim::Path(path_id));
+        let _ = r.set_shape(SdfPrim {
+            prim_type: SdfPrim::PATH,
+            id: path_id.inner(),
+        });
 
         let img = r.render_image();
         img_diff::assert_img_eq("sdf/filled_bez_path_holes_thickness_0.png", img);
@@ -1031,7 +1078,10 @@ mod test {
                     });
                     *last = p;
                     items.push(PathItem::Line(line_id));
-                    Some(SdfPrim::Line(line_id))
+                    Some(SdfPrim {
+                        prim_type: SdfPrim::LINE,
+                        id: line_id.inner(),
+                    })
                 }
 
                 let shapes = self
@@ -1060,7 +1110,10 @@ mod test {
                                     let bez_id = r.slab.append(&bez);
                                     last = c;
                                     items.push(PathItem::Bezier(bez_id));
-                                    Some(SdfPrim::Bezier(bez_id))
+                                    Some(SdfPrim {
+                                        prim_type: SdfPrim::BEZIER,
+                                        id: bez_id.inner(),
+                                    })
                                 }
                             }
                             Outline::CubicTo(_, _, _) => {
@@ -1074,7 +1127,10 @@ mod test {
                                 });
                                 start = None;
                                 items.push(PathItem::Line(line_id));
-                                Some(SdfPrim::Line(line_id))
+                                Some(SdfPrim {
+                                    prim_type: SdfPrim::LINE,
+                                    id: line_id.inner(),
+                                })
                             }
                         };
                         if start.is_none() && !matches!(item, Outline::Close) {
@@ -1138,7 +1194,10 @@ mod test {
             let mut builder = Builder::new(&face);
             if let Some(_) = face.outline_glyph(glyph_index, &mut builder) {
                 let outline = builder.build(&mut r);
-                r.set_shape(SdfPrim::Path(outline.path_id));
+                r.set_shape(SdfPrim {
+                    prim_type: SdfPrim::PATH,
+                    id: outline.path_id.inner(),
+                });
 
                 let img = r.render_image();
                 let filename = format!("{c}")
@@ -1167,8 +1226,8 @@ mod test {
         let sphere = Sphere { radius: 3.2 };
         let point = Vec3::new(1.0, 2.0, 3.0);
         let closest_point = sphere.closest_point(point);
-        assert_eq!(0.0, sphere.distance(closest_point));
-        let distance = sphere.distance(point);
+        assert_eq!(0.0, Sphere::distance(closest_point, sphere.radius));
+        let distance = Sphere::distance(point, sphere.radius);
         assert_approx_eq::assert_approx_eq!((point - closest_point).length(), distance, 1e-6);
 
         let line = Line {
@@ -1188,26 +1247,11 @@ mod test {
         let point = Vec3::new(2.0, 5.0, 0.0);
         let closest_point = sphere.closest_point(point);
         println!("closest_point: {:?}", closest_point);
-        assert_eq!(0.0, line.distance(closest_point));
-        let distance = line.distance(point);
+        assert_eq!(
+            0.0,
+            Line::distance(closest_point, line.start, line.end, line.thickness)
+        );
+        let distance = Line::distance(point, line.start, line.end, line.thickness);
         assert_approx_eq::assert_approx_eq!((point - closest_point).length(), distance, 1e-6);
-    }
-
-    #[test]
-    fn sdf_stack_sanity() {
-        let mut slab = CpuSlab::new(vec![]);
-        let sphere_id = slab.append(&Sphere { radius: 1.0 });
-        let prim_id = slab.append(&SdfPrim::Sphere(sphere_id));
-
-        let mut stack = Stack::<64>::default();
-        let params = slab.append_array(&[
-            StackParam::InputPosition,
-            StackParam::VarPrim(prim_id),
-            StackParam::OpDistance,
-        ]);
-        let distance = stack
-            .eval(slab.as_ref().as_slice(), params, Vec3::ZERO)
-            .pop_scalar(slab.as_ref().as_slice());
-        assert_eq!(-1.0, distance);
     }
 }

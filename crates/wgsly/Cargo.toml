@@ -1,0 +1,12 @@
+[package]
+name = "wgsly"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+glam = { workspace = true, features = ["std"] }
+naga.workspace = true
+wgpu.workspace = true
+wgsly-macros = { path = "../wgsly-macros" }

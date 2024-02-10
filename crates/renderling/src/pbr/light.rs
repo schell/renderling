@@ -99,16 +99,14 @@ impl SlabItem for LightStyle {
         1
     }
 
-    fn read_slab(&mut self, index: usize, slab: &[u32]) -> usize {
-        let mut proxy = 0u32;
-        let index = proxy.read_slab(index, slab);
+    fn read_slab(index: usize, slab: &[u32]) -> Self {
+        let proxy = u32::read_slab(index, slab);
         match proxy {
-            0 => *self = LightStyle::Directional,
-            1 => *self = LightStyle::Point,
-            2 => *self = LightStyle::Spot,
-            _ => *self = LightStyle::Directional,
+            0 => LightStyle::Directional,
+            1 => LightStyle::Point,
+            2 => LightStyle::Spot,
+            _ => LightStyle::Directional,
         }
-        index
     }
 
     fn write_slab(&self, index: usize, slab: &mut [u32]) -> usize {

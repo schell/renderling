@@ -239,11 +239,14 @@ mod cpu {
 #[cfg(not(target_arch = "spirv"))]
 pub use cpu::*;
 
+pub mod shader_test;
+
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::stage::Vertex;
-    use glam::{Mat3, Mat4, Quat, Vec2, Vec3};
+    use crate::{pbr::Material, stage::Vertex};
+
+    use glam::{Mat3, Mat4, Quat, Vec2, Vec3, Vec4};
     use pretty_assertions::assert_eq;
 
     #[test]
@@ -317,6 +320,8 @@ mod test {
     // This tests our ability to draw a CMYK triangle in the top left corner, using
     // CW geometry.
     fn cmy_triangle_backface() {
+        use img_diff::DiffCfg;
+
         let mut r = Renderling::headless(100, 100).with_background_color(Vec4::splat(1.0));
         let mut stage = r.new_stage();
         stage.configure_graph(&mut r, true);
@@ -839,6 +844,8 @@ mod test {
     #[test]
     /// Tests shading with directional light.
     fn scene_cube_directional() {
+        use crate::pbr::light::{DirectionalLight, Light, LightStyle};
+
         let mut r =
             Renderling::headless(100, 100).with_background_color(Vec3::splat(0.0).extend(1.0));
         let mut stage = r.new_stage();
