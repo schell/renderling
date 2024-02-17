@@ -18,7 +18,8 @@
 //! - forward+ style pipeline, configurable lighting model per material
 //!   - [ ] light tiling
 //!   - [ ] occlusion culling
-//!   - [x] physically based shading atlas)
+//!   - [x] physically based shading
+//!   - [x] texture atlas
 //! - [x] gltf support
 //!   - [x] scenes, nodes
 //!   - [x] cameras
@@ -29,7 +30,7 @@
 //!   - [x] animations
 //! - [x] high definition rendering
 //! - [x] image based lighting
-//! - [ ] bloom
+//! - [ ] "physically based" bloom
 //! - [ ] ssao
 //! - [ ] depth of field
 //!
