@@ -147,7 +147,8 @@ impl Ray {
             result.step_count = i + 1;
 
             result.position = origin + result.distance_marched * direction;
-            let (current_dist, id) = scene.distance_estimate(result.position, slab);
+            let (current_dist, id) = (super::Sphere::distance(result.position, 1.0), Id::NONE); // scene.distance_estimate(result.position, slab);
+
             // variable minimum distance based on the pixel footprint
             let min_dist = result
                 .position

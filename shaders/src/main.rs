@@ -111,10 +111,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         module,
     } = {
         let mut builder = SpirvBuilder::new(shader_crate, "spirv-unknown-vulkan1.2")
-            .shader_panic_strategy(spirv_builder::ShaderPanicStrategy::DebugPrintfThenExit {
-                print_inputs: true,
-                print_backtrace: true,
-            })
+            //.shader_panic_strategy(spirv_builder::ShaderPanicStrategy::UNSOUND_DO_NOT_USE_UndefinedBehaviorViaUnreachable)
             .print_metadata(MetadataPrintout::None)
             .multimodule(true);
 

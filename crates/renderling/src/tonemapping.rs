@@ -179,7 +179,6 @@ mod cpu {
             View<HdrSurface>,
         ),
     ) -> Result<(), GraphError> {
-        log::trace!("tonemapping");
         let label = Some("tonemapping");
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label });
         let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {

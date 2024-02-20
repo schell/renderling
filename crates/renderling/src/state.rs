@@ -248,6 +248,7 @@ pub fn new_default_instance() -> wgpu::Instance {
     // The instance is a handle to our GPU
     // BackendBit::PRIMARY => Vulkan + Metal + DX12 + Browser WebGPU
     wgpu::Instance::new(wgpu::InstanceDescriptor {
+        // TODO: change wgpu backend bit to just PRIMARY
         backends: wgpu::Backends::all(),
         ..Default::default()
     })

@@ -1,8 +1,8 @@
 use std::marker::PhantomData;
 
 use glam::{Vec2, Vec3};
-use wgsly_macros::wgsl;
 pub use wgsly_macros::Constructable;
+pub use wgsly_macros::{wgsl, wgsl_const, wgsl_fn};
 
 pub trait Constructable {
     fn read(slab: &[u32], id: u32) -> Self;
@@ -35,6 +35,15 @@ pub struct Wgsl<T> {
     _phantom: PhantomData<T>,
 }
 
+impl<T> Wgsl<T> {
+    pub const fn new(source: &'static str) -> Self {
+        Wgsl {
+            source,
+            _phantom: PhantomData,
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 pub struct MyThing {
     pub distance: f32,
@@ -42,27 +51,24 @@ pub struct MyThing {
     pub is_alive: bool,
 }
 
-const AVG_FN: wgpu::ShaderModuleDescriptor<'static> = wgsl!({
-    // Function with two parameters, which returns a 'f32' value
-    fn average(a: f32, b: f32) -> f32 {
-        return (a + b) / 2;
-    }
-});
+// const AVG_FN: wgpu::ShaderModuleDescriptor<'static> = wgsl!({
+//     // Function with two parameters, which returns a 'f32' value
+//     fn average(a: f32, b: f32) -> f32 {
+//         return (a + b) / 2;
+//     }
+// });
 
 #[cfg(test)]
-mod test {
+mod gen {
     use super::*;
+    use crate as wgsly;
 
-    #[test]
-    fn wgsl_output() {
-        let module = naga::front::wgsl::parse_str(AVG_FN).unwrap();
-        let mut validator =
-            naga::valid::Validator::new(Default::default(), naga::valid::Capabilities::empty());
-        let info = validator.validate(&module).unwrap();
-        panic!(
-            "{}",
-            naga::back::wgsl::write_string(&module, &info, naga::back::wgsl::WriterFlags::empty())
-                .unwrap()
-        );
+    #[wgsl_const]
+    const MAX_ITERATIONS: u32 = 16;
+
+    #[wgsl_fn]
+    /// Function here
+    pub fn average(a: f32, b: f32) -> f32 {
+        return (a + b) / 2.0;
     }
 }

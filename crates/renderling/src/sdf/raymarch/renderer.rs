@@ -15,10 +15,10 @@ pub fn new_render_pipeline(
     let label = Some("raymarch pipeline");
     let vertex_linkage = crate::linkage::sdf__raymarch__raymarch_vertex(device);
     let slab_layout = crate::linkage::slab_bindgroup_layout(device);
-    let atlas_and_skybox_layout = crate::linkage::atlas_and_skybox_bindgroup_layout(device);
+    //let atlas_and_skybox_layout = crate::linkage::atlas_and_skybox_bindgroup_layout(device);
     let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label,
-        bind_group_layouts: &[&slab_layout, &atlas_and_skybox_layout],
+        bind_group_layouts: &[&slab_layout], //, &atlas_and_skybox_layout],
         push_constant_ranges: &[],
     });
     let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -67,52 +67,54 @@ pub fn new_render_pipeline(
 pub struct RaymarchingRenderer {
     pub pipeline: wgpu::RenderPipeline,
     pub rays_pipeline: wgpu::RenderPipeline,
+    pub slab_bindgroup_layout: wgpu::BindGroupLayout,
     pub slab_bindgroup: wgpu::BindGroup,
-    pub atlas_and_skybox_bindgroup: wgpu::BindGroup,
-    pub renderling: Renderling,
+    // pub atlas_and_skybox_bindgroup_layout: wgpu::BindGroupLayout,
+    // pub atlas_and_skybox_bindgroup: wgpu::BindGroup,
     pub slab: CpuSlab<WgpuBuffer>,
-    pub atlas: Atlas,
-    pub skybox: Skybox,
+    // pub atlas: Atlas,
+    // pub skybox: Skybox,
+    pub raymarch: Id<Raymarch>,
 }
 
 impl RaymarchingRenderer {
-    pub fn headless(width: u32, height: u32) -> Self {
-        Self::headless_with_capacity(width, height, 256)
-    }
+    // pub fn headless(width: u32, height: u32) -> Self {
+    //     Self::headless_with_capacity(width, height, 256)
+    // }
 
-    fn make_atlas_and_skybox_bindgroup(
-        &self,
-        device: &wgpu::Device,
-        atlas: &Atlas,
-        skybox: &Skybox,
-    ) -> wgpu::BindGroup {
-        let layout = self.pipeline.get_bind_group_layout(1);
-        crate::linkage::atlas_and_skybox_bindgroup(device, &layout, atlas, skybox)
-    }
+    // fn make_atlas_and_skybox_bindgroup(
+    //     &self,
+    //     device: &wgpu::Device,
+    //     atlas: &Atlas,
+    //     skybox: &Skybox,
+    // ) -> wgpu::BindGroup {
+    //     crate::linkage::atlas_and_skybox_bindgroup(
+    //         device,
+    //         &self.atlas_and_skybox_bindgroup_layout,
+    //         atlas,
+    //         skybox,
+    //     )
+    // }
 
-    pub fn set_skybox(&mut self, skybox: Skybox) -> &mut Self {
-        self.skybox = skybox;
-        self.atlas_and_skybox_bindgroup = self.make_atlas_and_skybox_bindgroup(
-            self.renderling.get_device(),
-            &self.atlas,
-            &self.skybox,
-        );
-        self
-    }
+    // pub fn set_skybox(&mut self, r: &mut Renderling, skybox: Skybox) -> &mut Self {
+    //     self.skybox = skybox;
+    //     self.atlas_and_skybox_bindgroup =
+    //         self.make_atlas_and_skybox_bindgroup(r.get_device(), &self.atlas, &self.skybox);
+    //     self
+    // }
 
-    pub fn with_skybox(mut self, skybox: Skybox) -> Self {
-        self.set_skybox(skybox);
-        self
-    }
+    // pub fn with_skybox(mut self, r: &mut Renderling, skybox: Skybox) -> Self {
+    //     self.set_skybox(r, skybox);
+    //     self
+    // }
 
-    pub fn headless_with_capacity(width: u32, height: u32, cap: usize) -> Self {
-        let renderling = Renderling::headless(width, height);
-        Self::from_renderling(renderling, cap)
-    }
+    // pub fn headless_with_capacity(width: u32, height: u32, cap: usize) -> Self {
+    //     let renderling = Renderling::headless(width, height);
+    //     Self::from_renderling(renderling, cap)
+    // }
 
-    pub fn from_renderling(mut renderling: Renderling, cap: usize) -> Self {
+    pub fn from_renderling(renderling: &mut Renderling, cap: usize) -> Self {
         let headless = renderling.get_render_target().is_headless();
-        configure_graph(&mut renderling, headless);
         let (d, q) = renderling.get_device_and_queue_owned();
         let pipeline = new_render_pipeline(
             crate::linkage::sdf__raymarch__raymarch_fragment(&d),
@@ -125,27 +127,30 @@ impl RaymarchingRenderer {
             renderling.get_render_target().format(),
         );
         let slab = CpuSlab::new(WgpuBuffer::new(&d, &q, cap));
-        let bindgroup_layout = crate::linkage::slab_bindgroup_layout(&d);
+        let slab_bindgroup_layout = crate::linkage::slab_bindgroup_layout(&d);
         let slab_bindgroup =
-            crate::linkage::slab_bindgroup(&d, slab.as_ref().get_buffer(), &bindgroup_layout);
-        let atlas = Atlas::empty(&d, &q);
-        let skybox = Skybox::empty(d.clone(), q.clone());
-        let atlas_and_skybox_layout = crate::linkage::atlas_and_skybox_bindgroup_layout(&d);
-        let atlas_and_skybox_bindgroup = crate::linkage::atlas_and_skybox_bindgroup(
-            &d,
-            &atlas_and_skybox_layout,
-            &atlas,
-            &skybox,
-        );
+            crate::linkage::slab_bindgroup(&d, slab.as_ref().get_buffer(), &slab_bindgroup_layout);
+        // let atlas = Atlas::empty(&d, &q);
+        // let skybox = Skybox::empty(d.clone(), q.clone());
+        // let atlas_and_skybox_bindgroup_layout =
+        //     crate::linkage::atlas_and_skybox_bindgroup_layout(&d);
+        // let atlas_and_skybox_bindgroup = crate::linkage::atlas_and_skybox_bindgroup(
+        //     &d,
+        //     &atlas_and_skybox_bindgroup_layout,
+        //     &atlas,
+        //     &skybox,
+        // );
         Self {
             pipeline,
             rays_pipeline,
+            slab_bindgroup_layout,
             slab_bindgroup,
-            renderling,
             slab,
-            atlas,
-            skybox,
-            atlas_and_skybox_bindgroup,
+            //atlas,
+            //skybox,
+            // atlas_and_skybox_bindgroup_layout,
+            // atlas_and_skybox_bindgroup,
+            raymarch: Id::NONE,
         }
     }
 
@@ -153,7 +158,7 @@ impl RaymarchingRenderer {
         id: Id<Raymarch>,
         pipeline: &wgpu::RenderPipeline,
         slab_bindgroup: &wgpu::BindGroup,
-        atlas_and_skybox_bindgroup: &wgpu::BindGroup,
+        //atlas_and_skybox_bindgroup: &wgpu::BindGroup,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         view: &FrameTextureView,
@@ -184,98 +189,118 @@ impl RaymarchingRenderer {
             });
             render_pass.set_pipeline(pipeline);
             render_pass.set_bind_group(0, slab_bindgroup, &[]);
-            render_pass.set_bind_group(1, atlas_and_skybox_bindgroup, &[]);
+            //render_pass.set_bind_group(1, atlas_and_skybox_bindgroup, &[]);
             render_pass.draw(0..6, id.inner()..id.inner() + 1);
         }
         queue.submit(std::iter::once(encoder.finish()));
     }
 
-    pub fn render_rays(&mut self, raymarch: Id<Raymarch>) -> image::RgbaImage {
-        self.renderling
-            .render_local(
-                |(device, queue, frame, depth_texture): (
-                    View<Device>,
-                    View<Queue>,
-                    View<FrameTextureView>,
-                    View<DepthTexture>,
-                )|
-                 -> Result<(), GraphError> {
-                    Self::render_raymarching(
-                        raymarch,
-                        &self.rays_pipeline,
-                        &self.slab_bindgroup,
-                        &self.atlas_and_skybox_bindgroup,
-                        &device,
-                        &queue,
-                        &frame,
-                        &depth_texture,
-                    );
-                    Ok(())
-                },
-            )
-            .unwrap();
-        self.renderling.read_image().unwrap()
-    }
+    // pub fn render_rays(&mut self, raymarch: Id<Raymarch>) -> image::RgbaImage {
+    //     self.renderling
+    //         .render_local(
+    //             |(device, queue, frame, depth_texture): (
+    //                 View<Device>,
+    //                 View<Queue>,
+    //                 View<FrameTextureView>,
+    //                 View<DepthTexture>,
+    //             )|
+    //              -> Result<(), GraphError> {
+    //                 Self::render_raymarching(
+    //                     raymarch,
+    //                     &self.rays_pipeline,
+    //                     &self.slab_bindgroup,
+    //                     &self.atlas_and_skybox_bindgroup,
+    //                     &device,
+    //                     &queue,
+    //                     &frame,
+    //                     &depth_texture,
+    //                 );
+    //                 Ok(())
+    //             },
+    //         )
+    //         .unwrap();
+    //     self.renderling.read_image().unwrap()
+    // }
 
-    pub fn render(&mut self, raymarch: Id<Raymarch>) {
-        self.renderling
-            .render_local(
-                |(device, queue, frame, depth_texture): (
-                    View<Device>,
-                    View<Queue>,
-                    View<FrameTextureView>,
-                    View<DepthTexture>,
-                )|
-                 -> Result<(), GraphError> {
-                    Self::render_raymarching(
-                        raymarch,
-                        &self.pipeline,
-                        &self.slab_bindgroup,
-                        &self.atlas_and_skybox_bindgroup,
-                        &device,
-                        &queue,
-                        &frame,
-                        &depth_texture,
-                    );
-                    Ok(())
-                },
-            )
-            .unwrap();
-    }
+    // pub fn render(&mut self, raymarch: Id<Raymarch>) {
+    //     self.renderling.graph.add_resource(raymarch);
+    //     self.renderling
+    //         .render_local(
+    //             |(device, queue, frame, depth_texture): (
+    //                 View<Device>,
+    //                 View<Queue>,
+    //                 View<FrameTextureView>,
+    //                 View<DepthTexture>,
+    //             )|
+    //              -> Result<(), GraphError> {
+    //                 Self::render_raymarching(
+    //                     raymarch,
+    //                     &self.pipeline,
+    //                     &self.slab_bindgroup,
+    //                     &self.atlas_and_skybox_bindgroup,
+    //                     &device,
+    //                     &queue,
+    //                     &frame,
+    //                     &depth_texture,
+    //                 );
+    //                 Ok(())
+    //             },
+    //         )
+    //         .unwrap();
+    // }
 
-    pub fn render_image(&mut self, raymarch: Id<Raymarch>) -> image::RgbaImage {
-        self.render(raymarch);
-        let img = self.renderling.read_image().unwrap();
-        img
-    }
-}
+    // pub fn render_image(&mut self, raymarch: Id<Raymarch>) -> image::RgbaImage {
+    //     self.render(raymarch);
+    //     let img = self.renderling.read_image().unwrap();
+    //     img
+    // }
 
-pub fn configure_graph(r: &mut Renderling, headless: bool) {
-    // set up the render graph
-    use crate::{
-        frame::{clear_frame_and_depth, copy_frame_to_post, create_frame, present},
-        graph::{graph, Graph},
-    };
+    pub fn configure_graph(self, r: &mut Renderling, headless: bool) {
+        // set up the render graph
+        use crate::{
+            frame::{clear_frame_and_depth, copy_frame_to_post, create_frame, present},
+            graph::{graph, Graph},
+        };
 
-    // pre-render
-    r.graph
-        .add_subgraph(graph!(create_frame, clear_frame_and_depth))
-        .add_barrier();
+        r.graph.add_resource(self);
 
-    // render
-    r.graph.add_local::<(
-        View<Device>,
-        View<Queue>,
-        View<FrameTextureView>,
-        View<DepthTexture>,
-    ), ()>("raymarch_render");
-    r.graph.add_barrier();
+        // pre-render
+        r.graph
+            .add_subgraph(graph!(create_frame, clear_frame_and_depth))
+            .add_barrier();
 
-    // post
-    if headless {
-        r.graph.add_subgraph(graph!(copy_frame_to_post, present));
-    } else {
-        r.graph.add_subgraph(graph!(present));
+        // render
+        fn render_raymarching(
+            (renderer, device, queue, frame, depth_texture): (
+                View<RaymarchingRenderer>,
+                View<Device>,
+                View<Queue>,
+                View<FrameTextureView>,
+                View<DepthTexture>,
+            ),
+        ) -> Result<(), GraphError> {
+            RaymarchingRenderer::render_raymarching(
+                renderer.raymarch,
+                &renderer.pipeline,
+                &renderer.slab_bindgroup,
+                //&renderer.atlas_and_skybox_bindgroup,
+                &device,
+                &queue,
+                &frame,
+                &depth_texture,
+            );
+            Ok(())
+        }
+        r.graph
+            .add_subgraph(graph!(render_raymarching))
+            .add_barrier();
+
+        // post
+        if headless {
+            r.graph.add_subgraph(graph!(copy_frame_to_post, present));
+        } else {
+            r.graph.add_subgraph(graph!(present));
+        }
     }
 }
 

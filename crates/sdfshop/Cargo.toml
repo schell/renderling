@@ -6,21 +6,29 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [lib]
+name = "sdfshop"
 crate-type = ["cdylib", "rlib"]
+path = "src/lib.rs"
+
+[[bin]]
+name = "sdfshop"
+bench = false
+path = "src/main.rs"
 
 [dependencies]
-console_log = "0.2"
-console_error_panic_hook = "0.1"
+#console_log = "0.2"
+#console_error_panic_hook = "0.1"
 crabslab.workspace = true 
-fern = "0.6"
-mogwai-dom = "0.2.6"
-renderling = { path = "../renderling", default-features = false, features = ["wasm", "sdf", "winit"] }
+env_logger.workspace = true
+#fern = "0.6"
+#mogwai-dom = "0.2.6"
+renderling = { path = "../renderling", default-features = false, features = ["sdf", "winit", "gltf"] } #["wasm", "sdf", "winit"] }
 glam.workspace = true
 gltf.workspace = true 
 log.workspace = true 
 naga.workspace = true
-wasm-bindgen = "0.2"
-wasm-bindgen-futures = "0.4"
-web-sys = { version = "0.3", features = ["Request", "RequestInit", "Response", "HtmlCanvasElement"] }
+#wasm-bindgen = "0.2"
+#wasm-bindgen-futures = "0.4"
+#web-sys = { version = "0.3", features = ["Request", "RequestInit", "Response", "HtmlCanvasElement"] }
 winit.workspace = true 
 wgpu.workspace = true 
