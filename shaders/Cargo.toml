@@ -11,7 +11,6 @@ clap = { version = "4.4.8", features = ["derive"] }
 env_logger = "^0.10"
 log = "^0.4"
 naga = { version = "0.19", features = ["spv-in", "wgsl-out", "wgsl-in", "msl-out"] }
-prettyplease = "0.2"
 proc-macro2 = "1.0"
 quote = "1.0"
 spirv-builder = { git = "https://github.com/schell/rust-gpu", branch = "fix/v0.9.1-add-spirv-builder-cargo-features" }

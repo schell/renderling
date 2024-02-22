@@ -4,7 +4,7 @@
 use crabslab::{Array, Id, Slab, SlabItem};
 use glam::{vec2, vec3, BVec3, Vec2, Vec3, Vec4, Vec4Swizzles};
 
-#[cfg(target_arch = "spirv")]
+#[allow(unused_imports)]
 use crate::math::Float;
 
 use crate::{
@@ -582,6 +582,7 @@ impl<const T: usize> Stack<T> {
 
 pub const STACK_SIZE: usize = 64;
 
+#[cfg(feature = "sdf_prim_fragment_test")]
 /// Just a test to ensure that we can compile an entry point that uses the stack.
 #[spirv(fragment)]
 pub fn sdf_prim_fragment_test(
@@ -668,6 +669,7 @@ impl Default for ShapeLegend {
     }
 }
 
+#[cfg(feature = "sdf_shape_vertex")]
 /// Vertex shader used to inspect and test SDF shapes.
 #[spirv(vertex)]
 pub fn sdf_shape_vertex(
@@ -705,6 +707,7 @@ pub fn color_distance(
     (color.xyz() * lines).extend(1.0)
 }
 
+#[cfg(feature = "sdf_shape_fragment")]
 /// Fragment shader used to inspect and test SDF shapes.
 #[spirv(fragment)]
 pub fn sdf_shape_fragment(

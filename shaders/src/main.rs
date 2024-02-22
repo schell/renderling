@@ -142,7 +142,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                     }
                 }
-                shaders.push((entry, path));
+                shaders.push(shader::Linkage {
+                    entry_point: entry,
+                    source_path: path,
+                });
             }
         }
         ModuleResult::SingleModule(filepath) => {
@@ -151,29 +154,36 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 std::fs::copy(filepath, &path).unwrap();
             }
             for entry in entry_points {
-                shaders.push((entry, path.clone()));
+                shaders.push(shader::Linkage {
+                    entry_point: entry,
+                    source_path: path.clone(),
+                });
             }
         }
     }
 
-    let tokens = shader::gen_all_shaders(shaders, shader_lang);
-    let tokens = syn::parse_file(&tokens).unwrap_or_else(|e| {
-        panic!(
-            "Failed to parse generated shader.rs: {}\n\n{}",
-            e,
-            tokens.to_string()
-        )
-    });
-    let tokens = prettyplease::unparse(&tokens);
     if dry_run {
         println!("\nNot writing shaders.rs because --dry-run was set.\n");
     } else {
-        println!("\nWriting shaders.rs to {}", dir.display());
+        println!("\nWriting shaders...");
     };
-    let tokens = tokens.to_string();
-    println!("\n{tokens}");
-    if !dry_run {
-        std::fs::write(dir.join("shaders.rs"), tokens).unwrap();
+
+    let mut set = std::collections::HashSet::<&str>::default();
+
+    for linkage in shaders.iter() {
+        let fn_name = linkage.fn_name();
+
+        if set.contains(fn_name) {
+            panic!("Shader name '{fn_name}' is used for two or more shaders, aborting!");
+        }
+        set.insert(fn_name);
+
+        let filepath = dir.join(fn_name).with_extension("rs");
+        let contents = linkage.to_string(shader_lang);
+        if !dry_run {
+            std::fs::write(&filepath, contents).unwrap();
+            println!("  {}", filepath.display());
+        }
     }
 
     let end = std::time::Instant::now();

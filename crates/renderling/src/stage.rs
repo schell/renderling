@@ -11,7 +11,7 @@ use spirv_std::{
 
 use crate::{math::IsVector, pbr::PbrConfig};
 
-#[cfg(target_arch = "spirv")]
+#[allow(unused_imports)]
 use spirv_std::num_traits::Float;
 
 #[cfg(not(target_arch = "spirv"))]
@@ -179,11 +179,12 @@ pub enum Rendering {
     Sdf(Id<crate::sdf::Scene>),
 }
 
+#[cfg(feature = "stage_vertex")]
 /// Uber vertex shader.
 ///
 /// This reads the "instance" by index and proxies to a specific vertex shader.
 #[spirv(vertex)]
-pub fn vertex(
+pub fn stage_vertex(
     // Points at a `Rendering`
     #[spirv(instance_index)] instance_index: u32,
     // Which vertex within the render unit are we rendering
@@ -249,12 +250,13 @@ pub fn vertex(
     }
 }
 
+#[cfg(feature = "stage_fragment")]
 #[allow(clippy::too_many_arguments)]
 #[spirv(fragment)]
 /// Uber fragment shader.
 ///
 /// This reads the "instance" by index and proxies to a specific vertex shader.
-pub fn fragment(
+pub fn stage_fragment(
     #[spirv(descriptor_set = 1, binding = 0)] atlas: &Image2d,
     #[spirv(descriptor_set = 1, binding = 1)] atlas_sampler: &Sampler,
 

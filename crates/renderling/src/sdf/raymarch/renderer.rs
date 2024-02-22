@@ -13,7 +13,7 @@ pub fn new_render_pipeline(
     format: wgpu::TextureFormat,
 ) -> wgpu::RenderPipeline {
     let label = Some("raymarch pipeline");
-    let vertex_linkage = crate::linkage::sdf__raymarch__raymarch_vertex(device);
+    let vertex_linkage = crate::linkage::raymarch_vertex::linkage(device);
     let slab_layout = crate::linkage::slab_bindgroup_layout(device);
     //let atlas_and_skybox_layout = crate::linkage::atlas_and_skybox_bindgroup_layout(device);
     let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -117,12 +117,12 @@ impl RaymarchingRenderer {
         let headless = renderling.get_render_target().is_headless();
         let (d, q) = renderling.get_device_and_queue_owned();
         let pipeline = new_render_pipeline(
-            crate::linkage::sdf__raymarch__raymarch_fragment(&d),
+            crate::linkage::raymarch_fragment::linkage(&d),
             &d,
             renderling.get_render_target().format(),
         );
         let rays_pipeline = new_render_pipeline(
-            crate::linkage::sdf__raymarch__raymarch_rays(&d),
+            crate::linkage::raymarch_rays_fragment::linkage(&d),
             &d,
             renderling.get_render_target().format(),
         );

@@ -153,8 +153,8 @@ pub fn create_hdr_render_surface(
     };
     let hdr_texture = HdrSurface::create_texture(&device, &queue, size.width, size.height);
     let label = Some("hdr tonemapping");
-    let vertex_linkage = crate::linkage::tonemapping__vertex(&device);
-    let fragment_linkage = crate::linkage::tonemapping__fragment(&device);
+    let vertex_linkage = crate::linkage::tonemapping_vertex::linkage(&device);
+    let fragment_linkage = crate::linkage::tonemapping_fragment::linkage(&device);
     let hdr_layout = bindgroup_layout(&device, Some("hdr tonemapping"));
     let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label,

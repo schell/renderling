@@ -78,9 +78,9 @@ mod gen {
         }
     );
 
-    const CONVOLVE: &str = wgsly_macros::src!(
-        @group(0)
-        @binding(1)
-        var environment_texture: texture_cbe<f32>;
-    );
+    // const CONVOLVE: &str = wgsly_macros::src!(
+    //     @group(0)
+    //     @binding(1)
+    //     var environment_texture: texture_cbe<f32>;
+    // );
 }

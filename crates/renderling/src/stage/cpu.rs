@@ -266,8 +266,8 @@ impl Stage {
         fn create_stage_render_pipeline(device: &wgpu::Device) -> wgpu::RenderPipeline {
             log::trace!("creating stage render pipeline");
             let label = Some("stage render pipeline");
-            let vertex_linkage = crate::linkage::stage__vertex(device);
-            let fragment_linkage = crate::linkage::stage__fragment(device);
+            let vertex_linkage = crate::linkage::stage_vertex::linkage(device);
+            let fragment_linkage = crate::linkage::stage_fragment::linkage(device);
             let stage_slab_buffers_layout = crate::linkage::slab_bindgroup_layout(device);
             let atlas_and_skybox_layout = crate::linkage::atlas_and_skybox_bindgroup_layout(device);
             let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {

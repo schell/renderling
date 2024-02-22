@@ -26,6 +26,7 @@ pub struct Raymarch {
 }
 
 // TODO: Compute raymarching rays in the raymarching vertex shader
+#[cfg(feature = "raymarch_vertex")]
 #[spirv(vertex)]
 pub fn raymarch_vertex(
     #[spirv(vertex_index)] vertex_index: u32,
@@ -220,8 +221,9 @@ pub fn antialias_distance(_distance: f32) -> f32 {
     }
 }
 
+#[cfg(feature = "raymarch_rays_fragment")]
 #[spirv(fragment)]
-pub fn raymarch_rays(
+pub fn raymarch_rays_fragment(
     #[spirv(frag_coord)] frag_coord: Vec4,
     #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] slab: &[u32],
     #[spirv(flat)] raymarch: Id<Raymarch>,
@@ -238,6 +240,7 @@ pub fn raymarch_rays(
     *out_color = direction.extend(1.0);
 }
 
+#[cfg(feature = "raymarch_fragment")]
 #[spirv(fragment)]
 pub fn raymarch_fragment(
     #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] slab: &[u32],

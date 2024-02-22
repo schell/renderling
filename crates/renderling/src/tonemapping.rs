@@ -136,8 +136,9 @@ const QUAD_2D_POINTS: [(Vec2, Vec2); 6] = {
     [tl, bl, br, tl, br, tr]
 };
 
+#[cfg(feature = "tonemapping_vertex")]
 #[spirv(vertex)]
-pub fn vertex(
+pub fn tonemapping_vertex(
     #[spirv(vertex_index)] vertex_id: u32,
     out_uv: &mut glam::Vec2,
     #[spirv(position)] gl_pos: &mut glam::Vec4,
@@ -147,8 +148,9 @@ pub fn vertex(
     *gl_pos = pos.extend(0.0).extend(1.0);
 }
 
+#[cfg(feature = "tonemapping_fragment")]
 #[spirv(fragment)]
-pub fn fragment(
+pub fn tonemapping_fragment(
     #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] slab: &[u32],
     #[spirv(descriptor_set = 0, binding = 1)] texture: &Image2d,
     #[spirv(descriptor_set = 0, binding = 2)] sampler: &Sampler,

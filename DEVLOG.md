@@ -1,5 +1,22 @@
 # devlog
 
+## Thu Feb 22, 2024
+
+### NLNet progress 
+
+Michiel Leenaars reached out from NLNet on the 17th about my proposal. 
+It's been selected to enter the second round of the December 2023 call. 🤞
+
+### Exponentials 
+
+@eddyb has been drilling down into the exponential compile-time and file sizes caused by certain type-nesting scenarios in `rust-gpu`.
+It seems like he's found the cause(s) and has a couple ideas on how to fix it.
+[Get up to speed on the discord thread here](https://discord.com/channels/750717012564770887/1204616011475849296/1209826103502315520).
+
+### Feature gate the shaders
+
+I'm feature gating all the shaders, that way I can build only specific shaders by using `--no-default-features` + `--features {the_shader}`.
+
 ## Wed Feb 7, 2024
 
 ### Filesize and compile time woes 

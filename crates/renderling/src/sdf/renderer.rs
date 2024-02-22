@@ -46,8 +46,8 @@ pub fn new_render_pipeline(
     format: wgpu::TextureFormat,
 ) -> wgpu::RenderPipeline {
     let label = Some("sdf pipeline");
-    let vertex_linkage = crate::linkage::sdf__sdf_shape_vertex(device);
-    let fragment_linkage = crate::linkage::sdf__sdf_shape_fragment(device);
+    let vertex_linkage = crate::linkage::sdf_shape_vertex::linkage(device);
+    let fragment_linkage = crate::linkage::sdf_shape_fragment::linkage(device);
     let slab_layout = new_bindgroup_layout(device);
     let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label,
