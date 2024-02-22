@@ -71,4 +71,16 @@ mod gen {
     pub fn average(a: f32, b: f32) -> f32 {
         return (a + b) / 2.0;
     }
+
+    const AVG_FN: &str = wgsly_macros::src!(
+        fn average(a: f32, b: f32) -> f32 {
+            return (a + b) / 2.0;
+        }
+    );
+
+    const CONVOLVE: &str = wgsly_macros::src!(
+        @group(0)
+        @binding(1)
+        var environment_texture: texture_cbe<f32>;
+    );
 }

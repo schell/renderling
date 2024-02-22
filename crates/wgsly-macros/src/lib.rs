@@ -21,42 +21,15 @@ pub fn wgsl_fn(
 
 #[proc_macro_attribute]
 pub fn wgsl_const(
-    _attrs: proc_macro::TokenStream,
+    attrs: proc_macro::TokenStream,
     input: proc_macro::TokenStream,
 ) -> proc_macro::TokenStream {
-    match syn::parse::<WgslConst>(input.clone()) {
+    match syntax::wgsl_const(attrs, input) {
         Err(e) => {
             let e = e.into_compile_error();
             quote! {#e}.into()
         }
-        Ok(c) => match c.to_naga() {
-            Err(e) => {
-                let e = e.into_compile_error();
-                quote! {#e}.into()
-            }
-            Ok(m) => {
-                let ident = c.rust.ident;
-                let ty = c.rust.ty;
-                let fragment_ident = syn::Ident::new(&format!("{ident}__wgsl"), ident.span());
-                let source = match syntax::validate_source(&m) {
-                    Err(e) => {
-                        let e = e.into_compile_error();
-                        return quote! {#e}.into();
-                    }
-                    Ok(s) => s,
-                };
-                let input = proc_macro2::TokenStream::from(input);
-                quote! {
-                    #input
-
-                    #[allow(non_snake_case)]
-                    pub fn #fragment_ident() -> wgsly::Wgsl<#ty> {
-                        wgsly::Wgsl::new(#source)
-                    }
-                }
-                .into()
-            }
-        },
+        Ok(t) => t.into(),
     }
 }
 
@@ -81,6 +54,20 @@ pub fn wgsl(
             syn::Error::new(callsite, format!("{}", err.message()))
                 .into_compile_error()
                 .into()
+        }
+    }
+}
+
+#[proc_macro]
+pub fn src(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    match syntax::src(input) {
+        Err(e) => {
+            let e = e.into_compile_error();
+            quote! { #e }.into()
+        }
+        Ok(t) => {
+            let s = t.to_string();
+            quote! { #s }.into()
         }
     }
 }
