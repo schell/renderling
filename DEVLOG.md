@@ -1,5 +1,54 @@
 # devlog
 
+## Mon Feb 26, 2024 
+
+### SDF stack lang on GPU considered harmful
+
+I think anyone with a good working knowledge of GPUs could have predicted that evaluating 
+a stack language on a GPU would turn out poorly. 
+
+Of course I don't quite fit into that aformentioned group, yet, and so I had to find this 
+out for myself. 
+
+I think the problem is roughly that: 
+
+* The SDF raymarching shader performs raymarching until an SDF is hit
+  - includes evaluating the stack of each SDF in the scene and taking the min (obviously could 
+    use some kind of BVH)
+    - stack evaluation is a loop with branching
+* Because of this, there's no real coherence between operations in a warp
+
+So I think what I'll try next is completely ditching the stack lang and representing my SDFs 
+analytically on the CPU, and then "serializing" them to the GPU as pre-baked distance volumes. 
+
+[There's at least a little prior art.](https://gpuopen.com/gdc-presentations/2023/GDC-2023-Sparse-Distance-Fields-For-Games.pdf)
+
+Or maybe I'll just park SDFs for now and get back to rasterization...
+
+### Wgsly
+
+After hitting those exponential compile times with `rust-gpu` 
+(and also thinking ahead to `naga`'s lack of atomics support), I made a quick foray into embedding 
+WGSL into Rust using procedural macros.
+
+There's no quick and easy way to mate `naga`'s IR with `syn`'s AST parsing, so I stopped once I 
+realized I would have to implement `syn::parse::Parse` for the entirety of WGSL by hand. 
+
+It's not an insane amount of work though, and it would give nice editor tooling for any IDE that
+has it for Rust. Plus you could use macros to implement imports for WGSL....
+
+Anyway - I'm going to pull it out because it's not really on topic.
+
+## Fri Feb 23, 2024
+
+### Wavefront path tracing 
+@eddyb recommended I read  [Megakernels Considered Harmful: Wavefront Path Tracing on GPUs](convolution__fragment_generate_mipmap).
+It's a cool paper about breaking up monolithic ray tracing shaders into microkernal steps.
+
+There are also some breakdown posts about it: 
+
+- [https://jacco.ompf2.com/2019/07/18/wavefront-path-tracing/](https://jacco.ompf2.com/2019/07/18/wavefront-path-tracing/)
+
 ## Thu Feb 22, 2024
 
 ### NLNet progress 
