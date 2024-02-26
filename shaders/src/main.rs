@@ -5,6 +5,25 @@ use spirv_builder::{CompileResult, MetadataPrintout, ModuleResult, SpirvBuilder}
 
 mod shader;
 
+#[derive(Clone, Copy, Default)]
+pub enum ShaderLang {
+    #[default]
+    Spv,
+    Wgsl,
+}
+
+impl core::str::FromStr for ShaderLang {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "spv" => Ok(ShaderLang::Spv),
+            "wgsl" => Ok(ShaderLang::Wgsl),
+            s => Err(format!("not a valid option '{s}'")),
+        }
+    }
+}
+
 #[derive(Parser)]
 #[clap(author, version, about)]
 struct Cli {
@@ -15,6 +34,10 @@ struct Cli {
     /// Directory containing the shader crate to compile.
     #[clap(long, short, default_value = "renderling")]
     shader_crate: std::path::PathBuf,
+
+    /// Whether to write the spv or wgsl
+    #[clap(long, default_value = "spv")]
+    shader_lang: ShaderLang,
 
     /// Set cargo default-features.
     #[clap(long)]
@@ -36,10 +59,25 @@ struct Cli {
     dry_run: bool,
 }
 
+fn wgsl(spv_filepath: impl AsRef<std::path::Path>, destination: impl AsRef<std::path::Path>) {
+    let bytes = std::fs::read(spv_filepath).unwrap();
+    let opts = naga::front::spv::Options::default();
+    let module = naga::front::spv::parse_u8_slice(&bytes, &opts).unwrap();
+    let mut validator =
+        naga::valid::Validator::new(Default::default(), naga::valid::Capabilities::empty());
+    let info = validator.validate(&module).unwrap();
+    let wgsl =
+        naga::back::wgsl::write_string(&module, &info, naga::back::wgsl::WriterFlags::empty())
+            .unwrap();
+    let destination = destination.as_ref().with_extension("wgsl");
+    std::fs::write(destination, wgsl).unwrap();
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let Cli {
         verbosity,
         shader_crate,
+        shader_lang,
         no_default_features,
         features,
         output_dir,
@@ -66,13 +104,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         std::env::current_dir().unwrap().display()
     );
 
+    let start = std::time::Instant::now();
+
     let CompileResult {
         entry_points,
         module,
     } = {
         let mut builder = SpirvBuilder::new(shader_crate, "spirv-unknown-vulkan1.2")
-        .print_metadata(MetadataPrintout::None)
-        .multimodule(true);
+            //.shader_panic_strategy(spirv_builder::ShaderPanicStrategy::UNSOUND_DO_NOT_USE_UndefinedBehaviorViaUnreachable)
+            .print_metadata(MetadataPrintout::None)
+            .multimodule(true);
 
         if no_default_features {
             builder = builder.shader_crate_default_features(false);
@@ -92,9 +133,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             for (entry, filepath) in modules.into_iter() {
                 let path = dir.join(filepath.file_name().unwrap());
                 if !dry_run {
-                    std::fs::copy(filepath, &path).unwrap();
+                    match shader_lang {
+                        ShaderLang::Spv => {
+                            std::fs::copy(filepath, &path).unwrap();
+                        }
+                        ShaderLang::Wgsl => {
+                            wgsl(filepath, &path);
+                        }
+                    }
                 }
-                shaders.push((entry, path));
+                shaders.push(shader::Linkage {
+                    entry_point: entry,
+                    source_path: path,
+                });
             }
         }
         ModuleResult::SingleModule(filepath) => {
@@ -103,30 +154,40 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 std::fs::copy(filepath, &path).unwrap();
             }
             for entry in entry_points {
-                shaders.push((entry, path.clone()));
+                shaders.push(shader::Linkage {
+                    entry_point: entry,
+                    source_path: path.clone(),
+                });
             }
         }
     }
 
-    let tokens = shader::gen_all_shaders(shaders);
-    let tokens = syn::parse_file(&tokens).unwrap_or_else(|e| {
-        panic!(
-            "Failed to parse generated shader.rs: {}\n\n{}",
-            e,
-            tokens.to_string()
-        )
-    });
-    let tokens = prettyplease::unparse(&tokens);
     if dry_run {
         println!("\nNot writing shaders.rs because --dry-run was set.\n");
     } else {
-        println!("\nWriting shaders.rs to {}", dir.display());
+        println!("\nWriting shaders...");
     };
-    let tokens = tokens.to_string();
-    println!("\n{tokens}");
-    if !dry_run {
-        std::fs::write(dir.join("shaders.rs"), tokens).unwrap();
+
+    let mut set = std::collections::HashSet::<&str>::default();
+
+    for linkage in shaders.iter() {
+        let fn_name = linkage.fn_name();
+
+        if set.contains(fn_name) {
+            panic!("Shader name '{fn_name}' is used for two or more shaders, aborting!");
+        }
+        set.insert(fn_name);
+
+        let filepath = dir.join(fn_name).with_extension("rs");
+        let contents = linkage.to_string(shader_lang);
+        if !dry_run {
+            std::fs::write(&filepath, contents).unwrap();
+            println!("  {}", filepath.display());
+        }
     }
+
+    let end = std::time::Instant::now();
+    println!("Finished in {:?}", (end - start));
 
     Ok(())
 }

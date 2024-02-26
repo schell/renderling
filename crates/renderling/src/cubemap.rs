@@ -68,8 +68,8 @@ impl CubemapMakingRenderPipeline {
     /// images.
     pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat) -> Self {
         log::trace!("creating cubemap-making render pipeline with format '{format:?}'");
-        let vertex_linkage = crate::linkage::skybox__vertex_cubemap(device);
-        let fragment_linkage = crate::linkage::skybox__fragment_equirectangular(device);
+        let vertex_linkage = crate::linkage::skybox_cubemap_vertex::linkage(device);
+        let fragment_linkage = crate::linkage::skybox_equirectangular_fragment::linkage(device);
         let bg_layout = cubemap_making_bindgroup_layout(device);
         let pp_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("cubemap-making pipeline layout"),

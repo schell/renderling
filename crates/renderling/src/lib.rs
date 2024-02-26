@@ -1,41 +1,11 @@
-//! A "GPU driven" renderer  with a focus on simplicity and ease of use.
+//! A few "GPU driven" renderers  with a focus on simplicity and ease of use.
 //! Backed by WebGPU.
-//! Shaders written in rust using `rust-gpu`.
+//! Shaders written in rust using `rust-gpu` (mostly).
 //!
 //! # WARNING
 //! This is very much a work in progress.
 //! YMMV.
 //! PRs are very welcomed :)
-//!
-//! # renderlings 🍖
-//!
-//! Render graphs and all their resources are called "renderlings" for maximum
-//! cuteness. Renderlings are configurable DAGs that draw something to a screen
-//! or texture.
-//!
-//! ## Features
-//!
-//! - forward+ style pipeline, configurable lighting model per material
-//!   - [ ] light tiling
-//!   - [ ] occlusion culling
-//!   - [x] physically based shading atlas)
-//! - [x] gltf support
-//!   - [x] scenes, nodes
-//!   - [x] cameras
-//!   - [x] meshes
-//!   - [x] materials
-//!   - [x] textures, images, samplers
-//!   - [x] skins
-//!   - [x] animations
-//! - [x] high definition rendering
-//! - [x] image based lighting
-//! - [ ] bloom
-//! - [ ] ssao
-//! - [ ] depth of field
-//!
-//! ## Raw shaders
-//! You can also use the [shaders module](crate::shaders) without renderlings
-//! and manage your own resources for maximum flexibility.
 #![cfg_attr(target_arch = "spirv", no_std)]
 #![deny(clippy::disallowed_methods)]
 
@@ -49,7 +19,7 @@ pub mod convolution;
 pub mod cubemap;
 #[cfg(not(target_arch = "spirv"))]
 pub mod frame;
-#[cfg(feature = "gltf")]
+#[cfg(any(feature = "stage_fragment", feature = "stage_vertex", feature = "gltf"))]
 pub mod gltf;
 #[cfg(not(target_arch = "spirv"))]
 mod hdr;
@@ -63,7 +33,6 @@ pub mod mesh;
 pub mod pbr;
 #[cfg(not(target_arch = "spirv"))]
 mod renderer;
-pub mod sdf;
 pub mod skybox;
 mod stage;
 #[cfg(not(target_arch = "spirv"))]
@@ -269,16 +238,14 @@ mod cpu {
 #[cfg(not(target_arch = "spirv"))]
 pub use cpu::*;
 
+pub mod shader_test;
+
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::{
-        pbr::{light::*, Material},
-        stage::Vertex,
-        Camera, Transform,
-    };
+    use crate::{pbr::Material, stage::Vertex};
+
     use glam::{Mat3, Mat4, Quat, Vec2, Vec3, Vec4};
-    use img_diff::DiffCfg;
     use pretty_assertions::assert_eq;
 
     #[test]
@@ -352,6 +319,8 @@ mod test {
     // This tests our ability to draw a CMYK triangle in the top left corner, using
     // CW geometry.
     fn cmy_triangle_backface() {
+        use img_diff::DiffCfg;
+
         let mut r = Renderling::headless(100, 100).with_background_color(Vec4::splat(1.0));
         let mut stage = r.new_stage();
         stage.configure_graph(&mut r, true);
@@ -565,7 +534,7 @@ mod test {
             scale: Vec3::new(6.0, 6.0, 6.0),
             rotation: Quat::from_axis_angle(Vec3::Y, std::f32::consts::FRAC_PI_4),
         });
-        let (_, cube_two_rendering) = stage.draw_gltf_rendering(&render_unit);
+        let cube_two_rendering = stage.draw_gltf_rendering(&render_unit);
 
         // we should see two colored cubes
         let img = r.render_image().unwrap();
@@ -633,7 +602,7 @@ mod test {
             ..Default::default()
         });
 
-        let (cube, _) = stage.draw_gltf_rendering(&crate::gltf::GltfRendering {
+        let cube = stage.draw_gltf_rendering(&crate::gltf::GltfRendering {
             camera,
             vertex_count: cube_vertex_count as u32,
             node_path,
@@ -874,6 +843,8 @@ mod test {
     #[test]
     /// Tests shading with directional light.
     fn scene_cube_directional() {
+        use crate::pbr::light::{DirectionalLight, Light, LightStyle};
+
         let mut r =
             Renderling::headless(100, 100).with_background_color(Vec3::splat(0.0).extend(1.0));
         let mut stage = r.new_stage();

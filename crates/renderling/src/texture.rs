@@ -591,8 +591,8 @@ impl Texture {
             bind_group_layouts: &[&bg_layout],
             push_constant_ranges: &[],
         });
-        let vertex_linkage = crate::linkage::convolution__vertex_generate_mipmap(device);
-        let fragment_linkage = crate::linkage::convolution__fragment_generate_mipmap(device);
+        let vertex_linkage = crate::linkage::generate_mipmap_vertex::linkage(device);
+        let fragment_linkage = crate::linkage::generate_mipmap_fragment::linkage(device);
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label,
             layout: Some(&pp_layout),

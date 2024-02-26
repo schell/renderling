@@ -44,24 +44,20 @@ pub enum DataType {
 
 impl SlabItem for DataType {
     fn slab_size() -> usize {
-        // 1
-        u32::slab_size()
+        1
     }
 
-    fn read_slab(&mut self, index: usize, slab: &[u32]) -> usize {
-        let original_index = index;
-        let mut hash = 0u32;
-        let index = hash.read_slab(index, slab);
+    fn read_slab(index: usize, slab: &[u32]) -> Self {
+        let hash = u32::read_slab(index, slab);
         match hash {
-            0 => *self = DataType::I8,
-            1 => *self = DataType::U8,
-            2 => *self = DataType::I16,
-            3 => *self = DataType::U16,
-            4 => *self = DataType::U32,
-            5 => *self = DataType::F32,
-            _ => return original_index,
+            0 => DataType::I8,
+            1 => DataType::U8,
+            2 => DataType::I16,
+            3 => DataType::U16,
+            4 => DataType::U32,
+            5 => DataType::F32,
+            _ => DataType::U32,
         }
-        index
     }
 
     fn write_slab(&self, index: usize, slab: &mut [u32]) -> usize {
@@ -89,21 +85,18 @@ impl SlabItem for Dimensions {
         1
     }
 
-    fn read_slab(&mut self, index: usize, slab: &[u32]) -> usize {
-        let original_index = index;
-        let mut hash = 0u32;
-        let index = hash.read_slab(index, slab);
+    fn read_slab(index: usize, slab: &[u32]) -> Self {
+        let hash = u32::read_slab(index, slab);
         match hash {
-            0 => *self = Dimensions::Scalar,
-            1 => *self = Dimensions::Vec2,
-            2 => *self = Dimensions::Vec3,
-            3 => *self = Dimensions::Vec4,
-            4 => *self = Dimensions::Mat2,
-            5 => *self = Dimensions::Mat3,
-            6 => *self = Dimensions::Mat4,
-            _ => return original_index,
+            0 => Dimensions::Scalar,
+            1 => Dimensions::Vec2,
+            2 => Dimensions::Vec3,
+            3 => Dimensions::Vec4,
+            4 => Dimensions::Mat2,
+            5 => Dimensions::Mat3,
+            6 => Dimensions::Mat4,
+            _ => Dimensions::Scalar,
         }
-        index
     }
 
     fn write_slab(&self, index: usize, slab: &mut [u32]) -> usize {
@@ -761,46 +754,36 @@ impl SlabItem for GltfCamera {
         1 + 4
     }
 
-    fn read_slab(&mut self, index: usize, slab: &[u32]) -> usize {
+    fn read_slab(index: usize, slab: &[u32]) -> Self {
         let original_index = index;
-        let mut hash = 0u32;
-        let index = hash.read_slab(index, slab);
+        let hash = u32::read_slab(index, slab);
         match hash {
             Self::ORTHOGRAPHIC_HASH => {
-                let mut xmag = 0.0;
-                let mut ymag = 0.0;
-                let mut zfar = 0.0;
-                let mut znear = 0.0;
-                let index = xmag.read_slab(index, slab);
-                let index = ymag.read_slab(index, slab);
-                let index = zfar.read_slab(index, slab);
-                let _index = znear.read_slab(index, slab);
-                *self = Self::Orthographic {
+                let xmag = f32::read_slab(index + 1, slab);
+                let ymag = f32::read_slab(index + 2, slab);
+                let zfar = f32::read_slab(index + 3, slab);
+                let znear = f32::read_slab(index + 4, slab);
+                Self::Orthographic {
                     xmag,
                     ymag,
                     zfar,
                     znear,
-                };
+                }
             }
             Self::PERSPECTIVE_HASH => {
-                let mut aspect_ratio = 0.0;
-                let mut yfov = 0.0;
-                let mut zfar = 0.0;
-                let mut znear = 0.0;
-                let index = aspect_ratio.read_slab(index, slab);
-                let index = yfov.read_slab(index, slab);
-                let index = zfar.read_slab(index, slab);
-                let _index = znear.read_slab(index, slab);
-                *self = Self::Perspective {
+                let aspect_ratio = f32::read_slab(index + 1, slab);
+                let yfov = f32::read_slab(index + 2, slab);
+                let zfar = f32::read_slab(index + 3, slab);
+                let znear = f32::read_slab(index + 4, slab);
+                Self::Perspective {
                     aspect_ratio,
                     yfov,
                     zfar,
                     znear,
-                };
+                }
             }
-            _ => return index,
+            _ => Self::default(),
         }
-        original_index + Self::slab_size()
     }
 
     fn write_slab(&self, index: usize, slab: &mut [u32]) -> usize {
@@ -851,26 +834,21 @@ impl SlabItem for GltfLightKind {
             + 2 // inner_cone_angle, outer_cone_angle
     }
 
-    fn read_slab(&mut self, index: usize, slab: &[u32]) -> usize {
-        let original_index = index;
-        let mut hash = 0u32;
-        let index = hash.read_slab(index, slab);
+    fn read_slab(index: usize, slab: &[u32]) -> Self {
+        let hash = u32::read_slab(index, slab);
         match hash {
-            0 => *self = Self::Directional,
-            1 => *self = Self::Point,
+            0 => Self::Directional,
+            1 => Self::Point,
             2 => {
-                let mut inner_cone_angle = 0.0;
-                let mut outer_cone_angle = 0.0;
-                let index = inner_cone_angle.read_slab(index, slab);
-                let _index = outer_cone_angle.read_slab(index, slab);
-                *self = Self::Spot {
+                let inner_cone_angle = f32::read_slab(index + 1, slab);
+                let outer_cone_angle = f32::read_slab(index + 1, slab);
+                Self::Spot {
                     inner_cone_angle,
                     outer_cone_angle,
-                };
+                }
             }
-            _ => return index,
+            _ => Self::default(),
         }
-        original_index + Self::slab_size()
     }
 
     fn write_slab(&self, index: usize, slab: &mut [u32]) -> usize {
@@ -953,17 +931,14 @@ impl SlabItem for GltfInterpolation {
         1
     }
 
-    fn read_slab(&mut self, index: usize, slab: &[u32]) -> usize {
-        let original_index = index;
-        let mut proxy = 0u32;
-        let index = proxy.read_slab(index, slab);
+    fn read_slab(index: usize, slab: &[u32]) -> Self {
+        let proxy = u32::read_slab(index, slab);
         match proxy {
-            0 => *self = GltfInterpolation::Linear,
-            1 => *self = GltfInterpolation::Step,
-            2 => *self = GltfInterpolation::CubicSpline,
-            _ => return original_index,
+            0 => GltfInterpolation::Linear,
+            1 => GltfInterpolation::Step,
+            2 => GltfInterpolation::CubicSpline,
+            _ => GltfInterpolation::Linear,
         }
-        index
     }
 
     fn write_slab(&self, index: usize, slab: &mut [u32]) -> usize {
@@ -998,18 +973,15 @@ impl SlabItem for GltfTargetProperty {
         1
     }
 
-    fn read_slab(&mut self, index: usize, slab: &[u32]) -> usize {
-        let original_index = index;
-        let mut proxy = 0u32;
-        let index = proxy.read_slab(index, slab);
+    fn read_slab(index: usize, slab: &[u32]) -> Self {
+        let proxy = u32::read_slab(index, slab);
         match proxy {
-            0 => *self = GltfTargetProperty::Translation,
-            1 => *self = GltfTargetProperty::Rotation,
-            2 => *self = GltfTargetProperty::Scale,
-            3 => *self = GltfTargetProperty::MorphTargetWeights,
-            _ => return original_index,
+            0 => GltfTargetProperty::Translation,
+            1 => GltfTargetProperty::Rotation,
+            2 => GltfTargetProperty::Scale,
+            3 => GltfTargetProperty::MorphTargetWeights,
+            _ => GltfTargetProperty::Translation,
         }
-        index
     }
 
     fn write_slab(&self, index: usize, slab: &mut [u32]) -> usize {

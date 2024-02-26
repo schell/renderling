@@ -19,7 +19,7 @@ log = "^0.4"
 renderling = { path = "../renderling" }
 snafu = "^0.7"
 wgpu = { workspace = true }
-winit = { version = "^0.27", optional = true }
+winit = { workspace = true, optional = true }
 
 [dev-dependencies]
 env_logger = {workspace = true}

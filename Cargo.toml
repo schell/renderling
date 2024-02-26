@@ -15,13 +15,17 @@ resolver = "2"
 assert_approx_eq = "1.1.0"
 async-channel = "1.8"
 bytemuck = { version = "1.13.0", features = ["derive"] }
-crabslab = { version = "0.2.2", default-features = false }
+crabslab = { version = "0.3.0", default-features = false }
 env_logger = "0.10.0"
 futures-lite = "1.13"
 gltf = { git = 'https://github.com/gltf-rs/gltf.git', features = ["KHR_lights_punctual", "KHR_materials_unlit", "KHR_materials_emissive_strength", "extras"] }
 image = "0.24"
 log = "0.4"
+naga = { version = "0.19", features = ["spv-in", "wgsl-out", "wgsl-in", "msl-out"] }
+pretty_assertions = "1.4.0"
+proc-macro2 = { version = "1.0", features = ["span-locations"] }
 glam = { version = "0.24.2", default-features = false }
 snafu = "0.7"
-winit = { version = "0.27" }
-wgpu = { version = "0.18" }
+syn = { version = "2.0.49", features = ["full", "extra-traits", "parsing"] }
+winit = { version = "0.29" }
+wgpu = { version = "0.19" }

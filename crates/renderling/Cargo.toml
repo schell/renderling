@@ -15,9 +15,52 @@ readme = "../../README.md"
 crate-type = ["lib", "dylib"]
 
 [features]
-default = ["raw-window-handle", "winit"]
+default = ["winit", "gltf", "sdf", "shaders"]
+shaders = [
+  "array_test",
+  "brdf_lut_convolution_fragment",
+  "brdf_lut_convolution_vertex",
+  "generate_mipmap_fragment",
+  "generate_mipmap_vertex",
+  "pbr_fragment",
+  "prefilter_environment_cubemap_fragment",
+  "prefilter_environment_cubemap_vertex",
+  "skybox_cubemap_fragment",
+  "skybox_cubemap_vertex",
+  "skybox_equirectangular_fragment",
+  "skybox_vertex",
+  "stage_fragment",
+  "stage_vertex",
+  "test_i8_i16_extraction",
+  "tonemapping_fragment",
+  "tonemapping_vertex"
+]
 gltf = ["dep:gltf"]
 sdf = []
+# shaders
+array_test = []
+brdf_lut_convolution_fragment = []
+brdf_lut_convolution_vertex = []
+generate_mipmap_fragment = []
+generate_mipmap_vertex = []
+pbr_fragment = [] 
+prefilter_environment_cubemap_fragment = []
+prefilter_environment_cubemap_vertex = []
+raymarch_fragment = []
+raymarch_rays_fragment = []
+raymarch_vertex = []
+sdf_shape_fragment = []
+sdf_shape_vertex = []
+sdf_prim_fragment_test = []
+skybox_cubemap_fragment = []
+skybox_cubemap_vertex = []
+skybox_equirectangular_fragment = []
+skybox_vertex = []
+stage_fragment = []
+stage_vertex = []
+test_i8_i16_extraction = []
+tonemapping_fragment = []
+tonemapping_vertex = []
 wasm = ["wgpu/fragile-send-sync-non-atomic-wasm"]
 
 # dependencies for CPU and GPU code
@@ -42,8 +85,7 @@ gltf = {workspace = true, optional = true}
 half = "2.3"
 image = {workspace = true, features = ["hdr"]}
 log = {workspace = true}
-moongraph = { version = "0.3.5", features = ["dot"] }
-raw-window-handle = { version = "0.5", optional = true }
+moongraph = { version = "0.3.5", default-features = false, features = ["dot"] }
 rustc-hash = "1.1"
 send_wrapper = "0.6"
 snafu = {workspace = true}
@@ -60,8 +102,8 @@ ctor = "0.2.2"
 env_logger = {workspace = true}
 icosahedron = "0.1"
 img-diff = { path = "../img-diff" }
-naga = { version = "0.13", features = ["spv-in", "wgsl-out", "wgsl-in", "msl-out"] }
-pretty_assertions = "1.4.0"
+naga.workspace = true
+pretty_assertions.workspace = true
 ttf-parser = "0.20.0"
 
 [target.'cfg(not(target_arch = "spirv"))'.dev-dependencies]
