@@ -2,14 +2,14 @@
 //!
 //! These shaders convolve various functions to produce cached maps.
 use crabslab::{Id, Slab, SlabItem};
-use glam::{UVec2, Vec2, Vec3, Vec4, Vec4Swizzles};
+use glam::{Vec2, Vec3, Vec4, Vec4Swizzles};
 use spirv_std::{
     image::{Cubemap, Image2d},
     num_traits::Zero,
     spirv, Sampler,
 };
 
-#[cfg(target_arch = "spirv")]
+#[allow(unused_imports)]
 use spirv_std::num_traits::Float;
 
 use crate::{math::IsVector, Camera};
@@ -157,10 +157,11 @@ pub struct VertexPrefilterEnvironmentCubemapIds {
     pub roughness: Id<f32>,
 }
 
+#[cfg(feature = "prefilter_environment_cubemap_vertex")]
 /// Uses the `instance_index` as the [`Id`] of a [`PrefilterEnvironmentIds`].
 /// roughness value.
 #[spirv(vertex)]
-pub fn vertex_prefilter_environment_cubemap(
+pub fn prefilter_environment_cubemap_vertex(
     #[spirv(instance_index)] instance_index: u32,
     #[spirv(vertex_index)] vertex_id: u32,
     #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] slab: &[u32],
@@ -177,9 +178,10 @@ pub fn vertex_prefilter_environment_cubemap(
     *gl_pos = camera.projection * camera.view * in_pos.extend(1.0);
 }
 
+#[cfg(feature = "prefilter_environment_cubemap_fragment")]
 /// Lambertian prefilter.
 #[spirv(fragment)]
-pub fn fragment_prefilter_environment_cubemap(
+pub fn prefilter_environment_cubemap_fragment(
     #[spirv(descriptor_set = 0, binding = 1)] environment_cubemap: &Cubemap,
     #[spirv(descriptor_set = 0, binding = 2)] sampler: &Sampler,
     in_pos: Vec3,
@@ -240,8 +242,9 @@ pub fn calc_lod(n_dot_l: f32) -> f32 {
         .log2()
 }
 
+#[cfg(feature = "generate_mipmap_vertex")]
 #[spirv(vertex)]
-pub fn vertex_generate_mipmap(
+pub fn generate_mipmap_vertex(
     #[spirv(vertex_index)] vertex_id: u32,
     out_uv: &mut Vec2,
     #[spirv(position)] gl_pos: &mut Vec4,
@@ -251,42 +254,15 @@ pub fn vertex_generate_mipmap(
     *gl_pos = crate::math::CLIP_SPACE_COORD_QUAD_CCW[i];
 }
 
+#[cfg(feature = "generate_mipmap_fragment")]
 #[spirv(fragment)]
-pub fn fragment_generate_mipmap(
+pub fn generate_mipmap_fragment(
     #[spirv(descriptor_set = 0, binding = 0)] texture: &Image2d,
     #[spirv(descriptor_set = 0, binding = 1)] sampler: &Sampler,
     in_uv: Vec2,
     frag_color: &mut Vec4,
 ) {
     *frag_color = texture.sample(*sampler, in_uv);
-}
-
-#[spirv(fragment)]
-pub fn fragment_bloom(
-    #[spirv(uniform, descriptor_set = 0, binding = 0)] horizontal: &u32,
-    #[spirv(uniform, descriptor_set = 0, binding = 1)] UVec2 { x, y }: &UVec2,
-    #[spirv(descriptor_set = 0, binding = 2)] texture: &Image2d,
-    #[spirv(descriptor_set = 0, binding = 3)] sampler: &Sampler,
-    in_uv: Vec2,
-    frag_color: &mut Vec4,
-) {
-    let horizontal = *horizontal != 0;
-    let weight = [0.227027f32, 0.1945946, 0.1216216, 0.054054, 0.016216];
-    let texel_offset = 1.0 / Vec2::new(*x as f32, *y as f32);
-    let mut result = texture.sample(*sampler, in_uv).xyz() * weight[0];
-    let sample_offset = if horizontal {
-        Vec2::new(1.0, 0.0)
-    } else {
-        Vec2::new(0.0, 1.0)
-    };
-
-    #[allow(clippy::needless_range_loop)]
-    for i in 1..5 {
-        let offset = sample_offset * texel_offset * i as f32;
-        result += texture.sample_by_lod(*sampler, in_uv + offset, 0.0).xyz() * weight[i];
-        result += texture.sample_by_lod(*sampler, in_uv - offset, 0.0).xyz() * weight[i];
-    }
-    *frag_color = result.extend(1.0);
 }
 
 #[repr(C)]
@@ -318,8 +294,9 @@ const BRDF_VERTS: [Vert; 6] = {
     [bl, br, tr, bl, tr, tl]
 };
 
+#[cfg(feature = "brdf_lut_convolution_vertex")]
 #[spirv(vertex)]
-pub fn vertex_brdf_lut_convolution(
+pub fn brdf_lut_convolution_vertex(
     #[spirv(vertex_index)] vertex_id: u32,
     out_uv: &mut glam::Vec2,
     #[spirv(position)] gl_pos: &mut glam::Vec4,
@@ -329,8 +306,9 @@ pub fn vertex_brdf_lut_convolution(
     *gl_pos = Vec3::from(pos).extend(1.0);
 }
 
+#[cfg(feature = "brdf_lut_convolution_fragment")]
 #[spirv(fragment)]
-pub fn fragment_brdf_lut_convolution(in_uv: glam::Vec2, out_color: &mut glam::Vec2) {
+pub fn brdf_lut_convolution_fragment(in_uv: glam::Vec2, out_color: &mut glam::Vec2) {
     *out_color = integrate_brdf(in_uv.x, in_uv.y);
 }
 

@@ -69,7 +69,7 @@ impl DiffuseIrradianceConvolutionRenderPipeline {
     /// Create the rendering pipeline that performs a convolution.
     pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat) -> Self {
         log::trace!("creating convolution render pipeline with format '{format:?}'");
-        let vertex_linkage = crate::linkage::skybox__vertex_cubemap(device);
+        let vertex_linkage = crate::linkage::skybox_cubemap_vertex::linkage(device);
         let fragment_shader = device.create_shader_module(wgpu::include_wgsl!(
             // TODO: rewrite this shader in Rust after atomics are added to naga spv
             "../wgsl/diffuse_irradiance_convolution.wgsl"

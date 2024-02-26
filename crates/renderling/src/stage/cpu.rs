@@ -9,7 +9,6 @@ use std::{
 
 use crate::{
     pbr::{debug::DebugMode, light::Light, PbrConfig},
-    sdf::Scene,
     Atlas, AtlasError, AtlasImage, AtlasImageError, AtlasTexture, Camera, CpuCubemap, DepthTexture,
     Device, HdrSurface, Queue, Skybox, WgpuSlabError,
 };
@@ -266,8 +265,8 @@ impl Stage {
         fn create_stage_render_pipeline(device: &wgpu::Device) -> wgpu::RenderPipeline {
             log::trace!("creating stage render pipeline");
             let label = Some("stage render pipeline");
-            let vertex_linkage = crate::linkage::stage__vertex(device);
-            let fragment_linkage = crate::linkage::stage__fragment(device);
+            let vertex_linkage = crate::linkage::stage_vertex::linkage(device);
+            let fragment_linkage = crate::linkage::stage_fragment::linkage(device);
             let stage_slab_buffers_layout = crate::linkage::slab_bindgroup_layout(device);
             let atlas_and_skybox_layout = crate::linkage::atlas_and_skybox_bindgroup_layout(device);
             let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -370,15 +369,12 @@ impl Stage {
     #[cfg(feature = "gltf")]
     /// Draw a GLTF rendering each frame.
     ///
-    /// Returns the id of the stored `GltfRendering` and the id of the
-    /// [`Rendering`].
+    /// Returns the id of the stored `GltfRendering`.
     pub fn draw_gltf_rendering(
         &mut self,
         unit: &crate::gltf::GltfRendering,
-    ) -> (Id<crate::gltf::GltfRendering>, Id<Rendering>) {
-        let unit_id = self.append(unit);
-        let rendering = Rendering::Gltf(unit_id);
-        let id = self.append(&rendering);
+    ) -> Id<crate::gltf::GltfRendering> {
+        let id = self.append(unit);
         let draw = DrawUnit {
             id,
             vertex_count: unit.vertex_count,
@@ -391,33 +387,11 @@ impl Stage {
                 units.push(draw);
             }
         }
-        (unit_id, id)
-    }
-
-    /// Draw a signed distance field rendering each frame.
-    ///
-    /// Returns the id of the stored `Sdf` and the id of the [`Rendering`].
-    pub fn draw_sdf_rendering(&mut self, sdf: &Scene) -> (Id<Scene>, Id<Rendering>) {
-        let sdf_id = self.append(sdf);
-        let rendering = Rendering::Sdf(sdf_id);
-        let id = self.append(&rendering);
-        let draw = DrawUnit {
-            id,
-            vertex_count: sdf.vertex_count(),
-            visible: true,
-        };
-        // UNWRAP: if we can't acquire the lock we want to panic.
-        let mut draws = self.draws.write().unwrap();
-        match draws.deref_mut() {
-            StageDrawStrategy::Direct(units) => {
-                units.push(draw);
-            }
-        }
-        (sdf_id, id)
+        id
     }
 
     /// Erase the [`RenderUnit`] with the given `Id` from the stage.
-    pub fn erase_unit(&self, id: Id<Rendering>) {
+    pub fn erase_unit(&self, id: Id<GltfRendering>) {
         let mut draws = self.draws.write().unwrap();
         match draws.deref_mut() {
             StageDrawStrategy::Direct(units) => {
@@ -436,7 +410,7 @@ impl Stage {
     }
 
     /// Show the [`RenderUnit`] with the given `Id` for rendering.
-    pub fn show_unit(&self, id: Id<Rendering>) {
+    pub fn show_unit(&self, id: Id<GltfRendering>) {
         let mut draws = self.draws.write().unwrap();
         match draws.deref_mut() {
             StageDrawStrategy::Direct(units) => {
@@ -450,7 +424,7 @@ impl Stage {
     }
 
     /// Hide the [`RenderUnit`] with the given `Id` from rendering.
-    pub fn hide_unit(&self, id: Id<Rendering>) {
+    pub fn hide_unit(&self, id: Id<GltfRendering>) {
         let mut draws = self.draws.write().unwrap();
         match draws.deref_mut() {
             StageDrawStrategy::Direct(units) => {

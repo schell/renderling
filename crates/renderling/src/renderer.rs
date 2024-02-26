@@ -5,8 +5,7 @@ use snafu::prelude::*;
 use std::{ops::Deref, sync::Arc};
 
 use crate::{
-    CreateSurfaceFn, Graph, RenderTarget, Stage, TextureError,
-    /* UiScene, UiSceneBuilder, */ View, ViewMut, WgpuStateError,
+    new_default_instance, Graph, RenderTarget, Stage, TextureError, View, ViewMut, WgpuStateError,
 };
 
 #[derive(Debug, Snafu)]
@@ -162,12 +161,9 @@ impl Renderling {
 
     pub async fn try_new_headless(width: u32, height: u32) -> Result<Self, RenderlingError> {
         let size = (width, height);
-        let (adapter, device, queue, target) = crate::state::new_adapter_device_queue_and_target(
-            width,
-            height,
-            None as Option<CreateSurfaceFn>,
-        )
-        .await?;
+        let instance = new_default_instance();
+        let (adapter, device, queue, target) =
+            crate::state::new_headless_device_queue_and_target(width, height, &instance).await?;
         let depth_texture = crate::Texture::create_depth_texture(&device, width, height);
         Ok(Self::new(
             target,
@@ -179,25 +175,16 @@ impl Renderling {
         ))
     }
 
-    #[cfg(feature = "raw-window-handle")]
-    pub async fn try_from_raw_window<W>(
+    pub async fn try_from_raw_window(
         width: u32,
         height: u32,
-        window: &W,
-    ) -> Result<Self, RenderlingError>
-    where
-        W: raw_window_handle::HasRawWindowHandle + raw_window_handle::HasRawDisplayHandle,
-    {
+        window: impl Into<wgpu::SurfaceTarget<'static>>,
+    ) -> Result<Self, RenderlingError> {
         let size = (width, height);
-        let (adapter, device, queue, target) = crate::state::new_adapter_device_queue_and_target(
-            width,
-            height,
-            Some(Box::new(|instance: &wgpu::Instance| {
-                unsafe { instance.create_surface(window) }
-                    .map_err(|e| WgpuStateError::CreateSurface { source: e })
-            }) as crate::CreateSurfaceFn),
-        )
-        .await?;
+        let instance = new_default_instance();
+        let (adapter, device, queue, target) =
+            crate::state::new_windowed_adapter_device_queue(width, height, &instance, window)
+                .await?;
         let depth_texture = crate::Texture::create_depth_texture(&device, width, height);
 
         Ok(Self::new(
@@ -210,30 +197,24 @@ impl Renderling {
         ))
     }
 
-    #[cfg(feature = "raw-window-handle")]
-    pub async fn from_window_async(window: &winit::window::Window) -> Self {
+    pub async fn from_window_async(window: Arc<winit::window::Window>) -> Self {
         let inner_size = window.inner_size();
         Self::try_from_raw_window(inner_size.width, inner_size.height, window)
             .await
             .unwrap()
     }
 
-    #[cfg(all(feature = "raw-window-handle", not(target_arch = "wasm32")))]
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn try_from_raw_window_handle(
-        window_handle: &(impl raw_window_handle::HasRawWindowHandle
-              + raw_window_handle::HasRawDisplayHandle),
+        window_handle: impl Into<wgpu::SurfaceTarget<'static>>,
         width: u32,
         height: u32,
     ) -> Result<Self, RenderlingError> {
         futures_lite::future::block_on(Self::try_from_raw_window(width, height, window_handle))
     }
 
-    #[cfg(all(
-        feature = "winit",
-        feature = "raw-window-handle",
-        not(target_arch = "wasm32")
-    ))]
-    pub fn try_from_window(window: &winit::window::Window) -> Result<Self, RenderlingError> {
+    #[cfg(all(feature = "winit", not(target_arch = "wasm32")))]
+    pub fn try_from_window(window: Arc<winit::window::Window>) -> Result<Self, RenderlingError> {
         let inner_size = window.inner_size();
         Self::try_from_raw_window_handle(window, inner_size.width, inner_size.height)
     }

@@ -174,11 +174,11 @@ impl AtlasImage {
     }
 }
 
-fn u16_to_u8(c: u16) -> u8 {
+pub fn u16_to_u8(c: u16) -> u8 {
     ((c as f32 / 65535.0) * 255.0) as u8
 }
 
-fn f32_to_u8(c: f32) -> u8 {
+pub fn f32_to_u8(c: f32) -> u8 {
     (c / 255.0) as u8
 }
 

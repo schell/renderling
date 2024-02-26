@@ -1,5 +1,123 @@
 # devlog
 
+## Mon Feb 26, 2024 
+
+### SDF stack lang on GPU considered harmful
+
+I think anyone with a good working knowledge of GPUs could have predicted that evaluating 
+a stack language on a GPU would turn out poorly. 
+
+Of course I don't quite fit into that aformentioned group, yet, and so I had to find this 
+out for myself. 
+
+I think the problem is roughly that: 
+
+* The SDF raymarching shader performs raymarching until an SDF is hit
+  - includes evaluating the stack of each SDF in the scene and taking the min (obviously could 
+    use some kind of BVH)
+    - stack evaluation is a loop with branching
+* Because of this, there's no real coherence between operations in a warp
+
+So I think what I'll try next is completely ditching the stack lang and representing my SDFs 
+analytically on the CPU, and then "serializing" them to the GPU as pre-baked distance volumes. 
+
+[There's at least a little prior art.](https://gpuopen.com/gdc-presentations/2023/GDC-2023-Sparse-Distance-Fields-For-Games.pdf)
+
+Or maybe I'll just park SDFs for now and get back to rasterization...
+
+### Wgsly
+
+After hitting those exponential compile times with `rust-gpu` 
+(and also thinking ahead to `naga`'s lack of atomics support), I made a quick foray into embedding 
+WGSL into Rust using procedural macros.
+
+There's no quick and easy way to mate `naga`'s IR with `syn`'s AST parsing, so I stopped once I 
+realized I would have to implement `syn::parse::Parse` for the entirety of WGSL by hand. 
+
+It's not an insane amount of work though, and it would give nice editor tooling for any IDE that
+has it for Rust. Plus you could use macros to implement imports for WGSL....
+
+Anyway - I'm going to pull it out because it's not really on topic.
+
+## Fri Feb 23, 2024
+
+### Wavefront path tracing 
+@eddyb recommended I read  [Megakernels Considered Harmful: Wavefront Path Tracing on GPUs](convolution__fragment_generate_mipmap).
+It's a cool paper about breaking up monolithic ray tracing shaders into microkernal steps.
+
+There are also some breakdown posts about it: 
+
+- [https://jacco.ompf2.com/2019/07/18/wavefront-path-tracing/](https://jacco.ompf2.com/2019/07/18/wavefront-path-tracing/)
+
+## Thu Feb 22, 2024
+
+### NLNet progress 
+
+Michiel Leenaars reached out from NLNet on the 17th about my proposal. 
+It's been selected to enter the second round of the December 2023 call. 🤞
+
+### Exponentials 
+
+@eddyb has been drilling down into the exponential compile-time and file sizes caused by certain type-nesting scenarios in `rust-gpu`.
+It seems like he's found the cause(s) and has a couple ideas on how to fix it.
+[Get up to speed on the discord thread here](https://discord.com/channels/750717012564770887/1204616011475849296/1209826103502315520).
+
+### Feature gate the shaders
+
+I'm feature gating all the shaders, that way I can build only specific shaders by using `--no-default-features` + `--features {the_shader}`.
+
+## Wed Feb 7, 2024
+
+### Filesize and compile time woes 
+
+Lots of discussions about file sizes on the `rust-gpu` discord [starting here](https://discord.com/channels/750717012564770887/750717499737243679/1204153056191848618).
+Long story short (go read that thread if you want the long story), inlining happens in a big way in the `rust-gpu` compiler, and my code got hit hard. 
+I was able to reduce the `.spv` filesize of one of my shaders over 50% (from 731kb to 304kb) and the compile time by 85% (266s to 40s) simply by converting six calls of one function into a for loop 6 times over one function call.
+
+I'm also going to audit the `crabslab` API to attempt to reduce filesizes. 
+
+### SlabItem `read_slab` audit
+
+I have a minimal `crabslab` based shader that reads some structs off a the slab. 
+It clocks in at 9756 bytes. 
+
+I also have a baseline shader that does the same by hand, without the `SlabItem` trait.
+It weighs in at 4352 bytes. 
+
+So - just including `crabslab` here increases the `.spv` filesize by 124%!
+
+#### Rundown
+
+* including `Id` and `Array` doesn't change the filesize
+* including `SlabItem` increases it to 4688 bytes, a 7% increase.
+  - using `fn read_slab(&mut self, id: u32, slab: &[u32]) -> u32` is how we get to 4688 bytes
+  - using `fn read_slab(id: u32, slab: &[u32]) -> (u32, Self);` increases it to 4884 bytes
+  - using `fn read_slab(id: u32, slab: &[u32]) -> Self;` reduces it to 4628 bytes
+
+After rewriting the `read_slab` fn to `fn read_slab(id: u32, slab: &[u32]) -> Self;` the minimal 
+`crabslab` based shader is only 4576 bytes, which is only 5% larger than the baseline and 53% 
+smaller than the previous. We'll see how much smaller my shaders get as a result.
+
+### Filesize / compilation time audit result 
+
+After changing the slab reading API, bumping crabslab in `renderling` and recompiling my shader 
+the filesize was further reduced another 40% - from 304kb to 182kb.
+Compilation time reduced a further 35% - from 40s to 26s!
+
+So the total reduction in filesize is 75% - from 731kb to 182kb.
+Total reduction in compilation time is 90% - from 266s to 26s!
+
+What a difference a little tangential work and profiling can make!
+
+## Sun Feb 4, 2024 
+
+Oof, I miss recursion.
+
+In the absence of recursion I'm working on a little stack language evaluator that will 
+evaluate the distance to surfaces using signed distance functions. I figure if it works 
+well I could use it for both raymarching the distance and evaluating the color/material 
+of the object.
+
 ## Thu Feb 1, 2024 
 
 I've contributed to `rust-gpu`. 

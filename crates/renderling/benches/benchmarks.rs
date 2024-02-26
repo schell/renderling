@@ -1,6 +1,9 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
-use renderling::{GltfLoader, Renderling};
+#[cfg(feature = "gltf")]
+use renderling::GltfLoader;
+use renderling::Renderling;
 
+#[cfg(feature = "gltf")]
 fn load_damaged_helmet(c: &mut Criterion) {
     //let _ = env_logger::builder()
     //    .is_test(true)
@@ -47,5 +50,12 @@ fn load_damaged_helmet(c: &mut Criterion) {
     });
 }
 
+fn noop(_c: &mut Criterion) {}
+
+#[cfg(feature = "gltf")]
 criterion_group!(benches, load_damaged_helmet);
+
+#[cfg(not(feature = "gltf"))]
+criterion_group!(benches, noop);
+
 criterion_main!(benches);
