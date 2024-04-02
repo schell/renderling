@@ -13,7 +13,7 @@ use crate::{
     Device, HdrSurface, Queue, Skybox, WgpuSlabError,
 };
 use crabslab::{Array, CpuSlab, GrowableSlab, Id, Slab, SlabItem, WgpuBuffer};
-use moongraph::{View, ViewMut};
+use moongraph::{NoDefault, View, ViewMut};
 use snafu::Snafu;
 
 use super::*;
@@ -36,6 +36,12 @@ impl From<AtlasError> for StageError {
 impl From<WgpuSlabError> for StageError {
     fn from(source: WgpuSlabError) -> Self {
         Self::Slab { source }
+    }
+}
+
+impl From<StageError> for moongraph::GraphError {
+    fn from(value: StageError) -> Self {
+        moongraph::GraphError::other(value)
     }
 }
 
@@ -625,8 +631,12 @@ impl Stage {
 
 /// Render the stage.
 pub fn stage_render(
-    (stage, hdr_frame, depth): (ViewMut<Stage>, View<HdrSurface>, View<DepthTexture>),
-) -> Result<(), WgpuSlabError> {
+    (stage, hdr_frame, depth): (
+        ViewMut<Stage, NoDefault>,
+        View<HdrSurface, NoDefault>,
+        View<DepthTexture, NoDefault>,
+    ),
+) -> Result<(), StageError> {
     let label = Some("stage render");
     let pipeline = stage.get_pipeline();
     let slab_buffers_bindgroup = stage.get_slab_buffers_bindgroup();

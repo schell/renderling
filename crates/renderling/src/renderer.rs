@@ -1,6 +1,6 @@
 //! Builds the UI pipeline and manages resources.
 use glam::Vec4;
-use moongraph::TypeKey;
+use moongraph::{NoDefault, TypeKey};
 use snafu::prelude::*;
 use std::{ops::Deref, sync::Arc};
 
@@ -249,10 +249,10 @@ impl Renderling {
         self.graph
             .visit(
                 |(device, mut screen_size, mut target, mut depth_texture): (
-                    View<Device>,
-                    ViewMut<ScreenSize>,
-                    ViewMut<RenderTarget>,
-                    ViewMut<DepthTexture>,
+                    View<Device, NoDefault>,
+                    ViewMut<ScreenSize, NoDefault>,
+                    ViewMut<RenderTarget, NoDefault>,
+                    ViewMut<DepthTexture, NoDefault>,
                 )| {
                     *screen_size = ScreenSize { width, height };
                     target.resize(width, height, &device.0);

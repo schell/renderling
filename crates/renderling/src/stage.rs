@@ -2,14 +2,14 @@
 //!
 //! The `Stage` object contains a slab buffer and a render pipeline.
 //! It is used to stage objects for rendering.
-use crabslab::{Array, GrowableSlab, Id, Slab, SlabItem};
-use glam::{UVec3, Vec2, Vec3, Vec4};
+use crabslab::{Id, SlabItem};
+use glam::{Vec2, Vec3, Vec4};
 use spirv_std::{
     image::{Cubemap, Image2d},
     spirv, Sampler,
 };
 
-use crate::{gltf::GltfRendering, math::IsVector, pbr::PbrConfig};
+use crate::{gltf::GltfRendering, math::IsVector};
 
 #[allow(unused_imports)]
 use spirv_std::num_traits::Float;
@@ -26,10 +26,9 @@ pub use gltf_support::*;
 
 /// A vertex in a mesh.
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
-#[repr(C)]
 #[derive(Clone, Copy, PartialEq, SlabItem)]
 pub struct Vertex {
-    pub position: Vec4,
+    pub position: Vec3,
     pub color: Vec4,
     pub uv: Vec4,
     pub normal: Vec4,
@@ -57,7 +56,7 @@ impl Default for Vertex {
 
 impl Vertex {
     pub fn with_position(mut self, p: impl Into<Vec3>) -> Self {
-        self.position = p.into().extend(0.0);
+        self.position = p.into();
         self
     }
 
@@ -263,6 +262,17 @@ pub fn stage_fragment(
         world_pos,
         output,
     );
+
+    use crabslab::Slab;
+
+    use crate::pbr::{debug::DebugMode, PbrConfig};
+
+    let pbr_config = slab.read(Id::<PbrConfig>::new(0));
+    if pbr_config.debug_mode == DebugMode::Brdf {
+        *output = Vec4::new(1.0, 0.0, 0.0, 1.0);
+    } else {
+        *output = Vec4::new(1.0, 1.0, 0.0, 1.0);
+    }
 }
 
 //#[spirv(compute(threads(32)))]

@@ -25,6 +25,40 @@ analytically on the CPU, and then "serializing" them to the GPU as pre-baked dis
 
 Or maybe I'll just park SDFs for now and get back to rasterization...
 
+
+### SDFs going forward+
+
+I still think there's a way to make SDFs work well in _this_ project. Consider this rasterization factory:
+
+1. break down triangle geometry into meshlets 
+2. determine draw calls for meshlets
+3. draw calls run vertex shader for meshlets
+4. fragment shader writes to gbuffer, which might include
+   - u32 id of object
+   - vec3 position 
+   - vec3 normal  
+   - vec4 albedo 
+   - f32 metallic 
+   - f32 roughness 
+   - vec3 emissive 
+   - vec3 irradiance 
+   - vec3 prefiltered 
+   - vec2 brdf
+   - f32 depth
+5. break down SDFs into volumes 
+6. determine draw calls for SDF volumes 
+7. draw calls run vertex shader for volumes
+8. SDF volume fragment shader writes to gbuffer
+9. do a _raymarching_ pass over the gbuffer, discarding fragments not drawn to, using the depth as the first already-known hit point
+   1. march till bounce...
+   2. accumulate 
+   3. goto 1. or die
+
+But I guess step `9` can be omitted until a later date. Support for rasterizing SDFs is the main point. 
+
+I like the idea of raymarching for shading, though. It seems cognitively simpler than the current pile of tricks...
+
+
 ### Wgsly
 
 After hitting those exponential compile times with `rust-gpu` 
@@ -38,6 +72,12 @@ It's not an insane amount of work though, and it would give nice editor tooling 
 has it for Rust. Plus you could use macros to implement imports for WGSL....
 
 Anyway - I'm going to pull it out because it's not really on topic.
+
+### Crabslab update 
+
+I bumped `crabslab` after updating that library to use an associated constant for the slab size.
+
+The file sizes are a tad bit smaller now, but only by at most 100 bytes.
 
 ## Fri Feb 23, 2024
 

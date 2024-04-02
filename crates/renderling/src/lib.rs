@@ -1,6 +1,6 @@
 //! A few "GPU driven" renderers  with a focus on simplicity and ease of use.
 //! Backed by WebGPU.
-//! Shaders written in rust using `rust-gpu` (mostly).
+//! Shaders are written in Rust using `rust-gpu` (mostly).
 //!
 //! # WARNING
 //! This is very much a work in progress.
@@ -764,19 +764,19 @@ mod test {
         let cheetah_primitive = stage.new_primitive(
             vec![
                 Vertex {
-                    position: Vec4::new(0.0, 0.0, 0.0, 0.0),
+                    position: Vec3::new(0.0, 0.0, 0.0),
                     color: Vec4::new(1.0, 1.0, 0.0, 1.0),
                     uv: Vec4::new(0.0, 0.0, 0.0, 0.0),
                     ..Default::default()
                 },
                 Vertex {
-                    position: Vec4::new(100.0, 100.0, 0.0, 0.0),
+                    position: Vec3::new(100.0, 100.0, 0.0),
                     color: Vec4::new(0.0, 1.0, 1.0, 1.0),
                     uv: Vec4::new(1.0, 1.0, 1.0, 1.0),
                     ..Default::default()
                 },
                 Vertex {
-                    position: Vec4::new(100.0, 0.0, 0.0, 0.0),
+                    position: Vec3::new(100.0, 0.0, 0.0),
                     color: Vec4::new(1.0, 0.0, 1.0, 1.0),
                     uv: Vec4::new(1.0, 0.0, 1.0, 0.0),
                     ..Default::default()
@@ -890,7 +890,7 @@ mod test {
         let verts = math::unit_cube()
             .into_iter()
             .map(|(p, n)| Vertex {
-                position: p.extend(1.0),
+                position: p,
                 normal: n.extend(0.0),
                 ..Default::default()
             })

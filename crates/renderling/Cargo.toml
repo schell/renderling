@@ -85,7 +85,7 @@ gltf = {workspace = true, optional = true}
 half = "2.3"
 image = {workspace = true, features = ["hdr"]}
 log = {workspace = true}
-moongraph = { version = "0.3.5", default-features = false, features = ["dot"] }
+moongraph = { version = "0.4.2", default-features = false, features = ["dot", "derive"] }
 rustc-hash = "1.1"
 send_wrapper = "0.6"
 snafu = {workspace = true}

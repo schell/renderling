@@ -1,11 +1,14 @@
 //! Gltf support for the [`Stage`](crate::Stage).
+use crabslab::{Array, GrowableSlab, Slab};
 use glam::{Quat, Vec2, Vec3, Vec4};
 use snafu::{OptionExt, ResultExt, Snafu};
 
 use super::*;
 use crate::{
-    gltf::*, pbr::light::LightStyle, pbr::Material, stage::Vertex, AtlasImage, AtlasTexture,
-    Camera, TextureAddressMode, TextureModes,
+    gltf::*,
+    pbr::{light::LightStyle, Material, PbrConfig},
+    stage::Vertex,
+    AtlasImage, AtlasTexture, Camera, TextureAddressMode, TextureModes,
 };
 
 #[derive(Debug, Snafu)]
@@ -1328,7 +1331,7 @@ impl<'a> GltfMeshBuilder<'a> {
 #[cfg(test)]
 mod test {
     use crate::{gltf::*, pbr::Material, stage::Vertex, Camera, Renderling, Stage, Transform};
-    use crabslab::{Array, GrowableSlab, Id, Slab};
+    use crabslab::{Array, GrowableSlab, Id, Slab, SlabItem};
     use glam::{Vec2, Vec3, Vec4, Vec4Swizzles};
 
     #[test]
@@ -1348,31 +1351,33 @@ mod test {
 
     #[test]
     fn accessor_sanity() {
-        println!("{:08b}", 1u8);
-        println!("{:08b}", 1i8);
-        println!("{:08b}", -1i8);
-        println!("{} {}", u8::MAX, i8::MAX);
+        println!("1u8: {:08b}", 1u8);
+        println!("1i8: {:08b}", 1i8);
+        println!("-1i8: {:08b}", -1i8);
+        println!("max: {} {}", u8::MAX, i8::MAX);
         let u16buffer = [1u16, 1u16, 1u16, 1u16];
-        for chunk in u16buffer.chunks(2) {
+        for (i, chunk) in u16buffer.chunks(2).enumerate() {
             match chunk {
                 [a, b] => {
-                    println!("{a:016b} {b:016b}");
+                    println!("u16buffer[{i}]: {a:016b} {b:016b}");
                 }
                 _ => panic!("bad chunk"),
             }
         }
         let u32buffer = bytemuck::cast_slice::<u16, u32>(&u16buffer).to_vec();
         for u in u32buffer.iter() {
-            println!("{u:032b}");
+            println!("u32buffer: {u:032b}");
         }
         println!("u32buffer: {u32buffer:?}");
         assert_eq!(2, u32buffer.len());
         let mut data = [0u32; 256];
         let buffer_index = data.write_indexed_slice(&u32buffer, 0);
         assert_eq!(2, buffer_index);
+        assert_eq!(u32buffer, data[0..2], "unexpected buffer contents");
         let buffer = GltfBuffer(Array::new(0, buffer_index as u32));
         let view_index = data.write_indexed(&buffer, buffer_index);
-        let _ = data.write_indexed(
+        println!("view_index: {view_index}");
+        let final_index = data.write_indexed(
             &GltfBufferView {
                 buffer: Id::from(buffer_index),
                 offset: 0,
@@ -1381,6 +1386,7 @@ mod test {
             },
             view_index,
         );
+        assert_eq!(view_index + GltfBufferView::SLAB_SIZE, final_index);
         let accessor = GltfAccessor {
             size: 2,
             count: 3,
@@ -1391,11 +1397,10 @@ mod test {
             normalized: false,
         };
         let i0 = accessor.get_u32(0, &data);
-        assert_eq!(1, i0);
         let i1 = accessor.get_u32(1, &data);
-        assert_eq!(1, i1);
         let i2 = accessor.get_u32(2, &data);
-        assert_eq!(1, i2);
+        println!("data: {:#?}...", &data[0..4]);
+        assert_eq!([1, 1, 1], [i0, i1, i2]);
     }
 
     #[test]

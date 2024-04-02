@@ -43,7 +43,7 @@ impl Deref for FrameTextureView {
 
 /// Create the next screen frame texture, frame texture view and depth texture.
 pub fn create_frame(
-    render_target: View<RenderTarget>,
+    render_target: View<RenderTarget, NoDefault>,
 ) -> Result<(Frame, FrameTextureView), WgpuStateError> {
     let frame = render_target.get_current_frame()?;
     let (frame_view, format) = default_frame_texture_view(frame.texture());
@@ -104,11 +104,11 @@ pub fn conduct_clear_pass(
 /// textures.
 pub fn clear_frame_and_depth(
     (device, queue, frame_view, depth, color): (
-        View<Device>,
-        View<Queue>,
-        View<FrameTextureView>,
-        View<DepthTexture>,
-        View<BackgroundColor>,
+        View<Device, NoDefault>,
+        View<Queue, NoDefault>,
+        View<FrameTextureView, NoDefault>,
+        View<DepthTexture, NoDefault>,
+        View<BackgroundColor, NoDefault>,
     ),
 ) -> Result<(), WgpuStateError> {
     let depth_view = &depth.view;
@@ -138,7 +138,11 @@ pub fn clear_frame_and_depth(
 
 /// Conduct a clear pass on **only the depth texture**.
 pub fn clear_depth(
-    (device, queue, depth): (View<Device>, View<Queue>, View<DepthTexture>),
+    (device, queue, depth): (
+        View<Device, NoDefault>,
+        View<Queue, NoDefault>,
+        View<DepthTexture, NoDefault>,
+    ),
 ) -> Result<(), WgpuStateError> {
     let depth_view = &depth.view;
     conduct_clear_pass(
@@ -160,10 +164,10 @@ pub struct PostRenderBuffer(pub CopiedTextureBuffer);
 /// Render node that copies the current frame into a buffer.
 #[derive(Edges)]
 pub struct PostRenderBufferCreate {
-    device: View<Device>,
-    queue: View<Queue>,
-    size: View<ScreenSize>,
-    frame: View<Frame>,
+    device: View<Device, NoDefault>,
+    queue: View<Queue, NoDefault>,
+    size: View<ScreenSize, NoDefault>,
+    frame: View<Frame, NoDefault>,
 }
 
 /// Copies the current frame into a `PostRenderBuffer` resource.

@@ -870,7 +870,6 @@ impl CopiedTextureBuffer {
 
 #[cfg(test)]
 mod test {
-    use super::*;
     use crate::Renderling;
 
     #[test]

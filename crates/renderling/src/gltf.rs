@@ -43,9 +43,7 @@ pub enum DataType {
 }
 
 impl SlabItem for DataType {
-    fn slab_size() -> usize {
-        1
-    }
+    const SLAB_SIZE: usize = { 1 };
 
     fn read_slab(index: usize, slab: &[u32]) -> Self {
         let hash = u32::read_slab(index, slab);
@@ -81,9 +79,7 @@ pub enum Dimensions {
 }
 
 impl SlabItem for Dimensions {
-    fn slab_size() -> usize {
-        1
-    }
+    const SLAB_SIZE: usize = { 1 };
 
     fn read_slab(index: usize, slab: &[u32]) -> Self {
         let hash = u32::read_slab(index, slab);
@@ -698,7 +694,7 @@ impl GltfPrimitive {
         };
 
         crate::stage::Vertex {
-            position: position.extend(0.0),
+            position,
             color,
             uv,
             normal: normal.extend(0.0),
@@ -750,12 +746,9 @@ impl Default for GltfCamera {
 }
 
 impl SlabItem for GltfCamera {
-    fn slab_size() -> usize {
-        1 + 4
-    }
+    const SLAB_SIZE: usize = { 1 + 4 };
 
     fn read_slab(index: usize, slab: &[u32]) -> Self {
-        let original_index = index;
         let hash = u32::read_slab(index, slab);
         match hash {
             Self::ORTHOGRAPHIC_HASH => {
@@ -813,7 +806,7 @@ impl SlabItem for GltfCamera {
                 let _ = znear.write_slab(index, slab);
             }
         }
-        index + Self::slab_size()
+        index + Self::SLAB_SIZE
     }
 }
 
@@ -829,10 +822,10 @@ pub enum GltfLightKind {
 }
 
 impl SlabItem for GltfLightKind {
-    fn slab_size() -> usize {
+    const SLAB_SIZE: usize = {
         1 // hash
             + 2 // inner_cone_angle, outer_cone_angle
-    }
+    };
 
     fn read_slab(index: usize, slab: &[u32]) -> Self {
         let hash = u32::read_slab(index, slab);
@@ -868,7 +861,7 @@ impl SlabItem for GltfLightKind {
                 let _index = outer_cone_angle.write_slab(index, slab);
             }
         }
-        index + Self::slab_size()
+        index + Self::SLAB_SIZE
     }
 }
 
@@ -927,9 +920,7 @@ pub enum GltfInterpolation {
 }
 
 impl SlabItem for GltfInterpolation {
-    fn slab_size() -> usize {
-        1
-    }
+    const SLAB_SIZE: usize = { 1 };
 
     fn read_slab(index: usize, slab: &[u32]) -> Self {
         let proxy = u32::read_slab(index, slab);
@@ -969,9 +960,7 @@ pub enum GltfTargetProperty {
 }
 
 impl SlabItem for GltfTargetProperty {
-    fn slab_size() -> usize {
-        1
-    }
+    const SLAB_SIZE: usize = { 1 };
 
     fn read_slab(index: usize, slab: &[u32]) -> Self {
         let proxy = u32::read_slab(index, slab);
@@ -1144,9 +1133,9 @@ pub fn vertex(
     *out_tangent = tangent_w;
     *out_bitangent = bitangent_w;
     *out_norm = normal_w;
-    let view_pos = model_matrix * vertex.position.xyz().extend(1.0);
-    *out_pos = view_pos.xyz();
+    let view_pos = model_matrix.transform_point3(vertex.position);
+    *out_pos = view_pos;
     let camera = slab.read(unit.camera);
     *out_camera = unit.camera.into();
-    *clip_pos = camera.projection * camera.view * view_pos;
+    *clip_pos = camera.projection * camera.view * view_pos.extend(1.0);
 }

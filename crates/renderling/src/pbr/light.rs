@@ -95,9 +95,7 @@ pub enum LightStyle {
 }
 
 impl SlabItem for LightStyle {
-    fn slab_size() -> usize {
-        1
-    }
+    const SLAB_SIZE: usize = { 1 };
 
     fn read_slab(index: usize, slab: &[u32]) -> Self {
         let proxy = u32::read_slab(index, slab);

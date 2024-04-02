@@ -543,6 +543,7 @@ mod test {
             Renderling::headless(32, 32).with_background_color(Vec3::splat(0.0).extend(1.0));
         let mut stage = r.new_stage();
         stage.configure_graph(&mut r, true);
+        stage.set_debug_mode(crate::pbr::debug::DebugMode::Brdf);
         let (projection, view) = crate::camera::default_ortho2d(32.0, 32.0);
         let camera = stage.append(&Camera {
             projection,
