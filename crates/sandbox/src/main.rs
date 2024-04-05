@@ -61,11 +61,7 @@ fn atlas_uv_mapping(window: Arc<winit::window::Window>) -> Renderling {
     stage.configure_graph(&mut r, false);
     stage.set_debug_mode(renderling::pbr::debug::DebugMode::Brdf);
     let (projection, view) = renderling::default_ortho2d(32.0, 32.0);
-    let camera = stage.append(&Camera {
-        projection,
-        view,
-        ..Default::default()
-    });
+    let camera = stage.append(&Camera::new(projection, view));
     let dirt = AtlasImage::from_path("img/dirt.jpg").unwrap_or_else(|e| panic!("{e}"));
     let sandstone = AtlasImage::from_path("img/sandstone.png").unwrap();
     let texels = AtlasImage::from_path("test_img/atlas/uv_mapping.png").unwrap();
@@ -111,7 +107,7 @@ fn atlas_uv_mapping(window: Arc<winit::window::Window>) -> Renderling {
         ..Default::default()
     });
     let node_path = stage.append_array(&[node]);
-    let _unit = stage.draw_gltf_rendering(&renderling::gltf::GltfRendering {
+    let _unit = stage.draw(&renderling::gltf::GltfRendering {
         camera,
         transform,
         node_path,

@@ -1074,7 +1074,7 @@ impl Stage {
                         camera: camera_id,
                         ..Default::default()
                     };
-                    self.draw_gltf_rendering(&render_unit)
+                    self.draw(&render_unit)
                 })
                 .collect::<Vec<_>>()
         } else {
@@ -1124,176 +1124,186 @@ impl Stage {
         indices: impl IntoIterator<Item = u32>,
         material: Id<Material>,
     ) -> GltfPrimitive {
-        let vertices: Vec<Vertex> = vertices.into_iter().collect();
-        let indices: Vec<u32> = indices.into_iter().collect();
-        let indices_len: usize = indices.len();
-        let vertices_len: usize = vertices.len();
-        let vertex_count = if vertices_len > indices_len {
-            vertices_len
-        } else {
-            indices_len
-        } as u32;
-        let indices = if indices.is_empty() {
-            Id::NONE
-        } else {
-            let buffer = GltfBuffer(self.append_array(&indices).into_u32_array());
-            let buffer = self.append(&buffer);
-            let view = self.append(&GltfBufferView {
-                buffer,
-                offset: 0,
-                length: indices.len() as u32 * 4, // 4 bytes per u32
-                stride: 4,                        // 4 bytes in a u32,
-            });
-            let accessor = self.append(&GltfAccessor {
-                size: 4,
-                view,
-                offset: 0,
-                count: indices.len() as u32,
-                data_type: DataType::U32,
-                dimensions: Dimensions::Scalar,
-                normalized: false,
-            });
-            accessor
-        };
-
-        let vertex_buffer = GltfBuffer(self.append_array(&vertices).into_u32_array());
-        let buffer = self.append(&vertex_buffer);
-        let u32_stride = 4 // 4 position components,
-            + 4 // 4 color components,
-            + 4 // 4 uv components,
-            + 4 // 4 normal components,
-            + 4 // 4 tangent components,
-            + 4 // 4 joint components,
-            + 4; // 4 weight components
-        let stride = u32_stride * 4; // 4 bytes in a u32
-
-        let view = self.append(&GltfBufferView {
-            buffer,
-            offset: 0,
-            length: vertices.len() as u32 * u32_stride * 4, // stride as u32s * 4 bytes each
-            stride,
-        });
-
-        let positions = self.append(&GltfAccessor {
-            size: 3 * 4, // 3 position components * 4 bytes each
-            view,
-            offset: 0,
-            count: vertex_count as u32,
-            data_type: DataType::F32,
-            dimensions: Dimensions::Vec3,
-            normalized: false,
-        });
-
-        let colors = self.append(&GltfAccessor {
-            size: 4 * 4, // 4 color components * 4 bytes each
-            view,
-            offset: 4 * 4, // 3 + 1 position components * 4 bytes each
-            count: vertex_count as u32,
-            data_type: DataType::F32,
-            dimensions: Dimensions::Vec4,
-            normalized: false,
-        });
-
-        let tex_coords0 = self.append(&GltfAccessor {
-            size: 2 * 4, // 2 uv components * 4 bytes each
-            view,
-            offset: 8 * 4, // (3 + 1) position + 4 color components * 4 bytes each
-            count: vertex_count as u32,
-            data_type: DataType::F32,
-            dimensions: Dimensions::Vec2,
-            normalized: false,
-        });
-
-        let tex_coords1 = self.append(&GltfAccessor {
-            size: 2 * 4, // 2 uv components * 4 bytes each
-            view,
-            offset: 10 * 4, // (3 + 1) position + 4 color + 2 uv components * 4 bytes each
-            count: vertex_count as u32,
-            data_type: DataType::F32,
-            dimensions: Dimensions::Vec2,
-            normalized: false,
-        });
-
-        let normals = self.append(&GltfAccessor {
-            size: 3 * 4, // 3 normal components * 4 bytes each
-            view,
-            offset: 12 * 4, // (3 + 1) position + 4 color + 4 uv components * 4 bytes each
-            count: vertex_count as u32,
-            data_type: DataType::F32,
-            dimensions: Dimensions::Vec3,
-            normalized: false,
-        });
-
-        let tangents = self.append(&GltfAccessor {
-            size: 4 * 4, // 4 tangent components * 4 bytes each
-            view,
-            offset: 16 * 4, /* (3 + 1) position + 4 color + 4 uv + (3 + 1) normal components * 4
-                             * bytes each */
-            count: vertex_count as u32,
-            data_type: DataType::F32,
-            dimensions: Dimensions::Vec4,
-            normalized: false,
-        });
-
-        let joints = self.append(&GltfAccessor {
-            size: 4 * 4, // 4 joint components * 4 bytes each
-            view,
-            offset: 20 * 4, // (3 + 1) position + 4 color + 4 uv + (3 + 1) normal + 4 tangent components * 4 bytes each
-            count: vertex_count as u32,
-            data_type: DataType::F32,
-            dimensions: Dimensions::Vec4,
-            normalized: false,
-        });
-
-        let weights = self.append(&GltfAccessor {
-            size: 4 * 4, // 4 weight components * 4 bytes each
-            view,
-            offset: 24 * 4, // (3 + 1) position + 4 color + 4 uv + (3 + 1) normal + 4 tangent + 4 joint components * 4 bytes each
-            count: vertex_count as u32,
-            data_type: DataType::F32,
-            dimensions: Dimensions::Vec4,
-            normalized: false,
-        });
-
-        GltfPrimitive {
-            vertex_count,
-            material,
-            indices,
-            positions,
-            normals,
-            normals_were_generated: false,
-            tangents,
-            tangents_were_generated: false,
-            colors,
-            tex_coords0,
-            tex_coords1,
-            joints,
-            weights,
-        }
+        create_primitive(self, vertices, indices, material)
     }
-
     /// Convenience method for creating a [`GltfMesh`] without having a
     /// [`gltf::Document`].
     ///
     /// This is useful if you have non-GLTF assets that you want to render.
-    pub fn new_mesh(&mut self) -> GltfMeshBuilder {
+    pub fn new_mesh(&mut self) -> GltfMeshBuilder<Self> {
         GltfMeshBuilder::new(self)
     }
 }
+
+/// Convenience method for creating a `GltfPrimitive` along with all its
+/// `GltfAccessor`s, `GltfBufferView`s and a `GltfBuffer`.
+///
+/// Appends the vertices, indices, material and other structures to the
+/// slab and returns the `GltfPrimitive`.
+///
+/// ## Note
+/// This does **not** generate tangents or normals.
+pub fn create_primitive(
+    slab: &mut impl GrowableSlab,
+    vertices: impl IntoIterator<Item = Vertex>,
+    indices: impl IntoIterator<Item = u32>,
+    material: Id<Material>,
+) -> GltfPrimitive {
+    let vertices: Vec<Vertex> = vertices.into_iter().collect();
+    let indices: Vec<u32> = indices.into_iter().collect();
+    let indices_len: usize = indices.len();
+    let vertices_len: usize = vertices.len();
+    let vertex_count = if vertices_len > indices_len {
+        vertices_len
+    } else {
+        indices_len
+    } as u32;
+    let indices = if indices.is_empty() {
+        Id::NONE
+    } else {
+        let buffer = GltfBuffer(slab.append_array(&indices).into_u32_array());
+        let buffer = slab.append(&buffer);
+        let view = slab.append(&GltfBufferView {
+            buffer,
+            offset: 0,
+            length: indices.len() as u32 * 4, // 4 bytes per u32
+            stride: 4,                        // 4 bytes in a u32,
+        });
+        let accessor = slab.append(&GltfAccessor {
+            size: 4,
+            view,
+            offset: 0,
+            count: indices.len() as u32,
+            data_type: DataType::U32,
+            dimensions: Dimensions::Scalar,
+            normalized: false,
+        });
+        accessor
+    };
+
+    let vertex_buffer = GltfBuffer(slab.append_array(&vertices).into_u32_array());
+    let buffer = slab.append(&vertex_buffer);
+    let u32_stride = Vertex::SLAB_SIZE as u32;
+    let stride = u32_stride * 4; // 4 bytes in a u32
+
+    let view = slab.append(&GltfBufferView {
+        buffer,
+        offset: 0,
+        length: vertices.len() as u32 * u32_stride * 4, // stride as u32s * 4 bytes each
+        stride,
+    });
+
+    let positions = slab.append(&GltfAccessor {
+        size: Vertex::slab_size_of_position() as u32 * 4,
+        view,
+        offset: 0,
+        count: vertex_count as u32,
+        data_type: DataType::F32,
+        dimensions: Dimensions::Vec3,
+        normalized: false,
+    });
+
+    let colors = slab.append(&GltfAccessor {
+        size: Vertex::slab_size_of_color() as u32 * 4,
+        view,
+        offset: Vertex::offset_of_color().offset * 4,
+        count: vertex_count as u32,
+        data_type: DataType::F32,
+        dimensions: Dimensions::Vec4,
+        normalized: false,
+    });
+
+    let tex_coords0 = slab.append(&GltfAccessor {
+        size: Vertex::slab_size_of_uv0() as u32 * 4,
+        view,
+        offset: Vertex::offset_of_uv0().offset * 4,
+        count: vertex_count as u32,
+        data_type: DataType::F32,
+        dimensions: Dimensions::Vec2,
+        normalized: false,
+    });
+    let tex_coords1 = slab.append(&GltfAccessor {
+        size: Vertex::slab_size_of_uv1() as u32 * 4,
+        view,
+        offset: Vertex::offset_of_uv1().offset * 4,
+        count: vertex_count as u32,
+        data_type: DataType::F32,
+        dimensions: Dimensions::Vec2,
+        normalized: false,
+    });
+
+    let normals = slab.append(&GltfAccessor {
+        size: Vertex::slab_size_of_normal() as u32 * 4,
+        view,
+        offset: Vertex::offset_of_normal().offset * 4,
+        count: vertex_count as u32,
+        data_type: DataType::F32,
+        dimensions: Dimensions::Vec3,
+        normalized: false,
+    });
+
+    let tangents = slab.append(&GltfAccessor {
+        size: Vertex::slab_size_of_tangent() as u32 * 4,
+        view,
+        offset: Vertex::offset_of_tangent().offset * 4,
+        count: vertex_count as u32,
+        data_type: DataType::F32,
+        dimensions: Dimensions::Vec4,
+        normalized: false,
+    });
+
+    let joints = slab.append(&GltfAccessor {
+        size: Vertex::slab_size_of_joints() as u32 * 4,
+        view,
+        offset: Vertex::offset_of_joints().offset * 4,
+        count: vertex_count as u32,
+        data_type: DataType::F32,
+        dimensions: Dimensions::Vec4,
+        normalized: false,
+    });
+
+    let weights = slab.append(&GltfAccessor {
+        size: Vertex::slab_size_of_weights() as u32 * 4,
+        view,
+        offset: Vertex::offset_of_weights().offset * 4,
+        count: vertex_count as u32,
+        data_type: DataType::F32,
+        dimensions: Dimensions::Vec4,
+        normalized: false,
+    });
+
+    GltfPrimitive {
+        vertex_count,
+        material,
+        indices,
+        positions,
+        normals,
+        normals_were_generated: false,
+        tangents,
+        tangents_were_generated: false,
+        colors,
+        tex_coords0,
+        tex_coords1,
+        joints,
+        weights,
+    }
+}
+
+// TODO: GltfPrimitiveBuilder
 
 /// Convenience builder for creating a [`GltfMesh`] without having a
 /// [`gltf::Document`].
 ///
 /// This is useful if you have non-GLTF assets that you want to render.
-pub struct GltfMeshBuilder<'a> {
-    stage: &'a mut Stage,
+pub struct GltfMeshBuilder<'a, T> {
+    slab: &'a mut T,
     primitives: Vec<GltfPrimitive>,
 }
 
-impl<'a> GltfMeshBuilder<'a> {
-    pub fn new(stage: &'a mut Stage) -> Self {
+impl<'a, T: GrowableSlab> GltfMeshBuilder<'a, T> {
+    pub fn new(stage: &'a mut T) -> Self {
         Self {
-            stage,
+            slab: stage,
             primitives: vec![],
         }
     }
@@ -1304,7 +1314,7 @@ impl<'a> GltfMeshBuilder<'a> {
         indices: impl IntoIterator<Item = u32>,
         material_id: Id<Material>,
     ) {
-        let primitive = self.stage.new_primitive(vertices, indices, material_id);
+        let primitive = create_primitive(self.slab, vertices, indices, material_id);
         self.primitives.push(primitive);
     }
 
@@ -1320,7 +1330,7 @@ impl<'a> GltfMeshBuilder<'a> {
 
     pub fn build(self) -> GltfMesh {
         let weights = Array::default();
-        let primitives = self.stage.append_array(&self.primitives);
+        let primitives = self.slab.append_array(&self.primitives);
         GltfMesh {
             primitives,
             weights,
@@ -1509,7 +1519,7 @@ mod test {
             scale: Vec3::new(50.0, 50.0, 1.0),
             ..Default::default()
         });
-        let _unit_id = stage.draw_gltf_rendering(&GltfRendering {
+        let _unit_id = stage.draw(&GltfRendering {
             camera,
             transform,
             vertex_count: primitive.vertex_count,
@@ -1577,7 +1587,7 @@ mod test {
             ..Default::default()
         });
 
-        let _unit_id = stage.draw_gltf_rendering(&GltfRendering {
+        let _unit_id = stage.draw(&GltfRendering {
             camera: camera_id,
             transform,
             vertex_count: 6,
@@ -1680,7 +1690,7 @@ mod test {
 
         // accessors
         let positions_accessor = GltfAccessor {
-            size: 3 * 4, // 3 components * 4 bytes each
+            size: 3 * 4,
             view: views.at(0),
             offset: 0,
             count: 3,
@@ -1733,7 +1743,7 @@ mod test {
         let (projection, view) = crate::camera::default_ortho2d(100.0, 100.0);
         let camera = stage.append(&Camera::new(projection, view));
         let node_path = stage.append_array(&[nodes.at(0)]);
-        let rendering_id = stage.draw_gltf_rendering(&GltfRendering {
+        let rendering_id = stage.draw(&GltfRendering {
             camera,
             node_path,
             mesh_index: 0,
@@ -1743,8 +1753,30 @@ mod test {
         });
 
         let data = stage.read_slab().unwrap();
-        let invocation = GltfVertexInvocation::invoke(rendering_id.inner(), 0, &data);
-        println!("invoctaion: {invocation:#?}");
+        let mut clips = vec![];
+        for i in 0..3 {
+            let invocation = GltfVertexInvocation::invoke(rendering_id.inner(), i, &data);
+            clips.push(invocation.clip_pos);
+        }
+        println!("clips: {clips:#?}");
+
+        let (device, queue) = r.get_device_and_queue_owned();
+        let depth_texture = r
+            .graph
+            .get_resource::<crate::DepthTexture>()
+            .unwrap()
+            .unwrap();
+        let depth_copied_buffer = crate::Texture::read(
+            &depth_texture.texture,
+            &device,
+            &queue,
+            depth_texture.width() as usize,
+            depth_texture.height() as usize,
+            1,
+            4,
+        );
+        let depth_img = depth_copied_buffer.into_linear_rgba(&device).unwrap();
+        img_diff::save("gltf/cmy_tri_depth.png", depth_img);
 
         let img = r.render_linear_image().unwrap();
         img_diff::assert_img_eq("gltf/cmy_tri.png", img);

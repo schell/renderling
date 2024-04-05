@@ -438,7 +438,9 @@ impl Texture {
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: Self::DEPTH_FORMAT,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_SRC,
             view_formats: &[],
         };
         let texture = device.create_texture(&desc);
@@ -819,6 +821,47 @@ impl CopiedTextureBuffer {
             apply_linear_transfer: false,
         };
         Ok(img)
+    }
+
+    /// Convert the post render buffer into an RgbaImage.
+    ///
+    /// Ensures that the pixels are in the given color space by applying the
+    /// correct transfer function if needed.
+    pub fn into_rgba(
+        self,
+        device: &wgpu::Device,
+        // `true` - the resulting image will be in a linear color space
+        // `false` - the resulting image will be in an sRGB color space
+        linear: bool,
+    ) -> Result<image::RgbaImage, TextureError> {
+        let format = self.format;
+        let mut img_buffer = self.into_image::<image::Rgba<u8>>(device)?.into_rgba8();
+        let linear_xfer = format.is_srgb() && linear;
+        let opto_xfer = !format.is_srgb() && !linear;
+        let should_xfer = linear_xfer || opto_xfer;
+
+        if should_xfer {
+            let f = if linear_xfer {
+                log::trace!(
+                    "converting by applying linear transfer fn to srgb pixels (sRGB -> linear)"
+                );
+                crate::color::linear_xfer_u8
+            } else {
+                log::trace!(
+                    "converting by applying opto transfer fn to linear pixels (linear -> sRGB)"
+                );
+                crate::color::opto_xfer_u8
+            };
+            // Convert back to linear
+            img_buffer.pixels_mut().for_each(|p| {
+                f(&mut p.0[0]);
+                f(&mut p.0[1]);
+                f(&mut p.0[2]);
+                f(&mut p.0[3]);
+            });
+        }
+
+        Ok(img_buffer)
     }
 
     /// Convert the post render buffer into an RgbaImage.

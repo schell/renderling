@@ -1,5 +1,97 @@
 # devlog
 
+## Sat Apr 10, 2024 
+
+### Finishing the debugging session
+
+It WAS `crabslab`! Specifically it was `Slab::contains`, which is used to check that 
+a type with an `Id` _can be read_. 
+
+Previously the definition was: 
+
+```rust 
+fn contains<T: SlabItem>(&self, id: Id<T>) -> bool {
+    id.index() + T::SLAB_SIZE <= self.len()
+}
+```
+
+Which seems correct, and it functions correctly on the CPU. 
+But on the GPU (meaning `target_arch = "spirv"``) `usize` is a 32bit `u32`, 
+and so the `id.index() + T::SLAB_SIZE` will overflow if the id is `Id::NONE`, 
+because `Id::NONE = u32::MAX;`. 
+
+Indeed, the id is often `Id::NONE`, as that is the default!
+This was causing a silent panic in my shader, which then produced no output.
+
+Now the definition is this: 
+```rust
+fn contains<T: SlabItem>(&self, id: Id<T>) -> bool {
+    self.len() >= T::SLAB_SIZE && id.index() <= self.len() - T::SLAB_SIZE
+}
+```
+
+What a hard-to-diagnose bug! I really need trace statements on GPU.
+
+## Fri Apr 9, 2024 
+
+I have bugs after removing the SDF raymarching stuff. 
+
+Primarily I can't get any of my `stage_vertex`+`stage_fragment` tests passing. 
+Everything is blank. 
+
+### Debug with me!
+
+* it's not crabslab: I fixed some bugs in it and after testing through the `tutorial`
+  shaders I'm 80% certain it's not a (de)serialization problem.
+* NOTHING is being written to the depth texture...
+  - depth is cleared to 1.0 
+  - pipeline depth function is set to ALWAYS (always succeed) and still nothing is written
+  - face culling is off and still nothing is written
+  - running the vertex shader on CPU and printing out clip positions shows:
+    ```
+    clips: [
+        Vec4(
+            -1.0,
+            1.0,
+            0.25,
+            1.0,
+        ),
+        Vec4(
+            -1.0,
+            -1.0,
+            0.25,
+            1.0,
+        ),
+        Vec4(
+            1.0,
+            1.0,
+            0.25,
+            1.0,
+        ),
+    ]
+    ```
+    Which is a CCW triangle up in the top left of the clip space. 
+    So we should see SOMETHING in the depth texture at least, but we don't.
+    Why do we not? Is the render even happening on the GPU? Let's check logging
+    to see if we're issuing the calls..
+      - `stage_render` prints `drawing vertices 0..3 and instances 147..148`
+        so I'm certain we're actually rendering.
+
+At this point I'm a bit at a loss. The difference between the tutorial shaders (which are working) 
+and my stage shader is mainly that the stage shader first writes to an HDR surface and then 
+runs tonemapping and writes the result to the frame surface. I can't see any other course of action 
+than removing HDR and tonemapping to see if that works.
+
+I'm going to try rendering the `gltf_cmy_tri` slab with the `tutorial` shaders. 
+We'll see what happens.
+
+NOTHING! No rendering. No depth values. So this must have something to do with the data.
+
+### What to do about the wacky GLTF stage shaders
+
+I'm going to go back to a much simpler "renderlet" pbr shader program. The entire GLTF document can 
+still live on the GPU, but GLTF is too complicated a structure to use for the internal representation.
+
 ## Mon Feb 26, 2024 
 
 ### SDF stack lang on GPU considered harmful

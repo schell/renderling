@@ -57,6 +57,9 @@ pub fn create_frame(
 }
 
 /// Perform a clearing render pass on a frame and/or a depth texture.
+///
+/// ## Note
+/// This clears the depth to 1.0.
 pub fn conduct_clear_pass(
     device: &wgpu::Device,
     queue: &wgpu::Queue,

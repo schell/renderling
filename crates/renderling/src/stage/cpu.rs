@@ -13,7 +13,7 @@ use crate::{
     Device, HdrSurface, Queue, Skybox, WgpuSlabError,
 };
 use crabslab::{Array, CpuSlab, GrowableSlab, Id, Slab, SlabItem, WgpuBuffer};
-use moongraph::{NoDefault, View, ViewMut};
+use moongraph::{graph, Graph, NoDefault, View, ViewMut};
 use snafu::Snafu;
 
 use super::*;
@@ -49,7 +49,7 @@ impl From<StageError> for moongraph::GraphError {
 /// objects drawn.
 pub(crate) enum StageDrawStrategy {
     // TODO: Add `Indirect` to `StageDrawStrategy` which uses `RenderPass::multi_draw_indirect`
-    Direct(Vec<DrawUnit>),
+    Direct(Vec<(Id<Renderlet>, Renderlet)>),
 }
 
 /// Represents an entire scene worth of rendering data.
@@ -81,9 +81,9 @@ impl Slab for Stage {
         self.slab.read().unwrap().len()
     }
 
-    fn read<T: SlabItem + Default>(&self, id: Id<T>) -> T {
+    fn read_unchecked<T: SlabItem>(&self, id: Id<T>) -> T {
         // UNWRAP: if we can't acquire the lock we want to panic.
-        self.slab.read().unwrap().read(id)
+        self.slab.read().unwrap().read_unchecked(id)
     }
 
     fn write_indexed<T: SlabItem>(&mut self, t: &T, index: usize) -> usize {
@@ -271,8 +271,8 @@ impl Stage {
         fn create_stage_render_pipeline(device: &wgpu::Device) -> wgpu::RenderPipeline {
             log::trace!("creating stage render pipeline");
             let label = Some("stage render pipeline");
-            let vertex_linkage = crate::linkage::stage_vertex::linkage(device);
-            let fragment_linkage = crate::linkage::stage_fragment::linkage(device);
+            let vertex_linkage = crate::linkage::renderlet_vertex::linkage(device);
+            let fragment_linkage = crate::linkage::renderlet_fragment::linkage(device);
             let stage_slab_buffers_layout = crate::linkage::slab_bindgroup_layout(device);
             let atlas_and_skybox_layout = crate::linkage::atlas_and_skybox_bindgroup_layout(device);
             let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -372,42 +372,35 @@ impl Stage {
         }
     }
 
-    #[cfg(feature = "gltf")]
-    /// Draw a GLTF rendering each frame.
+    /// Draw a [`Renderlet`] each frame.
     ///
-    /// Returns the id of the stored `GltfRendering`.
-    pub fn draw_gltf_rendering(
-        &mut self,
-        unit: &crate::gltf::GltfRendering,
-    ) -> Id<crate::gltf::GltfRendering> {
-        let id = self.append(unit);
-        let draw = DrawUnit {
-            id,
-            vertex_count: unit.vertex_count,
-            visible: true,
-        };
+    /// Returns the id of the stored `Renderlet`.
+    pub fn draw(&mut self, renderlet: &crate::Renderlet) -> Id<crate::Renderlet> {
+        let id = self.append(renderlet);
         // UNWRAP: if we can't acquire the lock we want to panic.
         let mut draws = self.draws.write().unwrap();
         match draws.deref_mut() {
             StageDrawStrategy::Direct(units) => {
-                units.push(draw);
+                units.push((id, renderlet.clone()));
             }
         }
         id
     }
 
-    /// Erase the [`RenderUnit`] with the given `Id` from the stage.
-    pub fn erase_unit(&self, id: Id<GltfRendering>) {
+    /// Erase the [`Renderlet`] with the given [`Id`] from the stage.
+    ///
+    /// This removes the [`Renderlet`] from the stage.
+    pub fn erase(&self, id: Id<Renderlet>) {
         let mut draws = self.draws.write().unwrap();
         match draws.deref_mut() {
             StageDrawStrategy::Direct(units) => {
-                units.retain(|unit| unit.id != id);
+                units.retain(|(renderlet_id, _)| renderlet_id != &id);
             }
         }
     }
 
-    /// Returns all the draw operations on the stage.
-    pub fn get_draws(&self) -> Vec<DrawUnit> {
+    /// Returns all the draw operations ([`Renderlet`]s) on the stage, paired with their [`Id`]s.
+    pub fn get_draws(&self) -> Vec<(Id<Renderlet>, Renderlet)> {
         // UNWRAP: if we can't acquire the lock we want to panic.
         let draws = self.draws.read().unwrap();
         match draws.deref() {
@@ -415,28 +408,28 @@ impl Stage {
         }
     }
 
-    /// Show the [`RenderUnit`] with the given `Id` for rendering.
-    pub fn show_unit(&self, id: Id<GltfRendering>) {
+    /// Show the [`Renderlet`] with the given `Id` for rendering.
+    pub fn show(&self, id: Id<Renderlet>) {
         let mut draws = self.draws.write().unwrap();
         match draws.deref_mut() {
             StageDrawStrategy::Direct(units) => {
-                for unit in units.iter_mut() {
-                    if unit.id == id {
-                        unit.visible = true;
+                for (r_id, r) in units.iter_mut() {
+                    if r_id == &id {
+                        r.visible = true;
                     }
                 }
             }
         }
     }
 
-    /// Hide the [`RenderUnit`] with the given `Id` from rendering.
-    pub fn hide_unit(&self, id: Id<GltfRendering>) {
+    /// Hide the [`Renderlet`] with the given `Id` from rendering.
+    pub fn hide(&self, id: Id<Renderlet>) {
         let mut draws = self.draws.write().unwrap();
         match draws.deref_mut() {
             StageDrawStrategy::Direct(units) => {
-                for unit in units.iter_mut() {
-                    if unit.id == id {
-                        unit.visible = false;
+                for (r_id, r) in units.iter_mut() {
+                    if r_id == &id {
+                        r.visible = false;
                     }
                 }
             }
@@ -448,7 +441,6 @@ impl Stage {
         // set up the render graph
         use crate::{
             frame::{copy_frame_to_post, create_frame, present},
-            graph::{graph, Graph},
             hdr::{clear_surface_hdr_and_depth, create_hdr_render_surface},
             tonemapping::tonemapping,
         };
@@ -637,6 +629,7 @@ pub fn stage_render(
         View<DepthTexture, NoDefault>,
     ),
 ) -> Result<(), StageError> {
+    log::trace!("rendering the stage");
     let label = Some("stage render");
     let pipeline = stage.get_pipeline();
     let slab_buffers_bindgroup = stage.get_slab_buffers_bindgroup();
@@ -679,10 +672,14 @@ pub fn stage_render(
         render_pass.set_bind_group(1, &textures_bindgroup, &[]);
         match draws.deref() {
             StageDrawStrategy::Direct(units) => {
-                for unit in units {
-                    if unit.visible {
-                        render_pass
-                            .draw(0..unit.vertex_count, unit.id.inner()..unit.id.inner() + 1);
+                for (id, rlet) in units {
+                    if rlet.visible {
+                        let vertex_range = 0..rlet.geometry.len() as u32;
+                        let instance_range = id.inner()..id.inner() + 1;
+                        log::trace!(
+                            "drawing vertices {vertex_range:?} and instances {instance_range:?}"
+                        );
+                        render_pass.draw(vertex_range, instance_range);
                     }
                 }
             } /* render_pass.multi_draw_indirect(&indirect_buffer, 0,
@@ -701,4 +698,35 @@ pub fn stage_render(
     stage.queue.submit(std::iter::once(encoder.finish()));
 
     Ok(())
+}
+
+#[cfg(test)]
+mod test {
+    use crabslab::{Array, Slab};
+    use glam::{Vec2, Vec3};
+
+    use crate::Vertex;
+
+    #[test]
+    fn vertex_slab_roundtrip() {
+        let initial_vertices = {
+            let tl = Vertex::default()
+                .with_position(Vec3::ZERO)
+                .with_uv0(Vec2::ZERO);
+            let tr = Vertex::default()
+                .with_position(Vec3::new(1.0, 0.0, 0.0))
+                .with_uv0(Vec2::new(1.0, 0.0));
+            let bl = Vertex::default()
+                .with_position(Vec3::new(0.0, 1.0, 0.0))
+                .with_uv0(Vec2::new(0.0, 1.0));
+            let br = Vertex::default()
+                .with_position(Vec3::new(1.0, 1.0, 0.0))
+                .with_uv0(Vec2::splat(1.0));
+            vec![tl, bl, br, tl, br, tr]
+        };
+        let mut slab = [0u32; 256];
+        slab.write_indexed_slice(&initial_vertices, 0);
+        let vertices = slab.read_vec(Array::<Vertex>::new(0, initial_vertices.len() as u32));
+        pretty_assertions::assert_eq!(initial_vertices, vertices);
+    }
 }

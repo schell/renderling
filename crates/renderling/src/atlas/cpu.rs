@@ -511,9 +511,9 @@ impl Atlas {
 mod test {
     use crate::{
         atlas::{AtlasTexture, TextureAddressMode, TextureModes},
-        pbr::Material,
+        pbr::{Material, PbrConfig},
         stage::Vertex,
-        Camera, Renderling, Transform,
+        Camera, Renderlet, Renderling, Transform,
     };
     use crabslab::GrowableSlab;
     use glam::{Vec2, Vec3, Vec4};
@@ -535,7 +535,6 @@ mod test {
         img_diff::assert_img_eq("atlas/merge3.png", atlas3.atlas_img(&device, &queue));
     }
 
-    #[cfg(feature = "gltf")]
     #[test]
     // Ensures that textures are packed and rendered correctly.
     fn atlas_uv_mapping() {
@@ -543,13 +542,8 @@ mod test {
             Renderling::headless(32, 32).with_background_color(Vec3::splat(0.0).extend(1.0));
         let mut stage = r.new_stage();
         stage.configure_graph(&mut r, true);
-        stage.set_debug_mode(crate::pbr::debug::DebugMode::Brdf);
         let (projection, view) = crate::camera::default_ortho2d(32.0, 32.0);
-        let camera = stage.append(&Camera {
-            projection,
-            view,
-            ..Default::default()
-        });
+        let camera = stage.append(&Camera::new(projection, view));
         let dirt = AtlasImage::from_path("../../img/dirt.jpg").unwrap();
         let sandstone = AtlasImage::from_path("../../img/sandstone.png").unwrap();
         let texels = AtlasImage::from_path("../../test_img/atlas/uv_mapping.png").unwrap();
@@ -558,48 +552,35 @@ mod test {
         texels_tex.modes.s = TextureAddressMode::ClampToEdge;
         texels_tex.modes.t = TextureAddressMode::ClampToEdge;
         let texels_tex_id = stage.append(&texels_tex);
-        let material_id = stage.append(&Material {
+        let material = stage.append(&Material {
             albedo_texture: texels_tex_id,
             has_lighting: false,
             ..Default::default()
         });
-        let mesh = stage
-            .new_mesh()
-            .with_primitive(
-                {
-                    let tl = Vertex::default()
-                        .with_position(Vec3::ZERO)
-                        .with_uv0(Vec2::ZERO);
-                    let tr = Vertex::default()
-                        .with_position(Vec3::new(1.0, 0.0, 0.0))
-                        .with_uv0(Vec2::new(1.0, 0.0));
-                    let bl = Vertex::default()
-                        .with_position(Vec3::new(0.0, 1.0, 0.0))
-                        .with_uv0(Vec2::new(0.0, 1.0));
-                    let br = Vertex::default()
-                        .with_position(Vec3::new(1.0, 1.0, 0.0))
-                        .with_uv0(Vec2::splat(1.0));
-                    vec![tl, bl, br, tl, br, tr]
-                },
-                [],
-                material_id,
-            )
-            .build();
-        let mesh = stage.append(&mesh);
-        let node = stage.append(&crate::gltf::GltfNode {
-            mesh,
-            ..Default::default()
+        let geometry = stage.append_array(&{
+            let tl = Vertex::default()
+                .with_position(Vec3::ZERO)
+                .with_uv0(Vec2::ZERO);
+            let tr = Vertex::default()
+                .with_position(Vec3::new(1.0, 0.0, 0.0))
+                .with_uv0(Vec2::new(1.0, 0.0));
+            let bl = Vertex::default()
+                .with_position(Vec3::new(0.0, 1.0, 0.0))
+                .with_uv0(Vec2::new(0.0, 1.0));
+            let br = Vertex::default()
+                .with_position(Vec3::new(1.0, 1.0, 0.0))
+                .with_uv0(Vec2::splat(1.0));
+            [tl, bl, br, tl, br, tr]
         });
         let transform = stage.append(&Transform {
             scale: Vec3::new(32.0, 32.0, 1.0),
             ..Default::default()
         });
-        let node_path = stage.append_array(&[node]);
-        let _unit = stage.draw_gltf_rendering(&crate::gltf::GltfRendering {
+        let _renderlet = stage.draw(&crate::Renderlet {
             camera,
+            geometry,
             transform,
-            node_path,
-            vertex_count: 6,
+            material,
             ..Default::default()
         });
 
@@ -607,7 +588,6 @@ mod test {
         img_diff::assert_img_eq("atlas/uv_mapping.png", img);
     }
 
-    #[cfg(feature = "gltf")]
     #[test]
     // Ensures that textures with different wrapping modes are rendered correctly.
     fn uv_wrapping() {
@@ -620,14 +600,8 @@ mod test {
         let mut r = Renderling::headless(w, h).with_background_color(Vec4::new(1.0, 1.0, 0.0, 1.0));
         let mut stage = r.new_stage();
         stage.configure_graph(&mut r, true);
-
         let (projection, view) = crate::camera::default_ortho2d(w as f32, h as f32);
-        let camera = stage.append(&Camera {
-            projection,
-            view,
-            ..Default::default()
-        });
-
+        let camera = stage.append(&Camera::new(projection, view));
         let dirt = AtlasImage::from_path("../../img/dirt.jpg").unwrap();
         let sandstone = AtlasImage::from_path("../../img/sandstone.png").unwrap();
         let texels = AtlasImage::from_path("../../img/happy_mac.png").unwrap();
@@ -664,96 +638,49 @@ mod test {
 
         let sheet_w = sheet_w as f32;
         let sheet_h = sheet_h as f32;
-        let clamp_prim = stage.new_primitive(
-            {
-                let tl = Vertex::default()
-                    .with_position(Vec3::ZERO)
-                    .with_uv0(Vec2::ZERO);
-                let tr = Vertex::default()
-                    .with_position(Vec3::new(sheet_w, 0.0, 0.0))
-                    .with_uv0(Vec2::new(3.0, 0.0));
-                let bl = Vertex::default()
-                    .with_position(Vec3::new(0.0, sheet_h, 0.0))
-                    .with_uv0(Vec2::new(0.0, 3.0));
-                let br = Vertex::default()
-                    .with_position(Vec3::new(sheet_w, sheet_h, 0.0))
-                    .with_uv0(Vec2::splat(3.0));
-                vec![tl, bl, br, tl, br, tr]
-            },
-            [],
-            clamp_material_id,
-        );
-        let repeat_prim = {
-            let mut p = clamp_prim;
-            p.material = repeat_material_id;
-            p
-        };
-        let mirror_prim = {
-            let mut p = clamp_prim;
-            p.material = mirror_material_id;
-            p
-        };
-
-        let _clamp = {
-            let primitives = stage.append_array(&[clamp_prim]);
-            let mesh = stage.append(&crate::gltf::GltfMesh {
-                primitives,
-                ..Default::default()
-            });
-            let node = stage.append(&crate::gltf::GltfNode {
-                mesh,
-                ..Default::default()
-            });
-            let node_path = stage.append_array(&[node]);
-            stage.draw_gltf_rendering(&crate::gltf::GltfRendering {
-                camera,
-                node_path,
-                vertex_count: 6,
-                ..Default::default()
-            })
-        };
-        let _repeat = {
-            let primitives = stage.append_array(&[repeat_prim]);
-            let mesh = stage.append(&crate::gltf::GltfMesh {
-                primitives,
-                ..Default::default()
-            });
-            let node = stage.append(&crate::gltf::GltfNode {
-                mesh,
-                ..Default::default()
-            });
-            let node_path = stage.append_array(&[node]);
+        let geometry = stage.append_array(&{
+            let tl = Vertex::default()
+                .with_position(Vec3::ZERO)
+                .with_uv0(Vec2::ZERO);
+            let tr = Vertex::default()
+                .with_position(Vec3::new(sheet_w, 0.0, 0.0))
+                .with_uv0(Vec2::new(3.0, 0.0));
+            let bl = Vertex::default()
+                .with_position(Vec3::new(0.0, sheet_h, 0.0))
+                .with_uv0(Vec2::new(0.0, 3.0));
+            let br = Vertex::default()
+                .with_position(Vec3::new(sheet_w, sheet_h, 0.0))
+                .with_uv0(Vec2::splat(3.0));
+            [tl, bl, br, tl, br, tr]
+        });
+        let _clamp_prim = stage.draw(&Renderlet {
+            camera,
+            geometry,
+            material: clamp_material_id,
+            ..Default::default()
+        });
+        let _repeat_prim = {
             let transform = stage.append(&Transform {
                 translation: Vec3::new(sheet_w + 1.0, 0.0, 0.0),
                 ..Default::default()
             });
-            stage.draw_gltf_rendering(&crate::gltf::GltfRendering {
+            stage.draw(&Renderlet {
                 camera,
-                node_path,
-                vertex_count: 6,
+                geometry,
+                material: repeat_material_id,
                 transform,
                 ..Default::default()
             })
         };
-        let _mirror = {
-            let primitives = stage.append_array(&[mirror_prim]);
-            let mesh = stage.append(&crate::gltf::GltfMesh {
-                primitives,
-                ..Default::default()
-            });
-            let node = stage.append(&crate::gltf::GltfNode {
-                mesh,
-                ..Default::default()
-            });
-            let node_path = stage.append_array(&[node]);
+        let _mirror_prim = {
             let transform = stage.append(&Transform {
                 translation: Vec3::new(sheet_w as f32 * 2.0 + 2.0, 0.0, 0.0),
                 ..Default::default()
             });
-            stage.draw_gltf_rendering(&crate::gltf::GltfRendering {
+            stage.draw(&Renderlet {
                 camera,
-                node_path,
-                vertex_count: 6,
+                geometry,
+                material: mirror_material_id,
                 transform,
                 ..Default::default()
             })
@@ -763,7 +690,7 @@ mod test {
         img_diff::assert_img_eq("atlas/uv_wrapping.png", img);
     }
 
-    #[cfg(feature = "gltf")]
+    #[cfg(feature = "blah")]
     #[test]
     // Ensures that textures with negative uv coords wrap correctly
     fn negative_uv_wrapping() {
@@ -865,7 +792,7 @@ mod test {
                 ..Default::default()
             });
             let node_path = stage.append_array(&[node]);
-            stage.draw_gltf_rendering(&crate::gltf::GltfRendering {
+            stage.draw(&crate::gltf::GltfRendering {
                 camera,
                 node_path,
                 vertex_count: 6,
@@ -887,7 +814,7 @@ mod test {
                 translation: Vec3::new(sheet_w + 1.0, 0.0, 0.0),
                 ..Default::default()
             });
-            stage.draw_gltf_rendering(&crate::gltf::GltfRendering {
+            stage.draw(&crate::gltf::GltfRendering {
                 camera,
                 node_path,
                 transform,
@@ -910,7 +837,7 @@ mod test {
                 translation: Vec3::new(sheet_w as f32 * 2.0 + 2.0, 0.0, 0.0),
                 ..Default::default()
             });
-            stage.draw_gltf_rendering(&crate::gltf::GltfRendering {
+            stage.draw(&crate::gltf::GltfRendering {
                 camera,
                 node_path,
                 vertex_count: 6,

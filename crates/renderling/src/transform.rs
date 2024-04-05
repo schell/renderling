@@ -18,3 +18,24 @@ impl Default for Transform {
         }
     }
 }
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crabslab::*;
+
+    #[test]
+    fn transform_roundtrip() {
+        assert_eq!(3, Vec3::SLAB_SIZE, "unexpected Vec3 slab size");
+        assert_eq!(4, Quat::SLAB_SIZE, "unexpected Quat slab size");
+        assert_eq!(10, Transform::SLAB_SIZE);
+        let t = Transform::default();
+        let mut slab = CpuSlab::new(vec![]);
+        let t_id = slab.append(&t);
+        pretty_assertions::assert_eq!(
+            &[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+            bytemuck::cast_slice::<u32, f32>(slab.as_ref().as_slice())
+        );
+        pretty_assertions::assert_eq!(t, slab.read(t_id));
+    }
+}

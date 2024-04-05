@@ -229,7 +229,7 @@ pub fn clear_surface_hdr_and_depth(
     crate::frame::conduct_clear_pass(
         &device,
         &queue,
-        Some("clear_frame_and_depth"),
+        Some("clear_surface_hdr_and_depth"),
         vec![&frame.view, &hdr.hdr_texture.view],
         Some(&depth_view),
         color,

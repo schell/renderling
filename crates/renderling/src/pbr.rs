@@ -4,7 +4,7 @@
 //! * https://learnopengl.com/PBR/Theory
 //! * https://github.com/KhronosGroup/glTF-Sample-Viewer/blob/5b1b7f48a8cb2b7aaef00d08fdba18ccc8dd331b/source/Renderer/shaders/pbr.frag
 //! * https://github.khronos.org/glTF-Sample-Viewer-Release/
-use crabslab::{Array, Id, Slab, SlabItem, ID_NONE};
+use crabslab::{Array, Id, Slab, SlabItem};
 use glam::{Vec2, Vec3, Vec4, Vec4Swizzles};
 use light::Light;
 use spirv_std::{
@@ -256,8 +256,8 @@ impl Default for PbrConfig {
 }
 
 /// Returns the `Material` from the stage's slab.
-pub fn get_material(material_index: u32, has_lighting: bool, slab: &[u32]) -> Material {
-    if material_index == ID_NONE {
+pub fn get_material(material_id: Id<Material>, has_lighting: bool, slab: &[u32]) -> Material {
+    if material_id.is_none() {
         // without an explicit material (or if the entire render has no lighting)
         // the entity will not participate in any lighting calculations
         Material {
@@ -265,10 +265,8 @@ pub fn get_material(material_index: u32, has_lighting: bool, slab: &[u32]) -> Ma
             ..Default::default()
         }
     } else {
-        let mut material = slab.read(Id::<Material>::new(material_index));
-        if !has_lighting {
-            material.has_lighting = false;
-        }
+        let mut material = slab.read(material_id);
+        material.has_lighting &= has_lighting;
         material
     }
 }
@@ -282,7 +280,9 @@ pub fn texture_color<T: Sample2d<Sampler = S>, S: IsSampler>(
     slab: &[u32],
 ) -> Vec4 {
     let texture = slab.read(texture_id);
+    // uv is [0, 0] when texture_id is Id::NONE
     let uv = texture.uv(uv, atlas_size);
+    crate::println!("uv: {uv}");
     let mut color: Vec4 = atlas.sample_by_lod(*sampler, uv, 0.0);
     if texture_id.is_none() {
         color = Vec4::splat(1.0);
@@ -310,8 +310,8 @@ pub fn pbr_fragment(
     #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] slab: &[u32],
 
     #[spirv(flat)] in_pbr_config: Id<PbrConfig>,
-    #[spirv(flat)] in_camera: u32,
-    #[spirv(flat)] in_material: u32,
+    #[spirv(flat)] in_camera: Id<Camera>,
+    #[spirv(flat)] in_material: Id<Material>,
     in_color: Vec4,
     in_uv0: Vec2,
     in_uv1: Vec2,
@@ -360,8 +360,8 @@ pub fn fragment_impl<T, C, S>(
     slab: &[u32],
 
     in_pbr_config: Id<PbrConfig>,
-    in_camera: u32,
-    in_material: u32,
+    in_camera: Id<Camera>,
+    in_material: Id<Material>,
     in_color: Vec4,
     in_uv0: Vec2,
     in_uv1: Vec2,
@@ -380,7 +380,6 @@ pub fn fragment_impl<T, C, S>(
     my_println!("pbr: {:?}", pbr);
     let PbrConfig {
         atlas_size,
-
         debug_mode,
         has_lighting,
         light_array,
@@ -489,7 +488,7 @@ pub fn fragment_impl<T, C, S>(
     let emissive =
         emissive_tex_color.xyz() * material.emissive_factor * material.emissive_strength_multiplier;
     let irradiance = sample_irradiance(irradiance, irradiance_sampler, n);
-    let camera = slab.read(Id::<Camera>::new(in_camera));
+    let camera = slab.read(in_camera);
     let specular = sample_specular_reflection(
         prefiltered,
         prefiltered_sampler,

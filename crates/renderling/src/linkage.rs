@@ -7,14 +7,19 @@ pub mod generate_mipmap_vertex;
 pub mod pbr_fragment;
 pub mod prefilter_environment_cubemap_fragment;
 pub mod prefilter_environment_cubemap_vertex;
+pub mod renderlet_fragment;
+pub mod renderlet_vertex;
 pub mod skybox_cubemap_fragment;
 pub mod skybox_cubemap_vertex;
 pub mod skybox_equirectangular_fragment;
 pub mod skybox_vertex;
-pub mod stage_fragment;
-pub mod stage_vertex;
 pub mod tonemapping_fragment;
 pub mod tonemapping_vertex;
+pub mod tutorial_implicit_isosceles_vertex;
+pub mod tutorial_passthru_fragment;
+pub mod tutorial_slabbed_renderlet;
+pub mod tutorial_slabbed_vertices;
+pub mod tutorial_slabbed_vertices_no_instance;
 
 pub struct ShaderLinkage {
     pub module: wgpu::ShaderModule,
