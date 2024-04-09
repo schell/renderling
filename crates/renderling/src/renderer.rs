@@ -1,6 +1,6 @@
 //! Builds the UI pipeline and manages resources.
-use glam::Vec4;
-use moongraph::TypeKey;
+use glam::{UVec2, Vec4};
+use moongraph::{NoDefault, TypeKey};
 use snafu::prelude::*;
 use std::{ops::Deref, sync::Arc};
 
@@ -128,6 +128,40 @@ impl Deref for DepthTexture {
     }
 }
 
+impl DepthTexture {
+    pub fn width(&self) -> u32 {
+        self.0.texture.width()
+    }
+
+    pub fn height(&self) -> u32 {
+        self.0.texture.height()
+    }
+
+    /// Converts the depth texture into an image.
+    ///
+    /// Assumes the format is single channel 32bit.
+    pub fn into_image(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> Option<image::DynamicImage> {
+        let depth_copied_buffer = crate::Texture::read(
+            &self.texture,
+            &device,
+            &queue,
+            self.width() as usize,
+            self.height() as usize,
+            1,
+            4,
+        );
+        let pixels = depth_copied_buffer.pixels(device);
+        let pixels: Vec<f32> = bytemuck::cast_slice(&pixels).to_vec();
+        let img_buffer: image::ImageBuffer<image::Luma<f32>, Vec<f32>> =
+            image::ImageBuffer::from_raw(self.width(), self.height(), pixels)?;
+        Some(image::DynamicImage::from(img_buffer))
+    }
+}
+
 /// The global background color.
 pub struct BackgroundColor(pub Vec4);
 
@@ -249,10 +283,10 @@ impl Renderling {
         self.graph
             .visit(
                 |(device, mut screen_size, mut target, mut depth_texture): (
-                    View<Device>,
-                    ViewMut<ScreenSize>,
-                    ViewMut<RenderTarget>,
-                    ViewMut<DepthTexture>,
+                    View<Device, NoDefault>,
+                    ViewMut<ScreenSize, NoDefault>,
+                    ViewMut<RenderTarget, NoDefault>,
+                    ViewMut<DepthTexture, NoDefault>,
                 )| {
                     *screen_size = ScreenSize { width, height };
                     target.resize(width, height, &device.0);
@@ -263,6 +297,11 @@ impl Renderling {
         // The renderer doesn't _always_ have an HrdSurface, so we don't unwrap this
         // one.
         let _ = self.graph.visit(crate::hdr::resize_hdr_surface);
+
+        // Ditto with the Stage - don't unwrap because it may not exist.
+        let _ = self.graph.visit(|mut stage: ViewMut<Stage, NoDefault>| {
+            stage.set_resolution(UVec2::new(width, height));
+        });
     }
 
     pub fn create_texture<P>(
@@ -358,7 +397,8 @@ impl Renderling {
 
     pub fn new_stage(&self) -> Stage {
         let (device, queue) = self.get_device_and_queue_owned();
-        Stage::new(device, queue)
+        let (w, h) = self.get_screen_size();
+        Stage::new(device, queue, UVec2::new(w, h))
     }
 
     //pub fn new_ui_scene(&self) -> UiSceneBuilder<'_> {

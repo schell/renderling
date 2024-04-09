@@ -182,6 +182,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let contents = linkage.to_string(shader_lang);
         if !dry_run {
             std::fs::write(&filepath, contents).unwrap();
+            std::process::Command::new("rustfmt")
+                .args([&format!("{}", filepath.display())])
+                .output()
+                .expect("could not format generated code");
             println!("  {}", filepath.display());
         }
     }

@@ -1,7 +1,7 @@
 //! GPU staging area.
 //!
 //! The `Stage` object contains a slab buffer and a render pipeline.
-//! It is used to stage objects for rendering.
+//! It is used to stage [`Renderlet`]s for rendering.
 use std::{
     ops::{Deref, DerefMut},
     sync::{atomic::AtomicBool, Arc, Mutex, RwLock},
@@ -13,7 +13,7 @@ use crate::{
     Device, HdrSurface, Queue, Skybox, WgpuSlabError,
 };
 use crabslab::{Array, CpuSlab, GrowableSlab, Id, Slab, SlabItem, WgpuBuffer};
-use moongraph::{View, ViewMut};
+use moongraph::{graph, Graph, NoDefault, View, ViewMut};
 use snafu::Snafu;
 
 use super::*;
@@ -39,11 +39,17 @@ impl From<WgpuSlabError> for StageError {
     }
 }
 
+impl From<StageError> for moongraph::GraphError {
+    fn from(value: StageError) -> Self {
+        moongraph::GraphError::other(value)
+    }
+}
+
 /// Provides a way to communicate with the stage about how you'd like your
 /// objects drawn.
 pub(crate) enum StageDrawStrategy {
     // TODO: Add `Indirect` to `StageDrawStrategy` which uses `RenderPass::multi_draw_indirect`
-    Direct(Vec<DrawUnit>),
+    Direct(Vec<(Id<Renderlet>, Renderlet)>),
 }
 
 /// Represents an entire scene worth of rendering data.
@@ -55,6 +61,8 @@ pub(crate) enum StageDrawStrategy {
 #[derive(Clone)]
 pub struct Stage {
     pub(crate) slab: Arc<RwLock<CpuSlab<WgpuBuffer>>>,
+    pub(crate) vertex_debug: Arc<RwLock<CpuSlab<WgpuBuffer>>>,
+    pub(crate) fragment_debug: Arc<RwLock<CpuSlab<WgpuBuffer>>>,
     pub(crate) atlas: Arc<RwLock<Atlas>>,
     pub(crate) skybox: Arc<RwLock<Skybox>>,
     pub(crate) skybox_bindgroup: Arc<Mutex<Option<Arc<wgpu::BindGroup>>>>,
@@ -75,9 +83,9 @@ impl Slab for Stage {
         self.slab.read().unwrap().len()
     }
 
-    fn read<T: SlabItem + Default>(&self, id: Id<T>) -> T {
+    fn read_unchecked<T: SlabItem>(&self, id: Id<T>) -> T {
         // UNWRAP: if we can't acquire the lock we want to panic.
-        self.slab.read().unwrap().read(id)
+        self.slab.read().unwrap().read_unchecked(id)
     }
 
     fn write_indexed<T: SlabItem>(&mut self, t: &T, index: usize) -> usize {
@@ -110,10 +118,11 @@ impl GrowableSlab for Stage {
 
 impl Stage {
     /// Create a new stage.
-    pub fn new(device: Device, queue: Queue) -> Self {
+    pub fn new(device: Device, queue: Queue, resolution: UVec2) -> Self {
         let atlas = Atlas::empty(&device, &queue);
         let pbr_config = PbrConfig {
             atlas_size: atlas.size,
+            resolution,
             ..Default::default()
         };
         let mut s = Self {
@@ -122,6 +131,21 @@ impl Stage {
                 queue.0.clone(),
                 256,
             )))),
+            vertex_debug: Arc::new(RwLock::new(CpuSlab::new(WgpuBuffer::new(
+                device.0.clone(),
+                queue.0.clone(),
+                256,
+            )))),
+            fragment_debug: Arc::new(RwLock::new({
+                let len = (resolution.x * resolution.y) as usize;
+                let mut debug = CpuSlab::new(WgpuBuffer::new(
+                    device.0.clone(),
+                    queue.0.clone(),
+                    RenderletFragmentLog::SLAB_SIZE * len,
+                ));
+                debug.append_array(&vec![RenderletFragmentLog::default(); len]);
+                debug
+            })),
             pipeline: Default::default(),
             atlas: Arc::new(RwLock::new(atlas)),
             skybox: Arc::new(RwLock::new(Skybox::empty(device.clone(), queue.clone()))),
@@ -167,6 +191,27 @@ impl Stage {
     pub fn set_lights(&mut self, lights: Array<Light>) {
         let id = Id::<Array<Light>>::from(PbrConfig::offset_of_light_array());
         self.write(id, &lights);
+    }
+
+    pub fn set_resolution(&mut self, resolution: UVec2) {
+        let id = Id::<UVec2>::from(PbrConfig::offset_of_resolution());
+        self.write(id, &resolution);
+
+        // Allocate space for our fragment shader logs...
+        let len = resolution.x * resolution.y;
+        // UNWRAP: if we can't write we want to panic.
+        let mut debug = self.fragment_debug.write().unwrap();
+        let array = Array::<RenderletFragmentLog>::new(0, len);
+        debug.maybe_expand_to_fit::<RenderletFragmentLog>(len as usize);
+        debug.write_array(
+            array,
+            vec![RenderletFragmentLog::default(); len as usize].as_slice(),
+        );
+    }
+
+    pub fn with_resolution(mut self, resolution: UVec2) -> Self {
+        self.set_resolution(resolution);
+        self
     }
 
     /// Set the images to use for the atlas.
@@ -265,8 +310,8 @@ impl Stage {
         fn create_stage_render_pipeline(device: &wgpu::Device) -> wgpu::RenderPipeline {
             log::trace!("creating stage render pipeline");
             let label = Some("stage render pipeline");
-            let vertex_linkage = crate::linkage::stage_vertex::linkage(device);
-            let fragment_linkage = crate::linkage::stage_fragment::linkage(device);
+            let vertex_linkage = crate::linkage::renderlet_vertex::linkage(device);
+            let fragment_linkage = crate::linkage::renderlet_fragment::linkage(device);
             let stage_slab_buffers_layout = crate::linkage::slab_bindgroup_layout(device);
             let atlas_and_skybox_layout = crate::linkage::atlas_and_skybox_bindgroup_layout(device);
             let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -340,6 +385,8 @@ impl Stage {
                 crate::linkage::slab_bindgroup(
                     device,
                     self.slab.read().unwrap().as_ref().get_buffer(),
+                    self.vertex_debug.read().unwrap().as_ref().get_buffer(),
+                    self.fragment_debug.read().unwrap().as_ref().get_buffer(),
                     &pipeline.get_bind_group_layout(0),
                 )
             });
@@ -366,42 +413,55 @@ impl Stage {
         }
     }
 
-    #[cfg(feature = "gltf")]
-    /// Draw a GLTF rendering each frame.
+    /// Draw a [`Renderlet`] each frame.
     ///
-    /// Returns the id of the stored `GltfRendering`.
-    pub fn draw_gltf_rendering(
-        &mut self,
-        unit: &crate::gltf::GltfRendering,
-    ) -> Id<crate::gltf::GltfRendering> {
-        let id = self.append(unit);
-        let draw = DrawUnit {
-            id,
-            vertex_count: unit.vertex_count,
-            visible: true,
-        };
+    /// Returns the id of the stored `Renderlet`.
+    pub fn draw(&mut self, renderlet: &crate::Renderlet) -> Id<crate::Renderlet> {
+        let mut renderlet = *renderlet;
+        self.draw_debug(&mut renderlet)
+    }
+
+    /// Draw a [`Renderlet`] each frame.
+    ///
+    /// Returns the id of the stored `Renderlet`.
+    ///
+    /// Updates the input `renderlet` with a `debug_index`, which can be used to retrieve
+    /// debugging information after running a shader.
+    pub fn draw_debug(&mut self, renderlet: &mut crate::Renderlet) -> Id<crate::Renderlet> {
+        let id = self.append(renderlet);
         // UNWRAP: if we can't acquire the lock we want to panic.
         let mut draws = self.draws.write().unwrap();
         match draws.deref_mut() {
             StageDrawStrategy::Direct(units) => {
-                units.push(draw);
+                renderlet.debug_index = units.len() as u32;
+                units.push((id, *renderlet));
             }
+        }
+
+        // Ensure we have space to write GPU debugging info to our vertex debug buffer
+        {
+            let vertex_debug_data = vec![RenderletVertexLog::default(); renderlet.geometry.len()];
+            // UNWRAP: if we can't read we want to panic.
+            let mut debug = self.vertex_debug.write().unwrap();
+            debug.append_array(&vertex_debug_data);
         }
         id
     }
 
-    /// Erase the [`RenderUnit`] with the given `Id` from the stage.
-    pub fn erase_unit(&self, id: Id<GltfRendering>) {
+    /// Erase the [`Renderlet`] with the given [`Id`] from the stage.
+    ///
+    /// This removes the [`Renderlet`] from the stage.
+    pub fn erase(&self, id: Id<Renderlet>) {
         let mut draws = self.draws.write().unwrap();
         match draws.deref_mut() {
             StageDrawStrategy::Direct(units) => {
-                units.retain(|unit| unit.id != id);
+                units.retain(|(renderlet_id, _)| renderlet_id != &id);
             }
         }
     }
 
-    /// Returns all the draw operations on the stage.
-    pub fn get_draws(&self) -> Vec<DrawUnit> {
+    /// Returns all the draw operations ([`Renderlet`]s) on the stage, paired with their [`Id`]s.
+    pub fn get_draws(&self) -> Vec<(Id<Renderlet>, Renderlet)> {
         // UNWRAP: if we can't acquire the lock we want to panic.
         let draws = self.draws.read().unwrap();
         match draws.deref() {
@@ -409,28 +469,28 @@ impl Stage {
         }
     }
 
-    /// Show the [`RenderUnit`] with the given `Id` for rendering.
-    pub fn show_unit(&self, id: Id<GltfRendering>) {
+    /// Show the [`Renderlet`] with the given `Id` for rendering.
+    pub fn show(&self, id: Id<Renderlet>) {
         let mut draws = self.draws.write().unwrap();
         match draws.deref_mut() {
             StageDrawStrategy::Direct(units) => {
-                for unit in units.iter_mut() {
-                    if unit.id == id {
-                        unit.visible = true;
+                for (r_id, r) in units.iter_mut() {
+                    if r_id == &id {
+                        r.visible = true;
                     }
                 }
             }
         }
     }
 
-    /// Hide the [`RenderUnit`] with the given `Id` from rendering.
-    pub fn hide_unit(&self, id: Id<GltfRendering>) {
+    /// Hide the [`Renderlet`] with the given `Id` from rendering.
+    pub fn hide(&self, id: Id<Renderlet>) {
         let mut draws = self.draws.write().unwrap();
         match draws.deref_mut() {
             StageDrawStrategy::Direct(units) => {
-                for unit in units.iter_mut() {
-                    if unit.id == id {
-                        unit.visible = false;
+                for (r_id, r) in units.iter_mut() {
+                    if r_id == &id {
+                        r.visible = false;
                     }
                 }
             }
@@ -442,7 +502,6 @@ impl Stage {
         // set up the render graph
         use crate::{
             frame::{copy_frame_to_post, create_frame, present},
-            graph::{graph, Graph},
             hdr::{clear_surface_hdr_and_depth, create_hdr_render_surface},
             tonemapping::tonemapping,
         };
@@ -608,6 +667,72 @@ impl Stage {
         self.slab.read().unwrap().as_ref().block_on_read_raw(..)
     }
 
+    /// Read the vertex debug messages.
+    pub fn read_vertex_debug_logs(&self) -> Vec<RenderletVertexLog> {
+        // UNWRAP: if we can't acquire the lock we want to panic.
+        let draws = self.get_draws();
+        let len = draws
+            .into_iter()
+            .map(|(_, r)| r.geometry.len())
+            .sum::<usize>();
+        let array = Array::<RenderletVertexLog>::new(0, len as u32);
+        let logs = self.vertex_debug.read().unwrap().as_ref().read_vec(array);
+        logs
+    }
+
+    /// Clear the vertex debug messages.
+    pub fn clear_vertex_debug_logs(&self) {
+        let len = {
+            // UNWRAP: if we can't read we want to panic.
+            let draws = self.draws.read().unwrap();
+            match draws.deref() {
+                StageDrawStrategy::Direct(units) => {
+                    let len = units
+                        .iter()
+                        .map(|(_, renderlet)| renderlet.geometry.len())
+                        .sum::<usize>();
+                    len
+                }
+            }
+        };
+        // UNWRAP: if we can't read we want to panic.
+        let mut debug = self.vertex_debug.write().unwrap();
+        let array = Array::<RenderletVertexLog>::new(0, len as u32);
+        debug.write_array(array, vec![RenderletVertexLog::default(); len].as_slice());
+    }
+
+    /// Read the fragment debug messages.
+    pub fn read_fragment_debug_logs(&self) -> Vec<RenderletFragmentLog> {
+        // UNWRAP: if we can't acquire the lock we want to panic.
+        let len = {
+            let slab = self.slab.read().unwrap();
+            let cfg_id = Id::<PbrConfig>::new(0);
+            let resolution = slab.read(cfg_id + PbrConfig::offset_of_resolution());
+            resolution.x * resolution.y
+        };
+        // UNWRAP: if we can't read we want to panic.
+        let array = Array::<RenderletFragmentLog>::new(0, len);
+        log::trace!("reading {len} logs from fragment_debug buffer");
+        self.fragment_debug.read().unwrap().read_vec(array)
+    }
+
+    /// Clear the fragment debug messages.
+    pub fn clear_fragment_debug_logs(&self) {
+        let len = {
+            let slab = self.slab.read().unwrap();
+            let cfg_id = Id::<PbrConfig>::new(0);
+            let resolution = slab.read(cfg_id + PbrConfig::offset_of_resolution());
+            resolution.x * resolution.y
+        };
+        // UNWRAP: if we can't write we want to panic.
+        let mut debug = self.fragment_debug.write().unwrap();
+        let array = Array::<RenderletFragmentLog>::new(0, len);
+        debug.write_array(
+            array,
+            vec![RenderletFragmentLog::default(); len as usize].as_slice(),
+        );
+    }
+
     pub fn new_skybox_from_path(
         &self,
         path: impl AsRef<std::path::Path>,
@@ -625,8 +750,13 @@ impl Stage {
 
 /// Render the stage.
 pub fn stage_render(
-    (stage, hdr_frame, depth): (ViewMut<Stage>, View<HdrSurface>, View<DepthTexture>),
-) -> Result<(), WgpuSlabError> {
+    (stage, hdr_frame, depth): (
+        ViewMut<Stage, NoDefault>,
+        View<HdrSurface, NoDefault>,
+        View<DepthTexture, NoDefault>,
+    ),
+) -> Result<(), StageError> {
+    log::trace!("rendering the stage");
     let label = Some("stage render");
     let pipeline = stage.get_pipeline();
     let slab_buffers_bindgroup = stage.get_slab_buffers_bindgroup();
@@ -669,10 +799,14 @@ pub fn stage_render(
         render_pass.set_bind_group(1, &textures_bindgroup, &[]);
         match draws.deref() {
             StageDrawStrategy::Direct(units) => {
-                for unit in units {
-                    if unit.visible {
-                        render_pass
-                            .draw(0..unit.vertex_count, unit.id.inner()..unit.id.inner() + 1);
+                for (id, rlet) in units {
+                    if rlet.visible {
+                        let vertex_range = 0..rlet.geometry.len() as u32;
+                        let instance_range = id.inner()..id.inner() + 1;
+                        log::trace!(
+                            "drawing vertices {vertex_range:?} and instances {instance_range:?}"
+                        );
+                        render_pass.draw(vertex_range, instance_range);
                     }
                 }
             } /* render_pass.multi_draw_indirect(&indirect_buffer, 0,
@@ -691,4 +825,87 @@ pub fn stage_render(
     stage.queue.submit(std::iter::once(encoder.finish()));
 
     Ok(())
+}
+
+#[cfg(test)]
+mod test {
+    use crabslab::{Array, GrowableSlab, Slab};
+    use glam::{Vec2, Vec3};
+
+    use crate::{Camera, Renderlet, RenderletVertexLog, Renderling, Vertex};
+
+    #[test]
+    fn vertex_slab_roundtrip() {
+        let initial_vertices = {
+            let tl = Vertex::default()
+                .with_position(Vec3::ZERO)
+                .with_uv0(Vec2::ZERO);
+            let tr = Vertex::default()
+                .with_position(Vec3::new(1.0, 0.0, 0.0))
+                .with_uv0(Vec2::new(1.0, 0.0));
+            let bl = Vertex::default()
+                .with_position(Vec3::new(0.0, 1.0, 0.0))
+                .with_uv0(Vec2::new(0.0, 1.0));
+            let br = Vertex::default()
+                .with_position(Vec3::new(1.0, 1.0, 0.0))
+                .with_uv0(Vec2::splat(1.0));
+            vec![tl, bl, br, tl, br, tr]
+        };
+        let mut slab = [0u32; 256];
+        slab.write_indexed_slice(&initial_vertices, 0);
+        let vertices = slab.read_vec(Array::<Vertex>::new(0, initial_vertices.len() as u32));
+        pretty_assertions::assert_eq!(initial_vertices, vertices);
+    }
+
+    #[test]
+    fn can_read_shader_debug_logs() {
+        let mut r = Renderling::headless(10, 10);
+        let mut stage = r.new_stage();
+        stage.configure_graph(&mut r, true);
+        let (projection, view) = crate::default_ortho2d(100.0, 100.0);
+        let camera = stage.append(&Camera::new(projection, view));
+        let geometry = stage.append_array(&crate::test::right_tri_vertices());
+        let mut renderlet = Renderlet {
+            camera,
+            geometry,
+            ..Default::default()
+        };
+        let tri_id = stage.draw_debug(&mut renderlet);
+        let _ = r.render_linear_image().unwrap();
+
+        // read vertex logs
+        {
+            let vertex_logs = stage.read_vertex_debug_logs();
+            for (i, log) in vertex_logs.iter().enumerate() {
+                println!("log_{i}:{log:#?}");
+                assert_eq!(tri_id, log.renderlet_id);
+                assert!(log.started);
+                assert!(log.completed);
+            }
+
+            stage.clear_vertex_debug_logs();
+            let blank_logs = stage.read_vertex_debug_logs();
+            assert_ne!(vertex_logs, blank_logs);
+            for log in blank_logs.iter() {
+                assert_eq!(&RenderletVertexLog::default(), log);
+            }
+        }
+
+        // read fragment logs
+        {
+            let fragment_logs = stage.read_fragment_debug_logs();
+            let (w, h) = r.get_screen_size();
+            assert_eq!((w * h) as usize, fragment_logs.len());
+            for (i, log) in fragment_logs.iter().enumerate() {
+                // only those fragments covered by the vertex shader's output are
+                // evaluated by the fragment shader, so only check those ones...
+                // @see DEVLOG.md's "Tue Apr 9 - Better debugging"
+                if log.started {
+                    assert!(log.completed);
+                    println!("log_{i}:{log:#?}");
+                }
+            }
+            stage.clear_fragment_debug_logs();
+        }
+    }
 }

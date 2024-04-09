@@ -43,9 +43,7 @@ pub enum DataType {
 }
 
 impl SlabItem for DataType {
-    fn slab_size() -> usize {
-        1
-    }
+    const SLAB_SIZE: usize = { 1 };
 
     fn read_slab(index: usize, slab: &[u32]) -> Self {
         let hash = u32::read_slab(index, slab);
@@ -81,9 +79,7 @@ pub enum Dimensions {
 }
 
 impl SlabItem for Dimensions {
-    fn slab_size() -> usize {
-        1
-    }
+    const SLAB_SIZE: usize = { 1 };
 
     fn read_slab(index: usize, slab: &[u32]) -> Self {
         let hash = u32::read_slab(index, slab);
@@ -598,7 +594,7 @@ impl GltfAccessor {
 }
 
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
-#[derive(Default, Clone, Copy, SlabItem)]
+#[derive(Default, Clone, Copy, PartialEq, SlabItem)]
 pub struct GltfPrimitive {
     pub vertex_count: u32,
     pub material: Id<Material>,
@@ -665,21 +661,19 @@ impl GltfPrimitive {
             colors.get_vec4(index, slab)
         };
 
-        let tex_coords0 = if self.tex_coords0.is_none() {
+        let uv0 = if self.tex_coords0.is_none() {
             Vec2::ZERO
         } else {
             let tex_coords0 = slab.read(self.tex_coords0);
             tex_coords0.get_vec2(index, slab)
         };
 
-        let tex_coords1 = if self.tex_coords1.is_none() {
+        let uv1 = if self.tex_coords1.is_none() {
             Vec2::ZERO
         } else {
             let tex_coords1 = slab.read(self.tex_coords1);
             tex_coords1.get_vec2(index, slab)
         };
-
-        let uv = Vec4::new(tex_coords0.x, tex_coords0.y, tex_coords1.x, tex_coords1.y);
 
         let joints = if self.joints.is_none() {
             [0; 4]
@@ -698,10 +692,11 @@ impl GltfPrimitive {
         };
 
         crate::stage::Vertex {
-            position: position.extend(0.0),
+            position,
             color,
-            uv,
-            normal: normal.extend(0.0),
+            uv0,
+            uv1,
+            normal,
             tangent,
             joints,
             weights,
@@ -710,7 +705,7 @@ impl GltfPrimitive {
 }
 
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
-#[derive(Default, Clone, Copy, SlabItem)]
+#[derive(Default, Clone, Copy, PartialEq, SlabItem)]
 pub struct GltfMesh {
     pub primitives: Array<GltfPrimitive>,
     pub weights: Array<f32>,
@@ -750,12 +745,9 @@ impl Default for GltfCamera {
 }
 
 impl SlabItem for GltfCamera {
-    fn slab_size() -> usize {
-        1 + 4
-    }
+    const SLAB_SIZE: usize = { 1 + 4 };
 
     fn read_slab(index: usize, slab: &[u32]) -> Self {
-        let original_index = index;
         let hash = u32::read_slab(index, slab);
         match hash {
             Self::ORTHOGRAPHIC_HASH => {
@@ -813,7 +805,7 @@ impl SlabItem for GltfCamera {
                 let _ = znear.write_slab(index, slab);
             }
         }
-        index + Self::slab_size()
+        index + Self::SLAB_SIZE
     }
 }
 
@@ -829,10 +821,10 @@ pub enum GltfLightKind {
 }
 
 impl SlabItem for GltfLightKind {
-    fn slab_size() -> usize {
+    const SLAB_SIZE: usize = {
         1 // hash
             + 2 // inner_cone_angle, outer_cone_angle
-    }
+    };
 
     fn read_slab(index: usize, slab: &[u32]) -> Self {
         let hash = u32::read_slab(index, slab);
@@ -868,7 +860,7 @@ impl SlabItem for GltfLightKind {
                 let _index = outer_cone_angle.write_slab(index, slab);
             }
         }
-        index + Self::slab_size()
+        index + Self::SLAB_SIZE
     }
 }
 
@@ -888,7 +880,8 @@ pub struct GltfSkin {
     pub skeleton: Id<GltfNode>,
 }
 
-#[derive(Clone, Copy, SlabItem)]
+#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
+#[derive(Clone, Copy, PartialEq, SlabItem)]
 pub struct GltfNode {
     pub camera: Id<GltfCamera>,
     pub children: Array<Id<GltfNode>>,
@@ -927,9 +920,7 @@ pub enum GltfInterpolation {
 }
 
 impl SlabItem for GltfInterpolation {
-    fn slab_size() -> usize {
-        1
-    }
+    const SLAB_SIZE: usize = { 1 };
 
     fn read_slab(index: usize, slab: &[u32]) -> Self {
         let proxy = u32::read_slab(index, slab);
@@ -969,9 +960,7 @@ pub enum GltfTargetProperty {
 }
 
 impl SlabItem for GltfTargetProperty {
-    fn slab_size() -> usize {
-        1
-    }
+    const SLAB_SIZE: usize = { 1 };
 
     fn read_slab(index: usize, slab: &[u32]) -> Self {
         let proxy = u32::read_slab(index, slab);
@@ -1054,8 +1043,6 @@ pub struct GltfRendering {
     pub primitive_index: u32,
     // Points to a `Camera` in the stage's slab.
     pub camera: Id<Camera>,
-    // Points to a top-level `Transform` in the stage's slab.
-    //
     // This is used to transform your GLTF models.
     pub transform: Id<Transform>,
     // Number of vertices to draw for this unit.
@@ -1091,10 +1078,13 @@ impl GltfRendering {
         crate::println!("model(after): {model:#?}");
         // TODO: check nodes for skinning
         let mesh = slab.read(node.mesh);
+        crate::println!("mesh: {mesh:#?}");
         let primitive_id = mesh.primitives.at(self.primitive_index as usize);
         let primitive = slab.read(primitive_id);
+        crate::println!("primitive: {primitive:#?}");
         let material = primitive.material;
         let vertex = primitive.get_vertex(vertex_index as usize, slab);
+        crate::println!("vertex: {vertex:#?}");
         let (s, r, t) = model.to_scale_rotation_translation_or_id();
         let transform = Transform {
             translation: t,
@@ -1129,11 +1119,12 @@ pub fn vertex(
         Mat4::from_scale_rotation_translation(tfrm.scale, tfrm.rotation, tfrm.translation);
     *out_material = material.into();
     *out_color = vertex.color;
-    *out_uv0 = vertex.uv.xy();
-    *out_uv1 = vertex.uv.zw();
+    *out_uv0 = vertex.uv0;
+    *out_uv1 = vertex.uv0;
     let scale2 = tfrm.scale * tfrm.scale;
-    let normal = vertex.normal.xyz().alt_norm_or_zero();
+    let normal = vertex.normal.alt_norm_or_zero();
     let tangent = vertex.tangent.xyz().alt_norm_or_zero();
+
     let normal_w: Vec3 = (model_matrix * (normal / scale2).extend(0.0))
         .xyz()
         .alt_norm_or_zero();
@@ -1144,9 +1135,9 @@ pub fn vertex(
     *out_tangent = tangent_w;
     *out_bitangent = bitangent_w;
     *out_norm = normal_w;
-    let view_pos = model_matrix * vertex.position.xyz().extend(1.0);
-    *out_pos = view_pos.xyz();
+    let view_pos = model_matrix.transform_point3(vertex.position);
+    *out_pos = view_pos;
     let camera = slab.read(unit.camera);
     *out_camera = unit.camera.into();
-    *clip_pos = camera.projection * camera.view * view_pos;
+    *clip_pos = camera.projection * camera.view * view_pos.extend(1.0);
 }

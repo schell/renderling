@@ -114,7 +114,10 @@ fn get_results(
 pub fn save(filename: &str, seen: impl Into<DynamicImage>) {
     let path = Path::new(TEST_OUTPUT_DIR).join(filename);
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-    seen.into().save(path).unwrap();
+    let img: DynamicImage = seen.into();
+    let img_buffer = img.into_rgba8();
+    let img = DynamicImage::from(img_buffer);
+    img.save(path).unwrap();
 }
 
 pub fn assert_eq_cfg(
