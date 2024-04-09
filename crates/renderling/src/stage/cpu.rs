@@ -1,7 +1,7 @@
 //! GPU staging area.
 //!
 //! The `Stage` object contains a slab buffer and a render pipeline.
-//! It is used to stage objects for rendering.
+//! It is used to stage [`Renderlet`]s for rendering.
 use std::{
     ops::{Deref, DerefMut},
     sync::{atomic::AtomicBool, Arc, Mutex, RwLock},
@@ -832,7 +832,7 @@ mod test {
     use crabslab::{Array, GrowableSlab, Slab};
     use glam::{Vec2, Vec3};
 
-    use crate::{Camera, Renderlet, RenderletFragmentLog, RenderletVertexLog, Renderling, Vertex};
+    use crate::{Camera, Renderlet, RenderletVertexLog, Renderling, Vertex};
 
     #[test]
     fn vertex_slab_roundtrip() {

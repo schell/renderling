@@ -1,11 +1,15 @@
 //! A few "GPU driven" renderers  with a focus on simplicity and ease of use.
 //! Backed by WebGPU.
-//! Shaders are written in Rust using `rust-gpu` (mostly).
+//!
+//! Shaders are written in Rust using `rust-gpu`.
+//!
+//! Data is staged on the GPU using [`crabslab`], a slab allocator.
 //!
 //! # WARNING
+//!
 //! This is very much a work in progress.
-//! YMMV.
-//! PRs are very welcomed :)
+//!
+//! Your mileage may vary, and your PRs are welcomed :)
 #![cfg_attr(target_arch = "spirv", no_std)]
 #![deny(clippy::disallowed_methods)]
 

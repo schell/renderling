@@ -2,7 +2,7 @@
 //!
 //! The `Stage` object contains a slab buffer and a render pipeline.
 //! It is used to stage objects for rendering.
-use crabslab::{Array, Id, Offset, Slab, SlabItem};
+use crabslab::{Array, Id, Slab, SlabItem};
 use glam::{Mat4, UVec2, Vec2, Vec3, Vec4, Vec4Swizzles};
 use spirv_std::{
     image::{Cubemap, Image2d},

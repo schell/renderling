@@ -1024,7 +1024,7 @@ impl Stage {
         camera_id: Id<Camera>,
         node: gltf::Node<'a>,
         parents: Vec<Id<GltfNode>>,
-    ) -> Vec<Id<GltfRendering>> {
+    ) -> Vec<Id<Renderlet>> {
         if let Some(_light) = node.light() {
             // TODO: Support transforming lights based on node transforms
             ////let light = gpu_doc.lights.at(light.index());
@@ -1095,7 +1095,7 @@ impl Stage {
         gpu_doc: &GltfDocument,
         camera_id: Id<Camera>,
         node: gltf::Node<'_>,
-    ) -> Vec<Id<GltfRendering>> {
+    ) -> Vec<Id<Renderlet>> {
         self.draw_gltf_node_with(gpu_doc, camera_id, node, vec![])
     }
 
@@ -1106,7 +1106,7 @@ impl Stage {
         gpu_doc: &GltfDocument,
         camera_id: Id<Camera>,
         scene: gltf::Scene<'_>,
-    ) -> Vec<Id<GltfRendering>> {
+    ) -> Vec<Id<Renderlet>> {
         scene
             .nodes()
             .flat_map(|node| self.draw_gltf_node(gpu_doc, camera_id, node))
@@ -1342,7 +1342,7 @@ impl<'a, T: GrowableSlab> GltfMeshBuilder<'a, T> {
 mod test {
     use crate::{gltf::*, pbr::Material, stage::Vertex, Camera, Renderling, Stage, Transform};
     use crabslab::{Array, GrowableSlab, Id, Slab, SlabItem};
-    use glam::{Vec2, Vec3, Vec4, Vec4Swizzles};
+    use glam::{UVec2, Vec2, Vec3, Vec4, Vec4Swizzles};
 
     #[test]
     fn get_vertex_count_primitive_sanity() {
@@ -1428,7 +1428,7 @@ mod test {
         let projection = crate::camera::perspective(100.0, 50.0);
         let position = Vec3::new(1.0, 0.5, 1.5);
         let view = crate::camera::look_at(position, Vec3::new(1.0, 0.5, 0.0), Vec3::Y);
-        let mut stage = Stage::new(device.clone(), queue.clone()).with_lighting(false);
+        let mut stage = r.new_stage().with_lighting(false);
         stage.configure_graph(&mut r, true);
         let gpu_doc = stage
             .load_gltf_document(&document, buffers.clone(), images)
@@ -1454,7 +1454,7 @@ mod test {
         let mut r =
             Renderling::headless(20, 20).with_background_color(Vec3::splat(0.0).extend(1.0));
         let (device, queue) = r.get_device_and_queue_owned();
-        let mut stage = Stage::new(device, queue).with_lighting(false);
+        let mut stage = r.new_stage().with_lighting(false);
         stage.configure_graph(&mut r, true);
         let (document, buffers, images) =
             ::gltf::import("../../gltf/gltfTutorial_003_MinimalGltfFile.gltf").unwrap();
@@ -1478,66 +1478,13 @@ mod test {
     }
 
     #[test]
-    // Test that the top-level transform on `RenderUnit` transforms their
-    // child primitive's geometry correctly.
-    fn render_unit_transforms_primitive_geometry() {
-        let mut r = Renderling::headless(50, 50).with_background_color(Vec4::splat(1.0));
-        let mut stage = r.new_stage().with_lighting(false);
-        stage.configure_graph(&mut r, true);
-        let (projection, view) = crate::camera::default_ortho2d(50.0, 50.0);
-        let camera = stage.append(&Camera::new(projection, view));
-        let cyan = [0.0, 1.0, 1.0, 1.0];
-        let magenta = [1.0, 0.0, 1.0, 1.0];
-        let yellow = [1.0, 1.0, 0.0, 1.0];
-        let white = [1.0, 1.0, 1.0, 1.0];
-        let vertices = [
-            Vertex::default()
-                .with_position([0.0, 0.0, 0.0])
-                .with_color(cyan),
-            Vertex::default()
-                .with_position([1.0, 0.0, 0.0])
-                .with_color(magenta),
-            Vertex::default()
-                .with_position([1.0, 1.0, 0.0])
-                .with_color(yellow),
-            Vertex::default()
-                .with_position([0.0, 1.0, 0.0])
-                .with_color(white),
-        ];
-        let primitive = stage.new_primitive(vertices, [0, 3, 2, 0, 2, 1], Id::NONE);
-        let primitives = stage.append_array(&[primitive]);
-        let mesh = stage.append(&GltfMesh {
-            primitives,
-            ..Default::default()
-        });
-        let node = stage.append(&GltfNode {
-            mesh,
-            ..Default::default()
-        });
-        let node_path = stage.append_array(&[node]);
-        let transform = stage.append(&Transform {
-            scale: Vec3::new(50.0, 50.0, 1.0),
-            ..Default::default()
-        });
-        let _unit_id = stage.draw(&GltfRendering {
-            camera,
-            transform,
-            vertex_count: primitive.vertex_count,
-            node_path,
-            ..Default::default()
-        });
-        let img = r.render_linear_image().unwrap();
-        img_diff::assert_img_eq("gltf/render_unit_transforms_primitive_geometry.png", img);
-    }
-
-    #[test]
     // Tests importing a gltf file and rendering the first image as a 2d object.
     //
     // This ensures we are decoding images correctly.
     fn gltf_images() {
         let mut r = Renderling::headless(100, 100).with_background_color(Vec4::splat(1.0));
         let (device, queue) = r.get_device_and_queue_owned();
-        let mut stage = Stage::new(device.clone(), queue.clone()).with_lighting(false);
+        let mut stage = r.new_stage().with_lighting(false);
         stage.configure_graph(&mut r, true);
         let (document, buffers, images) = gltf::import("../../gltf/cheetah_cone.glb").unwrap();
         let gpu_doc = stage
@@ -1606,7 +1553,8 @@ mod test {
         let mut r =
             Renderling::headless(size, size).with_background_color(Vec3::splat(0.0).extend(1.0));
         let (device, queue) = r.get_device_and_queue_owned();
-        let mut stage = Stage::new(device.clone(), queue.clone())
+        let mut stage = r
+            .new_stage()
             // There are no lights in the scene and the material isn't marked as "unlit", so
             // let's force it to be unlit.
             .with_lighting(false);
