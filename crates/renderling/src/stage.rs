@@ -178,7 +178,8 @@ impl Vertex {
 #[derive(Clone, Copy, SlabItem)]
 pub struct Renderlet {
     pub visible: bool,
-    pub geometry: Array<Vertex>,
+    pub vertices: Array<Vertex>,
+    pub indices: Array<u32>,
     pub camera: Id<Camera>,
     pub transform: Id<Transform>,
     pub material: Id<Material>,
@@ -190,7 +191,8 @@ impl Default for Renderlet {
     fn default() -> Self {
         Renderlet {
             visible: true,
-            geometry: Array::default(),
+            vertices: Array::default(),
+            indices: Array::default(),
             camera: Id::NONE,
             transform: Id::NONE,
             material: Id::NONE,
@@ -259,7 +261,12 @@ pub fn renderlet_vertex(
     *out_material = renderlet.material;
     *out_pbr_config = renderlet.pbr_config;
 
-    let vertex_id = renderlet.geometry.at(vertex_index as usize);
+    let index = if renderlet.indices.is_null() {
+        vertex_index as usize
+    } else {
+        slab.read(renderlet.indices.at(vertex_index as usize)) as usize
+    };
+    let vertex_id = renderlet.vertices.at(index as usize);
     let vertex = slab.read_unchecked(vertex_id);
     *out_color = vertex.color;
     *out_uv0 = vertex.uv0;

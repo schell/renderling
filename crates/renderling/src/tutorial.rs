@@ -98,7 +98,7 @@ pub fn tutorial_slabbed_renderlet(
     #[spirv(position)] clip_pos: &mut Vec4,
 ) {
     let renderlet = slab.read_unchecked(renderlet_id);
-    let vertex_id = renderlet.geometry.at(vertex_index as usize);
+    let vertex_id = renderlet.vertices.at(vertex_index as usize);
     let vertex = slab.read(vertex_id);
     *out_color = vertex.color;
 
@@ -647,7 +647,7 @@ mod test {
         let renderlet = Renderlet {
             camera,
             transform,
-            geometry,
+            vertices: geometry,
             ..Default::default()
         };
         let unit_id = slab.append(&renderlet);
@@ -736,7 +736,7 @@ mod test {
             pipeline,
             bindgroup,
             unit_id,
-            unit_vertex_count: renderlet.geometry.len() as u32,
+            unit_vertex_count: renderlet.vertices.len() as u32,
         };
         r.graph.add_resource(app);
 
