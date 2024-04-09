@@ -22,7 +22,6 @@ shaders = [
   "brdf_lut_convolution_vertex",
   "generate_mipmap_fragment",
   "generate_mipmap_vertex",
-  "pbr_fragment",
   "prefilter_environment_cubemap_fragment",
   "prefilter_environment_cubemap_vertex",
   "renderlet_fragment",
@@ -50,7 +49,6 @@ brdf_lut_convolution_fragment = []
 brdf_lut_convolution_vertex = []
 generate_mipmap_fragment = []
 generate_mipmap_vertex = []
-pbr_fragment = [] 
 prefilter_environment_cubemap_fragment = []
 prefilter_environment_cubemap_vertex = []
 #raymarch_fragment = []

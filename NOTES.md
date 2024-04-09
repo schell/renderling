@@ -42,6 +42,8 @@ Just pro-cons on tech choices and little things I don't want to forget whil impl
 * if your shader crate is just a library and has no entry points it **cannot** have the
   `crate-type = ["rlib", "dylib"]` Cargo.toml annotation or you will get "Undefined symbols" errors
 * no recursion! you must convert your recursive algos into ones with manually managed stacks
+* `usize` is `u32` on `target_arch = "spirv"`! Watch out for silent shader panics caused by wrapping
+  arithmetic operations.
 
 # wgpu
 

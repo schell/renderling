@@ -2,8 +2,8 @@
 //!
 //! The `Stage` object contains a slab buffer and a render pipeline.
 //! It is used to stage objects for rendering.
-use crabslab::{Array, Id, Slab, SlabItem};
-use glam::{Mat4, Vec2, Vec3, Vec4, Vec4Swizzles};
+use crabslab::{Array, Id, Offset, Slab, SlabItem};
+use glam::{Mat4, UVec2, Vec2, Vec3, Vec4, Vec4Swizzles};
 use spirv_std::{
     image::{Cubemap, Image2d},
     spirv, Sampler,
@@ -183,6 +183,7 @@ pub struct Renderlet {
     pub transform: Id<Transform>,
     pub material: Id<Material>,
     pub pbr_config: Id<PbrConfig>,
+    pub debug_index: u32,
 }
 
 impl Default for Renderlet {
@@ -194,7 +195,34 @@ impl Default for Renderlet {
             transform: Id::NONE,
             material: Id::NONE,
             pbr_config: Id::new(0),
+            debug_index: 0,
         }
+    }
+}
+
+#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
+#[derive(Clone, Copy, Default, PartialEq, SlabItem)]
+pub struct RenderletVertexLog {
+    pub renderlet_id: Id<Renderlet>,
+    pub debug_index: u32,
+    pub vertex_index: u32,
+    pub started: bool,
+    pub completed: bool,
+}
+
+impl RenderletVertexLog {
+    pub fn new(renderlet_id: Id<Renderlet>, debug_index: u32, vertex_index: u32) -> Self {
+        let mut log = Self::default();
+        log.renderlet_id = renderlet_id;
+        log.debug_index = debug_index;
+        log.vertex_index = vertex_index;
+        log
+    }
+
+    pub fn write(&self, debug: &mut [u32]) {
+        let log_id: Id<RenderletVertexLog> =
+            Id::new(self.debug_index + self.vertex_index * RenderletVertexLog::SLAB_SIZE as u32);
+        debug.write(log_id, self);
     }
 }
 
@@ -207,6 +235,7 @@ pub fn renderlet_vertex(
     // Which vertex within the renderlet are we rendering
     #[spirv(vertex_index)] vertex_index: u32,
     #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] slab: &[u32],
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 1)] debug: &mut [u32],
 
     #[spirv(flat)] out_camera: &mut Id<Camera>,
     #[spirv(flat)] out_material: &mut Id<Material>,
@@ -221,6 +250,11 @@ pub fn renderlet_vertex(
     #[spirv(position)] out_clip_pos: &mut Vec4,
 ) {
     let renderlet = slab.read_unchecked(renderlet_id);
+
+    let mut vertex_log = RenderletVertexLog::new(renderlet_id, renderlet.debug_index, vertex_index);
+    vertex_log.started = true;
+    vertex_log.write(debug);
+
     *out_camera = renderlet.camera;
     *out_material = renderlet.material;
     *out_pbr_config = renderlet.pbr_config;
@@ -257,6 +291,37 @@ pub fn renderlet_vertex(
 
     let camera = slab.read(renderlet.camera);
     *out_clip_pos = camera.projection * camera.view * world_pos.extend(1.0);
+
+    vertex_log.completed = true;
+    vertex_log.write(debug);
+}
+
+#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
+#[derive(Clone, Copy, Default, PartialEq, SlabItem)]
+pub struct RenderletFragmentLog {
+    pub frag_coord: Vec4,
+    pub resolution: UVec2,
+    pub started: bool,
+    pub completed: bool,
+}
+
+impl RenderletFragmentLog {
+    pub fn new(frag_coord: Vec4, resolution: UVec2) -> Self {
+        let mut log = Self::default();
+        log.frag_coord = frag_coord;
+        log.resolution = resolution;
+        log
+    }
+
+    pub fn write(&self, debug: &mut [u32]) {
+        let x = self.frag_coord.x as u32;
+        let y = self.frag_coord.y as u32;
+        let w = self.resolution.x;
+        let fragment_index = y * w + x;
+        let index = fragment_index * RenderletFragmentLog::SLAB_SIZE as u32;
+        let log_id: Id<RenderletFragmentLog> = Id::new(index);
+        debug.write(log_id, self);
+    }
 }
 
 #[cfg(feature = "renderlet_fragment")]
@@ -276,6 +341,8 @@ pub fn renderlet_fragment(
     #[spirv(descriptor_set = 1, binding = 6)] brdf: &Image2d,
     #[spirv(descriptor_set = 1, binding = 7)] brdf_sampler: &Sampler,
     #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] slab: &[u32],
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 2)] debug: &mut [u32],
+    #[spirv(frag_coord)] frag_coord: Vec4,
     #[spirv(flat)] in_camera: Id<Camera>,
     #[spirv(flat)] in_material: Id<Material>,
     #[spirv(flat)] in_pbr_config: Id<PbrConfig>,
@@ -288,6 +355,11 @@ pub fn renderlet_fragment(
     world_pos: Vec3,
     output: &mut Vec4,
 ) {
+    let pbr_config = slab.read(in_pbr_config);
+    let mut log = RenderletFragmentLog::new(frag_coord, pbr_config.resolution);
+    log.started = true;
+    log.write(debug);
+
     crate::pbr::fragment_impl(
         atlas,
         atlas_sampler,
@@ -298,7 +370,7 @@ pub fn renderlet_fragment(
         brdf,
         brdf_sampler,
         slab,
-        in_pbr_config,
+        pbr_config,
         in_camera,
         in_material,
         in_color,
@@ -310,6 +382,9 @@ pub fn renderlet_fragment(
         world_pos,
         output,
     );
+
+    log.completed = true;
+    log.write(debug);
 }
 
 //#[spirv(compute(threads(32)))]

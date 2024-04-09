@@ -1,6 +1,52 @@
 # devlog
 
-## Sat Apr 10, 2024 
+## Tue Apr 9,
+
+### Better debugging
+
+Debugging on the CPU is great - it finds a lot of bugs relatively quickly.
+It's no silver bullet though, because often the size of types are different on the GPU,
+and the implementations of functions are different as well. 
+
+To some bugs, debugging on the GPU is necessary - but without special features and some 
+Vulkan layer magic (that are unavailable to `wgpu` at the time of this writing), 
+debugging is pretty hard.
+
+So I'm experimenting with writing my shaders to take an extra `debug: &mut [u32]` buffer 
+that it can use to write messages into. So far it works great in my vertex shader, but 
+the same setup (with a separate buffer) doesn't work on my fragment shader. I still don't 
+know why. So now I'm debugging my debugging. 
+
+For help I've posted on: 
+- [GP (graphics programming) discord](https://discord.com/channels/318590007881236480/591343919598534681/1227041127899729970) 
+- [rust-gpu discord](https://discord.com/channels/750717012564770887/750717499737243679/122701598544219355) for help...
+
+#### ...
+
+It seems that in fact, the values are being written, but when I read them out - I only 
+get a few...
+
+Wait.
+
+Oh wait.
+
+_smh_
+
+The vertex shader only covers _certain fragments_. 
+
+The fragment shader would only evaluate those pixels covered by the vertex shader.
+
+🤦
+
+So everything is as it should be.
+
+...Hooray! Sheesh.
+
+Ok, debugging messages work.
+
+Now - if I had atomics I could make this pretty ergonomic.
+
+## Sat Apr 6, 2024 
 
 ### Finishing the debugging session
 
@@ -32,7 +78,7 @@ fn contains<T: SlabItem>(&self, id: Id<T>) -> bool {
 
 What a hard-to-diagnose bug! I really need trace statements on GPU.
 
-## Fri Apr 9, 2024 
+## Fri Apr 5, 2024 
 
 I have bugs after removing the SDF raymarching stuff. 
 

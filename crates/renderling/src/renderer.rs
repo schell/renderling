@@ -1,5 +1,5 @@
 //! Builds the UI pipeline and manages resources.
-use glam::Vec4;
+use glam::{UVec2, Vec4};
 use moongraph::{NoDefault, TypeKey};
 use snafu::prelude::*;
 use std::{ops::Deref, sync::Arc};
@@ -297,6 +297,11 @@ impl Renderling {
         // The renderer doesn't _always_ have an HrdSurface, so we don't unwrap this
         // one.
         let _ = self.graph.visit(crate::hdr::resize_hdr_surface);
+
+        // Ditto with the Stage - don't unwrap because it may not exist.
+        let _ = self.graph.visit(|mut stage: ViewMut<Stage, NoDefault>| {
+            stage.set_resolution(UVec2::new(width, height));
+        });
     }
 
     pub fn create_texture<P>(
@@ -392,7 +397,8 @@ impl Renderling {
 
     pub fn new_stage(&self) -> Stage {
         let (device, queue) = self.get_device_and_queue_owned();
-        Stage::new(device, queue)
+        let (w, h) = self.get_screen_size();
+        Stage::new(device, queue, UVec2::new(w, h))
     }
 
     //pub fn new_ui_scene(&self) -> UiSceneBuilder<'_> {
