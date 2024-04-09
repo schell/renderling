@@ -13,7 +13,12 @@ pub enum AtlasImageError {
         path: std::path::PathBuf,
     },
 
-    #[snafu(display("Image error: {source}"))]
+    #[snafu(display(
+        "Image error: {source}\nCurrent dir: {}", 
+        std::env::current_dir()
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|e| e.to_string())
+    ))]
     Image { source: image::error::ImageError },
 }
 

@@ -1,11 +1,15 @@
 //! A few "GPU driven" renderers  with a focus on simplicity and ease of use.
 //! Backed by WebGPU.
-//! Shaders written in rust using `rust-gpu` (mostly).
+//!
+//! Shaders are written in Rust using `rust-gpu`.
+//!
+//! Data is staged on the GPU using [`crabslab`], a slab allocator.
 //!
 //! # WARNING
+//!
 //! This is very much a work in progress.
-//! YMMV.
-//! PRs are very welcomed :)
+//!
+//! Your mileage may vary, and your PRs are welcomed :)
 #![cfg_attr(target_arch = "spirv", no_std)]
 #![deny(clippy::disallowed_methods)]
 
@@ -19,7 +23,7 @@ pub mod convolution;
 pub mod cubemap;
 #[cfg(not(target_arch = "spirv"))]
 pub mod frame;
-#[cfg(any(feature = "stage_fragment", feature = "stage_vertex", feature = "gltf"))]
+#[cfg(feature = "gltf")]
 pub mod gltf;
 #[cfg(not(target_arch = "spirv"))]
 mod hdr;
@@ -43,7 +47,8 @@ mod state;
 mod texture;
 pub mod tonemapping;
 mod transform;
-//mod tutorial;
+#[cfg(feature = "tutorial")]
+pub mod tutorial;
 //mod ui;
 
 #[cfg(not(target_arch = "spirv"))]
@@ -143,12 +148,12 @@ mod cpu {
     /// A CPU-side texture sampler.
     ///
     /// Provided primarily for testing purposes.
-    #[derive(Debug, Clone, Copy)]
+    #[derive(Debug, Clone, Copy, Default)]
     pub struct CpuSampler;
 
     impl IsSampler for CpuSampler {}
 
-    #[derive(Debug)]
+    #[derive(Debug, Default)]
     pub struct CpuTexture2d {
         pub image: image::DynamicImage,
     }
@@ -158,6 +163,16 @@ mod cpu {
 
         fn sample_by_lod(&self, _sampler: Self::Sampler, uv: glam::Vec2, _lod: f32) -> glam::Vec4 {
             // TODO: lerp the CPU texture sampling
+            let x = uv.x as u32;
+            if x >= self.image.width() {
+                return glam::Vec4::ZERO;
+            }
+
+            let y = uv.y as u32;
+            if y >= self.image.height() {
+                return glam::Vec4::ZERO;
+            }
+
             let image::Rgba([r, g, b, a]) = self.image.get_pixel(uv.x as u32, uv.y as u32);
             glam::Vec4::new(
                 r as f32 / 255.0,
@@ -171,6 +186,7 @@ mod cpu {
     /// A CPU-side cubemap texture.
     ///
     /// Provided primarily for testing purposes.
+    #[derive(Default)]
     pub struct CpuCubemap {
         pub images: [image::DynamicImage; 6],
     }
@@ -210,7 +226,13 @@ mod cpu {
             let (width, height) = self.images[max_dim].dimensions();
             // Convert the u and v coordinates from [-1, 1] to [0, width/height]
             let tex_u = ((u + 1.0) * 0.5 * (width as f32 - 1.0)).round() as u32;
+            if tex_u >= self.images[max_dim].width() {
+                return glam::Vec4::ZERO;
+            }
             let tex_v = ((1.0 - v) * 0.5 * (height as f32 - 1.0)).round() as u32;
+            if tex_v >= self.images[max_dim].height() {
+                return glam::Vec4::ZERO;
+            }
 
             // Sample and return the color from the appropriate image in the cubemap
             let pixel = self.images[max_dim].get_pixel(tex_u, tex_v);
@@ -231,6 +253,7 @@ mod cpu {
             .filter_level(log::LevelFilter::Warn)
             .filter_module("moongraph", log::LevelFilter::Trace)
             .filter_module("renderling", log::LevelFilter::Trace)
+            .filter_module("crabslab", log::LevelFilter::Debug)
             .try_init();
     }
 }
@@ -266,21 +289,20 @@ mod test {
         assert_eq!(u32::MAX, u32max);
     }
 
-    fn right_tri_vertices() -> Vec<Vertex> {
+    pub fn right_tri_vertices() -> Vec<Vertex> {
         vec![
             Vertex::default()
-                .with_position([0.0, 0.0, 0.5])
+                .with_position([0.0, 0.0, 0.0])
                 .with_color([0.0, 1.0, 1.0, 1.0]),
             Vertex::default()
-                .with_position([0.0, 100.0, 0.5])
+                .with_position([0.0, 100.0, 0.0])
                 .with_color([1.0, 1.0, 0.0, 1.0]),
             Vertex::default()
-                .with_position([100.0, 0.0, 0.5])
+                .with_position([100.0, 0.0, 0.0])
                 .with_color([1.0, 0.0, 1.0, 1.0]),
         ]
     }
 
-    #[cfg(feature = "gltf")]
     #[test]
     // This tests our ability to draw a CMYK triangle in the top left corner.
     fn cmy_triangle_sanity() {
@@ -288,33 +310,38 @@ mod test {
         let mut stage = r.new_stage();
         stage.configure_graph(&mut r, true);
         let (projection, view) = default_ortho2d(100.0, 100.0);
-        let camera = stage.append(&Camera {
-            projection,
-            view,
-            ..Default::default()
-        });
-        let mesh = stage
-            .new_mesh()
-            .with_primitive(right_tri_vertices(), [], Id::NONE)
-            .build();
-        let mesh = stage.append(&mesh);
-        let node = stage.append(&crate::gltf::GltfNode {
-            mesh,
-            ..Default::default()
-        });
-        let node_path = stage.append_array(&[node]);
-        let _tri = stage.draw_gltf_rendering(&crate::gltf::GltfRendering {
+        let camera = stage.append(&Camera::new(projection, view));
+        let geometry = stage.append_array(&right_tri_vertices());
+        let _tri_id = stage.draw(&Renderlet {
             camera,
-            node_path,
-            vertex_count: 3,
+            geometry,
             ..Default::default()
         });
 
+        let data = stage.read_slab().unwrap();
+        let t = data.read(Id::<Transform>::NONE);
+        assert_eq!(Transform::default(), t);
+        assert_eq!(
+            Transform {
+                translation: Vec3::ZERO,
+                rotation: Quat::IDENTITY,
+                scale: Vec3::ONE
+            },
+            t
+        );
+
         let img = r.render_image().unwrap();
+        let (device, queue) = r.get_device_and_queue_owned();
+        let depth_texture = r
+            .graph
+            .get_resource::<crate::DepthTexture>()
+            .unwrap()
+            .unwrap();
+        let depth_img = depth_texture.into_image(&device, &queue).unwrap();
+        img_diff::assert_img_eq("cmy_triangle_depth.png", depth_img);
         img_diff::assert_img_eq("cmy_triangle.png", img);
     }
 
-    #[cfg(feature = "gltf")]
     #[test]
     // This tests our ability to draw a CMYK triangle in the top left corner, using
     // CW geometry.
@@ -330,28 +357,14 @@ mod test {
             view,
             ..Default::default()
         });
-        let mesh = stage
-            .new_mesh()
-            .with_primitive(
-                {
-                    let mut vs = right_tri_vertices();
-                    vs.reverse();
-                    vs
-                },
-                [],
-                Id::NONE,
-            )
-            .build();
-        let mesh = stage.append(&mesh);
-        let node = stage.append(&crate::gltf::GltfNode {
-            mesh,
-            ..Default::default()
+        let geometry = stage.append_array(&{
+            let mut vs = right_tri_vertices();
+            vs.reverse();
+            vs
         });
-        let node_path = stage.append_array(&[node]);
-        let _tri = stage.draw_gltf_rendering(&crate::gltf::GltfRendering {
+        let _tri = stage.draw(&Renderlet {
             camera,
-            node_path,
-            vertex_count: 3,
+            geometry,
             ..Default::default()
         });
 
@@ -366,7 +379,6 @@ mod test {
         );
     }
 
-    #[cfg(feature = "gltf")]
     #[test]
     // This tests our ability to update the transform of a `RenderUnit` after it
     // has already been sent to the GPU.
@@ -377,21 +389,11 @@ mod test {
         stage.configure_graph(&mut r, true);
         let (projection, view) = default_ortho2d(100.0, 100.0);
         let camera = stage.append(&Camera::new(projection, view));
-        let mesh = stage
-            .new_mesh()
-            .with_primitive(right_tri_vertices(), [], Id::NONE)
-            .build();
-        let mesh = stage.append(&mesh);
-        let node = stage.append(&crate::gltf::GltfNode {
-            mesh,
-            ..Default::default()
-        });
+        let geometry = stage.append_array(&right_tri_vertices());
         let transform = stage.append(&Transform::default());
-        let node_path = stage.append_array(&[node]);
-        let _tri = stage.draw_gltf_rendering(&crate::gltf::GltfRendering {
+        let _tri = stage.draw(&Renderlet {
             camera,
-            node_path,
-            vertex_count: 3,
+            geometry,
             transform,
             ..Default::default()
         });
@@ -450,7 +452,6 @@ mod test {
             .collect()
     }
 
-    #[cfg(feature = "gltf")]
     #[test]
     // Tests our ability to draw a CMYK cube.
     fn cmy_cube_sanity() {
@@ -463,28 +464,15 @@ mod test {
             view: Mat4::look_at_rh(camera_position, Vec3::ZERO, Vec3::Y),
             position: camera_position,
         });
-        let vertices = gpu_cube_vertices();
-        let vertex_count = vertices.len() as u32;
-        let mesh = stage
-            .new_mesh()
-            .with_primitive(vertices, [], Id::NONE)
-            .build();
-        let mesh = stage.append(&mesh);
-        let node = stage.append(&crate::gltf::GltfNode {
-            mesh,
-            ..Default::default()
-        });
-        let node_path = stage.append_array(&[node]);
-        let transform = Transform {
+        let geometry = stage.append_array(&gpu_cube_vertices());
+        let transform = stage.append(&Transform {
             scale: Vec3::new(6.0, 6.0, 6.0),
             rotation: Quat::from_axis_angle(Vec3::Y, -std::f32::consts::FRAC_PI_4),
             ..Default::default()
-        };
-        let transform = stage.append(&transform);
-        let _cube = stage.draw_gltf_rendering(&crate::gltf::GltfRendering {
+        });
+        let _cube = stage.draw(&Renderlet {
             camera,
-            vertex_count,
-            node_path,
+            geometry,
             transform,
             ..Default::default()
         });
@@ -492,7 +480,6 @@ mod test {
         img_diff::assert_img_eq("cmy_cube/sanity.png", img);
     }
 
-    #[cfg(feature = "gltf")]
     #[test]
     // Test our ability to create two cubes and toggle the visibility of one of
     // them.
@@ -506,21 +493,10 @@ mod test {
             view,
             ..Default::default()
         });
-        let vertices = gpu_cube_vertices();
-        let vertex_count = vertices.len() as u32;
-        let mesh = stage
-            .new_mesh()
-            .with_primitive(vertices, [], Id::NONE)
-            .build();
-        let mesh = stage.append(&mesh);
-        let node = stage.append(&crate::gltf::GltfNode {
-            mesh,
-            ..Default::default()
-        });
-        let mut render_unit = crate::gltf::GltfRendering {
+        let geometry = stage.append_array(&gpu_cube_vertices());
+        let mut renderlet = Renderlet {
+            geometry,
             camera,
-            vertex_count,
-            node_path: stage.append_array(&[node]),
             transform: stage.append(&Transform {
                 translation: Vec3::new(-4.5, 0.0, 0.0),
                 scale: Vec3::new(6.0, 6.0, 6.0),
@@ -528,13 +504,14 @@ mod test {
             }),
             ..Default::default()
         };
-        let _cube_one = stage.draw_gltf_rendering(&render_unit);
-        render_unit.transform = stage.append(&Transform {
+        let _cube_one = stage.draw(&renderlet);
+
+        renderlet.transform = stage.append(&Transform {
             translation: Vec3::new(4.5, 0.0, 0.0),
             scale: Vec3::new(6.0, 6.0, 6.0),
             rotation: Quat::from_axis_angle(Vec3::Y, std::f32::consts::FRAC_PI_4),
         });
-        let cube_two_rendering = stage.draw_gltf_rendering(&render_unit);
+        let cube_two_rendering = stage.draw(&renderlet);
 
         // we should see two colored cubes
         let img = r.render_image().unwrap();
@@ -542,21 +519,20 @@ mod test {
         let img_before = img;
 
         // update cube two making it invisible
-        stage.hide_unit(cube_two_rendering);
+        stage.hide(cube_two_rendering);
 
         // we should see only one colored cube
         let img = r.render_image().unwrap();
         img_diff::assert_img_eq("cmy_cube/visible_after.png", img);
 
         // update cube two making in visible again
-        stage.show_unit(cube_two_rendering);
+        stage.show(cube_two_rendering);
 
         // we should see two colored cubes again
         let img = r.render_image().unwrap();
         img_diff::assert_eq("cmy_cube/visible_before_again.png", img_before, img);
     }
 
-    #[cfg(feature = "gltf")]
     #[test]
     // Tests the ability to specify indexed vertices, as well as the ability to
     // update a field within a struct stored on the slab by offset.
@@ -570,42 +546,20 @@ mod test {
             view,
             ..Default::default()
         });
-        let pyramid_vertices = pyramid_points().map(cmy_gpu_vertex);
-        let pyramid_indices = pyramid_indices().map(|i| i as u32);
-        let _pyramid_vertex_count = pyramid_indices.len();
-        let pyramid_mesh = stage
-            .new_mesh()
-            .with_primitive(pyramid_vertices, pyramid_indices, Id::NONE)
-            .build();
-        let mesh = stage.append(&pyramid_mesh);
-        let pyramid_node = stage.append(&crate::gltf::GltfNode {
-            mesh,
-            ..Default::default()
-        });
-        let pyramid_node_path = stage.append_array(&[pyramid_node]);
+        let cube_geometry =
+            stage.append_array(&math::UNIT_INDICES.map(|i| cmy_gpu_vertex(math::UNIT_POINTS[i])));
+        let pyramid_points = pyramid_points();
+        let pyramid_geometry = stage
+            .append_array(&pyramid_indices().map(|i| cmy_gpu_vertex(pyramid_points[i as usize])));
 
-        let cube_vertices = math::UNIT_POINTS.map(cmy_gpu_vertex);
-        let cube_indices = math::UNIT_INDICES.map(|i| i as u32);
-        let cube_vertex_count = cube_indices.len();
-        let cube_mesh = stage
-            .new_mesh()
-            .with_primitive(cube_vertices, cube_indices, Id::NONE)
-            .build();
-        let mesh = stage.append(&cube_mesh);
-        let cube_node = stage.append(&crate::gltf::GltfNode {
-            mesh,
-            ..Default::default()
-        });
-        let node_path = stage.append_array(&[cube_node]);
         let transform = stage.append(&Transform {
             scale: Vec3::new(10.0, 10.0, 10.0),
             ..Default::default()
         });
 
-        let cube = stage.draw_gltf_rendering(&crate::gltf::GltfRendering {
+        let cube_id = stage.draw(&Renderlet {
             camera,
-            vertex_count: cube_vertex_count as u32,
-            node_path,
+            geometry: cube_geometry,
             transform,
             ..Default::default()
         });
@@ -614,12 +568,9 @@ mod test {
         let img = r.render_image().unwrap();
         img_diff::assert_img_eq("cmy_cube/remesh_before.png", img);
 
-        // Update the cube mesh to a pyramid by overwriting the `.node_path` field
-        // of `RenderUnit`
-        stage.write(
-            cube + crate::gltf::GltfRendering::offset_of_node_path(),
-            &pyramid_node_path,
-        );
+        // Update the cube mesh to a pyramid by overwriting the `.geometry` field
+        // of `Renderlet`
+        stage.write(cube_id + Renderlet::offset_of_geometry(), &pyramid_geometry);
 
         // we should see a pyramid (in sRGB color space)
         let img = r.render_image().unwrap();
@@ -672,7 +623,6 @@ mod test {
         ]
     }
 
-    #[cfg(feature = "gltf")]
     #[test]
     // Tests that updating the material actually updates the rendering of an unlit
     // mesh
@@ -681,43 +631,28 @@ mod test {
         let mut stage = r.new_stage();
         stage.configure_graph(&mut r, true);
         let (projection, view) = camera::default_perspective(100.0, 100.0);
-        let camera = stage.append(&Camera {
-            projection,
-            view,
-            ..Default::default()
-        });
+        let camera = stage.append(&Camera::new(projection, view));
         let sandstone = AtlasImage::from(image::open("../../img/sandstone.png").unwrap());
         let dirt = AtlasImage::from(image::open("../../img/dirt.jpg").unwrap());
         let textures = stage.set_images([sandstone, dirt]).unwrap();
         let sandstone_tex = textures[0];
         let dirt_tex = textures[1];
         let sandstone_tex_id = stage.append(&sandstone_tex);
-        let material_id = stage.append(&Material {
+        let material = stage.append(&Material {
             albedo_texture: sandstone_tex_id,
             has_lighting: false,
             ..Default::default()
         });
-        let vertices = gpu_uv_unit_cube();
-        let vertex_count = vertices.len() as u32;
-        let mesh = stage
-            .new_mesh()
-            .with_primitive(vertices, [], material_id)
-            .build();
-        let mesh = stage.append(&mesh);
-        let node = stage.append(&crate::gltf::GltfNode {
-            mesh,
-            ..Default::default()
-        });
-        let node_path = stage.append_array(&[node]);
+        let geometry = stage.append_array(&gpu_uv_unit_cube());
         let transform = stage.append(&Transform {
             scale: Vec3::new(10.0, 10.0, 10.0),
             ..Default::default()
         });
-        let cube = stage.draw_gltf_rendering(&crate::gltf::GltfRendering {
+        let cube = stage.draw(&Renderlet {
             camera,
-            node_path,
+            geometry,
+            material,
             transform,
-            vertex_count,
             ..Default::default()
         });
         println!("cube: {cube:?}");
@@ -734,10 +669,9 @@ mod test {
         img_diff::assert_img_eq("unlit_textured_cube_material_after.png", img);
     }
 
-    #[cfg(feature = "gltf")]
     #[test]
     // Ensures that we can render multiple nodes with mesh primitives
-    // that share the same buffer and geometry but have different materials.
+    // that share the same geometry, but have different materials.
     fn multi_node_scene() {
         let mut r =
             Renderling::headless(100, 100).with_background_color(Vec3::splat(0.0).extend(1.0));
@@ -745,11 +679,7 @@ mod test {
         stage.configure_graph(&mut r, true);
 
         let (projection, view) = camera::default_ortho2d(100.0, 100.0);
-        let camera = stage.append(&Camera {
-            projection,
-            view,
-            ..Default::default()
-        });
+        let camera = stage.append(&Camera::new(projection, view));
 
         // now test the textures functionality
         let img = AtlasImage::from_path("../../img/cheetah.jpg").unwrap();
@@ -761,75 +691,48 @@ mod test {
             ..Default::default()
         });
 
-        let cheetah_primitive = stage.new_primitive(
-            vec![
-                Vertex {
-                    position: Vec4::new(0.0, 0.0, 0.0, 0.0),
-                    color: Vec4::new(1.0, 1.0, 0.0, 1.0),
-                    uv: Vec4::new(0.0, 0.0, 0.0, 0.0),
-                    ..Default::default()
-                },
-                Vertex {
-                    position: Vec4::new(100.0, 100.0, 0.0, 0.0),
-                    color: Vec4::new(0.0, 1.0, 1.0, 1.0),
-                    uv: Vec4::new(1.0, 1.0, 1.0, 1.0),
-                    ..Default::default()
-                },
-                Vertex {
-                    position: Vec4::new(100.0, 0.0, 0.0, 0.0),
-                    color: Vec4::new(1.0, 0.0, 1.0, 1.0),
-                    uv: Vec4::new(1.0, 0.0, 1.0, 0.0),
-                    ..Default::default()
-                },
-            ],
-            [],
-            cheetah_material,
-        );
-        let color_primitive = {
-            let mut prim = cheetah_primitive;
-            prim.material = Id::NONE;
-            prim
-        };
-        let _unit = {
-            let primitives = stage.append_array(&[color_primitive]);
-            let mesh = stage.append(&crate::gltf::GltfMesh {
-                primitives,
+        let geometry = stage.append_array(&[
+            Vertex {
+                position: Vec3::new(0.0, 0.0, 0.0),
+                color: Vec4::new(1.0, 1.0, 0.0, 1.0),
+                uv0: Vec2::new(0.0, 0.0),
+                uv1: Vec2::new(0.0, 0.0),
                 ..Default::default()
-            });
-            let node = stage.append(&crate::gltf::GltfNode {
-                mesh,
+            },
+            Vertex {
+                position: Vec3::new(100.0, 100.0, 0.0),
+                color: Vec4::new(0.0, 1.0, 1.0, 1.0),
+                uv0: Vec2::new(1.0, 1.0),
+                uv1: Vec2::new(1.0, 1.0),
                 ..Default::default()
-            });
-            let node_path = stage.append_array(&[node]);
+            },
+            Vertex {
+                position: Vec3::new(100.0, 0.0, 0.0),
+                color: Vec4::new(1.0, 0.0, 1.0, 1.0),
+                uv0: Vec2::new(1.0, 0.0),
+                uv1: Vec2::new(1.0, 0.0),
+                ..Default::default()
+            },
+        ]);
 
-            stage.draw_gltf_rendering(&crate::gltf::GltfRendering {
+        let _color_prim = {
+            stage.draw(&Renderlet {
                 camera,
-                vertex_count: cheetah_primitive.vertex_count,
-                node_path,
+                geometry,
                 ..Default::default()
             })
         };
-        let _cheetah_unit = {
-            let primitives = stage.append_array(&[cheetah_primitive]);
-            let mesh = stage.append(&crate::gltf::GltfMesh {
-                primitives,
-                ..Default::default()
-            });
-            let node = stage.append(&crate::gltf::GltfNode {
-                mesh,
-                ..Default::default()
-            });
-            let node_path = stage.append_array(&[node]);
+        let _cheetah_prim = {
             let transform = stage.append(&Transform {
                 translation: Vec3::new(15.0, 35.0, 0.5),
                 scale: Vec3::new(0.5, 0.5, 1.0),
                 ..Default::default()
             });
-            stage.draw_gltf_rendering(&crate::gltf::GltfRendering {
+            stage.draw(&Renderlet {
                 camera,
+                geometry,
                 transform,
-                vertex_count: cheetah_primitive.vertex_count,
-                node_path,
+                material: cheetah_material,
                 ..Default::default()
             })
         };
@@ -839,7 +742,6 @@ mod test {
         img_diff::assert_img_eq("gpu_scene_sanity2.png", img);
     }
 
-    #[cfg(feature = "gltf")]
     #[test]
     /// Tests shading with directional light.
     fn scene_cube_directional() {
@@ -851,12 +753,8 @@ mod test {
         stage.configure_graph(&mut r, true);
 
         let (projection, _) = camera::default_perspective(100.0, 100.0);
-        let view = Mat4::look_at_rh(
-            Vec3::new(1.8, 1.8, 1.8),
-            Vec3::ZERO,
-            Vec3::new(0.0, 1.0, 0.0),
-        );
-        let camera = stage.append(&Camera::default().with_projection_and_view(projection, view));
+        let view = Mat4::look_at_rh(Vec3::new(1.8, 1.8, 1.8), Vec3::ZERO, Vec3::Y);
+        let camera = stage.append(&Camera::new(projection, view));
 
         let red = Vec3::X.extend(1.0);
         let green = Vec3::Y.extend(1.0);
@@ -887,29 +785,30 @@ mod test {
         stage.set_lights(lights);
 
         let material = stage.append(&Material::default());
-        let verts = math::unit_cube()
-            .into_iter()
-            .map(|(p, n)| Vertex {
-                position: p.extend(1.0),
-                normal: n.extend(0.0),
-                ..Default::default()
-            })
-            .collect::<Vec<_>>();
-        let vertex_count = verts.len() as u32;
-        let mesh = stage.new_mesh().with_primitive(verts, [], material).build();
-        let mesh = stage.append(&mesh);
-        let node = stage.append(&crate::gltf::GltfNode {
-            mesh,
-            ..Default::default()
-        });
-        let node_path = stage.append_array(&[node]);
-        let _cube = stage.draw_gltf_rendering(&crate::gltf::GltfRendering {
+        let geometry = stage.append_array(
+            &math::unit_cube()
+                .into_iter()
+                .map(|(p, n)| Vertex {
+                    position: p,
+                    normal: n,
+                    color: Vec4::ONE,
+                    ..Default::default()
+                })
+                .collect::<Vec<_>>(),
+        );
+        let _cube = stage.draw(&Renderlet {
             camera,
-            vertex_count,
-            node_path,
+            geometry,
+            material,
             ..Default::default()
         });
+
         let img = r.render_image().unwrap();
+        let depth_texture = r.graph.get_resource::<DepthTexture>().unwrap().unwrap();
+        let depth_img = depth_texture
+            .into_image(r.get_device(), r.get_queue())
+            .unwrap();
+        img_diff::save("scene_cube_directional_depth.png", depth_img);
         img_diff::assert_img_eq("scene_cube_directional.png", img);
     }
 
@@ -950,9 +849,8 @@ mod test {
         }
     }
 
-    #[cfg(feature = "gltf")]
     #[test]
-    // tests that nested children are transformed by their parent's transform
+    // shows how to "nest" children to make them appear transformed by their parent's transform
     fn scene_parent_sanity() {
         let mut r = Renderling::headless(100, 100);
         r.set_background_color(Vec4::splat(0.0));
@@ -977,109 +875,44 @@ mod test {
             ..Default::default()
         });
 
-        let cyan_primitive = stage.new_primitive(
-            [
-                Vertex::default().with_position([0.0, 0.0, 0.0]),
-                Vertex::default().with_position([size, size, 0.0]),
-                Vertex::default().with_position([size, 0.0, 0.0]),
-            ],
-            [],
-            cyan_material,
-        );
-        let yellow_primitive = {
-            let mut p = cyan_primitive;
-            p.material = yellow_material;
-            p
-        };
-        let red_primitive = {
-            let mut p = cyan_primitive;
-            p.material = red_material;
-            p
-        };
-
-        let root_node = stage.allocate::<crate::gltf::GltfNode>();
-        let cyan_node = stage.allocate::<crate::gltf::GltfNode>();
-        let yellow_node = stage.allocate::<crate::gltf::GltfNode>();
-        let red_node = stage.allocate::<crate::gltf::GltfNode>();
-
-        // Write the nodes now that we have references to them all
-        let children = stage.append_array(&[cyan_node]);
-        stage.write(
-            root_node,
-            &crate::gltf::GltfNode {
-                children,
-                scale: Vec3::new(25.0, 25.0, 1.0),
-                ..Default::default()
-            },
-        );
-
-        let primitives = stage.append_array(&[cyan_primitive]);
-        let children = stage.append_array(&[yellow_node]);
-        let mesh = stage.append(&crate::gltf::GltfMesh {
-            primitives,
+        let geometry = stage.append_array(&[
+            Vertex::default().with_position([0.0, 0.0, 0.0]),
+            Vertex::default().with_position([size, size, 0.0]),
+            Vertex::default().with_position([size, 0.0, 0.0]),
+        ]);
+        let root_mat4 = Mat4::from(Transform {
+            scale: Vec3::new(25.0, 25.0, 1.0),
             ..Default::default()
         });
-        stage.write(
-            cyan_node,
-            &crate::gltf::GltfNode {
-                mesh,
-                children,
-                translation: Vec3::new(1.0, 1.0, 0.0),
-                ..Default::default()
-            },
-        );
-
-        let primitives = stage.append_array(&[yellow_primitive]);
-        let children = stage.append_array(&[red_node]);
-        let mesh = stage.append(&crate::gltf::GltfMesh {
-            primitives,
+        let offset_mat4 = Mat4::from(Transform {
+            translation: Vec3::new(1.0, 1.0, 0.0),
             ..Default::default()
         });
-        stage.write(
-            yellow_node,
-            &crate::gltf::GltfNode {
-                mesh,
-                children,
-                translation: Vec3::new(1.0, 1.0, 0.0),
-                ..Default::default()
-            },
-        );
-
-        let primitives = stage.append_array(&[red_primitive]);
-        let mesh = stage.append(&crate::gltf::GltfMesh {
-            primitives,
-            ..Default::default()
-        });
-        stage.write(
-            red_node,
-            &crate::gltf::GltfNode {
-                mesh,
-                translation: Vec3::new(1.0, 1.0, 0.0),
-                ..Default::default()
-            },
-        );
-
-        let node_path = stage.append_array(&[root_node, cyan_node]);
-        let _cyan_unit = stage.draw_gltf_rendering(&crate::gltf::GltfRendering {
+        let cyan_mat4 = root_mat4 * offset_mat4;
+        let cyan_transform = stage.append(&cyan_mat4.into());
+        let yellow_mat4 = cyan_mat4 * offset_mat4;
+        let yellow_transform = stage.append(&yellow_mat4.into());
+        let red_mat4 = yellow_mat4 * offset_mat4;
+        let red_transform = stage.append(&red_mat4.into());
+        let _cyan_primitive = stage.draw(&Renderlet {
+            geometry,
             camera,
-            vertex_count: 3,
-            node_path,
+            material: cyan_material,
+            transform: cyan_transform,
             ..Default::default()
         });
-
-        let node_path = stage.append_array(&[root_node, cyan_node, yellow_node]);
-        let _yellow_unit = stage.draw_gltf_rendering(&crate::gltf::GltfRendering {
+        let _yellow_primitive = stage.draw(&Renderlet {
+            geometry,
             camera,
-            vertex_count: 3,
-            node_path,
+            material: yellow_material,
+            transform: yellow_transform,
             ..Default::default()
         });
-
-        let node_path = stage.append_array(&[root_node, cyan_node, yellow_node, red_node]);
-        let _red_unit = stage.draw_gltf_rendering(&crate::gltf::GltfRendering {
+        let _red_primitive = stage.draw(&Renderlet {
+            geometry,
             camera,
-            vertex_count: 3,
-            node_path,
+            material: red_material,
+            transform: red_transform,
             ..Default::default()
         });
 
@@ -1097,7 +930,6 @@ mod test {
         assert_eq!(position, extracted_position);
     }
 
-    #[cfg(feature = "gltf")]
     #[test]
     // Tests the initial implementation of pbr metallic roughness on an array of
     // spheres with different metallic roughnesses lit by an environment map.
@@ -1125,56 +957,54 @@ mod test {
         );
         let camera = stage.append(&Camera::new(projection, view));
 
-        let mut icosphere = icosahedron::Polyhedron::new_isocahedron(radius, 5);
-        icosphere.compute_triangle_normals();
-        let icosahedron::Polyhedron {
-            positions,
-            normals,
-            cells,
-            ..
-        } = icosphere;
-        log::info!("icosphere created on CPU");
+        let geometry = stage.append_array(&{
+            let mut icosphere = icosahedron::Polyhedron::new_isocahedron(radius, 5);
+            icosphere.compute_triangle_normals();
+            let icosahedron::Polyhedron {
+                positions,
+                normals,
+                cells,
+                ..
+            } = icosphere;
+            log::info!("icosphere created on CPU");
 
-        let to_vertex = |ndx: &usize| -> Vertex {
-            let p: [f32; 3] = positions[*ndx].0.into();
-            let n: [f32; 3] = normals[*ndx].0.into();
-            Vertex::default().with_position(p).with_normal(n)
-        };
-        let sphere_vertices = cells.iter().flat_map(|icosahedron::Triangle { a, b, c }| {
-            let p0 = to_vertex(&a);
-            let p1 = to_vertex(&b);
-            let p2 = to_vertex(&c);
-            vec![p0, p1, p2]
+            let to_vertex = |ndx: &usize| -> Vertex {
+                let p: [f32; 3] = positions[*ndx].0.into();
+                let n: [f32; 3] = normals[*ndx].0.into();
+                Vertex::default().with_position(p).with_normal(n)
+            };
+            cells
+                .iter()
+                .flat_map(|icosahedron::Triangle { a, b, c }| {
+                    let p0 = to_vertex(&a);
+                    let p1 = to_vertex(&b);
+                    let p2 = to_vertex(&c);
+                    vec![p0, p1, p2]
+                })
+                .collect::<Vec<_>>()
         });
-        let sphere_primitive = stage.new_primitive(sphere_vertices, [], Id::NONE);
         for i in 0..k {
             let roughness = i as f32 / (k - 1) as f32;
             let x = (diameter + spacing) * i as f32;
             for j in 0..k {
                 let metallic = j as f32 / (k - 1) as f32;
                 let y = (diameter + spacing) * j as f32;
-                let mut prim = sphere_primitive;
-                prim.material = stage.append(&Material {
+
+                let material = stage.append(&Material {
                     albedo_factor: Vec4::new(1.0, 1.0, 1.0, 1.0),
                     metallic_factor: metallic,
                     roughness_factor: roughness,
                     ..Default::default()
                 });
-                let primitives = stage.append_array(&[prim]);
-                let mesh = stage.append(&crate::gltf::GltfMesh {
-                    primitives,
-                    ..Default::default()
-                });
-                let node = stage.append(&crate::gltf::GltfNode {
-                    mesh,
+                let transform = stage.append(&Transform {
                     translation: Vec3::new(x, y, 0.0),
                     ..Default::default()
                 });
-                let node_path = stage.append_array(&[node]);
-                let _entity = stage.draw_gltf_rendering(&crate::gltf::GltfRendering {
+                let _sphere = stage.draw(&Renderlet {
                     camera,
-                    vertex_count: prim.vertex_count,
-                    node_path,
+                    geometry,
+                    transform,
+                    material,
                     ..Default::default()
                 });
             }

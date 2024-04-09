@@ -7,5 +7,6 @@ edition = "2021"
 
 [dependencies]
 renderling = { path = "../renderling" }
+crabslab = { workspace = true }
 wgpu = { workspace = true }
 winit = { workspace = true }

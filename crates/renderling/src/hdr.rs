@@ -136,13 +136,13 @@ pub fn bindgroup_layout(device: &wgpu::Device, label: Option<&str>) -> wgpu::Bin
 
 pub fn create_hdr_render_surface(
     (device, queue, size, target): (
-        View<Device>,
-        View<Queue>,
-        View<ScreenSize>,
-        View<RenderTarget>,
+        View<Device, NoDefault>,
+        View<Queue, NoDefault>,
+        View<ScreenSize, NoDefault>,
+        View<RenderTarget, NoDefault>,
     ),
 ) -> Result<(HdrSurface,), WgpuStateError> {
-    let buffer = WgpuBuffer::new(&*device, &*queue, TonemapConstants::slab_size());
+    let buffer = WgpuBuffer::new(&*device, &*queue, TonemapConstants::SLAB_SIZE);
     let mut slab = CpuSlab::new(buffer);
     // TODO: make the tonemapping configurable
     slab.write(0u32.into(), &TonemapConstants::default());
@@ -206,12 +206,12 @@ pub fn create_hdr_render_surface(
 /// texture.
 pub fn clear_surface_hdr_and_depth(
     (device, queue, frame, hdr, depth, color): (
-        View<Device>,
-        View<Queue>,
-        View<FrameTextureView>,
-        View<HdrSurface>,
-        View<DepthTexture>,
-        View<BackgroundColor>,
+        View<Device, NoDefault>,
+        View<Queue, NoDefault>,
+        View<FrameTextureView, NoDefault>,
+        View<HdrSurface, NoDefault>,
+        View<DepthTexture, NoDefault>,
+        View<BackgroundColor, NoDefault>,
     ),
 ) -> Result<(), WgpuStateError> {
     let depth_view = &depth.view;
@@ -229,7 +229,7 @@ pub fn clear_surface_hdr_and_depth(
     crate::frame::conduct_clear_pass(
         &device,
         &queue,
-        Some("clear_frame_and_depth"),
+        Some("clear_surface_hdr_and_depth"),
         vec![&frame.view, &hdr.hdr_texture.view],
         Some(&depth_view),
         color,
@@ -240,10 +240,10 @@ pub fn clear_surface_hdr_and_depth(
 /// Resize the HDR surface to match [`ScreenSize`].
 pub fn resize_hdr_surface(
     (device, queue, size, mut hdr): (
-        View<Device>,
-        View<Queue>,
-        View<ScreenSize>,
-        ViewMut<HdrSurface>,
+        View<Device, NoDefault>,
+        View<Queue, NoDefault>,
+        View<ScreenSize, NoDefault>,
+        ViewMut<HdrSurface, NoDefault>,
     ),
 ) -> Result<(), WgpuStateError> {
     let ScreenSize { width, height } = *size;

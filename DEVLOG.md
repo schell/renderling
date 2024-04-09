@@ -1,5 +1,143 @@
 # devlog
 
+## Tue Apr 9,
+
+### Better debugging
+
+Debugging on the CPU is great - it finds a lot of bugs relatively quickly.
+It's no silver bullet though, because often the size of types are different on the GPU,
+and the implementations of functions are different as well. 
+
+To some bugs, debugging on the GPU is necessary - but without special features and some 
+Vulkan layer magic (that are unavailable to `wgpu` at the time of this writing), 
+debugging is pretty hard.
+
+So I'm experimenting with writing my shaders to take an extra `debug: &mut [u32]` buffer 
+that it can use to write messages into. So far it works great in my vertex shader, but 
+the same setup (with a separate buffer) doesn't work on my fragment shader. I still don't 
+know why. So now I'm debugging my debugging. 
+
+For help I've posted on: 
+- [GP (graphics programming) discord](https://discord.com/channels/318590007881236480/591343919598534681/1227041127899729970) 
+- [rust-gpu discord](https://discord.com/channels/750717012564770887/750717499737243679/122701598544219355) for help...
+
+#### ...
+
+It seems that in fact, the values are being written, but when I read them out - I only 
+get a few...
+
+Wait.
+
+Oh wait.
+
+_smh_
+
+The vertex shader only covers _certain fragments_. 
+
+The fragment shader would only evaluate those pixels covered by the vertex shader.
+
+🤦
+
+So everything is as it should be.
+
+...Hooray! Sheesh.
+
+Ok, debugging messages work.
+
+Now - if I had atomics I could make this pretty ergonomic.
+
+## Sat Apr 6, 2024 
+
+### Finishing the debugging session
+
+It WAS `crabslab`! Specifically it was `Slab::contains`, which is used to check that 
+a type with an `Id` _can be read_. 
+
+Previously the definition was: 
+
+```rust 
+fn contains<T: SlabItem>(&self, id: Id<T>) -> bool {
+    id.index() + T::SLAB_SIZE <= self.len()
+}
+```
+
+Which seems correct, and it functions correctly on the CPU. 
+But on the GPU (meaning `target_arch = "spirv"``) `usize` is a 32bit `u32`, 
+and so the `id.index() + T::SLAB_SIZE` will overflow if the id is `Id::NONE`, 
+because `Id::NONE = u32::MAX;`. 
+
+Indeed, the id is often `Id::NONE`, as that is the default!
+This was causing a silent panic in my shader, which then produced no output.
+
+Now the definition is this: 
+```rust
+fn contains<T: SlabItem>(&self, id: Id<T>) -> bool {
+    self.len() >= T::SLAB_SIZE && id.index() <= self.len() - T::SLAB_SIZE
+}
+```
+
+What a hard-to-diagnose bug! I really need trace statements on GPU.
+
+## Fri Apr 5, 2024 
+
+I have bugs after removing the SDF raymarching stuff. 
+
+Primarily I can't get any of my `stage_vertex`+`stage_fragment` tests passing. 
+Everything is blank. 
+
+### Debug with me!
+
+* it's not crabslab: I fixed some bugs in it and after testing through the `tutorial`
+  shaders I'm 80% certain it's not a (de)serialization problem.
+* NOTHING is being written to the depth texture...
+  - depth is cleared to 1.0 
+  - pipeline depth function is set to ALWAYS (always succeed) and still nothing is written
+  - face culling is off and still nothing is written
+  - running the vertex shader on CPU and printing out clip positions shows:
+    ```
+    clips: [
+        Vec4(
+            -1.0,
+            1.0,
+            0.25,
+            1.0,
+        ),
+        Vec4(
+            -1.0,
+            -1.0,
+            0.25,
+            1.0,
+        ),
+        Vec4(
+            1.0,
+            1.0,
+            0.25,
+            1.0,
+        ),
+    ]
+    ```
+    Which is a CCW triangle up in the top left of the clip space. 
+    So we should see SOMETHING in the depth texture at least, but we don't.
+    Why do we not? Is the render even happening on the GPU? Let's check logging
+    to see if we're issuing the calls..
+      - `stage_render` prints `drawing vertices 0..3 and instances 147..148`
+        so I'm certain we're actually rendering.
+
+At this point I'm a bit at a loss. The difference between the tutorial shaders (which are working) 
+and my stage shader is mainly that the stage shader first writes to an HDR surface and then 
+runs tonemapping and writes the result to the frame surface. I can't see any other course of action 
+than removing HDR and tonemapping to see if that works.
+
+I'm going to try rendering the `gltf_cmy_tri` slab with the `tutorial` shaders. 
+We'll see what happens.
+
+NOTHING! No rendering. No depth values. So this must have something to do with the data.
+
+### What to do about the wacky GLTF stage shaders
+
+I'm going to go back to a much simpler "renderlet" pbr shader program. The entire GLTF document can 
+still live on the GPU, but GLTF is too complicated a structure to use for the internal representation.
+
 ## Mon Feb 26, 2024 
 
 ### SDF stack lang on GPU considered harmful
@@ -25,6 +163,40 @@ analytically on the CPU, and then "serializing" them to the GPU as pre-baked dis
 
 Or maybe I'll just park SDFs for now and get back to rasterization...
 
+
+### SDFs going forward+
+
+I still think there's a way to make SDFs work well in _this_ project. Consider this rasterization factory:
+
+1. break down triangle geometry into meshlets 
+2. determine draw calls for meshlets
+3. draw calls run vertex shader for meshlets
+4. fragment shader writes to gbuffer, which might include
+   - u32 id of object
+   - vec3 position 
+   - vec3 normal  
+   - vec4 albedo 
+   - f32 metallic 
+   - f32 roughness 
+   - vec3 emissive 
+   - vec3 irradiance 
+   - vec3 prefiltered 
+   - vec2 brdf
+   - f32 depth
+5. break down SDFs into volumes 
+6. determine draw calls for SDF volumes 
+7. draw calls run vertex shader for volumes
+8. SDF volume fragment shader writes to gbuffer
+9. do a _raymarching_ pass over the gbuffer, discarding fragments not drawn to, using the depth as the first already-known hit point
+   1. march till bounce...
+   2. accumulate 
+   3. goto 1. or die
+
+But I guess step `9` can be omitted until a later date. Support for rasterizing SDFs is the main point. 
+
+I like the idea of raymarching for shading, though. It seems cognitively simpler than the current pile of tricks...
+
+
 ### Wgsly
 
 After hitting those exponential compile times with `rust-gpu` 
@@ -38,6 +210,12 @@ It's not an insane amount of work though, and it would give nice editor tooling 
 has it for Rust. Plus you could use macros to implement imports for WGSL....
 
 Anyway - I'm going to pull it out because it's not really on topic.
+
+### Crabslab update 
+
+I bumped `crabslab` after updating that library to use an associated constant for the slab size.
+
+The file sizes are a tad bit smaller now, but only by at most 100 bytes.
 
 ## Fri Feb 23, 2024
 

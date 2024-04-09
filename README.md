@@ -1,7 +1,12 @@
 
 # renderling 🍖
 
-This aspires to be a modern "GPU-driven" renderer. It is alpha software. I'm still learning, but quickly!
+Renderling is an innovative, GPU-driven renderer designed for efficient scene rendering with a focus on leveraging 
+GPU capabilities for nearly all rendering operations. 
+Utilizing Rust for shader development, it ensures memory safety and cross-platform compatibility, including web platforms. 
+The project, currently in the alpha stage, aims for rapid loading of GLTF files, handling large scenes, and supporting numerous lights. 
+Development emphasizes performance, configurability, observability and the use of modern rendering techniques like forward+ rendering and 
+physically based shading.
 
 <img width="912" alt="ibl_environment_test" src="https://github.com/schell/renderling/assets/24942/297d6150-64b2-45b8-9760-12b27dc8cc3e">
 
@@ -155,9 +160,26 @@ RUSTFLAGS=--cfg=web_sys_unstable_apis trunk build crates/example-wasm/index.html
 
 ## 🫶 Sponsor this!
 
-This work will always be free and open source. If you use it (outright or for inspiration), please consider donating.
+This work will always be free and open source. 
+If you use it (outright or for inspiration), please consider donating.
 
 [💰 Sponsor 💝](https://github.com/sponsors/schell)
+
+### Related work & spin-off projects 
+
+Many projects were born from first solving a need within `renderling`. 
+Some of these solutions were then spun off into their own projects.
+
+- [`crabslab`](https://github.com/schell/crabslab)
+  A slab allocator for working across CPU/GPU boundaries.
+- [`loading-bytes`](crates/loading-bytes)
+  A cross-platform (including the web) way of loading files to bytes.
+- [`moongraph`](https://github.com/schell/moongraph)
+  A DAG and resource graph runner.
+- Contributions to [`naga`](https://github.com/gfx-rs/wgpu/issues/4489)
+  * Adding atomics support to the SPIR-V frontend (in progress)
+
+Sponsoring this project contributes to the ecosystem. 
 
 ## License
 Renderling is free and open source. All code in this repository is dual-licensed under either:

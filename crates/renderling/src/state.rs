@@ -37,6 +37,12 @@ pub enum WgpuStateError {
     CouldNotConvertImageBuffer,
 }
 
+impl From<WgpuStateError> for moongraph::GraphError {
+    fn from(value: WgpuStateError) -> Self {
+        moongraph::GraphError::other(value)
+    }
+}
+
 pub enum RenderTarget {
     Surface {
         surface: wgpu::Surface<'static>,

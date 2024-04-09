@@ -2,11 +2,9 @@
 use std::sync::Arc;
 
 use crabslab::{CpuSlab, GrowableSlab, Slab, SlabItem, WgpuBuffer};
-use glam::{Mat4, Vec2, Vec3};
+use glam::{Mat4, Vec3};
 
 use crate::{atlas::AtlasImage, convolution::VertexPrefilterEnvironmentCubemapIds, Camera};
-
-const INV_ATAN: Vec2 = Vec2::new(0.1591, core::f32::consts::FRAC_1_PI);
 
 /// Render pipeline used to draw a skybox.
 pub struct SkyboxRenderPipeline(pub wgpu::RenderPipeline);
@@ -294,7 +292,7 @@ impl Skybox {
         let buffer = WgpuBuffer::new_usage(
             device.0.clone(),
             queue.0.clone(),
-            Camera::slab_size(),
+            Camera::SLAB_SIZE,
             wgpu::BufferUsages::VERTEX,
         );
         let mut slab = CpuSlab::new(buffer);
@@ -427,7 +425,7 @@ impl Skybox {
         let buffer = WgpuBuffer::new_usage(
             device.clone(),
             queue.clone(),
-            Camera::slab_size(),
+            Camera::SLAB_SIZE,
             wgpu::BufferUsages::VERTEX,
         );
         let mut slab = CpuSlab::new(buffer);
@@ -466,7 +464,7 @@ impl Skybox {
         let buffer = WgpuBuffer::new_usage(
             device.clone(),
             queue.clone(),
-            Camera::slab_size(),
+            Camera::SLAB_SIZE,
             wgpu::BufferUsages::VERTEX,
         );
         let mut slab = CpuSlab::new(buffer);

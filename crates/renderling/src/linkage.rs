@@ -1,4 +1,5 @@
 //! Provides convenient wrappers around renderling shader linkage.
+// TODO: add a static cache for shader modules
 
 pub mod brdf_lut_convolution_fragment;
 pub mod brdf_lut_convolution_vertex;
@@ -7,14 +8,19 @@ pub mod generate_mipmap_vertex;
 pub mod pbr_fragment;
 pub mod prefilter_environment_cubemap_fragment;
 pub mod prefilter_environment_cubemap_vertex;
+pub mod renderlet_fragment;
+pub mod renderlet_vertex;
 pub mod skybox_cubemap_fragment;
 pub mod skybox_cubemap_vertex;
 pub mod skybox_equirectangular_fragment;
 pub mod skybox_vertex;
-pub mod stage_fragment;
-pub mod stage_vertex;
 pub mod tonemapping_fragment;
 pub mod tonemapping_vertex;
+pub mod tutorial_implicit_isosceles_vertex;
+pub mod tutorial_passthru_fragment;
+pub mod tutorial_slabbed_renderlet;
+pub mod tutorial_slabbed_vertices;
+pub mod tutorial_slabbed_vertices_no_instance;
 
 pub struct ShaderLinkage {
     pub module: wgpu::ShaderModule,
@@ -34,26 +40,62 @@ pub fn slab_bindgroup_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
         },
         count: None,
     };
-    let entries = vec![slab];
+    let vertex_debug = wgpu::BindGroupLayoutEntry {
+        binding: 1,
+        visibility,
+        ty: wgpu::BindingType::Buffer {
+            ty: wgpu::BufferBindingType::Storage { read_only: false },
+            has_dynamic_offset: false,
+            min_binding_size: None,
+        },
+        count: None,
+    };
+    let fragment_debug = wgpu::BindGroupLayoutEntry {
+        binding: 2,
+        visibility,
+        ty: wgpu::BindingType::Buffer {
+            ty: wgpu::BufferBindingType::Storage { read_only: false },
+            has_dynamic_offset: false,
+            min_binding_size: None,
+        },
+        count: None,
+    };
+    let entries = vec![slab, vertex_debug, fragment_debug];
     device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        label: Some("slab"),
+        label: Some("slabs"),
         entries: &entries,
     })
 }
 
 pub fn slab_bindgroup(
     device: &wgpu::Device,
-    buffer: &wgpu::Buffer,
+    slab_buffer: &wgpu::Buffer,
+    vertex_debug_buffer: &wgpu::Buffer,
+    fragment_debug_buffer: &wgpu::Buffer,
     bindgroup_layout: &wgpu::BindGroupLayout,
 ) -> wgpu::BindGroup {
     let label = Some("slab");
     device.create_bind_group(&wgpu::BindGroupDescriptor {
         label,
         layout: &bindgroup_layout,
-        entries: &[wgpu::BindGroupEntry {
-            binding: 0,
-            resource: wgpu::BindingResource::Buffer(buffer.as_entire_buffer_binding()),
-        }],
+        entries: &[
+            wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::Buffer(slab_buffer.as_entire_buffer_binding()),
+            },
+            wgpu::BindGroupEntry {
+                binding: 1,
+                resource: wgpu::BindingResource::Buffer(
+                    vertex_debug_buffer.as_entire_buffer_binding(),
+                ),
+            },
+            wgpu::BindGroupEntry {
+                binding: 2,
+                resource: wgpu::BindingResource::Buffer(
+                    fragment_debug_buffer.as_entire_buffer_binding(),
+                ),
+            },
+        ],
     })
 }
 

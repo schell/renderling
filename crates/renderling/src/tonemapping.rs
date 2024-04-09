@@ -164,7 +164,7 @@ pub fn tonemapping_fragment(
 
 #[cfg(not(target_arch = "spirv"))]
 mod cpu {
-    use moongraph::{GraphError, View};
+    use moongraph::{GraphError, NoDefault, View};
 
     use crate::{frame::FrameTextureView, Device, HdrSurface, Queue};
 
@@ -175,10 +175,10 @@ mod cpu {
     /// Only available on CPU. Not Available in shaders.
     pub fn tonemapping(
         (device, queue, frame, hdr_frame): (
-            View<Device>,
-            View<Queue>,
-            View<FrameTextureView>,
-            View<HdrSurface>,
+            View<Device, NoDefault>,
+            View<Queue, NoDefault>,
+            View<FrameTextureView, NoDefault>,
+            View<HdrSurface, NoDefault>,
         ),
     ) -> Result<(), GraphError> {
         let label = Some("tonemapping");
