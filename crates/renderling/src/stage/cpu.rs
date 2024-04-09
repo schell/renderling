@@ -440,7 +440,7 @@ impl Stage {
 
         // Ensure we have space to write GPU debugging info to our vertex debug buffer
         {
-            let vertex_debug_data = vec![RenderletVertexLog::default(); renderlet.geometry.len()];
+            let vertex_debug_data = vec![RenderletVertexLog::default(); renderlet.vertices.len()];
             // UNWRAP: if we can't read we want to panic.
             let mut debug = self.vertex_debug.write().unwrap();
             debug.append_array(&vertex_debug_data);
@@ -673,7 +673,7 @@ impl Stage {
         let draws = self.get_draws();
         let len = draws
             .into_iter()
-            .map(|(_, r)| r.geometry.len())
+            .map(|(_, r)| r.vertices.len())
             .sum::<usize>();
         let array = Array::<RenderletVertexLog>::new(0, len as u32);
         let logs = self.vertex_debug.read().unwrap().as_ref().read_vec(array);
@@ -689,7 +689,7 @@ impl Stage {
                 StageDrawStrategy::Direct(units) => {
                     let len = units
                         .iter()
-                        .map(|(_, renderlet)| renderlet.geometry.len())
+                        .map(|(_, renderlet)| renderlet.vertices.len())
                         .sum::<usize>();
                     len
                 }
@@ -801,7 +801,11 @@ pub fn stage_render(
             StageDrawStrategy::Direct(units) => {
                 for (id, rlet) in units {
                     if rlet.visible {
-                        let vertex_range = 0..rlet.geometry.len() as u32;
+                        let vertex_range = if rlet.indices.is_null() {
+                            0..rlet.vertices.len() as u32
+                        } else {
+                            0..rlet.indices.len() as u32
+                        };
                         let instance_range = id.inner()..id.inner() + 1;
                         log::trace!(
                             "drawing vertices {vertex_range:?} and instances {instance_range:?}"
@@ -867,7 +871,7 @@ mod test {
         let geometry = stage.append_array(&crate::test::right_tri_vertices());
         let mut renderlet = Renderlet {
             camera,
-            geometry,
+            vertices: geometry,
             ..Default::default()
         };
         let tri_id = stage.draw_debug(&mut renderlet);

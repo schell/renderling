@@ -578,7 +578,7 @@ mod test {
         });
         let _renderlet = stage.draw(&crate::Renderlet {
             camera,
-            geometry,
+            vertices: geometry,
             transform,
             material,
             ..Default::default()
@@ -655,7 +655,7 @@ mod test {
         });
         let _clamp_prim = stage.draw(&Renderlet {
             camera,
-            geometry,
+            vertices: geometry,
             material: clamp_material_id,
             ..Default::default()
         });
@@ -666,7 +666,7 @@ mod test {
             });
             stage.draw(&Renderlet {
                 camera,
-                geometry,
+                vertices: geometry,
                 material: repeat_material_id,
                 transform,
                 ..Default::default()
@@ -679,7 +679,7 @@ mod test {
             });
             stage.draw(&Renderlet {
                 camera,
-                geometry,
+                vertices: geometry,
                 material: mirror_material_id,
                 transform,
                 ..Default::default()
@@ -767,7 +767,7 @@ mod test {
 
         let _clamp_prim = stage.draw(&Renderlet {
             camera,
-            geometry,
+            vertices: geometry,
             material: clamp_material_id,
             ..Default::default()
         });
@@ -779,7 +779,7 @@ mod test {
 
             stage.draw(&Renderlet {
                 camera,
-                geometry,
+                vertices: geometry,
                 material: repeat_material_id,
                 transform,
                 ..Default::default()
@@ -793,7 +793,7 @@ mod test {
 
             stage.draw(&Renderlet {
                 camera,
-                geometry,
+                vertices: geometry,
                 material: mirror_material_id,
                 transform,
                 ..Default::default()

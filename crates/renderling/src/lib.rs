@@ -269,6 +269,7 @@ mod test {
     use crate::{pbr::Material, stage::Vertex};
 
     use glam::{Mat3, Mat4, Quat, Vec2, Vec3, Vec4};
+    use img_diff::DiffCfg;
     use pretty_assertions::assert_eq;
 
     #[test]
@@ -314,7 +315,7 @@ mod test {
         let geometry = stage.append_array(&right_tri_vertices());
         let _tri_id = stage.draw(&Renderlet {
             camera,
-            geometry,
+            vertices: geometry,
             ..Default::default()
         });
 
@@ -364,7 +365,7 @@ mod test {
         });
         let _tri = stage.draw(&Renderlet {
             camera,
-            geometry,
+            vertices: geometry,
             ..Default::default()
         });
 
@@ -393,7 +394,7 @@ mod test {
         let transform = stage.append(&Transform::default());
         let _tri = stage.draw(&Renderlet {
             camera,
-            geometry,
+            vertices: geometry,
             transform,
             ..Default::default()
         });
@@ -472,12 +473,49 @@ mod test {
         });
         let _cube = stage.draw(&Renderlet {
             camera,
-            geometry,
+            vertices: geometry,
             transform,
             ..Default::default()
         });
         let img = r.render_image().unwrap();
         img_diff::assert_img_eq("cmy_cube/sanity.png", img);
+    }
+
+    #[test]
+    // Tests our ability to draw a CMYK cube using indexed geometry.
+    fn cmy_cube_indices() {
+        let mut r = Renderling::headless(100, 100).with_background_color(Vec4::splat(1.0));
+        let mut stage = r.new_stage();
+        stage.configure_graph(&mut r, true);
+        let camera_position = Vec3::new(0.0, 12.0, 20.0);
+        let camera = stage.append(&Camera {
+            projection: Mat4::perspective_rh(std::f32::consts::PI / 4.0, 1.0, 0.1, 100.0),
+            view: Mat4::look_at_rh(camera_position, Vec3::ZERO, Vec3::Y),
+            position: camera_position,
+        });
+        let vertices = stage.append_array(&math::UNIT_POINTS.map(cmy_gpu_vertex));
+        let indices = stage.append_array(&math::UNIT_INDICES.map(|i| i as u32));
+        let transform = stage.append(&Transform {
+            scale: Vec3::new(6.0, 6.0, 6.0),
+            rotation: Quat::from_axis_angle(Vec3::Y, -std::f32::consts::FRAC_PI_4),
+            ..Default::default()
+        });
+        let _cube = stage.draw(&Renderlet {
+            camera,
+            vertices,
+            indices,
+            transform,
+            ..Default::default()
+        });
+        let img = r.render_image().unwrap();
+        img_diff::assert_img_eq_cfg(
+            "cmy_cube/sanity.png",
+            img,
+            DiffCfg {
+                test_name: Some("cmy_cube/indices"),
+                ..Default::default()
+            },
+        );
     }
 
     #[test]
@@ -495,7 +533,7 @@ mod test {
         });
         let geometry = stage.append_array(&gpu_cube_vertices());
         let mut renderlet = Renderlet {
-            geometry,
+            vertices: geometry,
             camera,
             transform: stage.append(&Transform {
                 translation: Vec3::new(-4.5, 0.0, 0.0),
@@ -559,7 +597,7 @@ mod test {
 
         let cube_id = stage.draw(&Renderlet {
             camera,
-            geometry: cube_geometry,
+            vertices: cube_geometry,
             transform,
             ..Default::default()
         });
@@ -568,9 +606,9 @@ mod test {
         let img = r.render_image().unwrap();
         img_diff::assert_img_eq("cmy_cube/remesh_before.png", img);
 
-        // Update the cube mesh to a pyramid by overwriting the `.geometry` field
+        // Update the cube mesh to a pyramid by overwriting the `.vertices` field
         // of `Renderlet`
-        stage.write(cube_id + Renderlet::offset_of_geometry(), &pyramid_geometry);
+        stage.write(cube_id + Renderlet::offset_of_vertices(), &pyramid_geometry);
 
         // we should see a pyramid (in sRGB color space)
         let img = r.render_image().unwrap();
@@ -650,7 +688,7 @@ mod test {
         });
         let cube = stage.draw(&Renderlet {
             camera,
-            geometry,
+            vertices: geometry,
             material,
             transform,
             ..Default::default()
@@ -718,7 +756,7 @@ mod test {
         let _color_prim = {
             stage.draw(&Renderlet {
                 camera,
-                geometry,
+                vertices: geometry,
                 ..Default::default()
             })
         };
@@ -730,7 +768,7 @@ mod test {
             });
             stage.draw(&Renderlet {
                 camera,
-                geometry,
+                vertices: geometry,
                 transform,
                 material: cheetah_material,
                 ..Default::default()
@@ -798,7 +836,7 @@ mod test {
         );
         let _cube = stage.draw(&Renderlet {
             camera,
-            geometry,
+            vertices: geometry,
             material,
             ..Default::default()
         });
@@ -895,21 +933,21 @@ mod test {
         let red_mat4 = yellow_mat4 * offset_mat4;
         let red_transform = stage.append(&red_mat4.into());
         let _cyan_primitive = stage.draw(&Renderlet {
-            geometry,
+            vertices: geometry,
             camera,
             material: cyan_material,
             transform: cyan_transform,
             ..Default::default()
         });
         let _yellow_primitive = stage.draw(&Renderlet {
-            geometry,
+            vertices: geometry,
             camera,
             material: yellow_material,
             transform: yellow_transform,
             ..Default::default()
         });
         let _red_primitive = stage.draw(&Renderlet {
-            geometry,
+            vertices: geometry,
             camera,
             material: red_material,
             transform: red_transform,
@@ -1002,7 +1040,7 @@ mod test {
                 });
                 let _sphere = stage.draw(&Renderlet {
                     camera,
-                    geometry,
+                    vertices: geometry,
                     transform,
                     material,
                     ..Default::default()
