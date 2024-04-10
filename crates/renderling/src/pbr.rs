@@ -586,8 +586,6 @@ pub fn shade_fragment(
             LightStyle::Point => {
                 let PointLight {
                     position,
-                    // TODO: remove unused `attenuation` from lights
-                    attenuation,
                     color,
                     intensity,
                 } = slab.read(light.into_point_id());
@@ -606,8 +604,6 @@ pub fn shade_fragment(
                 let SpotLight {
                     position,
                     direction,
-                    // TODO: remove unused `attenuation` from lights
-                    attenuation,
                     inner_cutoff,
                     outer_cutoff,
                     color,

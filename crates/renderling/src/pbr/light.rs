@@ -10,7 +10,6 @@ use crate::Transform;
 pub struct SpotLight {
     pub position: Vec3,
     pub direction: Vec3,
-    pub attenuation: Vec3,
     pub inner_cutoff: f32,
     pub outer_cutoff: f32,
     pub color: Vec4,
@@ -22,7 +21,6 @@ impl Default for SpotLight {
         let white = Vec4::splat(1.0);
         let inner_cutoff = core::f32::consts::PI / 3.0;
         let outer_cutoff = core::f32::consts::PI / 2.0;
-        let attenuation = Vec3::new(1.0, 0.014, 0.007);
         let direction = Vec3::new(0.0, -1.0, 0.0);
         let color = white;
         let intensity = 1.0;
@@ -30,7 +28,6 @@ impl Default for SpotLight {
         Self {
             position: Default::default(),
             direction,
-            attenuation,
             inner_cutoff,
             outer_cutoff,
             color,
@@ -67,20 +64,17 @@ impl Default for DirectionalLight {
 #[derive(Copy, Clone, SlabItem)]
 pub struct PointLight {
     pub position: Vec3,
-    pub attenuation: Vec3,
     pub color: Vec4,
     pub intensity: f32,
 }
 
 impl Default for PointLight {
     fn default() -> Self {
-        let attenuation = Vec3::new(1.0, 0.14, 0.07);
         let color = Vec4::splat(1.0);
         let intensity = 1.0;
 
         Self {
             position: Default::default(),
-            attenuation,
             color,
             intensity,
         }
