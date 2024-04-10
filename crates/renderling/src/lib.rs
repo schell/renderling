@@ -815,7 +815,8 @@ mod test {
         assert_eq!(
             Light {
                 light_type: LightStyle::Directional,
-                index: dir_red.inner()
+                index: dir_red.inner(),
+                ..Default::default()
             },
             dir_red.into()
         );
