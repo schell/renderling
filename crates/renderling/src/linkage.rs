@@ -5,7 +5,6 @@ pub mod brdf_lut_convolution_fragment;
 pub mod brdf_lut_convolution_vertex;
 pub mod generate_mipmap_fragment;
 pub mod generate_mipmap_vertex;
-pub mod pbr_fragment;
 pub mod prefilter_environment_cubemap_fragment;
 pub mod prefilter_environment_cubemap_vertex;
 pub mod renderlet_fragment;
