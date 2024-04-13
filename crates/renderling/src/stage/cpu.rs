@@ -73,6 +73,7 @@ pub struct Stage {
     pub(crate) buffers_bindgroup: Arc<Mutex<Option<Arc<wgpu::BindGroup>>>>,
     pub(crate) textures_bindgroup: Arc<Mutex<Option<Arc<wgpu::BindGroup>>>>,
     pub(crate) draws: Arc<RwLock<StageDrawStrategy>>,
+    pub(crate) nested_transforms: Arc<RwLock<Vec<NestedTransform>>>,
     pub(crate) device: Device,
     pub(crate) queue: Queue,
 }
@@ -156,6 +157,7 @@ impl Stage {
             buffers_bindgroup: Default::default(),
             textures_bindgroup: Default::default(),
             draws: Arc::new(RwLock::new(StageDrawStrategy::Direct(vec![]))),
+            nested_transforms: Default::default(),
             device,
             queue,
         };
@@ -746,11 +748,36 @@ impl Stage {
             camera,
         ))
     }
+
+    pub fn new_nested_transform(&mut self) -> NestedTransform {
+        NestedTransform::new(self)
+    }
+
+    fn update_nested_transforms(&mut self) {
+        let writes = {
+            let guard = self.nested_transforms.read().unwrap();
+            guard
+                .iter()
+                .filter_map(|nested| {
+                    if nested.get_dirty() {
+                        let transform = nested.get_global_transform();
+                        nested.set_dirty(false);
+                        Some((nested.transform_id, transform))
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<_>>()
+        };
+        for (id, transform) in writes.into_iter() {
+            self.write(id, &transform);
+        }
+    }
 }
 
 /// Render the stage.
 pub fn stage_render(
-    (stage, hdr_frame, depth): (
+    (mut stage, hdr_frame, depth): (
         ViewMut<Stage, NoDefault>,
         View<HdrSurface, NoDefault>,
         View<DepthTexture, NoDefault>,
@@ -767,6 +794,7 @@ pub fn stage_render(
     } else {
         None
     };
+    stage.update_nested_transforms();
     //let mut may_bloom_filter = if
     // stage.has_bloom.load(std::sync::atomic::Ordering::Relaxed) {    // UNWRAP:
     // if we can't acquire the lock we want to panic.    Some(stage.bloom.
@@ -829,6 +857,93 @@ pub fn stage_render(
     stage.queue.submit(std::iter::once(encoder.finish()));
 
     Ok(())
+}
+
+/// Manages scene heirarchy on the [`Stage`].
+///
+/// Clones all reference the same nested transform.
+#[derive(Clone)]
+pub struct NestedTransform {
+    transform: Arc<Mutex<Transform>>,
+    transform_id: Id<Transform>,
+    dirty: Arc<AtomicBool>,
+    children: Arc<RwLock<Vec<NestedTransform>>>,
+    parent: Arc<RwLock<Option<NestedTransform>>>,
+}
+
+impl NestedTransform {
+    pub fn new(stage: &mut Stage) -> Self {
+        let transform = Transform::default();
+        let transform_id = stage.append(&transform);
+        let nested = NestedTransform {
+            transform: Arc::new(Mutex::new(transform)),
+            transform_id,
+            dirty: Default::default(),
+            children: Default::default(),
+            parent: Default::default(),
+        };
+        stage
+            .nested_transforms
+            .write()
+            .unwrap()
+            .push(nested.clone());
+        nested
+    }
+
+    fn set_dirty(&self, dirty: bool) -> bool {
+        let prev = self.dirty.swap(dirty, std::sync::atomic::Ordering::Relaxed);
+        if dirty {
+            for child in self.children.read().unwrap().iter() {
+                let _ = child.set_dirty(dirty);
+            }
+        }
+        prev
+    }
+
+    fn get_dirty(&self) -> bool {
+        self.dirty.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    pub fn set_local_transform(&mut self, transform: Transform) {
+        *self.transform.lock().unwrap() = transform;
+        self.set_dirty(true);
+    }
+
+    pub fn get_local_transform(&self) -> Transform {
+        *self.transform.lock().unwrap()
+    }
+
+    pub fn get_global_transform(&self) -> Transform {
+        let maybe_parent_guard = self.parent.read().unwrap();
+        let transform = self.get_local_transform();
+        let parent_transform = maybe_parent_guard
+            .as_ref()
+            .map(|parent| parent.get_global_transform())
+            .unwrap_or_default();
+        Transform::from(Mat4::from(parent_transform) * Mat4::from(transform))
+    }
+
+    pub fn transform_id(&self) -> Id<Transform> {
+        self.transform_id
+    }
+
+    pub fn add_child(&mut self, node: &NestedTransform) {
+        node.set_dirty(true);
+        *node.parent.write().unwrap() = Some(self.clone());
+        self.children.write().unwrap().push(node.clone());
+    }
+
+    pub fn remove_child(&mut self, node: &NestedTransform) {
+        self.children.write().unwrap().retain_mut(|child| {
+            if child.transform_id() == node.transform_id() {
+                node.set_dirty(true);
+                let _ = node.parent.write().unwrap().take();
+                false
+            } else {
+                true
+            }
+        });
+    }
 }
 
 #[cfg(test)]

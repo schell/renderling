@@ -919,39 +919,50 @@ mod test {
             Vertex::default().with_position([size, size, 0.0]),
             Vertex::default().with_position([size, 0.0, 0.0]),
         ]);
-        let root_mat4 = Mat4::from(Transform {
+
+        let mut root_node = stage.new_nested_transform();
+        root_node.set_local_transform(Transform {
             scale: Vec3::new(25.0, 25.0, 1.0),
             ..Default::default()
         });
-        let offset_mat4 = Mat4::from(Transform {
+
+        let offset = Transform {
             translation: Vec3::new(1.0, 1.0, 0.0),
             ..Default::default()
-        });
-        let cyan_mat4 = root_mat4 * offset_mat4;
-        let cyan_transform = stage.append(&cyan_mat4.into());
-        let yellow_mat4 = cyan_mat4 * offset_mat4;
-        let yellow_transform = stage.append(&yellow_mat4.into());
-        let red_mat4 = yellow_mat4 * offset_mat4;
-        let red_transform = stage.append(&red_mat4.into());
+        };
+
+        let mut cyan_node = NestedTransform::new(&mut stage);
+        cyan_node.set_local_transform(offset);
+
+        let mut yellow_node = NestedTransform::new(&mut stage);
+        yellow_node.set_local_transform(offset);
+
+        let mut red_node = NestedTransform::new(&mut stage);
+        red_node.set_local_transform(offset);
+
+        root_node.add_child(&cyan_node);
+        cyan_node.add_child(&yellow_node);
+        yellow_node.add_child(&red_node);
+
         let _cyan_primitive = stage.draw(&Renderlet {
             vertices: geometry,
             camera,
             material: cyan_material,
-            transform: cyan_transform,
+            transform: cyan_node.transform_id(),
             ..Default::default()
         });
         let _yellow_primitive = stage.draw(&Renderlet {
             vertices: geometry,
             camera,
             material: yellow_material,
-            transform: yellow_transform,
+            transform: yellow_node.transform_id(),
             ..Default::default()
         });
         let _red_primitive = stage.draw(&Renderlet {
             vertices: geometry,
             camera,
             material: red_material,
-            transform: red_transform,
+            transform: red_node.transform_id(),
             ..Default::default()
         });
 
