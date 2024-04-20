@@ -23,10 +23,10 @@ mod cpu;
 #[cfg(not(target_arch = "spirv"))]
 pub use cpu::*;
 
-// #[cfg(all(feature = "gltf", not(target_arch = "spirv")))]
-// mod gltf_support;
-// #[cfg(all(feature = "gltf", not(target_arch = "spirv")))]
-// pub use gltf_support::*;
+#[cfg(all(feature = "gltf", not(target_arch = "spirv")))]
+mod gltf_support;
+#[cfg(all(feature = "gltf", not(target_arch = "spirv")))]
+pub use gltf_support::*;
 
 /// A vertex in a mesh.
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
@@ -175,7 +175,7 @@ impl Vertex {
 /// `Id::new(0)`. This corresponds to the `PbrConfig` that is maintained by
 /// the [`Stage`].
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
-#[derive(Clone, Copy, SlabItem)]
+#[derive(Clone, Copy, PartialEq, SlabItem)]
 pub struct Renderlet {
     pub visible: bool,
     pub vertices: Array<Vertex>,
