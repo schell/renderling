@@ -313,17 +313,9 @@ impl GltfPrimitive {
     pub fn from_gltf(
         stage: &mut Stage,
         primitive: gltf::Primitive,
-        document: &gltf::Document,
         buffer_data: &[gltf::buffer::Data],
         materials: &HybridArray<Material>,
     ) -> Self {
-        fn log_accessor(gltf_accessor: gltf::Accessor<'_>) {
-            log::trace!("      count: {}", gltf_accessor.count());
-            log::trace!("      size: {}", gltf_accessor.size());
-            log::trace!("      data_type: {:?}", gltf_accessor.data_type());
-            log::trace!("     dimensions: {:?}", gltf_accessor.dimensions());
-        }
-
         let material = primitive
             .material()
             .index()
@@ -492,7 +484,6 @@ pub struct GltfMesh {
 impl GltfMesh {
     fn from_gltf(
         stage: &mut Stage,
-        document: &gltf::Document,
         buffer_data: &[gltf::buffer::Data],
         materials: &HybridArray<Material>,
         mesh: gltf::Mesh,
@@ -500,7 +491,7 @@ impl GltfMesh {
         log::debug!("Loading primitives for mesh {}", mesh.index());
         let primitives = mesh
             .primitives()
-            .map(|prim| GltfPrimitive::from_gltf(stage, prim, document, buffer_data, &materials))
+            .map(|prim| GltfPrimitive::from_gltf(stage, prim, buffer_data, &materials))
             .collect::<Vec<_>>();
         log::trace!("  loaded {} primitives", primitives.len());
         let weights = mesh.weights().unwrap_or(&[]).iter().copied();
@@ -769,7 +760,7 @@ impl GltfDocument {
         log::debug!("Loading meshes");
         let mut meshes = vec![];
         for mesh in document.meshes() {
-            let mesh = GltfMesh::from_gltf(stage, document, &buffer_data, &materials, mesh);
+            let mesh = GltfMesh::from_gltf(stage, &buffer_data, &materials, mesh);
             meshes.push(mesh);
         }
         log::trace!("  loaded {} meshes", meshes.len());
