@@ -1131,8 +1131,6 @@ pub struct NestedTransform {
 
 impl core::fmt::Debug for NestedTransform {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        let local_transform = self.get_local_transform();
-        let global_transform = self.get_global_transform();
         let children = self
             .children
             .read()
@@ -1148,8 +1146,7 @@ impl core::fmt::Debug for NestedTransform {
             .map(|nt| nt.global_transform.id);
         f.debug_struct("NestedTransform")
             .field("global_transform", &self.global_transform)
-            .field("local_transform", &local_transform)
-            .field("global_transform", &global_transform)
+            .field("local_transform", &self.local_transform)
             .field("children", &children)
             .field("parent", &parent)
             .finish()

@@ -643,6 +643,8 @@ impl GltfDocument {
                 nt.clone()
             } else {
                 let mut transform = stage.new_nested_transform();
+                let mat4 = Mat4::from_cols_array_2d(&node.transform().matrix());
+                transform.set_local_transform(mat4.into());
                 for node in node.children() {
                     let child_transform = transform_for_node(stage, cache, &node);
                     transform.add_child(&child_transform);
@@ -728,7 +730,7 @@ impl GltfDocument {
         }
 
         log::debug!("Creating materials");
-        let mut default_material = stage.new_hybrid(Material::default());
+        let default_material = stage.new_hybrid(Material::default());
         let mut materials = vec![];
         for gltf_material in document.materials() {
             let material_index = gltf_material.index();
