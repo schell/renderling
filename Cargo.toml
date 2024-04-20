@@ -16,7 +16,8 @@ resolver = "2"
 assert_approx_eq = "1.1.0"
 async-channel = "1.8"
 bytemuck = { version = "1.13.0", features = ["derive"] }
-crabslab = { version = "0.4.5", path = "../crabslab/crates/crabslab", default-features = false }
+crabslab = { version = "0.4.6", default-features = false }
+dagga = "0.2.1"
 env_logger = "0.10.0"
 futures-lite = "1.13"
 gltf = { git = 'https://github.com/gltf-rs/gltf.git', features = ["KHR_lights_punctual", "KHR_materials_unlit", "KHR_materials_emissive_strength", "extras"] }

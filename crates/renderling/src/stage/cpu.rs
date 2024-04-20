@@ -52,6 +52,240 @@ pub(crate) enum StageDrawStrategy {
     Direct(Vec<(Id<Renderlet>, Renderlet)>),
 }
 
+/// A "hybrid" type that lives on the CPU and the GPU.
+///
+/// Updates are syncronized to the GPU once per frame.
+pub struct Hybrid<T> {
+    cpu_value: Arc<RwLock<T>>,
+    id: Id<T>,
+    dirty: Arc<AtomicBool>,
+}
+
+impl<T: core::fmt::Debug> core::fmt::Debug for Hybrid<T> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct(&format!("Hybrid<{}>", std::any::type_name::<T>()))
+            .field("id", &self.id)
+            .field("cpu_value", &self.cpu_value.read().unwrap())
+            .field("dirty", &self.get_dirty())
+            .finish()
+    }
+}
+
+impl<T> Clone for Hybrid<T> {
+    fn clone(&self) -> Self {
+        Hybrid {
+            cpu_value: self.cpu_value.clone(),
+            id: self.id,
+            dirty: self.dirty.clone(),
+        }
+    }
+}
+
+impl<T> Hybrid<T> {
+    pub(crate) fn set_dirty(&self, dirty: bool) {
+        self.dirty
+            .store(dirty, std::sync::atomic::Ordering::Relaxed)
+    }
+
+    pub(crate) fn get_dirty(&self) -> bool {
+        self.dirty.load(std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
+impl<T: SlabItem + Clone + Send + Sync + 'static> Hybrid<T> {
+    pub fn new(stage: &mut Stage, value: T) -> Self {
+        let id = stage.allocate::<T>();
+        let hybrid = Self::new_preallocated(id, value);
+        stage.add_updates(hybrid.clone());
+
+        hybrid
+    }
+
+    pub(crate) fn new_preallocated(id: Id<T>, value: T) -> Self {
+        Self {
+            cpu_value: Arc::new(RwLock::new(value)),
+            id,
+            dirty: Arc::new(true.into()),
+        }
+    }
+
+    pub fn id(&self) -> Id<T> {
+        self.id
+    }
+
+    pub fn get(&self) -> T {
+        self.cpu_value.read().unwrap().clone()
+    }
+
+    pub fn modify(&self, f: impl FnOnce(&mut T)) {
+        let mut value_guard = self.cpu_value.write().unwrap();
+        self.set_dirty(true);
+        f(&mut value_guard);
+    }
+
+    pub fn set(&self, value: T) {
+        self.modify(move |old| {
+            *old = value;
+        })
+    }
+}
+
+/// A "hybrid" array type that lives on the CPU and the GPU.
+///
+/// Once created, the array cannot be resized.
+///
+/// Updates are syncronized to the GPU once per frame.
+pub struct HybridArray<T> {
+    cpu_value: Arc<RwLock<Vec<T>>>,
+    array: Array<T>,
+    updates: Arc<Mutex<Vec<SlabUpdate>>>,
+}
+
+impl<T: core::fmt::Debug> core::fmt::Debug for HybridArray<T> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct(&format!("HybridArray<{}>", std::any::type_name::<T>()))
+            .field("array", &self.array)
+            .field("cpu_value", &self.cpu_value.read().unwrap())
+            .finish()
+    }
+}
+
+impl<T> Clone for HybridArray<T> {
+    fn clone(&self) -> Self {
+        HybridArray {
+            cpu_value: self.cpu_value.clone(),
+            array: self.array,
+            updates: self.updates.clone(),
+        }
+    }
+}
+
+impl<T: SlabItem + Clone + Send + Sync + 'static> HybridArray<T> {
+    pub fn new(stage: &mut Stage, values: impl IntoIterator<Item = T>) -> Self {
+        let value = values.into_iter().collect::<Vec<_>>();
+        let array = stage.allocate_array::<T>(value.len());
+        let hybrid = Self::new_preallocated(array, value);
+        stage
+            .slab_updates
+            .write()
+            .unwrap()
+            .push(Box::new(hybrid.clone()));
+        hybrid
+    }
+
+    fn new_preallocated(array: Array<T>, values: Vec<T>) -> Self {
+        Self {
+            array,
+            updates: {
+                let mut elements = vec![0u32; T::SLAB_SIZE * array.len()];
+                elements.write_array(Array::new(0, array.len() as u32), &values);
+                Arc::new(Mutex::new(vec![SlabUpdate {
+                    array: array.into_u32_array(),
+                    elements,
+                    #[cfg(debug_assertions)]
+                    type_is: std::any::type_name::<Vec<T>>(),
+                }]))
+            },
+            cpu_value: Arc::new(RwLock::new(values)),
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        self.array.len()
+    }
+
+    pub fn array(&self) -> Array<T> {
+        self.array
+    }
+
+    pub fn at(&self, index: usize) -> Option<T> {
+        self.cpu_value.read().unwrap().get(index).cloned()
+    }
+
+    pub fn modify<S>(&self, index: usize, f: impl FnOnce(&mut T) -> S) -> Option<S> {
+        let mut value_guard = self.cpu_value.write().unwrap();
+        let t = value_guard.get_mut(index)?;
+        let output = Some(f(t));
+        let t = t.clone();
+        let id = self.array.at(index);
+        let array = Array::<u32>::new(id.inner(), T::SLAB_SIZE as u32);
+        let mut elements = vec![0u32; T::SLAB_SIZE];
+        elements.write(id, &t);
+        self.updates.lock().unwrap().push(SlabUpdate {
+            array,
+            elements,
+            #[cfg(debug_assertions)]
+            type_is: std::any::type_name::<T>(),
+        });
+        output
+    }
+
+    pub fn set_item(&self, index: usize, value: T) -> Option<T> {
+        self.modify(index, move |t| std::mem::replace(t, value))
+    }
+}
+
+pub struct SlabUpdate {
+    array: Array<u32>,
+    elements: Vec<u32>,
+    #[cfg(debug_assertions)]
+    type_is: &'static str,
+}
+
+pub trait UpdatesSlab: Send + Sync + 'static {
+    /// Returns all current updates, clearing the queue.
+    fn get_updates(&self) -> Vec<SlabUpdate>;
+
+    /// Returns the slab range of all possible updates.
+    fn array(&self) -> Array<u32>;
+
+    /// Returns the number of references remaiting in the wild.
+    fn strong_count(&self) -> usize;
+}
+
+impl<T: SlabItem + Clone + Send + Sync + 'static> UpdatesSlab for Hybrid<T> {
+    fn get_updates(&self) -> Vec<SlabUpdate> {
+        if self.dirty.swap(false, std::sync::atomic::Ordering::Relaxed) {
+            let t = self.get();
+            let array = Array::<u32>::new(self.id.inner(), T::SLAB_SIZE as u32);
+            let mut elements = vec![0u32; T::SLAB_SIZE];
+            elements.write(0u32.into(), &t);
+            vec![SlabUpdate {
+                array,
+                elements,
+                #[cfg(debug_assertions)]
+                type_is: std::any::type_name::<T>(),
+            }]
+        } else {
+            vec![]
+        }
+    }
+
+    fn strong_count(&self) -> usize {
+        Arc::strong_count(&self.cpu_value)
+    }
+
+    fn array(&self) -> Array<u32> {
+        Array::new(self.id.inner(), T::SLAB_SIZE as u32)
+    }
+}
+
+impl<T: SlabItem + Clone + Send + Sync + 'static> UpdatesSlab for HybridArray<T> {
+    fn get_updates(&self) -> Vec<SlabUpdate> {
+        let mut guard = self.updates.lock().unwrap();
+        let updates = std::mem::take(guard.as_mut());
+        updates
+    }
+
+    fn strong_count(&self) -> usize {
+        Arc::strong_count(&self.cpu_value)
+    }
+
+    fn array(&self) -> Array<u32> {
+        self.array.into_u32_array()
+    }
+}
+
 /// Represents an entire scene worth of rendering data.
 ///
 /// A clone of a stage is a reference to the same stage.
@@ -72,8 +306,9 @@ pub struct Stage {
     pub(crate) has_bloom: Arc<AtomicBool>,
     pub(crate) buffers_bindgroup: Arc<Mutex<Option<Arc<wgpu::BindGroup>>>>,
     pub(crate) textures_bindgroup: Arc<Mutex<Option<Arc<wgpu::BindGroup>>>>,
+    pub(crate) lights: HybridArray<Id<Light>>,
     pub(crate) draws: Arc<RwLock<StageDrawStrategy>>,
-    pub(crate) nested_transforms: Arc<RwLock<Vec<NestedTransform>>>,
+    pub(crate) slab_updates: Arc<RwLock<Vec<Box<dyn UpdatesSlab>>>>,
     pub(crate) device: Device,
     pub(crate) queue: Queue,
 }
@@ -121,17 +356,18 @@ impl Stage {
     /// Create a new stage.
     pub fn new(device: Device, queue: Queue, resolution: UVec2) -> Self {
         let atlas = Atlas::empty(&device, &queue);
-        let pbr_config = PbrConfig {
+        let mut slab = CpuSlab::new(WgpuBuffer::new(device.0.clone(), queue.0.clone(), 256));
+        let _ = slab.append(&PbrConfig {
             atlas_size: atlas.size,
             resolution,
             ..Default::default()
-        };
-        let mut s = Self {
-            slab: Arc::new(RwLock::new(CpuSlab::new(WgpuBuffer::new(
-                device.0.clone(),
-                queue.0.clone(),
-                256,
-            )))),
+        });
+        // TODO: make number of lights on the stage configurable
+        let lights_values = vec![Id::<Light>::NONE; 16];
+        let lights =
+            HybridArray::new_preallocated(slab.append_array(&lights_values), lights_values);
+        Self {
+            slab: Arc::new(RwLock::new(slab)),
             vertex_debug: Arc::new(RwLock::new(CpuSlab::new(WgpuBuffer::new(
                 device.0.clone(),
                 queue.0.clone(),
@@ -157,12 +393,11 @@ impl Stage {
             buffers_bindgroup: Default::default(),
             textures_bindgroup: Default::default(),
             draws: Arc::new(RwLock::new(StageDrawStrategy::Direct(vec![]))),
-            nested_transforms: Default::default(),
+            lights,
+            slab_updates: Default::default(),
             device,
             queue,
-        };
-        s.append(&pbr_config);
-        s
+        }
     }
 
     /// Set the debug mode.
@@ -753,24 +988,48 @@ impl Stage {
         NestedTransform::new(self)
     }
 
-    fn update_nested_transforms(&mut self) {
+    pub(crate) fn add_updates(&mut self, updates: impl UpdatesSlab) {
+        self.slab_updates.write().unwrap().push(Box::new(updates));
+    }
+
+    pub fn new_hybrid<T: SlabItem + Clone + Send + Sync + 'static>(
+        &mut self,
+        value: T,
+    ) -> Hybrid<T> {
+        Hybrid::new(self, value)
+    }
+
+    pub fn new_hybrid_array<T: SlabItem + Clone + Send + Sync + 'static>(
+        &mut self,
+        values: impl IntoIterator<Item = T>,
+    ) -> HybridArray<T> {
+        HybridArray::new(self, values)
+    }
+    fn write_updates(&mut self) {
         let writes = {
-            let guard = self.nested_transforms.read().unwrap();
-            guard
-                .iter()
-                .filter_map(|nested| {
-                    if nested.get_dirty() {
-                        let transform = nested.get_global_transform();
-                        nested.set_dirty(false);
-                        Some((nested.transform_id, transform))
-                    } else {
-                        None
-                    }
-                })
-                .collect::<Vec<_>>()
+            let mut writes = vec![];
+            let mut guard = self.slab_updates.write().unwrap();
+            guard.retain(|hybrid| {
+                writes.extend(hybrid.get_updates());
+                let count = hybrid.strong_count();
+                count > 1
+            });
+            writes
         };
-        for (id, transform) in writes.into_iter() {
-            self.write(id, &transform);
+        for (
+            i,
+            SlabUpdate {
+                array,
+                elements,
+                type_is,
+            },
+        ) in writes
+            .into_iter()
+            .filter(|u| !u.array.is_empty() && !u.array.is_null())
+            .enumerate()
+        {
+            log::trace!("writing update {i} {type_is} {array:?}");
+            self.write_array(array, &elements);
         }
     }
 }
@@ -794,7 +1053,7 @@ pub fn stage_render(
     } else {
         None
     };
-    stage.update_nested_transforms();
+    stage.write_updates();
     //let mut may_bloom_filter = if
     // stage.has_bloom.load(std::sync::atomic::Ordering::Relaxed) {    // UNWRAP:
     // if we can't acquire the lock we want to panic.    Some(stage.bloom.
@@ -864,53 +1123,59 @@ pub fn stage_render(
 /// Clones all reference the same nested transform.
 #[derive(Clone)]
 pub struct NestedTransform {
-    transform: Arc<Mutex<Transform>>,
-    transform_id: Id<Transform>,
-    dirty: Arc<AtomicBool>,
+    global_transform: Hybrid<Transform>,
+    local_transform: Arc<RwLock<Transform>>,
     children: Arc<RwLock<Vec<NestedTransform>>>,
     parent: Arc<RwLock<Option<NestedTransform>>>,
 }
 
+impl core::fmt::Debug for NestedTransform {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        let local_transform = self.get_local_transform();
+        let global_transform = self.get_global_transform();
+        let children = self
+            .children
+            .read()
+            .unwrap()
+            .iter()
+            .map(|nt| nt.global_transform.id)
+            .collect::<Vec<_>>();
+        let parent = self
+            .parent
+            .read()
+            .unwrap()
+            .as_ref()
+            .map(|nt| nt.global_transform.id);
+        f.debug_struct("NestedTransform")
+            .field("global_transform", &self.global_transform)
+            .field("local_transform", &local_transform)
+            .field("global_transform", &global_transform)
+            .field("children", &children)
+            .field("parent", &parent)
+            .finish()
+    }
+}
+
 impl NestedTransform {
     pub fn new(stage: &mut Stage) -> Self {
-        let transform = Transform::default();
-        let transform_id = stage.append(&transform);
+        let global_transform = Hybrid::new(stage, Transform::default());
         let nested = NestedTransform {
-            transform: Arc::new(Mutex::new(transform)),
-            transform_id,
-            dirty: Default::default(),
+            local_transform: Arc::new(RwLock::new(Transform::default())),
+            global_transform,
             children: Default::default(),
             parent: Default::default(),
         };
-        stage
-            .nested_transforms
-            .write()
-            .unwrap()
-            .push(nested.clone());
         nested
     }
 
-    fn set_dirty(&self, dirty: bool) -> bool {
-        let prev = self.dirty.swap(dirty, std::sync::atomic::Ordering::Relaxed);
-        if dirty {
-            for child in self.children.read().unwrap().iter() {
-                let _ = child.set_dirty(dirty);
-            }
-        }
-        prev
-    }
-
-    fn get_dirty(&self) -> bool {
-        self.dirty.load(std::sync::atomic::Ordering::Relaxed)
-    }
-
     pub fn set_local_transform(&mut self, transform: Transform) {
-        *self.transform.lock().unwrap() = transform;
-        self.set_dirty(true);
+        *self.local_transform.write().unwrap() = transform;
+        let global_transform = self.get_global_transform();
+        self.global_transform.set(global_transform);
     }
 
     pub fn get_local_transform(&self) -> Transform {
-        *self.transform.lock().unwrap()
+        *self.local_transform.read().unwrap()
     }
 
     pub fn get_global_transform(&self) -> Transform {
@@ -923,20 +1188,22 @@ impl NestedTransform {
         Transform::from(Mat4::from(parent_transform) * Mat4::from(transform))
     }
 
-    pub fn transform_id(&self) -> Id<Transform> {
-        self.transform_id
+    pub fn global_transform_id(&self) -> Id<Transform> {
+        self.global_transform.id
     }
 
     pub fn add_child(&mut self, node: &NestedTransform) {
-        node.set_dirty(true);
         *node.parent.write().unwrap() = Some(self.clone());
+        let global_transform = node.get_global_transform();
+        node.global_transform.set(global_transform);
         self.children.write().unwrap().push(node.clone());
     }
 
     pub fn remove_child(&mut self, node: &NestedTransform) {
         self.children.write().unwrap().retain_mut(|child| {
-            if child.transform_id() == node.transform_id() {
-                node.set_dirty(true);
+            if child.global_transform.id == node.global_transform.id {
+                let local_transform = node.get_local_transform();
+                node.global_transform.set(local_transform);
                 let _ = node.parent.write().unwrap().take();
                 false
             } else {

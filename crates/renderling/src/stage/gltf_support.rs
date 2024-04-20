@@ -1,14 +1,18 @@
 //! Gltf support for the [`Stage`](crate::Stage).
-use crabslab::{Array, GrowableSlab, Slab};
-use glam::{Quat, Vec2, Vec3, Vec4};
+use std::collections::HashMap;
+
+use crabslab::{Array, GrowableSlab, Id, Slab};
+use glam::{Mat4, Quat, Vec2, Vec3, Vec4};
 use snafu::{OptionExt, ResultExt, Snafu};
 
-use super::*;
 use crate::{
-    gltf::*,
-    pbr::{light::LightStyle, Material, PbrConfig},
+    pbr::{
+        light::{DirectionalLight, Light, LightStyle, PointLight, SpotLight},
+        Material, PbrConfig,
+    },
     stage::Vertex,
-    AtlasImage, AtlasTexture, Camera, RepackPreview, TextureAddressMode, TextureModes,
+    AtlasImage, AtlasTexture, Camera, Hybrid, HybridArray, NestedTransform, Renderlet,
+    RepackPreview, Stage, TextureAddressMode, TextureModes, Transform,
 };
 
 #[derive(Debug, Snafu)]
@@ -30,6 +34,21 @@ pub enum StageGltfError {
         index: usize,
         tex_id: Id<AtlasTexture>,
     },
+
+    #[snafu(display("Missing material with index {index}"))]
+    MissingMaterial { index: usize },
+
+    #[snafu(display("Missing primitive with index {index}"))]
+    MissingPrimitive { index: usize },
+
+    #[snafu(display("Missing mesh with index {index}"))]
+    MissingMesh { index: usize },
+
+    #[snafu(display("Missing node with index {index}"))]
+    MissingNode { index: usize },
+
+    #[snafu(display("Missing light with index {index}"))]
+    MissingLight { index: usize },
 
     #[snafu(display("Unsupported primitive mode: {:?}", mode))]
     PrimitiveMode { mode: gltf::mesh::Mode },
@@ -78,11 +97,13 @@ pub fn gltf_light_intensity_units(kind: gltf::khr_lights_punctual::Kind) -> &'st
     }
 }
 
-fn texture_address_mode_from_gltf(mode: gltf::texture::WrappingMode) -> TextureAddressMode {
-    match mode {
-        gltf::texture::WrappingMode::ClampToEdge => TextureAddressMode::ClampToEdge,
-        gltf::texture::WrappingMode::MirroredRepeat => TextureAddressMode::MirroredRepeat,
-        gltf::texture::WrappingMode::Repeat => TextureAddressMode::Repeat,
+impl TextureAddressMode {
+    fn from_gltf(mode: gltf::texture::WrappingMode) -> TextureAddressMode {
+        match mode {
+            gltf::texture::WrappingMode::ClampToEdge => TextureAddressMode::ClampToEdge,
+            gltf::texture::WrappingMode::MirroredRepeat => TextureAddressMode::MirroredRepeat,
+            gltf::texture::WrappingMode::Repeat => TextureAddressMode::Repeat,
+        }
     }
 }
 
@@ -103,131 +124,82 @@ pub fn get_vertex_count(primitive: &gltf::Primitive<'_>) -> u32 {
     }
 }
 
-pub fn atlas_texture_from_gltf(
-    texture: gltf::Texture,
-    repacking: &mut RepackPreview,
-    atlas_offset: usize,
-) -> Result<AtlasTexture, StageGltfError> {
-    let image_index = texture.source().index();
-    let mode_s = texture_address_mode_from_gltf(texture.sampler().wrap_s());
-    let mode_t = texture_address_mode_from_gltf(texture.sampler().wrap_t());
-    let (offset_px, size_px) =
-        repacking
-            .get_frame(image_index + atlas_offset)
-            .context(MissingImageSnafu {
-                index: image_index,
-                offset: atlas_offset,
-            })?;
-    Ok(AtlasTexture {
-        offset_px,
-        size_px,
-        modes: TextureModes {
-            s: mode_s,
-            t: mode_t,
-        },
-        atlas_index: (image_index + atlas_offset) as u32,
-    })
+impl AtlasTexture {
+    pub fn from_gltf(
+        texture: gltf::Texture,
+        repacking: &mut RepackPreview,
+        atlas_offset: usize,
+    ) -> Result<AtlasTexture, StageGltfError> {
+        let image_index = texture.source().index();
+        let mode_s = TextureAddressMode::from_gltf(texture.sampler().wrap_s());
+        let mode_t = TextureAddressMode::from_gltf(texture.sampler().wrap_t());
+        let (offset_px, size_px) =
+            repacking
+                .get_frame(image_index + atlas_offset)
+                .context(MissingImageSnafu {
+                    index: image_index,
+                    offset: atlas_offset,
+                })?;
+        Ok(AtlasTexture {
+            offset_px,
+            size_px,
+            modes: TextureModes {
+                s: mode_s,
+                t: mode_t,
+            },
+            atlas_index: (image_index + atlas_offset) as u32,
+        })
+    }
 }
 
-/// Convert a [`gltf::Material`] to a [`Material`].
-pub fn material_from_gltf(
-    material: gltf::Material,
-    repacking: &mut RepackPreview,
-    textures: Array<AtlasTexture>,
-    atlas_offset: usize,
-) -> Result<Material, StageGltfError> {
-    let name = material.name().map(String::from);
-    log::trace!("loading material {:?} {name:?}", material.index());
-    let pbr = material.pbr_metallic_roughness();
-    let material = if material.unlit() {
-        log::trace!("  is unlit");
-        let (albedo_texture, albedo_tex_coord) = if let Some(info) = pbr.base_color_texture() {
-            let texture = info.texture();
-            let index = texture.index();
-            let tex_id = textures.at(index);
-            // The index of the image in the original gltf document
-            let image_index = texture.source().index();
-            // Update the image to ensure it gets transferred correctly
-            let image = repacking
-                .get_mut(atlas_offset + image_index)
-                .context(MissingImageSnafu {
-                    index: image_index,
-                    offset: atlas_offset,
-                })?
-                .as_scene_img_mut()
-                .context(WrongImageSnafu {
-                    index: image_index,
-                    offset: atlas_offset,
-                })?;
-            image.apply_linear_transfer = true;
-            (tex_id, info.tex_coord())
-        } else {
-            (Id::NONE, 0)
-        };
-
-        Material {
-            albedo_texture,
-            albedo_tex_coord,
-            albedo_factor: pbr.base_color_factor().into(),
-            ..Default::default()
-        }
-    } else {
-        log::trace!("  is pbr");
-        let albedo_factor: Vec4 = pbr.base_color_factor().into();
-        let (albedo_texture, albedo_tex_coord) = if let Some(info) = pbr.base_color_texture() {
-            let texture = info.texture();
-            let index = texture.index();
-            let tex_id = textures.at(index);
-            let image_index = texture.source().index();
-            // Update the image to ensure it gets transferred correctly
-            let image = repacking
-                .get_mut(image_index + atlas_offset)
-                .context(MissingImageSnafu {
-                    index: image_index,
-                    offset: atlas_offset,
-                })?
-                .as_scene_img_mut()
-                .context(WrongImageSnafu {
-                    index: image_index,
-                    offset: atlas_offset,
-                })?;
-            image.apply_linear_transfer = true;
-            (tex_id, info.tex_coord())
-        } else {
-            (Id::NONE, 0)
-        };
-
-        let (
-            metallic_factor,
-            roughness_factor,
-            metallic_roughness_texture,
-            metallic_roughness_tex_coord,
-        ) = if let Some(info) = pbr.metallic_roughness_texture() {
-            let index = info.texture().index();
-            let tex_id = textures.at(index);
-            (1.0, 1.0, tex_id, info.tex_coord())
-        } else {
-            (pbr.metallic_factor(), pbr.roughness_factor(), Id::NONE, 0)
-        };
-
-        let (normal_texture, normal_tex_coord) = if let Some(norm_tex) = material.normal_texture() {
-            let tex_id = textures.at(norm_tex.texture().index());
-            (tex_id, norm_tex.tex_coord())
-        } else {
-            (Id::NONE, 0)
-        };
-
-        let (ao_strength, ao_texture, ao_tex_coord) =
-            if let Some(occlusion_tex) = material.occlusion_texture() {
-                let tex_id = textures.at(occlusion_tex.texture().index());
-                (occlusion_tex.strength(), tex_id, occlusion_tex.tex_coord())
+impl Material {
+    /// Convert a [`gltf::Material`] to a [`Material`].
+    pub fn from_gltf(
+        material: gltf::Material,
+        repacking: &mut RepackPreview,
+        textures: Array<AtlasTexture>,
+        atlas_offset: usize,
+    ) -> Result<Material, StageGltfError> {
+        let name = material.name().map(String::from);
+        log::trace!("loading material {:?} {name:?}", material.index());
+        let pbr = material.pbr_metallic_roughness();
+        let material = if material.unlit() {
+            log::trace!("  is unlit");
+            let (albedo_texture, albedo_tex_coord) = if let Some(info) = pbr.base_color_texture() {
+                let texture = info.texture();
+                let index = texture.index();
+                let tex_id = textures.at(index);
+                // The index of the image in the original gltf document
+                let image_index = texture.source().index();
+                // Update the image to ensure it gets transferred correctly
+                let image = repacking
+                    .get_mut(atlas_offset + image_index)
+                    .context(MissingImageSnafu {
+                        index: image_index,
+                        offset: atlas_offset,
+                    })?
+                    .as_scene_img_mut()
+                    .context(WrongImageSnafu {
+                        index: image_index,
+                        offset: atlas_offset,
+                    })?;
+                image.apply_linear_transfer = true;
+                (tex_id, info.tex_coord())
             } else {
-                (0.0, Id::NONE, 0)
+                (Id::NONE, 0)
             };
 
-        let (emissive_texture, emissive_tex_coord) =
-            if let Some(emissive_tex) = material.emissive_texture() {
-                let texture = emissive_tex.texture();
+            Material {
+                albedo_texture,
+                albedo_tex_coord,
+                albedo_factor: pbr.base_color_factor().into(),
+                ..Default::default()
+            }
+        } else {
+            log::trace!("  is pbr");
+            let albedo_factor: Vec4 = pbr.base_color_factor().into();
+            let (albedo_texture, albedo_tex_coord) = if let Some(info) = pbr.base_color_texture() {
+                let texture = info.texture();
                 let index = texture.index();
                 let tex_id = textures.at(index);
                 let image_index = texture.source().index();
@@ -244,623 +216,317 @@ pub fn material_from_gltf(
                         offset: atlas_offset,
                     })?;
                 image.apply_linear_transfer = true;
-                (tex_id, emissive_tex.tex_coord())
+                (tex_id, info.tex_coord())
             } else {
                 (Id::NONE, 0)
             };
-        let emissive_factor = Vec3::from(material.emissive_factor());
-        let emissive_strength_multiplier = material.emissive_strength().unwrap_or(1.0);
 
-        Material {
-            albedo_factor,
-            metallic_factor,
-            roughness_factor,
-            albedo_texture,
-            metallic_roughness_texture,
-            normal_texture,
-            ao_texture,
-            albedo_tex_coord,
-            metallic_roughness_tex_coord,
-            normal_tex_coord,
-            ao_tex_coord,
-            ao_strength,
-            emissive_factor,
-            emissive_strength_multiplier,
-            emissive_texture,
-            emissive_tex_coord,
-            has_lighting: true,
-            ..Default::default()
+            let (
+                metallic_factor,
+                roughness_factor,
+                metallic_roughness_texture,
+                metallic_roughness_tex_coord,
+            ) = if let Some(info) = pbr.metallic_roughness_texture() {
+                let index = info.texture().index();
+                let tex_id = textures.at(index);
+                (1.0, 1.0, tex_id, info.tex_coord())
+            } else {
+                (pbr.metallic_factor(), pbr.roughness_factor(), Id::NONE, 0)
+            };
+
+            let (normal_texture, normal_tex_coord) =
+                if let Some(norm_tex) = material.normal_texture() {
+                    let tex_id = textures.at(norm_tex.texture().index());
+                    (tex_id, norm_tex.tex_coord())
+                } else {
+                    (Id::NONE, 0)
+                };
+
+            let (ao_strength, ao_texture, ao_tex_coord) =
+                if let Some(occlusion_tex) = material.occlusion_texture() {
+                    let tex_id = textures.at(occlusion_tex.texture().index());
+                    (occlusion_tex.strength(), tex_id, occlusion_tex.tex_coord())
+                } else {
+                    (0.0, Id::NONE, 0)
+                };
+
+            let (emissive_texture, emissive_tex_coord) =
+                if let Some(emissive_tex) = material.emissive_texture() {
+                    let texture = emissive_tex.texture();
+                    let index = texture.index();
+                    let tex_id = textures.at(index);
+                    let image_index = texture.source().index();
+                    // Update the image to ensure it gets transferred correctly
+                    let image = repacking
+                        .get_mut(image_index + atlas_offset)
+                        .context(MissingImageSnafu {
+                            index: image_index,
+                            offset: atlas_offset,
+                        })?
+                        .as_scene_img_mut()
+                        .context(WrongImageSnafu {
+                            index: image_index,
+                            offset: atlas_offset,
+                        })?;
+                    image.apply_linear_transfer = true;
+                    (tex_id, emissive_tex.tex_coord())
+                } else {
+                    (Id::NONE, 0)
+                };
+            let emissive_factor = Vec3::from(material.emissive_factor());
+            let emissive_strength_multiplier = material.emissive_strength().unwrap_or(1.0);
+
+            Material {
+                albedo_factor,
+                metallic_factor,
+                roughness_factor,
+                albedo_texture,
+                metallic_roughness_texture,
+                normal_texture,
+                ao_texture,
+                albedo_tex_coord,
+                metallic_roughness_tex_coord,
+                normal_tex_coord,
+                ao_tex_coord,
+                ao_strength,
+                emissive_factor,
+                emissive_strength_multiplier,
+                emissive_texture,
+                emissive_tex_coord,
+                has_lighting: true,
+                ..Default::default()
+            }
+        };
+        Ok(material)
+    }
+}
+
+#[derive(Debug)]
+pub struct GltfPrimitive {
+    pub indices: HybridArray<u32>,
+    pub vertices: HybridArray<Vertex>,
+    pub bounding_box: (Vec3, Vec3),
+    pub material: Id<Material>,
+}
+
+impl GltfPrimitive {
+    pub fn from_gltf(
+        stage: &mut Stage,
+        primitive: gltf::Primitive,
+        document: &gltf::Document,
+        buffer_data: &[gltf::buffer::Data],
+        materials: &HybridArray<Material>,
+    ) -> Self {
+        fn log_accessor(gltf_accessor: gltf::Accessor<'_>) {
+            log::trace!("      count: {}", gltf_accessor.count());
+            log::trace!("      size: {}", gltf_accessor.size());
+            log::trace!("      data_type: {:?}", gltf_accessor.data_type());
+            log::trace!("     dimensions: {:?}", gltf_accessor.dimensions());
         }
-    };
-    Ok(material)
-}
 
-pub fn make_accessor(accessor: gltf::Accessor<'_>, views: &Array<GltfBufferView>) -> GltfAccessor {
-    let size = accessor.size() as u32;
-    let buffer_view = accessor.view().unwrap();
-    let offset = accessor.offset() as u32;
-    let count = accessor.count() as u32;
-    let view = views.at(buffer_view.index());
-    let component_type = match accessor.data_type() {
-        gltf::accessor::DataType::I8 => DataType::I8,
-        gltf::accessor::DataType::U8 => DataType::U8,
-        gltf::accessor::DataType::I16 => DataType::I16,
-        gltf::accessor::DataType::U16 => DataType::U16,
-        gltf::accessor::DataType::U32 => DataType::U32,
-        gltf::accessor::DataType::F32 => DataType::F32,
-    };
-    let dimensions = match accessor.dimensions() {
-        gltf::accessor::Dimensions::Scalar => Dimensions::Scalar,
-        gltf::accessor::Dimensions::Vec2 => Dimensions::Vec2,
-        gltf::accessor::Dimensions::Vec3 => Dimensions::Vec3,
-        gltf::accessor::Dimensions::Vec4 => Dimensions::Vec4,
-        gltf::accessor::Dimensions::Mat2 => Dimensions::Mat2,
-        gltf::accessor::Dimensions::Mat3 => Dimensions::Mat3,
-        gltf::accessor::Dimensions::Mat4 => Dimensions::Mat4,
-    };
-    let normalized = accessor.normalized();
-    GltfAccessor {
-        size,
-        view,
-        count,
-        offset,
-        data_type: component_type,
-        dimensions,
-        normalized,
-    }
-}
+        let material = primitive
+            .material()
+            .index()
+            .map(|index| materials.array().at(index))
+            .unwrap_or_default();
 
-pub fn renderlet_from_gltf(
-    primitive: gltf::Primitive,
-    document: &gltf::Document,
-    buffer_data: &[gltf::buffer::Data],
-    slab: &mut impl GrowableSlab,
-    materials: Array<Material>,
-) -> Renderlet {
-    fn log_accessor(gltf_accessor: gltf::Accessor<'_>) {
-        log::trace!("      count: {}", gltf_accessor.count());
-        log::trace!("      size: {}", gltf_accessor.size());
-        log::trace!("      data_type: {:?}", gltf_accessor.data_type());
-        log::trace!("     dimensions: {:?}", gltf_accessor.dimensions());
-    }
+        let reader = primitive.reader(|buffer| {
+            let data = buffer_data.get(buffer.index())?;
+            Some(data.0.as_slice())
+        });
 
-    let material = primitive
-        .material()
-        .index()
-        .map(|i| materials.at(i))
-        .unwrap_or(Id::NONE);
+        let indices = reader
+            .read_indices()
+            .map(|is| {
+                let indices = is.into_u32().collect::<Vec<_>>();
+                assert_eq!(indices.len() % 3, 0, "indices do not form triangles");
+                indices
+            })
+            .unwrap_or_default();
 
-    let reader = primitive.reader(|buffer| {
-        let data = buffer_data.get(buffer.index())?;
-        Some(data.0.as_slice())
-    });
+        let positions = reader
+            .read_positions()
+            .into_iter()
+            .flat_map(|ps| ps.map(Vec3::from))
+            .collect::<Vec<_>>();
 
-    let indices = reader
-        .read_indices()
-        .map(|is| {
-            let indices = is.into_u32().collect::<Vec<_>>();
-            assert_eq!(indices.len() % 3, 0, "indices do not form triangles");
-            slab.append_array(&indices)
-        })
-        .unwrap_or_default();
+        let uv0s = reader
+            .read_tex_coords(0)
+            .into_iter()
+            .flat_map(|uvs| uvs.into_f32().map(Vec2::from))
+            .chain(std::iter::repeat(Vec2::ZERO))
+            .take(positions.len())
+            .collect::<Vec<_>>();
 
-    let positions = reader
-        .read_positions()
-        .into_iter()
-        .flat_map(|ps| ps.map(Vec3::from))
-        .collect::<Vec<_>>();
+        let uv1s = reader
+            .read_tex_coords(0)
+            .into_iter()
+            .flat_map(|uvs| uvs.into_f32().map(Vec2::from))
+            .chain(std::iter::repeat(Vec2::ZERO))
+            .take(positions.len());
 
-    let uv0s = reader
-        .read_tex_coords(0)
-        .into_iter()
-        .flat_map(|uvs| uvs.into_f32().map(Vec2::from))
-        .chain(std::iter::repeat(Vec2::ZERO))
-        .take(positions.len())
-        .collect::<Vec<_>>();
-
-    let uv1s = reader
-        .read_tex_coords(0)
-        .into_iter()
-        .flat_map(|uvs| uvs.into_f32().map(Vec2::from))
-        .chain(std::iter::repeat(Vec2::ZERO))
-        .take(positions.len());
-
-    let normals = reader
-        .read_normals()
-        .map(|ns| {
+        let mut normals = vec![Vec3::Z; positions.len()];
+        if let Some(ns) = reader.read_normals() {
             let ns = ns.map(Vec3::from).collect::<Vec<_>>();
             debug_assert_eq!(positions.len(), ns.len());
-            ns
-        })
-        .unwrap_or_else(|| {
-            let mut normals_were_generated = false;
+            normals = ns;
+        } else {
             log::trace!("    generating normals");
-            // Generate the normals
-            normals_were_generated = true;
-            positions
-                .chunks(3)
-                .flat_map(|chunk| match chunk {
-                    [a, b, c] => {
-                        let n = Vertex::generate_normal(*a, *b, *c);
-                        [n, n, n]
-                    }
-                    _ => panic!("not triangles!"),
-                })
-                .collect::<Vec<_>>()
-        });
 
-    let mut tangents_were_generated = false;
-    let tangents = reader
-        .read_tangents()
-        .map(|ts| {
+            let indices = if indices.is_empty() {
+                (0..positions.len() as u32).collect::<Vec<_>>()
+            } else {
+                indices.iter().copied().collect::<Vec<_>>()
+            };
+
+            indices.chunks(3).for_each(|chunk| match chunk {
+                [i, j, k] => {
+                    let a = positions[*i as usize];
+                    let b = positions[*j as usize];
+                    let c = positions[*k as usize];
+                    let n = Vertex::generate_normal(a, b, c);
+                    normals[*i as usize] = n;
+                    normals[*j as usize] = n;
+                    normals[*k as usize] = n;
+                }
+                _ => panic!("not triangles!"),
+            });
+        }
+
+        let mut tangents = vec![Vec4::ZERO; positions.len()];
+        if let Some(ts) = reader.read_tangents() {
             let ts = ts.map(Vec4::from).collect::<Vec<_>>();
             debug_assert_eq!(positions.len(), ts.len());
-            ts
-        })
-        .unwrap_or_else(|| {
+            tangents = ts;
+        } else {
             log::trace!("    generating tangents");
-            tangents_were_generated = true;
-            let p_uvs = positions
-                .iter()
-                .copied()
-                .zip(
-                    uv0s.iter()
-                        .copied()
-                        .chain(std::iter::repeat(Vec2::ZERO).cycle()),
-                )
-                .collect::<Vec<_>>();
-            p_uvs
-                .chunks(3)
-                .flat_map(|chunk| match chunk {
-                    [(a, a_uv), (b, b_uv), (c, c_uv)] => {
-                        let t = Vertex::generate_tangent(*a, *a_uv, *b, *b_uv, *c, *c_uv);
-                        [t, t, t]
-                    }
-                    _ => panic!("not triangles!"),
-                })
-                .collect::<Vec<_>>()
-        });
-    let colors = reader
-        .read_colors(0)
-        .into_iter()
-        .flat_map(|cs| cs.into_rgba_f32().map(Vec4::from))
-        .chain(std::iter::repeat(Vec4::ONE))
-        .take(positions.len());
-
-    let joints = reader
-        .read_joints(0)
-        .into_iter()
-        .flat_map(|js| {
-            js.into_u16()
-                .map(|[a, b, c, d]| [a as u32, b as u32, c as u32, d as u32])
-        })
-        .chain(std::iter::repeat([u32::MAX; 4]))
-        .take(positions.len());
-
-    let weights = reader
-        .read_weights(0)
-        .into_iter()
-        .flat_map(|ws| ws.into_f32())
-        .chain(std::iter::repeat([f32::MAX; 4]))
-        .take(positions.len());
-    let vs = joints.zip(weights);
-    let vs = colors.zip(vs);
-    let vs = tangents.into_iter().zip(vs);
-    let vs = normals.into_iter().zip(vs);
-    let vs = uv1s.zip(vs);
-    let vs = uv0s.into_iter().zip(vs);
-    let vs = positions.into_iter().zip(vs);
-    let vertices = vs
-        .map(
-            |(position, (uv0, (uv1, (normal, (tangent, (color, (joints, weights)))))))| Vertex {
-                position,
-                color,
-                uv0,
-                uv1,
-                normal,
-                tangent,
-                joints,
-                weights,
-            },
-        )
-        .collect::<Vec<_>>();
-    let vertices = slab.append_array(&vertices);
-    Renderlet {
-        vertices,
-        indices,
-        material,
-        ..Default::default()
-    }
-}
-
-#[derive(Clone, Default)]
-pub struct StagedGltfMesh {
-    pub primitives: Vec<Renderlet>,
-    pub weights: Array<f32>,
-}
-
-impl Stage {
-    pub fn load_gltf_document_from_path(
-        &mut self,
-        path: impl AsRef<std::path::Path>,
-    ) -> Result<(gltf::Document, GltfDocument), StageGltfError> {
-        let (document, buffers, images) = gltf::import(path)?;
-        let gpu_doc = self.load_gltf_document(&document, buffers, images)?;
-        Ok((document, gpu_doc))
-    }
-
-    pub fn load_gltf_document(
-        &mut self,
-        document: &gltf::Document,
-        buffer_data: Vec<gltf::buffer::Data>,
-        images: Vec<gltf::image::Data>,
-    ) -> Result<GltfDocument, StageGltfError> {
-        log::trace!("Loading buffers into the GPU");
-        let buffers = self.allocate_array::<GltfBuffer>(buffer_data.len());
-        for (i, buffer) in buffer_data.iter().enumerate() {
-            let slice: &[u32] = bytemuck::cast_slice(&buffer);
-            let buffer = self.append_array(slice);
-            self.write(buffers.at(i), &GltfBuffer(buffer));
-        }
-
-        log::trace!("Loading views into the GPU");
-        let views = self.allocate_array(document.views().len());
-        for view in document.views() {
-            let buffer = buffers.at(view.buffer().index());
-            let offset = view.offset() as u32;
-            let length = view.length() as u32;
-            let stride = view.stride().unwrap_or_default() as u32;
-            let id = views.at(view.index());
-            let gltf_view = GltfBufferView {
-                buffer,
-                offset,
-                length,
-                stride,
-            };
-            self.write(id, &gltf_view);
-        }
-
-        log::trace!("Loading accessors into the GPU");
-        let accessors = document
-            .accessors()
-            .enumerate()
-            .map(|(i, accessor)| {
-                let a = make_accessor(accessor, &views);
-                log::trace!("  accessor {i}: {a:#?}",);
-                a
-            })
-            .collect::<Vec<_>>();
-        let accessors = self.append_array(&accessors);
-
-        log::trace!("Loading cameras into the GPU");
-        let cameras = document
-            .cameras()
-            .map(|camera| match camera.projection() {
-                gltf::camera::Projection::Perspective(perspective) => {
-                    let aspect_ratio = perspective.aspect_ratio().unwrap_or(1.0);
-                    let yfov = perspective.yfov();
-                    let zfar = perspective.zfar().unwrap_or(f32::MAX);
-                    let znear = perspective.znear();
-                    let camera = GltfCamera::Perspective {
-                        aspect_ratio,
-                        yfov,
-                        zfar,
-                        znear,
-                    };
-                    camera
-                }
-                gltf::camera::Projection::Orthographic(orthographic) => {
-                    let xmag = orthographic.xmag();
-                    let ymag = orthographic.ymag();
-                    let zfar = orthographic.zfar();
-                    let znear = orthographic.znear();
-                    let camera = GltfCamera::Orthographic {
-                        xmag,
-                        ymag,
-                        zfar,
-                        znear,
-                    };
-                    camera
-                }
-            })
-            .collect::<Vec<_>>();
-        let cameras = self.append_array(&cameras);
-
-        // We need the (re)packing of the atlas before we marshal the images into the
-        // GPU because we need their frames for textures and materials, but we
-        // need to know if the materials require us to apply a linear transfer.
-        // So we'll get the preview repacking first, then update the frames in
-        // the textures.
-        let (mut repacking, atlas_offset) = {
-            // UNWRAP: if we can't lock the atlas, we want to panic.
-            let atlas = self.atlas.read().unwrap();
-            let atlas_offset = atlas.rects.len();
-            (
-                atlas
-                    .repack_preview(&self.device, images.into_iter().map(AtlasImage::from))
-                    .context(AtlasSnafu)?,
-                atlas_offset,
-            )
-        };
-
-        log::debug!("Creating atlas textures");
-        let textures = self.allocate_array::<AtlasTexture>(document.textures().len());
-        for (i, texture) in document.textures().enumerate() {
-            let texture = atlas_texture_from_gltf(texture, &mut repacking, atlas_offset)?;
-            let texture_id = textures.at(i);
-            log::trace!("  texture {i} {texture_id:?}: {texture:#?}");
-            self.write(texture_id, &texture);
-        }
-
-        log::debug!("Creating materials");
-        let mut default_material = Id::<Material>::NONE;
-        let materials = self.allocate_array::<Material>(document.materials().len());
-        for material in document.materials() {
-            let material_id = if let Some(index) = material.index() {
-                materials.at(index)
+            let indices = if indices.is_empty() {
+                (0..positions.len() as u32).collect::<Vec<_>>()
             } else {
-                // Allocate some extra space for this default material
-                default_material = self.allocate::<Material>();
-                default_material
+                indices.iter().copied().collect::<Vec<_>>()
             };
-            let material = material_from_gltf(material, &mut repacking, textures, atlas_offset)?;
-            log::trace!("  material {material_id:?}: {material:#?}",);
-            self.write(material_id, &material);
-        }
 
-        let number_of_new_images = repacking.new_images_len();
-        if number_of_new_images > 0 {
-            log::trace!("Packing the atlas");
-            log::trace!("  adding {number_of_new_images} new images",);
-            // UNWRAP: if we can't lock the atlas, we want to panic.
-            let mut atlas = self.atlas.write().unwrap();
-            let new_atlas = atlas
-                .commit_repack_preview(&self.device, &self.queue, repacking)
-                .context(AtlasSnafu)?;
-            let size = new_atlas.size;
-            *atlas = new_atlas;
-            // The bindgroup will have to be remade
-            let _ = self.textures_bindgroup.lock().unwrap().take();
-            // The atlas size must be reset
-            let size_id = PbrConfig::offset_of_atlas_size().into();
-            self.slab.write().unwrap().write(size_id, &size);
-        }
+            indices.chunks(3).for_each(|chunk| match chunk {
+                [i, j, k] => {
+                    let a = positions[*i as usize];
+                    let b = positions[*j as usize];
+                    let c = positions[*k as usize];
+                    let a_uv = uv0s[*i as usize];
+                    let b_uv = uv0s[*j as usize];
+                    let c_uv = uv0s[*k as usize];
 
-        log::trace!("Loading meshes");
-        let mut meshes = vec![];
-        for mesh in document.meshes() {
-            let mut staged_mesh = StagedGltfMesh::default();
-            // Each primitive becomes a Renderlet
-            for (j, primitive) in mesh.primitives().enumerate() {
-                log::trace!("  primitive {j}");
-                debug_assert_eq!(j, primitive.index());
-                let renderlet =
-                    renderlet_from_gltf(primitive, document, &buffer_data, self, materials);
-                staged_mesh.primitives.push(renderlet);
-            }
-            let weights = mesh.weights().unwrap_or(&[]);
-            staged_mesh.weights = self.append_array(weights);
-            meshes.push(staged_mesh);
+                    let t = Vertex::generate_tangent(a, a_uv, b, b_uv, c, c_uv);
+                    tangents[*i as usize] = t;
+                    tangents[*j as usize] = t;
+                    tangents[*k as usize] = t;
+                }
+                _ => panic!("not triangles!"),
+            });
         }
+        let colors = reader
+            .read_colors(0)
+            .into_iter()
+            .flat_map(|cs| cs.into_rgba_f32().map(Vec4::from))
+            .chain(std::iter::repeat(Vec4::ONE))
+            .take(positions.len());
 
-        log::trace!("Loading lights");
-        let lights_array = self.allocate_array::<GltfLight>(
-            document
-                .lights()
-                .map(|lights| lights.len())
-                .unwrap_or_default(),
-        );
-        if let Some(lights) = document.lights() {
-            for light in lights {
-                let light_index = light.index();
-                let color = Vec3::from(light.color());
-                let range = light.range().unwrap_or(f32::MAX);
-                let intensity = light.intensity();
-                let kind = match light.kind() {
-                    gltf::khr_lights_punctual::Kind::Directional => GltfLightKind::Directional,
-                    gltf::khr_lights_punctual::Kind::Point => GltfLightKind::Point,
-                    gltf::khr_lights_punctual::Kind::Spot {
-                        inner_cone_angle,
-                        outer_cone_angle,
-                    } => GltfLightKind::Spot {
-                        inner_cone_angle,
-                        outer_cone_angle,
-                    },
-                };
-                self.write(
-                    lights_array.at(light_index),
-                    &GltfLight {
+        let joints = reader
+            .read_joints(0)
+            .into_iter()
+            .flat_map(|js| {
+                js.into_u16()
+                    .map(|[a, b, c, d]| [a as u32, b as u32, c as u32, d as u32])
+            })
+            .chain(std::iter::repeat([u32::MAX; 4]))
+            .take(positions.len());
+
+        let weights = reader
+            .read_weights(0)
+            .into_iter()
+            .flat_map(|ws| ws.into_f32())
+            .chain(std::iter::repeat([f32::MAX; 4]))
+            .take(positions.len());
+        let vs = joints.zip(weights);
+        let vs = colors.zip(vs);
+        let vs = tangents.into_iter().zip(vs);
+        let vs = normals.into_iter().zip(vs);
+        let vs = uv1s.zip(vs);
+        let vs = uv0s.into_iter().zip(vs);
+        let vs = positions.into_iter().zip(vs);
+        let vertices = vs
+            .map(
+                |(position, (uv0, (uv1, (normal, (tangent, (color, (joints, weights)))))))| {
+                    Vertex {
+                        position,
                         color,
-                        range,
-                        intensity,
-                        kind,
-                    },
-                );
-            }
-        }
-        let lights = lights_array;
-
-        // Preallocate nodes and skins so we can reference their ids before
-        // we write them to the slab.
-        let nodes = self.allocate_array::<GltfNode>(document.nodes().len());
-        let skins = self.allocate_array::<GltfSkin>(document.skins().len());
-
-        log::trace!("Loading nodes");
-        for (i, node) in document.nodes().enumerate() {
-            let node_index = node.index();
-            debug_assert_eq!(i, node_index);
-            let children = node
-                .children()
-                .map(|node| nodes.at(node.index()))
-                .collect::<Vec<_>>();
-            let children = self.append_array(&children);
-            let (translation, rotation, scale) = node.transform().decomposed();
-            let translation = Vec3::from(translation);
-            let rotation = Quat::from_array(rotation);
-            let scale = Vec3::from(scale);
-            let mesh = node
-                .mesh()
-                .map(|mesh| meshes.at(mesh.index()))
-                .unwrap_or_default();
-            let skin = node
-                .skin()
-                .map(|skin| skins.at(skin.index()))
-                .unwrap_or_default();
-            let camera = node
-                .camera()
-                .map(|camera| cameras.at(camera.index()))
-                .unwrap_or_default();
-            let light = node
-                .light()
-                .map(|light| lights.at(light.index()))
-                .unwrap_or_default();
-            let weights = if let Some(weights) = node.weights() {
-                self.append_array(weights)
-            } else {
-                Array::default()
-            };
-            self.write(
-                nodes.at(node_index),
-                &GltfNode {
-                    children,
-                    translation,
-                    rotation,
-                    scale,
-                    mesh,
-                    camera,
-                    weights,
-                    light,
-                    skin,
-                },
-            );
-        }
-
-        log::trace!("Loading skins");
-        for skin in document.skins() {
-            let skin_index = skin.index();
-            let joints = skin
-                .joints()
-                .map(|node| nodes.at(node.index()))
-                .collect::<Vec<_>>();
-            let joints = self.append_array(&joints);
-            let inverse_bind_matrices = skin
-                .inverse_bind_matrices()
-                .map(|acc| accessors.at(acc.index()))
-                .unwrap_or_default();
-            let skeleton = skin
-                .skeleton()
-                .map(|node| nodes.at(node.index()))
-                .unwrap_or_default();
-            let _ = self.write(
-                skins.at(skin_index),
-                &GltfSkin {
-                    joints,
-                    inverse_bind_matrices,
-                    skeleton,
-                },
-            );
-        }
-
-        log::trace!("Loading animations");
-        let animations = self.allocate_array::<GltfAnimation>(document.animations().count());
-        for animation in document.animations() {
-            let samplers =
-                self.allocate_array::<GltfAnimationSampler>(animation.samplers().count());
-            fn create_sampler(
-                accessors: Array<GltfAccessor>,
-                sampler: gltf::animation::Sampler<'_>,
-            ) -> GltfAnimationSampler {
-                let interpolation = match sampler.interpolation() {
-                    gltf::animation::Interpolation::Linear => GltfInterpolation::Linear,
-                    gltf::animation::Interpolation::Step => GltfInterpolation::Step,
-                    gltf::animation::Interpolation::CubicSpline => GltfInterpolation::CubicSpline,
-                };
-                let input = accessors.at(sampler.input().index());
-                let output = accessors.at(sampler.output().index());
-                GltfAnimationSampler {
-                    interpolation,
-                    input,
-                    output,
-                }
-            }
-            let mut stored_samplers = vec![];
-            for (i, sampler) in animation.samplers().enumerate() {
-                let sampler = create_sampler(accessors, sampler);
-                self.write(samplers.at(i), &sampler);
-                // Store it later so we can figure out the index of the sampler
-                // used by the channel.
-                //
-                // TODO: Remove `stored_samplers` once `gltf` provides `.index()`
-                // @see https://github.com/gltf-rs/gltf/issues/398
-                stored_samplers.push(sampler);
-            }
-            let channels = self.allocate_array::<GltfChannel>(animation.channels().count());
-            for (i, channel) in animation.channels().enumerate() {
-                let target = channel.target();
-                let node = nodes.at(target.node().index());
-                let property = match target.property() {
-                    gltf::animation::Property::Translation => GltfTargetProperty::Translation,
-                    gltf::animation::Property::Rotation => GltfTargetProperty::Rotation,
-                    gltf::animation::Property::Scale => GltfTargetProperty::Scale,
-                    gltf::animation::Property::MorphTargetWeights => {
-                        GltfTargetProperty::MorphTargetWeights
+                        uv0,
+                        uv1,
+                        normal,
+                        tangent,
+                        joints,
+                        weights,
                     }
-                };
-                let target = GltfTarget { node, property };
-                let sampler = create_sampler(accessors, channel.sampler());
-                let index = stored_samplers
-                    .iter()
-                    .position(|s| s == &sampler)
-                    .context(MissingSamplerSnafu)?;
-                let sampler = samplers.at(index);
-                self.write(channels.at(i), &GltfChannel { target, sampler });
-            }
-            self.write(
-                animations.at(animation.index()),
-                &GltfAnimation { channels, samplers },
-            );
+                },
+            )
+            .collect::<Vec<_>>();
+        let vertices = stage.new_hybrid_array(vertices);
+        let indices = stage.new_hybrid_array(indices);
+        let gltf::mesh::Bounds { min, max } = primitive.bounding_box();
+        let min = Vec3::from_array(min);
+        let max = Vec3::from_array(max);
+        Self {
+            vertices,
+            indices,
+            material,
+            bounding_box: (min, max),
         }
-
-        log::trace!("Loading scenes");
-        let scenes = self.allocate_array::<GltfScene>(document.scenes().len());
-        for scene in document.scenes() {
-            let nodes = scene
-                .nodes()
-                .map(|node| nodes.at(node.index()))
-                .collect::<Vec<_>>();
-            let nodes = self.append_array(&nodes);
-            self.write(scenes.at(scene.index()), &GltfScene { nodes });
-        }
-
-        log::trace!("Done loading gltf");
-
-        Ok(GltfDocument {
-            accessors,
-            animations,
-            buffers,
-            cameras,
-            materials,
-            default_material,
-            meshes,
-            nodes,
-            scenes,
-            skins,
-            textures,
-            views,
-        })
     }
+}
 
-    /// Create a native camera for the gltf camera with the given index.
-    pub fn create_camera_from_gltf(
-        &self,
-        cpu_doc: &gltf::Document,
-        index: usize,
-    ) -> Result<Camera, StageGltfError> {
-        let gltf_camera = cpu_doc
-            .cameras()
-            .nth(index)
-            .context(MissingCameraSnafu { index })?;
-        let projection = match gltf_camera.projection() {
+#[derive(Debug)]
+pub struct GltfMesh {
+    pub primitives: Vec<GltfPrimitive>,
+    pub weights: HybridArray<f32>,
+}
+
+impl GltfMesh {
+    fn from_gltf(
+        stage: &mut Stage,
+        document: &gltf::Document,
+        buffer_data: &[gltf::buffer::Data],
+        materials: &HybridArray<Material>,
+        mesh: gltf::Mesh,
+    ) -> Self {
+        log::debug!("Loading primitives for mesh {}", mesh.index());
+        let primitives = mesh
+            .primitives()
+            .map(|prim| GltfPrimitive::from_gltf(stage, prim, document, buffer_data, &materials))
+            .collect::<Vec<_>>();
+        log::trace!("  loaded {} primitives", primitives.len());
+        let weights = mesh.weights().unwrap_or(&[]).iter().copied();
+        GltfMesh {
+            primitives,
+            weights: stage.new_hybrid_array(weights),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct GltfCamera {
+    pub index: usize,
+    pub name: Option<String>,
+    pub node_transform: NestedTransform,
+    projection: Mat4,
+    pub id: Id<Camera>,
+}
+
+impl<'a> GltfCamera {
+    fn new(
+        stage: &mut impl GrowableSlab,
+        camera: gltf::Camera<'a>,
+        transform: &NestedTransform,
+    ) -> Self {
+        let projection = match camera.projection() {
             gltf::camera::Projection::Orthographic(o) => glam::Mat4::orthographic_rh(
                 -o.xmag(),
                 o.xmag(),
@@ -883,348 +549,481 @@ impl Stage {
                 }
             }
         };
-        let view = cpu_doc
-            .nodes()
-            .find_map(|node| {
-                if node.camera().map(|c| c.index()) == Some(index) {
-                    Some(glam::Mat4::from_cols_array_2d(&node.transform().matrix()).inverse())
-                } else {
-                    None
-                }
-            })
-            .unwrap_or_default();
-        Ok(Camera {
+        let view = Mat4::from(transform.get_global_transform()).inverse();
+        GltfCamera {
+            index: camera.index(),
+            name: camera.name().map(String::from),
             projection,
-            view,
-            ..Default::default()
+            node_transform: transform.clone(),
+            id: stage.append(&Camera::new(projection, view)),
+        }
+    }
+
+    pub fn get_camera(&self) -> Camera {
+        let view = Mat4::from(self.node_transform.get_global_transform()).inverse();
+        Camera::new(self.projection, view)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub enum LightDetails {
+    Directional(Hybrid<DirectionalLight>),
+    Point(Hybrid<PointLight>),
+    Spot(Hybrid<SpotLight>),
+}
+
+#[derive(Debug)]
+pub struct GltfLight {
+    pub details: LightDetails,
+    pub node_transform: NestedTransform,
+    pub light: Hybrid<Light>,
+}
+
+/// A node in a GLTF document, ready to be 'drawn'.
+#[derive(Clone, Debug)]
+pub struct GltfNode {
+    /// Index of this node in the `StagedGltfDocument`'s `nodes` field.
+    pub index: usize,
+    /// Name of the node, if any,
+    pub name: Option<String>,
+    /// Id of the light this node refers to.
+    pub light: Option<usize>,
+    /// Index of the mesh in the document's meshes, if any.
+    pub mesh: Option<usize>,
+    /// Index into the cameras array, if any.
+    pub camera: Option<usize>,
+    /// Index of the skin in the document's skins, if any.
+    pub skin: Option<usize>,
+    /// Indices of the children of this node.
+    ///
+    /// Each element indexes into the `StagedGltfDocument`'s `nodes` field.
+    pub children: Vec<usize>,
+    /// Array of weights
+    pub weights: HybridArray<f32>,
+    /// This node's transform.
+    pub transform: NestedTransform,
+}
+
+impl GltfNode {
+    pub fn global_transform(&self) -> Transform {
+        todo!()
+    }
+}
+
+#[derive(Debug)]
+pub struct GltfDocument {
+    pub nodes: Vec<GltfNode>,
+    pub cameras: Vec<GltfCamera>,
+    pub meshes: Vec<GltfMesh>,
+    pub default_material: Hybrid<Material>,
+    pub materials: HybridArray<Material>,
+    /// Vector of scenes - each being a list of nodes.
+    pub scenes: Vec<Vec<usize>>,
+    pub default_scene: Option<usize>,
+    pub textures: Array<AtlasTexture>,
+    pub lights: Vec<GltfLight>,
+}
+
+impl GltfDocument {
+    pub fn from_gltf(
+        stage: &mut Stage,
+        document: &gltf::Document,
+        buffer_data: Vec<gltf::buffer::Data>,
+        images: Vec<gltf::image::Data>,
+    ) -> Result<GltfDocument, StageGltfError> {
+        log::debug!("Loading nodes");
+        let mut nodes = vec![];
+        let mut node_transforms = HashMap::<usize, NestedTransform>::new();
+        fn transform_for_node(
+            stage: &mut Stage,
+            cache: &mut HashMap<usize, NestedTransform>,
+            node: &gltf::Node,
+        ) -> NestedTransform {
+            if let Some(nt) = cache.get(&node.index()) {
+                nt.clone()
+            } else {
+                let mut transform = stage.new_nested_transform();
+                for node in node.children() {
+                    let child_transform = transform_for_node(stage, cache, &node);
+                    transform.add_child(&child_transform);
+                }
+                cache.insert(node.index(), transform.clone());
+                transform
+            }
+        }
+        let mut camera_index_to_node_index = HashMap::<usize, usize>::new();
+        let mut light_index_to_node_index = HashMap::<usize, usize>::new();
+        for (i, node) in document.nodes().enumerate() {
+            let node_index = node.index();
+            if let Some(camera) = node.camera() {
+                camera_index_to_node_index.insert(camera.index(), node_index);
+            }
+            if let Some(light) = node.light() {
+                light_index_to_node_index.insert(light.index(), node_index);
+            }
+
+            debug_assert_eq!(i, node_index);
+            let children = node.children().map(|node| node.index()).collect::<Vec<_>>();
+            let mesh = node.mesh().map(|mesh| mesh.index());
+            let skin = node.skin().map(|skin| skin.index());
+            let camera = node.camera().map(|camera| camera.index());
+            let light = node.light().map(|light| light.index());
+            let weights = node.weights().map(|w| w.to_vec()).unwrap_or_default();
+            let weights = stage.new_hybrid_array(weights);
+            let transform = transform_for_node(stage, &mut node_transforms, &node);
+            nodes.push(GltfNode {
+                index: node.index(),
+                name: node.name().map(String::from),
+                light,
+                mesh,
+                camera,
+                skin,
+                children,
+                weights,
+                transform,
+            });
+        }
+        log::trace!("  loaded {} nodes", nodes.len());
+
+        log::trace!("Loading cameras");
+        let mut cameras = vec![];
+        for camera in document.cameras() {
+            let camera_index = camera.index();
+            let node_index =
+                *camera_index_to_node_index
+                    .get(&camera_index)
+                    .context(MissingCameraSnafu {
+                        index: camera_index,
+                    })?;
+            let transform = node_transforms
+                .get(&camera_index)
+                .context(MissingNodeSnafu { index: node_index })?;
+            cameras.push(GltfCamera::new(stage, camera, transform));
+        }
+
+        // We need the (re)packing of the atlas before we marshal the images into the
+        // GPU because we need their frames for textures and materials, but we
+        // need to know if the materials require us to apply a linear transfer.
+        // So we'll get the preview repacking first, then update the frames in
+        // the textures.
+        let (mut repacking, atlas_offset) = {
+            // UNWRAP: if we can't lock the atlas, we want to panic.
+            let atlas = stage.atlas.read().unwrap();
+            let atlas_offset = atlas.rects.len();
+            (
+                atlas
+                    .repack_preview(&stage.device, images.into_iter().map(AtlasImage::from))
+                    .context(AtlasSnafu)?,
+                atlas_offset,
+            )
+        };
+
+        log::debug!("Creating atlas textures");
+        let textures = stage.allocate_array::<AtlasTexture>(document.textures().len());
+        for (i, texture) in document.textures().enumerate() {
+            let texture = AtlasTexture::from_gltf(texture, &mut repacking, atlas_offset)?;
+            let texture_id = textures.at(i);
+            log::trace!("  texture {i} {texture_id:?}: {texture:#?}");
+            stage.write(texture_id, &texture);
+        }
+
+        log::debug!("Creating materials");
+        let mut default_material = stage.new_hybrid(Material::default());
+        let mut materials = vec![];
+        for gltf_material in document.materials() {
+            let material_index = gltf_material.index();
+            let material =
+                Material::from_gltf(gltf_material, &mut repacking, textures, atlas_offset)?;
+            if let Some(index) = material_index {
+                log::trace!("  created material {index}");
+                debug_assert_eq!(index, materials.len(), "unexpected material index");
+                materials.push(material);
+            } else {
+                log::trace!("  created default material");
+                default_material.set(material);
+            }
+        }
+        let materials = stage.new_hybrid_array(materials);
+        log::trace!("  created {} materials", materials.len());
+
+        let number_of_new_images = repacking.new_images_len();
+        if number_of_new_images > 0 {
+            log::trace!("Packing the atlas");
+            log::trace!("  adding {number_of_new_images} new images",);
+            // UNWRAP: if we can't lock the atlas, we want to panic.
+            let mut atlas = stage.atlas.write().unwrap();
+            let new_atlas = atlas
+                .commit_repack_preview(&stage.device, &stage.queue, repacking)
+                .context(AtlasSnafu)?;
+            let size = new_atlas.size;
+            *atlas = new_atlas;
+            // The bindgroup will have to be remade
+            let _ = stage.textures_bindgroup.lock().unwrap().take();
+            // The atlas size must be reset
+            let size_id = PbrConfig::offset_of_atlas_size().into();
+            stage.slab.write().unwrap().write(size_id, &size);
+        }
+
+        log::debug!("Loading meshes");
+        let mut meshes = vec![];
+        for mesh in document.meshes() {
+            let mesh = GltfMesh::from_gltf(stage, document, &buffer_data, &materials, mesh);
+            meshes.push(mesh);
+        }
+        log::trace!("  loaded {} meshes", meshes.len());
+
+        log::trace!("Loading lights");
+        let mut lights = vec![];
+        if let Some(gltf_lights) = document.lights() {
+            for gltf_light in gltf_lights {
+                let color = Vec3::from(gltf_light.color()).extend(1.0);
+                let intensity = gltf_light.intensity();
+                let (mut light, details): (Light, _) = match gltf_light.kind() {
+                    gltf::khr_lights_punctual::Kind::Directional => {
+                        let light = stage.new_hybrid(DirectionalLight {
+                            direction: Vec3::NEG_Z,
+                            color,
+                            intensity,
+                        });
+
+                        (light.id().into(), LightDetails::Directional(light))
+                    }
+                    gltf::khr_lights_punctual::Kind::Point => {
+                        let light = stage.new_hybrid(PointLight {
+                            position: Vec3::ZERO,
+                            color,
+                            intensity,
+                        });
+                        (light.id().into(), LightDetails::Point(light))
+                    }
+                    gltf::khr_lights_punctual::Kind::Spot {
+                        inner_cone_angle,
+                        outer_cone_angle,
+                    } => {
+                        let light = stage.new_hybrid(SpotLight {
+                            position: Vec3::ZERO,
+                            direction: Vec3::NEG_Z,
+                            inner_cutoff: inner_cone_angle,
+                            outer_cutoff: outer_cone_angle,
+                            color,
+                            intensity,
+                        });
+                        (light.id().into(), LightDetails::Spot(light))
+                    }
+                };
+                let node_index = *light_index_to_node_index.get(&gltf_light.index()).context(
+                    MissingCameraSnafu {
+                        index: gltf_light.index(),
+                    },
+                )?;
+                let node_transform = node_transforms
+                    .get(&node_index)
+                    .context(MissingNodeSnafu { index: node_index })?
+                    .clone();
+                light.transform = node_transform.global_transform_id();
+
+                let light = stage.new_hybrid(light);
+                lights.push(GltfLight {
+                    details,
+                    node_transform,
+                    light,
+                });
+            }
+        }
+
+        //let skins = self.allocate_array::<GltfSkin>(document.skins().len());
+
+        // TODO: GLTF skinning
+        // log::trace!("Loading skins");
+        // for skin in document.skins() {
+        //     let skin_index = skin.index();
+        //     let joints = skin
+        //         .joints()
+        //         .map(|node| nodes.at(node.index()))
+        //         .collect::<Vec<_>>();
+        //     let joints = self.append_array(&joints);
+        //     let inverse_bind_matrices = skin
+        //         .inverse_bind_matrices()
+        //         .map(|acc| accessors.at(acc.index()))
+        //         .unwrap_or_default();
+        //     let skeleton = skin
+        //         .skeleton()
+        //         .map(|node| nodes.at(node.index()))
+        //         .unwrap_or_default();
+        //     let _ = self.write(
+        //         skins.at(skin_index),
+        //         &GltfSkin {
+        //             joints,
+        //             inverse_bind_matrices,
+        //             skeleton,
+        //         },
+        //     );
+        // }
+
+        // log::trace!("Loading animations");
+        // let animations = self.allocate_array::<GltfAnimation>(document.animations().count());
+        // for animation in document.animations() {
+        //     let samplers =
+        //         self.allocate_array::<GltfAnimationSampler>(animation.samplers().count());
+        //     fn create_sampler(
+        //         accessors: Array<GltfAccessor>,
+        //         sampler: gltf::animation::Sampler<'_>,
+        //     ) -> GltfAnimationSampler {
+        //         let interpolation = match sampler.interpolation() {
+        //             gltf::animation::Interpolation::Linear => GltfInterpolation::Linear,
+        //             gltf::animation::Interpolation::Step => GltfInterpolation::Step,
+        //             gltf::animation::Interpolation::CubicSpline => GltfInterpolation::CubicSpline,
+        //         };
+        //         let input = accessors.at(sampler.input().index());
+        //         let output = accessors.at(sampler.output().index());
+        //         GltfAnimationSampler {
+        //             interpolation,
+        //             input,
+        //             output,
+        //         }
+        //     }
+        //     let mut stored_samplers = vec![];
+        //     for (i, sampler) in animation.samplers().enumerate() {
+        //         let sampler = create_sampler(accessors, sampler);
+        //         self.write(samplers.at(i), &sampler);
+        //         // Store it later so we can figure out the index of the sampler
+        //         // used by the channel.
+        //         //
+        //         // TODO: Remove `stored_samplers` once `gltf` provides `.index()`
+        //         // @see https://github.com/gltf-rs/gltf/issues/398
+        //         stored_samplers.push(sampler);
+        //     }
+        //     let channels = self.allocate_array::<GltfChannel>(animation.channels().count());
+        //     for (i, channel) in animation.channels().enumerate() {
+        //         let target = channel.target();
+        //         let node = nodes.at(target.node().index());
+        //         let property = match target.property() {
+        //             gltf::animation::Property::Translation => GltfTargetProperty::Translation,
+        //             gltf::animation::Property::Rotation => GltfTargetProperty::Rotation,
+        //             gltf::animation::Property::Scale => GltfTargetProperty::Scale,
+        //             gltf::animation::Property::MorphTargetWeights => {
+        //                 GltfTargetProperty::MorphTargetWeights
+        //             }
+        //         };
+        //         let target = GltfTarget { node, property };
+        //         let sampler = create_sampler(accessors, channel.sampler());
+        //         let index = stored_samplers
+        //             .iter()
+        //             .position(|s| s == &sampler)
+        //             .context(MissingSamplerSnafu)?;
+        //         let sampler = samplers.at(index);
+        //         self.write(channels.at(i), &GltfChannel { target, sampler });
+        //     }
+        //     self.write(
+        //         animations.at(animation.index()),
+        //         &GltfAnimation { channels, samplers },
+        //     );
+        // }
+
+        log::debug!("Loading scenes");
+        let scenes = document
+            .scenes()
+            .map(|scene| scene.nodes().map(|node| node.index()).collect())
+            .collect();
+
+        log::trace!("Done loading gltf");
+
+        Ok(GltfDocument {
+            //animations,
+            lights,
+            cameras,
+            materials,
+            default_material,
+            meshes,
+            nodes,
+            scenes,
+            default_scene: document.default_scene().map(|scene| scene.index()),
+            textures,
+        })
+    }
+}
+
+#[derive(Debug)]
+pub struct Node {
+    pub gltf_node: GltfNode,
+    pub renderlets: Vec<Hybrid<Renderlet>>,
+}
+
+impl Stage {
+    pub fn load_gltf_document_from_path(
+        &mut self,
+        path: impl AsRef<std::path::Path>,
+    ) -> Result<GltfDocument, StageGltfError> {
+        let (document, buffers, images) = gltf::import(path)?;
+        GltfDocument::from_gltf(self, &document, buffers, images)
+    }
+
+    /// Draws the `StagedGltfNode` with the given `Camera`.
+    pub fn draw_gltf_node(
+        &mut self,
+        doc: &GltfDocument,
+        node_index: usize,
+        camera: Id<Camera>,
+    ) -> Result<Node, StageGltfError> {
+        let gltf_node = doc
+            .nodes
+            .get(node_index)
+            .context(MissingNodeSnafu { index: node_index })?
+            .clone();
+
+        log::trace!("drawing GLTF node {node_index} {:?}", gltf_node.name);
+
+        let mut renderlets = vec![];
+        if let Some(mesh_index) = gltf_node.mesh {
+            let mesh = doc
+                .meshes
+                .get(mesh_index)
+                .context(MissingMeshSnafu { index: mesh_index })?;
+            for prim in mesh.primitives.iter() {
+                let renderlet = Renderlet {
+                    vertices: prim.vertices.array(),
+                    indices: prim.indices.array(),
+                    camera,
+                    transform: gltf_node.transform.global_transform_id(),
+                    material: prim.material,
+                    ..Default::default()
+                };
+                let id = self.draw(&renderlet);
+                let hybrid = Hybrid::new_preallocated(id, renderlet);
+                self.add_updates(hybrid.clone());
+                renderlets.push(hybrid);
+            }
+        }
+
+        Ok(Node {
+            gltf_node,
+            renderlets,
         })
     }
 
-    /// Draw the given `gltf::Node` with the given `Camera`.
-    /// `parents` is a list of the parent nodes of the given node.
-    fn draw_gltf_node_with<'a>(
-        &mut self,
-        gpu_doc: &GltfDocument,
-        camera_id: Id<Camera>,
-        node: gltf::Node<'a>,
-        parents: Vec<Id<GltfNode>>,
-    ) -> Vec<Id<Renderlet>> {
-        if let Some(_light) = node.light() {
-            // TODO: Support transforming lights based on node transforms
-            ////let light = gpu_doc.lights.at(light.index());
-            //let t = Mat4::from_cols_array_2d(&node.transform().matrix());
-            //let position = t.transform_point3(Vec3::ZERO);
-
-            //let light_index = light.index();
-            //let color = Vec3::from(light.color());
-            //let range = light.range().unwrap_or(f32::MAX);
-            //let intensity = light.intensity();
-            //match light.kind() {
-            //    gltf::khr_lights_punctual::Kind::Directional =>
-            // GltfLightKind::Directional,
-            //    gltf::khr_lights_punctual::Kind::Point =>
-            // GltfLightKind::Point,
-            //    gltf::khr_lights_punctual::Kind::Spot {
-            //        inner_cone_angle,
-            //        outer_cone_angle,
-            //    } => GltfLightKind::Spot {
-            //        inner_cone_angle,
-            //        outer_cone_angle,
-            //    },
-            //};
-
-            //let transform = self.append(&transform);
-            //let render_unit = RenderUnit {
-            //    light,
-            //    transform,
-            //    ..Default::default()
-            //};
-            //return vec![self.draw_unit(&render_unit)];
-        }
-        let mut units = if let Some(mesh) = node.mesh() {
-            log::trace!("drawing mesh {}", mesh.index());
-            let primitives = mesh.primitives();
-            let mesh = gpu_doc.meshes.at(mesh.index());
-            let mut node_path = parents.clone();
-            node_path.push(gpu_doc.nodes.at(node.index()));
-            primitives
-                .map(|primitive| {
-                    let node_path = self.append_array(&node_path);
-                    let render_unit = GltfRendering {
-                        node_path,
-                        mesh_index: mesh.index() as u32,
-                        primitive_index: primitive.index() as u32,
-                        vertex_count: super::get_vertex_count(&primitive),
-                        camera: camera_id,
-                        ..Default::default()
-                    };
-                    self.draw(&render_unit)
-                })
-                .collect::<Vec<_>>()
-        } else {
-            vec![]
-        };
-        for child in node.children() {
-            let mut parents = parents.clone();
-            parents.push(gpu_doc.nodes.at(child.index()));
-            units.extend(self.draw_gltf_node_with(gpu_doc, camera_id, child, parents));
-        }
-        units
-    }
-
-    /// Draw the given [`gltf::Node`] using the given [`Camera`] and return the
-    /// ids of the render units that were created.
-    pub fn draw_gltf_node(
-        &mut self,
-        gpu_doc: &GltfDocument,
-        camera_id: Id<Camera>,
-        node: gltf::Node<'_>,
-    ) -> Vec<Id<Renderlet>> {
-        self.draw_gltf_node_with(gpu_doc, camera_id, node, vec![])
-    }
-
-    /// Draw the given [`gltf::Scene`] using the given [`Camera`] and return the
-    /// ids of the render units that were created.
     pub fn draw_gltf_scene(
         &mut self,
-        gpu_doc: &GltfDocument,
-        camera_id: Id<Camera>,
-        scene: gltf::Scene<'_>,
-    ) -> Vec<Id<Renderlet>> {
-        scene
-            .nodes()
-            .flat_map(|node| self.draw_gltf_node(gpu_doc, camera_id, node))
-            .collect()
-    }
-
-    /// Convenience method for creating a `GltfPrimitive` along with all its
-    /// `GltfAccessor`s, `GltfBufferView`s and a `GltfBuffer`.
-    ///
-    /// ## Note
-    /// This does **not** generate tangents or normals.
-    pub fn new_primitive(
-        &mut self,
-        vertices: impl IntoIterator<Item = Vertex>,
-        indices: impl IntoIterator<Item = u32>,
-        material: Id<Material>,
-    ) -> GltfPrimitive {
-        create_primitive(self, vertices, indices, material)
-    }
-    /// Convenience method for creating a [`GltfMesh`] without having a
-    /// [`gltf::Document`].
-    ///
-    /// This is useful if you have non-GLTF assets that you want to render.
-    pub fn new_mesh(&mut self) -> GltfMeshBuilder<Self> {
-        GltfMeshBuilder::new(self)
-    }
-}
-
-/// Convenience method for creating a `GltfPrimitive` along with all its
-/// `GltfAccessor`s, `GltfBufferView`s and a `GltfBuffer`.
-///
-/// Appends the vertices, indices, material and other structures to the
-/// slab and returns the `GltfPrimitive`.
-///
-/// ## Note
-/// This does **not** generate tangents or normals.
-pub fn create_primitive(
-    slab: &mut impl GrowableSlab,
-    vertices: impl IntoIterator<Item = Vertex>,
-    indices: impl IntoIterator<Item = u32>,
-    material: Id<Material>,
-) -> GltfPrimitive {
-    let vertices: Vec<Vertex> = vertices.into_iter().collect();
-    let indices: Vec<u32> = indices.into_iter().collect();
-    let indices_len: usize = indices.len();
-    let vertices_len: usize = vertices.len();
-    let vertex_count = if vertices_len > indices_len {
-        vertices_len
-    } else {
-        indices_len
-    } as u32;
-    let indices = if indices.is_empty() {
-        Id::NONE
-    } else {
-        let buffer = GltfBuffer(slab.append_array(&indices).into_u32_array());
-        let buffer = slab.append(&buffer);
-        let view = slab.append(&GltfBufferView {
-            buffer,
-            offset: 0,
-            length: indices.len() as u32 * 4, // 4 bytes per u32
-            stride: 4,                        // 4 bytes in a u32,
-        });
-        let accessor = slab.append(&GltfAccessor {
-            size: 4,
-            view,
-            offset: 0,
-            count: indices.len() as u32,
-            data_type: DataType::U32,
-            dimensions: Dimensions::Scalar,
-            normalized: false,
-        });
-        accessor
-    };
-
-    let vertex_buffer = GltfBuffer(slab.append_array(&vertices).into_u32_array());
-    let buffer = slab.append(&vertex_buffer);
-    let u32_stride = Vertex::SLAB_SIZE as u32;
-    let stride = u32_stride * 4; // 4 bytes in a u32
-
-    let view = slab.append(&GltfBufferView {
-        buffer,
-        offset: 0,
-        length: vertices.len() as u32 * u32_stride * 4, // stride as u32s * 4 bytes each
-        stride,
-    });
-
-    let positions = slab.append(&GltfAccessor {
-        size: Vertex::slab_size_of_position() as u32 * 4,
-        view,
-        offset: 0,
-        count: vertex_count as u32,
-        data_type: DataType::F32,
-        dimensions: Dimensions::Vec3,
-        normalized: false,
-    });
-
-    let colors = slab.append(&GltfAccessor {
-        size: Vertex::slab_size_of_color() as u32 * 4,
-        view,
-        offset: Vertex::offset_of_color().offset * 4,
-        count: vertex_count as u32,
-        data_type: DataType::F32,
-        dimensions: Dimensions::Vec4,
-        normalized: false,
-    });
-
-    let tex_coords0 = slab.append(&GltfAccessor {
-        size: Vertex::slab_size_of_uv0() as u32 * 4,
-        view,
-        offset: Vertex::offset_of_uv0().offset * 4,
-        count: vertex_count as u32,
-        data_type: DataType::F32,
-        dimensions: Dimensions::Vec2,
-        normalized: false,
-    });
-    let tex_coords1 = slab.append(&GltfAccessor {
-        size: Vertex::slab_size_of_uv1() as u32 * 4,
-        view,
-        offset: Vertex::offset_of_uv1().offset * 4,
-        count: vertex_count as u32,
-        data_type: DataType::F32,
-        dimensions: Dimensions::Vec2,
-        normalized: false,
-    });
-
-    let normals = slab.append(&GltfAccessor {
-        size: Vertex::slab_size_of_normal() as u32 * 4,
-        view,
-        offset: Vertex::offset_of_normal().offset * 4,
-        count: vertex_count as u32,
-        data_type: DataType::F32,
-        dimensions: Dimensions::Vec3,
-        normalized: false,
-    });
-
-    let tangents = slab.append(&GltfAccessor {
-        size: Vertex::slab_size_of_tangent() as u32 * 4,
-        view,
-        offset: Vertex::offset_of_tangent().offset * 4,
-        count: vertex_count as u32,
-        data_type: DataType::F32,
-        dimensions: Dimensions::Vec4,
-        normalized: false,
-    });
-
-    let joints = slab.append(&GltfAccessor {
-        size: Vertex::slab_size_of_joints() as u32 * 4,
-        view,
-        offset: Vertex::offset_of_joints().offset * 4,
-        count: vertex_count as u32,
-        data_type: DataType::F32,
-        dimensions: Dimensions::Vec4,
-        normalized: false,
-    });
-
-    let weights = slab.append(&GltfAccessor {
-        size: Vertex::slab_size_of_weights() as u32 * 4,
-        view,
-        offset: Vertex::offset_of_weights().offset * 4,
-        count: vertex_count as u32,
-        data_type: DataType::F32,
-        dimensions: Dimensions::Vec4,
-        normalized: false,
-    });
-
-    GltfPrimitive {
-        vertex_count,
-        material,
-        indices,
-        positions,
-        normals,
-        normals_were_generated: false,
-        tangents,
-        tangents_were_generated: false,
-        colors,
-        tex_coords0,
-        tex_coords1,
-        joints,
-        weights,
-    }
-}
-
-// TODO: GltfPrimitiveBuilder
-
-/// Convenience builder for creating a [`GltfMesh`] without having a
-/// [`gltf::Document`].
-///
-/// This is useful if you have non-GLTF assets that you want to render.
-pub struct GltfMeshBuilder<'a, T> {
-    slab: &'a mut T,
-    primitives: Vec<GltfPrimitive>,
-}
-
-impl<'a, T: GrowableSlab> GltfMeshBuilder<'a, T> {
-    pub fn new(stage: &'a mut T) -> Self {
-        Self {
-            slab: stage,
-            primitives: vec![],
+        doc: &GltfDocument,
+        // Any list of nodes makes a scene.
+        nodes: impl IntoIterator<Item = usize>,
+        camera: Id<Camera>,
+    ) -> Result<Vec<Node>, StageGltfError> {
+        let mut scene_nodes = vec![];
+        for node_index in nodes.into_iter() {
+            let node = self.draw_gltf_node(doc, node_index, camera)?;
+            scene_nodes.push(node);
         }
-    }
-
-    pub fn add_primitive(
-        &mut self,
-        vertices: impl IntoIterator<Item = Vertex>,
-        indices: impl IntoIterator<Item = u32>,
-        material_id: Id<Material>,
-    ) {
-        let primitive = create_primitive(self.slab, vertices, indices, material_id);
-        self.primitives.push(primitive);
-    }
-
-    pub fn with_primitive(
-        mut self,
-        vertices: impl IntoIterator<Item = Vertex>,
-        indices: impl IntoIterator<Item = u32>,
-        material_id: Id<Material>,
-    ) -> Self {
-        self.add_primitive(vertices, indices, material_id);
-        self
-    }
-
-    pub fn build(self) -> GltfMesh {
-        let weights = Array::default();
-        let primitives = self.slab.append_array(&self.primitives);
-        GltfMesh {
-            primitives,
-            weights,
-        }
+        Ok(scene_nodes)
     }
 }
 
 #[cfg(test)]
 mod test {
-    use crate::{gltf::*, pbr::Material, stage::Vertex, Camera, Renderling, Stage, Transform};
+    use crate::{
+        pbr::{Material, PbrConfig},
+        stage::Vertex,
+        Camera, Renderlet, Renderling, Stage, Transform,
+    };
     use crabslab::{Array, GrowableSlab, Id, Slab, SlabItem};
     use glam::{UVec2, Vec2, Vec3, Vec4, Vec4Swizzles};
 
@@ -1244,60 +1043,6 @@ mod test {
     }
 
     #[test]
-    fn accessor_sanity() {
-        println!("1u8: {:08b}", 1u8);
-        println!("1i8: {:08b}", 1i8);
-        println!("-1i8: {:08b}", -1i8);
-        println!("max: {} {}", u8::MAX, i8::MAX);
-        let u16buffer = [1u16, 1u16, 1u16, 1u16];
-        for (i, chunk) in u16buffer.chunks(2).enumerate() {
-            match chunk {
-                [a, b] => {
-                    println!("u16buffer[{i}]: {a:016b} {b:016b}");
-                }
-                _ => panic!("bad chunk"),
-            }
-        }
-        let u32buffer = bytemuck::cast_slice::<u16, u32>(&u16buffer).to_vec();
-        for u in u32buffer.iter() {
-            println!("u32buffer: {u:032b}");
-        }
-        println!("u32buffer: {u32buffer:?}");
-        assert_eq!(2, u32buffer.len());
-        let mut data = [0u32; 256];
-        let buffer_index = data.write_indexed_slice(&u32buffer, 0);
-        assert_eq!(2, buffer_index);
-        assert_eq!(u32buffer, data[0..2], "unexpected buffer contents");
-        let buffer = GltfBuffer(Array::new(0, buffer_index as u32));
-        let view_index = data.write_indexed(&buffer, buffer_index);
-        println!("view_index: {view_index}");
-        let final_index = data.write_indexed(
-            &GltfBufferView {
-                buffer: Id::from(buffer_index),
-                offset: 0,
-                length: 4 * 2, // 4 elements * 2 bytes each
-                stride: 2,
-            },
-            view_index,
-        );
-        assert_eq!(view_index + GltfBufferView::SLAB_SIZE, final_index);
-        let accessor = GltfAccessor {
-            size: 2,
-            count: 3,
-            view: Id::from(view_index),
-            offset: 0,
-            data_type: DataType::U16,
-            dimensions: Dimensions::Scalar,
-            normalized: false,
-        };
-        let i0 = accessor.get_u32(0, &data);
-        let i1 = accessor.get_u32(1, &data);
-        let i2 = accessor.get_u32(2, &data);
-        println!("data: {:#?}...", &data[0..4]);
-        assert_eq!([1, 1, 1], [i0, i1, i2]);
-    }
-
-    #[test]
     // ensures we can
     // * read simple meshes
     // * support multiple nodes that reference the same mesh
@@ -1306,27 +1051,31 @@ mod test {
     fn stage_gltf_simple_meshes() {
         let mut r =
             Renderling::headless(100, 50).with_background_color(Vec3::splat(0.0).extend(1.0));
-        let (device, queue) = r.get_device_and_queue_owned();
-        let (document, buffers, images) =
-            ::gltf::import("../../gltf/gltfTutorial_008_SimpleMeshes.gltf").unwrap();
         let projection = crate::camera::perspective(100.0, 50.0);
         let position = Vec3::new(1.0, 0.5, 1.5);
         let view = crate::camera::look_at(position, Vec3::new(1.0, 0.5, 0.0), Vec3::Y);
         let mut stage = r.new_stage().with_lighting(false);
         stage.configure_graph(&mut r, true);
-        let gpu_doc = stage
-            .load_gltf_document(&document, buffers.clone(), images)
+        let mut doc = stage
+            .load_gltf_document_from_path("../../gltf/gltfTutorial_008_SimpleMeshes.gltf")
             .unwrap();
+        println!("doc: {doc:#?}");
         let camera = Camera {
             projection,
             view,
             position,
         };
         let camera_id = stage.append(&camera);
+        let scene_index = doc.default_scene.unwrap();
+        let scene_nodes = doc.scenes.get(scene_index).unwrap().clone();
+        let scene = stage
+            .draw_gltf_scene(&mut doc, scene_nodes, camera_id)
+            .unwrap();
+        println!("scene: {scene:#?}");
 
-        let default_scene = document.default_scene().unwrap();
-        let unit_ids = stage.draw_gltf_scene(&gpu_doc, camera_id, default_scene);
-        assert_eq!(2, unit_ids.len());
+        // let default_scene = document.default_scene().unwrap();
+        // let unit_ids = stage.draw_gltf_scene(&gpu_doc, camera_id, default_scene);
+        // assert_eq!(2, unit_ids.len());
 
         let img = r.render_image().unwrap();
         img_diff::assert_img_eq("gltf_simple_meshes.png", img);
@@ -1337,13 +1086,10 @@ mod test {
     fn minimal_mesh() {
         let mut r =
             Renderling::headless(20, 20).with_background_color(Vec3::splat(0.0).extend(1.0));
-        let (device, queue) = r.get_device_and_queue_owned();
         let mut stage = r.new_stage().with_lighting(false);
         stage.configure_graph(&mut r, true);
-        let (document, buffers, images) =
-            ::gltf::import("../../gltf/gltfTutorial_003_MinimalGltfFile.gltf").unwrap();
-        let gpu_doc = stage
-            .load_gltf_document(&document, buffers, images)
+        let mut doc = stage
+            .load_gltf_document_from_path("../../gltf/gltfTutorial_003_MinimalGltfFile.gltf")
             .unwrap();
         let projection = crate::camera::perspective(20.0, 20.0);
         let eye = Vec3::new(0.5, 0.5, 2.0);
@@ -1354,8 +1100,12 @@ mod test {
             position: Vec3::new(0.5, 0.5, 2.0),
         };
         let camera_id = stage.append(&camera);
-        let default_scene = document.default_scene().unwrap();
-        let _unit_ids = stage.draw_gltf_scene(&gpu_doc, camera_id, default_scene);
+        let default_scene = doc.default_scene.unwrap();
+        let nodes = doc.scenes.get(default_scene).unwrap().clone();
+        let scene = stage.draw_gltf_scene(&mut doc, nodes, camera_id).unwrap();
+        for (i, node) in scene.into_iter().enumerate() {
+            println!("node_{i}: {node:#?}");
+        }
 
         let img = r.render_image().unwrap();
         img_diff::assert_img_eq("gltf_minimal_mesh.png", img);
@@ -1367,17 +1117,15 @@ mod test {
     // This ensures we are decoding images correctly.
     fn gltf_images() {
         let mut r = Renderling::headless(100, 100).with_background_color(Vec4::splat(1.0));
-        let (device, queue) = r.get_device_and_queue_owned();
         let mut stage = r.new_stage().with_lighting(false);
         stage.configure_graph(&mut r, true);
-        let (document, buffers, images) = gltf::import("../../gltf/cheetah_cone.glb").unwrap();
-        let gpu_doc = stage
-            .load_gltf_document(&document, buffers, images)
+        let doc = stage
+            .load_gltf_document_from_path("../../gltf/cheetah_cone.glb")
             .unwrap();
         let (projection, view) = crate::camera::default_ortho2d(100.0, 100.0);
         let camera_id = stage.append(&Camera::new(projection, view));
-        assert!(!gpu_doc.textures.is_empty());
-        let albedo_texture_id = gpu_doc.textures.at(0);
+        assert!(!doc.textures.is_empty());
+        let albedo_texture_id = doc.textures.at(0);
         assert!(albedo_texture_id.is_some());
         let material_id = stage.append(&Material {
             albedo_texture: albedo_texture_id,
@@ -1385,46 +1133,32 @@ mod test {
             ..Default::default()
         });
         println!("material_id: {:#?}", material_id);
-        let mesh = stage
-            .new_mesh()
-            .with_primitive(
-                [
-                    Vertex::default()
-                        .with_position([0.0, 0.0, 0.0])
-                        .with_uv0([0.0, 0.0]),
-                    Vertex::default()
-                        .with_position([1.0, 0.0, 0.0])
-                        .with_uv0([1.0, 0.0]),
-                    Vertex::default()
-                        .with_position([1.0, 1.0, 0.0])
-                        .with_uv0([1.0, 1.0]),
-                    Vertex::default()
-                        .with_position([0.0, 1.0, 0.0])
-                        .with_uv0([0.0, 1.0]),
-                ],
-                [0, 3, 2, 0, 2, 1],
-                material_id,
-            )
-            .build();
-        let mesh = stage.append(&mesh);
-        let node = stage.append(&GltfNode {
-            mesh,
-            ..Default::default()
-        });
-        let node_path = stage.append_array(&[node]);
-
+        let vertices = stage.append_array(&[
+            Vertex::default()
+                .with_position([0.0, 0.0, 0.0])
+                .with_uv0([0.0, 0.0]),
+            Vertex::default()
+                .with_position([1.0, 0.0, 0.0])
+                .with_uv0([1.0, 0.0]),
+            Vertex::default()
+                .with_position([1.0, 1.0, 0.0])
+                .with_uv0([1.0, 1.0]),
+            Vertex::default()
+                .with_position([0.0, 1.0, 0.0])
+                .with_uv0([0.0, 1.0]),
+        ]);
+        let indices = stage.append_array(&[0u32, 3, 2, 0, 2, 1]);
         let transform = stage.append(&Transform {
             scale: Vec3::new(100.0, 100.0, 1.0),
             ..Default::default()
         });
-
-        let _unit_id = stage.draw(&GltfRendering {
-            camera: camera_id,
+        let _renderlet = stage.draw(&Renderlet {
+            vertices,
+            indices,
+            material: material_id,
             transform,
-            vertex_count: 6,
-            node_path,
-            mesh_index: 0,
-            primitive_index: 0,
+            camera: camera_id,
+            ..Default::default()
         });
 
         let img = r.render_linear_image().unwrap();
@@ -1436,14 +1170,13 @@ mod test {
         let size = 100;
         let mut r =
             Renderling::headless(size, size).with_background_color(Vec3::splat(0.0).extend(1.0));
-        let (device, queue) = r.get_device_and_queue_owned();
         let mut stage = r
             .new_stage()
             // There are no lights in the scene and the material isn't marked as "unlit", so
             // let's force it to be unlit.
             .with_lighting(false);
         stage.configure_graph(&mut r, true);
-        let (cpu_doc, gpu_doc) = stage
+        let mut doc = stage
             .load_gltf_document_from_path("../../gltf/gltfTutorial_013_SimpleTexture.gltf")
             .unwrap();
 
@@ -1451,168 +1184,34 @@ mod test {
         let view =
             crate::camera::look_at(Vec3::new(0.5, 0.5, 1.25), Vec3::new(0.5, 0.5, 0.0), Vec3::Y);
         let camera = stage.append(&Camera::new(projection, view));
-        let _unit_ids = stage.draw_gltf_scene(&gpu_doc, camera, cpu_doc.default_scene().unwrap());
+        let default_scene_index = doc.default_scene.unwrap();
+        let nodes = doc.scenes.get(default_scene_index).unwrap().clone();
+        let _unit_ids = stage.draw_gltf_scene(&mut doc, nodes, camera).unwrap();
 
         let img = r.render_image().unwrap();
         img_diff::assert_img_eq("gltf_simple_texture.png", img);
     }
 
-    // This can be uncommented when we support lighting from GLTF files
-    //#[test]
-    //// Demonstrates how to load and render a gltf file containing lighting and a
-    //// normal map.
-    //fn normal_mapping_brick_sphere() {
-    //    let size = 600;
-    //    let mut r =
-    //        Renderling::headless(size,
-    // size).with_background_color(Vec3::splat(1.0).extend(1.0));    let mut
-    // stage = r.new_stage().with_lighting(true).with_bloom(true);
-    //    stage.configure_graph(&mut r, true);
-    //    let (cpu_doc, gpu_doc) = stage
-    //        .load_gltf_document_from_path("../../gltf/red_brick_03_1k.glb")
-    //        .unwrap();
-    //    let camera = stage.create_camera_from_gltf(&cpu_doc, 0).unwrap();
-    //    let camera_id = stage.append(&camera);
-    //    let _unit_ids =
-    //        stage.draw_gltf_scene(&gpu_doc, camera_id,
-    // cpu_doc.default_scene().unwrap());
+    // #[test]
+    // // Demonstrates how to load and render a gltf file containing lighting and a
+    // // normal map.
+    // fn normal_mapping_brick_sphere() {
+    //     let size = 600;
+    //     let mut r =
+    //         Renderling::headless(size, size).with_background_color(Vec3::splat(1.0).extend(1.0));
+    //     let mut stage = r.new_stage().with_lighting(true).with_bloom(true);
+    //     stage.configure_graph(&mut r, true);
+    //     let doc = stage
+    //         .load_gltf_document_from_path("../../gltf/red_brick_03_1k.glb")
+    //         .unwrap();
+    //     let camera = stage.create_camera_from_gltf(&cpu_doc, 0).unwrap();
+    //     let camera_id = stage.append(&camera);
+    //     let _unit_ids =
+    //         stage.draw_gltf_scene(&gpu_doc, camera_id, cpu_doc.default_scene().unwrap());
 
-    //    let img = r.render_image().unwrap();
-    //    img_diff::assert_img_eq("gltf_normal_mapping_brick_sphere.png", img);
-    //}
-
-    #[test]
-    // Demonstrates how to generate a mesh primitive on the CPU, long hand.
-    fn gltf_cmy_tri() {
-        let size = 100;
-        let mut r =
-            Renderling::headless(size, size).with_background_color(Vec3::splat(0.0).extend(1.0));
-        let mut stage = r
-            .new_stage()
-            // There are no lights in the scene and the material isn't marked as "unlit", so
-            // let's force it to be unlit.
-            .with_lighting(false);
-        stage.configure_graph(&mut r, true);
-
-        // buffers
-        let positions =
-            stage.append_array(&[[0.0, 0.0, 0.5f32], [0.0, 100.0, 0.5], [100.0, 0.0, 0.5]]);
-        let positions_buffer = GltfBuffer(positions.into_u32_array());
-        let cyan = [0.0, 1.0, 1.0, 1.0f32];
-        let magenta = [1.0, 0.0, 1.0, 1.0];
-        let yellow = [1.0, 1.0, 0.0, 1.0];
-        let colors = stage.append_array(&[cyan, magenta, yellow]);
-        let colors_buffer = GltfBuffer(colors.into_u32_array());
-        let buffers = stage.append_array(&[positions_buffer, colors_buffer]);
-
-        // views
-        let positions_view = GltfBufferView {
-            buffer: buffers.at(0),
-            offset: 0,
-            length: 3 * 3 * 4, // 3 vertices * 3 components * 4 bytes each
-            stride: 3 * 4,
-        };
-        let colors_view = GltfBufferView {
-            buffer: buffers.at(1),
-            offset: 0,
-            length: 3 * 4 * 4, // 3 vertices * 4 components * 4 bytes each
-            stride: 4 * 4,
-        };
-        let views = stage.append_array(&[positions_view, colors_view]);
-
-        // accessors
-        let positions_accessor = GltfAccessor {
-            size: 3 * 4,
-            view: views.at(0),
-            offset: 0,
-            count: 3,
-            data_type: DataType::F32,
-            dimensions: Dimensions::Vec3,
-            normalized: false,
-        };
-        let colors_accessor = GltfAccessor {
-            size: 4 * 4,
-            view: views.at(1),
-            offset: 0,
-            count: 3,
-            data_type: DataType::F32,
-            dimensions: Dimensions::Vec4,
-            normalized: false,
-        };
-        let accessors = stage.append_array(&[positions_accessor, colors_accessor]);
-
-        // meshes
-        let primitive = GltfPrimitive {
-            vertex_count: 3,
-            positions: accessors.at(0),
-            colors: accessors.at(1),
-            ..Default::default()
-        };
-        let primitives = stage.append_array(&[primitive]);
-        let mesh = GltfMesh {
-            primitives,
-            ..Default::default()
-        };
-        let meshes = stage.append_array(&[mesh]);
-
-        // nodes
-        let node = GltfNode {
-            mesh: meshes.at(0),
-            ..Default::default()
-        };
-        let nodes = stage.append_array(&[node]);
-
-        // doc
-        let _doc = stage.append(&GltfDocument {
-            accessors,
-            buffers,
-            meshes,
-            nodes,
-            ..Default::default()
-        });
-
-        // render unit
-        let (projection, view) = crate::camera::default_ortho2d(100.0, 100.0);
-        let camera = stage.append(&Camera::new(projection, view));
-        let node_path = stage.append_array(&[nodes.at(0)]);
-        let rendering_id = stage.draw(&GltfRendering {
-            camera,
-            node_path,
-            mesh_index: 0,
-            primitive_index: 0,
-            vertex_count: 3,
-            ..Default::default()
-        });
-
-        let data = stage.read_slab().unwrap();
-        let mut clips = vec![];
-        for i in 0..3 {
-            let invocation = GltfVertexInvocation::invoke(rendering_id.inner(), i, &data);
-            clips.push(invocation.clip_pos);
-        }
-        println!("clips: {clips:#?}");
-
-        let (device, queue) = r.get_device_and_queue_owned();
-        let depth_texture = r
-            .graph
-            .get_resource::<crate::DepthTexture>()
-            .unwrap()
-            .unwrap();
-        let depth_copied_buffer = crate::Texture::read(
-            &depth_texture.texture,
-            &device,
-            &queue,
-            depth_texture.width() as usize,
-            depth_texture.height() as usize,
-            1,
-            4,
-        );
-        let depth_img = depth_copied_buffer.into_linear_rgba(&device).unwrap();
-        img_diff::save("gltf/cmy_tri_depth.png", depth_img);
-
-        let img = r.render_linear_image().unwrap();
-        img_diff::assert_img_eq("gltf/cmy_tri.png", img);
-    }
+    //     let img = r.render_image().unwrap();
+    //     img_diff::assert_img_eq("gltf_normal_mapping_brick_sphere.png", img);
+    // }
 
     /// A helper struct that contains all outputs of the vertex shader.
     #[allow(unused)]
@@ -1620,10 +1219,11 @@ mod test {
     pub struct GltfVertexInvocation {
         pub instance_index: u32,
         pub vertex_index: u32,
-        pub render_unit_id: Id<GltfRendering>,
-        pub render_unit: GltfRendering,
-        pub out_camera: u32,
-        pub out_material: u32,
+        pub renderlet_id: Id<Renderlet>,
+        pub renderlet: Renderlet,
+        pub out_camera: Id<Camera>,
+        pub out_material: Id<Material>,
+        pub out_pbr_config: Id<PbrConfig>,
         pub out_color: Vec4,
         pub out_uv0: Vec2,
         pub out_uv1: Vec2,
@@ -1639,20 +1239,27 @@ mod test {
 
     impl GltfVertexInvocation {
         #[allow(dead_code)]
-        pub fn invoke(instance_index: u32, vertex_index: u32, slab: &[u32]) -> Self {
+        pub fn invoke(
+            instance_index: u32,
+            vertex_index: u32,
+            slab: &[u32],
+            debug: &mut [u32],
+        ) -> Self {
             let mut v = Self {
                 instance_index,
                 vertex_index,
                 ..Default::default()
             };
-            v.render_unit_id = Id::from(v.instance_index);
-            v.render_unit = slab.read(v.render_unit_id);
-            vertex(
-                v.render_unit_id,
+            v.renderlet_id = Id::from(v.instance_index);
+            v.renderlet = slab.read(v.renderlet_id);
+            crate::stage::renderlet_vertex(
+                v.renderlet_id,
                 v.vertex_index,
                 slab,
+                debug,
                 &mut v.out_camera,
                 &mut v.out_material,
+                &mut v.out_pbr_config,
                 &mut v.out_color,
                 &mut v.out_uv0,
                 &mut v.out_uv1,
