@@ -2,13 +2,14 @@
 use crabslab::{Id, SlabItem};
 use glam::{Vec3, Vec4};
 
+use crate::Transform;
+
 #[repr(C)]
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[derive(Copy, Clone, SlabItem)]
 pub struct SpotLight {
     pub position: Vec3,
     pub direction: Vec3,
-    pub attenuation: Vec3,
     pub inner_cutoff: f32,
     pub outer_cutoff: f32,
     pub color: Vec4,
@@ -20,7 +21,6 @@ impl Default for SpotLight {
         let white = Vec4::splat(1.0);
         let inner_cutoff = core::f32::consts::PI / 3.0;
         let outer_cutoff = core::f32::consts::PI / 2.0;
-        let attenuation = Vec3::new(1.0, 0.014, 0.007);
         let direction = Vec3::new(0.0, -1.0, 0.0);
         let color = white;
         let intensity = 1.0;
@@ -28,7 +28,6 @@ impl Default for SpotLight {
         Self {
             position: Default::default(),
             direction,
-            attenuation,
             inner_cutoff,
             outer_cutoff,
             color,
@@ -65,20 +64,17 @@ impl Default for DirectionalLight {
 #[derive(Copy, Clone, SlabItem)]
 pub struct PointLight {
     pub position: Vec3,
-    pub attenuation: Vec3,
     pub color: Vec4,
     pub intensity: f32,
 }
 
 impl Default for PointLight {
     fn default() -> Self {
-        let attenuation = Vec3::new(1.0, 0.14, 0.07);
         let color = Vec4::splat(1.0);
         let intensity = 1.0;
 
         Self {
             position: Default::default(),
-            attenuation,
             color,
             intensity,
         }
@@ -123,8 +119,8 @@ pub struct Light {
     pub light_type: LightStyle,
     // The index of the light in the slab
     pub index: u32,
-    //// The id of the next light
-    //pub next: Id<Light>,
+    // The id of a transform to apply to the position and direction of the light.
+    pub transform: Id<Transform>,
 }
 
 impl Default for Light {
@@ -132,7 +128,7 @@ impl Default for Light {
         Self {
             light_type: LightStyle::Directional,
             index: Id::<()>::NONE.inner(),
-            //next: Id::NONE,
+            transform: Id::NONE,
         }
     }
 }
@@ -142,7 +138,7 @@ impl From<Id<DirectionalLight>> for Light {
         Self {
             light_type: LightStyle::Directional,
             index: id.inner(),
-            //next: Id::NONE,
+            transform: Id::NONE,
         }
     }
 }
@@ -152,7 +148,7 @@ impl From<Id<SpotLight>> for Light {
         Self {
             light_type: LightStyle::Spot,
             index: id.inner(),
-            //next: Id::NONE,
+            transform: Id::NONE,
         }
     }
 }
@@ -162,7 +158,7 @@ impl From<Id<PointLight>> for Light {
         Self {
             light_type: LightStyle::Point,
             index: id.inner(),
-            //next: Id::NONE,
+            transform: Id::NONE,
         }
     }
 }
@@ -178,5 +174,50 @@ impl Light {
 
     pub fn into_point_id(self) -> Id<PointLight> {
         Id::from(self.index)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[cfg(feature = "gltf")]
+    #[test]
+    fn position_direction_sanity() {
+        // With GLTF, the direction of a light is given by the light's node's transform.
+        // Specifically we get the node's transform and use the rotation quaternion to
+        // rotate the vector Vec3::NEG_Z - the result is our direction.
+
+        use glam::{Mat4, Quat};
+        println!("{:#?}", std::env::current_dir());
+        let (document, _buffers, _images) = gltf::import("../../gltf/four_spotlights.glb").unwrap();
+        for node in document.nodes() {
+            println!("node: {} {:?}", node.index(), node.name());
+
+            let gltf_transform = node.transform();
+            let (translation, rotation, _scale) = gltf_transform.decomposed();
+            let position = Vec3::from_array(translation);
+            let direction =
+                Mat4::from_quat(Quat::from_array(rotation)).transform_vector3(Vec3::NEG_Z);
+            println!("position: {position}");
+            println!("direction: {direction}");
+
+            // In Blender, our lights are sitting at (0, 0, 1) pointing at -Z, +Z, +X and +Y.
+            // But alas, it is a bit more complicated than that because this file is exported with
+            // UP being +Y, so Z and Y have been flipped...
+            assert_eq!(Vec3::Y, position);
+            let expected_direction = match node.name() {
+                Some("light_negative_z") => Vec3::NEG_Y,
+                Some("light_positive_z") => Vec3::Y,
+                Some("light_positive_x") => Vec3::X,
+                // TODO: explain why positive +Y == -Z (why isn't +Y == +Z?)
+                Some("light_positive_y") => Vec3::NEG_Z,
+                n => panic!("unexpected node '{n:?}'"),
+            };
+            // And also there are rounding ... imprecisions...
+            assert_approx_eq::assert_approx_eq!(expected_direction.x, direction.x);
+            assert_approx_eq::assert_approx_eq!(expected_direction.y, direction.y);
+            assert_approx_eq::assert_approx_eq!(expected_direction.z, direction.z);
+        }
     }
 }

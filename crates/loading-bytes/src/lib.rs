@@ -60,6 +60,7 @@ pub async fn load(path: &str) -> Result<Vec<u8>, LoadingBytesError> {
     array.copy_to(&mut bytes);
     Ok(bytes)
 }
+
 #[cfg(not(target_arch = "wasm32"))]
 pub async fn load(path: &str) -> Result<Vec<u8>, LoadingBytesError> {
     let bytes: Vec<u8> = async_fs::read(path).await.with_context(|_| FsSnafu {

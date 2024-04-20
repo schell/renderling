@@ -5,7 +5,7 @@
 //! * https://github.com/KhronosGroup/glTF-Sample-Viewer/blob/5b1b7f48a8cb2b7aaef00d08fdba18ccc8dd331b/source/Renderer/shaders/pbr.frag
 //! * https://github.khronos.org/glTF-Sample-Viewer-Release/
 use crabslab::{Array, Id, Slab, SlabItem};
-use glam::{Vec2, Vec3, Vec4, Vec4Swizzles};
+use glam::{Mat4, Vec2, Vec3, Vec4, Vec4Swizzles};
 use light::Light;
 
 #[cfg(target_arch = "spirv")]
@@ -13,6 +13,7 @@ use spirv_std::num_traits::Float;
 
 use crate::{
     math::{self, IsVector},
+    pbr::light::{DirectionalLight, PointLight, SpotLight},
     println as my_println, AtlasTexture, Camera, IsSampler, Sample2d, SampleCube,
 };
 
@@ -577,71 +578,63 @@ pub fn shade_fragment(
     for i in 0..lights.len() {
         // calculate per-light radiance
         let light = slab.read(lights.at(i));
+        let transform = slab.read(light.transform);
+        let transform = Mat4::from(transform);
 
         // determine the light ray and the radiance
         match light.light_type {
             LightStyle::Point => {
-                let point_light = slab.read(light.into_point_id());
-                let frag_to_light = point_light.position - in_pos;
+                let PointLight {
+                    position,
+                    color,
+                    intensity,
+                } = slab.read(light.into_point_id());
+                let position = transform.transform_point3(position);
+                let frag_to_light = position - in_pos;
                 let distance = frag_to_light.length();
                 if distance == 0.0 {
                     continue;
                 }
                 let l = frag_to_light.alt_norm_or_zero();
-                let attenuation = point_light.intensity * 1.0 / (distance * distance);
-                lo += outgoing_radiance(
-                    point_light.color,
-                    albedo,
-                    attenuation,
-                    v,
-                    l,
-                    n,
-                    metallic,
-                    roughness,
-                );
+                let attenuation = intensity * 1.0 / (distance * distance);
+                lo += outgoing_radiance(color, albedo, attenuation, v, l, n, metallic, roughness);
             }
 
             LightStyle::Spot => {
-                let spot_light = slab.read(light.into_spot_id());
-                let frag_to_light = spot_light.position - in_pos;
+                let SpotLight {
+                    position,
+                    direction,
+                    inner_cutoff,
+                    outer_cutoff,
+                    color,
+                    intensity,
+                } = slab.read(light.into_spot_id());
+                let position = transform.transform_point3(position);
+                let frag_to_light = position - in_pos;
                 let distance = frag_to_light.length();
                 if distance == 0.0 {
                     continue;
                 }
                 let l = frag_to_light.alt_norm_or_zero();
-                let theta: f32 = l.dot(spot_light.direction.alt_norm_or_zero());
-                let epsilon: f32 = spot_light.inner_cutoff - spot_light.outer_cutoff;
-                let attenuation: f32 = spot_light.intensity
-                    * ((theta - spot_light.outer_cutoff) / epsilon).clamp(0.0, 1.0);
-                lo += outgoing_radiance(
-                    spot_light.color,
-                    albedo,
-                    attenuation,
-                    v,
-                    l,
-                    n,
-                    metallic,
-                    roughness,
-                );
+                let direction = transform.transform_vector3(direction).alt_norm_or_zero();
+                let theta: f32 = l.dot(direction);
+                let epsilon: f32 = inner_cutoff - outer_cutoff;
+                let attenuation: f32 =
+                    intensity * ((theta - outer_cutoff) / epsilon).clamp(0.0, 1.0);
+                lo += outgoing_radiance(color, albedo, attenuation, v, l, n, metallic, roughness);
             }
 
             LightStyle::Directional => {
-                let dir_light = slab.read(light.into_directional_id());
-                let l = -dir_light.direction.alt_norm_or_zero();
-                let attenuation = dir_light.intensity;
-                my_println!("dir_light: {dir_light:?}");
-                my_println!("l: {l:?}");
-                my_println!("attenuation: {attenuation:?}");
-                let radiance = outgoing_radiance(
-                    dir_light.color,
-                    albedo,
-                    attenuation,
-                    v,
-                    l,
-                    n,
-                    metallic,
-                    roughness,
-                );
+                let DirectionalLight {
+                    direction,
+                    color,
+                    intensity,
+                } = slab.read(light.into_directional_id());
+                let direction = transform.transform_vector3(direction);
+                let l = -direction.alt_norm_or_zero();
+                let attenuation = intensity;
+                let radiance =
+                    outgoing_radiance(color, albedo, attenuation, v, l, n, metallic, roughness);
                 my_println!("radiance: {radiance:?}");
                 lo += radiance;
             }

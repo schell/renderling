@@ -89,6 +89,7 @@ glam = { version = "0.24.2", default-features = false, features = ["libm"] }
 async-channel = {workspace = true}
 bytemuck = {workspace = true}
 crabslab = { workspace = true, features = ["default"] }
+dagga = {workspace=true}
 crunch = "0.5"
 futures-lite = {workspace=true}
 glam = { workspace = true, features = ["std"] }
