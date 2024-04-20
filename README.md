@@ -10,6 +10,10 @@ physically based shading.
 
 <img width="912" alt="ibl_environment_test" src="https://github.com/schell/renderling/assets/24942/297d6150-64b2-45b8-9760-12b27dc8cc3e">
 
+This project is sponsored by [NLnet](https://nlnet.nl/project/Renderling/) as part of [NGI Zero Core](https://nlnet.nl/core/).
+
+<img src="https://nlnet.nl/logo/banner.svg" width="200" />
+
 ## What
 
 `renderling` holds entire scenes of geometry, textures, materials, lighting, even the scene graph itself - in GPU buffers.
