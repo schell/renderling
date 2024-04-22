@@ -10,9 +10,10 @@ use crate::{
         light::{DirectionalLight, Light, LightStyle, PointLight, SpotLight},
         Material, PbrConfig,
     },
+    slab::*,
     stage::Vertex,
-    AtlasImage, AtlasTexture, Camera, Hybrid, HybridArray, NestedTransform, Renderlet,
-    RepackPreview, Stage, TextureAddressMode, TextureModes, Transform,
+    AtlasImage, AtlasTexture, Camera, NestedTransform, Renderlet, RepackPreview, Stage,
+    TextureAddressMode, TextureModes, Transform,
 };
 
 #[derive(Debug, Snafu)]
@@ -508,16 +509,12 @@ pub struct GltfCamera {
     pub name: Option<String>,
     pub node_transform: NestedTransform,
     projection: Mat4,
-    pub id: Id<Camera>,
+    pub camera: Hybrid<Camera>,
 }
 
 impl<'a> GltfCamera {
-    fn new(
-        stage: &mut impl GrowableSlab,
-        camera: gltf::Camera<'a>,
-        transform: &NestedTransform,
-    ) -> Self {
-        let projection = match camera.projection() {
+    fn new(stage: &mut Stage, gltf_camera: gltf::Camera<'a>, transform: &NestedTransform) -> Self {
+        let projection = match gltf_camera.projection() {
             gltf::camera::Projection::Orthographic(o) => glam::Mat4::orthographic_rh(
                 -o.xmag(),
                 o.xmag(),
@@ -541,12 +538,13 @@ impl<'a> GltfCamera {
             }
         };
         let view = Mat4::from(transform.get_global_transform()).inverse();
+        let camera = stage.new_hybrid(Camera::new(projection, view));
         GltfCamera {
-            index: camera.index(),
-            name: camera.name().map(String::from),
+            index: gltf_camera.index(),
+            name: gltf_camera.name().map(String::from),
             projection,
             node_transform: transform.clone(),
-            id: stage.append(&Camera::new(projection, view)),
+            camera,
         }
     }
 
@@ -753,8 +751,7 @@ impl GltfDocument {
             // The bindgroup will have to be remade
             let _ = stage.textures_bindgroup.lock().unwrap().take();
             // The atlas size must be reset
-            let size_id = PbrConfig::offset_of_atlas_size().into();
-            stage.slab.write().unwrap().write(size_id, &size);
+            stage.pbr_config.modify(|cfg| cfg.atlas_size = size);
         }
 
         log::debug!("Loading meshes");
@@ -973,17 +970,14 @@ impl Stage {
                 .get(mesh_index)
                 .context(MissingMeshSnafu { index: mesh_index })?;
             for prim in mesh.primitives.iter() {
-                let renderlet = Renderlet {
+                let hybrid = self.draw(Renderlet {
                     vertices: prim.vertices.array(),
                     indices: prim.indices.array(),
                     camera,
                     transform: gltf_node.transform.global_transform_id(),
                     material: prim.material,
                     ..Default::default()
-                };
-                let id = self.draw(&renderlet);
-                let hybrid = Hybrid::new_preallocated(id, renderlet);
-                self.add_updates(hybrid.clone());
+                });
                 renderlets.push(hybrid);
             }
         }
@@ -1145,7 +1139,7 @@ mod test {
             scale: Vec3::new(100.0, 100.0, 1.0),
             ..Default::default()
         });
-        let _renderlet = stage.draw(&Renderlet {
+        let _renderlet = stage.draw(Renderlet {
             vertices,
             indices,
             material: material_id,
@@ -1179,32 +1173,34 @@ mod test {
         let camera = stage.append(&Camera::new(projection, view));
         let default_scene_index = doc.default_scene.unwrap();
         let nodes = doc.scenes.get(default_scene_index).unwrap().clone();
-        let _unit_ids = stage.draw_gltf_scene(&mut doc, nodes, camera).unwrap();
+        let _scene = stage.draw_gltf_scene(&mut doc, nodes, camera).unwrap();
 
         let img = r.render_image().unwrap();
         img_diff::assert_img_eq("gltf_simple_texture.png", img);
     }
 
-    // #[test]
-    // // Demonstrates how to load and render a gltf file containing lighting and a
-    // // normal map.
-    // fn normal_mapping_brick_sphere() {
-    //     let size = 600;
-    //     let mut r =
-    //         Renderling::headless(size, size).with_background_color(Vec3::splat(1.0).extend(1.0));
-    //     let mut stage = r.new_stage().with_lighting(true).with_bloom(true);
-    //     stage.configure_graph(&mut r, true);
-    //     let doc = stage
-    //         .load_gltf_document_from_path("../../gltf/red_brick_03_1k.glb")
-    //         .unwrap();
-    //     let camera = stage.create_camera_from_gltf(&cpu_doc, 0).unwrap();
-    //     let camera_id = stage.append(&camera);
-    //     let _unit_ids =
-    //         stage.draw_gltf_scene(&gpu_doc, camera_id, cpu_doc.default_scene().unwrap());
+    #[test]
+    // Demonstrates how to load and render a gltf file containing lighting and a
+    // normal map.
+    fn normal_mapping_brick_sphere() {
+        let size = 600;
+        let mut r =
+            Renderling::headless(size, size).with_background_color(Vec3::splat(1.0).extend(1.0));
+        let mut stage = r.new_stage().with_lighting(true).with_bloom(true);
+        stage.configure_graph(&mut r, true);
+        let doc = stage
+            .load_gltf_document_from_path("../../gltf/red_brick_03_1k.glb")
+            .unwrap();
+        let gltf_camera = doc.cameras.get(0).unwrap();
+        let scene_index = doc.default_scene.unwrap();
+        let nodes = doc.scenes.get(scene_index).unwrap().iter().copied();
+        let _scene = stage.draw_gltf_scene(&doc, nodes, gltf_camera.camera.id());
 
-    //     let img = r.render_image().unwrap();
-    //     img_diff::assert_img_eq("gltf_normal_mapping_brick_sphere.png", img);
-    // }
+        stage.set_lights(doc.lights.iter().map(|gltf_light| gltf_light.light.id()));
+
+        let img = r.render_image().unwrap();
+        img_diff::assert_img_eq("gltf_normal_mapping_brick_sphere.png", img);
+    }
 
     /// A helper struct that contains all outputs of the vertex shader.
     #[allow(unused)]

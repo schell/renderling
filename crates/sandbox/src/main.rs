@@ -70,11 +70,10 @@ fn can_read_shader_debug_logs(window: Arc<winit::window::Window>) -> Renderling 
             .with_position([100.0, 0.0, 0.0])
             .with_color([1.0, 0.0, 1.0, 1.0]),
     ]);
-    let mut renderlet = Renderlet {
+    let _tri_id = stage.draw(Renderlet {
         camera,
         vertices: geometry,
         ..Default::default()
-    };
-    let _tri_id = stage.draw_debug(&mut renderlet);
+    });
     r
 }

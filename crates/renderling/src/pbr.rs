@@ -239,7 +239,7 @@ pub struct PbrConfig {
     pub resolution: glam::UVec2,
     pub debug_mode: debug::DebugMode,
     pub has_lighting: bool,
-    pub light_array: Array<light::Light>,
+    pub light_array: Array<Id<light::Light>>,
 }
 
 impl Default for PbrConfig {
@@ -565,7 +565,7 @@ pub fn shade_fragment(
     prefiltered: Vec3,
     brdf: Vec2,
 
-    lights: Array<Light>,
+    lights: Array<Id<Light>>,
     slab: &[u32],
 ) -> Vec4 {
     let n = in_norm.alt_norm_or_zero();
@@ -577,7 +577,11 @@ pub fn shade_fragment(
     let mut lo = Vec3::ZERO;
     for i in 0..lights.len() {
         // calculate per-light radiance
-        let light = slab.read(lights.at(i));
+        let light_id = slab.read(lights.at(i));
+        if light_id.is_none() {
+            break;
+        }
+        let light = slab.read(light_id);
         let transform = slab.read(light.transform);
         let transform = Mat4::from(transform);
 

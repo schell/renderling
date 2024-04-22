@@ -576,7 +576,7 @@ mod test {
             scale: Vec3::new(32.0, 32.0, 1.0),
             ..Default::default()
         });
-        let _renderlet = stage.draw(&crate::Renderlet {
+        let _renderlet = stage.draw(crate::Renderlet {
             camera,
             vertices: geometry,
             transform,
@@ -653,7 +653,7 @@ mod test {
                 .with_uv0(Vec2::splat(3.0));
             [tl, bl, br, tl, br, tr]
         });
-        let _clamp_prim = stage.draw(&Renderlet {
+        let _clamp_prim = stage.draw(Renderlet {
             camera,
             vertices: geometry,
             material: clamp_material_id,
@@ -664,7 +664,7 @@ mod test {
                 translation: Vec3::new(sheet_w + 1.0, 0.0, 0.0),
                 ..Default::default()
             });
-            stage.draw(&Renderlet {
+            stage.draw(Renderlet {
                 camera,
                 vertices: geometry,
                 material: repeat_material_id,
@@ -677,7 +677,7 @@ mod test {
                 translation: Vec3::new(sheet_w as f32 * 2.0 + 2.0, 0.0, 0.0),
                 ..Default::default()
             });
-            stage.draw(&Renderlet {
+            stage.draw(Renderlet {
                 camera,
                 vertices: geometry,
                 material: mirror_material_id,
@@ -765,7 +765,7 @@ mod test {
             stage.append_array(&[tl, bl, br, tl, br, tr])
         };
 
-        let _clamp_prim = stage.draw(&Renderlet {
+        let _clamp_prim = stage.draw(Renderlet {
             camera,
             vertices: geometry,
             material: clamp_material_id,
@@ -777,7 +777,7 @@ mod test {
                 ..Default::default()
             });
 
-            stage.draw(&Renderlet {
+            stage.draw(Renderlet {
                 camera,
                 vertices: geometry,
                 material: repeat_material_id,
@@ -791,7 +791,7 @@ mod test {
                 ..Default::default()
             });
 
-            stage.draw(&Renderlet {
+            stage.draw(Renderlet {
                 camera,
                 vertices: geometry,
                 material: mirror_material_id,
