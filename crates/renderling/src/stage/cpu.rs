@@ -9,6 +9,7 @@ use std::{
 
 use crate::{
     pbr::{debug::DebugMode, light::Light, PbrConfig},
+    slab::*,
     Atlas, AtlasError, AtlasImage, AtlasImageError, AtlasTexture, Camera, CpuCubemap, DepthTexture,
     Device, HdrSurface, Queue, Skybox, WgpuSlabError,
 };
@@ -49,241 +50,7 @@ impl From<StageError> for moongraph::GraphError {
 /// objects drawn.
 pub(crate) enum StageDrawStrategy {
     // TODO: Add `Indirect` to `StageDrawStrategy` which uses `RenderPass::multi_draw_indirect`
-    Direct(Vec<(Id<Renderlet>, Renderlet)>),
-}
-
-/// A "hybrid" type that lives on the CPU and the GPU.
-///
-/// Updates are syncronized to the GPU once per frame.
-pub struct Hybrid<T> {
-    cpu_value: Arc<RwLock<T>>,
-    id: Id<T>,
-    dirty: Arc<AtomicBool>,
-}
-
-impl<T: core::fmt::Debug> core::fmt::Debug for Hybrid<T> {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct(&format!("Hybrid<{}>", std::any::type_name::<T>()))
-            .field("id", &self.id)
-            .field("cpu_value", &self.cpu_value.read().unwrap())
-            .field("dirty", &self.get_dirty())
-            .finish()
-    }
-}
-
-impl<T> Clone for Hybrid<T> {
-    fn clone(&self) -> Self {
-        Hybrid {
-            cpu_value: self.cpu_value.clone(),
-            id: self.id,
-            dirty: self.dirty.clone(),
-        }
-    }
-}
-
-impl<T> Hybrid<T> {
-    pub(crate) fn set_dirty(&self, dirty: bool) {
-        self.dirty
-            .store(dirty, std::sync::atomic::Ordering::Relaxed)
-    }
-
-    pub(crate) fn get_dirty(&self) -> bool {
-        self.dirty.load(std::sync::atomic::Ordering::Relaxed)
-    }
-}
-
-impl<T: SlabItem + Clone + Send + Sync + 'static> Hybrid<T> {
-    pub fn new(stage: &mut Stage, value: T) -> Self {
-        let id = stage.allocate::<T>();
-        let hybrid = Self::new_preallocated(id, value);
-        stage.add_updates(hybrid.clone());
-
-        hybrid
-    }
-
-    pub(crate) fn new_preallocated(id: Id<T>, value: T) -> Self {
-        Self {
-            cpu_value: Arc::new(RwLock::new(value)),
-            id,
-            dirty: Arc::new(true.into()),
-        }
-    }
-
-    pub fn id(&self) -> Id<T> {
-        self.id
-    }
-
-    pub fn get(&self) -> T {
-        self.cpu_value.read().unwrap().clone()
-    }
-
-    pub fn modify(&self, f: impl FnOnce(&mut T)) {
-        let mut value_guard = self.cpu_value.write().unwrap();
-        self.set_dirty(true);
-        f(&mut value_guard);
-    }
-
-    pub fn set(&self, value: T) {
-        self.modify(move |old| {
-            *old = value;
-        })
-    }
-}
-
-/// A "hybrid" array type that lives on the CPU and the GPU.
-///
-/// Once created, the array cannot be resized.
-///
-/// Updates are syncronized to the GPU once per frame.
-pub struct HybridArray<T> {
-    cpu_value: Arc<RwLock<Vec<T>>>,
-    array: Array<T>,
-    updates: Arc<Mutex<Vec<SlabUpdate>>>,
-}
-
-impl<T: core::fmt::Debug> core::fmt::Debug for HybridArray<T> {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.debug_struct(&format!("HybridArray<{}>", std::any::type_name::<T>()))
-            .field("array", &self.array)
-            .field("cpu_value", &self.cpu_value.read().unwrap())
-            .finish()
-    }
-}
-
-impl<T> Clone for HybridArray<T> {
-    fn clone(&self) -> Self {
-        HybridArray {
-            cpu_value: self.cpu_value.clone(),
-            array: self.array,
-            updates: self.updates.clone(),
-        }
-    }
-}
-
-impl<T: SlabItem + Clone + Send + Sync + 'static> HybridArray<T> {
-    pub fn new(stage: &mut Stage, values: impl IntoIterator<Item = T>) -> Self {
-        let value = values.into_iter().collect::<Vec<_>>();
-        let array = stage.allocate_array::<T>(value.len());
-        let hybrid = Self::new_preallocated(array, value);
-        stage
-            .slab_updates
-            .write()
-            .unwrap()
-            .push(Box::new(hybrid.clone()));
-        hybrid
-    }
-
-    fn new_preallocated(array: Array<T>, values: Vec<T>) -> Self {
-        Self {
-            array,
-            updates: {
-                let mut elements = vec![0u32; T::SLAB_SIZE * array.len()];
-                elements.write_array(Array::new(0, array.len() as u32), &values);
-                Arc::new(Mutex::new(vec![SlabUpdate {
-                    array: array.into_u32_array(),
-                    elements,
-                    #[cfg(debug_assertions)]
-                    type_is: std::any::type_name::<Vec<T>>(),
-                }]))
-            },
-            cpu_value: Arc::new(RwLock::new(values)),
-        }
-    }
-
-    pub fn len(&self) -> usize {
-        self.array.len()
-    }
-
-    pub fn array(&self) -> Array<T> {
-        self.array
-    }
-
-    pub fn at(&self, index: usize) -> Option<T> {
-        self.cpu_value.read().unwrap().get(index).cloned()
-    }
-
-    pub fn modify<S>(&self, index: usize, f: impl FnOnce(&mut T) -> S) -> Option<S> {
-        let mut value_guard = self.cpu_value.write().unwrap();
-        let t = value_guard.get_mut(index)?;
-        let output = Some(f(t));
-        let t = t.clone();
-        let id = self.array.at(index);
-        let array = Array::<u32>::new(id.inner(), T::SLAB_SIZE as u32);
-        let mut elements = vec![0u32; T::SLAB_SIZE];
-        elements.write(id, &t);
-        self.updates.lock().unwrap().push(SlabUpdate {
-            array,
-            elements,
-            #[cfg(debug_assertions)]
-            type_is: std::any::type_name::<T>(),
-        });
-        output
-    }
-
-    pub fn set_item(&self, index: usize, value: T) -> Option<T> {
-        self.modify(index, move |t| std::mem::replace(t, value))
-    }
-}
-
-pub struct SlabUpdate {
-    array: Array<u32>,
-    elements: Vec<u32>,
-    #[cfg(debug_assertions)]
-    type_is: &'static str,
-}
-
-pub trait UpdatesSlab: Send + Sync + 'static {
-    /// Returns all current updates, clearing the queue.
-    fn get_updates(&self) -> Vec<SlabUpdate>;
-
-    /// Returns the slab range of all possible updates.
-    fn array(&self) -> Array<u32>;
-
-    /// Returns the number of references remaiting in the wild.
-    fn strong_count(&self) -> usize;
-}
-
-impl<T: SlabItem + Clone + Send + Sync + 'static> UpdatesSlab for Hybrid<T> {
-    fn get_updates(&self) -> Vec<SlabUpdate> {
-        if self.dirty.swap(false, std::sync::atomic::Ordering::Relaxed) {
-            let t = self.get();
-            let array = Array::<u32>::new(self.id.inner(), T::SLAB_SIZE as u32);
-            let mut elements = vec![0u32; T::SLAB_SIZE];
-            elements.write(0u32.into(), &t);
-            vec![SlabUpdate {
-                array,
-                elements,
-                #[cfg(debug_assertions)]
-                type_is: std::any::type_name::<T>(),
-            }]
-        } else {
-            vec![]
-        }
-    }
-
-    fn strong_count(&self) -> usize {
-        Arc::strong_count(&self.cpu_value)
-    }
-
-    fn array(&self) -> Array<u32> {
-        Array::new(self.id.inner(), T::SLAB_SIZE as u32)
-    }
-}
-
-impl<T: SlabItem + Clone + Send + Sync + 'static> UpdatesSlab for HybridArray<T> {
-    fn get_updates(&self) -> Vec<SlabUpdate> {
-        let mut guard = self.updates.lock().unwrap();
-        let updates = std::mem::take(guard.as_mut());
-        updates
-    }
-
-    fn strong_count(&self) -> usize {
-        Arc::strong_count(&self.cpu_value)
-    }
-
-    fn array(&self) -> Array<u32> {
-        self.array.into_u32_array()
-    }
+    Direct(Vec<Hybrid<Renderlet>>),
 }
 
 /// Represents an entire scene worth of rendering data.
@@ -294,7 +61,8 @@ impl<T: SlabItem + Clone + Send + Sync + 'static> UpdatesSlab for HybridArray<T>
 /// Only available on the CPU. Not available in shaders.
 #[derive(Clone)]
 pub struct Stage {
-    pub(crate) slab: Arc<RwLock<CpuSlab<WgpuBuffer>>>,
+    pub(crate) mngr: SlabManager,
+    pub(crate) pbr_config: Hybrid<PbrConfig>,
     pub(crate) vertex_debug: Arc<RwLock<CpuSlab<WgpuBuffer>>>,
     pub(crate) fragment_debug: Arc<RwLock<CpuSlab<WgpuBuffer>>>,
     pub(crate) atlas: Arc<RwLock<Atlas>>,
@@ -306,49 +74,23 @@ pub struct Stage {
     pub(crate) has_bloom: Arc<AtomicBool>,
     pub(crate) buffers_bindgroup: Arc<Mutex<Option<Arc<wgpu::BindGroup>>>>,
     pub(crate) textures_bindgroup: Arc<Mutex<Option<Arc<wgpu::BindGroup>>>>,
-    pub(crate) lights: HybridArray<Id<Light>>,
+    pub lights: HybridArray<Id<Light>>,
     pub(crate) draws: Arc<RwLock<StageDrawStrategy>>,
-    pub(crate) slab_updates: Arc<RwLock<Vec<Box<dyn UpdatesSlab>>>>,
     pub(crate) device: Device,
     pub(crate) queue: Queue,
 }
 
-impl Slab for Stage {
-    fn len(&self) -> usize {
-        // UNWRAP: if we can't acquire the lock we want to panic.
-        self.slab.read().unwrap().len()
-    }
+impl Deref for Stage {
+    type Target = SlabManager;
 
-    fn read_unchecked<T: SlabItem>(&self, id: Id<T>) -> T {
-        // UNWRAP: if we can't acquire the lock we want to panic.
-        self.slab.read().unwrap().read_unchecked(id)
-    }
-
-    fn write_indexed<T: SlabItem>(&mut self, t: &T, index: usize) -> usize {
-        // UNWRAP: if we can't acquire the lock we want to panic.
-        self.slab.write().unwrap().write_indexed(t, index)
-    }
-
-    fn write_indexed_slice<T: SlabItem>(&mut self, t: &[T], index: usize) -> usize {
-        // UNWRAP: if we can't acquire the lock we want to panic.
-        self.slab.write().unwrap().write_indexed_slice(t, index)
+    fn deref(&self) -> &Self::Target {
+        &self.mngr
     }
 }
 
-impl GrowableSlab for Stage {
-    fn capacity(&self) -> usize {
-        // UNWRAP: if we can't acquire the lock we want to panic.
-        self.slab.write().unwrap().capacity()
-    }
-
-    fn reserve_capacity(&mut self, capacity: usize) {
-        // UNWRAP: if we can't acquire the lock we want to panic.
-        self.slab.write().unwrap().reserve_capacity(capacity)
-    }
-
-    fn increment_len(&mut self, n: usize) -> usize {
-        // UNWRAP: if we can't acquire the lock we want to panic.
-        self.slab.write().unwrap().increment_len(n)
+impl DerefMut for Stage {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.mngr
     }
 }
 
@@ -356,18 +98,20 @@ impl Stage {
     /// Create a new stage.
     pub fn new(device: Device, queue: Queue, resolution: UVec2) -> Self {
         let atlas = Atlas::empty(&device, &queue);
-        let mut slab = CpuSlab::new(WgpuBuffer::new(device.0.clone(), queue.0.clone(), 256));
-        let _ = slab.append(&PbrConfig {
+        let mut mngr = SlabManager::new(&device, &queue);
+        let pbr_config = mngr.new_hybrid(PbrConfig {
             atlas_size: atlas.size,
             resolution,
             ..Default::default()
         });
         // TODO: make number of lights on the stage configurable
-        let lights_values = vec![Id::<Light>::NONE; 16];
-        let lights =
-            HybridArray::new_preallocated(slab.append_array(&lights_values), lights_values);
+        let lights = mngr.new_hybrid_array(vec![Id::<Light>::NONE; 16]);
+
         Self {
-            slab: Arc::new(RwLock::new(slab)),
+            mngr,
+            pbr_config,
+            lights,
+
             vertex_debug: Arc::new(RwLock::new(CpuSlab::new(WgpuBuffer::new(
                 device.0.clone(),
                 queue.0.clone(),
@@ -393,8 +137,6 @@ impl Stage {
             buffers_bindgroup: Default::default(),
             textures_bindgroup: Default::default(),
             draws: Arc::new(RwLock::new(StageDrawStrategy::Direct(vec![]))),
-            lights,
-            slab_updates: Default::default(),
             device,
             queue,
         }
@@ -402,8 +144,7 @@ impl Stage {
 
     /// Set the debug mode.
     pub fn set_debug_mode(&mut self, debug_mode: DebugMode) {
-        let id: Id<DebugMode> = Id::from(PbrConfig::offset_of_debug_mode());
-        self.write(id, &debug_mode);
+        self.pbr_config.modify(|cfg| cfg.debug_mode = debug_mode);
     }
 
     /// Set the debug mode.
@@ -414,8 +155,8 @@ impl Stage {
 
     /// Set whether the stage uses lighting.
     pub fn set_has_lighting(&mut self, use_lighting: bool) {
-        let id = Id::<bool>::from(PbrConfig::offset_of_has_lighting());
-        self.write(id, &use_lighting);
+        self.pbr_config
+            .modify(|cfg| cfg.has_lighting = use_lighting);
     }
 
     /// Set whether the stage uses lighting.
@@ -425,14 +166,16 @@ impl Stage {
     }
 
     /// Set the lights to use for shading.
-    pub fn set_lights(&mut self, lights: Array<Light>) {
-        let id = Id::<Array<Light>>::from(PbrConfig::offset_of_light_array());
-        self.write(id, &lights);
+    pub fn set_lights(&mut self, lights: impl IntoIterator<Item = Id<Light>>) {
+        log::trace!("setting lights");
+        self.lights = self.mngr.new_hybrid_array(lights);
+        self.pbr_config.modify(|cfg| {
+            cfg.light_array = self.lights.array();
+        });
     }
 
     pub fn set_resolution(&mut self, resolution: UVec2) {
-        let id = Id::<UVec2>::from(PbrConfig::offset_of_resolution());
-        self.write(id, &resolution);
+        self.pbr_config.modify(|cfg| cfg.resolution = resolution);
 
         // Allocate space for our fragment shader logs...
         let len = resolution.x * resolution.y;
@@ -469,9 +212,7 @@ impl Stage {
         // The textures bindgroup will have to be remade
         let _ = self.textures_bindgroup.lock().unwrap().take();
         // The atlas size must be reset
-        let size_id = Id::<glam::UVec2>::from(PbrConfig::offset_of_atlas_size());
-        // UNWRAP: if we can't write to the stage legend we want to panic
-        self.slab.write().unwrap().write(size_id, &atlas.size);
+        self.pbr_config.modify(|cfg| cfg.atlas_size = atlas.size);
 
         let textures = atlas
             .frames()
@@ -530,10 +271,9 @@ impl Stage {
         let bindgroup = if let Some(bindgroup) = bindgroup.as_ref() {
             bindgroup.clone()
         } else {
-            let slab = self.slab.read().unwrap();
             let bg = Arc::new(crate::skybox::create_skybox_bindgroup(
                 &self.device,
-                slab.as_ref().get_buffer(),
+                self.mngr.get_buffer().deref(),
                 &self.skybox.read().unwrap().environment_cubemap,
             ));
             *bindgroup = Some(bg.clone());
@@ -621,7 +361,7 @@ impl Stage {
                 let pipeline: &wgpu::RenderPipeline = &self.get_pipeline();
                 crate::linkage::slab_bindgroup(
                     device,
-                    self.slab.read().unwrap().as_ref().get_buffer(),
+                    self.mngr.get_buffer().deref(),
                     self.vertex_debug.read().unwrap().as_ref().get_buffer(),
                     self.fragment_debug.read().unwrap().as_ref().get_buffer(),
                     &pipeline.get_bind_group_layout(0),
@@ -652,26 +392,19 @@ impl Stage {
 
     /// Draw a [`Renderlet`] each frame.
     ///
-    /// Returns the id of the stored `Renderlet`.
-    pub fn draw(&mut self, renderlet: &crate::Renderlet) -> Id<crate::Renderlet> {
-        let mut renderlet = *renderlet;
-        self.draw_debug(&mut renderlet)
-    }
-
-    /// Draw a [`Renderlet`] each frame.
-    ///
-    /// Returns the id of the stored `Renderlet`.
+    /// Returns a CPU/GPU hybrid `Renderlet`.
     ///
     /// Updates the input `renderlet` with a `debug_index`, which can be used to retrieve
     /// debugging information after running a shader.
-    pub fn draw_debug(&mut self, renderlet: &mut crate::Renderlet) -> Id<crate::Renderlet> {
-        let id = self.append(renderlet);
+    pub fn draw(&mut self, mut renderlet: crate::Renderlet) -> Hybrid<crate::Renderlet> {
         // UNWRAP: if we can't acquire the lock we want to panic.
         let mut draws = self.draws.write().unwrap();
+        let hybrid;
         match draws.deref_mut() {
             StageDrawStrategy::Direct(units) => {
                 renderlet.debug_index = units.len() as u32;
-                units.push((id, *renderlet));
+                hybrid = self.mngr.new_hybrid(renderlet);
+                units.push(hybrid.clone());
             }
         }
 
@@ -682,7 +415,7 @@ impl Stage {
             let mut debug = self.vertex_debug.write().unwrap();
             debug.append_array(&vertex_debug_data);
         }
-        id
+        hybrid
     }
 
     /// Erase the [`Renderlet`] with the given [`Id`] from the stage.
@@ -692,45 +425,17 @@ impl Stage {
         let mut draws = self.draws.write().unwrap();
         match draws.deref_mut() {
             StageDrawStrategy::Direct(units) => {
-                units.retain(|(renderlet_id, _)| renderlet_id != &id);
+                units.retain(|hybrid| hybrid.id() != id);
             }
         }
     }
 
     /// Returns all the draw operations ([`Renderlet`]s) on the stage, paired with their [`Id`]s.
-    pub fn get_draws(&self) -> Vec<(Id<Renderlet>, Renderlet)> {
+    pub fn get_draws(&self) -> Vec<Hybrid<Renderlet>> {
         // UNWRAP: if we can't acquire the lock we want to panic.
         let draws = self.draws.read().unwrap();
         match draws.deref() {
             StageDrawStrategy::Direct(units) => units.clone(),
-        }
-    }
-
-    /// Show the [`Renderlet`] with the given `Id` for rendering.
-    pub fn show(&self, id: Id<Renderlet>) {
-        let mut draws = self.draws.write().unwrap();
-        match draws.deref_mut() {
-            StageDrawStrategy::Direct(units) => {
-                for (r_id, r) in units.iter_mut() {
-                    if r_id == &id {
-                        r.visible = true;
-                    }
-                }
-            }
-        }
-    }
-
-    /// Hide the [`Renderlet`] with the given `Id` from rendering.
-    pub fn hide(&self, id: Id<Renderlet>) {
-        let mut draws = self.draws.write().unwrap();
-        match draws.deref_mut() {
-            StageDrawStrategy::Direct(units) => {
-                for (r_id, r) in units.iter_mut() {
-                    if r_id == &id {
-                        r.visible = false;
-                    }
-                }
-            }
         }
     }
 
@@ -900,8 +605,7 @@ impl Stage {
     ///
     /// This is primarily used for debugging.
     pub fn read_slab(&self) -> Result<Vec<u32>, WgpuSlabError> {
-        // UNWRAP: if we can't acquire the lock we want to panic.
-        self.slab.read().unwrap().as_ref().block_on_read_raw(..)
+        self.mngr.read_slab()
     }
 
     /// Read the vertex debug messages.
@@ -910,7 +614,7 @@ impl Stage {
         let draws = self.get_draws();
         let len = draws
             .into_iter()
-            .map(|(_, r)| r.vertices.len())
+            .map(|r| r.get().vertices.len())
             .sum::<usize>();
         let array = Array::<RenderletVertexLog>::new(0, len as u32);
         let logs = self.vertex_debug.read().unwrap().as_ref().read_vec(array);
@@ -924,10 +628,7 @@ impl Stage {
             let draws = self.draws.read().unwrap();
             match draws.deref() {
                 StageDrawStrategy::Direct(units) => {
-                    let len = units
-                        .iter()
-                        .map(|(_, renderlet)| renderlet.vertices.len())
-                        .sum::<usize>();
+                    let len = units.iter().map(|r| r.get().vertices.len()).sum::<usize>();
                     len
                 }
             }
@@ -940,27 +641,18 @@ impl Stage {
 
     /// Read the fragment debug messages.
     pub fn read_fragment_debug_logs(&self) -> Vec<RenderletFragmentLog> {
-        // UNWRAP: if we can't acquire the lock we want to panic.
-        let len = {
-            let slab = self.slab.read().unwrap();
-            let cfg_id = Id::<PbrConfig>::new(0);
-            let resolution = slab.read(cfg_id + PbrConfig::offset_of_resolution());
-            resolution.x * resolution.y
-        };
-        // UNWRAP: if we can't read we want to panic.
+        let resolution = self.pbr_config.get().resolution;
+        let len = resolution.x * resolution.y;
         let array = Array::<RenderletFragmentLog>::new(0, len);
         log::trace!("reading {len} logs from fragment_debug buffer");
+        // UNWRAP: if we can't read we want to panic.
         self.fragment_debug.read().unwrap().read_vec(array)
     }
 
     /// Clear the fragment debug messages.
     pub fn clear_fragment_debug_logs(&self) {
-        let len = {
-            let slab = self.slab.read().unwrap();
-            let cfg_id = Id::<PbrConfig>::new(0);
-            let resolution = slab.read(cfg_id + PbrConfig::offset_of_resolution());
-            resolution.x * resolution.y
-        };
+        let resolution = self.pbr_config.get().resolution;
+        let len = resolution.x * resolution.y;
         // UNWRAP: if we can't write we want to panic.
         let mut debug = self.fragment_debug.write().unwrap();
         let array = Array::<RenderletFragmentLog>::new(0, len);
@@ -985,52 +677,7 @@ impl Stage {
     }
 
     pub fn new_nested_transform(&mut self) -> NestedTransform {
-        NestedTransform::new(self)
-    }
-
-    pub(crate) fn add_updates(&mut self, updates: impl UpdatesSlab) {
-        self.slab_updates.write().unwrap().push(Box::new(updates));
-    }
-
-    pub fn new_hybrid<T: SlabItem + Clone + Send + Sync + 'static>(
-        &mut self,
-        value: T,
-    ) -> Hybrid<T> {
-        Hybrid::new(self, value)
-    }
-
-    pub fn new_hybrid_array<T: SlabItem + Clone + Send + Sync + 'static>(
-        &mut self,
-        values: impl IntoIterator<Item = T>,
-    ) -> HybridArray<T> {
-        HybridArray::new(self, values)
-    }
-    fn write_updates(&mut self) {
-        let writes = {
-            let mut writes = vec![];
-            let mut guard = self.slab_updates.write().unwrap();
-            guard.retain(|hybrid| {
-                writes.extend(hybrid.get_updates());
-                let count = hybrid.strong_count();
-                count > 1
-            });
-            writes
-        };
-        for (
-            i,
-            SlabUpdate {
-                array,
-                elements,
-                type_is,
-            },
-        ) in writes
-            .into_iter()
-            .filter(|u| !u.array.is_empty() && !u.array.is_null())
-            .enumerate()
-        {
-            log::trace!("writing update {i} {type_is} {array:?}");
-            self.write_array(array, &elements);
-        }
+        NestedTransform::new(&mut self.mngr)
     }
 }
 
@@ -1053,7 +700,7 @@ pub fn stage_render(
     } else {
         None
     };
-    stage.write_updates();
+    stage.mngr.upkeep();
     //let mut may_bloom_filter = if
     // stage.has_bloom.load(std::sync::atomic::Ordering::Relaxed) {    // UNWRAP:
     // if we can't acquire the lock we want to panic.    Some(stage.bloom.
@@ -1086,13 +733,15 @@ pub fn stage_render(
         render_pass.set_bind_group(1, &textures_bindgroup, &[]);
         match draws.deref() {
             StageDrawStrategy::Direct(units) => {
-                for (id, rlet) in units {
+                for hybrid in units {
+                    let rlet = hybrid.get();
                     if rlet.visible {
                         let vertex_range = if rlet.indices.is_null() {
                             0..rlet.vertices.len() as u32
                         } else {
                             0..rlet.indices.len() as u32
                         };
+                        let id = hybrid.id();
                         let instance_range = id.inner()..id.inner() + 1;
                         log::trace!(
                             "drawing vertices {vertex_range:?} and instances {instance_range:?}"
@@ -1136,14 +785,14 @@ impl core::fmt::Debug for NestedTransform {
             .read()
             .unwrap()
             .iter()
-            .map(|nt| nt.global_transform.id)
+            .map(|nt| nt.global_transform.id())
             .collect::<Vec<_>>();
         let parent = self
             .parent
             .read()
             .unwrap()
             .as_ref()
-            .map(|nt| nt.global_transform.id);
+            .map(|nt| nt.global_transform.id());
         f.debug_struct("NestedTransform")
             .field("global_transform", &self.global_transform)
             .field("local_transform", &self.local_transform)
@@ -1154,8 +803,8 @@ impl core::fmt::Debug for NestedTransform {
 }
 
 impl NestedTransform {
-    pub fn new(stage: &mut Stage) -> Self {
-        let global_transform = Hybrid::new(stage, Transform::default());
+    pub fn new(mngr: &mut SlabManager) -> Self {
+        let global_transform = mngr.new_hybrid(Transform::default());
         let nested = NestedTransform {
             local_transform: Arc::new(RwLock::new(Transform::default())),
             global_transform,
@@ -1186,7 +835,7 @@ impl NestedTransform {
     }
 
     pub fn global_transform_id(&self) -> Id<Transform> {
-        self.global_transform.id
+        self.global_transform.id()
     }
 
     pub fn add_child(&mut self, node: &NestedTransform) {
@@ -1198,7 +847,7 @@ impl NestedTransform {
 
     pub fn remove_child(&mut self, node: &NestedTransform) {
         self.children.write().unwrap().retain_mut(|child| {
-            if child.global_transform.id == node.global_transform.id {
+            if child.global_transform.id() == node.global_transform.id() {
                 let local_transform = node.get_local_transform();
                 node.global_transform.set(local_transform);
                 let _ = node.parent.write().unwrap().take();
@@ -1248,12 +897,11 @@ mod test {
         let (projection, view) = crate::default_ortho2d(100.0, 100.0);
         let camera = stage.append(&Camera::new(projection, view));
         let geometry = stage.append_array(&crate::test::right_tri_vertices());
-        let mut renderlet = Renderlet {
+        let tri = stage.draw(Renderlet {
             camera,
             vertices: geometry,
             ..Default::default()
-        };
-        let tri_id = stage.draw_debug(&mut renderlet);
+        });
         let _ = r.render_linear_image().unwrap();
 
         // read vertex logs
@@ -1261,7 +909,7 @@ mod test {
             let vertex_logs = stage.read_vertex_debug_logs();
             for (i, log) in vertex_logs.iter().enumerate() {
                 println!("log_{i}:{log:#?}");
-                assert_eq!(tri_id, log.renderlet_id);
+                assert_eq!(tri.id(), log.renderlet_id);
                 assert!(log.started);
                 assert!(log.completed);
             }

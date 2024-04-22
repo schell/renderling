@@ -38,6 +38,8 @@ pub mod pbr;
 #[cfg(not(target_arch = "spirv"))]
 mod renderer;
 pub mod skybox;
+#[cfg(not(target_arch = "spirv"))]
+pub mod slab;
 mod stage;
 #[cfg(not(target_arch = "spirv"))]
 mod state;
@@ -313,7 +315,7 @@ mod test {
         let (projection, view) = default_ortho2d(100.0, 100.0);
         let camera = stage.append(&Camera::new(projection, view));
         let geometry = stage.append_array(&right_tri_vertices());
-        let _tri_id = stage.draw(&Renderlet {
+        let _tri_id = stage.draw(Renderlet {
             camera,
             vertices: geometry,
             ..Default::default()
@@ -363,7 +365,7 @@ mod test {
             vs.reverse();
             vs
         });
-        let _tri = stage.draw(&Renderlet {
+        let _tri = stage.draw(Renderlet {
             camera,
             vertices: geometry,
             ..Default::default()
@@ -392,7 +394,7 @@ mod test {
         let camera = stage.append(&Camera::new(projection, view));
         let geometry = stage.append_array(&right_tri_vertices());
         let transform = stage.append(&Transform::default());
-        let _tri = stage.draw(&Renderlet {
+        let _tri = stage.draw(Renderlet {
             camera,
             vertices: geometry,
             transform,
@@ -471,7 +473,7 @@ mod test {
             rotation: Quat::from_axis_angle(Vec3::Y, -std::f32::consts::FRAC_PI_4),
             ..Default::default()
         });
-        let _cube = stage.draw(&Renderlet {
+        let _cube = stage.draw(Renderlet {
             camera,
             vertices: geometry,
             transform,
@@ -500,7 +502,7 @@ mod test {
             rotation: Quat::from_axis_angle(Vec3::Y, -std::f32::consts::FRAC_PI_4),
             ..Default::default()
         });
-        let _cube = stage.draw(&Renderlet {
+        let _cube = stage.draw(Renderlet {
             camera,
             vertices,
             indices,
@@ -542,14 +544,14 @@ mod test {
             }),
             ..Default::default()
         };
-        let _cube_one = stage.draw(&renderlet);
+        let _cube_one = stage.draw(renderlet);
 
         renderlet.transform = stage.append(&Transform {
             translation: Vec3::new(4.5, 0.0, 0.0),
             scale: Vec3::new(6.0, 6.0, 6.0),
             rotation: Quat::from_axis_angle(Vec3::Y, std::f32::consts::FRAC_PI_4),
         });
-        let cube_two_rendering = stage.draw(&renderlet);
+        let cube_two_rendering = stage.draw(renderlet);
 
         // we should see two colored cubes
         let img = r.render_image().unwrap();
@@ -557,14 +559,14 @@ mod test {
         let img_before = img;
 
         // update cube two making it invisible
-        stage.hide(cube_two_rendering);
+        cube_two_rendering.modify(|r| r.visible = false);
 
         // we should see only one colored cube
         let img = r.render_image().unwrap();
         img_diff::assert_img_eq("cmy_cube/visible_after.png", img);
 
         // update cube two making in visible again
-        stage.show(cube_two_rendering);
+        cube_two_rendering.modify(|r| r.visible = true);
 
         // we should see two colored cubes again
         let img = r.render_image().unwrap();
@@ -595,7 +597,7 @@ mod test {
             ..Default::default()
         });
 
-        let cube_id = stage.draw(&Renderlet {
+        let cube = stage.draw(Renderlet {
             camera,
             vertices: cube_geometry,
             transform,
@@ -608,7 +610,7 @@ mod test {
 
         // Update the cube mesh to a pyramid by overwriting the `.vertices` field
         // of `Renderlet`
-        stage.write(cube_id + Renderlet::offset_of_vertices(), &pyramid_geometry);
+        cube.modify(|r| r.vertices = pyramid_geometry);
 
         // we should see a pyramid (in sRGB color space)
         let img = r.render_image().unwrap();
@@ -686,7 +688,7 @@ mod test {
             scale: Vec3::new(10.0, 10.0, 10.0),
             ..Default::default()
         });
-        let cube = stage.draw(&Renderlet {
+        let cube = stage.draw(Renderlet {
             camera,
             vertices: geometry,
             material,
@@ -754,7 +756,7 @@ mod test {
         ]);
 
         let _color_prim = {
-            stage.draw(&Renderlet {
+            stage.draw(Renderlet {
                 camera,
                 vertices: geometry,
                 ..Default::default()
@@ -766,7 +768,7 @@ mod test {
                 scale: Vec3::new(0.5, 0.5, 1.0),
                 ..Default::default()
             });
-            stage.draw(&Renderlet {
+            stage.draw(Renderlet {
                 camera,
                 vertices: geometry,
                 transform,
@@ -820,8 +822,10 @@ mod test {
             },
             dir_red.into()
         );
-        let lights = stage.append_array(&[dir_red.into(), dir_green.into(), dir_blue.into()]);
-        stage.set_lights(lights);
+        let dir_red = stage.append(&Light::from(dir_red));
+        let dir_green = stage.append(&Light::from(dir_green));
+        let dir_blue = stage.append(&Light::from(dir_blue));
+        stage.set_lights(vec![dir_red, dir_green, dir_blue]);
 
         let material = stage.append(&Material::default());
         let geometry = stage.append_array(
@@ -835,7 +839,7 @@ mod test {
                 })
                 .collect::<Vec<_>>(),
         );
-        let _cube = stage.draw(&Renderlet {
+        let _cube = stage.draw(Renderlet {
             camera,
             vertices: geometry,
             material,
@@ -951,21 +955,21 @@ mod test {
         yellow_node.add_child(&red_node);
         println!("red_node: {:#?}", red_node.get_global_transform());
 
-        let _cyan_primitive = stage.draw(&Renderlet {
+        let _cyan_primitive = stage.draw(Renderlet {
             vertices: geometry,
             camera,
             material: cyan_material,
             transform: cyan_node.global_transform_id(),
             ..Default::default()
         });
-        let _yellow_primitive = stage.draw(&Renderlet {
+        let _yellow_primitive = stage.draw(Renderlet {
             vertices: geometry,
             camera,
             material: yellow_material,
             transform: yellow_node.global_transform_id(),
             ..Default::default()
         });
-        let _red_primitive = stage.draw(&Renderlet {
+        let _red_primitive = stage.draw(Renderlet {
             vertices: geometry,
             camera,
             material: red_material,
@@ -1057,7 +1061,7 @@ mod test {
                     translation: Vec3::new(x, y, 0.0),
                     ..Default::default()
                 });
-                let _sphere = stage.draw(&Renderlet {
+                let _sphere = stage.draw(Renderlet {
                     camera,
                     vertices: geometry,
                     transform,
