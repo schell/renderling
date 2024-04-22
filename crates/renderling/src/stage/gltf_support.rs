@@ -2,13 +2,13 @@
 use std::collections::HashMap;
 
 use crabslab::{Array, GrowableSlab, Id, Slab};
-use glam::{Mat4, Quat, Vec2, Vec3, Vec4};
+use glam::{Mat4, Vec2, Vec3, Vec4};
 use snafu::{OptionExt, ResultExt, Snafu};
 
 use crate::{
     pbr::{
         light::{DirectionalLight, Light, LightStyle, PointLight, SpotLight},
-        Material, PbrConfig,
+        Material,
     },
     slab::*,
     stage::Vertex,
@@ -1009,10 +1009,10 @@ mod test {
     use crate::{
         pbr::{Material, PbrConfig},
         stage::Vertex,
-        Camera, Renderlet, Renderling, Stage, Transform,
+        Camera, Renderlet, Renderling, Transform,
     };
-    use crabslab::{Array, GrowableSlab, Id, Slab, SlabItem};
-    use glam::{UVec2, Vec2, Vec3, Vec4, Vec4Swizzles};
+    use crabslab::{GrowableSlab, Id, Slab};
+    use glam::{Vec2, Vec3, Vec4, Vec4Swizzles};
 
     #[test]
     fn get_vertex_count_primitive_sanity() {
