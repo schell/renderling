@@ -104,7 +104,6 @@ impl Stage {
             resolution,
             ..Default::default()
         });
-        // TODO: make number of lights on the stage configurable
         let lights = mngr.new_hybrid_array(vec![Id::<Light>::NONE; 16]);
 
         Self {
