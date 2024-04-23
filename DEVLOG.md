@@ -1,6 +1,21 @@
 # devlog
 
-## Tue Apr 9,
+## Wed Apr 24, 2024 🎉
+
+NLnet is officially sponsoring the development of `renderling`! 
+
+In fact, the project was specifically mentioned in 
+[their announcement](https://nlnet.nl/news/2024/20240417-announcing-projects.html), 
+which feels good.
+
+[Here is the renderling project overview on NLnet](https://nlnet.nl/project/Renderling/).
+
+Now I've got to get on my project organization and write up some documents, etc, then I 
+can get started adding atomics to `naga`, and unblock `renderling`'s occlusion culling 
+and light tiling steps (they will be `rust-gpu` compiled compute shaders, but they require 
+support for atomics, which `wgpu` currently lacks).
+
+## Tue Apr 9, 2024
 
 ### Better debugging
 

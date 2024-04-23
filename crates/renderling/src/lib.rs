@@ -17,6 +17,7 @@
 
 mod atlas;
 pub mod bits;
+pub mod bloom;
 mod camera;
 pub mod convolution;
 #[cfg(not(target_arch = "spirv"))]
