@@ -151,7 +151,7 @@ pub fn bloom_upsample_fragment(
 
 #[cfg(not(target_arch = "spirv"))]
 mod cpu {
-    use std::sync::{Arc, RwLock};
+    use std::sync::Arc;
 
     use super::*;
     use crate::{
