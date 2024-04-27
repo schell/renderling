@@ -47,12 +47,14 @@ tutorial = [
 bloom = [
   "bloom_downsample_fragment",
   "bloom_upsample_fragment",
+  "bloom_mix_fragment",
   "bloom_vertex"
 ]
 # shaders
 array_test = []
 bloom_downsample_fragment = []
 bloom_upsample_fragment = []
+bloom_mix_fragment = []
 bloom_vertex = []
 brdf_lut_convolution_fragment = []
 brdf_lut_convolution_vertex = []

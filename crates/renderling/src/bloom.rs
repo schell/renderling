@@ -2,7 +2,7 @@
 //!
 //! As described in [learnopengl.com's Physically Based Bloom article](https://learnopengl.com/Guest-Articles/2022/Phys.-Based-Bloom).
 use crabslab::{Id, Slab, SlabItem};
-use glam::{UVec2, Vec2, Vec4};
+use glam::{UVec2, Vec2, Vec4, Vec4Swizzles};
 use spirv_std::{image::Image2d, spirv, Sampler};
 
 #[derive(Clone, Copy, SlabItem)]
@@ -156,6 +156,24 @@ pub fn bloom_upsample_fragment(
     *upsample = sample;
 }
 
+#[cfg(feature = "bloom_mix_fragment")]
+#[spirv(fragment)]
+pub fn bloom_mix_fragment(
+    #[spirv(descriptor_set = 0, binding = 0)] hdr_texture: &Image2d,
+    #[spirv(descriptor_set = 0, binding = 1)] hdr_sampler: &Sampler,
+    #[spirv(descriptor_set = 0, binding = 2)] bloom_texture: &Image2d,
+    #[spirv(descriptor_set = 0, binding = 3)] bloom_sampler: &Sampler,
+    in_uv: Vec2,
+    #[spirv(flat)] in_bloom_strength: u32,
+    frag_color: &mut Vec4,
+) {
+    let bloom_strength = f32::from_bits(in_bloom_strength);
+    let hdr = hdr_texture.sample(*hdr_sampler, in_uv).xyz();
+    let bloom = bloom_texture.sample(*bloom_sampler, in_uv).xyz();
+    let color = hdr.lerp(bloom, bloom_strength);
+    *frag_color = color.extend(1.0)
+}
+
 #[cfg(not(target_arch = "spirv"))]
 mod cpu {
     use core::ops::Deref;
@@ -305,6 +323,44 @@ mod cpu {
             .fuse()
     }
 
+    fn create_texture(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        width: u32,
+        height: u32,
+    ) -> texture::Texture {
+        let label = Some("bloom");
+
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label,
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
+        crate::Texture::new_with(
+            &device,
+            &queue,
+            label,
+            Some(
+                wgpu::TextureUsages::RENDER_ATTACHMENT
+                    | wgpu::TextureUsages::TEXTURE_BINDING
+                    | wgpu::TextureUsages::COPY_SRC,
+            ),
+            Some(sampler),
+            wgpu::TextureFormat::Rgba16Float,
+            4,
+            2,
+            width,
+            height,
+            1,
+            &[],
+        )
+    }
+
     fn create_textures(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
@@ -312,41 +368,13 @@ mod cpu {
     ) -> Vec<texture::Texture> {
         let num_textures = resolution.x.min(resolution.y).ilog2();
         log::trace!("creating {num_textures} bloom textures at resolution {resolution}");
-        let label = Some("bloom");
         let mut textures = vec![];
         for UVec2 {
             x: width,
             y: height,
         } in config_resolutions(resolution).skip(1)
         {
-            let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-                label,
-                address_mode_u: wgpu::AddressMode::ClampToEdge,
-                address_mode_v: wgpu::AddressMode::ClampToEdge,
-                address_mode_w: wgpu::AddressMode::ClampToEdge,
-                mag_filter: wgpu::FilterMode::Linear,
-                min_filter: wgpu::FilterMode::Linear,
-                mipmap_filter: wgpu::FilterMode::Linear,
-                ..Default::default()
-            });
-            let texture = crate::Texture::new_with(
-                &device,
-                &queue,
-                label,
-                Some(
-                    wgpu::TextureUsages::RENDER_ATTACHMENT
-                        | wgpu::TextureUsages::TEXTURE_BINDING
-                        | wgpu::TextureUsages::COPY_SRC,
-                ),
-                Some(sampler),
-                wgpu::TextureFormat::Rgba16Float,
-                4,
-                2,
-                width,
-                height,
-                1,
-                &[],
-            );
+            let texture = create_texture(device, queue, width, height);
             textures.push(texture);
         }
         textures
@@ -392,6 +420,114 @@ mod cpu {
             .collect()
     }
 
+    fn create_mix_pipeline(device: &wgpu::Device) -> wgpu::RenderPipeline {
+        let label = Some("bloom mix");
+        let bindgroup_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label,
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+            ],
+        });
+        let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label,
+            bind_group_layouts: &[&bindgroup_layout],
+            push_constant_ranges: &[],
+        });
+        let vertex_module = crate::linkage::bloom_vertex::linkage(device);
+        let fragment_module = crate::linkage::bloom_mix_fragment::linkage(device);
+        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label,
+            layout: Some(&layout),
+            vertex: wgpu::VertexState {
+                module: &vertex_module.module,
+                entry_point: &vertex_module.entry_point,
+                buffers: &[],
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                unclipped_depth: false,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                conservative: false,
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &fragment_module.module,
+                entry_point: &fragment_module.entry_point,
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: wgpu::TextureFormat::Rgba16Float,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::all(),
+                })],
+            }),
+            multiview: None,
+        })
+    }
+
+    fn create_mix_bindgroup(
+        device: &wgpu::Device,
+        pipeline: &wgpu::RenderPipeline,
+        hdr_texture: &crate::Texture,
+        bloom_texture: &crate::Texture,
+    ) -> wgpu::BindGroup {
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("bloom mix"),
+            layout: &pipeline.get_bind_group_layout(0),
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&hdr_texture.view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&hdr_texture.sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::TextureView(&bloom_texture.view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::Sampler(&bloom_texture.sampler),
+                },
+            ],
+        })
+    }
+
     /// Performs a "physically based" bloom effect on a texture.
     ///
     /// Contains pipelines, down/upsampling textures, a buffer
@@ -404,11 +540,19 @@ mod cpu {
         upsample_pipeline: Arc<wgpu::RenderPipeline>,
         textures: Vec<texture::Texture>,
         bindgroups: Vec<wgpu::BindGroup>,
-        hdr_texture_bindgroup: Option<wgpu::BindGroup>,
+        hdr_texture_downsample_bindgroup: wgpu::BindGroup,
+        mix_pipeline: wgpu::RenderPipeline,
+        mix_bindgroup: wgpu::BindGroup,
+        mix_texture: crate::Texture,
     }
 
     impl Bloom {
-        pub fn new(device: &crate::Device, queue: &crate::Queue, resolution: UVec2) -> Self {
+        pub fn new(
+            device: &crate::Device,
+            queue: &crate::Queue,
+            resolution: UVec2,
+            hdr_texture: &crate::Texture,
+        ) -> Self {
             let mut slab = SlabManager::new(device, queue);
             let downsample_pixel_sizes = slab.new_hybrid_array(
                 config_resolutions(resolution).map(|r| 1.0 / Vec2::new(r.x as f32, r.y as f32)),
@@ -420,6 +564,17 @@ mod cpu {
             // up and downsample pipelines have the same layout, so we just choose one for the layout
             let bindgroups =
                 create_bindgroups(device, &downsample_pipeline, &slab.get_buffer(), &textures);
+            let hdr_texture_downsample_bindgroup = create_bindgroup(
+                device,
+                &downsample_pipeline.get_bind_group_layout(0),
+                slab.get_buffer().deref(),
+                hdr_texture,
+            );
+            let mix_texture = create_texture(device, queue, resolution.x, resolution.y);
+            let mix_pipeline = create_mix_pipeline(device);
+            let mix_bindgroup =
+                create_mix_bindgroup(device, &mix_pipeline, &hdr_texture, &textures[0]);
+
             Self {
                 slab,
                 downsample_pixel_sizes,
@@ -428,26 +583,14 @@ mod cpu {
                 upsample_pipeline,
                 textures,
                 bindgroups,
-                hdr_texture_bindgroup: None,
+                hdr_texture_downsample_bindgroup,
+                mix_pipeline,
+                mix_texture,
+                mix_bindgroup,
             }
         }
 
-        pub(crate) fn render_downsamples(
-            &mut self,
-            device: &wgpu::Device,
-            queue: &wgpu::Queue,
-            hdr_texture: &crate::Texture,
-        ) {
-            if self.hdr_texture_bindgroup.is_none() {
-                self.hdr_texture_bindgroup = Some(create_bindgroup(
-                    device,
-                    &self.downsample_pipeline.get_bind_group_layout(0),
-                    self.slab.get_buffer().deref(),
-                    hdr_texture,
-                ));
-            }
-            // UNWRAP: safe because we just set it to Some
-            let hdr_texture_bindgroup = self.hdr_texture_bindgroup.as_ref().unwrap();
+        pub(crate) fn render_downsamples(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) {
             struct DownsampleItem<'a> {
                 view: &'a wgpu::TextureView,
                 bindgroup: &'a wgpu::BindGroup,
@@ -458,7 +601,8 @@ mod cpu {
             // Since `bindgroups` are one element greater (we pushed `hdr_texture_bindgroup` to the
             // front) the last bindgroup will not be used, which is good - we don't need to read from
             // the smallest texture during downsampling.
-            let bindgroups = std::iter::once(hdr_texture_bindgroup).chain(self.bindgroups.iter());
+            let bindgroups = std::iter::once(&self.hdr_texture_downsample_bindgroup)
+                .chain(self.bindgroups.iter());
             let items = self
                 .textures
                 .iter()
@@ -507,12 +651,7 @@ mod cpu {
             }
         }
 
-        fn render_upsamples(
-            &self,
-            device: &wgpu::Device,
-            queue: &wgpu::Queue,
-            hdr_texture: &crate::Texture,
-        ) {
+        fn render_upsamples(&self, device: &wgpu::Device, queue: &wgpu::Queue) {
             struct UpsampleItem<'a> {
                 view: &'a wgpu::TextureView,
                 bindgroup: &'a wgpu::BindGroup,
@@ -547,7 +686,7 @@ mod cpu {
                         timestamp_writes: None,
                         occlusion_query_set: None,
                     });
-                    render_pass.set_pipeline(&self.downsample_pipeline);
+                    render_pass.set_pipeline(&self.upsample_pipeline);
                     render_pass.set_bind_group(0, bindgroup, &[]);
                     let id = self.upsample_filter_radius.id().into();
                     render_pass.draw(0..6, id..id + 1);
@@ -556,14 +695,37 @@ mod cpu {
             }
         }
 
-        pub fn bloom(
-            &mut self,
-            device: &wgpu::Device,
-            queue: &wgpu::Queue,
-            hdr_texture: &crate::Texture,
-        ) {
-            self.render_downsamples(device, queue, hdr_texture);
-            self.render_upsamples(device, queue, hdr_texture);
+        fn render_mix(&self, device: &wgpu::Device, queue: &wgpu::Queue) {
+            let label = Some("bloom mix");
+            let mut encoder =
+                device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label });
+            {
+                let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label,
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &self.mix_texture.view,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                });
+                render_pass.set_pipeline(&self.mix_pipeline);
+                render_pass.set_bind_group(0, &self.mix_bindgroup, &[]);
+                let id = 0.04f32.to_bits();
+                render_pass.draw(0..6, id..id + 1);
+            }
+            queue.submit(std::iter::once(encoder.finish()));
+        }
+
+        pub fn bloom(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) {
+            self.render_downsamples(device, queue);
+            self.render_upsamples(device, queue);
+            self.render_mix(device, queue);
         }
     }
 
@@ -624,14 +786,21 @@ mod cpu {
             stage.set_skybox(skybox);
             let scene_index = doc.default_scene.unwrap();
             let nodes = doc.scenes.get(scene_index).unwrap();
-            let scene = stage
+            let _scene = stage
                 .draw_gltf_scene(&doc, nodes.into_iter().copied(), camera.id())
                 .unwrap();
             let img = r.render_image().unwrap();
             img_diff::save("bloom/sanity_before.png", img);
             let (device, queue) = r.get_device_and_queue_owned();
-
-            let mut bloom = Bloom::new(&device, &queue, UVec2::new(width, height));
+            let mut bloom = {
+                let hdr_surface = r.graph.get_resource::<HdrSurface>().unwrap().unwrap();
+                Bloom::new(
+                    &device,
+                    &queue,
+                    UVec2::new(width, height),
+                    &hdr_surface.hdr_texture,
+                )
+            };
 
             fn save_bloom_texture(
                 r: &mut Renderling,
@@ -664,50 +833,58 @@ mod cpu {
                 let img = img.to_rgba8();
                 img_diff::save(name, img);
             }
+            log::info!("rendering downsamples");
+            bloom.render_downsamples(&device, &queue);
+            log::info!("  done!");
+            for (i, (texture, size)) in bloom
+                .textures
+                .iter()
+                .zip(config_resolutions(UVec2::new(width, height)).skip(1))
+                .enumerate()
             {
-                let hdr_surface = r.graph.get_resource::<HdrSurface>().unwrap().unwrap();
-                log::info!("rendering downsamples");
-                bloom.render_downsamples(&device, &queue, &hdr_surface.hdr_texture);
-                log::info!("  done!");
-                for (i, (texture, size)) in bloom
-                    .textures
-                    .iter()
-                    .zip(config_resolutions(UVec2::new(width, height)).skip(1))
-                    .enumerate()
-                {
-                    log::info!("reading downsample {i}");
-                    save_bloom_texture(
-                        &mut r,
-                        &device,
-                        &queue,
-                        size,
-                        texture,
-                        &format!("bloom/downsample_{i}.png"),
-                    );
-                }
+                log::info!("reading downsample {i}");
+                save_bloom_texture(
+                    &mut r,
+                    &device,
+                    &queue,
+                    size,
+                    texture,
+                    &format!("bloom/downsample_{i}.png"),
+                );
             }
+
+            log::info!("rendering upsamples");
+            bloom.render_upsamples(&device, &queue);
+            log::info!("  done!");
+            for (i, (texture, size)) in bloom
+                .textures
+                .iter()
+                .zip(config_resolutions(UVec2::new(width, height)).skip(1))
+                .enumerate()
             {
-                let hdr_surface = r.graph.get_resource::<HdrSurface>().unwrap().unwrap();
-                log::info!("rendering upsamples");
-                bloom.render_upsamples(&device, &queue, &hdr_surface.hdr_texture);
-                log::info!("  done!");
-                for (i, (texture, size)) in bloom
-                    .textures
-                    .iter()
-                    .zip(config_resolutions(UVec2::new(width, height)).skip(1))
-                    .enumerate()
-                {
-                    log::info!("reading upsample {i}");
-                    save_bloom_texture(
-                        &mut r,
-                        &device,
-                        &queue,
-                        size,
-                        texture,
-                        &format!("bloom/upsample_{i}.png"),
-                    );
-                }
+                log::info!("reading upsample {i}");
+                save_bloom_texture(
+                    &mut r,
+                    &device,
+                    &queue,
+                    size,
+                    texture,
+                    &format!("bloom/upsample_{i}.png"),
+                );
             }
+
+            log::info!("rendering mix");
+            bloom.render_mix(&device, &queue);
+            log::info!("  done!");
+            log::info!("reading mix texture");
+            save_bloom_texture(
+                &mut r,
+                &device,
+                &queue,
+                UVec2::new(width, height),
+                &bloom.mix_texture,
+                &format!("bloom/mix.png"),
+            );
         }
     }
 }
