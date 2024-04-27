@@ -28,6 +28,7 @@ impl Linkage {
                 entry_point, e
             )
         });
+        let static_name = syn::parse_str::<syn::Ident>(&self.fn_name().to_uppercase()).unwrap();
 
         let entry_point = match lang {
             ShaderLang::Spv => entry_point,
@@ -36,26 +37,48 @@ impl Linkage {
 
         let create_module = match lang {
             ShaderLang::Spv => quote! {
-                device.create_shader_module(wgpu::include_spirv!(#source_path))
+                Arc::new(device.create_shader_module(wgpu::include_spirv!(#source_path)))
             },
             ShaderLang::Wgsl => quote! {
-                device.create_shader_module(wgpu::include_wgsl!(#source_path))
+                Arc:new(device.create_shader_module(wgpu::include_wgsl!(#source_path)))
             },
         };
         let quote = quote! {
-            pub fn linkage(device: &wgpu::Device) -> ShaderLinkage {
-                log::debug!("creating shader module for {}", stringify!(#fn_name));
-                #[cfg(not(target_arch = "wasm32"))]
-                let start = std::time::Instant::now();
-                let module = #create_module;
-                #[cfg(not(target_arch = "wasm32"))]
-                {
-                    let duration = std::time::Instant::now() - start;
-                    log::debug!("...created shader module {} in {duration:?}", stringify!(#fn_name));
-                }
+            use std::sync::{Arc, Mutex};
 
+            use super::ShaderLinkage;
+
+            static #static_name: Mutex<Option<Arc<wgpu::ShaderModule>>> = Mutex::new(None);
+
+            fn get_module(device: &wgpu::Device) -> Arc<wgpu::ShaderModule> {
+                let mut guard = #static_name.lock().unwrap();
+                if let Some(module) = guard.as_ref() {
+                    module.clone()
+                } else {
+                    #[cfg(not(target_arch = "wasm32"))]
+                    let start = std::time::Instant::now();
+
+                    log::debug!(
+                        "creating shader module for {}",
+                        stringify!(#fn_name)
+                    );
+                    let module = #create_module;
+
+                    #[cfg(not(target_arch = "wasm32"))]
+                    {
+                        let duration = std::time::Instant::now() - start;
+                        log::debug!(
+                            "...created shader module {} in {duration:?}",
+                            stringify!(#fn_name)
+                        );
+                    }
+                    *guard = Some(module.clone());
+                    module
+                }
+            }
+            pub fn linkage(device: &wgpu::Device) -> ShaderLinkage {
                 ShaderLinkage {
-                    module,
+                    module: get_module(device),
                     entry_point: #entry_point,
                 }
             }
@@ -68,7 +91,6 @@ impl Linkage {
             //! [{entry_point}](crate::{entry_point}).
             //!
             //! **source path**: `crates/renderling/src/linkage/{source_path}`
-            use super::ShaderLinkage;
             {quote}
             "#,
         )
