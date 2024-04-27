@@ -322,7 +322,7 @@ mod test {
             ..Default::default()
         });
 
-        let data = stage.read_slab().unwrap();
+        let data = futures_lite::future::block_on(stage.read_slab()).unwrap();
         let t = data.read(Id::<Transform>::NONE);
         assert_eq!(Transform::default(), t);
         assert_eq!(

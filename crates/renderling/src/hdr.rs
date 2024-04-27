@@ -32,8 +32,17 @@ impl HdrSurface {
         crate::Texture::new_with(
             &device,
             &queue,
-            Some("HdrRenderBuffer"),
-            Some(wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING),
+            Some("hdr"),
+            Some(
+                // The hdr texture is what we render to in most cases
+                wgpu::TextureUsages::RENDER_ATTACHMENT 
+                    // we also read from it to calculate bloom
+                    | wgpu::TextureUsages::TEXTURE_BINDING
+                    // we also write the bloom mix result back to it
+                    | wgpu::TextureUsages::COPY_DST
+                    // we also read the texture in tests
+                    | wgpu::TextureUsages::COPY_SRC
+            ),
             Some({
                 device.create_sampler(&wgpu::SamplerDescriptor {
                     address_mode_u: wgpu::AddressMode::ClampToEdge,

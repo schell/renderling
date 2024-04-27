@@ -1,39 +1,89 @@
 //! Abstraction over a GPU buffer that provides near-automatic synchronization
 //! and RAII memory management.
-use core::ops::Deref;
-use crabslab::{Array, CpuSlab, GrowableSlab, Slab, SlabItem, WgpuBuffer, WgpuSlabError};
-use std::sync::{atomic::AtomicBool, Arc, Mutex, RwLock, RwLockReadGuard};
+use core::{
+    ops::Deref,
+    sync::atomic::{AtomicUsize, Ordering},
+};
+use crabslab::{Array, GrowableSlab, Slab, SlabItem};
+use snafu::prelude::*;
+use std::sync::{atomic::AtomicBool, Arc, Mutex, RwLock};
 
 use crabslab::Id;
 
-use crate::{Device, Queue};
+#[derive(Debug, Snafu)]
+pub enum SlabManagerError {
+    #[snafu(display(
+        "Slab has no internal buffer. Please call SlabManager::recreate_buffer first."
+    ))]
+    NoInternalBuffer,
 
+    #[snafu(display("Async recv error: {source}"))]
+    AsyncRecv { source: async_channel::RecvError },
+
+    #[snafu(display("Async error: {source}"))]
+    Async { source: wgpu::BufferAsyncError },
+}
+
+/// Manages slab allocations and updates.
+///
+/// Create a new instance using [`SlabManager::default`].
+/// Upon creation you will need to call [`SlabManager::recreate_buffer`] or
+/// [`SlabManager::upkeep`] at least once before any data is written to the GPU.
 #[derive(Clone)]
 pub struct SlabManager {
-    pub(crate) slab: Arc<RwLock<crabslab::CpuSlab<crabslab::WgpuBuffer>>>,
-    pub(crate) updates: Arc<RwLock<Vec<Box<dyn UpdatesSlab>>>>,
+    pub(crate) len: Arc<AtomicUsize>,
+    pub(crate) capacity: Arc<AtomicUsize>,
+    pub(crate) needs_expansion: Arc<AtomicBool>,
+    pub(crate) buffer: Arc<RwLock<Option<Arc<wgpu::Buffer>>>>,
+    pub(crate) update_sources: Arc<RwLock<Vec<Box<dyn UpdatesSlab>>>>,
+    pub(crate) updates: Arc<RwLock<Vec<SlabUpdate>>>,
     pub(crate) recycles: Arc<RwLock<Vec<Array<u32>>>>,
 }
 
 impl crabslab::Slab for SlabManager {
     fn len(&self) -> usize {
-        // UNWRAP: if we can't acquire the lock we want to panic.
-        self.slab.read().unwrap().len()
+        self.len.load(Ordering::Relaxed)
     }
 
     fn read_unchecked<T: SlabItem>(&self, id: Id<T>) -> T {
-        // UNWRAP: if we can't acquire the lock we want to panic.
-        self.slab.read().unwrap().read_unchecked(id)
+        panic!("slab is read-only")
     }
 
     fn write_indexed<T: SlabItem>(&mut self, t: &T, index: usize) -> usize {
         // UNWRAP: if we can't acquire the lock we want to panic.
-        self.slab.write().unwrap().write_indexed(t, index)
+        let mut guard = self.updates.write().unwrap();
+        guard.push(SlabUpdate {
+            array: Array::<u32>::new(index as u32, T::SLAB_SIZE as u32),
+            elements: {
+                let mut e = vec![0u32; T::SLAB_SIZE];
+                e.write_indexed(t, 0);
+                e
+            },
+            #[cfg(debug_assertions)]
+            type_is: std::any::type_name::<T>(),
+        });
+        index + T::SLAB_SIZE
     }
 
-    fn write_indexed_slice<T: SlabItem>(&mut self, t: &[T], index: usize) -> usize {
+    fn write_indexed_slice<T: SlabItem>(&mut self, ts: &[T], mut index: usize) -> usize {
         // UNWRAP: if we can't acquire the lock we want to panic.
-        self.slab.write().unwrap().write_indexed_slice(t, index)
+        let size = T::SLAB_SIZE * ts.len();
+        let mut guard = self.updates.write().unwrap();
+        guard.push(SlabUpdate {
+            array: Array::<u32>::new(index as u32, size as u32),
+            elements: {
+                let mut e = vec![0u32; T::SLAB_SIZE];
+                let mut i = 0;
+                for t in ts {
+                    i = e.write_indexed(t, i);
+                }
+                debug_assert_eq!(size, i);
+                e
+            },
+            #[cfg(debug_assertions)]
+            type_is: std::any::type_name::<T>(),
+        });
+        index + size
     }
 }
 
@@ -103,18 +153,15 @@ impl crabslab::GrowableSlab for SlabManager {
     }
 
     fn capacity(&self) -> usize {
-        // UNWRAP: if we can't acquire the lock we want to panic.
-        self.slab.write().unwrap().capacity()
+        self.capacity.load(Ordering::Relaxed)
     }
 
     fn reserve_capacity(&mut self, capacity: usize) {
-        // UNWRAP: if we can't acquire the lock we want to panic.
-        self.slab.write().unwrap().reserve_capacity(capacity)
+        self.capacity.store(capacity, Ordering::Relaxed)
     }
 
     fn increment_len(&mut self, n: usize) -> usize {
-        // UNWRAP: if we can't acquire the lock we want to panic.
-        self.slab.write().unwrap().increment_len(n)
+        self.len.fetch_add(n, Ordering::Relaxed)
     }
 }
 
@@ -151,37 +198,69 @@ fn split_array(a: Array<u32>, len: u32) -> Option<(Array<u32>, Option<Array<u32>
     }
 }
 
-struct SlabManagerBuffer<'a> {
-    inner: RwLockReadGuard<'a, CpuSlab<WgpuBuffer>>,
-}
-
-impl<'a> Deref for SlabManagerBuffer<'a> {
-    type Target = wgpu::Buffer;
-
-    fn deref(&self) -> &Self::Target {
-        self.inner.as_ref().get_buffer()
+impl Default for SlabManager {
+    fn default() -> Self {
+        Self {
+            update_sources: Default::default(),
+            recycles: Default::default(),
+            len: Default::default(),
+            capacity: Default::default(),
+            needs_expansion: Arc::new(true.into()),
+            buffer: Default::default(),
+            updates: Default::default(),
+        }
     }
 }
 
 impl SlabManager {
-    pub fn new(device: &Device, queue: &Queue) -> Self {
-        Self {
-            slab: Arc::new(RwLock::new(CpuSlab::new(WgpuBuffer::new(
-                device, queue, 256,
-            )))),
-            updates: Default::default(),
-            recycles: Default::default(),
-        }
+    /// Return the internal buffer used by this slab.
+    ///
+    /// If the buffer needs recreating due to a capacity change this function
+    /// will return `None`. In that case use [`Self::recreate_buffer`].
+    pub fn get_buffer(&self) -> Option<Arc<wgpu::Buffer>> {
+        self.buffer.read().unwrap().as_ref().cloned()
     }
 
-    pub fn get_buffer(&self) -> impl Deref<Target = wgpu::Buffer> + '_ {
-        SlabManagerBuffer {
-            inner: self.slab.read().unwrap(),
-        }
+    /// Recreate this buffer, writing the contents of the previous buffer (if it exists)
+    /// to the new one, then return the new buffer.
+    pub fn recreate_buffer(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        label: Option<&str>,
+        usages: wgpu::BufferUsages,
+    ) -> Arc<wgpu::Buffer> {
+        let mut guard = self.buffer.write().unwrap();
+        let buffer = if let Some(old_buffer) = guard.take() {
+            let usage = usages | old_buffer.usage();
+            let size = self.capacity() as u64 * std::mem::size_of::<u32>() as u64;
+            let new_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                label,
+                size,
+                usage,
+                mapped_at_creation: false,
+            });
+            let mut encoder =
+                device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label });
+            encoder.copy_buffer_to_buffer(&old_buffer, 0, &new_buffer, 0, size);
+            queue.submit(std::iter::once(encoder.finish()));
+            Arc::new(new_buffer)
+        } else {
+            let size = self.capacity() as u64 * std::mem::size_of::<u32>() as u64;
+            let new_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                label,
+                size,
+                usage: usages,
+                mapped_at_creation: false,
+            });
+            Arc::new(new_buffer)
+        };
+        *guard = Some(buffer.clone());
+        buffer
     }
 
     pub(crate) fn add_updates(&mut self, updates: impl UpdatesSlab) {
-        self.updates.write().unwrap().push(Box::new(updates));
+        self.update_sources.write().unwrap().push(Box::new(updates));
     }
 
     pub fn new_hybrid<T: SlabItem + Clone + Send + Sync + 'static>(
@@ -198,10 +277,24 @@ impl SlabManager {
         HybridArray::new(self, values)
     }
 
-    pub(crate) fn upkeep(&mut self) {
+    /// Perform upkeep on the slab, commiting changes to the GPU.
+    ///
+    /// Returns the new buffer if one was created due to a capacity resize.
+    pub fn upkeep(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        label: Option<&str>,
+        usage: wgpu::BufferUsages,
+    ) -> Option<Arc<wgpu::Buffer>> {
+        let new_buffer = if self.needs_expansion.swap(false, Ordering::Relaxed) {
+            Some(self.recreate_buffer(device, queue, label, usage))
+        } else {
+            None
+        };
         let writes = {
             let mut writes = vec![];
-            let mut updates_guard = self.updates.write().unwrap();
+            let mut updates_guard = self.update_sources.write().unwrap();
             let mut recycles_guard = self.recycles.write().unwrap();
             updates_guard.retain(|hybrid| {
                 writes.extend(hybrid.get_updates());
@@ -224,32 +317,87 @@ impl SlabManager {
             });
             writes
         };
-        for (
-            i,
-            SlabUpdate {
-                array,
-                elements,
-                type_is,
-            },
-        ) in writes
-            .into_iter()
-            .filter(|u| !u.array.is_empty() && !u.array.is_null())
-            .enumerate()
-        {
-            log::trace!("writing update {i} {type_is} {array:?}");
-            self.write_array(array, &elements);
+        if !writes.is_empty() {
+            // UNWRAP: safe because we know the buffer exists at this point, as we may have
+            // recreated it above^
+            let buffer = self.get_buffer().unwrap();
+            for (
+                i,
+                SlabUpdate {
+                    array,
+                    elements,
+                    type_is,
+                },
+            ) in writes
+                .into_iter()
+                .filter(|u| !u.array.is_empty() && !u.array.is_null())
+                .enumerate()
+            {
+                log::trace!("writing update {i} {type_is} {array:?}");
+                let offset = array.starting_index() as u64 * std::mem::size_of::<u32>() as u64;
+                queue.write_buffer(&buffer, offset, bytemuck::cast_slice(&elements));
+            }
+            queue.submit(std::iter::empty());
         }
+        new_buffer
     }
 
-    /// Read all the data from the stage.
-    ///
-    /// This blocks until the GPU buffer is mappable, and then copies the data
-    /// into a vector.
+    /// Read the range of data from the slab.
     ///
     /// This is primarily used for debugging.
-    pub fn read_slab(&self) -> Result<Vec<u32>, WgpuSlabError> {
-        // UNWRAP: if we can't acquire the lock we want to panic.
-        self.slab.read().unwrap().as_ref().block_on_read_raw(..)
+    pub async fn read(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        label: Option<&str>,
+        range: impl std::ops::RangeBounds<usize>,
+    ) -> Result<Vec<u32>, SlabManagerError> {
+        let start = match range.start_bound() {
+            core::ops::Bound::Included(start) => *start,
+            core::ops::Bound::Excluded(start) => *start + 1,
+            core::ops::Bound::Unbounded => 0,
+        };
+        let end = match range.end_bound() {
+            core::ops::Bound::Included(end) => *end + 1,
+            core::ops::Bound::Excluded(end) => *end,
+            core::ops::Bound::Unbounded => self.len(),
+        };
+        let len = end - start;
+        let byte_offset = start * std::mem::size_of::<u32>();
+        let length = len * std::mem::size_of::<u32>();
+        let output_buffer_size = length as u64;
+        let output_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label,
+            size: output_buffer_size,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        let internal_buffer = self.get_buffer().context(NoInternalBufferSnafu)?;
+
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label });
+        log::trace!(
+            "copy_buffer_to_buffer byte_offset:{byte_offset}, \
+             output_buffer_size:{output_buffer_size}",
+        );
+        encoder.copy_buffer_to_buffer(
+            &internal_buffer,
+            byte_offset as u64,
+            &output_buffer,
+            0,
+            output_buffer_size,
+        );
+        queue.submit(std::iter::once(encoder.finish()));
+
+        let buffer_slice = output_buffer.slice(..);
+        let (tx, rx) = async_channel::bounded(1);
+        buffer_slice.map_async(wgpu::MapMode::Read, move |res| tx.try_send(res).unwrap());
+        device.poll(wgpu::Maintain::Wait);
+        rx.recv()
+            .await
+            .context(AsyncRecvSnafu)?
+            .context(AsyncSnafu)?;
+        let bytes = buffer_slice.get_mapped_range();
+        Ok(bytemuck::cast_slice(bytes.deref()).to_vec())
     }
 }
 
@@ -438,7 +586,10 @@ impl<T: SlabItem + Clone + Send + Sync + 'static> HybridArray<T> {
         let value = values.into_iter().collect::<Vec<_>>();
         let array = mngr.allocate_array::<T>(value.len());
         let hybrid = Self::new_preallocated(array, value);
-        mngr.updates.write().unwrap().push(Box::new(hybrid.clone()));
+        mngr.update_sources
+            .write()
+            .unwrap()
+            .push(Box::new(hybrid.clone()));
         hybrid
     }
 
@@ -556,18 +707,28 @@ mod test {
     fn mngr_updates_count_sanity() {
         let r = Renderling::headless(1, 1);
         let (device, queue) = r.get_device_and_queue_owned();
-        let mut mngr = SlabManager::new(&device, &queue);
+        let mut mngr = SlabManager::default();
         {
             let value = mngr.new_hybrid(666u32);
             assert_eq!(2, value.strong_count());
         }
-        mngr.upkeep();
-        assert_eq!(0, mngr.updates.read().unwrap().len());
+        mngr.upkeep(
+            r.get_device(),
+            r.get_queue(),
+            Some("mngr updates count sanity 1"),
+            wgpu::BufferUsages::empty(),
+        );
+        assert_eq!(0, mngr.update_sources.read().unwrap().len());
         {
             let values = mngr.new_hybrid_array([666u32, 420u32]);
             assert_eq!(2, values.strong_count());
         }
-        mngr.upkeep();
-        assert_eq!(0, mngr.updates.read().unwrap().len());
+        mngr.upkeep(
+            r.get_device(),
+            r.get_queue(),
+            Some("mngr updates count sanity 2"),
+            wgpu::BufferUsages::empty(),
+        );
+        assert_eq!(0, mngr.update_sources.read().unwrap().len());
     }
 }

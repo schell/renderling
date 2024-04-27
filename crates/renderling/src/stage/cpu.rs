@@ -98,7 +98,7 @@ impl Stage {
     /// Create a new stage.
     pub fn new(device: Device, queue: Queue, resolution: UVec2) -> Self {
         let atlas = Atlas::empty(&device, &queue);
-        let mut mngr = SlabManager::new(&device, &queue);
+        let mut mngr = SlabManager::default();
         let pbr_config = mngr.new_hybrid(PbrConfig {
             atlas_size: atlas.size,
             resolution,
@@ -249,6 +249,7 @@ impl Stage {
     /// Return the skybox render pipeline, creating it if necessary.
     pub fn get_skybox_pipeline_and_bindgroup(
         &self,
+        slab_buffer: &wgpu::Buffer,
     ) -> (Arc<wgpu::RenderPipeline>, Arc<wgpu::BindGroup>) {
         // UNWRAP: safe because we're only ever called from the render thread.
         let mut pipeline = self.skybox_pipeline.write().unwrap();
@@ -272,7 +273,7 @@ impl Stage {
         } else {
             let bg = Arc::new(crate::skybox::create_skybox_bindgroup(
                 &self.device,
-                self.mngr.get_buffer().deref(),
+                slab_buffer,
                 &self.skybox.read().unwrap().environment_cubemap,
             ));
             *bindgroup = Some(bg.clone());
@@ -349,7 +350,7 @@ impl Stage {
         }
     }
 
-    pub fn get_slab_buffers_bindgroup(&self) -> Arc<wgpu::BindGroup> {
+    pub fn get_slab_buffers_bindgroup(&self, slab_buffer: &wgpu::Buffer) -> Arc<wgpu::BindGroup> {
         // UNWRAP: safe because we're only ever called from the render thread.
         let mut bindgroup = self.buffers_bindgroup.lock().unwrap();
         if let Some(bindgroup) = bindgroup.as_ref() {
@@ -360,7 +361,7 @@ impl Stage {
                 let pipeline: &wgpu::RenderPipeline = &self.get_pipeline();
                 crate::linkage::slab_bindgroup(
                     device,
-                    self.mngr.get_buffer().deref(),
+                    slab_buffer,
                     self.vertex_debug.read().unwrap().as_ref().get_buffer(),
                     self.fragment_debug.read().unwrap().as_ref().get_buffer(),
                     &pipeline.get_bind_group_layout(0),
@@ -603,8 +604,10 @@ impl Stage {
     /// into a vector.
     ///
     /// This is primarily used for debugging.
-    pub fn read_slab(&self) -> Result<Vec<u32>, WgpuSlabError> {
-        self.mngr.read_slab()
+    pub async fn read_slab(&self) -> Result<Vec<u32>, SlabManagerError> {
+        self.mngr
+            .read(&self.device, &self.queue, Some("stage slab read"), ..)
+            .await
     }
 
     /// Read the vertex debug messages.
@@ -682,24 +685,40 @@ impl Stage {
 
 /// Render the stage.
 pub fn stage_render(
-    (mut stage, hdr_frame, depth): (
+    (mut stage, hdr_frame, depth, device, queue): (
         ViewMut<Stage, NoDefault>,
         View<HdrSurface, NoDefault>,
         View<DepthTexture, NoDefault>,
+        View<Device, NoDefault>,
+        View<Queue, NoDefault>,
     ),
 ) -> Result<(), StageError> {
     log::trace!("rendering the stage");
     let label = Some("stage render");
     let pipeline = stage.get_pipeline();
-    let slab_buffers_bindgroup = stage.get_slab_buffers_bindgroup();
+    let slab_buffer = if let Some(new_slab_buffer) = stage.mngr.upkeep(
+        &device,
+        &queue,
+        Some("stage render upkeep"),
+        wgpu::BufferUsages::empty(),
+    ) {
+        // invalidate our bindgroups, etc
+        let _ = stage.skybox_bindgroup.lock().unwrap().take();
+        let _ = stage.buffers_bindgroup.lock().unwrap().take();
+        new_slab_buffer
+    } else {
+        // UNWRAP: safe because we called `SlabManager::upkeep` above^, which ensures the buffer
+        // exists
+        stage.mngr.get_buffer().unwrap()
+    };
+    let slab_buffers_bindgroup = stage.get_slab_buffers_bindgroup(&slab_buffer);
     let textures_bindgroup = stage.get_textures_bindgroup();
     let has_skybox = stage.has_skybox.load(std::sync::atomic::Ordering::Relaxed);
     let may_skybox_pipeline_and_bindgroup = if has_skybox {
-        Some(stage.get_skybox_pipeline_and_bindgroup())
+        Some(stage.get_skybox_pipeline_and_bindgroup(&slab_buffer))
     } else {
         None
     };
-    stage.mngr.upkeep();
     //let mut may_bloom_filter = if
     // stage.has_bloom.load(std::sync::atomic::Ordering::Relaxed) {    // UNWRAP:
     // if we can't acquire the lock we want to panic.    Some(stage.bloom.

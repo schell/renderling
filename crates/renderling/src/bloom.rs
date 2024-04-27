@@ -159,15 +159,16 @@ pub fn bloom_upsample_fragment(
 #[cfg(feature = "bloom_mix_fragment")]
 #[spirv(fragment)]
 pub fn bloom_mix_fragment(
-    #[spirv(descriptor_set = 0, binding = 0)] hdr_texture: &Image2d,
-    #[spirv(descriptor_set = 0, binding = 1)] hdr_sampler: &Sampler,
-    #[spirv(descriptor_set = 0, binding = 2)] bloom_texture: &Image2d,
-    #[spirv(descriptor_set = 0, binding = 3)] bloom_sampler: &Sampler,
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] slab: &[u32],
+    #[spirv(descriptor_set = 0, binding = 1)] hdr_texture: &Image2d,
+    #[spirv(descriptor_set = 0, binding = 2)] hdr_sampler: &Sampler,
+    #[spirv(descriptor_set = 0, binding = 3)] bloom_texture: &Image2d,
+    #[spirv(descriptor_set = 0, binding = 4)] bloom_sampler: &Sampler,
     in_uv: Vec2,
-    #[spirv(flat)] in_bloom_strength: u32,
+    #[spirv(flat)] in_bloom_strength_id: Id<f32>,
     frag_color: &mut Vec4,
 ) {
-    let bloom_strength = f32::from_bits(in_bloom_strength);
+    let bloom_strength = slab.read(in_bloom_strength_id);
     let hdr = hdr_texture.sample(*hdr_sampler, in_uv).xyz();
     let bloom = bloom_texture.sample(*bloom_sampler, in_uv).xyz();
     let color = hdr.lerp(bloom, bloom_strength);
@@ -176,7 +177,6 @@ pub fn bloom_mix_fragment(
 
 #[cfg(not(target_arch = "spirv"))]
 mod cpu {
-    use core::ops::Deref;
     use std::sync::Arc;
 
     use super::*;
@@ -328,9 +328,9 @@ mod cpu {
         queue: &wgpu::Queue,
         width: u32,
         height: u32,
+        label: Option<&str>,
+        extra_usages: wgpu::TextureUsages,
     ) -> texture::Texture {
-        let label = Some("bloom");
-
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label,
             address_mode_u: wgpu::AddressMode::ClampToEdge,
@@ -348,7 +348,8 @@ mod cpu {
             Some(
                 wgpu::TextureUsages::RENDER_ATTACHMENT
                     | wgpu::TextureUsages::TEXTURE_BINDING
-                    | wgpu::TextureUsages::COPY_SRC,
+                    | wgpu::TextureUsages::COPY_SRC
+                    | extra_usages,
             ),
             Some(sampler),
             wgpu::TextureFormat::Rgba16Float,
@@ -369,12 +370,24 @@ mod cpu {
         let num_textures = resolution.x.min(resolution.y).ilog2();
         log::trace!("creating {num_textures} bloom textures at resolution {resolution}");
         let mut textures = vec![];
-        for UVec2 {
-            x: width,
-            y: height,
-        } in config_resolutions(resolution).skip(1)
+        for (
+            i,
+            UVec2 {
+                x: width,
+                y: height,
+            },
+        ) in config_resolutions(resolution).skip(1).enumerate()
         {
-            let texture = create_texture(device, queue, width, height);
+            let title = format!("bloom texture[{i}]");
+            let label = Some(title.as_str());
+            let texture = create_texture(
+                device,
+                queue,
+                width,
+                height,
+                label,
+                wgpu::TextureUsages::empty(),
+            );
             textures.push(texture);
         }
         textures
@@ -428,21 +441,31 @@ mod cpu {
                 wgpu::BindGroupLayoutEntry {
                     binding: 0,
                     visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
                     },
                     count: None,
                 },
                 wgpu::BindGroupLayoutEntry {
                     binding: 1,
                     visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
                     count: None,
                 },
                 wgpu::BindGroupLayoutEntry {
                     binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Texture {
                         sample_type: wgpu::TextureSampleType::Float { filterable: true },
@@ -452,7 +475,7 @@ mod cpu {
                     count: None,
                 },
                 wgpu::BindGroupLayoutEntry {
-                    binding: 3,
+                    binding: 4,
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
                     count: None,
@@ -501,6 +524,7 @@ mod cpu {
     fn create_mix_bindgroup(
         device: &wgpu::Device,
         pipeline: &wgpu::RenderPipeline,
+        slab_buffer: &wgpu::Buffer,
         hdr_texture: &crate::Texture,
         bloom_texture: &crate::Texture,
     ) -> wgpu::BindGroup {
@@ -510,18 +534,22 @@ mod cpu {
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&hdr_texture.view),
+                    resource: wgpu::BindingResource::Buffer(slab_buffer.as_entire_buffer_binding()),
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&hdr_texture.sampler),
+                    resource: wgpu::BindingResource::TextureView(&hdr_texture.view),
                 },
                 wgpu::BindGroupEntry {
                     binding: 2,
-                    resource: wgpu::BindingResource::TextureView(&bloom_texture.view),
+                    resource: wgpu::BindingResource::Sampler(&hdr_texture.sampler),
                 },
                 wgpu::BindGroupEntry {
                     binding: 3,
+                    resource: wgpu::BindingResource::TextureView(&bloom_texture.view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
                     resource: wgpu::BindingResource::Sampler(&bloom_texture.sampler),
                 },
             ],
@@ -534,16 +562,19 @@ mod cpu {
     /// to communicate configuration to the shaders, and bindgroups.
     pub struct Bloom {
         slab: SlabManager,
+        resolution: UVec2,
         downsample_pixel_sizes: HybridArray<Vec2>,
         downsample_pipeline: Arc<wgpu::RenderPipeline>,
         upsample_filter_radius: Hybrid<Vec2>,
         upsample_pipeline: Arc<wgpu::RenderPipeline>,
         textures: Vec<texture::Texture>,
         bindgroups: Vec<wgpu::BindGroup>,
+        hdr_texture: texture::Texture,
         hdr_texture_downsample_bindgroup: wgpu::BindGroup,
         mix_pipeline: wgpu::RenderPipeline,
         mix_bindgroup: wgpu::BindGroup,
         mix_texture: crate::Texture,
+        mix_strength: Hybrid<f32>,
     }
 
     impl Bloom {
@@ -553,40 +584,65 @@ mod cpu {
             resolution: UVec2,
             hdr_texture: &crate::Texture,
         ) -> Self {
-            let mut slab = SlabManager::new(device, queue);
+            let mut slab = SlabManager::default();
+
             let downsample_pixel_sizes = slab.new_hybrid_array(
                 config_resolutions(resolution).map(|r| 1.0 / Vec2::new(r.x as f32, r.y as f32)),
             );
             let upsample_filter_radius = slab.new_hybrid(Vec2::ONE);
+            let mix_strength = slab.new_hybrid(0.04f32);
+            let slab_buffer = slab.recreate_buffer(
+                device,
+                queue,
+                Some("new bloom slab upkeep"),
+                wgpu::BufferUsages::empty(),
+            );
+
             let textures = create_textures(device, queue, resolution);
             let downsample_pipeline = Arc::new(create_bloom_downsample_pipeline(device));
             let upsample_pipeline = Arc::new(create_bloom_upsample_pipeline(device));
+
             // up and downsample pipelines have the same layout, so we just choose one for the layout
             let bindgroups =
-                create_bindgroups(device, &downsample_pipeline, &slab.get_buffer(), &textures);
+                create_bindgroups(device, &downsample_pipeline, &slab_buffer, &textures);
             let hdr_texture_downsample_bindgroup = create_bindgroup(
                 device,
                 &downsample_pipeline.get_bind_group_layout(0),
-                slab.get_buffer().deref(),
+                &slab_buffer,
                 hdr_texture,
             );
-            let mix_texture = create_texture(device, queue, resolution.x, resolution.y);
+            let mix_texture = create_texture(
+                device,
+                queue,
+                resolution.x,
+                resolution.y,
+                Some("bloom mix"),
+                wgpu::TextureUsages::COPY_SRC,
+            );
             let mix_pipeline = create_mix_pipeline(device);
-            let mix_bindgroup =
-                create_mix_bindgroup(device, &mix_pipeline, &hdr_texture, &textures[0]);
+            let mix_bindgroup = create_mix_bindgroup(
+                device,
+                &mix_pipeline,
+                &slab_buffer,
+                &hdr_texture,
+                &textures[0],
+            );
 
             Self {
                 slab,
+                resolution,
                 downsample_pixel_sizes,
                 downsample_pipeline,
                 upsample_filter_radius,
                 upsample_pipeline,
                 textures,
                 bindgroups,
+                hdr_texture: hdr_texture.clone(),
                 hdr_texture_downsample_bindgroup,
                 mix_pipeline,
                 mix_texture,
                 mix_bindgroup,
+                mix_strength,
             }
         }
 
@@ -716,13 +772,38 @@ mod cpu {
                 });
                 render_pass.set_pipeline(&self.mix_pipeline);
                 render_pass.set_bind_group(0, &self.mix_bindgroup, &[]);
-                let id = 0.04f32.to_bits();
+                let id = self.mix_strength.id().into();
                 render_pass.draw(0..6, id..id + 1);
             }
+            encoder.copy_texture_to_texture(
+                wgpu::ImageCopyTexture {
+                    texture: &self.mix_texture.texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d { x: 0, y: 0, z: 0 },
+                    aspect: wgpu::TextureAspect::All,
+                },
+                wgpu::ImageCopyTexture {
+                    texture: &self.hdr_texture.texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d { x: 0, y: 0, z: 0 },
+                    aspect: wgpu::TextureAspect::All,
+                },
+                wgpu::Extent3d {
+                    width: self.resolution.x,
+                    height: self.resolution.y,
+                    depth_or_array_layers: 1,
+                },
+            );
             queue.submit(std::iter::once(encoder.finish()));
         }
 
         pub fn bloom(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) {
+            self.slab.upkeep(
+                device,
+                queue,
+                Some("bloom upkeep"),
+                wgpu::BufferUsages::empty(),
+            );
             self.render_downsamples(device, queue);
             self.render_upsamples(device, queue);
             self.render_mix(device, queue);
@@ -876,7 +957,7 @@ mod cpu {
             log::info!("rendering mix");
             bloom.render_mix(&device, &queue);
             log::info!("  done!");
-            log::info!("reading mix texture");
+            log::info!("reading mix and hdr textures");
             save_bloom_texture(
                 &mut r,
                 &device,
@@ -884,6 +965,14 @@ mod cpu {
                 UVec2::new(width, height),
                 &bloom.mix_texture,
                 &format!("bloom/mix.png"),
+            );
+            save_bloom_texture(
+                &mut r,
+                &device,
+                &queue,
+                UVec2::new(width, height),
+                &bloom.hdr_texture,
+                &format!("bloom/hdr.png"),
             );
         }
     }
