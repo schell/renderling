@@ -646,7 +646,27 @@ mod cpu {
             }
         }
 
-        pub(crate) fn render_downsamples(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) {
+        pub fn set_mix_strength(&self, strength: f32) {
+            self.mix_strength.set(strength);
+        }
+
+        pub fn get_mix_strength(&self) -> f32 {
+            self.mix_strength.get()
+        }
+
+        pub fn set_filter_radius(&self, filter_radius: Vec2) {
+            self.upsample_filter_radius.set(filter_radius);
+        }
+
+        pub fn get_filter_radius(&self) -> Vec2 {
+            self.upsample_filter_radius.get()
+        }
+
+        pub fn get_size(&self) -> UVec2 {
+            self.resolution
+        }
+
+        pub(crate) fn render_downsamples(&self, device: &wgpu::Device, queue: &wgpu::Queue) {
             struct DownsampleItem<'a> {
                 view: &'a wgpu::TextureView,
                 bindgroup: &'a wgpu::BindGroup,
@@ -797,7 +817,7 @@ mod cpu {
             queue.submit(std::iter::once(encoder.finish()));
         }
 
-        pub fn bloom(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) {
+        pub fn bloom(&self, device: &wgpu::Device, queue: &wgpu::Queue) {
             self.slab.upkeep(
                 device,
                 queue,
@@ -814,7 +834,7 @@ mod cpu {
     mod test {
         use glam::Vec3;
 
-        use crate::{Camera, HdrSurface, Renderling};
+        use crate::{Camera, Context};
 
         use super::*;
 
@@ -852,9 +872,8 @@ mod cpu {
         fn bloom_sanity() {
             let width = 1024;
             let height = 800;
-            let mut r = Renderling::headless(width, height);
-            let mut stage = r.new_stage();
-            stage.configure_graph(&mut r, true);
+            let ctx = Context::headless(width, height);
+            let mut stage = ctx.new_stage().with_bloom(false);
             let doc = stage
                 .load_gltf_document_from_path("../../gltf/EmissiveStrengthTest.glb")
                 .unwrap();
@@ -870,21 +889,16 @@ mod cpu {
             let _scene = stage
                 .draw_gltf_scene(&doc, nodes.into_iter().copied(), camera.id())
                 .unwrap();
-            let img = r.render_image().unwrap();
+            let frame = ctx.get_current_frame().unwrap();
+            stage.render(&frame.view());
+            let img = frame.read_image().unwrap();
             img_diff::save("bloom/sanity_before.png", img);
-            let (device, queue) = r.get_device_and_queue_owned();
-            let mut bloom = {
-                let hdr_surface = r.graph.get_resource::<HdrSurface>().unwrap().unwrap();
-                Bloom::new(
-                    &device,
-                    &queue,
-                    UVec2::new(width, height),
-                    &hdr_surface.hdr_texture,
-                )
-            };
+
+            let (device, queue) = ctx.get_device_and_queue_owned();
+            let hdr_texture = crate::hdr::create_texture(&device, &queue, width, height);
+            let bloom = Bloom::new(&device, &queue, UVec2::new(width, height), &hdr_texture);
 
             fn save_bloom_texture(
-                r: &mut Renderling,
                 device: &wgpu::Device,
                 queue: &wgpu::Queue,
                 size: UVec2,
@@ -902,7 +916,7 @@ mod cpu {
                 );
                 log::info!("  done!");
 
-                let pixels = copied.pixels(r.get_device());
+                let pixels = copied.pixels(device);
                 let pixels = bytemuck::cast_slice::<u8, u16>(pixels.as_slice())
                     .iter()
                     .map(|p| half::f16::from_bits(*p).to_f32())
@@ -925,7 +939,6 @@ mod cpu {
             {
                 log::info!("reading downsample {i}");
                 save_bloom_texture(
-                    &mut r,
                     &device,
                     &queue,
                     size,
@@ -945,7 +958,6 @@ mod cpu {
             {
                 log::info!("reading upsample {i}");
                 save_bloom_texture(
-                    &mut r,
                     &device,
                     &queue,
                     size,
@@ -959,7 +971,6 @@ mod cpu {
             log::info!("  done!");
             log::info!("reading mix and hdr textures");
             save_bloom_texture(
-                &mut r,
                 &device,
                 &queue,
                 UVec2::new(width, height),
@@ -967,7 +978,6 @@ mod cpu {
                 &format!("bloom/mix.png"),
             );
             save_bloom_texture(
-                &mut r,
                 &device,
                 &queue,
                 UVec2::new(width, height),

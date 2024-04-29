@@ -27,6 +27,8 @@ pub mod frame;
 // #[cfg(feature = "gltf")]
 // pub mod gltf;
 #[cfg(not(target_arch = "spirv"))]
+mod context;
+#[cfg(not(target_arch = "spirv"))]
 mod hdr;
 #[cfg(not(target_arch = "spirv"))]
 pub mod ibl;
@@ -36,8 +38,6 @@ pub mod math;
 #[cfg(not(target_arch = "spirv"))]
 pub mod mesh;
 pub mod pbr;
-#[cfg(not(target_arch = "spirv"))]
-mod renderer;
 pub mod skybox;
 #[cfg(not(target_arch = "spirv"))]
 pub mod slab;
@@ -60,13 +60,13 @@ mod uniform;
 pub use atlas::*;
 pub mod color;
 pub use camera::*;
+#[cfg(not(target_arch = "spirv"))]
+pub use context::*;
 use glam::Vec3;
 #[cfg(not(target_arch = "spirv"))]
 pub use hdr::*;
 #[cfg(not(target_arch = "spirv"))]
 use image::GenericImageView;
-#[cfg(not(target_arch = "spirv"))]
-pub use renderer::*;
 #[cfg(not(target_arch = "spirv"))]
 pub use skybox::Skybox;
 pub use stage::*;
@@ -310,9 +310,8 @@ mod test {
     #[test]
     // This tests our ability to draw a CMYK triangle in the top left corner.
     fn cmy_triangle_sanity() {
-        let mut r = Renderling::headless(100, 100).with_background_color(Vec4::splat(1.0));
-        let mut stage = r.new_stage();
-        stage.configure_graph(&mut r, true);
+        let mut ctx = Context::headless(100, 100);
+        let mut stage = ctx.new_stage().with_background_color(Vec4::splat(1.0));
         let (projection, view) = default_ortho2d(100.0, 100.0);
         let camera = stage.append(&Camera::new(projection, view));
         let geometry = stage.append_array(&right_tri_vertices());
@@ -322,6 +321,17 @@ mod test {
             ..Default::default()
         });
 
+        let frame = ctx.get_current_frame().unwrap();
+        stage.render(&frame.view());
+        let img = frame.read_image().unwrap();
+        let (device, queue) = ctx.get_device_and_queue_owned();
+        let depth_texture = stage.get_depth_texture();
+        let depth_img = depth_texture.into_image(&device, &queue).unwrap();
+        img_diff::assert_img_eq("cmy_triangle_depth.png", depth_img);
+        img_diff::assert_img_eq("cmy_triangle.png", img);
+
+        // NOTE: We cannot call `stage.read_slab()` until we have rendered, as the
+        // slab has not created a GPU buffer until rendering.
         let data = futures_lite::future::block_on(stage.read_slab()).unwrap();
         let t = data.read(Id::<Transform>::NONE);
         assert_eq!(Transform::default(), t);
@@ -333,17 +343,6 @@ mod test {
             },
             t
         );
-
-        let img = r.render_image().unwrap();
-        let (device, queue) = r.get_device_and_queue_owned();
-        let depth_texture = r
-            .graph
-            .get_resource::<crate::DepthTexture>()
-            .unwrap()
-            .unwrap();
-        let depth_img = depth_texture.into_image(&device, &queue).unwrap();
-        img_diff::assert_img_eq("cmy_triangle_depth.png", depth_img);
-        img_diff::assert_img_eq("cmy_triangle.png", img);
     }
 
     #[test]
@@ -352,9 +351,8 @@ mod test {
     fn cmy_triangle_backface() {
         use img_diff::DiffCfg;
 
-        let mut r = Renderling::headless(100, 100).with_background_color(Vec4::splat(1.0));
-        let mut stage = r.new_stage();
-        stage.configure_graph(&mut r, true);
+        let ctx = Context::headless(100, 100);
+        let mut stage = ctx.new_stage().with_background_color(Vec4::splat(1.0));
         let (projection, view) = default_ortho2d(100.0, 100.0);
         let camera = stage.append(&Camera {
             projection,
@@ -372,7 +370,8 @@ mod test {
             ..Default::default()
         });
 
-        let img = r.render_image().unwrap();
+        let frame = ctx.get_current_frame().unwrap();
+        let img = frame.read_image().unwrap();
         img_diff::assert_img_eq_cfg(
             "cmy_triangle.png",
             img,
@@ -388,9 +387,8 @@ mod test {
     // has already been sent to the GPU.
     // We do this by writing over the previous transform in the stage.
     fn cmy_triangle_update_transform() {
-        let mut r = Renderling::headless(100, 100).with_background_color(Vec4::splat(1.0));
-        let mut stage = r.new_stage();
-        stage.configure_graph(&mut r, true);
+        let ctx = Context::headless(100, 100);
+        let mut stage = ctx.new_stage().with_background_color(Vec4::splat(1.0));
         let (projection, view) = default_ortho2d(100.0, 100.0);
         let camera = stage.append(&Camera::new(projection, view));
         let geometry = stage.append_array(&right_tri_vertices());
@@ -402,7 +400,8 @@ mod test {
             ..Default::default()
         });
 
-        let _ = r.render_image().unwrap();
+        let frame = ctx.get_current_frame().unwrap();
+        stage.render(&frame.view());
 
         stage.write(
             transform,
@@ -413,7 +412,8 @@ mod test {
             },
         );
 
-        let img = r.render_image().unwrap();
+        stage.render(&frame.view());
+        let img = frame.read_image().unwrap();
         img_diff::assert_img_eq("cmy_triangle_update_transform.png", img);
     }
 
@@ -459,9 +459,8 @@ mod test {
     #[test]
     // Tests our ability to draw a CMYK cube.
     fn cmy_cube_sanity() {
-        let mut r = Renderling::headless(100, 100).with_background_color(Vec4::splat(1.0));
-        let mut stage = r.new_stage();
-        stage.configure_graph(&mut r, true);
+        let ctx = Context::headless(100, 100);
+        let mut stage = ctx.new_stage().with_background_color(Vec4::splat(1.0));
         let camera_position = Vec3::new(0.0, 12.0, 20.0);
         let camera = stage.append(&Camera {
             projection: Mat4::perspective_rh(std::f32::consts::PI / 4.0, 1.0, 0.1, 100.0),
@@ -480,16 +479,17 @@ mod test {
             transform,
             ..Default::default()
         });
-        let img = r.render_image().unwrap();
+        let frame = ctx.get_current_frame().unwrap();
+        stage.render(&frame.view());
+        let img = frame.read_image().unwrap();
         img_diff::assert_img_eq("cmy_cube/sanity.png", img);
     }
 
     #[test]
     // Tests our ability to draw a CMYK cube using indexed geometry.
     fn cmy_cube_indices() {
-        let mut r = Renderling::headless(100, 100).with_background_color(Vec4::splat(1.0));
-        let mut stage = r.new_stage();
-        stage.configure_graph(&mut r, true);
+        let ctx = Context::headless(100, 100);
+        let mut stage = ctx.new_stage().with_background_color(Vec4::splat(1.0));
         let camera_position = Vec3::new(0.0, 12.0, 20.0);
         let camera = stage.append(&Camera {
             projection: Mat4::perspective_rh(std::f32::consts::PI / 4.0, 1.0, 0.1, 100.0),
@@ -510,7 +510,9 @@ mod test {
             transform,
             ..Default::default()
         });
-        let img = r.render_image().unwrap();
+        let frame = ctx.get_current_frame().unwrap();
+        stage.render(&frame.view());
+        let img = frame.read_image().unwrap();
         img_diff::assert_img_eq_cfg(
             "cmy_cube/sanity.png",
             img,
@@ -525,9 +527,8 @@ mod test {
     // Test our ability to create two cubes and toggle the visibility of one of
     // them.
     fn cmy_cube_visible() {
-        let mut r = Renderling::headless(100, 100).with_background_color(Vec4::splat(1.0));
-        let mut stage = r.new_stage();
-        stage.configure_graph(&mut r, true);
+        let ctx = Context::headless(100, 100);
+        let mut stage = ctx.new_stage().with_background_color(Vec4::splat(1.0));
         let (projection, view) = camera::default_perspective(100.0, 100.0);
         let camera = stage.append(&Camera {
             projection,
@@ -555,32 +556,41 @@ mod test {
         let cube_two_rendering = stage.draw(renderlet);
 
         // we should see two colored cubes
-        let img = r.render_image().unwrap();
+        let frame = ctx.get_current_frame().unwrap();
+        stage.render(&frame.view());
+        let img = frame.read_image().unwrap();
         img_diff::assert_img_eq("cmy_cube/visible_before.png", img.clone());
         let img_before = img;
+        frame.present();
 
         // update cube two making it invisible
         cube_two_rendering.modify(|r| r.visible = false);
 
         // we should see only one colored cube
-        let img = r.render_image().unwrap();
+        let frame = ctx.get_current_frame().unwrap();
+        stage.render(&frame.view());
+        let img = frame.read_image().unwrap();
         img_diff::assert_img_eq("cmy_cube/visible_after.png", img);
+        frame.present();
 
         // update cube two making in visible again
         cube_two_rendering.modify(|r| r.visible = true);
 
         // we should see two colored cubes again
-        let img = r.render_image().unwrap();
+        let frame = ctx.get_current_frame().unwrap();
+        let img = frame.read_image().unwrap();
         img_diff::assert_eq("cmy_cube/visible_before_again.png", img_before, img);
     }
 
     #[test]
     // Tests the ability to specify indexed vertices, as well as the ability to
-    // update a field within a struct stored on the slab by offset.
+    // update a field within a struct stored on the slab by using a `Hybrid`.
     fn cmy_cube_remesh() {
-        let mut r = Renderling::headless(100, 100).with_background_color(Vec4::splat(1.0));
-        let mut stage = r.new_stage().with_lighting(false);
-        stage.configure_graph(&mut r, true);
+        let ctx = Context::headless(100, 100);
+        let mut stage = ctx
+            .new_stage()
+            .with_lighting(false)
+            .with_background_color(Vec4::splat(1.0));
         let (projection, view) = camera::default_perspective(100.0, 100.0);
         let camera = stage.append(&Camera {
             projection,
@@ -598,7 +608,7 @@ mod test {
             ..Default::default()
         });
 
-        let cube = stage.draw(Renderlet {
+        let cube: slab::Hybrid<Renderlet> = stage.draw(Renderlet {
             camera,
             vertices: cube_geometry,
             transform,
@@ -606,15 +616,18 @@ mod test {
         });
 
         // we should see a cube (in sRGB color space)
-        let img = r.render_image().unwrap();
+        let frame = ctx.get_current_frame().unwrap();
+        let img = frame.read_image().unwrap();
         img_diff::assert_img_eq("cmy_cube/remesh_before.png", img);
+        frame.present();
 
         // Update the cube mesh to a pyramid by overwriting the `.vertices` field
         // of `Renderlet`
         cube.modify(|r| r.vertices = pyramid_geometry);
 
         // we should see a pyramid (in sRGB color space)
-        let img = r.render_image().unwrap();
+        let frame = ctx.get_current_frame().unwrap();
+        let img = frame.read_image().unwrap();
         img_diff::assert_img_eq("cmy_cube/remesh_after.png", img);
     }
 
@@ -668,9 +681,8 @@ mod test {
     // Tests that updating the material actually updates the rendering of an unlit
     // mesh
     fn unlit_textured_cube_material() {
-        let mut r = Renderling::headless(100, 100).with_background_color(Vec4::splat(0.0));
-        let mut stage = r.new_stage();
-        stage.configure_graph(&mut r, true);
+        let ctx = Context::headless(100, 100);
+        let mut stage = ctx.new_stage().with_background_color(Vec4::splat(0.0));
         let (projection, view) = camera::default_perspective(100.0, 100.0);
         let camera = stage.append(&Camera::new(projection, view));
         let sandstone = AtlasImage::from(image::open("../../img/sandstone.png").unwrap());
@@ -699,14 +711,19 @@ mod test {
         println!("cube: {cube:?}");
 
         // we should see a cube with a stoney texture
-        let img = r.render_image().unwrap();
+        let frame = ctx.get_current_frame().unwrap();
+        stage.render(&frame.view());
+        let img = frame.read_image().unwrap();
         img_diff::assert_img_eq("unlit_textured_cube_material_before.png", img);
+        frame.present();
 
         // update the material's texture on the GPU
         stage.write(sandstone_tex_id, &dirt_tex);
 
         // we should see a cube with a dirty texture
-        let img = r.render_image().unwrap();
+        let frame = ctx.get_current_frame().unwrap();
+        stage.render(&frame.view());
+        let img = frame.read_image().unwrap();
         img_diff::assert_img_eq("unlit_textured_cube_material_after.png", img);
     }
 
@@ -714,10 +731,10 @@ mod test {
     // Ensures that we can render multiple nodes with mesh primitives
     // that share the same geometry, but have different materials.
     fn multi_node_scene() {
-        let mut r =
-            Renderling::headless(100, 100).with_background_color(Vec3::splat(0.0).extend(1.0));
-        let mut stage = r.new_stage();
-        stage.configure_graph(&mut r, true);
+        let ctx = Context::headless(100, 100);
+        let mut stage = ctx
+            .new_stage()
+            .with_background_color(Vec3::splat(0.0).extend(1.0));
 
         let (projection, view) = camera::default_ortho2d(100.0, 100.0);
         let camera = stage.append(&Camera::new(projection, view));
@@ -778,8 +795,9 @@ mod test {
             })
         };
 
-        let img = r.render_image().unwrap();
-
+        let frame = ctx.get_current_frame().unwrap();
+        stage.render(&frame.view());
+        let img = frame.read_image().unwrap();
         img_diff::assert_img_eq("gpu_scene_sanity2.png", img);
     }
 
@@ -788,10 +806,10 @@ mod test {
     fn scene_cube_directional() {
         use crate::pbr::light::{DirectionalLight, Light, LightStyle};
 
-        let mut r =
-            Renderling::headless(100, 100).with_background_color(Vec3::splat(0.0).extend(1.0));
-        let mut stage = r.new_stage();
-        stage.configure_graph(&mut r, true);
+        let ctx = Context::headless(100, 100);
+        let mut stage = ctx
+            .new_stage()
+            .with_background_color(Vec3::splat(0.0).extend(1.0));
 
         let (projection, _) = camera::default_perspective(100.0, 100.0);
         let view = Mat4::look_at_rh(Vec3::new(1.8, 1.8, 1.8), Vec3::ZERO, Vec3::Y);
@@ -847,10 +865,11 @@ mod test {
             ..Default::default()
         });
 
-        let img = r.render_image().unwrap();
-        let depth_texture = r.graph.get_resource::<DepthTexture>().unwrap().unwrap();
+        let frame = ctx.get_current_frame().unwrap();
+        let img = frame.read_image().unwrap();
+        let depth_texture = stage.get_depth_texture();
         let depth_img = depth_texture
-            .into_image(r.get_device(), r.get_queue())
+            .into_image(ctx.get_device(), ctx.get_queue())
             .unwrap();
         img_diff::save("scene_cube_directional_depth.png", depth_img);
         img_diff::assert_img_eq("scene_cube_directional.png", img);
@@ -896,10 +915,8 @@ mod test {
     #[test]
     // shows how to "nest" children to make them appear transformed by their parent's transform
     fn scene_parent_sanity() {
-        let mut r = Renderling::headless(100, 100);
-        r.set_background_color(Vec4::splat(0.0));
-        let mut stage = r.new_stage();
-        stage.configure_graph(&mut r, true);
+        let ctx = Context::headless(100, 100);
+        let mut stage = ctx.new_stage().with_background_color(Vec4::splat(0.0));
         let (projection, view) = camera::default_ortho2d(100.0, 100.0);
         let camera = stage.append(&Camera::new(projection, view));
         let size = 1.0;
@@ -978,7 +995,9 @@ mod test {
             ..Default::default()
         });
 
-        let img = r.render_image().unwrap();
+        let frame = ctx.get_current_frame().unwrap();
+        stage.render(&frame.view());
+        let img = frame.read_image().unwrap();
         img_diff::assert_img_eq("scene_parent_sanity.png", img);
     }
 
@@ -999,10 +1018,8 @@ mod test {
     // see https://learnopengl.com/PBR/Lighting
     fn pbr_metallic_roughness_spheres() {
         let ss = 600;
-        let mut r =
-            Renderling::headless(ss, ss).with_background_color(Vec3::splat(0.0).extend(1.0));
-        let mut stage = r.new_stage();
-        stage.configure_graph(&mut r, true);
+        let ctx = Context::headless(ss, ss);
+        let mut stage = ctx.new_stage();
 
         let radius = 0.5;
         let ss = ss as f32;
@@ -1072,12 +1089,14 @@ mod test {
             }
         }
 
-        let (device, queue) = r.get_device_and_queue_owned();
+        let (device, queue) = ctx.get_device_and_queue_owned();
         let hdr_image = AtlasImage::from_hdr_path("../../img/hdr/resting_place.hdr").unwrap();
         let skybox = crate::skybox::Skybox::new(device, queue, hdr_image, camera);
         stage.set_skybox(skybox);
 
-        let img = r.render_linear_image().unwrap();
+        let frame = ctx.get_current_frame().unwrap();
+        stage.render(&frame.view());
+        let img = frame.read_image().unwrap();
         img_diff::assert_img_eq("pbr/metallic_roughness_spheres.png", img);
     }
 }

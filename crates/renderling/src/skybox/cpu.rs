@@ -640,16 +640,16 @@ mod test {
     use glam::Vec3;
 
     use super::*;
-    use crate::Renderling;
+    use crate::Context;
 
     #[test]
     fn hdr_skybox_scene() {
-        let mut r = Renderling::headless(600, 400);
+        let ctx = Context::headless(600, 400);
+
         let proj = crate::camera::perspective(600.0, 400.0);
         let view = crate::camera::look_at(Vec3::new(0.0, 0.0, 2.0), Vec3::ZERO, Vec3::Y);
 
-        let mut stage = r.new_stage();
-        stage.configure_graph(&mut r, true);
+        let mut stage = ctx.new_stage();
 
         let camera = stage.append(&Camera::new(proj, view));
         let skybox = stage
@@ -669,8 +669,8 @@ mod test {
             // save out the irradiance face
             let copied_buffer = crate::Texture::read_from(
                 &skybox.irradiance_cubemap.texture,
-                r.get_device(),
-                r.get_queue(),
+                ctx.get_device(),
+                ctx.get_queue(),
                 32,
                 32,
                 4,
@@ -678,7 +678,7 @@ mod test {
                 0,
                 Some(wgpu::Origin3d { x: 0, y: 0, z: i }),
             );
-            let pixels = copied_buffer.pixels(r.get_device());
+            let pixels = copied_buffer.pixels(ctx.get_device());
             let pixels = bytemuck::cast_slice::<u8, u16>(pixels.as_slice())
                 .iter()
                 .map(|p| half::f16::from_bits(*p).to_f32())
@@ -693,8 +693,8 @@ mod test {
                 // save out the prefiltered environment faces' mips
                 let copied_buffer = crate::Texture::read_from(
                     &skybox.prefiltered_environment_cubemap.texture,
-                    r.get_device(),
-                    r.get_queue(),
+                    ctx.get_device(),
+                    ctx.get_queue(),
                     mip_size as usize,
                     mip_size as usize,
                     4,
@@ -702,7 +702,7 @@ mod test {
                     mip_level,
                     Some(wgpu::Origin3d { x: 0, y: 0, z: i }),
                 );
-                let pixels = copied_buffer.pixels(r.get_device());
+                let pixels = copied_buffer.pixels(ctx.get_device());
                 let pixels = bytemuck::cast_slice::<u8, u16>(pixels.as_slice())
                     .iter()
                     .map(|p| half::f16::from_bits(*p).to_f32())
@@ -721,14 +721,16 @@ mod test {
 
         stage.set_skybox(skybox);
 
-        let img = r.render_linear_image().unwrap();
+        let frame = ctx.get_current_frame().unwrap();
+        stage.render(&frame.view());
+        let img = frame.read_linear_image().unwrap();
         img_diff::assert_img_eq("skybox/hdr.png", img);
     }
 
     #[test]
     fn precomputed_brdf() {
         assert_eq!(2, std::mem::size_of::<u16>());
-        let r = Renderling::headless(32, 32);
+        let r = Context::headless(32, 32);
         let (device, queue) = r.get_device_and_queue_owned();
         let brdf_lut = Skybox::create_precomputed_brdf_texture(&device, &queue);
         assert_eq!(wgpu::TextureFormat::Rg16Float, brdf_lut.texture.format());

@@ -22,14 +22,6 @@ impl Linkage {
         let source_path = source_path.file_name().unwrap().to_str().unwrap();
         let entry_point = self.entry_point.clone();
 
-        let fn_name = syn::parse_str::<syn::Ident>(self.fn_name()).unwrap_or_else(|e| {
-            panic!(
-                "Failed to parse entry point name `{}` as an identifier: {}",
-                entry_point, e
-            )
-        });
-        let static_name = syn::parse_str::<syn::Ident>(&self.fn_name().to_uppercase()).unwrap();
-
         let entry_point = match lang {
             ShaderLang::Spv => entry_point,
             ShaderLang::Wgsl => entry_point.replace("::", ""),
@@ -44,43 +36,27 @@ impl Linkage {
             },
         };
         let quote = quote! {
-            use std::sync::{Arc, Mutex};
+            use std::sync::Arc;
 
             use super::ShaderLinkage;
 
-            static #static_name: Mutex<Option<Arc<wgpu::ShaderModule>>> = Mutex::new(None);
+            pub const ENTRY_POINT: &str = #entry_point;
 
-            fn get_module(device: &wgpu::Device) -> Arc<wgpu::ShaderModule> {
-                let mut guard = #static_name.lock().unwrap();
-                if let Some(module) = guard.as_ref() {
-                    module.clone()
-                } else {
-                    #[cfg(not(target_arch = "wasm32"))]
-                    let start = std::time::Instant::now();
-
-                    log::debug!(
-                        "creating shader module for {}",
-                        stringify!(#fn_name)
-                    );
-                    let module = #create_module;
-
-                    #[cfg(not(target_arch = "wasm32"))]
-                    {
-                        let duration = std::time::Instant::now() - start;
-                        log::debug!(
-                            "...created shader module {} in {duration:?}",
-                            stringify!(#fn_name)
-                        );
-                    }
-                    *guard = Some(module.clone());
-                    module
-                }
-            }
             pub fn linkage(device: &wgpu::Device) -> ShaderLinkage {
                 ShaderLinkage {
-                    module: get_module(device),
-                    entry_point: #entry_point,
+                    module: #create_module,
+                    entry_point: ENTRY_POINT,
                 }
+            }
+
+            pub fn get_from_cache(
+                device: &wgpu::Device,
+                cache: &mut std::collections::HashMap<&'static str, Arc<ShaderLinkage>>
+            ) -> Arc<ShaderLinkage> {
+                cache
+                    .entry(ENTRY_POINT)
+                    .or_insert_with(|| linkage(device).into())
+                    .clone()
             }
         };
         format!(

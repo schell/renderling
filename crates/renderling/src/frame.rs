@@ -4,12 +4,20 @@
 //! `PostRenderBuffer` resource that holds a copy of the last frame's buffer.
 use std::{ops::Deref, sync::Arc};
 
+use glam::UVec2;
 use moongraph::*;
+use snafu::prelude::*;
 
 use crate::{
-    math::Vec4, BackgroundColor, CopiedTextureBuffer, DepthTexture, Device, Frame, Queue,
-    RenderTarget, ScreenSize, WgpuStateError,
+    math::Vec4, BackgroundColor, BufferDimensions, CopiedTextureBuffer, DepthTexture, Device,
+    Queue, WgpuStateError,
 };
+
+#[derive(Debug, Snafu)]
+pub enum FrameError {
+    #[snafu(display("{}", source))]
+    Texture { source: crate::TextureError },
+}
 
 pub fn default_frame_texture_view(
     frame_texture: &wgpu::Texture,
@@ -41,19 +49,149 @@ impl Deref for FrameTextureView {
     }
 }
 
-/// Create the next screen frame texture, frame texture view and depth texture.
-pub fn create_frame(
-    render_target: View<RenderTarget, NoDefault>,
-) -> Result<(Frame, FrameTextureView), WgpuStateError> {
-    let frame = render_target.get_current_frame()?;
-    let (frame_view, format) = default_frame_texture_view(frame.texture());
-    Ok((
-        frame,
-        FrameTextureView {
-            view: frame_view.into(),
-            format,
-        },
-    ))
+pub(crate) enum FrameSurface {
+    Surface(wgpu::SurfaceTexture),
+    Texture(Arc<wgpu::Texture>),
+}
+
+/// Abstracts over window and texture render targets.
+///
+/// Either a [`SurfaceTexture`] or a [`Texture`].
+pub struct Frame {
+    pub(crate) device: crate::Device,
+    pub(crate) queue: crate::Queue,
+    pub(crate) surface: FrameSurface,
+    pub(crate) size: UVec2,
+}
+
+impl Frame {
+    /// Returns the underlying texture of this target.
+    pub fn texture(&self) -> &wgpu::Texture {
+        match &self.surface {
+            FrameSurface::Surface(s) => &s.texture,
+            FrameSurface::Texture(t) => &t,
+        }
+    }
+
+    pub fn view(&self) -> wgpu::TextureView {
+        let texture = self.texture();
+        let format = texture.format().add_srgb_suffix();
+        texture.create_view(&wgpu::TextureViewDescriptor {
+            label: Some("Frame::view"),
+            format: Some(format),
+            dimension: None,
+            aspect: wgpu::TextureAspect::All,
+            base_mip_level: 0,
+            mip_level_count: None,
+            base_array_layer: 0,
+            array_layer_count: None,
+        })
+    }
+
+    pub fn copy_to_buffer(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        width: u32,
+        height: u32,
+    ) -> CopiedTextureBuffer {
+        let dimensions = BufferDimensions::new(4, 1, width as usize, height as usize);
+        // The output buffer lets us retrieve the self as an array
+        let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("RenderTarget::copy_to_buffer"),
+            size: (dimensions.padded_bytes_per_row * dimensions.height) as u64,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("post render screen capture encoder"),
+        });
+        let texture = self.texture();
+        // Copy the data from the surface texture to the buffer
+        encoder.copy_texture_to_buffer(
+            texture.as_image_copy(),
+            wgpu::ImageCopyBuffer {
+                buffer: &buffer,
+                layout: wgpu::ImageDataLayout {
+                    offset: 0,
+                    bytes_per_row: Some(dimensions.padded_bytes_per_row as u32),
+                    rows_per_image: None,
+                },
+            },
+            wgpu::Extent3d {
+                width: dimensions.width as u32,
+                height: dimensions.height as u32,
+                depth_or_array_layers: 1,
+            },
+        );
+
+        queue.submit(std::iter::once(encoder.finish()));
+
+        CopiedTextureBuffer {
+            dimensions,
+            buffer,
+            format: texture.format(),
+        }
+    }
+
+    /// Read the current frame buffer into an image.
+    ///
+    /// This should be called after rendering, before presentation.
+    /// Good for getting headless screen grabs.
+    ///
+    /// The resulting image will be in the color space of the frame.
+    ///
+    /// ## Note
+    /// This operation can take a long time, depending on how big the screen is.
+    pub fn read_image(&self) -> Result<image::RgbaImage, FrameError> {
+        let buffer = self.copy_to_buffer(&self.device, &self.queue, self.size.x, self.size.y);
+        let is_srgb = self.texture().format().is_srgb();
+        let img = if is_srgb {
+            buffer.into_srgba(&self.device).context(TextureSnafu)?
+        } else {
+            buffer
+                .into_linear_rgba(&self.device)
+                .context(TextureSnafu)?
+        };
+        Ok(img)
+    }
+
+    /// Read the frame into an image.
+    ///
+    /// This should be called after rendering, before presentation.
+    /// Good for getting headless screen grabs.
+    ///
+    /// The resulting image will be in a linear color space.
+    ///
+    /// ## Note
+    /// This operation can take a long time, depending on how big the screen is.
+    pub fn read_srgb_image(&self) -> Result<image::RgbaImage, FrameError> {
+        let buffer = self.copy_to_buffer(&self.device, &self.queue, self.size.x, self.size.y);
+        buffer.into_srgba(&self.device).context(TextureSnafu)
+    }
+    /// Read the frame into an image.
+    ///
+    /// This should be called after rendering, before presentation.
+    /// Good for getting headless screen grabs.
+    ///
+    /// The resulting image will be in a linear color space.
+    ///
+    /// ## Note
+    /// This operation can take a long time, depending on how big the screen is.
+    pub fn read_linear_image(&self) -> Result<image::RgbaImage, FrameError> {
+        let buffer = self.copy_to_buffer(&self.device, &self.queue, self.size.x, self.size.y);
+        buffer.into_linear_rgba(&self.device).context(TextureSnafu)
+    }
+
+    /// If self is `TargetFrame::Surface` this presents the surface frame.
+    ///
+    /// If self is a `TargetFrame::Texture` this is a noop.
+    pub fn present(self) {
+        match self.surface {
+            FrameSurface::Surface(s) => s.present(),
+            FrameSurface::Texture(_) => {}
+        }
+    }
 }
 
 /// Perform a clearing render pass on a frame and/or a depth texture.
@@ -157,35 +295,6 @@ pub fn clear_depth(
         Default::default(),
     );
     Ok(())
-}
-
-// pub fn create_hdr_render_buffer
-
-/// A buffer holding a copy of the last frame's buffer/texture.
-pub struct PostRenderBuffer(pub CopiedTextureBuffer);
-
-/// Render node that copies the current frame into a buffer.
-#[derive(Edges)]
-pub struct PostRenderBufferCreate {
-    device: View<Device, NoDefault>,
-    queue: View<Queue, NoDefault>,
-    size: View<ScreenSize, NoDefault>,
-    frame: View<Frame, NoDefault>,
-}
-
-/// Copies the current frame into a `PostRenderBuffer` resource.
-///
-/// If rendering to a window surface, this should be called after rendering,
-/// before presentation.
-pub fn copy_frame_to_post(
-    create: PostRenderBufferCreate,
-) -> Result<(PostRenderBuffer,), WgpuStateError> {
-    let ScreenSize { width, height } = *create.size;
-    let copied_texture_buffer =
-        create
-            .frame
-            .copy_to_buffer(&create.device, &create.queue, width, height);
-    Ok((PostRenderBuffer(copied_texture_buffer),))
 }
 
 /// Consume and present the screen frame to the screen.

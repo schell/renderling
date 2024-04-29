@@ -913,11 +913,11 @@ impl CopiedTextureBuffer {
 
 #[cfg(test)]
 mod test {
-    use crate::Renderling;
+    use crate::Context;
 
     #[test]
     fn generate_mipmaps() {
-        let r = Renderling::headless(10, 10);
+        let r = Context::headless(10, 10);
         let (device, queue) = r.get_device_and_queue_owned();
         let img = image::open("../../img/sandstone.png").unwrap();
         let width = img.width();

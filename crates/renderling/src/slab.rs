@@ -36,7 +36,7 @@ pub struct SlabManager {
     pub(crate) needs_expansion: Arc<AtomicBool>,
     pub(crate) buffer: Arc<RwLock<Option<Arc<wgpu::Buffer>>>>,
     pub(crate) update_sources: Arc<RwLock<Vec<Box<dyn UpdatesSlab>>>>,
-    pub(crate) updates: Arc<RwLock<Vec<SlabUpdate>>>,
+    pub(crate) updates: Arc<Mutex<Vec<SlabUpdate>>>,
     pub(crate) recycles: Arc<RwLock<Vec<Array<u32>>>>,
 }
 
@@ -45,13 +45,13 @@ impl crabslab::Slab for SlabManager {
         self.len.load(Ordering::Relaxed)
     }
 
-    fn read_unchecked<T: SlabItem>(&self, id: Id<T>) -> T {
+    fn read_unchecked<T: SlabItem>(&self, _: Id<T>) -> T {
         panic!("slab is read-only")
     }
 
     fn write_indexed<T: SlabItem>(&mut self, t: &T, index: usize) -> usize {
         // UNWRAP: if we can't acquire the lock we want to panic.
-        let mut guard = self.updates.write().unwrap();
+        let mut guard = self.updates.lock().unwrap();
         guard.push(SlabUpdate {
             array: Array::<u32>::new(index as u32, T::SLAB_SIZE as u32),
             elements: {
@@ -65,14 +65,14 @@ impl crabslab::Slab for SlabManager {
         index + T::SLAB_SIZE
     }
 
-    fn write_indexed_slice<T: SlabItem>(&mut self, ts: &[T], mut index: usize) -> usize {
+    fn write_indexed_slice<T: SlabItem>(&mut self, ts: &[T], index: usize) -> usize {
         // UNWRAP: if we can't acquire the lock we want to panic.
         let size = T::SLAB_SIZE * ts.len();
-        let mut guard = self.updates.write().unwrap();
+        let mut guard = self.updates.lock().unwrap();
         guard.push(SlabUpdate {
             array: Array::<u32>::new(index as u32, size as u32),
             elements: {
-                let mut e = vec![0u32; T::SLAB_SIZE];
+                let mut e = vec![0u32; size];
                 let mut i = 0;
                 for t in ts {
                     i = e.write_indexed(t, i);
@@ -157,7 +157,12 @@ impl crabslab::GrowableSlab for SlabManager {
     }
 
     fn reserve_capacity(&mut self, capacity: usize) {
-        self.capacity.store(capacity, Ordering::Relaxed)
+        let chosen_capacity = (2..13u32)
+            .map(|n| 2usize.pow(n))
+            .find(|pc| *pc >= capacity)
+            .unwrap_or(capacity);
+        self.capacity.store(chosen_capacity, Ordering::Relaxed);
+        self.needs_expansion.store(true, Ordering::Relaxed);
     }
 
     fn increment_len(&mut self, n: usize) -> usize {
@@ -230,33 +235,31 @@ impl SlabManager {
         label: Option<&str>,
         usages: wgpu::BufferUsages,
     ) -> Arc<wgpu::Buffer> {
+        let capacity = self.capacity() as u64;
+        let size = capacity * std::mem::size_of::<u32>() as u64;
+        log::trace!(
+            "recreating '{}' buffer - new size {capacity} ({size}bytes)",
+            label.unwrap_or("unknown")
+        );
+        let usage = usages
+            | wgpu::BufferUsages::STORAGE
+            | wgpu::BufferUsages::COPY_DST
+            | wgpu::BufferUsages::COPY_SRC;
+        let new_buffer = Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
+            label,
+            size,
+            usage,
+            mapped_at_creation: false,
+        }));
         let mut guard = self.buffer.write().unwrap();
-        let buffer = if let Some(old_buffer) = guard.take() {
-            let usage = usages | old_buffer.usage();
-            let size = self.capacity() as u64 * std::mem::size_of::<u32>() as u64;
-            let new_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-                label,
-                size,
-                usage,
-                mapped_at_creation: false,
-            });
+        if let Some(old_buffer) = guard.take() {
             let mut encoder =
                 device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label });
             encoder.copy_buffer_to_buffer(&old_buffer, 0, &new_buffer, 0, size);
             queue.submit(std::iter::once(encoder.finish()));
-            Arc::new(new_buffer)
-        } else {
-            let size = self.capacity() as u64 * std::mem::size_of::<u32>() as u64;
-            let new_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-                label,
-                size,
-                usage: usages,
-                mapped_at_creation: false,
-            });
-            Arc::new(new_buffer)
-        };
-        *guard = Some(buffer.clone());
-        buffer
+        }
+        *guard = Some(new_buffer.clone());
+        new_buffer
     }
 
     pub(crate) fn add_updates(&mut self, updates: impl UpdatesSlab) {
@@ -281,42 +284,41 @@ impl SlabManager {
     ///
     /// Returns the new buffer if one was created due to a capacity resize.
     pub fn upkeep(
-        &mut self,
+        &self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         label: Option<&str>,
         usage: wgpu::BufferUsages,
     ) -> Option<Arc<wgpu::Buffer>> {
+        log::trace!("upkeep");
         let new_buffer = if self.needs_expansion.swap(false, Ordering::Relaxed) {
             Some(self.recreate_buffer(device, queue, label, usage))
         } else {
             None
         };
-        let writes = {
-            let mut writes = vec![];
+        {
             let mut updates_guard = self.update_sources.write().unwrap();
             let mut recycles_guard = self.recycles.write().unwrap();
             updates_guard.retain(|hybrid| {
-                writes.extend(hybrid.get_updates());
                 let count = hybrid.strong_count();
-                if count > 1 {
-                    log::trace!(
-                        "{} {:?} has count {count}",
-                        hybrid.type_name(),
-                        hybrid.array()
-                    );
-                    true
-                } else {
+                if count <= 1 {
                     // recycle this allocation
                     let input_array = hybrid.array();
                     log::trace!("recycling {} {input_array:?}", hybrid.type_name());
-                    recycles_guard.push(input_array);
+                    if !hybrid.forgotten() {
+                        recycles_guard.push(input_array);
+                    } else {
+                        log::debug!("  cannot recycle - forgotten!");
+                    }
                     // TODO: combine recycled contiguous arrays
                     false
+                } else {
+                    true
                 }
             });
-            writes
-        };
+        }
+
+        let writes = std::mem::replace(self.updates.lock().unwrap().as_mut(), vec![]);
         if !writes.is_empty() {
             // UNWRAP: safe because we know the buffer exists at this point, as we may have
             // recreated it above^
@@ -409,9 +411,6 @@ pub struct SlabUpdate {
 }
 
 pub trait UpdatesSlab: Send + Sync + std::any::Any {
-    /// Returns all current updates, clearing the queue.
-    fn get_updates(&self) -> Vec<SlabUpdate>;
-
     /// Returns the slab range of all possible updates.
     fn array(&self) -> Array<u32>;
 
@@ -420,26 +419,12 @@ pub trait UpdatesSlab: Send + Sync + std::any::Any {
 
     /// Returns the type name of Self
     fn type_name(&self) -> &'static str;
+
+    /// Returns if the hybrid has been forgotten.
+    fn forgotten(&self) -> bool;
 }
 
 impl<T: SlabItem + Clone + Send + Sync + std::any::Any> UpdatesSlab for Hybrid<T> {
-    fn get_updates(&self) -> Vec<SlabUpdate> {
-        if self.dirty.swap(false, std::sync::atomic::Ordering::Relaxed) {
-            let t = self.get();
-            let array = Array::<u32>::new(self.id.inner(), T::SLAB_SIZE as u32);
-            let mut elements = vec![0u32; T::SLAB_SIZE];
-            elements.write(0u32.into(), &t);
-            vec![SlabUpdate {
-                array,
-                elements,
-                #[cfg(debug_assertions)]
-                type_is: std::any::type_name::<T>(),
-            }]
-        } else {
-            vec![]
-        }
-    }
-
     fn strong_count(&self) -> usize {
         Arc::strong_count(&self.cpu_value)
     }
@@ -451,15 +436,13 @@ impl<T: SlabItem + Clone + Send + Sync + std::any::Any> UpdatesSlab for Hybrid<T
     fn type_name(&self) -> &'static str {
         std::any::type_name_of_val(self)
     }
+
+    fn forgotten(&self) -> bool {
+        self.forgotten.load(Ordering::Relaxed)
+    }
 }
 
 impl<T: SlabItem + Clone + Send + Sync + std::any::Any> UpdatesSlab for HybridArray<T> {
-    fn get_updates(&self) -> Vec<SlabUpdate> {
-        let mut guard = self.updates.lock().unwrap();
-        let updates = std::mem::take(guard.as_mut());
-        updates
-    }
-
     fn strong_count(&self) -> usize {
         Arc::strong_count(&self.cpu_value)
     }
@@ -471,6 +454,10 @@ impl<T: SlabItem + Clone + Send + Sync + std::any::Any> UpdatesSlab for HybridAr
     fn type_name(&self) -> &'static str {
         std::any::type_name_of_val(self)
     }
+
+    fn forgotten(&self) -> bool {
+        self.forgotten.load(Ordering::Relaxed)
+    }
 }
 
 /// A "hybrid" type that lives on the CPU and the GPU.
@@ -479,7 +466,8 @@ impl<T: SlabItem + Clone + Send + Sync + std::any::Any> UpdatesSlab for HybridAr
 pub struct Hybrid<T> {
     cpu_value: Arc<RwLock<T>>,
     id: Id<T>,
-    dirty: Arc<AtomicBool>,
+    updates: Arc<Mutex<Vec<SlabUpdate>>>,
+    forgotten: Arc<AtomicBool>,
 }
 
 impl<T: core::fmt::Debug> core::fmt::Debug for Hybrid<T> {
@@ -487,7 +475,6 @@ impl<T: core::fmt::Debug> core::fmt::Debug for Hybrid<T> {
         f.debug_struct(&format!("Hybrid<{}>", std::any::type_name::<T>()))
             .field("id", &self.id)
             .field("cpu_value", &self.cpu_value.read().unwrap())
-            .field("dirty", &self.get_dirty())
             .finish()
     }
 }
@@ -497,37 +484,34 @@ impl<T> Clone for Hybrid<T> {
         Hybrid {
             cpu_value: self.cpu_value.clone(),
             id: self.id,
-            dirty: self.dirty.clone(),
+            updates: self.updates.clone(),
+            forgotten: self.forgotten.clone(),
         }
-    }
-}
-
-impl<T> Hybrid<T> {
-    pub(crate) fn set_dirty(&self, dirty: bool) {
-        self.dirty
-            .store(dirty, std::sync::atomic::Ordering::Relaxed)
-    }
-
-    pub(crate) fn get_dirty(&self) -> bool {
-        self.dirty.load(std::sync::atomic::Ordering::Relaxed)
     }
 }
 
 impl<T: SlabItem + Clone + Send + Sync + 'static> Hybrid<T> {
     pub fn new(mngr: &mut SlabManager, value: T) -> Self {
         let id = mngr.allocate::<T>();
-        let hybrid = Self::new_preallocated(id, value);
+        let hybrid = Self::new_preallocated(id, value, mngr.updates.clone());
         mngr.add_updates(hybrid.clone());
 
         hybrid
     }
 
-    pub(crate) fn new_preallocated(id: Id<T>, value: T) -> Self {
-        Self {
-            cpu_value: Arc::new(RwLock::new(value)),
+    pub(crate) fn new_preallocated(
+        id: Id<T>,
+        value: T,
+        updates: Arc<Mutex<Vec<SlabUpdate>>>,
+    ) -> Self {
+        let s = Self {
+            cpu_value: Arc::new(RwLock::new(value.clone())),
             id,
-            dirty: Arc::new(true.into()),
-        }
+            updates,
+            forgotten: Default::default(),
+        };
+        s.modify(move |old| *old = value);
+        s
     }
 
     pub fn id(&self) -> Id<T> {
@@ -540,14 +524,29 @@ impl<T: SlabItem + Clone + Send + Sync + 'static> Hybrid<T> {
 
     pub fn modify(&self, f: impl FnOnce(&mut T)) {
         let mut value_guard = self.cpu_value.write().unwrap();
-        self.set_dirty(true);
         f(&mut value_guard);
+        let t = value_guard.clone();
+        self.updates.lock().unwrap().push(SlabUpdate {
+            array: Array::new(self.id.inner(), T::SLAB_SIZE as u32),
+            elements: {
+                let mut es = vec![0u32; T::SLAB_SIZE];
+                es.write(Id::new(0), &t);
+                es
+            },
+            #[cfg(debug_assertions)]
+            type_is: std::any::type_name::<T>(),
+        })
     }
 
     pub fn set(&self, value: T) {
         self.modify(move |old| {
             *old = value;
         })
+    }
+
+    /// Forgets the hybrid value, preventing the GPU memory from being recycled and re-allocated.
+    pub fn forget(self) {
+        self.forgotten.store(true, Ordering::Relaxed);
     }
 }
 
@@ -560,6 +559,7 @@ pub struct HybridArray<T> {
     cpu_value: Arc<RwLock<Vec<T>>>,
     array: Array<T>,
     updates: Arc<Mutex<Vec<SlabUpdate>>>,
+    forgotten: Arc<AtomicBool>,
 }
 
 impl<T: core::fmt::Debug> core::fmt::Debug for HybridArray<T> {
@@ -577,6 +577,7 @@ impl<T> Clone for HybridArray<T> {
             cpu_value: self.cpu_value.clone(),
             array: self.array,
             updates: self.updates.clone(),
+            forgotten: self.forgotten.clone(),
         }
     }
 }
@@ -585,7 +586,7 @@ impl<T: SlabItem + Clone + Send + Sync + 'static> HybridArray<T> {
     pub fn new(mngr: &mut SlabManager, values: impl IntoIterator<Item = T>) -> Self {
         let value = values.into_iter().collect::<Vec<_>>();
         let array = mngr.allocate_array::<T>(value.len());
-        let hybrid = Self::new_preallocated(array, value);
+        let hybrid = Self::new_preallocated(array, value, mngr.updates.clone());
         mngr.update_sources
             .write()
             .unwrap()
@@ -593,20 +594,26 @@ impl<T: SlabItem + Clone + Send + Sync + 'static> HybridArray<T> {
         hybrid
     }
 
-    pub(crate) fn new_preallocated(array: Array<T>, values: Vec<T>) -> Self {
+    pub(crate) fn new_preallocated(
+        array: Array<T>,
+        values: Vec<T>,
+        updates: Arc<Mutex<Vec<SlabUpdate>>>,
+    ) -> Self {
+        {
+            let mut elements = vec![0u32; T::SLAB_SIZE * array.len()];
+            elements.write_array(Array::new(0, array.len() as u32), &values);
+            updates.lock().unwrap().push(SlabUpdate {
+                array: array.into_u32_array(),
+                elements,
+                #[cfg(debug_assertions)]
+                type_is: std::any::type_name::<Vec<T>>(),
+            });
+        }
         Self {
             array,
-            updates: {
-                let mut elements = vec![0u32; T::SLAB_SIZE * array.len()];
-                elements.write_array(Array::new(0, array.len() as u32), &values);
-                Arc::new(Mutex::new(vec![SlabUpdate {
-                    array: array.into_u32_array(),
-                    elements,
-                    #[cfg(debug_assertions)]
-                    type_is: std::any::type_name::<Vec<T>>(),
-                }]))
-            },
+            updates,
             cpu_value: Arc::new(RwLock::new(values)),
+            forgotten: Default::default(),
         }
     }
 
@@ -643,11 +650,15 @@ impl<T: SlabItem + Clone + Send + Sync + 'static> HybridArray<T> {
     pub fn set_item(&self, index: usize, value: T) -> Option<T> {
         self.modify(index, move |t| std::mem::replace(t, value))
     }
+
+    pub fn forget(self) {
+        self.forgotten.store(true, Ordering::Relaxed);
+    }
 }
 
 #[cfg(test)]
 mod test {
-    use crate::Renderling;
+    use crate::Context;
 
     use super::*;
 
@@ -705,8 +716,7 @@ mod test {
 
     #[test]
     fn mngr_updates_count_sanity() {
-        let r = Renderling::headless(1, 1);
-        let (device, queue) = r.get_device_and_queue_owned();
+        let r = Context::headless(1, 1);
         let mut mngr = SlabManager::default();
         {
             let value = mngr.new_hybrid(666u32);

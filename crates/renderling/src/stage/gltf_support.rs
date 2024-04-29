@@ -1009,7 +1009,7 @@ mod test {
     use crate::{
         pbr::{Material, PbrConfig},
         stage::Vertex,
-        Camera, Renderlet, Renderling, Transform,
+        Camera, Context, Renderlet, Transform,
     };
     use crabslab::{GrowableSlab, Id, Slab};
     use glam::{Vec2, Vec3, Vec4, Vec4Swizzles};
@@ -1036,13 +1036,14 @@ mod test {
     // * support primitives w/ positions and normal attributes
     // * support transforming nodes (T * R * S)
     fn stage_gltf_simple_meshes() {
-        let mut r =
-            Renderling::headless(100, 50).with_background_color(Vec3::splat(0.0).extend(1.0));
+        let ctx = Context::headless(100, 50);
         let projection = crate::camera::perspective(100.0, 50.0);
         let position = Vec3::new(1.0, 0.5, 1.5);
         let view = crate::camera::look_at(position, Vec3::new(1.0, 0.5, 0.0), Vec3::Y);
-        let mut stage = r.new_stage().with_lighting(false);
-        stage.configure_graph(&mut r, true);
+        let mut stage = ctx
+            .new_stage()
+            .with_lighting(false)
+            .with_background_color(Vec3::splat(0.0).extend(1.0));
         let mut doc = stage
             .load_gltf_document_from_path("../../gltf/gltfTutorial_008_SimpleMeshes.gltf")
             .unwrap();
@@ -1064,17 +1065,20 @@ mod test {
         // let unit_ids = stage.draw_gltf_scene(&gpu_doc, camera_id, default_scene);
         // assert_eq!(2, unit_ids.len());
 
-        let img = r.render_image().unwrap();
+        let frame = ctx.get_current_frame().unwrap();
+        stage.render(&frame.view());
+        let img = frame.read_image().unwrap();
         img_diff::assert_img_eq("gltf_simple_meshes.png", img);
     }
 
     #[test]
     // Ensures we can read a minimal gltf file with a simple triangle mesh.
     fn minimal_mesh() {
-        let mut r =
-            Renderling::headless(20, 20).with_background_color(Vec3::splat(0.0).extend(1.0));
-        let mut stage = r.new_stage().with_lighting(false);
-        stage.configure_graph(&mut r, true);
+        let ctx = Context::headless(20, 20);
+        let mut stage = ctx
+            .new_stage()
+            .with_lighting(false)
+            .with_background_color(Vec3::splat(0.0).extend(1.0));
         let mut doc = stage
             .load_gltf_document_from_path("../../gltf/gltfTutorial_003_MinimalGltfFile.gltf")
             .unwrap();
@@ -1094,7 +1098,9 @@ mod test {
             println!("node_{i}: {node:#?}");
         }
 
-        let img = r.render_image().unwrap();
+        let frame = ctx.get_current_frame().unwrap();
+        stage.render(&frame.view());
+        let img = frame.read_image().unwrap();
         img_diff::assert_img_eq("gltf_minimal_mesh.png", img);
     }
 
@@ -1103,9 +1109,11 @@ mod test {
     //
     // This ensures we are decoding images correctly.
     fn gltf_images() {
-        let mut r = Renderling::headless(100, 100).with_background_color(Vec4::splat(1.0));
-        let mut stage = r.new_stage().with_lighting(false);
-        stage.configure_graph(&mut r, true);
+        let ctx = Context::headless(100, 100);
+        let mut stage = ctx
+            .new_stage()
+            .with_lighting(false)
+            .with_background_color(Vec4::splat(1.0));
         let doc = stage
             .load_gltf_document_from_path("../../gltf/cheetah_cone.glb")
             .unwrap();
@@ -1148,21 +1156,22 @@ mod test {
             ..Default::default()
         });
 
-        let img = r.render_linear_image().unwrap();
+        let frame = ctx.get_current_frame().unwrap();
+        stage.render(&frame.view());
+        let img = frame.read_linear_image().unwrap();
         img_diff::assert_img_eq("gltf_images.png", img);
     }
 
     #[test]
     fn simple_texture() {
         let size = 100;
-        let mut r =
-            Renderling::headless(size, size).with_background_color(Vec3::splat(0.0).extend(1.0));
-        let mut stage = r
+        let ctx = Context::headless(size, size);
+        let mut stage = ctx
             .new_stage()
+            .with_background_color(Vec3::splat(0.0).extend(1.0))
             // There are no lights in the scene and the material isn't marked as "unlit", so
             // let's force it to be unlit.
             .with_lighting(false);
-        stage.configure_graph(&mut r, true);
         let mut doc = stage
             .load_gltf_document_from_path("../../gltf/gltfTutorial_013_SimpleTexture.gltf")
             .unwrap();
@@ -1175,7 +1184,9 @@ mod test {
         let nodes = doc.scenes.get(default_scene_index).unwrap().clone();
         let _scene = stage.draw_gltf_scene(&mut doc, nodes, camera).unwrap();
 
-        let img = r.render_image().unwrap();
+        let frame = ctx.get_current_frame().unwrap();
+        stage.render(&frame.view());
+        let img = frame.read_image().unwrap();
         img_diff::assert_img_eq("gltf_simple_texture.png", img);
     }
 
@@ -1184,10 +1195,12 @@ mod test {
     // normal map.
     fn normal_mapping_brick_sphere() {
         let size = 600;
-        let mut r =
-            Renderling::headless(size, size).with_background_color(Vec3::splat(1.0).extend(1.0));
-        let mut stage = r.new_stage().with_lighting(true).with_bloom(true);
-        stage.configure_graph(&mut r, true);
+        let ctx = Context::headless(size, size);
+        let mut stage = ctx
+            .new_stage()
+            .with_lighting(true)
+            .with_bloom(true)
+            .with_background_color(Vec3::splat(1.0).extend(1.0));
         let doc = stage
             .load_gltf_document_from_path("../../gltf/red_brick_03_1k.glb")
             .unwrap();
@@ -1198,7 +1211,9 @@ mod test {
 
         stage.set_lights(doc.lights.iter().map(|gltf_light| gltf_light.light.id()));
 
-        let img = r.render_image().unwrap();
+        let frame = ctx.get_current_frame().unwrap();
+        stage.render(&frame.view());
+        let img = frame.read_image().unwrap();
         img_diff::assert_img_eq("gltf_normal_mapping_brick_sphere.png", img);
     }
 

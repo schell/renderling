@@ -5,8 +5,6 @@
 use snafu::prelude::*;
 use std::sync::Arc;
 
-use crate::{BufferDimensions, CopiedTextureBuffer};
-
 #[derive(Debug, Snafu)]
 pub enum WgpuStateError {
     #[snafu(display("cannot create adaptor"))]
@@ -20,21 +18,6 @@ pub enum WgpuStateError {
 
     #[snafu(display("could not create surface: {}", source))]
     CreateSurface { source: wgpu::CreateSurfaceError },
-
-    #[snafu(display("missing surface texture: {}", source))]
-    MissingSurfaceTexture { source: wgpu::SurfaceError },
-
-    #[snafu(display("{}", source))]
-    Texture { source: crate::TextureError },
-
-    #[snafu(display("missing the target frame - call WgpuState::prepare_target_frame first"))]
-    MissingTargetFrame,
-
-    #[snafu(display("could not map buffer"))]
-    CouldNotMapBuffer { source: wgpu::BufferAsyncError },
-
-    #[snafu(display("could not convert image buffer"))]
-    CouldNotConvertImageBuffer,
 }
 
 impl From<WgpuStateError> for moongraph::GraphError {
@@ -105,96 +88,6 @@ impl RenderTarget {
         match self {
             RenderTarget::Surface { .. } => false,
             RenderTarget::Texture { .. } => true,
-        }
-    }
-
-    /// Get the current render target frame.
-    ///
-    /// Errs if the render target is a surface and there was an error getting
-    /// the next swapchain texture.
-    pub fn get_current_frame(&self) -> Result<Frame, WgpuStateError> {
-        match self {
-            RenderTarget::Surface { surface, .. } => {
-                let surface_texture = surface
-                    .get_current_texture()
-                    .context(MissingSurfaceTextureSnafu)?;
-                Ok(Frame::Surface(surface_texture))
-            }
-            RenderTarget::Texture { texture, .. } => Ok(Frame::Texture(texture.clone())),
-        }
-    }
-}
-
-/// Abstracts over window and texture render targets.
-///
-/// Either a [`SurfaceTexture`] or a [`Texture`].
-pub enum Frame {
-    Surface(wgpu::SurfaceTexture),
-    Texture(Arc<wgpu::Texture>),
-}
-
-impl Frame {
-    /// Returns the underlying texture of this target.
-    pub fn texture(&self) -> &wgpu::Texture {
-        match self {
-            Frame::Surface(s) => &s.texture,
-            Frame::Texture(t) => &t,
-        }
-    }
-
-    pub fn copy_to_buffer(
-        &self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        width: u32,
-        height: u32,
-    ) -> CopiedTextureBuffer {
-        let dimensions = BufferDimensions::new(4, 1, width as usize, height as usize);
-        // The output buffer lets us retrieve the self as an array
-        let buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("RenderTarget::copy_to_buffer"),
-            size: (dimensions.padded_bytes_per_row * dimensions.height) as u64,
-            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("post render screen capture encoder"),
-        });
-        let texture = self.texture();
-        // Copy the data from the surface texture to the buffer
-        encoder.copy_texture_to_buffer(
-            texture.as_image_copy(),
-            wgpu::ImageCopyBuffer {
-                buffer: &buffer,
-                layout: wgpu::ImageDataLayout {
-                    offset: 0,
-                    bytes_per_row: Some(dimensions.padded_bytes_per_row as u32),
-                    rows_per_image: None,
-                },
-            },
-            wgpu::Extent3d {
-                width: dimensions.width as u32,
-                height: dimensions.height as u32,
-                depth_or_array_layers: 1,
-            },
-        );
-
-        queue.submit(std::iter::once(encoder.finish()));
-
-        CopiedTextureBuffer {
-            dimensions,
-            buffer,
-            format: texture.format(),
-        }
-    }
-
-    /// If self is `TargetFrame::Surface` this presents the surface frame.
-    ///
-    /// If self is a `TargetFrame::Texture` this is a noop.
-    pub fn present(self) {
-        match self {
-            Frame::Surface(s) => s.present(),
-            Frame::Texture(_) => {}
         }
     }
 }

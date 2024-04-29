@@ -15,7 +15,7 @@ readme = "../../README.md"
 crate-type = ["lib", "dylib"]
 
 [features]
-default = ["gltf", "sdf", "shaders", "tutorial", "winit"]
+default = ["gltf", "sdf", "shaders", "winit"]
 shaders = [
   "array_test",
   "bloom",

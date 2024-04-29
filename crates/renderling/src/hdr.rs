@@ -9,6 +9,51 @@ use crate::{
     DepthTexture, Device, Queue, RenderTarget, ScreenSize, WgpuStateError,
 };
 
+pub const HDR_TEXTURE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
+
+/// Create a new HDR texture.
+pub fn create_texture(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    width: u32,
+    height: u32,
+) -> crate::Texture {
+    crate::Texture::new_with(
+        &device,
+        &queue,
+        Some("hdr"),
+        Some(
+            // * The hdr texture is what we render to in most cases
+            // * we also read from it to calculate bloom
+            // * we also write the bloom mix result back to it
+            // * we also read the texture in tests
+            wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_DST
+                | wgpu::TextureUsages::COPY_SRC,
+        ),
+        Some({
+            device.create_sampler(&wgpu::SamplerDescriptor {
+                address_mode_u: wgpu::AddressMode::ClampToEdge,
+                address_mode_v: wgpu::AddressMode::ClampToEdge,
+                address_mode_w: wgpu::AddressMode::ClampToEdge,
+                mag_filter: wgpu::FilterMode::Nearest,
+                min_filter: wgpu::FilterMode::Nearest,
+                mipmap_filter: wgpu::FilterMode::Nearest,
+                ..Default::default()
+            })
+        }),
+        HDR_TEXTURE_FORMAT,
+        4,
+        // TODO: pretty sure this should be `2`
+        1,
+        width,
+        height,
+        1,
+        &[],
+    )
+}
+
 /// A texture, tonemapping pipeline and uniform used for high dynamic range
 /// rendering.
 ///
@@ -21,50 +66,6 @@ pub struct HdrSurface {
 }
 
 impl HdrSurface {
-    pub const TEXTURE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
-
-    pub fn create_texture(
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        width: u32,
-        height: u32,
-    ) -> crate::Texture {
-        crate::Texture::new_with(
-            &device,
-            &queue,
-            Some("hdr"),
-            Some(
-                // The hdr texture is what we render to in most cases
-                wgpu::TextureUsages::RENDER_ATTACHMENT 
-                    // we also read from it to calculate bloom
-                    | wgpu::TextureUsages::TEXTURE_BINDING
-                    // we also write the bloom mix result back to it
-                    | wgpu::TextureUsages::COPY_DST
-                    // we also read the texture in tests
-                    | wgpu::TextureUsages::COPY_SRC
-            ),
-            Some({
-                device.create_sampler(&wgpu::SamplerDescriptor {
-                    address_mode_u: wgpu::AddressMode::ClampToEdge,
-                    address_mode_v: wgpu::AddressMode::ClampToEdge,
-                    address_mode_w: wgpu::AddressMode::ClampToEdge,
-                    mag_filter: wgpu::FilterMode::Nearest,
-                    min_filter: wgpu::FilterMode::Nearest,
-                    mipmap_filter: wgpu::FilterMode::Nearest,
-                    ..Default::default()
-                })
-            }),
-            Self::TEXTURE_FORMAT,
-            4,
-            // TODO: pretty sure this should be `2`
-            1,
-            width,
-            height,
-            1,
-            &[],
-        )
-    }
-
     pub fn create_bindgroup(
         device: &wgpu::Device,
         hdr_texture: &crate::Texture,
@@ -160,7 +161,7 @@ pub fn create_hdr_render_surface(
         height: size.height,
         depth_or_array_layers: 1,
     };
-    let hdr_texture = HdrSurface::create_texture(&device, &queue, size.width, size.height);
+    let hdr_texture = create_texture(&device, &queue, size.width, size.height);
     let label = Some("hdr tonemapping");
     let vertex_linkage = crate::linkage::tonemapping_vertex::linkage(&device);
     let fragment_linkage = crate::linkage::tonemapping_fragment::linkage(&device);
@@ -256,7 +257,7 @@ pub fn resize_hdr_surface(
     ),
 ) -> Result<(), WgpuStateError> {
     let ScreenSize { width, height } = *size;
-    hdr.hdr_texture = HdrSurface::create_texture(&device, &queue, width, height);
+    hdr.hdr_texture = create_texture(&device, &queue, width, height);
     hdr.bindgroup =
         HdrSurface::create_bindgroup(&device, &hdr.hdr_texture, hdr.slab.as_ref().get_buffer());
     Ok(())
