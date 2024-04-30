@@ -108,51 +108,6 @@ pub struct ScreenSize {
     pub height: u32,
 }
 
-/// A depth texture.
-pub struct DepthTexture(pub(crate) crate::Texture);
-
-impl Deref for DepthTexture {
-    type Target = crate::Texture;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl DepthTexture {
-    pub fn width(&self) -> u32 {
-        self.0.texture.width()
-    }
-
-    pub fn height(&self) -> u32 {
-        self.0.texture.height()
-    }
-
-    /// Converts the depth texture into an image.
-    ///
-    /// Assumes the format is single channel 32bit.
-    pub fn into_image(
-        &self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-    ) -> Option<image::DynamicImage> {
-        let depth_copied_buffer = crate::Texture::read(
-            &self.texture,
-            &device,
-            &queue,
-            self.width() as usize,
-            self.height() as usize,
-            1,
-            4,
-        );
-        let pixels = depth_copied_buffer.pixels(device);
-        let pixels: Vec<f32> = bytemuck::cast_slice(&pixels).to_vec();
-        let img_buffer: image::ImageBuffer<image::Luma<f32>, Vec<f32>> =
-            image::ImageBuffer::from_raw(self.width(), self.height(), pixels)?;
-        Some(image::DynamicImage::from(img_buffer))
-    }
-}
-
 /// The global background color.
 pub struct BackgroundColor(pub Vec4);
 

@@ -29,8 +29,6 @@ pub mod frame;
 #[cfg(not(target_arch = "spirv"))]
 mod context;
 #[cfg(not(target_arch = "spirv"))]
-mod hdr;
-#[cfg(not(target_arch = "spirv"))]
 pub mod ibl;
 #[cfg(not(target_arch = "spirv"))]
 pub mod linkage;
@@ -63,8 +61,6 @@ pub use camera::*;
 #[cfg(not(target_arch = "spirv"))]
 pub use context::*;
 use glam::Vec3;
-#[cfg(not(target_arch = "spirv"))]
-pub use hdr::*;
 #[cfg(not(target_arch = "spirv"))]
 use image::GenericImageView;
 #[cfg(not(target_arch = "spirv"))]
@@ -272,6 +268,7 @@ mod test {
     use crate::{pbr::Material, stage::Vertex};
 
     use glam::{Mat3, Mat4, Quat, Vec2, Vec3, Vec4};
+    use image::RgbaImage;
     use img_diff::DiffCfg;
     use pretty_assertions::assert_eq;
 
@@ -310,7 +307,7 @@ mod test {
     #[test]
     // This tests our ability to draw a CMYK triangle in the top left corner.
     fn cmy_triangle_sanity() {
-        let mut ctx = Context::headless(100, 100);
+        let ctx = Context::headless(100, 100);
         let mut stage = ctx.new_stage().with_background_color(Vec4::splat(1.0));
         let (projection, view) = default_ortho2d(100.0, 100.0);
         let camera = stage.append(&Camera::new(projection, view));
@@ -324,10 +321,26 @@ mod test {
         let frame = ctx.get_current_frame().unwrap();
         stage.render(&frame.view());
         let img = frame.read_image().unwrap();
-        let (device, queue) = ctx.get_device_and_queue_owned();
+        frame.present();
         let depth_texture = stage.get_depth_texture();
-        let depth_img = depth_texture.into_image(&device, &queue).unwrap();
-        img_diff::assert_img_eq("cmy_triangle_depth.png", depth_img);
+        let depth_img = depth_texture.read_image().unwrap();
+        img_diff::assert_img_eq("cmy_triangle_depth.png", depth_img.clone());
+        img_diff::save("cmy_triangle/depth.png", depth_img);
+
+        let hdr_img = stage
+            .hdr_texture
+            .read_hdr_image(ctx.get_device(), ctx.get_queue())
+            .unwrap();
+        //let hdr_img: RgbaImage = hdr_img.convert();
+        img_diff::save("cmy_triangle/hdr.png", hdr_img);
+
+        let bloom_mix = stage
+            .bloom
+            .get_mix_texture()
+            .read_hdr_image(ctx.get_device(), ctx.get_queue())
+            .unwrap();
+        img_diff::save("cmy_triangle/bloom_mix.png", bloom_mix);
+
         img_diff::assert_img_eq("cmy_triangle.png", img);
 
         // NOTE: We cannot call `stage.read_slab()` until we have rendered, as the
@@ -371,6 +384,7 @@ mod test {
         });
 
         let frame = ctx.get_current_frame().unwrap();
+        stage.render(&frame.view());
         let img = frame.read_image().unwrap();
         img_diff::assert_img_eq_cfg(
             "cmy_triangle.png",
@@ -481,6 +495,9 @@ mod test {
         });
         let frame = ctx.get_current_frame().unwrap();
         stage.render(&frame.view());
+        let depth_texture = stage.get_depth_texture();
+        let depth_img = depth_texture.read_image().unwrap();
+        img_diff::save("cmy_cube/sanity_depth.png", depth_img);
         let img = frame.read_image().unwrap();
         img_diff::assert_img_eq("cmy_cube/sanity.png", img);
     }
@@ -578,6 +595,7 @@ mod test {
 
         // we should see two colored cubes again
         let frame = ctx.get_current_frame().unwrap();
+        stage.render(&frame.view());
         let img = frame.read_image().unwrap();
         img_diff::assert_eq("cmy_cube/visible_before_again.png", img_before, img);
     }
@@ -617,6 +635,7 @@ mod test {
 
         // we should see a cube (in sRGB color space)
         let frame = ctx.get_current_frame().unwrap();
+        stage.render(&frame.view());
         let img = frame.read_image().unwrap();
         img_diff::assert_img_eq("cmy_cube/remesh_before.png", img);
         frame.present();
@@ -627,6 +646,7 @@ mod test {
 
         // we should see a pyramid (in sRGB color space)
         let frame = ctx.get_current_frame().unwrap();
+        stage.render(&frame.view());
         let img = frame.read_image().unwrap();
         img_diff::assert_img_eq("cmy_cube/remesh_after.png", img);
     }
@@ -866,11 +886,10 @@ mod test {
         });
 
         let frame = ctx.get_current_frame().unwrap();
+        stage.render(&frame.view());
         let img = frame.read_image().unwrap();
         let depth_texture = stage.get_depth_texture();
-        let depth_img = depth_texture
-            .into_image(ctx.get_device(), ctx.get_queue())
-            .unwrap();
+        let depth_img = depth_texture.read_image().unwrap();
         img_diff::save("scene_cube_directional_depth.png", depth_img);
         img_diff::assert_img_eq("scene_cube_directional.png", img);
     }

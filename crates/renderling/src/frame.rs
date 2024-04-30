@@ -1,39 +1,15 @@
 //! Frame creation and clearing.
-//!
-//! Contains graph nodes for creating and clearing frames, as well as a
-//! `PostRenderBuffer` resource that holds a copy of the last frame's buffer.
 use std::{ops::Deref, sync::Arc};
 
 use glam::UVec2;
-use moongraph::*;
 use snafu::prelude::*;
 
-use crate::{
-    math::Vec4, BackgroundColor, BufferDimensions, CopiedTextureBuffer, DepthTexture, Device,
-    Queue, WgpuStateError,
-};
+use crate::{BufferDimensions, CopiedTextureBuffer};
 
 #[derive(Debug, Snafu)]
 pub enum FrameError {
     #[snafu(display("{}", source))]
     Texture { source: crate::TextureError },
-}
-
-pub fn default_frame_texture_view(
-    frame_texture: &wgpu::Texture,
-) -> (wgpu::TextureView, wgpu::TextureFormat) {
-    let format = frame_texture.format().add_srgb_suffix();
-    let view = frame_texture.create_view(&wgpu::TextureViewDescriptor {
-        label: Some("WgpuState::default_frame_texture_view"),
-        format: Some(format),
-        dimension: None,
-        aspect: wgpu::TextureAspect::All,
-        base_mip_level: 0,
-        mip_level_count: None,
-        base_array_layer: 0,
-        array_layer_count: None,
-    });
-    (view, format)
 }
 
 pub struct FrameTextureView {
@@ -239,67 +215,4 @@ pub fn conduct_clear_pass(
     drop(render_pass);
 
     queue.submit(std::iter::once(encoder.finish()));
-}
-
-/// Render graph node to conduct a clear pass on the global frame and depth
-/// textures.
-pub fn clear_frame_and_depth(
-    (device, queue, frame_view, depth, color): (
-        View<Device, NoDefault>,
-        View<Queue, NoDefault>,
-        View<FrameTextureView, NoDefault>,
-        View<DepthTexture, NoDefault>,
-        View<BackgroundColor, NoDefault>,
-    ),
-) -> Result<(), WgpuStateError> {
-    let depth_view = &depth.view;
-    let color: Vec4 = if frame_view.format.is_srgb() {
-        color.0.powf(2.2)
-    } else {
-        color.0
-    };
-    let [r, g, b, a] = color.to_array();
-    let color = wgpu::Color {
-        r: r.into(),
-        g: g.into(),
-        b: b.into(),
-        a: a.into(),
-    };
-    let frames = vec![frame_view.view.as_ref()];
-    conduct_clear_pass(
-        &device,
-        &queue,
-        Some("clear_frame_and_depth"),
-        frames,
-        Some(&depth_view),
-        color,
-    );
-    Ok(())
-}
-
-/// Conduct a clear pass on **only the depth texture**.
-pub fn clear_depth(
-    (device, queue, depth): (
-        View<Device, NoDefault>,
-        View<Queue, NoDefault>,
-        View<DepthTexture, NoDefault>,
-    ),
-) -> Result<(), WgpuStateError> {
-    let depth_view = &depth.view;
-    conduct_clear_pass(
-        &device,
-        &queue,
-        Some("clear_depth"),
-        vec![],
-        Some(&depth_view),
-        Default::default(),
-    );
-    Ok(())
-}
-
-/// Consume and present the screen frame to the screen.
-pub fn present(frame: Move<Frame>) -> Result<(), WgpuStateError> {
-    let frame = frame.into();
-    frame.present();
-    Ok(())
 }

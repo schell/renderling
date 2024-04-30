@@ -108,6 +108,7 @@ impl RepackPreview {
 }
 
 /// A texture atlas, used to store all the textures in a scene.
+// TODO: make Atlas threadsafe
 pub struct Atlas {
     pub texture: crate::Texture,
     pub rects: Vec<crunch::Rect>,

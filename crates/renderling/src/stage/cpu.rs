@@ -12,6 +12,7 @@ use crate::{
     bloom::Bloom,
     pbr::{debug::DebugMode, light::Light, PbrConfig},
     slab::*,
+    tonemapping::Tonemapping,
     Atlas, AtlasError, AtlasImage, AtlasImageError, AtlasTexture, Camera, CpuCubemap, DepthTexture,
     Device, Queue, Skybox, WgpuSlabError,
 };
@@ -80,8 +81,9 @@ pub struct Stage {
     pub(crate) depth_texture: crate::Texture,
 
     pub(crate) atlas: Arc<RwLock<Atlas>>,
-    pub(crate) bloom: Arc<RwLock<Bloom>>,
+    pub(crate) bloom: Bloom,
     pub(crate) skybox: Arc<RwLock<Skybox>>,
+    pub(crate) tonemapping: Tonemapping,
     pub(crate) background_color: Arc<RwLock<wgpu::Color>>,
 
     pub(crate) has_skybox: Arc<AtomicBool>,
@@ -121,8 +123,15 @@ impl Stage {
             ..Default::default()
         });
         let lights = mngr.new_hybrid_array(vec![Id::<Light>::NONE; 16]);
-        let hdr_texture = crate::hdr::create_texture(&device, &queue, w, h);
+        let hdr_texture = crate::Texture::create_hdr_texture(&device, &queue, w, h);
         let depth_texture = crate::Texture::create_depth_texture(&device, w, h);
+        let bloom = Bloom::new(&device, &queue, resolution, &hdr_texture);
+        let tonemapping = Tonemapping::new(
+            &device,
+            &queue,
+            r.render_target.format().add_srgb_suffix(),
+            &bloom.get_mix_texture(),
+        );
 
         Self {
             mngr,
@@ -150,12 +159,8 @@ impl Stage {
             skybox_bindgroup: Default::default(),
             skybox_pipeline: Default::default(),
             has_skybox: Arc::new(AtomicBool::new(false)),
-            bloom: Arc::new(RwLock::new(Bloom::new(
-                &device,
-                &queue,
-                resolution,
-                &hdr_texture,
-            ))),
+            bloom,
+            tonemapping,
             has_bloom: AtomicBool::from(true).into(),
             buffers_bindgroup: Default::default(),
             textures_bindgroup: Default::default(),
@@ -301,7 +306,7 @@ impl Stage {
             let p = Arc::new(
                 crate::skybox::create_skybox_render_pipeline(
                     &self.device,
-                    crate::hdr::HDR_TEXTURE_FORMAT,
+                    crate::Texture::HDR_TEXTURE_FORMAT,
                 )
                 .0,
             );
@@ -483,7 +488,11 @@ impl Stage {
 
     /// Returns a clone of the current depth texture.
     pub fn get_depth_texture(&self) -> DepthTexture {
-        DepthTexture(self.depth_texture.clone())
+        DepthTexture {
+            device: self.device.0.clone(),
+            queue: self.queue.0.clone(),
+            texture: self.depth_texture.clone(),
+        }
     }
 
     // /// Configure [`Renderling`] to render this stage.
@@ -740,109 +749,107 @@ impl Stage {
             *self.background_color.read().unwrap(),
         );
 
-        log::trace!("rendering the stage");
-        let label = Some("stage render");
-        let pipeline = self.get_pipeline();
-        let slab_buffer = if let Some(new_slab_buffer) = self.mngr.upkeep(
-            &self.device,
-            &self.queue,
-            Some("stage render upkeep"),
-            wgpu::BufferUsages::empty(),
-        ) {
-            // invalidate our bindgroups, etc
-            let _ = self.skybox_bindgroup.lock().unwrap().take();
-            let _ = self.buffers_bindgroup.lock().unwrap().take();
-            new_slab_buffer
-        } else {
-            // UNWRAP: safe because we called `SlabManager::upkeep` above^, which ensures the buffer
-            // exists
-            self.mngr.get_buffer().unwrap()
-        };
-        let slab_buffers_bindgroup = self.get_slab_buffers_bindgroup(&slab_buffer);
-        let textures_bindgroup = self.get_textures_bindgroup();
-        let has_skybox = self.has_skybox.load(std::sync::atomic::Ordering::Relaxed);
-        let may_skybox_pipeline_and_bindgroup = if has_skybox {
-            Some(self.get_skybox_pipeline_and_bindgroup(&slab_buffer))
-        } else {
-            None
-        };
-        //let mut may_bloom_filter = if
-        // stage.has_bloom.load(std::sync::atomic::Ordering::Relaxed) {    // UNWRAP:
-        // if we can't acquire the lock we want to panic.    Some(stage.bloom.
-        // write().unwrap())
-        //} else {
-        //    None
-        //};
-        // UNWRAP: if we can't read we want to panic.
-        let draws = self.draws.read().unwrap();
-
-        let mut encoder = self
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
         {
-            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label,
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &self.hdr_texture.view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Load,
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: &self.depth_texture.view,
-                    depth_ops: Some(wgpu::Operations {
-                        load: wgpu::LoadOp::Load,
-                        store: wgpu::StoreOp::Store,
+            log::trace!("rendering the stage");
+            let label = Some("stage render");
+            let pipeline = self.get_pipeline();
+            let slab_buffer = if let Some(new_slab_buffer) = self.mngr.upkeep(
+                &self.device,
+                &self.queue,
+                Some("stage render upkeep"),
+                wgpu::BufferUsages::empty(),
+            ) {
+                // invalidate our bindgroups, etc
+                let _ = self.skybox_bindgroup.lock().unwrap().take();
+                let _ = self.buffers_bindgroup.lock().unwrap().take();
+                new_slab_buffer
+            } else {
+                // UNWRAP: safe because we called `SlabManager::upkeep` above^, which ensures the buffer
+                // exists
+                self.mngr.get_buffer().unwrap()
+            };
+            let slab_buffers_bindgroup = self.get_slab_buffers_bindgroup(&slab_buffer);
+            let textures_bindgroup = self.get_textures_bindgroup();
+            let has_skybox = self.has_skybox.load(std::sync::atomic::Ordering::Relaxed);
+            let may_skybox_pipeline_and_bindgroup = if has_skybox {
+                Some(self.get_skybox_pipeline_and_bindgroup(&slab_buffer))
+            } else {
+                None
+            };
+
+            // UNWRAP: if we can't read we want to panic.
+            let draws = self.draws.read().unwrap();
+
+            let mut encoder = self
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+            {
+                let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label,
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &self.hdr_texture.view,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Load,
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                        view: &self.depth_texture.view,
+                        depth_ops: Some(wgpu::Operations {
+                            load: wgpu::LoadOp::Load,
+                            store: wgpu::StoreOp::Store,
+                        }),
+                        stencil_ops: None,
                     }),
-                    stencil_ops: None,
-                }),
-                ..Default::default()
-            });
-            render_pass.set_pipeline(&pipeline);
-            render_pass.set_bind_group(0, &slab_buffers_bindgroup, &[]);
-            render_pass.set_bind_group(1, &textures_bindgroup, &[]);
-            match draws.deref() {
-                StageDrawStrategy::Direct(units) => {
-                    for hybrid in units {
-                        let rlet = hybrid.get();
-                        if rlet.visible {
-                            let vertex_range = if rlet.indices.is_null() {
-                                0..rlet.vertices.len() as u32
-                            } else {
-                                0..rlet.indices.len() as u32
-                            };
-                            let id = hybrid.id();
-                            let instance_range = id.inner()..id.inner() + 1;
-                            log::trace!(
+                    ..Default::default()
+                });
+                render_pass.set_pipeline(&pipeline);
+                render_pass.set_bind_group(0, &slab_buffers_bindgroup, &[]);
+                render_pass.set_bind_group(1, &textures_bindgroup, &[]);
+                match draws.deref() {
+                    StageDrawStrategy::Direct(units) => {
+                        for hybrid in units {
+                            let rlet = hybrid.get();
+                            if rlet.visible {
+                                let vertex_range = if rlet.indices.is_null() {
+                                    0..rlet.vertices.len() as u32
+                                } else {
+                                    0..rlet.indices.len() as u32
+                                };
+                                let id = hybrid.id();
+                                let instance_range = id.inner()..id.inner() + 1;
+                                log::trace!(
                             "drawing vertices {vertex_range:?} and instances {instance_range:?}"
                         );
-                            render_pass.draw(vertex_range, instance_range);
+                                render_pass.draw(vertex_range, instance_range);
+                            }
                         }
-                    }
-                } /* render_pass.multi_draw_indirect(&indirect_buffer, 0,
-                   * stage.number_of_indirect_draws()); */
-            }
+                    } /* render_pass.multi_draw_indirect(&indirect_buffer, 0,
+                       * stage.number_of_indirect_draws()); */
+                }
 
-            if let Some((pipeline, bindgroup)) = may_skybox_pipeline_and_bindgroup.as_ref() {
-                log::trace!("rendering skybox");
-                // UNWRAP: if we can't acquire the lock we want to panic.
-                let skybox = self.skybox.read().unwrap();
-                render_pass.set_pipeline(pipeline);
-                render_pass.set_bind_group(0, bindgroup, &[]);
-                render_pass.draw(0..36, skybox.camera.inner()..skybox.camera.inner() + 1);
+                if let Some((pipeline, bindgroup)) = may_skybox_pipeline_and_bindgroup.as_ref() {
+                    log::trace!("rendering skybox");
+                    // UNWRAP: if we can't acquire the lock we want to panic.
+                    let skybox = self.skybox.read().unwrap();
+                    render_pass.set_pipeline(pipeline);
+                    render_pass.set_bind_group(0, bindgroup, &[]);
+                    render_pass.draw(0..36, skybox.camera.inner()..skybox.camera.inner() + 1);
+                }
             }
+            self.queue.submit(std::iter::once(encoder.finish()));
         }
-        self.queue.submit(std::iter::once(encoder.finish()));
 
         // then render bloom
         if self.has_bloom.load(Ordering::Relaxed) {
             log::trace!("stage bloom");
-            self.bloom.read().unwrap().bloom(&self.device, &self.queue);
+            self.bloom.bloom(&self.device, &self.queue);
         }
 
         // then render tonemapping
+        log::trace!("stage tonemapping");
+        self.tonemapping.render(&self.device, &self.queue, view);
     }
 }
 

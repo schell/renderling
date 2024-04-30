@@ -4,7 +4,7 @@ use std::{ops::Deref, sync::Arc};
 
 use image::{
     load_from_memory, ColorType, DynamicImage, GenericImage, GenericImageView, ImageBuffer,
-    ImageError, PixelWithColorType,
+    ImageError, PixelWithColorType, Rgba32FImage,
 };
 
 #[derive(Debug, Snafu)]
@@ -23,6 +23,9 @@ pub enum TextureError {
 
     #[snafu(display("Could not convert image buffer"))]
     CouldNotConvertImageBuffer,
+
+    #[snafu(display("Could not create an image buffer"))]
+    CouldNotCreateImageBuffer,
 
     #[snafu(display("Unsupported format"))]
     UnsupportedFormat,
@@ -49,6 +52,14 @@ pub struct Texture {
 }
 
 impl Texture {
+    pub fn width(&self) -> u32 {
+        self.texture.width()
+    }
+
+    pub fn height(&self) -> u32 {
+        self.texture.height()
+    }
+
     /// Create a cubemap texture from 6 faces.
     pub fn new_cubemap_texture(
         device: &wgpu::Device,
@@ -551,6 +562,34 @@ impl Texture {
         }
     }
 
+    pub fn read_hdr_image(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> Result<Rgba32FImage, TextureError> {
+        let width = self.width();
+        let height = self.height();
+        let copied = crate::Texture::read(
+            &self.texture,
+            &device,
+            &queue,
+            width as usize,
+            height as usize,
+            4,
+            2,
+        );
+
+        let pixels = copied.pixels(device);
+        let pixels = bytemuck::cast_slice::<u8, u16>(pixels.as_slice())
+            .iter()
+            .map(|p| half::f16::from_bits(*p).to_f32())
+            .collect::<Vec<_>>();
+        assert_eq!((width * height * 4) as usize, pixels.len());
+        let img: image::Rgba32FImage = image::ImageBuffer::from_vec(width, height, pixels)
+            .context(CouldNotCreateImageBufferSnafu)?;
+        Ok(img)
+    }
+
     /// Generate `mipmap_levels - 1` mipmaps for the given texture.
     ///
     /// ## Note
@@ -694,6 +733,96 @@ impl Texture {
             mips.push(mip_texture);
         }
         mips
+    }
+
+    pub const HDR_TEXTURE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
+
+    /// Create a new HDR texture.
+    pub fn create_hdr_texture(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        width: u32,
+        height: u32,
+    ) -> crate::Texture {
+        crate::Texture::new_with(
+            &device,
+            &queue,
+            Some("hdr"),
+            Some(
+                // * The hdr texture is what we render to in most cases
+                // * we also read from it to calculate bloom
+                // * we also write the bloom mix result back to it
+                // * we also read the texture in tests
+                wgpu::TextureUsages::RENDER_ATTACHMENT
+                    | wgpu::TextureUsages::TEXTURE_BINDING
+                    | wgpu::TextureUsages::COPY_DST
+                    | wgpu::TextureUsages::COPY_SRC,
+            ),
+            Some({
+                device.create_sampler(&wgpu::SamplerDescriptor {
+                    address_mode_u: wgpu::AddressMode::ClampToEdge,
+                    address_mode_v: wgpu::AddressMode::ClampToEdge,
+                    address_mode_w: wgpu::AddressMode::ClampToEdge,
+                    mag_filter: wgpu::FilterMode::Nearest,
+                    min_filter: wgpu::FilterMode::Nearest,
+                    mipmap_filter: wgpu::FilterMode::Nearest,
+                    ..Default::default()
+                })
+            }),
+            Self::HDR_TEXTURE_FORMAT,
+            4,
+            // TODO: pretty sure this should be `2`
+            1,
+            width,
+            height,
+            1,
+            &[],
+        )
+    }
+}
+
+/// A depth texture.
+pub struct DepthTexture {
+    pub(crate) device: Arc<wgpu::Device>,
+    pub(crate) queue: Arc<wgpu::Queue>,
+    pub(crate) texture: crate::Texture,
+}
+
+impl Deref for DepthTexture {
+    type Target = crate::Texture;
+
+    fn deref(&self) -> &Self::Target {
+        &self.texture
+    }
+}
+
+impl DepthTexture {
+    pub fn width(&self) -> u32 {
+        self.texture.texture.width()
+    }
+
+    pub fn height(&self) -> u32 {
+        self.texture.texture.height()
+    }
+
+    /// Converts the depth texture into an image.
+    ///
+    /// Assumes the format is single channel 32bit.
+    pub fn read_image(&self) -> Option<image::DynamicImage> {
+        let depth_copied_buffer = crate::Texture::read(
+            &self.texture.texture,
+            &self.device,
+            &self.queue,
+            self.width() as usize,
+            self.height() as usize,
+            1,
+            4,
+        );
+        let pixels = depth_copied_buffer.pixels(&self.device);
+        let pixels: Vec<f32> = bytemuck::cast_slice(&pixels).to_vec();
+        let img_buffer: image::ImageBuffer<image::Luma<f32>, Vec<f32>> =
+            image::ImageBuffer::from_raw(self.width(), self.height(), pixels)?;
+        Some(image::DynamicImage::from(img_buffer))
     }
 }
 
