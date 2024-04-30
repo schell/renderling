@@ -15,9 +15,10 @@ readme = "../../README.md"
 crate-type = ["lib", "dylib"]
 
 [features]
-default = ["gltf", "sdf", "shaders", "tutorial", "winit"]
+default = ["gltf", "sdf", "shaders", "winit"]
 shaders = [
   "array_test",
+  "bloom",
   "brdf_lut_convolution_fragment",
   "brdf_lut_convolution_vertex",
   "generate_mipmap_fragment",
@@ -43,8 +44,18 @@ tutorial = [
   "tutorial_slabbed_vertices",
   "tutorial_slabbed_renderlet"
 ]
+bloom = [
+  "bloom_downsample_fragment",
+  "bloom_upsample_fragment",
+  "bloom_mix_fragment",
+  "bloom_vertex"
+]
 # shaders
 array_test = []
+bloom_downsample_fragment = []
+bloom_upsample_fragment = []
+bloom_mix_fragment = []
+bloom_vertex = []
 brdf_lut_convolution_fragment = []
 brdf_lut_convolution_vertex = []
 generate_mipmap_fragment = []

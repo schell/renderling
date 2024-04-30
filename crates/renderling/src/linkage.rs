@@ -1,6 +1,10 @@
 //! Provides convenient wrappers around renderling shader linkage.
-// TODO: add a static cache for shader modules
+use std::sync::Arc;
 
+pub mod bloom_downsample_fragment;
+pub mod bloom_mix_fragment;
+pub mod bloom_upsample_fragment;
+pub mod bloom_vertex;
 pub mod brdf_lut_convolution_fragment;
 pub mod brdf_lut_convolution_vertex;
 pub mod generate_mipmap_fragment;
@@ -22,7 +26,7 @@ pub mod tutorial_slabbed_vertices;
 pub mod tutorial_slabbed_vertices_no_instance;
 
 pub struct ShaderLinkage {
-    pub module: wgpu::ShaderModule,
+    pub module: Arc<wgpu::ShaderModule>,
     pub entry_point: &'static str,
 }
 
@@ -222,51 +226,43 @@ pub fn atlas_and_skybox_bindgroup(
 
 #[cfg(test)]
 mod test {
-    use snafu::prelude::*;
-
-    #[derive(Debug, Snafu)]
-    enum SrcError {
-        #[snafu(display("{source}"))]
-        Read { source: std::io::Error },
-        #[snafu(display("{source}"))]
-        ParseSpv { source: naga::front::spv::Error },
-        #[snafu(display("{source}"))]
-        Validate {
-            source: naga::WithSpan<naga::valid::ValidationError>,
-        },
-        #[snafu(display("{source}"))]
-        Write { source: naga::back::wgsl::Error },
-        #[snafu(display("{source}:\n{wgsl}"))]
-        ParseWgsl {
-            source: naga::front::wgsl::ParseError,
-            wgsl: String,
-        },
-    }
-
     #[test]
     // Ensure that the shaders can be converted to WGSL.
     // This is necessary for WASM using WebGPU, because WebGPU only accepts
     // WGSL as a shading language.
     fn validate_shaders() {
-        fn validate_src(path: &std::path::PathBuf) -> Result<(), SrcError> {
-            println!("validating source");
-            println!("  reading {}", path.display());
-            let bytes = std::fs::read(path).context(ReadSnafu)?;
-            println!("  {:0.2}k bytes read", bytes.len() as f32 / 1000.0);
+        fn validate_src(path: &std::path::PathBuf) {
+            log::info!("validating source");
+            log::info!("  reading '{}'", path.display());
+            let bytes = std::fs::read(path).unwrap();
+            log::info!("  {:0.2}k bytes read", bytes.len() as f32 / 1000.0);
             let opts = naga::front::spv::Options::default();
-            let module = naga::front::spv::parse_u8_slice(&bytes, &opts).context(ParseSpvSnafu)?;
-            println!("  parsed");
+            let module = match naga::front::spv::parse_u8_slice(&bytes, &opts) {
+                Ok(m) => m,
+                Err(e) => {
+                    log::error!("{e}");
+                    panic!("SPIR-V parse error");
+                }
+            };
+            println!("  SPIR-V parsed");
             let mut validator =
                 naga::valid::Validator::new(Default::default(), naga::valid::Capabilities::empty());
-            let info = validator.validate(&module).context(ValidateSnafu)?;
-            println!("  validated");
+            let info = match validator.validate(&module) {
+                Ok(i) => i,
+                Err(e) => {
+                    log::error!("{e}");
+                    log::error!("{}", e.emit_to_string(&""));
+                    panic!("SPIR-V validation error");
+                }
+            };
+            log::info!("  SPIR-V validated");
             let wgsl = naga::back::wgsl::write_string(
                 &module,
                 &info,
                 naga::back::wgsl::WriterFlags::empty(),
             )
-            .context(WriteSnafu)?;
-            println!("  output WGSL generated");
+            .unwrap();
+            log::info!("  output WGSL generated");
             let print_var_name = path
                 .file_stem()
                 .unwrap()
@@ -275,20 +271,31 @@ mod test {
                 .replace("-", "_");
             if let Ok(filepath) = std::env::var(&print_var_name) {
                 std::fs::write(&filepath, &wgsl).unwrap();
-                println!("  wrote generated WGSL to {filepath}");
+                log::info!("  wrote generated WGSL to {filepath}");
             } else {
-                println!(
+                log::info!(
                     "  to save the generated WGSL, use an env var '{print_var_name}={{filepath}}'"
                 );
             }
 
-            let module = naga::front::wgsl::parse_str(&wgsl).context(ParseWgslSnafu { wgsl })?;
-            println!("  output WGSL parsed");
+            let module = match naga::front::wgsl::parse_str(&wgsl) {
+                Ok(m) => m,
+                Err(e) => {
+                    log::error!("{}", e.emit_to_string(&wgsl));
+                    panic!("wgsl parse error");
+                }
+            };
+            log::info!("  output WGSL parsed");
             let mut validator =
                 naga::valid::Validator::new(Default::default(), naga::valid::Capabilities::empty());
-            let _info = validator.validate(&module).context(ValidateSnafu)?;
-            println!("  wgsl output validated");
-            Ok(())
+            let _info = match validator.validate(&module) {
+                Ok(i) => i,
+                Err(e) => {
+                    log::error!("{}", e.emit_to_string(&wgsl));
+                    panic!("wgsl validation error");
+                }
+            };
+            log::info!("  wgsl output validated");
         }
 
         let may_entries = std::fs::read_dir("src/linkage").unwrap();
@@ -297,9 +304,7 @@ mod test {
             let path = entry.path();
             let ext = path.extension().unwrap().to_str().unwrap();
             if ext == "spv" {
-                if let Err(msg) = validate_src(&path) {
-                    panic!("Invalid shader '{}': {msg}", path.display());
-                }
+                validate_src(&path);
             }
         }
     }

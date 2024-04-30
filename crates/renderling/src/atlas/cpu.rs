@@ -108,6 +108,7 @@ impl RepackPreview {
 }
 
 /// A texture atlas, used to store all the textures in a scene.
+// TODO: make Atlas threadsafe
 pub struct Atlas {
     pub texture: crate::Texture,
     pub rects: Vec<crunch::Rect>,
@@ -513,7 +514,7 @@ mod test {
         atlas::{AtlasTexture, TextureAddressMode, TextureModes},
         pbr::Material,
         stage::Vertex,
-        Camera, Renderlet, Renderling, Transform,
+        Camera, Context, Renderlet, Transform,
     };
     use crabslab::GrowableSlab;
     use glam::{Vec2, Vec3, Vec4};
@@ -522,7 +523,7 @@ mod test {
 
     #[test]
     fn can_merge_atlas() {
-        let r = Renderling::headless(100, 100);
+        let r = Context::headless(100, 100);
         let (device, queue) = r.get_device_and_queue_owned();
         println!("{}", std::env::current_dir().unwrap().display());
         let cheetah = AtlasImage::from_path("../../img/cheetah.jpg").unwrap();
@@ -538,10 +539,10 @@ mod test {
     #[test]
     // Ensures that textures are packed and rendered correctly.
     fn atlas_uv_mapping() {
-        let mut r =
-            Renderling::headless(32, 32).with_background_color(Vec3::splat(0.0).extend(1.0));
-        let mut stage = r.new_stage();
-        stage.configure_graph(&mut r, true);
+        let ctx = Context::headless(32, 32);
+        let mut stage = ctx
+            .new_stage()
+            .with_background_color(Vec3::splat(0.0).extend(1.0));
         let (projection, view) = crate::camera::default_ortho2d(32.0, 32.0);
         let camera = stage.append(&Camera::new(projection, view));
         let dirt = AtlasImage::from_path("../../img/dirt.jpg").unwrap();
@@ -584,7 +585,9 @@ mod test {
             ..Default::default()
         });
 
-        let img = r.render_image().unwrap();
+        let frame = ctx.get_current_frame().unwrap();
+        stage.render(&frame.view());
+        let img = frame.read_image().unwrap();
         img_diff::assert_img_eq("atlas/uv_mapping.png", img);
     }
 
@@ -597,9 +600,10 @@ mod test {
         let sheet_h = icon_h * 3;
         let w = sheet_w * 3 + 2;
         let h = sheet_h;
-        let mut r = Renderling::headless(w, h).with_background_color(Vec4::new(1.0, 1.0, 0.0, 1.0));
-        let mut stage = r.new_stage();
-        stage.configure_graph(&mut r, true);
+        let ctx = Context::headless(w, h);
+        let mut stage = ctx
+            .new_stage()
+            .with_background_color(Vec4::new(1.0, 1.0, 0.0, 1.0));
         let (projection, view) = crate::camera::default_ortho2d(w as f32, h as f32);
         let camera = stage.append(&Camera::new(projection, view));
         let dirt = AtlasImage::from_path("../../img/dirt.jpg").unwrap();
@@ -686,7 +690,9 @@ mod test {
             })
         };
 
-        let img = r.render_image().unwrap();
+        let frame = ctx.get_current_frame().unwrap();
+        stage.render(&frame.view());
+        let img = frame.read_image().unwrap();
         img_diff::assert_img_eq("atlas/uv_wrapping.png", img);
     }
 
@@ -699,9 +705,10 @@ mod test {
         let sheet_h = icon_h * 3;
         let w = sheet_w * 3 + 2;
         let h = sheet_h;
-        let mut r = Renderling::headless(w, h).with_background_color(Vec4::new(1.0, 1.0, 0.0, 1.0));
-        let mut stage = r.new_stage();
-        stage.configure_graph(&mut r, true);
+        let ctx = Context::headless(w, h);
+        let mut stage = ctx
+            .new_stage()
+            .with_background_color(Vec4::new(1.0, 1.0, 0.0, 1.0));
 
         let (projection, view) = crate::camera::default_ortho2d(w as f32, h as f32);
         let camera = stage.append(&Camera {
@@ -800,7 +807,9 @@ mod test {
             })
         };
 
-        let img = r.render_image().unwrap();
+        let frame = ctx.get_current_frame().unwrap();
+        stage.render(&frame.view());
+        let img = frame.read_image().unwrap();
         img_diff::assert_img_eq("atlas/negative_uv_wrapping.png", img);
     }
 

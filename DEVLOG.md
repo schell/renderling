@@ -1,6 +1,33 @@
 # devlog
 
-## Tue Apr 9,
+## Thu Apr 25, 2024 
+
+I missed the intro meeting for NLnet grantees :(. 
+I realized that I'm just no good at timezones. I'm so used to talking with folks in 
+LA and SF (and I'm in NZ) that I just assumed our meeting would cross the international 
+date line, and I got the date wrong! The NLnet folks assured me that it's ok, 
+but I was really looking forward to meeting the other project developers.
+
+Anyway - I've been putting together the development plan and the software bill of materials 
+as part of the intake process for the NLnet grant. It's a lot of crossing `T`s and dotting ...
+lower case `J`s, but the project will be so much better organized for it.
+
+## Wed Apr 24, 2024 🎉
+
+NLnet is officially sponsoring the development of `renderling`! 
+
+In fact, the project was specifically mentioned in 
+[their announcement](https://nlnet.nl/news/2024/20240417-announcing-projects.html), 
+which feels good.
+
+[Here is the renderling project overview on NLnet](https://nlnet.nl/project/Renderling/).
+
+Now I've got to get on my project organization and write up some documents, etc, then I 
+can get started adding atomics to `naga`, and unblock `renderling`'s occlusion culling 
+and light tiling steps (they will be `rust-gpu` compiled compute shaders, but they require 
+support for atomics, which `wgpu` currently lacks).
+
+## Tue Apr 9, 2024
 
 ### Better debugging
 

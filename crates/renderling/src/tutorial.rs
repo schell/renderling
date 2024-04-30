@@ -120,12 +120,12 @@ mod test {
     use crate::{
         frame::FrameTextureView,
         graph::{graph, Graph, GraphError, NoDefault, View},
-        Camera, DepthTexture, Device, Queue, Renderlet, Renderling, Transform, Vertex,
+        Camera, Context, DepthTexture, Device, Queue, Renderlet, Transform, Vertex,
     };
 
     #[test]
     fn tutorial_implicit_isosceles_triangle() {
-        let mut r = Renderling::headless(100, 100);
+        let mut r = Context::headless(100, 100);
         let (device, _queue) = r.get_device_and_queue_owned();
         let label = Some("implicit isosceles triangle");
         let vertex = crate::linkage::tutorial_implicit_isosceles_vertex::linkage(&device);
@@ -227,7 +227,7 @@ mod test {
 
     #[test]
     fn slabbed_isosceles_triangle_no_instance() {
-        let mut r = Renderling::headless(100, 100);
+        let mut r = Context::headless(100, 100);
         let (device, queue) = r.get_device_and_queue_owned();
 
         // Create our geometry on the slab.
@@ -412,7 +412,7 @@ mod test {
 
     #[test]
     fn tutorial_slabbed_isosceles_triangle() {
-        let mut r = Renderling::headless(100, 100);
+        let mut r = Context::headless(100, 100);
         let (device, queue) = r.get_device_and_queue_owned();
 
         // Create our geometry on the slab.
@@ -599,7 +599,7 @@ mod test {
 
     #[test]
     fn tutorial_slabbed_renderlet() {
-        let mut r = Renderling::headless(100, 100);
+        let mut r = Context::headless(100, 100);
         let (device, queue) = r.get_device_and_queue_owned();
 
         // Create our geometry on the slab.

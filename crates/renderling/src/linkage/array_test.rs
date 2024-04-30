@@ -6,21 +6,22 @@
 //!
 //! **source path**: `crates/renderling/src/linkage/shader_test-array_test.spv`
 use super::ShaderLinkage;
+use std::sync::Arc;
+pub const ENTRY_POINT: &str = "shader_test::array_test";
 pub fn linkage(device: &wgpu::Device) -> ShaderLinkage {
-    log::debug!("creating shader module for {}", stringify!(array_test));
-    #[cfg(not(target_arch = "wasm32"))]
-    let start = std::time::Instant::now();
-    let module = device.create_shader_module(wgpu::include_spirv!("shader_test-array_test.spv"));
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        let duration = std::time::Instant::now() - start;
-        log::debug!(
-            "...created shader module {} in {duration:?}",
-            stringify!(array_test)
-        );
-    }
     ShaderLinkage {
-        module,
-        entry_point: "shader_test::array_test",
+        module: Arc::new(
+            device.create_shader_module(wgpu::include_spirv!("shader_test-array_test.spv")),
+        ),
+        entry_point: ENTRY_POINT,
     }
+}
+pub fn get_from_cache(
+    device: &wgpu::Device,
+    cache: &mut std::collections::HashMap<&'static str, Arc<ShaderLinkage>>,
+) -> Arc<ShaderLinkage> {
+    cache
+        .entry(ENTRY_POINT)
+        .or_insert_with(|| linkage(device).into())
+        .clone()
 }
