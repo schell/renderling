@@ -55,6 +55,61 @@ pub(crate) enum StageDrawStrategy {
     Direct(Vec<Hybrid<Renderlet>>),
 }
 
+fn create_stage_render_pipeline(device: &wgpu::Device) -> wgpu::RenderPipeline {
+    log::trace!("creating stage render pipeline");
+    let label = Some("stage render");
+    let vertex_linkage = crate::linkage::renderlet_vertex::linkage(device);
+    let fragment_linkage = crate::linkage::renderlet_fragment::linkage(device);
+    let stage_slab_buffers_layout = crate::linkage::slab_bindgroup_layout(device);
+    let atlas_and_skybox_layout = crate::linkage::atlas_and_skybox_bindgroup_layout(device);
+    let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label,
+        bind_group_layouts: &[&stage_slab_buffers_layout, &atlas_and_skybox_layout],
+        push_constant_ranges: &[],
+    });
+    let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        label,
+        layout: Some(&layout),
+        vertex: wgpu::VertexState {
+            module: &vertex_linkage.module,
+            entry_point: vertex_linkage.entry_point,
+            buffers: &[],
+        },
+        primitive: wgpu::PrimitiveState {
+            topology: wgpu::PrimitiveTopology::TriangleList,
+            strip_index_format: None,
+            front_face: wgpu::FrontFace::Ccw,
+            cull_mode: None,
+            unclipped_depth: false,
+            polygon_mode: wgpu::PolygonMode::Fill,
+            conservative: false,
+        },
+        depth_stencil: Some(wgpu::DepthStencilState {
+            format: wgpu::TextureFormat::Depth32Float,
+            depth_write_enabled: true,
+            depth_compare: wgpu::CompareFunction::Less,
+            stencil: wgpu::StencilState::default(),
+            bias: wgpu::DepthBiasState::default(),
+        }),
+        multisample: wgpu::MultisampleState {
+            mask: !0,
+            alpha_to_coverage_enabled: false,
+            count: 1,
+        },
+        fragment: Some(wgpu::FragmentState {
+            module: &fragment_linkage.module,
+            entry_point: fragment_linkage.entry_point,
+            targets: &[Some(wgpu::ColorTargetState {
+                format: wgpu::TextureFormat::Rgba16Float,
+                blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                write_mask: wgpu::ColorWrites::ALL,
+            })],
+        }),
+        multiview: None,
+    });
+    pipeline
+}
+
 /// Represents an entire scene worth of rendering data.
 ///
 /// A clone of a stage is a reference to the same stage.
@@ -74,7 +129,7 @@ pub struct Stage {
     pub(crate) vertex_debug: Arc<RwLock<CpuSlab<WgpuBuffer>>>,
     pub(crate) fragment_debug: Arc<RwLock<CpuSlab<WgpuBuffer>>>,
 
-    pub(crate) pipeline: Arc<Mutex<Option<Arc<wgpu::RenderPipeline>>>>,
+    pub(crate) stage_pipeline: Arc<wgpu::RenderPipeline>,
     pub(crate) skybox_pipeline: Arc<RwLock<Option<Arc<wgpu::RenderPipeline>>>>,
 
     pub(crate) hdr_texture: crate::Texture,
@@ -153,7 +208,7 @@ impl Stage {
                 debug.append_array(&vec![RenderletFragmentLog::default(); len]);
                 debug
             })),
-            pipeline: Default::default(),
+            stage_pipeline: create_stage_render_pipeline(&device).into(),
             atlas: Arc::new(RwLock::new(atlas)),
             skybox: Arc::new(RwLock::new(Skybox::empty(device.clone(), queue.clone()))),
             skybox_bindgroup: Default::default(),
@@ -293,6 +348,33 @@ impl Stage {
         self
     }
 
+    /// Set the amount of bloom that is mixed in with the input image.
+    ///
+    /// Defaults to `0.04`.
+    pub fn set_bloom_mix_strength(&self, strength: f32) {
+        self.bloom.set_mix_strength(strength);
+    }
+
+    pub fn with_bloom_mix_strength(self, strength: f32) -> Self {
+        self.set_bloom_mix_strength(strength);
+        self
+    }
+
+    /// Sets the bloom filter radius, in pixels.
+    ///
+    /// Default is `1.0`.
+    pub fn set_bloom_filter_radius(&self, filter_radius: f32) {
+        self.bloom.set_filter_radius(filter_radius);
+    }
+
+    /// Sets the bloom filter radius, in pixels.
+    ///
+    /// Default is `1.0`.
+    pub fn with_bloom_filter_radius(self, filter_radius: f32) -> Self {
+        self.set_bloom_filter_radius(filter_radius);
+        self
+    }
+
     /// Return the skybox render pipeline, creating it if necessary.
     pub fn get_skybox_pipeline_and_bindgroup(
         &self,
@@ -331,70 +413,7 @@ impl Stage {
 
     /// Return the main render pipeline, creating it if necessary.
     pub fn get_pipeline(&self) -> Arc<wgpu::RenderPipeline> {
-        fn create_stage_render_pipeline(device: &wgpu::Device) -> wgpu::RenderPipeline {
-            log::trace!("creating stage render pipeline");
-            let label = Some("stage render pipeline");
-            let vertex_linkage = crate::linkage::renderlet_vertex::linkage(device);
-            let fragment_linkage = crate::linkage::renderlet_fragment::linkage(device);
-            let stage_slab_buffers_layout = crate::linkage::slab_bindgroup_layout(device);
-            let atlas_and_skybox_layout = crate::linkage::atlas_and_skybox_bindgroup_layout(device);
-            let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label,
-                bind_group_layouts: &[&stage_slab_buffers_layout, &atlas_and_skybox_layout],
-                push_constant_ranges: &[],
-            });
-            let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label,
-                layout: Some(&layout),
-                vertex: wgpu::VertexState {
-                    module: &vertex_linkage.module,
-                    entry_point: vertex_linkage.entry_point,
-                    buffers: &[],
-                },
-                primitive: wgpu::PrimitiveState {
-                    topology: wgpu::PrimitiveTopology::TriangleList,
-                    strip_index_format: None,
-                    front_face: wgpu::FrontFace::Ccw,
-                    cull_mode: None,
-                    unclipped_depth: false,
-                    polygon_mode: wgpu::PolygonMode::Fill,
-                    conservative: false,
-                },
-                depth_stencil: Some(wgpu::DepthStencilState {
-                    format: wgpu::TextureFormat::Depth32Float,
-                    depth_write_enabled: true,
-                    depth_compare: wgpu::CompareFunction::Less,
-                    stencil: wgpu::StencilState::default(),
-                    bias: wgpu::DepthBiasState::default(),
-                }),
-                multisample: wgpu::MultisampleState {
-                    mask: !0,
-                    alpha_to_coverage_enabled: false,
-                    count: 1,
-                },
-                fragment: Some(wgpu::FragmentState {
-                    module: &fragment_linkage.module,
-                    entry_point: fragment_linkage.entry_point,
-                    targets: &[Some(wgpu::ColorTargetState {
-                        format: wgpu::TextureFormat::Rgba16Float,
-                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                        write_mask: wgpu::ColorWrites::ALL,
-                    })],
-                }),
-                multiview: None,
-            });
-            pipeline
-        }
-
-        // UNWRAP: safe because we're only ever called from the render thread.
-        let mut pipeline = self.pipeline.lock().unwrap();
-        if let Some(pipeline) = pipeline.as_ref() {
-            pipeline.clone()
-        } else {
-            let p = Arc::new(create_stage_render_pipeline(&self.device));
-            *pipeline = Some(p.clone());
-            p
-        }
+        self.stage_pipeline.clone()
     }
 
     pub fn get_slab_buffers_bindgroup(&self, slab_buffer: &wgpu::Buffer) -> Arc<wgpu::BindGroup> {
@@ -494,41 +513,6 @@ impl Stage {
             texture: self.depth_texture.clone(),
         }
     }
-
-    // /// Configure [`Renderling`] to render this stage.
-    // pub fn configure_graph(&self, r: &mut crate::Context, should_copy_frame_to_post: bool) {
-    //     // set up the render graph
-    //     use crate::{
-    //         frame::{copy_frame_to_post, create_frame, present},
-    //         hdr::{clear_surface_hdr_and_depth, create_hdr_render_surface},
-    //         tonemapping::tonemapping,
-    //     };
-
-    //     let (hdr_surface,) = r.graph.visit(create_hdr_render_surface).unwrap().unwrap();
-    //     r.graph.add_resource(hdr_surface);
-    //     r.graph.add_resource(self.clone());
-
-    //     // pre-render
-    //     r.graph
-    //         .add_subgraph(graph!(create_frame, clear_surface_hdr_and_depth))
-    //         .add_barrier();
-
-    //     // render
-    //     if should_copy_frame_to_post {
-    //         r.graph.add_subgraph(graph!(
-    //             stage_render
-    //                 < tonemapping
-    //                 < copy_frame_to_post
-    //                 < present
-    //         ));
-    //     } else {
-    //         r.graph.add_subgraph(graph!(
-    //             stage_render
-    //                 < tonemapping
-    //                 < present
-    //         ));
-    //     }
-    // }
 
     /// Read the atlas image from the GPU.
     ///
@@ -845,6 +829,34 @@ impl Stage {
         if self.has_bloom.load(Ordering::Relaxed) {
             log::trace!("stage bloom");
             self.bloom.bloom(&self.device, &self.queue);
+        } else {
+            // copy the input hdr texture to the bloom mix texture
+            let mut encoder = self
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("no bloom copy"),
+                });
+            let bloom_mix_texture = self.bloom.get_mix_texture();
+            encoder.copy_texture_to_texture(
+                wgpu::ImageCopyTexture {
+                    texture: &self.hdr_texture.texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d { x: 0, y: 0, z: 0 },
+                    aspect: wgpu::TextureAspect::All,
+                },
+                wgpu::ImageCopyTexture {
+                    texture: &bloom_mix_texture.texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d { x: 0, y: 0, z: 0 },
+                    aspect: wgpu::TextureAspect::All,
+                },
+                wgpu::Extent3d {
+                    width: bloom_mix_texture.width(),
+                    height: bloom_mix_texture.height(),
+                    depth_or_array_layers: 1,
+                },
+            );
+            self.queue.submit(std::iter::once(encoder.finish()));
         }
 
         // then render tonemapping

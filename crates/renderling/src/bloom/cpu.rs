@@ -404,12 +404,13 @@ impl Bloom {
         let downsample_pixel_sizes = slab.new_hybrid_array(
             config_resolutions(resolution).map(|r| 1.0 / Vec2::new(r.x as f32, r.y as f32)),
         );
-        let upsample_filter_radius = slab.new_hybrid(Vec2::ONE);
+        let upsample_filter_radius =
+            slab.new_hybrid(1.0 / Vec2::new(resolution.x as f32, resolution.y as f32));
         let mix_strength = slab.new_hybrid(0.04f32);
-        let slab_buffer = slab.recreate_buffer(
+        let slab_buffer = slab.get_updated_buffer(
             device,
             queue,
-            Some("new bloom slab upkeep"),
+            Some("bloom slab"),
             wgpu::BufferUsages::empty(),
         );
 
@@ -431,7 +432,7 @@ impl Bloom {
             resolution.x,
             resolution.y,
             Some("bloom mix"),
-            wgpu::TextureUsages::COPY_SRC,
+            wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::COPY_DST,
         );
         let mix_pipeline = Arc::new(create_mix_pipeline(device));
         let mix_bindgroup = create_mix_bindgroup(
@@ -468,7 +469,10 @@ impl Bloom {
         self.mix_strength.get()
     }
 
-    pub fn set_filter_radius(&self, filter_radius: Vec2) {
+    /// Set the filter radius in pixels.
+    pub fn set_filter_radius(&self, filter_radius: f32) {
+        let size = self.get_size();
+        let filter_radius = Vec2::new(filter_radius / size.x as f32, filter_radius / size.y as f32);
         self.upsample_filter_radius.set(filter_radius);
     }
 
@@ -574,7 +578,7 @@ impl Bloom {
             .zip(views)
             .map(|(bindgroup, view)| UpsampleItem { view, bindgroup });
         for (i, UpsampleItem { view, bindgroup }) in items.enumerate() {
-            let title = format!("bloom upsample {i}");
+            let title = format!("bloom upsample {}", textures_guard.len() - i - 1);
             log::trace!("rendering {title}");
             let label = Some(title.as_str());
             let mut encoder =
@@ -629,34 +633,21 @@ impl Bloom {
             let id = self.mix_strength.id().into();
             render_pass.draw(0..6, id..id + 1);
         }
-        // encoder.copy_texture_to_texture(
-        //     wgpu::ImageCopyTexture {
-        //         texture: &self.mix_texture.texture,
-        //         mip_level: 0,
-        //         origin: wgpu::Origin3d { x: 0, y: 0, z: 0 },
-        //         aspect: wgpu::TextureAspect::All,
-        //     },
-        //     wgpu::ImageCopyTexture {
-        //         texture: &self.hdr_texture.texture,
-        //         mip_level: 0,
-        //         origin: wgpu::Origin3d { x: 0, y: 0, z: 0 },
-        //         aspect: wgpu::TextureAspect::All,
-        //     },
-        //     wgpu::Extent3d {
-        //         width: self.resolution.x,
-        //         height: self.resolution.y,
-        //         depth_or_array_layers: 1,
-        //     },
-        // );
+
         queue.submit(std::iter::once(encoder.finish()));
     }
 
     pub fn bloom(&self, device: &wgpu::Device, queue: &wgpu::Queue) {
-        self.slab.upkeep(
-            device,
-            queue,
-            Some("bloom upkeep"),
-            wgpu::BufferUsages::empty(),
+        assert!(
+            self.slab
+                .upkeep(
+                    device,
+                    queue,
+                    Some("bloom upkeep"),
+                    wgpu::BufferUsages::empty(),
+                )
+                .is_none(),
+            "bloom slab buffer should never resize"
         );
         self.render_downsamples(device, queue);
         self.render_upsamples(device, queue);
@@ -712,8 +703,8 @@ mod test {
 
     #[test]
     fn bloom_sanity() {
-        let width = 1024;
-        let height = 800;
+        let width = 256;
+        let height = 128;
         let ctx = Context::headless(width, height);
         let mut stage = ctx.new_stage().with_bloom(false);
         let doc = stage
@@ -723,7 +714,7 @@ mod test {
         let view = crate::camera::look_at(Vec3::new(0.0, 2.0, 18.0), Vec3::ZERO, Vec3::Y);
         let camera = stage.new_hybrid(Camera::new(projection, view));
         let skybox = stage
-            .new_skybox_from_path("../../img/hdr/helipad.hdr", camera.id())
+            .new_skybox_from_path("../../img/hdr/night.hdr", camera.id())
             .unwrap();
         stage.set_skybox(skybox);
         let scene_index = doc.default_scene.unwrap();
@@ -734,95 +725,16 @@ mod test {
         let frame = ctx.get_current_frame().unwrap();
         stage.render(&frame.view());
         let img = frame.read_image().unwrap();
-        img_diff::save("bloom/sanity_before.png", img);
+        img_diff::assert_img_eq("bloom/without.png", img);
+        frame.present();
 
-        let (device, queue) = ctx.get_device_and_queue_owned();
-        let hdr_texture = crate::Texture::create_hdr_texture(&device, &queue, width, height);
-        let bloom = Bloom::new(&device, &queue, UVec2::new(width, height), &hdr_texture);
-
-        // TODO: use Texture::read_hdr_image here instead
-        fn save_bloom_texture(
-            device: &wgpu::Device,
-            queue: &wgpu::Queue,
-            size: UVec2,
-            texture: &crate::Texture,
-            name: &str,
-        ) {
-            let copied = crate::Texture::read(
-                &texture.texture,
-                &device,
-                &queue,
-                size.x as usize,
-                size.y as usize,
-                4,
-                2,
-            );
-            log::info!("  done!");
-
-            let pixels = copied.pixels(device);
-            let pixels = bytemuck::cast_slice::<u8, u16>(pixels.as_slice())
-                .iter()
-                .map(|p| half::f16::from_bits(*p).to_f32())
-                .collect::<Vec<_>>();
-            assert_eq!((size.x * size.y * 4) as usize, pixels.len());
-            let img: image::Rgba32FImage =
-                image::ImageBuffer::from_vec(size.x, size.y, pixels).unwrap();
-            let img = image::DynamicImage::from(img);
-            let img = img.to_rgba8();
-            img_diff::save(name, img);
-        }
-        log::info!("rendering downsamples");
-        bloom.render_downsamples(&device, &queue);
-        log::info!("  done!");
-        for (i, (texture, size)) in bloom
-            .textures
-            .read()
-            .unwrap()
-            .iter()
-            .zip(config_resolutions(UVec2::new(width, height)).skip(1))
-            .enumerate()
-        {
-            log::info!("reading downsample {i}");
-            save_bloom_texture(
-                &device,
-                &queue,
-                size,
-                texture,
-                &format!("bloom/downsample_{i}.png"),
-            );
-        }
-
-        log::info!("rendering upsamples");
-        bloom.render_upsamples(&device, &queue);
-        log::info!("  done!");
-        for (i, (texture, size)) in bloom
-            .textures
-            .read()
-            .unwrap()
-            .iter()
-            .zip(config_resolutions(UVec2::new(width, height)).skip(1))
-            .enumerate()
-        {
-            log::info!("reading upsample {i}");
-            save_bloom_texture(
-                &device,
-                &queue,
-                size,
-                texture,
-                &format!("bloom/upsample_{i}.png"),
-            );
-        }
-
-        log::info!("rendering mix");
-        bloom.render_mix(&device, &queue);
-        log::info!("  done!");
-        log::info!("reading mix and hdr textures");
-        save_bloom_texture(
-            &device,
-            &queue,
-            UVec2::new(width, height),
-            &bloom.get_mix_texture(),
-            &format!("bloom/mix.png"),
-        );
+        // now render the whole thing with default values
+        stage.set_has_bloom(true);
+        stage.set_bloom_mix_strength(0.1);
+        stage.set_bloom_filter_radius(2.0);
+        let frame = ctx.get_current_frame().unwrap();
+        stage.render(&frame.view());
+        let img = frame.read_image().unwrap();
+        img_diff::assert_img_eq("bloom/with.png", img);
     }
 }

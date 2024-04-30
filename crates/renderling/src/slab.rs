@@ -221,14 +221,36 @@ impl SlabManager {
     /// Return the internal buffer used by this slab.
     ///
     /// If the buffer needs recreating due to a capacity change this function
-    /// will return `None`. In that case use [`Self::recreate_buffer`].
+    /// will return `None`. In that case use [`Self::get_updated_buffer`].
     pub fn get_buffer(&self) -> Option<Arc<wgpu::Buffer>> {
         self.buffer.read().unwrap().as_ref().cloned()
     }
 
+    /// Return an updated buffer.
+    ///
+    /// This is the only way to guarantee access to a buffer.
+    ///
+    /// Use [`SlabManager::upkeep`] when you only need the buffer after a change,
+    /// for example to recreate bindgroups.
+    pub fn get_updated_buffer(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        label: Option<&str>,
+        usage: wgpu::BufferUsages,
+    ) -> Arc<wgpu::Buffer> {
+        if let Some(new_buffer) = self.upkeep(device, queue, label, usage) {
+            new_buffer
+        } else {
+            // UNWRAP: safe because we know the buffer exists at this point,
+            // as we've called `upkeep` above
+            self.get_buffer().unwrap()
+        }
+    }
+
     /// Recreate this buffer, writing the contents of the previous buffer (if it exists)
     /// to the new one, then return the new buffer.
-    pub fn recreate_buffer(
+    fn recreate_buffer(
         &self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
@@ -283,6 +305,7 @@ impl SlabManager {
     /// Perform upkeep on the slab, commiting changes to the GPU.
     ///
     /// Returns the new buffer if one was created due to a capacity resize.
+    #[must_use]
     pub fn upkeep(
         &self,
         device: &wgpu::Device,
@@ -722,7 +745,7 @@ mod test {
             let value = mngr.new_hybrid(666u32);
             assert_eq!(2, value.strong_count());
         }
-        mngr.upkeep(
+        let _ = mngr.upkeep(
             r.get_device(),
             r.get_queue(),
             Some("mngr updates count sanity 1"),
@@ -733,7 +756,7 @@ mod test {
             let values = mngr.new_hybrid_array([666u32, 420u32]);
             assert_eq!(2, values.strong_count());
         }
-        mngr.upkeep(
+        let _ = mngr.upkeep(
             r.get_device(),
             r.get_queue(),
             Some("mngr updates count sanity 2"),

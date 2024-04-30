@@ -1199,7 +1199,6 @@ mod test {
         let mut stage = ctx
             .new_stage()
             .with_lighting(true)
-            .with_bloom(true)
             .with_background_color(Vec3::splat(1.0).extend(1.0));
         let doc = stage
             .load_gltf_document_from_path("../../gltf/red_brick_03_1k.glb")

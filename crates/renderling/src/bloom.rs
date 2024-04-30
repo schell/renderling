@@ -138,17 +138,33 @@ pub fn bloom_upsample_fragment(
     // d - e - f
     // g - h - i
     // === ('e' is the current texel) ===
-    let a = texture.sample(*sampler, Vec2::new(in_uv.x - x, in_uv.y + y));
-    let b = texture.sample(*sampler, Vec2::new(in_uv.x, in_uv.y + y));
-    let c = texture.sample(*sampler, Vec2::new(in_uv.x + x, in_uv.y + y));
+    let a = texture
+        .sample(*sampler, Vec2::new(in_uv.x - x, in_uv.y + y))
+        .xyz();
+    let b = texture
+        .sample(*sampler, Vec2::new(in_uv.x, in_uv.y + y))
+        .xyz();
+    let c = texture
+        .sample(*sampler, Vec2::new(in_uv.x + x, in_uv.y + y))
+        .xyz();
 
-    let d = texture.sample(*sampler, Vec2::new(in_uv.x - x, in_uv.y));
-    let e = texture.sample(*sampler, Vec2::new(in_uv.x, in_uv.y));
-    let f = texture.sample(*sampler, Vec2::new(in_uv.x + x, in_uv.y));
+    let d = texture
+        .sample(*sampler, Vec2::new(in_uv.x - x, in_uv.y))
+        .xyz();
+    let e = texture.sample(*sampler, Vec2::new(in_uv.x, in_uv.y)).xyz();
+    let f = texture
+        .sample(*sampler, Vec2::new(in_uv.x + x, in_uv.y))
+        .xyz();
 
-    let g = texture.sample(*sampler, Vec2::new(in_uv.x - x, in_uv.y - y));
-    let h = texture.sample(*sampler, Vec2::new(in_uv.x, in_uv.y - y));
-    let i = texture.sample(*sampler, Vec2::new(in_uv.x + x, in_uv.y - y));
+    let g = texture
+        .sample(*sampler, Vec2::new(in_uv.x - x, in_uv.y - y))
+        .xyz();
+    let h = texture
+        .sample(*sampler, Vec2::new(in_uv.x, in_uv.y - y))
+        .xyz();
+    let i = texture
+        .sample(*sampler, Vec2::new(in_uv.x + x, in_uv.y - y))
+        .xyz();
 
     // Apply weighted distribution, by using a 3x3 tent filter:
     //  1   | 1 2 1 |
@@ -158,7 +174,7 @@ pub fn bloom_upsample_fragment(
     sample += (b + d + f + h) * 2.0;
     sample += a + c + g + i;
     sample *= 1.0 / 16.0;
-    *upsample = sample;
+    *upsample = sample.extend(0.5);
 }
 
 #[cfg(feature = "bloom_mix_fragment")]

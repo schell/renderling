@@ -268,7 +268,6 @@ mod test {
     use crate::{pbr::Material, stage::Vertex};
 
     use glam::{Mat3, Mat4, Quat, Vec2, Vec3, Vec4};
-    use image::RgbaImage;
     use img_diff::DiffCfg;
     use pretty_assertions::assert_eq;
 

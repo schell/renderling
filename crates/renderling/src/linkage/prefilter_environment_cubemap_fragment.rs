@@ -1,3 +1,4 @@
+
 //! Automatically generated with `cd shaders && cargo run --release`.
 //!
 //! Provides the shader linkage for

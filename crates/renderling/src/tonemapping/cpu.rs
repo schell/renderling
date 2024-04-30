@@ -100,7 +100,8 @@ impl Tonemapping {
         let config = slab.new_hybrid(TonemapConstants::default());
 
         let label = Some("tonemapping");
-        let slab_buffer = slab.recreate_buffer(device, queue, label, wgpu::BufferUsages::empty());
+        let slab_buffer =
+            slab.get_updated_buffer(device, queue, label, wgpu::BufferUsages::empty());
         let bindgroup = Arc::new(RwLock::new(create_bindgroup(
             device,
             label,
@@ -176,17 +177,11 @@ impl Tonemapping {
 
     pub fn render(&self, device: &wgpu::Device, queue: &wgpu::Queue, view: &wgpu::TextureView) {
         let label = Some("tonemapping render");
-        if let Some(new_buffer) =
-            self.slab
-                .upkeep(device, queue, label, wgpu::BufferUsages::empty())
-        {
-            *self.bindgroup.write().unwrap() = create_bindgroup(
-                device,
-                Some("tonemapping"),
-                &self.hdr_texture.read().unwrap(),
-                &new_buffer,
-            );
-        }
+        assert!(self
+            .slab
+            .upkeep(device, queue, label, wgpu::BufferUsages::empty())
+            .is_none());
+
         // UNWRAP: not safe but we want to panic
         let bindgroup = self.bindgroup.read().unwrap();
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label });
