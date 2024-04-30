@@ -2,18 +2,19 @@
 //! Automatically generated with `cd shaders && cargo run --release`.
 //!
 //! Provides the shader linkage for
-//! [skybox::skybox_equirectangular_fragment](crate::skybox::skybox_equirectangular_fragment).
+//! [bloom::bloom_downsample_fragment](crate::bloom::bloom_downsample_fragment).
 //!
 //! **source path**:
-//! `crates/renderling/src/linkage/skybox-skybox_equirectangular_fragment.spv`
+//! `crates/renderling/src/linkage/bloom-bloom_downsample_fragment.spv`
 use super::ShaderLinkage;
 use std::sync::Arc;
-pub const ENTRY_POINT: &str = "skybox::skybox_equirectangular_fragment";
+pub const ENTRY_POINT: &str = "bloom::bloom_downsample_fragment";
 pub fn linkage(device: &wgpu::Device) -> ShaderLinkage {
     ShaderLinkage {
-        module: Arc::new(device.create_shader_module(wgpu::include_spirv!(
-            "skybox-skybox_equirectangular_fragment.spv"
-        ))),
+        module: Arc::new(
+            device
+                .create_shader_module(wgpu::include_spirv!("bloom-bloom_downsample_fragment.spv")),
+        ),
         entry_point: ENTRY_POINT,
     }
 }

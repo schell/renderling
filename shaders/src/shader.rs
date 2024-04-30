@@ -22,13 +22,6 @@ impl Linkage {
         let source_path = source_path.file_name().unwrap().to_str().unwrap();
         let entry_point = self.entry_point.clone();
 
-        let fn_name = syn::parse_str::<syn::Ident>(self.fn_name()).unwrap_or_else(|e| {
-            panic!(
-                "Failed to parse entry point name `{}` as an identifier: {}",
-                entry_point, e
-            )
-        });
-
         let entry_point = match lang {
             ShaderLang::Spv => entry_point,
             ShaderLang::Wgsl => entry_point.replace("::", ""),
@@ -36,28 +29,34 @@ impl Linkage {
 
         let create_module = match lang {
             ShaderLang::Spv => quote! {
-                device.create_shader_module(wgpu::include_spirv!(#source_path))
+                Arc::new(device.create_shader_module(wgpu::include_spirv!(#source_path)))
             },
             ShaderLang::Wgsl => quote! {
-                device.create_shader_module(wgpu::include_wgsl!(#source_path))
+                Arc:new(device.create_shader_module(wgpu::include_wgsl!(#source_path)))
             },
         };
         let quote = quote! {
-            pub fn linkage(device: &wgpu::Device) -> ShaderLinkage {
-                log::debug!("creating shader module for {}", stringify!(#fn_name));
-                #[cfg(not(target_arch = "wasm32"))]
-                let start = std::time::Instant::now();
-                let module = #create_module;
-                #[cfg(not(target_arch = "wasm32"))]
-                {
-                    let duration = std::time::Instant::now() - start;
-                    log::debug!("...created shader module {} in {duration:?}", stringify!(#fn_name));
-                }
+            use std::sync::Arc;
 
+            use super::ShaderLinkage;
+
+            pub const ENTRY_POINT: &str = #entry_point;
+
+            pub fn linkage(device: &wgpu::Device) -> ShaderLinkage {
                 ShaderLinkage {
-                    module,
-                    entry_point: #entry_point,
+                    module: #create_module,
+                    entry_point: ENTRY_POINT,
                 }
+            }
+
+            pub fn get_from_cache(
+                device: &wgpu::Device,
+                cache: &mut std::collections::HashMap<&'static str, Arc<ShaderLinkage>>
+            ) -> Arc<ShaderLinkage> {
+                cache
+                    .entry(ENTRY_POINT)
+                    .or_insert_with(|| linkage(device).into())
+                    .clone()
             }
         };
         format!(
@@ -68,7 +67,6 @@ impl Linkage {
             //! [{entry_point}](crate::{entry_point}).
             //!
             //! **source path**: `crates/renderling/src/linkage/{source_path}`
-            use super::ShaderLinkage;
             {quote}
             "#,
         )

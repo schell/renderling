@@ -1,9 +1,5 @@
 use crabslab::GrowableSlab;
-use renderling::{
-    math::{Vec2, Vec3, Vec4},
-    pbr::Material,
-    AtlasImage, Camera, Renderlet, Renderling, TextureAddressMode, Transform, Vertex,
-};
+use renderling::{math::UVec2, Camera, Context, Renderlet, Stage, Vertex};
 use std::sync::Arc;
 
 fn main() {
@@ -17,7 +13,7 @@ fn main() {
         .with_title("renderling gltf viewer");
     let window = Arc::new(window_builder.build(&event_loop).unwrap());
 
-    let mut r = can_read_shader_debug_logs(window.clone());
+    let (mut ctx, mut stage) = can_read_shader_debug_logs(window.clone());
     event_loop
         .run(move |event, target| {
             target.set_control_flow(winit::event_loop::ControlFlow::Poll);
@@ -36,16 +32,20 @@ fn main() {
                     } => target.exit(),
 
                     winit::event::WindowEvent::Resized(size) => {
-                        r.resize(size.width, size.height);
+                        let size = UVec2::new(size.width, size.height);
+                        ctx.set_size(size);
+                        stage.set_size(size)
                     }
 
                     winit::event::WindowEvent::RedrawRequested => {
-                        r.get_device().poll(wgpu::Maintain::Wait);
+                        ctx.get_device().poll(wgpu::Maintain::Wait);
                     }
                     _ => {}
                 },
                 winit::event::Event::AboutToWait => {
-                    r.render().unwrap();
+                    let frame = ctx.get_current_frame().unwrap();
+                    stage.render(&frame.view());
+                    frame.present();
                 }
                 _ => {}
             }
@@ -53,10 +53,9 @@ fn main() {
         .unwrap()
 }
 
-fn can_read_shader_debug_logs(window: Arc<winit::window::Window>) -> Renderling {
-    let mut r = Renderling::try_from_window(window).unwrap();
-    let mut stage = r.new_stage();
-    stage.configure_graph(&mut r, false);
+fn can_read_shader_debug_logs(window: Arc<winit::window::Window>) -> (Context, Stage) {
+    let ctx = Context::try_from_window(window).unwrap();
+    let mut stage = ctx.new_stage();
     let (projection, view) = renderling::default_ortho2d(100.0, 100.0);
     let camera = stage.append(&Camera::new(projection, view));
     let geometry = stage.append_array(&[
@@ -75,5 +74,5 @@ fn can_read_shader_debug_logs(window: Arc<winit::window::Window>) -> Renderling 
         vertices: geometry,
         ..Default::default()
     });
-    r
+    (ctx, stage)
 }
