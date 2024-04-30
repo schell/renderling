@@ -65,8 +65,7 @@ By default it uses a single uber-shader for rendering.
     - [x] diffuse
     - [x] specular
   - [ ] msaa
-  - [x] bloom (oldschool ping-pong gaussian)
-    - [ ] switch out for PBB (newschool up+downsampling blur)
+  - [x] bloom "physically based" up+downsampling blur
   - [ ] ssao
   - [ ] depth of field
   - gltf support
@@ -85,12 +84,6 @@ By default it uses a single uber-shader for rendering.
       - [x] interpolation
       - [x] morph targets
       - [x] skinning
-- 2d
-  - [x] colored, textured vertices
-  - [x] text rendering mode
-  - [ ] gpu-driven 2d
-    - [ ] SDF-based primitives
-      - [ ] text
 
 ## Definition
 **renderling** noun
