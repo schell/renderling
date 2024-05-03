@@ -7,6 +7,8 @@ use image::{
     ImageError, PixelWithColorType, Rgba32FImage,
 };
 
+use crate::atlas::{AtlasImage, AtlasImageFormat};
+
 #[derive(Debug, Snafu)]
 pub enum TextureError {
     #[snafu(display("Unable to load '{}' image from memory: {}", label, source))]
@@ -936,16 +938,13 @@ impl CopiedTextureBuffer {
     }
 
     /// Convert the post render buffer into an internal-format [`AtlasImage`].
-    pub fn into_atlas_image(
-        self,
-        device: &wgpu::Device,
-    ) -> Result<crate::AtlasImage, TextureError> {
+    pub fn into_atlas_image(self, device: &wgpu::Device) -> Result<AtlasImage, TextureError> {
         let pixels = self.pixels(device);
-        let img = crate::AtlasImage {
+        let img = AtlasImage {
             pixels,
             width: self.dimensions.width as u32,
             height: self.dimensions.height as u32,
-            format: crate::AtlasImageFormat::from_wgpu_texture_format(self.format)
+            format: AtlasImageFormat::from_wgpu_texture_format(self.format)
                 .context(UnsupportedFormatSnafu)?,
             apply_linear_transfer: false,
         };

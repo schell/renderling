@@ -2,7 +2,7 @@ use glam::UVec2;
 use image::{EncodableLayout, RgbaImage};
 use snafu::prelude::*;
 
-use super::atlas_image::AtlasImage;
+use super::atlas_image::{convert_to_rgba8_bytes, AtlasImage};
 
 #[derive(Debug, Snafu)]
 pub enum AtlasError {
@@ -222,7 +222,7 @@ impl Atlas {
                      data: mut img,
                      rect,
                  }| {
-                    let bytes = crate::convert_to_rgba8_bytes(
+                    let bytes = convert_to_rgba8_bytes(
                         std::mem::take(&mut img.pixels),
                         img.format,
                         img.apply_linear_transfer,
@@ -314,7 +314,7 @@ impl Atlas {
         for crunch::PackedItem { data: p, rect } in items.into_iter() {
             match p {
                 Packing::Img { index, mut image } => {
-                    let bytes = crate::convert_to_rgba8_bytes(
+                    let bytes = convert_to_rgba8_bytes(
                         std::mem::take(&mut image.pixels),
                         image.format,
                         image.apply_linear_transfer,
@@ -513,8 +513,8 @@ mod test {
     use crate::{
         atlas::{AtlasTexture, TextureAddressMode, TextureModes},
         pbr::Material,
-        stage::Vertex,
-        Camera, Context, Renderlet, Transform,
+        stage::{Renderlet, Vertex},
+        Camera, Context, Transform,
     };
     use crabslab::GrowableSlab;
     use glam::{Vec2, Vec3, Vec4};
@@ -577,7 +577,7 @@ mod test {
             scale: Vec3::new(32.0, 32.0, 1.0),
             ..Default::default()
         });
-        let _renderlet = stage.draw(crate::Renderlet {
+        let _renderlet = stage.draw(Renderlet {
             camera,
             vertices: geometry,
             transform,

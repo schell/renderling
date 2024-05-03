@@ -231,6 +231,7 @@ impl RenderletVertexLog {
 #[cfg(feature = "renderlet_vertex")]
 /// Renderlet vertex shader.
 #[spirv(vertex)]
+#[allow(dead_code)]
 pub fn renderlet_vertex(
     // Points at a `Renderlet`
     #[spirv(instance_index)] renderlet_id: Id<Renderlet>,
@@ -332,9 +333,9 @@ impl RenderletFragmentLog {
 }
 
 #[cfg(feature = "renderlet_fragment")]
-#[allow(clippy::too_many_arguments)]
-#[spirv(fragment)]
 /// Renderlet fragment shader
+#[allow(clippy::too_many_arguments, dead_code)]
+#[spirv(fragment)]
 pub fn renderlet_fragment(
     #[spirv(descriptor_set = 1, binding = 0)] atlas: &Image2d,
     #[spirv(descriptor_set = 1, binding = 1)] atlas_sampler: &Sampler,

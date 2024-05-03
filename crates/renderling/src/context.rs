@@ -1,9 +1,9 @@
 //! Builds the UI pipeline and manages resources.
 use glam::{UVec2, Vec4};
 use snafu::prelude::*;
-use std::{ops::Deref, sync::Arc};
+use std::sync::Arc;
 
-use crate::{new_default_instance, RenderTarget, Stage, TextureError, WgpuStateError};
+use crate::{new_default_instance, stage::Stage, RenderTarget, TextureError, WgpuStateError};
 
 #[derive(Debug, Snafu)]
 pub enum RenderlingError {
@@ -34,12 +34,6 @@ pub enum RenderlingError {
     #[snafu(display("gltf import failed: {}", source))]
     GltfImport { source: gltf::Error },
 
-    #[snafu(display(
-        "Missing PostRenderBuffer resource. Ensure a node that creates PostRenderBuffer (like \
-         PostRenderbufferCreate) is present in the graph: {source}"
-    ))]
-    MissingPostRenderBuffer { source: moongraph::GraphError },
-
     #[snafu(display("Timeout while waiting for a screengrab"))]
     ScreenGrabTimeout { source: TextureError },
 
@@ -50,54 +44,6 @@ pub enum RenderlingError {
 impl From<WgpuStateError> for RenderlingError {
     fn from(source: WgpuStateError) -> Self {
         Self::State { source }
-    }
-}
-
-/// A thread-safe, clonable wrapper around `wgpu::Device`.
-#[derive(Clone)]
-pub struct Device(pub Arc<wgpu::Device>);
-
-impl Deref for Device {
-    type Target = wgpu::Device;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl Into<Arc<wgpu::Device>> for &Device {
-    fn into(self) -> Arc<wgpu::Device> {
-        self.0.clone()
-    }
-}
-
-/// A thread-safe, clonable wrapper around `wgpu::Queue`.
-#[derive(Clone)]
-pub struct Queue(pub Arc<wgpu::Queue>);
-
-impl Deref for Queue {
-    type Target = wgpu::Queue;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl Into<Arc<wgpu::Queue>> for &Queue {
-    fn into(self) -> Arc<wgpu::Queue> {
-        self.0.clone()
-    }
-}
-
-/// A thread-safe, clonable wrapper around `wgpu::Adapter`.
-#[derive(Clone)]
-pub struct Adapter(pub Arc<wgpu::Adapter>);
-
-impl Deref for Adapter {
-    type Target = wgpu::Adapter;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
     }
 }
 
@@ -113,9 +59,9 @@ pub struct BackgroundColor(pub Vec4);
 
 /// Contains the adapter, device, queue and [`RenderTarget`].
 pub struct Context {
-    pub adapter: Adapter,
-    pub device: Device,
-    pub queue: Queue,
+    pub adapter: Arc<wgpu::Adapter>,
+    pub device: Arc<wgpu::Device>,
+    pub queue: Arc<wgpu::Queue>,
     pub render_target: RenderTarget,
     pub size: UVec2,
 }
@@ -129,9 +75,9 @@ impl Context {
         size: UVec2,
     ) -> Self {
         Self {
-            adapter: Adapter(adapter.into()),
-            device: Device(device.into()),
-            queue: Queue(queue.into()),
+            adapter: adapter.into(),
+            device: device.into(),
+            queue: queue.into(),
             render_target: target,
             size,
         }
@@ -243,12 +189,12 @@ impl Context {
     }
 
     /// Returns a the adapter in an owned wrapper.
-    pub fn get_adapter_owned(&self) -> crate::Adapter {
+    pub fn get_adapter_owned(&self) -> Arc<wgpu::Adapter> {
         self.adapter.clone()
     }
 
     /// Returns a pair of the device and queue in an owned wrapper.
-    pub fn get_device_and_queue_owned(&self) -> (crate::Device, crate::Queue) {
+    pub fn get_device_and_queue_owned(&self) -> (Arc<wgpu::Device>, Arc<wgpu::Queue>) {
         (self.device.clone(), self.queue.clone())
     }
 

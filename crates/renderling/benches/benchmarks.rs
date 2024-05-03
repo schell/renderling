@@ -1,7 +1,7 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
+use renderling::Context;
 #[cfg(feature = "gltf")]
 use renderling::GltfLoader;
-use renderling::Renderling;
 
 #[cfg(feature = "gltf")]
 fn load_damaged_helmet(c: &mut Criterion) {
@@ -23,7 +23,7 @@ fn load_damaged_helmet(c: &mut Criterion) {
 
     println!("{}", std::env::current_dir().unwrap().display());
 
-    let r = Renderling::headless(100, 100);
+    let r = Context::headless(100, 100);
     group.bench_function("legacy", |b| {
         b.iter(|| {
             let mut builder = r.new_scene();
@@ -38,7 +38,7 @@ fn load_damaged_helmet(c: &mut Criterion) {
         })
     });
 
-    let r = Renderling::headless(100, 100);
+    let r = Context::headless(100, 100);
     group.bench_function("gltf", |b| {
         b.iter(|| {
             let stage = r.new_stage();
