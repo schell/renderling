@@ -9,12 +9,14 @@ use std::{
 };
 
 use crate::{
+    atlas::{Atlas, AtlasError, AtlasImage, AtlasImageError, AtlasTexture},
     bloom::Bloom,
     pbr::{debug::DebugMode, light::Light, PbrConfig},
+    skybox::Skybox,
     slab::*,
+    stage::Renderlet,
     tonemapping::Tonemapping,
-    Atlas, AtlasError, AtlasImage, AtlasImageError, AtlasTexture, Camera, CpuCubemap, DepthTexture,
-    Device, Queue, Skybox, WgpuSlabError,
+    Camera, CpuCubemap, DepthTexture,
 };
 use crabslab::{Array, CpuSlab, GrowableSlab, Id, Slab, SlabItem, WgpuBuffer};
 use snafu::Snafu;
@@ -39,12 +41,6 @@ impl From<AtlasError> for StageError {
 impl From<WgpuSlabError> for StageError {
     fn from(source: WgpuSlabError) -> Self {
         Self::Slab { source }
-    }
-}
-
-impl From<StageError> for moongraph::GraphError {
-    fn from(value: StageError) -> Self {
-        moongraph::GraphError::other(value)
     }
 }
 
@@ -118,8 +114,8 @@ fn create_stage_render_pipeline(device: &wgpu::Device) -> wgpu::RenderPipeline {
 /// Only available on the CPU. Not available in shaders.
 #[derive(Clone)]
 pub struct Stage {
-    pub(crate) device: Device,
-    pub(crate) queue: Queue,
+    pub(crate) device: Arc<wgpu::Device>,
+    pub(crate) queue: Arc<wgpu::Queue>,
 
     pub(crate) mngr: SlabManager,
 
@@ -180,7 +176,7 @@ impl Stage {
         let lights = mngr.new_hybrid_array(vec![Id::<Light>::NONE; 16]);
         let hdr_texture = crate::Texture::create_hdr_texture(&device, &queue, w, h);
         let depth_texture = crate::Texture::create_depth_texture(&device, w, h);
-        let bloom = Bloom::new(&device, &queue, resolution, &hdr_texture);
+        let bloom = Bloom::new(device.clone(), queue.clone(), resolution, &hdr_texture);
         let tonemapping = Tonemapping::new(
             &device,
             &queue,
@@ -194,15 +190,15 @@ impl Stage {
             lights,
 
             vertex_debug: Arc::new(RwLock::new(CpuSlab::new(WgpuBuffer::new(
-                device.0.clone(),
-                queue.0.clone(),
+                device.clone(),
+                queue.clone(),
                 256,
             )))),
             fragment_debug: Arc::new(RwLock::new({
                 let len = (resolution.x * resolution.y) as usize;
                 let mut debug = CpuSlab::new(WgpuBuffer::new(
-                    device.0.clone(),
-                    queue.0.clone(),
+                    device.clone(),
+                    queue.clone(),
                     RenderletFragmentLog::SLAB_SIZE * len,
                 ));
                 debug.append_array(&vec![RenderletFragmentLog::default(); len]);
@@ -226,6 +222,10 @@ impl Stage {
             device,
             queue,
         }
+    }
+
+    pub fn get_device_and_queue_owned(&self) -> (Arc<wgpu::Device>, Arc<wgpu::Queue>) {
+        (self.device.clone(), self.queue.clone())
     }
 
     pub fn set_background_color(&self, color: impl Into<Vec4>) {
@@ -275,7 +275,17 @@ impl Stage {
         });
     }
 
+    pub fn get_size(&self) -> UVec2 {
+        let w = self.hdr_texture.width();
+        let h = self.hdr_texture.height();
+        UVec2::new(w, h)
+    }
+
     pub fn set_size(&self, size: UVec2) {
+        if size == self.get_size() {
+            return;
+        }
+
         self.pbr_config.modify(|cfg| cfg.resolution = size);
 
         // Allocate space for our fragment shader logs...
@@ -288,6 +298,8 @@ impl Stage {
             array,
             vec![RenderletFragmentLog::default(); len as usize].as_slice(),
         );
+
+        todo!("need to resize textures, recreate bloom, etc");
     }
 
     pub fn with_size(self, size: UVec2) -> Self {
@@ -334,6 +346,8 @@ impl Stage {
         *guard = skybox;
         self.has_skybox
             .store(true, std::sync::atomic::Ordering::Relaxed);
+        *self.skybox_bindgroup.lock().unwrap() = None;
+        *self.textures_bindgroup.lock().unwrap() = None;
     }
 
     /// Turn the bloom effect on or off.
@@ -462,7 +476,7 @@ impl Stage {
     ///
     /// Updates the input `renderlet` with a `debug_index`, which can be used to retrieve
     /// debugging information after running a shader.
-    pub fn draw(&mut self, mut renderlet: crate::Renderlet) -> Hybrid<crate::Renderlet> {
+    pub fn draw(&mut self, mut renderlet: Renderlet) -> Hybrid<Renderlet> {
         // UNWRAP: if we can't acquire the lock we want to panic.
         let mut draws = self.draws.write().unwrap();
         let hybrid;
@@ -508,8 +522,8 @@ impl Stage {
     /// Returns a clone of the current depth texture.
     pub fn get_depth_texture(&self) -> DepthTexture {
         DepthTexture {
-            device: self.device.0.clone(),
-            queue: self.queue.0.clone(),
+            device: self.device.clone(),
+            queue: self.queue.clone(),
             texture: self.depth_texture.clone(),
         }
     }
@@ -722,6 +736,39 @@ impl Stage {
         NestedTransform::new(&mut self.mngr)
     }
 
+    fn tick_internal(&mut self) -> Arc<wgpu::Buffer> {
+        {
+            let mut draw_guard = self.draws.write().unwrap();
+            match draw_guard.deref_mut() {
+                StageDrawStrategy::Direct(draws) => {
+                    draws.retain(|d| d.strong_count() > 2);
+                }
+            }
+        }
+        if let Some(new_slab_buffer) = self.mngr.upkeep(
+            &self.device,
+            &self.queue,
+            Some("stage render upkeep"),
+            wgpu::BufferUsages::empty(),
+        ) {
+            // invalidate our bindgroups, etc
+            let _ = self.skybox_bindgroup.lock().unwrap().take();
+            let _ = self.buffers_bindgroup.lock().unwrap().take();
+            new_slab_buffer
+        } else {
+            // UNWRAP: safe because we called `SlabManager::upkeep` above^, which ensures the buffer
+            // exists
+            self.mngr.get_buffer().unwrap()
+        }
+    }
+
+    /// Ticks the stage, synchronizing changes with the GPU.
+    ///
+    /// It's good to call this after dropping assets to free up space on the slab.
+    pub fn tick(&mut self) {
+        let _ = self.tick_internal();
+    }
+
     pub fn render(&mut self, view: &wgpu::TextureView) {
         log::trace!("clearing pass");
         crate::frame::conduct_clear_pass(
@@ -737,21 +784,7 @@ impl Stage {
             log::trace!("rendering the stage");
             let label = Some("stage render");
             let pipeline = self.get_pipeline();
-            let slab_buffer = if let Some(new_slab_buffer) = self.mngr.upkeep(
-                &self.device,
-                &self.queue,
-                Some("stage render upkeep"),
-                wgpu::BufferUsages::empty(),
-            ) {
-                // invalidate our bindgroups, etc
-                let _ = self.skybox_bindgroup.lock().unwrap().take();
-                let _ = self.buffers_bindgroup.lock().unwrap().take();
-                new_slab_buffer
-            } else {
-                // UNWRAP: safe because we called `SlabManager::upkeep` above^, which ensures the buffer
-                // exists
-                self.mngr.get_buffer().unwrap()
-            };
+            let slab_buffer = self.tick_internal();
             let slab_buffers_bindgroup = self.get_slab_buffers_bindgroup(&slab_buffer);
             let textures_bindgroup = self.get_textures_bindgroup();
             let has_skybox = self.has_skybox.load(std::sync::atomic::Ordering::Relaxed);
@@ -804,8 +837,8 @@ impl Stage {
                                 let id = hybrid.id();
                                 let instance_range = id.inner()..id.inner() + 1;
                                 log::trace!(
-                            "drawing vertices {vertex_range:?} and instances {instance_range:?}"
-                        );
+                                    "drawing vertices {vertex_range:?} and instances {instance_range:?}"
+                                );
                                 render_pass.draw(vertex_range, instance_range);
                             }
                         }
@@ -962,7 +995,10 @@ mod test {
     use crabslab::{Array, GrowableSlab, Slab};
     use glam::{UVec2, Vec2, Vec3};
 
-    use crate::{Camera, Context, Renderlet, RenderletVertexLog, Vertex};
+    use crate::{
+        stage::{Renderlet, RenderletVertexLog, Vertex},
+        Camera, Context,
+    };
 
     #[test]
     fn vertex_slab_roundtrip() {

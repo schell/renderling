@@ -5,22 +5,25 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
-[dependencies]
-renderling = { path = "../renderling" }
-renderling-gpui = { path = "../renderling-gpui" }
+[lib]
+source = "lib.rs"
 
-anyhow = "^1.0"
+[[bin]]
+name = "example"
+source = "main.rs"
+
+[dependencies]
 clap = { version = "^4.3", features = ["derive"] }
 env_logger = {workspace=true}
 futures-lite = {workspace=true}
+gltf = { workspace = true }
 icosahedron = "^0.1"
 instant = "^0.1"
+log = { workspace = true }
+renderling = { path = "../renderling" }
 loading-bytes = { path = "../loading-bytes" }
 wasm-bindgen = "^0.2"
 wasm-bindgen-futures = "^0.4"
-
-gltf = { workspace = true }
-log = { workspace = true }
 winit = { workspace = true }
 wgpu = { workspace = true }
 

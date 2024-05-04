@@ -12,9 +12,10 @@ use light::Light;
 use spirv_std::num_traits::Float;
 
 use crate::{
+    atlas::AtlasTexture,
     math::{self, IsVector},
     pbr::light::{DirectionalLight, PointLight, SpotLight},
-    println as my_println, AtlasTexture, Camera, IsSampler, Sample2d, SampleCube,
+    println as my_println, Camera, IsSampler, Sample2d, SampleCube,
 };
 
 pub mod debug;

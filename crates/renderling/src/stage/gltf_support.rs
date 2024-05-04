@@ -6,14 +6,15 @@ use glam::{Mat4, Vec2, Vec3, Vec4};
 use snafu::{OptionExt, ResultExt, Snafu};
 
 use crate::{
+    atlas::{AtlasImage, AtlasTexture, RepackPreview, TextureAddressMode, TextureModes},
     pbr::{
         light::{DirectionalLight, Light, LightStyle, PointLight, SpotLight},
         Material,
     },
     slab::*,
     stage::Vertex,
-    AtlasImage, AtlasTexture, Camera, NestedTransform, Renderlet, RepackPreview, Stage,
-    TextureAddressMode, TextureModes, Transform,
+    stage::{NestedTransform, Renderlet, Stage},
+    Camera, Transform,
 };
 
 #[derive(Debug, Snafu)]
@@ -463,7 +464,9 @@ impl GltfPrimitive {
             )
             .collect::<Vec<_>>();
         let vertices = stage.new_hybrid_array(vertices);
+        log::debug!("{} vertices, {:?}", vertices.len(), vertices.array());
         let indices = stage.new_hybrid_array(indices);
+        log::debug!("{} indices, {:?}", indices.len(), indices.array());
         let gltf::mesh::Bounds { min, max } = primitive.bounding_box();
         let min = Vec3::from_array(min);
         let max = Vec3::from_array(max);
@@ -585,7 +588,7 @@ pub struct GltfNode {
     pub skin: Option<usize>,
     /// Indices of the children of this node.
     ///
-    /// Each element indexes into the `StagedGltfDocument`'s `nodes` field.
+    /// Each element indexes into the `GltfDocument`'s `nodes` field.
     pub children: Vec<usize>,
     /// Array of weights
     pub weights: HybridArray<f32>,
@@ -595,7 +598,7 @@ pub struct GltfNode {
 
 impl GltfNode {
     pub fn global_transform(&self) -> Transform {
-        todo!()
+        self.transform.get_global_transform()
     }
 }
 
@@ -948,6 +951,14 @@ impl Stage {
         GltfDocument::from_gltf(self, &document, buffers, images)
     }
 
+    pub fn load_gltf_document_from_bytes(
+        &mut self,
+        bytes: impl AsRef<[u8]>,
+    ) -> Result<GltfDocument, StageGltfError> {
+        let (document, buffers, images) = gltf::import_slice(bytes)?;
+        GltfDocument::from_gltf(self, &document, buffers, images)
+    }
+
     /// Draws the `StagedGltfNode` with the given `Camera`.
     pub fn draw_gltf_node(
         &mut self,
@@ -1008,8 +1019,8 @@ impl Stage {
 mod test {
     use crate::{
         pbr::{Material, PbrConfig},
-        stage::Vertex,
-        Camera, Context, Renderlet, Transform,
+        stage::{Renderlet, Vertex},
+        Camera, Context, Transform,
     };
     use crabslab::{GrowableSlab, Id, Slab};
     use glam::{Vec2, Vec3, Vec4, Vec4Swizzles};

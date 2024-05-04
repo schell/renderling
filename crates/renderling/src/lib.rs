@@ -15,10 +15,11 @@
 
 // TODO: Audit the API and make it more ergonomic/predictable.
 
-mod atlas;
+pub mod atlas;
 pub mod bits;
 pub mod bloom;
 mod camera;
+pub mod color;
 pub mod convolution;
 #[cfg(not(target_arch = "spirv"))]
 pub mod cubemap;
@@ -33,30 +34,19 @@ pub mod ibl;
 #[cfg(not(target_arch = "spirv"))]
 pub mod linkage;
 pub mod math;
-#[cfg(not(target_arch = "spirv"))]
-pub mod mesh;
 pub mod pbr;
 pub mod skybox;
-#[cfg(not(target_arch = "spirv"))]
 pub mod slab;
-mod stage;
+pub mod stage;
 #[cfg(not(target_arch = "spirv"))]
 mod state;
-//#[cfg(feature = "text")]
-//mod text;
 #[cfg(not(target_arch = "spirv"))]
 mod texture;
 pub mod tonemapping;
 mod transform;
 #[cfg(feature = "tutorial")]
 pub mod tutorial;
-//mod ui;
 
-#[cfg(not(target_arch = "spirv"))]
-mod uniform;
-
-pub use atlas::*;
-pub mod color;
 pub use camera::*;
 #[cfg(not(target_arch = "spirv"))]
 pub use context::*;
@@ -64,35 +54,11 @@ use glam::Vec3;
 #[cfg(not(target_arch = "spirv"))]
 use image::GenericImageView;
 #[cfg(not(target_arch = "spirv"))]
-pub use skybox::Skybox;
-pub use stage::*;
-#[cfg(not(target_arch = "spirv"))]
 pub use state::*;
-//#[cfg(feature = "text")]
-//pub use text::*;
 #[cfg(not(target_arch = "spirv"))]
 pub use texture::*;
 pub use transform::*;
-//pub use ui::*;
-#[cfg(not(target_arch = "spirv"))]
-pub use uniform::*;
 
-#[cfg(not(target_arch = "spirv"))]
-pub mod graph {
-    //! Re-exports of [`moongraph`].
-    //!
-    //! ## Note
-    //! Only available on CPU. Not available in shaders.
-
-    pub use moongraph::*;
-
-    pub type RenderNode = Node<Function, TypeKey>;
-}
-
-pub use crabslab::*;
-// TODO: Remove some re-exports of `graph`
-#[cfg(not(target_arch = "spirv"))]
-pub use graph::{graph, Graph, GraphError, Move, View, ViewMut};
 use spirv_std::{
     image::{Cubemap, Image2d},
     Sampler,
@@ -265,7 +231,12 @@ pub mod shader_test;
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::{pbr::Material, stage::Vertex};
+    use crate::{
+        atlas::AtlasImage,
+        pbr::Material,
+        slab::*,
+        stage::{NestedTransform, Renderlet, Vertex},
+    };
 
     use glam::{Mat3, Mat4, Quat, Vec2, Vec3, Vec4};
     use img_diff::DiffCfg;

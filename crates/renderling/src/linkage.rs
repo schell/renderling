@@ -168,8 +168,8 @@ pub fn atlas_and_skybox_bindgroup_layout(device: &wgpu::Device) -> wgpu::BindGro
 pub fn atlas_and_skybox_bindgroup(
     device: &wgpu::Device,
     layout: &wgpu::BindGroupLayout,
-    atlas: &crate::Atlas,
-    skybox: &crate::Skybox,
+    atlas: &crate::atlas::Atlas,
+    skybox: &crate::skybox::Skybox,
 ) -> wgpu::BindGroup {
     let label = Some("atlas and skybox");
     device.create_bind_group(&wgpu::BindGroupDescriptor {
