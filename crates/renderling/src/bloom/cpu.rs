@@ -394,11 +394,13 @@ pub struct Bloom {
 
 impl Bloom {
     pub fn new(
-        device: &crate::Device,
-        queue: &crate::Queue,
+        device: impl Into<Arc<wgpu::Device>>,
+        queue: impl Into<Arc<wgpu::Queue>>,
         resolution: UVec2,
         hdr_texture: &crate::Texture,
     ) -> Self {
+        let device = device.into();
+        let queue = queue.into();
         let mut slab = SlabManager::default();
 
         let downsample_pixel_sizes = slab.new_hybrid_array(
@@ -408,35 +410,35 @@ impl Bloom {
             slab.new_hybrid(1.0 / Vec2::new(resolution.x as f32, resolution.y as f32));
         let mix_strength = slab.new_hybrid(0.04f32);
         let slab_buffer = slab.get_updated_buffer(
-            device,
-            queue,
+            &device,
+            &queue,
             Some("bloom slab"),
             wgpu::BufferUsages::empty(),
         );
 
-        let textures = create_textures(device, queue, resolution);
-        let downsample_pipeline = Arc::new(create_bloom_downsample_pipeline(device));
-        let upsample_pipeline = Arc::new(create_bloom_upsample_pipeline(device));
+        let textures = create_textures(&device, &queue, resolution);
+        let downsample_pipeline = Arc::new(create_bloom_downsample_pipeline(&device));
+        let upsample_pipeline = Arc::new(create_bloom_upsample_pipeline(&device));
 
         // up and downsample pipelines have the same layout, so we just choose one for the layout
-        let bindgroups = create_bindgroups(device, &downsample_pipeline, &slab_buffer, &textures);
+        let bindgroups = create_bindgroups(&device, &downsample_pipeline, &slab_buffer, &textures);
         let hdr_texture_downsample_bindgroup = create_bindgroup(
-            device,
+            &device,
             &downsample_pipeline.get_bind_group_layout(0),
             &slab_buffer,
             hdr_texture,
         );
         let mix_texture = create_texture(
-            device,
-            queue,
+            &device,
+            &queue,
             resolution.x,
             resolution.y,
             Some("bloom mix"),
             wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::COPY_DST,
         );
-        let mix_pipeline = Arc::new(create_mix_pipeline(device));
+        let mix_pipeline = Arc::new(create_mix_pipeline(&device));
         let mix_bindgroup = create_mix_bindgroup(
-            device,
+            &device,
             &mix_pipeline,
             &slab_buffer,
             &hdr_texture,

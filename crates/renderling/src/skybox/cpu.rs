@@ -151,13 +151,13 @@ pub struct Skybox {
 
 impl Skybox {
     /// Create an empty, transparent skybox.
-    pub fn empty(device: crate::Device, queue: crate::Queue) -> Self {
+    pub fn empty(device: impl Into<Arc<wgpu::Device>>, queue: impl Into<Arc<wgpu::Queue>>) -> Self {
         log::trace!("creating empty skybox");
         let hdr_img = AtlasImage {
             pixels: vec![0u8; 4 * 4],
             width: 1,
             height: 1,
-            format: crate::AtlasImageFormat::R32G32B32A32FLOAT,
+            format: crate::atlas::AtlasImageFormat::R32G32B32A32FLOAT,
             apply_linear_transfer: false,
         };
         Self::new(device, queue, hdr_img, crabslab::Id::<Camera>::NONE)
@@ -165,12 +165,14 @@ impl Skybox {
 
     /// Create a new `Skybox`.
     pub fn new(
-        device: crate::Device,
-        queue: crate::Queue,
+        device: impl Into<Arc<wgpu::Device>>,
+        queue: impl Into<Arc<wgpu::Queue>>,
         hdr_img: AtlasImage,
         camera: crabslab::Id<Camera>,
     ) -> Self {
         log::trace!("creating skybox");
+        let device = device.into();
+        let queue = queue.into();
         let equirectangular_texture =
             Skybox::hdr_texture_from_atlas_image(&device, &queue, hdr_img);
         let proj = Mat4::perspective_rh(std::f32::consts::FRAC_PI_2, 1.0, 0.1, 10.0);
@@ -217,13 +219,18 @@ impl Skybox {
         );
 
         // Convolve the environment map.
-        let irradiance_cubemap =
-            Skybox::create_irradiance_map(&device, &queue, &environment_cubemap, proj, views);
+        let irradiance_cubemap = Skybox::create_irradiance_map(
+            device.clone(),
+            queue.clone(),
+            &environment_cubemap,
+            proj,
+            views,
+        );
 
         // Generate specular IBL pre-filtered environment map.
         let prefiltered_environment_cubemap = Skybox::create_prefiltered_environment_map(
-            &device,
-            &queue,
+            device.clone(),
+            queue.clone(),
             &environment_cubemap,
             proj,
             views,
@@ -278,21 +285,23 @@ impl Skybox {
     }
 
     fn create_environment_map_from_hdr(
-        device: crate::Device,
-        queue: crate::Queue,
+        device: impl Into<Arc<wgpu::Device>>,
+        queue: impl Into<Arc<wgpu::Queue>>,
         hdr_texture: &crate::Texture,
         proj: Mat4,
         views: [Mat4; 6],
     ) -> crate::Texture {
         // Create the cubemap-making pipeline.
+        let device = device.into();
+        let queue = queue.into();
         let pipeline = crate::cubemap::CubemapMakingRenderPipeline::new(
             &device,
             wgpu::TextureFormat::Rgba16Float,
         );
 
         let buffer = WgpuBuffer::new_usage(
-            device.0.clone(),
-            queue.0.clone(),
+            device.clone(),
+            queue.clone(),
             Camera::SLAB_SIZE,
             wgpu::BufferUsages::VERTEX,
         );

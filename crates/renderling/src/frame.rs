@@ -34,8 +34,8 @@ pub(crate) enum FrameSurface {
 ///
 /// Either a [`SurfaceTexture`] or a [`Texture`].
 pub struct Frame {
-    pub(crate) device: crate::Device,
-    pub(crate) queue: crate::Queue,
+    pub(crate) device: Arc<wgpu::Device>,
+    pub(crate) queue: Arc<wgpu::Queue>,
     pub(crate) surface: FrameSurface,
     pub(crate) size: UVec2,
 }
