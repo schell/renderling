@@ -131,7 +131,6 @@ pub fn create_skybox_render_pipeline(
 /// A clone of a skybox is a reference to the same skybox.
 ///
 /// Only available on the CPU. Not available in shaders.
-// TODO: make Skybox threadsafe
 #[derive(Debug, Clone)]
 pub struct Skybox {
     // Cubemap texture of the environment cubemap

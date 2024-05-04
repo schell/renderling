@@ -6,7 +6,9 @@ use glam::{Mat4, Vec2, Vec3, Vec4};
 use snafu::{OptionExt, ResultExt, Snafu};
 
 use crate::{
-    atlas::{AtlasImage, AtlasTexture, RepackPreview, TextureAddressMode, TextureModes},
+    atlas::{
+        AtlasError, AtlasImage, AtlasTexture, RepackPreview, TextureAddressMode, TextureModes,
+    },
     pbr::{
         light::{DirectionalLight, Light, LightStyle, PointLight, SpotLight},
         Material,
@@ -80,6 +82,12 @@ impl From<crabslab::WgpuSlabError> for StageGltfError {
 impl From<gltf::Error> for StageGltfError {
     fn from(source: gltf::Error) -> Self {
         Self::Gltf { source }
+    }
+}
+
+impl From<AtlasError> for StageGltfError {
+    fn from(source: AtlasError) -> Self {
+        Self::Atlas { source }
     }
 }
 
@@ -702,10 +710,10 @@ impl GltfDocument {
         // the textures.
         let (mut repacking, atlas_offset) = {
             // UNWRAP: if we can't lock the atlas, we want to panic.
-            let atlas = stage.atlas.read().unwrap();
-            let atlas_offset = atlas.rects.len();
+            let atlas_offset = stage.atlas.frames().len();
             (
-                atlas
+                stage
+                    .atlas
                     .repack_preview(&stage.device, images.into_iter().map(AtlasImage::from))
                     .context(AtlasSnafu)?,
                 atlas_offset,
@@ -744,13 +752,8 @@ impl GltfDocument {
         if number_of_new_images > 0 {
             log::trace!("Packing the atlas");
             log::trace!("  adding {number_of_new_images} new images",);
-            // UNWRAP: if we can't lock the atlas, we want to panic.
-            let mut atlas = stage.atlas.write().unwrap();
-            let new_atlas = atlas
-                .commit_repack_preview(&stage.device, &stage.queue, repacking)
-                .context(AtlasSnafu)?;
-            let size = new_atlas.size;
-            *atlas = new_atlas;
+            stage.atlas.repack(&stage.device, &stage.queue, repacking)?;
+            let size = stage.atlas.get_size();
             // The bindgroup will have to be remade
             let _ = stage.textures_bindgroup.lock().unwrap().take();
             // The atlas size must be reset
@@ -1054,6 +1057,7 @@ mod test {
         let mut stage = ctx
             .new_stage()
             .with_lighting(false)
+            .with_bloom(false)
             .with_background_color(Vec3::splat(0.0).extend(1.0));
         let mut doc = stage
             .load_gltf_document_from_path("../../gltf/gltfTutorial_008_SimpleMeshes.gltf")
@@ -1079,7 +1083,7 @@ mod test {
         let frame = ctx.get_current_frame().unwrap();
         stage.render(&frame.view());
         let img = frame.read_image().unwrap();
-        img_diff::assert_img_eq("gltf_simple_meshes.png", img);
+        img_diff::assert_img_eq("gltf/simple_meshes.png", img);
     }
 
     #[test]
@@ -1089,6 +1093,7 @@ mod test {
         let mut stage = ctx
             .new_stage()
             .with_lighting(false)
+            .with_bloom(false)
             .with_background_color(Vec3::splat(0.0).extend(1.0));
         let mut doc = stage
             .load_gltf_document_from_path("../../gltf/gltfTutorial_003_MinimalGltfFile.gltf")
@@ -1105,14 +1110,14 @@ mod test {
         let default_scene = doc.default_scene.unwrap();
         let nodes = doc.scenes.get(default_scene).unwrap().clone();
         let scene = stage.draw_gltf_scene(&mut doc, nodes, camera_id).unwrap();
-        for (i, node) in scene.into_iter().enumerate() {
+        for (i, node) in scene.iter().enumerate() {
             println!("node_{i}: {node:#?}");
         }
 
         let frame = ctx.get_current_frame().unwrap();
         stage.render(&frame.view());
         let img = frame.read_image().unwrap();
-        img_diff::assert_img_eq("gltf_minimal_mesh.png", img);
+        img_diff::assert_img_eq("gltf/minimal_mesh.png", img);
     }
 
     #[test]
@@ -1170,7 +1175,7 @@ mod test {
         let frame = ctx.get_current_frame().unwrap();
         stage.render(&frame.view());
         let img = frame.read_linear_image().unwrap();
-        img_diff::assert_img_eq("gltf_images.png", img);
+        img_diff::assert_img_eq("gltf/images.png", img);
     }
 
     #[test]
@@ -1182,7 +1187,8 @@ mod test {
             .with_background_color(Vec3::splat(0.0).extend(1.0))
             // There are no lights in the scene and the material isn't marked as "unlit", so
             // let's force it to be unlit.
-            .with_lighting(false);
+            .with_lighting(false)
+            .with_bloom(false);
         let mut doc = stage
             .load_gltf_document_from_path("../../gltf/gltfTutorial_013_SimpleTexture.gltf")
             .unwrap();
@@ -1198,7 +1204,7 @@ mod test {
         let frame = ctx.get_current_frame().unwrap();
         stage.render(&frame.view());
         let img = frame.read_image().unwrap();
-        img_diff::assert_img_eq("gltf_simple_texture.png", img);
+        img_diff::assert_img_eq("gltf/simple_texture.png", img);
     }
 
     #[test]
@@ -1224,7 +1230,7 @@ mod test {
         let frame = ctx.get_current_frame().unwrap();
         stage.render(&frame.view());
         let img = frame.read_image().unwrap();
-        img_diff::assert_img_eq("gltf_normal_mapping_brick_sphere.png", img);
+        img_diff::assert_img_eq("gltf/normal_mapping_brick_sphere.png", img);
     }
 
     /// A helper struct that contains all outputs of the vertex shader.

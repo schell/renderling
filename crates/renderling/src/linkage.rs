@@ -178,11 +178,11 @@ pub fn atlas_and_skybox_bindgroup(
         entries: &[
             wgpu::BindGroupEntry {
                 binding: 0,
-                resource: wgpu::BindingResource::TextureView(&atlas.texture.view),
+                resource: wgpu::BindingResource::TextureView(&atlas.get_texture().view),
             },
             wgpu::BindGroupEntry {
                 binding: 1,
-                resource: wgpu::BindingResource::Sampler(&atlas.texture.sampler),
+                resource: wgpu::BindingResource::Sampler(&atlas.get_texture().sampler),
             },
             wgpu::BindGroupEntry {
                 binding: 2,

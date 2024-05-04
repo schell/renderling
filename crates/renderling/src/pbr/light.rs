@@ -210,7 +210,6 @@ mod test {
                 Some("light_negative_z") => Vec3::NEG_Y,
                 Some("light_positive_z") => Vec3::Y,
                 Some("light_positive_x") => Vec3::X,
-                // TODO: explain why positive +Y == -Z (why isn't +Y == +Z?)
                 Some("light_positive_y") => Vec3::NEG_Z,
                 n => panic!("unexpected node '{n:?}'"),
             };

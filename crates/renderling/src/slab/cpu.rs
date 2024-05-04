@@ -129,7 +129,7 @@ pub struct SlabManager {
     pub(crate) buffer: Arc<RwLock<Option<Arc<wgpu::Buffer>>>>,
     pub(crate) update_sources: Arc<RwLock<Vec<Box<dyn UpdatesSlab>>>>,
     pub(crate) updates: Arc<Mutex<Vec<SlabUpdate>>>,
-    pub(crate) recycles: Arc<RwLock<RangeManager>>,
+    recycles: Arc<RwLock<RangeManager>>,
 }
 
 impl crabslab::Slab for SlabManager {

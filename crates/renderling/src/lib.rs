@@ -799,6 +799,7 @@ mod test {
         let ctx = Context::headless(100, 100);
         let mut stage = ctx
             .new_stage()
+            .with_bloom(false)
             .with_background_color(Vec3::splat(0.0).extend(1.0));
 
         let (projection, _) = camera::default_perspective(100.0, 100.0);
@@ -1051,6 +1052,7 @@ mod test {
                 })
                 .collect::<Vec<_>>()
         });
+        let mut spheres = vec![];
         for i in 0..k {
             let roughness = i as f32 / (k - 1) as f32;
             let x = (diameter + spacing) * i as f32;
@@ -1068,13 +1070,14 @@ mod test {
                     translation: Vec3::new(x, y, 0.0),
                     ..Default::default()
                 });
-                let _sphere = stage.draw(Renderlet {
+                let sphere = stage.draw(Renderlet {
                     camera,
                     vertices: geometry,
                     transform,
                     material,
                     ..Default::default()
                 });
+                spheres.push(sphere);
             }
         }
 
