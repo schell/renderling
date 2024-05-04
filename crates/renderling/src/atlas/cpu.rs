@@ -293,7 +293,12 @@ impl Atlas {
             .items
             .iter()
             .zip(0..)
-            .all(|(item, i)| item.data.index() == i));
+            .all(|(item, i)| if item.data.index() != i {
+                log::error!("item {i}'s index does not match ({})", item.data.index());
+                false
+            } else {
+                true
+            }));
         Ok(RepackPreview { items })
     }
 

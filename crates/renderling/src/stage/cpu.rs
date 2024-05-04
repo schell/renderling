@@ -346,6 +346,8 @@ impl Stage {
         *guard = skybox;
         self.has_skybox
             .store(true, std::sync::atomic::Ordering::Relaxed);
+        *self.skybox_bindgroup.lock().unwrap() = None;
+        *self.textures_bindgroup.lock().unwrap() = None;
     }
 
     /// Turn the bloom effect on or off.
@@ -734,6 +736,39 @@ impl Stage {
         NestedTransform::new(&mut self.mngr)
     }
 
+    fn tick_internal(&mut self) -> Arc<wgpu::Buffer> {
+        {
+            let mut draw_guard = self.draws.write().unwrap();
+            match draw_guard.deref_mut() {
+                StageDrawStrategy::Direct(draws) => {
+                    draws.retain(|d| d.strong_count() > 2);
+                }
+            }
+        }
+        if let Some(new_slab_buffer) = self.mngr.upkeep(
+            &self.device,
+            &self.queue,
+            Some("stage render upkeep"),
+            wgpu::BufferUsages::empty(),
+        ) {
+            // invalidate our bindgroups, etc
+            let _ = self.skybox_bindgroup.lock().unwrap().take();
+            let _ = self.buffers_bindgroup.lock().unwrap().take();
+            new_slab_buffer
+        } else {
+            // UNWRAP: safe because we called `SlabManager::upkeep` above^, which ensures the buffer
+            // exists
+            self.mngr.get_buffer().unwrap()
+        }
+    }
+
+    /// Ticks the stage, synchronizing changes with the GPU.
+    ///
+    /// It's good to call this after dropping assets to free up space on the slab.
+    pub fn tick(&mut self) {
+        let _ = self.tick_internal();
+    }
+
     pub fn render(&mut self, view: &wgpu::TextureView) {
         log::trace!("clearing pass");
         crate::frame::conduct_clear_pass(
@@ -749,21 +784,7 @@ impl Stage {
             log::trace!("rendering the stage");
             let label = Some("stage render");
             let pipeline = self.get_pipeline();
-            let slab_buffer = if let Some(new_slab_buffer) = self.mngr.upkeep(
-                &self.device,
-                &self.queue,
-                Some("stage render upkeep"),
-                wgpu::BufferUsages::empty(),
-            ) {
-                // invalidate our bindgroups, etc
-                let _ = self.skybox_bindgroup.lock().unwrap().take();
-                let _ = self.buffers_bindgroup.lock().unwrap().take();
-                new_slab_buffer
-            } else {
-                // UNWRAP: safe because we called `SlabManager::upkeep` above^, which ensures the buffer
-                // exists
-                self.mngr.get_buffer().unwrap()
-            };
+            let slab_buffer = self.tick_internal();
             let slab_buffers_bindgroup = self.get_slab_buffers_bindgroup(&slab_buffer);
             let textures_bindgroup = self.get_textures_bindgroup();
             let has_skybox = self.has_skybox.load(std::sync::atomic::Ordering::Relaxed);
@@ -816,8 +837,8 @@ impl Stage {
                                 let id = hybrid.id();
                                 let instance_range = id.inner()..id.inner() + 1;
                                 log::trace!(
-                            "drawing vertices {vertex_range:?} and instances {instance_range:?}"
-                        );
+                                    "drawing vertices {vertex_range:?} and instances {instance_range:?}"
+                                );
                                 render_pass.draw(vertex_range, instance_range);
                             }
                         }

@@ -464,7 +464,9 @@ impl GltfPrimitive {
             )
             .collect::<Vec<_>>();
         let vertices = stage.new_hybrid_array(vertices);
+        log::debug!("{} vertices, {:?}", vertices.len(), vertices.array());
         let indices = stage.new_hybrid_array(indices);
+        log::debug!("{} indices, {:?}", indices.len(), indices.array());
         let gltf::mesh::Bounds { min, max } = primitive.bounding_box();
         let min = Vec3::from_array(min);
         let max = Vec3::from_array(max);
@@ -586,7 +588,7 @@ pub struct GltfNode {
     pub skin: Option<usize>,
     /// Indices of the children of this node.
     ///
-    /// Each element indexes into the `StagedGltfDocument`'s `nodes` field.
+    /// Each element indexes into the `GltfDocument`'s `nodes` field.
     pub children: Vec<usize>,
     /// Array of weights
     pub weights: HybridArray<f32>,

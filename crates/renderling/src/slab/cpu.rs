@@ -10,6 +10,98 @@ use std::sync::{atomic::AtomicBool, Arc, Mutex, RwLock};
 
 use crabslab::Id;
 
+#[derive(Clone, Copy)]
+struct Range {
+    first_index: u32,
+    last_index: u32,
+}
+
+impl core::fmt::Debug for Range {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str(&format!("{}..={}", self.first_index, self.last_index))
+    }
+}
+
+impl<T: SlabItem> From<Array<T>> for Range {
+    fn from(array: Array<T>) -> Self {
+        let array = array.into_u32_array();
+        let first_index = array.starting_index() as u32;
+        Range {
+            first_index,
+            last_index: first_index + array.len() as u32 - 1,
+        }
+    }
+}
+
+impl Range {
+    pub fn len(&self) -> u32 {
+        1 + self.last_index - self.first_index
+    }
+    pub fn intersects(&self, range: &Range) -> bool {
+        self.first_index <= range.last_index && self.last_index >= range.first_index
+    }
+
+    pub fn contiguous(&self, range: &Range) -> bool {
+        range.first_index > 0 && self.last_index == range.first_index - 1
+            || self.first_index > 0 && range.last_index == self.first_index - 1
+    }
+
+    pub fn union(&self, range: &Range) -> Self {
+        Range {
+            first_index: self.first_index.min(range.first_index),
+            last_index: self.last_index.max(range.last_index),
+        }
+    }
+}
+
+#[derive(Default)]
+struct RangeManager {
+    ranges: Vec<Range>,
+}
+
+impl RangeManager {
+    pub fn add_range(&mut self, input_range: Range) {
+        for range in self.ranges.iter_mut() {
+            debug_assert!(
+                !range.intersects(&input_range),
+                "{input_range:?} intersects existing {range:?}"
+            );
+            if range.contiguous(&input_range) {
+                let new_range = range.union(&input_range);
+                log::trace!("combining {range:?} and {input_range:?} into {new_range:?}");
+                *range = new_range;
+                return;
+            }
+        }
+        self.ranges.push(input_range);
+    }
+
+    /// Removes a range of `count` elements, if possible.
+    pub fn remove(&mut self, count: u32) -> Option<Range> {
+        let mut remove_index = usize::MAX;
+        for (i, range) in self.ranges.iter_mut().enumerate() {
+            if range.len() > count {
+                let first_index = range.first_index;
+                let last_index = range.first_index + count - 1;
+                range.first_index += count;
+                return Some(Range {
+                    first_index,
+                    last_index,
+                });
+            } else if range.len() == count {
+                remove_index = i;
+                break;
+            }
+        }
+
+        if remove_index == usize::MAX {
+            None
+        } else {
+            Some(self.ranges.swap_remove(remove_index))
+        }
+    }
+}
+
 #[derive(Debug, Snafu)]
 pub enum SlabManagerError {
     #[snafu(display(
@@ -37,7 +129,7 @@ pub struct SlabManager {
     pub(crate) buffer: Arc<RwLock<Option<Arc<wgpu::Buffer>>>>,
     pub(crate) update_sources: Arc<RwLock<Vec<Box<dyn UpdatesSlab>>>>,
     pub(crate) updates: Arc<Mutex<Vec<SlabUpdate>>>,
-    pub(crate) recycles: Arc<RwLock<Vec<Array<u32>>>>,
+    pub(crate) recycles: Arc<RwLock<RangeManager>>,
 }
 
 impl crabslab::Slab for SlabManager {
@@ -90,26 +182,14 @@ impl crabslab::Slab for SlabManager {
 impl crabslab::GrowableSlab for SlabManager {
     fn allocate<T: SlabItem>(&mut self) -> Id<T> {
         // UNWRAP: we want to panic
-        let mut guard = self.recycles.write().unwrap();
-        let len = T::SLAB_SIZE;
-        let mut id = Id::<T>::NONE;
-        guard.retain_mut(|recycled| {
-            if let Some((array, maybe_leftover)) = split_array(*recycled, len as u32) {
-                id = Id::new(array.starting_index() as u32);
-                if let Some(leftover) = maybe_leftover {
-                    *recycled = leftover;
-                    true
-                } else {
-                    false
-                }
-            } else {
-                true
-            }
-        });
-        drop(guard);
-
-        if id.is_some() {
-            log::trace!("recycled {id:?}");
+        let may_range = self.recycles.write().unwrap().remove(T::SLAB_SIZE as u32);
+        if let Some(range) = may_range {
+            let id = Id::<T>::new(range.first_index);
+            log::trace!("dequeued {range:?} to {id:?}");
+            debug_assert_eq!(
+                range.last_index,
+                range.first_index + T::SLAB_SIZE as u32 - 1
+            );
             id
         } else {
             self.maybe_expand_to_fit::<T>(1);
@@ -124,31 +204,23 @@ impl crabslab::GrowableSlab for SlabManager {
         }
 
         // UNWRAP: we want to panic
-        let mut guard = self.recycles.write().unwrap();
-        let slab_size = T::SLAB_SIZE * len;
-        let mut output_array = Array::<T>::default();
-        guard.retain_mut(|recycled| {
-            if let Some((array, maybe_leftover)) = split_array(*recycled, slab_size as u32) {
-                output_array = Array::new(array.starting_index() as u32, array.len() as u32);
-                if let Some(leftover) = maybe_leftover {
-                    *recycled = leftover;
-                    true
-                } else {
-                    false
-                }
-            } else {
-                true
-            }
-        });
-        drop(guard);
-
-        if output_array.is_null() || output_array.is_empty() {
-            self.maybe_expand_to_fit::<T>(len);
-            let index = self.increment_len(slab_size);
-            Array::new(index as u32, len as u32)
+        let may_range = self
+            .recycles
+            .write()
+            .unwrap()
+            .remove((T::SLAB_SIZE * len) as u32);
+        if let Some(range) = may_range {
+            let array = Array::<T>::new(range.first_index, len as u32);
+            log::trace!("dequeued {range:?} to {array:?}");
+            debug_assert_eq!(
+                range.last_index,
+                range.first_index + (T::SLAB_SIZE * len) as u32 - 1
+            );
+            array
         } else {
-            log::trace!("recycled {output_array:?}");
-            output_array
+            self.maybe_expand_to_fit::<T>(len);
+            let index = self.increment_len(T::SLAB_SIZE * len);
+            Array::new(index as u32, len as u32)
         }
     }
 
@@ -167,39 +239,6 @@ impl crabslab::GrowableSlab for SlabManager {
 
     fn increment_len(&mut self, n: usize) -> usize {
         self.len.fetch_add(n, Ordering::Relaxed)
-    }
-}
-
-fn _arrays_are_contiguous_or_overlapping(a: Array<u32>, b: Array<u32>) -> bool {
-    // overlapping
-    a.contains_index(b.starting_index())
-        || b.contains_index(a.starting_index())
-        || (
-            // contiguous
-            a.starting_index() + a.len() == b.starting_index()
-                || b.starting_index() + b.len() == a.starting_index()
-        )
-}
-
-fn _combine_arrays(a: Array<u32>, b: Array<u32>) -> Array<u32> {
-    let starting_index = a.starting_index().min(b.starting_index());
-    let ending_index = (a.starting_index() + a.len()).max(b.starting_index() + b.len());
-    let len = ending_index - starting_index;
-    Array::new(starting_index as u32, len as u32)
-}
-
-fn split_array(a: Array<u32>, len: u32) -> Option<(Array<u32>, Option<Array<u32>>)> {
-    if a.len() >= len as usize {
-        let array = Array::new(a.starting_index() as u32, len);
-        let leftover_len = a.len() as u32 - len;
-        let leftover = if leftover_len > 0 {
-            Some(Array::new(a.starting_index() as u32 + len, leftover_len))
-        } else {
-            None
-        };
-        Some((array, leftover))
-    } else {
-        None
     }
 }
 
@@ -326,18 +365,29 @@ impl SlabManager {
                 if count <= 1 {
                     // recycle this allocation
                     let input_array = hybrid.array();
-                    log::trace!("recycling {} {input_array:?}", hybrid.type_name());
-                    if !hybrid.forgotten() {
-                        recycles_guard.push(input_array);
-                    } else {
+                    log::debug!("recycling {} {input_array:?}", hybrid.type_name());
+                    if hybrid.forgotten() {
                         log::debug!("  cannot recycle - forgotten!");
+                    } else if hybrid.array().is_null() || hybrid.array().is_empty() {
+                        log::debug!("  cannot recycle - empty or null");
+                    } else {
+                        recycles_guard.add_range(input_array.into());
                     }
-                    // TODO: combine recycled contiguous arrays
                     false
                 } else {
                     true
                 }
             });
+            // defrag the ranges
+            let ranges = std::mem::replace(&mut recycles_guard.ranges, vec![]);
+            let num_ranges_to_defrag = ranges.len();
+            for range in ranges.into_iter() {
+                recycles_guard.add_range(range);
+            }
+            let num_ranges = recycles_guard.ranges.len();
+            if num_ranges < num_ranges_to_defrag {
+                log::trace!("{num_ranges_to_defrag} ranges before, {num_ranges} after");
+            }
         }
 
         let writes = std::mem::replace(self.updates.lock().unwrap().as_mut(), vec![]);
@@ -685,58 +735,6 @@ mod test {
     use super::*;
 
     #[test]
-    fn arrays_overlapping_or_contiguous_arrays_sanity() {
-        let overlapping_a = Array::<u32>::new(0, 11);
-        let overlapping_b = Array::<u32>::new(5, 25);
-        assert!(_arrays_are_contiguous_or_overlapping(
-            overlapping_a,
-            overlapping_b
-        ));
-
-        let contiguous_a = Array::<u32>::new(0, 11);
-        let contiguous_b = Array::<u32>::new(11, 20);
-        assert!(_arrays_are_contiguous_or_overlapping(
-            contiguous_a,
-            contiguous_b
-        ));
-
-        let not_contiguous_a = Array::<u32>::new(0, 5);
-        let not_contiguous_b = Array::<u32>::new(6, 8);
-        assert!(!_arrays_are_contiguous_or_overlapping(
-            not_contiguous_a,
-            not_contiguous_b
-        ));
-    }
-
-    #[test]
-    fn arrays_combine_arrays_sanity() {
-        let overlapping_a = Array::<u32>::new(0, 11);
-        let overlapping_b = Array::<u32>::new(5, 25);
-        assert_eq!(
-            Array::new(0, 30),
-            _combine_arrays(overlapping_a, overlapping_b)
-        );
-
-        let contiguous_a = Array::<u32>::new(0, 10);
-        let contiguous_b = Array::<u32>::new(10, 10);
-        assert_eq!(
-            Array::new(0, 20),
-            _combine_arrays(contiguous_a, contiguous_b)
-        );
-    }
-
-    #[test]
-    fn arrays_splitting_sanity() {
-        let array = Array::<u32>::new(0, 10);
-        assert_eq!(
-            Some((Array::new(0, 5), Some(Array::new(5, 5)))),
-            split_array(array, 5)
-        );
-        assert_eq!(Some((array, None)), split_array(array, array.len() as u32));
-        assert_eq!(None, split_array(array, 11));
-    }
-
-    #[test]
     fn mngr_updates_count_sanity() {
         let r = Context::headless(1, 1);
         let mut mngr = SlabManager::default();
@@ -762,5 +760,79 @@ mod test {
             wgpu::BufferUsages::empty(),
         );
         assert_eq!(0, mngr.update_sources.read().unwrap().len());
+    }
+
+    #[test]
+    fn range_sanity() {
+        let a = Range {
+            first_index: 1,
+            last_index: 2,
+        };
+        let b = Range {
+            first_index: 0,
+            last_index: 0,
+        };
+        assert!(!a.intersects(&b));
+        assert!(!b.intersects(&a));
+    }
+
+    #[test]
+    fn slab_manager_sanity() {
+        let r = Context::headless(1, 1);
+        let mut m = SlabManager::default();
+        let _ = m.allocate::<u32>();
+        let _ = m.allocate::<u32>();
+        let _ = m.allocate::<u32>();
+        let _ = m.allocate::<u32>();
+        let h4 = m.new_hybrid(0u32);
+        let h5 = m.new_hybrid(0u32);
+        let h6 = m.new_hybrid(0u32);
+        let h7 = m.new_hybrid(0u32);
+        let _ = m.upkeep(
+            r.get_device(),
+            r.get_queue(),
+            None,
+            wgpu::BufferUsages::empty(),
+        );
+        assert!(m.recycles.read().unwrap().ranges.is_empty());
+
+        drop(h4);
+        drop(h5);
+        drop(h6);
+        drop(h7);
+        let _ = m.upkeep(
+            r.get_device(),
+            r.get_queue(),
+            None,
+            wgpu::BufferUsages::empty(),
+        );
+        assert_eq!(1, m.recycles.read().unwrap().ranges.len());
+
+        let h4 = m.new_hybrid(0u32);
+        let h5 = m.new_hybrid(0u32);
+        let h6 = m.new_hybrid(0u32);
+        let h7 = m.new_hybrid(0u32);
+        assert!(m.recycles.read().unwrap().ranges.is_empty());
+
+        let h8 = m.new_hybrid(0u32);
+        drop(h8);
+        drop(h4);
+        drop(h6);
+        let _ = m.upkeep(
+            r.get_device(),
+            r.get_queue(),
+            None,
+            wgpu::BufferUsages::empty(),
+        );
+        assert_eq!(3, m.recycles.read().unwrap().ranges.len());
+        drop(h7);
+        drop(h5);
+        let _ = m.upkeep(
+            r.get_device(),
+            r.get_queue(),
+            None,
+            wgpu::BufferUsages::empty(),
+        );
+        assert_eq!(1, m.recycles.read().unwrap().ranges.len());
     }
 }

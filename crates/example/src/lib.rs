@@ -13,7 +13,7 @@ use renderling::{
     skybox::Skybox,
     slab::Hybrid,
     stage::{GltfDocument, Node, Stage},
-    Camera, Context, ScreenSize, Transform,
+    Camera, Context,
 };
 
 const RADIUS_SCROLL_DAMPENING: f32 = 0.001;
@@ -32,7 +32,6 @@ pub enum SupportedFileType {
 }
 
 pub fn is_file_supported(file: impl AsRef<std::path::Path>) -> Option<SupportedFileType> {
-    log::info!("loading '{}'", file.as_ref().display());
     let ext = file.as_ref().extension()?;
     Some(match ext.to_str()? {
         "hdr" => SupportedFileType::Hdr,
@@ -67,7 +66,11 @@ pub struct App {
 
 impl App {
     pub fn new(r: &Context) -> Self {
-        let mut stage = r.new_stage().with_background_color(DARK_BLUE_BG_COLOR);
+        let mut stage = r
+            .new_stage()
+            .with_background_color(DARK_BLUE_BG_COLOR)
+            .with_bloom_mix_strength(0.5)
+            .with_bloom_filter_radius(4.0);
         let camera = stage.new_hybrid(Camera::default());
 
         let radius = 6.0;
@@ -106,14 +109,6 @@ impl App {
         Vec3::new(x, z, y)
     }
 
-    fn get_updated_camera_text(&self) -> String {
-        format!(
-            "position: {}\nlooking at: {}",
-            Self::camera_position(self.radius, self.phi, self.theta),
-            self.eye,
-        )
-    }
-
     pub fn update_camera_view(&self) {
         let UVec2 { x: w, y: h } = self.stage.get_size();
         let camera = Camera::new(
@@ -138,10 +133,16 @@ impl App {
     }
 
     fn load_gltf_model(&mut self, bytes: &[u8]) {
+        log::info!("loading gltf");
         self.phi = 0.0;
         self.theta = std::f32::consts::FRAC_PI_4;
         self.left_mb_down = false;
         self.last_cursor_position = None;
+        self.stage.set_images(std::iter::empty()).unwrap();
+        self.document = None;
+        self.nodes = None;
+        log::debug!("ticking stage to reclaim buffers");
+        self.stage.tick();
 
         let doc = match self.stage.load_gltf_document_from_bytes(bytes) {
             Err(e) => {
@@ -185,6 +186,7 @@ impl App {
             }
             Ok(ns) => Some(ns),
         };
+        self.document = Some(doc);
 
         let halfway_point = min + ((max - min).normalize() * ((max - min).length() / 2.0));
         let length = min.distance(max);
@@ -200,6 +202,7 @@ impl App {
     pub fn tick_loads(&mut self) {
         let loaded = std::mem::take(&mut *self.loads.lock().unwrap());
         for (path, bytes) in loaded.into_iter() {
+            log::info!("loaded {}bytes from {}", bytes.len(), path.display());
             match is_file_supported(&path) {
                 Some(SupportedFileType::Gltf) => self.load_gltf_model(&bytes),
                 Some(SupportedFileType::Hdr) => self.load_hdr_skybox(bytes),
@@ -229,18 +232,14 @@ impl App {
         }
     }
 
-    // fn mouse_button(
-    //     &mut self,
-    //     state: winit::event::ElementState,
-    //     button: winit::event::MouseButton,
-    // ) {
-    //     if matches!(button, winit::event::MouseButton::Left) {
-    //         self.left_mb_down = matches!(state, winit::event::ElementState::Pressed);
-    //         if !self.left_mb_down {
-    //             self.last_cursor_position = None;
-    //         }
-    //     }
-    // }
+    pub fn mouse_button(&mut self, is_pressed: bool, is_left_button: bool) {
+        if is_left_button {
+            self.left_mb_down = is_pressed;
+            if !self.left_mb_down {
+                self.last_cursor_position = None;
+            }
+        }
+    }
 
     // fn key_input(
     //     &mut self,

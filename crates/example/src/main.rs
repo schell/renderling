@@ -103,9 +103,11 @@ pub fn tick(app: &mut App, ev: Option<&winit::event::WindowEvent>) {
             winit::event::WindowEvent::CursorMoved { position, .. } => {
                 app.pan(*position);
             }
-            // winit::event::WindowEvent::MouseInput { state, button, .. } => {
-            //     app.mouse_button(*state, *button);
-            // }
+            winit::event::WindowEvent::MouseInput { state, button, .. } => {
+                let is_pressed = matches!(state, winit::event::ElementState::Pressed);
+                let is_left_button = matches!(button, winit::event::MouseButton::Left);
+                app.mouse_button(is_pressed, is_left_button);
+            }
             winit::event::WindowEvent::DroppedFile(path) => {
                 log::trace!("got dropped file event: {}", path.display());
                 let path = format!("{}", path.display());
