@@ -131,7 +131,7 @@ pub struct Stage {
     pub(crate) hdr_texture: crate::Texture,
     pub(crate) depth_texture: crate::Texture,
 
-    pub(crate) atlas: Arc<RwLock<Atlas>>,
+    pub(crate) atlas: Atlas,
     pub(crate) bloom: Bloom,
     pub(crate) skybox: Arc<RwLock<Skybox>>,
     pub(crate) tonemapping: Tonemapping,
@@ -169,7 +169,7 @@ impl Stage {
         let atlas = Atlas::empty(&device, &queue);
         let mut mngr = SlabManager::default();
         let pbr_config = mngr.new_hybrid(PbrConfig {
-            atlas_size: atlas.size,
+            atlas_size: atlas.get_size(),
             resolution,
             ..Default::default()
         });
@@ -205,7 +205,7 @@ impl Stage {
                 debug
             })),
             stage_pipeline: create_stage_render_pipeline(&device).into(),
-            atlas: Arc::new(RwLock::new(atlas)),
+            atlas,
             skybox: Arc::new(RwLock::new(Skybox::empty(device.clone(), queue.clone()))),
             skybox_bindgroup: Default::default(),
             skybox_pipeline: Default::default(),
@@ -313,22 +313,24 @@ impl Stage {
     /// vector of the textures ready to be staged.
     ///
     /// ## WARNING
-    /// This invalidates any currently staged `GpuTextures`.
+    /// This invalidates any currently staged `AtlasTexture`s.
     pub fn set_images(
-        &mut self,
+        &self,
         images: impl IntoIterator<Item = AtlasImage>,
     ) -> Result<Vec<AtlasTexture>, StageError> {
-        // UNWRAP: if we can't write the atlas we want to panic
-        let mut atlas = self.atlas.write().unwrap();
-        *atlas = Atlas::pack(&self.device, &self.queue, images)?;
+        self.atlas.reset(&self.device, &self.queue, images)?;
+
+        let size = self.atlas.get_size();
 
         // The textures bindgroup will have to be remade
         let _ = self.textures_bindgroup.lock().unwrap().take();
         // The atlas size must be reset
-        self.pbr_config.modify(|cfg| cfg.atlas_size = atlas.size);
+        self.pbr_config.modify(|cfg| cfg.atlas_size = size);
 
-        let textures = atlas
+        let textures = self
+            .atlas
             .frames()
+            .into_iter()
             .map(|(i, (offset_px, size_px))| AtlasTexture {
                 offset_px,
                 size_px,
@@ -462,7 +464,7 @@ impl Stage {
                 &self.device,
                 &self.get_pipeline().get_bind_group_layout(1),
                 // UNWRAP: if we can't acquire locks we want to panic
-                &self.atlas.read().unwrap(),
+                &self.atlas,
                 &self.skybox.read().unwrap(),
             ));
             *bindgroup = Some(b.clone());
@@ -537,10 +539,7 @@ impl Stage {
     /// `RgbaImage`.
     pub fn read_atlas_image(&self) -> image::RgbaImage {
         // UNWRAP: if we can't acquire the lock we want to panic.
-        self.atlas
-            .read()
-            .unwrap()
-            .atlas_img(&self.device, &self.queue)
+        self.atlas.atlas_img(&self.device, &self.queue)
     }
 
     /// Read the brdf image from the GPU.

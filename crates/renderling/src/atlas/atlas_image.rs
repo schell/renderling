@@ -39,7 +39,6 @@ pub enum AtlasImageFormat {
 
 impl AtlasImageFormat {
     pub fn from_wgpu_texture_format(value: wgpu::TextureFormat) -> Option<Self> {
-        // TODO: implement more AtlasImageFormat conversions from wgpu::TetxureFormat
         match value {
             wgpu::TextureFormat::R8Uint => Some(AtlasImageFormat::R8),
             wgpu::TextureFormat::R16Uint => Some(AtlasImageFormat::R16),
