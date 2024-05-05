@@ -22,6 +22,7 @@ impl Linkage {
         let source_path = source_path.file_name().unwrap().to_str().unwrap();
         let entry_point = self.entry_point.clone();
 
+        let wgsl_entry_point = entry_point.replace("::", "");
         let entry_point = match lang {
             ShaderLang::Spv => entry_point,
             ShaderLang::Wgsl => entry_point.replace("::", ""),
@@ -32,7 +33,7 @@ impl Linkage {
                 Arc::new(device.create_shader_module(wgpu::include_spirv!(#source_path)))
             },
             ShaderLang::Wgsl => quote! {
-                Arc:new(device.create_shader_module(wgpu::include_wgsl!(#source_path)))
+                Arc::new(device.create_shader_module(wgpu::include_wgsl!(#source_path)))
             },
         };
         let quote = quote! {
@@ -40,7 +41,10 @@ impl Linkage {
 
             use super::ShaderLinkage;
 
+            #[cfg(not(target_arch = "wasm32"))]
             pub const ENTRY_POINT: &str = #entry_point;
+            #[cfg(target_arch = "wasm32")]
+            pub const ENTRY_POINT: &str = #wgsl_entry_point;
 
             pub fn linkage(device: &wgpu::Device) -> ShaderLinkage {
                 ShaderLinkage {

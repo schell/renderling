@@ -1,28 +1,51 @@
 //! Provides convenient wrappers around renderling shader linkage.
 use std::sync::Arc;
 
+#[cfg(feature = "bloom_downsample_fragment")]
 pub mod bloom_downsample_fragment;
+#[cfg(feature = "bloom_mix_fragment")]
 pub mod bloom_mix_fragment;
+#[cfg(feature = "bloom_upsample_fragment")]
 pub mod bloom_upsample_fragment;
+#[cfg(feature = "bloom_vertex")]
 pub mod bloom_vertex;
+#[cfg(feature = "brdf_lut_convolution_fragment")]
 pub mod brdf_lut_convolution_fragment;
+#[cfg(feature = "brdf_lut_convolution_vertex")]
 pub mod brdf_lut_convolution_vertex;
+#[cfg(feature = "generate_mipmap_fragment")]
 pub mod generate_mipmap_fragment;
+#[cfg(feature = "generate_mipmap_vertex")]
 pub mod generate_mipmap_vertex;
+#[cfg(feature = "prefilter_environment_cubemap_fragment")]
 pub mod prefilter_environment_cubemap_fragment;
+#[cfg(feature = "prefilter_environment_cubemap_vertex")]
 pub mod prefilter_environment_cubemap_vertex;
+#[cfg(feature = "renderlet_fragment")]
 pub mod renderlet_fragment;
+#[cfg(feature = "renderlet_vertex")]
 pub mod renderlet_vertex;
+#[cfg(feature = "skybox_cubemap_fragment")]
 pub mod skybox_cubemap_fragment;
+#[cfg(feature = "skybox_cubemap_vertex")]
 pub mod skybox_cubemap_vertex;
+#[cfg(feature = "skybox_equirectangular_fragment")]
 pub mod skybox_equirectangular_fragment;
+#[cfg(feature = "skybox_vertex")]
 pub mod skybox_vertex;
+#[cfg(feature = "tonemapping_fragment")]
 pub mod tonemapping_fragment;
+#[cfg(feature = "tonemapping_vertex")]
 pub mod tonemapping_vertex;
+#[cfg(feature = "tutorial_implicit_isosceles_vertex")]
 pub mod tutorial_implicit_isosceles_vertex;
+#[cfg(feature = "tutorial_passthru_fragment")]
 pub mod tutorial_passthru_fragment;
+#[cfg(feature = "tutorial_slabbed_renderlet")]
 pub mod tutorial_slabbed_renderlet;
+#[cfg(feature = "tutorial_slabbed_vertices")]
 pub mod tutorial_slabbed_vertices;
+#[cfg(feature = "tutorial_slabbed_vertices_no_instance")]
 pub mod tutorial_slabbed_vertices_no_instance;
 
 pub struct ShaderLinkage {

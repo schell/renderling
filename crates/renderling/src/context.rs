@@ -104,6 +104,7 @@ impl Context {
         Ok(Self::new(target, adapter, device, queue, size))
     }
 
+    #[cfg(feature = "winit")]
     pub async fn from_window_async(window: Arc<winit::window::Window>) -> Self {
         let inner_size = window.inner_size();
         Self::try_from_raw_window(inner_size.width, inner_size.height, window)

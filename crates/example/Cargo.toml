@@ -17,13 +17,14 @@ clap = { version = "^4.3", features = ["derive"] }
 env_logger = {workspace=true}
 futures-lite = {workspace=true}
 gltf = { workspace = true }
-icosahedron = "^0.1"
-instant = "^0.1"
+icosahedron = "0.1"
+lazy_static = "1.4.0"
 log = { workspace = true }
 renderling = { path = "../renderling" }
 loading-bytes = { path = "../loading-bytes" }
-wasm-bindgen = "^0.2"
+wasm-bindgen = { workspace = true }
 wasm-bindgen-futures = "^0.4"
+web-sys = { workspace = true, features = ["Performance", "Window"] }
 winit = { workspace = true }
 wgpu = { workspace = true }
 
