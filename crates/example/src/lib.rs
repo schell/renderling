@@ -5,8 +5,6 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use instant::Instant;
-
 use renderling::{
     atlas::AtlasImage,
     math::{Mat4, UVec2, Vec3, Vec4},
@@ -39,8 +37,28 @@ pub fn is_file_supported(file: impl AsRef<std::path::Path>) -> Option<SupportedF
     })
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+lazy_static::lazy_static! {
+    static ref START: std::time::Instant = std::time::Instant::now();
+}
+
+fn now() -> f64 {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let doc = web_sys::window().unwrap();
+        let perf = doc.performance().unwrap();
+        perf.now()
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let now = std::time::Instant::now();
+        let duration = now.duration_since(*START);
+        duration.as_secs_f64()
+    }
+}
+
 pub struct App {
-    last_frame_instant: Instant,
+    last_frame_instant: f64,
     skybox_image_bytes: Option<Vec<u8>>,
     loads: Arc<Mutex<HashMap<std::path::PathBuf, Vec<u8>>>>,
 
@@ -88,7 +106,7 @@ impl App {
 
             skybox_image_bytes: None,
             loads: Arc::new(Mutex::new(HashMap::default())),
-            last_frame_instant: Instant::now(),
+            last_frame_instant: now(),
             radius,
             eye: Vec3::ZERO,
             phi,
@@ -194,7 +212,7 @@ impl App {
 
         self.radius = radius;
         self.eye = halfway_point;
-        self.last_frame_instant = Instant::now();
+        self.last_frame_instant = now();
 
         self.update_camera_view();
     }

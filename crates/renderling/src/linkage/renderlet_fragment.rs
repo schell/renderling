@@ -8,7 +8,10 @@
 //! `crates/renderling/src/linkage/stage-renderlet_fragment.spv`
 use super::ShaderLinkage;
 use std::sync::Arc;
+#[cfg(not(target_arch = "wasm32"))]
 pub const ENTRY_POINT: &str = "stage::renderlet_fragment";
+#[cfg(target_arch = "wasm32")]
+pub const ENTRY_POINT: &str = "stagerenderlet_fragment";
 pub fn linkage(device: &wgpu::Device) -> ShaderLinkage {
     ShaderLinkage {
         module: Arc::new(

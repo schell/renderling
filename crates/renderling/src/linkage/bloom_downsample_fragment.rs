@@ -8,7 +8,10 @@
 //! `crates/renderling/src/linkage/bloom-bloom_downsample_fragment.spv`
 use super::ShaderLinkage;
 use std::sync::Arc;
+#[cfg(not(target_arch = "wasm32"))]
 pub const ENTRY_POINT: &str = "bloom::bloom_downsample_fragment";
+#[cfg(target_arch = "wasm32")]
+pub const ENTRY_POINT: &str = "bloombloom_downsample_fragment";
 pub fn linkage(device: &wgpu::Device) -> ShaderLinkage {
     ShaderLinkage {
         module: Arc::new(

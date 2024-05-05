@@ -13,14 +13,13 @@ console_log = "^0.2"
 console_error_panic_hook = "^0.1"
 example = { path = "../example" }
 fern = "0.6"
-renderling = { path = "../renderling", features = ["wasm"] }
-renderling-gpui = { path = "../renderling-gpui" }
-wasm-bindgen = "^0.2"
-wasm-bindgen-futures = "^0.4"
-wasm-bindgen-test = "^0.3"
-web-sys = { version = "^0.3", features = ["Document", "Element", "HtmlElement", "Window"] }
-
+futures-lite = { workspace = true }
 gltf = { workspace = true }
 log = { workspace = true }
+renderling = { path = "../renderling", features = ["wasm"] }
+wasm-bindgen = { workspace = true }
+wasm-bindgen-futures = { workspace = true }
+wasm-bindgen-test = "^0.3"
+web-sys = { workspace = true, features = ["Document", "Element", "Event", "HtmlCanvasElement", "HtmlElement", "Window"] }
 winit = { workspace = true }
 wgpu = { workspace = true }

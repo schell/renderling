@@ -7,7 +7,10 @@
 //! **source path**: `crates/renderling/src/linkage/shader_test-array_test.spv`
 use super::ShaderLinkage;
 use std::sync::Arc;
+#[cfg(not(target_arch = "wasm32"))]
 pub const ENTRY_POINT: &str = "shader_test::array_test";
+#[cfg(target_arch = "wasm32")]
+pub const ENTRY_POINT: &str = "shader_testarray_test";
 pub fn linkage(device: &wgpu::Device) -> ShaderLinkage {
     ShaderLinkage {
         module: Arc::new(

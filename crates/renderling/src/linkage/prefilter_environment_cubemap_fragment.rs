@@ -9,7 +9,10 @@
 //! convolution-prefilter_environment_cubemap_fragment.spv`
 use super::ShaderLinkage;
 use std::sync::Arc;
+#[cfg(not(target_arch = "wasm32"))]
 pub const ENTRY_POINT: &str = "convolution::prefilter_environment_cubemap_fragment";
+#[cfg(target_arch = "wasm32")]
+pub const ENTRY_POINT: &str = "convolutionprefilter_environment_cubemap_fragment";
 pub fn linkage(device: &wgpu::Device) -> ShaderLinkage {
     ShaderLinkage {
         module: Arc::new(device.create_shader_module(wgpu::include_spirv!(

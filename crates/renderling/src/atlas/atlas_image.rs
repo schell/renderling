@@ -5,20 +5,27 @@
 use image::EncodableLayout;
 use snafu::prelude::*;
 
+fn cwd() -> Option<String> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        Some("localhost".to_string())
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let cwd = std::env::current_dir().ok()?;
+        Some(format!("{}", cwd.display()))
+    }
+}
+
 #[derive(Debug, Snafu)]
 pub enum AtlasImageError {
-    #[snafu(display("Cannot load image '{}' from cwd '{:?}': {source}", path.display(), std::env::current_dir()))]
+    #[snafu(display("Cannot load image '{}' from cwd '{:?}': {source}", path.display(), cwd()))]
     CannotLoad {
         source: std::io::Error,
         path: std::path::PathBuf,
     },
 
-    #[snafu(display(
-        "Image error: {source}\nCurrent dir: {}", 
-        std::env::current_dir()
-            .map(|path| path.display().to_string())
-            .unwrap_or_else(|e| e.to_string())
-    ))]
+    #[snafu(display("Image error: {source}\nCurrent dir: {:?}", cwd()))]
     Image { source: image::error::ImageError },
 }
 
