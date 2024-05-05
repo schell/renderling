@@ -6,11 +6,9 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [lib]
-source = "lib.rs"
 
 [[bin]]
 name = "example"
-source = "main.rs"
 
 [dependencies]
 clap = { version = "^4.3", features = ["derive"] }
