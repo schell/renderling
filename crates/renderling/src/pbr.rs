@@ -1,9 +1,9 @@
-//! Physically-based shading code.
+//! "Physically based" types and functions.
 //!
 //! ## References
-//! * https://learnopengl.com/PBR/Theory
-//! * https://github.com/KhronosGroup/glTF-Sample-Viewer/blob/5b1b7f48a8cb2b7aaef00d08fdba18ccc8dd331b/source/Renderer/shaders/pbr.frag
-//! * https://github.khronos.org/glTF-Sample-Viewer-Release/
+//! * <https://learnopengl.com/PBR/Theory>
+//! * <https://github.com/KhronosGroup/glTF-Sample-Viewer/blob/5b1b7f48a8cb2b7aaef00d08fdba18ccc8dd331b/source/Renderer/shaders/pbr.frag>
+//! * <https://github.khronos.org/glTF-Sample-Viewer-Release/>
 use crabslab::{Array, Id, Slab, SlabItem};
 use glam::{Mat4, Vec2, Vec3, Vec4, Vec4Swizzles};
 use light::Light;
@@ -13,9 +13,10 @@ use spirv_std::num_traits::Float;
 
 use crate::{
     atlas::AtlasTexture,
-    math::{self, IsVector},
+    camera::Camera,
+    math::{self, IsSampler, IsVector, Sample2d, SampleCube},
     pbr::light::{DirectionalLight, PointLight, SpotLight},
-    println as my_println, Camera, IsSampler, Sample2d, SampleCube,
+    println as my_println,
 };
 
 pub mod debug;
@@ -25,10 +26,6 @@ pub mod light;
 use light::LightStyle;
 
 /// Represents a material on the GPU.
-///
-/// `Material` is capable of representing many material types.
-/// Use the appropriate builder for your material type from
-/// [`SceneBuilder`](crate::SceneBuilder).
 #[repr(C)]
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[derive(Clone, Copy, PartialEq, SlabItem)]
@@ -39,11 +36,11 @@ pub struct Material {
     pub metallic_factor: f32,
     pub roughness_factor: f32,
 
-    pub albedo_texture: Id<AtlasTexture>,
-    pub metallic_roughness_texture: Id<AtlasTexture>,
-    pub normal_texture: Id<AtlasTexture>,
-    pub ao_texture: Id<AtlasTexture>,
-    pub emissive_texture: Id<AtlasTexture>,
+    pub albedo_texture_id: Id<AtlasTexture>,
+    pub metallic_roughness_texture_id: Id<AtlasTexture>,
+    pub normal_texture_id: Id<AtlasTexture>,
+    pub ao_texture_id: Id<AtlasTexture>,
+    pub emissive_texture_id: Id<AtlasTexture>,
 
     pub albedo_tex_coord: u32,
     pub metallic_roughness_tex_coord: u32,
@@ -63,17 +60,17 @@ impl Default for Material {
             albedo_factor: Vec4::ONE,
             metallic_factor: 1.0,
             roughness_factor: 1.0,
-            albedo_texture: Id::NONE,
-            metallic_roughness_texture: Id::NONE,
-            normal_texture: Id::NONE,
-            ao_texture: Id::NONE,
+            albedo_texture_id: Id::NONE,
+            metallic_roughness_texture_id: Id::NONE,
+            normal_texture_id: Id::NONE,
+            ao_texture_id: Id::NONE,
             albedo_tex_coord: 0,
             metallic_roughness_tex_coord: 0,
             normal_tex_coord: 0,
             ao_tex_coord: 0,
             has_lighting: true,
             ao_strength: 0.0,
-            emissive_texture: Id::NONE,
+            emissive_texture_id: Id::NONE,
             emissive_tex_coord: 0,
         }
     }
@@ -336,7 +333,7 @@ pub fn fragment_impl<T, C, S>(
         in_uv1
     };
     let albedo_tex_color = texture_color(
-        material.albedo_texture,
+        material.albedo_texture_id,
         albedo_tex_uv,
         atlas,
         atlas_sampler,
@@ -351,7 +348,7 @@ pub fn fragment_impl<T, C, S>(
         in_uv1
     };
     let metallic_roughness_tex_color = texture_color(
-        material.metallic_roughness_texture,
+        material.metallic_roughness_texture_id,
         metallic_roughness_uv,
         atlas,
         atlas_sampler,
@@ -369,7 +366,7 @@ pub fn fragment_impl<T, C, S>(
         in_uv1
     };
     let normal_tex_color = texture_color(
-        material.normal_texture,
+        material.normal_texture_id,
         normal_tex_uv,
         atlas,
         atlas_sampler,
@@ -384,7 +381,7 @@ pub fn fragment_impl<T, C, S>(
         in_uv1
     };
     let ao_tex_color = texture_color(
-        material.ao_texture,
+        material.ao_texture_id,
         ao_tex_uv,
         atlas,
         atlas_sampler,
@@ -398,7 +395,7 @@ pub fn fragment_impl<T, C, S>(
         in_uv1
     };
     let emissive_tex_color = texture_color(
-        material.emissive_texture,
+        material.emissive_texture_id,
         emissive_tex_uv,
         atlas,
         atlas_sampler,
@@ -406,7 +403,7 @@ pub fn fragment_impl<T, C, S>(
         slab,
     );
 
-    let (norm, uv_norm) = if material.normal_texture.is_none() {
+    let (norm, uv_norm) = if material.normal_texture_id.is_none() {
         // there is no normal map, use the normal normal ;)
         (in_norm, Vec3::ZERO)
     } else {

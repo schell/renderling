@@ -79,12 +79,12 @@ pub fn tutorial_slabbed_vertices(
 
 #[cfg(feature = "tutorial_slabbed_renderlet")]
 /// This shader uses the `instance_index` as a slab [`Id`].
-/// The `instance_index` is the [`Id`] of a [`RenderUnit`].
-/// The [`RenderUnit`] contains an [`Array`] of [`Vertex`]s
-/// as its mesh, the [`Id`]s of a [`Material`] and [`Camera`],
-/// and TRS transforms.
+/// The `instance_index` is the [`Id`] of a [`Renderlet`].
+/// The [`Renderlet`] contains an [`Array`] of [`Vertex`]s
+/// as its mesh, the [`Id`]s of a [`Material`](crate::pbr::Material)
+/// and [`Camera`](crate::camera::Camera), and TRS transforms.
 /// The `vertex_index` is the index of a [`Vertex`] within the
-/// [`RenderUnit`]'s `vertices` [`Array`].
+/// [`Renderlet`]'s `vertices` [`Array`].
 #[spirv(vertex)]
 pub fn tutorial_slabbed_renderlet(
     // Id of the renderlet
@@ -98,30 +98,31 @@ pub fn tutorial_slabbed_renderlet(
     #[spirv(position)] clip_pos: &mut Vec4,
 ) {
     let renderlet = slab.read_unchecked(renderlet_id);
-    let vertex_id = renderlet.vertices.at(vertex_index as usize);
+    let vertex_id = renderlet.vertices_array.at(vertex_index as usize);
     let vertex = slab.read(vertex_id);
     *out_color = vertex.color;
 
-    let transform = slab.read(renderlet.transform);
+    let transform = slab.read(renderlet.transform_id);
     let model = Mat4::from_scale_rotation_translation(
         transform.scale,
         transform.rotation,
         transform.translation,
     );
-    let camera = slab.read(renderlet.camera);
+    let camera = slab.read(renderlet.camera_id);
     *clip_pos = camera.projection * camera.view * model * vertex.position.extend(1.0);
 }
 
 #[cfg(test)]
 mod test {
-    use crabslab::*;
-    use glam::{Vec3, Vec4, Vec4Swizzles};
-
     use crate::{
-        frame::conduct_clear_pass,
-        slab::SlabManager,
+        camera::Camera,
+        conduct_clear_pass,
+        math::{Vec3, Vec4, Vec4Swizzles},
+        slab::SlabAllocator,
         stage::{Renderlet, Vertex},
-        Camera, Context, Transform,
+        texture::Texture,
+        transform::Transform,
+        Context,
     };
 
     #[test]
@@ -129,7 +130,7 @@ mod test {
         let ctx = Context::headless(100, 100);
         let (device, queue) = ctx.get_device_and_queue_owned();
         let label = Some("implicit isosceles triangle");
-        let depth = crate::Texture::create_depth_texture(&device, 100, 100);
+        let depth = Texture::create_depth_texture(&device, 100, 100);
         let vertex = crate::linkage::tutorial_implicit_isosceles_vertex::linkage(&device);
         let fragment = crate::linkage::tutorial_passthru_fragment::linkage(&device);
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -173,10 +174,10 @@ mod test {
             multiview: None,
         });
 
-        let frame = ctx.get_current_frame().unwrap();
+        let frame = ctx.get_next_frame().unwrap();
         let view = frame.view();
 
-        crate::frame::conduct_clear_pass(
+        crate::conduct_clear_pass(
             &device,
             &queue,
             None,
@@ -223,7 +224,7 @@ mod test {
         let (device, queue) = ctx.get_device_and_queue_owned();
 
         // Create our geometry on the slab.
-        let mut slab = SlabManager::default();
+        let mut slab = SlabAllocator::default();
         let initial_vertices = [
             Vertex {
                 position: Vec3::new(0.5, -0.5, 0.0),
@@ -241,7 +242,7 @@ mod test {
                 ..Default::default()
             },
         ];
-        let vertices = slab.append_array(&initial_vertices);
+        let vertices = slab.new_array(initial_vertices);
         assert_eq!(3, vertices.len());
 
         // Create a bindgroup for the slab so our shader can read out the types.
@@ -319,8 +320,8 @@ mod test {
             }],
         });
 
-        let depth = crate::Texture::create_depth_texture(&device, 100, 100);
-        let frame = ctx.get_current_frame().unwrap();
+        let depth = Texture::create_depth_texture(&device, 100, 100);
+        let frame = ctx.get_next_frame().unwrap();
         let view = frame.view();
 
         conduct_clear_pass(
@@ -388,7 +389,7 @@ mod test {
         let (device, queue) = ctx.get_device_and_queue_owned();
 
         // Create our geometry on the slab.
-        let mut slab = SlabManager::default();
+        let mut slab = SlabAllocator::default();
         let geometry = vec![
             Vertex {
                 position: Vec3::new(0.5, -0.5, 0.0),
@@ -421,8 +422,8 @@ mod test {
                 ..Default::default()
             },
         ];
-        let vertices = slab.append_array(&geometry);
-        let vertices_id = slab.append(&vertices);
+        let vertices = slab.new_array(geometry);
+        let vertices_array = slab.new_value(vertices.array());
 
         // Create a bindgroup for the slab so our shader can read out the types.
         let label = Some("slabbed isosceles triangle");
@@ -498,8 +499,8 @@ mod test {
             }],
         });
 
-        let depth = crate::Texture::create_depth_texture(&device, 100, 100);
-        let frame = ctx.get_current_frame().unwrap();
+        let depth = Texture::create_depth_texture(&device, 100, 100);
+        let frame = ctx.get_next_frame().unwrap();
         let view = frame.view();
 
         conduct_clear_pass(
@@ -538,7 +539,7 @@ mod test {
             render_pass.set_bind_group(0, &bindgroup, &[]);
             render_pass.draw(
                 0..vertices.len() as u32,
-                vertices_id.inner()..vertices_id.inner() + 1,
+                vertices_array.id().inner()..vertices_array.id().inner() + 1,
             );
         }
         queue.submit(std::iter::once(encoder.finish()));
@@ -554,8 +555,8 @@ mod test {
 
         // Create our geometry on the slab.
         // Don't worry too much about capacity, it can grow.
-        let mut slab = SlabManager::default();
-        let geometry = slab.append_array(&[
+        let mut slab = SlabAllocator::default();
+        let geometry = slab.new_array([
             Vertex {
                 position: Vec3::new(0.5, -0.5, 0.0),
                 color: Vec4::new(1.0, 0.0, 0.0, 1.0),
@@ -587,20 +588,19 @@ mod test {
                 ..Default::default()
             },
         ]);
-        let (projection, view) = crate::default_ortho2d(100.0, 100.0);
-        let camera = slab.append(&Camera::new(projection, view));
-        let transform = slab.append(&Transform {
+        let camera = slab.new_value(Camera::default_ortho2d(100.0, 100.0));
+        let transform = slab.new_value(Transform {
             translation: Vec3::new(50.0, 50.0, 0.0),
             scale: Vec3::new(50.0, 50.0, 1.0),
             ..Default::default()
         });
         let renderlet = Renderlet {
-            camera,
-            transform,
-            vertices: geometry,
+            camera_id: camera.id(),
+            transform_id: transform.id(),
+            vertices_array: geometry.array(),
             ..Default::default()
         };
-        let unit_id = slab.append(&renderlet);
+        let unit = slab.new_value(renderlet);
 
         // Create a bindgroup for the slab so our shader can read out the types.
         let label = Some("slabbed renderlet");
@@ -677,8 +677,8 @@ mod test {
             }],
         });
 
-        let depth = crate::Texture::create_depth_texture(&device, 100, 100);
-        let frame = ctx.get_current_frame().unwrap();
+        let depth = Texture::create_depth_texture(&device, 100, 100);
+        let frame = ctx.get_next_frame().unwrap();
         let view = frame.view();
 
         conduct_clear_pass(
@@ -717,7 +717,7 @@ mod test {
             render_pass.set_bind_group(0, &bindgroup, &[]);
             render_pass.draw(
                 0..geometry.len() as u32,
-                unit_id.inner()..unit_id.inner() + 1,
+                unit.id().inner()..unit.id().inner() + 1,
             );
         }
         queue.submit(std::iter::once(encoder.finish()));

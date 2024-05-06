@@ -4,12 +4,15 @@ use std::sync::Arc;
 use crabslab::{CpuSlab, GrowableSlab, Slab, SlabItem, WgpuBuffer};
 use glam::{Mat4, Vec3};
 
-use crate::{atlas::AtlasImage, convolution::VertexPrefilterEnvironmentCubemapIds, Camera};
+use crate::{
+    atlas::AtlasImage, camera::Camera, convolution::VertexPrefilterEnvironmentCubemapIds,
+    texture::Texture,
+};
 
 /// Render pipeline used to draw a skybox.
 pub struct SkyboxRenderPipeline(pub wgpu::RenderPipeline);
 
-pub fn skybox_bindgroup_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+fn skybox_bindgroup_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
     device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some("skybox bindgroup"),
         entries: &[
@@ -43,10 +46,10 @@ pub fn skybox_bindgroup_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
     })
 }
 
-pub fn create_skybox_bindgroup(
+pub(crate) fn create_skybox_bindgroup(
     device: &wgpu::Device,
     slab_buffer: &wgpu::Buffer,
-    texture: &crate::Texture,
+    texture: &Texture,
 ) -> wgpu::BindGroup {
     device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("skybox"),
@@ -69,7 +72,7 @@ pub fn create_skybox_bindgroup(
 }
 
 /// Create the skybox rendering pipeline.
-pub fn create_skybox_render_pipeline(
+pub(crate) fn create_skybox_render_pipeline(
     device: &wgpu::Device,
     format: wgpu::TextureFormat,
 ) -> SkyboxRenderPipeline {
@@ -134,14 +137,14 @@ pub fn create_skybox_render_pipeline(
 #[derive(Debug, Clone)]
 pub struct Skybox {
     // Cubemap texture of the environment cubemap
-    pub environment_cubemap: crate::Texture,
+    pub environment_cubemap: Texture,
     // Cubemap texture of the pre-computed irradiance cubemap
-    pub irradiance_cubemap: crate::Texture,
+    pub irradiance_cubemap: Texture,
     // Cubemap texture and mip maps of the specular highlights,
     // where each mip level is a different roughness.
-    pub prefiltered_environment_cubemap: crate::Texture,
+    pub prefiltered_environment_cubemap: Texture,
     // Texture of the pre-computed brdf integration
-    pub brdf_lut: crate::Texture,
+    pub brdf_lut: Texture,
     // `Id` of the camera to use for rendering the skybox.
     //
     // The camera is used to determine the orientation of the skybox.
@@ -167,7 +170,7 @@ impl Skybox {
         device: impl Into<Arc<wgpu::Device>>,
         queue: impl Into<Arc<wgpu::Queue>>,
         hdr_img: AtlasImage,
-        camera: crabslab::Id<Camera>,
+        camera_id: crate::slab::Id<Camera>,
     ) -> Self {
         log::trace!("creating skybox");
         let device = device.into();
@@ -242,7 +245,7 @@ impl Skybox {
             irradiance_cubemap,
             prefiltered_environment_cubemap,
             brdf_lut,
-            camera,
+            camera: camera_id,
         }
     }
 
@@ -251,8 +254,8 @@ impl Skybox {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         img: AtlasImage,
-    ) -> crate::Texture {
-        crate::Texture::new_with(
+    ) -> Texture {
+        Texture::new_with(
             device,
             queue,
             Some("create hdr texture"),
@@ -278,7 +281,7 @@ impl Skybox {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         hdr_data: &[u8],
-    ) -> crate::Texture {
+    ) -> Texture {
         let img = AtlasImage::from_hdr_bytes(hdr_data).unwrap();
         Self::hdr_texture_from_atlas_image(device, queue, img)
     }
@@ -286,10 +289,10 @@ impl Skybox {
     fn create_environment_map_from_hdr(
         device: impl Into<Arc<wgpu::Device>>,
         queue: impl Into<Arc<wgpu::Queue>>,
-        hdr_texture: &crate::Texture,
+        hdr_texture: &Texture,
         proj: Mat4,
         views: [Mat4; 6],
-    ) -> crate::Texture {
+    ) -> Texture {
         // Create the cubemap-making pipeline.
         let device = device.into();
         let queue = queue.into();
@@ -342,7 +345,7 @@ impl Skybox {
         views: [Mat4; 6],
         texture_size: u32,
         mip_levels: Option<u32>,
-    ) -> crate::Texture {
+    ) -> Texture {
         let mut cubemap_faces = Vec::new();
         let mip_levels = mip_levels.unwrap_or(1);
 
@@ -352,7 +355,7 @@ impl Skybox {
                 label: Some(&format!("create cubemap {label_prefix}")),
             });
 
-            let mut cubemap_face = crate::Texture::new_with(
+            let mut cubemap_face = Texture::new_with(
                 device,
                 queue,
                 Some(&format!("cubemap{i}{label_prefix}")),
@@ -406,7 +409,7 @@ impl Skybox {
             cubemap_faces.extend(mips);
         }
 
-        crate::Texture::new_cubemap_texture(
+        Texture::new_cubemap_texture(
             device,
             queue,
             Some(&format!("{label_prefix} cubemap")),
@@ -420,10 +423,10 @@ impl Skybox {
     fn create_irradiance_map(
         device: impl Into<Arc<wgpu::Device>>,
         queue: impl Into<Arc<wgpu::Queue>>,
-        environment_texture: &crate::Texture,
+        environment_texture: &Texture,
         proj: Mat4,
         views: [Mat4; 6],
-    ) -> crate::Texture {
+    ) -> Texture {
         let device = device.into();
         let queue = queue.into();
         let pipeline =
@@ -464,10 +467,10 @@ impl Skybox {
     fn create_prefiltered_environment_map(
         device: impl Into<Arc<wgpu::Device>>,
         queue: impl Into<Arc<wgpu::Queue>>,
-        environment_texture: &crate::Texture,
+        environment_texture: &Texture,
         proj: Mat4,
         views: [Mat4; 6],
-    ) -> crate::Texture {
+    ) -> Texture {
         let device = device.into();
         let queue = queue.into();
         let buffer = WgpuBuffer::new_usage(
@@ -502,7 +505,7 @@ impl Skybox {
                     label: Some("specular convolution"),
                 });
 
-                let cubemap_face = crate::Texture::new_with(
+                let cubemap_face = Texture::new_with(
                     &device,
                     &queue,
                     Some(&format!("cubemap{i}{mip_level}prefiltered_environment")),
@@ -545,7 +548,7 @@ impl Skybox {
             }
         }
 
-        crate::Texture::new_cubemap_texture(
+        Texture::new_cubemap_texture(
             &device,
             &queue,
             Some(&format!("prefiltered environment cubemap")),
@@ -556,10 +559,7 @@ impl Skybox {
         )
     }
 
-    fn create_precomputed_brdf_texture(
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-    ) -> crate::Texture {
+    fn create_precomputed_brdf_texture(device: &wgpu::Device, queue: &wgpu::Queue) -> Texture {
         let vertex_linkage = crate::linkage::brdf_lut_convolution_vertex::linkage(device);
         let fragment_linkage = crate::linkage::brdf_lut_convolution_fragment::linkage(device);
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -600,7 +600,7 @@ impl Skybox {
             multiview: None,
         });
 
-        let framebuffer = crate::Texture::new_with(
+        let framebuffer = Texture::new_with(
             device,
             queue,
             Some("brdf_lut"),
@@ -645,7 +645,6 @@ impl Skybox {
 
 #[cfg(test)]
 mod test {
-    use crabslab::GrowableSlab;
     use glam::Vec3;
 
     use super::*;
@@ -660,9 +659,9 @@ mod test {
 
         let mut stage = ctx.new_stage();
 
-        let camera = stage.append(&Camera::new(proj, view));
+        let camera = stage.new_value(Camera::new(proj, view));
         let skybox = stage
-            .new_skybox_from_path("../../img/hdr/resting_place.hdr", camera)
+            .new_skybox_from_path("../../img/hdr/resting_place.hdr", camera.id())
             .unwrap();
 
         assert_eq!(
@@ -676,7 +675,7 @@ mod test {
 
         for i in 0..6 {
             // save out the irradiance face
-            let copied_buffer = crate::Texture::read_from(
+            let copied_buffer = Texture::read_from(
                 &skybox.irradiance_cubemap.texture,
                 ctx.get_device(),
                 ctx.get_queue(),
@@ -700,7 +699,7 @@ mod test {
             for mip_level in 0..5 {
                 let mip_size = 128u32 >> mip_level;
                 // save out the prefiltered environment faces' mips
-                let copied_buffer = crate::Texture::read_from(
+                let copied_buffer = Texture::read_from(
                     &skybox.prefiltered_environment_cubemap.texture,
                     ctx.get_device(),
                     ctx.get_queue(),
@@ -730,7 +729,7 @@ mod test {
 
         stage.set_skybox(skybox);
 
-        let frame = ctx.get_current_frame().unwrap();
+        let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
         let img = frame.read_linear_image().unwrap();
         img_diff::assert_img_eq("skybox/hdr.png", img);
@@ -743,8 +742,7 @@ mod test {
         let (device, queue) = r.get_device_and_queue_owned();
         let brdf_lut = Skybox::create_precomputed_brdf_texture(&device, &queue);
         assert_eq!(wgpu::TextureFormat::Rg16Float, brdf_lut.texture.format());
-        let copied_buffer =
-            crate::Texture::read(&brdf_lut.texture, &device, &queue, 512, 512, 2, 2);
+        let copied_buffer = Texture::read(&brdf_lut.texture, &device, &queue, 512, 512, 2, 2);
         let pixels = copied_buffer.pixels(&device);
         let pixels: Vec<f32> = bytemuck::cast_slice::<u8, u16>(pixels.as_slice())
             .iter()

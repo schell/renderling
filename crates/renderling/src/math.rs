@@ -1,8 +1,159 @@
 //! Mathematical helper types and functions.
+//!
+//! Primarily this module re-exports types from `glam`. It also adds
+//! some traits to help using `glam` types on the GPU without panicking,
+//! as well as a few traits to aid in writing generic shader code that can be
+//! run on the CPU.
+//!
+//! Lastly, it provides some constant geometry used in many shaders.
 use core::ops::Mul;
+use spirv_std::{
+    image::{Cubemap, Image2d},
+    Sampler,
+};
 
 pub use glam::*;
 pub use spirv_std::num_traits::{clamp, Float, Zero};
+pub trait IsSampler: Copy + Clone {}
+
+impl IsSampler for Sampler {}
+
+pub trait Sample2d {
+    type Sampler: IsSampler;
+
+    fn sample_by_lod(&self, sampler: Self::Sampler, uv: glam::Vec2, lod: f32) -> glam::Vec4;
+}
+
+impl Sample2d for Image2d {
+    type Sampler = Sampler;
+
+    fn sample_by_lod(&self, sampler: Self::Sampler, uv: glam::Vec2, lod: f32) -> glam::Vec4 {
+        self.sample_by_lod(sampler, uv, lod)
+    }
+}
+
+pub trait SampleCube {
+    type Sampler: IsSampler;
+
+    fn sample_by_lod(&self, sampler: Self::Sampler, uv: Vec3, lod: f32) -> glam::Vec4;
+}
+
+impl SampleCube for Cubemap {
+    type Sampler = Sampler;
+
+    fn sample_by_lod(&self, sampler: Self::Sampler, uv: Vec3, lod: f32) -> glam::Vec4 {
+        self.sample_by_lod(sampler, uv, lod)
+    }
+}
+
+#[cfg(not(target_arch = "spirv"))]
+mod cpu {
+    use image::GenericImageView;
+
+    use super::*;
+
+    /// A CPU-side texture sampler.
+    ///
+    /// Provided primarily for testing purposes.
+    #[derive(Debug, Clone, Copy, Default)]
+    pub struct CpuSampler;
+
+    impl IsSampler for CpuSampler {}
+
+    #[derive(Debug, Default)]
+    pub struct CpuTexture2d {
+        pub image: image::DynamicImage,
+    }
+
+    impl Sample2d for CpuTexture2d {
+        type Sampler = CpuSampler;
+
+        fn sample_by_lod(&self, _sampler: Self::Sampler, uv: glam::Vec2, _lod: f32) -> glam::Vec4 {
+            // TODO: lerp the CPU texture sampling
+            let x = uv.x as u32;
+            if x >= self.image.width() {
+                return glam::Vec4::ZERO;
+            }
+
+            let y = uv.y as u32;
+            if y >= self.image.height() {
+                return glam::Vec4::ZERO;
+            }
+
+            let image::Rgba([r, g, b, a]) = self.image.get_pixel(uv.x as u32, uv.y as u32);
+            glam::Vec4::new(
+                r as f32 / 255.0,
+                g as f32 / 255.0,
+                b as f32 / 255.0,
+                a as f32 / 255.0,
+            )
+        }
+    }
+
+    /// A CPU-side cubemap texture.
+    ///
+    /// Provided primarily for testing purposes.
+    #[derive(Default)]
+    pub struct CpuCubemap {
+        pub images: [image::DynamicImage; 6],
+    }
+
+    impl SampleCube for CpuCubemap {
+        type Sampler = CpuSampler;
+
+        fn sample_by_lod(
+            &self,
+            _sampler: Self::Sampler,
+            direction: glam::Vec3,
+            _lod: f32,
+        ) -> glam::Vec4 {
+            // Take the absolute value of the direction vector components
+            let abs_direction = direction.abs();
+            let (max_dim, u, v): (usize, f32, f32);
+
+            // Determine which face of the cubemap the direction vector is pointing towards
+            // by finding the largest component of the vector.
+            // The u and v texture coordinates within that face are calculated by dividing
+            // the other two components of the direction vector by the largest component.
+            if abs_direction.x >= abs_direction.y && abs_direction.x >= abs_direction.z {
+                max_dim = if direction.x >= 0.0 { 0 } else { 1 };
+                u = -direction.z / abs_direction.x;
+                v = -direction.y / abs_direction.x;
+            } else if abs_direction.y >= abs_direction.x && abs_direction.y >= abs_direction.z {
+                max_dim = if direction.y >= 0.0 { 2 } else { 3 };
+                u = direction.x / abs_direction.y;
+                v = -direction.z / abs_direction.y;
+            } else {
+                max_dim = if direction.z >= 0.0 { 4 } else { 5 };
+                u = direction.x / abs_direction.z;
+                v = direction.y / abs_direction.z;
+            }
+
+            // Get the dimensions of the cubemap image
+            let (width, height) = self.images[max_dim].dimensions();
+            // Convert the u and v coordinates from [-1, 1] to [0, width/height]
+            let tex_u = ((u + 1.0) * 0.5 * (width as f32 - 1.0)).round() as u32;
+            if tex_u >= self.images[max_dim].width() {
+                return glam::Vec4::ZERO;
+            }
+            let tex_v = ((1.0 - v) * 0.5 * (height as f32 - 1.0)).round() as u32;
+            if tex_v >= self.images[max_dim].height() {
+                return glam::Vec4::ZERO;
+            }
+
+            // Sample and return the color from the appropriate image in the cubemap
+            let pixel = self.images[max_dim].get_pixel(tex_u, tex_v);
+            glam::Vec4::new(
+                pixel[0] as f32 / 255.0,
+                pixel[1] as f32 / 255.0,
+                pixel[2] as f32 / 255.0,
+                pixel[3] as f32 / 255.0,
+            )
+        }
+    }
+}
+#[cfg(not(target_arch = "spirv"))]
+pub use cpu::*;
 
 /// Additional/replacement methods for glam vector types.
 ///

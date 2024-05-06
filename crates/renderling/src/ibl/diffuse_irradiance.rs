@@ -41,7 +41,7 @@ pub fn diffuse_irradiance_convolution_bindgroup(
     label: Option<&str>,
     buffer: &wgpu::Buffer,
     // The texture to sample the environment from
-    texture: &crate::Texture,
+    texture: &crate::texture::Texture,
 ) -> wgpu::BindGroup {
     device.create_bind_group(&wgpu::BindGroupDescriptor {
         label,

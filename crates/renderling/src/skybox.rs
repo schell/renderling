@@ -10,8 +10,8 @@ use spirv_std::{
 use spirv_std::num_traits::Float;
 
 use crate::{
+    camera::Camera,
     math::{self, IsVector},
-    Camera,
 };
 
 #[cfg(not(target_arch = "spirv"))]
@@ -64,7 +64,7 @@ pub fn skybox_cubemap_fragment(
 }
 
 #[cfg(feature = "skybox_cubemap_vertex")]
-/// Draws a cubemap.
+/// Vertex shader that draws a cubemap.
 ///
 /// Uses the `instance_index` as the [`Id`] for a [`Camera`].
 ///
@@ -85,7 +85,7 @@ pub fn skybox_cubemap_vertex(
 }
 
 #[cfg(feature = "skybox_equirectangular_fragment")]
-/// Colors a skybox using an equirectangular texture.
+/// Fragment shader that colors a skybox using an equirectangular texture.
 #[spirv(fragment)]
 pub fn skybox_equirectangular_fragment(
     #[spirv(descriptor_set = 0, binding = 1)] texture: &Image2d,

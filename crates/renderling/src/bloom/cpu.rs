@@ -1,10 +1,12 @@
 //! Bloom.
 use std::sync::{Arc, RwLock};
 
-use super::*;
+use crabslab::Id;
+use glam::{UVec2, Vec2};
+
 use crate::{
-    slab::{Hybrid, HybridArray, SlabManager},
-    texture,
+    slab::{Hybrid, HybridArray, SlabAllocator},
+    texture::{self, Texture},
 };
 
 fn create_bindgroup_layout(device: &wgpu::Device, label: Option<&str>) -> wgpu::BindGroupLayout {
@@ -148,7 +150,7 @@ fn create_texture(
         mipmap_filter: wgpu::FilterMode::Linear,
         ..Default::default()
     });
-    crate::Texture::new_with(
+    Texture::new_with(
         &device,
         &queue,
         label,
@@ -207,7 +209,7 @@ fn create_bindgroup(
     device: &wgpu::Device,
     layout: &wgpu::BindGroupLayout,
     buffer: &wgpu::Buffer,
-    tex: &crate::Texture,
+    tex: &Texture,
 ) -> wgpu::BindGroup {
     let label = Some("bloom");
     device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -234,7 +236,7 @@ fn create_bindgroups(
     device: &wgpu::Device,
     pipeline: &wgpu::RenderPipeline,
     buffer: &wgpu::Buffer,
-    textures: &[crate::Texture],
+    textures: &[Texture],
 ) -> Vec<wgpu::BindGroup> {
     let layout = pipeline.get_bind_group_layout(0);
     textures
@@ -335,8 +337,8 @@ fn create_mix_bindgroup(
     device: &wgpu::Device,
     pipeline: &wgpu::RenderPipeline,
     slab_buffer: &wgpu::Buffer,
-    hdr_texture: &crate::Texture,
-    bloom_texture: &crate::Texture,
+    hdr_texture: &Texture,
+    bloom_texture: &Texture,
 ) -> wgpu::BindGroup {
     device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("bloom mix"),
@@ -366,7 +368,7 @@ fn create_mix_bindgroup(
     })
 }
 
-/// Performs a "physically based" bloom effect on a texture.
+/// Performs a "physically based" bloom effect on a texture. CPU only.
 ///
 /// Contains pipelines, down/upsampling textures, a buffer
 /// to communicate configuration to the shaders, and bindgroups.
@@ -374,7 +376,7 @@ fn create_mix_bindgroup(
 /// Clones of [`Bloom`] all point to the same resources.
 #[derive(Clone)]
 pub struct Bloom {
-    slab: SlabManager,
+    slab: SlabAllocator,
 
     downsample_pixel_sizes: HybridArray<Vec2>,
     downsample_pipeline: Arc<wgpu::RenderPipeline>,
@@ -388,7 +390,7 @@ pub struct Bloom {
 
     mix_pipeline: Arc<wgpu::RenderPipeline>,
     mix_bindgroup: Arc<RwLock<wgpu::BindGroup>>,
-    mix_texture: Arc<RwLock<crate::Texture>>,
+    mix_texture: Arc<RwLock<Texture>>,
     mix_strength: Hybrid<f32>,
 }
 
@@ -397,18 +399,18 @@ impl Bloom {
         device: impl Into<Arc<wgpu::Device>>,
         queue: impl Into<Arc<wgpu::Queue>>,
         resolution: UVec2,
-        hdr_texture: &crate::Texture,
+        hdr_texture: &Texture,
     ) -> Self {
         let device = device.into();
         let queue = queue.into();
-        let mut slab = SlabManager::default();
+        let mut slab = SlabAllocator::default();
 
-        let downsample_pixel_sizes = slab.new_hybrid_array(
+        let downsample_pixel_sizes = slab.new_array(
             config_resolutions(resolution).map(|r| 1.0 / Vec2::new(r.x as f32, r.y as f32)),
         );
         let upsample_filter_radius =
-            slab.new_hybrid(1.0 / Vec2::new(resolution.x as f32, resolution.y as f32));
-        let mix_strength = slab.new_hybrid(0.04f32);
+            slab.new_value(1.0 / Vec2::new(resolution.x as f32, resolution.y as f32));
+        let mix_strength = slab.new_value(0.04f32);
         let slab_buffer = slab.get_updated_buffer(
             &device,
             &queue,
@@ -490,7 +492,7 @@ impl Bloom {
     /// Returns a clone of the current mix texture.
     ///
     /// The mix texture is the result of mixing the bloom by the hdr using the mix strength.
-    pub fn get_mix_texture(&self) -> crate::Texture {
+    pub fn get_mix_texture(&self) -> Texture {
         // UNWRAP: not safe but we want to panic
         self.mix_texture.read().unwrap().clone()
     }
@@ -661,7 +663,7 @@ impl Bloom {
 mod test {
     use glam::Vec3;
 
-    use crate::{Camera, Context};
+    use crate::{camera::Camera, Context};
 
     use super::*;
 
@@ -714,7 +716,7 @@ mod test {
             .unwrap();
         let projection = crate::camera::perspective(width as f32, height as f32);
         let view = crate::camera::look_at(Vec3::new(0.0, 2.0, 18.0), Vec3::ZERO, Vec3::Y);
-        let camera = stage.new_hybrid(Camera::new(projection, view));
+        let camera = stage.new_value(Camera::new(projection, view));
         let skybox = stage
             .new_skybox_from_path("../../img/hdr/night.hdr", camera.id())
             .unwrap();
@@ -724,7 +726,7 @@ mod test {
         let _scene = stage
             .draw_gltf_scene(&doc, nodes.into_iter().copied(), camera.id())
             .unwrap();
-        let frame = ctx.get_current_frame().unwrap();
+        let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
         let img = frame.read_image().unwrap();
         img_diff::assert_img_eq("bloom/without.png", img);
@@ -734,7 +736,7 @@ mod test {
         stage.set_has_bloom(true);
         stage.set_bloom_mix_strength(0.1);
         stage.set_bloom_filter_radius(2.0);
-        let frame = ctx.get_current_frame().unwrap();
+        let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
         let img = frame.read_image().unwrap();
         img_diff::assert_img_eq("bloom/with.png", img);

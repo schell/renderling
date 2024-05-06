@@ -1,8 +1,8 @@
 //! Physically based bloom.
 //!
 //! As described in [learnopengl.com's Physically Based Bloom article](https://learnopengl.com/Guest-Articles/2022/Phys.-Based-Bloom).
-use crabslab::{Id, Slab, SlabItem};
-use glam::{UVec2, Vec2, Vec4, Vec4Swizzles};
+use crabslab::{Id, Slab};
+use glam::{Vec2, Vec4, Vec4Swizzles};
 use spirv_std::{image::Image2d, spirv, Sampler};
 
 #[cfg(not(target_arch = "spirv"))]
@@ -10,23 +10,10 @@ mod cpu;
 #[cfg(not(target_arch = "spirv"))]
 pub use cpu::*;
 
-#[derive(Clone, Copy, SlabItem)]
-pub struct BloomConfig {
-    pub resolution: UVec2,
-    pub upsample_filter_radius: Vec2,
-}
-
-impl Default for BloomConfig {
-    fn default() -> Self {
-        Self {
-            resolution: UVec2::ONE,
-            upsample_filter_radius: Vec2::ONE,
-        }
-    }
-}
-
 #[cfg(feature = "bloom_vertex")]
-/// A passthru vertex shader to facilitate a bloom effect.
+/// Bloom vertex shader.
+///
+/// This is a pass-through vertex shader to facilitate a bloom effect.
 #[spirv(vertex)]
 pub fn bloom_vertex(
     #[spirv(vertex_index)] vertex_index: u32,
@@ -42,7 +29,9 @@ pub fn bloom_vertex(
 }
 
 #[cfg(feature = "bloom_downsample_fragment")]
-/// Performs downsampling on a texture.
+/// Bloom downsampling shader.
+///
+/// Performs successive downsampling from a source texture.
 ///
 /// As taken from Call Of Duty method - presented at ACM Siggraph 2014.
 ///
@@ -114,7 +103,10 @@ pub fn bloom_downsample_fragment(
 }
 
 #[cfg(feature = "bloom_upsample_fragment")]
-/// This shader performs upsampling on a texture.
+/// Bloom upsampling shader.
+///
+/// This shader performs successive upsampling on a source texture.
+///
 /// Taken from Call Of Duty method, presented at ACM Siggraph 2014.
 #[spirv(fragment)]
 pub fn bloom_upsample_fragment(
@@ -179,6 +171,10 @@ pub fn bloom_upsample_fragment(
 
 #[cfg(feature = "bloom_mix_fragment")]
 #[spirv(fragment)]
+/// Bloom "mix" shader.
+///
+/// This is the final step in applying bloom in which the computed bloom is
+/// mixed with the source texture according to a strength factor.
 pub fn bloom_mix_fragment(
     #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] slab: &[u32],
     #[spirv(descriptor_set = 0, binding = 1)] hdr_texture: &Image2d,

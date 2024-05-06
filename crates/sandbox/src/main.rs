@@ -1,5 +1,8 @@
-use crabslab::GrowableSlab;
-use renderling::{math::UVec2, Camera, Context, Renderlet, Stage, Vertex};
+//! This is a sandbox.
+//!
+//! This program will change on a whim and does not contain anything all that
+//! useful.
+use renderling::{math::UVec2, Context};
 use std::sync::Arc;
 
 fn main() {
@@ -12,8 +15,12 @@ fn main() {
         .with_inner_size::<winit::dpi::LogicalSize<u32>>(window_size)
         .with_title("renderling gltf viewer");
     let window = Arc::new(window_builder.build(&event_loop).unwrap());
-
-    let (mut ctx, mut stage) = can_read_shader_debug_logs(window.clone());
+    let mut ctx = Context::from_window(window);
+    {
+        let _frame = ctx.get_next_frame().unwrap();
+        let _frame2 = ctx.get_next_frame().unwrap();
+    }
+    let mut stage = ctx.new_stage();
     event_loop
         .run(move |event, target| {
             target.set_control_flow(winit::event_loop::ControlFlow::Poll);
@@ -43,7 +50,7 @@ fn main() {
                     _ => {}
                 },
                 winit::event::Event::AboutToWait => {
-                    let frame = ctx.get_current_frame().unwrap();
+                    let frame = ctx.get_next_frame().unwrap();
                     stage.render(&frame.view());
                     frame.present();
                 }
@@ -51,28 +58,4 @@ fn main() {
             }
         })
         .unwrap()
-}
-
-fn can_read_shader_debug_logs(window: Arc<winit::window::Window>) -> (Context, Stage) {
-    let ctx = Context::try_from_window(window).unwrap();
-    let mut stage = ctx.new_stage();
-    let (projection, view) = renderling::default_ortho2d(100.0, 100.0);
-    let camera = stage.append(&Camera::new(projection, view));
-    let geometry = stage.append_array(&[
-        Vertex::default()
-            .with_position([0.0, 0.0, 0.0])
-            .with_color([0.0, 1.0, 1.0, 1.0]),
-        Vertex::default()
-            .with_position([0.0, 100.0, 0.0])
-            .with_color([1.0, 1.0, 0.0, 1.0]),
-        Vertex::default()
-            .with_position([100.0, 0.0, 0.0])
-            .with_color([1.0, 0.0, 1.0, 1.0]),
-    ]);
-    let _tri_id = stage.draw(Renderlet {
-        camera,
-        vertices: geometry,
-        ..Default::default()
-    });
-    (ctx, stage)
 }

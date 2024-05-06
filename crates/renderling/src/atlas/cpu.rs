@@ -4,6 +4,8 @@ use image::{EncodableLayout, RgbaImage};
 use snafu::prelude::*;
 use std::sync::{Arc, RwLock};
 
+use crate::texture::Texture;
+
 use super::atlas_image::{convert_to_rgba8_bytes, AtlasImage};
 
 #[derive(Debug, Snafu)]
@@ -110,7 +112,7 @@ impl RepackPreview {
 }
 
 pub struct AtlasPacking {
-    texture: crate::Texture,
+    texture: Texture,
     rects: Vec<crunch::Rect>,
     size: UVec2,
 }
@@ -120,13 +122,13 @@ pub struct AtlasPacking {
 /// Clones of `Atlas` all point to the same internal data.
 #[derive(Clone)]
 pub struct Atlas {
-    texture: Arc<RwLock<crate::Texture>>,
+    texture: Arc<RwLock<Texture>>,
     rects: Arc<RwLock<Vec<crunch::Rect>>>,
     size: Arc<RwLock<UVec2>>,
 }
 
 impl Atlas {
-    pub fn new_with_texture(texture: crate::Texture, size: UVec2) -> Self {
+    pub fn new_with_texture(texture: Texture, size: UVec2) -> Self {
         Atlas {
             texture: Arc::new(RwLock::new(texture)),
             rects: Default::default(),
@@ -134,7 +136,7 @@ impl Atlas {
         }
     }
 
-    fn create_texture(device: &wgpu::Device, queue: &wgpu::Queue, size: UVec2) -> crate::Texture {
+    fn create_texture(device: &wgpu::Device, queue: &wgpu::Queue, size: UVec2) -> Texture {
         let extent = wgpu::Extent3d {
             width: size.x,
             height: size.y,
@@ -178,7 +180,7 @@ impl Atlas {
             mipmap_filter: wgpu::FilterMode::Nearest,
             ..Default::default()
         };
-        let gpu_texture = crate::Texture::from_wgpu_tex(device, texture, Some(sampler_desc), None);
+        let gpu_texture = Texture::from_wgpu_tex(device, texture, Some(sampler_desc), None);
         gpu_texture
     }
 
@@ -201,7 +203,7 @@ impl Atlas {
     }
 
     /// Returns a clone of the current atlas texture.
-    pub fn get_texture(&self) -> crate::Texture {
+    pub fn get_texture(&self) -> Texture {
         // UNWRAP: panic on purpose
         self.texture.read().unwrap().clone()
     }
@@ -512,7 +514,7 @@ impl Atlas {
     /// `RgbaImage`.
     pub fn atlas_img(&self, device: &wgpu::Device, queue: &wgpu::Queue) -> RgbaImage {
         let size = self.get_size();
-        let buffer = crate::Texture::read(
+        let buffer = Texture::read(
             &self.get_texture().texture,
             device,
             queue,
@@ -529,11 +531,12 @@ impl Atlas {
 mod test {
     use crate::{
         atlas::{AtlasTexture, TextureAddressMode, TextureModes},
+        camera::Camera,
         pbr::Material,
         stage::{Renderlet, Vertex},
-        Camera, Context, Transform,
+        transform::Transform,
+        Context,
     };
-    use crabslab::GrowableSlab;
     use glam::{Vec2, Vec3, Vec4};
 
     use super::*;
@@ -546,7 +549,7 @@ mod test {
             .new_stage()
             .with_background_color(Vec3::splat(0.0).extend(1.0));
         let (projection, view) = crate::camera::default_ortho2d(32.0, 32.0);
-        let camera = stage.append(&Camera::new(projection, view));
+        let camera = stage.new_value(Camera::new(projection, view));
         let dirt = AtlasImage::from_path("../../img/dirt.jpg").unwrap();
         let sandstone = AtlasImage::from_path("../../img/sandstone.png").unwrap();
         let texels = AtlasImage::from_path("../../test_img/atlas/uv_mapping.png").unwrap();
@@ -554,13 +557,13 @@ mod test {
         let mut texels_tex = textures[2];
         texels_tex.modes.s = TextureAddressMode::ClampToEdge;
         texels_tex.modes.t = TextureAddressMode::ClampToEdge;
-        let texels_tex_id = stage.append(&texels_tex);
-        let material = stage.append(&Material {
-            albedo_texture: texels_tex_id,
+        let texels_tex = stage.new_value(texels_tex);
+        let material = stage.new_value(Material {
+            albedo_texture_id: texels_tex.id(),
             has_lighting: false,
             ..Default::default()
         });
-        let geometry = stage.append_array(&{
+        let geometry = stage.new_array({
             let tl = Vertex::default()
                 .with_position(Vec3::ZERO)
                 .with_uv0(Vec2::ZERO);
@@ -575,19 +578,20 @@ mod test {
                 .with_uv0(Vec2::splat(1.0));
             [tl, bl, br, tl, br, tr]
         });
-        let transform = stage.append(&Transform {
+        let transform = stage.new_value(Transform {
             scale: Vec3::new(32.0, 32.0, 1.0),
             ..Default::default()
         });
-        let _renderlet = stage.draw(Renderlet {
-            camera,
-            vertices: geometry,
-            transform,
-            material,
+        let renderlet = stage.new_value(Renderlet {
+            camera_id: camera.id(),
+            vertices_array: geometry.array(),
+            transform_id: transform.id(),
+            material_id: material.id(),
             ..Default::default()
         });
+        stage.add_renderlet(&renderlet);
 
-        let frame = ctx.get_current_frame().unwrap();
+        let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
         let img = frame.read_image().unwrap();
         img_diff::assert_img_eq("atlas/uv_mapping.png", img);
@@ -607,7 +611,7 @@ mod test {
             .new_stage()
             .with_background_color(Vec4::new(1.0, 1.0, 0.0, 1.0));
         let (projection, view) = crate::camera::default_ortho2d(w as f32, h as f32);
-        let camera = stage.append(&Camera::new(projection, view));
+        let camera = stage.new_value(Camera::new(projection, view));
         let dirt = AtlasImage::from_path("../../img/dirt.jpg").unwrap();
         let sandstone = AtlasImage::from_path("../../img/sandstone.png").unwrap();
         let texels = AtlasImage::from_path("../../img/happy_mac.png").unwrap();
@@ -623,28 +627,28 @@ mod test {
         mirror_tex.modes.s = TextureAddressMode::MirroredRepeat;
         mirror_tex.modes.t = TextureAddressMode::MirroredRepeat;
 
-        let albedo_texture = stage.append(&clamp_tex);
-        let clamp_material_id = stage.append(&Material {
-            albedo_texture,
+        let albedo_texture = stage.new_value(clamp_tex);
+        let clamp_material = stage.new_value(Material {
+            albedo_texture_id: albedo_texture.id(),
             has_lighting: false,
             ..Default::default()
         });
-        let albedo_texture = stage.append(&repeat_tex);
-        let repeat_material_id = stage.append(&Material {
-            albedo_texture,
+        let albedo_texture = stage.new_value(repeat_tex);
+        let repeat_material = stage.new_value(Material {
+            albedo_texture_id: albedo_texture.id(),
             has_lighting: false,
             ..Default::default()
         });
-        let albedo_texture = stage.append(&mirror_tex);
-        let mirror_material_id = stage.append(&Material {
-            albedo_texture,
+        let albedo_texture = stage.new_value(mirror_tex);
+        let mirror_material = stage.new_value(Material {
+            albedo_texture_id: albedo_texture.id(),
             has_lighting: false,
             ..Default::default()
         });
 
         let sheet_w = sheet_w as f32;
         let sheet_h = sheet_h as f32;
-        let geometry = stage.append_array(&{
+        let geometry = stage.new_array({
             let tl = Vertex::default()
                 .with_position(Vec3::ZERO)
                 .with_uv0(Vec2::ZERO);
@@ -659,40 +663,41 @@ mod test {
                 .with_uv0(Vec2::splat(3.0));
             [tl, bl, br, tl, br, tr]
         });
-        let _clamp_prim = stage.draw(Renderlet {
-            camera,
-            vertices: geometry,
-            material: clamp_material_id,
+        let clamp_prim = stage.new_value(Renderlet {
+            camera_id: camera.id(),
+            vertices_array: geometry.array(),
+            material_id: clamp_material.id(),
             ..Default::default()
         });
-        let _repeat_prim = {
-            let transform = stage.append(&Transform {
-                translation: Vec3::new(sheet_w + 1.0, 0.0, 0.0),
-                ..Default::default()
-            });
-            stage.draw(Renderlet {
-                camera,
-                vertices: geometry,
-                material: repeat_material_id,
-                transform,
-                ..Default::default()
-            })
-        };
-        let _mirror_prim = {
-            let transform = stage.append(&Transform {
-                translation: Vec3::new(sheet_w as f32 * 2.0 + 2.0, 0.0, 0.0),
-                ..Default::default()
-            });
-            stage.draw(Renderlet {
-                camera,
-                vertices: geometry,
-                material: mirror_material_id,
-                transform,
-                ..Default::default()
-            })
-        };
+        stage.add_renderlet(&clamp_prim);
 
-        let frame = ctx.get_current_frame().unwrap();
+        let repeat_transform = stage.new_value(Transform {
+            translation: Vec3::new(sheet_w + 1.0, 0.0, 0.0),
+            ..Default::default()
+        });
+        let repeat_prim = stage.new_value(Renderlet {
+            camera_id: camera.id(),
+            vertices_array: geometry.array(),
+            material_id: repeat_material.id(),
+            transform_id: repeat_transform.id(),
+            ..Default::default()
+        });
+        stage.add_renderlet(&repeat_prim);
+
+        let mirror_transform = stage.new_value(Transform {
+            translation: Vec3::new(sheet_w as f32 * 2.0 + 2.0, 0.0, 0.0),
+            ..Default::default()
+        });
+        let mirror_prim = stage.new_value(Renderlet {
+            camera_id: camera.id(),
+            vertices_array: geometry.array(),
+            material_id: mirror_material.id(),
+            transform_id: mirror_transform.id(),
+            ..Default::default()
+        });
+        stage.add_renderlet(&mirror_prim);
+
+        let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
         let img = frame.read_image().unwrap();
         img_diff::assert_img_eq("atlas/uv_wrapping.png", img);
@@ -713,7 +718,7 @@ mod test {
             .with_background_color(Vec4::new(1.0, 1.0, 0.0, 1.0));
 
         let (projection, view) = crate::camera::default_ortho2d(w as f32, h as f32);
-        let camera = stage.append(&Camera {
+        let camera = stage.new_value(Camera {
             projection,
             view,
             ..Default::default()
@@ -735,23 +740,23 @@ mod test {
         mirror_tex.modes.s = TextureAddressMode::MirroredRepeat;
         mirror_tex.modes.t = TextureAddressMode::MirroredRepeat;
 
-        let albedo_texture = stage.append(&clamp_tex);
-        let clamp_material_id = stage.append(&Material {
-            albedo_texture,
+        let clamp_albedo_texture = stage.new_value(clamp_tex);
+        let clamp_material = stage.new_value(Material {
+            albedo_texture_id: clamp_albedo_texture.id(),
             has_lighting: false,
             ..Default::default()
         });
 
-        let albedo_texture = stage.append(&repeat_tex);
-        let repeat_material_id = stage.append(&Material {
-            albedo_texture,
+        let repeat_albedo_texture = stage.new_value(repeat_tex);
+        let repeat_material = stage.new_value(Material {
+            albedo_texture_id: repeat_albedo_texture.id(),
             has_lighting: false,
             ..Default::default()
         });
 
-        let albedo_texture = stage.append(&mirror_tex);
-        let mirror_material_id = stage.append(&Material {
-            albedo_texture,
+        let mirror_albedo_texture = stage.new_value(mirror_tex);
+        let mirror_material = stage.new_value(Material {
+            albedo_texture_id: mirror_albedo_texture.id(),
             has_lighting: false,
             ..Default::default()
         });
@@ -771,45 +776,44 @@ mod test {
             let br = Vertex::default()
                 .with_position(Vec3::new(sheet_w, sheet_h, 0.0))
                 .with_uv0(Vec2::splat(-3.0));
-            stage.append_array(&[tl, bl, br, tl, br, tr])
+            stage.new_array([tl, bl, br, tl, br, tr])
         };
 
-        let _clamp_prim = stage.draw(Renderlet {
-            camera,
-            vertices: geometry,
-            material: clamp_material_id,
+        let clamp_prim = stage.new_value(Renderlet {
+            camera_id: camera.id(),
+            vertices_array: geometry.array(),
+            material_id: clamp_material.id(),
             ..Default::default()
         });
-        let _repeat_prim = {
-            let transform = stage.append(&Transform {
-                translation: Vec3::new(sheet_w + 1.0, 0.0, 0.0),
-                ..Default::default()
-            });
+        stage.add_renderlet(&clamp_prim);
 
-            stage.draw(Renderlet {
-                camera,
-                vertices: geometry,
-                material: repeat_material_id,
-                transform,
-                ..Default::default()
-            })
-        };
-        let _mirror_prim = {
-            let transform = stage.append(&Transform {
-                translation: Vec3::new(sheet_w as f32 * 2.0 + 2.0, 0.0, 0.0),
-                ..Default::default()
-            });
+        let repeat_transform = stage.new_value(Transform {
+            translation: Vec3::new(sheet_w + 1.0, 0.0, 0.0),
+            ..Default::default()
+        });
+        let repeat_prim = stage.new_value(Renderlet {
+            camera_id: camera.id(),
+            vertices_array: geometry.array(),
+            material_id: repeat_material.id(),
+            transform_id: repeat_transform.id(),
+            ..Default::default()
+        });
+        stage.add_renderlet(&repeat_prim);
 
-            stage.draw(Renderlet {
-                camera,
-                vertices: geometry,
-                material: mirror_material_id,
-                transform,
-                ..Default::default()
-            })
-        };
+        let mirror_transform = stage.new_value(Transform {
+            translation: Vec3::new(sheet_w as f32 * 2.0 + 2.0, 0.0, 0.0),
+            ..Default::default()
+        });
+        let mirror_prim = stage.new_value(Renderlet {
+            camera_id: camera.id(),
+            vertices_array: geometry.array(),
+            material_id: mirror_material.id(),
+            transform_id: mirror_transform.id(),
+            ..Default::default()
+        });
+        stage.add_renderlet(&mirror_prim);
 
-        let frame = ctx.get_current_frame().unwrap();
+        let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
         let img = frame.read_image().unwrap();
         img_diff::assert_img_eq("atlas/negative_uv_wrapping.png", img);

@@ -4,11 +4,11 @@ use core::{
     ops::Deref,
     sync::atomic::{AtomicUsize, Ordering},
 };
-use crabslab::{Array, GrowableSlab, Slab, SlabItem};
+use crabslab::{Slab, SlabItem};
 use snafu::prelude::*;
 use std::sync::{atomic::AtomicBool, Arc, Mutex, RwLock};
 
-use crabslab::Id;
+pub use crabslab::{Array, Id};
 
 #[derive(Clone, Copy)]
 struct Range {
@@ -103,9 +103,9 @@ impl RangeManager {
 }
 
 #[derive(Debug, Snafu)]
-pub enum SlabManagerError {
+pub enum SlabAllocatorError {
     #[snafu(display(
-        "Slab has no internal buffer. Please call SlabManager::recreate_buffer first."
+        "Slab has no internal buffer. Please call SlabAllocator::upkeep or SlabAllocator::get_updated_buffer first."
     ))]
     NoInternalBuffer,
 
@@ -118,68 +118,39 @@ pub enum SlabManagerError {
 
 /// Manages slab allocations and updates.
 ///
-/// Create a new instance using [`SlabManager::default`].
-/// Upon creation you will need to call [`SlabManager::recreate_buffer`] or
-/// [`SlabManager::upkeep`] at least once before any data is written to the GPU.
+/// Create a new instance using [`SlabAllocator::default`].
+/// Upon creation you will need to call [`SlabAllocator::get_updated_buffer`] or
+/// [`SlabAllocator::upkeep`] at least once before any data is written to the GPU.
 #[derive(Clone)]
-pub struct SlabManager {
-    pub(crate) len: Arc<AtomicUsize>,
-    pub(crate) capacity: Arc<AtomicUsize>,
-    pub(crate) needs_expansion: Arc<AtomicBool>,
-    pub(crate) buffer: Arc<RwLock<Option<Arc<wgpu::Buffer>>>>,
-    pub(crate) update_sources: Arc<RwLock<Vec<Box<dyn UpdatesSlab>>>>,
-    pub(crate) updates: Arc<Mutex<Vec<SlabUpdate>>>,
+pub struct SlabAllocator {
+    len: Arc<AtomicUsize>,
+    capacity: Arc<AtomicUsize>,
+    needs_expansion: Arc<AtomicBool>,
+    buffer: Arc<RwLock<Option<Arc<wgpu::Buffer>>>>,
+    update_sources: Arc<RwLock<Vec<Box<dyn UpdatesSlab>>>>,
+    updates: Arc<Mutex<Vec<SlabUpdate>>>,
     recycles: Arc<RwLock<RangeManager>>,
 }
 
-impl crabslab::Slab for SlabManager {
+impl Default for SlabAllocator {
+    fn default() -> Self {
+        Self {
+            update_sources: Default::default(),
+            recycles: Default::default(),
+            len: Default::default(),
+            capacity: Default::default(),
+            needs_expansion: Arc::new(true.into()),
+            buffer: Default::default(),
+            updates: Default::default(),
+        }
+    }
+}
+
+impl SlabAllocator {
     fn len(&self) -> usize {
         self.len.load(Ordering::Relaxed)
     }
 
-    fn read_unchecked<T: SlabItem>(&self, _: Id<T>) -> T {
-        panic!("slab is read-only")
-    }
-
-    fn write_indexed<T: SlabItem>(&mut self, t: &T, index: usize) -> usize {
-        // UNWRAP: if we can't acquire the lock we want to panic.
-        let mut guard = self.updates.lock().unwrap();
-        guard.push(SlabUpdate {
-            array: Array::<u32>::new(index as u32, T::SLAB_SIZE as u32),
-            elements: {
-                let mut e = vec![0u32; T::SLAB_SIZE];
-                e.write_indexed(t, 0);
-                e
-            },
-            #[cfg(debug_assertions)]
-            type_is: std::any::type_name::<T>(),
-        });
-        index + T::SLAB_SIZE
-    }
-
-    fn write_indexed_slice<T: SlabItem>(&mut self, ts: &[T], index: usize) -> usize {
-        // UNWRAP: if we can't acquire the lock we want to panic.
-        let size = T::SLAB_SIZE * ts.len();
-        let mut guard = self.updates.lock().unwrap();
-        guard.push(SlabUpdate {
-            array: Array::<u32>::new(index as u32, size as u32),
-            elements: {
-                let mut e = vec![0u32; size];
-                let mut i = 0;
-                for t in ts {
-                    i = e.write_indexed(t, i);
-                }
-                debug_assert_eq!(size, i);
-                e
-            },
-            #[cfg(debug_assertions)]
-            type_is: std::any::type_name::<T>(),
-        });
-        index + size
-    }
-}
-
-impl crabslab::GrowableSlab for SlabManager {
     fn allocate<T: SlabItem>(&mut self) -> Id<T> {
         // UNWRAP: we want to panic
         let may_range = self.recycles.write().unwrap().remove(T::SLAB_SIZE as u32);
@@ -240,23 +211,23 @@ impl crabslab::GrowableSlab for SlabManager {
     fn increment_len(&mut self, n: usize) -> usize {
         self.len.fetch_add(n, Ordering::Relaxed)
     }
-}
 
-impl Default for SlabManager {
-    fn default() -> Self {
-        Self {
-            update_sources: Default::default(),
-            recycles: Default::default(),
-            len: Default::default(),
-            capacity: Default::default(),
-            needs_expansion: Arc::new(true.into()),
-            buffer: Default::default(),
-            updates: Default::default(),
+    fn maybe_expand_to_fit<T: SlabItem>(&mut self, len: usize) {
+        let capacity = self.capacity();
+        // log::trace!(
+        //    "append_slice: {size} * {ts_len} + {len} ({}) >= {capacity}",
+        //    size * ts_len + len
+        //);
+        let capacity_needed = self.len() + T::SLAB_SIZE * len;
+        if capacity_needed > capacity {
+            let mut new_capacity = capacity * 2;
+            while new_capacity < capacity_needed {
+                new_capacity = (new_capacity * 2).max(2);
+            }
+            self.reserve_capacity(new_capacity);
         }
     }
-}
 
-impl SlabManager {
     /// Return the internal buffer used by this slab.
     ///
     /// If the buffer needs recreating due to a capacity change this function
@@ -269,7 +240,7 @@ impl SlabManager {
     ///
     /// This is the only way to guarantee access to a buffer.
     ///
-    /// Use [`SlabManager::upkeep`] when you only need the buffer after a change,
+    /// Use [`SlabAllocator::upkeep`] when you only need the buffer after a change,
     /// for example to recreate bindgroups.
     pub fn get_updated_buffer(
         &self,
@@ -327,14 +298,16 @@ impl SlabManager {
         self.update_sources.write().unwrap().push(Box::new(updates));
     }
 
-    pub fn new_hybrid<T: SlabItem + Clone + Send + Sync + 'static>(
+    /// Stage a new value that lives on the GPU _and_ CPU.
+    pub fn new_value<T: SlabItem + Clone + Send + Sync + 'static>(
         &mut self,
         value: T,
     ) -> Hybrid<T> {
         Hybrid::new(self, value)
     }
 
-    pub fn new_hybrid_array<T: SlabItem + Clone + Send + Sync + 'static>(
+    /// Stage a contiguous array of new values that live on the GPU _and_ CPU.
+    pub fn new_array<T: SlabItem + Clone + Send + Sync + 'static>(
         &mut self,
         values: impl IntoIterator<Item = T>,
     ) -> HybridArray<T> {
@@ -364,11 +337,11 @@ impl SlabManager {
                 let count = hybrid.strong_count();
                 if count <= 1 {
                     // recycle this allocation
-                    let input_array = hybrid.array();
+                    let input_array = hybrid.u32_array();
                     log::debug!("recycling {} {input_array:?}", hybrid.type_name());
                     if hybrid.forgotten() {
                         log::debug!("  cannot recycle - forgotten!");
-                    } else if hybrid.array().is_null() || hybrid.array().is_empty() {
+                    } else if hybrid.u32_array().is_null() || hybrid.u32_array().is_empty() {
                         log::debug!("  cannot recycle - empty or null");
                     } else {
                         recycles_guard.add_range(input_array.into());
@@ -425,7 +398,7 @@ impl SlabManager {
         queue: &wgpu::Queue,
         label: Option<&str>,
         range: impl std::ops::RangeBounds<usize>,
-    ) -> Result<Vec<u32>, SlabManagerError> {
+    ) -> Result<Vec<u32>, SlabAllocatorError> {
         let start = match range.start_bound() {
             core::ops::Bound::Included(start) => *start,
             core::ops::Bound::Excluded(start) => *start + 1,
@@ -475,16 +448,16 @@ impl SlabManager {
     }
 }
 
-pub struct SlabUpdate {
+struct SlabUpdate {
     array: Array<u32>,
     elements: Vec<u32>,
     #[cfg(debug_assertions)]
     type_is: &'static str,
 }
 
-pub trait UpdatesSlab: Send + Sync + std::any::Any {
+pub(crate) trait UpdatesSlab: Send + Sync + std::any::Any {
     /// Returns the slab range of all possible updates.
-    fn array(&self) -> Array<u32>;
+    fn u32_array(&self) -> Array<u32>;
 
     /// Returns the number of references remaiting in the wild.
     fn strong_count(&self) -> usize;
@@ -496,13 +469,49 @@ pub trait UpdatesSlab: Send + Sync + std::any::Any {
     fn forgotten(&self) -> bool;
 }
 
-impl<T: SlabItem + Clone + Send + Sync + std::any::Any> UpdatesSlab for Hybrid<T> {
+impl<T: SlabItem + Clone + Send + Sync + std::any::Any> UpdatesSlab for Gpu<T> {
     fn strong_count(&self) -> usize {
-        Arc::strong_count(&self.cpu_value)
+        Arc::strong_count(&self.forgotten)
     }
 
-    fn array(&self) -> Array<u32> {
+    fn u32_array(&self) -> Array<u32> {
         Array::new(self.id.inner(), T::SLAB_SIZE as u32)
+    }
+
+    fn type_name(&self) -> &'static str {
+        std::any::type_name_of_val(self)
+    }
+
+    fn forgotten(&self) -> bool {
+        self.forgotten.load(Ordering::Relaxed)
+    }
+}
+
+impl<T: SlabItem + Clone + Send + Sync + std::any::Any> UpdatesSlab for Hybrid<T> {
+    fn strong_count(&self) -> usize {
+        self.gpu_value.strong_count()
+    }
+
+    fn u32_array(&self) -> Array<u32> {
+        self.gpu_value.u32_array()
+    }
+
+    fn type_name(&self) -> &'static str {
+        std::any::type_name_of_val(self)
+    }
+
+    fn forgotten(&self) -> bool {
+        self.gpu_value.forgotten()
+    }
+}
+
+impl<T: SlabItem + Clone + Send + Sync + std::any::Any> UpdatesSlab for GpuArray<T> {
+    fn strong_count(&self) -> usize {
+        Arc::strong_count(&self.forgotten)
+    }
+
+    fn u32_array(&self) -> Array<u32> {
+        self.array.into_u32_array()
     }
 
     fn type_name(&self) -> &'static str {
@@ -516,11 +525,11 @@ impl<T: SlabItem + Clone + Send + Sync + std::any::Any> UpdatesSlab for Hybrid<T
 
 impl<T: SlabItem + Clone + Send + Sync + std::any::Any> UpdatesSlab for HybridArray<T> {
     fn strong_count(&self) -> usize {
-        Arc::strong_count(&self.cpu_value)
+        self.gpu_value.strong_count()
     }
 
-    fn array(&self) -> Array<u32> {
-        self.array.into_u32_array()
+    fn u32_array(&self) -> Array<u32> {
+        self.gpu_value.u32_array()
     }
 
     fn type_name(&self) -> &'static str {
@@ -528,24 +537,24 @@ impl<T: SlabItem + Clone + Send + Sync + std::any::Any> UpdatesSlab for HybridAr
     }
 
     fn forgotten(&self) -> bool {
-        self.forgotten.load(Ordering::Relaxed)
+        self.gpu_value.forgotten()
     }
 }
 
 /// A "hybrid" type that lives on the CPU and the GPU.
 ///
 /// Updates are syncronized to the GPU once per frame.
+///
+/// Clones of a hybrid all point to the same CPU and GPU data.
 pub struct Hybrid<T> {
     cpu_value: Arc<RwLock<T>>,
-    id: Id<T>,
-    updates: Arc<Mutex<Vec<SlabUpdate>>>,
-    forgotten: Arc<AtomicBool>,
+    gpu_value: Gpu<T>,
 }
 
 impl<T: core::fmt::Debug> core::fmt::Debug for Hybrid<T> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct(&format!("Hybrid<{}>", std::any::type_name::<T>()))
-            .field("id", &self.id)
+            .field("id", &self.gpu_value.id)
             .field("cpu_value", &self.cpu_value.read().unwrap())
             .finish()
     }
@@ -555,39 +564,23 @@ impl<T> Clone for Hybrid<T> {
     fn clone(&self) -> Self {
         Hybrid {
             cpu_value: self.cpu_value.clone(),
-            id: self.id,
-            updates: self.updates.clone(),
-            forgotten: self.forgotten.clone(),
+            gpu_value: self.gpu_value.clone(),
         }
     }
 }
 
 impl<T: SlabItem + Clone + Send + Sync + 'static> Hybrid<T> {
-    pub fn new(mngr: &mut SlabManager, value: T) -> Self {
-        let id = mngr.allocate::<T>();
-        let hybrid = Self::new_preallocated(id, value, mngr.updates.clone());
-        mngr.add_updates(hybrid.clone());
-
-        hybrid
-    }
-
-    pub(crate) fn new_preallocated(
-        id: Id<T>,
-        value: T,
-        updates: Arc<Mutex<Vec<SlabUpdate>>>,
-    ) -> Self {
-        let s = Self {
-            cpu_value: Arc::new(RwLock::new(value.clone())),
-            id,
-            updates,
-            forgotten: Default::default(),
-        };
-        s.modify(move |old| *old = value);
-        s
+    pub fn new(mngr: &mut SlabAllocator, value: T) -> Self {
+        let cpu_value = Arc::new(RwLock::new(value.clone()));
+        let gpu_value = Gpu::new(mngr, value);
+        Self {
+            cpu_value,
+            gpu_value,
+        }
     }
 
     pub fn id(&self) -> Id<T> {
-        self.id
+        self.gpu_value.id()
     }
 
     pub fn get(&self) -> T {
@@ -598,16 +591,7 @@ impl<T: SlabItem + Clone + Send + Sync + 'static> Hybrid<T> {
         let mut value_guard = self.cpu_value.write().unwrap();
         f(&mut value_guard);
         let t = value_guard.clone();
-        self.updates.lock().unwrap().push(SlabUpdate {
-            array: Array::new(self.id.inner(), T::SLAB_SIZE as u32),
-            elements: {
-                let mut es = vec![0u32; T::SLAB_SIZE];
-                es.write(Id::new(0), &t);
-                es
-            },
-            #[cfg(debug_assertions)]
-            type_is: std::any::type_name::<T>(),
-        })
+        self.gpu_value.set(t);
     }
 
     pub fn set(&self, value: T) {
@@ -616,7 +600,178 @@ impl<T: SlabItem + Clone + Send + Sync + 'static> Hybrid<T> {
         })
     }
 
-    /// Forgets the hybrid value, preventing the GPU memory from being recycled and re-allocated.
+    /// Drop the CPU portion of the hybrid value, returning a type that wraps only the
+    /// GPU resources.
+    pub fn into_gpu_only(self) -> Gpu<T> {
+        self.gpu_value
+    }
+
+    pub fn forget(self) {
+        self.gpu_value.forget();
+    }
+}
+
+/// A type that lives on the GPU.
+///
+/// Updates are synchronized to the GPU during [`SlabAllocator::upkeep`].
+pub struct Gpu<T> {
+    id: Id<T>,
+    updates: Arc<Mutex<Vec<SlabUpdate>>>,
+    forgotten: Arc<AtomicBool>,
+}
+
+impl<T> Clone for Gpu<T> {
+    fn clone(&self) -> Self {
+        Self {
+            id: self.id.clone(),
+            updates: self.updates.clone(),
+            forgotten: self.forgotten.clone(),
+        }
+    }
+}
+
+impl<T: SlabItem + Clone + Send + Sync + 'static> Gpu<T> {
+    pub fn new(mngr: &mut SlabAllocator, value: T) -> Self {
+        let id = mngr.allocate::<T>();
+        let updates = mngr.updates.clone();
+        let s = Self {
+            id,
+            updates,
+            forgotten: Default::default(),
+        };
+        s.set(value);
+        mngr.add_updates(s.clone());
+        s
+    }
+
+    pub fn id(&self) -> Id<T> {
+        self.id
+    }
+
+    pub fn set(&self, value: T) {
+        self.updates.lock().unwrap().push(SlabUpdate {
+            array: Array::new(self.id.inner(), T::SLAB_SIZE as u32),
+            elements: {
+                let mut es = vec![0u32; T::SLAB_SIZE];
+                es.write(Id::new(0), &value);
+                es
+            },
+            #[cfg(debug_assertions)]
+            type_is: std::any::type_name::<T>(),
+        })
+    }
+
+    /// Pair with a CPU value.
+    ///
+    /// ## Warning
+    /// No effort is made to ensure that the value provided is the same as the value on
+    /// the GPU.
+    pub fn into_hybrid(self, value: T) -> Hybrid<T> {
+        let cpu_value = Arc::new(RwLock::new(value));
+        Hybrid {
+            cpu_value,
+            gpu_value: self,
+        }
+    }
+
+    /// Forgets the value, preventing the GPU memory from being recycled and re-allocated.
+    ///
+    /// ## Warning
+    /// After calling this function the memory will never be returned to the allocator.
+    pub fn forget(self) {
+        self.forgotten.store(true, Ordering::Relaxed);
+    }
+}
+
+/// A array type that lives on the GPU.
+///
+/// Once created, the array cannot be resized.
+///
+/// Updates are syncronized to the GPU once per frame.
+pub struct GpuArray<T> {
+    array: Array<T>,
+    updates: Arc<Mutex<Vec<SlabUpdate>>>,
+    forgotten: Arc<AtomicBool>,
+}
+
+impl<T> Clone for GpuArray<T> {
+    fn clone(&self) -> Self {
+        GpuArray {
+            array: self.array,
+            updates: self.updates.clone(),
+            forgotten: self.forgotten.clone(),
+        }
+    }
+}
+
+impl<T: SlabItem + Clone + Send + Sync + 'static> GpuArray<T> {
+    pub fn new(mngr: &mut SlabAllocator, values: &[T]) -> Self {
+        let array = mngr.allocate_array::<T>(values.len());
+        let updates = mngr.updates.clone();
+        {
+            let mut elements = vec![0u32; T::SLAB_SIZE * array.len()];
+            elements.write_array(Array::new(0, array.len() as u32), values);
+            updates.lock().unwrap().push(SlabUpdate {
+                array: array.into_u32_array(),
+                elements,
+                #[cfg(debug_assertions)]
+                type_is: std::any::type_name::<Vec<T>>(),
+            });
+        }
+        let g = GpuArray {
+            array,
+            updates,
+            forgotten: Default::default(),
+        };
+        mngr.update_sources
+            .write()
+            .unwrap()
+            .push(Box::new(g.clone()));
+        g
+    }
+
+    pub fn len(&self) -> usize {
+        self.array.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.array.is_empty()
+    }
+
+    pub fn array(&self) -> Array<T> {
+        self.array
+    }
+
+    pub fn get_id(&self, index: usize) -> Id<T> {
+        self.array().at(index)
+    }
+
+    pub fn set_item(&self, index: usize, value: &T) {
+        let id = self.array.at(index);
+        let array = Array::<u32>::new(id.inner(), T::SLAB_SIZE as u32);
+        let mut elements = vec![0u32; T::SLAB_SIZE];
+        elements.write(0u32.into(), value);
+        self.updates.lock().unwrap().push(SlabUpdate {
+            array,
+            elements,
+            #[cfg(debug_assertions)]
+            type_is: std::any::type_name::<T>(),
+        });
+    }
+
+    /// Pair with a CPU value.
+    ///
+    /// ## Warning
+    /// No effort is made to ensure that the value provided is the same as the value on
+    /// the GPU.
+    pub fn into_hybrid(self, values: impl IntoIterator<Item = T>) -> HybridArray<T> {
+        let cpu_value = Arc::new(RwLock::new(values.into_iter().collect()));
+        HybridArray {
+            cpu_value,
+            gpu_value: self,
+        }
+    }
+
     pub fn forget(self) {
         self.forgotten.store(true, Ordering::Relaxed);
     }
@@ -629,15 +784,13 @@ impl<T: SlabItem + Clone + Send + Sync + 'static> Hybrid<T> {
 /// Updates are syncronized to the GPU once per frame.
 pub struct HybridArray<T> {
     cpu_value: Arc<RwLock<Vec<T>>>,
-    array: Array<T>,
-    updates: Arc<Mutex<Vec<SlabUpdate>>>,
-    forgotten: Arc<AtomicBool>,
+    gpu_value: GpuArray<T>,
 }
 
 impl<T: core::fmt::Debug> core::fmt::Debug for HybridArray<T> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct(&format!("HybridArray<{}>", std::any::type_name::<T>()))
-            .field("array", &self.array)
+            .field("array", &self.gpu_value.array)
             .field("cpu_value", &self.cpu_value.read().unwrap())
             .finish()
     }
@@ -647,75 +800,47 @@ impl<T> Clone for HybridArray<T> {
     fn clone(&self) -> Self {
         HybridArray {
             cpu_value: self.cpu_value.clone(),
-            array: self.array,
-            updates: self.updates.clone(),
-            forgotten: self.forgotten.clone(),
+            gpu_value: self.gpu_value.clone(),
         }
     }
 }
 
 impl<T: SlabItem + Clone + Send + Sync + 'static> HybridArray<T> {
-    pub fn new(mngr: &mut SlabManager, values: impl IntoIterator<Item = T>) -> Self {
-        let value = values.into_iter().collect::<Vec<_>>();
-        let array = mngr.allocate_array::<T>(value.len());
-        let hybrid = Self::new_preallocated(array, value, mngr.updates.clone());
-        mngr.update_sources
-            .write()
-            .unwrap()
-            .push(Box::new(hybrid.clone()));
-        hybrid
-    }
-
-    pub(crate) fn new_preallocated(
-        array: Array<T>,
-        values: Vec<T>,
-        updates: Arc<Mutex<Vec<SlabUpdate>>>,
-    ) -> Self {
-        {
-            let mut elements = vec![0u32; T::SLAB_SIZE * array.len()];
-            elements.write_array(Array::new(0, array.len() as u32), &values);
-            updates.lock().unwrap().push(SlabUpdate {
-                array: array.into_u32_array(),
-                elements,
-                #[cfg(debug_assertions)]
-                type_is: std::any::type_name::<Vec<T>>(),
-            });
-        }
-        Self {
-            array,
-            updates,
-            cpu_value: Arc::new(RwLock::new(values)),
-            forgotten: Default::default(),
+    pub fn new(mngr: &mut SlabAllocator, values: impl IntoIterator<Item = T>) -> Self {
+        let values = values.into_iter().collect::<Vec<_>>();
+        let gpu_value = GpuArray::<T>::new(mngr, &values);
+        let cpu_value = Arc::new(RwLock::new(values));
+        HybridArray {
+            cpu_value,
+            gpu_value,
         }
     }
 
     pub fn len(&self) -> usize {
-        self.array.len()
+        self.gpu_value.array.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.gpu_value.is_empty()
     }
 
     pub fn array(&self) -> Array<T> {
-        self.array
+        self.gpu_value.array()
     }
 
-    pub fn at(&self, index: usize) -> Option<T> {
+    pub fn get(&self, index: usize) -> Option<T> {
         self.cpu_value.read().unwrap().get(index).cloned()
+    }
+
+    pub fn get_id(&self, index: usize) -> Id<T> {
+        self.gpu_value.get_id(index)
     }
 
     pub fn modify<S>(&self, index: usize, f: impl FnOnce(&mut T) -> S) -> Option<S> {
         let mut value_guard = self.cpu_value.write().unwrap();
         let t = value_guard.get_mut(index)?;
         let output = Some(f(t));
-        let t = t.clone();
-        let id = self.array.at(index);
-        let array = Array::<u32>::new(id.inner(), T::SLAB_SIZE as u32);
-        let mut elements = vec![0u32; T::SLAB_SIZE];
-        elements.write(0u32.into(), &t);
-        self.updates.lock().unwrap().push(SlabUpdate {
-            array,
-            elements,
-            #[cfg(debug_assertions)]
-            type_is: std::any::type_name::<T>(),
-        });
+        self.gpu_value.set_item(index, &t);
         output
     }
 
@@ -723,8 +848,12 @@ impl<T: SlabItem + Clone + Send + Sync + 'static> HybridArray<T> {
         self.modify(index, move |t| std::mem::replace(t, value))
     }
 
+    pub fn into_gpu_only(self) -> GpuArray<T> {
+        self.gpu_value
+    }
+
     pub fn forget(self) {
-        self.forgotten.store(true, Ordering::Relaxed);
+        self.gpu_value.forget()
     }
 }
 
@@ -737,9 +866,9 @@ mod test {
     #[test]
     fn mngr_updates_count_sanity() {
         let r = Context::headless(1, 1);
-        let mut mngr = SlabManager::default();
+        let mut mngr = SlabAllocator::default();
         {
-            let value = mngr.new_hybrid(666u32);
+            let value = mngr.new_value(666u32);
             assert_eq!(2, value.strong_count());
         }
         let _ = mngr.upkeep(
@@ -750,7 +879,7 @@ mod test {
         );
         assert_eq!(0, mngr.update_sources.read().unwrap().len());
         {
-            let values = mngr.new_hybrid_array([666u32, 420u32]);
+            let values = mngr.new_array([666u32, 420u32]);
             assert_eq!(2, values.strong_count());
         }
         let _ = mngr.upkeep(
@@ -779,15 +908,15 @@ mod test {
     #[test]
     fn slab_manager_sanity() {
         let r = Context::headless(1, 1);
-        let mut m = SlabManager::default();
+        let mut m = SlabAllocator::default();
         let _ = m.allocate::<u32>();
         let _ = m.allocate::<u32>();
         let _ = m.allocate::<u32>();
         let _ = m.allocate::<u32>();
-        let h4 = m.new_hybrid(0u32);
-        let h5 = m.new_hybrid(0u32);
-        let h6 = m.new_hybrid(0u32);
-        let h7 = m.new_hybrid(0u32);
+        let h4 = m.new_value(0u32);
+        let h5 = m.new_value(0u32);
+        let h6 = m.new_value(0u32);
+        let h7 = m.new_value(0u32);
         let _ = m.upkeep(
             r.get_device(),
             r.get_queue(),
@@ -808,13 +937,13 @@ mod test {
         );
         assert_eq!(1, m.recycles.read().unwrap().ranges.len());
 
-        let h4 = m.new_hybrid(0u32);
-        let h5 = m.new_hybrid(0u32);
-        let h6 = m.new_hybrid(0u32);
-        let h7 = m.new_hybrid(0u32);
+        let h4 = m.new_value(0u32);
+        let h5 = m.new_value(0u32);
+        let h6 = m.new_value(0u32);
+        let h7 = m.new_value(0u32);
         assert!(m.recycles.read().unwrap().ranges.is_empty());
 
-        let h8 = m.new_hybrid(0u32);
+        let h8 = m.new_value(0u32);
         drop(h8);
         drop(h4);
         drop(h6);

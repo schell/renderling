@@ -1,10 +1,10 @@
-//! Camera projections and utilities.
+//! Camera projection, view and utilities.
 use crabslab::SlabItem;
 use glam::{Mat4, Vec3};
 
 /// A camera used for transforming the stage during rendering.
 ///
-/// Use `Camera::new(projection, view)` to create a new camera.
+/// Use [`Camera::new`] to create a new camera.
 /// Or use `Camera::default` followed by `Camera::with_projection_and_view`
 /// to set the projection and view matrices. Using the `with_*` or `set_*`
 /// methods is preferred over setting the fields directly because they will
@@ -21,6 +21,16 @@ pub struct Camera {
 impl Camera {
     pub fn new(projection: Mat4, view: Mat4) -> Self {
         Camera::default().with_projection_and_view(projection, view)
+    }
+
+    pub fn default_perspective(width: f32, height: f32) -> Self {
+        let (projection, view) = default_perspective(width, height);
+        Camera::new(projection, view)
+    }
+
+    pub fn default_ortho2d(width: f32, height: f32) -> Self {
+        let (projection, view) = default_ortho2d(width, height);
+        Camera::new(projection, view)
     }
 
     pub fn set_projection_and_view(&mut self, projection: Mat4, view: Mat4) {

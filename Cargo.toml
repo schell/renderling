@@ -4,8 +4,7 @@ members = [
     "crates/example-wasm",
     "crates/loading-bytes",
     "crates/renderling",
-    #"crates/renderling-gpui",
-    #"crates/sandbox"
+    "crates/sandbox"
 ]
 
 exclude = ["./shaders"]

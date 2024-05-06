@@ -2,7 +2,7 @@
 use crabslab::{Id, SlabItem};
 use glam::{Vec3, Vec4};
 
-use crate::Transform;
+use crate::transform::Transform;
 
 #[repr(C)]
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
