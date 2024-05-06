@@ -1,15 +1,16 @@
 //! Creating and using CPU-side textures.
-use snafu::prelude::*;
 use std::{ops::Deref, sync::Arc};
 
 use image::{
     load_from_memory, ColorType, DynamicImage, GenericImage, GenericImageView, ImageBuffer,
     ImageError, PixelWithColorType, Rgba32FImage,
 };
+use snafu::prelude::*;
 
 use crate::atlas::{AtlasImage, AtlasImageFormat};
 
 #[derive(Debug, Snafu)]
+/// Enumeration of errors produced by [`Texture`].
 pub enum TextureError {
     #[snafu(display("Unable to load '{}' image from memory: {}", label, source))]
     Loading { source: ImageError, label: String },
@@ -571,7 +572,7 @@ impl Texture {
     ) -> Result<Rgba32FImage, TextureError> {
         let width = self.width();
         let height = self.height();
-        let copied = crate::Texture::read(
+        let copied = Texture::read(
             &self.texture,
             &device,
             &queue,
@@ -745,8 +746,8 @@ impl Texture {
         queue: &wgpu::Queue,
         width: u32,
         height: u32,
-    ) -> crate::Texture {
-        crate::Texture::new_with(
+    ) -> Texture {
+        Texture::new_with(
             &device,
             &queue,
             Some("hdr"),
@@ -787,11 +788,11 @@ impl Texture {
 pub struct DepthTexture {
     pub(crate) device: Arc<wgpu::Device>,
     pub(crate) queue: Arc<wgpu::Queue>,
-    pub(crate) texture: crate::Texture,
+    pub(crate) texture: Texture,
 }
 
 impl Deref for DepthTexture {
-    type Target = crate::Texture;
+    type Target = Texture;
 
     fn deref(&self) -> &Self::Target {
         &self.texture
@@ -811,7 +812,7 @@ impl DepthTexture {
     ///
     /// Assumes the format is single channel 32bit.
     pub fn read_image(&self) -> Option<image::DynamicImage> {
-        let depth_copied_buffer = crate::Texture::read(
+        let depth_copied_buffer = Texture::read(
             &self.texture.texture,
             &self.device,
             &self.queue,
@@ -1043,6 +1044,8 @@ impl CopiedTextureBuffer {
 mod test {
     use crate::Context;
 
+    use super::Texture;
+
     #[test]
     fn generate_mipmaps() {
         let r = Context::headless(10, 10);
@@ -1051,7 +1054,7 @@ mod test {
         let width = img.width();
         let height = img.height();
         let mip_level_count = 5;
-        let mut texture = crate::Texture::from_dynamic_image(
+        let mut texture = Texture::from_dynamic_image(
             &device,
             &queue,
             img,
@@ -1072,7 +1075,7 @@ mod test {
             let mip_width = width >> mip_level;
             let mip_height = height >> mip_level;
             // save out the mips
-            let copied_buffer = crate::Texture::read_from(
+            let copied_buffer = Texture::read_from(
                 &mip.texture,
                 r.get_device(),
                 r.get_queue(),

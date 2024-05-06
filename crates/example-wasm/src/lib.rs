@@ -53,7 +53,7 @@ pub async fn main() {
 
     while let Some(event) = all_events.next().await {
         log::trace!("event: {event:#?}");
-        let frame = ctx.get_current_frame().unwrap();
+        let frame = ctx.get_next_frame().unwrap();
         app.stage.render(&frame.view());
         frame.present();
     }

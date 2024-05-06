@@ -1,7 +1,10 @@
 //! Tonemapping.
 use std::sync::{Arc, RwLock};
 
-use crate::slab::{Hybrid, SlabManager};
+use crate::{
+    slab::{Hybrid, SlabAllocator},
+    texture::Texture,
+};
 
 use super::TonemapConstants;
 
@@ -45,7 +48,7 @@ pub fn bindgroup_layout(device: &wgpu::Device, label: Option<&str>) -> wgpu::Bin
 pub fn create_bindgroup(
     device: &wgpu::Device,
     label: Option<&str>,
-    hdr_texture: &crate::Texture,
+    hdr_texture: &Texture,
     slab_buffer: &wgpu::Buffer,
 ) -> wgpu::BindGroup {
     device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -82,9 +85,9 @@ pub fn create_bindgroup(
 /// Only available on CPU. Not Available in shaders.
 #[derive(Clone)]
 pub struct Tonemapping {
-    slab: SlabManager,
+    slab: SlabAllocator,
     config: Hybrid<TonemapConstants>,
-    hdr_texture: Arc<RwLock<crate::Texture>>,
+    hdr_texture: Arc<RwLock<Texture>>,
     bindgroup: Arc<RwLock<wgpu::BindGroup>>,
     pipeline: Arc<wgpu::RenderPipeline>,
 }
@@ -94,10 +97,10 @@ impl Tonemapping {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         frame_texture_format: wgpu::TextureFormat,
-        hdr_texture: &crate::Texture,
+        hdr_texture: &Texture,
     ) -> Self {
-        let mut slab = SlabManager::default();
-        let config = slab.new_hybrid(TonemapConstants::default());
+        let mut slab = SlabAllocator::default();
+        let config = slab.new_value(TonemapConstants::default());
 
         let label = Some("tonemapping");
         let slab_buffer =
@@ -158,7 +161,7 @@ impl Tonemapping {
         }
     }
 
-    pub fn set_hdr_texture(&self, device: &wgpu::Device, hdr_texture: &crate::Texture) {
+    pub fn set_hdr_texture(&self, device: &wgpu::Device, hdr_texture: &Texture) {
         // UNWRAP: safe because the buffer is created in `Self::new` and guaranteed to exist
         let slab_buffer = self.slab.get_buffer().unwrap();
         let bindgroup = create_bindgroup(device, Some("tonemapping"), hdr_texture, &slab_buffer);

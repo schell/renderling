@@ -7,11 +7,12 @@ use std::{
 
 use renderling::{
     atlas::AtlasImage,
+    camera::Camera,
     math::{Mat4, UVec2, Vec3, Vec4},
     skybox::Skybox,
     slab::Hybrid,
     stage::{GltfDocument, Node, Stage},
-    Camera, Context,
+    Context,
 };
 
 const RADIUS_SCROLL_DAMPENING: f32 = 0.001;
@@ -89,7 +90,7 @@ impl App {
             .with_background_color(DARK_BLUE_BG_COLOR)
             .with_bloom_mix_strength(0.5)
             .with_bloom_filter_radius(4.0);
-        let camera = stage.new_hybrid(Camera::default());
+        let camera = stage.new_value(Camera::default());
 
         let radius = 6.0;
         let phi = 0.0;

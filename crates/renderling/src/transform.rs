@@ -1,8 +1,12 @@
+//! Decomposed 3d transform.
 use crabslab::SlabItem;
 use glam::{Mat4, Quat, Vec3};
 
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[derive(Clone, Copy, PartialEq, SlabItem)]
+/// A decomposed transformation.
+///
+/// `Transform` can be converted to/from [`Mat4`].
 pub struct Transform {
     pub translation: Vec3,
     pub rotation: Quat,

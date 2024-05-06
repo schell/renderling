@@ -1,5 +1,7 @@
 //! Render pipelines and layouts for creating cubemaps.
 
+use crate::texture::Texture;
+
 pub fn cubemap_making_bindgroup_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
     device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some("cubemap-making bindgroup"),
@@ -39,7 +41,7 @@ pub fn cubemap_making_bindgroup(
     label: Option<&str>,
     buffer: &wgpu::Buffer,
     // The texture to sample the environment from
-    texture: &crate::Texture,
+    texture: &Texture,
 ) -> wgpu::BindGroup {
     device.create_bind_group(&wgpu::BindGroupDescriptor {
         label,

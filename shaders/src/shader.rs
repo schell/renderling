@@ -52,16 +52,6 @@ impl Linkage {
                     entry_point: ENTRY_POINT,
                 }
             }
-
-            pub fn get_from_cache(
-                device: &wgpu::Device,
-                cache: &mut std::collections::HashMap<&'static str, Arc<ShaderLinkage>>
-            ) -> Arc<ShaderLinkage> {
-                cache
-                    .entry(ENTRY_POINT)
-                    .or_insert_with(|| linkage(device).into())
-                    .clone()
-            }
         };
         format!(
             r#"

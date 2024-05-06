@@ -1,8 +1,8 @@
 //! Tonemapping from an HDR texture to sRGB (most likely).
 //!
 //! ## References
-//! * https://github.com/KhronosGroup/glTF-Sample-Viewer/blob/5b1b7f48a8cb2b7aaef00d08fdba18ccc8dd331b/source/Renderer/shaders/tonemapping.glsl
-//! * https://64.github.io/tonemapping
+//! * <https://github.com/KhronosGroup/glTF-Sample-Viewer/blob/5b1b7f48a8cb2b7aaef00d08fdba18ccc8dd331b/source/Renderer/shaders/tonemapping.glsl>
+//! * <https://64.github.io/tonemapping>
 
 use crabslab::{Slab, SlabItem};
 use glam::{mat3, Mat3, Vec2, Vec3, Vec4, Vec4Swizzles};
@@ -31,25 +31,25 @@ const ACESOUTPUT_MAT: Mat3 = mat3(
 );
 
 /// Linear to sRGB approximation.
-/// See http://chilliant.blogspot.com/2012/08/srgb-approximations-for-hlsl.html
+/// See <http://chilliant.blogspot.com/2012/08/srgb-approximations-for-hlsl.html>
 pub fn linear_to_srgb(color: Vec3) -> Vec3 {
     color.powf(INV_GAMMA)
 }
 
 /// sRGB to linear approximation.
-/// See http://chilliant.blogspot.com/2012/08/srgb-approximations-for-hlsl.html
+/// See <http://chilliant.blogspot.com/2012/08/srgb-approximations-for-hlsl.html>
 pub fn srgb_to_linear(srgb_in: Vec3) -> Vec3 {
     srgb_in.powf(GAMMA)
 }
 
 /// sRGB to linear approximation.
-/// See http://chilliant.blogspot.com/2012/08/srgb-approximations-for-hlsl.html
+/// See <http://chilliant.blogspot.com/2012/08/srgb-approximations-for-hlsl.html>
 pub fn srgba_to_linear(srgb_in: Vec4) -> Vec4 {
     srgb_to_linear(srgb_in.xyz()).extend(srgb_in.w)
 }
 
 /// ACES tone map (faster approximation)
-/// see: https://knarkowicz.wordpress.com/2016/01/06/aces-filmic-tone-mapping-curve/
+/// see: <https://knarkowicz.wordpress.com/2016/01/06/aces-filmic-tone-mapping-curve>
 pub fn tone_map_aces_narkowicz(color: Vec3) -> Vec3 {
     const A: f32 = 2.51;
     const B: f32 = 0.03;
@@ -61,7 +61,7 @@ pub fn tone_map_aces_narkowicz(color: Vec3) -> Vec3 {
 }
 
 /// ACES filmic tone map approximation
-/// see https://github.com/TheRealMJP/BakingLab/blob/master/BakingLab/ACES.hlsl
+/// see <https://github.com/TheRealMJP/BakingLab/blob/master/BakingLab/ACES.hlsl>
 fn rrt_and_odtfit(color: Vec3) -> Vec3 {
     let a: Vec3 = color * (color + 0.0245786) - 0.000090537;
     let b: Vec3 = color * (0.983729 * color + 0.432951) + 0.238081;

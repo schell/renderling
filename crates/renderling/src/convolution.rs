@@ -12,7 +12,7 @@ use spirv_std::{
 #[allow(unused_imports)]
 use spirv_std::num_traits::Float;
 
-use crate::{math::IsVector, Camera};
+use crate::{camera::Camera, math::IsVector};
 
 fn radical_inverse_vdc(mut bits: u32) -> f32 {
     bits = (bits << 16u32) | (bits >> 16u32);
@@ -149,20 +149,20 @@ pub fn integrate_brdf_doesnt_work(mut n_dot_v: f32, roughness: f32) -> Vec2 {
     Vec2::new(a, b)
 }
 
-/// Used by [`vertex_prefilter_environment_cubemap`] to read the camera and
+/// Used by [`prefilter_environment_cubemap_vertex`] to read the camera and
 /// roughness values from the slab.
 #[derive(Default, SlabItem)]
 pub struct VertexPrefilterEnvironmentCubemapIds {
     pub camera: Id<Camera>,
+    // TODO: does this have to be an Id? Pretty sure it can be inline
     pub roughness: Id<f32>,
 }
 
 #[cfg(feature = "prefilter_environment_cubemap_vertex")]
-/// Uses the `instance_index` as the [`Id`] of a [`PrefilterEnvironmentIds`].
-/// roughness value.
+/// Vertex shader for rendering a "prefilter environment" cubemap.
 #[spirv(vertex)]
 pub fn prefilter_environment_cubemap_vertex(
-    #[spirv(instance_index)] instance_index: u32,
+    #[spirv(instance_index)] prefilter_id: Id<VertexPrefilterEnvironmentCubemapIds>,
     #[spirv(vertex_index)] vertex_id: u32,
     #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] slab: &[u32],
     out_pos: &mut Vec3,
@@ -170,8 +170,7 @@ pub fn prefilter_environment_cubemap_vertex(
     #[spirv(position)] gl_pos: &mut Vec4,
 ) {
     let in_pos = crate::math::CUBE[vertex_id as usize];
-    let VertexPrefilterEnvironmentCubemapIds { camera, roughness } =
-        slab.read(Id::new(instance_index));
+    let VertexPrefilterEnvironmentCubemapIds { camera, roughness } = slab.read(prefilter_id);
     let camera = slab.read(camera);
     *out_roughness = slab.read(roughness);
     *out_pos = in_pos;
@@ -179,6 +178,8 @@ pub fn prefilter_environment_cubemap_vertex(
 }
 
 #[cfg(feature = "prefilter_environment_cubemap_fragment")]
+/// Fragment shader for rendering a "prefilter environment" cubemap.
+///
 /// Lambertian prefilter.
 #[spirv(fragment)]
 pub fn prefilter_environment_cubemap_fragment(
@@ -244,6 +245,7 @@ pub fn calc_lod(n_dot_l: f32) -> f32 {
 
 #[cfg(feature = "generate_mipmap_vertex")]
 #[spirv(vertex)]
+/// Vertex shader for generating texture mips.
 pub fn generate_mipmap_vertex(
     #[spirv(vertex_index)] vertex_id: u32,
     out_uv: &mut Vec2,
@@ -256,6 +258,7 @@ pub fn generate_mipmap_vertex(
 
 #[cfg(feature = "generate_mipmap_fragment")]
 #[spirv(fragment)]
+/// Fragment shader for generating texture mips.
 pub fn generate_mipmap_fragment(
     #[spirv(descriptor_set = 0, binding = 0)] texture: &Image2d,
     #[spirv(descriptor_set = 0, binding = 1)] sampler: &Sampler,
@@ -296,6 +299,7 @@ const BRDF_VERTS: [Vert; 6] = {
 
 #[cfg(feature = "brdf_lut_convolution_vertex")]
 #[spirv(vertex)]
+/// Vertex shader for creating a BRDF LUT.
 pub fn brdf_lut_convolution_vertex(
     #[spirv(vertex_index)] vertex_id: u32,
     out_uv: &mut glam::Vec2,
@@ -308,6 +312,7 @@ pub fn brdf_lut_convolution_vertex(
 
 #[cfg(feature = "brdf_lut_convolution_fragment")]
 #[spirv(fragment)]
+/// Fragment shader for creating a BRDF LUT.
 pub fn brdf_lut_convolution_fragment(in_uv: glam::Vec2, out_color: &mut glam::Vec2) {
     *out_color = integrate_brdf(in_uv.x, in_uv.y);
 }

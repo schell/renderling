@@ -1,70 +1,169 @@
-//! A few "GPU driven" renderers  with a focus on simplicity and ease of use.
+//! A "GPU driven" renderer with a focus on simplicity and ease of use.
 //! Backed by WebGPU.
 //!
 //! Shaders are written in Rust using `rust-gpu`.
 //!
-//! Data is staged on the GPU using [`crabslab`], a slab allocator.
+//! All data is staged on the GPU using a [slab allocator](crate::slab).
+//!
+//! ## Hello triangle
+//!
+//! First you must create a [`crate::context::Context`].
+//!
+//! ```
+//! use renderling::Context;
+//!
+//! // create a headless context with dimensions 100, 100.
+//! let ctx = Context::headless(100, 100);
+//! ```
+//!
+//! Then create a stage to place your camera, geometry, materials and lights.
+//!
+//! ```
+//! # use renderling::Context;
+//! use renderling::stage::Stage;
+//! # let ctx = Context::headless(100, 100);
+//! let mut stage: Stage = ctx.new_stage();
+//! ```
+//!
+//! The stage is neat in that it allows you to place values and arrays of values
+//! directly onto the GPU. Those values can be modified on the CPU and synchronization
+//! will happen during [`Stage::render`](crate::stage::Stage::render).
+//! These values are called [`Hybrid`](crate::slab::Hybrid)s and [`HybridArray`](crate::slab::HybridArray)s.
+//!
+//! ```
+//! # use renderling::{Context, stage::Stage};
+//! # let ctx = Context::headless(100, 100);
+//! # let mut stage: Stage = ctx.new_stage();
+//! use renderling::slab::{Hybrid, HybridArray};
+//!
+//! let an_f32: Hybrid<f32> = stage.new_value(1337.0);
+//!
+//! let an_array_of_tuples: HybridArray<(f32, u32, bool)> = stage.new_array([
+//!     (0.0, 0, false),
+//!     (1.0, 1, true),
+//! ]);
+//! ```
+//!
+//! In order to render, we need to "stage" a [`Renderlet`](crate::stage::Renderlet),
+//! which is a bundle of rendering resources.
+//! We do this in the same way we "staged" `an_f32` above.
+//!
+//! But first we'll need a [`Camera`](crate::camera::Camera) and some vertices of
+//! [`Vertex`](crate::stage::Vertex).
+//!
+//! ```
+//! # use renderling::{Context, stage::Stage};
+//! # let ctx = Context::headless(100, 100);
+//! # let mut stage: Stage = ctx.new_stage();
+//! use renderling::{camera::Camera, stage::{Renderlet, Vertex}};
+//! let camera = stage.new_value(Camera::default_ortho2d(100.0, 100.0));
+//! let vertices = stage.new_array([
+//!     Vertex::default()
+//!         .with_position([0.0, 0.0, 0.0])
+//!         .with_color([0.0, 1.0, 1.0, 1.0]),
+//!     Vertex::default()
+//!         .with_position([0.0, 100.0, 0.0])
+//!         .with_color([1.0, 1.0, 0.0, 1.0]),
+//!     Vertex::default()
+//!         .with_position([100.0, 0.0, 0.0])
+//!         .with_color([1.0, 0.0, 1.0, 1.0]),
+//! ]);
+//! let triangle = stage.new_value(Renderlet {
+//!     camera_id: camera.id(),
+//!     vertices_array: vertices.array(),
+//!     ..Default::default()
+//! });
+//! ```
+//!
+//! This gives us `triangle`, which is a `Hybrid<Renderlet>`. We can now pass `triangle`
+//! to the stage to draw each frame using
+//! [`Stage::add_renderlet`](crate::stage::Stage::add_renderlet).
+//!
+//! Finally, we get the next frame from the context with [`Context::get_next_frame`],
+//! render to it using [`Stage::render`](crate::stage::Stage::render) and then present the
+//! frame with [`Frame::present`].
+//!
+//! ```
+//! # use renderling::{
+//! #     Context,
+//! #     camera::Camera,    
+//! #     stage::{
+//! #         Vertex,    
+//! #         Renderlet,
+//! #     }
+//! # };
+//! # let ctx = Context::headless(100, 100);
+//! # let mut stage = ctx.new_stage();
+//! # let camera = stage.new_value(Camera::default_ortho2d(100.0, 100.0));
+//! # let vertices = stage.new_array([
+//! #     Vertex::default()
+//! #         .with_position([0.0, 0.0, 0.0])
+//! #         .with_color([0.0, 1.0, 1.0, 1.0]),
+//! #     Vertex::default()
+//! #         .with_position([0.0, 100.0, 0.0])
+//! #         .with_color([1.0, 1.0, 0.0, 1.0]),
+//! #     Vertex::default()
+//! #         .with_position([100.0, 0.0, 0.0])
+//! #         .with_color([1.0, 0.0, 1.0, 1.0]),
+//! # ]);
+//! # let triangle = stage.new_value(Renderlet {
+//! #     camera_id: camera.id(),
+//! #     vertices_array: vertices.array(),
+//! #     ..Default::default()
+//! # });
+//! stage.add_renderlet(&triangle);
+//!
+//! let frame = ctx.get_next_frame().unwrap();
+//! stage.render(&frame.view());
+//! let img = frame.read_image().unwrap();
+//! frame.present();
+//! ```
+//!
+//! Saving `img` should give us this:
+//!
+//! ![renderling hello triangle](https://github.com/schell/renderling/blob/main/test_img/cmy_triangle.png?raw=true)
 //!
 //! # WARNING
 //!
 //! This is very much a work in progress.
 //!
-//! Your mileage may vary, and your PRs are welcomed :)
+//! Your mileage may vary, but I hope you get good use out of this library.
+//!
+//! PRs are very much welcomed :)
 #![cfg_attr(target_arch = "spirv", no_std)]
 #![deny(clippy::disallowed_methods)]
-
-// TODO: Audit the API and make it more ergonomic/predictable.
 
 pub mod atlas;
 pub mod bits;
 pub mod bloom;
-mod camera;
+pub mod camera;
 pub mod color;
+#[cfg(not(target_arch = "spirv"))]
+mod context;
 pub mod convolution;
 #[cfg(not(target_arch = "spirv"))]
 pub mod cubemap;
 #[cfg(not(target_arch = "spirv"))]
-pub mod frame;
-// #[cfg(feature = "gltf")]
-// pub mod gltf;
-#[cfg(not(target_arch = "spirv"))]
-mod context;
-#[cfg(not(target_arch = "spirv"))]
 pub mod ibl;
 #[cfg(not(target_arch = "spirv"))]
-pub mod linkage;
+mod linkage;
 pub mod math;
 pub mod pbr;
 pub mod skybox;
 pub mod slab;
 pub mod stage;
 #[cfg(not(target_arch = "spirv"))]
-mod state;
-#[cfg(not(target_arch = "spirv"))]
-mod texture;
+pub mod texture;
 pub mod tonemapping;
-mod transform;
-#[cfg(feature = "tutorial")]
+pub mod transform;
+#[cfg(test)]
 pub mod tutorial;
 
-pub use camera::*;
 #[cfg(not(target_arch = "spirv"))]
 pub use context::*;
-use glam::Vec3;
-#[cfg(not(target_arch = "spirv"))]
-use image::GenericImageView;
-#[cfg(not(target_arch = "spirv"))]
-pub use state::*;
-#[cfg(not(target_arch = "spirv"))]
-pub use texture::*;
-pub use transform::*;
-
-use spirv_std::{
-    image::{Cubemap, Image2d},
-    Sampler,
-};
 
 #[macro_export]
+/// A wrapper around `std::println` that is a noop on the GPU.
 macro_rules! println {
     ($($arg:tt)*) => {
         #[cfg(not(target_arch = "spirv"))]
@@ -74,143 +173,21 @@ macro_rules! println {
     }
 }
 
-pub trait IsSampler: Copy + Clone {}
-
-impl IsSampler for Sampler {}
-
-pub trait Sample2d {
-    type Sampler: IsSampler;
-
-    fn sample_by_lod(&self, sampler: Self::Sampler, uv: glam::Vec2, lod: f32) -> glam::Vec4;
-}
-
-impl Sample2d for Image2d {
-    type Sampler = Sampler;
-
-    fn sample_by_lod(&self, sampler: Self::Sampler, uv: glam::Vec2, lod: f32) -> glam::Vec4 {
-        self.sample_by_lod(sampler, uv, lod)
-    }
-}
-
-pub trait SampleCube {
-    type Sampler: IsSampler;
-
-    fn sample_by_lod(&self, sampler: Self::Sampler, uv: Vec3, lod: f32) -> glam::Vec4;
-}
-
-impl SampleCube for Cubemap {
-    type Sampler = Sampler;
-
-    fn sample_by_lod(&self, sampler: Self::Sampler, uv: Vec3, lod: f32) -> glam::Vec4 {
-        self.sample_by_lod(sampler, uv, lod)
-    }
-}
-
-#[cfg(not(target_arch = "spirv"))]
-mod cpu {
+#[cfg(test)]
+mod test {
     use super::*;
+    use crate::{
+        atlas::AtlasImage,
+        camera::Camera,
+        pbr::Material,
+        stage::{NestedTransform, Renderlet, Vertex},
+        transform::Transform,
+    };
 
-    /// A CPU-side texture sampler.
-    ///
-    /// Provided primarily for testing purposes.
-    #[derive(Debug, Clone, Copy, Default)]
-    pub struct CpuSampler;
+    use glam::{Mat3, Mat4, Quat, Vec2, Vec3, Vec4};
+    use img_diff::DiffCfg;
+    use pretty_assertions::assert_eq;
 
-    impl IsSampler for CpuSampler {}
-
-    #[derive(Debug, Default)]
-    pub struct CpuTexture2d {
-        pub image: image::DynamicImage,
-    }
-
-    impl Sample2d for CpuTexture2d {
-        type Sampler = CpuSampler;
-
-        fn sample_by_lod(&self, _sampler: Self::Sampler, uv: glam::Vec2, _lod: f32) -> glam::Vec4 {
-            // TODO: lerp the CPU texture sampling
-            let x = uv.x as u32;
-            if x >= self.image.width() {
-                return glam::Vec4::ZERO;
-            }
-
-            let y = uv.y as u32;
-            if y >= self.image.height() {
-                return glam::Vec4::ZERO;
-            }
-
-            let image::Rgba([r, g, b, a]) = self.image.get_pixel(uv.x as u32, uv.y as u32);
-            glam::Vec4::new(
-                r as f32 / 255.0,
-                g as f32 / 255.0,
-                b as f32 / 255.0,
-                a as f32 / 255.0,
-            )
-        }
-    }
-
-    /// A CPU-side cubemap texture.
-    ///
-    /// Provided primarily for testing purposes.
-    #[derive(Default)]
-    pub struct CpuCubemap {
-        pub images: [image::DynamicImage; 6],
-    }
-
-    impl SampleCube for CpuCubemap {
-        type Sampler = CpuSampler;
-
-        fn sample_by_lod(
-            &self,
-            _sampler: Self::Sampler,
-            direction: glam::Vec3,
-            _lod: f32,
-        ) -> glam::Vec4 {
-            // Take the absolute value of the direction vector components
-            let abs_direction = direction.abs();
-            let (max_dim, u, v): (usize, f32, f32);
-
-            // Determine which face of the cubemap the direction vector is pointing towards
-            // by finding the largest component of the vector.
-            // The u and v texture coordinates within that face are calculated by dividing
-            // the other two components of the direction vector by the largest component.
-            if abs_direction.x >= abs_direction.y && abs_direction.x >= abs_direction.z {
-                max_dim = if direction.x >= 0.0 { 0 } else { 1 };
-                u = -direction.z / abs_direction.x;
-                v = -direction.y / abs_direction.x;
-            } else if abs_direction.y >= abs_direction.x && abs_direction.y >= abs_direction.z {
-                max_dim = if direction.y >= 0.0 { 2 } else { 3 };
-                u = direction.x / abs_direction.y;
-                v = -direction.z / abs_direction.y;
-            } else {
-                max_dim = if direction.z >= 0.0 { 4 } else { 5 };
-                u = direction.x / abs_direction.z;
-                v = direction.y / abs_direction.z;
-            }
-
-            // Get the dimensions of the cubemap image
-            let (width, height) = self.images[max_dim].dimensions();
-            // Convert the u and v coordinates from [-1, 1] to [0, width/height]
-            let tex_u = ((u + 1.0) * 0.5 * (width as f32 - 1.0)).round() as u32;
-            if tex_u >= self.images[max_dim].width() {
-                return glam::Vec4::ZERO;
-            }
-            let tex_v = ((1.0 - v) * 0.5 * (height as f32 - 1.0)).round() as u32;
-            if tex_v >= self.images[max_dim].height() {
-                return glam::Vec4::ZERO;
-            }
-
-            // Sample and return the color from the appropriate image in the cubemap
-            let pixel = self.images[max_dim].get_pixel(tex_u, tex_v);
-            glam::Vec4::new(
-                pixel[0] as f32 / 255.0,
-                pixel[1] as f32 / 255.0,
-                pixel[2] as f32 / 255.0,
-                pixel[3] as f32 / 255.0,
-            )
-        }
-    }
-
-    #[cfg(test)]
     #[ctor::ctor]
     fn init_logging() {
         let _ = env_logger::builder()
@@ -221,26 +198,6 @@ mod cpu {
             .filter_module("crabslab", log::LevelFilter::Debug)
             .try_init();
     }
-}
-
-#[cfg(not(target_arch = "spirv"))]
-pub use cpu::*;
-
-pub mod shader_test;
-
-#[cfg(test)]
-mod test {
-    use super::*;
-    use crate::{
-        atlas::AtlasImage,
-        pbr::Material,
-        slab::*,
-        stage::{NestedTransform, Renderlet, Vertex},
-    };
-
-    use glam::{Mat3, Mat4, Quat, Vec2, Vec3, Vec4};
-    use img_diff::DiffCfg;
-    use pretty_assertions::assert_eq;
 
     #[test]
     fn sanity_transmute() {
@@ -279,19 +236,20 @@ mod test {
     fn cmy_triangle_sanity() {
         let ctx = Context::headless(100, 100);
         let mut stage = ctx.new_stage().with_background_color(Vec4::splat(1.0));
-        let (projection, view) = default_ortho2d(100.0, 100.0);
-        let camera = stage.append(&Camera::new(projection, view));
-        let geometry = stage.append_array(&right_tri_vertices());
-        let _tri_id = stage.draw(Renderlet {
-            camera,
-            vertices: geometry,
+        let camera = stage.new_value(Camera::default_ortho2d(100.0, 100.0));
+        let geometry = stage.new_array(right_tri_vertices());
+        let tri = stage.new_value(Renderlet {
+            camera_id: camera.id(),
+            vertices_array: geometry.array(),
             ..Default::default()
         });
+        stage.add_renderlet(&tri);
 
-        let frame = ctx.get_current_frame().unwrap();
+        let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
         let img = frame.read_image().unwrap();
         frame.present();
+
         let depth_texture = stage.get_depth_texture();
         let depth_img = depth_texture.read_image().unwrap();
         img_diff::assert_img_eq("cmy_triangle_depth.png", depth_img.clone());
@@ -312,20 +270,6 @@ mod test {
         img_diff::save("cmy_triangle/bloom_mix.png", bloom_mix);
 
         img_diff::assert_img_eq("cmy_triangle.png", img);
-
-        // NOTE: We cannot call `stage.read_slab()` until we have rendered, as the
-        // slab has not created a GPU buffer until rendering.
-        let data = futures_lite::future::block_on(stage.read_slab()).unwrap();
-        let t = data.read(Id::<Transform>::NONE);
-        assert_eq!(Transform::default(), t);
-        assert_eq!(
-            Transform {
-                translation: Vec3::ZERO,
-                rotation: Quat::IDENTITY,
-                scale: Vec3::ONE
-            },
-            t
-        );
     }
 
     #[test]
@@ -336,24 +280,20 @@ mod test {
 
         let ctx = Context::headless(100, 100);
         let mut stage = ctx.new_stage().with_background_color(Vec4::splat(1.0));
-        let (projection, view) = default_ortho2d(100.0, 100.0);
-        let camera = stage.append(&Camera {
-            projection,
-            view,
-            ..Default::default()
-        });
-        let geometry = stage.append_array(&{
+        let camera = stage.new_value(Camera::default_ortho2d(100.0, 100.0));
+        let geometry = stage.new_array({
             let mut vs = right_tri_vertices();
             vs.reverse();
             vs
         });
-        let _tri = stage.draw(Renderlet {
-            camera,
-            vertices: geometry,
+        let tri = stage.new_value(Renderlet {
+            camera_id: camera.id(),
+            vertices_array: geometry.array(),
             ..Default::default()
         });
+        stage.add_renderlet(&tri);
 
-        let frame = ctx.get_current_frame().unwrap();
+        let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
         let img = frame.read_image().unwrap();
         img_diff::assert_img_eq_cfg(
@@ -367,34 +307,31 @@ mod test {
     }
 
     #[test]
-    // This tests our ability to update the transform of a `RenderUnit` after it
+    // This tests our ability to update the transform of a `Renderlet` after it
     // has already been sent to the GPU.
     // We do this by writing over the previous transform in the stage.
     fn cmy_triangle_update_transform() {
         let ctx = Context::headless(100, 100);
         let mut stage = ctx.new_stage().with_background_color(Vec4::splat(1.0));
-        let (projection, view) = default_ortho2d(100.0, 100.0);
-        let camera = stage.append(&Camera::new(projection, view));
-        let geometry = stage.append_array(&right_tri_vertices());
-        let transform = stage.append(&Transform::default());
-        let _tri = stage.draw(Renderlet {
-            camera,
-            vertices: geometry,
-            transform,
+        let camera = stage.new_value(Camera::default_ortho2d(100.0, 100.0));
+        let geometry = stage.new_array(right_tri_vertices());
+        let transform = stage.new_value(Transform::default());
+        let tri = stage.new_value(Renderlet {
+            camera_id: camera.id(),
+            vertices_array: geometry.array(),
+            transform_id: transform.id(),
             ..Default::default()
         });
+        stage.add_renderlet(&tri);
 
-        let frame = ctx.get_current_frame().unwrap();
+        let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
 
-        stage.write(
-            transform,
-            &Transform {
-                translation: Vec3::new(100.0, 0.0, 0.0),
-                rotation: Quat::from_axis_angle(Vec3::Z, std::f32::consts::FRAC_PI_2),
-                scale: Vec3::new(0.5, 0.5, 1.0),
-            },
-        );
+        transform.set(Transform {
+            translation: Vec3::new(100.0, 0.0, 0.0),
+            rotation: Quat::from_axis_angle(Vec3::Z, std::f32::consts::FRAC_PI_2),
+            scale: Vec3::new(0.5, 0.5, 1.0),
+        });
 
         stage.render(&frame.view());
         let img = frame.read_image().unwrap();
@@ -446,24 +383,26 @@ mod test {
         let ctx = Context::headless(100, 100);
         let mut stage = ctx.new_stage().with_background_color(Vec4::splat(1.0));
         let camera_position = Vec3::new(0.0, 12.0, 20.0);
-        let camera = stage.append(&Camera {
+        let camera = stage.new_value(Camera {
             projection: Mat4::perspective_rh(std::f32::consts::PI / 4.0, 1.0, 0.1, 100.0),
             view: Mat4::look_at_rh(camera_position, Vec3::ZERO, Vec3::Y),
             position: camera_position,
         });
-        let geometry = stage.append_array(&gpu_cube_vertices());
-        let transform = stage.append(&Transform {
+        let geometry = stage.new_array(gpu_cube_vertices());
+        let transform = stage.new_value(Transform {
             scale: Vec3::new(6.0, 6.0, 6.0),
             rotation: Quat::from_axis_angle(Vec3::Y, -std::f32::consts::FRAC_PI_4),
             ..Default::default()
         });
-        let _cube = stage.draw(Renderlet {
-            camera,
-            vertices: geometry,
-            transform,
+        let cube = stage.new_value(Renderlet {
+            camera_id: camera.id(),
+            vertices_array: geometry.array(),
+            transform_id: transform.id(),
             ..Default::default()
         });
-        let frame = ctx.get_current_frame().unwrap();
+        stage.add_renderlet(&cube);
+
+        let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
         let depth_texture = stage.get_depth_texture();
         let depth_img = depth_texture.read_image().unwrap();
@@ -478,26 +417,28 @@ mod test {
         let ctx = Context::headless(100, 100);
         let mut stage = ctx.new_stage().with_background_color(Vec4::splat(1.0));
         let camera_position = Vec3::new(0.0, 12.0, 20.0);
-        let camera = stage.append(&Camera {
+        let camera = stage.new_value(Camera {
             projection: Mat4::perspective_rh(std::f32::consts::PI / 4.0, 1.0, 0.1, 100.0),
             view: Mat4::look_at_rh(camera_position, Vec3::ZERO, Vec3::Y),
             position: camera_position,
         });
-        let vertices = stage.append_array(&math::UNIT_POINTS.map(cmy_gpu_vertex));
-        let indices = stage.append_array(&math::UNIT_INDICES.map(|i| i as u32));
-        let transform = stage.append(&Transform {
+        let vertices = stage.new_array(math::UNIT_POINTS.map(cmy_gpu_vertex));
+        let indices = stage.new_array(math::UNIT_INDICES.map(|i| i as u32));
+        let transform = stage.new_value(Transform {
             scale: Vec3::new(6.0, 6.0, 6.0),
             rotation: Quat::from_axis_angle(Vec3::Y, -std::f32::consts::FRAC_PI_4),
             ..Default::default()
         });
-        let _cube = stage.draw(Renderlet {
-            camera,
-            vertices,
-            indices,
-            transform,
+        let cube = stage.new_value(Renderlet {
+            camera_id: camera.id(),
+            vertices_array: vertices.array(),
+            indices_array: indices.array(),
+            transform_id: transform.id(),
             ..Default::default()
         });
-        let frame = ctx.get_current_frame().unwrap();
+        stage.add_renderlet(&cube);
+
+        let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
         let img = frame.read_image().unwrap();
         img_diff::assert_img_eq_cfg(
@@ -517,33 +458,37 @@ mod test {
         let ctx = Context::headless(100, 100);
         let mut stage = ctx.new_stage().with_background_color(Vec4::splat(1.0));
         let (projection, view) = camera::default_perspective(100.0, 100.0);
-        let camera = stage.append(&Camera {
+        let camera = stage.new_value(Camera {
             projection,
             view,
             ..Default::default()
         });
-        let geometry = stage.append_array(&gpu_cube_vertices());
+        let geometry = stage.new_array(gpu_cube_vertices());
+        let cube_one_transform = stage.new_value(Transform {
+            translation: Vec3::new(-4.5, 0.0, 0.0),
+            scale: Vec3::new(6.0, 6.0, 6.0),
+            rotation: Quat::from_axis_angle(Vec3::Y, -std::f32::consts::FRAC_PI_4),
+        });
         let mut renderlet = Renderlet {
-            vertices: geometry,
-            camera,
-            transform: stage.append(&Transform {
-                translation: Vec3::new(-4.5, 0.0, 0.0),
-                scale: Vec3::new(6.0, 6.0, 6.0),
-                rotation: Quat::from_axis_angle(Vec3::Y, -std::f32::consts::FRAC_PI_4),
-            }),
+            vertices_array: geometry.array(),
+            camera_id: camera.id(),
+            transform_id: cube_one_transform.id(),
             ..Default::default()
         };
-        let _cube_one = stage.draw(renderlet);
+        let cube_one = stage.new_value(renderlet);
+        stage.add_renderlet(&cube_one);
 
-        renderlet.transform = stage.append(&Transform {
+        let cube_two_transform = stage.new_value(Transform {
             translation: Vec3::new(4.5, 0.0, 0.0),
             scale: Vec3::new(6.0, 6.0, 6.0),
             rotation: Quat::from_axis_angle(Vec3::Y, std::f32::consts::FRAC_PI_4),
         });
-        let cube_two_rendering = stage.draw(renderlet);
+        renderlet.transform_id = cube_two_transform.id();
+        let cube_two = stage.new_value(renderlet);
+        stage.add_renderlet(&cube_two);
 
         // we should see two colored cubes
-        let frame = ctx.get_current_frame().unwrap();
+        let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
         let img = frame.read_image().unwrap();
         img_diff::assert_img_eq("cmy_cube/visible_before.png", img.clone());
@@ -551,20 +496,20 @@ mod test {
         frame.present();
 
         // update cube two making it invisible
-        cube_two_rendering.modify(|r| r.visible = false);
+        cube_two.modify(|r| r.visible = false);
 
         // we should see only one colored cube
-        let frame = ctx.get_current_frame().unwrap();
+        let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
         let img = frame.read_image().unwrap();
         img_diff::assert_img_eq("cmy_cube/visible_after.png", img);
         frame.present();
 
         // update cube two making in visible again
-        cube_two_rendering.modify(|r| r.visible = true);
+        cube_two.modify(|r| r.visible = true);
 
         // we should see two colored cubes again
-        let frame = ctx.get_current_frame().unwrap();
+        let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
         let img = frame.read_image().unwrap();
         img_diff::assert_eq("cmy_cube/visible_before_again.png", img_before, img);
@@ -580,31 +525,32 @@ mod test {
             .with_lighting(false)
             .with_background_color(Vec4::splat(1.0));
         let (projection, view) = camera::default_perspective(100.0, 100.0);
-        let camera = stage.append(&Camera {
+        let camera = stage.new_value(Camera {
             projection,
             view,
             ..Default::default()
         });
         let cube_geometry =
-            stage.append_array(&math::UNIT_INDICES.map(|i| cmy_gpu_vertex(math::UNIT_POINTS[i])));
+            stage.new_array(math::UNIT_INDICES.map(|i| cmy_gpu_vertex(math::UNIT_POINTS[i])));
         let pyramid_points = pyramid_points();
-        let pyramid_geometry = stage
-            .append_array(&pyramid_indices().map(|i| cmy_gpu_vertex(pyramid_points[i as usize])));
+        let pyramid_geometry =
+            stage.new_array(pyramid_indices().map(|i| cmy_gpu_vertex(pyramid_points[i as usize])));
 
-        let transform = stage.append(&Transform {
+        let transform = stage.new_value(Transform {
             scale: Vec3::new(10.0, 10.0, 10.0),
             ..Default::default()
         });
 
-        let cube: slab::Hybrid<Renderlet> = stage.draw(Renderlet {
-            camera,
-            vertices: cube_geometry,
-            transform,
+        let cube: slab::Hybrid<Renderlet> = stage.new_value(Renderlet {
+            camera_id: camera.id(),
+            vertices_array: cube_geometry.array(),
+            transform_id: transform.id(),
             ..Default::default()
         });
+        stage.add_renderlet(&cube);
 
         // we should see a cube (in sRGB color space)
-        let frame = ctx.get_current_frame().unwrap();
+        let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
         let img = frame.read_image().unwrap();
         img_diff::assert_img_eq("cmy_cube/remesh_before.png", img);
@@ -612,10 +558,10 @@ mod test {
 
         // Update the cube mesh to a pyramid by overwriting the `.vertices` field
         // of `Renderlet`
-        cube.modify(|r| r.vertices = pyramid_geometry);
+        cube.modify(|r| r.vertices_array = pyramid_geometry.array());
 
         // we should see a pyramid (in sRGB color space)
-        let frame = ctx.get_current_frame().unwrap();
+        let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
         let img = frame.read_image().unwrap();
         img_diff::assert_img_eq("cmy_cube/remesh_after.png", img);
@@ -674,44 +620,45 @@ mod test {
         let ctx = Context::headless(100, 100);
         let mut stage = ctx.new_stage().with_background_color(Vec4::splat(0.0));
         let (projection, view) = camera::default_perspective(100.0, 100.0);
-        let camera = stage.append(&Camera::new(projection, view));
+        let camera = stage.new_value(Camera::new(projection, view));
         let sandstone = AtlasImage::from(image::open("../../img/sandstone.png").unwrap());
         let dirt = AtlasImage::from(image::open("../../img/dirt.jpg").unwrap());
         let textures = stage.set_images([sandstone, dirt]).unwrap();
         let sandstone_tex = textures[0];
         let dirt_tex = textures[1];
-        let sandstone_tex_id = stage.append(&sandstone_tex);
-        let material = stage.append(&Material {
-            albedo_texture: sandstone_tex_id,
+        let sandstone_tex = stage.new_value(sandstone_tex);
+        let material = stage.new_value(Material {
+            albedo_texture_id: sandstone_tex.id(),
             has_lighting: false,
             ..Default::default()
         });
-        let geometry = stage.append_array(&gpu_uv_unit_cube());
-        let transform = stage.append(&Transform {
+        let geometry = stage.new_array(gpu_uv_unit_cube());
+        let transform = stage.new_value(Transform {
             scale: Vec3::new(10.0, 10.0, 10.0),
             ..Default::default()
         });
-        let cube = stage.draw(Renderlet {
-            camera,
-            vertices: geometry,
-            material,
-            transform,
+        let cube = stage.new_value(Renderlet {
+            camera_id: camera.id(),
+            vertices_array: geometry.array(),
+            material_id: material.id(),
+            transform_id: transform.id(),
             ..Default::default()
         });
+        stage.add_renderlet(&cube);
         println!("cube: {cube:?}");
 
         // we should see a cube with a stoney texture
-        let frame = ctx.get_current_frame().unwrap();
+        let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
         let img = frame.read_image().unwrap();
         img_diff::assert_img_eq("unlit_textured_cube_material_before.png", img);
         frame.present();
 
         // update the material's texture on the GPU
-        stage.write(sandstone_tex_id, &dirt_tex);
+        sandstone_tex.set(dirt_tex);
 
         // we should see a cube with a dirty texture
-        let frame = ctx.get_current_frame().unwrap();
+        let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
         let img = frame.read_image().unwrap();
         img_diff::assert_img_eq("unlit_textured_cube_material_after.png", img);
@@ -727,19 +674,19 @@ mod test {
             .with_background_color(Vec3::splat(0.0).extend(1.0));
 
         let (projection, view) = camera::default_ortho2d(100.0, 100.0);
-        let camera = stage.append(&Camera::new(projection, view));
+        let camera = stage.new_value(Camera::new(projection, view));
 
         // now test the textures functionality
         let img = AtlasImage::from_path("../../img/cheetah.jpg").unwrap();
         let textures = stage.set_images([img]).unwrap();
-        let textures = stage.append_array(&textures);
-        let cheetah_material = stage.append(&Material {
-            albedo_texture: textures.at(0),
+        let textures = stage.new_array(textures);
+        let cheetah_material = stage.new_value(Material {
+            albedo_texture_id: textures.array().at(0),
             has_lighting: false,
             ..Default::default()
         });
 
-        let geometry = stage.append_array(&[
+        let geometry = stage.new_array([
             Vertex {
                 position: Vec3::new(0.0, 0.0, 0.0),
                 color: Vec4::new(1.0, 1.0, 0.0, 1.0),
@@ -763,29 +710,28 @@ mod test {
             },
         ]);
 
-        let _color_prim = {
-            stage.draw(Renderlet {
-                camera,
-                vertices: geometry,
-                ..Default::default()
-            })
-        };
-        let _cheetah_prim = {
-            let transform = stage.append(&Transform {
-                translation: Vec3::new(15.0, 35.0, 0.5),
-                scale: Vec3::new(0.5, 0.5, 1.0),
-                ..Default::default()
-            });
-            stage.draw(Renderlet {
-                camera,
-                vertices: geometry,
-                transform,
-                material: cheetah_material,
-                ..Default::default()
-            })
-        };
+        let color_prim = stage.new_value(Renderlet {
+            camera_id: camera.id(),
+            vertices_array: geometry.array(),
+            ..Default::default()
+        });
+        stage.add_renderlet(&color_prim);
 
-        let frame = ctx.get_current_frame().unwrap();
+        let cheetah_transform = stage.new_value(Transform {
+            translation: Vec3::new(15.0, 35.0, 0.5),
+            scale: Vec3::new(0.5, 0.5, 1.0),
+            ..Default::default()
+        });
+        let cheetah_prim = stage.new_value(Renderlet {
+            camera_id: camera.id(),
+            vertices_array: geometry.array(),
+            transform_id: cheetah_transform.id(),
+            material_id: cheetah_material.id(),
+            ..Default::default()
+        });
+        stage.add_renderlet(&cheetah_prim);
+
+        let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
         let img = frame.read_image().unwrap();
         img_diff::assert_img_eq("gpu_scene_sanity2.png", img);
@@ -804,22 +750,22 @@ mod test {
 
         let (projection, _) = camera::default_perspective(100.0, 100.0);
         let view = Mat4::look_at_rh(Vec3::new(1.8, 1.8, 1.8), Vec3::ZERO, Vec3::Y);
-        let camera = stage.append(&Camera::new(projection, view));
+        let camera = stage.new_value(Camera::new(projection, view));
 
         let red = Vec3::X.extend(1.0);
         let green = Vec3::Y.extend(1.0);
         let blue = Vec3::Z.extend(1.0);
-        let dir_red = stage.append(&DirectionalLight {
+        let dir_red = stage.new_value(DirectionalLight {
             direction: Vec3::NEG_Y,
             color: red,
             intensity: 10.0,
         });
-        let dir_green = stage.append(&DirectionalLight {
+        let dir_green = stage.new_value(DirectionalLight {
             direction: Vec3::NEG_X,
             color: green,
             intensity: 10.0,
         });
-        let dir_blue = stage.append(&DirectionalLight {
+        let dir_blue = stage.new_value(DirectionalLight {
             direction: Vec3::NEG_Z,
             color: blue,
             intensity: 10.0,
@@ -827,19 +773,19 @@ mod test {
         assert_eq!(
             Light {
                 light_type: LightStyle::Directional,
-                index: dir_red.inner(),
+                index: dir_red.id().inner(),
                 ..Default::default()
             },
-            dir_red.into()
+            dir_red.id().into()
         );
-        let dir_red = stage.append(&Light::from(dir_red));
-        let dir_green = stage.append(&Light::from(dir_green));
-        let dir_blue = stage.append(&Light::from(dir_blue));
-        stage.set_lights(vec![dir_red, dir_green, dir_blue]);
+        let dir_red = stage.new_value(Light::from(dir_red.id()));
+        let dir_green = stage.new_value(Light::from(dir_green.id()));
+        let dir_blue = stage.new_value(Light::from(dir_blue.id()));
+        stage.set_lights(vec![dir_red.id(), dir_green.id(), dir_blue.id()]);
 
-        let material = stage.append(&Material::default());
-        let geometry = stage.append_array(
-            &math::unit_cube()
+        let material = stage.new_value(Material::default());
+        let geometry = stage.new_array(
+            math::unit_cube()
                 .into_iter()
                 .map(|(p, n)| Vertex {
                     position: p,
@@ -849,14 +795,15 @@ mod test {
                 })
                 .collect::<Vec<_>>(),
         );
-        let _cube = stage.draw(Renderlet {
-            camera,
-            vertices: geometry,
-            material,
+        let cube = stage.new_value(Renderlet {
+            camera_id: camera.id(),
+            vertices_array: geometry.array(),
+            material_id: material.id(),
             ..Default::default()
         });
+        stage.add_renderlet(&cube);
 
-        let frame = ctx.get_current_frame().unwrap();
+        let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
         let img = frame.read_image().unwrap();
         let depth_texture = stage.get_depth_texture();
@@ -908,25 +855,25 @@ mod test {
         let ctx = Context::headless(100, 100);
         let mut stage = ctx.new_stage().with_background_color(Vec4::splat(0.0));
         let (projection, view) = camera::default_ortho2d(100.0, 100.0);
-        let camera = stage.append(&Camera::new(projection, view));
+        let camera = stage.new_value(Camera::new(projection, view));
         let size = 1.0;
-        let cyan_material = stage.append(&Material {
+        let cyan_material = stage.new_value(Material {
             albedo_factor: Vec4::new(0.0, 1.0, 1.0, 1.0),
             has_lighting: false,
             ..Default::default()
         });
-        let yellow_material = stage.append(&Material {
+        let yellow_material = stage.new_value(Material {
             albedo_factor: Vec4::new(1.0, 1.0, 0.0, 1.0),
             has_lighting: false,
             ..Default::default()
         });
-        let red_material = stage.append(&Material {
+        let red_material = stage.new_value(Material {
             albedo_factor: Vec4::new(1.0, 0.0, 0.0, 1.0),
             has_lighting: false,
             ..Default::default()
         });
 
-        let geometry = stage.append_array(&[
+        let geometry = stage.new_array([
             Vertex::default().with_position([0.0, 0.0, 0.0]),
             Vertex::default().with_position([size, size, 0.0]),
             Vertex::default().with_position([size, 0.0, 0.0]),
@@ -963,29 +910,32 @@ mod test {
         yellow_node.add_child(&red_node);
         println!("red_node: {:#?}", red_node.get_global_transform());
 
-        let _cyan_primitive = stage.draw(Renderlet {
-            vertices: geometry,
-            camera,
-            material: cyan_material,
-            transform: cyan_node.global_transform_id(),
+        let cyan_primitive = stage.new_value(Renderlet {
+            vertices_array: geometry.array(),
+            camera_id: camera.id(),
+            material_id: cyan_material.id(),
+            transform_id: cyan_node.global_transform_id(),
             ..Default::default()
         });
-        let _yellow_primitive = stage.draw(Renderlet {
-            vertices: geometry,
-            camera,
-            material: yellow_material,
-            transform: yellow_node.global_transform_id(),
+        stage.add_renderlet(&cyan_primitive);
+        let yellow_primitive = stage.new_value(Renderlet {
+            vertices_array: geometry.array(),
+            camera_id: camera.id(),
+            material_id: yellow_material.id(),
+            transform_id: yellow_node.global_transform_id(),
             ..Default::default()
         });
-        let _red_primitive = stage.draw(Renderlet {
-            vertices: geometry,
-            camera,
-            material: red_material,
-            transform: red_node.global_transform_id(),
+        stage.add_renderlet(&yellow_primitive);
+        let red_primitive = stage.new_value(Renderlet {
+            vertices_array: geometry.array(),
+            camera_id: camera.id(),
+            material_id: red_material.id(),
+            transform_id: red_node.global_transform_id(),
             ..Default::default()
         });
+        stage.add_renderlet(&red_primitive);
 
-        let frame = ctx.get_current_frame().unwrap();
+        let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
         let img = frame.read_image().unwrap();
         img_diff::assert_img_eq("scene_parent_sanity.png", img);
@@ -1024,9 +974,9 @@ mod test {
             Vec3::new(half, half, 0.0),
             Vec3::Y,
         );
-        let camera = stage.append(&Camera::new(projection, view));
+        let camera = stage.new_value(Camera::new(projection, view));
 
-        let geometry = stage.append_array(&{
+        let geometry = stage.new_array({
             let mut icosphere = icosahedron::Polyhedron::new_isocahedron(radius, 5);
             icosphere.compute_triangle_normals();
             let icosahedron::Polyhedron {
@@ -1060,33 +1010,34 @@ mod test {
                 let metallic = j as f32 / (k - 1) as f32;
                 let y = (diameter + spacing) * j as f32;
 
-                let material = stage.append(&Material {
+                let material = stage.new_value(Material {
                     albedo_factor: Vec4::new(1.0, 1.0, 1.0, 1.0),
                     metallic_factor: metallic,
                     roughness_factor: roughness,
                     ..Default::default()
                 });
-                let transform = stage.append(&Transform {
+                let transform = stage.new_value(Transform {
                     translation: Vec3::new(x, y, 0.0),
                     ..Default::default()
                 });
-                let sphere = stage.draw(Renderlet {
-                    camera,
-                    vertices: geometry,
-                    transform,
-                    material,
+                let sphere = stage.new_value(Renderlet {
+                    camera_id: camera.id(),
+                    vertices_array: geometry.array(),
+                    transform_id: transform.id(),
+                    material_id: material.id(),
                     ..Default::default()
                 });
+                stage.add_renderlet(&sphere);
                 spheres.push(sphere);
             }
         }
 
         let (device, queue) = ctx.get_device_and_queue_owned();
         let hdr_image = AtlasImage::from_hdr_path("../../img/hdr/resting_place.hdr").unwrap();
-        let skybox = crate::skybox::Skybox::new(device, queue, hdr_image, camera);
+        let skybox = crate::skybox::Skybox::new(device, queue, hdr_image, camera.id());
         stage.set_skybox(skybox);
 
-        let frame = ctx.get_current_frame().unwrap();
+        let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
         let img = frame.read_image().unwrap();
         img_diff::assert_img_eq("pbr/metallic_roughness_spheres.png", img);

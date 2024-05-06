@@ -10,9 +10,10 @@ use spirv_std::{
 };
 
 use crate::{
+    camera::Camera,
     math::IsVector,
     pbr::{Material, PbrConfig},
-    Camera, Transform,
+    transform::Transform,
 };
 
 #[allow(unused_imports)]
@@ -178,12 +179,12 @@ impl Vertex {
 #[derive(Clone, Copy, PartialEq, SlabItem)]
 pub struct Renderlet {
     pub visible: bool,
-    pub vertices: Array<Vertex>,
-    pub indices: Array<u32>,
-    pub camera: Id<Camera>,
-    pub transform: Id<Transform>,
-    pub material: Id<Material>,
-    pub pbr_config: Id<PbrConfig>,
+    pub vertices_array: Array<Vertex>,
+    pub indices_array: Array<u32>,
+    pub camera_id: Id<Camera>,
+    pub transform_id: Id<Transform>,
+    pub material_id: Id<Material>,
+    pub pbr_config_id: Id<PbrConfig>,
     pub debug_index: u32,
 }
 
@@ -191,12 +192,12 @@ impl Default for Renderlet {
     fn default() -> Self {
         Renderlet {
             visible: true,
-            vertices: Array::default(),
-            indices: Array::default(),
-            camera: Id::NONE,
-            transform: Id::NONE,
-            material: Id::NONE,
-            pbr_config: Id::new(0),
+            vertices_array: Array::default(),
+            indices_array: Array::default(),
+            camera_id: Id::NONE,
+            transform_id: Id::NONE,
+            material_id: Id::NONE,
+            pbr_config_id: Id::new(0),
             debug_index: 0,
         }
     }
@@ -258,21 +259,21 @@ pub fn renderlet_vertex(
     vertex_log.started = true;
     vertex_log.write(debug);
 
-    *out_camera = renderlet.camera;
-    *out_material = renderlet.material;
-    *out_pbr_config = renderlet.pbr_config;
+    *out_camera = renderlet.camera_id;
+    *out_material = renderlet.material_id;
+    *out_pbr_config = renderlet.pbr_config_id;
 
-    let index = if renderlet.indices.is_null() {
+    let index = if renderlet.indices_array.is_null() {
         vertex_index as usize
     } else {
-        slab.read(renderlet.indices.at(vertex_index as usize)) as usize
+        slab.read(renderlet.indices_array.at(vertex_index as usize)) as usize
     };
-    let vertex_id = renderlet.vertices.at(index as usize);
+    let vertex_id = renderlet.vertices_array.at(index as usize);
     let vertex = slab.read_unchecked(vertex_id);
     *out_color = vertex.color;
     *out_uv0 = vertex.uv0;
     *out_uv1 = vertex.uv1;
-    let transform = slab.read(renderlet.transform);
+    let transform = slab.read(renderlet.transform_id);
     let model_matrix = Mat4::from_scale_rotation_translation(
         transform.scale,
         transform.rotation,
@@ -297,7 +298,7 @@ pub fn renderlet_vertex(
     let world_pos = model_matrix.transform_point3(vertex.position);
     *out_world_pos = world_pos;
 
-    let camera = slab.read(renderlet.camera);
+    let camera = slab.read(renderlet.camera_id);
     *out_clip_pos = camera.projection * camera.view * world_pos.extend(1.0);
 
     vertex_log.completed = true;

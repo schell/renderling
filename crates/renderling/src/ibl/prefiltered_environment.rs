@@ -4,7 +4,7 @@
 pub fn create_pipeline_and_bindgroup(
     device: &wgpu::Device,
     buffer: &wgpu::Buffer,
-    environment_texture: &crate::Texture,
+    environment_texture: &crate::texture::Texture,
 ) -> (wgpu::RenderPipeline, wgpu::BindGroup) {
     let label = Some("prefiltered environment");
     let bindgroup_layout_desc = wgpu::BindGroupLayoutDescriptor {
