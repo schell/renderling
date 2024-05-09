@@ -35,7 +35,8 @@ pub struct GltfSkin {
     pub joints: Vec<usize>,
     // Containins the 4x4 inverse-bind matrices.
     //
-    // When None, each matrix is assumed to be the 4x4 identity matrix which implies that the inverse-bind matrices were pre-applied.
+    // When None, each matrix is assumed to be the 4x4 identity matrix which implies that the
+    // inverse-bind matrices were pre-applied.
     pub inverse_bind_matrices: Option<Vec<Mat4>>,
     // Index of the node used as the skeleton root.
     // When None, joints transforms resolve to scene root.
@@ -703,8 +704,8 @@ impl Animation {
 /// Applies animations to a list of [`Node`] and keeps track of how much
 /// time has elapsed.
 ///
-/// To function without errors, the [`Animation`]'s tweens' [`Tween::target_node_index`] must
-/// point to the index of [`Node`].
+/// To function without errors, the [`Animation`]'s tweens'
+/// [`Tween::target_node_index`] must point to the index of [`Node`].
 ///
 /// [`Node`]: super::Node
 #[derive(Default, Debug, Clone)]
@@ -737,8 +738,8 @@ impl Animator {
         }
     }
 
-    /// Progress the animator's animation, applying any tweened properties to the animator's
-    /// nodes.
+    /// Progress the animator's animation, applying any tweened properties to
+    /// the animator's nodes.
     pub fn progress(&mut self, dt_seconds: f32) -> Result<(), InterpolationError> {
         log::trace!(
             "progressing '{}' {dt_seconds} seconds",

@@ -1,4 +1,3 @@
-
 #![allow(dead_code)]
 //! Automatically generated with `cd shaders && cargo run --release`.
 //!

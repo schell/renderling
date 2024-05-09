@@ -319,8 +319,8 @@ impl App {
     //             r.graph.add_resource(scene);
     //             self.loader = None;
     //             self.ui
-    //                 .set_text_title("awaiting drag and dropped `.gltf` or `.glb` file");
-    //         }
+    //                 .set_text_title("awaiting drag and dropped `.gltf` or `.glb`
+    // file");         }
     //         _ => {}
     //     };
     // }
@@ -391,17 +391,17 @@ impl App {
 //             match ev {
 //                 winit::event::WindowEvent::MouseWheel { delta, .. } => {
 //                     let delta = match delta {
-//                         winit::event::MouseScrollDelta::LineDelta(_, up) => *up,
-//                         winit::event::MouseScrollDelta::PixelDelta(pos) => pos.y as f32,
-//                     };
+//                         winit::event::MouseScrollDelta::LineDelta(_, up) =>
+// *up,                         winit::event::MouseScrollDelta::PixelDelta(pos)
+// => pos.y as f32,                     };
 
 //                     app.zoom(r, delta);
 //                 }
 //                 winit::event::WindowEvent::CursorMoved { position, .. } => {
 //                     app.pan(r, *position);
 //                 }
-//                 winit::event::WindowEvent::MouseInput { state, button, .. } => {
-//                     app.mouse_button(*state, *button);
+//                 winit::event::WindowEvent::MouseInput { state, button, .. }
+// => {                     app.mouse_button(*state, *button);
 //                 }
 //                 winit::event::WindowEvent::KeyboardInput { input, .. } => {
 //                     app.key_input(r, *input);
@@ -418,19 +418,19 @@ impl App {
 //                         .unwrap();
 //                 }
 //                 winit::event::WindowEvent::DroppedFile(path) => {
-//                     log::trace!("got dropped file event: {}", path.display());
-//                     let path = format!("{}", path.display());
-//                     app.load(&path);
+//                     log::trace!("got dropped file event: {}",
+// path.display());                     let path = format!("{}",
+// path.display());                     app.load(&path);
 //                 }
 //                 _ => {}
 //             }
 
 //             if let Some(ev) = event_state.event_from_winit(ev) {
-//                 let scene = r.graph.get_resource_mut::<Scene>().unwrap().unwrap();
-//                 let channel = scene.get_debug_channel();
-//                 let mut set_debug_channel = |mode| {
-//                     log::debug!("setting debug mode to {mode:?}");
-//                     if channel != mode {
+//                 let scene =
+// r.graph.get_resource_mut::<Scene>().unwrap().unwrap();                 let
+// channel = scene.get_debug_channel();                 let mut
+// set_debug_channel = |mode| {                     log::debug!("setting debug
+// mode to {mode:?}");                     if channel != mode {
 //                         scene.set_debug_channel(mode);
 //                     } else {
 //                         scene.set_debug_channel(DebugChannel::None);
@@ -440,8 +440,8 @@ impl App {
 //                 match app.ui.event(ev) {
 //                     None => {}
 //                     Some(ev) => match ev {
-//                         UiEvent::ToggleDebugChannel(channel) => set_debug_channel(channel),
-//                     },
+//                         UiEvent::ToggleDebugChannel(channel) =>
+// set_debug_channel(channel),                     },
 //                 }
 //             }
 //         } else {

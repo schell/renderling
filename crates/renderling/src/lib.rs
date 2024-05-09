@@ -26,9 +26,11 @@
 //! ```
 //!
 //! The stage is neat in that it allows you to place values and arrays of values
-//! directly onto the GPU. Those values can be modified on the CPU and synchronization
-//! will happen during [`Stage::render`](crate::stage::Stage::render).
-//! These values are called [`Hybrid`](crate::slab::Hybrid)s and [`HybridArray`](crate::slab::HybridArray)s.
+//! directly onto the GPU. Those values can be modified on the CPU and
+//! synchronization will happen during
+//! [`Stage::render`](crate::stage::Stage::render). These values are called
+//! [`Hybrid`](crate::slab::Hybrid)s and
+//! [`HybridArray`](crate::slab::HybridArray)s.
 //!
 //! ```
 //! # use renderling::{Context, stage::Stage};
@@ -38,24 +40,26 @@
 //!
 //! let an_f32: Hybrid<f32> = stage.new_value(1337.0);
 //!
-//! let an_array_of_tuples: HybridArray<(f32, u32, bool)> = stage.new_array([
-//!     (0.0, 0, false),
-//!     (1.0, 1, true),
-//! ]);
+//! let an_array_of_tuples: HybridArray<(f32, u32, bool)> =
+//!     stage.new_array([(0.0, 0, false), (1.0, 1, true)]);
 //! ```
 //!
-//! In order to render, we need to "stage" a [`Renderlet`](crate::stage::Renderlet),
-//! which is a bundle of rendering resources.
-//! We do this in the same way we "staged" `an_f32` above.
+//! In order to render, we need to "stage" a
+//! [`Renderlet`](crate::stage::Renderlet), which is a bundle of rendering
+//! resources. We do this in the same way we "staged" `an_f32` above.
 //!
-//! But first we'll need a [`Camera`](crate::camera::Camera) and some vertices of
-//! [`Vertex`](crate::stage::Vertex) organized as triangles with counter-clockwise winding.
+//! But first we'll need a [`Camera`](crate::camera::Camera) and some vertices
+//! of [`Vertex`](crate::stage::Vertex) organized as triangles with
+//! counter-clockwise winding.
 //!
 //! ```
 //! # use renderling::{Context, stage::Stage};
 //! # let ctx = Context::headless(100, 100);
 //! # let mut stage: Stage = ctx.new_stage();
-//! use renderling::{camera::Camera, stage::{Renderlet, Vertex}};
+//! use renderling::{
+//!     camera::Camera,
+//!     stage::{Renderlet, Vertex},
+//! };
 //! let camera = stage.new_value(Camera::default_ortho2d(100.0, 100.0));
 //! let vertices = stage.new_array([
 //!     Vertex::default()
@@ -75,20 +79,21 @@
 //! });
 //! ```
 //!
-//! This gives us `triangle`, which is a `Hybrid<Renderlet>`. We can now pass `triangle`
-//! to the stage to draw each frame using
+//! This gives us `triangle`, which is a `Hybrid<Renderlet>`. We can now pass
+//! `triangle` to the stage to draw each frame using
 //! [`Stage::add_renderlet`](crate::stage::Stage::add_renderlet).
 //!
-//! Finally, we get the next frame from the context with [`Context::get_next_frame`],
-//! render to it using [`Stage::render`](crate::stage::Stage::render) and then present the
+//! Finally, we get the next frame from the context with
+//! [`Context::get_next_frame`], render to it using
+//! [`Stage::render`](crate::stage::Stage::render) and then present the
 //! frame with [`Frame::present`].
 //!
 //! ```
 //! # use renderling::{
 //! #     Context,
-//! #     camera::Camera,    
+//! #     camera::Camera,
 //! #     stage::{
-//! #         Vertex,    
+//! #         Vertex,
 //! #         Renderlet,
 //! #     }
 //! # };
@@ -132,6 +137,7 @@
 //! PRs, criticisms and ideas are all very much welcomed [at the repo](https://github.com/schell/renderling).
 //!
 //! 😀☕
+#![allow(unexpected_cfgs)]
 #![cfg_attr(target_arch = "spirv", no_std)]
 #![deny(clippy::disallowed_methods)]
 
@@ -853,7 +859,8 @@ mod test {
     }
 
     #[test]
-    // shows how to "nest" children to make them appear transformed by their parent's transform
+    // shows how to "nest" children to make them appear transformed by their
+    // parent's transform
     fn scene_parent_sanity() {
         let ctx = Context::headless(100, 100);
         let mut stage = ctx.new_stage().with_background_color(Vec4::splat(0.0));

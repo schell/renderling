@@ -15,8 +15,7 @@ use crate::{
         Material,
     },
     slab::*,
-    stage::Vertex,
-    stage::{NestedTransform, Renderlet, Stage},
+    stage::{NestedTransform, Renderlet, Stage, Vertex},
     transform::Transform,
 };
 

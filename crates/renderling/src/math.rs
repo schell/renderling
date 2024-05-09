@@ -170,7 +170,8 @@ pub trait IsVector {
     /// Return a vector with `signum_or_zero` applied to each component.
     fn signum_or_zero(&self) -> Self;
 
-    /// Returns the dot product of a vector with itself (the square of its length).
+    /// Returns the dot product of a vector with itself (the square of its
+    /// length).
     fn dot2(&self) -> f32;
 }
 

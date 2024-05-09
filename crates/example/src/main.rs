@@ -136,8 +136,8 @@ pub fn tick(app: &mut App, ev: Option<&winit::event::WindowEvent>) {
     //     match app.ui.event(ev) {
     //         None => {}
     //         Some(ev) => match ev {
-    //             UiEvent::ToggleDebugChannel(channel) => set_debug_channel(channel),
-    //         },
+    //             UiEvent::ToggleDebugChannel(channel) =>
+    // set_debug_channel(channel),         },
     //     }
     // }
 

@@ -105,7 +105,8 @@ impl RangeManager {
 #[derive(Debug, Snafu)]
 pub enum SlabAllocatorError {
     #[snafu(display(
-        "Slab has no internal buffer. Please call SlabAllocator::upkeep or SlabAllocator::get_updated_buffer first."
+        "Slab has no internal buffer. Please call SlabAllocator::upkeep or \
+         SlabAllocator::get_updated_buffer first."
     ))]
     NoInternalBuffer,
 
@@ -120,7 +121,8 @@ pub enum SlabAllocatorError {
 ///
 /// Create a new instance using [`SlabAllocator::default`].
 /// Upon creation you will need to call [`SlabAllocator::get_updated_buffer`] or
-/// [`SlabAllocator::upkeep`] at least once before any data is written to the GPU.
+/// [`SlabAllocator::upkeep`] at least once before any data is written to the
+/// GPU.
 #[derive(Clone)]
 pub struct SlabAllocator {
     len: Arc<AtomicUsize>,
@@ -240,8 +242,8 @@ impl SlabAllocator {
     ///
     /// This is the only way to guarantee access to a buffer.
     ///
-    /// Use [`SlabAllocator::upkeep`] when you only need the buffer after a change,
-    /// for example to recreate bindgroups.
+    /// Use [`SlabAllocator::upkeep`] when you only need the buffer after a
+    /// change, for example to recreate bindgroups.
     pub fn get_updated_buffer(
         &self,
         device: &wgpu::Device,
@@ -258,8 +260,8 @@ impl SlabAllocator {
         }
     }
 
-    /// Recreate this buffer, writing the contents of the previous buffer (if it exists)
-    /// to the new one, then return the new buffer.
+    /// Recreate this buffer, writing the contents of the previous buffer (if it
+    /// exists) to the new one, then return the new buffer.
     fn recreate_buffer(
         &self,
         device: &wgpu::Device,
@@ -600,8 +602,8 @@ impl<T: SlabItem + Clone + Send + Sync + 'static> Hybrid<T> {
         })
     }
 
-    /// Drop the CPU portion of the hybrid value, returning a type that wraps only the
-    /// GPU resources.
+    /// Drop the CPU portion of the hybrid value, returning a type that wraps
+    /// only the GPU resources.
     pub fn into_gpu_only(self) -> Gpu<T> {
         self.gpu_value
     }
@@ -664,8 +666,8 @@ impl<T: SlabItem + Clone + Send + Sync + 'static> Gpu<T> {
     /// Pair with a CPU value.
     ///
     /// ## Warning
-    /// No effort is made to ensure that the value provided is the same as the value on
-    /// the GPU.
+    /// No effort is made to ensure that the value provided is the same as the
+    /// value on the GPU.
     pub fn into_hybrid(self, value: T) -> Hybrid<T> {
         let cpu_value = Arc::new(RwLock::new(value));
         Hybrid {
@@ -674,10 +676,12 @@ impl<T: SlabItem + Clone + Send + Sync + 'static> Gpu<T> {
         }
     }
 
-    /// Forgets the value, preventing the GPU memory from being recycled and re-allocated.
+    /// Forgets the value, preventing the GPU memory from being recycled and
+    /// re-allocated.
     ///
     /// ## Warning
-    /// After calling this function the memory will never be returned to the allocator.
+    /// After calling this function the memory will never be returned to the
+    /// allocator.
     pub fn forget(self) {
         self.forgotten.store(true, Ordering::Relaxed);
     }
@@ -762,8 +766,8 @@ impl<T: SlabItem + Clone + Send + Sync + 'static> GpuArray<T> {
     /// Pair with a CPU value.
     ///
     /// ## Warning
-    /// No effort is made to ensure that the value provided is the same as the value on
-    /// the GPU.
+    /// No effort is made to ensure that the value provided is the same as the
+    /// value on the GPU.
     pub fn into_hybrid(self, values: impl IntoIterator<Item = T>) -> HybridArray<T> {
         let cpu_value = Arc::new(RwLock::new(values.into_iter().collect()));
         HybridArray {

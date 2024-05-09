@@ -2,16 +2,17 @@
 //!
 //! Re-exports [`Array`], [`Id`], [`Slab`] and [`SlabItem`] from [`crabslab`](https://docs.rs/crabslab/latest/crabslab/).
 //!
-//! User types can automatically derive `SlabItem` in most cases. It is required that
-//! your type's fields all implement `SlabItem` and `crabslab` must be in scope.
+//! User types can automatically derive `SlabItem` in most cases. It is required
+//! that your type's fields all implement `SlabItem` and `crabslab` must be in
+//! scope.
 //!
 //! ```
 //! use renderling::slab::SlabItem;
 //!
 //! #[derive(Clone, Copy, SlabItem)]
 //! struct UserData {
-//!     pos: (f32, f32, f32),    
-//!     acc: (f32, f32, f32)
+//!     pos: (f32, f32, f32),
+//!     acc: (f32, f32, f32),
 //! }
 //! ```
 pub use crabslab::{Array, Id, Slab, SlabItem};

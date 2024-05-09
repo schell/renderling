@@ -464,12 +464,14 @@ impl Stage {
         }
     }
 
-    /// Adds a renderlet to the internal list of renderlets to be drawn each frame.
+    /// Adds a renderlet to the internal list of renderlets to be drawn each
+    /// frame.
     ///
     /// This makes an internal clone of the renderlet.
     ///
-    /// If you drop the renderlet and no other references are kept, it will be removed
-    /// automatically from the internal list and will cease to be drawn each frame.
+    /// If you drop the renderlet and no other references are kept, it will be
+    /// removed automatically from the internal list and will cease to be
+    /// drawn each frame.
     pub fn add_renderlet(&mut self, renderlet: &Hybrid<Renderlet>) {
         // UNWRAP: if we can't acquire the lock we want to panic.
         let mut draws = self.draws.write().unwrap();
@@ -487,7 +489,8 @@ impl Stage {
         debug.append_array(&vertex_debug_data);
     }
 
-    /// Erase the given renderlet from the internal list of renderlets to be drawn each frame.
+    /// Erase the given renderlet from the internal list of renderlets to be
+    /// drawn each frame.
     pub fn remove_renderlet(&self, renderlet: &Hybrid<Renderlet>) {
         let id = renderlet.id();
         let mut draws = self.draws.write().unwrap();
@@ -611,15 +614,16 @@ impl Stage {
             let _ = self.buffers_bindgroup.lock().unwrap().take();
             new_slab_buffer
         } else {
-            // UNWRAP: safe because we called `SlabManager::upkeep` above^, which ensures the buffer
-            // exists
+            // UNWRAP: safe because we called `SlabManager::upkeep` above^, which ensures
+            // the buffer exists
             self.mngr.get_buffer().unwrap()
         }
     }
 
     /// Ticks the stage, synchronizing changes with the GPU.
     ///
-    /// It's good to call this after dropping assets to free up space on the slab.
+    /// It's good to call this after dropping assets to free up space on the
+    /// slab.
     pub fn tick(&mut self) {
         let _ = self.tick_internal();
     }
@@ -692,7 +696,8 @@ impl Stage {
                                 let id = hybrid.id();
                                 let instance_range = id.inner()..id.inner() + 1;
                                 log::trace!(
-                                    "drawing vertices {vertex_range:?} and instances {instance_range:?}"
+                                    "drawing vertices {vertex_range:?} and instances \
+                                     {instance_range:?}"
                                 );
                                 render_pass.draw(vertex_range, instance_range);
                             }

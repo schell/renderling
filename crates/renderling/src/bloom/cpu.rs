@@ -422,7 +422,8 @@ impl Bloom {
         let downsample_pipeline = Arc::new(create_bloom_downsample_pipeline(&device));
         let upsample_pipeline = Arc::new(create_bloom_upsample_pipeline(&device));
 
-        // up and downsample pipelines have the same layout, so we just choose one for the layout
+        // up and downsample pipelines have the same layout, so we just choose one for
+        // the layout
         let bindgroups = create_bindgroups(&device, &downsample_pipeline, &slab_buffer, &textures);
         let hdr_texture_downsample_bindgroup = create_bindgroup(
             &device,
@@ -491,7 +492,8 @@ impl Bloom {
 
     /// Returns a clone of the current mix texture.
     ///
-    /// The mix texture is the result of mixing the bloom by the hdr using the mix strength.
+    /// The mix texture is the result of mixing the bloom by the hdr using the
+    /// mix strength.
     pub fn get_mix_texture(&self) -> Texture {
         // UNWRAP: not safe but we want to panic
         self.mix_texture.read().unwrap().clone()
@@ -505,9 +507,9 @@ impl Bloom {
         }
         // Get all the bindgroups (which are what we're reading from),
         // starting with the hdr frame.
-        // Since `bindgroups` are one element greater (we pushed `hdr_texture_bindgroup` to the
-        // front) the last bindgroup will not be used, which is good - we don't need to read from
-        // the smallest texture during downsampling.
+        // Since `bindgroups` are one element greater (we pushed `hdr_texture_bindgroup`
+        // to the front) the last bindgroup will not be used, which is good - we
+        // don't need to read from the smallest texture during downsampling.
         // UNWRAP: not safe but we want to panic
         let textures_guard = self.textures.read().unwrap();
         let hdr_texture_downsample_bindgroup_guard =

@@ -184,6 +184,14 @@ My setup is like this:
 
 All together this lets me know if my shader validates after each change.
 
+#### Solution 
+
+As it turns out `Transform`'s `From<Mat4>` was the culprit. It was using `Mat4::to_scale_rotation_translation`, 
+which calls `f32::signum`, which uses `NAN`. 
+
+The crappy part is that `clippy` would have caught it, because both of those functions are listed in `disallowed-methods`,
+but I hardly ever _run_ clippy. So now I've got to make that a normal practice.
+
 ## Wed May 8, 2024
 
 TODO: `crabslab` probably doesn't need to generate the `offset_of_*` functions. It's a bit noisy, 
