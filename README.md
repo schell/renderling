@@ -1,4 +1,3 @@
-
 # renderling 🍖
 
 Renderling is an innovative, GPU-driven renderer designed for efficient scene rendering with a focus on leveraging 
@@ -22,18 +21,28 @@ The CPU is used to interact with the filesystem to marshall data to the GPU and 
 
 Shaders are written in Rust, via `rust-gpu`.
 
-## Why
+## Why should I use `renderling`
 
-This makes `renderling` very effective at rendering certain types of scenes.
-Specifically `renderling` aims to be good at rendering scenes with a moderate level of unique geometry,
-(possibly a large amount of repeated geometry), with a small number of large textures (or large number of small textures),
-and lots of lighting effects.
+* Data is easily staged on the GPU using an automatically reference counted slab allocator that 
+  provides access from the CPU.
 
-## General Aspirations
+  Your scene geometry, materials, animations - all of it - live on the GPU, while the CPU has easy access
+  to read and modify that data, without borrowing - allowing you to send your data through threads to anything 
+  that needs it. 
 
-- Very fast loading times for GLTF files
-- Support for very large scenes
-- Support for many lights
+* Having everything on the GPU makes `renderling` very effective at rendering certain types of scenes.
+  
+  Specifically `renderling` aims to be good at rendering scenes with a moderate level of unique geometry,
+  (possibly a large amount of repeated geometry), with a small number of large textures (or large number of small textures),
+  and lots of lighting effects.
+
+* Tight integration with GLTF:
+  - Loading scenes, nodes, animations etc
+  - Includes tools for controlling animations
+
+* Image based lighting + analytical lighting
+
+* Good documentation
 
 ## API Features
 
@@ -55,6 +64,7 @@ By default it uses a single uber-shader for rendering.
 - [ ] frustum culling
 - [ ] occlusion culling
 - [ ] light tiling
+- [ ] shadow mapping
 - 3d
   - [x] Built-in support for common lighting/material workflows
     - [x] physically based shading
@@ -64,12 +74,12 @@ By default it uses a single uber-shader for rendering.
   - image based lighting
     - [x] diffuse
     - [x] specular
-  - [ ] msaa
+  - [ ] msaa (easy because of forward+)
   - [x] bloom "physically based" up+downsampling blur
   - [ ] ssao
   - [ ] depth of field
   - gltf support
-    - [ ] scenes
+    - [x] scenes
     - [x] nodes
     - [x] cameras
     - [x] meshes
@@ -175,6 +185,7 @@ Some of these solutions were then spun off into their own projects.
   A DAG and resource graph runner.
 - Contributions to [`naga`](https://github.com/gfx-rs/wgpu/issues/4489)
   * Adding atomics support to the SPIR-V frontend (in progress)
+- Contributions to [`gltf`](https://github.com/gltf-rs/gltf/pull/419)
 
 Sponsoring this project contributes to the ecosystem. 
 

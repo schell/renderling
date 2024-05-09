@@ -15,11 +15,11 @@ resolver = "2"
 assert_approx_eq = "1.1.0"
 async-channel = "1.8"
 bytemuck = { version = "1.13.0", features = ["derive"] }
-crabslab = { version = "0.4.6", default-features = false }
+crabslab = { path = "../crabslab/crates/crabslab", version = "0.4.6", default-features = false }
 dagga = "0.2.1"
 env_logger = "0.10.0"
 futures-lite = "1.13"
-gltf = { git = 'https://github.com/gltf-rs/gltf.git', features = ["KHR_lights_punctual", "KHR_materials_unlit", "KHR_materials_emissive_strength", "extras"] }
+gltf = { git = 'https://github.com/schell/gltf.git', branch ="feature/channel-sampler-index", features = ["KHR_lights_punctual", "KHR_materials_unlit", "KHR_materials_emissive_strength", "extras"] }
 image = "0.24"
 log = "0.4"
 naga = { version = "0.19", features = ["spv-in", "wgsl-out", "wgsl-in", "msl-out"] }

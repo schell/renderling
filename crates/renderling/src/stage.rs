@@ -29,6 +29,41 @@ mod gltf_support;
 #[cfg(all(feature = "gltf", not(target_arch = "spirv")))]
 pub use gltf_support::*;
 
+/// A vertex skin.
+///
+/// For more info on vertex skinning, see
+/// <https://github.khronos.org/glTF-Tutorials/gltfTutorial/gltfTutorial_019_SimpleSkin.html>
+#[derive(Clone, Copy, Default, SlabItem)]
+pub struct Skin {
+    // Ids of the skeleton nodes' global transforms used as joints in this skin.
+    pub joints: Array<Id<Transform>>,
+    // Contains the 4x4 inverse-bind matrices.
+    //
+    // When is none, each matrix is assumed to be the 4x4 identity matrix
+    // which implies that the inverse-bind matrices were pre-applied.
+    pub inverse_bind_matrices: Array<Mat4>,
+}
+
+impl Skin {
+    pub fn get_transform(&self, vertex: Vertex, slab: &[u32]) -> Transform {
+        let mut mat = Mat4::ZERO;
+        for i in 0..vertex.joints.len() {
+            let joint_index = vertex.joints[i] as usize;
+            let joint_id = slab.read(self.joints.at(joint_index));
+            let inverse_bind_matrix = slab.read(self.inverse_bind_matrices.at(i));
+            let joint_matrix = Mat4::from(slab.read(joint_id)) * inverse_bind_matrix;
+            let joint_weight = vertex.weights[i];
+            mat += joint_weight * joint_matrix;
+        }
+        let mat = if mat == Mat4::ZERO {
+            Mat4::IDENTITY
+        } else {
+            mat
+        };
+        Transform::from(mat)
+    }
+}
+
 /// A vertex in a mesh.
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[derive(Clone, Copy, PartialEq, SlabItem)]
@@ -39,8 +74,7 @@ pub struct Vertex {
     pub uv1: Vec2,
     pub normal: Vec3,
     pub tangent: Vec4,
-    // Indices that point to this vertex's joints by indexing into an array of Id<GpuEntity>
-    // provided by the GpuEntity that is using this vertex
+    // Indices that point to this vertex's 'joint' transforms.
     pub joints: [u32; 4],
     // The weights of influence that each joint has over this vertex
     pub weights: [f32; 4],
@@ -92,50 +126,6 @@ impl Vertex {
         self
     }
 
-    ///// Return the matrix needed to bring vertices into the coordinate space of
-    ///// the joint node.
-    //pub fn get_joint_matrix(
-    //    &self,
-    //    i: usize,
-    //    joint_ids: &[Id<GpuEntity>; 32],
-    //    entities: &[GpuEntity],
-    //) -> Mat4 {
-    //    if i >= self.joints.len() {
-    //        return Mat4::IDENTITY;
-    //    }
-    //    let joint_index = self.joints[i];
-    //    let joint_id = if joint_index as usize >= joint_ids.len() {
-    //        Id::NONE
-    //    } else {
-    //        joint_ids[joint_index as usize]
-    //    };
-    //    if joint_id.is_none() {
-    //        return Mat4::IDENTITY;
-    //    }
-    //    let entity_index = joint_id.index();
-    //    if entity_index >= entities.len() {
-    //        return Mat4::IDENTITY;
-    //    }
-    //    let joint_entity = &entities[entity_index];
-    //    let (t, r, s) = joint_entity.get_world_transform(entities);
-    //    let trs = Mat4::from_scale_rotation_translation(s, r, t);
-    //    trs * joint_entity.inverse_bind_matrix
-    //}
-
-    ///// Return the result of adding all joint matrices multiplied by their
-    ///// weights for the given vertex.
-    //// See the [khronos gltf viewer reference](https://github.com/KhronosGroup/glTF-Sample-Viewer/blob/47a191931461a6f2e14de48d6da0f0eb6ec2d147/source/Renderer/shaders/animation.glsl#L47)
-    //pub fn get_skin_matrix(&self, joint_ids: &[Id<GpuEntity>; 32], entities:
-    // &[GpuEntity]) -> Mat4 {    let mut mat = Mat4::ZERO;
-    //    for i in 0..self.joints.len() {
-    //        mat += self.weights[i] * self.get_joint_matrix(i, joint_ids,
-    // entities);    }
-    //    if mat == Mat4::ZERO {
-    //        return Mat4::IDENTITY;
-    //    }
-    //    mat
-    //}
-
     pub fn generate_normal(a: Vec3, b: Vec3, c: Vec3) -> Vec3 {
         let ab = a - b;
         let ac = a - c;
@@ -184,6 +174,7 @@ pub struct Renderlet {
     pub camera_id: Id<Camera>,
     pub transform_id: Id<Transform>,
     pub material_id: Id<Material>,
+    pub skin_id: Id<Skin>,
     pub pbr_config_id: Id<PbrConfig>,
     pub debug_index: u32,
 }
@@ -197,6 +188,7 @@ impl Default for Renderlet {
             camera_id: Id::NONE,
             transform_id: Id::NONE,
             material_id: Id::NONE,
+            skin_id: Id::NONE,
             pbr_config_id: Id::new(0),
             debug_index: 0,
         }
@@ -273,7 +265,13 @@ pub fn renderlet_vertex(
     *out_color = vertex.color;
     *out_uv0 = vertex.uv0;
     *out_uv1 = vertex.uv1;
-    let transform = slab.read(renderlet.transform_id);
+
+    let transform = if renderlet.skin_id.is_some() {
+        let skin = slab.read(renderlet.skin_id);
+        skin.get_transform(vertex, slab)
+    } else {
+        slab.read(renderlet.transform_id)
+    };
     let model_matrix = Mat4::from_scale_rotation_translation(
         transform.scale,
         transform.rotation,

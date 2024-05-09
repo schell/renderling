@@ -1,7 +1,7 @@
 //! Runs through all the gltf sample models to test and show-off renderling's
 //! gltf capabilities.
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     sync::{Arc, Mutex},
 };
 
@@ -11,7 +11,8 @@ use renderling::{
     math::{Mat4, UVec2, Vec3, Vec4},
     skybox::Skybox,
     slab::Hybrid,
-    stage::{GltfDocument, Node, Stage},
+    stage::{Animator, GltfDocument, Node, Stage},
+    transform::Transform,
     Context,
 };
 
@@ -68,6 +69,8 @@ pub struct App {
 
     document: Option<GltfDocument>,
     nodes: Option<Vec<Node>>,
+    animators: Option<Vec<Animator>>,
+    animations_conflict: bool,
 
     // look at
     eye: Vec3,
@@ -98,12 +101,14 @@ impl App {
         let left_mb_down: bool = false;
         let last_cursor_position: Option<winit::dpi::PhysicalPosition<f64>> = None;
 
-        let mut app = Self {
+        Self {
             stage,
             camera,
 
             document: None,
             nodes: None,
+            animators: None,
+            animations_conflict: false,
 
             skybox_image_bytes: None,
             loads: Arc::new(Mutex::new(HashMap::default())),
@@ -114,9 +119,7 @@ impl App {
             theta,
             left_mb_down,
             last_cursor_position,
-        };
-        app.load("img/hdr/night.hdr");
-        app
+        }
     }
 
     fn camera_position(radius: f32, phi: f32, theta: f32) -> Vec3 {
@@ -163,7 +166,7 @@ impl App {
         log::debug!("ticking stage to reclaim buffers");
         self.stage.tick();
 
-        let doc = match self.stage.load_gltf_document_from_bytes(bytes) {
+        let mut doc = match self.stage.load_gltf_document_from_bytes(bytes) {
             Err(e) => {
                 log::error!("gltf loading error: {e}");
                 return;
@@ -184,10 +187,13 @@ impl App {
             .get(scene)
             .map(Vec::clone)
             .unwrap_or_else(|| (0..doc.nodes.len()).collect());
+        log::trace!("  nodes:");
         for node_index in nodes.iter() {
             // UNWRAP: safe because we know the node exists
             let node = doc.nodes.get(*node_index).unwrap();
             let tfrm = Mat4::from(node.global_transform());
+            let decomposed = Transform::from(tfrm);
+            log::trace!("    {} {:?} {decomposed:?}", node.index, node.name);
             if let Some(mesh_index) = node.mesh {
                 // UNWRAP: safe because we know the node exists
                 for primitive in doc.meshes.get(mesh_index).unwrap().primitives.iter() {
@@ -198,13 +204,47 @@ impl App {
                 }
             }
         }
-        self.nodes = match self.stage.draw_gltf_scene(&doc, nodes, self.camera.id()) {
+        let nodes = match self.stage.draw_gltf_scene(&doc, nodes, self.camera.id()) {
             Err(e) => {
                 log::error!("could not draw scene: {e}");
-                None
+                vec![]
             }
-            Ok(ns) => Some(ns),
+            Ok(ns) => ns,
         };
+        if doc.animations.is_empty() {
+            log::trace!("  animations: none");
+        } else {
+            log::trace!("  animations:");
+        }
+        let mut animated_nodes = HashSet::default();
+        let mut has_conflicting_animations = false;
+        self.animators = Some(
+            std::mem::take(&mut doc.animations)
+                .into_iter()
+                .enumerate()
+                .map(|(i, a)| {
+                    let target_nodes = a.target_node_indices().collect::<HashSet<_>>();
+                    has_conflicting_animations =
+                        has_conflicting_animations || !animated_nodes.is_disjoint(&target_nodes);
+                    animated_nodes.extend(target_nodes);
+
+                    log::trace!("    {i} {:?} {}s", a.name, a.length_in_seconds());
+                    for (t, tween) in a.tweens.iter().enumerate() {
+                        log::trace!(
+                            "      tween {t} targets node {} {}",
+                            tween.target_node_index,
+                            tween.properties.description()
+                        );
+                    }
+                    Animator::new(&nodes, a)
+                })
+                .collect(),
+        );
+        if has_conflicting_animations {
+            log::trace!("  and some animations conflict");
+        }
+        self.animations_conflict = has_conflicting_animations;
+        self.nodes = Some(nodes);
         self.document = Some(doc);
 
         let halfway_point = min + ((max - min).normalize() * ((max - min).length() / 2.0));
@@ -314,50 +354,22 @@ impl App {
         self.stage.set_size(size);
     }
 
-    // fn animate(&mut self, r: &mut Context) {
-    //     let now = Instant::now();
-    //     let dt = now - self.last_frame_instant;
-    //     self.last_frame_instant = now;
-    //     let dt_secs = dt.as_secs_f32();
-    //     if let Some(loader) = self.loader.as_mut() {
-    //         for (index, animation) in loader.animations.iter_mut().enumerate() {
-    //             let animation_len = animation.length_in_seconds();
-    //             animation.stored_timestamp += dt_secs;
-    //             if animation.stored_timestamp > animation_len {
-    //                 log::trace!("animation {index} {:?} has looped", animation.name);
-    //             }
-    //             let time = animation.stored_timestamp % animation.length_in_seconds();
-    //             for (id, tween_prop) in animation.get_properties_at_time(time).unwrap() {
-    //                 let ent = self.entities.get_mut(id.index()).unwrap();
-    //                 match tween_prop {
-    //                     TweenProperty::Translation(t) => {
-    //                         ent.position = t.extend(ent.position.w);
-    //                     }
-    //                     TweenProperty::Rotation(r) => {
-    //                         ent.rotation = r;
-    //                     }
-    //                     TweenProperty::Scale(s) => {
-    //                         if s == Vec3::ZERO {
-    //                             log::trace!("scale is zero at time: {time:?}");
-    //                             panic!("animation: {animation:#?}");
-    //                         }
-    //                         ent.scale = s.extend(ent.scale.w);
-    //                     }
-    //                     TweenProperty::MorphTargetWeights(ws) => {
-    //                         ent.set_morph_target_weights(ws);
-    //                     }
-    //                 }
-    //                 r.graph
-    //                     .visit(|mut scene: ViewMut<Scene>| {
-    //                         scene.update_entity(*ent).unwrap();
-    //                     })
-    //                     .unwrap();
-    //             }
-    //             animation.stored_timestamp = time;
-    //             break;
-    //         }
-    //     }
-    // }
+    pub fn animate(&mut self) {
+        let now = now();
+        let dt_seconds = now - self.last_frame_instant;
+        self.last_frame_instant = now;
+        if let Some(animators) = self.animators.as_mut() {
+            if self.animations_conflict {
+                if let Some(animator) = animators.first_mut() {
+                    animator.progress(dt_seconds as f32).unwrap();
+                }
+            } else {
+                for animator in animators.iter_mut() {
+                    animator.progress(dt_seconds as f32).unwrap();
+                }
+            }
+        }
+    }
 }
 
 // /// Sets up the demo for a given model

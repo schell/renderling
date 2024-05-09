@@ -2,6 +2,8 @@
 use crabslab::SlabItem;
 use glam::{Mat4, Quat, Vec3};
 
+use crate::math::IsMatrix;
+
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[derive(Clone, Copy, PartialEq, SlabItem)]
 /// A decomposed transformation.
@@ -25,7 +27,7 @@ impl Default for Transform {
 
 impl From<Mat4> for Transform {
     fn from(value: Mat4) -> Self {
-        let (scale, rotation, translation) = value.to_scale_rotation_translation();
+        let (scale, rotation, translation) = value.to_scale_rotation_translation_or_id();
         Transform {
             translation,
             rotation,

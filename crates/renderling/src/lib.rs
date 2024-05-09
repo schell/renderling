@@ -49,7 +49,7 @@
 //! We do this in the same way we "staged" `an_f32` above.
 //!
 //! But first we'll need a [`Camera`](crate::camera::Camera) and some vertices of
-//! [`Vertex`](crate::stage::Vertex).
+//! [`Vertex`](crate::stage::Vertex) organized as triangles with counter-clockwise winding.
 //!
 //! ```
 //! # use renderling::{Context, stage::Stage};
@@ -129,7 +129,9 @@
 //!
 //! Your mileage may vary, but I hope you get good use out of this library.
 //!
-//! PRs are very much welcomed :)
+//! PRs, criticisms and ideas are all very much welcomed [at the repo](https://github.com/schell/renderling).
+//!
+//! 😀☕
 #![cfg_attr(target_arch = "spirv", no_std)]
 #![deny(clippy::disallowed_methods)]
 
@@ -156,7 +158,7 @@ pub mod stage;
 pub mod texture;
 pub mod tonemapping;
 pub mod transform;
-#[cfg(test)]
+#[cfg(feature = "tutorial")]
 pub mod tutorial;
 
 #[cfg(not(target_arch = "spirv"))]
@@ -196,6 +198,7 @@ mod test {
             .filter_module("moongraph", log::LevelFilter::Trace)
             .filter_module("renderling", log::LevelFilter::Trace)
             .filter_module("crabslab", log::LevelFilter::Debug)
+            .filter_module("renderling::bloom", log::LevelFilter::Debug)
             .try_init();
     }
 
@@ -734,7 +737,7 @@ mod test {
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
         let img = frame.read_image().unwrap();
-        img_diff::assert_img_eq("gpu_scene_sanity2.png", img);
+        img_diff::assert_img_eq("stage/shared_node_with_different_materials.png", img);
     }
 
     #[test]
@@ -808,8 +811,8 @@ mod test {
         let img = frame.read_image().unwrap();
         let depth_texture = stage.get_depth_texture();
         let depth_img = depth_texture.read_image().unwrap();
-        img_diff::save("scene_cube_directional_depth.png", depth_img);
-        img_diff::assert_img_eq("scene_cube_directional.png", img);
+        img_diff::assert_img_eq("stage/cube_directional_depth.png", depth_img);
+        img_diff::assert_img_eq("stage/cube_directional.png", img);
     }
 
     #[test]
@@ -879,7 +882,7 @@ mod test {
             Vertex::default().with_position([size, 0.0, 0.0]),
         ]);
 
-        let mut root_node = stage.new_nested_transform();
+        let root_node = stage.new_nested_transform();
         root_node.set_local_transform(Transform {
             scale: Vec3::new(25.0, 25.0, 1.0),
             ..Default::default()
@@ -891,15 +894,15 @@ mod test {
             ..Default::default()
         };
 
-        let mut cyan_node = NestedTransform::new(&mut stage);
+        let cyan_node = NestedTransform::new(&mut stage);
         cyan_node.set_local_transform(offset);
         println!("cyan_node: {:#?}", cyan_node.get_global_transform());
 
-        let mut yellow_node = NestedTransform::new(&mut stage);
+        let yellow_node = NestedTransform::new(&mut stage);
         yellow_node.set_local_transform(offset);
         println!("yellow_node: {:#?}", yellow_node.get_global_transform());
 
-        let mut red_node = NestedTransform::new(&mut stage);
+        let red_node = NestedTransform::new(&mut stage);
         red_node.set_local_transform(offset);
         println!("red_node: {:#?}", red_node.get_global_transform());
 

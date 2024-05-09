@@ -764,8 +764,6 @@ dependencies = [
 [[package]]
 name = "crabslab"
 version = "0.4.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4cae74e77eb5698bc202eacea1dd86eecf9b6d1a1e2b4d9fe482c56488ce57f4"
 dependencies = [
  "async-channel 1.9.0",
  "bytemuck",
@@ -780,8 +778,6 @@ dependencies = [
 [[package]]
 name = "crabslab-derive"
 version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6c11ee241fd568cf8ef49be0c998d9498fd99cc419cabc64856df621404f36c4"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1060,7 +1056,7 @@ dependencies = [
  "futures-lite 1.13.0",
  "gltf",
  "icosahedron",
- "image",
+ "image 0.24.7",
  "img-diff",
  "lazy_static",
  "loading-bytes",
@@ -1381,13 +1377,13 @@ dependencies = [
 
 [[package]]
 name = "gltf"
-version = "1.3.0"
-source = "git+https://github.com/gltf-rs/gltf.git#6b9a7dfad71d25cafcc4ea9f56d3114b9b085f78"
+version = "1.4.0"
+source = "git+https://github.com/schell/gltf.git?branch=feature/channel-sampler-index#4d557957788da1d8ac2aaf99f8ae1d6d592f8738"
 dependencies = [
  "base64",
  "byteorder",
  "gltf-json",
- "image",
+ "image 0.25.1",
  "lazy_static",
  "serde_json",
  "urlencoding",
@@ -1395,8 +1391,8 @@ dependencies = [
 
 [[package]]
 name = "gltf-derive"
-version = "1.3.0"
-source = "git+https://github.com/gltf-rs/gltf.git#6b9a7dfad71d25cafcc4ea9f56d3114b9b085f78"
+version = "1.4.0"
+source = "git+https://github.com/schell/gltf.git?branch=feature/channel-sampler-index#4d557957788da1d8ac2aaf99f8ae1d6d592f8738"
 dependencies = [
  "inflections",
  "proc-macro2",
@@ -1406,8 +1402,8 @@ dependencies = [
 
 [[package]]
 name = "gltf-json"
-version = "1.3.0"
-source = "git+https://github.com/gltf-rs/gltf.git#6b9a7dfad71d25cafcc4ea9f56d3114b9b085f78"
+version = "1.4.0"
+source = "git+https://github.com/schell/gltf.git?branch=feature/channel-sampler-index#4d557957788da1d8ac2aaf99f8ae1d6d592f8738"
 dependencies = [
  "gltf-derive",
  "serde",
@@ -1624,11 +1620,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "image"
+version = "0.25.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fd54d660e773627692c524beaad361aca785a4f9f5730ce91f42aabe5bce3d11"
+dependencies = [
+ "bytemuck",
+ "byteorder",
+ "num-traits",
+ "png",
+ "zune-core",
+ "zune-jpeg",
+]
+
+[[package]]
 name = "img-diff"
 version = "0.1.0"
 dependencies = [
  "glam",
- "image",
+ "image 0.24.7",
  "snafu",
 ]
 
@@ -2233,7 +2243,7 @@ checksum = "d2c224ba00d7cadd4d5c660deaf2098e5e80e07846537c51f9cfa4be50c1fd45"
 dependencies = [
  "chrono",
  "font-kit",
- "image",
+ "image 0.24.7",
  "lazy_static",
  "num-traits",
  "pathfinder_geometry",
@@ -2258,7 +2268,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0cebbe1f70205299abc69e8b295035bb52a6a70ee35474ad10011f0a4efb8543"
 dependencies = [
  "gif",
- "image",
+ "image 0.24.7",
  "plotters-backend",
 ]
 
@@ -2595,7 +2605,7 @@ dependencies = [
  "gltf",
  "half 2.3.1",
  "icosahedron",
- "image",
+ "image 0.24.7",
  "img-diff",
  "log",
  "naga",
@@ -3867,10 +3877,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "zune-core"
+version = "0.4.12"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3f423a2c17029964870cfaabb1f13dfab7d092a62a29a89264f4d36990ca414a"
+
+[[package]]
 name = "zune-inflate"
 version = "0.2.54"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "73ab332fe2f6680068f3582b16a24f90ad7096d5d39b974d1c0aff0125116f02"
 dependencies = [
  "simd-adler32",
+]
+
+[[package]]
+name = "zune-jpeg"
+version = "0.4.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ec866b44a2a1fd6133d363f073ca1b179f438f99e7e5bfb1e33f7181facfe448"
+dependencies = [
+ "zune-core",
 ]

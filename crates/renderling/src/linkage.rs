@@ -249,6 +249,8 @@ pub fn atlas_and_skybox_bindgroup(
 
 #[cfg(test)]
 mod test {
+    use naga::valid::ValidationFlags;
+
     #[test]
     // Ensure that the shaders can be converted to WGSL.
     // This is necessary for WASM using WebGPU, because WebGPU only accepts
@@ -267,18 +269,26 @@ mod test {
                     panic!("SPIR-V parse error");
                 }
             };
-            println!("  SPIR-V parsed");
+            log::info!("  SPIR-V parsed");
             let mut validator =
                 naga::valid::Validator::new(Default::default(), naga::valid::Capabilities::empty());
+            let is_valid;
             let info = match validator.validate(&module) {
-                Ok(i) => i,
+                Ok(i) => {
+                    is_valid = true;
+                    log::info!("  SPIR-V validated");
+                    i
+                }
                 Err(e) => {
-                    log::error!("{e}");
-                    log::error!("{}", e.emit_to_string(&""));
-                    panic!("SPIR-V validation error");
+                    log::error!("{}", e.emit_to_string(""));
+                    is_valid = false;
+                    let mut validator = naga::valid::Validator::new(
+                        ValidationFlags::empty(),
+                        naga::valid::Capabilities::empty(),
+                    );
+                    validator.validate(&module).unwrap()
                 }
             };
-            log::info!("  SPIR-V validated");
             let wgsl = naga::back::wgsl::write_string(
                 &module,
                 &info,
@@ -286,19 +296,31 @@ mod test {
             )
             .unwrap();
             log::info!("  output WGSL generated");
+
             let print_var_name = path
                 .file_stem()
                 .unwrap()
                 .to_str()
                 .unwrap()
                 .replace("-", "_");
-            if let Ok(filepath) = std::env::var(&print_var_name) {
-                std::fs::write(&filepath, &wgsl).unwrap();
-                log::info!("  wrote generated WGSL to {filepath}");
+            let maybe_output_path = if std::env::var("print_wgsl").is_ok() || !is_valid {
+                let dir = std::path::PathBuf::from("../../test_output");
+                std::fs::create_dir_all(&dir).unwrap();
+                let output_path = dir.join(print_var_name).with_extension("wgsl");
+                log::info!("writing WGSL to '{}'", output_path.display());
+                Some(output_path)
             } else {
-                log::info!(
-                    "  to save the generated WGSL, use an env var '{print_var_name}={{filepath}}'"
-                );
+                log::info!("  to save the generated WGSL, use an env var 'print_wgsl=1'");
+                None
+            };
+
+            if let Some(output_path) = maybe_output_path {
+                std::fs::write(&output_path, &wgsl).unwrap();
+                log::info!("  wrote generated WGSL to {}", output_path.display());
+            }
+
+            if !is_valid {
+                panic!("SPIR-V validation error");
             }
 
             let module = match naga::front::wgsl::parse_str(&wgsl) {
@@ -326,6 +348,17 @@ mod test {
             let entry = may_entry.unwrap();
             let path = entry.path();
             let ext = path.extension().unwrap().to_str().unwrap();
+            if let Some(filename) = std::env::var("only_shader").ok() {
+                let stem = path.file_stem().unwrap().to_str().unwrap();
+                if filename != stem {
+                    log::info!(
+                        "  '{}' doesn't match 'only_shader' env '{}', skipping",
+                        filename,
+                        stem
+                    );
+                    continue;
+                }
+            }
             if ext == "spv" {
                 validate_src(&path);
             }

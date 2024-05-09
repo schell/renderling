@@ -20,6 +20,9 @@ use crate::{
     transform::Transform,
 };
 
+mod anime;
+pub use anime::*;
+
 #[derive(Debug, Snafu)]
 pub enum StageGltfError {
     #[snafu(display("{source}"))]
@@ -69,6 +72,9 @@ pub enum StageGltfError {
 
     #[snafu(display("Missing gltf camera at index {index}"))]
     MissingCamera { index: usize },
+
+    #[snafu(display("{source}"))]
+    Animation { source: anime::AnimationError },
 
     #[snafu(display("{source}"))]
     Slab { source: crabslab::WgpuSlabError },
@@ -613,11 +619,13 @@ impl GltfNode {
 
 #[derive(Debug)]
 pub struct GltfDocument {
+    pub animations: Vec<Animation>,
     pub nodes: Vec<GltfNode>,
     pub cameras: Vec<GltfCamera>,
     pub meshes: Vec<GltfMesh>,
     pub default_material: Hybrid<Material>,
     pub materials: HybridArray<Material>,
+    pub skins: Vec<GltfSkin>,
     /// Vector of scenes - each being a list of nodes.
     pub scenes: Vec<Vec<usize>>,
     pub default_scene: Option<usize>,
@@ -632,7 +640,7 @@ impl GltfDocument {
         buffer_data: Vec<gltf::buffer::Data>,
         images: Vec<gltf::image::Data>,
     ) -> Result<GltfDocument, StageGltfError> {
-        log::debug!("Loading nodes");
+        log::debug!("Loading {} nodes", document.nodes().count());
         let mut nodes = vec![];
         let mut node_transforms = HashMap::<usize, NestedTransform>::new();
         fn transform_for_node(
@@ -643,7 +651,7 @@ impl GltfDocument {
             if let Some(nt) = cache.get(&node.index()) {
                 nt.clone()
             } else {
-                let mut transform = stage.new_nested_transform();
+                let transform = stage.new_nested_transform();
                 let mat4 = Mat4::from_cols_array_2d(&node.transform().matrix());
                 transform.set_local_transform(mat4.into());
                 for node in node.children() {
@@ -832,94 +840,17 @@ impl GltfDocument {
             }
         }
 
-        //let skins = self.allocate_array::<GltfSkin>(document.skins().len());
+        log::trace!("Loading skins");
+        let skins = document
+            .skins()
+            .map(|skin| GltfSkin::from_gltf(&buffer_data, skin))
+            .collect::<Vec<_>>();
 
-        // TODO: GLTF skinning
-        // log::trace!("Loading skins");
-        // for skin in document.skins() {
-        //     let skin_index = skin.index();
-        //     let joints = skin
-        //         .joints()
-        //         .map(|node| nodes.at(node.index()))
-        //         .collect::<Vec<_>>();
-        //     let joints = self.append_array(&joints);
-        //     let inverse_bind_matrices = skin
-        //         .inverse_bind_matrices()
-        //         .map(|acc| accessors.at(acc.index()))
-        //         .unwrap_or_default();
-        //     let skeleton = skin
-        //         .skeleton()
-        //         .map(|node| nodes.at(node.index()))
-        //         .unwrap_or_default();
-        //     let _ = self.write(
-        //         skins.at(skin_index),
-        //         &GltfSkin {
-        //             joints,
-        //             inverse_bind_matrices,
-        //             skeleton,
-        //         },
-        //     );
-        // }
-
-        // log::trace!("Loading animations");
-        // let animations = self.allocate_array::<GltfAnimation>(document.animations().count());
-        // for animation in document.animations() {
-        //     let samplers =
-        //         self.allocate_array::<GltfAnimationSampler>(animation.samplers().count());
-        //     fn create_sampler(
-        //         accessors: Array<GltfAccessor>,
-        //         sampler: gltf::animation::Sampler<'_>,
-        //     ) -> GltfAnimationSampler {
-        //         let interpolation = match sampler.interpolation() {
-        //             gltf::animation::Interpolation::Linear => GltfInterpolation::Linear,
-        //             gltf::animation::Interpolation::Step => GltfInterpolation::Step,
-        //             gltf::animation::Interpolation::CubicSpline => GltfInterpolation::CubicSpline,
-        //         };
-        //         let input = accessors.at(sampler.input().index());
-        //         let output = accessors.at(sampler.output().index());
-        //         GltfAnimationSampler {
-        //             interpolation,
-        //             input,
-        //             output,
-        //         }
-        //     }
-        //     let mut stored_samplers = vec![];
-        //     for (i, sampler) in animation.samplers().enumerate() {
-        //         let sampler = create_sampler(accessors, sampler);
-        //         self.write(samplers.at(i), &sampler);
-        //         // Store it later so we can figure out the index of the sampler
-        //         // used by the channel.
-        //         //
-        //         // TODO: Remove `stored_samplers` once `gltf` provides `.index()`
-        //         // @see https://github.com/gltf-rs/gltf/issues/398
-        //         stored_samplers.push(sampler);
-        //     }
-        //     let channels = self.allocate_array::<GltfChannel>(animation.channels().count());
-        //     for (i, channel) in animation.channels().enumerate() {
-        //         let target = channel.target();
-        //         let node = nodes.at(target.node().index());
-        //         let property = match target.property() {
-        //             gltf::animation::Property::Translation => GltfTargetProperty::Translation,
-        //             gltf::animation::Property::Rotation => GltfTargetProperty::Rotation,
-        //             gltf::animation::Property::Scale => GltfTargetProperty::Scale,
-        //             gltf::animation::Property::MorphTargetWeights => {
-        //                 GltfTargetProperty::MorphTargetWeights
-        //             }
-        //         };
-        //         let target = GltfTarget { node, property };
-        //         let sampler = create_sampler(accessors, channel.sampler());
-        //         let index = stored_samplers
-        //             .iter()
-        //             .position(|s| s == &sampler)
-        //             .context(MissingSamplerSnafu)?;
-        //         let sampler = samplers.at(index);
-        //         self.write(channels.at(i), &GltfChannel { target, sampler });
-        //     }
-        //     self.write(
-        //         animations.at(animation.index()),
-        //         &GltfAnimation { channels, samplers },
-        //     );
-        // }
+        log::trace!("Loading animations");
+        let mut animations = vec![];
+        for animation in document.animations() {
+            animations.push(Animation::from_gltf(&buffer_data, animation).context(AnimationSnafu)?);
+        }
 
         log::debug!("Loading scenes");
         let scenes = document
@@ -930,7 +861,7 @@ impl GltfDocument {
         log::trace!("Done loading gltf");
 
         Ok(GltfDocument {
-            //animations,
+            animations,
             lights,
             cameras,
             materials,
@@ -938,16 +869,34 @@ impl GltfDocument {
             meshes,
             nodes,
             scenes,
+            skins,
             default_scene: document.default_scene().map(|scene| scene.index()),
             textures,
         })
     }
 }
 
-#[derive(Debug)]
+/// A collection of [`Renderlet`]s that represent one entity.
+///
+/// A node may be part of a hierarchy and have child nodes, or be the child
+/// of another node.
+///
+/// Hierachical transformations are maintained by [`NestedTransform`].
+#[derive(Debug, Clone)]
 pub struct Node {
     pub gltf_node: GltfNode,
     pub renderlets: Vec<Hybrid<Renderlet>>,
+    pub children: Vec<Node>,
+}
+
+impl Node {
+    pub fn index(&self) -> usize {
+        self.gltf_node.index
+    }
+
+    pub fn name(&self) -> Option<&str> {
+        self.gltf_node.name.as_deref()
+    }
 }
 
 impl Stage {
@@ -980,15 +929,18 @@ impl Stage {
             .context(MissingNodeSnafu { index: node_index })?
             .clone();
 
-        log::trace!("drawing GLTF node {node_index} {:?}", gltf_node.name);
+        log::debug!("drawing GLTF node {node_index} {:?}", gltf_node.name);
 
         let mut renderlets = vec![];
         if let Some(mesh_index) = gltf_node.mesh {
+            log::debug!("  mesh {mesh_index}");
             let mesh = doc
                 .meshes
                 .get(mesh_index)
                 .context(MissingMeshSnafu { index: mesh_index })?;
-            for prim in mesh.primitives.iter() {
+            let num_prims = mesh.primitives.len();
+            log::debug!("    has {num_prims} primitives");
+            for (prim, i) in mesh.primitives.iter().zip(1..) {
                 let hybrid = self.new_value(Renderlet {
                     vertices_array: prim.vertices.array(),
                     indices_array: prim.indices.array(),
@@ -997,14 +949,28 @@ impl Stage {
                     material_id: prim.material,
                     ..Default::default()
                 });
+                log::debug!("    created renderlet {i}/{num_prims}: {:#?}", hybrid.get());
                 self.add_renderlet(&hybrid);
                 renderlets.push(hybrid);
             }
+        } else {
+            log::debug!("  node has no mesh");
+        }
+
+        let mut children = vec![];
+        log::debug!(
+            "  has {} children: {:?}",
+            gltf_node.children.len(),
+            gltf_node.children
+        );
+        for child_index in gltf_node.children.iter() {
+            children.push(self.draw_gltf_node(doc, *child_index, camera)?);
         }
 
         Ok(Node {
             gltf_node,
             renderlets,
+            children,
         })
     }
 
