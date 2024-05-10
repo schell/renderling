@@ -713,9 +713,7 @@ mod test {
         let height = 128;
         let ctx = Context::headless(width, height);
         let mut stage = ctx.new_stage().with_bloom(false);
-        let doc = stage
-            .load_gltf_document_from_path("../../gltf/EmissiveStrengthTest.glb")
-            .unwrap();
+
         let projection = crate::camera::perspective(width as f32, height as f32);
         let view = crate::camera::look_at(Vec3::new(0.0, 2.0, 18.0), Vec3::ZERO, Vec3::Y);
         let camera = stage.new_value(Camera::new(projection, view));
@@ -723,11 +721,11 @@ mod test {
             .new_skybox_from_path("../../img/hdr/night.hdr", camera.id())
             .unwrap();
         stage.set_skybox(skybox);
-        let scene_index = doc.default_scene.unwrap();
-        let nodes = doc.scenes.get(scene_index).unwrap();
-        let _scene = stage
-            .draw_gltf_scene(&doc, nodes.into_iter().copied(), camera.id())
+
+        let _doc = stage
+            .load_gltf_document_from_path("../../gltf/EmissiveStrengthTest.glb", camera.id())
             .unwrap();
+
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
         let img = frame.read_image().unwrap();

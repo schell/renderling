@@ -34,6 +34,7 @@ pub use gltf_support::*;
 /// For more info on vertex skinning, see
 /// <https://github.khronos.org/glTF-Tutorials/gltfTutorial/gltfTutorial_019_SimpleSkin.html>
 #[derive(Clone, Copy, Default, SlabItem)]
+#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 pub struct Skin {
     // Ids of the skeleton nodes' global transforms used as joints in this skin.
     pub joints: Array<Id<Transform>>,
@@ -45,22 +46,27 @@ pub struct Skin {
 }
 
 impl Skin {
-    pub fn get_transform(&self, vertex: Vertex, slab: &[u32]) -> Transform {
+    pub fn get_transform(&self, vertex: Vertex, slab: &[u32]) -> Mat4 {
         let mut mat = Mat4::ZERO;
         for i in 0..vertex.joints.len() {
+            let joint_weight = vertex.weights[i];
+            if joint_weight == 0.0 {
+                continue;
+            }
+
+            let inverse_bind_matrix = slab.read(self.inverse_bind_matrices.at(i));
+
             let joint_index = vertex.joints[i] as usize;
             let joint_id = slab.read(self.joints.at(joint_index));
-            let inverse_bind_matrix = slab.read(self.inverse_bind_matrices.at(i));
             let joint_matrix = Mat4::from(slab.read(joint_id)) * inverse_bind_matrix;
-            let joint_weight = vertex.weights[i];
-            mat += joint_weight * joint_matrix;
+
+            mat += joint_matrix * joint_weight;
         }
-        let mat = if mat == Mat4::ZERO {
+        if mat == Mat4::ZERO {
             Mat4::IDENTITY
         } else {
             mat
-        };
-        Transform::from(mat)
+        }
     }
 }
 
@@ -245,6 +251,8 @@ pub fn renderlet_vertex(
     out_world_pos: &mut Vec3,
     #[spirv(position)] out_clip_pos: &mut Vec4,
 ) {
+    use crate::math::IsMatrix;
+
     let renderlet = slab.read_unchecked(renderlet_id);
 
     let mut vertex_log = RenderletVertexLog::new(renderlet_id, renderlet.debug_index, vertex_index);
@@ -266,18 +274,15 @@ pub fn renderlet_vertex(
     *out_uv0 = vertex.uv0;
     *out_uv1 = vertex.uv1;
 
-    let transform = if renderlet.skin_id.is_some() {
+    let model_matrix = if renderlet.skin_id.is_some() {
         let skin = slab.read(renderlet.skin_id);
         skin.get_transform(vertex, slab)
     } else {
-        slab.read(renderlet.transform_id)
+        let t = slab.read(renderlet.transform_id);
+        Mat4::from(t)
     };
-    let model_matrix = Mat4::from_scale_rotation_translation(
-        transform.scale,
-        transform.rotation,
-        transform.translation,
-    );
-    let scale2 = transform.scale * transform.scale;
+    let (scale, _, _) = model_matrix.to_scale_rotation_translation_or_id();
+    let scale2 = scale * scale;
     let normal = vertex.normal.alt_norm_or_zero();
     let tangent = vertex.tangent.xyz().alt_norm_or_zero();
     let normal_w: Vec3 = (model_matrix * (normal / scale2).extend(0.0))

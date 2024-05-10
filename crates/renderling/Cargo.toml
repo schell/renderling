@@ -119,13 +119,11 @@ features = ["gltf", "raw-window-handle", "winit"]
 
 [dev-dependencies]
 assert_approx_eq = {workspace = true}
-criterion = { version = "0.5", features = ["html_reports"] }
 ctor = "0.2.2"
 env_logger = {workspace = true}
 icosahedron = "0.1"
 img-diff = { path = "../img-diff" }
 naga.workspace = true
-plotters.workspace = true
 pretty_assertions.workspace = true
 ttf-parser = "0.20.0"
 

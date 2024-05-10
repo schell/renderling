@@ -1,8 +1,8 @@
 //! Animation helpers for gltf.
-use glam::{Mat4, Quat, Vec3};
+use glam::{Quat, Vec3};
 use snafu::prelude::*;
 
-use crate::stage::Node;
+use crate::stage::NestedTransform;
 
 #[derive(Debug, Snafu)]
 pub enum InterpolationError {
@@ -26,41 +26,6 @@ pub enum InterpolationError {
 
     #[snafu(display("Mismatched properties"))]
     MismatchedProperties,
-}
-
-#[derive(Clone, Default, Debug)]
-pub struct GltfSkin {
-    pub index: usize,
-    // Indices of the skeleton nodes used as joints in this skin
-    pub joints: Vec<usize>,
-    // Containins the 4x4 inverse-bind matrices.
-    //
-    // When None, each matrix is assumed to be the 4x4 identity matrix which implies that the
-    // inverse-bind matrices were pre-applied.
-    pub inverse_bind_matrices: Option<Vec<Mat4>>,
-    // Index of the node used as the skeleton root.
-    // When None, joints transforms resolve to scene root.
-    pub skeleton: Option<usize>,
-}
-
-impl GltfSkin {
-    pub fn from_gltf(buffer_data: &[gltf::buffer::Data], skin: gltf::Skin) -> Self {
-        let index = skin.index();
-        let joints = skin.joints().map(|n| n.index()).collect::<Vec<_>>();
-        let reader = skin.reader(|b| buffer_data.get(b.index()).map(|d| d.0.as_slice()));
-        let inverse_bind_matrices = reader.read_inverse_bind_matrices().map(|mats| {
-            mats.into_iter()
-                .map(|m| Mat4::from_cols_array_2d(&m))
-                .collect()
-        });
-        let skeleton = skin.skeleton().map(|n| n.index());
-        GltfSkin {
-            index,
-            joints,
-            inverse_bind_matrices,
-            skeleton,
-        }
-    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -690,7 +655,10 @@ impl Animation {
         Ok(tweens.into_iter().collect())
     }
 
-    pub fn into_animator<'a>(self, nodes: impl IntoIterator<Item = &'a Node>) -> Animator {
+    pub fn into_animator<'a>(
+        self,
+        nodes: impl IntoIterator<Item = (usize, NestedTransform)>,
+    ) -> Animator {
         Animator::new(nodes, self)
     }
 
@@ -714,22 +682,18 @@ pub struct Animator {
     // of the current animation.
     pub timestamp: f32,
     // All nodes under this animator's control.
-    pub nodes: rustc_hash::FxHashMap<usize, Node>,
+    pub nodes: rustc_hash::FxHashMap<usize, NestedTransform>,
     // The animation that will apply to the nodes.
     pub animation: Animation,
 }
 
 impl Animator {
     /// Create a new animator with the given nodes and animation.
-    pub fn new<'a>(nodes: impl IntoIterator<Item = &'a Node>, animation: Animation) -> Self {
-        // a function to return this node and all its descendants
-        fn get_descendants(node: &Node) -> Vec<Node> {
-            let mut nodes: Vec<Node> = node.children.iter().flat_map(get_descendants).collect();
-            nodes.push(node.clone());
-            nodes
-        }
-        let nodes = nodes.into_iter();
-        let nodes = nodes.flat_map(get_descendants).map(|n| (n.index(), n));
+    pub fn new(
+        nodes: impl IntoIterator<Item = impl Into<(usize, NestedTransform)>>,
+        animation: Animation,
+    ) -> Self {
+        let nodes = nodes.into_iter().map(|n| n.into());
         let nodes = rustc_hash::FxHashMap::from_iter(nodes);
         Animator {
             nodes,
@@ -759,20 +723,20 @@ impl Animator {
             // * business logic has removed it
             // * ...and the beat goes on
             // So we won't fret if we can't find it...
-            if let Some(node) = self.nodes.get(&node_index) {
+            if let Some(transform) = self.nodes.get(&node_index) {
                 match property {
                     TweenProperty::Translation(translation) => {
-                        node.gltf_node.transform.modify_local_transform(|t| {
+                        transform.modify_local_transform(|t| {
                             t.translation = translation;
                         });
                     }
                     TweenProperty::Rotation(rotation) => {
-                        node.gltf_node.transform.modify_local_transform(|t| {
+                        transform.modify_local_transform(|t| {
                             t.rotation = rotation;
                         });
                     }
                     TweenProperty::Scale(scale) => {
-                        node.gltf_node.transform.modify_local_transform(|t| {
+                        transform.modify_local_transform(|t| {
                             t.scale = scale;
                         });
                     }
@@ -788,7 +752,7 @@ impl Animator {
 
 #[cfg(test)]
 mod test {
-    use crate::{camera::Camera, math::Vec3, stage::GltfDocument, Context};
+    use crate::{camera::Camera, math::Vec3, stage::Animator, Context};
 
     #[test]
     fn gltf_simple_animation() {
@@ -800,13 +764,14 @@ mod test {
         let projection = crate::camera::perspective(50.0, 50.0);
         let view = crate::camera::look_at(Vec3::Z * 3.0, Vec3::ZERO, Vec3::Y);
         let camera = stage.new_value(Camera::new(projection, view));
+
         let doc = stage
-            .load_gltf_document_from_path("../../gltf/animated_triangle.gltf")
+            .load_gltf_document_from_path("../../gltf/animated_triangle.gltf", camera.id())
             .unwrap();
 
-        let nodes = vec![stage.draw_gltf_node(&doc, 0, camera.id()).unwrap()];
-        let GltfDocument { mut animations, .. } = doc;
-        let mut animator = animations.pop().unwrap().into_animator(&nodes);
+        let nodes = doc.nodes_in_scene(doc.default_scene.unwrap_or_default());
+
+        let mut animator = Animator::new(nodes, doc.animations.first().unwrap().clone());
         log::info!("animator: {animator:#?}");
 
         let frame = ctx.get_next_frame().unwrap();

@@ -11,7 +11,7 @@ use renderling::{
     math::{Mat4, UVec2, Vec3, Vec4},
     skybox::Skybox,
     slab::Hybrid,
-    stage::{Animator, GltfDocument, Node, Stage},
+    stage::{Animator, GltfDocument, Stage},
     transform::Transform,
     Context,
 };
@@ -68,7 +68,6 @@ pub struct App {
     camera: Hybrid<Camera>,
 
     document: Option<GltfDocument>,
-    nodes: Option<Vec<Node>>,
     animators: Option<Vec<Animator>>,
     animations_conflict: bool,
 
@@ -106,7 +105,6 @@ impl App {
             camera,
 
             document: None,
-            nodes: None,
             animators: None,
             animations_conflict: false,
 
@@ -162,11 +160,13 @@ impl App {
         self.last_cursor_position = None;
         self.stage.set_images(std::iter::empty()).unwrap();
         self.document = None;
-        self.nodes = None;
         log::debug!("ticking stage to reclaim buffers");
         self.stage.tick();
 
-        let mut doc = match self.stage.load_gltf_document_from_bytes(bytes) {
+        let doc = match self
+            .stage
+            .load_gltf_document_from_bytes(bytes, self.camera.id())
+        {
             Err(e) => {
                 log::error!("gltf loading error: {e}");
                 return;
@@ -204,13 +204,7 @@ impl App {
                 }
             }
         }
-        let nodes = match self.stage.draw_gltf_scene(&doc, nodes, self.camera.id()) {
-            Err(e) => {
-                log::error!("could not draw scene: {e}");
-                vec![]
-            }
-            Ok(ns) => ns,
-        };
+
         if doc.animations.is_empty() {
             log::trace!("  animations: none");
         } else {
@@ -219,8 +213,8 @@ impl App {
         let mut animated_nodes = HashSet::default();
         let mut has_conflicting_animations = false;
         self.animators = Some(
-            std::mem::take(&mut doc.animations)
-                .into_iter()
+            doc.animations
+                .iter()
                 .enumerate()
                 .map(|(i, a)| {
                     let target_nodes = a.target_node_indices().collect::<HashSet<_>>();
@@ -236,7 +230,7 @@ impl App {
                             tween.properties.description()
                         );
                     }
-                    Animator::new(&nodes, a)
+                    Animator::new(doc.nodes.iter(), a.clone())
                 })
                 .collect(),
         );
@@ -244,7 +238,6 @@ impl App {
             log::trace!("  and some animations conflict");
         }
         self.animations_conflict = has_conflicting_animations;
-        self.nodes = Some(nodes);
         self.document = Some(doc);
 
         let halfway_point = min + ((max - min).normalize() * ((max - min).length() / 2.0));
