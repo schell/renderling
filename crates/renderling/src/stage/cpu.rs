@@ -840,7 +840,7 @@ impl NestedTransform {
             .as_ref()
             .map(|parent| parent.get_global_transform())
             .unwrap_or_default();
-        Transform::from(Mat4::from(transform) * Mat4::from(parent_transform))
+        Transform::from(Mat4::from(parent_transform) * Mat4::from(transform))
     }
 
     pub fn global_transform_id(&self) -> Id<Transform> {
