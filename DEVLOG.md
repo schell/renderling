@@ -2,12 +2,12 @@
 
 ## Sat May 11, 2024
 
+![gltf fox debacle](https://github.com/schell/renderling/assets/24942/8cd6bf35-877e-4917-8a55-4bc7f5c3fc4f)
+
 Skinning is pretty hard! I remember before that it took a good amount of fiddling before 
 vertex skinning "clicked". I understand the concept and how it should work, but in practice 
 I feel like there's always a matrix multiplication that is in the wrong order, or that I'm 
 missing (I've been through it twice now).
-
-![gltf fox debacle](./devlog/Screenshot 2024-05-11 at 10.42.01 AM.png)
 
 ## Wed May 9, 2024
 
