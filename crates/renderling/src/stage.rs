@@ -11,7 +11,7 @@ use spirv_std::{
 
 use crate::{
     camera::Camera,
-    math::IsVector,
+    math::{IsMatrix, IsVector},
     pbr::{Material, PbrConfig},
     transform::Transform,
 };
@@ -45,28 +45,32 @@ pub struct Skin {
     pub inverse_bind_matrices: Array<Mat4>,
 }
 
+
 impl Skin {
-    pub fn get_transform(&self, vertex: Vertex, slab: &[u32]) -> Mat4 {
-        let mut mat = Mat4::ZERO;
-        for i in 0..vertex.joints.len() {
-            let joint_weight = vertex.weights[i];
-            if joint_weight == 0.0 {
-                continue;
-            }
+    pub fn get_inverse_bind_matrix(&self, i: usize, slab: &[u32]) -> Mat4 {
+        slab.read(self.inverse_bind_matrices.at(i))
+    }
 
-            let inverse_bind_matrix = slab.read(self.inverse_bind_matrices.at(i));
+    pub fn get_joint_matrix(&self, i: usize, vertex: Vertex, slab: &[u32]) -> Mat4 {
+        let joint_index = vertex.joints[i] as usize;
+        let joint_id = slab.read(self.joints.at(joint_index));
+        let joint_transform = slab.read(joint_id);
+        Mat4::from(joint_transform) * self.get_inverse_bind_matrix(i, slab)
+    }
 
-            let joint_index = vertex.joints[i] as usize;
-            let joint_id = slab.read(self.joints.at(joint_index));
-            let joint_matrix = Mat4::from(slab.read(joint_id)) * inverse_bind_matrix;
+    pub fn get_transform(&self, vertex: Vertex, slab: &[u32]) -> Transform {
+        let mat = vertex.weights[0] * self.get_joint_matrix(0, vertex, slab)
+            + vertex.weights[1] * self.get_joint_matrix(1, vertex, slab)
+            + vertex.weights[2] * self.get_joint_matrix(2, vertex, slab)
+            + vertex.weights[3] * self.get_joint_matrix(3, vertex, slab);
 
-            mat += joint_matrix * joint_weight;
-        }
-        if mat == Mat4::ZERO {
-            Mat4::IDENTITY
-        } else {
-            mat
-        }
+        Transform::from(
+            if mat == Mat4::ZERO {
+                Mat4::IDENTITY
+            } else {
+                mat
+            },
+        )
     }
 }
 
@@ -251,8 +255,6 @@ pub fn renderlet_vertex(
     out_world_pos: &mut Vec3,
     #[spirv(position)] out_clip_pos: &mut Vec4,
 ) {
-    use crate::math::IsMatrix;
-
     let renderlet = slab.read_unchecked(renderlet_id);
 
     let mut vertex_log = RenderletVertexLog::new(renderlet_id, renderlet.debug_index, vertex_index);
@@ -274,17 +276,16 @@ pub fn renderlet_vertex(
     *out_uv0 = vertex.uv0;
     *out_uv1 = vertex.uv1;
 
-    let model_matrix = if renderlet.skin_id.is_some() {
+    let transform = if renderlet.skin_id.is_some() {
         let skin = slab.read(renderlet.skin_id);
         skin.get_transform(vertex, slab)
     } else {
-        let t = slab.read(renderlet.transform_id);
-        Mat4::from(t)
+        slab.read(renderlet.transform_id)
     };
-    let (scale, _, _) = model_matrix.to_scale_rotation_translation_or_id();
-    let scale2 = scale * scale;
+    let scale2 = transform.scale * transform.scale;
     let normal = vertex.normal.alt_norm_or_zero();
     let tangent = vertex.tangent.xyz().alt_norm_or_zero();
+    let model_matrix = Mat4::from(transform);
     let normal_w: Vec3 = (model_matrix * (normal / scale2).extend(0.0))
         .xyz()
         .alt_norm_or_zero();
@@ -457,5 +458,29 @@ pub fn test_i8_i16_extraction(
     let (value, _, _) = crate::bits::extract_i16(index, 2, slab);
     if value > 0 {
         slab[index] = value as u32;
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use glam::{Mat4, Vec3};
+
+    use crate::transform::Transform;
+
+    #[test]
+    fn matrix_hierarchy_sanity() {
+        let a: Mat4 = Transform {
+            translation: Vec3::new(100.0, 100.0, 0.0),
+            ..Default::default()
+        }
+        .into();
+        let b: Mat4 = Transform {
+            scale: Vec3::splat(0.5),
+            ..Default::default()
+        }
+        .into();
+        let c1 = a * b;
+        let c2 = b * a;
+        assert_ne!(c1, c2);
     }
 }

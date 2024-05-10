@@ -18,6 +18,7 @@ use crate::{
     stage::Renderlet,
     texture::{DepthTexture, Texture},
     tonemapping::Tonemapping,
+    transform::Transform,
 };
 use crabslab::{Array, CpuSlab, GrowableSlab, Id, Slab, SlabItem, WgpuBuffer};
 use snafu::Snafu;
@@ -839,7 +840,7 @@ impl NestedTransform {
             .as_ref()
             .map(|parent| parent.get_global_transform())
             .unwrap_or_default();
-        Transform::from(Mat4::from(parent_transform) * Mat4::from(transform))
+        Transform::from(Mat4::from(transform) * Mat4::from(parent_transform))
     }
 
     pub fn global_transform_id(&self) -> Id<Transform> {

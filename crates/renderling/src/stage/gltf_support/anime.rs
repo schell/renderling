@@ -1,8 +1,8 @@
 //! Animation helpers for gltf.
-use glam::{Quat, Vec3};
+use glam::{Mat4, Quat, Vec3};
 use snafu::prelude::*;
 
-use crate::stage::NestedTransform;
+use crate::{math::IsMatrix, stage::NestedTransform};
 
 #[derive(Debug, Snafu)]
 pub enum InterpolationError {

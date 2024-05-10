@@ -468,9 +468,22 @@ impl GltfPrimitive {
         let vs = uv1s.zip(vs);
         let vs = uv0s.into_iter().zip(vs);
         let vs = positions.into_iter().zip(vs);
+        let mut logged_not_normalized = false;
+        let mut unnormalized_weight_vertices_count = 0;
         let vertices = vs
             .map(
-                |(position, (uv0, (uv1, (normal, (tangent, (color, (joints, weights)))))))| {
+                |(position, (uv0, (uv1, (normal, (tangent, (color, (joints, mut weights)))))))| {
+                    let weight_sum: f32 = weights.iter().sum();
+                    let are_normalized = 1.0 - weight_sum <= f32::EPSILON;
+                    if !are_normalized {
+                        unnormalized_weight_vertices_count += 1;
+                        if !logged_not_normalized {
+                            log::warn!("weights are not normalized: {weights:?}");
+                            logged_not_normalized = true;
+                            weights = weights.map(|w| w / weight_sum);
+                            log::warn!("  normalized to {weights:?}");
+                        }
+                    }
                     Vertex {
                         position,
                         color,
@@ -486,6 +499,11 @@ impl GltfPrimitive {
             .collect::<Vec<_>>();
         let vertices = stage.new_array(vertices);
         log::debug!("{} vertices, {:?}", vertices.len(), vertices.array());
+        if logged_not_normalized {
+            log::debug!(
+                "  {unnormalized_weight_vertices_count} of which had unnormalized joint weights"
+            );
+        }
         let indices = stage.new_array(indices);
         log::debug!("{} indices, {:?}", indices.len(), indices.array());
         let gltf::mesh::Bounds { min, max } = primitive.bounding_box();

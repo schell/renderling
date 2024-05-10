@@ -1,6 +1,6 @@
 //! Stage lighting.
 use crabslab::{Id, SlabItem};
-use glam::{Vec3, Vec4};
+use glam::{Mat4, Vec3, Vec4};
 
 use crate::transform::Transform;
 
