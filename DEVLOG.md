@@ -1,6 +1,15 @@
 # devlog
 
-## Web May 9, 2024
+## Sat May 11, 2024
+
+Skinning is pretty hard! I remember before that it took a good amount of fiddling before 
+vertex skinning "clicked". I understand the concept and how it should work, but in practice 
+I feel like there's always a matrix multiplication that is in the wrong order, or that I'm 
+missing (I've been through it twice now).
+
+![gltf fox debacle](./devlog/Screenshot 2024-05-11 at 10.42.01 AM.png)
+
+## Wed May 9, 2024
 
 I finished the Memorandum of Understanding for my NLnet grant. 
 The MoU is kinda like a project plan or roadmap that lets NLnet know what the milestones are 

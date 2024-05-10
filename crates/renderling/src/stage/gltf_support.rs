@@ -651,7 +651,8 @@ impl GltfNode {
 #[derive(Clone, Debug)]
 pub struct GltfSkin {
     pub index: usize,
-    // Indices of the skeleton nodes used as joints in this skin
+    // Indices of the skeleton nodes used as joints in this skin, unused internally
+    // but possibly useful.
     pub joint_nodes: Vec<usize>,
     pub joint_transforms: HybridArray<Id<Transform>>,
     // Containins the 4x4 inverse-bind matrices.
@@ -662,7 +663,7 @@ pub struct GltfSkin {
     // Index of the node used as the skeleton root.
     // When None, joints transforms resolve to scene root.
     pub skeleton: Option<usize>,
-
+    // Skin as seen by shaders, on the GPU
     pub skin: Hybrid<Skin>,
 }
 
@@ -734,24 +735,33 @@ impl GltfDocument {
         log::debug!("Loading {} nodes", document.nodes().count());
         let mut nodes = vec![];
         let mut node_transforms = HashMap::<usize, NestedTransform>::new();
+
         fn transform_for_node(
+            nesting_level: usize,
             stage: &mut Stage,
             cache: &mut HashMap<usize, NestedTransform>,
             node: &gltf::Node,
         ) -> NestedTransform {
-            if let Some(nt) = cache.get(&node.index()) {
+            let padding = std::iter::repeat(" ")
+                .take(nesting_level * 2)
+                .collect::<Vec<_>>()
+                .join("");
+            log::debug!("{padding}{} {:?}", node.index(), node.name());
+            let nt = if let Some(nt) = cache.get(&node.index()) {
                 nt.clone()
             } else {
                 let transform = stage.new_nested_transform();
                 let mat4 = Mat4::from_cols_array_2d(&node.transform().matrix());
                 transform.set_local_transform(mat4.into());
                 for node in node.children() {
-                    let child_transform = transform_for_node(stage, cache, &node);
+                    let child_transform =
+                        transform_for_node(nesting_level + 1, stage, cache, &node);
                     transform.add_child(&child_transform);
                 }
                 cache.insert(node.index(), transform.clone());
                 transform
-            }
+            };
+            nt
         }
         let mut camera_index_to_node_index = HashMap::<usize, usize>::new();
         let mut light_index_to_node_index = HashMap::<usize, usize>::new();
@@ -772,7 +782,7 @@ impl GltfDocument {
             let light = node.light().map(|light| light.index());
             let weights = node.weights().map(|w| w.to_vec()).unwrap_or_default();
             let weights = stage.new_array(weights);
-            let transform = transform_for_node(stage, &mut node_transforms, &node);
+            let transform = transform_for_node(0, stage, &mut node_transforms, &node);
             nodes.push(GltfNode {
                 index: node.index(),
                 name: node.name().map(String::from),
