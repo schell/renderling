@@ -764,7 +764,7 @@ impl Stage {
 /// Clones all reference the same nested transform.
 #[derive(Clone)]
 pub struct NestedTransform {
-    global_transform: Hybrid<Transform>,
+    global_transform: Gpu<Transform>,
     local_transform: Arc<RwLock<Transform>>,
     children: Arc<RwLock<Vec<NestedTransform>>>,
     parent: Arc<RwLock<Option<NestedTransform>>>,
@@ -786,7 +786,6 @@ impl core::fmt::Debug for NestedTransform {
             .as_ref()
             .map(|nt| nt.global_transform.id());
         f.debug_struct("NestedTransform")
-            .field("global_transform", &self.global_transform)
             .field("local_transform", &self.local_transform)
             .field("children", &children)
             .field("parent", &parent)
@@ -794,33 +793,62 @@ impl core::fmt::Debug for NestedTransform {
     }
 }
 
+impl UpdatesSlab for NestedTransform {
+    fn u32_array(&self) -> Array<u32> {
+        self.global_transform.u32_array()
+    }
+
+    fn strong_count(&self) -> usize {
+        self.global_transform.strong_count()
+    }
+
+    fn type_name(&self) -> &'static str {
+        self.global_transform.type_name()
+    }
+
+    fn get_update(&self) -> Vec<SlabUpdate> {
+        let transform = self.get_global_transform();
+        self.global_transform.set(transform);
+        self.global_transform.get_update()
+    }
+
+    fn forgotten(&self) -> bool {
+        self.global_transform.forgotten()
+    }
+}
+
 impl NestedTransform {
     pub fn new(mngr: &mut SlabAllocator) -> Self {
-        let global_transform = mngr.new_value(Transform::default());
+        let id = mngr.allocate::<Transform>();
+        let mut update_sources = mngr.update_sources.write().unwrap();
+        let global_transform = Gpu {
+            id,
+            notifier_index: update_sources.len(),
+            notify: mngr.notifier.0.clone(),
+            update: Default::default(),
+            forgotten: Default::default(),
+        };
         let nested = NestedTransform {
             local_transform: Arc::new(RwLock::new(Transform::default())),
             global_transform,
             children: Default::default(),
             parent: Default::default(),
         };
+
+        update_sources.push(Box::new(nested.clone()));
+
         nested
     }
 
-    fn recalculate_global_transform(&self) {
-        let global = self.get_global_transform();
-        self.global_transform.set(global);
-        for child in self.children.read().unwrap().iter() {
-            child.recalculate_global_transform();
-        }
-    }
-
     pub fn modify_local_transform(&self, f: impl Fn(&mut Transform)) {
-        {
-            // UNWRAP: panic on purpose
-            let mut local_guard = self.local_transform.write().unwrap();
-            f(&mut local_guard);
-        }
-        self.recalculate_global_transform();
+        // UNWRAP: panic on purpose
+        let mut local_guard = self.local_transform.write().unwrap();
+        f(&mut local_guard);
+        // UNWRAP: safe because it's unbounded
+        self.global_transform
+            .notify
+            .try_send(self.global_transform.notifier_index)
+            .unwrap();
     }
 
     pub fn set_local_transform(&self, transform: Transform) {

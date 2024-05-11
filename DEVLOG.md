@@ -2,12 +2,33 @@
 
 ## Sat May 11, 2024
 
+### Skinning a Fox
+
 ![gltf fox debacle](https://github.com/schell/renderling/assets/24942/8cd6bf35-877e-4917-8a55-4bc7f5c3fc4f)
 
 Skinning is pretty hard! I remember before that it took a good amount of fiddling before 
 vertex skinning "clicked". I understand the concept and how it should work, but in practice 
 I feel like there's always a matrix multiplication that is in the wrong order, or that I'm 
 missing (I've been through it twice now).
+
+It's weird because the "simple skin" example runs as expected. For the most part the "recursive skins"
+example does too (it's slow though because it's a stress test). So there's something special about the 
+fox that is tripping the renderer...
+
+```
+cargo watch -x 'run -p example -- --model /Users/schell/code/glTF-Sample-Models/2.0/RecursiveSkeletons/glTF-Binary/RecursiveSkeletons.glb  --skybox /Users/schell/code/renderling/img/hdr/resting_place.hdr'
+```
+
+### Sidetracked by performance
+
+I saw that the recursive skeleton example wasn't doing so well, it was really slow. After a little 
+investigation I saw that it was making something like 40,000 separate buffer writes per frame.
+
+So I rewrote the "updates" code that syncs CPU -> GPU values and now it does 900 buffer writes per frame.
+That still seems high, but given that it has something like 800 animated nodes I don't think it's a big 
+deal. It runs smooth now!
+
+But I still haven't figured out that fox...
 
 ## Wed May 9, 2024
 

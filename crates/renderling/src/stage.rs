@@ -11,7 +11,7 @@ use spirv_std::{
 
 use crate::{
     camera::Camera,
-    math::{IsMatrix, IsVector},
+    math::IsVector,
     pbr::{Material, PbrConfig},
     transform::Transform,
 };
@@ -55,7 +55,8 @@ impl Skin {
         let joint_index = vertex.joints[i] as usize;
         let joint_id = slab.read(self.joints.at(joint_index));
         let joint_transform = slab.read(joint_id);
-        Mat4::from(joint_transform) * self.get_inverse_bind_matrix(i, slab)
+        let inverse_bind_matrix = slab.read(self.inverse_bind_matrices.at(i));
+        Mat4::from(joint_transform) * inverse_bind_matrix
     }
 
     pub fn get_transform(&self, vertex: Vertex, slab: &[u32]) -> Transform {

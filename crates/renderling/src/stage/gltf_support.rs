@@ -2,7 +2,7 @@
 use std::collections::HashMap;
 
 use crabslab::{Array, Id};
-use glam::{Mat4, Vec2, Vec3, Vec4};
+use glam::{Mat4, Quat, Vec2, Vec3, Vec4};
 use rustc_hash::FxHashMap;
 use snafu::{OptionExt, ResultExt, Snafu};
 
@@ -746,13 +746,17 @@ impl GltfDocument {
                 .take(nesting_level * 2)
                 .collect::<Vec<_>>()
                 .join("");
-            log::debug!("{padding}{} {:?}", node.index(), node.name());
             let nt = if let Some(nt) = cache.get(&node.index()) {
                 nt.clone()
             } else {
                 let transform = stage.new_nested_transform();
-                let mat4 = Mat4::from_cols_array_2d(&node.transform().matrix());
-                transform.set_local_transform(mat4.into());
+                let (translation, rotation, scale) = &node.transform().decomposed();
+                let t = Transform {
+                    translation: Vec3::from_array(*translation),
+                    rotation: Quat::from_array(*rotation),
+                    scale: Vec3::from_array(*scale),
+                };
+                transform.set_local_transform(t);
                 for node in node.children() {
                     let child_transform =
                         transform_for_node(nesting_level + 1, stage, cache, &node);
@@ -761,6 +765,15 @@ impl GltfDocument {
                 cache.insert(node.index(), transform.clone());
                 transform
             };
+            let t = nt.get_local_transform();
+            log::trace!(
+                "{padding}{} {:?} {:?} {:?} {:?}",
+                node.index(),
+                node.name(),
+                t.translation,
+                t.rotation,
+                t.scale
+            );
             nt
         }
         let mut camera_index_to_node_index = HashMap::<usize, usize>::new();
@@ -963,14 +976,9 @@ impl GltfDocument {
 
         let mut renderlets = FxHashMap::default();
         for gltf_node in nodes.iter() {
-            log::debug!(
-                "  creating renderlets for node {} {:?}",
-                gltf_node.index,
-                gltf_node.name
-            );
-
             let mut node_renderlets = vec![];
             let skin_id = if let Some(skin_index) = gltf_node.skin {
+                log::debug!("  node {} {:?} has skin", gltf_node.index, gltf_node.name);
                 let gltf_skin = skins
                     .get(skin_index)
                     .context(MissingSkinSnafu { index: skin_index })?;
@@ -980,7 +988,11 @@ impl GltfDocument {
             };
 
             if let Some(mesh_index) = gltf_node.mesh {
-                log::debug!("  mesh {mesh_index}");
+                log::debug!(
+                    "  node {} {:?} has mesh {mesh_index}",
+                    gltf_node.index,
+                    gltf_node.name
+                );
                 let mesh = meshes
                     .get(mesh_index)
                     .context(MissingMeshSnafu { index: mesh_index })?;
@@ -1000,8 +1012,6 @@ impl GltfDocument {
                     stage.add_renderlet(&hybrid);
                     node_renderlets.push(hybrid);
                 }
-            } else {
-                log::debug!("  node has no mesh");
             }
             if !node_renderlets.is_empty() {
                 renderlets.insert(gltf_node.index, node_renderlets);

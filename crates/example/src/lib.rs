@@ -187,13 +187,13 @@ impl App {
             .get(scene)
             .map(Vec::clone)
             .unwrap_or_else(|| (0..doc.nodes.len()).collect());
-        log::trace!("  nodes:");
+        //log::trace!("  nodes:");
         for node_index in nodes.iter() {
             // UNWRAP: safe because we know the node exists
             let node = doc.nodes.get(*node_index).unwrap();
             let tfrm = Mat4::from(node.global_transform());
             let decomposed = Transform::from(tfrm);
-            log::trace!("    {} {:?} {decomposed:?}", node.index, node.name);
+            //log::trace!("    {} {:?} {decomposed:?}", node.index, node.name);
             if let Some(mesh_index) = node.mesh {
                 // UNWRAP: safe because we know the node exists
                 for primitive in doc.meshes.get(mesh_index).unwrap().primitives.iter() {
@@ -222,14 +222,14 @@ impl App {
                         has_conflicting_animations || !animated_nodes.is_disjoint(&target_nodes);
                     animated_nodes.extend(target_nodes);
 
-                    log::trace!("    {i} {:?} {}s", a.name, a.length_in_seconds());
-                    for (t, tween) in a.tweens.iter().enumerate() {
-                        log::trace!(
-                            "      tween {t} targets node {} {}",
-                            tween.target_node_index,
-                            tween.properties.description()
-                        );
-                    }
+                    //log::trace!("    {i} {:?} {}s", a.name, a.length_in_seconds());
+                    // for (t, tween) in a.tweens.iter().enumerate() {
+                    //     log::trace!(
+                    //         "      tween {t} targets node {} {}",
+                    //         tween.target_node_index,
+                    //         tween.properties.description()
+                    //     );
+                    // }
                     Animator::new(doc.nodes.iter(), a.clone())
                 })
                 .collect(),
