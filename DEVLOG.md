@@ -1,5 +1,55 @@
 # devlog
 
+## Sun May 12, 2024 
+
+### More Fox Skinning
+
+I've noticed that some GLTF models (like `CesiumMan`) cause the uber-shader to barf. 
+I haven't figured out what feature in those models is causing it yet. It may or may not 
+be related to the fox skinning problem.
+
+### Box!
+
+A very simple GLTF file fails to render. It's the `Box.glb` model. 
+
+![box should look like this](https://github.com/KhronosGroup/glTF-Sample-Models/raw/main/2.0/Box/screenshot/screenshot.png)
+
+Ooh, now upon visiting the [Khronos sample models repo](https://github.com/KhronosGroup/glTF-Sample-Models?tab=readme-ov-file)
+I find that it (the repo) has been deprecated in favor of [another](https://github.com/KhronosGroup/glTF-Sample-Assets).
+
+Anyway - this is a fundamentally simple GLTF model so something must have regressed in `renderling`...
+
+#### Investigation
+
+* Turns out there are buffer writes happening each frame, which is weird because the `Box.glb` model doesn't 
+  include animation.
+* When I trace it out it looks like the camera's view has NaN values.
+* Looks like after adding a `debug_assert!` I can see that the camera's calculated radius (the 
+  distance at which the camera rotates around the model) is `inf`...
+* That's because after loading, the model's bounding box is `[inf, inf, inf] [-inf, -inf, -inf]`...
+* And calculation of the bounding box only takes into consideration the nodes in the scene and 
+  doesn't include those node's children...
+
+After updating the bounding box calculation to take child nodes into consideration the problem 
+is fixed.
+
+<img width="450" alt="Screenshot 2024-05-12 at 10 52 21 AM" src="https://github.com/schell/renderling/assets/24942/9d3618d3-60bb-47c4-9a37-4b7a71952277">
+
+* But there are still two `Transform` writes per frame when there should be none.
+* I can't see any other place in the example app where those transforms are being updated.
+* I recently redid the way `NestedTransform` do their updates, so I'll look there.
+* There's nothing modifying those transforms...
+* Ah, but each update source is being polled for updates each frame, and NestedTransforms 
+  always give their global transform as an update regardless if it changed.
+* I'm changing the update sources to be a set, and the `SlabAllocator` only checks those sources
+  that have sent in an "update" signal on its notification channel. This also means we only check 
+  sources for strong counts when this "update" signal comes in, so those sources need to send the 
+  signal on Drop. All in all though this should be a nice optimization.
+* ...but alas, after the update I get the grey screen of death again, which means something's not 
+  right...
+* Turns out it was because `Gpu::new` was calling `SlabAllocator::next_update_k` twice, using one 
+  for its `notifier_index` and then using the other for the first notification.
+
 ## Sat May 11, 2024
 
 ### Skinning a Fox

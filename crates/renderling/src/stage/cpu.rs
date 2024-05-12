@@ -764,10 +764,22 @@ impl Stage {
 /// Clones all reference the same nested transform.
 #[derive(Clone)]
 pub struct NestedTransform {
-    global_transform: Gpu<Transform>,
+    global_transform_id: Id<Transform>,
     local_transform: Arc<RwLock<Transform>>,
+
+    notifier_index: usize,
+    notify: async_channel::Sender<usize>,
+
     children: Arc<RwLock<Vec<NestedTransform>>>,
     parent: Arc<RwLock<Option<NestedTransform>>>,
+
+    forgotten: Arc<AtomicBool>,
+}
+
+impl Drop for NestedTransform {
+    fn drop(&mut self) {
+        let _ = self.notify.try_send(self.notifier_index);
+    }
 }
 
 impl core::fmt::Debug for NestedTransform {
@@ -777,14 +789,14 @@ impl core::fmt::Debug for NestedTransform {
             .read()
             .unwrap()
             .iter()
-            .map(|nt| nt.global_transform.id())
+            .map(|nt| nt.global_transform_id)
             .collect::<Vec<_>>();
         let parent = self
             .parent
             .read()
             .unwrap()
             .as_ref()
-            .map(|nt| nt.global_transform.id());
+            .map(|nt| nt.global_transform_id);
         f.debug_struct("NestedTransform")
             .field("local_transform", &self.local_transform)
             .field("children", &children)
@@ -795,60 +807,62 @@ impl core::fmt::Debug for NestedTransform {
 
 impl UpdatesSlab for NestedTransform {
     fn u32_array(&self) -> Array<u32> {
-        self.global_transform.u32_array()
+        Array::new(
+            self.global_transform_id.inner(),
+            Transform::SLAB_SIZE as u32,
+        )
     }
 
     fn strong_count(&self) -> usize {
-        self.global_transform.strong_count()
-    }
-
-    fn type_name(&self) -> &'static str {
-        self.global_transform.type_name()
+        Arc::strong_count(&self.forgotten)
     }
 
     fn get_update(&self) -> Vec<SlabUpdate> {
         let transform = self.get_global_transform();
-        self.global_transform.set(transform);
-        self.global_transform.get_update()
-    }
-
-    fn forgotten(&self) -> bool {
-        self.global_transform.forgotten()
+        let array = self.u32_array();
+        let mut elements = vec![0u32; Transform::SLAB_SIZE];
+        elements.write_indexed(&transform, 0);
+        vec![SlabUpdate { array, elements }]
     }
 }
 
 impl NestedTransform {
     pub fn new(mngr: &mut SlabAllocator) -> Self {
         let id = mngr.allocate::<Transform>();
-        let mut update_sources = mngr.update_sources.write().unwrap();
-        let global_transform = Gpu {
-            id,
-            notifier_index: update_sources.len(),
-            notify: mngr.notifier.0.clone(),
-            update: Default::default(),
-            forgotten: Default::default(),
-        };
+        let notifier_index = mngr.next_update_k();
+
         let nested = NestedTransform {
+            global_transform_id: id,
             local_transform: Arc::new(RwLock::new(Transform::default())),
-            global_transform,
+
+            notifier_index,
+            notify: mngr.notifier.0.clone(),
+
             children: Default::default(),
             parent: Default::default(),
+
+            forgotten: Arc::new(false.into()),
         };
 
-        update_sources.push(Box::new(nested.clone()));
+        mngr.insert_update_source(notifier_index, nested.clone());
 
+        nested.mark_dirty();
         nested
+    }
+
+    fn mark_dirty(&self) {
+        // UNWRAP: safe because it's unbounded
+        self.notify.try_send(self.notifier_index).unwrap();
+        for child in self.children.read().unwrap().iter() {
+            child.mark_dirty();
+        }
     }
 
     pub fn modify_local_transform(&self, f: impl Fn(&mut Transform)) {
         // UNWRAP: panic on purpose
         let mut local_guard = self.local_transform.write().unwrap();
         f(&mut local_guard);
-        // UNWRAP: safe because it's unbounded
-        self.global_transform
-            .notify
-            .try_send(self.global_transform.notifier_index)
-            .unwrap();
+        self.mark_dirty();
     }
 
     pub fn set_local_transform(&self, transform: Transform) {
@@ -872,21 +886,19 @@ impl NestedTransform {
     }
 
     pub fn global_transform_id(&self) -> Id<Transform> {
-        self.global_transform.id()
+        self.global_transform_id
     }
 
     pub fn add_child(&self, node: &NestedTransform) {
         *node.parent.write().unwrap() = Some(self.clone());
-        let global_transform = node.get_global_transform();
-        node.global_transform.set(global_transform);
+        node.mark_dirty();
         self.children.write().unwrap().push(node.clone());
     }
 
     pub fn remove_child(&self, node: &NestedTransform) {
         self.children.write().unwrap().retain_mut(|child| {
-            if child.global_transform.id() == node.global_transform.id() {
-                let local_transform = node.get_local_transform();
-                node.global_transform.set(local_transform);
+            if child.global_transform_id == node.global_transform_id {
+                node.mark_dirty();
                 let _ = node.parent.write().unwrap().take();
                 false
             } else {

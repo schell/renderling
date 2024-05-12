@@ -39,7 +39,10 @@ Shaders are written in Rust, via `rust-gpu`.
 * Tight integration with GLTF:
   - Loading scenes, nodes, animations etc
   - Includes tools for controlling animations
-
+  - Supported extensions:
+    * KHR_lights_punctual
+    * KHR_materials_unlit
+    * KHR_materials_emissive_strength
 * Image based lighting + analytical lighting
 
 * Good documentation

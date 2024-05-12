@@ -711,6 +711,7 @@ pub struct GltfDocument {
     pub animations: Vec<Animation>,
     pub nodes: Vec<GltfNode>,
     pub cameras: Vec<GltfCamera>,
+    pub extensions: Option<serde_json::Value>,
     pub meshes: Vec<GltfMesh>,
     pub default_material: Hybrid<Material>,
     pub materials: HybridArray<Material>,
@@ -766,7 +767,7 @@ impl GltfDocument {
                 transform
             };
             let t = nt.get_local_transform();
-            log::trace!(
+            log::debug!(
                 "{padding}{} {:?} {:?} {:?} {:?}",
                 node.index(),
                 node.name(),
@@ -1018,7 +1019,9 @@ impl GltfDocument {
             }
         }
 
-        log::trace!("Done loading gltf");
+        log::debug!("Extensions used: {:?}", document.extensions_used());
+        log::debug!("Extensions required: {:?}", document.extensions_required());
+        log::debug!("Done loading gltf");
 
         Ok(GltfDocument {
             animations,
@@ -1033,6 +1036,10 @@ impl GltfDocument {
             default_scene: document.default_scene().map(|scene| scene.index()),
             textures,
             renderlets,
+            extensions: document
+                .extensions()
+                .cloned()
+                .map(serde_json::Value::Object),
         })
     }
 

@@ -35,7 +35,7 @@ shaders = [
   "tonemapping_fragment",
   "tonemapping_vertex"
 ]
-gltf = ["dep:gltf"]
+gltf = ["dep:gltf", "dep:serde_json"]
 sdf = []
 tutorial = [
   "tutorial_passthru_fragment",
@@ -110,6 +110,7 @@ image = {workspace = true, features = ["hdr"]}
 log = {workspace = true}
 rustc-hash = "1.1"
 send_wrapper = "0.6"
+serde_json = {workspace = true, optional = true}
 snafu = {workspace = true}
 wgpu = { workspace = true, features = ["spirv"] }
 winit = { workspace = true, optional = true }

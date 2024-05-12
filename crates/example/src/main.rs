@@ -23,6 +23,7 @@ fn main() {
     env_logger::Builder::default()
         .filter_module("example", log::LevelFilter::Trace)
         .filter_module("renderling", log::LevelFilter::Debug)
+        .filter_module("renderling::stage::cpu", log::LevelFilter::Debug)
         .filter_module("renderling::slab", log::LevelFilter::Debug)
         .filter_module(
             "renderling::stage::gltf_support::anime",

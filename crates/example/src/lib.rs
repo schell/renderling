@@ -72,7 +72,7 @@ pub struct App {
     animations_conflict: bool,
 
     // look at
-    eye: Vec3,
+    center: Vec3,
     // distance from the origin
     radius: f32,
     // anglular position on a circle `radius` away from the origin on x,z
@@ -112,7 +112,7 @@ impl App {
             loads: Arc::new(Mutex::new(HashMap::default())),
             last_frame_instant: now(),
             radius,
-            eye: Vec3::ZERO,
+            center: Vec3::ZERO,
             phi,
             theta,
             left_mb_down,
@@ -131,13 +131,19 @@ impl App {
 
     pub fn update_camera_view(&self) {
         let UVec2 { x: w, y: h } = self.stage.get_size();
+        let camera_position = Self::camera_position(self.radius, self.phi, self.theta);
         let camera = Camera::new(
             Mat4::perspective_infinite_rh(std::f32::consts::FRAC_PI_4, w as f32 / h as f32, 0.01),
-            Mat4::look_at_rh(
-                Self::camera_position(self.radius, self.phi, self.theta),
-                self.eye,
-                Vec3::Y,
-            ),
+            Mat4::look_at_rh(camera_position, self.center, Vec3::Y),
+        );
+        debug_assert!(
+            camera.view.is_finite(),
+            "camera view is borked w:{w} h:{h} camera_position: {camera_position} center: {} \
+             radius: {} phi: {} theta: {}",
+            self.center,
+            self.radius,
+            self.phi,
+            self.theta
         );
         if self.camera.get() != camera {
             self.camera.set(camera);
@@ -182,18 +188,17 @@ impl App {
 
         let scene = doc.default_scene.unwrap_or(0);
         log::info!("Displaying scene {scene}");
-        let nodes = doc
-            .scenes
-            .get(scene)
-            .map(Vec::clone)
-            .unwrap_or_else(|| (0..doc.nodes.len()).collect());
-        //log::trace!("  nodes:");
-        for node_index in nodes.iter() {
-            // UNWRAP: safe because we know the node exists
-            let node = doc.nodes.get(*node_index).unwrap();
+        let nodes = doc.nodes_in_scene(scene).flat_map(|n| {
+            n.children
+                .iter()
+                .filter_map(|i| doc.nodes.get(*i))
+                .chain(std::iter::once(n))
+        });
+        log::trace!("  nodes:");
+        for node in nodes {
             let tfrm = Mat4::from(node.global_transform());
             let decomposed = Transform::from(tfrm);
-            //log::trace!("    {} {:?} {decomposed:?}", node.index, node.name);
+            log::trace!("    {} {:?} {decomposed:?}", node.index, node.name);
             if let Some(mesh_index) = node.mesh {
                 // UNWRAP: safe because we know the node exists
                 for primitive in doc.meshes.get(mesh_index).unwrap().primitives.iter() {
@@ -204,6 +209,17 @@ impl App {
                 }
             }
         }
+
+        log::trace!("Bounding box: {min} {max}");
+        let halfway_point = min + ((max - min).normalize() * ((max - min).length() / 2.0));
+        let length = min.distance(max);
+        let radius = length * 1.25;
+
+        self.radius = radius;
+        self.center = halfway_point;
+        self.last_frame_instant = now();
+
+        self.update_camera_view();
 
         if doc.animations.is_empty() {
             log::trace!("  animations: none");
@@ -222,7 +238,7 @@ impl App {
                         has_conflicting_animations || !animated_nodes.is_disjoint(&target_nodes);
                     animated_nodes.extend(target_nodes);
 
-                    //log::trace!("    {i} {:?} {}s", a.name, a.length_in_seconds());
+                    log::trace!("    {i} {:?} {}s", a.name, a.length_in_seconds());
                     // for (t, tween) in a.tweens.iter().enumerate() {
                     //     log::trace!(
                     //         "      tween {t} targets node {} {}",
@@ -239,16 +255,6 @@ impl App {
         }
         self.animations_conflict = has_conflicting_animations;
         self.document = Some(doc);
-
-        let halfway_point = min + ((max - min).normalize() * ((max - min).length() / 2.0));
-        let length = min.distance(max);
-        let radius = length * 1.25;
-
-        self.radius = radius;
-        self.eye = halfway_point;
-        self.last_frame_instant = now();
-
-        self.update_camera_view();
     }
 
     pub fn tick_loads(&mut self) {
