@@ -2227,7 +2227,7 @@ checksum = "216080ab382b992234dda86873c18d4c48358f5cfcb70fd693d7f6f2131b628b"
 
 [[package]]
 name = "renderling"
-version = "0.3.2"
+version = "0.4.0"
 dependencies = [
  "assert_approx_eq",
  "async-channel 1.9.0",
