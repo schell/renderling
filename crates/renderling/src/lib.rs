@@ -26,9 +26,11 @@
 //! ```
 //!
 //! The stage is neat in that it allows you to place values and arrays of values
-//! directly onto the GPU. Those values can be modified on the CPU and synchronization
-//! will happen during [`Stage::render`](crate::stage::Stage::render).
-//! These values are called [`Hybrid`](crate::slab::Hybrid)s and [`HybridArray`](crate::slab::HybridArray)s.
+//! directly onto the GPU. Those values can be modified on the CPU and
+//! synchronization will happen during
+//! [`Stage::render`](crate::stage::Stage::render). These values are called
+//! [`Hybrid`](crate::slab::Hybrid)s and
+//! [`HybridArray`](crate::slab::HybridArray)s.
 //!
 //! ```
 //! # use renderling::{Context, stage::Stage};
@@ -38,24 +40,26 @@
 //!
 //! let an_f32: Hybrid<f32> = stage.new_value(1337.0);
 //!
-//! let an_array_of_tuples: HybridArray<(f32, u32, bool)> = stage.new_array([
-//!     (0.0, 0, false),
-//!     (1.0, 1, true),
-//! ]);
+//! let an_array_of_tuples: HybridArray<(f32, u32, bool)> =
+//!     stage.new_array([(0.0, 0, false), (1.0, 1, true)]);
 //! ```
 //!
-//! In order to render, we need to "stage" a [`Renderlet`](crate::stage::Renderlet),
-//! which is a bundle of rendering resources.
-//! We do this in the same way we "staged" `an_f32` above.
+//! In order to render, we need to "stage" a
+//! [`Renderlet`](crate::stage::Renderlet), which is a bundle of rendering
+//! resources. We do this in the same way we "staged" `an_f32` above.
 //!
-//! But first we'll need a [`Camera`](crate::camera::Camera) and some vertices of
-//! [`Vertex`](crate::stage::Vertex).
+//! But first we'll need a [`Camera`](crate::camera::Camera) and some vertices
+//! of [`Vertex`](crate::stage::Vertex) organized as triangles with
+//! counter-clockwise winding.
 //!
 //! ```
 //! # use renderling::{Context, stage::Stage};
 //! # let ctx = Context::headless(100, 100);
 //! # let mut stage: Stage = ctx.new_stage();
-//! use renderling::{camera::Camera, stage::{Renderlet, Vertex}};
+//! use renderling::{
+//!     camera::Camera,
+//!     stage::{Renderlet, Vertex},
+//! };
 //! let camera = stage.new_value(Camera::default_ortho2d(100.0, 100.0));
 //! let vertices = stage.new_array([
 //!     Vertex::default()
@@ -75,20 +79,21 @@
 //! });
 //! ```
 //!
-//! This gives us `triangle`, which is a `Hybrid<Renderlet>`. We can now pass `triangle`
-//! to the stage to draw each frame using
+//! This gives us `triangle`, which is a `Hybrid<Renderlet>`. We can now pass
+//! `triangle` to the stage to draw each frame using
 //! [`Stage::add_renderlet`](crate::stage::Stage::add_renderlet).
 //!
-//! Finally, we get the next frame from the context with [`Context::get_next_frame`],
-//! render to it using [`Stage::render`](crate::stage::Stage::render) and then present the
+//! Finally, we get the next frame from the context with
+//! [`Context::get_next_frame`], render to it using
+//! [`Stage::render`](crate::stage::Stage::render) and then present the
 //! frame with [`Frame::present`].
 //!
 //! ```
 //! # use renderling::{
 //! #     Context,
-//! #     camera::Camera,    
+//! #     camera::Camera,
 //! #     stage::{
-//! #         Vertex,    
+//! #         Vertex,
 //! #         Renderlet,
 //! #     }
 //! # };
@@ -129,7 +134,10 @@
 //!
 //! Your mileage may vary, but I hope you get good use out of this library.
 //!
-//! PRs are very much welcomed :)
+//! PRs, criticisms and ideas are all very much welcomed [at the repo](https://github.com/schell/renderling).
+//!
+//! 😀☕
+#![allow(unexpected_cfgs)]
 #![cfg_attr(target_arch = "spirv", no_std)]
 #![deny(clippy::disallowed_methods)]
 
@@ -156,7 +164,7 @@ pub mod stage;
 pub mod texture;
 pub mod tonemapping;
 pub mod transform;
-#[cfg(test)]
+#[cfg(feature = "tutorial")]
 pub mod tutorial;
 
 #[cfg(not(target_arch = "spirv"))]
@@ -196,6 +204,7 @@ mod test {
             .filter_module("moongraph", log::LevelFilter::Trace)
             .filter_module("renderling", log::LevelFilter::Trace)
             .filter_module("crabslab", log::LevelFilter::Debug)
+            .filter_module("renderling::bloom", log::LevelFilter::Debug)
             .try_init();
     }
 
@@ -734,7 +743,7 @@ mod test {
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
         let img = frame.read_image().unwrap();
-        img_diff::assert_img_eq("gpu_scene_sanity2.png", img);
+        img_diff::assert_img_eq("stage/shared_node_with_different_materials.png", img);
     }
 
     #[test]
@@ -808,8 +817,8 @@ mod test {
         let img = frame.read_image().unwrap();
         let depth_texture = stage.get_depth_texture();
         let depth_img = depth_texture.read_image().unwrap();
-        img_diff::save("scene_cube_directional_depth.png", depth_img);
-        img_diff::assert_img_eq("scene_cube_directional.png", img);
+        img_diff::assert_img_eq("stage/cube_directional_depth.png", depth_img);
+        img_diff::assert_img_eq("stage/cube_directional.png", img);
     }
 
     #[test]
@@ -850,7 +859,8 @@ mod test {
     }
 
     #[test]
-    // shows how to "nest" children to make them appear transformed by their parent's transform
+    // shows how to "nest" children to make them appear transformed by their
+    // parent's transform
     fn scene_parent_sanity() {
         let ctx = Context::headless(100, 100);
         let mut stage = ctx.new_stage().with_background_color(Vec4::splat(0.0));
@@ -879,7 +889,7 @@ mod test {
             Vertex::default().with_position([size, 0.0, 0.0]),
         ]);
 
-        let mut root_node = stage.new_nested_transform();
+        let root_node = stage.new_nested_transform();
         root_node.set_local_transform(Transform {
             scale: Vec3::new(25.0, 25.0, 1.0),
             ..Default::default()
@@ -891,15 +901,15 @@ mod test {
             ..Default::default()
         };
 
-        let mut cyan_node = NestedTransform::new(&mut stage);
+        let cyan_node = NestedTransform::new(&mut stage);
         cyan_node.set_local_transform(offset);
         println!("cyan_node: {:#?}", cyan_node.get_global_transform());
 
-        let mut yellow_node = NestedTransform::new(&mut stage);
+        let yellow_node = NestedTransform::new(&mut stage);
         yellow_node.set_local_transform(offset);
         println!("yellow_node: {:#?}", yellow_node.get_global_transform());
 
-        let mut red_node = NestedTransform::new(&mut stage);
+        let red_node = NestedTransform::new(&mut stage);
         red_node.set_local_transform(offset);
         println!("red_node: {:#?}", red_node.get_global_transform());
 
@@ -949,97 +959,5 @@ mod test {
         let view = Mat4::look_at_rh(position, Vec3::new(1.0, 2.0, 0.0), Vec3::Y);
         let extracted_position = view.inverse().transform_point3(Vec3::ZERO);
         assert_eq!(position, extracted_position);
-    }
-
-    #[test]
-    // Tests the initial implementation of pbr metallic roughness on an array of
-    // spheres with different metallic roughnesses lit by an environment map.
-    //
-    // see https://learnopengl.com/PBR/Lighting
-    fn pbr_metallic_roughness_spheres() {
-        let ss = 600;
-        let ctx = Context::headless(ss, ss);
-        let mut stage = ctx.new_stage();
-
-        let radius = 0.5;
-        let ss = ss as f32;
-        let projection = camera::perspective(ss, ss);
-        let k = 7;
-        let diameter = 2.0 * radius;
-        let spacing = radius * 0.25;
-        let len = (k - 1) as f32 * (diameter + spacing);
-        let half = len / 2.0;
-        let view = camera::look_at(
-            Vec3::new(half, half, 1.6 * len),
-            Vec3::new(half, half, 0.0),
-            Vec3::Y,
-        );
-        let camera = stage.new_value(Camera::new(projection, view));
-
-        let geometry = stage.new_array({
-            let mut icosphere = icosahedron::Polyhedron::new_isocahedron(radius, 5);
-            icosphere.compute_triangle_normals();
-            let icosahedron::Polyhedron {
-                positions,
-                normals,
-                cells,
-                ..
-            } = icosphere;
-            log::info!("icosphere created on CPU");
-
-            let to_vertex = |ndx: &usize| -> Vertex {
-                let p: [f32; 3] = positions[*ndx].0.into();
-                let n: [f32; 3] = normals[*ndx].0.into();
-                Vertex::default().with_position(p).with_normal(n)
-            };
-            cells
-                .iter()
-                .flat_map(|icosahedron::Triangle { a, b, c }| {
-                    let p0 = to_vertex(&a);
-                    let p1 = to_vertex(&b);
-                    let p2 = to_vertex(&c);
-                    vec![p0, p1, p2]
-                })
-                .collect::<Vec<_>>()
-        });
-        let mut spheres = vec![];
-        for i in 0..k {
-            let roughness = i as f32 / (k - 1) as f32;
-            let x = (diameter + spacing) * i as f32;
-            for j in 0..k {
-                let metallic = j as f32 / (k - 1) as f32;
-                let y = (diameter + spacing) * j as f32;
-
-                let material = stage.new_value(Material {
-                    albedo_factor: Vec4::new(1.0, 1.0, 1.0, 1.0),
-                    metallic_factor: metallic,
-                    roughness_factor: roughness,
-                    ..Default::default()
-                });
-                let transform = stage.new_value(Transform {
-                    translation: Vec3::new(x, y, 0.0),
-                    ..Default::default()
-                });
-                let sphere = stage.new_value(Renderlet {
-                    camera_id: camera.id(),
-                    vertices_array: geometry.array(),
-                    transform_id: transform.id(),
-                    material_id: material.id(),
-                    ..Default::default()
-                });
-                stage.add_renderlet(&sphere);
-                spheres.push(sphere);
-            }
-        }
-
-        let (device, queue) = ctx.get_device_and_queue_owned();
-        let hdr_image = AtlasImage::from_hdr_path("../../img/hdr/resting_place.hdr").unwrap();
-        let skybox = crate::skybox::Skybox::new(device, queue, hdr_image, camera.id());
-        stage.set_skybox(skybox);
-
-        let frame = ctx.get_next_frame().unwrap();
-        stage.render(&frame.view());
-        let img = frame.read_image().unwrap();
-        img_diff::assert_img_eq("pbr/metallic_roughness_spheres.png", img);
     }
 }

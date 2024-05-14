@@ -23,7 +23,12 @@ fn main() {
     env_logger::Builder::default()
         .filter_module("example", log::LevelFilter::Trace)
         .filter_module("renderling", log::LevelFilter::Debug)
-        .filter_module("renderling::slab", log::LevelFilter::Trace)
+        .filter_module("renderling::stage::cpu", log::LevelFilter::Debug)
+        .filter_module("renderling::slab", log::LevelFilter::Debug)
+        .filter_module(
+            "renderling::stage::gltf_support::anime",
+            log::LevelFilter::Debug,
+        )
         //.filter_module("naga", log::LevelFilter::Warn)
         .filter_module("wgpu", log::LevelFilter::Warn)
         .init();
@@ -115,29 +120,29 @@ pub fn tick(app: &mut App, ev: Option<&winit::event::WindowEvent>) {
             }
             _ => {}
         }
-
-        // if let Some(ev) = event_state.event_from_winit(ev) {
-        //     let scene = r.graph.get_resource_mut::<Scene>().unwrap().unwrap();
-        //     let channel = scene.get_debug_channel();
-        //     let mut set_debug_channel = |mode| {
-        //         log::debug!("setting debug mode to {mode:?}");
-        //         if channel != mode {
-        //             scene.set_debug_channel(mode);
-        //         } else {
-        //             scene.set_debug_channel(DebugChannel::None);
-        //         }
-        //     };
-
-        //     match app.ui.event(ev) {
-        //         None => {}
-        //         Some(ev) => match ev {
-        //             UiEvent::ToggleDebugChannel(channel) => set_debug_channel(channel),
-        //         },
-        //     }
-        // }
-    } else {
-        app.tick_loads();
-        app.update_camera_view();
-        // app.animate();
     }
+
+    // if let Some(ev) = event_state.event_from_winit(ev) {
+    //     let scene = r.graph.get_resource_mut::<Scene>().unwrap().unwrap();
+    //     let channel = scene.get_debug_channel();
+    //     let mut set_debug_channel = |mode| {
+    //         log::debug!("setting debug mode to {mode:?}");
+    //         if channel != mode {
+    //             scene.set_debug_channel(mode);
+    //         } else {
+    //             scene.set_debug_channel(DebugChannel::None);
+    //         }
+    //     };
+
+    //     match app.ui.event(ev) {
+    //         None => {}
+    //         Some(ev) => match ev {
+    //             UiEvent::ToggleDebugChannel(channel) =>
+    // set_debug_channel(channel),         },
+    //     }
+    // }
+
+    app.tick_loads();
+    app.update_camera_view();
+    app.animate();
 }

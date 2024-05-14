@@ -29,6 +29,52 @@ mod gltf_support;
 #[cfg(all(feature = "gltf", not(target_arch = "spirv")))]
 pub use gltf_support::*;
 
+/// A vertex skin.
+///
+/// For more info on vertex skinning, see
+/// <https://github.khronos.org/glTF-Tutorials/gltfTutorial/gltfTutorial_019_SimpleSkin.html>
+#[derive(Clone, Copy, Default, SlabItem)]
+#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
+pub struct Skin {
+    // Ids of the skeleton nodes' global transforms used as joints in this skin.
+    pub joints: Array<Id<Transform>>,
+    // Contains the 4x4 inverse-bind matrices.
+    //
+    // When is none, each matrix is assumed to be the 4x4 identity matrix
+    // which implies that the inverse-bind matrices were pre-applied.
+    pub inverse_bind_matrices: Array<Mat4>,
+}
+
+
+impl Skin {
+    pub fn get_inverse_bind_matrix(&self, i: usize, slab: &[u32]) -> Mat4 {
+        slab.read(self.inverse_bind_matrices.at(i))
+    }
+
+    pub fn get_joint_matrix(&self, i: usize, vertex: Vertex, slab: &[u32]) -> Mat4 {
+        let joint_index = vertex.joints[i] as usize;
+        let joint_id = slab.read(self.joints.at(joint_index));
+        let joint_transform = slab.read(joint_id);
+        let inverse_bind_matrix = slab.read(self.inverse_bind_matrices.at(i));
+        Mat4::from(joint_transform) * inverse_bind_matrix
+    }
+
+    pub fn get_transform(&self, vertex: Vertex, slab: &[u32]) -> Transform {
+        let mat = vertex.weights[0] * self.get_joint_matrix(0, vertex, slab)
+            + vertex.weights[1] * self.get_joint_matrix(1, vertex, slab)
+            + vertex.weights[2] * self.get_joint_matrix(2, vertex, slab)
+            + vertex.weights[3] * self.get_joint_matrix(3, vertex, slab);
+
+        Transform::from(
+            if mat == Mat4::ZERO {
+                Mat4::IDENTITY
+            } else {
+                mat
+            },
+        )
+    }
+}
+
 /// A vertex in a mesh.
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[derive(Clone, Copy, PartialEq, SlabItem)]
@@ -39,8 +85,7 @@ pub struct Vertex {
     pub uv1: Vec2,
     pub normal: Vec3,
     pub tangent: Vec4,
-    // Indices that point to this vertex's joints by indexing into an array of Id<GpuEntity>
-    // provided by the GpuEntity that is using this vertex
+    // Indices that point to this vertex's 'joint' transforms.
     pub joints: [u32; 4],
     // The weights of influence that each joint has over this vertex
     pub weights: [f32; 4],
@@ -92,50 +137,6 @@ impl Vertex {
         self
     }
 
-    ///// Return the matrix needed to bring vertices into the coordinate space of
-    ///// the joint node.
-    //pub fn get_joint_matrix(
-    //    &self,
-    //    i: usize,
-    //    joint_ids: &[Id<GpuEntity>; 32],
-    //    entities: &[GpuEntity],
-    //) -> Mat4 {
-    //    if i >= self.joints.len() {
-    //        return Mat4::IDENTITY;
-    //    }
-    //    let joint_index = self.joints[i];
-    //    let joint_id = if joint_index as usize >= joint_ids.len() {
-    //        Id::NONE
-    //    } else {
-    //        joint_ids[joint_index as usize]
-    //    };
-    //    if joint_id.is_none() {
-    //        return Mat4::IDENTITY;
-    //    }
-    //    let entity_index = joint_id.index();
-    //    if entity_index >= entities.len() {
-    //        return Mat4::IDENTITY;
-    //    }
-    //    let joint_entity = &entities[entity_index];
-    //    let (t, r, s) = joint_entity.get_world_transform(entities);
-    //    let trs = Mat4::from_scale_rotation_translation(s, r, t);
-    //    trs * joint_entity.inverse_bind_matrix
-    //}
-
-    ///// Return the result of adding all joint matrices multiplied by their
-    ///// weights for the given vertex.
-    //// See the [khronos gltf viewer reference](https://github.com/KhronosGroup/glTF-Sample-Viewer/blob/47a191931461a6f2e14de48d6da0f0eb6ec2d147/source/Renderer/shaders/animation.glsl#L47)
-    //pub fn get_skin_matrix(&self, joint_ids: &[Id<GpuEntity>; 32], entities:
-    // &[GpuEntity]) -> Mat4 {    let mut mat = Mat4::ZERO;
-    //    for i in 0..self.joints.len() {
-    //        mat += self.weights[i] * self.get_joint_matrix(i, joint_ids,
-    // entities);    }
-    //    if mat == Mat4::ZERO {
-    //        return Mat4::IDENTITY;
-    //    }
-    //    mat
-    //}
-
     pub fn generate_normal(a: Vec3, b: Vec3, c: Vec3) -> Vec3 {
         let ab = a - b;
         let ac = a - c;
@@ -184,6 +185,7 @@ pub struct Renderlet {
     pub camera_id: Id<Camera>,
     pub transform_id: Id<Transform>,
     pub material_id: Id<Material>,
+    pub skin_id: Id<Skin>,
     pub pbr_config_id: Id<PbrConfig>,
     pub debug_index: u32,
 }
@@ -197,6 +199,7 @@ impl Default for Renderlet {
             camera_id: Id::NONE,
             transform_id: Id::NONE,
             material_id: Id::NONE,
+            skin_id: Id::NONE,
             pbr_config_id: Id::new(0),
             debug_index: 0,
         }
@@ -273,15 +276,17 @@ pub fn renderlet_vertex(
     *out_color = vertex.color;
     *out_uv0 = vertex.uv0;
     *out_uv1 = vertex.uv1;
-    let transform = slab.read(renderlet.transform_id);
-    let model_matrix = Mat4::from_scale_rotation_translation(
-        transform.scale,
-        transform.rotation,
-        transform.translation,
-    );
+
+    let transform = if renderlet.skin_id.is_some() {
+        let skin = slab.read(renderlet.skin_id);
+        skin.get_transform(vertex, slab)
+    } else {
+        slab.read(renderlet.transform_id)
+    };
     let scale2 = transform.scale * transform.scale;
     let normal = vertex.normal.alt_norm_or_zero();
     let tangent = vertex.tangent.xyz().alt_norm_or_zero();
+    let model_matrix = Mat4::from(transform);
     let normal_w: Vec3 = (model_matrix * (normal / scale2).extend(0.0))
         .xyz()
         .alt_norm_or_zero();
@@ -396,47 +401,19 @@ pub fn renderlet_fragment(
     log.write(debug);
 }
 
-//#[spirv(compute(threads(32)))]
-///// Compute the draw calls for this frame.
-/////
-///// This should be called with `groupcount = (entities.len() / threads) + 1`.
-//pub fn compute_cull_entities(
-//    #[spirv(storage_buffer, descriptor_set = 0, binding = 2)] entities:
-// &[GpuEntity],    #[spirv(storage_buffer, descriptor_set = 1, binding = 0)]
-// draws: &mut [DrawIndirect],    #[spirv(global_invocation_id)] global_id:
-// UVec3,
-//) {
-//    let i = global_id.x as usize;
-//
-//    if i > entities.len() {
-//        return;
-//    }
-//
-//    // when the vertex count and/or instance count is 0, it effectively
-// filters    // the draw call
-//    let mut call = DrawIndirect {
-//        vertex_count: 0,
-//        instance_count: 0,
-//        base_vertex: 0,
-//        base_instance: i as u32,
-//    };
-//    let entity = &entities[i];
-//    let is_visible = entity.visible != 0;
-//    if entity.is_alive() && is_visible {
-//        //// once naga supports atomics we can use this to compact the array
-//        // let index = unsafe {
-//        //    spirv_std::arch::atomic_i_increment::<
-//        //        u32,
-//        //        { spirv_std::memory::Scope::Device as u32 },
-//        //        { spirv_std::memory::Semantics::NONE.bits() as u32 },
-//        //    >(count)
-//        //};
-//        call.instance_count = 1;
-//        call.base_vertex = entity.mesh_first_vertex;
-//        call.vertex_count = entity.mesh_vertex_count;
-//    }
-//    draws[i] = call;
-//}
+#[cfg(feature = "test_atomic_i_increment")]
+#[spirv(compute(threads(32)))]
+pub fn test_atomic_i_increment(
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] global_index: &mut u32,
+) {
+    let _ = unsafe {
+        spirv_std::arch::atomic_i_increment::<
+            u32,
+            { spirv_std::memory::Scope::Workgroup as u32 },
+            { spirv_std::memory::Semantics::NONE.bits() as u32 },
+        >(global_index)
+    };
+}
 
 #[cfg(feature = "test_i8_16_extraction")]
 #[spirv(compute(threads(32)))]
@@ -454,5 +431,29 @@ pub fn test_i8_i16_extraction(
     let (value, _, _) = crate::bits::extract_i16(index, 2, slab);
     if value > 0 {
         slab[index] = value as u32;
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use glam::{Mat4, Vec3};
+
+    use crate::transform::Transform;
+
+    #[test]
+    fn matrix_hierarchy_sanity() {
+        let a: Mat4 = Transform {
+            translation: Vec3::new(100.0, 100.0, 0.0),
+            ..Default::default()
+        }
+        .into();
+        let b: Mat4 = Transform {
+            scale: Vec3::splat(0.5),
+            ..Default::default()
+        }
+        .into();
+        let c1 = a * b;
+        let c2 = b * a;
+        assert_ne!(c1, c2);
     }
 }

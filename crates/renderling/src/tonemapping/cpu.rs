@@ -162,7 +162,8 @@ impl Tonemapping {
     }
 
     pub fn set_hdr_texture(&self, device: &wgpu::Device, hdr_texture: &Texture) {
-        // UNWRAP: safe because the buffer is created in `Self::new` and guaranteed to exist
+        // UNWRAP: safe because the buffer is created in `Self::new` and guaranteed to
+        // exist
         let slab_buffer = self.slab.get_buffer().unwrap();
         let bindgroup = create_bindgroup(device, Some("tonemapping"), hdr_texture, &slab_buffer);
         // UNWRAP: not safe but we want to panic

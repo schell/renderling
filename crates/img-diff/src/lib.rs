@@ -58,7 +58,7 @@ fn get_results(
     threshold: f32,
 ) -> Result<Option<(usize, Rgba32FImage)>, ImgDiffError> {
     let lid @ (width, height) = left_image.dimensions();
-    let rid = left_image.dimensions();
+    let rid = right_image.dimensions();
     snafu::ensure!(lid == rid, ImageSizeSnafu);
 
     let results = left_image

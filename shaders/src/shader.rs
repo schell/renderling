@@ -54,7 +54,7 @@ impl Linkage {
             }
         };
         format!(
-            r#"
+            r#"#![allow(dead_code)]
             //! Automatically generated with `cd shaders && cargo run --release`.
             //!
             //! Provides the shader linkage for

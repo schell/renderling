@@ -22,7 +22,7 @@ struct WebCallback {
 impl Drop for WebCallback {
     fn drop(&mut self) {
         if let Some(arc) = self.closure.take() {
-            if let Some(closure) = Arc::try_unwrap(arc).ok() {
+            if let Ok(closure) = Arc::try_unwrap(arc) {
                 self.target
                     .remove_event_listener_with_callback(
                         self.name.as_str(),

@@ -103,11 +103,7 @@ pub fn tutorial_slabbed_renderlet(
     *out_color = vertex.color;
 
     let transform = slab.read(renderlet.transform_id);
-    let model = Mat4::from_scale_rotation_translation(
-        transform.scale,
-        transform.rotation,
-        transform.translation,
-    );
+    let model = Mat4::from(transform);
     let camera = slab.read(renderlet.camera_id);
     *clip_pos = camera.projection * camera.view * model * vertex.position.extend(1.0);
 }

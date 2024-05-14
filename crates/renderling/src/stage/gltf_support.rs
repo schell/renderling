@@ -2,7 +2,8 @@
 use std::collections::HashMap;
 
 use crabslab::{Array, Id};
-use glam::{Mat4, Vec2, Vec3, Vec4};
+use glam::{Mat4, Quat, Vec2, Vec3, Vec4};
+use rustc_hash::FxHashMap;
 use snafu::{OptionExt, ResultExt, Snafu};
 
 use crate::{
@@ -15,10 +16,12 @@ use crate::{
         Material,
     },
     slab::*,
-    stage::Vertex,
-    stage::{NestedTransform, Renderlet, Stage},
+    stage::{NestedTransform, Renderlet, Skin, Stage, Vertex},
     transform::Transform,
 };
+
+mod anime;
+pub use anime::*;
 
 #[derive(Debug, Snafu)]
 pub enum StageGltfError {
@@ -69,6 +72,15 @@ pub enum StageGltfError {
 
     #[snafu(display("Missing gltf camera at index {index}"))]
     MissingCamera { index: usize },
+
+    #[snafu(display("Node has no skin"))]
+    NoSkin,
+
+    #[snafu(display("Missing gltf skin at index {index}"))]
+    MissingSkin { index: usize },
+
+    #[snafu(display("{source}"))]
+    Animation { source: anime::AnimationError },
 
     #[snafu(display("{source}"))]
     Slab { source: crabslab::WgpuSlabError },
@@ -456,9 +468,22 @@ impl GltfPrimitive {
         let vs = uv1s.zip(vs);
         let vs = uv0s.into_iter().zip(vs);
         let vs = positions.into_iter().zip(vs);
+        let mut logged_not_normalized = false;
+        let mut unnormalized_weight_vertices_count = 0;
         let vertices = vs
             .map(
-                |(position, (uv0, (uv1, (normal, (tangent, (color, (joints, weights)))))))| {
+                |(position, (uv0, (uv1, (normal, (tangent, (color, (joints, mut weights)))))))| {
+                    let weight_sum: f32 = weights.iter().sum();
+                    let are_normalized = 1.0 - weight_sum <= f32::EPSILON;
+                    if !are_normalized {
+                        unnormalized_weight_vertices_count += 1;
+                        if !logged_not_normalized {
+                            log::warn!("weights are not normalized: {weights:?}");
+                            logged_not_normalized = true;
+                            weights = weights.map(|w| w / weight_sum);
+                            log::warn!("  normalized to {weights:?}");
+                        }
+                    }
                     Vertex {
                         position,
                         color,
@@ -474,6 +499,11 @@ impl GltfPrimitive {
             .collect::<Vec<_>>();
         let vertices = stage.new_array(vertices);
         log::debug!("{} vertices, {:?}", vertices.len(), vertices.array());
+        if logged_not_normalized {
+            log::debug!(
+                "  {unnormalized_weight_vertices_count} of which had unnormalized joint weights"
+            );
+        }
         let indices = stage.new_array(indices);
         log::debug!("{} indices, {:?}", indices.len(), indices.array());
         let gltf::mesh::Bounds { min, max } = primitive.bounding_box();
@@ -605,24 +635,93 @@ pub struct GltfNode {
     pub transform: NestedTransform,
 }
 
+impl From<&GltfNode> for (usize, NestedTransform) {
+    fn from(node: &GltfNode) -> Self {
+        (node.index, node.transform.clone())
+    }
+}
+
 impl GltfNode {
     pub fn global_transform(&self) -> Transform {
         self.transform.get_global_transform()
     }
 }
 
+
+#[derive(Clone, Debug)]
+pub struct GltfSkin {
+    pub index: usize,
+    // Indices of the skeleton nodes used as joints in this skin, unused internally
+    // but possibly useful.
+    pub joint_nodes: Vec<usize>,
+    pub joint_transforms: HybridArray<Id<Transform>>,
+    // Containins the 4x4 inverse-bind matrices.
+    //
+    // When None, each matrix is assumed to be the 4x4 identity matrix which implies that the
+    // inverse-bind matrices were pre-applied.
+    pub inverse_bind_matrices: Option<HybridArray<Mat4>>,
+    // Index of the node used as the skeleton root.
+    // When None, joints transforms resolve to scene root.
+    pub skeleton: Option<usize>,
+    // Skin as seen by shaders, on the GPU
+    pub skin: Hybrid<Skin>,
+}
+
+impl GltfSkin {
+    pub fn from_gltf(
+        stage: &mut Stage,
+        buffer_data: &[gltf::buffer::Data],
+        nodes: &[GltfNode],
+        skin: gltf::Skin,
+    ) -> Result<Self, StageGltfError> {
+        let joint_nodes = skin.joints().map(|n| n.index()).collect::<Vec<_>>();
+        let mut joint_transforms = vec![];
+        for node_index in joint_nodes.iter() {
+            let gltf_node: &GltfNode = nodes
+                .get(*node_index)
+                .context(MissingNodeSnafu { index: *node_index })?;
+            let transform_id = gltf_node.transform.global_transform_id();
+            joint_transforms.push(transform_id);
+        }
+        let joint_transforms = stage.new_array(joint_transforms);
+        let reader = skin.reader(|b| buffer_data.get(b.index()).map(|d| d.0.as_slice()));
+        let inverse_bind_matrices = reader
+            .read_inverse_bind_matrices()
+            .map(|mats| stage.new_array(mats.into_iter().map(|m| Mat4::from_cols_array_2d(&m))));
+        let skeleton = skin.skeleton().map(|n| n.index());
+        Ok(GltfSkin {
+            index: skin.index(),
+            skin: stage.new_value(Skin {
+                joints: joint_transforms.array(),
+                inverse_bind_matrices: inverse_bind_matrices
+                    .as_ref()
+                    .map(|a| a.array())
+                    .unwrap_or_default(),
+            }),
+            joint_nodes,
+            joint_transforms,
+            inverse_bind_matrices,
+            skeleton,
+        })
+    }
+}
+
 #[derive(Debug)]
 pub struct GltfDocument {
+    pub animations: Vec<Animation>,
     pub nodes: Vec<GltfNode>,
     pub cameras: Vec<GltfCamera>,
+    pub extensions: Option<serde_json::Value>,
     pub meshes: Vec<GltfMesh>,
     pub default_material: Hybrid<Material>,
     pub materials: HybridArray<Material>,
+    pub skins: Vec<GltfSkin>,
     /// Vector of scenes - each being a list of nodes.
     pub scenes: Vec<Vec<usize>>,
     pub default_scene: Option<usize>,
     pub textures: HybridArray<AtlasTexture>,
     pub lights: Vec<GltfLight>,
+    pub renderlets: FxHashMap<usize, Vec<Hybrid<Renderlet>>>,
 }
 
 impl GltfDocument {
@@ -631,28 +730,52 @@ impl GltfDocument {
         document: &gltf::Document,
         buffer_data: Vec<gltf::buffer::Data>,
         images: Vec<gltf::image::Data>,
+        // Camera id to use for any created Renderlets
+        camera_id: Id<Camera>,
     ) -> Result<GltfDocument, StageGltfError> {
-        log::debug!("Loading nodes");
+        log::debug!("Loading {} nodes", document.nodes().count());
         let mut nodes = vec![];
         let mut node_transforms = HashMap::<usize, NestedTransform>::new();
+
         fn transform_for_node(
+            nesting_level: usize,
             stage: &mut Stage,
             cache: &mut HashMap<usize, NestedTransform>,
             node: &gltf::Node,
         ) -> NestedTransform {
-            if let Some(nt) = cache.get(&node.index()) {
+            let padding = std::iter::repeat(" ")
+                .take(nesting_level * 2)
+                .collect::<Vec<_>>()
+                .join("");
+            let nt = if let Some(nt) = cache.get(&node.index()) {
                 nt.clone()
             } else {
-                let mut transform = stage.new_nested_transform();
-                let mat4 = Mat4::from_cols_array_2d(&node.transform().matrix());
-                transform.set_local_transform(mat4.into());
+                let transform = stage.new_nested_transform();
+                let (translation, rotation, scale) = &node.transform().decomposed();
+                let t = Transform {
+                    translation: Vec3::from_array(*translation),
+                    rotation: Quat::from_array(*rotation),
+                    scale: Vec3::from_array(*scale),
+                };
+                transform.set_local_transform(t);
                 for node in node.children() {
-                    let child_transform = transform_for_node(stage, cache, &node);
+                    let child_transform =
+                        transform_for_node(nesting_level + 1, stage, cache, &node);
                     transform.add_child(&child_transform);
                 }
                 cache.insert(node.index(), transform.clone());
                 transform
-            }
+            };
+            let t = nt.get_local_transform();
+            log::debug!(
+                "{padding}{} {:?} {:?} {:?} {:?}",
+                node.index(),
+                node.name(),
+                t.translation,
+                t.rotation,
+                t.scale
+            );
+            nt
         }
         let mut camera_index_to_node_index = HashMap::<usize, usize>::new();
         let mut light_index_to_node_index = HashMap::<usize, usize>::new();
@@ -673,7 +796,7 @@ impl GltfDocument {
             let light = node.light().map(|light| light.index());
             let weights = node.weights().map(|w| w.to_vec()).unwrap_or_default();
             let weights = stage.new_array(weights);
-            let transform = transform_for_node(stage, &mut node_transforms, &node);
+            let transform = transform_for_node(0, stage, &mut node_transforms, &node);
             nodes.push(GltfNode {
                 index: node.index(),
                 name: node.name().map(String::from),
@@ -832,94 +955,17 @@ impl GltfDocument {
             }
         }
 
-        //let skins = self.allocate_array::<GltfSkin>(document.skins().len());
+        log::trace!("Loading skins");
+        let mut skins = vec![];
+        for skin in document.skins() {
+            skins.push(GltfSkin::from_gltf(stage, &buffer_data, &nodes, skin)?);
+        }
 
-        // TODO: GLTF skinning
-        // log::trace!("Loading skins");
-        // for skin in document.skins() {
-        //     let skin_index = skin.index();
-        //     let joints = skin
-        //         .joints()
-        //         .map(|node| nodes.at(node.index()))
-        //         .collect::<Vec<_>>();
-        //     let joints = self.append_array(&joints);
-        //     let inverse_bind_matrices = skin
-        //         .inverse_bind_matrices()
-        //         .map(|acc| accessors.at(acc.index()))
-        //         .unwrap_or_default();
-        //     let skeleton = skin
-        //         .skeleton()
-        //         .map(|node| nodes.at(node.index()))
-        //         .unwrap_or_default();
-        //     let _ = self.write(
-        //         skins.at(skin_index),
-        //         &GltfSkin {
-        //             joints,
-        //             inverse_bind_matrices,
-        //             skeleton,
-        //         },
-        //     );
-        // }
-
-        // log::trace!("Loading animations");
-        // let animations = self.allocate_array::<GltfAnimation>(document.animations().count());
-        // for animation in document.animations() {
-        //     let samplers =
-        //         self.allocate_array::<GltfAnimationSampler>(animation.samplers().count());
-        //     fn create_sampler(
-        //         accessors: Array<GltfAccessor>,
-        //         sampler: gltf::animation::Sampler<'_>,
-        //     ) -> GltfAnimationSampler {
-        //         let interpolation = match sampler.interpolation() {
-        //             gltf::animation::Interpolation::Linear => GltfInterpolation::Linear,
-        //             gltf::animation::Interpolation::Step => GltfInterpolation::Step,
-        //             gltf::animation::Interpolation::CubicSpline => GltfInterpolation::CubicSpline,
-        //         };
-        //         let input = accessors.at(sampler.input().index());
-        //         let output = accessors.at(sampler.output().index());
-        //         GltfAnimationSampler {
-        //             interpolation,
-        //             input,
-        //             output,
-        //         }
-        //     }
-        //     let mut stored_samplers = vec![];
-        //     for (i, sampler) in animation.samplers().enumerate() {
-        //         let sampler = create_sampler(accessors, sampler);
-        //         self.write(samplers.at(i), &sampler);
-        //         // Store it later so we can figure out the index of the sampler
-        //         // used by the channel.
-        //         //
-        //         // TODO: Remove `stored_samplers` once `gltf` provides `.index()`
-        //         // @see https://github.com/gltf-rs/gltf/issues/398
-        //         stored_samplers.push(sampler);
-        //     }
-        //     let channels = self.allocate_array::<GltfChannel>(animation.channels().count());
-        //     for (i, channel) in animation.channels().enumerate() {
-        //         let target = channel.target();
-        //         let node = nodes.at(target.node().index());
-        //         let property = match target.property() {
-        //             gltf::animation::Property::Translation => GltfTargetProperty::Translation,
-        //             gltf::animation::Property::Rotation => GltfTargetProperty::Rotation,
-        //             gltf::animation::Property::Scale => GltfTargetProperty::Scale,
-        //             gltf::animation::Property::MorphTargetWeights => {
-        //                 GltfTargetProperty::MorphTargetWeights
-        //             }
-        //         };
-        //         let target = GltfTarget { node, property };
-        //         let sampler = create_sampler(accessors, channel.sampler());
-        //         let index = stored_samplers
-        //             .iter()
-        //             .position(|s| s == &sampler)
-        //             .context(MissingSamplerSnafu)?;
-        //         let sampler = samplers.at(index);
-        //         self.write(channels.at(i), &GltfChannel { target, sampler });
-        //     }
-        //     self.write(
-        //         animations.at(animation.index()),
-        //         &GltfAnimation { channels, samplers },
-        //     );
-        // }
+        log::trace!("Loading animations");
+        let mut animations = vec![];
+        for animation in document.animations() {
+            animations.push(Animation::from_gltf(&buffer_data, animation).context(AnimationSnafu)?);
+        }
 
         log::debug!("Loading scenes");
         let scenes = document
@@ -927,10 +973,58 @@ impl GltfDocument {
             .map(|scene| scene.nodes().map(|node| node.index()).collect())
             .collect();
 
-        log::trace!("Done loading gltf");
+        log::debug!("Creating renderlets");
+
+        let mut renderlets = FxHashMap::default();
+        for gltf_node in nodes.iter() {
+            let mut node_renderlets = vec![];
+            let skin_id = if let Some(skin_index) = gltf_node.skin {
+                log::debug!("  node {} {:?} has skin", gltf_node.index, gltf_node.name);
+                let gltf_skin = skins
+                    .get(skin_index)
+                    .context(MissingSkinSnafu { index: skin_index })?;
+                gltf_skin.skin.id()
+            } else {
+                Id::NONE
+            };
+
+            if let Some(mesh_index) = gltf_node.mesh {
+                log::debug!(
+                    "  node {} {:?} has mesh {mesh_index}",
+                    gltf_node.index,
+                    gltf_node.name
+                );
+                let mesh = meshes
+                    .get(mesh_index)
+                    .context(MissingMeshSnafu { index: mesh_index })?;
+                let num_prims = mesh.primitives.len();
+                log::debug!("    has {num_prims} primitives");
+                for (prim, i) in mesh.primitives.iter().zip(1..) {
+                    let hybrid = stage.new_value(Renderlet {
+                        vertices_array: prim.vertices.array(),
+                        indices_array: prim.indices.array(),
+                        transform_id: gltf_node.transform.global_transform_id(),
+                        material_id: prim.material,
+                        camera_id,
+                        skin_id,
+                        ..Default::default()
+                    });
+                    log::debug!("    created renderlet {i}/{num_prims}: {:#?}", hybrid.get());
+                    stage.add_renderlet(&hybrid);
+                    node_renderlets.push(hybrid);
+                }
+            }
+            if !node_renderlets.is_empty() {
+                renderlets.insert(gltf_node.index, node_renderlets);
+            }
+        }
+
+        log::debug!("Extensions used: {:?}", document.extensions_used());
+        log::debug!("Extensions required: {:?}", document.extensions_required());
+        log::debug!("Done loading gltf");
 
         Ok(GltfDocument {
-            //animations,
+            animations,
             lights,
             cameras,
             materials,
@@ -938,89 +1032,52 @@ impl GltfDocument {
             meshes,
             nodes,
             scenes,
+            skins,
             default_scene: document.default_scene().map(|scene| scene.index()),
             textures,
+            renderlets,
+            extensions: document
+                .extensions()
+                .cloned()
+                .map(serde_json::Value::Object),
         })
     }
-}
 
-#[derive(Debug)]
-pub struct Node {
-    pub gltf_node: GltfNode,
-    pub renderlets: Vec<Hybrid<Renderlet>>,
+    pub fn renderlets_iter(&self) -> impl Iterator<Item = &Hybrid<Renderlet>> {
+        self.renderlets.iter().flat_map(|(_, rs)| rs.iter())
+    }
+
+    pub fn nodes_in_scene(&self, scene_index: usize) -> impl Iterator<Item = &GltfNode> {
+        let scene = self.scenes.get(scene_index);
+        let mut nodes = vec![];
+        if let Some(indices) = scene {
+            for node_index in indices {
+                if let Some(node) = self.nodes.get(*node_index) {
+                    nodes.push(node);
+                }
+            }
+        }
+        nodes.into_iter()
+    }
 }
 
 impl Stage {
     pub fn load_gltf_document_from_path(
         &mut self,
         path: impl AsRef<std::path::Path>,
+        camera_id: Id<Camera>,
     ) -> Result<GltfDocument, StageGltfError> {
         let (document, buffers, images) = gltf::import(path)?;
-        GltfDocument::from_gltf(self, &document, buffers, images)
+        GltfDocument::from_gltf(self, &document, buffers, images, camera_id)
     }
 
     pub fn load_gltf_document_from_bytes(
         &mut self,
         bytes: impl AsRef<[u8]>,
+        camera_id: Id<Camera>,
     ) -> Result<GltfDocument, StageGltfError> {
         let (document, buffers, images) = gltf::import_slice(bytes)?;
-        GltfDocument::from_gltf(self, &document, buffers, images)
-    }
-
-    /// Draws the `StagedGltfNode` with the given `Camera`.
-    pub fn draw_gltf_node(
-        &mut self,
-        doc: &GltfDocument,
-        node_index: usize,
-        camera: Id<Camera>,
-    ) -> Result<Node, StageGltfError> {
-        let gltf_node = doc
-            .nodes
-            .get(node_index)
-            .context(MissingNodeSnafu { index: node_index })?
-            .clone();
-
-        log::trace!("drawing GLTF node {node_index} {:?}", gltf_node.name);
-
-        let mut renderlets = vec![];
-        if let Some(mesh_index) = gltf_node.mesh {
-            let mesh = doc
-                .meshes
-                .get(mesh_index)
-                .context(MissingMeshSnafu { index: mesh_index })?;
-            for prim in mesh.primitives.iter() {
-                let hybrid = self.new_value(Renderlet {
-                    vertices_array: prim.vertices.array(),
-                    indices_array: prim.indices.array(),
-                    camera_id: camera,
-                    transform_id: gltf_node.transform.global_transform_id(),
-                    material_id: prim.material,
-                    ..Default::default()
-                });
-                self.add_renderlet(&hybrid);
-                renderlets.push(hybrid);
-            }
-        }
-
-        Ok(Node {
-            gltf_node,
-            renderlets,
-        })
-    }
-
-    pub fn draw_gltf_scene(
-        &mut self,
-        doc: &GltfDocument,
-        // Any list of nodes makes a scene.
-        nodes: impl IntoIterator<Item = usize>,
-        camera: Id<Camera>,
-    ) -> Result<Vec<Node>, StageGltfError> {
-        let mut scene_nodes = vec![];
-        for node_index in nodes.into_iter() {
-            let node = self.draw_gltf_node(doc, node_index, camera)?;
-            scene_nodes.push(node);
-        }
-        Ok(scene_nodes)
+        GltfDocument::from_gltf(self, &document, buffers, images, camera_id)
     }
 }
 
@@ -1067,26 +1124,17 @@ mod test {
             .with_lighting(false)
             .with_bloom(false)
             .with_background_color(Vec3::splat(0.0).extend(1.0));
-        let mut doc = stage
-            .load_gltf_document_from_path("../../gltf/gltfTutorial_008_SimpleMeshes.gltf")
-            .unwrap();
-        println!("doc: {doc:#?}");
-        let camera = Camera {
+        let camera = stage.new_value(Camera {
             projection,
             view,
             position,
-        };
-        let camera = stage.new_value(camera);
-        let scene_index = doc.default_scene.unwrap();
-        let scene_nodes = doc.scenes.get(scene_index).unwrap().clone();
-        let scene = stage
-            .draw_gltf_scene(&mut doc, scene_nodes, camera.id())
+        });
+        let _doc = stage
+            .load_gltf_document_from_path(
+                "../../gltf/gltfTutorial_008_SimpleMeshes.gltf",
+                camera.id(),
+            )
             .unwrap();
-        println!("scene: {scene:#?}");
-
-        // let default_scene = document.default_scene().unwrap();
-        // let unit_ids = stage.draw_gltf_scene(&gpu_doc, camera_id, default_scene);
-        // assert_eq!(2, unit_ids.len());
 
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
@@ -1103,24 +1151,22 @@ mod test {
             .with_lighting(false)
             .with_bloom(false)
             .with_background_color(Vec3::splat(0.0).extend(1.0));
-        let mut doc = stage
-            .load_gltf_document_from_path("../../gltf/gltfTutorial_003_MinimalGltfFile.gltf")
-            .unwrap();
+
         let projection = crate::camera::perspective(20.0, 20.0);
         let eye = Vec3::new(0.5, 0.5, 2.0);
         let view = crate::camera::look_at(eye, Vec3::new(0.5, 0.5, 0.0), Vec3::Y);
-        let camera = Camera {
+        let camera = stage.new_value(Camera {
             projection,
             view,
             position: Vec3::new(0.5, 0.5, 2.0),
-        };
-        let camera = stage.new_value(camera);
-        let default_scene = doc.default_scene.unwrap();
-        let nodes = doc.scenes.get(default_scene).unwrap().clone();
-        let scene = stage.draw_gltf_scene(&mut doc, nodes, camera.id()).unwrap();
-        for (i, node) in scene.iter().enumerate() {
-            println!("node_{i}: {node:#?}");
-        }
+        });
+
+        let _doc = stage
+            .load_gltf_document_from_path(
+                "../../gltf/gltfTutorial_003_MinimalGltfFile.gltf",
+                camera.id(),
+            )
+            .unwrap();
 
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
@@ -1138,11 +1184,11 @@ mod test {
             .new_stage()
             .with_lighting(false)
             .with_background_color(Vec4::splat(1.0));
-        let doc = stage
-            .load_gltf_document_from_path("../../gltf/cheetah_cone.glb")
-            .unwrap();
         let (projection, view) = crate::camera::default_ortho2d(100.0, 100.0);
         let camera = stage.new_value(Camera::new(projection, view));
+        let doc = stage
+            .load_gltf_document_from_path("../../gltf/cheetah_cone.glb", camera.id())
+            .unwrap();
         assert!(!doc.textures.is_empty());
         let albedo_texture = doc.textures.get(0);
         assert!(albedo_texture.is_some());
@@ -1198,17 +1244,17 @@ mod test {
             // let's force it to be unlit.
             .with_lighting(false)
             .with_bloom(false);
-        let mut doc = stage
-            .load_gltf_document_from_path("../../gltf/gltfTutorial_013_SimpleTexture.gltf")
-            .unwrap();
-
         let projection = crate::camera::perspective(size as f32, size as f32);
         let view =
             crate::camera::look_at(Vec3::new(0.5, 0.5, 1.25), Vec3::new(0.5, 0.5, 0.0), Vec3::Y);
         let camera = stage.new_value(Camera::new(projection, view));
-        let default_scene_index = doc.default_scene.unwrap();
-        let nodes = doc.scenes.get(default_scene_index).unwrap().clone();
-        let _scene = stage.draw_gltf_scene(&mut doc, nodes, camera.id()).unwrap();
+
+        let _doc = stage
+            .load_gltf_document_from_path(
+                "../../gltf/gltfTutorial_013_SimpleTexture.gltf",
+                camera.id(),
+            )
+            .unwrap();
 
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
@@ -1226,13 +1272,16 @@ mod test {
             .new_stage()
             .with_lighting(true)
             .with_background_color(Vec3::splat(1.0).extend(1.0));
+
         let doc = stage
-            .load_gltf_document_from_path("../../gltf/red_brick_03_1k.glb")
+            .load_gltf_document_from_path("../../gltf/red_brick_03_1k.glb", Id::NONE)
             .unwrap();
         let gltf_camera = doc.cameras.get(0).unwrap();
-        let scene_index = doc.default_scene.unwrap();
-        let nodes = doc.scenes.get(scene_index).unwrap().iter().copied();
-        let _scene = stage.draw_gltf_scene(&doc, nodes, gltf_camera.camera.id());
+        doc.renderlets_iter().for_each(|hybrid| {
+            hybrid.modify(|r| {
+                r.camera_id = gltf_camera.camera.id();
+            });
+        });
 
         stage.set_lights(doc.lights.iter().map(|gltf_light| gltf_light.light.id()));
 

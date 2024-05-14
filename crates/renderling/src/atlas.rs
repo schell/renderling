@@ -116,7 +116,8 @@ impl core::fmt::Display for TextureAddressMode {
 }
 
 impl TextureAddressMode {
-    /// Wrap the given s/t coord into a pixel index according to texture addressing.
+    /// Wrap the given s/t coord into a pixel index according to texture
+    /// addressing.
     pub fn wrap(&self, input: f32) -> f32 {
         match self {
             TextureAddressMode::Repeat => {
