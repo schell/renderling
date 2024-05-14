@@ -115,9 +115,6 @@ snafu = {workspace = true}
 wgpu = { workspace = true, features = ["spirv"] }
 winit = { workspace = true, optional = true }
 
-[package.metadata.docs.rs]
-features = ["gltf", "raw-window-handle", "winit"]
-
 [dev-dependencies]
 assert_approx_eq = {workspace = true}
 ctor = "0.2.2"
