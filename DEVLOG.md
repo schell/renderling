@@ -1,5 +1,23 @@
 # devlog
 
+## Tue May 14, 2024
+
+### Website! 
+
+Part of the NLnet work is setting up a website to host this devlog, docs, guides etc. 
+So yesterday I bought a domain - [renderling.xyz](https://renderling.xyz)!
+I figured since renderling is a 3d renderer `.xyz` was a good choice. It was either that
+or `.rs`, but I do my domains through AWS Route53 which doesn't support `.rs` as a TLD.
+Also I hope that this library gets used by a wider audience than just the Rust community.
+I have plans to write bindings at some point, afterall.
+
+### `naga` SPIR-V atomics support
+
+I opened my first PR into `wgpu` [to add support for atomics in the SPIR-V frontend](https://github.com/gfx-rs/wgpu/pull/5702).
+This is the first of many PRs and this is the main focus of the NLnet work.
+The PR itself is more of a sanity check that I'm "doing things right". I figured I'd 
+open it early since I'm unfamiliar with the way `naga` does things.
+
 ## Sun May 12, 2024 
 
 ### More Fox Skinning

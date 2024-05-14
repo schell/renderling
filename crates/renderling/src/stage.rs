@@ -401,47 +401,19 @@ pub fn renderlet_fragment(
     log.write(debug);
 }
 
-//#[spirv(compute(threads(32)))]
-///// Compute the draw calls for this frame.
-/////
-///// This should be called with `groupcount = (entities.len() / threads) + 1`.
-//pub fn compute_cull_entities(
-//    #[spirv(storage_buffer, descriptor_set = 0, binding = 2)] entities:
-// &[GpuEntity],    #[spirv(storage_buffer, descriptor_set = 1, binding = 0)]
-// draws: &mut [DrawIndirect],    #[spirv(global_invocation_id)] global_id:
-// UVec3,
-//) {
-//    let i = global_id.x as usize;
-//
-//    if i > entities.len() {
-//        return;
-//    }
-//
-//    // when the vertex count and/or instance count is 0, it effectively
-// filters    // the draw call
-//    let mut call = DrawIndirect {
-//        vertex_count: 0,
-//        instance_count: 0,
-//        base_vertex: 0,
-//        base_instance: i as u32,
-//    };
-//    let entity = &entities[i];
-//    let is_visible = entity.visible != 0;
-//    if entity.is_alive() && is_visible {
-//        //// once naga supports atomics we can use this to compact the array
-//        // let index = unsafe {
-//        //    spirv_std::arch::atomic_i_increment::<
-//        //        u32,
-//        //        { spirv_std::memory::Scope::Device as u32 },
-//        //        { spirv_std::memory::Semantics::NONE.bits() as u32 },
-//        //    >(count)
-//        //};
-//        call.instance_count = 1;
-//        call.base_vertex = entity.mesh_first_vertex;
-//        call.vertex_count = entity.mesh_vertex_count;
-//    }
-//    draws[i] = call;
-//}
+#[cfg(feature = "test_atomic_i_increment")]
+#[spirv(compute(threads(32)))]
+pub fn test_atomic_i_increment(
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] global_index: &mut u32,
+) {
+    let _ = unsafe {
+        spirv_std::arch::atomic_i_increment::<
+            u32,
+            { spirv_std::memory::Scope::Workgroup as u32 },
+            { spirv_std::memory::Semantics::NONE.bits() as u32 },
+        >(global_index)
+    };
+}
 
 #[cfg(feature = "test_i8_16_extraction")]
 #[spirv(compute(threads(32)))]

@@ -42,10 +42,6 @@ impl Range {
     pub fn intersects(&self, other: &Range) -> bool {
         !(self.first_index > other.last_index || self.last_index < other.first_index)
     }
-
-    pub fn contiguous(&self, range: &Range) -> bool {
-        self.last_index + 1 == range.first_index || self.first_index == range.last_index + 1
-    }
 }
 
 trait IsRange {
@@ -61,7 +57,7 @@ impl IsRange for Range {
             "{self:?} intersects existing {other:?}, should never happen with Range"
         );
 
-        self.contiguous(&other)
+        self.last_index + 1 == other.first_index || self.first_index == other.last_index + 1
     }
 
     fn union(&mut self, other: Self) {
@@ -460,6 +456,15 @@ impl SlabAllocator {
             queue.submit(std::iter::empty());
         }
         new_buffer
+    }
+
+    /// Defragments the internal "recycle" buffer.
+    pub fn defrag(&self) {
+        // UNWRAP: panic on purpose
+        let mut recycle_guard = self.recycles.write().unwrap();
+        for range in std::mem::take(&mut recycle_guard.ranges) {
+            recycle_guard.add_range(range);
+        }
     }
 
     /// Read the range of data from the slab.
@@ -972,10 +977,13 @@ mod test {
     fn slab_manager_sanity() {
         let r = Context::headless(1, 1);
         let mut m = SlabAllocator::default();
+        log::info!("allocating 4 unused u32 slots");
         let _ = m.allocate::<u32>();
         let _ = m.allocate::<u32>();
         let _ = m.allocate::<u32>();
         let _ = m.allocate::<u32>();
+
+        log::info!("creating 4 update sources");
         let h4 = m.new_value(0u32);
         let h5 = m.new_value(0u32);
         let h6 = m.new_value(0u32);
@@ -987,7 +995,11 @@ mod test {
             wgpu::BufferUsages::empty(),
         );
         assert!(m.recycles.read().unwrap().ranges.is_empty());
+        assert_eq!(4, m.update_sources.read().unwrap().len());
+        let k = m.update_k.load(Ordering::Relaxed);
+        assert_eq!(4, k);
 
+        log::info!("dropping 4 update sources");
         drop(h4);
         drop(h5);
         drop(h6);
@@ -999,13 +1011,20 @@ mod test {
             wgpu::BufferUsages::empty(),
         );
         assert_eq!(1, m.recycles.read().unwrap().ranges.len());
+        assert!(m.update_sources.read().unwrap().is_empty());
 
+        log::info!("creating 4 update sources, round two");
         let h4 = m.new_value(0u32);
         let h5 = m.new_value(0u32);
         let h6 = m.new_value(0u32);
         let h7 = m.new_value(0u32);
         assert!(m.recycles.read().unwrap().ranges.is_empty());
+        assert_eq!(4, m.update_sources.read().unwrap().len());
+        let k = m.update_k.load(Ordering::Relaxed);
+        // MAYBE_TODO: recycle "update_k"s instead of incrementing for each new source
+        assert_eq!(8, k);
 
+        log::info!("creating one more update source, immediately dropping it and two others");
         let h8 = m.new_value(0u32);
         drop(h8);
         drop(h4);
@@ -1017,6 +1036,9 @@ mod test {
             wgpu::BufferUsages::empty(),
         );
         assert_eq!(3, m.recycles.read().unwrap().ranges.len());
+        assert_eq!(2, m.update_sources.read().unwrap().len());
+        assert_eq!(9, m.update_k.load(Ordering::Relaxed));
+
         drop(h7);
         drop(h5);
         let _ = m.upkeep(
@@ -1025,6 +1047,12 @@ mod test {
             None,
             wgpu::BufferUsages::empty(),
         );
-        assert_eq!(1, m.recycles.read().unwrap().ranges.len());
+        m.defrag();
+        assert_eq!(
+            1,
+            m.recycles.read().unwrap().ranges.len(),
+            "ranges: {:#?}",
+            m.recycles.read().unwrap().ranges
+        );
     }
 }
