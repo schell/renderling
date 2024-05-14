@@ -35,7 +35,7 @@ shaders = [
   "tonemapping_fragment",
   "tonemapping_vertex"
 ]
-gltf = ["dep:gltf"]
+gltf = ["dep:gltf", "dep:serde_json"]
 sdf = []
 tutorial = [
   "tutorial_passthru_fragment",
@@ -93,7 +93,7 @@ spirv-std = "0.9"
 [target.'cfg(target_arch = "spirv")'.dependencies]
 crabslab = { workspace = true, features = ["glam"]  }
 half = { version = "2.3", default-features = false }
-glam = { version = "0.24.2", default-features = false, features = ["libm"] }
+glam = { workspace = true, default-features = false, features = ["libm"] }
 
 # dependencies for CPU code
 [target.'cfg(not(target_arch = "spirv"))'.dependencies]
@@ -110,6 +110,7 @@ image = {workspace = true, features = ["hdr"]}
 log = {workspace = true}
 rustc-hash = "1.1"
 send_wrapper = "0.6"
+serde_json = {workspace = true, optional = true}
 snafu = {workspace = true}
 wgpu = { workspace = true, features = ["spirv"] }
 winit = { workspace = true, optional = true }
@@ -119,13 +120,11 @@ features = ["gltf", "raw-window-handle", "winit"]
 
 [dev-dependencies]
 assert_approx_eq = {workspace = true}
-criterion = { version = "0.5", features = ["html_reports"] }
 ctor = "0.2.2"
 env_logger = {workspace = true}
 icosahedron = "0.1"
 img-diff = { path = "../img-diff" }
 naga.workspace = true
-plotters.workspace = true
 pretty_assertions.workspace = true
 ttf-parser = "0.20.0"
 

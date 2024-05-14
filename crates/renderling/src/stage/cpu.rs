@@ -12,13 +12,13 @@ use crate::{
     atlas::{Atlas, AtlasError, AtlasImage, AtlasImageError, AtlasTexture},
     bloom::Bloom,
     camera::Camera,
-    math::CpuCubemap,
     pbr::{debug::DebugMode, light::Light, PbrConfig},
     skybox::Skybox,
     slab::*,
     stage::Renderlet,
     texture::{DepthTexture, Texture},
     tonemapping::Tonemapping,
+    transform::Transform,
 };
 use crabslab::{Array, CpuSlab, GrowableSlab, Id, Slab, SlabItem, WgpuBuffer};
 use snafu::Snafu;
@@ -465,12 +465,14 @@ impl Stage {
         }
     }
 
-    /// Adds a renderlet to the internal list of renderlets to be drawn each frame.
+    /// Adds a renderlet to the internal list of renderlets to be drawn each
+    /// frame.
     ///
     /// This makes an internal clone of the renderlet.
     ///
-    /// If you drop the renderlet and no other references are kept, it will be removed
-    /// automatically from the internal list and will cease to be drawn each frame.
+    /// If you drop the renderlet and no other references are kept, it will be
+    /// removed automatically from the internal list and will cease to be
+    /// drawn each frame.
     pub fn add_renderlet(&mut self, renderlet: &Hybrid<Renderlet>) {
         // UNWRAP: if we can't acquire the lock we want to panic.
         let mut draws = self.draws.write().unwrap();
@@ -488,7 +490,8 @@ impl Stage {
         debug.append_array(&vertex_debug_data);
     }
 
-    /// Erase the given renderlet from the internal list of renderlets to be drawn each frame.
+    /// Erase the given renderlet from the internal list of renderlets to be
+    /// drawn each frame.
     pub fn remove_renderlet(&self, renderlet: &Hybrid<Renderlet>) {
         let id = renderlet.id();
         let mut draws = self.draws.write().unwrap();
@@ -515,139 +518,6 @@ impl Stage {
             queue: self.queue.clone(),
             texture: self.depth_texture.clone(),
         }
-    }
-
-    /// Read the atlas image from the GPU.
-    ///
-    /// This is primarily used for debugging.
-    ///
-    /// ## Panics
-    /// Panics if the pixels read from the GPU cannot be converted into an
-    /// `RgbaImage`.
-    fn read_atlas_image(&self) -> image::RgbaImage {
-        // UNWRAP: if we can't acquire the lock we want to panic.
-        self.atlas.atlas_img(&self.device, &self.queue)
-    }
-
-    /// Read the brdf image from the GPU.
-    ///
-    /// This is primarily used for debugging.
-    ///
-    /// ## Panics
-    /// Panics if the pixels read from the GPU cannot be converted into an
-    /// `RgbaImage`.
-    fn read_brdf_image(&self) -> image::Rgba32FImage {
-        // UNWRAP: if we can't acquire the lock we want to panic.
-        let skybox = self.skybox.read().unwrap();
-        let texture = &skybox.brdf_lut;
-        let extent = texture.texture.size();
-        let buffer = Texture::read(
-            &texture.texture,
-            &self.device,
-            &self.queue,
-            extent.width as usize,
-            extent.height as usize,
-            2,
-            2,
-        );
-        let pixels = buffer.pixels(&self.device);
-        let pixels: Vec<f32> = bytemuck::cast_slice::<u8, u16>(pixels.as_slice())
-            .iter()
-            .copied()
-            .map(|bits| half::f16::from_bits(bits).to_f32())
-            .collect();
-        let pixels: Vec<f32> = pixels
-            .chunks_exact(2)
-            .flat_map(|pixel| match pixel {
-                [r, g] => [*r, *g, 0.0, 1.0],
-                _ => unreachable!(),
-            })
-            .collect();
-        let img: image::ImageBuffer<image::Rgba<f32>, Vec<f32>> =
-            image::ImageBuffer::from_vec(extent.width, extent.height, pixels).unwrap();
-        img
-    }
-
-    fn read_cubemap_mip0(&self, texture: &Texture) -> CpuCubemap {
-        let placeholder_image =
-            image::Rgba32FImage::from_pixel(1, 1, image::Rgba([0.0, 0.0, 0.0, 0.0]));
-        let mut out: [image::Rgba32FImage; 6] = [
-            placeholder_image.clone(),
-            placeholder_image.clone(),
-            placeholder_image.clone(),
-            placeholder_image.clone(),
-            placeholder_image.clone(),
-            placeholder_image.clone(),
-        ];
-        let extent = texture.texture.size();
-        let width = extent.width;
-        let height = extent.height;
-        for i in 0..6 {
-            let copied_buffer = Texture::read_from(
-                &texture.texture,
-                &self.device,
-                &self.queue,
-                width as usize,
-                height as usize,
-                4,
-                2,
-                0,
-                Some(wgpu::Origin3d { x: 0, y: 0, z: i }),
-            );
-            let pixels = copied_buffer.pixels(&self.device);
-            let pixels = bytemuck::cast_slice::<u8, u16>(pixels.as_slice())
-                .iter()
-                .map(|p| half::f16::from_bits(*p).to_f32())
-                .collect::<Vec<_>>();
-            let img: image::Rgba32FImage =
-                image::ImageBuffer::from_vec(width, height, pixels).unwrap();
-            out[i as usize] = img;
-        }
-        CpuCubemap {
-            images: out.map(|img| img.into()),
-        }
-    }
-
-    /// Read the irradiance cubemap images from the GPU.
-    ///
-    /// This only reads the top level of mips. This is primarily used for
-    /// debugging.
-    ///
-    /// ## Panics
-    /// Panics if the pixels read from the GPU cannot be converted into an
-    /// `RgbaImage`.
-    fn read_irradiance_cubemap(&self) -> CpuCubemap {
-        // UNWRAP: if we can't acquire the lock we want to panic.
-        let skybox = self.skybox.read().unwrap();
-        let texture = &skybox.irradiance_cubemap;
-        self.read_cubemap_mip0(texture)
-    }
-
-    /// Read the prefiltered cubemap images from the GPU.
-    ///
-    /// This only reads the top level of mips. This is primarily used for
-    /// debugging.
-    ///
-    /// ## Panics
-    /// Panics if the pixels read from the GPU cannot be converted into an
-    /// `RgbaImage`.
-    fn read_prefiltered_cubemap(&self) -> CpuCubemap {
-        // UNWRAP: if we can't acquire the lock we want to panic.
-        let skybox = self.skybox.read().unwrap();
-        let texture = &skybox.prefiltered_environment_cubemap;
-        self.read_cubemap_mip0(texture)
-    }
-
-    /// Read all the data from the stage.
-    ///
-    /// This blocks until the GPU buffer is mappable, and then copies the data
-    /// into a vector.
-    ///
-    /// This is primarily used for debugging.
-    async fn read_slab(&self) -> Result<Vec<u32>, SlabAllocatorError> {
-        self.mngr
-            .read(&self.device, &self.queue, Some("stage slab read"), ..)
-            .await
     }
 
     /// Read the vertex debug messages.
@@ -745,15 +615,16 @@ impl Stage {
             let _ = self.buffers_bindgroup.lock().unwrap().take();
             new_slab_buffer
         } else {
-            // UNWRAP: safe because we called `SlabManager::upkeep` above^, which ensures the buffer
-            // exists
+            // UNWRAP: safe because we called `SlabManager::upkeep` above^, which ensures
+            // the buffer exists
             self.mngr.get_buffer().unwrap()
         }
     }
 
     /// Ticks the stage, synchronizing changes with the GPU.
     ///
-    /// It's good to call this after dropping assets to free up space on the slab.
+    /// It's good to call this after dropping assets to free up space on the
+    /// slab.
     pub fn tick(&mut self) {
         let _ = self.tick_internal();
     }
@@ -826,7 +697,8 @@ impl Stage {
                                 let id = hybrid.id();
                                 let instance_range = id.inner()..id.inner() + 1;
                                 log::trace!(
-                                    "drawing vertices {vertex_range:?} and instances {instance_range:?}"
+                                    "drawing vertices {vertex_range:?} and instances \
+                                     {instance_range:?}"
                                 );
                                 render_pass.draw(vertex_range, instance_range);
                             }
@@ -892,10 +764,22 @@ impl Stage {
 /// Clones all reference the same nested transform.
 #[derive(Clone)]
 pub struct NestedTransform {
-    global_transform: Hybrid<Transform>,
+    global_transform_id: Id<Transform>,
     local_transform: Arc<RwLock<Transform>>,
+
+    notifier_index: usize,
+    notify: async_channel::Sender<usize>,
+
     children: Arc<RwLock<Vec<NestedTransform>>>,
     parent: Arc<RwLock<Option<NestedTransform>>>,
+
+    forgotten: Arc<AtomicBool>,
+}
+
+impl Drop for NestedTransform {
+    fn drop(&mut self) {
+        let _ = self.notify.try_send(self.notifier_index);
+    }
 }
 
 impl core::fmt::Debug for NestedTransform {
@@ -905,16 +789,15 @@ impl core::fmt::Debug for NestedTransform {
             .read()
             .unwrap()
             .iter()
-            .map(|nt| nt.global_transform.id())
+            .map(|nt| nt.global_transform_id)
             .collect::<Vec<_>>();
         let parent = self
             .parent
             .read()
             .unwrap()
             .as_ref()
-            .map(|nt| nt.global_transform.id());
+            .map(|nt| nt.global_transform_id);
         f.debug_struct("NestedTransform")
-            .field("global_transform", &self.global_transform)
             .field("local_transform", &self.local_transform)
             .field("children", &children)
             .field("parent", &parent)
@@ -922,22 +805,70 @@ impl core::fmt::Debug for NestedTransform {
     }
 }
 
+impl UpdatesSlab for NestedTransform {
+    fn u32_array(&self) -> Array<u32> {
+        Array::new(
+            self.global_transform_id.inner(),
+            Transform::SLAB_SIZE as u32,
+        )
+    }
+
+    fn strong_count(&self) -> usize {
+        Arc::strong_count(&self.forgotten)
+    }
+
+    fn get_update(&self) -> Vec<SlabUpdate> {
+        let transform = self.get_global_transform();
+        let array = self.u32_array();
+        let mut elements = vec![0u32; Transform::SLAB_SIZE];
+        elements.write_indexed(&transform, 0);
+        vec![SlabUpdate { array, elements }]
+    }
+}
+
 impl NestedTransform {
     pub fn new(mngr: &mut SlabAllocator) -> Self {
-        let global_transform = mngr.new_value(Transform::default());
+        let id = mngr.allocate::<Transform>();
+        let notifier_index = mngr.next_update_k();
+
         let nested = NestedTransform {
+            global_transform_id: id,
             local_transform: Arc::new(RwLock::new(Transform::default())),
-            global_transform,
+
+            notifier_index,
+            notify: mngr.notifier.0.clone(),
+
             children: Default::default(),
             parent: Default::default(),
+
+            forgotten: Arc::new(false.into()),
         };
+
+        mngr.insert_update_source(notifier_index, nested.clone());
+
+        nested.mark_dirty();
         nested
     }
 
-    pub fn set_local_transform(&mut self, transform: Transform) {
-        *self.local_transform.write().unwrap() = transform;
-        let global_transform = self.get_global_transform();
-        self.global_transform.set(global_transform);
+    fn mark_dirty(&self) {
+        // UNWRAP: safe because it's unbounded
+        self.notify.try_send(self.notifier_index).unwrap();
+        for child in self.children.read().unwrap().iter() {
+            child.mark_dirty();
+        }
+    }
+
+    pub fn modify_local_transform(&self, f: impl Fn(&mut Transform)) {
+        // UNWRAP: panic on purpose
+        let mut local_guard = self.local_transform.write().unwrap();
+        f(&mut local_guard);
+        self.mark_dirty();
+    }
+
+    pub fn set_local_transform(&self, transform: Transform) {
+        self.modify_local_transform(move |t| {
+            *t = transform;
+        });
     }
 
     pub fn get_local_transform(&self) -> Transform {
@@ -955,21 +886,19 @@ impl NestedTransform {
     }
 
     pub fn global_transform_id(&self) -> Id<Transform> {
-        self.global_transform.id()
+        self.global_transform_id
     }
 
-    pub fn add_child(&mut self, node: &NestedTransform) {
+    pub fn add_child(&self, node: &NestedTransform) {
         *node.parent.write().unwrap() = Some(self.clone());
-        let global_transform = node.get_global_transform();
-        node.global_transform.set(global_transform);
+        node.mark_dirty();
         self.children.write().unwrap().push(node.clone());
     }
 
-    pub fn remove_child(&mut self, node: &NestedTransform) {
+    pub fn remove_child(&self, node: &NestedTransform) {
         self.children.write().unwrap().retain_mut(|child| {
-            if child.global_transform.id() == node.global_transform.id() {
-                let local_transform = node.get_local_transform();
-                node.global_transform.set(local_transform);
+            if child.global_transform_id == node.global_transform_id {
+                node.mark_dirty();
                 let _ = node.parent.write().unwrap().take();
                 false
             } else {
@@ -982,7 +911,7 @@ impl NestedTransform {
 #[cfg(test)]
 mod test {
     use crabslab::{Array, Slab};
-    use glam::{UVec2, Vec2, Vec3};
+    use glam::{Mat4, UVec2, Vec2, Vec3};
 
     use crate::{
         camera::Camera,
@@ -1061,5 +990,11 @@ mod test {
             }
             stage.clear_fragment_debug_logs();
         }
+    }
+
+    #[test]
+    fn matrix_subtraction_sanity() {
+        let m = Mat4::IDENTITY - Mat4::IDENTITY;
+        assert_eq!(Mat4::ZERO, m);
     }
 }

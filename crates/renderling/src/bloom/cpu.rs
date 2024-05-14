@@ -422,7 +422,8 @@ impl Bloom {
         let downsample_pipeline = Arc::new(create_bloom_downsample_pipeline(&device));
         let upsample_pipeline = Arc::new(create_bloom_upsample_pipeline(&device));
 
-        // up and downsample pipelines have the same layout, so we just choose one for the layout
+        // up and downsample pipelines have the same layout, so we just choose one for
+        // the layout
         let bindgroups = create_bindgroups(&device, &downsample_pipeline, &slab_buffer, &textures);
         let hdr_texture_downsample_bindgroup = create_bindgroup(
             &device,
@@ -491,7 +492,8 @@ impl Bloom {
 
     /// Returns a clone of the current mix texture.
     ///
-    /// The mix texture is the result of mixing the bloom by the hdr using the mix strength.
+    /// The mix texture is the result of mixing the bloom by the hdr using the
+    /// mix strength.
     pub fn get_mix_texture(&self) -> Texture {
         // UNWRAP: not safe but we want to panic
         self.mix_texture.read().unwrap().clone()
@@ -505,9 +507,9 @@ impl Bloom {
         }
         // Get all the bindgroups (which are what we're reading from),
         // starting with the hdr frame.
-        // Since `bindgroups` are one element greater (we pushed `hdr_texture_bindgroup` to the
-        // front) the last bindgroup will not be used, which is good - we don't need to read from
-        // the smallest texture during downsampling.
+        // Since `bindgroups` are one element greater (we pushed `hdr_texture_bindgroup`
+        // to the front) the last bindgroup will not be used, which is good - we
+        // don't need to read from the smallest texture during downsampling.
         // UNWRAP: not safe but we want to panic
         let textures_guard = self.textures.read().unwrap();
         let hdr_texture_downsample_bindgroup_guard =
@@ -711,9 +713,7 @@ mod test {
         let height = 128;
         let ctx = Context::headless(width, height);
         let mut stage = ctx.new_stage().with_bloom(false);
-        let doc = stage
-            .load_gltf_document_from_path("../../gltf/EmissiveStrengthTest.glb")
-            .unwrap();
+
         let projection = crate::camera::perspective(width as f32, height as f32);
         let view = crate::camera::look_at(Vec3::new(0.0, 2.0, 18.0), Vec3::ZERO, Vec3::Y);
         let camera = stage.new_value(Camera::new(projection, view));
@@ -721,11 +721,11 @@ mod test {
             .new_skybox_from_path("../../img/hdr/night.hdr", camera.id())
             .unwrap();
         stage.set_skybox(skybox);
-        let scene_index = doc.default_scene.unwrap();
-        let nodes = doc.scenes.get(scene_index).unwrap();
-        let _scene = stage
-            .draw_gltf_scene(&doc, nodes.into_iter().copied(), camera.id())
+
+        let _doc = stage
+            .load_gltf_document_from_path("../../gltf/EmissiveStrengthTest.glb", camera.id())
             .unwrap();
+
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
         let img = frame.read_image().unwrap();

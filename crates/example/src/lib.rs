@@ -1,7 +1,7 @@
 //! Runs through all the gltf sample models to test and show-off renderling's
 //! gltf capabilities.
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     sync::{Arc, Mutex},
 };
 
@@ -11,7 +11,8 @@ use renderling::{
     math::{Mat4, UVec2, Vec3, Vec4},
     skybox::Skybox,
     slab::Hybrid,
-    stage::{GltfDocument, Node, Stage},
+    stage::{Animator, GltfDocument, Stage},
+    transform::Transform,
     Context,
 };
 
@@ -67,10 +68,11 @@ pub struct App {
     camera: Hybrid<Camera>,
 
     document: Option<GltfDocument>,
-    nodes: Option<Vec<Node>>,
+    animators: Option<Vec<Animator>>,
+    animations_conflict: bool,
 
     // look at
-    eye: Vec3,
+    center: Vec3,
     // distance from the origin
     radius: f32,
     // anglular position on a circle `radius` away from the origin on x,z
@@ -98,25 +100,24 @@ impl App {
         let left_mb_down: bool = false;
         let last_cursor_position: Option<winit::dpi::PhysicalPosition<f64>> = None;
 
-        let mut app = Self {
+        Self {
             stage,
             camera,
 
             document: None,
-            nodes: None,
+            animators: None,
+            animations_conflict: false,
 
             skybox_image_bytes: None,
             loads: Arc::new(Mutex::new(HashMap::default())),
             last_frame_instant: now(),
             radius,
-            eye: Vec3::ZERO,
+            center: Vec3::ZERO,
             phi,
             theta,
             left_mb_down,
             last_cursor_position,
-        };
-        app.load("img/hdr/night.hdr");
-        app
+        }
     }
 
     fn camera_position(radius: f32, phi: f32, theta: f32) -> Vec3 {
@@ -130,13 +131,19 @@ impl App {
 
     pub fn update_camera_view(&self) {
         let UVec2 { x: w, y: h } = self.stage.get_size();
+        let camera_position = Self::camera_position(self.radius, self.phi, self.theta);
         let camera = Camera::new(
             Mat4::perspective_infinite_rh(std::f32::consts::FRAC_PI_4, w as f32 / h as f32, 0.01),
-            Mat4::look_at_rh(
-                Self::camera_position(self.radius, self.phi, self.theta),
-                self.eye,
-                Vec3::Y,
-            ),
+            Mat4::look_at_rh(camera_position, self.center, Vec3::Y),
+        );
+        debug_assert!(
+            camera.view.is_finite(),
+            "camera view is borked w:{w} h:{h} camera_position: {camera_position} center: {} \
+             radius: {} phi: {} theta: {}",
+            self.center,
+            self.radius,
+            self.phi,
+            self.theta
         );
         if self.camera.get() != camera {
             self.camera.set(camera);
@@ -159,11 +166,13 @@ impl App {
         self.last_cursor_position = None;
         self.stage.set_images(std::iter::empty()).unwrap();
         self.document = None;
-        self.nodes = None;
         log::debug!("ticking stage to reclaim buffers");
         self.stage.tick();
 
-        let doc = match self.stage.load_gltf_document_from_bytes(bytes) {
+        let doc = match self
+            .stage
+            .load_gltf_document_from_bytes(bytes, self.camera.id())
+        {
             Err(e) => {
                 log::error!("gltf loading error: {e}");
                 return;
@@ -179,15 +188,17 @@ impl App {
 
         let scene = doc.default_scene.unwrap_or(0);
         log::info!("Displaying scene {scene}");
-        let nodes = doc
-            .scenes
-            .get(scene)
-            .map(Vec::clone)
-            .unwrap_or_else(|| (0..doc.nodes.len()).collect());
-        for node_index in nodes.iter() {
-            // UNWRAP: safe because we know the node exists
-            let node = doc.nodes.get(*node_index).unwrap();
+        let nodes = doc.nodes_in_scene(scene).flat_map(|n| {
+            n.children
+                .iter()
+                .filter_map(|i| doc.nodes.get(*i))
+                .chain(std::iter::once(n))
+        });
+        log::trace!("  nodes:");
+        for node in nodes {
             let tfrm = Mat4::from(node.global_transform());
+            let decomposed = Transform::from(tfrm);
+            log::trace!("    {} {:?} {decomposed:?}", node.index, node.name);
             if let Some(mesh_index) = node.mesh {
                 // UNWRAP: safe because we know the node exists
                 for primitive in doc.meshes.get(mesh_index).unwrap().primitives.iter() {
@@ -198,24 +209,52 @@ impl App {
                 }
             }
         }
-        self.nodes = match self.stage.draw_gltf_scene(&doc, nodes, self.camera.id()) {
-            Err(e) => {
-                log::error!("could not draw scene: {e}");
-                None
-            }
-            Ok(ns) => Some(ns),
-        };
-        self.document = Some(doc);
 
+        log::trace!("Bounding box: {min} {max}");
         let halfway_point = min + ((max - min).normalize() * ((max - min).length() / 2.0));
         let length = min.distance(max);
         let radius = length * 1.25;
 
         self.radius = radius;
-        self.eye = halfway_point;
+        self.center = halfway_point;
         self.last_frame_instant = now();
 
         self.update_camera_view();
+
+        if doc.animations.is_empty() {
+            log::trace!("  animations: none");
+        } else {
+            log::trace!("  animations:");
+        }
+        let mut animated_nodes = HashSet::default();
+        let mut has_conflicting_animations = false;
+        self.animators = Some(
+            doc.animations
+                .iter()
+                .enumerate()
+                .map(|(i, a)| {
+                    let target_nodes = a.target_node_indices().collect::<HashSet<_>>();
+                    has_conflicting_animations =
+                        has_conflicting_animations || !animated_nodes.is_disjoint(&target_nodes);
+                    animated_nodes.extend(target_nodes);
+
+                    log::trace!("    {i} {:?} {}s", a.name, a.length_in_seconds());
+                    // for (t, tween) in a.tweens.iter().enumerate() {
+                    //     log::trace!(
+                    //         "      tween {t} targets node {} {}",
+                    //         tween.target_node_index,
+                    //         tween.properties.description()
+                    //     );
+                    // }
+                    Animator::new(doc.nodes.iter(), a.clone())
+                })
+                .collect(),
+        );
+        if has_conflicting_animations {
+            log::trace!("  and some animations conflict");
+        }
+        self.animations_conflict = has_conflicting_animations;
+        self.document = Some(doc);
     }
 
     pub fn tick_loads(&mut self) {
@@ -279,8 +318,8 @@ impl App {
     //             r.graph.add_resource(scene);
     //             self.loader = None;
     //             self.ui
-    //                 .set_text_title("awaiting drag and dropped `.gltf` or `.glb` file");
-    //         }
+    //                 .set_text_title("awaiting drag and dropped `.gltf` or `.glb`
+    // file");         }
     //         _ => {}
     //     };
     // }
@@ -314,50 +353,22 @@ impl App {
         self.stage.set_size(size);
     }
 
-    // fn animate(&mut self, r: &mut Context) {
-    //     let now = Instant::now();
-    //     let dt = now - self.last_frame_instant;
-    //     self.last_frame_instant = now;
-    //     let dt_secs = dt.as_secs_f32();
-    //     if let Some(loader) = self.loader.as_mut() {
-    //         for (index, animation) in loader.animations.iter_mut().enumerate() {
-    //             let animation_len = animation.length_in_seconds();
-    //             animation.stored_timestamp += dt_secs;
-    //             if animation.stored_timestamp > animation_len {
-    //                 log::trace!("animation {index} {:?} has looped", animation.name);
-    //             }
-    //             let time = animation.stored_timestamp % animation.length_in_seconds();
-    //             for (id, tween_prop) in animation.get_properties_at_time(time).unwrap() {
-    //                 let ent = self.entities.get_mut(id.index()).unwrap();
-    //                 match tween_prop {
-    //                     TweenProperty::Translation(t) => {
-    //                         ent.position = t.extend(ent.position.w);
-    //                     }
-    //                     TweenProperty::Rotation(r) => {
-    //                         ent.rotation = r;
-    //                     }
-    //                     TweenProperty::Scale(s) => {
-    //                         if s == Vec3::ZERO {
-    //                             log::trace!("scale is zero at time: {time:?}");
-    //                             panic!("animation: {animation:#?}");
-    //                         }
-    //                         ent.scale = s.extend(ent.scale.w);
-    //                     }
-    //                     TweenProperty::MorphTargetWeights(ws) => {
-    //                         ent.set_morph_target_weights(ws);
-    //                     }
-    //                 }
-    //                 r.graph
-    //                     .visit(|mut scene: ViewMut<Scene>| {
-    //                         scene.update_entity(*ent).unwrap();
-    //                     })
-    //                     .unwrap();
-    //             }
-    //             animation.stored_timestamp = time;
-    //             break;
-    //         }
-    //     }
-    // }
+    pub fn animate(&mut self) {
+        let now = now();
+        let dt_seconds = now - self.last_frame_instant;
+        self.last_frame_instant = now;
+        if let Some(animators) = self.animators.as_mut() {
+            if self.animations_conflict {
+                if let Some(animator) = animators.first_mut() {
+                    animator.progress(dt_seconds as f32).unwrap();
+                }
+            } else {
+                for animator in animators.iter_mut() {
+                    animator.progress(dt_seconds as f32).unwrap();
+                }
+            }
+        }
+    }
 }
 
 // /// Sets up the demo for a given model
@@ -379,17 +390,17 @@ impl App {
 //             match ev {
 //                 winit::event::WindowEvent::MouseWheel { delta, .. } => {
 //                     let delta = match delta {
-//                         winit::event::MouseScrollDelta::LineDelta(_, up) => *up,
-//                         winit::event::MouseScrollDelta::PixelDelta(pos) => pos.y as f32,
-//                     };
+//                         winit::event::MouseScrollDelta::LineDelta(_, up) =>
+// *up,                         winit::event::MouseScrollDelta::PixelDelta(pos)
+// => pos.y as f32,                     };
 
 //                     app.zoom(r, delta);
 //                 }
 //                 winit::event::WindowEvent::CursorMoved { position, .. } => {
 //                     app.pan(r, *position);
 //                 }
-//                 winit::event::WindowEvent::MouseInput { state, button, .. } => {
-//                     app.mouse_button(*state, *button);
+//                 winit::event::WindowEvent::MouseInput { state, button, .. }
+// => {                     app.mouse_button(*state, *button);
 //                 }
 //                 winit::event::WindowEvent::KeyboardInput { input, .. } => {
 //                     app.key_input(r, *input);
@@ -406,19 +417,19 @@ impl App {
 //                         .unwrap();
 //                 }
 //                 winit::event::WindowEvent::DroppedFile(path) => {
-//                     log::trace!("got dropped file event: {}", path.display());
-//                     let path = format!("{}", path.display());
-//                     app.load(&path);
+//                     log::trace!("got dropped file event: {}",
+// path.display());                     let path = format!("{}",
+// path.display());                     app.load(&path);
 //                 }
 //                 _ => {}
 //             }
 
 //             if let Some(ev) = event_state.event_from_winit(ev) {
-//                 let scene = r.graph.get_resource_mut::<Scene>().unwrap().unwrap();
-//                 let channel = scene.get_debug_channel();
-//                 let mut set_debug_channel = |mode| {
-//                     log::debug!("setting debug mode to {mode:?}");
-//                     if channel != mode {
+//                 let scene =
+// r.graph.get_resource_mut::<Scene>().unwrap().unwrap();                 let
+// channel = scene.get_debug_channel();                 let mut
+// set_debug_channel = |mode| {                     log::debug!("setting debug
+// mode to {mode:?}");                     if channel != mode {
 //                         scene.set_debug_channel(mode);
 //                     } else {
 //                         scene.set_debug_channel(DebugChannel::None);
@@ -428,8 +439,8 @@ impl App {
 //                 match app.ui.event(ev) {
 //                     None => {}
 //                     Some(ev) => match ev {
-//                         UiEvent::ToggleDebugChannel(channel) => set_debug_channel(channel),
-//                     },
+//                         UiEvent::ToggleDebugChannel(channel) =>
+// set_debug_channel(channel),                     },
 //                 }
 //             }
 //         } else {

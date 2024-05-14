@@ -439,7 +439,8 @@ pub(crate) fn conduct_clear_pass<'a>(
 
 /// Contains the adapter, device, queue and [`RenderTarget`].
 ///
-/// A `Context` is created to initialize rendering to a window, canvas or texture.
+/// A `Context` is created to initialize rendering to a window, canvas or
+/// texture.
 ///
 /// ```
 /// use renderling::Context;
@@ -500,8 +501,8 @@ impl Context {
     }
 
     #[cfg(all(feature = "winit", not(target_arch = "wasm32")))]
-    /// Create a new context from a `winit::window::Window`, blocking until it is
-    /// created.
+    /// Create a new context from a `winit::window::Window`, blocking until it
+    /// is created.
     ///
     /// ## Panics
     /// Panics if the context cannot be created.
@@ -602,12 +603,14 @@ impl Context {
 
     /// Get the next frame from the render target.
     ///
-    /// A surface context (window or canvas) will return the next swapchain texture.
+    /// A surface context (window or canvas) will return the next swapchain
+    /// texture.
     ///
     /// A headless context will return the underlying headless texture.
     ///
     /// Errs if the render target is a surface and there was an error getting
-    /// the next swapchain texture. This can happen if the frame has already been acquired.
+    /// the next swapchain texture. This can happen if the frame has already
+    /// been acquired.
     pub fn get_next_frame(&self) -> Result<Frame, ContextError> {
         Ok(Frame {
             device: self.device.clone(),

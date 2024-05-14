@@ -202,9 +202,10 @@ mod test {
             println!("position: {position}");
             println!("direction: {direction}");
 
-            // In Blender, our lights are sitting at (0, 0, 1) pointing at -Z, +Z, +X and +Y.
-            // But alas, it is a bit more complicated than that because this file is exported with
-            // UP being +Y, so Z and Y have been flipped...
+            // In Blender, our lights are sitting at (0, 0, 1) pointing at -Z, +Z, +X and
+            // +Y. But alas, it is a bit more complicated than that because this
+            // file is exported with UP being +Y, so Z and Y have been
+            // flipped...
             assert_eq!(Vec3::Y, position);
             let expected_direction = match node.name() {
                 Some("light_negative_z") => Vec3::NEG_Y,

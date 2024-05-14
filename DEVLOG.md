@@ -1,5 +1,375 @@
 # devlog
 
+## Tue May 14, 2024
+
+### Website! 
+
+Part of the NLnet work is setting up a website to host this devlog, docs, guides etc. 
+So yesterday I bought a domain - [renderling.xyz](https://renderling.xyz)!
+I figured since renderling is a 3d renderer `.xyz` was a good choice. It was either that
+or `.rs`, but I do my domains through AWS Route53 which doesn't support `.rs` as a TLD.
+Also I hope that this library gets used by a wider audience than just the Rust community.
+I have plans to write bindings at some point, afterall.
+
+### `naga` SPIR-V atomics support
+
+I opened my first PR into `wgpu` [to add support for atomics in the SPIR-V frontend](https://github.com/gfx-rs/wgpu/pull/5702).
+This is the first of many PRs and this is the main focus of the NLnet work.
+The PR itself is more of a sanity check that I'm "doing things right". I figured I'd 
+open it early since I'm unfamiliar with the way `naga` does things.
+
+## Sun May 12, 2024 
+
+### More Fox Skinning
+
+I've noticed that some GLTF models (like `CesiumMan`) cause the uber-shader to barf. 
+I haven't figured out what feature in those models is causing it yet. It may or may not 
+be related to the fox skinning problem.
+
+### Box!
+
+A very simple GLTF file fails to render. It's the `Box.glb` model. 
+
+![box should look like this](https://github.com/KhronosGroup/glTF-Sample-Models/raw/main/2.0/Box/screenshot/screenshot.png)
+
+Ooh, now upon visiting the [Khronos sample models repo](https://github.com/KhronosGroup/glTF-Sample-Models?tab=readme-ov-file)
+I find that it (the repo) has been deprecated in favor of [another](https://github.com/KhronosGroup/glTF-Sample-Assets).
+
+Anyway - this is a fundamentally simple GLTF model so something must have regressed in `renderling`...
+
+#### Investigation
+
+* Turns out there are buffer writes happening each frame, which is weird because the `Box.glb` model doesn't 
+  include animation.
+* When I trace it out it looks like the camera's view has NaN values.
+* Looks like after adding a `debug_assert!` I can see that the camera's calculated radius (the 
+  distance at which the camera rotates around the model) is `inf`...
+* That's because after loading, the model's bounding box is `[inf, inf, inf] [-inf, -inf, -inf]`...
+* And calculation of the bounding box only takes into consideration the nodes in the scene and 
+  doesn't include those node's children...
+
+After updating the bounding box calculation to take child nodes into consideration the problem 
+is fixed.
+
+<img width="450" alt="Screenshot 2024-05-12 at 10 52 21 AM" src="https://github.com/schell/renderling/assets/24942/9d3618d3-60bb-47c4-9a37-4b7a71952277">
+
+* But there are still two `Transform` writes per frame when there should be none.
+* I can't see any other place in the example app where those transforms are being updated.
+* I recently redid the way `NestedTransform` do their updates, so I'll look there.
+* There's nothing modifying those transforms...
+* Ah, but each update source is being polled for updates each frame, and NestedTransforms 
+  always give their global transform as an update regardless if it changed.
+* I'm changing the update sources to be a set, and the `SlabAllocator` only checks those sources
+  that have sent in an "update" signal on its notification channel. This also means we only check 
+  sources for strong counts when this "update" signal comes in, so those sources need to send the 
+  signal on Drop. All in all though this should be a nice optimization.
+* ...but alas, after the update I get the grey screen of death again, which means something's not 
+  right...
+* Turns out it was because `Gpu::new` was calling `SlabAllocator::next_update_k` twice, using one 
+  for its `notifier_index` and then using the other for the first notification.
+
+## Sat May 11, 2024
+
+### Skinning a Fox
+
+![gltf fox debacle](https://github.com/schell/renderling/assets/24942/8cd6bf35-877e-4917-8a55-4bc7f5c3fc4f)
+
+Skinning is pretty hard! I remember before that it took a good amount of fiddling before 
+vertex skinning "clicked". I understand the concept and how it should work, but in practice 
+I feel like there's always a matrix multiplication that is in the wrong order, or that I'm 
+missing (I've been through it twice now).
+
+It's weird because the "simple skin" example runs as expected. For the most part the "recursive skins"
+example does too (it's slow though because it's a stress test). So there's something special about the 
+fox that is tripping the renderer...
+
+```
+cargo watch -x 'run -p example -- --model /Users/schell/code/glTF-Sample-Models/2.0/RecursiveSkeletons/glTF-Binary/RecursiveSkeletons.glb  --skybox /Users/schell/code/renderling/img/hdr/resting_place.hdr'
+```
+
+### Sidetracked by performance
+
+I saw that the recursive skeleton example wasn't doing so well, it was really slow. After a little 
+investigation I saw that it was making something like 40,000 separate buffer writes per frame.
+
+So I rewrote the "updates" code that syncs CPU -> GPU values and now it does 900 buffer writes per frame.
+That still seems high, but given that it has something like 800 animated nodes I don't think it's a big 
+deal. It runs smooth now!
+
+But I still haven't figured out that fox...
+
+## Wed May 9, 2024
+
+I finished the Memorandum of Understanding for my NLnet grant. 
+The MoU is kinda like a project plan or roadmap that lets NLnet know what the milestones are 
+and when I'll be requesting payment. It's nice to have this amount of organization - even if 
+there is a bit of overhead for it. I like knowing the steps the library is going to move through.
+
+### Animation 
+
+I'm having trouble debugging the fox's animation. 
+
+It could be:
+* hierarchical node transforms are not recalculating as expected
+* node hierarchy could be wrong in some way
+
+Let's step through one animation frame: 
+
+```
+progressing 'Survey' 0.001417125 seconds
+  total: 3.4166667
+  current: 0.21563251
+  21 properties
+    8 rotation
+    7 rotation
+    11 rotation
+    10 rotation
+    9 rotation
+    14 rotation
+    13 rotation
+    12 rotation
+    6 rotation
+    5 rotation
+    17 rotation
+    16 rotation
+    15 rotation
+    20 rotation
+    19 rotation
+    18 rotation
+    24 rotation
+    23 rotation
+    22 rotation
+    4 translation
+    4 rotation
+```
+
+And here's the log output while building the GLTF model:
+
+```
+drawing GLTF node 0 Some("root")
+  node has no mesh
+  has 1 children: [2]
+drawing GLTF node 2 Some("_rootJoint")
+  node has no mesh
+  has 1 children: [3]
+drawing GLTF node 3 Some("b_Root_00")
+  node has no mesh
+  has 1 children: [4]
+drawing GLTF node 4 Some("b_Hip_01")
+  node has no mesh
+  has 4 children: [5, 15, 18, 22]
+drawing GLTF node 5 Some("b_Spine01_02")
+  node has no mesh
+  has 1 children: [6]
+drawing GLTF node 6 Some("b_Spine02_03")
+  node has no mesh
+  has 3 children: [7, 9, 12]
+drawing GLTF node 7 Some("b_Neck_04")
+  node has no mesh
+  has 1 children: [8]
+drawing GLTF node 8 Some("b_Head_05")
+  node has no mesh
+  has 0 children: []
+drawing GLTF node 9 Some("b_RightUpperArm_06")
+  node has no mesh
+  has 1 children: [10]
+drawing GLTF node 10 Some("b_RightForeArm_07")
+  node has no mesh
+  has 1 children: [11]
+drawing GLTF node 11 Some("b_RightHand_08")
+  node has no mesh
+  has 0 children: []
+drawing GLTF node 12 Some("b_LeftUpperArm_09")
+  node has no mesh
+  has 1 children: [13]
+drawing GLTF node 13 Some("b_LeftForeArm_010")
+  node has no mesh
+  has 1 children: [14]
+drawing GLTF node 14 Some("b_LeftHand_011")
+  node has no mesh
+  has 0 children: []
+drawing GLTF node 15 Some("b_Tail01_012")
+  node has no mesh
+  has 1 children: [16]
+drawing GLTF node 16 Some("b_Tail02_013")
+  node has no mesh
+  has 1 children: [17]
+drawing GLTF node 17 Some("b_Tail03_014")
+  node has no mesh
+  has 0 children: []
+drawing GLTF node 18 Some("b_LeftLeg01_015")
+  node has no mesh
+  has 1 children: [19]
+drawing GLTF node 19 Some("b_LeftLeg02_016")
+  node has no mesh
+  has 1 children: [20]
+drawing GLTF node 20 Some("b_LeftFoot01_017")
+  node has no mesh
+  has 1 children: [21]
+drawing GLTF node 21 Some("b_LeftFoot02_018")
+  node has no mesh
+  has 0 children: []
+drawing GLTF node 22 Some("b_RightLeg01_019")
+  node has no mesh
+  has 1 children: [23]
+drawing GLTF node 23 Some("b_RightLeg02_020")
+  node has no mesh
+  has 1 children: [24]
+drawing GLTF node 24 Some("b_RightFoot01_021")
+  node has no mesh
+  has 1 children: [25]
+drawing GLTF node 25 Some("b_RightFoot02_022")
+  node has no mesh
+  has 0 children: []
+drawing GLTF node 1 Some("fox")
+  mesh 0
+    has 1 primitives
+    created renderlet 1/1: Renderlet {
+        visible: true,
+        vertices_array: Array<renderling::stage::Vertex>(370, 1728),
+        indices_array: Array<u32>(null),
+        camera_id: Id<renderling::camera::Camera>(24),
+        transform_id: Id<renderling::transform::Transform>(309),
+        material_id: Id<renderling::pbr::Material>(348),
+        pbr_config_id: Id<renderling::pbr::PbrConfig>(0),
+        debug_index: 0,
+    }
+  has 0 children: []
+```
+
+### NAN in shaders for no apparent reason
+
+While re-building vertex skinning I've run into an odd problem where `naga` says my SPIR-V has 
+`NaN` values in it, which are invalid. I'm trying to track down where these values are getting 
+introduced. It's somewhere in `glam`, I'm pretty sure. 
+
+To aid in doing this I'm taking advantage of the `validate_shaders` test and `cargo watch`. 
+
+My setup is like this: 
+
+* in my code I've created a minimal vertex shader to work on in isolation:
+  ```rust
+  #[spirv(vertex)]
+  pub fn nan_catcher(
+      #[spirv(vertex_index)] vertex_index: u32,
+      #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] slab: &[u32],
+      #[spirv(position)] clip_pos: &mut Vec4,
+  ) {
+      let skin = Skin::default();
+      let t = skin.get_transform(Vertex::default(), slab);
+      *clip_pos = Mat4::from(t) * UNIT_QUAD_CCW[vertex_index as usize % 6].extend(1.0);
+  } 
+  ```
+
+* In one terminal tab we auto-compile our shaders: 
+
+  ```
+    cd shaders
+    cargo watch --ignore ../crates/renderling/src/linkage/ --watch ../crates/renderling/src/stage --watch ../crates/renderling/src/stage.rs -x 'run --release -- --no-default-features'
+  ```
+
+  `--no-default-features` turns _off_ all the other shaders, so only this "nan-catcher" is compiled.
+  `--ignore ../crates/renderling/src/linkage/` is important because another terminal tab is creating a WGSL file in that directory
+
+* in another terminal tab we watch for changes to the compiled shaders and then run validation: 
+
+  ```
+  only_shader=stage-nan_catcher print_wgsl=1 cargo watch --ignore stage-nan_catcher.wgsl --watch crates/renderling/src/linkage/ -x 'test -p renderling -- --nocapture validate_shaders'  
+  ```
+
+  `only_shader` validates only my "nan-catcher" shader and `print_wgsl` saves the source 
+  (regardless of validation)
+
+All together this lets me know if my shader validates after each change.
+
+#### Solution 
+
+As it turns out `Transform`'s `From<Mat4>` was the culprit. It was using `Mat4::to_scale_rotation_translation`, 
+which calls `f32::signum`, which uses `NAN`. 
+
+The crappy part is that `clippy` would have caught it, because both of those functions are listed in `disallowed-methods`,
+but I hardly ever _run_ clippy. So now I've got to make that a normal practice.
+
+## Wed May 8, 2024
+
+TODO: `crabslab` probably doesn't need to generate the `offset_of_*` functions. It's a bit noisy, 
+and not as useful as I planned.
+
+Also, the `WgpuBuffer` in `crabslab` probably shouldn't be part of the library. I've already 
+stopped using it in `renderling`.
+
+### Animator
+
+I've added `renderling::stage::Animator` to help with animating GLTF nodes.
+
+## Tue May 7, 2024
+
+I had the intake meeting with NLnet's Lwenn and Gerben and they were very sweet people. 
+Everything went well and I should be able to get to work on naga's atomics this week!
+
+The following is some of the stuff I managed to fit into renderling these past two weeks.
+
+### Physically based bloom!
+
+I re-built the bloom effect to the updated "PBR" technique that downsamples an HDR texture
+and then upsamples the mips and mixes it in. It looks quite nice. The `Bloom` object can 
+also be used without the rest of renderling, though it depends on renderling's texture type.
+I feel like the library is small enough in total that if somebody wants just the bloom it 
+would be worth it.
+
+### Refactor
+
+I did quite a lot of API refactoring to make the library more predictable. 
+
+### Slab allocator 
+I also added a proper slab-ish arena-ish allocator that does automatic-ish syncronozation. 
+With the new `SlabAllocator` (and `Stage`, for that matter) one can create "hybrid" values 
+that live on both the CPU and GPU. Those values can be "downgraded" to GPU-only values to 
+release CPU memory. Symmetrically those GPU-only values can also be "upgraded" to "hybrid"
+values later. 
+
+All in all  I feel like the API is really feeling quite polished!
+
+## New work in the short-term
+### Animation 
+
+I'm going to re-build GLTF animation before getting to work on atomics, since that feature 
+is not blocked by atomics.
+
+### Atomics
+
+I'm kicking off work on adding atomics to `naga`'s SPIR-V frontend. These are all the 
+operations in the SPIR-V spec (at least at my first glance):
+
+* OpAtomicLoad
+* OpAtomicStore
+* OpAtomicExchange
+* OpAtomicCompareExchange
+* OpAtomicCompareExchangeWeak
+* OpAtomicIIncrement
+* OpAtomicIDecrement
+* OpAtomicIAdd
+* OpAtomicISub
+* OpAtomicSMin
+* OpAtomicUMin
+* OpAtomicSMax
+* OpAtomicUMax
+* OpAtomicAnd
+* OpAtomicOr
+* OpAtomicXor
+* OpAtomicFlagTestAndSet
+* OpAtomicFlagClear
+
+...and then it looks like there are some extension ops: 
+
+* OpAtomicFMinEXT
+* OpAtomicFMaxEXT
+* OpAtomicFAddEXT
+
+But the extensions seem to be reserved and don't have descriptions, so maybe they're not 
+used yet?
+
+
 ## Thu Apr 25, 2024 
 
 I missed the intro meeting for NLnet grantees :(. 
