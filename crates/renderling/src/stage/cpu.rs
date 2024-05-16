@@ -110,7 +110,7 @@ pub struct Stage {
     pub(crate) device: Arc<wgpu::Device>,
     pub(crate) queue: Arc<wgpu::Queue>,
 
-    pub(crate) mngr: SlabAllocator,
+    pub(crate) mngr: SlabAllocator<wgpu::Buffer>,
 
     pub(crate) pbr_config: Hybrid<PbrConfig>,
     pub(crate) lights: HybridArray<Id<Light>>,
@@ -141,7 +141,7 @@ pub struct Stage {
 }
 
 impl Deref for Stage {
-    type Target = SlabAllocator;
+    type Target = SlabAllocator<wgpu::Buffer>;
 
     fn deref(&self) -> &Self::Target {
         &self.mngr
@@ -604,12 +604,12 @@ impl Stage {
                 }
             }
         }
-        if let Some(new_slab_buffer) = self.mngr.upkeep(
+        if let Some(new_slab_buffer) = self.mngr.upkeep((
             &self.device,
             &self.queue,
             Some("stage render upkeep"),
             wgpu::BufferUsages::empty(),
-        ) {
+        )) {
             // invalidate our bindgroups, etc
             let _ = self.skybox_bindgroup.lock().unwrap().take();
             let _ = self.buffers_bindgroup.lock().unwrap().take();
@@ -827,7 +827,7 @@ impl UpdatesSlab for NestedTransform {
 }
 
 impl NestedTransform {
-    pub fn new(mngr: &mut SlabAllocator) -> Self {
+    pub fn new(mngr: &mut SlabAllocator<impl IsBuffer>) -> Self {
         let id = mngr.allocate::<Transform>();
         let notifier_index = mngr.next_update_k();
 
@@ -910,12 +910,15 @@ impl NestedTransform {
 
 #[cfg(test)]
 mod test {
+    use std::sync::Mutex;
+
     use crabslab::{Array, Slab};
     use glam::{Mat4, UVec2, Vec2, Vec3};
 
     use crate::{
         camera::Camera,
-        stage::{Renderlet, RenderletVertexLog, Vertex},
+        stage::{cpu::SlabAllocator, NestedTransform, Renderlet, RenderletVertexLog, Vertex},
+        transform::Transform,
         Context,
     };
 
@@ -996,5 +999,35 @@ mod test {
     fn matrix_subtraction_sanity() {
         let m = Mat4::IDENTITY - Mat4::IDENTITY;
         assert_eq!(Mat4::ZERO, m);
+    }
+
+    #[test]
+    fn can_global_transform_calculation() {
+        let mut slab = SlabAllocator::<Mutex<Vec<u32>>>::default();
+        // Setup a hierarchy of transforms
+        let root = NestedTransform::new(&mut slab);
+        let child = NestedTransform::new(&mut slab);
+        child.set_local_transform(Transform {
+            translation: Vec3::new(1.0, 0.0, 0.0),
+            ..Default::default()
+        });
+        let grandchild = NestedTransform::new(&mut slab);
+        grandchild.set_local_transform(Transform {
+            translation: Vec3::new(1.0, 0.0, 0.0),
+            ..Default::default()
+        });
+
+        // Build the hierarchy
+        root.add_child(&child);
+        child.add_child(&grandchild);
+
+        // Calculate global transforms
+        let grandchild_global_transform = grandchild.get_global_transform();
+
+        // Assert that the global transform is as expected
+        assert_eq!(
+            grandchild_global_transform.translation.x, 2.0,
+            "Grandchild's global translation should   2.0 along the x-axis"
+        );
     }
 }

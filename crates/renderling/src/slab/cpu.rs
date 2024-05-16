@@ -158,25 +158,82 @@ pub enum SlabAllocatorError {
     Async { source: wgpu::BufferAsyncError },
 }
 
-/// Manages slab allocations and updates.
+pub trait IsBuffer: Sized {
+    type Resources<'a>: Clone;
+
+    /// Create a new buffer with the given capacity.
+    fn buffer_create(resources: Self::Resources<'_>, capacity: usize) -> Self;
+
+    /// Copy the contents of one buffer into another at index 0.
+    fn buffer_copy(resources: Self::Resources<'_>, source_buffer: &Self, destination_buffer: &Self);
+
+    /// Write updates to the buffer.
+    fn buffer_write<U: Iterator<Item = SlabUpdate>>(
+        &self,
+        resources: Self::Resources<'_>,
+        updates: U,
+    );
+}
+
+impl IsBuffer for Mutex<Vec<u32>> {
+    type Resources<'a> = ();
+
+    fn buffer_create((): Self::Resources<'_>, capacity: usize) -> Self {
+        log::trace!("creating vec with capacity {capacity}");
+        Mutex::new(vec![0; capacity])
+    }
+
+    fn buffer_copy((): Self::Resources<'_>, source_buffer: &Self, destination_buffer: &Self) {
+        let source = source_buffer.lock().unwrap();
+        let mut destination = destination_buffer.lock().unwrap();
+        let destination_slice = &mut destination[0..source.len()];
+        destination_slice.copy_from_slice(source.as_slice());
+    }
+
+    fn buffer_write<U: Iterator<Item = SlabUpdate>>(&self, (): Self::Resources<'_>, updates: U) {
+        let mut guard = self.lock().unwrap();
+        log::trace!("writing to vec len:{}", guard.len());
+        for SlabUpdate { array, elements } in updates {
+            log::trace!("array: {array:?} elements: {elements:?}");
+            let slice = &mut guard[array.starting_index()..array.starting_index() + array.len()];
+            slice.copy_from_slice(&elements);
+        }
+    }
+}
+
+/// Manages slab allocations and updates over a parameterised buffer.
 ///
 /// Create a new instance using [`SlabAllocator::default`].
 /// Upon creation you will need to call [`SlabAllocator::get_updated_buffer`] or
 /// [`SlabAllocator::upkeep`] at least once before any data is written to the
-/// GPU.
-#[derive(Clone)]
-pub struct SlabAllocator {
+/// internal buffer.
+pub struct SlabAllocator<Buffer> {
     pub(crate) notifier: (async_channel::Sender<usize>, async_channel::Receiver<usize>),
     len: Arc<AtomicUsize>,
     capacity: Arc<AtomicUsize>,
     needs_expansion: Arc<AtomicBool>,
-    buffer: Arc<RwLock<Option<Arc<wgpu::Buffer>>>>,
+    buffer: Arc<RwLock<Option<Arc<Buffer>>>>,
     update_k: Arc<AtomicUsize>,
     update_sources: Arc<RwLock<FxHashMap<usize, Box<dyn UpdatesSlab>>>>,
     recycles: Arc<RwLock<RangeManager<Range>>>,
 }
 
-impl Default for SlabAllocator {
+impl<Buffer> Clone for SlabAllocator<Buffer> {
+    fn clone(&self) -> Self {
+        SlabAllocator {
+            notifier: self.notifier.clone(),
+            len: self.len.clone(),
+            capacity: self.capacity.clone(),
+            needs_expansion: self.needs_expansion.clone(),
+            buffer: self.buffer.clone(),
+            update_k: self.update_k.clone(),
+            update_sources: self.update_sources.clone(),
+            recycles: self.recycles.clone(),
+        }
+    }
+}
+
+impl<Buffer> Default for SlabAllocator<Buffer> {
     fn default() -> Self {
         Self {
             notifier: async_channel::unbounded(),
@@ -191,7 +248,58 @@ impl Default for SlabAllocator {
     }
 }
 
-impl SlabAllocator {
+impl IsBuffer for wgpu::Buffer {
+    type Resources<'a> = (
+        &'a wgpu::Device,
+        &'a wgpu::Queue,
+        Option<&'a str>,
+        wgpu::BufferUsages,
+    );
+
+    fn buffer_write<U: Iterator<Item = SlabUpdate>>(
+        &self,
+        (_, queue, _, _): Self::Resources<'_>,
+        updates: U,
+    ) {
+        for SlabUpdate { array, elements } in updates {
+            let offset = array.starting_index() as u64 * std::mem::size_of::<u32>() as u64;
+            queue.write_buffer(&self, offset, bytemuck::cast_slice(&elements));
+        }
+        queue.submit(std::iter::empty());
+    }
+
+    fn buffer_create((device, _, label, usages): Self::Resources<'_>, capacity: usize) -> Self {
+        let size = (capacity * std::mem::size_of::<u32>()) as u64;
+        let usage = usages
+            | wgpu::BufferUsages::STORAGE
+            | wgpu::BufferUsages::COPY_DST
+            | wgpu::BufferUsages::COPY_SRC;
+        device.create_buffer(&wgpu::BufferDescriptor {
+            label,
+            size,
+            usage,
+            mapped_at_creation: false,
+        })
+    }
+
+    fn buffer_copy(
+        (device, queue, label, _): Self::Resources<'_>,
+        source_buffer: &Self,
+        destination_buffer: &Self,
+    ) {
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label });
+        encoder.copy_buffer_to_buffer(
+            source_buffer,
+            0,
+            destination_buffer,
+            0,
+            destination_buffer.size(),
+        );
+        queue.submit(std::iter::once(encoder.finish()));
+    }
+}
+
+impl<Buffer: IsBuffer> SlabAllocator<Buffer> {
     pub(crate) fn next_update_k(&self) -> usize {
         self.update_k.fetch_add(1, Ordering::Relaxed)
     }
@@ -262,11 +370,7 @@ impl SlabAllocator {
     }
 
     fn reserve_capacity(&mut self, capacity: usize) {
-        let chosen_capacity = (2..13u32)
-            .map(|n| 2usize.pow(n))
-            .find(|pc| *pc >= capacity)
-            .unwrap_or(capacity);
-        self.capacity.store(chosen_capacity, Ordering::Relaxed);
+        self.capacity.store(capacity, Ordering::Relaxed);
         self.needs_expansion.store(true, Ordering::Relaxed);
     }
 
@@ -293,8 +397,9 @@ impl SlabAllocator {
     /// Return the internal buffer used by this slab.
     ///
     /// If the buffer needs recreating due to a capacity change this function
-    /// will return `None`. In that case use [`Self::get_updated_buffer`].
-    pub fn get_buffer(&self) -> Option<Arc<wgpu::Buffer>> {
+    /// will return `None`. In that case use [`Self::get_updated_wgpu_buffer`]
+    /// or another `get_updated_*_buffer` function.
+    pub fn get_buffer(&self) -> Option<Arc<Buffer>> {
         self.buffer.read().unwrap().as_ref().cloned()
     }
 
@@ -304,14 +409,8 @@ impl SlabAllocator {
     ///
     /// Use [`SlabAllocator::upkeep`] when you only need the buffer after a
     /// change, for example to recreate bindgroups.
-    pub fn get_updated_buffer(
-        &self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        label: Option<&str>,
-        usage: wgpu::BufferUsages,
-    ) -> Arc<wgpu::Buffer> {
-        if let Some(new_buffer) = self.upkeep(device, queue, label, usage) {
+    pub fn get_updated_buffer(&self, resources: Buffer::Resources<'_>) -> Arc<Buffer> {
+        if let Some(new_buffer) = self.upkeep(resources) {
             new_buffer
         } else {
             // UNWRAP: safe because we know the buffer exists at this point,
@@ -322,35 +421,11 @@ impl SlabAllocator {
 
     /// Recreate this buffer, writing the contents of the previous buffer (if it
     /// exists) to the new one, then return the new buffer.
-    fn recreate_buffer(
-        &self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        label: Option<&str>,
-        usages: wgpu::BufferUsages,
-    ) -> Arc<wgpu::Buffer> {
-        let capacity = self.capacity() as u64;
-        let size = capacity * std::mem::size_of::<u32>() as u64;
-        log::trace!(
-            "recreating '{}' buffer - new size {capacity} ({size}bytes)",
-            label.unwrap_or("unknown")
-        );
-        let usage = usages
-            | wgpu::BufferUsages::STORAGE
-            | wgpu::BufferUsages::COPY_DST
-            | wgpu::BufferUsages::COPY_SRC;
-        let new_buffer = Arc::new(device.create_buffer(&wgpu::BufferDescriptor {
-            label,
-            size,
-            usage,
-            mapped_at_creation: false,
-        }));
+    fn recreate_buffer(&self, resources: Buffer::Resources<'_>) -> Arc<Buffer> {
+        let new_buffer = Arc::new(Buffer::buffer_create(resources.clone(), self.capacity()));
         let mut guard = self.buffer.write().unwrap();
         if let Some(old_buffer) = guard.take() {
-            let mut encoder =
-                device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label });
-            encoder.copy_buffer_to_buffer(&old_buffer, 0, &new_buffer, 0, old_buffer.size());
-            queue.submit(std::iter::once(encoder.finish()));
+            Buffer::buffer_copy(resources, &old_buffer, &new_buffer);
         }
         *guard = Some(new_buffer.clone());
         new_buffer
@@ -372,24 +447,9 @@ impl SlabAllocator {
         HybridArray::new(self, values)
     }
 
-    /// Perform upkeep on the slab, commiting changes to the GPU.
-    ///
-    /// Returns the new buffer if one was created due to a capacity resize.
-    #[must_use]
-    pub fn upkeep(
-        &self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        label: Option<&str>,
-        usage: wgpu::BufferUsages,
-    ) -> Option<Arc<wgpu::Buffer>> {
-        let new_buffer = if self.needs_expansion.swap(false, Ordering::Relaxed) {
-            Some(self.recreate_buffer(device, queue, label, usage))
-        } else {
-            None
-        };
-
-        // Build the set of sources that require updates
+    /// Build the set of sources that require updates, draining the source
+    /// notifier.
+    fn drain_updated_sources(&self) -> RangeManager<SlabUpdate> {
         let mut update_set = rustc_hash::FxHashSet::<usize>::default();
         while let Ok(source_index) = self.notifier.1.try_recv() {
             update_set.insert(source_index);
@@ -445,15 +505,26 @@ impl SlabAllocator {
             }
         }
 
+        writes
+    }
+
+    /// Perform upkeep on the slab, commiting changes to the GPU.
+    ///
+    /// Returns the new buffer if one was created due to a capacity resize.
+    #[must_use]
+    pub fn upkeep(&self, resources: Buffer::Resources<'_>) -> Option<Arc<Buffer>> {
+        let new_buffer = if self.needs_expansion.swap(false, Ordering::Relaxed) {
+            Some(self.recreate_buffer(resources.clone()))
+        } else {
+            None
+        };
+
+        let writes = self.drain_updated_sources();
         if !writes.ranges.is_empty() {
             // UNWRAP: safe because we know the buffer exists at this point, as we may have
             // recreated it above^
             let buffer = self.get_buffer().unwrap();
-            for SlabUpdate { array, elements } in writes.ranges.into_iter() {
-                let offset = array.starting_index() as u64 * std::mem::size_of::<u32>() as u64;
-                queue.write_buffer(&buffer, offset, bytemuck::cast_slice(&elements));
-            }
-            queue.submit(std::iter::empty());
+            buffer.buffer_write(resources, writes.ranges.into_iter());
         }
         new_buffer
     }
@@ -466,7 +537,9 @@ impl SlabAllocator {
             recycle_guard.add_range(range);
         }
     }
+}
 
+impl SlabAllocator<wgpu::Buffer> {
     /// Read the range of data from the slab.
     ///
     /// This is primarily used for debugging.
@@ -526,9 +599,9 @@ impl SlabAllocator {
     }
 }
 
-pub(crate) struct SlabUpdate {
-    pub(crate) array: Array<u32>,
-    pub(crate) elements: Vec<u32>,
+pub struct SlabUpdate {
+    pub array: Array<u32>,
+    pub elements: Vec<u32>,
 }
 
 impl SlabUpdate {
@@ -644,7 +717,7 @@ impl<T> Clone for Hybrid<T> {
 }
 
 impl<T: SlabItem + Clone + Send + Sync + 'static> Hybrid<T> {
-    pub fn new(mngr: &mut SlabAllocator, value: T) -> Self {
+    pub fn new(mngr: &mut SlabAllocator<impl IsBuffer>, value: T) -> Self {
         let cpu_value = Arc::new(RwLock::new(value.clone()));
         let gpu_value = Gpu::new(mngr, value);
         Self {
@@ -709,7 +782,7 @@ impl<T> Clone for Gpu<T> {
 }
 
 impl<T: SlabItem + Clone + Send + Sync + 'static> Gpu<T> {
-    pub fn new(mngr: &mut SlabAllocator, value: T) -> Self {
+    pub fn new(mngr: &mut SlabAllocator<impl IsBuffer>, value: T) -> Self {
         let id = mngr.allocate::<T>();
         let notifier_index = mngr.next_update_k();
         let s = Self {
@@ -785,7 +858,7 @@ impl<T> Clone for GpuArray<T> {
 }
 
 impl<T: SlabItem + Clone + Send + Sync + 'static> GpuArray<T> {
-    pub fn new(mngr: &mut SlabAllocator, values: &[T]) -> Self {
+    pub fn new(mngr: &mut SlabAllocator<impl IsBuffer>, values: &[T]) -> Self {
         let array = mngr.allocate_array::<T>(values.len());
         let update = {
             let mut elements = vec![0u32; T::SLAB_SIZE * array.len()];
@@ -878,7 +951,10 @@ impl<T> Clone for HybridArray<T> {
 }
 
 impl<T: SlabItem + Clone + Send + Sync + 'static> HybridArray<T> {
-    pub fn new(mngr: &mut SlabAllocator, values: impl IntoIterator<Item = T>) -> Self {
+    pub fn new(
+        mngr: &mut SlabAllocator<impl IsBuffer>,
+        values: impl IntoIterator<Item = T>,
+    ) -> Self {
         let values = values.into_iter().collect::<Vec<_>>();
         let gpu_value = GpuArray::<T>::new(mngr, &values);
         let cpu_value = Arc::new(RwLock::new(values));
@@ -927,35 +1003,22 @@ impl<T: SlabItem + Clone + Send + Sync + 'static> HybridArray<T> {
 
 #[cfg(test)]
 mod test {
-    use crate::Context;
-
     use super::*;
 
     #[test]
     fn mngr_updates_count_sanity() {
-        let r = Context::headless(1, 1);
-        let mut mngr = SlabAllocator::default();
+        let mut mngr = SlabAllocator::<Mutex<Vec<u32>>>::default();
         {
             let value = mngr.new_value(666u32);
             assert_eq!(2, value.strong_count());
         }
-        let _ = mngr.upkeep(
-            r.get_device(),
-            r.get_queue(),
-            Some("mngr updates count sanity 1"),
-            wgpu::BufferUsages::empty(),
-        );
+        let _ = mngr.upkeep(());
         assert_eq!(0, mngr.update_sources.read().unwrap().len());
         {
             let values = mngr.new_array([666u32, 420u32]);
             assert_eq!(2, values.strong_count());
         }
-        let _ = mngr.upkeep(
-            r.get_device(),
-            r.get_queue(),
-            Some("mngr updates count sanity 2"),
-            wgpu::BufferUsages::empty(),
-        );
+        let _ = mngr.upkeep(());
         assert_eq!(0, mngr.update_sources.read().unwrap().len());
     }
 
@@ -975,8 +1038,7 @@ mod test {
 
     #[test]
     fn slab_manager_sanity() {
-        let r = Context::headless(1, 1);
-        let mut m = SlabAllocator::default();
+        let mut m = SlabAllocator::<Mutex<Vec<u32>>>::default();
         log::info!("allocating 4 unused u32 slots");
         let _ = m.allocate::<u32>();
         let _ = m.allocate::<u32>();
@@ -988,12 +1050,7 @@ mod test {
         let h5 = m.new_value(0u32);
         let h6 = m.new_value(0u32);
         let h7 = m.new_value(0u32);
-        let _ = m.upkeep(
-            r.get_device(),
-            r.get_queue(),
-            None,
-            wgpu::BufferUsages::empty(),
-        );
+        let _ = m.upkeep(());
         assert!(m.recycles.read().unwrap().ranges.is_empty());
         assert_eq!(4, m.update_sources.read().unwrap().len());
         let k = m.update_k.load(Ordering::Relaxed);
@@ -1004,12 +1061,7 @@ mod test {
         drop(h5);
         drop(h6);
         drop(h7);
-        let _ = m.upkeep(
-            r.get_device(),
-            r.get_queue(),
-            None,
-            wgpu::BufferUsages::empty(),
-        );
+        let _ = m.upkeep(());
         assert_eq!(1, m.recycles.read().unwrap().ranges.len());
         assert!(m.update_sources.read().unwrap().is_empty());
 
@@ -1029,24 +1081,14 @@ mod test {
         drop(h8);
         drop(h4);
         drop(h6);
-        let _ = m.upkeep(
-            r.get_device(),
-            r.get_queue(),
-            None,
-            wgpu::BufferUsages::empty(),
-        );
+        let _ = m.upkeep(());
         assert_eq!(3, m.recycles.read().unwrap().ranges.len());
         assert_eq!(2, m.update_sources.read().unwrap().len());
         assert_eq!(9, m.update_k.load(Ordering::Relaxed));
 
         drop(h7);
         drop(h5);
-        let _ = m.upkeep(
-            r.get_device(),
-            r.get_queue(),
-            None,
-            wgpu::BufferUsages::empty(),
-        );
+        let _ = m.upkeep(());
         m.defrag();
         assert_eq!(
             1,

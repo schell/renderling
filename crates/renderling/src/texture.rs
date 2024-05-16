@@ -1,4 +1,4 @@
-//! Creating and using CPU-side textures.
+//! Wrapper around [`wgpu::Texture`].
 use std::{ops::Deref, sync::Arc};
 
 use image::{
