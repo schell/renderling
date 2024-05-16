@@ -220,7 +220,7 @@ mod test {
         let (device, queue) = ctx.get_device_and_queue_owned();
 
         // Create our geometry on the slab.
-        let mut slab = SlabAllocator::default();
+        let mut slab = SlabAllocator::<wgpu::Buffer>::default();
         let initial_vertices = [
             Vertex {
                 position: Vec3::new(0.5, -0.5, 0.0),
@@ -306,7 +306,7 @@ mod test {
         });
 
         let slab_buffer =
-            slab.get_updated_buffer(&device, &queue, None, wgpu::BufferUsages::empty());
+            slab.get_updated_buffer((&device, &queue, None, wgpu::BufferUsages::empty()));
         let bindgroup = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label,
             layout: &bindgroup_layout,
@@ -385,7 +385,7 @@ mod test {
         let (device, queue) = ctx.get_device_and_queue_owned();
 
         // Create our geometry on the slab.
-        let mut slab = SlabAllocator::default();
+        let mut slab = SlabAllocator::<wgpu::Buffer>::default();
         let geometry = vec![
             Vertex {
                 position: Vec3::new(0.5, -0.5, 0.0),
@@ -485,7 +485,7 @@ mod test {
         });
 
         let slab_buffer =
-            slab.get_updated_buffer(&device, &queue, None, wgpu::BufferUsages::empty());
+            slab.get_updated_buffer((&device, &queue, None, wgpu::BufferUsages::empty()));
         let bindgroup = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label,
             layout: &bindgroup_layout,
@@ -551,7 +551,7 @@ mod test {
 
         // Create our geometry on the slab.
         // Don't worry too much about capacity, it can grow.
-        let mut slab = SlabAllocator::default();
+        let mut slab = SlabAllocator::<wgpu::Buffer>::default();
         let geometry = slab.new_array([
             Vertex {
                 position: Vec3::new(0.5, -0.5, 0.0),
@@ -663,7 +663,7 @@ mod test {
         });
 
         let slab_buffer =
-            slab.get_updated_buffer(&device, &queue, None, wgpu::BufferUsages::empty());
+            slab.get_updated_buffer((&device, &queue, None, wgpu::BufferUsages::empty()));
         let bindgroup = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label,
             layout: &bindgroup_layout,

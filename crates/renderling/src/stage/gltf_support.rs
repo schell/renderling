@@ -3,7 +3,7 @@ use std::collections::HashMap;
 
 use crabslab::{Array, Id};
 use glam::{Mat4, Quat, Vec2, Vec3, Vec4};
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use snafu::{OptionExt, ResultExt, Snafu};
 
 use crate::{
@@ -454,6 +454,12 @@ impl GltfPrimitive {
             })
             .chain(std::iter::repeat([u32::MAX; 4]))
             .take(positions.len());
+        let joints = joints.collect::<Vec<_>>();
+        let mut all_joints = FxHashSet::default();
+        for js in joints.iter() {
+            all_joints.extend(*js);
+        }
+        log::debug!("  joints: {all_joints:?}");
 
         let weights = reader
             .read_weights(0)
@@ -461,7 +467,7 @@ impl GltfPrimitive {
             .flat_map(|ws| ws.into_f32())
             .chain(std::iter::repeat([f32::MAX; 4]))
             .take(positions.len());
-        let vs = joints.zip(weights);
+        let vs = joints.into_iter().zip(weights);
         let vs = colors.zip(vs);
         let vs = tangents.into_iter().zip(vs);
         let vs = normals.into_iter().zip(vs);
@@ -685,9 +691,17 @@ impl GltfSkin {
         }
         let joint_transforms = stage.new_array(joint_transforms);
         let reader = skin.reader(|b| buffer_data.get(b.index()).map(|d| d.0.as_slice()));
-        let inverse_bind_matrices = reader
-            .read_inverse_bind_matrices()
-            .map(|mats| stage.new_array(mats.into_iter().map(|m| Mat4::from_cols_array_2d(&m))));
+        let inverse_bind_matrices = if let Some(mats) = reader.read_inverse_bind_matrices() {
+            let invs = mats
+                .into_iter()
+                .map(|m| Mat4::from_cols_array_2d(&m))
+                .collect::<Vec<_>>();
+            log::debug!("has inverse bind matrices: {invs:#?}");
+            Some(stage.new_array(invs))
+        } else {
+            log::debug!("no inverse bind matrices");
+            None
+        };
         let skeleton = skin.skeleton().map(|n| n.index());
         Ok(GltfSkin {
             index: skin.index(),

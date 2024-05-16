@@ -85,7 +85,7 @@ pub fn create_bindgroup(
 /// Only available on CPU. Not Available in shaders.
 #[derive(Clone)]
 pub struct Tonemapping {
-    slab: SlabAllocator,
+    slab: SlabAllocator<wgpu::Buffer>,
     config: Hybrid<TonemapConstants>,
     hdr_texture: Arc<RwLock<Texture>>,
     bindgroup: Arc<RwLock<wgpu::BindGroup>>,
@@ -104,7 +104,7 @@ impl Tonemapping {
 
         let label = Some("tonemapping");
         let slab_buffer =
-            slab.get_updated_buffer(device, queue, label, wgpu::BufferUsages::empty());
+            slab.get_updated_buffer((device, queue, label, wgpu::BufferUsages::empty()));
         let bindgroup = Arc::new(RwLock::new(create_bindgroup(
             device,
             label,
@@ -183,7 +183,7 @@ impl Tonemapping {
         let label = Some("tonemapping render");
         assert!(self
             .slab
-            .upkeep(device, queue, label, wgpu::BufferUsages::empty())
+            .upkeep((device, queue, label, wgpu::BufferUsages::empty()))
             .is_none());
 
         // UNWRAP: not safe but we want to panic

@@ -1,4 +1,4 @@
-//! Tonemapping from an HDR texture to sRGB (most likely).
+//! Tonemapping from an HDR texture to SDR.
 //!
 //! ## References
 //! * <https://github.com/KhronosGroup/glTF-Sample-Viewer/blob/5b1b7f48a8cb2b7aaef00d08fdba18ccc8dd331b/source/Renderer/shaders/tonemapping.glsl>

@@ -376,7 +376,7 @@ fn create_mix_bindgroup(
 /// Clones of [`Bloom`] all point to the same resources.
 #[derive(Clone)]
 pub struct Bloom {
-    slab: SlabAllocator,
+    slab: SlabAllocator<wgpu::Buffer>,
 
     downsample_pixel_sizes: HybridArray<Vec2>,
     downsample_pipeline: Arc<wgpu::RenderPipeline>,
@@ -411,12 +411,12 @@ impl Bloom {
         let upsample_filter_radius =
             slab.new_value(1.0 / Vec2::new(resolution.x as f32, resolution.y as f32));
         let mix_strength = slab.new_value(0.04f32);
-        let slab_buffer = slab.get_updated_buffer(
-            &device,
-            &queue,
+        let slab_buffer = slab.get_updated_buffer((
+            device.as_ref(),
+            queue.as_ref(),
             Some("bloom slab"),
             wgpu::BufferUsages::empty(),
-        );
+        ));
 
         let textures = create_textures(&device, &queue, resolution);
         let downsample_pipeline = Arc::new(create_bloom_downsample_pipeline(&device));
@@ -646,12 +646,12 @@ impl Bloom {
     pub fn bloom(&self, device: &wgpu::Device, queue: &wgpu::Queue) {
         assert!(
             self.slab
-                .upkeep(
+                .upkeep((
                     device,
                     queue,
                     Some("bloom upkeep"),
                     wgpu::BufferUsages::empty(),
-                )
+                ))
                 .is_none(),
             "bloom slab buffer should never resize"
         );

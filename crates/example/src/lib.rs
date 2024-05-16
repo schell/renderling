@@ -188,11 +188,28 @@ impl App {
 
         let scene = doc.default_scene.unwrap_or(0);
         log::info!("Displaying scene {scene}");
+        fn get_children(doc: &GltfDocument, n: usize) -> Vec<usize> {
+            let mut children = vec![];
+            if let Some(parent) = doc.nodes.get(n) {
+                children.extend(parent.children.iter().copied());
+                let descendants = parent
+                    .children
+                    .iter()
+                    .copied()
+                    .flat_map(|n| get_children(doc, n));
+                children.extend(descendants);
+            }
+            children
+        }
+
         let nodes = doc.nodes_in_scene(scene).flat_map(|n| {
-            n.children
-                .iter()
-                .filter_map(|i| doc.nodes.get(*i))
-                .chain(std::iter::once(n))
+            let mut all_nodes = vec![n];
+            for child_index in get_children(&doc, n.index) {
+                if let Some(child_node) = doc.nodes.get(child_index) {
+                    all_nodes.push(child_node);
+                }
+            }
+            all_nodes
         });
         log::trace!("  nodes:");
         for node in nodes {
