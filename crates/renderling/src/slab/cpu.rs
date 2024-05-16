@@ -397,8 +397,7 @@ impl<Buffer: IsBuffer> SlabAllocator<Buffer> {
     /// Return the internal buffer used by this slab.
     ///
     /// If the buffer needs recreating due to a capacity change this function
-    /// will return `None`. In that case use [`Self::get_updated_wgpu_buffer`]
-    /// or another `get_updated_*_buffer` function.
+    /// will return `None`. In that case use [`Self::get_updated_buffer`].
     pub fn get_buffer(&self) -> Option<Arc<Buffer>> {
         self.buffer.read().unwrap().as_ref().cloned()
     }
