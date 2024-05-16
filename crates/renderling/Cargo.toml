@@ -1,6 +1,6 @@
 [package]
 name = "renderling"
-version = "0.4.0"
+version = "0.4.1"
 edition = "2021"
 description = "User-friendly real-time rendering. 🍖"
 repository = "https://github.com/schell/renderling"
@@ -114,9 +114,6 @@ serde_json = {workspace = true, optional = true}
 snafu = {workspace = true}
 wgpu = { workspace = true, features = ["spirv"] }
 winit = { workspace = true, optional = true }
-
-[package.metadata.docs.rs]
-features = ["gltf", "raw-window-handle", "winit"]
 
 [dev-dependencies]
 assert_approx_eq = {workspace = true}

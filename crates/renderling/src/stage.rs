@@ -59,19 +59,14 @@ impl Skin {
         Mat4::from(joint_transform) * inverse_bind_matrix
     }
 
-    pub fn get_transform(&self, vertex: Vertex, slab: &[u32]) -> Transform {
-        let mat = vertex.weights[0] * self.get_joint_matrix(0, vertex, slab)
-            + vertex.weights[1] * self.get_joint_matrix(1, vertex, slab)
-            + vertex.weights[2] * self.get_joint_matrix(2, vertex, slab)
-            + vertex.weights[3] * self.get_joint_matrix(3, vertex, slab);
+    pub fn get_skinning_matrix(&self, vertex: Vertex, slab: &[u32]) -> Mat4 {
+        let mut skinning_matrix = Mat4::ZERO;
+        for i in 0..vertex.joints.len() {
+            let joint_matrix = self.get_joint_matrix(i, vertex, slab);
+            skinning_matrix += vertex.weights[i] * joint_matrix;
+        }
 
-        Transform::from(
-            if mat == Mat4::ZERO {
-                Mat4::IDENTITY
-            } else {
-                mat
-            },
-        )
+        skinning_matrix
     }
 }
 
@@ -279,7 +274,9 @@ pub fn renderlet_vertex(
 
     let transform = if renderlet.skin_id.is_some() {
         let skin = slab.read(renderlet.skin_id);
-        skin.get_transform(vertex, slab)
+        Transform::from(
+            Mat4::from(slab.read(renderlet.transform_id)) * skin.get_skinning_matrix(vertex, slab),
+        )
     } else {
         slab.read(renderlet.transform_id)
     };
