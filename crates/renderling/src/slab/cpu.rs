@@ -293,7 +293,7 @@ impl IsBuffer for wgpu::Buffer {
             0,
             destination_buffer,
             0,
-            destination_buffer.size(),
+            source_buffer.size(),
         );
         queue.submit(std::iter::once(encoder.finish()));
     }
