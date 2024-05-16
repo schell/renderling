@@ -667,23 +667,21 @@ impl Animation {
     }
 }
 
-/// Combines [`Node`] and [`Animation`] to progress an animation.
+/// Combines [`NestedTransform`] and [`Animation`] to progress an animation.
 ///
-/// Applies animations to a list of [`Node`] and keeps track of how much
-/// time has elapsed.
+/// Applies animations to a list of `(usize, [NestedTransform])` and keeps track
+/// of how much time has elapsed.
 ///
 /// To function without errors, the [`Animation`]'s tweens'
-/// [`Tween::target_node_index`] must point to the index of [`Node`].
-///
-/// [`Node`]: super::Node
+/// [`Tween::target_node_index`] must point to the index of [`NestedTransform`].
 #[derive(Default, Debug, Clone)]
 pub struct Animator {
-    // A time to use as the current amount of seconds elapsed in the running
-    // of the current animation.
+    /// A time to use as the current amount of seconds elapsed in the running
+    /// of the current animation.
     pub timestamp: f32,
-    // All nodes under this animator's control.
+    /// All nodes under this animator's control.
     pub nodes: rustc_hash::FxHashMap<usize, NestedTransform>,
-    // The animation that will apply to the nodes.
+    /// The animation that will apply to the nodes.
     pub animation: Animation,
 }
 
