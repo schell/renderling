@@ -1,15 +1,14 @@
+//! This is an integration of the `renderling` renderer, the `lyon`
+//! path tesselator and the `glyph_brush` text rendering libraries.
 use crabslab::Id;
 use lyon::{
     path::traits::PathBuilder,
-    tessellation::{
-        geometry_builder::simple_builder, BuffersBuilder, FillOptions, FillTessellator, FillVertex,
-        FillVertexConstructor, VertexBuffers,
-    },
+    tessellation::{BuffersBuilder, FillOptions, FillTessellator, FillVertex, VertexBuffers},
 };
 use renderling::{
     camera::Camera,
     math::{UVec2, Vec2, Vec3, Vec4},
-    slab::{Gpu, GpuArray, Hybrid},
+    slab::{GpuArray, Hybrid},
     stage::{Renderlet, Stage, Vertex},
     transform::Transform,
     Context,
@@ -142,6 +141,15 @@ impl UiPathBuilder {
         self
     }
 
+    pub fn set_fill_color(&mut self, color: impl Into<Vec4>) {
+        self.attributes.fill_color = color.into();
+    }
+
+    pub fn with_fill_color(mut self, color: impl Into<Vec4>) -> Self {
+        self.set_fill_color(color);
+        self
+    }
+
     pub fn build(mut self) -> UiPath {
         let l_path = self.inner.build();
         let mut geometry = VertexBuffers::<Vertex, u16>::new();
@@ -192,8 +200,8 @@ impl UiPathBuilder {
 }
 
 pub struct Ui {
-    pub camera: Hybrid<Camera>,
-    pub stage: Stage,
+    camera: Hybrid<Camera>,
+    stage: Stage,
 }
 
 impl Ui {

@@ -97,7 +97,7 @@ pub fn look_at(eye: impl Into<Vec3>, target: impl Into<Vec3>, up: impl Into<Vec3
 }
 
 /// Creates a typical 2d orthographic projection with +Y extending downward
-/// and the Z axis coming out towards the viewer.
+/// and the +Z axis coming out towards the viewer.
 pub fn default_ortho2d(width: f32, height: f32) -> (Mat4, Mat4) {
     let left = 0.0;
     let right = width;
