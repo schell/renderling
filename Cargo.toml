@@ -3,7 +3,8 @@ members = [
     "crates/example",
     "crates/example-wasm",
     "crates/loading-bytes",
-    "crates/renderling",
+    "crates/renderling", 
+    "crates/renderling-ui",
     "crates/sandbox"
 ]
 
@@ -16,6 +17,7 @@ assert_approx_eq = "1.1.0"
 async-channel = "1.8"
 bytemuck = { version = "1.13.0", features = ["derive"] }
 crabslab = { version = "0.5.1", default-features = false }
+ctor = "0.2.2"
 dagga = "0.2.1"
 env_logger = "0.10.0"
 futures-lite = "1.13"
