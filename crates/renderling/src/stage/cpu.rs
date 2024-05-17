@@ -222,12 +222,12 @@ impl Stage {
     }
 
     pub fn set_background_color(&self, color: impl Into<Vec4>) {
-        let Vec4 { x, y, z, w } = color.into();
+        let color = color.into();
         *self.background_color.write().unwrap() = wgpu::Color {
-            r: x as f64,
-            g: y as f64,
-            b: z as f64,
-            a: w as f64,
+            r: color.x as f64,
+            g: color.y as f64,
+            b: color.z as f64,
+            a: color.w as f64,
         };
     }
 
