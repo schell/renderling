@@ -120,8 +120,8 @@ pub struct Stage {
     pub(crate) stage_pipeline: Arc<wgpu::RenderPipeline>,
     pub(crate) skybox_pipeline: Arc<RwLock<Option<Arc<wgpu::RenderPipeline>>>>,
 
-    pub(crate) hdr_texture: Texture,
-    pub(crate) depth_texture: Texture,
+    pub(crate) hdr_texture: Arc<RwLock<Texture>>,
+    pub(crate) depth_texture: Arc<RwLock<Texture>>,
 
     pub(crate) atlas: Atlas,
     pub(crate) bloom: Bloom,
@@ -166,9 +166,12 @@ impl Stage {
             ..Default::default()
         });
         let lights = mngr.new_array(vec![Id::<Light>::NONE; 16]);
-        let hdr_texture = Texture::create_hdr_texture(&device, &queue, w, h);
-        let depth_texture = Texture::create_depth_texture(&device, w, h);
-        let bloom = Bloom::new(device.clone(), queue.clone(), resolution, &hdr_texture);
+        let hdr_texture = Arc::new(RwLock::new(Texture::create_hdr_texture(
+            &device, &queue, w, h,
+        )));
+        let depth_texture = Arc::new(RwLock::new(Texture::create_depth_texture(&device, w, h)));
+        // UNWRAP: safe because no other references at this point (created above^)
+        let bloom = Bloom::new(&device, &queue, &hdr_texture.read().unwrap());
         let tonemapping = Tonemapping::new(
             &device,
             &queue,
@@ -253,8 +256,10 @@ impl Stage {
     }
 
     pub fn get_size(&self) -> UVec2 {
-        let w = self.hdr_texture.width();
-        let h = self.hdr_texture.height();
+        // UNWRAP: panic on purpose
+        let hdr = self.hdr_texture.read().unwrap();
+        let w = hdr.width();
+        let h = hdr.height();
         UVec2::new(w, h)
     }
 
@@ -264,8 +269,17 @@ impl Stage {
         }
 
         self.pbr_config.modify(|cfg| cfg.resolution = size);
+        let hdr_texture = Texture::create_hdr_texture(&self.device, &self.queue, size.x, size.y);
+        // UNWRAP: panic on purpose
+        *self.depth_texture.write().unwrap() =
+            Texture::create_depth_texture(&self.device, size.x, size.y);
+        self.bloom
+            .set_hdr_texture(&self.device, &self.queue, &hdr_texture);
+        self.tonemapping.set_hdr_texture(&self.device, &hdr_texture);
+        *self.hdr_texture.write().unwrap() = hdr_texture;
 
-        todo!("need to resize textures, recreate bloom, etc");
+        let _ = self.skybox_bindgroup.lock().unwrap().take();
+        let _ = self.textures_bindgroup.lock().unwrap().take();
     }
 
     pub fn with_size(self, size: UVec2) -> Self {
@@ -478,7 +492,7 @@ impl Stage {
         DepthTexture {
             device: self.device.clone(),
             queue: self.queue.clone(),
-            texture: self.depth_texture.clone(),
+            texture: self.depth_texture.read().unwrap().clone(),
         }
     }
 
@@ -535,8 +549,8 @@ impl Stage {
             &self.device,
             &self.queue,
             Some("stage clear pass"),
-            vec![view, &self.hdr_texture.view],
-            Some(&self.depth_texture.view),
+            vec![view, &self.hdr_texture.read().unwrap().view],
+            Some(&self.depth_texture.read().unwrap().view),
             *self.background_color.read().unwrap(),
         );
 
@@ -564,10 +578,12 @@ impl Stage {
                 .device
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
             {
+                let hdr_texture = self.hdr_texture.read().unwrap();
+                let depth_texture = self.depth_texture.read().unwrap();
                 let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                     label,
                     color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                        view: &self.hdr_texture.view,
+                        view: &hdr_texture.view,
                         resolve_target: None,
                         ops: wgpu::Operations {
                             load: wgpu::LoadOp::Load,
@@ -575,7 +591,7 @@ impl Stage {
                         },
                     })],
                     depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                        view: &self.depth_texture.view,
+                        view: &depth_texture.view,
                         depth_ops: Some(wgpu::Operations {
                             load: wgpu::LoadOp::Load,
                             store: wgpu::StoreOp::Store,
@@ -636,7 +652,7 @@ impl Stage {
             let bloom_mix_texture = self.bloom.get_mix_texture();
             encoder.copy_texture_to_texture(
                 wgpu::ImageCopyTexture {
-                    texture: &self.hdr_texture.texture,
+                    texture: &self.hdr_texture.read().unwrap().texture,
                     mip_level: 0,
                     origin: wgpu::Origin3d { x: 0, y: 0, z: 0 },
                     aspect: wgpu::TextureAspect::All,

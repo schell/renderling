@@ -401,16 +401,10 @@ pub struct Bloom {
 }
 
 impl Bloom {
-    pub fn new(
-        device: impl Into<Arc<wgpu::Device>>,
-        queue: impl Into<Arc<wgpu::Queue>>,
-        resolution: UVec2,
-        hdr_texture: &Texture,
-    ) -> Self {
-        let device = device.into();
-        let queue = queue.into();
-        let mut slab = SlabAllocator::default();
+    pub fn new(device: &wgpu::Device, queue: &wgpu::Queue, hdr_texture: &Texture) -> Self {
+        let resolution = UVec2::new(hdr_texture.width(), hdr_texture.height());
 
+        let mut slab = SlabAllocator::default();
         let downsample_pixel_sizes = slab.new_array(
             config_resolutions(resolution).map(|r| 1.0 / Vec2::new(r.x as f32, r.y as f32)),
         );
@@ -418,36 +412,36 @@ impl Bloom {
             slab.new_value(1.0 / Vec2::new(resolution.x as f32, resolution.y as f32));
         let mix_strength = slab.new_value(0.04f32);
         let slab_buffer = slab.get_updated_buffer((
-            device.as_ref(),
-            queue.as_ref(),
+            device,
+            queue,
             Some("bloom slab"),
             wgpu::BufferUsages::empty(),
         ));
 
-        let textures = create_textures(&device, &queue, resolution);
         let downsample_pipeline = Arc::new(create_bloom_downsample_pipeline(&device));
         let upsample_pipeline = Arc::new(create_bloom_upsample_pipeline(&device));
+        let mix_pipeline = Arc::new(create_mix_pipeline(&device));
 
-        // up and downsample pipelines have the same layout, so we just choose one for
-        // the layout
-        let bindgroups = create_bindgroups(&device, &downsample_pipeline, &slab_buffer, &textures);
         let hdr_texture_downsample_bindgroup = create_bindgroup(
-            &device,
+            device,
             &downsample_pipeline.get_bind_group_layout(0),
             &slab_buffer,
-            hdr_texture,
+            &hdr_texture,
         );
         let mix_texture = create_texture(
-            &device,
-            &queue,
+            device,
+            queue,
             resolution.x,
             resolution.y,
             Some("bloom mix"),
             wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::COPY_DST,
         );
-        let mix_pipeline = Arc::new(create_mix_pipeline(&device));
+
+        let textures = create_textures(device, queue, resolution);
+        let bindgroups = create_bindgroups(device, &downsample_pipeline, &slab_buffer, &textures);
+
         let mix_bindgroup = create_mix_bindgroup(
-            &device,
+            device,
             &mix_pipeline,
             &slab_buffer,
             &hdr_texture,
@@ -494,6 +488,45 @@ impl Bloom {
     pub fn get_size(&self) -> UVec2 {
         let mix_texture = self.get_mix_texture();
         UVec2::new(mix_texture.width(), mix_texture.height())
+    }
+
+    /// Recreates this bloom using the new HDR texture.
+    pub fn set_hdr_texture(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        hdr_texture: &Texture,
+    ) {
+        // UNWRAP: panic on purpose (here and on till the end of this fn)
+        let slab_buffer = self.slab.get_buffer().unwrap();
+        let resolution = UVec2::new(hdr_texture.width(), hdr_texture.height());
+
+        let textures = create_textures(device, queue, resolution);
+
+        *self.bindgroups.write().unwrap() =
+            create_bindgroups(device, &self.downsample_pipeline, &slab_buffer, &textures);
+        *self.hdr_texture_downsample_bindgroup.write().unwrap() = create_bindgroup(
+            &device,
+            &self.downsample_pipeline.get_bind_group_layout(0),
+            &slab_buffer,
+            hdr_texture,
+        );
+        *self.mix_texture.write().unwrap() = create_texture(
+            &device,
+            &queue,
+            resolution.x,
+            resolution.y,
+            Some("bloom mix"),
+            wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::COPY_DST,
+        );
+        *self.mix_bindgroup.write().unwrap() = create_mix_bindgroup(
+            &device,
+            &self.mix_pipeline,
+            &slab_buffer,
+            &hdr_texture,
+            &textures[0],
+        );
+        *self.textures.write().unwrap() = textures;
     }
 
     /// Returns a clone of the current mix texture.

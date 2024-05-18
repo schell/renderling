@@ -266,6 +266,8 @@ mod test {
 
         let hdr_img = stage
             .hdr_texture
+            .read()
+            .unwrap()
             .read_hdr_image(ctx.get_device(), ctx.get_queue())
             .unwrap();
         //let hdr_img: RgbaImage = hdr_img.convert();
@@ -967,10 +969,32 @@ mod test {
         let mut ctx = Context::headless(size.x, size.y);
         let mut stage = ctx.new_stage();
 
+        // create the CMY cube
+        let camera_position = Vec3::new(0.0, 12.0, 20.0);
+        let camera = stage.new_value(Camera {
+            projection: Mat4::perspective_rh(std::f32::consts::PI / 4.0, 1.0, 0.1, 100.0),
+            view: Mat4::look_at_rh(camera_position, Vec3::ZERO, Vec3::Y),
+            position: camera_position,
+        });
+        let geometry = stage.new_array(gpu_cube_vertices());
+        let transform = stage.new_value(Transform {
+            scale: Vec3::new(6.0, 6.0, 6.0),
+            rotation: Quat::from_axis_angle(Vec3::Y, -std::f32::consts::FRAC_PI_4),
+            ..Default::default()
+        });
+        let cube = stage.new_value(Renderlet {
+            camera_id: camera.id(),
+            vertices_array: geometry.array(),
+            transform_id: transform.id(),
+            ..Default::default()
+        });
+        stage.add_renderlet(&cube);
+
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
         let img = frame.read_image().unwrap();
         assert_eq!(size, UVec2::new(img.width(), img.height()));
+        img_diff::save("stage/resize_100.png", img);
         frame.present();
 
         let new_size = UVec2::new(200, 200);
@@ -981,6 +1005,7 @@ mod test {
         stage.render(&frame.view());
         let img = frame.read_image().unwrap();
         assert_eq!(new_size, UVec2::new(img.width(), img.height()));
+        img_diff::save("stage/resize_200.png", img);
         frame.present();
     }
 }
