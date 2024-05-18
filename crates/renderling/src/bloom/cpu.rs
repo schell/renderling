@@ -60,6 +60,7 @@ fn create_bloom_downsample_pipeline(device: &wgpu::Device) -> wgpu::RenderPipeli
             module: &vertex_module.module,
             entry_point: &vertex_module.entry_point,
             buffers: &[],
+            compilation_options: Default::default(),
         },
         primitive: wgpu::PrimitiveState {
             topology: wgpu::PrimitiveTopology::TriangleList,
@@ -80,6 +81,7 @@ fn create_bloom_downsample_pipeline(device: &wgpu::Device) -> wgpu::RenderPipeli
                 blend: None,
                 write_mask: wgpu::ColorWrites::all(),
             })],
+            compilation_options: Default::default(),
         }),
         multiview: None,
     })
@@ -102,6 +104,7 @@ fn create_bloom_upsample_pipeline(device: &wgpu::Device) -> wgpu::RenderPipeline
             module: &vertex_module.module,
             entry_point: &vertex_module.entry_point,
             buffers: &[],
+            compilation_options: Default::default(),
         },
         primitive: wgpu::PrimitiveState {
             topology: wgpu::PrimitiveTopology::TriangleList,
@@ -122,6 +125,7 @@ fn create_bloom_upsample_pipeline(device: &wgpu::Device) -> wgpu::RenderPipeline
                 blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                 write_mask: wgpu::ColorWrites::all(),
             })],
+            compilation_options: Default::default(),
         }),
         multiview: None,
     })
@@ -308,6 +312,7 @@ fn create_mix_pipeline(device: &wgpu::Device) -> wgpu::RenderPipeline {
             module: &vertex_module.module,
             entry_point: &vertex_module.entry_point,
             buffers: &[],
+            compilation_options: Default::default(),
         },
         primitive: wgpu::PrimitiveState {
             topology: wgpu::PrimitiveTopology::TriangleList,
@@ -328,6 +333,7 @@ fn create_mix_pipeline(device: &wgpu::Device) -> wgpu::RenderPipeline {
                 blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                 write_mask: wgpu::ColorWrites::all(),
             })],
+            compilation_options: Default::default(),
         }),
         multiview: None,
     })

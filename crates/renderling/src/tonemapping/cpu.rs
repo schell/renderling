@@ -128,6 +128,7 @@ impl Tonemapping {
                     module: &vertex_linkage.module,
                     entry_point: vertex_linkage.entry_point,
                     buffers: &[],
+                    compilation_options: Default::default(),
                 },
                 primitive: wgpu::PrimitiveState {
                     topology: wgpu::PrimitiveTopology::TriangleList,
@@ -147,6 +148,7 @@ impl Tonemapping {
                         blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                         write_mask: wgpu::ColorWrites::ALL,
                     })],
+                    compilation_options: Default::default(),
                 }),
                 multisample: wgpu::MultisampleState::default(),
                 multiview: None,

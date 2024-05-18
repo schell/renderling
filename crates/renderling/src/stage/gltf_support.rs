@@ -653,7 +653,6 @@ impl GltfNode {
     }
 }
 
-
 #[derive(Clone, Debug)]
 pub struct GltfSkin {
     pub index: usize,
@@ -1331,12 +1330,7 @@ mod test {
 
     impl GltfVertexInvocation {
         #[allow(dead_code)]
-        pub fn invoke(
-            instance_index: u32,
-            vertex_index: u32,
-            slab: &[u32],
-            debug: &mut [u32],
-        ) -> Self {
+        pub fn invoke(instance_index: u32, vertex_index: u32, slab: &[u32]) -> Self {
             let mut v = Self {
                 instance_index,
                 vertex_index,
@@ -1348,7 +1342,6 @@ mod test {
                 v.renderlet_id,
                 v.vertex_index,
                 slab,
-                debug,
                 &mut v.out_camera,
                 &mut v.out_material,
                 &mut v.out_pbr_config,

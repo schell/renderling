@@ -752,7 +752,7 @@ mod test {
 
         let (device, queue) = ctx.get_device_and_queue_owned();
         let hdr_image = AtlasImage::from_hdr_path("../../img/hdr/resting_place.hdr").unwrap();
-        let skybox = crate::skybox::Skybox::new(device, queue, hdr_image, camera.id());
+        let skybox = crate::skybox::Skybox::new(&device, &queue, hdr_image, camera.id());
         stage.set_skybox(skybox);
 
         let frame = ctx.get_next_frame().unwrap();

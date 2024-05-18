@@ -192,7 +192,7 @@ mod test {
         transform::Transform,
     };
 
-    use glam::{Mat3, Mat4, Quat, Vec2, Vec3, Vec4};
+    use glam::{Mat3, Mat4, Quat, UVec2, Vec2, Vec3, Vec4};
     use img_diff::DiffCfg;
     use pretty_assertions::assert_eq;
 
@@ -959,5 +959,28 @@ mod test {
         let view = Mat4::look_at_rh(position, Vec3::new(1.0, 2.0, 0.0), Vec3::Y);
         let extracted_position = view.inverse().transform_point3(Vec3::ZERO);
         assert_eq!(position, extracted_position);
+    }
+
+    #[test]
+    fn can_resize_context_and_stage() {
+        let size = UVec2::new(100, 100);
+        let mut ctx = Context::headless(size.x, size.y);
+        let mut stage = ctx.new_stage();
+
+        let frame = ctx.get_next_frame().unwrap();
+        stage.render(&frame.view());
+        let img = frame.read_image().unwrap();
+        assert_eq!(size, UVec2::new(img.width(), img.height()));
+        frame.present();
+
+        let new_size = UVec2::new(200, 200);
+        ctx.set_size(new_size);
+        stage.set_size(new_size);
+
+        let frame = ctx.get_next_frame().unwrap();
+        stage.render(&frame.view());
+        let img = frame.read_image().unwrap();
+        assert_eq!(new_size, UVec2::new(img.width(), img.height()));
+        frame.present();
     }
 }
