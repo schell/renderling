@@ -153,7 +153,7 @@ impl App {
     fn load_hdr_skybox(&mut self, bytes: Vec<u8>) {
         let img = AtlasImage::from_hdr_bytes(&bytes).unwrap();
         let (device, queue) = self.stage.get_device_and_queue_owned();
-        let skybox = Skybox::new(device, queue, img, self.camera.id());
+        let skybox = Skybox::new(&device, &queue, img, self.camera.id());
         self.skybox_image_bytes = Some(bytes);
         self.stage.set_skybox(skybox);
     }

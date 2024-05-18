@@ -3,6 +3,8 @@
 //! The `Stage` object contains a slab buffer and a render pipeline.
 //! It is used to stage [`Renderlet`]s for rendering.
 use core::sync::atomic::Ordering;
+use crabslab::{Array, Id, Slab, SlabItem};
+use snafu::Snafu;
 use std::{
     ops::{Deref, DerefMut},
     sync::{atomic::AtomicBool, Arc, Mutex, RwLock},
@@ -20,8 +22,6 @@ use crate::{
     tonemapping::Tonemapping,
     transform::Transform,
 };
-use crabslab::{Array, CpuSlab, GrowableSlab, Id, Slab, SlabItem, WgpuBuffer};
-use snafu::Snafu;
 
 use super::*;
 
@@ -63,6 +63,7 @@ fn create_stage_render_pipeline(device: &wgpu::Device) -> wgpu::RenderPipeline {
             module: &vertex_linkage.module,
             entry_point: vertex_linkage.entry_point,
             buffers: &[],
+            compilation_options: Default::default(),
         },
         primitive: wgpu::PrimitiveState {
             topology: wgpu::PrimitiveTopology::TriangleList,
@@ -93,6 +94,7 @@ fn create_stage_render_pipeline(device: &wgpu::Device) -> wgpu::RenderPipeline {
                 blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                 write_mask: wgpu::ColorWrites::ALL,
             })],
+            compilation_options: Default::default(),
         }),
         multiview: None,
     });
@@ -115,14 +117,11 @@ pub struct Stage {
     pub(crate) pbr_config: Hybrid<PbrConfig>,
     pub(crate) lights: HybridArray<Id<Light>>,
 
-    pub(crate) vertex_debug: Arc<RwLock<CpuSlab<WgpuBuffer>>>,
-    pub(crate) fragment_debug: Arc<RwLock<CpuSlab<WgpuBuffer>>>,
-
     pub(crate) stage_pipeline: Arc<wgpu::RenderPipeline>,
     pub(crate) skybox_pipeline: Arc<RwLock<Option<Arc<wgpu::RenderPipeline>>>>,
 
-    pub(crate) hdr_texture: Texture,
-    pub(crate) depth_texture: Texture,
+    pub(crate) hdr_texture: Arc<RwLock<Texture>>,
+    pub(crate) depth_texture: Arc<RwLock<Texture>>,
 
     pub(crate) atlas: Atlas,
     pub(crate) bloom: Bloom,
@@ -167,9 +166,12 @@ impl Stage {
             ..Default::default()
         });
         let lights = mngr.new_array(vec![Id::<Light>::NONE; 16]);
-        let hdr_texture = Texture::create_hdr_texture(&device, &queue, w, h);
-        let depth_texture = Texture::create_depth_texture(&device, w, h);
-        let bloom = Bloom::new(device.clone(), queue.clone(), resolution, &hdr_texture);
+        let hdr_texture = Arc::new(RwLock::new(Texture::create_hdr_texture(
+            &device, &queue, w, h,
+        )));
+        let depth_texture = Arc::new(RwLock::new(Texture::create_depth_texture(&device, w, h)));
+        // UNWRAP: safe because no other references at this point (created above^)
+        let bloom = Bloom::new(&device, &queue, &hdr_texture.read().unwrap());
         let tonemapping = Tonemapping::new(
             &device,
             &queue,
@@ -182,24 +184,9 @@ impl Stage {
             pbr_config,
             lights,
 
-            vertex_debug: Arc::new(RwLock::new(CpuSlab::new(WgpuBuffer::new(
-                device.clone(),
-                queue.clone(),
-                256,
-            )))),
-            fragment_debug: Arc::new(RwLock::new({
-                let len = (resolution.x * resolution.y) as usize;
-                let mut debug = CpuSlab::new(WgpuBuffer::new(
-                    device.clone(),
-                    queue.clone(),
-                    RenderletFragmentLog::SLAB_SIZE * len,
-                ));
-                debug.append_array(&vec![RenderletFragmentLog::default(); len]);
-                debug
-            })),
             stage_pipeline: create_stage_render_pipeline(&device).into(),
             atlas,
-            skybox: Arc::new(RwLock::new(Skybox::empty(device.clone(), queue.clone()))),
+            skybox: Arc::new(RwLock::new(Skybox::empty(&device, &queue))),
             skybox_bindgroup: Default::default(),
             skybox_pipeline: Default::default(),
             has_skybox: Arc::new(AtomicBool::new(false)),
@@ -269,8 +256,10 @@ impl Stage {
     }
 
     pub fn get_size(&self) -> UVec2 {
-        let w = self.hdr_texture.width();
-        let h = self.hdr_texture.height();
+        // UNWRAP: panic on purpose
+        let hdr = self.hdr_texture.read().unwrap();
+        let w = hdr.width();
+        let h = hdr.height();
         UVec2::new(w, h)
     }
 
@@ -280,19 +269,17 @@ impl Stage {
         }
 
         self.pbr_config.modify(|cfg| cfg.resolution = size);
+        let hdr_texture = Texture::create_hdr_texture(&self.device, &self.queue, size.x, size.y);
+        // UNWRAP: panic on purpose
+        *self.depth_texture.write().unwrap() =
+            Texture::create_depth_texture(&self.device, size.x, size.y);
+        self.bloom
+            .set_hdr_texture(&self.device, &self.queue, &hdr_texture);
+        self.tonemapping.set_hdr_texture(&self.device, &hdr_texture);
+        *self.hdr_texture.write().unwrap() = hdr_texture;
 
-        // Allocate space for our fragment shader logs...
-        let len = size.x * size.y;
-        // UNWRAP: if we can't write we want to panic.
-        let mut debug = self.fragment_debug.write().unwrap();
-        let array = Array::<RenderletFragmentLog>::new(0, len);
-        debug.maybe_expand_to_fit::<RenderletFragmentLog>(len as usize);
-        debug.write_array(
-            array,
-            vec![RenderletFragmentLog::default(); len as usize].as_slice(),
-        );
-
-        todo!("need to resize textures, recreate bloom, etc");
+        let _ = self.skybox_bindgroup.lock().unwrap().take();
+        let _ = self.textures_bindgroup.lock().unwrap().take();
     }
 
     pub fn with_size(self, size: UVec2) -> Self {
@@ -420,11 +407,6 @@ impl Stage {
         (pipeline, bindgroup)
     }
 
-    /// Return the main render pipeline, creating it if necessary.
-    fn get_pipeline(&self) -> Arc<wgpu::RenderPipeline> {
-        self.stage_pipeline.clone()
-    }
-
     fn get_slab_buffers_bindgroup(&self, slab_buffer: &wgpu::Buffer) -> Arc<wgpu::BindGroup> {
         // UNWRAP: safe because we're only ever called from the render thread.
         let mut bindgroup = self.buffers_bindgroup.lock().unwrap();
@@ -433,13 +415,10 @@ impl Stage {
         } else {
             let b = Arc::new({
                 let device: &wgpu::Device = &self.device;
-                let pipeline: &wgpu::RenderPipeline = &self.get_pipeline();
                 crate::linkage::slab_bindgroup(
                     device,
                     slab_buffer,
-                    self.vertex_debug.read().unwrap().as_ref().get_buffer(),
-                    self.fragment_debug.read().unwrap().as_ref().get_buffer(),
-                    &pipeline.get_bind_group_layout(0),
+                    &self.stage_pipeline.get_bind_group_layout(0),
                 )
             });
             *bindgroup = Some(b.clone());
@@ -455,7 +434,11 @@ impl Stage {
         } else {
             let b = Arc::new(crate::linkage::atlas_and_skybox_bindgroup(
                 &self.device,
-                &self.get_pipeline().get_bind_group_layout(1),
+                &{
+                    let this = &self;
+                    this.stage_pipeline.clone()
+                }
+                .get_bind_group_layout(1),
                 // UNWRAP: if we can't acquire locks we want to panic
                 &self.atlas,
                 &self.skybox.read().unwrap(),
@@ -481,13 +464,6 @@ impl Stage {
                 units.push(renderlet.clone());
             }
         }
-
-        // Ensure we have space to write GPU debugging info to our vertex debug buffer
-        let vertex_debug_data =
-            vec![RenderletVertexLog::default(); renderlet.get().vertices_array.len()];
-        // UNWRAP: if we can't read we want to panic.
-        let mut debug = self.vertex_debug.write().unwrap();
-        debug.append_array(&vertex_debug_data);
     }
 
     /// Erase the given renderlet from the internal list of renderlets to be
@@ -516,79 +492,17 @@ impl Stage {
         DepthTexture {
             device: self.device.clone(),
             queue: self.queue.clone(),
-            texture: self.depth_texture.clone(),
+            texture: self.depth_texture.read().unwrap().clone(),
         }
-    }
-
-    /// Read the vertex debug messages.
-    pub fn read_vertex_debug_logs(&self) -> Vec<RenderletVertexLog> {
-        // UNWRAP: if we can't acquire the lock we want to panic.
-        let draws = self.get_renderlets();
-        let len = draws
-            .into_iter()
-            .map(|r| r.get().vertices_array.len())
-            .sum::<usize>();
-        let array = Array::<RenderletVertexLog>::new(0, len as u32);
-        let logs = self.vertex_debug.read().unwrap().as_ref().read_vec(array);
-        logs
-    }
-
-    /// Clear the vertex debug messages.
-    pub fn clear_vertex_debug_logs(&self) {
-        let len = {
-            // UNWRAP: if we can't read we want to panic.
-            let draws = self.draws.read().unwrap();
-            match draws.deref() {
-                StageDrawStrategy::Direct(units) => {
-                    let len = units
-                        .iter()
-                        .map(|r| r.get().vertices_array.len())
-                        .sum::<usize>();
-                    len
-                }
-            }
-        };
-        // UNWRAP: if we can't read we want to panic.
-        let mut debug = self.vertex_debug.write().unwrap();
-        let array = Array::<RenderletVertexLog>::new(0, len as u32);
-        debug.write_array(array, vec![RenderletVertexLog::default(); len].as_slice());
-    }
-
-    /// Read the fragment debug messages.
-    pub fn read_fragment_debug_logs(&self) -> Vec<RenderletFragmentLog> {
-        let resolution = self.pbr_config.get().resolution;
-        let len = resolution.x * resolution.y;
-        let array = Array::<RenderletFragmentLog>::new(0, len);
-        log::trace!("reading {len} logs from fragment_debug buffer");
-        // UNWRAP: if we can't read we want to panic.
-        self.fragment_debug.read().unwrap().read_vec(array)
-    }
-
-    /// Clear the fragment debug messages.
-    pub fn clear_fragment_debug_logs(&self) {
-        let resolution = self.pbr_config.get().resolution;
-        let len = resolution.x * resolution.y;
-        // UNWRAP: if we can't write we want to panic.
-        let mut debug = self.fragment_debug.write().unwrap();
-        let array = Array::<RenderletFragmentLog>::new(0, len);
-        debug.write_array(
-            array,
-            vec![RenderletFragmentLog::default(); len as usize].as_slice(),
-        );
     }
 
     pub fn new_skybox_from_path(
         &self,
         path: impl AsRef<std::path::Path>,
-        camera: Id<Camera>,
+        camera_id: Id<Camera>,
     ) -> Result<Skybox, AtlasImageError> {
         let hdr = AtlasImage::from_hdr_path(path)?;
-        Ok(Skybox::new(
-            self.device.clone(),
-            self.queue.clone(),
-            hdr,
-            camera,
-        ))
+        Ok(Skybox::new(&self.device, &self.queue, hdr, camera_id))
     }
 
     pub fn new_nested_transform(&mut self) -> NestedTransform {
@@ -635,15 +549,18 @@ impl Stage {
             &self.device,
             &self.queue,
             Some("stage clear pass"),
-            vec![view, &self.hdr_texture.view],
-            Some(&self.depth_texture.view),
+            vec![view, &self.hdr_texture.read().unwrap().view],
+            Some(&self.depth_texture.read().unwrap().view),
             *self.background_color.read().unwrap(),
         );
 
         {
             log::trace!("rendering the stage");
             let label = Some("stage render");
-            let pipeline = self.get_pipeline();
+            let pipeline = {
+                let this = &self;
+                this.stage_pipeline.clone()
+            };
             let slab_buffer = self.tick_internal();
             let slab_buffers_bindgroup = self.get_slab_buffers_bindgroup(&slab_buffer);
             let textures_bindgroup = self.get_textures_bindgroup();
@@ -661,10 +578,12 @@ impl Stage {
                 .device
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
             {
+                let hdr_texture = self.hdr_texture.read().unwrap();
+                let depth_texture = self.depth_texture.read().unwrap();
                 let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                     label,
                     color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                        view: &self.hdr_texture.view,
+                        view: &hdr_texture.view,
                         resolve_target: None,
                         ops: wgpu::Operations {
                             load: wgpu::LoadOp::Load,
@@ -672,7 +591,7 @@ impl Stage {
                         },
                     })],
                     depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                        view: &self.depth_texture.view,
+                        view: &depth_texture.view,
                         depth_ops: Some(wgpu::Operations {
                             load: wgpu::LoadOp::Load,
                             store: wgpu::StoreOp::Store,
@@ -733,7 +652,7 @@ impl Stage {
             let bloom_mix_texture = self.bloom.get_mix_texture();
             encoder.copy_texture_to_texture(
                 wgpu::ImageCopyTexture {
-                    texture: &self.hdr_texture.texture,
+                    texture: &self.hdr_texture.read().unwrap().texture,
                     mip_level: 0,
                     origin: wgpu::Origin3d { x: 0, y: 0, z: 0 },
                     aspect: wgpu::TextureAspect::All,
@@ -913,13 +832,11 @@ mod test {
     use std::sync::Mutex;
 
     use crabslab::{Array, Slab};
-    use glam::{Mat4, UVec2, Vec2, Vec3};
+    use glam::{Mat4, Vec2, Vec3};
 
     use crate::{
-        camera::Camera,
-        stage::{cpu::SlabAllocator, NestedTransform, Renderlet, RenderletVertexLog, Vertex},
+        stage::{cpu::SlabAllocator, NestedTransform, Vertex},
         transform::Transform,
-        Context,
     };
 
     #[test]
@@ -943,56 +860,6 @@ mod test {
         slab.write_indexed_slice(&initial_vertices, 0);
         let vertices = slab.read_vec(Array::<Vertex>::new(0, initial_vertices.len() as u32));
         pretty_assertions::assert_eq!(initial_vertices, vertices);
-    }
-
-    #[test]
-    fn can_read_shader_debug_logs() {
-        let ctx = Context::headless(10, 10);
-        let mut stage = ctx.new_stage();
-        let camera = stage.new_value(Camera::default_ortho2d(100.0, 100.0));
-        let geometry = stage.new_array(crate::test::right_tri_vertices());
-        let tri = stage.new_value(Renderlet {
-            camera_id: camera.id(),
-            vertices_array: geometry.array(),
-            ..Default::default()
-        });
-        stage.add_renderlet(&tri);
-        stage.render(&ctx.get_next_frame().unwrap().view());
-
-        // read vertex logs
-        {
-            let vertex_logs = stage.read_vertex_debug_logs();
-            for (i, log) in vertex_logs.iter().enumerate() {
-                println!("log_{i}:{log:#?}");
-                assert_eq!(tri.id(), log.renderlet_id);
-                assert!(log.started);
-                assert!(log.completed);
-            }
-
-            stage.clear_vertex_debug_logs();
-            let blank_logs = stage.read_vertex_debug_logs();
-            assert_ne!(vertex_logs, blank_logs);
-            for log in blank_logs.iter() {
-                assert_eq!(&RenderletVertexLog::default(), log);
-            }
-        }
-
-        // read fragment logs
-        {
-            let fragment_logs = stage.read_fragment_debug_logs();
-            let UVec2 { x: w, y: h } = ctx.get_size();
-            assert_eq!((w * h) as usize, fragment_logs.len());
-            for (i, log) in fragment_logs.iter().enumerate() {
-                // only those fragments covered by the vertex shader's output are
-                // evaluated by the fragment shader, so only check those ones...
-                // @see DEVLOG.md's "Tue Apr 9 - Better debugging"
-                if log.started {
-                    assert!(log.completed);
-                    println!("log_{i}:{log:#?}");
-                }
-            }
-            stage.clear_fragment_debug_logs();
-        }
     }
 
     #[test]

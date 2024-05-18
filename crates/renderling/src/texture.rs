@@ -644,6 +644,7 @@ impl Texture {
                 module: &vertex_linkage.module,
                 entry_point: vertex_linkage.entry_point,
                 buffers: &[],
+                compilation_options: Default::default(),
             },
             primitive: wgpu::PrimitiveState {
                 topology: wgpu::PrimitiveTopology::TriangleList,
@@ -659,6 +660,7 @@ impl Texture {
                     blend: None,
                     write_mask: wgpu::ColorWrites::all(),
                 })],
+                compilation_options: Default::default(),
             }),
             depth_stencil: None,
             multisample: wgpu::MultisampleState::default(),

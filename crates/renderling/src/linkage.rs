@@ -66,27 +66,7 @@ pub fn slab_bindgroup_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
         },
         count: None,
     };
-    let vertex_debug = wgpu::BindGroupLayoutEntry {
-        binding: 1,
-        visibility,
-        ty: wgpu::BindingType::Buffer {
-            ty: wgpu::BufferBindingType::Storage { read_only: false },
-            has_dynamic_offset: false,
-            min_binding_size: None,
-        },
-        count: None,
-    };
-    let fragment_debug = wgpu::BindGroupLayoutEntry {
-        binding: 2,
-        visibility,
-        ty: wgpu::BindingType::Buffer {
-            ty: wgpu::BufferBindingType::Storage { read_only: false },
-            has_dynamic_offset: false,
-            min_binding_size: None,
-        },
-        count: None,
-    };
-    let entries = vec![slab, vertex_debug, fragment_debug];
+    let entries = vec![slab];
     device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
         label: Some("slabs"),
         entries: &entries,
@@ -96,32 +76,16 @@ pub fn slab_bindgroup_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
 pub fn slab_bindgroup(
     device: &wgpu::Device,
     slab_buffer: &wgpu::Buffer,
-    vertex_debug_buffer: &wgpu::Buffer,
-    fragment_debug_buffer: &wgpu::Buffer,
     bindgroup_layout: &wgpu::BindGroupLayout,
 ) -> wgpu::BindGroup {
     let label = Some("slab");
     device.create_bind_group(&wgpu::BindGroupDescriptor {
         label,
         layout: &bindgroup_layout,
-        entries: &[
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: wgpu::BindingResource::Buffer(slab_buffer.as_entire_buffer_binding()),
-            },
-            wgpu::BindGroupEntry {
-                binding: 1,
-                resource: wgpu::BindingResource::Buffer(
-                    vertex_debug_buffer.as_entire_buffer_binding(),
-                ),
-            },
-            wgpu::BindGroupEntry {
-                binding: 2,
-                resource: wgpu::BindingResource::Buffer(
-                    fragment_debug_buffer.as_entire_buffer_binding(),
-                ),
-            },
-        ],
+        entries: &[wgpu::BindGroupEntry {
+            binding: 0,
+            resource: wgpu::BindingResource::Buffer(slab_buffer.as_entire_buffer_binding()),
+        }],
     })
 }
 
