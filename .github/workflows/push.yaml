@@ -16,11 +16,11 @@ jobs:
           cd shaders && cargo run --release && cd ..
           git diff --exit-code --no-ext-diff crates/renderling/src/linkage
 
-  #renderling-test:
-  #  runs-on: [ubuntu-latest, gpu]
-  #  steps:
-  #    - uses: actions/checkout@v2
-  #    - uses: actions-rs/toolchain@v1
-  #      with:
-  #        toolchain: stable
-  #    - run: cargo test
+  renderling-test:
+    runs-on: self-hosted
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+      - run: cargo test
