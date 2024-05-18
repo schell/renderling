@@ -95,6 +95,14 @@ async fn adapter<'window>(
     instance: &wgpu::Instance,
     compatible_surface: Option<&wgpu::Surface<'window>>,
 ) -> Result<wgpu::Adapter, ContextError> {
+    log::trace!(
+        "creating adapter for a {} context",
+        if compatible_surface.is_none() {
+            "headless"
+        } else {
+            "surface-based"
+        }
+    );
     let adapter = instance
         .request_adapter(&wgpu::RequestAdapterOptions {
             power_preference: wgpu::PowerPreference::default(),
@@ -135,13 +143,23 @@ async fn device(
 }
 
 fn new_default_instance() -> wgpu::Instance {
+    log::trace!(
+        "creating instance - available backends: {:#?}",
+        wgpu::Instance::enabled_backend_features()
+    );
     // The instance is a handle to our GPU
+    let backends = wgpu::Backends::all();
     // BackendBit::PRIMARY => Vulkan + Metal + DX12 + Browser WebGPU
-    wgpu::Instance::new(wgpu::InstanceDescriptor {
+    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
         // TODO: change wgpu backend bit to just PRIMARY
-        backends: wgpu::Backends::all(),
+        backends,
         ..Default::default()
-    })
+    });
+
+    let adapters = instance.enumerate_adapters(backends);
+    log::trace!("available adapters: {adapters:#?}");
+
+    instance
 }
 
 async fn new_windowed_adapter_device_queue(
@@ -473,6 +491,7 @@ impl Context {
     }
 
     pub async fn try_new_headless(width: u32, height: u32) -> Result<Self, ContextError> {
+        log::trace!("creating headless context of size ({width}, {height})");
         let size = UVec2::new(width, height);
         let instance = new_default_instance();
         let (adapter, device, queue, target) =

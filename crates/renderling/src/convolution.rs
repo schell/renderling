@@ -151,7 +151,7 @@ pub fn integrate_brdf_doesnt_work(mut n_dot_v: f32, roughness: f32) -> Vec2 {
 
 /// Used by [`prefilter_environment_cubemap_vertex`] to read the camera and
 /// roughness values from the slab.
-#[derive(Default, SlabItem)]
+#[derive(Clone, Copy, Default, SlabItem)]
 pub struct VertexPrefilterEnvironmentCubemapIds {
     pub camera: Id<Camera>,
     // TODO: does this have to be an Id? Pretty sure it can be inline
