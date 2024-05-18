@@ -16,11 +16,28 @@ jobs:
           cd shaders && cargo run --release && cd ..
           git diff --exit-code --no-ext-diff crates/renderling/src/linkage
 
-  #renderling-test:
-  #  runs-on: [ubuntu-latest, gpu]
-  #  steps:
-  #    - uses: actions/checkout@v2
-  #    - uses: actions-rs/toolchain@v1
-  #      with:
-  #        toolchain: stable
-  #    - run: cargo test
+  renderling-test:
+    strategy:
+      matrix:
+        label: [pi4, intel, amd]
+    runs-on: ${{ matrix.label }}
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+      - run: cargo test
+        env:
+          RUST_BACKTRACE: 1
+
+  renderling-clippy:
+    strategy:
+      matrix:
+        label: [pi4, intel, amd]
+    runs-on: ${{ matrix.label }}
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions-rs/toolchain@v1
+        with:
+          toolchain: stable
+      - run: cargo clippy
