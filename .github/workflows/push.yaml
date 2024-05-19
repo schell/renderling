@@ -28,9 +28,15 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
+      - run: apt-get -q -y update && apt-get -q -y install libvulkan1
       - run: RUST_LOG=trace cargo test
         env:
           RUST_BACKTRACE: 1
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-output-${{ matrix.label }}
+          path: test_output/**/*.png
 
   renderling-clippy:
     strategy:
