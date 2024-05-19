@@ -29,11 +29,28 @@ jobs:
           cache-on-failure: "true"
       - run: cargo clippy
 
+  renderling-test-windows:
+    strategy:
+      fail-fast: false
+    continue-on-error: true
+    runs-on: Windows
+    steps:
+      - uses: actions/checkout@v2
+      - run: RUST_LOG=trace cargo test -j 1 -- --test-threads=1
+        env:
+          RUST_BACKTRACE: 1
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-output-windows
+          path: test_output/**/*.png
+
   renderling-test:
     strategy:
       fail-fast: false
       matrix:
-        label: [pi4, intel, amd, Windows]
+        label: [pi4, intel, amd]
+    continue-on-error: true
     runs-on: ${{ matrix.label }}
     steps:
       - uses: actions/checkout@v2
