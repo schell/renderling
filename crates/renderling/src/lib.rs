@@ -201,6 +201,7 @@ mod test {
         let _ = env_logger::builder()
             .is_test(true)
             .filter_level(log::LevelFilter::Warn)
+            .filter_module("wgpu", log::LevelFilter::Trace)
             .filter_module("moongraph", log::LevelFilter::Trace)
             .filter_module("renderling", log::LevelFilter::Trace)
             .filter_module("crabslab", log::LevelFilter::Debug)
