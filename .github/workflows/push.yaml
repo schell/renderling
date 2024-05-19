@@ -28,7 +28,7 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
-      - run: cargo test
+      - run: RUST_LOG=trace cargo test
         env:
           RUST_BACKTRACE: 1
 
