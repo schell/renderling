@@ -81,15 +81,6 @@ pub enum StageGltfError {
 
     #[snafu(display("{source}"))]
     Animation { source: anime::AnimationError },
-
-    #[snafu(display("{source}"))]
-    Slab { source: crabslab::WgpuSlabError },
-}
-
-impl From<crabslab::WgpuSlabError> for StageGltfError {
-    fn from(source: crabslab::WgpuSlabError) -> Self {
-        Self::Slab { source }
-    }
 }
 
 impl From<gltf::Error> for StageGltfError {
