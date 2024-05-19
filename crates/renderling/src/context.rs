@@ -142,16 +142,14 @@ async fn device(
         .await
 }
 
-fn new_default_instance() -> wgpu::Instance {
+fn new_instance() -> wgpu::Instance {
     log::trace!(
         "creating instance - available backends: {:#?}",
         wgpu::Instance::enabled_backend_features()
     );
-    // The instance is a handle to our GPU
-    let backends = wgpu::Backends::all();
     // BackendBit::PRIMARY => Vulkan + Metal + DX12 + Browser WebGPU
+    let backends = wgpu::Backends::PRIMARY;
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-        // TODO: change wgpu backend bit to just PRIMARY
         backends,
         ..Default::default()
     });
@@ -493,7 +491,7 @@ impl Context {
     pub async fn try_new_headless(width: u32, height: u32) -> Result<Self, ContextError> {
         log::trace!("creating headless context of size ({width}, {height})");
         let size = UVec2::new(width, height);
-        let instance = new_default_instance();
+        let instance = new_instance();
         let (adapter, device, queue, target) =
             new_headless_device_queue_and_target(width, height, &instance).await?;
         Ok(Self::new(target, adapter, device, queue, size))
@@ -505,7 +503,7 @@ impl Context {
         window: impl Into<wgpu::SurfaceTarget<'static>>,
     ) -> Result<Self, ContextError> {
         let size = UVec2::new(width, height);
-        let instance = new_default_instance();
+        let instance = new_instance();
         let (adapter, device, queue, target) =
             new_windowed_adapter_device_queue(width, height, &instance, window).await?;
         Ok(Self::new(target, adapter, device, queue, size))
