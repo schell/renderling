@@ -17,7 +17,6 @@ jobs:
           git diff --exit-code --no-ext-diff crates/renderling/src/linkage
 
   renderling-clippy:
-    strategy:
     continue-on-error: true
     runs-on: ubuntu-latest
     steps:
