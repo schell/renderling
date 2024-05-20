@@ -33,10 +33,6 @@ jobs:
     runs-on: Windows
     steps:
       - uses: actions/checkout@v2
-      - uses: moonrepo/setup-rust@v1
-        with:
-          channel: nightly
-          targets: x86_64-pc-windows-msvc
       - run: rustup show
       - run: cargo test -j 1 -- --test-threads=1
         env:
