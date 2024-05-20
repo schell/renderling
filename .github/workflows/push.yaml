@@ -36,7 +36,7 @@ jobs:
     runs-on: Windows
     steps:
       - uses: actions/checkout@v2
-      - run: RUST_LOG=trace cargo test -j 1 -- --test-threads=1
+      - run: cargo test -j 1 -- --test-threads=1
         env:
           RUST_BACKTRACE: 1
       - uses: actions/upload-artifact@v4
