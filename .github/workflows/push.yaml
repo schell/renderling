@@ -51,7 +51,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        label: [pi4, intel, amd]
+        label: [intel, amd]
     continue-on-error: true
     runs-on: ${{ matrix.label }}
     steps:
