@@ -33,6 +33,7 @@ jobs:
     runs-on: Windows
     steps:
       - uses: actions/checkout@v2
+      - run: rustup show
       - run: cargo test -j 1 -- --test-threads=1
         env:
           RUST_BACKTRACE: 1
