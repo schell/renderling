@@ -1,4 +1,4 @@
-on: [push]
+on: [push, pull_request]
 
 name: push
 
@@ -24,15 +24,20 @@ jobs:
       - uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-all-crates: "true"
+          cache-on-failure: "true"
       - run: cargo clippy
       
   renderling-test-windows:
-    strategy:
-      fail-fast: false
-    continue-on-error: true
     runs-on: Windows
     steps:
       - uses: actions/checkout@v2
+      - uses: moonrepo/setup-rust@v1
+        with: 
+          channel: nightly 
+          targets: x86_64-pc-windwos-msvc
       - run: rustup show
       - run: cargo test -j 1 -- --test-threads=1
         env:
@@ -42,23 +47,26 @@ jobs:
         with:
           name: test-output-windows
           path: test_output/**/*.png
-          
+
   renderling-test:
     strategy:
-      fail-fast: false
       matrix:
-        label: [intel, amd]
-    continue-on-error: true
+        label: [intel, amd, pi4]
     runs-on: ${{ matrix.label }}
     steps:
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-all-crates: "true"
+          cache-on-failure: "true"
       - run: apt-get -q -y update && apt-get -q -y install libvulkan1
-      - run: RUST_LOG=trace cargo test -j 1 -- --test-threads=1
+      - run: cargo test -- --test-threads=1
         env:
           RUST_BACKTRACE: 1
+          RUST_LOG: trace
       - uses: actions/upload-artifact@v4
         if: always()
         with:

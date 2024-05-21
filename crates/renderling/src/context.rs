@@ -83,14 +83,6 @@ impl RenderTarget {
     }
 }
 
-fn limits(adapter: &wgpu::Adapter) -> wgpu::Limits {
-    if cfg!(target_arch = "wasm32") {
-        wgpu::Limits::downlevel_defaults().using_resolution(adapter.limits())
-    } else {
-        wgpu::Limits::default()
-    }
-}
-
 async fn adapter<'window>(
     instance: &wgpu::Instance,
     compatible_surface: Option<&wgpu::Surface<'window>>,
@@ -124,20 +116,23 @@ async fn adapter<'window>(
 async fn device(
     adapter: &wgpu::Adapter,
 ) -> Result<(wgpu::Device, wgpu::Queue), wgpu::RequestDeviceError> {
+    let wanted_features = wgpu::Features::INDIRECT_FIRST_INSTANCE
+                        | wgpu::Features::MULTI_DRAW_INDIRECT
+                        //// when debugging rust-gpu shader miscompilation it's nice to have this
+                        //| wgpu::Features::SPIRV_SHADER_PASSTHROUGH
+                        // this one is a funny requirement, it seems it is needed if using storage buffers in
+                        // vertex shaders, even if those shaders are read-only
+                        | wgpu::Features::VERTEX_WRITABLE_STORAGE;
+    let supported_features = adapter.features();
+    let required_features = wanted_features.intersection(supported_features);
     adapter
         .request_device(
             &wgpu::DeviceDescriptor {
-                required_features: wgpu::Features::INDIRECT_FIRST_INSTANCE
-                        | wgpu::Features::MULTI_DRAW_INDIRECT
-                        // this one is a funny requirement, it seems it is needed if using storage buffers in
-                        // vertex shaders, even if those shaders are read-only
-                        | wgpu::Features::VERTEX_WRITABLE_STORAGE, //| wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES
-                //// when debugging rust-gpu shader miscompilation it's nice to have this
-                //| wgpu::Features::SPIRV_SHADER_PASSTHROUGH
-                required_limits: limits(&adapter),
+                required_features,
+                required_limits: adapter.limits(),
                 label: None,
             },
-            None, // Trace path
+            None,
         )
         .await
 }
@@ -154,8 +149,11 @@ fn new_instance() -> wgpu::Instance {
         ..Default::default()
     });
 
-    let adapters = instance.enumerate_adapters(backends);
-    log::trace!("available adapters: {adapters:#?}");
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let adapters = instance.enumerate_adapters(backends);
+        log::trace!("available adapters: {adapters:#?}");
+    }
 
     instance
 }

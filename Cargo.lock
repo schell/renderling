@@ -660,20 +660,21 @@ dependencies = [
 
 [[package]]
 name = "crabslab"
-version = "0.5.0"
+version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cd385ba9075959f7c3f1ada2d879842700a89022ec6e4f9dc25d53f780798262"
+checksum = "397b9889820d56442e311e78a98611cb77aed881ab0d25705fcb4f4221311098"
 dependencies = [
  "crabslab-derive",
  "futures-lite 1.13.0",
  "glam",
+ "spirv-std",
 ]
 
 [[package]]
 name = "crabslab-derive"
-version = "0.4.1"
+version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b2c6de498d6dda575115359c1a3b671f8ecdee7a771d93cde8be45692c206eba"
+checksum = "23834bdd3f175b7899b352743b70b855639f662ac6f07360ff85c502e144cfde"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2277,7 +2278,7 @@ checksum = "19b30a45b0cd0bcca8037f3d0dc3421eaf95327a17cad11964fb8179b4fc4832"
 
 [[package]]
 name = "renderling"
-version = "0.4.3"
+version = "0.4.4"
 dependencies = [
  "assert_approx_eq",
  "async-channel 1.9.0",

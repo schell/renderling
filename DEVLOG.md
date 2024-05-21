@@ -1,5 +1,45 @@
 # devlog
 
+## Tue May 21, 2024 
+
+### Crabslab updates
+
+I replaced the slab indexing in `crabslab` with `spirv_std::IndexUnchecked` when the `target_arch` 
+is `"spirv"`. This had the effect of DRASTICALLY reducing the nesting in the resulting WGSL code, 
+and also GREATLY reducing the size of that code. Here are some percentage changes in the SPIR-V
+shader files produced by `rust-gpu`:
+
+```
+- 7.55%: bloom-bloom_downsample_fragment.spv
+-10.00%: bloom-bloom_mix_fragment.spv
+-10.81%: bloom-bloom_upsample_fragment.spv
+  0.00%: bloom-bloom_vertex.spv
+  0.00%: convolution-brdf_lut_convolution_fragment.spv
+  0.00%: convolution-brdf_lut_convolution_vertex.spv
+  0.00%: convolution-generate_mipmap_fragment.spv
+  0.00%: convolution-generate_mipmap_vertex.spv
+  0.00%: convolution-prefilter_environment_cubemap_fragment.spv
+-36.00%: convolution-prefilter_environment_cubemap_vertex.spv
+  0.00%: skybox-skybox_cubemap_fragment.spv
+-33.08%: skybox-skybox_cubemap_vertex.spv
+  0.00%: skybox-skybox_equirectangular_fragment.spv
+-40.00%: skybox-skybox_vertex.spv
+-25.27%: stage-renderlet_fragment.spv
+-30.77%: stage-renderlet_vertex.spv
+- 6.78%: tonemapping-tonemapping_fragment.spv
+  0.00%: tonemapping-tonemapping_vertex.spv
+  0.00%: tutorial-tutorial_implicit_isosceles_vertex.spv
+  0.00%: tutorial-tutorial_passthru_fragment.spv
+-39.29%: tutorial-tutorial_slabbed_renderlet.spv
+-37.76%: tutorial-tutorial_slabbed_vertices.spv
+-37.50%: tutorial-tutorial_slabbed_vertices_no_instance.spv
+```
+
+Drastically reducing the nesting in resulting WGSL code means that `naga` shouldn't err when 
+translating the SPIR-V code into WGSL on web. This means that `renderling` works on web again!
+
+Greatly reducing the size of the SPIR-V files may eliminate the stack overflow on Windows.
+
 ## Tue May 14, 2024
 
 ### Website! 
