@@ -17,32 +17,39 @@ jobs:
           git diff --exit-code --no-ext-diff crates/renderling/src/linkage
 
   renderling-clippy:
-    strategy:
-    continue-on-error: true
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-all-crates: "true"
+          cache-on-failure: "true"
       - run: cargo clippy
 
   renderling-test:
     strategy:
       fail-fast: false
       matrix:
-        label: [pi4, intel, amd]
-    continue-on-error: true
+        label: [pi4, intel, amd, Windows]
     runs-on: ${{ matrix.label }}
     steps:
       - uses: actions/checkout@v2
       - uses: actions-rs/toolchain@v1
         with:
           toolchain: stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-all-crates: "true"
+          cache-on-failure: "true"
       - run: apt-get -q -y update && apt-get -q -y install libvulkan1
-      - run: RUST_LOG=trace cargo test -j 1 -- --test-threads=1
+        if: ${{ runner.os == 'Linux' }}
+      - run: cargo test -- --test-threads=1
         env:
           RUST_BACKTRACE: 1
+          RUST_LOG: trace
       - uses: actions/upload-artifact@v4
         if: always()
         with:
