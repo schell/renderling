@@ -30,12 +30,13 @@ jobs:
       - run: cargo clippy
 
   renderling-test-windows:
-    strategy:
-      fail-fast: false
-    continue-on-error: true
     runs-on: Windows
     steps:
       - uses: actions/checkout@v2
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-all-crates: "true"
+          cache-on-failure: "true"      
       - run: rustup show
       - run: cargo test -j 1 -- --test-threads=1
         env:
@@ -48,10 +49,8 @@ jobs:
 
   renderling-test:
     strategy:
-      fail-fast: false
       matrix:
         label: [intel, amd, pi4]
-    continue-on-error: true
     runs-on: ${{ matrix.label }}
     steps:
       - uses: actions/checkout@v2
@@ -63,7 +62,6 @@ jobs:
           cache-all-crates: "true"
           cache-on-failure: "true"
       - run: apt-get -q -y update && apt-get -q -y install libvulkan1
-        if: ${{ runner.os == 'Linux' }}
       - run: cargo test -- --test-threads=1
         env:
           RUST_BACKTRACE: 1
