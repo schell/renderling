@@ -154,8 +154,11 @@ fn new_instance() -> wgpu::Instance {
         ..Default::default()
     });
 
-    let adapters = instance.enumerate_adapters(backends);
-    log::trace!("available adapters: {adapters:#?}");
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let adapters = instance.enumerate_adapters(backends);
+        log::trace!("available adapters: {adapters:#?}");
+    }
 
     instance
 }

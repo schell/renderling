@@ -328,4 +328,90 @@ mod test {
             }
         }
     }
+
+    #[test]
+    fn before_after() {
+        let before = [
+            (5.3 * 1000.0, "bloom-bloom_downsample_fragment.spv"),
+            (2.0 * 1000.0, "bloom-bloom_mix_fragment.spv"),
+            (3.7 * 1000.0, "bloom-bloom_upsample_fragment.spv"),
+            (1.3 * 1000.0, "bloom-bloom_vertex.spv"),
+            (
+                5.2 * 1000.0,
+                "convolution-brdf_lut_convolution_fragment.spv",
+            ),
+            (1.4 * 1000.0, "convolution-brdf_lut_convolution_vertex.spv"),
+            (608.0, "convolution-generate_mipmap_fragment.spv"),
+            (1.2 * 1000.0, "convolution-generate_mipmap_vertex.spv"),
+            (
+                6.5 * 1000.0,
+                "convolution-prefilter_environment_cubemap_fragment.spv",
+            ),
+            (
+                15.0 * 1000.0,
+                "convolution-prefilter_environment_cubemap_vertex.spv",
+            ),
+            (1.1 * 1000.0, "skybox-skybox_cubemap_fragment.spv"),
+            (13.0 * 1000.0, "skybox-skybox_cubemap_vertex.spv"),
+            (1.4 * 1000.0, "skybox-skybox_equirectangular_fragment.spv"),
+            (12.0 * 1000.0, "skybox-skybox_vertex.spv"),
+            (91.0 * 1000.0, "stage-renderlet_fragment.spv"),
+            (52.0 * 1000.0, "stage-renderlet_vertex.spv"),
+            (5.9 * 1000.0, "tonemapping-tonemapping_fragment.spv"),
+            (1.1 * 1000.0, "tonemapping-tonemapping_vertex.spv"),
+            (756.0, "tutorial-tutorial_implicit_isosceles_vertex.spv"),
+            (328.0, "tutorial-tutorial_passthru_fragment.spv"),
+            (28.0 * 1000.0, "tutorial-tutorial_slabbed_renderlet.spv"),
+            (9.8 * 1000.0, "tutorial-tutorial_slabbed_vertices.spv"),
+            (
+                8.8 * 1000.0,
+                "tutorial-tutorial_slabbed_vertices_no_instance.spv",
+            ),
+        ];
+        let after = [
+            (4.9 * 1000.0, "bloom-bloom_downsample_fragment.spv"),
+            (1.8 * 1000.0, "bloom-bloom_mix_fragment.spv"),
+            (3.3 * 1000.0, "bloom-bloom_upsample_fragment.spv"),
+            (1.3 * 1000.0, "bloom-bloom_vertex.spv"),
+            (
+                5.2 * 1000.0,
+                "convolution-brdf_lut_convolution_fragment.spv",
+            ),
+            (1.4 * 1000.0, "convolution-brdf_lut_convolution_vertex.spv"),
+            (608.0, "convolution-generate_mipmap_fragment.spv"),
+            (1.2 * 1000.0, "convolution-generate_mipmap_vertex.spv"),
+            (
+                6.5 * 1000.0,
+                "convolution-prefilter_environment_cubemap_fragment.spv",
+            ),
+            (
+                9.6 * 1000.0,
+                "convolution-prefilter_environment_cubemap_vertex.spv",
+            ),
+            (1.1 * 1000.0, "skybox-skybox_cubemap_fragment.spv"),
+            (8.7 * 1000.0, "skybox-skybox_cubemap_vertex.spv"),
+            (1.4 * 1000.0, "skybox-skybox_equirectangular_fragment.spv"),
+            (7.2 * 1000.0, "skybox-skybox_vertex.spv"),
+            (68.0 * 1000.0, "stage-renderlet_fragment.spv"),
+            (36.0 * 1000.0, "stage-renderlet_vertex.spv"),
+            (5.5 * 1000.0, "tonemapping-tonemapping_fragment.spv"),
+            (1.1 * 1000.0, "tonemapping-tonemapping_vertex.spv"),
+            (756.0, "tutorial-tutorial_implicit_isosceles_vertex.spv"),
+            (328.0, "tutorial-tutorial_passthru_fragment.spv"),
+            (17.0 * 1000.0, "tutorial-tutorial_slabbed_renderlet.spv"),
+            (6.1 * 1000.0, "tutorial-tutorial_slabbed_vertices.spv"),
+            (
+                5.5 * 1000.0,
+                "tutorial-tutorial_slabbed_vertices_no_instance.spv",
+            ),
+        ];
+
+        for ((before_size, before_name), (after_size, after_name)) in
+            before.into_iter().zip(after.into_iter())
+        {
+            assert_eq!(before_name, after_name);
+            let change = 100.0 * (after_size - before_size) / before_size;
+            log::info!("{change:0.02}%: {before_name}");
+        }
+    }
 }
