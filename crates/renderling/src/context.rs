@@ -83,14 +83,6 @@ impl RenderTarget {
     }
 }
 
-fn limits(adapter: &wgpu::Adapter) -> wgpu::Limits {
-    if cfg!(target_arch = "wasm32") {
-        wgpu::Limits::downlevel_defaults().using_resolution(adapter.limits())
-    } else {
-        wgpu::Limits::default()
-    }
-}
-
 async fn adapter<'window>(
     instance: &wgpu::Instance,
     compatible_surface: Option<&wgpu::Surface<'window>>,
@@ -137,7 +129,7 @@ async fn device(
         .request_device(
             &wgpu::DeviceDescriptor {
                 required_features,
-                required_limits: limits(&adapter),
+                required_limits: adapter.limits(),
                 label: None,
             },
             None,
