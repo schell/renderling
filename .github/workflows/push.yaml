@@ -21,7 +21,6 @@ jobs:
           git diff --exit-code --no-ext-diff crates/renderling/src/linkage
 
   renderling-clippy:
-    continue-on-error: true
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
@@ -34,6 +33,7 @@ jobs:
           cache-on-failure: "true"
       - run: cargo clippy
       
+  # windows w/ gpu
   renderling-test-windows:
     runs-on: Windows
     steps:
@@ -52,6 +52,7 @@ jobs:
           name: test-output-windows
           path: test_output/**/*.png
 
+  # ubuntu linux w/ software rasterizer
   renderling-test-lavapipe:
     runs-on: ubuntu-latest 
     steps: 
@@ -59,7 +60,7 @@ jobs:
       - uses: moonrepo/setup-rust@v1
         with: 
           channel: stable
-      - run: sudo apt-get -q -y update && apt-get -q -y install mesa-vulkan-drivers libvulkan1 vulkan-tools vulkan-validationlayers
+      - run: apt-get -q -y update && apt-get -q -y install mesa-vulkan-drivers libvulkan1 vulkan-tools vulkan-validationlayers
       - run: cargo test
         env: 
           RUST_BACKTRACE: 1
@@ -69,6 +70,7 @@ jobs:
           name: test-output-lavapipe
           path: test_output/**/*.png
 
+  # various linuxes w/ gpus
   renderling-test:
     strategy:
       matrix:
