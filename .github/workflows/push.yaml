@@ -1,10 +1,10 @@
+name: push
+
 on: 
   push:
     branches: 
       - main
   pull_request:
-
-name: push
 
 jobs:
   renderling-build-shaders:
@@ -52,6 +52,22 @@ jobs:
           name: test-output-windows
           path: test_output/**/*.png
 
+  renderling-test-lavapipe:
+    runs-on: ubuntu-latest 
+    steps: 
+      - uses: actions/checkout@v2
+      - uses: moonrepo/setup-rust@v1
+        with: 
+          channel: stable
+      - run: sudo apt-get -q -y update && apt-get -q -y install mesa-vulkan-drivers libvulkan1 vulkan-tools vulkan-validationlayers
+      - run: cargo test
+        env: RUST_BACKTRACE=1
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-output-lavapipe
+          path: test_output/**/*.png
+
   renderling-test:
     strategy:
       matrix:
@@ -59,14 +75,10 @@ jobs:
     runs-on: ${{ matrix.label }}
     steps:
       - uses: actions/checkout@v2
-      - uses: actions-rs/toolchain@v1
+      - uses: moonrepo/setup-rust@v1
         with:
           toolchain: stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          cache-all-crates: "true"
-          cache-on-failure: "true"
-      - run: apt-get -q -y update && apt-get -q -y install libvulkan1
+      - run: apt-get -q -y update && apt-get -q -y install libvulkan1 vulkan-tools vulkan-validationlayers
       - run: cargo test -- --test-threads=1
         env:
           RUST_BACKTRACE: 1
