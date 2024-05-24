@@ -60,7 +60,7 @@ jobs:
       - uses: moonrepo/setup-rust@v1
         with: 
           channel: stable
-      - run: apt-get -y install mesa-vulkan-drivers libvulkan1 vulkan-tools vulkan-validationlayers
+      - run: sudo apt-get -y install mesa-vulkan-drivers libvulkan1 vulkan-tools vulkan-validationlayers
       - run: cargo test
         env: 
           RUST_BACKTRACE: 1
