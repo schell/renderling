@@ -63,6 +63,7 @@ impl RenderTarget {
                     label: Some("RenderTarget texture"),
                     view_formats: &[],
                 };
+                crate::texture::size_check(width, height);
                 *texture = Arc::new(device.create_texture(&texture_desc));
             }
         }
@@ -80,14 +81,6 @@ impl RenderTarget {
             RenderTargetInner::Surface { .. } => false,
             RenderTargetInner::Texture { .. } => true,
         }
-    }
-}
-
-fn limits(adapter: &wgpu::Adapter) -> wgpu::Limits {
-    if cfg!(target_arch = "wasm32") {
-        wgpu::Limits::downlevel_defaults().using_resolution(adapter.limits())
-    } else {
-        wgpu::Limits::default()
     }
 }
 
@@ -124,20 +117,29 @@ async fn adapter<'window>(
 async fn device(
     adapter: &wgpu::Adapter,
 ) -> Result<(wgpu::Device, wgpu::Queue), wgpu::RequestDeviceError> {
+    let wanted_features = wgpu::Features::INDIRECT_FIRST_INSTANCE
+                        | wgpu::Features::MULTI_DRAW_INDIRECT
+                        //// when debugging rust-gpu shader miscompilation it's nice to have this
+                        //| wgpu::Features::SPIRV_SHADER_PASSTHROUGH
+                        // this one is a funny requirement, it seems it is needed if using storage buffers in
+                        // vertex shaders, even if those shaders are read-only
+                        | wgpu::Features::VERTEX_WRITABLE_STORAGE;
+    let supported_features = adapter.features();
+    let required_features = wanted_features.intersection(supported_features);
+    let unsupported_features = wanted_features.difference(supported_features);
+    if !unsupported_features.is_empty() {
+        log::error!("required but unsupported features: {unsupported_features:#?}");
+    }
+    let limits = adapter.limits();
+    log::info!("adapter limits: {limits:#?}");
     adapter
         .request_device(
             &wgpu::DeviceDescriptor {
-                required_features: wgpu::Features::INDIRECT_FIRST_INSTANCE
-                        | wgpu::Features::MULTI_DRAW_INDIRECT
-                        // this one is a funny requirement, it seems it is needed if using storage buffers in
-                        // vertex shaders, even if those shaders are read-only
-                        | wgpu::Features::VERTEX_WRITABLE_STORAGE, //| wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES
-                //// when debugging rust-gpu shader miscompilation it's nice to have this
-                //| wgpu::Features::SPIRV_SHADER_PASSTHROUGH
-                required_limits: limits(&adapter),
+                required_features,
+                required_limits: adapter.limits(),
                 label: None,
             },
-            None, // Trace path
+            None,
         )
         .await
 }
@@ -154,8 +156,11 @@ fn new_instance() -> wgpu::Instance {
         ..Default::default()
     });
 
-    let adapters = instance.enumerate_adapters(backends);
-    log::trace!("available adapters: {adapters:#?}");
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let adapters = instance.enumerate_adapters(backends);
+        log::trace!("available adapters: {adapters:#?}");
+    }
 
     instance
 }
@@ -189,7 +194,7 @@ async fn new_windowed_adapter_device_queue(
     } else {
         vec![fmt.add_srgb_suffix()]
     };
-    log::debug!("surface capabilities: {surface_caps:#?}");
+    log::info!("surface capabilities: {surface_caps:#?}");
     let mut surface_config = surface
         .get_default_config(&adapter, width, height)
         .context(IncompatibleSurfaceSnafu)?;
@@ -226,6 +231,7 @@ async fn new_headless_device_queue_and_target(
         view_formats: &[],
     };
     let (device, queue) = device(&adapter).await.context(CannotRequestDeviceSnafu)?;
+    crate::texture::size_check(width, height);
     let texture = Arc::new(device.create_texture(&texture_desc));
     let target = RenderTarget(RenderTargetInner::Texture { texture });
     Ok((adapter, device, queue, target))

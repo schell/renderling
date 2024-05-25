@@ -143,6 +143,7 @@ impl Atlas {
             depth_or_array_layers: 1,
         };
 
+        crate::texture::size_check(size.x, size.y);
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("atlas texture"),
             size: extent,
