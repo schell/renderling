@@ -11,9 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
-      - uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
+      - uses: moonrepo/setup-rust@v1
       - run: |
           # ensure the shader binaries were properly checked in
           rm -rf crates/renderling/src/linkage/*.spv
@@ -24,13 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
-      - uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          cache-all-crates: "true"
-          cache-on-failure: "true"
+      - uses: moonrepo/setup-rust@v1
       - run: cargo clippy
       
   # windows w/ gpu
@@ -58,8 +50,6 @@ jobs:
     steps: 
       - uses: actions/checkout@v2
       - uses: moonrepo/setup-rust@v1
-        with: 
-          channel: stable
       - run: sudo apt-get -y install mesa-vulkan-drivers libvulkan1 vulkan-tools vulkan-validationlayers
       - run: cargo test
         env: 
@@ -82,7 +72,7 @@ jobs:
         with:
           toolchain: stable
       - run: apt-get -q -y update && apt-get -q -y install libvulkan1 vulkan-tools vulkan-validationlayers
-      - run: cargo test -- --test-threads=1
+      - run: cargo test -j 1 -- --test-threads=1 --nocapture
         env:
           RUST_BACKTRACE: 1
       - uses: actions/upload-artifact@v4
