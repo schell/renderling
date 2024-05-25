@@ -4,7 +4,7 @@ Renderling is an innovative, GPU-driven renderer designed for efficient scene re
 GPU capabilities for nearly all rendering operations. 
 Utilizing Rust for shader development, it ensures memory safety and cross-platform compatibility, including web platforms. 
 The project, currently in the alpha stage, aims for rapid loading of GLTF files, handling large scenes, and supporting numerous lights. 
-Development emphasizes performance, configurability, observability and the use of modern rendering techniques like forward+ rendering and 
+Development emphasizes performance, ergonomics, observability and the use of modern rendering techniques like forward+ rendering and 
 physically based shading.
 
 <img width="912" alt="ibl_environment_test" src="https://github.com/schell/renderling/assets/24942/297d6150-64b2-45b8-9760-12b27dc8cc3e">
