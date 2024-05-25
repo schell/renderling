@@ -12,6 +12,8 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - uses: moonrepo/setup-rust@v1
+        with: 
+          target-dirs: target,shaders/target
       - run: |
           # ensure the shader binaries were properly checked in
           rm -rf crates/renderling/src/linkage/*.spv
@@ -66,7 +68,7 @@ jobs:
           path: test_output/**/*.png
 
   # various linuxes w/ physical gpus
-  renderling-test:
+  renderling-test-linux-other:
     strategy:
       matrix:
         label: [intel, amd, pi4]
@@ -76,7 +78,7 @@ jobs:
       - uses: moonrepo/setup-rust@v1
         with:
           toolchain: stable
-      - run: apt-get -q -y update && apt-get -q -y install libvulkan1 vulkan-tools vulkan-validationlayers
+      - run: apt-get -q -y update && apt-get -q -y install mesa-vulkan-drivers libvulkan1 vulkan-tools vulkan-validationlayers
       - run: cargo test -j 1 -- --test-threads=1 --nocapture
         env:
           RUST_BACKTRACE: 1
