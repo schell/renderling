@@ -126,6 +126,12 @@ async fn device(
                         | wgpu::Features::VERTEX_WRITABLE_STORAGE;
     let supported_features = adapter.features();
     let required_features = wanted_features.intersection(supported_features);
+    let unsupported_features = wanted_features.difference(supported_features);
+    if !unsupported_features.is_empty() {
+        log::error!("required but unsupported features: {unsupported_features:#?}");
+    }
+    let limits = adapter.limits();
+    log::info!("adapter limits: {limits:#?}");
     adapter
         .request_device(
             &wgpu::DeviceDescriptor {
@@ -188,7 +194,7 @@ async fn new_windowed_adapter_device_queue(
     } else {
         vec![fmt.add_srgb_suffix()]
     };
-    log::debug!("surface capabilities: {surface_caps:#?}");
+    log::info!("surface capabilities: {surface_caps:#?}");
     let mut surface_config = surface
         .get_default_config(&adapter, width, height)
         .context(IncompatibleSurfaceSnafu)?;

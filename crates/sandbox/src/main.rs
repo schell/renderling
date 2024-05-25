@@ -9,6 +9,7 @@ use winit::{
     window::{Window, WindowAttributes},
 };
 
+#[allow(dead_code)]
 struct Example {
     ctx: Context,
     window: Arc<Window>,

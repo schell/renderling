@@ -201,6 +201,7 @@ mod test {
         let _ = env_logger::builder()
             .is_test(true)
             .filter_level(log::LevelFilter::Warn)
+            .filter_module("renderling::context", log::LevelFilter::Info)
             .try_init();
     }
 
