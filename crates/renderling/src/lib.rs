@@ -200,11 +200,7 @@ mod test {
     fn init_logging() {
         let _ = env_logger::builder()
             .is_test(true)
-            .filter_level(log::LevelFilter::Info)
-            .filter_module("wgpu", log::LevelFilter::Debug)
-            .filter_module("renderling", log::LevelFilter::Trace)
-            .filter_module("crabslab", log::LevelFilter::Debug)
-            .filter_module("renderling::bloom", log::LevelFilter::Debug)
+            .filter_level(log::LevelFilter::Warn)
             .try_init();
     }
 

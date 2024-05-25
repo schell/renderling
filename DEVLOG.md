@@ -35,8 +35,9 @@ Here's a step-by-step of the strategy for adding support for _parsing_ a new ato
   This step will be different for each op and depends on the inputs and outpus of that op. 
 
 At this point the op can be parsed and WGSL (or whatever the output language) can be emitted, 
-but the module will fail to validate. This is expected because the types used in the atomic op 
-have not yet been upgraded to their atomic counterparts, which is the subject of the next PR. 
+but the module **will fail to validate**. This is expected because the types used in the atomic op 
+have not yet been upgraded to their atomic counterparts, which is the crux of the problem and also the 
+subject of the next PR. 
 
 ## Tue May 21, 2024 
 

@@ -9,6 +9,15 @@ use snafu::prelude::*;
 
 use crate::atlas::{AtlasImage, AtlasImageFormat};
 
+pub(crate) fn size_check(width: u32, height: u32) {
+    let mega_pixels = width * height;
+    if mega_pixels > 1_000_000 {
+        log::warn!(
+            "creating textures > 1_000_000 pixels is unsupported on some platforms (like rpi)"
+        );
+    }
+}
+
 #[derive(Debug, Snafu)]
 /// Enumeration of errors produced by [`Texture`].
 pub enum TextureError {
@@ -78,6 +87,7 @@ impl Texture {
             height: texture_size,
             depth_or_array_layers: 6,
         };
+        crate::texture::size_check(texture_size, texture_size);
         let cubemap_texture = device.create_texture(&wgpu::TextureDescriptor {
             label: None,
             size,
@@ -173,6 +183,7 @@ impl Texture {
             depth_or_array_layers: 1,
         };
 
+        size_check(width, height);
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label,
             size,
@@ -309,6 +320,7 @@ impl Texture {
             }
         };
 
+        size_check(size.width, size.height);
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label,
             size,
@@ -360,6 +372,7 @@ impl Texture {
             depth_or_array_layers: 1,
         };
 
+        size_check(size.width, size.height);
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label,
             size,
@@ -457,6 +470,7 @@ impl Texture {
                 | wgpu::TextureUsages::COPY_SRC,
             view_formats: &[],
         };
+        size_check(size.width, size.height);
         let texture = device.create_texture(&desc);
 
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
