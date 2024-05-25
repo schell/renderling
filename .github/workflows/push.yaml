@@ -12,9 +12,9 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - uses: moonrepo/setup-rust@v1
-        with: 
-          target-dirs: shaders/target
-          inherit-toolchain: true
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: shaders
       - run: |
           # ensure the shader binaries were properly checked in
           rm -rf crates/renderling/src/linkage/*.spv
