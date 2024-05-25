@@ -25,27 +25,7 @@ jobs:
       - uses: moonrepo/setup-rust@v1
       - run: cargo clippy
       
-  # windows w/ gpu
-  # renderling-test-windows:
-  #   runs-on: Windows
-  #   steps:
-  #     - uses: actions/checkout@v2
-  #     - uses: moonrepo/setup-rust@v1
-  #       with: 
-  #         channel: nightly-x86_64-pc-windows-msvc
-  #         targets: x86_64-pc-windows-msvc
-  #     - run: rustup show
-  #     - run: cargo test -j 1 -- --test-threads=1
-  #       env:
-  #         RUST_BACKTRACE: 1
-  #     - uses: actions/upload-artifact@v4
-  #       if: always()
-  #       with:
-  #         name: test-output-windows
-  #         path: test_output/**/*.png
-
-  # ubuntu linux w/ software rasterizer
-  renderling-test-lavapipe:
+  renderling-test-linux:
     runs-on: ubuntu-latest 
     steps: 
       - uses: actions/checkout@v2
@@ -55,9 +35,8 @@ jobs:
         env: 
           RUST_BACKTRACE: 1
       - uses: actions/upload-artifact@v4
-        if: always()
         with:
-          name: test-output-lavapipe
+          name: test-output-linux
           path: test_output/**/*.png
 
   renderling-test-macos:
@@ -83,27 +62,25 @@ jobs:
           RUST_BACKTRACE: 1
       - uses: actions/upload-artifact@v4
         with:
-          name: test-output-macos
+          name: test-output-windows
           path: test_output/**/*.png
-  # various linuxes w/ gpus
-  #renderling-test:
-  #  strategy:
-  #    matrix:
-  #      label: [intel, amd, pi4]
-  #  runs-on: ${{ matrix.label }}
-  #  steps:
-  #    - uses: actions/checkout@v2
-  #    - uses: moonrepo/setup-rust@v1
-  #      with:
-  #        toolchain: stable
-  #    - run: apt-get -q -y update && apt-get -q -y install libvulkan1 vulkan-tools vulkan-validationlayers
-  #    - run: cargo test -j 1 -- --test-threads=1 --nocapture
-  #      env:
-  #        RUST_BACKTRACE: 1
-  #    - uses: actions/upload-artifact@v4
-  #      if: always()
-  #      with:
-  #        name: test-output-${{ matrix.label }}
-  #        path: test_output/**/*.png
 
-
+  # various linuxes w/ physical gpus
+  renderling-test:
+    strategy:
+      matrix:
+        label: [intel, amd, pi4]
+    runs-on: ${{ matrix.label }}
+    steps:
+      - uses: actions/checkout@v2
+      - uses: moonrepo/setup-rust@v1
+        with:
+          toolchain: stable
+      - run: apt-get -q -y update && apt-get -q -y install libvulkan1 vulkan-tools vulkan-validationlayers
+      - run: cargo test -j 1 -- --test-threads=1 --nocapture
+        env:
+          RUST_BACKTRACE: 1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: test-output-${{ matrix.label }}
+          path: test_output/**/*.png
