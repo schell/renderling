@@ -1,15 +1,20 @@
-on: [push, pull_request]
-
 name: push
+
+on: 
+  push:
+    branches: 
+      - main
+  pull_request:
 
 jobs:
   renderling-build-shaders:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
-      - uses: actions-rs/toolchain@v1
+      - uses: moonrepo/setup-rust@v1
+      - uses: Swatinem/rust-cache@v2
         with:
-          toolchain: stable
+          workspaces: shaders
       - run: |
           # ensure the shader binaries were properly checked in
           rm -rf crates/renderling/src/linkage/*.spv
@@ -20,40 +25,63 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
-      - uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          cache-all-crates: "true"
-          cache-on-failure: "true"
+      - uses: moonrepo/setup-rust@v1
       - run: cargo clippy
+      
+  renderling-test-linux:
+    runs-on: ubuntu-latest 
+    steps: 
+      - uses: actions/checkout@v2
+      - uses: moonrepo/setup-rust@v1
+      - run: sudo apt-get -y install mesa-vulkan-drivers libvulkan1 vulkan-tools vulkan-validationlayers
+      - run: cargo test
+        env: 
+          RUST_BACKTRACE: 1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: test-output-linux
+          path: test_output/**/*.png
 
-  renderling-test:
+  renderling-test-macos:
+    runs-on: macos-latest        
+    steps:
+      - uses: actions/checkout@v2
+      - uses: moonrepo/setup-rust@v1
+      - run: cargo test
+        env:
+          RUST_BACKTRACE: 1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: test-output-macos
+          path: test_output/**/*.png
+
+  renderling-test-windows:
+    runs-on: macos-latest        
+    steps:
+      - uses: actions/checkout@v2
+      - uses: moonrepo/setup-rust@v1
+      - run: cargo test
+        env:
+          RUST_BACKTRACE: 1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: test-output-windows
+          path: test_output/**/*.png
+
+  # various linuxes w/ physical gpus
+  renderling-test-linux-other:
     strategy:
-      fail-fast: false
       matrix:
-        label: [pi4, intel, amd, Windows]
+        label: [intel, amd, pi4]
     runs-on: ${{ matrix.label }}
     steps:
       - uses: actions/checkout@v2
-      - uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-      - uses: Swatinem/rust-cache@v2
-        with:
-          cache-all-crates: "true"
-          cache-on-failure: "true"
-      - run: apt-get -q -y update && apt-get -q -y install libvulkan1
-        if: ${{ runner.os == 'Linux' }}
-      - run: cargo test -- --test-threads=1
+      - uses: moonrepo/setup-rust@v1
+      - run: apt-get -q -y update && apt-get -q -y install mesa-vulkan-drivers libvulkan1 vulkan-tools vulkan-validationlayers
+      - run: cargo test -j 1 -- --test-threads=1 --nocapture
         env:
           RUST_BACKTRACE: 1
-          RUST_LOG: trace
       - uses: actions/upload-artifact@v4
-        if: always()
         with:
           name: test-output-${{ matrix.label }}
           path: test_output/**/*.png
-
-

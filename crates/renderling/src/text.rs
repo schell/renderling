@@ -21,6 +21,7 @@ pub struct Cache {
 
 impl Cache {
     pub fn new(device: &wgpu::Device, width: u32, height: u32) -> Cache {
+        crate::texture::size_check(width, height);
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("systems::text::cache::Cache"),
             size: wgpu::Extent3d {

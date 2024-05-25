@@ -175,6 +175,11 @@ If you use it (outright or for inspiration), please consider donating.
 
 [💰 Sponsor 💝](https://github.com/sponsors/schell)
 
+### Special thanks 
+
+- James Harton ([@jimsynz](https://github.com/jimsynz/)) for donating multiple linux CI runners with 
+  physical GPUs!
+
 ### Related work & spin-off projects 
 
 Many projects were born from first solving a need within `renderling`. 

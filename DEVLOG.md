@@ -1,5 +1,84 @@
 # devlog
 
+## Sat May 25, 2024
+
+### SPIR-V atomics update
+
+[My first PR to add atomics to naga's SPIR-V frontend](https://github.com/gfx-rs/wgpu/pull/5702) is 
+just about ready. Most of the work has been about figuring out how to use the `naga` machinery.
+
+Here's a step-by-step of the strategy for adding support for _parsing_ a new atomic operation: 
+
+- Add a match for the op in the `terminator` loop of `naga::front::spv::Frontend::next_block`.
+  [Like so](https://github.com/gfx-rs/wgpu/pull/5702/files#diff-da9de19bca31f63903511682e750d4a03d5ffaae563f0a95d23b3f6d41bc0391R3963).
+  This matches whenever the parser encounters your op.
+- Ensure the current instruction is the correct size.
+  [Here](https://github.com/gfx-rs/wgpu/pull/5702/files#diff-da9de19bca31f63903511682e750d4a03d5ffaae563f0a95d23b3f6d41bc0391R3964).
+  Essentially, `inst.expect({size})?;`, where `size` can be found from the SPIR-V spec, which in this case is
+  <https://registry.khronos.org/SPIR-V/specs/unified1/SPIRV.html#OpAtomicIIncrement>.
+
+  The first value in the table is the "Word Count" of the instruction. From the spec:
+
+  > Word Count is the high-order 16 bits of word 0 of the instruction, holding its total WordCount. 
+  > If the instruction takes a variable number of operands, Word Count also says "+ variable", 
+  > after stating the minimum size of the instruction.
+
+  You can find the lowdown on the form of each instruction 
+  [here](https://registry.khronos.org/SPIR-V/specs/unified1/SPIRV.html#_instructions_3).
+
+- Then we store the op for a later pass (to be implemented later) when we'll upgrade the associated 
+  types:
+  [Here](https://github.com/gfx-rs/wgpu/pull/5702/files#diff-da9de19bca31f63903511682e750d4a03d5ffaae563f0a95d23b3f6d41bc0391R3972-R3981).
+
+- Lastly we have the real meat of the problem where we construct the types and variables in the `naga` module.
+  [Shown here](https://github.com/gfx-rs/wgpu/pull/5702/files#diff-da9de19bca31f63903511682e750d4a03d5ffaae563f0a95d23b3f6d41bc0391R3985-R4036).
+  This step will be different for each op and depends on the inputs and outpus of that op. 
+
+At this point the op can be parsed and WGSL (or whatever the output language) can be emitted, 
+but the module **will fail to validate**. This is expected because the types used in the atomic op 
+have not yet been upgraded to their atomic counterparts, which is the crux of the problem and also the 
+subject of the next PR. 
+
+## Tue May 21, 2024 
+
+### Crabslab updates
+
+I replaced the slab indexing in `crabslab` with `spirv_std::IndexUnchecked` when the `target_arch` 
+is `"spirv"`. This had the effect of DRASTICALLY reducing the nesting in the resulting WGSL code, 
+and also GREATLY reducing the size of that code. Here are some percentage changes in the SPIR-V
+shader files produced by `rust-gpu`:
+
+```
+- 7.55%: bloom-bloom_downsample_fragment.spv
+-10.00%: bloom-bloom_mix_fragment.spv
+-10.81%: bloom-bloom_upsample_fragment.spv
+  0.00%: bloom-bloom_vertex.spv
+  0.00%: convolution-brdf_lut_convolution_fragment.spv
+  0.00%: convolution-brdf_lut_convolution_vertex.spv
+  0.00%: convolution-generate_mipmap_fragment.spv
+  0.00%: convolution-generate_mipmap_vertex.spv
+  0.00%: convolution-prefilter_environment_cubemap_fragment.spv
+-36.00%: convolution-prefilter_environment_cubemap_vertex.spv
+  0.00%: skybox-skybox_cubemap_fragment.spv
+-33.08%: skybox-skybox_cubemap_vertex.spv
+  0.00%: skybox-skybox_equirectangular_fragment.spv
+-40.00%: skybox-skybox_vertex.spv
+-25.27%: stage-renderlet_fragment.spv
+-30.77%: stage-renderlet_vertex.spv
+- 6.78%: tonemapping-tonemapping_fragment.spv
+  0.00%: tonemapping-tonemapping_vertex.spv
+  0.00%: tutorial-tutorial_implicit_isosceles_vertex.spv
+  0.00%: tutorial-tutorial_passthru_fragment.spv
+-39.29%: tutorial-tutorial_slabbed_renderlet.spv
+-37.76%: tutorial-tutorial_slabbed_vertices.spv
+-37.50%: tutorial-tutorial_slabbed_vertices_no_instance.spv
+```
+
+Drastically reducing the nesting in resulting WGSL code means that `naga` shouldn't err when 
+translating the SPIR-V code into WGSL on web. This means that `renderling` works on web again!
+
+Greatly reducing the size of the SPIR-V files may eliminate the stack overflow on Windows.
+
 ## Tue May 14, 2024
 
 ### Website! 
