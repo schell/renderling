@@ -3,87 +3,67 @@
 //! This module is only enabled with the `text` cargo feature.
 use std::{
     borrow::Cow,
+    collections::HashMap,
     ops::{Deref, DerefMut},
 };
 
-use ::ab_glyph::Rect;
+use ab_glyph::Rect;
+use crabslab::Id;
 use glyph_brush::*;
 
-pub use ::ab_glyph::FontArc;
+pub use ab_glyph::FontArc;
 pub use glyph_brush::{Color, FontId, GlyphCruncher, OwnedSection, OwnedText, Section, Text};
 
-use crate::{Texture, UiVertex};
+use image::{GenericImage, ImageBuffer, Luma};
+use renderling::{
+    camera::Camera,
+    stage::{Stage, Vertex},
+};
+
+pub struct UiText {}
+
+pub struct UiTextBuilder {
+    stage: Stage,
+    camera_id: Id<Camera>,
+    fonts: HashMap<usize, FontArc>,
+}
+
+impl UiTextBuilder {
+    pub fn new(ui: &super::Ui) -> Self {
+        Self {
+            stage: ui.stage.clone(),
+            camera_id: ui.camera.id(),
+            fonts: ui.fonts.clone(),
+        }
+    }
+}
 
 /// A text cache maintained mostly by ab_glyph.
 pub struct Cache {
-    pub(crate) texture: Texture,
+    img: image::ImageBuffer<image::Luma<u8>, Vec<u8>>,
+    dirty: bool,
 }
 
 impl Cache {
-    pub fn new(device: &wgpu::Device, width: u32, height: u32) -> Cache {
-        crate::texture::size_check(width, height);
-        let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("systems::text::cache::Cache"),
-            size: wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
-            },
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::R8Unorm,
-            usage: wgpu::TextureUsages::COPY_SRC
-                | wgpu::TextureUsages::COPY_DST
-                | wgpu::TextureUsages::TEXTURE_BINDING,
-            mip_level_count: 1,
-            sample_count: 1,
-            view_formats: &[],
-        });
-
-        let texture = Texture::from_wgpu_tex(
-            device,
-            texture,
-            Some(wgpu::SamplerDescriptor {
-                address_mode_u: wgpu::AddressMode::ClampToEdge,
-                address_mode_v: wgpu::AddressMode::ClampToEdge,
-                address_mode_w: wgpu::AddressMode::ClampToEdge,
-                mag_filter: wgpu::FilterMode::Nearest,
-                min_filter: wgpu::FilterMode::Nearest,
-                mipmap_filter: wgpu::FilterMode::Nearest,
-                ..Default::default()
-            }),
-            None,
-        );
-
-        Cache { texture }
+    pub fn new(width: u32, height: u32) -> Cache {
+        Cache {
+            img: image::ImageBuffer::from_pixel(width, height, image::Luma([0])),
+            dirty: false,
+        }
     }
 
-    pub fn update(&mut self, queue: &wgpu::Queue, offset: [u16; 2], size: [u16; 2], data: &[u8]) {
-        let width = size[0] as usize;
-        let height = size[1] as usize;
+    pub fn update(&mut self, offset: [u16; 2], size: [u16; 2], data: &[u8]) {
+        let width = size[0] as u32;
+        let height = size[1] as u32;
+        let x = offset[0] as u32;
+        let y = offset[1] as u32;
 
-        queue.write_texture(
-            wgpu::ImageCopyTexture {
-                texture: &self.texture.texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d {
-                    x: u32::from(offset[0]),
-                    y: u32::from(offset[1]),
-                    z: 0,
-                },
-                aspect: wgpu::TextureAspect::All,
-            },
-            &data,
-            wgpu::ImageDataLayout {
-                offset: 0,
-                bytes_per_row: Some(width as u32),
-                rows_per_image: Some(height as u32),
-            },
-            wgpu::Extent3d {
-                width: size[0] as u32,
-                height: size[1] as u32,
-                depth_or_array_layers: 1,
-            },
-        );
+        // UNWRAP: panic on purpose
+        let source =
+            image::ImageBuffer::<image::Luma<u8>, Vec<u8>>::from_vec(width, height, data.to_vec())
+                .unwrap();
+        self.img.copy_from(&source, x, y).unwrap();
+        self.dirty = true;
     }
 }
 
@@ -124,12 +104,13 @@ impl Cache {
 /// can use [`TextData`] to create a builder, which can be used to position and
 /// scale the text entity and add other components.
 pub struct GlyphCache {
-    pub(crate) cache: Option<Cache>,
-    pub brush: GlyphBrush<Vec<UiVertex>>,
+    /// Image on the CPU or GPU used as our texture cache
+    cache: Option<Cache>,
+    brush: GlyphBrush<Vec<Vertex>>,
 }
 
 impl Deref for GlyphCache {
-    type Target = GlyphBrush<Vec<UiVertex>>;
+    type Target = GlyphBrush<Vec<Vertex>>;
 
     fn deref(&self) -> &Self::Target {
         &self.brush
@@ -142,8 +123,6 @@ impl DerefMut for GlyphCache {
     }
 }
 
-impl GlyphCache {}
-
 #[inline]
 fn to_vertex(
     glyph_brush::GlyphVertex {
@@ -152,7 +131,7 @@ fn to_vertex(
         bounds,
         extra,
     }: glyph_brush::GlyphVertex,
-) -> Vec<UiVertex> {
+) -> Vec<Vertex> {
     let gl_bounds = bounds;
 
     let mut gl_rect = Rect {
@@ -181,21 +160,21 @@ fn to_vertex(
         gl_rect.min.y = gl_bounds.min.y;
         tex_coords.min.y = tex_coords.max.y - tex_coords.height() * gl_rect.height() / old_height;
     }
-    let tl = UiVertex::default()
-        .with_position([gl_rect.min.x, gl_rect.min.y])
-        .with_uv([tex_coords.min.x, tex_coords.min.y])
+    let tl = Vertex::default()
+        .with_position([gl_rect.min.x, gl_rect.min.y, 0.0])
+        .with_uv0([tex_coords.min.x, tex_coords.min.y])
         .with_color(extra.color);
-    let tr = UiVertex::default()
-        .with_position([gl_rect.max.x, gl_rect.min.y])
-        .with_uv([tex_coords.max.x, tex_coords.min.y])
+    let tr = Vertex::default()
+        .with_position([gl_rect.max.x, gl_rect.min.y, 0.0])
+        .with_uv0([tex_coords.max.x, tex_coords.min.y])
         .with_color(extra.color);
-    let br = UiVertex::default()
-        .with_position([gl_rect.max.x, gl_rect.max.y])
-        .with_uv([tex_coords.max.x, tex_coords.max.y])
+    let br = Vertex::default()
+        .with_position([gl_rect.max.x, gl_rect.max.y, 0.0])
+        .with_uv0([tex_coords.max.x, tex_coords.max.y])
         .with_color(extra.color);
-    let bl = UiVertex::default()
-        .with_position([gl_rect.min.x, gl_rect.max.y])
-        .with_uv([tex_coords.min.x, tex_coords.max.y])
+    let bl = Vertex::default()
+        .with_position([gl_rect.min.x, gl_rect.max.y, 0.0])
+        .with_uv0([tex_coords.min.x, tex_coords.max.y])
         .with_color(extra.color);
 
     // Draw as two tris
@@ -215,25 +194,19 @@ impl GlyphCache {
     {
         self.brush.glyph_bounds(section)
     }
+
     /// Process any brushes, updating textures, etc.
     ///
     /// Returns a new mesh if the mesh needs to be updated.
     /// Returns a new texture if the texture needs to be updated.
     ///
-    /// The texture and mesh are meant to be used to build or update an object
+    /// The texture and mesh are meant to be used to build or update a `Renderlet`
     /// to display.
-    pub fn get_updated(
-        &mut self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-    ) -> (Option<Vec<UiVertex>>, Option<Texture>) {
-        let mut may_mesh: Option<Vec<UiVertex>> = None;
-        let mut may_texture: Option<Texture> = None;
+    pub fn get_updated(&mut self) -> (Option<Vec<Vertex>>, Option<ImageBuffer<Luma<u8>, Vec<u8>>>) {
+        let mut may_mesh: Option<Vec<Vertex>> = None;
         let mut cache = self.cache.take().unwrap_or_else(|| {
             let (width, height) = self.brush.texture_dimensions();
-            let cache = Cache::new(device, width, height);
-            may_texture = Some(cache.texture.clone());
-            cache
+            Cache::new(width, height)
         });
 
         let mut brush_action;
@@ -242,7 +215,7 @@ impl GlyphCache {
                 |rect, tex_data| {
                     let offset = [rect.min[0] as u16, rect.min[1] as u16];
                     let size = [rect.width() as u16, rect.height() as u16];
-                    cache.update(queue, offset, size, tex_data)
+                    cache.update(offset, size, tex_data)
                 },
                 to_vertex,
             );
@@ -269,13 +242,11 @@ impl GlyphCache {
                         new = (new_width, new_height),
                     );
 
-                    cache = Cache::new(device, new_width, new_height);
+                    cache = Cache::new(new_width, new_height);
                     self.brush.resize_texture(new_width, new_height);
-                    may_texture = Some(cache.texture.clone());
                 }
             }
         }
-        self.cache = Some(cache);
 
         match brush_action.unwrap() {
             BrushAction::Draw(all_vertices) => {
@@ -290,6 +261,12 @@ impl GlyphCache {
             }
             BrushAction::ReDraw => {}
         }
+        let may_texture = if cache.dirty {
+            Some(cache.img.clone())
+        } else {
+            None
+        };
+        self.cache = Some(cache);
 
         (may_mesh, may_texture)
     }

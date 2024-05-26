@@ -2487,6 +2487,7 @@ dependencies = [
  "ctor",
  "env_logger",
  "glyph_brush",
+ "image 0.24.9",
  "img-diff",
  "log",
  "lyon",

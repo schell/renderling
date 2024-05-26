@@ -7,6 +7,8 @@ edition = "2021"
 crabslab = {workspace = true}
 bytemuck = {workspace = true}
 glyph_brush = "0.7.8"
+image = {workspace=true}
+log = {workspace=true}
 lyon = "1.0.1"
 renderling = {path = "../renderling"}
 wgpu = {workspace = true}
@@ -15,4 +17,3 @@ wgpu = {workspace = true}
 ctor = {workspace = true}
 env_logger = {workspace = true}
 img-diff = {path = "../img-diff"}
-log = {workspace = true}

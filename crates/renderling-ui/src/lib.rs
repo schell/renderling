@@ -1,5 +1,7 @@
 //! This is an integration of the `renderling` renderer, the `lyon`
 //! path tesselator and the `glyph_brush` text rendering libraries.
+use std::collections::HashMap;
+
 use renderling::{
     camera::Camera,
     math::{UVec2, Vec4},
@@ -11,9 +13,13 @@ use renderling::{
 mod path;
 pub use path::*;
 
+mod text;
+pub use text::*;
+
 pub struct Ui {
     camera: Hybrid<Camera>,
     stage: Stage,
+    fonts: HashMap<usize, FontArc>,
 }
 
 impl Ui {
@@ -25,11 +31,19 @@ impl Ui {
             .with_lighting(false)
             .with_bloom(false);
         let camera = stage.new_value(Camera::default_ortho2d(x as f32, y as f32));
-        Ui { camera, stage }
+        Ui {
+            camera,
+            stage,
+            fonts: Default::default(),
+        }
     }
 
     pub fn new_path(&self) -> UiPathBuilder {
         UiPathBuilder::new(&self.stage, self.camera.id())
+    }
+
+    pub fn new_text(&self) -> UiTextBuilder {
+        UiTextBuilder::new(&self.stage, self.camera.id())
     }
 
     pub fn render(&mut self, view: &wgpu::TextureView) {
