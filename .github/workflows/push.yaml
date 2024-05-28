@@ -80,6 +80,10 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - uses: moonrepo/setup-rust@v1
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-all-crates: "true"
+          cache-on-failure: "true"
       - run: apt-get -q -y update && apt-get -q -y install mesa-vulkan-drivers libvulkan1 vulkan-tools vulkan-validationlayers
       - run: cargo test -j 1 -- --test-threads=1 --nocapture
         continue-on-error: ${{ matrix.label == 'pi4' }}
