@@ -11,6 +11,7 @@ image = {workspace=true}
 log = {workspace=true}
 lyon = "1.0.1"
 renderling = {path = "../renderling"}
+rustc-hash = {workspace = true}
 wgpu = {workspace = true}
 
 [dev-dependencies]

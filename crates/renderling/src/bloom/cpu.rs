@@ -404,7 +404,7 @@ impl Bloom {
     pub fn new(device: &wgpu::Device, queue: &wgpu::Queue, hdr_texture: &Texture) -> Self {
         let resolution = UVec2::new(hdr_texture.width(), hdr_texture.height());
 
-        let mut slab = SlabAllocator::default();
+        let slab = SlabAllocator::default();
         let downsample_pixel_sizes = slab.new_array(
             config_resolutions(resolution).map(|r| 1.0 / Vec2::new(r.x as f32, r.y as f32)),
         );

@@ -1,22 +1,21 @@
 //! Path and builder.
-use crabslab::Id;
 use lyon::{
     path::traits::PathBuilder,
     tessellation::{BuffersBuilder, FillOptions, FillTessellator, FillVertex, VertexBuffers},
 };
 use renderling::{
-    camera::Camera,
     math::{Vec2, Vec3, Vec4},
     slab::{GpuArray, Hybrid},
-    stage::{Renderlet, Stage, Vertex},
-    transform::Transform,
+    stage::{Renderlet, Vertex},
 };
+
+use crate::{Ui, UiTransform};
 
 pub struct UiPath {
     pub fill_vertices: GpuArray<Vertex>,
     pub fill_indices: GpuArray<u32>,
-    pub transform: Hybrid<Transform>,
-    pub renderlets: Vec<Hybrid<Renderlet>>,
+    pub transform: UiTransform,
+    pub fill_renderlet: Option<Hybrid<Renderlet>>,
 }
 
 struct PathAttributes {
@@ -58,8 +57,7 @@ impl PathAttributes {
 }
 
 pub struct UiPathBuilder {
-    stage: Stage,
-    camera_id: Id<Camera>,
+    ui: Ui,
     attributes: PathAttributes,
     inner: lyon::path::BuilderWithAttributes,
 }
@@ -116,10 +114,9 @@ fn vec2_to_point(Vec2 { x, y }: Vec2) -> lyon::geom::Point<f32> {
 }
 
 impl UiPathBuilder {
-    pub fn new(stage: &Stage, camera_id: Id<Camera>) -> Self {
+    pub fn new(ui: &Ui) -> Self {
         Self {
-            stage: stage.clone(),
-            camera_id,
+            ui: ui.clone(),
             attributes: PathAttributes::default(),
             inner: lyon::path::Path::builder_with_attributes(PathAttributes::NUM_ATTRIBUTES),
         }
@@ -171,28 +168,32 @@ impl UiPathBuilder {
                 }),
             )
             .unwrap();
-        let vertices = self.stage.new_array(std::mem::take(&mut geometry.vertices));
-        let indices = self.stage.new_array(
+        let vertices = self
+            .ui
+            .stage
+            .new_array(std::mem::take(&mut geometry.vertices));
+        let indices = self.ui.stage.new_array(
             std::mem::take(&mut geometry.indices)
                 .into_iter()
                 .map(|u| u as u32),
         );
-        let transform = self.stage.new_value(Transform::default());
-        let fill_renderlet = self.stage.new_value(Renderlet {
+        let fill_renderlet = self.ui.stage.new_value(Renderlet {
             vertices_array: vertices.array(),
             indices_array: indices.array(),
-            camera_id: self.camera_id,
-            transform_id: transform.id(),
+            camera_id: self.ui.camera.id(),
             ..Default::default()
         });
 
-        self.stage.add_renderlet(&fill_renderlet);
+        self.ui.stage.add_renderlet(&fill_renderlet);
+
+        let transform = self.ui.new_transform(vec![fill_renderlet.id()]);
+        fill_renderlet.modify(|r| r.transform_id = transform.id());
 
         UiPath {
             fill_vertices: vertices.into_gpu_only(),
             fill_indices: indices.into_gpu_only(),
             transform,
-            renderlets: vec![fill_renderlet],
+            fill_renderlet: Some(fill_renderlet),
         }
     }
 }

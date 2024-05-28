@@ -3,37 +3,130 @@
 //! This module is only enabled with the `text` cargo feature.
 use std::{
     borrow::Cow,
-    collections::HashMap,
     ops::{Deref, DerefMut},
 };
 
 use ab_glyph::Rect;
-use crabslab::Id;
 use glyph_brush::*;
 
 pub use ab_glyph::FontArc;
-pub use glyph_brush::{Color, FontId, GlyphCruncher, OwnedSection, OwnedText, Section, Text};
+pub use glyph_brush::{Section, Text};
 
-use image::{GenericImage, ImageBuffer, Luma};
+use image::{DynamicImage, GenericImage, ImageBuffer, Luma, Rgba};
 use renderling::{
-    camera::Camera,
-    stage::{Stage, Vertex},
+    atlas::AtlasTexture,
+    math::{Vec2, Vec4},
+    pbr::Material,
+    slab::{GpuArray, Hybrid},
+    stage::{Renderlet, Vertex},
 };
 
-pub struct UiText {}
+use crate::{Ui, UiTransform};
+
+pub struct UiText {
+    pub cache: GlyphCache,
+    pub vertices: GpuArray<Vertex>,
+    pub transform: UiTransform,
+    pub texture: Hybrid<AtlasTexture>,
+    pub material: Hybrid<Material>,
+    pub renderlet: Hybrid<Renderlet>,
+    pub bounds: (Vec2, Vec2),
+}
 
 pub struct UiTextBuilder {
-    stage: Stage,
-    camera_id: Id<Camera>,
-    fonts: HashMap<usize, FontArc>,
+    ui: Ui,
+    material: Material,
+    bounds: (Vec2, Vec2),
+    brush: GlyphBrush<Vec<Vertex>>,
 }
 
 impl UiTextBuilder {
-    pub fn new(ui: &super::Ui) -> Self {
+    pub fn new(ui: &Ui) -> Self {
         Self {
-            stage: ui.stage.clone(),
+            ui: ui.clone(),
+            material: Material::default(),
+            brush: GlyphBrushBuilder::using_fonts(ui.get_fonts()).build(),
+            bounds: (Vec2::ZERO, Vec2::ZERO),
+        }
+    }
+
+    pub fn set_color(&mut self, color: impl Into<Vec4>) -> &mut Self {
+        self.material.albedo_factor = color.into();
+        self
+    }
+
+    pub fn with_color(mut self, color: impl Into<Vec4>) -> Self {
+        self.set_color(color);
+        self
+    }
+
+    pub fn set_section<'a>(
+        &mut self,
+        section: impl Into<Cow<'a, Section<'a, Extra>>>,
+    ) -> &mut Self {
+        self.brush = self.brush.to_builder().build();
+        let section: Cow<'a, Section<'a, Extra>> = section.into();
+        if let Some(bounds) = self.brush.glyph_bounds(section.clone()) {
+            let min = Vec2::new(bounds.min.x, bounds.min.y);
+            let max = Vec2::new(bounds.max.x, bounds.max.y);
+            self.bounds = (min, max);
+        }
+        self.brush.queue(section);
+        self
+    }
+
+    pub fn with_section<'a>(mut self, section: impl Into<Cow<'a, Section<'a, Extra>>>) -> Self {
+        self.set_section(section);
+        self
+    }
+
+    pub fn build(self) -> UiText {
+        let UiTextBuilder {
+            mut ui,
+            mut material,
+            bounds,
+            brush,
+        } = self;
+        let mut cache = GlyphCache { cache: None, brush };
+
+        let (maybe_mesh, maybe_img) = cache.get_updated();
+        let mesh = maybe_mesh.unwrap_or_default();
+        let luma_img = maybe_img.unwrap_or_default();
+        let img = DynamicImage::from(ImageBuffer::from_fn(
+            luma_img.width(),
+            luma_img.height(),
+            |x, y| {
+                let luma = luma_img.get_pixel(x, y);
+                Rgba([255, 255, 255, luma.0[0]])
+            },
+        ));
+
+        // UNWRAP: panic on purpose
+        let texture = ui.stage.add_image(img).unwrap();
+        let texture = ui.stage.new_value(texture);
+        material.albedo_texture_id = texture.id();
+
+        let vertices = ui.stage.new_array(mesh);
+        let material = ui.stage.new_value(material);
+        let renderlet = ui.stage.new_value(Renderlet {
+            vertices_array: vertices.array(),
             camera_id: ui.camera.id(),
-            fonts: ui.fonts.clone(),
+            material_id: material.id(),
+            ..Default::default()
+        });
+        ui.stage.add_renderlet(&renderlet);
+
+        let transform = ui.new_transform(vec![renderlet.id()]);
+        renderlet.modify(|r| r.transform_id = transform.id());
+
+        UiText {
+            cache,
+            bounds,
+            vertices: vertices.into_gpu_only(),
+            transform,
+            texture,
+            material,
+            renderlet,
         }
     }
 }
@@ -68,41 +161,6 @@ impl Cache {
 }
 
 /// A cache of glyphs.
-///
-/// Text is required to come from a cache. Creation is easy and only requires
-/// a vector of the fonts to be used in sections.
-///
-/// ``` ignore
-/// let font = fs::load_font("my_font.ttf").await?;
-/// let mut cache = GlyphCache::new(vec![font]);
-/// cache.brush.queue(
-///     Section::default()
-///         .add_text(
-///             Text::new("Here is some text.\n")
-///                 .with_scale(64.0)
-///                 .with_color(Color::rgb(0x00, 0x00, 0x00)),
-///         )
-///         .add_text(
-///             Text::new("Here is text in a new color\n")
-///                 .with_scale(64.0)
-///                 .with_color(Color::rgb(255, 255, 0)),
-///         )
-///         .add_text(
-///             Text::new("(and variable size)\n")
-///                 .with_scale(32.0)
-///                 .with_color(Color::rgb(255, 0, 255))
-///         )
-///         .add_text(
-///             Text::new("...and variable transparency\n...and word wrap")
-///                 .with_scale(64.0)
-///                 .with_color(Color::rgba(0x33, 0x33, 0x33, 127)),
-///         )
-/// );
-/// ```
-///
-/// Once you have a `GlyphCache` that has text [`queue`](GlyphBrush::queue)d you
-/// can use [`TextData`] to create a builder, which can be used to position and
-/// scale the text entity and add other components.
 pub struct GlyphCache {
     /// Image on the CPU or GPU used as our texture cache
     cache: Option<Cache>,
@@ -183,18 +241,6 @@ fn to_vertex(
 }
 
 impl GlyphCache {
-    pub fn new(fonts: Vec<FontArc>) -> Self {
-        let brush = GlyphBrushBuilder::using_fonts(fonts).build();
-        GlyphCache { cache: None, brush }
-    }
-
-    pub fn bounds<'a, S>(&mut self, section: S) -> Option<ab_glyph::Rect>
-    where
-        S: Into<Cow<'a, Section<'a, Extra>>>,
-    {
-        self.brush.glyph_bounds(section)
-    }
-
     /// Process any brushes, updating textures, etc.
     ///
     /// Returns a new mesh if the mesh needs to be updated.
@@ -269,5 +315,117 @@ impl GlyphCache {
         self.cache = Some(cache);
 
         (may_mesh, may_texture)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use glyph_brush::Section;
+    use renderling::Context;
+
+    use crate::Ui;
+
+    use super::*;
+
+    #[test]
+    fn can_display_uitext() {
+        log::info!("{:#?}", std::env::current_dir());
+        let bytes =
+            std::fs::read("../../fonts/Recursive Mn Lnr St Med Nerd Font Complete.ttf").unwrap();
+        let font = FontArc::try_from_vec(bytes).unwrap();
+
+        let ctx = Context::headless(500, 500);
+        let mut ui = Ui::new(&ctx);
+        let _font_id = ui.add_font(font);
+        let _text = ui
+            .new_text()
+            .with_section(
+                Section::default()
+                    .add_text(
+                        Text::new("Here is some text.\n")
+                            .with_scale(64.0)
+                            .with_color([0.0, 0.0, 0.0, 1.0]),
+                    )
+                    .add_text(
+                        Text::new("Here is text in a new color\n")
+                            .with_scale(64.0)
+                            .with_color([1.0, 1.0, 0.0, 1.0]),
+                    )
+                    .add_text(
+                        Text::new("(and variable size)\n")
+                            .with_scale(32.0)
+                            .with_color([1.0, 0.0, 1.0, 1.0]),
+                    )
+                    .add_text(
+                        Text::new("...and variable transparency\n...and word wrap")
+                            .with_scale(64.0)
+                            .with_color([0.2, 0.2, 0.2, 0.5]),
+                    ),
+            )
+            .build();
+
+        let frame = ctx.get_next_frame().unwrap();
+        ui.render(&frame.view());
+        let img = frame.read_image().unwrap();
+        img_diff::save("ui/text/can_display.png", img);
+    }
+
+    #[test]
+    /// Tests that if we overlay text (which has transparency) on top of other objects, it
+    /// renders the transparency correctly.
+    fn text_overlayed() {
+        log::info!("{:#?}", std::env::current_dir());
+        let bytes =
+            std::fs::read("../../fonts/Recursive Mn Lnr St Med Nerd Font Complete.ttf").unwrap();
+        let font = FontArc::try_from_vec(bytes).unwrap();
+
+        let ctx = Context::headless(500, 500);
+        let mut ui = Ui::new(&ctx);
+        let _font_id = ui.add_font(font);
+        let text1 = "Voluptas magnam sint et incidunt. Aliquam praesentium voluptas ut nemo laboriosam. Dicta qui et dicta.";
+        let text2 = "Inventore impedit quo ratione ullam blanditiis soluta aliquid. Enim molestiae eaque ab commodi et.\nQuidem ex tempore ipsam. Incidunt suscipit aut commodi cum atque voluptate est.";
+        let text = ui
+            .new_text()
+            .with_section(
+                Section::default().add_text(
+                    Text::new(text1)
+                        .with_scale(24.0)
+                        .with_color([0.0, 0.0, 0.0, 1.0]),
+                ),
+            )
+            .with_section(
+                Section::default()
+                    .add_text(
+                        Text::new(text2)
+                            .with_scale(24.0)
+                            .with_color([0.0, 0.0, 0.0, 1.0]),
+                    )
+                    .with_bounds((400.0, f32::INFINITY)),
+            )
+            .build();
+
+        let path = ui
+            .new_path()
+            .with_fill_color([1.0, 1.0, 0.0, 1.0])
+            .with_rectangle(text.bounds.0, text.bounds.1)
+            .build();
+
+        // move the path to (50, 50)
+        path.transform.set_translation(Vec2::splat(50.0));
+        // move it to the back
+        path.transform.set_z(-0.1);
+
+        // ensure we render the path behind the text
+        ui.stage.reorder_renderlets([
+            path.fill_renderlet.as_ref().unwrap().id(),
+            text.renderlet.id(),
+        ]);
+
+        let frame = ctx.get_next_frame().unwrap();
+        ui.render(&frame.view());
+        let img = frame.read_image().unwrap();
+        img_diff::save("ui/text/multiple_sections.png", img);
+        let depth_img = ui.stage.get_depth_texture().read_image().unwrap();
+        img_diff::save("ui/text/multiple_sections_depth.png", depth_img);
     }
 }
