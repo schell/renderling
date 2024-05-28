@@ -61,6 +61,18 @@ Just pro-cons on tech choices and little things I don't want to forget whil impl
 * atomics are not supported in the Naga SPIRV frontend, which limits the capabilities of compute
   - see [the related Naga issue](https://github.com/gfx-rs/naga/issues/2301)
 
+# glam
+
+## pros
+
+* lots of other graphics libs use it
+* speed
+
+## cons
+
+* different types on SIMD, with different structures - like Vec4 is a struct on my macos
+  but it's a tuple on SIMD linux.
+
 # more things to figure out
 
 * bindless - wth exactly is it
