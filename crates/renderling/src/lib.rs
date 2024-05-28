@@ -202,6 +202,7 @@ mod test {
             .is_test(true)
             .filter_level(log::LevelFilter::Warn)
             .filter_module("renderling::context", log::LevelFilter::Info)
+            .filter_module("renderling", log::LevelFilter::Debug)
             .try_init();
     }
 
@@ -889,7 +890,7 @@ mod test {
         ]);
 
         let root_node = stage.new_nested_transform();
-        root_node.set_local_transform(Transform {
+        root_node.set(Transform {
             scale: Vec3::new(25.0, 25.0, 1.0),
             ..Default::default()
         });
@@ -901,15 +902,15 @@ mod test {
         };
 
         let cyan_node = NestedTransform::new(&mut stage);
-        cyan_node.set_local_transform(offset);
+        cyan_node.set(offset);
         println!("cyan_node: {:#?}", cyan_node.get_global_transform());
 
         let yellow_node = NestedTransform::new(&mut stage);
-        yellow_node.set_local_transform(offset);
+        yellow_node.set(offset);
         println!("yellow_node: {:#?}", yellow_node.get_global_transform());
 
         let red_node = NestedTransform::new(&mut stage);
-        red_node.set_local_transform(offset);
+        red_node.set(offset);
         println!("red_node: {:#?}", red_node.get_global_transform());
 
         root_node.add_child(&cyan_node);

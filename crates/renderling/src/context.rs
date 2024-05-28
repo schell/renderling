@@ -105,7 +105,7 @@ async fn adapter<'window>(
         .await
         .context(CannotCreateAdaptorSnafu)?;
     let info = adapter.get_info();
-    log::trace!(
+    log::info!(
         "using adapter: '{}' backend:{:?} driver:'{}'",
         info.name,
         info.backend,

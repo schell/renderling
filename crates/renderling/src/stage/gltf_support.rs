@@ -761,7 +761,7 @@ impl GltfDocument {
                     rotation: Quat::from_array(*rotation),
                     scale: Vec3::from_array(*scale),
                 };
-                transform.set_local_transform(t);
+                transform.set(t);
                 for node in node.children() {
                     let child_transform =
                         transform_for_node(nesting_level + 1, stage, cache, &node);
@@ -770,7 +770,7 @@ impl GltfDocument {
                 cache.insert(node.index(), transform.clone());
                 transform
             };
-            let t = nt.get_local_transform();
+            let t = nt.get();
             log::debug!(
                 "{padding}{} {:?} {:?} {:?} {:?}",
                 node.index(),

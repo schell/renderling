@@ -4,6 +4,7 @@
 //! It is used to stage [`Renderlet`]s for rendering.
 use core::sync::atomic::Ordering;
 use crabslab::{Array, Id, Slab, SlabItem};
+use rustc_hash::FxHashMap;
 use snafu::Snafu;
 use std::{
     ops::{Deref, DerefMut},
@@ -159,7 +160,7 @@ impl Stage {
         let (device, queue) = ctx.get_device_and_queue_owned();
         let resolution @ UVec2 { x: w, y: h } = ctx.get_size();
         let atlas = Atlas::empty(&device, &queue);
-        let mut mngr = SlabAllocator::default();
+        let mngr = SlabAllocator::default();
         let pbr_config = mngr.new_value(PbrConfig {
             atlas_size: atlas.get_size(),
             resolution,
@@ -285,6 +286,39 @@ impl Stage {
     pub fn with_size(self, size: UVec2) -> Self {
         self.set_size(size);
         self
+    }
+
+    /// Add an image to the set of atlas images.
+    ///
+    /// Adding an image can be quite expensive, as it requires repacking all previous images.
+    /// For that reason it's better to use [`Stage::set_images`] if you have all the images
+    /// beforehand.
+    pub fn add_image(&self, image: impl Into<AtlasImage>) -> Result<AtlasTexture, StageError> {
+        let preview = self
+            .atlas
+            .repack_preview(&self.device, Some(image.into()))?;
+        self.atlas.repack(&self.device, &self.queue, preview)?;
+
+        let size = self.atlas.get_size();
+        // The textures bindgroup will have to be remade
+        let _ = self.textures_bindgroup.lock().unwrap().take();
+        // The atlas size must be reset
+        self.pbr_config.modify(|cfg| cfg.atlas_size = size);
+
+        let texture = self
+            .atlas
+            .frames()
+            .into_iter()
+            .last()
+            .map(|(i, (offset_px, size_px))| AtlasTexture {
+                offset_px,
+                size_px,
+                atlas_index: i,
+                ..Default::default()
+            })
+            .unwrap();
+
+        Ok(texture)
     }
 
     /// Set the images to use for the atlas.
@@ -487,6 +521,31 @@ impl Stage {
         }
     }
 
+    /// Re-order the renderlets.
+    ///
+    /// This determines the order in which they are drawn each frame.
+    ///
+    /// If the `order` iterator is missing any renderlet ids, those missing renderlets
+    /// will be drawn _before_ the ordered ones, in no particular order.
+    pub fn reorder_renderlets(&self, order: impl IntoIterator<Item = Id<Renderlet>>) {
+        // UNWRAP: panic on purpose
+        let mut renderlets = self.draws.write().unwrap();
+        match renderlets.deref_mut() {
+            StageDrawStrategy::Direct(rs) => {
+                let mut ordered = vec![];
+                let mut m =
+                    FxHashMap::from_iter(std::mem::take(rs).into_iter().map(|r| (r.id(), r)));
+                for id in order.into_iter() {
+                    if let Some(renderlet) = m.remove(&id) {
+                        ordered.push(renderlet);
+                    }
+                }
+                rs.extend(m.into_values());
+                rs.extend(ordered);
+            }
+        }
+    }
+
     /// Returns a clone of the current depth texture.
     pub fn get_depth_texture(&self) -> DepthTexture {
         DepthTexture {
@@ -505,8 +564,8 @@ impl Stage {
         Ok(Skybox::new(&self.device, &self.queue, hdr, camera_id))
     }
 
-    pub fn new_nested_transform(&mut self) -> NestedTransform {
-        NestedTransform::new(&mut self.mngr)
+    pub fn new_nested_transform(&self) -> NestedTransform {
+        NestedTransform::new(&self.mngr)
     }
 
     fn tick_internal(&mut self) -> Arc<wgpu::Buffer> {
@@ -691,8 +750,6 @@ pub struct NestedTransform {
 
     children: Arc<RwLock<Vec<NestedTransform>>>,
     parent: Arc<RwLock<Option<NestedTransform>>>,
-
-    forgotten: Arc<AtomicBool>,
 }
 
 impl Drop for NestedTransform {
@@ -725,6 +782,10 @@ impl core::fmt::Debug for NestedTransform {
 }
 
 impl UpdatesSlab for NestedTransform {
+    fn id(&self) -> usize {
+        self.notifier_index
+    }
+
     fn u32_array(&self) -> Array<u32> {
         Array::new(
             self.global_transform_id.inner(),
@@ -733,7 +794,7 @@ impl UpdatesSlab for NestedTransform {
     }
 
     fn strong_count(&self) -> usize {
-        Arc::strong_count(&self.forgotten)
+        Arc::strong_count(&self.local_transform)
     }
 
     fn get_update(&self) -> Vec<SlabUpdate> {
@@ -746,7 +807,7 @@ impl UpdatesSlab for NestedTransform {
 }
 
 impl NestedTransform {
-    pub fn new(mngr: &mut SlabAllocator<impl IsBuffer>) -> Self {
+    pub fn new(mngr: &SlabAllocator<impl IsBuffer>) -> Self {
         let id = mngr.allocate::<Transform>();
         let notifier_index = mngr.next_update_k();
 
@@ -759,8 +820,6 @@ impl NestedTransform {
 
             children: Default::default(),
             parent: Default::default(),
-
-            forgotten: Arc::new(false.into()),
         };
 
         mngr.insert_update_source(notifier_index, nested.clone());
@@ -777,26 +836,32 @@ impl NestedTransform {
         }
     }
 
-    pub fn modify_local_transform(&self, f: impl Fn(&mut Transform)) {
+    /// Modify the local transform.
+    ///
+    /// This automatically applies the local transform to the global transform.
+    pub fn modify(&self, f: impl Fn(&mut Transform)) {
         // UNWRAP: panic on purpose
         let mut local_guard = self.local_transform.write().unwrap();
         f(&mut local_guard);
         self.mark_dirty();
     }
 
-    pub fn set_local_transform(&self, transform: Transform) {
-        self.modify_local_transform(move |t| {
+    /// Set the local transform.
+    ///
+    /// This automatically applies the local transform to the global transform.
+    pub fn set(&self, transform: Transform) {
+        self.modify(move |t| {
             *t = transform;
         });
     }
 
-    pub fn get_local_transform(&self) -> Transform {
+    pub fn get(&self) -> Transform {
         *self.local_transform.read().unwrap()
     }
 
     pub fn get_global_transform(&self) -> Transform {
         let maybe_parent_guard = self.parent.read().unwrap();
-        let transform = self.get_local_transform();
+        let transform = self.get();
         let parent_transform = maybe_parent_guard
             .as_ref()
             .map(|parent| parent.get_global_transform())
@@ -874,12 +939,12 @@ mod test {
         // Setup a hierarchy of transforms
         let root = NestedTransform::new(&mut slab);
         let child = NestedTransform::new(&mut slab);
-        child.set_local_transform(Transform {
+        child.set(Transform {
             translation: Vec3::new(1.0, 0.0, 0.0),
             ..Default::default()
         });
         let grandchild = NestedTransform::new(&mut slab);
-        grandchild.set_local_transform(Transform {
+        grandchild.set(Transform {
             translation: Vec3::new(1.0, 0.0, 0.0),
             ..Default::default()
         });

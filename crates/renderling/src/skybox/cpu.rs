@@ -177,7 +177,7 @@ impl Skybox {
     ) -> Self {
         log::trace!("creating skybox");
 
-        let mut slab = SlabAllocator::<wgpu::Buffer>::default();
+        let slab = SlabAllocator::<wgpu::Buffer>::default();
 
         let proj = Mat4::perspective_rh(std::f32::consts::FRAC_PI_2, 1.0, 0.1, 10.0);
         let camera = slab.new_value(Camera::default().with_projection(proj));

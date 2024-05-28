@@ -724,17 +724,17 @@ impl Animator {
             if let Some(transform) = self.nodes.get(&node_index) {
                 match property {
                     TweenProperty::Translation(translation) => {
-                        transform.modify_local_transform(|t| {
+                        transform.modify(|t| {
                             t.translation = translation;
                         });
                     }
                     TweenProperty::Rotation(rotation) => {
-                        transform.modify_local_transform(|t| {
+                        transform.modify(|t| {
                             t.rotation = rotation;
                         });
                     }
                     TweenProperty::Scale(scale) => {
-                        transform.modify_local_transform(|t| {
+                        transform.modify(|t| {
                             t.scale = scale;
                         });
                     }

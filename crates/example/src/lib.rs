@@ -87,7 +87,7 @@ pub struct App {
 
 impl App {
     pub fn new(r: &Context) -> Self {
-        let mut stage = r
+        let stage = r
             .new_stage()
             .with_background_color(DARK_BLUE_BG_COLOR)
             .with_bloom_mix_strength(0.5)

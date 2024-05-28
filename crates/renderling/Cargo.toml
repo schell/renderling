@@ -108,7 +108,7 @@ gltf = {workspace = true, optional = true}
 half = "2.3"
 image = {workspace = true, features = ["hdr"]}
 log = {workspace = true}
-rustc-hash = "1.1"
+rustc-hash = {workspace = true}
 send_wrapper = "0.6"
 serde_json = {workspace = true, optional = true}
 snafu = {workspace = true}
