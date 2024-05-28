@@ -16,7 +16,7 @@ glyph_brush = "0.7.8"
 image = {workspace=true}
 log = {workspace=true}
 lyon = "1.0.1"
-renderling = {path = "../renderling"}
+renderling = {version = "0.4.5", path = "../renderling"}
 rustc-hash = {workspace = true}
 wgpu = {workspace = true}
 

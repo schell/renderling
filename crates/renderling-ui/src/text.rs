@@ -367,7 +367,7 @@ mod test {
         let frame = ctx.get_next_frame().unwrap();
         ui.render(&frame.view());
         let img = frame.read_image().unwrap();
-        img_diff::save("ui/text/can_display.png", img);
+        img_diff::assert_img_eq("ui/text/can_display.png", img);
     }
 
     #[test]
@@ -424,8 +424,8 @@ mod test {
         let frame = ctx.get_next_frame().unwrap();
         ui.render(&frame.view());
         let img = frame.read_image().unwrap();
-        img_diff::save("ui/text/multiple_sections.png", img);
+        img_diff::assert_img_eq("ui/text/overlay.png", img);
         let depth_img = ui.stage.get_depth_texture().read_image().unwrap();
-        img_diff::save("ui/text/multiple_sections_depth.png", depth_img);
+        img_diff::assert_img_eq("ui/text/overlay_depth.png", depth_img);
     }
 }
