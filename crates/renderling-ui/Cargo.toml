@@ -7,7 +7,7 @@ repository = "https://github.com/schell/renderling"
 license = "MIT OR Apache-2.0"
 keywords = ["game", "graphics", "shader", "rendering"]
 categories = ["rendering", "game-development", "graphics"]
-readme = "../README.md"
+readme = "README.md"
 
 [dependencies]
 crabslab = {workspace = true}
