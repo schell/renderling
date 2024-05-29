@@ -1,22 +1,24 @@
-//! `renderling-ui` is a "GPU driven" 2d renderer with a focus on simplicity and ease of use.
+//! `renderling-ui` is a "GPU driven" 2d renderer with a focus on simplicity and
+//! ease of use.
 //!
 //! This library is meant to be used with its parent [`renderling`].
 //!
 //! # Getting Started
-//! First we create a context, then we create a [`Ui`], which we can use to "stage" our
-//! paths, text, etc:
+//! First we create a context, then we create a [`Ui`], which we can use to
+//! "stage" our paths, text, etc:
 //!
 //! ```rust
-//! use renderling::{Context, math::Vec2};
+//! use renderling::{math::Vec2, Context};
 //! use renderling_ui::Ui;
 //!
 //! let ctx = Context::headless(100, 100);
 //! let mut ui = Ui::new(&ctx);
-
+//!
 //! let _path = ui
 //!     .new_path()
+//!     .with_stroke_color([1.0, 1.0, 0.0, 1.0])
 //!     .with_rectangle(Vec2::splat(10.0), Vec2::splat(60.0))
-//!     .build();
+//!     .stroke();
 //!
 //! let frame = ctx.get_next_frame().unwrap();
 //! ui.render(&frame.view());
@@ -200,9 +202,8 @@ impl Ui {
 
 #[cfg(test)]
 mod test {
-    use renderling::math::Vec2;
-
-    use super::*;
+    use itertools::Itertools;
+    use renderling::{color::rgb_hex_color, math::Vec4};
 
     #[ctor::ctor]
     fn init_logging() {
@@ -215,18 +216,29 @@ mod test {
             .try_init();
     }
 
-    #[test]
-    fn can_build_path_sanity() {
-        let ctx = Context::headless(100, 100);
-        let mut ui = Ui::new(&ctx);
-        let _path = ui
-            .new_path()
-            .with_rectangle(Vec2::splat(10.0), Vec2::splat(60.0))
-            .build();
+    pub struct Colors<const N: usize>(
+        std::iter::Cycle<itertools::Permutations<std::array::IntoIter<Vec4, N>>>,
+    );
 
-        let frame = ctx.get_next_frame().unwrap();
-        ui.render(&frame.view());
-        let img = frame.read_image().unwrap();
-        img_diff::save("ui/path/sanity.png", img);
+    pub fn cute_beach_palette() -> [Vec4; 4] {
+        [
+            rgb_hex_color(0x6DC5D1),
+            rgb_hex_color(0xFDE49E),
+            rgb_hex_color(0xFEB941),
+            rgb_hex_color(0xDD761C),
+        ]
+    }
+
+    impl<const N: usize> Colors<N> {
+        pub fn from_array(colors: [Vec4; N]) -> Self {
+            Colors(colors.into_iter().permutations(2).cycle())
+        }
+
+        pub fn next_color(&mut self) -> (Vec4, Vec4) {
+            match self.0.next().unwrap().as_slice() {
+                [a, b] => (*a, *b),
+                _ => unreachable!("no more colors!"),
+            }
+        }
     }
 }

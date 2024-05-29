@@ -24,3 +24,4 @@ wgpu = {workspace = true}
 ctor = {workspace = true}
 env_logger = {workspace = true}
 img-diff = {path = "../img-diff"}
+itertools = "0.13"
