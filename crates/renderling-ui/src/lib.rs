@@ -119,7 +119,7 @@ impl Ui {
             .with_background_color(Vec4::ONE)
             .with_lighting(false)
             .with_bloom(false)
-            .with_multisample_count(4);
+            .with_msaa_sample_count(4);
         let camera = stage.new_value(Camera::default_ortho2d(x as f32, y as f32));
         Ui {
             camera,
@@ -127,6 +127,17 @@ impl Ui {
             fonts: Default::default(),
             transforms: Default::default(),
         }
+    }
+
+    fn set_antialiasing(&self, antialiasing_is_on: bool) -> &Self {
+        let sample_count = if antialiasing_is_on { 4 } else { 1 };
+        self.stage.set_msaa_sample_count(sample_count);
+        self
+    }
+
+    fn with_antialiasing(self, antialiasing_is_on: bool) -> Self {
+        self.set_antialiasing(antialiasing_is_on);
+        self
     }
 
     fn new_transform(&self, renderlet_ids: Vec<Id<Renderlet>>) -> UiTransform {

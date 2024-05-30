@@ -351,14 +351,7 @@ impl UiPathBuilder {
 
 #[cfg(test)]
 mod test {
-    use std::f32::consts::PI;
-
-    use itertools::Itertools;
-    use renderling::{
-        color::rgb_hex_color,
-        math::{Vec2, Vec4},
-        Context,
-    };
+    use renderling::{math::Vec2, Context};
 
     use crate::{
         test::{cute_beach_palette, Colors},
@@ -368,7 +361,7 @@ mod test {
     #[test]
     fn can_build_path_sanity() {
         let ctx = Context::headless(100, 100);
-        let mut ui = Ui::new(&ctx);
+        let mut ui = Ui::new(&ctx).with_antialiasing(false);
         let builder = ui
             .new_path()
             .with_fill_color([1.0, 1.0, 0.0, 1.0])

@@ -380,7 +380,7 @@ mod test {
         let font = FontArc::try_from_vec(bytes).unwrap();
 
         let ctx = Context::headless(500, 253);
-        let mut ui = Ui::new(&ctx);
+        let mut ui = Ui::new(&ctx).with_antialiasing(false);
         let _font_id = ui.add_font(font);
         let text1 = "Voluptas magnam sint et incidunt. Aliquam praesentium voluptas ut nemo \
                      laboriosam. Dicta qui et dicta.";
