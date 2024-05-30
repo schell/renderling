@@ -52,11 +52,18 @@ impl Default for DiffCfg {
     }
 }
 
+pub struct DiffResults {
+    num_pixels: usize,
+    diff_image: Rgba32FImage,
+    max_delta_length: f32,
+    avg_delta_length: f32,
+}
+
 fn get_results(
     left_image: &Rgba32FImage,
     right_image: &Rgba32FImage,
     threshold: f32,
-) -> Result<Option<(usize, Rgba32FImage)>, ImgDiffError> {
+) -> Result<Option<DiffResults>, ImgDiffError> {
     let lid @ (width, height) = left_image.dimensions();
     let rid = right_image.dimensions();
     snafu::ensure!(lid == rid, ImageSizeSnafu);
@@ -83,6 +90,8 @@ fn get_results(
         })
         .collect::<Vec<_>>();
 
+    let mut max_delta_length: f32 = 0.0;
+    let mut sum_delta_length: f32 = 0.0;
     let diffs: usize = results.len();
     if diffs == 0 {
         Ok(None)
@@ -97,6 +106,9 @@ fn get_results(
         }
 
         for (x, y, delta) in results {
+            let length = delta.length();
+            sum_delta_length += length;
+            max_delta_length = length.max(max_delta_length);
             let bg = checkerboard_background_color(x, y);
             let a = 1.0 - delta.z;
             let color = Vec4::new(
@@ -107,7 +119,12 @@ fn get_results(
             );
             output_image.put_pixel(x, y, Rgba(color.into()));
         }
-        Ok(Some((diffs, output_image)))
+        Ok(Some(DiffResults {
+            num_pixels: diffs,
+            diff_image: output_image,
+            max_delta_length,
+            avg_delta_length: sum_delta_length / diffs as f32,
+        }))
     }
 }
 
@@ -134,8 +151,19 @@ pub fn assert_eq_cfg(
         image_threshold,
         test_name,
     } = cfg;
-    if let Some((diffs, diff_image)) = get_results(&lhs, &rhs, pixel_threshold).unwrap() {
+    if let Some(DiffResults {
+        num_pixels: diffs,
+        diff_image,
+        max_delta_length,
+        avg_delta_length,
+    }) = get_results(&lhs, &rhs, pixel_threshold).unwrap()
+    {
         println!("{filename} has {diffs} pixel differences (threshold={pixel_threshold})");
+        println!("  max_delta_length: {max_delta_length}");
+        println!(
+            "  avg_delta_length: {avg_delta_length} (average of deltas of pixels past the \
+             threshold)"
+        );
         let percent_diff = diffs as f32 / (lhs.width() * lhs.height()) as f32;
         println!("{filename}'s image is {percent_diff} different (threshold={image_threshold})");
         if percent_diff < image_threshold {
