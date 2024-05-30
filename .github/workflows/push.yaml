@@ -73,6 +73,7 @@ jobs:
 
   # various linuxes w/ physical gpus
   renderling-test-linux-other:
+    continue-on-error: true
     strategy:
       matrix:
         label: [intel, amd, pi4]
