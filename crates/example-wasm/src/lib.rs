@@ -46,7 +46,7 @@ pub async fn main() {
 
     let surface = surface_from_canvas(viewport_canvas.clone()).unwrap();
     let ctx = Context::try_from_raw_window(ww, wh, surface).await.unwrap();
-    let mut app = example::App::new(&ctx);
+    let app = example::App::new(&ctx);
 
     let window_resize = event::event_stream("resize", &dom_window);
     let mut all_events = window_resize;

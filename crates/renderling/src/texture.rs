@@ -452,7 +452,12 @@ impl Texture {
 
     pub const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
-    pub fn create_depth_texture(device: &wgpu::Device, width: u32, height: u32) -> Self {
+    pub fn create_depth_texture(
+        device: &wgpu::Device,
+        width: u32,
+        height: u32,
+        multisample_count: u32,
+    ) -> Self {
         let size = wgpu::Extent3d {
             width,
             height,
@@ -462,7 +467,7 @@ impl Texture {
             label: Some("depth_texture"),
             size,
             mip_level_count: 1,
-            sample_count: 1,
+            sample_count: multisample_count,
             dimension: wgpu::TextureDimension::D2,
             format: Self::DEPTH_FORMAT,
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT
@@ -759,44 +764,47 @@ impl Texture {
     /// Create a new HDR texture.
     pub fn create_hdr_texture(
         device: &wgpu::Device,
-        queue: &wgpu::Queue,
         width: u32,
         height: u32,
+        multisample_count: u32,
     ) -> Texture {
-        Texture::new_with(
-            &device,
-            &queue,
-            Some("hdr"),
-            Some(
-                // * The hdr texture is what we render to in most cases
-                // * we also read from it to calculate bloom
-                // * we also write the bloom mix result back to it
-                // * we also read the texture in tests
-                wgpu::TextureUsages::RENDER_ATTACHMENT
-                    | wgpu::TextureUsages::TEXTURE_BINDING
-                    | wgpu::TextureUsages::COPY_DST
-                    | wgpu::TextureUsages::COPY_SRC,
-            ),
-            Some({
-                device.create_sampler(&wgpu::SamplerDescriptor {
-                    address_mode_u: wgpu::AddressMode::ClampToEdge,
-                    address_mode_v: wgpu::AddressMode::ClampToEdge,
-                    address_mode_w: wgpu::AddressMode::ClampToEdge,
-                    mag_filter: wgpu::FilterMode::Nearest,
-                    min_filter: wgpu::FilterMode::Nearest,
-                    mipmap_filter: wgpu::FilterMode::Nearest,
-                    ..Default::default()
-                })
-            }),
-            Self::HDR_TEXTURE_FORMAT,
-            4,
-            // TODO: pretty sure this should be `2`
-            1,
-            width,
-            height,
-            1,
-            &[],
-        )
+        // * The hdr texture is what we render to in most cases
+        // * we also read from it to calculate bloom
+        // * we also write the bloom mix result back to it
+        // * we also read the texture in tests
+        let usage = wgpu::TextureUsages::RENDER_ATTACHMENT
+            | wgpu::TextureUsages::TEXTURE_BINDING
+            | wgpu::TextureUsages::COPY_DST
+            | wgpu::TextureUsages::COPY_SRC;
+        let texture = Arc::new(device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("hdr"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: multisample_count,
+            dimension: wgpu::TextureDimension::D2,
+            format: Self::HDR_TEXTURE_FORMAT,
+            usage,
+            view_formats: &[],
+        }));
+        let sampler = Arc::new(device.create_sampler(&wgpu::SamplerDescriptor {
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
+        }));
+        let view = Arc::new(texture.create_view(&wgpu::TextureViewDescriptor::default()));
+        Texture {
+            texture,
+            view,
+            sampler,
+        }
     }
 }
 
