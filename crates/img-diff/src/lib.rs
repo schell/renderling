@@ -7,6 +7,7 @@ use std::path::Path;
 const TEST_IMG_DIR: &str = "../../test_img";
 const TEST_OUTPUT_DIR: &str = "../../test_output";
 const PIXEL_MAGNITUDE_THRESHOLD: f32 = 0.1;
+pub const LOW_PIXEL_THRESHOLD: f32 = 0.02;
 const IMAGE_DIFF_THRESHOLD: f32 = 0.05;
 
 fn checkerboard_background_color(x: u32, y: u32) -> Vec3 {

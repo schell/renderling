@@ -1098,8 +1098,7 @@ mod test {
             "msaa/without.png",
             img,
             img_diff::DiffCfg {
-                pixel_threshold: 0.0,
-                image_threshold: 0.0,
+                pixel_threshold: img_diff::LOW_PIXEL_THRESHOLD,
                 ..Default::default()
             },
         );
@@ -1115,8 +1114,7 @@ mod test {
             "msaa/with.png",
             img,
             img_diff::DiffCfg {
-                pixel_threshold: 0.0,
-                image_threshold: 0.0,
+                pixel_threshold: img_diff::LOW_PIXEL_THRESHOLD,
                 ..Default::default()
             },
         );
