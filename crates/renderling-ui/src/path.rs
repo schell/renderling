@@ -4,8 +4,7 @@
 use lyon::{
     path::traits::PathBuilder,
     tessellation::{
-        BuffersBuilder, FillOptions, FillTessellator, FillVertex, StrokeOptions, StrokeTessellator,
-        StrokeVertex, VertexBuffers,
+        BuffersBuilder, FillTessellator, FillVertex, StrokeTessellator, StrokeVertex, VertexBuffers,
     },
 };
 use renderling::{
@@ -15,6 +14,7 @@ use renderling::{
 };
 
 use crate::{Ui, UiTransform};
+pub use lyon::tessellation::{FillOptions, LineCap, LineJoin, StrokeOptions};
 
 pub struct UiPath {
     pub vertices: GpuArray<Vertex>,
@@ -67,53 +67,8 @@ pub struct UiPathBuilder {
     ui: Ui,
     attributes: PathAttributes,
     inner: lyon::path::BuilderWithAttributes,
-}
-
-impl lyon::path::builder::PathBuilder for UiPathBuilder {
-    fn num_attributes(&self) -> usize {
-        PathAttributes::NUM_ATTRIBUTES
-    }
-
-    fn begin(
-        &mut self,
-        at: lyon::math::Point,
-        _: lyon::path::Attributes,
-    ) -> lyon::path::EndpointId {
-        self.inner.begin(at, &self.attributes.to_array())
-    }
-
-    fn end(&mut self, close: bool) {
-        self.inner.end(close)
-    }
-
-    fn line_to(
-        &mut self,
-        to: lyon::math::Point,
-        _: lyon::path::Attributes,
-    ) -> lyon::path::EndpointId {
-        self.inner.line_to(to, &self.attributes.to_array())
-    }
-
-    fn quadratic_bezier_to(
-        &mut self,
-        ctrl: lyon::math::Point,
-        to: lyon::math::Point,
-        _: lyon::path::Attributes,
-    ) -> lyon::path::EndpointId {
-        self.inner
-            .quadratic_bezier_to(ctrl, to, &self.attributes.to_array())
-    }
-
-    fn cubic_bezier_to(
-        &mut self,
-        ctrl1: lyon::math::Point,
-        ctrl2: lyon::math::Point,
-        to: lyon::math::Point,
-        _: lyon::path::Attributes,
-    ) -> lyon::path::EndpointId {
-        self.inner
-            .cubic_bezier_to(ctrl1, ctrl2, to, &self.attributes.to_array())
-    }
+    default_stroke_options: StrokeOptions,
+    default_fill_options: FillOptions,
 }
 
 fn vec2_to_point(v: impl Into<Vec2>) -> lyon::geom::Point<f32> {
@@ -132,7 +87,55 @@ impl UiPathBuilder {
             ui: ui.clone(),
             attributes: PathAttributes::default(),
             inner: lyon::path::Path::builder_with_attributes(PathAttributes::NUM_ATTRIBUTES),
+            default_stroke_options: ui.default_stroke_options.read().unwrap().clone(),
+            default_fill_options: ui.default_fill_options.read().unwrap().clone(),
         }
+    }
+
+    pub fn begin(&mut self, at: impl Into<Vec2>) -> &mut Self {
+        self.inner
+            .begin(vec2_to_point(at), &self.attributes.to_array());
+        self
+    }
+
+    pub fn with_begin(mut self, at: impl Into<Vec2>) -> Self {
+        self.begin(at);
+        self
+    }
+
+    pub fn end(&mut self, close: bool) -> &mut Self {
+        self.inner.end(close);
+        self
+    }
+
+    pub fn line_to(&mut self, to: impl Into<Vec2>) -> &mut Self {
+        self.inner
+            .line_to(vec2_to_point(to), &self.attributes.to_array());
+        self
+    }
+
+    pub fn quadratic_bezier_to(&mut self, ctrl: impl Into<Vec2>, to: impl Into<Vec2>) -> &mut Self {
+        self.inner.quadratic_bezier_to(
+            vec2_to_point(ctrl),
+            vec2_to_point(to),
+            &self.attributes.to_array(),
+        );
+        self
+    }
+
+    pub fn cubic_bezier_to(
+        &mut self,
+        ctrl1: impl Into<Vec2>,
+        ctrl2: impl Into<Vec2>,
+        to: impl Into<Vec2>,
+    ) -> &mut Self {
+        self.inner.cubic_bezier_to(
+            vec2_to_point(ctrl1),
+            vec2_to_point(ctrl2),
+            vec2_to_point(to),
+            &self.attributes.to_array(),
+        );
+        self
     }
 
     pub fn add_rectangle(
@@ -151,6 +154,54 @@ impl UiPathBuilder {
 
     pub fn with_rectangle(mut self, box_min: impl Into<Vec2>, box_max: impl Into<Vec2>) -> Self {
         self.add_rectangle(box_min, box_max);
+        self
+    }
+
+    pub fn add_rounded_rectangle(
+        &mut self,
+        box_min: impl Into<Vec2>,
+        box_max: impl Into<Vec2>,
+        top_left_radius: f32,
+        top_right_radius: f32,
+        bottom_left_radius: f32,
+        bottom_right_radius: f32,
+    ) -> &mut Self {
+        let rect = lyon::geom::Box2D {
+            min: vec2_to_point(box_min),
+            max: vec2_to_point(box_max),
+        };
+        let radii = lyon::path::builder::BorderRadii {
+            top_left: top_left_radius,
+            top_right: top_right_radius,
+            bottom_left: bottom_left_radius,
+            bottom_right: bottom_right_radius,
+        };
+        self.inner.add_rounded_rectangle(
+            &rect,
+            &radii,
+            lyon::path::Winding::Positive,
+            &self.attributes.to_array(),
+        );
+        self
+    }
+
+    pub fn with_rounded_rectangle(
+        mut self,
+        box_min: impl Into<Vec2>,
+        box_max: impl Into<Vec2>,
+        top_left_radius: f32,
+        top_right_radius: f32,
+        bottom_left_radius: f32,
+        bottom_right_radius: f32,
+    ) -> Self {
+        self.add_rounded_rectangle(
+            box_min,
+            box_max,
+            top_left_radius,
+            top_right_radius,
+            bottom_left_radius,
+            bottom_right_radius,
+        );
         self
     }
 
@@ -195,6 +246,29 @@ impl UiPathBuilder {
         self
     }
 
+    pub fn add_polygon(
+        &mut self,
+        is_closed: bool,
+        polygon: impl IntoIterator<Item = Vec2>,
+    ) -> &mut Self {
+        let points = polygon.into_iter().map(vec2_to_point).collect::<Vec<_>>();
+        let polygon = lyon::path::Polygon {
+            points: points.as_slice(),
+            closed: is_closed,
+        };
+        self.inner.add_polygon(polygon, &self.attributes.to_array());
+        self
+    }
+
+    pub fn with_polygon(
+        mut self,
+        is_closed: bool,
+        polygon: impl IntoIterator<Item = Vec2>,
+    ) -> Self {
+        self.add_polygon(is_closed, polygon);
+        self
+    }
+
     pub fn set_fill_color(&mut self, color: impl Into<Vec4>) -> &mut Self {
         let mut color = color.into();
         renderling::color::linear_xfer_vec4(&mut color);
@@ -219,7 +293,7 @@ impl UiPathBuilder {
         self
     }
 
-    pub fn fill_with_options(mut self, options: FillOptions) -> UiPath {
+    pub fn fill_with_options(self, options: FillOptions) -> UiPath {
         let l_path = self.inner.build();
         let mut geometry = VertexBuffers::<Vertex, u16>::new();
         let mut tesselator = FillTessellator::new();
@@ -271,10 +345,11 @@ impl UiPathBuilder {
     }
 
     pub fn fill(self) -> UiPath {
-        self.fill_with_options(Default::default())
+        let options = self.default_fill_options;
+        self.fill_with_options(options)
     }
 
-    pub fn stroke_with_options(mut self, options: StrokeOptions) -> UiPath {
+    pub fn stroke_with_options(self, options: StrokeOptions) -> UiPath {
         let l_path = self.inner.build();
         let mut geometry = VertexBuffers::<Vertex, u16>::new();
         let mut tesselator = StrokeTessellator::new();
@@ -326,7 +401,7 @@ impl UiPathBuilder {
     }
 
     pub fn stroke(self) -> UiPath {
-        let options = StrokeOptions::default().with_line_width(2.0);
+        let options = self.default_stroke_options;
         self.stroke_with_options(options)
     }
 
@@ -342,10 +417,9 @@ impl UiPathBuilder {
     }
 
     pub fn fill_and_stroke(self) -> (UiPath, UiPath) {
-        self.fill_and_stroke_with_options(
-            Default::default(),
-            StrokeOptions::default().with_line_width(2.0),
-        )
+        let fill_options = self.default_fill_options;
+        let stroke_options = self.default_stroke_options;
+        self.fill_and_stroke_with_options(fill_options, stroke_options)
     }
 }
 
@@ -357,6 +431,8 @@ mod test {
         test::{cute_beach_palette, Colors},
         Ui,
     };
+
+    use super::*;
 
     #[test]
     fn can_build_path_sanity() {
@@ -380,35 +456,89 @@ mod test {
 
     #[test]
     fn can_draw_shapes() {
-        let ctx = Context::headless(256, 256);
-        let mut ui = Ui::new(&ctx);
+        let ctx = Context::headless(256, 48);
+        let mut ui = Ui::new(&ctx)
+            .with_default_stroke_options(StrokeOptions::default().with_line_width(4.0));
         let mut colors = Colors::from_array(cute_beach_palette());
 
         // rectangle
-        let (stroke, fill) = colors.next_color();
+        let fill = colors.next_color();
         let _rect = ui
             .new_path()
-            .with_stroke_color(stroke)
             .with_fill_color(fill)
             .with_rectangle(Vec2::splat(2.0), Vec2::splat(42.0))
             .fill_and_stroke();
 
         // circle
-        let (stroke, fill) = colors.next_color();
+        let fill = colors.next_color();
         let _circ = ui
             .new_path()
-            .with_stroke_color(stroke)
             .with_fill_color(fill)
             .with_circle([64.0, 22.0], 20.0)
             .fill_and_stroke();
 
         // ellipse
-        let (stroke, fill) = colors.next_color();
+        let fill = colors.next_color();
         let _elli = ui
             .new_path()
-            .with_stroke_color(stroke)
             .with_fill_color(fill)
             .with_ellipse([104.0, 22.0], [20.0, 15.0], std::f32::consts::FRAC_PI_4)
+            .fill_and_stroke();
+
+        // various polygons
+        fn circle_points(num_points: usize, radius: f32) -> Vec<Vec2> {
+            let mut points = Vec::with_capacity(num_points);
+            for i in 0..num_points {
+                let angle = 2.0 * std::f32::consts::PI * i as f32 / num_points as f32;
+                points.push(Vec2::new(radius * angle.cos(), radius * angle.sin()));
+            }
+            points
+        }
+
+        let fill = colors.next_color();
+        let center = Vec2::new(144.0, 22.0);
+        let _penta = ui
+            .new_path()
+            .with_fill_color(fill)
+            .with_polygon(true, circle_points(5, 20.0).into_iter().map(|p| p + center))
+            .fill_and_stroke();
+
+        /// Generates points for a star shape.
+        /// `num_points` specifies the number of points (tips) the star will
+        /// have. `radius` specifies the radius of the circle in which
+        /// the star is inscribed.
+        fn star_points(num_points: usize, outer_radius: f32, inner_radius: f32) -> Vec<Vec2> {
+            let mut points = Vec::with_capacity(num_points * 2);
+            let angle_step = std::f32::consts::PI / num_points as f32;
+            for i in 0..num_points * 2 {
+                let angle = angle_step * i as f32;
+                let radius = if i % 2 == 0 {
+                    outer_radius
+                } else {
+                    inner_radius
+                };
+                points.push(Vec2::new(radius * angle.cos(), radius * angle.sin()));
+            }
+            points
+        }
+
+        let fill = colors.next_color();
+        let center = Vec2::new(184.0, 22.0);
+        let _star = ui
+            .new_path()
+            .with_fill_color(fill)
+            .with_polygon(
+                true,
+                star_points(5, 20.0, 10.0).into_iter().map(|p| p + center),
+            )
+            .fill_and_stroke();
+
+        let fill = colors.next_color();
+        let tl = Vec2::new(210.0, 4.0);
+        let _rrect = ui
+            .new_path()
+            .with_fill_color(fill)
+            .with_rounded_rectangle(tl, tl + Vec2::new(40.0, 40.0), 5.0, 0.0, 0.0, 10.0)
             .fill_and_stroke();
 
         let frame = ctx.get_next_frame().unwrap();

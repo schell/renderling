@@ -109,6 +109,8 @@ pub struct Ui {
     //
     // This is required because interface elements have transparency.
     transforms: Arc<RwLock<FxHashMap<usize, UiTransform>>>,
+    default_stroke_options: Arc<RwLock<StrokeOptions>>,
+    default_fill_options: Arc<RwLock<FillOptions>>,
 }
 
 impl Ui {
@@ -126,17 +128,41 @@ impl Ui {
             stage,
             fonts: Default::default(),
             transforms: Default::default(),
+            default_stroke_options: Arc::new(RwLock::new(
+                StrokeOptions::default().with_line_width(2.0),
+            )),
+            default_fill_options: Default::default(),
         }
     }
 
-    fn set_antialiasing(&self, antialiasing_is_on: bool) -> &Self {
+    pub fn set_antialiasing(&self, antialiasing_is_on: bool) -> &Self {
         let sample_count = if antialiasing_is_on { 4 } else { 1 };
         self.stage.set_msaa_sample_count(sample_count);
         self
     }
 
-    fn with_antialiasing(self, antialiasing_is_on: bool) -> Self {
+    pub fn with_antialiasing(self, antialiasing_is_on: bool) -> Self {
         self.set_antialiasing(antialiasing_is_on);
+        self
+    }
+
+    pub fn set_default_stroke_options(&self, options: StrokeOptions) -> &Self {
+        *self.default_stroke_options.write().unwrap() = options;
+        self
+    }
+
+    pub fn with_default_stroke_options(self, options: StrokeOptions) -> Self {
+        self.set_default_stroke_options(options);
+        self
+    }
+
+    pub fn set_default_fill_options(&self, options: FillOptions) -> &Self {
+        *self.default_fill_options.write().unwrap() = options;
+        self
+    }
+
+    pub fn with_default_fill_options(self, options: FillOptions) -> Self {
+        self.set_default_fill_options(options);
         self
     }
 
@@ -214,7 +240,6 @@ impl Ui {
 
 #[cfg(test)]
 mod test {
-    use itertools::Itertools;
     use renderling::{color::rgb_hex_color, math::Vec4};
 
     #[ctor::ctor]
@@ -228,9 +253,7 @@ mod test {
             .try_init();
     }
 
-    pub struct Colors<const N: usize>(
-        std::iter::Cycle<itertools::Permutations<std::array::IntoIter<Vec4, N>>>,
-    );
+    pub struct Colors<const N: usize>(std::iter::Cycle<std::array::IntoIter<Vec4, N>>);
 
     pub fn cute_beach_palette() -> [Vec4; 4] {
         [
@@ -243,14 +266,11 @@ mod test {
 
     impl<const N: usize> Colors<N> {
         pub fn from_array(colors: [Vec4; N]) -> Self {
-            Colors(colors.into_iter().permutations(2).cycle())
+            Colors(colors.into_iter().cycle())
         }
 
-        pub fn next_color(&mut self) -> (Vec4, Vec4) {
-            match self.0.next().unwrap().as_slice() {
-                [a, b] => (*a, *b),
-                _ => unreachable!("no more colors!"),
-            }
+        pub fn next_color(&mut self) -> Vec4 {
+            self.0.next().unwrap()
         }
     }
 }
