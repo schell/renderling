@@ -118,7 +118,8 @@ impl Ui {
             .new_stage()
             .with_background_color(Vec4::ONE)
             .with_lighting(false)
-            .with_bloom(false);
+            .with_bloom(false)
+            .with_multisample_count(4);
         let camera = stage.new_value(Camera::default_ortho2d(x as f32, y as f32));
         Ui {
             camera,

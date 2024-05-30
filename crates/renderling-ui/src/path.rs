@@ -170,6 +170,16 @@ impl UiPathBuilder {
         self
     }
 
+    pub fn with_ellipse(
+        mut self,
+        center: impl Into<Vec2>,
+        radii: impl Into<Vec2>,
+        rotation: f32,
+    ) -> Self {
+        self.add_ellipse(center, radii, rotation);
+        self
+    }
+
     pub fn add_circle(&mut self, center: impl Into<Vec2>, radius: f32) -> &mut Self {
         self.inner.add_circle(
             vec2_to_point(center),
@@ -341,6 +351,8 @@ impl UiPathBuilder {
 
 #[cfg(test)]
 mod test {
+    use std::f32::consts::PI;
+
     use itertools::Itertools;
     use renderling::{
         color::rgb_hex_color,
@@ -394,7 +406,16 @@ mod test {
             .new_path()
             .with_stroke_color(stroke)
             .with_fill_color(fill)
-            .with_circle([56.0, 22.0], 20.0)
+            .with_circle([64.0, 22.0], 20.0)
+            .fill_and_stroke();
+
+        // ellipse
+        let (stroke, fill) = colors.next_color();
+        let _elli = ui
+            .new_path()
+            .with_stroke_color(stroke)
+            .with_fill_color(fill)
+            .with_ellipse([104.0, 22.0], [20.0, 15.0], std::f32::consts::FRAC_PI_4)
             .fill_and_stroke();
 
         let frame = ctx.get_next_frame().unwrap();
