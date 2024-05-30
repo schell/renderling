@@ -1,5 +1,29 @@
-//! This is an integration of the `renderling` renderer, the `lyon`
-//! path tesselator and the `glyph_brush` text rendering libraries.
+//! `renderling-ui` is a "GPU driven" 2d renderer with a focus on simplicity and ease of use.
+//!
+//! This library is meant to be used with its parent [`renderling`].
+//!
+//! # Getting Started
+//! First we create a context, then we create a [`Ui`], which we can use to "stage" our
+//! paths, text, etc:
+//!
+//! ```rust
+//! use renderling::{Context, math::Vec2};
+//! use renderling_ui::Ui;
+//!
+//! let ctx = Context::headless(100, 100);
+//! let mut ui = Ui::new(&ctx);
+
+//! let _path = ui
+//!     .new_path()
+//!     .with_rectangle(Vec2::splat(10.0), Vec2::splat(60.0))
+//!     .build();
+//!
+//! let frame = ctx.get_next_frame().unwrap();
+//! ui.render(&frame.view());
+//! frame.present();
+//! ```
+//!
+//! Happy hacking!
 use std::sync::{Arc, RwLock};
 
 use crabslab::Id;
@@ -203,6 +227,6 @@ mod test {
         let frame = ctx.get_next_frame().unwrap();
         ui.render(&frame.view());
         let img = frame.read_image().unwrap();
-        img_diff::save("renderling-ui/path_sanity.png", img);
+        img_diff::save("ui/path/sanity.png", img);
     }
 }

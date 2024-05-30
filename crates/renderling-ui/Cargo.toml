@@ -1,7 +1,13 @@
 [package]
-name = "renderling-ui"
-version = "0.1.0"
+name = "renderling_ui"
+version = "0.3.0"
 edition = "2021"
+description = "User-friendly real-time 2d rendering. 🍖"
+repository = "https://github.com/schell/renderling"
+license = "MIT OR Apache-2.0"
+keywords = ["game", "graphics", "shader", "rendering"]
+categories = ["rendering", "game-development", "graphics"]
+readme = "README.md"
 
 [dependencies]
 crabslab = {workspace = true}
@@ -10,7 +16,7 @@ glyph_brush = "0.7.8"
 image = {workspace=true}
 log = {workspace=true}
 lyon = "1.0.1"
-renderling = {path = "../renderling"}
+renderling = {version = "0.4.5", path = "../renderling"}
 rustc-hash = {workspace = true}
 wgpu = {workspace = true}
 

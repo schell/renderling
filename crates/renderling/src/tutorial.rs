@@ -112,7 +112,6 @@ pub fn tutorial_slabbed_renderlet(
 mod test {
     use crate::{
         camera::Camera,
-        conduct_clear_pass,
         math::{Vec3, Vec4, Vec4Swizzles},
         slab::SlabAllocator,
         stage::{Renderlet, Vertex},
@@ -126,7 +125,7 @@ mod test {
         let ctx = Context::headless(100, 100);
         let (device, queue) = ctx.get_device_and_queue_owned();
         let label = Some("implicit isosceles triangle");
-        let depth = Texture::create_depth_texture(&device, 100, 100);
+        let depth = Texture::create_depth_texture(&device, 100, 100, 1);
         let vertex = crate::linkage::tutorial_implicit_isosceles_vertex::linkage(&device);
         let fragment = crate::linkage::tutorial_passthru_fragment::linkage(&device);
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -175,15 +174,6 @@ mod test {
         let frame = ctx.get_next_frame().unwrap();
         let view = frame.view();
 
-        crate::conduct_clear_pass(
-            &device,
-            &queue,
-            None,
-            vec![&view],
-            Some(&depth.view),
-            wgpu::Color::TRANSPARENT,
-        );
-
         let label = Some("implicit isosceles triangle");
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label });
         {
@@ -200,7 +190,7 @@ mod test {
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                     view: &depth.view,
                     depth_ops: Some(wgpu::Operations {
-                        load: wgpu::LoadOp::Load,
+                        load: wgpu::LoadOp::Clear(1.0),
                         store: wgpu::StoreOp::Store,
                     }),
                     stencil_ops: None,
@@ -320,18 +310,9 @@ mod test {
             }],
         });
 
-        let depth = Texture::create_depth_texture(&device, 100, 100);
+        let depth = Texture::create_depth_texture(&device, 100, 100, 1);
         let frame = ctx.get_next_frame().unwrap();
         let view = frame.view();
-
-        conduct_clear_pass(
-            &device,
-            &queue,
-            None,
-            vec![&view],
-            Some(&depth.view),
-            wgpu::Color::TRANSPARENT,
-        );
 
         let label = Some("slabbed isosceles triangle");
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label });
@@ -349,7 +330,7 @@ mod test {
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                     view: &depth.view,
                     depth_ops: Some(wgpu::Operations {
-                        load: wgpu::LoadOp::Load,
+                        load: wgpu::LoadOp::Clear(1.0),
                         store: wgpu::StoreOp::Store,
                     }),
                     stencil_ops: None,
@@ -501,18 +482,9 @@ mod test {
             }],
         });
 
-        let depth = Texture::create_depth_texture(&device, 100, 100);
+        let depth = Texture::create_depth_texture(&device, 100, 100, 1);
         let frame = ctx.get_next_frame().unwrap();
         let view = frame.view();
-
-        conduct_clear_pass(
-            &device,
-            &queue,
-            None,
-            vec![&view],
-            Some(&depth.view),
-            wgpu::Color::TRANSPARENT,
-        );
 
         let label = Some("slabbed isosceles triangle");
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label });
@@ -530,7 +502,7 @@ mod test {
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                     view: &depth.view,
                     depth_ops: Some(wgpu::Operations {
-                        load: wgpu::LoadOp::Load,
+                        load: wgpu::LoadOp::Clear(1.0),
                         store: wgpu::StoreOp::Store,
                     }),
                     stencil_ops: None,
@@ -681,18 +653,9 @@ mod test {
             }],
         });
 
-        let depth = Texture::create_depth_texture(&device, 100, 100);
+        let depth = Texture::create_depth_texture(&device, 100, 100, 1);
         let frame = ctx.get_next_frame().unwrap();
         let view = frame.view();
-
-        conduct_clear_pass(
-            &device,
-            &queue,
-            None,
-            vec![&view],
-            Some(&depth.view),
-            wgpu::Color::TRANSPARENT,
-        );
 
         let label = Some("slabbed renderlet");
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label });
@@ -710,7 +673,7 @@ mod test {
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                     view: &depth.view,
                     depth_ops: Some(wgpu::Operations {
-                        load: wgpu::LoadOp::Load,
+                        load: wgpu::LoadOp::Clear(1.0),
                         store: wgpu::StoreOp::Store,
                     }),
                     stencil_ops: None,

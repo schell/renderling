@@ -654,7 +654,7 @@ mod test {
         let proj = crate::camera::perspective(600.0, 400.0);
         let view = crate::camera::look_at(Vec3::new(0.0, 0.0, 2.0), Vec3::ZERO, Vec3::Y);
 
-        let mut stage = ctx.new_stage();
+        let stage = ctx.new_stage();
 
         let camera = stage.new_value(Camera::new(proj, view));
         let skybox = stage
