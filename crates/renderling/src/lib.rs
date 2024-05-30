@@ -22,7 +22,11 @@
 //! # use renderling::Context;
 //! use renderling::stage::Stage;
 //! # let ctx = Context::headless(100, 100);
-//! let mut stage: Stage = ctx.new_stage();
+//! let stage: Stage = ctx
+//!     .new_stage()
+//!     .with_background_color([1.0, 1.0, 1.0, 1.0])
+//!     // For this demo we won't use lighting
+//!     .with_lighting(false);
 //! ```
 //!
 //! The stage is neat in that it allows you to place values and arrays of values
@@ -35,7 +39,7 @@
 //! ```
 //! # use renderling::{Context, stage::Stage};
 //! # let ctx = Context::headless(100, 100);
-//! # let mut stage: Stage = ctx.new_stage();
+//! # let stage: Stage = ctx.new_stage();
 //! use renderling::slab::{Hybrid, HybridArray};
 //!
 //! let an_f32: Hybrid<f32> = stage.new_value(1337.0);
@@ -55,7 +59,7 @@
 //! ```
 //! # use renderling::{Context, stage::Stage};
 //! # let ctx = Context::headless(100, 100);
-//! # let mut stage: Stage = ctx.new_stage();
+//! # let stage: Stage = ctx.new_stage();
 //! use renderling::{
 //!     camera::Camera,
 //!     stage::{Renderlet, Vertex},
@@ -98,7 +102,7 @@
 //! #     }
 //! # };
 //! # let ctx = Context::headless(100, 100);
-//! # let mut stage = ctx.new_stage();
+//! # let stage = ctx.new_stage();
 //! # let camera = stage.new_value(Camera::default_ortho2d(100.0, 100.0));
 //! # let vertices = stage.new_array([
 //! #     Vertex::default()
@@ -242,7 +246,7 @@ mod test {
     // This tests our ability to draw a CMYK triangle in the top left corner.
     fn cmy_triangle_sanity() {
         let ctx = Context::headless(100, 100);
-        let mut stage = ctx.new_stage().with_background_color(Vec4::splat(1.0));
+        let stage = ctx.new_stage().with_background_color(Vec4::splat(1.0));
         let camera = stage.new_value(Camera::default_ortho2d(100.0, 100.0));
         let geometry = stage.new_array(right_tri_vertices());
         let tri = stage.new_value(Renderlet {
@@ -288,7 +292,7 @@ mod test {
         use img_diff::DiffCfg;
 
         let ctx = Context::headless(100, 100);
-        let mut stage = ctx.new_stage().with_background_color(Vec4::splat(1.0));
+        let stage = ctx.new_stage().with_background_color(Vec4::splat(1.0));
         let camera = stage.new_value(Camera::default_ortho2d(100.0, 100.0));
         let geometry = stage.new_array({
             let mut vs = right_tri_vertices();
@@ -321,7 +325,7 @@ mod test {
     // We do this by writing over the previous transform in the stage.
     fn cmy_triangle_update_transform() {
         let ctx = Context::headless(100, 100);
-        let mut stage = ctx.new_stage().with_background_color(Vec4::splat(1.0));
+        let stage = ctx.new_stage().with_background_color(Vec4::splat(1.0));
         let camera = stage.new_value(Camera::default_ortho2d(100.0, 100.0));
         let geometry = stage.new_array(right_tri_vertices());
         let transform = stage.new_value(Transform::default());
@@ -390,7 +394,7 @@ mod test {
     // Tests our ability to draw a CMYK cube.
     fn cmy_cube_sanity() {
         let ctx = Context::headless(100, 100);
-        let mut stage = ctx.new_stage().with_background_color(Vec4::splat(1.0));
+        let stage = ctx.new_stage().with_background_color(Vec4::splat(1.0));
         let camera_position = Vec3::new(0.0, 12.0, 20.0);
         let camera = stage.new_value(Camera {
             projection: Mat4::perspective_rh(std::f32::consts::PI / 4.0, 1.0, 0.1, 100.0),
@@ -424,7 +428,7 @@ mod test {
     // Tests our ability to draw a CMYK cube using indexed geometry.
     fn cmy_cube_indices() {
         let ctx = Context::headless(100, 100);
-        let mut stage = ctx.new_stage().with_background_color(Vec4::splat(1.0));
+        let stage = ctx.new_stage().with_background_color(Vec4::splat(1.0));
         let camera_position = Vec3::new(0.0, 12.0, 20.0);
         let camera = stage.new_value(Camera {
             projection: Mat4::perspective_rh(std::f32::consts::PI / 4.0, 1.0, 0.1, 100.0),
@@ -465,7 +469,7 @@ mod test {
     // them.
     fn cmy_cube_visible() {
         let ctx = Context::headless(100, 100);
-        let mut stage = ctx.new_stage().with_background_color(Vec4::splat(1.0));
+        let stage = ctx.new_stage().with_background_color(Vec4::splat(1.0));
         let (projection, view) = camera::default_perspective(100.0, 100.0);
         let camera = stage.new_value(Camera {
             projection,
@@ -529,7 +533,7 @@ mod test {
     // update a field within a struct stored on the slab by using a `Hybrid`.
     fn cmy_cube_remesh() {
         let ctx = Context::headless(100, 100);
-        let mut stage = ctx
+        let stage = ctx
             .new_stage()
             .with_lighting(false)
             .with_background_color(Vec4::splat(1.0));
@@ -627,7 +631,7 @@ mod test {
     // mesh
     fn unlit_textured_cube_material() {
         let ctx = Context::headless(100, 100);
-        let mut stage = ctx.new_stage().with_background_color(Vec4::splat(0.0));
+        let stage = ctx.new_stage().with_background_color(Vec4::splat(0.0));
         let (projection, view) = camera::default_perspective(100.0, 100.0);
         let camera = stage.new_value(Camera::new(projection, view));
         let sandstone = AtlasImage::from(image::open("../../img/sandstone.png").unwrap());
@@ -678,7 +682,7 @@ mod test {
     // that share the same geometry, but have different materials.
     fn multi_node_scene() {
         let ctx = Context::headless(100, 100);
-        let mut stage = ctx
+        let stage = ctx
             .new_stage()
             .with_background_color(Vec3::splat(0.0).extend(1.0));
 
@@ -752,7 +756,7 @@ mod test {
         use crate::pbr::light::{DirectionalLight, Light, LightStyle};
 
         let ctx = Context::headless(100, 100);
-        let mut stage = ctx
+        let stage = ctx
             .new_stage()
             .with_bloom(false)
             .with_background_color(Vec3::splat(0.0).extend(1.0));
@@ -863,7 +867,7 @@ mod test {
     // parent's transform
     fn scene_parent_sanity() {
         let ctx = Context::headless(100, 100);
-        let mut stage = ctx.new_stage().with_background_color(Vec4::splat(0.0));
+        let stage = ctx.new_stage().with_background_color(Vec4::splat(0.0));
         let (projection, view) = camera::default_ortho2d(100.0, 100.0);
         let camera = stage.new_value(Camera::new(projection, view));
         let size = 1.0;
@@ -901,15 +905,15 @@ mod test {
             ..Default::default()
         };
 
-        let cyan_node = NestedTransform::new(&mut stage);
+        let cyan_node = NestedTransform::new(&stage);
         cyan_node.set(offset);
         println!("cyan_node: {:#?}", cyan_node.get_global_transform());
 
-        let yellow_node = NestedTransform::new(&mut stage);
+        let yellow_node = NestedTransform::new(&stage);
         yellow_node.set(offset);
         println!("yellow_node: {:#?}", yellow_node.get_global_transform());
 
-        let red_node = NestedTransform::new(&mut stage);
+        let red_node = NestedTransform::new(&stage);
         red_node.set(offset);
         println!("red_node: {:#?}", red_node.get_global_transform());
 
@@ -965,7 +969,7 @@ mod test {
     fn can_resize_context_and_stage() {
         let size = UVec2::new(100, 100);
         let mut ctx = Context::headless(size.x, size.y);
-        let mut stage = ctx.new_stage();
+        let stage = ctx.new_stage();
 
         // create the CMY cube
         let camera_position = Vec3::new(0.0, 12.0, 20.0);

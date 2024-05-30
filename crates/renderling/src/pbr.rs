@@ -677,7 +677,7 @@ mod test {
     fn pbr_metallic_roughness_spheres() {
         let ss = 600;
         let ctx = crate::Context::headless(ss, ss);
-        let mut stage = ctx.new_stage();
+        let stage = ctx.new_stage();
 
         let radius = 0.5;
         let ss = ss as f32;

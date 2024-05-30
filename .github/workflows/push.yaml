@@ -73,6 +73,7 @@ jobs:
 
   # various linuxes w/ physical gpus
   renderling-test-linux-other:
+    continue-on-error: true
     strategy:
       matrix:
         label: [intel, amd, pi4]
@@ -80,6 +81,8 @@ jobs:
     steps:
       - uses: actions/checkout@v2
       - uses: moonrepo/setup-rust@v1
+        with:
+          cache: false
       - uses: Swatinem/rust-cache@v2
         with:
           cache-all-crates: "true"

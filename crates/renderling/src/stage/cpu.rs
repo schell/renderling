@@ -2,7 +2,7 @@
 //!
 //! The `Stage` object contains a slab buffer and a render pipeline.
 //! It is used to stage [`Renderlet`]s for rendering.
-use core::sync::atomic::Ordering;
+use core::sync::atomic::{AtomicU32, Ordering};
 use crabslab::{Array, Id, Slab, SlabItem};
 use rustc_hash::FxHashMap;
 use snafu::Snafu;
@@ -45,7 +45,35 @@ pub(crate) enum StageDrawStrategy {
     Direct(Vec<Hybrid<Renderlet>>),
 }
 
-fn create_stage_render_pipeline(device: &wgpu::Device) -> wgpu::RenderPipeline {
+fn create_msaa_textureview(
+    device: &wgpu::Device,
+    width: u32,
+    height: u32,
+    format: wgpu::TextureFormat,
+    sample_count: u32,
+) -> wgpu::TextureView {
+    device
+        .create_texture(&wgpu::TextureDescriptor {
+            label: Some("stage msaa render target"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count,
+            dimension: wgpu::TextureDimension::D2,
+            format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        })
+        .create_view(&wgpu::TextureViewDescriptor::default())
+}
+
+fn create_stage_render_pipeline(
+    device: &wgpu::Device,
+    multisample_count: u32,
+) -> wgpu::RenderPipeline {
     log::trace!("creating stage render pipeline");
     let label = Some("stage render");
     let vertex_linkage = crate::linkage::renderlet_vertex::linkage(device);
@@ -85,7 +113,7 @@ fn create_stage_render_pipeline(device: &wgpu::Device) -> wgpu::RenderPipeline {
         multisample: wgpu::MultisampleState {
             mask: !0,
             alpha_to_coverage_enabled: false,
-            count: 1,
+            count: multisample_count,
         },
         fragment: Some(wgpu::FragmentState {
             module: &fragment_linkage.module,
@@ -116,13 +144,15 @@ pub struct Stage {
     pub(crate) mngr: SlabAllocator<wgpu::Buffer>,
 
     pub(crate) pbr_config: Hybrid<PbrConfig>,
-    pub(crate) lights: HybridArray<Id<Light>>,
+    pub(crate) lights: Arc<RwLock<HybridArray<Id<Light>>>>,
 
-    pub(crate) stage_pipeline: Arc<wgpu::RenderPipeline>,
+    pub(crate) stage_pipeline: Arc<RwLock<wgpu::RenderPipeline>>,
     pub(crate) skybox_pipeline: Arc<RwLock<Option<Arc<wgpu::RenderPipeline>>>>,
 
     pub(crate) hdr_texture: Arc<RwLock<Texture>>,
     pub(crate) depth_texture: Arc<RwLock<Texture>>,
+    pub(crate) msaa_render_target: Arc<RwLock<Option<wgpu::TextureView>>>,
+    pub(crate) msaa_sample_count: Arc<AtomicU32>,
 
     pub(crate) atlas: Atlas,
     pub(crate) bloom: Bloom,
@@ -148,12 +178,6 @@ impl Deref for Stage {
     }
 }
 
-impl DerefMut for Stage {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.mngr
-    }
-}
-
 impl Stage {
     /// Create a new stage.
     pub fn new(ctx: &crate::Context) -> Self {
@@ -166,11 +190,21 @@ impl Stage {
             resolution,
             ..Default::default()
         });
+        let multisample_count = 1;
         let lights = mngr.new_array(vec![Id::<Light>::NONE; 16]);
         let hdr_texture = Arc::new(RwLock::new(Texture::create_hdr_texture(
-            &device, &queue, w, h,
+            &device,
+            w,
+            h,
+            multisample_count,
         )));
-        let depth_texture = Arc::new(RwLock::new(Texture::create_depth_texture(&device, w, h)));
+        let depth_texture = Arc::new(RwLock::new(Texture::create_depth_texture(
+            &device,
+            w,
+            h,
+            multisample_count,
+        )));
+        let msaa_render_target = Default::default();
         // UNWRAP: safe because no other references at this point (created above^)
         let bloom = Bloom::new(&device, &queue, &hdr_texture.read().unwrap());
         let tonemapping = Tonemapping::new(
@@ -183,9 +217,12 @@ impl Stage {
         Self {
             mngr,
             pbr_config,
-            lights,
+            lights: Arc::new(RwLock::new(lights)),
 
-            stage_pipeline: create_stage_render_pipeline(&device).into(),
+            stage_pipeline: Arc::new(RwLock::new(create_stage_render_pipeline(
+                &device,
+                multisample_count,
+            ))),
             atlas,
             skybox: Arc::new(RwLock::new(Skybox::empty(&device, &queue))),
             skybox_bindgroup: Default::default(),
@@ -199,6 +236,8 @@ impl Stage {
             draws: Arc::new(RwLock::new(StageDrawStrategy::Direct(vec![]))),
             hdr_texture,
             depth_texture,
+            msaa_render_target,
+            msaa_sample_count: Arc::new(multisample_count.into()),
             background_color: Arc::new(RwLock::new(wgpu::Color::TRANSPARENT)),
             device,
             queue,
@@ -224,36 +263,78 @@ impl Stage {
         self
     }
 
+    /// Set the MSAA multisample count.
+    ///
+    /// Set to `1` to disable MSAA. Setting to `0` will be treated the same as
+    /// setting to `1`.
+    pub fn set_multisample_count(&self, multisample_count: u32) {
+        let multisample_count = multisample_count.max(1);
+        let prev_multisample_count = self
+            .msaa_sample_count
+            .swap(multisample_count, Ordering::Relaxed);
+        if prev_multisample_count == multisample_count {
+            log::warn!("set_multisample_count: multisample count is unchanged, noop");
+            return;
+        }
+
+        log::debug!("setting multisample count to {multisample_count}");
+        // UNWRAP: POP
+        *self.stage_pipeline.write().unwrap() =
+            create_stage_render_pipeline(&self.device, multisample_count);
+        let size = self.get_size();
+        // UNWRAP: POP
+        *self.depth_texture.write().unwrap() =
+            Texture::create_depth_texture(&self.device, size.x, size.y, multisample_count);
+        // UNWRAP: POP
+        let format = self.hdr_texture.read().unwrap().texture.format();
+        *self.msaa_render_target.write().unwrap() = if multisample_count == 1 {
+            None
+        } else {
+            Some(create_msaa_textureview(
+                &self.device,
+                size.x,
+                size.y,
+                format,
+                multisample_count,
+            ))
+        };
+
+        // Invalidate the textures bindgroup - it must be recreated
+        let _ = self.textures_bindgroup.lock().unwrap().take();
+    }
+
     /// Set the debug mode.
-    pub fn set_debug_mode(&mut self, debug_mode: DebugMode) {
+    pub fn set_debug_mode(&self, debug_mode: DebugMode) {
         self.pbr_config.modify(|cfg| cfg.debug_mode = debug_mode);
     }
 
     /// Set the debug mode.
-    pub fn with_debug_mode(mut self, debug_mode: DebugMode) -> Self {
+    pub fn with_debug_mode(self, debug_mode: DebugMode) -> Self {
         self.set_debug_mode(debug_mode);
         self
     }
 
     /// Set whether the stage uses lighting.
-    pub fn set_has_lighting(&mut self, use_lighting: bool) {
+    pub fn set_has_lighting(&self, use_lighting: bool) {
         self.pbr_config
             .modify(|cfg| cfg.has_lighting = use_lighting);
     }
 
     /// Set whether the stage uses lighting.
-    pub fn with_lighting(mut self, use_lighting: bool) -> Self {
+    pub fn with_lighting(self, use_lighting: bool) -> Self {
         self.set_has_lighting(use_lighting);
         self
     }
 
     /// Set the lights to use for shading.
-    pub fn set_lights(&mut self, lights: impl IntoIterator<Item = Id<Light>>) {
+    pub fn set_lights(&self, lights: impl IntoIterator<Item = Id<Light>>) {
         log::trace!("setting lights");
-        self.lights = self.mngr.new_array(lights);
+        let lights = self.mngr.new_array(lights);
         self.pbr_config.modify(|cfg| {
-            cfg.light_array = self.lights.array();
+            cfg.light_array = lights.array();
         });
+        // UNWRAP: POP
+        *self.lights.write().unwrap() = lights;
     }
 
     pub fn get_size(&self) -> UVec2 {
@@ -270,10 +351,21 @@ impl Stage {
         }
 
         self.pbr_config.modify(|cfg| cfg.resolution = size);
-        let hdr_texture = Texture::create_hdr_texture(&self.device, &self.queue, size.x, size.y);
+        let hdr_texture = Texture::create_hdr_texture(&self.device, size.x, size.y, 1);
+        let sample_count = self.msaa_sample_count.load(Ordering::Relaxed);
+        if let Some(msaa_view) = self.msaa_render_target.write().unwrap().as_mut() {
+            *msaa_view = create_msaa_textureview(
+                &self.device,
+                size.x,
+                size.y,
+                hdr_texture.texture.format(),
+                sample_count,
+            );
+        }
+
         // UNWRAP: panic on purpose
         *self.depth_texture.write().unwrap() =
-            Texture::create_depth_texture(&self.device, size.x, size.y);
+            Texture::create_depth_texture(&self.device, size.x, size.y, sample_count);
         self.bloom
             .set_hdr_texture(&self.device, &self.queue, &hdr_texture);
         self.tonemapping.set_hdr_texture(&self.device, &hdr_texture);
@@ -290,9 +382,9 @@ impl Stage {
 
     /// Add an image to the set of atlas images.
     ///
-    /// Adding an image can be quite expensive, as it requires repacking all previous images.
-    /// For that reason it's better to use [`Stage::set_images`] if you have all the images
-    /// beforehand.
+    /// Adding an image can be quite expensive, as it requires repacking all
+    /// previous images. For that reason it's better to use
+    /// [`Stage::set_images`] if you have all the images beforehand.
     pub fn add_image(&self, image: impl Into<AtlasImage>) -> Result<AtlasTexture, StageError> {
         let preview = self
             .atlas
@@ -452,7 +544,8 @@ impl Stage {
                 crate::linkage::slab_bindgroup(
                     device,
                     slab_buffer,
-                    &self.stage_pipeline.get_bind_group_layout(0),
+                    // UNWRAP: POP
+                    &self.stage_pipeline.read().unwrap().get_bind_group_layout(0),
                 )
             });
             *bindgroup = Some(b.clone());
@@ -472,8 +565,11 @@ impl Stage {
                     let this = &self;
                     this.stage_pipeline.clone()
                 }
+                .read()
+                // UNWRAP: POP
+                .unwrap()
                 .get_bind_group_layout(1),
-                // UNWRAP: if we can't acquire locks we want to panic
+                // UNWRAP: POP
                 &self.atlas,
                 &self.skybox.read().unwrap(),
             ));
@@ -490,7 +586,7 @@ impl Stage {
     /// If you drop the renderlet and no other references are kept, it will be
     /// removed automatically from the internal list and will cease to be
     /// drawn each frame.
-    pub fn add_renderlet(&mut self, renderlet: &Hybrid<Renderlet>) {
+    pub fn add_renderlet(&self, renderlet: &Hybrid<Renderlet>) {
         // UNWRAP: if we can't acquire the lock we want to panic.
         let mut draws = self.draws.write().unwrap();
         match draws.deref_mut() {
@@ -525,8 +621,9 @@ impl Stage {
     ///
     /// This determines the order in which they are drawn each frame.
     ///
-    /// If the `order` iterator is missing any renderlet ids, those missing renderlets
-    /// will be drawn _before_ the ordered ones, in no particular order.
+    /// If the `order` iterator is missing any renderlet ids, those missing
+    /// renderlets will be drawn _before_ the ordered ones, in no particular
+    /// order.
     pub fn reorder_renderlets(&self, order: impl IntoIterator<Item = Id<Renderlet>>) {
         // UNWRAP: panic on purpose
         let mut renderlets = self.draws.write().unwrap();
@@ -568,7 +665,7 @@ impl Stage {
         NestedTransform::new(&self.mngr)
     }
 
-    fn tick_internal(&mut self) -> Arc<wgpu::Buffer> {
+    fn tick_internal(&self) -> Arc<wgpu::Buffer> {
         {
             let mut draw_guard = self.draws.write().unwrap();
             match draw_guard.deref_mut() {
@@ -598,29 +695,21 @@ impl Stage {
     ///
     /// It's good to call this after dropping assets to free up space on the
     /// slab.
-    pub fn tick(&mut self) {
+    pub fn tick(&self) {
         let _ = self.tick_internal();
     }
 
-    pub fn render(&mut self, view: &wgpu::TextureView) {
-        log::trace!("clearing pass");
-        crate::conduct_clear_pass(
-            &self.device,
-            &self.queue,
-            Some("stage clear pass"),
-            vec![view, &self.hdr_texture.read().unwrap().view],
-            Some(&self.depth_texture.read().unwrap().view),
-            *self.background_color.read().unwrap(),
-        );
-
+    pub fn render(&self, view: &wgpu::TextureView) {
         {
             log::trace!("rendering the stage");
             let label = Some("stage render");
-            let pipeline = {
-                let this = &self;
-                this.stage_pipeline.clone()
-            };
+            // UNWRAP: POP
+            let background_color = *self.background_color.read().unwrap();
             let slab_buffer = self.tick_internal();
+            // UNWRAP: POP
+            let pipeline = self.stage_pipeline.read().unwrap();
+            // UNWRAP: POP
+            let msaa_target = self.msaa_render_target.read().unwrap();
             let slab_buffers_bindgroup = self.get_slab_buffers_bindgroup(&slab_buffer);
             let textures_bindgroup = self.get_textures_bindgroup();
             let has_skybox = self.has_skybox.load(std::sync::atomic::Ordering::Relaxed);
@@ -635,24 +724,34 @@ impl Stage {
 
             let mut encoder = self
                 .device
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor { label });
             {
                 let hdr_texture = self.hdr_texture.read().unwrap();
                 let depth_texture = self.depth_texture.read().unwrap();
-                let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                    label,
-                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                let ops = wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(background_color),
+                    store: wgpu::StoreOp::Store,
+                };
+                let color_attachment = if let Some(msaa_view) = msaa_target.as_ref() {
+                    wgpu::RenderPassColorAttachment {
+                        ops,
+                        view: msaa_view,
+                        resolve_target: Some(&hdr_texture.view),
+                    }
+                } else {
+                    wgpu::RenderPassColorAttachment {
+                        ops,
                         view: &hdr_texture.view,
                         resolve_target: None,
-                        ops: wgpu::Operations {
-                            load: wgpu::LoadOp::Load,
-                            store: wgpu::StoreOp::Store,
-                        },
-                    })],
+                    }
+                };
+                let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label,
+                    color_attachments: &[Some(color_attachment)],
                     depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                         view: &depth_texture.view,
                         depth_ops: Some(wgpu::Operations {
-                            load: wgpu::LoadOp::Load,
+                            load: wgpu::LoadOp::Clear(1.0),
                             store: wgpu::StoreOp::Store,
                         }),
                         stencil_ops: None,
@@ -900,8 +999,10 @@ mod test {
     use glam::{Mat4, Vec2, Vec3};
 
     use crate::{
-        stage::{cpu::SlabAllocator, NestedTransform, Vertex},
+        camera::Camera,
+        stage::{cpu::SlabAllocator, NestedTransform, Renderlet, Vertex},
         transform::Transform,
+        Context,
     };
 
     #[test]
@@ -961,5 +1062,62 @@ mod test {
             grandchild_global_transform.translation.x, 2.0,
             "Grandchild's global translation should   2.0 along the x-axis"
         );
+    }
+
+    #[test]
+    fn can_msaa() {
+        let ctx = Context::headless(100, 100);
+        let stage = ctx
+            .new_stage()
+            .with_background_color([1.0, 1.0, 1.0, 1.0])
+            .with_lighting(false);
+        let camera = stage.new_value(Camera::default_ortho2d(100.0, 100.0));
+        let vertices = stage.new_array([
+            Vertex::default()
+                .with_position([10.0, 10.0, 0.0])
+                .with_color([0.0, 1.0, 1.0, 1.0]),
+            Vertex::default()
+                .with_position([10.0, 90.0, 0.0])
+                .with_color([1.0, 1.0, 0.0, 1.0]),
+            Vertex::default()
+                .with_position([90.0, 10.0, 0.0])
+                .with_color([1.0, 0.0, 1.0, 1.0]),
+        ]);
+        let triangle = stage.new_value(Renderlet {
+            camera_id: camera.id(),
+            vertices_array: vertices.array(),
+            ..Default::default()
+        });
+        stage.add_renderlet(&triangle);
+
+        log::debug!("rendering without msaa");
+        let frame = ctx.get_next_frame().unwrap();
+        stage.render(&frame.view());
+        let img = frame.read_image().unwrap();
+        img_diff::assert_img_eq_cfg(
+            "msaa/without.png",
+            img,
+            img_diff::DiffCfg {
+                pixel_threshold: img_diff::LOW_PIXEL_THRESHOLD,
+                ..Default::default()
+            },
+        );
+        frame.present();
+        log::debug!("  all good!");
+
+        stage.set_multisample_count(4);
+        log::debug!("rendering with msaa");
+        let frame = ctx.get_next_frame().unwrap();
+        stage.render(&frame.view());
+        let img = frame.read_image().unwrap();
+        img_diff::assert_img_eq_cfg(
+            "msaa/with.png",
+            img,
+            img_diff::DiffCfg {
+                pixel_threshold: img_diff::LOW_PIXEL_THRESHOLD,
+                ..Default::default()
+            },
+        );
+        frame.present();
     }
 }
