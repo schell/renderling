@@ -145,7 +145,7 @@ impl UiPathBuilder {
         self
     }
 
-    pub fn build(mut self) -> UiPath {
+    pub fn build(self) -> UiPath {
         let l_path = self.inner.build();
         let mut geometry = VertexBuffers::<Vertex, u16>::new();
         let options = FillOptions::tolerance(0.1);

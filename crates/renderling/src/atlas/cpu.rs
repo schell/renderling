@@ -546,7 +546,7 @@ mod test {
     // Ensures that textures are packed and rendered correctly.
     fn atlas_uv_mapping() {
         let ctx = Context::headless(32, 32);
-        let mut stage = ctx
+        let stage = ctx
             .new_stage()
             .with_background_color(Vec3::splat(0.0).extend(1.0));
         let (projection, view) = crate::camera::default_ortho2d(32.0, 32.0);
@@ -608,7 +608,7 @@ mod test {
         let w = sheet_w * 3 + 2;
         let h = sheet_h;
         let ctx = Context::headless(w, h);
-        let mut stage = ctx
+        let stage = ctx
             .new_stage()
             .with_background_color(Vec4::new(1.0, 1.0, 0.0, 1.0));
         let (projection, view) = crate::camera::default_ortho2d(w as f32, h as f32);
@@ -714,7 +714,7 @@ mod test {
         let w = sheet_w * 3 + 2;
         let h = sheet_h;
         let ctx = Context::headless(w, h);
-        let mut stage = ctx
+        let stage = ctx
             .new_stage()
             .with_background_color(Vec4::new(1.0, 1.0, 0.0, 1.0));
 

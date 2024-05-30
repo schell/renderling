@@ -1,24 +1,25 @@
 //! Provides image diffing for testing.
-use glam::{Vec4, Vec4Swizzles};
-use image::{DynamicImage, Rgba, Rgba32FImage};
+use glam::{Vec3, Vec4, Vec4Swizzles};
+use image::{DynamicImage, Luma, Rgb, Rgb32FImage, Rgba32FImage};
 use snafu::prelude::*;
 use std::path::Path;
 
 const TEST_IMG_DIR: &str = "../../test_img";
 const TEST_OUTPUT_DIR: &str = "../../test_output";
 const PIXEL_MAGNITUDE_THRESHOLD: f32 = 0.1;
+pub const LOW_PIXEL_THRESHOLD: f32 = 0.02;
 const IMAGE_DIFF_THRESHOLD: f32 = 0.05;
 
-fn checkerboard_background_color(x: u32, y: u32) -> Vec4 {
+fn checkerboard_background_color(x: u32, y: u32) -> Vec3 {
     let size = 16;
     let x_square_index = x / size;
     let x_grey = x_square_index % 2 == 0;
     let y_square_index = y / size;
     let y_grey = y_square_index % 2 == 0;
     if (x_grey && y_grey) || (!x_grey && !y_grey) {
-        Vec4::from([0.5, 0.5, 0.5, 1.0])
+        Vec3::from([0.5, 0.5, 0.5])
     } else {
-        Vec4::from([1.0, 1.0, 1.0, 1.0])
+        Vec3::from([1.0, 1.0, 1.0])
     }
 }
 
@@ -52,11 +53,19 @@ impl Default for DiffCfg {
     }
 }
 
+pub struct DiffResults {
+    num_pixels: usize,
+    diff_image: Rgb32FImage,
+    mask_image: DynamicImage,
+    max_delta_length: f32,
+    avg_delta_length: f32,
+}
+
 fn get_results(
     left_image: &Rgba32FImage,
     right_image: &Rgba32FImage,
     threshold: f32,
-) -> Result<Option<(usize, Rgba32FImage)>, ImgDiffError> {
+) -> Result<Option<DiffResults>, ImgDiffError> {
     let lid @ (width, height) = left_image.dimensions();
     let rid = right_image.dimensions();
     snafu::ensure!(lid == rid, ImageSizeSnafu);
@@ -75,7 +84,7 @@ fn get_results(
                 let right_pixel = (right_pixel * right_pixel.w).xyz();
                 let delta = (left_pixel - right_pixel).abs();
                 if delta.length() > threshold {
-                    Some((x, y, delta.extend(1.0)))
+                    Some((x, y, delta))
                 } else {
                     None
                 }
@@ -83,31 +92,35 @@ fn get_results(
         })
         .collect::<Vec<_>>();
 
+    let mut max_delta_length: f32 = 0.0;
+    let mut sum_delta_length: f32 = 0.0;
     let diffs: usize = results.len();
     if diffs == 0 {
         Ok(None)
     } else {
-        let mut output_image =
-            image::ImageBuffer::from_pixel(width, height, Rgba([0.0, 0.0, 0.0, 0.0]));
+        let mut mask_image = image::ImageBuffer::from_pixel(width, height, Luma([255u8]));
+        let mut output_image = image::ImageBuffer::from_pixel(width, height, Rgb([0.0, 0.0, 0.0]));
 
         for x in 0..width {
             for y in 0..height {
-                output_image.put_pixel(x, y, Rgba(checkerboard_background_color(x, y).into()));
+                output_image.put_pixel(x, y, Rgb(checkerboard_background_color(x, y).into()));
             }
         }
 
         for (x, y, delta) in results {
-            let bg = checkerboard_background_color(x, y);
-            let a = 1.0 - delta.z;
-            let color = Vec4::new(
-                bg.x * a + delta.x,
-                bg.y * a + delta.y,
-                bg.z * a + delta.z,
-                1.0,
-            );
-            output_image.put_pixel(x, y, Rgba(color.into()));
+            let length = delta.length();
+            sum_delta_length += length;
+            max_delta_length = length.max(max_delta_length);
+            mask_image.put_pixel(x, y, Luma([0]));
+            output_image.put_pixel(x, y, Rgb(delta.into()));
         }
-        Ok(Some((diffs, output_image)))
+        Ok(Some(DiffResults {
+            num_pixels: diffs,
+            diff_image: output_image,
+            mask_image: mask_image.into(),
+            max_delta_length,
+            avg_delta_length: sum_delta_length / diffs as f32,
+        }))
     }
 }
 
@@ -134,8 +147,20 @@ pub fn assert_eq_cfg(
         image_threshold,
         test_name,
     } = cfg;
-    if let Some((diffs, diff_image)) = get_results(&lhs, &rhs, pixel_threshold).unwrap() {
+    if let Some(DiffResults {
+        num_pixels: diffs,
+        diff_image,
+        mask_image,
+        max_delta_length,
+        avg_delta_length,
+    }) = get_results(&lhs, &rhs, pixel_threshold).unwrap()
+    {
         println!("{filename} has {diffs} pixel differences (threshold={pixel_threshold})");
+        println!("  max_delta_length: {max_delta_length}");
+        println!(
+            "  avg_delta_length: {avg_delta_length} (average of deltas of pixels past the \
+             threshold)"
+        );
         let percent_diff = diffs as f32 / (lhs.width() * lhs.height()) as f32;
         println!("{filename}'s image is {percent_diff} different (threshold={image_threshold})");
         if percent_diff < image_threshold {
@@ -148,6 +173,7 @@ pub fn assert_eq_cfg(
         let expected = dir.join("expected.png");
         let seen = dir.join("seen.png");
         let diff = dir.join("diff.png");
+        let mask = dir.join("mask.png");
         let lhs = DynamicImage::from(lhs).into_rgba8();
         let rhs = DynamicImage::from(rhs).into_rgba8();
         lhs.save_with_format(&expected, image::ImageFormat::Png)
@@ -158,6 +184,10 @@ pub fn assert_eq_cfg(
         diff_image
             .save_with_format(&diff, image::ImageFormat::Png)
             .expect("can't save diff");
+        let mask_image = mask_image.into_rgba8();
+        mask_image
+            .save_with_format(&mask, image::ImageFormat::Png)
+            .expect("can't save diff mask");
         panic!(
             "{} has >= {} differences above the threshold\nexpected: {}\nseen: {}\ndiff: {}",
             filename,

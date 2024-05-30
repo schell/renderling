@@ -77,7 +77,7 @@ By default it uses a single uber-shader for rendering.
   - image based lighting
     - [x] diffuse
     - [x] specular
-  - [ ] msaa (easy because of forward+)
+  - [x] msaa (easy because of forward+)
   - [x] bloom "physically based" up+downsampling blur
   - [ ] ssao
   - [ ] depth of field
