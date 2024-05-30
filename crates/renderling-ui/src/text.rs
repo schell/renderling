@@ -82,7 +82,7 @@ impl UiTextBuilder {
 
     pub fn build(self) -> UiText {
         let UiTextBuilder {
-            mut ui,
+            ui,
             mut material,
             bounds,
             brush,
@@ -246,8 +246,8 @@ impl GlyphCache {
     /// Returns a new mesh if the mesh needs to be updated.
     /// Returns a new texture if the texture needs to be updated.
     ///
-    /// The texture and mesh are meant to be used to build or update a `Renderlet`
-    /// to display.
+    /// The texture and mesh are meant to be used to build or update a
+    /// `Renderlet` to display.
     pub fn get_updated(&mut self) -> (Option<Vec<Vertex>>, Option<ImageBuffer<Luma<u8>, Vec<u8>>>) {
         let mut may_mesh: Option<Vec<Vertex>> = None;
         let mut cache = self.cache.take().unwrap_or_else(|| {
@@ -371,8 +371,8 @@ mod test {
     }
 
     #[test]
-    /// Tests that if we overlay text (which has transparency) on top of other objects, it
-    /// renders the transparency correctly.
+    /// Tests that if we overlay text (which has transparency) on top of other
+    /// objects, it renders the transparency correctly.
     fn text_overlayed() {
         log::info!("{:#?}", std::env::current_dir());
         let bytes =
@@ -382,8 +382,11 @@ mod test {
         let ctx = Context::headless(500, 500);
         let mut ui = Ui::new(&ctx);
         let _font_id = ui.add_font(font);
-        let text1 = "Voluptas magnam sint et incidunt. Aliquam praesentium voluptas ut nemo laboriosam. Dicta qui et dicta.";
-        let text2 = "Inventore impedit quo ratione ullam blanditiis soluta aliquid. Enim molestiae eaque ab commodi et.\nQuidem ex tempore ipsam. Incidunt suscipit aut commodi cum atque voluptate est.";
+        let text1 = "Voluptas magnam sint et incidunt. Aliquam praesentium voluptas ut nemo \
+                     laboriosam. Dicta qui et dicta.";
+        let text2 = "Inventore impedit quo ratione ullam blanditiis soluta aliquid. Enim \
+                     molestiae eaque ab commodi et.\nQuidem ex tempore ipsam. Incidunt suscipit \
+                     aut commodi cum atque voluptate est.";
         let text = ui
             .new_text()
             .with_section(

@@ -412,53 +412,6 @@ impl Frame {
     }
 }
 
-/// Perform a clearing render pass on a frame and/or a depth texture.
-///
-/// ## Note
-/// This clears the depth to 1.0.
-pub(crate) fn conduct_clear_pass<'a>(
-    device: &wgpu::Device,
-    queue: &wgpu::Queue,
-    label: Option<&str>,
-    frame_views: impl IntoIterator<Item = &'a wgpu::TextureView>,
-    depth_view: Option<&wgpu::TextureView>,
-    clear_color: wgpu::Color,
-) {
-    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-        label: Some("renderling clear pass"),
-    });
-
-    let frame_views = frame_views
-        .into_iter()
-        .map(|view| {
-            Some(wgpu::RenderPassColorAttachment {
-                view,
-                resolve_target: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(clear_color),
-                    store: wgpu::StoreOp::Store,
-                },
-            })
-        })
-        .collect::<Vec<_>>();
-    let render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-        label,
-        color_attachments: &frame_views,
-        depth_stencil_attachment: depth_view.map(|view| wgpu::RenderPassDepthStencilAttachment {
-            view,
-            depth_ops: Some(wgpu::Operations {
-                load: wgpu::LoadOp::Clear(1.0),
-                store: wgpu::StoreOp::Store,
-            }),
-            stencil_ops: None,
-        }),
-        ..Default::default()
-    });
-    drop(render_pass);
-
-    queue.submit(std::iter::once(encoder.finish()));
-}
-
 /// Contains the adapter, device, queue and [`RenderTarget`].
 ///
 /// A `Context` is created to initialize rendering to a window, canvas or
