@@ -334,7 +334,7 @@ mod test {
             std::fs::read("../../fonts/Recursive Mn Lnr St Med Nerd Font Complete.ttf").unwrap();
         let font = FontArc::try_from_vec(bytes).unwrap();
 
-        let ctx = Context::headless(500, 500);
+        let ctx = Context::headless(455, 145);
         let mut ui = Ui::new(&ctx);
         let _font_id = ui.add_font(font);
         let _text = ui
@@ -343,22 +343,22 @@ mod test {
                 Section::default()
                     .add_text(
                         Text::new("Here is some text.\n")
-                            .with_scale(64.0)
+                            .with_scale(32.0)
                             .with_color([0.0, 0.0, 0.0, 1.0]),
                     )
                     .add_text(
                         Text::new("Here is text in a new color\n")
-                            .with_scale(64.0)
+                            .with_scale(32.0)
                             .with_color([1.0, 1.0, 0.0, 1.0]),
                     )
                     .add_text(
                         Text::new("(and variable size)\n")
-                            .with_scale(32.0)
+                            .with_scale(16.0)
                             .with_color([1.0, 0.0, 1.0, 1.0]),
                     )
                     .add_text(
                         Text::new("...and variable transparency\n...and word wrap")
-                            .with_scale(64.0)
+                            .with_scale(32.0)
                             .with_color([0.2, 0.2, 0.2, 0.5]),
                     ),
             )
@@ -379,8 +379,8 @@ mod test {
             std::fs::read("../../fonts/Recursive Mn Lnr St Med Nerd Font Complete.ttf").unwrap();
         let font = FontArc::try_from_vec(bytes).unwrap();
 
-        let ctx = Context::headless(500, 500);
-        let mut ui = Ui::new(&ctx);
+        let ctx = Context::headless(500, 253);
+        let mut ui = Ui::new(&ctx).with_antialiasing(false);
         let _font_id = ui.add_font(font);
         let text1 = "Voluptas magnam sint et incidunt. Aliquam praesentium voluptas ut nemo \
                      laboriosam. Dicta qui et dicta.";
@@ -407,22 +407,19 @@ mod test {
             )
             .build();
 
-        let path = ui
+        let (fill, stroke) = ui
             .new_path()
             .with_fill_color([1.0, 1.0, 0.0, 1.0])
+            .with_stroke_color([1.0, 0.0, 1.0, 1.0])
             .with_rectangle(text.bounds.0, text.bounds.1)
-            .build();
+            .fill_and_stroke();
 
-        // move the path to (50, 50)
-        path.transform.set_translation(Vec2::splat(50.0));
-        // move it to the back
-        path.transform.set_z(-0.1);
-
-        // ensure we render the path behind the text
-        ui.stage.reorder_renderlets([
-            path.fill_renderlet.as_ref().unwrap().id(),
-            text.renderlet.id(),
-        ]);
+        for path in [&fill, &stroke] {
+            // move the path to (50, 50)
+            path.transform.set_translation(Vec2::new(51.0, 53.0));
+            // move it to the back
+            path.transform.set_z(-0.1);
+        }
 
         let frame = ctx.get_next_frame().unwrap();
         ui.render(&frame.view());
@@ -430,5 +427,18 @@ mod test {
         img_diff::assert_img_eq("ui/text/overlay.png", img);
         let depth_img = ui.stage.get_depth_texture().read_image().unwrap();
         img_diff::assert_img_eq("ui/text/overlay_depth.png", depth_img);
+    }
+
+    #[test]
+    fn text_color() {
+        let bytes =
+            std::fs::read("../../fonts/Recursive Mn Lnr St Med Nerd Font Complete.ttf").unwrap();
+        let font = FontArc::try_from_vec(bytes).unwrap();
+
+        let ctx = Context::headless(500, 253);
+        let mut ui = Ui::new(&ctx);
+        let _font_id = ui.add_font(font);
+        let s =
+            "Voluptas magnam sint et incidunt. Aliquam praesentium voluptas ut nemo laboriosam.";
     }
 }

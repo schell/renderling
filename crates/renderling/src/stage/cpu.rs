@@ -267,7 +267,7 @@ impl Stage {
     ///
     /// Set to `1` to disable MSAA. Setting to `0` will be treated the same as
     /// setting to `1`.
-    pub fn set_multisample_count(&self, multisample_count: u32) {
+    pub fn set_msaa_sample_count(&self, multisample_count: u32) {
         let multisample_count = multisample_count.max(1);
         let prev_multisample_count = self
             .msaa_sample_count
@@ -301,6 +301,15 @@ impl Stage {
 
         // Invalidate the textures bindgroup - it must be recreated
         let _ = self.textures_bindgroup.lock().unwrap().take();
+    }
+
+    /// Set the MSAA multisample count.
+    ///
+    /// Set to `1` to disable MSAA. Setting to `0` will be treated the same as
+    /// setting to `1`.
+    pub fn with_msaa_sample_count(self, multisample_count: u32) -> Self {
+        self.set_msaa_sample_count(multisample_count);
+        self
     }
 
     /// Set the debug mode.
@@ -1105,7 +1114,7 @@ mod test {
         frame.present();
         log::debug!("  all good!");
 
-        stage.set_multisample_count(4);
+        stage.set_msaa_sample_count(4);
         log::debug!("rendering with msaa");
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());

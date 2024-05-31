@@ -835,6 +835,10 @@ impl DepthTexture {
     /// Converts the depth texture into an image.
     ///
     /// Assumes the format is single channel 32bit.
+    ///
+    /// ## Panics
+    /// This may panic if the depth texture has a multisample count greater than
+    /// 1.
     pub fn read_image(&self) -> Option<image::DynamicImage> {
         let depth_copied_buffer = Texture::read(
             &self.texture.texture,

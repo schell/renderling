@@ -1,22 +1,24 @@
-//! `renderling-ui` is a "GPU driven" 2d renderer with a focus on simplicity and ease of use.
+//! `renderling-ui` is a "GPU driven" 2d renderer with a focus on simplicity and
+//! ease of use.
 //!
 //! This library is meant to be used with its parent [`renderling`].
 //!
 //! # Getting Started
-//! First we create a context, then we create a [`Ui`], which we can use to "stage" our
-//! paths, text, etc:
+//! First we create a context, then we create a [`Ui`], which we can use to
+//! "stage" our paths, text, etc:
 //!
 //! ```rust
-//! use renderling::{Context, math::Vec2};
+//! use renderling::{math::Vec2, Context};
 //! use renderling_ui::Ui;
 //!
 //! let ctx = Context::headless(100, 100);
 //! let mut ui = Ui::new(&ctx);
-
+//!
 //! let _path = ui
 //!     .new_path()
+//!     .with_stroke_color([1.0, 1.0, 0.0, 1.0])
 //!     .with_rectangle(Vec2::splat(10.0), Vec2::splat(60.0))
-//!     .build();
+//!     .stroke();
 //!
 //! let frame = ctx.get_next_frame().unwrap();
 //! ui.render(&frame.view());
@@ -107,6 +109,8 @@ pub struct Ui {
     //
     // This is required because interface elements have transparency.
     transforms: Arc<RwLock<FxHashMap<usize, UiTransform>>>,
+    default_stroke_options: Arc<RwLock<StrokeOptions>>,
+    default_fill_options: Arc<RwLock<FillOptions>>,
 }
 
 impl Ui {
@@ -116,14 +120,50 @@ impl Ui {
             .new_stage()
             .with_background_color(Vec4::ONE)
             .with_lighting(false)
-            .with_bloom(false);
+            .with_bloom(false)
+            .with_msaa_sample_count(4);
         let camera = stage.new_value(Camera::default_ortho2d(x as f32, y as f32));
         Ui {
             camera,
             stage,
             fonts: Default::default(),
             transforms: Default::default(),
+            default_stroke_options: Arc::new(RwLock::new(
+                StrokeOptions::default().with_line_width(2.0),
+            )),
+            default_fill_options: Default::default(),
         }
+    }
+
+    pub fn set_antialiasing(&self, antialiasing_is_on: bool) -> &Self {
+        let sample_count = if antialiasing_is_on { 4 } else { 1 };
+        self.stage.set_msaa_sample_count(sample_count);
+        self
+    }
+
+    pub fn with_antialiasing(self, antialiasing_is_on: bool) -> Self {
+        self.set_antialiasing(antialiasing_is_on);
+        self
+    }
+
+    pub fn set_default_stroke_options(&self, options: StrokeOptions) -> &Self {
+        *self.default_stroke_options.write().unwrap() = options;
+        self
+    }
+
+    pub fn with_default_stroke_options(self, options: StrokeOptions) -> Self {
+        self.set_default_stroke_options(options);
+        self
+    }
+
+    pub fn set_default_fill_options(&self, options: FillOptions) -> &Self {
+        *self.default_fill_options.write().unwrap() = options;
+        self
+    }
+
+    pub fn with_default_fill_options(self, options: FillOptions) -> Self {
+        self.set_default_fill_options(options);
+        self
     }
 
     fn new_transform(&self, renderlet_ids: Vec<Id<Renderlet>>) -> UiTransform {
@@ -200,9 +240,7 @@ impl Ui {
 
 #[cfg(test)]
 mod test {
-    use renderling::math::Vec2;
-
-    use super::*;
+    use renderling::{color::rgb_hex_color, math::Vec4};
 
     #[ctor::ctor]
     fn init_logging() {
@@ -215,18 +253,24 @@ mod test {
             .try_init();
     }
 
-    #[test]
-    fn can_build_path_sanity() {
-        let ctx = Context::headless(100, 100);
-        let mut ui = Ui::new(&ctx);
-        let _path = ui
-            .new_path()
-            .with_rectangle(Vec2::splat(10.0), Vec2::splat(60.0))
-            .build();
+    pub struct Colors<const N: usize>(std::iter::Cycle<std::array::IntoIter<Vec4, N>>);
 
-        let frame = ctx.get_next_frame().unwrap();
-        ui.render(&frame.view());
-        let img = frame.read_image().unwrap();
-        img_diff::save("ui/path/sanity.png", img);
+    pub fn cute_beach_palette() -> [Vec4; 4] {
+        [
+            rgb_hex_color(0x6DC5D1),
+            rgb_hex_color(0xFDE49E),
+            rgb_hex_color(0xFEB941),
+            rgb_hex_color(0xDD761C),
+        ]
+    }
+
+    impl<const N: usize> Colors<N> {
+        pub fn from_array(colors: [Vec4; N]) -> Self {
+            Colors(colors.into_iter().cycle())
+        }
+
+        pub fn next_color(&mut self) -> Vec4 {
+            self.0.next().unwrap()
+        }
     }
 }
