@@ -87,8 +87,8 @@ impl UiPathBuilder {
             ui: ui.clone(),
             attributes: PathAttributes::default(),
             inner: lyon::path::Path::builder_with_attributes(PathAttributes::NUM_ATTRIBUTES),
-            default_stroke_options: ui.default_stroke_options.read().unwrap().clone(),
-            default_fill_options: ui.default_fill_options.read().unwrap().clone(),
+            default_stroke_options: *ui.default_stroke_options.read().unwrap(),
+            default_fill_options: *ui.default_fill_options.read().unwrap(),
         }
     }
 
