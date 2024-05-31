@@ -81,7 +81,7 @@ pub fn slab_bindgroup(
     let label = Some("slab");
     device.create_bind_group(&wgpu::BindGroupDescriptor {
         label,
-        layout: &bindgroup_layout,
+        layout: bindgroup_layout,
         entries: &[wgpu::BindGroupEntry {
             binding: 0,
             resource: wgpu::BindingResource::Buffer(slab_buffer.as_entire_buffer_binding()),
@@ -312,7 +312,7 @@ mod test {
             let entry = may_entry.unwrap();
             let path = entry.path();
             let ext = path.extension().unwrap().to_str().unwrap();
-            if let Some(filename) = std::env::var("only_shader").ok() {
+            if let Ok(filename) = std::env::var("only_shader") {
                 let stem = path.file_stem().unwrap().to_str().unwrap();
                 if filename != stem {
                     log::info!(

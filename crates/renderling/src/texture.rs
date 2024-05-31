@@ -162,6 +162,7 @@ impl Texture {
     }
 
     /// Create a new texture.
+    #[allow(clippy::too_many_arguments)]
     pub fn new_with(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
@@ -238,6 +239,7 @@ impl Texture {
     ///
     /// This defaults the format to `Rgba8UnormSrgb` and assumes a pixel is 1
     /// byte per channel.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
@@ -531,6 +533,7 @@ impl Texture {
     /// To read the texture you must provide the width, height, the number of
     /// color/alpha channels and the number of bytes in the underlying
     /// subpixel type (usually u8=1, u16=2 or f32=4).
+    #[allow(clippy::too_many_arguments)]
     pub fn read_from(
         texture: &wgpu::Texture,
         device: &wgpu::Device,
@@ -593,8 +596,8 @@ impl Texture {
         let height = self.height();
         let copied = Texture::read(
             &self.texture,
-            &device,
-            &queue,
+            device,
+            queue,
             width as usize,
             height as usize,
             4,
@@ -710,6 +713,9 @@ impl Texture {
                 &[],
             );
             let prev_texture = if mip_level == 1 {
+                // This is not a needless borrow as without it the compiler
+                // thinks `self` has been moved
+                #[allow(clippy::needless_borrow)]
                 &self
             } else {
                 &mips[(mip_level - 2) as usize]

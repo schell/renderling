@@ -713,9 +713,9 @@ mod test {
             cells
                 .iter()
                 .flat_map(|icosahedron::Triangle { a, b, c }| {
-                    let p0 = to_vertex(&a);
-                    let p1 = to_vertex(&b);
-                    let p2 = to_vertex(&c);
+                    let p0 = to_vertex(a);
+                    let p1 = to_vertex(b);
+                    let p2 = to_vertex(c);
                     vec![p0, p1, p2]
                 })
                 .collect::<Vec<_>>()

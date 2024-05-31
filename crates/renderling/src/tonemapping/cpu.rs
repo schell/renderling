@@ -53,7 +53,7 @@ pub fn create_bindgroup(
 ) -> wgpu::BindGroup {
     device.create_bind_group(&wgpu::BindGroupDescriptor {
         label,
-        layout: &bindgroup_layout(&device, label),
+        layout: &bindgroup_layout(device, label),
         entries: &[
             wgpu::BindGroupEntry {
                 binding: 0,
@@ -112,9 +112,9 @@ impl Tonemapping {
             &slab_buffer,
         )));
 
-        let vertex_linkage = crate::linkage::tonemapping_vertex::linkage(&device);
-        let fragment_linkage = crate::linkage::tonemapping_fragment::linkage(&device);
-        let hdr_layout = bindgroup_layout(&device, label);
+        let vertex_linkage = crate::linkage::tonemapping_vertex::linkage(device);
+        let fragment_linkage = crate::linkage::tonemapping_fragment::linkage(device);
+        let hdr_layout = bindgroup_layout(device, label);
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label,
             bind_group_layouts: &[&hdr_layout],

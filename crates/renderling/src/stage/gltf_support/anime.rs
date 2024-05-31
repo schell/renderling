@@ -145,9 +145,9 @@ impl TweenProperties {
             TweenProperties::Translations(translations) => {
                 if let Some([p0, p1, p2]) = translations.get(start..end) {
                     Some([
-                        TweenProperty::Translation(p0.clone()),
-                        TweenProperty::Translation(p1.clone()),
-                        TweenProperty::Translation(p2.clone()),
+                        TweenProperty::Translation(*p0),
+                        TweenProperty::Translation(*p1),
+                        TweenProperty::Translation(*p2),
                     ])
                 } else {
                     None
@@ -156,9 +156,9 @@ impl TweenProperties {
             TweenProperties::Rotations(rotations) => {
                 if let Some([p0, p1, p2]) = rotations.get(start..end) {
                     Some([
-                        TweenProperty::Rotation(p0.clone()),
-                        TweenProperty::Rotation(p1.clone()),
-                        TweenProperty::Rotation(p2.clone()),
+                        TweenProperty::Rotation(*p0),
+                        TweenProperty::Rotation(*p1),
+                        TweenProperty::Rotation(*p2),
                     ])
                 } else {
                     None
@@ -167,9 +167,9 @@ impl TweenProperties {
             TweenProperties::Scales(scales) => {
                 if let Some([p0, p1, p2]) = scales.get(start..end) {
                     Some([
-                        TweenProperty::Scale(p0.clone()),
-                        TweenProperty::Scale(p1.clone()),
-                        TweenProperty::Scale(p2.clone()),
+                        TweenProperty::Scale(*p0),
+                        TweenProperty::Scale(*p1),
+                        TweenProperty::Scale(*p2),
                     ])
                 } else {
                     None
@@ -391,11 +391,7 @@ impl Tween {
 
                 let weights = from
                     .into_iter()
-                    .zip(
-                        from_out
-                            .into_iter()
-                            .zip(to_in.into_iter().zip(to.into_iter())),
-                    )
+                    .zip(from_out.iter().zip(to_in.iter().zip(to.iter())))
                     .map(|(from, (from_out, (to_in, to)))| -> f32 {
                         let previous_tangent = from_out * delta_time;
                         let next_tangent = to_in * delta_time;
@@ -470,39 +466,35 @@ impl Tween {
         }
 
         let last_keyframe = self.keyframes.len() - 1;
-        let last_time = self.keyframes[last_keyframe].0;
-        last_time
+        self.keyframes[last_keyframe].0
     }
 
     pub fn get_first_keyframe_property(&self) -> Option<TweenProperty> {
         match &self.properties {
             TweenProperties::Translations(ts) => {
                 if self.interpolation.is_cubic_spline() {
-                    ts.iter().nth(1).copied().map(TweenProperty::Translation)
+                    ts.get(1).copied().map(TweenProperty::Translation)
                 } else {
                     ts.first().copied().map(TweenProperty::Translation)
                 }
             }
             TweenProperties::Rotations(rs) => {
                 if self.interpolation.is_cubic_spline() {
-                    rs.iter().nth(1).copied().map(TweenProperty::Rotation)
+                    rs.get(1).copied().map(TweenProperty::Rotation)
                 } else {
                     rs.first().copied().map(TweenProperty::Rotation)
                 }
             }
             TweenProperties::Scales(ss) => {
                 if self.interpolation.is_cubic_spline() {
-                    ss.iter().nth(1).copied().map(TweenProperty::Scale)
+                    ss.get(1).copied().map(TweenProperty::Scale)
                 } else {
                     ss.first().copied().map(TweenProperty::Scale)
                 }
             }
             TweenProperties::MorphTargetWeights(ws) => {
                 if self.interpolation.is_cubic_spline() {
-                    ws.iter()
-                        .nth(1)
-                        .cloned()
-                        .map(TweenProperty::MorphTargetWeights)
+                    ws.get(1).cloned().map(TweenProperty::MorphTargetWeights)
                 } else {
                     ws.first().cloned().map(TweenProperty::MorphTargetWeights)
                 }
@@ -574,14 +566,16 @@ impl Animation {
         let index = animation.index();
         let name = animation.name().map(String::from);
         log::trace!("  animation {index} {name:?}");
-        let mut r_animation = Animation::default();
-        r_animation.name = name;
+        let mut r_animation = Animation {
+            name,
+            ..Default::default()
+        };
         for (i, channel) in animation.channels().enumerate() {
             log::trace!("  channel {i}");
             let reader = channel.reader(|buffer| Some(&buffer_data[buffer.index()]));
             let inputs = reader.read_inputs().context(MissingInputsSnafu)?;
             let outputs = reader.read_outputs().context(MissingOutputsSnafu)?;
-            let keyframes = inputs.map(|t| Keyframe(t)).collect::<Vec<_>>();
+            let keyframes = inputs.map(Keyframe).collect::<Vec<_>>();
             log::trace!("    with {} keyframes", keyframes.len());
             let interpolation = channel.sampler().interpolation().into();
             log::trace!("    using {interpolation} interpolation");
@@ -611,7 +605,7 @@ impl Animation {
                         log::trace!("      morph targets   : {}", num_morph_targets);
                         TweenProperties::MorphTargetWeights(
                             ws.chunks_exact(num_morph_targets)
-                                .map(|chunk| chunk.iter().copied().collect::<Vec<_>>())
+                                .map(|chunk| chunk.to_vec())
                                 .collect(),
                         )
                     }
@@ -655,7 +649,7 @@ impl Animation {
         Ok(tweens.into_iter().collect())
     }
 
-    pub fn into_animator<'a>(
+    pub fn into_animator(
         self,
         nodes: impl IntoIterator<Item = (usize, NestedTransform)>,
     ) -> Animator {

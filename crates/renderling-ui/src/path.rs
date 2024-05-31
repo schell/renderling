@@ -41,7 +41,7 @@ impl Default for PathAttributes {
 impl PathAttributes {
     const NUM_ATTRIBUTES: usize = 8;
 
-    fn to_array(&self) -> [f32; Self::NUM_ATTRIBUTES] {
+    fn to_array(self) -> [f32; Self::NUM_ATTRIBUTES] {
         [
             self.stroke_color.x,
             self.stroke_color.y,
