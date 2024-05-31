@@ -21,5 +21,4 @@ wasm-bindgen = { workspace = true }
 wasm-bindgen-futures = { workspace = true }
 wasm-bindgen-test = "^0.3"
 web-sys = { workspace = true, features = ["Document", "Element", "Event", "HtmlCanvasElement", "HtmlElement", "Window"] }
-winit = { workspace = true }
 wgpu = { workspace = true }

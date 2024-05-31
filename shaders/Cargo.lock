@@ -693,10 +693,8 @@ dependencies = [
  "env_logger",
  "log",
  "naga",
- "proc-macro2",
  "quote",
  "spirv-builder",
- "syn 2.0.48",
 ]
 
 [[package]]

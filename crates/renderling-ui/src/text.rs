@@ -428,17 +428,4 @@ mod test {
         let depth_img = ui.stage.get_depth_texture().read_image().unwrap();
         img_diff::assert_img_eq("ui/text/overlay_depth.png", depth_img);
     }
-
-    #[test]
-    fn text_color() {
-        let bytes =
-            std::fs::read("../../fonts/Recursive Mn Lnr St Med Nerd Font Complete.ttf").unwrap();
-        let font = FontArc::try_from_vec(bytes).unwrap();
-
-        let ctx = Context::headless(500, 253);
-        let mut ui = Ui::new(&ctx);
-        let _font_id = ui.add_font(font);
-        let s =
-            "Voluptas magnam sint et incidunt. Aliquam praesentium voluptas ut nemo laboriosam.";
-    }
 }
