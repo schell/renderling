@@ -38,6 +38,18 @@ impl From<AtlasError> for StageError {
     }
 }
 
+/// The count at which a `Renderlet` will be automatically removed from the
+/// stage and recycled.
+///
+/// This constant is exposed for downstream authors to write renderers that
+/// may need to store the renderlet in a system.
+///
+/// * +1 for the clone in [`Stage`]'s renderlets (added via
+///   [`Stage::add_renderlet`]), required to draw
+/// * +1 for the clone in [`Stage`]'s [`SlabAllocator`]'s update sources, needed
+///   to update the GPU
+pub const RENDERLET_STRONG_COUNT_LOWER_BOUND: usize = 2;
+
 /// Provides a way to communicate with the stage about how you'd like your
 /// objects drawn.
 pub(crate) enum StageDrawStrategy {
@@ -679,7 +691,7 @@ impl Stage {
             let mut draw_guard = self.draws.write().unwrap();
             match draw_guard.deref_mut() {
                 StageDrawStrategy::Direct(draws) => {
-                    draws.retain(|d| d.strong_count() > 2);
+                    draws.retain(|d| d.strong_count() > RENDERLET_STRONG_COUNT_LOWER_BOUND);
                 }
             }
         }
@@ -1009,7 +1021,10 @@ mod test {
 
     use crate::{
         camera::Camera,
-        stage::{cpu::SlabAllocator, NestedTransform, Renderlet, Vertex},
+        stage::{
+            cpu::{SlabAllocator, UpdatesSlab},
+            NestedTransform, Renderlet, Vertex,
+        },
         transform::Transform,
         Context,
     };
@@ -1128,5 +1143,16 @@ mod test {
             },
         );
         frame.present();
+    }
+
+    #[test]
+    fn has_consistent_stage_renderlet_strong_count() {
+        let ctx = Context::headless(100, 100);
+        let stage = ctx.new_stage();
+        let r = stage.new_value(Renderlet::default());
+        stage.add_renderlet(&r);
+        let expected_strong_count = 1 // for `r` here
+            + super::RENDERLET_STRONG_COUNT_LOWER_BOUND;
+        assert_eq!(expected_strong_count, r.strong_count());
     }
 }
