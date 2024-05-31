@@ -300,7 +300,7 @@ impl App {
                 self.phi += dx as f32 * DX_DY_DRAG_DAMPENING;
 
                 let next_theta = self.theta - dy as f32 * DX_DY_DRAG_DAMPENING;
-                self.theta = next_theta.max(0.0001).min(std::f32::consts::PI);
+                self.theta = next_theta.clamp(0.0001, std::f32::consts::PI);
             }
             self.last_cursor_position = Some(position);
             self.update_camera_view();

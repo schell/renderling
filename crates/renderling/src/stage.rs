@@ -198,36 +198,10 @@ impl Default for Renderlet {
     }
 }
 
-#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
-#[derive(Clone, Copy, Default, PartialEq, SlabItem)]
-pub struct RenderletVertexLog {
-    pub renderlet_id: Id<Renderlet>,
-    pub debug_index: u32,
-    pub vertex_index: u32,
-    pub started: bool,
-    pub completed: bool,
-}
-
-impl RenderletVertexLog {
-    pub fn new(renderlet_id: Id<Renderlet>, debug_index: u32, vertex_index: u32) -> Self {
-        let mut log = Self::default();
-        log.renderlet_id = renderlet_id;
-        log.debug_index = debug_index;
-        log.vertex_index = vertex_index;
-        log
-    }
-
-    pub fn write(&self, debug: &mut [u32]) {
-        let log_id: Id<RenderletVertexLog> =
-            Id::new(self.debug_index + self.vertex_index * RenderletVertexLog::SLAB_SIZE as u32);
-        debug.write(log_id, self);
-    }
-}
-
 #[cfg(feature = "renderlet_vertex")]
 /// Renderlet vertex shader.
 #[spirv(vertex)]
-#[allow(dead_code)]
+#[allow(clippy::too_many_arguments)]
 pub fn renderlet_vertex(
     // Points at a `Renderlet`
     #[spirv(instance_index)] renderlet_id: Id<Renderlet>,
@@ -258,7 +232,7 @@ pub fn renderlet_vertex(
     } else {
         slab.read(renderlet.indices_array.at(vertex_index as usize)) as usize
     };
-    let vertex_id = renderlet.vertices_array.at(index as usize);
+    let vertex_id = renderlet.vertices_array.at(index);
     let vertex = slab.read_unchecked(vertex_id);
     *out_color = vertex.color;
     *out_uv0 = vertex.uv0;
@@ -294,34 +268,6 @@ pub fn renderlet_vertex(
 
     let camera = slab.read(renderlet.camera_id);
     *out_clip_pos = camera.projection * camera.view * world_pos.extend(1.0);
-}
-
-#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
-#[derive(Clone, Copy, Default, PartialEq, SlabItem)]
-pub struct RenderletFragmentLog {
-    pub frag_coord: Vec4,
-    pub resolution: UVec2,
-    pub started: bool,
-    pub completed: bool,
-}
-
-impl RenderletFragmentLog {
-    pub fn new(frag_coord: Vec4, resolution: UVec2) -> Self {
-        let mut log = Self::default();
-        log.frag_coord = frag_coord;
-        log.resolution = resolution;
-        log
-    }
-
-    pub fn write(&self, debug: &mut [u32]) {
-        let x = self.frag_coord.x as u32;
-        let y = self.frag_coord.y as u32;
-        let w = self.resolution.x;
-        let fragment_index = y * w + x;
-        let index = fragment_index * RenderletFragmentLog::SLAB_SIZE as u32;
-        let log_id: Id<RenderletFragmentLog> = Id::new(index);
-        debug.write(log_id, self);
-    }
 }
 
 #[cfg(feature = "renderlet_fragment")]
@@ -376,20 +322,6 @@ pub fn renderlet_fragment(
         world_pos,
         output,
     );
-}
-
-#[cfg(feature = "test_atomic_i_increment")]
-#[spirv(compute(threads(32)))]
-pub fn test_atomic_i_increment(
-    #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] global_index: &mut u32,
-) {
-    let _ = unsafe {
-        spirv_std::arch::atomic_i_increment::<
-            u32,
-            { spirv_std::memory::Scope::Workgroup as u32 },
-            { spirv_std::memory::Semantics::NONE.bits() as u32 },
-        >(global_index)
-    };
 }
 
 #[cfg(feature = "test_i8_16_extraction")]

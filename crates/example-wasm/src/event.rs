@@ -11,10 +11,12 @@ use futures_lite::Stream;
 use wasm_bindgen::{prelude::Closure, JsCast, JsValue};
 use web_sys::EventTarget;
 
+type MaybeCallback = Option<Arc<Closure<dyn FnMut(JsValue)>>>;
+
 struct WebCallback {
     target: EventTarget,
     name: String,
-    closure: Option<Arc<Closure<dyn FnMut(JsValue)>>>,
+    closure: MaybeCallback,
     waker: Arc<Mutex<Option<Waker>>>,
     event: Arc<Mutex<Option<web_sys::Event>>>,
 }

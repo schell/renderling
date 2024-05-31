@@ -181,8 +181,8 @@ impl Atlas {
             mipmap_filter: wgpu::FilterMode::Nearest,
             ..Default::default()
         };
-        let gpu_texture = Texture::from_wgpu_tex(device, texture, Some(sampler_desc), None);
-        gpu_texture
+
+        Texture::from_wgpu_tex(device, texture, Some(sampler_desc), None)
     }
 
     /// Create a new atlas.
@@ -218,7 +218,7 @@ impl Atlas {
     ///
     /// Returns a vector of ids that determine the locations of the given images
     /// but doesn't send any data to the GPU.
-    pub fn pack_preview<'a>(
+    pub fn pack_preview(
         device: &wgpu::Device,
         images: impl IntoIterator<Item = AtlasImage>,
     ) -> Result<crunch::PackedItems<AtlasImage>, AtlasError> {
@@ -686,7 +686,7 @@ mod test {
         stage.add_renderlet(&repeat_prim);
 
         let mirror_transform = stage.new_value(Transform {
-            translation: Vec3::new(sheet_w as f32 * 2.0 + 2.0, 0.0, 0.0),
+            translation: Vec3::new(sheet_w * 2.0 + 2.0, 0.0, 0.0),
             ..Default::default()
         });
         let mirror_prim = stage.new_value(Renderlet {
@@ -802,7 +802,7 @@ mod test {
         stage.add_renderlet(&repeat_prim);
 
         let mirror_transform = stage.new_value(Transform {
-            translation: Vec3::new(sheet_w as f32 * 2.0 + 2.0, 0.0, 0.0),
+            translation: Vec3::new(sheet_w * 2.0 + 2.0, 0.0, 0.0),
             ..Default::default()
         });
         let mirror_prim = stage.new_value(Renderlet {

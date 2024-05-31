@@ -70,10 +70,10 @@ pub fn extract_u8(
         (U8_3_BITS, 1),
     ];
     let byte_mod = byte_offset % 4;
-    let (shift_mask, index_inc) = SHIFT_MASKS[byte_mod as usize];
+    let (shift_mask, index_inc) = SHIFT_MASKS[byte_mod];
     let u32_value = slab.read(Id::from(u32_index));
     let value = extract(u32_value, shift_mask);
-    (value, u32_index + index_inc as usize, byte_mod + 1)
+    (value, u32_index + index_inc, byte_mod + 1)
 }
 
 /// Extract 8 bits of the u32 at the given index in the slab.
@@ -113,7 +113,7 @@ pub fn extract_u16(
     ];
     let byte_mod = byte_offset % 4;
     crate::println!("byte_mod: {byte_mod}");
-    let (shift_mask, next_byte_offset, index_inc) = SHIFT_MASKS[byte_mod as usize];
+    let (shift_mask, next_byte_offset, index_inc) = SHIFT_MASKS[byte_mod];
     let u32_value = slab.read(Id::from(u32_index));
     crate::println!("u32: {:032b}", u32_value);
     let value = extract(u32_value, shift_mask);

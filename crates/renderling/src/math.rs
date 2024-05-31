@@ -508,11 +508,11 @@ mod test {
 
     #[test]
     fn nan_sanity() {
-        let n = 0.0 / 0.0;
+        let n = f32::NAN;
         assert!(n.is_nan());
-        assert_eq!(false, n > 0.0);
-        assert_eq!(false, n < 0.0);
-        assert_eq!(false, n == 0.0);
+        assert!(n <= 0.0);
+        assert!(n >= 0.0);
+        assert!(n != 0.0);
     }
 
     #[test]
@@ -522,7 +522,7 @@ mod test {
         assert_eq!(1.0, signum_or_zero(-0.0));
         assert_eq!(-1.0, signum_or_zero(-0.33));
 
-        let nan = 0.0 / 0.0;
+        let nan = f32::NAN;
         assert_eq!(0.0, signum_or_zero(nan));
     }
 }

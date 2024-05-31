@@ -44,7 +44,7 @@ impl RenderTarget {
             } => {
                 surface_config.width = width;
                 surface_config.height = height;
-                surface.configure(&device, &surface_config);
+                surface.configure(device, surface_config)
             }
             RenderTargetInner::Texture { texture } => {
                 let usage = texture.usage();
@@ -174,7 +174,7 @@ async fn new_windowed_adapter_device_queue(
     let surface = instance
         .create_surface(window)
         .map_err(|e| ContextError::CreateSurface { source: e })?;
-    let adapter = adapter(&instance, Some(&surface)).await?;
+    let adapter = adapter(instance, Some(&surface)).await?;
     let surface_caps = surface.get_capabilities(&adapter);
     let fmt = if surface_caps
         .formats
@@ -213,7 +213,7 @@ async fn new_headless_device_queue_and_target(
     height: u32,
     instance: &wgpu::Instance,
 ) -> Result<(wgpu::Adapter, wgpu::Device, wgpu::Queue, RenderTarget), ContextError> {
-    let adapter = adapter(&instance, None).await?;
+    let adapter = adapter(instance, None).await?;
     let texture_desc = wgpu::TextureDescriptor {
         size: wgpu::Extent3d {
             width,
@@ -289,7 +289,7 @@ impl Frame {
     pub fn texture(&self) -> &wgpu::Texture {
         match &self.surface {
             FrameSurface::Surface(s) => &s.texture,
-            FrameSurface::Texture(t) => &t,
+            FrameSurface::Texture(t) => t,
         }
     }
 
@@ -606,6 +606,6 @@ impl Context {
 
     /// Create and return a new [`Stage`] renderer.
     pub fn new_stage(&self) -> Stage {
-        Stage::new(&self)
+        Stage::new(self)
     }
 }

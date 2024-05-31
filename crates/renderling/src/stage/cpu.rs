@@ -97,7 +97,8 @@ fn create_stage_render_pipeline(
         bind_group_layouts: &[&stage_slab_buffers_layout, &atlas_and_skybox_layout],
         push_constant_ranges: &[],
     });
-    let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+
+    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label,
         layout: Some(&layout),
         vertex: wgpu::VertexState {
@@ -138,8 +139,7 @@ fn create_stage_render_pipeline(
             compilation_options: Default::default(),
         }),
         multiview: None,
-    });
-    pipeline
+    })
 }
 
 /// Represents an entire scene worth of rendering data.
@@ -1060,15 +1060,15 @@ mod test {
 
     #[test]
     fn can_global_transform_calculation() {
-        let mut slab = SlabAllocator::<Mutex<Vec<u32>>>::default();
+        let slab = SlabAllocator::<Mutex<Vec<u32>>>::default();
         // Setup a hierarchy of transforms
-        let root = NestedTransform::new(&mut slab);
-        let child = NestedTransform::new(&mut slab);
+        let root = NestedTransform::new(&slab);
+        let child = NestedTransform::new(&slab);
         child.set(Transform {
             translation: Vec3::new(1.0, 0.0, 0.0),
             ..Default::default()
         });
-        let grandchild = NestedTransform::new(&mut slab);
+        let grandchild = NestedTransform::new(&slab);
         grandchild.set(Transform {
             translation: Vec3::new(1.0, 0.0, 0.0),
             ..Default::default()

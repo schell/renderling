@@ -213,18 +213,18 @@ mod test {
     #[test]
     fn sanity_transmute() {
         let zerof32 = 0f32;
-        let zerof32asu32: u32 = unsafe { std::mem::transmute(zerof32) };
+        let zerof32asu32: u32 = zerof32.to_bits();
         assert_eq!(0, zerof32asu32);
 
         let foure_45 = 4e-45f32;
-        let in_u32: u32 = unsafe { std::mem::transmute(foure_45) };
+        let in_u32: u32 = foure_45.to_bits();
         assert_eq!(3, in_u32);
 
         let u32max = u32::MAX;
-        let f32nan: f32 = unsafe { std::mem::transmute(u32max) };
+        let f32nan: f32 = f32::from_bits(u32max);
         assert!(f32nan.is_nan());
 
-        let u32max: u32 = unsafe { std::mem::transmute(f32nan) };
+        let u32max: u32 = f32nan.to_bits();
         assert_eq!(u32::MAX, u32max);
     }
 
@@ -386,7 +386,7 @@ mod test {
     fn gpu_cube_vertices() -> Vec<Vertex> {
         math::UNIT_INDICES
             .iter()
-            .map(|i| cmy_gpu_vertex(math::UNIT_POINTS[*i as usize]))
+            .map(|i| cmy_gpu_vertex(math::UNIT_POINTS[*i]))
             .collect()
     }
 

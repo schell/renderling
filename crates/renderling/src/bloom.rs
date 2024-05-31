@@ -171,6 +171,7 @@ pub fn bloom_upsample_fragment(
 
 #[cfg(feature = "bloom_mix_fragment")]
 #[spirv(fragment)]
+#[allow(clippy::too_many_arguments)]
 /// Bloom "mix" shader.
 ///
 /// This is the final step in applying bloom in which the computed bloom is

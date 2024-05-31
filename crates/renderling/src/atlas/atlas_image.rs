@@ -219,15 +219,15 @@ pub fn convert_to_rgba8_bytes(
             | AtlasImageFormat::R16G16B16
             | AtlasImageFormat::R16G16B16A16 => {
                 let bytes: &mut [u16] = bytemuck::cast_slice_mut(&mut bytes);
-                bytes.into_iter().for_each(linear_xfer_u16);
+                bytes.iter_mut().for_each(linear_xfer_u16);
             }
             AtlasImageFormat::R16G16B16A16FLOAT => {
                 let bytes: &mut [u16] = bytemuck::cast_slice_mut(&mut bytes);
-                bytes.into_iter().for_each(linear_xfer_f16);
+                bytes.iter_mut().for_each(linear_xfer_f16);
             }
             AtlasImageFormat::R32G32B32FLOAT | AtlasImageFormat::R32G32B32A32FLOAT => {
                 let bytes: &mut [f32] = bytemuck::cast_slice_mut(&mut bytes);
-                bytes.into_iter().for_each(linear_xfer_f32);
+                bytes.iter_mut().for_each(linear_xfer_f32);
             }
         }
     }
@@ -257,7 +257,7 @@ pub fn convert_to_rgba8_bytes(
             .collect(),
         AtlasImageFormat::R8G8B8A8 => bytes,
         AtlasImageFormat::R16 => bytemuck::cast_slice::<u8, u16>(&bytes)
-            .into_iter()
+            .iter()
             .flat_map(|r| [u16_to_u8(*r), 0, 0, 255])
             .collect(),
         AtlasImageFormat::R16G16 => bytemuck::cast_slice::<u8, u16>(&bytes)
@@ -282,12 +282,12 @@ pub fn convert_to_rgba8_bytes(
             .collect(),
 
         AtlasImageFormat::R16G16B16A16 => bytemuck::cast_slice::<u8, u16>(&bytes)
-            .into_iter()
+            .iter()
             .copied()
             .map(u16_to_u8)
             .collect(),
         AtlasImageFormat::R16G16B16A16FLOAT => bytemuck::cast_slice::<u8, u16>(&bytes)
-            .into_iter()
+            .iter()
             .map(|bits| half::f16::from_bits(*bits).to_f32())
             .collect::<Vec<_>>()
             .chunks_exact(4)
@@ -310,7 +310,7 @@ pub fn convert_to_rgba8_bytes(
             })
             .collect(),
         AtlasImageFormat::R32G32B32A32FLOAT => bytemuck::cast_slice::<u8, f32>(&bytes)
-            .into_iter()
+            .iter()
             .copied()
             .map(f32_to_u8)
             .collect(),

@@ -199,8 +199,7 @@ impl Skybox {
             debug_assert!(maybe_resized_buffer.is_none());
         };
 
-        let equirectangular_texture =
-            Skybox::hdr_texture_from_atlas_image(&device, &queue, hdr_img);
+        let equirectangular_texture = Skybox::hdr_texture_from_atlas_image(device, queue, hdr_img);
         let views = [
             Mat4::look_at_rh(
                 Vec3::new(0.0, 0.0, 0.0),
@@ -269,7 +268,7 @@ impl Skybox {
             views,
         );
 
-        let brdf_lut = Skybox::create_precomputed_brdf_texture(&device, &queue);
+        let brdf_lut = Skybox::create_precomputed_brdf_texture(device, queue);
 
         Skybox {
             environment_cubemap,
@@ -328,7 +327,7 @@ impl Skybox {
     ) -> Texture {
         // Create the cubemap-making pipeline.
         let pipeline = crate::cubemap::CubemapMakingRenderPipeline::new(
-            &device,
+            device,
             wgpu::TextureFormat::Rgba16Float,
         );
 
@@ -339,14 +338,14 @@ impl Skybox {
             wgpu::BufferUsages::VERTEX,
         );
         let bindgroup =
-            crate::cubemap::cubemap_making_bindgroup(&device, resources.2, &buffer, hdr_texture);
+            crate::cubemap::cubemap_making_bindgroup(device, resources.2, buffer, hdr_texture);
 
         Self::render_cubemap(
             device,
             queue,
             &pipeline.0,
             buffer_upkeep,
-            &camera,
+            camera,
             &bindgroup,
             views,
             512,
@@ -354,6 +353,7 @@ impl Skybox {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn render_cubemap(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
@@ -369,7 +369,7 @@ impl Skybox {
         let mip_levels = mip_levels.unwrap_or(1);
 
         // Render every cube face.
-        for i in 0..6 {
+        for (i, view) in views.iter().enumerate() {
             let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some(&format!("cubemap{i}")),
             });
@@ -395,7 +395,7 @@ impl Skybox {
             );
 
             // update the view to point at one of the cube faces
-            camera.modify(|c| c.set_view(views[i]));
+            camera.modify(|c| c.set_view(*view));
             buffer_upkeep();
 
             {
@@ -414,7 +414,7 @@ impl Skybox {
                 });
 
                 render_pass.set_pipeline(pipeline);
-                render_pass.set_bind_group(0, &bindgroup, &[]);
+                render_pass.set_bind_group(0, bindgroup, &[]);
                 render_pass.draw(0..36, 0..1);
             }
 
@@ -446,20 +446,20 @@ impl Skybox {
     ) -> Texture {
         let pipeline =
             crate::ibl::diffuse_irradiance::DiffuseIrradianceConvolutionRenderPipeline::new(
-                &device,
+                device,
                 wgpu::TextureFormat::Rgba16Float,
             );
 
         let bindgroup = crate::ibl::diffuse_irradiance::diffuse_irradiance_convolution_bindgroup(
-            &device,
+            device,
             Some("irradiance"),
             buffer,
             environment_texture,
         );
 
         Self::render_cubemap(
-            &device,
-            &queue,
+            device,
+            queue,
             &pipeline.0,
             buffer_upkeep,
             camera,
@@ -470,6 +470,7 @@ impl Skybox {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn create_prefiltered_environment_map(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
@@ -483,13 +484,13 @@ impl Skybox {
     ) -> Texture {
         let (pipeline, bindgroup) =
             crate::ibl::prefiltered_environment::create_pipeline_and_bindgroup(
-                &device,
+                device,
                 buffer,
                 environment_texture,
             );
         let mut cubemap_faces = Vec::new();
 
-        for i in 0..6 {
+        for (i, view) in views.iter().enumerate() {
             for mip_level in 0..5 {
                 let mip_width: u32 = 128 >> mip_level;
                 let mip_height: u32 = 128 >> mip_level;
@@ -499,8 +500,8 @@ impl Skybox {
                 });
 
                 let cubemap_face = Texture::new_with(
-                    &device,
-                    &queue,
+                    device,
+                    queue,
                     Some(&format!("cubemap{i}{mip_level}prefiltered_environment")),
                     Some(wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC),
                     None,
@@ -516,7 +517,7 @@ impl Skybox {
                 // update the roughness for these mips
                 roughness.set(mip_level as f32 / 4.0);
                 // update the view to point at one of the cube faces
-                camera.modify(|c| c.set_view(views[i]));
+                camera.modify(|c| c.set_view(*view));
                 buffer_upkeep();
                 {
                     let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -544,9 +545,9 @@ impl Skybox {
         }
 
         Texture::new_cubemap_texture(
-            &device,
-            &queue,
-            Some(&format!("prefiltered environment cubemap")),
+            device,
+            queue,
+            Some("prefiltered environment cubemap"),
             128,
             cubemap_faces.as_slice(),
             wgpu::TextureFormat::Rgba16Float,

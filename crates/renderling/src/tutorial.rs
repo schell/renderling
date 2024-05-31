@@ -288,7 +288,7 @@ mod test {
             },
             fragment: Some(wgpu::FragmentState {
                 module: &fragment.module,
-                entry_point: &fragment.entry_point,
+                entry_point: fragment.entry_point,
                 targets: &[Some(wgpu::ColorTargetState {
                     format: wgpu::TextureFormat::Rgba8UnormSrgb,
                     blend: Some(wgpu::BlendState::ALPHA_BLENDING),

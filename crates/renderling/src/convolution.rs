@@ -227,11 +227,11 @@ pub fn calc_lod_old(n: Vec3, v: Vec3, h: Vec3, roughness: f32) -> f32 {
     let d = crate::pbr::normal_distribution_ggx(n, h, roughness);
     let n_dot_h = n.dot(h).max(0.0);
     let h_dot_v = h.dot(v).max(0.0);
-    let pdf = (d * n_dot_h / (4.0 * h_dot_v)).max(core::f32::EPSILON);
+    let pdf = (d * n_dot_h / (4.0 * h_dot_v)).max(f32::EPSILON);
 
     let resolution = 512.0; // resolution of source cubemap (per face)
     let sa_texel = 4.0 * core::f32::consts::PI / (6.0 * resolution * resolution);
-    let sa_sample = 1.0 / (SAMPLE_COUNT as f32 * pdf + core::f32::EPSILON);
+    let sa_sample = 1.0 / (SAMPLE_COUNT as f32 * pdf + f32::EPSILON);
 
     0.5 * (sa_sample / sa_texel).log2()
 }
@@ -239,8 +239,7 @@ pub fn calc_lod_old(n: Vec3, v: Vec3, h: Vec3, roughness: f32) -> f32 {
 pub fn calc_lod(n_dot_l: f32) -> f32 {
     let cube_width = 512.0;
     let pdf = (n_dot_l * core::f32::consts::FRAC_1_PI).max(0.0);
-    0.5 * (6.0 * cube_width * cube_width / (SAMPLE_COUNT as f32 * pdf).max(core::f32::EPSILON))
-        .log2()
+    0.5 * (6.0 * cube_width * cube_width / (SAMPLE_COUNT as f32 * pdf).max(f32::EPSILON)).log2()
 }
 
 #[cfg(feature = "generate_mipmap_vertex")]

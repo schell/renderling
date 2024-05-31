@@ -58,7 +58,7 @@ fn create_bloom_downsample_pipeline(device: &wgpu::Device) -> wgpu::RenderPipeli
         layout: Some(&layout),
         vertex: wgpu::VertexState {
             module: &vertex_module.module,
-            entry_point: &vertex_module.entry_point,
+            entry_point: vertex_module.entry_point,
             buffers: &[],
             compilation_options: Default::default(),
         },
@@ -75,7 +75,7 @@ fn create_bloom_downsample_pipeline(device: &wgpu::Device) -> wgpu::RenderPipeli
         multisample: wgpu::MultisampleState::default(),
         fragment: Some(wgpu::FragmentState {
             module: &fragment_module.module,
-            entry_point: &fragment_module.entry_point,
+            entry_point: fragment_module.entry_point,
             targets: &[Some(wgpu::ColorTargetState {
                 format: wgpu::TextureFormat::Rgba16Float,
                 blend: None,
@@ -102,7 +102,7 @@ fn create_bloom_upsample_pipeline(device: &wgpu::Device) -> wgpu::RenderPipeline
         layout: Some(&layout),
         vertex: wgpu::VertexState {
             module: &vertex_module.module,
-            entry_point: &vertex_module.entry_point,
+            entry_point: vertex_module.entry_point,
             buffers: &[],
             compilation_options: Default::default(),
         },
@@ -119,7 +119,7 @@ fn create_bloom_upsample_pipeline(device: &wgpu::Device) -> wgpu::RenderPipeline
         multisample: wgpu::MultisampleState::default(),
         fragment: Some(wgpu::FragmentState {
             module: &fragment_module.module,
-            entry_point: &fragment_module.entry_point,
+            entry_point: fragment_module.entry_point,
             targets: &[Some(wgpu::ColorTargetState {
                 format: wgpu::TextureFormat::Rgba16Float,
                 blend: Some(wgpu::BlendState::ALPHA_BLENDING),
@@ -155,8 +155,8 @@ fn create_texture(
         ..Default::default()
     });
     Texture::new_with(
-        &device,
-        &queue,
+        device,
+        queue,
         label,
         Some(
             wgpu::TextureUsages::RENDER_ATTACHMENT
@@ -310,7 +310,7 @@ fn create_mix_pipeline(device: &wgpu::Device) -> wgpu::RenderPipeline {
         layout: Some(&layout),
         vertex: wgpu::VertexState {
             module: &vertex_module.module,
-            entry_point: &vertex_module.entry_point,
+            entry_point: vertex_module.entry_point,
             buffers: &[],
             compilation_options: Default::default(),
         },
@@ -327,7 +327,7 @@ fn create_mix_pipeline(device: &wgpu::Device) -> wgpu::RenderPipeline {
         multisample: wgpu::MultisampleState::default(),
         fragment: Some(wgpu::FragmentState {
             module: &fragment_module.module,
-            entry_point: &fragment_module.entry_point,
+            entry_point: fragment_module.entry_point,
             targets: &[Some(wgpu::ColorTargetState {
                 format: wgpu::TextureFormat::Rgba16Float,
                 blend: Some(wgpu::BlendState::ALPHA_BLENDING),
@@ -418,15 +418,15 @@ impl Bloom {
             wgpu::BufferUsages::empty(),
         ));
 
-        let downsample_pipeline = Arc::new(create_bloom_downsample_pipeline(&device));
-        let upsample_pipeline = Arc::new(create_bloom_upsample_pipeline(&device));
-        let mix_pipeline = Arc::new(create_mix_pipeline(&device));
+        let downsample_pipeline = Arc::new(create_bloom_downsample_pipeline(device));
+        let upsample_pipeline = Arc::new(create_bloom_upsample_pipeline(device));
+        let mix_pipeline = Arc::new(create_mix_pipeline(device));
 
         let hdr_texture_downsample_bindgroup = create_bindgroup(
             device,
             &downsample_pipeline.get_bind_group_layout(0),
             &slab_buffer,
-            &hdr_texture,
+            hdr_texture,
         );
         let mix_texture = create_texture(
             device,
@@ -444,7 +444,7 @@ impl Bloom {
             device,
             &mix_pipeline,
             &slab_buffer,
-            &hdr_texture,
+            hdr_texture,
             &textures[0],
         );
 
@@ -506,24 +506,24 @@ impl Bloom {
         *self.bindgroups.write().unwrap() =
             create_bindgroups(device, &self.downsample_pipeline, &slab_buffer, &textures);
         *self.hdr_texture_downsample_bindgroup.write().unwrap() = create_bindgroup(
-            &device,
+            device,
             &self.downsample_pipeline.get_bind_group_layout(0),
             &slab_buffer,
             hdr_texture,
         );
         *self.mix_texture.write().unwrap() = create_texture(
-            &device,
-            &queue,
+            device,
+            queue,
             resolution.x,
             resolution.y,
             Some("bloom mix"),
             wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::COPY_DST,
         );
         *self.mix_bindgroup.write().unwrap() = create_mix_bindgroup(
-            &device,
+            device,
             &self.mix_pipeline,
             &slab_buffer,
-            &hdr_texture,
+            hdr_texture,
             &textures[0],
         );
         *self.textures.write().unwrap() = textures;

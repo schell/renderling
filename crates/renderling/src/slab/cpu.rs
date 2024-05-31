@@ -53,7 +53,7 @@ trait IsRange {
 impl IsRange for Range {
     fn should_merge_with(&self, other: &Self) -> bool {
         debug_assert!(
-            !self.intersects(&other),
+            !self.intersects(other),
             "{self:?} intersects existing {other:?}, should never happen with Range"
         );
 
@@ -121,6 +121,9 @@ impl RangeManager<Range> {
     pub fn remove(&mut self, count: u32) -> Option<Range> {
         let mut remove_index = usize::MAX;
         for (i, range) in self.ranges.iter_mut().enumerate() {
+            // This is potentially a hot path, so use the `if` even
+            // though clippy complains (because using match is slower)
+            #[allow(clippy::comparison_chain)]
             if range.len() > count {
                 let first_index = range.first_index;
                 let last_index = range.first_index + count - 1;
@@ -266,7 +269,7 @@ impl IsBuffer for wgpu::Buffer {
     ) {
         for SlabUpdate { array, elements } in updates {
             let offset = array.starting_index() as u64 * std::mem::size_of::<u32>() as u64;
-            queue.write_buffer(&self, offset, bytemuck::cast_slice(&elements));
+            queue.write_buffer(self, offset, bytemuck::cast_slice(&elements));
         }
         queue.submit(std::iter::empty());
     }
@@ -501,7 +504,7 @@ impl<Buffer: IsBuffer> SlabAllocator<Buffer> {
                 }
             }
             // Defrag the recycle ranges
-            let ranges = std::mem::replace(&mut recycles_guard.ranges, vec![]);
+            let ranges = std::mem::take(&mut recycles_guard.ranges);
             let num_ranges_to_defrag = ranges.len();
             for range in ranges.into_iter() {
                 recycles_guard.add_range(range);
@@ -635,7 +638,7 @@ pub trait UpdatesSlab: Send + Sync + std::any::Any {
     /// Returns the slab range of all possible updates.
     fn u32_array(&self) -> Array<u32>;
 
-    /// Returns the number of references remaiting in the wild.
+    /// Returns the number of references remaining in the wild.
     fn strong_count(&self) -> usize;
 
     /// Return the latest update, if any.
@@ -802,7 +805,7 @@ impl<T> Drop for Gpu<T> {
 impl<T> Clone for Gpu<T> {
     fn clone(&self) -> Self {
         Self {
-            id: self.id.clone(),
+            id: self.id,
             notifier_index: self.notifier_index,
             notify: self.notify.clone(),
             update: self.update.clone(),
@@ -1014,7 +1017,7 @@ impl<T: SlabItem + Clone + Send + Sync + 'static> HybridArray<T> {
         let mut value_guard = self.cpu_value.write().unwrap();
         let t = value_guard.get_mut(index)?;
         let output = Some(f(t));
-        self.gpu_value.set_item(index, &t);
+        self.gpu_value.set_item(index, t);
         output
     }
 

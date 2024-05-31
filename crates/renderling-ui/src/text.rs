@@ -248,6 +248,7 @@ impl GlyphCache {
     ///
     /// The texture and mesh are meant to be used to build or update a
     /// `Renderlet` to display.
+    #[allow(clippy::type_complexity)]
     pub fn get_updated(&mut self) -> (Option<Vec<Vertex>>, Option<ImageBuffer<Luma<u8>, Vec<u8>>>) {
         let mut may_mesh: Option<Vec<Vertex>> = None;
         let mut cache = self.cache.take().unwrap_or_else(|| {

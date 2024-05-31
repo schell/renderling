@@ -126,15 +126,13 @@ pub fn get_vertex_count(primitive: &gltf::Primitive<'_>) -> u32 {
         let count = indices.count() as u32;
         log::trace!("    has {count} indices");
         count
+    } else if let Some(positions) = primitive.get(&gltf::Semantic::Positions) {
+        let count = positions.count() as u32;
+        log::trace!("    has {count} positions");
+        count
     } else {
-        if let Some(positions) = primitive.get(&gltf::Semantic::Positions) {
-            let count = positions.count() as u32;
-            log::trace!("    has {count} positions");
-            count
-        } else {
-            log::trace!("    has no indices nor positions");
-            0
-        }
+        log::trace!("    has no indices nor positions");
+        0
     }
 }
 
@@ -308,7 +306,6 @@ impl Material {
                 emissive_texture_id: emissive_texture,
                 emissive_tex_coord,
                 has_lighting: true,
-                ..Default::default()
             }
         };
         Ok(material)
@@ -382,7 +379,7 @@ impl GltfPrimitive {
             let indices = if indices.is_empty() {
                 (0..positions.len() as u32).collect::<Vec<_>>()
             } else {
-                indices.iter().copied().collect::<Vec<_>>()
+                indices.to_vec()
             };
 
             indices.chunks(3).for_each(|chunk| match chunk {
@@ -409,7 +406,7 @@ impl GltfPrimitive {
             let indices = if indices.is_empty() {
                 (0..positions.len() as u32).collect::<Vec<_>>()
             } else {
-                indices.iter().copied().collect::<Vec<_>>()
+                indices.to_vec()
             };
 
             indices.chunks(3).for_each(|chunk| match chunk {
@@ -531,7 +528,7 @@ impl GltfMesh {
         log::debug!("Loading primitives for mesh {}", mesh.index());
         let primitives = mesh
             .primitives()
-            .map(|prim| GltfPrimitive::from_gltf(stage, prim, buffer_data, &materials))
+            .map(|prim| GltfPrimitive::from_gltf(stage, prim, buffer_data, materials))
             .collect::<Vec<_>>();
         log::trace!("  loaded {} primitives", primitives.len());
         let weights = mesh.weights().unwrap_or(&[]).iter().copied();
@@ -1280,7 +1277,7 @@ mod test {
         let doc = stage
             .load_gltf_document_from_path("../../gltf/red_brick_03_1k.glb", Id::NONE)
             .unwrap();
-        let gltf_camera = doc.cameras.get(0).unwrap();
+        let gltf_camera = doc.cameras.first().unwrap();
         doc.renderlets_iter().for_each(|hybrid| {
             hybrid.modify(|r| {
                 r.camera_id = gltf_camera.camera.id();
