@@ -336,7 +336,7 @@ mod test {
         let font = FontArc::try_from_vec(bytes).unwrap();
 
         let ctx = Context::headless(455, 145);
-        let mut ui = Ui::new(&ctx);
+        let ui = Ui::new(&ctx);
         let _font_id = ui.add_font(font);
         let _text = ui
             .new_text()
@@ -378,7 +378,7 @@ mod test {
         log::info!("{:#?}", std::env::current_dir());
 
         let ctx = Context::headless(500, 253);
-        let mut ui = Ui::new(&ctx).with_antialiasing(false);
+        let ui = Ui::new(&ctx).with_antialiasing(false);
         let font_id = futures_lite::future::block_on(
             ui.load_font("../../fonts/Recursive Mn Lnr St Med Nerd Font Complete.ttf"),
         )

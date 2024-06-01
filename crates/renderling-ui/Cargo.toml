@@ -13,7 +13,7 @@ readme = "README.md"
 crabslab = {workspace = true}
 glyph_brush = "0.7.8"
 image = {workspace=true}
-loading-bytes = {version = "0.1.0", path = "../loading-bytes"}
+loading-bytes = {version = "0.1.1", path = "../loading-bytes"}
 log = {workspace=true}
 lyon = "1.0.1"
 renderling = {version = "0.4.6", path = "../renderling"}
