@@ -188,7 +188,7 @@ Some of these solutions were then spun off into their own projects.
 - [`crabslab`](https://github.com/schell/crabslab)
   A slab allocator for working across CPU/GPU boundaries.
 - [`loading-bytes`](crates/loading-bytes)
-  A cross-platform (including the web) way of loading files to bytes.
+  A cross-platform (including the web) and comedically tiny way of loading files to bytes.
 - [`moongraph`](https://github.com/schell/moongraph)
   A DAG and resource graph runner.
 - Contributions to [`naga`](https://github.com/gfx-rs/wgpu/issues/4489)
