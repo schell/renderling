@@ -1638,7 +1638,7 @@ checksum = "b4ce301924b7887e9d637144fdade93f9dfff9b60981d4ac161db09720d39aa5"
 
 [[package]]
 name = "loading-bytes"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-fs",
  "js-sys",
@@ -2479,7 +2479,7 @@ dependencies = [
 
 [[package]]
 name = "renderling_ui"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "crabslab",
  "ctor",
