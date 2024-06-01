@@ -376,13 +376,13 @@ mod test {
     /// objects, it renders the transparency correctly.
     fn text_overlayed() {
         log::info!("{:#?}", std::env::current_dir());
-        let bytes =
-            std::fs::read("../../fonts/Recursive Mn Lnr St Med Nerd Font Complete.ttf").unwrap();
-        let font = FontArc::try_from_vec(bytes).unwrap();
 
         let ctx = Context::headless(500, 253);
         let mut ui = Ui::new(&ctx).with_antialiasing(false);
-        let _font_id = ui.add_font(font);
+        let font_id = futures_lite::future::block_on(
+            ui.load_font("../../fonts/Recursive Mn Lnr St Med Nerd Font Complete.ttf"),
+        )
+        .unwrap();
         let text1 = "Voluptas magnam sint et incidunt. Aliquam praesentium voluptas ut nemo \
                      laboriosam. Dicta qui et dicta.";
         let text2 = "Inventore impedit quo ratione ullam blanditiis soluta aliquid. Enim \
@@ -394,7 +394,8 @@ mod test {
                 Section::default().add_text(
                     Text::new(text1)
                         .with_scale(24.0)
-                        .with_color([0.0, 0.0, 0.0, 1.0]),
+                        .with_color([0.0, 0.0, 0.0, 1.0])
+                        .with_font_id(font_id),
                 ),
             )
             .with_section(

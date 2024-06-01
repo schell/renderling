@@ -266,7 +266,7 @@ mod test {
                 .unwrap()
                 .to_str()
                 .unwrap()
-                .replace("-", "_");
+                .replace('-', "_");
             let maybe_output_path = if std::env::var("print_wgsl").is_ok() || !is_valid {
                 let dir = std::path::PathBuf::from("../../test_output");
                 std::fs::create_dir_all(&dir).unwrap();

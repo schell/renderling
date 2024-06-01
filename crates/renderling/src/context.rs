@@ -379,12 +379,13 @@ impl Frame {
     /// This should be called after rendering, before presentation.
     /// Good for getting headless screen grabs.
     ///
-    /// The resulting image will be in a linear color space.
+    /// The resulting image will be in a sRGB color space.
     ///
     /// ## Note
     /// This operation can take a long time, depending on how big the screen is.
     pub fn read_srgb_image(&self) -> Result<image::RgbaImage, TextureError> {
         let buffer = self.copy_to_buffer(&self.device, &self.queue, self.size.x, self.size.y);
+        log::trace!("read image has the format: {:?}", buffer.format);
         buffer.into_srgba(&self.device)
     }
     /// Read the frame into an image.
