@@ -426,7 +426,7 @@ impl Stage {
             .map(|(i, (offset_px, size_px))| AtlasTexture {
                 offset_px,
                 size_px,
-                atlas_index: i,
+                frame_index: i,
                 ..Default::default()
             })
             .unwrap();
@@ -461,7 +461,7 @@ impl Stage {
             .map(|(i, (offset_px, size_px))| AtlasTexture {
                 offset_px,
                 size_px,
-                atlas_index: i,
+                frame_index: i,
                 ..Default::default()
             })
             .collect();

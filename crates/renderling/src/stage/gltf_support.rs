@@ -159,7 +159,7 @@ impl AtlasTexture {
                 s: mode_s,
                 t: mode_t,
             },
-            atlas_index: (image_index + atlas_offset) as u32,
+            frame_index: (image_index + atlas_offset) as u32,
         })
     }
 }

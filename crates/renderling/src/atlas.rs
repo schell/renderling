@@ -42,7 +42,7 @@ pub struct AtlasTexture {
     // Various toggles of texture modes.
     pub modes: TextureModes,
     // The index of the image in the atlas.
-    pub atlas_index: u32,
+    pub frame_index: u32,
 }
 
 impl AtlasTexture {
