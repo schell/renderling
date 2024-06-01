@@ -2,6 +2,11 @@
 name = "loading-bytes"
 version = "0.1.0"
 edition = "2021"
+description = "Load bytes from paths on native and WASM"
+repository = "https://github.com/schell/renderling"
+license = "MIT OR Apache-2.0"
+keywords = ["image", "font", "binary", "loading", "bytes"]
+categories = ["webassembly", "filesystem", "asynchronous"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
