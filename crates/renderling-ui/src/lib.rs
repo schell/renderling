@@ -29,7 +29,9 @@
 use std::sync::{Arc, RwLock};
 
 use crabslab::Id;
+use glyph_brush::ab_glyph;
 use renderling::{
+    atlas::AtlasTexture,
     camera::Camera,
     math::{Quat, UVec2, Vec2, Vec3Swizzles, Vec4},
     slab::{Hybrid, UpdatesSlab},
@@ -38,12 +40,43 @@ use renderling::{
     Context,
 };
 use rustc_hash::FxHashMap;
+use snafu::{prelude::*, ResultExt};
+
+pub use glyph_brush::FontId;
 
 mod path;
 pub use path::*;
 
 mod text;
 pub use text::*;
+
+#[derive(Debug, Snafu)]
+pub enum UiError {
+    #[snafu(display("{source}"))]
+    Loading {
+        source: loading_bytes::LoadingBytesError,
+    },
+
+    #[snafu(display("{source}"))]
+    InvalidFont { source: ab_glyph::InvalidFont },
+
+    #[snafu(display("{source}"))]
+    Image { source: image::ImageError },
+
+    #[snafu(display("{source}"))]
+    Stage {
+        source: renderling::stage::StageError,
+    },
+}
+
+/// An image identifier.
+///
+/// This locates the image within a [`Ui`].
+///
+/// `ImageId` can be created with [`Ui::load_image`].
+#[repr(transparent)]
+#[derive(Clone, Copy, Debug)]
+pub struct ImageId(usize);
 
 /// A two dimensional transformation.
 ///
@@ -104,6 +137,7 @@ impl UiTransform {
 pub struct Ui {
     camera: Hybrid<Camera>,
     stage: Stage,
+    images: Arc<RwLock<Vec<Hybrid<AtlasTexture>>>>,
     fonts: Arc<RwLock<Vec<FontArc>>>,
     // We keep a list of transforms that we use to "manually" order renderlets.
     //
@@ -126,11 +160,10 @@ impl Ui {
         Ui {
             camera,
             stage,
+            images: Default::default(),
             fonts: Default::default(),
             transforms: Default::default(),
-            default_stroke_options: Arc::new(RwLock::new(
-                StrokeOptions::default().with_line_width(2.0),
-            )),
+            default_stroke_options: Default::default(),
             default_fill_options: Default::default(),
         }
     }
@@ -187,17 +220,46 @@ impl Ui {
         UiTextBuilder::new(self)
     }
 
-    pub fn add_font(&mut self, font: FontArc) -> usize {
+    pub async fn load_font(&self, path: impl AsRef<str>) -> Result<FontId, UiError> {
+        let path_s = path.as_ref();
+        let bytes = loading_bytes::load(path_s).await.context(LoadingSnafu)?;
+        let font = FontArc::try_from_vec(bytes).context(InvalidFontSnafu)?;
+        Ok(self.add_font(font))
+    }
+
+    pub fn add_font(&self, font: FontArc) -> FontId {
         // UNWRAP: panic on purpose
         let mut fonts = self.fonts.write().unwrap();
         let id = fonts.len();
         fonts.push(font);
-        id
+        FontId(id)
     }
 
     pub fn get_fonts(&self) -> Vec<FontArc> {
         // UNWRAP: panic on purpose
         self.fonts.read().unwrap().clone()
+    }
+
+    pub async fn load_image(&self, path: impl AsRef<str>) -> Result<ImageId, UiError> {
+        let path_s = path.as_ref();
+        let bytes = loading_bytes::load(path_s).await.context(LoadingSnafu)?;
+        let img = image::load_from_memory_with_format(
+            bytes.as_slice(),
+            image::ImageFormat::from_path(path_s).context(ImageSnafu)?,
+        )
+        .context(ImageSnafu)?;
+        let mut texture = self.stage.add_image(img).context(StageSnafu)?;
+        texture.modes.s = renderling::atlas::TextureAddressMode::Repeat;
+        texture.modes.t = renderling::atlas::TextureAddressMode::Repeat;
+        let hybrid = self.stage.new_value(texture);
+        let mut guard = self.images.write().unwrap();
+        let id = guard.len();
+        guard.push(hybrid);
+        Ok(ImageId(id))
+    }
+
+    pub(crate) fn get_texture(&self, index: usize) -> Option<Hybrid<AtlasTexture>> {
+        self.images.read().unwrap().get(index).cloned()
     }
 
     fn reorder_renderlets(&self) {
@@ -216,7 +278,7 @@ impl Ui {
         );
     }
 
-    pub fn render(&mut self, view: &wgpu::TextureView) {
+    pub fn render(&self, view: &wgpu::TextureView) {
         let mut should_reorder = false;
         // UNWRAP: panic on purpose
         let mut transforms = self.transforms.write().unwrap();
@@ -247,7 +309,7 @@ mod test {
         let _ = env_logger::builder()
             .is_test(true)
             .filter_level(log::LevelFilter::Warn)
-            .filter_module("renderling", log::LevelFilter::Info)
+            .filter_module("renderling", log::LevelFilter::Trace)
             .filter_module("renderling_ui", log::LevelFilter::Trace)
             .filter_module("crabslab", log::LevelFilter::Debug)
             .try_init();

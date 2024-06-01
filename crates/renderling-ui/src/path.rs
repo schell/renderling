@@ -1,6 +1,7 @@
 //! Path and builder.
 //!
 //! Path colors are sRGB.
+use crabslab::Id;
 use lyon::{
     path::traits::PathBuilder,
     tessellation::{
@@ -8,18 +9,20 @@ use lyon::{
     },
 };
 use renderling::{
-    math::{Vec2, Vec3, Vec4},
+    math::{Vec2, Vec3, Vec3Swizzles, Vec4},
+    pbr::Material,
     slab::{GpuArray, Hybrid},
     stage::{Renderlet, Vertex},
 };
 
-use crate::{Ui, UiTransform};
-pub use lyon::tessellation::{FillOptions, LineCap, LineJoin, StrokeOptions};
+use crate::{ImageId, Ui, UiTransform};
+pub use lyon::tessellation::{LineCap, LineJoin};
 
 pub struct UiPath {
     pub vertices: GpuArray<Vertex>,
     pub indices: GpuArray<u32>,
     pub transform: UiTransform,
+    pub material: Hybrid<Material>,
     pub renderlet: Hybrid<Renderlet>,
 }
 
@@ -60,6 +63,30 @@ impl PathAttributes {
             fill_color: Vec4::new(s[4], s[5], s[6], s[7]),
         }
     }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct StrokeOptions {
+    pub line_width: f32,
+    pub line_cap: LineCap,
+    pub line_join: LineJoin,
+    pub image_id: Option<ImageId>,
+}
+
+impl Default for StrokeOptions {
+    fn default() -> Self {
+        StrokeOptions {
+            line_width: 2.0,
+            line_cap: LineCap::Round,
+            line_join: LineJoin::Round,
+            image_id: None,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct FillOptions {
+    pub image_id: Option<ImageId>,
 }
 
 #[derive(Clone)]
@@ -108,9 +135,19 @@ impl UiPathBuilder {
         self
     }
 
+    pub fn with_end(mut self, close: bool) -> Self {
+        self.end(close);
+        self
+    }
+
     pub fn line_to(&mut self, to: impl Into<Vec2>) -> &mut Self {
         self.inner
             .line_to(vec2_to_point(to), &self.attributes.to_array());
+        self
+    }
+
+    pub fn with_line_to(mut self, to: impl Into<Vec2>) -> Self {
+        self.line_to(to);
         self
     }
 
@@ -120,6 +157,11 @@ impl UiPathBuilder {
             vec2_to_point(to),
             &self.attributes.to_array(),
         );
+        self
+    }
+
+    pub fn with_quadratic_bezier_to(mut self, ctrl: impl Into<Vec2>, to: impl Into<Vec2>) -> Self {
+        self.quadratic_bezier_to(ctrl, to);
         self
     }
 
@@ -135,6 +177,16 @@ impl UiPathBuilder {
             vec2_to_point(to),
             &self.attributes.to_array(),
         );
+        self
+    }
+
+    pub fn with_cubic_bezier_to(
+        mut self,
+        ctrl1: impl Into<Vec2>,
+        ctrl2: impl Into<Vec2>,
+        to: impl Into<Vec2>,
+    ) -> Self {
+        self.cubic_bezier_to(ctrl1, ctrl2, to);
         self
     }
 
@@ -297,18 +349,37 @@ impl UiPathBuilder {
         let l_path = self.inner.build();
         let mut geometry = VertexBuffers::<Vertex, u16>::new();
         let mut tesselator = FillTessellator::new();
+
+        let mut size = Vec2::ONE;
+        let albedo_texture_id = if let Some(ImageId(index)) = options.image_id {
+            if let Some(hybrid) = self.ui.get_texture(index) {
+                let tex = hybrid.get();
+                log::debug!("size: {}", tex.size_px);
+                size.x = tex.size_px.x as f32;
+                size.y = tex.size_px.y as f32;
+                hybrid.id()
+            } else {
+                Id::NONE
+            }
+        } else {
+            log::debug!("no image");
+            Id::NONE
+        };
+
         tesselator
             .tessellate_path(
                 l_path.as_slice(),
-                &options,
+                &Default::default(),
                 &mut BuffersBuilder::new(&mut geometry, |mut vertex: FillVertex| {
                     let p = vertex.position();
                     let PathAttributes {
                         stroke_color: _,
                         fill_color,
                     } = PathAttributes::from_slice(vertex.interpolated_attributes());
+                    let position = Vec3::new(p.x, p.y, 0.0);
                     Vertex {
-                        position: Vec3::new(p.x, p.y, 0.0),
+                        position,
+                        uv0: position.xy() / size,
                         color: fill_color,
                         ..Default::default()
                     }
@@ -324,10 +395,16 @@ impl UiPathBuilder {
                 .into_iter()
                 .map(|u| u as u32),
         );
+
+        let material = self.ui.stage.new_value(Material {
+            albedo_texture_id,
+            ..Default::default()
+        });
         let renderlet = self.ui.stage.new_value(Renderlet {
             vertices_array: vertices.array(),
             indices_array: indices.array(),
             camera_id: self.ui.camera.id(),
+            material_id: material.id(),
             ..Default::default()
         });
 
@@ -340,6 +417,7 @@ impl UiPathBuilder {
             vertices: vertices.into_gpu_only(),
             indices: indices.into_gpu_only(),
             transform,
+            material,
             renderlet,
         }
     }
@@ -353,18 +431,47 @@ impl UiPathBuilder {
         let l_path = self.inner.build();
         let mut geometry = VertexBuffers::<Vertex, u16>::new();
         let mut tesselator = StrokeTessellator::new();
+        let StrokeOptions {
+            line_width,
+            line_cap,
+            line_join,
+            image_id,
+        } = options;
+        let tesselator_options = lyon::tessellation::StrokeOptions::default()
+            .with_line_cap(line_cap)
+            .with_line_join(line_join)
+            .with_line_width(line_width);
+
+        let mut size = Vec2::ONE;
+        let albedo_texture_id = if let Some(ImageId(index)) = image_id {
+            if let Some(hybrid) = self.ui.get_texture(index) {
+                let tex = hybrid.get();
+                log::debug!("size: {}", tex.size_px);
+                size.x = tex.size_px.x as f32;
+                size.y = tex.size_px.y as f32;
+                hybrid.id()
+            } else {
+                Id::NONE
+            }
+        } else {
+            log::debug!("no image");
+            Id::NONE
+        };
+
         tesselator
             .tessellate_path(
                 l_path.as_slice(),
-                &options,
+                &tesselator_options,
                 &mut BuffersBuilder::new(&mut geometry, |mut vertex: StrokeVertex| {
                     let p = vertex.position();
                     let PathAttributes {
                         stroke_color,
                         fill_color: _,
                     } = PathAttributes::from_slice(vertex.interpolated_attributes());
+                    let position = Vec3::new(p.x, p.y, 0.0);
                     Vertex {
-                        position: Vec3::new(p.x, p.y, 0.0),
+                        position,
+                        uv0: position.xy() / size,
                         color: stroke_color,
                         ..Default::default()
                     }
@@ -380,10 +487,15 @@ impl UiPathBuilder {
                 .into_iter()
                 .map(|u| u as u32),
         );
+        let material = self.ui.stage.new_value(Material {
+            albedo_texture_id,
+            ..Default::default()
+        });
         let renderlet = self.ui.stage.new_value(Renderlet {
             vertices_array: vertices.array(),
             indices_array: indices.array(),
             camera_id: self.ui.camera.id(),
+            material_id: material.id(),
             ..Default::default()
         });
 
@@ -396,6 +508,7 @@ impl UiPathBuilder {
             vertices: vertices.into_gpu_only(),
             indices: indices.into_gpu_only(),
             transform,
+            material,
             renderlet,
         }
     }
@@ -434,10 +547,29 @@ mod test {
 
     use super::*;
 
+    /// Generates points for a star shape.
+    /// `num_points` specifies the number of points (tips) the star will
+    /// have. `radius` specifies the radius of the circle in which
+    /// the star is inscribed.
+    fn star_points(num_points: usize, outer_radius: f32, inner_radius: f32) -> Vec<Vec2> {
+        let mut points = Vec::with_capacity(num_points * 2);
+        let angle_step = std::f32::consts::PI / num_points as f32;
+        for i in 0..num_points * 2 {
+            let angle = angle_step * i as f32;
+            let radius = if i % 2 == 0 {
+                outer_radius
+            } else {
+                inner_radius
+            };
+            points.push(Vec2::new(radius * angle.cos(), radius * angle.sin()));
+        }
+        points
+    }
+
     #[test]
     fn can_build_path_sanity() {
         let ctx = Context::headless(100, 100);
-        let mut ui = Ui::new(&ctx).with_antialiasing(false);
+        let ui = Ui::new(&ctx).with_antialiasing(false);
         let builder = ui
             .new_path()
             .with_fill_color([1.0, 1.0, 0.0, 1.0])
@@ -457,8 +589,10 @@ mod test {
     #[test]
     fn can_draw_shapes() {
         let ctx = Context::headless(256, 48);
-        let mut ui = Ui::new(&ctx)
-            .with_default_stroke_options(StrokeOptions::default().with_line_width(4.0));
+        let ui = Ui::new(&ctx).with_default_stroke_options(StrokeOptions {
+            line_width: 4.0,
+            ..Default::default()
+        });
         let mut colors = Colors::from_array(cute_beach_palette());
 
         // rectangle
@@ -503,25 +637,6 @@ mod test {
             .with_polygon(true, circle_points(5, 20.0).into_iter().map(|p| p + center))
             .fill_and_stroke();
 
-        /// Generates points for a star shape.
-        /// `num_points` specifies the number of points (tips) the star will
-        /// have. `radius` specifies the radius of the circle in which
-        /// the star is inscribed.
-        fn star_points(num_points: usize, outer_radius: f32, inner_radius: f32) -> Vec<Vec2> {
-            let mut points = Vec::with_capacity(num_points * 2);
-            let angle_step = std::f32::consts::PI / num_points as f32;
-            for i in 0..num_points * 2 {
-                let angle = angle_step * i as f32;
-                let radius = if i % 2 == 0 {
-                    outer_radius
-                } else {
-                    inner_radius
-                };
-                points.push(Vec2::new(radius * angle.cos(), radius * angle.sin()));
-            }
-            points
-        }
-
         let fill = colors.next_color();
         let center = Vec2::new(184.0, 22.0);
         let _star = ui
@@ -545,5 +660,44 @@ mod test {
         ui.render(&frame.view());
         let img = frame.read_image().unwrap();
         img_diff::save("ui/path/shapes.png", img);
+    }
+
+    #[test]
+    fn can_fill_image() {
+        let w = 150.0;
+        let ctx = Context::headless(w as u32, w as u32);
+        let ui = Ui::new(&ctx);
+        let image_id = futures_lite::future::block_on(ui.load_image("../../img/dirt.jpg")).unwrap();
+        let center = Vec2::splat(w / 2.0);
+        let _path = ui
+            .new_path()
+            .with_polygon(
+                true,
+                star_points(7, w / 2.0, w / 3.0)
+                    .into_iter()
+                    .map(|p| center + p),
+            )
+            .with_fill_color([1.0, 1.0, 1.0, 1.0])
+            .with_stroke_color([1.0, 0.0, 0.0, 1.0])
+            .fill_and_stroke_with_options(
+                FillOptions {
+                    image_id: Some(image_id),
+                },
+                StrokeOptions {
+                    line_width: 5.0,
+                    image_id: Some(image_id),
+                    ..Default::default()
+                },
+            );
+
+        let frame = ctx.get_next_frame().unwrap();
+        ui.render(&frame.view());
+        let mut img = frame.read_srgb_image().unwrap();
+        img.pixels_mut().for_each(|p| {
+            renderling::color::opto_xfer_u8(&mut p.0[0]);
+            renderling::color::opto_xfer_u8(&mut p.0[1]);
+            renderling::color::opto_xfer_u8(&mut p.0[2]);
+        });
+        img_diff::save("ui/path/fill_image.png", img);
     }
 }

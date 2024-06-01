@@ -2484,13 +2484,16 @@ dependencies = [
  "crabslab",
  "ctor",
  "env_logger",
+ "futures-lite 1.13.0",
  "glyph_brush",
  "image 0.24.9",
  "img-diff",
+ "loading-bytes",
  "log",
  "lyon",
  "renderling",
  "rustc-hash",
+ "snafu",
  "wgpu",
 ]
 
