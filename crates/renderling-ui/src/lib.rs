@@ -168,6 +168,16 @@ impl Ui {
         }
     }
 
+    pub fn set_background_color(&self, color: impl Into<Vec4>) -> &Self {
+        self.stage.set_background_color(color);
+        self
+    }
+
+    pub fn with_background_color(self, color: impl Into<Vec4>) -> Self {
+        self.set_background_color(color);
+        self
+    }
+
     pub fn set_antialiasing(&self, antialiasing_is_on: bool) -> &Self {
         let sample_count = if antialiasing_is_on { 4 } else { 1 };
         self.stage.set_msaa_sample_count(sample_count);
