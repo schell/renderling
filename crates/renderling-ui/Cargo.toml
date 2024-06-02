@@ -1,6 +1,6 @@
 [package]
 name = "renderling_ui"
-version = "0.3.2"
+version = "0.3.3"
 edition = "2021"
 description = "User-friendly real-time 2d rendering. 🍖"
 repository = "https://github.com/schell/renderling"
