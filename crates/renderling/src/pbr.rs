@@ -14,7 +14,7 @@ use spirv_std::num_traits::Float;
 use crate::{
     atlas::AtlasTexture,
     camera::Camera,
-    math::{self, IsSampler, IsVector, Sample2d, SampleCube},
+    math::{self, IsSampler, IsVector, Sample2d, Sample2dArray, SampleCube},
     pbr::light::{DirectionalLight, PointLight, SpotLight},
     println as my_println,
 };
@@ -268,17 +268,17 @@ pub fn get_material(material_id: Id<Material>, has_lighting: bool, slab: &[u32])
     }
 }
 
-pub fn texture_color<T: Sample2d<Sampler = S>, S: IsSampler>(
+pub fn texture_color<A: Sample2dArray<Sampler = S>, S: IsSampler>(
     texture_id: Id<AtlasTexture>,
     uv: Vec2,
-    atlas: &T,
+    atlas: &A,
     sampler: &S,
     atlas_size: glam::UVec2,
     slab: &[u32],
 ) -> Vec4 {
     let texture = slab.read(texture_id);
     // uv is [0, 0] when texture_id is Id::NONE
-    let uv = texture.uv(uv, atlas_size);
+    let uv = texture.uv(slab, uv, atlas_size);
     crate::println!("uv: {uv}");
     let mut color: Vec4 = atlas.sample_by_lod(*sampler, uv, 0.0);
     if texture_id.is_none() {
@@ -289,8 +289,8 @@ pub fn texture_color<T: Sample2d<Sampler = S>, S: IsSampler>(
 
 /// PBR fragment shader capable of being run on CPU or GPU.
 #[allow(clippy::too_many_arguments)]
-pub fn fragment_impl<T, C, S>(
-    atlas: &T,
+pub fn fragment_impl<A, T, C, S>(
+    atlas: &A,
     atlas_sampler: &S,
     irradiance: &C,
     irradiance_sampler: &S,
@@ -320,6 +320,7 @@ pub fn fragment_impl<T, C, S>(
 
     output: &mut Vec4,
 ) where
+    A: Sample2dArray<Sampler = S>,
     T: Sample2d<Sampler = S>,
     C: SampleCube<Sampler = S>,
     S: IsSampler,

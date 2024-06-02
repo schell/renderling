@@ -1,4 +1,5 @@
 //! Rendering context initialization and frame management.
+use core::sync::atomic::AtomicU32;
 use std::{ops::Deref, sync::Arc};
 
 use glam::UVec2;
@@ -123,7 +124,8 @@ async fn device(
                         //| wgpu::Features::SPIRV_SHADER_PASSTHROUGH
                         // this one is a funny requirement, it seems it is needed if using storage buffers in
                         // vertex shaders, even if those shaders are read-only
-                        | wgpu::Features::VERTEX_WRITABLE_STORAGE;
+                        | wgpu::Features::VERTEX_WRITABLE_STORAGE
+                        | wgpu::Features::CLEAR_TEXTURE;
     let supported_features = adapter.features();
     let required_features = wanted_features.intersection(supported_features);
     let unsupported_features = wanted_features.difference(supported_features);
@@ -429,6 +431,8 @@ pub struct Context {
     queue: Arc<wgpu::Queue>,
     render_target: RenderTarget,
     size: UVec2,
+    pub(crate) default_atlas_texture_array_size: Arc<AtomicU32>,
+    pub(crate) default_atlas_texture_array_layers: Arc<AtomicU32>,
 }
 
 impl Context {
@@ -439,12 +443,29 @@ impl Context {
         queue: impl Into<Arc<wgpu::Queue>>,
         size: UVec2,
     ) -> Self {
+        let adapter: Arc<wgpu::Adapter> = adapter.into();
+        let limits = adapter.limits();
+        let default_atlas_texture_array_size = Arc::new(
+            limits
+                .max_texture_dimension_2d
+                .min(crate::atlas::ATLAS_SUGGESTED_SIZE)
+                .into(),
+        );
+        let default_atlas_texture_array_layers = Arc::new(
+            adapter
+                .limits()
+                .max_texture_array_layers
+                .min(crate::atlas::ATLAS_SUGGESTED_LAYERS)
+                .into(),
+        );
         Self {
             adapter: adapter.into(),
             device: device.into(),
             queue: queue.into(),
             render_target: target,
             size,
+            default_atlas_texture_array_size,
+            default_atlas_texture_array_layers,
         }
     }
 
@@ -603,6 +624,36 @@ impl Context {
                 }
             },
         })
+    }
+
+    /// Set the default texture size for any atlas.
+    ///
+    /// Must be a power of two.
+    pub fn set_default_atlas_texture_size(&self, size: u32) -> &Self {
+        self.default_atlas_texture_array_size
+            .store(size, core::sync::atomic::Ordering::Relaxed);
+        self
+    }
+
+    /// Set the default texture size for any atlas.
+    ///
+    /// Must be a power of two.
+    pub fn with_default_atlas_texture_size(self, size: u32) -> Self {
+        self.set_default_atlas_texture_size(size);
+        self
+    }
+
+    /// Set the default number of layers for any atlas.
+    pub fn set_default_atlas_texture_layers(&self, layers: u32) -> &Self {
+        self.default_atlas_texture_array_layers
+            .store(layers, core::sync::atomic::Ordering::Relaxed);
+        self
+    }
+
+    /// Set the default number of layers for any atlas.
+    pub fn with_default_atlas_texture_layers(self, layers: u32) -> Self {
+        self.set_default_atlas_texture_layers(layers);
+        self
     }
 
     /// Create and return a new [`Stage`] renderer.

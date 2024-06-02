@@ -164,7 +164,7 @@ impl App {
         self.theta = std::f32::consts::FRAC_PI_4;
         self.left_mb_down = false;
         self.last_cursor_position = None;
-        self.stage.set_images(std::iter::empty()).unwrap();
+        self.stage.clear_images().unwrap();
         self.document = None;
         log::debug!("ticking stage to reclaim buffers");
         self.stage.tick();

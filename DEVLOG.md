@@ -1,5 +1,27 @@
 # devlog
 
+## Mon June 3, 2024
+
+### NLNet progress
+
+[My first PR to add atomics to naga's SPIR-V frontend](https://github.com/gfx-rs/wgpu/pull/5702) was 
+merged last week! I'm super stoked because I was worried it might be a bit beyond my pay grade, but 
+I figured it out with the help of @jimblandy.
+
+### Atlas improvements
+
+Finally, the atlas in renderling is a true texture array, greatly increasing `renderling`'s texture
+capacity.
+
+By default the atlas holds an array of 2048x2048x8 textures, but it's configurable so if you need 
+more you can bump up the default size in `Context`, before you create the stage.
+
+### renderling-ui
+
+I've rebuilt and released a good portion of [`renderling-ui`](https://crates.io/renderling-ui). 
+Partially because @jimsynz wanted to use `renderling` as a [`scenic`](hexdocs.pm/scenic/) driver,
+and partially because I still want to be able to write game and tools UI with `renderling`.
+
 ## Sat May 25, 2024
 
 ### SPIR-V atomics update

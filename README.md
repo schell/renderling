@@ -64,6 +64,7 @@ Renderling takes a [forward+](https://takahiroharada.files.wordpress.com/2015/04
 
 By default it uses a single uber-shader for rendering.
 
+- [x] texture atlas
 - [ ] frustum culling
 - [ ] occlusion culling
 - [ ] light tiling
@@ -95,8 +96,15 @@ By default it uses a single uber-shader for rendering.
     - [x] textures, images, samplers
     - animation
       - [x] interpolation
-      - [x] morph targets
-      - [x] skinning
+      - [x] skinning (still working on one [issue](https://github.com/schell/renderling/issues/120))
+      - [ ] morph targets (requires rebuild)
+- 2d 
+  - [x] text
+  - [x] stroked and filled paths
+    - [x] cubic beziers
+    - [x] quadratic beziers
+    - [x] arbitrary polygons
+    - [x] fill w/ image
 
 ## Definition
 **renderling** noun

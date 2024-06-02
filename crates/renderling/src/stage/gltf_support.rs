@@ -7,9 +7,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use snafu::{OptionExt, ResultExt, Snafu};
 
 use crate::{
-    atlas::{
-        AtlasError, AtlasImage, AtlasTexture, LayerRepacking, TextureAddressMode, TextureModes,
-    },
+    atlas::{AtlasError, AtlasFrame, AtlasImage, AtlasTexture, TextureAddressMode, TextureModes},
     camera::Camera,
     pbr::{
         light::{DirectionalLight, Light, LightStyle, PointLight, SpotLight},
@@ -26,16 +24,22 @@ pub use anime::*;
 #[derive(Debug, Snafu)]
 pub enum StageGltfError {
     #[snafu(display("{source}"))]
+    Stage { source: crate::stage::StageError },
+
+    #[snafu(display("{source}"))]
     Gltf { source: gltf::Error },
 
     #[snafu(display("{source}"))]
     Atlas { source: crate::atlas::AtlasError },
 
-    #[snafu(display("Missing image at index {index} atlas offset {offset}"))]
-    MissingImage { offset: usize, index: usize },
+    #[snafu(display("Missing image at index {index}"))]
+    MissingImage { index: usize },
 
     #[snafu(display("Wrong image at index {index} atlas offset {offset}"))]
     WrongImage { offset: usize, index: usize },
+
+    #[snafu(display("Missing atlas image frame {index}"))]
+    MissingFrame { index: usize },
 
     #[snafu(display("Missing texture at gltf index {index} slab index {tex_id:?}"))]
     MissingTexture {
@@ -136,41 +140,11 @@ pub fn get_vertex_count(primitive: &gltf::Primitive<'_>) -> u32 {
     }
 }
 
-impl AtlasTexture {
-    pub fn from_gltf(
-        texture: gltf::Texture,
-        repacking: &mut LayerRepacking,
-        atlas_offset: usize,
-    ) -> Result<AtlasTexture, StageGltfError> {
-        let image_index = texture.source().index();
-        let mode_s = TextureAddressMode::from_gltf(texture.sampler().wrap_s());
-        let mode_t = TextureAddressMode::from_gltf(texture.sampler().wrap_t());
-        let (offset_px, size_px) =
-            repacking
-                .get_frame(image_index + atlas_offset)
-                .context(MissingImageSnafu {
-                    index: image_index,
-                    offset: atlas_offset,
-                })?;
-        Ok(AtlasTexture {
-            offset_px,
-            size_px,
-            modes: TextureModes {
-                s: mode_s,
-                t: mode_t,
-            },
-            frame_index: (image_index + atlas_offset) as u32,
-        })
-    }
-}
-
 impl Material {
-    /// Convert a [`gltf::Material`] to a [`Material`].
     pub fn from_gltf(
         material: gltf::Material,
-        repacking: &mut LayerRepacking,
         textures: Array<AtlasTexture>,
-        atlas_offset: usize,
+        images: &mut [AtlasImage],
     ) -> Result<Material, StageGltfError> {
         let name = material.name().map(String::from);
         log::trace!("loading material {:?} {name:?}", material.index());
@@ -184,17 +158,9 @@ impl Material {
                 // The index of the image in the original gltf document
                 let image_index = texture.source().index();
                 // Update the image to ensure it gets transferred correctly
-                let image = repacking
-                    .get_mut(atlas_offset + image_index)
-                    .context(MissingImageSnafu {
-                        index: image_index,
-                        offset: atlas_offset,
-                    })?
-                    .as_scene_img_mut()
-                    .context(WrongImageSnafu {
-                        index: image_index,
-                        offset: atlas_offset,
-                    })?;
+                let image = images
+                    .get_mut(image_index)
+                    .context(MissingImageSnafu { index: image_index })?;
                 image.apply_linear_transfer = true;
                 (tex_id, info.tex_coord())
             } else {
@@ -216,17 +182,9 @@ impl Material {
                 let tex_id = textures.at(index);
                 let image_index = texture.source().index();
                 // Update the image to ensure it gets transferred correctly
-                let image = repacking
-                    .get_mut(image_index + atlas_offset)
-                    .context(MissingImageSnafu {
-                        index: image_index,
-                        offset: atlas_offset,
-                    })?
-                    .as_scene_img_mut()
-                    .context(WrongImageSnafu {
-                        index: image_index,
-                        offset: atlas_offset,
-                    })?;
+                let image = images
+                    .get_mut(image_index)
+                    .context(MissingImageSnafu { index: image_index })?;
                 image.apply_linear_transfer = true;
                 (tex_id, info.tex_coord())
             } else {
@@ -269,17 +227,9 @@ impl Material {
                     let tex_id = textures.at(index);
                     let image_index = texture.source().index();
                     // Update the image to ensure it gets transferred correctly
-                    let image = repacking
-                        .get_mut(image_index + atlas_offset)
-                        .context(MissingImageSnafu {
-                            index: image_index,
-                            offset: atlas_offset,
-                        })?
-                        .as_scene_img_mut()
-                        .context(WrongImageSnafu {
-                            index: image_index,
-                            offset: atlas_offset,
-                        })?;
+                    let image = images
+                        .get_mut(image_index)
+                        .context(MissingImageSnafu { index: image_index })?;
                     image.apply_linear_transfer = true;
                     (tex_id, emissive_tex.tex_coord())
                 } else {
@@ -710,19 +660,20 @@ impl GltfSkin {
 #[derive(Debug)]
 pub struct GltfDocument {
     pub animations: Vec<Animation>,
-    pub nodes: Vec<GltfNode>,
     pub cameras: Vec<GltfCamera>,
-    pub extensions: Option<serde_json::Value>,
-    pub meshes: Vec<GltfMesh>,
     pub default_material: Hybrid<Material>,
+    pub default_scene: Option<usize>,
+    pub extensions: Option<serde_json::Value>,
+    pub frames: Vec<Hybrid<AtlasFrame>>,
+    pub lights: Vec<GltfLight>,
+    pub meshes: Vec<GltfMesh>,
+    pub nodes: Vec<GltfNode>,
     pub materials: HybridArray<Material>,
-    pub skins: Vec<GltfSkin>,
+    pub renderlets: FxHashMap<usize, Vec<Hybrid<Renderlet>>>,
     /// Vector of scenes - each being a list of nodes.
     pub scenes: Vec<Vec<usize>>,
-    pub default_scene: Option<usize>,
+    pub skins: Vec<GltfSkin>,
     pub textures: HybridArray<AtlasTexture>,
-    pub lights: Vec<GltfLight>,
-    pub renderlets: FxHashMap<usize, Vec<Hybrid<Renderlet>>>,
 }
 
 impl GltfDocument {
@@ -734,6 +685,49 @@ impl GltfDocument {
         // Camera id to use for any created Renderlets
         camera_id: Id<Camera>,
     ) -> Result<GltfDocument, StageGltfError> {
+        let mut images = images.into_iter().map(AtlasImage::from).collect::<Vec<_>>();
+
+        let num_textures = document.textures().len();
+        log::debug!("Preallocating an array of {num_textures} textures");
+        let textures = stage.new_array(vec![AtlasTexture::default(); num_textures]);
+
+        log::debug!("Creating materials");
+        let default_material = stage.new_value(Material::default());
+        let mut materials = vec![];
+        for gltf_material in document.materials() {
+            let material_index = gltf_material.index();
+            let material = Material::from_gltf(gltf_material, textures.array(), &mut images)?;
+            if let Some(index) = material_index {
+                log::trace!("  created material {index}");
+                debug_assert_eq!(index, materials.len(), "unexpected material index");
+                materials.push(material);
+            } else {
+                log::trace!("  created default material");
+                default_material.set(material);
+            }
+        }
+        let materials = stage.new_array(materials);
+        log::trace!("  created {} materials", materials.len());
+
+        log::debug!("Loading {} images into the atlas", images.len());
+        let frames = stage.add_images(images).context(StageSnafu)?;
+
+        log::debug!("Writing textures");
+        for (i, texture) in document.textures().enumerate() {
+            let index = texture.index();
+            let frame = frames.get(index).context(MissingFrameSnafu { index })?;
+            let texture = AtlasTexture {
+                frame_id: frame.id(),
+                modes: TextureModes {
+                    s: TextureAddressMode::from_gltf(texture.sampler().wrap_s()),
+                    t: TextureAddressMode::from_gltf(texture.sampler().wrap_t()),
+                },
+            };
+            let texture_id = textures.array().at(i);
+            log::trace!("  texture {i} {texture_id:?}: {texture:#?}");
+            textures.set_item(i, texture);
+        }
+
         log::debug!("Loading {} nodes", document.nodes().count());
         let mut nodes = vec![];
         let mut node_transforms = HashMap::<usize, NestedTransform>::new();
@@ -826,67 +820,6 @@ impl GltfDocument {
                 .get(&camera_index)
                 .context(MissingNodeSnafu { index: node_index })?;
             cameras.push(GltfCamera::new(stage, camera, transform));
-        }
-
-        // We need the (re)packing of the atlas before we marshal the images into the
-        // GPU because we need their frames for textures and materials, but we
-        // need to know if the materials require us to apply a linear transfer.
-        // So we'll get the preview repacking first, then update the frames in
-        // the textures.
-        let (mut repacking, atlas_offset) = {
-            // UNWRAP: if we can't lock the atlas, we want to panic.
-            let atlas_offset = stage.atlas.frames().len();
-            (
-                stage
-                    .atlas
-                    .begin_repacking(&stage.device, images.into_iter().map(AtlasImage::from))
-                    .context(AtlasSnafu)?,
-                atlas_offset,
-            )
-        };
-
-        log::debug!("Creating atlas textures");
-        let textures = stage.new_array(vec![AtlasTexture::default(); document.textures().len()]);
-        for (i, texture) in document.textures().enumerate() {
-            let texture = AtlasTexture::from_gltf(texture, &mut repacking, atlas_offset)?;
-            let texture_id = textures.array().at(i);
-            log::trace!("  texture {i} {texture_id:?}: {texture:#?}");
-            textures.set_item(i, texture);
-        }
-
-        log::debug!("Creating materials");
-        let default_material = stage.new_value(Material::default());
-        let mut materials = vec![];
-        for gltf_material in document.materials() {
-            let material_index = gltf_material.index();
-            let material = Material::from_gltf(
-                gltf_material,
-                &mut repacking,
-                textures.array(),
-                atlas_offset,
-            )?;
-            if let Some(index) = material_index {
-                log::trace!("  created material {index}");
-                debug_assert_eq!(index, materials.len(), "unexpected material index");
-                materials.push(material);
-            } else {
-                log::trace!("  created default material");
-                default_material.set(material);
-            }
-        }
-        let materials = stage.new_array(materials);
-        log::trace!("  created {} materials", materials.len());
-
-        let number_of_new_images = repacking.new_images_len();
-        if number_of_new_images > 0 {
-            log::trace!("Packing the atlas");
-            log::trace!("  adding {number_of_new_images} new images",);
-            stage.atlas.repack(&stage.device, &stage.queue, repacking)?;
-            let size = stage.atlas.get_size();
-            // The bindgroup will have to be remade
-            let _ = stage.textures_bindgroup.lock().unwrap().take();
-            // The atlas size must be reset
-            stage.pbr_config.modify(|cfg| cfg.atlas_size = size);
         }
 
         log::debug!("Loading meshes");
@@ -1025,6 +958,7 @@ impl GltfDocument {
         log::debug!("Done loading gltf");
 
         Ok(GltfDocument {
+            frames,
             animations,
             lights,
             cameras,

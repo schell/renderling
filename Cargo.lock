@@ -2479,7 +2479,7 @@ dependencies = [
 
 [[package]]
 name = "renderling_ui"
-version = "0.3.2"
+version = "0.3.3"
 dependencies = [
  "crabslab",
  "ctor",

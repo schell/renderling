@@ -102,8 +102,11 @@ impl UiTextBuilder {
         ));
 
         // UNWRAP: panic on purpose
-        let texture = ui.stage.add_image(img).unwrap();
-        let texture = ui.stage.new_value(texture);
+        let frame = ui.stage.add_images(Some(img)).unwrap().pop().unwrap();
+        let texture = ui.stage.new_value(AtlasTexture {
+            frame_id: frame.id(),
+            ..Default::default()
+        });
         material.albedo_texture_id = texture.id();
 
         let vertices = ui.stage.new_array(mesh);
