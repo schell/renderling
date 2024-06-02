@@ -35,14 +35,16 @@ pub struct TextureModes {
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[derive(Clone, Copy, Default, PartialEq, SlabItem)]
 pub struct AtlasTexture {
-    // The top left offset of texture in the atlas.
+    /// The top left offset of texture in the atlas.
     pub offset_px: UVec2,
-    // The size of the texture in the atlas.
+    /// The size of the texture in the atlas.
     pub size_px: UVec2,
-    // Various toggles of texture modes.
+    /// Various toggles of texture modes.
     pub modes: TextureModes,
-    // The index of the image in the atlas.
-    pub frame_index: u32,
+    /// The index of the layer within the atlas that this `AtlasTexture `belongs to.
+    pub layer_index: u32,
+    /// The index of this texture within the layer.
+    pub texture_index: u32,
 }
 
 impl AtlasTexture {

@@ -8,7 +8,7 @@ use snafu::{OptionExt, ResultExt, Snafu};
 
 use crate::{
     atlas::{
-        AtlasError, AtlasImage, AtlasTexture, RepackPreview, TextureAddressMode, TextureModes,
+        AtlasError, AtlasImage, AtlasTexture, LayerRepacking, TextureAddressMode, TextureModes,
     },
     camera::Camera,
     pbr::{
@@ -139,7 +139,7 @@ pub fn get_vertex_count(primitive: &gltf::Primitive<'_>) -> u32 {
 impl AtlasTexture {
     pub fn from_gltf(
         texture: gltf::Texture,
-        repacking: &mut RepackPreview,
+        repacking: &mut LayerRepacking,
         atlas_offset: usize,
     ) -> Result<AtlasTexture, StageGltfError> {
         let image_index = texture.source().index();
@@ -168,7 +168,7 @@ impl Material {
     /// Convert a [`gltf::Material`] to a [`Material`].
     pub fn from_gltf(
         material: gltf::Material,
-        repacking: &mut RepackPreview,
+        repacking: &mut LayerRepacking,
         textures: Array<AtlasTexture>,
         atlas_offset: usize,
     ) -> Result<Material, StageGltfError> {
@@ -839,7 +839,7 @@ impl GltfDocument {
             (
                 stage
                     .atlas
-                    .repack_preview(&stage.device, images.into_iter().map(AtlasImage::from))
+                    .begin_repacking(&stage.device, images.into_iter().map(AtlasImage::from))
                     .context(AtlasSnafu)?,
                 atlas_offset,
             )

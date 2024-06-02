@@ -401,35 +401,21 @@ impl Stage {
         self
     }
 
-    /// Add an image to the set of atlas images.
+    /// Add images to the set of atlas images.
     ///
     /// Adding an image can be quite expensive, as it requires repacking all
     /// previous images. For that reason it's better to use
     /// [`Stage::set_images`] if you have all the images beforehand.
-    pub fn add_image(&self, image: impl Into<AtlasImage>) -> Result<AtlasTexture, StageError> {
-        let preview = self
+    pub fn add_images(
+        &self,
+        image: impl Into<AtlasImage>,
+    ) -> Result<Hybrid<AtlasTexture>, StageError> {
+        let mut hybrids = self
             .atlas
-            .repack_preview(&self.device, Some(image.into()))?;
-        self.atlas.repack(&self.device, &self.queue, preview)?;
-
-        let size = self.atlas.get_size();
-        // The textures bindgroup will have to be remade
-        let _ = self.textures_bindgroup.lock().unwrap().take();
-        // The atlas size must be reset
-        self.pbr_config.modify(|cfg| cfg.atlas_size = size);
-
-        let texture = self
-            .atlas
-            .frames()
-            .into_iter()
-            .last()
-            .map(|(i, (offset_px, size_px))| AtlasTexture {
-                offset_px,
-                size_px,
-                frame_index: i,
-                ..Default::default()
-            })
-            .unwrap();
+            .add_images(&self.device, &self.queue, &self, Some(image))?;
+        // UNWRAP: safe because we know add_images will return the same number of textures
+        // as the number of images that we put in, or it will err.
+        let texture = hybrids.pop().unwrap();
 
         Ok(texture)
     }
