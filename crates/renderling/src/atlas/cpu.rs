@@ -1,120 +1,102 @@
 use core::ops::Deref;
 use glam::UVec2;
-use image::{EncodableLayout, RgbaImage};
+use image::RgbaImage;
 use snafu::prelude::*;
 use std::sync::{Arc, RwLock};
 
-use crate::texture::Texture;
+use crate::{
+    slab::{Hybrid, IsBuffer, SlabAllocator},
+    texture::Texture,
+};
 
-use super::atlas_image::{convert_to_rgba8_bytes, AtlasImage};
+use super::{
+    atlas_image::{convert_to_rgba8_bytes, AtlasImage},
+    AtlasFrame,
+};
+
+pub(crate) const ATLAS_SUGGESTED_SIZE: u32 = 2048;
+pub(crate) const ATLAS_SUGGESTED_LAYERS: u32 = 8;
 
 #[derive(Debug, Snafu)]
 pub enum AtlasError {
-    #[snafu(display("Cannot pack textures. {len} textures took up too much space."))]
-    CannotPackTextures { len: usize },
+    #[snafu(display(
+        "Cannot pack textures.\natlas_size: {size:#?}\nimage_sizes: {image_sizes:#?}"
+    ))]
+    CannotPackTextures {
+        size: wgpu::Extent3d,
+        image_sizes: Vec<UVec2>,
+    },
+
+    #[snafu(display("Missing layer {index}"))]
+    MissingLayer { index: u32, images: Vec<AtlasImage> },
+
+    #[snafu(display("Atlas size is invalid: {size:?}"))]
+    Size { size: wgpu::Extent3d },
 }
 
-fn gpu_frame_from_rect(r: &crunch::Rect) -> (UVec2, UVec2) {
-    (
-        UVec2::new(r.x as u32, r.y as u32),
-        UVec2::new(r.w as u32, r.h as u32),
-    )
+pub(crate) fn check_size(size: wgpu::Extent3d) -> Result<(), AtlasError> {
+    let conditions = size.depth_or_array_layers >= 2
+        && size.width == size.height
+        && (size.width & (size.width - 1)) == 0;
+    if !conditions {
+        return SizeSnafu { size }.fail();
+    }
+
+    Ok(())
+}
+
+fn fan_split_n<T>(n: usize, input: impl IntoIterator<Item = T>) -> Vec<Vec<T>> {
+    if n == 0 {
+        return vec![];
+    }
+    let mut output = vec![];
+    for _ in 0..n {
+        output.push(vec![]);
+    }
+    let mut i = 0;
+    for item in input.into_iter() {
+        // UNWRAP: safe because i % n
+        output
+            .get_mut(i)
+            .unwrap_or_else(|| panic!("could not unwrap i:{i} n:{n}"))
+            .push(item);
+        i = (i + 1) % n;
+    }
+    output
 }
 
 /// A texture atlas packing, before it is committed to the GPU.
 #[derive(Clone)]
-pub enum Packing {
+enum Packing<'a> {
+    /// A new packing.
+    ///
+    /// This image does not yet live on the GPU
     Img {
-        index: usize,
-        image: AtlasImage,
+        /// Index of the layer within the atlas.
+        layer_index: u32,
+        /// Index of the frame within the layer.
+        frame_index: u32,
+        /// Image bytes, etc
+        image: &'a AtlasImage,
     },
-    GpuImg {
-        index: usize,
-        offset_px: UVec2,
-        size_px: UVec2,
-    },
+    /// A previous packing.
+    ///
+    /// This image has already been staged on the GPU.
+    GpuImg { frame: Hybrid<AtlasFrame> },
 }
 
-impl Packing {
-    pub fn width(&self) -> u32 {
+impl<'a> Packing<'a> {
+    pub fn size(&self) -> UVec2 {
         match self {
-            Packing::Img { image, .. } => image.width,
-            Packing::GpuImg { size_px, .. } => size_px.x,
-        }
-    }
-
-    pub fn height(&self) -> u32 {
-        match self {
-            Packing::Img { image, .. } => image.height,
-            Packing::GpuImg { size_px, .. } => size_px.y,
-        }
-    }
-
-    pub fn index(&self) -> usize {
-        match self {
-            Packing::Img { index, .. } => *index,
-            Packing::GpuImg { index, .. } => *index,
-        }
-    }
-
-    pub fn set_index(&mut self, index: usize) {
-        match self {
-            Packing::Img { index: i, .. } => *i = index,
-            Packing::GpuImg { index: i, .. } => *i = index,
-        }
-    }
-
-    pub fn as_scene_img_mut(&mut self) -> Option<&mut AtlasImage> {
-        match self {
-            Packing::Img { image, .. } => Some(image),
-            Packing::GpuImg { .. } => None,
-        }
-    }
-
-    pub fn as_scene_img(&self) -> Option<&AtlasImage> {
-        match self {
-            Packing::Img { image, .. } => Some(image),
-            Packing::GpuImg { .. } => None,
+            Packing::Img { image, .. } => image.size,
+            Packing::GpuImg { frame: texture } => texture.get().size_px,
         }
     }
 }
 
-/// A preview of the packed atlas.
-///
-/// Using a preview of the atlas allows us to access the packed frames
-/// without committing the atlas to the GPU. Since the items images
-/// are still in CPU memory, we can mutate them and then commit the
-/// atlas to the GPU.
-#[repr(transparent)]
-pub struct RepackPreview {
-    pub items: crunch::PackedItems<Packing>,
-}
-
-impl RepackPreview {
-    pub fn get_frame(&self, index: usize) -> Option<(UVec2, UVec2)> {
-        self.items.items.get(index).map(|item| {
-            let rect = item.rect;
-            gpu_frame_from_rect(&rect)
-        })
-    }
-
-    pub fn get_mut(&mut self, index: usize) -> Option<&mut Packing> {
-        self.items.items.get_mut(index).map(|item| &mut item.data)
-    }
-
-    pub fn new_images_len(&self) -> usize {
-        self.items
-            .items
-            .iter()
-            .filter(|item| item.data.as_scene_img().is_some())
-            .count()
-    }
-}
-
-pub struct AtlasPacking {
-    texture: Texture,
-    rects: Vec<crunch::Rect>,
-    size: UVec2,
+#[derive(Clone, Default, Debug)]
+pub struct Layer {
+    pub frames: Vec<Hybrid<AtlasFrame>>,
 }
 
 /// A texture atlas, used to store all the textures in a scene.
@@ -122,31 +104,37 @@ pub struct AtlasPacking {
 /// Clones of `Atlas` all point to the same internal data.
 #[derive(Clone)]
 pub struct Atlas {
-    texture: Arc<RwLock<Texture>>,
-    rects: Arc<RwLock<Vec<crunch::Rect>>>,
-    size: Arc<RwLock<UVec2>>,
+    texture_array: Arc<RwLock<Texture>>,
+    layers: Arc<RwLock<Vec<Layer>>>,
 }
 
 impl Atlas {
-    pub fn new_with_texture(texture: Texture, size: UVec2) -> Self {
+    /// Create a new atlas with `size` and `num_layers` layers.
+    ///
+    /// `size` **must be a power of two**.
+    ///
+    /// ## Panics
+    /// Panics if `size` is _not_ a power of two.
+    fn new_with_texture(texture: Texture) -> Self {
+        let num_layers = texture.texture.size().depth_or_array_layers as usize;
+        let layers = vec![Layer::default(); num_layers];
+        log::trace!("created atlas with {num_layers} layers");
         Atlas {
-            texture: Arc::new(RwLock::new(texture)),
-            rects: Default::default(),
-            size: Arc::new(RwLock::new(size)),
+            layers: Arc::new(RwLock::new(layers)),
+            texture_array: Arc::new(RwLock::new(texture)),
         }
     }
 
-    fn create_texture(device: &wgpu::Device, queue: &wgpu::Queue, size: UVec2) -> Texture {
-        let extent = wgpu::Extent3d {
-            width: size.x,
-            height: size.y,
-            depth_or_array_layers: 1,
-        };
-
-        crate::texture::size_check(size.x, size.y);
+    /// Create the initial texture to use.
+    fn create_texture(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        size: wgpu::Extent3d,
+    ) -> Result<Texture, AtlasError> {
+        check_size(size)?;
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("atlas texture"),
-            size: extent,
+            size,
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
@@ -156,22 +144,24 @@ impl Atlas {
                 | wgpu::TextureUsages::COPY_SRC,
             view_formats: &[],
         });
-        let img = RgbaImage::from_pixel(extent.width, extent.height, image::Rgba([0, 0, 0, 0]));
-        queue.write_texture(
-            wgpu::ImageCopyTextureBase {
-                texture: &texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            img.as_bytes(),
-            wgpu::ImageDataLayout {
-                offset: 0,
-                bytes_per_row: Some(4 * extent.width),
-                rows_per_image: Some(extent.height),
-            },
-            extent,
-        );
+
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("create atlas texture array"),
+        });
+        if device.features().contains(wgpu::Features::CLEAR_TEXTURE) {
+            encoder.clear_texture(
+                &texture,
+                &wgpu::ImageSubresourceRange {
+                    aspect: wgpu::TextureAspect::All,
+                    base_mip_level: 0,
+                    mip_level_count: None,
+                    base_array_layer: 0,
+                    array_layer_count: None,
+                },
+            );
+        }
+        queue.submit(Some(encoder.finish()));
+
         let sampler_desc = wgpu::SamplerDescriptor {
             address_mode_u: wgpu::AddressMode::ClampToEdge,
             address_mode_v: wgpu::AddressMode::ClampToEdge,
@@ -182,286 +172,362 @@ impl Atlas {
             ..Default::default()
         };
 
-        Texture::from_wgpu_tex(device, texture, Some(sampler_desc), None)
+        Ok(Texture::from_wgpu_tex(
+            device,
+            texture,
+            Some(sampler_desc),
+            None,
+        ))
     }
 
     /// Create a new atlas.
     ///
-    /// Size should be a power of two.
-    fn new(device: &wgpu::Device, queue: &wgpu::Queue, size: UVec2) -> Self {
-        log::trace!("creating new atlas with dimensions {size}");
-        Self::new_with_texture(Self::create_texture(device, queue, size), size)
-    }
-
-    /// Creates a new empty atlas.
-    pub fn empty(device: &wgpu::Device, queue: &wgpu::Queue) -> Self {
-        Self::new(device, queue, UVec2::new(1, 1))
+    /// Size _must_ be a power of two.
+    ///
+    /// ## Panics
+    /// Panics if `size` is not a power of two.
+    pub fn new(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        size: wgpu::Extent3d,
+    ) -> Result<Self, AtlasError> {
+        log::trace!("creating new atlas with dimensions {size:?}");
+        let texture = Self::create_texture(device, queue, size)?;
+        Ok(Self::new_with_texture(texture))
     }
 
     pub fn is_empty(&self) -> bool {
         // UNWRAP: panic on purpose
-        self.rects.read().unwrap().is_empty()
+        let layers = self.layers.read().unwrap();
+        let num_frames = layers.iter().map(|layer| layer.frames.len()).sum::<usize>();
+        num_frames == 0
     }
 
-    /// Returns a clone of the current atlas texture.
+    /// Returns a clone of the current atlas texture array.
     pub fn get_texture(&self) -> Texture {
         // UNWRAP: panic on purpose
-        self.texture.read().unwrap().clone()
+        self.texture_array.read().unwrap().clone()
     }
 
-    pub fn get_rects(&self) -> impl Deref<Target = Vec<crunch::Rect>> + '_ {
+    pub fn get_layers(&self) -> impl Deref<Target = Vec<Layer>> + '_ {
         // UNWRAP: panic on purpose
-        self.rects.read().unwrap()
-    }
-
-    /// Does a dry-run packing of the atlas with the list of images.
-    ///
-    /// Returns a vector of ids that determine the locations of the given images
-    /// but doesn't send any data to the GPU.
-    pub fn pack_preview(
-        device: &wgpu::Device,
-        images: impl IntoIterator<Item = AtlasImage>,
-    ) -> Result<crunch::PackedItems<AtlasImage>, AtlasError> {
-        let images = images.into_iter().collect::<Vec<_>>();
-        let len = images.len();
-        let limit = device.limits().max_texture_dimension_1d;
-        let items = crunch::pack_into_po2(
-            limit as usize,
-            images.into_iter().map(|img| {
-                let w = img.width;
-                let h = img.height;
-                crunch::Item::new(img, w as usize, h as usize, crunch::Rotation::None)
-            }),
-        )
-        .ok()
-        .context(CannotPackTexturesSnafu { len })?;
-        Ok(items)
-    }
-
-    pub fn commit_preview(
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        crunch::PackedItems { w, h, items }: crunch::PackedItems<AtlasImage>,
-    ) -> Result<AtlasPacking, AtlasError> {
-        let size = UVec2::new(w as u32, h as u32);
-        let texture = Self::create_texture(device, queue, size);
-        let rects = items
-            .into_iter()
-            .map(
-                |crunch::PackedItem {
-                     data: mut img,
-                     rect,
-                 }| {
-                    let bytes = convert_to_rgba8_bytes(
-                        std::mem::take(&mut img.pixels),
-                        img.format,
-                        img.apply_linear_transfer,
-                    );
-                    queue.write_texture(
-                        wgpu::ImageCopyTextureBase {
-                            texture: &texture.texture,
-                            mip_level: 0,
-                            origin: wgpu::Origin3d {
-                                x: rect.x as u32,
-                                y: rect.y as u32,
-                                z: 0,
-                            },
-                            aspect: wgpu::TextureAspect::All,
-                        },
-                        &bytes,
-                        wgpu::ImageDataLayout {
-                            offset: 0,
-                            bytes_per_row: Some(4 * img.width),
-                            rows_per_image: Some(img.height),
-                        },
-                        wgpu::Extent3d {
-                            width: img.width,
-                            height: img.height,
-                            depth_or_array_layers: 1,
-                        },
-                    );
-                    rect
-                },
-            )
-            .collect();
-        Ok(AtlasPacking {
-            texture,
-            rects,
-            size,
-        })
-    }
-
-    pub fn repack_preview(
-        &self,
-        device: &wgpu::Device,
-        images: impl IntoIterator<Item = AtlasImage>,
-    ) -> Result<RepackPreview, AtlasError> {
-        let mut images = images.into_iter().collect::<Vec<_>>();
-        let rects = self.get_rects();
-        let len = images.len() + rects.len();
-        let items = crunch::pack_into_po2(
-            device.limits().max_texture_dimension_1d as usize,
-            rects
-                .iter()
-                .map(|r| Packing::GpuImg {
-                    index: 0,
-                    offset_px: UVec2::new(r.x as u32, r.y as u32),
-                    size_px: UVec2::new(r.w as u32, r.y as u32),
-                })
-                .chain(
-                    images
-                        .drain(..)
-                        .map(|image| Packing::Img { index: 0, image }),
-                )
-                .enumerate()
-                .map(|(i, mut p)| {
-                    let w = p.width() as usize;
-                    let h = p.height() as usize;
-                    p.set_index(i);
-                    crunch::Item::new(p, w, h, crunch::Rotation::None)
-                }),
-        )
-        .ok()
-        .context(CannotPackTexturesSnafu { len })?;
-        debug_assert!(items
-            .items
-            .iter()
-            .zip(0..)
-            .all(|(item, i)| if item.data.index() != i {
-                log::error!("item {i}'s index does not match ({})", item.data.index());
-                false
-            } else {
-                true
-            }));
-        Ok(RepackPreview { items })
-    }
-
-    /// Packs the atlas with the list of images.
-    ///
-    /// Returns a vector of ids that determine the locations of the given images
-    /// within the atlas.
-    pub fn from_images(
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        images: impl IntoIterator<Item = AtlasImage>,
-    ) -> Result<Self, AtlasError> {
-        let images = images.into_iter().collect::<Vec<_>>();
-        let items = Self::pack_preview(device, images)?;
-        let AtlasPacking {
-            texture,
-            rects,
-            size,
-        } = Self::commit_preview(device, queue, items)?;
-        Ok(Atlas {
-            texture: Arc::new(RwLock::new(texture)),
-            rects: Arc::new(RwLock::new(rects)),
-            size: Arc::new(RwLock::new(size)),
-        })
+        self.layers.read().unwrap()
     }
 
     /// Reset this atlas with all new images.
     ///
-    /// This invalidates the previous internal texture, creating a new one.
-    pub fn reset(
+    /// Any existing `Hybrid<AtlasTexture>`s will be invalidated.
+    pub fn set_images(
         &self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        images: impl IntoIterator<Item = AtlasImage>,
-    ) -> Result<(), AtlasError> {
-        let images = images.into_iter().collect::<Vec<_>>();
-        let items = Self::pack_preview(device, images)?;
-        let AtlasPacking {
-            texture,
-            rects,
-            size,
-        } = Self::commit_preview(device, queue, items)?;
-        // UNWRAP: panic on purpose
-        *self.texture.write().unwrap() = texture;
-        *self.rects.write().unwrap() = rects;
-        *self.size.write().unwrap() = size;
-        Ok(())
+        slab: &SlabAllocator<impl IsBuffer>,
+        images: impl IntoIterator<Item = impl Into<AtlasImage>>,
+    ) -> Result<Vec<Hybrid<AtlasFrame>>, AtlasError> {
+        log::debug!("setting images");
+        {
+            // UNWRAP: panic on purpose
+            let texture = self.texture_array.read().unwrap();
+            let mut guard = self.layers.write().unwrap();
+            let layers: &mut Vec<_> = guard.as_mut();
+            let new_layers =
+                vec![Layer::default(); texture.texture.size().depth_or_array_layers as usize];
+            let _old_layers = std::mem::replace(layers, new_layers);
+        }
+        self.add_images(device, queue, slab, images)
     }
 
-    /// Repack this atlas from a preview.
-    ///
-    /// This invalidates the previous internal texture, creating a new one.
-    pub fn repack(
+    pub fn get_size(&self) -> wgpu::Extent3d {
+        // UNWRAP: POP
+        self.texture_array.read().unwrap().texture.size()
+    }
+
+    pub fn add_images(
         &self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        RepackPreview {
-            items: crunch::PackedItems { w, h, items },
-        }: RepackPreview,
-    ) -> Result<(), AtlasError> {
-        let old_atlas_texture = self.get_texture();
+        slab: &SlabAllocator<impl IsBuffer>,
+        images: impl IntoIterator<Item = impl Into<AtlasImage>>,
+    ) -> Result<Vec<Hybrid<AtlasFrame>>, AtlasError> {
+        // UNWRAP: POP
+        let mut layers = self.layers.write().unwrap();
 
-        let new_atlas_size = UVec2::new(w as u32, h as u32);
-        let new_atlas_texture = Self::create_texture(device, queue, new_atlas_size);
-        let mut new_atlas_rects = vec![crunch::Rect::default(); items.len()];
+        let mut images = images
+            .into_iter()
+            .enumerate()
+            .map(|(i, img)| (i, img.into()))
+            .collect::<Vec<_>>();
+        images.sort_by(|a, b| (a.1.size.x * a.1.size.y).cmp(&(b.1.size.x * b.1.size.y)));
 
+        log::trace!("adding {} images to {} layers", images.len(), layers.len());
+        let layer_additions: Vec<Vec<(usize, AtlasImage)>> = fan_split_n(layers.len(), images);
+        log::trace!(
+            "extending the atlas by '{}'",
+            layer_additions
+                .iter()
+                .map(|v| format!("{}", v.len()))
+                .collect::<Vec<_>>()
+                .join(",")
+        );
+
+        // UNWRAP: POP
+        let mut texture_array = self.texture_array.write().unwrap();
+        let extent = texture_array.texture.size();
+        let new_texture_array = Self::create_texture(device, queue, extent)?;
+
+        let mut output = vec![];
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("repack atlas"),
+            label: Some("atlas add images"),
         });
 
-        for crunch::PackedItem { data: p, rect } in items.into_iter() {
-            match p {
-                Packing::Img { index, mut image } => {
-                    let bytes = convert_to_rgba8_bytes(
-                        std::mem::take(&mut image.pixels),
-                        image.format,
-                        image.apply_linear_transfer,
+        // for each new layer addition, attempt to repack that layer
+        for (i, additions) in layer_additions.into_iter().enumerate() {
+            if additions.is_empty() {
+                continue;
+            }
+            log::trace!("repacking layer {i} and adding {} images", additions.len());
+            // UNWRAP: safe because we know this index exists from our calc above
+            let layer = layers.get_mut(i).unwrap();
+            let images_starting_texture_index = layer.frames.len() as u32;
+            let maybe_items = crunch::pack_into_po2(
+                extent.width as usize,
+                layer
+                    .frames
+                    .iter()
+                    .map(|self_texture| Packing::GpuImg {
+                        frame: self_texture.clone(),
+                    })
+                    .chain(additions.iter().map(|(j, image)| Packing::Img {
+                        layer_index: i as u32,
+                        frame_index: images_starting_texture_index + *j as u32,
+                        image,
+                    }))
+                    .map(|packing: Packing| {
+                        let size = packing.size();
+                        crunch::Item::new(
+                            packing,
+                            size.x as usize,
+                            size.y as usize,
+                            crunch::Rotation::None,
+                        )
+                    }),
+            )
+            .ok();
+            if let Some(items) = maybe_items {
+                for crunch::PackedItem { data: item, rect } in items.items.into_iter() {
+                    let offset_px = UVec2::new(rect.x as u32, rect.y as u32);
+                    let size_px = UVec2::new(rect.w as u32, rect.h as u32);
+                    // convert into hybrids
+                    match item {
+                        Packing::Img {
+                            layer_index,
+                            frame_index,
+                            image,
+                        } => {
+                            let frame = AtlasFrame {
+                                offset_px,
+                                size_px,
+                                layer_index,
+                                frame_index,
+                            };
+                            let hybrid = slab.new_value(frame);
+                            output.push(hybrid.clone());
+                            layer.frames.push(hybrid);
+
+                            let bytes = convert_to_rgba8_bytes(
+                                image.pixels.clone(),
+                                image.format,
+                                image.apply_linear_transfer,
+                            );
+
+                            let origin = wgpu::Origin3d {
+                                x: offset_px.x,
+                                y: offset_px.y,
+                                z: layer_index,
+                            };
+                            let size = wgpu::Extent3d {
+                                width: size_px.x,
+                                height: size_px.y,
+                                depth_or_array_layers: 1,
+                            };
+                            log::trace!("  writing image data to frame {frame_index} in layer {layer_index}");
+                            log::trace!("    frame: {frame:?}");
+                            log::trace!("    origin: {origin:?}");
+                            log::trace!("    size: {size:?}");
+
+                            // write the new image from the CPU to the new texture
+                            queue.write_texture(
+                                wgpu::ImageCopyTextureBase {
+                                    texture: &new_texture_array.texture,
+                                    mip_level: 0,
+                                    origin,
+                                    aspect: wgpu::TextureAspect::All,
+                                },
+                                &bytes,
+                                wgpu::ImageDataLayout {
+                                    offset: 0,
+                                    bytes_per_row: Some(4 * size_px.x),
+                                    rows_per_image: Some(size_px.y),
+                                },
+                                size,
+                            );
+                        }
+                        Packing::GpuImg { frame: texture } => texture.modify(|t| {
+                            debug_assert_eq!(t.size_px, size_px);
+
+                            log::trace!(
+                                "  copying previous texture {} in layer {}",
+                                t.frame_index,
+                                t.layer_index
+                            );
+                            // copy the frame from the old texture to the new texture
+                            // in a new destination
+                            encoder.copy_texture_to_texture(
+                                wgpu::ImageCopyTexture {
+                                    texture: &texture_array.texture,
+                                    mip_level: 0,
+                                    origin: wgpu::Origin3d {
+                                        x: t.offset_px.x,
+                                        y: t.offset_px.y,
+                                        z: t.layer_index,
+                                    },
+                                    aspect: wgpu::TextureAspect::All,
+                                },
+                                wgpu::ImageCopyTexture {
+                                    texture: &new_texture_array.texture,
+                                    mip_level: 0,
+                                    origin: wgpu::Origin3d {
+                                        x: offset_px.x,
+                                        y: offset_px.y,
+                                        z: t.layer_index,
+                                    },
+                                    aspect: wgpu::TextureAspect::All,
+                                },
+                                wgpu::Extent3d {
+                                    width: size_px.x,
+                                    height: size_px.y,
+                                    depth_or_array_layers: 1,
+                                },
+                            );
+
+                            t.offset_px = offset_px;
+                        }),
+                    }
+                }
+            } else {
+                // TODO: create a new layer and retry
+                return CannotPackTexturesSnafu {
+                    size: texture_array.texture.size(),
+                    image_sizes: additions
+                        .iter()
+                        .map(|(_, img)| img.size)
+                        .collect::<Vec<_>>(),
+                }
+                .fail();
+            }
+        }
+        queue.submit(Some(encoder.finish()));
+
+        *texture_array = new_texture_array;
+
+        output.sort_by(|a, b| a.get().frame_index.cmp(&b.get().frame_index));
+        Ok(output)
+    }
+
+    /// Resize the atlas.
+    ///
+    /// This also distributes the images by size among all layers in an effort to reduce
+    /// the likelyhood that packing the atlas may fail.
+    ///
+    /// ## Errors
+    /// Errors if `size` has a width or height that is not a power of two, or are unequal
+    pub fn resize(
+        &self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        size: wgpu::Extent3d,
+    ) -> Result<(), AtlasError> {
+        let new_texture_array = Self::create_texture(device, queue, size)?;
+        // UNWRAP: POP
+        let mut texture_array = self.texture_array.write().unwrap();
+        // UNWRAP: POP
+        let mut layers = self.layers.write().unwrap();
+        let old_layers = std::mem::replace(
+            layers.as_mut(),
+            vec![Layer::default(); size.depth_or_array_layers as usize],
+        );
+        log::trace!("repacking all layers due to a resize");
+        let mut all_frames = old_layers
+            .into_iter()
+            .flat_map(|layer| layer.frames)
+            .collect::<Vec<_>>();
+        all_frames.sort_by(|a, b| {
+            let a = a.get();
+            let b = b.get();
+            (a.size_px.x * a.size_px.y).cmp(&(b.size_px.x * b.size_px.y))
+        });
+
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("atlas resize"),
+        });
+        for (i, frames) in fan_split_n(size.depth_or_array_layers as usize, all_frames)
+            .into_iter()
+            .enumerate()
+        {
+            log::trace!("repacking layer {i} with {} frames", frames.len());
+            let items = crunch::pack_into_po2(
+                size.width as usize,
+                frames.iter().map(|frame| {
+                    let size = frame.get().size_px;
+                    crunch::Item::new(
+                        frame,
+                        size.x as usize,
+                        size.y as usize,
+                        crunch::Rotation::None,
+                    )
+                }),
+            )
+            .ok()
+            .context(CannotPackTexturesSnafu {
+                size,
+                image_sizes: frames.iter().map(|f| f.get().size_px).collect::<Vec<_>>(),
+            })?;
+            log::trace!("  packed!");
+
+            // UNWRAP: safe because we know the new layers has this index
+            let layer = layers.get_mut(i).unwrap();
+            for (j, crunch::PackedItem { data: frame, rect }) in items.items.into_iter().enumerate()
+            {
+                let offset_px = UVec2::new(rect.x as u32, rect.y as u32);
+                let size_px = UVec2::new(rect.w as u32, rect.h as u32);
+
+                frame.modify(|t| {
+                    debug_assert_eq!(t.size_px, size_px);
+
+                    log::trace!(
+                        "  copying previous texture {} in layer {}",
+                        t.frame_index,
+                        t.layer_index
                     );
-                    // write the new image from the CPU to the new texture
-                    queue.write_texture(
-                        wgpu::ImageCopyTextureBase {
-                            texture: &new_atlas_texture.texture,
+                    // copy the frame from the old frame to the new frame
+                    encoder.copy_texture_to_texture(
+                        wgpu::ImageCopyTexture {
+                            texture: &texture_array.texture,
                             mip_level: 0,
                             origin: wgpu::Origin3d {
-                                x: rect.x as u32,
-                                y: rect.y as u32,
-                                z: 0,
+                                x: t.offset_px.x,
+                                y: t.offset_px.y,
+                                z: t.layer_index,
                             },
                             aspect: wgpu::TextureAspect::All,
                         },
-                        &bytes,
-                        wgpu::ImageDataLayout {
-                            offset: 0,
-                            bytes_per_row: Some(4 * image.width),
-                            rows_per_image: Some(image.height),
-                        },
-                        wgpu::Extent3d {
-                            width: image.width,
-                            height: image.height,
-                            depth_or_array_layers: 1,
-                        },
-                    );
-                    new_atlas_rects[index] = rect;
-                }
-                Packing::GpuImg {
-                    index,
-                    offset_px,
-                    size_px,
-                } => {
-                    // copy the frame from the old texture to the new texture
-                    // in a new destination
-                    encoder.copy_texture_to_texture(
                         wgpu::ImageCopyTexture {
-                            texture: &old_atlas_texture.texture,
+                            texture: &new_texture_array.texture,
                             mip_level: 0,
                             origin: wgpu::Origin3d {
                                 x: offset_px.x,
                                 y: offset_px.y,
-                                z: 0,
-                            },
-                            aspect: wgpu::TextureAspect::All,
-                        },
-                        wgpu::ImageCopyTexture {
-                            texture: &new_atlas_texture.texture,
-                            mip_level: 0,
-                            origin: wgpu::Origin3d {
-                                x: rect.x as u32,
-                                y: rect.y as u32,
-                                z: 0,
+                                z: t.layer_index,
                             },
                             aspect: wgpu::TextureAspect::All,
                         },
@@ -471,37 +537,20 @@ impl Atlas {
                             depth_or_array_layers: 1,
                         },
                     );
-                    new_atlas_rects[index] = rect;
-                }
+
+                    t.offset_px = offset_px;
+                    t.layer_index = i as u32;
+                    t.frame_index = j as u32;
+                });
+
+                layer.frames.push(frame.clone());
             }
         }
-        queue.submit(std::iter::once(encoder.finish()));
+        queue.submit(Some(encoder.finish()));
 
-        // UNWRAP: panic on purpose
-        *self.texture.write().unwrap() = new_atlas_texture;
-        *self.rects.write().unwrap() = new_atlas_rects;
-        *self.size.write().unwrap() = new_atlas_size;
+        *texture_array = new_texture_array;
+
         Ok(())
-    }
-
-    pub fn frames(&self) -> Vec<(u32, (UVec2, UVec2))> {
-        let rects_guard = self.rects.read().unwrap();
-        let rects = rects_guard.iter().map(gpu_frame_from_rect);
-        (0u32..).zip(rects).collect()
-    }
-
-    /// Return the position and size of the frame at the given index.
-    pub fn get_frame(&self, index: usize) -> Option<(UVec2, UVec2)> {
-        self.rects
-            .read()
-            .unwrap()
-            .get(index)
-            .map(gpu_frame_from_rect)
-    }
-
-    pub fn get_size(&self) -> UVec2 {
-        // UNWRAP: panic on purpose
-        *self.size.read().unwrap()
     }
 
     /// Read the atlas image from the GPU.
@@ -513,16 +562,23 @@ impl Atlas {
     /// ## Panics
     /// Panics if the pixels read from the GPU cannot be converted into an
     /// `RgbaImage`.
-    pub fn atlas_img(&self, device: &wgpu::Device, queue: &wgpu::Queue) -> RgbaImage {
-        let size = self.get_size();
-        let buffer = Texture::read(
-            &self.get_texture().texture,
+    pub fn atlas_img(&self, device: &wgpu::Device, queue: &wgpu::Queue, layer: u32) -> RgbaImage {
+        let tex = self.get_texture();
+        let size = tex.texture.size();
+        let buffer = Texture::read_from(
+            &tex.texture,
             device,
             queue,
-            size.x as usize,
-            size.y as usize,
+            size.width as usize,
+            size.height as usize,
             4,
             1,
+            0,
+            Some(wgpu::Origin3d {
+                x: 0,
+                y: 0,
+                z: layer,
+            }),
         );
         buffer.into_linear_rgba(device).unwrap()
     }
@@ -531,21 +587,24 @@ impl Atlas {
 #[cfg(test)]
 mod test {
     use crate::{
-        atlas::{AtlasTexture, TextureAddressMode, TextureModes},
+        atlas::{AtlasTexture, TextureAddressMode},
         camera::Camera,
         pbr::Material,
         stage::{Renderlet, Vertex},
         transform::Transform,
         Context,
     };
-    use glam::{Vec2, Vec3, Vec4};
+    use crabslab::{Id, Slab, SlabItem};
+    use glam::{UVec3, Vec2, Vec3, Vec4};
 
     use super::*;
 
     #[test]
     // Ensures that textures are packed and rendered correctly.
     fn atlas_uv_mapping() {
-        let ctx = Context::headless(32, 32);
+        log::info!("{:?}", std::env::current_dir());
+        let ctx =
+            Context::headless(32, 32).with_default_atlas_texture_size(UVec3::new(1024, 1024, 2));
         let stage = ctx
             .new_stage()
             .with_background_color(Vec3::splat(0.0).extend(1.0));
@@ -554,11 +613,15 @@ mod test {
         let dirt = AtlasImage::from_path("../../img/dirt.jpg").unwrap();
         let sandstone = AtlasImage::from_path("../../img/sandstone.png").unwrap();
         let texels = AtlasImage::from_path("../../test_img/atlas/uv_mapping.png").unwrap();
-        let textures = stage.set_images([dirt, sandstone, texels]).unwrap();
-        let mut texels_tex = textures[2];
-        texels_tex.modes.s = TextureAddressMode::ClampToEdge;
-        texels_tex.modes.t = TextureAddressMode::ClampToEdge;
-        let texels_tex = stage.new_value(texels_tex);
+        log::info!("setting images");
+        let frames = stage.set_images([dirt, sandstone, texels]).unwrap();
+        log::info!("  done setting images");
+
+        let texels_frame = &frames[2];
+        let texels_tex = stage.new_value(AtlasTexture {
+            frame_id: texels_frame.id(),
+            ..Default::default()
+        });
         let material = stage.new_value(Material {
             albedo_texture_id: texels_tex.id(),
             has_lighting: false,
@@ -592,6 +655,7 @@ mod test {
         });
         stage.add_renderlet(&renderlet);
 
+        log::info!("rendering");
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
         let img = frame.read_image().unwrap();
@@ -616,33 +680,33 @@ mod test {
         let dirt = AtlasImage::from_path("../../img/dirt.jpg").unwrap();
         let sandstone = AtlasImage::from_path("../../img/sandstone.png").unwrap();
         let texels = AtlasImage::from_path("../../img/happy_mac.png").unwrap();
-        let textures = stage.set_images([dirt, sandstone, texels]).unwrap();
-        let texel_tex = textures[2];
-        let mut clamp_tex = texel_tex;
-        clamp_tex.modes.s = TextureAddressMode::ClampToEdge;
-        clamp_tex.modes.t = TextureAddressMode::ClampToEdge;
-        let mut repeat_tex = texel_tex;
+        let frames = stage.set_images([dirt, sandstone, texels]).unwrap();
+        let base_texture = AtlasTexture {
+            frame_id: frames[2].id(),
+            ..Default::default()
+        };
+        let clamp_tex = stage.new_value(base_texture);
+        let mut repeat_tex = base_texture;
         repeat_tex.modes.s = TextureAddressMode::Repeat;
         repeat_tex.modes.t = TextureAddressMode::Repeat;
-        let mut mirror_tex = texel_tex;
+        let repeat_tex = stage.new_value(repeat_tex);
+        let mut mirror_tex = base_texture;
         mirror_tex.modes.s = TextureAddressMode::MirroredRepeat;
         mirror_tex.modes.t = TextureAddressMode::MirroredRepeat;
+        let mirror_tex = stage.new_value(mirror_tex);
 
-        let albedo_texture = stage.new_value(clamp_tex);
         let clamp_material = stage.new_value(Material {
-            albedo_texture_id: albedo_texture.id(),
+            albedo_texture_id: clamp_tex.id(),
             has_lighting: false,
             ..Default::default()
         });
-        let albedo_texture = stage.new_value(repeat_tex);
         let repeat_material = stage.new_value(Material {
-            albedo_texture_id: albedo_texture.id(),
+            albedo_texture_id: repeat_tex.id(),
             has_lighting: false,
             ..Default::default()
         });
-        let albedo_texture = stage.new_value(mirror_tex);
         let mirror_material = stage.new_value(Material {
-            albedo_texture_id: albedo_texture.id(),
+            albedo_texture_id: mirror_tex.id(),
             has_lighting: false,
             ..Default::default()
         });
@@ -728,36 +792,38 @@ mod test {
         let dirt = AtlasImage::from_path("../../img/dirt.jpg").unwrap();
         let sandstone = AtlasImage::from_path("../../img/sandstone.png").unwrap();
         let texels = AtlasImage::from_path("../../img/happy_mac.png").unwrap();
-        let textures = stage.set_images([dirt, sandstone, texels]).unwrap();
+        let frames = stage.set_images([dirt, sandstone, texels]).unwrap();
 
-        let texel_tex = textures[2];
-        let mut clamp_tex = texel_tex;
-        clamp_tex.modes.s = TextureAddressMode::ClampToEdge;
-        clamp_tex.modes.t = TextureAddressMode::ClampToEdge;
-        let mut repeat_tex = texel_tex;
+        let base_tex = AtlasTexture {
+            frame_id: frames[2].id(),
+            ..Default::default()
+        };
+        let clamp_tex = stage.new_value(base_tex);
+
+        let mut repeat_tex = base_tex;
         repeat_tex.modes.s = TextureAddressMode::Repeat;
         repeat_tex.modes.t = TextureAddressMode::Repeat;
-        let mut mirror_tex = texel_tex;
+        let repeat_tex = stage.new_value(repeat_tex);
+
+        let mut mirror_tex = base_tex;
         mirror_tex.modes.s = TextureAddressMode::MirroredRepeat;
         mirror_tex.modes.t = TextureAddressMode::MirroredRepeat;
+        let mirror_tex = stage.new_value(mirror_tex);
 
-        let clamp_albedo_texture = stage.new_value(clamp_tex);
         let clamp_material = stage.new_value(Material {
-            albedo_texture_id: clamp_albedo_texture.id(),
+            albedo_texture_id: clamp_tex.id(),
             has_lighting: false,
             ..Default::default()
         });
 
-        let repeat_albedo_texture = stage.new_value(repeat_tex);
         let repeat_material = stage.new_value(Material {
-            albedo_texture_id: repeat_albedo_texture.id(),
+            albedo_texture_id: repeat_tex.id(),
             has_lighting: false,
             ..Default::default()
         });
 
-        let mirror_albedo_texture = stage.new_value(mirror_tex);
         let mirror_material = stage.new_value(Material {
-            albedo_texture_id: mirror_albedo_texture.id(),
+            albedo_texture_id: mirror_tex.id(),
             has_lighting: false,
             ..Default::default()
         });
@@ -822,16 +888,46 @@ mod test {
 
     #[test]
     fn transform_uvs_for_atlas() {
-        let mut tex = AtlasTexture {
+        let mut slab = [0u32; AtlasFrame::SLAB_SIZE];
+        let mut frame = AtlasFrame {
             offset_px: UVec2::ZERO,
             size_px: UVec2::ONE,
-            modes: TextureModes::default(),
             ..Default::default()
         };
-        assert_eq!(Vec2::ZERO, tex.uv(Vec2::ZERO, UVec2::splat(100)));
-        assert_eq!(Vec2::ZERO, tex.uv(Vec2::ZERO, UVec2::splat(1)));
-        assert_eq!(Vec2::ZERO, tex.uv(Vec2::ZERO, UVec2::splat(256)));
-        tex.offset_px = UVec2::splat(10);
-        assert_eq!(Vec2::splat(0.1), tex.uv(Vec2::ZERO, UVec2::splat(100)));
+        let frame_id = Id::new(0);
+        slab.write(Id::new(0), &frame);
+        let tex = AtlasTexture {
+            frame_id,
+            ..Default::default()
+        };
+        assert_eq!(Vec3::ZERO, tex.uv(&slab, Vec2::ZERO, UVec2::splat(100)));
+        assert_eq!(Vec3::ZERO, tex.uv(&slab, Vec2::ZERO, UVec2::splat(1)));
+        assert_eq!(Vec3::ZERO, tex.uv(&slab, Vec2::ZERO, UVec2::splat(256)));
+        frame.offset_px = UVec2::splat(10);
+        slab.write(Id::new(0), &frame);
+        assert_eq!(
+            Vec2::splat(0.1).extend(0.0),
+            tex.uv(&slab, Vec2::ZERO, UVec2::splat(100))
+        );
+    }
+
+    #[test]
+    fn can_load_and_read_atlas_texture_array() {
+        // tests that the atlas lays out textures in the way we expect
+        let ctx =
+            Context::headless(100, 100).with_default_atlas_texture_size(UVec3::new(512, 512, 2));
+        let stage = ctx.new_stage();
+        let dirt = AtlasImage::from_path("../../img/dirt.jpg").unwrap();
+        let sandstone = AtlasImage::from_path("../../img/sandstone.png").unwrap();
+        let cheetah = AtlasImage::from_path("../../img/cheetah.jpg").unwrap();
+        let texels = AtlasImage::from_path("../../img/happy_mac.png").unwrap();
+        let _frames = stage
+            .set_images([dirt, sandstone, cheetah, texels])
+            .unwrap();
+
+        let img = stage.atlas.atlas_img(&stage.device, &stage.queue, 0);
+        img_diff::assert_img_eq("atlas/array0.png", img);
+        let img = stage.atlas.atlas_img(&stage.device, &stage.queue, 1);
+        img_diff::assert_img_eq("atlas/array1.png", img);
     }
 }

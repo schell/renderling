@@ -1638,7 +1638,7 @@ checksum = "b4ce301924b7887e9d637144fdade93f9dfff9b60981d4ac161db09720d39aa5"
 
 [[package]]
 name = "loading-bytes"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-fs",
  "js-sys",
@@ -2447,7 +2447,7 @@ checksum = "19b30a45b0cd0bcca8037f3d0dc3421eaf95327a17cad11964fb8179b4fc4832"
 
 [[package]]
 name = "renderling"
-version = "0.4.6"
+version = "0.4.7"
 dependencies = [
  "assert_approx_eq",
  "async-channel 1.9.0",
@@ -2479,7 +2479,7 @@ dependencies = [
 
 [[package]]
 name = "renderling_ui"
-version = "0.3.1"
+version = "0.3.4"
 dependencies = [
  "crabslab",
  "ctor",

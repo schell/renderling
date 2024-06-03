@@ -1,6 +1,6 @@
 //! CPU-side code for skybox rendering.
 use crabslab::Id;
-use glam::{Mat4, Vec3};
+use glam::{Mat4, UVec2, Vec3};
 
 use crate::{
     atlas::AtlasImage,
@@ -160,8 +160,7 @@ impl Skybox {
         log::trace!("creating empty skybox");
         let hdr_img = AtlasImage {
             pixels: vec![0u8; 4 * 4],
-            width: 1,
-            height: 1,
+            size: UVec2::splat(1),
             format: crate::atlas::AtlasImageFormat::R32G32B32A32FLOAT,
             apply_linear_transfer: false,
         };
@@ -299,8 +298,8 @@ impl Skybox {
             wgpu::TextureFormat::Rgba32Float,
             4,
             4,
-            img.width,
-            img.height,
+            img.size.x,
+            img.size.y,
             1,
             &img.pixels,
         )

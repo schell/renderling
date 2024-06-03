@@ -8,7 +8,7 @@
 //! Lastly, it provides some constant geometry used in many shaders.
 use core::ops::Mul;
 use spirv_std::{
-    image::{Cubemap, Image2d},
+    image::{Cubemap, Image2d, Image2dArray},
     Sampler,
 };
 
@@ -28,6 +28,20 @@ impl Sample2d for Image2d {
     type Sampler = Sampler;
 
     fn sample_by_lod(&self, sampler: Self::Sampler, uv: glam::Vec2, lod: f32) -> glam::Vec4 {
+        self.sample_by_lod(sampler, uv, lod)
+    }
+}
+
+pub trait Sample2dArray {
+    type Sampler: IsSampler;
+
+    fn sample_by_lod(&self, sampler: Self::Sampler, uv: glam::Vec3, lod: f32) -> glam::Vec4;
+}
+
+impl Sample2dArray for Image2dArray {
+    type Sampler = Sampler;
+
+    fn sample_by_lod(&self, sampler: Self::Sampler, uv: glam::Vec3, lod: f32) -> glam::Vec4 {
         self.sample_by_lod(sampler, uv, lod)
     }
 }
@@ -507,12 +521,12 @@ mod test {
     }
 
     #[test]
+    #[allow(clippy::bool_comparison)]
     fn nan_sanity() {
         let n = f32::NAN;
         assert!(n.is_nan());
-        assert!(n <= 0.0);
-        assert!(n >= 0.0);
-        assert!(n != 0.0);
+        assert!((n <= 0.0) == false);
+        assert!((n > 0.0) == false);
     }
 
     #[test]

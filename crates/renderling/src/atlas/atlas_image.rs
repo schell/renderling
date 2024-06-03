@@ -2,6 +2,7 @@
 //!
 //! Used to represent textures before they are sent to the GPU, in the
 //! [`AtlasBuilder`].
+use glam::UVec2;
 use image::EncodableLayout;
 use snafu::prelude::*;
 
@@ -61,8 +62,7 @@ impl AtlasImageFormat {
 #[derive(Clone, Debug)]
 pub struct AtlasImage {
     pub pixels: Vec<u8>,
-    pub width: u32,
-    pub height: u32,
+    pub size: UVec2,
     pub format: AtlasImageFormat,
     // Whether or not to convert from sRGB color space into linear color space.
     pub apply_linear_transfer: bool,
@@ -72,8 +72,7 @@ pub struct AtlasImage {
 impl From<gltf::image::Data> for AtlasImage {
     fn from(value: gltf::image::Data) -> Self {
         let pixels = value.pixels;
-        let width = value.width;
-        let height = value.height;
+        let size = UVec2::new(value.width, value.height);
         let format = match value.format {
             gltf::image::Format::R8 => AtlasImageFormat::R8,
             gltf::image::Format::R8G8 => AtlasImageFormat::R8G8,
@@ -88,12 +87,11 @@ impl From<gltf::image::Data> for AtlasImage {
         };
 
         AtlasImage {
+            size,
             pixels,
             format,
             // Determining this gets deferred until material construction
             apply_linear_transfer: false,
-            width,
-            height,
         }
     }
 }
@@ -125,8 +123,7 @@ impl From<image::DynamicImage> for AtlasImage {
             // Most of the time when people are using `image` to load images, those images
             // have color data that was authored in sRGB space.
             apply_linear_transfer: true,
-            width,
-            height,
+            size: UVec2::new(width, height),
         }
     }
 }
@@ -168,8 +165,7 @@ impl AtlasImage {
 
         Ok(Self {
             pixels,
-            width,
-            height,
+            size: UVec2::new(width, height),
             format: AtlasImageFormat::R32G32B32A32FLOAT,
             apply_linear_transfer: false,
         })
@@ -181,7 +177,7 @@ impl AtlasImage {
 
     pub fn into_rgba8(self) -> Option<image::RgbaImage> {
         let pixels = convert_to_rgba8_bytes(self.pixels, self.format, self.apply_linear_transfer);
-        image::RgbaImage::from_vec(self.width, self.height, pixels)
+        image::RgbaImage::from_vec(self.size.x, self.size.y, pixels)
     }
 }
 
@@ -198,11 +194,12 @@ pub fn f32_to_u8(c: f32) -> u8 {
 /// This applies the linear transfer function if `apply_linear_transfer` is
 /// `true`.
 pub fn convert_to_rgba8_bytes(
-    mut bytes: Vec<u8>,
+    bytes: impl IntoIterator<Item = u8>,
     format: AtlasImageFormat,
     apply_linear_transfer: bool,
 ) -> Vec<u8> {
     use crate::color::*;
+    let mut bytes = bytes.into_iter().collect::<Vec<_>>();
     log::trace!("converting image of format {format:?}");
     // Convert using linear transfer, if needed
     if apply_linear_transfer {

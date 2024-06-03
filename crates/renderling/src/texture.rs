@@ -1,6 +1,7 @@
 //! Wrapper around [`wgpu::Texture`].
 use std::{ops::Deref, sync::Arc};
 
+use glam::UVec2;
 use image::{
     load_from_memory, ColorType, DynamicImage, GenericImage, GenericImageView, ImageBuffer,
     ImageError, PixelWithColorType, Rgba32FImage,
@@ -977,8 +978,7 @@ impl CopiedTextureBuffer {
         let pixels = self.pixels(device);
         let img = AtlasImage {
             pixels,
-            width: self.dimensions.width as u32,
-            height: self.dimensions.height as u32,
+            size: UVec2::new(self.dimensions.width as u32, self.dimensions.height as u32),
             format: AtlasImageFormat::from_wgpu_texture_format(self.format)
                 .context(UnsupportedFormatSnafu)?,
             apply_linear_transfer: false,

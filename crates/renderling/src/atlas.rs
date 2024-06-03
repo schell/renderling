@@ -10,8 +10,8 @@
 //! on web.
 //!
 //! `Atlas` is only available on CPU. Not available in shaders.
-use crabslab::SlabItem;
-use glam::{UVec2, Vec2};
+use crabslab::{Id, Slab, SlabItem};
+use glam::{UVec2, Vec2, Vec3};
 #[cfg(target_arch = "spirv")]
 use spirv_std::num_traits::*;
 
@@ -24,6 +24,7 @@ mod cpu;
 #[cfg(not(target_arch = "spirv"))]
 pub use cpu::*;
 
+/// Method of addressing the edges of a texture.
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[derive(Clone, Copy, Default, PartialEq, SlabItem)]
 pub struct TextureModes {
@@ -31,34 +32,45 @@ pub struct TextureModes {
     pub t: TextureAddressMode,
 }
 
+/// A locatable frame within the atlas.
+#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
+#[derive(Clone, Copy, Default, PartialEq, SlabItem)]
+pub struct AtlasFrame {
+    /// The top left offset of texture in the atlas.
+    pub offset_px: UVec2,
+    /// The size of the texture in the atlas.
+    pub size_px: UVec2,
+    /// The index of the layer within the atlas that this `AtlasTexture `belongs to.
+    pub layer_index: u32,
+    /// The index of this frame within the layer.
+    pub frame_index: u32,
+}
+
 /// A texture inside the atlas.
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[derive(Clone, Copy, Default, PartialEq, SlabItem)]
 pub struct AtlasTexture {
-    // The top left offset of texture in the atlas.
-    pub offset_px: UVec2,
-    // The size of the texture in the atlas.
-    pub size_px: UVec2,
-    // Various toggles of texture modes.
+    /// Id of the texture's frame.
+    pub frame_id: Id<AtlasFrame>,
+    /// Various toggles of texture modes.
     pub modes: TextureModes,
-    // The index of the image in the atlas.
-    pub atlas_index: u32,
 }
 
 impl AtlasTexture {
     /// Transform the given `uv` coordinates for this texture's address mode
     /// and placement in the atlas of the given size.
-    pub fn uv(&self, mut uv: Vec2, atlas_size: UVec2) -> Vec2 {
+    pub fn uv(&self, slab: &[u32], mut uv: Vec2, atlas_size: UVec2) -> Vec3 {
+        let frame = slab.read(self.frame_id);
         uv.x = self.modes.s.wrap(uv.x);
         uv.y = self.modes.t.wrap(uv.y);
 
         // get the pixel index of the uv coordinate in terms of the original image
-        let mut px_index_s = (uv.x * self.size_px.x as f32) as u32;
-        let mut px_index_t = (uv.y * self.size_px.y as f32) as u32;
+        let mut px_index_s = (uv.x * frame.size_px.x as f32) as u32;
+        let mut px_index_t = (uv.y * frame.size_px.y as f32) as u32;
 
         // convert the pixel index from image to atlas space
-        px_index_s += self.offset_px.x;
-        px_index_t += self.offset_px.y;
+        px_index_s += frame.offset_px.x;
+        px_index_t += frame.offset_px.y;
 
         let sx = atlas_size.x as f32;
         let sy = atlas_size.y as f32;
@@ -66,7 +78,7 @@ impl AtlasTexture {
         let uv_s = px_index_s as f32 / sx;
         let uv_t = px_index_t as f32 / sy;
 
-        Vec2::new(uv_s, uv_t)
+        Vec2::new(uv_s, uv_t).extend(frame.layer_index as f32)
     }
 }
 

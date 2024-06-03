@@ -12,7 +12,7 @@ use std::{
 };
 
 use crate::{
-    atlas::{Atlas, AtlasError, AtlasImage, AtlasImageError, AtlasTexture},
+    atlas::{Atlas, AtlasError, AtlasFrame, AtlasImage, AtlasImageError},
     bloom::Bloom,
     camera::Camera,
     pbr::{debug::DebugMode, light::Light, PbrConfig},
@@ -195,10 +195,11 @@ impl Stage {
     pub fn new(ctx: &crate::Context) -> Self {
         let (device, queue) = ctx.get_device_and_queue_owned();
         let resolution @ UVec2 { x: w, y: h } = ctx.get_size();
-        let atlas = Atlas::empty(&device, &queue);
+        let atlas_size = *ctx.atlas_size.read().unwrap();
+        let atlas = Atlas::new(&device, &queue, atlas_size).unwrap();
         let mngr = SlabAllocator::default();
         let pbr_config = mngr.new_value(PbrConfig {
-            atlas_size: atlas.get_size(),
+            atlas_size: UVec2::new(atlas_size.width, atlas_size.height),
             resolution,
             ..Default::default()
         });
@@ -401,71 +402,54 @@ impl Stage {
         self
     }
 
-    /// Add an image to the set of atlas images.
+    /// Add images to the set of atlas images.
     ///
-    /// Adding an image can be quite expensive, as it requires repacking all
-    /// previous images. For that reason it's better to use
-    /// [`Stage::set_images`] if you have all the images beforehand.
-    pub fn add_image(&self, image: impl Into<AtlasImage>) -> Result<AtlasTexture, StageError> {
-        let preview = self
+    /// Adding an image can be quite expensive, as it requires creating a new texture
+    /// array for the atlas and repacking all previous images. For that reason it is
+    /// to batch images to reduce the number of calls.
+    pub fn add_images(
+        &self,
+        images: impl IntoIterator<Item = impl Into<AtlasImage>>,
+    ) -> Result<Vec<Hybrid<AtlasFrame>>, StageError> {
+        let frames = self
             .atlas
-            .repack_preview(&self.device, Some(image.into()))?;
-        self.atlas.repack(&self.device, &self.queue, preview)?;
+            .add_images(&self.device, &self.queue, self, images)?;
 
-        let size = self.atlas.get_size();
         // The textures bindgroup will have to be remade
         let _ = self.textures_bindgroup.lock().unwrap().take();
-        // The atlas size must be reset
-        self.pbr_config.modify(|cfg| cfg.atlas_size = size);
 
-        let texture = self
-            .atlas
-            .frames()
-            .into_iter()
-            .last()
-            .map(|(i, (offset_px, size_px))| AtlasTexture {
-                offset_px,
-                size_px,
-                atlas_index: i,
-                ..Default::default()
-            })
-            .unwrap();
+        Ok(frames)
+    }
 
-        Ok(texture)
+    /// Clear all images from the atlas.
+    ///
+    /// ## WARNING
+    /// This invalidates any previously staged `AtlasFrame`s.
+    pub fn clear_images(&self) -> Result<(), StageError> {
+        let none = Option::<AtlasImage>::None;
+        let _ = self.set_images(none)?;
+        Ok(())
     }
 
     /// Set the images to use for the atlas.
     ///
     /// Resets the atlas, packing it with the given images and returning a
-    /// vector of the textures ready to be staged.
+    /// vector of the frames already staged.
     ///
     /// ## WARNING
-    /// This invalidates any currently staged `AtlasTexture`s.
+    /// This invalidates any previously staged `AtlasFrame`s.
     pub fn set_images(
         &self,
-        images: impl IntoIterator<Item = AtlasImage>,
-    ) -> Result<Vec<AtlasTexture>, StageError> {
-        self.atlas.reset(&self.device, &self.queue, images)?;
-
-        let size = self.atlas.get_size();
+        images: impl IntoIterator<Item = impl Into<AtlasImage>>,
+    ) -> Result<Vec<Hybrid<AtlasFrame>>, StageError> {
+        let frames = self
+            .atlas
+            .set_images(&self.device, &self.queue, self, images)?;
 
         // The textures bindgroup will have to be remade
         let _ = self.textures_bindgroup.lock().unwrap().take();
-        // The atlas size must be reset
-        self.pbr_config.modify(|cfg| cfg.atlas_size = size);
 
-        let textures = self
-            .atlas
-            .frames()
-            .into_iter()
-            .map(|(i, (offset_px, size_px))| AtlasTexture {
-                offset_px,
-                size_px,
-                atlas_index: i,
-                ..Default::default()
-            })
-            .collect();
-        Ok(textures)
+        Ok(frames)
     }
 
     /// Set the skybox.
