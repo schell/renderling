@@ -352,12 +352,12 @@ impl UiPathBuilder {
 
         let mut size = Vec2::ONE;
         let albedo_texture_id = if let Some(ImageId(index)) = options.image_id {
-            if let Some(hybrid) = self.ui.get_texture(index) {
-                let tex = hybrid.get();
-                log::debug!("size: {}", tex.size_px);
-                size.x = tex.size_px.x as f32;
-                size.y = tex.size_px.y as f32;
-                hybrid.id()
+            if let Some(image) = self.ui.get_image(index) {
+                let frame = image.frame.get();
+                log::debug!("size: {}", frame.size_px);
+                size.x = frame.size_px.x as f32;
+                size.y = frame.size_px.y as f32;
+                image.texture.id()
             } else {
                 Id::NONE
             }
@@ -444,12 +444,12 @@ impl UiPathBuilder {
 
         let mut size = Vec2::ONE;
         let albedo_texture_id = if let Some(ImageId(index)) = image_id {
-            if let Some(hybrid) = self.ui.get_texture(index) {
-                let tex = hybrid.get();
-                log::debug!("size: {}", tex.size_px);
-                size.x = tex.size_px.x as f32;
-                size.y = tex.size_px.y as f32;
-                hybrid.id()
+            if let Some(image) = self.ui.get_image(index) {
+                let frame = image.frame.get();
+                log::debug!("size: {}", frame.size_px);
+                size.x = frame.size_px.x as f32;
+                size.y = frame.size_px.y as f32;
+                image.texture.id()
             } else {
                 Id::NONE
             }
