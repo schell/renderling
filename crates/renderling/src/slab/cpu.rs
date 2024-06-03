@@ -311,7 +311,7 @@ impl<Buffer: IsBuffer> SlabAllocator<Buffer> {
     }
 
     pub(crate) fn insert_update_source(&self, k: usize, source: impl UpdatesSlab) {
-        log::debug!(
+        log::trace!(
             "inserting update source {k} {}",
             std::any::type_name_of_val(&source)
         );

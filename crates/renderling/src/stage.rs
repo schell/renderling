@@ -3,9 +3,11 @@
 //! The `Stage` object contains a slab buffer and a render pipeline.
 //! It is used to stage objects for rendering.
 use crabslab::{Array, Id, Slab, SlabItem};
-use glam::{Mat4, UVec2, Vec2, Vec3, Vec4, Vec4Swizzles};
+#[cfg(not(target_arch = "spirv"))]
+use glam::UVec2;
+use glam::{Mat4, Vec2, Vec3, Vec4, Vec4Swizzles};
 use spirv_std::{
-    image::{Cubemap, Image2d},
+    image::{Cubemap, Image2d, Image2dArray},
     spirv, Sampler,
 };
 
@@ -275,7 +277,7 @@ pub fn renderlet_vertex(
 #[allow(clippy::too_many_arguments, dead_code)]
 #[spirv(fragment)]
 pub fn renderlet_fragment(
-    #[spirv(descriptor_set = 1, binding = 0)] atlas: &Image2d,
+    #[spirv(descriptor_set = 1, binding = 0)] atlas: &Image2dArray,
     #[spirv(descriptor_set = 1, binding = 1)] atlas_sampler: &Sampler,
 
     #[spirv(descriptor_set = 1, binding = 2)] irradiance: &Cubemap,
