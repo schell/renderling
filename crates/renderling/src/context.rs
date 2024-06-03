@@ -1,8 +1,10 @@
 //! Rendering context initialization and frame management.
-use core::sync::atomic::AtomicU32;
-use std::{ops::Deref, sync::Arc};
+use std::{
+    ops::Deref,
+    sync::{Arc, RwLock},
+};
 
-use glam::UVec2;
+use glam::{UVec2, UVec3};
 use snafu::prelude::*;
 
 use crate::{
@@ -81,6 +83,19 @@ impl RenderTarget {
         match &self.0 {
             RenderTargetInner::Surface { .. } => false,
             RenderTargetInner::Texture { .. } => true,
+        }
+    }
+
+    pub fn get_size(&self) -> UVec2 {
+        match &self.0 {
+            RenderTargetInner::Surface {
+                surface: _,
+                surface_config,
+            } => UVec2::new(surface_config.width, surface_config.height),
+            RenderTargetInner::Texture { texture } => {
+                let s = texture.size();
+                UVec2::new(s.width, s.height)
+            }
         }
     }
 }
@@ -283,7 +298,6 @@ pub struct Frame {
     pub(crate) device: Arc<wgpu::Device>,
     pub(crate) queue: Arc<wgpu::Queue>,
     pub(crate) surface: FrameSurface,
-    pub(crate) size: UVec2,
 }
 
 impl Frame {
@@ -356,6 +370,11 @@ impl Frame {
         }
     }
 
+    pub fn get_size(&self) -> UVec2 {
+        let s = self.texture().size();
+        UVec2::new(s.width, s.height)
+    }
+
     /// Read the current frame buffer into an image.
     ///
     /// This should be called after rendering, before presentation.
@@ -366,7 +385,8 @@ impl Frame {
     /// ## Note
     /// This operation can take a long time, depending on how big the screen is.
     pub fn read_image(&self) -> Result<image::RgbaImage, TextureError> {
-        let buffer = self.copy_to_buffer(&self.device, &self.queue, self.size.x, self.size.y);
+        let size = self.get_size();
+        let buffer = self.copy_to_buffer(&self.device, &self.queue, size.x, size.y);
         let is_srgb = self.texture().format().is_srgb();
         let img = if is_srgb {
             buffer.into_srgba(&self.device)?
@@ -386,7 +406,8 @@ impl Frame {
     /// ## Note
     /// This operation can take a long time, depending on how big the screen is.
     pub fn read_srgb_image(&self) -> Result<image::RgbaImage, TextureError> {
-        let buffer = self.copy_to_buffer(&self.device, &self.queue, self.size.x, self.size.y);
+        let size = self.get_size();
+        let buffer = self.copy_to_buffer(&self.device, &self.queue, size.x, size.y);
         log::trace!("read image has the format: {:?}", buffer.format);
         buffer.into_srgba(&self.device)
     }
@@ -400,7 +421,8 @@ impl Frame {
     /// ## Note
     /// This operation can take a long time, depending on how big the screen is.
     pub fn read_linear_image(&self) -> Result<image::RgbaImage, TextureError> {
-        let buffer = self.copy_to_buffer(&self.device, &self.queue, self.size.x, self.size.y);
+        let size = self.get_size();
+        let buffer = self.copy_to_buffer(&self.device, &self.queue, size.x, size.y);
         buffer.into_linear_rgba(&self.device)
     }
 
@@ -430,9 +452,7 @@ pub struct Context {
     device: Arc<wgpu::Device>,
     queue: Arc<wgpu::Queue>,
     render_target: RenderTarget,
-    size: UVec2,
-    pub(crate) default_atlas_texture_array_size: Arc<AtomicU32>,
-    pub(crate) default_atlas_texture_array_layers: Arc<AtomicU32>,
+    pub(crate) atlas_size: Arc<RwLock<wgpu::Extent3d>>,
 }
 
 impl Context {
@@ -441,41 +461,35 @@ impl Context {
         adapter: impl Into<Arc<wgpu::Adapter>>,
         device: impl Into<Arc<wgpu::Device>>,
         queue: impl Into<Arc<wgpu::Queue>>,
-        size: UVec2,
     ) -> Self {
         let adapter: Arc<wgpu::Adapter> = adapter.into();
         let limits = adapter.limits();
-        let default_atlas_texture_array_size = Arc::new(
-            limits
-                .max_texture_dimension_2d
-                .min(crate::atlas::ATLAS_SUGGESTED_SIZE)
-                .into(),
-        );
-        let default_atlas_texture_array_layers = Arc::new(
-            adapter
+        let w = limits
+            .max_texture_dimension_2d
+            .min(crate::atlas::ATLAS_SUGGESTED_SIZE);
+        let atlas_size = Arc::new(RwLock::new(wgpu::Extent3d {
+            width: w,
+            height: w,
+            depth_or_array_layers: adapter
                 .limits()
                 .max_texture_array_layers
-                .min(crate::atlas::ATLAS_SUGGESTED_LAYERS)
-                .into(),
-        );
+                .min(crate::atlas::ATLAS_SUGGESTED_LAYERS),
+        }));
         Self {
-            adapter: adapter.into(),
+            adapter,
             device: device.into(),
             queue: queue.into(),
             render_target: target,
-            size,
-            default_atlas_texture_array_size,
-            default_atlas_texture_array_layers,
+            atlas_size,
         }
     }
 
     pub async fn try_new_headless(width: u32, height: u32) -> Result<Self, ContextError> {
         log::trace!("creating headless context of size ({width}, {height})");
-        let size = UVec2::new(width, height);
         let instance = new_instance();
         let (adapter, device, queue, target) =
             new_headless_device_queue_and_target(width, height, &instance).await?;
-        Ok(Self::new(target, adapter, device, queue, size))
+        Ok(Self::new(target, adapter, device, queue))
     }
 
     pub async fn try_from_raw_window(
@@ -483,11 +497,10 @@ impl Context {
         height: u32,
         window: impl Into<wgpu::SurfaceTarget<'static>>,
     ) -> Result<Self, ContextError> {
-        let size = UVec2::new(width, height);
         let instance = new_instance();
         let (adapter, device, queue, target) =
             new_windowed_adapter_device_queue(width, height, &instance, window).await?;
-        Ok(Self::new(target, adapter, device, queue, size))
+        Ok(Self::new(target, adapter, device, queue))
     }
 
     #[cfg(feature = "winit")]
@@ -533,11 +546,10 @@ impl Context {
     }
 
     pub fn get_size(&self) -> UVec2 {
-        self.size
+        self.render_target.get_size()
     }
 
     pub fn set_size(&mut self, size: UVec2) {
-        self.size = size;
         let (device, _) = self.get_device_and_queue_owned();
         self.render_target.resize(size.x, size.y, &device);
     }
@@ -613,7 +625,6 @@ impl Context {
         Ok(Frame {
             device: self.device.clone(),
             queue: self.queue.clone(),
-            size: self.size,
             surface: match &self.render_target.0 {
                 RenderTargetInner::Surface { surface, .. } => {
                     let surface_texture = surface.get_current_texture().context(SurfaceSnafu)?;
@@ -628,31 +639,34 @@ impl Context {
 
     /// Set the default texture size for any atlas.
     ///
-    /// Must be a power of two.
-    pub fn set_default_atlas_texture_size(&self, size: u32) -> &Self {
-        self.default_atlas_texture_array_size
-            .store(size, core::sync::atomic::Ordering::Relaxed);
+    /// * Width is `size.x` and must be a power of two.
+    /// * Height is `size.y`, must match `size.x` and must be a power of two.
+    /// * Layers is `size.z` and must be two or greater.
+    ///
+    /// ## Panics
+    /// Will panic if the above conditions are not met.
+    pub fn set_default_atlas_texture_size(&self, size: impl Into<UVec3>) -> &Self {
+        let size = size.into();
+        let size = wgpu::Extent3d {
+            width: size.x,
+            height: size.y,
+            depth_or_array_layers: size.z,
+        };
+        crate::atlas::check_size(size).unwrap();
+        *self.atlas_size.write().unwrap() = size;
         self
     }
 
     /// Set the default texture size for any atlas.
     ///
-    /// Must be a power of two.
-    pub fn with_default_atlas_texture_size(self, size: u32) -> Self {
+    /// * Width is `size.x` and must be a power of two.
+    /// * Height is `size.y`, must match `size.x` and must be a power of two.
+    /// * Layers is `size.z` and must be greater than zero.
+    ///
+    /// ## Panics
+    /// Will panic if the above conditions are not met.
+    pub fn with_default_atlas_texture_size(self, size: impl Into<UVec3>) -> Self {
         self.set_default_atlas_texture_size(size);
-        self
-    }
-
-    /// Set the default number of layers for any atlas.
-    pub fn set_default_atlas_texture_layers(&self, layers: u32) -> &Self {
-        self.default_atlas_texture_array_layers
-            .store(layers, core::sync::atomic::Ordering::Relaxed);
-        self
-    }
-
-    /// Set the default number of layers for any atlas.
-    pub fn with_default_atlas_texture_layers(self, layers: u32) -> Self {
-        self.set_default_atlas_texture_layers(layers);
         self
     }
 

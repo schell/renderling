@@ -195,15 +195,11 @@ impl Stage {
     pub fn new(ctx: &crate::Context) -> Self {
         let (device, queue) = ctx.get_device_and_queue_owned();
         let resolution @ UVec2 { x: w, y: h } = ctx.get_size();
-        let atlas_size = ctx.default_atlas_texture_array_size.load(Ordering::Relaxed);
-        let atlas_layers = ctx
-            .default_atlas_texture_array_layers
-            .load(Ordering::Relaxed);
-        let atlas = Atlas::new(&device, &queue, atlas_size, atlas_layers);
+        let atlas_size = *ctx.atlas_size.read().unwrap();
+        let atlas = Atlas::new(&device, &queue, atlas_size).unwrap();
         let mngr = SlabAllocator::default();
-        let atlas_size = UVec2::new(atlas_size, atlas_size);
         let pbr_config = mngr.new_value(PbrConfig {
-            atlas_size,
+            atlas_size: UVec2::new(atlas_size.width, atlas_size.height),
             resolution,
             ..Default::default()
         });
@@ -417,7 +413,7 @@ impl Stage {
     ) -> Result<Vec<Hybrid<AtlasFrame>>, StageError> {
         let frames = self
             .atlas
-            .add_images(&self.device, &self.queue, &self, images)?;
+            .add_images(&self.device, &self.queue, self, images)?;
 
         // The textures bindgroup will have to be remade
         let _ = self.textures_bindgroup.lock().unwrap().take();
@@ -448,7 +444,7 @@ impl Stage {
     ) -> Result<Vec<Hybrid<AtlasFrame>>, StageError> {
         let frames = self
             .atlas
-            .set_images(&self.device, &self.queue, &self, images)?;
+            .set_images(&self.device, &self.queue, self, images)?;
 
         // The textures bindgroup will have to be remade
         let _ = self.textures_bindgroup.lock().unwrap().take();

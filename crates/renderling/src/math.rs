@@ -521,11 +521,12 @@ mod test {
     }
 
     #[test]
+    #[allow(clippy::bool_comparison)]
     fn nan_sanity() {
         let n = f32::NAN;
         assert!(n.is_nan());
-        assert!(!(n <= 0.0));
-        assert!(!(n > 0.0));
+        assert!((n <= 0.0) == false);
+        assert!((n > 0.0) == false);
     }
 
     #[test]

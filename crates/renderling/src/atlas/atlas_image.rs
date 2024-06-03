@@ -194,11 +194,12 @@ pub fn f32_to_u8(c: f32) -> u8 {
 /// This applies the linear transfer function if `apply_linear_transfer` is
 /// `true`.
 pub fn convert_to_rgba8_bytes(
-    mut bytes: Vec<u8>,
+    bytes: impl IntoIterator<Item = u8>,
     format: AtlasImageFormat,
     apply_linear_transfer: bool,
 ) -> Vec<u8> {
     use crate::color::*;
+    let mut bytes = bytes.into_iter().collect::<Vec<_>>();
     log::trace!("converting image of format {format:?}");
     // Convert using linear transfer, if needed
     if apply_linear_transfer {
