@@ -31,7 +31,7 @@ use std::sync::{Arc, RwLock};
 use crabslab::Id;
 use glyph_brush::ab_glyph;
 use renderling::{
-    atlas::AtlasTexture,
+    atlas::{AtlasFrame, AtlasTexture, TextureModes},
     camera::Camera,
     math::{Quat, UVec2, Vec2, Vec3Swizzles, Vec4},
     slab::{Hybrid, UpdatesSlab},
@@ -130,6 +130,12 @@ impl UiTransform {
     }
 }
 
+#[derive(Clone)]
+struct UiImage {
+    frame: Hybrid<AtlasFrame>,
+    texture: Hybrid<AtlasTexture>,
+}
+
 /// A 2d user interface renderer.
 ///
 /// Clones of `Ui` all point to the same data.
@@ -137,7 +143,7 @@ impl UiTransform {
 pub struct Ui {
     camera: Hybrid<Camera>,
     stage: Stage,
-    images: Arc<RwLock<Vec<Hybrid<AtlasTexture>>>>,
+    images: Arc<RwLock<Vec<UiImage>>>,
     fonts: Arc<RwLock<Vec<FontArc>>>,
     // We keep a list of transforms that we use to "manually" order renderlets.
     //
@@ -166,6 +172,16 @@ impl Ui {
             default_stroke_options: Default::default(),
             default_fill_options: Default::default(),
         }
+    }
+
+    pub fn set_background_color(&self, color: impl Into<Vec4>) -> &Self {
+        self.stage.set_background_color(color);
+        self
+    }
+
+    pub fn with_background_color(self, color: impl Into<Vec4>) -> Self {
+        self.set_background_color(color);
+        self
     }
 
     pub fn set_antialiasing(&self, antialiasing_is_on: bool) -> &Self {
@@ -248,17 +264,26 @@ impl Ui {
             image::ImageFormat::from_path(path_s).context(ImageSnafu)?,
         )
         .context(ImageSnafu)?;
-        let mut texture = self.stage.add_image(img).context(StageSnafu)?;
-        texture.modes.s = renderling::atlas::TextureAddressMode::Repeat;
-        texture.modes.t = renderling::atlas::TextureAddressMode::Repeat;
-        let hybrid = self.stage.new_value(texture);
+        let frame = self
+            .stage
+            .add_images(Some(img))
+            .context(StageSnafu)?
+            .pop()
+            .unwrap();
+        let texture = self.stage.new_value(AtlasTexture {
+            frame_id: frame.id(),
+            modes: TextureModes {
+                s: renderling::atlas::TextureAddressMode::Repeat,
+                t: renderling::atlas::TextureAddressMode::Repeat,
+            },
+        });
         let mut guard = self.images.write().unwrap();
         let id = guard.len();
-        guard.push(hybrid);
+        guard.push(UiImage { frame, texture });
         Ok(ImageId(id))
     }
 
-    pub(crate) fn get_texture(&self, index: usize) -> Option<Hybrid<AtlasTexture>> {
+    pub(crate) fn get_image(&self, index: usize) -> Option<UiImage> {
         self.images.read().unwrap().get(index).cloned()
     }
 

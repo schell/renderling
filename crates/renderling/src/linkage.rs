@@ -130,7 +130,22 @@ pub fn atlas_and_skybox_bindgroup_layout(device: &wgpu::Device) -> wgpu::BindGro
         (img, sampler)
     }
 
-    let (atlas, atlas_sampler) = image2d_entry(0);
+    let atlas = wgpu::BindGroupLayoutEntry {
+        binding: 0,
+        visibility: wgpu::ShaderStages::FRAGMENT,
+        ty: wgpu::BindingType::Texture {
+            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+            view_dimension: wgpu::TextureViewDimension::D2Array,
+            multisampled: false,
+        },
+        count: None,
+    };
+    let atlas_sampler = wgpu::BindGroupLayoutEntry {
+        binding: 1,
+        visibility: wgpu::ShaderStages::FRAGMENT,
+        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+        count: None,
+    };
     let (irradiance, irradiance_sampler) = cubemap_entry(2);
     let (prefilter, prefilter_sampler) = cubemap_entry(4);
     let (brdf, brdf_sampler) = image2d_entry(6);
