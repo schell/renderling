@@ -1,5 +1,54 @@
 # devlog
 
+## Tue June 4, 2024
+
+I'm working on "upgrading" pointer types in `naga`'s SPIR-V frontend. This really is the meat of the 
+problem, I would say. I'm attempting to follow this process, roughly:
+
+- in the frontend:
+  * lookup the pointer's expression
+  * lookup the type of that expression
+  * get the id of the base type of that type (because the type is essentially `Pointer<T>` 
+    and we want the `T`)
+  * lookup up the base type
+- then in the `Module`: 
+  * get that same base type in the types arena
+  * replace that type with an atomic type
+
+This works fine, so long as no other types are using that base type. Odds are that the base type is 
+`u32` or `i32`, though, and that it _is_ indeed being used elsewhere, which fails to type check. 
+This is expected because we're changing the type for everything that references it.
+
+So, instead we can try it this way - it's all the same up to interacting with the module: 
+
+  - then in the `Module`: 
+    * create a new atomic type with the base type of the type we were going to replace
+    * get the pointer type from the types arena
+    * replace the pointer's base type with the atomic type
+
+This gives us a different error:    
+
+```
+WithSpan { inner: InvalidHandle(ForwardDependency(FwdDepError { subject: [3], subject_kind: "naga::Type", depends_on: [6], depends_on_kind: "naga::Type" })), spans: [] }
+```
+
+which essentially means that type `[3]` depends on type `[6]` but obviously `3` < `6`, and this is a 
+problem because the handles of the types imply when they were declared. So it's saying that `[3]` 
+_cannot_ depend on `[6]` because when declaring `[3]` all symbols used in that declaration must also 
+have been previously declared, and `[6]` is greater than `[3]` and therefore was not pre-declared.
+
+So here we are. I've had a couple ideas, and none of them are great: 
+
+1. Modify all handles in the module and the frontend, incrementing all handles >= the pointer's handle,
+   then inserting the atomic type using the pointers handle.
+   This is error prone because I'm not sure where all the handles are, where they get copied, etc.
+   But maybe I'm overestimating this solution.
+2. Change `Handle`'s type to include some extra bit of information to allow the comparison to check.
+   This is bad for obvious reasons - `Handle` is small on purpose and something like this would probably
+   blow out the performance characteristics. Also there are probably *many* handles being created and 
+   there may be memory concerns.
+3. Do something else like provision some handles up front to use later. Possibly any time a pointer is 
+   created, also create another placeholder handle.
 ## Mon June 3, 2024
 
 ### NLNet progress
