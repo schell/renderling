@@ -1,5 +1,27 @@
 # devlog
 
+## Fri June 14, 2024
+
+I put up [another incremental PR for `naga`'s SPIR-V frontend](https://github.com/gfx-rs/wgpu/pull/5775) 
+that applies atomic upgrades to types and to a lesser extent to expressions. It's currently awaiting 
+review from @jimblandy. If I'm still on-point and understanding the direction then I'll be adding the 
+"spiraling out" of expression upgrades next. 
+
+The "spiraling out" problem is roughly that expressions contain sub-expressions and
+any expression that requires an upgrade might be referenced as a sub-expression of another,
+therefore after an expression upgrade we need to traverse the `Module` looking for these 
+references and upgrade the expressions that contains them - which then must be iterated upon 
+again, searching the `Module` for expressions that may contain _those_ as sub-expressions.
+
+I do have a couple questions that I'm purposefully *not* addressing yet: 
+
+* TODO
+
+## Sun June 9, 2024
+
+Following @jimblandy's advice I've got a good portion of the atomic "upgrade" process working.
+* [@jimblandy's explaination of steps required](https://app.element.io/#/room/#naga:matrix.org/$eIqQA71wsmmzR0NWug4KsSFk3YKiX8zpIG6ToNN-0Sk)
+
 ## Tue June 4, 2024
 
 I'm working on "upgrading" pointer types in `naga`'s SPIR-V frontend. This really is the meat of the 
@@ -49,6 +71,9 @@ So here we are. I've had a couple ideas, and none of them are great:
    there may be memory concerns.
 3. Do something else like provision some handles up front to use later. Possibly any time a pointer is 
    created, also create another placeholder handle.
+
+I posted this on the `wgpu`/`naga` matrix and @jimblandy [replied here](https://app.element.io/#/room/#naga:matrix.org/$QkIQkuLk6yxqEXAt3uArnZpvV9C8pDhGJni5800QVv4).
+
 ## Mon June 3, 2024
 
 ### NLNet progress
