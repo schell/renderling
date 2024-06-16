@@ -1,6 +1,30 @@
 # devlog
 
+## Sun June 16, 2024
+
+### nlnet updates 
+
+After some back and for with @jimblandy on my second PR I've landed on a set of changes that 
+actually produce a validating `naga::Module`! That means the system is producing viable code!
+
+What this means is that I'm actually very close to hitting the first nlnet milestone! 
+
+With that, I've started work on the second milestone while my first set of PRs are in review, 
+as it takes a good while to roundtrip w/ feedback.
+
+### raspberry pi updates
+
+Still getting OOM errors and I'm not sure why. There are a few changes I need to make to figure 
+it out: 
+
+- [ ] env var configurable logging in tests
+  * because we need to be able to debug where the memory is going
+- [ ] add a new test that ensures the image comparison machinery is sane 
+  * because the comparisons seem pretty borked
+
 ## Fri June 14, 2024
+
+### nlnet updates 
 
 I put up [another incremental PR for `naga`'s SPIR-V frontend](https://github.com/gfx-rs/wgpu/pull/5775) 
 that applies atomic upgrades to types and to a lesser extent to expressions. It's currently awaiting 
@@ -13,16 +37,16 @@ therefore after an expression upgrade we need to traverse the `Module` looking f
 references and upgrade the expressions that contains them - which then must be iterated upon 
 again, searching the `Module` for expressions that may contain _those_ as sub-expressions.
 
-I do have a couple questions that I'm purposefully *not* addressing yet: 
-
-* TODO
-
 ## Sun June 9, 2024
+
+### nlnet updates 
 
 Following @jimblandy's advice I've got a good portion of the atomic "upgrade" process working.
 * [@jimblandy's explaination of steps required](https://app.element.io/#/room/#naga:matrix.org/$eIqQA71wsmmzR0NWug4KsSFk3YKiX8zpIG6ToNN-0Sk)
 
 ## Tue June 4, 2024
+
+### nlnet updates 
 
 I'm working on "upgrading" pointer types in `naga`'s SPIR-V frontend. This really is the meat of the 
 problem, I would say. I'm attempting to follow this process, roughly:
@@ -76,7 +100,7 @@ I posted this on the `wgpu`/`naga` matrix and @jimblandy [replied here](https://
 
 ## Mon June 3, 2024
 
-### NLNet progress
+### nlnet updates 
 
 [My first PR to add atomics to naga's SPIR-V frontend](https://github.com/gfx-rs/wgpu/pull/5702) was 
 merged last week! I'm super stoked because I was worried it might be a bit beyond my pay grade, but 
