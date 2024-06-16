@@ -21,7 +21,21 @@ it out:
   * because we need to be able to debug where the memory is going
 - [ ] add a new test that ensures the image comparison machinery is sane 
   * because the comparisons seem pretty borked
+  * as an example, here's an image comparison:
+    - expected:
+      
+      ![expected](https://github.com/schell/renderling/assets/24942/bf68007e-e8c0-43e5-a77d-d18a89680051)
+    - seen:
+      
+      ![seen](https://github.com/schell/renderling/assets/24942/9e1454bb-8d99-4153-80dd-a0629e32d0a5)
+    - mask:
+      
+      ![mask](https://github.com/schell/renderling/assets/24942/a958c9e4-b17a-4b89-a257-1fac4b7483c1)
+    - diff:
+      
+      ![diff](https://github.com/schell/renderling/assets/24942/4770e596-34ee-479f-ba2d-2325d8dfa282)
 
+    `seen.png` is nothing but wacky garbage!
 ## Fri June 14, 2024
 
 ### nlnet updates 
