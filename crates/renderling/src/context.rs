@@ -145,7 +145,7 @@ async fn device(
     let required_features = wanted_features.intersection(supported_features);
     let unsupported_features = wanted_features.difference(supported_features);
     if !unsupported_features.is_empty() {
-        log::error!("required but unsupported features: {unsupported_features:#?}");
+        log::error!("requested but unsupported features: {unsupported_features:#?}");
     }
     let limits = adapter.limits();
     log::info!("adapter limits: {limits:#?}");

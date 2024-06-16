@@ -1,5 +1,13 @@
 # devlog
 
+## Mon June 17, 2024
+
+### nlnet updates
+
+The [first nlnet milestone PR](https://github.com/gfx-rs/wgpu/pull/5775) is really close to 
+merging. I'm already working on the [follow up PR](https://github.com/gfx-rs/wgpu/pull/5824)
+that adds the rest of the operators, which is milestone #2.
+
 ## Sun June 16, 2024
 
 ### nlnet updates 
@@ -11,6 +19,23 @@ What this means is that I'm actually very close to hitting the first nlnet miles
 
 With that, I've started work on the second milestone while my first set of PRs are in review, 
 as it takes a good while to roundtrip w/ feedback.
+
+#### Spiralling out
+
+Previously we had talked about upgrading expressions, and how there would be a "spiralling out" 
+or "cascade" of upgrades needed. I think we've mostly side-stepped that requirement by first 
+realizing that atomics can really only be held in global variables since they only appear in 
+`workgroup` and `storage` address spaces. 
+
+So these ops will always be accessed through a pointer to a global variable, and we can modify 
+that global variable's type in place and then not worry about having to upgrade the expressions 
+that contain that global variable. It's a nice simplification.
+
+> The reason I think you won't need to update any expressions is that Naga IR Load expressions 
+> and Store statements both can operate on Atomics, so everything accessing the globals whose 
+> types you're whacking, whether Loads, Stores, or Atomics, should still be okay. 
+>
+> -- Jim Blandy
 
 ### raspberry pi updates
 
@@ -36,6 +61,7 @@ it out:
       ![diff](https://github.com/schell/renderling/assets/24942/4770e596-34ee-479f-ba2d-2325d8dfa282)
 
     `seen.png` is nothing but wacky garbage!
+
 ## Fri June 14, 2024
 
 ### nlnet updates 
