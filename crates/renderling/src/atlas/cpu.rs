@@ -607,7 +607,8 @@ mod test {
             Context::headless(32, 32).with_default_atlas_texture_size(UVec3::new(1024, 1024, 2));
         let stage = ctx
             .new_stage()
-            .with_background_color(Vec3::splat(0.0).extend(1.0));
+            .with_background_color(Vec3::splat(0.0).extend(1.0))
+            .with_bloom(false);
         let (projection, view) = crate::camera::default_ortho2d(32.0, 32.0);
         let camera = stage.new_value(Camera::new(projection, view));
         let dirt = AtlasImage::from_path("../../img/dirt.jpg").unwrap();
