@@ -42,9 +42,9 @@ that contain that global variable. It's a nice simplification.
 Still getting OOM errors and I'm not sure why. There are a few changes I need to make to figure 
 it out: 
 
-- [ ] env var configurable logging in tests
+- [x] env var configurable logging in tests
   * because we need to be able to debug where the memory is going
-- [ ] add a new test that ensures the image comparison machinery is sane 
+- [x] add a new test that ensures the image comparison machinery is sane 
   * because the comparisons seem pretty borked
   * as an example, here's an image comparison:
     - expected:
