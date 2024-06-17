@@ -217,3 +217,14 @@ pub fn assert_img_eq_cfg(filename: &str, seen: impl Into<DynamicImage>, cfg: Dif
 pub fn assert_img_eq(filename: &str, seen: impl Into<DynamicImage>) {
     assert_img_eq_cfg(filename, seen, DiffCfg::default())
 }
+
+#[cfg(test)]
+mod test {
+    use crate::assert_img_eq;
+
+    #[test]
+    fn can_compare_images_sanity() {
+        let img = image::open("../../test_img/jolt.png").unwrap();
+        assert_img_eq("jolt.png", img);
+    }
+}

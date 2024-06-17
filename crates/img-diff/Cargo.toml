@@ -6,6 +6,6 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-glam = { workspace = true }
+glam = { workspace = true, features = ["std"] }
 image = { version = "^0.24" }
 snafu = "^0.7"
