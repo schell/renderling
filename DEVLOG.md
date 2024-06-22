@@ -1,5 +1,6 @@
-# devlog
-
+---
+title: devlog
+---
 ## Mon June 17, 2024
 
 ### nlnet updates
