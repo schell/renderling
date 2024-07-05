@@ -169,6 +169,7 @@ mod test {
                 compilation_options: Default::default(),
             }),
             multiview: None,
+            cache: None,
         });
 
         let frame = ctx.get_next_frame().unwrap();
@@ -297,6 +298,7 @@ mod test {
                 compilation_options: Default::default(),
             }),
             multiview: None,
+            cache: None,
         });
 
         let slab_buffer =
@@ -469,6 +471,7 @@ mod test {
                 compilation_options: Default::default(),
             }),
             multiview: None,
+            cache: None,
         });
 
         let slab_buffer =
@@ -640,6 +643,7 @@ mod test {
                 compilation_options: Default::default(),
             }),
             multiview: None,
+            cache: None,
         });
 
         let slab_buffer =

@@ -128,6 +128,7 @@ pub(crate) fn create_skybox_render_pipeline(
                 compilation_options: Default::default(),
             }),
             multiview: None,
+            cache: None,
         }),
     )
 }
@@ -595,6 +596,7 @@ impl Skybox {
                 compilation_options: Default::default(),
             }),
             multiview: None,
+            cache: None,
         });
 
         let framebuffer = Texture::new_with(

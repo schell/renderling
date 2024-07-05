@@ -139,6 +139,7 @@ fn create_stage_render_pipeline(
             compilation_options: Default::default(),
         }),
         multiview: None,
+        cache: None,
     })
 }
 

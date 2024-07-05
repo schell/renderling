@@ -118,6 +118,7 @@ impl DiffuseIrradianceConvolutionRenderPipeline {
                     compilation_options: Default::default(),
                 }),
                 multiview: None,
+                cache: None,
             },
         ));
         log::trace!("  completed pipeline creation");

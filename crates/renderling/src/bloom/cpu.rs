@@ -84,6 +84,7 @@ fn create_bloom_downsample_pipeline(device: &wgpu::Device) -> wgpu::RenderPipeli
             compilation_options: Default::default(),
         }),
         multiview: None,
+        cache: None,
     })
 }
 
@@ -128,6 +129,7 @@ fn create_bloom_upsample_pipeline(device: &wgpu::Device) -> wgpu::RenderPipeline
             compilation_options: Default::default(),
         }),
         multiview: None,
+        cache: None,
     })
 }
 
@@ -336,6 +338,7 @@ fn create_mix_pipeline(device: &wgpu::Device) -> wgpu::RenderPipeline {
             compilation_options: Default::default(),
         }),
         multiview: None,
+        cache: None,
     })
 }
 
