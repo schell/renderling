@@ -14,6 +14,7 @@ with financial support from the European Commission's [Next Generation Internet]
 Learn more at the [NLnet project page](https://nlnet.nl/project/Renderling).
 
 [<img src="https://nlnet.nl/logo/banner.png" alt="NLnet foundation logo" width="20%" />](https://nlnet.nl)
+
 [<img src="https://nlnet.nl/image/logos/NGI0_tag.svg" alt="NGI Zero Logo" width="20%" />](https://nlnet.nl/core)
 
 ## What
