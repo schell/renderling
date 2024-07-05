@@ -3,17 +3,6 @@ title: devlog
 ---
 ## Sat Jul 6, 2024
 
-a. Open first PR into wgpu including SPIR-V frontend pass identifying and storing (but not using) two atomics operations
-b. Iterate on PR feedback, address wgpu team concerns
-c. First PR merged, update in Renderling, maintenance and release minor version
-https://github.com/gfx-rs/wgpu/pull/5702
-
-
-d. Open PR into wgpu including SPIR-V frontend pass upgrading identified atomic uses to atomic types
-e. Iterate on PR feedback, address wgpu team concerns
-f. PR merged, update in Renderling, maintenance and release minor version
-
-
 ### nlnet updates 
 
 Milestone 1 is complete! `wgpu` users should now be able to write shaders that use the 
