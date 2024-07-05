@@ -152,6 +152,7 @@ impl Tonemapping {
                 }),
                 multisample: wgpu::MultisampleState::default(),
                 multiview: None,
+                cache: None,
             }),
         );
         Self {

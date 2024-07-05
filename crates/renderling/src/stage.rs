@@ -345,6 +345,126 @@ pub fn test_i8_i16_extraction(
     }
 }
 
+#[spirv(compute(threads(32)))]
+pub fn test_atomic_i_increment(
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] global_index: &mut u32,
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 1)] times: &u32,
+) {
+    let mut i = 0u32;
+    loop {
+        if i >= *times {
+            break;
+        }
+        let _ = unsafe {
+            spirv_std::arch::atomic_i_increment::<
+                u32,
+                { spirv_std::memory::Scope::Workgroup as u32 },
+                { spirv_std::memory::Semantics::NONE.bits() },
+            >(global_index)
+        };
+        i += 1;
+    }
+}
+
+#[spirv(compute(threads(32)))]
+pub fn test_atomic_load_and_store(
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] global_index: &mut u32,
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 1)] times: &u32,
+) {
+    for _ in 0..*times {
+        let loaded = unsafe {
+            spirv_std::arch::atomic_load::<
+                u32,
+                { spirv_std::memory::Scope::Workgroup as u32 },
+                { spirv_std::memory::Semantics::NONE.bits() },
+            >(global_index)
+        };
+        unsafe {
+            spirv_std::arch::atomic_store::<
+                u32,
+                { spirv_std::memory::Scope::Workgroup as u32 },
+                { spirv_std::memory::Semantics::NONE.bits() },
+            >(global_index, loaded + 2)
+        };
+    }
+}
+
+#[spirv(compute(threads(32)))]
+pub fn test_atomic_exchange(
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] global_index: &mut u32,
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 1)] times: &u32,
+) {
+    let mut n = 0u32;
+    for _ in 0..*times {
+        n += unsafe {
+            spirv_std::arch::atomic_exchange::<
+                u32,
+                { spirv_std::memory::Scope::Workgroup as u32 },
+                { spirv_std::memory::Semantics::NONE.bits() },
+            >(global_index, n)
+        };
+    }
+}
+
+#[spirv(compute(threads(32)))]
+pub fn test_atomic_compare_exchange(
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] global_index: &mut u32,
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 1)] times: &u32,
+) {
+    for n in 0..*times {
+        unsafe {
+            spirv_std::arch::atomic_compare_exchange::<
+                u32,
+                { spirv_std::memory::Scope::Workgroup as u32 },
+                { spirv_std::memory::Semantics::WORKGROUP_MEMORY.bits() },
+                { spirv_std::memory::Semantics::WORKGROUP_MEMORY.bits() },
+            >(global_index, n, 3)
+        };
+    }
+}
+
+#[spirv(compute(threads(32)))]
+pub fn test_atomic_i_decrement(
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] global_index: &mut u32,
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 1)] output: &mut [u32],
+) {
+    loop {
+        let i = unsafe {
+            spirv_std::arch::atomic_i_decrement::<
+                u32,
+                { spirv_std::memory::Scope::Workgroup as u32 },
+                { spirv_std::memory::Semantics::NONE.bits() },
+            >(global_index)
+        };
+        output[i as usize] = i;
+        if i == 0 {
+            break;
+        }
+    }
+}
+
+#[spirv(compute(threads(32)))]
+pub fn test_atomic_i_add_sub(
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] global_index: &mut u32,
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 1)] output: &mut [u32],
+) {
+    let i = unsafe {
+        spirv_std::arch::atomic_i_add::<
+            u32,
+            { spirv_std::memory::Scope::Workgroup as u32 },
+            { spirv_std::memory::Semantics::NONE.bits() },
+        >(global_index, 2)
+    };
+
+    output[i as usize] = unsafe {
+        spirv_std::arch::atomic_i_sub::<
+            u32,
+            { spirv_std::memory::Scope::Workgroup as u32 },
+            { spirv_std::memory::Semantics::NONE.bits() },
+        >(global_index, i)
+    };
+}
+
 #[cfg(test)]
 mod test {
     use glam::{Mat4, Vec3};

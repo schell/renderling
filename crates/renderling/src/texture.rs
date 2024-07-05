@@ -688,6 +688,7 @@ impl Texture {
             depth_stencil: None,
             multisample: wgpu::MultisampleState::default(),
             multiview: None,
+            cache: None,
         });
         let size = self.texture.size();
         let mut mips: Vec<Texture> = vec![];

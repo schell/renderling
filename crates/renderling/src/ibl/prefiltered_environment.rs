@@ -102,6 +102,7 @@ pub fn create_pipeline_and_bindgroup(
             compilation_options: Default::default(),
         }),
         multiview: None,
+        cache: None,
     });
     (pipeline, bindgroup)
 }
