@@ -1,6 +1,18 @@
 ---
 title: devlog
 ---
+## Sat Jul 6, 2024
+
+### nlnet updates 
+
+Milestone 1 is complete! `wgpu` users should now be able to write shaders that use the 
+`AtomicIIncrement` operator in SPIR-V!
+
+[Here is the tracking ticket](https://github.com/gfx-rs/wgpu/issues/4489) for atomics support.
+
+This was a big milestone for me as it's my first significant contribution to a large open 
+source project, and it was quite technically challenging. It feels good!
+
 ## Mon June 17, 2024
 
 ### nlnet updates
