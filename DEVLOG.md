@@ -1,6 +1,21 @@
 ---
 title: devlog
 ---
+## Wed Aug 7, 2024
+
+I got another sponsorship on Github! [Second Half Games](https://secondhalf.games/),
+(maker of [Meanwhile in Sector 80](https://store.steampowered.com/app/2660180/MEANWHILE_IN_SECTOR_80/),
+sponsored me in a significant way. Thank y'all! The game they're making looks really cool, to boot.
+
+### naga SPIR-V updates
+
+I'm preparing the next PR into `wgpu` that would bring in support for almost all the rest of the 
+atomic operations. After that there should be one more to support `AtomicCompareExchange`, which is 
+the last op to be supported. The reason `AtomicCompareExchange` is last is because the return type 
+more complicated - it's a struct containing the previous value and a bool of whether or not it was 
+exchanged. This is going to take extra work in the `atomic_upgrade` module, unlike the other ops,
+which only require parsing.
+
 ## Sat Jul 6, 2024
 
 ### nlnet updates 
