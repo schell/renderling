@@ -702,9 +702,9 @@ impl Animator {
             self.animation.name.as_deref().unwrap_or("")
         );
         let max_length_seconds = self.animation.length_in_seconds();
-        log::trace!("  total: {max_length_seconds}");
+        log::trace!("  total length: {max_length_seconds}s");
         self.timestamp = (self.timestamp + dt_seconds) % max_length_seconds;
-        log::trace!("  current: {}", self.timestamp);
+        log::trace!("  current time: {}s", self.timestamp);
         let properties = self.animation.get_properties_at_time(self.timestamp)?;
         log::trace!("  {} properties", properties.len());
         for (node_index, property) in properties.into_iter() {

@@ -1,6 +1,299 @@
 ---
 title: devlog
 ---
+## Thu Aug 22, 2024
+
+### Distorted Fox, continued
+
+Looking back at what I had written 
+[previously](https://github.com/schell/renderling/commit/c53b8c2b34fa5f472fe4ee546ba8100d420cedb5#diff-3dd35db6d66a08d742b825d90b6841bddf0f4246c1652ee1c0e6ee1621211d4eR92-R135),
+it seems I was indeed using global transforms of bones. This means somehow my current matrices are borked. Here's that code inline just to make it easier:
+
+```rust 
+    /// Return the matrix needed to bring vertices into the coordinate space of
+    /// the joint node.
+    pub fn get_joint_matrix(
+        &self,
+        i: usize,
+        joint_ids: &[Id<GpuEntity>; 32],
+        entities: &[GpuEntity],
+    ) -> Mat4 {
+        if i >= self.joints.len() {
+            return Mat4::IDENTITY;
+        }
+        let joint_index = self.joints[i];
+        let joint_id = if joint_index as usize >= joint_ids.len() {
+            Id::NONE
+        } else {
+            joint_ids[joint_index as usize]
+        };
+        if joint_id.is_none() {
+            return Mat4::IDENTITY;
+        }
+        let entity_index = joint_id.index();
+        if entity_index >= entities.len() {
+            return Mat4::IDENTITY;
+        }
+        let joint_entity = &entities[entity_index];
+        let (t, r, s) = joint_entity.get_world_transform(entities);
+        let trs = Mat4::from_scale_rotation_translation(s, r, t);
+        trs * joint_entity.inverse_bind_matrix
+    }
+
+    /// Return the result of adding all joint matrices multiplied by their
+    /// weights for the given vertex.
+    // See the [khronos gltf viewer reference](https://github.com/KhronosGroup/glTF-Sample-Viewer/blob/47a191931461a6f2e14de48d6da0f0eb6ec2d147/source/Renderer/shaders/animation.glsl#L47)
+    pub fn get_skin_matrix(&self, joint_ids: &[Id<GpuEntity>; 32], entities: &[GpuEntity]) -> Mat4 {
+        let mut mat = Mat4::ZERO;
+        for i in 0..self.joints.len() {
+            mat += self.weights[i] * self.get_joint_matrix(i, joint_ids, entities);
+        }
+        if mat == Mat4::ZERO {
+            return Mat4::IDENTITY;
+        }
+        mat
+    }
+```
+
+And here's the `GpuEntity::get_world_transform` function at the time: 
+
+```rust 
+    pub fn get_world_transform(&self, entities: &[GpuEntity]) -> (Vec3, Quat, Vec3) {
+        let mut mat = Mat4::IDENTITY;
+        let mut id = self.id;
+        loop {
+            let entity = entities[id.index()];
+            mat = Mat4::from_scale_rotation_translation(
+                entity.scale.xyz(),
+                entity.rotation,
+                entity.position.xyz(),
+            ) * mat;
+            id = entity.parent;
+            if id.index() >= entities.len() {
+                break;
+            }
+        }
+        let (s, r, t) = mat.to_scale_rotation_translation();
+        (t, r, s)
+    }
+```
+
+The current `NestedTransform` calculates its world transform like so: 
+
+```rust
+    pub fn get_global_transform(&self) -> Transform {
+        let maybe_parent_guard = self.parent.read().unwrap();
+        let transform = self.get();
+        let parent_transform = maybe_parent_guard
+            .as_ref()
+            .map(|parent| parent.get_global_transform())
+            .unwrap_or_default();
+        Transform::from(Mat4::from(parent_transform) * Mat4::from(transform))
+    }
+```
+
+This expands roughly to `great_grand_parent_transform * grand_parent_transform * parent_transform * child_transform`.
+
+Converting from `Mat4` to `Transform` makes me a little nervous, but it's rather simple:
+
+```rust 
+impl From<Transform> for Mat4 {
+    fn from(
+        Transform {
+            translation,
+            rotation,
+            scale,
+        }: Transform,
+    ) -> Self {
+        Mat4::from_scale_rotation_translation(scale, rotation, translation)
+    }
+}
+```
+
+## Sat Aug 17, 2024
+
+### naga SPIR-V updates 
+
+[My third PR](https://github.com/gfx-rs/wgpu/pull/5824) into `wgpu` is up and I'm just waiting for 
+a review...
+
+### Distorted Fox
+
+I'd like to squash this rigging issue once and for all. It's always tricky.
+
+#### Skin/Rigging bug - pipeline drilldown
+
+First let's go over how GLTF nodes are loaded into `renderling` in the 
+`GltfDocument::from_gltf` function: 
+
+For each node we create a `NestedTransform`, which is a CPU struct that has a global 
+transform ID, a shared local transform (TRS) and a shared list of parent 
+`NestedTransform`s:
+
+```rust 
+#[derive(Clone)]
+pub struct NestedTransform {
+    global_transform_id: Id<Transform>,
+    local_transform: Arc<RwLock<Transform>>,
+
+    notifier_index: usize,
+    notify: async_channel::Sender<usize>,
+
+    children: Arc<RwLock<Vec<NestedTransform>>>,
+    parent: Arc<RwLock<Option<NestedTransform>>>,
+}
+```
+
+We keep all the transforms in a temporary cache, which we use to look up when creating the 
+GLTF document nodes:
+
+```rust 
+fn transform_for_node(
+    nesting_level: usize,
+    stage: &mut Stage,
+    cache: &mut HashMap<usize, NestedTransform>,
+    node: &gltf::Node,
+) -> NestedTransform {
+    let padding = std::iter::repeat(" ")
+        .take(nesting_level * 2)
+        .collect::<Vec<_>>()
+        .join("");
+    let nt = if let Some(nt) = cache.get(&node.index()) {
+        nt.clone()
+    } else {
+        let transform = stage.new_nested_transform();
+        let (translation, rotation, scale) = &node.transform().decomposed();
+        let t = Transform {
+            translation: Vec3::from_array(*translation),
+            rotation: Quat::from_array(*rotation),
+            scale: Vec3::from_array(*scale),
+        };
+        transform.set(t);
+        for node in node.children() {
+            let child_transform =
+                transform_for_node(nesting_level + 1, stage, cache, &node);
+            transform.add_child(&child_transform);
+        }
+        cache.insert(node.index(), transform.clone());
+        transform
+    };
+    let t = nt.get();
+    log::trace!(
+        "{padding}{} {:?} {:?} {:?} {:?}",
+        node.index(),
+        node.name(),
+        t.translation,
+        t.rotation,
+        t.scale
+    );
+    nt
+}
+```
+
+This ensures that each node is only created at most once, and that all its children are
+also created.
+
+We create all the nodes as `GltfNode` and keep them in a vector. `GltfNode` contains the 
+`NestedTrantsform` and indexes into other vectors in the document.
+
+`NestedTransform` is a special type in that whenever it is modified it gets marked
+"dirty" along with all its children. This sends notice to the stage's GPU buffer.
+Each frame tick on the CPU these buffer values are collected and updated on the GPU. 
+This happens in `renderling::stage::cpu::SlabAllocator::drain_updated_sources`. In 
+this function all update sources are polled for their new values and then updated in
+the GPU buffer. `NestedTransform` gives its global transform as its new value. 
+
+This is how `NestedTransform` calculates its global transform:
+
+```rust 
+    pub fn get_global_transform(&self) -> Transform {
+        let maybe_parent_guard = self.parent.read().unwrap();
+        let transform = self.get();
+        let parent_transform = maybe_parent_guard
+            .as_ref()
+            .map(|parent| parent.get_global_transform())
+            .unwrap_or_default();
+        Transform::from(Mat4::from(parent_transform) * Mat4::from(transform))
+    }
+```
+
+Later we load the meshes and each mesh's primitives. Loading each primitives loads its 
+joints and weights. The only transformation that happens here is that the weights are 
+normalized if they aren't already normalized within the GLTF file.
+
+Later we load the skins with `GltfSkin::from_gltf`. This runs through all the joints
+of the skin, collecting the global transform id (`Id<Transform>`) of each joint's `NestedTransform`
+and storing it in an array on the GPU as the skin's `joint_transforms`. This also stores 
+the `inverse_bind_matrices` of the skin on the GPU. No transformation is applied to the 
+inverse bind matrices. 
+
+So then what's happening on the GPU is in `renderling::stage::renderlet_vertex`. We read
+the renderlet, from that we read if the renderlet has a skin. If the renderlet has a skin
+we read the skin and then get the skinning matrix for the vertex with 
+`skin.get_skinning_matrix`:
+
+```rust 
+pub fn get_skinning_matrix(&self, vertex: Vertex, slab: &[u32]) -> Mat4 {
+    let mut skinning_matrix = Mat4::ZERO;
+    for i in 0..vertex.joints.len() {
+        let joint_matrix = self.get_joint_matrix(i, vertex, slab);
+        // Ensure weights are applied correctly to the joint matrix
+        let weight = vertex.weights[i];
+        if weight > 0.0 {
+            skinning_matrix += weight * joint_matrix;
+        }
+    }
+
+    skinning_matrix
+}
+```
+
+The bulk of that work is in `Skin::get_joint_matrix`: 
+
+```rust 
+pub fn get_joint_matrix(&self, i: usize, vertex: Vertex, slab: &[u32]) -> Mat4 {
+    let joint_index = vertex.joints[i] as usize;
+    let joint_id = slab.read(self.joints.at(joint_index));
+    let joint_transform = slab.read(joint_id);
+    // Use the corrected method to get the inverse bind matrix
+    let inverse_bind_matrix = self.get_inverse_bind_matrix(i, slab);
+    Mat4::from(joint_transform) * inverse_bind_matrix
+}
+```
+
+Above we read out the `joint_id`, which is the `Id<Transform>` of the joint node's 
+`NestedTransform`. Which means `joint_transform` is the global transform of the joint.
+That is - it's the transform that brings the joint's node into world-space. We then 
+multiply this transform by the joint's inverse bind matrix. I think this might be where 
+the algorithm is going wrong?
+
+#### A small change
+
+If we change the code above to `inverse_bind_matrix * Mat4::from(joint_transform)` we 
+get a fox that is MUCH LESS distorted, but the further the animation takes the vertices 
+from the resting position, the more distorted it gets (it results in a fox animation that 
+looks weird at the edges of its transition). So there's still some funkiness, but the 
+majority of the problem is gone.
+
+This change also makes the `SimpleSkin.gltf` example fail. It warps the skin too far.
+So at least it's consistent.
+
+#### Last thoughts
+
+My last thought for the day is that maybe there's a transformation that's getting applied 
+multiple times. When pushing the mesh to the GPU we have to create a `Renderlet` for each
+mesh primitive, because each primitive must be a separate draw. So what I think may be 
+happening is that the skinning matrix is being calculated and in that calculation the 
+joint node matrices already include the node's transform - but the vertex shader also 
+multiplies the skinning matrix by the renderlet transform... 
+
+...though it turns out getting rid of that multiplication does nothing.
+
+#### Ok not quite
+
+After creating an `Animator` and animating `0.0` seconds - we get the deformation. If 
+we don't animate, there is no deformation. 
+
 ## Wed Aug 7, 2024
 
 I got another sponsorship on Github! [Second Half Games](https://secondhalf.games/),

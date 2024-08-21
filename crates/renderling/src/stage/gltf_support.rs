@@ -617,13 +617,16 @@ impl GltfSkin {
         nodes: &[GltfNode],
         skin: gltf::Skin,
     ) -> Result<Self, StageGltfError> {
+        log::debug!("reading skin {} {:?}", skin.index(), skin.name());
         let joint_nodes = skin.joints().map(|n| n.index()).collect::<Vec<_>>();
+        log::debug!("  has {} joints", joint_nodes.len());
         let mut joint_transforms = vec![];
         for node_index in joint_nodes.iter() {
             let gltf_node: &GltfNode = nodes
                 .get(*node_index)
                 .context(MissingNodeSnafu { index: *node_index })?;
             let transform_id = gltf_node.transform.global_transform_id();
+            log::debug!("    joint node {node_index} is {transform_id:?}");
             joint_transforms.push(transform_id);
         }
         let joint_transforms = stage.new_array(joint_transforms);
@@ -633,13 +636,20 @@ impl GltfSkin {
                 .into_iter()
                 .map(|m| Mat4::from_cols_array_2d(&m))
                 .collect::<Vec<_>>();
-            log::debug!("has inverse bind matrices: {invs:#?}");
+            log::debug!("  has {} inverse bind matrices", invs.len());
             Some(stage.new_array(invs))
         } else {
-            log::debug!("no inverse bind matrices");
+            log::debug!("  no inverse bind matrices");
             None
         };
-        let skeleton = skin.skeleton().map(|n| n.index());
+        let skeleton = if let Some(n) = skin.skeleton() {
+            let index = n.index();
+            log::debug!("  skeleton is node {index}, {:?}", n.name());
+            Some(index)
+        } else {
+            log::debug!("  skeleton is assumed to be the scene root");
+            None
+        };
         Ok(GltfSkin {
             index: skin.index(),
             skin: stage.new_value(Skin {
@@ -669,6 +679,7 @@ pub struct GltfDocument {
     pub meshes: Vec<GltfMesh>,
     pub nodes: Vec<GltfNode>,
     pub materials: HybridArray<Material>,
+    // map of node index to renderlets
     pub renderlets: FxHashMap<usize, Vec<Hybrid<Renderlet>>>,
     /// Vector of scenes - each being a list of nodes.
     pub scenes: Vec<Vec<usize>>,
@@ -762,7 +773,7 @@ impl GltfDocument {
                 transform
             };
             let t = nt.get();
-            log::debug!(
+            log::trace!(
                 "{padding}{} {:?} {:?} {:?} {:?}",
                 node.index(),
                 node.name(),
@@ -908,7 +919,6 @@ impl GltfDocument {
             .collect();
 
         log::debug!("Creating renderlets");
-
         let mut renderlets = FxHashMap::default();
         for gltf_node in nodes.iter() {
             let mut node_renderlets = vec![];
@@ -1206,7 +1216,7 @@ mod test {
         let mut stage = ctx
             .new_stage()
             .with_lighting(true)
-            .with_background_color(Vec3::splat(1.0).extend(1.0));
+            .with_background_color(Vec4::ONE);
 
         let doc = stage
             .load_gltf_document_from_path("../../gltf/red_brick_03_1k.glb", Id::NONE)
@@ -1279,5 +1289,72 @@ mod test {
             v.ndc_pos = v.clip_pos.xyz() / v.clip_pos.w;
             v
         }
+    }
+
+    #[test]
+    fn rigged_fox() {
+        let ctx = Context::headless(256, 256);
+        let mut stage = ctx
+            .new_stage()
+            .with_lighting(false)
+            .with_vertex_skinning(false)
+            .with_bloom(false)
+            .with_background_color(Vec3::splat(0.5).extend(1.0));
+
+        let aspect = 256.0 / 256.0;
+        let fovy = core::f32::consts::PI / 4.0;
+        let znear = 0.1;
+        let zfar = 1000.0;
+        let projection = glam::Mat4::perspective_rh(fovy, aspect, znear, zfar);
+        let y = 50.0;
+        let eye = Vec3::new(120.0, y, 120.0);
+        let target = Vec3::new(0.0, y, 0.0);
+        let up = Vec3::Y;
+        let view = glam::Mat4::look_at_rh(eye, target, up);
+
+        let camera = stage.new_value(Camera::new(projection, view));
+        let doc = stage
+            .load_gltf_document_from_path("../../gltf/Fox.glb", camera.id())
+            .unwrap();
+        log::info!("renderlets: {:#?}", doc.renderlets);
+
+        // render a frame without vertex skinning as a baseline
+        let frame = ctx.get_next_frame().unwrap();
+        stage.render(&frame.view());
+        let img = frame.read_image().unwrap();
+        img_diff::assert_img_eq("gltf/skinning/rigged_fox_no_skinning.png", img);
+
+        // render a frame with vertex skinning to ensure our rigging is correct
+        stage.set_has_vertex_skinning(true);
+        let frame = ctx.get_next_frame().unwrap();
+        stage.render(&frame.view());
+        let img = frame.read_image().unwrap();
+        img_diff::assert_img_eq_cfg(
+            "gltf/skinning/rigged_fox_no_skinning.png",
+            img,
+            img_diff::DiffCfg {
+                test_name: Some("gltf/skinning/rigged_fox"),
+                ..Default::default()
+            },
+        );
+
+        let mut animator = doc
+            .animations
+            .get(0)
+            .unwrap()
+            .clone()
+            .into_animator(doc.nodes.iter().map(|n| (n.index, n.transform.clone())));
+        animator.progress(0.0).unwrap();
+        let frame = ctx.get_next_frame().unwrap();
+        stage.render(&frame.view());
+        let img = frame.read_image().unwrap();
+        img_diff::assert_img_eq_cfg(
+            "gltf/skinning/rigged_fox_no_skinning.png",
+            img,
+            img_diff::DiffCfg {
+                test_name: Some("gltf/skinning/rigged_fox_0"),
+                ..Default::default()
+            },
+        );
     }
 }

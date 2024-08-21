@@ -349,6 +349,18 @@ impl Stage {
         self
     }
 
+    /// Set whether to use vertex skinning.
+    pub fn set_has_vertex_skinning(&self, use_skinning: bool) {
+        self.pbr_config
+            .modify(|cfg| cfg.has_skinning = use_skinning);
+    }
+
+    /// Set whether to use vertex skinning.
+    pub fn with_vertex_skinning(self, use_skinning: bool) -> Self {
+        self.set_has_vertex_skinning(use_skinning);
+        self
+    }
+
     /// Set the lights to use for shading.
     pub fn set_lights(&self, lights: impl IntoIterator<Item = Id<Light>>) {
         log::trace!("setting lights");

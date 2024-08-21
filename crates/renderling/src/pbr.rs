@@ -237,6 +237,7 @@ pub struct PbrConfig {
     pub resolution: glam::UVec2,
     pub debug_mode: debug::DebugMode,
     pub has_lighting: bool,
+    pub has_skinning: bool,
     pub light_array: Array<Id<light::Light>>,
 }
 
@@ -247,6 +248,7 @@ impl Default for PbrConfig {
             resolution: glam::UVec2::ONE,
             debug_mode: Default::default(),
             has_lighting: true,
+            has_skinning: true,
             light_array: Default::default(),
         }
     }
@@ -305,6 +307,7 @@ pub fn fragment_impl<A, T, C, S>(
         resolution: _,
         debug_mode,
         has_lighting,
+        has_skinning: _,
         light_array,
     }: PbrConfig,
 
