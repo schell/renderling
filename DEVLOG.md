@@ -7,7 +7,9 @@ title: devlog
 
 Looking back at what I had written 
 [previously](https://github.com/schell/renderling/commit/c53b8c2b34fa5f472fe4ee546ba8100d420cedb5#diff-3dd35db6d66a08d742b825d90b6841bddf0f4246c1652ee1c0e6ee1621211d4eR92-R135),
-it seems I was indeed using global transforms of bones. This means somehow my current matrices are borked. Here's that code inline just to make it easier:
+it seems I was indeed using global transforms of bones. This means somehow my current matrices are borked, 
+even if the concept is the same and was previously working. Though I remember it was a bit fiddly getting it 
+to work in the first place. Here's that unearthed code inline just to make it easier:
 
 ```rust 
     /// Return the matrix needed to bring vertices into the coordinate space of
