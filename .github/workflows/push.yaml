@@ -27,6 +27,13 @@ jobs:
       - uses: actions/checkout@v2
       - uses: moonrepo/setup-rust@v1
       - run: cargo clippy
+
+  renderling-build-example:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2 
+      - uses: moonrepo/setup-rust@v1
+      - run: cargo build -p example
       
   renderling-test-linux:
     runs-on: ubuntu-latest 

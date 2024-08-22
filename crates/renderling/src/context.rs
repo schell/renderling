@@ -155,6 +155,7 @@ async fn device(
                 required_features,
                 required_limits: adapter.limits(),
                 label: None,
+                memory_hints: wgpu::MemoryHints::default(),
             },
             None,
         )
