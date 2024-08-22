@@ -345,6 +345,7 @@ pub fn test_i8_i16_extraction(
     }
 }
 
+#[cfg(feature = "test_spirv_atomics")]
 #[spirv(compute(threads(32)))]
 pub fn test_atomic_i_increment(
     #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] global_index: &mut u32,
@@ -366,6 +367,7 @@ pub fn test_atomic_i_increment(
     }
 }
 
+#[cfg(feature = "test_spirv_atomics")]
 #[spirv(compute(threads(32)))]
 pub fn test_atomic_load_and_store(
     #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] global_index: &mut u32,
@@ -389,6 +391,7 @@ pub fn test_atomic_load_and_store(
     }
 }
 
+#[cfg(feature = "test_spirv_atomics")]
 #[spirv(compute(threads(32)))]
 pub fn test_atomic_exchange(
     #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] global_index: &mut u32,
@@ -406,6 +409,7 @@ pub fn test_atomic_exchange(
     }
 }
 
+#[cfg(feature = "test_spirv_atomics")]
 #[spirv(compute(threads(32)))]
 pub fn test_atomic_compare_exchange(
     #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] global_index: &mut u32,
@@ -423,6 +427,7 @@ pub fn test_atomic_compare_exchange(
     }
 }
 
+#[cfg(feature = "test_spirv_atomics")]
 #[spirv(compute(threads(32)))]
 pub fn test_atomic_i_decrement(
     #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] global_index: &mut u32,
@@ -443,6 +448,7 @@ pub fn test_atomic_i_decrement(
     }
 }
 
+#[cfg(feature = "test_spirv_atomics")]
 #[spirv(compute(threads(32)))]
 pub fn test_atomic_i_add_sub(
     #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] global_index: &mut u32,
