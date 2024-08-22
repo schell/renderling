@@ -11,9 +11,6 @@ readme = "../../README.md"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
-[lib]
-crate-type = ["lib", "dylib"]
-
 [features]
 default = ["gltf", "sdf", "shaders", "tutorial", "winit"]
 shaders = [
