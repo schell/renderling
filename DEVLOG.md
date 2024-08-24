@@ -8,6 +8,18 @@ title: devlog
 Still working on the fox rigging bug. I'm going to write a test that performs the skinning on CPU 
 and see how that goes.
 
+...
+
+I've added the test
+[here](https://github.com/schell/renderling/pull/124/commits/87ed4fdca52b3b21b91c2de3d5d559c4beb95175#diff-157f0f4e2d7f79c6b0f59d72bc0ea76b845993f9e2a6fdbada26ceee2fd89e49R504-R549).
+
+So far it passes, so I don't think the problem is in the node/bone global transform calculation.
+Next I'll try testing the joint matrix and skinning matrix calculations.
+
+...
+
+
+
 ## Thu Aug 22, 2024
 
 ### Distorted Fox, continued
