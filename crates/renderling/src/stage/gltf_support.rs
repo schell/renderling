@@ -399,11 +399,27 @@ impl GltfPrimitive {
         }
         log::debug!("  joints: {all_joints:?}");
 
+        const UNWEIGHTED_WEIGHTS: [f32; 4] = [1.0, 0.0, 0.0, 0.0];
+        let mut logged_weights_not_f32 = false;
         let weights = reader
             .read_weights(0)
             .into_iter()
-            .flat_map(|ws| ws.into_f32())
-            .chain(std::iter::repeat([f32::MAX; 4]))
+            .flat_map(|ws| {
+                if !logged_weights_not_f32 {
+                    match ws {
+                        gltf::mesh::util::ReadWeights::U8(_) => log::warn!("weights are u8"),
+                        gltf::mesh::util::ReadWeights::U16(_) => log::warn!("weights are u16"),
+                        gltf::mesh::util::ReadWeights::F32(_) => {}
+                    }
+                    logged_weights_not_f32 = true;
+                }
+                ws.into_f32().map(|weights| {
+                    // normalize the weights
+                    let sum = weights[0] + weights[1] + weights[2] + weights[3];
+                    weights.map(|w| w / sum)
+                })
+            })
+            .chain(std::iter::repeat(UNWEIGHTED_WEIGHTS))
             .take(positions.len());
         let vs = joints.into_iter().zip(weights);
         let vs = colors.zip(vs);
@@ -412,22 +428,9 @@ impl GltfPrimitive {
         let vs = uv1s.zip(vs);
         let vs = uv0s.into_iter().zip(vs);
         let vs = positions.into_iter().zip(vs);
-        let mut logged_not_normalized = false;
-        let mut unnormalized_weight_vertices_count = 0;
         let vertices = vs
             .map(
-                |(position, (uv0, (uv1, (normal, (tangent, (color, (joints, mut weights)))))))| {
-                    let weight_sum: f32 = weights.iter().sum();
-                    let are_normalized = 1.0 - weight_sum <= f32::EPSILON;
-                    if !are_normalized {
-                        unnormalized_weight_vertices_count += 1;
-                        if !logged_not_normalized {
-                            log::warn!("weights are not normalized: {weights:?}");
-                            logged_not_normalized = true;
-                            weights = weights.map(|w| w / weight_sum);
-                            log::warn!("  normalized to {weights:?}");
-                        }
-                    }
+                |(position, (uv0, (uv1, (normal, (tangent, (color, (joints, weights)))))))| {
                     Vertex {
                         position,
                         color,
@@ -443,16 +446,12 @@ impl GltfPrimitive {
             .collect::<Vec<_>>();
         let vertices = stage.new_array(vertices);
         log::debug!("{} vertices, {:?}", vertices.len(), vertices.array());
-        if logged_not_normalized {
-            log::debug!(
-                "  {unnormalized_weight_vertices_count} of which had unnormalized joint weights"
-            );
-        }
         let indices = stage.new_array(indices);
         log::debug!("{} indices, {:?}", indices.len(), indices.array());
         let gltf::mesh::Bounds { min, max } = primitive.bounding_box();
         let min = Vec3::from_array(min);
         let max = Vec3::from_array(max);
+
         Self {
             vertices,
             indices,
@@ -1338,20 +1337,6 @@ mod test {
             },
         );
 
-        let slab = futures_lite::future::block_on(stage.read(
-            ctx.get_device(),
-            ctx.get_queue(),
-            Some("stage slab"),
-            ..,
-        ))
-        .unwrap();
-
-        assert_eq!(1, doc.skins.len());
-        let skin = doc.skins[0].skin.get();
-        for joint_index in 0..skin.joints.len() {
-            skin.get_joint_matrix(, , )
-        }
-
         // let mut animator = doc
         //     .animations
         //     .get(0)
@@ -1370,5 +1355,19 @@ mod test {
         //         ..Default::default()
         //     },
         // );
+
+        // let slab = futures_lite::future::block_on(stage.read(
+        //     ctx.get_device(),
+        //     ctx.get_queue(),
+        //     Some("stage slab"),
+        //     ..,
+        // ))
+        // .unwrap();
+
+        // assert_eq!(1, doc.skins.len());
+        // let skin = doc.skins[0].skin.get();
+        // for joint_index in 0..skin.joints.len() {
+        //     // skin.get_joint_matrix(, , )
+        // }
     }
 }

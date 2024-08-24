@@ -677,6 +677,7 @@ pub struct Animator {
     pub nodes: rustc_hash::FxHashMap<usize, NestedTransform>,
     /// The animation that will apply to the nodes.
     pub animation: Animation,
+    erred_unsupported_morph_targets: bool,
 }
 
 impl Animator {
@@ -732,7 +733,12 @@ impl Animator {
                             t.scale = scale;
                         });
                     }
-                    TweenProperty::MorphTargetWeights(_) => todo!(),
+                    TweenProperty::MorphTargetWeights(_) => {
+                        if !self.erred_unsupported_morph_targets {
+                            log::error!("model has morph targets, which are currently unsupported");
+                            self.erred_unsupported_morph_targets = true;
+                        }
+                    }
                 }
             } else {
                 log::warn!("node {node_index} isn't in the animator's list of nodes");

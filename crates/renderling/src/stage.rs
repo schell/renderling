@@ -545,7 +545,27 @@ mod test {
         } = c.get_global_transform();
         let global_transform = (translation, rotation, scale);
         let legacy_transform = legacy_get_world_transform(&c);
+        assert_eq!(legacy_transform, global_transform);
 
+        c.modify(|t| t.translation = Vec3::ONE);
+
+        let all_updates = slab.get_updated_source_ids();
+        assert_eq!(
+            std::collections::HashSet::from_iter([
+                a.get_notifier_index(),
+                b.get_notifier_index(),
+                c.get_notifier_index()
+            ]),
+            all_updates
+        );
+
+        let Transform {
+            translation,
+            rotation,
+            scale,
+        } = c.get_global_transform();
+        let global_transform = (translation, rotation, scale);
+        let legacy_transform = legacy_get_world_transform(&c);
         assert_eq!(legacy_transform, global_transform);
     }
 }

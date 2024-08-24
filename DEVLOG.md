@@ -22,6 +22,39 @@ Ok, I made a little progress there. I think what I'll do is checkout the last co
 good, write a test to output some of the Fox's vertices, joint matrices and skinning matrices and then 
 use those as data in a unit test on my bugfix branch. I probably should have started here.
 
+...
+
+Turns out it doesn't compile at that commit, I know it did at the time, but it looks like one of the 
+dependencies is borked. Instead of spending a bunch of time debugging _that problem_, I'll just port
+over some of the functions.
+
+...
+
+First I'm going to do a sanity check to ensure that `NestedTransform` is updating the entire hierarchy
+correctly.
+
+Yup, that's fine.
+
+...
+
+I found another glb model with distortion - CesiumMan.
+
+I found another glb model with distortion - RobotExpressive. It's actually a really cute robot 
+with some great animations in it. Good find. Even better is that I found a three.js issue that 
+seems to detail [the same problem I'm
+having](https://github.com/mrdoob/three.js/issues/15319) - I hope.
+
+...
+
+THAT WAS THE KEY. 
+
+The solution was to normalize the weights before collecting the vertices.
+
+This fixes the Fox model, and the cute robot model, but the cute robot model still has an odd 
+artifact on its thumb during animation.
+
+This does *not* fix CesiumMan, so I'll have to investigate that separately.
+
 ## Thu Aug 22, 2024
 
 ### Distorted Fox, continued

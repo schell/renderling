@@ -945,6 +945,11 @@ impl NestedTransform {
         nested
     }
 
+    #[cfg(test)]
+    pub(crate) fn get_notifier_index(&self) -> usize {
+        self.notifier_index
+    }
+
     fn mark_dirty(&self) {
         // UNWRAP: safe because it's unbounded
         self.notify.try_send(self.notifier_index).unwrap();
