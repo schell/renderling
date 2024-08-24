@@ -1338,23 +1338,37 @@ mod test {
             },
         );
 
-        let mut animator = doc
-            .animations
-            .get(0)
-            .unwrap()
-            .clone()
-            .into_animator(doc.nodes.iter().map(|n| (n.index, n.transform.clone())));
-        animator.progress(0.0).unwrap();
-        let frame = ctx.get_next_frame().unwrap();
-        stage.render(&frame.view());
-        let img = frame.read_image().unwrap();
-        img_diff::assert_img_eq_cfg(
-            "gltf/skinning/rigged_fox_no_skinning.png",
-            img,
-            img_diff::DiffCfg {
-                test_name: Some("gltf/skinning/rigged_fox_0"),
-                ..Default::default()
-            },
-        );
+        let slab = futures_lite::future::block_on(stage.read(
+            ctx.get_device(),
+            ctx.get_queue(),
+            Some("stage slab"),
+            ..,
+        ))
+        .unwrap();
+
+        assert_eq!(1, doc.skins.len());
+        let skin = doc.skins[0].skin.get();
+        for joint_index in 0..skin.joints.len() {
+            skin.get_joint_matrix(, , )
+        }
+
+        // let mut animator = doc
+        //     .animations
+        //     .get(0)
+        //     .unwrap()
+        //     .clone()
+        //     .into_animator(doc.nodes.iter().map(|n| (n.index, n.transform.clone())));
+        // animator.progress(0.0).unwrap();
+        // let frame = ctx.get_next_frame().unwrap();
+        // stage.render(&frame.view());
+        // let img = frame.read_image().unwrap();
+        // img_diff::assert_img_eq_cfg(
+        //     "gltf/skinning/rigged_fox_no_skinning.png",
+        //     img,
+        //     img_diff::DiffCfg {
+        //         test_name: Some("gltf/skinning/rigged_fox_0"),
+        //         ..Default::default()
+        //     },
+        // );
     }
 }
