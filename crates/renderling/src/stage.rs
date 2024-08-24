@@ -477,9 +477,11 @@ pub fn test_atomic_i_add_sub(
 
 #[cfg(test)]
 mod test {
-    use glam::{Mat4, Vec3};
+    use std::sync::Mutex;
 
-    use crate::transform::Transform;
+    use glam::{Mat4, Quat, Vec3};
+
+    use crate::{slab::SlabAllocator, stage::NestedTransform, transform::Transform};
 
     #[test]
     fn matrix_hierarchy_sanity() {
@@ -496,5 +498,54 @@ mod test {
         let c1 = a * b;
         let c2 = b * a;
         assert_ne!(c1, c2);
+    }
+
+    #[test]
+    fn nested_transform_fox_rigging() {
+        pub fn legacy_get_world_transform(tfrm: &NestedTransform) -> (Vec3, Quat, Vec3) {
+            let mut mat = Mat4::IDENTITY;
+            let mut local = Some(tfrm.clone());
+            while let Some(t) = local.take() {
+                let transform = t.get();
+                mat = Mat4::from_scale_rotation_translation(
+                    transform.scale,
+                    transform.rotation,
+                    transform.translation,
+                ) * mat;
+                local = t.parent();
+            }
+            let (s, r, t) = mat.to_scale_rotation_translation();
+            (t, r, s)
+        }
+
+        let slab = SlabAllocator::<Mutex<Vec<u32>>>::default();
+        let a = NestedTransform::new(&slab);
+        a.set(Transform {
+            translation: Vec3::splat(100.0),
+            ..Default::default()
+        });
+        let b = NestedTransform::new(&slab);
+        b.set(Transform {
+            rotation: Quat::from_scaled_axis(Vec3::Z),
+            ..Default::default()
+        });
+        let c = NestedTransform::new(&slab);
+        c.set(Transform {
+            scale: Vec3::splat(2.0),
+            ..Default::default()
+        });
+
+        a.add_child(&b);
+        b.add_child(&c);
+
+        let Transform {
+            translation,
+            rotation,
+            scale,
+        } = c.get_global_transform();
+        let global_transform = (translation, rotation, scale);
+        let legacy_transform = legacy_get_world_transform(&c);
+
+        assert_eq!(legacy_transform, global_transform);
     }
 }

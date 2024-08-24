@@ -1007,6 +1007,10 @@ impl NestedTransform {
             }
         });
     }
+
+    pub fn parent(&self) -> Option<NestedTransform> {
+        self.parent.read().unwrap().clone()
+    }
 }
 
 #[cfg(test)]

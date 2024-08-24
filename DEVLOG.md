@@ -1,6 +1,13 @@
 ---
 title: devlog
 ---
+## Sun Aug 25, 2024
+
+### Fox rigging bug
+
+Still working on the fox rigging bug. I'm going to write a test that performs the skinning on CPU 
+and see how that goes.
+
 ## Thu Aug 22, 2024
 
 ### Distorted Fox, continued
