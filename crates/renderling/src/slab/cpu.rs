@@ -449,6 +449,7 @@ impl<Buffer: IsBuffer> SlabAllocator<Buffer> {
         HybridArray::new(self, values)
     }
 
+    /// Return the ids of all sources that require updating.
     pub fn get_updated_source_ids(&self) -> FxHashSet<usize> {
         // UNWRAP: panic on purpose
         let mut update_set = self.update_queue.write().unwrap();

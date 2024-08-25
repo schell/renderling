@@ -48,15 +48,13 @@ pub struct Skin {
 }
 
 impl Skin {
-    pub fn get_inverse_bind_matrix(&self, i: usize, slab: &[u32]) -> Mat4 {
-        slab.read(self.inverse_bind_matrices.at(i))
-    }
-
     pub fn get_joint_matrix(&self, i: usize, vertex: Vertex, slab: &[u32]) -> Mat4 {
         let joint_index = vertex.joints[i] as usize;
         let joint_id = slab.read(self.joints.at(joint_index));
         let joint_transform = slab.read(joint_id);
-        let inverse_bind_matrix = slab.read(self.inverse_bind_matrices.at(i));
+        // First apply the inverse bind matrix to bring the vertex into the joint's local space,
+        // then apply the joint's current transformation to move it into world space.
+        let inverse_bind_matrix = slab.read(self.inverse_bind_matrices.at(joint_index));
         Mat4::from(joint_transform) * inverse_bind_matrix
     }
 
@@ -64,10 +62,16 @@ impl Skin {
         let mut skinning_matrix = Mat4::ZERO;
         for i in 0..vertex.joints.len() {
             let joint_matrix = self.get_joint_matrix(i, vertex, slab);
-            skinning_matrix += vertex.weights[i] * joint_matrix;
+            // Ensure weights are applied correctly to the joint matrix
+            let weight = vertex.weights[i];
+            skinning_matrix += weight * joint_matrix;
         }
 
-        skinning_matrix
+        if skinning_matrix == Mat4::ZERO {
+            Mat4::IDENTITY
+        } else {
+            skinning_matrix
+        }
     }
 }
 
@@ -240,11 +244,11 @@ pub fn renderlet_vertex(
     *out_uv0 = vertex.uv0;
     *out_uv1 = vertex.uv1;
 
-    let transform = if renderlet.skin_id.is_some() {
+    let config = slab.read_unchecked(renderlet.pbr_config_id);
+
+    let transform = if config.has_skinning && renderlet.skin_id.is_some() {
         let skin = slab.read(renderlet.skin_id);
-        Transform::from(
-            Mat4::from(slab.read(renderlet.transform_id)) * skin.get_skinning_matrix(vertex, slab),
-        )
+        Transform::from(skin.get_skinning_matrix(vertex, slab))
     } else {
         slab.read(renderlet.transform_id)
     };
@@ -473,9 +477,11 @@ pub fn test_atomic_i_add_sub(
 
 #[cfg(test)]
 mod test {
-    use glam::{Mat4, Vec3};
+    use std::sync::Mutex;
 
-    use crate::transform::Transform;
+    use glam::{Mat4, Quat, Vec3};
+
+    use crate::{slab::SlabAllocator, stage::NestedTransform, transform::Transform};
 
     #[test]
     fn matrix_hierarchy_sanity() {
@@ -492,5 +498,74 @@ mod test {
         let c1 = a * b;
         let c2 = b * a;
         assert_ne!(c1, c2);
+    }
+
+    #[test]
+    fn nested_transform_fox_rigging() {
+        pub fn legacy_get_world_transform(tfrm: &NestedTransform) -> (Vec3, Quat, Vec3) {
+            let mut mat = Mat4::IDENTITY;
+            let mut local = Some(tfrm.clone());
+            while let Some(t) = local.take() {
+                let transform = t.get();
+                mat = Mat4::from_scale_rotation_translation(
+                    transform.scale,
+                    transform.rotation,
+                    transform.translation,
+                ) * mat;
+                local = t.parent();
+            }
+            let (s, r, t) = mat.to_scale_rotation_translation();
+            (t, r, s)
+        }
+
+        let slab = SlabAllocator::<Mutex<Vec<u32>>>::default();
+        let a = NestedTransform::new(&slab);
+        a.set(Transform {
+            translation: Vec3::splat(100.0),
+            ..Default::default()
+        });
+        let b = NestedTransform::new(&slab);
+        b.set(Transform {
+            rotation: Quat::from_scaled_axis(Vec3::Z),
+            ..Default::default()
+        });
+        let c = NestedTransform::new(&slab);
+        c.set(Transform {
+            scale: Vec3::splat(2.0),
+            ..Default::default()
+        });
+
+        a.add_child(&b);
+        b.add_child(&c);
+
+        let Transform {
+            translation,
+            rotation,
+            scale,
+        } = c.get_global_transform();
+        let global_transform = (translation, rotation, scale);
+        let legacy_transform = legacy_get_world_transform(&c);
+        assert_eq!(legacy_transform, global_transform);
+
+        c.modify(|t| t.translation = Vec3::ONE);
+
+        let all_updates = slab.get_updated_source_ids();
+        assert_eq!(
+            std::collections::HashSet::from_iter([
+                a.get_notifier_index(),
+                b.get_notifier_index(),
+                c.get_notifier_index()
+            ]),
+            all_updates
+        );
+
+        let Transform {
+            translation,
+            rotation,
+            scale,
+        } = c.get_global_transform();
+        let global_transform = (translation, rotation, scale);
+        let legacy_transform = legacy_get_world_transform(&c);
+        assert_eq!(legacy_transform, global_transform);
     }
 }
