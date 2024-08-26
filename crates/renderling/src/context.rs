@@ -1,4 +1,5 @@
 //! Rendering context initialization and frame management.
+use core::fmt::Debug;
 use std::{
     ops::Deref,
     sync::{Arc, RwLock},
@@ -162,13 +163,13 @@ async fn device(
         .await
 }
 
-fn new_instance() -> wgpu::Instance {
+fn new_instance(backends: Option<wgpu::Backends>) -> wgpu::Instance {
     log::trace!(
         "creating instance - available backends: {:#?}",
         wgpu::Instance::enabled_backend_features()
     );
     // BackendBit::PRIMARY => Vulkan + Metal + DX12 + Browser WebGPU
-    let backends = wgpu::Backends::PRIMARY;
+    let backends = backends.unwrap_or(wgpu::Backends::PRIMARY);
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
         backends,
         ..Default::default()
@@ -485,9 +486,13 @@ impl Context {
         }
     }
 
-    pub async fn try_new_headless(width: u32, height: u32) -> Result<Self, ContextError> {
+    pub async fn try_new_headless(
+        width: u32,
+        height: u32,
+        backends: Option<wgpu::Backends>,
+    ) -> Result<Self, ContextError> {
         log::trace!("creating headless context of size ({width}, {height})");
-        let instance = new_instance();
+        let instance = new_instance(backends);
         let (adapter, device, queue, target) =
             new_headless_device_queue_and_target(width, height, &instance).await?;
         Ok(Self::new(target, adapter, device, queue))
@@ -496,18 +501,22 @@ impl Context {
     pub async fn try_from_raw_window(
         width: u32,
         height: u32,
+        backends: Option<wgpu::Backends>,
         window: impl Into<wgpu::SurfaceTarget<'static>>,
     ) -> Result<Self, ContextError> {
-        let instance = new_instance();
+        let instance = new_instance(backends);
         let (adapter, device, queue, target) =
             new_windowed_adapter_device_queue(width, height, &instance, window).await?;
         Ok(Self::new(target, adapter, device, queue))
     }
 
     #[cfg(feature = "winit")]
-    pub async fn from_window_async(window: Arc<winit::window::Window>) -> Self {
+    pub async fn from_window_async(
+        backends: Option<wgpu::Backends>,
+        window: Arc<winit::window::Window>,
+    ) -> Self {
         let inner_size = window.inner_size();
-        Self::try_from_raw_window(inner_size.width, inner_size.height, window)
+        Self::try_from_raw_window(inner_size.width, inner_size.height, backends, window)
             .await
             .unwrap()
     }
@@ -518,8 +527,11 @@ impl Context {
     ///
     /// ## Panics
     /// Panics if the context cannot be created.
-    pub fn from_window(window: Arc<winit::window::Window>) -> Self {
-        futures_lite::future::block_on(Self::from_window_async(window))
+    pub fn from_window(
+        backends: Option<wgpu::Backends>,
+        window: Arc<winit::window::Window>,
+    ) -> Self {
+        futures_lite::future::block_on(Self::from_window_async(backends, window))
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -527,14 +539,23 @@ impl Context {
         window_handle: impl Into<wgpu::SurfaceTarget<'static>>,
         width: u32,
         height: u32,
+        backends: Option<wgpu::Backends>,
     ) -> Result<Self, ContextError> {
-        futures_lite::future::block_on(Self::try_from_raw_window(width, height, window_handle))
+        futures_lite::future::block_on(Self::try_from_raw_window(
+            width,
+            height,
+            backends,
+            window_handle,
+        ))
     }
 
     #[cfg(all(feature = "winit", not(target_arch = "wasm32")))]
-    pub fn try_from_window(window: Arc<winit::window::Window>) -> Result<Self, ContextError> {
+    pub fn try_from_window(
+        backends: Option<wgpu::Backends>,
+        window: Arc<winit::window::Window>,
+    ) -> Result<Self, ContextError> {
         let inner_size = window.inner_size();
-        Self::try_from_raw_window_handle(window, inner_size.width, inner_size.height)
+        Self::try_from_raw_window_handle(window, inner_size.width, inner_size.height, backends)
     }
 
     /// Create a new headless renderer.
@@ -543,7 +564,7 @@ impl Context {
     /// This function will panic if an adapter cannot be found. For example this
     /// would happen on machines without a GPU.
     pub fn headless(width: u32, height: u32) -> Self {
-        futures_lite::future::block_on(Self::try_new_headless(width, height)).unwrap()
+        futures_lite::future::block_on(Self::try_new_headless(width, height, None)).unwrap()
     }
 
     pub fn get_size(&self) -> UVec2 {

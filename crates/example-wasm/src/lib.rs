@@ -45,7 +45,9 @@ pub async fn main() {
     viewport_canvas.set_height(wh);
 
     let surface = surface_from_canvas(viewport_canvas.clone()).unwrap();
-    let ctx = Context::try_from_raw_window(ww, wh, surface).await.unwrap();
+    let ctx = Context::try_from_raw_window(ww, wh, None, surface)
+        .await
+        .unwrap();
     let app = example::App::new(&ctx);
 
     let window_resize = event::event_stream("resize", &dom_window);

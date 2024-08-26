@@ -94,7 +94,7 @@ impl ApplicationHandler for OuterApp {
         let window = Arc::new(event_loop.create_window(attributes).unwrap());
 
         // Set up a new renderling context
-        let ctx = Context::try_from_window(window.clone()).unwrap();
+        let ctx = Context::try_from_window(None, window.clone()).unwrap();
         let mut app = App::new(&ctx);
         if let Some(file) = self.cli.model.as_ref() {
             app.load(file.as_ref());
