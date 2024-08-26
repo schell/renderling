@@ -345,7 +345,7 @@ impl<Buffer: IsBuffer> SlabAllocator<Buffer> {
         }
     }
 
-    fn allocate_array<T: SlabItem>(&self, len: usize) -> Array<T> {
+    pub(crate) fn allocate_array<T: SlabItem>(&self, len: usize) -> Array<T> {
         if len == 0 {
             return Array::default();
         }

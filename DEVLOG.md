@@ -1,6 +1,11 @@
 ---
 title: devlog
 ---
+
+## Mon Aug 26, 2024
+
+I'm adding morph targets. I've done this once before so I expect it'll be pretty easy.
+
 ## Sun Aug 25, 2024
 
 ### Fox rigging bug
