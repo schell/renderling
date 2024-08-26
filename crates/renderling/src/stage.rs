@@ -75,6 +75,22 @@ impl Skin {
     }
 }
 
+/// A displacement target.
+///
+/// Use to displace vertices using weights defined on the mesh.
+///
+/// For more info on morph targets, see
+/// <https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html#morph-targets>
+#[derive(Clone, Copy, Default, PartialEq, SlabItem)]
+#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
+pub struct MorphTarget {
+    pub position: Vec3,
+    pub normal: Vec3,
+    pub tangent: Vec3,
+    // TODO: Extend MorphTargets to include UV and Color.
+    // I think this would take a contribution to the `gltf` crate.
+}
+
 /// A vertex in a mesh.
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[derive(Clone, Copy, PartialEq, SlabItem)]
@@ -186,6 +202,8 @@ pub struct Renderlet {
     pub transform_id: Id<Transform>,
     pub material_id: Id<Material>,
     pub skin_id: Id<Skin>,
+    pub morph_targets: Array<Array<MorphTarget>>,
+    pub morph_weights: Array<f32>,
     pub pbr_config_id: Id<PbrConfig>,
 }
 
@@ -199,8 +217,32 @@ impl Default for Renderlet {
             transform_id: Id::NONE,
             material_id: Id::NONE,
             skin_id: Id::NONE,
+            morph_targets: Array::default(),
+            morph_weights: Array::default(),
             pbr_config_id: Id::new(0),
         }
+    }
+}
+
+impl Renderlet {
+    /// Retrieve the vertex from the slab, calculating any displacement due to morph targets.
+    pub fn get_vertex(&self, vertex_index: u32, slab: &[u32]) -> Vertex {
+        let index = if self.indices_array.is_null() {
+            vertex_index as usize
+        } else {
+            slab.read(self.indices_array.at(vertex_index as usize)) as usize
+        };
+        let vertex_id = self.vertices_array.at(index);
+        let mut vertex = slab.read_unchecked(vertex_id);
+        for i in 0..self.morph_targets.len() {
+            let morph_target_array = slab.read(self.morph_targets.at(i));
+            let morph_target = slab.read(morph_target_array.at(index));
+            let weight = slab.read(self.morph_weights.at(i));
+            vertex.position += weight * morph_target.position;
+            vertex.normal += weight * morph_target.normal;
+            vertex.tangent += weight * morph_target.tangent.extend(0.0);
+        }
+        vertex
     }
 }
 
@@ -233,13 +275,7 @@ pub fn renderlet_vertex(
     *out_material = renderlet.material_id;
     *out_pbr_config = renderlet.pbr_config_id;
 
-    let index = if renderlet.indices_array.is_null() {
-        vertex_index as usize
-    } else {
-        slab.read(renderlet.indices_array.at(vertex_index as usize)) as usize
-    };
-    let vertex_id = renderlet.vertices_array.at(index);
-    let vertex = slab.read_unchecked(vertex_id);
+    let vertex = renderlet.get_vertex(vertex_index, slab);
     *out_color = vertex.color;
     *out_uv0 = vertex.uv0;
     *out_uv1 = vertex.uv1;

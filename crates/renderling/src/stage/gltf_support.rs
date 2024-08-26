@@ -14,7 +14,7 @@ use crate::{
         Material,
     },
     slab::*,
-    stage::{NestedTransform, Renderlet, Skin, Stage, Vertex},
+    stage::{MorphTarget, NestedTransform, Renderlet, Skin, Stage, Vertex},
     transform::Transform,
 };
 
@@ -268,6 +268,8 @@ pub struct GltfPrimitive {
     pub vertices: HybridArray<Vertex>,
     pub bounding_box: (Vec3, Vec3),
     pub material: Id<Material>,
+    pub morph_targets: Vec<HybridArray<MorphTarget>>,
+    pub morph_targets_array: HybridArray<Array<MorphTarget>>,
 }
 
 impl GltfPrimitive {
@@ -421,6 +423,55 @@ impl GltfPrimitive {
             })
             .chain(std::iter::repeat(UNWEIGHTED_WEIGHTS))
             .take(positions.len());
+
+        // See the GLTF spec on morph targets
+        // https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html#morph-targets
+        //
+        // TODO: Generate morph target normals and tangents if absent.
+        // Although the spec says we have to generate normals or tangents if not specified,
+        // we are explicitly *not* doing that here.
+        let morph_targets: Vec<Vec<MorphTarget>> = reader
+            .read_morph_targets()
+            .map(|(may_ps, may_ns, may_ts)| {
+                let ps = may_ps
+                    .into_iter()
+                    .flat_map(|iter| iter.map(Vec3::from_array))
+                    .chain(std::iter::repeat(Vec3::ZERO))
+                    .take(positions.len());
+
+                let ns = may_ns
+                    .into_iter()
+                    .flat_map(|iter| iter.map(Vec3::from_array))
+                    .chain(std::iter::repeat(Vec3::ZERO))
+                    .take(positions.len());
+
+                let ts = may_ts
+                    .into_iter()
+                    .flat_map(|iter| iter.map(Vec3::from_array))
+                    .chain(std::iter::repeat(Vec3::ZERO))
+                    .take(positions.len());
+
+                ps.zip(ns)
+                    .zip(ts)
+                    .map(|((position, normal), tangent)| MorphTarget {
+                        position,
+                        normal,
+                        tangent,
+                    })
+                    .collect()
+            })
+            .collect();
+        log::debug!(
+            "  {} morph_targets: {:?}",
+            morph_targets.len(),
+            morph_targets.iter().map(|mt| mt.len()).collect::<Vec<_>>()
+        );
+        let morph_targets = morph_targets
+            .into_iter()
+            .map(|verts| stage.new_array(verts))
+            .collect::<Vec<_>>();
+        let morph_targets_array = stage.new_array(morph_targets.iter().map(HybridArray::array));
+
         let vs = joints.into_iter().zip(weights);
         let vs = colors.zip(vs);
         let vs = tangents.into_iter().zip(vs);
@@ -457,13 +508,17 @@ impl GltfPrimitive {
             indices,
             material,
             bounding_box: (min, max),
+            morph_targets,
+            morph_targets_array,
         }
     }
 }
 
 #[derive(Debug)]
 pub struct GltfMesh {
+    /// Mesh primitives, aka meshlets
     pub primitives: Vec<GltfPrimitive>,
+    /// Morph target weights
     pub weights: HybridArray<f32>,
 }
 
@@ -572,16 +627,10 @@ pub struct GltfNode {
     ///
     /// Each element indexes into the `GltfDocument`'s `nodes` field.
     pub children: Vec<usize>,
-    /// Array of weights
+    /// Array of morph target weights
     pub weights: HybridArray<f32>,
     /// This node's transform.
     pub transform: NestedTransform,
-}
-
-impl From<&GltfNode> for (usize, NestedTransform) {
-    fn from(node: &GltfNode) -> Self {
-        (node.index, node.transform.clone())
-    }
 }
 
 impl GltfNode {
@@ -698,7 +747,7 @@ impl GltfDocument {
         let mut images = images.into_iter().map(AtlasImage::from).collect::<Vec<_>>();
 
         let num_textures = document.textures().len();
-        log::debug!("Preallocating an array of {num_textures} textures");
+        log::debug!("\nPreallocating an array of {num_textures} textures");
         let textures = stage.new_array(vec![AtlasTexture::default(); num_textures]);
 
         log::debug!("Creating materials");
@@ -737,6 +786,14 @@ impl GltfDocument {
             log::trace!("  texture {i} {texture_id:?}: {texture:#?}");
             textures.set_item(i, texture);
         }
+
+        log::debug!("Loading meshes");
+        let mut meshes = vec![];
+        for mesh in document.meshes() {
+            let mesh = GltfMesh::from_gltf(stage, &buffer_data, &materials, mesh);
+            meshes.push(mesh);
+        }
+        log::trace!("  loaded {} meshes", meshes.len());
 
         log::debug!("Loading {} nodes", document.nodes().count());
         let mut nodes = vec![];
@@ -800,7 +857,21 @@ impl GltfDocument {
             let camera = node.camera().map(|camera| camera.index());
             let light = node.light().map(|light| light.index());
             let weights = node.weights().map(|w| w.to_vec()).unwrap_or_default();
-            let weights = stage.new_array(weights);
+            // From the glTF spec:
+            //
+            // A mesh with morph targets MAY also define an optional mesh.weights property
+            // that stores the default targets' weights. These weights MUST be used when
+            // node.weights is undefined. When mesh.weights is undefined, the default
+            // targets' weights are zeros.
+            let weights = if weights.is_empty() {
+                if let Some(mesh) = node.mesh() {
+                    meshes[mesh.index()].weights.clone()
+                } else {
+                    stage.new_array(weights)
+                }
+            } else {
+                stage.new_array(weights)
+            };
             let transform = transform_for_node(0, stage, &mut node_transforms, &node);
             nodes.push(GltfNode {
                 index: node.index(),
@@ -831,14 +902,6 @@ impl GltfDocument {
                 .context(MissingNodeSnafu { index: node_index })?;
             cameras.push(GltfCamera::new(stage, camera, transform));
         }
-
-        log::debug!("Loading meshes");
-        let mut meshes = vec![];
-        for mesh in document.meshes() {
-            let mesh = GltfMesh::from_gltf(stage, &buffer_data, &materials, mesh);
-            meshes.push(mesh);
-        }
-        log::trace!("  loaded {} meshes", meshes.len());
 
         log::trace!("Loading lights");
         let mut lights = vec![];
@@ -950,6 +1013,8 @@ impl GltfDocument {
                         material_id: prim.material,
                         camera_id,
                         skin_id,
+                        morph_targets: prim.morph_targets_array.array(),
+                        morph_weights: gltf_node.weights.array(),
                         ..Default::default()
                     });
                     log::debug!("    created renderlet {i}/{num_prims}: {:#?}", hybrid.get());

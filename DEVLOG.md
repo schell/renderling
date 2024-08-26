@@ -1,6 +1,26 @@
 ---
 title: devlog
 ---
+
+## Mon Aug 26, 2024
+
+I'm adding morph targets. I've done this once before so I expect it'll be pretty easy.
+
+...
+
+[It was pretty easy](https://github.com/schell/renderling/pull/126)! 
+
+Most of my time was spent reloading the concept into my brain.
+
+But now I notice that the morph-target stress test glTF file isn't displaying properly. 
+The morph targets/animation stuff is fine, it's the texturing on the base that is off.
+
+I think it might be the texture's repeat/wrapping. It also looks like it has ambient occlusion,
+oddly enough, and it seems the AO texture is getting read.
+
+[I created a ticket to track the MorphStressTest texture
+bug](https://github.com/schell/renderling/issues/127).
+
 ## Sun Aug 25, 2024
 
 ### Fox rigging bug

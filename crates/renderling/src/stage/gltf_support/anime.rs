@@ -2,7 +2,10 @@
 use glam::{Quat, Vec3};
 use snafu::prelude::*;
 
-use crate::stage::NestedTransform;
+use crate::{
+    slab::HybridArray,
+    stage::{gltf_support::GltfNode, NestedTransform},
+};
 
 #[derive(Debug, Snafu)]
 pub enum InterpolationError {
@@ -542,6 +545,24 @@ impl Tween {
     }
 }
 
+#[derive(Clone, Debug)]
+pub struct AnimationNode {
+    pub transform: NestedTransform,
+    pub morph_weights: HybridArray<f32>,
+}
+
+impl From<&GltfNode> for (usize, AnimationNode) {
+    fn from(node: &GltfNode) -> Self {
+        (
+            node.index,
+            AnimationNode {
+                transform: node.transform.clone(),
+                morph_weights: node.weights.clone(),
+            },
+        )
+    }
+}
+
 #[derive(Debug, Snafu)]
 pub enum AnimationError {
     #[snafu(display("Missing inputs"))]
@@ -651,7 +672,7 @@ impl Animation {
 
     pub fn into_animator(
         self,
-        nodes: impl IntoIterator<Item = (usize, NestedTransform)>,
+        nodes: impl IntoIterator<Item = (usize, AnimationNode)>,
     ) -> Animator {
         Animator::new(nodes, self)
     }
@@ -674,16 +695,15 @@ pub struct Animator {
     /// of the current animation.
     pub timestamp: f32,
     /// All nodes under this animator's control.
-    pub nodes: rustc_hash::FxHashMap<usize, NestedTransform>,
+    pub nodes: rustc_hash::FxHashMap<usize, AnimationNode>,
     /// The animation that will apply to the nodes.
     pub animation: Animation,
-    erred_unsupported_morph_targets: bool,
 }
 
 impl Animator {
     /// Create a new animator with the given nodes and animation.
     pub fn new(
-        nodes: impl IntoIterator<Item = impl Into<(usize, NestedTransform)>>,
+        nodes: impl IntoIterator<Item = impl Into<(usize, AnimationNode)>>,
         animation: Animation,
     ) -> Self {
         let nodes = nodes.into_iter().map(|n| n.into());
@@ -716,32 +736,35 @@ impl Animator {
             // * business logic has removed it
             // * ...and the beat goes on
             // So we won't fret if we can't find it...
-            if let Some(transform) = self.nodes.get(&node_index) {
+            if let Some(node) = self.nodes.get(&node_index) {
                 match property {
                     TweenProperty::Translation(translation) => {
-                        transform.modify(|t| {
+                        node.transform.modify(|t| {
                             t.translation = translation;
                         });
                     }
                     TweenProperty::Rotation(rotation) => {
-                        transform.modify(|t| {
+                        node.transform.modify(|t| {
                             t.rotation = rotation;
                         });
                     }
                     TweenProperty::Scale(scale) => {
-                        transform.modify(|t| {
+                        node.transform.modify(|t| {
                             t.scale = scale;
                         });
                     }
-                    TweenProperty::MorphTargetWeights(_) => {
-                        if !self.erred_unsupported_morph_targets {
-                            log::error!("model has morph targets, which are currently unsupported");
-                            self.erred_unsupported_morph_targets = true;
+                    TweenProperty::MorphTargetWeights(new_weights) => {
+                        if node.morph_weights.is_empty() {
+                            log::error!("animation is applied to morph targets but node {node_index} is missing weights");
+                        } else {
+                            for (i, w) in new_weights.into_iter().enumerate() {
+                                let _ = node.morph_weights.set_item(i, w);
+                            }
                         }
                     }
                 }
             } else {
-                log::warn!("node {node_index} isn't in the animator's list of nodes");
+                log::warn!("missing node {node_index} in animation");
             }
         }
         Ok(())
@@ -767,7 +790,9 @@ mod test {
             .load_gltf_document_from_path("../../gltf/animated_triangle.gltf", camera.id())
             .unwrap();
 
-        let nodes = doc.nodes_in_scene(doc.default_scene.unwrap_or_default());
+        let nodes = doc
+            .nodes_in_scene(doc.default_scene.unwrap_or_default())
+            .collect::<Vec<_>>();
 
         let mut animator = Animator::new(nodes, doc.animations.first().unwrap().clone());
         log::info!("animator: {animator:#?}");
