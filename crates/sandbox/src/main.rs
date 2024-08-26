@@ -59,7 +59,7 @@ impl winit::application::ApplicationHandler for App {
             })
             .with_title("renderling gltf viewer");
         let window = Arc::new(event_loop.create_window(attributes).unwrap());
-        let ctx = Context::from_window(window.clone());
+        let ctx = Context::from_window(None, window.clone());
         let stage = ctx.new_stage();
         self.example = Some(Example { ctx, window, stage });
     }
