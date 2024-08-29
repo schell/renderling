@@ -538,7 +538,10 @@ impl UiPathBuilder {
 
 #[cfg(test)]
 mod test {
-    use renderling::{math::Vec2, Context};
+    use renderling::{
+        math::{hex_to_vec4, Vec2},
+        Context,
+    };
 
     use crate::{
         test::{cute_beach_palette, Colors},
@@ -576,14 +579,34 @@ mod test {
             .with_stroke_color([0.0, 1.0, 1.0, 1.0])
             .with_rectangle(Vec2::splat(10.0), Vec2::splat(60.0))
             .with_circle(Vec2::splat(100.0), 20.0);
+        {
+            let _fill = builder.clone().fill();
+            let _stroke = builder.clone().stroke();
 
-        let _fill = builder.clone().fill();
-        let _stroke = builder.stroke();
+            let frame = ctx.get_next_frame().unwrap();
+            ui.render(&frame.view());
+            let img = frame.read_image().unwrap();
+            img_diff::assert_img_eq("ui/path/sanity.png", img);
+        }
 
         let frame = ctx.get_next_frame().unwrap();
         ui.render(&frame.view());
-        let img = frame.read_image().unwrap();
-        img_diff::assert_img_eq("ui/path/sanity.png", img);
+        frame.present();
+
+        {
+            let _resources = builder.fill_and_stroke();
+            let frame = ctx.get_next_frame().unwrap();
+            ui.render(&frame.view());
+            let img = frame.read_image().unwrap();
+            img_diff::assert_img_eq_cfg(
+                "ui/path/sanity.png",
+                img,
+                img_diff::DiffCfg {
+                    test_name: Some("ui/path/sanity - separate path and stroke same as together"),
+                    ..Default::default()
+                },
+            );
+        }
     }
 
     #[test]
@@ -600,6 +623,7 @@ mod test {
         let _rect = ui
             .new_path()
             .with_fill_color(fill)
+            .with_stroke_color(hex_to_vec4(0x333333FF))
             .with_rectangle(Vec2::splat(2.0), Vec2::splat(42.0))
             .fill_and_stroke();
 
@@ -608,6 +632,7 @@ mod test {
         let _circ = ui
             .new_path()
             .with_fill_color(fill)
+            .with_stroke_color(hex_to_vec4(0x333333FF))
             .with_circle([64.0, 22.0], 20.0)
             .fill_and_stroke();
 
@@ -616,6 +641,7 @@ mod test {
         let _elli = ui
             .new_path()
             .with_fill_color(fill)
+            .with_stroke_color(hex_to_vec4(0x333333FF))
             .with_ellipse([104.0, 22.0], [20.0, 15.0], std::f32::consts::FRAC_PI_4)
             .fill_and_stroke();
 
@@ -634,6 +660,7 @@ mod test {
         let _penta = ui
             .new_path()
             .with_fill_color(fill)
+            .with_stroke_color(hex_to_vec4(0x333333FF))
             .with_polygon(true, circle_points(5, 20.0).into_iter().map(|p| p + center))
             .fill_and_stroke();
 
@@ -642,6 +669,7 @@ mod test {
         let _star = ui
             .new_path()
             .with_fill_color(fill)
+            .with_stroke_color(hex_to_vec4(0x333333FF))
             .with_polygon(
                 true,
                 star_points(5, 20.0, 10.0).into_iter().map(|p| p + center),
@@ -653,13 +681,14 @@ mod test {
         let _rrect = ui
             .new_path()
             .with_fill_color(fill)
+            .with_stroke_color(hex_to_vec4(0x333333FF))
             .with_rounded_rectangle(tl, tl + Vec2::new(40.0, 40.0), 5.0, 0.0, 0.0, 10.0)
             .fill_and_stroke();
 
         let frame = ctx.get_next_frame().unwrap();
         ui.render(&frame.view());
         let img = frame.read_image().unwrap();
-        img_diff::save("ui/path/shapes.png", img);
+        img_diff::assert_img_eq("ui/path/shapes.png", img);
     }
 
     #[test]
@@ -698,6 +727,6 @@ mod test {
             renderling::color::opto_xfer_u8(&mut p.0[1]);
             renderling::color::opto_xfer_u8(&mut p.0[2]);
         });
-        img_diff::save("ui/path/fill_image.png", img);
+        img_diff::assert_img_eq("ui/path/fill_image.png", img);
     }
 }
