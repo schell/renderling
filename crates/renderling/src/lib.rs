@@ -174,6 +174,13 @@ pub mod tutorial;
 #[cfg(not(target_arch = "spirv"))]
 pub use context::*;
 
+pub mod prelude {
+    //! A prelude, meant to be glob-imported.
+
+    pub extern crate glam;
+    pub use crate::{camera::*, pbr::Material, slab::*, stage::*, Context};
+}
+
 #[macro_export]
 /// A wrapper around `std::println` that is a noop on the GPU.
 macro_rules! println {
