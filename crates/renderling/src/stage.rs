@@ -517,7 +517,9 @@ mod test {
 
     use glam::{Mat4, Quat, Vec3};
 
-    use crate::{slab::SlabAllocator, stage::NestedTransform, transform::Transform};
+    use crate::{
+        math::IsMatrix, slab::SlabAllocator, stage::NestedTransform, transform::Transform,
+    };
 
     #[test]
     fn matrix_hierarchy_sanity() {
@@ -550,7 +552,7 @@ mod test {
                 ) * mat;
                 local = t.parent();
             }
-            let (s, r, t) = mat.to_scale_rotation_translation();
+            let (s, r, t) = mat.to_scale_rotation_translation_or_id();
             (t, r, s)
         }
 
