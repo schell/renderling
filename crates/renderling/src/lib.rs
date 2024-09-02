@@ -178,7 +178,7 @@ pub mod prelude {
     //! A prelude, meant to be glob-imported.
 
     pub extern crate glam;
-    pub use crate::{camera::*, pbr::Material, slab::*, stage::*, Context};
+    pub use crate::{camera::*, pbr::Material, slab::*, stage::*, transform::Transform, Context};
 }
 
 #[macro_export]
