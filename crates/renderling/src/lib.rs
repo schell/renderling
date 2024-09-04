@@ -196,7 +196,7 @@ macro_rules! println {
 mod test {
     use super::*;
     use crate::{
-        atlas::{AtlasImage, AtlasTexture},
+        atlas::AtlasImage,
         camera::Camera,
         pbr::Material,
         stage::{NestedTransform, Renderlet, Vertex},
@@ -639,19 +639,13 @@ mod test {
         let stage = ctx.new_stage().with_background_color(Vec4::splat(0.0));
         let (projection, view) = camera::default_perspective(100.0, 100.0);
         let camera = stage.new_value(Camera::new(projection, view));
+
         let sandstone = AtlasImage::from(image::open("../../img/sandstone.png").unwrap());
         let dirt = AtlasImage::from(image::open("../../img/dirt.jpg").unwrap());
-        let frames = stage.set_images([sandstone, dirt]).unwrap();
-        let sandstone_tex = stage.new_value(AtlasTexture {
-            frame_id: frames[0].id(),
-            ..Default::default()
-        });
-        let dirt_tex = stage.new_value(AtlasTexture {
-            frame_id: frames[1].id(),
-            ..Default::default()
-        });
+        let entries = stage.set_images([sandstone, dirt]).unwrap();
+
         let material = stage.new_value(Material {
-            albedo_texture_id: sandstone_tex.id(),
+            albedo_texture_id: entries[0].texture().id(),
             has_lighting: false,
             ..Default::default()
         });
@@ -678,7 +672,7 @@ mod test {
         frame.present();
 
         // update the material's texture on the GPU
-        sandstone_tex.set(dirt_tex.get());
+        material.modify(|m| m.albedo_texture_id = entries[1].texture().id());
 
         // we should see a cube with a dirty texture
         let frame = ctx.get_next_frame().unwrap();
@@ -701,13 +695,10 @@ mod test {
 
         // now test the textures functionality
         let img = AtlasImage::from_path("../../img/cheetah.jpg").unwrap();
-        let frames = stage.set_images([img]).unwrap();
-        let texture = stage.new_value(AtlasTexture {
-            frame_id: frames[0].id(),
-            ..Default::default()
-        });
+        let entries = stage.set_images([img]).unwrap();
+
         let cheetah_material = stage.new_value(Material {
-            albedo_texture_id: texture.id(),
+            albedo_texture_id: entries[0].texture().id(),
             has_lighting: false,
             ..Default::default()
         });

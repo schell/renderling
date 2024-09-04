@@ -5,17 +5,25 @@ use snafu::prelude::*;
 use std::sync::{Arc, RwLock};
 
 use crate::{
-    slab::{Hybrid, IsBuffer, SlabAllocator},
+    slab::{Hybrid, IsBuffer, SlabAllocator, UpdatesSlab},
     texture::Texture,
 };
 
 use super::{
     atlas_image::{convert_to_rgba8_bytes, AtlasImage},
-    AtlasFrame,
+    AtlasFrame, AtlasTexture,
 };
 
 pub(crate) const ATLAS_SUGGESTED_SIZE: u32 = 2048;
 pub(crate) const ATLAS_SUGGESTED_LAYERS: u32 = 8;
+
+/// The count at which a `AtlasFrame` will be automatically removed from the
+/// atlas and recycled.
+///
+/// * +1 for the clone in [`Atlas`]'s layers
+/// * +1 for the clone in [`Stage`]'s [`SlabAllocator`]'s update sources, needed
+///   to update the GPU
+pub const ENTRY_STRONG_COUNT_LOWER_BOUND: usize = 2;
 
 #[derive(Debug, Snafu)]
 pub enum AtlasError {
@@ -82,21 +90,42 @@ enum Packing<'a> {
     /// A previous packing.
     ///
     /// This image has already been staged on the GPU.
-    GpuImg { frame: Hybrid<AtlasFrame> },
+    GpuImg(AtlasEntry),
 }
 
 impl<'a> Packing<'a> {
     pub fn size(&self) -> UVec2 {
         match self {
             Packing::Img { image, .. } => image.size,
-            Packing::GpuImg { frame: texture } => texture.get().size_px,
+            Packing::GpuImg(entry) => entry.frame.get().size_px,
         }
     }
 }
 
 #[derive(Clone, Default, Debug)]
 pub struct Layer {
-    pub frames: Vec<Hybrid<AtlasFrame>>,
+    pub frames: Vec<AtlasEntry>,
+}
+
+/// Represents an image stored in the atlas.
+///
+/// Dropping this will reduces its reference count. If the atlas determines
+/// there are no more external references the entry will be removed internally,
+/// invalidating the atlas, causing the atlas to repack itself.
+#[derive(Clone, Debug)]
+pub struct AtlasEntry {
+    frame: Hybrid<AtlasFrame>,
+    texture: Hybrid<AtlasTexture>,
+}
+
+impl AtlasEntry {
+    pub fn frame(&self) -> &Hybrid<AtlasFrame> {
+        &self.frame
+    }
+
+    pub fn texture(&self) -> &Hybrid<AtlasTexture> {
+        &self.texture
+    }
 }
 
 /// A texture atlas, used to store all the textures in a scene.
@@ -196,11 +225,15 @@ impl Atlas {
         Ok(Self::new_with_texture(texture))
     }
 
-    pub fn is_empty(&self) -> bool {
+    pub fn len(&self) -> usize {
         // UNWRAP: panic on purpose
         let layers = self.layers.read().unwrap();
-        let num_frames = layers.iter().map(|layer| layer.frames.len()).sum::<usize>();
-        num_frames == 0
+        layers.iter().map(|layer| layer.frames.len()).sum::<usize>()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        // UNWRAP: panic on purpose
+        self.len() == 0
     }
 
     /// Returns a clone of the current atlas texture array.
@@ -223,7 +256,7 @@ impl Atlas {
         queue: &wgpu::Queue,
         slab: &SlabAllocator<impl IsBuffer>,
         images: impl IntoIterator<Item = impl Into<AtlasImage>>,
-    ) -> Result<Vec<Hybrid<AtlasFrame>>, AtlasError> {
+    ) -> Result<Vec<AtlasEntry>, AtlasError> {
         log::debug!("setting images");
         {
             // UNWRAP: panic on purpose
@@ -248,7 +281,7 @@ impl Atlas {
         queue: &wgpu::Queue,
         slab: &SlabAllocator<impl IsBuffer>,
         images: impl IntoIterator<Item = impl Into<AtlasImage>>,
-    ) -> Result<Vec<Hybrid<AtlasFrame>>, AtlasError> {
+    ) -> Result<Vec<AtlasEntry>, AtlasError> {
         // UNWRAP: POP
         let mut layers = self.layers.write().unwrap();
 
@@ -294,9 +327,7 @@ impl Atlas {
                 layer
                     .frames
                     .iter()
-                    .map(|self_texture| Packing::GpuImg {
-                        frame: self_texture.clone(),
-                    })
+                    .map(|entry| Packing::GpuImg(entry.clone()))
                     .chain(additions.iter().map(|(j, image)| Packing::Img {
                         layer_index: i as u32,
                         frame_index: images_starting_texture_index + *j as u32,
@@ -324,15 +355,20 @@ impl Atlas {
                             frame_index,
                             image,
                         } => {
-                            let frame = AtlasFrame {
+                            let atlas_frame = AtlasFrame {
                                 offset_px,
                                 size_px,
                                 layer_index,
                                 frame_index,
                             };
-                            let hybrid = slab.new_value(frame);
-                            output.push(hybrid.clone());
-                            layer.frames.push(hybrid);
+                            let frame = slab.new_value(atlas_frame);
+                            let texture = slab.new_value(AtlasTexture {
+                                frame_id: frame.id(),
+                                modes: Default::default(),
+                            });
+                            let entry = AtlasEntry { frame, texture };
+                            output.push(entry.clone());
+                            layer.frames.push(entry);
 
                             let bytes = convert_to_rgba8_bytes(
                                 image.pixels.clone(),
@@ -351,7 +387,7 @@ impl Atlas {
                                 depth_or_array_layers: 1,
                             };
                             log::trace!("  writing image data to frame {frame_index} in layer {layer_index}");
-                            log::trace!("    frame: {frame:?}");
+                            log::trace!("    frame: {atlas_frame:?}");
                             log::trace!("    origin: {origin:?}");
                             log::trace!("    size: {size:?}");
 
@@ -372,14 +408,9 @@ impl Atlas {
                                 size,
                             );
                         }
-                        Packing::GpuImg { frame: texture } => texture.modify(|t| {
+                        Packing::GpuImg(entry) => entry.frame.modify(|t| {
                             debug_assert_eq!(t.size_px, size_px);
-
-                            log::trace!(
-                                "  copying previous texture {} in layer {}",
-                                t.frame_index,
-                                t.layer_index
-                            );
+                            log::trace!("  add_images: copying previous frame {t:?}",);
                             // copy the frame from the old texture to the new texture
                             // in a new destination
                             encoder.copy_texture_to_texture(
@@ -430,7 +461,10 @@ impl Atlas {
 
         *texture_array = new_texture_array;
 
-        output.sort_by(|a, b| a.get().frame_index.cmp(&b.get().frame_index));
+        output.sort_by_key(|a| {
+            // UNWRAP: safe because we created the value as a hybrid above
+            a.frame.get().frame_index
+        });
         Ok(output)
     }
 
@@ -462,25 +496,25 @@ impl Atlas {
             .flat_map(|layer| layer.frames)
             .collect::<Vec<_>>();
         all_frames.sort_by(|a, b| {
-            let a = a.get();
-            let b = b.get();
+            let a = a.frame.get();
+            let b = b.frame.get();
             (a.size_px.x * a.size_px.y).cmp(&(b.size_px.x * b.size_px.y))
         });
 
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("atlas resize"),
         });
-        for (i, frames) in fan_split_n(size.depth_or_array_layers as usize, all_frames)
+        for (i, entries) in fan_split_n(size.depth_or_array_layers as usize, all_frames)
             .into_iter()
             .enumerate()
         {
-            log::trace!("repacking layer {i} with {} frames", frames.len());
+            log::trace!("repacking layer {i} with {} frames", entries.len());
             let items = crunch::pack_into_po2(
                 size.width as usize,
-                frames.iter().map(|frame| {
-                    let size = frame.get().size_px;
+                entries.iter().map(|entry| {
+                    let size = entry.frame.get().size_px;
                     crunch::Item::new(
-                        frame,
+                        entry,
                         size.x as usize,
                         size.y as usize,
                         crunch::Rotation::None,
@@ -490,22 +524,25 @@ impl Atlas {
             .ok()
             .context(CannotPackTexturesSnafu {
                 size,
-                image_sizes: frames.iter().map(|f| f.get().size_px).collect::<Vec<_>>(),
+                image_sizes: entries
+                    .iter()
+                    .map(|entry| entry.frame.get().size_px)
+                    .collect::<Vec<_>>(),
             })?;
             log::trace!("  packed!");
 
             // UNWRAP: safe because we know the new layers has this index
             let layer = layers.get_mut(i).unwrap();
-            for (j, crunch::PackedItem { data: frame, rect }) in items.items.into_iter().enumerate()
+            for (j, crunch::PackedItem { data: entry, rect }) in items.items.into_iter().enumerate()
             {
                 let offset_px = UVec2::new(rect.x as u32, rect.y as u32);
                 let size_px = UVec2::new(rect.w as u32, rect.h as u32);
 
-                frame.modify(|t| {
+                entry.frame.modify(|t| {
                     debug_assert_eq!(t.size_px, size_px);
 
                     log::trace!(
-                        "  copying previous texture {} in layer {}",
+                        "  resize: copying previous texture {} in layer {}",
                         t.frame_index,
                         t.layer_index
                     );
@@ -543,7 +580,7 @@ impl Atlas {
                     t.frame_index = j as u32;
                 });
 
-                layer.frames.push(frame.clone());
+                layer.frames.push(entry.clone());
             }
         }
         queue.submit(Some(encoder.finish()));
@@ -551,6 +588,45 @@ impl Atlas {
         *texture_array = new_texture_array;
 
         Ok(())
+    }
+
+    /// Perform upkeep on the atlas.
+    ///
+    /// This removes any `TextureFrame`s that have no references and repacks the atlas
+    /// if any were removed.
+    pub fn upkeep(&self, device: &wgpu::Device, queue: &wgpu::Queue) {
+        let mut total_dropped = 0;
+        {
+            let mut layers = self.layers.write().unwrap();
+            for (i, layer) in layers.iter_mut().enumerate() {
+                let mut dropped = 0;
+                layer.frames.retain(|entry| {
+                    let frame_has_references =
+                        entry.frame.strong_count() > ENTRY_STRONG_COUNT_LOWER_BOUND;
+                    let tex_has_references =
+                        entry.frame.strong_count() > ENTRY_STRONG_COUNT_LOWER_BOUND;
+                    if frame_has_references || tex_has_references {
+                        true
+                    } else {
+                        dropped += 1;
+                        false
+                    }
+                });
+                total_dropped += dropped;
+                if dropped > 0 {
+                    log::trace!("removed {dropped} frames from layer {i}");
+                }
+            }
+
+            layers.len()
+        };
+
+        if total_dropped > 0 {
+            log::trace!("repacking after dropping {total_dropped} frames from the atlas");
+            // UNWRAP: safe because we can only remove frames from the atlas, which should
+            // only make it easier to pack.
+            self.resize(device, queue, self.get_size()).unwrap();
+        }
     }
 
     /// Read the atlas image from the GPU.
@@ -615,16 +691,13 @@ mod test {
         let sandstone = AtlasImage::from_path("../../img/sandstone.png").unwrap();
         let texels = AtlasImage::from_path("../../test_img/atlas/uv_mapping.png").unwrap();
         log::info!("setting images");
-        let frames = stage.set_images([dirt, sandstone, texels]).unwrap();
+        let atlas_entries = stage.set_images([dirt, sandstone, texels]).unwrap();
         log::info!("  done setting images");
 
-        let texels_frame = &frames[2];
-        let texels_tex = stage.new_value(AtlasTexture {
-            frame_id: texels_frame.id(),
-            ..Default::default()
-        });
+        let texels_entry = &atlas_entries[2];
+
         let material = stage.new_value(Material {
-            albedo_texture_id: texels_tex.id(),
+            albedo_texture_id: texels_entry.texture().id(),
             has_lighting: false,
             ..Default::default()
         });
@@ -681,9 +754,9 @@ mod test {
         let dirt = AtlasImage::from_path("../../img/dirt.jpg").unwrap();
         let sandstone = AtlasImage::from_path("../../img/sandstone.png").unwrap();
         let texels = AtlasImage::from_path("../../img/happy_mac.png").unwrap();
-        let frames = stage.set_images([dirt, sandstone, texels]).unwrap();
+        let entry = stage.set_images([dirt, sandstone, texels]).unwrap();
         let base_texture = AtlasTexture {
-            frame_id: frames[2].id(),
+            frame_id: entry[2].frame().id(),
             ..Default::default()
         };
         let clamp_tex = stage.new_value(base_texture);
@@ -793,10 +866,10 @@ mod test {
         let dirt = AtlasImage::from_path("../../img/dirt.jpg").unwrap();
         let sandstone = AtlasImage::from_path("../../img/sandstone.png").unwrap();
         let texels = AtlasImage::from_path("../../img/happy_mac.png").unwrap();
-        let frames = stage.set_images([dirt, sandstone, texels]).unwrap();
+        let entries = stage.set_images([dirt, sandstone, texels]).unwrap();
 
         let base_tex = AtlasTexture {
-            frame_id: frames[2].id(),
+            frame_id: entries[2].frame().id(),
             ..Default::default()
         };
         let clamp_tex = stage.new_value(base_tex);
@@ -930,5 +1003,38 @@ mod test {
         img_diff::assert_img_eq("atlas/array0.png", img);
         let img = stage.atlas.atlas_img(&stage.device, &stage.queue, 1);
         img_diff::assert_img_eq("atlas/array1.png", img);
+    }
+
+    #[test]
+    fn upkeep_trims_the_atlas() {
+        // tests that Atlas::upkeep trims out unused images and repacks the atlas
+        let ctx =
+            Context::headless(100, 100).with_default_atlas_texture_size(UVec3::new(512, 512, 2));
+        let stage = ctx.new_stage();
+        let dirt = AtlasImage::from_path("../../img/dirt.jpg").unwrap();
+        let sandstone = AtlasImage::from_path("../../img/sandstone.png").unwrap();
+        let cheetah = AtlasImage::from_path("../../img/cheetah.jpg").unwrap();
+        let texels = AtlasImage::from_path("../../img/happy_mac.png").unwrap();
+        let mut frames = stage
+            .set_images([
+                dirt,
+                sandstone,
+                cheetah,
+                texels.clone(),
+                texels.clone(),
+                texels.clone(),
+                texels.clone(),
+                texels,
+            ])
+            .unwrap();
+        assert_eq!(8, stage.atlas.len());
+
+        frames.pop();
+        frames.pop();
+        frames.pop();
+        frames.pop();
+
+        stage.atlas.upkeep(&stage.device, &stage.queue);
+        assert_eq!(4, stage.atlas.len());
     }
 }

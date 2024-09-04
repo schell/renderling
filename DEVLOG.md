@@ -2,6 +2,25 @@
 title: devlog
 ---
 
+## Wed Sep 4, 2024
+
+### nlnet updates 
+
+I'm just waiting for a review on [my third PR, which adds parsing for a bunch of atomic 
+ops](https://github.com/gfx-rs/wgpu/pull/5824). The turn-around time has gotten pretty 
+long, though - this PR has been sitting for a month and I can't seem to get folks to 
+review it. I'm sure if I keep pinging them they'll pick it back up but I don't like 
+doing that. I know they're busy with day jobs just like I am, but my time on this grant 
+is running out, and I still have 6 milestones to hit.
+
+### Atlas updates
+
+I'm updating the atlas so that it automatically evicts frames/textures without any 
+references (stale or dead frames and textures). I think I'll just merge `AtlasFrame`
+and `AtlasTexture`. The only reason they're separate is in case somebody wants to have 
+different wrapping parameters for the same texture data, but I don't think any graphics 
+APIs even support this.
+
 ## Mon Aug 26, 2024
 
 I'm adding morph targets. I've done this once before so I expect it'll be pretty easy.

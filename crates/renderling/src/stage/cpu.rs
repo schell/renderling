@@ -12,7 +12,7 @@ use std::{
 };
 
 use crate::{
-    atlas::{Atlas, AtlasError, AtlasFrame, AtlasImage, AtlasImageError},
+    atlas::{Atlas, AtlasEntry, AtlasError, AtlasImage, AtlasImageError},
     bloom::Bloom,
     camera::Camera,
     pbr::{debug::DebugMode, light::Light, PbrConfig},
@@ -166,6 +166,8 @@ pub struct Stage {
     pub(crate) depth_texture: Arc<RwLock<Texture>>,
     pub(crate) msaa_render_target: Arc<RwLock<Option<wgpu::TextureView>>>,
     pub(crate) msaa_sample_count: Arc<AtomicU32>,
+    pub(crate) clear_color_attachments: Arc<AtomicBool>,
+    pub(crate) clear_depth_attachments: Arc<AtomicBool>,
 
     pub(crate) atlas: Atlas,
     pub(crate) bloom: Bloom,
@@ -252,6 +254,8 @@ impl Stage {
             depth_texture,
             msaa_render_target,
             msaa_sample_count: Arc::new(multisample_count.into()),
+            clear_color_attachments: Arc::new(true.into()),
+            clear_depth_attachments: Arc::new(true.into()),
             background_color: Arc::new(RwLock::new(wgpu::Color::TRANSPARENT)),
             device,
             queue,
@@ -323,6 +327,30 @@ impl Stage {
     /// setting to `1`.
     pub fn with_msaa_sample_count(self, multisample_count: u32) -> Self {
         self.set_msaa_sample_count(multisample_count);
+        self
+    }
+
+    /// Set whether color attachments are cleared before rendering.
+    pub fn set_clear_color_attachments(&self, should_clear: bool) {
+        self.clear_color_attachments
+            .store(should_clear, Ordering::Relaxed);
+    }
+
+    /// Set whether color attachments are cleared before rendering.
+    pub fn with_clear_color_attachments(self, should_clear: bool) -> Self {
+        self.set_clear_color_attachments(should_clear);
+        self
+    }
+
+    /// Set whether color attachments are cleared before rendering.
+    pub fn set_clear_depth_attachments(&self, should_clear: bool) {
+        self.clear_depth_attachments
+            .store(should_clear, Ordering::Relaxed);
+    }
+
+    /// Set whether color attachments are cleared before rendering.
+    pub fn with_clear_depth_attachments(self, should_clear: bool) -> Self {
+        self.set_clear_depth_attachments(should_clear);
         self
     }
 
@@ -419,11 +447,21 @@ impl Stage {
     ///
     /// Adding an image can be quite expensive, as it requires creating a new texture
     /// array for the atlas and repacking all previous images. For that reason it is
-    /// to batch images to reduce the number of calls.
+    /// good to batch images to reduce the number of calls.
+    ///
+    /// This returns a vector of [`AtlasEntry`](e), which
+    /// represent each image in the atlas maintained on the GPU. Dropping these entries
+    /// will invalidate those images and cause the atlas to be repacked, and any GPU
+    /// references to the underlying [`AtlasFrame`](f) and [`AtlasTexture`](t) will also
+    /// be invalidated.
+    ///
+    /// [e]: crate::atlas::AtlasEntry
+    /// [f]: crate::atlas::AtlasFrame
+    /// [t]: crate::atlas::AtlasTexture
     pub fn add_images(
         &self,
         images: impl IntoIterator<Item = impl Into<AtlasImage>>,
-    ) -> Result<Vec<Hybrid<AtlasFrame>>, StageError> {
+    ) -> Result<Vec<AtlasEntry>, StageError> {
         let frames = self
             .atlas
             .add_images(&self.device, &self.queue, self, images)?;
@@ -450,11 +488,11 @@ impl Stage {
     /// vector of the frames already staged.
     ///
     /// ## WARNING
-    /// This invalidates any previously staged `AtlasFrame`s.
+    /// This invalidates any previously staged `AtlasEntry`s.
     pub fn set_images(
         &self,
         images: impl IntoIterator<Item = impl Into<AtlasImage>>,
-    ) -> Result<Vec<Hybrid<AtlasFrame>>, StageError> {
+    ) -> Result<Vec<AtlasEntry>, StageError> {
         let frames = self
             .atlas
             .set_images(&self.device, &self.queue, self, images)?;
@@ -714,6 +752,7 @@ impl Stage {
     /// It's good to call this after dropping assets to free up space on the
     /// slab.
     pub fn tick(&self) {
+        self.atlas.upkeep(&self.device, &self.queue);
         let _ = self.tick_internal();
     }
 
@@ -730,12 +769,14 @@ impl Stage {
             let msaa_target = self.msaa_render_target.read().unwrap();
             let slab_buffers_bindgroup = self.get_slab_buffers_bindgroup(&slab_buffer);
             let textures_bindgroup = self.get_textures_bindgroup();
-            let has_skybox = self.has_skybox.load(std::sync::atomic::Ordering::Relaxed);
+            let has_skybox = self.has_skybox.load(Ordering::Relaxed);
             let may_skybox_pipeline_and_bindgroup = if has_skybox {
                 Some(self.get_skybox_pipeline_and_bindgroup(&slab_buffer))
             } else {
                 None
             };
+            let clear_colors = self.clear_color_attachments.load(Ordering::Relaxed);
+            let clear_depth = self.clear_depth_attachments.load(Ordering::Relaxed);
 
             // UNWRAP: if we can't read we want to panic.
             let draws = self.draws.read().unwrap();
@@ -747,7 +788,11 @@ impl Stage {
                 let hdr_texture = self.hdr_texture.read().unwrap();
                 let depth_texture = self.depth_texture.read().unwrap();
                 let ops = wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(background_color),
+                    load: if clear_colors {
+                        wgpu::LoadOp::Clear(background_color)
+                    } else {
+                        wgpu::LoadOp::Load
+                    },
                     store: wgpu::StoreOp::Store,
                 };
                 let color_attachment = if let Some(msaa_view) = msaa_target.as_ref() {
@@ -769,7 +814,11 @@ impl Stage {
                     depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                         view: &depth_texture.view,
                         depth_ops: Some(wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(1.0),
+                            load: if clear_depth {
+                                wgpu::LoadOp::Clear(1.0)
+                            } else {
+                                wgpu::LoadOp::Load
+                            },
                             store: wgpu::StoreOp::Store,
                         }),
                         stencil_ops: None,
