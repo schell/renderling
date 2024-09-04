@@ -31,7 +31,7 @@ use std::sync::{Arc, RwLock};
 use crabslab::Id;
 use glyph_brush::ab_glyph;
 use renderling::{
-    atlas::AtlasEntry,
+    atlas::AtlasTexture,
     camera::Camera,
     math::{Quat, UVec2, Vec2, Vec3Swizzles, Vec4},
     slab::{Hybrid, UpdatesSlab},
@@ -132,7 +132,7 @@ impl UiTransform {
 
 #[derive(Clone)]
 #[repr(transparent)]
-struct UiImage(AtlasEntry);
+struct UiImage(Hybrid<AtlasTexture>);
 
 /// A 2d user interface renderer.
 ///
@@ -286,7 +286,7 @@ impl Ui {
             .context(StageSnafu)?
             .pop()
             .unwrap();
-        entry.texture().modify(|t| {
+        entry.modify(|t| {
             t.modes.s = renderling::atlas::TextureAddressMode::Repeat;
             t.modes.t = renderling::atlas::TextureAddressMode::Repeat;
         });

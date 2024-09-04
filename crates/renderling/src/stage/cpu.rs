@@ -12,7 +12,7 @@ use std::{
 };
 
 use crate::{
-    atlas::{Atlas, AtlasEntry, AtlasError, AtlasImage, AtlasImageError},
+    atlas::{Atlas, AtlasError, AtlasImage, AtlasImageError, AtlasTexture},
     bloom::Bloom,
     camera::Camera,
     pbr::{debug::DebugMode, light::Light, PbrConfig},
@@ -449,19 +449,19 @@ impl Stage {
     /// array for the atlas and repacking all previous images. For that reason it is
     /// good to batch images to reduce the number of calls.
     ///
-    /// This returns a vector of [`AtlasEntry`](e), which
+    /// This returns a vector of [`Hybrid<AtlasTexture>`](e), which
     /// represent each image in the atlas maintained on the GPU. Dropping these entries
     /// will invalidate those images and cause the atlas to be repacked, and any GPU
     /// references to the underlying [`AtlasFrame`](f) and [`AtlasTexture`](t) will also
     /// be invalidated.
     ///
-    /// [e]: crate::atlas::AtlasEntry
+    /// [e]: crate::atlas::Hybrid<AtlasTexture>
     /// [f]: crate::atlas::AtlasFrame
     /// [t]: crate::atlas::AtlasTexture
     pub fn add_images(
         &self,
         images: impl IntoIterator<Item = impl Into<AtlasImage>>,
-    ) -> Result<Vec<AtlasEntry>, StageError> {
+    ) -> Result<Vec<Hybrid<AtlasTexture>>, StageError> {
         let frames = self
             .atlas
             .add_images(&self.device, &self.queue, self, images)?;
@@ -488,11 +488,11 @@ impl Stage {
     /// vector of the frames already staged.
     ///
     /// ## WARNING
-    /// This invalidates any previously staged `AtlasEntry`s.
+    /// This invalidates any previously staged `Hybrid<AtlasTexture>`s.
     pub fn set_images(
         &self,
         images: impl IntoIterator<Item = impl Into<AtlasImage>>,
-    ) -> Result<Vec<AtlasEntry>, StageError> {
+    ) -> Result<Vec<Hybrid<AtlasTexture>>, StageError> {
         let frames = self
             .atlas
             .set_images(&self.device, &self.queue, self, images)?;

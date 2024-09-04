@@ -14,7 +14,7 @@ pub use glyph_brush::{Section, Text};
 
 use image::{DynamicImage, GenericImage, ImageBuffer, Luma, Rgba};
 use renderling::{
-    atlas::AtlasEntry,
+    atlas::AtlasTexture,
     math::{Vec2, Vec4},
     pbr::Material,
     slab::{GpuArray, Hybrid},
@@ -27,7 +27,7 @@ pub struct UiText {
     pub cache: GlyphCache,
     pub vertices: GpuArray<Vertex>,
     pub transform: UiTransform,
-    pub entry: AtlasEntry,
+    pub texture: Hybrid<AtlasTexture>,
     pub material: Hybrid<Material>,
     pub renderlet: Hybrid<Renderlet>,
     pub bounds: (Vec2, Vec2),
@@ -103,7 +103,7 @@ impl UiTextBuilder {
 
         // UNWRAP: panic on purpose
         let entry = ui.stage.add_images(Some(img)).unwrap().pop().unwrap();
-        material.albedo_texture_id = entry.texture().id();
+        material.albedo_texture_id = entry.id();
 
         let vertices = ui.stage.new_array(mesh);
         let material = ui.stage.new_value(material);
@@ -123,7 +123,7 @@ impl UiTextBuilder {
             bounds,
             vertices: vertices.into_gpu_only(),
             transform,
-            entry,
+            texture: entry,
             material,
             renderlet,
         }

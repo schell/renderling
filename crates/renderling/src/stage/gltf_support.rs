@@ -7,7 +7,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use snafu::{OptionExt, ResultExt, Snafu};
 
 use crate::{
-    atlas::{AtlasEntry, AtlasError, AtlasImage, AtlasTexture, TextureAddressMode, TextureModes},
+    atlas::{AtlasError, AtlasImage, AtlasTexture, TextureAddressMode, TextureModes},
     camera::Camera,
     pbr::{
         light::{DirectionalLight, Light, LightStyle, PointLight, SpotLight},
@@ -183,7 +183,7 @@ impl Material {
 
     pub fn from_gltf(
         material: gltf::Material,
-        entries: &[AtlasEntry],
+        entries: &[Hybrid<AtlasTexture>],
     ) -> Result<Material, StageGltfError> {
         let name = material.name().map(String::from);
         log::trace!("loading material {:?} {name:?}", material.index());
@@ -193,7 +193,7 @@ impl Material {
             let (albedo_texture, albedo_tex_coord) = if let Some(info) = pbr.base_color_texture() {
                 let texture = info.texture();
                 let index = texture.index();
-                let tex_id = entries[index].texture().id();
+                let tex_id = entries[index].id();
                 (tex_id, info.tex_coord())
             } else {
                 (Id::NONE, 0)
@@ -211,7 +211,7 @@ impl Material {
             let (albedo_texture, albedo_tex_coord) = if let Some(info) = pbr.base_color_texture() {
                 let texture = info.texture();
                 let index = texture.index();
-                let tex_id = entries[index].texture().id();
+                let tex_id = entries[index].id();
                 (tex_id, info.tex_coord())
             } else {
                 (Id::NONE, 0)
@@ -224,7 +224,7 @@ impl Material {
                 metallic_roughness_tex_coord,
             ) = if let Some(info) = pbr.metallic_roughness_texture() {
                 let index = info.texture().index();
-                let tex_id = entries[index].texture().id();
+                let tex_id = entries[index].id();
                 (1.0, 1.0, tex_id, info.tex_coord())
             } else {
                 (pbr.metallic_factor(), pbr.roughness_factor(), Id::NONE, 0)
@@ -232,7 +232,7 @@ impl Material {
 
             let (normal_texture, normal_tex_coord) =
                 if let Some(norm_tex) = material.normal_texture() {
-                    let tex_id = entries[norm_tex.texture().index()].texture().id();
+                    let tex_id = entries[norm_tex.texture().index()].id();
                     (tex_id, norm_tex.tex_coord())
                 } else {
                     (Id::NONE, 0)
@@ -240,7 +240,7 @@ impl Material {
 
             let (ao_strength, ao_texture, ao_tex_coord) =
                 if let Some(occlusion_tex) = material.occlusion_texture() {
-                    let tex_id = entries[occlusion_tex.texture().index()].texture().id();
+                    let tex_id = entries[occlusion_tex.texture().index()].id();
                     (occlusion_tex.strength(), tex_id, occlusion_tex.tex_coord())
                 } else {
                     (0.0, Id::NONE, 0)
@@ -250,7 +250,7 @@ impl Material {
                 if let Some(emissive_tex) = material.emissive_texture() {
                     let texture = emissive_tex.texture();
                     let index = texture.index();
-                    let tex_id = entries[index].texture().id();
+                    let tex_id = entries[index].id();
                     (tex_id, emissive_tex.tex_coord())
                 } else {
                     (Id::NONE, 0)
@@ -742,7 +742,7 @@ pub struct GltfDocument {
     pub default_material: Hybrid<Material>,
     pub default_scene: Option<usize>,
     pub extensions: Option<serde_json::Value>,
-    pub entries: Vec<AtlasEntry>,
+    pub textures: Vec<Hybrid<AtlasTexture>>,
     pub lights: Vec<GltfLight>,
     pub meshes: Vec<GltfMesh>,
     pub nodes: Vec<GltfNode>,
@@ -769,19 +769,19 @@ impl GltfDocument {
         }
 
         log::debug!("Loading {} images into the atlas", images.len());
-        let entries = stage.add_images(images).context(StageSnafu)?;
+        let textures = stage.add_images(images).context(StageSnafu)?;
 
         log::debug!("Writing textures");
         for (i, texture) in document.textures().enumerate() {
             let index = texture.index();
-            let entry = entries.get(index).context(MissingFrameSnafu { index })?;
-            entry.texture().modify(|tex| {
+            let entry = textures.get(index).context(MissingFrameSnafu { index })?;
+            entry.modify(|tex| {
                 tex.modes = TextureModes {
                     s: TextureAddressMode::from_gltf(texture.sampler().wrap_s()),
                     t: TextureAddressMode::from_gltf(texture.sampler().wrap_t()),
                 };
             });
-            let texture_id = entry.texture().id();
+            let texture_id = entry.id();
             log::trace!("  texture {i} {texture_id:?}: {texture:#?}");
         }
 
@@ -790,7 +790,7 @@ impl GltfDocument {
         let mut materials = vec![];
         for gltf_material in document.materials() {
             let material_index = gltf_material.index();
-            let material = Material::from_gltf(gltf_material, &entries)?;
+            let material = Material::from_gltf(gltf_material, &textures)?;
             if let Some(index) = material_index {
                 log::trace!("  created material {index}");
                 debug_assert_eq!(index, materials.len(), "unexpected material index");
@@ -1048,7 +1048,7 @@ impl GltfDocument {
         log::debug!("Done loading gltf");
 
         Ok(GltfDocument {
-            entries,
+            textures,
             animations,
             lights,
             cameras,
@@ -1213,9 +1213,9 @@ mod test {
         let doc = stage
             .load_gltf_document_from_path("../../gltf/cheetah_cone.glb", camera.id())
             .unwrap();
-        assert!(!doc.entries.is_empty());
+        assert!(!doc.textures.is_empty());
         let material = stage.new_value(Material {
-            albedo_texture_id: doc.entries[0].texture().id(),
+            albedo_texture_id: doc.textures[0].id(),
             has_lighting: false,
             ..Default::default()
         });

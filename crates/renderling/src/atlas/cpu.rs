@@ -11,7 +11,7 @@ use crate::{
 
 use super::{
     atlas_image::{convert_to_rgba8_bytes, AtlasImage},
-    AtlasFrame, AtlasTexture,
+    AtlasTexture,
 };
 
 pub(crate) const ATLAS_SUGGESTED_SIZE: u32 = 2048;
@@ -90,42 +90,21 @@ enum Packing<'a> {
     /// A previous packing.
     ///
     /// This image has already been staged on the GPU.
-    GpuImg(AtlasEntry),
+    GpuImg(Hybrid<AtlasTexture>),
 }
 
 impl<'a> Packing<'a> {
     pub fn size(&self) -> UVec2 {
         match self {
             Packing::Img { image, .. } => image.size,
-            Packing::GpuImg(entry) => entry.frame.get().size_px,
+            Packing::GpuImg(entry) => entry.get().size_px,
         }
     }
 }
 
 #[derive(Clone, Default, Debug)]
 pub struct Layer {
-    pub frames: Vec<AtlasEntry>,
-}
-
-/// Represents an image stored in the atlas.
-///
-/// Dropping this will reduces its reference count. If the atlas determines
-/// there are no more external references the entry will be removed internally,
-/// invalidating the atlas, causing the atlas to repack itself.
-#[derive(Clone, Debug)]
-pub struct AtlasEntry {
-    frame: Hybrid<AtlasFrame>,
-    texture: Hybrid<AtlasTexture>,
-}
-
-impl AtlasEntry {
-    pub fn frame(&self) -> &Hybrid<AtlasFrame> {
-        &self.frame
-    }
-
-    pub fn texture(&self) -> &Hybrid<AtlasTexture> {
-        &self.texture
-    }
+    pub frames: Vec<Hybrid<AtlasTexture>>,
 }
 
 /// A texture atlas, used to store all the textures in a scene.
@@ -256,7 +235,7 @@ impl Atlas {
         queue: &wgpu::Queue,
         slab: &SlabAllocator<impl IsBuffer>,
         images: impl IntoIterator<Item = impl Into<AtlasImage>>,
-    ) -> Result<Vec<AtlasEntry>, AtlasError> {
+    ) -> Result<Vec<Hybrid<AtlasTexture>>, AtlasError> {
         log::debug!("setting images");
         {
             // UNWRAP: panic on purpose
@@ -281,7 +260,7 @@ impl Atlas {
         queue: &wgpu::Queue,
         slab: &SlabAllocator<impl IsBuffer>,
         images: impl IntoIterator<Item = impl Into<AtlasImage>>,
-    ) -> Result<Vec<AtlasEntry>, AtlasError> {
+    ) -> Result<Vec<Hybrid<AtlasTexture>>, AtlasError> {
         // UNWRAP: POP
         let mut layers = self.layers.write().unwrap();
 
@@ -355,20 +334,16 @@ impl Atlas {
                             frame_index,
                             image,
                         } => {
-                            let atlas_frame = AtlasFrame {
+                            let atlas_texture = AtlasTexture {
                                 offset_px,
                                 size_px,
                                 layer_index,
                                 frame_index,
+                                ..Default::default()
                             };
-                            let frame = slab.new_value(atlas_frame);
-                            let texture = slab.new_value(AtlasTexture {
-                                frame_id: frame.id(),
-                                modes: Default::default(),
-                            });
-                            let entry = AtlasEntry { frame, texture };
-                            output.push(entry.clone());
-                            layer.frames.push(entry);
+                            let texture = slab.new_value(atlas_texture);
+                            output.push(texture.clone());
+                            layer.frames.push(texture);
 
                             let bytes = convert_to_rgba8_bytes(
                                 image.pixels.clone(),
@@ -387,7 +362,7 @@ impl Atlas {
                                 depth_or_array_layers: 1,
                             };
                             log::trace!("  writing image data to frame {frame_index} in layer {layer_index}");
-                            log::trace!("    frame: {atlas_frame:?}");
+                            log::trace!("    frame: {atlas_texture:?}");
                             log::trace!("    origin: {origin:?}");
                             log::trace!("    size: {size:?}");
 
@@ -408,7 +383,7 @@ impl Atlas {
                                 size,
                             );
                         }
-                        Packing::GpuImg(entry) => entry.frame.modify(|t| {
+                        Packing::GpuImg(texture) => texture.modify(|t| {
                             debug_assert_eq!(t.size_px, size_px);
                             log::trace!("  add_images: copying previous frame {t:?}",);
                             // copy the frame from the old texture to the new texture
@@ -463,7 +438,7 @@ impl Atlas {
 
         output.sort_by_key(|a| {
             // UNWRAP: safe because we created the value as a hybrid above
-            a.frame.get().frame_index
+            a.get().frame_index
         });
         Ok(output)
     }
@@ -496,8 +471,8 @@ impl Atlas {
             .flat_map(|layer| layer.frames)
             .collect::<Vec<_>>();
         all_frames.sort_by(|a, b| {
-            let a = a.frame.get();
-            let b = b.frame.get();
+            let a = a.get();
+            let b = b.get();
             (a.size_px.x * a.size_px.y).cmp(&(b.size_px.x * b.size_px.y))
         });
 
@@ -511,10 +486,10 @@ impl Atlas {
             log::trace!("repacking layer {i} with {} frames", entries.len());
             let items = crunch::pack_into_po2(
                 size.width as usize,
-                entries.iter().map(|entry| {
-                    let size = entry.frame.get().size_px;
+                entries.iter().map(|atlas_texture| {
+                    let size = atlas_texture.get().size_px;
                     crunch::Item::new(
-                        entry,
+                        atlas_texture,
                         size.x as usize,
                         size.y as usize,
                         crunch::Rotation::None,
@@ -524,10 +499,7 @@ impl Atlas {
             .ok()
             .context(CannotPackTexturesSnafu {
                 size,
-                image_sizes: entries
-                    .iter()
-                    .map(|entry| entry.frame.get().size_px)
-                    .collect::<Vec<_>>(),
+                image_sizes: entries.iter().map(|t| t.get().size_px).collect::<Vec<_>>(),
             })?;
             log::trace!("  packed!");
 
@@ -538,7 +510,7 @@ impl Atlas {
                 let offset_px = UVec2::new(rect.x as u32, rect.y as u32);
                 let size_px = UVec2::new(rect.w as u32, rect.h as u32);
 
-                entry.frame.modify(|t| {
+                entry.modify(|t| {
                     debug_assert_eq!(t.size_px, size_px);
 
                     log::trace!(
@@ -601,11 +573,8 @@ impl Atlas {
             for (i, layer) in layers.iter_mut().enumerate() {
                 let mut dropped = 0;
                 layer.frames.retain(|entry| {
-                    let frame_has_references =
-                        entry.frame.strong_count() > ENTRY_STRONG_COUNT_LOWER_BOUND;
-                    let tex_has_references =
-                        entry.frame.strong_count() > ENTRY_STRONG_COUNT_LOWER_BOUND;
-                    if frame_has_references || tex_has_references {
+                    let tex_has_references = entry.strong_count() > ENTRY_STRONG_COUNT_LOWER_BOUND;
+                    if tex_has_references {
                         true
                     } else {
                         dropped += 1;
@@ -670,7 +639,6 @@ mod test {
         transform::Transform,
         Context,
     };
-    use crabslab::{Id, Slab, SlabItem};
     use glam::{UVec3, Vec2, Vec3, Vec4};
 
     use super::*;
@@ -697,7 +665,7 @@ mod test {
         let texels_entry = &atlas_entries[2];
 
         let material = stage.new_value(Material {
-            albedo_texture_id: texels_entry.texture().id(),
+            albedo_texture_id: texels_entry.id(),
             has_lighting: false,
             ..Default::default()
         });
@@ -751,23 +719,19 @@ mod test {
             .with_background_color(Vec4::new(1.0, 1.0, 0.0, 1.0));
         let (projection, view) = crate::camera::default_ortho2d(w as f32, h as f32);
         let camera = stage.new_value(Camera::new(projection, view));
-        let dirt = AtlasImage::from_path("../../img/dirt.jpg").unwrap();
-        let sandstone = AtlasImage::from_path("../../img/sandstone.png").unwrap();
         let texels = AtlasImage::from_path("../../img/happy_mac.png").unwrap();
-        let entry = stage.set_images([dirt, sandstone, texels]).unwrap();
-        let base_texture = AtlasTexture {
-            frame_id: entry[2].frame().id(),
-            ..Default::default()
-        };
-        let clamp_tex = stage.new_value(base_texture);
-        let mut repeat_tex = base_texture;
-        repeat_tex.modes.s = TextureAddressMode::Repeat;
-        repeat_tex.modes.t = TextureAddressMode::Repeat;
-        let repeat_tex = stage.new_value(repeat_tex);
-        let mut mirror_tex = base_texture;
-        mirror_tex.modes.s = TextureAddressMode::MirroredRepeat;
-        mirror_tex.modes.t = TextureAddressMode::MirroredRepeat;
-        let mirror_tex = stage.new_value(mirror_tex);
+        let entries = stage.set_images(std::iter::repeat(texels).take(3)).unwrap();
+        let clamp_tex = &entries[0];
+        let repeat_tex = &entries[1];
+        repeat_tex.modify(|t| {
+            t.modes.s = TextureAddressMode::Repeat;
+            t.modes.t = TextureAddressMode::Repeat;
+        });
+        let mirror_tex = &entries[2];
+        mirror_tex.modify(|t| {
+            t.modes.s = TextureAddressMode::MirroredRepeat;
+            t.modes.t = TextureAddressMode::MirroredRepeat;
+        });
 
         let clamp_material = stage.new_value(Material {
             albedo_texture_id: clamp_tex.id(),
@@ -863,26 +827,21 @@ mod test {
             ..Default::default()
         });
 
-        let dirt = AtlasImage::from_path("../../img/dirt.jpg").unwrap();
-        let sandstone = AtlasImage::from_path("../../img/sandstone.png").unwrap();
         let texels = AtlasImage::from_path("../../img/happy_mac.png").unwrap();
-        let entries = stage.set_images([dirt, sandstone, texels]).unwrap();
+        let entries = stage.set_images(std::iter::repeat(texels).take(3)).unwrap();
 
-        let base_tex = AtlasTexture {
-            frame_id: entries[2].frame().id(),
-            ..Default::default()
-        };
-        let clamp_tex = stage.new_value(base_tex);
+        let clamp_tex = &entries[0];
+        let repeat_tex = &entries[1];
+        repeat_tex.modify(|t| {
+            t.modes.s = TextureAddressMode::Repeat;
+            t.modes.t = TextureAddressMode::Repeat;
+        });
 
-        let mut repeat_tex = base_tex;
-        repeat_tex.modes.s = TextureAddressMode::Repeat;
-        repeat_tex.modes.t = TextureAddressMode::Repeat;
-        let repeat_tex = stage.new_value(repeat_tex);
-
-        let mut mirror_tex = base_tex;
-        mirror_tex.modes.s = TextureAddressMode::MirroredRepeat;
-        mirror_tex.modes.t = TextureAddressMode::MirroredRepeat;
-        let mirror_tex = stage.new_value(mirror_tex);
+        let mirror_tex = &entries[2];
+        mirror_tex.modify(|t| {
+            t.modes.s = TextureAddressMode::MirroredRepeat;
+            t.modes.t = TextureAddressMode::MirroredRepeat;
+        });
 
         let clamp_material = stage.new_value(Material {
             albedo_texture_id: clamp_tex.id(),
@@ -962,26 +921,18 @@ mod test {
 
     #[test]
     fn transform_uvs_for_atlas() {
-        let mut slab = [0u32; AtlasFrame::SLAB_SIZE];
-        let mut frame = AtlasFrame {
+        let mut tex = AtlasTexture {
             offset_px: UVec2::ZERO,
             size_px: UVec2::ONE,
             ..Default::default()
         };
-        let frame_id = Id::new(0);
-        slab.write(Id::new(0), &frame);
-        let tex = AtlasTexture {
-            frame_id,
-            ..Default::default()
-        };
-        assert_eq!(Vec3::ZERO, tex.uv(&slab, Vec2::ZERO, UVec2::splat(100)));
-        assert_eq!(Vec3::ZERO, tex.uv(&slab, Vec2::ZERO, UVec2::splat(1)));
-        assert_eq!(Vec3::ZERO, tex.uv(&slab, Vec2::ZERO, UVec2::splat(256)));
-        frame.offset_px = UVec2::splat(10);
-        slab.write(Id::new(0), &frame);
+        assert_eq!(Vec3::ZERO, tex.uv(Vec2::ZERO, UVec2::splat(100)));
+        assert_eq!(Vec3::ZERO, tex.uv(Vec2::ZERO, UVec2::splat(1)));
+        assert_eq!(Vec3::ZERO, tex.uv(Vec2::ZERO, UVec2::splat(256)));
+        tex.offset_px = UVec2::splat(10);
         assert_eq!(
             Vec2::splat(0.1).extend(0.0),
-            tex.uv(&slab, Vec2::ZERO, UVec2::splat(100))
+            tex.uv(Vec2::ZERO, UVec2::splat(100))
         );
     }
 

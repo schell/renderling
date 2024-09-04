@@ -178,7 +178,10 @@ pub mod prelude {
     //! A prelude, meant to be glob-imported.
 
     pub extern crate glam;
-    pub use crate::{camera::*, pbr::Material, slab::*, stage::*, transform::Transform, Context};
+    pub use crate::{camera::*, pbr::Material, slab::*, stage::*, transform::Transform};
+
+    #[cfg(not(target_arch = "spirv"))]
+    pub use crate::context::*;
 }
 
 #[macro_export]
@@ -645,7 +648,7 @@ mod test {
         let entries = stage.set_images([sandstone, dirt]).unwrap();
 
         let material = stage.new_value(Material {
-            albedo_texture_id: entries[0].texture().id(),
+            albedo_texture_id: entries[0].id(),
             has_lighting: false,
             ..Default::default()
         });
@@ -672,7 +675,7 @@ mod test {
         frame.present();
 
         // update the material's texture on the GPU
-        material.modify(|m| m.albedo_texture_id = entries[1].texture().id());
+        material.modify(|m| m.albedo_texture_id = entries[1].id());
 
         // we should see a cube with a dirty texture
         let frame = ctx.get_next_frame().unwrap();
@@ -698,7 +701,7 @@ mod test {
         let entries = stage.set_images([img]).unwrap();
 
         let cheetah_material = stage.new_value(Material {
-            albedo_texture_id: entries[0].texture().id(),
+            albedo_texture_id: entries[0].id(),
             has_lighting: false,
             ..Default::default()
         });
