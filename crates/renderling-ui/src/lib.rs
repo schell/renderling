@@ -272,6 +272,10 @@ impl Ui {
         self.fonts.read().unwrap().clone()
     }
 
+    pub fn get_camera(&self) -> &Hybrid<Camera> {
+        &self.camera
+    }
+
     pub async fn load_image(&self, path: impl AsRef<str>) -> Result<ImageId, UiError> {
         let path_s = path.as_ref();
         let bytes = loading_bytes::load(path_s).await.context(LoadingSnafu)?;

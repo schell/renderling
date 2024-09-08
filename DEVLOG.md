@@ -21,6 +21,10 @@ and `AtlasTexture`. The only reason they're separate is in case somebody wants t
 different wrapping parameters for the same texture data, but I don't think any graphics 
 APIs even support this.
 
+...
+
+It wasn't too hard!
+
 ## Mon Aug 26, 2024
 
 I'm adding morph targets. I've done this once before so I expect it'll be pretty easy.

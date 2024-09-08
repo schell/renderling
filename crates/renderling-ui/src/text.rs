@@ -1,6 +1,7 @@
 //! Text rendering capabilities for `Renderling`.
 //!
 //! This module is only enabled with the `text` cargo feature.
+
 use std::{
     borrow::Cow,
     ops::{Deref, DerefMut},
@@ -22,6 +23,8 @@ use renderling::{
 };
 
 use crate::{Ui, UiTransform};
+
+// TODO: make UiText able to be updated without fully destroying it
 
 pub struct UiText {
     pub cache: GlyphCache,
