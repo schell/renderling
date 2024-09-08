@@ -280,7 +280,7 @@ pub fn texture_color<A: Sample2dArray<Sampler = S>, S: IsSampler>(
 ) -> Vec4 {
     let texture = slab.read(texture_id);
     // uv is [0, 0] when texture_id is Id::NONE
-    let uv = texture.uv(slab, uv, atlas_size);
+    let uv = texture.uv(uv, atlas_size);
     crate::println!("uv: {uv}");
     let mut color: Vec4 = atlas.sample_by_lod(*sampler, uv, 0.0);
     if texture_id.is_none() {

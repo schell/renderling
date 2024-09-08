@@ -110,7 +110,6 @@ half = "2.3"
 image = {workspace = true, features = ["hdr"]}
 log = {workspace = true}
 rustc-hash = {workspace = true}
-send_wrapper = "0.6"
 serde_json = {workspace = true, optional = true}
 snafu = {workspace = true}
 wgpu = { workspace = true, features = ["spirv"] }

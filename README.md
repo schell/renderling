@@ -69,6 +69,9 @@ Renderling takes a [forward+](https://takahiroharada.files.wordpress.com/2015/04
 By default it uses a single uber-shader for rendering.
 
 - [x] texture atlas
+  - [x] automatic resource management (Arc/drop based)
+- [x] GPU slab allocator
+  - [x] automatic resource management (Arc/drop based)
 - [ ] frustum culling
 - [ ] occlusion culling
 - [ ] light tiling
@@ -102,9 +105,11 @@ By default it uses a single uber-shader for rendering.
       - [x] interpolation
       - [x] skinning (still working on one [issue](https://github.com/schell/renderling/issues/120))
       - [ ] morph targets (requires rebuild)
-- 2d 
+- 2d (renderling-ui)
   - [x] text
   - [x] stroked and filled paths
+    - [x] circles
+    - [x] rectangles
     - [x] cubic beziers
     - [x] quadratic beziers
     - [x] arbitrary polygons

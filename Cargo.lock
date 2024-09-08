@@ -1620,6 +1620,7 @@ version = "0.1.1"
 dependencies = [
  "async-fs",
  "js-sys",
+ "send_wrapper",
  "snafu",
  "wasm-bindgen",
  "wasm-bindgen-futures",
@@ -2549,7 +2550,6 @@ dependencies = [
  "naga 0.19.2",
  "pretty_assertions",
  "rustc-hash 1.1.0",
- "send_wrapper",
  "serde_json",
  "snafu",
  "spirv-std",
