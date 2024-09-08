@@ -7,7 +7,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use snafu::{OptionExt, ResultExt, Snafu};
 
 use crate::{
-    atlas::{AtlasError, AtlasFrame, AtlasImage, AtlasTexture, TextureAddressMode, TextureModes},
+    atlas::{AtlasError, AtlasImage, AtlasTexture, TextureAddressMode, TextureModes},
     camera::Camera,
     pbr::{
         light::{DirectionalLight, Light, LightStyle, PointLight, SpotLight},
@@ -141,10 +141,49 @@ pub fn get_vertex_count(primitive: &gltf::Primitive<'_>) -> u32 {
 }
 
 impl Material {
+    pub fn preprocess_images(
+        material: gltf::Material,
+        images: &mut [AtlasImage],
+    ) -> Result<(), StageGltfError> {
+        let pbr = material.pbr_metallic_roughness();
+        if material.unlit() {
+            if let Some(info) = pbr.base_color_texture() {
+                let texture = info.texture();
+                // The index of the image in the original gltf document
+                let image_index = texture.source().index();
+                // Update the image to ensure it gets transferred correctly
+                let image = images
+                    .get_mut(image_index)
+                    .context(MissingImageSnafu { index: image_index })?;
+                image.apply_linear_transfer = true;
+            }
+        } else {
+            if let Some(info) = pbr.base_color_texture() {
+                let texture = info.texture();
+                let image_index = texture.source().index();
+                // Update the image to ensure it gets transferred correctly
+                let image = images
+                    .get_mut(image_index)
+                    .context(MissingImageSnafu { index: image_index })?;
+                image.apply_linear_transfer = true;
+            }
+
+            if let Some(emissive_tex) = material.emissive_texture() {
+                let texture = emissive_tex.texture();
+                let image_index = texture.source().index();
+                // Update the image to ensure it gets transferred correctly
+                let image = images
+                    .get_mut(image_index)
+                    .context(MissingImageSnafu { index: image_index })?;
+                image.apply_linear_transfer = true;
+            }
+        }
+        Ok(())
+    }
+
     pub fn from_gltf(
         material: gltf::Material,
-        textures: Array<AtlasTexture>,
-        images: &mut [AtlasImage],
+        entries: &[Hybrid<AtlasTexture>],
     ) -> Result<Material, StageGltfError> {
         let name = material.name().map(String::from);
         log::trace!("loading material {:?} {name:?}", material.index());
@@ -154,14 +193,7 @@ impl Material {
             let (albedo_texture, albedo_tex_coord) = if let Some(info) = pbr.base_color_texture() {
                 let texture = info.texture();
                 let index = texture.index();
-                let tex_id = textures.at(index);
-                // The index of the image in the original gltf document
-                let image_index = texture.source().index();
-                // Update the image to ensure it gets transferred correctly
-                let image = images
-                    .get_mut(image_index)
-                    .context(MissingImageSnafu { index: image_index })?;
-                image.apply_linear_transfer = true;
+                let tex_id = entries[index].id();
                 (tex_id, info.tex_coord())
             } else {
                 (Id::NONE, 0)
@@ -179,13 +211,7 @@ impl Material {
             let (albedo_texture, albedo_tex_coord) = if let Some(info) = pbr.base_color_texture() {
                 let texture = info.texture();
                 let index = texture.index();
-                let tex_id = textures.at(index);
-                let image_index = texture.source().index();
-                // Update the image to ensure it gets transferred correctly
-                let image = images
-                    .get_mut(image_index)
-                    .context(MissingImageSnafu { index: image_index })?;
-                image.apply_linear_transfer = true;
+                let tex_id = entries[index].id();
                 (tex_id, info.tex_coord())
             } else {
                 (Id::NONE, 0)
@@ -198,7 +224,7 @@ impl Material {
                 metallic_roughness_tex_coord,
             ) = if let Some(info) = pbr.metallic_roughness_texture() {
                 let index = info.texture().index();
-                let tex_id = textures.at(index);
+                let tex_id = entries[index].id();
                 (1.0, 1.0, tex_id, info.tex_coord())
             } else {
                 (pbr.metallic_factor(), pbr.roughness_factor(), Id::NONE, 0)
@@ -206,7 +232,7 @@ impl Material {
 
             let (normal_texture, normal_tex_coord) =
                 if let Some(norm_tex) = material.normal_texture() {
-                    let tex_id = textures.at(norm_tex.texture().index());
+                    let tex_id = entries[norm_tex.texture().index()].id();
                     (tex_id, norm_tex.tex_coord())
                 } else {
                     (Id::NONE, 0)
@@ -214,7 +240,7 @@ impl Material {
 
             let (ao_strength, ao_texture, ao_tex_coord) =
                 if let Some(occlusion_tex) = material.occlusion_texture() {
-                    let tex_id = textures.at(occlusion_tex.texture().index());
+                    let tex_id = entries[occlusion_tex.texture().index()].id();
                     (occlusion_tex.strength(), tex_id, occlusion_tex.tex_coord())
                 } else {
                     (0.0, Id::NONE, 0)
@@ -224,13 +250,7 @@ impl Material {
                 if let Some(emissive_tex) = material.emissive_texture() {
                     let texture = emissive_tex.texture();
                     let index = texture.index();
-                    let tex_id = textures.at(index);
-                    let image_index = texture.source().index();
-                    // Update the image to ensure it gets transferred correctly
-                    let image = images
-                        .get_mut(image_index)
-                        .context(MissingImageSnafu { index: image_index })?;
-                    image.apply_linear_transfer = true;
+                    let tex_id = entries[index].id();
                     (tex_id, emissive_tex.tex_coord())
                 } else {
                     (Id::NONE, 0)
@@ -722,7 +742,7 @@ pub struct GltfDocument {
     pub default_material: Hybrid<Material>,
     pub default_scene: Option<usize>,
     pub extensions: Option<serde_json::Value>,
-    pub frames: Vec<Hybrid<AtlasFrame>>,
+    pub textures: Vec<Hybrid<AtlasTexture>>,
     pub lights: Vec<GltfLight>,
     pub meshes: Vec<GltfMesh>,
     pub nodes: Vec<GltfNode>,
@@ -732,7 +752,6 @@ pub struct GltfDocument {
     /// Vector of scenes - each being a list of nodes.
     pub scenes: Vec<Vec<usize>>,
     pub skins: Vec<GltfSkin>,
-    pub textures: HybridArray<AtlasTexture>,
 }
 
 impl GltfDocument {
@@ -745,17 +764,33 @@ impl GltfDocument {
         camera_id: Id<Camera>,
     ) -> Result<GltfDocument, StageGltfError> {
         let mut images = images.into_iter().map(AtlasImage::from).collect::<Vec<_>>();
+        for gltf_material in document.materials() {
+            Material::preprocess_images(gltf_material, &mut images)?;
+        }
 
-        let num_textures = document.textures().len();
-        log::debug!("\nPreallocating an array of {num_textures} textures");
-        let textures = stage.new_array(vec![AtlasTexture::default(); num_textures]);
+        log::debug!("Loading {} images into the atlas", images.len());
+        let textures = stage.add_images(images).context(StageSnafu)?;
+
+        log::debug!("Writing textures");
+        for (i, texture) in document.textures().enumerate() {
+            let index = texture.index();
+            let entry = textures.get(index).context(MissingFrameSnafu { index })?;
+            entry.modify(|tex| {
+                tex.modes = TextureModes {
+                    s: TextureAddressMode::from_gltf(texture.sampler().wrap_s()),
+                    t: TextureAddressMode::from_gltf(texture.sampler().wrap_t()),
+                };
+            });
+            let texture_id = entry.id();
+            log::trace!("  texture {i} {texture_id:?}: {texture:#?}");
+        }
 
         log::debug!("Creating materials");
         let default_material = stage.new_value(Material::default());
         let mut materials = vec![];
         for gltf_material in document.materials() {
             let material_index = gltf_material.index();
-            let material = Material::from_gltf(gltf_material, textures.array(), &mut images)?;
+            let material = Material::from_gltf(gltf_material, &textures)?;
             if let Some(index) = material_index {
                 log::trace!("  created material {index}");
                 debug_assert_eq!(index, materials.len(), "unexpected material index");
@@ -767,25 +802,6 @@ impl GltfDocument {
         }
         let materials = stage.new_array(materials);
         log::trace!("  created {} materials", materials.len());
-
-        log::debug!("Loading {} images into the atlas", images.len());
-        let frames = stage.add_images(images).context(StageSnafu)?;
-
-        log::debug!("Writing textures");
-        for (i, texture) in document.textures().enumerate() {
-            let index = texture.index();
-            let frame = frames.get(index).context(MissingFrameSnafu { index })?;
-            let texture = AtlasTexture {
-                frame_id: frame.id(),
-                modes: TextureModes {
-                    s: TextureAddressMode::from_gltf(texture.sampler().wrap_s()),
-                    t: TextureAddressMode::from_gltf(texture.sampler().wrap_t()),
-                },
-            };
-            let texture_id = textures.array().at(i);
-            log::trace!("  texture {i} {texture_id:?}: {texture:#?}");
-            textures.set_item(i, texture);
-        }
 
         log::debug!("Loading meshes");
         let mut meshes = vec![];
@@ -1032,7 +1048,7 @@ impl GltfDocument {
         log::debug!("Done loading gltf");
 
         Ok(GltfDocument {
-            frames,
+            textures,
             animations,
             lights,
             cameras,
@@ -1043,7 +1059,6 @@ impl GltfDocument {
             scenes,
             skins,
             default_scene: document.default_scene().map(|scene| scene.index()),
-            textures,
             renderlets,
             extensions: document
                 .extensions()
@@ -1199,10 +1214,8 @@ mod test {
             .load_gltf_document_from_path("../../gltf/cheetah_cone.glb", camera.id())
             .unwrap();
         assert!(!doc.textures.is_empty());
-        let albedo_texture = doc.textures.get(0);
-        assert!(albedo_texture.is_some());
         let material = stage.new_value(Material {
-            albedo_texture_id: doc.textures.get_id(0),
+            albedo_texture_id: doc.textures[0].id(),
             has_lighting: false,
             ..Default::default()
         });

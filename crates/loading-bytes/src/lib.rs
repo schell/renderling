@@ -7,7 +7,7 @@ pub enum LoadingBytesError {
     #[snafu(display("loading '{path}' by WASM error: {msg:#?}"))]
     Wasm {
         path: String,
-        msg: wasm_bindgen::JsValue,
+        msg: send_wrapper::SendWrapper<wasm_bindgen::JsValue>,
     },
     #[snafu(display("loading '{path}' by filesystem from CWD '{}' error: {source}", cwd.display()))]
     Fs {
@@ -30,7 +30,7 @@ pub async fn load(path: &str) -> Result<Vec<u8>, LoadingBytesError> {
         let request = web_sys::Request::new_with_str_and_init(&path, &opts).map_err(|msg| {
             LoadingBytesError::Wasm {
                 path: path.clone(),
-                msg,
+                msg: send_wrapper::SendWrapper::new(msg),
             }
         })?;
         let window = web_sys::window().unwrap();
@@ -38,24 +38,24 @@ pub async fn load(path: &str) -> Result<Vec<u8>, LoadingBytesError> {
             .await
             .map_err(|msg| LoadingBytesError::Wasm {
                 path: path.clone(),
-                msg,
+                msg: send_wrapper::SendWrapper::new(msg),
             })?;
         let resp: web_sys::Response =
             resp_value
                 .dyn_into()
                 .map_err(|msg| LoadingBytesError::Wasm {
                     path: path.clone(),
-                    msg,
+                    msg: send_wrapper::SendWrapper::new(msg),
                 })?;
         let array_promise = resp.array_buffer().map_err(|msg| LoadingBytesError::Wasm {
             path: path.clone(),
-            msg,
+            msg: send_wrapper::SendWrapper::new(msg),
         })?;
         let buffer = wasm_bindgen_futures::JsFuture::from(array_promise)
             .await
             .map_err(|msg| LoadingBytesError::Wasm {
                 path: path.clone(),
-                msg,
+                msg: send_wrapper::SendWrapper::new(msg),
             })?;
         assert!(buffer.is_instance_of::<js_sys::ArrayBuffer>());
         let array: js_sys::Uint8Array = js_sys::Uint8Array::new(&buffer);

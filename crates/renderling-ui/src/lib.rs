@@ -31,7 +31,7 @@ use std::sync::{Arc, RwLock};
 use crabslab::Id;
 use glyph_brush::ab_glyph;
 use renderling::{
-    atlas::{AtlasFrame, AtlasTexture, TextureModes},
+    atlas::AtlasTexture,
     camera::Camera,
     math::{Quat, UVec2, Vec2, Vec3Swizzles, Vec4},
     slab::{Hybrid, UpdatesSlab},
@@ -131,10 +131,8 @@ impl UiTransform {
 }
 
 #[derive(Clone)]
-struct UiImage {
-    frame: Hybrid<AtlasFrame>,
-    texture: Hybrid<AtlasTexture>,
-}
+#[repr(transparent)]
+struct UiImage(Hybrid<AtlasTexture>);
 
 /// A 2d user interface renderer.
 ///
@@ -172,6 +170,24 @@ impl Ui {
             default_stroke_options: Default::default(),
             default_fill_options: Default::default(),
         }
+    }
+
+    pub fn set_clear_color_attachments(&self, should_clear: bool) {
+        self.stage.set_clear_color_attachments(should_clear);
+    }
+
+    pub fn with_clear_color_attachments(self, should_clear: bool) -> Self {
+        self.set_clear_color_attachments(should_clear);
+        self
+    }
+
+    pub fn set_clear_depth_attachments(&self, should_clear: bool) {
+        self.stage.set_clear_depth_attachments(should_clear);
+    }
+
+    pub fn with_clear_depth_attachments(self, should_clear: bool) -> Self {
+        self.set_clear_depth_attachments(should_clear);
+        self
     }
 
     pub fn set_background_color(&self, color: impl Into<Vec4>) -> &Self {
@@ -256,6 +272,10 @@ impl Ui {
         self.fonts.read().unwrap().clone()
     }
 
+    pub fn get_camera(&self) -> &Hybrid<Camera> {
+        &self.camera
+    }
+
     pub async fn load_image(&self, path: impl AsRef<str>) -> Result<ImageId, UiError> {
         let path_s = path.as_ref();
         let bytes = loading_bytes::load(path_s).await.context(LoadingSnafu)?;
@@ -264,22 +284,19 @@ impl Ui {
             image::ImageFormat::from_path(path_s).context(ImageSnafu)?,
         )
         .context(ImageSnafu)?;
-        let frame = self
+        let entry = self
             .stage
             .add_images(Some(img))
             .context(StageSnafu)?
             .pop()
             .unwrap();
-        let texture = self.stage.new_value(AtlasTexture {
-            frame_id: frame.id(),
-            modes: TextureModes {
-                s: renderling::atlas::TextureAddressMode::Repeat,
-                t: renderling::atlas::TextureAddressMode::Repeat,
-            },
+        entry.modify(|t| {
+            t.modes.s = renderling::atlas::TextureAddressMode::Repeat;
+            t.modes.t = renderling::atlas::TextureAddressMode::Repeat;
         });
         let mut guard = self.images.write().unwrap();
         let id = guard.len();
-        guard.push(UiImage { frame, texture });
+        guard.push(UiImage(entry));
         Ok(ImageId(id))
     }
 
@@ -321,6 +338,7 @@ impl Ui {
             log::trace!("a ui transform changed, sorting the renderlets");
             self.reorder_renderlets();
         }
+        self.stage.tick();
         self.stage.render(view);
     }
 }

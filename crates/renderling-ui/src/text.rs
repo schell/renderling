@@ -1,6 +1,7 @@
 //! Text rendering capabilities for `Renderling`.
 //!
 //! This module is only enabled with the `text` cargo feature.
+
 use std::{
     borrow::Cow,
     ops::{Deref, DerefMut},
@@ -22,6 +23,8 @@ use renderling::{
 };
 
 use crate::{Ui, UiTransform};
+
+// TODO: make UiText able to be updated without fully destroying it
 
 pub struct UiText {
     pub cache: GlyphCache,
@@ -102,12 +105,8 @@ impl UiTextBuilder {
         ));
 
         // UNWRAP: panic on purpose
-        let frame = ui.stage.add_images(Some(img)).unwrap().pop().unwrap();
-        let texture = ui.stage.new_value(AtlasTexture {
-            frame_id: frame.id(),
-            ..Default::default()
-        });
-        material.albedo_texture_id = texture.id();
+        let entry = ui.stage.add_images(Some(img)).unwrap().pop().unwrap();
+        material.albedo_texture_id = entry.id();
 
         let vertices = ui.stage.new_array(mesh);
         let material = ui.stage.new_value(material);
@@ -127,7 +126,7 @@ impl UiTextBuilder {
             bounds,
             vertices: vertices.into_gpu_only(),
             transform,
-            texture,
+            texture: entry,
             material,
             renderlet,
         }
