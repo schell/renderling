@@ -2,6 +2,23 @@
 title: devlog
 ---
 
+<!-- 🤞 -->
+
+## Mon Sep 16, 2024
+
+### nlnet updates 
+
+I've been constantly pinging the `wgpu` folks about [my third `wgpu` PR, which adds parsing for 
+a bunch of atomic ops](https://github.com/gfx-rs/wgpu/pull/5824) - but still no review. 
+I've stopped getting any response from the maintainers about two weeks ago. 
+So I'm going to cut my last PR on top of the third one and then run with my own fork 
+of `wgpu` to try to finish out the rest of my milestones. The last 
+PR will add support for `OpAtomicCompareExchange`, which is the trickiest op.
+
+...
+
+@jimblandy got to it! Looks like this will merge soon 🤞.
+
 ## Wed Sep 4, 2024
 
 ### nlnet updates 
