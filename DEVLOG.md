@@ -4,6 +4,24 @@ title: devlog
 
 <!-- 🤞 -->
 
+## Wed Sep 18, 2024
+
+### nlnet updates 
+
+[#5824](https://github.com/gfx-rs/wgpu/pull/5824) merged! This means that in the next release 
+of `wgpu`, most of the SPIR-V atomic ops will be supported! 
+
+Thank you @jimb!
+
+I ended up cutting out support of `OpAtomicFlagClear` and `OpAtomicFlagTestAndSet` at the 
+last minute because I didn't have tests for them in place, and they can't be generated from 
+`rust-gpu`, which is what I use to generate my SPIR-V shaders (this is also why I didn't 
+have tests for them). 
+
+Also there is one other unsupported op - `OpAtomicCompareExchange`. That one will take a little 
+more infrastructure to support, as the types involved in the WGSL side are a bit more complicated.
+But all in all, I think this part of the project is a success!
+
 ## Mon Sep 16, 2024
 
 ### nlnet updates 
