@@ -1,8 +1,48 @@
 ---
 title: devlog
 ---
+_[This devlog lives permanently at https://renderling.xyz/devlog/index.html](https://renderling.xyz/devlog/index.html)_
 
-<!-- 🤞 -->
+
+<!-- 
+
+My private stuff. Pay no attention to the man behind the curtain.
+
+🤞 
+
+-->
+
+## Thu Sep 19, 2024
+
+I'm looking for a new logo. The "meat-on-bone" emoji is not doing this project justice.
+
+I'd like the new logo to be a cute 3d asset that I can use `renderling` to render, and 
+have it show off the features of the libary. I'll be talking to some artists to see how 
+much this might cost. Here's my shortlist of talented artists:
+
+#### Paul Marion Wood 
+
+Paul is a Design Manager at LEGO. We grew up together and are close friends. He's a great 
+artist and I would love to work with him. His models are amaizing for their detail, humor,
+whimsicality and irreverance. He'd be a shoe in as he creates cute and cool things 
+constantly at LEGO.
+
+Links: 
+
+* [paul.m.wood instagram](https://www.instagram.com/paul.m.wood/)
+* [wexlerworks.studio istagram](https://www.instagram.com/wexlerworks.studios/)
+
+![ice cream chicken](/img/paul-marion-wood-1.jpg "Paul Marion Wood's 'Ice Cream Chicken'")
+
+#### Nigel Goh
+
+I don't know much about Nigel but I found his stuff on instagram a couple years ago and have 
+been following him since. His stuff just looks like the kind of game I'd like to play. I will 
+be buying his art packs when I start my next game. 
+
+* [nigel_goh_art instagram](https://www.instagram.com/nigel_goh_art/)
+
+![dragon rest 03](/img/nigel-goh-1.jpg "Nigel Goh's 'Dragon Rest 03'")
 
 ## Wed Sep 18, 2024
 
