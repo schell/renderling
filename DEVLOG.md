@@ -17,6 +17,16 @@ My private stuff. Pay no attention to the man behind the curtain.
 I'm trying to decide what the next step is - either I can tackle frustum culling, 
 light tiling or shadow mapping.
 
+In the meantime I finally got around to using 
+[`RenderPass::multi_draw_indirect`](https://docs.rs/wgpu/22.1.0/wgpu/struct.RenderPass.html#method.multi_draw_indirect)
+for my draw calls, when available.
+
+The only hitch was that `Renderlets` that have been marked invisible were still getting drawn.
+This is because previously we checked `is_visible` on the CPU and simply didn't send that draw 
+call, but now that it's hosted in a buffer we check in the vertex shader itself, and if 
+`is_visible == false` we move the vertex outside of the clipping frustum. It's sub-optimal but 
+it's dead easy and I think it's probably a good trade-off. This feature is meant to be used to
+save time on draw calls, which it will, even if we have to discard some triangles.
 
 ## Thu Sep 19, 2024
 
