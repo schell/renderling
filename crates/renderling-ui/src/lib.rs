@@ -349,13 +349,7 @@ mod test {
 
     #[ctor::ctor]
     fn init_logging() {
-        let _ = env_logger::builder()
-            .is_test(true)
-            .filter_level(log::LevelFilter::Warn)
-            .filter_module("renderling", log::LevelFilter::Trace)
-            .filter_module("renderling_ui", log::LevelFilter::Trace)
-            .filter_module("crabslab", log::LevelFilter::Debug)
-            .try_init();
+        let _ = env_logger::builder().is_test(true).try_init();
     }
 
     pub struct Colors<const N: usize>(std::iter::Cycle<std::array::IntoIter<Vec4, N>>);
