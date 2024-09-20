@@ -8,7 +8,8 @@ use std::{
 use renderling::{
     atlas::AtlasImage,
     camera::Camera,
-    math::{Mat4, UVec2, Vec3, Vec4},
+    math::{hex_to_vec4, Mat4, UVec2, Vec3, Vec4},
+    pbr::light::{DirectionalLight, Light},
     skybox::Skybox,
     slab::Hybrid,
     stage::{Animator, GltfDocument, Stage},
@@ -66,6 +67,7 @@ pub struct App {
 
     pub stage: Stage,
     camera: Hybrid<Camera>,
+    light: (Hybrid<DirectionalLight>, Hybrid<Light>),
 
     document: Option<GltfDocument>,
     animators: Option<Vec<Animator>>,
@@ -91,8 +93,16 @@ impl App {
             .new_stage()
             .with_background_color(DARK_BLUE_BG_COLOR)
             .with_bloom_mix_strength(0.5)
-            .with_bloom_filter_radius(4.0);
+            .with_bloom_filter_radius(4.0)
+            .with_msaa_sample_count(4);
         let camera = stage.new_value(Camera::default());
+        let sunlight = stage.new_value(DirectionalLight {
+            direction: Vec3::NEG_Y,
+            color: hex_to_vec4(0xFDFBD3FF),
+            intensity: 10.0,
+        });
+        let light = stage.new_value(Light::from(sunlight.id()));
+        stage.set_lights([light.id()]);
 
         let radius = 6.0;
         let phi = 0.0;
@@ -103,6 +113,7 @@ impl App {
         Self {
             stage,
             camera,
+            light: (sunlight, light),
 
             document: None,
             animators: None,
