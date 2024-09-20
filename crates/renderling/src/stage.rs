@@ -31,6 +31,15 @@ mod gltf_support;
 #[cfg(all(feature = "gltf", not(target_arch = "spirv")))]
 pub use gltf_support::*;
 
+/// Argument buffer layout for draw_indirect commands.
+#[derive(Clone, Copy, Default, SlabItem)]
+pub struct DrawIndirectArgs {
+    pub vertex_count: u32,
+    pub instance_count: u32,
+    pub first_vertex: u32,
+    pub first_instance: u32,
+}
+
 /// A vertex skin.
 ///
 /// For more info on vertex skinning, see
@@ -270,6 +279,11 @@ pub fn renderlet_vertex(
     #[spirv(position)] out_clip_pos: &mut Vec4,
 ) {
     let renderlet = slab.read_unchecked(renderlet_id);
+    if !renderlet.visible {
+        // put it outside the clipping frustum
+        *out_clip_pos = Vec4::new(10.0, 10.0, 10.0, 1.0);
+        return;
+    }
 
     *out_camera = renderlet.camera_id;
     *out_material = renderlet.material_id;
