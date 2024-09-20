@@ -12,6 +12,12 @@ My private stuff. Pay no attention to the man behind the curtain.
 
 -->
 
+## Fri Sep 20, 2024
+
+I'm trying to decide what the next step is - either I can tackle frustum culling, 
+light tiling or shadow mapping.
+
+
 ## Thu Sep 19, 2024
 
 I'm looking for a new logo. The "meat-on-bone" emoji is not doing this project justice.

@@ -11,7 +11,16 @@ use crate::{
 };
 
 /// Render pipeline used to draw a skybox.
-pub struct SkyboxRenderPipeline(pub wgpu::RenderPipeline);
+pub struct SkyboxRenderPipeline {
+    pub pipeline: wgpu::RenderPipeline,
+    msaa_sample_count: u32,
+}
+
+impl SkyboxRenderPipeline {
+    pub fn msaa_sample_count(&self) -> u32 {
+        self.msaa_sample_count
+    }
+}
 
 fn skybox_bindgroup_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
     device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -76,6 +85,7 @@ pub(crate) fn create_skybox_bindgroup(
 pub(crate) fn create_skybox_render_pipeline(
     device: &wgpu::Device,
     format: wgpu::TextureFormat,
+    multisample_count: Option<u32>,
 ) -> SkyboxRenderPipeline {
     log::trace!("creating skybox render pipeline with format '{format:?}'");
     let vertex_linkage = crate::linkage::skybox_vertex::linkage(device);
@@ -86,8 +96,9 @@ pub(crate) fn create_skybox_render_pipeline(
         bind_group_layouts: &[&bg_layout],
         push_constant_ranges: &[],
     });
-    SkyboxRenderPipeline(
-        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+    let msaa_sample_count = multisample_count.unwrap_or(1);
+    SkyboxRenderPipeline {
+        pipeline: device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("skybox render pipeline"),
             layout: Some(&pp_layout),
             vertex: wgpu::VertexState {
@@ -115,7 +126,7 @@ pub(crate) fn create_skybox_render_pipeline(
             multisample: wgpu::MultisampleState {
                 mask: !0,
                 alpha_to_coverage_enabled: false,
-                count: 1,
+                count: msaa_sample_count,
             },
             fragment: Some(wgpu::FragmentState {
                 module: &fragment_linkage.module,
@@ -130,7 +141,8 @@ pub(crate) fn create_skybox_render_pipeline(
             multiview: None,
             cache: None,
         }),
-    )
+        msaa_sample_count,
+    }
 }
 
 /// An HDR skybox that also provides IBL cubemaps and lookups.

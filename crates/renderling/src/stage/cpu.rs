@@ -16,7 +16,7 @@ use crate::{
     bloom::Bloom,
     camera::Camera,
     pbr::{debug::DebugMode, light::Light, PbrConfig},
-    skybox::Skybox,
+    skybox::{Skybox, SkyboxRenderPipeline},
     slab::*,
     stage::Renderlet,
     texture::{DepthTexture, Texture},
@@ -160,7 +160,7 @@ pub struct Stage {
     pub(crate) lights: Arc<RwLock<HybridArray<Id<Light>>>>,
 
     pub(crate) stage_pipeline: Arc<RwLock<wgpu::RenderPipeline>>,
-    pub(crate) skybox_pipeline: Arc<RwLock<Option<Arc<wgpu::RenderPipeline>>>>,
+    pub(crate) skybox_pipeline: Arc<RwLock<Option<Arc<SkyboxRenderPipeline>>>>,
 
     pub(crate) hdr_texture: Arc<RwLock<Texture>>,
     pub(crate) depth_texture: Arc<RwLock<Texture>>,
@@ -557,21 +557,27 @@ impl Stage {
     fn get_skybox_pipeline_and_bindgroup(
         &self,
         slab_buffer: &wgpu::Buffer,
-    ) -> (Arc<wgpu::RenderPipeline>, Arc<wgpu::BindGroup>) {
+    ) -> (Arc<SkyboxRenderPipeline>, Arc<wgpu::BindGroup>) {
+        let msaa_sample_count = self.msaa_sample_count.load(Ordering::Relaxed);
         // UNWRAP: safe because we're only ever called from the render thread.
-        let mut pipeline = self.skybox_pipeline.write().unwrap();
-        let pipeline = if let Some(pipeline) = pipeline.as_ref() {
-            pipeline.clone()
-        } else {
-            let p = Arc::new(
-                crate::skybox::create_skybox_render_pipeline(
+        let mut pipeline_guard = self.skybox_pipeline.write().unwrap();
+        let pipeline = if let Some(pipeline) = pipeline_guard.as_mut() {
+            if pipeline.msaa_sample_count() != msaa_sample_count {
+                *pipeline = Arc::new(crate::skybox::create_skybox_render_pipeline(
                     &self.device,
                     Texture::HDR_TEXTURE_FORMAT,
-                )
-                .0,
-            );
-            *pipeline = Some(p.clone());
-            p
+                    Some(msaa_sample_count),
+                ));
+            }
+            pipeline.clone()
+        } else {
+            let pipeline = Arc::new(crate::skybox::create_skybox_render_pipeline(
+                &self.device,
+                Texture::HDR_TEXTURE_FORMAT,
+                Some(msaa_sample_count),
+            ));
+            *pipeline_guard = Some(pipeline.clone());
+            pipeline
         };
         // UNWRAP: safe because we're only ever called from the render thread.
         let mut bindgroup = self.skybox_bindgroup.lock().unwrap();
@@ -855,7 +861,7 @@ impl Stage {
                     log::trace!("rendering skybox");
                     // UNWRAP: if we can't acquire the lock we want to panic.
                     let skybox = self.skybox.read().unwrap();
-                    render_pass.set_pipeline(pipeline);
+                    render_pass.set_pipeline(&pipeline.pipeline);
                     render_pass.set_bind_group(0, bindgroup, &[]);
                     render_pass.draw(0..36, skybox.camera.inner()..skybox.camera.inner() + 1);
                 }
