@@ -21,6 +21,7 @@ shaders = [
   "bloom",
   "brdf_lut_convolution_fragment",
   "brdf_lut_convolution_vertex",
+  "compute_frustum_culling",
   "generate_mipmap_fragment",
   "generate_mipmap_vertex",
   "prefilter_environment_cubemap_fragment",
@@ -58,6 +59,7 @@ bloom_mix_fragment = []
 bloom_vertex = []
 brdf_lut_convolution_fragment = []
 brdf_lut_convolution_vertex = []
+compute_frustum_culling = []
 generate_mipmap_fragment = []
 generate_mipmap_vertex = []
 prefilter_environment_cubemap_fragment = []

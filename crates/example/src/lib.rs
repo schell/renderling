@@ -96,13 +96,13 @@ impl App {
             .with_bloom_filter_radius(4.0)
             .with_msaa_sample_count(4);
         let camera = stage.new_value(Camera::default());
-        let sunlight = stage.new_value(DirectionalLight {
-            direction: Vec3::NEG_Y,
-            color: hex_to_vec4(0xFDFBD3FF),
-            intensity: 10.0,
-        });
-        let light = stage.new_value(Light::from(sunlight.id()));
-        stage.set_lights([light.id()]);
+        // let sunlight = stage.new_value(DirectionalLight {
+        //     direction: Vec3::NEG_Y,
+        //     color: hex_to_vec4(0xFDFBD3FF),
+        //     intensity: 10.0,
+        // });
+        // let light = stage.new_value(Light::from(sunlight.id()));
+        // stage.set_lights([light.id()]);
 
         stage
             .set_atlas_size(wgpu::Extent3d {
@@ -121,7 +121,7 @@ impl App {
         Self {
             stage,
             camera,
-            _light: Some((sunlight, light)),
+            _light: None,
 
             document: None,
             animators: None,

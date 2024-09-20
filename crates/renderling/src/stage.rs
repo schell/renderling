@@ -37,7 +37,7 @@ pub struct DrawIndirectArgs {
     pub vertex_count: u32,
     pub instance_count: u32,
     pub first_vertex: u32,
-    pub first_instance: u32,
+    pub first_instance: Id<Renderlet>,
 }
 
 /// A vertex skin.
@@ -206,6 +206,8 @@ impl Vertex {
 pub struct Renderlet {
     pub visible: bool,
     pub vertices_array: Array<Vertex>,
+    pub min_position: Vec3,
+    pub max_position: Vec3,
     pub indices_array: Array<u32>,
     pub camera_id: Id<Camera>,
     pub transform_id: Id<Transform>,
@@ -221,6 +223,8 @@ impl Default for Renderlet {
         Renderlet {
             visible: true,
             vertices_array: Array::default(),
+            min_position: Vec3::ZERO,
+            max_position: Vec3::ZERO,
             indices_array: Array::default(),
             camera_id: Id::NONE,
             transform_id: Id::NONE,

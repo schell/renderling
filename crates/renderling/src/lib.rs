@@ -155,6 +155,7 @@ mod context;
 pub mod convolution;
 #[cfg(not(target_arch = "spirv"))]
 pub mod cubemap;
+pub mod cull;
 #[cfg(not(target_arch = "spirv"))]
 pub mod ibl;
 #[cfg(not(target_arch = "spirv"))]

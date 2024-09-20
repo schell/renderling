@@ -17,6 +17,11 @@ Learn more at the [NLnet project page](https://nlnet.nl/project/Renderling).
 
 [<img src="https://nlnet.nl/image/logos/NGI0_tag.svg" alt="NGI Zero Logo" width="20%" />](https://nlnet.nl/core)
 
+
+## Warning
+
+This is very much a work in progress.
+
 ## What
 
 `renderling` holds entire scenes of geometry, textures, materials, lighting, even the scene graph itself - in GPU buffers.
@@ -53,12 +58,13 @@ Shaders are written in Rust, via `rust-gpu`.
 
 ## API Features
 
-* builder pattern for scenes, entities (scene nodes), materials and lights
+* simple structs represent nodes, meshes, materials and lights
+* seamless GPU / CPU syncronization
 * headless rendering support
   - rendering to texture and saving via `image` crate
-* text rendering support (cargo feature `text` - on by default)
+* text and user interface rendering support
 * nested nodes with local transforms
-* tight support for loading scenes through `gltf` (cargo feature `gltf` - on by default)
+* tight integration with glTF (cargo feature `gltf` - on by default)
 
 Shaders are written in Rust via `rust-gpu` where possible, falling back to `wgsl` where needed.
 
