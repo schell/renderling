@@ -481,6 +481,14 @@ impl Stage {
         self
     }
 
+    /// Set the size of the atlas.
+    ///
+    /// This will cause a repacking.
+    pub fn set_atlas_size(&self, size: wgpu::Extent3d) -> Result<(), StageError> {
+        self.atlas.resize(&self.device, &self.queue, size)?;
+        Ok(())
+    }
+
     /// Add images to the set of atlas images.
     ///
     /// Adding an image can be quite expensive, as it requires creating a new texture

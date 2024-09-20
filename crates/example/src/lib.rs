@@ -67,7 +67,7 @@ pub struct App {
 
     pub stage: Stage,
     camera: Hybrid<Camera>,
-    light: (Hybrid<DirectionalLight>, Hybrid<Light>),
+    _light: Option<(Hybrid<DirectionalLight>, Hybrid<Light>)>,
 
     document: Option<GltfDocument>,
     animators: Option<Vec<Animator>>,
@@ -104,6 +104,14 @@ impl App {
         let light = stage.new_value(Light::from(sunlight.id()));
         stage.set_lights([light.id()]);
 
+        stage
+            .set_atlas_size(wgpu::Extent3d {
+                width: 2048,
+                height: 2048,
+                depth_or_array_layers: 32,
+            })
+            .unwrap();
+
         let radius = 6.0;
         let phi = 0.0;
         let theta = std::f32::consts::FRAC_PI_4;
@@ -113,7 +121,7 @@ impl App {
         Self {
             stage,
             camera,
-            light: (sunlight, light),
+            _light: Some((sunlight, light)),
 
             document: None,
             animators: None,
@@ -179,7 +187,6 @@ impl App {
         self.document = None;
         log::debug!("ticking stage to reclaim buffers");
         self.stage.tick();
-
         let doc = match self
             .stage
             .load_gltf_document_from_bytes(bytes, self.camera.id())
