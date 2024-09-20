@@ -267,7 +267,11 @@ impl Atlas {
         let mut images = images
             .into_iter()
             .enumerate()
-            .map(|(i, img)| (i, img.into()))
+            .map(|(i, img)| {
+                let img = img.into();
+                log::trace!("adding image{i}: {:?}", img.size);
+                (i, img)
+            })
             .collect::<Vec<_>>();
         images.sort_by(|a, b| (a.1.size.x * a.1.size.y).cmp(&(b.1.size.x * b.1.size.y)));
 

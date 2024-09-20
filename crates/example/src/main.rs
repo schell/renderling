@@ -130,20 +130,8 @@ impl ApplicationHandler for OuterApp {
 
 fn main() {
     let cli = Cli::parse();
-
-    env_logger::Builder::default()
-        .filter_module("example", log::LevelFilter::Trace)
-        .filter_module("renderling", log::LevelFilter::Debug)
-        .filter_module("renderling::stage::cpu", log::LevelFilter::Debug)
-        .filter_module("renderling::slab", log::LevelFilter::Debug)
-        .filter_module(
-            "renderling::stage::gltf_support::anime",
-            log::LevelFilter::Debug,
-        )
-        //.filter_module("naga", log::LevelFilter::Warn)
-        .filter_module("wgpu", log::LevelFilter::Warn)
-        .init();
-
+    env_logger::builder().init();
+    log::info!("starting up");
     let event_loop = winit::event_loop::EventLoop::new().unwrap();
     event_loop.set_control_flow(winit::event_loop::ControlFlow::Poll);
     let mut outer_app = OuterApp { cli, inner: None };
