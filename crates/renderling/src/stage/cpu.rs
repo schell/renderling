@@ -730,23 +730,27 @@ impl Stage {
     /// renderlets will be drawn _before_ the ordered ones, in no particular
     /// order.
     pub fn reorder_renderlets(&self, order: impl IntoIterator<Item = Id<Renderlet>>) {
+        log::trace!("reordering renderlets");
         // UNWRAP: panic on purpose
-        let mut renderlets = self.draws.write().unwrap();
+        let mut guard = self.draws.write().unwrap();
+        let StageDraws {
+            ref mut hybrids,
+            indirect,
+        } = guard.deref_mut();
         let mut ordered = vec![];
-        let mut m = FxHashMap::from_iter(
-            std::mem::take(&mut renderlets.hybrids)
-                .into_iter()
-                .map(|r| (r.id(), r)),
-        );
+        let mut m = FxHashMap::from_iter(std::mem::take(hybrids).into_iter().map(|r| (r.id(), r)));
         for id in order.into_iter() {
             if let Some(renderlet) = m.remove(&id) {
                 ordered.push(renderlet);
             }
         }
-        renderlets.hybrids.extend(m.into_values());
-        renderlets.hybrids.extend(ordered);
-        if let Some(indirect) = renderlets.indirect.as_mut() {
-            indirect.draws = vec![];
+        hybrids.extend(m.into_values());
+        hybrids.extend(ordered);
+        if let Some(indirect) = indirect.as_mut() {
+            indirect.draws.drain(..);
+            // for (hybrid, draw) in hybrids.iter().zip(indirect.draws.iter_mut()) {
+            //     draw.set(hybrid.into());
+            // }
         }
     }
 
@@ -787,6 +791,14 @@ impl Stage {
             });
             if let Some(IndirectDraws { slab, draws }) = indirect.as_mut() {
                 if redraw_args || draws.len() != hybrids.len() {
+                    // Pre-upkeep to reclaim resources - this is necessary because
+                    // the draw buffer has to be contiguous (it can't start with a bunch of trash)
+                    let _ = slab.upkeep((
+                        &self.device,
+                        &self.queue,
+                        Some("indirect draw pre upkeep"),
+                        wgpu::BufferUsages::INDIRECT,
+                    ));
                     *draws = hybrids
                         .iter()
                         .map(|h: &Hybrid<Renderlet>| {
