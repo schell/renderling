@@ -50,11 +50,33 @@ impl From<AtlasError> for StageError {
 ///   to update the GPU
 pub const RENDERLET_STRONG_COUNT_LOWER_BOUND: usize = 2;
 
+struct IndirectDraws {
+    slab: SlabAllocator<wgpu::Buffer>,
+    draws: Vec<Gpu<DrawIndirectArgs>>,
+}
+
+impl From<&Hybrid<Renderlet>> for DrawIndirectArgs {
+    fn from(h: &Hybrid<Renderlet>) -> Self {
+        let r = h.get();
+        DrawIndirectArgs {
+            vertex_count: if r.indices_array.is_null() {
+                r.vertices_array.len() as u32
+            } else {
+                r.indices_array.len() as u32
+            },
+            instance_count: 1,
+            first_vertex: 0,
+            first_instance: h.id().into(),
+        }
+    }
+}
+
 /// Provides a way to communicate with the stage about how you'd like your
 /// objects drawn.
-pub(crate) enum StageDrawStrategy {
-    // TODO: Add `Indirect` to `StageDrawStrategy` which uses `RenderPass::multi_draw_indirect`
-    Direct(Vec<Hybrid<Renderlet>>),
+#[derive(Default)]
+pub(crate) struct StageDraws {
+    hybrids: Vec<Hybrid<Renderlet>>,
+    indirect: Option<IndirectDraws>,
 }
 
 fn create_msaa_textureview(
@@ -182,7 +204,7 @@ pub struct Stage {
     pub(crate) buffers_bindgroup: Arc<Mutex<Option<Arc<wgpu::BindGroup>>>>,
     pub(crate) textures_bindgroup: Arc<Mutex<Option<Arc<wgpu::BindGroup>>>>,
 
-    pub(crate) draws: Arc<RwLock<StageDrawStrategy>>,
+    pub(crate) draws: Arc<RwLock<StageDraws>>,
 }
 
 impl Deref for Stage {
@@ -229,6 +251,22 @@ impl Stage {
             ctx.get_render_target().format().add_srgb_suffix(),
             &bloom.get_mix_texture(),
         );
+        let draws = StageDraws {
+            hybrids: vec![],
+            indirect: {
+                if ctx.get_adapter().features().contains(
+                    wgpu::Features::INDIRECT_FIRST_INSTANCE | wgpu::Features::MULTI_DRAW_INDIRECT,
+                ) {
+                    log::info!("creating stage to use Renderpass::multi_draw_indirect");
+                    Some(IndirectDraws {
+                        slab: SlabAllocator::default(),
+                        draws: vec![],
+                    })
+                } else {
+                    None
+                }
+            },
+        };
 
         Self {
             mngr,
@@ -249,7 +287,7 @@ impl Stage {
             has_bloom: AtomicBool::from(true).into(),
             buffers_bindgroup: Default::default(),
             textures_bindgroup: Default::default(),
-            draws: Arc::new(RwLock::new(StageDrawStrategy::Direct(vec![]))),
+            draws: Arc::new(RwLock::new(draws)),
             hdr_texture,
             depth_texture,
             msaa_render_target,
@@ -651,10 +689,13 @@ impl Stage {
     pub fn add_renderlet(&self, renderlet: &Hybrid<Renderlet>) {
         // UNWRAP: if we can't acquire the lock we want to panic.
         let mut draws = self.draws.write().unwrap();
-        match draws.deref_mut() {
-            StageDrawStrategy::Direct(units) => {
-                units.push(renderlet.clone());
-            }
+        let StageDraws { hybrids, indirect } = draws.deref_mut();
+        hybrids.push(renderlet.clone());
+        if let Some(IndirectDraws { slab, draws }) = indirect.as_mut() {
+            draws.push(
+                slab.new_value(DrawIndirectArgs::from(renderlet))
+                    .into_gpu_only(),
+            );
         }
     }
 
@@ -663,10 +704,10 @@ impl Stage {
     pub fn remove_renderlet(&self, renderlet: &Hybrid<Renderlet>) {
         let id = renderlet.id();
         let mut draws = self.draws.write().unwrap();
-        match draws.deref_mut() {
-            StageDrawStrategy::Direct(units) => {
-                units.retain(|hybrid| hybrid.id() != id);
-            }
+        let StageDraws { hybrids, indirect } = draws.deref_mut();
+        hybrids.retain(|hybrid| hybrid.id() != id);
+        if let Some(IndirectDraws { slab: _, draws }) = indirect.as_mut() {
+            *draws = vec![];
         }
     }
 
@@ -674,9 +715,11 @@ impl Stage {
     pub fn get_renderlets(&self) -> Vec<Hybrid<Renderlet>> {
         // UNWRAP: if we can't acquire the lock we want to panic.
         let draws = self.draws.read().unwrap();
-        match draws.deref() {
-            StageDrawStrategy::Direct(units) => units.clone(),
-        }
+        let StageDraws {
+            hybrids,
+            indirect: _,
+        } = draws.deref();
+        hybrids.clone()
     }
 
     /// Re-order the renderlets.
@@ -687,21 +730,27 @@ impl Stage {
     /// renderlets will be drawn _before_ the ordered ones, in no particular
     /// order.
     pub fn reorder_renderlets(&self, order: impl IntoIterator<Item = Id<Renderlet>>) {
+        log::trace!("reordering renderlets");
         // UNWRAP: panic on purpose
-        let mut renderlets = self.draws.write().unwrap();
-        match renderlets.deref_mut() {
-            StageDrawStrategy::Direct(rs) => {
-                let mut ordered = vec![];
-                let mut m =
-                    FxHashMap::from_iter(std::mem::take(rs).into_iter().map(|r| (r.id(), r)));
-                for id in order.into_iter() {
-                    if let Some(renderlet) = m.remove(&id) {
-                        ordered.push(renderlet);
-                    }
-                }
-                rs.extend(m.into_values());
-                rs.extend(ordered);
+        let mut guard = self.draws.write().unwrap();
+        let StageDraws {
+            ref mut hybrids,
+            indirect,
+        } = guard.deref_mut();
+        let mut ordered = vec![];
+        let mut m = FxHashMap::from_iter(std::mem::take(hybrids).into_iter().map(|r| (r.id(), r)));
+        for id in order.into_iter() {
+            if let Some(renderlet) = m.remove(&id) {
+                ordered.push(renderlet);
             }
+        }
+        hybrids.extend(m.into_values());
+        hybrids.extend(ordered);
+        if let Some(indirect) = indirect.as_mut() {
+            indirect.draws.drain(..);
+            // for (hybrid, draw) in hybrids.iter().zip(indirect.draws.iter_mut()) {
+            //     draw.set(hybrid.into());
+            // }
         }
     }
 
@@ -727,15 +776,46 @@ impl Stage {
         NestedTransform::new(&self.mngr)
     }
 
-    fn tick_internal(&self) -> Arc<wgpu::Buffer> {
-        {
+    fn tick_internal(&self) -> (Arc<wgpu::Buffer>, Option<Arc<wgpu::Buffer>>) {
+        let maybe_indirect_draw_buffer = {
+            let mut redraw_args = false;
             let mut draw_guard = self.draws.write().unwrap();
-            match draw_guard.deref_mut() {
-                StageDrawStrategy::Direct(draws) => {
-                    draws.retain(|d| d.strong_count() > RENDERLET_STRONG_COUNT_LOWER_BOUND);
+            let StageDraws { hybrids, indirect } = draw_guard.deref_mut();
+            hybrids.retain(|d| {
+                if d.strong_count() > RENDERLET_STRONG_COUNT_LOWER_BOUND {
+                    true
+                } else {
+                    redraw_args = true;
+                    false
                 }
+            });
+            if let Some(IndirectDraws { slab, draws }) = indirect.as_mut() {
+                if redraw_args || draws.len() != hybrids.len() {
+                    // Pre-upkeep to reclaim resources - this is necessary because
+                    // the draw buffer has to be contiguous (it can't start with a bunch of trash)
+                    let _ = slab.upkeep((
+                        &self.device,
+                        &self.queue,
+                        Some("indirect draw pre upkeep"),
+                        wgpu::BufferUsages::INDIRECT,
+                    ));
+                    *draws = hybrids
+                        .iter()
+                        .map(|h: &Hybrid<Renderlet>| {
+                            slab.new_value(DrawIndirectArgs::from(h)).into_gpu_only()
+                        })
+                        .collect();
+                }
+                Some(slab.get_updated_buffer((
+                    &self.device,
+                    &self.queue,
+                    Some("indirect draw upkeep"),
+                    wgpu::BufferUsages::INDIRECT,
+                )))
+            } else {
+                None
             }
-        }
+        };
         if let Some(new_slab_buffer) = self.mngr.upkeep((
             &self.device,
             &self.queue,
@@ -745,11 +825,11 @@ impl Stage {
             // invalidate our bindgroups, etc
             let _ = self.skybox_bindgroup.lock().unwrap().take();
             let _ = self.buffers_bindgroup.lock().unwrap().take();
-            new_slab_buffer
+            (new_slab_buffer, maybe_indirect_draw_buffer)
         } else {
             // UNWRAP: safe because we called `SlabManager::upkeep` above^, which ensures
             // the buffer exists
-            self.mngr.get_buffer().unwrap()
+            (self.mngr.get_buffer().unwrap(), maybe_indirect_draw_buffer)
         }
     }
 
@@ -768,7 +848,7 @@ impl Stage {
             let label = Some("stage render");
             // UNWRAP: POP
             let background_color = *self.background_color.read().unwrap();
-            let slab_buffer = self.tick_internal();
+            let (slab_buffer, maybe_indirect_draw_buffer) = self.tick_internal();
             // UNWRAP: POP
             let pipeline = self.stage_pipeline.read().unwrap();
             // UNWRAP: POP
@@ -831,12 +911,20 @@ impl Stage {
                     }),
                     ..Default::default()
                 });
+
                 render_pass.set_pipeline(&pipeline);
                 render_pass.set_bind_group(0, &slab_buffers_bindgroup, &[]);
                 render_pass.set_bind_group(1, &textures_bindgroup, &[]);
-                match draws.deref() {
-                    StageDrawStrategy::Direct(units) => {
-                        for hybrid in units {
+                let num_draw_calls = draws.hybrids.len();
+                if num_draw_calls > 0 {
+                    if let Some(indirect_draw_buffer) = maybe_indirect_draw_buffer {
+                        render_pass.multi_draw_indirect(
+                            &indirect_draw_buffer,
+                            0,
+                            draws.hybrids.len() as u32,
+                        );
+                    } else {
+                        for hybrid in draws.hybrids.iter() {
                             let rlet = hybrid.get();
                             if rlet.visible {
                                 let vertex_range = if rlet.indices_array.is_null() {
@@ -848,13 +936,12 @@ impl Stage {
                                 let instance_range = id.inner()..id.inner() + 1;
                                 log::trace!(
                                     "drawing vertices {vertex_range:?} and instances \
-                                     {instance_range:?}"
+                                             {instance_range:?}"
                                 );
                                 render_pass.draw(vertex_range, instance_range);
                             }
                         }
-                    } /* render_pass.multi_draw_indirect(&indirect_buffer, 0,
-                       * stage.number_of_indirect_draws()); */
+                    }
                 }
 
                 if let Some((pipeline, bindgroup)) = may_skybox_pipeline_and_bindgroup.as_ref() {

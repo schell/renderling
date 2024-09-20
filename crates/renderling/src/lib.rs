@@ -212,10 +212,7 @@ mod test {
 
     #[ctor::ctor]
     fn init_logging() {
-        let _ = env_logger::builder()
-            .is_test(true)
-            .filter_level(log::LevelFilter::Warn)
-            .try_init();
+        let _ = env_logger::builder().is_test(true).try_init();
     }
 
     #[test]
