@@ -8,6 +8,7 @@ use glam::UVec3;
 use glam::Vec3;
 use spirv_std::{arch::IndexUnchecked, spirv};
 
+use crate::bvol::Aabb;
 use crate::{camera::Camera, stage::DrawIndirectArgs, transform::Transform};
 
 /// Determine (roughly) if an AABB is within the clip space after transformation.
@@ -17,12 +18,11 @@ pub fn is_visible_by_clip_culling(
     camera: Camera,
     model: Transform,
 ) -> bool {
-    let local_center = (local_min + local_max) * 0.5;
     let transform = camera.projection * camera.view * Mat4::from(model);
-    let clip_center = transform.project_point3(local_center);
-    let clip_surface = transform.project_point3(local_max);
-    let clip_radius = (clip_surface - clip_center).length();
-    clip_center.length() < clip_radius
+    let min = transform.project_point3(local_min);
+    let max = transform.project_point3(local_max);
+    let aabb = Aabb { min, max };
+    !aabb.is_outside_frustum(camera.frustum)
 }
 
 #[cfg(feature = "compute_frustum_culling")]

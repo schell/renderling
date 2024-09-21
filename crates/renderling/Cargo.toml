@@ -97,6 +97,7 @@ spirv-std = "0.9"
 crabslab = { workspace = true, features = ["glam"]  }
 half = { version = "2.3", default-features = false }
 glam = { workspace = true, default-features = false, features = ["libm"] }
+treeculler = { workspace = true, default-features = false, features = ["libm"] }
 
 # dependencies for CPU code
 [target.'cfg(not(target_arch = "spirv"))'.dependencies]
@@ -113,6 +114,7 @@ image = {workspace = true, features = ["hdr"]}
 log = {workspace = true}
 rustc-hash = {workspace = true}
 serde_json = {workspace = true, optional = true}
+treeculler = { workspace = true, default-features = true }
 snafu = {workspace = true}
 wgpu = { workspace = true, features = ["spirv"] }
 winit = { workspace = true, optional = true }

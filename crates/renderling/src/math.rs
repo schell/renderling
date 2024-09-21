@@ -509,6 +509,11 @@ pub fn reflect(i: Vec3, n: Vec3) -> Vec3 {
     i - 2.0 * n.dot(i) * n
 }
 
+pub struct Plane {
+    pub point: Vec3,
+    pub norm: Vec3,
+}
+
 #[cfg(test)]
 mod test {
     use super::*;

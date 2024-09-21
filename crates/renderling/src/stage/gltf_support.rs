@@ -1152,6 +1152,7 @@ mod test {
             projection,
             view,
             position,
+            ..Default::default()
         });
         let _doc = stage
             .load_gltf_document_from_path(
@@ -1183,6 +1184,7 @@ mod test {
             projection,
             view,
             position: Vec3::new(0.5, 0.5, 2.0),
+            ..Default::default()
         });
 
         let _doc = stage

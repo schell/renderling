@@ -148,6 +148,7 @@
 pub mod atlas;
 pub mod bits;
 pub mod bloom;
+pub mod bvol;
 pub mod camera;
 pub mod color;
 #[cfg(not(target_arch = "spirv"))]
@@ -406,6 +407,7 @@ mod test {
             projection: Mat4::perspective_rh(std::f32::consts::PI / 4.0, 1.0, 0.1, 100.0),
             view: Mat4::look_at_rh(camera_position, Vec3::ZERO, Vec3::Y),
             position: camera_position,
+            ..Default::default()
         });
         let geometry = stage.new_array(gpu_cube_vertices());
         let transform = stage.new_value(Transform {
@@ -440,6 +442,7 @@ mod test {
             projection: Mat4::perspective_rh(std::f32::consts::PI / 4.0, 1.0, 0.1, 100.0),
             view: Mat4::look_at_rh(camera_position, Vec3::ZERO, Vec3::Y),
             position: camera_position,
+            ..Default::default()
         });
         let vertices = stage.new_array(math::UNIT_POINTS.map(cmy_gpu_vertex));
         let indices = stage.new_array(math::UNIT_INDICES.map(|i| i as u32));
@@ -982,6 +985,7 @@ mod test {
             projection: Mat4::perspective_rh(std::f32::consts::PI / 4.0, 1.0, 0.1, 100.0),
             view: Mat4::look_at_rh(camera_position, Vec3::ZERO, Vec3::Y),
             position: camera_position,
+            ..Default::default()
         });
         let geometry = stage.new_array(gpu_cube_vertices());
         let transform = stage.new_value(Transform {

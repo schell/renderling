@@ -2,20 +2,22 @@
 use crabslab::SlabItem;
 use glam::{Mat4, Vec3};
 
+use crate::bvol::Frustum;
+
 /// A camera used for transforming the stage during rendering.
 ///
-/// Use [`Camera::new`] to create a new camera.
-/// Or use `Camera::default` followed by `Camera::with_projection_and_view`
+/// Use [`Camera::new`] to create a new camera,
+/// or use `Camera::default` followed by `Camera::with_projection_and_view`
 /// to set the projection and view matrices. Using the `with_*` or `set_*`
 /// methods is preferred over setting the fields directly because they will
-/// also update the camera's position.
+/// also update the camera's position and resulting view frustum.
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
-#[repr(C)]
 #[derive(Default, Clone, Copy, PartialEq, SlabItem)]
 pub struct Camera {
     pub projection: Mat4,
     pub view: Mat4,
     pub position: Vec3,
+    pub frustum: Frustum,
 }
 
 impl Camera {
@@ -37,6 +39,7 @@ impl Camera {
         self.projection = projection;
         self.view = view;
         self.position = view.inverse().transform_point3(Vec3::ZERO);
+        self.frustum = Frustum::from_camera(self);
     }
 
     pub fn with_projection_and_view(mut self, projection: Mat4, view: Mat4) -> Self {
