@@ -39,3 +39,12 @@ wasm-bindgen-futures = "0.4"
 web-sys = "0.3"
 winit = { version = "0.30" }
 wgpu = "22.1.0"
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package.image]
+opt-level = 3
+
+[profile.dev.package.gltf]
+opt-level = 3

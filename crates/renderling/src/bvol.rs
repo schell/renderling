@@ -1,6 +1,10 @@
 //! Bounding volumes and culling primitives.
 //!
-// The initial implementation here is taken from `treeculler`.
+// The initial implementation here is taken from `treeculler`, which
+// unfortunately cannot compile to SPIR-V because of its use of `u8`.
+//
+// Also, here we use `glam`, whereas `treeculler` uses its own internal
+// primitives.
 use crabslab::SlabItem;
 use glam::{Vec3, Vec4, Vec4Swizzles};
 #[cfg(target_arch = "spirv")]
@@ -85,6 +89,21 @@ pub struct Aabb {
 }
 
 impl Aabb {
+    pub fn new(a: Vec3, b: Vec3) -> Self {
+        Self {
+            min: a.min(b),
+            max: a.max(b),
+        }
+    }
+
+    pub fn center(&self) -> Vec3 {
+        (self.min + self.max) * 0.5
+    }
+
+    pub fn diagonal_length(&self) -> f32 {
+        self.min.distance(self.max)
+    }
+
     pub fn is_outside_frustum(&self, frustum: Frustum) -> bool {
         let (inside, _) = self.coherent_test_against_frustum(&frustum, 0);
         !inside

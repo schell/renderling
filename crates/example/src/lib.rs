@@ -2,13 +2,15 @@
 //! gltf capabilities.
 use std::{
     collections::{HashMap, HashSet},
+    str::FromStr,
     sync::{Arc, Mutex},
 };
 
 use renderling::{
     atlas::AtlasImage,
+    bvol::Aabb,
     camera::Camera,
-    math::{hex_to_vec4, Mat4, UVec2, Vec3, Vec4},
+    math::{Mat4, Quat, UVec2, Vec2, Vec3, Vec4},
     pbr::light::{DirectionalLight, Light},
     skybox::Skybox,
     slab::Hybrid,
@@ -27,6 +29,25 @@ const DARK_BLUE_BG_COLOR: Vec4 = Vec4::new(
     1.0,
 );
 
+#[derive(Clone, Copy, Debug, Default)]
+pub enum CameraControl {
+    #[default]
+    Turntable,
+    WasdMouse,
+}
+
+impl FromStr for CameraControl {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "turntable" => Ok(CameraControl::Turntable),
+            "wasdmouse" => Ok(CameraControl::WasdMouse),
+            _ => Err("must be 'turntable' or 'wasdmouse'".to_owned()),
+        }
+    }
+}
+
 pub enum SupportedFileType {
     Gltf,
     Hdr,
@@ -43,6 +64,148 @@ pub fn is_file_supported(file: impl AsRef<std::path::Path>) -> Option<SupportedF
 #[cfg(not(target_arch = "wasm32"))]
 lazy_static::lazy_static! {
     static ref START: std::time::Instant = std::time::Instant::now();
+}
+
+struct TurntableCameraController {
+    /// look at
+    center: Vec3,
+    /// distance from the origin
+    radius: f32,
+    /// anglular position on a circle `radius` away from the origin on x,z
+    phi: f32,
+    /// angular distance from y axis
+    theta: f32,
+    /// is the left mouse button down
+    left_mb_down: bool,
+}
+
+impl Default for TurntableCameraController {
+    fn default() -> Self {
+        Self {
+            center: Vec3::ZERO,
+            radius: 6.0,
+            phi: 0.0,
+            theta: std::f32::consts::FRAC_PI_4,
+            left_mb_down: false,
+        }
+    }
+}
+
+impl CameraController for TurntableCameraController {
+    fn reset(&mut self, bounds: Aabb) {
+        self.radius = bounds.diagonal_length() * 1.25;
+        self.center = bounds.center();
+        self.left_mb_down = false;
+    }
+
+    fn update_camera_view(&self, UVec2 { x: w, y: h }: UVec2, current_camera: &Hybrid<Camera>) {
+        let camera_position = Self::camera_position(self.radius, self.phi, self.theta);
+        let camera = Camera::new(
+            Mat4::perspective_infinite_rh(std::f32::consts::FRAC_PI_4, w as f32 / h as f32, 0.01),
+            Mat4::look_at_rh(camera_position, self.center, Vec3::Y),
+        );
+        debug_assert!(
+            camera.view.is_finite(),
+            "camera view is borked w:{w} h:{h} camera_position: {camera_position} center: {} \
+             radius: {} phi: {} theta: {}",
+            self.center,
+            self.radius,
+            self.phi,
+            self.theta
+        );
+        if current_camera.get() != camera {
+            current_camera.set(camera);
+        }
+    }
+
+    fn mouse_scroll(&mut self, delta: f32) {
+        self.zoom(delta);
+    }
+
+    fn mouse_moved(&mut self, _position: Vec2) {}
+
+    fn mouse_motion(&mut self, delta: Vec2) {
+        self.pan(delta);
+    }
+
+    fn mouse_button(&mut self, is_pressed: bool, is_left_button: bool) {
+        self.left_mb_down = is_left_button && is_pressed;
+    }
+
+    fn key(&mut self, _event: winit::event::KeyEvent) {}
+}
+
+impl TurntableCameraController {
+    fn camera_position(radius: f32, phi: f32, theta: f32) -> Vec3 {
+        // convert from spherical to cartesian
+        let x = radius * theta.sin() * phi.cos();
+        let y = radius * theta.sin() * phi.sin();
+        let z = radius * theta.cos();
+        // in renderling Y is up so switch the y and z axis
+        Vec3::new(x, z, y)
+    }
+
+    fn zoom(&mut self, delta: f32) {
+        self.radius = (self.radius - (delta * RADIUS_SCROLL_DAMPENING)).max(0.0);
+    }
+
+    fn pan(&mut self, delta: Vec2) {
+        if self.left_mb_down {
+            self.phi += delta.x * DX_DY_DRAG_DAMPENING;
+
+            let next_theta = self.theta - delta.y * DX_DY_DRAG_DAMPENING;
+            self.theta = next_theta.clamp(0.0001, std::f32::consts::PI);
+        }
+    }
+}
+
+#[derive(Default)]
+struct WasdMouseCameraController {
+    position: Vec3,
+    rotation: Quat,
+}
+
+impl CameraController for WasdMouseCameraController {
+    fn update_camera_view(&self, UVec2 { x: w, y: h }: UVec2, camera: &Hybrid<Camera>) {
+        let projection =
+            Mat4::perspective_infinite_rh(std::f32::consts::FRAC_PI_4, w as f32 / h as f32, 0.01);
+        let view = Mat4::from_scale_rotation_translation(Vec3::ONE, self.rotation, self.position);
+        camera.modify(|c| c.set_projection_and_view(projection, view));
+    }
+
+    fn reset(&mut self, bounds: Aabb) {
+        todo!()
+    }
+
+    fn mouse_scroll(&mut self, delta: f32) {
+        todo!()
+    }
+
+    fn mouse_moved(&mut self, position: Vec2) {
+        todo!()
+    }
+
+    fn mouse_motion(&mut self, delta: Vec2) {
+        todo!()
+    }
+
+    fn mouse_button(&mut self, is_pressed: bool, is_left_button: bool) {
+        todo!()
+    }
+
+    fn key(&mut self, event: winit::event::KeyEvent) {
+        todo!()
+    }
+}
+
+pub trait CameraController {
+    fn reset(&mut self, bounds: Aabb);
+    fn update_camera_view(&self, size: UVec2, camera: &Hybrid<Camera>);
+    fn mouse_scroll(&mut self, delta: f32);
+    fn mouse_moved(&mut self, position: Vec2);
+    fn mouse_motion(&mut self, delta: Vec2);
+    fn mouse_button(&mut self, is_pressed: bool, is_left_button: bool);
+    fn key(&mut self, event: winit::event::KeyEvent);
 }
 
 fn now() -> f64 {
@@ -73,22 +236,49 @@ pub struct App {
     animators: Option<Vec<Animator>>,
     animations_conflict: bool,
 
-    // look at
-    center: Vec3,
-    // distance from the origin
-    radius: f32,
-    // anglular position on a circle `radius` away from the origin on x,z
-    phi: f32,
-    // angular distance from y axis
-    theta: f32,
-    // is the left mouse button down
-    left_mb_down: bool,
-    // cursor position
-    last_cursor_position: Option<winit::dpi::PhysicalPosition<f64>>,
+    camera_controller: Box<dyn CameraController>,
+}
+
+impl CameraController for App {
+    fn mouse_scroll(&mut self, delta: f32) {
+        self.camera_controller.mouse_scroll(delta);
+        self.update_camera_view(self.stage.get_size(), &self.camera);
+    }
+
+    /// Set the mouse position relative to the top left of the window.
+    fn mouse_moved(&mut self, position: Vec2) {
+        self.camera_controller.mouse_moved(position);
+        self.update_camera_view(self.stage.get_size(), &self.camera);
+    }
+
+    /// Update from device mouse motion.
+    fn mouse_motion(&mut self, delta: Vec2) {
+        self.camera_controller.mouse_motion(delta);
+        self.update_camera_view(self.stage.get_size(), &self.camera);
+    }
+
+    fn mouse_button(&mut self, is_pressed: bool, is_left_button: bool) {
+        self.camera_controller
+            .mouse_button(is_pressed, is_left_button);
+        self.update_camera_view(self.stage.get_size(), &self.camera);
+    }
+
+    fn key(&mut self, event: winit::event::KeyEvent) {
+        self.camera_controller.key(event);
+        self.update_camera_view(self.stage.get_size(), &self.camera);
+    }
+
+    fn reset(&mut self, bounds: Aabb) {
+        self.camera_controller.reset(bounds);
+    }
+
+    fn update_camera_view(&self, size: UVec2, camera: &Hybrid<Camera>) {
+        self.camera_controller.update_camera_view(size, camera);
+    }
 }
 
 impl App {
-    pub fn new(r: &Context) -> Self {
+    pub fn new(r: &Context, camera_control: CameraControl) -> Self {
         let stage = r
             .new_stage()
             .with_background_color(DARK_BLUE_BG_COLOR)
@@ -112,12 +302,6 @@ impl App {
             })
             .unwrap();
 
-        let radius = 6.0;
-        let phi = 0.0;
-        let theta = std::f32::consts::FRAC_PI_4;
-        let left_mb_down: bool = false;
-        let last_cursor_position: Option<winit::dpi::PhysicalPosition<f64>> = None;
-
         Self {
             stage,
             camera,
@@ -130,43 +314,16 @@ impl App {
             skybox_image_bytes: None,
             loads: Arc::new(Mutex::new(HashMap::default())),
             last_frame_instant: now(),
-            radius,
-            center: Vec3::ZERO,
-            phi,
-            theta,
-            left_mb_down,
-            last_cursor_position,
+
+            camera_controller: match camera_control {
+                CameraControl::Turntable => Box::new(TurntableCameraController::default()),
+                CameraControl::WasdMouse => Box::new(WasdMouseCameraController::default()),
+            },
         }
     }
 
-    fn camera_position(radius: f32, phi: f32, theta: f32) -> Vec3 {
-        // convert from spherical to cartesian
-        let x = radius * theta.sin() * phi.cos();
-        let y = radius * theta.sin() * phi.sin();
-        let z = radius * theta.cos();
-        // in renderling Y is up so switch the y and z axis
-        Vec3::new(x, z, y)
-    }
-
-    pub fn update_camera_view(&self) {
-        let UVec2 { x: w, y: h } = self.stage.get_size();
-        let camera_position = Self::camera_position(self.radius, self.phi, self.theta);
-        let camera = Camera::new(
-            Mat4::perspective_infinite_rh(std::f32::consts::FRAC_PI_4, w as f32 / h as f32, 0.01),
-            Mat4::look_at_rh(camera_position, self.center, Vec3::Y),
-        );
-        debug_assert!(
-            camera.view.is_finite(),
-            "camera view is borked w:{w} h:{h} camera_position: {camera_position} center: {} \
-             radius: {} phi: {} theta: {}",
-            self.center,
-            self.radius,
-            self.phi,
-            self.theta
-        );
-        if self.camera.get() != camera {
-            self.camera.set(camera);
-        }
+    pub fn update_camera(&self) {
+        self.update_camera_view(self.stage.get_size(), &self.camera);
     }
 
     fn load_hdr_skybox(&mut self, bytes: Vec<u8>) {
@@ -177,12 +334,10 @@ impl App {
         self.stage.set_skybox(skybox);
     }
 
-    fn load_gltf_model(&mut self, bytes: &[u8]) {
+    fn load_gltf_model(&mut self, path: impl AsRef<std::path::Path>, bytes: &[u8]) {
         log::info!("loading gltf");
-        self.phi = 0.0;
-        self.theta = std::f32::consts::FRAC_PI_4;
-        self.left_mb_down = false;
-        self.last_cursor_position = None;
+        self.camera_controller
+            .reset(Aabb::new(Vec3::NEG_ONE, Vec3::ONE));
         self.stage.clear_images().unwrap();
         self.document = None;
         log::debug!("ticking stage to reclaim buffers");
@@ -193,7 +348,21 @@ impl App {
         {
             Err(e) => {
                 log::error!("gltf loading error: {e}");
-                return;
+                if cfg!(not(target_arch = "wasm32")) {
+                    log::info!("attempting to load by filesystem");
+                    match self
+                        .stage
+                        .load_gltf_document_from_path(path, self.camera.id())
+                    {
+                        Ok(doc) => doc,
+                        Err(e) => {
+                            log::error!("gltf loading error: {e}");
+                            return;
+                        }
+                    }
+                } else {
+                    return;
+                }
             }
             Ok(doc) => doc,
         };
@@ -246,15 +415,12 @@ impl App {
         }
 
         log::trace!("Bounding box: {min} {max}");
-        let halfway_point = min + ((max - min).normalize() * ((max - min).length() / 2.0));
-        let length = min.distance(max);
-        let radius = length * 1.25;
+        let bounding_box = Aabb::new(min, max);
+        self.camera_controller.reset(bounding_box);
+        self.camera_controller
+            .update_camera_view(self.stage.get_size(), &self.camera);
 
-        self.radius = radius;
-        self.center = halfway_point;
         self.last_frame_instant = now();
-
-        self.update_camera_view();
 
         if doc.animations.is_empty() {
             log::trace!("  animations: none");
@@ -297,67 +463,12 @@ impl App {
         for (path, bytes) in loaded.into_iter() {
             log::info!("loaded {}bytes from {}", bytes.len(), path.display());
             match is_file_supported(&path) {
-                Some(SupportedFileType::Gltf) => self.load_gltf_model(&bytes),
+                Some(SupportedFileType::Gltf) => self.load_gltf_model(path, &bytes),
                 Some(SupportedFileType::Hdr) => self.load_hdr_skybox(bytes),
                 None => {}
             }
         }
     }
-
-    pub fn zoom(&mut self, delta: f32) {
-        self.radius = (self.radius - (delta * RADIUS_SCROLL_DAMPENING)).max(0.0);
-        self.update_camera_view();
-    }
-
-    pub fn pan(&mut self, position: winit::dpi::PhysicalPosition<f64>) {
-        if self.left_mb_down {
-            if let Some(last_cursor_position) = self.last_cursor_position.as_ref() {
-                let dx = position.x - last_cursor_position.x;
-                let dy = position.y - last_cursor_position.y;
-
-                self.phi += dx as f32 * DX_DY_DRAG_DAMPENING;
-
-                let next_theta = self.theta - dy as f32 * DX_DY_DRAG_DAMPENING;
-                self.theta = next_theta.clamp(0.0001, std::f32::consts::PI);
-            }
-            self.last_cursor_position = Some(position);
-            self.update_camera_view();
-        }
-    }
-
-    pub fn mouse_button(&mut self, is_pressed: bool, is_left_button: bool) {
-        if is_left_button {
-            self.left_mb_down = is_pressed;
-            if !self.left_mb_down {
-                self.last_cursor_position = None;
-            }
-        }
-    }
-
-    // fn key_input(
-    //     &mut self,
-    //     r: &mut Context,
-    //     KeyboardInput {
-    //         state,
-    //         virtual_keycode,
-    //         ..
-    //     }: winit::event::KeyboardInput,
-    // ) {
-    //     if matches!(state, winit::event::ElementState::Pressed) {
-    //         return;
-    //     }
-    //     match virtual_keycode {
-    //         Some(winit::event::VirtualKeyCode::Space) => {
-    //             // clear all objects, cameras and lights
-    //             let scene = r.new_scene().build().unwrap();
-    //             r.graph.add_resource(scene);
-    //             self.loader = None;
-    //             self.ui
-    //                 .set_text_title("awaiting drag and dropped `.gltf` or `.glb`
-    // file");         }
-    //         _ => {}
-    //     };
-    // }
 
     /// Queues a load operation.
     pub fn load(&mut self, path: &str) {
@@ -377,7 +488,8 @@ impl App {
         #[cfg(not(target_arch = "wasm32"))]
         {
             let _ = std::thread::spawn(move || {
-                let bytes = std::fs::read(&path).unwrap();
+                let bytes = std::fs::read(&path)
+                    .unwrap_or_else(|e| panic!("could not load '{}': {e}", path.display()));
                 let mut loads = loads.lock().unwrap();
                 loads.insert(path, bytes);
             });

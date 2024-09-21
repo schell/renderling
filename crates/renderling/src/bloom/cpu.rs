@@ -580,7 +580,6 @@ impl Bloom {
         ) in items.enumerate()
         {
             let title = format!("bloom downsample {i}");
-            log::trace!("rendering {title}");
             let label = Some(title.as_str());
             let mut encoder =
                 device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label });
@@ -627,7 +626,6 @@ impl Bloom {
             .map(|(bindgroup, view)| UpsampleItem { view, bindgroup });
         for (i, UpsampleItem { view, bindgroup }) in items.enumerate() {
             let title = format!("bloom upsample {}", textures_guard.len() - i - 1);
-            log::trace!("rendering {title}");
             let label = Some(title.as_str());
             let mut encoder =
                 device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label });

@@ -66,7 +66,7 @@ impl From<&Hybrid<Renderlet>> for DrawIndirectArgs {
             },
             instance_count: 1,
             first_vertex: 0,
-            first_instance: h.id().into(),
+            first_instance: h.id(),
         }
     }
 }
@@ -257,7 +257,7 @@ impl Stage {
                 if ctx.get_adapter().features().contains(
                     wgpu::Features::INDIRECT_FIRST_INSTANCE | wgpu::Features::MULTI_DRAW_INDIRECT,
                 ) {
-                    log::info!("creating stage to use Renderpass::multi_draw_indirect");
+                    log::info!("stage is using Renderpass::multi_draw_indirect");
                     Some(IndirectDraws {
                         slab: SlabAllocator::default(),
                         draws: vec![],
@@ -485,6 +485,7 @@ impl Stage {
     ///
     /// This will cause a repacking.
     pub fn set_atlas_size(&self, size: wgpu::Extent3d) -> Result<(), StageError> {
+        log::info!("resizing atlas to {size:?}");
         self.atlas.resize(&self.device, &self.queue, size)?;
         Ok(())
     }
@@ -852,7 +853,6 @@ impl Stage {
 
     pub fn render(&self, view: &wgpu::TextureView) {
         {
-            log::trace!("rendering the stage");
             let label = Some("stage render");
             // UNWRAP: POP
             let background_color = *self.background_color.read().unwrap();
@@ -942,10 +942,6 @@ impl Stage {
                                 };
                                 let id = hybrid.id();
                                 let instance_range = id.inner()..id.inner() + 1;
-                                log::trace!(
-                                    "drawing vertices {vertex_range:?} and instances \
-                                             {instance_range:?}"
-                                );
                                 render_pass.draw(vertex_range, instance_range);
                             }
                         }
@@ -953,7 +949,6 @@ impl Stage {
                 }
 
                 if let Some((pipeline, bindgroup)) = may_skybox_pipeline_and_bindgroup.as_ref() {
-                    log::trace!("rendering skybox");
                     // UNWRAP: if we can't acquire the lock we want to panic.
                     let skybox = self.skybox.read().unwrap();
                     render_pass.set_pipeline(&pipeline.pipeline);
@@ -966,7 +961,6 @@ impl Stage {
 
         // then render bloom
         if self.has_bloom.load(Ordering::Relaxed) {
-            log::trace!("stage bloom");
             self.bloom.bloom(&self.device, &self.queue);
         } else {
             // copy the input hdr texture to the bloom mix texture
@@ -999,7 +993,6 @@ impl Stage {
         }
 
         // then render tonemapping
-        log::trace!("stage tonemapping");
         self.tonemapping.render(&self.device, &self.queue, view);
     }
 }

@@ -1033,7 +1033,7 @@ impl GltfDocument {
                         morph_weights: gltf_node.weights.array(),
                         ..Default::default()
                     });
-                    log::debug!("    created renderlet {i}/{num_prims}: {:#?}", hybrid.get());
+                    log::trace!("    created renderlet {i}/{num_prims}: {:#?}", hybrid.get());
                     stage.add_renderlet(&hybrid);
                     node_renderlets.push(hybrid);
                 }
