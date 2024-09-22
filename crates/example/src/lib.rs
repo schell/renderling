@@ -10,13 +10,17 @@ use renderling::{
     atlas::AtlasImage,
     bvol::Aabb,
     camera::Camera,
-    math::{Mat4, Quat, UVec2, Vec2, Vec3, Vec4},
+    math::{EulerRot, Mat4, Quat, UVec2, Vec2, Vec3, Vec3Swizzles, Vec4},
     pbr::light::{DirectionalLight, Light},
     skybox::Skybox,
     slab::Hybrid,
     stage::{Animator, GltfDocument, Stage},
     transform::Transform,
     Context,
+};
+use winit::{
+    event::KeyEvent,
+    keyboard::{Key, NamedKey},
 };
 
 const RADIUS_SCROLL_DAMPENING: f32 = 0.001;
@@ -98,7 +102,7 @@ impl CameraController for TurntableCameraController {
         self.left_mb_down = false;
     }
 
-    fn update_camera_view(&self, UVec2 { x: w, y: h }: UVec2, current_camera: &Hybrid<Camera>) {
+    fn update(&mut self, UVec2 { x: w, y: h }: UVec2, current_camera: &Hybrid<Camera>) {
         let camera_position = Self::camera_position(self.radius, self.phi, self.theta);
         let camera = Camera::new(
             Mat4::perspective_infinite_rh(std::f32::consts::FRAC_PI_4, w as f32 / h as f32, 0.01),
@@ -132,7 +136,7 @@ impl CameraController for TurntableCameraController {
         self.left_mb_down = is_left_button && is_pressed;
     }
 
-    fn key(&mut self, _event: winit::event::KeyEvent) {}
+    fn key(&mut self, _event: KeyEvent) {}
 }
 
 impl TurntableCameraController {
@@ -162,50 +166,126 @@ impl TurntableCameraController {
 #[derive(Default)]
 struct WasdMouseCameraController {
     position: Vec3,
-    rotation: Quat,
+    theta: f32,
+    phi: f32,
+    forward_is_down: bool,
+    backward_is_down: bool,
+    left_is_down: bool,
+    right_is_down: bool,
+    up_is_down: bool,
+    down_is_down: bool,
+    speed: f32,
+    last_tick: Option<f64>,
 }
 
 impl CameraController for WasdMouseCameraController {
-    fn update_camera_view(&self, UVec2 { x: w, y: h }: UVec2, camera: &Hybrid<Camera>) {
+    fn update(&mut self, UVec2 { x: w, y: h }: UVec2, camera: &Hybrid<Camera>) {
+        let now = now();
+        if let Some(prev) = self.last_tick.replace(now) {
+            let dt = now - prev;
+
+            // We want the direction to be based solely on self.theta, because we
+            // don't want the camera to move in Y.
+            let forward_direction = Vec3::NEG_Z;
+            let left_direction = Vec3::NEG_X;
+            let up_direction = Vec3::Y;
+            let rotation = Quat::from_rotation_y(-self.theta);
+
+            if self.forward_is_down {
+                let direction = rotation * forward_direction;
+                let velocity = dt as f32 * self.speed * direction;
+                self.position += velocity;
+            }
+            if self.backward_is_down {
+                let direction = rotation * forward_direction;
+                let velocity = dt as f32 * self.speed * direction;
+                self.position -= velocity;
+            }
+            if self.left_is_down {
+                let direction = rotation * left_direction;
+                let velocity = dt as f32 * self.speed * direction;
+                self.position += velocity;
+            }
+            if self.right_is_down {
+                let direction = rotation * left_direction;
+                let velocity = dt as f32 * self.speed * direction;
+                self.position -= velocity;
+            }
+            if self.up_is_down {
+                let velocity = dt as f32 * self.speed * up_direction;
+                self.position += velocity;
+            }
+            if self.down_is_down {
+                let velocity = dt as f32 * self.speed * up_direction;
+                self.position -= velocity;
+            }
+        }
+
+        let camera_rotation =
+            Quat::from_euler(renderling::math::EulerRot::XYZ, self.phi, self.theta, 0.0);
         let projection =
             Mat4::perspective_infinite_rh(std::f32::consts::FRAC_PI_4, w as f32 / h as f32, 0.01);
-        let view = Mat4::from_scale_rotation_translation(Vec3::ONE, self.rotation, self.position);
+        let view = Mat4::from_quat(camera_rotation) * Mat4::from_translation(-self.position);
         camera.modify(|c| c.set_projection_and_view(projection, view));
     }
 
-    fn reset(&mut self, bounds: Aabb) {
-        todo!()
+    fn reset(&mut self, _bounds: Aabb) {
+        self.position = Vec3::ZERO; //center_max_z + (center_max_z - center_min_z) * 0.5;
+        self.theta = 0.0;
+        self.phi = 0.0;
+        self.speed = 2.0;
+        log::info!("resetting to position: {}", self.position);
     }
 
-    fn mouse_scroll(&mut self, delta: f32) {
-        todo!()
-    }
+    fn mouse_scroll(&mut self, _delta: f32) {}
 
-    fn mouse_moved(&mut self, position: Vec2) {
-        todo!()
-    }
+    fn mouse_moved(&mut self, _position: Vec2) {}
 
     fn mouse_motion(&mut self, delta: Vec2) {
-        todo!()
+        const DAMPER: f32 = 0.005;
+        self.theta = (self.theta + DAMPER * delta.x).rem_euclid(2.0 * std::f32::consts::PI);
+        self.phi = (self.phi + DAMPER * delta.y).clamp(-1.2, 1.2);
     }
 
-    fn mouse_button(&mut self, is_pressed: bool, is_left_button: bool) {
-        todo!()
-    }
+    fn mouse_button(&mut self, _is_pressed: bool, _is_left_button: bool) {}
 
-    fn key(&mut self, event: winit::event::KeyEvent) {
-        todo!()
+    fn key(
+        &mut self,
+        KeyEvent {
+            logical_key, state, ..
+        }: KeyEvent,
+    ) {
+        match logical_key {
+            Key::Character(c) => {
+                match c.as_str() {
+                    "p" => self.forward_is_down = state.is_pressed(),
+                    "k" => self.backward_is_down = state.is_pressed(),
+                    "i" => self.right_is_down = state.is_pressed(),
+                    "y" => self.left_is_down = state.is_pressed(),
+                    "u" => self.up_is_down = state.is_pressed(),
+                    "U" => self.down_is_down = state.is_pressed(),
+                    s => log::info!("unused key char '{s}'"),
+                }
+                log::info!(
+                    "forward,backward: {},{}",
+                    self.forward_is_down,
+                    self.backward_is_down
+                );
+            }
+
+            k => log::info!("key: {k:#?}"),
+        }
     }
 }
 
 pub trait CameraController {
     fn reset(&mut self, bounds: Aabb);
-    fn update_camera_view(&self, size: UVec2, camera: &Hybrid<Camera>);
+    fn update(&mut self, size: UVec2, camera: &Hybrid<Camera>);
     fn mouse_scroll(&mut self, delta: f32);
     fn mouse_moved(&mut self, position: Vec2);
     fn mouse_motion(&mut self, delta: Vec2);
     fn mouse_button(&mut self, is_pressed: bool, is_left_button: bool);
-    fn key(&mut self, event: winit::event::KeyEvent);
+    fn key(&mut self, event: KeyEvent);
 }
 
 fn now() -> f64 {
@@ -242,38 +322,38 @@ pub struct App {
 impl CameraController for App {
     fn mouse_scroll(&mut self, delta: f32) {
         self.camera_controller.mouse_scroll(delta);
-        self.update_camera_view(self.stage.get_size(), &self.camera);
+        self.update_camera();
     }
 
     /// Set the mouse position relative to the top left of the window.
     fn mouse_moved(&mut self, position: Vec2) {
         self.camera_controller.mouse_moved(position);
-        self.update_camera_view(self.stage.get_size(), &self.camera);
+        self.update_camera();
     }
 
     /// Update from device mouse motion.
     fn mouse_motion(&mut self, delta: Vec2) {
         self.camera_controller.mouse_motion(delta);
-        self.update_camera_view(self.stage.get_size(), &self.camera);
+        self.update_camera();
     }
 
     fn mouse_button(&mut self, is_pressed: bool, is_left_button: bool) {
         self.camera_controller
             .mouse_button(is_pressed, is_left_button);
-        self.update_camera_view(self.stage.get_size(), &self.camera);
+        self.update_camera();
     }
 
-    fn key(&mut self, event: winit::event::KeyEvent) {
+    fn key(&mut self, event: KeyEvent) {
         self.camera_controller.key(event);
-        self.update_camera_view(self.stage.get_size(), &self.camera);
+        self.update_camera();
     }
 
     fn reset(&mut self, bounds: Aabb) {
         self.camera_controller.reset(bounds);
     }
 
-    fn update_camera_view(&self, size: UVec2, camera: &Hybrid<Camera>) {
-        self.camera_controller.update_camera_view(size, camera);
+    fn update(&mut self, size: UVec2, camera: &Hybrid<Camera>) {
+        self.camera_controller.update(size, camera);
     }
 }
 
@@ -322,8 +402,9 @@ impl App {
         }
     }
 
-    pub fn update_camera(&self) {
-        self.update_camera_view(self.stage.get_size(), &self.camera);
+    pub fn update_camera(&mut self) {
+        self.camera_controller
+            .update(self.stage.get_size(), &self.camera);
     }
 
     fn load_hdr_skybox(&mut self, bytes: Vec<u8>) {
@@ -418,7 +499,7 @@ impl App {
         let bounding_box = Aabb::new(min, max);
         self.camera_controller.reset(bounding_box);
         self.camera_controller
-            .update_camera_view(self.stage.get_size(), &self.camera);
+            .update(self.stage.get_size(), &self.camera);
 
         self.last_frame_instant = now();
 
