@@ -48,7 +48,7 @@ pub async fn main() {
     let ctx = Context::try_from_raw_window(ww, wh, None, surface)
         .await
         .unwrap();
-    let app = example::App::new(&ctx);
+    let app = example::App::new(&ctx, example::camera::CameraControl::Turntable);
 
     let window_resize = event::event_stream("resize", &dom_window);
     let mut all_events = window_resize;

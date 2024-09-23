@@ -2,7 +2,7 @@
 use std::sync::Arc;
 
 use clap::Parser;
-use example::{App, CameraControl, CameraController};
+use example::{camera::CameraControl, App};
 use renderling::{
     math::{UVec2, Vec2},
     Context,
@@ -35,8 +35,9 @@ struct InnerApp {
 
 impl InnerApp {
     fn tick(&mut self) {
+        self.app.camera_controller.tick();
         self.app.tick_loads();
-        self.app.update_camera();
+        self.app.update_view();
         self.app.animate();
     }
 
@@ -48,16 +49,19 @@ impl InnerApp {
                     winit::event::MouseScrollDelta::PixelDelta(pos) => pos.y as f32,
                 };
 
-                self.app.mouse_scroll(delta);
+                self.app.camera_controller.mouse_scroll(delta);
             }
             winit::event::WindowEvent::CursorMoved { position, .. } => {
                 self.app
+                    .camera_controller
                     .mouse_moved(Vec2::new(position.x as f32, position.y as f32));
             }
             winit::event::WindowEvent::MouseInput { state, button, .. } => {
                 let is_pressed = matches!(state, winit::event::ElementState::Pressed);
                 let is_left_button = matches!(button, winit::event::MouseButton::Left);
-                self.app.mouse_button(is_pressed, is_left_button);
+                self.app
+                    .camera_controller
+                    .mouse_button(is_pressed, is_left_button);
             }
             winit::event::WindowEvent::DroppedFile(path) => {
                 log::trace!("got dropped file event: {}", path.display());
@@ -79,7 +83,7 @@ impl InnerApp {
                 event,
                 is_synthetic: _,
             } => {
-                self.app.key(event);
+                self.app.camera_controller.key(event);
             }
             winit::event::WindowEvent::Resized(size) => {
                 let size = UVec2::new(size.width, size.height);
@@ -157,6 +161,7 @@ impl ApplicationHandler for OuterApp {
             if let winit::event::DeviceEvent::MouseMotion { delta } = event {
                 inner
                     .app
+                    .camera_controller
                     .mouse_motion(Vec2::new(delta.0 as f32, delta.1 as f32))
             }
         }

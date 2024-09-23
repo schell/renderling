@@ -2,7 +2,6 @@
 //! gltf capabilities.
 use std::{
     collections::{HashMap, HashSet},
-    str::FromStr,
     sync::{Arc, Mutex},
 };
 
@@ -10,21 +9,18 @@ use renderling::{
     atlas::AtlasImage,
     bvol::Aabb,
     camera::Camera,
-    math::{EulerRot, Mat4, Quat, UVec2, Vec2, Vec3, Vec3Swizzles, Vec4},
+    math::{Mat4, UVec2, Vec3, Vec4},
     pbr::light::{DirectionalLight, Light},
     skybox::Skybox,
     slab::Hybrid,
     stage::{Animator, GltfDocument, Stage},
-    transform::Transform,
     Context,
 };
-use winit::{
-    event::KeyEvent,
-    keyboard::{Key, NamedKey},
-};
 
-const RADIUS_SCROLL_DAMPENING: f32 = 0.001;
-const DX_DY_DRAG_DAMPENING: f32 = 0.01;
+pub mod camera;
+use camera::{
+    CameraControl, CameraController, TurntableCameraController, WasdMouseCameraController,
+};
 
 const DARK_BLUE_BG_COLOR: Vec4 = Vec4::new(
     0x30 as f32 / 255.0,
@@ -32,25 +28,6 @@ const DARK_BLUE_BG_COLOR: Vec4 = Vec4::new(
     0x42 as f32 / 255.0,
     1.0,
 );
-
-#[derive(Clone, Copy, Debug, Default)]
-pub enum CameraControl {
-    #[default]
-    Turntable,
-    WasdMouse,
-}
-
-impl FromStr for CameraControl {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "turntable" => Ok(CameraControl::Turntable),
-            "wasdmouse" => Ok(CameraControl::WasdMouse),
-            _ => Err("must be 'turntable' or 'wasdmouse'".to_owned()),
-        }
-    }
-}
 
 pub enum SupportedFileType {
     Gltf,
@@ -68,217 +45,6 @@ pub fn is_file_supported(file: impl AsRef<std::path::Path>) -> Option<SupportedF
 #[cfg(not(target_arch = "wasm32"))]
 lazy_static::lazy_static! {
     static ref START: std::time::Instant = std::time::Instant::now();
-}
-
-struct TurntableCameraController {
-    /// look at
-    center: Vec3,
-    /// distance from the origin
-    radius: f32,
-    /// anglular position on a circle `radius` away from the origin on x,z
-    phi: f32,
-    /// angular distance from y axis
-    theta: f32,
-    /// is the left mouse button down
-    left_mb_down: bool,
-}
-
-impl Default for TurntableCameraController {
-    fn default() -> Self {
-        Self {
-            center: Vec3::ZERO,
-            radius: 6.0,
-            phi: 0.0,
-            theta: std::f32::consts::FRAC_PI_4,
-            left_mb_down: false,
-        }
-    }
-}
-
-impl CameraController for TurntableCameraController {
-    fn reset(&mut self, bounds: Aabb) {
-        self.radius = bounds.diagonal_length() * 1.25;
-        self.center = bounds.center();
-        self.left_mb_down = false;
-    }
-
-    fn update(&mut self, UVec2 { x: w, y: h }: UVec2, current_camera: &Hybrid<Camera>) {
-        let camera_position = Self::camera_position(self.radius, self.phi, self.theta);
-        let camera = Camera::new(
-            Mat4::perspective_infinite_rh(std::f32::consts::FRAC_PI_4, w as f32 / h as f32, 0.01),
-            Mat4::look_at_rh(camera_position, self.center, Vec3::Y),
-        );
-        debug_assert!(
-            camera.view.is_finite(),
-            "camera view is borked w:{w} h:{h} camera_position: {camera_position} center: {} \
-             radius: {} phi: {} theta: {}",
-            self.center,
-            self.radius,
-            self.phi,
-            self.theta
-        );
-        if current_camera.get() != camera {
-            current_camera.set(camera);
-        }
-    }
-
-    fn mouse_scroll(&mut self, delta: f32) {
-        self.zoom(delta);
-    }
-
-    fn mouse_moved(&mut self, _position: Vec2) {}
-
-    fn mouse_motion(&mut self, delta: Vec2) {
-        self.pan(delta);
-    }
-
-    fn mouse_button(&mut self, is_pressed: bool, is_left_button: bool) {
-        self.left_mb_down = is_left_button && is_pressed;
-    }
-
-    fn key(&mut self, _event: KeyEvent) {}
-}
-
-impl TurntableCameraController {
-    fn camera_position(radius: f32, phi: f32, theta: f32) -> Vec3 {
-        // convert from spherical to cartesian
-        let x = radius * theta.sin() * phi.cos();
-        let y = radius * theta.sin() * phi.sin();
-        let z = radius * theta.cos();
-        // in renderling Y is up so switch the y and z axis
-        Vec3::new(x, z, y)
-    }
-
-    fn zoom(&mut self, delta: f32) {
-        self.radius = (self.radius - (delta * RADIUS_SCROLL_DAMPENING)).max(0.0);
-    }
-
-    fn pan(&mut self, delta: Vec2) {
-        if self.left_mb_down {
-            self.phi += delta.x * DX_DY_DRAG_DAMPENING;
-
-            let next_theta = self.theta - delta.y * DX_DY_DRAG_DAMPENING;
-            self.theta = next_theta.clamp(0.0001, std::f32::consts::PI);
-        }
-    }
-}
-
-#[derive(Default)]
-struct WasdMouseCameraController {
-    position: Vec3,
-    theta: f32,
-    phi: f32,
-    forward_is_down: bool,
-    backward_is_down: bool,
-    left_is_down: bool,
-    right_is_down: bool,
-    up_is_down: bool,
-    down_is_down: bool,
-    speed: f32,
-    last_tick: Option<f64>,
-}
-
-impl CameraController for WasdMouseCameraController {
-    fn update(&mut self, UVec2 { x: w, y: h }: UVec2, camera: &Hybrid<Camera>) {
-        let now = now();
-        if let Some(prev) = self.last_tick.replace(now) {
-            let dt = now - prev;
-
-            // We want the direction to be based solely on self.theta, because we
-            // don't want the camera to move in Y.
-            let forward_direction = Vec3::NEG_Z;
-            let left_direction = Vec3::NEG_X;
-            let up_direction = Vec3::Y;
-            let rotation = Quat::from_rotation_y(-self.theta);
-
-            if self.forward_is_down {
-                let direction = rotation * forward_direction;
-                let velocity = dt as f32 * self.speed * direction;
-                self.position += velocity;
-            }
-            if self.backward_is_down {
-                let direction = rotation * forward_direction;
-                let velocity = dt as f32 * self.speed * direction;
-                self.position -= velocity;
-            }
-            if self.left_is_down {
-                let direction = rotation * left_direction;
-                let velocity = dt as f32 * self.speed * direction;
-                self.position += velocity;
-            }
-            if self.right_is_down {
-                let direction = rotation * left_direction;
-                let velocity = dt as f32 * self.speed * direction;
-                self.position -= velocity;
-            }
-            if self.up_is_down {
-                let velocity = dt as f32 * self.speed * up_direction;
-                self.position += velocity;
-            }
-            if self.down_is_down {
-                let velocity = dt as f32 * self.speed * up_direction;
-                self.position -= velocity;
-            }
-        }
-
-        let camera_rotation =
-            Quat::from_euler(renderling::math::EulerRot::XYZ, self.phi, self.theta, 0.0);
-        let projection =
-            Mat4::perspective_infinite_rh(std::f32::consts::FRAC_PI_4, w as f32 / h as f32, 0.01);
-        let view = Mat4::from_quat(camera_rotation) * Mat4::from_translation(-self.position);
-        camera.modify(|c| c.set_projection_and_view(projection, view));
-    }
-
-    fn reset(&mut self, _bounds: Aabb) {
-        self.position = Vec3::ZERO; //center_max_z + (center_max_z - center_min_z) * 0.5;
-        self.theta = 0.0;
-        self.phi = 0.0;
-        self.speed = 2.0;
-        log::info!("resetting to position: {}", self.position);
-    }
-
-    fn mouse_scroll(&mut self, _delta: f32) {}
-
-    fn mouse_moved(&mut self, _position: Vec2) {}
-
-    fn mouse_motion(&mut self, delta: Vec2) {
-        const DAMPER: f32 = 0.005;
-        self.theta = (self.theta + DAMPER * delta.x).rem_euclid(2.0 * std::f32::consts::PI);
-        self.phi = (self.phi + DAMPER * delta.y).clamp(-1.2, 1.2);
-    }
-
-    fn mouse_button(&mut self, _is_pressed: bool, _is_left_button: bool) {}
-
-    fn key(
-        &mut self,
-        KeyEvent {
-            logical_key, state, ..
-        }: KeyEvent,
-    ) {
-        match logical_key {
-            Key::Character(c) => match c.as_str() {
-                "p" => self.forward_is_down = state.is_pressed(),
-                "k" => self.backward_is_down = state.is_pressed(),
-                "i" => self.right_is_down = state.is_pressed(),
-                "y" => self.left_is_down = state.is_pressed(),
-                "u" => self.up_is_down = state.is_pressed(),
-                "U" => self.down_is_down = state.is_pressed(),
-                s => log::info!("unused key char '{s}'"),
-            },
-
-            k => log::info!("key: {k:#?}"),
-        }
-    }
-}
-
-pub trait CameraController {
-    fn reset(&mut self, bounds: Aabb);
-    fn update(&mut self, size: UVec2, camera: &Hybrid<Camera>);
-    fn mouse_scroll(&mut self, delta: f32);
-    fn mouse_moved(&mut self, position: Vec2);
-    fn mouse_motion(&mut self, delta: Vec2);
-    fn mouse_button(&mut self, is_pressed: bool, is_left_button: bool);
-    fn key(&mut self, event: KeyEvent);
 }
 
 fn now() -> f64 {
@@ -309,45 +75,7 @@ pub struct App {
     animators: Option<Vec<Animator>>,
     animations_conflict: bool,
 
-    camera_controller: Box<dyn CameraController>,
-}
-
-impl CameraController for App {
-    fn mouse_scroll(&mut self, delta: f32) {
-        self.camera_controller.mouse_scroll(delta);
-        self.update_camera();
-    }
-
-    /// Set the mouse position relative to the top left of the window.
-    fn mouse_moved(&mut self, position: Vec2) {
-        self.camera_controller.mouse_moved(position);
-        self.update_camera();
-    }
-
-    /// Update from device mouse motion.
-    fn mouse_motion(&mut self, delta: Vec2) {
-        self.camera_controller.mouse_motion(delta);
-        self.update_camera();
-    }
-
-    fn mouse_button(&mut self, is_pressed: bool, is_left_button: bool) {
-        self.camera_controller
-            .mouse_button(is_pressed, is_left_button);
-        self.update_camera();
-    }
-
-    fn key(&mut self, event: KeyEvent) {
-        self.camera_controller.key(event);
-        self.update_camera();
-    }
-
-    fn reset(&mut self, bounds: Aabb) {
-        self.camera_controller.reset(bounds);
-    }
-
-    fn update(&mut self, size: UVec2, camera: &Hybrid<Camera>) {
-        self.camera_controller.update(size, camera);
-    }
+    pub camera_controller: Box<dyn CameraController>,
 }
 
 impl App {
@@ -395,9 +123,9 @@ impl App {
         }
     }
 
-    pub fn update_camera(&mut self) {
+    pub fn update_view(&mut self) {
         self.camera_controller
-            .update(self.stage.get_size(), &self.camera);
+            .update_camera(self.stage.get_size(), &self.camera);
     }
 
     fn load_hdr_skybox(&mut self, bytes: Vec<u8>) {
@@ -490,7 +218,7 @@ impl App {
         let bounding_box = Aabb::new(min, max);
         self.camera_controller.reset(bounding_box);
         self.camera_controller
-            .update(self.stage.get_size(), &self.camera);
+            .update_camera(self.stage.get_size(), &self.camera);
 
         self.last_frame_instant = now();
 
@@ -576,6 +304,7 @@ impl App {
         let now = now();
         let dt_seconds = now - self.last_frame_instant;
         self.last_frame_instant = now;
+        self.camera_controller.tick();
         if let Some(animators) = self.animators.as_mut() {
             if self.animations_conflict {
                 if let Some(animator) = animators.first_mut() {
