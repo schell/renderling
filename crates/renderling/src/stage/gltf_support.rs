@@ -5,7 +5,6 @@ use crabslab::{Array, Id};
 use glam::{Mat4, Quat, Vec2, Vec3, Vec4};
 use rustc_hash::{FxHashMap, FxHashSet};
 use snafu::{OptionExt, ResultExt, Snafu};
-use wgpu::naga::FastHashSet;
 
 use crate::{
     atlas::{AtlasError, AtlasImage, AtlasTexture, TextureAddressMode, TextureModes},
@@ -821,7 +820,12 @@ impl GltfDocument {
                     .clone();
                 prepared_images.push(image);
             }
+            let duplicated_image_count = prepared_images.len() - images.len();
+            if duplicated_image_count > 0 {
+                log::debug!("had to duplicate {duplicated_image_count} images...");
+            }
             drop(images);
+
             let prepared_images: Vec<AtlasImage> = prepared_images
                 .into_iter()
                 .map(|aimg| match Arc::try_unwrap(aimg) {
