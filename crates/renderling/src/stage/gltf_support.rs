@@ -1,10 +1,11 @@
 //! Gltf support for the [`Stage`](crate::Stage).
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 use crabslab::{Array, Id};
 use glam::{Mat4, Quat, Vec2, Vec3, Vec4};
 use rustc_hash::{FxHashMap, FxHashSet};
 use snafu::{OptionExt, ResultExt, Snafu};
+use wgpu::naga::FastHashSet;
 
 use crate::{
     atlas::{AtlasError, AtlasImage, AtlasTexture, TextureAddressMode, TextureModes},
@@ -32,14 +33,11 @@ pub enum StageGltfError {
     #[snafu(display("{source}"))]
     Atlas { source: crate::atlas::AtlasError },
 
-    #[snafu(display("Missing image at index {index}"))]
-    MissingImage { index: usize },
-
     #[snafu(display("Wrong image at index {index} atlas offset {offset}"))]
     WrongImage { offset: usize, index: usize },
 
-    #[snafu(display("Missing atlas image frame {index}"))]
-    MissingFrame { index: usize },
+    #[snafu(display("Missing image {index} '{name}'"))]
+    MissingImage { index: usize, name: String },
 
     #[snafu(display("Missing texture at gltf index {index} slab index {tex_id:?}"))]
     MissingTexture {
@@ -151,30 +149,36 @@ impl Material {
                 let texture = info.texture();
                 // The index of the image in the original gltf document
                 let image_index = texture.source().index();
+                let name = texture.name().unwrap_or("unknown");
                 // Update the image to ensure it gets transferred correctly
-                let image = images
-                    .get_mut(image_index)
-                    .context(MissingImageSnafu { index: image_index })?;
+                let image = images.get_mut(image_index).context(MissingImageSnafu {
+                    index: image_index,
+                    name,
+                })?;
                 image.apply_linear_transfer = true;
             }
         } else {
             if let Some(info) = pbr.base_color_texture() {
                 let texture = info.texture();
+                let name = texture.name().unwrap_or("unknown");
                 let image_index = texture.source().index();
                 // Update the image to ensure it gets transferred correctly
-                let image = images
-                    .get_mut(image_index)
-                    .context(MissingImageSnafu { index: image_index })?;
+                let image = images.get_mut(image_index).context(MissingImageSnafu {
+                    index: image_index,
+                    name,
+                })?;
                 image.apply_linear_transfer = true;
             }
 
             if let Some(emissive_tex) = material.emissive_texture() {
                 let texture = emissive_tex.texture();
+                let name = texture.name().unwrap_or("unknown");
                 let image_index = texture.source().index();
                 // Update the image to ensure it gets transferred correctly
-                let image = images
-                    .get_mut(image_index)
-                    .context(MissingImageSnafu { index: image_index })?;
+                let image = images.get_mut(image_index).context(MissingImageSnafu {
+                    index: image_index,
+                    name,
+                })?;
                 image.apply_linear_transfer = true;
             }
         }
@@ -193,7 +197,7 @@ impl Material {
             let (albedo_texture, albedo_tex_coord) = if let Some(info) = pbr.base_color_texture() {
                 let texture = info.texture();
                 let index = texture.index();
-                let tex_id = entries[index].id();
+                let tex_id = entries.get(index).map(|e| e.id()).unwrap_or_default();
                 (tex_id, info.tex_coord())
             } else {
                 (Id::NONE, 0)
@@ -211,7 +215,7 @@ impl Material {
             let (albedo_texture, albedo_tex_coord) = if let Some(info) = pbr.base_color_texture() {
                 let texture = info.texture();
                 let index = texture.index();
-                let tex_id = entries[index].id();
+                let tex_id = entries.get(index).map(|e| e.id()).unwrap_or_default();
                 (tex_id, info.tex_coord())
             } else {
                 (Id::NONE, 0)
@@ -224,7 +228,7 @@ impl Material {
                 metallic_roughness_tex_coord,
             ) = if let Some(info) = pbr.metallic_roughness_texture() {
                 let index = info.texture().index();
-                let tex_id = entries[index].id();
+                let tex_id = entries.get(index).map(|e| e.id()).unwrap_or_default();
                 (1.0, 1.0, tex_id, info.tex_coord())
             } else {
                 (pbr.metallic_factor(), pbr.roughness_factor(), Id::NONE, 0)
@@ -232,7 +236,10 @@ impl Material {
 
             let (normal_texture, normal_tex_coord) =
                 if let Some(norm_tex) = material.normal_texture() {
-                    let tex_id = entries[norm_tex.texture().index()].id();
+                    let tex_id = entries
+                        .get(norm_tex.texture().index())
+                        .map(|e| e.id())
+                        .unwrap_or_default();
                     (tex_id, norm_tex.tex_coord())
                 } else {
                     (Id::NONE, 0)
@@ -240,7 +247,10 @@ impl Material {
 
             let (ao_strength, ao_texture, ao_tex_coord) =
                 if let Some(occlusion_tex) = material.occlusion_texture() {
-                    let tex_id = entries[occlusion_tex.texture().index()].id();
+                    let tex_id = entries
+                        .get(occlusion_tex.texture().index())
+                        .map(|e| e.id())
+                        .unwrap_or_default();
                     (occlusion_tex.strength(), tex_id, occlusion_tex.tex_coord())
                 } else {
                     (0.0, Id::NONE, 0)
@@ -250,7 +260,7 @@ impl Material {
                 if let Some(emissive_tex) = material.emissive_texture() {
                     let texture = emissive_tex.texture();
                     let index = texture.index();
-                    let tex_id = entries[index].id();
+                    let tex_id = entries.get(index).map(|e| e.id()).unwrap_or_default();
                     (tex_id, emissive_tex.tex_coord())
                 } else {
                     (Id::NONE, 0)
@@ -554,7 +564,7 @@ impl GltfMesh {
             .primitives()
             .map(|prim| GltfPrimitive::from_gltf(stage, prim, buffer_data, materials))
             .collect::<Vec<_>>();
-        log::trace!("  loaded {} primitives", primitives.len());
+        log::debug!("  loaded {} primitives\n", primitives.len());
         let weights = mesh.weights().unwrap_or(&[]).iter().copied();
         GltfMesh {
             primitives,
@@ -763,27 +773,77 @@ impl GltfDocument {
         // Camera id to use for any created Renderlets
         camera_id: Id<Camera>,
     ) -> Result<GltfDocument, StageGltfError> {
-        let mut images = images.into_iter().map(AtlasImage::from).collect::<Vec<_>>();
-        for gltf_material in document.materials() {
-            Material::preprocess_images(gltf_material, &mut images)?;
-        }
+        let textures = {
+            let mut images = images.into_iter().map(AtlasImage::from).collect::<Vec<_>>();
+            for gltf_material in document.materials() {
+                Material::preprocess_images(gltf_material, &mut images)?;
+            }
+            // Arc these images because they could be large and we don't want duplicates
+            let images = images.into_iter().map(Arc::new).collect::<Vec<_>>();
 
-        log::debug!("Loading {} images into the atlas", images.len());
-        let textures = stage.add_images(images).context(StageSnafu)?;
+            log::debug!("Loading {} images into the atlas", images.len());
 
-        log::debug!("Writing textures");
-        for (i, texture) in document.textures().enumerate() {
-            let index = texture.index();
-            let entry = textures.get(index).context(MissingFrameSnafu { index })?;
-            entry.modify(|tex| {
-                tex.modes = TextureModes {
+            log::debug!("Writing textures");
+            #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+            struct Texture {
+                source: usize,
+                modes: TextureModes,
+            }
+            let mut textures = vec![];
+            let mut deduped_textures = FxHashMap::<Texture, Vec<usize>>::default();
+            for (i, texture) in document.textures().enumerate() {
+                let index = texture.index();
+                debug_assert_eq!(i, index);
+                let name = texture.name().unwrap_or("unknown");
+                log::trace!("  texture {i} '{name}'",);
+                let source = texture.source().index();
+                let modes = TextureModes {
                     s: TextureAddressMode::from_gltf(texture.sampler().wrap_s()),
                     t: TextureAddressMode::from_gltf(texture.sampler().wrap_t()),
                 };
-            });
-            let texture_id = entry.id();
-            log::trace!("  texture {i} {texture_id:?}: {texture:#?}");
-        }
+                let tex = Texture { modes, source };
+                textures.push(tex);
+                let entry = deduped_textures.entry(tex).or_default();
+                entry.push(i);
+            }
+
+            // Prepare the textures for packing
+            let mut deduped_textures = deduped_textures.into_iter().collect::<Vec<_>>();
+            deduped_textures.sort();
+            let mut prepared_images = vec![];
+            for (tex, refs) in deduped_textures.iter() {
+                let image = images
+                    .get(tex.source)
+                    .context(MissingImageSnafu {
+                        index: refs[0],
+                        name: "unknown".to_owned(),
+                    })?
+                    .clone();
+                prepared_images.push(image);
+            }
+            drop(images);
+            let prepared_images: Vec<AtlasImage> = prepared_images
+                .into_iter()
+                .map(|aimg| match Arc::try_unwrap(aimg) {
+                    Ok(img) => img,
+                    Err(aimg) => aimg.as_ref().clone(),
+                })
+                .collect();
+            let hybrid_textures = stage.add_images(prepared_images).context(StageSnafu)?;
+            let mut texture_lookup = FxHashMap::<usize, Hybrid<AtlasTexture>>::default();
+            for (hybrid, (tex, refs)) in hybrid_textures.into_iter().zip(deduped_textures) {
+                hybrid.modify(|t| t.modes = tex.modes);
+                for tex_index in refs.into_iter() {
+                    texture_lookup.insert(tex_index, hybrid.clone());
+                }
+            }
+            let mut textures = texture_lookup.into_iter().collect::<Vec<_>>();
+            textures.sort_by_key(|(index, _)| *index);
+            textures
+                .into_iter()
+                .map(|(_, hybrid)| hybrid)
+                .collect::<Vec<_>>()
+        };
 
         log::debug!("Creating materials");
         let default_material = stage.new_value(Material::default());
@@ -1011,7 +1071,7 @@ impl GltfDocument {
             };
 
             if let Some(mesh_index) = gltf_node.mesh {
-                log::debug!(
+                log::trace!(
                     "  node {} {:?} has mesh {mesh_index}",
                     gltf_node.index,
                     gltf_node.name
@@ -1020,7 +1080,7 @@ impl GltfDocument {
                     .get(mesh_index)
                     .context(MissingMeshSnafu { index: mesh_index })?;
                 let num_prims = mesh.primitives.len();
-                log::debug!("    has {num_prims} primitives");
+                log::trace!("    has {num_prims} primitives");
                 for (prim, i) in mesh.primitives.iter().zip(1..) {
                     let hybrid = stage.new_value(Renderlet {
                         vertices_array: prim.vertices.array(),

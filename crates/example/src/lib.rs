@@ -256,22 +256,15 @@ impl CameraController for WasdMouseCameraController {
         }: KeyEvent,
     ) {
         match logical_key {
-            Key::Character(c) => {
-                match c.as_str() {
-                    "p" => self.forward_is_down = state.is_pressed(),
-                    "k" => self.backward_is_down = state.is_pressed(),
-                    "i" => self.right_is_down = state.is_pressed(),
-                    "y" => self.left_is_down = state.is_pressed(),
-                    "u" => self.up_is_down = state.is_pressed(),
-                    "U" => self.down_is_down = state.is_pressed(),
-                    s => log::info!("unused key char '{s}'"),
-                }
-                log::info!(
-                    "forward,backward: {},{}",
-                    self.forward_is_down,
-                    self.backward_is_down
-                );
-            }
+            Key::Character(c) => match c.as_str() {
+                "p" => self.forward_is_down = state.is_pressed(),
+                "k" => self.backward_is_down = state.is_pressed(),
+                "i" => self.right_is_down = state.is_pressed(),
+                "y" => self.left_is_down = state.is_pressed(),
+                "u" => self.up_is_down = state.is_pressed(),
+                "U" => self.down_is_down = state.is_pressed(),
+                s => log::info!("unused key char '{s}'"),
+            },
 
             k => log::info!("key: {k:#?}"),
         }
@@ -482,8 +475,6 @@ impl App {
         log::trace!("  nodes:");
         for node in nodes {
             let tfrm = Mat4::from(node.global_transform());
-            let decomposed = Transform::from(tfrm);
-            log::trace!("    {} {:?} {decomposed:?}", node.index, node.name);
             if let Some(mesh_index) = node.mesh {
                 // UNWRAP: safe because we know the node exists
                 for primitive in doc.meshes.get(mesh_index).unwrap().primitives.iter() {
