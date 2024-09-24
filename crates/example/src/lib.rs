@@ -9,18 +9,25 @@ use renderling::{
     atlas::AtlasImage,
     bvol::Aabb,
     camera::Camera,
-    math::{Mat4, UVec2, Vec3, Vec4},
+    math::{Mat4, UVec2, Vec2, Vec3, Vec4},
     pbr::light::{DirectionalLight, Light},
     skybox::Skybox,
     slab::Hybrid,
     stage::{Animator, GltfDocument, Stage},
     Context,
 };
+use renderling_ui::{FontArc, Section, Text, Ui, UiPath, UiText};
 
 pub mod camera;
 use camera::{
     CameraControl, CameraController, TurntableCameraController, WasdMouseCameraController,
 };
+
+pub mod time;
+use time::FPSCounter;
+
+const FONT_BYTES: &[u8] =
+    include_bytes!("../../../fonts/Recursive Mn Lnr St Med Nerd Font Complete.ttf");
 
 const DARK_BLUE_BG_COLOR: Vec4 = Vec4::new(
     0x30 as f32 / 255.0,
@@ -62,25 +69,63 @@ fn now() -> f64 {
     }
 }
 
+struct AppUi {
+    ui: Ui,
+    fps_text: UiText,
+    fps_counter: FPSCounter,
+    fps_background: UiPath,
+    last_fps_display: f64,
+}
+
+impl AppUi {
+    fn make_fps_widget(fps_counter: &FPSCounter, ui: &Ui) -> (UiText, UiPath) {
+        let translation = Vec2::new(2.0, 2.0);
+        let text = format!("{}fps", fps_counter.current_fps_string());
+        let fps_text = ui
+            .new_text()
+            .with_color(Vec3::ZERO.extend(1.0))
+            .with_section(Section::new().add_text(Text::new(&text).with_scale(32.0)))
+            .build();
+        fps_text.transform.set_translation(translation);
+        let background = ui
+            .new_path()
+            .with_fill_color(Vec4::ONE)
+            .with_rectangle(fps_text.bounds.0, fps_text.bounds.1)
+            .fill();
+        background.transform.set_translation(translation);
+        background.transform.set_z(-0.9);
+        (fps_text, background)
+    }
+
+    fn tick(&mut self) {
+        self.fps_counter.next_frame();
+        let now = now();
+        if now - self.last_fps_display >= 1.0 {
+            let (fps_text, background) = Self::make_fps_widget(&self.fps_counter, &self.ui);
+            self.fps_text = fps_text;
+            self.fps_background = background;
+            self.last_fps_display = now;
+        }
+    }
+}
+
 pub struct App {
     last_frame_instant: f64,
     skybox_image_bytes: Option<Vec<u8>>,
     loads: Arc<Mutex<HashMap<std::path::PathBuf, Vec<u8>>>>,
-
     pub stage: Stage,
     camera: Hybrid<Camera>,
     _light: Option<(Hybrid<DirectionalLight>, Hybrid<Light>)>,
-
     document: Option<GltfDocument>,
     animators: Option<Vec<Animator>>,
     animations_conflict: bool,
-
     pub camera_controller: Box<dyn CameraController>,
+    ui: AppUi,
 }
 
 impl App {
-    pub fn new(r: &Context, camera_control: CameraControl) -> Self {
-        let stage = r
+    pub fn new(ctx: &Context, camera_control: CameraControl) -> Self {
+        let stage = ctx
             .new_stage()
             .with_background_color(DARK_BLUE_BG_COLOR)
             .with_bloom_mix_strength(0.5)
@@ -103,7 +148,19 @@ impl App {
             })
             .unwrap();
 
+        let ui = Ui::new(ctx).with_background_color(Vec4::ZERO);
+        let _ = ui.add_font(FontArc::try_from_slice(FONT_BYTES).unwrap());
+        let fps_counter = FPSCounter::default();
+        let (fps_text, fps_background) = AppUi::make_fps_widget(&fps_counter, &ui);
+
         Self {
+            ui: AppUi {
+                ui,
+                fps_text,
+                fps_counter,
+                fps_background,
+                last_fps_display: now(),
+            },
             stage,
             camera,
             _light: None,
@@ -121,6 +178,21 @@ impl App {
                 CameraControl::WasdMouse => Box::new(WasdMouseCameraController::default()),
             },
         }
+    }
+
+    pub fn tick(&mut self) {
+        self.camera_controller.tick();
+        self.tick_loads();
+        self.update_view();
+        self.animate();
+        self.ui.tick();
+    }
+
+    pub fn render(&self, ctx: &Context) {
+        let frame = ctx.get_next_frame().unwrap();
+        self.stage.render(&frame.view());
+        self.ui.ui.render(&frame.view());
+        frame.present();
     }
 
     pub fn update_view(&mut self) {

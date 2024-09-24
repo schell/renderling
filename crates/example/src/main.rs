@@ -35,10 +35,7 @@ struct InnerApp {
 
 impl InnerApp {
     fn tick(&mut self) {
-        self.app.camera_controller.tick();
-        self.app.tick_loads();
-        self.app.update_view();
-        self.app.animate();
+        self.app.tick();
     }
 
     fn event(&mut self, event: WindowEvent) -> bool {
@@ -132,9 +129,7 @@ impl ApplicationHandler for OuterApp {
     fn about_to_wait(&mut self, _event_loop: &winit::event_loop::ActiveEventLoop) {
         if let Some(inner) = self.inner.as_mut() {
             inner.tick();
-            let frame = inner.ctx.get_next_frame().unwrap();
-            inner.app.stage.render(&frame.view());
-            frame.present();
+            inner.app.render(&inner.ctx);
         }
     }
 
@@ -172,6 +167,7 @@ fn main() {
     let cli = Cli::parse();
     env_logger::builder().init();
     log::info!("starting up with options: {cli:#?}");
+
     let event_loop = winit::event_loop::EventLoop::new().unwrap();
     event_loop.set_control_flow(winit::event_loop::ControlFlow::Poll);
     let mut outer_app = OuterApp { cli, inner: None };
