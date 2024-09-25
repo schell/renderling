@@ -82,10 +82,17 @@ pub fn mo_vertex(plane: &Vec4, aabb: &Aabb) -> Vec3 {
 }
 
 /// Axis aligned bounding box.
-#[derive(Clone, Copy, SlabItem)]
+#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
+#[derive(Clone, Copy, Default, PartialEq, SlabItem)]
 pub struct Aabb {
     pub min: Vec3,
     pub max: Vec3,
+}
+
+impl From<(Vec3, Vec3)> for Aabb {
+    fn from((a, b): (Vec3, Vec3)) -> Self {
+        Aabb::new(a, b)
+    }
 }
 
 impl Aabb {
@@ -107,6 +114,10 @@ impl Aabb {
     pub fn is_outside_frustum(&self, frustum: Frustum) -> bool {
         let (inside, _) = self.coherent_test_against_frustum(&frustum, 0);
         !inside
+    }
+
+    pub fn is_zero(&self) -> bool {
+        self.min == self.max
     }
 }
 

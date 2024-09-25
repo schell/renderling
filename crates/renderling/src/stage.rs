@@ -12,6 +12,7 @@ use spirv_std::{
 };
 
 use crate::{
+    bvol::Aabb,
     camera::Camera,
     math::IsVector,
     pbr::{Material, PbrConfig},
@@ -206,8 +207,7 @@ impl Vertex {
 pub struct Renderlet {
     pub visible: bool,
     pub vertices_array: Array<Vertex>,
-    pub min_position: Vec3,
-    pub max_position: Vec3,
+    pub bounds: Aabb,
     pub indices_array: Array<u32>,
     pub camera_id: Id<Camera>,
     pub transform_id: Id<Transform>,
@@ -223,8 +223,7 @@ impl Default for Renderlet {
         Renderlet {
             visible: true,
             vertices_array: Array::default(),
-            min_position: Vec3::ZERO,
-            max_position: Vec3::ZERO,
+            bounds: Aabb::default(),
             indices_array: Array::default(),
             camera_id: Id::NONE,
             transform_id: Id::NONE,

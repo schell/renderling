@@ -15,6 +15,7 @@ use crate::{
     atlas::{Atlas, AtlasError, AtlasImage, AtlasImageError, AtlasTexture},
     bloom::Bloom,
     camera::Camera,
+    cull::ComputeCulling,
     pbr::{debug::DebugMode, light::Light, PbrConfig},
     skybox::{Skybox, SkyboxRenderPipeline},
     slab::*,
@@ -192,6 +193,7 @@ pub struct Stage {
     pub(crate) clear_depth_attachments: Arc<AtomicBool>,
 
     pub(crate) atlas: Atlas,
+    pub(crate) compute_culling: Arc<RwLock<Option<ComputeCulling>>>,
     pub(crate) bloom: Bloom,
     pub(crate) skybox: Arc<RwLock<Skybox>>,
     pub(crate) tonemapping: Tonemapping,
@@ -278,6 +280,7 @@ impl Stage {
                 multisample_count,
             ))),
             atlas,
+            compute_culling: Arc::new(RwLock::new(Some(ComputeCulling::new(&device)))),
             skybox: Arc::new(RwLock::new(Skybox::empty(&device, &queue))),
             skybox_bindgroup: Default::default(),
             skybox_pipeline: Default::default(),
@@ -785,6 +788,13 @@ impl Stage {
         NestedTransform::new(&self.mngr)
     }
 
+    fn invalidate_compute_culling_bindgroup(&self) {
+        let mut compute_culling_guard = self.compute_culling.write().unwrap();
+        if let Some(compute_culling) = compute_culling_guard.as_mut() {
+            compute_culling.invalidate_bindgroup();
+        }
+    }
+
     fn tick_internal(&self) -> (Arc<wgpu::Buffer>, Option<Arc<wgpu::Buffer>>) {
         let maybe_indirect_draw_buffer = {
             let mut redraw_args = false;
@@ -798,24 +808,33 @@ impl Stage {
                     false
                 }
             });
-            if let Some(IndirectDraws { slab, draws }) = indirect.as_mut() {
+            if let Some(IndirectDraws {
+                slab: indirect_slab,
+                draws,
+            }) = indirect.as_mut()
+            {
                 if redraw_args || draws.len() != hybrids.len() {
                     // Pre-upkeep to reclaim resources - this is necessary because
                     // the draw buffer has to be contiguous (it can't start with a bunch of trash)
-                    let _ = slab.upkeep((
+                    if let Some(_indirect_buffer) = indirect_slab.upkeep((
                         &self.device,
                         &self.queue,
                         Some("indirect draw pre upkeep"),
                         wgpu::BufferUsages::INDIRECT,
-                    ));
+                    )) {
+                        // Invalidate the compute culling buffer, it will be regenerated later...
+                        self.invalidate_compute_culling_bindgroup();
+                    }
                     *draws = hybrids
                         .iter()
                         .map(|h: &Hybrid<Renderlet>| {
-                            slab.new_value(DrawIndirectArgs::from(h)).into_gpu_only()
+                            indirect_slab
+                                .new_value(DrawIndirectArgs::from(h))
+                                .into_gpu_only()
                         })
                         .collect();
                 }
-                Some(slab.get_updated_buffer((
+                Some(indirect_slab.get_updated_buffer((
                     &self.device,
                     &self.queue,
                     Some("indirect draw upkeep"),
@@ -834,6 +853,7 @@ impl Stage {
             // invalidate our bindgroups, etc
             let _ = self.skybox_bindgroup.lock().unwrap().take();
             let _ = self.buffers_bindgroup.lock().unwrap().take();
+            self.invalidate_compute_culling_bindgroup();
             (new_slab_buffer, maybe_indirect_draw_buffer)
         } else {
             // UNWRAP: safe because we called `SlabManager::upkeep` above^, which ensures
@@ -852,11 +872,22 @@ impl Stage {
     }
 
     pub fn render(&self, view: &wgpu::TextureView) {
+        let num_draw_calls = self.draws.read().unwrap().hybrids.len();
+        let (slab_buffer, maybe_indirect_draw_buffer) = self.tick_internal();
+        if let Some(indirect_buffer) = maybe_indirect_draw_buffer.as_ref() {
+            if let Some(compute_culling) = self.compute_culling.write().unwrap().as_mut() {
+                compute_culling.run(
+                    &self.device,
+                    &slab_buffer,
+                    indirect_buffer,
+                    num_draw_calls as u32,
+                );
+            }
+        }
         {
             let label = Some("stage render");
             // UNWRAP: POP
             let background_color = *self.background_color.read().unwrap();
-            let (slab_buffer, maybe_indirect_draw_buffer) = self.tick_internal();
             // UNWRAP: POP
             let pipeline = self.stage_pipeline.read().unwrap();
             // UNWRAP: POP
@@ -923,7 +954,6 @@ impl Stage {
                 render_pass.set_pipeline(&pipeline);
                 render_pass.set_bind_group(0, &slab_buffers_bindgroup, &[]);
                 render_pass.set_bind_group(1, &textures_bindgroup, &[]);
-                let num_draw_calls = draws.hybrids.len();
                 if num_draw_calls > 0 {
                     if let Some(indirect_draw_buffer) = maybe_indirect_draw_buffer {
                         render_pass.multi_draw_indirect(

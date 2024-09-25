@@ -1095,8 +1095,7 @@ impl GltfDocument {
                         skin_id,
                         morph_targets: prim.morph_targets_array.array(),
                         morph_weights: gltf_node.weights.array(),
-                        min_position: prim.bounding_box.0,
-                        max_position: prim.bounding_box.1,
+                        bounds: prim.bounding_box.into(),
                         ..Default::default()
                     });
                     log::trace!("    created renderlet {i}/{num_prims}: {:#?}", hybrid.get());
