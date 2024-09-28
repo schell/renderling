@@ -326,7 +326,7 @@ pub fn renderlet_vertex(
     *out_world_pos = world_pos;
 
     let camera = slab.read(renderlet.camera_id);
-    *out_clip_pos = camera.projection * camera.view * world_pos.extend(1.0);
+    *out_clip_pos = camera.view_projection() * world_pos.extend(1.0);
 }
 
 #[cfg(feature = "renderlet_fragment")]

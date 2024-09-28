@@ -435,12 +435,12 @@ pub fn fragment_impl<A, T, C, S>(
     let specular = sample_specular_reflection(
         prefiltered,
         prefiltered_sampler,
-        camera.position,
+        camera.position(),
         in_pos,
         n,
         roughness,
     );
-    let brdf = sample_brdf(brdf, brdf_sampler, camera.position, in_pos, n, roughness);
+    let brdf = sample_brdf(brdf, brdf_sampler, camera.position(), in_pos, n, roughness);
 
     fn colorize(u: Vec3) -> Vec4 {
         ((u.alt_norm_or_zero() + Vec3::splat(1.0)) / 2.0).extend(1.0)
@@ -529,7 +529,7 @@ pub fn fragment_impl<A, T, C, S>(
 
     *output = if material.has_lighting {
         shade_fragment(
-            camera.position,
+            camera.position(),
             n,
             in_pos,
             albedo.xyz(),

@@ -3,12 +3,7 @@ use std::{any::Any, sync::Arc};
 
 use example::{camera::CameraController, utils::*};
 use glam::*;
-use renderling::{
-    bvol::{Aabb, Frustum},
-    math::hex_to_vec4,
-    prelude::*,
-    tonemapping::srgba_to_linear,
-};
+use renderling::{bvol::Aabb, math::hex_to_vec4, prelude::*, tonemapping::srgba_to_linear};
 use winit::{
     application::ApplicationHandler,
     event::{ElementState, KeyEvent},
@@ -175,8 +170,8 @@ impl ApplicationHandler for CullingExample {
 
 impl TestAppHandler for CullingExample {
     fn new(
-        event_loop: &ActiveEventLoop,
-        window: Arc<winit::window::Window>,
+        _event_loop: &ActiveEventLoop,
+        _window: Arc<winit::window::Window>,
         ctx: &Context,
     ) -> Self {
         let mut seed = 46;
@@ -244,7 +239,7 @@ impl TestAppHandler for CullingExample {
         seed += 1;
 
         let frustum_vertices =
-            stage.new_array(frustum_camera.0.frustum.get_mesh().into_iter().map(
+            stage.new_array(frustum_camera.0.frustum().get_mesh().into_iter().map(
                 |(position, normal)| Vertex {
                     position,
                     normal,

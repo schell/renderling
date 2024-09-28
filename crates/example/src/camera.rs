@@ -79,7 +79,7 @@ impl CameraController for TurntableCameraController {
             Mat4::look_at_rh(camera_position, self.center, Vec3::Y),
         );
         debug_assert!(
-            camera.view.is_finite(),
+            camera.view().is_finite(),
             "camera view is borked w:{w} h:{h} camera_position: {camera_position} center: {} \
              radius: {} phi: {} theta: {}",
             self.center,

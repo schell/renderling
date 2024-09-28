@@ -6,18 +6,14 @@ use crate::bvol::Frustum;
 
 /// A camera used for transforming the stage during rendering.
 ///
-/// Use [`Camera::new`] to create a new camera,
-/// or use `Camera::default` followed by `Camera::with_projection_and_view`
-/// to set the projection and view matrices. Using the `with_*` or `set_*`
-/// methods is preferred over setting the fields directly because they will
-/// also update the camera's position and resulting view frustum.
+/// Use [`Camera::new`] to create a new camera.
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[derive(Default, Clone, Copy, PartialEq, SlabItem)]
 pub struct Camera {
-    pub projection: Mat4,
-    pub view: Mat4,
-    pub position: Vec3,
-    pub frustum: Frustum,
+    projection: Mat4,
+    view: Mat4,
+    position: Vec3,
+    frustum: Frustum,
 }
 
 impl Camera {
@@ -33,6 +29,10 @@ impl Camera {
     pub fn default_ortho2d(width: f32, height: f32) -> Self {
         let (projection, view) = default_ortho2d(width, height);
         Camera::new(projection, view)
+    }
+
+    pub fn projection(&self) -> Mat4 {
+        self.projection
     }
 
     pub fn set_projection_and_view(&mut self, projection: Mat4, view: Mat4) {
@@ -56,6 +56,10 @@ impl Camera {
         self
     }
 
+    pub fn view(&self) -> Mat4 {
+        self.view
+    }
+
     pub fn set_view(&mut self, view: Mat4) {
         self.set_projection_and_view(self.projection, view);
     }
@@ -63,6 +67,18 @@ impl Camera {
     pub fn with_view(mut self, view: Mat4) -> Self {
         self.set_view(view);
         self
+    }
+
+    pub fn position(&self) -> Vec3 {
+        self.position
+    }
+
+    pub fn frustum(&self) -> Frustum {
+        self.frustum
+    }
+
+    pub fn view_projection(&self) -> Mat4 {
+        self.projection * self.view
     }
 }
 

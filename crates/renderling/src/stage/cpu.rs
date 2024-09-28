@@ -888,15 +888,20 @@ impl Stage {
     pub fn render(&self, view: &wgpu::TextureView) {
         let num_draw_calls = self.draws.read().unwrap().hybrids.len();
         let (slab_buffer, maybe_indirect_draw_buffer) = self.tick_internal();
-        if let Some(indirect_buffer) = maybe_indirect_draw_buffer.as_ref() {
-            if let Some(compute_culling) = self.compute_culling.write().unwrap().as_mut() {
-                compute_culling.run(
-                    &self.device,
-                    &self.queue,
-                    &slab_buffer,
-                    indirect_buffer,
-                    num_draw_calls as u32,
-                );
+        // Only do compute culling if there are things we need to draw, otherwise
+        // `wgpu` will err with something like:
+        // "Buffer with 'indirect draw upkeep' label binding size is zero"
+        if num_draw_calls > 0 {
+            if let Some(indirect_buffer) = maybe_indirect_draw_buffer.as_ref() {
+                if let Some(compute_culling) = self.compute_culling.write().unwrap().as_mut() {
+                    compute_culling.run(
+                        &self.device,
+                        &self.queue,
+                        &slab_buffer,
+                        indirect_buffer,
+                        num_draw_calls as u32,
+                    );
+                }
             }
         }
         {

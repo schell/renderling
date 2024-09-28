@@ -1213,12 +1213,7 @@ mod test {
             .with_lighting(false)
             .with_bloom(false)
             .with_background_color(Vec3::splat(0.0).extend(1.0));
-        let camera = stage.new_value(Camera {
-            projection,
-            view,
-            position,
-            ..Default::default()
-        });
+        let camera = stage.new_value(Camera::new(projection, view));
         let _doc = stage
             .load_gltf_document_from_path(
                 "../../gltf/gltfTutorial_008_SimpleMeshes.gltf",
@@ -1245,12 +1240,7 @@ mod test {
         let projection = crate::camera::perspective(20.0, 20.0);
         let eye = Vec3::new(0.5, 0.5, 2.0);
         let view = crate::camera::look_at(eye, Vec3::new(0.5, 0.5, 0.0), Vec3::Y);
-        let camera = stage.new_value(Camera {
-            projection,
-            view,
-            position: Vec3::new(0.5, 0.5, 2.0),
-            ..Default::default()
-        });
+        let camera = stage.new_value(Camera::new(projection, view));
 
         let _doc = stage
             .load_gltf_document_from_path(
