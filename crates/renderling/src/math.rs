@@ -493,15 +493,7 @@ pub const CUBE: [Vec3; 36] = {
     let p7 = Vec3::new(-0.5, -0.5, -0.5);
     let p6 = Vec3::new(0.5, -0.5, -0.5);
     let p5 = Vec3::new(0.5, -0.5, 0.5);
-
-    [
-        p0, p2, p1, p0, p3, p2, // top
-        p0, p4, p3, p4, p5, p3, // front
-        p3, p6, p2, p3, p5, p6, // right
-        p1, p7, p0, p7, p4, p0, // left
-        p4, p6, p5, p4, p7, p6, // bottom
-        p2, p7, p1, p2, p6, p7, // back
-    ]
+    convex_mesh([p0, p1, p2, p3, p4, p5, p6, p7])
 };
 
 pub fn reflect(i: Vec3, n: Vec3) -> Vec3 {
@@ -512,6 +504,17 @@ pub fn reflect(i: Vec3, n: Vec3) -> Vec3 {
 pub struct Plane {
     pub point: Vec3,
     pub norm: Vec3,
+}
+
+pub const fn convex_mesh([p0, p1, p2, p3, p4, p5, p6, p7]: [Vec3; 8]) -> [Vec3; 36] {
+    [
+        p0, p2, p1, p0, p3, p2, // top
+        p0, p4, p3, p4, p5, p3, // front
+        p3, p6, p2, p3, p5, p6, // right
+        p1, p7, p0, p7, p4, p0, // left
+        p4, p6, p5, p4, p7, p6, // bottom
+        p2, p7, p1, p2, p6, p7, // back
+    ]
 }
 
 #[cfg(test)]

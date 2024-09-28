@@ -26,6 +26,8 @@ use camera::{
 pub mod time;
 use time::FPSCounter;
 
+pub mod utils;
+
 const FONT_BYTES: &[u8] =
     include_bytes!("../../../fonts/Recursive Mn Lnr St Med Nerd Font Complete.ttf");
 
@@ -119,7 +121,7 @@ pub struct App {
     document: Option<GltfDocument>,
     animators: Option<Vec<Animator>>,
     animations_conflict: bool,
-    pub camera_controller: Box<dyn CameraController>,
+    pub camera_controller: Box<dyn CameraController + 'static>,
     ui: AppUi,
 }
 

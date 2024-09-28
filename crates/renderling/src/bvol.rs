@@ -6,15 +6,17 @@
 // Also, here we use `glam`, whereas `treeculler` uses its own internal
 // primitives.
 use crabslab::SlabItem;
-use glam::{Vec3, Vec4, Vec4Swizzles};
+use glam::{Mat4, Vec3, Vec4, Vec4Swizzles};
 #[cfg(target_arch = "spirv")]
 use spirv_std::num_traits::Float;
 
-use crate::camera::Camera;
+use crate::{camera::Camera, transform::Transform};
 
 /// Normalize a plane.
 pub fn normalize_plane(mut plane: Vec4) -> Vec4 {
-    let normal_magnitude = (plane.x.powi(2) + plane.y.powi(2) + plane.z.powi(2)).sqrt();
+    let normal_magnitude = (plane.x.powi(2) + plane.y.powi(2) + plane.z.powi(2))
+        .sqrt()
+        .max(f32::EPSILON);
     plane.x /= normal_magnitude;
     plane.y /= normal_magnitude;
     plane.z /= normal_magnitude;
@@ -119,6 +121,51 @@ impl Aabb {
     pub fn is_zero(&self) -> bool {
         self.min == self.max
     }
+
+    /// Determines whether this `Aabb` can be seen by `camera` after being transformed by
+    /// `transform`.
+    pub fn is_outside_camera_view(&self, camera: &Camera, transform: Transform) -> bool {
+        let transform = Mat4::from(transform);
+        let min = transform.transform_point3(self.min);
+        let max = transform.transform_point3(self.max);
+        Aabb::new(min, max).is_outside_frustum(camera.frustum)
+    }
+
+    #[cfg(not(target_arch = "spirv"))]
+    /// Return a triangle mesh connecting this `Aabb`'s corners.
+    ///
+    /// ```ignore
+    ///    y           1_____2     _____
+    ///    |           /    /|    /|    |  (same box, left and front sides removed)
+    ///    |___x     0/___3/ |   /7|____|6
+    ///   /           |    | /   | /    /
+    /// z/            |____|/   4|/____/5
+    ///
+    /// 7 is min
+    /// 3 is max
+    /// ```
+    pub fn get_mesh(&self) -> Vec<(Vec3, Vec3)> {
+        let p0 = Vec3::new(self.min.x, self.max.y, self.max.z);
+        let p1 = Vec3::new(self.min.x, self.max.y, self.min.z);
+        let p2 = Vec3::new(self.max.x, self.max.y, self.min.z);
+        let p3 = Vec3::new(self.max.x, self.max.y, self.max.z);
+        let p4 = Vec3::new(self.min.x, self.min.y, self.max.z);
+        let p7 = Vec3::new(self.min.x, self.min.y, self.min.z);
+        let p6 = Vec3::new(self.max.x, self.min.y, self.min.z);
+        let p5 = Vec3::new(self.max.x, self.min.y, self.max.z);
+
+        let positions = crate::math::convex_mesh([p0, p1, p2, p3, p4, p5, p6, p7]);
+        positions
+            .chunks_exact(3)
+            .flat_map(|chunk| match chunk {
+                [a, b, c] => {
+                    let n = crate::math::triangle_face_normal(*a, *b, *c);
+                    [(*a, n), (*b, n), (*c, n)]
+                }
+                _ => unreachable!(),
+            })
+            .collect()
+    }
 }
 
 /// Six planes of a view frustum.
@@ -170,6 +217,12 @@ impl Frustum {
             -mvp[3][2] + mvp[3][3],
         ));
 
+        // Account for the possibility that the projection is infinite.
+        //
+        // See <https://renderling.xyz/devlog/index.html#actual_frustum_culling>
+        // for more details.
+        let far = (-1.0 * near.xyz()).extend(far.w);
+
         let flt = intersect_planes(&far, &left, &top);
         let frt = intersect_planes(&far, &right, &top);
         let flb = intersect_planes(&far, &left, &bottom);
@@ -183,6 +236,30 @@ impl Frustum {
             planes: [near, left, right, bottom, top, far],
             points: [nlt, nrt, nlb, nrb, flt, frt, flb, frb],
         }
+    }
+
+    #[cfg(not(target_arch = "spirv"))]
+    /// Return a triangle mesh connecting this `Frustum`'s corners.
+    pub fn get_mesh(&self) -> Vec<(Vec3, Vec3)> {
+        let [nlt, nrt, nlb, nrb, flt, frt, flb, frb] = self.points;
+        let p0 = nlt;
+        let p1 = flt;
+        let p2 = frt;
+        let p3 = nrt;
+        let p4 = nlb;
+        let p5 = nrb;
+        let p6 = frb;
+        let p7 = flb;
+        crate::math::convex_mesh([p0, p1, p2, p3, p4, p5, p6, p7])
+            .chunks_exact(3)
+            .flat_map(|chunk| match chunk {
+                [a, b, c] => {
+                    let n = crate::math::triangle_face_normal(*a, *b, *c);
+                    [(*a, n), (*b, n), (*c, n)]
+                }
+                _ => unreachable!(),
+            })
+            .collect()
     }
 
     pub fn test_against_aabb(&self, aabb: &Aabb) -> bool {
@@ -278,6 +355,8 @@ impl BVol for Aabb {
 
 #[cfg(test)]
 mod test {
+    use glam::Mat4;
+
     use super::*;
 
     #[test]
@@ -295,5 +374,87 @@ mod test {
             max: Vec3::new(3.0, 3.0, 3.0),
         };
         assert!(!aabb_inside.is_outside_frustum(camera.frustum));
+    }
+
+    #[test]
+    fn frustum_from_infinite_rh() {
+        let aspect = 1.0;
+        let fovy = core::f32::consts::FRAC_PI_4;
+        let znear = 4.0;
+        let projection = Mat4::perspective_infinite_rh(fovy, aspect, znear);
+        let eye = Vec3::new(5.0, 20.0, 10.0);
+        let target = Vec3::ZERO;
+        let up = Vec3::Y;
+        let view = Mat4::look_at_rh(eye, target, up);
+        let camera = Camera::new(projection, view);
+
+        pub fn from_camera(camera: &Camera) -> Frustum {
+            let viewprojection = camera.projection * camera.view;
+            let mvp = viewprojection.to_cols_array_2d();
+            log::info!("mvp: {mvp:?}");
+
+            let left = normalize_plane(Vec4::new(
+                mvp[0][0] + mvp[0][3],
+                mvp[1][0] + mvp[1][3],
+                mvp[2][0] + mvp[2][3],
+                mvp[3][0] + mvp[3][3],
+            ));
+            log::info!("left: {left:?}");
+            let right = normalize_plane(Vec4::new(
+                -mvp[0][0] + mvp[0][3],
+                -mvp[1][0] + mvp[1][3],
+                -mvp[2][0] + mvp[2][3],
+                -mvp[3][0] + mvp[3][3],
+            ));
+            log::info!("right: {right:?}");
+            let bottom = normalize_plane(Vec4::new(
+                mvp[0][1] + mvp[0][3],
+                mvp[1][1] + mvp[1][3],
+                mvp[2][1] + mvp[2][3],
+                mvp[3][1] + mvp[3][3],
+            ));
+            log::info!("bottom: {bottom:?}");
+            let top = normalize_plane(Vec4::new(
+                -mvp[0][1] + mvp[0][3],
+                -mvp[1][1] + mvp[1][3],
+                -mvp[2][1] + mvp[2][3],
+                -mvp[3][1] + mvp[3][3],
+            ));
+            log::info!("top: {top:?}");
+            let near = normalize_plane(Vec4::new(
+                mvp[0][2] + mvp[0][3],
+                mvp[1][2] + mvp[1][3],
+                mvp[2][2] + mvp[2][3],
+                mvp[3][2] + mvp[3][3],
+            ));
+            log::info!("near: {near:?}");
+            let unnormalized_far = Vec4::new(
+                -mvp[0][2] + mvp[0][3],
+                -mvp[1][2] + mvp[1][3],
+                -mvp[2][2] + mvp[2][3],
+                -mvp[3][2] + mvp[3][3],
+            );
+            let far = normalize_plane(unnormalized_far);
+            log::info!("unnormalized: {unnormalized_far:?}");
+            log::info!("far: {far:?}");
+            let far = (-1.0 * near.xyz()).extend(far.w);
+
+            let flt = intersect_planes(&far, &left, &top);
+            let frt = intersect_planes(&far, &right, &top);
+            let flb = intersect_planes(&far, &left, &bottom);
+            let frb = intersect_planes(&far, &right, &bottom);
+            let nlt = intersect_planes(&near, &left, &top);
+            let nrt = intersect_planes(&near, &right, &top);
+            let nlb = intersect_planes(&near, &left, &bottom);
+            let nrb = intersect_planes(&near, &right, &bottom);
+
+            Frustum {
+                planes: [near, left, right, bottom, top, far],
+                points: [nlt, nrt, nlb, nrb, flt, frt, flb, frb],
+            }
+        }
+
+        let frustum = from_camera(&camera);
+        log::info!("frustum: {frustum:#?}");
     }
 }

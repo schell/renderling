@@ -934,6 +934,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "example-culling"
+version = "0.1.0"
+dependencies = [
+ "env_logger",
+ "example",
+ "fastrand 2.1.1",
+ "log",
+ "renderling",
+ "winit",
+]
+
+[[package]]
 name = "example-wasm"
 version = "0.1.0"
 dependencies = [
@@ -979,9 +991,9 @@ dependencies = [
 
 [[package]]
 name = "fastrand"
-version = "2.1.0"
+version = "2.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9fc0510504f03c51ada170672ac806f1f105a88aa97a5281117e1ddc3368e51a"
+checksum = "e8c02a5121d4ea3eb16a80748c74f5549a5665e4c21333c6098f283870fbdea6"
 
 [[package]]
 name = "fdeflate"
@@ -2187,7 +2199,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ae1d5c74c9876f070d3e8fd503d748c7d974c3e48da8f41350fa5222ef9b4391"
 dependencies = [
  "atomic-waker",
- "fastrand 2.1.0",
+ "fastrand 2.1.1",
  "futures-io",
 ]
 
@@ -2540,6 +2552,8 @@ dependencies = [
  "ctor",
  "dagga",
  "env_logger",
+ "example",
+ "fastrand 2.1.1",
  "futures-lite 1.13.0",
  "glam",
  "gltf",

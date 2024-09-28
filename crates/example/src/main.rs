@@ -40,26 +40,6 @@ impl InnerApp {
 
     fn event(&mut self, event: WindowEvent) -> bool {
         match event {
-            winit::event::WindowEvent::MouseWheel { delta, .. } => {
-                let delta = match delta {
-                    winit::event::MouseScrollDelta::LineDelta(_, up) => up,
-                    winit::event::MouseScrollDelta::PixelDelta(pos) => pos.y as f32,
-                };
-
-                self.app.camera_controller.mouse_scroll(delta);
-            }
-            winit::event::WindowEvent::CursorMoved { position, .. } => {
-                self.app
-                    .camera_controller
-                    .mouse_moved(Vec2::new(position.x as f32, position.y as f32));
-            }
-            winit::event::WindowEvent::MouseInput { state, button, .. } => {
-                let is_pressed = matches!(state, winit::event::ElementState::Pressed);
-                let is_left_button = matches!(button, winit::event::MouseButton::Left);
-                self.app
-                    .camera_controller
-                    .mouse_button(is_pressed, is_left_button);
-            }
             winit::event::WindowEvent::DroppedFile(path) => {
                 log::trace!("got dropped file event: {}", path.display());
                 let path = format!("{}", path.display());
@@ -75,13 +55,6 @@ impl InnerApp {
                     },
                 ..
             } => return true,
-            winit::event::WindowEvent::KeyboardInput {
-                device_id: _,
-                event,
-                is_synthetic: _,
-            } => {
-                self.app.camera_controller.key(event);
-            }
             winit::event::WindowEvent::Resized(size) => {
                 let size = UVec2::new(size.width, size.height);
                 self.ctx.set_size(size);
@@ -90,7 +63,7 @@ impl InnerApp {
             winit::event::WindowEvent::RedrawRequested => {
                 self.ctx.get_device().poll(wgpu::Maintain::Wait);
             }
-            _ => {}
+            e => self.app.camera_controller.window_event(e),
         }
         false
     }

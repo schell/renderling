@@ -1,6 +1,7 @@
 [workspace]
 members = [
-    "crates/example",
+    "crates/example", 
+    "crates/example-culling",
     "crates/example-wasm",
     "crates/loading-bytes",
     "crates/renderling", 

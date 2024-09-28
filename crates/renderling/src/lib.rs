@@ -180,7 +180,13 @@ pub mod prelude {
     //! A prelude, meant to be glob-imported.
 
     pub extern crate glam;
-    pub use crate::{camera::*, pbr::Material, slab::*, stage::*, transform::Transform};
+    pub use crate::{
+        camera::*,
+        pbr::{light::*, Material},
+        slab::*,
+        stage::*,
+        transform::Transform,
+    };
 
     #[cfg(not(target_arch = "spirv"))]
     pub use crate::context::*;
@@ -199,6 +205,8 @@ macro_rules! println {
 
 #[cfg(test)]
 mod test {
+    use std::sync::Arc;
+
     use super::*;
     use crate::{
         atlas::AtlasImage,

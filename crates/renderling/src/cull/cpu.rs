@@ -107,19 +107,23 @@ impl ComputeCulling {
     pub fn run(
         &mut self,
         device: &wgpu::Device,
+        queue: &wgpu::Queue,
         slab_buffer: &wgpu::Buffer,
         indirect_draw_buffer: &wgpu::Buffer,
         indirect_draw_count: u32,
     ) {
         let mut encoder =
             device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: LABEL });
-        let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-            label: LABEL,
-            timestamp_writes: None,
-        });
-        compute_pass.set_pipeline(&self.pipeline);
-        let bindgroup = self.get_bindgroup(device, slab_buffer, indirect_draw_buffer);
-        compute_pass.set_bind_group(0, bindgroup, &[]);
-        compute_pass.dispatch_workgroups(indirect_draw_count / 32 + 1, 1, 1);
+        {
+            let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: LABEL,
+                timestamp_writes: None,
+            });
+            compute_pass.set_pipeline(&self.pipeline);
+            let bindgroup = self.get_bindgroup(device, slab_buffer, indirect_draw_buffer);
+            compute_pass.set_bind_group(0, bindgroup, &[]);
+            compute_pass.dispatch_workgroups(indirect_draw_count / 32 + 1, 1, 1);
+        }
+        queue.submit(Some(encoder.finish()));
     }
 }

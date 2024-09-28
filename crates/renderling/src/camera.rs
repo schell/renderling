@@ -68,6 +68,25 @@ impl Camera {
 
 /// Returns the projection and view matrices for a camera with default
 /// perspective.
+///
+/// The default projection and view matrices are defined as:
+///
+/// ```rust
+/// use renderling::prelude::*;
+///
+/// let width = 800.0;
+/// let height = 600.0;
+/// let aspect = width / height;
+/// let fovy = core::f32::consts::PI / 4.0;
+/// let znear = 0.1;
+/// let zfar = 100.0;
+/// let projection = Mat4::perspective_rh(fovy, aspect, znear, zfar)
+/// let eye = Vec3::new(0.0, 12.0, 20.0);
+/// let target = Vec3::ZERO;
+/// let up = Vec3::Y;
+/// let view = Mat4::look_at_rh(eye, target, up);
+/// assert_eq!(default_perspective(width, height), (projection, view));
+/// ```
 pub fn default_perspective(width: f32, height: f32) -> (Mat4, Mat4) {
     let projection = perspective(width, height);
     let eye = Vec3::new(0.0, 12.0, 20.0);

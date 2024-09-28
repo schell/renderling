@@ -3,25 +3,15 @@
 //! Frustum culling as explained in
 //! [the vulkan guide](https://vkguide.dev/docs/gpudriven/compute_culling/).
 use crabslab::Slab;
-use glam::Mat4;
 use glam::UVec3;
 use spirv_std::{arch::IndexUnchecked, spirv};
 
-use crate::bvol::Aabb;
-use crate::{camera::Camera, stage::DrawIndirectArgs, transform::Transform};
+use crate::stage::DrawIndirectArgs;
 
 #[cfg(not(target_arch = "spirv"))]
 mod cpu;
 #[cfg(not(target_arch = "spirv"))]
 pub use cpu::*;
-
-/// Determine (roughly) if an AABB is within the clip space after transformation.
-pub fn is_visible_in_clip_space(aabb: Aabb, camera: Camera, model: Transform) -> bool {
-    let transform = camera.projection * camera.view * Mat4::from(model);
-    let min = transform.project_point3(aabb.min);
-    let max = transform.project_point3(aabb.max);
-    !Aabb::new(min, max).is_outside_frustum(camera.frustum)
-}
 
 #[cfg(feature = "compute_frustum_culling")]
 #[spirv(compute(threads(32)))]
@@ -46,7 +36,7 @@ pub fn compute_frustum_culling(
     }
     let camera = slab.read(renderlet.camera_id);
     let model = slab.read(renderlet.transform_id);
-    if is_visible_in_clip_space(renderlet.bounds, camera, model) {
+    if renderlet.bounds.is_outside_camera_view(&camera, model) {
         arg.instance_count = 0;
     }
 }

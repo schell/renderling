@@ -322,6 +322,20 @@ impl Stage {
         self
     }
 
+    pub fn set_compute_culling(&mut self, has_compute_culling: bool) {
+        let mut guard = self.compute_culling.write().unwrap();
+        if has_compute_culling && guard.is_none() {
+            *guard = Some(ComputeCulling::new(&self.device));
+        } else {
+            let _ = guard.take();
+        }
+    }
+
+    pub fn with_compute_culling(mut self, has_compute_culling: bool) -> Self {
+        self.set_compute_culling(has_compute_culling);
+        self
+    }
+
     /// Set the MSAA multisample count.
     ///
     /// Set to `1` to disable MSAA. Setting to `0` will be treated the same as
@@ -878,6 +892,7 @@ impl Stage {
             if let Some(compute_culling) = self.compute_culling.write().unwrap().as_mut() {
                 compute_culling.run(
                     &self.device,
+                    &self.queue,
                     &slab_buffer,
                     indirect_buffer,
                     num_draw_calls as u32,

@@ -1,0 +1,12 @@
+[package]
+name = "example-culling"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+env_logger.workspace = true
+example = { path = "../example" }
+fastrand = "2.1.1"
+log.workspace = true
+renderling = { path = "../renderling" }
+winit.workspace = true
