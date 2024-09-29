@@ -119,11 +119,6 @@ impl Aabb {
         self.min.distance(self.max)
     }
 
-    pub fn is_outside_frustum(&self, frustum: Frustum) -> bool {
-        let (inside, _) = self.coherent_test_is_volume_inside_frustum(&frustum, 0);
-        !inside
-    }
-
     pub fn is_zero(&self) -> bool {
         self.min == self.max
     }
@@ -134,7 +129,7 @@ impl Aabb {
         let transform = Mat4::from(transform);
         let min = transform.transform_point3(self.min);
         let max = transform.transform_point3(self.max);
-        Aabb::new(min, max).is_outside_frustum(camera.frustum())
+        Aabb::new(min, max).is_inside_frustum(camera.frustum())
     }
 
     #[cfg(not(target_arch = "spirv"))]
@@ -295,10 +290,26 @@ impl Frustum {
     }
 }
 
-/// A bounding sphere.
+/// Bounding sphere consisting of a center and radius.
+#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
+#[derive(Clone, Copy, Default, PartialEq, SlabItem)]
 pub struct BoundingSphere {
     pub center: Vec3,
     pub radius: f32,
+}
+
+impl From<(Vec3, Vec3)> for BoundingSphere {
+    fn from((min, max): (Vec3, Vec3)) -> Self {
+        let center = (min + max) * 0.5;
+        let radius = center.distance(max);
+        BoundingSphere { center, radius }
+    }
+}
+
+impl From<Aabb> for BoundingSphere {
+    fn from(value: Aabb) -> Self {
+        (value.min, value.max).into()
+    }
 }
 
 impl BoundingSphere {
@@ -308,6 +319,15 @@ impl BoundingSphere {
             center: center.into(),
             radius,
         }
+    }
+
+    pub fn is_inside_camera_view(&self, camera: &Camera, transform: Transform) -> bool {
+        let center = Mat4::from(transform).transform_point3(self.center);
+        let scale = Vec3::splat(transform.scale.max_element());
+        let radius = Mat4::from_scale(scale)
+            .transform_point3(Vec3::new(self.radius, 0.0, 0.0))
+            .distance(Vec3::ZERO);
+        BoundingSphere::new(center, radius).is_inside_frustum(camera.frustum())
     }
 }
 
@@ -319,7 +339,7 @@ impl BVol for BoundingSphere {
         }
     }
 
-    fn intersects_with_plane(&self, plane: &Vec4) -> bool {
+    fn culls_this_plane(&self, plane: &Vec4) -> bool {
         dist_bpp(plane, self.center) < -self.radius
     }
 }
@@ -329,43 +349,48 @@ pub trait BVol {
     /// Returns an AABB that contains the bounding volume.
     fn get_aabb(&self) -> Aabb;
 
-    /// Checks if bounding volume intersects with a plane.
+    /// Checks if the given bounding volume is culled by this plane.
     ///
     /// Returns true if it does, false otherwise.
-    fn intersects_with_plane(&self, plane: &Vec4) -> bool;
+    fn culls_this_plane(&self, plane: &Vec4) -> bool;
 
-    /// Checks if bounding volume is inside the frustum "coherently".
+    fn is_inside_frustum(&self, frustum: Frustum) -> bool {
+        let (inside, _) = self.coherent_test_is_volume_outside_frustum(&frustum, 0);
+        !inside
+    }
+
+    /// Checks if bounding volume is outside the frustum "coherently".
+    ///
+    /// In order for a bounding volume to be inside the frustum, it must not be
+    /// culled by any plane.
     ///
     /// Coherence is provided by the `lpindex` argument, which should be the index of
-    /// the first plane found intersecting this volume, given as part of the return
+    /// the first plane found that culls this volume, given as part of the return
     /// value of this function.
     ///
-    /// Returns `true` if the volume is inside or intersecting the frust, `false` otherwise.
-    /// Returns the index of first plane found intersecting this volume, to cache and use later
+    /// Returns `true` if the volume is outside the frustum, `false` otherwise.
+    ///
+    /// Returns the index of first plane found that culls this volume, to cache and use later
     /// as a short circuit.
-    fn coherent_test_is_volume_inside_frustum(
+    fn coherent_test_is_volume_outside_frustum(
         &self,
         frustum: &Frustum,
         lpindex: u32,
     ) -> (bool, u32) {
-        if self.intersects_with_plane(&frustum.planes[lpindex as usize]) {
-            log::info!("bvol intersects 'coherent' plane {lpindex}");
+        if self.culls_this_plane(&frustum.planes[lpindex as usize]) {
             return (true, lpindex);
         }
 
         for i in 0..6 {
-            if (i != lpindex) && self.intersects_with_plane(&frustum.planes[i as usize]) {
-                log::info!("bvol intersects plane {lpindex}");
+            if (i != lpindex) && self.culls_this_plane(&frustum.planes[i as usize]) {
                 return (true, i);
             }
         }
 
         if !frustum.test_against_aabb(&self.get_aabb()) {
-            log::info!("frustum intersects bvol's AABB");
             return (true, lpindex);
         }
 
-        log::info!("bvol is outside the frustum");
         (false, lpindex)
     }
 }
@@ -375,7 +400,7 @@ impl BVol for Aabb {
         *self
     }
 
-    fn intersects_with_plane(&self, plane: &Vec4) -> bool {
+    fn culls_this_plane(&self, plane: &Vec4) -> bool {
         dist_bpp(plane, mi_vertex(plane, self)) < 0.0
     }
 }
@@ -394,13 +419,13 @@ mod test {
             min: Vec3::new(-10.0, -12.0, 20.0),
             max: Vec3::new(10.0, 12.0, 40.0),
         };
-        assert!(aabb_outside.is_outside_frustum(camera.frustum()));
+        assert!(aabb_outside.is_inside_frustum(camera.frustum()));
 
         let aabb_inside = Aabb {
             min: Vec3::new(-3.0, -3.0, -3.0),
             max: Vec3::new(3.0, 3.0, 3.0),
         };
-        assert!(!aabb_inside.is_outside_frustum(camera.frustum()));
+        assert!(!aabb_inside.is_inside_frustum(camera.frustum()));
     }
 
     #[test]

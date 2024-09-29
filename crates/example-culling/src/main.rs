@@ -3,7 +3,12 @@ use std::{any::Any, sync::Arc};
 
 use example::{camera::CameraController, utils::*};
 use glam::*;
-use renderling::{bvol::Aabb, math::hex_to_vec4, prelude::*, tonemapping::srgba_to_linear};
+use renderling::{
+    bvol::{Aabb, BoundingSphere},
+    math::hex_to_vec4,
+    prelude::*,
+    tonemapping::srgba_to_linear,
+};
 use winit::{
     application::ApplicationHandler,
     event::{ElementState, KeyEvent},
@@ -118,27 +123,15 @@ impl CullingExample {
                         aabb,
                         transform.id(),
                         app_camera.0.id(),
-                        if aabb.is_outside_camera_view(&frustum_camera.0, transform.get()) {
-                            material_outside.id()
-                        } else {
+                        if BoundingSphere::from(aabb)
+                            .is_inside_camera_view(&frustum_camera.0, transform.get())
+                        {
                             material_overlapping.id()
+                        } else {
+                            material_outside.id()
                         },
                     );
-                    let aabb_rez = (aabb_renderlet, aabb_vertices, transform);
-
-                    let transform = Mat4::from(aabb_transform);
-                    let min = transform.transform_point3(aabb.min);
-                    let max = transform.transform_point3(aabb.max);
-                    let aabb = Aabb::new(min, max);
-                    let (aabb_renderlet, aabb_vertices) = Self::add_aabb_renderlet(
-                        stage,
-                        aabb,
-                        Id::NONE,
-                        app_camera.0.id(),
-                        material_bounding.id(),
-                    );
-                    let bounding_box_rez = (aabb_renderlet, aabb_vertices);
-                    (aabb_rez, bounding_box_rez)
+                    (aabb_renderlet, aabb_vertices, transform)
                 })
                 .collect::<Vec<_>>(),
         )

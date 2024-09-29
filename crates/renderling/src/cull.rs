@@ -31,12 +31,12 @@ pub fn compute_frustum_culling(
 
     // Get the renderlet using the draw arg's renderlet id
     let renderlet = slab.read_unchecked(arg.first_instance);
-    if renderlet.bounds.is_zero() {
+    if renderlet.bounds.radius == 0.0 {
         return;
     }
     let camera = slab.read(renderlet.camera_id);
     let model = slab.read(renderlet.transform_id);
-    if renderlet.bounds.is_outside_camera_view(&camera, model) {
+    if !renderlet.bounds.is_inside_camera_view(&camera, model) {
         arg.instance_count = 0;
     }
 }
