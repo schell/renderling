@@ -1,10 +1,16 @@
 //! Bounding volumes and culling primitives.
 //!
-// The initial implementation here is taken from `treeculler`, which
-// unfortunately cannot compile to SPIR-V because of its use of `u8`.
-//
-// Also, here we use `glam`, whereas `treeculler` uses its own internal
-// primitives.
+//! The initial implementation here was gleaned from `treeculler`, which
+//! unfortunately cannot compile to SPIR-V because of its use of `u8`.
+//!
+//! Also, here we use `glam`, whereas `treeculler` uses its own internal
+//! primitives.
+//!
+//! More resources:
+//! * https://fgiesen.wordpress.com/2010/10/17/view-frustum-culling/
+//! * http://old.cescg.org/CESCG-2002/DSykoraJJelinek/
+//! * https://iquilezles.org/www/articles/frustumcorrect/frustumcorrect.htm
+
 use crabslab::SlabItem;
 use glam::{Mat4, Vec3, Vec4, Vec4Swizzles};
 #[cfg(target_arch = "spirv")]
@@ -114,7 +120,7 @@ impl Aabb {
     }
 
     pub fn is_outside_frustum(&self, frustum: Frustum) -> bool {
-        let (inside, _) = self.coherent_test_against_frustum(&frustum, 0);
+        let (inside, _) = self.coherent_test_is_volume_inside_frustum(&frustum, 0);
         !inside
     }
 
@@ -177,9 +183,11 @@ pub struct Frustum {
 }
 
 impl Frustum {
+    /// Compute a frustum in world space from the given [`Camera`].
     pub fn from_camera(camera: &Camera) -> Self {
         let viewprojection = camera.view_projection();
         let mvp = viewprojection.to_cols_array_2d();
+
         let left = normalize_plane(Vec4::new(
             mvp[0][0] + mvp[0][3],
             mvp[1][0] + mvp[1][3],
@@ -295,51 +303,41 @@ pub trait BVol {
     /// Checks if bounding volume intersects with a plane.
     ///
     /// Returns true if it does, false otherwise.
-    fn test_against_plane(&self, plane: &Vec4) -> bool;
+    fn intersects_with_plane(&self, plane: &Vec4) -> bool;
 
-    /// Checks if bounding volume is outside the frustum.
+    /// Checks if bounding volume is inside the frustum "coherently".
     ///
-    /// Sets a bit if the bounding volume is outside that bit's plane. Returns `1` if it is fully outside.
-    fn test_against_frustum(&self, frustum: &Frustum, mut mask: u32) -> u32 {
+    /// Coherence is provided by the `lpindex` argument, which should be the index of
+    /// the first plane found intersecting this volume, given as part of the return
+    /// value of this function.
+    ///
+    /// Returns `true` if the volume is inside or intersecting the frust, `false` otherwise.
+    /// Returns the index of first plane found intersecting this volume, to cache and use later
+    /// as a short circuit.
+    fn coherent_test_is_volume_inside_frustum(
+        &self,
+        frustum: &Frustum,
+        lpindex: u32,
+    ) -> (bool, u32) {
+        if self.intersects_with_plane(&frustum.planes[lpindex as usize]) {
+            log::info!("bvol intersects 'coherent' plane {lpindex}");
+            return (true, lpindex);
+        }
+
         for i in 0..6 {
-            if self.test_against_plane(&frustum.planes[i as usize]) {
-                return u32::MAX;
-            } else {
-                // This piece of code first shifts the hardcoded byte by i, which is used as an
-                // index, and then OR is used to set the index bit to one.
-                mask |= 0b1000_0000u32 >> i;
+            if (i != lpindex) && self.intersects_with_plane(&frustum.planes[i as usize]) {
+                log::info!("bvol intersects plane {lpindex}");
+                return (true, i);
             }
         }
 
         if !frustum.test_against_aabb(&self.get_aabb()) {
-            return u32::MAX;
+            log::info!("frustum intersects bvol's AABB");
+            return (true, lpindex);
         }
 
-        mask
-    }
-
-    /// Checks if bounding volume is outside the frustum coherently.
-    /// Coherence is provided by the `lpindex` argument, which should be the last plane
-    /// this volume got culled.
-    ///
-    /// Returns false if the volume is outside, true otherwise. Returns the last plane
-    /// this volume has been culled as an `u8`, to save it and use it later again.
-    fn coherent_test_against_frustum(&self, frustum: &Frustum, lpindex: u32) -> (bool, u32) {
-        if self.test_against_plane(&frustum.planes[lpindex as usize]) {
-            return (false, lpindex);
-        }
-
-        for i in 0..6 {
-            if (i != lpindex) && self.test_against_plane(&frustum.planes[i as usize]) {
-                return (false, i);
-            }
-        }
-
-        if !frustum.test_against_aabb(&self.get_aabb()) {
-            return (false, lpindex);
-        }
-
-        (true, lpindex)
+        log::info!("bvol is outside the frustum");
+        (false, lpindex)
     }
 }
 
@@ -348,14 +346,14 @@ impl BVol for Aabb {
         *self
     }
 
-    fn test_against_plane(&self, plane: &Vec4) -> bool {
+    fn intersects_with_plane(&self, plane: &Vec4) -> bool {
         dist_bpp(plane, mi_vertex(plane, self)) < 0.0
     }
 }
 
 #[cfg(test)]
 mod test {
-    use glam::Mat4;
+    use glam::{Mat4, Quat};
 
     use super::*;
 
@@ -377,84 +375,33 @@ mod test {
     }
 
     #[test]
-    fn frustum_from_infinite_rh() {
-        let aspect = 1.0;
-        let fovy = core::f32::consts::FRAC_PI_4;
-        let znear = 4.0;
-        let projection = Mat4::perspective_infinite_rh(fovy, aspect, znear);
-        let eye = Vec3::new(5.0, 20.0, 10.0);
-        let target = Vec3::ZERO;
-        let up = Vec3::Y;
-        let view = Mat4::look_at_rh(eye, target, up);
-        let camera = Camera::new(projection, view);
-
-        pub fn from_camera(camera: &Camera) -> Frustum {
-            let viewprojection = camera.view_projection();
-            let mvp = viewprojection.to_cols_array_2d();
-            log::info!("mvp: {mvp:?}");
-
-            let left = normalize_plane(Vec4::new(
-                mvp[0][0] + mvp[0][3],
-                mvp[1][0] + mvp[1][3],
-                mvp[2][0] + mvp[2][3],
-                mvp[3][0] + mvp[3][3],
-            ));
-            log::info!("left: {left:?}");
-            let right = normalize_plane(Vec4::new(
-                -mvp[0][0] + mvp[0][3],
-                -mvp[1][0] + mvp[1][3],
-                -mvp[2][0] + mvp[2][3],
-                -mvp[3][0] + mvp[3][3],
-            ));
-            log::info!("right: {right:?}");
-            let bottom = normalize_plane(Vec4::new(
-                mvp[0][1] + mvp[0][3],
-                mvp[1][1] + mvp[1][3],
-                mvp[2][1] + mvp[2][3],
-                mvp[3][1] + mvp[3][3],
-            ));
-            log::info!("bottom: {bottom:?}");
-            let top = normalize_plane(Vec4::new(
-                -mvp[0][1] + mvp[0][3],
-                -mvp[1][1] + mvp[1][3],
-                -mvp[2][1] + mvp[2][3],
-                -mvp[3][1] + mvp[3][3],
-            ));
-            log::info!("top: {top:?}");
-            let near = normalize_plane(Vec4::new(
-                mvp[0][2] + mvp[0][3],
-                mvp[1][2] + mvp[1][3],
-                mvp[2][2] + mvp[2][3],
-                mvp[3][2] + mvp[3][3],
-            ));
-            log::info!("near: {near:?}");
-            let unnormalized_far = Vec4::new(
-                -mvp[0][2] + mvp[0][3],
-                -mvp[1][2] + mvp[1][3],
-                -mvp[2][2] + mvp[2][3],
-                -mvp[3][2] + mvp[3][3],
-            );
-            let far = normalize_plane(unnormalized_far);
-            log::info!("unnormalized: {unnormalized_far:?}");
-            log::info!("far: {far:?}");
-            let far = (-1.0 * near.xyz()).extend(far.w);
-
-            let flt = intersect_planes(&far, &left, &top);
-            let frt = intersect_planes(&far, &right, &top);
-            let flb = intersect_planes(&far, &left, &bottom);
-            let frb = intersect_planes(&far, &right, &bottom);
-            let nlt = intersect_planes(&near, &left, &top);
-            let nrt = intersect_planes(&near, &right, &top);
-            let nlb = intersect_planes(&near, &left, &bottom);
-            let nrb = intersect_planes(&near, &right, &bottom);
-
-            Frustum {
-                planes: [near, left, right, bottom, top, far],
-                points: [nlt, nrt, nlb, nrb, flt, frt, flb, frb],
-            }
-        }
-
-        let frustum = from_camera(&camera);
-        log::info!("frustum: {frustum:#?}");
+    fn frustum_culling_debug_corner_case() {
+        // https://github.com/schell/renderling/issues/131
+        // https://renderling.xyz/devlog/index.html#frustum_culling_last_debugging__aabb_vs_frustum_corner_case
+        let camera = {
+            let aspect = 1.0;
+            let fovy = core::f32::consts::FRAC_PI_4;
+            let znear = 4.0;
+            let zfar = 1000.0;
+            let projection = Mat4::perspective_rh(fovy, aspect, znear, zfar);
+            let eye = Vec3::new(0.0, 0.0, 10.0);
+            let target = Vec3::ZERO;
+            let up = Vec3::Y;
+            let view = Mat4::look_at_rh(eye, target, up);
+            Camera::new(projection, view)
+        };
+        let aabb = Aabb {
+            min: Vec3::new(-3.2869213, -3.0652206, -3.8715153),
+            max: Vec3::new(3.2869213, 3.0652206, 3.8715153),
+        };
+        let transform = Transform {
+            translation: Vec3::new(7.5131035, -9.947085, -5.001645),
+            rotation: Quat::from_xyzw(0.4700742, 0.34307128, 0.6853008, -0.43783003),
+            scale: Vec3::new(1.0, 1.0, 1.0),
+        };
+        assert!(
+            !aabb.is_outside_camera_view(&camera, transform),
+            "aabb should be inside the frustum"
+        );
     }
 }

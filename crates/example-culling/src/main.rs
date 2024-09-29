@@ -31,6 +31,7 @@ struct CullingExample {
     lights: [Hybrid<Light>; 2],
     material_aabb_overlapping: Hybrid<Material>,
     material_aabb_outside: Hybrid<Material>,
+    material_aabb_bounds: Hybrid<Material>,
     material_frustum: Hybrid<Material>,
     frustum_camera: FrustumCamera,
     frustum_vertices: HybridArray<Vertex>,
@@ -46,6 +47,34 @@ impl CullingExample {
         Aabb::new(min, max)
     }
 
+    fn add_aabb_renderlet(
+        stage: &Stage,
+        aabb: Aabb,
+        transform_id: Id<Transform>,
+        camera_id: Id<Camera>,
+        material_id: Id<Material>,
+    ) -> (Hybrid<Renderlet>, GpuArray<Vertex>) {
+        let vertices =
+            stage.new_array(
+                aabb.get_mesh()
+                    .into_iter()
+                    .map(|(position, normal)| Vertex {
+                        position,
+                        normal,
+                        ..Default::default()
+                    }),
+            );
+        let renderlet = stage.new_value(Renderlet {
+            vertices_array: vertices.array(),
+            camera_id,
+            transform_id,
+            material_id,
+            ..Default::default()
+        });
+        stage.add_renderlet(&renderlet);
+        (renderlet, vertices.into_gpu_only())
+    }
+
     fn make_aabbs(
         seed: u64,
         stage: &Stage,
@@ -53,12 +82,14 @@ impl CullingExample {
         frustum_camera: &FrustumCamera,
         material_outside: &Hybrid<Material>,
         material_overlapping: &Hybrid<Material>,
+        material_bounding: &Hybrid<Material>,
     ) -> Box<dyn Any> {
         log::info!("generating aabbs with seed {seed}");
         fastrand::seed(seed);
         Box::new(
             (0..25u32)
-                .map(|_| {
+                .map(|i| {
+                    log::info!("aabb {i}");
                     let x = fastrand::f32() * MAX_DIST - MAX_DIST / 2.0;
                     let y = fastrand::f32() * MAX_DIST - MAX_DIST / 2.0;
                     let z = fastrand::f32() * MAX_DIST - MAX_DIST / 2.0;
@@ -74,36 +105,40 @@ impl CullingExample {
 
                     let center = Vec3::new(x, y, z);
                     let half_size = Vec3::new(w, h, l);
-                    log::info!("Aabb: {center} {half_size}");
                     let aabb = Self::make_aabb(Vec3::ZERO, half_size);
-                    let aabb_vertices =
-                        stage.new_array(aabb.get_mesh().into_iter().map(|(position, normal)| {
-                            Vertex {
-                                position,
-                                normal,
-                                ..Default::default()
-                            }
-                        }));
-                    let transform = stage.new_value(Transform {
+                    let aabb_transform = Transform {
                         translation: center,
                         rotation,
                         ..Default::default()
-                    });
-                    let aabb_renderlet = stage.new_value(Renderlet {
-                        vertices_array: aabb_vertices.array(),
-                        camera_id: app_camera.0.id(),
-                        transform_id: transform.id(),
-                        material_id: {
-                            if aabb.is_outside_camera_view(&frustum_camera.0, transform.get()) {
-                                material_outside.id()
-                            } else {
-                                material_overlapping.id()
-                            }
+                    };
+
+                    let transform = stage.new_value(aabb_transform);
+                    let (aabb_renderlet, aabb_vertices) = Self::add_aabb_renderlet(
+                        stage,
+                        aabb,
+                        transform.id(),
+                        app_camera.0.id(),
+                        if aabb.is_outside_camera_view(&frustum_camera.0, transform.get()) {
+                            material_outside.id()
+                        } else {
+                            material_overlapping.id()
                         },
-                        ..Default::default()
-                    });
-                    stage.add_renderlet(&aabb_renderlet);
-                    (aabb_renderlet, aabb_vertices, transform)
+                    );
+                    let aabb_rez = (aabb_renderlet, aabb_vertices, transform);
+
+                    let transform = Mat4::from(aabb_transform);
+                    let min = transform.transform_point3(aabb.min);
+                    let max = transform.transform_point3(aabb.max);
+                    let aabb = Aabb::new(min, max);
+                    let (aabb_renderlet, aabb_vertices) = Self::add_aabb_renderlet(
+                        stage,
+                        aabb,
+                        Id::NONE,
+                        app_camera.0.id(),
+                        material_bounding.id(),
+                    );
+                    let bounding_box_rez = (aabb_renderlet, aabb_vertices);
+                    (aabb_rez, bounding_box_rez)
                 })
                 .collect::<Vec<_>>(),
         )
@@ -141,6 +176,7 @@ impl ApplicationHandler for CullingExample {
                         &self.frustum_camera,
                         &self.material_aabb_outside,
                         &self.material_aabb_overlapping,
+                        &self.material_aabb_bounds,
                     ));
                     self.next_k += 1;
                 }
@@ -207,12 +243,18 @@ impl TestAppHandler for CullingExample {
             let target = Vec3::ZERO;
             let up = Vec3::Y;
             let view = Mat4::look_at_rh(eye, target, up);
+            // let projection = Mat4::orthographic_rh(-10.0, 10.0, -10.0, 10.0, -10.0, 10.0);
+            // let view = Mat4::IDENTITY;
             Camera::new(projection, view)
         });
+
+        let frustum = frustum_camera.0.frustum();
+        log::info!("frustum.planes: {:#?}", frustum.planes);
 
         let blue_color = srgba_to_linear(hex_to_vec4(0x7EACB5FF));
         let red_color = srgba_to_linear(hex_to_vec4(0xC96868FF));
         let yellow_color = srgba_to_linear(hex_to_vec4(0xFADFA1FF));
+        let white_color = srgba_to_linear(hex_to_vec4(0xFFF4EAFF));
 
         let material_aabb_overlapping = stage.new_value(Material {
             albedo_factor: blue_color,
@@ -226,7 +268,10 @@ impl TestAppHandler for CullingExample {
             albedo_factor: yellow_color,
             ..Default::default()
         });
-
+        let material_aabb_bounds = stage.new_value(Material {
+            albedo_factor: white_color,
+            ..Default::default()
+        });
         let app_camera = AppCamera(stage.new_value(Camera::default()));
         resources.push(Self::make_aabbs(
             seed,
@@ -235,6 +280,7 @@ impl TestAppHandler for CullingExample {
             &frustum_camera,
             &material_aabb_outside,
             &material_aabb_overlapping,
+            &material_aabb_bounds,
         ));
         seed += 1;
 
@@ -269,6 +315,7 @@ impl TestAppHandler for CullingExample {
             lights,
             material_aabb_overlapping,
             material_aabb_outside,
+            material_aabb_bounds,
             material_frustum,
             frustum_vertices,
             frustum_renderlet,
