@@ -6,6 +6,10 @@ on:
       - main
   pull_request:
 
+env:
+  # For setup-rust, see https://github.com/moonrepo/setup-rust/issues/22
+  GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
 jobs:
   renderling-build-shaders:
     runs-on: ubuntu-latest

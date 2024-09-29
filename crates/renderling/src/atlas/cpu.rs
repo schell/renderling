@@ -825,11 +825,7 @@ mod test {
             .with_background_color(Vec4::new(1.0, 1.0, 0.0, 1.0));
 
         let (projection, view) = crate::camera::default_ortho2d(w as f32, h as f32);
-        let camera = stage.new_value(Camera {
-            projection,
-            view,
-            ..Default::default()
-        });
+        let camera = stage.new_value(Camera::new(projection, view));
 
         let texels = AtlasImage::from_path("../../img/happy_mac.png").unwrap();
         let entries = stage.set_images(std::iter::repeat(texels).take(3)).unwrap();

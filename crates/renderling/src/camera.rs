@@ -2,20 +2,18 @@
 use crabslab::SlabItem;
 use glam::{Mat4, Vec3};
 
+use crate::bvol::Frustum;
+
 /// A camera used for transforming the stage during rendering.
 ///
 /// Use [`Camera::new`] to create a new camera.
-/// Or use `Camera::default` followed by `Camera::with_projection_and_view`
-/// to set the projection and view matrices. Using the `with_*` or `set_*`
-/// methods is preferred over setting the fields directly because they will
-/// also update the camera's position.
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
-#[repr(C)]
 #[derive(Default, Clone, Copy, PartialEq, SlabItem)]
 pub struct Camera {
-    pub projection: Mat4,
-    pub view: Mat4,
-    pub position: Vec3,
+    projection: Mat4,
+    view: Mat4,
+    position: Vec3,
+    frustum: Frustum,
 }
 
 impl Camera {
@@ -33,10 +31,15 @@ impl Camera {
         Camera::new(projection, view)
     }
 
+    pub fn projection(&self) -> Mat4 {
+        self.projection
+    }
+
     pub fn set_projection_and_view(&mut self, projection: Mat4, view: Mat4) {
         self.projection = projection;
         self.view = view;
         self.position = view.inverse().transform_point3(Vec3::ZERO);
+        self.frustum = Frustum::from_camera(self);
     }
 
     pub fn with_projection_and_view(mut self, projection: Mat4, view: Mat4) -> Self {
@@ -53,6 +56,10 @@ impl Camera {
         self
     }
 
+    pub fn view(&self) -> Mat4 {
+        self.view
+    }
+
     pub fn set_view(&mut self, view: Mat4) {
         self.set_projection_and_view(self.projection, view);
     }
@@ -61,10 +68,42 @@ impl Camera {
         self.set_view(view);
         self
     }
+
+    pub fn position(&self) -> Vec3 {
+        self.position
+    }
+
+    pub fn frustum(&self) -> Frustum {
+        self.frustum
+    }
+
+    pub fn view_projection(&self) -> Mat4 {
+        self.projection * self.view
+    }
 }
 
 /// Returns the projection and view matrices for a camera with default
 /// perspective.
+///
+/// The default projection and view matrices are defined as:
+///
+/// ```rust
+/// use renderling::prelude::*;
+/// use glam::*;
+///
+/// let width = 800.0;
+/// let height = 600.0;
+/// let aspect = width / height;
+/// let fovy = core::f32::consts::PI / 4.0;
+/// let znear = 0.1;
+/// let zfar = 100.0;
+/// let projection = Mat4::perspective_rh(fovy, aspect, znear, zfar);
+/// let eye = Vec3::new(0.0, 12.0, 20.0);
+/// let target = Vec3::ZERO;
+/// let up = Vec3::Y;
+/// let view = Mat4::look_at_rh(eye, target, up);
+/// assert_eq!(default_perspective(width, height), (projection, view));
+/// ```
 pub fn default_perspective(width: f32, height: f32) -> (Mat4, Mat4) {
     let projection = perspective(width, height);
     let eye = Vec3::new(0.0, 12.0, 20.0);

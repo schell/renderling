@@ -7,18 +7,29 @@ use std::{
 
 use renderling::{
     atlas::AtlasImage,
+    bvol::Aabb,
     camera::Camera,
-    math::{hex_to_vec4, Mat4, UVec2, Vec3, Vec4},
+    math::{Mat4, UVec2, Vec2, Vec3, Vec4},
     pbr::light::{DirectionalLight, Light},
     skybox::Skybox,
     slab::Hybrid,
     stage::{Animator, GltfDocument, Stage},
-    transform::Transform,
     Context,
 };
+use renderling_ui::{FontArc, Section, Text, Ui, UiPath, UiText};
 
-const RADIUS_SCROLL_DAMPENING: f32 = 0.001;
-const DX_DY_DRAG_DAMPENING: f32 = 0.01;
+pub mod camera;
+use camera::{
+    CameraControl, CameraController, TurntableCameraController, WasdMouseCameraController,
+};
+
+pub mod time;
+use time::FPSCounter;
+
+pub mod utils;
+
+const FONT_BYTES: &[u8] =
+    include_bytes!("../../../fonts/Recursive Mn Lnr St Med Nerd Font Complete.ttf");
 
 const DARK_BLUE_BG_COLOR: Vec4 = Vec4::new(
     0x30 as f32 / 255.0,
@@ -60,49 +71,76 @@ fn now() -> f64 {
     }
 }
 
+struct AppUi {
+    ui: Ui,
+    fps_text: UiText,
+    fps_counter: FPSCounter,
+    fps_background: UiPath,
+    last_fps_display: f64,
+}
+
+impl AppUi {
+    fn make_fps_widget(fps_counter: &FPSCounter, ui: &Ui) -> (UiText, UiPath) {
+        let translation = Vec2::new(2.0, 2.0);
+        let text = format!("{}fps", fps_counter.current_fps_string());
+        let fps_text = ui
+            .new_text()
+            .with_color(Vec3::ZERO.extend(1.0))
+            .with_section(Section::new().add_text(Text::new(&text).with_scale(32.0)))
+            .build();
+        fps_text.transform.set_translation(translation);
+        let background = ui
+            .new_path()
+            .with_fill_color(Vec4::ONE)
+            .with_rectangle(fps_text.bounds.0, fps_text.bounds.1)
+            .fill();
+        background.transform.set_translation(translation);
+        background.transform.set_z(-0.9);
+        (fps_text, background)
+    }
+
+    fn tick(&mut self) {
+        self.fps_counter.next_frame();
+        let now = now();
+        if now - self.last_fps_display >= 1.0 {
+            let (fps_text, background) = Self::make_fps_widget(&self.fps_counter, &self.ui);
+            self.fps_text = fps_text;
+            self.fps_background = background;
+            self.last_fps_display = now;
+        }
+    }
+}
+
 pub struct App {
     last_frame_instant: f64,
     skybox_image_bytes: Option<Vec<u8>>,
     loads: Arc<Mutex<HashMap<std::path::PathBuf, Vec<u8>>>>,
-
     pub stage: Stage,
     camera: Hybrid<Camera>,
     _light: Option<(Hybrid<DirectionalLight>, Hybrid<Light>)>,
-
     document: Option<GltfDocument>,
     animators: Option<Vec<Animator>>,
     animations_conflict: bool,
-
-    // look at
-    center: Vec3,
-    // distance from the origin
-    radius: f32,
-    // anglular position on a circle `radius` away from the origin on x,z
-    phi: f32,
-    // angular distance from y axis
-    theta: f32,
-    // is the left mouse button down
-    left_mb_down: bool,
-    // cursor position
-    last_cursor_position: Option<winit::dpi::PhysicalPosition<f64>>,
+    pub camera_controller: Box<dyn CameraController + 'static>,
+    ui: AppUi,
 }
 
 impl App {
-    pub fn new(r: &Context) -> Self {
-        let stage = r
+    pub fn new(ctx: &Context, camera_control: CameraControl) -> Self {
+        let stage = ctx
             .new_stage()
             .with_background_color(DARK_BLUE_BG_COLOR)
             .with_bloom_mix_strength(0.5)
             .with_bloom_filter_radius(4.0)
             .with_msaa_sample_count(4);
         let camera = stage.new_value(Camera::default());
-        let sunlight = stage.new_value(DirectionalLight {
-            direction: Vec3::NEG_Y,
-            color: hex_to_vec4(0xFDFBD3FF),
-            intensity: 10.0,
-        });
-        let light = stage.new_value(Light::from(sunlight.id()));
-        stage.set_lights([light.id()]);
+        // let sunlight = stage.new_value(DirectionalLight {
+        //     direction: Vec3::NEG_Y,
+        //     color: hex_to_vec4(0xFDFBD3FF),
+        //     intensity: 10.0,
+        // });
+        // let light = stage.new_value(Light::from(sunlight.id()));
+        // stage.set_lights([light.id()]);
 
         stage
             .set_atlas_size(wgpu::Extent3d {
@@ -112,16 +150,22 @@ impl App {
             })
             .unwrap();
 
-        let radius = 6.0;
-        let phi = 0.0;
-        let theta = std::f32::consts::FRAC_PI_4;
-        let left_mb_down: bool = false;
-        let last_cursor_position: Option<winit::dpi::PhysicalPosition<f64>> = None;
+        let ui = Ui::new(ctx).with_background_color(Vec4::ZERO);
+        let _ = ui.add_font(FontArc::try_from_slice(FONT_BYTES).unwrap());
+        let fps_counter = FPSCounter::default();
+        let (fps_text, fps_background) = AppUi::make_fps_widget(&fps_counter, &ui);
 
         Self {
+            ui: AppUi {
+                ui,
+                fps_text,
+                fps_counter,
+                fps_background,
+                last_fps_display: now(),
+            },
             stage,
             camera,
-            _light: Some((sunlight, light)),
+            _light: None,
 
             document: None,
             animators: None,
@@ -130,43 +174,32 @@ impl App {
             skybox_image_bytes: None,
             loads: Arc::new(Mutex::new(HashMap::default())),
             last_frame_instant: now(),
-            radius,
-            center: Vec3::ZERO,
-            phi,
-            theta,
-            left_mb_down,
-            last_cursor_position,
+
+            camera_controller: match camera_control {
+                CameraControl::Turntable => Box::new(TurntableCameraController::default()),
+                CameraControl::WasdMouse => Box::new(WasdMouseCameraController::default()),
+            },
         }
     }
 
-    fn camera_position(radius: f32, phi: f32, theta: f32) -> Vec3 {
-        // convert from spherical to cartesian
-        let x = radius * theta.sin() * phi.cos();
-        let y = radius * theta.sin() * phi.sin();
-        let z = radius * theta.cos();
-        // in renderling Y is up so switch the y and z axis
-        Vec3::new(x, z, y)
+    pub fn tick(&mut self) {
+        self.camera_controller.tick();
+        self.tick_loads();
+        self.update_view();
+        self.animate();
+        self.ui.tick();
     }
 
-    pub fn update_camera_view(&self) {
-        let UVec2 { x: w, y: h } = self.stage.get_size();
-        let camera_position = Self::camera_position(self.radius, self.phi, self.theta);
-        let camera = Camera::new(
-            Mat4::perspective_infinite_rh(std::f32::consts::FRAC_PI_4, w as f32 / h as f32, 0.01),
-            Mat4::look_at_rh(camera_position, self.center, Vec3::Y),
-        );
-        debug_assert!(
-            camera.view.is_finite(),
-            "camera view is borked w:{w} h:{h} camera_position: {camera_position} center: {} \
-             radius: {} phi: {} theta: {}",
-            self.center,
-            self.radius,
-            self.phi,
-            self.theta
-        );
-        if self.camera.get() != camera {
-            self.camera.set(camera);
-        }
+    pub fn render(&self, ctx: &Context) {
+        let frame = ctx.get_next_frame().unwrap();
+        self.stage.render(&frame.view());
+        self.ui.ui.render(&frame.view());
+        frame.present();
+    }
+
+    pub fn update_view(&mut self) {
+        self.camera_controller
+            .update_camera(self.stage.get_size(), &self.camera);
     }
 
     fn load_hdr_skybox(&mut self, bytes: Vec<u8>) {
@@ -177,12 +210,10 @@ impl App {
         self.stage.set_skybox(skybox);
     }
 
-    fn load_gltf_model(&mut self, bytes: &[u8]) {
+    fn load_gltf_model(&mut self, path: impl AsRef<std::path::Path>, bytes: &[u8]) {
         log::info!("loading gltf");
-        self.phi = 0.0;
-        self.theta = std::f32::consts::FRAC_PI_4;
-        self.left_mb_down = false;
-        self.last_cursor_position = None;
+        self.camera_controller
+            .reset(Aabb::new(Vec3::NEG_ONE, Vec3::ONE));
         self.stage.clear_images().unwrap();
         self.document = None;
         log::debug!("ticking stage to reclaim buffers");
@@ -193,7 +224,21 @@ impl App {
         {
             Err(e) => {
                 log::error!("gltf loading error: {e}");
-                return;
+                if cfg!(not(target_arch = "wasm32")) {
+                    log::info!("attempting to load by filesystem");
+                    match self
+                        .stage
+                        .load_gltf_document_from_path(path, self.camera.id())
+                    {
+                        Ok(doc) => doc,
+                        Err(e) => {
+                            log::error!("gltf loading error: {e}");
+                            return;
+                        }
+                    }
+                } else {
+                    return;
+                }
             }
             Ok(doc) => doc,
         };
@@ -232,8 +277,6 @@ impl App {
         log::trace!("  nodes:");
         for node in nodes {
             let tfrm = Mat4::from(node.global_transform());
-            let decomposed = Transform::from(tfrm);
-            log::trace!("    {} {:?} {decomposed:?}", node.index, node.name);
             if let Some(mesh_index) = node.mesh {
                 // UNWRAP: safe because we know the node exists
                 for primitive in doc.meshes.get(mesh_index).unwrap().primitives.iter() {
@@ -246,15 +289,12 @@ impl App {
         }
 
         log::trace!("Bounding box: {min} {max}");
-        let halfway_point = min + ((max - min).normalize() * ((max - min).length() / 2.0));
-        let length = min.distance(max);
-        let radius = length * 1.25;
+        let bounding_box = Aabb::new(min, max);
+        self.camera_controller.reset(bounding_box);
+        self.camera_controller
+            .update_camera(self.stage.get_size(), &self.camera);
 
-        self.radius = radius;
-        self.center = halfway_point;
         self.last_frame_instant = now();
-
-        self.update_camera_view();
 
         if doc.animations.is_empty() {
             log::trace!("  animations: none");
@@ -297,67 +337,12 @@ impl App {
         for (path, bytes) in loaded.into_iter() {
             log::info!("loaded {}bytes from {}", bytes.len(), path.display());
             match is_file_supported(&path) {
-                Some(SupportedFileType::Gltf) => self.load_gltf_model(&bytes),
+                Some(SupportedFileType::Gltf) => self.load_gltf_model(path, &bytes),
                 Some(SupportedFileType::Hdr) => self.load_hdr_skybox(bytes),
                 None => {}
             }
         }
     }
-
-    pub fn zoom(&mut self, delta: f32) {
-        self.radius = (self.radius - (delta * RADIUS_SCROLL_DAMPENING)).max(0.0);
-        self.update_camera_view();
-    }
-
-    pub fn pan(&mut self, position: winit::dpi::PhysicalPosition<f64>) {
-        if self.left_mb_down {
-            if let Some(last_cursor_position) = self.last_cursor_position.as_ref() {
-                let dx = position.x - last_cursor_position.x;
-                let dy = position.y - last_cursor_position.y;
-
-                self.phi += dx as f32 * DX_DY_DRAG_DAMPENING;
-
-                let next_theta = self.theta - dy as f32 * DX_DY_DRAG_DAMPENING;
-                self.theta = next_theta.clamp(0.0001, std::f32::consts::PI);
-            }
-            self.last_cursor_position = Some(position);
-            self.update_camera_view();
-        }
-    }
-
-    pub fn mouse_button(&mut self, is_pressed: bool, is_left_button: bool) {
-        if is_left_button {
-            self.left_mb_down = is_pressed;
-            if !self.left_mb_down {
-                self.last_cursor_position = None;
-            }
-        }
-    }
-
-    // fn key_input(
-    //     &mut self,
-    //     r: &mut Context,
-    //     KeyboardInput {
-    //         state,
-    //         virtual_keycode,
-    //         ..
-    //     }: winit::event::KeyboardInput,
-    // ) {
-    //     if matches!(state, winit::event::ElementState::Pressed) {
-    //         return;
-    //     }
-    //     match virtual_keycode {
-    //         Some(winit::event::VirtualKeyCode::Space) => {
-    //             // clear all objects, cameras and lights
-    //             let scene = r.new_scene().build().unwrap();
-    //             r.graph.add_resource(scene);
-    //             self.loader = None;
-    //             self.ui
-    //                 .set_text_title("awaiting drag and dropped `.gltf` or `.glb`
-    // file");         }
-    //         _ => {}
-    //     };
-    // }
 
     /// Queues a load operation.
     pub fn load(&mut self, path: &str) {
@@ -377,7 +362,8 @@ impl App {
         #[cfg(not(target_arch = "wasm32"))]
         {
             let _ = std::thread::spawn(move || {
-                let bytes = std::fs::read(&path).unwrap();
+                let bytes = std::fs::read(&path)
+                    .unwrap_or_else(|e| panic!("could not load '{}': {e}", path.display()));
                 let mut loads = loads.lock().unwrap();
                 loads.insert(path, bytes);
             });
@@ -392,6 +378,7 @@ impl App {
         let now = now();
         let dt_seconds = now - self.last_frame_instant;
         self.last_frame_instant = now;
+        self.camera_controller.tick();
         if let Some(animators) = self.animators.as_mut() {
             if self.animations_conflict {
                 if let Some(animator) = animators.first_mut() {

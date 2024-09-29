@@ -105,7 +105,7 @@ pub fn tutorial_slabbed_renderlet(
     let transform = slab.read(renderlet.transform_id);
     let model = Mat4::from(transform);
     let camera = slab.read(renderlet.camera_id);
-    *clip_pos = camera.projection * camera.view * model * vertex.position.extend(1.0);
+    *clip_pos = camera.view_projection() * model * vertex.position.extend(1.0);
 }
 
 #[cfg(test)]

@@ -174,7 +174,7 @@ pub fn prefilter_environment_cubemap_vertex(
     let camera = slab.read(camera);
     *out_roughness = slab.read(roughness);
     *out_pos = in_pos;
-    *gl_pos = camera.projection * camera.view * in_pos.extend(1.0);
+    *gl_pos = camera.view_projection() * in_pos.extend(1.0);
 }
 
 #[cfg(feature = "prefilter_environment_cubemap_fragment")]
