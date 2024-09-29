@@ -465,9 +465,6 @@ impl<Buffer: IsBuffer> SlabAllocator<Buffer> {
         let update_set = self.get_updated_source_ids();
         // UNWRAP: panic on purpose
         *self.update_queue.write().unwrap() = Default::default();
-        if !update_set.is_empty() {
-            log::trace!("sources {:?}", update_set);
-        }
         // Prepare all of our GPU buffer writes
         let mut writes = RangeManager::<SlabUpdate>::default();
         {

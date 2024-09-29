@@ -44,9 +44,9 @@ pub fn skybox_vertex(
     let camera = slab.read(camera_id);
     let point = math::CUBE[vertex_index as usize];
     *local_pos = point;
-    let camera_view_without_translation = Mat3::from_mat4(camera.view);
+    let camera_view_without_translation = Mat3::from_mat4(camera.view());
     let rot_view = Mat4::from_mat3(camera_view_without_translation);
-    let position = camera.projection * rot_view * point.extend(1.0);
+    let position = camera.projection() * rot_view * point.extend(1.0);
     *clip_pos = position.xyww();
 }
 
@@ -81,7 +81,7 @@ pub fn skybox_cubemap_vertex(
     let camera = slab.read(camera_id);
     let pos = crate::math::CUBE[vertex_index as usize];
     *local_pos = pos;
-    *gl_pos = camera.projection * camera.view * pos.extend(1.0);
+    *gl_pos = camera.view_projection() * pos.extend(1.0);
 }
 
 #[cfg(feature = "skybox_equirectangular_fragment")]

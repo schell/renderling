@@ -26,7 +26,7 @@ pub use cpu::*;
 
 /// Method of addressing the edges of a texture.
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
-#[derive(Clone, Copy, Default, PartialEq, SlabItem)]
+#[derive(Clone, Copy, Default, PartialEq, Eq, Hash, PartialOrd, Ord, SlabItem)]
 pub struct TextureModes {
     pub s: TextureAddressMode,
     pub t: TextureAddressMode,
@@ -100,7 +100,7 @@ pub fn clamp(input: f32) -> f32 {
 /// How edges should be handled in texture addressing/wrapping.
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[repr(u32)]
-#[derive(Clone, Copy, PartialEq, Eq, Default, SlabItem)]
+#[derive(Clone, Copy, Default, PartialEq, Eq, Hash, PartialOrd, Ord, SlabItem)]
 pub enum TextureAddressMode {
     #[default]
     ClampToEdge,

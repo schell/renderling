@@ -67,7 +67,6 @@ impl RenderTarget {
                     label: Some("RenderTarget texture"),
                     view_formats: &[],
                 };
-                crate::texture::size_check(width, height);
                 *texture = Arc::new(device.create_texture(&texture_desc));
             }
         }
@@ -250,7 +249,6 @@ async fn new_headless_device_queue_and_target(
         view_formats: &[],
     };
     let (device, queue) = device(&adapter).await.context(CannotRequestDeviceSnafu)?;
-    crate::texture::size_check(width, height);
     let texture = Arc::new(device.create_texture(&texture_desc));
     let target = RenderTarget(RenderTargetInner::Texture { texture });
     Ok((adapter, device, queue, target))

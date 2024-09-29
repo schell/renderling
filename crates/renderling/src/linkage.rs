@@ -13,6 +13,8 @@ pub mod bloom_vertex;
 pub mod brdf_lut_convolution_fragment;
 #[cfg(feature = "brdf_lut_convolution_vertex")]
 pub mod brdf_lut_convolution_vertex;
+#[cfg(feature = "compute_frustum_culling")]
+pub mod compute_frustum_culling;
 #[cfg(feature = "generate_mipmap_fragment")]
 pub mod generate_mipmap_fragment;
 #[cfg(feature = "generate_mipmap_vertex")]
