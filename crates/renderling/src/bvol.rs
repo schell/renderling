@@ -419,13 +419,13 @@ mod test {
             min: Vec3::new(-10.0, -12.0, 20.0),
             max: Vec3::new(10.0, 12.0, 40.0),
         };
-        assert!(aabb_outside.is_inside_frustum(camera.frustum()));
+        assert!(!aabb_outside.is_inside_frustum(camera.frustum()));
 
         let aabb_inside = Aabb {
             min: Vec3::new(-3.0, -3.0, -3.0),
             max: Vec3::new(3.0, 3.0, 3.0),
         };
-        assert!(!aabb_inside.is_inside_frustum(camera.frustum()));
+        assert!(aabb_inside.is_inside_frustum(camera.frustum()));
     }
 
     #[test]

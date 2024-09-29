@@ -36,7 +36,6 @@ struct CullingExample {
     lights: [Hybrid<Light>; 2],
     material_aabb_overlapping: Hybrid<Material>,
     material_aabb_outside: Hybrid<Material>,
-    material_aabb_bounds: Hybrid<Material>,
     material_frustum: Hybrid<Material>,
     frustum_camera: FrustumCamera,
     frustum_vertices: HybridArray<Vertex>,
@@ -87,7 +86,6 @@ impl CullingExample {
         frustum_camera: &FrustumCamera,
         material_outside: &Hybrid<Material>,
         material_overlapping: &Hybrid<Material>,
-        material_bounding: &Hybrid<Material>,
     ) -> Box<dyn Any> {
         log::info!("generating aabbs with seed {seed}");
         fastrand::seed(seed);
@@ -169,7 +167,6 @@ impl ApplicationHandler for CullingExample {
                         &self.frustum_camera,
                         &self.material_aabb_outside,
                         &self.material_aabb_overlapping,
-                        &self.material_aabb_bounds,
                     ));
                     self.next_k += 1;
                 }
@@ -247,7 +244,6 @@ impl TestAppHandler for CullingExample {
         let blue_color = srgba_to_linear(hex_to_vec4(0x7EACB5FF));
         let red_color = srgba_to_linear(hex_to_vec4(0xC96868FF));
         let yellow_color = srgba_to_linear(hex_to_vec4(0xFADFA1FF));
-        let white_color = srgba_to_linear(hex_to_vec4(0xFFF4EAFF));
 
         let material_aabb_overlapping = stage.new_value(Material {
             albedo_factor: blue_color,
@@ -261,10 +257,6 @@ impl TestAppHandler for CullingExample {
             albedo_factor: yellow_color,
             ..Default::default()
         });
-        let material_aabb_bounds = stage.new_value(Material {
-            albedo_factor: white_color,
-            ..Default::default()
-        });
         let app_camera = AppCamera(stage.new_value(Camera::default()));
         resources.push(Self::make_aabbs(
             seed,
@@ -273,7 +265,6 @@ impl TestAppHandler for CullingExample {
             &frustum_camera,
             &material_aabb_outside,
             &material_aabb_overlapping,
-            &material_aabb_bounds,
         ));
         seed += 1;
 
@@ -308,7 +299,6 @@ impl TestAppHandler for CullingExample {
             lights,
             material_aabb_overlapping,
             material_aabb_outside,
-            material_aabb_bounds,
             material_frustum,
             frustum_vertices,
             frustum_renderlet,

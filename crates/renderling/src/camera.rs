@@ -89,6 +89,7 @@ impl Camera {
 ///
 /// ```rust
 /// use renderling::prelude::*;
+/// use glam::*;
 ///
 /// let width = 800.0;
 /// let height = 600.0;
@@ -96,7 +97,7 @@ impl Camera {
 /// let fovy = core::f32::consts::PI / 4.0;
 /// let znear = 0.1;
 /// let zfar = 100.0;
-/// let projection = Mat4::perspective_rh(fovy, aspect, znear, zfar)
+/// let projection = Mat4::perspective_rh(fovy, aspect, znear, zfar);
 /// let eye = Vec3::new(0.0, 12.0, 20.0);
 /// let target = Vec3::ZERO;
 /// let up = Vec3::Y;
