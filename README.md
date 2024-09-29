@@ -78,7 +78,7 @@ By default it uses a single uber-shader for rendering.
   - [x] automatic resource management (Arc/drop based)
 - [x] GPU slab allocator
   - [x] automatic resource management (Arc/drop based)
-- [ ] frustum culling
+- [x] frustum culling
 - [ ] occlusion culling
 - [ ] light tiling
 - [ ] shadow mapping
@@ -109,8 +109,8 @@ By default it uses a single uber-shader for rendering.
     - [x] textures, images, samplers
     - animation
       - [x] interpolation
-      - [x] skinning (still working on one [issue](https://github.com/schell/renderling/issues/120))
-      - [ ] morph targets (requires rebuild)
+      - [x] skinning
+      - [x] morph targets 
 - 2d (renderling-ui)
   - [x] text
   - [x] stroked and filled paths
