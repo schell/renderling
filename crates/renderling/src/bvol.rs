@@ -295,6 +295,35 @@ impl Frustum {
     }
 }
 
+/// A bounding sphere.
+pub struct BoundingSphere {
+    pub center: Vec3,
+    pub radius: f32,
+}
+
+impl BoundingSphere {
+    /// Creates a new bounding sphere.
+    pub fn new(center: impl Into<Vec3>, radius: f32) -> BoundingSphere {
+        BoundingSphere {
+            center: center.into(),
+            radius,
+        }
+    }
+}
+
+impl BVol for BoundingSphere {
+    fn get_aabb(&self) -> Aabb {
+        Aabb {
+            min: self.center - Vec3::splat(self.radius),
+            max: self.center + Vec3::splat(self.radius),
+        }
+    }
+
+    fn intersects_with_plane(&self, plane: &Vec4) -> bool {
+        dist_bpp(plane, self.center) < -self.radius
+    }
+}
+
 /// Bounding volume trait.
 pub trait BVol {
     /// Returns an AABB that contains the bounding volume.
