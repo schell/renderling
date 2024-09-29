@@ -670,9 +670,9 @@ dependencies = [
 
 [[package]]
 name = "crabslab"
-version = "0.5.1"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "397b9889820d56442e311e78a98611cb77aed881ab0d25705fcb4f4221311098"
+checksum = "fa3781ede0f1a6126c8dc76581800b73c76c029485f1ce11840661b9eade6138"
 dependencies = [
  "crabslab-derive",
  "futures-lite 1.13.0",
