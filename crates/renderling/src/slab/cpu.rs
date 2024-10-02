@@ -7,7 +7,7 @@ use core::{
 use crabslab::{Slab, SlabItem};
 use rustc_hash::{FxHashMap, FxHashSet};
 use snafu::prelude::*;
-use std::sync::{atomic::AtomicBool, Arc, Mutex, RwLock};
+use std::sync::{atomic::AtomicBool, Arc, Mutex, RwLock, Weak};
 
 pub use crabslab::{Array, Id};
 
@@ -629,6 +629,12 @@ impl SlabUpdate {
     }
 }
 
+struct WeakGpuRef {
+    notifier_index: usize,
+    u32_array: Array<u32>,
+    weak: Weak<Mutex<Option<SlabUpdate>>>,
+}
+
 pub trait UpdatesSlab: Send + Sync + std::any::Any {
     /// Return the id of this update source.
     fn id(&self) -> usize;
@@ -724,8 +730,8 @@ impl<T: SlabItem + Clone + Send + Sync + std::any::Any> UpdatesSlab for HybridAr
 ///
 /// Clones of a hybrid all point to the same CPU and GPU data.
 pub struct Hybrid<T> {
-    cpu_value: Arc<RwLock<T>>,
-    gpu_value: Gpu<T>,
+    pub(crate) cpu_value: Arc<RwLock<T>>,
+    pub(crate) gpu_value: Gpu<T>,
 }
 
 impl<T: core::fmt::Debug> core::fmt::Debug for Hybrid<T> {
@@ -843,19 +849,6 @@ impl<T: SlabItem + Clone + Send + Sync + 'static> Gpu<T> {
         // UNWRAP: safe because it's unbound
         self.notify.try_send(self.notifier_index).unwrap();
     }
-
-    /// Pair with a CPU value.
-    ///
-    /// ## Warning
-    /// No effort is made to ensure that the value provided is the same as the
-    /// value on the GPU.
-    pub fn into_hybrid(self, value: T) -> Hybrid<T> {
-        let cpu_value = Arc::new(RwLock::new(value));
-        Hybrid {
-            cpu_value,
-            gpu_value: self,
-        }
-    }
 }
 
 /// A array type that lives on the GPU.
@@ -936,19 +929,6 @@ impl<T: SlabItem + Clone + Send + Sync + 'static> GpuArray<T> {
             .push(SlabUpdate { array, elements });
         // UNWRAP: safe because it's unbounded
         self.notifier.try_send(self.notifier_index).unwrap();
-    }
-
-    /// Pair with a CPU value.
-    ///
-    /// ## Warning
-    /// No effort is made to ensure that the value provided is the same as the
-    /// value on the GPU.
-    pub fn into_hybrid(self, values: impl IntoIterator<Item = T>) -> HybridArray<T> {
-        let cpu_value = Arc::new(RwLock::new(values.into_iter().collect()));
-        HybridArray {
-            cpu_value,
-            gpu_value: self,
-        }
     }
 }
 
