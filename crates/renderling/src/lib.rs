@@ -678,6 +678,15 @@ mod test {
         stage.render(&frame.view());
         let img = frame.read_image().unwrap();
         img_diff::assert_img_eq("unlit_textured_cube_material_after.png", img);
+
+        // let size = stage.atlas.get_size();
+        // for i in 0..size.depth_or_array_layers {
+        //     let atlas_img = stage.atlas.atlas_img(&ctx, i);
+        //     img_diff::save(
+        //         &format!("unlit_texture_cube_atlas_layer_{i}.png"),
+        //         atlas_img,
+        //     );
+        // }
     }
 
     #[test]

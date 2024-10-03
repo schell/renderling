@@ -3,7 +3,7 @@
 //! The `Stage` object contains a slab buffer and a render pipeline.
 //! It is used to stage [`Renderlet`]s for rendering.
 use core::sync::atomic::{AtomicU32, Ordering};
-use crabslab::{Array, Id, Slab, SlabItem};
+use crabslab::{Id, Slab};
 use snafu::Snafu;
 use std::{
     ops::Deref,
@@ -452,9 +452,10 @@ impl Stage {
         &self,
         images: impl IntoIterator<Item = impl Into<AtlasImage>>,
     ) -> Result<Vec<Hybrid<AtlasTexture>>, StageError> {
+        let images = images.into_iter().map(|i| i.into()).collect::<Vec<_>>();
         let frames = self
             .atlas
-            .add_images(&self.device, &self.queue, self, images)?;
+            .add_images(&self.device, &self.queue, self, &images)?;
 
         // The textures bindgroup will have to be remade
         let _ = self.textures_bindgroup.lock().unwrap().take();
@@ -483,9 +484,10 @@ impl Stage {
         &self,
         images: impl IntoIterator<Item = impl Into<AtlasImage>>,
     ) -> Result<Vec<Hybrid<AtlasTexture>>, StageError> {
+        let images = images.into_iter().map(|i| i.into()).collect::<Vec<_>>();
         let frames = self
             .atlas
-            .set_images(&self.device, &self.queue, self, images)?;
+            .set_images(&self.device, &self.queue, self, &images)?;
 
         // The textures bindgroup will have to be remade
         let _ = self.textures_bindgroup.lock().unwrap().take();
@@ -849,22 +851,14 @@ impl Stage {
 /// Manages scene heirarchy on the [`Stage`].
 ///
 /// Clones all reference the same nested transform.
+///
+/// Only available on CPU.
 #[derive(Clone)]
 pub struct NestedTransform {
-    global_transform_id: Id<Transform>,
+    global_transform: Gpu<Transform>,
     local_transform: Arc<RwLock<Transform>>,
-
-    notifier_index: usize,
-    notify: async_channel::Sender<usize>,
-
     children: Arc<RwLock<Vec<NestedTransform>>>,
     parent: Arc<RwLock<Option<NestedTransform>>>,
-}
-
-impl Drop for NestedTransform {
-    fn drop(&mut self) {
-        let _ = self.notify.try_send(self.notifier_index);
-    }
 }
 
 impl core::fmt::Debug for NestedTransform {
@@ -874,14 +868,14 @@ impl core::fmt::Debug for NestedTransform {
             .read()
             .unwrap()
             .iter()
-            .map(|nt| nt.global_transform_id)
+            .map(|nt| nt.global_transform.id())
             .collect::<Vec<_>>();
         let parent = self
             .parent
             .read()
             .unwrap()
             .as_ref()
-            .map(|nt| nt.global_transform_id);
+            .map(|nt| nt.global_transform.id());
         f.debug_struct("NestedTransform")
             .field("local_transform", &self.local_transform)
             .field("children", &children)
@@ -890,61 +884,24 @@ impl core::fmt::Debug for NestedTransform {
     }
 }
 
-impl UpdatesSlab for NestedTransform {
-    fn id(&self) -> usize {
-        self.notifier_index
-    }
-
-    fn u32_array(&self) -> Array<u32> {
-        Array::new(
-            self.global_transform_id.inner(),
-            Transform::SLAB_SIZE as u32,
-        )
-    }
-
-    fn strong_count(&self) -> usize {
-        Arc::strong_count(&self.local_transform)
-    }
-
-    fn get_update(&self) -> Vec<SlabUpdate> {
-        let transform = self.get_global_transform();
-        let array = self.u32_array();
-        let mut elements = vec![0u32; Transform::SLAB_SIZE];
-        elements.write_indexed(&transform, 0);
-        vec![SlabUpdate { array, elements }]
-    }
-}
-
 impl NestedTransform {
     pub fn new(mngr: &SlabAllocator<impl IsBuffer>) -> Self {
-        let id = mngr.allocate::<Transform>();
-        let notifier_index = mngr.next_update_k();
-
         let nested = NestedTransform {
-            global_transform_id: id,
             local_transform: Arc::new(RwLock::new(Transform::default())),
-
-            notifier_index,
-            notify: mngr.notifier.0.clone(),
-
+            global_transform: mngr.new_value(Transform::default()).into_gpu_only(),
             children: Default::default(),
             parent: Default::default(),
         };
-
-        mngr.insert_update_source(notifier_index, nested.clone());
-
         nested.mark_dirty();
         nested
     }
 
-    #[cfg(test)]
-    pub(crate) fn get_notifier_index(&self) -> usize {
-        self.notifier_index
+    pub fn get_notifier_index(&self) -> usize {
+        self.global_transform.notifier_index
     }
 
     fn mark_dirty(&self) {
-        // UNWRAP: safe because it's unbounded
-        self.notify.try_send(self.notifier_index).unwrap();
+        self.global_transform.set(self.get_global_transform());
         for child in self.children.read().unwrap().iter() {
             child.mark_dirty();
         }
@@ -954,10 +911,12 @@ impl NestedTransform {
     ///
     /// This automatically applies the local transform to the global transform.
     pub fn modify(&self, f: impl Fn(&mut Transform)) {
-        // UNWRAP: panic on purpose
-        let mut local_guard = self.local_transform.write().unwrap();
-        f(&mut local_guard);
-        self.mark_dirty();
+        {
+            // UNWRAP: panic on purpose
+            let mut local_guard = self.local_transform.write().unwrap();
+            f(&mut local_guard);
+        }
+        self.mark_dirty()
     }
 
     /// Set the local transform.
@@ -984,7 +943,7 @@ impl NestedTransform {
     }
 
     pub fn global_transform_id(&self) -> Id<Transform> {
-        self.global_transform_id
+        self.global_transform.id()
     }
 
     pub fn add_child(&self, node: &NestedTransform) {
@@ -995,7 +954,7 @@ impl NestedTransform {
 
     pub fn remove_child(&self, node: &NestedTransform) {
         self.children.write().unwrap().retain_mut(|child| {
-            if child.global_transform_id == node.global_transform_id {
+            if child.global_transform.id() == node.global_transform.id() {
                 node.mark_dirty();
                 let _ = node.parent.write().unwrap().take();
                 false
@@ -1019,10 +978,7 @@ mod test {
 
     use crate::{
         camera::Camera,
-        stage::{
-            cpu::{SlabAllocator, UpdatesSlab},
-            NestedTransform, Renderlet, Vertex,
-        },
+        stage::{cpu::SlabAllocator, NestedTransform, Renderlet, Vertex},
         transform::Transform,
         Context,
     };
@@ -1060,22 +1016,27 @@ mod test {
     fn can_global_transform_calculation() {
         let slab = SlabAllocator::<Mutex<Vec<u32>>>::default();
         // Setup a hierarchy of transforms
+        log::info!("new");
         let root = NestedTransform::new(&slab);
         let child = NestedTransform::new(&slab);
+        log::info!("set");
         child.set(Transform {
             translation: Vec3::new(1.0, 0.0, 0.0),
             ..Default::default()
         });
+        log::info!("grandchild");
         let grandchild = NestedTransform::new(&slab);
         grandchild.set(Transform {
             translation: Vec3::new(1.0, 0.0, 0.0),
             ..Default::default()
         });
 
+        log::info!("hierarchy");
         // Build the hierarchy
         root.add_child(&child);
         child.add_child(&grandchild);
 
+        log::info!("get_global_transform");
         // Calculate global transforms
         let grandchild_global_transform = grandchild.get_global_transform();
 
@@ -1148,9 +1109,9 @@ mod test {
         let ctx = Context::headless(100, 100);
         let stage = ctx.new_stage();
         let r = stage.new_value(Renderlet::default());
-        assert_eq!(1, r.strong_count());
+        assert_eq!(1, r.ref_count());
 
         stage.add_renderlet(&r);
-        assert_eq!(1, r.strong_count());
+        assert_eq!(1, r.ref_count());
     }
 }
