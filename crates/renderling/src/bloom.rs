@@ -35,7 +35,7 @@ pub fn bloom_vertex(
 ///
 /// As taken from Call Of Duty method - presented at ACM Siggraph 2014.
 ///
-/// This particular method was customly designed to eliminate
+/// This particular method was designed to eliminate
 /// "pulsating artifacts and temporal stability issues".
 #[spirv(fragment)]
 pub fn bloom_downsample_fragment(

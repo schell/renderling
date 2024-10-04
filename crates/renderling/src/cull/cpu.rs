@@ -136,6 +136,7 @@ pub struct OcclusionCulling {
     pipeline: wgpu::ComputePipeline,
     bindgroup_layout: wgpu::BindGroupLayout,
     bindgroup: Option<wgpu::BindGroup>,
+    depth_pyramid: Texture,
 }
 
 impl OcclusionCulling {

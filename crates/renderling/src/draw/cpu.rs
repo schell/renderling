@@ -266,7 +266,10 @@ impl DrawCalls {
         // `wgpu` will err with something like:
         // "Buffer with 'indirect draw upkeep' label binding size is zero"
         if num_draw_calls > 0 {
-            // TODO: Cull on CPU when using direct drawing.
+            // TODO: Cull on GPU even when `multidraw_indirect` is unavailable.
+            //
+            // We can do this without multidraw by running GPU culling and then
+            // copying `indirect_buffer` back to the CPU.
             if let DrawingStrategy::Indirect(indirect) = &mut self.drawing_strategy {
                 if let Some(indirect_buffer) = indirect.slab.get_buffer() {
                     log::trace!("performing culling on {num_draw_calls} renderlets");
