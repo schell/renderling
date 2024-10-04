@@ -34,7 +34,7 @@ use renderling::{
     atlas::AtlasTexture,
     camera::Camera,
     math::{Quat, UVec2, Vec2, Vec3Swizzles, Vec4},
-    slab::{Hybrid, UpdatesSlab},
+    slab::Hybrid,
     stage::{NestedTransform, Renderlet, Stage},
     transform::Transform,
     Context,
@@ -146,6 +146,9 @@ pub struct Ui {
     // We keep a list of transforms that we use to "manually" order renderlets.
     //
     // This is required because interface elements have transparency.
+    //
+    // The `usize` key here is the update source notifier index, which is needed
+    // to re-order after any transform performs an update.
     transforms: Arc<RwLock<FxHashMap<usize, UiTransform>>>,
     default_stroke_options: Arc<RwLock<StrokeOptions>>,
     default_fill_options: Arc<RwLock<FillOptions>>,
@@ -240,7 +243,7 @@ impl Ui {
         self.transforms
             .write()
             .unwrap()
-            .insert(transform.transform.id(), transform.clone());
+            .insert(transform.transform.get_notifier_index(), transform.clone());
         transform
     }
 

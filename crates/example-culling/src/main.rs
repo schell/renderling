@@ -202,10 +202,7 @@ impl TestAppHandler for CullingExample {
     ) -> Self {
         let mut seed = 46;
         let mut resources = BagOfResources::default();
-        let stage = ctx
-            .new_stage()
-            .with_lighting(true)
-            .with_compute_culling(false);
+        let stage = ctx.new_stage().with_lighting(true);
         let sunlight_a = stage.new_value(DirectionalLight {
             direction: Vec3::new(-0.8, -1.0, 0.5).normalize(),
             color: Vec4::ONE,

@@ -7,7 +7,7 @@ use core::{
 use crabslab::{Slab, SlabItem};
 use rustc_hash::{FxHashMap, FxHashSet};
 use snafu::prelude::*;
-use std::sync::{atomic::AtomicBool, Arc, Mutex, RwLock};
+use std::sync::{atomic::AtomicBool, Arc, Mutex, RwLock, Weak};
 
 pub use crabslab::{Array, Id};
 
@@ -217,7 +217,7 @@ pub struct SlabAllocator<Buffer> {
     needs_expansion: Arc<AtomicBool>,
     buffer: Arc<RwLock<Option<Arc<Buffer>>>>,
     update_k: Arc<AtomicUsize>,
-    update_sources: Arc<RwLock<FxHashMap<usize, Box<dyn UpdatesSlab>>>>,
+    update_sources: Arc<RwLock<FxHashMap<usize, WeakGpuRef>>>,
     update_queue: Arc<RwLock<FxHashSet<usize>>>,
     recycles: Arc<RwLock<RangeManager<Range>>>,
 }
@@ -310,17 +310,11 @@ impl<Buffer: IsBuffer> SlabAllocator<Buffer> {
         self.update_k.fetch_add(1, Ordering::Relaxed)
     }
 
-    pub(crate) fn insert_update_source(&self, k: usize, source: impl UpdatesSlab) {
-        log::trace!(
-            "inserting update source {k} {}",
-            std::any::type_name_of_val(&source)
-        );
+    pub(crate) fn insert_update_source(&self, k: usize, source: WeakGpuRef) {
+        log::trace!("inserting update source {k}",);
         let _ = self.notifier.0.try_send(k);
         // UNWRAP: panic on purpose
-        self.update_sources
-            .write()
-            .unwrap()
-            .insert(k, Box::new(source));
+        self.update_sources.write().unwrap().insert(k, source);
     }
 
     fn len(&self) -> usize {
@@ -473,23 +467,23 @@ impl<Buffer: IsBuffer> SlabAllocator<Buffer> {
             let mut updates_guard = self.update_sources.write().unwrap();
             let mut recycles_guard = self.recycles.write().unwrap();
             for key in update_set {
-                let delete = if let Some(hybrid) = updates_guard.get_mut(&key) {
-                    let count = hybrid.strong_count();
-                    if count <= 1 {
+                let delete = if let Some(gpu_ref) = updates_guard.get_mut(&key) {
+                    let count = gpu_ref.weak.strong_count();
+                    if count == 0 {
                         // recycle this allocation
-                        let input_array = hybrid.u32_array();
-                        log::debug!("recycling {key} {input_array:?}",);
-                        if hybrid.u32_array().is_null() || hybrid.u32_array().is_empty() {
+                        log::debug!("recycling {key} {:?}", gpu_ref.u32_array);
+                        if gpu_ref.u32_array.is_null() || gpu_ref.u32_array.is_empty() {
                             log::debug!("  cannot recycle - empty or null");
                             true
                         } else {
-                            recycles_guard.add_range(input_array.into());
+                            recycles_guard.add_range(gpu_ref.u32_array.into());
                             true
                         }
                     } else {
-                        hybrid
+                        gpu_ref
                             .get_update()
                             .into_iter()
+                            .flatten()
                             .for_each(|u| writes.add_range(u));
                         false
                     }
@@ -607,6 +601,7 @@ impl SlabAllocator<wgpu::Buffer> {
     }
 }
 
+#[derive(Clone)]
 pub struct SlabUpdate {
     pub array: Array<u32>,
     pub elements: Vec<u32>,
@@ -629,92 +624,152 @@ impl SlabUpdate {
     }
 }
 
-pub trait UpdatesSlab: Send + Sync + std::any::Any {
-    /// Return the id of this update source.
-    fn id(&self) -> usize;
-
-    /// Returns the slab range of all possible updates.
-    fn u32_array(&self) -> Array<u32>;
-
-    /// Returns the number of references remaining in the wild.
-    fn strong_count(&self) -> usize;
-
-    /// Return the latest update, if any.
-    ///
-    /// ## Warning!
-    /// This will likely clear the update from its queue.
-    fn get_update(&self) -> Vec<SlabUpdate>;
+pub(crate) struct WeakGpuRef {
+    pub(crate) notifier_index: usize,
+    pub(crate) u32_array: Array<u32>,
+    pub(crate) weak: Weak<Mutex<Vec<SlabUpdate>>>,
+    pub(crate) takes_update: bool,
 }
 
-impl<T: SlabItem + Clone + Send + Sync + std::any::Any> UpdatesSlab for Gpu<T> {
-    fn id(&self) -> usize {
-        self.notifier_index
+impl WeakGpuRef {
+    fn get_update(&self) -> Option<Vec<SlabUpdate>> {
+        let strong = self.weak.upgrade()?;
+        let mut guard = strong.lock().unwrap();
+        let updates: Vec<_> = if self.takes_update {
+            std::mem::take(guard.as_mut())
+        } else {
+            guard.clone()
+        };
+
+        if updates.is_empty() {
+            None
+        } else {
+            Some(updates)
+        }
     }
 
-    fn strong_count(&self) -> usize {
-        Arc::strong_count(&self.update)
+    pub(crate) fn from_gpu<T: SlabItem>(gpu: &Gpu<T>) -> Self {
+        WeakGpuRef {
+            notifier_index: gpu.notifier_index,
+            u32_array: Array::new(gpu.id.inner(), T::SLAB_SIZE as u32),
+            weak: Arc::downgrade(&gpu.update),
+            takes_update: true,
+        }
     }
 
-    fn u32_array(&self) -> Array<u32> {
-        Array::new(self.id.inner(), T::SLAB_SIZE as u32)
-    }
-
-    fn get_update(&self) -> Vec<SlabUpdate> {
-        self.update.lock().unwrap().take().into_iter().collect()
-    }
-}
-
-impl<T: SlabItem + Clone + Send + Sync + std::any::Any> UpdatesSlab for Hybrid<T> {
-    fn id(&self) -> usize {
-        self.gpu_value.notifier_index
-    }
-
-    fn strong_count(&self) -> usize {
-        self.gpu_value.strong_count()
-    }
-
-    fn u32_array(&self) -> Array<u32> {
-        self.gpu_value.u32_array()
-    }
-
-    fn get_update(&self) -> Vec<SlabUpdate> {
-        self.gpu_value.get_update()
+    pub(crate) fn from_gpu_array<T: SlabItem>(gpu_array: &GpuArray<T>) -> Self {
+        WeakGpuRef {
+            notifier_index: gpu_array.notifier_index,
+            u32_array: gpu_array.array.into_u32_array(),
+            weak: Arc::downgrade(&gpu_array.updates),
+            takes_update: true,
+        }
     }
 }
 
-impl<T: SlabItem + Clone + Send + Sync + std::any::Any> UpdatesSlab for GpuArray<T> {
-    fn strong_count(&self) -> usize {
-        Arc::strong_count(&self.updates)
-    }
+// impl<T: SlabItem + Clone + Send + Sync + std::any::Any> UpdatesSlab for GpuArray<T> {
+//     fn strong_count(&self) -> usize {
+//         Arc::strong_count(&self.updates)
+//     }
 
-    fn u32_array(&self) -> Array<u32> {
-        self.array.into_u32_array()
-    }
+//     fn u32_array(&self) -> Array<u32> {
+//         self.array.into_u32_array()
+//     }
 
-    fn get_update(&self) -> Vec<SlabUpdate> {
-        std::mem::take(self.updates.lock().unwrap().as_mut())
-    }
+//     fn get_update(&self) -> Vec<SlabUpdate> {
+//         std::mem::take(self.updates.lock().unwrap().as_mut())
+//     }
 
-    fn id(&self) -> usize {
-        self.notifier_index
+//     fn id(&self) -> usize {
+//         self.notifier_index
+//     }
+// }
+
+// impl<T: SlabItem + Clone + Send + Sync + std::any::Any> UpdatesSlab for HybridArray<T> {
+//     fn strong_count(&self) -> usize {
+//         self.gpu_value.strong_count()
+//     }
+
+//     fn u32_array(&self) -> Array<u32> {
+//         self.gpu_value.u32_array()
+//     }
+
+//     fn get_update(&self) -> Vec<SlabUpdate> {
+//         self.gpu_value.get_update()
+//     }
+
+//     fn id(&self) -> usize {
+//         self.gpu_value.notifier_index
+//     }
+// }
+
+#[derive(Debug)]
+pub struct WeakGpu<T> {
+    pub(crate) id: Id<T>,
+    pub(crate) notifier_index: usize,
+    pub(crate) notify: async_channel::Sender<usize>,
+    pub(crate) update: Weak<Mutex<Vec<SlabUpdate>>>,
+}
+
+impl<T> Clone for WeakGpu<T> {
+    fn clone(&self) -> Self {
+        Self {
+            id: self.id,
+            notifier_index: self.notifier_index,
+            notify: self.notify.clone(),
+            update: self.update.clone(),
+        }
     }
 }
 
-impl<T: SlabItem + Clone + Send + Sync + std::any::Any> UpdatesSlab for HybridArray<T> {
-    fn strong_count(&self) -> usize {
-        self.gpu_value.strong_count()
+impl<T> WeakGpu<T> {
+    pub fn from_gpu(gpu: &Gpu<T>) -> Self {
+        Self {
+            id: gpu.id,
+            notifier_index: gpu.notifier_index,
+            notify: gpu.notify.clone(),
+            update: Arc::downgrade(&gpu.update),
+        }
     }
 
-    fn u32_array(&self) -> Array<u32> {
-        self.gpu_value.u32_array()
+    pub fn upgrade(&self) -> Option<Gpu<T>> {
+        Some(Gpu {
+            id: self.id,
+            notifier_index: self.notifier_index,
+            notify: self.notify.clone(),
+            update: self.update.upgrade()?,
+        })
+    }
+}
+
+#[derive(Debug)]
+pub struct WeakHybrid<T> {
+    pub(crate) weak_cpu: Weak<RwLock<T>>,
+    pub(crate) weak_gpu: WeakGpu<T>,
+}
+
+impl<T> Clone for WeakHybrid<T> {
+    fn clone(&self) -> Self {
+        Self {
+            weak_cpu: self.weak_cpu.clone(),
+            weak_gpu: self.weak_gpu.clone(),
+        }
+    }
+}
+
+impl<T> WeakHybrid<T> {
+    pub fn from_hybrid(h: &Hybrid<T>) -> Self {
+        Self {
+            weak_cpu: Arc::downgrade(&h.cpu_value),
+            weak_gpu: WeakGpu::from_gpu(&h.gpu_value),
+        }
     }
 
-    fn get_update(&self) -> Vec<SlabUpdate> {
-        self.gpu_value.get_update()
-    }
-
-    fn id(&self) -> usize {
-        self.gpu_value.notifier_index
+    pub fn upgrade(&self) -> Option<Hybrid<T>> {
+        Some(Hybrid {
+            cpu_value: self.weak_cpu.upgrade()?,
+            gpu_value: self.weak_gpu.upgrade()?,
+        })
     }
 }
 
@@ -724,8 +779,8 @@ impl<T: SlabItem + Clone + Send + Sync + std::any::Any> UpdatesSlab for HybridAr
 ///
 /// Clones of a hybrid all point to the same CPU and GPU data.
 pub struct Hybrid<T> {
-    cpu_value: Arc<RwLock<T>>,
-    gpu_value: Gpu<T>,
+    pub(crate) cpu_value: Arc<RwLock<T>>,
+    pub(crate) gpu_value: Gpu<T>,
 }
 
 impl<T: core::fmt::Debug> core::fmt::Debug for Hybrid<T> {
@@ -754,6 +809,11 @@ impl<T: SlabItem + Clone + Send + Sync + 'static> Hybrid<T> {
             cpu_value,
             gpu_value,
         }
+    }
+
+    /// Returns the number of clones of this Hybrid on the CPU.
+    pub fn ref_count(&self) -> usize {
+        Arc::strong_count(&self.gpu_value.update)
     }
 
     pub fn id(&self) -> Id<T> {
@@ -791,7 +851,7 @@ pub struct Gpu<T> {
     pub(crate) id: Id<T>,
     pub(crate) notifier_index: usize,
     pub(crate) notify: async_channel::Sender<usize>,
-    pub(crate) update: Arc<Mutex<Option<SlabUpdate>>>,
+    pub(crate) update: Arc<Mutex<Vec<SlabUpdate>>>,
 }
 
 impl<T> Drop for Gpu<T> {
@@ -822,7 +882,7 @@ impl<T: SlabItem + Clone + Send + Sync + 'static> Gpu<T> {
             update: Default::default(),
         };
         s.set(value);
-        mngr.insert_update_source(notifier_index, s.clone());
+        mngr.insert_update_source(notifier_index, WeakGpuRef::from_gpu(&s));
         s
     }
 
@@ -832,29 +892,16 @@ impl<T: SlabItem + Clone + Send + Sync + 'static> Gpu<T> {
 
     pub fn set(&self, value: T) {
         // UNWRAP: panic on purpose
-        *self.update.lock().unwrap() = Some(SlabUpdate {
+        *self.update.lock().unwrap() = vec![SlabUpdate {
             array: Array::new(self.id.inner(), T::SLAB_SIZE as u32),
             elements: {
                 let mut es = vec![0u32; T::SLAB_SIZE];
                 es.write(Id::new(0), &value);
                 es
             },
-        });
+        }];
         // UNWRAP: safe because it's unbound
         self.notify.try_send(self.notifier_index).unwrap();
-    }
-
-    /// Pair with a CPU value.
-    ///
-    /// ## Warning
-    /// No effort is made to ensure that the value provided is the same as the
-    /// value on the GPU.
-    pub fn into_hybrid(self, value: T) -> Hybrid<T> {
-        let cpu_value = Arc::new(RwLock::new(value));
-        Hybrid {
-            cpu_value,
-            gpu_value: self,
-        }
     }
 }
 
@@ -905,7 +952,7 @@ impl<T: SlabItem + Clone + Send + Sync + 'static> GpuArray<T> {
             array,
             updates: Arc::new(Mutex::new(vec![update])),
         };
-        mngr.insert_update_source(notifier_index, g.clone());
+        mngr.insert_update_source(notifier_index, WeakGpuRef::from_gpu_array(&g));
         g
     }
 
@@ -936,19 +983,6 @@ impl<T: SlabItem + Clone + Send + Sync + 'static> GpuArray<T> {
             .push(SlabUpdate { array, elements });
         // UNWRAP: safe because it's unbounded
         self.notifier.try_send(self.notifier_index).unwrap();
-    }
-
-    /// Pair with a CPU value.
-    ///
-    /// ## Warning
-    /// No effort is made to ensure that the value provided is the same as the
-    /// value on the GPU.
-    pub fn into_hybrid(self, values: impl IntoIterator<Item = T>) -> HybridArray<T> {
-        let cpu_value = Arc::new(RwLock::new(values.into_iter().collect()));
-        HybridArray {
-            cpu_value,
-            gpu_value: self,
-        }
     }
 }
 
@@ -989,6 +1023,10 @@ impl<T: SlabItem + Clone + Send + Sync + 'static> HybridArray<T> {
             cpu_value,
             gpu_value,
         }
+    }
+
+    pub fn ref_count(&self) -> usize {
+        Arc::strong_count(&self.gpu_value.updates)
     }
 
     pub fn len(&self) -> usize {
@@ -1037,16 +1075,32 @@ mod test {
         let mngr = SlabAllocator::<Mutex<Vec<u32>>>::default();
         {
             let value = mngr.new_value(666u32);
-            assert_eq!(2, value.strong_count());
+            assert_eq!(
+                1,
+                value.ref_count(),
+                "slab should not retain a count on value"
+            );
         }
         let _ = mngr.upkeep(());
-        assert_eq!(0, mngr.update_sources.read().unwrap().len());
+        assert_eq!(
+            0,
+            mngr.update_sources.read().unwrap().len(),
+            "value should have dropped with no refs"
+        );
         {
             let values = mngr.new_array([666u32, 420u32]);
-            assert_eq!(2, values.strong_count());
+            assert_eq!(
+                1,
+                values.ref_count(),
+                "slab should not retain a count on array"
+            );
         }
         let _ = mngr.upkeep(());
-        assert_eq!(0, mngr.update_sources.read().unwrap().len());
+        assert_eq!(
+            0,
+            mngr.update_sources.read().unwrap().len(),
+            "array should have dropped with no refs"
+        );
     }
 
     #[test]
@@ -1077,6 +1131,7 @@ mod test {
         let h5 = m.new_value(0u32);
         let h6 = m.new_value(0u32);
         let h7 = m.new_value(0u32);
+        log::info!("running upkeep");
         let _ = m.upkeep(());
         assert!(m.recycles.read().unwrap().ranges.is_empty());
         assert_eq!(4, m.update_sources.read().unwrap().len());
