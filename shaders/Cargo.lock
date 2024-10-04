@@ -430,6 +430,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9c198f91728a82281a64e1f4f9eeb25d82cb32a5de251c6bd1b5154d63a8e7bd"
 
 [[package]]
+name = "libm"
+version = "0.2.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4ec2a862134d2a7d32d7983ddcdd1c4923530833c9f2ea1a44fc5fa473989058"
+
+[[package]]
 name = "linux-raw-sys"
 version = "0.3.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -484,6 +490,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "578ede34cf02f8924ab9447f50c28075b4d3e5b269972345e7e0372b38c6cdcd"
 dependencies = [
  "autocfg",
+ "libm",
 ]
 
 [[package]]
@@ -569,7 +576,7 @@ checksum = "08d43f7aa6b08d49f382cde6a7982047c3426db949b1424bc4b7ec9ae12c6ce2"
 [[package]]
 name = "rustc_codegen_spirv"
 version = "0.9.0"
-source = "git+https://github.com/Firestar99/rust-gpu-new?branch=linker-speedup#4c4c77a4df9e2f9da228fe5ec7b33e6eb646229a"
+source = "git+https://github.com/schell/rust-gpu?branch=fix/v0.9.1-add-spirv-builder-cargo-features#f4453138ab66e06fee99082c66e324aa4798a233"
 dependencies = [
  "ar",
  "either",
@@ -585,6 +592,8 @@ dependencies = [
  "rustc-demangle",
  "rustc_codegen_spirv-types",
  "sanitize-filename",
+ "serde",
+ "serde_json",
  "smallvec",
  "spirt",
  "spirv-tools",
@@ -594,11 +603,10 @@ dependencies = [
 [[package]]
 name = "rustc_codegen_spirv-types"
 version = "0.9.0"
-source = "git+https://github.com/Firestar99/rust-gpu-new?branch=linker-speedup#4c4c77a4df9e2f9da228fe5ec7b33e6eb646229a"
+source = "git+https://github.com/schell/rust-gpu?branch=fix/v0.9.1-add-spirv-builder-cargo-features#f4453138ab66e06fee99082c66e324aa4798a233"
 dependencies = [
  "rspirv",
  "serde",
- "serde_json",
 ]
 
 [[package]]
@@ -701,13 +709,14 @@ dependencies = [
 [[package]]
 name = "spirt"
 version = "0.3.0"
-source = "git+https://github.com/Rust-GPU/spirt?rev=39140c7f74d4cf77412f619b3b74d3be236ee5d3#39140c7f74d4cf77412f619b3b74d3be236ee5d3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "64e1f7903720ff818d6da824edf2c4082c6e7a029a99317fd10c39dd7c40c7ff"
 dependencies = [
  "arrayvec",
  "bytemuck",
  "derive_more",
  "elsa",
- "indexmap 2.5.0",
+ "indexmap 1.9.2",
  "internal-iterator",
  "itertools",
  "lazy_static",
@@ -740,7 +749,7 @@ dependencies = [
 [[package]]
 name = "spirv-builder"
 version = "0.9.0"
-source = "git+https://github.com/Firestar99/rust-gpu-new?branch=linker-speedup#4c4c77a4df9e2f9da228fe5ec7b33e6eb646229a"
+source = "git+https://github.com/schell/rust-gpu?branch=fix/v0.9.1-add-spirv-builder-cargo-features#f4453138ab66e06fee99082c66e324aa4798a233"
 dependencies = [
  "memchr",
  "raw-string",
@@ -752,18 +761,18 @@ dependencies = [
 
 [[package]]
 name = "spirv-tools"
-version = "0.10.0"
+version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bcb3b0832881834994b7ec82b709ec5491043ceb4bf8101e27da6b5234b24261"
+checksum = "dc7c8ca2077515286505bd3ccd396e55ac5706e80322e1d6d22a82e1cad4f7c3"
 dependencies = [
  "spirv-tools-sys",
 ]
 
 [[package]]
 name = "spirv-tools-sys"
-version = "0.8.0"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "48e68b55a97aa6856e010a6f2477425875a97873e147bb0232160e73c45bdae7"
+checksum = "b4b32d9d6469cd6b50dcd6bd841204b5946b4fb7b70a97872717cdc417659c9a"
 dependencies = [
  "cc",
 ]

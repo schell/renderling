@@ -15,7 +15,7 @@ readme = "../../README.md"
 crate-type = ["rlib", "cdylib"]
 
 [features]
-default = ["gltf", "sdf", "shaders", "tutorial", "winit"]
+default = ["gltf", "shaders", "tutorial", "winit"]
 shaders = [
   "array_test",
   "bloom",
@@ -37,7 +37,6 @@ shaders = [
   "tonemapping_vertex"
 ]
 gltf = ["dep:gltf", "dep:serde_json"]
-sdf = []
 tutorial = [
   "tutorial_passthru_fragment",
   "tutorial_implicit_isosceles_vertex",
