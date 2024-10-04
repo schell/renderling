@@ -758,6 +758,10 @@ impl<T> Clone for WeakHybrid<T> {
 }
 
 impl<T> WeakHybrid<T> {
+    pub fn id(&self) -> Id<T> {
+        self.weak_gpu.id
+    }
+
     pub fn from_hybrid(h: &Hybrid<T>) -> Self {
         Self {
             weak_cpu: Arc::downgrade(&h.cpu_value),
@@ -770,6 +774,10 @@ impl<T> WeakHybrid<T> {
             cpu_value: self.weak_cpu.upgrade()?,
             gpu_value: self.weak_gpu.upgrade()?,
         })
+    }
+
+    pub fn strong_count(&self) -> usize {
+        self.weak_gpu.update.strong_count()
     }
 }
 

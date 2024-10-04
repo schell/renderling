@@ -1,13 +1,13 @@
 //! CPU-only side of renderling/draw.rs
 
-use std::sync::{Arc, RwLock, Weak};
+use std::sync::Arc;
 
 use crabslab::Id;
 use rustc_hash::FxHashMap;
 
 use crate::{
-    cull::ComputeCulling,
-    slab::{Gpu, Hybrid, SlabAllocator},
+    cull::FrustumCulling,
+    slab::{Gpu, Hybrid, SlabAllocator, WeakHybrid},
     stage::Renderlet,
     Context,
 };
@@ -15,29 +15,19 @@ use crate::{
 use super::DrawIndirectArgs;
 
 /// Used to track renderlets internally.
+#[repr(transparent)]
 struct InternalRenderlet {
-    id: Id<Renderlet>,
-    vertex_count: u32,
-    is_visible: bool,
-    weak_cpu: Weak<RwLock<Renderlet>>,
-    weak_gpu: Weak<dyn std::any::Any>,
+    inner: WeakHybrid<Renderlet>,
 }
 
 impl InternalRenderlet {
     fn has_external_references(&self) -> bool {
-        self.weak_gpu.strong_count() > 0
+        self.inner.strong_count() > 0
     }
 
     fn from_hybrid_renderlet(hr: &Hybrid<Renderlet>) -> Self {
-        let r = hr.get();
-        let weak_cpu = Arc::downgrade(&hr.cpu_value);
-        let weak_gpu = Arc::downgrade(&hr.gpu_value.update);
-        InternalRenderlet {
-            id: hr.id(),
-            vertex_count: r.get_vertex_count(),
-            is_visible: r.visible,
-            weak_cpu,
-            weak_gpu,
+        Self {
+            inner: WeakHybrid::from_hybrid(hr),
         }
     }
 }
@@ -45,13 +35,13 @@ impl InternalRenderlet {
 struct IndirectDraws {
     slab: SlabAllocator<wgpu::Buffer>,
     draws: Vec<Gpu<DrawIndirectArgs>>,
-    compute_culling: ComputeCulling,
+    compute_culling: FrustumCulling,
 }
 
 impl IndirectDraws {
     fn new(device: &wgpu::Device) -> Self {
         Self {
-            compute_culling: ComputeCulling::new(device),
+            compute_culling: FrustumCulling::new(device),
             slab: SlabAllocator::default(),
             draws: vec![],
         }
@@ -96,7 +86,7 @@ impl IndirectDraws {
                 .iter()
                 .map(|ir: &InternalRenderlet| {
                     self.slab
-                        .new_value(DrawIndirectArgs::from(ir.id))
+                        .new_value(DrawIndirectArgs::from(ir.inner.id()))
                         .into_gpu_only()
                 })
                 .collect();
@@ -191,7 +181,7 @@ impl DrawCalls {
     /// Returns the number of draw calls remaining in the queue.
     pub fn remove_renderlet(&mut self, renderlet: &Hybrid<Renderlet>) -> usize {
         let id = renderlet.id();
-        self.internal_renderlets.retain(|ir| ir.id != id);
+        self.internal_renderlets.retain(|ir| ir.inner.id() != id);
 
         if let DrawingStrategy::Indirect(indirect) = &mut self.drawing_strategy {
             indirect.invalidate();
@@ -212,7 +202,7 @@ impl DrawCalls {
         let mut m = FxHashMap::from_iter(
             std::mem::take(&mut self.internal_renderlets)
                 .into_iter()
-                .map(|r| (r.id, r)),
+                .map(|r| (r.inner.id(), r)),
         );
         for id in order.into_iter() {
             if let Some(renderlet) = m.remove(&id) {
@@ -241,21 +231,10 @@ impl DrawCalls {
         // Drop any renderlets that have no external references.
         self.internal_renderlets.retain_mut(|ir| {
             if ir.has_external_references() {
-                // Update the cached data (for direct drawing), if possible
-                //
-                // Note:
-                // If we can't upgrade here, it means the CPU value has been
-                // dropped. In that case we don't need to update the cache here,
-                // since the user can no longer update the cache either.
-                if let Some(arc_renderlet) = Weak::upgrade(&ir.weak_cpu) {
-                    let r = arc_renderlet.read().unwrap();
-                    ir.vertex_count = r.get_vertex_count();
-                    ir.is_visible = r.visible;
-                }
                 true
             } else {
                 redraw_args = true;
-                log::trace!("dropping '{:?}' from drawing", ir.id);
+                log::trace!("dropping '{:?}' from drawing", ir.inner.id());
                 false
             }
         });
@@ -324,9 +303,10 @@ impl DrawCalls {
                     log::trace!("drawing {num_draw_calls} renderlets using direct");
                     for ir in self.internal_renderlets.iter() {
                         // UNWRAP: panic on purpose
-                        if ir.is_visible {
-                            let vertex_range = 0..ir.vertex_count;
-                            let id = ir.id;
+                        if let Some(hr) = ir.inner.upgrade() {
+                            let ir = hr.get();
+                            let vertex_range = 0..ir.get_vertex_count();
+                            let id = hr.id();
                             let instance_range = id.inner()..id.inner() + 1;
                             render_pass.draw(vertex_range, instance_range);
                         }

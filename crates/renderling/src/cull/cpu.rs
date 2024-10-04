@@ -3,13 +3,13 @@
 const LABEL: Option<&str> = Some("compute-culling");
 
 /// Computes furstum culling on the GPU.
-pub struct ComputeCulling {
-    pipeline: wgpu::ComputePipeline,
+pub struct FrustumCulling {
+    frustum_pipeline: wgpu::ComputePipeline,
     bindgroup_layout: wgpu::BindGroupLayout,
     bindgroup: Option<wgpu::BindGroup>,
 }
 
-impl ComputeCulling {
+impl FrustumCulling {
     fn new_bindgroup(
         slab_buffer: &wgpu::Buffer,
         indirect_buffer: &wgpu::Buffer,
@@ -76,7 +76,7 @@ impl ComputeCulling {
             cache: None,
         });
         Self {
-            pipeline,
+            frustum_pipeline: pipeline,
             bindgroup_layout,
             bindgroup: None,
         }
@@ -119,7 +119,7 @@ impl ComputeCulling {
                 label: LABEL,
                 timestamp_writes: None,
             });
-            compute_pass.set_pipeline(&self.pipeline);
+            compute_pass.set_pipeline(&self.frustum_pipeline);
             let bindgroup = self.get_bindgroup(device, slab_buffer, indirect_draw_buffer);
             compute_pass.set_bind_group(0, bindgroup, &[]);
             compute_pass.dispatch_workgroups(indirect_draw_count / 32 + 1, 1, 1);
