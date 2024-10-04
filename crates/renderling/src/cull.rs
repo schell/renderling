@@ -6,7 +6,7 @@ use crabslab::Slab;
 use glam::UVec3;
 use spirv_std::{arch::IndexUnchecked, spirv};
 
-use crate::stage::DrawIndirectArgs;
+use crate::draw::DrawIndirectArgs;
 
 #[cfg(not(target_arch = "spirv"))]
 mod cpu;
@@ -27,10 +27,12 @@ pub fn compute_frustum_culling(
 
     // Get the draw arg
     let arg = unsafe { args.index_unchecked_mut(gid) };
-    arg.instance_count = 1;
-
     // Get the renderlet using the draw arg's renderlet id
     let renderlet = slab.read_unchecked(arg.first_instance);
+
+    arg.vertex_count = renderlet.get_vertex_count();
+    arg.instance_count = if renderlet.visible { 1 } else { 0 };
+
     if renderlet.bounds.radius == 0.0 {
         return;
     }

@@ -9,7 +9,9 @@ use crate::stage::{Renderlet, Vertex};
 /// Simple fragment shader that writes the input color to the output color.
 #[spirv(fragment)]
 pub fn tutorial_passthru_fragment(in_color: Vec4, output: &mut Vec4) {
-    *output = in_color;
+    use glam::Vec4Swizzles;
+    // This seems silly, but without it rust-gpu doesn't emit a .spv file...
+    *output = in_color.xyz().extend(in_color.w);
 }
 
 fn implicit_isosceles_triangle(vertex_index: u32) -> Vec4 {

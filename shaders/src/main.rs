@@ -47,9 +47,6 @@ struct Cli {
     #[clap(long)]
     features: Vec<String>,
 
-    ///// Cargo features to be passed to the shader crate compilation invocation.
-    //#[clap(long, short)]
-    //features: Vec<String>,
     /// Path to the output directory for the compiled shaders.
     #[clap(long, short, default_value = "../crates/renderling/src/linkage")]
     output_dir: std::path::PathBuf,
@@ -116,9 +113,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .multimodule(true);
 
         if no_default_features {
+            println!("setting cargo --no-default-features");
             builder = builder.shader_crate_default_features(false);
         }
         if !features.is_empty() {
+            println!("setting --features {features:?}");
             builder = builder.shader_crate_features(features);
         }
 

@@ -3,11 +3,10 @@
 //! The `Stage` object contains a slab buffer and a render pipeline.
 //! It is used to stage [`Renderlet`]s for rendering.
 use core::sync::atomic::{AtomicU32, Ordering};
-use crabslab::{Array, Id, Slab, SlabItem};
-use rustc_hash::FxHashMap;
+use crabslab::{Id, Slab};
 use snafu::Snafu;
 use std::{
-    ops::{Deref, DerefMut},
+    ops::Deref,
     sync::{atomic::AtomicBool, Arc, Mutex, RwLock},
 };
 
@@ -15,7 +14,7 @@ use crate::{
     atlas::{Atlas, AtlasError, AtlasImage, AtlasImageError, AtlasTexture},
     bloom::Bloom,
     camera::Camera,
-    cull::ComputeCulling,
+    draw::DrawCalls,
     pbr::{debug::DebugMode, light::Light, PbrConfig},
     skybox::{Skybox, SkyboxRenderPipeline},
     slab::*,
@@ -37,47 +36,6 @@ impl From<AtlasError> for StageError {
     fn from(source: AtlasError) -> Self {
         Self::Atlas { source }
     }
-}
-
-/// The count at which a `Renderlet` will be automatically removed from the
-/// stage and recycled.
-///
-/// This constant is exposed for downstream authors to write renderers that
-/// may need to store the renderlet in a system.
-///
-/// * +1 for the clone in [`Stage`]'s renderlets (added via
-///   [`Stage::add_renderlet`]), required to draw
-/// * +1 for the clone in [`Stage`]'s [`SlabAllocator`]'s update sources, needed
-///   to update the GPU
-pub const RENDERLET_STRONG_COUNT_LOWER_BOUND: usize = 2;
-
-struct IndirectDraws {
-    slab: SlabAllocator<wgpu::Buffer>,
-    draws: Vec<Gpu<DrawIndirectArgs>>,
-}
-
-impl From<&Hybrid<Renderlet>> for DrawIndirectArgs {
-    fn from(h: &Hybrid<Renderlet>) -> Self {
-        let r = h.get();
-        DrawIndirectArgs {
-            vertex_count: if r.indices_array.is_null() {
-                r.vertices_array.len() as u32
-            } else {
-                r.indices_array.len() as u32
-            },
-            instance_count: 1,
-            first_vertex: 0,
-            first_instance: h.id(),
-        }
-    }
-}
-
-/// Provides a way to communicate with the stage about how you'd like your
-/// objects drawn.
-#[derive(Default)]
-pub(crate) struct StageDraws {
-    hybrids: Vec<Hybrid<Renderlet>>,
-    indirect: Option<IndirectDraws>,
 }
 
 fn create_msaa_textureview(
@@ -193,7 +151,6 @@ pub struct Stage {
     pub(crate) clear_depth_attachments: Arc<AtomicBool>,
 
     pub(crate) atlas: Atlas,
-    pub(crate) compute_culling: Arc<RwLock<Option<ComputeCulling>>>,
     pub(crate) bloom: Bloom,
     pub(crate) skybox: Arc<RwLock<Skybox>>,
     pub(crate) tonemapping: Tonemapping,
@@ -206,7 +163,7 @@ pub struct Stage {
     pub(crate) buffers_bindgroup: Arc<Mutex<Option<Arc<wgpu::BindGroup>>>>,
     pub(crate) textures_bindgroup: Arc<Mutex<Option<Arc<wgpu::BindGroup>>>>,
 
-    pub(crate) draws: Arc<RwLock<StageDraws>>,
+    pub(crate) draw_calls: Arc<RwLock<DrawCalls>>,
 }
 
 impl Deref for Stage {
@@ -253,22 +210,6 @@ impl Stage {
             ctx.get_render_target().format().add_srgb_suffix(),
             &bloom.get_mix_texture(),
         );
-        let draws = StageDraws {
-            hybrids: vec![],
-            indirect: {
-                if ctx.get_adapter().features().contains(
-                    wgpu::Features::INDIRECT_FIRST_INSTANCE | wgpu::Features::MULTI_DRAW_INDIRECT,
-                ) {
-                    log::info!("stage is using Renderpass::multi_draw_indirect");
-                    Some(IndirectDraws {
-                        slab: SlabAllocator::default(),
-                        draws: vec![],
-                    })
-                } else {
-                    None
-                }
-            },
-        };
 
         Self {
             mngr,
@@ -280,7 +221,6 @@ impl Stage {
                 multisample_count,
             ))),
             atlas,
-            compute_culling: Arc::new(RwLock::new(Some(ComputeCulling::new(&device)))),
             skybox: Arc::new(RwLock::new(Skybox::empty(&device, &queue))),
             skybox_bindgroup: Default::default(),
             skybox_pipeline: Default::default(),
@@ -290,7 +230,7 @@ impl Stage {
             has_bloom: AtomicBool::from(true).into(),
             buffers_bindgroup: Default::default(),
             textures_bindgroup: Default::default(),
-            draws: Arc::new(RwLock::new(draws)),
+            draw_calls: Arc::new(RwLock::new(DrawCalls::new(ctx, true))),
             hdr_texture,
             depth_texture,
             msaa_render_target,
@@ -319,20 +259,6 @@ impl Stage {
 
     pub fn with_background_color(self, color: impl Into<Vec4>) -> Self {
         self.set_background_color(color);
-        self
-    }
-
-    pub fn set_compute_culling(&mut self, has_compute_culling: bool) {
-        let mut guard = self.compute_culling.write().unwrap();
-        if has_compute_culling && guard.is_none() {
-            *guard = Some(ComputeCulling::new(&self.device));
-        } else {
-            let _ = guard.take();
-        }
-    }
-
-    pub fn with_compute_culling(mut self, has_compute_culling: bool) -> Self {
-        self.set_compute_culling(has_compute_culling);
         self
     }
 
@@ -526,9 +452,10 @@ impl Stage {
         &self,
         images: impl IntoIterator<Item = impl Into<AtlasImage>>,
     ) -> Result<Vec<Hybrid<AtlasTexture>>, StageError> {
+        let images = images.into_iter().map(|i| i.into()).collect::<Vec<_>>();
         let frames = self
             .atlas
-            .add_images(&self.device, &self.queue, self, images)?;
+            .add_images(&self.device, &self.queue, self, &images)?;
 
         // The textures bindgroup will have to be remade
         let _ = self.textures_bindgroup.lock().unwrap().take();
@@ -557,9 +484,10 @@ impl Stage {
         &self,
         images: impl IntoIterator<Item = impl Into<AtlasImage>>,
     ) -> Result<Vec<Hybrid<AtlasTexture>>, StageError> {
+        let images = images.into_iter().map(|i| i.into()).collect::<Vec<_>>();
         let frames = self
             .atlas
-            .set_images(&self.device, &self.queue, self, images)?;
+            .set_images(&self.device, &self.queue, self, &images)?;
 
         // The textures bindgroup will have to be remade
         let _ = self.textures_bindgroup.lock().unwrap().take();
@@ -707,45 +635,20 @@ impl Stage {
     /// Adds a renderlet to the internal list of renderlets to be drawn each
     /// frame.
     ///
-    /// This makes an internal clone of the renderlet.
-    ///
     /// If you drop the renderlet and no other references are kept, it will be
     /// removed automatically from the internal list and will cease to be
     /// drawn each frame.
     pub fn add_renderlet(&self, renderlet: &Hybrid<Renderlet>) {
         // UNWRAP: if we can't acquire the lock we want to panic.
-        let mut draws = self.draws.write().unwrap();
-        let StageDraws { hybrids, indirect } = draws.deref_mut();
-        hybrids.push(renderlet.clone());
-        if let Some(IndirectDraws { slab, draws }) = indirect.as_mut() {
-            draws.push(
-                slab.new_value(DrawIndirectArgs::from(renderlet))
-                    .into_gpu_only(),
-            );
-        }
+        let mut draws = self.draw_calls.write().unwrap();
+        draws.add_renderlet(renderlet);
     }
 
     /// Erase the given renderlet from the internal list of renderlets to be
     /// drawn each frame.
     pub fn remove_renderlet(&self, renderlet: &Hybrid<Renderlet>) {
-        let id = renderlet.id();
-        let mut draws = self.draws.write().unwrap();
-        let StageDraws { hybrids, indirect } = draws.deref_mut();
-        hybrids.retain(|hybrid| hybrid.id() != id);
-        if let Some(IndirectDraws { slab: _, draws }) = indirect.as_mut() {
-            *draws = vec![];
-        }
-    }
-
-    /// Returns a clone of all the staged [`Renderlet`]s.
-    pub fn get_renderlets(&self) -> Vec<Hybrid<Renderlet>> {
-        // UNWRAP: if we can't acquire the lock we want to panic.
-        let draws = self.draws.read().unwrap();
-        let StageDraws {
-            hybrids,
-            indirect: _,
-        } = draws.deref();
-        hybrids.clone()
+        let mut draws = self.draw_calls.write().unwrap();
+        draws.remove_renderlet(renderlet);
     }
 
     /// Re-order the renderlets.
@@ -758,26 +661,8 @@ impl Stage {
     pub fn reorder_renderlets(&self, order: impl IntoIterator<Item = Id<Renderlet>>) {
         log::trace!("reordering renderlets");
         // UNWRAP: panic on purpose
-        let mut guard = self.draws.write().unwrap();
-        let StageDraws {
-            ref mut hybrids,
-            indirect,
-        } = guard.deref_mut();
-        let mut ordered = vec![];
-        let mut m = FxHashMap::from_iter(std::mem::take(hybrids).into_iter().map(|r| (r.id(), r)));
-        for id in order.into_iter() {
-            if let Some(renderlet) = m.remove(&id) {
-                ordered.push(renderlet);
-            }
-        }
-        hybrids.extend(m.into_values());
-        hybrids.extend(ordered);
-        if let Some(indirect) = indirect.as_mut() {
-            indirect.draws.drain(..);
-            // for (hybrid, draw) in hybrids.iter().zip(indirect.draws.iter_mut()) {
-            //     draw.set(hybrid.into());
-            // }
-        }
+        let mut guard = self.draw_calls.write().unwrap();
+        guard.reorder_renderlets(order);
     }
 
     /// Returns a clone of the current depth texture.
@@ -803,61 +688,16 @@ impl Stage {
     }
 
     fn invalidate_compute_culling_bindgroup(&self) {
-        let mut compute_culling_guard = self.compute_culling.write().unwrap();
-        if let Some(compute_culling) = compute_culling_guard.as_mut() {
-            compute_culling.invalidate_bindgroup();
-        }
+        let mut guard = self.draw_calls.write().unwrap();
+        guard.invalidate_external_slab_buffer();
     }
 
-    fn tick_internal(&self) -> (Arc<wgpu::Buffer>, Option<Arc<wgpu::Buffer>>) {
-        let maybe_indirect_draw_buffer = {
-            let mut redraw_args = false;
-            let mut draw_guard = self.draws.write().unwrap();
-            let StageDraws { hybrids, indirect } = draw_guard.deref_mut();
-            hybrids.retain(|d| {
-                if d.strong_count() > RENDERLET_STRONG_COUNT_LOWER_BOUND {
-                    true
-                } else {
-                    redraw_args = true;
-                    false
-                }
-            });
-            if let Some(IndirectDraws {
-                slab: indirect_slab,
-                draws,
-            }) = indirect.as_mut()
-            {
-                if redraw_args || draws.len() != hybrids.len() {
-                    // Pre-upkeep to reclaim resources - this is necessary because
-                    // the draw buffer has to be contiguous (it can't start with a bunch of trash)
-                    if let Some(_indirect_buffer) = indirect_slab.upkeep((
-                        &self.device,
-                        &self.queue,
-                        Some("indirect draw pre upkeep"),
-                        wgpu::BufferUsages::INDIRECT,
-                    )) {
-                        // Invalidate the compute culling buffer, it will be regenerated later...
-                        self.invalidate_compute_culling_bindgroup();
-                    }
-                    *draws = hybrids
-                        .iter()
-                        .map(|h: &Hybrid<Renderlet>| {
-                            indirect_slab
-                                .new_value(DrawIndirectArgs::from(h))
-                                .into_gpu_only()
-                        })
-                        .collect();
-                }
-                Some(indirect_slab.get_updated_buffer((
-                    &self.device,
-                    &self.queue,
-                    Some("indirect draw upkeep"),
-                    wgpu::BufferUsages::INDIRECT,
-                )))
-            } else {
-                None
-            }
-        };
+    fn tick_internal(&self) -> Arc<wgpu::Buffer> {
+        self.draw_calls
+            .write()
+            .unwrap()
+            .upkeep(&self.device, &self.queue);
+
         if let Some(new_slab_buffer) = self.mngr.upkeep((
             &self.device,
             &self.queue,
@@ -868,11 +708,11 @@ impl Stage {
             let _ = self.skybox_bindgroup.lock().unwrap().take();
             let _ = self.buffers_bindgroup.lock().unwrap().take();
             self.invalidate_compute_culling_bindgroup();
-            (new_slab_buffer, maybe_indirect_draw_buffer)
+            new_slab_buffer
         } else {
             // UNWRAP: safe because we called `SlabManager::upkeep` above^, which ensures
             // the buffer exists
-            (self.mngr.get_buffer().unwrap(), maybe_indirect_draw_buffer)
+            self.mngr.get_buffer().unwrap()
         }
     }
 
@@ -886,24 +726,9 @@ impl Stage {
     }
 
     pub fn render(&self, view: &wgpu::TextureView) {
-        let num_draw_calls = self.draws.read().unwrap().hybrids.len();
-        let (slab_buffer, maybe_indirect_draw_buffer) = self.tick_internal();
-        // Only do compute culling if there are things we need to draw, otherwise
-        // `wgpu` will err with something like:
-        // "Buffer with 'indirect draw upkeep' label binding size is zero"
-        if num_draw_calls > 0 {
-            if let Some(indirect_buffer) = maybe_indirect_draw_buffer.as_ref() {
-                if let Some(compute_culling) = self.compute_culling.write().unwrap().as_mut() {
-                    compute_culling.run(
-                        &self.device,
-                        &self.queue,
-                        &slab_buffer,
-                        indirect_buffer,
-                        num_draw_calls as u32,
-                    );
-                }
-            }
-        }
+        let slab_buffer = self.tick_internal();
+        let mut draw_calls = self.draw_calls.write().unwrap();
+        draw_calls.pre_draw(&self.device, &self.queue, &slab_buffer);
         {
             let label = Some("stage render");
             // UNWRAP: POP
@@ -922,9 +747,6 @@ impl Stage {
             };
             let clear_colors = self.clear_color_attachments.load(Ordering::Relaxed);
             let clear_depth = self.clear_depth_attachments.load(Ordering::Relaxed);
-
-            // UNWRAP: if we can't read we want to panic.
-            let draws = self.draws.read().unwrap();
 
             let mut encoder = self
                 .device
@@ -974,29 +796,8 @@ impl Stage {
                 render_pass.set_pipeline(&pipeline);
                 render_pass.set_bind_group(0, &slab_buffers_bindgroup, &[]);
                 render_pass.set_bind_group(1, &textures_bindgroup, &[]);
-                if num_draw_calls > 0 {
-                    if let Some(indirect_draw_buffer) = maybe_indirect_draw_buffer {
-                        render_pass.multi_draw_indirect(
-                            &indirect_draw_buffer,
-                            0,
-                            draws.hybrids.len() as u32,
-                        );
-                    } else {
-                        for hybrid in draws.hybrids.iter() {
-                            let rlet = hybrid.get();
-                            if rlet.visible {
-                                let vertex_range = if rlet.indices_array.is_null() {
-                                    0..rlet.vertices_array.len() as u32
-                                } else {
-                                    0..rlet.indices_array.len() as u32
-                                };
-                                let id = hybrid.id();
-                                let instance_range = id.inner()..id.inner() + 1;
-                                render_pass.draw(vertex_range, instance_range);
-                            }
-                        }
-                    }
-                }
+
+                draw_calls.draw(&mut render_pass);
 
                 if let Some((pipeline, bindgroup)) = may_skybox_pipeline_and_bindgroup.as_ref() {
                     // UNWRAP: if we can't acquire the lock we want to panic.
@@ -1050,22 +851,14 @@ impl Stage {
 /// Manages scene heirarchy on the [`Stage`].
 ///
 /// Clones all reference the same nested transform.
+///
+/// Only available on CPU.
 #[derive(Clone)]
 pub struct NestedTransform {
-    global_transform_id: Id<Transform>,
+    global_transform: Gpu<Transform>,
     local_transform: Arc<RwLock<Transform>>,
-
-    notifier_index: usize,
-    notify: async_channel::Sender<usize>,
-
     children: Arc<RwLock<Vec<NestedTransform>>>,
     parent: Arc<RwLock<Option<NestedTransform>>>,
-}
-
-impl Drop for NestedTransform {
-    fn drop(&mut self) {
-        let _ = self.notify.try_send(self.notifier_index);
-    }
 }
 
 impl core::fmt::Debug for NestedTransform {
@@ -1075,14 +868,14 @@ impl core::fmt::Debug for NestedTransform {
             .read()
             .unwrap()
             .iter()
-            .map(|nt| nt.global_transform_id)
+            .map(|nt| nt.global_transform.id())
             .collect::<Vec<_>>();
         let parent = self
             .parent
             .read()
             .unwrap()
             .as_ref()
-            .map(|nt| nt.global_transform_id);
+            .map(|nt| nt.global_transform.id());
         f.debug_struct("NestedTransform")
             .field("local_transform", &self.local_transform)
             .field("children", &children)
@@ -1091,61 +884,24 @@ impl core::fmt::Debug for NestedTransform {
     }
 }
 
-impl UpdatesSlab for NestedTransform {
-    fn id(&self) -> usize {
-        self.notifier_index
-    }
-
-    fn u32_array(&self) -> Array<u32> {
-        Array::new(
-            self.global_transform_id.inner(),
-            Transform::SLAB_SIZE as u32,
-        )
-    }
-
-    fn strong_count(&self) -> usize {
-        Arc::strong_count(&self.local_transform)
-    }
-
-    fn get_update(&self) -> Vec<SlabUpdate> {
-        let transform = self.get_global_transform();
-        let array = self.u32_array();
-        let mut elements = vec![0u32; Transform::SLAB_SIZE];
-        elements.write_indexed(&transform, 0);
-        vec![SlabUpdate { array, elements }]
-    }
-}
-
 impl NestedTransform {
     pub fn new(mngr: &SlabAllocator<impl IsBuffer>) -> Self {
-        let id = mngr.allocate::<Transform>();
-        let notifier_index = mngr.next_update_k();
-
         let nested = NestedTransform {
-            global_transform_id: id,
             local_transform: Arc::new(RwLock::new(Transform::default())),
-
-            notifier_index,
-            notify: mngr.notifier.0.clone(),
-
+            global_transform: mngr.new_value(Transform::default()).into_gpu_only(),
             children: Default::default(),
             parent: Default::default(),
         };
-
-        mngr.insert_update_source(notifier_index, nested.clone());
-
         nested.mark_dirty();
         nested
     }
 
-    #[cfg(test)]
-    pub(crate) fn get_notifier_index(&self) -> usize {
-        self.notifier_index
+    pub fn get_notifier_index(&self) -> usize {
+        self.global_transform.notifier_index
     }
 
     fn mark_dirty(&self) {
-        // UNWRAP: safe because it's unbounded
-        self.notify.try_send(self.notifier_index).unwrap();
+        self.global_transform.set(self.get_global_transform());
         for child in self.children.read().unwrap().iter() {
             child.mark_dirty();
         }
@@ -1155,10 +911,12 @@ impl NestedTransform {
     ///
     /// This automatically applies the local transform to the global transform.
     pub fn modify(&self, f: impl Fn(&mut Transform)) {
-        // UNWRAP: panic on purpose
-        let mut local_guard = self.local_transform.write().unwrap();
-        f(&mut local_guard);
-        self.mark_dirty();
+        {
+            // UNWRAP: panic on purpose
+            let mut local_guard = self.local_transform.write().unwrap();
+            f(&mut local_guard);
+        }
+        self.mark_dirty()
     }
 
     /// Set the local transform.
@@ -1185,7 +943,7 @@ impl NestedTransform {
     }
 
     pub fn global_transform_id(&self) -> Id<Transform> {
-        self.global_transform_id
+        self.global_transform.id()
     }
 
     pub fn add_child(&self, node: &NestedTransform) {
@@ -1196,7 +954,7 @@ impl NestedTransform {
 
     pub fn remove_child(&self, node: &NestedTransform) {
         self.children.write().unwrap().retain_mut(|child| {
-            if child.global_transform_id == node.global_transform_id {
+            if child.global_transform.id() == node.global_transform.id() {
                 node.mark_dirty();
                 let _ = node.parent.write().unwrap().take();
                 false
@@ -1220,10 +978,7 @@ mod test {
 
     use crate::{
         camera::Camera,
-        stage::{
-            cpu::{SlabAllocator, UpdatesSlab},
-            NestedTransform, Renderlet, Vertex,
-        },
+        stage::{cpu::SlabAllocator, NestedTransform, Renderlet, Vertex},
         transform::Transform,
         Context,
     };
@@ -1261,22 +1016,27 @@ mod test {
     fn can_global_transform_calculation() {
         let slab = SlabAllocator::<Mutex<Vec<u32>>>::default();
         // Setup a hierarchy of transforms
+        log::info!("new");
         let root = NestedTransform::new(&slab);
         let child = NestedTransform::new(&slab);
+        log::info!("set");
         child.set(Transform {
             translation: Vec3::new(1.0, 0.0, 0.0),
             ..Default::default()
         });
+        log::info!("grandchild");
         let grandchild = NestedTransform::new(&slab);
         grandchild.set(Transform {
             translation: Vec3::new(1.0, 0.0, 0.0),
             ..Default::default()
         });
 
+        log::info!("hierarchy");
         // Build the hierarchy
         root.add_child(&child);
         child.add_child(&grandchild);
 
+        log::info!("get_global_transform");
         // Calculate global transforms
         let grandchild_global_transform = grandchild.get_global_transform();
 
@@ -1349,9 +1109,9 @@ mod test {
         let ctx = Context::headless(100, 100);
         let stage = ctx.new_stage();
         let r = stage.new_value(Renderlet::default());
+        assert_eq!(1, r.ref_count());
+
         stage.add_renderlet(&r);
-        let expected_strong_count = 1 // for `r` here
-            + super::RENDERLET_STRONG_COUNT_LOWER_BOUND;
-        assert_eq!(expected_strong_count, r.strong_count());
+        assert_eq!(1, r.ref_count());
     }
 }

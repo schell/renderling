@@ -32,15 +32,6 @@ mod gltf_support;
 #[cfg(all(feature = "gltf", not(target_arch = "spirv")))]
 pub use gltf_support::*;
 
-/// Argument buffer layout for draw_indirect commands.
-#[derive(Clone, Copy, Default, SlabItem)]
-pub struct DrawIndirectArgs {
-    pub vertex_count: u32,
-    pub instance_count: u32,
-    pub first_vertex: u32,
-    pub first_instance: Id<Renderlet>,
-}
-
 /// A vertex skin.
 ///
 /// For more info on vertex skinning, see
@@ -255,6 +246,14 @@ impl Renderlet {
             vertex.tangent += weight * morph_target.tangent.extend(0.0);
         }
         vertex
+    }
+
+    pub fn get_vertex_count(&self) -> u32 {
+        if self.indices_array.is_null() {
+            self.vertices_array.len() as u32
+        } else {
+            self.indices_array.len() as u32
+        }
     }
 }
 
