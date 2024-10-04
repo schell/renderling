@@ -6,7 +6,7 @@ use crabslab::Id;
 use rustc_hash::FxHashMap;
 
 use crate::{
-    cull::FrustumCulling,
+    cull::{FrustumCulling, OcclusionCulling},
     slab::{Gpu, Hybrid, SlabAllocator, WeakHybrid},
     stage::Renderlet,
     Context,
@@ -35,13 +35,15 @@ impl InternalRenderlet {
 struct IndirectDraws {
     slab: SlabAllocator<wgpu::Buffer>,
     draws: Vec<Gpu<DrawIndirectArgs>>,
-    compute_culling: FrustumCulling,
+    frustum_culling: FrustumCulling,
+    occlusion_culling: OcclusionCulling,
 }
 
 impl IndirectDraws {
     fn new(device: &wgpu::Device) -> Self {
         Self {
-            compute_culling: FrustumCulling::new(device),
+            frustum_culling: FrustumCulling::new(device),
+            occlusion_culling: OcclusionCulling::new(device),
             slab: SlabAllocator::default(),
             draws: vec![],
         }
@@ -80,7 +82,7 @@ impl IndirectDraws {
                 wgpu::BufferUsages::INDIRECT,
             )) {
                 // Invalidate the compute culling buffer, it will be regenerated later...
-                self.compute_culling.invalidate_bindgroup();
+                self.frustum_culling.invalidate_bindgroup();
             }
             self.draws = internal_renderlets
                 .iter()
@@ -220,7 +222,7 @@ impl DrawCalls {
     /// which holds the [`Renderlet`]s that have been queued to draw.
     pub fn invalidate_external_slab_buffer(&mut self) {
         if let DrawingStrategy::Indirect(indirect) = &mut self.drawing_strategy {
-            indirect.compute_culling.invalidate_bindgroup();
+            indirect.frustum_culling.invalidate_bindgroup();
         }
     }
 
@@ -264,10 +266,18 @@ impl DrawCalls {
         // `wgpu` will err with something like:
         // "Buffer with 'indirect draw upkeep' label binding size is zero"
         if num_draw_calls > 0 {
+            // TODO: Cull on CPU when using direct drawing.
             if let DrawingStrategy::Indirect(indirect) = &mut self.drawing_strategy {
                 if let Some(indirect_buffer) = indirect.slab.get_buffer() {
                     log::trace!("performing culling on {num_draw_calls} renderlets");
-                    indirect.compute_culling.run(
+                    indirect.frustum_culling.run(
+                        device,
+                        queue,
+                        slab_buffer,
+                        &indirect_buffer,
+                        num_draw_calls as u32,
+                    );
+                    indirect.occlusion_culling.run(
                         device,
                         queue,
                         slab_buffer,
