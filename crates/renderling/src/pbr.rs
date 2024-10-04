@@ -13,14 +13,14 @@ use spirv_std::num_traits::Float;
 
 use crate::{
     atlas::AtlasTexture,
-    camera::Camera,
     math::{self, IsSampler, IsVector, Sample2d, Sample2dArray, SampleCube},
     pbr::light::{DirectionalLight, PointLight, SpotLight},
     println as my_println,
+    stage::Renderlet,
 };
 
 pub mod debug;
-use debug::DebugMode;
+use debug::DebugChannel;
 
 pub mod light;
 use light::LightStyle;
@@ -232,12 +232,14 @@ pub fn sample_brdf<T: Sample2d<Sampler = S>, S: IsSampler>(
 /// Holds PBR configuration info.
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[derive(Clone, Copy, PartialEq, SlabItem)]
+#[offsets]
 pub struct PbrConfig {
     pub atlas_size: glam::UVec2,
     pub resolution: glam::UVec2,
-    pub debug_mode: debug::DebugMode,
+    pub debug_channel: debug::DebugChannel,
     pub has_lighting: bool,
     pub has_skinning: bool,
+    pub has_compute_culling: bool,
     pub light_array: Array<Id<light::Light>>,
 }
 
@@ -246,9 +248,10 @@ impl Default for PbrConfig {
         Self {
             atlas_size: Default::default(),
             resolution: glam::UVec2::ONE,
-            debug_mode: Default::default(),
+            debug_channel: Default::default(),
             has_lighting: true,
             has_skinning: true,
+            has_compute_culling: false,
             light_array: Default::default(),
         }
     }
@@ -302,17 +305,8 @@ pub fn fragment_impl<A, T, C, S>(
     brdf_sampler: &S,
     slab: &[u32],
 
-    PbrConfig {
-        atlas_size,
-        resolution: _,
-        debug_mode,
-        has_lighting,
-        has_skinning: _,
-        light_array,
-    }: PbrConfig,
+    renderlet_id: Id<Renderlet>,
 
-    in_camera: Id<Camera>,
-    in_material: Id<Material>,
     in_color: Vec4,
     in_uv0: Vec2,
     in_uv1: Vec2,
@@ -328,7 +322,18 @@ pub fn fragment_impl<A, T, C, S>(
     C: SampleCube<Sampler = S>,
     S: IsSampler,
 {
-    let material = get_material(in_material, has_lighting, slab);
+    let renderlet = slab.read_unchecked(renderlet_id);
+    let PbrConfig {
+        atlas_size,
+        resolution: _,
+        debug_channel,
+        has_lighting,
+        has_skinning: _,
+        has_compute_culling: _,
+        light_array,
+    } = slab.read_unchecked(renderlet.pbr_config_id);
+
+    let material = get_material(renderlet.material_id, has_lighting, slab);
     my_println!("material: {:?}", material);
 
     let albedo_tex_uv = if material.albedo_tex_coord == 0 {
@@ -431,7 +436,7 @@ pub fn fragment_impl<A, T, C, S>(
     let emissive =
         emissive_tex_color.xyz() * material.emissive_factor * material.emissive_strength_multiplier;
     let irradiance = sample_irradiance(irradiance, irradiance_sampler, n);
-    let camera = slab.read(in_camera);
+    let camera = slab.read(renderlet.camera_id);
     let specular = sample_specular_reflection(
         prefiltered,
         prefiltered_sampler,
@@ -446,82 +451,82 @@ pub fn fragment_impl<A, T, C, S>(
         ((u.alt_norm_or_zero() + Vec3::splat(1.0)) / 2.0).extend(1.0)
     }
 
-    crate::println!("debug_mode: {debug_mode:?}");
-    match debug_mode {
-        DebugMode::None => {}
-        DebugMode::UvCoords0 => {
+    crate::println!("debug_mode: {debug_channel:?}");
+    match debug_channel {
+        DebugChannel::None => {}
+        DebugChannel::UvCoords0 => {
             *output = colorize(Vec3::new(in_uv0.x, in_uv0.y, 0.0));
             return;
         }
-        DebugMode::UvCoords1 => {
+        DebugChannel::UvCoords1 => {
             *output = colorize(Vec3::new(in_uv1.x, in_uv1.y, 0.0));
             return;
         }
-        DebugMode::Normals => {
+        DebugChannel::Normals => {
             *output = colorize(norm);
             return;
         }
-        DebugMode::VertexColor => {
+        DebugChannel::VertexColor => {
             *output = in_color;
             return;
         }
-        DebugMode::VertexNormals => {
+        DebugChannel::VertexNormals => {
             *output = colorize(in_norm);
             return;
         }
-        DebugMode::UvNormals => {
+        DebugChannel::UvNormals => {
             *output = colorize(uv_norm);
             return;
         }
-        DebugMode::Tangents => {
+        DebugChannel::Tangents => {
             *output = colorize(in_tangent);
             return;
         }
-        DebugMode::Bitangents => {
+        DebugChannel::Bitangents => {
             *output = colorize(in_bitangent);
             return;
         }
-        DebugMode::DiffuseIrradiance => {
+        DebugChannel::DiffuseIrradiance => {
             *output = irradiance.extend(1.0);
             return;
         }
-        DebugMode::SpecularReflection => {
+        DebugChannel::SpecularReflection => {
             *output = specular.extend(1.0);
             return;
         }
-        DebugMode::Brdf => {
+        DebugChannel::Brdf => {
             *output = brdf.extend(1.0).extend(1.0);
             return;
         }
-        DebugMode::Roughness => {
+        DebugChannel::Roughness => {
             *output = Vec3::splat(roughness).extend(1.0);
             return;
         }
-        DebugMode::Metallic => {
+        DebugChannel::Metallic => {
             *output = Vec3::splat(metallic).extend(1.0);
             return;
         }
-        DebugMode::Albedo => {
+        DebugChannel::Albedo => {
             *output = albedo;
             return;
         }
-        DebugMode::Occlusion => {
+        DebugChannel::Occlusion => {
             *output = Vec3::splat(ao).extend(1.0);
             return;
         }
-        DebugMode::Emissive => {
+        DebugChannel::Emissive => {
             *output = emissive.extend(1.0);
             return;
         }
-        DebugMode::UvEmissive => {
+        DebugChannel::UvEmissive => {
             *output = emissive_tex_color.xyz().extend(1.0);
             return;
         }
-        DebugMode::EmissiveFactor => {
+        DebugChannel::EmissiveFactor => {
             *output = material.emissive_factor.extend(1.0);
             return;
         }
-        DebugMode::EmissiveStrength => {
+        DebugChannel::EmissiveStrength => {
             *output = Vec3::splat(material.emissive_strength_multiplier).extend(1.0);
             return;
         }

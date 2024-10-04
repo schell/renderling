@@ -58,7 +58,7 @@ fn create_bloom_downsample_pipeline(device: &wgpu::Device) -> wgpu::RenderPipeli
         layout: Some(&layout),
         vertex: wgpu::VertexState {
             module: &vertex_module.module,
-            entry_point: vertex_module.entry_point,
+            entry_point: Some(vertex_module.entry_point),
             buffers: &[],
             compilation_options: Default::default(),
         },
@@ -75,7 +75,7 @@ fn create_bloom_downsample_pipeline(device: &wgpu::Device) -> wgpu::RenderPipeli
         multisample: wgpu::MultisampleState::default(),
         fragment: Some(wgpu::FragmentState {
             module: &fragment_module.module,
-            entry_point: fragment_module.entry_point,
+            entry_point: Some(fragment_module.entry_point),
             targets: &[Some(wgpu::ColorTargetState {
                 format: wgpu::TextureFormat::Rgba16Float,
                 blend: None,
@@ -103,7 +103,7 @@ fn create_bloom_upsample_pipeline(device: &wgpu::Device) -> wgpu::RenderPipeline
         layout: Some(&layout),
         vertex: wgpu::VertexState {
             module: &vertex_module.module,
-            entry_point: vertex_module.entry_point,
+            entry_point: Some(vertex_module.entry_point),
             buffers: &[],
             compilation_options: Default::default(),
         },
@@ -120,7 +120,7 @@ fn create_bloom_upsample_pipeline(device: &wgpu::Device) -> wgpu::RenderPipeline
         multisample: wgpu::MultisampleState::default(),
         fragment: Some(wgpu::FragmentState {
             module: &fragment_module.module,
-            entry_point: fragment_module.entry_point,
+            entry_point: Some(fragment_module.entry_point),
             targets: &[Some(wgpu::ColorTargetState {
                 format: wgpu::TextureFormat::Rgba16Float,
                 blend: Some(wgpu::BlendState::ALPHA_BLENDING),
@@ -312,7 +312,7 @@ fn create_mix_pipeline(device: &wgpu::Device) -> wgpu::RenderPipeline {
         layout: Some(&layout),
         vertex: wgpu::VertexState {
             module: &vertex_module.module,
-            entry_point: vertex_module.entry_point,
+            entry_point: Some(vertex_module.entry_point),
             buffers: &[],
             compilation_options: Default::default(),
         },
@@ -329,7 +329,7 @@ fn create_mix_pipeline(device: &wgpu::Device) -> wgpu::RenderPipeline {
         multisample: wgpu::MultisampleState::default(),
         fragment: Some(wgpu::FragmentState {
             module: &fragment_module.module,
-            entry_point: fragment_module.entry_point,
+            entry_point: Some(fragment_module.entry_point),
             targets: &[Some(wgpu::ColorTargetState {
                 format: wgpu::TextureFormat::Rgba16Float,
                 blend: Some(wgpu::BlendState::ALPHA_BLENDING),
@@ -599,7 +599,7 @@ impl Bloom {
                     occlusion_query_set: None,
                 });
                 render_pass.set_pipeline(&self.downsample_pipeline);
-                render_pass.set_bind_group(0, bindgroup, &[]);
+                render_pass.set_bind_group(0, Some(bindgroup), &[]);
                 let id = pixel_size.into();
                 render_pass.draw(0..6, id..id + 1);
             }
@@ -645,7 +645,7 @@ impl Bloom {
                     occlusion_query_set: None,
                 });
                 render_pass.set_pipeline(&self.upsample_pipeline);
-                render_pass.set_bind_group(0, bindgroup, &[]);
+                render_pass.set_bind_group(0, Some(bindgroup), &[]);
                 let id = self.upsample_filter_radius.id().into();
                 render_pass.draw(0..6, id..id + 1);
             }
@@ -675,7 +675,7 @@ impl Bloom {
                 occlusion_query_set: None,
             });
             render_pass.set_pipeline(&self.mix_pipeline);
-            render_pass.set_bind_group(0, &mix_bindgroup, &[]);
+            render_pass.set_bind_group(0, Some(&mix_bindgroup), &[]);
             let id = self.mix_strength.id().into();
             render_pass.draw(0..6, id..id + 1);
         }

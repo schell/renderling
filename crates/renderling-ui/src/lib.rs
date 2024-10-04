@@ -81,7 +81,7 @@ pub struct ImageId(usize);
 /// A two dimensional transformation.
 ///
 /// Clones of `UiTransform` all point to the same data.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct UiTransform {
     transform: NestedTransform,
     renderlet_ids: Arc<Vec<Id<Renderlet>>>,

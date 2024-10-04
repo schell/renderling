@@ -365,10 +365,18 @@ pub fn signum_or_zero(n: f32) -> f32 {
     ((n >= 0.0) as u32) as f32 - ((n < 0.0) as u32) as f32
 }
 
-/// Return `0.0` where `value` is less than `edge` and `1.0` where
-/// `value` is greater than or equal to `edge`.
-pub fn step(edge: f32, value: f32) -> f32 {
+/// Return `1.0` when `value` is greater than or equal to `edge` and `0.0` where
+/// `value` is less than `edge`.
+#[inline(always)]
+pub fn step_ge(value: f32, edge: f32) -> f32 {
     ((value >= edge) as u32) as f32
+}
+
+/// Return `1.0` when `value` is less than or equal to `edge`
+/// and `0.0` when `value` is greater than `edge`.
+#[inline(always)]
+pub fn step_le(value: f32, edge: f32) -> f32 {
+    ((value <= edge) as u32) as f32
 }
 
 pub fn smoothstep(edge_in: f32, edge_out: f32, mut x: f32) -> f32 {
@@ -482,6 +490,10 @@ pub fn unit_cube() -> Vec<(Vec3, Vec3)> {
         .collect::<Vec<_>>()
 }
 
+/// Points on the unit cube that create a triangle-list mesh.
+///
+/// Use [`unit_cube`] for a mesh that includes normals.
+///
 /// `rust-gpu` doesn't like nested/double indexing so we do this here.
 /// See [this comment on discord](https://discord.com/channels/750717012564770887/750717499737243679/1131395331368693770)
 pub const CUBE: [Vec3; 36] = {
@@ -523,9 +535,9 @@ mod test {
 
     #[test]
     fn step_sanity() {
-        assert_eq!(0.0, step(0.0, -0.33333));
-        assert_eq!(1.0, step(0.0, 0.33333));
-        assert_eq!(1.0, step(0.0, 0.0));
+        assert_eq!(0.0, step_le(0.0, -0.33333));
+        assert_eq!(1.0, step_le(0.0, 0.33333));
+        assert_eq!(1.0, step_le(0.0, 0.0));
     }
 
     #[test]

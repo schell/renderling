@@ -17,16 +17,16 @@ resolver = "2"
 assert_approx_eq = "1.1.0"
 async-channel = "1.8"
 bytemuck = { version = "1.13.0", features = ["derive"] }
-crabslab = { version = "0.6.0", default-features = false }
+crabslab = { path = "../crabslab/crates/crabslab", version = "0.6.1", default-features = false }
 ctor = "0.2.2"
 dagga = "0.2.1"
 env_logger = "0.10.0"
 futures-lite = "1.13"
-glam = { version = "0.24.2", default-features = false }
+glam = { version = "0.29", default-features = false }
 gltf = { version = "1.4,1", features = ["KHR_lights_punctual", "KHR_materials_unlit", "KHR_materials_emissive_strength", "extras", "extensions"] }
 image = "0.24"
 log = "0.4"
-naga = { version = "22.1.0", features = ["spv-in", "wgsl-out", "wgsl-in", "msl-out"] }
+naga = { version = "22.0.0", features = ["spv-in", "wgsl-out", "wgsl-in", "msl-out"] }
 pretty_assertions = "1.4.0"
 proc-macro2 = { version = "1.0", features = ["span-locations"] }
 rustc-hash = "1.1"
@@ -38,7 +38,7 @@ wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 web-sys = "0.3"
 winit = { version = "0.30" }
-wgpu = "22.1.0"
+wgpu = "22.0.0"
 
 
 [profile.dev]
@@ -49,3 +49,9 @@ opt-level = 3
 
 [profile.dev.package.gltf]
 opt-level = 3
+
+[patch.crates-io]
+naga = { git = "https://github.com/gfx-rs/wgpu.git" }
+wgpu = { git = "https://github.com/gfx-rs/wgpu.git" }
+spirv-std = { git = "https://github.com/Rust-GPU/rust-gpu" }
+

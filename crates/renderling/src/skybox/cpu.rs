@@ -103,7 +103,7 @@ pub(crate) fn create_skybox_render_pipeline(
             layout: Some(&pp_layout),
             vertex: wgpu::VertexState {
                 module: &vertex_linkage.module,
-                entry_point: vertex_linkage.entry_point,
+                entry_point: Some(vertex_linkage.entry_point),
                 buffers: &[],
                 compilation_options: Default::default(),
             },
@@ -130,7 +130,7 @@ pub(crate) fn create_skybox_render_pipeline(
             },
             fragment: Some(wgpu::FragmentState {
                 module: &fragment_linkage.module,
-                entry_point: fragment_linkage.entry_point,
+                entry_point: Some(fragment_linkage.entry_point),
                 targets: &[Some(wgpu::ColorTargetState {
                     format,
                     blend: Some(wgpu::BlendState::ALPHA_BLENDING),
@@ -426,7 +426,7 @@ impl Skybox {
                 });
 
                 render_pass.set_pipeline(pipeline);
-                render_pass.set_bind_group(0, bindgroup, &[]);
+                render_pass.set_bind_group(0, Some(bindgroup), &[]);
                 render_pass.draw(0..36, 0..1);
             }
 
@@ -547,7 +547,7 @@ impl Skybox {
                     });
 
                     render_pass.set_pipeline(&pipeline);
-                    render_pass.set_bind_group(0, &bindgroup, &[]);
+                    render_pass.set_bind_group(0, Some(&bindgroup), &[]);
                     render_pass.draw(0..36, prefilter_id.inner()..prefilter_id.inner() + 1);
                 }
 
@@ -575,7 +575,7 @@ impl Skybox {
             layout: None,
             vertex: wgpu::VertexState {
                 module: &vertex_linkage.module,
-                entry_point: vertex_linkage.entry_point,
+                entry_point: Some(vertex_linkage.entry_point),
                 buffers: &[],
                 compilation_options: Default::default(),
             },
@@ -596,7 +596,7 @@ impl Skybox {
             },
             fragment: Some(wgpu::FragmentState {
                 module: &fragment_linkage.module,
-                entry_point: fragment_linkage.entry_point,
+                entry_point: Some(fragment_linkage.entry_point),
                 targets: &[Some(wgpu::ColorTargetState {
                     format: wgpu::TextureFormat::Rg16Float,
                     blend: Some(wgpu::BlendState {

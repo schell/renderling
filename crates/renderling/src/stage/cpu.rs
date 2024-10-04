@@ -3,7 +3,7 @@
 //! The `Stage` object contains a slab buffer and a render pipeline.
 //! It is used to stage [`Renderlet`]s for rendering.
 use core::sync::atomic::{AtomicU32, Ordering};
-use crabslab::{Id, Slab};
+use crabslab::Id;
 use snafu::Snafu;
 use std::{
     ops::Deref,
@@ -14,8 +14,9 @@ use crate::{
     atlas::{Atlas, AtlasError, AtlasImage, AtlasImageError, AtlasTexture},
     bloom::Bloom,
     camera::Camera,
+    debug::DebugOverlay,
     draw::DrawCalls,
-    pbr::{debug::DebugMode, light::Light, PbrConfig},
+    pbr::{debug::DebugChannel, light::Light, PbrConfig},
     skybox::{Skybox, SkyboxRenderPipeline},
     slab::*,
     stage::Renderlet,
@@ -84,7 +85,7 @@ fn create_stage_render_pipeline(
         layout: Some(&layout),
         vertex: wgpu::VertexState {
             module: &vertex_linkage.module,
-            entry_point: vertex_linkage.entry_point,
+            entry_point: Some(vertex_linkage.entry_point),
             buffers: &[],
             compilation_options: Default::default(),
         },
@@ -111,7 +112,7 @@ fn create_stage_render_pipeline(
         },
         fragment: Some(wgpu::FragmentState {
             module: &fragment_linkage.module,
-            entry_point: fragment_linkage.entry_point,
+            entry_point: Some(fragment_linkage.entry_point),
             targets: &[Some(wgpu::ColorTargetState {
                 format: wgpu::TextureFormat::Rgba16Float,
                 blend: Some(wgpu::BlendState::ALPHA_BLENDING),
@@ -154,10 +155,12 @@ pub struct Stage {
     pub(crate) bloom: Bloom,
     pub(crate) skybox: Arc<RwLock<Skybox>>,
     pub(crate) tonemapping: Tonemapping,
+    pub(crate) debug_overlay: DebugOverlay,
     pub(crate) background_color: Arc<RwLock<wgpu::Color>>,
 
     pub(crate) has_skybox: Arc<AtomicBool>,
     pub(crate) has_bloom: Arc<AtomicBool>,
+    pub(crate) has_debug_overlay: Arc<AtomicBool>,
 
     pub(crate) skybox_bindgroup: Arc<Mutex<Option<Arc<wgpu::BindGroup>>>>,
     pub(crate) buffers_bindgroup: Arc<Mutex<Option<Arc<wgpu::BindGroup>>>>,
@@ -230,7 +233,14 @@ impl Stage {
             has_bloom: AtomicBool::from(true).into(),
             buffers_bindgroup: Default::default(),
             textures_bindgroup: Default::default(),
-            draw_calls: Arc::new(RwLock::new(DrawCalls::new(ctx, true))),
+            draw_calls: Arc::new(RwLock::new(DrawCalls::new(
+                ctx,
+                true,
+                UVec2::new(w, h),
+                multisample_count,
+            ))),
+            debug_overlay: DebugOverlay::new(&device, ctx.get_render_target().format()),
+            has_debug_overlay: Arc::new(false.into()),
             hdr_texture,
             depth_texture,
             msaa_render_target,
@@ -336,13 +346,37 @@ impl Stage {
     }
 
     /// Set the debug mode.
-    pub fn set_debug_mode(&self, debug_mode: DebugMode) {
-        self.pbr_config.modify(|cfg| cfg.debug_mode = debug_mode);
+    pub fn set_debug_mode(&self, debug_mode: DebugChannel) {
+        self.pbr_config.modify(|cfg| cfg.debug_channel = debug_mode);
     }
 
     /// Set the debug mode.
-    pub fn with_debug_mode(self, debug_mode: DebugMode) -> Self {
+    pub fn with_debug_mode(self, debug_mode: DebugChannel) -> Self {
         self.set_debug_mode(debug_mode);
+        self
+    }
+
+    /// Set whether to render the debug overlay.
+    pub fn set_use_debug_overlay(&self, use_debug_overlay: bool) {
+        self.has_debug_overlay
+            .store(use_debug_overlay, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Set whether to render the debug overlay.
+    pub fn with_debug_overlay(self, use_debug_overlay: bool) -> Self {
+        self.set_use_debug_overlay(use_debug_overlay);
+        self
+    }
+
+    /// Set whether to use culling on GPU before drawing.
+    pub fn set_use_compute_culling(&self, use_compute_culling: bool) {
+        self.pbr_config
+            .modify(|cfg| cfg.has_compute_culling = use_compute_culling);
+    }
+
+    /// Set whether to render the debug overlay.
+    pub fn with_compute_culling(self, use_compute_culling: bool) -> Self {
+        self.set_use_compute_culling(use_compute_culling);
         self
     }
 
@@ -665,6 +699,13 @@ impl Stage {
         guard.reorder_renderlets(order);
     }
 
+    /// Iterator over all staged [`Renderlet`]s.
+    pub fn renderlets_iter(&self) -> impl Iterator<Item = Renderlet> {
+        // UNWRAP: panic on purpose
+        let guard = self.draw_calls.read().unwrap();
+        guard.renderlets_iter()
+    }
+
     /// Returns a clone of the current depth texture.
     pub fn get_depth_texture(&self) -> DepthTexture {
         DepthTexture {
@@ -728,7 +769,11 @@ impl Stage {
     pub fn render(&self, view: &wgpu::TextureView) {
         let slab_buffer = self.tick_internal();
         let mut draw_calls = self.draw_calls.write().unwrap();
-        draw_calls.pre_draw(&self.device, &self.queue, &slab_buffer);
+        let depth_texture = self.depth_texture.read().unwrap();
+        // UNWRAP: safe because we know the depth texture format will always match
+        let maybe_indirect_buffer = draw_calls
+            .pre_draw(&self.device, &self.queue, &slab_buffer, &depth_texture)
+            .unwrap();
         {
             let label = Some("stage render");
             // UNWRAP: POP
@@ -753,24 +798,24 @@ impl Stage {
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor { label });
             {
                 let hdr_texture = self.hdr_texture.read().unwrap();
-                let depth_texture = self.depth_texture.read().unwrap();
-                let ops = wgpu::Operations {
+
+                let mk_ops = |store| wgpu::Operations {
                     load: if clear_colors {
                         wgpu::LoadOp::Clear(background_color)
                     } else {
                         wgpu::LoadOp::Load
                     },
-                    store: wgpu::StoreOp::Store,
+                    store,
                 };
                 let color_attachment = if let Some(msaa_view) = msaa_target.as_ref() {
                     wgpu::RenderPassColorAttachment {
-                        ops,
+                        ops: mk_ops(wgpu::StoreOp::Discard),
                         view: msaa_view,
                         resolve_target: Some(&hdr_texture.view),
                     }
                 } else {
                     wgpu::RenderPassColorAttachment {
-                        ops,
+                        ops: mk_ops(wgpu::StoreOp::Store),
                         view: &hdr_texture.view,
                         resolve_target: None,
                     }
@@ -794,16 +839,15 @@ impl Stage {
                 });
 
                 render_pass.set_pipeline(&pipeline);
-                render_pass.set_bind_group(0, &slab_buffers_bindgroup, &[]);
-                render_pass.set_bind_group(1, &textures_bindgroup, &[]);
-
+                render_pass.set_bind_group(0, Some(&slab_buffers_bindgroup), &[]);
+                render_pass.set_bind_group(1, Some(&textures_bindgroup), &[]);
                 draw_calls.draw(&mut render_pass);
 
                 if let Some((pipeline, bindgroup)) = may_skybox_pipeline_and_bindgroup.as_ref() {
                     // UNWRAP: if we can't acquire the lock we want to panic.
                     let skybox = self.skybox.read().unwrap();
                     render_pass.set_pipeline(&pipeline.pipeline);
-                    render_pass.set_bind_group(0, bindgroup, &[]);
+                    render_pass.set_bind_group(0, Some(bindgroup), &[]);
                     render_pass.draw(0..36, skybox.camera.inner()..skybox.camera.inner() + 1);
                 }
             }
@@ -843,8 +887,19 @@ impl Stage {
             self.queue.submit(std::iter::once(encoder.finish()));
         }
 
-        // then render tonemapping
         self.tonemapping.render(&self.device, &self.queue, view);
+
+        if self.has_debug_overlay.load(Ordering::Relaxed) {
+            if let Some(indirect_draw_buffer) = maybe_indirect_buffer {
+                self.debug_overlay.render(
+                    &self.device,
+                    &self.queue,
+                    view,
+                    &slab_buffer,
+                    &indirect_draw_buffer,
+                );
+            }
+        }
     }
 }
 

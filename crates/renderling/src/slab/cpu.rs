@@ -247,7 +247,9 @@ impl<Buffer> Default for SlabAllocator<Buffer> {
             update_queue: Default::default(),
             recycles: Default::default(),
             len: Default::default(),
-            capacity: Default::default(),
+            // Start with size 1, because some of `wgpu`'s validation depends on it.
+            // See <https://github.com/gfx-rs/wgpu/issues/6414> for more info.
+            capacity: Arc::new(AtomicUsize::new(1)),
             needs_expansion: Arc::new(true.into()),
             buffer: Default::default(),
         }
@@ -311,7 +313,7 @@ impl<Buffer: IsBuffer> SlabAllocator<Buffer> {
     }
 
     pub(crate) fn insert_update_source(&self, k: usize, source: WeakGpuRef) {
-        log::trace!("inserting update source {k}",);
+        log::trace!("slab insert_update_source {k}",);
         let _ = self.notifier.0.try_send(k);
         // UNWRAP: panic on purpose
         self.update_sources.write().unwrap().insert(k, source);
@@ -326,7 +328,10 @@ impl<Buffer: IsBuffer> SlabAllocator<Buffer> {
         let may_range = self.recycles.write().unwrap().remove(T::SLAB_SIZE as u32);
         if let Some(range) = may_range {
             let id = Id::<T>::new(range.first_index);
-            log::trace!("dequeued {range:?} to {id:?}");
+            log::trace!(
+                "slab allocate {}: dequeued {range:?} to {id:?}",
+                std::any::type_name::<T>()
+            );
             debug_assert_eq!(
                 range.last_index,
                 range.first_index + T::SLAB_SIZE as u32 - 1
@@ -352,7 +357,10 @@ impl<Buffer: IsBuffer> SlabAllocator<Buffer> {
             .remove((T::SLAB_SIZE * len) as u32);
         if let Some(range) = may_range {
             let array = Array::<T>::new(range.first_index, len as u32);
-            log::trace!("dequeued {range:?} to {array:?}");
+            log::trace!(
+                "slab allocate_array {len}x{}: dequeued {range:?} to {array:?}",
+                std::any::type_name::<T>()
+            );
             debug_assert_eq!(
                 range.last_index,
                 range.first_index + (T::SLAB_SIZE * len) as u32 - 1
@@ -409,12 +417,26 @@ impl<Buffer: IsBuffer> SlabAllocator<Buffer> {
     /// Use [`SlabAllocator::upkeep`] when you only need the buffer after a
     /// change, for example to recreate bindgroups.
     pub fn get_updated_buffer(&self, resources: Buffer::Resources<'_>) -> Arc<Buffer> {
+        self.get_updated_buffer_and_check(resources).0
+    }
+
+    /// Return an updated buffer, and whether or not it is different from the
+    /// last one.
+    ///
+    /// This is the only way to guarantee access to a buffer.
+    ///
+    /// Use [`SlabAllocator::upkeep`] when you only need the buffer after a
+    /// change, for example to recreate bindgroups.
+    pub fn get_updated_buffer_and_check(
+        &self,
+        resources: Buffer::Resources<'_>,
+    ) -> (Arc<Buffer>, bool) {
         if let Some(new_buffer) = self.upkeep(resources) {
-            new_buffer
+            (new_buffer, true)
         } else {
             // UNWRAP: safe because we know the buffer exists at this point,
             // as we've called `upkeep` above
-            self.get_buffer().unwrap()
+            (self.get_buffer().unwrap(), false)
         }
     }
 
@@ -455,6 +477,8 @@ impl<Buffer: IsBuffer> SlabAllocator<Buffer> {
 
     /// Build the set of sources that require updates, draining the source
     /// notifier and resetting the stored `update_queue`.
+    ///
+    /// This also places recycled items into the recycle bin.
     fn drain_updated_sources(&self) -> RangeManager<SlabUpdate> {
         let update_set = self.get_updated_source_ids();
         // UNWRAP: panic on purpose
@@ -471,14 +495,16 @@ impl<Buffer: IsBuffer> SlabAllocator<Buffer> {
                     let count = gpu_ref.weak.strong_count();
                     if count == 0 {
                         // recycle this allocation
-                        log::debug!("recycling {key} {:?}", gpu_ref.u32_array);
-                        if gpu_ref.u32_array.is_null() || gpu_ref.u32_array.is_empty() {
-                            log::debug!("  cannot recycle - empty or null");
-                            true
+                        let array = gpu_ref.u32_array;
+                        log::debug!("slab drain_updated_sources: recycling {key} {array:?}");
+                        if array.is_null() {
+                            log::debug!("  cannot recycle, null");
+                        } else if array.is_empty() {
+                            log::debug!("  cannot recycle, empty");
                         } else {
                             recycles_guard.add_range(gpu_ref.u32_array.into());
-                            true
                         }
+                        true
                     } else {
                         gpu_ref
                             .get_update()
@@ -547,8 +573,7 @@ impl SlabAllocator<wgpu::Buffer> {
     /// This is primarily used for debugging.
     pub async fn read(
         &self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
+        ctx: &crate::Context,
         label: Option<&str>,
         range: impl std::ops::RangeBounds<usize>,
     ) -> Result<Vec<u32>, SlabAllocatorError> {
@@ -566,7 +591,7 @@ impl SlabAllocator<wgpu::Buffer> {
         let byte_offset = start * std::mem::size_of::<u32>();
         let length = len * std::mem::size_of::<u32>();
         let output_buffer_size = length as u64;
-        let output_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        let output_buffer = ctx.get_device().create_buffer(&wgpu::BufferDescriptor {
             label,
             size: output_buffer_size,
             usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
@@ -574,7 +599,9 @@ impl SlabAllocator<wgpu::Buffer> {
         });
         let internal_buffer = self.get_buffer().context(NoInternalBufferSnafu)?;
 
-        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label });
+        let mut encoder = ctx
+            .get_device()
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label });
         log::trace!(
             "copy_buffer_to_buffer byte_offset:{byte_offset}, \
              output_buffer_size:{output_buffer_size}",
@@ -586,12 +613,12 @@ impl SlabAllocator<wgpu::Buffer> {
             0,
             output_buffer_size,
         );
-        queue.submit(std::iter::once(encoder.finish()));
+        ctx.get_queue().submit(std::iter::once(encoder.finish()));
 
         let buffer_slice = output_buffer.slice(..);
         let (tx, rx) = async_channel::bounded(1);
         buffer_slice.map_async(wgpu::MapMode::Read, move |res| tx.try_send(res).unwrap());
-        device.poll(wgpu::Maintain::Wait);
+        ctx.get_device().poll(wgpu::Maintain::Wait);
         rx.recv()
             .await
             .context(AsyncRecvSnafu)?
@@ -601,7 +628,7 @@ impl SlabAllocator<wgpu::Buffer> {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct SlabUpdate {
     pub array: Array<u32>,
     pub elements: Vec<u32>,
@@ -625,7 +652,6 @@ impl SlabUpdate {
 }
 
 pub(crate) struct WeakGpuRef {
-    pub(crate) notifier_index: usize,
     pub(crate) u32_array: Array<u32>,
     pub(crate) weak: Weak<Mutex<Vec<SlabUpdate>>>,
     pub(crate) takes_update: bool,
@@ -650,7 +676,6 @@ impl WeakGpuRef {
 
     pub(crate) fn from_gpu<T: SlabItem>(gpu: &Gpu<T>) -> Self {
         WeakGpuRef {
-            notifier_index: gpu.notifier_index,
             u32_array: Array::new(gpu.id.inner(), T::SLAB_SIZE as u32),
             weak: Arc::downgrade(&gpu.update),
             takes_update: true,
@@ -659,7 +684,6 @@ impl WeakGpuRef {
 
     pub(crate) fn from_gpu_array<T: SlabItem>(gpu_array: &GpuArray<T>) -> Self {
         WeakGpuRef {
-            notifier_index: gpu_array.notifier_index,
             u32_array: gpu_array.array.into_u32_array(),
             weak: Arc::downgrade(&gpu_array.updates),
             takes_update: true,
@@ -667,8 +691,8 @@ impl WeakGpuRef {
     }
 }
 
-// impl<T: SlabItem + Clone + Send + Sync + std::any::Any> UpdatesSlab for GpuArray<T> {
-//     fn strong_count(&self) -> usize {
+// impl<T: SlabItem + Clone + Send + Sync + std::any::Any> UpdatesSlab for
+// GpuArray<T> {     fn strong_count(&self) -> usize {
 //         Arc::strong_count(&self.updates)
 //     }
 
@@ -685,8 +709,8 @@ impl WeakGpuRef {
 //     }
 // }
 
-// impl<T: SlabItem + Clone + Send + Sync + std::any::Any> UpdatesSlab for HybridArray<T> {
-//     fn strong_count(&self) -> usize {
+// impl<T: SlabItem + Clone + Send + Sync + std::any::Any> UpdatesSlab for
+// HybridArray<T> {     fn strong_count(&self) -> usize {
 //         self.gpu_value.strong_count()
 //     }
 
@@ -832,11 +856,12 @@ impl<T: SlabItem + Clone + Send + Sync + 'static> Hybrid<T> {
         self.cpu_value.read().unwrap().clone()
     }
 
-    pub fn modify(&self, f: impl FnOnce(&mut T)) {
+    pub fn modify<A: std::any::Any>(&self, f: impl FnOnce(&mut T) -> A) -> A {
         let mut value_guard = self.cpu_value.write().unwrap();
-        f(&mut value_guard);
+        let a = f(&mut value_guard);
         let t = value_guard.clone();
         self.gpu_value.set(t);
+        a
     }
 
     pub fn set(&self, value: T) {
@@ -918,6 +943,7 @@ impl<T: SlabItem + Clone + Send + Sync + 'static> Gpu<T> {
 /// Once created, the array cannot be resized.
 ///
 /// Updates are syncronized to the GPU once per frame.
+#[derive(Debug)]
 pub struct GpuArray<T> {
     array: Array<T>,
     notifier_index: usize,

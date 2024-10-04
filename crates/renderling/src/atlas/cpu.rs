@@ -278,7 +278,7 @@ impl Atlas {
         let mut texture_array = self.texture_array.write().unwrap();
         let extent = texture_array.texture.size();
 
-        let newly_packed_layers = pack_images(&layers, &images, extent)
+        let newly_packed_layers = pack_images(&layers, images, extent)
             .context(CannotPackTexturesSnafu { size: extent })?;
 
         let mut staged = StagedResources::try_staging(
@@ -422,14 +422,14 @@ fn pack_images<'a>(
                 images
                     .iter()
                     .enumerate()
-                    .map(|(i, img)| AnotherPacking::Img {
+                    .map(|(i, image)| AnotherPacking::Img {
                         original_index: i,
-                        image: &img,
+                        image,
                     }),
             )
             .collect()
     };
-    new_packing.sort_by(|a, b| (a.size().length_squared()).cmp(&(b.size().length_squared())));
+    new_packing.sort_by_key(|a| (a.size().length_squared()));
     let total_images = new_packing.len();
     let new_packing_layers: Vec<Vec<AnotherPacking>> =
         fan_split_n(extent.depth_or_array_layers as usize, new_packing);
@@ -473,7 +473,7 @@ impl StagedResources {
         let new_texture_array = Atlas::create_texture(device, queue, extent)?;
         let mut output = vec![];
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("atlas add images"),
+            label: Some("atlas staging"),
         });
         let mut temporary_layers = vec![Layer::default(); extent.depth_or_array_layers as usize];
         for (layer_index, packed_items) in newly_packed_layers.into_iter().enumerate() {
@@ -551,7 +551,7 @@ impl StagedResources {
                     AnotherPacking::Internal(mut texture) => {
                         let mut t = texture.cache;
                         debug_assert_eq!(t.size_px, size_px);
-                        log::trace!("  add_images: copying previous frame {t:?}",);
+                        log::trace!("  copying previous frame {t:?}",);
                         // copy the frame from the old texture to the new texture
                         // in a new destination
                         encoder.copy_texture_to_texture(
@@ -571,7 +571,7 @@ impl StagedResources {
                                 origin: wgpu::Origin3d {
                                     x: offset_px.x,
                                     y: offset_px.y,
-                                    z: t.layer_index,
+                                    z: layer_index as u32,
                                 },
                                 aspect: wgpu::TextureAspect::All,
                             },
