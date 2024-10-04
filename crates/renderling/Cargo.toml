@@ -87,9 +87,12 @@ tutorial_slabbed_renderlet = []
 
 wasm = ["wgpu/fragile-send-sync-non-atomic-wasm"]
 
+[patch.crates-io]
+spirv-std = { git = "https://github.com/Rust-GPU/rust-gpu" }
+
 # dependencies for CPU and GPU code
 [dependencies]
-spirv-std = "0.9"
+spirv-std = { version = "0.9" }
 
 # dependencies for GPU code
 [target.'cfg(target_arch = "spirv")'.dependencies]
