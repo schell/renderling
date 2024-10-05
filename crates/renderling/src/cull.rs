@@ -3,8 +3,8 @@
 //! Frustum culling as explained in
 //! [the vulkan guide](https://vkguide.dev/docs/gpudriven/compute_culling/).
 use crabslab::Slab;
-use glam::UVec3;
-use spirv_std::{arch::IndexUnchecked, spirv};
+use glam::{UVec3, Vec2, Vec4, Vec4Swizzles};
+use spirv_std::{arch::IndexUnchecked, image::Image2d, spirv, Sampler};
 
 use crate::draw::DrawIndirectArgs;
 
@@ -41,6 +41,40 @@ pub fn compute_frustum_culling(
     if !renderlet.bounds.is_inside_camera_view(&camera, model) {
         arg.instance_count = 0;
     }
+}
+
+#[cfg(feature = "compute_occlusion_culling")]
+#[spirv(vertex)]
+pub fn downsample_depth_pyramid_vertex(
+    #[spirv(vertex_index)] vertex_index: u32,
+    #[spirv(position)] out_clip_pos: &mut Vec4,
+) {
+    let i = (vertex_index % 6) as usize;
+    *out_clip_pos = crate::math::CLIP_SPACE_COORD_QUAD_CCW[i];
+}
+
+#[cfg(feature = "compute_occlusion_culling")]
+#[spirv(fragment)]
+pub fn downsample_depth_pyramid_fragment(
+    #[spirv(descriptor_set = 0, binding = 0)] mip_texture: &Image2d,
+    #[spirv(descriptor_set = 0, binding = 1)] mip_sampler: &Sampler,
+    #[spirv(frag_coord)] frag_coord: Vec4,
+    frag_color: &mut Vec4,
+) {
+    // Find the top-left of the 2x2 texel we're going to sample.
+    let tl_texel = frag_coord.xy() * 2.0;
+    // Sample te texel.
+    //
+    // The texel will look like this:
+    //
+    // a b
+    // c d
+    let a = mip_texture.sample(*mip_sampler, tl_texel);
+    let b = mip_texture.sample(*mip_sampler, tl_texel + Vec2::new(1.0, 0.0));
+    let c = mip_texture.sample(*mip_sampler, tl_texel + Vec2::new(0.0, 1.0));
+    let d = mip_texture.sample(*mip_sampler, tl_texel + Vec2::new(1.0, 1.0));
+    let depth_value = a.min(b).min(c).min(d);
+    *frag_color = depth_value;
 }
 
 #[cfg(feature = "compute_occlusion_culling")]

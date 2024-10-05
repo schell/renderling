@@ -1,6 +1,10 @@
 //! Provides convenient wrappers around renderling shader linkage.
 use std::sync::Arc;
 
+// TODO: Remove all the shader cargo features.
+// They were originally used to keep rust-gpu from compiling all the
+// shaders, because it took a really long time. Now the compile times
+// are much better, so I don't think we need these any longer.
 #[cfg(feature = "bloom_downsample_fragment")]
 pub mod bloom_downsample_fragment;
 #[cfg(feature = "bloom_mix_fragment")]
@@ -17,6 +21,10 @@ pub mod brdf_lut_convolution_vertex;
 pub mod compute_frustum_culling;
 #[cfg(feature = "compute_occlusion_culling")]
 pub mod compute_occlusion_culling;
+#[cfg(feature = "compute_occlusion_culling")]
+pub mod downsample_depth_pyramid_fragment;
+#[cfg(feature = "compute_occlusion_culling")]
+pub mod downsample_depth_pyramid_vertex;
 #[cfg(feature = "generate_mipmap_fragment")]
 pub mod generate_mipmap_fragment;
 #[cfg(feature = "generate_mipmap_vertex")]
