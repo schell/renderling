@@ -1,43 +1,35 @@
 //! CPU-only side of renderling/draw.rs
 
-use std::sync::{Arc, RwLock, Weak};
+use std::sync::Arc;
 
 use crabslab::Id;
+use glam::UVec2;
 use rustc_hash::FxHashMap;
 
 use crate::{
-    cull::ComputeCulling,
-    slab::{Gpu, Hybrid, SlabAllocator},
+    cull::{CullingError, FrustumCulling, OcclusionCulling},
+    slab::{Gpu, Hybrid, SlabAllocator, WeakHybrid},
     stage::Renderlet,
+    texture::Texture,
     Context,
 };
 
 use super::DrawIndirectArgs;
 
 /// Used to track renderlets internally.
+#[repr(transparent)]
 struct InternalRenderlet {
-    id: Id<Renderlet>,
-    vertex_count: u32,
-    is_visible: bool,
-    weak_cpu: Weak<RwLock<Renderlet>>,
-    weak_gpu: Weak<dyn std::any::Any>,
+    inner: WeakHybrid<Renderlet>,
 }
 
 impl InternalRenderlet {
     fn has_external_references(&self) -> bool {
-        self.weak_gpu.strong_count() > 0
+        self.inner.strong_count() > 0
     }
 
     fn from_hybrid_renderlet(hr: &Hybrid<Renderlet>) -> Self {
-        let r = hr.get();
-        let weak_cpu = Arc::downgrade(&hr.cpu_value);
-        let weak_gpu = Arc::downgrade(&hr.gpu_value.update);
-        InternalRenderlet {
-            id: hr.id(),
-            vertex_count: r.get_vertex_count(),
-            is_visible: r.visible,
-            weak_cpu,
-            weak_gpu,
+        Self {
+            inner: WeakHybrid::from_hybrid(hr),
         }
     }
 }
@@ -45,13 +37,15 @@ impl InternalRenderlet {
 struct IndirectDraws {
     slab: SlabAllocator<wgpu::Buffer>,
     draws: Vec<Gpu<DrawIndirectArgs>>,
-    compute_culling: ComputeCulling,
+    frustum_culling: FrustumCulling,
+    occlusion_culling: OcclusionCulling,
 }
 
 impl IndirectDraws {
-    fn new(device: &wgpu::Device) -> Self {
+    fn new(device: &wgpu::Device, size: UVec2, sample_count: u32) -> Self {
         Self {
-            compute_culling: ComputeCulling::new(device),
+            frustum_culling: FrustumCulling::new(device),
+            occlusion_culling: OcclusionCulling::new(device, size, sample_count),
             slab: SlabAllocator::default(),
             draws: vec![],
         }
@@ -90,13 +84,13 @@ impl IndirectDraws {
                 wgpu::BufferUsages::INDIRECT,
             )) {
                 // Invalidate the compute culling buffer, it will be regenerated later...
-                self.compute_culling.invalidate_bindgroup();
+                self.frustum_culling.invalidate_bindgroup();
             }
             self.draws = internal_renderlets
                 .iter()
                 .map(|ir: &InternalRenderlet| {
                     self.slab
-                        .new_value(DrawIndirectArgs::from(ir.id))
+                        .new_value(DrawIndirectArgs::from(ir.inner.id()))
                         .into_gpu_only()
                 })
                 .collect();
@@ -142,7 +136,7 @@ impl DrawCalls {
     ///
     /// `use_compute_culling` can be used to set whether frustum culling is used as a GPU compute
     /// step before drawing. This is a native-only option.
-    pub fn new(ctx: &Context, use_compute_culling: bool) -> Self {
+    pub fn new(ctx: &Context, use_compute_culling: bool, size: UVec2, sample_count: u32) -> Self {
         let can_use_multi_draw_indirect = ctx.get_adapter().features().contains(
             wgpu::Features::INDIRECT_FIRST_INSTANCE | wgpu::Features::MULTI_DRAW_INDIRECT,
         );
@@ -158,7 +152,11 @@ impl DrawCalls {
             drawing_strategy: {
                 if can_use_compute_culling {
                     log::debug!("Using indirect drawing method and compute culling");
-                    DrawingStrategy::Indirect(IndirectDraws::new(ctx.get_device()))
+                    DrawingStrategy::Indirect(IndirectDraws::new(
+                        ctx.get_device(),
+                        size,
+                        sample_count,
+                    ))
                 } else {
                     log::debug!("Using direct drawing method");
                     DrawingStrategy::Direct
@@ -191,7 +189,7 @@ impl DrawCalls {
     /// Returns the number of draw calls remaining in the queue.
     pub fn remove_renderlet(&mut self, renderlet: &Hybrid<Renderlet>) -> usize {
         let id = renderlet.id();
-        self.internal_renderlets.retain(|ir| ir.id != id);
+        self.internal_renderlets.retain(|ir| ir.inner.id() != id);
 
         if let DrawingStrategy::Indirect(indirect) = &mut self.drawing_strategy {
             indirect.invalidate();
@@ -212,7 +210,7 @@ impl DrawCalls {
         let mut m = FxHashMap::from_iter(
             std::mem::take(&mut self.internal_renderlets)
                 .into_iter()
-                .map(|r| (r.id, r)),
+                .map(|r| (r.inner.id(), r)),
         );
         for id in order.into_iter() {
             if let Some(renderlet) = m.remove(&id) {
@@ -230,7 +228,7 @@ impl DrawCalls {
     /// which holds the [`Renderlet`]s that have been queued to draw.
     pub fn invalidate_external_slab_buffer(&mut self) {
         if let DrawingStrategy::Indirect(indirect) = &mut self.drawing_strategy {
-            indirect.compute_culling.invalidate_bindgroup();
+            indirect.frustum_culling.invalidate_bindgroup();
         }
     }
 
@@ -241,21 +239,10 @@ impl DrawCalls {
         // Drop any renderlets that have no external references.
         self.internal_renderlets.retain_mut(|ir| {
             if ir.has_external_references() {
-                // Update the cached data (for direct drawing), if possible
-                //
-                // Note:
-                // If we can't upgrade here, it means the CPU value has been
-                // dropped. In that case we don't need to update the cache here,
-                // since the user can no longer update the cache either.
-                if let Some(arc_renderlet) = Weak::upgrade(&ir.weak_cpu) {
-                    let r = arc_renderlet.read().unwrap();
-                    ir.vertex_count = r.get_vertex_count();
-                    ir.is_visible = r.visible;
-                }
                 true
             } else {
                 redraw_args = true;
-                log::trace!("dropping '{:?}' from drawing", ir.id);
+                log::trace!("dropping '{:?}' from drawing", ir.inner.id());
                 false
             }
         });
@@ -279,22 +266,30 @@ impl DrawCalls {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         slab_buffer: &wgpu::Buffer,
-    ) {
+        depth_texture: &Texture,
+    ) -> Result<(), CullingError> {
         let num_draw_calls = self.internal_renderlets.len();
         // Only do compute culling if there are things we need to draw, otherwise
         // `wgpu` will err with something like:
         // "Buffer with 'indirect draw upkeep' label binding size is zero"
         if num_draw_calls > 0 {
+            // TODO: Cull on GPU even when `multidraw_indirect` is unavailable.
+            //
+            // We can do this without multidraw by running GPU culling and then
+            // copying `indirect_buffer` back to the CPU.
             if let DrawingStrategy::Indirect(indirect) = &mut self.drawing_strategy {
                 if let Some(indirect_buffer) = indirect.slab.get_buffer() {
                     log::trace!("performing culling on {num_draw_calls} renderlets");
-                    indirect.compute_culling.run(
+                    indirect.frustum_culling.run(
                         device,
                         queue,
                         slab_buffer,
                         &indirect_buffer,
                         num_draw_calls as u32,
                     );
+                    indirect
+                        .occlusion_culling
+                        .run(device, queue, depth_texture)?;
                 } else {
                     log::warn!(
                         "DrawCalls::pre_render called without first calling `upkeep` \
@@ -303,6 +298,7 @@ impl DrawCalls {
                 }
             }
         }
+        Ok(())
     }
 
     /// Draw into the given `RenderPass`.
@@ -324,9 +320,10 @@ impl DrawCalls {
                     log::trace!("drawing {num_draw_calls} renderlets using direct");
                     for ir in self.internal_renderlets.iter() {
                         // UNWRAP: panic on purpose
-                        if ir.is_visible {
-                            let vertex_range = 0..ir.vertex_count;
-                            let id = ir.id;
+                        if let Some(hr) = ir.inner.upgrade() {
+                            let ir = hr.get();
+                            let vertex_range = 0..ir.get_vertex_count();
+                            let id = hr.id();
                             let instance_range = id.inner()..id.inner() + 1;
                             render_pass.draw(vertex_range, instance_range);
                         }

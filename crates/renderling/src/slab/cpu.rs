@@ -409,12 +409,25 @@ impl<Buffer: IsBuffer> SlabAllocator<Buffer> {
     /// Use [`SlabAllocator::upkeep`] when you only need the buffer after a
     /// change, for example to recreate bindgroups.
     pub fn get_updated_buffer(&self, resources: Buffer::Resources<'_>) -> Arc<Buffer> {
+        self.get_updated_buffer_and_check(resources).0
+    }
+
+    /// Return an updated buffer, and whether or not it is different from the last one.
+    ///
+    /// This is the only way to guarantee access to a buffer.
+    ///
+    /// Use [`SlabAllocator::upkeep`] when you only need the buffer after a
+    /// change, for example to recreate bindgroups.
+    pub fn get_updated_buffer_and_check(
+        &self,
+        resources: Buffer::Resources<'_>,
+    ) -> (Arc<Buffer>, bool) {
         if let Some(new_buffer) = self.upkeep(resources) {
-            new_buffer
+            (new_buffer, true)
         } else {
             // UNWRAP: safe because we know the buffer exists at this point,
             // as we've called `upkeep` above
-            self.get_buffer().unwrap()
+            (self.get_buffer().unwrap(), false)
         }
     }
 
@@ -625,7 +638,6 @@ impl SlabUpdate {
 }
 
 pub(crate) struct WeakGpuRef {
-    pub(crate) notifier_index: usize,
     pub(crate) u32_array: Array<u32>,
     pub(crate) weak: Weak<Mutex<Vec<SlabUpdate>>>,
     pub(crate) takes_update: bool,
@@ -650,7 +662,6 @@ impl WeakGpuRef {
 
     pub(crate) fn from_gpu<T: SlabItem>(gpu: &Gpu<T>) -> Self {
         WeakGpuRef {
-            notifier_index: gpu.notifier_index,
             u32_array: Array::new(gpu.id.inner(), T::SLAB_SIZE as u32),
             weak: Arc::downgrade(&gpu.update),
             takes_update: true,
@@ -659,7 +670,6 @@ impl WeakGpuRef {
 
     pub(crate) fn from_gpu_array<T: SlabItem>(gpu_array: &GpuArray<T>) -> Self {
         WeakGpuRef {
-            notifier_index: gpu_array.notifier_index,
             u32_array: gpu_array.array.into_u32_array(),
             weak: Arc::downgrade(&gpu_array.updates),
             takes_update: true,
@@ -758,6 +768,10 @@ impl<T> Clone for WeakHybrid<T> {
 }
 
 impl<T> WeakHybrid<T> {
+    pub fn id(&self) -> Id<T> {
+        self.weak_gpu.id
+    }
+
     pub fn from_hybrid(h: &Hybrid<T>) -> Self {
         Self {
             weak_cpu: Arc::downgrade(&h.cpu_value),
@@ -770,6 +784,10 @@ impl<T> WeakHybrid<T> {
             cpu_value: self.weak_cpu.upgrade()?,
             gpu_value: self.weak_gpu.upgrade()?,
         })
+    }
+
+    pub fn strong_count(&self) -> usize {
+        self.weak_gpu.update.strong_count()
     }
 }
 

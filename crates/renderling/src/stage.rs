@@ -257,7 +257,6 @@ impl Renderlet {
     }
 }
 
-#[cfg(feature = "renderlet_vertex")]
 /// Renderlet vertex shader.
 #[spirv(vertex)]
 #[allow(clippy::too_many_arguments)]
@@ -328,7 +327,6 @@ pub fn renderlet_vertex(
     *out_clip_pos = camera.view_projection() * world_pos.extend(1.0);
 }
 
-#[cfg(feature = "renderlet_fragment")]
 /// Renderlet fragment shader
 #[allow(clippy::too_many_arguments, dead_code)]
 #[spirv(fragment)]
