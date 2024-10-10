@@ -28,7 +28,7 @@ fn create_pipeline(
         layout: Some(&pp_layout),
         vertex: wgpu::VertexState {
             module: &vertex_linkage.module,
-            entry_point: vertex_linkage.entry_point,
+            entry_point: Some(vertex_linkage.entry_point),
             buffers: &[],
             compilation_options: Default::default(),
         },
@@ -40,7 +40,7 @@ fn create_pipeline(
         },
         fragment: Some(wgpu::FragmentState {
             module: &fragment_linkage.module,
-            entry_point: fragment_linkage.entry_point,
+            entry_point: Some(fragment_linkage.entry_point),
             targets: &[Some(wgpu::ColorTargetState {
                 format,
                 blend: None,
@@ -183,7 +183,7 @@ impl MipMapGenerator {
                 });
 
                 render_pass.set_pipeline(&self.pipeline);
-                render_pass.set_bind_group(0, &bindgroup, &[]);
+                render_pass.set_bind_group(0, Some(&bindgroup), &[]);
                 render_pass.draw(0..6, 0..1);
             }
 

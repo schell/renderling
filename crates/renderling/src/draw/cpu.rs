@@ -3,12 +3,14 @@
 use std::sync::Arc;
 
 use crabslab::Id;
+use glam::UVec2;
 use rustc_hash::FxHashMap;
 
 use crate::{
-    cull::{FrustumCulling, OcclusionCulling},
+    cull::{CullingError, FrustumCulling, OcclusionCulling},
     slab::{Gpu, Hybrid, SlabAllocator, WeakHybrid},
     stage::Renderlet,
+    texture::Texture,
     Context,
 };
 
@@ -40,10 +42,10 @@ struct IndirectDraws {
 }
 
 impl IndirectDraws {
-    fn new(device: &wgpu::Device) -> Self {
+    fn new(device: &wgpu::Device, size: UVec2, sample_count: u32) -> Self {
         Self {
             frustum_culling: FrustumCulling::new(device),
-            occlusion_culling: OcclusionCulling::new(device),
+            occlusion_culling: OcclusionCulling::new(device, size, sample_count),
             slab: SlabAllocator::default(),
             draws: vec![],
         }
@@ -134,7 +136,7 @@ impl DrawCalls {
     ///
     /// `use_compute_culling` can be used to set whether frustum culling is used as a GPU compute
     /// step before drawing. This is a native-only option.
-    pub fn new(ctx: &Context, use_compute_culling: bool) -> Self {
+    pub fn new(ctx: &Context, use_compute_culling: bool, size: UVec2, sample_count: u32) -> Self {
         let can_use_multi_draw_indirect = ctx.get_adapter().features().contains(
             wgpu::Features::INDIRECT_FIRST_INSTANCE | wgpu::Features::MULTI_DRAW_INDIRECT,
         );
@@ -150,7 +152,11 @@ impl DrawCalls {
             drawing_strategy: {
                 if can_use_compute_culling {
                     log::debug!("Using indirect drawing method and compute culling");
-                    DrawingStrategy::Indirect(IndirectDraws::new(ctx.get_device()))
+                    DrawingStrategy::Indirect(IndirectDraws::new(
+                        ctx.get_device(),
+                        size,
+                        sample_count,
+                    ))
                 } else {
                     log::debug!("Using direct drawing method");
                     DrawingStrategy::Direct
@@ -260,7 +266,8 @@ impl DrawCalls {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         slab_buffer: &wgpu::Buffer,
-    ) {
+        depth_texture: &Texture,
+    ) -> Result<(), CullingError> {
         let num_draw_calls = self.internal_renderlets.len();
         // Only do compute culling if there are things we need to draw, otherwise
         // `wgpu` will err with something like:
@@ -280,13 +287,9 @@ impl DrawCalls {
                         &indirect_buffer,
                         num_draw_calls as u32,
                     );
-                    indirect.occlusion_culling.run(
-                        device,
-                        queue,
-                        slab_buffer,
-                        &indirect_buffer,
-                        num_draw_calls as u32,
-                    );
+                    indirect
+                        .occlusion_culling
+                        .run(device, queue, depth_texture)?;
                 } else {
                     log::warn!(
                         "DrawCalls::pre_render called without first calling `upkeep` \
@@ -295,6 +298,7 @@ impl DrawCalls {
                 }
             }
         }
+        Ok(())
     }
 
     /// Draw into the given `RenderPass`.

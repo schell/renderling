@@ -2,9 +2,13 @@
 //!
 //! Frustum culling as explained in
 //! [the vulkan guide](https://vkguide.dev/docs/gpudriven/compute_culling/).
-use crabslab::Slab;
-use glam::{UVec3, Vec2, Vec4, Vec4Swizzles};
-use spirv_std::{arch::IndexUnchecked, image::Image2d, spirv, Sampler};
+use crabslab::{Slab, SlabItem};
+use glam::{UVec2, UVec3, Vec3Swizzles, Vec4};
+use spirv_std::{
+    arch::IndexUnchecked,
+    image::{sample_with, Image, ImageWithMethods},
+    spirv,
+};
 
 use crate::draw::DrawIndirectArgs;
 
@@ -13,7 +17,6 @@ mod cpu;
 #[cfg(not(target_arch = "spirv"))]
 pub use cpu::*;
 
-#[cfg(feature = "compute_frustum_culling")]
 #[spirv(compute(threads(32)))]
 pub fn compute_frustum_culling(
     #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] slab: &[u32],
@@ -43,41 +46,74 @@ pub fn compute_frustum_culling(
     }
 }
 
-#[cfg(feature = "compute_occlusion_culling")]
-#[spirv(vertex)]
-pub fn downsample_depth_pyramid_vertex(
-    #[spirv(vertex_index)] vertex_index: u32,
-    #[spirv(position)] out_clip_pos: &mut Vec4,
-) {
-    let i = (vertex_index % 6) as usize;
-    *out_clip_pos = crate::math::CLIP_SPACE_COORD_QUAD_CCW[i];
+#[derive(Clone, Copy, Default, SlabItem)]
+pub struct PyramidDescriptor {
+    /// Size of the top layer mip.
+    size: UVec2,
+    /// Current mip level.
+    ///
+    /// This will be updated for each run of the downsample compute shader.
+    mip_level: u32,
 }
 
-#[cfg(feature = "compute_occlusion_culling")]
-#[spirv(fragment)]
-pub fn downsample_depth_pyramid_fragment(
-    #[spirv(descriptor_set = 0, binding = 0)] mip_texture: &Image2d,
-    #[spirv(descriptor_set = 0, binding = 1)] mip_sampler: &Sampler,
-    #[spirv(frag_coord)] frag_coord: Vec4,
-    frag_color: &mut Vec4,
+impl PyramidDescriptor {
+    fn should_skip_invocation(&self, global_invocation: UVec3) -> bool {
+        let current_size = self.size >> self.mip_level;
+        global_invocation.x < current_size.x && global_invocation.y < current_size.y
+    }
+}
+
+pub type DepthImage2d = Image!(2D, type=f32, sampled=true, depth=true);
+pub type DepthPyramidImage = Image!(2D, format = r32f, sampled = true, depth = false);
+pub type DepthPyramidImageMut = Image!(2D, format = r32f, sampled = false, depth = false);
+
+/// Copies a depth texture to the top mip of a pyramid of mips.
+#[spirv(compute(threads(32)))]
+pub fn compute_copy_depth_to_pyramid(
+    #[spirv(descriptor_set = 0, binding = 0, storage_buffer)] desc: &PyramidDescriptor,
+    #[spirv(descriptor_set = 0, binding = 1)] depth_texture: &DepthImage2d,
+    #[spirv(descriptor_set = 0, binding = 2)] mip: &DepthPyramidImageMut,
+    #[spirv(global_invocation_id)] global_id: UVec3,
 ) {
-    // Find the top-left of the 2x2 texel we're going to sample.
-    let tl_texel = frag_coord.xy() * 2.0;
-    // Sample te texel.
+    if desc.should_skip_invocation(global_id) {
+        return;
+    }
+
+    let depth: Vec4 = depth_texture.fetch_with(global_id.xy(), sample_with::lod(0));
+    unsafe {
+        mip.write(global_id.xy(), depth);
+    }
+}
+
+/// Downsample from `previous_mip` into `current_mip`.
+#[spirv(compute(threads(32)))]
+pub fn compute_downsample_depth_pyramid(
+    #[spirv(descriptor_set = 0, binding = 0, storage_buffer)] desc: &PyramidDescriptor,
+    #[spirv(descriptor_set = 0, binding = 1)] previous_mip: &DepthPyramidImage,
+    #[spirv(descriptor_set = 0, binding = 2)] current_mip: &DepthPyramidImageMut,
+    #[spirv(global_invocation_id)] global_id: UVec3,
+) {
+    if desc.should_skip_invocation(global_id) {
+        return;
+    }
+    // Sample the texel.
     //
     // The texel will look like this:
     //
     // a b
     // c d
-    let a = mip_texture.sample(*mip_sampler, tl_texel);
-    let b = mip_texture.sample(*mip_sampler, tl_texel + Vec2::new(1.0, 0.0));
-    let c = mip_texture.sample(*mip_sampler, tl_texel + Vec2::new(0.0, 1.0));
-    let d = mip_texture.sample(*mip_sampler, tl_texel + Vec2::new(1.0, 1.0));
+    let coord_in_previous_mip = global_id.xy() * 2;
+    let a = previous_mip.fetch(coord_in_previous_mip);
+    let b = previous_mip.fetch(coord_in_previous_mip + UVec2::new(1, 0));
+    let c = previous_mip.fetch(coord_in_previous_mip + UVec2::new(0, 1));
+    let d = previous_mip.fetch(coord_in_previous_mip + UVec2::new(1, 1));
     let depth_value = a.min(b).min(c).min(d);
-    *frag_color = depth_value;
+    // Write the texel in the current mip
+    unsafe {
+        current_mip.write(global_id.xy(), Vec4::splat(depth_value));
+    }
 }
 
-#[cfg(feature = "compute_occlusion_culling")]
 #[spirv(compute(threads(32)))]
 pub fn compute_occlusion_culling(
     #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] slab: &[u32],
