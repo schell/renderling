@@ -412,7 +412,8 @@ impl<Buffer: IsBuffer> SlabAllocator<Buffer> {
         self.get_updated_buffer_and_check(resources).0
     }
 
-    /// Return an updated buffer, and whether or not it is different from the last one.
+    /// Return an updated buffer, and whether or not it is different from the
+    /// last one.
     ///
     /// This is the only way to guarantee access to a buffer.
     ///
@@ -468,6 +469,8 @@ impl<Buffer: IsBuffer> SlabAllocator<Buffer> {
 
     /// Build the set of sources that require updates, draining the source
     /// notifier and resetting the stored `update_queue`.
+    ///
+    /// This also places recycled items into the recycle bin.
     fn drain_updated_sources(&self) -> RangeManager<SlabUpdate> {
         let update_set = self.get_updated_source_ids();
         // UNWRAP: panic on purpose
@@ -677,8 +680,8 @@ impl WeakGpuRef {
     }
 }
 
-// impl<T: SlabItem + Clone + Send + Sync + std::any::Any> UpdatesSlab for GpuArray<T> {
-//     fn strong_count(&self) -> usize {
+// impl<T: SlabItem + Clone + Send + Sync + std::any::Any> UpdatesSlab for
+// GpuArray<T> {     fn strong_count(&self) -> usize {
 //         Arc::strong_count(&self.updates)
 //     }
 
@@ -695,8 +698,8 @@ impl WeakGpuRef {
 //     }
 // }
 
-// impl<T: SlabItem + Clone + Send + Sync + std::any::Any> UpdatesSlab for HybridArray<T> {
-//     fn strong_count(&self) -> usize {
+// impl<T: SlabItem + Clone + Send + Sync + std::any::Any> UpdatesSlab for
+// HybridArray<T> {     fn strong_count(&self) -> usize {
 //         self.gpu_value.strong_count()
 //     }
 

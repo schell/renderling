@@ -8,7 +8,7 @@ pub mod bloom_vertex;
 pub mod brdf_lut_convolution_fragment;
 pub mod brdf_lut_convolution_vertex;
 pub mod compute_copy_depth_to_pyramid;
-pub mod compute_downsample_depth_pyramid;
+//pub mod compute_downsample_depth_pyramid;
 pub mod compute_frustum_culling;
 pub mod compute_occlusion_culling;
 pub mod generate_mipmap_fragment;

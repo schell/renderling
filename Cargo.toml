@@ -52,5 +52,5 @@ opt-level = 3
 [patch.crates-io]
 naga = { git = "https://github.com/schell/wgpu.git", branch = "fix/spv-in-sampling-result-for-depth-texture-is-scalar" }
 wgpu = { git = "https://github.com/schell/wgpu.git", branch = "fix/spv-in-sampling-result-for-depth-texture-is-scalar" }
-spirv-std = { git = "https://github.com/Rust-GPU/rust-gpu" }
+spirv-std = {path = "../rust-gpu/crates/spirv-std" } #{ git = "https://github.com/Rust-GPU/rust-gpu" }
 

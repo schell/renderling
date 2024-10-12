@@ -2753,7 +2753,6 @@ dependencies = [
 [[package]]
 name = "spirv-std"
 version = "0.9.0"
-source = "git+https://github.com/Rust-GPU/rust-gpu#529aaf4f3fd1f40cb7dea4fbfd484d544b7b60ed"
 dependencies = [
  "bitflags 1.3.2",
  "glam",
@@ -2765,7 +2764,6 @@ dependencies = [
 [[package]]
 name = "spirv-std-macros"
 version = "0.9.0"
-source = "git+https://github.com/Rust-GPU/rust-gpu#529aaf4f3fd1f40cb7dea4fbfd484d544b7b60ed"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2776,7 +2774,6 @@ dependencies = [
 [[package]]
 name = "spirv-std-types"
 version = "0.9.0"
-source = "git+https://github.com/Rust-GPU/rust-gpu#529aaf4f3fd1f40cb7dea4fbfd484d544b7b60ed"
 
 [[package]]
 name = "static_assertions"
