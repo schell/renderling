@@ -3,7 +3,7 @@
 //! Frustum culling as explained in
 //! [the vulkan guide](https://vkguide.dev/docs/gpudriven/compute_culling/).
 use crabslab::{Array, Id, Slab, SlabItem};
-use glam::{UVec2, UVec3, Vec3Swizzles, Vec4};
+use glam::{UVec2, UVec3, Vec3Swizzles};
 use spirv_std::{
     arch::IndexUnchecked,
     image::{sample_with, Image, ImageWithMethods},
@@ -83,8 +83,8 @@ pub type DepthPyramidImageMut = Image!(2D, format = r32f, depth = false);
 
 /// Copies a depth texture to the top mip of a pyramid of mips.
 ///
-/// It is assumed that a [`PyramidDescriptor`] is stored at index `0` in the
-/// given slab.
+/// It is assumed that a [`DepthPyramidDescriptor`] is stored at index `0` in
+/// the given slab.
 #[spirv(compute(threads(32, 32, 1)))]
 pub fn compute_copy_depth_to_pyramid(
     #[spirv(descriptor_set = 0, binding = 0, storage_buffer)] slab: &mut [u32],
@@ -103,34 +103,40 @@ pub fn compute_copy_depth_to_pyramid(
     slab.write(dest_id, &depth);
 }
 
-// /// Downsample from `previous_mip` into `current_mip`.
-// #[spirv(compute(threads(32)))]
-// pub fn compute_downsample_depth_pyramid(
-//     #[spirv(descriptor_set = 0, binding = 0, storage_buffer)] desc:
-// &PyramidDescriptor,     #[spirv(descriptor_set = 0, binding = 1)]
-// previous_mip: &DepthPyramidImage,     #[spirv(descriptor_set = 0, binding =
-// 2)] current_mip: &DepthPyramidImageMut,     #[spirv(global_invocation_id)]
-// global_id: UVec3, ) {
-//     if desc.should_skip_invocation(global_id) {
-//         return;
-//     }
-//     // Sample the texel.
-//     //
-//     // The texel will look like this:
-//     //
-//     // a b
-//     // c d
-//     let coord_in_previous_mip = global_id.xy() * 2;
-//     let a = previous_mip.fetch(coord_in_previous_mip);
-//     let b = previous_mip.fetch(coord_in_previous_mip + UVec2::new(1, 0));
-//     let c = previous_mip.fetch(coord_in_previous_mip + UVec2::new(0, 1));
-//     let d = previous_mip.fetch(coord_in_previous_mip + UVec2::new(1, 1));
-//     let depth_value = a.min(b).min(c).min(d);
-//     // Write the texel in the current mip
-//     unsafe {
-//         current_mip.write(global_id.xy(), Vec4::splat(depth_value));
-//     }
-// }
+/// Downsample from `DepthPyramidDescriptor::mip_level` into
+/// `DepthPyramidDescriptor::mip_level + 1`.
+///
+/// It is assumed that a [`DepthPyramidDescriptor`] is stored at index `0` in
+/// the given slab.
+///
+/// The `DepthPyramidDescriptor`'s `mip_level` field will point to that of the
+/// level being sampled.
+///
+/// This shader should be called in a loop from from `1..mip_count`.
+#[spirv(compute(threads(32, 32, 1)))]
+pub fn compute_downsample_depth_pyramid(
+    #[spirv(descriptor_set = 0, binding = 0, storage_buffer)] slab: &mut [u32],
+    #[spirv(global_invocation_id)] global_id: UVec3,
+) {
+    let desc = slab.read_unchecked::<DepthPyramidDescriptor>(0u32.into());
+    if desc.should_skip_invocation(global_id) {
+        return;
+    }
+    // Sample the texel.
+    //
+    // The texel will look like this:
+    //
+    // a b
+    // c d
+    let a = slab.read(desc.id_of_depth(desc.mip_level, global_id.xy(), slab));
+    let b = slab.read(desc.id_of_depth(desc.mip_level, global_id.xy() + UVec2::new(1, 0), slab));
+    let c = slab.read(desc.id_of_depth(desc.mip_level, global_id.xy() + UVec2::new(0, 1), slab));
+    let d = slab.read(desc.id_of_depth(desc.mip_level, global_id.xy() + UVec2::new(1, 1), slab));
+    let depth_value = a.min(b).min(c).min(d);
+    // Write the texel in the current mip
+    let current_mip_id = desc.id_of_depth(desc.mip_level + 1, global_id.xy() / 2, slab);
+    slab.write(current_mip_id, &depth_value);
+}
 
 #[spirv(compute(threads(32)))]
 pub fn compute_occlusion_culling(
