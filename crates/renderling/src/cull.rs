@@ -65,7 +65,7 @@ pub struct DepthPyramidDescriptor {
 impl DepthPyramidDescriptor {
     fn should_skip_invocation(&self, global_invocation: UVec3) -> bool {
         let current_size = self.size >> self.mip_level;
-        global_invocation.x < current_size.x && global_invocation.y < current_size.y
+        !(global_invocation.x < current_size.x && global_invocation.y < current_size.y)
     }
 
     /// Return the [`Id`] of the depth at the given `mip_level` and coordinate.
@@ -85,7 +85,7 @@ pub type DepthPyramidImageMut = Image!(2D, format = r32f, depth = false);
 ///
 /// It is assumed that a [`PyramidDescriptor`] is stored at index `0` in the
 /// given slab.
-#[spirv(compute(threads(32)))]
+#[spirv(compute(threads(32, 32, 1)))]
 pub fn compute_copy_depth_to_pyramid(
     #[spirv(descriptor_set = 0, binding = 0, storage_buffer)] slab: &mut [u32],
     #[spirv(descriptor_set = 0, binding = 1)] depth_texture: &DepthImage2d,

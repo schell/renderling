@@ -1,12 +1,13 @@
 //! CPU side of compute culling.
 
-use crabslab::Array;
+use crabslab::{Array, Slab};
 use glam::UVec2;
-use snafu::Snafu;
+use snafu::{OptionExt, Snafu};
 use std::sync::Arc;
 
 use crate::{
-    slab::{GpuArray, Hybrid, SlabAllocator},
+    camera::Camera,
+    slab::{GpuArray, Hybrid, SlabAllocator, SlabAllocatorError},
     texture::Texture,
 };
 
@@ -22,6 +23,18 @@ pub enum CullingError {
 
     #[snafu(display("Missing depth pyramid mip {index}"))]
     MissingMip { index: usize },
+
+    #[snafu(display("{source}"))]
+    SlabError { source: SlabAllocatorError },
+
+    #[snafu(display("Could not read mip {index}"))]
+    ReadMip { index: usize },
+}
+
+impl From<SlabAllocatorError> for CullingError {
+    fn from(source: SlabAllocatorError) -> Self {
+        CullingError::SlabError { source }
+    }
 }
 
 const FRUSTUM_LABEL: Option<&str> = Some("compute-frustum-culling");
@@ -207,6 +220,7 @@ impl DepthPyramid {
         queue: &wgpu::Queue,
         size: UVec2,
     ) -> (Arc<wgpu::Buffer>, bool) {
+        log::info!("resizing depth pyramid to {size}");
         let mip = self.slab.new_array(vec![]);
         self.mip_data = vec![];
         self.desc.modify(|desc| desc.mip = mip.array());
@@ -237,6 +251,44 @@ impl DepthPyramid {
 
     pub fn size(&self) -> UVec2 {
         self.desc.get().size
+    }
+
+    pub async fn read_images(
+        &self,
+        ctx: &crate::Context,
+        camera: &Camera,
+    ) -> Result<Vec<image::DynamicImage>, CullingError> {
+        let size = self.size();
+        let slab_data = self
+            .slab
+            .read(ctx.get_device(), ctx.get_queue(), Self::LABEL, 0..)
+            .await?;
+        let mut images = vec![];
+        let mut min = f32::MAX;
+        let mut max = f32::MIN;
+        for (i, mip) in self.mip_data.iter().enumerate() {
+            let depth_data: Vec<f32> = slab_data
+                .read_vec(mip.array())
+                .into_iter()
+                .map(|depth| {
+                    if i == 0 {
+                        min = min.min(depth);
+                        max = max.max(depth);
+                    }
+                    camera.linearize_depth_value(depth)
+                    // depth
+                })
+                .collect();
+            log::info!("min: {min}");
+            log::info!("max: {max}");
+            let width = size.x >> i;
+            let height = size.y >> i;
+            let image: image::ImageBuffer<image::Luma<f32>, Vec<f32>> =
+                image::ImageBuffer::from_raw(width, height, depth_data)
+                    .context(ReadMipSnafu { index: i })?;
+            images.push(image::DynamicImage::from(image));
+        }
+        Ok(images)
     }
 }
 
@@ -378,7 +430,7 @@ impl ComputeCopyDepth {
 /// Computes occlusion culling on the GPU.
 pub struct OcclusionCulling {
     sample_count: u32,
-    depth_pyramid: DepthPyramid,
+    pub(crate) depth_pyramid: DepthPyramid,
     compute_copy_depth: ComputeCopyDepth,
 }
 
@@ -413,6 +465,7 @@ impl OcclusionCulling {
     ) -> Result<(), CullingError> {
         let sample_count = depth_texture.texture.sample_count();
         if sample_count != self.sample_count {
+            log::warn!("sample_count changed, invalidating");
             self.invalidate();
             // let (bindgroup_layout, pipeline) =
             //     Self::create_bindgroup_layout_and_pipeline(device,
@@ -423,6 +476,7 @@ impl OcclusionCulling {
         let extent = depth_texture.texture.size();
         let size = UVec2::new(extent.width, extent.height);
         let (depth_pyramid_buffer, should_invalidate) = if size != self.depth_pyramid.size() {
+            log::warn!("depth texture size changed, invalidating");
             self.invalidate();
             self.depth_pyramid.resize(device, queue, size)
         } else {
@@ -446,5 +500,67 @@ impl OcclusionCulling {
         );
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::prelude::*;
+    use glam::{Mat4, Quat, Vec3, Vec4};
+
+
+    #[test]
+    fn occlusion_culling_sanity() {
+        let ctx = Context::headless(100, 100);
+        let stage = ctx.new_stage().with_background_color(Vec4::splat(1.0));
+        let camera_position = Vec3::new(0.0, 9.0, 9.0);
+        let camera = stage.new_value(Camera::new(
+            Mat4::perspective_rh(std::f32::consts::PI / 4.0, 1.0, 1.0, 24.0),
+            Mat4::look_at_rh(camera_position, Vec3::ZERO, Vec3::Y),
+        ));
+        let geometry = stage.new_array(crate::test::gpu_cube_vertices());
+        let transform = stage.new_value(Transform {
+            scale: Vec3::new(6.0, 6.0, 6.0),
+            rotation: Quat::from_axis_angle(Vec3::Y, -std::f32::consts::FRAC_PI_4),
+            ..Default::default()
+        });
+        let cube = stage.new_value(Renderlet {
+            camera_id: camera.id(),
+            vertices_array: geometry.array(),
+            transform_id: transform.id(),
+            ..Default::default()
+        });
+        stage.add_renderlet(&cube);
+
+        let frame = ctx.get_next_frame().unwrap();
+        stage.render(&frame.view());
+        frame.present();
+
+        let frame = ctx.get_next_frame().unwrap();
+        stage.render(&frame.view());
+        let img = frame.read_image().unwrap();
+        img_diff::save("cull/pyramid/frame.png", img);
+        frame.present();
+
+        let depth_texture = stage.get_depth_texture();
+        let depth_img = depth_texture.read_image().unwrap();
+        img_diff::save("cull/pyramid/depth.png", depth_img);
+
+        let pyramid_images = futures_lite::future::block_on(
+            stage
+                .draw_calls
+                .read()
+                .unwrap()
+                .drawing_strategy
+                .as_indirect()
+                .unwrap()
+                .occlusion_culling
+                .depth_pyramid
+                .read_images(&ctx, &camera.get()),
+        )
+        .unwrap();
+        for (i, img) in pyramid_images.into_iter().enumerate() {
+            img_diff::save(&format!("cull/pyramid/mip_{i}.png"), img);
+        }
     }
 }

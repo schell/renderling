@@ -34,11 +34,11 @@ impl InternalRenderlet {
     }
 }
 
-struct IndirectDraws {
+pub(crate) struct IndirectDraws {
     slab: SlabAllocator<wgpu::Buffer>,
     draws: Vec<Gpu<DrawIndirectArgs>>,
     frustum_culling: FrustumCulling,
-    occlusion_culling: OcclusionCulling,
+    pub(crate) occlusion_culling: OcclusionCulling,
 }
 
 impl IndirectDraws {
@@ -113,7 +113,7 @@ impl From<Id<Renderlet>> for DrawIndirectArgs {
     }
 }
 
-enum DrawingStrategy {
+pub(crate) enum DrawingStrategy {
     /// The standard drawing method that includes compute culling.
     Indirect(IndirectDraws),
     /// Fallback drawing method for web targets.
@@ -123,27 +123,38 @@ enum DrawingStrategy {
     Direct,
 }
 
+impl DrawingStrategy {
+    #[cfg(test)]
+    pub fn as_indirect(&self) -> Option<&IndirectDraws> {
+        if let DrawingStrategy::Indirect(i) = self {
+            Some(i)
+        } else {
+            None
+        }
+    }
+}
+
 /// Used to determine which objects are drawn and maintains the
 /// list of all [`Renderlet`]s.
 pub struct DrawCalls {
     /// Internal representation of all staged renderlets.
     internal_renderlets: Vec<InternalRenderlet>,
-    drawing_strategy: DrawingStrategy,
+    pub(crate) drawing_strategy: DrawingStrategy,
 }
 
 impl DrawCalls {
     /// Create a new [`DrawCalls`].
     ///
-    /// `use_compute_culling` can be used to set whether frustum culling is used as a GPU compute
-    /// step before drawing. This is a native-only option.
+    /// `use_compute_culling` can be used to set whether frustum culling is used
+    /// as a GPU compute step before drawing. This is a native-only option.
     pub fn new(ctx: &Context, use_compute_culling: bool, size: UVec2, sample_count: u32) -> Self {
         let can_use_multi_draw_indirect = ctx.get_adapter().features().contains(
             wgpu::Features::INDIRECT_FIRST_INSTANCE | wgpu::Features::MULTI_DRAW_INDIRECT,
         );
         if use_compute_culling && !can_use_multi_draw_indirect {
             log::warn!(
-                "`use_compute_culling` is `true`, but the MULTI_DRAW_INDIRECT feature \
-                 is not available. No compute culling will occur."
+                "`use_compute_culling` is `true`, but the MULTI_DRAW_INDIRECT feature is not \
+                 available. No compute culling will occur."
             )
         }
         let can_use_compute_culling = use_compute_culling && can_use_multi_draw_indirect;
@@ -259,8 +270,8 @@ impl DrawCalls {
 
     /// Perform pre-draw steps like compute culling, if available.
     ///
-    /// This does not do upkeep, please call [`DrawCalls::upkeep`] before calling this
-    /// function.
+    /// This does not do upkeep, please call [`DrawCalls::upkeep`] before
+    /// calling this function.
     pub fn pre_draw(
         &mut self,
         device: &wgpu::Device,
@@ -292,8 +303,8 @@ impl DrawCalls {
                         .run(device, queue, depth_texture)?;
                 } else {
                     log::warn!(
-                        "DrawCalls::pre_render called without first calling `upkeep` \
-                            - no culling was performed"
+                        "DrawCalls::pre_render called without first calling `upkeep` - no culling \
+                         was performed"
                     );
                 }
             }
