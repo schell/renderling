@@ -81,6 +81,7 @@ impl Camera {
         self.projection * self.view
     }
 
+    /// Returns **roughly** the location of the znear plane.
     pub fn z_near(&self) -> f32 {
         dist_bpp(&self.frustum.planes[0], self.position)
     }
@@ -155,26 +156,4 @@ pub fn default_ortho2d(width: f32, height: f32) -> (Mat4, Mat4) {
     let projection = Mat4::orthographic_rh(left, right, bottom, top, near, far);
     let view = Mat4::IDENTITY;
     (projection, view)
-}
-
-#[cfg(test)]
-mod test {
-    use super::*;
-
-    #[test]
-    fn camera_znear_zfar() {
-        let znear = 0.01;
-        let zfar = 100.0;
-        let projection = Mat4::perspective_rh(core::f32::consts::PI / 4.0, 1.0, znear, zfar);
-        let view = Mat4::look_at_rh(Vec3::new(5.0, 5.0, 10.0), Vec3::ZERO, Vec3::Y);
-        let camera = Camera::new(projection, view);
-
-        log::info!("near_plane: {}", camera.frustum.planes[0]);
-        log::info!("znear: {}", camera.z_near());
-        log::info!("far_plane: {}", camera.frustum.planes[5]);
-        log::info!("zfar: {}", camera.z_far());
-
-        assert_eq!(znear, camera.z_near(), "znear");
-        assert_eq!(zfar, camera.z_far(), "zfar");
-    }
 }

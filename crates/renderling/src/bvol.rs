@@ -44,7 +44,7 @@ pub fn intersect_planes(p0: &Vec4, p1: &Vec4, p2: &Vec4) -> Vec3 {
 
 /// Calculates distance between plane and point
 pub fn dist_bpp(plane: &Vec4, point: Vec3) -> f32 {
-    (plane.x * point.x + plane.y * point.y + plane.z * point.z + plane.w).abs()
+    plane.x * point.x + plane.y * point.y + plane.z * point.z + plane.w
 }
 
 /// Calculates the most inside vertex of an AABB.

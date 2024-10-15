@@ -9,7 +9,7 @@ use spirv_std::num_traits::Float;
 use spirv_std::{
     arch::IndexUnchecked,
     image::{sample_with, Image, ImageWithMethods},
-    spirv, Sampler,
+    spirv,
 };
 
 use crate::draw::DrawIndirectArgs;
