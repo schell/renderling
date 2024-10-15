@@ -321,13 +321,20 @@ impl BoundingSphere {
         }
     }
 
-    pub fn is_inside_camera_view(&self, camera: &Camera, transform: Transform) -> bool {
+    /// Determine whether this sphere is inside the camera's view frustum after
+    /// being transformed by `transform`.  
+    pub fn is_inside_camera_view(
+        &self,
+        camera: &Camera,
+        transform: Transform,
+    ) -> (bool, BoundingSphere) {
         let center = Mat4::from(transform).transform_point3(self.center);
         let scale = Vec3::splat(transform.scale.max_element());
         let radius = Mat4::from_scale(scale)
             .transform_point3(Vec3::new(self.radius, 0.0, 0.0))
             .distance(Vec3::ZERO);
-        BoundingSphere::new(center, radius).is_inside_frustum(camera.frustum())
+        let sphere = BoundingSphere::new(center, radius);
+        (sphere.is_inside_frustum(camera.frustum()), sphere)
     }
 }
 

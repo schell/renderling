@@ -7,7 +7,7 @@ use glam::UVec2;
 use rustc_hash::FxHashMap;
 
 use crate::{
-    cull::{CullingError, FrustumCulling, OcclusionCulling},
+    cull::{ComputeCulling, CullingError},
     slab::{Gpu, Hybrid, SlabAllocator, WeakHybrid},
     stage::Renderlet,
     texture::Texture,
@@ -34,18 +34,19 @@ impl InternalRenderlet {
     }
 }
 
-pub(crate) struct IndirectDraws {
+/// Issues indirect draw calls.
+///
+/// Issues draw calls and performs culling.
+pub struct IndirectDraws {
     slab: SlabAllocator<wgpu::Buffer>,
     draws: Vec<Gpu<DrawIndirectArgs>>,
-    frustum_culling: FrustumCulling,
-    pub(crate) occlusion_culling: OcclusionCulling,
+    compute_culling: ComputeCulling,
 }
 
 impl IndirectDraws {
     fn new(device: &wgpu::Device, size: UVec2, sample_count: u32) -> Self {
         Self {
-            frustum_culling: FrustumCulling::new(device),
-            occlusion_culling: OcclusionCulling::new(device, size, sample_count),
+            compute_culling: ComputeCulling::new(device, size, sample_count),
             slab: SlabAllocator::default(),
             draws: vec![],
         }
@@ -84,7 +85,7 @@ impl IndirectDraws {
                 wgpu::BufferUsages::INDIRECT,
             )) {
                 // Invalidate the compute culling buffer, it will be regenerated later...
-                self.frustum_culling.invalidate_bindgroup();
+                self.compute_culling.invalidate_bindgroup();
             }
             self.draws = internal_renderlets
                 .iter()
@@ -96,6 +97,21 @@ impl IndirectDraws {
                 .collect();
         }
         self.get_indirect_buffer(device, queue)
+    }
+
+    /// Read the images from the hierarchical z-buffer used for occlusion
+    /// culling.
+    ///
+    /// This is primarily for testing.
+    pub async fn read_hzb_images(
+        &self,
+        ctx: &crate::Context,
+    ) -> Result<Vec<image::DynamicImage>, CullingError> {
+        self.compute_culling
+            .compute_depth_pyramid
+            .depth_pyramid
+            .read_images(ctx)
+            .await
     }
 }
 
@@ -239,7 +255,7 @@ impl DrawCalls {
     /// which holds the [`Renderlet`]s that have been queued to draw.
     pub fn invalidate_external_slab_buffer(&mut self) {
         if let DrawingStrategy::Indirect(indirect) = &mut self.drawing_strategy {
-            indirect.frustum_culling.invalidate_bindgroup();
+            indirect.compute_culling.invalidate_bindgroup();
         }
     }
 
@@ -291,16 +307,14 @@ impl DrawCalls {
             if let DrawingStrategy::Indirect(indirect) = &mut self.drawing_strategy {
                 if let Some(indirect_buffer) = indirect.slab.get_buffer() {
                     log::trace!("performing culling on {num_draw_calls} renderlets");
-                    indirect.frustum_culling.run(
+                    indirect.compute_culling.run(
                         device,
                         queue,
                         slab_buffer,
                         &indirect_buffer,
                         num_draw_calls as u32,
-                    );
-                    indirect
-                        .occlusion_culling
-                        .run(device, queue, depth_texture)?;
+                        depth_texture,
+                    )?;
                 } else {
                     log::warn!(
                         "DrawCalls::pre_render called without first calling `upkeep` - no culling \

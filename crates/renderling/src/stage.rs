@@ -199,6 +199,7 @@ impl Vertex {
 pub struct Renderlet {
     pub visible: bool,
     pub vertices_array: Array<Vertex>,
+    /// Bounding sphere of the entire renderlet, in local space.
     pub bounds: BoundingSphere,
     pub indices_array: Array<u32>,
     pub camera_id: Id<Camera>,

@@ -6,7 +6,6 @@ use snafu::{OptionExt, Snafu};
 use std::sync::Arc;
 
 use crate::{
-    camera::Camera,
     slab::{GpuArray, Hybrid, SlabAllocator, SlabAllocatorError},
     texture::Texture,
 };
@@ -37,32 +36,43 @@ impl From<SlabAllocatorError> for CullingError {
     }
 }
 
-const FRUSTUM_LABEL: Option<&str> = Some("compute-frustum-culling");
 
-/// Computes furstum culling on the GPU.
-pub struct FrustumCulling {
+/// Computes frustum and occlusion culling on the GPU.
+pub struct ComputeCulling {
     pipeline: wgpu::ComputePipeline,
     bindgroup_layout: wgpu::BindGroupLayout,
     bindgroup: Option<wgpu::BindGroup>,
+    pub(crate) compute_depth_pyramid: ComputeDepthPyramid,
 }
 
-impl FrustumCulling {
+impl ComputeCulling {
+    const LABEL: Option<&'static str> = Some("compute-culling");
+
     fn new_bindgroup(
-        slab_buffer: &wgpu::Buffer,
+        stage_slab_buffer: &wgpu::Buffer,
+        hzb_slab_buffer: &wgpu::Buffer,
         indirect_buffer: &wgpu::Buffer,
         layout: &wgpu::BindGroupLayout,
         device: &wgpu::Device,
     ) -> wgpu::BindGroup {
         device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: FRUSTUM_LABEL,
+            label: Self::LABEL,
             layout,
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: wgpu::BindingResource::Buffer(slab_buffer.as_entire_buffer_binding()),
+                    resource: wgpu::BindingResource::Buffer(
+                        stage_slab_buffer.as_entire_buffer_binding(),
+                    ),
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
+                    resource: wgpu::BindingResource::Buffer(
+                        hzb_slab_buffer.as_entire_buffer_binding(),
+                    ),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
                     resource: wgpu::BindingResource::Buffer(
                         indirect_buffer.as_entire_buffer_binding(),
                     ),
@@ -71,9 +81,9 @@ impl FrustumCulling {
         })
     }
 
-    pub fn new(device: &wgpu::Device) -> Self {
+    pub fn new(device: &wgpu::Device, size: UVec2, sample_count: u32) -> Self {
         let bindgroup_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: FRUSTUM_LABEL,
+            label: Self::LABEL,
             entries: &[
                 wgpu::BindGroupLayoutEntry {
                     binding: 0,
@@ -89,6 +99,16 @@ impl FrustumCulling {
                     binding: 1,
                     visibility: wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Storage { read_only: false },
                         has_dynamic_offset: false,
                         min_binding_size: None,
@@ -97,12 +117,12 @@ impl FrustumCulling {
                 },
             ],
         });
-        let linkage = crate::linkage::compute_frustum_culling::linkage(device);
+        let linkage = crate::linkage::compute_culling::linkage(device);
         let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-            label: FRUSTUM_LABEL,
+            label: Self::LABEL,
             layout: Some(
                 &device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                    label: FRUSTUM_LABEL,
+                    label: Self::LABEL,
                     bind_group_layouts: &[&bindgroup_layout],
                     push_constant_ranges: &[],
                 }),
@@ -116,6 +136,7 @@ impl FrustumCulling {
             pipeline,
             bindgroup_layout,
             bindgroup: None,
+            compute_depth_pyramid: ComputeDepthPyramid::new(device, size, sample_count),
         }
     }
 
@@ -126,12 +147,14 @@ impl FrustumCulling {
     fn get_bindgroup(
         &mut self,
         device: &wgpu::Device,
-        slab_buffer: &wgpu::Buffer,
+        stage_slab_buffer: &wgpu::Buffer,
+        hzb_slab_buffer: &wgpu::Buffer,
         indirect_draw_buffer: &wgpu::Buffer,
     ) -> &wgpu::BindGroup {
         if self.bindgroup.is_none() {
             self.bindgroup = Some(Self::new_bindgroup(
-                slab_buffer,
+                stage_slab_buffer,
+                hzb_slab_buffer,
                 indirect_draw_buffer,
                 &self.bindgroup_layout,
                 device,
@@ -145,24 +168,42 @@ impl FrustumCulling {
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        slab_buffer: &wgpu::Buffer,
+        stage_slab_buffer: &wgpu::Buffer,
         indirect_draw_buffer: &wgpu::Buffer,
         indirect_draw_count: u32,
-    ) {
-        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: FRUSTUM_LABEL,
-        });
+        depth_texture: &Texture,
+    ) -> Result<(), CullingError> {
+        // Compute the depth pyramid from last frame's depth buffer
+        self.compute_depth_pyramid
+            .run(device, queue, depth_texture)?;
+        let (hzb_buffer, invalidate) = self
+            .compute_depth_pyramid
+            .depth_pyramid
+            .slab
+            .get_updated_buffer_and_check((
+                device,
+                queue,
+                Self::LABEL,
+                wgpu::BufferUsages::empty(),
+            ));
+        if invalidate {
+            self.invalidate_bindgroup();
+        }
+        let mut encoder =
+            device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Self::LABEL });
         {
             let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: FRUSTUM_LABEL,
+                label: Self::LABEL,
                 timestamp_writes: None,
             });
             compute_pass.set_pipeline(&self.pipeline);
-            let bindgroup = self.get_bindgroup(device, slab_buffer, indirect_draw_buffer);
+            let bindgroup =
+                self.get_bindgroup(device, stage_slab_buffer, &hzb_buffer, indirect_draw_buffer);
             compute_pass.set_bind_group(0, Some(bindgroup), &[]);
             compute_pass.dispatch_workgroups(indirect_draw_count / 32 + 1, 1, 1);
         }
         queue.submit(Some(encoder.finish()));
+        Ok(())
     }
 }
 
@@ -181,9 +222,7 @@ impl DepthPyramid {
         desc: &Hybrid<DepthPyramidDescriptor>,
         slab: &SlabAllocator<wgpu::Buffer>,
     ) -> (Vec<GpuArray<f32>>, GpuArray<Array<f32>>) {
-        let width_levels = size.x.ilog2();
-        let height_levels = size.y.ilog2();
-        let mip_levels = width_levels.min(height_levels);
+        let mip_levels = size.min_element().ilog2();
         let mip_data = (0..mip_levels)
             .map(|i| {
                 let width = size.x >> i;
@@ -256,7 +295,6 @@ impl DepthPyramid {
     pub async fn read_images(
         &self,
         ctx: &crate::Context,
-        camera: &Camera,
     ) -> Result<Vec<image::DynamicImage>, CullingError> {
         let size = self.size();
         let slab_data = self
@@ -275,8 +313,7 @@ impl DepthPyramid {
                         min = min.min(depth);
                         max = max.max(depth);
                     }
-                    camera.linearize_depth_value(depth)
-                    // depth
+                    depth
                 })
                 .collect();
             log::info!("min: {min}");
@@ -292,17 +329,30 @@ impl DepthPyramid {
     }
 }
 
+
 /// Copies the depth texture to the top of the depth pyramid.
 struct ComputeCopyDepth {
     pipeline: wgpu::ComputePipeline,
-    bindgroup: Option<wgpu::BindGroup>,
     bindgroup_layout: wgpu::BindGroupLayout,
+    sample_count: u32,
+    bindgroup: Option<wgpu::BindGroup>,
 }
 
 impl ComputeCopyDepth {
     const LABEL: Option<&'static str> = Some("compute-occlusion-copy-depth-to-pyramid");
 
     fn create_bindgroup_layout(device: &wgpu::Device, sample_count: u32) -> wgpu::BindGroupLayout {
+        if sample_count > 1 {
+            log::info!(
+                "creating bindgroup layout with {sample_count} multisampled depth for {}",
+                Self::LABEL.unwrap()
+            );
+        } else {
+            log::info!(
+                "creating bindgroup layout without multisampling for {}",
+                Self::LABEL.unwrap()
+            );
+        }
         device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Self::LABEL,
             entries: &[
@@ -335,8 +385,18 @@ impl ComputeCopyDepth {
     fn create_pipeline(
         device: &wgpu::Device,
         bindgroup_layout: &wgpu::BindGroupLayout,
+        multisampled: bool,
     ) -> wgpu::ComputePipeline {
-        let linkage = crate::linkage::compute_copy_depth_to_pyramid::linkage(device);
+        let linkage = if multisampled {
+            log::info!("creating multisampled shader for {}", Self::LABEL.unwrap());
+            crate::linkage::compute_copy_depth_to_pyramid_multisampled::linkage(device)
+        } else {
+            log::info!(
+                "creating shader without multisampling for {}",
+                Self::LABEL.unwrap()
+            );
+            crate::linkage::compute_copy_depth_to_pyramid::linkage(device)
+        };
         device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
             label: Self::LABEL,
             layout: Some(
@@ -379,11 +439,12 @@ impl ComputeCopyDepth {
 
     pub fn new(device: &wgpu::Device, sample_count: u32) -> Self {
         let bindgroup_layout = Self::create_bindgroup_layout(device, sample_count);
-        let pipeline = Self::create_pipeline(device, &bindgroup_layout);
+        let pipeline = Self::create_pipeline(device, &bindgroup_layout, sample_count > 1);
         Self {
             pipeline,
             bindgroup: None,
             bindgroup_layout,
+            sample_count,
         }
     }
 
@@ -395,16 +456,44 @@ impl ComputeCopyDepth {
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        size: UVec2,
-        pyramid_desc_buffer: &wgpu::Buffer,
-        depth_texture: &wgpu::TextureView,
+        pyramid: &DepthPyramid,
+        depth_texture: &Texture,
     ) {
+        let size = pyramid.desc.modify(|desc| {
+            desc.mip_level = 0;
+            desc.size
+        });
+        let (slab_buffer, slab_buffer_is_new) = pyramid.slab.get_updated_buffer_and_check((
+            device,
+            queue,
+            Self::LABEL,
+            wgpu::BufferUsages::empty(),
+        ));
+
+        if slab_buffer_is_new {
+            self.bindgroup = None;
+        }
+
+        let sample_count = depth_texture.texture.sample_count();
+        let sample_count_mismatch = sample_count != self.sample_count;
+
+        if sample_count_mismatch {
+            log::info!(
+                "sample count changed, updating {} bindgroup layout and pipeline",
+                Self::LABEL.unwrap()
+            );
+            self.sample_count = sample_count;
+            self.bindgroup_layout = Self::create_bindgroup_layout(device, sample_count);
+            self.pipeline = Self::create_pipeline(device, &self.bindgroup_layout, sample_count > 1);
+            self.bindgroup = None;
+        }
+
         if self.bindgroup.is_none() {
             self.bindgroup = Some(Self::create_bindgroup(
                 device,
                 &self.bindgroup_layout,
-                pyramid_desc_buffer,
-                depth_texture,
+                &slab_buffer,
+                &depth_texture.view,
             ));
         }
         // UNWRAP: safe because we just set it above^
@@ -427,22 +516,159 @@ impl ComputeCopyDepth {
     }
 }
 
+
+/// Downsamples the depth texture from one mip to the next.
+struct ComputeDownsampleDepth {
+    pipeline: wgpu::ComputePipeline,
+    bindgroup: Option<wgpu::BindGroup>,
+    bindgroup_layout: wgpu::BindGroupLayout,
+}
+
+impl ComputeDownsampleDepth {
+    const LABEL: Option<&'static str> = Some("compute-occlusion-downsample-depth");
+
+    fn create_bindgroup_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Self::LABEL,
+            entries: &[
+                // slab
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
+        })
+    }
+
+    fn create_pipeline(
+        device: &wgpu::Device,
+        bindgroup_layout: &wgpu::BindGroupLayout,
+    ) -> wgpu::ComputePipeline {
+        let linkage = crate::linkage::compute_downsample_depth_pyramid::linkage(device);
+        device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Self::LABEL,
+            layout: Some(
+                &device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                    label: Self::LABEL,
+                    bind_group_layouts: &[bindgroup_layout],
+                    push_constant_ranges: &[],
+                }),
+            ),
+            module: &linkage.module,
+            entry_point: Some(linkage.entry_point),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            cache: None,
+        })
+    }
+
+    fn create_bindgroup(
+        device: &wgpu::Device,
+        layout: &wgpu::BindGroupLayout,
+        pyramid_desc_buffer: &wgpu::Buffer,
+    ) -> wgpu::BindGroup {
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Self::LABEL,
+            layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: wgpu::BindingResource::Buffer(
+                    pyramid_desc_buffer.as_entire_buffer_binding(),
+                ),
+            }],
+        })
+    }
+
+    pub fn new(device: &wgpu::Device) -> Self {
+        let bindgroup_layout = Self::create_bindgroup_layout(device);
+        let pipeline = Self::create_pipeline(device, &bindgroup_layout);
+        Self {
+            pipeline,
+            bindgroup: None,
+            bindgroup_layout,
+        }
+    }
+
+    pub fn invalidate(&mut self) {
+        self.bindgroup = None;
+    }
+
+    pub fn run(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, pyramid: &DepthPyramid) {
+        if self.bindgroup.is_none() {
+            self.bindgroup = Some(Self::create_bindgroup(
+                device,
+                &self.bindgroup_layout,
+                &pyramid.slab.get_updated_buffer((
+                    device,
+                    queue,
+                    Self::LABEL,
+                    wgpu::BufferUsages::empty(),
+                )),
+            ));
+        }
+        for i in 1..pyramid.mip_data.len() {
+            log::trace!("downsampling to mip {i}");
+            // UNWRAP: safe because we just set it above^
+            let bindgroup = self.bindgroup.as_ref().unwrap();
+            // Update the mip_level we're operating on.
+            let size = pyramid.desc.modify(|desc| {
+                desc.mip_level = i as u32;
+                desc.size
+            });
+            // Sync the change.
+            let (_, should_invalidate) = pyramid.slab.get_updated_buffer_and_check((
+                device,
+                queue,
+                Self::LABEL,
+                wgpu::BufferUsages::empty(),
+            ));
+            debug_assert!(!should_invalidate, "pyramid slab should never resize here");
+
+            let mut encoder = device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Self::LABEL });
+            {
+                let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Self::LABEL,
+                    ..Default::default()
+                });
+                compute_pass.set_pipeline(&self.pipeline);
+                compute_pass.set_bind_group(0, Some(bindgroup), &[]);
+                let w = size.x >> i;
+                let h = size.y >> i;
+                let x = w / 32 + 1;
+                let y = h / 32 + 1;
+                let z = 1;
+                compute_pass.dispatch_workgroups(x, y, z);
+            }
+            queue.submit(Some(encoder.finish()));
+        }
+    }
+}
+
 /// Computes occlusion culling on the GPU.
-pub struct OcclusionCulling {
+pub struct ComputeDepthPyramid {
     sample_count: u32,
     pub(crate) depth_pyramid: DepthPyramid,
     compute_copy_depth: ComputeCopyDepth,
+    compute_downsample_depth: ComputeDownsampleDepth,
 }
 
-impl OcclusionCulling {
-    const LABEL: Option<&'static str> = Some("compute-occlusion-culling");
+impl ComputeDepthPyramid {
+    const LABEL: Option<&'static str> = Some("compute-depth-pyramid");
 
     pub fn new(device: &wgpu::Device, size: UVec2, sample_count: u32) -> Self {
         let depth_pyramid = DepthPyramid::new(size);
         let compute_copy_depth = ComputeCopyDepth::new(device, sample_count);
+        let compute_downsample_depth = ComputeDownsampleDepth::new(device);
         Self {
             depth_pyramid,
             compute_copy_depth,
+            compute_downsample_depth,
             sample_count,
         }
     }
@@ -466,18 +692,15 @@ impl OcclusionCulling {
         let sample_count = depth_texture.texture.sample_count();
         if sample_count != self.sample_count {
             log::warn!("sample_count changed, invalidating");
-            self.invalidate();
-            // let (bindgroup_layout, pipeline) =
-            //     Self::create_bindgroup_layout_and_pipeline(device,
-            // sample_count); self.bindgroup_layout =
-            // bindgroup_layout; self.pipeline = pipeline;
+            self.compute_copy_depth.invalidate();
         }
 
         let extent = depth_texture.texture.size();
         let size = UVec2::new(extent.width, extent.height);
-        let (depth_pyramid_buffer, should_invalidate) = if size != self.depth_pyramid.size() {
+        let (_, should_invalidate) = if size != self.depth_pyramid.size() {
             log::warn!("depth texture size changed, invalidating");
-            self.invalidate();
+            self.compute_copy_depth.invalidate();
+            self.compute_downsample_depth.invalidate();
             self.depth_pyramid.resize(device, queue, size)
         } else {
             self.depth_pyramid.slab.get_updated_buffer_and_check((
@@ -489,15 +712,14 @@ impl OcclusionCulling {
         };
         if should_invalidate {
             self.compute_copy_depth.invalidate();
+            self.compute_downsample_depth.invalidate();
         }
 
-        self.compute_copy_depth.run(
-            device,
-            queue,
-            size,
-            &depth_pyramid_buffer,
-            &depth_texture.view,
-        );
+        self.compute_copy_depth
+            .run(device, queue, &self.depth_pyramid, depth_texture);
+
+        self.compute_downsample_depth
+            .run(device, queue, &self.depth_pyramid);
 
         Ok(())
     }
@@ -505,9 +727,9 @@ impl OcclusionCulling {
 
 #[cfg(test)]
 mod test {
-    use crate::prelude::*;
-    use glam::{Mat4, Quat, Vec3, Vec4};
-
+    use crate::{cull::DepthPyramidDescriptor, prelude::*};
+    use crabslab::GrowableSlab;
+    use glam::{Mat4, Quat, UVec2, Vec3, Vec4};
 
     #[test]
     fn occlusion_culling_sanity() {
@@ -554,13 +776,57 @@ mod test {
                 .drawing_strategy
                 .as_indirect()
                 .unwrap()
-                .occlusion_culling
-                .depth_pyramid
-                .read_images(&ctx, &camera.get()),
+                .read_hzb_images(&ctx),
         )
         .unwrap();
         for (i, img) in pyramid_images.into_iter().enumerate() {
             img_diff::save(&format!("cull/pyramid/mip_{i}.png"), img);
+        }
+    }
+
+    #[test]
+    fn depth_pyramid_descriptor_sanity() {
+        let mut slab = vec![];
+        let size = UVec2::new(64, 32);
+        let mip_levels = size.min_element().ilog2();
+        let desc_id = slab.allocate::<DepthPyramidDescriptor>();
+        let mips_array = slab.allocate_array::<Array<f32>>(mip_levels as usize);
+        let mip_data_arrays = (0..mip_levels)
+            .map(|i| {
+                let w = size.x >> i;
+                let h = size.y >> i;
+                let len = (w * h) as usize;
+                log::info!("allocating {len} f32s for mip {i} of size {w}x{h}");
+                let array = slab.allocate_array::<f32>(len);
+                let mut data: Vec<f32> = vec![];
+                for _y in 0..h {
+                    for x in 0..w {
+                        data.push(x as f32);
+                    }
+                }
+                slab.write_array(array, &data);
+                array
+            })
+            .collect::<Vec<_>>();
+        slab.write_array(mips_array, &mip_data_arrays);
+        let desc = DepthPyramidDescriptor {
+            size: UVec2::new(64, 32),
+            mip_level: 0,
+            mip: mips_array,
+        };
+        slab.write(desc_id, &desc);
+
+        // Test that `id_of_depth` returns the correct value.
+        for mip_level in 0..mip_levels {
+            let size = desc.size_at(mip_level);
+            log::info!("mip {mip_level} is size {size}");
+            for y in 0..size.y {
+                for x in 0..size.x {
+                    let id = desc.id_of_depth(mip_level, UVec2::new(x, y), &slab);
+                    let depth = slab.read(id);
+                    assert_eq!(x as f32, depth, "depth should be x value");
+                }
+            }
         }
     }
 }

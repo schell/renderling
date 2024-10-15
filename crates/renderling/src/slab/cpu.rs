@@ -845,11 +845,12 @@ impl<T: SlabItem + Clone + Send + Sync + 'static> Hybrid<T> {
         self.cpu_value.read().unwrap().clone()
     }
 
-    pub fn modify(&self, f: impl FnOnce(&mut T)) {
+    pub fn modify<A: std::any::Any>(&self, f: impl FnOnce(&mut T) -> A) -> A {
         let mut value_guard = self.cpu_value.write().unwrap();
-        f(&mut value_guard);
+        let a = f(&mut value_guard);
         let t = value_guard.clone();
         self.gpu_value.set(t);
+        a
     }
 
     pub fn set(&self, value: T) {

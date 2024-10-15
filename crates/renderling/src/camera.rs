@@ -1,6 +1,6 @@
 //! Camera projection, view and utilities.
 use crabslab::SlabItem;
-use glam::{Mat4, Vec3, Vec4Swizzles};
+use glam::{Mat4, Vec3};
 
 use crate::bvol::{dist_bpp, Frustum};
 
@@ -87,15 +87,6 @@ impl Camera {
 
     pub fn z_far(&self) -> f32 {
         dist_bpp(&self.frustum.planes[5], self.position)
-    }
-
-    /// Linearize and normalize a depth value.
-    pub fn linearize_depth_value(&self, depth: f32) -> f32 {
-        let z_near = self.z_near();
-        let z_far = self.z_far();
-        let z_linear = (2.0 * z_near) / (z_far + z_near - depth * (z_far - z_near));
-        // Normalize the linearized depth to [0, 1]
-        (z_linear - z_near) / (z_far - z_near)
     }
 }
 
