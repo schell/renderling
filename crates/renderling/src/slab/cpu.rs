@@ -247,7 +247,9 @@ impl<Buffer> Default for SlabAllocator<Buffer> {
             update_queue: Default::default(),
             recycles: Default::default(),
             len: Default::default(),
-            capacity: Default::default(),
+            // Start with size 1, because some of `wgpu`'s validation depends on it.
+            // See <https://github.com/gfx-rs/wgpu/issues/6414> for more info.
+            capacity: Arc::new(AtomicUsize::new(1)),
             needs_expansion: Arc::new(true.into()),
             buffer: Default::default(),
         }

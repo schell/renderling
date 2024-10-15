@@ -14,6 +14,8 @@ use spirv_std::num_traits::Float;
 
 use crate::{camera::Camera, math::IsVector};
 
+// Allow manual bit rotation because this code is `no_std`.
+#[allow(clippy::manual_rotate)]
 fn radical_inverse_vdc(mut bits: u32) -> f32 {
     bits = (bits << 16u32) | (bits >> 16u32);
     bits = ((bits & 0x55555555u32) << 1u32) | ((bits & 0xAAAAAAAAu32) >> 1u32);

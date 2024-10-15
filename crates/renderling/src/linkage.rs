@@ -11,7 +11,6 @@ pub mod compute_copy_depth_to_pyramid;
 pub mod compute_copy_depth_to_pyramid_multisampled;
 pub mod compute_culling;
 pub mod compute_downsample_depth_pyramid;
-pub mod compute_occlusion_culling;
 pub mod generate_mipmap_fragment;
 pub mod generate_mipmap_vertex;
 pub mod prefilter_environment_cubemap_fragment;

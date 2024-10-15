@@ -36,7 +36,6 @@ impl From<SlabAllocatorError> for CullingError {
     }
 }
 
-
 /// Computes frustum and occlusion culling on the GPU.
 pub struct ComputeCulling {
     pipeline: wgpu::ComputePipeline,
@@ -308,12 +307,11 @@ impl DepthPyramid {
             let depth_data: Vec<f32> = slab_data
                 .read_vec(mip.array())
                 .into_iter()
-                .map(|depth| {
+                .inspect(|&depth| {
                     if i == 0 {
                         min = min.min(depth);
                         max = max.max(depth);
                     }
-                    depth
                 })
                 .collect();
             log::info!("min: {min}");
@@ -328,7 +326,6 @@ impl DepthPyramid {
         Ok(images)
     }
 }
-
 
 /// Copies the depth texture to the top of the depth pyramid.
 struct ComputeCopyDepth {
@@ -515,7 +512,6 @@ impl ComputeCopyDepth {
         queue.submit(Some(encoder.finish()));
     }
 }
-
 
 /// Downsamples the depth texture from one mip to the next.
 struct ComputeDownsampleDepth {

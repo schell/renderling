@@ -17,7 +17,7 @@ resolver = "2"
 assert_approx_eq = "1.1.0"
 async-channel = "1.8"
 bytemuck = { version = "1.13.0", features = ["derive"] }
-crabslab = { version = "0.6.0", path = "../crabslab/crates/crabslab", default-features = false }
+crabslab = { version = "0.6.1", default-features = false }
 ctor = "0.2.2"
 dagga = "0.2.1"
 env_logger = "0.10.0"
@@ -50,7 +50,7 @@ opt-level = 3
 opt-level = 3
 
 [patch.crates-io]
-naga = { git = "https://github.com/schell/wgpu.git", branch = "fix/spv-in-sampling-result-for-depth-texture-is-scalar" }
-wgpu = { git = "https://github.com/schell/wgpu.git", branch = "fix/spv-in-sampling-result-for-depth-texture-is-scalar" }
-spirv-std = {path = "../rust-gpu/crates/spirv-std" } #{ git = "https://github.com/Rust-GPU/rust-gpu" }
+naga = { git = "https://github.com/gfx-rs/wgpu.git" }
+wgpu = { git = "https://github.com/gfx-rs/wgpu.git" }
+spirv-std = { git = "https://github.com/Rust-GPU/rust-gpu" }
 

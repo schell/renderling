@@ -25,7 +25,7 @@ fn create_pipeline(
     let fragment_linkage = crate::linkage::generate_mipmap_fragment::linkage(device);
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: LABEL,
-        layout: Some(&pp_layout),
+        layout: Some(pp_layout),
         vertex: wgpu::VertexState {
             module: &vertex_linkage.module,
             entry_point: Some(vertex_linkage.entry_point),

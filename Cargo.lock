@@ -360,9 +360,9 @@ checksum = "79296716171880943b8470b5f8d03aa55eb2e645a4874bdbb28adb49162e012c"
 
 [[package]]
 name = "bytemuck"
-version = "1.18.0"
+version = "1.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "94bbb0ad554ad961ddc5da507a12a29b14e4ae5bda06b19f575a3e6079d2e2ae"
+checksum = "8334215b81e418a0a7bdb8ef0849474f40bb10c8b71f1c4ed315cff49f32494d"
 dependencies = [
  "bytemuck_derive",
 ]
@@ -636,7 +636,9 @@ dependencies = [
 
 [[package]]
 name = "crabslab"
-version = "0.6.0"
+version = "0.6.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "830473ae396e76994b52c4c68aae94003ba85449ada4bf8e6345edcb6b3194b6"
 dependencies = [
  "crabslab-derive",
  "futures-lite 1.13.0",
@@ -647,6 +649,8 @@ dependencies = [
 [[package]]
 name = "crabslab-derive"
 version = "0.4.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "23834bdd3f175b7899b352743b70b855639f662ac6f07360ff85c502e144cfde"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1118,9 +1122,9 @@ dependencies = [
 
 [[package]]
 name = "glow"
-version = "0.14.1"
+version = "0.14.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2f4a888dbe8181a7535853469c21c67ca9a1cea9460b16808fc018ea9e55d248"
+checksum = "d51fa363f025f5c111e03f13eda21162faeacb6911fe8caa0c0349f9cf0c4483"
 dependencies = [
  "js-sys",
  "slotmap",
@@ -1475,9 +1479,9 @@ dependencies = [
 
 [[package]]
 name = "js-sys"
-version = "0.3.70"
+version = "0.3.72"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1868808506b929d7b0cfa8f75951347aa71bb21144b7791bae35d9bccfcfe37a"
+checksum = "6a88f1bda2bd75b0452a14784937d796722fdebfe50df998aeb3f0b7603019a9"
 dependencies = [
  "wasm-bindgen",
 ]
@@ -1714,7 +1718,7 @@ dependencies = [
 [[package]]
 name = "naga"
 version = "22.0.0"
-source = "git+https://github.com/schell/wgpu.git?branch=fix/spv-in-sampling-result-for-depth-texture-is-scalar#3711eed0930d226833f49e083f8700971fb6798b"
+source = "git+https://github.com/gfx-rs/wgpu.git#59f56e02639fcaba765929525f56e2231d9a58a9"
 dependencies = [
  "arrayvec",
  "bit-set",
@@ -2753,6 +2757,7 @@ dependencies = [
 [[package]]
 name = "spirv-std"
 version = "0.9.0"
+source = "git+https://github.com/Rust-GPU/rust-gpu#d2eb777510bae92c33eabe29567a61e3617088ba"
 dependencies = [
  "bitflags 1.3.2",
  "glam",
@@ -2764,6 +2769,7 @@ dependencies = [
 [[package]]
 name = "spirv-std-macros"
 version = "0.9.0"
+source = "git+https://github.com/Rust-GPU/rust-gpu#d2eb777510bae92c33eabe29567a61e3617088ba"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2774,6 +2780,7 @@ dependencies = [
 [[package]]
 name = "spirv-std-types"
 version = "0.9.0"
+source = "git+https://github.com/Rust-GPU/rust-gpu#d2eb777510bae92c33eabe29567a61e3617088ba"
 
 [[package]]
 name = "static_assertions"
@@ -3023,9 +3030,9 @@ checksum = "9c8d87e72b64a3b4db28d11ce29237c246188f4f51057d65a7eab63b7987e423"
 
 [[package]]
 name = "wasm-bindgen"
-version = "0.2.93"
+version = "0.2.95"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a82edfc16a6c469f5f44dc7b571814045d60404b55a0ee849f9bcfa2e63dd9b5"
+checksum = "128d1e363af62632b8eb57219c8fd7877144af57558fb2ef0368d0087bddeb2e"
 dependencies = [
  "cfg-if",
  "once_cell",
@@ -3034,9 +3041,9 @@ dependencies = [
 
 [[package]]
 name = "wasm-bindgen-backend"
-version = "0.2.93"
+version = "0.2.95"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9de396da306523044d3302746f1208fa71d7532227f15e347e2d93e4145dd77b"
+checksum = "cb6dd4d3ca0ddffd1dd1c9c04f94b868c37ff5fac97c30b97cff2d74fce3a358"
 dependencies = [
  "bumpalo",
  "log",
@@ -3061,9 +3068,9 @@ dependencies = [
 
 [[package]]
 name = "wasm-bindgen-macro"
-version = "0.2.93"
+version = "0.2.95"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "585c4c91a46b072c92e908d99cb1dcdf95c5218eeb6f3bf1efa991ee7a68cccf"
+checksum = "e79384be7f8f5a9dd5d7167216f022090cf1f9ec128e6e6a482a2cb5c5422c56"
 dependencies = [
  "quote",
  "wasm-bindgen-macro-support",
@@ -3071,9 +3078,9 @@ dependencies = [
 
 [[package]]
 name = "wasm-bindgen-macro-support"
-version = "0.2.93"
+version = "0.2.95"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "afc340c74d9005395cf9dd098506f7f44e38f2b4a21c6aaacf9a105ea5e1e836"
+checksum = "26c6ab57572f7a24a4985830b120de1594465e5d500f24afe89e16b4e833ef68"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3084,9 +3091,9 @@ dependencies = [
 
 [[package]]
 name = "wasm-bindgen-shared"
-version = "0.2.93"
+version = "0.2.95"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c62a0a307cb4a311d3a07867860911ca130c3494e8c2719593806c08bc5d0484"
+checksum = "65fc09f10666a9f147042251e0dda9c18f166ff7de300607007e96bdebc1068d"
 
 [[package]]
 name = "wasm-bindgen-test"
@@ -3225,9 +3232,9 @@ dependencies = [
 
 [[package]]
 name = "web-sys"
-version = "0.3.70"
+version = "0.3.72"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "26fdeaafd9bd129f65e7c031593c24d62186301e0c72c8978fa1678be7d532c0"
+checksum = "f6488b90108c040df0fe62fa815cbdee25124641df01814dd7282749234c6112"
 dependencies = [
  "js-sys",
  "wasm-bindgen",
@@ -3252,7 +3259,7 @@ checksum = "53a85b86a771b1c87058196170769dd264f66c0782acf1ae6cc51bfd64b39082"
 [[package]]
 name = "wgpu"
 version = "22.0.0"
-source = "git+https://github.com/schell/wgpu.git?branch=fix/spv-in-sampling-result-for-depth-texture-is-scalar#3711eed0930d226833f49e083f8700971fb6798b"
+source = "git+https://github.com/gfx-rs/wgpu.git#59f56e02639fcaba765929525f56e2231d9a58a9"
 dependencies = [
  "arrayvec",
  "cfg_aliases 0.1.1",
@@ -3276,7 +3283,7 @@ dependencies = [
 [[package]]
 name = "wgpu-core"
 version = "22.0.0"
-source = "git+https://github.com/schell/wgpu.git?branch=fix/spv-in-sampling-result-for-depth-texture-is-scalar#3711eed0930d226833f49e083f8700971fb6798b"
+source = "git+https://github.com/gfx-rs/wgpu.git#59f56e02639fcaba765929525f56e2231d9a58a9"
 dependencies = [
  "arrayvec",
  "bit-vec",
@@ -3301,7 +3308,7 @@ dependencies = [
 [[package]]
 name = "wgpu-hal"
 version = "22.0.0"
-source = "git+https://github.com/schell/wgpu.git?branch=fix/spv-in-sampling-result-for-depth-texture-is-scalar#3711eed0930d226833f49e083f8700971fb6798b"
+source = "git+https://github.com/gfx-rs/wgpu.git#59f56e02639fcaba765929525f56e2231d9a58a9"
 dependencies = [
  "android_system_properties",
  "arrayvec",
@@ -3345,7 +3352,7 @@ dependencies = [
 [[package]]
 name = "wgpu-types"
 version = "22.0.0"
-source = "git+https://github.com/schell/wgpu.git?branch=fix/spv-in-sampling-result-for-depth-texture-is-scalar#3711eed0930d226833f49e083f8700971fb6798b"
+source = "git+https://github.com/gfx-rs/wgpu.git#59f56e02639fcaba765929525f56e2231d9a58a9"
 dependencies = [
  "bitflags 2.6.0",
  "js-sys",

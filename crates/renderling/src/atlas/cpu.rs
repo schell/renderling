@@ -278,7 +278,7 @@ impl Atlas {
         let mut texture_array = self.texture_array.write().unwrap();
         let extent = texture_array.texture.size();
 
-        let newly_packed_layers = pack_images(&layers, &images, extent)
+        let newly_packed_layers = pack_images(&layers, images, extent)
             .context(CannotPackTexturesSnafu { size: extent })?;
 
         let mut staged = StagedResources::try_staging(
@@ -422,14 +422,14 @@ fn pack_images<'a>(
                 images
                     .iter()
                     .enumerate()
-                    .map(|(i, img)| AnotherPacking::Img {
+                    .map(|(i, image)| AnotherPacking::Img {
                         original_index: i,
-                        image: &img,
+                        image,
                     }),
             )
             .collect()
     };
-    new_packing.sort_by(|a, b| (a.size().length_squared()).cmp(&(b.size().length_squared())));
+    new_packing.sort_by_key(|a| (a.size().length_squared()));
     let total_images = new_packing.len();
     let new_packing_layers: Vec<Vec<AnotherPacking>> =
         fan_split_n(extent.depth_or_array_layers as usize, new_packing);
