@@ -473,7 +473,7 @@ impl StagedResources {
         let new_texture_array = Atlas::create_texture(device, queue, extent)?;
         let mut output = vec![];
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("atlas add images"),
+            label: Some("atlas staging"),
         });
         let mut temporary_layers = vec![Layer::default(); extent.depth_or_array_layers as usize];
         for (layer_index, packed_items) in newly_packed_layers.into_iter().enumerate() {
@@ -551,7 +551,7 @@ impl StagedResources {
                     AnotherPacking::Internal(mut texture) => {
                         let mut t = texture.cache;
                         debug_assert_eq!(t.size_px, size_px);
-                        log::trace!("  add_images: copying previous frame {t:?}",);
+                        log::trace!("  copying previous frame {t:?}",);
                         // copy the frame from the old texture to the new texture
                         // in a new destination
                         encoder.copy_texture_to_texture(
@@ -571,7 +571,7 @@ impl StagedResources {
                                 origin: wgpu::Origin3d {
                                     x: offset_px.x,
                                     y: offset_px.y,
-                                    z: t.layer_index,
+                                    z: layer_index as u32,
                                 },
                                 aspect: wgpu::TextureAspect::All,
                             },

@@ -313,7 +313,7 @@ impl<Buffer: IsBuffer> SlabAllocator<Buffer> {
     }
 
     pub(crate) fn insert_update_source(&self, k: usize, source: WeakGpuRef) {
-        log::trace!("inserting update source {k}",);
+        log::trace!("slab insert_update_source {k}",);
         let _ = self.notifier.0.try_send(k);
         // UNWRAP: panic on purpose
         self.update_sources.write().unwrap().insert(k, source);
@@ -328,7 +328,10 @@ impl<Buffer: IsBuffer> SlabAllocator<Buffer> {
         let may_range = self.recycles.write().unwrap().remove(T::SLAB_SIZE as u32);
         if let Some(range) = may_range {
             let id = Id::<T>::new(range.first_index);
-            log::trace!("dequeued {range:?} to {id:?}");
+            log::trace!(
+                "slab allocate {}: dequeued {range:?} to {id:?}",
+                std::any::type_name::<T>()
+            );
             debug_assert_eq!(
                 range.last_index,
                 range.first_index + T::SLAB_SIZE as u32 - 1
@@ -354,7 +357,10 @@ impl<Buffer: IsBuffer> SlabAllocator<Buffer> {
             .remove((T::SLAB_SIZE * len) as u32);
         if let Some(range) = may_range {
             let array = Array::<T>::new(range.first_index, len as u32);
-            log::trace!("dequeued {range:?} to {array:?}");
+            log::trace!(
+                "slab allocate_array {len}x{}: dequeued {range:?} to {array:?}",
+                std::any::type_name::<T>()
+            );
             debug_assert_eq!(
                 range.last_index,
                 range.first_index + (T::SLAB_SIZE * len) as u32 - 1
@@ -489,14 +495,16 @@ impl<Buffer: IsBuffer> SlabAllocator<Buffer> {
                     let count = gpu_ref.weak.strong_count();
                     if count == 0 {
                         // recycle this allocation
-                        log::debug!("recycling {key} {:?}", gpu_ref.u32_array);
-                        if gpu_ref.u32_array.is_null() || gpu_ref.u32_array.is_empty() {
-                            log::debug!("  cannot recycle - empty or null");
-                            true
+                        let array = gpu_ref.u32_array;
+                        log::debug!("slab drain_updated_sources: recycling {key} {array:?}");
+                        if array.is_null() {
+                            log::debug!("  cannot recycle, null");
+                        } else if array.is_empty() {
+                            log::debug!("  cannot recycle, empty");
                         } else {
                             recycles_guard.add_range(gpu_ref.u32_array.into());
-                            true
                         }
+                        true
                     } else {
                         gpu_ref
                             .get_update()
@@ -619,7 +627,7 @@ impl SlabAllocator<wgpu::Buffer> {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct SlabUpdate {
     pub array: Array<u32>,
     pub elements: Vec<u32>,
@@ -934,6 +942,7 @@ impl<T: SlabItem + Clone + Send + Sync + 'static> Gpu<T> {
 /// Once created, the array cannot be resized.
 ///
 /// Updates are syncronized to the GPU once per frame.
+#[derive(Debug)]
 pub struct GpuArray<T> {
     array: Array<T>,
     notifier_index: usize,

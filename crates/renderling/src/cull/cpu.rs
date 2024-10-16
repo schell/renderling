@@ -476,7 +476,9 @@ impl ComputeCopyDepth {
 
         if sample_count_mismatch {
             log::info!(
-                "sample count changed, updating {} bindgroup layout and pipeline",
+                "sample count changed from {} to {}, updating {} bindgroup layout and pipeline",
+                self.sample_count,
+                sample_count,
                 Self::LABEL.unwrap()
             );
             self.sample_count = sample_count;

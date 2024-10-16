@@ -25,7 +25,7 @@ use renderling::{
 use crate::{Ui, UiTransform};
 
 // TODO: make UiText able to be updated without fully destroying it
-
+#[derive(Debug)]
 pub struct UiText {
     pub cache: GlyphCache,
     pub vertices: GpuArray<Vertex>,
@@ -139,6 +139,15 @@ pub struct Cache {
     dirty: bool,
 }
 
+impl core::fmt::Debug for Cache {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Cache")
+            .field("img", &(self.img.width(), self.img.height()))
+            .field("dirty", &self.dirty)
+            .finish()
+    }
+}
+
 impl Cache {
     pub fn new(width: u32, height: u32) -> Cache {
         Cache {
@@ -163,6 +172,7 @@ impl Cache {
 }
 
 /// A cache of glyphs.
+#[derive(Debug)]
 pub struct GlyphCache {
     /// Image on the CPU or GPU used as our texture cache
     cache: Option<Cache>,
@@ -431,5 +441,53 @@ mod test {
         img_diff::assert_img_eq("ui/text/overlay.png", img);
         let depth_img = ui.stage.get_depth_texture().read_image().unwrap();
         img_diff::assert_img_eq("ui/text/overlay_depth.png", depth_img);
+    }
+
+    #[test]
+    fn recreate_text() {
+        let ctx = Context::headless(50, 50);
+        let ui = Ui::new(&ctx).with_antialiasing(true);
+        let _font_id = futures_lite::future::block_on(
+            ui.load_font("../../fonts/Recursive Mn Lnr St Med Nerd Font Complete.ttf"),
+        )
+        .unwrap();
+        let mut _text = ui
+            .new_text()
+            .with_section(
+                Section::default()
+                    .add_text(
+                        Text::new("60.0 fps")
+                            .with_scale(24.0)
+                            .with_color([1.0, 0.0, 0.0, 1.0]),
+                    )
+                    .with_bounds((50.0, 50.0)),
+            )
+            .build();
+
+        let frame = ctx.get_next_frame().unwrap();
+        ui.render(&frame.view());
+        let img = frame.read_image().unwrap();
+        frame.present();
+        img_diff::assert_img_eq("ui/text/can_recreate_0.png", img);
+
+        log::info!("replacing text");
+        _text = ui
+            .new_text()
+            .with_section(
+                Section::default()
+                    .add_text(
+                        Text::new(":)-|<")
+                            .with_scale(24.0)
+                            .with_color([1.0, 0.0, 0.0, 1.0]),
+                    )
+                    .with_bounds((50.0, 50.0)),
+            )
+            .build();
+
+        let frame = ctx.get_next_frame().unwrap();
+        ui.render(&frame.view());
+        let img = frame.read_image().unwrap();
+        frame.present();
+        img_diff::assert_img_eq("ui/text/can_recreate_1.png", img);
     }
 }

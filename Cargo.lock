@@ -2526,6 +2526,7 @@ dependencies = [
  "loading-bytes",
  "log",
  "lyon",
+ "pretty_assertions",
  "renderling",
  "rustc-hash 1.1.0",
  "snafu",

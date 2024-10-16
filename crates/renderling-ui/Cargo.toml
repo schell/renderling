@@ -26,3 +26,4 @@ ctor = {workspace = true}
 env_logger = {workspace = true}
 futures-lite = {workspace = true}
 img-diff = {path = "../img-diff"}
+pretty_assertions.workspace = true 
