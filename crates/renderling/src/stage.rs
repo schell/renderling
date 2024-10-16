@@ -53,8 +53,9 @@ impl Skin {
         let joint_index = vertex.joints[i] as usize;
         let joint_id = slab.read(self.joints.at(joint_index));
         let joint_transform = slab.read(joint_id);
-        // First apply the inverse bind matrix to bring the vertex into the joint's local space,
-        // then apply the joint's current transformation to move it into world space.
+        // First apply the inverse bind matrix to bring the vertex into the joint's
+        // local space, then apply the joint's current transformation to move it
+        // into world space.
         let inverse_bind_matrix = slab.read(self.inverse_bind_matrices.at(joint_index));
         Mat4::from(joint_transform) * inverse_bind_matrix
     }
@@ -198,6 +199,7 @@ impl Vertex {
 pub struct Renderlet {
     pub visible: bool,
     pub vertices_array: Array<Vertex>,
+    /// Bounding sphere of the entire renderlet, in local space.
     pub bounds: BoundingSphere,
     pub indices_array: Array<u32>,
     pub camera_id: Id<Camera>,
@@ -228,7 +230,8 @@ impl Default for Renderlet {
 }
 
 impl Renderlet {
-    /// Retrieve the vertex from the slab, calculating any displacement due to morph targets.
+    /// Retrieve the vertex from the slab, calculating any displacement due to
+    /// morph targets.
     pub fn get_vertex(&self, vertex_index: u32, slab: &[u32]) -> Vertex {
         let index = if self.indices_array.is_null() {
             vertex_index as usize
@@ -257,7 +260,6 @@ impl Renderlet {
     }
 }
 
-#[cfg(feature = "renderlet_vertex")]
 /// Renderlet vertex shader.
 #[spirv(vertex)]
 #[allow(clippy::too_many_arguments)]
@@ -328,7 +330,6 @@ pub fn renderlet_vertex(
     *out_clip_pos = camera.view_projection() * world_pos.extend(1.0);
 }
 
-#[cfg(feature = "renderlet_fragment")]
 /// Renderlet fragment shader
 #[allow(clippy::too_many_arguments, dead_code)]
 #[spirv(fragment)]

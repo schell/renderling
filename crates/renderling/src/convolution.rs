@@ -14,6 +14,8 @@ use spirv_std::num_traits::Float;
 
 use crate::{camera::Camera, math::IsVector};
 
+// Allow manual bit rotation because this code is `no_std`.
+#[allow(clippy::manual_rotate)]
 fn radical_inverse_vdc(mut bits: u32) -> f32 {
     bits = (bits << 16u32) | (bits >> 16u32);
     bits = ((bits & 0x55555555u32) << 1u32) | ((bits & 0xAAAAAAAAu32) >> 1u32);
@@ -158,7 +160,6 @@ pub struct VertexPrefilterEnvironmentCubemapIds {
     pub roughness: Id<f32>,
 }
 
-#[cfg(feature = "prefilter_environment_cubemap_vertex")]
 /// Vertex shader for rendering a "prefilter environment" cubemap.
 #[spirv(vertex)]
 pub fn prefilter_environment_cubemap_vertex(
@@ -177,7 +178,6 @@ pub fn prefilter_environment_cubemap_vertex(
     *gl_pos = camera.view_projection() * in_pos.extend(1.0);
 }
 
-#[cfg(feature = "prefilter_environment_cubemap_fragment")]
 /// Fragment shader for rendering a "prefilter environment" cubemap.
 ///
 /// Lambertian prefilter.
@@ -242,7 +242,6 @@ pub fn calc_lod(n_dot_l: f32) -> f32 {
     0.5 * (6.0 * cube_width * cube_width / (SAMPLE_COUNT as f32 * pdf).max(f32::EPSILON)).log2()
 }
 
-#[cfg(feature = "generate_mipmap_vertex")]
 #[spirv(vertex)]
 /// Vertex shader for generating texture mips.
 pub fn generate_mipmap_vertex(
@@ -255,7 +254,6 @@ pub fn generate_mipmap_vertex(
     *gl_pos = crate::math::CLIP_SPACE_COORD_QUAD_CCW[i];
 }
 
-#[cfg(feature = "generate_mipmap_fragment")]
 #[spirv(fragment)]
 /// Fragment shader for generating texture mips.
 pub fn generate_mipmap_fragment(
@@ -296,7 +294,6 @@ const BRDF_VERTS: [Vert; 6] = {
     [bl, br, tr, bl, tr, tl]
 };
 
-#[cfg(feature = "brdf_lut_convolution_vertex")]
 #[spirv(vertex)]
 /// Vertex shader for creating a BRDF LUT.
 pub fn brdf_lut_convolution_vertex(
@@ -309,7 +306,6 @@ pub fn brdf_lut_convolution_vertex(
     *gl_pos = Vec3::from(pos).extend(1.0);
 }
 
-#[cfg(feature = "brdf_lut_convolution_fragment")]
 #[spirv(fragment)]
 /// Fragment shader for creating a BRDF LUT.
 pub fn brdf_lut_convolution_fragment(in_uv: glam::Vec2, out_color: &mut glam::Vec2) {
