@@ -106,7 +106,7 @@ impl IndirectDraws {
     pub async fn read_hzb_images(
         &self,
         ctx: &crate::Context,
-    ) -> Result<Vec<image::DynamicImage>, CullingError> {
+    ) -> Result<Vec<image::ImageBuffer<image::Luma<f32>, Vec<f32>>>, CullingError> {
         self.compute_culling
             .compute_depth_pyramid
             .depth_pyramid

@@ -805,7 +805,6 @@ impl Stage {
                 render_pass.set_pipeline(&pipeline);
                 render_pass.set_bind_group(0, Some(&slab_buffers_bindgroup), &[]);
                 render_pass.set_bind_group(1, Some(&textures_bindgroup), &[]);
-
                 draw_calls.draw(&mut render_pass);
 
                 if let Some((pipeline, bindgroup)) = may_skybox_pipeline_and_bindgroup.as_ref() {

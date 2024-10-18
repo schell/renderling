@@ -294,7 +294,7 @@ impl DepthPyramid {
     pub async fn read_images(
         &self,
         ctx: &crate::Context,
-    ) -> Result<Vec<image::DynamicImage>, CullingError> {
+    ) -> Result<Vec<image::ImageBuffer<image::Luma<f32>, Vec<f32>>>, CullingError> {
         let size = self.size();
         let slab_data = self
             .slab
@@ -321,7 +321,7 @@ impl DepthPyramid {
             let image: image::ImageBuffer<image::Luma<f32>, Vec<f32>> =
                 image::ImageBuffer::from_raw(width, height, depth_data)
                     .context(ReadMipSnafu { index: i })?;
-            images.push(image::DynamicImage::from(image));
+            images.push(image);
         }
         Ok(images)
     }
@@ -725,9 +725,12 @@ impl ComputeDepthPyramid {
 
 #[cfg(test)]
 mod test {
-    use crate::{cull::DepthPyramidDescriptor, prelude::*};
+    use crate::{
+        bvol::BoundingSphere, cull::DepthPyramidDescriptor, math::hex_to_vec4, prelude::*,
+    };
     use crabslab::GrowableSlab;
-    use glam::{Mat4, Quat, UVec2, Vec3, Vec4};
+    use glam::{Mat4, Quat, UVec2, UVec4, Vec2, Vec3, Vec4};
+    use image::GenericImageView;
 
     #[test]
     fn occlusion_culling_sanity() {
@@ -825,6 +828,200 @@ mod test {
                     assert_eq!(x as f32, depth, "depth should be x value");
                 }
             }
+        }
+    }
+
+    #[test]
+    fn occlusion_culling_debugging() {
+        let ctx = Context::headless(128, 128);
+        let stage = ctx
+            .new_stage()
+            .with_lighting(false)
+            .with_bloom(false)
+            .with_background_color(Vec4::splat(1.0));
+        let camera = {
+            let fovy = std::f32::consts::FRAC_PI_4;
+            let aspect = 1.0;
+            let znear = 0.1;
+            let zfar = 100.0;
+            let projection = Mat4::perspective_rh(fovy, aspect, znear, zfar);
+            // Camera is looking straight down Z, towards the origin with Y up
+            let view = Mat4::look_at_rh(Vec3::new(0.0, 0.0, 10.0), Vec3::ZERO, Vec3::Y);
+            stage.new_value(Camera::new(projection, view))
+        };
+
+        let save_render = |s: &str| {
+            let frame = ctx.get_next_frame().unwrap();
+            stage.render(&frame.view());
+            let img = frame.read_image().unwrap();
+            img_diff::save(&format!("cull/debugging_{s}.png"), img);
+            frame.present();
+        };
+
+        // Add four yellow cubes in each corner
+        let _ycubes = [
+            Vec2::new(-1.0, 1.0),
+            Vec2::new(1.0, 1.0),
+            Vec2::new(1.0, -1.0),
+            Vec2::new(-1.0, -1.0),
+        ]
+        .map(|offset| {
+            let yellow = hex_to_vec4(0xFFE6A5FF);
+            let transform = stage.new_value(Transform {
+                // move it back behind the purple cube
+                translation: (offset * 10.0).extend(-20.0),
+                // scale it up since it's a unit cube
+                scale: Vec3::splat(2.0),
+                ..Default::default()
+            });
+            let vertices = stage.new_array(crate::math::unit_cube().into_iter().map(|(p, n)| {
+                Vertex::default()
+                    .with_position(p)
+                    .with_normal(n)
+                    .with_color(yellow)
+            }));
+            let renderlet = stage.new_value(Renderlet {
+                camera_id: camera.id(),
+                vertices_array: vertices.array(),
+                transform_id: transform.id(),
+                bounds: BoundingSphere::new(Vec3::ZERO, Vec3::splat(0.5).length()),
+                ..Default::default()
+            });
+            stage.add_renderlet(&renderlet);
+            (renderlet, transform, vertices)
+        });
+
+        save_render("0_yellow_cubes");
+
+        // We'll add a golden floor
+        let _floor = {
+            let golden = hex_to_vec4(0xFFBF61FF);
+            let transform = stage.new_value(Transform {
+                // flip it so it's facing up, like a floor should be
+                rotation: Quat::from_rotation_x(std::f32::consts::FRAC_PI_2),
+                // move it down and back a bit
+                translation: Vec3::new(0.0, -5.0, -10.0),
+                // scale it up, since it's a unit quad
+                scale: Vec3::new(100.0, 100.0, 1.0),
+            });
+            let vertices = stage.new_array(
+                crate::math::UNIT_QUAD_CCW
+                    .map(|p| Vertex::default().with_position(p).with_color(golden)),
+            );
+            let renderlet = stage.new_value(Renderlet {
+                camera_id: camera.id(),
+                vertices_array: vertices.array(),
+                transform_id: transform.id(),
+                bounds: BoundingSphere::new(Vec3::ZERO, Vec2::splat(0.5).length()),
+                ..Default::default()
+            });
+            stage.add_renderlet(&renderlet);
+            (renderlet, transform, vertices)
+        };
+
+        save_render("1_floor");
+
+        // Add a green cube
+        let _gcube = {
+            let green = hex_to_vec4(0x8ABFA3FF);
+            let transform = stage.new_value(Transform {
+                // move it back behind the purple cube
+                translation: Vec3::new(0.0, 0.0, -10.0),
+                // scale it up since it's a unit cube
+                scale: Vec3::splat(5.0),
+                ..Default::default()
+            });
+            let vertices = stage.new_array(crate::math::unit_cube().into_iter().map(|(p, n)| {
+                Vertex::default()
+                    .with_position(p)
+                    .with_normal(n)
+                    .with_color(green)
+            }));
+            let renderlet = stage.new_value(Renderlet {
+                camera_id: camera.id(),
+                vertices_array: vertices.array(),
+                transform_id: transform.id(),
+                bounds: BoundingSphere::new(Vec3::ZERO, Vec3::splat(0.5).length()),
+                ..Default::default()
+            });
+            stage.add_renderlet(&renderlet);
+            (renderlet, transform, vertices)
+        };
+
+        save_render("2_green_cube");
+
+        // And a purple cube
+        let _pcube = {
+            let purple = hex_to_vec4(0x605678FF);
+            let transform = stage.new_value(Transform {
+                // move it back a bit
+                translation: Vec3::new(0.0, 0.0, -3.0),
+                // scale it up since it's a unit cube
+                scale: Vec3::splat(5.0),
+                ..Default::default()
+            });
+            let vertices = stage.new_array(crate::math::unit_cube().into_iter().map(|(p, n)| {
+                Vertex::default()
+                    .with_position(p)
+                    .with_normal(n)
+                    .with_color(purple)
+            }));
+            let renderlet = stage.new_value(Renderlet {
+                camera_id: camera.id(),
+                vertices_array: vertices.array(),
+                transform_id: transform.id(),
+                bounds: BoundingSphere::new(Vec3::ZERO, Vec3::splat(0.5).length()),
+                ..Default::default()
+            });
+            stage.add_renderlet(&renderlet);
+            (renderlet, transform, vertices)
+        };
+
+        // Do two renders, because depth pyramid operates on depth data one frame
+        // behind
+        save_render("3_purple_cube");
+        save_render("3_purple_cube");
+
+        // save the normalized depth image
+        let mut depth_img = stage.get_depth_texture().read_image().unwrap();
+        let mut max = Vec3::MIN;
+        let mut min = Vec3::MAX;
+        depth_img.as_rgb32f().unwrap().pixels().for_each(|c| {
+            let v = Vec3::from(c.0);
+            max = max.max(v);
+            min = min.min(v);
+        });
+        let total = max.x - min.x;
+        log::info!("depth: {depth_img:#?}");
+        depth_img
+            .as_mut_rgb32f()
+            .unwrap()
+            .pixels_mut()
+            .for_each(|c| {
+                let comps = c.0.map(|u| (u - min.x) / total);
+                c.0 = comps;
+            });
+        log::info!("min: {min}");
+        log::info!("max: {max}");
+        img_diff::save("cull/debugging_4_depth.png", depth_img);
+
+        // save the normalized pyramid images
+        let pyramid_images = futures_lite::future::block_on(
+            stage
+                .draw_calls
+                .read()
+                .unwrap()
+                .drawing_strategy
+                .as_indirect()
+                .unwrap()
+                .read_hzb_images(&ctx),
+        )
+        .unwrap();
+        for (i, mut img) in pyramid_images.into_iter().enumerate() {
+            img.pixels_mut().for_each(|p| {
+                p.0[0] = (p.0[0] - min.x) / total;
+            });
+            img_diff::save(&format!("cull/debugging_pyramid_mip_{i}.png"), img);
         }
     }
 }
