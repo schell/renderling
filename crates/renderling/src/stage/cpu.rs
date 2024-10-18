@@ -3,7 +3,7 @@
 //! The `Stage` object contains a slab buffer and a render pipeline.
 //! It is used to stage [`Renderlet`]s for rendering.
 use core::sync::atomic::{AtomicU32, Ordering};
-use crabslab::{Id, Slab};
+use crabslab::Id;
 use snafu::Snafu;
 use std::{
     ops::Deref,
@@ -84,7 +84,7 @@ fn create_stage_render_pipeline(
         layout: Some(&layout),
         vertex: wgpu::VertexState {
             module: &vertex_linkage.module,
-            entry_point: vertex_linkage.entry_point,
+            entry_point: Some(vertex_linkage.entry_point),
             buffers: &[],
             compilation_options: Default::default(),
         },
@@ -111,7 +111,7 @@ fn create_stage_render_pipeline(
         },
         fragment: Some(wgpu::FragmentState {
             module: &fragment_linkage.module,
-            entry_point: fragment_linkage.entry_point,
+            entry_point: Some(fragment_linkage.entry_point),
             targets: &[Some(wgpu::ColorTargetState {
                 format: wgpu::TextureFormat::Rgba16Float,
                 blend: Some(wgpu::BlendState::ALPHA_BLENDING),
@@ -230,7 +230,12 @@ impl Stage {
             has_bloom: AtomicBool::from(true).into(),
             buffers_bindgroup: Default::default(),
             textures_bindgroup: Default::default(),
-            draw_calls: Arc::new(RwLock::new(DrawCalls::new(ctx, true))),
+            draw_calls: Arc::new(RwLock::new(DrawCalls::new(
+                ctx,
+                true,
+                UVec2::new(w, h),
+                multisample_count,
+            ))),
             hdr_texture,
             depth_texture,
             msaa_render_target,
@@ -728,7 +733,11 @@ impl Stage {
     pub fn render(&self, view: &wgpu::TextureView) {
         let slab_buffer = self.tick_internal();
         let mut draw_calls = self.draw_calls.write().unwrap();
-        draw_calls.pre_draw(&self.device, &self.queue, &slab_buffer);
+        let depth_texture = self.depth_texture.read().unwrap();
+        // UNWRAP: safe because we know the depth texture format will always match
+        draw_calls
+            .pre_draw(&self.device, &self.queue, &slab_buffer, &depth_texture)
+            .unwrap();
         {
             let label = Some("stage render");
             // UNWRAP: POP
@@ -753,7 +762,7 @@ impl Stage {
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor { label });
             {
                 let hdr_texture = self.hdr_texture.read().unwrap();
-                let depth_texture = self.depth_texture.read().unwrap();
+
                 let ops = wgpu::Operations {
                     load: if clear_colors {
                         wgpu::LoadOp::Clear(background_color)
@@ -794,16 +803,15 @@ impl Stage {
                 });
 
                 render_pass.set_pipeline(&pipeline);
-                render_pass.set_bind_group(0, &slab_buffers_bindgroup, &[]);
-                render_pass.set_bind_group(1, &textures_bindgroup, &[]);
-
+                render_pass.set_bind_group(0, Some(&slab_buffers_bindgroup), &[]);
+                render_pass.set_bind_group(1, Some(&textures_bindgroup), &[]);
                 draw_calls.draw(&mut render_pass);
 
                 if let Some((pipeline, bindgroup)) = may_skybox_pipeline_and_bindgroup.as_ref() {
                     // UNWRAP: if we can't acquire the lock we want to panic.
                     let skybox = self.skybox.read().unwrap();
                     render_pass.set_pipeline(&pipeline.pipeline);
-                    render_pass.set_bind_group(0, bindgroup, &[]);
+                    render_pass.set_bind_group(0, Some(bindgroup), &[]);
                     render_pass.draw(0..36, skybox.camera.inner()..skybox.camera.inner() + 1);
                 }
             }

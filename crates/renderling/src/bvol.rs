@@ -123,8 +123,8 @@ impl Aabb {
         self.min == self.max
     }
 
-    /// Determines whether this `Aabb` can be seen by `camera` after being transformed by
-    /// `transform`.
+    /// Determines whether this `Aabb` can be seen by `camera` after being
+    /// transformed by `transform`.
     pub fn is_outside_camera_view(&self, camera: &Camera, transform: Transform) -> bool {
         let transform = Mat4::from(transform);
         let min = transform.transform_point3(self.min);
@@ -321,13 +321,20 @@ impl BoundingSphere {
         }
     }
 
-    pub fn is_inside_camera_view(&self, camera: &Camera, transform: Transform) -> bool {
+    /// Determine whether this sphere is inside the camera's view frustum after
+    /// being transformed by `transform`.  
+    pub fn is_inside_camera_view(
+        &self,
+        camera: &Camera,
+        transform: Transform,
+    ) -> (bool, BoundingSphere) {
         let center = Mat4::from(transform).transform_point3(self.center);
         let scale = Vec3::splat(transform.scale.max_element());
         let radius = Mat4::from_scale(scale)
             .transform_point3(Vec3::new(self.radius, 0.0, 0.0))
             .distance(Vec3::ZERO);
-        BoundingSphere::new(center, radius).is_inside_frustum(camera.frustum())
+        let sphere = BoundingSphere::new(center, radius);
+        (sphere.is_inside_frustum(camera.frustum()), sphere)
     }
 }
 
@@ -364,14 +371,14 @@ pub trait BVol {
     /// In order for a bounding volume to be inside the frustum, it must not be
     /// culled by any plane.
     ///
-    /// Coherence is provided by the `lpindex` argument, which should be the index of
-    /// the first plane found that culls this volume, given as part of the return
-    /// value of this function.
+    /// Coherence is provided by the `lpindex` argument, which should be the
+    /// index of the first plane found that culls this volume, given as part
+    /// of the return value of this function.
     ///
     /// Returns `true` if the volume is outside the frustum, `false` otherwise.
     ///
-    /// Returns the index of first plane found that culls this volume, to cache and use later
-    /// as a short circuit.
+    /// Returns the index of first plane found that culls this volume, to cache
+    /// and use later as a short circuit.
     fn coherent_test_is_volume_outside_frustum(
         &self,
         frustum: &Frustum,

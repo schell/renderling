@@ -10,7 +10,6 @@ mod cpu;
 #[cfg(not(target_arch = "spirv"))]
 pub use cpu::*;
 
-#[cfg(feature = "bloom_vertex")]
 /// Bloom vertex shader.
 ///
 /// This is a pass-through vertex shader to facilitate a bloom effect.
@@ -28,14 +27,13 @@ pub fn bloom_vertex(
     *out_id = in_id;
 }
 
-#[cfg(feature = "bloom_downsample_fragment")]
 /// Bloom downsampling shader.
 ///
 /// Performs successive downsampling from a source texture.
 ///
 /// As taken from Call Of Duty method - presented at ACM Siggraph 2014.
 ///
-/// This particular method was customly designed to eliminate
+/// This particular method was designed to eliminate
 /// "pulsating artifacts and temporal stability issues".
 #[spirv(fragment)]
 pub fn bloom_downsample_fragment(
@@ -102,7 +100,6 @@ pub fn bloom_downsample_fragment(
     *downsample = (center + inner + outer + furthest).max(min);
 }
 
-#[cfg(feature = "bloom_upsample_fragment")]
 /// Bloom upsampling shader.
 ///
 /// This shader performs successive upsampling on a source texture.
@@ -169,7 +166,6 @@ pub fn bloom_upsample_fragment(
     *upsample = sample.extend(0.5);
 }
 
-#[cfg(feature = "bloom_mix_fragment")]
 #[spirv(fragment)]
 #[allow(clippy::too_many_arguments)]
 /// Bloom "mix" shader.
