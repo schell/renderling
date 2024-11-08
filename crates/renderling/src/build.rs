@@ -25,10 +25,13 @@ impl core::fmt::Display for Linkage {
             wgsl_entry_point,
         } = self;
 
+        let fn_name = self.fn_name();
+
         let quote = quote! {
             use crate::linkage::ShaderLinkage;
 
-            mod native {
+            #[cfg(not(target_arch = "wasm32"))]
+            mod target {
                 pub const ENTRY_POINT: &str = #entry_point;
 
                 pub fn descriptor() -> wgpu::ShaderModuleDescriptor<'static> {
@@ -36,21 +39,23 @@ impl core::fmt::Display for Linkage {
                 }
 
                 pub fn linkage(device: &wgpu::Device) -> super::ShaderLinkage {
+                    log::info!("creating native linkage for {}", #fn_name);
                     super::ShaderLinkage {
                         entry_point: ENTRY_POINT,
                         module: device.create_shader_module(descriptor()).into()
                     }
                 }
             }
-
-            mod web {
+            #[cfg(target_arch = "wasm32")]
+            mod target {
                 pub const ENTRY_POINT: &str = #wgsl_entry_point;
 
                 pub fn descriptor() -> wgpu::ShaderModuleDescriptor<'static> {
-                    wgpu::include_spirv!(#wgsl_include_source_path)
+                    wgpu::include_wgsl!(#wgsl_include_source_path)
                 }
 
                 pub fn linkage(device: &wgpu::Device) -> super::ShaderLinkage {
+                    log::info!("creating web linkage for {}", #fn_name);
                     super::ShaderLinkage {
                         entry_point: ENTRY_POINT,
                         module: device.create_shader_module(descriptor()).into()
@@ -58,20 +63,8 @@ impl core::fmt::Display for Linkage {
                 }
             }
 
-            pub fn linkage_native(device: &wgpu::Device) -> ShaderLinkage {
-                native::linkage(device)
-            }
-
-            pub fn linkage_web(device: &wgpu::Device) -> ShaderLinkage {
-                web::linkage(device)
-            }
-
             pub fn linkage(device: &wgpu::Device) -> ShaderLinkage {
-                if cfg!(feature = "wasm") {
-                    web::linkage(device)
-                } else {
-                    native::linkage(device)
-                }
+                target::linkage(device)
             }
         };
 

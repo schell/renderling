@@ -88,11 +88,8 @@ tutorial_slabbed_renderlet = []
 
 wasm = ["wgpu/fragile-send-sync-non-atomic-wasm"]
 
-[patch.crates-io]
-spirv-std = { git = "https://github.com/Rust-GPU/rust-gpu" }
-
 [build-dependencies]
-naga = { version = "22.1", features = ["spv-in", "wgsl-out", "wgsl-in", "msl-out"] }
+naga = {workspace = true}
 pathdiff = "0.2.2"
 quote = "1.0"
 serde = {version = "1.0", features = ["derive"]}

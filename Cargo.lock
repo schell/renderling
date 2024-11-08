@@ -287,27 +287,12 @@ checksum = "9e1b586273c5702936fe7b7d6896644d8be71e6314cfe09d3167c95f712589e8"
 
 [[package]]
 name = "bit-set"
-version = "0.5.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0700ddab506f33b20a03b13996eccd309a48e5ff77d0d95926aa0210fb4e95f1"
-dependencies = [
- "bit-vec 0.6.3",
-]
-
-[[package]]
-name = "bit-set"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f0481a0e032742109b1133a095184ee93d88f3dc9e0d28a5d033dc77a073f44f"
 dependencies = [
- "bit-vec 0.7.0",
+ "bit-vec",
 ]
-
-[[package]]
-name = "bit-vec"
-version = "0.6.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "349f9b6a179ed607305526ca489b34ad0a41aed5f7980fa90eb03160b69598fb"
 
 [[package]]
 name = "bit-vec"
@@ -1759,33 +1744,12 @@ dependencies = [
 
 [[package]]
 name = "naga"
-version = "0.19.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "50e3524642f53d9af419ab5e8dd29d3ba155708267667c2f3f06c88c9e130843"
-dependencies = [
- "bit-set 0.5.3",
- "bitflags 2.6.0",
- "codespan-reporting",
- "hexf-parse",
- "indexmap",
- "log",
- "num-traits",
- "petgraph",
- "rustc-hash 1.1.0",
- "spirv",
- "termcolor",
- "thiserror",
- "unicode-xid",
-]
-
-[[package]]
-name = "naga"
 version = "22.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8bd5a652b6faf21496f2cfd88fc49989c8db0825d1f6746b1a71a6ede24a63ad"
 dependencies = [
  "arrayvec",
- "bit-set 0.6.0",
+ "bit-set",
  "bitflags 2.6.0",
  "cfg_aliases 0.1.1",
  "codespan-reporting",
@@ -2568,8 +2532,7 @@ dependencies = [
  "image 0.24.9",
  "img-diff",
  "log",
- "naga 0.19.2",
- "naga 22.1.0",
+ "naga",
  "pathdiff",
  "pretty_assertions",
  "quote",
@@ -3332,7 +3295,7 @@ dependencies = [
  "document-features",
  "js-sys",
  "log",
- "naga 22.1.0",
+ "naga",
  "parking_lot",
  "profiling",
  "raw-window-handle",
@@ -3353,14 +3316,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0348c840d1051b8e86c3bcd31206080c5e71e5933dabd79be1ce732b0b2f089a"
 dependencies = [
  "arrayvec",
- "bit-vec 0.7.0",
+ "bit-vec",
  "bitflags 2.6.0",
  "bytemuck",
  "cfg_aliases 0.1.1",
  "document-features",
  "indexmap",
  "log",
- "naga 22.1.0",
+ "naga",
  "once_cell",
  "parking_lot",
  "profiling",
@@ -3381,7 +3344,7 @@ dependencies = [
  "android_system_properties",
  "arrayvec",
  "ash",
- "bit-set 0.6.0",
+ "bit-set",
  "bitflags 2.6.0",
  "block",
  "cfg_aliases 0.1.1",
@@ -3399,7 +3362,7 @@ dependencies = [
  "libloading",
  "log",
  "metal",
- "naga 22.1.0",
+ "naga",
  "ndk-sys 0.5.0+25.2.9519653",
  "objc",
  "once_cell",
