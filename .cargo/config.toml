@@ -1,5 +1,5 @@
 [alias]
-shaders = "gpu --output-dir crates/renderling/shaders --shader-crate crates/renderling/ --shader-manifest crates/renderling/shaders/manifest.json"
+shaders = "gpu build --output-dir crates/renderling/shaders --shader-crate crates/renderling/ --shader-manifest crates/renderling/shaders/manifest.json"
 
 [build]
 rustflags = ["--cfg=web_sys_unstable_apis"]
