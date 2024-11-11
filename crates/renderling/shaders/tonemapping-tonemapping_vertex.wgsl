@@ -15,13 +15,20 @@ var<private> global_2: vec4<f32> = vec4<f32>(0f, 0f, 0f, 1f);
 fn function() {
     var local: array<type_9, 6>;
 
-    let _e22 = global_1;
-    local = array<type_9, 6>(type_9(vec2<f32>(-1f, 1f), vec2<f32>(0f, 0f)), type_9(vec2<f32>(-1f, -1f), vec2<f32>(0f, 1f)), type_9(vec2<f32>(1f, -1f), vec2<f32>(1f, 1f)), type_9(vec2<f32>(-1f, 1f), vec2<f32>(0f, 0f)), type_9(vec2<f32>(1f, -1f), vec2<f32>(1f, 1f)), type_9(vec2<f32>(1f, 1f), vec2<f32>(1f, 0f)));
-    if (_e22 < 6u) {
-        let _e26 = local[_e22].member;
-        let _e29 = local[_e22].member_1;
-        global = _e29;
-        global_2 = vec4<f32>(_e26.x, _e26.y, 0f, 1f);
+    switch bitcast<i32>(0u) {
+        default: {
+            let _e23 = global_1;
+            local = array<type_9, 6>(type_9(vec2<f32>(-1f, 1f), vec2<f32>(0f, 0f)), type_9(vec2<f32>(-1f, -1f), vec2<f32>(0f, 1f)), type_9(vec2<f32>(1f, -1f), vec2<f32>(1f, 1f)), type_9(vec2<f32>(-1f, 1f), vec2<f32>(0f, 0f)), type_9(vec2<f32>(1f, -1f), vec2<f32>(1f, 1f)), type_9(vec2<f32>(1f, 1f), vec2<f32>(1f, 0f)));
+            if (_e23 < 6u) {
+            } else {
+                break;
+            }
+            let _e27 = local[_e23].member;
+            let _e30 = local[_e23].member_1;
+            global = _e30;
+            global_2 = vec4<f32>(_e27.x, _e27.y, 0f, 1f);
+            break;
+        }
     }
     return;
 }

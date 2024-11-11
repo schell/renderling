@@ -11,16 +11,25 @@ fn function() {
     var local: array<vec2<f32>, 6>;
     var local_1: array<vec4<f32>, 6>;
 
-    let _e20 = global_1;
-    local = array<vec2<f32>, 6>(vec2<f32>(0f, 1f), vec2<f32>(1f, 1f), vec2<f32>(1f, 0f), vec2<f32>(1f, 0f), vec2<f32>(0f, 0f), vec2<f32>(0f, 1f));
-    let _e21 = (_e20 < 6u);
-    if _e21 {
-        let _e23 = local[_e20];
-        global = _e23;
-        local_1 = array<vec4<f32>, 6>(vec4<f32>(-1f, -1f, 0.5f, 1f), vec4<f32>(1f, -1f, 0.5f, 1f), vec4<f32>(1f, 1f, 0.5f, 1f), vec4<f32>(1f, 1f, 0.5f, 1f), vec4<f32>(-1f, 1f, 0.5f, 1f), vec4<f32>(-1f, -1f, 0.5f, 1f));
-        if _e21 {
-            let _e25 = local_1[_e20];
-            global_2 = _e25;
+    switch bitcast<i32>(0u) {
+        default: {
+            let _e22 = global_1;
+            local = array<vec2<f32>, 6>(vec2<f32>(0f, 1f), vec2<f32>(1f, 1f), vec2<f32>(1f, 0f), vec2<f32>(1f, 0f), vec2<f32>(0f, 0f), vec2<f32>(0f, 1f));
+            let _e23 = (_e22 < 6u);
+            if _e23 {
+            } else {
+                break;
+            }
+            let _e25 = local[_e22];
+            global = _e25;
+            local_1 = array<vec4<f32>, 6>(vec4<f32>(-1f, -1f, 0.5f, 1f), vec4<f32>(1f, -1f, 0.5f, 1f), vec4<f32>(1f, 1f, 0.5f, 1f), vec4<f32>(1f, 1f, 0.5f, 1f), vec4<f32>(-1f, 1f, 0.5f, 1f), vec4<f32>(-1f, -1f, 0.5f, 1f));
+            if _e23 {
+            } else {
+                break;
+            }
+            let _e27 = local_1[_e22];
+            global_2 = _e27;
+            break;
         }
     }
     return;
