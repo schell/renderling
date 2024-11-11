@@ -8,6 +8,7 @@ license = "MIT OR Apache-2.0"
 keywords = ["game", "graphics", "shader", "rendering"]
 categories = ["rendering", "game-development", "graphics"]
 readme = "../../README.md"
+build = "src/build.rs"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -87,8 +88,12 @@ tutorial_slabbed_renderlet = []
 
 wasm = ["wgpu/fragile-send-sync-non-atomic-wasm"]
 
-[patch.crates-io]
-spirv-std = { git = "https://github.com/Rust-GPU/rust-gpu" }
+[build-dependencies]
+naga = {workspace = true}
+pathdiff = "0.2.2"
+quote = "1.0"
+serde = {version = "1.0", features = ["derive"]}
+serde_json = {workspace = true}
 
 # dependencies for CPU and GPU code
 [dependencies]
@@ -134,8 +139,3 @@ winit.workspace = true
 
 [target.'cfg(not(target_arch = "spirv"))'.dev-dependencies]
 glam = { workspace = true, features = ["std", "debug-glam-assert"] }
-
-
-# [[bench]]
-# name = "benchmarks"
-# harness = false
