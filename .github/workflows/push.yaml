@@ -15,18 +15,18 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
-      - uses: moonrepo/setup-rust@v1
-      - uses: Swatinem/rust-cache@v2
+      - uses: actions/cache@v4
         with:
-          workspaces: shaders
-      # ensure the shader binaries were properly checked in
+          path: ~/.cache/rust-gpu
+          key: ${{ runner.os }}
+      - uses: moonrepo/setup-rust@v1
       - run: rustup toolchain add nightly-2024-04-24
       - run: rustup component add --toolchain nightly-2024-04-24 rust-src rustc-dev llvm-tools
       - run: cargo install --git https://github.com/rust-gpu/cargo-gpu
-      - run: rm -rf crates/renderling/src/linkage/*
-      - run: rm -rf crates/renderling/shaders
+      - run: rm -rf crates/renderling/src/linkage/* crates/renderling/shaders
       - run: RUST_LOG=trace cargo shaders
-      - run: git diff --exit-code --no-ext-diff crates/renderling/src/linkage
+      - run: cargo build -p renderling
+      - run: git diff --exit-code --no-ext-diff
 
   renderling-clippy:
     runs-on: ubuntu-latest
