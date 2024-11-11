@@ -20,6 +20,8 @@ jobs:
         with:
           workspaces: shaders
       # ensure the shader binaries were properly checked in
+      - run: rustup toolchain add nightly-2024-04-24
+      - run: rustup component add --toolchain nightly-2024-04-24 rust-src rustc-dev llvm-tools
       - run: cargo install --git https://github.com/rust-gpu/cargo-gpu
       - run: rm -rf crates/renderling/src/linkage/*
       - run: rm -rf crates/renderling/shaders
