@@ -167,7 +167,7 @@ pub mod pbr;
 pub mod skybox;
 pub mod slab;
 pub mod stage;
-#[cfg(not(target_arch = "spirv"))]
+#[cfg(not(target_arch = "spirv"))] 
 pub mod texture;
 pub mod tonemapping;
 pub mod transform;
