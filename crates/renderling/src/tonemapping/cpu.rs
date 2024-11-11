@@ -1,4 +1,5 @@
 //! Tonemapping.
+use core::ops::Deref;
 use std::sync::{Arc, RwLock};
 
 use crate::{
@@ -206,7 +207,7 @@ impl Tonemapping {
             ..Default::default()
         });
         render_pass.set_pipeline(&self.pipeline);
-        render_pass.set_bind_group(0, Some(&bindgroup), &[]);
+        render_pass.set_bind_group(0, Some(bindgroup.deref()), &[]);
         let id = self.config.id().into();
         render_pass.draw(0..6, id..id + 1);
         drop(render_pass);

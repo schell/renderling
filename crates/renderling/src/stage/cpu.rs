@@ -839,15 +839,15 @@ impl Stage {
                 });
 
                 render_pass.set_pipeline(&pipeline);
-                render_pass.set_bind_group(0, Some(&slab_buffers_bindgroup), &[]);
-                render_pass.set_bind_group(1, Some(&textures_bindgroup), &[]);
+                render_pass.set_bind_group(0, Some(slab_buffers_bindgroup.as_ref()), &[]);
+                render_pass.set_bind_group(1, Some(textures_bindgroup.as_ref()), &[]);
                 draw_calls.draw(&mut render_pass);
 
                 if let Some((pipeline, bindgroup)) = may_skybox_pipeline_and_bindgroup.as_ref() {
                     // UNWRAP: if we can't acquire the lock we want to panic.
                     let skybox = self.skybox.read().unwrap();
                     render_pass.set_pipeline(&pipeline.pipeline);
-                    render_pass.set_bind_group(0, Some(bindgroup), &[]);
+                    render_pass.set_bind_group(0, Some(bindgroup.as_ref()), &[]);
                     render_pass.draw(0..36, skybox.camera.inner()..skybox.camera.inner() + 1);
                 }
             }

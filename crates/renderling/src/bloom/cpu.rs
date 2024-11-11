@@ -1,4 +1,5 @@
 //! Bloom.
+use core::ops::Deref;
 use std::sync::{Arc, RwLock};
 
 use crabslab::Id;
@@ -675,7 +676,7 @@ impl Bloom {
                 occlusion_query_set: None,
             });
             render_pass.set_pipeline(&self.mix_pipeline);
-            render_pass.set_bind_group(0, Some(&mix_bindgroup), &[]);
+            render_pass.set_bind_group(0, Some(mix_bindgroup.deref()), &[]);
             let id = self.mix_strength.id().into();
             render_pass.draw(0..6, id..id + 1);
         }

@@ -50,9 +50,34 @@
     "wgsl_entry_point": "convolutionprefilter_environment_cubemap_vertex"
   },
   {
-    "source_path": "crates/renderling/shaders/cull-compute_frustum_culling.spv",
-    "entry_point": "cull::compute_frustum_culling",
-    "wgsl_entry_point": "cullcompute_frustum_culling"
+    "source_path": "crates/renderling/shaders/cull-compute_copy_depth_to_pyramid.spv",
+    "entry_point": "cull::compute_copy_depth_to_pyramid",
+    "wgsl_entry_point": "cullcompute_copy_depth_to_pyramid"
+  },
+  {
+    "source_path": "crates/renderling/shaders/cull-compute_copy_depth_to_pyramid_multisampled.spv",
+    "entry_point": "cull::compute_copy_depth_to_pyramid_multisampled",
+    "wgsl_entry_point": "cullcompute_copy_depth_to_pyramid_multisampled"
+  },
+  {
+    "source_path": "crates/renderling/shaders/cull-compute_culling.spv",
+    "entry_point": "cull::compute_culling",
+    "wgsl_entry_point": "cullcompute_culling"
+  },
+  {
+    "source_path": "crates/renderling/shaders/cull-compute_downsample_depth_pyramid.spv",
+    "entry_point": "cull::compute_downsample_depth_pyramid",
+    "wgsl_entry_point": "cullcompute_downsample_depth_pyramid"
+  },
+  {
+    "source_path": "crates/renderling/shaders/debug-debug_overlay_fragment.spv",
+    "entry_point": "debug::debug_overlay_fragment",
+    "wgsl_entry_point": "debugdebug_overlay_fragment"
+  },
+  {
+    "source_path": "crates/renderling/shaders/debug-debug_overlay_vertex.spv",
+    "entry_point": "debug::debug_overlay_vertex",
+    "wgsl_entry_point": "debugdebug_overlay_vertex"
   },
   {
     "source_path": "crates/renderling/shaders/skybox-skybox_cubemap_fragment.spv",
