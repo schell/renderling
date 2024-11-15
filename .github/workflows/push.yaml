@@ -18,9 +18,9 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: ~/.cache/rust-gpu
-          key: ${{ runner.os }}
+          key: https___github_com_rust-gpu_cargo-gpu-${{ runner.os }}
       - uses: moonrepo/setup-rust@v1
-      - run: RUST_LOG=trace cargo install --git https://github.com/rust-gpu/cargo-gpu --branch fix/use-explicit-target-spec-file
+      - run: RUST_LOG=trace cargo install --git https://github.com/rust-gpu/cargo-gpu 
       - run: rm -rf crates/renderling/src/linkage/* crates/renderling/shaders
       - run: RUST_LOG=trace cargo shaders
       - run: cargo build -p renderling
