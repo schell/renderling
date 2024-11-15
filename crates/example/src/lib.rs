@@ -144,8 +144,7 @@ impl App {
             .with_bloom_mix_strength(0.5)
             .with_bloom_filter_radius(4.0)
             .with_msaa_sample_count(4)
-            .with_debug_overlay(true)
-            .with_compute_culling(false);
+            .with_debug_overlay(true);
         let camera = stage.new_value(Camera::default());
         // let sunlight = stage.new_value(DirectionalLight {
         //     direction: Vec3::NEG_Y,

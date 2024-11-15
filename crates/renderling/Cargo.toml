@@ -10,6 +10,13 @@ categories = ["rendering", "game-development", "graphics"]
 readme = "../../README.md"
 build = "src/build.rs"
 
+[package.metadata.rust-gpu.build.spirv-builder]
+git = "https://github.com/Rust-GPU/rust-gpu.git" 
+rev = "0da80f8"
+
+[package.metadata.rust-gpu.build]
+output-dir = "shaders" 
+
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [lib]
@@ -77,3 +84,4 @@ winit.workspace = true
 
 [target.'cfg(not(target_arch = "spirv"))'.dev-dependencies]
 glam = { workspace = true, features = ["std", "debug-glam-assert"] }
+

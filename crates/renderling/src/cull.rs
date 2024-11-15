@@ -48,7 +48,7 @@ pub fn compute_culling(
     }
 
     let config: PbrConfig = stage_slab.read(Id::new(0));
-    if !config.has_compute_culling {
+    if !config.perform_frustum_culling {
         return;
     }
 
@@ -57,10 +57,15 @@ pub fn compute_culling(
     // Compute frustum culling, and then occlusion culling, if need be
     let (renderlet_is_inside_frustum, sphere_in_world_coords) =
         renderlet.bounds.is_inside_camera_view(&camera, model);
+
     if renderlet_is_inside_frustum {
+        arg.instance_count = 1;
         crate::println!("renderlet is inside frustum");
         crate::println!("znear: {}", camera.frustum().planes[0]);
         crate::println!(" zfar: {}", camera.frustum().planes[5]);
+        if !config.perform_occlusion_culling {
+            return;
+        }
 
         // Compute occlusion culling using the hierachical z-buffer.
         let hzb_desc = depth_pyramid_slab.read_unchecked::<DepthPyramidDescriptor>(0u32.into());

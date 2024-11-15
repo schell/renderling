@@ -368,15 +368,35 @@ impl Stage {
         self
     }
 
-    /// Set whether to use culling on GPU before drawing.
-    pub fn set_use_compute_culling(&self, use_compute_culling: bool) {
+    /// Set whether to use frustum culling on GPU before drawing.
+    ///
+    /// This defaults to `true`.
+    pub fn set_use_frustum_culling(&self, use_frustum_culling: bool) {
         self.pbr_config
-            .modify(|cfg| cfg.has_compute_culling = use_compute_culling);
+            .modify(|cfg| cfg.perform_frustum_culling = use_frustum_culling);
     }
 
     /// Set whether to render the debug overlay.
-    pub fn with_compute_culling(self, use_compute_culling: bool) -> Self {
-        self.set_use_compute_culling(use_compute_culling);
+    pub fn with_frustum_culling(self, use_frustum_culling: bool) -> Self {
+        self.set_use_frustum_culling(use_frustum_culling);
+        self
+    }
+
+    /// Set whether to use occlusion culling on GPU before drawing.
+    ///
+    /// This defaults to `false`.
+    ///
+    /// ## Warning
+    ///
+    /// Occlusion culling is a feature in development. YMMV.
+    pub fn set_use_occlusion_culling(&self, use_occlusion_culling: bool) {
+        self.pbr_config
+            .modify(|cfg| cfg.perform_occlusion_culling = use_occlusion_culling);
+    }
+
+    /// Set whether to render the debug overlay.
+    pub fn with_occlusion_culling(self, use_occlusion_culling: bool) -> Self {
+        self.set_use_occlusion_culling(use_occlusion_culling);
         self
     }
 

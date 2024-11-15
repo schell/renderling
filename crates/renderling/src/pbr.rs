@@ -239,7 +239,8 @@ pub struct PbrConfig {
     pub debug_channel: debug::DebugChannel,
     pub has_lighting: bool,
     pub has_skinning: bool,
-    pub has_compute_culling: bool,
+    pub perform_frustum_culling: bool,
+    pub perform_occlusion_culling: bool,
     pub light_array: Array<Id<light::Light>>,
 }
 
@@ -251,7 +252,8 @@ impl Default for PbrConfig {
             debug_channel: Default::default(),
             has_lighting: true,
             has_skinning: true,
-            has_compute_culling: false,
+            perform_frustum_culling: true,
+            perform_occlusion_culling: false,
             light_array: Default::default(),
         }
     }
@@ -329,7 +331,8 @@ pub fn fragment_impl<A, T, C, S>(
         debug_channel,
         has_lighting,
         has_skinning: _,
-        has_compute_culling: _,
+        perform_frustum_culling: _,
+        perform_occlusion_culling: _,
         light_array,
     } = slab.read_unchecked(renderlet.pbr_config_id);
 

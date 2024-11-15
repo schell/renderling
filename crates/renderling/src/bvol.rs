@@ -525,7 +525,7 @@ mod test {
             .with_lighting(false)
             .with_background_color(Vec4::ONE)
             .with_debug_overlay(true)
-            .with_compute_culling(false);
+            .with_frustum_culling(false);
 
         let mut min = Vec3::splat(f32::INFINITY);
         let mut max = Vec3::splat(f32::NEG_INFINITY);
