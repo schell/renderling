@@ -134,13 +134,13 @@ async fn device(
     adapter: &wgpu::Adapter,
 ) -> Result<(wgpu::Device, wgpu::Queue), wgpu::RequestDeviceError> {
     let wanted_features = wgpu::Features::INDIRECT_FIRST_INSTANCE
-                        | wgpu::Features::MULTI_DRAW_INDIRECT
-                        //// when debugging rust-gpu shader miscompilation it's nice to have this
-                        //| wgpu::Features::SPIRV_SHADER_PASSTHROUGH
-                        // this one is a funny requirement, it seems it is needed if using storage buffers in
-                        // vertex shaders, even if those shaders are read-only
-                        | wgpu::Features::VERTEX_WRITABLE_STORAGE
-                        | wgpu::Features::CLEAR_TEXTURE;
+        | wgpu::Features::MULTI_DRAW_INDIRECT
+        //// when debugging rust-gpu shader miscompilation it's nice to have this
+        //| wgpu::Features::SPIRV_SHADER_PASSTHROUGH
+        // this one is a funny requirement, it seems it is needed if using storage buffers in
+        // vertex shaders, even if those shaders are read-only
+        | wgpu::Features::VERTEX_WRITABLE_STORAGE
+        | wgpu::Features::CLEAR_TEXTURE;
     let supported_features = adapter.features();
     let required_features = wanted_features.intersection(supported_features);
     let unsupported_features = wanted_features.difference(supported_features);

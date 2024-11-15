@@ -508,9 +508,14 @@ impl GltfPrimitive {
         let vs = uv1s.zip(vs);
         let vs = uv0s.into_iter().zip(vs);
         let vs = positions.into_iter().zip(vs);
+
+        let mut min = Vec3::splat(f32::INFINITY);
+        let mut max = Vec3::splat(f32::NEG_INFINITY);
         let vertices = vs
             .map(
                 |(position, (uv0, (uv1, (normal, (tangent, (color, (joints, weights)))))))| {
+                    min = min.min(position);
+                    max = max.max(position);
                     Vertex {
                         position,
                         color,
@@ -528,17 +533,27 @@ impl GltfPrimitive {
         log::debug!("{} vertices, {:?}", vertices.len(), vertices.array());
         let indices = stage.new_array(indices);
         log::debug!("{} indices, {:?}", indices.len(), indices.array());
-        let gltf::mesh::Bounds { min, max } = primitive.bounding_box();
-        let min = Vec3::from_array(min);
-        let max = Vec3::from_array(max);
+        let (bbmin, bbmax) = {
+            let gltf::mesh::Bounds { min, max } = primitive.bounding_box();
+            (Vec3::from_array(min), Vec3::from_array(max))
+        };
+        if bbmin != min {
+            log::warn!("gltf supplied bounding box min ({bbmin:?}) doesn't match seen ({min:?})");
+        }
+        if bbmax != max {
+            log::warn!("gltf supplied bounding box max ({bbmax:?}) doesn't match seen ({max:?})");
+        }
+        let bounding_box = (min, max);
+
+        log::info!("primitive '{}' bounds: {bounding_box:?}", primitive.index());
 
         Self {
             vertices,
             indices,
             material,
-            bounding_box: (min, max),
             morph_targets,
             morph_targets_array,
+            bounding_box,
         }
     }
 }
@@ -1408,9 +1423,7 @@ mod test {
                 v.renderlet_id,
                 v.vertex_index,
                 slab,
-                &mut v.out_camera,
-                &mut v.out_material,
-                &mut v.out_pbr_config,
+                &mut v.renderlet_id,
                 &mut v.out_color,
                 &mut v.out_uv0,
                 &mut v.out_uv1,

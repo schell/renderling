@@ -88,7 +88,7 @@ impl DiffuseIrradianceConvolutionRenderPipeline {
                 layout: Some(&pp_layout),
                 vertex: wgpu::VertexState {
                     module: &vertex_linkage.module,
-                    entry_point: vertex_linkage.entry_point,
+                    entry_point: Some(vertex_linkage.entry_point),
                     buffers: &[],
                     compilation_options: Default::default(),
                 },
@@ -109,7 +109,7 @@ impl DiffuseIrradianceConvolutionRenderPipeline {
                 },
                 fragment: Some(wgpu::FragmentState {
                     module: &fragment_shader,
-                    entry_point: "fragment_convolve_diffuse_irradiance",
+                    entry_point: Some("fragment_convolve_diffuse_irradiance"),
                     targets: &[Some(wgpu::ColorTargetState {
                         format,
                         blend: Some(wgpu::BlendState::ALPHA_BLENDING),

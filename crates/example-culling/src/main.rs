@@ -1,4 +1,5 @@
-//! An example app showing (and verifying) how frustum culling works in `renderling`.
+//! An example app showing (and verifying) how frustum culling works in
+//! `renderling`.
 use std::{any::Any, sync::Arc};
 
 use example::{camera::CameraController, utils::*};
@@ -123,6 +124,7 @@ impl CullingExample {
                         app_camera.0.id(),
                         if BoundingSphere::from(aabb)
                             .is_inside_camera_view(&frustum_camera.0, transform.get())
+                            .0
                         {
                             material_overlapping.id()
                         } else {
@@ -230,8 +232,8 @@ impl TestAppHandler for CullingExample {
             let target = Vec3::ZERO;
             let up = Vec3::Y;
             let view = Mat4::look_at_rh(eye, target, up);
-            // let projection = Mat4::orthographic_rh(-10.0, 10.0, -10.0, 10.0, -10.0, 10.0);
-            // let view = Mat4::IDENTITY;
+            // let projection = Mat4::orthographic_rh(-10.0, 10.0, -10.0, 10.0, -10.0,
+            // 10.0); let view = Mat4::IDENTITY;
             Camera::new(projection, view)
         });
 

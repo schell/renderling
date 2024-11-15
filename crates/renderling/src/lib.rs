@@ -157,6 +157,7 @@ pub mod convolution;
 #[cfg(not(target_arch = "spirv"))]
 pub mod cubemap;
 pub mod cull;
+pub mod debug;
 pub mod draw;
 #[cfg(not(target_arch = "spirv"))]
 pub mod ibl;
@@ -164,6 +165,7 @@ pub mod ibl;
 mod linkage;
 pub mod math;
 pub mod pbr;
+pub mod sdf;
 pub mod skybox;
 pub mod slab;
 pub mod stage;
@@ -397,7 +399,7 @@ mod test {
             .with_color([r, g, b, 1.0])
     }
 
-    fn gpu_cube_vertices() -> Vec<Vertex> {
+    pub fn gpu_cube_vertices() -> Vec<Vertex> {
         math::UNIT_INDICES
             .iter()
             .map(|i| cmy_gpu_vertex(math::UNIT_POINTS[*i]))
@@ -430,9 +432,6 @@ mod test {
 
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
-        let depth_texture = stage.get_depth_texture();
-        let depth_img = depth_texture.read_image().unwrap();
-        img_diff::save("cmy_cube/sanity_depth.png", depth_img);
         let img = frame.read_image().unwrap();
         img_diff::assert_img_eq("cmy_cube/sanity.png", img);
     }

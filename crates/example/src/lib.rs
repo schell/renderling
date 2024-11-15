@@ -7,13 +7,13 @@ use std::{
 
 use renderling::{
     atlas::AtlasImage,
-    bvol::Aabb,
+    bvol::{Aabb, BoundingSphere},
     camera::Camera,
     math::{Mat4, UVec2, Vec2, Vec3, Vec4},
     pbr::light::{DirectionalLight, Light},
     skybox::Skybox,
-    slab::Hybrid,
-    stage::{Animator, GltfDocument, Stage},
+    slab::{GpuArray, Hybrid},
+    stage::{Animator, GltfDocument, Renderlet, Stage, Vertex},
     Context,
 };
 use renderling_ui::{FontArc, Section, Text, Ui, UiPath, UiText};
@@ -111,6 +111,17 @@ impl AppUi {
     }
 }
 
+struct DefaultModel {
+    vertices: GpuArray<Vertex>,
+    renderlet: Hybrid<Renderlet>,
+}
+
+pub enum Model {
+    Gltf(GltfDocument),
+    Default(DefaultModel),
+    None,
+}
+
 pub struct App {
     last_frame_instant: f64,
     skybox_image_bytes: Option<Vec<u8>>,
@@ -118,7 +129,7 @@ pub struct App {
     pub stage: Stage,
     camera: Hybrid<Camera>,
     _light: Option<(Hybrid<DirectionalLight>, Hybrid<Light>)>,
-    document: Option<GltfDocument>,
+    model: Model,
     animators: Option<Vec<Animator>>,
     animations_conflict: bool,
     pub camera_controller: Box<dyn CameraController + 'static>,
@@ -132,7 +143,8 @@ impl App {
             .with_background_color(DARK_BLUE_BG_COLOR)
             .with_bloom_mix_strength(0.5)
             .with_bloom_filter_radius(4.0)
-            .with_msaa_sample_count(4);
+            .with_msaa_sample_count(4)
+            .with_debug_overlay(true);
         let camera = stage.new_value(Camera::default());
         // let sunlight = stage.new_value(DirectionalLight {
         //     direction: Vec3::NEG_Y,
@@ -167,7 +179,7 @@ impl App {
             camera,
             _light: None,
 
-            document: None,
+            model: Model::None,
             animators: None,
             animations_conflict: false,
 
@@ -210,12 +222,44 @@ impl App {
         self.stage.set_skybox(skybox);
     }
 
+    pub fn load_default_model(&mut self) {
+        let mut min = Vec3::splat(f32::INFINITY);
+        let mut max = Vec3::splat(f32::NEG_INFINITY);
+        let vertices = self
+            .stage
+            .new_array(renderling::math::unit_cube().into_iter().map(|(p, n)| {
+                let p = p * 2.0;
+                min = min.min(p);
+                max = max.max(p);
+                Vertex::default()
+                    .with_position(p)
+                    .with_normal(n)
+                    .with_color(Vec4::new(1.0, 0.0, 0.0, 1.0))
+            }));
+        log::info!("default model bounds: {min} {max}");
+        let bounds = BoundingSphere::from((min, max));
+        self.camera_controller.reset(Aabb::new(min, max));
+        self.camera_controller
+            .update_camera(self.stage.get_size(), &self.camera);
+        self.last_frame_instant = now();
+        let renderlet = self.stage.new_value(Renderlet {
+            vertices_array: vertices.array(),
+            camera_id: self.camera.id(),
+            bounds,
+            ..Default::default()
+        });
+        self.model = Model::Default(DefaultModel {
+            vertices: vertices.into_gpu_only(),
+            renderlet,
+        });
+    }
+
     fn load_gltf_model(&mut self, path: impl AsRef<std::path::Path>, bytes: &[u8]) {
         log::info!("loading gltf");
         self.camera_controller
             .reset(Aabb::new(Vec3::NEG_ONE, Vec3::ONE));
         self.stage.clear_images().unwrap();
-        self.document = None;
+        self.model = Model::None;
         log::debug!("ticking stage to reclaim buffers");
         self.stage.tick();
         let doc = match self
@@ -329,7 +373,7 @@ impl App {
             log::trace!("  and some animations conflict");
         }
         self.animations_conflict = has_conflicting_animations;
-        self.document = Some(doc);
+        self.model = Model::Gltf(doc);
     }
 
     pub fn tick_loads(&mut self) {

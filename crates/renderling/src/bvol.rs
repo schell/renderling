@@ -12,7 +12,7 @@
 //! * https://iquilezles.org/www/articles/frustumcorrect/frustumcorrect.htm
 
 use crabslab::SlabItem;
-use glam::{Mat4, Vec3, Vec4, Vec4Swizzles};
+use glam::{Mat4, Vec2, Vec3, Vec3Swizzles, Vec4, Vec4Swizzles};
 #[cfg(target_arch = "spirv")]
 use spirv_std::num_traits::Float;
 
@@ -111,6 +111,21 @@ impl Aabb {
         }
     }
 
+    /// Return the length along the x axis.
+    pub fn width(&self) -> f32 {
+        self.max.x - self.min.x
+    }
+
+    /// Return the length along the y axis.
+    pub fn height(&self) -> f32 {
+        self.max.y - self.min.y
+    }
+
+    /// Return the length along the z axis.
+    pub fn depth(&self) -> f32 {
+        self.max.z - self.min.z
+    }
+
     pub fn center(&self) -> Vec3 {
         (self.min + self.max) * 0.5
     }
@@ -123,8 +138,8 @@ impl Aabb {
         self.min == self.max
     }
 
-    /// Determines whether this `Aabb` can be seen by `camera` after being transformed by
-    /// `transform`.
+    /// Determines whether this `Aabb` can be seen by `camera` after being
+    /// transformed by `transform`.
     pub fn is_outside_camera_view(&self, camera: &Camera, transform: Transform) -> bool {
         let transform = Mat4::from(transform);
         let min = transform.transform_point3(self.min);
@@ -173,6 +188,9 @@ impl Aabb {
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[derive(Clone, Copy, Default, PartialEq, SlabItem)]
 pub struct Frustum {
+    /// Planes constructing the sides of the frustum,
+    /// each expressed as a normal vector (xyz) and the distance (w)
+    /// from the origin along that vector.
     pub planes: [Vec4; 6],
     pub points: [Vec3; 8],
 }
@@ -321,13 +339,48 @@ impl BoundingSphere {
         }
     }
 
-    pub fn is_inside_camera_view(&self, camera: &Camera, transform: Transform) -> bool {
+    /// Determine whether this sphere is inside the camera's view frustum after
+    /// being transformed by `transform`.  
+    pub fn is_inside_camera_view(
+        &self,
+        camera: &Camera,
+        transform: Transform,
+    ) -> (bool, BoundingSphere) {
         let center = Mat4::from(transform).transform_point3(self.center);
         let scale = Vec3::splat(transform.scale.max_element());
         let radius = Mat4::from_scale(scale)
             .transform_point3(Vec3::new(self.radius, 0.0, 0.0))
             .distance(Vec3::ZERO);
-        BoundingSphere::new(center, radius).is_inside_frustum(camera.frustum())
+        let sphere = BoundingSphere::new(center, radius);
+        (sphere.is_inside_frustum(camera.frustum()), sphere)
+    }
+
+    /// Returns an [`Aabb`] with x and y coordinates in viewport pixels and z coordinate
+    /// in NDC depth.
+    pub fn project_onto_viewport(&self, camera: &Camera, viewport: Vec2) -> Aabb {
+        fn ndc_to_pixel(viewport: Vec2, ndc: Vec3) -> Vec2 {
+            let screen = Vec3::new((ndc.x + 1.0) * 0.5, 1.0 - (ndc.y + 1.0) * 0.5, ndc.z);
+            (screen * viewport.extend(1.0)).xy()
+        }
+
+        let viewproj = camera.view_projection();
+        let frustum = camera.frustum();
+
+        // Find the center and radius of the bounding sphere in pixel space.
+        // By pixel space, I mean where (0, 0) is the top-left of the screen
+        // and (w, h) is is the bottom-left.
+        let center_clip = viewproj * self.center.extend(1.0);
+        let front_center_ndc =
+            viewproj.project_point3(self.center + self.radius * frustum.planes[5].xyz());
+        let back_center_ndc =
+            viewproj.project_point3(self.center + self.radius * frustum.planes[0].xyz());
+        let center_ndc = center_clip.xyz() / center_clip.w;
+        let center_pixels = ndc_to_pixel(viewport, center_ndc);
+        let radius_pixels = viewport.x * (self.radius / center_clip.w);
+        Aabb::new(
+            (center_pixels - radius_pixels).extend(front_center_ndc.z),
+            (center_pixels + radius_pixels).extend(back_center_ndc.z),
+        )
     }
 }
 
@@ -364,14 +417,14 @@ pub trait BVol {
     /// In order for a bounding volume to be inside the frustum, it must not be
     /// culled by any plane.
     ///
-    /// Coherence is provided by the `lpindex` argument, which should be the index of
-    /// the first plane found that culls this volume, given as part of the return
-    /// value of this function.
+    /// Coherence is provided by the `lpindex` argument, which should be the
+    /// index of the first plane found that culls this volume, given as part
+    /// of the return value of this function.
     ///
     /// Returns `true` if the volume is outside the frustum, `false` otherwise.
     ///
-    /// Returns the index of first plane found that culls this volume, to cache and use later
-    /// as a short circuit.
+    /// Returns the index of first plane found that culls this volume, to cache
+    /// and use later as a short circuit.
     fn coherent_test_is_volume_outside_frustum(
         &self,
         frustum: &Frustum,
@@ -408,6 +461,11 @@ impl BVol for Aabb {
 #[cfg(test)]
 mod test {
     use glam::{Mat4, Quat};
+
+    use crate::{
+        stage::{Renderlet, Vertex},
+        Context,
+    };
 
     use super::*;
 
@@ -457,5 +515,47 @@ mod test {
             !aabb.is_outside_camera_view(&camera, transform),
             "aabb should be inside the frustum"
         );
+    }
+
+    #[test]
+    fn bounding_sphere_from_min_max() {
+        let ctx = Context::headless(100, 100);
+        let stage = ctx
+            .new_stage()
+            .with_lighting(false)
+            .with_background_color(Vec4::ONE)
+            .with_debug_overlay(true)
+            .with_frustum_culling(false);
+
+        let mut min = Vec3::splat(f32::INFINITY);
+        let mut max = Vec3::splat(f32::NEG_INFINITY);
+        let vertices = stage.new_array(crate::math::unit_cube().into_iter().map(|(p, n)| {
+            min = min.min(p);
+            max = max.max(p);
+            Vertex::default()
+                .with_position(p)
+                .with_normal(n)
+                .with_color(Vec4::new(1.0, 0.0, 0.0, 1.0))
+        }));
+        let bounds = BoundingSphere::from((min, max));
+        log::info!("bounds: {bounds:?}");
+
+        let projection = Mat4::perspective_rh(std::f32::consts::FRAC_PI_4, 1.0, 0.1, 20.0);
+        let view = Mat4::look_at_rh(Vec3::new(0.0, 0.0, 2.0), Vec3::ZERO, Vec3::Y);
+        let camera = stage.new_value(Camera::new(projection, view));
+
+        let renderlet = stage.new_value(Renderlet {
+            vertices_array: vertices.array(),
+            bounds,
+            camera_id: camera.id(),
+            ..Default::default()
+        });
+        stage.add_renderlet(&renderlet);
+
+        let frame = ctx.get_next_frame().unwrap();
+        stage.render(&frame.view());
+        let img = frame.read_image().unwrap();
+        img_diff::save("bvol/bounding_sphere_from_min_max.png", img);
+        frame.present();
     }
 }

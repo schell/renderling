@@ -69,7 +69,7 @@ pub fn create_pipeline_and_bindgroup(
         layout: Some(&pp_layout),
         vertex: wgpu::VertexState {
             module: &vertex_linkage.module,
-            entry_point: vertex_linkage.entry_point,
+            entry_point: Some(vertex_linkage.entry_point),
             buffers: &[],
             compilation_options: Default::default(),
         },
@@ -90,7 +90,7 @@ pub fn create_pipeline_and_bindgroup(
         },
         fragment: Some(wgpu::FragmentState {
             module: &fragment_linkage.module,
-            entry_point: fragment_linkage.entry_point,
+            entry_point: Some(fragment_linkage.entry_point),
             targets: &[Some(wgpu::ColorTargetState {
                 format: wgpu::TextureFormat::Rgba16Float,
                 blend: Some(wgpu::BlendState {

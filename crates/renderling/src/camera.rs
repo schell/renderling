@@ -2,7 +2,7 @@
 use crabslab::SlabItem;
 use glam::{Mat4, Vec3};
 
-use crate::bvol::Frustum;
+use crate::bvol::{dist_bpp, Frustum};
 
 /// A camera used for transforming the stage during rendering.
 ///
@@ -80,6 +80,15 @@ impl Camera {
     pub fn view_projection(&self) -> Mat4 {
         self.projection * self.view
     }
+
+    /// Returns **roughly** the location of the znear plane.
+    pub fn z_near(&self) -> f32 {
+        dist_bpp(&self.frustum.planes[0], self.position)
+    }
+
+    pub fn z_far(&self) -> f32 {
+        dist_bpp(&self.frustum.planes[5], self.position)
+    }
 }
 
 /// Returns the projection and view matrices for a camera with default
@@ -88,8 +97,8 @@ impl Camera {
 /// The default projection and view matrices are defined as:
 ///
 /// ```rust
-/// use renderling::prelude::*;
 /// use glam::*;
+/// use renderling::prelude::*;
 ///
 /// let width = 800.0;
 /// let height = 600.0;
