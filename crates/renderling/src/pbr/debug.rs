@@ -6,7 +6,7 @@ use crabslab::SlabItem;
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[repr(u32)]
 #[derive(Clone, Copy, Default, PartialEq, PartialOrd, SlabItem)]
-pub enum DebugMode {
+pub enum DebugChannel {
     #[default]
     None,
 

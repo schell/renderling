@@ -76,41 +76,48 @@ By default it uses a single uber-shader for rendering.
 
 - [x] texture atlas
   - [x] automatic resource management (Arc/drop based)
+  - [ ] [BCn compression](https://www.reedbeta.com/blog/understanding-bcn-texture-compression-formats/)
+
 - [x] GPU slab allocator
   - [x] automatic resource management (Arc/drop based)
+
 - [x] frustum culling
-- [ ] occlusion culling
+- [ ] occlusion culling - in progress
+
+- [x] Built-in support for common lighting/material workflows
+  - [x] physically based shading
+  - [x] unlit
 - [ ] light tiling
 - [ ] shadow mapping
-- 3d
-  - [x] Built-in support for common lighting/material workflows
-    - [x] physically based shading
-    - [x] unlit
-  - [x] high dynamic range
-  - [x] skybox
-  - image based lighting
-    - [x] diffuse
-    - [x] specular
-  - [x] msaa (easy because of forward+)
-  - [x] bloom "physically based" up+downsampling blur
-  - [ ] ssao
-  - [ ] depth of field
-  - gltf support
-    - [x] scenes
-    - [x] nodes
-    - [x] cameras
-    - [x] meshes
-    - materials
-      - [x] pbr metallic roughness (factors + textures)
-      - [x] normal mapping
-      - [x] occlusion textures
-      - [ ] pbr specular glosiness
-      - [ ] parallax mapping
-    - [x] textures, images, samplers
-    - animation
-      - [x] interpolation
-      - [x] skinning
-      - [x] morph targets 
+- [ ] ssao
+
+- [x] msaa
+- [x] bloom "physically based" up+downsampling blur
+- [ ] depth of field
+- [x] high dynamic range
+- [x] skybox
+
+- [x] image based lighting
+  - [x] diffuse
+  - [x] specular
+
+- gltf support
+  - [x] scenes
+  - [x] nodes
+  - [x] cameras
+  - [x] meshes
+  - materials
+    - [x] pbr metallic roughness (factors + textures)
+    - [x] normal mapping
+    - [x] occlusion textures
+    - [ ] pbr specular glossiness
+    - [ ] parallax mapping
+  - [x] textures, images, samplers
+  - animation
+    - [x] interpolation
+    - [x] skinning
+    - [x] morph targets 
+
 - 2d (renderling-ui)
   - [x] text
   - [x] stroked and filled paths

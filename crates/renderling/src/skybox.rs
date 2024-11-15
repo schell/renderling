@@ -30,7 +30,6 @@ pub fn direction_to_equirectangular_uv(dir: Vec3) -> Vec2 {
     uv
 }
 
-#[cfg(feature = "skybox_vertex")]
 /// Vertex shader for a skybox.
 #[spirv(vertex)]
 pub fn skybox_vertex(
@@ -50,7 +49,6 @@ pub fn skybox_vertex(
     *clip_pos = position.xyww();
 }
 
-#[cfg(feature = "skybox_cubemap_fragment")]
 /// Colors a skybox using a cubemap texture.
 #[spirv(fragment)]
 pub fn skybox_cubemap_fragment(
@@ -63,7 +61,6 @@ pub fn skybox_cubemap_fragment(
     *out_color = env_color.extend(1.0);
 }
 
-#[cfg(feature = "skybox_cubemap_vertex")]
 /// Vertex shader that draws a cubemap.
 ///
 /// Uses the `instance_index` as the [`Id`] for a [`Camera`].
@@ -84,7 +81,6 @@ pub fn skybox_cubemap_vertex(
     *gl_pos = camera.view_projection() * pos.extend(1.0);
 }
 
-#[cfg(feature = "skybox_equirectangular_fragment")]
 /// Fragment shader that colors a skybox using an equirectangular texture.
 #[spirv(fragment)]
 pub fn skybox_equirectangular_fragment(

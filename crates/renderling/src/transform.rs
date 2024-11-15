@@ -17,11 +17,7 @@ pub struct Transform {
 
 impl Default for Transform {
     fn default() -> Self {
-        Self {
-            translation: Vec3::ZERO,
-            rotation: Quat::IDENTITY,
-            scale: Vec3::ONE,
-        }
+        Self::IDENTITY
     }
 }
 
@@ -46,6 +42,14 @@ impl From<Transform> for Mat4 {
     ) -> Self {
         Mat4::from_scale_rotation_translation(scale, rotation, translation)
     }
+}
+
+impl Transform {
+    pub const IDENTITY: Self = Transform {
+        translation: Vec3::ZERO,
+        rotation: Quat::IDENTITY,
+        scale: Vec3::ONE,
+    };
 }
 
 #[cfg(test)]

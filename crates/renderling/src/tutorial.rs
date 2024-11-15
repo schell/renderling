@@ -5,7 +5,6 @@ use spirv_std::spirv;
 
 use crate::stage::{Renderlet, Vertex};
 
-#[cfg(feature = "tutorial_passthru_fragment")]
 /// Simple fragment shader that writes the input color to the output color.
 #[spirv(fragment)]
 pub fn tutorial_passthru_fragment(in_color: Vec4, output: &mut Vec4) {
@@ -20,7 +19,6 @@ fn implicit_isosceles_triangle(vertex_index: u32) -> Vec4 {
     Vec4::new(x, y, 0.0, 1.0)
 }
 
-#[cfg(feature = "tutorial_implicit_isosceles_vertex")]
 /// Simple vertex shader with an implicit isosceles triangle.
 #[spirv(vertex)]
 pub fn tutorial_implicit_isosceles_vertex(
@@ -36,7 +34,6 @@ pub fn tutorial_implicit_isosceles_vertex(
     *clip_pos = pos;
 }
 
-#[cfg(feature = "tutorial_slabbed_vertices_no_instance")]
 /// This shader uses the vertex index as a slab [`Id`]. The [`Id`] is used to
 /// read the vertex from the slab. The vertex's position and color are written
 /// to the output.
@@ -56,7 +53,6 @@ pub fn tutorial_slabbed_vertices_no_instance(
     *out_color = vertex.color;
 }
 
-#[cfg(feature = "tutorial_slabbed_vertices")]
 /// This shader uses the `instance_index` as a slab [`Id`].
 /// The `instance_index` is the [`Id`] of an [`Array`] of [`Vertex`]s. The
 /// `vertex_index` is the index of a [`Vertex`] within the [`Array`].
@@ -79,7 +75,6 @@ pub fn tutorial_slabbed_vertices(
     *out_color = vertex.color;
 }
 
-#[cfg(feature = "tutorial_slabbed_renderlet")]
 /// This shader uses the `instance_index` as a slab [`Id`].
 /// The `instance_index` is the [`Id`] of a [`Renderlet`].
 /// The [`Renderlet`] contains an [`Array`] of [`Vertex`]s
@@ -135,7 +130,7 @@ mod test {
             layout: None,
             vertex: wgpu::VertexState {
                 module: &vertex.module,
-                entry_point: vertex.entry_point,
+                entry_point: Some(vertex.entry_point),
                 buffers: &[],
                 compilation_options: Default::default(),
             },
@@ -162,7 +157,7 @@ mod test {
             },
             fragment: Some(wgpu::FragmentState {
                 module: &fragment.module,
-                entry_point: fragment.entry_point,
+                entry_point: Some(fragment.entry_point),
                 targets: &[Some(wgpu::ColorTargetState {
                     format: wgpu::TextureFormat::Rgba8UnormSrgb,
                     blend: Some(wgpu::BlendState::ALPHA_BLENDING),
@@ -264,7 +259,7 @@ mod test {
             layout: Some(&pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &vertex.module,
-                entry_point: vertex.entry_point,
+                entry_point: Some(vertex.entry_point),
                 buffers: &[],
                 compilation_options: Default::default(),
             },
@@ -291,7 +286,7 @@ mod test {
             },
             fragment: Some(wgpu::FragmentState {
                 module: &fragment.module,
-                entry_point: fragment.entry_point,
+                entry_point: Some(fragment.entry_point),
                 targets: &[Some(wgpu::ColorTargetState {
                     format: wgpu::TextureFormat::Rgba8UnormSrgb,
                     blend: Some(wgpu::BlendState::ALPHA_BLENDING),
@@ -342,13 +337,13 @@ mod test {
                 ..Default::default()
             });
             render_pass.set_pipeline(&pipeline);
-            render_pass.set_bind_group(0, &bindgroup, &[]);
+            render_pass.set_bind_group(0, Some(&bindgroup), &[]);
             render_pass.draw(0..vertices.len() as u32, 0..1);
         }
         queue.submit(std::iter::once(encoder.finish()));
 
         // assert that we're reading the data correctly
-        let data = futures_lite::future::block_on(slab.read(&device, &queue, None, ..)).unwrap();
+        let data = futures_lite::future::block_on(slab.read(&ctx, None, ..)).unwrap();
         let mut vertices = vec![];
         for i in 0..3 {
             let mut out_color = Vec4::ONE;
@@ -437,7 +432,7 @@ mod test {
             layout: Some(&pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &vertex.module,
-                entry_point: vertex.entry_point,
+                entry_point: Some(vertex.entry_point),
                 buffers: &[],
                 compilation_options: Default::default(),
             },
@@ -464,7 +459,7 @@ mod test {
             },
             fragment: Some(wgpu::FragmentState {
                 module: &fragment.module,
-                entry_point: fragment.entry_point,
+                entry_point: Some(fragment.entry_point),
                 targets: &[Some(wgpu::ColorTargetState {
                     format: wgpu::TextureFormat::Rgba8UnormSrgb,
                     blend: Some(wgpu::BlendState::ALPHA_BLENDING),
@@ -515,7 +510,7 @@ mod test {
                 ..Default::default()
             });
             render_pass.set_pipeline(&pipeline);
-            render_pass.set_bind_group(0, &bindgroup, &[]);
+            render_pass.set_bind_group(0, Some(&bindgroup), &[]);
             render_pass.draw(
                 0..vertices.len() as u32,
                 vertices_array.id().inner()..vertices_array.id().inner() + 1,
@@ -609,7 +604,7 @@ mod test {
             layout: Some(&pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &vertex.module,
-                entry_point: vertex.entry_point,
+                entry_point: Some(vertex.entry_point),
                 buffers: &[],
                 compilation_options: Default::default(),
             },
@@ -636,7 +631,7 @@ mod test {
             },
             fragment: Some(wgpu::FragmentState {
                 module: &fragment.module,
-                entry_point: fragment.entry_point,
+                entry_point: Some(fragment.entry_point),
                 targets: &[Some(wgpu::ColorTargetState {
                     format: wgpu::TextureFormat::Rgba8UnormSrgb,
                     blend: Some(wgpu::BlendState::ALPHA_BLENDING),
@@ -687,7 +682,7 @@ mod test {
                 ..Default::default()
             });
             render_pass.set_pipeline(&pipeline);
-            render_pass.set_bind_group(0, &bindgroup, &[]);
+            render_pass.set_bind_group(0, Some(&bindgroup), &[]);
             render_pass.draw(
                 0..geometry.len() as u32,
                 unit.id().inner()..unit.id().inner() + 1,

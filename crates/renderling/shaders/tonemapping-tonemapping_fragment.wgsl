@@ -17,19 +17,19 @@ var global_3: texture_2d<f32>;
 var<private> global_4: vec4<f32>;
 
 fn function() {
-    var phi_142_: type_14;
-    var phi_190_: vec4<f32>;
+    var phi_141_: type_14;
+    var phi_189_: vec4<f32>;
 
     let _e53 = global_1;
     let _e54 = textureSample(global_3, global_2, _e53);
     if select(false, true, (arrayLength((&global.member)) >= 2u)) {
         let _e59 = global.member[0u];
         let _e62 = global.member[1u];
-        phi_142_ = type_14(_e59, bitcast<f32>(_e62));
+        phi_141_ = type_14(_e59, bitcast<f32>(_e62));
     } else {
-        phi_142_ = type_14(0u, 1f);
+        phi_141_ = type_14(0u, 1f);
     }
-    let _e66 = phi_142_;
+    let _e66 = phi_141_;
     let _e70 = (_e54.x * _e66.member_1);
     let _e72 = (_e54.y * _e66.member_1);
     let _e74 = (_e54.z * _e66.member_1);
@@ -37,7 +37,7 @@ fn function() {
     switch bitcast<i32>(_e66.member) {
         case 1: {
             let _e98 = min(vec3<f32>(max(((_e70 * fma(2.51f, _e70, 0.03f)) / fma(_e70, fma(2.43f, _e70, 0.59f), 0.14f)), 0f), max(((_e72 * fma(2.51f, _e72, 0.03f)) / fma(_e72, fma(2.43f, _e72, 0.59f), 0.14f)), 0f), max(((_e74 * fma(2.51f, _e74, 0.03f)) / fma(_e74, fma(2.43f, _e74, 0.59f), 0.14f)), 0f)), vec3<f32>(1f, 1f, 1f));
-            phi_190_ = vec4<f32>(_e98.x, _e98.y, _e98.z, _e76);
+            phi_189_ = vec4<f32>(_e98.x, _e98.y, _e98.z, _e76);
             break;
         }
         case 2: {
@@ -48,7 +48,7 @@ fn function() {
             let _e125 = (fma(_e110, (_e110 + 0.0245786f), -0.000090537f) / fma(_e110, fma(0.983729f, _e110, 0.432951f), 0.238081f));
             let _e126 = (fma(_e111, (_e111 + 0.0245786f), -0.000090537f) / fma(_e111, fma(0.983729f, _e111, 0.432951f), 0.238081f));
             let _e140 = min(vec3<f32>(max(fma(-0.07367f, _e126, fma(1.60475f, _e124, (-0.53108f * _e125))), 0f), max(fma(-0.00605f, _e126, fma(-0.10208f, _e124, (1.10813f * _e125))), 0f), max(fma(1.07602f, _e126, fma(-0.00327f, _e124, (-0.07276f * _e125))), 0f)), vec3<f32>(1f, 1f, 1f));
-            phi_190_ = vec4<f32>(_e140.x, _e140.y, _e140.z, _e76);
+            phi_189_ = vec4<f32>(_e140.x, _e140.y, _e140.z, _e76);
             break;
         }
         case 3: {
@@ -59,20 +59,20 @@ fn function() {
             let _e167 = (fma(_e152, (_e152 + 0.0245786f), -0.000090537f) / fma(_e152, fma(0.983729f, _e152, 0.432951f), 0.238081f));
             let _e168 = (fma(_e153, (_e153 + 0.0245786f), -0.000090537f) / fma(_e153, fma(0.983729f, _e153, 0.432951f), 0.238081f));
             let _e182 = min(vec3<f32>(max(fma(-0.07367f, _e168, fma(1.60475f, _e166, (-0.53108f * _e167))), 0f), max(fma(-0.00605f, _e168, fma(-0.10208f, _e166, (1.10813f * _e167))), 0f), max(fma(1.07602f, _e168, fma(-0.00327f, _e166, (-0.07276f * _e167))), 0f)), vec3<f32>(1f, 1f, 1f));
-            phi_190_ = vec4<f32>(_e182.x, _e182.y, _e182.z, _e76);
+            phi_189_ = vec4<f32>(_e182.x, _e182.y, _e182.z, _e76);
             break;
         }
         case 4: {
             let _e192 = (vec3<f32>(_e70, _e72, _e74) / vec3<f32>(fma(_e54.x, _e66.member_1, 1f), fma(_e54.y, _e66.member_1, 1f), fma(_e54.z, _e66.member_1, 1f)));
-            phi_190_ = vec4<f32>(_e192.x, _e192.y, _e192.z, _e76);
+            phi_189_ = vec4<f32>(_e192.x, _e192.y, _e192.z, _e76);
             break;
         }
         default: {
-            phi_190_ = vec4<f32>(_e70, _e72, _e74, _e76);
+            phi_189_ = vec4<f32>(_e70, _e72, _e74, _e76);
             break;
         }
     }
-    let _e198 = phi_190_;
+    let _e198 = phi_189_;
     global_4 = _e198;
     return;
 }

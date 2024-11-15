@@ -10,81 +10,26 @@ categories = ["rendering", "game-development", "graphics"]
 readme = "../../README.md"
 build = "src/build.rs"
 
+[package.metadata.rust-gpu.build.spirv-builder]
+git = "https://github.com/Rust-GPU/rust-gpu.git" 
+rev = "0da80f8"
+
+[package.metadata.rust-gpu.build]
+output-dir = "shaders" 
+
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [lib]
 crate-type = ["rlib", "cdylib"]
 
 [features]
-default = ["gltf", "shaders", "tutorial", "winit"]
-shaders = [
-  "array_test",
-  "bloom",
-  "brdf_lut_convolution_fragment",
-  "brdf_lut_convolution_vertex",
-  "compute_frustum_culling",
-  "generate_mipmap_fragment",
-  "generate_mipmap_vertex",
-  "prefilter_environment_cubemap_fragment",
-  "prefilter_environment_cubemap_vertex",
-  "renderlet_fragment",
-  "renderlet_vertex",
-  "skybox_cubemap_fragment",
-  "skybox_cubemap_vertex",
-  "skybox_equirectangular_fragment",
-  "skybox_vertex",
-  "test_i8_i16_extraction",
-  "tonemapping_fragment",
-  "tonemapping_vertex"
-]
+default = ["gltf", "tutorial", "winit"]
 gltf = ["dep:gltf", "dep:serde_json"]
-tutorial = [
-  "tutorial_passthru_fragment",
-  "tutorial_implicit_isosceles_vertex",
-  "tutorial_slabbed_vertices_no_instance",
-  "tutorial_slabbed_vertices",
-  "tutorial_slabbed_renderlet"
-]
-bloom = [
-  "bloom_downsample_fragment",
-  "bloom_upsample_fragment",
-  "bloom_mix_fragment",
-  "bloom_vertex"
-]
-# shaders
+# optional shaders
 array_test = []
-bloom_downsample_fragment = []
-bloom_upsample_fragment = []
-bloom_mix_fragment = []
-bloom_vertex = []
-brdf_lut_convolution_fragment = []
-brdf_lut_convolution_vertex = []
-compute_frustum_culling = []
-generate_mipmap_fragment = []
-generate_mipmap_vertex = []
-prefilter_environment_cubemap_fragment = []
-prefilter_environment_cubemap_vertex = []
-#raymarch_fragment = []
-#raymarch_rays_fragment = []
-#raymarch_vertex = []
-#sdf_shape_fragment = []
-#sdf_shape_vertex = []
-#sdf_prim_fragment_test = []
-renderlet_fragment = []
-renderlet_vertex = []
-skybox_cubemap_fragment = []
-skybox_cubemap_vertex = []
-skybox_equirectangular_fragment = []
-skybox_vertex = []
 test_i8_i16_extraction = []
 test_spirv_atomics = []
-tonemapping_fragment = []
-tonemapping_vertex = []
-tutorial_passthru_fragment = []
-tutorial_implicit_isosceles_vertex = []
-tutorial_slabbed_vertices_no_instance = []
-tutorial_slabbed_vertices = []
-tutorial_slabbed_renderlet = []
+tutorial = []
 
 wasm = ["wgpu/fragile-send-sync-non-atomic-wasm"]
 
@@ -139,3 +84,4 @@ winit.workspace = true
 
 [target.'cfg(not(target_arch = "spirv"))'.dev-dependencies]
 glam = { workspace = true, features = ["std", "debug-glam-assert"] }
+

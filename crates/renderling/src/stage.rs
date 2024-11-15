@@ -53,8 +53,9 @@ impl Skin {
         let joint_index = vertex.joints[i] as usize;
         let joint_id = slab.read(self.joints.at(joint_index));
         let joint_transform = slab.read(joint_id);
-        // First apply the inverse bind matrix to bring the vertex into the joint's local space,
-        // then apply the joint's current transformation to move it into world space.
+        // First apply the inverse bind matrix to bring the vertex into the joint's
+        // local space, then apply the joint's current transformation to move it
+        // into world space.
         let inverse_bind_matrix = slab.read(self.inverse_bind_matrices.at(joint_index));
         Mat4::from(joint_transform) * inverse_bind_matrix
     }
@@ -195,9 +196,11 @@ impl Vertex {
 /// the [`Stage`].
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[derive(Clone, Copy, PartialEq, SlabItem)]
+#[offsets]
 pub struct Renderlet {
     pub visible: bool,
     pub vertices_array: Array<Vertex>,
+    /// Bounding sphere of the entire renderlet, in local space.
     pub bounds: BoundingSphere,
     pub indices_array: Array<u32>,
     pub camera_id: Id<Camera>,
@@ -228,7 +231,8 @@ impl Default for Renderlet {
 }
 
 impl Renderlet {
-    /// Retrieve the vertex from the slab, calculating any displacement due to morph targets.
+    /// Retrieve the vertex from the slab, calculating any displacement due to
+    /// morph targets.
     pub fn get_vertex(&self, vertex_index: u32, slab: &[u32]) -> Vertex {
         let index = if self.indices_array.is_null() {
             vertex_index as usize
@@ -257,7 +261,6 @@ impl Renderlet {
     }
 }
 
-#[cfg(feature = "renderlet_vertex")]
 /// Renderlet vertex shader.
 #[spirv(vertex)]
 #[allow(clippy::too_many_arguments)]
@@ -268,9 +271,7 @@ pub fn renderlet_vertex(
     #[spirv(vertex_index)] vertex_index: u32,
     #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] slab: &[u32],
 
-    #[spirv(flat)] out_camera: &mut Id<Camera>,
-    #[spirv(flat)] out_material: &mut Id<Material>,
-    #[spirv(flat)] out_pbr_config: &mut Id<PbrConfig>,
+    #[spirv(flat)] out_renderlet: &mut Id<Renderlet>,
     out_color: &mut Vec4,
     out_uv0: &mut Vec2,
     out_uv1: &mut Vec2,
@@ -287,9 +288,7 @@ pub fn renderlet_vertex(
         return;
     }
 
-    *out_camera = renderlet.camera_id;
-    *out_material = renderlet.material_id;
-    *out_pbr_config = renderlet.pbr_config_id;
+    *out_renderlet = renderlet_id;
 
     let vertex = renderlet.get_vertex(vertex_index, slab);
     *out_color = vertex.color;
@@ -328,7 +327,6 @@ pub fn renderlet_vertex(
     *out_clip_pos = camera.view_projection() * world_pos.extend(1.0);
 }
 
-#[cfg(feature = "renderlet_fragment")]
 /// Renderlet fragment shader
 #[allow(clippy::too_many_arguments, dead_code)]
 #[spirv(fragment)]
@@ -345,10 +343,7 @@ pub fn renderlet_fragment(
     #[spirv(descriptor_set = 1, binding = 6)] brdf: &Image2d,
     #[spirv(descriptor_set = 1, binding = 7)] brdf_sampler: &Sampler,
     #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] slab: &[u32],
-    #[spirv(frag_coord)] _frag_coord: Vec4,
-    #[spirv(flat)] in_camera: Id<Camera>,
-    #[spirv(flat)] in_material: Id<Material>,
-    #[spirv(flat)] in_pbr_config: Id<PbrConfig>,
+    #[spirv(flat)] renderlet_id: Id<Renderlet>,
     in_color: Vec4,
     in_uv0: Vec2,
     in_uv1: Vec2,
@@ -368,9 +363,7 @@ pub fn renderlet_fragment(
         brdf,
         brdf_sampler,
         slab,
-        slab.read(in_pbr_config),
-        in_camera,
-        in_material,
+        renderlet_id,
         in_color,
         in_uv0,
         in_uv1,

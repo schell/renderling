@@ -73,7 +73,7 @@ fn function() {
     var phi_768_: type_28;
     var phi_1412_: bool;
     var phi_819_: type_25;
-    var phi_1483_: bool;
+    var phi_1482_: bool;
     var phi_980_: type_22;
     var phi_981_: type_22;
     var phi_996_: type_22;
@@ -235,11 +235,11 @@ fn function() {
     let _e362 = (vec4<f32>(fma(_e325.member_1.x, _e334, -(_e340)), (1f - fma(_e325.member_1.x, _e333, _e337)), fma(_e325.member_1.y, _e335, _e338), 0f) * _e325.member_2.y);
     let _e364 = (vec4<f32>(fma(_e325.member_1.x, _e335, _e339), fma(_e325.member_1.y, _e335, -(_e338)), (1f - fma(_e325.member_1.x, _e333, (_e325.member_1.y * _e334))), 0f) * _e325.member_2.z);
     if (_e79 >= 83u) {
-        phi_1483_ = (_e91 <= (_e79 - 83u));
+        phi_1482_ = (_e91 <= (_e79 - 83u));
     } else {
-        phi_1483_ = false;
+        phi_1482_ = false;
     }
-    let _e372 = phi_1483_;
+    let _e372 = phi_1482_;
     if _e372 {
         let _e375 = global_1.member[_e91];
         let _e380 = global_1.member[(_e91 + 1u)];

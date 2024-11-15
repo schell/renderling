@@ -91,6 +91,9 @@ impl ApplicationHandler for OuterApp {
         if let Some(file) = self.cli.model.as_ref() {
             log::info!("loading model '{file}'");
             app.load(file.as_ref());
+        } else {
+            log::info!("loading default model");
+            app.load_default_model();
         }
         if let Some(file) = self.cli.skybox.as_ref() {
             log::info!("loading skybox '{file}'");

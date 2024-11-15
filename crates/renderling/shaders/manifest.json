@@ -1,121 +1,146 @@
 [
   {
-    "source_path": "crates/renderling/shaders/bloom-bloom_downsample_fragment.spv",
+    "source_path": "shaders/bloom-bloom_downsample_fragment.spv",
     "entry_point": "bloom::bloom_downsample_fragment",
     "wgsl_entry_point": "bloombloom_downsample_fragment"
   },
   {
-    "source_path": "crates/renderling/shaders/bloom-bloom_mix_fragment.spv",
+    "source_path": "shaders/bloom-bloom_mix_fragment.spv",
     "entry_point": "bloom::bloom_mix_fragment",
     "wgsl_entry_point": "bloombloom_mix_fragment"
   },
   {
-    "source_path": "crates/renderling/shaders/bloom-bloom_upsample_fragment.spv",
+    "source_path": "shaders/bloom-bloom_upsample_fragment.spv",
     "entry_point": "bloom::bloom_upsample_fragment",
     "wgsl_entry_point": "bloombloom_upsample_fragment"
   },
   {
-    "source_path": "crates/renderling/shaders/bloom-bloom_vertex.spv",
+    "source_path": "shaders/bloom-bloom_vertex.spv",
     "entry_point": "bloom::bloom_vertex",
     "wgsl_entry_point": "bloombloom_vertex"
   },
   {
-    "source_path": "crates/renderling/shaders/convolution-brdf_lut_convolution_fragment.spv",
+    "source_path": "shaders/convolution-brdf_lut_convolution_fragment.spv",
     "entry_point": "convolution::brdf_lut_convolution_fragment",
     "wgsl_entry_point": "convolutionbrdf_lut_convolution_fragment"
   },
   {
-    "source_path": "crates/renderling/shaders/convolution-brdf_lut_convolution_vertex.spv",
+    "source_path": "shaders/convolution-brdf_lut_convolution_vertex.spv",
     "entry_point": "convolution::brdf_lut_convolution_vertex",
     "wgsl_entry_point": "convolutionbrdf_lut_convolution_vertex"
   },
   {
-    "source_path": "crates/renderling/shaders/convolution-generate_mipmap_fragment.spv",
+    "source_path": "shaders/convolution-generate_mipmap_fragment.spv",
     "entry_point": "convolution::generate_mipmap_fragment",
     "wgsl_entry_point": "convolutiongenerate_mipmap_fragment"
   },
   {
-    "source_path": "crates/renderling/shaders/convolution-generate_mipmap_vertex.spv",
+    "source_path": "shaders/convolution-generate_mipmap_vertex.spv",
     "entry_point": "convolution::generate_mipmap_vertex",
     "wgsl_entry_point": "convolutiongenerate_mipmap_vertex"
   },
   {
-    "source_path": "crates/renderling/shaders/convolution-prefilter_environment_cubemap_fragment.spv",
+    "source_path": "shaders/convolution-prefilter_environment_cubemap_fragment.spv",
     "entry_point": "convolution::prefilter_environment_cubemap_fragment",
     "wgsl_entry_point": "convolutionprefilter_environment_cubemap_fragment"
   },
   {
-    "source_path": "crates/renderling/shaders/convolution-prefilter_environment_cubemap_vertex.spv",
+    "source_path": "shaders/convolution-prefilter_environment_cubemap_vertex.spv",
     "entry_point": "convolution::prefilter_environment_cubemap_vertex",
     "wgsl_entry_point": "convolutionprefilter_environment_cubemap_vertex"
   },
   {
-    "source_path": "crates/renderling/shaders/cull-compute_frustum_culling.spv",
-    "entry_point": "cull::compute_frustum_culling",
-    "wgsl_entry_point": "cullcompute_frustum_culling"
+    "source_path": "shaders/cull-compute_copy_depth_to_pyramid.spv",
+    "entry_point": "cull::compute_copy_depth_to_pyramid",
+    "wgsl_entry_point": "cullcompute_copy_depth_to_pyramid"
   },
   {
-    "source_path": "crates/renderling/shaders/skybox-skybox_cubemap_fragment.spv",
+    "source_path": "shaders/cull-compute_copy_depth_to_pyramid_multisampled.spv",
+    "entry_point": "cull::compute_copy_depth_to_pyramid_multisampled",
+    "wgsl_entry_point": "cullcompute_copy_depth_to_pyramid_multisampled"
+  },
+  {
+    "source_path": "shaders/cull-compute_culling.spv",
+    "entry_point": "cull::compute_culling",
+    "wgsl_entry_point": "cullcompute_culling"
+  },
+  {
+    "source_path": "shaders/cull-compute_downsample_depth_pyramid.spv",
+    "entry_point": "cull::compute_downsample_depth_pyramid",
+    "wgsl_entry_point": "cullcompute_downsample_depth_pyramid"
+  },
+  {
+    "source_path": "shaders/debug-debug_overlay_fragment.spv",
+    "entry_point": "debug::debug_overlay_fragment",
+    "wgsl_entry_point": "debugdebug_overlay_fragment"
+  },
+  {
+    "source_path": "shaders/debug-debug_overlay_vertex.spv",
+    "entry_point": "debug::debug_overlay_vertex",
+    "wgsl_entry_point": "debugdebug_overlay_vertex"
+  },
+  {
+    "source_path": "shaders/skybox-skybox_cubemap_fragment.spv",
     "entry_point": "skybox::skybox_cubemap_fragment",
     "wgsl_entry_point": "skyboxskybox_cubemap_fragment"
   },
   {
-    "source_path": "crates/renderling/shaders/skybox-skybox_cubemap_vertex.spv",
+    "source_path": "shaders/skybox-skybox_cubemap_vertex.spv",
     "entry_point": "skybox::skybox_cubemap_vertex",
     "wgsl_entry_point": "skyboxskybox_cubemap_vertex"
   },
   {
-    "source_path": "crates/renderling/shaders/skybox-skybox_equirectangular_fragment.spv",
+    "source_path": "shaders/skybox-skybox_equirectangular_fragment.spv",
     "entry_point": "skybox::skybox_equirectangular_fragment",
     "wgsl_entry_point": "skyboxskybox_equirectangular_fragment"
   },
   {
-    "source_path": "crates/renderling/shaders/skybox-skybox_vertex.spv",
+    "source_path": "shaders/skybox-skybox_vertex.spv",
     "entry_point": "skybox::skybox_vertex",
     "wgsl_entry_point": "skyboxskybox_vertex"
   },
   {
-    "source_path": "crates/renderling/shaders/stage-renderlet_fragment.spv",
+    "source_path": "shaders/stage-renderlet_fragment.spv",
     "entry_point": "stage::renderlet_fragment",
     "wgsl_entry_point": "stagerenderlet_fragment"
   },
   {
-    "source_path": "crates/renderling/shaders/stage-renderlet_vertex.spv",
+    "source_path": "shaders/stage-renderlet_vertex.spv",
     "entry_point": "stage::renderlet_vertex",
     "wgsl_entry_point": "stagerenderlet_vertex"
   },
   {
-    "source_path": "crates/renderling/shaders/tonemapping-tonemapping_fragment.spv",
+    "source_path": "shaders/tonemapping-tonemapping_fragment.spv",
     "entry_point": "tonemapping::tonemapping_fragment",
     "wgsl_entry_point": "tonemappingtonemapping_fragment"
   },
   {
-    "source_path": "crates/renderling/shaders/tonemapping-tonemapping_vertex.spv",
+    "source_path": "shaders/tonemapping-tonemapping_vertex.spv",
     "entry_point": "tonemapping::tonemapping_vertex",
     "wgsl_entry_point": "tonemappingtonemapping_vertex"
   },
   {
-    "source_path": "crates/renderling/shaders/tutorial-tutorial_implicit_isosceles_vertex.spv",
+    "source_path": "shaders/tutorial-tutorial_implicit_isosceles_vertex.spv",
     "entry_point": "tutorial::tutorial_implicit_isosceles_vertex",
     "wgsl_entry_point": "tutorialtutorial_implicit_isosceles_vertex"
   },
   {
-    "source_path": "crates/renderling/shaders/tutorial-tutorial_passthru_fragment.spv",
+    "source_path": "shaders/tutorial-tutorial_passthru_fragment.spv",
     "entry_point": "tutorial::tutorial_passthru_fragment",
     "wgsl_entry_point": "tutorialtutorial_passthru_fragment"
   },
   {
-    "source_path": "crates/renderling/shaders/tutorial-tutorial_slabbed_renderlet.spv",
+    "source_path": "shaders/tutorial-tutorial_slabbed_renderlet.spv",
     "entry_point": "tutorial::tutorial_slabbed_renderlet",
     "wgsl_entry_point": "tutorialtutorial_slabbed_renderlet"
   },
   {
-    "source_path": "crates/renderling/shaders/tutorial-tutorial_slabbed_vertices.spv",
+    "source_path": "shaders/tutorial-tutorial_slabbed_vertices.spv",
     "entry_point": "tutorial::tutorial_slabbed_vertices",
     "wgsl_entry_point": "tutorialtutorial_slabbed_vertices"
   },
   {
-    "source_path": "crates/renderling/shaders/tutorial-tutorial_slabbed_vertices_no_instance.spv",
+    "source_path": "shaders/tutorial-tutorial_slabbed_vertices_no_instance.spv",
     "entry_point": "tutorial::tutorial_slabbed_vertices_no_instance",
     "wgsl_entry_point": "tutorialtutorial_slabbed_vertices_no_instance"
   }
