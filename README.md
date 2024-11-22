@@ -1,4 +1,4 @@
-# renderling 🍖
+# <img style="image-rendering: pixelated; image-rendering: -moz-crisp-edges; image-rendering: crisp-edges;" src="https://github.com/user-attachments/assets/83eafc47-287c-4b5b-8fd7-2063e56b2338" /> renderling
 
 Renderling is an innovative, GPU-driven renderer designed for efficient scene rendering with a focus on leveraging 
 GPU capabilities for nearly all rendering operations. 
