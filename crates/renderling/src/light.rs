@@ -224,4 +224,9 @@ mod test {
             assert_approx_eq::assert_approx_eq!(expected_direction.z, direction.z);
         }
     }
+
+    #[test]
+    fn shadow_mapping_sanity() {
+        // Test that shadow mapping is working as expected.
+    }
 }
