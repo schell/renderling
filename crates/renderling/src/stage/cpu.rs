@@ -16,7 +16,8 @@ use crate::{
     camera::Camera,
     debug::DebugOverlay,
     draw::DrawCalls,
-    pbr::{debug::DebugChannel, light::Light, PbrConfig},
+    light::Light,
+    pbr::{debug::DebugChannel, PbrConfig},
     skybox::{Skybox, SkyboxRenderPipeline},
     slab::*,
     stage::Renderlet,
@@ -731,7 +732,7 @@ impl Stage {
         DepthTexture {
             device: self.device.clone(),
             queue: self.queue.clone(),
-            texture: self.depth_texture.read().unwrap().clone(),
+            texture: self.depth_texture.read().unwrap().texture.clone(),
         }
     }
 

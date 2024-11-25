@@ -9,8 +9,8 @@ use renderling::{
     atlas::AtlasImage,
     bvol::{Aabb, BoundingSphere},
     camera::Camera,
+    light::{DirectionalLight, Light, ShadowMap},
     math::{Mat4, UVec2, Vec2, Vec3, Vec4},
-    pbr::light::{DirectionalLight, Light},
     skybox::Skybox,
     slab::{GpuArray, Hybrid},
     stage::{Animator, GltfDocument, Renderlet, Stage, Vertex},
@@ -129,6 +129,7 @@ pub struct App {
     pub stage: Stage,
     camera: Hybrid<Camera>,
     _light: Option<(Hybrid<DirectionalLight>, Hybrid<Light>)>,
+    // shadows: ShadowMap,
     model: Model,
     animators: Option<Vec<Animator>>,
     animations_conflict: bool,
@@ -146,12 +147,21 @@ impl App {
             .with_msaa_sample_count(4)
             .with_debug_overlay(true);
         let camera = stage.new_value(Camera::default());
-        // let sunlight = stage.new_value(DirectionalLight {
-        //     direction: Vec3::NEG_Y,
-        //     color: hex_to_vec4(0xFDFBD3FF),
-        //     intensity: 10.0,
-        // });
-        // let light = stage.new_value(Light::from(sunlight.id()));
+        let sunlight = stage.new_value(DirectionalLight {
+            direction: Vec3::NEG_Y,
+            color: renderling::math::hex_to_vec4(0xFDFBD3FF),
+            intensity: 10.0,
+        });
+        let light = stage.new_value(Light::from(sunlight.id()));
+        // let shadows = ShadowMap::new(
+        //     &ctx,
+        //     light.id(),
+        //     wgpu::Extent3d {
+        //         width: 256,
+        //         height: 256,
+        //         depth_or_array_layers: 1,
+        //     },
+        // );
         // stage.set_lights([light.id()]);
 
         stage
@@ -178,7 +188,7 @@ impl App {
             stage,
             camera,
             _light: None,
-
+            // shadows,
             model: Model::None,
             animators: None,
             animations_conflict: false,
@@ -204,6 +214,19 @@ impl App {
 
     pub fn render(&self, ctx: &Context) {
         let frame = ctx.get_next_frame().unwrap();
+        self.stage.tick();
+        // self.shadows.update(
+        //     ctx,
+        //     &self.stage.get_buffer().unwrap(),
+        //     match &self.model {
+        //         Model::Gltf(doc) => {
+        //             Box::new(doc.renderlets_iter()) as Box<dyn Iterator<Item = &Hybrid<Renderlet>>>
+        //         }
+        //         Model::Default(def) => Box::new(std::iter::once(&def.renderlet))
+        //             as Box<dyn Iterator<Item = &Hybrid<Renderlet>>>,
+        //         Model::None => Box::new(std::iter::empty()),
+        //     },
+        // );
         self.stage.render(&frame.view());
         self.ui.ui.render(&frame.view());
         frame.present();

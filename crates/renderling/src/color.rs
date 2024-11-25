@@ -17,11 +17,24 @@ pub fn linear_xfer_u16(c: &mut u16) {
 }
 
 #[cfg(not(target_arch = "spirv"))]
-pub fn linear_xfer_f16(c: &mut u16) {
-    let mut f = half::f16::from_bits(*c).to_f32();
-    linear_xfer_f32(&mut f);
-    *c = half::f16::from_f32(f).to_bits();
+mod cpu {
+    pub fn linear_xfer_f16(c: &mut u16) {
+        let mut f = half::f16::from_bits(*c).to_f32();
+        super::linear_xfer_f32(&mut f);
+        *c = half::f16::from_f32(f).to_bits();
+    }
+
+    pub fn u16_to_u8(c: u16) -> u8 {
+        ((c as f32 / 65535.0) * 255.0) as u8
+    }
+
+    pub fn f32_to_u8(c: f32) -> u8 {
+        // TODO: figure out if this is the correct impl of f32_to_u8
+        (c / 255.0) as u8
+    }
 }
+#[cfg(not(target_arch = "spirv"))]
+pub use cpu::*;
 
 pub fn linear_xfer_f32(c: &mut f32) {
     *c = c.powf(2.2);

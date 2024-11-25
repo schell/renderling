@@ -8,7 +8,7 @@ mod target {
         wgpu::include_spirv!("../../shaders/tutorial-tutorial_implicit_isosceles_vertex.spv")
     }
     pub fn linkage(device: &wgpu::Device) -> super::ShaderLinkage {
-        log::info!(
+        log::debug!(
             "creating native linkage for {}",
             "tutorial_implicit_isosceles_vertex"
         );
@@ -25,7 +25,7 @@ mod target {
         wgpu::include_wgsl!("../../shaders/tutorial-tutorial_implicit_isosceles_vertex.wgsl")
     }
     pub fn linkage(device: &wgpu::Device) -> super::ShaderLinkage {
-        log::info!(
+        log::debug!(
             "creating web linkage for {}",
             "tutorial_implicit_isosceles_vertex"
         );

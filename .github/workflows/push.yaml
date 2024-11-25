@@ -40,7 +40,7 @@ jobs:
       - run: cargo install --git https://github.com/rust-gpu/cargo-gpu cargo-gpu
       - id: cachepathstep
         run: |
-          CACHE_PATH=`cargo gpu show --cache-directory`
+          CACHE_PATH=`cargo gpu show cache-directory`
           echo $CACHE_PATH
           echo "cachepath-$RUNNER_OS=$CACHE_PATH" >> "$GITHUB_OUTPUT"
 

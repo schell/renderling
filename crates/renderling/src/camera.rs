@@ -1,6 +1,6 @@
 //! Camera projection, view and utilities.
 use crabslab::SlabItem;
-use glam::{Mat4, Vec3};
+use glam::{Mat4, Vec3, Vec4};
 
 use crate::bvol::{dist_bpp, Frustum};
 
@@ -81,6 +81,14 @@ impl Camera {
         self.projection * self.view
     }
 
+    pub fn near_plane(&self) -> Vec4 {
+        self.frustum.planes[0]
+    }
+
+    pub fn far_plane(&self) -> Vec4 {
+        self.frustum.planes[5]
+    }
+
     /// Returns **roughly** the location of the znear plane.
     pub fn z_near(&self) -> f32 {
         dist_bpp(&self.frustum.planes[0], self.position)
@@ -88,6 +96,18 @@ impl Camera {
 
     pub fn z_far(&self) -> f32 {
         dist_bpp(&self.frustum.planes[5], self.position)
+    }
+
+    pub fn depth(&self) -> f32 {
+        self.frustum.depth()
+    }
+
+    #[warn(soft_unstable, reason = "depth linearization is currently unreliable")]
+    pub fn linearize_depth(&self, d: f32) -> f32 {
+        // TODO: figure out why z_near and z_far come out equal in ortho
+        let z_near = self.z_near();
+        let z_far = self.z_far();
+        z_near * z_far / (z_far + d * (z_near - z_far))
     }
 }
 
