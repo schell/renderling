@@ -1,8 +1,81 @@
-//! Stage lighting.
-use crabslab::{Id, SlabItem};
-use glam::{Vec3, Vec4};
+//! Lighting.
+//!
+//! Directional, point and spot lights.
+//!
+//! Shadow mapping.
+use crabslab::{Id, Slab, SlabItem};
+use glam::{Mat4, Vec3, Vec4, Vec4Swizzles};
+use spirv_std::spirv;
 
-use crate::transform::Transform;
+use crate::{camera::Camera, math::IsVector, stage::Renderlet, transform::Transform};
+
+#[cfg(cpu)]
+mod cpu;
+#[cfg(cpu)]
+pub use cpu::*;
+
+#[cfg(test)]
+#[derive(Default, Debug, Clone, Copy, PartialEq)]
+pub struct ShadowMappingVertexInfo {
+    pub renderlet_id: Id<Renderlet>,
+    pub vertex_index: u32,
+    pub vertex: crate::stage::Vertex,
+    pub transform: Transform,
+    pub model_matrix: Mat4,
+    pub world_pos: Vec3,
+    pub view_projection: Mat4,
+    pub clip_pos: Vec4,
+}
+
+/// Shadow mapping vertex shader.
+#[spirv(vertex)]
+#[allow(clippy::too_many_arguments)]
+pub fn shadow_mapping_vertex(
+    // Points at a `Renderlet`
+    #[spirv(instance_index)] renderlet_id: Id<Renderlet>,
+    // Which vertex within the renderlet are we rendering
+    #[spirv(vertex_index)] vertex_index: u32,
+    // The slab where the renderlet's geometry is staged
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] slab: &[u32],
+    // The projection*view matrix that puts world coordinates into clip space.
+    //
+    // This is the projection*view from the light's point of view.
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 1)] light_transform: &Mat4,
+
+    #[spirv(position)] out_clip_pos: &mut Vec4,
+    #[cfg(test)] out_comparison_info: &mut ShadowMappingVertexInfo,
+) {
+    let renderlet = slab.read_unchecked(renderlet_id);
+    if !renderlet.visible {
+        // put it outside the clipping frustum
+        *out_clip_pos = Vec4::new(10.0, 10.0, 10.0, 1.0);
+        return;
+    }
+
+    let (_vertex, _transform, _model_matrix, world_pos) =
+        renderlet.get_vertex_info(vertex_index, slab);
+
+    let clip_pos = *light_transform * world_pos.extend(1.0);
+    #[cfg(test)]
+    {
+        *out_comparison_info = ShadowMappingVertexInfo {
+            renderlet_id,
+            vertex_index,
+            vertex: _vertex,
+            transform: _transform,
+            model_matrix: _model_matrix,
+            world_pos,
+            view_projection: *light_transform,
+            clip_pos,
+        };
+    }
+    *out_clip_pos = clip_pos;
+}
+
+#[spirv(fragment)]
+pub fn shadow_mapping_fragment(clip_pos: Vec4, frag_color: &mut Vec4) {
+    *frag_color = (clip_pos.xyz() / clip_pos.w).extend(1.0);
+}
 
 #[repr(C)]
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
@@ -59,6 +132,26 @@ impl Default for DirectionalLight {
     }
 }
 
+impl DirectionalLight {
+    pub fn shadow_mapping_projection_and_view(
+        &self,
+        parent_light_transform: &Mat4,
+        camera: &Camera,
+    ) -> (Mat4, Mat4) {
+        // TODO: add `shadow_mapping_projection_and_view` to `SpotLight`
+        let frustum = camera.frustum();
+        let depth = frustum.depth();
+        let hd = depth * 0.5;
+        let projection = Mat4::orthographic_rh(-hd, hd, -hd, hd, 0.0, depth);
+        let direction = parent_light_transform
+            .transform_vector3(self.direction)
+            .alt_norm_or_zero();
+        let position = -direction * depth * 0.5;
+        let view = Mat4::look_to_rh(position, direction, Vec3::Z);
+        (projection, view)
+    }
+}
+
 #[repr(C)]
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[derive(Copy, Clone, SlabItem)]
@@ -109,18 +202,18 @@ impl SlabItem for LightStyle {
     }
 }
 
-/// A type-erased linked-list-of-lights that is used as a slab pointer to any
-/// light type.
+/// A type-erased/generic light that is used as a slab pointer to a
+/// specific light type.
 #[repr(C)]
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[derive(Copy, Clone, PartialEq, SlabItem)]
 pub struct Light {
-    // The type of the light
+    /// The type of the light
     pub light_type: LightStyle,
-    // The index of the light in the slab
+    /// The index of the light in the slab
     pub index: u32,
-    // The id of a transform to apply to the position and direction of the light.
-    pub transform: Id<Transform>,
+    /// The id of a transform to apply to the position and direction of the light.
+    pub transform_id: Id<Transform>,
 }
 
 impl Default for Light {
@@ -128,7 +221,7 @@ impl Default for Light {
         Self {
             light_type: LightStyle::Directional,
             index: Id::<()>::NONE.inner(),
-            transform: Id::NONE,
+            transform_id: Id::NONE,
         }
     }
 }
@@ -138,7 +231,7 @@ impl From<Id<DirectionalLight>> for Light {
         Self {
             light_type: LightStyle::Directional,
             index: id.inner(),
-            transform: Id::NONE,
+            transform_id: Id::NONE,
         }
     }
 }
@@ -148,7 +241,7 @@ impl From<Id<SpotLight>> for Light {
         Self {
             light_type: LightStyle::Spot,
             index: id.inner(),
-            transform: Id::NONE,
+            transform_id: Id::NONE,
         }
     }
 }
@@ -158,7 +251,7 @@ impl From<Id<PointLight>> for Light {
         Self {
             light_type: LightStyle::Point,
             index: id.inner(),
-            transform: Id::NONE,
+            transform_id: Id::NONE,
         }
     }
 }
@@ -219,5 +312,10 @@ mod test {
             assert_approx_eq::assert_approx_eq!(expected_direction.y, direction.y);
             assert_approx_eq::assert_approx_eq!(expected_direction.z, direction.z);
         }
+    }
+
+    #[test]
+    fn shadow_mapping_sanity() {
+        // Test that shadow mapping is working as expected.
     }
 }
