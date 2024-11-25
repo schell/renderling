@@ -201,10 +201,10 @@ impl Skybox {
             roughness: roughness.id(),
         });
 
-        let buffer = slab.get_updated_buffer();
+        let buffer = slab.upkeep();
         let mut buffer_upkeep = || {
-            let maybe_resized_buffer = slab.upkeep();
-            debug_assert!(maybe_resized_buffer.is_none());
+            let possibly_new_buffer = slab.upkeep();
+            debug_assert!(!possibly_new_buffer.is_new_this_upkeep());
         };
 
         let equirectangular_texture = Skybox::hdr_texture_from_atlas_image(runtime, hdr_img);

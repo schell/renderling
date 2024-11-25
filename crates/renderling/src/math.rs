@@ -165,6 +165,16 @@ mod cpu {
             )
         }
     }
+
+    /// Convert a u8 in range 0-255 to an f32 in range 0.0 - 1.0.
+    pub fn scaled_u8_to_f32(u: u8) -> f32 {
+        u as f32 / 255.0
+    }
+
+    /// Convert an f32 in range 0.0 - 1.0 into a u8 in range 0-255.
+    pub fn scaled_f32_to_u8(f: f32) -> u8 {
+        (f * 255.0) as u8
+    }
 }
 #[cfg(not(target_arch = "spirv"))]
 pub use cpu::*;

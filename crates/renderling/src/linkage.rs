@@ -25,6 +25,8 @@ pub mod prefilter_environment_cubemap_fragment;
 pub mod prefilter_environment_cubemap_vertex;
 pub mod renderlet_fragment;
 pub mod renderlet_vertex;
+pub mod shadow_mapping_fragment;
+pub mod shadow_mapping_vertex;
 pub mod skybox_cubemap_fragment;
 pub mod skybox_cubemap_vertex;
 pub mod skybox_equirectangular_fragment;
