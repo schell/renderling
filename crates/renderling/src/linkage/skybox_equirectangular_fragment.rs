@@ -8,7 +8,7 @@ mod target {
         wgpu::include_spirv!("../../shaders/skybox-skybox_equirectangular_fragment.spv")
     }
     pub fn linkage(device: &wgpu::Device) -> super::ShaderLinkage {
-        log::info!(
+        log::debug!(
             "creating native linkage for {}",
             "skybox_equirectangular_fragment"
         );
@@ -25,7 +25,7 @@ mod target {
         wgpu::include_wgsl!("../../shaders/skybox-skybox_equirectangular_fragment.wgsl")
     }
     pub fn linkage(device: &wgpu::Device) -> super::ShaderLinkage {
-        log::info!(
+        log::debug!(
             "creating web linkage for {}",
             "skybox_equirectangular_fragment"
         );

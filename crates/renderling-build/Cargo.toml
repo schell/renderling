@@ -1,0 +1,16 @@
+[package]
+name = "renderling_build"
+version = "0.1.0"
+edition = "2021"
+description = "Builds shader linkage for the Renderling project"
+repository = "https://github.com/schell/renderling"
+license = "MIT OR Apache-2.0"
+keywords = ["game", "graphics", "shader", "rendering"]
+categories = ["rendering", "game-development", "graphics"]
+
+[dependencies]
+log.workspace = true
+naga.workspace = true
+quote.workspace = true
+serde.workspace = true
+serde_json.workspace = true

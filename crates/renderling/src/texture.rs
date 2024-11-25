@@ -3,8 +3,8 @@ use std::{ops::Deref, sync::Arc};
 
 use glam::UVec2;
 use image::{
-    load_from_memory, ColorType, DynamicImage, GenericImage, GenericImageView, ImageBuffer,
-    ImageError, PixelWithColorType, Rgba32FImage,
+    load_from_memory, DynamicImage, GenericImage, GenericImageView, ImageBuffer, ImageError,
+    PixelWithColorType, Rgba32FImage,
 };
 use mips::MipMapGenerator;
 use snafu::prelude::*;
@@ -21,7 +21,7 @@ pub enum TextureError {
 
     #[snafu(display("Image buffer '{}' unsupported color type: {:?}", label, color_type))]
     UnsupportedColorType {
-        color_type: ColorType,
+        color_type: image::ExtendedColorType,
         label: String,
     },
 
@@ -374,7 +374,7 @@ impl Texture {
             dimension: wgpu::TextureDimension::D2,
             format: {
                 ensure!(
-                    P::COLOR_TYPE == ColorType::Rgba8,
+                    P::COLOR_TYPE == image::ExtendedColorType::Rgba8,
                     UnsupportedColorTypeSnafu {
                         color_type: P::COLOR_TYPE,
                         label: label
@@ -671,15 +671,36 @@ impl Texture {
     }
 }
 
+pub fn read_depth_texture_to_image(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    width: usize,
+    height: usize,
+    texture: &wgpu::Texture,
+) -> Option<image::GrayImage> {
+    let depth_copied_buffer = Texture::read(texture, device, queue, width, height, 1, 4);
+    let pixels = depth_copied_buffer.pixels(device);
+    let pixels = bytemuck::cast_slice::<u8, f32>(&pixels)
+        .iter()
+        .copied()
+        .map(|f| {
+            // Depth texture is stored as Depth32Float, but the values are normalized 0.0-1.0
+            (255.0 * f) as u8
+        })
+        .collect::<Vec<u8>>();
+    let img_buffer = image::GrayImage::from_raw(width as u32, height as u32, pixels)?;
+    Some(img_buffer)
+}
+
 /// A depth texture.
 pub struct DepthTexture {
     pub(crate) device: Arc<wgpu::Device>,
     pub(crate) queue: Arc<wgpu::Queue>,
-    pub(crate) texture: Texture,
+    pub(crate) texture: Arc<wgpu::Texture>,
 }
 
 impl Deref for DepthTexture {
-    type Target = Texture;
+    type Target = wgpu::Texture;
 
     fn deref(&self) -> &Self::Target {
         &self.texture
@@ -687,12 +708,13 @@ impl Deref for DepthTexture {
 }
 
 impl DepthTexture {
-    pub fn width(&self) -> u32 {
-        self.texture.texture.width()
-    }
-
-    pub fn height(&self) -> u32 {
-        self.texture.texture.height()
+    pub fn new(ctx: &crate::Context, texture: impl Into<Arc<wgpu::Texture>>) -> Self {
+        let (device, queue) = ctx.get_device_and_queue_owned();
+        Self {
+            device,
+            queue,
+            texture: texture.into(),
+        }
     }
 
     /// Converts the depth texture into an image.
@@ -700,23 +722,15 @@ impl DepthTexture {
     /// Assumes the format is single channel 32bit.
     ///
     /// ## Panics
-    /// This may panic if the depth texture has a multisample count greater than
-    /// 1.
-    pub fn read_image(&self) -> Option<image::DynamicImage> {
-        let depth_copied_buffer = Texture::read(
-            &self.texture.texture,
+    /// This may panic if the depth texture has a multisample count greater than 1.
+    pub fn read_image(&self) -> Option<image::GrayImage> {
+        read_depth_texture_to_image(
             &self.device,
             &self.queue,
             self.width() as usize,
             self.height() as usize,
-            1,
-            4,
-        );
-        let pixels = depth_copied_buffer.pixels(&self.device);
-        let pixels: Vec<f32> = bytemuck::cast_slice(&pixels).to_vec();
-        let img_buffer: image::ImageBuffer<image::Luma<f32>, Vec<f32>> =
-            image::ImageBuffer::from_raw(self.width(), self.height(), pixels)?;
-        Some(image::DynamicImage::from(img_buffer))
+            &self.texture,
+        )
     }
 }
 
