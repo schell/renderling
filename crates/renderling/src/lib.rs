@@ -160,6 +160,7 @@ pub mod cull;
 pub mod debug;
 pub mod draw;
 pub mod ibl;
+pub mod light;
 #[cfg(not(target_arch = "spirv"))]
 mod linkage;
 pub mod math;
@@ -182,13 +183,7 @@ pub mod prelude {
     //! A prelude, meant to be glob-imported.
 
     pub extern crate glam;
-    pub use crate::{
-        camera::*,
-        pbr::{light::*, Material},
-        slab::*,
-        stage::*,
-        transform::Transform,
-    };
+    pub use crate::{camera::*, light::*, pbr::Material, slab::*, stage::*, transform::Transform};
 
     #[cfg(not(target_arch = "spirv"))]
     pub use crate::context::*;
@@ -763,7 +758,7 @@ mod test {
     #[test]
     /// Tests shading with directional light.
     fn scene_cube_directional() {
-        use crate::pbr::light::{DirectionalLight, Light, LightStyle};
+        use crate::light::{DirectionalLight, Light, LightStyle};
 
         let ctx = Context::headless(100, 100);
         let stage = ctx

@@ -9,10 +9,8 @@ use snafu::{OptionExt, ResultExt, Snafu};
 use crate::{
     atlas::{AtlasError, AtlasImage, AtlasTexture, TextureAddressMode, TextureModes},
     camera::Camera,
-    pbr::{
-        light::{DirectionalLight, Light, LightStyle, PointLight, SpotLight},
-        Material,
-    },
+    light::{DirectionalLight, Light, LightStyle, PointLight, SpotLight},
+    pbr::Material,
     slab::*,
     stage::{MorphTarget, NestedTransform, Renderlet, Skin, Stage, Vertex},
     transform::Transform,
