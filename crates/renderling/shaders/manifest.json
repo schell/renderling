@@ -80,6 +80,11 @@
     "wgsl_entry_point": "debugdebug_overlay_vertex"
   },
   {
+    "source_path": "shaders/ibl-diffuse_irradiance-di_convolution_fragment.spv",
+    "entry_point": "ibl::diffuse_irradiance::di_convolution_fragment",
+    "wgsl_entry_point": "ibldiffuse_irradiancedi_convolution_fragment"
+  },
+  {
     "source_path": "shaders/skybox-skybox_cubemap_fragment.spv",
     "entry_point": "skybox::skybox_cubemap_fragment",
     "wgsl_entry_point": "skyboxskybox_cubemap_fragment"

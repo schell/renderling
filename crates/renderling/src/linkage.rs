@@ -18,6 +18,7 @@ pub mod compute_culling;
 pub mod compute_downsample_depth_pyramid;
 pub mod debug_overlay_fragment;
 pub mod debug_overlay_vertex;
+pub mod di_convolution_fragment;
 pub mod generate_mipmap_fragment;
 pub mod generate_mipmap_vertex;
 pub mod prefilter_environment_cubemap_fragment;

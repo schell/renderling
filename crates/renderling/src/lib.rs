@@ -159,7 +159,6 @@ pub mod cubemap;
 pub mod cull;
 pub mod debug;
 pub mod draw;
-#[cfg(not(target_arch = "spirv"))]
 pub mod ibl;
 #[cfg(not(target_arch = "spirv"))]
 mod linkage;
@@ -169,7 +168,7 @@ pub mod sdf;
 pub mod skybox;
 pub mod slab;
 pub mod stage;
-#[cfg(not(target_arch = "spirv"))] 
+#[cfg(not(target_arch = "spirv"))]
 pub mod texture;
 pub mod tonemapping;
 pub mod transform;
