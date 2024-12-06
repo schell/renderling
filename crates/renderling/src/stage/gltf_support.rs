@@ -1004,7 +1004,15 @@ impl GltfDocument {
                         let light = stage.new_value(DirectionalLight {
                             direction: Vec3::NEG_Z,
                             color,
-                            intensity,
+                            // TODO: Set a unit for lighting.
+                            // We don't yet use a unit for our lighting, and we should.
+                            // NOTE:
+                            // glTF spec [1] says directional light is in lux, whereas spot and point are
+                            // in candelas. I haven't really set a unit, it's implicit in the shader, but it seems we
+                            // can roughly get candelas from lux by dividing by 683 [2].
+                            // 1. https://github.com/KhronosGroup/glTF/blob/main/extensions/2.0/Khronos/KHR_lights_punctual/README.md
+                            // 2. https://depts.washington.edu/mictech/optics/me557/Radiometry.pdf
+                            intensity: intensity / 683.0,
                         });
 
                         (light.id().into(), LightDetails::Directional(light))

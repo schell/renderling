@@ -66,7 +66,7 @@ mod test {
     #[test]
     fn shadow_mapping_sanity() {
         let ctx = crate::Context::headless(1024, 800);
-        let mut stage = ctx.new_stage().with_lighting(false);
+        let mut stage = ctx.new_stage();
         let camera = stage.new_value(Camera::default());
         let doc = stage
             .load_gltf_document_from_path(
