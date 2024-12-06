@@ -8,6 +8,11 @@ use glam::{Vec3, Vec4};
 
 use crate::transform::Transform;
 
+#[cfg(cpu)]
+mod cpu;
+#[cfg(cpu)]
+pub use cpu::*;
+
 #[repr(C)]
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[derive(Copy, Clone, SlabItem)]

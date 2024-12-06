@@ -34,6 +34,7 @@ tutorial = []
 wasm = ["wgpu/fragile-send-sync-non-atomic-wasm"]
 
 [build-dependencies]
+cfg_aliases = "0.2"
 naga = {workspace = true}
 pathdiff = "0.2.2"
 quote = "1.0"

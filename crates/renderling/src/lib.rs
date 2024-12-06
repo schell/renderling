@@ -220,6 +220,10 @@ mod test {
         let _ = env_logger::builder().is_test(true).try_init();
     }
 
+    pub fn workspace_dir() -> std::path::PathBuf {
+        std::path::PathBuf::from(std::env!("CARGO_WORKSPACE_DIR"))
+    }
+
     #[test]
     fn sanity_transmute() {
         let zerof32 = 0f32;

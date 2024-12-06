@@ -8,7 +8,7 @@ mod target {
         wgpu::include_spirv!("../../shaders/tutorial-tutorial_slabbed_vertices.spv")
     }
     pub fn linkage(device: &wgpu::Device) -> super::ShaderLinkage {
-        log::info!(
+        log::debug!(
             "creating native linkage for {}",
             "tutorial_slabbed_vertices"
         );
@@ -25,7 +25,7 @@ mod target {
         wgpu::include_wgsl!("../../shaders/tutorial-tutorial_slabbed_vertices.wgsl")
     }
     pub fn linkage(device: &wgpu::Device) -> super::ShaderLinkage {
-        log::info!("creating web linkage for {}", "tutorial_slabbed_vertices");
+        log::debug!("creating web linkage for {}", "tutorial_slabbed_vertices");
         super::ShaderLinkage {
             entry_point: ENTRY_POINT,
             module: device.create_shader_module(descriptor()).into(),

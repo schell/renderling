@@ -9,7 +9,7 @@ use snafu::{OptionExt, ResultExt, Snafu};
 use crate::{
     atlas::{AtlasError, AtlasImage, AtlasTexture, TextureAddressMode, TextureModes},
     camera::Camera,
-    light::{DirectionalLight, Light, LightStyle, PointLight, SpotLight},
+    light::{DirectionalLight, Light, LightDetails, LightStyle, PointLight, SpotLight},
     pbr::Material,
     slab::*,
     stage::{MorphTarget, NestedTransform, Renderlet, Skin, Stage, Vertex},
@@ -596,6 +596,8 @@ pub struct GltfCamera {
 
 impl<'a> GltfCamera {
     fn new(stage: &mut Stage, gltf_camera: gltf::Camera<'a>, transform: &NestedTransform) -> Self {
+        log::info!("camera: {}", gltf_camera.name().unwrap_or("unknown"));
+        log::info!("  transform: {:#?}", transform.get_global_transform());
         let projection = match gltf_camera.projection() {
             gltf::camera::Projection::Orthographic(o) => glam::Mat4::orthographic_rh(
                 -o.xmag(),
@@ -636,19 +638,14 @@ impl<'a> GltfCamera {
     }
 }
 
-#[derive(Clone, Debug)]
-pub enum LightDetails {
-    Directional(Hybrid<DirectionalLight>),
-    Point(Hybrid<PointLight>),
-    Spot(Hybrid<SpotLight>),
-}
-
 #[derive(Debug)]
 pub struct GltfLight {
     pub details: LightDetails,
     pub node_transform: NestedTransform,
     pub light: Hybrid<Light>,
 }
+
+impl GltfLight {}
 
 /// A node in a GLTF document, ready to be 'drawn'.
 #[derive(Clone, Debug)]
@@ -991,7 +988,7 @@ impl GltfDocument {
                         index: camera_index,
                     })?;
             let transform = node_transforms
-                .get(&camera_index)
+                .get(&node_index)
                 .context(MissingNodeSnafu { index: node_index })?;
             cameras.push(GltfCamera::new(stage, camera, transform));
         }
@@ -1515,5 +1512,39 @@ mod test {
         // for joint_index in 0..skin.joints.len() {
         //     // skin.get_joint_matrix(, , )
         // }
+    }
+
+    #[test]
+    fn camera_position_sanity() {
+        // Test that the camera has the expected translation
+        let ctx = Context::headless(100, 100);
+        let mut stage = ctx.new_stage();
+        let doc = stage
+            .load_gltf_document_from_path(
+                crate::test::workspace_dir()
+                    .join("gltf")
+                    .join("shadow_mapping_sanity_camera.gltf"),
+                Id::NONE,
+            )
+            .unwrap();
+        let camera_a = doc.cameras.first().unwrap();
+        assert!(
+            Vec3::new(14.699949, 4.958309, 12.676651).distance(camera_a.get_camera().position())
+                <= 10e-6
+        );
+
+        let doc = stage
+            .load_gltf_document_from_path(
+                crate::test::workspace_dir()
+                    .join("gltf")
+                    .join("shadow_mapping_sanity.gltf"),
+                Id::NONE,
+            )
+            .unwrap();
+        let camera_b = doc.cameras.first().unwrap();
+        assert_eq!(
+            camera_a.get_camera().position(),
+            camera_b.get_camera().position()
+        );
     }
 }

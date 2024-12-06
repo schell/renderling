@@ -39,7 +39,7 @@ impl core::fmt::Display for Linkage {
                 }
 
                 pub fn linkage(device: &wgpu::Device) -> super::ShaderLinkage {
-                    log::info!("creating native linkage for {}", #fn_name);
+                    log::debug!("creating native linkage for {}", #fn_name);
                     super::ShaderLinkage {
                         entry_point: ENTRY_POINT,
                         module: device.create_shader_module(descriptor()).into()
@@ -55,7 +55,7 @@ impl core::fmt::Display for Linkage {
                 }
 
                 pub fn linkage(device: &wgpu::Device) -> super::ShaderLinkage {
-                    log::info!("creating web linkage for {}", #fn_name);
+                    log::debug!("creating web linkage for {}", #fn_name);
                     super::ShaderLinkage {
                         entry_point: ENTRY_POINT,
                         module: device.create_shader_module(descriptor()).into()
@@ -159,5 +159,10 @@ fn generate_linkage() {
 fn main() {
     if std::env::var("CARGO_CFG_TARGET_ARCH").as_deref() != Ok("spirv") {
         generate_linkage();
+    }
+
+    cfg_aliases::cfg_aliases! {
+        cpu: { not(target_arch = "spirv") },
+        gpu: { target_arch = "spirv" },
     }
 }
