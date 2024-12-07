@@ -26,6 +26,8 @@ jobs:
           path: ~/.cache/rust-gpu
           key: 0-${{ runner.os }}
       - uses: moonrepo/setup-rust@v1
+      - run: rustup default stable 
+      - run: rustup update
       - run: cargo install --git https://github.com/rust-gpu/cargo-gpu cargo-gpu
       - run: rm -rf crates/renderling/src/linkage/* crates/renderling/shaders
       - run: cargo shaders
