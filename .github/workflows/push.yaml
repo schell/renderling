@@ -25,9 +25,9 @@ jobs:
       - uses: actions/checkout@v2
       - uses: actions/cache@v4
         with:
-          path: 
-            - ~/.cache/rust-gpu
-            - ~/.cargo/bin
+          path: | 
+            ~/.cache/rust-gpu
+            ~/.cargo/bin
           key: 0-${{ runner.os }}
       - uses: moonrepo/setup-rust@v1
       - run: rustup default stable 
@@ -49,9 +49,9 @@ jobs:
       - uses: actions/checkout@v2
       - uses: actions/cache@v4
         with:
-          path: 
-            - ~/.cache/rust-gpu
-            - ~/.cargo/bin
+          path: |
+            ~/.cache/rust-gpu
+            ~/.cargo/bin
           key: 0-${{ runner.os }}
       - uses: moonrepo/setup-rust@v1
       - run: rm -rf crates/renderling/src/linkage/* crates/renderling/shaders
