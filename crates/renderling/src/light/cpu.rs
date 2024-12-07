@@ -9,7 +9,7 @@ use crate::{
     stage::Renderlet,
 };
 
-use super::{DirectionalLight, Light, PointLight, ShadowMapDescriptor, SpotLight};
+use super::{DirectionalLight, Light, PointLight, SpotLight};
 
 /// A wrapper around all types of analytical lighting.
 #[derive(Clone, Debug)]
@@ -78,7 +78,9 @@ impl ShadowMap {
                     // TODO: what about point lights? Does this need to be D3 then?
                     dimension: wgpu::TextureDimension::D2,
                     format: wgpu::TextureFormat::Depth32Float,
-                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                        | wgpu::TextureUsages::TEXTURE_BINDING
+                        | wgpu::TextureUsages::COPY_SRC,
                     view_formats: &[],
                 })
                 .into(),
@@ -183,38 +185,40 @@ impl ShadowMap {
     ) {
         let mut encoder =
             device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Self::LABEL });
-        let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Self::LABEL,
-            color_attachments: &[],
-            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                view: &self.texture.create_view(&wgpu::TextureViewDescriptor {
-                    label: Self::LABEL,
-                    format: None,
-                    dimension: None,
-                    aspect: wgpu::TextureAspect::StencilOnly,
-                    base_mip_level: 0,
-                    mip_level_count: None,
-                    base_array_layer: 0,
-                    array_layer_count: None,
+        {
+            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Self::LABEL,
+                color_attachments: &[],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.texture.create_view(&wgpu::TextureViewDescriptor {
+                        label: Self::LABEL,
+                        format: None,
+                        dimension: None,
+                        aspect: wgpu::TextureAspect::DepthOnly,
+                        base_mip_level: 0,
+                        mip_level_count: None,
+                        base_array_layer: 0,
+                        array_layer_count: None,
+                    }),
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(1.0),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
                 }),
-                depth_ops: Some(wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(1.0),
-                    store: wgpu::StoreOp::Store,
-                }),
-                stencil_ops: None,
-            }),
-            timestamp_writes: None,
-            occlusion_query_set: None,
-        });
-        render_pass.set_pipeline(&self.pipeline);
-        let bindgroup = self.get_bindgroup(device, queue, slab_buffer);
-        render_pass.set_bind_group(0, Some(bindgroup.as_ref()), &[]);
-        for rlet in renderlets {
-            let id = rlet.id();
-            let rlet = rlet.get();
-            let vertex_range = 0..rlet.get_vertex_count();
-            let instance_range = id.inner()..id.inner() + 1;
-            render_pass.draw(vertex_range, instance_range);
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            render_pass.set_pipeline(&self.pipeline);
+            let bindgroup = self.get_bindgroup(device, queue, slab_buffer);
+            render_pass.set_bind_group(0, Some(bindgroup.as_ref()), &[]);
+            for rlet in renderlets {
+                let id = rlet.id();
+                let rlet = rlet.get();
+                let vertex_range = 0..rlet.get_vertex_count();
+                let instance_range = id.inner()..id.inner() + 1;
+                render_pass.draw(vertex_range, instance_range);
+            }
         }
         queue.submit(Some(encoder.finish()));
     }
@@ -254,13 +258,28 @@ mod test {
 
         let shadows = ShadowMap::new(
             ctx.get_device(),
+            gltf_light.light.id(),
             wgpu::Extent3d {
                 width: 1024,
-                height: 1024,
+                height: 800,
                 depth_or_array_layers: 1,
             },
-            &gltf_light.light,
-            &gltf_light.details,
         );
+        shadows.update(
+            ctx.get_device(),
+            ctx.get_queue(),
+            &stage.get_buffer().unwrap(),
+            doc.renderlets.values().flatten(),
+        );
+
+        let img = crate::texture::read_depth_texture_to_image(
+            ctx.get_device(),
+            ctx.get_queue(),
+            1024,
+            800,
+            &shadows.texture,
+        )
+        .unwrap();
+        img_diff::save("shadows/shadow_mapping_sanity_depth.png", img);
     }
 }
