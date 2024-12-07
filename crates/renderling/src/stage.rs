@@ -231,6 +231,19 @@ impl Default for Renderlet {
 }
 
 impl Renderlet {
+    /// Retrieve the transform of this `Renderlet`.
+    ///
+    /// This takes into consideration all skinning matrices.
+    pub fn get_transform(&self, vertex: Vertex, slab: &[u32]) -> Transform {
+        let config = slab.read_unchecked(self.pbr_config_id);
+        if config.has_skinning && self.skin_id.is_some() {
+            let skin = slab.read(self.skin_id);
+            Transform::from(skin.get_skinning_matrix(vertex, slab))
+        } else {
+            slab.read(self.transform_id)
+        }
+    }
+
     /// Retrieve the vertex from the slab, calculating any displacement due to
     /// morph targets.
     pub fn get_vertex(&self, vertex_index: u32, slab: &[u32]) -> Vertex {
@@ -295,14 +308,7 @@ pub fn renderlet_vertex(
     *out_uv0 = vertex.uv0;
     *out_uv1 = vertex.uv1;
 
-    let config = slab.read_unchecked(renderlet.pbr_config_id);
-
-    let transform = if config.has_skinning && renderlet.skin_id.is_some() {
-        let skin = slab.read(renderlet.skin_id);
-        Transform::from(skin.get_skinning_matrix(vertex, slab))
-    } else {
-        slab.read(renderlet.transform_id)
-    };
+    let transform = renderlet.get_transform(vertex, slab);
     let scale2 = transform.scale * transform.scale;
     let normal = vertex.normal.alt_norm_or_zero();
     let tangent = vertex.tangent.xyz().alt_norm_or_zero();

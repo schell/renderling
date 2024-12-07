@@ -1006,6 +1006,8 @@ impl GltfDocument {
                             color,
                             // TODO: Set a unit for lighting.
                             // We don't yet use a unit for our lighting, and we should.
+                            // https://www.realtimerendering.com/blog/physical-units-for-lights/
+                            //
                             // NOTE:
                             // glTF spec [1] says directional light is in lux, whereas spot and point are
                             // in candelas. I haven't really set a unit, it's implicit in the shader, but it seems we
