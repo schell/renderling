@@ -11,7 +11,7 @@ env:
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
 jobs:
-  renderling-build-shaders:
+  install-cargo-gpu:
     strategy:
       matrix: 
         os: [ubuntu-latest, macos-latest, windows-latest]
@@ -19,6 +19,8 @@ jobs:
     defaults:
       run: 
         shell: bash
+    env:
+      RUST_LOG: debug  
     steps:
       - uses: actions/checkout@v2
       - uses: actions/cache@v4
@@ -29,6 +31,25 @@ jobs:
       - run: rustup default stable 
       - run: rustup update
       - run: cargo install --git https://github.com/rust-gpu/cargo-gpu cargo-gpu
+
+  renderling-build-shaders:
+    needs: install-cargo-gpu
+    strategy:
+      matrix: 
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run: 
+        shell: bash
+    env:
+      RUST_LOG: debug
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/rust-gpu
+          key: 0-${{ runner.os }}
+      - uses: moonrepo/setup-rust@v1
       - run: rm -rf crates/renderling/src/linkage/* crates/renderling/shaders
       - run: cargo shaders
       - run: cargo build -p renderling
