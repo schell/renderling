@@ -16,6 +16,7 @@ pub fn linear_xfer_u16(c: &mut u16) {
     *c = ((*c as f32 / 65535.0).powf(2.2) * 65535.0) as u16;
 }
 
+#[cfg(not(target_arch = "spirv"))]
 pub fn linear_xfer_f16(c: &mut u16) {
     let mut f = half::f16::from_bits(*c).to_f32();
     linear_xfer_f32(&mut f);
