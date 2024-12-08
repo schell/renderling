@@ -21,8 +21,11 @@ jobs:
         shell: bash
     env:
       RUST_LOG: debug  
+      RUNNER_OS: ${{ matrix.os }}
     outputs:
-      cachepath: ${{ steps.cachepathstep.outputs.cachepath }}
+      cachepath-macOS: ${{ steps.cachepathstep.outputs.cachepath-macOS }}
+      cachepath-Linux: ${{ steps.cachepathstep.outputs.cachepath-Linux }}
+      cachepath-Windows: ${{ steps.cachepathstep.outputs.cachepath-macOS }}
     steps:
       - uses: actions/checkout@v2
       - uses: actions/cache@v4
@@ -37,7 +40,7 @@ jobs:
         run: |
           CACHE_PATH=`cargo gpu show --cache-directory`
           echo $CACHE_PATH
-          echo "cachepath=$CACHE_PATH" >> "$GITHUB_OUTPUT"
+          echo "cachepath-$RUNNER_OS=$CACHE_PATH" >> "$GITHUB_OUTPUT"
 
   renderling-build-shaders:
     needs: install-cargo-gpu
