@@ -47,7 +47,6 @@ spirv-std = { version = "0.9" }
 # dependencies for GPU code
 [target.'cfg(target_arch = "spirv")'.dependencies]
 crabslab = { workspace = true, features = ["glam"]  }
-half = { version = "2.3", default-features = false }
 glam = { workspace = true, default-features = false, features = ["libm"] }
 
 # dependencies for CPU code
