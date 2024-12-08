@@ -671,6 +671,21 @@ impl Texture {
     }
 }
 
+pub fn read_depth_texture_to_image(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    width: usize,
+    height: usize,
+    texture: &wgpu::Texture,
+) -> Option<image::DynamicImage> {
+    let depth_copied_buffer = Texture::read(texture, device, queue, width, height, 1, 4);
+    let pixels = depth_copied_buffer.pixels(device);
+    let pixels: Vec<f32> = bytemuck::cast_slice(&pixels).to_vec();
+    let img_buffer: image::ImageBuffer<image::Luma<f32>, Vec<f32>> =
+        image::ImageBuffer::from_raw(width as u32, height as u32, pixels)?;
+    Some(image::DynamicImage::from(img_buffer))
+}
+
 /// A depth texture.
 pub struct DepthTexture {
     pub(crate) device: Arc<wgpu::Device>,
@@ -703,20 +718,13 @@ impl DepthTexture {
     /// This may panic if the depth texture has a multisample count greater than
     /// 1.
     pub fn read_image(&self) -> Option<image::DynamicImage> {
-        let depth_copied_buffer = Texture::read(
-            &self.texture.texture,
+        read_depth_texture_to_image(
             &self.device,
             &self.queue,
             self.width() as usize,
             self.height() as usize,
-            1,
-            4,
-        );
-        let pixels = depth_copied_buffer.pixels(&self.device);
-        let pixels: Vec<f32> = bytemuck::cast_slice(&pixels).to_vec();
-        let img_buffer: image::ImageBuffer<image::Luma<f32>, Vec<f32>> =
-            image::ImageBuffer::from_raw(self.width(), self.height(), pixels)?;
-        Some(image::DynamicImage::from(img_buffer))
+            &self.texture.texture,
+        )
     }
 }
 

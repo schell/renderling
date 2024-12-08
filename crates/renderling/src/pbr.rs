@@ -6,24 +6,20 @@
 //! * <https://github.khronos.org/glTF-Sample-Viewer-Release/>
 use crabslab::{Array, Id, Slab, SlabItem};
 use glam::{Mat4, Vec2, Vec3, Vec4, Vec4Swizzles};
-use light::Light;
 
 #[cfg(target_arch = "spirv")]
 use spirv_std::num_traits::Float;
 
 use crate::{
     atlas::AtlasTexture,
+    light::{DirectionalLight, Light, LightStyle, PointLight, SpotLight},
     math::{self, IsSampler, IsVector, Sample2d, Sample2dArray, SampleCube},
-    pbr::light::{DirectionalLight, PointLight, SpotLight},
     println as my_println,
     stage::Renderlet,
 };
 
 pub mod debug;
 use debug::DebugChannel;
-
-pub mod light;
-use light::LightStyle;
 
 /// Represents a material on the GPU.
 #[repr(C)]
@@ -241,7 +237,7 @@ pub struct PbrConfig {
     pub has_skinning: bool,
     pub perform_frustum_culling: bool,
     pub perform_occlusion_culling: bool,
-    pub light_array: Array<Id<light::Light>>,
+    pub light_array: Array<Id<Light>>,
 }
 
 impl Default for PbrConfig {

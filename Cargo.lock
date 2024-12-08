@@ -2467,6 +2467,7 @@ dependencies = [
  "assert_approx_eq",
  "async-channel 1.9.0",
  "bytemuck",
+ "cfg_aliases 0.2.1",
  "crabslab",
  "crunch",
  "ctor",

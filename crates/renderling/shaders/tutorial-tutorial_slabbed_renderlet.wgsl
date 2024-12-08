@@ -52,8 +52,8 @@ var<private> global: u32;
 @group(0) @binding(0) 
 var<storage> global_1: type_11;
 var<private> global_2: vec4<f32> = vec4<f32>(0f, 0f, 0f, 1f);
-var<private> global_3: vec4<f32>;
-var<private> global_4: u32;
+var<private> global_3: u32;
+var<private> global_4: vec4<f32>;
 
 fn function() {
     var local: array<vec3<f32>, 8>;
@@ -84,7 +84,7 @@ fn function() {
     var phi_1068_: bool;
     var phi_1076_: type_20;
 
-    let _e76 = global_4;
+    let _e76 = global_3;
     let _e77 = global;
     let _e79 = arrayLength((&global_1.member));
     let _e83 = global_1.member[(_e76 + 1u)];
@@ -201,7 +201,7 @@ fn function() {
         phi_768_ = type_28(vec3<f32>(0f, 0f, 0f), vec4<f32>(1f, 1f, 1f, 1f), vec3<f32>(0f, 0f, 1f), vec4<f32>(0f, 1f, 0f, 0f), array<u32, 4>(0u, 0u, 0u, 0u), array<f32, 4>(0f, 0f, 0f, 0f), vec2<f32>(0f, 0f), vec2<f32>(0f, 0f));
     }
     let _e264 = phi_768_;
-    global_3 = _e264.member_1;
+    global_4 = _e264.member_1;
     if (_e79 >= 10u) {
         phi_1412_ = (_e95 <= (_e79 - 10u));
     } else {
@@ -384,12 +384,12 @@ fn function() {
 
 @vertex 
 fn tutorialtutorial_slabbed_renderlet(@builtin(instance_index) param: u32, @builtin(vertex_index) param_1: u32) -> VertexOutput {
-    global_4 = param;
+    global_3 = param;
     global = param_1;
     function();
     let _e7 = global_2.y;
     global_2.y = -(_e7);
-    let _e9 = global_3;
+    let _e9 = global_4;
     let _e10 = global_2;
     return VertexOutput(_e9, _e10);
 }

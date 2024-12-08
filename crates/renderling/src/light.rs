@@ -1,8 +1,69 @@
-//! Stage lighting.
-use crabslab::{Id, SlabItem};
-use glam::{Vec3, Vec4};
+//! Lighting.
+//!
+//! Directional, point and spot lights.
+//!
+//! Shadow mapping.
+use crabslab::{Id, Slab, SlabItem};
+use glam::{Mat4, Vec3, Vec4};
+use spirv_std::spirv;
 
-use crate::transform::Transform;
+use crate::{stage::Renderlet, transform::Transform};
+
+#[cfg(cpu)]
+mod cpu;
+#[cfg(cpu)]
+pub use cpu::*;
+
+/// Shadow mapping vertex shader.
+#[spirv(vertex)]
+#[allow(clippy::too_many_arguments)]
+pub fn shadow_mapping_vertex(
+    // Points at a `Renderlet`
+    #[spirv(instance_index)] renderlet_id: Id<Renderlet>,
+    // Which vertex within the renderlet are we rendering
+    #[spirv(vertex_index)] vertex_index: u32,
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] slab: &[u32],
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 1)] light_id: &Id<Light>,
+
+    #[spirv(position)] out_clip_pos: &mut Vec4,
+) {
+    let renderlet = slab.read_unchecked(renderlet_id);
+    if !renderlet.visible {
+        // put it outside the clipping frustum
+        *out_clip_pos = Vec4::new(10.0, 10.0, 10.0, 1.0);
+        return;
+    }
+    let vertex = renderlet.get_vertex(vertex_index, slab);
+    let transform = renderlet.get_transform(vertex, slab);
+    let model_matrix = Mat4::from(transform);
+    let world_pos = model_matrix.transform_point3(vertex.position);
+    let light = slab.read_unchecked(*light_id);
+    let parent_light_transform = Mat4::from(slab.read(light.transform));
+    // TODO: Possibly figure out the shadow mapping view_projection on the CPU...
+    // ...to avoid a `match` on GPU.
+
+    // TODO: Revisit the values used for shadow map projection...
+    // ...are they correct? They should be related to the scene being rendered.
+    let view_projection = match light.light_type {
+        LightStyle::Directional => {
+            let directional_light = slab.read_unchecked(Id::<DirectionalLight>::new(light.index));
+            let projection = Mat4::orthographic_rh(-10.0, 10.0, -10.0, 10.0, 1.0, 7.5);
+            let direction = parent_light_transform.transform_vector3(directional_light.direction);
+            let view = Mat4::look_at_rh(direction, Vec3::ZERO, Vec3::Y);
+            projection * view
+        }
+        LightStyle::Spot => {
+            let spot_light = slab.read_unchecked(Id::<SpotLight>::new(light.index));
+            let projection = Mat4::perspective_rh(spot_light.outer_cutoff, 1.0, 0.01, 100.0);
+            let direction = parent_light_transform.transform_vector3(spot_light.direction);
+            let position = parent_light_transform.transform_point3(spot_light.position);
+            let view = Mat4::look_to_rh(position, direction, Vec3::Y);
+            projection * view
+        }
+        LightStyle::Point => Mat4::default(),
+    };
+    *out_clip_pos = view_projection * world_pos.extend(1.0);
+}
 
 #[repr(C)]
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
@@ -109,17 +170,17 @@ impl SlabItem for LightStyle {
     }
 }
 
-/// A type-erased linked-list-of-lights that is used as a slab pointer to any
-/// light type.
+/// A type-erased/generic light that is used as a slab pointer to a
+/// specific light type.
 #[repr(C)]
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[derive(Copy, Clone, PartialEq, SlabItem)]
 pub struct Light {
-    // The type of the light
+    /// The type of the light
     pub light_type: LightStyle,
-    // The index of the light in the slab
+    /// The index of the light in the slab
     pub index: u32,
-    // The id of a transform to apply to the position and direction of the light.
+    /// The id of a transform to apply to the position and direction of the light.
     pub transform: Id<Transform>,
 }
 
@@ -219,5 +280,10 @@ mod test {
             assert_approx_eq::assert_approx_eq!(expected_direction.y, direction.y);
             assert_approx_eq::assert_approx_eq!(expected_direction.z, direction.z);
         }
+    }
+
+    #[test]
+    fn shadow_mapping_sanity() {
+        // Test that shadow mapping is working as expected.
     }
 }

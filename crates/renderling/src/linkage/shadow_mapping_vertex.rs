@@ -3,15 +3,12 @@
 use crate::linkage::ShaderLinkage;
 #[cfg(not(target_arch = "wasm32"))]
 mod target {
-    pub const ENTRY_POINT: &str = "tutorial::tutorial_passthru_fragment";
+    pub const ENTRY_POINT: &str = "light::shadow_mapping_vertex";
     pub fn descriptor() -> wgpu::ShaderModuleDescriptor<'static> {
-        wgpu::include_spirv!("../../shaders/tutorial-tutorial_passthru_fragment.spv")
+        wgpu::include_spirv!("../../shaders/light-shadow_mapping_vertex.spv")
     }
     pub fn linkage(device: &wgpu::Device) -> super::ShaderLinkage {
-        log::debug!(
-            "creating native linkage for {}",
-            "tutorial_passthru_fragment"
-        );
+        log::debug!("creating native linkage for {}", "shadow_mapping_vertex");
         super::ShaderLinkage {
             entry_point: ENTRY_POINT,
             module: device.create_shader_module(descriptor()).into(),
@@ -20,12 +17,12 @@ mod target {
 }
 #[cfg(target_arch = "wasm32")]
 mod target {
-    pub const ENTRY_POINT: &str = "tutorialtutorial_passthru_fragment";
+    pub const ENTRY_POINT: &str = "lightshadow_mapping_vertex";
     pub fn descriptor() -> wgpu::ShaderModuleDescriptor<'static> {
-        wgpu::include_wgsl!("../../shaders/tutorial-tutorial_passthru_fragment.wgsl")
+        wgpu::include_wgsl!("../../shaders/light-shadow_mapping_vertex.wgsl")
     }
     pub fn linkage(device: &wgpu::Device) -> super::ShaderLinkage {
-        log::debug!("creating web linkage for {}", "tutorial_passthru_fragment");
+        log::debug!("creating web linkage for {}", "shadow_mapping_vertex");
         super::ShaderLinkage {
             entry_point: ENTRY_POINT,
             module: device.create_shader_module(descriptor()).into(),

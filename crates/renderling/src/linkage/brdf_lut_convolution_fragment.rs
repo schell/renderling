@@ -8,7 +8,7 @@ mod target {
         wgpu::include_spirv!("../../shaders/convolution-brdf_lut_convolution_fragment.spv")
     }
     pub fn linkage(device: &wgpu::Device) -> super::ShaderLinkage {
-        log::info!(
+        log::debug!(
             "creating native linkage for {}",
             "brdf_lut_convolution_fragment"
         );
@@ -25,7 +25,7 @@ mod target {
         wgpu::include_wgsl!("../../shaders/convolution-brdf_lut_convolution_fragment.wgsl")
     }
     pub fn linkage(device: &wgpu::Device) -> super::ShaderLinkage {
-        log::info!(
+        log::debug!(
             "creating web linkage for {}",
             "brdf_lut_convolution_fragment"
         );
