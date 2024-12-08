@@ -26,7 +26,7 @@ jobs:
     outputs:
       cachepath-macOS: ${{ steps.cachepathstep.outputs.cachepath-macOS }}
       cachepath-Linux: ${{ steps.cachepathstep.outputs.cachepath-Linux }}
-      cachepath-Windows: ${{ steps.cachepathstep.outputs.cachepath-macOS }}
+      cachepath-Windows: ${{ steps.cachepathstep.outputs.cachepath-Windows }}
     steps:
       - uses: actions/checkout@v2
       - uses: actions/cache@v4
@@ -67,7 +67,7 @@ jobs:
               ${{ needs.install-cargo-gpu.outputs.cachepath-macOS }}
               ${{ needs.install-cargo-gpu.outputs.cachepath-Linux }}
               ${{ needs.install-cargo-gpu.outputs.cachepath-Windows }}
-          key: rust-gpu-cache-${{ runner.os }}
+          key: rust-gpu-cache-0-${{ runner.os }}
       - uses: moonrepo/setup-rust@v1
       - run: rm -rf crates/renderling/src/linkage/* crates/renderling/shaders
       - run: cargo shaders
