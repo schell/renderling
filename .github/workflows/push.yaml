@@ -28,7 +28,7 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: ~/.cargo
-          key: 2-${{ runner.os }}
+          key: cargo-cache-${{ runner.os }}
       - uses: moonrepo/setup-rust@v1
       - run: rustup default stable 
       - run: rustup update
@@ -54,10 +54,12 @@ jobs:
       - uses: actions/checkout@v2
       - uses: actions/cache@v4
         with:
-          path: |
-            ~/.cargo
-            ${{ needs.install-cargo-gpu.outputs.cachepath }}
-          key: 2-${{ runner.os }}
+          path: ~/.cargo
+          key: cargo-cache-${{ runner.os }}
+      - uses: actions/cache@v4
+        with:
+          path: ${{ needs.install-cargo-gpu.outputs.cachepath }}
+          key: rust-gpu-cache-${{ runner.os }}
       - uses: moonrepo/setup-rust@v1
       - run: rm -rf crates/renderling/src/linkage/* crates/renderling/shaders
       - run: cargo shaders
