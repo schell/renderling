@@ -1,3 +1,4 @@
+# Happens on push to main, and all PRs
 name: push
 
 on: 
