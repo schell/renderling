@@ -21,18 +21,22 @@ jobs:
         shell: bash
     env:
       RUST_LOG: debug  
+    outputs:
+      cachepath: ${{steps.cachepathstep.cachepath}}
     steps:
       - uses: actions/checkout@v2
       - uses: actions/cache@v4
         with:
-          path: | 
-            ~/.cache/rust-gpu
-            ~/.cargo/bin
-          key: 0-${{ runner.os }}
+          path: ~/.cargo
+          key: 1-${{ runner.os }}
       - uses: moonrepo/setup-rust@v1
       - run: rustup default stable 
       - run: rustup update
       - run: cargo install --git https://github.com/rust-gpu/cargo-gpu cargo-gpu
+      - id: cachepathstep
+        run: |
+          CACHE_PATH=`cargo gpu show --cache-directory`
+          echo "cachepath=$CACHE_PATH" >> "$GITHUB_OUTPUT"
 
   renderling-build-shaders:
     needs: install-cargo-gpu
@@ -50,9 +54,9 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: |
-            ~/.cache/rust-gpu
-            ~/.cargo/bin
-          key: 0-${{ runner.os }}
+            ~/.cargo
+            ${{needs.install-cargo-gpu.outputs.cachepath}}
+          key: 1-${{ runner.os }}
       - uses: moonrepo/setup-rust@v1
       - run: rm -rf crates/renderling/src/linkage/* crates/renderling/shaders
       - run: cargo shaders
