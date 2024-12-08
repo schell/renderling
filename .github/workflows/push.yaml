@@ -1,3 +1,4 @@
+# Happens on push to main, and all PRs
 name: push
 
 on: 
@@ -11,21 +12,70 @@ env:
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
 jobs:
-  renderling-build-shaders:
-    runs-on: ubuntu-latest
+  # Installs `cargo-gpu` and sets the cache directory for subsequent jobs
+  install-cargo-gpu:
+    strategy:
+      matrix: 
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run: 
+        shell: bash
+    env:
+      RUST_LOG: debug  
+      RUNNER_OS: ${{ matrix.os }}
+    outputs:
+      cachepath-macOS: ${{ steps.cachepathstep.outputs.cachepath-macOS }}
+      cachepath-Linux: ${{ steps.cachepathstep.outputs.cachepath-Linux }}
+      cachepath-Windows: ${{ steps.cachepathstep.outputs.cachepath-Windows }}
     steps:
       - uses: actions/checkout@v2
       - uses: actions/cache@v4
         with:
-          path: ~/.cache/rust-gpu
-          key: 0-${{ runner.os }}
+          path: ~/.cargo
+          key: cargo-cache-${{ runner.os }}
       - uses: moonrepo/setup-rust@v1
-      - run: RUST_LOG=trace cargo install --git https://github.com/rust-gpu/cargo-gpu 
+      - run: rustup default stable 
+      - run: rustup update
+      - run: cargo install --git https://github.com/rust-gpu/cargo-gpu cargo-gpu
+      - id: cachepathstep
+        run: |
+          CACHE_PATH=`cargo gpu show --cache-directory`
+          echo $CACHE_PATH
+          echo "cachepath-$RUNNER_OS=$CACHE_PATH" >> "$GITHUB_OUTPUT"
+
+  # Builds the shaders and ensures there is no git diff
+  renderling-build-shaders:
+    needs: install-cargo-gpu
+    strategy:
+      matrix: 
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run: 
+        shell: bash
+    env:
+      RUST_LOG: debug
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cargo
+          key: cargo-cache-${{ runner.os }}
+      - uses: actions/cache@v4
+        with:
+          path: | 
+              ${{ needs.install-cargo-gpu.outputs.cachepath-macOS }}
+              ${{ needs.install-cargo-gpu.outputs.cachepath-Linux }}
+              ${{ needs.install-cargo-gpu.outputs.cachepath-Windows }}
+          key: rust-gpu-cache-0-${{ runner.os }}
+      - uses: moonrepo/setup-rust@v1
       - run: rm -rf crates/renderling/src/linkage/* crates/renderling/shaders
-      - run: RUST_LOG=trace cargo shaders
+      - run: cargo shaders
       - run: cargo build -p renderling
       - run: git diff --exit-code --no-ext-diff
 
+  # BAU clippy lints
   renderling-clippy:
     runs-on: ubuntu-latest
     steps:
@@ -33,6 +83,7 @@ jobs:
       - uses: moonrepo/setup-rust@v1
       - run: cargo clippy
 
+  # Ensures the example glTF viewer compiles
   renderling-build-example:
     runs-on: ubuntu-latest
     steps:
@@ -40,6 +91,7 @@ jobs:
       - uses: moonrepo/setup-rust@v1
       - run: cargo build -p example
       
+  # BAU tests
   renderling-test-linux:
     runs-on: ubuntu-latest 
     steps: 

@@ -4,7 +4,3 @@ shaders = "gpu toml crates/renderling"
 [build]
 rustflags = ["--cfg=web_sys_unstable_apis"]
 rustdocflags = ["--cfg=web_sys_unstable_apis"]
-
-
-[target.x86_64-pc-windows-msvc]
-rustflags = ["-Zshare-generics=off"]
