@@ -11,6 +11,7 @@ env:
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
 jobs:
+  # Installs `cargo-gpu` and sets the cache directory for subsequent jobs
   install-cargo-gpu:
     strategy:
       matrix: 
@@ -42,6 +43,7 @@ jobs:
           echo $CACHE_PATH
           echo "cachepath-$RUNNER_OS=$CACHE_PATH" >> "$GITHUB_OUTPUT"
 
+  # Builds the shaders and ensures there is no git diff
   renderling-build-shaders:
     needs: install-cargo-gpu
     strategy:
@@ -61,7 +63,7 @@ jobs:
           key: cargo-cache-${{ runner.os }}
       - uses: actions/cache@v4
         with:
-          path: ${{ needs.install-cargo-gpu.outputs.cachepath }}
+          path: ${{ needs.install-cargo-gpu.outputs.cachepath-${{ runner.os }} }}
           key: rust-gpu-cache-${{ runner.os }}
       - uses: moonrepo/setup-rust@v1
       - run: rm -rf crates/renderling/src/linkage/* crates/renderling/shaders
@@ -69,6 +71,7 @@ jobs:
       - run: cargo build -p renderling
       - run: git diff --exit-code --no-ext-diff
 
+  # BAU clippy lints
   renderling-clippy:
     runs-on: ubuntu-latest
     steps:
@@ -76,6 +79,7 @@ jobs:
       - uses: moonrepo/setup-rust@v1
       - run: cargo clippy
 
+  # Ensures the example glTF viewer compiles
   renderling-build-example:
     runs-on: ubuntu-latest
     steps:
@@ -83,6 +87,7 @@ jobs:
       - uses: moonrepo/setup-rust@v1
       - run: cargo build -p example
       
+  # BAU tests
   renderling-test-linux:
     runs-on: ubuntu-latest 
     steps: 
