@@ -1,3 +1,9 @@
+<!--
+SPDX-FileCopyrightText: 2024 Schell Scivally <efsubenovex@gmail.com>>
+
+SPDX-License-Identifier: MIT OR Apache-2.0
+-->
+
 # loading-bytes
 
 Sometimes loading things really bites. 
