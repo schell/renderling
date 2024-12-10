@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2024 Schell Scivally <efsubenovex@gmail.com>>
+#
+# SPDX-License-Identifier: CC0-1.0
+
 # macOS
 *.DS_Store
 # will have compiled files and executables
