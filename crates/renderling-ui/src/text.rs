@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2024 Schell Scivally <efsubenovex@gmail.com>>
+//
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! Text rendering capabilities for `Renderling`.
 //!
 //! This module is only enabled with the `text` cargo feature.

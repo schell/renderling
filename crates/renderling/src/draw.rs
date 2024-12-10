@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2024 Schell Scivally <efsubenovex@gmail.com>>
+//
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! Handles queueing draw calls.
 //!
 //! [`DrawCalls`] is used to maintain the list of all staged [`Renderlet`]s.

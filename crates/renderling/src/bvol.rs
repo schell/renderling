@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2024 Schell Scivally <efsubenovex@gmail.com>>
+//
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! Bounding volumes and culling primitives.
 //!
 //! The initial implementation here was gleaned from `treeculler`, which

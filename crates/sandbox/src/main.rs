@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2024 Schell Scivally <efsubenovex@gmail.com>>
+//
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! This is a sandbox.
 //!
 //! This program will change on a whim and does not contain anything all that

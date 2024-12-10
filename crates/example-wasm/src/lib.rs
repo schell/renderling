@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2024 Schell Scivally <efsubenovex@gmail.com>>
+//
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 use futures_lite::StreamExt;
 use renderling::Context;
 use wasm_bindgen::prelude::*;

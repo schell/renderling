@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2024 Schell Scivally <efsubenovex@gmail.com>>
+//
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! Debug overlay.
 use crabslab::{Id, Slab};
 use glam::{Vec2, Vec3Swizzles, Vec4, Vec4Swizzles};

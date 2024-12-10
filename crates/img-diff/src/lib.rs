@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2024 Schell Scivally <efsubenovex@gmail.com>>
+//
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! Provides image diffing for testing.
 use glam::{Vec3, Vec4, Vec4Swizzles};
 use image::{DynamicImage, Luma, Rgb, Rgb32FImage, Rgba32FImage};

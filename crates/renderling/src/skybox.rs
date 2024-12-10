@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2024 Schell Scivally <efsubenovex@gmail.com>>
+//
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! Skybox shaders and CPU code.
 use crabslab::{Id, Slab};
 use glam::{Mat3, Mat4, Vec2, Vec3, Vec4, Vec4Swizzles};

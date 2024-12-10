@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2024 Schell Scivally <efsubenovex@gmail.com>>
+//
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! Physically based bloom.
 //!
 //! As described in [learnopengl.com's Physically Based Bloom article](https://learnopengl.com/Guest-Articles/2022/Phys.-Based-Bloom).

@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2024 Schell Scivally <efsubenovex@gmail.com>>
+//
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! Decomposed 3d transform.
 use crabslab::SlabItem;
 use glam::{Mat4, Quat, Vec3};

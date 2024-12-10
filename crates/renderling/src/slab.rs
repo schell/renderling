@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2024 Schell Scivally <efsubenovex@gmail.com>>
+//
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! GPU and CPU slab allocation.
 //!
 //! Re-exports [`Array`], [`Id`], [`Slab`] and [`SlabItem`] from [`crabslab`](https://docs.rs/crabslab/latest/crabslab/).

@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2024 Schell Scivally <efsubenovex@gmail.com>>
+//
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! A tutorial module for the renderling crate.
 use crabslab::{Array, Id, Slab, SlabItem};
 use glam::{Mat4, Vec4};

@@ -1,3 +1,7 @@
+// SPDX-FileCopyrightText: 2024 Schell Scivally <efsubenovex@gmail.com>>
+//
+// SPDX-License-Identifier: MIT OR Apache-2.0
+
 //! `renderling-ui` is a "GPU driven" 2d renderer with a focus on simplicity and
 //! ease of use.
 //!
