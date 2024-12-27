@@ -1,3 +1,6 @@
-* text=auto
+*.txt text
+*.rs text
+*.md text
+*.yaml text
 *.spv binary
 *.wgsl binary
