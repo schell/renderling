@@ -1,6 +1,9 @@
 [alias]
-shaders = "gpu toml crates/renderling"
+xtask = "run --package xtask --"
 
 [build]
 rustflags = ["--cfg=web_sys_unstable_apis"]
 rustdocflags = ["--cfg=web_sys_unstable_apis"]
+
+[env]
+CARGO_WORKSPACE_DIR = { value = "", relative = true }

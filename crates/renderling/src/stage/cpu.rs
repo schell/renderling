@@ -731,7 +731,7 @@ impl Stage {
         DepthTexture {
             device: self.device.clone(),
             queue: self.queue.clone(),
-            texture: self.depth_texture.read().unwrap().clone(),
+            texture: self.depth_texture.read().unwrap().texture.clone(),
         }
     }
 

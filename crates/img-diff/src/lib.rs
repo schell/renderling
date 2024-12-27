@@ -218,6 +218,28 @@ pub fn assert_img_eq(filename: &str, seen: impl Into<DynamicImage>) {
     assert_img_eq_cfg(filename, seen, DiffCfg::default())
 }
 
+/// Normalize the depth image to make it easier to see.
+///
+/// ## Warning
+/// This is only normalization, not linearization.
+pub fn normalize_gray_img(seen: &mut image::GrayImage) {
+    let mut max = 0u8;
+    let mut min = u8::MAX;
+    seen.pixels().for_each(|Luma([c])| {
+        max = max.max(*c);
+        min = min.min(*c);
+    });
+    let total = (max - min) as f32;
+    seen.pixels_mut().for_each(|c| {
+        let comps = c.0.map(|u| {
+            let percent = (u as f32 - min as f32) / total;
+            let float = percent * 255.0;
+            float as u8
+        });
+        c.0 = comps;
+    });
+}
+
 #[cfg(test)]
 mod test {
     use crate::assert_img_eq;

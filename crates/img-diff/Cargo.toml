@@ -7,5 +7,5 @@ edition = "2021"
 
 [dependencies]
 glam = { workspace = true, features = ["std"] }
-image = { version = "^0.24" }
+image.workspace = true
 snafu = "^0.7"
