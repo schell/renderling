@@ -150,11 +150,12 @@ impl AtlasImage {
         let decoder = image::codecs::hdr::HdrDecoder::new(bytes).context(ImageSnafu)?;
         let width = decoder.metadata().width;
         let height = decoder.metadata().height;
-        let pixels = decoder.read_image_hdr().unwrap();
+        let img = image::DynamicImage::from_decoder(decoder).unwrap();
+        let pixels = img.into_rgb32f();
 
         // Add alpha data.
         let mut pixel_data: Vec<f32> = Vec::new();
-        for pixel in pixels {
+        for pixel in pixels.pixels() {
             pixel_data.push(pixel[0]);
             pixel_data.push(pixel[1]);
             pixel_data.push(pixel[2]);
@@ -179,14 +180,6 @@ impl AtlasImage {
         let pixels = convert_to_rgba8_bytes(self.pixels, self.format, self.apply_linear_transfer);
         image::RgbaImage::from_vec(self.size.x, self.size.y, pixels)
     }
-}
-
-pub fn u16_to_u8(c: u16) -> u8 {
-    ((c as f32 / 65535.0) * 255.0) as u8
-}
-
-pub fn f32_to_u8(c: f32) -> u8 {
-    (c / 255.0) as u8
 }
 
 /// Interpret/convert the pixel data into rgba8 pixels.
@@ -290,6 +283,7 @@ pub fn convert_to_rgba8_bytes(
             .chunks_exact(4)
             .flat_map(|p| {
                 if let [r, g, b, a] = p {
+                    todo!("f32_to_u8 erroneously used, use f16_to_u8 instead");
                     [f32_to_u8(*r), f32_to_u8(*g), f32_to_u8(*b), f32_to_u8(*a)]
                 } else {
                     unreachable!()

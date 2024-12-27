@@ -8,7 +8,7 @@ mod target {
         wgpu::include_spirv!("../../shaders/bloom-bloom_downsample_fragment.spv")
     }
     pub fn linkage(device: &wgpu::Device) -> super::ShaderLinkage {
-        log::info!(
+        log::debug!(
             "creating native linkage for {}",
             "bloom_downsample_fragment"
         );
@@ -25,7 +25,7 @@ mod target {
         wgpu::include_wgsl!("../../shaders/bloom-bloom_downsample_fragment.wgsl")
     }
     pub fn linkage(device: &wgpu::Device) -> super::ShaderLinkage {
-        log::info!("creating web linkage for {}", "bloom_downsample_fragment");
+        log::debug!("creating web linkage for {}", "bloom_downsample_fragment");
         super::ShaderLinkage {
             entry_point: ENTRY_POINT,
             module: device.create_shader_module(descriptor()).into(),

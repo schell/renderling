@@ -294,30 +294,30 @@ impl DepthPyramid {
     pub async fn read_images(
         &self,
         ctx: &crate::Context,
-    ) -> Result<Vec<image::ImageBuffer<image::Luma<f32>, Vec<f32>>>, CullingError> {
+    ) -> Result<Vec<image::GrayImage>, CullingError> {
         let size = self.size();
         let slab_data = self.slab.read(ctx, Self::LABEL, 0..).await?;
         let mut images = vec![];
         let mut min = f32::MAX;
         let mut max = f32::MIN;
         for (i, mip) in self.mip_data.iter().enumerate() {
-            let depth_data: Vec<f32> = slab_data
+            let depth_data: Vec<u8> = slab_data
                 .read_vec(mip.array())
                 .into_iter()
-                .inspect(|&depth| {
+                .map(|depth: f32| {
                     if i == 0 {
                         min = min.min(depth);
                         max = max.max(depth);
                     }
+                    crate::color::f32_to_u8(depth)
                 })
                 .collect();
             log::info!("min: {min}");
             log::info!("max: {max}");
             let width = size.x >> i;
             let height = size.y >> i;
-            let image: image::ImageBuffer<image::Luma<f32>, Vec<f32>> =
-                image::ImageBuffer::from_raw(width, height, depth_data)
-                    .context(ReadMipSnafu { index: i })?;
+            let image = image::GrayImage::from_raw(width, height, depth_data)
+                .context(ReadMipSnafu { index: i })?;
             images.push(image);
         }
         Ok(images)
@@ -991,24 +991,7 @@ mod test {
 
         // save the normalized depth image
         let mut depth_img = stage.get_depth_texture().read_image().unwrap();
-        let mut max = Vec3::MIN;
-        let mut min = Vec3::MAX;
-        depth_img.as_rgb32f().unwrap().pixels().for_each(|c| {
-            let v = Vec3::from(c.0);
-            max = max.max(v);
-            min = min.min(v);
-        });
-        let total = max.x - min.x;
-        depth_img
-            .as_mut_rgb32f()
-            .unwrap()
-            .pixels_mut()
-            .for_each(|c| {
-                let comps = c.0.map(|u| (u - min.x) / total);
-                c.0 = comps;
-            });
-        log::info!("min: {min}");
-        log::info!("max: {max}");
+        img_diff::normalize_gray_img(&mut depth_img);
         img_diff::save("cull/debugging_4_depth.png", depth_img);
 
         // save the normalized pyramid images
@@ -1024,9 +1007,7 @@ mod test {
         )
         .unwrap();
         for (i, mut img) in pyramid_images.into_iter().enumerate() {
-            img.pixels_mut().for_each(|p| {
-                p.0[0] = (p.0[0] - min.x) / total;
-            });
+            img_diff::normalize_gray_img(&mut img);
             img_diff::save(&format!("cull/debugging_pyramid_mip_{i}.png"), img);
         }
 

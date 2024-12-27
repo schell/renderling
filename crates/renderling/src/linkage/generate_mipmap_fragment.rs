@@ -8,7 +8,7 @@ mod target {
         wgpu::include_spirv!("../../shaders/convolution-generate_mipmap_fragment.spv")
     }
     pub fn linkage(device: &wgpu::Device) -> super::ShaderLinkage {
-        log::info!("creating native linkage for {}", "generate_mipmap_fragment");
+        log::debug!("creating native linkage for {}", "generate_mipmap_fragment");
         super::ShaderLinkage {
             entry_point: ENTRY_POINT,
             module: device.create_shader_module(descriptor()).into(),
@@ -22,7 +22,7 @@ mod target {
         wgpu::include_wgsl!("../../shaders/convolution-generate_mipmap_fragment.wgsl")
     }
     pub fn linkage(device: &wgpu::Device) -> super::ShaderLinkage {
-        log::info!("creating web linkage for {}", "generate_mipmap_fragment");
+        log::debug!("creating web linkage for {}", "generate_mipmap_fragment");
         super::ShaderLinkage {
             entry_point: ENTRY_POINT,
             module: device.create_shader_module(descriptor()).into(),
