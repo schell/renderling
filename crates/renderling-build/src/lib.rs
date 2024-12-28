@@ -116,11 +116,7 @@ impl Default for RenderlingPaths {
         let renderling_crate = cargo_workspace.join("crates").join("renderling");
         log::debug!("cargo_manifest_dir: {renderling_crate:#?}");
         let shader_dir = renderling_crate.join("shaders");
-        assert!(
-            shader_dir.is_dir(),
-            "missing directory '{}', you must first compile the shaders",
-            shader_dir.display()
-        );
+
         let shader_manifest = shader_dir.join("manifest.json");
         let linkage_dir = renderling_crate.join("src").join("linkage");
 
