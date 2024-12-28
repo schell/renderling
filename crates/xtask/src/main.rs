@@ -25,6 +25,11 @@ fn main() {
         Command::CompileShaders => {
             let paths = renderling_build::RenderlingPaths::default();
 
+            log::info!(
+                "Calling `cargo gpu toml {}",
+                paths.renderling_crate.display()
+            );
+
             std::process::Command::new("cargo")
                 .args(["gpu", "toml"])
                 .arg(&paths.renderling_crate)
@@ -33,6 +38,9 @@ fn main() {
                 .output()
                 .unwrap();
         }
-        Command::GenerateLinkage => renderling_build::generate_linkage(),
+        Command::GenerateLinkage => {
+            log::info!("Generating linkage for shaders");
+            renderling_build::generate_linkage()
+        }
     }
 }
