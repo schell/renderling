@@ -139,10 +139,11 @@ pub fn generate_linkage() {
         "missing file '{}', you must first compile the shaders",
         paths.shader_manifest.display()
     );
-    assert!(
-        paths.linkage_dir.is_dir(),
-        "missing crates/renderling/src/linkage"
-    );
+
+    if !paths.linkage_dir.is_dir() {
+        log::info!("creating linkage directory");
+        std::fs::create_dir_all(&paths.linkage_dir).unwrap();
+    }
 
     log::debug!("cwd: {:?}", std::env::current_dir().unwrap());
 

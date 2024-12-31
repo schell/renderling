@@ -11,6 +11,7 @@ readme = "../../README.md"
 build = "src/build.rs"
 
 [package.metadata.rust-gpu.build]
+auto-install-rust-toolchain = true
 output-dir = "shaders" 
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
