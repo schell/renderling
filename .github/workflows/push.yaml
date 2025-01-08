@@ -33,6 +33,7 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: ~/.cargo
+          # THIS KEY MUST MATCH BELOW
           key: cargo-cache-1-${{ runner.os }}
       - uses: moonrepo/setup-rust@v1
       - run: rustup default stable 
@@ -62,7 +63,8 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: ~/.cargo
-          key: cargo-cache-${{ runner.os }}
+          # THIS KEY MUST MATCH ABOVE
+          key: cargo-cache-1-${{ runner.os }}
       - uses: actions/cache@v4
         with:
           path: | 
