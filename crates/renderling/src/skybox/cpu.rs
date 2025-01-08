@@ -58,10 +58,11 @@ fn skybox_bindgroup_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
 }
 
 pub(crate) fn create_skybox_bindgroup(
-    device: &wgpu::Device,
+    runtime: impl AsRef<WgpuRuntime>,
     slab_buffer: &wgpu::Buffer,
     texture: &Texture,
 ) -> wgpu::BindGroup {
+    let device = &runtime.as_ref().device;
     device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("skybox"),
         layout: &skybox_bindgroup_layout(device),
@@ -84,10 +85,11 @@ pub(crate) fn create_skybox_bindgroup(
 
 /// Create the skybox rendering pipeline.
 pub(crate) fn create_skybox_render_pipeline(
-    device: &wgpu::Device,
+    runtime: impl AsRef<WgpuRuntime>,
     format: wgpu::TextureFormat,
     multisample_count: Option<u32>,
 ) -> SkyboxRenderPipeline {
+    let device = &runtime.as_ref().device;
     log::trace!("creating skybox render pipeline with format '{format:?}'");
     let vertex_linkage = crate::linkage::skybox_vertex::linkage(device);
     let fragment_linkage = crate::linkage::skybox_cubemap_fragment::linkage(device);
@@ -170,7 +172,8 @@ pub struct Skybox {
 
 impl Skybox {
     /// Create an empty, transparent skybox.
-    pub fn empty(runtime: &WgpuRuntime) -> Self {
+    pub fn empty(runtime: impl AsRef<WgpuRuntime>) -> Self {
+        let runtime = runtime.as_ref();
         log::trace!("creating empty skybox");
         let hdr_img = AtlasImage {
             pixels: vec![0u8; 4 * 4],
@@ -182,7 +185,8 @@ impl Skybox {
     }
 
     /// Create a new `Skybox`.
-    pub fn new(runtime: &WgpuRuntime, hdr_img: AtlasImage, camera_id: Id<Camera>) -> Self {
+    pub fn new(runtime: impl AsRef<WgpuRuntime>, hdr_img: AtlasImage, camera_id: Id<Camera>) -> Self {
+        let runtime = runtime.as_ref();
         log::trace!("creating skybox");
 
         let slab = SlabAllocator::new(runtime, wgpu::BufferUsages::VERTEX);
@@ -288,6 +292,7 @@ impl Skybox {
         runtime: impl AsRef<WgpuRuntime>,
         img: AtlasImage,
     ) -> Texture {
+        let runtime = runtime.as_ref();
         Texture::new_with(
             runtime.as_ref(),
             Some("create hdr texture"),
@@ -315,19 +320,22 @@ impl Skybox {
 
     /// Create an HDR equirectangular texture from bytes.
     pub fn create_hdr_texture(runtime: impl AsRef<WgpuRuntime>, hdr_data: &[u8]) -> Texture {
+        let runtime = runtime.as_ref();
         let img = AtlasImage::from_hdr_bytes(hdr_data).unwrap();
         Self::hdr_texture_from_atlas_image(runtime, img)
     }
 
     fn create_environment_map_from_hdr(
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
+        runtime: impl AsRef<WgpuRuntime>,
         buffer: &wgpu::Buffer,
         buffer_upkeep: impl FnMut(),
         hdr_texture: &Texture,
         camera: &Hybrid<Camera>,
         views: [Mat4; 6],
     ) -> Texture {
+        let runtime = runtime.as_ref();
+        let device = &runtime.device;
+        let queue = &runtime.queue;
         // Create the cubemap-making pipeline.
         let pipeline = crate::cubemap::CubemapMakingRenderPipeline::new(
             device,
@@ -358,8 +366,7 @@ impl Skybox {
 
     #[allow(clippy::too_many_arguments)]
     fn render_cubemap(
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
+        runtime: impl AsRef<WgpuRuntime>,
         pipeline: &wgpu::RenderPipeline,
         mut buffer_upkeep: impl FnMut(),
         camera: &Hybrid<Camera>,
@@ -368,6 +375,9 @@ impl Skybox {
         texture_size: u32,
         mip_levels: Option<u32>,
     ) -> Texture {
+        let runtime = runtime.as_ref();
+        let device = &runtime.device;
+        let queue = &runtime.queue;
         let mut cubemap_faces = Vec::new();
         let mip_levels = mip_levels.unwrap_or(1);
 
@@ -439,14 +449,16 @@ impl Skybox {
     }
 
     fn create_irradiance_map(
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
+        runtime: impl AsRef<WgpuRuntime>,
         buffer: &wgpu::Buffer,
         buffer_upkeep: impl FnMut(),
         environment_texture: &Texture,
         camera: &Hybrid<Camera>,
         views: [Mat4; 6],
     ) -> Texture {
+        let runtime = runtime.as_ref();
+        let device = &runtime.device;
+        let queue = &runtime.queue;
         let pipeline =
             crate::ibl::diffuse_irradiance::DiffuseIrradianceConvolutionRenderPipeline::new(
                 device,
@@ -475,8 +487,7 @@ impl Skybox {
 
     #[allow(clippy::too_many_arguments)]
     fn create_prefiltered_environment_map(
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
+        runtime: impl AsRef<WgpuRuntime>,
         buffer: &wgpu::Buffer,
         mut buffer_upkeep: impl FnMut(),
         camera: &Hybrid<Camera>,
@@ -485,6 +496,9 @@ impl Skybox {
         environment_texture: &Texture,
         views: [Mat4; 6],
     ) -> Texture {
+        let runtime = runtime.as_ref();
+        let device = &runtime.device;
+        let queue = &runtime.queue;
         let (pipeline, bindgroup) =
             crate::ibl::prefiltered_environment::create_pipeline_and_bindgroup(
                 device,
@@ -558,7 +572,10 @@ impl Skybox {
         )
     }
 
-    fn create_precomputed_brdf_texture(device: &wgpu::Device, queue: &wgpu::Queue) -> Texture {
+    fn create_precomputed_brdf_texture(runtime: impl AsRef<WgpuRuntime>) -> Texture {
+        let runtime = runtime.as_ref();
+        let device = &runtime.device;
+        let queue = &runtime.queue;
         let vertex_linkage = crate::linkage::brdf_lut_convolution_vertex::linkage(device);
         let fragment_linkage = crate::linkage::brdf_lut_convolution_fragment::linkage(device);
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
