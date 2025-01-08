@@ -10,7 +10,7 @@
 //! First you must create a [`crate::context::Context`].
 //!
 //! ```
-//! use renderling::Context;
+//! use renderling::prelude::*;
 //!
 //! // create a headless context with dimensions 100, 100.
 //! let ctx = Context::headless(100, 100);
@@ -19,8 +19,7 @@
 //! Then create a stage to place your camera, geometry, materials and lights.
 //!
 //! ```
-//! # use renderling::Context;
-//! use renderling::stage::Stage;
+//! # use renderling::prelude::*;
 //! # let ctx = Context::headless(100, 100);
 //! let stage: Stage = ctx
 //!     .new_stage()
@@ -32,15 +31,19 @@
 //! The stage is neat in that it allows you to place values and arrays of values
 //! directly onto the GPU. Those values can be modified on the CPU and
 //! synchronization will happen during
-//! [`Stage::render`](crate::stage::Stage::render). These values are called
-//! [`Hybrid`](crate::slab::Hybrid)s and
-//! [`HybridArray`](crate::slab::HybridArray)s.
+//! [`Stage::render`](crate::stage::Stage::render).
+//!
+//! These values are called
+//! [`Hybrid`](craballoc::Hybrid)s and
+//! [`HybridArray`](craballoc::HybridArray)s.
+//!
+//! They come from the [`craballoc`] library, which is re-exported
+//! from [the prelude](crate::prelude).
 //!
 //! ```
-//! # use renderling::{Context, stage::Stage};
+//! # use renderling::prelude::*;
 //! # let ctx = Context::headless(100, 100);
 //! # let stage: Stage = ctx.new_stage();
-//! use renderling::slab::{Hybrid, HybridArray};
 //!
 //! let an_f32: Hybrid<f32> = stage.new_value(1337.0);
 //!
@@ -57,13 +60,10 @@
 //! counter-clockwise winding.
 //!
 //! ```
-//! # use renderling::{Context, stage::Stage};
+//! # use renderling::prelude::*;
 //! # let ctx = Context::headless(100, 100);
 //! # let stage: Stage = ctx.new_stage();
-//! use renderling::{
-//!     camera::Camera,
-//!     stage::{Renderlet, Vertex},
-//! };
+//!
 //! let camera = stage.new_value(Camera::default_ortho2d(100.0, 100.0));
 //! let vertices = stage.new_array([
 //!     Vertex::default()
@@ -93,14 +93,7 @@
 //! frame with [`Frame::present`].
 //!
 //! ```
-//! # use renderling::{
-//! #     Context,
-//! #     camera::Camera,
-//! #     stage::{
-//! #         Vertex,
-//! #         Renderlet,
-//! #     }
-//! # };
+//! # use renderling::prelude::*;
 //! # let ctx = Context::headless(100, 100);
 //! # let stage = ctx.new_stage();
 //! # let camera = stage.new_value(Camera::default_ortho2d(100.0, 100.0));
@@ -180,9 +173,11 @@ pub use context::*;
 pub mod prelude {
     //! A prelude, meant to be glob-imported.
 
+    #[cfg(cpu)]
     pub extern crate craballoc;
     pub extern crate glam;
 
+    #[cfg(cpu)]
     pub use craballoc::prelude::*;
     pub use crabslab::{Array, Id};
 
@@ -193,7 +188,7 @@ pub mod prelude {
         transform::Transform,
     };
 
-    #[cfg(not(target_arch = "spirv"))]
+    #[cfg(cpu)]
     pub use crate::context::*;
 }
 

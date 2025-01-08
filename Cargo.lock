@@ -695,9 +695,9 @@ dependencies = [
 
 [[package]]
 name = "craballoc"
-version = "0.1.0"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1c4dfc568222e8df817d040c32671317994601bcac4a472cebfa37f3e1f27403"
+checksum = "b378ae0de786477bac466f4ecd4a102402cd3a08cc05de38c0ae07443e9e1b0f"
 dependencies = [
  "async-channel 1.9.0",
  "bytemuck",

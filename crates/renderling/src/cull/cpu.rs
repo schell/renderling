@@ -210,7 +210,7 @@ pub struct DepthPyramid {
 }
 
 impl DepthPyramid {
-    const _LABEL: Option<&'static str> = Some("depth-pyramid");
+    const LABEL: Option<&'static str> = Some("depth-pyramid");
 
     fn allocate(
         size: UVec2,
@@ -236,7 +236,7 @@ impl DepthPyramid {
     }
 
     pub fn new(runtime: impl AsRef<WgpuRuntime>, size: UVec2) -> Self {
-        let slab = SlabAllocator::new(runtime, wgpu::BufferUsages::empty());
+        let slab = SlabAllocator::new_with_label(runtime, wgpu::BufferUsages::empty(), Self::LABEL);
         let desc = slab.new_value(DepthPyramidDescriptor::default());
         let (mip_data, mip) = Self::allocate(size, &desc, &slab);
 
