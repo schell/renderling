@@ -463,6 +463,8 @@ impl Texture {
         height: u32,
         multisample_count: u32,
     ) -> Self {
+        let runtime = runtime.as_ref();
+        let device = &runtime.device;
         let size = wgpu::Extent3d {
             width,
             height,
