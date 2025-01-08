@@ -696,11 +696,12 @@ dependencies = [
 [[package]]
 name = "craballoc"
 version = "0.1.0"
-source = "git+https://github.com/schell/crabslab#717578bd41e60d00bb38c8767dc1110eef8b5d87"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1c4dfc568222e8df817d040c32671317994601bcac4a472cebfa37f3e1f27403"
 dependencies = [
  "async-channel 1.9.0",
  "bytemuck",
- "crabslab 0.6.3 (git+https://github.com/schell/crabslab)",
+ "crabslab",
  "log",
  "rustc-hash 1.1.0",
  "snafu 0.8.5",
@@ -714,18 +715,7 @@ version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6d3486b5979b1c73ca6ba48f69e2abd7941dd72b0e725519d113aef61ff7a236"
 dependencies = [
- "crabslab-derive 0.4.3 (registry+https://github.com/rust-lang/crates.io-index)",
- "futures-lite 1.13.0",
- "glam",
- "spirv-std",
-]
-
-[[package]]
-name = "crabslab"
-version = "0.6.3"
-source = "git+https://github.com/schell/crabslab#717578bd41e60d00bb38c8767dc1110eef8b5d87"
-dependencies = [
- "crabslab-derive 0.4.3 (git+https://github.com/schell/crabslab)",
+ "crabslab-derive",
  "futures-lite 1.13.0",
  "glam",
  "spirv-std",
@@ -736,16 +726,6 @@ name = "crabslab-derive"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ef999dd82fff9dc1f2cf371c0f9a6315016b9562a04811fbefae2d80da6a1fad"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.95",
-]
-
-[[package]]
-name = "crabslab-derive"
-version = "0.4.3"
-source = "git+https://github.com/schell/crabslab#717578bd41e60d00bb38c8767dc1110eef8b5d87"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2761,7 +2741,7 @@ dependencies = [
  "bytemuck",
  "cfg_aliases",
  "craballoc",
- "crabslab 0.6.3 (registry+https://github.com/rust-lang/crates.io-index)",
+ "crabslab",
  "crunch",
  "ctor",
  "dagga",
@@ -2807,7 +2787,7 @@ name = "renderling_ui"
 version = "0.3.5"
 dependencies = [
  "craballoc",
- "crabslab 0.6.3 (registry+https://github.com/rust-lang/crates.io-index)",
+ "crabslab",
  "ctor",
  "env_logger",
  "futures-lite 1.13.0",
