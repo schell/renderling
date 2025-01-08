@@ -250,11 +250,8 @@ impl Texture {
         data: &[u8],
     ) -> Self {
         let runtime = runtime.as_ref();
-        let device = &runtime.device;
-        let queue = &runtime.queue;
         Self::new_with(
-            device,
-            queue,
+            runtime,
             label,
             usage,
             None,
