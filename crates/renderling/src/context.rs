@@ -170,7 +170,7 @@ fn new_instance(backends: Option<wgpu::Backends>) -> wgpu::Instance {
     );
     // BackendBit::PRIMARY => Vulkan + Metal + DX12 + Browser WebGPU
     let backends = backends.unwrap_or(wgpu::Backends::PRIMARY);
-    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+    let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
         backends,
         ..Default::default()
     });
@@ -315,12 +315,7 @@ impl Frame {
         texture.create_view(&wgpu::TextureViewDescriptor {
             label: Some("Frame::view"),
             format: Some(format),
-            dimension: None,
-            aspect: wgpu::TextureAspect::All,
-            base_mip_level: 0,
-            mip_level_count: None,
-            base_array_layer: 0,
-            array_layer_count: None,
+            ..Default::default()
         })
     }
 
@@ -343,9 +338,9 @@ impl Frame {
         // Copy the data from the surface texture to the buffer
         encoder.copy_texture_to_buffer(
             texture.as_image_copy(),
-            wgpu::ImageCopyBuffer {
+            wgpu::TexelCopyBufferInfo {
                 buffer: &buffer,
-                layout: wgpu::ImageDataLayout {
+                layout: wgpu::TexelCopyBufferLayout {
                     offset: 0,
                     bytes_per_row: Some(dimensions.padded_bytes_per_row as u32),
                     rows_per_image: None,

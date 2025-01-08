@@ -106,13 +106,13 @@ impl Texture {
                 let index = i * mip_levels as usize + mip_level;
                 let texture = &face_textures[index].texture;
                 encoder.copy_texture_to_texture(
-                    wgpu::ImageCopyTexture {
+                    wgpu::TexelCopyTextureInfo {
                         texture,
                         mip_level: 0,
                         origin: wgpu::Origin3d::ZERO,
                         aspect: wgpu::TextureAspect::All,
                     },
-                    wgpu::ImageCopyTexture {
+                    wgpu::TexelCopyTextureInfo {
                         texture: &cubemap_texture,
                         mip_level: mip_level as u32,
                         origin: wgpu::Origin3d {
@@ -195,14 +195,14 @@ impl Texture {
 
         if !data.is_empty() {
             queue.write_texture(
-                wgpu::ImageCopyTextureBase {
+                wgpu::TexelCopyTextureInfo {
                     texture: &texture,
                     mip_level: 0,
                     origin: wgpu::Origin3d::ZERO,
                     aspect: wgpu::TextureAspect::All,
                 },
                 data,
-                wgpu::ImageDataLayout {
+                wgpu::TexelCopyBufferLayout {
                     offset: 0,
                     bytes_per_row: Some(color_channels * color_channel_bytes * width),
                     rows_per_image: None,
@@ -331,14 +331,14 @@ impl Texture {
         });
 
         queue.write_texture(
-            wgpu::ImageCopyTextureBase {
+            wgpu::TexelCopyTextureInfo {
                 texture: &texture,
                 mip_level: 0,
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
             },
             img.as_bytes(),
-            wgpu::ImageDataLayout {
+            wgpu::TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(channels * dimensions.0),
                 rows_per_image: Some(dimensions.1),
@@ -393,14 +393,14 @@ impl Texture {
         });
 
         runtime.queue.write_texture(
-            wgpu::ImageCopyTextureBase {
+            wgpu::TexelCopyTextureInfo {
                 texture: &texture,
                 mip_level: 0,
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
             },
             img.deref(),
-            wgpu::ImageDataLayout {
+            wgpu::TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(P::CHANNEL_COUNT as u32 * dimensions.0),
                 rows_per_image: Some(dimensions.1),
@@ -558,9 +558,9 @@ impl Texture {
         // Copy the data from the surface texture to the buffer
         encoder.copy_texture_to_buffer(
             source,
-            wgpu::ImageCopyBuffer {
+            wgpu::TexelCopyBufferInfo {
                 buffer: &buffer,
-                layout: wgpu::ImageDataLayout {
+                layout: wgpu::TexelCopyBufferLayout {
                     offset: 0,
                     bytes_per_row: Some(dimensions.padded_bytes_per_row as u32),
                     rows_per_image: None,
@@ -675,14 +675,13 @@ impl Texture {
 }
 
 pub fn read_depth_texture_to_image(
-    device: &wgpu::Device,
-    queue: &wgpu::Queue,
+    runtime: impl AsRef<WgpuRuntime>,
     width: usize,
     height: usize,
     texture: &wgpu::Texture,
 ) -> Option<image::GrayImage> {
-    let depth_copied_buffer = Texture::read(texture, device, queue, width, height, 1, 4);
-    let pixels = depth_copied_buffer.pixels(device);
+    let depth_copied_buffer = Texture::read(runtime.as_ref(), texture, width, height, 1, 4);
+    let pixels = depth_copied_buffer.pixels(&runtime.as_ref().device);
     let pixels = bytemuck::cast_slice::<u8, f32>(&pixels)
         .iter()
         .copied()
@@ -697,8 +696,7 @@ pub fn read_depth_texture_to_image(
 
 /// A depth texture.
 pub struct DepthTexture {
-    pub(crate) device: Arc<wgpu::Device>,
-    pub(crate) queue: Arc<wgpu::Queue>,
+    pub(crate) runtime: WgpuRuntime,
     pub(crate) texture: Arc<wgpu::Texture>,
 }
 
@@ -711,11 +709,9 @@ impl Deref for DepthTexture {
 }
 
 impl DepthTexture {
-    pub fn new(ctx: &crate::Context, texture: impl Into<Arc<wgpu::Texture>>) -> Self {
-        let (device, queue) = ctx.get_device_and_queue_owned();
+    pub fn new(runtime: impl AsRef<WgpuRuntime>, texture: impl Into<Arc<wgpu::Texture>>) -> Self {
         Self {
-            device,
-            queue,
+            runtime: runtime.as_ref().clone(),
             texture: texture.into(),
         }
     }
@@ -730,10 +726,9 @@ impl DepthTexture {
     pub fn read_image(&self) -> Option<image::GrayImage> {
         // TODO: impl AsRef<WgpuRuntime>
         read_depth_texture_to_image(
-            &self.device,
-            &self.queue,
-            self.width(),
-            self.height(),
+            &self.runtime,
+            self.width() as usize,
+            self.height() as usize,
             &self.texture,
         )
     }

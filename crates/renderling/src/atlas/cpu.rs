@@ -529,14 +529,14 @@ impl StagedResources {
 
                         // write the new image from the CPU to the new texture
                         runtime.queue.write_texture(
-                            wgpu::ImageCopyTextureBase {
+                            wgpu::TexelCopyTextureInfo {
                                 texture: &new_texture_array.texture,
                                 mip_level: 0,
                                 origin,
                                 aspect: wgpu::TextureAspect::All,
                             },
                             &bytes,
-                            wgpu::ImageDataLayout {
+                            wgpu::TexelCopyBufferLayout {
                                 offset: 0,
                                 bytes_per_row: Some(4 * size_px.x),
                                 rows_per_image: Some(size_px.y),
@@ -551,7 +551,7 @@ impl StagedResources {
                         // copy the frame from the old texture to the new texture
                         // in a new destination
                         encoder.copy_texture_to_texture(
-                            wgpu::ImageCopyTexture {
+                            wgpu::TexelCopyTextureInfo {
                                 texture: &old_texture_array.texture,
                                 mip_level: 0,
                                 origin: wgpu::Origin3d {
@@ -561,7 +561,7 @@ impl StagedResources {
                                 },
                                 aspect: wgpu::TextureAspect::All,
                             },
-                            wgpu::ImageCopyTexture {
+                            wgpu::TexelCopyTextureInfo {
                                 texture: &new_texture_array.texture,
                                 mip_level: 0,
                                 origin: wgpu::Origin3d {

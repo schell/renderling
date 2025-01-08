@@ -716,9 +716,8 @@ impl Stage {
     /// Returns a clone of the current depth texture.
     pub fn get_depth_texture(&self) -> DepthTexture {
         DepthTexture {
-            device: self.runtime().device.clone(),
-            queue: self.runtime().queue.clone(),
-            texture: self.depth_texture.read().unwrap().clone(),
+            runtime: self.runtime().clone(),
+            texture: self.depth_texture.read().unwrap().texture.clone(),
         }
     }
 
@@ -865,13 +864,13 @@ impl Stage {
                     });
             let bloom_mix_texture = self.bloom.get_mix_texture();
             encoder.copy_texture_to_texture(
-                wgpu::ImageCopyTexture {
+                wgpu::TexelCopyTextureInfo {
                     texture: &self.hdr_texture.read().unwrap().texture,
                     mip_level: 0,
                     origin: wgpu::Origin3d { x: 0, y: 0, z: 0 },
                     aspect: wgpu::TextureAspect::All,
                 },
-                wgpu::ImageCopyTexture {
+                wgpu::TexelCopyTextureInfo {
                     texture: &bloom_mix_texture.texture,
                     mip_level: 0,
                     origin: wgpu::Origin3d { x: 0, y: 0, z: 0 },
