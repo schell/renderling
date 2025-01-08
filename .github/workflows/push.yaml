@@ -38,6 +38,7 @@ jobs:
       - run: rustup default stable 
       - run: rustup update
       - run: cargo install --git https://github.com/rust-gpu/cargo-gpu cargo-gpu
+      - run: cargo gpu show commitsh
       - id: cachepathstep
         run: |
           CACHE_PATH=`cargo gpu show cache-directory`
@@ -70,6 +71,7 @@ jobs:
               ${{ needs.install-cargo-gpu.outputs.cachepath-Windows }}
           key: rust-gpu-cache-0-${{ runner.os }}
       - uses: moonrepo/setup-rust@v1
+      - run: cargo gpu show commitsh
       - run: rm -rf crates/renderling/src/linkage/* crates/renderling/shaders
       - run: cargo xtask compile-shaders
       - run: cargo build -p renderling
