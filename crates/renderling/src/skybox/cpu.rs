@@ -285,21 +285,24 @@ impl Skybox {
 
     /// Convert an HDR [`AtlasImage`] into a texture.
     pub fn hdr_texture_from_atlas_image(
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
+        runtime: impl AsRef<WgpuRuntime>,
         img: AtlasImage,
     ) -> Texture {
         Texture::new_with(
-            device,
-            queue,
+            runtime.as_ref(),
             Some("create hdr texture"),
             None,
-            Some(device.create_sampler(&wgpu::SamplerDescriptor {
-                mag_filter: wgpu::FilterMode::Nearest,
-                min_filter: wgpu::FilterMode::Nearest,
-                mipmap_filter: wgpu::FilterMode::Nearest,
-                ..Default::default()
-            })),
+            Some(
+                runtime
+                    .as_ref()
+                    .device
+                    .create_sampler(&wgpu::SamplerDescriptor {
+                        mag_filter: wgpu::FilterMode::Nearest,
+                        min_filter: wgpu::FilterMode::Nearest,
+                        mipmap_filter: wgpu::FilterMode::Nearest,
+                        ..Default::default()
+                    }),
+            ),
             wgpu::TextureFormat::Rgba32Float,
             4,
             4,
@@ -311,13 +314,9 @@ impl Skybox {
     }
 
     /// Create an HDR equirectangular texture from bytes.
-    pub fn create_hdr_texture(
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        hdr_data: &[u8],
-    ) -> Texture {
+    pub fn create_hdr_texture(runtime: impl AsRef<WgpuRuntime>, hdr_data: &[u8]) -> Texture {
         let img = AtlasImage::from_hdr_bytes(hdr_data).unwrap();
-        Self::hdr_texture_from_atlas_image(device, queue, img)
+        Self::hdr_texture_from_atlas_image(runtime, img)
     }
 
     fn create_environment_map_from_hdr(
