@@ -1,0 +1,10 @@
+[package]
+name = "xtask"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+clap.workspace = true
+env_logger.workspace = true
+log.workspace = true
+renderling_build = { path = "../renderling-build" }

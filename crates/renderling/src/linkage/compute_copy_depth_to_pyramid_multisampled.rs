@@ -8,7 +8,7 @@ mod target {
         wgpu::include_spirv!("../../shaders/cull-compute_copy_depth_to_pyramid_multisampled.spv")
     }
     pub fn linkage(device: &wgpu::Device) -> super::ShaderLinkage {
-        log::info!(
+        log::debug!(
             "creating native linkage for {}",
             "compute_copy_depth_to_pyramid_multisampled"
         );
@@ -25,7 +25,7 @@ mod target {
         wgpu::include_wgsl!("../../shaders/cull-compute_copy_depth_to_pyramid_multisampled.wgsl")
     }
     pub fn linkage(device: &wgpu::Device) -> super::ShaderLinkage {
-        log::info!(
+        log::debug!(
             "creating web linkage for {}",
             "compute_copy_depth_to_pyramid_multisampled"
         );

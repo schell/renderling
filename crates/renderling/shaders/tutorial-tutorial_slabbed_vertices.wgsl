@@ -33,29 +33,29 @@ var<private> global_4: u32;
 fn function() {
     var local: array<f32, 4>;
     var local_1: array<u32, 4>;
-    var phi_365_: bool;
+    var phi_381_: bool;
     var phi_148_: type_13;
-    var phi_391_: u32;
-    var phi_410_: bool;
+    var phi_407_: u32;
+    var phi_426_: bool;
     var phi_239_: type_13;
     var phi_240_: type_13;
-    var phi_255_: type_13;
-    var phi_268_: bool;
-    var phi_274_: type_13;
-    var phi_275_: type_13;
-    var phi_290_: type_13;
-    var phi_304_: bool;
-    var phi_308_: type_18;
+    var phi_263_: type_13;
+    var phi_276_: bool;
+    var phi_282_: type_13;
+    var phi_283_: type_13;
+    var phi_306_: type_13;
+    var phi_320_: bool;
+    var phi_324_: type_18;
 
     let _e45 = global_4;
     let _e46 = global;
     let _e48 = arrayLength((&global_1.member));
     if (_e48 >= 2u) {
-        phi_365_ = (_e45 <= (_e48 - 2u));
+        phi_381_ = (_e45 <= (_e48 - 2u));
     } else {
-        phi_365_ = false;
+        phi_381_ = false;
     }
-    let _e53 = phi_365_;
+    let _e53 = phi_381_;
     if _e53 {
         let _e56 = global_1.member[_e45];
         let _e60 = global_1.member[(_e45 + 1u)];
@@ -65,17 +65,17 @@ fn function() {
     }
     let _e63 = phi_148_;
     if (_e46 >= _e63.member_1) {
-        phi_391_ = 4294967295u;
+        phi_407_ = 4294967295u;
     } else {
-        phi_391_ = (_e63.member + (26u * _e46));
+        phi_407_ = (_e63.member + (26u * _e46));
     }
-    let _e70 = phi_391_;
+    let _e70 = phi_407_;
     if (_e48 >= 26u) {
-        phi_410_ = (_e70 <= (_e48 - 26u));
+        phi_426_ = (_e70 <= (_e48 - 26u));
     } else {
-        phi_410_ = false;
+        phi_426_ = false;
     }
-    let _e75 = phi_410_;
+    let _e75 = phi_426_;
     if _e75 {
         let _e78 = global_1.member[_e70];
         let _e83 = global_1.member[(_e70 + 1u)];
@@ -101,30 +101,30 @@ fn function() {
             let _e173 = phi_239_;
             if (_e173.member < _e173.member_1) {
                 phi_240_ = type_13((_e173.member + 1u), _e173.member_1);
-                phi_255_ = type_13(1u, _e173.member);
+                phi_263_ = type_13(1u, _e173.member);
             } else {
                 phi_240_ = _e173;
-                phi_255_ = type_13(0u, type_13().member_1);
+                phi_263_ = type_13(0u, type_13().member_1);
             }
             let _e186 = phi_240_;
-            let _e188 = phi_255_;
+            let _e188 = phi_263_;
             switch bitcast<i32>(_e188.member) {
                 case 0: {
-                    phi_268_ = false;
+                    phi_276_ = false;
                     break;
                 }
                 case 1: {
                     let _e195 = global_1.member[((_e70 + 18u) + _e188.member_1)];
                     local_1[_e188.member_1] = _e195;
-                    phi_268_ = true;
+                    phi_276_ = true;
                     break;
                 }
                 default: {
-                    phi_268_ = bool();
+                    phi_276_ = bool();
                     break;
                 }
             }
-            let _e198 = phi_268_;
+            let _e198 = phi_276_;
             continue;
             continuing {
                 phi_239_ = _e186;
@@ -133,47 +133,47 @@ fn function() {
         }
         let _e200 = local_1;
         local = array<f32, 4>(0f, 0f, 0f, 0f);
-        phi_274_ = type_13(0u, 4u);
+        phi_282_ = type_13(0u, 4u);
         loop {
-            let _e203 = phi_274_;
+            let _e203 = phi_282_;
             if (_e203.member < _e203.member_1) {
-                phi_275_ = type_13((_e203.member + 1u), _e203.member_1);
-                phi_290_ = type_13(1u, _e203.member);
+                phi_283_ = type_13((_e203.member + 1u), _e203.member_1);
+                phi_306_ = type_13(1u, _e203.member);
             } else {
-                phi_275_ = _e203;
-                phi_290_ = type_13(0u, type_13().member_1);
+                phi_283_ = _e203;
+                phi_306_ = type_13(0u, type_13().member_1);
             }
-            let _e216 = phi_275_;
-            let _e218 = phi_290_;
+            let _e216 = phi_283_;
+            let _e218 = phi_306_;
             switch bitcast<i32>(_e218.member) {
                 case 0: {
-                    phi_304_ = false;
+                    phi_320_ = false;
                     break;
                 }
                 case 1: {
                     let _e225 = global_1.member[((_e70 + 22u) + _e218.member_1)];
                     local[_e218.member_1] = bitcast<f32>(_e225);
-                    phi_304_ = true;
+                    phi_320_ = true;
                     break;
                 }
                 default: {
-                    phi_304_ = bool();
+                    phi_320_ = bool();
                     break;
                 }
             }
-            let _e229 = phi_304_;
+            let _e229 = phi_320_;
             continue;
             continuing {
-                phi_274_ = _e216;
+                phi_282_ = _e216;
                 break if !(_e229);
             }
         }
         let _e231 = local;
-        phi_308_ = type_18(vec3<f32>(bitcast<f32>(_e78), bitcast<f32>(_e83), bitcast<f32>(_e88)), vec4<f32>(bitcast<f32>(_e94), bitcast<f32>(_e99), bitcast<f32>(_e104), bitcast<f32>(_e109)), vec3<f32>(bitcast<f32>(_e137), bitcast<f32>(_e142), bitcast<f32>(_e147)), vec4<f32>(bitcast<f32>(_e153), bitcast<f32>(_e158), bitcast<f32>(_e163), bitcast<f32>(_e168)), _e200, _e231, vec2<f32>(bitcast<f32>(_e115), bitcast<f32>(_e120)), vec2<f32>(bitcast<f32>(_e126), bitcast<f32>(_e131)));
+        phi_324_ = type_18(vec3<f32>(bitcast<f32>(_e78), bitcast<f32>(_e83), bitcast<f32>(_e88)), vec4<f32>(bitcast<f32>(_e94), bitcast<f32>(_e99), bitcast<f32>(_e104), bitcast<f32>(_e109)), vec3<f32>(bitcast<f32>(_e137), bitcast<f32>(_e142), bitcast<f32>(_e147)), vec4<f32>(bitcast<f32>(_e153), bitcast<f32>(_e158), bitcast<f32>(_e163), bitcast<f32>(_e168)), _e200, _e231, vec2<f32>(bitcast<f32>(_e115), bitcast<f32>(_e120)), vec2<f32>(bitcast<f32>(_e126), bitcast<f32>(_e131)));
     } else {
-        phi_308_ = type_18(vec3<f32>(0f, 0f, 0f), vec4<f32>(1f, 1f, 1f, 1f), vec3<f32>(0f, 0f, 1f), vec4<f32>(0f, 1f, 0f, 0f), array<u32, 4>(0u, 0u, 0u, 0u), array<f32, 4>(0f, 0f, 0f, 0f), vec2<f32>(0f, 0f), vec2<f32>(0f, 0f));
+        phi_324_ = type_18(vec3<f32>(0f, 0f, 0f), vec4<f32>(1f, 1f, 1f, 1f), vec3<f32>(0f, 0f, 1f), vec4<f32>(0f, 1f, 0f, 0f), array<u32, 4>(0u, 0u, 0u, 0u), array<f32, 4>(0f, 0f, 0f, 0f), vec2<f32>(0f, 0f), vec2<f32>(0f, 0f));
     }
-    let _e234 = phi_308_;
+    let _e234 = phi_324_;
     global_2 = vec4<f32>(_e234.member.x, _e234.member.y, _e234.member.z, 1f);
     global_3 = _e234.member_1;
     return;

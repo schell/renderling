@@ -8,7 +8,7 @@ mod target {
         wgpu::include_spirv!("../../shaders/cull-compute_downsample_depth_pyramid.spv")
     }
     pub fn linkage(device: &wgpu::Device) -> super::ShaderLinkage {
-        log::info!(
+        log::debug!(
             "creating native linkage for {}",
             "compute_downsample_depth_pyramid"
         );
@@ -25,7 +25,7 @@ mod target {
         wgpu::include_wgsl!("../../shaders/cull-compute_downsample_depth_pyramid.wgsl")
     }
     pub fn linkage(device: &wgpu::Device) -> super::ShaderLinkage {
-        log::info!(
+        log::debug!(
             "creating web linkage for {}",
             "compute_downsample_depth_pyramid"
         );

@@ -8,7 +8,7 @@ mod target {
         wgpu::include_spirv!("../../shaders/convolution-prefilter_environment_cubemap_vertex.spv")
     }
     pub fn linkage(device: &wgpu::Device) -> super::ShaderLinkage {
-        log::info!(
+        log::debug!(
             "creating native linkage for {}",
             "prefilter_environment_cubemap_vertex"
         );
@@ -25,7 +25,7 @@ mod target {
         wgpu::include_wgsl!("../../shaders/convolution-prefilter_environment_cubemap_vertex.wgsl")
     }
     pub fn linkage(device: &wgpu::Device) -> super::ShaderLinkage {
-        log::info!(
+        log::debug!(
             "creating web linkage for {}",
             "prefilter_environment_cubemap_vertex"
         );

@@ -10,11 +10,8 @@ categories = ["rendering", "game-development", "graphics"]
 readme = "../../README.md"
 build = "src/build.rs"
 
-[package.metadata.rust-gpu.build.spirv-builder]
-git = "https://github.com/Rust-GPU/rust-gpu.git" 
-rev = "0da80f8"
-
 [package.metadata.rust-gpu.build]
+auto-install-rust-toolchain = true
 output-dir = "shaders" 
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -34,11 +31,13 @@ tutorial = []
 wasm = ["wgpu/fragile-send-sync-non-atomic-wasm"]
 
 [build-dependencies]
-naga = {workspace = true}
+cfg_aliases.workspace = true
+naga.workspace = true
 pathdiff = "0.2.2"
-quote = "1.0"
-serde = {version = "1.0", features = ["derive"]}
-serde_json = {workspace = true}
+quote.workspace = true
+renderling_build = { path = "../renderling-build", version = "0.1.0" }
+serde.workspace = true
+serde_json.workspace = true
 
 # dependencies for CPU and GPU code
 [dependencies]
