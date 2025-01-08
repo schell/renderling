@@ -449,16 +449,14 @@ impl Skybox {
     }
 
     fn create_irradiance_map(
-        runtime: impl AsRef<WgpuRuntime>,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
         buffer: &wgpu::Buffer,
         buffer_upkeep: impl FnMut(),
         environment_texture: &Texture,
         camera: &Hybrid<Camera>,
         views: [Mat4; 6],
     ) -> Texture {
-        let runtime = runtime.as_ref();
-        let device = &runtime.device;
-        let queue = &runtime.queue;
         let pipeline =
             crate::ibl::diffuse_irradiance::DiffuseIrradianceConvolutionRenderPipeline::new(
                 device,
@@ -487,7 +485,8 @@ impl Skybox {
 
     #[allow(clippy::too_many_arguments)]
     fn create_prefiltered_environment_map(
-        runtime: impl AsRef<WgpuRuntime>,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
         buffer: &wgpu::Buffer,
         mut buffer_upkeep: impl FnMut(),
         camera: &Hybrid<Camera>,
@@ -496,9 +495,6 @@ impl Skybox {
         environment_texture: &Texture,
         views: [Mat4; 6],
     ) -> Texture {
-        let runtime = runtime.as_ref();
-        let device = &runtime.device;
-        let queue = &runtime.queue;
         let (pipeline, bindgroup) =
             crate::ibl::prefiltered_environment::create_pipeline_and_bindgroup(
                 device,
