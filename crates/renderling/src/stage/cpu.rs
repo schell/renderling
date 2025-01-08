@@ -191,13 +191,13 @@ impl Stage {
         let multisample_count = 1;
         let lights = mngr.new_array(vec![Id::<Light>::NONE; 16]);
         let hdr_texture = Arc::new(RwLock::new(Texture::create_hdr_texture(
-            &device,
+            device,
             w,
             h,
             multisample_count,
         )));
         let depth_texture = Arc::new(RwLock::new(Texture::create_depth_texture(
-            &device,
+            device,
             w,
             h,
             multisample_count,
@@ -206,7 +206,7 @@ impl Stage {
         // UNWRAP: safe because no other references at this point (created above^)
         let bloom = Bloom::new(ctx, &hdr_texture.read().unwrap());
         let tonemapping = Tonemapping::new(
-            &runtime,
+            runtime,
             ctx.get_render_target().format().add_srgb_suffix(),
             &bloom.get_mix_texture(),
         );
@@ -217,11 +217,11 @@ impl Stage {
             lights: Arc::new(RwLock::new(lights)),
 
             stage_pipeline: Arc::new(RwLock::new(create_stage_render_pipeline(
-                &device,
+                device,
                 multisample_count,
             ))),
             atlas,
-            skybox: Arc::new(RwLock::new(Skybox::empty(&runtime))),
+            skybox: Arc::new(RwLock::new(Skybox::empty(runtime))),
             skybox_bindgroup: Default::default(),
             skybox_pipeline: Default::default(),
             has_skybox: Arc::new(AtomicBool::new(false)),
@@ -236,7 +236,7 @@ impl Stage {
                 UVec2::new(w, h),
                 multisample_count,
             ))),
-            debug_overlay: DebugOverlay::new(&device, ctx.get_render_target().format()),
+            debug_overlay: DebugOverlay::new(device, ctx.get_render_target().format()),
             has_debug_overlay: Arc::new(false.into()),
             hdr_texture,
             depth_texture,
@@ -1067,6 +1067,10 @@ mod test {
 
     #[test]
     fn can_global_transform_calculation() {
+        #[expect(
+            clippy::needless_borrows_for_generic_args,
+            reason = "This is just riff-raff, as it doesn't compile without the borrow."
+        )]
         let slab = SlabAllocator::<CpuRuntime>::new(&CpuRuntime, ());
         // Setup a hierarchy of transforms
         log::info!("new");

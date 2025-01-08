@@ -291,20 +291,15 @@ impl Skybox {
     ) -> Texture {
         let runtime = runtime.as_ref();
         Texture::new_with(
-            runtime.as_ref(),
+            runtime,
             Some("create hdr texture"),
             None,
-            Some(
-                runtime
-                    .as_ref()
-                    .device
-                    .create_sampler(&wgpu::SamplerDescriptor {
-                        mag_filter: wgpu::FilterMode::Nearest,
-                        min_filter: wgpu::FilterMode::Nearest,
-                        mipmap_filter: wgpu::FilterMode::Nearest,
-                        ..Default::default()
-                    }),
-            ),
+            Some(runtime.device.create_sampler(&wgpu::SamplerDescriptor {
+                mag_filter: wgpu::FilterMode::Nearest,
+                min_filter: wgpu::FilterMode::Nearest,
+                mipmap_filter: wgpu::FilterMode::Nearest,
+                ..Default::default()
+            })),
             wgpu::TextureFormat::Rgba32Float,
             4,
             4,

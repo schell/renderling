@@ -596,8 +596,8 @@ pub struct GltfCamera {
     pub camera: Hybrid<Camera>,
 }
 
-impl<'a> GltfCamera {
-    fn new(stage: &mut Stage, gltf_camera: gltf::Camera<'a>, transform: &NestedTransform) -> Self {
+impl GltfCamera {
+    fn new(stage: &mut Stage, gltf_camera: gltf::Camera<'_>, transform: &NestedTransform) -> Self {
         let projection = match gltf_camera.projection() {
             gltf::camera::Projection::Orthographic(o) => glam::Mat4::orthographic_rh(
                 -o.xmag(),

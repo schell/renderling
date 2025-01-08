@@ -106,7 +106,7 @@ enum AnotherPacking<'a> {
     Internal(InternalAtlasTexture),
 }
 
-impl<'a> AnotherPacking<'a> {
+impl AnotherPacking<'_> {
     fn size(&self) -> UVec2 {
         match self {
             AnotherPacking::Img {
