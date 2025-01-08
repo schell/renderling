@@ -81,8 +81,8 @@ impl ComputeCulling {
         })
     }
 
-    pub fn new(ctx: &crate::Context, size: UVec2, sample_count: u32) -> Self {
-        let device = ctx.get_device();
+    pub fn new(runtime: impl AsRef<WgpuRuntime>, size: UVec2, sample_count: u32) -> Self {
+        let device = &runtime.as_ref().device;
         let bindgroup_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Self::LABEL,
             entries: &[
@@ -137,7 +137,7 @@ impl ComputeCulling {
             pipeline,
             bindgroup_layout,
             bindgroup: None,
-            compute_depth_pyramid: ComputeDepthPyramid::new(ctx, size, sample_count),
+            compute_depth_pyramid: ComputeDepthPyramid::new(runtime, size, sample_count),
         }
     }
 
@@ -210,7 +210,7 @@ pub struct DepthPyramid {
 }
 
 impl DepthPyramid {
-    const LABEL: Option<&'static str> = Some("depth-pyramid");
+    const _LABEL: Option<&'static str> = Some("depth-pyramid");
 
     fn allocate(
         size: UVec2,
@@ -235,8 +235,8 @@ impl DepthPyramid {
         (mip_data, mip.into_gpu_only())
     }
 
-    pub fn new(ctx: &crate::Context, size: UVec2) -> Self {
-        let slab = SlabAllocator::new(&ctx.get_runtime(), wgpu::BufferUsages::empty());
+    pub fn new(runtime: impl AsRef<WgpuRuntime>, size: UVec2) -> Self {
+        let slab = SlabAllocator::new(runtime, wgpu::BufferUsages::empty());
         let desc = slab.new_value(DepthPyramidDescriptor::default());
         let (mip_data, mip) = Self::allocate(size, &desc, &slab);
 
@@ -613,12 +613,13 @@ pub struct ComputeDepthPyramid {
 }
 
 impl ComputeDepthPyramid {
-    const LABEL: Option<&'static str> = Some("compute-depth-pyramid");
+    const _LABEL: Option<&'static str> = Some("compute-depth-pyramid");
 
-    pub fn new(ctx: &crate::Context, size: UVec2, sample_count: u32) -> Self {
-        let depth_pyramid = DepthPyramid::new(ctx, size);
-        let compute_copy_depth = ComputeCopyDepth::new(ctx.get_device(), sample_count);
-        let compute_downsample_depth = ComputeDownsampleDepth::new(ctx.get_device());
+    pub fn new(runtime: impl AsRef<WgpuRuntime>, size: UVec2, sample_count: u32) -> Self {
+        let runtime = runtime.as_ref();
+        let depth_pyramid = DepthPyramid::new(runtime, size);
+        let compute_copy_depth = ComputeCopyDepth::new(&runtime.device, sample_count);
+        let compute_downsample_depth = ComputeDownsampleDepth::new(&runtime.device);
         Self {
             depth_pyramid,
             compute_copy_depth,
@@ -677,7 +678,7 @@ mod test {
         bvol::BoundingSphere, cull::DepthPyramidDescriptor, draw::DrawIndirectArgs,
         math::hex_to_vec4, prelude::*,
     };
-    use crabslab::GrowableSlab;
+    use crabslab::{GrowableSlab, Slab};
     use glam::{Mat4, Quat, UVec2, UVec3, Vec2, Vec3, Vec4};
 
     #[test]

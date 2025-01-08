@@ -177,13 +177,12 @@ impl Deref for Stage {
 impl Stage {
     /// Create a new stage.
     pub fn new(ctx: &crate::Context) -> Self {
-        let runtime = ctx.get_runtime();
+        let runtime = ctx.as_ref();
         let device = &runtime.device;
-        let queue = &runtime.queue;
         let resolution @ UVec2 { x: w, y: h } = ctx.get_size();
         let atlas_size = *ctx.atlas_size.read().unwrap();
-        let atlas = Atlas::new(&device, &queue, atlas_size).unwrap();
-        let mngr = SlabAllocator::new(&runtime, wgpu::BufferUsages::empty());
+        let atlas = Atlas::new(ctx, atlas_size).unwrap();
+        let mngr = SlabAllocator::new(runtime, wgpu::BufferUsages::empty());
         let pbr_config = mngr.new_value(PbrConfig {
             atlas_size: UVec2::new(atlas_size.width, atlas_size.height),
             resolution,
@@ -456,8 +455,7 @@ impl Stage {
         // UNWRAP: panic on purpose
         *self.depth_texture.write().unwrap() =
             Texture::create_depth_texture(self.device(), size.x, size.y, sample_count);
-        self.bloom
-            .set_hdr_texture(self.device(), self.queue(), &hdr_texture);
+        self.bloom.set_hdr_texture(self.runtime(), &hdr_texture);
         self.tonemapping
             .set_hdr_texture(self.device(), &hdr_texture);
         *self.hdr_texture.write().unwrap() = hdr_texture;
@@ -476,7 +474,7 @@ impl Stage {
     /// This will cause a repacking.
     pub fn set_atlas_size(&self, size: wgpu::Extent3d) -> Result<(), StageError> {
         log::info!("resizing atlas to {size:?}");
-        self.atlas.resize(self.device(), self.queue(), size)?;
+        self.atlas.resize(self.runtime(), size)?;
         Ok(())
     }
 
@@ -500,9 +498,7 @@ impl Stage {
         images: impl IntoIterator<Item = impl Into<AtlasImage>>,
     ) -> Result<Vec<Hybrid<AtlasTexture>>, StageError> {
         let images = images.into_iter().map(|i| i.into()).collect::<Vec<_>>();
-        let frames = self
-            .atlas
-            .add_images(self.device(), self.queue(), self, &images)?;
+        let frames = self.atlas.add_images(self, &images)?;
 
         // The textures bindgroup will have to be remade
         let _ = self.textures_bindgroup.lock().unwrap().take();
@@ -532,9 +528,7 @@ impl Stage {
         images: impl IntoIterator<Item = impl Into<AtlasImage>>,
     ) -> Result<Vec<Hybrid<AtlasTexture>>, StageError> {
         let images = images.into_iter().map(|i| i.into()).collect::<Vec<_>>();
-        let frames = self
-            .atlas
-            .set_images(self.device(), self.queue(), self, &images)?;
+        let frames = self.atlas.set_images(self, &images)?;
 
         // The textures bindgroup will have to be remade
         let _ = self.textures_bindgroup.lock().unwrap().take();
@@ -767,7 +761,7 @@ impl Stage {
     /// It's good to call this after dropping assets to free up space on the
     /// slab.
     pub fn tick(&self) {
-        self.atlas.upkeep(self.device(), self.queue());
+        self.atlas.upkeep(self.runtime());
         let _ = self.tick_internal();
     }
 
@@ -945,7 +939,7 @@ impl core::fmt::Debug for NestedTransform {
 }
 
 impl NestedTransform {
-    pub fn new(mngr: &SlabAllocator<WgpuRuntime>) -> Self {
+    pub fn new(mngr: &SlabAllocator<impl IsRuntime>) -> Self {
         let nested = NestedTransform {
             local_transform: Arc::new(RwLock::new(Transform::default())),
             global_transform: mngr.new_value(Transform::default()).into_gpu_only(),
@@ -1031,8 +1025,7 @@ impl NestedTransform {
 
 #[cfg(test)]
 mod test {
-    use std::sync::Mutex;
-
+    use craballoc::runtime::CpuRuntime;
     use crabslab::{Array, Slab};
     use glam::{Mat4, Vec2, Vec3};
 
@@ -1074,7 +1067,7 @@ mod test {
 
     #[test]
     fn can_global_transform_calculation() {
-        let slab = SlabAllocator::<Mutex<Vec<u32>>>::default();
+        let slab = SlabAllocator::<CpuRuntime>::new(&CpuRuntime, ());
         // Setup a hierarchy of transforms
         log::info!("new");
         let root = NestedTransform::new(&slab);

@@ -48,12 +48,10 @@ pub struct IndirectDraws {
 }
 
 impl IndirectDraws {
-    fn new(ctx: &crate::Context, size: UVec2, sample_count: u32) -> Self {
-        let (device, queue) = ctx.get_device_and_queue_owned();
-        let runtime = WgpuRuntime { device, queue };
+    fn new(runtime: impl AsRef<WgpuRuntime>, size: UVec2, sample_count: u32) -> Self {
         Self {
-            compute_culling: ComputeCulling::new(ctx, size, sample_count),
-            slab: SlabAllocator::new(&runtime, wgpu::BufferUsages::INDIRECT),
+            compute_culling: ComputeCulling::new(runtime.as_ref(), size, sample_count),
+            slab: SlabAllocator::new(runtime, wgpu::BufferUsages::INDIRECT),
             draws: vec![],
         }
     }

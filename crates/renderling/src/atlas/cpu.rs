@@ -265,6 +265,7 @@ impl Atlas {
         self.texture_array.read().unwrap().texture.size()
     }
 
+    // TODO: Atlas should probably clone a reference to the runtime and the slab.
     pub fn add_images(
         &self,
         slab: &SlabAllocator<WgpuRuntime>,
@@ -375,9 +376,8 @@ impl Atlas {
         let tex = self.get_texture();
         let size = tex.texture.size();
         let buffer = Texture::read_from(
+            ctx,
             &tex.texture,
-            ctx.get_device(),
-            ctx.get_queue(),
             size.width as usize,
             size.height as usize,
             4,
@@ -949,7 +949,7 @@ mod test {
         frames.pop();
         frames.pop();
 
-        stage.atlas.upkeep(&ctx.get_runtime());
+        stage.atlas.upkeep(&ctx);
         assert_eq!(4, stage.atlas.len());
     }
 }

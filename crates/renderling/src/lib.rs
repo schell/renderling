@@ -219,6 +219,7 @@ mod test {
         transform::Transform,
     };
 
+    use craballoc::value::Hybrid;
     use glam::{Mat3, Mat4, Quat, UVec2, Vec2, Vec3, Vec4};
     use img_diff::DiffCfg;
     use pretty_assertions::assert_eq;
@@ -288,16 +289,12 @@ mod test {
             .hdr_texture
             .read()
             .unwrap()
-            .read_hdr_image(ctx.get_device(), ctx.get_queue())
+            .read_hdr_image(&ctx)
             .unwrap();
         //let hdr_img: RgbaImage = hdr_img.convert();
         img_diff::save("cmy_triangle/hdr.png", hdr_img);
 
-        let bloom_mix = stage
-            .bloom
-            .get_mix_texture()
-            .read_hdr_image(ctx.get_device(), ctx.get_queue())
-            .unwrap();
+        let bloom_mix = stage.bloom.get_mix_texture().read_hdr_image(&ctx).unwrap();
         img_diff::save("cmy_triangle/bloom_mix.png", bloom_mix);
 
         img_diff::assert_img_eq("cmy_triangle.png", img);
@@ -559,7 +556,7 @@ mod test {
             ..Default::default()
         });
 
-        let cube: slab::Hybrid<Renderlet> = stage.new_value(Renderlet {
+        let cube: Hybrid<Renderlet> = stage.new_value(Renderlet {
             camera_id: camera.id(),
             vertices_array: cube_geometry.array(),
             transform_id: transform.id(),

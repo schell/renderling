@@ -522,13 +522,10 @@ pub fn test_atomic_i_add_sub(
 
 #[cfg(test)]
 mod test {
-    use std::sync::Mutex;
-
+    use craballoc::{prelude::SlabAllocator, runtime::CpuRuntime};
     use glam::{Mat4, Quat, Vec3};
 
-    use crate::{
-        math::IsMatrix, slab::SlabAllocator, stage::NestedTransform, transform::Transform,
-    };
+    use crate::{math::IsMatrix, stage::NestedTransform, transform::Transform};
 
     #[test]
     fn matrix_hierarchy_sanity() {
@@ -565,7 +562,8 @@ mod test {
             (t, r, s)
         }
 
-        let slab = SlabAllocator::<Mutex<Vec<u32>>>::default();
+        #[expect(clippy::needless_borrows_for_generic_args, reason = "riffraff")]
+        let slab = SlabAllocator::<CpuRuntime>::new(&CpuRuntime, ());
         let a = NestedTransform::new(&slab);
         a.set(Transform {
             translation: Vec3::splat(100.0),

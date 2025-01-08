@@ -696,7 +696,11 @@ dependencies = [
 [[package]]
 name = "craballoc"
 version = "0.1.0"
+<<<<<<< HEAD
 source = "git+https://github.com/schell/crabslab#717578bd41e60d00bb38c8767dc1110eef8b5d87"
+=======
+source = "git+https://github.com/schell/crabslab#74936fdfe43a6423bda6e8c6d3bb8240688f4df5"
+>>>>>>> 1e9a24f (change many device, queue params into impl AsRef<WgpuRuntime>)
 dependencies = [
  "async-channel 1.9.0",
  "bytemuck",
@@ -710,9 +714,14 @@ dependencies = [
 
 [[package]]
 name = "crabslab"
+<<<<<<< HEAD
 version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6d3486b5979b1c73ca6ba48f69e2abd7941dd72b0e725519d113aef61ff7a236"
+=======
+version = "0.6.2"
+source = "git+https://github.com/schell/crabslab#74936fdfe43a6423bda6e8c6d3bb8240688f4df5"
+>>>>>>> 1e9a24f (change many device, queue params into impl AsRef<WgpuRuntime>)
 dependencies = [
  "crabslab-derive 0.4.3 (registry+https://github.com/rust-lang/crates.io-index)",
  "futures-lite 1.13.0",
@@ -734,8 +743,12 @@ dependencies = [
 [[package]]
 name = "crabslab-derive"
 version = "0.4.3"
+<<<<<<< HEAD
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ef999dd82fff9dc1f2cf371c0f9a6315016b9562a04811fbefae2d80da6a1fad"
+=======
+source = "git+https://github.com/schell/crabslab#74936fdfe43a6423bda6e8c6d3bb8240688f4df5"
+>>>>>>> 1e9a24f (change many device, queue params into impl AsRef<WgpuRuntime>)
 dependencies = [
  "proc-macro2",
  "quote",
