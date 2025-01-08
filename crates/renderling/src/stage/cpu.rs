@@ -3,6 +3,7 @@
 //! The `Stage` object contains a slab buffer and a render pipeline.
 //! It is used to stage [`Renderlet`]s for rendering.
 use core::sync::atomic::{AtomicU32, Ordering};
+use craballoc::prelude::*;
 use crabslab::Id;
 use snafu::Snafu;
 use std::{
@@ -18,7 +19,6 @@ use crate::{
     draw::DrawCalls,
     pbr::{debug::DebugChannel, light::Light, PbrConfig},
     skybox::{Skybox, SkyboxRenderPipeline},
-    slab::*,
     stage::Renderlet,
     texture::{DepthTexture, Texture},
     tonemapping::Tonemapping,
@@ -133,10 +133,7 @@ fn create_stage_render_pipeline(
 /// Only available on the CPU. Not available in shaders.
 #[derive(Clone)]
 pub struct Stage {
-    pub(crate) device: Arc<wgpu::Device>,
-    pub(crate) queue: Arc<wgpu::Queue>,
-
-    pub(crate) mngr: SlabAllocator<wgpu::Buffer>,
+    pub(crate) mngr: SlabAllocator<WgpuRuntime>,
 
     pub(crate) pbr_config: Hybrid<PbrConfig>,
     pub(crate) lights: Arc<RwLock<HybridArray<Id<Light>>>>,
@@ -170,7 +167,7 @@ pub struct Stage {
 }
 
 impl Deref for Stage {
-    type Target = SlabAllocator<wgpu::Buffer>;
+    type Target = SlabAllocator<WgpuRuntime>;
 
     fn deref(&self) -> &Self::Target {
         &self.mngr
@@ -180,11 +177,12 @@ impl Deref for Stage {
 impl Stage {
     /// Create a new stage.
     pub fn new(ctx: &crate::Context) -> Self {
-        let (device, queue) = ctx.get_device_and_queue_owned();
+        let runtime = ctx.as_ref();
+        let device = &runtime.device;
         let resolution @ UVec2 { x: w, y: h } = ctx.get_size();
         let atlas_size = *ctx.atlas_size.read().unwrap();
-        let atlas = Atlas::new(&device, &queue, atlas_size).unwrap();
-        let mngr = SlabAllocator::default();
+        let atlas = Atlas::new(ctx, atlas_size).unwrap();
+        let mngr = SlabAllocator::new(runtime, wgpu::BufferUsages::empty());
         let pbr_config = mngr.new_value(PbrConfig {
             atlas_size: UVec2::new(atlas_size.width, atlas_size.height),
             resolution,
@@ -193,23 +191,22 @@ impl Stage {
         let multisample_count = 1;
         let lights = mngr.new_array(vec![Id::<Light>::NONE; 16]);
         let hdr_texture = Arc::new(RwLock::new(Texture::create_hdr_texture(
-            &device,
+            device,
             w,
             h,
             multisample_count,
         )));
         let depth_texture = Arc::new(RwLock::new(Texture::create_depth_texture(
-            &device,
+            device,
             w,
             h,
             multisample_count,
         )));
         let msaa_render_target = Default::default();
         // UNWRAP: safe because no other references at this point (created above^)
-        let bloom = Bloom::new(&device, &queue, &hdr_texture.read().unwrap());
+        let bloom = Bloom::new(ctx, &hdr_texture.read().unwrap());
         let tonemapping = Tonemapping::new(
-            &device,
-            &queue,
+            runtime,
             ctx.get_render_target().format().add_srgb_suffix(),
             &bloom.get_mix_texture(),
         );
@@ -220,11 +217,11 @@ impl Stage {
             lights: Arc::new(RwLock::new(lights)),
 
             stage_pipeline: Arc::new(RwLock::new(create_stage_render_pipeline(
-                &device,
+                device,
                 multisample_count,
             ))),
             atlas,
-            skybox: Arc::new(RwLock::new(Skybox::empty(&device, &queue))),
+            skybox: Arc::new(RwLock::new(Skybox::empty(runtime))),
             skybox_bindgroup: Default::default(),
             skybox_pipeline: Default::default(),
             has_skybox: Arc::new(AtomicBool::new(false)),
@@ -239,7 +236,7 @@ impl Stage {
                 UVec2::new(w, h),
                 multisample_count,
             ))),
-            debug_overlay: DebugOverlay::new(&device, ctx.get_render_target().format()),
+            debug_overlay: DebugOverlay::new(device, ctx.get_render_target().format()),
             has_debug_overlay: Arc::new(false.into()),
             hdr_texture,
             depth_texture,
@@ -248,13 +245,7 @@ impl Stage {
             clear_color_attachments: Arc::new(true.into()),
             clear_depth_attachments: Arc::new(true.into()),
             background_color: Arc::new(RwLock::new(wgpu::Color::TRANSPARENT)),
-            device,
-            queue,
         }
-    }
-
-    pub fn get_device_and_queue_owned(&self) -> (Arc<wgpu::Device>, Arc<wgpu::Queue>) {
-        (self.device.clone(), self.queue.clone())
     }
 
     pub fn set_background_color(&self, color: impl Into<Vec4>) {
@@ -289,18 +280,18 @@ impl Stage {
         log::debug!("setting multisample count to {multisample_count}");
         // UNWRAP: POP
         *self.stage_pipeline.write().unwrap() =
-            create_stage_render_pipeline(&self.device, multisample_count);
+            create_stage_render_pipeline(self.device(), multisample_count);
         let size = self.get_size();
         // UNWRAP: POP
         *self.depth_texture.write().unwrap() =
-            Texture::create_depth_texture(&self.device, size.x, size.y, multisample_count);
+            Texture::create_depth_texture(self.device(), size.x, size.y, multisample_count);
         // UNWRAP: POP
         let format = self.hdr_texture.read().unwrap().texture.format();
         *self.msaa_render_target.write().unwrap() = if multisample_count == 1 {
             None
         } else {
             Some(create_msaa_textureview(
-                &self.device,
+                self.device(),
                 size.x,
                 size.y,
                 format,
@@ -449,11 +440,11 @@ impl Stage {
         }
 
         self.pbr_config.modify(|cfg| cfg.resolution = size);
-        let hdr_texture = Texture::create_hdr_texture(&self.device, size.x, size.y, 1);
+        let hdr_texture = Texture::create_hdr_texture(self.device(), size.x, size.y, 1);
         let sample_count = self.msaa_sample_count.load(Ordering::Relaxed);
         if let Some(msaa_view) = self.msaa_render_target.write().unwrap().as_mut() {
             *msaa_view = create_msaa_textureview(
-                &self.device,
+                self.device(),
                 size.x,
                 size.y,
                 hdr_texture.texture.format(),
@@ -463,10 +454,10 @@ impl Stage {
 
         // UNWRAP: panic on purpose
         *self.depth_texture.write().unwrap() =
-            Texture::create_depth_texture(&self.device, size.x, size.y, sample_count);
-        self.bloom
-            .set_hdr_texture(&self.device, &self.queue, &hdr_texture);
-        self.tonemapping.set_hdr_texture(&self.device, &hdr_texture);
+            Texture::create_depth_texture(self.device(), size.x, size.y, sample_count);
+        self.bloom.set_hdr_texture(self.runtime(), &hdr_texture);
+        self.tonemapping
+            .set_hdr_texture(self.device(), &hdr_texture);
         *self.hdr_texture.write().unwrap() = hdr_texture;
 
         let _ = self.skybox_bindgroup.lock().unwrap().take();
@@ -483,7 +474,7 @@ impl Stage {
     /// This will cause a repacking.
     pub fn set_atlas_size(&self, size: wgpu::Extent3d) -> Result<(), StageError> {
         log::info!("resizing atlas to {size:?}");
-        self.atlas.resize(&self.device, &self.queue, size)?;
+        self.atlas.resize(self.runtime(), size)?;
         Ok(())
     }
 
@@ -507,9 +498,7 @@ impl Stage {
         images: impl IntoIterator<Item = impl Into<AtlasImage>>,
     ) -> Result<Vec<Hybrid<AtlasTexture>>, StageError> {
         let images = images.into_iter().map(|i| i.into()).collect::<Vec<_>>();
-        let frames = self
-            .atlas
-            .add_images(&self.device, &self.queue, self, &images)?;
+        let frames = self.atlas.add_images(self, &images)?;
 
         // The textures bindgroup will have to be remade
         let _ = self.textures_bindgroup.lock().unwrap().take();
@@ -539,9 +528,7 @@ impl Stage {
         images: impl IntoIterator<Item = impl Into<AtlasImage>>,
     ) -> Result<Vec<Hybrid<AtlasTexture>>, StageError> {
         let images = images.into_iter().map(|i| i.into()).collect::<Vec<_>>();
-        let frames = self
-            .atlas
-            .set_images(&self.device, &self.queue, self, &images)?;
+        let frames = self.atlas.set_images(self, &images)?;
 
         // The textures bindgroup will have to be remade
         let _ = self.textures_bindgroup.lock().unwrap().take();
@@ -610,7 +597,7 @@ impl Stage {
         let pipeline = if let Some(pipeline) = pipeline_guard.as_mut() {
             if pipeline.msaa_sample_count() != msaa_sample_count {
                 *pipeline = Arc::new(crate::skybox::create_skybox_render_pipeline(
-                    &self.device,
+                    self.device(),
                     Texture::HDR_TEXTURE_FORMAT,
                     Some(msaa_sample_count),
                 ));
@@ -618,7 +605,7 @@ impl Stage {
             pipeline.clone()
         } else {
             let pipeline = Arc::new(crate::skybox::create_skybox_render_pipeline(
-                &self.device,
+                self.device(),
                 Texture::HDR_TEXTURE_FORMAT,
                 Some(msaa_sample_count),
             ));
@@ -631,7 +618,7 @@ impl Stage {
             bindgroup.clone()
         } else {
             let bg = Arc::new(crate::skybox::create_skybox_bindgroup(
-                &self.device,
+                self.device(),
                 slab_buffer,
                 &self.skybox.read().unwrap().environment_cubemap,
             ));
@@ -648,7 +635,7 @@ impl Stage {
             bindgroup.clone()
         } else {
             let b = Arc::new({
-                let device: &wgpu::Device = &self.device;
+                let device: &wgpu::Device = self.device();
                 crate::linkage::slab_bindgroup(
                     device,
                     slab_buffer,
@@ -668,7 +655,7 @@ impl Stage {
             bindgroup.clone()
         } else {
             let b = Arc::new(crate::linkage::atlas_and_skybox_bindgroup(
-                &self.device,
+                self.device(),
                 &{
                     let this = &self;
                     this.stage_pipeline.clone()
@@ -729,8 +716,7 @@ impl Stage {
     /// Returns a clone of the current depth texture.
     pub fn get_depth_texture(&self) -> DepthTexture {
         DepthTexture {
-            device: self.device.clone(),
-            queue: self.queue.clone(),
+            runtime: self.runtime().clone(),
             texture: self.depth_texture.read().unwrap().texture.clone(),
         }
     }
@@ -741,7 +727,7 @@ impl Stage {
         camera_id: Id<Camera>,
     ) -> Result<Skybox, AtlasImageError> {
         let hdr = AtlasImage::from_hdr_path(path)?;
-        Ok(Skybox::new(&self.device, &self.queue, hdr, camera_id))
+        Ok(Skybox::new(self.runtime(), hdr, camera_id))
     }
 
     pub fn new_nested_transform(&self) -> NestedTransform {
@@ -754,17 +740,9 @@ impl Stage {
     }
 
     fn tick_internal(&self) -> Arc<wgpu::Buffer> {
-        self.draw_calls
-            .write()
-            .unwrap()
-            .upkeep(&self.device, &self.queue);
+        self.draw_calls.write().unwrap().upkeep();
 
-        if let Some(new_slab_buffer) = self.mngr.upkeep((
-            &self.device,
-            &self.queue,
-            Some("stage render upkeep"),
-            wgpu::BufferUsages::empty(),
-        )) {
+        if let Some(new_slab_buffer) = self.mngr.upkeep() {
             // invalidate our bindgroups, etc
             let _ = self.skybox_bindgroup.lock().unwrap().take();
             let _ = self.buffers_bindgroup.lock().unwrap().take();
@@ -782,7 +760,7 @@ impl Stage {
     /// It's good to call this after dropping assets to free up space on the
     /// slab.
     pub fn tick(&self) {
-        self.atlas.upkeep(&self.device, &self.queue);
+        self.atlas.upkeep(self.runtime());
         let _ = self.tick_internal();
     }
 
@@ -792,7 +770,7 @@ impl Stage {
         let depth_texture = self.depth_texture.read().unwrap();
         // UNWRAP: safe because we know the depth texture format will always match
         let maybe_indirect_buffer = draw_calls
-            .pre_draw(&self.device, &self.queue, &slab_buffer, &depth_texture)
+            .pre_draw(self.device(), self.queue(), &slab_buffer, &depth_texture)
             .unwrap();
         {
             let label = Some("stage render");
@@ -814,7 +792,7 @@ impl Stage {
             let clear_depth = self.clear_depth_attachments.load(Ordering::Relaxed);
 
             let mut encoder = self
-                .device
+                .device()
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor { label });
             {
                 let hdr_texture = self.hdr_texture.read().unwrap();
@@ -871,28 +849,28 @@ impl Stage {
                     render_pass.draw(0..36, skybox.camera.inner()..skybox.camera.inner() + 1);
                 }
             }
-            self.queue.submit(std::iter::once(encoder.finish()));
+            self.queue().submit(std::iter::once(encoder.finish()));
         }
 
         // then render bloom
         if self.has_bloom.load(Ordering::Relaxed) {
-            self.bloom.bloom(&self.device, &self.queue);
+            self.bloom.bloom(self.device(), self.queue());
         } else {
             // copy the input hdr texture to the bloom mix texture
-            let mut encoder = self
-                .device
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                    label: Some("no bloom copy"),
-                });
+            let mut encoder =
+                self.device()
+                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                        label: Some("no bloom copy"),
+                    });
             let bloom_mix_texture = self.bloom.get_mix_texture();
             encoder.copy_texture_to_texture(
-                wgpu::ImageCopyTexture {
+                wgpu::TexelCopyTextureInfo {
                     texture: &self.hdr_texture.read().unwrap().texture,
                     mip_level: 0,
                     origin: wgpu::Origin3d { x: 0, y: 0, z: 0 },
                     aspect: wgpu::TextureAspect::All,
                 },
-                wgpu::ImageCopyTexture {
+                wgpu::TexelCopyTextureInfo {
                     texture: &bloom_mix_texture.texture,
                     mip_level: 0,
                     origin: wgpu::Origin3d { x: 0, y: 0, z: 0 },
@@ -904,16 +882,16 @@ impl Stage {
                     depth_or_array_layers: 1,
                 },
             );
-            self.queue.submit(std::iter::once(encoder.finish()));
+            self.queue().submit(std::iter::once(encoder.finish()));
         }
 
-        self.tonemapping.render(&self.device, &self.queue, view);
+        self.tonemapping.render(self.device(), self.queue(), view);
 
         if self.has_debug_overlay.load(Ordering::Relaxed) {
             if let Some(indirect_draw_buffer) = maybe_indirect_buffer {
                 self.debug_overlay.render(
-                    &self.device,
-                    &self.queue,
+                    self.device(),
+                    self.queue(),
                     view,
                     &slab_buffer,
                     &indirect_draw_buffer,
@@ -960,7 +938,7 @@ impl core::fmt::Debug for NestedTransform {
 }
 
 impl NestedTransform {
-    pub fn new(mngr: &SlabAllocator<impl IsBuffer>) -> Self {
+    pub fn new(mngr: &SlabAllocator<impl IsRuntime>) -> Self {
         let nested = NestedTransform {
             local_transform: Arc::new(RwLock::new(Transform::default())),
             global_transform: mngr.new_value(Transform::default()).into_gpu_only(),
@@ -972,7 +950,7 @@ impl NestedTransform {
     }
 
     pub fn get_notifier_index(&self) -> usize {
-        self.global_transform.notifier_index
+        self.global_transform.notifier_index()
     }
 
     fn mark_dirty(&self) {
@@ -1046,8 +1024,7 @@ impl NestedTransform {
 
 #[cfg(test)]
 mod test {
-    use std::sync::Mutex;
-
+    use craballoc::runtime::CpuRuntime;
     use crabslab::{Array, Slab};
     use glam::{Mat4, Vec2, Vec3};
 
@@ -1089,7 +1066,11 @@ mod test {
 
     #[test]
     fn can_global_transform_calculation() {
-        let slab = SlabAllocator::<Mutex<Vec<u32>>>::default();
+        #[expect(
+            clippy::needless_borrows_for_generic_args,
+            reason = "This is just riff-raff, as it doesn't compile without the borrow."
+        )]
+        let slab = SlabAllocator::<CpuRuntime>::new(&CpuRuntime, ());
         // Setup a hierarchy of transforms
         log::info!("new");
         let root = NestedTransform::new(&slab);

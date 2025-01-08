@@ -2,13 +2,13 @@
 
 use std::sync::Arc;
 
+use craballoc::prelude::{Gpu, Hybrid, SlabAllocator, WeakHybrid, WgpuRuntime};
 use crabslab::Id;
 use glam::UVec2;
 use rustc_hash::FxHashMap;
 
 use crate::{
     cull::{ComputeCulling, CullingError},
-    slab::{Gpu, Hybrid, SlabAllocator, WeakHybrid},
     stage::Renderlet,
     texture::Texture,
     Context,
@@ -42,16 +42,16 @@ impl InternalRenderlet {
 ///
 /// Issues draw calls and performs culling.
 pub struct IndirectDraws {
-    pub(crate) slab: SlabAllocator<wgpu::Buffer>,
+    pub(crate) slab: SlabAllocator<WgpuRuntime>,
     pub(crate) draws: Vec<Gpu<DrawIndirectArgs>>,
     pub(crate) compute_culling: ComputeCulling,
 }
 
 impl IndirectDraws {
-    fn new(device: &wgpu::Device, size: UVec2, sample_count: u32) -> Self {
+    fn new(runtime: impl AsRef<WgpuRuntime>, size: UVec2, sample_count: u32) -> Self {
         Self {
-            compute_culling: ComputeCulling::new(device, size, sample_count),
-            slab: SlabAllocator::default(),
+            compute_culling: ComputeCulling::new(runtime.as_ref(), size, sample_count),
+            slab: SlabAllocator::new(runtime, wgpu::BufferUsages::INDIRECT),
             draws: vec![],
         }
     }
@@ -62,19 +62,12 @@ impl IndirectDraws {
         }
     }
 
-    fn get_indirect_buffer(&self, device: &wgpu::Device, queue: &wgpu::Queue) -> Arc<wgpu::Buffer> {
-        self.slab.get_updated_buffer((
-            device,
-            queue,
-            Some("indirect draw upkeep"),
-            wgpu::BufferUsages::INDIRECT,
-        ))
+    fn get_indirect_buffer(&self) -> Arc<wgpu::Buffer> {
+        self.slab.get_updated_buffer()
     }
 
     fn sync_with_internal_renderlets(
         &mut self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
         internal_renderlets: &[InternalRenderlet],
         redraw_args: bool,
     ) -> Arc<wgpu::Buffer> {
@@ -82,12 +75,7 @@ impl IndirectDraws {
             self.invalidate();
             // Pre-upkeep to reclaim resources - this is necessary because
             // the draw buffer has to be contiguous (it can't start with a bunch of trash)
-            if let Some(_indirect_buffer) = self.slab.upkeep((
-                device,
-                queue,
-                Some("indirect draw pre upkeep"),
-                wgpu::BufferUsages::INDIRECT,
-            )) {
+            if let Some(_indirect_buffer) = self.slab.upkeep() {
                 // Invalidate the compute culling buffer, it will be regenerated later...
                 self.compute_culling.invalidate_bindgroup();
             }
@@ -100,21 +88,18 @@ impl IndirectDraws {
                 })
                 .collect();
         }
-        self.get_indirect_buffer(device, queue)
+        self.get_indirect_buffer()
     }
 
     /// Read the images from the hierarchical z-buffer used for occlusion
     /// culling.
     ///
     /// This is primarily for testing.
-    pub async fn read_hzb_images(
-        &self,
-        ctx: &crate::Context,
-    ) -> Result<Vec<image::GrayImage>, CullingError> {
+    pub async fn read_hzb_images(&self) -> Result<Vec<image::GrayImage>, CullingError> {
         self.compute_culling
             .compute_depth_pyramid
             .depth_pyramid
-            .read_images(ctx)
+            .read_images()
             .await
     }
 }
@@ -183,11 +168,7 @@ impl DrawCalls {
             drawing_strategy: {
                 if can_use_compute_culling {
                     log::debug!("Using indirect drawing method and compute culling");
-                    DrawingStrategy::Indirect(IndirectDraws::new(
-                        ctx.get_device(),
-                        size,
-                        sample_count,
-                    ))
+                    DrawingStrategy::Indirect(IndirectDraws::new(ctx, size, sample_count))
                 } else {
                     log::debug!("Using direct drawing method");
                     DrawingStrategy::Direct
@@ -273,7 +254,7 @@ impl DrawCalls {
     }
 
     /// Perform upkeep on queued draw calls and synchronize internal buffers.
-    pub fn upkeep(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) {
+    pub fn upkeep(&mut self) {
         let mut redraw_args = false;
 
         // Drop any renderlets that have no external references.
@@ -288,12 +269,7 @@ impl DrawCalls {
         });
 
         if let DrawingStrategy::Indirect(indirect) = &mut self.drawing_strategy {
-            indirect.sync_with_internal_renderlets(
-                device,
-                queue,
-                &self.internal_renderlets,
-                redraw_args,
-            );
+            indirect.sync_with_internal_renderlets(&self.internal_renderlets, redraw_args);
         }
     }
 

@@ -107,10 +107,11 @@ pub fn tutorial_slabbed_renderlet(
 
 #[cfg(test)]
 mod test {
+    use craballoc::prelude::{SlabAllocator, WgpuRuntime};
+
     use crate::{
         camera::Camera,
         math::{Vec3, Vec4, Vec4Swizzles},
-        slab::SlabAllocator,
         stage::{Renderlet, Vertex},
         texture::Texture,
         transform::Transform,
@@ -120,11 +121,11 @@ mod test {
     #[test]
     fn tutorial_implicit_isosceles_triangle() {
         let ctx = Context::headless(100, 100);
-        let (device, queue) = ctx.get_device_and_queue_owned();
+        let WgpuRuntime { device, queue } = ctx.as_ref();
         let label = Some("implicit isosceles triangle");
-        let depth = Texture::create_depth_texture(&device, 100, 100, 1);
-        let vertex = crate::linkage::tutorial_implicit_isosceles_vertex::linkage(&device);
-        let fragment = crate::linkage::tutorial_passthru_fragment::linkage(&device);
+        let depth = Texture::create_depth_texture(device, 100, 100, 1);
+        let vertex = crate::linkage::tutorial_implicit_isosceles_vertex::linkage(device);
+        let fragment = crate::linkage::tutorial_passthru_fragment::linkage(device);
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label,
             layout: None,
@@ -207,10 +208,10 @@ mod test {
     #[test]
     fn slabbed_isosceles_triangle_no_instance() {
         let ctx = Context::headless(100, 100);
-        let (device, queue) = ctx.get_device_and_queue_owned();
+        let WgpuRuntime { device, queue } = ctx.as_ref();
 
         // Create our geometry on the slab.
-        let slab = SlabAllocator::<wgpu::Buffer>::default();
+        let slab = SlabAllocator::new(&ctx, wgpu::BufferUsages::empty());
         let initial_vertices = [
             Vertex {
                 position: Vec3::new(0.5, -0.5, 0.0),
@@ -252,8 +253,8 @@ mod test {
             push_constant_ranges: &[],
         });
 
-        let vertex = crate::linkage::tutorial_slabbed_vertices_no_instance::linkage(&device);
-        let fragment = crate::linkage::tutorial_passthru_fragment::linkage(&device);
+        let vertex = crate::linkage::tutorial_slabbed_vertices_no_instance::linkage(device);
+        let fragment = crate::linkage::tutorial_passthru_fragment::linkage(device);
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label,
             layout: Some(&pipeline_layout),
@@ -298,8 +299,7 @@ mod test {
             cache: None,
         });
 
-        let slab_buffer =
-            slab.get_updated_buffer((&device, &queue, None, wgpu::BufferUsages::empty()));
+        let slab_buffer = slab.get_updated_buffer();
         let bindgroup = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label,
             layout: &bindgroup_layout,
@@ -309,7 +309,7 @@ mod test {
             }],
         });
 
-        let depth = Texture::create_depth_texture(&device, 100, 100, 1);
+        let depth = Texture::create_depth_texture(device, 100, 100, 1);
         let frame = ctx.get_next_frame().unwrap();
         let view = frame.view();
 
@@ -343,7 +343,7 @@ mod test {
         queue.submit(std::iter::once(encoder.finish()));
 
         // assert that we're reading the data correctly
-        let data = futures_lite::future::block_on(slab.read(&ctx, None, ..)).unwrap();
+        let data = futures_lite::future::block_on(slab.read(..)).unwrap();
         let mut vertices = vec![];
         for i in 0..3 {
             let mut out_color = Vec4::ONE;
@@ -366,10 +366,10 @@ mod test {
     #[test]
     fn tutorial_slabbed_isosceles_triangle() {
         let ctx = Context::headless(100, 100);
-        let (device, queue) = ctx.get_device_and_queue_owned();
+        let WgpuRuntime { device, queue } = ctx.as_ref();
 
         // Create our geometry on the slab.
-        let slab = SlabAllocator::<wgpu::Buffer>::default();
+        let slab = SlabAllocator::new(&ctx, wgpu::BufferUsages::empty());
         let geometry = vec![
             Vertex {
                 position: Vec3::new(0.5, -0.5, 0.0),
@@ -425,8 +425,8 @@ mod test {
             bind_group_layouts: &[&bindgroup_layout],
             push_constant_ranges: &[],
         });
-        let vertex = crate::linkage::tutorial_slabbed_vertices::linkage(&device);
-        let fragment = crate::linkage::tutorial_passthru_fragment::linkage(&device);
+        let vertex = crate::linkage::tutorial_slabbed_vertices::linkage(device);
+        let fragment = crate::linkage::tutorial_passthru_fragment::linkage(device);
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label,
             layout: Some(&pipeline_layout),
@@ -471,8 +471,7 @@ mod test {
             cache: None,
         });
 
-        let slab_buffer =
-            slab.get_updated_buffer((&device, &queue, None, wgpu::BufferUsages::empty()));
+        let slab_buffer = slab.get_updated_buffer();
         let bindgroup = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label,
             layout: &bindgroup_layout,
@@ -482,7 +481,7 @@ mod test {
             }],
         });
 
-        let depth = Texture::create_depth_texture(&device, 100, 100, 1);
+        let depth = Texture::create_depth_texture(device, 100, 100, 1);
         let frame = ctx.get_next_frame().unwrap();
         let view = frame.view();
 
@@ -525,11 +524,11 @@ mod test {
     #[test]
     fn tutorial_slabbed_renderlet() {
         let ctx = Context::headless(100, 100);
-        let (device, queue) = ctx.get_device_and_queue_owned();
+        let WgpuRuntime { device, queue } = ctx.as_ref();
 
         // Create our geometry on the slab.
         // Don't worry too much about capacity, it can grow.
-        let slab = SlabAllocator::<wgpu::Buffer>::default();
+        let slab = SlabAllocator::new(&ctx, wgpu::BufferUsages::empty());
         let geometry = slab.new_array([
             Vertex {
                 position: Vec3::new(0.5, -0.5, 0.0),
@@ -597,8 +596,8 @@ mod test {
             push_constant_ranges: &[],
         });
 
-        let vertex = crate::linkage::tutorial_slabbed_renderlet::linkage(&device);
-        let fragment = crate::linkage::tutorial_passthru_fragment::linkage(&device);
+        let vertex = crate::linkage::tutorial_slabbed_renderlet::linkage(device);
+        let fragment = crate::linkage::tutorial_passthru_fragment::linkage(device);
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label,
             layout: Some(&pipeline_layout),
@@ -643,8 +642,7 @@ mod test {
             cache: None,
         });
 
-        let slab_buffer =
-            slab.get_updated_buffer((&device, &queue, None, wgpu::BufferUsages::empty()));
+        let slab_buffer = slab.get_updated_buffer();
         let bindgroup = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label,
             layout: &bindgroup_layout,
@@ -654,7 +652,7 @@ mod test {
             }],
         });
 
-        let depth = Texture::create_depth_texture(&device, 100, 100, 1);
+        let depth = Texture::create_depth_texture(device, 100, 100, 1);
         let frame = ctx.get_next_frame().unwrap();
         let view = frame.view();
 

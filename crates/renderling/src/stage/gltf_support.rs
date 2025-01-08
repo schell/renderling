@@ -1,6 +1,7 @@
 //! Gltf support for the [`Stage`](crate::Stage).
 use std::{collections::HashMap, sync::Arc};
 
+use craballoc::prelude::*;
 use crabslab::{Array, Id};
 use glam::{Mat4, Quat, Vec2, Vec3, Vec4};
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -13,7 +14,6 @@ use crate::{
         light::{DirectionalLight, Light, LightStyle, PointLight, SpotLight},
         Material,
     },
-    slab::*,
     stage::{MorphTarget, NestedTransform, Renderlet, Skin, Stage, Vertex},
     transform::Transform,
 };
@@ -596,8 +596,8 @@ pub struct GltfCamera {
     pub camera: Hybrid<Camera>,
 }
 
-impl<'a> GltfCamera {
-    fn new(stage: &mut Stage, gltf_camera: gltf::Camera<'a>, transform: &NestedTransform) -> Self {
+impl GltfCamera {
+    fn new(stage: &mut Stage, gltf_camera: gltf::Camera<'_>, transform: &NestedTransform) -> Self {
         let projection = match gltf_camera.projection() {
             gltf::camera::Projection::Orthographic(o) => glam::Mat4::orthographic_rh(
                 -o.xmag(),

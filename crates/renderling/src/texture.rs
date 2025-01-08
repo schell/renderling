@@ -1,6 +1,7 @@
 //! Wrapper around [`wgpu::Texture`].
 use std::{ops::Deref, sync::Arc};
 
+use craballoc::runtime::WgpuRuntime;
 use glam::UVec2;
 use image::{
     load_from_memory, DynamicImage, GenericImage, GenericImageView, ImageBuffer, ImageError,
@@ -69,14 +70,14 @@ impl Texture {
 
     /// Create a cubemap texture from 6 faces.
     pub fn new_cubemap_texture(
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
+        runtime: impl AsRef<WgpuRuntime>,
         label: Option<&str>,
         texture_size: u32,
         face_textures: &[Texture],
         image_format: wgpu::TextureFormat,
         mip_levels: u32,
     ) -> Self {
+        let WgpuRuntime { device, queue } = runtime.as_ref();
         let size = wgpu::Extent3d {
             width: texture_size,
             height: texture_size,
@@ -105,13 +106,13 @@ impl Texture {
                 let index = i * mip_levels as usize + mip_level;
                 let texture = &face_textures[index].texture;
                 encoder.copy_texture_to_texture(
-                    wgpu::ImageCopyTexture {
+                    wgpu::TexelCopyTextureInfo {
                         texture,
                         mip_level: 0,
                         origin: wgpu::Origin3d::ZERO,
                         aspect: wgpu::TextureAspect::All,
                     },
-                    wgpu::ImageCopyTexture {
+                    wgpu::TexelCopyTextureInfo {
                         texture: &cubemap_texture,
                         mip_level: mip_level as u32,
                         origin: wgpu::Origin3d {
@@ -158,8 +159,7 @@ impl Texture {
     /// Create a new texture.
     #[allow(clippy::too_many_arguments)]
     pub fn new_with(
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
+        runtime: impl AsRef<WgpuRuntime>,
         label: Option<&str>,
         usage: Option<wgpu::TextureUsages>,
         sampler: Option<wgpu::Sampler>,
@@ -171,6 +171,9 @@ impl Texture {
         mip_level_count: u32,
         data: &[u8],
     ) -> Self {
+        let runtime = runtime.as_ref();
+        let device = &runtime.device;
+        let queue = &runtime.queue;
         let mip_level_count = 1.max(mip_level_count);
         let size = wgpu::Extent3d {
             width,
@@ -192,14 +195,14 @@ impl Texture {
 
         if !data.is_empty() {
             queue.write_texture(
-                wgpu::ImageCopyTextureBase {
+                wgpu::TexelCopyTextureInfo {
                     texture: &texture,
                     mip_level: 0,
                     origin: wgpu::Origin3d::ZERO,
                     aspect: wgpu::TextureAspect::All,
                 },
                 data,
-                wgpu::ImageDataLayout {
+                wgpu::TexelCopyBufferLayout {
                     offset: 0,
                     bytes_per_row: Some(color_channels * color_channel_bytes * width),
                     rows_per_image: None,
@@ -234,8 +237,7 @@ impl Texture {
     /// byte per channel.
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
+        runtime: impl AsRef<WgpuRuntime>,
         label: Option<&str>,
         usage: Option<wgpu::TextureUsages>,
         color_channels: u32,
@@ -243,9 +245,9 @@ impl Texture {
         height: u32,
         data: &[u8],
     ) -> Self {
+        let runtime = runtime.as_ref();
         Self::new_with(
-            device,
-            queue,
+            runtime,
             label,
             usage,
             None,
@@ -260,8 +262,7 @@ impl Texture {
     }
 
     pub fn from_image_bytes(
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
+        runtime: impl AsRef<WgpuRuntime>,
         bytes: &[u8],
         label: &str,
     ) -> Result<Self> {
@@ -271,29 +272,31 @@ impl Texture {
 
         match img {
             DynamicImage::ImageLuma8(b) => {
-                Self::from_image_buffer(device, queue, &b, Some(label), None, None)
+                Self::from_image_buffer(runtime, &b, Some(label), None, None)
             }
             DynamicImage::ImageLumaA8(b) => {
-                Self::from_image_buffer(device, queue, &b, Some(label), None, None)
+                Self::from_image_buffer(runtime, &b, Some(label), None, None)
             }
             DynamicImage::ImageRgb8(b) => {
-                Self::from_image_buffer(device, queue, &b, Some(label), None, None)
+                Self::from_image_buffer(runtime, &b, Some(label), None, None)
             }
             DynamicImage::ImageRgba8(b) => {
-                Self::from_image_buffer(device, queue, &b, Some(label), None, None)
+                Self::from_image_buffer(runtime, &b, Some(label), None, None)
             }
-            img => Self::from_image_buffer(device, queue, &img.to_rgba8(), Some(label), None, None),
+            img => Self::from_image_buffer(runtime, &img.to_rgba8(), Some(label), None, None),
         }
     }
 
     pub fn from_dynamic_image(
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
+        runtime: impl AsRef<WgpuRuntime>,
         dyn_img: image::DynamicImage,
         label: Option<&str>,
         usage: Option<wgpu::TextureUsages>,
         mip_level_count: u32,
     ) -> Self {
+        let runtime = runtime.as_ref();
+        let device = &runtime.device;
+        let queue = &runtime.queue;
         let mip_level_count = mip_level_count.max(1);
         let dimensions = dyn_img.dimensions();
 
@@ -328,14 +331,14 @@ impl Texture {
         });
 
         queue.write_texture(
-            wgpu::ImageCopyTextureBase {
+            wgpu::TexelCopyTextureInfo {
                 texture: &texture,
                 mip_level: 0,
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
             },
             img.as_bytes(),
-            wgpu::ImageDataLayout {
+            wgpu::TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(channels * dimensions.0),
                 rows_per_image: Some(dimensions.1),
@@ -347,8 +350,7 @@ impl Texture {
     }
 
     pub fn from_image_buffer<P>(
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
+        runtime: impl AsRef<WgpuRuntime>,
         img: &ImageBuffer<P, Vec<u8>>,
         label: Option<&str>,
         usage: Option<wgpu::TextureUsages>,
@@ -358,6 +360,7 @@ impl Texture {
         P: PixelWithColorType,
         ImageBuffer<P, Vec<u8>>: GenericImage + Deref<Target = [u8]>,
     {
+        let runtime = runtime.as_ref();
         let dimensions = img.dimensions();
 
         let size = wgpu::Extent3d {
@@ -366,7 +369,7 @@ impl Texture {
             depth_or_array_layers: 1,
         };
 
-        let texture = device.create_texture(&wgpu::TextureDescriptor {
+        let texture = runtime.device.create_texture(&wgpu::TextureDescriptor {
             label,
             size,
             mip_level_count: 1,
@@ -389,15 +392,15 @@ impl Texture {
             view_formats: &[],
         });
 
-        queue.write_texture(
-            wgpu::ImageCopyTextureBase {
+        runtime.queue.write_texture(
+            wgpu::TexelCopyTextureInfo {
                 texture: &texture,
                 mip_level: 0,
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
             },
             img.deref(),
-            wgpu::ImageDataLayout {
+            wgpu::TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(P::CHANNEL_COUNT as u32 * dimensions.0),
                 rows_per_image: Some(dimensions.1),
@@ -405,7 +408,12 @@ impl Texture {
             size,
         );
 
-        Ok(Self::from_wgpu_tex(device, texture, None, mip_level_count))
+        Ok(Self::from_wgpu_tex(
+            &runtime.device,
+            texture,
+            None,
+            mip_level_count,
+        ))
     }
 
     pub fn from_wgpu_tex(
@@ -416,14 +424,8 @@ impl Texture {
     ) -> Self {
         let texture = texture.into();
         let view = Arc::new(texture.create_view(&wgpu::TextureViewDescriptor {
-            label: Some("texture view"),
-            format: None,
-            dimension: None,
-            aspect: wgpu::TextureAspect::All,
-            base_mip_level: 0,
             mip_level_count,
-            base_array_layer: 0,
-            array_layer_count: None,
+            ..Default::default()
         }));
         let sampler_descriptor = sampler.unwrap_or_else(|| wgpu::SamplerDescriptor {
             address_mode_u: wgpu::AddressMode::ClampToEdge,
@@ -496,19 +498,19 @@ impl Texture {
     /// To read the texture you must provide the width, height, the number of
     /// color/alpha channels and the number of bytes in the underlying
     /// subpixel type (usually u8=1, u16=2 or f32=4).
+    // TODO: remove width and height from these calls, as they can be obtained
+    // from Texture::size()
     pub fn read(
+        runtime: impl AsRef<WgpuRuntime>,
         texture: &wgpu::Texture,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
         width: usize,
         height: usize,
         channels: usize,
         subpixel_bytes: usize,
     ) -> CopiedTextureBuffer {
         Self::read_from(
+            runtime,
             texture,
-            device,
-            queue,
             width,
             height,
             channels,
@@ -525,9 +527,8 @@ impl Texture {
     /// subpixel type (usually u8=1, u16=2 or f32=4).
     #[allow(clippy::too_many_arguments)]
     pub fn read_from(
+        runtime: impl AsRef<WgpuRuntime>,
         texture: &wgpu::Texture,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
         width: usize,
         height: usize,
         channels: usize,
@@ -535,6 +536,9 @@ impl Texture {
         mip_level: u32,
         origin: Option<wgpu::Origin3d>,
     ) -> CopiedTextureBuffer {
+        let runtime = runtime.as_ref();
+        let device = &runtime.device;
+        let queue = &runtime.queue;
         let dimensions = BufferDimensions::new(channels, subpixel_bytes, width, height);
         // The output buffer lets us retrieve the self as an array
         let buffer = device.create_buffer(&wgpu::BufferDescriptor {
@@ -554,9 +558,9 @@ impl Texture {
         // Copy the data from the surface texture to the buffer
         encoder.copy_texture_to_buffer(
             source,
-            wgpu::ImageCopyBuffer {
+            wgpu::TexelCopyBufferInfo {
                 buffer: &buffer,
-                layout: wgpu::ImageDataLayout {
+                layout: wgpu::TexelCopyBufferLayout {
                     offset: 0,
                     bytes_per_row: Some(dimensions.padded_bytes_per_row as u32),
                     rows_per_image: None,
@@ -579,22 +583,21 @@ impl Texture {
 
     pub fn read_hdr_image(
         &self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
+        runtime: impl AsRef<WgpuRuntime>,
     ) -> Result<Rgba32FImage, TextureError> {
+        let runtime = runtime.as_ref();
         let width = self.width();
         let height = self.height();
         let copied = Texture::read(
+            runtime,
             &self.texture,
-            device,
-            queue,
             width as usize,
             height as usize,
             4,
             2,
         );
 
-        let pixels = copied.pixels(device);
+        let pixels = copied.pixels(&runtime.device);
         let pixels = bytemuck::cast_slice::<u8, u16>(pixels.as_slice())
             .iter()
             .map(|p| half::f16::from_bits(*p).to_f32())
@@ -612,14 +615,14 @@ impl Texture {
     /// from an empty mip.
     pub fn generate_mips(
         &mut self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
+        runtime: impl AsRef<WgpuRuntime>,
         _label: Option<&str>,
         mip_levels: u32,
     ) -> Vec<Self> {
-        let generator = MipMapGenerator::new(device, self.texture.format());
+        let runtime = runtime.as_ref();
+        let generator = MipMapGenerator::new(&runtime.device, self.texture.format());
         // UNWRAP: safe because we know the formats match.
-        generator.generate(device, queue, self, mip_levels).unwrap()
+        generator.generate(runtime, self, mip_levels).unwrap()
     }
 
     pub const HDR_TEXTURE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
@@ -672,14 +675,13 @@ impl Texture {
 }
 
 pub fn read_depth_texture_to_image(
-    device: &wgpu::Device,
-    queue: &wgpu::Queue,
+    runtime: impl AsRef<WgpuRuntime>,
     width: usize,
     height: usize,
     texture: &wgpu::Texture,
 ) -> Option<image::GrayImage> {
-    let depth_copied_buffer = Texture::read(texture, device, queue, width, height, 1, 4);
-    let pixels = depth_copied_buffer.pixels(device);
+    let depth_copied_buffer = Texture::read(runtime.as_ref(), texture, width, height, 1, 4);
+    let pixels = depth_copied_buffer.pixels(&runtime.as_ref().device);
     let pixels = bytemuck::cast_slice::<u8, f32>(&pixels)
         .iter()
         .copied()
@@ -694,8 +696,7 @@ pub fn read_depth_texture_to_image(
 
 /// A depth texture.
 pub struct DepthTexture {
-    pub(crate) device: Arc<wgpu::Device>,
-    pub(crate) queue: Arc<wgpu::Queue>,
+    pub(crate) runtime: WgpuRuntime,
     pub(crate) texture: Arc<wgpu::Texture>,
 }
 
@@ -708,11 +709,9 @@ impl Deref for DepthTexture {
 }
 
 impl DepthTexture {
-    pub fn new(ctx: &crate::Context, texture: impl Into<Arc<wgpu::Texture>>) -> Self {
-        let (device, queue) = ctx.get_device_and_queue_owned();
+    pub fn new(runtime: impl AsRef<WgpuRuntime>, texture: impl Into<Arc<wgpu::Texture>>) -> Self {
         Self {
-            device,
-            queue,
+            runtime: runtime.as_ref().clone(),
             texture: texture.into(),
         }
     }
@@ -722,11 +721,12 @@ impl DepthTexture {
     /// Assumes the format is single channel 32bit.
     ///
     /// ## Panics
-    /// This may panic if the depth texture has a multisample count greater than 1.
+    /// This may panic if the depth texture has a multisample count greater than
+    /// 1.
     pub fn read_image(&self) -> Option<image::GrayImage> {
+        // TODO: impl AsRef<WgpuRuntime>
         read_depth_texture_to_image(
-            &self.device,
-            &self.queue,
+            &self.runtime,
             self.width() as usize,
             self.height() as usize,
             &self.texture,
@@ -953,14 +953,12 @@ mod test {
     #[test]
     fn generate_mipmaps() {
         let r = Context::headless(10, 10);
-        let (device, queue) = r.get_device_and_queue_owned();
         let img = image::open("../../img/sandstone.png").unwrap();
         let width = img.width();
         let height = img.height();
         let mip_level_count = 5;
         let mut texture = Texture::from_dynamic_image(
-            &device,
-            &queue,
+            &r,
             img,
             Some("sandstone"),
             Some(
@@ -970,7 +968,7 @@ mod test {
             ),
             1,
         );
-        let mips = texture.generate_mips(&device, &queue, None, mip_level_count);
+        let mips = texture.generate_mips(&r, None, mip_level_count);
 
         let (channels, subpixel_bytes) =
             super::wgpu_texture_format_channels_and_subpixel_bytes(texture.texture.format());
@@ -980,9 +978,8 @@ mod test {
             let mip_height = height >> mip_level;
             // save out the mips
             let copied_buffer = Texture::read_from(
+                &r,
                 &mip.texture,
-                r.get_device(),
-                r.get_queue(),
                 mip_width as usize,
                 mip_height as usize,
                 channels as usize,

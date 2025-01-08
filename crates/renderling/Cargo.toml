@@ -52,6 +52,7 @@ glam = { workspace = true, default-features = false, features = ["libm"] }
 [target.'cfg(not(target_arch = "spirv"))'.dependencies]
 async-channel = {workspace = true}
 bytemuck = {workspace = true}
+craballoc.workspace = true
 crabslab = { workspace = true, features = ["default"] }
 dagga = {workspace=true}
 crunch = "0.5"

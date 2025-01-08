@@ -1,13 +1,15 @@
 use core::ops::Deref;
+use std::sync::{Arc, RwLock};
+
+use craballoc::{
+    prelude::{Hybrid, SlabAllocator, WeakHybrid},
+    runtime::WgpuRuntime,
+};
 use glam::UVec2;
 use image::RgbaImage;
 use snafu::{prelude::*, OptionExt};
-use std::sync::{Arc, RwLock};
 
-use crate::{
-    slab::{Hybrid, IsBuffer, SlabAllocator, WeakHybrid},
-    texture::Texture,
-};
+use crate::texture::Texture;
 
 use super::{
     atlas_image::{convert_to_rgba8_bytes, AtlasImage},
@@ -49,15 +51,17 @@ impl InternalAtlasTexture {
     }
 
     fn has_external_references(&self) -> bool {
-        self.weak.weak_gpu.update.strong_count() > 0
+        self.weak.has_external_references()
     }
 
     fn set(&mut self, at: AtlasTexture) {
         self.cache = at;
         if let Some(hy) = self.weak.upgrade() {
             hy.set(at);
-        } else if let Some(gpu) = self.weak.weak_gpu.upgrade() {
+        } else if let Some(gpu) = self.weak.weak_gpu().upgrade() {
             gpu.set(at)
+        } else {
+            log::warn!("could not set atlas texture, lost");
         }
     }
 }
@@ -102,7 +106,7 @@ enum AnotherPacking<'a> {
     Internal(InternalAtlasTexture),
 }
 
-impl<'a> AnotherPacking<'a> {
+impl AnotherPacking<'_> {
     fn size(&self) -> UVec2 {
         match self {
             AnotherPacking::Img {
@@ -147,10 +151,11 @@ impl Atlas {
 
     /// Create the initial texture to use.
     fn create_texture(
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
+        runtime: impl AsRef<WgpuRuntime>,
         size: wgpu::Extent3d,
     ) -> Result<Texture, AtlasError> {
+        let device = &runtime.as_ref().device;
+        let queue = &runtime.as_ref().queue;
         check_size(size)?;
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("atlas texture"),
@@ -206,13 +211,9 @@ impl Atlas {
     ///
     /// ## Panics
     /// Panics if `size` is not a power of two.
-    pub fn new(
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        size: wgpu::Extent3d,
-    ) -> Result<Self, AtlasError> {
+    pub fn new(runtime: impl AsRef<WgpuRuntime>, size: wgpu::Extent3d) -> Result<Self, AtlasError> {
         log::trace!("creating new atlas with dimensions {size:?}");
-        let texture = Self::create_texture(device, queue, size)?;
+        let texture = Self::create_texture(runtime, size)?;
         Ok(Self::new_with_texture(texture))
     }
 
@@ -243,9 +244,7 @@ impl Atlas {
     /// Any existing `Hybrid<AtlasTexture>`s will be invalidated.
     pub fn set_images(
         &self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        slab: &SlabAllocator<impl IsBuffer>,
+        slab: &SlabAllocator<WgpuRuntime>,
         images: &[AtlasImage],
     ) -> Result<Vec<Hybrid<AtlasTexture>>, AtlasError> {
         log::debug!("setting images");
@@ -258,7 +257,7 @@ impl Atlas {
                 vec![Layer::default(); texture.texture.size().depth_or_array_layers as usize];
             let _old_layers = std::mem::replace(layers, new_layers);
         }
-        self.add_images(device, queue, slab, images)
+        self.add_images(slab, images)
     }
 
     pub fn get_size(&self) -> wgpu::Extent3d {
@@ -266,11 +265,10 @@ impl Atlas {
         self.texture_array.read().unwrap().texture.size()
     }
 
+    // TODO: Atlas should probably clone a reference to the runtime and the slab.
     pub fn add_images(
         &self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        slab: &SlabAllocator<impl IsBuffer>,
+        slab: &SlabAllocator<WgpuRuntime>,
         images: &[AtlasImage],
     ) -> Result<Vec<Hybrid<AtlasTexture>>, AtlasError> {
         // UNWRAP: POP
@@ -282,8 +280,7 @@ impl Atlas {
             .context(CannotPackTexturesSnafu { size: extent })?;
 
         let mut staged = StagedResources::try_staging(
-            device,
-            queue,
+            slab.runtime(),
             extent,
             newly_packed_layers,
             Some(slab),
@@ -307,8 +304,7 @@ impl Atlas {
     /// Errors if `size` has a width or height that is not a power of two, or are unequal
     pub fn resize(
         &self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
+        runtime: impl AsRef<WgpuRuntime>,
         extent: wgpu::Extent3d,
     ) -> Result<(), AtlasError> {
         let mut layers = self.layers.write().unwrap();
@@ -318,11 +314,10 @@ impl Atlas {
             pack_images(&layers, &[], extent).context(CannotPackTexturesSnafu { size: extent })?;
 
         let staged = StagedResources::try_staging(
-            device,
-            queue,
+            runtime,
             extent,
             newly_packed_layers,
-            None::<&SlabAllocator<wgpu::Buffer>>,
+            None::<&SlabAllocator<WgpuRuntime>>,
             &texture_array,
         )?;
 
@@ -337,7 +332,7 @@ impl Atlas {
     ///
     /// This removes any `TextureFrame`s that have no references and repacks the atlas
     /// if any were removed.
-    pub fn upkeep(&self, device: &wgpu::Device, queue: &wgpu::Queue) {
+    pub fn upkeep(&self, runtime: impl AsRef<WgpuRuntime>) {
         let mut total_dropped = 0;
         {
             let mut layers = self.layers.write().unwrap();
@@ -364,7 +359,7 @@ impl Atlas {
             log::trace!("repacking after dropping {total_dropped} frames from the atlas");
             // UNWRAP: safe because we can only remove frames from the atlas, which should
             // only make it easier to pack.
-            self.resize(device, queue, self.get_size()).unwrap();
+            self.resize(runtime.as_ref(), self.get_size()).unwrap();
         }
     }
 
@@ -381,9 +376,8 @@ impl Atlas {
         let tex = self.get_texture();
         let size = tex.texture.size();
         let buffer = Texture::read_from(
+            ctx,
             &tex.texture,
-            ctx.get_device(),
-            ctx.get_queue(),
             size.width as usize,
             size.height as usize,
             4,
@@ -463,18 +457,20 @@ struct StagedResources {
 impl StagedResources {
     /// Stage the packed images, copying them to the next texture.
     fn try_staging(
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
+        runtime: impl AsRef<WgpuRuntime>,
         extent: wgpu::Extent3d,
         newly_packed_layers: Vec<crunch::PackedItems<AnotherPacking>>,
-        slab: Option<&SlabAllocator<impl IsBuffer>>,
+        slab: Option<&SlabAllocator<WgpuRuntime>>,
         old_texture_array: &Texture,
     ) -> Result<Self, AtlasError> {
-        let new_texture_array = Atlas::create_texture(device, queue, extent)?;
+        let runtime = runtime.as_ref();
+        let new_texture_array = Atlas::create_texture(runtime, extent)?;
         let mut output = vec![];
-        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("atlas staging"),
-        });
+        let mut encoder = runtime
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("atlas staging"),
+            });
         let mut temporary_layers = vec![Layer::default(); extent.depth_or_array_layers as usize];
         for (layer_index, packed_items) in newly_packed_layers.into_iter().enumerate() {
             if packed_items.items.is_empty() {
@@ -532,15 +528,15 @@ impl StagedResources {
                         log::trace!("    size: {size:?}");
 
                         // write the new image from the CPU to the new texture
-                        queue.write_texture(
-                            wgpu::ImageCopyTextureBase {
+                        runtime.queue.write_texture(
+                            wgpu::TexelCopyTextureInfo {
                                 texture: &new_texture_array.texture,
                                 mip_level: 0,
                                 origin,
                                 aspect: wgpu::TextureAspect::All,
                             },
                             &bytes,
-                            wgpu::ImageDataLayout {
+                            wgpu::TexelCopyBufferLayout {
                                 offset: 0,
                                 bytes_per_row: Some(4 * size_px.x),
                                 rows_per_image: Some(size_px.y),
@@ -555,7 +551,7 @@ impl StagedResources {
                         // copy the frame from the old texture to the new texture
                         // in a new destination
                         encoder.copy_texture_to_texture(
-                            wgpu::ImageCopyTexture {
+                            wgpu::TexelCopyTextureInfo {
                                 texture: &old_texture_array.texture,
                                 mip_level: 0,
                                 origin: wgpu::Origin3d {
@@ -565,7 +561,7 @@ impl StagedResources {
                                 },
                                 aspect: wgpu::TextureAspect::All,
                             },
-                            wgpu::ImageCopyTexture {
+                            wgpu::TexelCopyTextureInfo {
                                 texture: &new_texture_array.texture,
                                 mip_level: 0,
                                 origin: wgpu::Origin3d {
@@ -591,7 +587,7 @@ impl StagedResources {
                 }
             }
         }
-        queue.submit(Some(encoder.finish()));
+        runtime.queue.submit(Some(encoder.finish()));
 
         Ok(Self {
             texture: new_texture_array,
@@ -953,7 +949,7 @@ mod test {
         frames.pop();
         frames.pop();
 
-        stage.atlas.upkeep(&stage.device, &stage.queue);
+        stage.atlas.upkeep(&ctx);
         assert_eq!(4, stage.atlas.len());
     }
 }

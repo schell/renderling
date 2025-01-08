@@ -1,11 +1,9 @@
 //! Animation helpers for gltf.
+use craballoc::prelude::HybridArray;
 use glam::{Quat, Vec3};
 use snafu::prelude::*;
 
-use crate::{
-    slab::HybridArray,
-    stage::{gltf_support::GltfNode, NestedTransform},
-};
+use crate::stage::{gltf_support::GltfNode, NestedTransform};
 
 #[derive(Debug, Snafu)]
 pub enum InterpolationError {

@@ -2,13 +2,14 @@
 use core::ops::Deref;
 use std::sync::{Arc, RwLock};
 
+use craballoc::{
+    prelude::{Hybrid, HybridArray, SlabAllocator},
+    runtime::WgpuRuntime,
+};
 use crabslab::Id;
 use glam::{UVec2, Vec2};
 
-use crate::{
-    slab::{Hybrid, HybridArray, SlabAllocator},
-    texture::{self, Texture},
-};
+use crate::texture::{self, Texture};
 
 fn create_bindgroup_layout(device: &wgpu::Device, label: Option<&str>) -> wgpu::BindGroupLayout {
     device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -140,26 +141,27 @@ fn config_resolutions(resolution: UVec2) -> impl Iterator<Item = UVec2> {
 }
 
 fn create_texture(
-    device: &wgpu::Device,
-    queue: &wgpu::Queue,
+    runtime: impl AsRef<WgpuRuntime>,
     width: u32,
     height: u32,
     label: Option<&str>,
     extra_usages: wgpu::TextureUsages,
 ) -> texture::Texture {
-    let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-        label,
-        address_mode_u: wgpu::AddressMode::ClampToEdge,
-        address_mode_v: wgpu::AddressMode::ClampToEdge,
-        address_mode_w: wgpu::AddressMode::ClampToEdge,
-        mag_filter: wgpu::FilterMode::Linear,
-        min_filter: wgpu::FilterMode::Linear,
-        mipmap_filter: wgpu::FilterMode::Linear,
-        ..Default::default()
-    });
+    let sampler = runtime
+        .as_ref()
+        .device
+        .create_sampler(&wgpu::SamplerDescriptor {
+            label,
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
     Texture::new_with(
-        device,
-        queue,
+        runtime,
         label,
         Some(
             wgpu::TextureUsages::RENDER_ATTACHMENT
@@ -178,11 +180,7 @@ fn create_texture(
     )
 }
 
-fn create_textures(
-    device: &wgpu::Device,
-    queue: &wgpu::Queue,
-    resolution: UVec2,
-) -> Vec<texture::Texture> {
+fn create_textures(runtime: impl AsRef<WgpuRuntime>, resolution: UVec2) -> Vec<texture::Texture> {
     let resolutions = config_resolutions(resolution).collect::<Vec<_>>();
     log::trace!(
         "creating {} bloom textures at resolution {resolution}",
@@ -200,8 +198,7 @@ fn create_textures(
         let title = format!("bloom texture[{i}]");
         let label = Some(title.as_str());
         let texture = create_texture(
-            device,
-            queue,
+            runtime.as_ref(),
             width,
             height,
             label,
@@ -386,7 +383,7 @@ fn create_mix_bindgroup(
 /// Clones of [`Bloom`] all point to the same resources.
 #[derive(Clone)]
 pub struct Bloom {
-    slab: SlabAllocator<wgpu::Buffer>,
+    slab: SlabAllocator<WgpuRuntime>,
 
     downsample_pixel_sizes: HybridArray<Vec2>,
     downsample_pipeline: Arc<wgpu::RenderPipeline>,
@@ -405,47 +402,48 @@ pub struct Bloom {
 }
 
 impl Bloom {
-    pub fn new(device: &wgpu::Device, queue: &wgpu::Queue, hdr_texture: &Texture) -> Self {
+    pub fn new(runtime: impl AsRef<WgpuRuntime>, hdr_texture: &Texture) -> Self {
+        let runtime = runtime.as_ref();
         let resolution = UVec2::new(hdr_texture.width(), hdr_texture.height());
 
-        let slab = SlabAllocator::default();
+        let slab =
+            SlabAllocator::new_with_label(runtime, wgpu::BufferUsages::empty(), Some("bloom-slab"));
         let downsample_pixel_sizes = slab.new_array(
             config_resolutions(resolution).map(|r| 1.0 / Vec2::new(r.x as f32, r.y as f32)),
         );
         let upsample_filter_radius =
             slab.new_value(1.0 / Vec2::new(resolution.x as f32, resolution.y as f32));
         let mix_strength = slab.new_value(0.04f32);
-        let slab_buffer = slab.get_updated_buffer((
-            device,
-            queue,
-            Some("bloom slab"),
-            wgpu::BufferUsages::empty(),
-        ));
+        let slab_buffer = slab.get_updated_buffer();
 
-        let downsample_pipeline = Arc::new(create_bloom_downsample_pipeline(device));
-        let upsample_pipeline = Arc::new(create_bloom_upsample_pipeline(device));
-        let mix_pipeline = Arc::new(create_mix_pipeline(device));
+        let downsample_pipeline = Arc::new(create_bloom_downsample_pipeline(&runtime.device));
+        let upsample_pipeline = Arc::new(create_bloom_upsample_pipeline(&runtime.device));
+        let mix_pipeline = Arc::new(create_mix_pipeline(&runtime.device));
 
         let hdr_texture_downsample_bindgroup = create_bindgroup(
-            device,
+            &runtime.device,
             &downsample_pipeline.get_bind_group_layout(0),
             &slab_buffer,
             hdr_texture,
         );
         let mix_texture = create_texture(
-            device,
-            queue,
+            runtime,
             resolution.x,
             resolution.y,
             Some("bloom mix"),
             wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::COPY_DST,
         );
 
-        let textures = create_textures(device, queue, resolution);
-        let bindgroups = create_bindgroups(device, &downsample_pipeline, &slab_buffer, &textures);
+        let textures = create_textures(runtime, resolution);
+        let bindgroups = create_bindgroups(
+            &runtime.device,
+            &downsample_pipeline,
+            &slab_buffer,
+            &textures,
+        );
 
         let mix_bindgroup = create_mix_bindgroup(
-            device,
+            &runtime.device,
             &mix_pipeline,
             &slab_buffer,
             hdr_texture,
@@ -495,36 +493,34 @@ impl Bloom {
     }
 
     /// Recreates this bloom using the new HDR texture.
-    pub fn set_hdr_texture(
-        &self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        hdr_texture: &Texture,
-    ) {
+    pub fn set_hdr_texture(&self, runtime: impl AsRef<WgpuRuntime>, hdr_texture: &Texture) {
         // UNWRAP: panic on purpose (here and on till the end of this fn)
         let slab_buffer = self.slab.get_buffer().unwrap();
         let resolution = UVec2::new(hdr_texture.width(), hdr_texture.height());
+        let runtime = runtime.as_ref();
+        let textures = create_textures(runtime, resolution);
 
-        let textures = create_textures(device, queue, resolution);
-
-        *self.bindgroups.write().unwrap() =
-            create_bindgroups(device, &self.downsample_pipeline, &slab_buffer, &textures);
+        *self.bindgroups.write().unwrap() = create_bindgroups(
+            &runtime.device,
+            &self.downsample_pipeline,
+            &slab_buffer,
+            &textures,
+        );
         *self.hdr_texture_downsample_bindgroup.write().unwrap() = create_bindgroup(
-            device,
+            &runtime.device,
             &self.downsample_pipeline.get_bind_group_layout(0),
             &slab_buffer,
             hdr_texture,
         );
         *self.mix_texture.write().unwrap() = create_texture(
-            device,
-            queue,
+            runtime,
             resolution.x,
             resolution.y,
             Some("bloom mix"),
             wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::COPY_DST,
         );
         *self.mix_bindgroup.write().unwrap() = create_mix_bindgroup(
-            device,
+            &runtime.device,
             &self.mix_pipeline,
             &slab_buffer,
             hdr_texture,
@@ -686,14 +682,7 @@ impl Bloom {
 
     pub fn bloom(&self, device: &wgpu::Device, queue: &wgpu::Queue) {
         assert!(
-            self.slab
-                .upkeep((
-                    device,
-                    queue,
-                    Some("bloom upkeep"),
-                    wgpu::BufferUsages::empty(),
-                ))
-                .is_none(),
+            self.slab.upkeep().is_none(),
             "bloom slab buffer should never resize"
         );
         self.render_downsamples(device, queue);

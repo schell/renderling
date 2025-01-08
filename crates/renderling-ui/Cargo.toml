@@ -10,6 +10,7 @@ categories = ["rendering", "game-development", "graphics"]
 readme = "README.md"
 
 [dependencies]
+craballoc.workspace = true
 crabslab = {workspace = true}
 glyph_brush = "0.7.8"
 image = {workspace=true}

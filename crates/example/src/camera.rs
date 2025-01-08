@@ -1,11 +1,11 @@
 //! Camera control.
 use std::str::FromStr;
 
+use craballoc::prelude::Hybrid;
 use renderling::{
     bvol::Aabb,
     camera::Camera,
     math::{Mat4, Quat, UVec2, Vec2, Vec3},
-    slab::Hybrid,
 };
 use winit::{event::KeyEvent, keyboard::Key};
 

@@ -283,7 +283,6 @@ pub fn convert_to_rgba8_bytes(
             .chunks_exact(4)
             .flat_map(|p| {
                 if let [r, g, b, a] = p {
-                    todo!("f32_to_u8 erroneously used, use f16_to_u8 instead");
                     [f32_to_u8(*r), f32_to_u8(*g), f32_to_u8(*b), f32_to_u8(*a)]
                 } else {
                     unreachable!()

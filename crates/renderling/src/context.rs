@@ -5,6 +5,7 @@ use std::{
     sync::{Arc, RwLock},
 };
 
+use craballoc::runtime::WgpuRuntime;
 use glam::{UVec2, UVec3};
 use snafu::prelude::*;
 
@@ -169,7 +170,7 @@ fn new_instance(backends: Option<wgpu::Backends>) -> wgpu::Instance {
     );
     // BackendBit::PRIMARY => Vulkan + Metal + DX12 + Browser WebGPU
     let backends = backends.unwrap_or(wgpu::Backends::PRIMARY);
-    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+    let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
         backends,
         ..Default::default()
     });
@@ -295,8 +296,7 @@ pub(crate) enum FrameSurface {
 ///
 /// Returned by [`Context::get_next_frame`].
 pub struct Frame {
-    pub(crate) device: Arc<wgpu::Device>,
-    pub(crate) queue: Arc<wgpu::Queue>,
+    pub(crate) runtime: WgpuRuntime,
     pub(crate) surface: FrameSurface,
 }
 
@@ -315,40 +315,32 @@ impl Frame {
         texture.create_view(&wgpu::TextureViewDescriptor {
             label: Some("Frame::view"),
             format: Some(format),
-            dimension: None,
-            aspect: wgpu::TextureAspect::All,
-            base_mip_level: 0,
-            mip_level_count: None,
-            base_array_layer: 0,
-            array_layer_count: None,
+            ..Default::default()
         })
     }
 
-    pub fn copy_to_buffer(
-        &self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        width: u32,
-        height: u32,
-    ) -> CopiedTextureBuffer {
+    pub fn copy_to_buffer(&self, width: u32, height: u32) -> CopiedTextureBuffer {
         let dimensions = BufferDimensions::new(4, 1, width as usize, height as usize);
         // The output buffer lets us retrieve the self as an array
-        let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        let buffer = self.runtime.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("RenderTarget::copy_to_buffer"),
             size: (dimensions.padded_bytes_per_row * dimensions.height) as u64,
             usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("post render screen capture encoder"),
-        });
+        let mut encoder =
+            self.runtime
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("post render screen capture encoder"),
+                });
         let texture = self.texture();
         // Copy the data from the surface texture to the buffer
         encoder.copy_texture_to_buffer(
             texture.as_image_copy(),
-            wgpu::ImageCopyBuffer {
+            wgpu::TexelCopyBufferInfo {
                 buffer: &buffer,
-                layout: wgpu::ImageDataLayout {
+                layout: wgpu::TexelCopyBufferLayout {
                     offset: 0,
                     bytes_per_row: Some(dimensions.padded_bytes_per_row as u32),
                     rows_per_image: None,
@@ -361,7 +353,7 @@ impl Frame {
             },
         );
 
-        queue.submit(std::iter::once(encoder.finish()));
+        self.runtime.queue.submit(std::iter::once(encoder.finish()));
 
         CopiedTextureBuffer {
             dimensions,
@@ -386,12 +378,12 @@ impl Frame {
     /// This operation can take a long time, depending on how big the screen is.
     pub fn read_image(&self) -> Result<image::RgbaImage, TextureError> {
         let size = self.get_size();
-        let buffer = self.copy_to_buffer(&self.device, &self.queue, size.x, size.y);
+        let buffer = self.copy_to_buffer(size.x, size.y);
         let is_srgb = self.texture().format().is_srgb();
         let img = if is_srgb {
-            buffer.into_srgba(&self.device)?
+            buffer.into_srgba(&self.runtime.device)?
         } else {
-            buffer.into_linear_rgba(&self.device)?
+            buffer.into_linear_rgba(&self.runtime.device)?
         };
         Ok(img)
     }
@@ -407,9 +399,9 @@ impl Frame {
     /// This operation can take a long time, depending on how big the screen is.
     pub fn read_srgb_image(&self) -> Result<image::RgbaImage, TextureError> {
         let size = self.get_size();
-        let buffer = self.copy_to_buffer(&self.device, &self.queue, size.x, size.y);
+        let buffer = self.copy_to_buffer(size.x, size.y);
         log::trace!("read image has the format: {:?}", buffer.format);
-        buffer.into_srgba(&self.device)
+        buffer.into_srgba(&self.runtime.device)
     }
     /// Read the frame into an image.
     ///
@@ -422,8 +414,8 @@ impl Frame {
     /// This operation can take a long time, depending on how big the screen is.
     pub fn read_linear_image(&self) -> Result<image::RgbaImage, TextureError> {
         let size = self.get_size();
-        let buffer = self.copy_to_buffer(&self.device, &self.queue, size.x, size.y);
-        buffer.into_linear_rgba(&self.device)
+        let buffer = self.copy_to_buffer(size.x, size.y);
+        buffer.into_linear_rgba(&self.runtime.device)
     }
 
     /// If self is `TargetFrame::Surface` this presents the surface frame.
@@ -437,7 +429,7 @@ impl Frame {
     }
 }
 
-/// Contains the adapter, device, queue and [`RenderTarget`].
+/// Contains the adapter, device, queue, [`RenderTarget`] and initial atlas sizing.
 ///
 /// A `Context` is created to initialize rendering to a window, canvas or
 /// texture.
@@ -448,11 +440,16 @@ impl Frame {
 /// let ctx = Context::headless(100, 100);
 /// ```
 pub struct Context {
+    runtime: WgpuRuntime,
     adapter: Arc<wgpu::Adapter>,
-    device: Arc<wgpu::Device>,
-    queue: Arc<wgpu::Queue>,
     render_target: RenderTarget,
     pub(crate) atlas_size: Arc<RwLock<wgpu::Extent3d>>,
+}
+
+impl AsRef<WgpuRuntime> for Context {
+    fn as_ref(&self) -> &WgpuRuntime {
+        &self.runtime
+    }
 }
 
 impl Context {
@@ -477,8 +474,10 @@ impl Context {
         }));
         Self {
             adapter,
-            device: device.into(),
-            queue: queue.into(),
+            runtime: WgpuRuntime {
+                device: device.into(),
+                queue: queue.into(),
+            },
             render_target: target,
             atlas_size,
         }
@@ -570,8 +569,8 @@ impl Context {
     }
 
     pub fn set_size(&mut self, size: UVec2) {
-        let (device, _) = self.get_device_and_queue_owned();
-        self.render_target.resize(size.x, size.y, &device);
+        self.render_target
+            .resize(size.x, size.y, &self.runtime.device);
     }
 
     /// Convenience method for creating textures from an image buffer.
@@ -585,11 +584,8 @@ impl Context {
         image::ImageBuffer<P, Vec<u8>>: image::GenericImage + std::ops::Deref<Target = [u8]>,
     {
         let name = label.unwrap_or("unknown");
-        let device = &self.device;
-        let queue = &self.queue;
         Texture::from_image_buffer(
-            device,
-            queue,
+            self,
             img,
             Some(&format!("Renderling::create_texture {}", name)),
             None,
@@ -606,11 +602,11 @@ impl Context {
     }
 
     pub fn get_device(&self) -> &wgpu::Device {
-        &self.device
+        &self.runtime.device
     }
 
     pub fn get_queue(&self) -> &wgpu::Queue {
-        &self.queue
+        &self.runtime.queue
     }
 
     pub fn get_adapter(&self) -> &wgpu::Adapter {
@@ -620,11 +616,6 @@ impl Context {
     /// Returns a the adapter in an owned wrapper.
     pub fn get_adapter_owned(&self) -> Arc<wgpu::Adapter> {
         self.adapter.clone()
-    }
-
-    /// Returns a pair of the device and queue in an owned wrapper.
-    pub fn get_device_and_queue_owned(&self) -> (Arc<wgpu::Device>, Arc<wgpu::Queue>) {
-        (self.device.clone(), self.queue.clone())
     }
 
     pub fn get_render_target(&self) -> &RenderTarget {
@@ -643,8 +634,7 @@ impl Context {
     /// been acquired.
     pub fn get_next_frame(&self) -> Result<Frame, ContextError> {
         Ok(Frame {
-            device: self.device.clone(),
-            queue: self.queue.clone(),
+            runtime: self.runtime.clone(),
             surface: match &self.render_target.0 {
                 RenderTargetInner::Surface { surface, .. } => {
                     let surface_texture = surface.get_current_texture().context(SurfaceSnafu)?;

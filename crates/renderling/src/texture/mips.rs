@@ -1,6 +1,7 @@
 //! Mip-map generation.
 
 use crate::texture::Texture;
+use craballoc::runtime::WgpuRuntime;
 use snafu::Snafu;
 
 use super::wgpu_texture_format_channels_and_subpixel_bytes;
@@ -103,8 +104,7 @@ impl MipMapGenerator {
     /// Errors if the texture's format doesn't match the generator format.
     pub fn generate(
         &self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
+        runtime: impl AsRef<WgpuRuntime>,
         texture: &Texture,
         mip_levels: u32,
     ) -> Result<Vec<Texture>, MipMapError> {
@@ -127,8 +127,7 @@ impl MipMapGenerator {
             let mip_width = size.width >> mip_level;
             let mip_height = size.height >> mip_level;
             let mip_texture = Texture::new_with(
-                device,
-                queue,
+                runtime.as_ref(),
                 Some(&format!("mip{mip_level}")),
                 Some(
                     wgpu::TextureUsages::COPY_SRC
@@ -149,23 +148,28 @@ impl MipMapGenerator {
             } else {
                 &mips[(mip_level - 2) as usize]
             };
-            let bindgroup = device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: LABEL,
-                layout: &self.bindgroup_layout,
-                entries: &[
-                    wgpu::BindGroupEntry {
-                        binding: 0,
-                        resource: wgpu::BindingResource::TextureView(&prev_texture.view),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 1,
-                        resource: wgpu::BindingResource::Sampler(&prev_texture.sampler),
-                    },
-                ],
-            });
+            let bindgroup = runtime
+                .as_ref()
+                .device
+                .create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: LABEL,
+                    layout: &self.bindgroup_layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: wgpu::BindingResource::TextureView(&prev_texture.view),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: wgpu::BindingResource::Sampler(&prev_texture.sampler),
+                        },
+                    ],
+                });
 
-            let mut encoder =
-                device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+            let mut encoder = runtime
+                .as_ref()
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
 
             {
                 let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -187,7 +191,10 @@ impl MipMapGenerator {
                 render_pass.draw(0..6, 0..1);
             }
 
-            queue.submit(std::iter::once(encoder.finish()));
+            runtime
+                .as_ref()
+                .queue
+                .submit(std::iter::once(encoder.finish()));
 
             mips.push(mip_texture);
         }
