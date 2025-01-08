@@ -5,6 +5,7 @@ use std::{
     sync::{Arc, RwLock},
 };
 
+use craballoc::runtime::WgpuRuntime;
 use glam::{UVec2, UVec3};
 use snafu::prelude::*;
 
@@ -448,11 +449,16 @@ impl Frame {
 /// let ctx = Context::headless(100, 100);
 /// ```
 pub struct Context {
+    runtime: WgpuRuntime,
     adapter: Arc<wgpu::Adapter>,
-    device: Arc<wgpu::Device>,
-    queue: Arc<wgpu::Queue>,
     render_target: RenderTarget,
     pub(crate) atlas_size: Arc<RwLock<wgpu::Extent3d>>,
+}
+
+impl AsRef<WgpuRuntime> for Context {
+    fn as_ref(&self) -> &WgpuRuntime {
+        &self.runtime
+    }
 }
 
 impl Context {
@@ -477,8 +483,10 @@ impl Context {
         }));
         Self {
             adapter,
-            device: device.into(),
-            queue: queue.into(),
+            runtime: WgpuRuntime {
+                device: device.into(),
+                queue: queue.into(),
+            },
             render_target: target,
             atlas_size,
         }
@@ -625,6 +633,13 @@ impl Context {
     /// Returns a pair of the device and queue in an owned wrapper.
     pub fn get_device_and_queue_owned(&self) -> (Arc<wgpu::Device>, Arc<wgpu::Queue>) {
         (self.device.clone(), self.queue.clone())
+    }
+
+    pub fn get_runtime(&self) -> WgpuRuntime {
+        WgpuRuntime {
+            device: self.device.clone(),
+            queue: self.queue.clone(),
+        }
     }
 
     pub fn get_render_target(&self) -> &RenderTarget {

@@ -1,6 +1,7 @@
 //! Wrapper around [`wgpu::Texture`].
 use std::{ops::Deref, sync::Arc};
 
+use craballoc::runtime::WgpuRuntime;
 use glam::UVec2;
 use image::{
     load_from_memory, DynamicImage, GenericImage, GenericImageView, ImageBuffer, ImageError,
@@ -260,8 +261,7 @@ impl Texture {
     }
 
     pub fn from_image_bytes(
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
+        runtime: impl AsRef<WgpuRuntime>,
         bytes: &[u8],
         label: &str,
     ) -> Result<Self> {
@@ -271,18 +271,18 @@ impl Texture {
 
         match img {
             DynamicImage::ImageLuma8(b) => {
-                Self::from_image_buffer(device, queue, &b, Some(label), None, None)
+                Self::from_image_buffer(runtime, &b, Some(label), None, None)
             }
             DynamicImage::ImageLumaA8(b) => {
-                Self::from_image_buffer(device, queue, &b, Some(label), None, None)
+                Self::from_image_buffer(runtime, &b, Some(label), None, None)
             }
             DynamicImage::ImageRgb8(b) => {
-                Self::from_image_buffer(device, queue, &b, Some(label), None, None)
+                Self::from_image_buffer(runtime, &b, Some(label), None, None)
             }
             DynamicImage::ImageRgba8(b) => {
-                Self::from_image_buffer(device, queue, &b, Some(label), None, None)
+                Self::from_image_buffer(runtime, &b, Some(label), None, None)
             }
-            img => Self::from_image_buffer(device, queue, &img.to_rgba8(), Some(label), None, None),
+            img => Self::from_image_buffer(runtime, &img.to_rgba8(), Some(label), None, None),
         }
     }
 
@@ -347,8 +347,7 @@ impl Texture {
     }
 
     pub fn from_image_buffer<P>(
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
+        runtime: impl AsRef<WgpuRuntime>,
         img: &ImageBuffer<P, Vec<u8>>,
         label: Option<&str>,
         usage: Option<wgpu::TextureUsages>,
@@ -358,6 +357,7 @@ impl Texture {
         P: PixelWithColorType,
         ImageBuffer<P, Vec<u8>>: GenericImage + Deref<Target = [u8]>,
     {
+        let runtime = runtime.as_ref();
         let dimensions = img.dimensions();
 
         let size = wgpu::Extent3d {
@@ -366,7 +366,7 @@ impl Texture {
             depth_or_array_layers: 1,
         };
 
-        let texture = device.create_texture(&wgpu::TextureDescriptor {
+        let texture = runtime.device.create_texture(&wgpu::TextureDescriptor {
             label,
             size,
             mip_level_count: 1,
@@ -389,7 +389,7 @@ impl Texture {
             view_formats: &[],
         });
 
-        queue.write_texture(
+        runtime.queue.write_texture(
             wgpu::ImageCopyTextureBase {
                 texture: &texture,
                 mip_level: 0,
@@ -405,7 +405,12 @@ impl Texture {
             size,
         );
 
-        Ok(Self::from_wgpu_tex(device, texture, None, mip_level_count))
+        Ok(Self::from_wgpu_tex(
+            &runtime.device,
+            texture,
+            None,
+            mip_level_count,
+        ))
     }
 
     pub fn from_wgpu_tex(

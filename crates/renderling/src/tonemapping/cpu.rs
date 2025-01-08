@@ -1,11 +1,12 @@
 //! Tonemapping.
 use core::ops::Deref;
+use craballoc::{
+    prelude::{Hybrid, SlabAllocator},
+    runtime::WgpuRuntime,
+};
 use std::sync::{Arc, RwLock};
 
-use crate::{
-    slab::{Hybrid, SlabAllocator},
-    texture::Texture,
-};
+use crate::texture::Texture;
 
 use super::TonemapConstants;
 
@@ -86,7 +87,7 @@ pub fn create_bindgroup(
 /// Only available on CPU. Not Available in shaders.
 #[derive(Clone)]
 pub struct Tonemapping {
-    slab: SlabAllocator<wgpu::Buffer>,
+    slab: SlabAllocator<WgpuRuntime>,
     config: Hybrid<TonemapConstants>,
     hdr_texture: Arc<RwLock<Texture>>,
     bindgroup: Arc<RwLock<wgpu::BindGroup>>,
@@ -95,24 +96,23 @@ pub struct Tonemapping {
 
 impl Tonemapping {
     pub fn new(
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
+        runtime: &WgpuRuntime,
         frame_texture_format: wgpu::TextureFormat,
         hdr_texture: &Texture,
     ) -> Self {
-        let slab = SlabAllocator::default();
+        let slab = SlabAllocator::new(runtime, wgpu::BufferUsages::empty());
         let config = slab.new_value(TonemapConstants::default());
 
         let label = Some("tonemapping");
-        let slab_buffer =
-            slab.get_updated_buffer((device, queue, label, wgpu::BufferUsages::empty()));
+        let slab_buffer = slab.get_updated_buffer();
         let bindgroup = Arc::new(RwLock::new(create_bindgroup(
-            device,
+            &runtime.device,
             label,
             hdr_texture,
             &slab_buffer,
         )));
 
+        let device = &runtime.device;
         let vertex_linkage = crate::linkage::tonemapping_vertex::linkage(device);
         let fragment_linkage = crate::linkage::tonemapping_fragment::linkage(device);
         let hdr_layout = bindgroup_layout(device, label);
@@ -185,10 +185,7 @@ impl Tonemapping {
 
     pub fn render(&self, device: &wgpu::Device, queue: &wgpu::Queue, view: &wgpu::TextureView) {
         let label = Some("tonemapping render");
-        assert!(self
-            .slab
-            .upkeep((device, queue, label, wgpu::BufferUsages::empty()))
-            .is_none());
+        assert!(self.slab.upkeep().is_none());
 
         // UNWRAP: not safe but we want to panic
         let bindgroup = self.bindgroup.read().unwrap();

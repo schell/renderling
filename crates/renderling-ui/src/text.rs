@@ -8,6 +8,7 @@ use std::{
 };
 
 use ab_glyph::Rect;
+use craballoc::prelude::{GpuArray, Hybrid};
 use glyph_brush::*;
 
 pub use ab_glyph::FontArc;
@@ -18,7 +19,6 @@ use renderling::{
     atlas::AtlasTexture,
     math::{Vec2, Vec4},
     pbr::Material,
-    slab::{GpuArray, Hybrid},
     stage::{Renderlet, Vertex},
 };
 

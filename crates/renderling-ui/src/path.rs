@@ -1,6 +1,7 @@
 //! Path and builder.
 //!
 //! Path colors are sRGB.
+use craballoc::prelude::{GpuArray, Hybrid};
 use crabslab::Id;
 use lyon::{
     path::traits::PathBuilder,
@@ -11,7 +12,6 @@ use lyon::{
 use renderling::{
     math::{Vec2, Vec3, Vec3Swizzles, Vec4},
     pbr::Material,
-    slab::{GpuArray, Hybrid},
     stage::{Renderlet, Vertex},
 };
 

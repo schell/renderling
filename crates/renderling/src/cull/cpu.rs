@@ -1,14 +1,15 @@
 //! CPU side of compute culling.
 
+use craballoc::{
+    prelude::{GpuArray, Hybrid, SlabAllocator, SlabAllocatorError},
+    runtime::WgpuRuntime,
+};
 use crabslab::{Array, Slab};
 use glam::UVec2;
 use snafu::{OptionExt, Snafu};
 use std::sync::Arc;
 
-use crate::{
-    slab::{GpuArray, Hybrid, SlabAllocator, SlabAllocatorError},
-    texture::Texture,
-};
+use crate::texture::Texture;
 
 use super::DepthPyramidDescriptor;
 
@@ -80,7 +81,8 @@ impl ComputeCulling {
         })
     }
 
-    pub fn new(device: &wgpu::Device, size: UVec2, sample_count: u32) -> Self {
+    pub fn new(ctx: &crate::Context, size: UVec2, sample_count: u32) -> Self {
+        let device = ctx.get_device();
         let bindgroup_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Self::LABEL,
             entries: &[
@@ -135,7 +137,7 @@ impl ComputeCulling {
             pipeline,
             bindgroup_layout,
             bindgroup: None,
-            compute_depth_pyramid: ComputeDepthPyramid::new(device, size, sample_count),
+            compute_depth_pyramid: ComputeDepthPyramid::new(ctx, size, sample_count),
         }
     }
 
@@ -173,18 +175,12 @@ impl ComputeCulling {
         depth_texture: &Texture,
     ) -> Result<(), CullingError> {
         // Compute the depth pyramid from last frame's depth buffer
-        self.compute_depth_pyramid
-            .run(device, queue, depth_texture)?;
+        self.compute_depth_pyramid.run(depth_texture)?;
         let (hzb_buffer, invalidate) = self
             .compute_depth_pyramid
             .depth_pyramid
             .slab
-            .get_updated_buffer_and_check((
-                device,
-                queue,
-                Self::LABEL,
-                wgpu::BufferUsages::empty(),
-            ));
+            .get_updated_buffer_and_check();
         if invalidate {
             self.invalidate_bindgroup();
         }
@@ -207,7 +203,7 @@ impl ComputeCulling {
 }
 
 pub struct DepthPyramid {
-    slab: SlabAllocator<wgpu::Buffer>,
+    slab: SlabAllocator<WgpuRuntime>,
     desc: Hybrid<DepthPyramidDescriptor>,
     mip: GpuArray<Array<f32>>,
     mip_data: Vec<GpuArray<f32>>,
@@ -219,7 +215,7 @@ impl DepthPyramid {
     fn allocate(
         size: UVec2,
         desc: &Hybrid<DepthPyramidDescriptor>,
-        slab: &SlabAllocator<wgpu::Buffer>,
+        slab: &SlabAllocator<WgpuRuntime>,
     ) -> (Vec<GpuArray<f32>>, GpuArray<Array<f32>>) {
         let mip_levels = size.min_element().ilog2();
         let mip_data = (0..mip_levels)
@@ -239,8 +235,8 @@ impl DepthPyramid {
         (mip_data, mip.into_gpu_only())
     }
 
-    pub fn new(size: UVec2) -> Self {
-        let slab = SlabAllocator::default();
+    pub fn new(ctx: &crate::Context, size: UVec2) -> Self {
+        let slab = SlabAllocator::new(&ctx.get_runtime(), wgpu::BufferUsages::empty());
         let desc = slab.new_value(DepthPyramidDescriptor::default());
         let (mip_data, mip) = Self::allocate(size, &desc, &slab);
 
@@ -252,12 +248,7 @@ impl DepthPyramid {
         }
     }
 
-    pub fn resize(
-        &mut self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        size: UVec2,
-    ) -> (Arc<wgpu::Buffer>, bool) {
+    pub fn resize(&mut self, size: UVec2) -> (Arc<wgpu::Buffer>, bool) {
         log::info!("resizing depth pyramid to {size}");
         let mip = self.slab.new_array(vec![]);
         self.mip_data = vec![];
@@ -265,12 +256,7 @@ impl DepthPyramid {
         self.mip = mip.into_gpu_only();
 
         // Reclaim the dropped buffer slots
-        let (_, should_invalidate_a) = self.slab.get_updated_buffer_and_check((
-            device,
-            queue,
-            Self::LABEL,
-            wgpu::BufferUsages::empty(),
-        ));
+        let (_, should_invalidate_a) = self.slab.get_updated_buffer_and_check();
 
         // Reallocate
         let (mip_data, mip) = Self::allocate(size, &self.desc, &self.slab);
@@ -278,12 +264,7 @@ impl DepthPyramid {
         self.mip = mip;
 
         // Run upkeep one more time to sync the resize
-        let (buffer, should_invalidate_b) = self.slab.get_updated_buffer_and_check((
-            device,
-            queue,
-            Self::LABEL,
-            wgpu::BufferUsages::empty(),
-        ));
+        let (buffer, should_invalidate_b) = self.slab.get_updated_buffer_and_check();
         (buffer, should_invalidate_a || should_invalidate_b)
     }
 
@@ -291,12 +272,9 @@ impl DepthPyramid {
         self.desc.get().size
     }
 
-    pub async fn read_images(
-        &self,
-        ctx: &crate::Context,
-    ) -> Result<Vec<image::GrayImage>, CullingError> {
+    pub async fn read_images(&self) -> Result<Vec<image::GrayImage>, CullingError> {
         let size = self.size();
-        let slab_data = self.slab.read(ctx, Self::LABEL, 0..).await?;
+        let slab_data = self.slab.read(0..).await?;
         let mut images = vec![];
         let mut min = f32::MAX;
         let mut max = f32::MIN;
@@ -446,23 +424,12 @@ impl ComputeCopyDepth {
         self.bindgroup = None;
     }
 
-    pub fn run(
-        &mut self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        pyramid: &DepthPyramid,
-        depth_texture: &Texture,
-    ) {
+    pub fn run(&mut self, pyramid: &DepthPyramid, depth_texture: &Texture) {
         let size = pyramid.desc.modify(|desc| {
             desc.mip_level = 0;
             desc.size
         });
-        let (slab_buffer, slab_buffer_is_new) = pyramid.slab.get_updated_buffer_and_check((
-            device,
-            queue,
-            Self::LABEL,
-            wgpu::BufferUsages::empty(),
-        ));
+        let (slab_buffer, slab_buffer_is_new) = pyramid.slab.get_updated_buffer_and_check();
 
         if slab_buffer_is_new {
             self.bindgroup = None;
@@ -470,6 +437,7 @@ impl ComputeCopyDepth {
 
         let sample_count = depth_texture.texture.sample_count();
         let sample_count_mismatch = sample_count != self.sample_count;
+        let device = pyramid.slab.device();
 
         if sample_count_mismatch {
             log::info!(
@@ -508,7 +476,7 @@ impl ComputeCopyDepth {
             let z = 1;
             compute_pass.dispatch_workgroups(x, y, z);
         }
-        queue.submit(Some(encoder.finish()));
+        pyramid.slab.queue().submit(Some(encoder.finish()));
     }
 }
 
@@ -593,17 +561,13 @@ impl ComputeDownsampleDepth {
         self.bindgroup = None;
     }
 
-    pub fn run(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, pyramid: &DepthPyramid) {
+    pub fn run(&mut self, pyramid: &DepthPyramid) {
+        let device = pyramid.slab.device();
         if self.bindgroup.is_none() {
             self.bindgroup = Some(Self::create_bindgroup(
                 device,
                 &self.bindgroup_layout,
-                &pyramid.slab.get_updated_buffer((
-                    device,
-                    queue,
-                    Self::LABEL,
-                    wgpu::BufferUsages::empty(),
-                )),
+                &pyramid.slab.get_updated_buffer(),
             ));
         }
         for i in 1..pyramid.mip_data.len() {
@@ -616,12 +580,7 @@ impl ComputeDownsampleDepth {
                 desc.size
             });
             // Sync the change.
-            let (_, should_invalidate) = pyramid.slab.get_updated_buffer_and_check((
-                device,
-                queue,
-                Self::LABEL,
-                wgpu::BufferUsages::empty(),
-            ));
+            let (_, should_invalidate) = pyramid.slab.get_updated_buffer_and_check();
             debug_assert!(!should_invalidate, "pyramid slab should never resize here");
 
             let mut encoder = device
@@ -640,7 +599,7 @@ impl ComputeDownsampleDepth {
                 let z = 1;
                 compute_pass.dispatch_workgroups(x, y, z);
             }
-            queue.submit(Some(encoder.finish()));
+            pyramid.slab.queue().submit(Some(encoder.finish()));
         }
     }
 }
@@ -656,10 +615,10 @@ pub struct ComputeDepthPyramid {
 impl ComputeDepthPyramid {
     const LABEL: Option<&'static str> = Some("compute-depth-pyramid");
 
-    pub fn new(device: &wgpu::Device, size: UVec2, sample_count: u32) -> Self {
-        let depth_pyramid = DepthPyramid::new(size);
-        let compute_copy_depth = ComputeCopyDepth::new(device, sample_count);
-        let compute_downsample_depth = ComputeDownsampleDepth::new(device);
+    pub fn new(ctx: &crate::Context, size: UVec2, sample_count: u32) -> Self {
+        let depth_pyramid = DepthPyramid::new(ctx, size);
+        let compute_copy_depth = ComputeCopyDepth::new(ctx.get_device(), sample_count);
+        let compute_downsample_depth = ComputeDownsampleDepth::new(ctx.get_device());
         Self {
             depth_pyramid,
             compute_copy_depth,
@@ -675,12 +634,7 @@ impl ComputeDepthPyramid {
         self.compute_copy_depth.invalidate();
     }
 
-    pub fn run(
-        &mut self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        depth_texture: &Texture,
-    ) -> Result<(), CullingError> {
+    pub fn run(&mut self, depth_texture: &Texture) -> Result<(), CullingError> {
         let sample_count = depth_texture.texture.sample_count();
         if sample_count != self.sample_count {
             log::warn!(
@@ -697,14 +651,9 @@ impl ComputeDepthPyramid {
             log::warn!("depth texture size changed, invalidating");
             self.compute_copy_depth.invalidate();
             self.compute_downsample_depth.invalidate();
-            self.depth_pyramid.resize(device, queue, size)
+            self.depth_pyramid.resize(size)
         } else {
-            self.depth_pyramid.slab.get_updated_buffer_and_check((
-                device,
-                queue,
-                Self::LABEL,
-                wgpu::BufferUsages::empty(),
-            ))
+            self.depth_pyramid.slab.get_updated_buffer_and_check()
         };
         if should_invalidate {
             self.compute_copy_depth.invalidate();
@@ -712,10 +661,9 @@ impl ComputeDepthPyramid {
         }
 
         self.compute_copy_depth
-            .run(device, queue, &self.depth_pyramid, depth_texture);
+            .run(&self.depth_pyramid, depth_texture);
 
-        self.compute_downsample_depth
-            .run(device, queue, &self.depth_pyramid);
+        self.compute_downsample_depth.run(&self.depth_pyramid);
 
         Ok(())
     }
@@ -777,7 +725,7 @@ mod test {
                 .drawing_strategy
                 .as_indirect()
                 .unwrap()
-                .read_hzb_images(&ctx),
+                .read_hzb_images(),
         )
         .unwrap();
         for (i, img) in pyramid_images.into_iter().enumerate() {
@@ -1003,7 +951,7 @@ mod test {
                 .drawing_strategy
                 .as_indirect()
                 .unwrap()
-                .read_hzb_images(&ctx),
+                .read_hzb_images(),
         )
         .unwrap();
         for (i, mut img) in pyramid_images.into_iter().enumerate() {
@@ -1012,8 +960,7 @@ mod test {
         }
 
         // The stage's slab, which contains the `Renderlet`s and their `BoundingSphere`s
-        let stage_slab =
-            futures_lite::future::block_on(stage.read(&ctx, Some("read stage"), ..)).unwrap();
+        let stage_slab = futures_lite::future::block_on(stage.read(..)).unwrap();
         let draw_calls = stage.draw_calls.read().unwrap();
         let indirect_draws = draw_calls.drawing_strategy.as_indirect().unwrap();
         // The HZB slab, which contains a `DepthPyramidDescriptor` at index 0, and all the
@@ -1024,13 +971,11 @@ mod test {
                 .compute_depth_pyramid
                 .depth_pyramid
                 .slab
-                .read(&ctx, Some("read hzb desc"), ..),
+                .read(..),
         )
         .unwrap();
         // The indirect draw buffer
-        let mut args_slab =
-            futures_lite::future::block_on(indirect_draws.slab.read(&ctx, Some("read args"), ..))
-                .unwrap();
+        let mut args_slab = futures_lite::future::block_on(indirect_draws.slab.read(..)).unwrap();
         let args: &mut [DrawIndirectArgs] = bytemuck::cast_slice_mut(&mut args_slab);
         // Number of `DrawIndirectArgs` in the `args` buffer.
         let num_draw_calls = draw_calls.draw_count();

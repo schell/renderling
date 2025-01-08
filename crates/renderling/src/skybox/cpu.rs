@@ -1,12 +1,13 @@
 //! CPU-side code for skybox rendering.
+use craballoc::{
+    prelude::{Hybrid, SlabAllocator},
+    runtime::WgpuRuntime,
+};
 use crabslab::Id;
 use glam::{Mat4, UVec2, Vec3};
 
 use crate::{
-    atlas::AtlasImage,
-    camera::Camera,
-    convolution::VertexPrefilterEnvironmentCubemapIds,
-    slab::{Hybrid, SlabAllocator},
+    atlas::AtlasImage, camera::Camera, convolution::VertexPrefilterEnvironmentCubemapIds,
     texture::Texture,
 };
 
@@ -169,7 +170,7 @@ pub struct Skybox {
 
 impl Skybox {
     /// Create an empty, transparent skybox.
-    pub fn empty(device: &wgpu::Device, queue: &wgpu::Queue) -> Self {
+    pub fn empty(runtime: &WgpuRuntime) -> Self {
         log::trace!("creating empty skybox");
         let hdr_img = AtlasImage {
             pixels: vec![0u8; 4 * 4],
@@ -177,19 +178,14 @@ impl Skybox {
             format: crate::atlas::AtlasImageFormat::R32G32B32A32FLOAT,
             apply_linear_transfer: false,
         };
-        Self::new(device, queue, hdr_img, crabslab::Id::<Camera>::NONE)
+        Self::new(runtime, hdr_img, crabslab::Id::<Camera>::NONE)
     }
 
     /// Create a new `Skybox`.
-    pub fn new(
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        hdr_img: AtlasImage,
-        camera_id: crate::slab::Id<Camera>,
-    ) -> Self {
+    pub fn new(runtime: &WgpuRuntime, hdr_img: AtlasImage, camera_id: Id<Camera>) -> Self {
         log::trace!("creating skybox");
 
-        let slab = SlabAllocator::<wgpu::Buffer>::default();
+        let slab = SlabAllocator::new(runtime, wgpu::BufferUsages::VERTEX);
 
         let proj = Mat4::perspective_rh(std::f32::consts::FRAC_PI_2, 1.0, 0.1, 10.0);
         let camera = slab.new_value(Camera::default().with_projection(proj));
@@ -199,18 +195,14 @@ impl Skybox {
             roughness: roughness.id(),
         });
 
-        let buffer =
-            slab.get_updated_buffer((device, queue, Some("skybox"), wgpu::BufferUsages::VERTEX));
+        let buffer = slab.get_updated_buffer();
         let mut buffer_upkeep = || {
-            let maybe_resized_buffer = slab.upkeep((
-                device,
-                queue,
-                Some("skybox-upkeep"),
-                wgpu::BufferUsages::VERTEX,
-            ));
+            let maybe_resized_buffer = slab.upkeep();
             debug_assert!(maybe_resized_buffer.is_none());
         };
 
+        let device = &runtime.device;
+        let queue = &runtime.queue;
         let equirectangular_texture = Skybox::hdr_texture_from_atlas_image(device, queue, hdr_img);
         let views = [
             Mat4::look_at_rh(

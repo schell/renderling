@@ -28,13 +28,13 @@
 //! Happy hacking!
 use std::sync::{Arc, RwLock};
 
+use craballoc::prelude::Hybrid;
 use crabslab::Id;
 use glyph_brush::ab_glyph;
 use renderling::{
     atlas::AtlasTexture,
     camera::Camera,
     math::{Quat, UVec2, Vec2, Vec3Swizzles, Vec4},
-    slab::Hybrid,
     stage::{NestedTransform, Renderlet, Stage},
     transform::Transform,
     Context,

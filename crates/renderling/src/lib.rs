@@ -166,7 +166,6 @@ pub mod math;
 pub mod pbr;
 pub mod sdf;
 pub mod skybox;
-pub mod slab;
 pub mod stage;
 #[cfg(not(target_arch = "spirv"))]
 pub mod texture;
@@ -181,11 +180,15 @@ pub use context::*;
 pub mod prelude {
     //! A prelude, meant to be glob-imported.
 
+    pub extern crate craballoc;
     pub extern crate glam;
+
+    pub use craballoc::prelude::*;
+    pub use crabslab::{Array, Id};
+
     pub use crate::{
         camera::*,
         pbr::{light::*, Material},
-        slab::*,
         stage::*,
         transform::Transform,
     };
