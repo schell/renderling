@@ -106,13 +106,13 @@ impl Texture {
                 let index = i * mip_levels as usize + mip_level;
                 let texture = &face_textures[index].texture;
                 encoder.copy_texture_to_texture(
-                    wgpu::TexelCopyTextureInfo {
+                    wgpu::ImageCopyTexture {
                         texture,
                         mip_level: 0,
                         origin: wgpu::Origin3d::ZERO,
                         aspect: wgpu::TextureAspect::All,
                     },
-                    wgpu::TexelCopyTextureInfo {
+                    wgpu::ImageCopyTexture {
                         texture: &cubemap_texture,
                         mip_level: mip_level as u32,
                         origin: wgpu::Origin3d {
@@ -195,14 +195,14 @@ impl Texture {
 
         if !data.is_empty() {
             queue.write_texture(
-                wgpu::TexelCopyTextureInfo {
+                wgpu::ImageCopyTexture {
                     texture: &texture,
                     mip_level: 0,
                     origin: wgpu::Origin3d::ZERO,
                     aspect: wgpu::TextureAspect::All,
                 },
                 data,
-                wgpu::TexelCopyBufferLayout {
+                wgpu::ImageDataLayout {
                     offset: 0,
                     bytes_per_row: Some(color_channels * color_channel_bytes * width),
                     rows_per_image: None,
@@ -331,14 +331,14 @@ impl Texture {
         });
 
         queue.write_texture(
-            wgpu::TexelCopyTextureInfo {
+            wgpu::ImageCopyTexture {
                 texture: &texture,
                 mip_level: 0,
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
             },
             img.as_bytes(),
-            wgpu::TexelCopyBufferLayout {
+            wgpu::ImageDataLayout {
                 offset: 0,
                 bytes_per_row: Some(channels * dimensions.0),
                 rows_per_image: Some(dimensions.1),
@@ -393,14 +393,14 @@ impl Texture {
         });
 
         runtime.queue.write_texture(
-            wgpu::TexelCopyTextureInfo {
+            wgpu::ImageCopyTexture {
                 texture: &texture,
                 mip_level: 0,
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
             },
             img.deref(),
-            wgpu::TexelCopyBufferLayout {
+            wgpu::ImageDataLayout {
                 offset: 0,
                 bytes_per_row: Some(P::CHANNEL_COUNT as u32 * dimensions.0),
                 rows_per_image: Some(dimensions.1),
@@ -558,9 +558,9 @@ impl Texture {
         // Copy the data from the surface texture to the buffer
         encoder.copy_texture_to_buffer(
             source,
-            wgpu::TexelCopyBufferInfo {
+            wgpu::ImageCopyBuffer {
                 buffer: &buffer,
-                layout: wgpu::TexelCopyBufferLayout {
+                layout: wgpu::ImageDataLayout {
                     offset: 0,
                     bytes_per_row: Some(dimensions.padded_bytes_per_row as u32),
                     rows_per_image: None,
