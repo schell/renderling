@@ -58,3 +58,6 @@ opt-level = 3
 
 [profile.dev.package.gltf]
 opt-level = 3
+
+[patch.crates-io]
+spirv-std = { git = "https://github.com/Rust-GPU/rust-gpu", rev = "562dff9176f63b318e9b34620ffacb8aa89dae9a" }
