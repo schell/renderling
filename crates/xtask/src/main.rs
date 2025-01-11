@@ -23,7 +23,7 @@ fn main() {
     let cli = Cli::parse();
     match cli.subcommand {
         Command::CompileShaders => {
-            let paths = renderling_build::RenderlingPaths::default();
+            let paths = renderling_build::RenderlingPaths::new().unwrap();
 
             log::info!(
                 "Calling `cargo gpu toml {}",
@@ -40,7 +40,8 @@ fn main() {
         }
         Command::GenerateLinkage => {
             log::info!("Generating linkage for shaders");
-            renderling_build::generate_linkage()
+            let paths = renderling_build::RenderlingPaths::new().unwrap();
+            paths.generate_linkage();
         }
     }
 }
