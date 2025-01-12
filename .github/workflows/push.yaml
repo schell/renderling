@@ -75,6 +75,7 @@ jobs:
       - uses: moonrepo/setup-rust@v1
       - name: Check LongPathsEnabled
         if: runner.os == 'Windows'
+        shell: powershell
         run: |
           (Get-ItemProperty "HKLM:System\CurrentControlSet\Control\FileSystem").LongPathsEnabled
       - name: Set git core.longpaths flag
