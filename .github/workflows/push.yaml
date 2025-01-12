@@ -82,6 +82,15 @@ jobs:
         if: runner.os == 'Windows'
         run: |
           git config --system core.longpaths true
+      - name: Set MSBuild version
+        id: set-msbuild
+        if: runner.os == 'Windows'
+        uses: microsoft/setup-msbuild@v1.1
+        with:
+          msbuild-architecture: x64
+      - name: Check msbuild path
+        if: runner.os == 'Windows'
+        run: echo "MSVS_PATH=$(Resolve-Path -Path '${{ steps.set-msbuild.outputs.msbuildPath }}\..\..\..\..' | Select -ExpandProperty 'Path')" >> $env:GITHUB_ENV
       - run: cargo gpu show commitsh
       - run: rm -rf crates/renderling/src/linkage/* crates/renderling/shaders
       - run: cargo xtask compile-shaders
