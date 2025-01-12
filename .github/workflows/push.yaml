@@ -73,6 +73,14 @@ jobs:
               ${{ needs.install-cargo-gpu.outputs.cachepath-Windows }}
           key: rust-gpu-cache-0-${{ runner.os }}
       - uses: moonrepo/setup-rust@v1
+      - name: Check LongPathsEnabled
+        if: runner.os == 'Windows'
+        run: |
+          (Get-ItemProperty "HKLM:System\CurrentControlSet\Control\FileSystem").LongPathsEnabled
+      - name: Set git core.longpaths flag
+        if: runner.os == 'Windows'
+        run: |
+          git config --system core.longpaths true
       - run: cargo gpu show commitsh
       - run: rm -rf crates/renderling/src/linkage/* crates/renderling/shaders
       - run: cargo xtask compile-shaders
