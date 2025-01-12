@@ -41,7 +41,7 @@ serde_json.workspace = true
 
 # dependencies for CPU and GPU code
 [dependencies]
-spirv-std = { version = "0.9" }
+spirv-std.workspace = true
 
 # dependencies for GPU code
 [target.'cfg(target_arch = "spirv")'.dependencies]

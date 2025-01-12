@@ -2,7 +2,9 @@
 
 fn main() {
     if std::env::var("CARGO_CFG_TARGET_ARCH").as_deref() != Ok("spirv") {
-        renderling_build::generate_linkage();
+        if let Some(paths) = renderling_build::RenderlingPaths::new() {
+            paths.generate_linkage();
+        }
     }
 
     cfg_aliases::cfg_aliases! {

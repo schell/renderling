@@ -109,10 +109,15 @@ pub struct RenderlingPaths {
     pub linkage_dir: std::path::PathBuf,
 }
 
-impl Default for RenderlingPaths {
-    fn default() -> Self {
-        let cargo_workspace =
-            std::path::PathBuf::from(std::env::var("CARGO_WORKSPACE_DIR").unwrap());
+impl RenderlingPaths {
+    /// Create a new `RenderlingPaths`.
+    ///
+    /// If the `CARGO_WORKSPACE_DIR` is _not_ available, this most likely means we're building renderling
+    /// outside of its own source tree, which means we **don't want to compile shaders or generate linkage**.
+    ///
+    /// For this reason we return `Option`.
+    pub fn new() -> Option<Self> {
+        let cargo_workspace = std::path::PathBuf::from(std::env::var("CARGO_WORKSPACE_DIR").ok()?);
         let renderling_crate = cargo_workspace.join("crates").join("renderling");
         log::debug!("cargo_manifest_dir: {renderling_crate:#?}");
         let shader_dir = renderling_crate.join("shaders");
@@ -120,62 +125,61 @@ impl Default for RenderlingPaths {
         let shader_manifest = shader_dir.join("manifest.json");
         let linkage_dir = renderling_crate.join("src").join("linkage");
 
-        Self {
+        Some(Self {
             cargo_workspace,
             renderling_crate,
             shader_dir,
             shader_manifest,
             linkage_dir,
+        })
+    }
+
+    /// Generate linkage (Rust source) files for each shader in the manifest.
+    pub fn generate_linkage(&self) {
+        log::trace!("{:#?}", std::env::vars().collect::<Vec<_>>());
+        assert!(
+            self.shader_manifest.is_file(),
+            "missing file '{}', you must first compile the shaders",
+            self.shader_manifest.display()
+        );
+
+        if !self.linkage_dir.is_dir() {
+            log::info!("creating linkage directory");
+            std::fs::create_dir_all(&self.linkage_dir).unwrap();
         }
-    }
-}
-/// Generate linkage (Rust source) files for each shader in the manifest.
-pub fn generate_linkage() {
-    log::trace!("{:#?}", std::env::vars().collect::<Vec<_>>());
-    let paths = RenderlingPaths::default();
 
-    assert!(
-        paths.shader_manifest.is_file(),
-        "missing file '{}', you must first compile the shaders",
-        paths.shader_manifest.display()
-    );
+        log::debug!("cwd: {:?}", std::env::current_dir().unwrap());
 
-    if !paths.linkage_dir.is_dir() {
-        log::info!("creating linkage directory");
-        std::fs::create_dir_all(&paths.linkage_dir).unwrap();
-    }
+        let manifest_file = std::fs::File::open(&self.shader_manifest).unwrap();
+        let manifest: Vec<Linkage> = serde_json::from_reader(manifest_file).unwrap();
+        let mut set = std::collections::HashSet::new();
+        for linkage in manifest.into_iter() {
+            log::debug!("linkage: {linkage:#?}");
+            let fn_name = linkage.fn_name();
 
-    log::debug!("cwd: {:?}", std::env::current_dir().unwrap());
+            if set.contains(fn_name) {
+                panic!("Shader name '{fn_name}' is used for two or more shaders, aborting!");
+            }
+            set.insert(fn_name.to_string());
 
-    let manifest_file = std::fs::File::open(&paths.shader_manifest).unwrap();
-    let manifest: Vec<Linkage> = serde_json::from_reader(manifest_file).unwrap();
-    let mut set = std::collections::HashSet::new();
-    for linkage in manifest.into_iter() {
-        log::debug!("linkage: {linkage:#?}");
-        let fn_name = linkage.fn_name();
+            let absolute_source_path = self
+                .shader_dir
+                .join(linkage.source_path.file_name().unwrap());
+            let wgsl_source_path = linkage.source_path.with_extension("wgsl");
+            let absolute_wgsl_source_path =
+                self.shader_dir.join(wgsl_source_path.file_name().unwrap());
+            wgsl(absolute_source_path, absolute_wgsl_source_path);
 
-        if set.contains(fn_name) {
-            panic!("Shader name '{fn_name}' is used for two or more shaders, aborting!");
+            let filepath = self.linkage_dir.join(fn_name).with_extension("rs");
+            log::info!("generating: {}", linkage.entry_point,);
+
+            let contents = linkage.to_string();
+            std::fs::write(&filepath, contents).unwrap();
+            std::process::Command::new("rustfmt")
+                .args([&format!("{}", filepath.display())])
+                .output()
+                .expect("could not format generated code");
         }
-        set.insert(fn_name.to_string());
-
-        let absolute_source_path = paths
-            .shader_dir
-            .join(linkage.source_path.file_name().unwrap());
-        let wgsl_source_path = linkage.source_path.with_extension("wgsl");
-        let absolute_wgsl_source_path =
-            paths.shader_dir.join(wgsl_source_path.file_name().unwrap());
-        wgsl(absolute_source_path, absolute_wgsl_source_path);
-
-        let filepath = paths.linkage_dir.join(fn_name).with_extension("rs");
-        log::info!("generating: {}", linkage.entry_point,);
-
-        let contents = linkage.to_string();
-        std::fs::write(&filepath, contents).unwrap();
-        std::process::Command::new("rustfmt")
-            .args([&format!("{}", filepath.display())])
-            .output()
-            .expect("could not format generated code");
+        log::info!("...done!")
     }
-    log::info!("...done!")
 }
