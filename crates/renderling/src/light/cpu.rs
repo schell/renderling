@@ -1,6 +1,6 @@
 //! CPU-only lighting and shadows.
 
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 
 use craballoc::{
     prelude::{Hybrid, SlabAllocator, WgpuRuntime},
@@ -32,7 +32,12 @@ impl LightDetails {
 
 pub struct ShadowMapBindGroup {}
 
-/// A depth map rendering of a scene from a light's point of view.
+/// A depth map rendering of the scene from a light's point of view.
+///
+/// Used to project shadows from one light source for specific objects.
+///
+/// Based on the
+/// [shadow mapping article at learnopengl](https://learnopengl.com/Advanced-Lighting/Shadows/Shadow-Mapping).
 // TODO: Separate pipeline and bindgroup layout from ShadowMap
 pub struct ShadowMap {
     /// A depth texture used to store the scene from the light's POV.
@@ -283,7 +288,7 @@ mod test {
         frame.present();
 
         // Rendering the scene without shadows as a sanity check
-        img_diff::save("shadows/shadow_mapping_sanity_scene_before.png", img);
+        img_diff::assert_img_eq("shadows/shadow_mapping_sanity_scene_before.png", img);
 
         assert_eq!(
             gltf_light.light.get().transform_id,
@@ -339,12 +344,12 @@ mod test {
             let img = frame.read_image().unwrap();
             frame.present();
 
-            img_diff::save("shadows/shadow_mapping_sanity_light_pov.png", img);
+            img_diff::assert_img_eq("shadows/shadow_mapping_sanity_light_pov.png", img);
 
             let mut depth_img = stage.get_depth_texture().read_image().unwrap();
             // Normalize the value
             img_diff::normalize_gray_img(&mut depth_img);
-            img_diff::save(
+            img_diff::assert_img_eq(
                 "shadows/shadow_mapping_sanity_light_pov_depth.png",
                 depth_img,
             );
@@ -417,7 +422,7 @@ mod test {
         let depth_texture = DepthTexture::new(&ctx, shadows.texture.clone());
         let mut depth_img = depth_texture.read_image().unwrap();
         img_diff::normalize_gray_img(&mut depth_img);
-        img_diff::save("shadows/shadow_mapping_sanity_depth.png", depth_img);
+        img_diff::assert_img_eq("shadows/shadow_mapping_sanity_depth.png", depth_img);
 
         assert_eq!(renderlet_vertex_info.len(), shadow_vertex_info.len());
 
