@@ -100,7 +100,11 @@ impl Tonemapping {
         frame_texture_format: wgpu::TextureFormat,
         hdr_texture: &Texture,
     ) -> Self {
-        let slab = SlabAllocator::new(runtime, wgpu::BufferUsages::empty());
+        let slab = SlabAllocator::new_with_label(
+            runtime,
+            wgpu::BufferUsages::empty(),
+            Some("tonemapping-slab"),
+        );
         let config = slab.new_value(TonemapConstants::default());
 
         let label = Some("tonemapping");

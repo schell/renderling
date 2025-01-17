@@ -9,7 +9,7 @@ use crabslab::{Array, Slab};
 use glam::UVec2;
 use snafu::{OptionExt, Snafu};
 
-use crate::texture::Texture;
+use crate::{bindgroup::ManagedBindGroup, texture::Texture};
 
 use super::DepthPyramidDescriptor;
 
@@ -40,11 +40,14 @@ impl From<SlabAllocatorError> for CullingError {
 /// Computes frustum and occlusion culling on the GPU.
 pub struct ComputeCulling {
     pipeline: wgpu::ComputePipeline,
-    bindgroup_layout: wgpu::BindGroupLayout,
-    bindgroup: wgpu::BindGroup,
+
     pyramid_slab_buffer: SlabBuffer<wgpu::Buffer>,
     stage_slab_buffer: SlabBuffer<wgpu::Buffer>,
     indirect_slab_buffer: SlabBuffer<wgpu::Buffer>,
+
+    bindgroup_layout: wgpu::BindGroupLayout,
+    bindgroup: ManagedBindGroup,
+
     pub(crate) compute_depth_pyramid: ComputeDepthPyramid,
 }
 
@@ -86,10 +89,9 @@ impl ComputeCulling {
 
     pub fn new(
         runtime: impl AsRef<WgpuRuntime>,
-        size: UVec2,
-        sample_count: u32,
         stage_slab_buffer: &SlabBuffer<wgpu::Buffer>,
         indirect_slab_buffer: &SlabBuffer<wgpu::Buffer>,
+        depth_texture: &Texture,
     ) -> Self {
         let runtime = runtime.as_ref();
         let device = &runtime.device;
@@ -143,7 +145,7 @@ impl ComputeCulling {
             compilation_options: wgpu::PipelineCompilationOptions::default(),
             cache: None,
         });
-        let compute_depth_pyramid = ComputeDepthPyramid::new(runtime, size, sample_count);
+        let compute_depth_pyramid = ComputeDepthPyramid::new(runtime, depth_texture);
         let pyramid_slab_buffer = compute_depth_pyramid
             .compute_copy_depth
             .pyramid_slab_buffer
@@ -151,14 +153,14 @@ impl ComputeCulling {
         let bindgroup = Self::new_bindgroup(
             stage_slab_buffer,
             &pyramid_slab_buffer,
-            &indirect_slab_buffer,
+            indirect_slab_buffer,
             &bindgroup_layout,
             device,
         );
         Self {
             pipeline,
             bindgroup_layout,
-            bindgroup,
+            bindgroup: ManagedBindGroup::new(bindgroup),
             compute_depth_pyramid,
             pyramid_slab_buffer,
             stage_slab_buffer: stage_slab_buffer.clone(),
@@ -171,21 +173,31 @@ impl ComputeCulling {
     }
 
     pub fn run(&mut self, indirect_draw_count: u32, depth_texture: &Texture) {
+        log::trace!(
+            "indirect_draw_count: {indirect_draw_count}, sample_count: {}",
+            depth_texture.texture.sample_count()
+        );
         // Compute the depth pyramid from last frame's depth buffer
         self.compute_depth_pyramid.run(depth_texture);
 
-        let should_recreate_bindgroup = self.stage_slab_buffer.synchronize()
-            || self.indirect_slab_buffer.synchronize()
-            || self.pyramid_slab_buffer.synchronize();
-        if should_recreate_bindgroup {
-            self.bindgroup = Self::new_bindgroup(
+        let stage_slab_invalid = self.stage_slab_buffer.synchronize();
+        let indirect_slab_invalid = self.indirect_slab_buffer.synchronize();
+        let pyramid_slab_invalid = self.pyramid_slab_buffer.synchronize();
+        let should_recreate_bindgroup =
+            stage_slab_invalid || indirect_slab_invalid || pyramid_slab_invalid;
+        log::trace!("stage_slab_invalid: {stage_slab_invalid}");
+        log::trace!("indirect_slab_invalid: {indirect_slab_invalid}");
+        log::trace!("pyramid_slab_invalid: {pyramid_slab_invalid}");
+        let bindgroup = self.bindgroup.get(should_recreate_bindgroup, || {
+            log::debug!("recreating compute-culling bindgroup");
+            Self::new_bindgroup(
                 &self.stage_slab_buffer,
                 &self.pyramid_slab_buffer,
                 &self.indirect_slab_buffer,
                 &self.bindgroup_layout,
                 self.compute_depth_pyramid.depth_pyramid.slab.device(),
-            );
-        }
+            )
+        });
         let runtime = self.runtime();
         let mut encoder = runtime
             .device
@@ -196,7 +208,7 @@ impl ComputeCulling {
                 timestamp_writes: None,
             });
             compute_pass.set_pipeline(&self.pipeline);
-            compute_pass.set_bind_group(0, Some(&self.bindgroup), &[]);
+            compute_pass.set_bind_group(0, Some(bindgroup.as_ref()), &[]);
             compute_pass.dispatch_workgroups(indirect_draw_count / 32 + 1, 1, 1);
         }
         runtime.queue.submit(Some(encoder.finish()));
@@ -309,7 +321,7 @@ struct ComputeCopyDepth {
     bindgroup_layout: wgpu::BindGroupLayout,
     sample_count: u32,
     pyramid_slab_buffer: SlabBuffer<wgpu::Buffer>,
-    bindgroup: Option<wgpu::BindGroup>,
+    bindgroup: ManagedBindGroup,
 }
 
 impl ComputeCopyDepth {
@@ -411,14 +423,21 @@ impl ComputeCopyDepth {
         })
     }
 
-    pub fn new(sample_count: u32, depth_pyramid: &DepthPyramid) -> Self {
+    pub fn new(depth_pyramid: &DepthPyramid, depth_texture: &Texture) -> Self {
         let device = depth_pyramid.slab.device();
+        let sample_count = depth_texture.texture.sample_count();
         let bindgroup_layout = Self::create_bindgroup_layout(device, sample_count);
         let pipeline = Self::create_pipeline(device, &bindgroup_layout, sample_count > 1);
         let pyramid_slab_buffer = depth_pyramid.slab.upkeep();
+        let buffer = Self::create_bindgroup(
+            device,
+            &bindgroup_layout,
+            &pyramid_slab_buffer,
+            &depth_texture.view,
+        );
         Self {
             pipeline,
-            bindgroup: None,
+            bindgroup: ManagedBindGroup::new(buffer),
             bindgroup_layout,
             pyramid_slab_buffer,
             sample_count,
@@ -458,17 +477,15 @@ impl ComputeCopyDepth {
         let _ = pyramid.slab.upkeep();
         let should_recreate_bindgroup =
             self.pyramid_slab_buffer.synchronize() || sample_count_mismatch || size_changed;
-        if should_recreate_bindgroup {
-            self.bindgroup = Some(Self::create_bindgroup(
-                pyramid.slab.device(),
+        let bindgroup = self.bindgroup.get(should_recreate_bindgroup, || {
+            Self::create_bindgroup(
+                &runtime.device,
                 &self.bindgroup_layout,
                 &self.pyramid_slab_buffer,
                 &depth_texture.view,
-            ));
-        }
+            )
+        });
 
-        // UNWRAP: safe because we just set it above^
-        let bindgroup = self.bindgroup.as_ref().unwrap();
         let mut encoder = runtime
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Self::LABEL });
@@ -478,7 +495,7 @@ impl ComputeCopyDepth {
                 ..Default::default()
             });
             compute_pass.set_pipeline(&self.pipeline);
-            compute_pass.set_bind_group(0, Some(bindgroup), &[]);
+            compute_pass.set_bind_group(0, Some(bindgroup.as_ref()), &[]);
             let x = size.x / 32 + 1;
             let y = size.y / 32 + 1;
             let z = 1;
@@ -579,7 +596,7 @@ impl ComputeDownsampleDepth {
         }
 
         for i in 1..pyramid.mip_data.len() {
-            log::trace!("downsampling to mip {i}");
+            log::trace!("downsampling to mip {i}..{}", pyramid.mip_data.len());
             // Update the mip_level we're operating on.
             let size = pyramid.desc.modify(|desc| {
                 desc.mip_level = i as u32;
@@ -615,7 +632,6 @@ impl ComputeDownsampleDepth {
 
 /// Computes occlusion culling on the GPU.
 pub struct ComputeDepthPyramid {
-    sample_count: u32,
     pub(crate) depth_pyramid: DepthPyramid,
     compute_copy_depth: ComputeCopyDepth,
     compute_downsample_depth: ComputeDownsampleDepth,
@@ -624,16 +640,15 @@ pub struct ComputeDepthPyramid {
 impl ComputeDepthPyramid {
     const _LABEL: Option<&'static str> = Some("compute-depth-pyramid");
 
-    pub fn new(runtime: impl AsRef<WgpuRuntime>, size: UVec2, sample_count: u32) -> Self {
+    pub fn new(runtime: impl AsRef<WgpuRuntime>, depth_texture: &Texture) -> Self {
         let runtime = runtime.as_ref();
-        let depth_pyramid = DepthPyramid::new(runtime, size);
-        let compute_copy_depth = ComputeCopyDepth::new(sample_count, &depth_pyramid);
+        let depth_pyramid = DepthPyramid::new(runtime, depth_texture.size());
+        let compute_copy_depth = ComputeCopyDepth::new(&depth_pyramid, depth_texture);
         let compute_downsample_depth = ComputeDownsampleDepth::new(&depth_pyramid);
         Self {
             depth_pyramid,
             compute_copy_depth,
             compute_downsample_depth,
-            sample_count,
         }
     }
 
