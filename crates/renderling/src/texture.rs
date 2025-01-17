@@ -68,6 +68,10 @@ impl Texture {
         self.texture.height()
     }
 
+    pub fn size(&self) -> UVec2 {
+        UVec2::new(self.width(), self.height())
+    }
+
     /// Create a cubemap texture from 6 faces.
     pub fn new_cubemap_texture(
         runtime: impl AsRef<WgpuRuntime>,
