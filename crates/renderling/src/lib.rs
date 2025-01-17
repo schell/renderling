@@ -139,6 +139,8 @@
 #![deny(clippy::disallowed_methods)]
 
 pub mod atlas;
+#[cfg(cpu)]
+pub mod bindgroup;
 pub mod bits;
 pub mod bloom;
 pub mod bvol;
@@ -153,6 +155,7 @@ pub mod cull;
 pub mod debug;
 pub mod draw;
 pub mod ibl;
+pub mod light;
 #[cfg(not(target_arch = "spirv"))]
 mod linkage;
 pub mod math;
@@ -181,12 +184,7 @@ pub mod prelude {
     pub use craballoc::prelude::*;
     pub use crabslab::{Array, Id};
 
-    pub use crate::{
-        camera::*,
-        pbr::{light::*, Material},
-        stage::*,
-        transform::Transform,
-    };
+    pub use crate::{camera::*, light::*, pbr::Material, stage::*, transform::Transform};
 
     #[cfg(cpu)]
     pub use crate::context::*;
@@ -222,6 +220,10 @@ mod test {
     #[ctor::ctor]
     fn init_logging() {
         let _ = env_logger::builder().is_test(true).try_init();
+    }
+
+    pub fn workspace_dir() -> std::path::PathBuf {
+        std::path::PathBuf::from(std::env!("CARGO_WORKSPACE_DIR"))
     }
 
     #[test]
@@ -276,7 +278,16 @@ mod test {
         frame.present();
 
         let depth_texture = stage.get_depth_texture();
-        let depth_img = depth_texture.read_image().unwrap();
+        let mut depth_img = depth_texture.read_image().unwrap();
+        let mut min = u8::MAX;
+        let mut max = u8::MIN;
+        // depth_img.pixels_mut().for_each(|image::Luma([d])| {
+        //     min = min.min(*d);
+        //     max = max.max(*d);
+        //     let f = crate::math::scaled_u8_to_f32(*d);
+        //     *d = crate::math::scaled_f32_to_u8(camera.get().linearize_depth(f));
+        // });
+        // log::warn!("minmax: ({min}, {max})");
         img_diff::assert_img_eq("cmy_triangle_depth.png", depth_img.clone());
         img_diff::save("cmy_triangle/depth.png", depth_img);
 
@@ -758,7 +769,7 @@ mod test {
     #[test]
     /// Tests shading with directional light.
     fn scene_cube_directional() {
-        use crate::pbr::light::{DirectionalLight, Light, LightStyle};
+        use crate::light::{DirectionalLight, Light, LightStyle};
 
         let ctx = Context::headless(100, 100);
         let stage = ctx

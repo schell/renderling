@@ -187,11 +187,16 @@ The `crates/renderling/shaders/` folder contains the generated SPIR-V files.
 To regenerate the shaders, run:
 
 ```
-cargo shaders
+cargo xtask compile-shaders
 ```
 
-There is a `.cargo/config.toml` alias for `cargo shaders` that expands into a larger 
-shader compilation command.
+And to explicitly re-generate `wgpu` linkage, you can run: 
+
+```
+cargo xtask generate-linkage
+```
+
+...but the `build.rs` script will do this for you, so it's not strictly necessary.
 
 ## Building on WASM
 

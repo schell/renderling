@@ -13,11 +13,13 @@ use std::{
 
 use crate::{
     atlas::{Atlas, AtlasError, AtlasImage, AtlasImageError, AtlasTexture},
+    bindgroup::ManagedBindGroup,
     bloom::Bloom,
     camera::Camera,
     debug::DebugOverlay,
     draw::DrawCalls,
-    pbr::{debug::DebugChannel, light::Light, PbrConfig},
+    light::Light,
+    pbr::{debug::DebugChannel, PbrConfig},
     skybox::{Skybox, SkyboxRenderPipeline},
     stage::Renderlet,
     texture::{DepthTexture, Texture},
@@ -159,8 +161,10 @@ pub struct Stage {
     pub(crate) has_bloom: Arc<AtomicBool>,
     pub(crate) has_debug_overlay: Arc<AtomicBool>,
 
+    pub(crate) stage_slab_buffer: Arc<RwLock<SlabBuffer<wgpu::Buffer>>>,
+
     pub(crate) skybox_bindgroup: Arc<Mutex<Option<Arc<wgpu::BindGroup>>>>,
-    pub(crate) buffers_bindgroup: Arc<Mutex<Option<Arc<wgpu::BindGroup>>>>,
+    pub(crate) buffers_bindgroup: ManagedBindGroup,
     pub(crate) textures_bindgroup: Arc<Mutex<Option<Arc<wgpu::BindGroup>>>>,
 
     pub(crate) draw_calls: Arc<RwLock<DrawCalls>>,
@@ -182,7 +186,8 @@ impl Stage {
         let resolution @ UVec2 { x: w, y: h } = ctx.get_size();
         let atlas_size = *ctx.atlas_size.read().unwrap();
         let atlas = Atlas::new(ctx, atlas_size).unwrap();
-        let mngr = SlabAllocator::new(runtime, wgpu::BufferUsages::empty());
+        let mngr =
+            SlabAllocator::new_with_label(runtime, wgpu::BufferUsages::empty(), Some("stage-slab"));
         let pbr_config = mngr.new_value(PbrConfig {
             atlas_size: UVec2::new(atlas_size.width, atlas_size.height),
             resolution,
@@ -196,12 +201,7 @@ impl Stage {
             h,
             multisample_count,
         )));
-        let depth_texture = Arc::new(RwLock::new(Texture::create_depth_texture(
-            device,
-            w,
-            h,
-            multisample_count,
-        )));
+        let depth_texture = Texture::create_depth_texture(device, w, h, multisample_count);
         let msaa_render_target = Default::default();
         // UNWRAP: safe because no other references at this point (created above^)
         let bloom = Bloom::new(ctx, &hdr_texture.read().unwrap());
@@ -210,16 +210,27 @@ impl Stage {
             ctx.get_render_target().format().add_srgb_suffix(),
             &bloom.get_mix_texture(),
         );
+        let stage_pipeline = create_stage_render_pipeline(device, multisample_count);
+        let stage_slab_buffer = mngr.upkeep();
 
         Self {
+            draw_calls: Arc::new(RwLock::new(DrawCalls::new(
+                ctx,
+                true,
+                &mngr.upkeep(),
+                &depth_texture,
+            ))),
+            depth_texture: Arc::new(RwLock::new(depth_texture)),
+            buffers_bindgroup: ManagedBindGroup::new(crate::linkage::slab_bindgroup(
+                device,
+                &stage_slab_buffer,
+                &stage_pipeline.get_bind_group_layout(0),
+            )),
+            stage_slab_buffer: Arc::new(RwLock::new(stage_slab_buffer)),
             mngr,
             pbr_config,
             lights: Arc::new(RwLock::new(lights)),
-
-            stage_pipeline: Arc::new(RwLock::new(create_stage_render_pipeline(
-                device,
-                multisample_count,
-            ))),
+            stage_pipeline: Arc::new(RwLock::new(stage_pipeline)),
             atlas,
             skybox: Arc::new(RwLock::new(Skybox::empty(runtime))),
             skybox_bindgroup: Default::default(),
@@ -228,18 +239,10 @@ impl Stage {
             bloom,
             tonemapping,
             has_bloom: AtomicBool::from(true).into(),
-            buffers_bindgroup: Default::default(),
             textures_bindgroup: Default::default(),
-            draw_calls: Arc::new(RwLock::new(DrawCalls::new(
-                ctx,
-                true,
-                UVec2::new(w, h),
-                multisample_count,
-            ))),
             debug_overlay: DebugOverlay::new(device, ctx.get_render_target().format()),
             has_debug_overlay: Arc::new(false.into()),
             hdr_texture,
-            depth_texture,
             msaa_render_target,
             msaa_sample_count: Arc::new(multisample_count.into()),
             clear_color_attachments: Arc::new(true.into()),
@@ -628,26 +631,6 @@ impl Stage {
         (pipeline, bindgroup)
     }
 
-    fn get_slab_buffers_bindgroup(&self, slab_buffer: &wgpu::Buffer) -> Arc<wgpu::BindGroup> {
-        // UNWRAP: safe because we're only ever called from the render thread.
-        let mut bindgroup = self.buffers_bindgroup.lock().unwrap();
-        if let Some(bindgroup) = bindgroup.as_ref() {
-            bindgroup.clone()
-        } else {
-            let b = Arc::new({
-                let device: &wgpu::Device = self.device();
-                crate::linkage::slab_bindgroup(
-                    device,
-                    slab_buffer,
-                    // UNWRAP: POP
-                    &self.stage_pipeline.read().unwrap().get_bind_group_layout(0),
-                )
-            });
-            *bindgroup = Some(b.clone());
-            b
-        }
-    }
-
     fn get_textures_bindgroup(&self) -> Arc<wgpu::BindGroup> {
         // UNWRAP: safe because we're only ever called from the render thread.
         let mut bindgroup = self.textures_bindgroup.lock().unwrap();
@@ -734,24 +717,15 @@ impl Stage {
         NestedTransform::new(&self.mngr)
     }
 
-    fn invalidate_compute_culling_bindgroup(&self) {
-        let mut guard = self.draw_calls.write().unwrap();
-        guard.invalidate_external_slab_buffer();
-    }
-
-    fn tick_internal(&self) -> Arc<wgpu::Buffer> {
+    fn tick_internal(&self) {
         self.draw_calls.write().unwrap().upkeep();
 
-        if let Some(new_slab_buffer) = self.mngr.upkeep() {
+        let stage_slab_buffer = self.mngr.upkeep();
+        if stage_slab_buffer.is_new_this_upkeep() {
             // invalidate our bindgroups, etc
+            // TODO: we shouldn't have to invalidate skybox and other bindgroups,
+            // they can do this in their own `run` functions
             let _ = self.skybox_bindgroup.lock().unwrap().take();
-            let _ = self.buffers_bindgroup.lock().unwrap().take();
-            self.invalidate_compute_culling_bindgroup();
-            new_slab_buffer
-        } else {
-            // UNWRAP: safe because we called `SlabManager::upkeep` above^, which ensures
-            // the buffer exists
-            self.mngr.get_buffer().unwrap()
         }
     }
 
@@ -765,13 +739,11 @@ impl Stage {
     }
 
     pub fn render(&self, view: &wgpu::TextureView) {
-        let slab_buffer = self.tick_internal();
+        self.tick_internal();
         let mut draw_calls = self.draw_calls.write().unwrap();
         let depth_texture = self.depth_texture.read().unwrap();
         // UNWRAP: safe because we know the depth texture format will always match
-        let maybe_indirect_buffer = draw_calls
-            .pre_draw(self.device(), self.queue(), &slab_buffer, &depth_texture)
-            .unwrap();
+        let maybe_indirect_buffer = draw_calls.pre_draw(&depth_texture).unwrap();
         {
             let label = Some("stage render");
             // UNWRAP: POP
@@ -780,11 +752,26 @@ impl Stage {
             let pipeline = self.stage_pipeline.read().unwrap();
             // UNWRAP: POP
             let msaa_target = self.msaa_render_target.read().unwrap();
-            let slab_buffers_bindgroup = self.get_slab_buffers_bindgroup(&slab_buffer);
+
+            let slab_buffers_bindgroup = {
+                let mut stage_slab_buffer = self.stage_slab_buffer.write().unwrap();
+                let should_invalidate_buffers_bindgroup = stage_slab_buffer.synchronize();
+                self.buffers_bindgroup
+                    .get(should_invalidate_buffers_bindgroup, || {
+                        crate::linkage::slab_bindgroup(
+                            self.device(),
+                            &stage_slab_buffer,
+                            // UNWRAP: POP
+                            &self.stage_pipeline.read().unwrap().get_bind_group_layout(0),
+                        )
+                    })
+            };
+
+            let stage_slab_buffer = self.stage_slab_buffer.read().unwrap();
             let textures_bindgroup = self.get_textures_bindgroup();
             let has_skybox = self.has_skybox.load(Ordering::Relaxed);
             let may_skybox_pipeline_and_bindgroup = if has_skybox {
-                Some(self.get_skybox_pipeline_and_bindgroup(&slab_buffer))
+                Some(self.get_skybox_pipeline_and_bindgroup(&stage_slab_buffer))
             } else {
                 None
             };
@@ -893,7 +880,7 @@ impl Stage {
                     self.device(),
                     self.queue(),
                     view,
-                    &slab_buffer,
+                    &self.stage_slab_buffer.read().unwrap(),
                     &indirect_draw_buffer,
                 );
             }
