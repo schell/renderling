@@ -53,19 +53,21 @@ pub struct IndirectDraws {
 impl IndirectDraws {
     fn new(
         runtime: impl AsRef<WgpuRuntime>,
-        size: UVec2,
-        sample_count: u32,
         stage_slab_buffer: &SlabBuffer<wgpu::Buffer>,
+        depth_texture: &Texture,
     ) -> Self {
         let runtime = runtime.as_ref();
-        let indirect_slab = SlabAllocator::new(runtime, wgpu::BufferUsages::INDIRECT);
+        let indirect_slab = SlabAllocator::new_with_label(
+            runtime,
+            wgpu::BufferUsages::INDIRECT,
+            Some("indirect-slab"),
+        );
         Self {
             compute_culling: ComputeCulling::new(
                 runtime,
-                size,
-                sample_count,
                 stage_slab_buffer,
                 &indirect_slab.upkeep(),
+                depth_texture,
             ),
             slab: indirect_slab,
             draws: vec![],
@@ -91,7 +93,10 @@ impl IndirectDraws {
             self.invalidate();
             // Pre-upkeep to reclaim resources - this is necessary because
             // the draw buffer has to be contiguous (it can't start with a bunch of trash)
-            self.slab.upkeep();
+            let indirect_buffer = self.slab.upkeep();
+            if indirect_buffer.is_new_this_upkeep() {
+                log::warn!("new indirect buffer");
+            }
             self.draws = internal_renderlets
                 .iter()
                 .map(|ir: &InternalRenderlet| {
@@ -173,9 +178,8 @@ impl DrawCalls {
     pub fn new(
         ctx: &Context,
         use_compute_culling: bool,
-        size: UVec2,
-        sample_count: u32,
         stage_slab_buffer: &SlabBuffer<wgpu::Buffer>,
+        depth_texture: &Texture,
     ) -> Self {
         let can_use_multi_draw_indirect = ctx.get_adapter().features().contains(
             wgpu::Features::INDIRECT_FIRST_INSTANCE | wgpu::Features::MULTI_DRAW_INDIRECT,
@@ -194,9 +198,8 @@ impl DrawCalls {
                     log::debug!("Using indirect drawing method and compute culling");
                     DrawingStrategy::Indirect(IndirectDraws::new(
                         ctx,
-                        size,
-                        sample_count,
                         stage_slab_buffer,
+                        depth_texture,
                     ))
                 } else {
                     log::debug!("Using direct drawing method");
