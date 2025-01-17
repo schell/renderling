@@ -186,7 +186,8 @@ impl Stage {
         let resolution @ UVec2 { x: w, y: h } = ctx.get_size();
         let atlas_size = *ctx.atlas_size.read().unwrap();
         let atlas = Atlas::new(ctx, atlas_size).unwrap();
-        let mngr = SlabAllocator::new(runtime, wgpu::BufferUsages::empty());
+        let mngr =
+            SlabAllocator::new_with_label(runtime, wgpu::BufferUsages::empty(), Some("stage-slab"));
         let pbr_config = mngr.new_value(PbrConfig {
             atlas_size: UVec2::new(atlas_size.width, atlas_size.height),
             resolution,
@@ -200,12 +201,7 @@ impl Stage {
             h,
             multisample_count,
         )));
-        let depth_texture = Arc::new(RwLock::new(Texture::create_depth_texture(
-            device,
-            w,
-            h,
-            multisample_count,
-        )));
+        let depth_texture = Texture::create_depth_texture(device, w, h, multisample_count);
         let msaa_render_target = Default::default();
         // UNWRAP: safe because no other references at this point (created above^)
         let bloom = Bloom::new(ctx, &hdr_texture.read().unwrap());
@@ -221,10 +217,10 @@ impl Stage {
             draw_calls: Arc::new(RwLock::new(DrawCalls::new(
                 ctx,
                 true,
-                UVec2::new(w, h),
-                multisample_count,
                 &mngr.upkeep(),
+                &depth_texture,
             ))),
+            depth_texture: Arc::new(RwLock::new(depth_texture)),
             buffers_bindgroup: ManagedBindGroup::new(crate::linkage::slab_bindgroup(
                 device,
                 &stage_slab_buffer,
@@ -234,7 +230,6 @@ impl Stage {
             mngr,
             pbr_config,
             lights: Arc::new(RwLock::new(lights)),
-
             stage_pipeline: Arc::new(RwLock::new(stage_pipeline)),
             atlas,
             skybox: Arc::new(RwLock::new(Skybox::empty(runtime))),
@@ -245,11 +240,9 @@ impl Stage {
             tonemapping,
             has_bloom: AtomicBool::from(true).into(),
             textures_bindgroup: Default::default(),
-
             debug_overlay: DebugOverlay::new(device, ctx.get_render_target().format()),
             has_debug_overlay: Arc::new(false.into()),
             hdr_texture,
-            depth_texture,
             msaa_render_target,
             msaa_sample_count: Arc::new(multisample_count.into()),
             clear_color_attachments: Arc::new(true.into()),

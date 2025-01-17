@@ -1473,7 +1473,9 @@ mod test {
 
     #[test]
     fn camera_position_sanity() {
-        // Test that the camera has the expected translation
+        // Test that the camera has the expected translation,
+        // taking into account that the gltf files may have been
+        // saved with Y up, or with Z up
         let ctx = Context::headless(100, 100);
         let mut stage = ctx.new_stage();
         let doc = stage
@@ -1485,10 +1487,11 @@ mod test {
             )
             .unwrap();
         let camera_a = doc.cameras.first().unwrap();
-        assert!(
-            Vec3::new(14.699949, 4.958309, 12.676651).distance(camera_a.get_camera().position())
-                <= 10e-6
-        );
+
+        let eq = |p: Vec3| p.distance(camera_a.get_camera().position()) <= 10e-6;
+        let either_y_up_or_z_up = eq(Vec3::new(14.699949, 4.958309, 12.676651))
+            || eq(Vec3::new(14.699949, -12.676651, 4.958309));
+        assert!(either_y_up_or_z_up);
 
         let doc = stage
             .load_gltf_document_from_path(
@@ -1499,9 +1502,17 @@ mod test {
             )
             .unwrap();
         let camera_b = doc.cameras.first().unwrap();
-        assert_eq!(
+
+        let eq = |a: Vec3, b: Vec3| {
+            let c = Vec3::new(b.x, -b.z, b.y);
+            println!("a: {a}");
+            println!("b: {b}");
+            println!("c: {c}");
+            a.distance(b) <= 10e-6 || c.distance(c) <= 10e-6
+        };
+        assert!(eq(
             camera_a.get_camera().position(),
             camera_b.get_camera().position()
-        );
+        ));
     }
 }
