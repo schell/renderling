@@ -9,7 +9,7 @@
 use core::ops::Mul;
 use spirv_std::{
     image::{Cubemap, Image2d, Image2dArray},
-    Sampler,
+    Image, Sampler,
 };
 
 pub use glam::*;
@@ -25,6 +25,14 @@ pub trait Sample2d {
 }
 
 impl Sample2d for Image2d {
+    type Sampler = Sampler;
+
+    fn sample_by_lod(&self, sampler: Self::Sampler, uv: glam::Vec2, lod: f32) -> glam::Vec4 {
+        self.sample_by_lod(sampler, uv, lod)
+    }
+}
+
+impl Sample2d for Image!(2D, type=f32, sampled, depth) {
     type Sampler = Sampler;
 
     fn sample_by_lod(&self, sampler: Self::Sampler, uv: glam::Vec2, lod: f32) -> glam::Vec4 {

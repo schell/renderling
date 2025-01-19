@@ -18,7 +18,7 @@ use crate::{
     camera::Camera,
     debug::DebugOverlay,
     draw::DrawCalls,
-    light::Light,
+    light::{Light, Lighting, ShadowMap},
     pbr::{debug::DebugChannel, PbrConfig},
     skybox::{Skybox, SkyboxRenderPipeline},
     stage::Renderlet,
@@ -76,9 +76,14 @@ fn create_stage_render_pipeline(
     let fragment_linkage = crate::linkage::renderlet_fragment::linkage(device);
     let stage_slab_buffers_layout = crate::linkage::slab_bindgroup_layout(device);
     let atlas_and_skybox_layout = crate::linkage::atlas_and_skybox_bindgroup_layout(device);
+    let light_bindgroup_layout = crate::light::Lighting::create_bindgroup_layout(device);
     let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label,
-        bind_group_layouts: &[&stage_slab_buffers_layout, &atlas_and_skybox_layout],
+        bind_group_layouts: &[
+            &stage_slab_buffers_layout,
+            &atlas_and_skybox_layout,
+            &light_bindgroup_layout,
+        ],
         push_constant_ranges: &[],
     });
 
@@ -153,6 +158,7 @@ pub struct Stage {
     pub(crate) atlas: Atlas,
     pub(crate) bloom: Bloom,
     pub(crate) skybox: Arc<RwLock<Skybox>>,
+    pub(crate) lighting: Lighting,
     pub(crate) tonemapping: Tonemapping,
     pub(crate) debug_overlay: DebugOverlay,
     pub(crate) background_color: Arc<RwLock<wgpu::Color>>,
@@ -213,6 +219,8 @@ impl Stage {
         let stage_pipeline = create_stage_render_pipeline(device, multisample_count);
         let stage_slab_buffer = mngr.upkeep();
 
+        let lighting = Lighting::new(runtime, &stage_slab_buffer);
+
         Self {
             draw_calls: Arc::new(RwLock::new(DrawCalls::new(
                 ctx,
@@ -220,6 +228,7 @@ impl Stage {
                 &mngr.upkeep(),
                 &depth_texture,
             ))),
+            lighting,
             depth_texture: Arc::new(RwLock::new(depth_texture)),
             buffers_bindgroup: ManagedBindGroup::new(crate::linkage::slab_bindgroup(
                 device,
@@ -769,6 +778,7 @@ impl Stage {
 
             let stage_slab_buffer = self.stage_slab_buffer.read().unwrap();
             let textures_bindgroup = self.get_textures_bindgroup();
+            let light_bindgroup = self.lighting.get_bindgroup();
             let has_skybox = self.has_skybox.load(Ordering::Relaxed);
             let may_skybox_pipeline_and_bindgroup = if has_skybox {
                 Some(self.get_skybox_pipeline_and_bindgroup(&stage_slab_buffer))
@@ -826,6 +836,7 @@ impl Stage {
                 render_pass.set_pipeline(&pipeline);
                 render_pass.set_bind_group(0, Some(slab_buffers_bindgroup.as_ref()), &[]);
                 render_pass.set_bind_group(1, Some(textures_bindgroup.as_ref()), &[]);
+                render_pass.set_bind_group(2, Some(light_bindgroup.as_ref()), &[]);
                 draw_calls.draw(&mut render_pass);
 
                 if let Some((pipeline, bindgroup)) = may_skybox_pipeline_and_bindgroup.as_ref() {

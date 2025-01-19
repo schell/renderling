@@ -12,7 +12,7 @@ use spirv_std::num_traits::Float;
 
 use crate::{
     atlas::AtlasTexture,
-    light::{DirectionalLight, Light, LightStyle, PointLight, SpotLight},
+    light::{shadow_calculation, DirectionalLight, Light, LightStyle, PointLight, SpotLight},
     math::{self, IsSampler, IsVector, Sample2d, Sample2dArray, SampleCube},
     println as my_println,
     stage::Renderlet,
@@ -292,7 +292,7 @@ pub fn texture_color<A: Sample2dArray<Sampler = S>, S: IsSampler>(
 
 /// PBR fragment shader capable of being run on CPU or GPU.
 #[allow(clippy::too_many_arguments)]
-pub fn fragment_impl<A, T, C, S>(
+pub fn fragment_impl<A, T, Dt, C, S>(
     atlas: &A,
     atlas_sampler: &S,
     irradiance: &C,
@@ -301,7 +301,11 @@ pub fn fragment_impl<A, T, C, S>(
     prefiltered_sampler: &S,
     brdf: &T,
     brdf_sampler: &S,
+    shadow_map: &Dt,
+    shadow_map_sampler: &S,
+
     slab: &[u32],
+    lighting_slab: &[u32],
 
     renderlet_id: Id<Renderlet>,
 
@@ -317,9 +321,13 @@ pub fn fragment_impl<A, T, C, S>(
 ) where
     A: Sample2dArray<Sampler = S>,
     T: Sample2d<Sampler = S>,
+    Dt: Sample2d<Sampler = S>,
     C: SampleCube<Sampler = S>,
     S: IsSampler,
 {
+    let light_space_transform = lighting_slab.read_unchecked(Id::<Mat4>::new(0));
+    let frag_pos_in_light_space = light_space_transform.project_point3(in_pos);
+
     let renderlet = slab.read_unchecked(renderlet_id);
     let PbrConfig {
         atlas_size,
@@ -533,7 +541,10 @@ pub fn fragment_impl<A, T, C, S>(
 
     *output = if material.has_lighting {
         shade_fragment(
+            shadow_map,
+            shadow_map_sampler,
             camera.position(),
+            frag_pos_in_light_space,
             n,
             in_pos,
             albedo.xyz(),
@@ -554,9 +565,12 @@ pub fn fragment_impl<A, T, C, S>(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn shade_fragment(
+pub fn shade_fragment<S: IsSampler, T: Sample2d<Sampler = S>>(
+    shadow_map: &T,
+    shadow_map_sampler: &S,
     // camera's position in world space
     camera_pos: Vec3,
+    frag_pos_in_light_space: Vec3,
     // normal of the fragment
     in_norm: Vec3,
     // position of the fragment in world space
@@ -662,7 +676,8 @@ pub fn shade_fragment(
     let kd = (1.0 - ks) * (1.0 - metallic);
     let diffuse = irradiance * albedo;
     let specular = prefiltered * (fresnel * brdf.x + brdf.y);
-    let color = (kd * diffuse + specular) * ao + lo + emissive;
+    let shadow = shadow_calculation(shadow_map, shadow_map_sampler, frag_pos_in_light_space);
+    let color = (kd * diffuse + specular) * ao + (lo * (1.0 - shadow)) + emissive;
     color.extend(1.0)
 }
 

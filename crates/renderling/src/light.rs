@@ -4,15 +4,26 @@
 //!
 //! Shadow mapping.
 use crabslab::{Id, Slab, SlabItem};
-use glam::{Mat4, Vec3, Vec4, Vec4Swizzles};
+use glam::{Mat4, Vec3, Vec3Swizzles, Vec4, Vec4Swizzles};
 use spirv_std::spirv;
 
-use crate::{camera::Camera, math::IsVector, stage::Renderlet, transform::Transform};
+use crate::{
+    camera::Camera,
+    math::{IsSampler, IsVector, Sample2d},
+    stage::Renderlet,
+    transform::Transform,
+};
 
 #[cfg(cpu)]
 mod cpu;
 #[cfg(cpu)]
 pub use cpu::*;
+
+/// Root descriptor of the lighting system.
+#[derive(Clone, Copy, Default, SlabItem, core::fmt::Debug)]
+pub struct LightingDescriptor {
+    pub shadow_map_light_transform: Id<Mat4>,
+}
 
 #[cfg(test)]
 #[derive(Default, Debug, Clone, Copy, PartialEq)]
@@ -28,6 +39,9 @@ pub struct ShadowMappingVertexInfo {
 }
 
 /// Shadow mapping vertex shader.
+// Note:
+// If this is taking too long to render for each renderlet, think about
+// a frustum and occlusion culling pass to generate the list of renderlets.
 #[spirv(vertex)]
 #[allow(clippy::too_many_arguments)]
 pub fn shadow_mapping_vertex(
@@ -267,6 +281,37 @@ impl Light {
 
     pub fn into_point_id(self) -> Id<PointLight> {
         Id::from(self.index)
+    }
+}
+
+/// Returns shadow _intensity_ at the given position.
+///
+/// Returns `1.0` when the fragment is in complete shadow.
+/// Returns `0.0` when the fragment is in the light.
+pub fn shadow_calculation<S: IsSampler, T: Sample2d<Sampler = S>>(
+    shadow_map: &T,
+    shadow_map_sampler: &S,
+    frag_pos_in_light_space: Vec3,
+) -> f32 {
+    // Because the depth from the depth map is in the range [0,1]
+    // and we also want to use proj_coords to sample from the depth map,
+    // we transform the NDC coordinates to the range [0,1]
+    let proj_coords = frag_pos_in_light_space * 0.5 + 0.5;
+    // With these projected coordinates we can sample the depth map as the
+    // resulting [0,1] coordinates from proj_coords directly correspond to
+    // the transformed NDC coordinates from the `ShadowMap::update` render pass.
+    // This gives us the closest depth from the light's point of view:
+    let closest_depth = shadow_map
+        .sample_by_lod(*shadow_map_sampler, proj_coords.xy(), 0.0)
+        .x;
+    // To get the current depth at this fragment we simply retrieve the projected vector's z
+    // coordinate which equals the depth of this fragment from the light's perspective.
+    let current_depth = proj_coords.z;
+
+    if current_depth > closest_depth {
+        1.0
+    } else {
+        0.0
     }
 }
 

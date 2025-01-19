@@ -8,7 +8,7 @@ use glam::UVec2;
 use glam::{Mat4, Vec2, Vec3, Vec4, Vec4Swizzles};
 use spirv_std::{
     image::{Cubemap, Image2d, Image2dArray},
-    spirv, Sampler,
+    spirv, Image, Sampler,
 };
 
 use crate::{
@@ -203,6 +203,8 @@ pub struct Renderlet {
     /// Bounding sphere of the entire renderlet, in local space.
     pub bounds: BoundingSphere,
     pub indices_array: Array<u32>,
+    // TODO: Move camera to PbrConfig or something higher up,
+    // because it doesn't change all that often.
     pub camera_id: Id<Camera>,
     pub transform_id: Id<Transform>,
     pub material_id: Id<Material>,
@@ -291,7 +293,7 @@ impl Renderlet {
 #[cfg(test)]
 /// A helper struct that contains all outputs of the Renderlet's PBR vertex shader.
 #[derive(Default, Debug, Clone, Copy, PartialEq)]
-pub(crate) struct RenderletPbrVertexInfo {
+pub struct RenderletPbrVertexInfo {
     pub renderlet: Renderlet,
     pub renderlet_id: Id<Renderlet>,
     pub vertex_index: u32,
@@ -320,6 +322,7 @@ pub fn renderlet_vertex(
     #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] slab: &[u32],
 
     #[spirv(flat)] out_renderlet: &mut Id<Renderlet>,
+    // TODO: Think about placing all these out values in a G-Buffer
     out_color: &mut Vec4,
     out_uv0: &mut Vec2,
     out_uv1: &mut Vec2,
@@ -403,7 +406,13 @@ pub fn renderlet_fragment(
 
     #[spirv(descriptor_set = 1, binding = 6)] brdf: &Image2d,
     #[spirv(descriptor_set = 1, binding = 7)] brdf_sampler: &Sampler,
+
     #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] slab: &[u32],
+
+    #[spirv(storage_buffer, descriptor_set = 2, binding = 0)] light_slab: &[u32],
+    #[spirv(descriptor_set = 2, binding = 1)] shadow_map: &Image!(2D, type=f32, sampled, depth),
+    #[spirv(descriptor_set = 2, binding = 2)] shadow_map_sampler: &Sampler,
+
     #[spirv(flat)] renderlet_id: Id<Renderlet>,
     in_color: Vec4,
     in_uv0: Vec2,
@@ -423,7 +432,10 @@ pub fn renderlet_fragment(
         prefiltered_sampler,
         brdf,
         brdf_sampler,
+        shadow_map,
+        shadow_map_sampler,
         slab,
+        light_slab,
         renderlet_id,
         in_color,
         in_uv0,
