@@ -48,10 +48,16 @@ impl LightDetails {
 #[derive(Clone)]
 pub struct ShadowMap {
     /// A depth texture used to store the scene from the light's POV.
+    // TODO: Use an Atlas for shadow maps.
     texture: crate::texture::Texture,
+    light_slab: SlabAllocator<WgpuRuntime>,
     stage_slab_buffer: Arc<RwLock<SlabBuffer<wgpu::Buffer>>>,
     light_slab_buffer: Arc<RwLock<SlabBuffer<wgpu::Buffer>>>,
-    _light_transform: Hybrid<Mat4>,
+    /// This shadow map's light transform
+    light_transform: Hybrid<Mat4>,
+    /// A clone of the [`Lighting`] manager's descriptor, which
+    /// gets written to when updating this shadow map.
+    lighting_descriptor: Hybrid<LightingDescriptor>,
     pipeline: Arc<wgpu::RenderPipeline>,
     bindgroup_layout: Arc<wgpu::BindGroupLayout>,
     bindgroup: ManagedBindGroup,
@@ -60,7 +66,7 @@ pub struct ShadowMap {
 impl ShadowMap {
     const LABEL: Option<&str> = Some("shadow-map");
 
-    fn create_shadow_map_texture(
+    pub fn create_shadow_map_texture(
         device: &wgpu::Device,
         size: wgpu::Extent3d,
     ) -> crate::texture::Texture {
@@ -84,14 +90,15 @@ impl ShadowMap {
     // TODO: ShadowMap::new should take a light source instead of
     // a projection+view matrix.
     pub fn new(
-        runtime: impl AsRef<WgpuRuntime>,
-        light_slab: &SlabAllocator<WgpuRuntime>,
+        // Required for the shadow map shader to read the light transform
+        lighting_manager: &Lighting,
         light_transform: Mat4,
         size: wgpu::Extent3d,
+        // Required for the shadow map shader to access geometry
         stage_slab_buffer: &SlabBuffer<wgpu::Buffer>,
     ) -> Self {
-        let runtime = runtime.as_ref();
-        let device = &runtime.device;
+        let light_slab = lighting_manager.light_slab.clone();
+        let device = &light_slab.device();
         let bindgroup_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Self::LABEL,
             entries: &[
@@ -124,8 +131,8 @@ impl ShadowMap {
         });
         let vertex = crate::linkage::shadow_mapping_vertex::linkage(device);
 
-        let _light_transform = light_slab.new_value(light_transform);
-        let light_slab_buffer = light_slab.upkeep();
+        let light_transform = lighting_manager.light_slab.new_value(light_transform);
+        let light_slab_buffer = lighting_manager.light_slab.upkeep();
         let bindgroup = ManagedBindGroup::new(Self::create_bindgroup(
             device,
             &bindgroup_layout,
@@ -134,10 +141,12 @@ impl ShadowMap {
         ));
 
         ShadowMap {
+            light_slab: light_slab.clone(),
             stage_slab_buffer: Arc::new(RwLock::new(stage_slab_buffer.clone())),
             light_slab_buffer: Arc::new(RwLock::new(light_slab_buffer)),
             texture: Self::create_shadow_map_texture(device, size),
-            _light_transform,
+            lighting_descriptor: lighting_manager.lighting_descriptor.clone(),
+            light_transform,
             bindgroup_layout: bindgroup_layout.into(),
             bindgroup,
             pipeline: device
@@ -204,14 +213,16 @@ impl ShadowMap {
     /// Update the shadow map, rendering the given [`Renderlet`]s to the map as shadow casters.
     // TODO: Add a `light_source: Option<_>` parameter to `ShadowMap::update`.
     // Or something similar that updates the light source's "light space transform".
-    pub fn update<'a>(
-        &self,
-        lighting_manager: &Lighting,
-        renderlets: impl IntoIterator<Item = &'a Hybrid<Renderlet>>,
-    ) {
-        let runtime = lighting_manager.light_slab.runtime();
-        let device = &runtime.device;
-        let queue = &runtime.queue;
+    pub fn update<'a>(&self, renderlets: impl IntoIterator<Item = &'a Hybrid<Renderlet>>) {
+        // Update the lighting descriptor to point to this shadow map, which tells the
+        // vertex shader which shadow map we're updating.
+        self.lighting_descriptor.modify(|ld| {
+            ld.shadow_map_light_transform = self.light_transform.id();
+        });
+        let _ = self.light_slab.upkeep();
+
+        let device = &self.light_slab.device();
+        let queue = &self.light_slab.queue();
         let mut light_slab_buffer = self.light_slab_buffer.write().unwrap();
         let mut stage_slab_buffer = self.stage_slab_buffer.write().unwrap();
 
@@ -254,20 +265,8 @@ impl ShadowMap {
                 render_pass.draw(vertex_range, instance_range);
             }
         }
-        // Note:
-        // We should think about copying the depth buffer to a storage buffer
-        // (possibly just for lights) which we could "sample" from, since WebGPU
-        // doesn't provide arrays of textures to bind to.
-        //
-        // Currently we either have to choose:
-        // * set the number of shadow maps statically at compile time (code change)
-        // * run shading once per shadow map (don't know if would work)
-        // * use a texture array and each shadow map is the same size
-        //
-        // With a storage buffer for lights we could store the shadow map's depth
-        // buffer at any size, and reference it from the slab.
-        // But we would lose sampling conveniences.
-        queue.submit(Some(encoder.finish()));
+        let submission = queue.submit(Some(encoder.finish()));
+        device.poll(wgpu::Maintain::wait_for(submission));
     }
 }
 
@@ -276,10 +275,9 @@ impl ShadowMap {
 pub struct Lighting {
     light_slab: SlabAllocator<WgpuRuntime>,
     light_slab_buffer: Arc<RwLock<SlabBuffer<wgpu::Buffer>>>,
-    _lighting_descriptor: Hybrid<LightingDescriptor>,
-    shadow_map: ShadowMap,
+    stage_slab_buffer: Arc<RwLock<SlabBuffer<wgpu::Buffer>>>,
+    lighting_descriptor: Hybrid<LightingDescriptor>,
     bindgroup_layout: Arc<wgpu::BindGroupLayout>,
-    bindgroup: ManagedBindGroup,
 }
 
 impl Lighting {
@@ -349,17 +347,19 @@ impl Lighting {
     }
 
     /// Returns the lighting bindgroup.
-    pub fn get_bindgroup(&self) -> Arc<wgpu::BindGroup> {
+    pub fn get_bindgroup(
+        &self,
+        shadow_map_depth_texture: &crate::texture::Texture,
+    ) -> wgpu::BindGroup {
         let mut light_slab_buffer = self.light_slab_buffer.write().unwrap();
-        let should_invalidate = light_slab_buffer.synchronize();
-        self.bindgroup.get(should_invalidate, || {
-            Self::create_bindgroup(
-                self.light_slab.device(),
-                &self.bindgroup_layout,
-                &light_slab_buffer,
-                &self.shadow_map.texture,
-            )
-        })
+        let _should_invalidate = light_slab_buffer.synchronize();
+
+        Self::create_bindgroup(
+            self.light_slab.device(),
+            &self.bindgroup_layout,
+            &light_slab_buffer,
+            shadow_map_depth_texture,
+        )
     }
 
     /// Create a new [`Lighting`] manager.
@@ -372,30 +372,20 @@ impl Lighting {
         let _lighting_descriptor = light_slab.new_value(LightingDescriptor {
             shadow_map_light_transform: Id::NONE,
         });
-        let shadow_map = ShadowMap::new(
-            runtime,
-            &light_slab,
-            Mat4::IDENTITY,
-            wgpu::Extent3d::default(),
-            stage_slab_buffer,
-        );
         let light_slab_buffer = light_slab.upkeep();
         let bindgroup_layout = Self::create_bindgroup_layout(&runtime.device);
-        let bindgroup = ManagedBindGroup::new(Self::create_bindgroup(
-            &runtime.device,
-            &bindgroup_layout,
-            &light_slab_buffer,
-            &shadow_map.texture,
-        ));
-
         Self {
             light_slab,
             light_slab_buffer: Arc::new(RwLock::new(light_slab_buffer)),
-            _lighting_descriptor,
-            shadow_map,
+            lighting_descriptor: _lighting_descriptor,
+            stage_slab_buffer: Arc::new(RwLock::new(stage_slab_buffer.clone())),
             bindgroup_layout: bindgroup_layout.into(),
-            bindgroup,
         }
+    }
+
+    pub fn new_shadow_map(&self, light_transform: Mat4, size: wgpu::Extent3d) -> ShadowMap {
+        let stage_slab_buffer = self.stage_slab_buffer.read().unwrap();
+        ShadowMap::new(self, light_transform, size, &stage_slab_buffer)
     }
 }
 
@@ -549,23 +539,23 @@ mod test {
             frame.present();
         }
 
-        let stage_slab_buffer = stage.stage_slab_buffer.read().unwrap();
-        let lighting = Lighting::new(&ctx, &stage_slab_buffer);
+        let (lighting, shadows) = {
+            let stage_slab_buffer = stage.stage_slab_buffer.read().unwrap();
+            let lighting = Lighting::new(&ctx, &stage_slab_buffer);
+            let shadows = lighting.new_shadow_map(
+                light_transform,
+                wgpu::Extent3d {
+                    width: w as u32,
+                    height: h as u32,
+                    depth_or_array_layers: 1,
+                },
+            );
+            shadows.update(doc.renderlets_iter());
+            (lighting, shadows)
+        };
 
-        let shadows = ShadowMap::new(
-            &ctx,
-            &lighting.light_slab,
-            light_transform,
-            wgpu::Extent3d {
-                width: w as u32,
-                height: h as u32,
-                depth_or_array_layers: 1,
-            },
-            &stage.get_buffer().unwrap(),
-        );
-        shadows.update(&lighting, doc.renderlets_iter());
-
-        let slab = futures_lite::future::block_on(stage.read(..)).unwrap();
+        let geometry_slab = futures_lite::future::block_on(stage.read(..)).unwrap();
+        let light_slab = futures_lite::future::block_on(lighting.light_slab.read(..)).unwrap();
         let mut shadow_vertex_info = vec![];
         for hybrid in doc.renderlets_iter() {
             let renderlet = hybrid.get();
@@ -574,8 +564,8 @@ mod test {
                 crate::light::shadow_mapping_vertex(
                     hybrid.id(),
                     vertex_index,
-                    &slab,
-                    &light_transform,
+                    &geometry_slab,
+                    &light_slab,
                     &mut Default::default(),
                     &mut info,
                 );
@@ -619,6 +609,13 @@ mod test {
             };
             pretty_assertions::assert_eq!(pbr_info, shadow_info, "vertex {i} is not equal");
         }
+
+        // Now do the rendering *with the shadow map* to see if it works.
+        let frame = ctx.get_next_frame().unwrap();
+        stage.render_with(&frame.view(), Some(&shadows.texture));
+        let img = frame.read_image().unwrap();
+        frame.present();
+        img_diff::save("shadows/shadow_mapping_sanity_stage_render.png", img);
     }
 
     #[test]
@@ -637,292 +634,5 @@ mod test {
         log::info!("near_plane: {}", light_camera.near_plane());
         log::info!("far_plane: {}", light_camera.far_plane());
         log::info!("position: {}", light_camera.position());
-    }
-
-    fn assert_sanity_strings(
-        seen_directional_light: DirectionalLight,
-        seen_parent_light_transform: Mat4,
-        seen_camera: Camera,
-        seen_projection: Mat4,
-        seen_view: Mat4,
-        seen_view_projection: Mat4,
-    ) {
-        let directional_light = r#"DirectionalLight {
-    direction: Vec3(
-        0.0,
-        0.0,
-        -1.0,
-    ),
-    color: Vec4(
-        1.0,
-        1.0,
-        1.0,
-        1.0,
-    ),
-    intensity: 10.0,
-}"#;
-        pretty_assertions::assert_str_eq!(
-            directional_light,
-            format!("{seen_directional_light:#?}")
-        );
-        let parent_light_transform = r#"Mat4 {
-    x_axis: Vec4(
-        -0.5525446,
-        0.7096175,
-        0.4371941,
-        0.0,
-    ),
-    y_axis: Vec4(
-        -0.12115364,
-        -0.587348,
-        0.80021566,
-        0.0,
-    ),
-    z_axis: Vec4(
-        0.82463145,
-        0.3891868,
-        0.41050822,
-        0.0,
-    ),
-    w_axis: Vec4(
-        4.0762453,
-        1.005454,
-        5.903862,
-        1.0,
-    ),
-}"#;
-        pretty_assertions::assert_str_eq!(
-            parent_light_transform,
-            format!("{seen_parent_light_transform:#?}")
-        );
-        let camera = r#"Camera {
-    projection: Mat4 {
-        x_axis: Vec4(
-            2.4142134,
-            0.0,
-            0.0,
-            0.0,
-        ),
-        y_axis: Vec4(
-            0.0,
-            2.4142134,
-            0.0,
-            0.0,
-        ),
-        z_axis: Vec4(
-            0.0,
-            0.0,
-            -1.001001,
-            -1.0,
-        ),
-        w_axis: Vec4(
-            0.0,
-            0.0,
-            -0.1001001,
-            0.0,
-        ),
-    },
-    view: Mat4 {
-        x_axis: Vec4(
-            0.56048316,
-            -0.04112576,
-            0.8271439,
-            -0.0,
-        ),
-        y_axis: Vec4(
-            0.82782656,
-            0.05640688,
-            -0.55814093,
-            0.0,
-        ),
-        z_axis: Vec4(
-            -0.023702562,
-            0.9975604,
-            0.06566016,
-            -0.0,
-        ),
-        w_axis: Vec4(
-            2.3725195,
-            -3.6266158,
-            -19.559895,
-            1.0,
-        ),
-    },
-    position: Vec3(
-        14.69995,
-        -12.676652,
-        4.9583097,
-    ),
-    frustum: Frustum {
-        planes: [
-            Vec4(
-                -0.8271441,
-                0.55814105,
-                -0.06566017,
-                19.509872,
-            ),
-            Vec4(
-                0.20128462,
-                0.97840333,
-                -0.047025368,
-                9.67717,
-            ),
-            Vec4(
-                -0.8343532,
-                -0.5512207,
-                -0.0032287433,
-                5.2933264,
-            ),
-            Vec4(
-                -0.3545296,
-                0.2657045,
-                0.89649874,
-                4.1346927,
-            ),
-            Vec4(
-                -0.27853903,
-                0.16147813,
-                -0.9467527,
-                10.835804,
-            ),
-            Vec4(
-                0.8271441,
-                -0.55814105,
-                0.06566017,
-                80.44148,
-            ),
-        ],
-        points: [
-            Vec3(
-                14.646105,
-                -12.664715,
-                4.976187,
-            ),
-            Vec3(
-                14.6693325,
-                -12.630406,
-                4.975204,
-            ),
-            Vec3(
-                14.647809,
-                -12.667053,
-                4.9348445,
-            ),
-            Vec3(
-                14.671038,
-                -12.632747,
-                4.9338613,
-            ),
-            Vec3(
-                -92.93541,
-                11.184539,
-                40.694893,
-            ),
-            Vec3(
-                -46.502815,
-                79.76488,
-                38.731274,
-            ),
-            Vec3(
-                -89.52838,
-                6.511578,
-                -41.94686,
-            ),
-            Vec3(
-                -43.095795,
-                75.09193,
-                -43.91048,
-            ),
-        ],
-        center: Vec3(
-            14.658571,
-            -12.64873,
-            4.9550242,
-        ),
-    },
-}"#;
-        pretty_assertions::assert_str_eq!(camera, format!("{seen_camera:#?}"));
-        let projection = r#"Mat4 {
-    x_axis: Vec4(
-        0.032823686,
-        0.0,
-        0.0,
-        0.0,
-    ),
-    y_axis: Vec4(
-        0.0,
-        0.032823686,
-        0.0,
-        0.0,
-    ),
-    z_axis: Vec4(
-        0.0,
-        0.0,
-        -0.016411843,
-        0.0,
-    ),
-    w_axis: Vec4(
-        -0.0,
-        -0.0,
-        -0.0,
-        1.0,
-    ),
-}"#;
-
-        pretty_assertions::assert_str_eq!(projection, format!("{seen_projection:#?}"));
-        let view = r#"Mat4 {
-    x_axis: Vec4(
-        -0.42680675,
-        -0.37124008,
-        0.8246313,
-        0.0,
-    ),
-    y_axis: Vec4(
-        0.90434283,
-        -0.17520764,
-        0.3891867,
-        0.0,
-    ),
-    z_axis: Vec4(
-        0.0,
-        0.9118569,
-        0.41050813,
-        0.0,
-    ),
-    w_axis: Vec4(
-        -9.536743e-7,
-        9.536743e-7,
-        -30.465805,
-        1.0,
-    ),
-}"#;
-        pretty_assertions::assert_str_eq!(view, format!("{seen_view:#?}"));
-        let view_projection = r#"Mat4 {
-    x_axis: Vec4(
-        -0.0140093705,
-        -0.012185467,
-        -0.013533719,
-        0.0,
-    ),
-    y_axis: Vec4(
-        0.029683866,
-        -0.0057509607,
-        -0.006387271,
-        0.0,
-    ),
-    z_axis: Vec4(
-        0.0,
-        0.029930504,
-        -0.006737195,
-        0.0,
-    ),
-    w_axis: Vec4(
-        -3.1303106e-8,
-        3.1303106e-8,
-        0.5,
-        1.0,
-    ),
-}"#;
-        pretty_assertions::assert_str_eq!(view_projection, format!("{seen_view_projection:#?}"));
     }
 }

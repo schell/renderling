@@ -748,25 +748,34 @@ impl Stage {
     }
 
     pub fn render(&self, view: &wgpu::TextureView) {
+        self.render_with(view, None);
+    }
+
+    pub fn render_with(
+        &self,
+        view: &wgpu::TextureView,
+        shadow_map_depth_texture: Option<&crate::texture::Texture>,
+    ) {
+        log::info!("render_with");
         self.tick_internal();
+        log::info!("ticked");
         let mut draw_calls = self.draw_calls.write().unwrap();
         let depth_texture = self.depth_texture.read().unwrap();
         // UNWRAP: safe because we know the depth texture format will always match
         let maybe_indirect_buffer = draw_calls.pre_draw(&depth_texture).unwrap();
         {
+            log::info!("rendering");
             let label = Some("stage render");
-            // UNWRAP: POP
-            let background_color = *self.background_color.read().unwrap();
-            // UNWRAP: POP
-            let pipeline = self.stage_pipeline.read().unwrap();
-            // UNWRAP: POP
-            let msaa_target = self.msaa_render_target.read().unwrap();
 
+            log::info!("getting slab buffers bindgroup");
             let slab_buffers_bindgroup = {
+                log::info!("getting write lock");
                 let mut stage_slab_buffer = self.stage_slab_buffer.write().unwrap();
+                log::info!("got write lock");
                 let should_invalidate_buffers_bindgroup = stage_slab_buffer.synchronize();
                 self.buffers_bindgroup
                     .get(should_invalidate_buffers_bindgroup, || {
+                        log::info!("renewing invalid stage slab buffers bindgroup");
                         crate::linkage::slab_bindgroup(
                             self.device(),
                             &stage_slab_buffer,
@@ -776,9 +785,22 @@ impl Stage {
                     })
             };
 
+            log::info!("getting stage slab buffer");
             let stage_slab_buffer = self.stage_slab_buffer.read().unwrap();
             let textures_bindgroup = self.get_textures_bindgroup();
-            let light_bindgroup = self.lighting.get_bindgroup();
+            let shadow_map_depth_texture = shadow_map_depth_texture.cloned().unwrap_or_else(|| {
+                ShadowMap::create_shadow_map_texture(self.device(), wgpu::Extent3d::default())
+            });
+            log::info!("got stage slab buffer and shadow map depth texture");
+
+            // UNWRAP: POP
+            let background_color = *self.background_color.read().unwrap();
+            // UNWRAP: POP
+            let pipeline = self.stage_pipeline.read().unwrap();
+            // UNWRAP: POP
+            let msaa_target = self.msaa_render_target.read().unwrap();
+
+            let light_bindgroup = self.lighting.get_bindgroup(&shadow_map_depth_texture);
             let has_skybox = self.has_skybox.load(Ordering::Relaxed);
             let may_skybox_pipeline_and_bindgroup = if has_skybox {
                 Some(self.get_skybox_pipeline_and_bindgroup(&stage_slab_buffer))
@@ -836,7 +858,7 @@ impl Stage {
                 render_pass.set_pipeline(&pipeline);
                 render_pass.set_bind_group(0, Some(slab_buffers_bindgroup.as_ref()), &[]);
                 render_pass.set_bind_group(1, Some(textures_bindgroup.as_ref()), &[]);
-                render_pass.set_bind_group(2, Some(light_bindgroup.as_ref()), &[]);
+                render_pass.set_bind_group(2, Some(&light_bindgroup), &[]);
                 draw_calls.draw(&mut render_pass);
 
                 if let Some((pipeline, bindgroup)) = may_skybox_pipeline_and_bindgroup.as_ref() {

@@ -50,16 +50,14 @@ pub fn shadow_mapping_vertex(
     // Which vertex within the renderlet are we rendering
     #[spirv(vertex_index)] vertex_index: u32,
     // The slab where the renderlet's geometry is staged
-    #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] slab: &[u32],
-    // The projection*view matrix that puts world coordinates into clip space.
-    //
-    // This is the projection*view from the light's point of view.
-    #[spirv(storage_buffer, descriptor_set = 0, binding = 1)] light_transform: &Mat4,
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] geometry_slab: &[u32],
+    // The slab where the scene's lighting data is staged
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 1)] light_slab: &[u32],
 
     #[spirv(position)] out_clip_pos: &mut Vec4,
     #[cfg(test)] out_comparison_info: &mut ShadowMappingVertexInfo,
 ) {
-    let renderlet = slab.read_unchecked(renderlet_id);
+    let renderlet = geometry_slab.read_unchecked(renderlet_id);
     if !renderlet.visible {
         // put it outside the clipping frustum
         *out_clip_pos = Vec4::new(10.0, 10.0, 10.0, 1.0);
@@ -67,9 +65,12 @@ pub fn shadow_mapping_vertex(
     }
 
     let (_vertex, _transform, _model_matrix, world_pos) =
-        renderlet.get_vertex_info(vertex_index, slab);
+        renderlet.get_vertex_info(vertex_index, geometry_slab);
 
-    let clip_pos = *light_transform * world_pos.extend(1.0);
+    let lighting_descr = light_slab.read_unchecked(Id::<LightingDescriptor>::new(0));
+    let light_transform = light_slab.read_unchecked(lighting_descr.shadow_map_light_transform);
+
+    let clip_pos = light_transform * world_pos.extend(1.0);
     #[cfg(test)]
     {
         *out_comparison_info = ShadowMappingVertexInfo {
@@ -79,7 +80,7 @@ pub fn shadow_mapping_vertex(
             transform: _transform,
             model_matrix: _model_matrix,
             world_pos,
-            view_projection: *light_transform,
+            view_projection: light_transform,
             clip_pos,
         };
     }
