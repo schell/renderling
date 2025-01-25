@@ -788,9 +788,14 @@ impl Stage {
             log::info!("getting stage slab buffer");
             let stage_slab_buffer = self.stage_slab_buffer.read().unwrap();
             let textures_bindgroup = self.get_textures_bindgroup();
-            let shadow_map_depth_texture = shadow_map_depth_texture.cloned().unwrap_or_else(|| {
-                ShadowMap::create_shadow_map_texture(self.device(), wgpu::Extent3d::default())
-            });
+            let shadow_map_depth_texture = shadow_map_depth_texture
+                .map(|t| {
+                    log::info!("rendering with shadows");
+                    t.clone()
+                })
+                .unwrap_or_else(|| {
+                    ShadowMap::create_shadow_map_texture(self.device(), wgpu::Extent3d::default())
+                });
             log::info!("got stage slab buffer and shadow map depth texture");
 
             // UNWRAP: POP

@@ -289,15 +289,22 @@ impl Light {
 ///
 /// Returns `1.0` when the fragment is in complete shadow.
 /// Returns `0.0` when the fragment is in the light.
-pub fn shadow_calculation<S: IsSampler, T: Sample2d<Sampler = S>>(
+pub fn shadow_calculation<S, T>(
     shadow_map: &T,
     shadow_map_sampler: &S,
     frag_pos_in_light_space: Vec3,
-) -> f32 {
-    // Because the depth from the depth map is in the range [0,1]
-    // and we also want to use proj_coords to sample from the depth map,
-    // we transform the NDC coordinates to the range [0,1]
-    let proj_coords = frag_pos_in_light_space * 0.5 + 0.5;
+) -> f32
+where
+    S: IsSampler,
+    T: Sample2d<Sampler = S, Sample = Vec4>,
+{
+    // The range of coordinates in the light's clip space is -1.0 to 1.0 for x and y,
+    // but the texture space is [0, 1], and Y increases downward, so we do this
+    // conversion to flip Y and also normalize to the range [0.0, 1.0].
+    // Z should already be 0.0 to 1.0.
+    let proj_coords =
+        frag_pos_in_light_space * Vec3::new(0.5, -0.5, 1.0) + Vec3::new(0.5, 0.5, 0.0);
+
     // With these projected coordinates we can sample the depth map as the
     // resulting [0,1] coordinates from proj_coords directly correspond to
     // the transformed NDC coordinates from the `ShadowMap::update` render pass.
@@ -309,6 +316,9 @@ pub fn shadow_calculation<S: IsSampler, T: Sample2d<Sampler = S>>(
     // coordinate which equals the depth of this fragment from the light's perspective.
     let current_depth = proj_coords.z;
 
+    // If the `current_depth`, which is the depth of the fragment from the lights POV, is
+    // greater than the `closest_depth` of the shadow map at that fragment, the fragment
+    // is in shadow
     if current_depth > closest_depth {
         1.0
     } else {

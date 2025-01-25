@@ -20,12 +20,14 @@ impl IsSampler for Sampler {}
 
 pub trait Sample2d {
     type Sampler: IsSampler;
+    type Sample;
 
-    fn sample_by_lod(&self, sampler: Self::Sampler, uv: glam::Vec2, lod: f32) -> glam::Vec4;
+    fn sample_by_lod(&self, sampler: Self::Sampler, uv: glam::Vec2, lod: f32) -> Self::Sample;
 }
 
 impl Sample2d for Image2d {
     type Sampler = Sampler;
+    type Sample = glam::Vec4;
 
     fn sample_by_lod(&self, sampler: Self::Sampler, uv: glam::Vec2, lod: f32) -> glam::Vec4 {
         self.sample_by_lod(sampler, uv, lod)
@@ -34,6 +36,7 @@ impl Sample2d for Image2d {
 
 impl Sample2d for Image!(2D, type=f32, sampled, depth) {
     type Sampler = Sampler;
+    type Sample = glam::Vec4;
 
     fn sample_by_lod(&self, sampler: Self::Sampler, uv: glam::Vec2, lod: f32) -> glam::Vec4 {
         self.sample_by_lod(sampler, uv, lod)
@@ -83,31 +86,32 @@ mod cpu {
     impl IsSampler for CpuSampler {}
 
     #[derive(Debug, Default)]
-    pub struct CpuTexture2d {
-        pub image: image::DynamicImage,
+    pub struct CpuTexture2d<P: image::Pixel, Container> {
+        pub image: image::ImageBuffer<P, Container>,
     }
 
-    impl Sample2d for CpuTexture2d {
+    impl<P: image::Pixel, Container> CpuTexture2d<P, Container> {
+        pub fn from_image(image: image::ImageBuffer<P, Container>) -> Self {
+            Self { image }
+        }
+    }
+
+    impl<P, Container> Sample2d for CpuTexture2d<P, Container>
+    where
+        P: image::Pixel,
+        Container: std::ops::Deref<Target = [P::Subpixel]>,
+    {
         type Sampler = CpuSampler;
+        type Sample = P;
 
-        fn sample_by_lod(&self, _sampler: Self::Sampler, uv: glam::Vec2, _lod: f32) -> glam::Vec4 {
+        fn sample_by_lod(&self, _sampler: Self::Sampler, uv: glam::Vec2, _lod: f32) -> P {
             // TODO: lerp the CPU texture sampling
-            let x = uv.x as u32;
-            if x >= self.image.width() {
-                return glam::Vec4::ZERO;
-            }
-
-            let y = uv.y as u32;
-            if y >= self.image.height() {
-                return glam::Vec4::ZERO;
-            }
-
-            let image::Rgba([r, g, b, a]) = self.image.get_pixel(uv.x as u32, uv.y as u32);
-            glam::Vec4::new(
-                r as f32 / 255.0,
-                g as f32 / 255.0,
-                b as f32 / 255.0,
-                a as f32 / 255.0,
+            // TODO: use configurable wrap mode on CPU sampling
+            let px = uv.x.clamp(0.0, 1.0) * self.image.width() as f32;
+            let py = uv.y.clamp(0.0, 1.0) * self.image.height() as f32;
+            *self.image.get_pixel(
+                px.round().min(self.image.width() as f32) as u32,
+                py.round().min(self.image.height() as f32) as u32,
             )
         }
     }

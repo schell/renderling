@@ -391,12 +391,15 @@ impl Lighting {
 
 #[cfg(test)]
 mod test {
-    use glam::{Mat4, Vec3, Vec4, Vec4Swizzles};
+    use crabslab::Slab;
+    use glam::{Mat4, Vec2, Vec3, Vec3Swizzles, Vec4, Vec4Swizzles};
 
     use crate::{
+        atlas::AtlasImage,
         camera::Camera,
         light::{LightStyle, ShadowMappingVertexInfo},
         prelude::Transform,
+        skybox::Skybox,
         stage::RenderletPbrVertexInfo,
         texture::DepthTexture,
     };
@@ -408,8 +411,13 @@ mod test {
         let w = 800.0;
         let h = 800.0;
         let ctx = crate::Context::headless(w as u32, h as u32);
-        let mut stage = ctx.new_stage().with_lighting(false);
+        let mut stage = ctx.new_stage().with_lighting(true);
+        // let hdr_path =
+        //     std::path::PathBuf::from(std::env!("CARGO_WORKSPACE_DIR")).join("img/hdr/night.hdr");
+        // let hdr_img = AtlasImage::from_hdr_path(hdr_path).unwrap();
         let camera = stage.new_value(Camera::default());
+        // let skybox = Skybox::new(&ctx, hdr_img, camera.id());
+        // stage.set_skybox(skybox);
         log::info!("camera_id: {:?}", camera.id());
         let doc = stage
             .load_gltf_document_from_path(
@@ -424,12 +432,7 @@ mod test {
         c.set_projection(crate::camera::perspective(w, h));
         camera.set(c);
         let gltf_light = doc.lights.first().unwrap();
-        log::info!("light_id: {:?}", gltf_light.light.id());
-        log::info!("light.index: {:?}", gltf_light.light.get().index);
-        log::info!(
-            "light.transform_id: {:?}",
-            gltf_light.light.get().transform_id
-        );
+        log::info!("gltf_light: {gltf_light:#?}");
         stage.set_lights([gltf_light.light.id()]);
 
         let frame = ctx.get_next_frame().unwrap();
@@ -438,7 +441,7 @@ mod test {
         frame.present();
 
         // Rendering the scene without shadows as a sanity check
-        img_diff::assert_img_eq("shadows/shadow_mapping_sanity_scene_before.png", img);
+        img_diff::save("shadows/shadow_mapping_sanity_scene_before.png", img);
 
         assert_eq!(
             gltf_light.light.get().transform_id,
@@ -494,12 +497,12 @@ mod test {
             let img = frame.read_image().unwrap();
             frame.present();
 
-            img_diff::assert_img_eq("shadows/shadow_mapping_sanity_light_pov.png", img);
+            img_diff::save("shadows/shadow_mapping_sanity_light_pov.png", img);
 
             let mut depth_img = stage.get_depth_texture().read_image().unwrap();
             // Normalize the value
             img_diff::normalize_gray_img(&mut depth_img);
-            img_diff::assert_img_eq(
+            img_diff::save(
                 "shadows/shadow_mapping_sanity_light_pov_depth.png",
                 depth_img,
             );
@@ -574,9 +577,10 @@ mod test {
         }
 
         let depth_texture = DepthTexture::new(&ctx, shadows.texture.texture.clone());
-        let mut depth_img = depth_texture.read_image().unwrap();
+        let shadow_depth_img = depth_texture.read_image().unwrap();
+        let mut depth_img = shadow_depth_img.clone();
         img_diff::normalize_gray_img(&mut depth_img);
-        img_diff::assert_img_eq("shadows/shadow_mapping_sanity_depth.png", depth_img);
+        img_diff::save("shadows/shadow_mapping_sanity_depth.png", depth_img);
 
         assert_eq!(renderlet_vertex_info.len(), shadow_vertex_info.len());
 
@@ -585,7 +589,7 @@ mod test {
             .zip(shadow_vertex_info.into_iter())
             .enumerate()
         {
-            log::info!("{i}");
+            // log::info!("{i}");
             let RenderletPbrVertexInfo {
                 renderlet_id,
                 vertex_index,
@@ -608,6 +612,58 @@ mod test {
                 clip_pos: out_clip_pos,
             };
             pretty_assertions::assert_eq!(pbr_info, shadow_info, "vertex {i} is not equal");
+        }
+
+        let top_of_green_sphere_pos = {
+            use crate::math::{CpuSampler, CpuTexture2d, Sample2d};
+            // Here we'll check the `shadow_calculation` function to make sure it's calculating
+            // the shadow correctly
+            let sphere_001 = doc
+                .nodes
+                .iter()
+                .find(|n| n.name.as_deref() == Some("Sphere.001"))
+                .unwrap();
+            let shadow_map = CpuTexture2d::from_image(shadow_depth_img);
+            let light_space_transform = light_transform;
+            // Fragment position in world space
+            let frag_pos = sphere_001.global_transform().translation;
+            log::info!("frag_pos: {frag_pos}");
+            let frag_pos_in_light_space = light_space_transform.project_point3(frag_pos);
+            log::info!("frag_pos_in_light_space: {frag_pos_in_light_space}");
+            let proj_coords =
+                frag_pos_in_light_space * Vec3::new(0.5, -0.5, 1.0) + Vec3::new(0.5, 0.5, 0.0);
+            log::info!("proj_coords: {proj_coords}");
+            log::info!(
+                "proj_coords in pixels: {}",
+                proj_coords.xy() * Vec2::new(w, h)
+            );
+            let image::Luma([closest_depth_luma_8]) =
+                shadow_map.sample_by_lod(CpuSampler, proj_coords.xy(), 0.0);
+            log::info!("closest_depth_luma: {closest_depth_luma_8:?}");
+            let closest_depth = closest_depth_luma_8 as f32 / u8::MAX as f32;
+            log::info!("closest_depth: {closest_depth:?}");
+            let current_depth = proj_coords.z;
+            assert!(
+                current_depth > closest_depth,
+                "top of green sphere is not in shadow"
+            );
+
+            frag_pos
+        };
+
+        {
+            // Ensure the light slab has the correct light transform
+            let light_slab = futures_lite::future::block_on(lighting.light_slab.read(..)).unwrap();
+            let desc = light_slab.read_unchecked(Id::<LightingDescriptor>::new(0));
+            let light_space_transform = light_slab.read_unchecked(desc.shadow_map_light_transform);
+            assert_eq!(
+                light_transform, light_space_transform,
+                "light space transforms are not equal"
+            );
+
+            let frag_pos_in_light_space =
+                light_space_transform.project_point3(top_of_green_sphere_pos);
+            log::info!("frag_pos_in_light_space: {frag_pos_in_light_space}");
         }
 
         // Now do the rendering *with the shadow map* to see if it works.

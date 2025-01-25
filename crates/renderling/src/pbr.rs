@@ -12,7 +12,10 @@ use spirv_std::num_traits::Float;
 
 use crate::{
     atlas::AtlasTexture,
-    light::{shadow_calculation, DirectionalLight, Light, LightStyle, PointLight, SpotLight},
+    light::{
+        shadow_calculation, DirectionalLight, Light, LightStyle, LightingDescriptor, PointLight,
+        SpotLight,
+    },
     math::{self, IsSampler, IsVector, Sample2d, Sample2dArray, SampleCube},
     println as my_println,
     stage::Renderlet,
@@ -209,7 +212,7 @@ pub fn sample_specular_reflection<T: SampleCube<Sampler = S>, S: IsSampler>(
         .xyz()
 }
 
-pub fn sample_brdf<T: Sample2d<Sampler = S>, S: IsSampler>(
+pub fn sample_brdf<T: Sample2d<Sampler = S, Sample = Vec4>, S: IsSampler>(
     brdf: &T,
     brdf_sampler: &S,
     // camera position in world space
@@ -320,12 +323,14 @@ pub fn fragment_impl<A, T, Dt, C, S>(
     output: &mut Vec4,
 ) where
     A: Sample2dArray<Sampler = S>,
-    T: Sample2d<Sampler = S>,
-    Dt: Sample2d<Sampler = S>,
+    T: Sample2d<Sampler = S, Sample = Vec4>,
+    Dt: Sample2d<Sampler = S, Sample = Vec4>,
     C: SampleCube<Sampler = S>,
     S: IsSampler,
 {
-    let light_space_transform = lighting_slab.read_unchecked(Id::<Mat4>::new(0));
+    let lighting_desc = lighting_slab.read_unchecked(Id::<LightingDescriptor>::new(0));
+    let light_space_transform =
+        lighting_slab.read_unchecked(lighting_desc.shadow_map_light_transform);
     let frag_pos_in_light_space = light_space_transform.project_point3(in_pos);
 
     let renderlet = slab.read_unchecked(renderlet_id);
@@ -565,7 +570,7 @@ pub fn fragment_impl<A, T, Dt, C, S>(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn shade_fragment<S: IsSampler, T: Sample2d<Sampler = S>>(
+pub fn shade_fragment<S, T>(
     shadow_map: &T,
     shadow_map_sampler: &S,
     // camera's position in world space
@@ -587,7 +592,11 @@ pub fn shade_fragment<S: IsSampler, T: Sample2d<Sampler = S>>(
 
     lights: Array<Id<Light>>,
     slab: &[u32],
-) -> Vec4 {
+) -> Vec4
+where
+    S: IsSampler,
+    T: Sample2d<Sampler = S, Sample = Vec4>,
+{
     let n = in_norm.alt_norm_or_zero();
     let v = (camera_pos - in_pos).alt_norm_or_zero();
     my_println!("lights: {lights:?}");
@@ -596,6 +605,7 @@ pub fn shade_fragment<S: IsSampler, T: Sample2d<Sampler = S>>(
     // reflectance
     let mut lo = Vec3::ZERO;
     for i in 0..lights.len() {
+        // TODO: Move lights to the lighting slab
         // calculate per-light radiance
         let light_id = slab.read(lights.at(i));
         if light_id.is_none() {
@@ -677,7 +687,7 @@ pub fn shade_fragment<S: IsSampler, T: Sample2d<Sampler = S>>(
     let diffuse = irradiance * albedo;
     let specular = prefiltered * (fresnel * brdf.x + brdf.y);
     let shadow = shadow_calculation(shadow_map, shadow_map_sampler, frag_pos_in_light_space);
-    let color = (kd * diffuse + specular) * ao + (lo * (1.0 - shadow)) + emissive;
+    let color = Vec3::splat(shadow); //(1.0 - shadow) * ((kd * diffuse + specular) * ao + lo + emissive);
     color.extend(1.0)
 }
 
