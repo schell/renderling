@@ -369,7 +369,7 @@ impl Lighting {
     ) -> Self {
         let runtime = runtime.as_ref();
         let light_slab = SlabAllocator::new(runtime, wgpu::BufferUsages::empty());
-        let _lighting_descriptor = light_slab.new_value(LightingDescriptor {
+        let lighting_descriptor = light_slab.new_value(LightingDescriptor {
             shadow_map_light_transform: Id::NONE,
         });
         let light_slab_buffer = light_slab.upkeep();
@@ -377,7 +377,7 @@ impl Lighting {
         Self {
             light_slab,
             light_slab_buffer: Arc::new(RwLock::new(light_slab_buffer)),
-            lighting_descriptor: _lighting_descriptor,
+            lighting_descriptor,
             stage_slab_buffer: Arc::new(RwLock::new(stage_slab_buffer.clone())),
             bindgroup_layout: bindgroup_layout.into(),
         }
@@ -393,11 +393,14 @@ impl Lighting {
 mod test {
     use crabslab::Slab;
     use glam::{Mat4, Vec2, Vec3, Vec3Swizzles, Vec4, Vec4Swizzles};
+    use image::Luma;
 
     use crate::{
         atlas::AtlasImage,
         camera::Camera,
         light::{LightStyle, ShadowMappingVertexInfo},
+        math::{ConstTexture, CpuTexture2d},
+        pbr::shade_fragment,
         prelude::Transform,
         skybox::Skybox,
         stage::RenderletPbrVertexInfo,
@@ -584,6 +587,14 @@ mod test {
 
         assert_eq!(renderlet_vertex_info.len(), shadow_vertex_info.len());
 
+        // Get the green sphere to use for testing what should be in shadow
+        let sphere_001 = doc
+            .nodes
+            .iter()
+            .find(|n| n.name.as_deref() == Some("Sphere.001"))
+            .unwrap();
+        let mut found_vertex_output_for_sphere_001 = None;
+
         for (i, (pbr_info, shadow_info)) in renderlet_vertex_info
             .into_iter()
             .zip(shadow_vertex_info.into_iter())
@@ -601,7 +612,7 @@ mod test {
                 out_clip_pos,
                 ..
             } = pbr_info;
-            let pbr_info = ShadowMappingVertexInfo {
+            let vertex_shadow_info = ShadowMappingVertexInfo {
                 renderlet_id,
                 vertex_index,
                 vertex,
@@ -611,11 +622,29 @@ mod test {
                 view_projection,
                 clip_pos: out_clip_pos,
             };
-            pretty_assertions::assert_eq!(pbr_info, shadow_info, "vertex {i} is not equal");
+            pretty_assertions::assert_eq!(
+                shadow_info,
+                vertex_shadow_info,
+                "vertex {i} is not equal"
+            );
+            if found_vertex_output_for_sphere_001.is_none() {
+                let distance_to_sphere_origin = shadow_info
+                    .world_pos
+                    .distance(sphere_001.global_transform().translation);
+                if distance_to_sphere_origin < 0.1 {
+                    // Save the point for further renders
+                    log::info!("found it: distance={distance_to_sphere_origin} {shadow_info:#?}");
+                    found_vertex_output_for_sphere_001 = Some(pbr_info);
+                }
+            }
+        }
+
+        fn luma_8_to_vec4(Luma([a]): &Luma<u8>) -> Vec4 {
+            Vec4::splat(*a as f32 / 255.0)
         }
 
         let top_of_green_sphere_pos = {
-            use crate::math::{CpuSampler, CpuTexture2d, Sample2d};
+            use crate::math::{CpuTexture2d, Sample2d};
             // Here we'll check the `shadow_calculation` function to make sure it's calculating
             // the shadow correctly
             let sphere_001 = doc
@@ -623,7 +652,7 @@ mod test {
                 .iter()
                 .find(|n| n.name.as_deref() == Some("Sphere.001"))
                 .unwrap();
-            let shadow_map = CpuTexture2d::from_image(shadow_depth_img);
+            let shadow_map = CpuTexture2d::from_image(shadow_depth_img.clone(), luma_8_to_vec4);
             let light_space_transform = light_transform;
             // Fragment position in world space
             let frag_pos = sphere_001.global_transform().translation;
@@ -637,10 +666,8 @@ mod test {
                 "proj_coords in pixels: {}",
                 proj_coords.xy() * Vec2::new(w, h)
             );
-            let image::Luma([closest_depth_luma_8]) =
-                shadow_map.sample_by_lod(CpuSampler, proj_coords.xy(), 0.0);
-            log::info!("closest_depth_luma: {closest_depth_luma_8:?}");
-            let closest_depth = closest_depth_luma_8 as f32 / u8::MAX as f32;
+            let shadow = shadow_map.sample_by_lod((), proj_coords.xy(), 0.0);
+            let closest_depth = shadow.x;
             log::info!("closest_depth: {closest_depth:?}");
             let current_depth = proj_coords.z;
             assert!(
@@ -664,6 +691,38 @@ mod test {
             let frag_pos_in_light_space =
                 light_space_transform.project_point3(top_of_green_sphere_pos);
             log::info!("frag_pos_in_light_space: {frag_pos_in_light_space}");
+        }
+
+        {
+            // Run the fragment shader on that one point
+            let shadow_map = CpuTexture2d::from_image(shadow_depth_img, luma_8_to_vec4);
+            let geometry_slab = futures_lite::future::block_on(stage.read(..)).unwrap();
+            let light_slab = futures_lite::future::block_on(lighting.light_slab.read(..)).unwrap();
+            let vertex_info = found_vertex_output_for_sphere_001.unwrap();
+            let mut output = Vec4::ZERO;
+            crate::pbr::fragment_impl(
+                &ConstTexture::new(Vec4::ONE),
+                &(),
+                &ConstTexture::new(Vec4::ONE),
+                &(),
+                &ConstTexture::new(Vec4::ONE),
+                &(),
+                &ConstTexture::new(Vec4::ONE),
+                &(),
+                &shadow_map,
+                &(),
+                &geometry_slab,
+                &light_slab,
+                vertex_info.renderlet_id,
+                vertex_info.out_color,
+                vertex_info.out_uv0,
+                vertex_info.out_uv1,
+                vertex_info.out_norm,
+                vertex_info.out_tangent,
+                vertex_info.out_bitangent,
+                vertex_info.out_pos,
+                &mut output,
+            );
         }
 
         // Now do the rendering *with the shadow map* to see if it works.

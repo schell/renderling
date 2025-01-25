@@ -212,7 +212,7 @@ pub fn sample_specular_reflection<T: SampleCube<Sampler = S>, S: IsSampler>(
         .xyz()
 }
 
-pub fn sample_brdf<T: Sample2d<Sampler = S, Sample = Vec4>, S: IsSampler>(
+pub fn sample_brdf<T: Sample2d<Sampler = S>, S: IsSampler>(
     brdf: &T,
     brdf_sampler: &S,
     // camera position in world space
@@ -323,8 +323,8 @@ pub fn fragment_impl<A, T, Dt, C, S>(
     output: &mut Vec4,
 ) where
     A: Sample2dArray<Sampler = S>,
-    T: Sample2d<Sampler = S, Sample = Vec4>,
-    Dt: Sample2d<Sampler = S, Sample = Vec4>,
+    T: Sample2d<Sampler = S>,
+    Dt: Sample2d<Sampler = S>,
     C: SampleCube<Sampler = S>,
     S: IsSampler,
 {
@@ -595,7 +595,7 @@ pub fn shade_fragment<S, T>(
 ) -> Vec4
 where
     S: IsSampler,
-    T: Sample2d<Sampler = S, Sample = Vec4>,
+    T: Sample2d<Sampler = S>,
 {
     let n = in_norm.alt_norm_or_zero();
     let v = (camera_pos - in_pos).alt_norm_or_zero();
@@ -687,7 +687,8 @@ where
     let diffuse = irradiance * albedo;
     let specular = prefiltered * (fresnel * brdf.x + brdf.y);
     let shadow = shadow_calculation(shadow_map, shadow_map_sampler, frag_pos_in_light_space);
-    let color = Vec3::splat(shadow); //(1.0 - shadow) * ((kd * diffuse + specular) * ao + lo + emissive);
+    my_println!("shadow: {shadow}");
+    let color = (1.0 - shadow) * ((kd * diffuse + specular) * ao + lo + emissive);
     color.extend(1.0)
 }
 

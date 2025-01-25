@@ -296,7 +296,7 @@ pub fn shadow_calculation<S, T>(
 ) -> f32
 where
     S: IsSampler,
-    T: Sample2d<Sampler = S, Sample = Vec4>,
+    T: Sample2d<Sampler = S>,
 {
     // The range of coordinates in the light's clip space is -1.0 to 1.0 for x and y,
     // but the texture space is [0, 1], and Y increases downward, so we do this

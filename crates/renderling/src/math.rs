@@ -14,20 +14,21 @@ use spirv_std::{
 
 pub use glam::*;
 pub use spirv_std::num_traits::{clamp, Float, Zero};
+
 pub trait IsSampler: Copy + Clone {}
+
+impl IsSampler for () {}
 
 impl IsSampler for Sampler {}
 
 pub trait Sample2d {
     type Sampler: IsSampler;
-    type Sample;
 
-    fn sample_by_lod(&self, sampler: Self::Sampler, uv: glam::Vec2, lod: f32) -> Self::Sample;
+    fn sample_by_lod(&self, sampler: Self::Sampler, uv: glam::Vec2, lod: f32) -> glam::Vec4;
 }
 
 impl Sample2d for Image2d {
     type Sampler = Sampler;
-    type Sample = glam::Vec4;
 
     fn sample_by_lod(&self, sampler: Self::Sampler, uv: glam::Vec2, lod: f32) -> glam::Vec4 {
         self.sample_by_lod(sampler, uv, lod)
@@ -36,7 +37,6 @@ impl Sample2d for Image2d {
 
 impl Sample2d for Image!(2D, type=f32, sampled, depth) {
     type Sampler = Sampler;
-    type Sample = glam::Vec4;
 
     fn sample_by_lod(&self, sampler: Self::Sampler, uv: glam::Vec2, lod: f32) -> glam::Vec4 {
         self.sample_by_lod(sampler, uv, lod)
@@ -77,22 +77,52 @@ mod cpu {
 
     use super::*;
 
-    /// A CPU-side texture sampler.
-    ///
-    /// Provided primarily for testing purposes.
-    #[derive(Debug, Clone, Copy, Default)]
-    pub struct CpuSampler;
+    /// A CPU texture with no dimensions that always returns the same
+    /// value when sampled.
+    pub struct ConstTexture(Vec4);
 
-    impl IsSampler for CpuSampler {}
+    impl Sample2d for ConstTexture {
+        type Sampler = ();
 
-    #[derive(Debug, Default)]
+        fn sample_by_lod(&self, _sampler: Self::Sampler, _uv: glam::Vec2, _lod: f32) -> Vec4 {
+            self.0
+        }
+    }
+
+    impl Sample2dArray for ConstTexture {
+        type Sampler = ();
+
+        fn sample_by_lod(&self, _sampler: Self::Sampler, _uv: glam::Vec3, _lod: f32) -> glam::Vec4 {
+            self.0
+        }
+    }
+
+    impl SampleCube for ConstTexture {
+        type Sampler = ();
+
+        fn sample_by_lod(&self, _sampler: Self::Sampler, _uv: Vec3, _lod: f32) -> glam::Vec4 {
+            self.0
+        }
+    }
+
+    impl ConstTexture {
+        pub fn new(value: Vec4) -> Self {
+            Self(value)
+        }
+    }
+
+    #[derive(Debug)]
     pub struct CpuTexture2d<P: image::Pixel, Container> {
         pub image: image::ImageBuffer<P, Container>,
+        convert_fn: fn(&P) -> Vec4,
     }
 
     impl<P: image::Pixel, Container> CpuTexture2d<P, Container> {
-        pub fn from_image(image: image::ImageBuffer<P, Container>) -> Self {
-            Self { image }
+        pub fn from_image(
+            image: image::ImageBuffer<P, Container>,
+            convert_fn: fn(&P) -> Vec4,
+        ) -> Self {
+            Self { image, convert_fn }
         }
     }
 
@@ -101,18 +131,18 @@ mod cpu {
         P: image::Pixel,
         Container: std::ops::Deref<Target = [P::Subpixel]>,
     {
-        type Sampler = CpuSampler;
-        type Sample = P;
+        type Sampler = ();
 
-        fn sample_by_lod(&self, _sampler: Self::Sampler, uv: glam::Vec2, _lod: f32) -> P {
+        fn sample_by_lod(&self, _sampler: Self::Sampler, uv: glam::Vec2, _lod: f32) -> Vec4 {
             // TODO: lerp the CPU texture sampling
             // TODO: use configurable wrap mode on CPU sampling
             let px = uv.x.clamp(0.0, 1.0) * self.image.width() as f32;
             let py = uv.y.clamp(0.0, 1.0) * self.image.height() as f32;
-            *self.image.get_pixel(
+            let p = self.image.get_pixel(
                 px.round().min(self.image.width() as f32) as u32,
                 py.round().min(self.image.height() as f32) as u32,
-            )
+            );
+            (self.convert_fn)(p)
         }
     }
 
@@ -125,7 +155,7 @@ mod cpu {
     }
 
     impl SampleCube for CpuCubemap {
-        type Sampler = CpuSampler;
+        type Sampler = ();
 
         fn sample_by_lod(
             &self,
