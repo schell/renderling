@@ -7,8 +7,7 @@
 use crabslab::{Array, Id, Slab, SlabItem};
 use glam::{Mat4, Vec2, Vec3, Vec4, Vec4Swizzles};
 
-#[cfg(target_arch = "spirv")]
-use spirv_std::num_traits::Float;
+use spirv_std::num_traits::{Float, Zero};
 
 use crate::{
     atlas::AtlasTexture,
@@ -328,11 +327,6 @@ pub fn fragment_impl<A, T, Dt, C, S>(
     C: SampleCube<Sampler = S>,
     S: IsSampler,
 {
-    let lighting_desc = lighting_slab.read_unchecked(Id::<LightingDescriptor>::new(0));
-    let light_space_transform =
-        lighting_slab.read_unchecked(lighting_desc.shadow_map_light_transform);
-    let frag_pos_in_light_space = light_space_transform.project_point3(in_pos);
-
     let renderlet = slab.read_unchecked(renderlet_id);
     let PbrConfig {
         atlas_size,
@@ -549,7 +543,6 @@ pub fn fragment_impl<A, T, Dt, C, S>(
             shadow_map,
             shadow_map_sampler,
             camera.position(),
-            frag_pos_in_light_space,
             n,
             in_pos,
             albedo.xyz(),
@@ -562,6 +555,7 @@ pub fn fragment_impl<A, T, Dt, C, S>(
             brdf,
             light_array,
             slab,
+            lighting_slab,
         )
     } else {
         crate::println!("no shading!");
@@ -575,7 +569,6 @@ pub fn shade_fragment<S, T>(
     shadow_map_sampler: &S,
     // camera's position in world space
     camera_pos: Vec3,
-    frag_pos_in_light_space: Vec3,
     // normal of the fragment
     in_norm: Vec3,
     // position of the fragment in world space
@@ -592,6 +585,7 @@ pub fn shade_fragment<S, T>(
 
     lights: Array<Id<Light>>,
     slab: &[u32],
+    light_slab: &[u32],
 ) -> Vec4
 where
     S: IsSampler,
@@ -686,6 +680,10 @@ where
     let kd = (1.0 - ks) * (1.0 - metallic);
     let diffuse = irradiance * albedo;
     let specular = prefiltered * (fresnel * brdf.x + brdf.y);
+
+    let lighting_desc = light_slab.read_unchecked(Id::<LightingDescriptor>::new(0));
+    let light_space_transform = light_slab.read_unchecked(lighting_desc.shadow_map_light_transform);
+    let frag_pos_in_light_space = light_space_transform.project_point3(in_pos);
     let shadow = shadow_calculation(shadow_map, shadow_map_sampler, frag_pos_in_light_space);
     my_println!("shadow: {shadow}");
     let color = (1.0 - shadow) * ((kd * diffuse + specular) * ao + lo + emissive);

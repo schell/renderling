@@ -298,12 +298,14 @@ where
     S: IsSampler,
     T: Sample2d<Sampler = S>,
 {
+    crate::println!("frag_pos_in_light_space: {frag_pos_in_light_space}");
     // The range of coordinates in the light's clip space is -1.0 to 1.0 for x and y,
     // but the texture space is [0, 1], and Y increases downward, so we do this
     // conversion to flip Y and also normalize to the range [0.0, 1.0].
     // Z should already be 0.0 to 1.0.
     let proj_coords =
         frag_pos_in_light_space * Vec3::new(0.5, -0.5, 1.0) + Vec3::new(0.5, 0.5, 0.0);
+    crate::println!("proj_coords: {proj_coords}");
 
     // With these projected coordinates we can sample the depth map as the
     // resulting [0,1] coordinates from proj_coords directly correspond to
@@ -319,6 +321,8 @@ where
     // If the `current_depth`, which is the depth of the fragment from the lights POV, is
     // greater than the `closest_depth` of the shadow map at that fragment, the fragment
     // is in shadow
+    crate::println!("current_depth: {current_depth}");
+    crate::println!("closest_depth: {closest_depth}");
     if current_depth > closest_depth {
         1.0
     } else {

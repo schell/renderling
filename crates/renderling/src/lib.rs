@@ -226,6 +226,52 @@ mod test {
         std::path::PathBuf::from(std::env!("CARGO_WORKSPACE_DIR"))
     }
 
+    pub fn capture_gpu_frame<T>(
+        ctx: &Context,
+        path: impl AsRef<std::path::Path>,
+        f: impl FnOnce() -> T,
+    ) -> T {
+        let path = workspace_dir().join("test_output").join(path);
+        let parent = path.parent().unwrap();
+        std::fs::create_dir_all(parent).unwrap();
+
+        #[cfg(target_os = "macos")]
+        {
+            if path.exists() {
+                log::info!(
+                    "deleting {} before writing gpu frame capture",
+                    path.display()
+                );
+                std::fs::remove_dir_all(&path).unwrap();
+            }
+            let m = metal::CaptureManager::shared();
+            let desc = metal::CaptureDescriptor::new();
+
+            desc.set_destination(metal::MTLCaptureDestination::GpuTraceDocument);
+            desc.set_output_url(path);
+            unsafe {
+                ctx.get_device()
+                    .as_hal::<wgpu_core::api::Metal, _, ()>(|maybe_metal_device| {
+                        if let Some(metal_device) = maybe_metal_device {
+                            desc.set_capture_device(
+                                metal_device.raw_device().try_lock().unwrap().as_ref(),
+                            );
+                        } else {
+                            panic!("not a capturable device")
+                        }
+                    })
+            };
+            m.start_capture(&desc).unwrap();
+            let t = f();
+            m.stop_capture();
+            t
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            f()
+        }
+    }
+
     #[test]
     fn sanity_transmute() {
         let zerof32 = 0f32;

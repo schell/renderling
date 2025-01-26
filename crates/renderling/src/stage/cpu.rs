@@ -751,6 +751,10 @@ impl Stage {
         self.render_with(view, None);
     }
 
+    pub fn lighting(&self) -> &Lighting {
+        &self.lighting
+    }
+
     pub fn render_with(
         &self,
         view: &wgpu::TextureView,
@@ -794,6 +798,7 @@ impl Stage {
                     t.clone()
                 })
                 .unwrap_or_else(|| {
+                    log::info!("rendering without shadows");
                     ShadowMap::create_shadow_map_texture(self.device(), wgpu::Extent3d::default())
                 });
             log::info!("got stage slab buffer and shadow map depth texture");

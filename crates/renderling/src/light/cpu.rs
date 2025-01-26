@@ -213,11 +213,21 @@ impl ShadowMap {
     /// Update the shadow map, rendering the given [`Renderlet`]s to the map as shadow casters.
     // TODO: Add a `light_source: Option<_>` parameter to `ShadowMap::update`.
     // Or something similar that updates the light source's "light space transform".
-    pub fn update<'a>(&self, renderlets: impl IntoIterator<Item = &'a Hybrid<Renderlet>>) {
+    pub fn update<'a>(
+        &self,
+        light_space_transform: Option<Mat4>,
+        renderlets: impl IntoIterator<Item = &'a Hybrid<Renderlet>>,
+    ) {
+        if let Some(transform) = light_space_transform {
+            log::trace!("updating shadow map light space transform");
+            self.light_transform.set(transform);
+        }
         // Update the lighting descriptor to point to this shadow map, which tells the
         // vertex shader which shadow map we're updating.
         self.lighting_descriptor.modify(|ld| {
-            ld.shadow_map_light_transform = self.light_transform.id();
+            let id = self.light_transform.id();
+            log::trace!("updating lighting descriptor's pointer to the shadow map to {id:?}");
+            ld.shadow_map_light_transform = id;
         });
         let _ = self.light_slab.upkeep();
 
@@ -231,6 +241,7 @@ impl ShadowMap {
             let should_invalidate_stage_slab = stage_slab_buffer.synchronize();
             let should_invalidate = should_invalidate_light_slab || should_invalidate_stage_slab;
             self.bindgroup.get(should_invalidate, || {
+                log::trace!("recreating shadow mapping bindgroup");
                 Self::create_bindgroup(
                     device,
                     &self.bindgroup_layout,
@@ -257,16 +268,23 @@ impl ShadowMap {
             });
             render_pass.set_pipeline(&self.pipeline);
             render_pass.set_bind_group(0, Some(bindgroup.as_ref()), &[]);
+            let mut count = 0;
             for rlet in renderlets {
                 let id = rlet.id();
                 let rlet = rlet.get();
                 let vertex_range = 0..rlet.get_vertex_count();
                 let instance_range = id.inner()..id.inner() + 1;
                 render_pass.draw(vertex_range, instance_range);
+                count += 1;
             }
+            log::trace!("rendered {count} renderlets to the shadow map");
         }
         let submission = queue.submit(Some(encoder.finish()));
         device.poll(wgpu::Maintain::wait_for(submission));
+    }
+
+    pub fn texture(&self) -> &crate::texture::Texture {
+        &self.texture
     }
 }
 
@@ -368,7 +386,8 @@ impl Lighting {
         stage_slab_buffer: &SlabBuffer<wgpu::Buffer>,
     ) -> Self {
         let runtime = runtime.as_ref();
-        let light_slab = SlabAllocator::new(runtime, wgpu::BufferUsages::empty());
+        let light_slab =
+            SlabAllocator::new_with_label(runtime, wgpu::BufferUsages::empty(), Some("light-slab"));
         let lighting_descriptor = light_slab.new_value(LightingDescriptor {
             shadow_map_light_transform: Id::NONE,
         });
@@ -392,17 +411,13 @@ impl Lighting {
 #[cfg(test)]
 mod test {
     use crabslab::Slab;
-    use glam::{Mat4, Vec2, Vec3, Vec3Swizzles, Vec4, Vec4Swizzles};
+    use glam::{Mat4, Vec2, Vec3, Vec3Swizzles, Vec4};
     use image::Luma;
 
     use crate::{
-        atlas::AtlasImage,
         camera::Camera,
-        light::{LightStyle, ShadowMappingVertexInfo},
+        light::ShadowMappingVertexInfo,
         math::{ConstTexture, CpuTexture2d},
-        pbr::shade_fragment,
-        prelude::Transform,
-        skybox::Skybox,
         stage::RenderletPbrVertexInfo,
         texture::DepthTexture,
     };
@@ -545,20 +560,16 @@ mod test {
             frame.present();
         }
 
-        let (lighting, shadows) = {
-            let stage_slab_buffer = stage.stage_slab_buffer.read().unwrap();
-            let lighting = Lighting::new(&ctx, &stage_slab_buffer);
-            let shadows = lighting.new_shadow_map(
-                light_transform,
-                wgpu::Extent3d {
-                    width: w as u32,
-                    height: h as u32,
-                    depth_or_array_layers: 1,
-                },
-            );
-            shadows.update(doc.renderlets_iter());
-            (lighting, shadows)
-        };
+        let lighting = stage.lighting();
+        let shadows = stage.lighting().new_shadow_map(
+            light_transform,
+            wgpu::Extent3d {
+                width: w as u32,
+                height: h as u32,
+                depth_or_array_layers: 1,
+            },
+        );
+        shadows.update(None, doc.renderlets_iter());
 
         let geometry_slab = futures_lite::future::block_on(stage.read(..)).unwrap();
         let light_slab = futures_lite::future::block_on(lighting.light_slab.read(..)).unwrap();
@@ -639,6 +650,8 @@ mod test {
             }
         }
 
+        let found_vertex_output_for_sphere_001 = found_vertex_output_for_sphere_001.unwrap();
+
         fn luma_8_to_vec4(Luma([a]): &Luma<u8>) -> Vec4 {
             Vec4::splat(*a as f32 / 255.0)
         }
@@ -698,7 +711,17 @@ mod test {
             let shadow_map = CpuTexture2d::from_image(shadow_depth_img, luma_8_to_vec4);
             let geometry_slab = futures_lite::future::block_on(stage.read(..)).unwrap();
             let light_slab = futures_lite::future::block_on(lighting.light_slab.read(..)).unwrap();
-            let vertex_info = found_vertex_output_for_sphere_001.unwrap();
+            let vertex_info = found_vertex_output_for_sphere_001;
+            {
+                // Verify some more things that are used in the fragment shader
+                //
+                let lighting_desc = light_slab.read_unchecked(Id::<LightingDescriptor>::new(0));
+                let light_space_transform =
+                    light_slab.read_unchecked(lighting_desc.shadow_map_light_transform);
+                let frag_pos_in_light_space =
+                    light_space_transform.project_point3(vertex_info.out_pos);
+                log::info!("frag_pos_in_light_space: {frag_pos_in_light_space}");
+            }
             let mut output = Vec4::ZERO;
             crate::pbr::fragment_impl(
                 &ConstTexture::new(Vec4::ONE),
@@ -723,13 +746,25 @@ mod test {
                 vertex_info.out_pos,
                 &mut output,
             );
+            log::info!("color: {output}");
+        }
+
+        {
+            // Check one last time that we're using the correct texture
+            let depth_texture = DepthTexture::new(&ctx, shadows.texture.texture.clone());
+            let img = depth_texture.read_image().unwrap();
+            img_diff::save("shadows/shadow_mapping_again.png", img);
         }
 
         // Now do the rendering *with the shadow map* to see if it works.
-        let frame = ctx.get_next_frame().unwrap();
-        stage.render_with(&frame.view(), Some(&shadows.texture));
-        let img = frame.read_image().unwrap();
-        frame.present();
+        let img = crate::test::capture_gpu_frame(&ctx, "shadows/capture.gputrace", || {
+            let frame = ctx.get_next_frame().unwrap();
+            stage.render_with(&frame.view(), Some(&shadows.texture));
+            let img = frame.read_image().unwrap();
+            frame.present();
+            img
+        });
+
         img_diff::save("shadows/shadow_mapping_sanity_stage_render.png", img);
     }
 

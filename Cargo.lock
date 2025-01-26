@@ -2783,6 +2783,7 @@ dependencies = [
  "image",
  "img-diff",
  "log",
+ "metal",
  "naga 23.0.0",
  "pathdiff",
  "pretty_assertions",
@@ -2795,6 +2796,7 @@ dependencies = [
  "spirv-std",
  "ttf-parser 0.20.0",
  "wgpu",
+ "wgpu-core",
  "winit",
 ]
 

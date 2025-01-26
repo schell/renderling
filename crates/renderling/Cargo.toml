@@ -76,9 +76,11 @@ example = { path = "../example" }
 fastrand = "2.1.1"
 icosahedron = "0.1"
 img-diff = { path = "../img-diff" }
+metal.workspace = true
 naga.workspace = true
 pretty_assertions.workspace = true
 ttf-parser = "0.20.0"
+wgpu-core.workspace = true
 winit.workspace = true
 
 [target.'cfg(not(target_arch = "spirv"))'.dev-dependencies]
