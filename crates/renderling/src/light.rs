@@ -20,9 +20,21 @@ mod cpu;
 pub use cpu::*;
 
 /// Root descriptor of the lighting system.
-#[derive(Clone, Copy, Default, SlabItem, core::fmt::Debug)]
+#[derive(Clone, Copy, SlabItem, core::fmt::Debug)]
 pub struct LightingDescriptor {
     pub shadow_map_light_transform: Id<Mat4>,
+    pub bias_min: f32,
+    pub bias_max: f32,
+}
+
+impl Default for LightingDescriptor {
+    fn default() -> Self {
+        Self {
+            shadow_map_light_transform: Id::NONE,
+            bias_min: 0.005,
+            bias_max: 0.05,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -293,6 +305,10 @@ pub fn shadow_calculation<S, T>(
     shadow_map: &T,
     shadow_map_sampler: &S,
     frag_pos_in_light_space: Vec3,
+    surface_normal: Vec3,
+    light_direction: Vec3,
+    bias_min: f32,
+    bias_max: f32,
 ) -> f32
 where
     S: IsSampler,
@@ -323,7 +339,9 @@ where
     // is in shadow
     crate::println!("current_depth: {current_depth}");
     crate::println!("closest_depth: {closest_depth}");
-    if current_depth > closest_depth {
+    let bias = (bias_max * (1.0 - surface_normal.dot(light_direction))).max(bias_min);
+
+    if (current_depth - bias) > closest_depth {
         1.0
     } else {
         0.0

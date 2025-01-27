@@ -390,6 +390,7 @@ impl Lighting {
             SlabAllocator::new_with_label(runtime, wgpu::BufferUsages::empty(), Some("light-slab"));
         let lighting_descriptor = light_slab.new_value(LightingDescriptor {
             shadow_map_light_transform: Id::NONE,
+            ..Default::default()
         });
         let light_slab_buffer = light_slab.upkeep();
         let bindgroup_layout = Self::create_bindgroup_layout(&runtime.device);

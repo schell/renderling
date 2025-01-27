@@ -7,6 +7,7 @@
 use crabslab::{Array, Id, Slab, SlabItem};
 use glam::{Mat4, Vec2, Vec3, Vec4, Vec4Swizzles};
 
+#[allow(unused)]
 use spirv_std::num_traits::{Float, Zero};
 
 use crate::{
@@ -664,7 +665,23 @@ where
                 let radiance =
                     outgoing_radiance(color, albedo, attenuation, v, l, n, metallic, roughness);
                 my_println!("radiance: {radiance:?}");
-                lo += radiance;
+
+                let lighting_desc = light_slab.read_unchecked(Id::<LightingDescriptor>::new(0));
+                let light_space_transform =
+                    light_slab.read_unchecked(lighting_desc.shadow_map_light_transform);
+                let frag_pos_in_light_space = light_space_transform.project_point3(in_pos);
+                // Shadow is 1.0 when the fragment is in the shadow of this light,
+                // and 0.0 otherwise
+                let shadow = shadow_calculation(
+                    shadow_map,
+                    shadow_map_sampler,
+                    frag_pos_in_light_space,
+                    n,
+                    l,
+                    lighting_desc.bias_min,
+                    lighting_desc.bias_max,
+                );
+                lo += radiance * (1.0 - shadow);
             }
         }
     }
@@ -680,13 +697,7 @@ where
     let kd = (1.0 - ks) * (1.0 - metallic);
     let diffuse = irradiance * albedo;
     let specular = prefiltered * (fresnel * brdf.x + brdf.y);
-
-    let lighting_desc = light_slab.read_unchecked(Id::<LightingDescriptor>::new(0));
-    let light_space_transform = light_slab.read_unchecked(lighting_desc.shadow_map_light_transform);
-    let frag_pos_in_light_space = light_space_transform.project_point3(in_pos);
-    let shadow = shadow_calculation(shadow_map, shadow_map_sampler, frag_pos_in_light_space);
-    my_println!("shadow: {shadow}");
-    let color = (1.0 - shadow) * ((kd * diffuse + specular) * ao + lo + emissive);
+    let color = (kd * diffuse + specular) * ao + lo + emissive;
     color.extend(1.0)
 }
 
