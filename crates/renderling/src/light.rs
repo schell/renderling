@@ -20,21 +20,11 @@ mod cpu;
 pub use cpu::*;
 
 /// Root descriptor of the lighting system.
-#[derive(Clone, Copy, SlabItem, core::fmt::Debug)]
+#[derive(Clone, Copy, Default, SlabItem, core::fmt::Debug)]
 pub struct LightingDescriptor {
     pub shadow_map_light_transform: Id<Mat4>,
     pub bias_min: f32,
     pub bias_max: f32,
-}
-
-impl Default for LightingDescriptor {
-    fn default() -> Self {
-        Self {
-            shadow_map_light_transform: Id::NONE,
-            bias_min: 0.005,
-            bias_max: 0.05,
-        }
-    }
 }
 
 #[cfg(test)]

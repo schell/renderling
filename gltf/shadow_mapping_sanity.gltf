@@ -4,6 +4,7 @@
 		"version":"2.0"
 	},
 	"extensionsUsed":[
+		"KHR_materials_emissive_strength",
 		"KHR_lights_punctual"
 	],
 	"extensionsRequired":[
@@ -35,7 +36,9 @@
 				2,
 				3,
 				4,
-				5
+				5,
+				6,
+				7
 			]
 		}
 	],
@@ -46,7 +49,7 @@
 			"translation":[
 				0,
 				0,
-				1.5244084596633911
+				0.8984647393226624
 			]
 		},
 		{
@@ -103,6 +106,46 @@
 				-3.5589241981506348,
 				-1.1574621200561523,
 				1.4128384590148926
+			]
+		},
+		{
+			"mesh":4,
+			"name":"Cylinder",
+			"rotation":[
+				-0.14098228514194489,
+				0.5328636765480042,
+				0.2134113311767578,
+				0.8066200613975525
+			],
+			"scale":[
+				0.2753068208694458,
+				0.2753068506717682,
+				0.2753068208694458
+			],
+			"translation":[
+				4.076245307922363,
+				1.0054539442062378,
+				5.903861999511719
+			]
+		},
+		{
+			"mesh":5,
+			"name":"Cylinder.001",
+			"rotation":[
+				-0.14098228514194489,
+				0.5328636765480042,
+				0.2134113311767578,
+				0.8066200613975525
+			],
+			"scale":[
+				0.2753068208694458,
+				0.2753068506717682,
+				0.2753068208694458
+			],
+			"translation":[
+				-6.663036346435547,
+				-4.068678855895996,
+				0.5199804306030273
 			]
 		}
 	],
@@ -168,6 +211,28 @@
 				"metallicFactor":0,
 				"roughnessFactor":0.5
 			}
+		},
+		{
+			"doubleSided":true,
+			"emissiveFactor":[
+				0,
+				0.31788796186447144,
+				1
+			],
+			"extensions":{
+				"KHR_materials_emissive_strength":{
+					"emissiveStrength":10
+				}
+			},
+			"name":"LightCone",
+			"pbrMetallicRoughness":{
+				"baseColorFactor":[
+					0,
+					0,
+					0,
+					1
+				]
+			}
 		}
 	],
 	"meshes":[
@@ -224,6 +289,34 @@
 					},
 					"indices":15,
 					"material":3
+				}
+			]
+		},
+		{
+			"name":"Cylinder",
+			"primitives":[
+				{
+					"attributes":{
+						"POSITION":16,
+						"NORMAL":17,
+						"TEXCOORD_0":18
+					},
+					"indices":19,
+					"material":4
+				}
+			]
+		},
+		{
+			"name":"Cylinder.001",
+			"primitives":[
+				{
+					"attributes":{
+						"POSITION":20,
+						"NORMAL":21,
+						"TEXCOORD_0":22
+					},
+					"indices":19,
+					"material":4
 				}
 			]
 		}
@@ -364,6 +457,68 @@
 			"componentType":5123,
 			"count":2880,
 			"type":"SCALAR"
+		},
+		{
+			"bufferView":16,
+			"componentType":5126,
+			"count":192,
+			"max":[
+				1,
+				1,
+				1
+			],
+			"min":[
+				-1,
+				-1,
+				-1
+			],
+			"type":"VEC3"
+		},
+		{
+			"bufferView":17,
+			"componentType":5126,
+			"count":192,
+			"type":"VEC3"
+		},
+		{
+			"bufferView":18,
+			"componentType":5126,
+			"count":192,
+			"type":"VEC2"
+		},
+		{
+			"bufferView":19,
+			"componentType":5123,
+			"count":372,
+			"type":"SCALAR"
+		},
+		{
+			"bufferView":20,
+			"componentType":5126,
+			"count":192,
+			"max":[
+				1,
+				1,
+				1
+			],
+			"min":[
+				-1,
+				-1,
+				-1
+			],
+			"type":"VEC3"
+		},
+		{
+			"bufferView":21,
+			"componentType":5126,
+			"count":192,
+			"type":"VEC3"
+		},
+		{
+			"bufferView":22,
+			"componentType":5126,
+			"count":192,
+			"type":"VEC2"
 		}
 	],
 	"bufferViews":[
@@ -462,11 +617,53 @@
 			"byteLength":5760,
 			"byteOffset":134416,
 			"target":34963
+		},
+		{
+			"buffer":0,
+			"byteLength":2304,
+			"byteOffset":140176,
+			"target":34962
+		},
+		{
+			"buffer":0,
+			"byteLength":2304,
+			"byteOffset":142480,
+			"target":34962
+		},
+		{
+			"buffer":0,
+			"byteLength":1536,
+			"byteOffset":144784,
+			"target":34962
+		},
+		{
+			"buffer":0,
+			"byteLength":744,
+			"byteOffset":146320,
+			"target":34963
+		},
+		{
+			"buffer":0,
+			"byteLength":2304,
+			"byteOffset":147064,
+			"target":34962
+		},
+		{
+			"buffer":0,
+			"byteLength":2304,
+			"byteOffset":149368,
+			"target":34962
+		},
+		{
+			"buffer":0,
+			"byteLength":1536,
+			"byteOffset":151672,
+			"target":34962
 		}
 	],
 	"buffers":[
 		{
-			"byteLength":140176,
+			"byteLength":153208,
 			"uri":"shadow_mapping_sanity.bin"
 		}
 	]

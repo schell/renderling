@@ -163,7 +163,7 @@ impl ShadowMap {
                         topology: wgpu::PrimitiveTopology::TriangleList,
                         strip_index_format: None,
                         front_face: wgpu::FrontFace::Ccw,
-                        cull_mode: None,
+                        cull_mode: Some(wgpu::Face::Front),
                         unclipped_depth: false,
                         polygon_mode: wgpu::PolygonMode::Fill,
                         conservative: false,
@@ -749,6 +749,12 @@ mod test {
             );
             log::info!("color: {output}");
         }
+
+        lighting.lighting_descriptor.modify(|desc| {
+            desc.bias_min = 0.001;
+            desc.bias_max = 0.01;
+        });
+        let _ = lighting.light_slab.upkeep();
 
         {
             // Check one last time that we're using the correct texture

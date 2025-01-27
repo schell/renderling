@@ -211,7 +211,11 @@ mod test {
         let WgpuRuntime { device, queue } = ctx.as_ref();
 
         // Create our geometry on the slab.
-        let slab = SlabAllocator::new(&ctx, wgpu::BufferUsages::empty());
+        let slab = SlabAllocator::new_with_label(
+            &ctx,
+            wgpu::BufferUsages::empty(),
+            Some("isosceles-triangle-no-instance"),
+        );
         let initial_vertices = [
             Vertex {
                 position: Vec3::new(0.5, -0.5, 0.0),
@@ -369,7 +373,11 @@ mod test {
         let WgpuRuntime { device, queue } = ctx.as_ref();
 
         // Create our geometry on the slab.
-        let slab = SlabAllocator::new(&ctx, wgpu::BufferUsages::empty());
+        let slab = SlabAllocator::new_with_label(
+            &ctx,
+            wgpu::BufferUsages::empty(),
+            Some("slabbed-isosceles-triangle"),
+        );
         let geometry = vec![
             Vertex {
                 position: Vec3::new(0.5, -0.5, 0.0),
@@ -528,7 +536,11 @@ mod test {
 
         // Create our geometry on the slab.
         // Don't worry too much about capacity, it can grow.
-        let slab = SlabAllocator::new(&ctx, wgpu::BufferUsages::empty());
+        let slab = SlabAllocator::new_with_label(
+            &ctx,
+            wgpu::BufferUsages::empty(),
+            Some("slabbed-renderlet"),
+        );
         let geometry = slab.new_array([
             Vertex {
                 position: Vec3::new(0.5, -0.5, 0.0),
