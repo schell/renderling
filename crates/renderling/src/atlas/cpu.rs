@@ -5,11 +5,11 @@ use craballoc::{
     prelude::{Hybrid, SlabAllocator, WeakHybrid},
     runtime::WgpuRuntime,
 };
-use glam::UVec2;
+use glam::{UVec2, UVec3};
 use image::RgbaImage;
 use snafu::{prelude::*, OptionExt};
 
-use crate::texture::Texture;
+use crate::{atlas::AtlasDescriptor, texture::Texture};
 
 use super::{
     atlas_image::{convert_to_rgba8_bytes, AtlasImage},
@@ -66,15 +66,13 @@ impl InternalAtlasTexture {
     }
 }
 
-pub(crate) fn check_size(size: wgpu::Extent3d) -> Result<(), AtlasError> {
+pub(crate) fn check_size(size: wgpu::Extent3d) {
     let conditions = size.depth_or_array_layers >= 2
         && size.width == size.height
         && (size.width & (size.width - 1)) == 0;
     if !conditions {
-        return SizeSnafu { size }.fail();
+        log::error!("{}", AtlasError::Size { size });
     }
-
-    Ok(())
 }
 
 fn fan_split_n<T>(n: usize, input: impl IntoIterator<Item = T>) -> Vec<Vec<T>> {
@@ -130,22 +128,32 @@ pub struct Layer {
 pub struct Atlas {
     texture_array: Arc<RwLock<Texture>>,
     layers: Arc<RwLock<Vec<Layer>>>,
+    label: Option<String>,
+    descriptor: Hybrid<AtlasDescriptor>,
 }
 
 impl Atlas {
+    const LABEL: Option<&str> = Some("atlas-texture");
     /// Create a new atlas with `size` and `num_layers` layers.
     ///
     /// `size` **must be a power of two**.
     ///
     /// ## Panics
     /// Panics if `size` is _not_ a power of two.
-    fn new_with_texture(texture: Texture) -> Self {
+    pub fn new_with_texture(
+        descriptor: Hybrid<AtlasDescriptor>,
+        texture: Texture,
+        label: Option<&str>,
+    ) -> Self {
+        let label = label.map(|s| s.to_owned());
         let num_layers = texture.texture.size().depth_or_array_layers as usize;
         let layers = vec![Layer::default(); num_layers];
         log::trace!("created atlas with {num_layers} layers");
         Atlas {
             layers: Arc::new(RwLock::new(layers)),
             texture_array: Arc::new(RwLock::new(texture)),
+            descriptor,
+            label,
         }
     }
 
@@ -153,18 +161,23 @@ impl Atlas {
     fn create_texture(
         runtime: impl AsRef<WgpuRuntime>,
         size: wgpu::Extent3d,
-    ) -> Result<Texture, AtlasError> {
+        format: Option<wgpu::TextureFormat>,
+        label: Option<&str>,
+        usage: Option<wgpu::TextureUsages>,
+    ) -> Texture {
         let device = &runtime.as_ref().device;
         let queue = &runtime.as_ref().queue;
-        check_size(size)?;
+        check_size(size);
+        let usage = usage.unwrap_or(wgpu::TextureUsages::empty());
         let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("atlas texture"),
+            label: Some(label.unwrap_or(Self::LABEL.unwrap())),
             size,
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8Unorm,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING
+            format: format.unwrap_or(wgpu::TextureFormat::Rgba8Unorm),
+            usage: usage
+                | wgpu::TextureUsages::TEXTURE_BINDING
                 | wgpu::TextureUsages::COPY_DST
                 | wgpu::TextureUsages::COPY_SRC,
             view_formats: &[],
@@ -197,12 +210,7 @@ impl Atlas {
             ..Default::default()
         };
 
-        Ok(Texture::from_wgpu_tex(
-            device,
-            texture,
-            Some(sampler_desc),
-            None,
-        ))
+        Texture::from_wgpu_tex(device, texture, Some(sampler_desc), None)
     }
 
     /// Create a new atlas.
@@ -211,10 +219,28 @@ impl Atlas {
     ///
     /// ## Panics
     /// Panics if `size` is not a power of two.
-    pub fn new(runtime: impl AsRef<WgpuRuntime>, size: wgpu::Extent3d) -> Result<Self, AtlasError> {
-        log::trace!("creating new atlas with dimensions {size:?}");
-        let texture = Self::create_texture(runtime, size)?;
-        Ok(Self::new_with_texture(texture))
+    pub fn new(
+        slab: &SlabAllocator<WgpuRuntime>,
+        size: wgpu::Extent3d,
+        format: Option<wgpu::TextureFormat>,
+        label: Option<&str>,
+        usage: Option<wgpu::TextureUsages>,
+    ) -> Self {
+        let texture = Self::create_texture(slab.runtime(), size, format, label, usage);
+        let num_layers = texture.texture.size().depth_or_array_layers as usize;
+        let layers = vec![Layer::default(); num_layers];
+        log::trace!("creating new atlas with dimensions {size:?}, {num_layers} layers");
+        let descriptor = slab.new_value(AtlasDescriptor {
+            size: UVec3::new(size.width, size.height, size.depth_or_array_layers),
+        });
+        let label = label.map(|s| s.to_owned());
+
+        Atlas {
+            layers: Arc::new(RwLock::new(layers)),
+            texture_array: Arc::new(RwLock::new(texture)),
+            descriptor,
+            label,
+        }
     }
 
     pub fn len(&self) -> usize {
@@ -228,10 +254,10 @@ impl Atlas {
         self.len() == 0
     }
 
-    /// Returns a clone of the current atlas texture array.
-    pub fn get_texture(&self) -> Texture {
+    /// Returns a reference to the current atlas texture array.
+    pub fn get_texture(&self) -> impl Deref<Target = Texture> + '_ {
         // UNWRAP: panic on purpose
-        self.texture_array.read().unwrap().clone()
+        self.texture_array.read().unwrap()
     }
 
     pub fn get_layers(&self) -> impl Deref<Target = Vec<Layer>> + '_ {
@@ -265,11 +291,12 @@ impl Atlas {
         self.texture_array.read().unwrap().texture.size()
     }
 
+    /// Add the given images
     // TODO: Atlas should probably clone a reference to the runtime and the slab.
-    pub fn add_images(
+    pub fn add_images<'a>(
         &self,
         slab: &SlabAllocator<WgpuRuntime>,
-        images: &[AtlasImage],
+        images: impl IntoIterator<Item = &'a AtlasImage>,
     ) -> Result<Vec<Hybrid<AtlasTexture>>, AtlasError> {
         // UNWRAP: POP
         let mut layers = self.layers.write().unwrap();
@@ -285,6 +312,7 @@ impl Atlas {
             newly_packed_layers,
             Some(slab),
             &texture_array,
+            self.label.as_deref(),
         )?;
 
         // Commit our newly staged values, now that everything is done.
@@ -319,6 +347,7 @@ impl Atlas {
             newly_packed_layers,
             None::<&SlabAllocator<WgpuRuntime>>,
             &texture_array,
+            self.label.as_deref(),
         )?;
 
         // Commit our newly staged values, now that everything is done.
@@ -372,11 +401,12 @@ impl Atlas {
     /// ## Panics
     /// Panics if the pixels read from the GPU cannot be converted into an
     /// `RgbaImage`.
-    pub fn atlas_img(&self, ctx: &crate::Context, layer: u32) -> RgbaImage {
+    pub fn atlas_img(&self, runtime: impl AsRef<WgpuRuntime>, layer: u32) -> RgbaImage {
+        let runtime = runtime.as_ref();
         let tex = self.get_texture();
         let size = tex.texture.size();
         let buffer = Texture::read_from(
-            ctx,
+            runtime,
             &tex.texture,
             size.width as usize,
             size.height as usize,
@@ -389,13 +419,13 @@ impl Atlas {
                 z: layer,
             }),
         );
-        buffer.into_linear_rgba(ctx.get_device()).unwrap()
+        buffer.into_linear_rgba(&runtime.device).unwrap()
     }
 }
 
 fn pack_images<'a>(
     layers: &[Layer],
-    images: &'a [AtlasImage],
+    images: impl IntoIterator<Item = &'a AtlasImage>,
     extent: wgpu::Extent3d,
 ) -> Option<Vec<crunch::PackedItems<AnotherPacking<'a>>>> {
     let mut new_packing: Vec<AnotherPacking> = {
@@ -414,7 +444,7 @@ fn pack_images<'a>(
             })
             .chain(
                 images
-                    .iter()
+                    .into_iter()
                     .enumerate()
                     .map(|(i, image)| AnotherPacking::Img {
                         original_index: i,
@@ -462,9 +492,16 @@ impl StagedResources {
         newly_packed_layers: Vec<crunch::PackedItems<AnotherPacking>>,
         slab: Option<&SlabAllocator<WgpuRuntime>>,
         old_texture_array: &Texture,
+        label: Option<&str>,
     ) -> Result<Self, AtlasError> {
         let runtime = runtime.as_ref();
-        let new_texture_array = Atlas::create_texture(runtime, extent)?;
+        let new_texture_array = Atlas::create_texture(
+            runtime,
+            extent,
+            Some(old_texture_array.texture.format()),
+            label,
+            Some(old_texture_array.texture.usage()),
+        );
         let mut output = vec![];
         let mut encoder = runtime
             .device

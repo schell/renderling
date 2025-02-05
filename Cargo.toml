@@ -21,7 +21,7 @@ async-channel = "1.8"
 bytemuck = { version = "1.13.0", features = ["derive"] }
 cfg_aliases = "0.2"
 clap = { version = "4.5.23", features = ["derive"] }
-craballoc = { version = "0.1.3" }
+craballoc = { version = "0.1.5" }
 crabslab = { version = "0.6.3", default-features = false }
 ctor = "0.2.2"
 dagga = "0.2.1"

@@ -11,7 +11,7 @@
 //!
 //! `Atlas` is only available on CPU. Not available in shaders.
 use crabslab::SlabItem;
-use glam::{UVec2, Vec2, Vec3};
+use glam::{UVec2, UVec3, Vec2, Vec3, Vec3Swizzles};
 #[cfg(target_arch = "spirv")]
 use spirv_std::num_traits::*;
 
@@ -23,6 +23,12 @@ pub use atlas_image::*;
 mod cpu;
 #[cfg(not(target_arch = "spirv"))]
 pub use cpu::*;
+
+/// Describes various qualities of the atlas, to be used on the GPU.
+#[derive(Clone, Copy, core::fmt::Debug, Default, PartialEq, SlabItem)]
+pub struct AtlasDescriptor {
+    pub size: UVec3,
+}
 
 /// Method of addressing the edges of a texture.
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
@@ -70,6 +76,27 @@ impl AtlasTexture {
         let uv_t = px_index_t as f32 / sy;
 
         Vec2::new(uv_s, uv_t).extend(self.layer_index as f32)
+    }
+
+    /// Constrain the input `clip_pos` to be within the bounds of this texture
+    /// within its atlas, in texture space.
+    pub fn constrain_clip_coords_to_texture_space(
+        &self,
+        clip_pos: Vec2,
+        atlas_size: UVec2,
+    ) -> Vec2 {
+        // Convert `clip_pos` into uv coords to figure out where in the texture
+        // this point lives
+        let input_uv = (clip_pos + Vec2::splat(1.0)) * Vec2::new(0.5, -0.5);
+        self.uv(input_uv, atlas_size).xy()
+    }
+
+    /// Constrain the input `clip_pos` to be within the bounds of this texture
+    /// within its atlas.
+    pub fn constrain_clip_coords(&self, clip_pos: Vec2, atlas_size: UVec2) -> Vec2 {
+        let uv = self.constrain_clip_coords_to_texture_space(clip_pos, atlas_size);
+        // Convert `uv` back into clip space
+        uv * Vec2::new(2.0, -2.0) - Vec2::splat(1.0)
     }
 }
 

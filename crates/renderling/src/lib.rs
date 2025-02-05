@@ -244,6 +244,12 @@ mod test {
                 );
                 std::fs::remove_dir_all(&path).unwrap();
             }
+
+            if std::env::var("METAL_CAPTURE_ENABLED").is_err() {
+                log::error!("Env var METAL_CAPTURE_ENABLED must be set");
+                panic!("missing METAL_CAPTURE_ENABLED=1");
+            }
+
             let m = metal::CaptureManager::shared();
             let desc = metal::CaptureDescriptor::new();
 

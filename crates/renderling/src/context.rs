@@ -662,7 +662,7 @@ impl Context {
             height: size.y,
             depth_or_array_layers: size.z,
         };
-        crate::atlas::check_size(size).unwrap();
+        crate::atlas::check_size(size);
         *self.atlas_size.write().unwrap() = size;
         self
     }

@@ -3,13 +3,14 @@
 //! Directional, point and spot lights.
 //!
 //! Shadow mapping.
-use crabslab::{Id, Slab, SlabItem};
-use glam::{Mat4, Vec3, Vec3Swizzles, Vec4, Vec4Swizzles};
+use crabslab::{Array, Id, Slab, SlabItem};
+use glam::{Mat4, UVec2, Vec3, Vec3Swizzles, Vec4, Vec4Swizzles};
 use spirv_std::spirv;
 
 use crate::{
+    atlas::{AtlasDescriptor, AtlasTexture},
     camera::Camera,
-    math::{IsSampler, IsVector, Sample2d},
+    math::{IsSampler, IsVector, Sample2dArray},
     stage::Renderlet,
     transform::Transform,
 };
@@ -21,8 +22,30 @@ pub use cpu::*;
 
 /// Root descriptor of the lighting system.
 #[derive(Clone, Copy, Default, SlabItem, core::fmt::Debug)]
+#[offsets]
 pub struct LightingDescriptor {
-    pub shadow_map_light_transform: Id<Mat4>,
+    /// List of all analytical lights in the scene.
+    pub analytical_lights: Array<Id<Light>>,
+    /// Shadow mapping atlas info.
+    pub shadow_map_atlas_descriptor_id: Id<AtlasDescriptor>,
+    /// `Id` of the [`ShadowMapDescriptor`] to use when updating
+    /// a shadow map.
+    ///
+    /// This changes from each run of the `shadow_mapping_vertex`.
+    pub update_shadow_map_id: Id<ShadowMapDescriptor>,
+    /// The index of the shadow map atlas texture to update.
+    pub update_shadow_map_texture_index: u32,
+}
+
+#[derive(Clone, Copy, Default, SlabItem, core::fmt::Debug)]
+pub struct ShadowMapDescriptor {
+    pub light_space_transform: Mat4,
+    /// Pointers to the atlas textures where the shadow map depth
+    /// data is stored.
+    ///
+    /// This will be an array of one `Id` for directional and spot lights,
+    /// and an array of four `Id`s for a point light.
+    pub atlas_textures_array: Array<Id<AtlasTexture>>,
     pub bias_min: f32,
     pub bias_max: f32,
 }
@@ -41,6 +64,15 @@ pub struct ShadowMappingVertexInfo {
 }
 
 /// Shadow mapping vertex shader.
+///
+/// It is assumed that a [`LightingDescriptor`] is stored at `Id(0)` of the
+/// `light_slab`.
+///
+/// This shader reads the [`LightingDescriptor`] to find the shadow map to
+/// be updated, then determines the clip positions to emit based on the
+/// shadow map's atlas texture.
+///
+/// It then renders the renderlet into the designated atlas frame.
 // Note:
 // If this is taking too long to render for each renderlet, think about
 // a frustum and occlusion culling pass to generate the list of renderlets.
@@ -69,10 +101,24 @@ pub fn shadow_mapping_vertex(
     let (_vertex, _transform, _model_matrix, world_pos) =
         renderlet.get_vertex_info(vertex_index, geometry_slab);
 
-    let lighting_descr = light_slab.read_unchecked(Id::<LightingDescriptor>::new(0));
-    let light_transform = light_slab.read_unchecked(lighting_descr.shadow_map_light_transform);
+    let lighting_desc = light_slab.read_unchecked(Id::<LightingDescriptor>::new(0));
+    let shadow_map_atlas_desc =
+        light_slab.read_unchecked(lighting_desc.shadow_map_atlas_descriptor_id);
+    let shadow_desc = light_slab.read_unchecked(lighting_desc.update_shadow_map_id);
+    let atlas_texture_id = light_slab.read_unchecked(
+        shadow_desc
+            .atlas_textures_array
+            .at(lighting_desc.update_shadow_map_texture_index as usize),
+    );
+    let atlas_texture = light_slab.read_unchecked(atlas_texture_id);
 
-    let clip_pos = light_transform * world_pos.extend(1.0);
+    let clip_pos = shadow_desc.light_space_transform * world_pos.extend(1.0);
+    // Since the shadow map's pixels live within an atlas, we have to transform the
+    // clip position to apply to only that portion of the viewport
+    let texture_clip_pos = atlas_texture
+        .constrain_clip_coords(clip_pos.xy(), shadow_map_atlas_desc.size.xy())
+        .extend(clip_pos.z)
+        .extend(clip_pos.w);
     #[cfg(test)]
     {
         *out_comparison_info = ShadowMappingVertexInfo {
@@ -82,11 +128,11 @@ pub fn shadow_mapping_vertex(
             transform: _transform,
             model_matrix: _model_matrix,
             world_pos,
-            view_projection: light_transform,
-            clip_pos,
+            view_projection: shadow_desc.light_space_transform,
+            clip_pos: texture_clip_pos,
         };
     }
-    *out_clip_pos = clip_pos;
+    *out_clip_pos = texture_clip_pos;
 }
 
 #[spirv(fragment)]
@@ -227,10 +273,14 @@ impl SlabItem for LightStyle {
 pub struct Light {
     /// The type of the light
     pub light_type: LightStyle,
-    /// The index of the light in the slab
+    /// The index of the light in the lighting slab
     pub index: u32,
     /// The id of a transform to apply to the position and direction of the light.
+    ///
+    /// This `Id` points to a transform on the geometry slab.
     pub transform_id: Id<Transform>,
+    /// The id of the shadow map in use by this light.
+    pub shadow_map_desc_id: Id<ShadowMapDescriptor>,
 }
 
 impl Default for Light {
@@ -239,6 +289,7 @@ impl Default for Light {
             light_type: LightStyle::Directional,
             index: Id::<()>::NONE.inner(),
             transform_id: Id::NONE,
+            shadow_map_desc_id: Id::NONE,
         }
     }
 }
@@ -249,6 +300,7 @@ impl From<Id<DirectionalLight>> for Light {
             light_type: LightStyle::Directional,
             index: id.inner(),
             transform_id: Id::NONE,
+            shadow_map_desc_id: Id::NONE,
         }
     }
 }
@@ -259,6 +311,7 @@ impl From<Id<SpotLight>> for Light {
             light_type: LightStyle::Spot,
             index: id.inner(),
             transform_id: Id::NONE,
+            shadow_map_desc_id: Id::NONE,
         }
     }
 }
@@ -269,6 +322,7 @@ impl From<Id<PointLight>> for Light {
             light_type: LightStyle::Point,
             index: id.inner(),
             transform_id: Id::NONE,
+            shadow_map_desc_id: Id::NONE,
         }
     }
 }
@@ -294,6 +348,8 @@ impl Light {
 pub fn shadow_calculation<S, T>(
     shadow_map: &T,
     shadow_map_sampler: &S,
+    shadow_map_atlas_texture: AtlasTexture,
+    shadow_map_atlas_size: UVec2,
     frag_pos_in_light_space: Vec3,
     surface_normal: Vec3,
     light_direction: Vec3,
@@ -302,15 +358,17 @@ pub fn shadow_calculation<S, T>(
 ) -> f32
 where
     S: IsSampler,
-    T: Sample2d<Sampler = S>,
+    T: Sample2dArray<Sampler = S>,
 {
     crate::println!("frag_pos_in_light_space: {frag_pos_in_light_space}");
     // The range of coordinates in the light's clip space is -1.0 to 1.0 for x and y,
     // but the texture space is [0, 1], and Y increases downward, so we do this
     // conversion to flip Y and also normalize to the range [0.0, 1.0].
     // Z should already be 0.0 to 1.0.
-    let proj_coords =
-        frag_pos_in_light_space * Vec3::new(0.5, -0.5, 1.0) + Vec3::new(0.5, 0.5, 0.0);
+    let proj_coords = shadow_map_atlas_texture.constrain_clip_coords_to_texture_space(
+        frag_pos_in_light_space.xy(),
+        shadow_map_atlas_size,
+    );
     crate::println!("proj_coords: {proj_coords}");
 
     // With these projected coordinates we can sample the depth map as the
@@ -318,11 +376,15 @@ where
     // the transformed NDC coordinates from the `ShadowMap::update` render pass.
     // This gives us the closest depth from the light's point of view:
     let closest_depth = shadow_map
-        .sample_by_lod(*shadow_map_sampler, proj_coords.xy(), 0.0)
+        .sample_by_lod(
+            *shadow_map_sampler,
+            proj_coords.extend(shadow_map_atlas_texture.layer_index as f32),
+            0.0,
+        )
         .x;
     // To get the current depth at this fragment we simply retrieve the projected vector's z
     // coordinate which equals the depth of this fragment from the light's perspective.
-    let current_depth = proj_coords.z;
+    let current_depth = frag_pos_in_light_space.z;
 
     // If the `current_depth`, which is the depth of the fragment from the lights POV, is
     // greater than the `closest_depth` of the shadow map at that fragment, the fragment

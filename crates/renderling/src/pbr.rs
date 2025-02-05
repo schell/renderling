@@ -5,7 +5,7 @@
 //! * <https://github.com/KhronosGroup/glTF-Sample-Viewer/blob/5b1b7f48a8cb2b7aaef00d08fdba18ccc8dd331b/source/Renderer/shaders/pbr.frag>
 //! * <https://github.khronos.org/glTF-Sample-Viewer-Release/>
 use crabslab::{Array, Id, Slab, SlabItem};
-use glam::{Mat4, Vec2, Vec3, Vec4, Vec4Swizzles};
+use glam::{Mat4, Vec2, Vec3, Vec3Swizzles, Vec4, Vec4Swizzles};
 
 #[allow(unused)]
 use spirv_std::num_traits::{Float, Zero};
@@ -295,7 +295,7 @@ pub fn texture_color<A: Sample2dArray<Sampler = S>, S: IsSampler>(
 
 /// PBR fragment shader capable of being run on CPU or GPU.
 #[allow(clippy::too_many_arguments)]
-pub fn fragment_impl<A, T, Dt, C, S>(
+pub fn fragment_impl<A, T, DtA, C, S>(
     atlas: &A,
     atlas_sampler: &S,
     irradiance: &C,
@@ -304,7 +304,7 @@ pub fn fragment_impl<A, T, Dt, C, S>(
     prefiltered_sampler: &S,
     brdf: &T,
     brdf_sampler: &S,
-    shadow_map: &Dt,
+    shadow_map: &DtA,
     shadow_map_sampler: &S,
 
     slab: &[u32],
@@ -324,7 +324,7 @@ pub fn fragment_impl<A, T, Dt, C, S>(
 ) where
     A: Sample2dArray<Sampler = S>,
     T: Sample2d<Sampler = S>,
-    Dt: Sample2d<Sampler = S>,
+    DtA: Sample2dArray<Sampler = S>,
     C: SampleCube<Sampler = S>,
     S: IsSampler,
 {
@@ -590,7 +590,7 @@ pub fn shade_fragment<S, T>(
 ) -> Vec4
 where
     S: IsSampler,
-    T: Sample2d<Sampler = S>,
+    T: Sample2dArray<Sampler = S>,
 {
     let n = in_norm.alt_norm_or_zero();
     let v = (camera_pos - in_pos).alt_norm_or_zero();
@@ -601,6 +601,7 @@ where
     let mut lo = Vec3::ZERO;
     for i in 0..lights.len() {
         // TODO: Move lights to the lighting slab
+
         // calculate per-light radiance
         let light_id = slab.read(lights.at(i));
         if light_id.is_none() {
@@ -666,21 +667,40 @@ where
                     outgoing_radiance(color, albedo, attenuation, v, l, n, metallic, roughness);
                 my_println!("radiance: {radiance:?}");
 
-                let lighting_desc = light_slab.read_unchecked(Id::<LightingDescriptor>::new(0));
-                let light_space_transform =
-                    light_slab.read_unchecked(lighting_desc.shadow_map_light_transform);
-                let frag_pos_in_light_space = light_space_transform.project_point3(in_pos);
-                // Shadow is 1.0 when the fragment is in the shadow of this light,
-                // and 0.0 otherwise
-                let shadow = shadow_calculation(
-                    shadow_map,
-                    shadow_map_sampler,
-                    frag_pos_in_light_space,
-                    n,
-                    l,
-                    lighting_desc.bias_min,
-                    lighting_desc.bias_max,
-                );
+                let shadow = if light.shadow_map_desc_id.is_some() {
+                    let shadow_map_descr = light_slab.read_unchecked(light.shadow_map_desc_id);
+                    let atlas_texture = {
+                        let atlas_texture_id =
+                            light_slab.read_unchecked(shadow_map_descr.atlas_textures_array.at(0));
+                        light_slab.read_unchecked(atlas_texture_id)
+                    };
+                    let atlas_size = {
+                        let lighting_desc_id = Id::<LightingDescriptor>::new(0);
+                        let atlas_desc_id = light_slab.read_unchecked(
+                            lighting_desc_id
+                                + LightingDescriptor::OFFSET_OF_SHADOW_MAP_ATLAS_DESCRIPTOR_ID,
+                        );
+                        let atlas_desc = light_slab.read_unchecked(atlas_desc_id);
+                        atlas_desc.size
+                    };
+                    let light_space_transform = shadow_map_descr.light_space_transform;
+                    let frag_pos_in_light_space = light_space_transform.project_point3(in_pos);
+                    // Shadow is 1.0 when the fragment is in the shadow of this light,
+                    // and 0.0 otherwise
+                    shadow_calculation(
+                        shadow_map,
+                        shadow_map_sampler,
+                        atlas_texture,
+                        atlas_size.xy(),
+                        frag_pos_in_light_space,
+                        n,
+                        l,
+                        shadow_map_descr.bias_min,
+                        shadow_map_descr.bias_max,
+                    )
+                } else {
+                    0.0
+                };
                 lo += radiance * (1.0 - shadow);
             }
         }

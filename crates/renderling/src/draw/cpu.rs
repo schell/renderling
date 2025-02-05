@@ -1,13 +1,10 @@
 //! CPU-only side of renderling/draw.rs
 
-use std::sync::Arc;
-
 use craballoc::{
     prelude::{Gpu, Hybrid, SlabAllocator, WeakHybrid, WgpuRuntime},
     slab::SlabBuffer,
 };
 use crabslab::Id;
-use glam::UVec2;
 use rustc_hash::FxHashMap;
 
 use crate::{

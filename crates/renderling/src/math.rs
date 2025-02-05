@@ -57,6 +57,14 @@ impl Sample2dArray for Image2dArray {
     }
 }
 
+impl Sample2dArray for Image!(2D, type=f32, sampled, arrayed, depth) {
+    type Sampler = Sampler;
+
+    fn sample_by_lod(&self, sampler: Self::Sampler, uv: glam::Vec3, lod: f32) -> glam::Vec4 {
+        self.sample_by_lod(sampler, uv, lod)
+    }
+}
+
 pub trait SampleCube {
     type Sampler: IsSampler;
 
@@ -141,6 +149,43 @@ mod cpu {
             let p = self.image.get_pixel(
                 px.round().min(self.image.width() as f32) as u32,
                 py.round().min(self.image.height() as f32) as u32,
+            );
+            (self.convert_fn)(p)
+        }
+    }
+
+    pub struct CpuTexture2dArray<P: image::Pixel, Container> {
+        pub images: Vec<image::ImageBuffer<P, Container>>,
+        convert_fn: fn(&P) -> Vec4,
+    }
+
+    impl<P: image::Pixel, Container> CpuTexture2dArray<P, Container> {
+        pub fn from_images(
+            images: impl IntoIterator<Item = image::ImageBuffer<P, Container>>,
+            convert_fn: fn(&P) -> Vec4,
+        ) -> Self {
+            let images = images.into_iter().collect();
+            Self { images, convert_fn }
+        }
+    }
+
+    impl<P, Container> Sample2dArray for CpuTexture2dArray<P, Container>
+    where
+        P: image::Pixel,
+        Container: std::ops::Deref<Target = [P::Subpixel]>,
+    {
+        type Sampler = ();
+
+        /// Panics if `uv.z` is greater than length of images.
+        fn sample_by_lod(&self, _sampler: Self::Sampler, uv: glam::Vec3, _lod: f32) -> Vec4 {
+            // TODO: lerp the CPU texture sampling
+            // TODO: use configurable wrap mode on CPU sampling
+            let img = &self.images[uv.z as usize];
+            let px = uv.x.clamp(0.0, 1.0) * img.width() as f32;
+            let py = uv.y.clamp(0.0, 1.0) * img.height() as f32;
+            let p = img.get_pixel(
+                px.round().min(img.width() as f32) as u32,
+                py.round().min(img.height() as f32) as u32,
             );
             (self.convert_fn)(p)
         }

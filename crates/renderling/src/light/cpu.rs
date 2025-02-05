@@ -1,28 +1,65 @@
 //! CPU-only lighting and shadows.
 
+use core::sync::atomic::AtomicUsize;
 use std::sync::{Arc, RwLock};
 
 use craballoc::{
     prelude::{Hybrid, SlabAllocator, WgpuRuntime},
     slab::SlabBuffer,
+    value::{HybridWriteGuard, WeakHybrid},
 };
 use crabslab::Id;
-use glam::Mat4;
+use glam::{Mat4, UVec2};
+use snafu::prelude::*;
 
-use crate::{bindgroup::ManagedBindGroup, stage::Renderlet};
+use crate::{
+    atlas::{Atlas, AtlasError, AtlasImage, AtlasTexture},
+    bindgroup::ManagedBindGroup,
+    stage::Renderlet,
+};
 
-use super::{DirectionalLight, LightingDescriptor, PointLight, SpotLight};
+use super::{DirectionalLight, LightingDescriptor, PointLight, ShadowMapDescriptor, SpotLight};
+
+#[derive(Debug, Snafu)]
+pub enum LightingError {
+    #[snafu(display("{source}"))]
+    Atlas { source: AtlasError },
+}
+
+impl From<AtlasError> for LightingError {
+    fn from(source: AtlasError) -> Self {
+        LightingError::Atlas { source }
+    }
+}
+
+pub trait IsContainer {
+    type Container<T>;
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct HybridContainer;
+
+impl IsContainer for HybridContainer {
+    type Container<T> = Hybrid<T>;
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct WeakContainer;
+
+impl IsContainer for WeakContainer {
+    type Container<T> = WeakHybrid<T>;
+}
 
 /// A wrapper around all types of analytical lighting.
 #[derive(Clone, Debug)]
-pub enum LightDetails {
-    Directional(Hybrid<DirectionalLight>),
-    Point(Hybrid<PointLight>),
-    Spot(Hybrid<SpotLight>),
+pub enum LightDetails<C: IsContainer = HybridContainer> {
+    Directional(C::Container<DirectionalLight>),
+    Point(C::Container<PointLight>),
+    Spot(C::Container<SpotLight>),
 }
 
-impl LightDetails {
-    pub fn as_directional(&self) -> Option<&Hybrid<DirectionalLight>> {
+impl<C: IsContainer> LightDetails<C> {
+    pub fn as_directional(&self) -> Option<&C::Container<DirectionalLight>> {
         if let LightDetails::Directional(d) = self {
             Some(d)
         } else {
@@ -34,56 +71,40 @@ impl LightDetails {
 /// A depth map rendering of the scene from a light's point of view.
 ///
 /// Used to project shadows from one light source for specific objects.
-///
-/// Based on the
-/// [shadow mapping article at learnopengl](https://learnopengl.com/Advanced-Lighting/Shadows/Shadow-Mapping).
-///
-/// Clones of this type all point to the same underlying data.
-// TODO: Separate pipeline and bindgroup layout from ShadowMap
-// TODO: Ensure that Lighting doesn't need ShadowMap at creation,
-// it should instead only reference the light slab.
-// ShadowMap
-// |_Lighting
-// |_Stage
 #[derive(Clone)]
 pub struct ShadowMap {
-    /// A depth texture used to store the scene from the light's POV.
-    // TODO: Use an Atlas for shadow maps.
-    texture: crate::texture::Texture,
-    light_slab: SlabAllocator<WgpuRuntime>,
-    stage_slab_buffer: Arc<RwLock<SlabBuffer<wgpu::Buffer>>>,
-    light_slab_buffer: Arc<RwLock<SlabBuffer<wgpu::Buffer>>>,
-    /// This shadow map's light transform
-    light_transform: Hybrid<Mat4>,
-    /// A clone of the [`Lighting`] manager's descriptor, which
-    /// gets written to when updating this shadow map.
-    lighting_descriptor: Hybrid<LightingDescriptor>,
-    pipeline: Arc<wgpu::RenderPipeline>,
-    bindgroup_layout: Arc<wgpu::BindGroupLayout>,
+    /// Last time the stage slab was bound.
+    stage_slab_buffer_creation_time: Arc<AtomicUsize>,
+    /// Last time the light slab was bound.
+    light_slab_buffer_creation_time: Arc<AtomicUsize>,
+    /// This shadow map's light transform,
+    shadowmap_descriptor: Hybrid<ShadowMapDescriptor>,
     bindgroup: ManagedBindGroup,
+    /// The textures used by this shadow map, pointing to image data hosted
+    /// in the atlas's texture array.
+    ///
+    /// The inner [`AtlasTexture`] is staged on the light slab.
+    atlas_textures: Vec<Hybrid<AtlasTexture>>,
 }
 
 impl ShadowMap {
     const LABEL: Option<&str> = Some("shadow-map");
 
-    pub fn create_shadow_map_texture(
-        device: &wgpu::Device,
+    /// Create the atlas used to store all shadow maps.
+    pub fn create_shadow_map_atlas(
+        light_slab: &SlabAllocator<WgpuRuntime>,
         size: wgpu::Extent3d,
-    ) -> crate::texture::Texture {
-        let tex = device.create_texture(&wgpu::TextureDescriptor {
-            label: Self::LABEL,
+    ) -> Atlas {
+        let usage = wgpu::TextureUsages::RENDER_ATTACHMENT
+            | wgpu::TextureUsages::TEXTURE_BINDING
+            | wgpu::TextureUsages::COPY_SRC;
+        Atlas::new(
+            light_slab,
             size,
-            mip_level_count: 1,
-            sample_count: 1,
-            // TODO: what about point lights? Does this need to be D3 then?
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Depth32Float,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                | wgpu::TextureUsages::TEXTURE_BINDING
-                | wgpu::TextureUsages::COPY_SRC,
-            view_formats: &[],
-        });
-        crate::texture::Texture::from_wgpu_tex(device, tex, None, None)
+            Some(wgpu::TextureFormat::Depth32Float),
+            Some("shadow-map-atlas"),
+            Some(usage),
+        )
     }
 
     /// Create a new [`ShadowMap`] for a single light source.
@@ -91,101 +112,47 @@ impl ShadowMap {
     // a projection+view matrix.
     pub fn new(
         // Required for the shadow map shader to read the light transform
-        lighting_manager: &Lighting,
+        lighting: &Lighting,
         light_transform: Mat4,
+        bias_min: f32,
+        bias_max: f32,
         size: wgpu::Extent3d,
         // Required for the shadow map shader to access geometry
         stage_slab_buffer: &SlabBuffer<wgpu::Buffer>,
-    ) -> Self {
-        let light_slab = lighting_manager.light_slab.clone();
-        let device = &light_slab.device();
-        let bindgroup_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Self::LABEL,
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::VERTEX,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-            ],
+    ) -> Result<Self, LightingError> {
+        let images = vec![
+            AtlasImage::new(
+                UVec2::new(size.width, size.height),
+                crate::atlas::AtlasImageFormat::D32FLOAT
+            );
+            size.depth_or_array_layers as usize
+        ];
+        let atlas_textures = lighting
+            .shadow_map_atlas
+            .add_images(&lighting.light_slab, &images)?;
+        let atlas_textures_array = lighting
+            .light_slab
+            .new_array(atlas_textures.iter().map(|h| h.id()));
+        let shadowmap_descriptor = lighting.light_slab.new_value(ShadowMapDescriptor {
+            light_space_transform: light_transform,
+            atlas_textures_array: atlas_textures_array.array(),
+            bias_min,
+            bias_max,
         });
-        let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Self::LABEL,
-            bind_group_layouts: &[&bindgroup_layout],
-            push_constant_ranges: &[],
-        });
-        let vertex = crate::linkage::shadow_mapping_vertex::linkage(device);
-
-        let light_transform = lighting_manager.light_slab.new_value(light_transform);
-        let light_slab_buffer = lighting_manager.light_slab.upkeep();
+        let light_slab_buffer = lighting.light_slab.commit();
         let bindgroup = ManagedBindGroup::new(Self::create_bindgroup(
-            device,
-            &bindgroup_layout,
+            lighting.light_slab.device(),
+            &lighting.shadow_map_update_bindgroup_layout,
             stage_slab_buffer,
             &light_slab_buffer,
         ));
-
-        ShadowMap {
-            light_slab: light_slab.clone(),
-            stage_slab_buffer: Arc::new(RwLock::new(stage_slab_buffer.clone())),
-            light_slab_buffer: Arc::new(RwLock::new(light_slab_buffer)),
-            texture: Self::create_shadow_map_texture(device, size),
-            lighting_descriptor: lighting_manager.lighting_descriptor.clone(),
-            light_transform,
-            bindgroup_layout: bindgroup_layout.into(),
+        Ok(ShadowMap {
+            stage_slab_buffer_creation_time: Arc::new(stage_slab_buffer.creation_time().into()),
+            light_slab_buffer_creation_time: Arc::new(light_slab_buffer.creation_time().into()),
+            shadowmap_descriptor,
             bindgroup,
-            pipeline: device
-                .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                    label: Self::LABEL,
-                    layout: Some(&layout),
-                    vertex: wgpu::VertexState {
-                        module: &vertex.module,
-                        entry_point: Some(vertex.entry_point),
-                        compilation_options: wgpu::PipelineCompilationOptions::default(),
-                        buffers: &[],
-                    },
-                    primitive: wgpu::PrimitiveState {
-                        topology: wgpu::PrimitiveTopology::TriangleList,
-                        strip_index_format: None,
-                        front_face: wgpu::FrontFace::Ccw,
-                        cull_mode: Some(wgpu::Face::Front),
-                        unclipped_depth: false,
-                        polygon_mode: wgpu::PolygonMode::Fill,
-                        conservative: false,
-                    },
-                    depth_stencil: Some(wgpu::DepthStencilState {
-                        format: wgpu::TextureFormat::Depth32Float,
-                        depth_write_enabled: true,
-                        depth_compare: wgpu::CompareFunction::Less,
-                        stencil: wgpu::StencilState::default(),
-                        bias: wgpu::DepthBiasState::default(),
-                    }),
-                    multisample: wgpu::MultisampleState::default(),
-                    fragment: None,
-                    multiview: None,
-                    cache: None,
-                })
-                .into(),
-        }
-    }
-
-    pub fn size(&self) -> wgpu::Extent3d {
-        self.texture.texture.size()
+            atlas_textures,
+        })
     }
 
     fn create_bindgroup(
@@ -210,54 +177,83 @@ impl ShadowMap {
         })
     }
 
+    /// Returns the [`Id`] of the inner [`ShadowMapDescriptor`].
+    pub fn descriptor_id(&self) -> Id<ShadowMapDescriptor> {
+        self.shadowmap_descriptor.id()
+    }
+
+    /// Returns a guard on the inner [`ShadowMapDescriptor`].
+    ///
+    /// Use this to update descriptor values before calling `ShadowMap::update`.
+    pub fn descriptor_lock(&self) -> HybridWriteGuard<'_, ShadowMapDescriptor> {
+        self.shadowmap_descriptor.lock()
+    }
+
     /// Update the shadow map, rendering the given [`Renderlet`]s to the map as shadow casters.
     // TODO: Add a `light_source: Option<_>` parameter to `ShadowMap::update`.
     // Or something similar that updates the light source's "light space transform".
     pub fn update<'a>(
         &self,
-        light_space_transform: Option<Mat4>,
+        lighting: &Lighting,
         renderlets: impl IntoIterator<Item = &'a Hybrid<Renderlet>>,
     ) {
-        if let Some(transform) = light_space_transform {
-            log::trace!("updating shadow map light space transform");
-            self.light_transform.set(transform);
-        }
         // Update the lighting descriptor to point to this shadow map, which tells the
         // vertex shader which shadow map we're updating.
-        self.lighting_descriptor.modify(|ld| {
-            let id = self.light_transform.id();
+        lighting.lighting_descriptor.modify(|ld| {
+            let id = self.shadowmap_descriptor.id();
             log::trace!("updating lighting descriptor's pointer to the shadow map to {id:?}");
-            ld.shadow_map_light_transform = id;
+            ld.update_shadow_map_id = id;
         });
-        let _ = self.light_slab.upkeep();
+        // Sync those changes
+        let _ = lighting.light_slab.commit();
 
-        let device = &self.light_slab.device();
-        let queue = &self.light_slab.queue();
-        let mut light_slab_buffer = self.light_slab_buffer.write().unwrap();
-        let mut stage_slab_buffer = self.stage_slab_buffer.write().unwrap();
+        let device = &lighting.light_slab.device();
+        let queue = &lighting.light_slab.queue();
+        let mut light_slab_buffer = lighting.light_slab_buffer.write().unwrap();
+        let mut stage_slab_buffer = lighting.stage_slab_buffer.write().unwrap();
 
         let bindgroup = {
-            let should_invalidate_light_slab = light_slab_buffer.synchronize();
-            let should_invalidate_stage_slab = stage_slab_buffer.synchronize();
-            let should_invalidate = should_invalidate_light_slab || should_invalidate_stage_slab;
+            light_slab_buffer.update_if_invalid();
+            stage_slab_buffer.update_if_invalid();
+            let stored_light_buffer_creation_time = self.light_slab_buffer_creation_time.swap(
+                light_slab_buffer.creation_time(),
+                std::sync::atomic::Ordering::Relaxed,
+            );
+            let stored_stage_buffer_creation_time = self.stage_slab_buffer_creation_time.swap(
+                stage_slab_buffer.creation_time(),
+                std::sync::atomic::Ordering::Relaxed,
+            );
+            let should_invalidate = light_slab_buffer.creation_time()
+                > stored_light_buffer_creation_time
+                || stage_slab_buffer.creation_time() > stored_stage_buffer_creation_time;
             self.bindgroup.get(should_invalidate, || {
                 log::trace!("recreating shadow mapping bindgroup");
                 Self::create_bindgroup(
                     device,
-                    &self.bindgroup_layout,
+                    &lighting.shadow_map_update_bindgroup_layout,
                     &stage_slab_buffer,
                     &light_slab_buffer,
                 )
             })
         };
+        let atlas_texture = self.atlas_textures[0].get();
         let mut encoder =
             device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Self::LABEL });
         {
+            let shadow_map_atlas_texture = lighting.shadow_map_atlas.get_texture();
+            let view = shadow_map_atlas_texture
+                .texture
+                .create_view(&wgpu::TextureViewDescriptor {
+                    label: Some("shadow-map-update"),
+                    base_array_layer: atlas_texture.layer_index,
+                    array_layer_count: Some(1),
+                    ..Default::default()
+                });
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Self::LABEL,
                 color_attachments: &[],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: &self.texture.view,
+                    view: &view,
                     depth_ops: Some(wgpu::Operations {
                         load: wgpu::LoadOp::Clear(1.0),
                         store: wgpu::StoreOp::Store,
@@ -266,7 +262,7 @@ impl ShadowMap {
                 }),
                 ..Default::default()
             });
-            render_pass.set_pipeline(&self.pipeline);
+            render_pass.set_pipeline(&lighting.shadow_map_update_pipeline);
             render_pass.set_bind_group(0, Some(bindgroup.as_ref()), &[]);
             let mut count = 0;
             for rlet in renderlets {
@@ -282,10 +278,12 @@ impl ShadowMap {
         let submission = queue.submit(Some(encoder.finish()));
         device.poll(wgpu::Maintain::wait_for(submission));
     }
+}
 
-    pub fn texture(&self) -> &crate::texture::Texture {
-        &self.texture
-    }
+struct AnalyticalLightBundle {
+    light: WeakHybrid<super::Light>,
+    light_details: LightDetails<WeakContainer>,
+    shadow_map: Option<ShadowMap>,
 }
 
 /// Manages lighting for an entire scene.
@@ -296,6 +294,10 @@ pub struct Lighting {
     stage_slab_buffer: Arc<RwLock<SlabBuffer<wgpu::Buffer>>>,
     lighting_descriptor: Hybrid<LightingDescriptor>,
     bindgroup_layout: Arc<wgpu::BindGroupLayout>,
+    analytical_lights: Arc<RwLock<Vec<AnalyticalLightBundle>>>,
+    shadow_map_update_pipeline: Arc<wgpu::RenderPipeline>,
+    shadow_map_update_bindgroup_layout: Arc<wgpu::BindGroupLayout>,
+    shadow_map_atlas: Atlas,
 }
 
 impl Lighting {
@@ -322,7 +324,7 @@ impl Lighting {
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Texture {
                         sample_type: wgpu::TextureSampleType::Depth,
-                        view_dimension: wgpu::TextureViewDimension::D2,
+                        view_dimension: wgpu::TextureViewDimension::D2Array,
                         multisampled: false,
                     },
                     count: None,
@@ -365,18 +367,16 @@ impl Lighting {
     }
 
     /// Returns the lighting bindgroup.
-    pub fn get_bindgroup(
-        &self,
-        shadow_map_depth_texture: &crate::texture::Texture,
-    ) -> wgpu::BindGroup {
+    pub fn get_bindgroup(&self) -> wgpu::BindGroup {
         let mut light_slab_buffer = self.light_slab_buffer.write().unwrap();
-        let _should_invalidate = light_slab_buffer.synchronize();
+        // TODO: invalidate
+        let _should_invalidate = light_slab_buffer.update_if_invalid();
 
         Self::create_bindgroup(
             self.light_slab.device(),
             &self.bindgroup_layout,
             &light_slab_buffer,
-            shadow_map_depth_texture,
+            &self.shadow_map_atlas.get_texture(),
         )
     }
 
@@ -388,37 +388,130 @@ impl Lighting {
         let runtime = runtime.as_ref();
         let light_slab =
             SlabAllocator::new_with_label(runtime, wgpu::BufferUsages::empty(), Some("light-slab"));
-        let lighting_descriptor = light_slab.new_value(LightingDescriptor {
-            shadow_map_light_transform: Id::NONE,
-            ..Default::default()
-        });
-        let light_slab_buffer = light_slab.upkeep();
+        let lighting_descriptor = light_slab.new_value(LightingDescriptor::default());
+        let light_slab_buffer = light_slab.commit();
         let bindgroup_layout = Self::create_bindgroup_layout(&runtime.device);
+
+        let shadow_map_update_vertex =
+            crate::linkage::shadow_mapping_vertex::linkage(&runtime.device);
+        let shadow_map_update_bindgroup_layout: Arc<_> = runtime
+            .device
+            .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: ShadowMap::LABEL,
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::VERTEX,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::VERTEX,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                ],
+            })
+            .into();
+        let shadow_map_update_layout =
+            runtime
+                .device
+                .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                    label: ShadowMap::LABEL,
+                    bind_group_layouts: &[&shadow_map_update_bindgroup_layout],
+                    push_constant_ranges: &[],
+                });
+        let shadow_map_update_pipeline = runtime
+            .device
+            .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Self::LABEL,
+                layout: Some(&shadow_map_update_layout),
+                vertex: wgpu::VertexState {
+                    module: &shadow_map_update_vertex.module,
+                    entry_point: Some(shadow_map_update_vertex.entry_point),
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                    buffers: &[],
+                },
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    strip_index_format: None,
+                    front_face: wgpu::FrontFace::Ccw,
+                    cull_mode: Some(wgpu::Face::Front),
+                    unclipped_depth: false,
+                    polygon_mode: wgpu::PolygonMode::Fill,
+                    conservative: false,
+                },
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: wgpu::TextureFormat::Depth32Float,
+                    depth_write_enabled: true,
+                    depth_compare: wgpu::CompareFunction::Less,
+                    stencil: wgpu::StencilState::default(),
+                    bias: wgpu::DepthBiasState::default(),
+                }),
+                multisample: wgpu::MultisampleState::default(),
+                fragment: None,
+                multiview: None,
+                cache: None,
+            })
+            .into();
         Self {
+            shadow_map_atlas: ShadowMap::create_shadow_map_atlas(
+                &light_slab,
+                wgpu::Extent3d {
+                    width: 1024,
+                    height: 1024,
+                    depth_or_array_layers: 4,
+                },
+            ),
             light_slab,
             light_slab_buffer: Arc::new(RwLock::new(light_slab_buffer)),
             lighting_descriptor,
             stage_slab_buffer: Arc::new(RwLock::new(stage_slab_buffer.clone())),
             bindgroup_layout: bindgroup_layout.into(),
+            analytical_lights: Default::default(),
+            shadow_map_update_pipeline,
+            shadow_map_update_bindgroup_layout,
         }
     }
 
-    pub fn new_shadow_map(&self, light_transform: Mat4, size: wgpu::Extent3d) -> ShadowMap {
+    pub fn new_shadow_map(
+        &self,
+        light_transform: Mat4,
+        bias_min: f32,
+        bias_max: f32,
+        size: wgpu::Extent3d,
+    ) -> Result<ShadowMap, LightingError> {
         let stage_slab_buffer = self.stage_slab_buffer.read().unwrap();
-        ShadowMap::new(self, light_transform, size, &stage_slab_buffer)
+        ShadowMap::new(
+            self,
+            light_transform,
+            bias_min,
+            bias_max,
+            size,
+            &stage_slab_buffer,
+        )
     }
 }
 
 #[cfg(test)]
 mod test {
-    use crabslab::Slab;
+    use crabslab::{Id, Slab};
     use glam::{Mat4, Vec2, Vec3, Vec3Swizzles, Vec4};
     use image::Luma;
 
     use crate::{
         camera::Camera,
         light::ShadowMappingVertexInfo,
-        math::{ConstTexture, CpuTexture2d},
+        math::{ConstTexture, CpuTexture2d, CpuTexture2dArray},
         stage::RenderletPbrVertexInfo,
         texture::DepthTexture,
     };
@@ -562,15 +655,20 @@ mod test {
         }
 
         let lighting = stage.lighting();
-        let shadows = stage.lighting().new_shadow_map(
-            light_transform,
-            wgpu::Extent3d {
-                width: w as u32,
-                height: h as u32,
-                depth_or_array_layers: 1,
-            },
-        );
-        shadows.update(None, doc.renderlets_iter());
+        let shadows = stage
+            .lighting()
+            .new_shadow_map(
+                light_transform,
+                0.005,
+                0.05,
+                wgpu::Extent3d {
+                    width: w as u32,
+                    height: h as u32,
+                    depth_or_array_layers: 1,
+                },
+            )
+            .unwrap();
+        shadows.update(&lighting, doc.renderlets_iter());
 
         let geometry_slab = futures_lite::future::block_on(stage.read(..)).unwrap();
         let light_slab = futures_lite::future::block_on(lighting.light_slab.read(..)).unwrap();
@@ -591,8 +689,8 @@ mod test {
             }
         }
 
-        let depth_texture = DepthTexture::new(&ctx, shadows.texture.texture.clone());
-        let shadow_depth_img = depth_texture.read_image().unwrap();
+        let shadow_depth_img = lighting.shadow_map_atlas.atlas_img(&ctx, 0);
+        let shadow_depth_img = image::DynamicImage::from(shadow_depth_img).into_luma8();
         let mut depth_img = shadow_depth_img.clone();
         img_diff::normalize_gray_img(&mut depth_img);
         img_diff::save("shadows/shadow_mapping_sanity_depth.png", depth_img);
@@ -695,8 +793,8 @@ mod test {
         {
             // Ensure the light slab has the correct light transform
             let light_slab = futures_lite::future::block_on(lighting.light_slab.read(..)).unwrap();
-            let desc = light_slab.read_unchecked(Id::<LightingDescriptor>::new(0));
-            let light_space_transform = light_slab.read_unchecked(desc.shadow_map_light_transform);
+            let desc = light_slab.read_unchecked(shadows.descriptor_id());
+            let light_space_transform = desc.light_space_transform;
             assert_eq!(
                 light_transform, light_space_transform,
                 "light space transforms are not equal"
@@ -709,20 +807,10 @@ mod test {
 
         {
             // Run the fragment shader on that one point
-            let shadow_map = CpuTexture2d::from_image(shadow_depth_img, luma_8_to_vec4);
+            let shadow_map = CpuTexture2dArray::from_images(Some(shadow_depth_img), luma_8_to_vec4);
             let geometry_slab = futures_lite::future::block_on(stage.read(..)).unwrap();
             let light_slab = futures_lite::future::block_on(lighting.light_slab.read(..)).unwrap();
             let vertex_info = found_vertex_output_for_sphere_001;
-            {
-                // Verify some more things that are used in the fragment shader
-                //
-                let lighting_desc = light_slab.read_unchecked(Id::<LightingDescriptor>::new(0));
-                let light_space_transform =
-                    light_slab.read_unchecked(lighting_desc.shadow_map_light_transform);
-                let frag_pos_in_light_space =
-                    light_space_transform.project_point3(vertex_info.out_pos);
-                log::info!("frag_pos_in_light_space: {frag_pos_in_light_space}");
-            }
             let mut output = Vec4::ZERO;
             crate::pbr::fragment_impl(
                 &ConstTexture::new(Vec4::ONE),
@@ -750,28 +838,13 @@ mod test {
             log::info!("color: {output}");
         }
 
-        lighting.lighting_descriptor.modify(|desc| {
-            desc.bias_min = 0.001;
-            desc.bias_max = 0.01;
-        });
-        let _ = lighting.light_slab.upkeep();
-
-        {
-            // Check one last time that we're using the correct texture
-            let depth_texture = DepthTexture::new(&ctx, shadows.texture.texture.clone());
-            let img = depth_texture.read_image().unwrap();
-            img_diff::save("shadows/shadow_mapping_again.png", img);
-        }
+        let _ = lighting.light_slab.commit();
 
         // Now do the rendering *with the shadow map* to see if it works.
-        let img = crate::test::capture_gpu_frame(&ctx, "shadows/capture.gputrace", || {
-            let frame = ctx.get_next_frame().unwrap();
-            stage.render_with(&frame.view(), Some(&shadows.texture));
-            let img = frame.read_image().unwrap();
-            frame.present();
-            img
-        });
-
+        let frame = ctx.get_next_frame().unwrap();
+        stage.render(&frame.view());
+        let img = frame.read_image().unwrap();
+        frame.present();
         img_diff::save("shadows/shadow_mapping_sanity_stage_render.png", img);
     }
 

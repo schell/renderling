@@ -18,7 +18,7 @@ use crate::{
     camera::Camera,
     debug::DebugOverlay,
     draw::DrawCalls,
-    light::{Light, Lighting, ShadowMap},
+    light::{Light, Lighting},
     pbr::{debug::DebugChannel, PbrConfig},
     skybox::{Skybox, SkyboxRenderPipeline},
     stage::Renderlet,
@@ -191,9 +191,9 @@ impl Stage {
         let device = &runtime.device;
         let resolution @ UVec2 { x: w, y: h } = ctx.get_size();
         let atlas_size = *ctx.atlas_size.read().unwrap();
-        let atlas = Atlas::new(ctx, atlas_size).unwrap();
         let mngr =
             SlabAllocator::new_with_label(runtime, wgpu::BufferUsages::empty(), Some("stage-slab"));
+        let atlas = Atlas::new(&mngr, atlas_size, None, Some("stage-atlas"), None);
         let pbr_config = mngr.new_value(PbrConfig {
             atlas_size: UVec2::new(atlas_size.width, atlas_size.height),
             resolution,
@@ -744,22 +744,14 @@ impl Stage {
     /// slab.
     pub fn tick(&self) {
         self.atlas.upkeep(self.runtime());
-        let _ = self.tick_internal();
-    }
-
-    pub fn render(&self, view: &wgpu::TextureView) {
-        self.render_with(view, None);
+        self.tick_internal();
     }
 
     pub fn lighting(&self) -> &Lighting {
         &self.lighting
     }
 
-    pub fn render_with(
-        &self,
-        view: &wgpu::TextureView,
-        shadow_map_depth_texture: Option<&crate::texture::Texture>,
-    ) {
+    pub fn render(&self, view: &wgpu::TextureView) {
         log::info!("render_with");
         self.tick_internal();
         log::info!("ticked");
@@ -792,15 +784,6 @@ impl Stage {
             log::info!("getting stage slab buffer");
             let stage_slab_buffer = self.stage_slab_buffer.read().unwrap();
             let textures_bindgroup = self.get_textures_bindgroup();
-            let shadow_map_depth_texture = shadow_map_depth_texture
-                .map(|t| {
-                    log::info!("rendering with shadows");
-                    t.clone()
-                })
-                .unwrap_or_else(|| {
-                    log::info!("rendering without shadows");
-                    ShadowMap::create_shadow_map_texture(self.device(), wgpu::Extent3d::default())
-                });
             log::info!("got stage slab buffer and shadow map depth texture");
 
             // UNWRAP: POP
@@ -810,7 +793,7 @@ impl Stage {
             // UNWRAP: POP
             let msaa_target = self.msaa_render_target.read().unwrap();
 
-            let light_bindgroup = self.lighting.get_bindgroup(&shadow_map_depth_texture);
+            let light_bindgroup = self.lighting.get_bindgroup();
             let has_skybox = self.has_skybox.load(Ordering::Relaxed);
             let may_skybox_pipeline_and_bindgroup = if has_skybox {
                 Some(self.get_skybox_pipeline_and_bindgroup(&stage_slab_buffer))

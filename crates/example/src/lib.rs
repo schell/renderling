@@ -160,19 +160,23 @@ impl App {
         let sunlight = stage.new_value(directional_light);
         let light = stage.new_value(Light::from(sunlight.id()));
         stage.set_lights([light.id()]);
-        let lighting = Lighting::new(ctx, &stage.upkeep());
-        let shadow_map = lighting.new_shadow_map(
-            {
-                let (p, v) = directional_light
-                    .shadow_mapping_projection_and_view(&Mat4::IDENTITY, &camera.get());
-                p * v
-            },
-            wgpu::Extent3d {
-                width: 256,
-                height: 256,
-                depth_or_array_layers: 1,
-            },
-        );
+        let lighting = Lighting::new(ctx, &stage.commit());
+        let shadow_map = lighting
+            .new_shadow_map(
+                {
+                    let (p, v) = directional_light
+                        .shadow_mapping_projection_and_view(&Mat4::IDENTITY, &camera.get());
+                    p * v
+                },
+                0.005,
+                0.05,
+                wgpu::Extent3d {
+                    width: 256,
+                    height: 256,
+                    depth_or_array_layers: 1,
+                },
+            )
+            .unwrap();
         let my_lighting = MyLighting {
             light,
             light_details: sunlight,
@@ -230,8 +234,7 @@ impl App {
     pub fn render(&self, ctx: &Context) {
         let frame = ctx.get_next_frame().unwrap();
         self.stage.tick();
-        self.stage
-            .render_with(&frame.view(), Some(self.lighting.shadow_map.texture()));
+        self.stage.render(&frame.view());
         self.ui.ui.render(&frame.view());
         frame.present();
     }
@@ -402,13 +405,18 @@ impl App {
         for light in doc.lights.iter() {
             if let Some(dir) = light.details.as_directional() {
                 log::info!("found a directional light to use for shadows");
-                let (p, j) = dir.get().shadow_mapping_projection_and_view(
-                    &light.node_transform.get_global_transform().into(),
-                    &self.camera.get(),
-                );
+                {
+                    let (p, j) = dir.get().shadow_mapping_projection_and_view(
+                        &light.node_transform.get_global_transform().into(),
+                        &self.camera.get(),
+                    );
+                    let mut guard = self.lighting.shadow_map.descriptor_lock();
+                    guard.light_space_transform = p * j;
+                }
+
                 self.lighting
                     .shadow_map
-                    .update(Some(p * j), doc.renderlets.values().flatten());
+                    .update(&self.lighting.lighting, doc.renderlets.values().flatten());
                 self.lighting.light = light.light.clone();
                 self.lighting.light_details = dir.clone();
             }

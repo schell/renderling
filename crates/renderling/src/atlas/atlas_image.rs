@@ -1,7 +1,6 @@
 //! Images and texture formats.
 //!
-//! Used to represent textures before they are sent to the GPU, in the
-//! [`AtlasBuilder`].
+//! Used to represent textures before they are sent to the GPU.
 use glam::UVec2;
 use image::EncodableLayout;
 use snafu::prelude::*;
@@ -32,6 +31,7 @@ pub enum AtlasImageError {
 
 #[derive(Clone, Copy, Debug)]
 pub enum AtlasImageFormat {
+    D32FLOAT,
     R8,
     R8G8,
     R8G8B8,
@@ -53,7 +53,27 @@ impl AtlasImageFormat {
             wgpu::TextureFormat::Rg8Uint => Some(AtlasImageFormat::R8G8),
             wgpu::TextureFormat::Rg16Uint => Some(AtlasImageFormat::R16G16),
             wgpu::TextureFormat::Rgba16Float => Some(AtlasImageFormat::R16G16B16A16FLOAT),
+            wgpu::TextureFormat::Depth32Float => Some(AtlasImageFormat::D32FLOAT),
             _ => None,
+        }
+    }
+
+    pub fn zero_pixel(&self) -> &[u8] {
+        match self {
+            AtlasImageFormat::D32FLOAT => &[0, 0, 0, 0],
+            AtlasImageFormat::R8 => &[0],
+            AtlasImageFormat::R8G8 => &[0, 0],
+            AtlasImageFormat::R8G8B8 => &[0, 0, 0],
+            AtlasImageFormat::R8G8B8A8 => &[0, 0, 0, 0],
+            AtlasImageFormat::R16 => &[0, 0],
+            AtlasImageFormat::R16G16 => &[0, 0, 0, 0],
+            AtlasImageFormat::R16G16B16 => &[0, 0, 0, 0, 0, 0],
+            AtlasImageFormat::R16G16B16A16 => &[0, 0, 0, 0, 0, 0, 0, 0],
+            AtlasImageFormat::R16G16B16A16FLOAT => &[0, 0, 0, 0, 0, 0, 0, 0],
+            AtlasImageFormat::R32G32B32FLOAT => &[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            AtlasImageFormat::R32G32B32A32FLOAT => {
+                &[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+            }
         }
     }
 }
@@ -180,6 +200,19 @@ impl AtlasImage {
         let pixels = convert_to_rgba8_bytes(self.pixels, self.format, self.apply_linear_transfer);
         image::RgbaImage::from_vec(self.size.x, self.size.y, pixels)
     }
+
+    /// Returns a new [`AtlasImage`] with zeroed data.
+    pub fn new(size: UVec2, format: AtlasImageFormat) -> Self {
+        Self {
+            pixels: std::iter::repeat_n(format.zero_pixel(), (size.x * size.y) as usize)
+                .flatten()
+                .copied()
+                .collect(),
+            size,
+            format,
+            apply_linear_transfer: false,
+        }
+    }
 }
 
 /// Interpret/convert the pixel data into rgba8 pixels.
@@ -215,7 +248,9 @@ pub fn convert_to_rgba8_bytes(
                 let bytes: &mut [u16] = bytemuck::cast_slice_mut(&mut bytes);
                 bytes.iter_mut().for_each(linear_xfer_f16);
             }
-            AtlasImageFormat::R32G32B32FLOAT | AtlasImageFormat::R32G32B32A32FLOAT => {
+            AtlasImageFormat::R32G32B32FLOAT
+            | AtlasImageFormat::R32G32B32A32FLOAT
+            | AtlasImageFormat::D32FLOAT => {
                 let bytes: &mut [f32] = bytemuck::cast_slice_mut(&mut bytes);
                 bytes.iter_mut().for_each(linear_xfer_f32);
             }
@@ -299,10 +334,12 @@ pub fn convert_to_rgba8_bytes(
                 }
             })
             .collect(),
-        AtlasImageFormat::R32G32B32A32FLOAT => bytemuck::cast_slice::<u8, f32>(&bytes)
-            .iter()
-            .copied()
-            .map(f32_to_u8)
-            .collect(),
+        AtlasImageFormat::R32G32B32A32FLOAT | AtlasImageFormat::D32FLOAT => {
+            bytemuck::cast_slice::<u8, f32>(&bytes)
+                .iter()
+                .copied()
+                .map(f32_to_u8)
+                .collect()
+        }
     }
 }
