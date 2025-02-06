@@ -102,7 +102,19 @@ impl ShadowMapViews {
 
     /// Create a new six-sided `ShadowMapView`, used for a point light shadow map.
     pub fn new_six(lighting: &Lighting, size: UVec2) -> Result<Self, LightingError> {
-        todo!()
+        let atlas = &lighting.shadow_map_atlas;
+        let mut views = [(); 6].map(|_| {
+            let image = AtlasImage::new(size, crate::atlas::AtlasImageFormat::R32FLOAT);
+            // UNWRAP: safe because we know there's one in here
+            let atlas_texture = atlas.add_images(Some(&image))?.pop().unwrap();
+            let update_texture = crate::texture::Texture::create_depth_texture(atlas.device(), size.x, size.y, 1);
+            Ok(ShadowMapView {
+                update_texture,
+                blitting_op: lighting.shadow_map_update_blitter.new_blitting_operation(&atlas, atlas_texture.id()),
+                atlas_texture,
+            })
+        });
+        Ok(Self::Six(views.try_into().unwrap()))
     }
 }
 
