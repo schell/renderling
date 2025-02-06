@@ -13,7 +13,7 @@ use glam::{Mat4, UVec2};
 use snafu::prelude::*;
 
 use crate::{
-    atlas::{Atlas, AtlasError, AtlasImage, AtlasTexture},
+    atlas::{Atlas, AtlasBlitter, AtlasBlittingOperation, AtlasError, AtlasImage, AtlasTexture},
     bindgroup::ManagedBindGroup,
     stage::Renderlet,
 };
@@ -68,6 +68,44 @@ impl<C: IsContainer> LightDetails<C> {
     }
 }
 
+/// A bundle of resources needed to update and use a shadow map.
+struct ShadowMapView {
+    atlas_texture: Hybrid<AtlasTexture>,
+    update_texture: crate::texture::Texture,
+    blitting_op: AtlasBlittingOperation,
+}
+
+/// Abstracts the different views of a shadow map.
+///
+/// Shadow maps of directional and spot lights have one view.
+///
+/// Shadow maps of point lights have six views.
+enum ShadowMapViews {
+    One(ShadowMapView),
+    Six([ShadowMapView; 6]),
+}
+
+impl ShadowMapViews {
+    /// Create a new single `ShadowMapView`, used for a directional or spot light shadow map.
+    pub fn new_one(lighting: &Lighting, size: UVec2) -> Result<Self, LightingError> {
+        let atlas = &lighting.shadow_map_atlas;
+        let image = AtlasImage::new(size, crate::atlas::AtlasImageFormat::R32FLOAT);
+        // UNWRAP: safe because we know there's one in here
+        let atlas_texture = atlas.add_images(Some(&image))?.pop().unwrap();
+        let update_texture = crate::texture::Texture::create_depth_texture(atlas.device(), size.x, size.y, 1);
+        Ok(Self::One(ShadowMapView {
+            update_texture,
+            blitting_op: lighting.shadow_map_update_blitter.new_blitting_operation(&atlas, atlas_texture.id()),
+            atlas_texture,
+        }))
+    }
+
+    /// Create a new six-sided `ShadowMapView`, used for a point light shadow map.
+    pub fn new_six(lighting: &Lighting, size: UVec2) -> Result<Self, LightingError> {
+        todo!()
+    }
+}
+
 /// A depth map rendering of the scene from a light's point of view.
 ///
 /// Used to project shadows from one light source for specific objects.
@@ -79,12 +117,11 @@ pub struct ShadowMap {
     light_slab_buffer_creation_time: Arc<AtomicUsize>,
     /// This shadow map's light transform,
     shadowmap_descriptor: Hybrid<ShadowMapDescriptor>,
-    bindgroup: ManagedBindGroup,
-    /// The textures used by this shadow map, pointing to image data hosted
-    /// in the atlas's texture array.
-    ///
-    /// The inner [`AtlasTexture`] is staged on the light slab.
-    atlas_textures: Vec<Hybrid<AtlasTexture>>,
+    /// Bindgroup for the shadow map update shader
+    update_bindgroup: ManagedBindGroup,
+    /// The "views" or "sides" of this shadow map, which varies based
+    /// on the type of light.
+    view_sides: Arc<ShadowMapViews>,
 }
 
 impl ShadowMap {
@@ -101,7 +138,7 @@ impl ShadowMap {
         Atlas::new(
             light_slab,
             size,
-            Some(wgpu::TextureFormat::Depth32Float),
+            Some(wgpu::TextureFormat::R32Float),
             Some("shadow-map-atlas"),
             Some(usage),
         )
@@ -116,16 +153,14 @@ impl ShadowMap {
         light_transform: Mat4,
         bias_min: f32,
         bias_max: f32,
-        size: wgpu::Extent3d,
+        size: UVec2,
+        is_point_light: bool,
         // Required for the shadow map shader to access geometry
         stage_slab_buffer: &SlabBuffer<wgpu::Buffer>,
     ) -> Result<Self, LightingError> {
         let images = vec![
-            AtlasImage::new(
-                UVec2::new(size.width, size.height),
-                crate::atlas::AtlasImageFormat::D32FLOAT
-            );
-            size.depth_or_array_layers as usize
+            AtlasImage::new(size, crate::atlas::AtlasImageFormat::R32FLOAT);
+            if is_point_light { 6 } else { 1 }
         ];
         let atlas_textures = lighting
             .shadow_map_atlas
@@ -140,26 +175,39 @@ impl ShadowMap {
             bias_max,
         });
         let light_slab_buffer = lighting.light_slab.commit();
-        let bindgroup = ManagedBindGroup::new(Self::create_bindgroup(
+        let update_bindgroup = ManagedBindGroup::from(Self::create_update_bindgroup(
             lighting.light_slab.device(),
             &lighting.shadow_map_update_bindgroup_layout,
             stage_slab_buffer,
             &light_slab_buffer,
         ));
+        let update_textures: Vec<_> = (0..images.len())
+            .map(|_| {
+                crate::texture::Texture::create_depth_texture(
+                    lighting.light_slab.device(),
+                    size.x,
+                    size.y,
+                    1,
+                )
+            });
+        let view_sides = Arc::new(if is_point_light {
+            } else {
+                    })
         Ok(ShadowMap {
             stage_slab_buffer_creation_time: Arc::new(stage_slab_buffer.creation_time().into()),
             light_slab_buffer_creation_time: Arc::new(light_slab_buffer.creation_time().into()),
             shadowmap_descriptor,
-            bindgroup,
-            atlas_textures,
+            update_bindgroup,
+            view_sides,
         })
     }
 
-    fn create_bindgroup(
+    /// Create the bindgroup for the shadow map update shader.
+    fn create_update_bindgroup(
         device: &wgpu::Device,
         bindgroup_layout: &wgpu::BindGroupLayout,
-        slab_buffer: &wgpu::Buffer,
-        desc_buffer: &wgpu::Buffer,
+        geometry_slab_buffer: &wgpu::Buffer,
+        light_slab_buffer: &wgpu::Buffer,
     ) -> wgpu::BindGroup {
         device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Self::LABEL,
@@ -167,11 +215,15 @@ impl ShadowMap {
             entries: &[
                 wgpu::BindGroupEntry {
                     binding: 0,
-                    resource: wgpu::BindingResource::Buffer(slab_buffer.as_entire_buffer_binding()),
+                    resource: wgpu::BindingResource::Buffer(
+                        geometry_slab_buffer.as_entire_buffer_binding(),
+                    ),
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: wgpu::BindingResource::Buffer(desc_buffer.as_entire_buffer_binding()),
+                    resource: wgpu::BindingResource::Buffer(
+                        light_slab_buffer.as_entire_buffer_binding(),
+                    ),
                 },
             ],
         })
@@ -207,8 +259,8 @@ impl ShadowMap {
         // Sync those changes
         let _ = lighting.light_slab.commit();
 
-        let device = &lighting.light_slab.device();
-        let queue = &lighting.light_slab.queue();
+        let device = lighting.light_slab.device();
+        let queue = lighting.light_slab.queue();
         let mut light_slab_buffer = lighting.light_slab_buffer.write().unwrap();
         let mut stage_slab_buffer = lighting.stage_slab_buffer.write().unwrap();
 
@@ -226,9 +278,9 @@ impl ShadowMap {
             let should_invalidate = light_slab_buffer.creation_time()
                 > stored_light_buffer_creation_time
                 || stage_slab_buffer.creation_time() > stored_stage_buffer_creation_time;
-            self.bindgroup.get(should_invalidate, || {
+            self.update_bindgroup.get(should_invalidate, || {
                 log::trace!("recreating shadow mapping bindgroup");
-                Self::create_bindgroup(
+                Self::create_update_bindgroup(
                     device,
                     &lighting.shadow_map_update_bindgroup_layout,
                     &stage_slab_buffer,
@@ -236,24 +288,15 @@ impl ShadowMap {
                 )
             })
         };
-        let atlas_texture = self.atlas_textures[0].get();
         let mut encoder =
             device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Self::LABEL });
         {
-            let shadow_map_atlas_texture = lighting.shadow_map_atlas.get_texture();
-            let view = shadow_map_atlas_texture
-                .texture
-                .create_view(&wgpu::TextureViewDescriptor {
-                    label: Some("shadow-map-update"),
-                    base_array_layer: atlas_texture.layer_index,
-                    array_layer_count: Some(1),
-                    ..Default::default()
-                });
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Self::LABEL,
                 color_attachments: &[],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: &view,
+                    // TODO: support for point lights
+                    view: &self.update_textures[0].view,
                     depth_ops: Some(wgpu::Operations {
                         load: wgpu::LoadOp::Clear(1.0),
                         store: wgpu::StoreOp::Store,
@@ -275,6 +318,30 @@ impl ShadowMap {
             }
             log::trace!("rendered {count} renderlets to the shadow map");
         }
+        // Then copy the depth texture to our shadow map atlas in the lighting
+        // struct
+        lighting.shadow_map_update_blitter.copy(
+            device,
+            &mut encoder,
+            // TODO: support for point lights
+            &self.update_textures[0].view,
+            &lighting
+                .shadow_map_atlas
+                .get_texture()
+                .texture
+                .create_view(todo!()),
+        );
+        let atlas_texture = self.atlas_textures[0].get();
+        encoder.copy_texture_to_texture(
+            self.update_textures[0].texture.as_image_copy(),
+            wgpu::TexelCopyTextureInfo {
+                texture: &lighting.shadow_map_atlas.get_texture().texture,
+                mip_level: 0,
+                origin: atlas_texture.origin(),
+                aspect: wgpu::TextureAspect::DepthOnly,
+            },
+            self.update_textures[0].texture.size(),
+        );
         let submission = queue.submit(Some(encoder.finish()));
         device.poll(wgpu::Maintain::wait_for(submission));
     }
@@ -297,6 +364,7 @@ pub struct Lighting {
     analytical_lights: Arc<RwLock<Vec<AnalyticalLightBundle>>>,
     shadow_map_update_pipeline: Arc<wgpu::RenderPipeline>,
     shadow_map_update_bindgroup_layout: Arc<wgpu::BindGroupLayout>,
+    shadow_map_update_blitter: AtlasBlitter,
     shadow_map_atlas: Atlas,
 }
 
@@ -323,7 +391,7 @@ impl Lighting {
                     binding: 1,
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Depth,
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
                         view_dimension: wgpu::TextureViewDimension::D2Array,
                         multisampled: false,
                     },
@@ -333,7 +401,7 @@ impl Lighting {
                 wgpu::BindGroupLayoutEntry {
                     binding: 2,
                     visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
                     count: None,
                 },
             ],
@@ -480,6 +548,11 @@ impl Lighting {
             analytical_lights: Default::default(),
             shadow_map_update_pipeline,
             shadow_map_update_bindgroup_layout,
+            shadow_map_update_blitter: AtlasBlitter::new(
+                &runtime.device,
+                wgpu::TextureFormat::R32Float,
+                wgpu::FilterMode::Nearest,
+            ),
         }
     }
 
@@ -488,7 +561,8 @@ impl Lighting {
         light_transform: Mat4,
         bias_min: f32,
         bias_max: f32,
-        size: wgpu::Extent3d,
+        size: UVec2,
+        is_point_light: bool,
     ) -> Result<ShadowMap, LightingError> {
         let stage_slab_buffer = self.stage_slab_buffer.read().unwrap();
         ShadowMap::new(
@@ -497,6 +571,7 @@ impl Lighting {
             bias_min,
             bias_max,
             size,
+            is_point_light,
             &stage_slab_buffer,
         )
     }
@@ -661,14 +736,11 @@ mod test {
                 light_transform,
                 0.005,
                 0.05,
-                wgpu::Extent3d {
-                    width: w as u32,
-                    height: h as u32,
-                    depth_or_array_layers: 1,
-                },
+                UVec2::new(w as u32, h as u32),
+                false,
             )
             .unwrap();
-        shadows.update(&lighting, doc.renderlets_iter());
+        shadows.update(lighting, doc.renderlets_iter());
 
         let geometry_slab = futures_lite::future::block_on(stage.read(..)).unwrap();
         let light_slab = futures_lite::future::block_on(lighting.light_slab.read(..)).unwrap();
