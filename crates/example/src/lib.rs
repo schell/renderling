@@ -10,7 +10,7 @@ use renderling::{
     atlas::AtlasImage,
     bvol::{Aabb, BoundingSphere},
     camera::Camera,
-    light::{DirectionalLight, Light, Lighting, ShadowMap},
+    light::{AnalyticalLightBundle, DirectionalLightDescriptor, Light, Lighting},
     math::{Mat4, UVec2, Vec2, Vec3, Vec4},
     skybox::Skybox,
     stage::{Animator, GltfDocument, Renderlet, Stage, Vertex},
@@ -122,20 +122,13 @@ pub enum Model {
     None,
 }
 
-struct MyLighting {
-    light: Hybrid<Light>,
-    light_details: Hybrid<DirectionalLight>,
-    lighting: Lighting,
-    shadow_map: ShadowMap,
-}
-
 pub struct App {
     last_frame_instant: f64,
     skybox_image_bytes: Option<Vec<u8>>,
     loads: Arc<Mutex<HashMap<std::path::PathBuf, Vec<u8>>>>,
     pub stage: Stage,
     camera: Hybrid<Camera>,
-    lighting: MyLighting,
+    lighting: AnalyticalLightBundle,
     model: Model,
     animators: Option<Vec<Animator>>,
     animations_conflict: bool,
@@ -152,7 +145,7 @@ impl App {
             .with_bloom_filter_radius(4.0)
             .with_msaa_sample_count(4);
         let camera = stage.new_value(Camera::default());
-        let directional_light = DirectionalLight {
+        let directional_light = DirectionalLightDescriptor {
             direction: Vec3::NEG_Y,
             color: renderling::math::hex_to_vec4(0xFDFBD3FF),
             intensity: 10.0,
@@ -161,28 +154,7 @@ impl App {
         let light = stage.new_value(Light::from(sunlight.id()));
         stage.set_lights([light.id()]);
         let lighting = Lighting::new(ctx, &stage.commit());
-        let shadow_map = lighting
-            .new_shadow_map(
-                {
-                    let (p, v) = directional_light
-                        .shadow_mapping_projection_and_view(&Mat4::IDENTITY, &camera.get());
-                    p * v
-                },
-                0.005,
-                0.05,
-                wgpu::Extent3d {
-                    width: 256,
-                    height: 256,
-                    depth_or_array_layers: 1,
-                },
-            )
-            .unwrap();
-        let my_lighting = MyLighting {
-            light,
-            light_details: sunlight,
-            lighting,
-            shadow_map,
-        };
+        let light_bundle = lighting.new_directional_light(directional_light, None);
 
         stage
             .set_atlas_size(wgpu::Extent3d {
@@ -207,7 +179,7 @@ impl App {
             },
             stage,
             camera,
-            lighting: my_lighting,
+            lighting: light_bundle,
             model: Model::None,
             animators: None,
             animations_conflict: false,
@@ -401,26 +373,26 @@ impl App {
         }
         self.animations_conflict = has_conflicting_animations;
 
-        // Update lights and shadows
-        for light in doc.lights.iter() {
-            if let Some(dir) = light.details.as_directional() {
-                log::info!("found a directional light to use for shadows");
-                {
-                    let (p, j) = dir.get().shadow_mapping_projection_and_view(
-                        &light.node_transform.get_global_transform().into(),
-                        &self.camera.get(),
-                    );
-                    let mut guard = self.lighting.shadow_map.descriptor_lock();
-                    guard.light_space_transform = p * j;
-                }
+        // // Update lights and shadows
+        // for light in doc.lights.iter() {
+        //     if let Some(dir) = light.details.as_directional() {
+        //         log::info!("found a directional light to use for shadows");
+        //         {
+        //             let (p, j) = dir.get().shadow_mapping_projection_and_view(
+        //                 &light.node_transform.get_global_transform().into(),
+        //                 &self.camera.get(),
+        //             );
+        //             let mut guard = self.lighting.shadow_map.descriptor_lock();
+        //             guard.light_space_transform = p * j;
+        //         }
 
-                self.lighting
-                    .shadow_map
-                    .update(&self.lighting.lighting, doc.renderlets.values().flatten());
-                self.lighting.light = light.light.clone();
-                self.lighting.light_details = dir.clone();
-            }
-        }
+        //         self.lighting
+        //             .shadow_map
+        //             .update(&self.lighting.lighting, doc.renderlets.values().flatten());
+        //         self.lighting.light = light.light.clone();
+        //         self.lighting.light_details = dir.clone();
+        //     }
+        // }
 
         self.model = Model::Gltf(doc);
     }

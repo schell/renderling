@@ -1,5 +1,9 @@
 //! Wrapper around [`wgpu::Texture`].
-use std::{ops::Deref, sync::Arc};
+use core::sync::atomic::AtomicUsize;
+use std::{
+    ops::Deref,
+    sync::{Arc, LazyLock},
+};
 
 use craballoc::runtime::WgpuRuntime;
 use glam::UVec2;
@@ -51,15 +55,33 @@ pub fn wgpu_texture_format_channels_and_subpixel_bytes(format: wgpu::TextureForm
     }
 }
 
+static NEXT_TEXTURE_ID: LazyLock<Arc<AtomicUsize>> = LazyLock::new(|| Arc::new(0.into()));
+
+fn get_next_texture_id() -> usize {
+    NEXT_TEXTURE_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
+
 /// A texture living on the GPU.
 #[derive(Debug, Clone)]
 pub struct Texture {
     pub texture: Arc<wgpu::Texture>,
     pub view: Arc<wgpu::TextureView>,
     pub sampler: Arc<wgpu::Sampler>,
+    id: usize,
 }
 
 impl Texture {
+    /// Returns the id of this texture.
+    ///
+    /// The id is a monotonically increasing count of all textures created.
+    ///
+    /// This can be used to determine if a texture has been
+    /// replaced by another, which can be used, for example, to invalidate
+    /// a [`wgpu::BindGroup`].
+    pub fn id(&self) -> usize {
+        self.id
+    }
+
     pub fn width(&self) -> u32 {
         self.texture.width()
     }
@@ -110,13 +132,13 @@ impl Texture {
                 let index = i * mip_levels as usize + mip_level;
                 let texture = &face_textures[index].texture;
                 encoder.copy_texture_to_texture(
-                    wgpu::ImageCopyTexture {
+                    wgpu::TexelCopyTextureInfo {
                         texture,
                         mip_level: 0,
                         origin: wgpu::Origin3d::ZERO,
                         aspect: wgpu::TextureAspect::All,
                     },
-                    wgpu::ImageCopyTexture {
+                    wgpu::TexelCopyTextureInfo {
                         texture: &cubemap_texture,
                         mip_level: mip_level as u32,
                         origin: wgpu::Origin3d {
@@ -157,6 +179,7 @@ impl Texture {
             texture: cubemap_texture.into(),
             view: view.into(),
             sampler: sampler.into(),
+            id: get_next_texture_id(),
         }
     }
 
@@ -199,14 +222,14 @@ impl Texture {
 
         if !data.is_empty() {
             queue.write_texture(
-                wgpu::ImageCopyTexture {
+                wgpu::TexelCopyTextureInfo {
                     texture: &texture,
                     mip_level: 0,
                     origin: wgpu::Origin3d::ZERO,
                     aspect: wgpu::TextureAspect::All,
                 },
                 data,
-                wgpu::ImageDataLayout {
+                wgpu::TexelCopyBufferLayout {
                     offset: 0,
                     bytes_per_row: Some(color_channels * color_channel_bytes * width),
                     rows_per_image: None,
@@ -232,6 +255,7 @@ impl Texture {
             texture: Arc::new(texture),
             view: Arc::new(view),
             sampler: Arc::new(sampler),
+            id: get_next_texture_id(),
         }
     }
 
@@ -335,14 +359,14 @@ impl Texture {
         });
 
         queue.write_texture(
-            wgpu::ImageCopyTexture {
+            wgpu::TexelCopyTextureInfo {
                 texture: &texture,
                 mip_level: 0,
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
             },
             img.as_bytes(),
-            wgpu::ImageDataLayout {
+            wgpu::TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(channels * dimensions.0),
                 rows_per_image: Some(dimensions.1),
@@ -397,14 +421,14 @@ impl Texture {
         });
 
         runtime.queue.write_texture(
-            wgpu::ImageCopyTexture {
+            wgpu::TexelCopyTextureInfo {
                 texture: &texture,
                 mip_level: 0,
                 origin: wgpu::Origin3d::ZERO,
                 aspect: wgpu::TextureAspect::All,
             },
             img.deref(),
-            wgpu::ImageDataLayout {
+            wgpu::TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(P::CHANNEL_COUNT as u32 * dimensions.0),
                 rows_per_image: Some(dimensions.1),
@@ -446,6 +470,7 @@ impl Texture {
             texture,
             view,
             sampler,
+            id: get_next_texture_id(),
         }
     }
 
@@ -494,6 +519,7 @@ impl Texture {
             texture: Arc::new(texture),
             view: Arc::new(view),
             sampler: Arc::new(sampler),
+            id: get_next_texture_id(),
         }
     }
 
@@ -562,9 +588,9 @@ impl Texture {
         // Copy the data from the surface texture to the buffer
         encoder.copy_texture_to_buffer(
             source,
-            wgpu::ImageCopyBuffer {
+            wgpu::TexelCopyBufferInfo {
                 buffer: &buffer,
-                layout: wgpu::ImageDataLayout {
+                layout: wgpu::TexelCopyBufferLayout {
                     offset: 0,
                     bytes_per_row: Some(dimensions.padded_bytes_per_row as u32),
                     rows_per_image: None,
@@ -674,6 +700,7 @@ impl Texture {
             texture,
             view,
             sampler,
+            id: get_next_texture_id(),
         }
     }
 }
@@ -718,6 +745,20 @@ impl DepthTexture {
             runtime: runtime.as_ref().clone(),
             texture: texture.into(),
         }
+    }
+
+    pub fn try_new_from(
+        runtime: impl AsRef<WgpuRuntime>,
+        value: Texture,
+    ) -> Result<Self, TextureError> {
+        if value.texture.format() != wgpu::TextureFormat::Depth32Float {
+            return UnsupportedFormatSnafu.fail();
+        }
+
+        Ok(Self {
+            runtime: runtime.as_ref().clone(),
+            texture: value.texture,
+        })
     }
 
     /// Converts the depth texture into an image.

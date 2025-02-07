@@ -410,7 +410,7 @@ pub fn renderlet_fragment(
     #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] slab: &[u32],
 
     #[spirv(storage_buffer, descriptor_set = 2, binding = 0)] light_slab: &[u32],
-    #[spirv(descriptor_set = 2, binding = 1)] shadow_map: &Image!(2D, type=f32, sampled, arrayed, depth),
+    #[spirv(descriptor_set = 2, binding = 1)] shadow_map: &Image!(2D, type=f32, sampled, arrayed),
     #[spirv(descriptor_set = 2, binding = 2)] shadow_map_sampler: &Sampler,
 
     #[spirv(flat)] renderlet_id: Id<Renderlet>,

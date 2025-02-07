@@ -821,7 +821,7 @@ mod test {
     #[test]
     /// Tests shading with directional light.
     fn scene_cube_directional() {
-        use crate::light::{DirectionalLight, Light, LightStyle};
+        use crate::light::{DirectionalLightDescriptor, Light, LightStyle};
 
         let ctx = Context::headless(100, 100);
         let stage = ctx
@@ -836,17 +836,17 @@ mod test {
         let red = Vec3::X.extend(1.0);
         let green = Vec3::Y.extend(1.0);
         let blue = Vec3::Z.extend(1.0);
-        let dir_red = stage.new_value(DirectionalLight {
+        let dir_red = stage.new_value(DirectionalLightDescriptor {
             direction: Vec3::NEG_Y,
             color: red,
             intensity: 10.0,
         });
-        let dir_green = stage.new_value(DirectionalLight {
+        let dir_green = stage.new_value(DirectionalLightDescriptor {
             direction: Vec3::NEG_X,
             color: green,
             intensity: 10.0,
         });
-        let dir_blue = stage.new_value(DirectionalLight {
+        let dir_blue = stage.new_value(DirectionalLightDescriptor {
             direction: Vec3::NEG_Z,
             color: blue,
             intensity: 10.0,

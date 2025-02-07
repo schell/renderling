@@ -9,7 +9,7 @@ use spirv_std::spirv;
 
 use crate::{
     atlas::{AtlasDescriptor, AtlasTexture},
-    camera::Camera,
+    bvol::Frustum,
     math::{IsSampler, IsVector, Sample2dArray},
     stage::Renderlet,
     transform::Transform,
@@ -39,7 +39,7 @@ pub struct LightingDescriptor {
 
 #[derive(Clone, Copy, Default, SlabItem, core::fmt::Debug)]
 pub struct ShadowMapDescriptor {
-    pub light_space_transform: Mat4,
+    pub light_space_transforms_array: Array<Mat4>,
     /// Pointers to the atlas textures where the shadow map depth
     /// data is stored.
     ///
@@ -102,23 +102,12 @@ pub fn shadow_mapping_vertex(
         renderlet.get_vertex_info(vertex_index, geometry_slab);
 
     let lighting_desc = light_slab.read_unchecked(Id::<LightingDescriptor>::new(0));
-    let shadow_map_atlas_desc =
-        light_slab.read_unchecked(lighting_desc.shadow_map_atlas_descriptor_id);
     let shadow_desc = light_slab.read_unchecked(lighting_desc.update_shadow_map_id);
-    let atlas_texture_id = light_slab.read_unchecked(
-        shadow_desc
-            .atlas_textures_array
-            .at(lighting_desc.update_shadow_map_texture_index as usize),
-    );
-    let atlas_texture = light_slab.read_unchecked(atlas_texture_id);
-
-    let clip_pos = shadow_desc.light_space_transform * world_pos.extend(1.0);
-    // Since the shadow map's pixels live within an atlas, we have to transform the
-    // clip position to apply to only that portion of the viewport
-    let texture_clip_pos = atlas_texture
-        .constrain_clip_coords(clip_pos.xy(), shadow_map_atlas_desc.size.xy())
-        .extend(clip_pos.z)
-        .extend(clip_pos.w);
+    let light_space_transform_id = shadow_desc
+        .light_space_transforms_array
+        .at(lighting_desc.update_shadow_map_texture_index as usize);
+    let light_space_transform = light_slab.read_unchecked(light_space_transform_id);
+    let clip_pos = light_space_transform * world_pos.extend(1.0);
     #[cfg(test)]
     {
         *out_comparison_info = ShadowMappingVertexInfo {
@@ -128,11 +117,11 @@ pub fn shadow_mapping_vertex(
             transform: _transform,
             model_matrix: _model_matrix,
             world_pos,
-            view_projection: shadow_desc.light_space_transform,
-            clip_pos: texture_clip_pos,
+            view_projection: light_space_transform,
+            clip_pos,
         };
     }
-    *out_clip_pos = texture_clip_pos;
+    *out_clip_pos = clip_pos;
 }
 
 #[spirv(fragment)]
@@ -143,7 +132,7 @@ pub fn shadow_mapping_fragment(clip_pos: Vec4, frag_color: &mut Vec4) {
 #[repr(C)]
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[derive(Copy, Clone, SlabItem)]
-pub struct SpotLight {
+pub struct SpotLightDescriptor {
     pub position: Vec3,
     pub direction: Vec3,
     pub inner_cutoff: f32,
@@ -152,7 +141,7 @@ pub struct SpotLight {
     pub intensity: f32,
 }
 
-impl Default for SpotLight {
+impl Default for SpotLightDescriptor {
     fn default() -> Self {
         let white = Vec4::splat(1.0);
         let inner_cutoff = core::f32::consts::PI / 3.0;
@@ -175,13 +164,13 @@ impl Default for SpotLight {
 #[repr(C)]
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[derive(Copy, Clone, SlabItem)]
-pub struct DirectionalLight {
+pub struct DirectionalLightDescriptor {
     pub direction: Vec3,
     pub color: Vec4,
     pub intensity: f32,
 }
 
-impl Default for DirectionalLight {
+impl Default for DirectionalLightDescriptor {
     fn default() -> Self {
         let direction = Vec3::new(0.0, -1.0, 0.0);
         let color = Vec4::splat(1.0);
@@ -195,14 +184,14 @@ impl Default for DirectionalLight {
     }
 }
 
-impl DirectionalLight {
+impl DirectionalLightDescriptor {
+    // TODO: add `shadow_mapping_projection_and_view` to `SpotLight`
     pub fn shadow_mapping_projection_and_view(
         &self,
         parent_light_transform: &Mat4,
-        camera: &Camera,
+        // Limits of the reach of the light
+        frustum: Frustum,
     ) -> (Mat4, Mat4) {
-        // TODO: add `shadow_mapping_projection_and_view` to `SpotLight`
-        let frustum = camera.frustum();
         let depth = frustum.depth();
         let hd = depth * 0.5;
         let projection = Mat4::orthographic_rh(-hd, hd, -hd, hd, 0.0, depth);
@@ -210,6 +199,8 @@ impl DirectionalLight {
             .transform_vector3(self.direction)
             .alt_norm_or_zero();
         let position = -direction * depth * 0.5;
+        crate::println!("direction: {direction}");
+        crate::println!("position: {position}");
         let view = Mat4::look_to_rh(position, direction, Vec3::Z);
         (projection, view)
     }
@@ -218,13 +209,13 @@ impl DirectionalLight {
 #[repr(C)]
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[derive(Copy, Clone, SlabItem)]
-pub struct PointLight {
+pub struct PointLightDescriptor {
     pub position: Vec3,
     pub color: Vec4,
     pub intensity: f32,
 }
 
-impl Default for PointLight {
+impl Default for PointLightDescriptor {
     fn default() -> Self {
         let color = Vec4::splat(1.0);
         let intensity = 1.0;
@@ -267,6 +258,7 @@ impl SlabItem for LightStyle {
 
 /// A type-erased/generic light that is used as a slab pointer to a
 /// specific light type.
+// TODO: rename to `LightDescriptor`
 #[repr(C)]
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[derive(Copy, Clone, PartialEq, SlabItem)]
@@ -294,8 +286,8 @@ impl Default for Light {
     }
 }
 
-impl From<Id<DirectionalLight>> for Light {
-    fn from(id: Id<DirectionalLight>) -> Self {
+impl From<Id<DirectionalLightDescriptor>> for Light {
+    fn from(id: Id<DirectionalLightDescriptor>) -> Self {
         Self {
             light_type: LightStyle::Directional,
             index: id.inner(),
@@ -305,8 +297,8 @@ impl From<Id<DirectionalLight>> for Light {
     }
 }
 
-impl From<Id<SpotLight>> for Light {
-    fn from(id: Id<SpotLight>) -> Self {
+impl From<Id<SpotLightDescriptor>> for Light {
+    fn from(id: Id<SpotLightDescriptor>) -> Self {
         Self {
             light_type: LightStyle::Spot,
             index: id.inner(),
@@ -316,8 +308,8 @@ impl From<Id<SpotLight>> for Light {
     }
 }
 
-impl From<Id<PointLight>> for Light {
-    fn from(id: Id<PointLight>) -> Self {
+impl From<Id<PointLightDescriptor>> for Light {
+    fn from(id: Id<PointLightDescriptor>) -> Self {
         Self {
             light_type: LightStyle::Point,
             index: id.inner(),
@@ -328,15 +320,15 @@ impl From<Id<PointLight>> for Light {
 }
 
 impl Light {
-    pub fn into_directional_id(self) -> Id<DirectionalLight> {
+    pub fn into_directional_id(self) -> Id<DirectionalLightDescriptor> {
         Id::from(self.index)
     }
 
-    pub fn into_spot_id(self) -> Id<SpotLight> {
+    pub fn into_spot_id(self) -> Id<SpotLightDescriptor> {
         Id::from(self.index)
     }
 
-    pub fn into_point_id(self) -> Id<PointLight> {
+    pub fn into_point_id(self) -> Id<PointLightDescriptor> {
         Id::from(self.index)
     }
 }

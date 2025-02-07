@@ -8,8 +8,8 @@ struct VertexOutput {
     @builtin(position) member_1: vec4<f32>,
 }
 
-var<private> global: vec2<f32>;
-var<private> global_1: u32;
+var<private> global: u32;
+var<private> global_1: vec2<f32>;
 var<private> global_2: vec4<f32> = vec4<f32>(0f, 0f, 0f, 1f);
 
 fn function() {
@@ -17,7 +17,7 @@ fn function() {
 
     switch bitcast<i32>(0u) {
         default: {
-            let _e23 = global_1;
+            let _e23 = global;
             local = array<type_9, 6>(type_9(vec2<f32>(-1f, 1f), vec2<f32>(0f, 0f)), type_9(vec2<f32>(-1f, -1f), vec2<f32>(0f, 1f)), type_9(vec2<f32>(1f, -1f), vec2<f32>(1f, 1f)), type_9(vec2<f32>(-1f, 1f), vec2<f32>(0f, 0f)), type_9(vec2<f32>(1f, -1f), vec2<f32>(1f, 1f)), type_9(vec2<f32>(1f, 1f), vec2<f32>(1f, 0f)));
             if (_e23 < 6u) {
             } else {
@@ -25,7 +25,7 @@ fn function() {
             }
             let _e27 = local[_e23].member;
             let _e30 = local[_e23].member_1;
-            global = _e30;
+            global_1 = _e30;
             global_2 = vec4<f32>(_e27.x, _e27.y, 0f, 1f);
             break;
         }
@@ -35,11 +35,11 @@ fn function() {
 
 @vertex 
 fn tonemappingtonemapping_vertex(@builtin(vertex_index) param: u32) -> VertexOutput {
-    global_1 = param;
+    global = param;
     function();
     let _e5 = global_2.y;
     global_2.y = -(_e5);
-    let _e7 = global;
+    let _e7 = global_1;
     let _e8 = global_2;
     return VertexOutput(_e7, _e8);
 }

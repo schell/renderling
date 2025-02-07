@@ -515,12 +515,20 @@ pub const CLIP_QUAD_CCW: [Vec3; 6] = {
     [bl, br, tr, tr, tl, bl]
 };
 
+pub const CLIP_SPACE_COORD_QUAD_CCW_TL: Vec4 = Vec4::new(-1.0, 1.0, 0.5, 1.0);
+pub const CLIP_SPACE_COORD_QUAD_CCW_BL: Vec4 = Vec4::new(-1.0, -1.0, 0.5, 1.0);
+pub const CLIP_SPACE_COORD_QUAD_CCW_TR: Vec4 = Vec4::new(1.0, 1.0, 0.5, 1.0);
+pub const CLIP_SPACE_COORD_QUAD_CCW_BR: Vec4 = Vec4::new(1.0, -1.0, 0.5, 1.0);
+
 pub const CLIP_SPACE_COORD_QUAD_CCW: [Vec4; 6] = {
-    let tl = Vec4::new(-1.0, 1.0, 0.5, 1.0);
-    let tr = Vec4::new(1.0, 1.0, 0.5, 1.0);
-    let bl = Vec4::new(-1.0, -1.0, 0.5, 1.0);
-    let br = Vec4::new(1.0, -1.0, 0.5, 1.0);
-    [bl, br, tr, tr, tl, bl]
+    [
+        CLIP_SPACE_COORD_QUAD_CCW_BL,
+        CLIP_SPACE_COORD_QUAD_CCW_BR,
+        CLIP_SPACE_COORD_QUAD_CCW_TR,
+        CLIP_SPACE_COORD_QUAD_CCW_TR,
+        CLIP_SPACE_COORD_QUAD_CCW_TL,
+        CLIP_SPACE_COORD_QUAD_CCW_BL,
+    ]
 };
 
 pub const UV_COORD_QUAD_CCW: [Vec2; 6] = {

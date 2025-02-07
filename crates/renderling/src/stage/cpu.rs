@@ -217,7 +217,7 @@ impl Stage {
             &bloom.get_mix_texture(),
         );
         let stage_pipeline = create_stage_render_pipeline(device, multisample_count);
-        let stage_slab_buffer = mngr.upkeep();
+        let stage_slab_buffer = mngr.commit();
 
         let lighting = Lighting::new(runtime, &stage_slab_buffer);
 
@@ -225,12 +225,12 @@ impl Stage {
             draw_calls: Arc::new(RwLock::new(DrawCalls::new(
                 ctx,
                 true,
-                &mngr.upkeep(),
+                &mngr.commit(),
                 &depth_texture,
             ))),
             lighting,
             depth_texture: Arc::new(RwLock::new(depth_texture)),
-            buffers_bindgroup: ManagedBindGroup::new(crate::linkage::slab_bindgroup(
+            buffers_bindgroup: ManagedBindGroup::from(crate::linkage::slab_bindgroup(
                 device,
                 &stage_slab_buffer,
                 &stage_pipeline.get_bind_group_layout(0),
@@ -510,7 +510,7 @@ impl Stage {
         images: impl IntoIterator<Item = impl Into<AtlasImage>>,
     ) -> Result<Vec<Hybrid<AtlasTexture>>, StageError> {
         let images = images.into_iter().map(|i| i.into()).collect::<Vec<_>>();
-        let frames = self.atlas.add_images(self, &images)?;
+        let frames = self.atlas.add_images(&images)?;
 
         // The textures bindgroup will have to be remade
         let _ = self.textures_bindgroup.lock().unwrap().take();
@@ -540,7 +540,7 @@ impl Stage {
         images: impl IntoIterator<Item = impl Into<AtlasImage>>,
     ) -> Result<Vec<Hybrid<AtlasTexture>>, StageError> {
         let images = images.into_iter().map(|i| i.into()).collect::<Vec<_>>();
-        let frames = self.atlas.set_images(self, &images)?;
+        let frames = self.atlas.set_images(&images)?;
 
         // The textures bindgroup will have to be remade
         let _ = self.textures_bindgroup.lock().unwrap().take();
@@ -729,8 +729,8 @@ impl Stage {
     fn tick_internal(&self) {
         self.draw_calls.write().unwrap().upkeep();
 
-        let stage_slab_buffer = self.mngr.upkeep();
-        if stage_slab_buffer.is_new_this_upkeep() {
+        let stage_slab_buffer = self.mngr.commit();
+        if stage_slab_buffer.is_new_this_commit() {
             // invalidate our bindgroups, etc
             // TODO: we shouldn't have to invalidate skybox and other bindgroups,
             // they can do this in their own `run` functions
@@ -768,7 +768,7 @@ impl Stage {
                 log::info!("getting write lock");
                 let mut stage_slab_buffer = self.stage_slab_buffer.write().unwrap();
                 log::info!("got write lock");
-                let should_invalidate_buffers_bindgroup = stage_slab_buffer.synchronize();
+                let should_invalidate_buffers_bindgroup = stage_slab_buffer.update_if_invalid();
                 self.buffers_bindgroup
                     .get(should_invalidate_buffers_bindgroup, || {
                         log::info!("renewing invalid stage slab buffers bindgroup");
@@ -877,13 +877,13 @@ impl Stage {
                     });
             let bloom_mix_texture = self.bloom.get_mix_texture();
             encoder.copy_texture_to_texture(
-                wgpu::ImageCopyTexture {
+                wgpu::TexelCopyTextureInfo {
                     texture: &self.hdr_texture.read().unwrap().texture,
                     mip_level: 0,
                     origin: wgpu::Origin3d { x: 0, y: 0, z: 0 },
                     aspect: wgpu::TextureAspect::All,
                 },
-                wgpu::ImageCopyTexture {
+                wgpu::TexelCopyTextureInfo {
                     texture: &bloom_mix_texture.texture,
                     mip_level: 0,
                     origin: wgpu::Origin3d { x: 0, y: 0, z: 0 },

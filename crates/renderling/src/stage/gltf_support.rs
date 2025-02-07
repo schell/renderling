@@ -10,7 +10,10 @@ use snafu::{OptionExt, ResultExt, Snafu};
 use crate::{
     atlas::{AtlasError, AtlasImage, AtlasTexture, TextureAddressMode, TextureModes},
     camera::Camera,
-    light::{DirectionalLight, Light, LightDetails, LightStyle, PointLight, SpotLight},
+    light::{
+        DirectionalLightDescriptor, Light, LightDetails, LightStyle, PointLightDescriptor,
+        SpotLightDescriptor,
+    },
     pbr::Material,
     stage::{MorphTarget, NestedTransform, Renderlet, Skin, Stage, Vertex},
     transform::Transform,
@@ -1001,7 +1004,7 @@ impl GltfDocument {
                 let intensity = gltf_light.intensity();
                 let (mut light, details): (Light, _) = match gltf_light.kind() {
                     gltf::khr_lights_punctual::Kind::Directional => {
-                        let light = stage.new_value(DirectionalLight {
+                        let light = stage.new_value(DirectionalLightDescriptor {
                             direction: Vec3::NEG_Z,
                             color,
                             // TODO: Set a unit for lighting.
@@ -1020,7 +1023,7 @@ impl GltfDocument {
                         (light.id().into(), LightDetails::Directional(light))
                     }
                     gltf::khr_lights_punctual::Kind::Point => {
-                        let light = stage.new_value(PointLight {
+                        let light = stage.new_value(PointLightDescriptor {
                             position: Vec3::ZERO,
                             color,
                             intensity,
@@ -1031,7 +1034,7 @@ impl GltfDocument {
                         inner_cone_angle,
                         outer_cone_angle,
                     } => {
-                        let light = stage.new_value(SpotLight {
+                        let light = stage.new_value(SpotLightDescriptor {
                             position: Vec3::ZERO,
                             direction: Vec3::NEG_Z,
                             inner_cutoff: inner_cone_angle,

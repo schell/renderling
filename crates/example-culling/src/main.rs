@@ -33,7 +33,7 @@ struct CullingExample {
     app_camera: AppCamera,
     controller: example::camera::TurntableCameraController,
     stage: Stage,
-    dlights: [Hybrid<DirectionalLight>; 2],
+    dlights: [Hybrid<DirectionalLightDescriptor>; 2],
     lights: [Hybrid<Light>; 2],
     material_aabb_overlapping: Hybrid<Material>,
     material_aabb_outside: Hybrid<Material>,
@@ -205,13 +205,13 @@ impl TestAppHandler for CullingExample {
         let mut seed = 46;
         let mut resources = BagOfResources::default();
         let stage = ctx.new_stage().with_lighting(true);
-        let sunlight_a = stage.new_value(DirectionalLight {
+        let sunlight_a = stage.new_value(DirectionalLightDescriptor {
             direction: Vec3::new(-0.8, -1.0, 0.5).normalize(),
             color: Vec4::ONE,
             intensity: 10.0,
         });
         let light_a = stage.new_value(Light::from(sunlight_a.id()));
-        let sunlight_b = stage.new_value(DirectionalLight {
+        let sunlight_b = stage.new_value(DirectionalLightDescriptor {
             direction: Vec3::new(1.0, 1.0, -0.1).normalize(),
             color: Vec4::ONE,
             intensity: 1.0,

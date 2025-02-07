@@ -303,7 +303,7 @@ mod test {
             cache: None,
         });
 
-        let slab_buffer = slab.upkeep();
+        let slab_buffer = slab.commit();
         let bindgroup = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label,
             layout: &bindgroup_layout,
@@ -479,7 +479,7 @@ mod test {
             cache: None,
         });
 
-        let slab_buffer = slab.upkeep();
+        let slab_buffer = slab.commit();
         let bindgroup = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label,
             layout: &bindgroup_layout,
@@ -654,7 +654,7 @@ mod test {
             cache: None,
         });
 
-        let slab_buffer = slab.upkeep();
+        let slab_buffer = slab.commit();
         let bindgroup = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label,
             layout: &bindgroup_layout,

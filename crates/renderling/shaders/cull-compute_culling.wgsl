@@ -1,47 +1,47 @@
-struct type_9 {
+struct type_2 {
     member: array<u32>,
 }
 
-struct type_15 {
+struct type_12 {
+    member: u32,
+    member_1: u32,
+}
+
+struct type_17 {
     member: vec4<f32>,
     member_1: vec4<f32>,
     member_2: vec4<f32>,
     member_3: vec4<f32>,
 }
 
-struct type_16 {
+struct type_18 {
     member: array<vec3<f32>, 8>,
     member_1: array<vec4<f32>, 6>,
     member_2: vec3<f32>,
 }
 
-struct type_17 {
-    member: type_15,
-    member_1: type_15,
-    member_2: vec3<f32>,
-    member_3: type_16,
-}
-
 struct type_19 {
-    member: u32,
-    member_1: u32,
+    member: type_17,
+    member_1: type_17,
+    member_2: vec3<f32>,
+    member_3: type_18,
 }
 
-struct type_23 {
+struct type_24 {
     member: u32,
     member_1: u32,
     member_2: u32,
     member_3: u32,
 }
 
-struct type_25 {
-    member: array<type_23>,
+struct type_26 {
+    member: array<type_24>,
 }
 
 struct type_31 {
     member: vec2<u32>,
     member_1: vec2<u32>,
-    member_2: type_19,
+    member_2: type_12,
     member_3: u32,
     member_4: bool,
     member_5: bool,
@@ -61,11 +61,11 @@ struct type_33 {
 }
 
 @group(0) @binding(0) 
-var<storage> global: type_9;
+var<storage> global: type_2;
 @group(0) @binding(1) 
-var<storage> global_1: type_9;
+var<storage> global_1: type_2;
 @group(0) @binding(2) 
-var<storage, read_write> global_2: type_25;
+var<storage, read_write> global_2: type_26;
 var<private> global_3: vec3<u32>;
 
 fn function() {
@@ -80,42 +80,42 @@ fn function() {
     var phi_631_: u32;
     var phi_667_: type_31;
     var phi_2144_: bool;
-    var phi_832_: type_19;
-    var phi_833_: type_19;
-    var phi_856_: type_19;
+    var phi_832_: type_12;
+    var phi_833_: type_12;
+    var phi_856_: type_12;
     var phi_883_: bool;
-    var phi_889_: type_19;
-    var phi_890_: type_19;
-    var phi_913_: type_19;
+    var phi_889_: type_12;
+    var phi_890_: type_12;
+    var phi_913_: type_12;
     var phi_936_: bool;
-    var phi_957_: type_17;
+    var phi_957_: type_19;
     var phi_2176_: bool;
     var phi_1008_: type_32;
-    var phi_1140_: type_19;
-    var phi_1141_: type_19;
-    var phi_1164_: type_19;
+    var phi_1140_: type_12;
+    var phi_1141_: type_12;
+    var phi_1164_: type_12;
     var phi_1208_: bool;
     var phi_1212_: bool;
     var phi_1213_: bool;
     var phi_2740_: bool;
     var phi_2045_: bool;
     var phi_2767_: bool;
-    var phi_1220_: type_19;
-    var phi_1221_: type_19;
-    var phi_1244_: type_19;
-    var phi_1254_: type_19;
+    var phi_1220_: type_12;
+    var phi_1221_: type_12;
+    var phi_1244_: type_12;
+    var phi_1254_: type_12;
     var phi_1257_: i32;
-    var phi_1255_: type_19;
-    var phi_1280_: type_19;
+    var phi_1255_: type_12;
+    var phi_1280_: type_12;
     var phi_1321_: i32;
     var phi_1258_: i32;
     var phi_1322_: bool;
     var phi_2761_: bool;
     var local_8: i32;
-    var phi_1329_: type_19;
+    var phi_1329_: type_12;
     var phi_1332_: i32;
-    var phi_1330_: type_19;
-    var phi_1355_: type_19;
+    var phi_1330_: type_12;
+    var phi_1355_: type_12;
     var phi_1396_: i32;
     var phi_1333_: i32;
     var phi_1397_: bool;
@@ -140,7 +140,7 @@ fn function() {
     var phi_1439_: type_33;
     var phi_1703_: u32;
     var phi_2559_: bool;
-    var phi_1721_: type_19;
+    var phi_1721_: type_12;
     var phi_2585_: u32;
 
     switch bitcast<i32>(0u) {
@@ -268,9 +268,9 @@ fn function() {
                         let _e195 = global.member[8u];
                         let _e199 = global.member[9u];
                         let _e202 = global.member[10u];
-                        phi_667_ = type_31(vec2<u32>(_e163, _e166), vec2<u32>(_e170, _e173), type_19(_e199, _e202), _e180, (_e183 == 1u), (_e187 == 1u), (_e191 == 1u), (_e195 == 1u));
+                        phi_667_ = type_31(vec2<u32>(_e163, _e166), vec2<u32>(_e170, _e173), type_12(_e199, _e202), _e180, (_e183 == 1u), (_e187 == 1u), (_e191 == 1u), (_e195 == 1u));
                     } else {
-                        phi_667_ = type_31(vec2<u32>(0u, 0u), vec2<u32>(1u, 1u), type_19(4294967295u, 0u), 0u, true, true, true, false);
+                        phi_667_ = type_31(vec2<u32>(0u, 0u), vec2<u32>(1u, 1u), type_12(4294967295u, 0u), 0u, true, true, true, false);
                     }
                     let _e206 = phi_667_;
                     if _e206.member_6 {
@@ -317,15 +317,15 @@ fn function() {
                             let _e390 = global.member[(_e144 + 33u)];
                             let _e395 = global.member[(_e144 + 34u)];
                             local_7 = array<vec4<f32>, 6>(vec4<f32>(0f, 0f, 0f, 0f), vec4<f32>(0f, 0f, 0f, 0f), vec4<f32>(0f, 0f, 0f, 0f), vec4<f32>(0f, 0f, 0f, 0f), vec4<f32>(0f, 0f, 0f, 0f), vec4<f32>(0f, 0f, 0f, 0f));
-                            phi_832_ = type_19(0u, 6u);
+                            phi_832_ = type_12(0u, 6u);
                             loop {
                                 let _e400 = phi_832_;
                                 if (_e400.member < _e400.member_1) {
-                                    phi_833_ = type_19((_e400.member + 1u), _e400.member_1);
-                                    phi_856_ = type_19(1u, _e400.member);
+                                    phi_833_ = type_12((_e400.member + 1u), _e400.member_1);
+                                    phi_856_ = type_12(1u, _e400.member);
                                 } else {
                                     phi_833_ = _e400;
-                                    phi_856_ = type_19(0u, type_19().member_1);
+                                    phi_856_ = type_12(0u, type_12().member_1);
                                 }
                                 let _e413 = phi_833_;
                                 let _e415 = phi_856_;
@@ -358,15 +358,15 @@ fn function() {
                             }
                             let _e445 = local_7;
                             local_6 = array<vec3<f32>, 8>(vec3<f32>(0f, 0f, 0f), vec3<f32>(0f, 0f, 0f), vec3<f32>(0f, 0f, 0f), vec3<f32>(0f, 0f, 0f), vec3<f32>(0f, 0f, 0f), vec3<f32>(0f, 0f, 0f), vec3<f32>(0f, 0f, 0f), vec3<f32>(0f, 0f, 0f));
-                            phi_889_ = type_19(0u, 8u);
+                            phi_889_ = type_12(0u, 8u);
                             loop {
                                 let _e448 = phi_889_;
                                 if (_e448.member < _e448.member_1) {
-                                    phi_890_ = type_19((_e448.member + 1u), _e448.member_1);
-                                    phi_913_ = type_19(1u, _e448.member);
+                                    phi_890_ = type_12((_e448.member + 1u), _e448.member_1);
+                                    phi_913_ = type_12(1u, _e448.member);
                                 } else {
                                     phi_890_ = _e448;
-                                    phi_913_ = type_19(0u, type_19().member_1);
+                                    phi_913_ = type_12(0u, type_12().member_1);
                                 }
                                 let _e461 = phi_890_;
                                 let _e463 = phi_913_;
@@ -400,9 +400,9 @@ fn function() {
                             let _e492 = global.member[(_e144 + 83u)];
                             let _e497 = global.member[(_e144 + 84u)];
                             let _e502 = global.member[(_e144 + 85u)];
-                            phi_957_ = type_17(type_15(vec4<f32>(bitcast<f32>(_e215), bitcast<f32>(_e220), bitcast<f32>(_e225), bitcast<f32>(_e230)), vec4<f32>(bitcast<f32>(_e236), bitcast<f32>(_e241), bitcast<f32>(_e246), bitcast<f32>(_e251)), vec4<f32>(bitcast<f32>(_e257), bitcast<f32>(_e262), bitcast<f32>(_e267), bitcast<f32>(_e272)), vec4<f32>(bitcast<f32>(_e278), bitcast<f32>(_e283), bitcast<f32>(_e288), bitcast<f32>(_e293))), type_15(vec4<f32>(bitcast<f32>(_e300), bitcast<f32>(_e305), bitcast<f32>(_e310), bitcast<f32>(_e315)), vec4<f32>(bitcast<f32>(_e321), bitcast<f32>(_e326), bitcast<f32>(_e331), bitcast<f32>(_e336)), vec4<f32>(bitcast<f32>(_e342), bitcast<f32>(_e347), bitcast<f32>(_e352), bitcast<f32>(_e357)), vec4<f32>(bitcast<f32>(_e363), bitcast<f32>(_e368), bitcast<f32>(_e373), bitcast<f32>(_e378))), vec3<f32>(bitcast<f32>(_e385), bitcast<f32>(_e390), bitcast<f32>(_e395)), type_16(_e488, _e445, vec3<f32>(bitcast<f32>(_e492), bitcast<f32>(_e497), bitcast<f32>(_e502))));
+                            phi_957_ = type_19(type_17(vec4<f32>(bitcast<f32>(_e215), bitcast<f32>(_e220), bitcast<f32>(_e225), bitcast<f32>(_e230)), vec4<f32>(bitcast<f32>(_e236), bitcast<f32>(_e241), bitcast<f32>(_e246), bitcast<f32>(_e251)), vec4<f32>(bitcast<f32>(_e257), bitcast<f32>(_e262), bitcast<f32>(_e267), bitcast<f32>(_e272)), vec4<f32>(bitcast<f32>(_e278), bitcast<f32>(_e283), bitcast<f32>(_e288), bitcast<f32>(_e293))), type_17(vec4<f32>(bitcast<f32>(_e300), bitcast<f32>(_e305), bitcast<f32>(_e310), bitcast<f32>(_e315)), vec4<f32>(bitcast<f32>(_e321), bitcast<f32>(_e326), bitcast<f32>(_e331), bitcast<f32>(_e336)), vec4<f32>(bitcast<f32>(_e342), bitcast<f32>(_e347), bitcast<f32>(_e352), bitcast<f32>(_e357)), vec4<f32>(bitcast<f32>(_e363), bitcast<f32>(_e368), bitcast<f32>(_e373), bitcast<f32>(_e378))), vec3<f32>(bitcast<f32>(_e385), bitcast<f32>(_e390), bitcast<f32>(_e395)), type_18(_e488, _e445, vec3<f32>(bitcast<f32>(_e492), bitcast<f32>(_e497), bitcast<f32>(_e502))));
                         } else {
-                            phi_957_ = type_17(type_15(vec4<f32>(1f, 0f, 0f, 0f), vec4<f32>(0f, 1f, 0f, 0f), vec4<f32>(0f, 0f, 1f, 0f), vec4<f32>(0f, 0f, 0f, 1f)), type_15(vec4<f32>(1f, 0f, 0f, 0f), vec4<f32>(0f, 1f, 0f, 0f), vec4<f32>(0f, 0f, 1f, 0f), vec4<f32>(0f, 0f, 0f, 1f)), vec3<f32>(0f, 0f, 0f), type_16(array<vec3<f32>, 8>(vec3<f32>(0f, 0f, 0f), vec3<f32>(0f, 0f, 0f), vec3<f32>(0f, 0f, 0f), vec3<f32>(0f, 0f, 0f), vec3<f32>(0f, 0f, 0f), vec3<f32>(0f, 0f, 0f), vec3<f32>(0f, 0f, 0f), vec3<f32>(0f, 0f, 0f)), array<vec4<f32>, 6>(vec4<f32>(0f, 0f, 0f, 0f), vec4<f32>(0f, 0f, 0f, 0f), vec4<f32>(0f, 0f, 0f, 0f), vec4<f32>(0f, 0f, 0f, 0f), vec4<f32>(0f, 0f, 0f, 0f), vec4<f32>(0f, 0f, 0f, 0f)), vec3<f32>(0f, 0f, 0f)));
+                            phi_957_ = type_19(type_17(vec4<f32>(1f, 0f, 0f, 0f), vec4<f32>(0f, 1f, 0f, 0f), vec4<f32>(0f, 0f, 1f, 0f), vec4<f32>(0f, 0f, 0f, 1f)), type_17(vec4<f32>(1f, 0f, 0f, 0f), vec4<f32>(0f, 1f, 0f, 0f), vec4<f32>(0f, 0f, 1f, 0f), vec4<f32>(0f, 0f, 0f, 1f)), vec3<f32>(0f, 0f, 0f), type_18(array<vec3<f32>, 8>(vec3<f32>(0f, 0f, 0f), vec3<f32>(0f, 0f, 0f), vec3<f32>(0f, 0f, 0f), vec3<f32>(0f, 0f, 0f), vec3<f32>(0f, 0f, 0f), vec3<f32>(0f, 0f, 0f), vec3<f32>(0f, 0f, 0f), vec3<f32>(0f, 0f, 0f)), array<vec4<f32>, 6>(vec4<f32>(0f, 0f, 0f, 0f), vec4<f32>(0f, 0f, 0f, 0f), vec4<f32>(0f, 0f, 0f, 0f), vec4<f32>(0f, 0f, 0f, 0f), vec4<f32>(0f, 0f, 0f, 0f), vec4<f32>(0f, 0f, 0f, 0f)), vec3<f32>(0f, 0f, 0f)));
                         }
                         let _e508 = phi_957_;
                         if (_e93 >= 10u) {
@@ -453,15 +453,15 @@ fn function() {
                         if ((fma(_e653, _e636, fma(_e645, _e634, (_e648 * _e635))) + _e657) < _e659) {
                             phi_1439_ = type_33(true, 0u);
                         } else {
-                            phi_1140_ = type_19(0u, 6u);
+                            phi_1140_ = type_12(0u, 6u);
                             loop {
                                 let _e662 = phi_1140_;
                                 if (_e662.member < _e662.member_1) {
-                                    phi_1141_ = type_19((_e662.member + 1u), _e662.member_1);
-                                    phi_1164_ = type_19(1u, _e662.member);
+                                    phi_1141_ = type_12((_e662.member + 1u), _e662.member_1);
+                                    phi_1164_ = type_12(1u, _e662.member);
                                 } else {
                                     phi_1141_ = _e662;
-                                    phi_1164_ = type_19(0u, type_19().member_1);
+                                    phi_1164_ = type_12(0u, type_12().member_1);
                                 }
                                 let _e675 = phi_1141_;
                                 let _e677 = phi_1164_;
@@ -519,16 +519,16 @@ fn function() {
                                 let _e713 = (_e637 - _e712);
                                 let _e714 = (_e637 + _e712);
                                 phi_2767_ = _e709;
-                                phi_1220_ = type_19(0u, 3u);
+                                phi_1220_ = type_12(0u, 3u);
                                 loop {
                                     let _e716 = phi_2767_;
                                     let _e718 = phi_1220_;
                                     if (_e718.member < _e718.member_1) {
-                                        phi_1221_ = type_19((_e718.member + 1u), _e718.member_1);
-                                        phi_1244_ = type_19(1u, _e718.member);
+                                        phi_1221_ = type_12((_e718.member + 1u), _e718.member_1);
+                                        phi_1244_ = type_12(1u, _e718.member);
                                     } else {
                                         phi_1221_ = _e718;
-                                        phi_1244_ = type_19(0u, type_19().member_1);
+                                        phi_1244_ = type_12(0u, type_12().member_1);
                                     }
                                     let _e731 = phi_1221_;
                                     let _e733 = phi_1244_;
@@ -542,18 +542,18 @@ fn function() {
                                             break;
                                         }
                                         case 1: {
-                                            phi_1254_ = type_19(0u, 8u);
+                                            phi_1254_ = type_12(0u, 8u);
                                             phi_1257_ = 0i;
                                             loop {
                                                 let _e738 = phi_1254_;
                                                 let _e740 = phi_1257_;
                                                 local_8 = _e740;
                                                 if (_e738.member < _e738.member_1) {
-                                                    phi_1255_ = type_19((_e738.member + 1u), _e738.member_1);
-                                                    phi_1280_ = type_19(1u, _e738.member);
+                                                    phi_1255_ = type_12((_e738.member + 1u), _e738.member_1);
+                                                    phi_1280_ = type_12(1u, _e738.member);
                                                 } else {
                                                     phi_1255_ = _e738;
-                                                    phi_1280_ = type_19(0u, type_19().member_1);
+                                                    phi_1280_ = type_12(0u, type_12().member_1);
                                                 }
                                                 let _e753 = phi_1255_;
                                                 let _e755 = phi_1280_;
@@ -628,18 +628,18 @@ fn function() {
                                                 phi_1403_ = false;
                                                 phi_1404_ = false;
                                             } else {
-                                                phi_1329_ = type_19(0u, 8u);
+                                                phi_1329_ = type_12(0u, 8u);
                                                 phi_1332_ = 0i;
                                                 loop {
                                                     let _e794 = phi_1329_;
                                                     let _e796 = phi_1332_;
                                                     local_9 = _e796;
                                                     if (_e794.member < _e794.member_1) {
-                                                        phi_1330_ = type_19((_e794.member + 1u), _e794.member_1);
-                                                        phi_1355_ = type_19(1u, _e794.member);
+                                                        phi_1330_ = type_12((_e794.member + 1u), _e794.member_1);
+                                                        phi_1355_ = type_12(1u, _e794.member);
                                                     } else {
                                                         phi_1330_ = _e794;
-                                                        phi_1355_ = type_19(0u, type_19().member_1);
+                                                        phi_1355_ = type_12(0u, type_12().member_1);
                                                     }
                                                     let _e809 = phi_1330_;
                                                     let _e811 = phi_1355_;
@@ -831,9 +831,9 @@ fn function() {
                                 if _e1127 {
                                     let _e1130 = global_1.member[_e1122];
                                     let _e1134 = global_1.member[(_e1122 + 1u)];
-                                    phi_1721_ = type_19(_e1130, _e1134);
+                                    phi_1721_ = type_12(_e1130, _e1134);
                                 } else {
-                                    phi_1721_ = type_19(4294967295u, 0u);
+                                    phi_1721_ = type_12(4294967295u, 0u);
                                 }
                                 let _e1137 = phi_1721_;
                                 let _e1143 = (((select(select(u32(_e1110), 0u, (_e1110 < 0f)), 4294967295u, (_e1110 > 4294967000f)) >> bitcast<u32>(_e1107)) * (_e897 >> bitcast<u32>(_e1107))) + (select(select(u32(_e1101), 0u, (_e1101 < 0f)), 4294967295u, (_e1101 > 4294967000f)) >> bitcast<u32>(_e1107)));

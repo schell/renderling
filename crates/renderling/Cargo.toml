@@ -85,4 +85,3 @@ winit.workspace = true
 
 [target.'cfg(not(target_arch = "spirv"))'.dev-dependencies]
 glam = { workspace = true, features = ["std", "debug-glam-assert"] }
-

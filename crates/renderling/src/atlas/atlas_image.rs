@@ -31,7 +31,6 @@ pub enum AtlasImageError {
 
 #[derive(Clone, Copy, Debug)]
 pub enum AtlasImageFormat {
-    D32FLOAT,
     R8,
     R8G8,
     R8G8B8,
@@ -41,8 +40,10 @@ pub enum AtlasImageFormat {
     R16G16B16,
     R16G16B16A16,
     R16G16B16A16FLOAT,
+    R32FLOAT,
     R32G32B32FLOAT,
     R32G32B32A32FLOAT,
+    D32FLOAT,
 }
 
 impl AtlasImageFormat {
@@ -50,6 +51,7 @@ impl AtlasImageFormat {
         match value {
             wgpu::TextureFormat::R8Uint => Some(AtlasImageFormat::R8),
             wgpu::TextureFormat::R16Uint => Some(AtlasImageFormat::R16),
+            wgpu::TextureFormat::R32Float => Some(AtlasImageFormat::R32FLOAT),
             wgpu::TextureFormat::Rg8Uint => Some(AtlasImageFormat::R8G8),
             wgpu::TextureFormat::Rg16Uint => Some(AtlasImageFormat::R16G16),
             wgpu::TextureFormat::Rgba16Float => Some(AtlasImageFormat::R16G16B16A16FLOAT),
@@ -60,7 +62,6 @@ impl AtlasImageFormat {
 
     pub fn zero_pixel(&self) -> &[u8] {
         match self {
-            AtlasImageFormat::D32FLOAT => &[0, 0, 0, 0],
             AtlasImageFormat::R8 => &[0],
             AtlasImageFormat::R8G8 => &[0, 0],
             AtlasImageFormat::R8G8B8 => &[0, 0, 0],
@@ -70,6 +71,7 @@ impl AtlasImageFormat {
             AtlasImageFormat::R16G16B16 => &[0, 0, 0, 0, 0, 0],
             AtlasImageFormat::R16G16B16A16 => &[0, 0, 0, 0, 0, 0, 0, 0],
             AtlasImageFormat::R16G16B16A16FLOAT => &[0, 0, 0, 0, 0, 0, 0, 0],
+            AtlasImageFormat::R32FLOAT | AtlasImageFormat::D32FLOAT => &[0, 0, 0, 0],
             AtlasImageFormat::R32G32B32FLOAT => &[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
             AtlasImageFormat::R32G32B32A32FLOAT => {
                 &[0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
@@ -197,7 +199,12 @@ impl AtlasImage {
     }
 
     pub fn into_rgba8(self) -> Option<image::RgbaImage> {
-        let pixels = convert_to_rgba8_bytes(self.pixels, self.format, self.apply_linear_transfer);
+        let pixels = convert_pixels(
+            self.pixels,
+            self.format,
+            wgpu::TextureFormat::Rgba8Unorm,
+            self.apply_linear_transfer,
+        );
         image::RgbaImage::from_vec(self.size.x, self.size.y, pixels)
     }
 
@@ -215,52 +222,62 @@ impl AtlasImage {
     }
 }
 
-/// Interpret/convert the pixel data into rgba8 pixels.
+fn apply_linear_xfer(bytes: &mut [u8], format: AtlasImageFormat) {
+    use crate::color::*;
+    match format {
+        AtlasImageFormat::R8
+        | AtlasImageFormat::R8G8
+        | AtlasImageFormat::R8G8B8
+        | AtlasImageFormat::R8G8B8A8 => {
+            bytes.iter_mut().for_each(linear_xfer_u8);
+        }
+        AtlasImageFormat::R16
+        | AtlasImageFormat::R16G16
+        | AtlasImageFormat::R16G16B16
+        | AtlasImageFormat::R16G16B16A16 => {
+            let bytes: &mut [u16] = bytemuck::cast_slice_mut(bytes);
+            bytes.iter_mut().for_each(linear_xfer_u16);
+        }
+        AtlasImageFormat::R16G16B16A16FLOAT => {
+            let bytes: &mut [u16] = bytemuck::cast_slice_mut(bytes);
+            bytes.iter_mut().for_each(linear_xfer_f16);
+        }
+        AtlasImageFormat::R32G32B32FLOAT
+        | AtlasImageFormat::R32G32B32A32FLOAT
+        | AtlasImageFormat::D32FLOAT
+        | AtlasImageFormat::R32FLOAT => {
+            let bytes: &mut [f32] = bytemuck::cast_slice_mut(bytes);
+            bytes.iter_mut().for_each(linear_xfer_f32);
+        }
+    }
+}
+
+/// Interpret/convert the `AtlasImage` pixel data into `wgpu::TextureFormat` pixels,
+/// if possible.
 ///
 /// This applies the linear transfer function if `apply_linear_transfer` is
 /// `true`.
-pub fn convert_to_rgba8_bytes(
+pub fn convert_pixels(
     bytes: impl IntoIterator<Item = u8>,
-    format: AtlasImageFormat,
+    from_format: AtlasImageFormat,
+    to_format: wgpu::TextureFormat,
     apply_linear_transfer: bool,
 ) -> Vec<u8> {
     use crate::color::*;
     let mut bytes = bytes.into_iter().collect::<Vec<_>>();
-    log::trace!("converting image of format {format:?}");
+    log::trace!("converting image of format {from_format:?}");
     // Convert using linear transfer, if needed
     if apply_linear_transfer {
         log::trace!("  converting to linear color space (from sRGB)");
-        match format {
-            AtlasImageFormat::R8
-            | AtlasImageFormat::R8G8
-            | AtlasImageFormat::R8G8B8
-            | AtlasImageFormat::R8G8B8A8 => {
-                bytes.iter_mut().for_each(linear_xfer_u8);
-            }
-            AtlasImageFormat::R16
-            | AtlasImageFormat::R16G16
-            | AtlasImageFormat::R16G16B16
-            | AtlasImageFormat::R16G16B16A16 => {
-                let bytes: &mut [u16] = bytemuck::cast_slice_mut(&mut bytes);
-                bytes.iter_mut().for_each(linear_xfer_u16);
-            }
-            AtlasImageFormat::R16G16B16A16FLOAT => {
-                let bytes: &mut [u16] = bytemuck::cast_slice_mut(&mut bytes);
-                bytes.iter_mut().for_each(linear_xfer_f16);
-            }
-            AtlasImageFormat::R32G32B32FLOAT
-            | AtlasImageFormat::R32G32B32A32FLOAT
-            | AtlasImageFormat::D32FLOAT => {
-                let bytes: &mut [f32] = bytemuck::cast_slice_mut(&mut bytes);
-                bytes.iter_mut().for_each(linear_xfer_f32);
-            }
-        }
+        apply_linear_xfer(&mut bytes, from_format);
     }
 
-    // Convert to rgba8
-    match format {
-        AtlasImageFormat::R8 => bytes.into_iter().flat_map(|r| [r, 0, 0, 255]).collect(),
-        AtlasImageFormat::R8G8 => bytes
+    // Hamfisted conversion to `to_format`
+    match (from_format, to_format) {
+        (AtlasImageFormat::R8, wgpu::TextureFormat::Rgba8Unorm) => {
+            bytes.into_iter().flat_map(|r| [r, 0, 0, 255]).collect()
+        }
+        (AtlasImageFormat::R8G8, wgpu::TextureFormat::Rgba8Unorm) => bytes
             .chunks_exact(2)
             .flat_map(|p| {
                 if let [r, g] = p {
@@ -270,7 +287,7 @@ pub fn convert_to_rgba8_bytes(
                 }
             })
             .collect(),
-        AtlasImageFormat::R8G8B8 => bytes
+        (AtlasImageFormat::R8G8B8, wgpu::TextureFormat::Rgba8Unorm) => bytes
             .chunks_exact(3)
             .flat_map(|p| {
                 if let [r, g, b] = p {
@@ -280,66 +297,83 @@ pub fn convert_to_rgba8_bytes(
                 }
             })
             .collect(),
-        AtlasImageFormat::R8G8B8A8 => bytes,
-        AtlasImageFormat::R16 => bytemuck::cast_slice::<u8, u16>(&bytes)
-            .iter()
-            .flat_map(|r| [u16_to_u8(*r), 0, 0, 255])
-            .collect(),
-        AtlasImageFormat::R16G16 => bytemuck::cast_slice::<u8, u16>(&bytes)
-            .chunks_exact(2)
-            .flat_map(|p| {
-                if let [r, g] = p {
-                    [u16_to_u8(*r), u16_to_u8(*g), 0, 255]
-                } else {
-                    unreachable!()
-                }
-            })
-            .collect(),
-        AtlasImageFormat::R16G16B16 => bytemuck::cast_slice::<u8, u16>(&bytes)
-            .chunks_exact(3)
-            .flat_map(|p| {
-                if let [r, g, b] = p {
-                    [u16_to_u8(*r), u16_to_u8(*g), u16_to_u8(*b), 255]
-                } else {
-                    unreachable!()
-                }
-            })
-            .collect(),
+        (AtlasImageFormat::R8G8B8A8, wgpu::TextureFormat::Rgba8Unorm) => bytes,
+        (AtlasImageFormat::R16, wgpu::TextureFormat::Rgba8Unorm) => {
+            bytemuck::cast_slice::<u8, u16>(&bytes)
+                .iter()
+                .flat_map(|r| [u16_to_u8(*r), 0, 0, 255])
+                .collect()
+        }
+        (AtlasImageFormat::R16G16, wgpu::TextureFormat::Rgba8Unorm) => {
+            bytemuck::cast_slice::<u8, u16>(&bytes)
+                .chunks_exact(2)
+                .flat_map(|p| {
+                    if let [r, g] = p {
+                        [u16_to_u8(*r), u16_to_u8(*g), 0, 255]
+                    } else {
+                        unreachable!()
+                    }
+                })
+                .collect()
+        }
+        (AtlasImageFormat::R16G16B16, wgpu::TextureFormat::Rgba8Unorm) => {
+            bytemuck::cast_slice::<u8, u16>(&bytes)
+                .chunks_exact(3)
+                .flat_map(|p| {
+                    if let [r, g, b] = p {
+                        [u16_to_u8(*r), u16_to_u8(*g), u16_to_u8(*b), 255]
+                    } else {
+                        unreachable!()
+                    }
+                })
+                .collect()
+        }
 
-        AtlasImageFormat::R16G16B16A16 => bytemuck::cast_slice::<u8, u16>(&bytes)
-            .iter()
-            .copied()
-            .map(u16_to_u8)
-            .collect(),
-        AtlasImageFormat::R16G16B16A16FLOAT => bytemuck::cast_slice::<u8, u16>(&bytes)
-            .iter()
-            .map(|bits| half::f16::from_bits(*bits).to_f32())
-            .collect::<Vec<_>>()
-            .chunks_exact(4)
-            .flat_map(|p| {
-                if let [r, g, b, a] = p {
-                    [f32_to_u8(*r), f32_to_u8(*g), f32_to_u8(*b), f32_to_u8(*a)]
-                } else {
-                    unreachable!()
-                }
-            })
-            .collect(),
-        AtlasImageFormat::R32G32B32FLOAT => bytemuck::cast_slice::<u8, f32>(&bytes)
-            .chunks_exact(3)
-            .flat_map(|p| {
-                if let [r, g, b] = p {
-                    [f32_to_u8(*r), f32_to_u8(*g), f32_to_u8(*b), 255]
-                } else {
-                    unreachable!()
-                }
-            })
-            .collect(),
-        AtlasImageFormat::R32G32B32A32FLOAT | AtlasImageFormat::D32FLOAT => {
+        (AtlasImageFormat::R16G16B16A16, wgpu::TextureFormat::Rgba8Unorm) => {
+            bytemuck::cast_slice::<u8, u16>(&bytes)
+                .iter()
+                .copied()
+                .map(u16_to_u8)
+                .collect()
+        }
+        (AtlasImageFormat::R16G16B16A16FLOAT, wgpu::TextureFormat::Rgba8Unorm) => {
+            bytemuck::cast_slice::<u8, u16>(&bytes)
+                .iter()
+                .map(|bits| half::f16::from_bits(*bits).to_f32())
+                .collect::<Vec<_>>()
+                .chunks_exact(4)
+                .flat_map(|p| {
+                    if let [r, g, b, a] = p {
+                        [f32_to_u8(*r), f32_to_u8(*g), f32_to_u8(*b), f32_to_u8(*a)]
+                    } else {
+                        unreachable!()
+                    }
+                })
+                .collect()
+        }
+        (AtlasImageFormat::R32G32B32FLOAT, wgpu::TextureFormat::Rgba8Unorm) => {
+            bytemuck::cast_slice::<u8, f32>(&bytes)
+                .chunks_exact(3)
+                .flat_map(|p| {
+                    if let [r, g, b] = p {
+                        [f32_to_u8(*r), f32_to_u8(*g), f32_to_u8(*b), 255]
+                    } else {
+                        unreachable!()
+                    }
+                })
+                .collect()
+        }
+        (AtlasImageFormat::R32G32B32A32FLOAT, wgpu::TextureFormat::Rgba8Unorm)
+        | (AtlasImageFormat::R32FLOAT, wgpu::TextureFormat::Rgba8Unorm)
+        | (AtlasImageFormat::D32FLOAT, wgpu::TextureFormat::Rgba8Unorm) => {
             bytemuck::cast_slice::<u8, f32>(&bytes)
                 .iter()
                 .copied()
                 .map(f32_to_u8)
                 .collect()
         }
+        (AtlasImageFormat::R32FLOAT, wgpu::TextureFormat::R32Float) => bytes,
+        // TODO: add more atlas format conversions
+        (from, to) => panic!("cannot convert from atlas format {from:?} to {to:?}"),
     }
 }

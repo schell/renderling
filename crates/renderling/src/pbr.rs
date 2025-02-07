@@ -13,8 +13,8 @@ use spirv_std::num_traits::{Float, Zero};
 use crate::{
     atlas::AtlasTexture,
     light::{
-        shadow_calculation, DirectionalLight, Light, LightStyle, LightingDescriptor, PointLight,
-        SpotLight,
+        shadow_calculation, DirectionalLightDescriptor, Light, LightStyle, LightingDescriptor,
+        PointLightDescriptor, SpotLightDescriptor,
     },
     math::{self, IsSampler, IsVector, Sample2d, Sample2dArray, SampleCube},
     println as my_println,
@@ -614,7 +614,7 @@ where
         // determine the light ray and the radiance
         match light.light_type {
             LightStyle::Point => {
-                let PointLight {
+                let PointLightDescriptor {
                     position,
                     color,
                     intensity,
@@ -631,7 +631,7 @@ where
             }
 
             LightStyle::Spot => {
-                let SpotLight {
+                let SpotLightDescriptor {
                     position,
                     direction,
                     inner_cutoff,
@@ -655,7 +655,7 @@ where
             }
 
             LightStyle::Directional => {
-                let DirectionalLight {
+                let DirectionalLightDescriptor {
                     direction,
                     color,
                     intensity,
@@ -683,7 +683,9 @@ where
                         let atlas_desc = light_slab.read_unchecked(atlas_desc_id);
                         atlas_desc.size
                     };
-                    let light_space_transform = shadow_map_descr.light_space_transform;
+                    let light_space_transform_id =
+                        shadow_map_descr.light_space_transforms_array.at(0);
+                    let light_space_transform = light_slab.read_unchecked(light_space_transform_id);
                     let frag_pos_in_light_space = light_space_transform.project_point3(in_pos);
                     // Shadow is 1.0 when the fragment is in the shadow of this light,
                     // and 0.0 otherwise
