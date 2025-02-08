@@ -25,7 +25,7 @@ pub use cpu::*;
 #[offsets]
 pub struct LightingDescriptor {
     /// List of all analytical lights in the scene.
-    pub analytical_lights: Array<Id<Light>>,
+    pub analytical_lights_array: Array<Id<Light>>,
     /// Shadow mapping atlas info.
     pub shadow_map_atlas_descriptor_id: Id<AtlasDescriptor>,
     /// `Id` of the [`ShadowMapDescriptor`] to use when updating

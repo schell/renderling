@@ -6,7 +6,9 @@ use std::sync::{Arc, Mutex, RwLock};
 use craballoc::{
     prelude::{Hybrid, SlabAllocator, WgpuRuntime},
     slab::SlabBuffer,
-    value::{HybridArray, HybridContainer, HybridWriteGuard, IsContainer},
+    value::{
+        HybridArray, HybridContainer, HybridWriteGuard, IsContainer, WeakContainer, WeakHybrid,
+    },
 };
 use crabslab::Id;
 use glam::{Mat4, UVec2};
@@ -18,7 +20,7 @@ use crate::{
     bvol::Frustum,
     camera::Camera,
     prelude::Transform,
-    stage::{NestedTransform, Renderlet},
+    stage::Renderlet,
 };
 
 use super::{
@@ -64,6 +66,16 @@ impl<C: IsContainer> LightDetails<C> {
     }
 }
 
+impl LightDetails<WeakContainer> {
+    pub fn from_hybrid(hybrid: &LightDetails<HybridContainer>) -> Self {
+        match hybrid {
+            LightDetails::Directional(d) => LightDetails::Directional(WeakHybrid::from_hybrid(d)),
+            LightDetails::Point(p) => LightDetails::Point(WeakHybrid::from_hybrid(p)),
+            LightDetails::Spot(s) => LightDetails::Spot(WeakHybrid::from_hybrid(s)),
+        }
+    }
+}
+
 /// A depth map rendering of the scene from a light's point of view.
 ///
 /// Used to project shadows from one light source for specific objects.
@@ -79,10 +91,12 @@ pub struct ShadowMap {
     ///
     /// Directional and spot lights have 1, point lights
     /// have 6.
+    #[allow(dead_code)]
     light_space_transforms: HybridArray<Mat4>,
     /// Bindgroup for the shadow map update shader
     update_bindgroup: ManagedBindGroup,
     atlas_textures: Vec<Hybrid<AtlasTexture>>,
+    #[allow(dead_code)]
     atlas_textures_array: HybridArray<Id<AtlasTexture>>,
     update_texture: crate::texture::Texture,
     blitting_op: AtlasBlittingOperation,
@@ -228,13 +242,23 @@ impl ShadowMap {
 /// Create an `AnalyticalLightBundle` with the `Lighting::new_*_light` functions:
 /// - [`Lighting::new_directional_light`]
 pub struct AnalyticalLightBundle<Ct: IsContainer = HybridContainer> {
-    light: Ct::Container<super::Light>,
-    light_details: LightDetails<Ct>,
-    transform: Ct::Container<Transform>,
+    pub light: Ct::Container<super::Light>,
+    pub light_details: LightDetails<Ct>,
+    pub transform: Ct::Container<Transform>,
+}
+
+impl AnalyticalLightBundle<WeakContainer> {
+    fn from_hybrid(light: &AnalyticalLightBundle) -> Self {
+        AnalyticalLightBundle {
+            light: WeakHybrid::from_hybrid(&light.light),
+            light_details: LightDetails::from_hybrid(&light.light_details),
+            transform: WeakHybrid::from_hybrid(&light.transform),
+        }
+    }
 }
 
 impl AnalyticalLightBundle {
-    fn light_space_transforms(&self, frustum: Frustum) -> Vec<Mat4> {
+    pub fn light_space_transforms(&self, frustum: Frustum) -> Vec<Mat4> {
         let t = self.transform.get();
         let m = Mat4::from(t);
         match &self.light_details {
@@ -255,6 +279,8 @@ pub struct Lighting {
     light_slab_buffer: Arc<RwLock<SlabBuffer<wgpu::Buffer>>>,
     stage_slab_buffer: Arc<RwLock<SlabBuffer<wgpu::Buffer>>>,
     lighting_descriptor: Hybrid<LightingDescriptor>,
+    analytical_lights: Arc<Mutex<Vec<AnalyticalLightBundle<WeakContainer>>>>,
+    analytical_lights_array: Arc<Mutex<HybridArray<Id<super::Light>>>>,
     bindgroup_layout: Arc<wgpu::BindGroupLayout>,
     shadow_map_update_pipeline: Arc<wgpu::RenderPipeline>,
     shadow_map_update_bindgroup_layout: Arc<wgpu::BindGroupLayout>,
@@ -452,6 +478,8 @@ impl Lighting {
                     depth_or_array_layers: 4,
                 },
             ),
+            analytical_lights: Default::default(),
+            analytical_lights_array: Arc::new(Mutex::new(light_slab.new_array([]))),
             light_slab,
             light_slab_buffer: Arc::new(RwLock::new(light_slab_buffer)),
             lighting_descriptor,
@@ -464,6 +492,24 @@ impl Lighting {
                 wgpu::TextureFormat::R32Float,
                 wgpu::FilterMode::Nearest,
             ),
+        }
+    }
+
+    fn add_light_bundle(&self, bundle: &AnalyticalLightBundle) {
+        {
+            // Update the array of light ids
+            // UNWRAP: POP
+            let mut analytical_lights_array_guard = self.analytical_lights_array.lock().unwrap();
+            let mut analytical_light_ids_vec = analytical_lights_array_guard.get_vec();
+            analytical_light_ids_vec.push(bundle.light.id());
+            *analytical_lights_array_guard = self.light_slab.new_array(analytical_light_ids_vec);
+        }
+        {
+            // Update our list of weakly ref'd light bundles
+            self.analytical_lights
+                .lock()
+                .unwrap()
+                .push(AnalyticalLightBundle::<WeakContainer>::from_hybrid(bundle));
         }
     }
 
@@ -483,11 +529,15 @@ impl Lighting {
             light
         });
         let light_details = LightDetails::Directional(light_inner);
-        AnalyticalLightBundle {
+        let bundle = AnalyticalLightBundle {
             light,
             light_details,
             transform,
-        }
+        };
+
+        self.add_light_bundle(&bundle);
+
+        bundle
     }
 
     /// Enable shadow mapping for the given [`AnalyticalLightBundle`], creating
@@ -587,7 +637,6 @@ mod test {
         camera.set(c);
         let gltf_light = doc.lights.first().unwrap();
         log::info!("gltf_light: {gltf_light:#?}");
-        stage.set_lights([gltf_light.light.id()]);
 
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
@@ -708,7 +757,7 @@ mod test {
 
         crate::test::capture_gpu_frame(
             &ctx,
-            "shadows/shadow_mapping_sanity/shadows.gputrace",
+            "shadows/shadow_mapping_sanity/shadow_map_update.gputrace",
             || shadows.update(lighting, doc.renderlets_iter()),
         );
 
@@ -922,7 +971,12 @@ mod test {
 
         // Now do the rendering *with the shadow map* to see if it works.
         let frame = ctx.get_next_frame().unwrap();
-        stage.render(&frame.view());
+        crate::test::capture_gpu_frame(
+            &ctx,
+            "shadows/shadow_mapping_sanity/render.gputrace",
+            || stage.render(&frame.view()),
+        );
+
         let img = frame.read_image().unwrap();
         frame.present();
         img_diff::save("shadows/shadow_mapping_sanity/stage_render.png", img);

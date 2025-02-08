@@ -836,33 +836,38 @@ mod test {
         let red = Vec3::X.extend(1.0);
         let green = Vec3::Y.extend(1.0);
         let blue = Vec3::Z.extend(1.0);
-        let dir_red = stage.new_value(DirectionalLightDescriptor {
-            direction: Vec3::NEG_Y,
-            color: red,
-            intensity: 10.0,
-        });
-        let dir_green = stage.new_value(DirectionalLightDescriptor {
-            direction: Vec3::NEG_X,
-            color: green,
-            intensity: 10.0,
-        });
-        let dir_blue = stage.new_value(DirectionalLightDescriptor {
-            direction: Vec3::NEG_Z,
-            color: blue,
-            intensity: 10.0,
-        });
+        let dir_red = stage.lighting().new_directional_light(
+            DirectionalLightDescriptor {
+                direction: Vec3::NEG_Y,
+                color: red,
+                intensity: 10.0,
+            },
+            None,
+        );
+        let _dir_green = stage.lighting().new_directional_light(
+            DirectionalLightDescriptor {
+                direction: Vec3::NEG_X,
+                color: green,
+                intensity: 10.0,
+            },
+            None,
+        );
+        let _dir_blue = stage.lighting().new_directional_light(
+            DirectionalLightDescriptor {
+                direction: Vec3::NEG_Z,
+                color: blue,
+                intensity: 10.0,
+            },
+            None,
+        );
         assert_eq!(
             Light {
                 light_type: LightStyle::Directional,
-                index: dir_red.id().inner(),
+                index: dir_red.light_details.as_directional().unwrap().id().inner(),
                 ..Default::default()
             },
-            dir_red.id().into()
+            Light::from(dir_red.light_details.as_directional().unwrap().id())
         );
-        let dir_red = stage.new_value(Light::from(dir_red.id()));
-        let dir_green = stage.new_value(Light::from(dir_green.id()));
-        let dir_blue = stage.new_value(Light::from(dir_blue.id()));
-        stage.set_lights(vec![dir_red.id(), dir_green.id(), dir_blue.id()]);
 
         let material = stage.new_value(Material::default());
         let geometry = stage.new_array(

@@ -427,17 +427,6 @@ impl Stage {
         self
     }
 
-    /// Set the lights to use for shading.
-    pub fn set_lights(&self, lights: impl IntoIterator<Item = Id<Light>>) {
-        log::trace!("setting lights");
-        let lights = self.mngr.new_array(lights);
-        self.pbr_config.modify(|cfg| {
-            cfg.light_array = lights.array();
-        });
-        // UNWRAP: POP
-        *self.lights.write().unwrap() = lights;
-    }
-
     pub fn get_size(&self) -> UVec2 {
         // UNWRAP: panic on purpose
         let hdr = self.hdr_texture.read().unwrap();

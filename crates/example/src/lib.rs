@@ -150,11 +150,9 @@ impl App {
             color: renderling::math::hex_to_vec4(0xFDFBD3FF),
             intensity: 10.0,
         };
-        let sunlight = stage.new_value(directional_light);
-        let light = stage.new_value(Light::from(sunlight.id()));
-        stage.set_lights([light.id()]);
-        let lighting = Lighting::new(ctx, &stage.commit());
-        let light_bundle = lighting.new_directional_light(directional_light, None);
+
+        let lighting = stage.lighting();
+        let sunlight_bundle = lighting.new_directional_light(directional_light, None);
 
         stage
             .set_atlas_size(wgpu::Extent3d {
@@ -179,7 +177,7 @@ impl App {
             },
             stage,
             camera,
-            lighting: light_bundle,
+            lighting: sunlight_bundle,
             model: Model::None,
             animators: None,
             animations_conflict: false,

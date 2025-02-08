@@ -240,7 +240,6 @@ pub struct PbrConfig {
     pub has_skinning: bool,
     pub perform_frustum_culling: bool,
     pub perform_occlusion_culling: bool,
-    pub light_array: Array<Id<Light>>,
 }
 
 impl Default for PbrConfig {
@@ -253,7 +252,6 @@ impl Default for PbrConfig {
             has_skinning: true,
             perform_frustum_culling: true,
             perform_occlusion_culling: false,
-            light_array: Default::default(),
         }
     }
 }
@@ -337,7 +335,6 @@ pub fn fragment_impl<A, T, DtA, C, S>(
         has_skinning: _,
         perform_frustum_culling: _,
         perform_occlusion_culling: _,
-        light_array,
     } = slab.read_unchecked(renderlet.pbr_config_id);
 
     let material = get_material(renderlet.material_id, has_lighting, slab);
@@ -554,8 +551,6 @@ pub fn fragment_impl<A, T, DtA, C, S>(
             irradiance,
             specular,
             brdf,
-            light_array,
-            slab,
             lighting_slab,
         )
     } else {
@@ -584,8 +579,6 @@ pub fn shade_fragment<S, T>(
     prefiltered: Vec3,
     brdf: Vec2,
 
-    lights: Array<Id<Light>>,
-    slab: &[u32],
     light_slab: &[u32],
 ) -> Vec4
 where
@@ -594,21 +587,23 @@ where
 {
     let n = in_norm.alt_norm_or_zero();
     let v = (camera_pos - in_pos).alt_norm_or_zero();
-    my_println!("lights: {lights:?}");
+    // There is always a `LightingDescriptor` stored at index `0` of the
+    // light slab.
+    let lighting_desc = light_slab.read_unchecked(Id::<LightingDescriptor>::new(0));
+    let analytical_lights_array = lighting_desc.analytical_lights_array;
+    my_println!("lights: {analytical_lights_array:?}");
     my_println!("n: {n:?}");
     my_println!("v: {v:?}");
     // reflectance
     let mut lo = Vec3::ZERO;
-    for i in 0..lights.len() {
-        // TODO: Move lights to the lighting slab
-
+    for i in 0..analytical_lights_array.len() {
         // calculate per-light radiance
-        let light_id = slab.read(lights.at(i));
+        let light_id = light_slab.read(analytical_lights_array.at(i));
         if light_id.is_none() {
             break;
         }
-        let light = slab.read(light_id);
-        let transform = slab.read(light.transform_id);
+        let light = light_slab.read(light_id);
+        let transform = light_slab.read(light.transform_id);
         let transform = Mat4::from(transform);
 
         // determine the light ray and the radiance
@@ -618,7 +613,7 @@ where
                     position,
                     color,
                     intensity,
-                } = slab.read(light.into_point_id());
+                } = light_slab.read(light.into_point_id());
                 let position = transform.transform_point3(position);
                 let frag_to_light = position - in_pos;
                 let distance = frag_to_light.length();
@@ -638,7 +633,7 @@ where
                     outer_cutoff,
                     color,
                     intensity,
-                } = slab.read(light.into_spot_id());
+                } = light_slab.read(light.into_spot_id());
                 let position = transform.transform_point3(position);
                 let frag_to_light = position - in_pos;
                 let distance = frag_to_light.length();
@@ -659,7 +654,7 @@ where
                     direction,
                     color,
                     intensity,
-                } = slab.read(light.into_directional_id());
+                } = light_slab.read(light.into_directional_id());
                 let direction = transform.transform_vector3(direction);
                 let l = -direction.alt_norm_or_zero();
                 let attenuation = intensity;
