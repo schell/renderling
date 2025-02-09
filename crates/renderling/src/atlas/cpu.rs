@@ -1,19 +1,25 @@
-use core::ops::Deref;
-use std::sync::{Arc, RwLock};
+use core::{ops::Deref, sync::atomic::AtomicUsize};
+use std::sync::{Arc, Mutex, RwLock};
 
 use craballoc::{
     prelude::{Hybrid, SlabAllocator, WeakHybrid},
     runtime::WgpuRuntime,
+    slab::SlabBuffer,
 };
-use glam::UVec2;
+use crabslab::Id;
+use glam::{UVec2, UVec3};
 use image::RgbaImage;
 use snafu::{prelude::*, OptionExt};
 
-use crate::texture::Texture;
+use crate::{
+    atlas::AtlasDescriptor,
+    bindgroup::ManagedBindGroup,
+    texture::{CopiedTextureBuffer, Texture},
+};
 
 use super::{
-    atlas_image::{convert_to_rgba8_bytes, AtlasImage},
-    AtlasTexture,
+    atlas_image::{convert_pixels, AtlasImage},
+    AtlasBlittingDescriptor, AtlasTexture,
 };
 
 pub(crate) const ATLAS_SUGGESTED_SIZE: u32 = 2048;
@@ -66,15 +72,13 @@ impl InternalAtlasTexture {
     }
 }
 
-pub(crate) fn check_size(size: wgpu::Extent3d) -> Result<(), AtlasError> {
+pub(crate) fn check_size(size: wgpu::Extent3d) {
     let conditions = size.depth_or_array_layers >= 2
         && size.width == size.height
         && (size.width & (size.width - 1)) == 0;
     if !conditions {
-        return SizeSnafu { size }.fail();
+        log::error!("{}", AtlasError::Size { size });
     }
-
-    Ok(())
 }
 
 fn fan_split_n<T>(n: usize, input: impl IntoIterator<Item = T>) -> Vec<Vec<T>> {
@@ -128,43 +132,41 @@ pub struct Layer {
 /// Clones of `Atlas` all point to the same internal data.
 #[derive(Clone)]
 pub struct Atlas {
+    pub(crate) slab: SlabAllocator<WgpuRuntime>,
     texture_array: Arc<RwLock<Texture>>,
     layers: Arc<RwLock<Vec<Layer>>>,
+    label: Option<String>,
+    descriptor: Hybrid<AtlasDescriptor>,
 }
 
 impl Atlas {
-    /// Create a new atlas with `size` and `num_layers` layers.
-    ///
-    /// `size` **must be a power of two**.
-    ///
-    /// ## Panics
-    /// Panics if `size` is _not_ a power of two.
-    fn new_with_texture(texture: Texture) -> Self {
-        let num_layers = texture.texture.size().depth_or_array_layers as usize;
-        let layers = vec![Layer::default(); num_layers];
-        log::trace!("created atlas with {num_layers} layers");
-        Atlas {
-            layers: Arc::new(RwLock::new(layers)),
-            texture_array: Arc::new(RwLock::new(texture)),
-        }
+    const LABEL: Option<&str> = Some("atlas-texture");
+
+    pub fn device(&self) -> &wgpu::Device {
+        self.slab.device()
     }
 
     /// Create the initial texture to use.
     fn create_texture(
         runtime: impl AsRef<WgpuRuntime>,
         size: wgpu::Extent3d,
-    ) -> Result<Texture, AtlasError> {
+        format: Option<wgpu::TextureFormat>,
+        label: Option<&str>,
+        usage: Option<wgpu::TextureUsages>,
+    ) -> Texture {
         let device = &runtime.as_ref().device;
         let queue = &runtime.as_ref().queue;
-        check_size(size)?;
+        check_size(size);
+        let usage = usage.unwrap_or(wgpu::TextureUsages::empty());
         let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("atlas texture"),
+            label: Some(label.unwrap_or(Self::LABEL.unwrap())),
             size,
             mip_level_count: 1,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8Unorm,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING
+            format: format.unwrap_or(wgpu::TextureFormat::Rgba8Unorm),
+            usage: usage
+                | wgpu::TextureUsages::TEXTURE_BINDING
                 | wgpu::TextureUsages::COPY_DST
                 | wgpu::TextureUsages::COPY_SRC,
             view_formats: &[],
@@ -197,12 +199,7 @@ impl Atlas {
             ..Default::default()
         };
 
-        Ok(Texture::from_wgpu_tex(
-            device,
-            texture,
-            Some(sampler_desc),
-            None,
-        ))
+        Texture::from_wgpu_tex(device, texture, Some(sampler_desc), None)
     }
 
     /// Create a new atlas.
@@ -211,10 +208,33 @@ impl Atlas {
     ///
     /// ## Panics
     /// Panics if `size` is not a power of two.
-    pub fn new(runtime: impl AsRef<WgpuRuntime>, size: wgpu::Extent3d) -> Result<Self, AtlasError> {
-        log::trace!("creating new atlas with dimensions {size:?}");
-        let texture = Self::create_texture(runtime, size)?;
-        Ok(Self::new_with_texture(texture))
+    pub fn new(
+        slab: &SlabAllocator<WgpuRuntime>,
+        size: wgpu::Extent3d,
+        format: Option<wgpu::TextureFormat>,
+        label: Option<&str>,
+        usage: Option<wgpu::TextureUsages>,
+    ) -> Self {
+        let texture = Self::create_texture(slab.runtime(), size, format, label, usage);
+        let num_layers = texture.texture.size().depth_or_array_layers as usize;
+        let layers = vec![Layer::default(); num_layers];
+        log::trace!("creating new atlas with dimensions {size:?}, {num_layers} layers");
+        let descriptor = slab.new_value(AtlasDescriptor {
+            size: UVec3::new(size.width, size.height, size.depth_or_array_layers),
+        });
+        let label = label.map(|s| s.to_owned());
+
+        Atlas {
+            slab: slab.clone(),
+            layers: Arc::new(RwLock::new(layers)),
+            texture_array: Arc::new(RwLock::new(texture)),
+            descriptor,
+            label,
+        }
+    }
+
+    pub fn descriptor_id(&self) -> Id<AtlasDescriptor> {
+        self.descriptor.id()
     }
 
     pub fn len(&self) -> usize {
@@ -228,10 +248,10 @@ impl Atlas {
         self.len() == 0
     }
 
-    /// Returns a clone of the current atlas texture array.
-    pub fn get_texture(&self) -> Texture {
+    /// Returns a reference to the current atlas texture array.
+    pub fn get_texture(&self) -> impl Deref<Target = Texture> + '_ {
         // UNWRAP: panic on purpose
-        self.texture_array.read().unwrap().clone()
+        self.texture_array.read().unwrap()
     }
 
     pub fn get_layers(&self) -> impl Deref<Target = Vec<Layer>> + '_ {
@@ -244,7 +264,6 @@ impl Atlas {
     /// Any existing `Hybrid<AtlasTexture>`s will be invalidated.
     pub fn set_images(
         &self,
-        slab: &SlabAllocator<WgpuRuntime>,
         images: &[AtlasImage],
     ) -> Result<Vec<Hybrid<AtlasTexture>>, AtlasError> {
         log::debug!("setting images");
@@ -257,7 +276,7 @@ impl Atlas {
                 vec![Layer::default(); texture.texture.size().depth_or_array_layers as usize];
             let _old_layers = std::mem::replace(layers, new_layers);
         }
-        self.add_images(slab, images)
+        self.add_images(images)
     }
 
     pub fn get_size(&self) -> wgpu::Extent3d {
@@ -265,11 +284,10 @@ impl Atlas {
         self.texture_array.read().unwrap().texture.size()
     }
 
-    // TODO: Atlas should probably clone a reference to the runtime and the slab.
-    pub fn add_images(
+    /// Add the given images
+    pub fn add_images<'a>(
         &self,
-        slab: &SlabAllocator<WgpuRuntime>,
-        images: &[AtlasImage],
+        images: impl IntoIterator<Item = &'a AtlasImage>,
     ) -> Result<Vec<Hybrid<AtlasTexture>>, AtlasError> {
         // UNWRAP: POP
         let mut layers = self.layers.write().unwrap();
@@ -280,11 +298,12 @@ impl Atlas {
             .context(CannotPackTexturesSnafu { size: extent })?;
 
         let mut staged = StagedResources::try_staging(
-            slab.runtime(),
+            self.slab.runtime(),
             extent,
             newly_packed_layers,
-            Some(slab),
+            Some(&self.slab),
             &texture_array,
+            self.label.as_deref(),
         )?;
 
         // Commit our newly staged values, now that everything is done.
@@ -319,6 +338,7 @@ impl Atlas {
             newly_packed_layers,
             None::<&SlabAllocator<WgpuRuntime>>,
             &texture_array,
+            self.label.as_deref(),
         )?;
 
         // Commit our newly staged values, now that everything is done.
@@ -363,6 +383,41 @@ impl Atlas {
         }
     }
 
+    /// Read the atlas image from the GPU into a [`CopiedTextureBuffer`].
+    ///
+    /// This is primarily for testing.
+    ///
+    /// ## Panics
+    /// Panics if the pixels read from the GPU cannot be read.
+    pub fn atlas_img_buffer(
+        &self,
+        runtime: impl AsRef<WgpuRuntime>,
+        layer: u32,
+    ) -> CopiedTextureBuffer {
+        let runtime = runtime.as_ref();
+        let tex = self.get_texture();
+        let size = tex.texture.size();
+        let (channels, subpixel_bytes) =
+            crate::texture::wgpu_texture_format_channels_and_subpixel_bytes(tex.texture.format());
+        log::info!("atlas_texture_format: {:#?}", tex.texture.format());
+        log::info!("atlas_texture_channels: {channels:#?}");
+        log::info!("atlas_texture_subpixel_bytes: {subpixel_bytes:#?}");
+        Texture::read_from(
+            runtime,
+            &tex.texture,
+            size.width as usize,
+            size.height as usize,
+            channels as usize,
+            subpixel_bytes as usize,
+            0,
+            Some(wgpu::Origin3d {
+                x: 0,
+                y: 0,
+                z: layer,
+            }),
+        )
+    }
+
     /// Read the atlas image from the GPU.
     ///
     /// This is primarily for testing.
@@ -372,30 +427,16 @@ impl Atlas {
     /// ## Panics
     /// Panics if the pixels read from the GPU cannot be converted into an
     /// `RgbaImage`.
-    pub fn atlas_img(&self, ctx: &crate::Context, layer: u32) -> RgbaImage {
-        let tex = self.get_texture();
-        let size = tex.texture.size();
-        let buffer = Texture::read_from(
-            ctx,
-            &tex.texture,
-            size.width as usize,
-            size.height as usize,
-            4,
-            1,
-            0,
-            Some(wgpu::Origin3d {
-                x: 0,
-                y: 0,
-                z: layer,
-            }),
-        );
-        buffer.into_linear_rgba(ctx.get_device()).unwrap()
+    pub fn atlas_img(&self, runtime: impl AsRef<WgpuRuntime>, layer: u32) -> RgbaImage {
+        let runtime = runtime.as_ref();
+        let buffer = self.atlas_img_buffer(runtime, layer);
+        buffer.into_linear_rgba(&runtime.device).unwrap()
     }
 }
 
 fn pack_images<'a>(
     layers: &[Layer],
-    images: &'a [AtlasImage],
+    images: impl IntoIterator<Item = &'a AtlasImage>,
     extent: wgpu::Extent3d,
 ) -> Option<Vec<crunch::PackedItems<AnotherPacking<'a>>>> {
     let mut new_packing: Vec<AnotherPacking> = {
@@ -414,7 +455,7 @@ fn pack_images<'a>(
             })
             .chain(
                 images
-                    .iter()
+                    .into_iter()
                     .enumerate()
                     .map(|(i, image)| AnotherPacking::Img {
                         original_index: i,
@@ -462,9 +503,16 @@ impl StagedResources {
         newly_packed_layers: Vec<crunch::PackedItems<AnotherPacking>>,
         slab: Option<&SlabAllocator<WgpuRuntime>>,
         old_texture_array: &Texture,
+        label: Option<&str>,
     ) -> Result<Self, AtlasError> {
         let runtime = runtime.as_ref();
-        let new_texture_array = Atlas::create_texture(runtime, extent)?;
+        let new_texture_array = Atlas::create_texture(
+            runtime,
+            extent,
+            Some(old_texture_array.texture.format()),
+            label,
+            Some(old_texture_array.texture.usage()),
+        );
         let mut output = vec![];
         let mut encoder = runtime
             .device
@@ -504,9 +552,10 @@ impl StagedResources {
                             .push(InternalAtlasTexture::from_hybrid(&texture));
                         output.push((original_index, texture));
 
-                        let bytes = convert_to_rgba8_bytes(
+                        let bytes = convert_pixels(
                             image.pixels.clone(),
                             image.format,
+                            old_texture_array.texture.format(),
                             image.apply_linear_transfer,
                         );
 
@@ -529,14 +578,14 @@ impl StagedResources {
 
                         // write the new image from the CPU to the new texture
                         runtime.queue.write_texture(
-                            wgpu::ImageCopyTexture {
+                            wgpu::TexelCopyTextureInfo {
                                 texture: &new_texture_array.texture,
                                 mip_level: 0,
                                 origin,
                                 aspect: wgpu::TextureAspect::All,
                             },
                             &bytes,
-                            wgpu::ImageDataLayout {
+                            wgpu::TexelCopyBufferLayout {
                                 offset: 0,
                                 bytes_per_row: Some(4 * size_px.x),
                                 rows_per_image: Some(size_px.y),
@@ -551,17 +600,13 @@ impl StagedResources {
                         // copy the frame from the old texture to the new texture
                         // in a new destination
                         encoder.copy_texture_to_texture(
-                            wgpu::ImageCopyTexture {
+                            wgpu::TexelCopyTextureInfo {
                                 texture: &old_texture_array.texture,
                                 mip_level: 0,
-                                origin: wgpu::Origin3d {
-                                    x: t.offset_px.x,
-                                    y: t.offset_px.y,
-                                    z: t.layer_index,
-                                },
+                                origin: t.origin(),
                                 aspect: wgpu::TextureAspect::All,
                             },
-                            wgpu::ImageCopyTexture {
+                            wgpu::TexelCopyTextureInfo {
                                 texture: &new_texture_array.texture,
                                 mip_level: 0,
                                 origin: wgpu::Origin3d {
@@ -571,11 +616,7 @@ impl StagedResources {
                                 },
                                 aspect: wgpu::TextureAspect::All,
                             },
-                            wgpu::Extent3d {
-                                width: size_px.x,
-                                height: size_px.y,
-                                depth_or_array_layers: 1,
-                            },
+                            t.size_as_extent(),
                         );
 
                         t.layer_index = layer_index as u32;
@@ -594,6 +635,250 @@ impl StagedResources {
             image_additions: output,
             layers: temporary_layers,
         })
+    }
+}
+
+/// A reusable blitting operation that copies a source texture into a specific
+/// frame of an [`Atlas`].
+#[derive(Clone)]
+pub struct AtlasBlittingOperation {
+    atlas_slab_buffer: Arc<Mutex<SlabBuffer<wgpu::Buffer>>>,
+    pipeline: Arc<wgpu::RenderPipeline>,
+    bindgroup: ManagedBindGroup,
+    bindgroup_layout: Arc<wgpu::BindGroupLayout>,
+    sampler: Arc<wgpu::Sampler>,
+    from_texture_id: Arc<AtomicUsize>,
+    pub(crate) desc: Hybrid<AtlasBlittingDescriptor>,
+}
+
+impl AtlasBlittingOperation {
+    /// Copies the data from texture this [`AtlasBlittingOperation`] was created with
+    /// into the atlas.
+    ///
+    /// The original items used to create the inner bind group are required here, to
+    /// determine whether or not the bind group needs to be invalidated.
+    pub fn run(
+        &self,
+        runtime: impl AsRef<WgpuRuntime>,
+        encoder: &mut wgpu::CommandEncoder,
+        from_texture: &crate::texture::Texture,
+        to_atlas: &Atlas,
+        atlas_texture: &Hybrid<AtlasTexture>,
+    ) {
+        let runtime = runtime.as_ref();
+
+        // update the descriptor
+        self.desc.set(AtlasBlittingDescriptor {
+            atlas_texture_id: atlas_texture.id(),
+            atlas_desc_id: to_atlas.descriptor_id(),
+        });
+        // sync the update
+        let _ = to_atlas.slab.commit();
+
+        let to_atlas_texture = to_atlas.get_texture();
+        let mut atlas_slab_buffer = self.atlas_slab_buffer.lock().unwrap();
+        let atlas_slab_invalid = atlas_slab_buffer.update_if_invalid();
+        let from_texture_has_been_replaced = {
+            let prev_id = self
+                .from_texture_id
+                .swap(from_texture.id(), std::sync::atomic::Ordering::Relaxed);
+            from_texture.id() != prev_id
+        };
+        let should_invalidate = atlas_slab_invalid || from_texture_has_been_replaced;
+        let bindgroup = self.bindgroup.get(should_invalidate, || {
+            runtime
+                .device
+                .create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("atlas-blitting"),
+                    layout: &self.bindgroup_layout,
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: wgpu::BindingResource::Buffer(
+                                atlas_slab_buffer.deref().as_entire_buffer_binding(),
+                            ),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: wgpu::BindingResource::TextureView(&from_texture.view),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: wgpu::BindingResource::Sampler(&self.sampler),
+                        },
+                    ],
+                })
+        });
+
+        let atlas_texture = atlas_texture.get();
+        let atlas_view = to_atlas_texture
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor {
+                label: Some("atlas-blitting"),
+                format: None,
+                dimension: Some(wgpu::TextureViewDimension::D2),
+                usage: None,
+                aspect: wgpu::TextureAspect::All,
+                base_mip_level: 0,
+                mip_level_count: None,
+                base_array_layer: atlas_texture.layer_index,
+                array_layer_count: Some(1),
+            });
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("atlas-blitter"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: &atlas_view,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Load,
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+        });
+        pass.set_pipeline(&self.pipeline);
+        pass.set_bind_group(0, Some(bindgroup.as_ref()), &[]);
+        let id = self.desc.id();
+        pass.draw(0..6, id.inner()..id.inner() + 1);
+    }
+}
+
+/// A texture blitting utility.
+///
+/// [`AtlasBlitter`] copies textures to specific frames within the texture atlas.
+///
+/// Use this if you want to just render/copy texture A to texture B where
+/// [CommandEncoder::copy_texture_to_texture] would not work because of either
+/// - Textures are in incompatible formats
+/// - Textures are of different sizes
+#[derive(Clone)]
+pub struct AtlasBlitter {
+    pipeline: Arc<wgpu::RenderPipeline>,
+    bind_group_layout: Arc<wgpu::BindGroupLayout>,
+    sampler: Arc<wgpu::Sampler>,
+}
+
+impl AtlasBlitter {
+    /// Returns a new [`TextureBlitter`]
+    /// # Arguments
+    /// - `device` - A [`Device`]
+    /// - `format` - The [`TextureFormat`] of the texture that will be copied to. This has to be renderable.
+    /// - `sample_type` - The [`Sampler`] Filtering Mode
+    pub fn new(
+        device: &wgpu::Device,
+        format: wgpu::TextureFormat,
+        sample_type: wgpu::FilterMode,
+    ) -> Self {
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("atlas-blitter"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: sample_type,
+            ..Default::default()
+        });
+
+        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("atlas-blitter"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float {
+                            filterable: sample_type == wgpu::FilterMode::Linear,
+                        },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(if sample_type == wgpu::FilterMode::Linear {
+                        wgpu::SamplerBindingType::Filtering
+                    } else {
+                        wgpu::SamplerBindingType::NonFiltering
+                    }),
+                    count: None,
+                },
+            ],
+        });
+
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("atlas-blitter"),
+            bind_group_layouts: &[&bind_group_layout],
+            push_constant_ranges: &[],
+        });
+
+        let vertex = crate::linkage::atlas_blit_vertex::linkage(device);
+        let fragment = crate::linkage::atlas_blit_fragment::linkage(device);
+        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("atlas-blitter"),
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &vertex.module,
+                entry_point: Some(vertex.entry_point),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                buffers: &[],
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                unclipped_depth: false,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                conservative: false,
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &fragment.module,
+                entry_point: Some(fragment.entry_point),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format,
+                    blend: None,
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            multiview: None,
+            cache: None,
+        });
+
+        Self {
+            pipeline: pipeline.into(),
+            bind_group_layout: bind_group_layout.into(),
+            sampler: sampler.into(),
+        }
+    }
+
+    pub fn new_blitting_operation(&self, into_atlas: &Atlas) -> AtlasBlittingOperation {
+        AtlasBlittingOperation {
+            desc: into_atlas
+                .slab
+                .new_value(AtlasBlittingDescriptor::default()),
+            atlas_slab_buffer: Arc::new(Mutex::new(into_atlas.slab.commit())),
+            bindgroup: ManagedBindGroup::default(),
+            pipeline: self.pipeline.clone(),
+            sampler: self.sampler.clone(),
+            bindgroup_layout: self.bind_group_layout.clone(),
+            from_texture_id: Default::default(),
+        }
     }
 }
 

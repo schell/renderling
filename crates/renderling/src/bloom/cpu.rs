@@ -416,7 +416,7 @@ impl Bloom {
         let upsample_filter_radius =
             slab.new_value(1.0 / Vec2::new(resolution.x as f32, resolution.y as f32));
         let mix_strength = slab.new_value(0.04f32);
-        let slab_buffer = slab.upkeep();
+        let slab_buffer = slab.commit();
 
         let downsample_pipeline = Arc::new(create_bloom_downsample_pipeline(&runtime.device));
         let upsample_pipeline = Arc::new(create_bloom_upsample_pipeline(&runtime.device));
@@ -684,7 +684,7 @@ impl Bloom {
     }
 
     pub fn bloom(&self, device: &wgpu::Device, queue: &wgpu::Queue) {
-        self.slab.upkeep();
+        self.slab.commit();
         assert!(
             self.slab_buffer.is_valid(),
             "bloom slab buffer should never resize"

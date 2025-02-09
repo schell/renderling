@@ -160,7 +160,7 @@ impl ComputeCulling {
         Self {
             pipeline,
             bindgroup_layout,
-            bindgroup: ManagedBindGroup::new(bindgroup),
+            bindgroup: ManagedBindGroup::from(bindgroup),
             compute_depth_pyramid,
             pyramid_slab_buffer,
             stage_slab_buffer: stage_slab_buffer.clone(),
@@ -180,9 +180,9 @@ impl ComputeCulling {
         // Compute the depth pyramid from last frame's depth buffer
         self.compute_depth_pyramid.run(depth_texture);
 
-        let stage_slab_invalid = self.stage_slab_buffer.synchronize();
-        let indirect_slab_invalid = self.indirect_slab_buffer.synchronize();
-        let pyramid_slab_invalid = self.pyramid_slab_buffer.synchronize();
+        let stage_slab_invalid = self.stage_slab_buffer.update_if_invalid();
+        let indirect_slab_invalid = self.indirect_slab_buffer.update_if_invalid();
+        let pyramid_slab_invalid = self.pyramid_slab_buffer.update_if_invalid();
         let should_recreate_bindgroup =
             stage_slab_invalid || indirect_slab_invalid || pyramid_slab_invalid;
         log::trace!("stage_slab_invalid: {stage_slab_invalid}");
@@ -270,7 +270,7 @@ impl DepthPyramid {
         self.mip = mip.into_gpu_only();
 
         // Reclaim the dropped buffer slots
-        self.slab.upkeep();
+        self.slab.commit();
 
         // Reallocate
         let (mip_data, mip) = Self::allocate(size, &self.desc, &self.slab);
@@ -278,7 +278,7 @@ impl DepthPyramid {
         self.mip = mip;
 
         // Run upkeep one more time to sync the resize
-        self.slab.upkeep();
+        self.slab.commit();
     }
 
     pub fn size(&self) -> UVec2 {
@@ -428,7 +428,7 @@ impl ComputeCopyDepth {
         let sample_count = depth_texture.texture.sample_count();
         let bindgroup_layout = Self::create_bindgroup_layout(device, sample_count);
         let pipeline = Self::create_pipeline(device, &bindgroup_layout, sample_count > 1);
-        let pyramid_slab_buffer = depth_pyramid.slab.upkeep();
+        let pyramid_slab_buffer = depth_pyramid.slab.commit();
         let buffer = Self::create_bindgroup(
             device,
             &bindgroup_layout,
@@ -437,7 +437,7 @@ impl ComputeCopyDepth {
         );
         Self {
             pipeline,
-            bindgroup: ManagedBindGroup::new(buffer),
+            bindgroup: ManagedBindGroup::from(buffer),
             bindgroup_layout,
             pyramid_slab_buffer,
             sample_count,
@@ -474,9 +474,9 @@ impl ComputeCopyDepth {
         }
 
         // TODO: check if we need to upkeep the depth pyramid slab here.
-        let _ = pyramid.slab.upkeep();
+        let _ = pyramid.slab.commit();
         let should_recreate_bindgroup =
-            self.pyramid_slab_buffer.synchronize() || sample_count_mismatch || size_changed;
+            self.pyramid_slab_buffer.update_if_invalid() || sample_count_mismatch || size_changed;
         let bindgroup = self.bindgroup.get(should_recreate_bindgroup, || {
             Self::create_bindgroup(
                 &runtime.device,
@@ -577,7 +577,7 @@ impl ComputeDownsampleDepth {
         let device = pyramid.slab.device();
         let bindgroup_layout = Self::create_bindgroup_layout(device);
         let pipeline = Self::create_pipeline(device, &bindgroup_layout);
-        let pyramid_slab_buffer = pyramid.slab.upkeep();
+        let pyramid_slab_buffer = pyramid.slab.commit();
         let bindgroup = Self::create_bindgroup(device, &bindgroup_layout, &pyramid_slab_buffer);
         Self {
             pipeline,
@@ -590,7 +590,7 @@ impl ComputeDownsampleDepth {
     pub fn run(&mut self, pyramid: &DepthPyramid) {
         let device = pyramid.slab.device();
 
-        if self.pyramid_slab_buffer.synchronize() {
+        if self.pyramid_slab_buffer.update_if_invalid() {
             self.bindgroup =
                 Self::create_bindgroup(device, &self.bindgroup_layout, &self.pyramid_slab_buffer);
         }
@@ -603,7 +603,7 @@ impl ComputeDownsampleDepth {
                 desc.size
             });
             // Sync the change.
-            pyramid.slab.upkeep();
+            pyramid.slab.commit();
             debug_assert!(
                 self.pyramid_slab_buffer.is_valid(),
                 "pyramid slab should never resize here"

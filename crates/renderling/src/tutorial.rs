@@ -107,7 +107,10 @@ pub fn tutorial_slabbed_renderlet(
 
 #[cfg(test)]
 mod test {
-    use craballoc::prelude::{SlabAllocator, WgpuRuntime};
+    use craballoc::{
+        prelude::{SlabAllocator, WgpuRuntime},
+        slab::SlabBuffer,
+    };
 
     use crate::{
         camera::Camera,
@@ -211,7 +214,11 @@ mod test {
         let WgpuRuntime { device, queue } = ctx.as_ref();
 
         // Create our geometry on the slab.
-        let slab = SlabAllocator::new(&ctx, wgpu::BufferUsages::empty());
+        let slab = SlabAllocator::new_with_label(
+            &ctx,
+            wgpu::BufferUsages::empty(),
+            Some("isosceles-triangle-no-instance"),
+        );
         let initial_vertices = [
             Vertex {
                 position: Vec3::new(0.5, -0.5, 0.0),
@@ -299,7 +306,7 @@ mod test {
             cache: None,
         });
 
-        let slab_buffer = slab.upkeep();
+        let slab_buffer: SlabBuffer<wgpu::Buffer> = slab.commit();
         let bindgroup = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label,
             layout: &bindgroup_layout,
@@ -369,7 +376,11 @@ mod test {
         let WgpuRuntime { device, queue } = ctx.as_ref();
 
         // Create our geometry on the slab.
-        let slab = SlabAllocator::new(&ctx, wgpu::BufferUsages::empty());
+        let slab: SlabAllocator<WgpuRuntime> = SlabAllocator::new_with_label(
+            &ctx,
+            wgpu::BufferUsages::empty(),
+            Some("slabbed-isosceles-triangle"),
+        );
         let geometry = vec![
             Vertex {
                 position: Vec3::new(0.5, -0.5, 0.0),
@@ -471,7 +482,7 @@ mod test {
             cache: None,
         });
 
-        let slab_buffer = slab.upkeep();
+        let slab_buffer: SlabBuffer<wgpu::Buffer> = slab.commit();
         let bindgroup = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label,
             layout: &bindgroup_layout,
@@ -528,7 +539,11 @@ mod test {
 
         // Create our geometry on the slab.
         // Don't worry too much about capacity, it can grow.
-        let slab = SlabAllocator::new(&ctx, wgpu::BufferUsages::empty());
+        let slab: SlabAllocator<WgpuRuntime> = SlabAllocator::new_with_label(
+            &ctx,
+            wgpu::BufferUsages::empty(),
+            Some("slabbed-renderlet"),
+        );
         let geometry = slab.new_array([
             Vertex {
                 position: Vec3::new(0.5, -0.5, 0.0),
@@ -642,7 +657,7 @@ mod test {
             cache: None,
         });
 
-        let slab_buffer = slab.upkeep();
+        let slab_buffer: SlabBuffer<wgpu::Buffer> = slab.commit();
         let bindgroup = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label,
             layout: &bindgroup_layout,

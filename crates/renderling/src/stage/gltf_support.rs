@@ -10,7 +10,10 @@ use snafu::{OptionExt, ResultExt, Snafu};
 use crate::{
     atlas::{AtlasError, AtlasImage, AtlasTexture, TextureAddressMode, TextureModes},
     camera::Camera,
-    light::{DirectionalLight, Light, LightDetails, LightStyle, PointLight, SpotLight},
+    light::{
+        AnalyticalLightBundle, DirectionalLightDescriptor, Light, LightDetails, LightStyle,
+        PointLightDescriptor, SpotLightDescriptor,
+    },
     pbr::Material,
     stage::{MorphTarget, NestedTransform, Renderlet, Skin, Stage, Vertex},
     transform::Transform,
@@ -638,15 +641,6 @@ impl GltfCamera {
     }
 }
 
-#[derive(Debug)]
-pub struct GltfLight {
-    pub details: LightDetails,
-    pub node_transform: NestedTransform,
-    pub light: Hybrid<Light>,
-}
-
-impl GltfLight {}
-
 /// A node in a GLTF document, ready to be 'drawn'.
 #[derive(Clone, Debug)]
 pub struct GltfNode {
@@ -754,7 +748,7 @@ impl GltfSkin {
     }
 }
 
-#[derive(Debug)]
+/// A loaded GLTF document.
 pub struct GltfDocument {
     pub animations: Vec<Animation>,
     pub cameras: Vec<GltfCamera>,
@@ -762,7 +756,7 @@ pub struct GltfDocument {
     pub default_scene: Option<usize>,
     pub extensions: Option<serde_json::Value>,
     pub textures: Vec<Hybrid<AtlasTexture>>,
-    pub lights: Vec<GltfLight>,
+    pub lights: Vec<AnalyticalLightBundle>,
     pub meshes: Vec<GltfMesh>,
     pub nodes: Vec<GltfNode>,
     pub materials: HybridArray<Material>,
@@ -997,68 +991,67 @@ impl GltfDocument {
         let mut lights = vec![];
         if let Some(gltf_lights) = document.lights() {
             for gltf_light in gltf_lights {
-                let color = Vec3::from(gltf_light.color()).extend(1.0);
-                let intensity = gltf_light.intensity();
-                let (mut light, details): (Light, _) = match gltf_light.kind() {
-                    gltf::khr_lights_punctual::Kind::Directional => {
-                        let light = stage.new_value(DirectionalLight {
-                            direction: Vec3::NEG_Z,
-                            color,
-                            // TODO: Set a unit for lighting.
-                            // We don't yet use a unit for our lighting, and we should.
-                            // https://www.realtimerendering.com/blog/physical-units-for-lights/
-                            //
-                            // NOTE:
-                            // glTF spec [1] says directional light is in lux, whereas spot and point are
-                            // in candelas. I haven't really set a unit, it's implicit in the shader, but it seems we
-                            // can roughly get candelas from lux by dividing by 683 [2].
-                            // 1. https://github.com/KhronosGroup/glTF/blob/main/extensions/2.0/Khronos/KHR_lights_punctual/README.md
-                            // 2. https://depts.washington.edu/mictech/optics/me557/Radiometry.pdf
-                            intensity: intensity / 683.0,
-                        });
-
-                        (light.id().into(), LightDetails::Directional(light))
-                    }
-                    gltf::khr_lights_punctual::Kind::Point => {
-                        let light = stage.new_value(PointLight {
-                            position: Vec3::ZERO,
-                            color,
-                            intensity,
-                        });
-                        (light.id().into(), LightDetails::Point(light))
-                    }
-                    gltf::khr_lights_punctual::Kind::Spot {
-                        inner_cone_angle,
-                        outer_cone_angle,
-                    } => {
-                        let light = stage.new_value(SpotLight {
-                            position: Vec3::ZERO,
-                            direction: Vec3::NEG_Z,
-                            inner_cutoff: inner_cone_angle,
-                            outer_cutoff: outer_cone_angle,
-                            color,
-                            intensity,
-                        });
-                        (light.id().into(), LightDetails::Spot(light))
-                    }
-                };
                 let node_index = *light_index_to_node_index.get(&gltf_light.index()).context(
                     MissingCameraSnafu {
                         index: gltf_light.index(),
                     },
                 )?;
-                let node_transform = node_transforms
+
+                let mut node_transform = node_transforms
                     .get(&node_index)
                     .context(MissingNodeSnafu { index: node_index })?
                     .clone();
-                light.transform_id = node_transform.global_transform_id();
+                node_transform.move_gpu_to_slab(stage.lighting().slab());
 
-                let light = stage.new_value(light);
-                lights.push(GltfLight {
-                    details,
-                    node_transform,
-                    light,
-                });
+                let color = Vec3::from(gltf_light.color()).extend(1.0);
+                let intensity = gltf_light.intensity();
+                let light_bundle = match gltf_light.kind() {
+                    gltf::khr_lights_punctual::Kind::Directional => {
+                        stage.lighting().new_directional_light(
+                            DirectionalLightDescriptor {
+                                direction: Vec3::NEG_Z,
+                                color,
+                                // TODO: Set a unit for lighting.
+                                // We don't yet use a unit for our lighting, and we should.
+                                // https://www.realtimerendering.com/blog/physical-units-for-lights/
+                                //
+                                // NOTE:
+                                // glTF spec [1] says directional light is in lux, whereas spot and point are
+                                // in candelas. I haven't really set a unit, it's implicit in the shader, but it seems we
+                                // can roughly get candelas from lux by dividing by 683 [2].
+                                // 1. https://github.com/KhronosGroup/glTF/blob/main/extensions/2.0/Khronos/KHR_lights_punctual/README.md
+                                // 2. https://depts.washington.edu/mictech/optics/me557/Radiometry.pdf
+                                intensity: intensity / 683.0,
+                            },
+                            Some(node_transform),
+                        )
+                    }
+                    gltf::khr_lights_punctual::Kind::Point => todo!(),
+                    // {
+                    //     let light = stage.new_value(PointLightDescriptor {
+                    //         position: Vec3::ZERO,
+                    //         color,
+                    //         intensity,
+                    //     });
+                    //     (light.id().into(), LightDetails::Point(light))
+                    // }
+                    gltf::khr_lights_punctual::Kind::Spot {
+                        inner_cone_angle,
+                        outer_cone_angle,
+                    } => todo!(), // {
+                                  //     let light = stage.new_value(SpotLightDescriptor {
+                                  //         position: Vec3::ZERO,
+                                  //         direction: Vec3::NEG_Z,
+                                  //         inner_cutoff: inner_cone_angle,
+                                  //         outer_cutoff: outer_cone_angle,
+                                  //         color,
+                                  //         intensity,
+                                  //     });
+                                  //     (light.id().into(), LightDetails::Spot(light))
+                                  // }
+                };
+
+                lights.push(light_bundle);
             }
         }
 
@@ -1381,8 +1374,6 @@ mod test {
                 r.camera_id = gltf_camera.camera.id();
             });
         });
-
-        stage.set_lights(doc.lights.iter().map(|gltf_light| gltf_light.light.id()));
 
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());

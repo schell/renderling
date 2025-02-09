@@ -9,12 +9,15 @@
 use core::ops::Mul;
 use spirv_std::{
     image::{Cubemap, Image2d, Image2dArray},
-    Sampler,
+    Image, Sampler,
 };
 
 pub use glam::*;
 pub use spirv_std::num_traits::{clamp, Float, Zero};
+
 pub trait IsSampler: Copy + Clone {}
+
+impl IsSampler for () {}
 
 impl IsSampler for Sampler {}
 
@@ -32,6 +35,14 @@ impl Sample2d for Image2d {
     }
 }
 
+impl Sample2d for Image!(2D, type=f32, sampled, depth) {
+    type Sampler = Sampler;
+
+    fn sample_by_lod(&self, sampler: Self::Sampler, uv: glam::Vec2, lod: f32) -> glam::Vec4 {
+        self.sample_by_lod(sampler, uv, lod)
+    }
+}
+
 pub trait Sample2dArray {
     type Sampler: IsSampler;
 
@@ -39,6 +50,14 @@ pub trait Sample2dArray {
 }
 
 impl Sample2dArray for Image2dArray {
+    type Sampler = Sampler;
+
+    fn sample_by_lod(&self, sampler: Self::Sampler, uv: glam::Vec3, lod: f32) -> glam::Vec4 {
+        self.sample_by_lod(sampler, uv, lod)
+    }
+}
+
+impl Sample2dArray for Image!(2D, type=f32, sampled, arrayed, depth) {
     type Sampler = Sampler;
 
     fn sample_by_lod(&self, sampler: Self::Sampler, uv: glam::Vec3, lod: f32) -> glam::Vec4 {
@@ -66,41 +85,109 @@ mod cpu {
 
     use super::*;
 
-    /// A CPU-side texture sampler.
-    ///
-    /// Provided primarily for testing purposes.
-    #[derive(Debug, Clone, Copy, Default)]
-    pub struct CpuSampler;
+    /// A CPU texture with no dimensions that always returns the same
+    /// value when sampled.
+    pub struct ConstTexture(Vec4);
 
-    impl IsSampler for CpuSampler {}
+    impl Sample2d for ConstTexture {
+        type Sampler = ();
 
-    #[derive(Debug, Default)]
-    pub struct CpuTexture2d {
-        pub image: image::DynamicImage,
+        fn sample_by_lod(&self, _sampler: Self::Sampler, _uv: glam::Vec2, _lod: f32) -> Vec4 {
+            self.0
+        }
     }
 
-    impl Sample2d for CpuTexture2d {
-        type Sampler = CpuSampler;
+    impl Sample2dArray for ConstTexture {
+        type Sampler = ();
 
-        fn sample_by_lod(&self, _sampler: Self::Sampler, uv: glam::Vec2, _lod: f32) -> glam::Vec4 {
+        fn sample_by_lod(&self, _sampler: Self::Sampler, _uv: glam::Vec3, _lod: f32) -> glam::Vec4 {
+            self.0
+        }
+    }
+
+    impl SampleCube for ConstTexture {
+        type Sampler = ();
+
+        fn sample_by_lod(&self, _sampler: Self::Sampler, _uv: Vec3, _lod: f32) -> glam::Vec4 {
+            self.0
+        }
+    }
+
+    impl ConstTexture {
+        pub fn new(value: Vec4) -> Self {
+            Self(value)
+        }
+    }
+
+    #[derive(Debug)]
+    pub struct CpuTexture2d<P: image::Pixel, Container> {
+        pub image: image::ImageBuffer<P, Container>,
+        convert_fn: fn(&P) -> Vec4,
+    }
+
+    impl<P: image::Pixel, Container> CpuTexture2d<P, Container> {
+        pub fn from_image(
+            image: image::ImageBuffer<P, Container>,
+            convert_fn: fn(&P) -> Vec4,
+        ) -> Self {
+            Self { image, convert_fn }
+        }
+    }
+
+    impl<P, Container> Sample2d for CpuTexture2d<P, Container>
+    where
+        P: image::Pixel,
+        Container: std::ops::Deref<Target = [P::Subpixel]>,
+    {
+        type Sampler = ();
+
+        fn sample_by_lod(&self, _sampler: Self::Sampler, uv: glam::Vec2, _lod: f32) -> Vec4 {
             // TODO: lerp the CPU texture sampling
-            let x = uv.x as u32;
-            if x >= self.image.width() {
-                return glam::Vec4::ZERO;
-            }
+            // TODO: use configurable wrap mode on CPU sampling
+            let px = uv.x.clamp(0.0, 1.0) * self.image.width() as f32;
+            let py = uv.y.clamp(0.0, 1.0) * self.image.height() as f32;
+            let p = self.image.get_pixel(
+                px.round().min(self.image.width() as f32) as u32,
+                py.round().min(self.image.height() as f32) as u32,
+            );
+            (self.convert_fn)(p)
+        }
+    }
 
-            let y = uv.y as u32;
-            if y >= self.image.height() {
-                return glam::Vec4::ZERO;
-            }
+    pub struct CpuTexture2dArray<P: image::Pixel, Container> {
+        pub images: Vec<image::ImageBuffer<P, Container>>,
+        convert_fn: fn(&P) -> Vec4,
+    }
 
-            let image::Rgba([r, g, b, a]) = self.image.get_pixel(uv.x as u32, uv.y as u32);
-            glam::Vec4::new(
-                r as f32 / 255.0,
-                g as f32 / 255.0,
-                b as f32 / 255.0,
-                a as f32 / 255.0,
-            )
+    impl<P: image::Pixel, Container> CpuTexture2dArray<P, Container> {
+        pub fn from_images(
+            images: impl IntoIterator<Item = image::ImageBuffer<P, Container>>,
+            convert_fn: fn(&P) -> Vec4,
+        ) -> Self {
+            let images = images.into_iter().collect();
+            Self { images, convert_fn }
+        }
+    }
+
+    impl<P, Container> Sample2dArray for CpuTexture2dArray<P, Container>
+    where
+        P: image::Pixel,
+        Container: std::ops::Deref<Target = [P::Subpixel]>,
+    {
+        type Sampler = ();
+
+        /// Panics if `uv.z` is greater than length of images.
+        fn sample_by_lod(&self, _sampler: Self::Sampler, uv: glam::Vec3, _lod: f32) -> Vec4 {
+            // TODO: lerp the CPU texture sampling
+            // TODO: use configurable wrap mode on CPU sampling
+            let img = &self.images[uv.z as usize];
+            let px = uv.x.clamp(0.0, 1.0) * img.width() as f32;
+            let py = uv.y.clamp(0.0, 1.0) * img.height() as f32;
+            let p = img.get_pixel(
+                px.round().min(img.width() as f32) as u32,
+                py.round().min(img.height() as f32) as u32,
+            );
+            (self.convert_fn)(p)
         }
     }
 
@@ -113,7 +200,7 @@ mod cpu {
     }
 
     impl SampleCube for CpuCubemap {
-        type Sampler = CpuSampler;
+        type Sampler = ();
 
         fn sample_by_lod(
             &self,
@@ -428,12 +515,20 @@ pub const CLIP_QUAD_CCW: [Vec3; 6] = {
     [bl, br, tr, tr, tl, bl]
 };
 
+pub const CLIP_SPACE_COORD_QUAD_CCW_TL: Vec4 = Vec4::new(-1.0, 1.0, 0.5, 1.0);
+pub const CLIP_SPACE_COORD_QUAD_CCW_BL: Vec4 = Vec4::new(-1.0, -1.0, 0.5, 1.0);
+pub const CLIP_SPACE_COORD_QUAD_CCW_TR: Vec4 = Vec4::new(1.0, 1.0, 0.5, 1.0);
+pub const CLIP_SPACE_COORD_QUAD_CCW_BR: Vec4 = Vec4::new(1.0, -1.0, 0.5, 1.0);
+
 pub const CLIP_SPACE_COORD_QUAD_CCW: [Vec4; 6] = {
-    let tl = Vec4::new(-1.0, 1.0, 0.5, 1.0);
-    let tr = Vec4::new(1.0, 1.0, 0.5, 1.0);
-    let bl = Vec4::new(-1.0, -1.0, 0.5, 1.0);
-    let br = Vec4::new(1.0, -1.0, 0.5, 1.0);
-    [bl, br, tr, tr, tl, bl]
+    [
+        CLIP_SPACE_COORD_QUAD_CCW_BL,
+        CLIP_SPACE_COORD_QUAD_CCW_BR,
+        CLIP_SPACE_COORD_QUAD_CCW_TR,
+        CLIP_SPACE_COORD_QUAD_CCW_TR,
+        CLIP_SPACE_COORD_QUAD_CCW_TL,
+        CLIP_SPACE_COORD_QUAD_CCW_BL,
+    ]
 };
 
 pub const UV_COORD_QUAD_CCW: [Vec2; 6] = {
