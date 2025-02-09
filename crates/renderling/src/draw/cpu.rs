@@ -1,13 +1,10 @@
 //! CPU-only side of renderling/draw.rs
 
-use std::sync::Arc;
-
 use craballoc::{
     prelude::{Gpu, Hybrid, SlabAllocator, WeakHybrid, WgpuRuntime},
     slab::SlabBuffer,
 };
 use crabslab::Id;
-use glam::UVec2;
 use rustc_hash::FxHashMap;
 
 use crate::{
@@ -66,7 +63,7 @@ impl IndirectDraws {
             compute_culling: ComputeCulling::new(
                 runtime,
                 stage_slab_buffer,
-                &indirect_slab.upkeep(),
+                &indirect_slab.commit(),
                 depth_texture,
             ),
             slab: indirect_slab,
@@ -81,7 +78,7 @@ impl IndirectDraws {
     }
 
     fn get_indirect_buffer(&self) -> SlabBuffer<wgpu::Buffer> {
-        self.slab.upkeep()
+        self.slab.commit()
     }
 
     fn sync_with_internal_renderlets(
@@ -93,8 +90,8 @@ impl IndirectDraws {
             self.invalidate();
             // Pre-upkeep to reclaim resources - this is necessary because
             // the draw buffer has to be contiguous (it can't start with a bunch of trash)
-            let indirect_buffer = self.slab.upkeep();
-            if indirect_buffer.is_new_this_upkeep() {
+            let indirect_buffer = self.slab.commit();
+            if indirect_buffer.is_new_this_commit() {
                 log::warn!("new indirect buffer");
             }
             self.draws = internal_renderlets
