@@ -226,6 +226,58 @@ mod test {
         std::path::PathBuf::from(std::env!("CARGO_WORKSPACE_DIR"))
     }
 
+    pub fn capture_gpu_frame<T>(
+        ctx: &Context,
+        path: impl AsRef<std::path::Path>,
+        f: impl FnOnce() -> T,
+    ) -> T {
+        let path = workspace_dir().join("test_output").join(path);
+        let parent = path.parent().unwrap();
+        std::fs::create_dir_all(parent).unwrap();
+
+        #[cfg(target_os = "macos")]
+        {
+            if path.exists() {
+                log::info!(
+                    "deleting {} before writing gpu frame capture",
+                    path.display()
+                );
+                std::fs::remove_dir_all(&path).unwrap();
+            }
+
+            if std::env::var("METAL_CAPTURE_ENABLED").is_err() {
+                log::error!("Env var METAL_CAPTURE_ENABLED must be set");
+                panic!("missing METAL_CAPTURE_ENABLED=1");
+            }
+
+            let m = metal::CaptureManager::shared();
+            let desc = metal::CaptureDescriptor::new();
+
+            desc.set_destination(metal::MTLCaptureDestination::GpuTraceDocument);
+            desc.set_output_url(path);
+            unsafe {
+                ctx.get_device()
+                    .as_hal::<wgpu_core::api::Metal, _, ()>(|maybe_metal_device| {
+                        if let Some(metal_device) = maybe_metal_device {
+                            desc.set_capture_device(
+                                metal_device.raw_device().try_lock().unwrap().as_ref(),
+                            );
+                        } else {
+                            panic!("not a capturable device")
+                        }
+                    })
+            };
+            m.start_capture(&desc).unwrap();
+            let t = f();
+            m.stop_capture();
+            t
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            f()
+        }
+    }
+
     #[test]
     fn sanity_transmute() {
         let zerof32 = 0f32;
@@ -769,7 +821,7 @@ mod test {
     #[test]
     /// Tests shading with directional light.
     fn scene_cube_directional() {
-        use crate::light::{DirectionalLight, Light, LightStyle};
+        use crate::light::{DirectionalLightDescriptor, Light, LightStyle};
 
         let ctx = Context::headless(100, 100);
         let stage = ctx
@@ -784,33 +836,38 @@ mod test {
         let red = Vec3::X.extend(1.0);
         let green = Vec3::Y.extend(1.0);
         let blue = Vec3::Z.extend(1.0);
-        let dir_red = stage.new_value(DirectionalLight {
-            direction: Vec3::NEG_Y,
-            color: red,
-            intensity: 10.0,
-        });
-        let dir_green = stage.new_value(DirectionalLight {
-            direction: Vec3::NEG_X,
-            color: green,
-            intensity: 10.0,
-        });
-        let dir_blue = stage.new_value(DirectionalLight {
-            direction: Vec3::NEG_Z,
-            color: blue,
-            intensity: 10.0,
-        });
+        let dir_red = stage.lighting().new_directional_light(
+            DirectionalLightDescriptor {
+                direction: Vec3::NEG_Y,
+                color: red,
+                intensity: 10.0,
+            },
+            None,
+        );
+        let _dir_green = stage.lighting().new_directional_light(
+            DirectionalLightDescriptor {
+                direction: Vec3::NEG_X,
+                color: green,
+                intensity: 10.0,
+            },
+            None,
+        );
+        let _dir_blue = stage.lighting().new_directional_light(
+            DirectionalLightDescriptor {
+                direction: Vec3::NEG_Z,
+                color: blue,
+                intensity: 10.0,
+            },
+            None,
+        );
         assert_eq!(
             Light {
                 light_type: LightStyle::Directional,
-                index: dir_red.id().inner(),
+                index: dir_red.light_details.as_directional().unwrap().id().inner(),
                 ..Default::default()
             },
-            dir_red.id().into()
+            Light::from(dir_red.light_details.as_directional().unwrap().id())
         );
-        let dir_red = stage.new_value(Light::from(dir_red.id()));
-        let dir_green = stage.new_value(Light::from(dir_green.id()));
-        let dir_blue = stage.new_value(Light::from(dir_blue.id()));
-        stage.set_lights(vec![dir_red.id(), dir_green.id(), dir_blue.id()]);
 
         let material = stage.new_value(Material::default());
         let geometry = stage.new_array(
