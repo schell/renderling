@@ -47,6 +47,8 @@ type Result<T, E = TextureError> = std::result::Result<T, E>;
 
 pub fn wgpu_texture_format_channels_and_subpixel_bytes(format: wgpu::TextureFormat) -> (u32, u32) {
     match format {
+        wgpu::TextureFormat::Depth32Float => (1, 4),
+        wgpu::TextureFormat::R32Float => (1, 4),
         wgpu::TextureFormat::Rg16Float => (2, 2),
         wgpu::TextureFormat::Rgba16Float => (4, 2),
         wgpu::TextureFormat::Rgba32Float => (4, 4),
@@ -873,16 +875,25 @@ impl CopiedTextureBuffer {
     }
 
     /// Convert the post render buffer into an image.
-    pub fn into_image<P>(self, device: &wgpu::Device) -> Result<image::DynamicImage, TextureError>
+    ///
+    /// `Sp` is the sub-pixel type. eg, `u8` or `f32`
+    ///
+    /// `P` is the pixel type. eg, `Rgba<u8>` or `Luma<f32>`
+    pub fn into_image<Sp, P>(
+        self,
+        device: &wgpu::Device,
+    ) -> Result<image::DynamicImage, TextureError>
     where
-        P: image::Pixel<Subpixel = u8>,
-        image::DynamicImage: From<image::ImageBuffer<P, Vec<u8>>>,
+        Sp: bytemuck::AnyBitPattern,
+        P: image::Pixel<Subpixel = Sp>,
+        image::DynamicImage: From<image::ImageBuffer<P, Vec<Sp>>>,
     {
         let pixels = self.pixels(device);
-        let img_buffer: image::ImageBuffer<P, Vec<u8>> = image::ImageBuffer::from_raw(
+        let coerced_pixels: &[Sp] = bytemuck::cast_slice(&pixels);
+        let img_buffer: image::ImageBuffer<P, Vec<Sp>> = image::ImageBuffer::from_raw(
             self.dimensions.width as u32,
             self.dimensions.height as u32,
-            pixels,
+            coerced_pixels.to_vec(),
         )
         .context(CouldNotConvertImageBufferSnafu)?;
         Ok(image::DynamicImage::from(img_buffer))
@@ -905,6 +916,8 @@ impl CopiedTextureBuffer {
     ///
     /// Ensures that the pixels are in the given color space by applying the
     /// correct transfer function if needed.
+    ///
+    /// Assumes the texture is in `Rgba8` format.
     pub fn into_rgba(
         self,
         device: &wgpu::Device,
@@ -913,7 +926,7 @@ impl CopiedTextureBuffer {
         linear: bool,
     ) -> Result<image::RgbaImage, TextureError> {
         let format = self.format;
-        let mut img_buffer = self.into_image::<image::Rgba<u8>>(device)?.into_rgba8();
+        let mut img_buffer = self.into_image::<u8, image::Rgba<u8>>(device)?.into_rgba8();
         let linear_xfer = format.is_srgb() && linear;
         let opto_xfer = !format.is_srgb() && !linear;
         let should_xfer = linear_xfer || opto_xfer;
@@ -948,7 +961,7 @@ impl CopiedTextureBuffer {
     /// linear transfer if the texture this buffer was copied from was sRGB.
     pub fn into_linear_rgba(self, device: &wgpu::Device) -> Result<image::RgbaImage, TextureError> {
         let format = self.format;
-        let mut img_buffer = self.into_image::<image::Rgba<u8>>(device)?.into_rgba8();
+        let mut img_buffer = self.into_image::<u8, image::Rgba<u8>>(device)?.into_rgba8();
         if format.is_srgb() {
             log::trace!(
                 "converting by applying linear transfer fn to srgb pixels (sRGB -> linear)"
@@ -971,7 +984,7 @@ impl CopiedTextureBuffer {
     /// linear transfer if the texture this buffer was copied from was sRGB.
     pub fn into_srgba(self, device: &wgpu::Device) -> Result<image::RgbaImage, TextureError> {
         let format = self.format;
-        let mut img_buffer = self.into_image::<image::Rgba<u8>>(device)?.into_rgba8();
+        let mut img_buffer = self.into_image::<u8, image::Rgba<u8>>(device)?.into_rgba8();
         if !format.is_srgb() {
             log::trace!(
                 "converting by applying opto transfer fn to linear pixels (linear -> sRGB)"

@@ -601,6 +601,10 @@ impl Context {
         Texture::from_wgpu_tex(self.get_device(), texture, sampler, None)
     }
 
+    pub fn runtime(&self) -> &WgpuRuntime {
+        &self.runtime
+    }
+
     pub fn get_device(&self) -> &wgpu::Device {
         &self.runtime.device
     }

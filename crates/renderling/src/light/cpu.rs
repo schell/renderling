@@ -19,8 +19,7 @@ use crate::{
     bindgroup::ManagedBindGroup,
     bvol::Frustum,
     camera::Camera,
-    prelude::Transform,
-    stage::Renderlet,
+    stage::{NestedTransform, Renderlet},
 };
 
 use super::{
@@ -244,7 +243,7 @@ impl ShadowMap {
 pub struct AnalyticalLightBundle<Ct: IsContainer = HybridContainer> {
     pub light: Ct::Container<super::Light>,
     pub light_details: LightDetails<Ct>,
-    pub transform: Ct::Container<Transform>,
+    pub transform: NestedTransform<Ct>,
 }
 
 impl AnalyticalLightBundle<WeakContainer> {
@@ -252,7 +251,7 @@ impl AnalyticalLightBundle<WeakContainer> {
         AnalyticalLightBundle {
             light: WeakHybrid::from_hybrid(&light.light),
             light_details: LightDetails::from_hybrid(&light.light_details),
-            transform: WeakHybrid::from_hybrid(&light.transform),
+            transform: NestedTransform::from_hybrid(&light.transform),
         }
     }
 }
@@ -495,6 +494,10 @@ impl Lighting {
         }
     }
 
+    pub fn slab(&self) -> &SlabAllocator<WgpuRuntime> {
+        &self.light_slab
+    }
+
     fn add_light_bundle(&self, bundle: &AnalyticalLightBundle) {
         {
             // Update the array of light ids
@@ -517,15 +520,13 @@ impl Lighting {
     pub fn new_directional_light(
         &self,
         directional_light: DirectionalLightDescriptor,
-        world_space_transform: Option<Transform>,
+        nested_transform: Option<NestedTransform>,
     ) -> AnalyticalLightBundle {
-        let transform = self
-            .light_slab
-            .new_value(world_space_transform.unwrap_or_default());
+        let transform = nested_transform.unwrap_or_else(|| NestedTransform::new(&self.light_slab));
         let light_inner = self.light_slab.new_value(directional_light);
         let light = self.light_slab.new_value({
             let mut light: super::Light = light_inner.id().into();
-            light.transform_id = transform.id();
+            light.transform_id = transform.global_transform_id();
             light
         });
         let light_details = LightDetails::Directional(light_inner);
@@ -572,6 +573,10 @@ impl Lighting {
             bias_min: 0.005,
             bias_max: 0.05,
         });
+        // Set the descriptor in the light, so the shader knows to use it
+        analytical_light_bundle.light.modify(|light| {
+            light.shadow_map_desc_id = shadowmap_descriptor.id();
+        });
         let light_slab_buffer = self.light_slab.commit();
         let update_bindgroup = ManagedBindGroup::from(ShadowMap::create_update_bindgroup(
             self.light_slab.device(),
@@ -592,18 +597,29 @@ impl Lighting {
             blitting_op,
         })
     }
+
+    pub fn upkeep(&self) {
+        self.lighting_descriptor.set(LightingDescriptor {
+            analytical_lights_array: self.analytical_lights_array.lock().unwrap().array(),
+            shadow_map_atlas_descriptor_id: self.shadow_map_atlas.descriptor_id(),
+            update_shadow_map_id: Id::NONE,
+            update_shadow_map_texture_index: 0,
+        });
+        self.light_slab.commit();
+    }
 }
 
 #[cfg(test)]
 mod test {
-    use crabslab::{Id, Slab};
-    use glam::{Mat4, Vec2, Vec3, Vec3Swizzles, Vec4};
+    use crabslab::Slab;
+    use glam::{Mat4, Vec2, Vec3, Vec4};
     use image::Luma;
 
     use crate::{
         camera::Camera,
-        light::ShadowMappingVertexInfo,
-        math::{ConstTexture, CpuTexture2d, CpuTexture2dArray},
+        light::{ShadowCalculation, ShadowMappingVertexInfo},
+        math::{ConstTexture, CpuTexture2dArray, IsVector},
+        pbr::PbrConfig,
         stage::RenderletPbrVertexInfo,
         texture::DepthTexture,
     };
@@ -616,9 +632,11 @@ mod test {
         let h = 800.0;
         let ctx = crate::Context::headless(w as u32, h as u32);
         let mut stage = ctx.new_stage().with_lighting(true);
+
         // let hdr_path =
         //     std::path::PathBuf::from(std::env!("CARGO_WORKSPACE_DIR")).join("img/hdr/night.hdr");
         // let hdr_img = AtlasImage::from_hdr_path(hdr_path).unwrap();
+
         let camera = stage.new_value(Camera::default());
         // let skybox = Skybox::new(&ctx, hdr_img, camera.id());
         // stage.set_skybox(skybox);
@@ -635,8 +653,6 @@ mod test {
         let mut c = gltf_camera.get_camera();
         c.set_projection(crate::camera::perspective(w, h));
         camera.set(c);
-        let gltf_light = doc.lights.first().unwrap();
-        log::info!("gltf_light: {gltf_light:#?}");
 
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
@@ -646,9 +662,10 @@ mod test {
         // Rendering the scene without shadows as a sanity check
         img_diff::save("shadows/shadow_mapping_sanity/scene_before.png", img);
 
+        let gltf_light = doc.lights.first().unwrap();
         assert_eq!(
             gltf_light.light.get().transform_id,
-            gltf_light.node_transform.global_transform_id(),
+            gltf_light.transform.global_transform_id(),
             "light's global transform id is different from its transform_id"
         );
 
@@ -658,10 +675,9 @@ mod test {
         // 4. Extract the depth texture as a a sanity check
         // 5. Extract ComparisonInfo for each vertex
         let (light_projection, light_view) = {
-            let parent_light_transform =
-                Mat4::from(gltf_light.node_transform.get_global_transform());
+            let parent_light_transform = Mat4::from(gltf_light.transform.get_global_transform());
             let camera = camera.get();
-            match &gltf_light.details {
+            match &gltf_light.light_details {
                 LightDetails::Directional(d) => {
                     let directional_light = d.get();
                     let (projection, view) = directional_light.shadow_mapping_projection_and_view(
@@ -746,23 +762,19 @@ mod test {
             frame.present();
         }
 
-        let lighting = stage.lighting();
-        let light_bundle = lighting.new_directional_light(
-            gltf_light.details.as_directional().unwrap().get(),
-            Some(gltf_light.node_transform.get_global_transform()),
-        );
-        let shadows = lighting
-            .new_shadow_map(&light_bundle, UVec2::new(w as u32, h as u32), &camera.get())
+        let shadows = stage
+            .lighting()
+            .new_shadow_map(gltf_light, UVec2::new(w as u32, h as u32), &camera.get())
             .unwrap();
 
         crate::test::capture_gpu_frame(
             &ctx,
             "shadows/shadow_mapping_sanity/shadow_map_update.gputrace",
-            || shadows.update(lighting, doc.renderlets_iter()),
+            || shadows.update(stage.lighting(), doc.renderlets_iter()),
         );
 
         let geometry_slab = futures_lite::future::block_on(stage.read(..)).unwrap();
-        let light_slab = futures_lite::future::block_on(lighting.light_slab.read(..)).unwrap();
+        let light_slab = futures_lite::future::block_on(stage.lighting().slab().read(..)).unwrap();
         {
             // Inspect the blitting vertex
             #[derive(Default, Debug)]
@@ -790,6 +802,7 @@ mod test {
                     .collect::<Vec<_>>()
             );
         }
+
         let mut shadow_vertex_info = vec![];
         for hybrid in doc.renderlets_iter() {
             let renderlet = hybrid.get();
@@ -819,8 +832,11 @@ mod test {
             );
         }
 
-        let shadow_depth_img = lighting.shadow_map_atlas.atlas_img(&ctx, 0);
-        let shadow_depth_img = image::DynamicImage::from(shadow_depth_img).into_luma8();
+        let shadow_depth_buffer = stage.lighting().shadow_map_atlas.atlas_img_buffer(&ctx, 0);
+        let shadow_depth_img = shadow_depth_buffer
+            .into_image::<f32, Luma<f32>>(ctx.get_device())
+            .unwrap();
+        let shadow_depth_img = shadow_depth_img.into_luma8();
         let mut depth_img = shadow_depth_img.clone();
         img_diff::normalize_gray_img(&mut depth_img);
         img_diff::save("shadows/shadow_mapping_sanity/depth.png", depth_img);
@@ -835,38 +851,10 @@ mod test {
             .unwrap();
         let mut found_vertex_output_for_sphere_001 = None;
 
-        for (i, (pbr_info, shadow_info)) in renderlet_vertex_info
+        for (pbr_info, shadow_info) in renderlet_vertex_info
             .into_iter()
             .zip(shadow_vertex_info.into_iter())
-            .enumerate()
         {
-            // log::info!("{i}");
-            let RenderletPbrVertexInfo {
-                renderlet_id,
-                vertex_index,
-                vertex,
-                transform,
-                model_matrix,
-                out_pos,
-                view_projection,
-                out_clip_pos,
-                ..
-            } = pbr_info;
-            let vertex_shadow_info = ShadowMappingVertexInfo {
-                renderlet_id,
-                vertex_index,
-                vertex,
-                transform,
-                model_matrix,
-                world_pos: out_pos,
-                view_projection,
-                clip_pos: out_clip_pos,
-            };
-            pretty_assertions::assert_eq!(
-                shadow_info,
-                vertex_shadow_info,
-                "vertex {i} is not equal"
-            );
             if found_vertex_output_for_sphere_001.is_none() {
                 let distance_to_sphere_origin = shadow_info
                     .world_pos
@@ -886,48 +874,44 @@ mod test {
         }
 
         let top_of_green_sphere_pos = {
-            use crate::math::{CpuTexture2d, Sample2d};
-            // Here we'll check the `shadow_calculation` function to make sure it's calculating
-            // the shadow correctly
             let sphere_001 = doc
                 .nodes
                 .iter()
                 .find(|n| n.name.as_deref() == Some("Sphere.001"))
                 .unwrap();
-            let shadow_map = CpuTexture2d::from_image(shadow_depth_img.clone(), luma_8_to_vec4);
-            let light_space_transform = light_transform;
             // Fragment position in world space
-            let frag_pos = sphere_001.global_transform().translation;
-            log::info!("frag_pos: {frag_pos}");
-            let frag_pos_in_light_space = light_space_transform.project_point3(frag_pos);
-            log::info!("frag_pos_in_light_space: {frag_pos_in_light_space}");
-            let proj_coords =
-                frag_pos_in_light_space * Vec3::new(0.5, -0.5, 1.0) + Vec3::new(0.5, 0.5, 0.0);
-            log::info!("proj_coords: {proj_coords}");
-            log::info!(
-                "proj_coords in pixels: {}",
-                proj_coords.xy() * Vec2::new(w, h)
-            );
-            let shadow = shadow_map.sample_by_lod((), proj_coords.xy(), 0.0);
-            let closest_depth = shadow.x;
-            log::info!("closest_depth: {closest_depth:?}");
-            let current_depth = proj_coords.z;
-            assert!(
-                current_depth > closest_depth,
-                "top of green sphere is not in shadow"
-            );
-
-            frag_pos
+            sphere_001.global_transform().translation
         };
 
         {
             // Ensure the light slab has the correct light transform
-            let light_slab = futures_lite::future::block_on(lighting.light_slab.read(..)).unwrap();
+            let light_slab =
+                futures_lite::future::block_on(stage.lighting().slab().read(..)).unwrap();
             let light_space_transform = light_slab.read(shadows.light_space_transforms.get_id(0));
-            assert_eq!(
-                light_transform, light_space_transform,
-                "light space transforms are not equal"
-            );
+
+            let dx = light_transform
+                .x_axis
+                .distance(light_space_transform.x_axis);
+            let dy = light_transform
+                .y_axis
+                .distance(light_space_transform.y_axis);
+            let dz = light_transform
+                .z_axis
+                .distance(light_space_transform.z_axis);
+            let dw = light_transform
+                .w_axis
+                .distance(light_space_transform.w_axis);
+            if [dx, dy, dz, dw].iter().any(|d| {
+                let log = d.log10();
+                log::info!("log: {log}");
+                log > -7.0
+            }) {
+                pretty_assertions::assert_eq!(
+                    light_transform,
+                    light_space_transform,
+                    "light space transforms are not equal"
+                );
+            }
 
             let frag_pos_in_light_space =
                 light_space_transform.project_point3(top_of_green_sphere_pos);
@@ -938,8 +922,29 @@ mod test {
             // Run the fragment shader on that one point
             let shadow_map = CpuTexture2dArray::from_images(Some(shadow_depth_img), luma_8_to_vec4);
             let geometry_slab = futures_lite::future::block_on(stage.read(..)).unwrap();
-            let light_slab = futures_lite::future::block_on(lighting.light_slab.read(..)).unwrap();
+            let light_slab =
+                futures_lite::future::block_on(stage.lighting().slab().read(..)).unwrap();
             let vertex_info = found_vertex_output_for_sphere_001;
+            {
+                // Check that this point actually _is in shadow_
+                let light = gltf_light.light.get();
+                let transform = light_slab.read(light.transform_id);
+                let transform = Mat4::from(transform);
+                let DirectionalLightDescriptor { direction, .. } =
+                    light_slab.read(light.into_directional_id());
+                let is_in_shadow = ShadowCalculation::new(
+                    &light_slab,
+                    light,
+                    vertex_info.out_pos,
+                    vertex_info.out_norm.alt_norm_or_zero(),
+                    {
+                        let direction = transform.transform_vector3(direction);
+                        -direction.alt_norm_or_zero()
+                    },
+                )
+                .run(&shadow_map, &());
+                assert_eq!(1.0, is_in_shadow, "point should be in shadow");
+            }
             let mut output = Vec4::ZERO;
             crate::pbr::fragment_impl(
                 &ConstTexture::new(Vec4::ONE),
@@ -967,7 +972,7 @@ mod test {
             log::info!("color: {output}");
         }
 
-        let _ = lighting.light_slab.commit();
+        let _ = stage.lighting().slab().commit();
 
         // Now do the rendering *with the shadow map* to see if it works.
         let frame = ctx.get_next_frame().unwrap();

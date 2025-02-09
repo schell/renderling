@@ -333,62 +333,113 @@ impl Light {
     }
 }
 
-/// Returns shadow _intensity_ at the given position.
+/// Parameters to the shadow mapping calculation function.
 ///
-/// Returns `1.0` when the fragment is in complete shadow.
-/// Returns `0.0` when the fragment is in the light.
-pub fn shadow_calculation<S, T>(
-    shadow_map: &T,
-    shadow_map_sampler: &S,
-    shadow_map_atlas_texture: AtlasTexture,
-    shadow_map_atlas_size: UVec2,
-    frag_pos_in_light_space: Vec3,
-    surface_normal: Vec3,
-    light_direction: Vec3,
-    bias_min: f32,
-    bias_max: f32,
-) -> f32
-where
-    S: IsSampler,
-    T: Sample2dArray<Sampler = S>,
-{
-    crate::println!("frag_pos_in_light_space: {frag_pos_in_light_space}");
-    // The range of coordinates in the light's clip space is -1.0 to 1.0 for x and y,
-    // but the texture space is [0, 1], and Y increases downward, so we do this
-    // conversion to flip Y and also normalize to the range [0.0, 1.0].
-    // Z should already be 0.0 to 1.0.
-    let proj_coords = shadow_map_atlas_texture.constrain_clip_coords_to_texture_space(
-        frag_pos_in_light_space.xy(),
-        shadow_map_atlas_size,
-    );
-    crate::println!("proj_coords: {proj_coords}");
+/// This is mostly just to appease clippy.
+pub struct ShadowCalculation {
+    pub shadow_map_atlas_texture: AtlasTexture,
+    pub shadow_map_atlas_size: UVec2,
+    pub frag_pos_in_light_space: Vec3,
+    pub surface_normal: Vec3,
+    pub light_direction: Vec3,
+    pub bias_min: f32,
+    pub bias_max: f32,
+}
 
-    // With these projected coordinates we can sample the depth map as the
-    // resulting [0,1] coordinates from proj_coords directly correspond to
-    // the transformed NDC coordinates from the `ShadowMap::update` render pass.
-    // This gives us the closest depth from the light's point of view:
-    let closest_depth = shadow_map
-        .sample_by_lod(
-            *shadow_map_sampler,
-            proj_coords.extend(shadow_map_atlas_texture.layer_index as f32),
-            0.0,
-        )
-        .x;
-    // To get the current depth at this fragment we simply retrieve the projected vector's z
-    // coordinate which equals the depth of this fragment from the light's perspective.
-    let current_depth = frag_pos_in_light_space.z;
+impl ShadowCalculation {
+    /// Reads various required parameters from the slab and creates a `ShadowCalculation`.
+    pub fn new(
+        light_slab: &[u32],
+        light: crate::prelude::Light,
+        in_pos: Vec3,
+        surface_normal: Vec3,
+        light_direction: Vec3,
+    ) -> Self {
+        let shadow_map_descr = light_slab.read_unchecked(light.shadow_map_desc_id);
+        let atlas_texture = {
+            let atlas_texture_id =
+                light_slab.read_unchecked(shadow_map_descr.atlas_textures_array.at(0));
+            light_slab.read_unchecked(atlas_texture_id)
+        };
+        let atlas_size = {
+            let lighting_desc_id = Id::<LightingDescriptor>::new(0);
+            let atlas_desc_id = light_slab.read_unchecked(
+                lighting_desc_id + LightingDescriptor::OFFSET_OF_SHADOW_MAP_ATLAS_DESCRIPTOR_ID,
+            );
+            let atlas_desc = light_slab.read_unchecked(atlas_desc_id);
+            atlas_desc.size
+        };
+        let light_space_transform_id = shadow_map_descr.light_space_transforms_array.at(0);
+        let light_space_transform = light_slab.read_unchecked(light_space_transform_id);
+        let frag_pos_in_light_space = light_space_transform.project_point3(in_pos);
 
-    // If the `current_depth`, which is the depth of the fragment from the lights POV, is
-    // greater than the `closest_depth` of the shadow map at that fragment, the fragment
-    // is in shadow
-    crate::println!("current_depth: {current_depth}");
-    crate::println!("closest_depth: {closest_depth}");
-    let bias = (bias_max * (1.0 - surface_normal.dot(light_direction))).max(bias_min);
+        ShadowCalculation {
+            shadow_map_atlas_texture: atlas_texture,
+            shadow_map_atlas_size: atlas_size.xy(),
+            frag_pos_in_light_space,
+            surface_normal,
+            light_direction,
+            bias_min: shadow_map_descr.bias_min,
+            bias_max: shadow_map_descr.bias_max,
+        }
+    }
 
-    if (current_depth - bias) > closest_depth {
-        1.0
-    } else {
-        0.0
+    /// Returns shadow _intensity.
+    ///
+    /// Returns `1.0` when the fragment is in complete shadow.
+    /// Returns `0.0` when the fragment is in the light.
+    pub fn run<T, S>(&self, shadow_map: &T, shadow_map_sampler: &S) -> f32
+    where
+        S: IsSampler,
+        T: Sample2dArray<Sampler = S>,
+    {
+        let ShadowCalculation {
+            shadow_map_atlas_texture,
+            shadow_map_atlas_size,
+            frag_pos_in_light_space,
+            surface_normal,
+            light_direction,
+            bias_min,
+            bias_max,
+        } = self;
+        crate::println!("frag_pos_in_light_space: {frag_pos_in_light_space}");
+        // The range of coordinates in the light's clip space is -1.0 to 1.0 for x and y,
+        // but the texture space is [0, 1], and Y increases downward, so we do this
+        // conversion to flip Y and also normalize to the range [0.0, 1.0].
+        // Z should already be 0.0 to 1.0.
+        let proj_coords = shadow_map_atlas_texture.constrain_clip_coords_to_texture_space(
+            frag_pos_in_light_space.xy(),
+            *shadow_map_atlas_size,
+        );
+        crate::println!("proj_coords: {proj_coords}");
+
+        // With these projected coordinates we can sample the depth map as the
+        // resulting [0,1] coordinates from proj_coords directly correspond to
+        // the transformed NDC coordinates from the `ShadowMap::update` render pass.
+        // This gives us the closest depth from the light's point of view:
+        let closest_depth = shadow_map
+            .sample_by_lod(
+                *shadow_map_sampler,
+                proj_coords.extend(shadow_map_atlas_texture.layer_index as f32),
+                0.0,
+            )
+            .x;
+        // To get the current depth at this fragment we simply retrieve the projected vector's z
+        // coordinate which equals the depth of this fragment from the light's perspective.
+        let current_depth = frag_pos_in_light_space.z;
+
+        // If the `current_depth`, which is the depth of the fragment from the lights POV, is
+        // greater than the `closest_depth` of the shadow map at that fragment, the fragment
+        // is in shadow
+        crate::println!("current_depth: {current_depth}");
+        crate::println!("closest_depth: {closest_depth}");
+        let bias = (bias_max * (1.0 - surface_normal.dot(*light_direction))).max(*bias_min);
+
+        if (current_depth - bias) > closest_depth {
+            1.0
+        } else {
+            0.0
+        }
     }
 }
 

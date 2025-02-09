@@ -4,8 +4,8 @@
 //! * <https://learnopengl.com/PBR/Theory>
 //! * <https://github.com/KhronosGroup/glTF-Sample-Viewer/blob/5b1b7f48a8cb2b7aaef00d08fdba18ccc8dd331b/source/Renderer/shaders/pbr.frag>
 //! * <https://github.khronos.org/glTF-Sample-Viewer-Release/>
-use crabslab::{Array, Id, Slab, SlabItem};
-use glam::{Mat4, Vec2, Vec3, Vec3Swizzles, Vec4, Vec4Swizzles};
+use crabslab::{Id, Slab, SlabItem};
+use glam::{Mat4, Vec2, Vec3, Vec4, Vec4Swizzles};
 
 #[allow(unused)]
 use spirv_std::num_traits::{Float, Zero};
@@ -13,8 +13,8 @@ use spirv_std::num_traits::{Float, Zero};
 use crate::{
     atlas::AtlasTexture,
     light::{
-        shadow_calculation, DirectionalLightDescriptor, Light, LightStyle, LightingDescriptor,
-        PointLightDescriptor, SpotLightDescriptor,
+        DirectionalLightDescriptor, LightStyle, LightingDescriptor, PointLightDescriptor,
+        ShadowCalculation, SpotLightDescriptor,
     },
     math::{self, IsSampler, IsVector, Sample2d, Sample2dArray, SampleCube},
     println as my_println,
@@ -327,6 +327,10 @@ pub fn fragment_impl<A, T, DtA, C, S>(
     S: IsSampler,
 {
     let renderlet = slab.read_unchecked(renderlet_id);
+    // TODO: rename `PbrConfig` to `PbrShaderDescriptor`
+    let pbr_desc = slab.read_unchecked(renderlet.pbr_config_id);
+    crate::println!("pbr_desc_id: {:?}", renderlet.pbr_config_id);
+    crate::println!("pbr_desc: {pbr_desc:#?}");
     let PbrConfig {
         atlas_size,
         resolution: _,
@@ -335,10 +339,10 @@ pub fn fragment_impl<A, T, DtA, C, S>(
         has_skinning: _,
         perform_frustum_culling: _,
         perform_occlusion_culling: _,
-    } = slab.read_unchecked(renderlet.pbr_config_id);
+    } = pbr_desc;
 
     let material = get_material(renderlet.material_id, has_lighting, slab);
-    my_println!("material: {:?}", material);
+    crate::println!("material: {:#?}", material);
 
     let albedo_tex_uv = if material.albedo_tex_coord == 0 {
         in_uv0
@@ -663,38 +667,10 @@ where
                 my_println!("radiance: {radiance:?}");
 
                 let shadow = if light.shadow_map_desc_id.is_some() {
-                    let shadow_map_descr = light_slab.read_unchecked(light.shadow_map_desc_id);
-                    let atlas_texture = {
-                        let atlas_texture_id =
-                            light_slab.read_unchecked(shadow_map_descr.atlas_textures_array.at(0));
-                        light_slab.read_unchecked(atlas_texture_id)
-                    };
-                    let atlas_size = {
-                        let lighting_desc_id = Id::<LightingDescriptor>::new(0);
-                        let atlas_desc_id = light_slab.read_unchecked(
-                            lighting_desc_id
-                                + LightingDescriptor::OFFSET_OF_SHADOW_MAP_ATLAS_DESCRIPTOR_ID,
-                        );
-                        let atlas_desc = light_slab.read_unchecked(atlas_desc_id);
-                        atlas_desc.size
-                    };
-                    let light_space_transform_id =
-                        shadow_map_descr.light_space_transforms_array.at(0);
-                    let light_space_transform = light_slab.read_unchecked(light_space_transform_id);
-                    let frag_pos_in_light_space = light_space_transform.project_point3(in_pos);
                     // Shadow is 1.0 when the fragment is in the shadow of this light,
                     // and 0.0 otherwise
-                    shadow_calculation(
-                        shadow_map,
-                        shadow_map_sampler,
-                        atlas_texture,
-                        atlas_size.xy(),
-                        frag_pos_in_light_space,
-                        n,
-                        l,
-                        shadow_map_descr.bias_min,
-                        shadow_map_descr.bias_max,
-                    )
+                    ShadowCalculation::new(light_slab, light, in_pos, n, l)
+                        .run(shadow_map, shadow_map_sampler)
                 } else {
                     0.0
                 };

@@ -18,7 +18,7 @@ use crate::{
     camera::Camera,
     debug::DebugOverlay,
     draw::DrawCalls,
-    light::{Light, Lighting},
+    light::Lighting,
     pbr::{debug::DebugChannel, PbrConfig},
     skybox::{Skybox, SkyboxRenderPipeline},
     stage::Renderlet,
@@ -143,7 +143,6 @@ pub struct Stage {
     pub(crate) mngr: SlabAllocator<WgpuRuntime>,
 
     pub(crate) pbr_config: Hybrid<PbrConfig>,
-    pub(crate) lights: Arc<RwLock<HybridArray<Id<Light>>>>,
 
     pub(crate) stage_pipeline: Arc<RwLock<wgpu::RenderPipeline>>,
     pub(crate) skybox_pipeline: Arc<RwLock<Option<Arc<SkyboxRenderPipeline>>>>,
@@ -187,20 +186,21 @@ impl Deref for Stage {
 impl Stage {
     /// Create a new stage.
     pub fn new(ctx: &crate::Context) -> Self {
-        let runtime = ctx.as_ref();
+        let runtime = ctx.runtime();
         let device = &runtime.device;
         let resolution @ UVec2 { x: w, y: h } = ctx.get_size();
         let atlas_size = *ctx.atlas_size.read().unwrap();
+
         let mngr =
             SlabAllocator::new_with_label(runtime, wgpu::BufferUsages::empty(), Some("stage-slab"));
-        let atlas = Atlas::new(&mngr, atlas_size, None, Some("stage-atlas"), None);
         let pbr_config = mngr.new_value(PbrConfig {
             atlas_size: UVec2::new(atlas_size.width, atlas_size.height),
             resolution,
             ..Default::default()
         });
+
+        let atlas = Atlas::new(&mngr, atlas_size, None, Some("stage-atlas"), None);
         let multisample_count = 1;
-        let lights = mngr.new_array(vec![Id::<Light>::NONE; 16]);
         let hdr_texture = Arc::new(RwLock::new(Texture::create_hdr_texture(
             device,
             w,
@@ -238,7 +238,6 @@ impl Stage {
             stage_slab_buffer: Arc::new(RwLock::new(stage_slab_buffer)),
             mngr,
             pbr_config,
-            lights: Arc::new(RwLock::new(lights)),
             stage_pipeline: Arc::new(RwLock::new(stage_pipeline)),
             atlas,
             skybox: Arc::new(RwLock::new(Skybox::empty(runtime))),
@@ -744,6 +743,7 @@ impl Stage {
         log::info!("render_with");
         self.tick_internal();
         log::info!("ticked");
+        self.lighting.upkeep();
         let mut draw_calls = self.draw_calls.write().unwrap();
         let depth_texture = self.depth_texture.read().unwrap();
         // UNWRAP: safe because we know the depth texture format will always match
@@ -909,8 +909,8 @@ impl Stage {
 ///
 /// Only available on CPU.
 #[derive(Clone)]
-pub struct NestedTransform {
-    global_transform: Gpu<Transform>,
+pub struct NestedTransform<Ct: IsContainer = HybridContainer> {
+    global_transform: Ct::Container<Transform>,
     local_transform: Arc<RwLock<Transform>>,
     children: Arc<RwLock<Vec<NestedTransform>>>,
     parent: Arc<RwLock<Option<NestedTransform>>>,
@@ -939,16 +939,38 @@ impl core::fmt::Debug for NestedTransform {
     }
 }
 
+impl NestedTransform<WeakContainer> {
+    pub fn from_hybrid(hybrid: &NestedTransform) -> Self {
+        Self {
+            global_transform: WeakHybrid::from_hybrid(&hybrid.global_transform),
+            local_transform: hybrid.local_transform.clone(),
+            children: hybrid.children.clone(),
+            parent: hybrid.parent.clone(),
+        }
+    }
+}
+
 impl NestedTransform {
     pub fn new(mngr: &SlabAllocator<impl IsRuntime>) -> Self {
         let nested = NestedTransform {
             local_transform: Arc::new(RwLock::new(Transform::default())),
-            global_transform: mngr.new_value(Transform::default()).into_gpu_only(),
+            global_transform: mngr.new_value(Transform::default()),
             children: Default::default(),
             parent: Default::default(),
         };
         nested.mark_dirty();
         nested
+    }
+
+    /// Moves the inner `Gpu<Transform>` of the global transform to a different
+    /// slab.
+    ///
+    /// This is used by the GLTF parser to move light's node transforms to the
+    /// light slab after they are created, which keeping any geometry's node
+    /// transforms untouched.
+    pub(crate) fn move_gpu_to_slab(&mut self, slab: &SlabAllocator<impl IsRuntime>) {
+        self.global_transform = slab.new_value(Transform::default());
+        self.mark_dirty();
     }
 
     pub fn get_notifier_index(&self) -> usize {
@@ -1027,11 +1049,12 @@ impl NestedTransform {
 #[cfg(test)]
 mod test {
     use craballoc::runtime::CpuRuntime;
-    use crabslab::{Array, Slab};
+    use crabslab::{Array, Id, Slab};
     use glam::{Mat4, Vec2, Vec3};
 
     use crate::{
         camera::Camera,
+        pbr::PbrConfig,
         stage::{cpu::SlabAllocator, NestedTransform, Renderlet, Vertex},
         transform::Transform,
         Context,
@@ -1171,5 +1194,18 @@ mod test {
 
         stage.add_renderlet(&r);
         assert_eq!(1, r.ref_count());
+    }
+
+    #[test]
+    /// Tests that the PBR descriptor is written to slot 0 of the geometry buffer,
+    /// and that it contains what we think it contains.
+    fn stage_pbr_desc_sanity() {
+        let ctx = Context::headless(100, 100);
+        let stage = ctx.new_stage();
+        stage.commit();
+
+        let slab = futures_lite::future::block_on(stage.read(..)).unwrap();
+        let pbr_desc = slab.read_unchecked(Id::<PbrConfig>::new(0));
+        pretty_assertions::assert_eq!(stage.pbr_config.get(), pbr_desc);
     }
 }

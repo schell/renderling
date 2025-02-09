@@ -11,7 +11,11 @@ use glam::{UVec2, UVec3};
 use image::RgbaImage;
 use snafu::{prelude::*, OptionExt};
 
-use crate::{atlas::AtlasDescriptor, bindgroup::ManagedBindGroup, texture::Texture};
+use crate::{
+    atlas::AtlasDescriptor,
+    bindgroup::ManagedBindGroup,
+    texture::{CopiedTextureBuffer, Texture},
+};
 
 use super::{
     atlas_image::{convert_pixels, AtlasImage},
@@ -379,6 +383,41 @@ impl Atlas {
         }
     }
 
+    /// Read the atlas image from the GPU into a [`CopiedTextureBuffer`].
+    ///
+    /// This is primarily for testing.
+    ///
+    /// ## Panics
+    /// Panics if the pixels read from the GPU cannot be read.
+    pub fn atlas_img_buffer(
+        &self,
+        runtime: impl AsRef<WgpuRuntime>,
+        layer: u32,
+    ) -> CopiedTextureBuffer {
+        let runtime = runtime.as_ref();
+        let tex = self.get_texture();
+        let size = tex.texture.size();
+        let (channels, subpixel_bytes) =
+            crate::texture::wgpu_texture_format_channels_and_subpixel_bytes(tex.texture.format());
+        log::info!("atlas_texture_format: {:#?}", tex.texture.format());
+        log::info!("atlas_texture_channels: {channels:#?}");
+        log::info!("atlas_texture_subpixel_bytes: {subpixel_bytes:#?}");
+        Texture::read_from(
+            runtime,
+            &tex.texture,
+            size.width as usize,
+            size.height as usize,
+            channels as usize,
+            subpixel_bytes as usize,
+            0,
+            Some(wgpu::Origin3d {
+                x: 0,
+                y: 0,
+                z: layer,
+            }),
+        )
+    }
+
     /// Read the atlas image from the GPU.
     ///
     /// This is primarily for testing.
@@ -390,22 +429,7 @@ impl Atlas {
     /// `RgbaImage`.
     pub fn atlas_img(&self, runtime: impl AsRef<WgpuRuntime>, layer: u32) -> RgbaImage {
         let runtime = runtime.as_ref();
-        let tex = self.get_texture();
-        let size = tex.texture.size();
-        let buffer = Texture::read_from(
-            runtime,
-            &tex.texture,
-            size.width as usize,
-            size.height as usize,
-            4,
-            1,
-            0,
-            Some(wgpu::Origin3d {
-                x: 0,
-                y: 0,
-                z: layer,
-            }),
-        );
+        let buffer = self.atlas_img_buffer(runtime, layer);
         buffer.into_linear_rgba(&runtime.device).unwrap()
     }
 }
