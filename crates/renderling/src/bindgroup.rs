@@ -8,13 +8,28 @@ use std::sync::{Arc, RwLock};
 /// re-creating bindgroups.
 #[derive(Clone)]
 pub struct ManagedBindGroup {
-    bindgroup: Arc<RwLock<Arc<wgpu::BindGroup>>>,
+    bindgroup: Arc<RwLock<Option<Arc<wgpu::BindGroup>>>>,
+}
+
+impl Default for ManagedBindGroup {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl From<wgpu::BindGroup> for ManagedBindGroup {
+    fn from(value: wgpu::BindGroup) -> Self {
+        let mbg = ManagedBindGroup::new();
+        // UNWRAP: POP
+        *mbg.bindgroup.write().unwrap() = Some(value.into());
+        mbg
+    }
 }
 
 impl ManagedBindGroup {
-    pub fn new(buffer: wgpu::BindGroup) -> Self {
+    pub fn new() -> Self {
         Self {
-            bindgroup: Arc::new(RwLock::new(buffer.into())),
+            bindgroup: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -23,14 +38,22 @@ impl ManagedBindGroup {
         should_invalidate: bool,
         fn_recreate: impl FnOnce() -> wgpu::BindGroup,
     ) -> Arc<wgpu::BindGroup> {
-        if should_invalidate {
+        let recreate = || {
             let mut guard = self.bindgroup.write().unwrap();
 
             let bg = Arc::new(fn_recreate());
-            *guard = bg.clone();
+            *guard = Some(bg.clone());
             bg
+        };
+        if should_invalidate {
+            recreate()
         } else {
-            self.bindgroup.read().unwrap().clone()
+            let maybe_buffer = self.bindgroup.read().unwrap().clone();
+            if let Some(buffer) = maybe_buffer {
+                buffer
+            } else {
+                recreate()
+            }
         }
     }
 }
