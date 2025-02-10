@@ -598,14 +598,12 @@ where
     my_println!("lights: {analytical_lights_array:?}");
     my_println!("n: {n:?}");
     my_println!("v: {v:?}");
-    // reflectance
+
+    // accumulated outgoing radiance
     let mut lo = Vec3::ZERO;
     for i in 0..analytical_lights_array.len() {
         // calculate per-light radiance
         let light_id = light_slab.read(analytical_lights_array.at(i));
-        if light_id.is_none() {
-            break;
-        }
         let light = light_slab.read(light_id);
         let transform = light_slab.read(light.transform_id);
         let transform = Mat4::from(transform);
@@ -668,7 +666,7 @@ where
 
                 let shadow = if light.shadow_map_desc_id.is_some() {
                     // Shadow is 1.0 when the fragment is in the shadow of this light,
-                    // and 0.0 otherwise
+                    // and 0.0 in darkness
                     ShadowCalculation::new(light_slab, light, in_pos, n, l)
                         .run(shadow_map, shadow_map_sampler)
                 } else {

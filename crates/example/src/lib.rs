@@ -10,7 +10,7 @@ use renderling::{
     atlas::AtlasImage,
     bvol::{Aabb, BoundingSphere},
     camera::Camera,
-    light::{AnalyticalLightBundle, DirectionalLightDescriptor, Light, Lighting},
+    light::{AnalyticalLightBundle, DirectionalLightDescriptor},
     math::{Mat4, UVec2, Vec2, Vec3, Vec4},
     skybox::Skybox,
     stage::{Animator, GltfDocument, Renderlet, Stage, Vertex},

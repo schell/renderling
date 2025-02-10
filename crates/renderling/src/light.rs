@@ -4,12 +4,11 @@
 //!
 //! Shadow mapping.
 use crabslab::{Array, Id, Slab, SlabItem};
-use glam::{Mat4, UVec2, Vec3, Vec3Swizzles, Vec4, Vec4Swizzles};
+use glam::{Mat4, UVec2, Vec2, Vec3, Vec3Swizzles, Vec4, Vec4Swizzles};
 use spirv_std::spirv;
 
 use crate::{
     atlas::{AtlasDescriptor, AtlasTexture},
-    bvol::Frustum,
     math::{IsSampler, IsVector, Sample2dArray},
     stage::Renderlet,
     transform::Transform,
@@ -48,6 +47,7 @@ pub struct ShadowMapDescriptor {
     pub atlas_textures_array: Array<Id<AtlasTexture>>,
     pub bias_min: f32,
     pub bias_max: f32,
+    pub pcf_samples: u32,
 }
 
 #[cfg(test)]
@@ -189,10 +189,12 @@ impl DirectionalLightDescriptor {
     pub fn shadow_mapping_projection_and_view(
         &self,
         parent_light_transform: &Mat4,
-        // Limits of the reach of the light
-        frustum: Frustum,
+        // Limits of the light's reach
+        //
+        // The maximum should be the `Camera`'s `Frustum::depth()`.
+        size: f32,
     ) -> (Mat4, Mat4) {
-        let depth = frustum.depth();
+        let depth = size;
         let hd = depth * 0.5;
         let projection = Mat4::orthographic_rh(-hd, hd, -hd, hd, 0.0, depth);
         let direction = parent_light_transform
@@ -344,6 +346,7 @@ pub struct ShadowCalculation {
     pub light_direction: Vec3,
     pub bias_min: f32,
     pub bias_max: f32,
+    pub pcf_samples: u32,
 }
 
 impl ShadowCalculation {
@@ -381,6 +384,7 @@ impl ShadowCalculation {
             light_direction,
             bias_min: shadow_map_descr.bias_min,
             bias_max: shadow_map_descr.bias_max,
+            pcf_samples: shadow_map_descr.pcf_samples,
         }
     }
 
@@ -401,45 +405,60 @@ impl ShadowCalculation {
             light_direction,
             bias_min,
             bias_max,
+            pcf_samples,
         } = self;
         crate::println!("frag_pos_in_light_space: {frag_pos_in_light_space}");
+        if !crate::math::is_inside_clip_space(frag_pos_in_light_space.xyz()) {
+            return 0.0;
+        }
         // The range of coordinates in the light's clip space is -1.0 to 1.0 for x and y,
         // but the texture space is [0, 1], and Y increases downward, so we do this
         // conversion to flip Y and also normalize to the range [0.0, 1.0].
         // Z should already be 0.0 to 1.0.
-        let proj_coords = shadow_map_atlas_texture.constrain_clip_coords_to_texture_space(
-            frag_pos_in_light_space.xy(),
-            *shadow_map_atlas_size,
-        );
-        crate::println!("proj_coords: {proj_coords}");
+        let proj_coords_uv = (frag_pos_in_light_space.xy() * Vec2::new(1.0, -1.0)
+            + Vec2::splat(1.0))
+            * Vec2::splat(0.5);
+        crate::println!("proj_coords_uv: {proj_coords_uv}");
 
         // With these projected coordinates we can sample the depth map as the
         // resulting [0,1] coordinates from proj_coords directly correspond to
         // the transformed NDC coordinates from the `ShadowMap::update` render pass.
         // This gives us the closest depth from the light's point of view:
-        let closest_depth = shadow_map
-            .sample_by_lod(
-                *shadow_map_sampler,
-                proj_coords.extend(shadow_map_atlas_texture.layer_index as f32),
-                0.0,
-            )
-            .x;
-        // To get the current depth at this fragment we simply retrieve the projected vector's z
-        // coordinate which equals the depth of this fragment from the light's perspective.
-        let current_depth = frag_pos_in_light_space.z;
+        let pcf_samples_2 = *pcf_samples as i32 / 2;
+        let texel_size = 1.0
+            / Vec2::new(
+                shadow_map_atlas_texture.size_px.x as f32,
+                shadow_map_atlas_texture.size_px.y as f32,
+            );
+        let mut shadow = 0.0f32;
+        for x in -pcf_samples_2..=pcf_samples_2 {
+            for y in -pcf_samples_2..=pcf_samples_2 {
+                let proj_coords = shadow_map_atlas_texture.uv(
+                    proj_coords_uv + Vec2::new(x as f32, y as f32) * texel_size,
+                    *shadow_map_atlas_size,
+                );
+                let closest_depth = shadow_map
+                    .sample_by_lod(*shadow_map_sampler, proj_coords, 0.0)
+                    .x;
+                // To get the current depth at this fragment we simply retrieve the projected vector's z
+                // coordinate which equals the depth of this fragment from the light's perspective.
+                let current_depth = frag_pos_in_light_space.z;
 
-        // If the `current_depth`, which is the depth of the fragment from the lights POV, is
-        // greater than the `closest_depth` of the shadow map at that fragment, the fragment
-        // is in shadow
-        crate::println!("current_depth: {current_depth}");
-        crate::println!("closest_depth: {closest_depth}");
-        let bias = (bias_max * (1.0 - surface_normal.dot(*light_direction))).max(*bias_min);
+                // If the `current_depth`, which is the depth of the fragment from the lights POV, is
+                // greater than the `closest_depth` of the shadow map at that fragment, the fragment
+                // is in shadow
+                crate::println!("current_depth: {current_depth}");
+                crate::println!("closest_depth: {closest_depth}");
+                let bias = (bias_max * (1.0 - surface_normal.dot(*light_direction))).max(*bias_min);
 
-        if (current_depth - bias) > closest_depth {
-            1.0
-        } else {
-            0.0
+                shadow += if (current_depth - bias) > closest_depth {
+                    1.0
+                } else {
+                    0.0
+                };
+            }
         }
+        shadow / ((pcf_samples_2 * 2) as f32 + 1.0)
     }
 }
 
@@ -488,7 +507,22 @@ mod test {
     }
 
     #[test]
-    fn shadow_mapping_sanity() {
-        // Test that shadow mapping is working as expected.
+    /// Test that we can determine if a point is inside clip space or not.
+    fn clip_space_bounds_sanity() {
+        let inside = Vec3::ONE;
+        assert!(
+            crate::math::is_inside_clip_space(inside),
+            "should be inside"
+        );
+        let inside = Vec3::new(0.5, -0.5, -0.8);
+        assert!(
+            crate::math::is_inside_clip_space(inside),
+            "should be inside"
+        );
+        let outside = Vec3::new(0.5, 0.0, 1.3);
+        assert!(
+            !crate::math::is_inside_clip_space(outside),
+            "should be outside"
+        );
     }
 }

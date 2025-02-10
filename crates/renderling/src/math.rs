@@ -618,6 +618,10 @@ pub fn reflect(i: Vec3, n: Vec3) -> Vec3 {
     i - 2.0 * n.dot(i) * n
 }
 
+pub fn is_inside_clip_space(p: Vec3) -> bool {
+    p.x.abs() <= 1.0 && p.y.abs() <= 1.0 && p.z.abs() <= 1.0
+}
+
 pub struct Plane {
     pub point: Vec3,
     pub norm: Vec3,
