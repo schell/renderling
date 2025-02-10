@@ -87,7 +87,6 @@ impl AtlasTexture {
         // Convert `clip_pos` into uv coords to figure out where in the texture
         // this point lives
         let input_uv = (clip_pos * Vec2::new(1.0, -1.0) + Vec2::splat(1.0)) * Vec2::splat(0.5);
-        // let input_uv = (clip_pos + Vec2::splat(1.0)) * Vec2::new(0.5, -0.5);
         self.uv(input_uv, atlas_size).xy()
     }
 
