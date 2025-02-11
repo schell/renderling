@@ -1,22 +1,22 @@
-struct type_5 {
+struct type_2 {
     member: array<u32>,
 }
 
-struct type_8 {
+struct type_9 {
     member: u32,
     member_1: u32,
 }
 
 var<private> global: vec3<u32>;
 @group(0) @binding(0) 
-var<storage, read_write> global_1: type_5;
+var<storage, read_write> global_1: type_2;
 @group(0) @binding(1) 
 var global_2: texture_depth_multisampled_2d;
 
 fn function() {
     var phi_285_: bool;
     var phi_312_: bool;
-    var phi_233_: type_8;
+    var phi_233_: type_9;
     var phi_338_: u32;
 
     let _e15 = arrayLength((&global_1.member));
@@ -46,9 +46,9 @@ fn function() {
         if _e55 {
             let _e58 = global_1.member[_e50];
             let _e62 = global_1.member[(_e50 + 1u)];
-            phi_233_ = type_8(_e58, _e62);
+            phi_233_ = type_9(_e58, _e62);
         } else {
-            phi_233_ = type_8(4294967295u, 0u);
+            phi_233_ = type_9(4294967295u, 0u);
         }
         let _e65 = phi_233_;
         let _e71 = ((_e16.y * (_e19 >> bitcast<u32>(0u))) + _e16.x);

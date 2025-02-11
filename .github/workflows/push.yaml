@@ -38,7 +38,8 @@ jobs:
       - uses: moonrepo/setup-rust@v1
       - run: rustup default stable 
       - run: rustup update
-      - run: cargo install --git https://github.com/rust-gpu/cargo-gpu cargo-gpu
+      - run: | 
+          cargo install --git https://github.com/rust-gpu/cargo-gpu --rev d1a00d8 cargo-gpu 
       - run: cargo gpu show commitsh
       - id: cachepathstep
         run: |
@@ -77,7 +78,8 @@ jobs:
       - uses: moonrepo/setup-rust@v1
       - run: cargo gpu show commitsh
       - run: rm -rf crates/renderling/src/linkage/* crates/renderling/shaders
-      - run: cargo xtask compile-shaders
+      - run: cargo shaders
+      - run: cargo linkage
       - run: cargo build -p renderling
       - run: git diff --exit-code --no-ext-diff
 

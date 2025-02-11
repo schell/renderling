@@ -191,7 +191,8 @@ impl Skybox {
         let runtime = runtime.as_ref();
         log::trace!("creating skybox");
 
-        let slab = SlabAllocator::new(runtime, wgpu::BufferUsages::VERTEX);
+        let slab =
+            SlabAllocator::new_with_label(runtime, wgpu::BufferUsages::VERTEX, Some("skybox-slab"));
 
         let proj = Mat4::perspective_rh(std::f32::consts::FRAC_PI_2, 1.0, 0.1, 10.0);
         let camera = slab.new_value(Camera::default().with_projection(proj));
@@ -201,10 +202,10 @@ impl Skybox {
             roughness: roughness.id(),
         });
 
-        let buffer = slab.get_updated_buffer();
+        let buffer = slab.commit();
         let mut buffer_upkeep = || {
-            let maybe_resized_buffer = slab.upkeep();
-            debug_assert!(maybe_resized_buffer.is_none());
+            let possibly_new_buffer = slab.commit();
+            debug_assert!(!possibly_new_buffer.is_new_this_commit());
         };
 
         let equirectangular_texture = Skybox::hdr_texture_from_atlas_image(runtime, hdr_img);
