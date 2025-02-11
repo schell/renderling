@@ -25,13 +25,10 @@ fn main() {
         Command::CompileShaders => {
             let paths = renderling_build::RenderlingPaths::new().unwrap();
 
-            log::info!(
-                "Calling `cargo gpu toml {}",
-                paths.renderling_crate.display()
-            );
+            log::info!("Calling `cargo gpu {}", paths.renderling_crate.display());
 
             std::process::Command::new("cargo")
-                .args(["gpu", "toml"])
+                .args(["gpu", "build", "--shader-crate"])
                 .arg(&paths.renderling_crate)
                 .stdout(std::process::Stdio::inherit())
                 .stderr(std::process::Stdio::inherit())
