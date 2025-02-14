@@ -219,7 +219,7 @@ impl Stage {
         let stage_pipeline = create_stage_render_pipeline(device, multisample_count);
         let stage_slab_buffer = mngr.commit();
 
-        let lighting = Lighting::new(runtime, &stage_slab_buffer);
+        let lighting = Lighting::new(&mngr);
 
         Self {
             draw_calls: Arc::new(RwLock::new(DrawCalls::new(
@@ -740,10 +740,9 @@ impl Stage {
     }
 
     pub fn render(&self, view: &wgpu::TextureView) {
-        log::info!("render_with");
         self.tick_internal();
-        log::info!("ticked");
         self.lighting.upkeep();
+
         let mut draw_calls = self.draw_calls.write().unwrap();
         let depth_texture = self.depth_texture.read().unwrap();
         // UNWRAP: safe because we know the depth texture format will always match
