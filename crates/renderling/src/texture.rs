@@ -50,9 +50,11 @@ pub fn wgpu_texture_format_channels_and_subpixel_bytes(format: wgpu::TextureForm
         wgpu::TextureFormat::Depth32Float => (1, 4),
         wgpu::TextureFormat::R32Float => (1, 4),
         wgpu::TextureFormat::Rg16Float => (2, 2),
+        wgpu::TextureFormat::Rgba8Unorm => (4, 1),
         wgpu::TextureFormat::Rgba16Float => (4, 2),
         wgpu::TextureFormat::Rgba32Float => (4, 4),
         wgpu::TextureFormat::Rgba8UnormSrgb => (4, 1),
+        wgpu::TextureFormat::R8Unorm => (1, 1),
         _ => todo!("temporarily unsupported format '{format:?}'"),
     }
 }
