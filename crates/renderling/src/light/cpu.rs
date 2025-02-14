@@ -148,12 +148,15 @@ impl ShadowMap {
         lighting: &Lighting,
         renderlets: impl IntoIterator<Item = &'a Hybrid<Renderlet>>,
     ) {
+        if lighting.geometry_slab.has_queued_updates() {
+            lighting.geometry_slab.commit();
+        }
         let renderlets = renderlets.into_iter().collect::<Vec<_>>();
 
         let device = lighting.light_slab.device();
         let queue = lighting.light_slab.queue();
         let mut light_slab_buffer = lighting.light_slab_buffer.write().unwrap();
-        let mut stage_slab_buffer = lighting.stage_slab_buffer.write().unwrap();
+        let mut stage_slab_buffer = lighting.geometry_slab_buffer.write().unwrap();
 
         let bindgroup = {
             light_slab_buffer.update_if_invalid();
@@ -272,9 +275,10 @@ impl AnalyticalLightBundle {
 /// Manages lighting for an entire scene.
 #[derive(Clone)]
 pub struct Lighting {
+    geometry_slab: SlabAllocator<WgpuRuntime>,
     light_slab: SlabAllocator<WgpuRuntime>,
     light_slab_buffer: Arc<RwLock<SlabBuffer<wgpu::Buffer>>>,
-    stage_slab_buffer: Arc<RwLock<SlabBuffer<wgpu::Buffer>>>,
+    geometry_slab_buffer: Arc<RwLock<SlabBuffer<wgpu::Buffer>>>,
     lighting_descriptor: Hybrid<LightingDescriptor>,
     analytical_lights: Arc<Mutex<Vec<AnalyticalLightBundle<WeakContainer>>>>,
     analytical_lights_array: Arc<Mutex<HybridArray<Id<super::Light>>>>,
@@ -383,11 +387,8 @@ impl Lighting {
     }
 
     /// Create a new [`Lighting`] manager.
-    pub fn new(
-        runtime: impl AsRef<WgpuRuntime>,
-        stage_slab_buffer: &SlabBuffer<wgpu::Buffer>,
-    ) -> Self {
-        let runtime = runtime.as_ref();
+    pub fn new(geometry_slab: &SlabAllocator<WgpuRuntime>) -> Self {
+        let runtime = geometry_slab.runtime();
         let light_slab =
             SlabAllocator::new_with_label(runtime, wgpu::BufferUsages::empty(), Some("light-slab"));
         let lighting_descriptor = light_slab.new_value(LightingDescriptor::default());
@@ -477,10 +478,11 @@ impl Lighting {
             ),
             analytical_lights: Default::default(),
             analytical_lights_array: Arc::new(Mutex::new(light_slab.new_array([]))),
+            geometry_slab: geometry_slab.clone(),
             light_slab,
             light_slab_buffer: Arc::new(RwLock::new(light_slab_buffer)),
             lighting_descriptor,
-            stage_slab_buffer: Arc::new(RwLock::new(stage_slab_buffer.clone())),
+            geometry_slab_buffer: Arc::new(RwLock::new(geometry_slab.commit())),
             bindgroup_layout: bindgroup_layout.into(),
             shadow_map_update_pipeline,
             shadow_map_update_bindgroup_layout,
@@ -549,7 +551,7 @@ impl Lighting {
         // Diameter of the area to cover with the shadow map, in world coordinates
         depth: f32,
     ) -> Result<ShadowMap, LightingError> {
-        let stage_slab_buffer = self.stage_slab_buffer.read().unwrap();
+        let stage_slab_buffer = self.geometry_slab_buffer.read().unwrap();
         let is_point_light =
             analytical_light_bundle.light_details.style() == super::LightStyle::Point;
         let count = if is_point_light { 6 } else { 1 };
@@ -613,7 +615,7 @@ impl Lighting {
 #[cfg(test)]
 mod test {
     use crabslab::Slab;
-    use glam::{Mat4, Vec2, Vec3, Vec4};
+    use glam::{Mat4, Vec2, Vec4};
     use image::Luma;
 
     use crate::{
@@ -663,7 +665,7 @@ mod test {
         frame.present();
 
         // Rendering the scene without shadows as a sanity check
-        img_diff::save("shadows/shadow_mapping_just_cuboid/scene_before.png", img);
+        img_diff::assert_img_eq("shadows/shadow_mapping_just_cuboid/scene_before.png", img);
 
         let gltf_light = doc.lights.first().unwrap();
         let shadow_map = stage
@@ -679,7 +681,7 @@ mod test {
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
         let img = frame.read_image().unwrap();
-        img_diff::save("shadows/shadow_mapping_just_cuboid/scene_after.png", img);
+        img_diff::assert_img_eq("shadows/shadow_mapping_just_cuboid/scene_after.png", img);
         frame.present();
     }
 
@@ -693,13 +695,7 @@ mod test {
             .with_lighting(true)
             .with_msaa_sample_count(4);
 
-        // let hdr_path =
-        //     std::path::PathBuf::from(std::env!("CARGO_WORKSPACE_DIR")).join("img/hdr/night.hdr");
-        // let hdr_img = AtlasImage::from_hdr_path(hdr_path).unwrap();
-
         let camera = stage.new_value(Camera::default());
-        // let skybox = Skybox::new(&ctx, hdr_img, camera.id());
-        // stage.set_skybox(skybox);
         log::info!("camera_id: {:?}", camera.id());
         let doc = stage
             .load_gltf_document_from_path(
@@ -736,14 +732,11 @@ mod test {
         shadow_map_b.update(stage.lighting(), doc.renderlets_iter());
 
         let frame = ctx.get_next_frame().unwrap();
-        crate::test::capture_gpu_frame(
-            &ctx,
-            "shadows/shadow_mapping_just_cuboid/red_blue.gputrace",
-            || stage.render(&frame.view()),
-        );
+
+        stage.render(&frame.view());
         let img = frame.read_image().unwrap();
-        img_diff::save(
-            "shadows/shadow_mapping_just_cuboid/scene_red_and_blue.png",
+        img_diff::assert_img_eq(
+            "shadows/shadow_mapping_just_cuboid/red_and_blue/frame.png",
             img,
         );
         frame.present();
@@ -783,7 +776,7 @@ mod test {
         frame.present();
 
         // Rendering the scene without shadows as a sanity check
-        img_diff::save("shadows/shadow_mapping_sanity/scene_before.png", img);
+        img_diff::assert_img_eq("shadows/shadow_mapping_sanity/scene_before.png", img);
 
         let gltf_light = doc.lights.first().unwrap();
         assert_eq!(
@@ -838,12 +831,12 @@ mod test {
             stage.render(&frame.view());
             let img = frame.read_image().unwrap();
             frame.present();
-            img_diff::save("shadows/shadow_mapping_sanity/scene_light_pov.png", img);
+            img_diff::assert_img_eq("shadows/shadow_mapping_sanity/scene_light_pov.png", img);
 
             let mut depth_img = stage.get_depth_texture().read_image().unwrap();
             // Normalize the value
             img_diff::normalize_gray_img(&mut depth_img);
-            img_diff::save(
+            img_diff::assert_img_eq(
                 "shadows/shadow_mapping_sanity/light_pov_depth.png",
                 depth_img,
             );
@@ -888,11 +881,7 @@ mod test {
             .new_shadow_map(gltf_light, UVec2::new(w as u32, h as u32), shadow_depth)
             .unwrap();
 
-        crate::test::capture_gpu_frame(
-            &ctx,
-            "shadows/shadow_mapping_sanity/shadow_map_update.gputrace",
-            || shadows.update(stage.lighting(), doc.renderlets_iter()),
-        );
+        shadows.update(stage.lighting(), doc.renderlets_iter());
 
         let geometry_slab = futures_lite::future::block_on(stage.read(..)).unwrap();
         let light_slab = futures_lite::future::block_on(stage.lighting().slab().read(..)).unwrap();
@@ -947,7 +936,7 @@ mod test {
                 DepthTexture::try_new_from(&ctx, shadows.update_texture.clone()).unwrap();
             let mut shadow_map_update_img = shadow_map_update_texture.read_image().unwrap();
             img_diff::normalize_gray_img(&mut shadow_map_update_img);
-            img_diff::save(
+            img_diff::assert_img_eq(
                 "shadows/shadow_mapping_sanity/shadows_update_texture.png",
                 shadow_map_update_img,
             );
@@ -960,7 +949,7 @@ mod test {
         let shadow_depth_img = shadow_depth_img.into_luma8();
         let mut depth_img = shadow_depth_img.clone();
         img_diff::normalize_gray_img(&mut depth_img);
-        img_diff::save("shadows/shadow_mapping_sanity/depth.png", depth_img);
+        img_diff::assert_img_eq("shadows/shadow_mapping_sanity/depth.png", depth_img);
 
         assert_eq!(renderlet_vertex_info.len(), shadow_vertex_info.len());
 
@@ -1097,14 +1086,10 @@ mod test {
 
         // Now do the rendering *with the shadow map* to see if it works.
         let frame = ctx.get_next_frame().unwrap();
-        crate::test::capture_gpu_frame(
-            &ctx,
-            "shadows/shadow_mapping_sanity/render.gputrace",
-            || stage.render(&frame.view()),
-        );
+        stage.render(&frame.view());
 
         let img = frame.read_image().unwrap();
         frame.present();
-        img_diff::save("shadows/shadow_mapping_sanity/stage_render.png", img);
+        img_diff::assert_img_eq("shadows/shadow_mapping_sanity/stage_render.png", img);
     }
 }

@@ -388,10 +388,10 @@ impl ShadowCalculation {
         }
     }
 
-    /// Returns shadow _intensity.
+    /// Returns shadow _intensity_.
     ///
-    /// Returns `1.0` when the fragment is in complete shadow.
-    /// Returns `0.0` when the fragment is in the light.
+    /// Returns `0.0` when the fragment is in full light.
+    /// Returns `1.0` when the fragment is in full shadow.
     pub fn run<T, S>(&self, shadow_map: &T, shadow_map_sampler: &S) -> f32
     where
         S: IsSampler,
@@ -431,6 +431,7 @@ impl ShadowCalculation {
                 shadow_map_atlas_texture.size_px.y as f32,
             );
         let mut shadow = 0.0f32;
+        let mut total = 0.0f32;
         for x in -pcf_samples_2..=pcf_samples_2 {
             for y in -pcf_samples_2..=pcf_samples_2 {
                 let proj_coords = shadow_map_atlas_texture.uv(
@@ -456,9 +457,10 @@ impl ShadowCalculation {
                 } else {
                     0.0
                 };
+                total += 1.0;
             }
         }
-        shadow / ((pcf_samples_2 * 2) as f32 + 1.0)
+        shadow / total.max(1.0)
     }
 }
 
