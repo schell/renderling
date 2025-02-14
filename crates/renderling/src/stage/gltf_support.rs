@@ -1374,6 +1374,18 @@ mod test {
                 r.camera_id = gltf_camera.camera.id();
             });
         });
+        // A change to the lighting units for directional lights causes this test to fail.
+        //
+        // Instead of changing the saved picture, we'll adjust the intensity.
+        //
+        // See <https://github.com/schell/renderling/pull/158/files#r1956634581> for more info.
+        doc.lights.iter().for_each(|bundle| {
+            if let crate::light::LightDetails::Directional(d) = &bundle.light_details {
+                d.modify(|dir| {
+                    dir.intensity *= 683.0;
+                });
+            }
+        });
 
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
