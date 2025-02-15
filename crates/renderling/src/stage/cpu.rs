@@ -207,7 +207,8 @@ impl Stage {
             h,
             multisample_count,
         )));
-        let depth_texture = Texture::create_depth_texture(device, w, h, multisample_count);
+        let depth_texture =
+            Texture::create_depth_texture(device, w, h, multisample_count, Some("stage-depth"));
         let msaa_render_target = Default::default();
         // UNWRAP: safe because no other references at this point (created above^)
         let bloom = Bloom::new(ctx, &hdr_texture.read().unwrap());
@@ -294,8 +295,13 @@ impl Stage {
             create_stage_render_pipeline(self.device(), multisample_count);
         let size = self.get_size();
         // UNWRAP: POP
-        *self.depth_texture.write().unwrap() =
-            Texture::create_depth_texture(self.device(), size.x, size.y, multisample_count);
+        *self.depth_texture.write().unwrap() = Texture::create_depth_texture(
+            self.device(),
+            size.x,
+            size.y,
+            multisample_count,
+            Some("stage-depth"),
+        );
         // UNWRAP: POP
         let format = self.hdr_texture.read().unwrap().texture.format();
         *self.msaa_render_target.write().unwrap() = if multisample_count == 1 {
@@ -453,8 +459,13 @@ impl Stage {
         }
 
         // UNWRAP: panic on purpose
-        *self.depth_texture.write().unwrap() =
-            Texture::create_depth_texture(self.device(), size.x, size.y, sample_count);
+        *self.depth_texture.write().unwrap() = Texture::create_depth_texture(
+            self.device(),
+            size.x,
+            size.y,
+            sample_count,
+            Some("stage-depth"),
+        );
         self.bloom.set_hdr_texture(self.runtime(), &hdr_texture);
         self.tonemapping
             .set_hdr_texture(self.device(), &hdr_texture);

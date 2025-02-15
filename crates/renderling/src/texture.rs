@@ -485,6 +485,7 @@ impl Texture {
         width: u32,
         height: u32,
         multisample_count: u32,
+        label: Option<&str>,
     ) -> Self {
         let size = wgpu::Extent3d {
             width,
@@ -492,7 +493,7 @@ impl Texture {
             depth_or_array_layers: 1,
         };
         let desc = wgpu::TextureDescriptor {
-            label: Some("depth_texture"),
+            label,
             size,
             mip_level_count: 1,
             sample_count: multisample_count,
