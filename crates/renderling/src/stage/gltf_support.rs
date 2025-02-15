@@ -1007,7 +1007,7 @@ impl GltfDocument {
                 let intensity = gltf_light.intensity();
                 let light_bundle = match gltf_light.kind() {
                     gltf::khr_lights_punctual::Kind::Directional => {
-                        stage.lighting().new_directional_light(
+                        stage.lighting().new_analytical_light(
                             DirectionalLightDescriptor {
                                 direction: Vec3::NEG_Z,
                                 color,
@@ -1038,17 +1038,17 @@ impl GltfDocument {
                     gltf::khr_lights_punctual::Kind::Spot {
                         inner_cone_angle,
                         outer_cone_angle,
-                    } => todo!(), // {
-                                  //     let light = stage.new_value(SpotLightDescriptor {
-                                  //         position: Vec3::ZERO,
-                                  //         direction: Vec3::NEG_Z,
-                                  //         inner_cutoff: inner_cone_angle,
-                                  //         outer_cutoff: outer_cone_angle,
-                                  //         color,
-                                  //         intensity,
-                                  //     });
-                                  //     (light.id().into(), LightDetails::Spot(light))
-                                  // }
+                    } => stage.lighting().new_analytical_light(
+                        SpotLightDescriptor {
+                            position: Vec3::ZERO,
+                            direction: Vec3::NEG_Z,
+                            inner_cutoff: inner_cone_angle,
+                            outer_cutoff: outer_cone_angle,
+                            color,
+                            intensity: intensity / (683.0 * 4.0 * std::f32::consts::PI),
+                        },
+                        Some(node_transform),
+                    ),
                 };
 
                 lights.push(light_bundle);
