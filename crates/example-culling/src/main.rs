@@ -204,7 +204,7 @@ impl TestAppHandler for CullingExample {
         let mut seed = 46;
         let mut resources = BagOfResources::default();
         let stage = ctx.new_stage().with_lighting(true);
-        let sunlight_a = stage.lighting().new_directional_light(
+        let sunlight_a = stage.lighting().new_analytical_light(
             DirectionalLightDescriptor {
                 direction: Vec3::new(-0.8, -1.0, 0.5).normalize(),
                 color: Vec4::ONE,
@@ -212,7 +212,7 @@ impl TestAppHandler for CullingExample {
             },
             None,
         );
-        let sunlight_b = stage.lighting().new_directional_light(
+        let sunlight_b = stage.lighting().new_analytical_light(
             DirectionalLightDescriptor {
                 direction: Vec3::new(1.0, 1.0, -0.1).normalize(),
                 color: Vec4::ONE,

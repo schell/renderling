@@ -152,7 +152,7 @@ impl App {
         };
 
         let lighting = stage.lighting();
-        let sunlight_bundle = lighting.new_directional_light(directional_light, None);
+        let sunlight_bundle = lighting.new_analytical_light(directional_light, None);
 
         stage
             .set_atlas_size(wgpu::Extent3d {
