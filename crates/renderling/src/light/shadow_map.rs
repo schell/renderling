@@ -276,9 +276,16 @@ impl ShadowMap {
         let image = AtlasImage::new(size, crate::atlas::AtlasImageFormat::R32FLOAT);
         // UNWRAP: safe because we know there's one in here
         let atlas_textures = atlas.add_images(vec![&image; count])?;
+        let atlas_textures_len = atlas_textures.len();
         // Regardless of light type, we only create one depth texture.
-        let update_texture =
-            crate::texture::Texture::create_depth_texture(atlas.device(), size.x, size.y, 1);
+        let label = format!("shadow-map-{atlas_textures_len}");
+        let update_texture = crate::texture::Texture::create_depth_texture(
+            atlas.device(),
+            size.x,
+            size.y,
+            1,
+            Some(&label),
+        );
         let atlas_textures_array = lighting
             .light_slab
             .new_array(atlas_textures.iter().map(|t| t.id()));

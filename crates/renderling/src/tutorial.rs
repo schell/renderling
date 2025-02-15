@@ -126,7 +126,7 @@ mod test {
         let ctx = Context::headless(100, 100);
         let WgpuRuntime { device, queue } = ctx.as_ref();
         let label = Some("implicit isosceles triangle");
-        let depth = Texture::create_depth_texture(device, 100, 100, 1);
+        let depth = Texture::create_depth_texture(device, 100, 100, 1, None);
         let vertex = crate::linkage::tutorial_implicit_isosceles_vertex::linkage(device);
         let fragment = crate::linkage::tutorial_passthru_fragment::linkage(device);
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -316,7 +316,7 @@ mod test {
             }],
         });
 
-        let depth = Texture::create_depth_texture(device, 100, 100, 1);
+        let depth = Texture::create_depth_texture(device, 100, 100, 1, None);
         let frame = ctx.get_next_frame().unwrap();
         let view = frame.view();
 
@@ -492,7 +492,7 @@ mod test {
             }],
         });
 
-        let depth = Texture::create_depth_texture(device, 100, 100, 1);
+        let depth = Texture::create_depth_texture(device, 100, 100, 1, None);
         let frame = ctx.get_next_frame().unwrap();
         let view = frame.view();
 
@@ -667,7 +667,7 @@ mod test {
             }],
         });
 
-        let depth = Texture::create_depth_texture(device, 100, 100, 1);
+        let depth = Texture::create_depth_texture(device, 100, 100, 1, None);
         let frame = ctx.get_next_frame().unwrap();
         let view = frame.view();
 
