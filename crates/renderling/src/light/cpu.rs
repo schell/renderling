@@ -70,6 +70,14 @@ impl<C: IsContainer> LightDetails<C> {
         }
     }
 
+    pub fn as_spot(&self) -> Option<&C::Container<SpotLightDescriptor>> {
+        if let LightDetails::Spot(s) = self {
+            Some(s)
+        } else {
+            None
+        }
+    }
+
     pub fn style(&self) -> LightStyle {
         match self {
             LightDetails::Directional(_) => LightStyle::Directional,
@@ -120,9 +128,7 @@ impl AnalyticalLightBundle {
             }],
             LightDetails::Point(_) => todo!(),
             LightDetails::Spot(spot) => vec![{
-                let (p, j) = spot
-                    .get()
-                    .shadow_mapping_projection_and_view(&m, 0.001, size);
+                let (p, j) = spot.get().shadow_mapping_projection_and_view(&m, size);
                 p * j
             }],
         }
@@ -420,6 +426,47 @@ mod test {
     };
 
     use super::*;
+
+    #[test]
+    /// Test the spot lights.
+    ///
+    /// This should render a cube with two spot lights illuminating a spot each on its
+    /// sides.
+    fn spot_lights() {
+        let w = 800.0;
+        let h = 800.0;
+        let ctx = crate::Context::headless(w as u32, h as u32);
+        let mut stage = ctx
+            .new_stage()
+            .with_lighting(true)
+            .with_msaa_sample_count(4);
+
+        let camera = stage.new_value(Camera::default());
+        log::info!("camera_id: {:?}", camera.id());
+        let doc = stage
+            .load_gltf_document_from_path(
+                crate::test::workspace_dir()
+                    .join("gltf")
+                    .join("spot_lights.glb"),
+                camera.id(),
+            )
+            .unwrap();
+        let gltf_camera = doc.cameras.first().unwrap();
+        // TODO: investigate using the camera's aspect for any frame size.
+        // A `TextureView` of the frame could be created that renders to the frame
+        // within the camera's expected aspect ratio.
+        //
+        // We'd probably need to constrain rendering to one camera, though.
+        let mut c = gltf_camera.get_camera();
+        c.set_projection(crate::camera::perspective(w, h));
+        camera.set(c);
+
+        let frame = ctx.get_next_frame().unwrap();
+        stage.render(&frame.view());
+        let img = frame.read_image().unwrap();
+        img_diff::save("lights/spot_lights/frame.png", img);
+        frame.present();
+    }
 
     #[test]
     fn shadow_mapping_just_cuboid() {
@@ -909,9 +956,25 @@ mod test {
         let gltf_camera = doc.cameras.first().unwrap();
         let mut c = gltf_camera.get_camera();
         c.set_projection(crate::camera::perspective(w, h));
+
+        // {
+        //     let parent_transform = doc.lights[0].transform.get_global_transform();
+        //     let spot_light = doc.lights[0].light_details.as_spot().unwrap().get();
+        //     log::info!("parent_transform: {parent_transform:#?}");
+        //     log::info!("spot_light: {spot_light:#?}");
+        //     log::info!(
+        //         "transformed position: {}",
+        //         Mat4::from(parent_transform).transform_point3(spot_light.position)
+        //     );
+        //     let (p, j) =
+        //         spot_light.shadow_mapping_projection_and_view(&parent_transform.into(), 0.1, 100.0);
+        //     c.set_projection_and_view(p, j);
+        // }
+
         camera.set(c);
 
-        for (i, light_bundle) in doc.lights.iter().enumerate() {
+        let mut shadow_maps = vec![];
+        for light_bundle in doc.lights.iter() {
             log::info!(
                 "light_bundle descriptor: {}",
                 match &light_bundle.light_details {
@@ -928,20 +991,15 @@ mod test {
                 desc.bias_min = 0.00008;
                 desc.bias_max = 0.00008;
             });
-            if i == 1 {
-                crate::test::capture_gpu_frame(
-                    &ctx,
-                    "shadows/shadow_mapping_spots/update.gputrace",
-                    || shadow.update(stage.lighting(), doc.renderlets_iter()),
-                );
-            } else {
-                shadow.update(stage.lighting(), doc.renderlets_iter());
-            }
+
+            shadow.update(stage.lighting(), doc.renderlets_iter());
+            shadow_maps.push(shadow);
         }
 
         let frame = ctx.get_next_frame().unwrap();
-
-        stage.render(&frame.view());
+        crate::test::capture_gpu_frame(&ctx, "shadows/shadow_mapping_spots/frame.gputrace", || {
+            stage.render(&frame.view())
+        });
         let img = frame.read_image().unwrap();
         img_diff::save("shadows/shadow_mapping_spots/frame.png", img);
         frame.present();
