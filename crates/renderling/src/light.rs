@@ -167,22 +167,19 @@ impl Default for SpotLightDescriptor {
 }
 
 impl SpotLightDescriptor {
-    // TODO: add `shadow_mapping_projection_and_view` to `SpotLight`
     pub fn shadow_mapping_projection_and_view(
         &self,
         parent_light_transform: &Mat4,
-        z_near: f32,
+        // TODO: determine the far plane based off of light intensity and attenuation
         z_far: f32,
     ) -> (Mat4, Mat4) {
         let fovy = 2.0 * self.outer_cutoff;
         let aspect = 1.0;
-        let projection = Mat4::perspective_rh(fovy, aspect, z_near, z_far);
+        let projection = Mat4::perspective_rh(fovy, aspect, 0.001, z_far);
         let direction = parent_light_transform
             .transform_vector3(self.direction)
             .alt_norm_or_zero();
-        let position = parent_light_transform.transform_vector3(self.position);
-        crate::println!("direction: {direction}");
-        crate::println!("position: {position}");
+        let position = parent_light_transform.transform_point3(self.position);
         let view = Mat4::look_to_rh(position, direction, Vec3::Z);
         (projection, view)
     }
