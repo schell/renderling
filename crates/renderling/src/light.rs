@@ -264,12 +264,12 @@ impl SpotLightDescriptor {
     pub fn shadow_mapping_projection_and_view(
         &self,
         parent_light_transform: &Mat4,
-        // TODO: determine the far plane based off of light intensity and attenuation
+        z_near: f32,
         z_far: f32,
     ) -> (Mat4, Mat4) {
         let fovy = 2.0 * self.outer_cutoff;
         let aspect = 1.0;
-        let projection = Mat4::perspective_rh(fovy, aspect, 0.001, z_far);
+        let projection = Mat4::perspective_rh(fovy, aspect, z_near, z_far);
         let direction = parent_light_transform
             .transform_vector3(self.direction)
             .alt_norm_or_zero();
@@ -306,16 +306,18 @@ impl DirectionalLightDescriptor {
     pub fn shadow_mapping_projection_and_view(
         &self,
         parent_light_transform: &Mat4,
-        // Limits of the light's reach
+        // Near limits of the light's reach
         //
         // The maximum should be the `Camera`'s `Frustum::depth()`.
         // TODO: in `DirectionalLightDescriptor::shadow_mapping_projection_and_view`, take Frustum
         // as a parameter and then figure out the minimal view projection that includes that frustum
-        size: f32,
+        z_near: f32,
+        // Far limits of the light's reach
+        z_far: f32,
     ) -> (Mat4, Mat4) {
-        let depth = size;
+        let depth = (z_far - z_near).abs();
         let hd = depth * 0.5;
-        let projection = Mat4::orthographic_rh(-hd, hd, -hd, hd, 0.0, depth);
+        let projection = Mat4::orthographic_rh(-hd, hd, -hd, hd, z_near, z_far);
         let direction = parent_light_transform
             .transform_vector3(self.direction)
             .alt_norm_or_zero();

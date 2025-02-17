@@ -648,14 +648,8 @@ where
                 let shadow = if light.shadow_map_desc_id.is_some() {
                     // Shadow is 1.0 when the fragment is in the shadow of this light,
                     // and 0.0 in darkness
-                    ShadowCalculation::new(
-                        light_slab,
-                        light,
-                        in_pos,
-                        n,
-                        calculation.light_direction,
-                    )
-                    .run(shadow_map, shadow_map_sampler)
+                    ShadowCalculation::new(light_slab, light, in_pos, n, calculation.frag_to_light)
+                        .run(shadow_map, shadow_map_sampler)
                 } else {
                     0.0
                 };
