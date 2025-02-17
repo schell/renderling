@@ -118,17 +118,21 @@ impl AnalyticalLightBundle<WeakContainer> {
 }
 
 impl AnalyticalLightBundle {
-    pub fn light_space_transforms(&self, size: f32) -> Vec<Mat4> {
+    pub fn light_space_transforms(&self, z_near: f32, z_far: f32) -> Vec<Mat4> {
         let t = self.transform.get();
         let m = Mat4::from(t);
         match &self.light_details {
             LightDetails::Directional(d) => vec![{
-                let (p, j) = d.get().shadow_mapping_projection_and_view(&m, size);
+                let (p, j) = d
+                    .get()
+                    .shadow_mapping_projection_and_view(&m, z_near, z_far);
                 p * j
             }],
             LightDetails::Point(_) => todo!(),
             LightDetails::Spot(spot) => vec![{
-                let (p, j) = spot.get().shadow_mapping_projection_and_view(&m, size);
+                let (p, j) = spot
+                    .get()
+                    .shadow_mapping_projection_and_view(&m, z_near, z_far);
                 p * j
             }],
         }
@@ -378,10 +382,16 @@ impl Lighting {
         analytical_light_bundle: &AnalyticalLightBundle,
         // Size of the shadow map
         size: UVec2,
-        // Diameter of the area to cover with the shadow map, in world coordinates
-        depth: f32,
+        // Distance to the near plane of the shadow map's frustum.
+        //
+        // Only objects within the shadow map's frustum will cast shadows.
+        z_near: f32,
+        // Distance to the far plane of the shadow map's frustum
+        //
+        // Only objects within the shadow map's frustum will cast shadows.
+        z_far: f32,
     ) -> Result<ShadowMap, LightingError> {
-        ShadowMap::new(self, analytical_light_bundle, size, depth)
+        ShadowMap::new(self, analytical_light_bundle, size, z_near, z_far)
     }
 
     pub fn upkeep(&self) {
@@ -601,7 +611,7 @@ mod test {
         let gltf_light = doc.lights.first().unwrap();
         let shadow_map = stage
             .lighting()
-            .new_shadow_map(gltf_light, UVec2::splat(256), 20.0)
+            .new_shadow_map(gltf_light, UVec2::splat(256), 0.0, 20.0)
             .unwrap();
         shadow_map.shadowmap_descriptor.modify(|desc| {
             desc.bias_min = 0.00008;
@@ -645,7 +655,7 @@ mod test {
         let gltf_light_b = doc.lights.get(1).unwrap();
         let shadow_map_a = stage
             .lighting()
-            .new_shadow_map(gltf_light_a, UVec2::splat(256), 20.0)
+            .new_shadow_map(gltf_light_a, UVec2::splat(256), 0.0, 20.0)
             .unwrap();
         shadow_map_a.shadowmap_descriptor.modify(|desc| {
             desc.bias_min = 0.00008;
@@ -654,7 +664,7 @@ mod test {
         shadow_map_a.update(stage.lighting(), doc.renderlets_iter());
         let shadow_map_b = stage
             .lighting()
-            .new_shadow_map(gltf_light_b, UVec2::splat(256), 20.0)
+            .new_shadow_map(gltf_light_b, UVec2::splat(256), 0.0, 20.0)
             .unwrap();
         shadow_map_b.shadowmap_descriptor.modify(|desc| {
             desc.bias_min = 0.00008;
@@ -713,7 +723,7 @@ mod test {
 
         let shadows = stage
             .lighting()
-            .new_shadow_map(gltf_light, UVec2::new(w as u32, h as u32), 20.0)
+            .new_shadow_map(gltf_light, UVec2::new(w as u32, h as u32), 0.0, 20.0)
             .unwrap();
         shadows.update(stage.lighting(), doc.renderlets_iter());
 
@@ -773,18 +783,21 @@ mod test {
         camera.set(c);
 
         let mut shadow_maps = vec![];
+        let z_near = 0.1;
+        let z_far = 100.0;
         for (i, light_bundle) in doc.lights.iter().enumerate() {
             {
                 let desc = light_bundle.light_details.as_spot().unwrap().get();
                 let (p, v) = desc.shadow_mapping_projection_and_view(
                     &light_bundle.transform.get_global_transform().into(),
-                    20.0,
+                    z_near,
+                    z_far,
                 );
                 camera.set(Camera::new(p, v));
                 let frame = ctx.get_next_frame().unwrap();
                 stage.render(&frame.view());
                 let img = frame.read_image().unwrap();
-                img_diff::save(
+                img_diff::assert_img_eq(
                     &format!("shadows/shadow_mapping_spots/light_pov_{i}.png"),
                     img,
                 );
@@ -792,11 +805,11 @@ mod test {
             }
             let shadow = stage
                 .lighting()
-                .new_shadow_map(light_bundle, UVec2::splat(256), 20.0)
+                .new_shadow_map(light_bundle, UVec2::splat(256), z_near, z_far)
                 .unwrap();
             shadow.shadowmap_descriptor.modify(|desc| {
-                desc.bias_min = 0.00008;
-                desc.bias_max = 0.00008;
+                desc.bias_min = f32::EPSILON;
+                desc.bias_max = f32::EPSILON;
             });
 
             shadow.update(stage.lighting(), doc.renderlets_iter());
@@ -809,7 +822,7 @@ mod test {
             stage.render(&frame.view())
         });
         let img = frame.read_image().unwrap();
-        img_diff::save("shadows/shadow_mapping_spots/frame.png", img);
+        img_diff::assert_img_eq("shadows/shadow_mapping_spots/frame.png", img);
         frame.present();
     }
 }

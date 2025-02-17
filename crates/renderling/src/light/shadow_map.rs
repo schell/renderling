@@ -257,8 +257,10 @@ impl ShadowMap {
         analytical_light_bundle: &AnalyticalLightBundle,
         // Size of the shadow map
         size: UVec2,
-        // Diameter of the area to cover with the shadow map, in world coordinates
-        depth: f32,
+        // Distance to the shadow map frustum's near plane
+        z_near: f32,
+        // Distance to the shadow map frustum's far plane
+        z_far: f32,
     ) -> Result<Self, LightingError> {
         let stage_slab_buffer = lighting.geometry_slab_buffer.read().unwrap();
         let is_point_light =
@@ -286,7 +288,7 @@ impl ShadowMap {
             .new_blitting_operation(atlas);
         let light_space_transforms = lighting
             .light_slab
-            .new_array(analytical_light_bundle.light_space_transforms(depth));
+            .new_array(analytical_light_bundle.light_space_transforms(z_near, z_far));
         let shadowmap_descriptor = lighting.light_slab.new_value(ShadowMapDescriptor {
             light_space_transforms_array: light_space_transforms.array(),
             atlas_textures_array: atlas_textures_array.array(),
