@@ -97,6 +97,17 @@ impl From<AtlasError> for StageGltfError {
     }
 }
 
+impl From<gltf::scene::Transform> for Transform {
+    fn from(transform: gltf::scene::Transform) -> Self {
+        let (translation, rotation, scale) = transform.decomposed();
+        Transform {
+            translation: Vec3::from_array(translation),
+            rotation: Quat::from_array(rotation),
+            scale: Vec3::from_array(scale),
+        }
+    }
+}
+
 pub fn from_gltf_light_kind(kind: gltf::khr_lights_punctual::Kind) -> LightStyle {
     match kind {
         gltf::khr_lights_punctual::Kind::Directional => LightStyle::Directional,
@@ -897,13 +908,7 @@ impl GltfDocument {
                 nt.clone()
             } else {
                 let transform = stage.new_nested_transform();
-                let (translation, rotation, scale) = &node.transform().decomposed();
-                let t = Transform {
-                    translation: Vec3::from_array(*translation),
-                    rotation: Quat::from_array(*rotation),
-                    scale: Vec3::from_array(*scale),
-                };
-                transform.set(t);
+                transform.set(node.transform().into());
                 for node in node.children() {
                     let child_transform =
                         transform_for_node(nesting_level + 1, stage, cache, &node);
@@ -1021,6 +1026,7 @@ impl GltfDocument {
                                 // can roughly get candelas from lux by dividing by 683 [2].
                                 // 1. https://github.com/KhronosGroup/glTF/blob/main/extensions/2.0/Khronos/KHR_lights_punctual/README.md
                                 // 2. https://depts.washington.edu/mictech/optics/me557/Radiometry.pdf
+                                // 3. https://projects.blender.org/blender/blender-addons/commit/9d903a93f03b
                                 intensity: intensity / 683.0,
                             },
                             Some(node_transform),

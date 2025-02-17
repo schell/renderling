@@ -14,7 +14,7 @@ use crate::{
     atlas::AtlasTexture,
     light::{
         DirectionalLightDescriptor, LightStyle, LightingDescriptor, PointLightDescriptor,
-        ShadowCalculation, SpotLightDescriptor,
+        ShadowCalculation, SpotLightCalculation,
     },
     math::{self, IsSampler, IsVector, Sample2d, Sample2dArray, SampleCube},
     println as my_println,
@@ -628,27 +628,23 @@ where
             }
 
             LightStyle::Spot => {
-                let SpotLightDescriptor {
-                    position,
-                    direction,
-                    inner_cutoff,
-                    outer_cutoff,
-                    color,
-                    intensity,
-                } = light_slab.read(light.into_spot_id());
-                let position = transform.transform_point3(position);
-                let frag_to_light = position - in_pos;
-                let distance = frag_to_light.length();
-                if distance == 0.0 {
+                let spot_light_descriptor = light_slab.read(light.into_spot_id());
+                let calculation =
+                    SpotLightCalculation::new(spot_light_descriptor, transform, in_pos);
+                if calculation.frag_to_light_distance == 0.0 {
                     continue;
                 }
-                let l = frag_to_light.alt_norm_or_zero();
-                let direction = transform.transform_vector3(direction).alt_norm_or_zero();
-                let theta: f32 = l.dot(direction);
-                let epsilon: f32 = inner_cutoff - outer_cutoff;
-                let attenuation: f32 =
-                    intensity * ((theta - outer_cutoff) / epsilon).clamp(0.0, 1.0);
-                lo += outgoing_radiance(color, albedo, attenuation, v, l, n, metallic, roughness);
+                let attenuation: f32 = spot_light_descriptor.intensity * calculation.contribution;
+                lo += outgoing_radiance(
+                    spot_light_descriptor.color,
+                    albedo,
+                    attenuation,
+                    v,
+                    calculation.frag_to_light,
+                    n,
+                    metallic,
+                    roughness,
+                );
             }
 
             LightStyle::Directional => {
