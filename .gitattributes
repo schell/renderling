@@ -2,7 +2,5 @@
 *.rs text
 *.md text
 *.yaml text
-*.spv linguist-generated=true 
 *.spv binary
-*.wgsl linguist-generated=true 
 *.wgsl binary
