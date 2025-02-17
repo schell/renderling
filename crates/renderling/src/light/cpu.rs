@@ -414,18 +414,108 @@ impl Lighting {
 #[cfg(test)]
 mod test {
     use crabslab::Slab;
-    use glam::{Mat4, Vec2, Vec4};
+    use glam::{Mat4, Vec2, Vec3, Vec4};
     use image::Luma;
 
     use crate::{
         camera::Camera,
-        light::{ShadowCalculation, ShadowMappingVertexInfo},
+        light::{ShadowCalculation, ShadowMappingVertexInfo, SpotLightCalculation},
         math::{ConstTexture, CpuTexture2dArray, IsVector},
+        prelude::Transform,
         stage::RenderletPbrVertexInfo,
         texture::DepthTexture,
     };
 
     use super::*;
+
+    #[test]
+    /// Ensures that a spot light can determine if a point lies inside or outside its cone
+    /// of emission.
+    fn spot_one_calc() {
+        let (doc, _, _) = gltf::import(
+            crate::test::workspace_dir()
+                .join("gltf")
+                .join("spot_one.glb"),
+        )
+        .unwrap();
+        let light = doc.lights().unwrap().next().unwrap();
+        let spot = if let gltf::khr_lights_punctual::Kind::Spot {
+            inner_cone_angle,
+            outer_cone_angle,
+        } = light.kind()
+        {
+            (inner_cone_angle, outer_cone_angle)
+        } else {
+            panic!("not a spot light");
+        };
+        log::info!("spot: {spot:#?}");
+
+        let light_node = doc.nodes().find(|node| node.light().is_some()).unwrap();
+        let parent_transform = Transform::from(light_node.transform());
+        log::info!("parent_transform: {parent_transform:#?}");
+
+        let spot_descriptor = SpotLightDescriptor {
+            position: Vec3::ZERO,
+            direction: Vec3::NEG_Z,
+            inner_cutoff: spot.0,
+            outer_cutoff: spot.1,
+            color: Vec3::from(light.color()).extend(1.0),
+            intensity: light.intensity(),
+        };
+
+        let specific_points = [
+            (Vec3::ZERO, true, true, Some(1.0)),
+            (Vec3::new(0.5, 0.0, 0.0), false, true, None),
+            (Vec3::new(0.5, 0.0, 0.5), false, false, None),
+            (Vec3::new(1.0, 0.0, 0.0), false, false, Some(0.0)),
+        ];
+        for (i, (point, inside_inner, inside_outer, maybe_contribution)) in
+            specific_points.into_iter().enumerate()
+        {
+            log::info!("{i} descriptor: {spot_descriptor:#?}");
+            let spot_calc =
+                SpotLightCalculation::new(spot_descriptor, parent_transform.into(), point);
+            log::info!("{i} spot_calc@{point}:\n{spot_calc:#?}");
+            assert_eq!(
+                (inside_inner, inside_outer),
+                (
+                    spot_calc.fragment_is_inside_inner_cone,
+                    spot_calc.fragment_is_inside_outer_cone
+                ),
+            );
+            if let Some(expected_contribution) = maybe_contribution {
+                assert_eq!(expected_contribution, spot_calc.contribution);
+            }
+        }
+    }
+
+    #[test]
+    /// Ensures that a spot light illuminates only the objects within its cone of
+    /// emission.
+    fn spot_one_frame() {
+        let m = 32.0;
+        let (w, h) = (16.0f32 * m, 9.0 * m);
+        let ctx = crate::Context::headless(w as u32, h as u32);
+        let mut stage = ctx.new_stage().with_msaa_sample_count(4);
+        let camera = stage.new_value(Camera::default());
+        let doc = stage
+            .load_gltf_document_from_path(
+                crate::test::workspace_dir()
+                    .join("gltf")
+                    .join("spot_one.glb"),
+                camera.id(),
+            )
+            .unwrap();
+        let mut c = doc.cameras.first().unwrap().get_camera();
+        c.set_projection(crate::camera::perspective(w, h));
+        camera.set(c);
+
+        let frame = ctx.get_next_frame().unwrap();
+        stage.render(&frame.view());
+        let img = frame.read_image().unwrap();
+        img_diff::save("lights/spot_lights/one.png", img);
+        frame.present();
+    }
 
     #[test]
     /// Test the spot lights.
@@ -460,6 +550,12 @@ mod test {
         let mut c = gltf_camera.get_camera();
         c.set_projection(crate::camera::perspective(w, h));
         camera.set(c);
+
+        let down_light = doc.lights.first().unwrap();
+        log::info!(
+            "down_light: {:#?}",
+            down_light.light_details.as_spot().unwrap().get()
+        );
 
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());

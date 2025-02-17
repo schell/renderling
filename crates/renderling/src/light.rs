@@ -134,6 +134,100 @@ pub fn shadow_mapping_fragment(clip_pos: Vec4, frag_color: &mut Vec4) {
     *frag_color = (clip_pos.xyz() / clip_pos.w).extend(1.0);
 }
 
+/// Contains values needed to determine the outgoing radiance of a fragment.
+///
+/// For more info, see the **Spotlight** section of the
+/// [learnopengl](https://learnopengl.com/Lighting/Light-casters)
+/// article.
+#[derive(Clone, Copy, Default, core::fmt::Debug)]
+pub struct SpotLightCalculation {
+    /// Position of the light in world space
+    pub light_position: Vec3,
+    /// Position of the fragment in world space
+    pub frag_position: Vec3,
+    /// Unit vector (LightDir) pointing from the fragment to the light
+    pub frag_to_light: Vec3,
+    /// Distance from the fragment to the light
+    pub frag_to_light_distance: f32,
+    /// Unit vector (SpotDir) direction that the light is pointing in
+    pub light_direction: Vec3,
+    /// The cosine of the cutoff angle (Phi ϕ) that specifies the spotlight's radius.
+    ///
+    /// Everything inside this angle is lit by the spotlight.
+    pub cos_inner_cutoff: f32,
+    /// The cosine of the cutoff angle (Gamma γ) that specifies the spotlight's outer radius.
+    ///
+    /// Everything outside this angle is not lit by the spotlight.
+    ///
+    /// Fragments between `inner_cutoff` and `outer_cutoff` have an intensity
+    /// between `1.0` and `0.0`.
+    pub cos_outer_cutoff: f32,
+    /// Whether the fragment is inside the `inner_cutoff` cone.
+    pub fragment_is_inside_inner_cone: bool,
+    /// Whether the fragment is inside the `outer_cutoff` cone.
+    pub fragment_is_inside_outer_cone: bool,
+    /// `outer_cutoff` - `inner_cutoff`
+    pub epsilon: f32,
+    /// Cosine of the angle (Theta θ) between `frag_to_light` (LightDir) vector and the
+    /// `light_direction` (SpotDir) vector.
+    ///
+    /// θ  should be smaller than `outer_cutoff` (Gamma γ) to be
+    /// inside the spotlight, but since these are all cosines of angles, we actually
+    /// compare using `>`.
+    pub cos_theta: f32,
+    pub contribution_unclamped: f32,
+    /// The intensity level between `0.0` and `1.0` that should be used to determine
+    /// outgoing radiance.
+    pub contribution: f32,
+}
+
+impl SpotLightCalculation {
+    /// Calculate the values required to determine outgoing radiance of a spot light.
+    pub fn new(
+        spot_light_descriptor: SpotLightDescriptor,
+        node_transform: Mat4,
+        fragment_world_position: Vec3,
+    ) -> Self {
+        #[cfg(gpu)]
+        use spirv_std::num_traits::Float;
+
+        let light_position = node_transform.transform_point3(spot_light_descriptor.position);
+        let frag_position = fragment_world_position;
+        let frag_to_light = light_position - frag_position;
+        let frag_to_light_distance = frag_to_light.length();
+        if frag_to_light_distance == 0.0 {
+            return Self::default();
+        }
+        let frag_to_light = frag_to_light.alt_norm_or_zero();
+        let light_direction = node_transform
+            .transform_vector3(spot_light_descriptor.direction)
+            .alt_norm_or_zero();
+        let cos_inner_cutoff = spot_light_descriptor.inner_cutoff.cos();
+        let cos_outer_cutoff = spot_light_descriptor.outer_cutoff.cos();
+        let epsilon = cos_inner_cutoff - cos_outer_cutoff;
+        let cos_theta = frag_to_light.dot(-light_direction);
+        let fragment_is_inside_inner_cone = cos_theta > cos_inner_cutoff;
+        let fragment_is_inside_outer_cone = cos_theta > cos_outer_cutoff;
+        let contribution_unclamped = (cos_theta - cos_outer_cutoff) / epsilon;
+        let contribution = contribution_unclamped.clamp(0.0, 1.0);
+        Self {
+            light_position,
+            frag_position,
+            frag_to_light,
+            frag_to_light_distance,
+            light_direction,
+            cos_inner_cutoff,
+            cos_outer_cutoff,
+            fragment_is_inside_inner_cone,
+            fragment_is_inside_outer_cone,
+            epsilon,
+            cos_theta,
+            contribution_unclamped,
+            contribution,
+        }
+    }
+}
+
 #[repr(C)]
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[derive(Copy, Clone, SlabItem)]
@@ -209,7 +303,6 @@ impl Default for DirectionalLightDescriptor {
 }
 
 impl DirectionalLightDescriptor {
-    // TODO: add `shadow_mapping_projection_and_view` to `SpotLight`
     pub fn shadow_mapping_projection_and_view(
         &self,
         parent_light_transform: &Mat4,
