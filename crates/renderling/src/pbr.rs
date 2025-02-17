@@ -635,7 +635,7 @@ where
                     continue;
                 }
                 let attenuation: f32 = spot_light_descriptor.intensity * calculation.contribution;
-                lo += outgoing_radiance(
+                let radiance = outgoing_radiance(
                     spot_light_descriptor.color,
                     albedo,
                     attenuation,
@@ -645,6 +645,21 @@ where
                     metallic,
                     roughness,
                 );
+                let shadow = if light.shadow_map_desc_id.is_some() {
+                    // Shadow is 1.0 when the fragment is in the shadow of this light,
+                    // and 0.0 in darkness
+                    ShadowCalculation::new(
+                        light_slab,
+                        light,
+                        in_pos,
+                        n,
+                        calculation.light_direction,
+                    )
+                    .run(shadow_map, shadow_map_sampler)
+                } else {
+                    0.0
+                };
+                lo += radiance * (1.0 - shadow);
             }
 
             LightStyle::Directional => {

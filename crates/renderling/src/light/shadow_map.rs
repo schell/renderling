@@ -1,30 +1,22 @@
 //! Shadow mapping.
 
 use core::{ops::Deref, sync::atomic::AtomicUsize};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::Arc;
 
 use craballoc::{
-    prelude::{Hybrid, SlabAllocator, WgpuRuntime},
-    slab::SlabBuffer,
-    value::{
-        HybridArray, HybridContainer, HybridWriteGuard, IsContainer, WeakContainer, WeakHybrid,
-    },
+    prelude::Hybrid,
+    value::{HybridArray, HybridWriteGuard},
 };
-use crabslab::{Id, SlabItem};
+use crabslab::Id;
 use glam::{Mat4, UVec2};
-use snafu::prelude::*;
 
 use crate::{
-    atlas::{Atlas, AtlasBlitter, AtlasBlittingOperation, AtlasError, AtlasImage, AtlasTexture},
+    atlas::{AtlasBlittingOperation, AtlasImage, AtlasTexture},
     bindgroup::ManagedBindGroup,
-    stage::{NestedTransform, Renderlet},
+    stage::Renderlet,
 };
 
-use super::{
-    AnalyticalLightBundle, DirectionalLightDescriptor, Light, LightStyle, Lighting,
-    LightingDescriptor, LightingError, PointLightDescriptor, ShadowMapDescriptor,
-    SpotLightDescriptor,
-};
+use super::{AnalyticalLightBundle, Lighting, LightingError, ShadowMapDescriptor};
 
 /// A depth map rendering of the scene from a light's point of view.
 ///
@@ -88,7 +80,7 @@ impl ShadowMap {
         let shadow_map_update_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: ShadowMap::LABEL,
-                bind_group_layouts: &[&bindgroup_layout],
+                bind_group_layouts: &[bindgroup_layout],
                 push_constant_ranges: &[],
             });
         let shadow_map_update_vertex = crate::linkage::shadow_mapping_vertex::linkage(device);
