@@ -33,8 +33,7 @@ struct CullingExample {
     app_camera: AppCamera,
     controller: example::camera::TurntableCameraController,
     stage: Stage,
-    dlights: [Hybrid<DirectionalLight>; 2],
-    lights: [Hybrid<Light>; 2],
+    dlights: [AnalyticalLightBundle; 2],
     material_aabb_overlapping: Hybrid<Material>,
     material_aabb_outside: Hybrid<Material>,
     material_frustum: Hybrid<Material>,
@@ -205,22 +204,24 @@ impl TestAppHandler for CullingExample {
         let mut seed = 46;
         let mut resources = BagOfResources::default();
         let stage = ctx.new_stage().with_lighting(true);
-        let sunlight_a = stage.new_value(DirectionalLight {
-            direction: Vec3::new(-0.8, -1.0, 0.5).normalize(),
-            color: Vec4::ONE,
-            intensity: 10.0,
-        });
-        let light_a = stage.new_value(Light::from(sunlight_a.id()));
-        let sunlight_b = stage.new_value(DirectionalLight {
-            direction: Vec3::new(1.0, 1.0, -0.1).normalize(),
-            color: Vec4::ONE,
-            intensity: 1.0,
-        });
-        let light_b = stage.new_value(Light::from(sunlight_b.id()));
-        stage.set_lights([light_a.id(), light_b.id()]);
+        let sunlight_a = stage.lighting().new_analytical_light(
+            DirectionalLightDescriptor {
+                direction: Vec3::new(-0.8, -1.0, 0.5).normalize(),
+                color: Vec4::ONE,
+                intensity: 10.0,
+            },
+            None,
+        );
+        let sunlight_b = stage.lighting().new_analytical_light(
+            DirectionalLightDescriptor {
+                direction: Vec3::new(1.0, 1.0, -0.1).normalize(),
+                color: Vec4::ONE,
+                intensity: 1.0,
+            },
+            None,
+        );
 
         let dlights = [sunlight_a, sunlight_b];
-        let lights = [light_a, light_b];
 
         let frustum_camera = FrustumCamera({
             let aspect = 1.0;
@@ -287,6 +288,7 @@ impl TestAppHandler for CullingExample {
             next_k: seed,
             app_camera,
             frustum_camera,
+            dlights,
             controller: {
                 let mut c = example::camera::TurntableCameraController::default();
                 c.reset(BOUNDS);
@@ -294,8 +296,6 @@ impl TestAppHandler for CullingExample {
                 c
             },
             stage,
-            dlights,
-            lights,
             material_aabb_overlapping,
             material_aabb_outside,
             material_frustum,
