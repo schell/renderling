@@ -513,15 +513,15 @@ mod test {
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
         let img = frame.read_image().unwrap();
-        img_diff::save("lights/spot_lights/one.png", img);
+        img_diff::assert_img_eq("lights/spot_lights/one.png", img);
         frame.present();
     }
 
     #[test]
     /// Test the spot lights.
     ///
-    /// This should render a cube with two spot lights illuminating a spot each on its
-    /// sides.
+    /// This should render a cube with two spot lights illuminating a spot on two
+    /// of its sides.
     fn spot_lights() {
         let w = 800.0;
         let h = 800.0;
@@ -560,7 +560,7 @@ mod test {
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
         let img = frame.read_image().unwrap();
-        img_diff::save("lights/spot_lights/frame.png", img);
+        img_diff::assert_img_eq("lights/spot_lights/frame.png", img);
         frame.present();
     }
 
@@ -1052,21 +1052,6 @@ mod test {
         let gltf_camera = doc.cameras.first().unwrap();
         let mut c = gltf_camera.get_camera();
         c.set_projection(crate::camera::perspective(w, h));
-
-        // {
-        //     let parent_transform = doc.lights[0].transform.get_global_transform();
-        //     let spot_light = doc.lights[0].light_details.as_spot().unwrap().get();
-        //     log::info!("parent_transform: {parent_transform:#?}");
-        //     log::info!("spot_light: {spot_light:#?}");
-        //     log::info!(
-        //         "transformed position: {}",
-        //         Mat4::from(parent_transform).transform_point3(spot_light.position)
-        //     );
-        //     let (p, j) =
-        //         spot_light.shadow_mapping_projection_and_view(&parent_transform.into(), 0.1, 100.0);
-        //     c.set_projection_and_view(p, j);
-        // }
-
         camera.set(c);
 
         let mut shadow_maps = vec![];
