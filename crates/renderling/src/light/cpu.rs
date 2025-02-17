@@ -818,9 +818,7 @@ mod test {
         camera.set(c);
 
         let frame = ctx.get_next_frame().unwrap();
-        crate::test::capture_gpu_frame(&ctx, "shadows/shadow_mapping_spots/frame.gputrace", || {
-            stage.render(&frame.view())
-        });
+        stage.render(&frame.view());
         let img = frame.read_image().unwrap();
         img_diff::assert_img_eq("shadows/shadow_mapping_spots/frame.png", img);
         frame.present();
