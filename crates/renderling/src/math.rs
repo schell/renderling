@@ -640,6 +640,11 @@ pub const fn convex_mesh([p0, p1, p2, p3, p4, p5, p6, p7]: [Vec3; 8]) -> [Vec3; 
 
 #[cfg(test)]
 mod test {
+    use crate::{
+        camera::Camera,
+        stage::{Renderlet, Vertex},
+    };
+
     use super::*;
 
     #[test]
@@ -667,5 +672,109 @@ mod test {
 
         let nan = f32::NAN;
         assert_eq!(0.0, signum_or_zero(nan));
+    }
+
+    #[test]
+    fn hand_rolled_cubemap_sampling() {
+        let ctx = crate::Context::headless(256, 256);
+        let stage = ctx
+            .new_stage()
+            .with_background_color(Vec4::ZERO)
+            .with_lighting(false)
+            .with_msaa_sample_count(4);
+        let camera = stage.new_value(
+            Camera::default_perspective(256.0, 256.0).with_view(Mat4::look_at_rh(
+                Vec3::splat(3.0),
+                Vec3::ZERO,
+                Vec3::Y,
+            )),
+        );
+        // geometry is the "clip cube" where colors are normalized 3d space coords
+        let vertices = stage.new_array(UNIT_POINTS.map(|unit_cube_point| {
+            Vertex::default()
+                // multiply by 2.0 because the unit cube's AABB bounds are at 0.5, and we want 1.0
+                .with_position(unit_cube_point * 2.0)
+                // "normalize" (really "shift") the space coord from [-0.5, 0.5] to [0.0, 1.0]
+                .with_color((unit_cube_point + 0.5).extend(1.0))
+        }));
+        let indices = stage.new_array(UNIT_INDICES.map(|u| u as u32));
+        let renderlet = stage.new_value(Renderlet {
+            vertices_array: vertices.array(),
+            indices_array: indices.array(),
+            camera_id: camera.id(),
+            ..Default::default()
+        });
+        stage.add_renderlet(&renderlet);
+
+        // assuming a camera at the origin
+        struct CubemapFaceDirection {
+            // where is the camera
+            dir: Vec3,
+            // which direction is up
+            up: Vec3,
+        }
+        impl CubemapFaceDirection {
+            fn to_mat4(self) -> Mat4 {
+                Mat4::look_at_rh(Vec3::ZERO, self.dir, self.up)
+            }
+        }
+        // TODO: investigate why the skybox (where we got this from) does NEG_Y for up
+        let views = [
+            CubemapFaceDirection {
+                dir: Vec3::X,
+                up: Vec3::NEG_Y,
+            },
+            CubemapFaceDirection {
+                dir: Vec3::NEG_X,
+                up: Vec3::NEG_Y,
+            },
+            CubemapFaceDirection {
+                dir: Vec3::NEG_Y,
+                up: Vec3::NEG_Z,
+            },
+            CubemapFaceDirection {
+                dir: Vec3::Y,
+                up: Vec3::Z,
+            },
+            CubemapFaceDirection {
+                dir: Vec3::Z,
+                up: Vec3::NEG_Y,
+            },
+            CubemapFaceDirection {
+                dir: Vec3::NEG_Z,
+                up: Vec3::NEG_Y,
+            },
+        ]
+        .map(CubemapFaceDirection::to_mat4);
+        let cubemap_texture = ctx.get_device().create_texture(&wgpu::TextureDescriptor {
+            label: Some("cubemap-texture"),
+            size: wgpu::Extent3d {
+                width: 256,
+                height: 256,
+                depth_or_array_layers: 6,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D3,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        let cubemap_making_pipeline = crate::cubemap::CubemapMakingRenderPipeline::new(
+            ctx.get_device(),
+            wgpu::TextureFormat::Rgba8Unorm,
+        );
+        let bindgroup = crate::cubemap::cubemap_making_bindgroup(
+            ctx.get_device(),
+            Some("cubemap-texture"),
+            buffer,
+            hdr_texture,
+        );
+
+        let frame = ctx.get_next_frame().unwrap();
+        stage.render(&frame.view());
+        let img = frame.read_image().unwrap();
+        img_diff::save("math/hand_rolled_cubemap_sampling/cube.png", img);
+        frame.present();
     }
 }
