@@ -38,6 +38,9 @@ pub enum AtlasError {
 
     #[snafu(display("Missing slab during staging"))]
     StagingMissingSlab,
+
+    #[snafu(display("Missing bindgroup {layer}"))]
+    MissingBindgroup { layer: u32 },
 }
 
 /// Used to track textures internally.
@@ -644,7 +647,7 @@ impl StagedResources {
 pub struct AtlasBlittingOperation {
     atlas_slab_buffer: Arc<Mutex<SlabBuffer<wgpu::Buffer>>>,
     pipeline: Arc<wgpu::RenderPipeline>,
-    bindgroup: ManagedBindGroup,
+    bindgroups: Arc<Vec<ManagedBindGroup>>,
     bindgroup_layout: Arc<wgpu::BindGroupLayout>,
     sampler: Arc<wgpu::Sampler>,
     from_texture_id: Arc<AtomicUsize>,
@@ -662,9 +665,10 @@ impl AtlasBlittingOperation {
         runtime: impl AsRef<WgpuRuntime>,
         encoder: &mut wgpu::CommandEncoder,
         from_texture: &crate::texture::Texture,
+        layer: u32,
         to_atlas: &Atlas,
         atlas_texture: &Hybrid<AtlasTexture>,
-    ) {
+    ) -> Result<(), AtlasError> {
         let runtime = runtime.as_ref();
 
         // update the descriptor
@@ -685,30 +689,43 @@ impl AtlasBlittingOperation {
             from_texture.id() != prev_id
         };
         let should_invalidate = atlas_slab_invalid || from_texture_has_been_replaced;
-        let bindgroup = self.bindgroup.get(should_invalidate, || {
-            runtime
-                .device
-                .create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: Some("atlas-blitting"),
-                    layout: &self.bindgroup_layout,
-                    entries: &[
-                        wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: wgpu::BindingResource::Buffer(
-                                atlas_slab_buffer.deref().as_entire_buffer_binding(),
-                            ),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 1,
-                            resource: wgpu::BindingResource::TextureView(&from_texture.view),
-                        },
-                        wgpu::BindGroupEntry {
-                            binding: 2,
-                            resource: wgpu::BindingResource::Sampler(&self.sampler),
-                        },
-                    ],
-                })
-        });
+        let view = from_texture
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor {
+                label: Some("atlas-blitting"),
+                base_array_layer: layer,
+                array_layer_count: Some(1),
+                dimension: Some(wgpu::TextureViewDimension::D2),
+                ..Default::default()
+            });
+        let bindgroup = self
+            .bindgroups
+            .get(layer as usize)
+            .context(MissingBindgroupSnafu { layer })?
+            .get(should_invalidate, || {
+                runtime
+                    .device
+                    .create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("atlas-blitting"),
+                        layout: &self.bindgroup_layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: wgpu::BindingResource::Buffer(
+                                    atlas_slab_buffer.deref().as_entire_buffer_binding(),
+                                ),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: wgpu::BindingResource::TextureView(&view),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 2,
+                                resource: wgpu::BindingResource::Sampler(&self.sampler),
+                            },
+                        ],
+                    })
+            });
 
         let atlas_texture = atlas_texture.get();
         let atlas_view = to_atlas_texture
@@ -742,6 +759,7 @@ impl AtlasBlittingOperation {
         pass.set_bind_group(0, Some(bindgroup.as_ref()), &[]);
         let id = self.desc.id();
         pass.draw(0..6, id.inner()..id.inner() + 1);
+        Ok(())
     }
 }
 
@@ -867,13 +885,23 @@ impl AtlasBlitter {
         }
     }
 
-    pub fn new_blitting_operation(&self, into_atlas: &Atlas) -> AtlasBlittingOperation {
+    pub fn new_blitting_operation(
+        &self,
+        into_atlas: &Atlas,
+        layers: usize,
+    ) -> AtlasBlittingOperation {
         AtlasBlittingOperation {
             desc: into_atlas
                 .slab
                 .new_value(AtlasBlittingDescriptor::default()),
             atlas_slab_buffer: Arc::new(Mutex::new(into_atlas.slab.commit())),
-            bindgroup: ManagedBindGroup::default(),
+            bindgroups: {
+                let mut bgs = vec![];
+                for _ in 0..layers {
+                    bgs.push(ManagedBindGroup::default());
+                }
+                Arc::new(bgs)
+            },
             pipeline: self.pipeline.clone(),
             sampler: self.sampler.clone(),
             bindgroup_layout: self.bind_group_layout.clone(),

@@ -11,8 +11,8 @@ use crate::{
     atlas::{AtlasError, AtlasImage, AtlasTexture, TextureAddressMode, TextureModes},
     camera::Camera,
     light::{
-        AnalyticalLightBundle, DirectionalLightDescriptor, Light, LightDetails, LightStyle,
-        PointLightDescriptor, SpotLightDescriptor,
+        AnalyticalLightBundle, DirectionalLightDescriptor, LightStyle, PointLightDescriptor,
+        SpotLightDescriptor,
     },
     pbr::Material,
     stage::{MorphTarget, NestedTransform, Renderlet, Skin, Stage, Vertex},
@@ -1032,15 +1032,18 @@ impl GltfDocument {
                             Some(node_transform),
                         )
                     }
-                    gltf::khr_lights_punctual::Kind::Point => todo!(),
-                    // {
-                    //     let light = stage.new_value(PointLightDescriptor {
-                    //         position: Vec3::ZERO,
-                    //         color,
-                    //         intensity,
-                    //     });
-                    //     (light.id().into(), LightDetails::Point(light))
-                    // }
+
+                    gltf::khr_lights_punctual::Kind::Point => {
+                        stage.lighting().new_analytical_light(
+                            PointLightDescriptor {
+                                position: Vec3::ZERO,
+                                color,
+                                intensity: intensity / 683.0,
+                            },
+                            Some(node_transform),
+                        )
+                    }
+
                     gltf::khr_lights_punctual::Kind::Spot {
                         inner_cone_angle,
                         outer_cone_angle,
@@ -1193,13 +1196,13 @@ impl Stage {
 mod test {
     use crate::{
         camera::Camera,
-        pbr::{Material, PbrConfig},
+        pbr::Material,
         stage::{Renderlet, Vertex},
         transform::Transform,
         Context,
     };
-    use crabslab::{Id, Slab};
-    use glam::{Vec2, Vec3, Vec4, Vec4Swizzles};
+    use crabslab::Id;
+    use glam::{Vec3, Vec4};
 
     #[test]
     fn get_vertex_count_primitive_sanity() {

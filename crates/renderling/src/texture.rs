@@ -528,6 +528,55 @@ impl Texture {
         }
     }
 
+    pub fn create_depth_texture_for_shadow_map(
+        device: &wgpu::Device,
+        width: u32,
+        height: u32,
+        multisample_count: u32,
+        label: Option<&str>,
+        is_point_light: bool,
+    ) -> Self {
+        let size = wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: if is_point_light { 6 } else { 1 },
+        };
+        let desc = wgpu::TextureDescriptor {
+            label,
+            size,
+            mip_level_count: 1,
+            sample_count: multisample_count,
+            dimension: wgpu::TextureDimension::D2,
+            format: Self::DEPTH_FORMAT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        };
+        let texture = device.create_texture(&desc);
+
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            compare: Some(wgpu::CompareFunction::LessEqual),
+            lod_min_clamp: 0.0,
+            lod_max_clamp: 100.0,
+            ..Default::default()
+        });
+
+        Self {
+            texture: Arc::new(texture),
+            view: Arc::new(view),
+            sampler: Arc::new(sampler),
+            id: get_next_texture_id(),
+        }
+    }
+
     /// Read the texture from the GPU.
     ///
     /// To read the texture you must provide the width, height, the number of
