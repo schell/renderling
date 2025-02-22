@@ -8,7 +8,7 @@ use glam::UVec2;
 use glam::{Mat4, Vec2, Vec3, Vec4, Vec4Swizzles};
 use spirv_std::{
     image::{Cubemap, Image2d, Image2dArray},
-    spirv, Sampler,
+    spirv, Image, Sampler,
 };
 
 use crate::{
@@ -203,6 +203,8 @@ pub struct Renderlet {
     /// Bounding sphere of the entire renderlet, in local space.
     pub bounds: BoundingSphere,
     pub indices_array: Array<u32>,
+    // TODO: Move camera to PbrConfig or something higher up,
+    // because it doesn't change all that often.
     pub camera_id: Id<Camera>,
     pub transform_id: Id<Transform>,
     pub material_id: Id<Material>,
@@ -231,6 +233,33 @@ impl Default for Renderlet {
 }
 
 impl Renderlet {
+    /// Returns the vertex at the given index and its related values.
+    ///
+    /// These values are often used in shaders, so they are grouped together.
+    pub fn get_vertex_info(
+        &self,
+        vertex_index: u32,
+        slab: &[u32],
+    ) -> (Vertex, Transform, Mat4, Vec3) {
+        let vertex = self.get_vertex(vertex_index, slab);
+        let transform = self.get_transform(vertex, slab);
+        let model_matrix = Mat4::from(transform);
+        let world_pos = model_matrix.transform_point3(vertex.position);
+        (vertex, transform, model_matrix, world_pos)
+    }
+    /// Retrieve the transform of this `Renderlet`.
+    ///
+    /// This takes into consideration all skinning matrices.
+    pub fn get_transform(&self, vertex: Vertex, slab: &[u32]) -> Transform {
+        let config = slab.read_unchecked(self.pbr_config_id);
+        if config.has_skinning && self.skin_id.is_some() {
+            let skin = slab.read(self.skin_id);
+            Transform::from(skin.get_skinning_matrix(vertex, slab))
+        } else {
+            slab.read(self.transform_id)
+        }
+    }
+
     /// Retrieve the vertex from the slab, calculating any displacement due to
     /// morph targets.
     pub fn get_vertex(&self, vertex_index: u32, slab: &[u32]) -> Vertex {
@@ -261,6 +290,27 @@ impl Renderlet {
     }
 }
 
+#[cfg(test)]
+/// A helper struct that contains all outputs of the Renderlet's PBR vertex shader.
+#[derive(Default, Debug, Clone, Copy, PartialEq)]
+pub struct RenderletPbrVertexInfo {
+    pub renderlet: Renderlet,
+    pub renderlet_id: Id<Renderlet>,
+    pub vertex_index: u32,
+    pub vertex: Vertex,
+    pub transform: Transform,
+    pub model_matrix: Mat4,
+    pub view_projection: Mat4,
+    pub out_color: Vec4,
+    pub out_uv0: Vec2,
+    pub out_uv1: Vec2,
+    pub out_norm: Vec3,
+    pub out_tangent: Vec3,
+    pub out_bitangent: Vec3,
+    pub out_pos: Vec3,
+    pub out_clip_pos: Vec4,
+}
+
 /// Renderlet vertex shader.
 #[spirv(vertex)]
 #[allow(clippy::too_many_arguments)]
@@ -272,6 +322,7 @@ pub fn renderlet_vertex(
     #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] slab: &[u32],
 
     #[spirv(flat)] out_renderlet: &mut Id<Renderlet>,
+    // TODO: Think about placing all these out values in a G-Buffer
     out_color: &mut Vec4,
     out_uv0: &mut Vec2,
     out_uv1: &mut Vec2,
@@ -280,6 +331,8 @@ pub fn renderlet_vertex(
     out_bitangent: &mut Vec3,
     out_world_pos: &mut Vec3,
     #[spirv(position)] out_clip_pos: &mut Vec4,
+    // test-only info struct
+    #[cfg(test)] out_info: &mut RenderletPbrVertexInfo,
 ) {
     let renderlet = slab.read_unchecked(renderlet_id);
     if !renderlet.visible {
@@ -290,23 +343,16 @@ pub fn renderlet_vertex(
 
     *out_renderlet = renderlet_id;
 
-    let vertex = renderlet.get_vertex(vertex_index, slab);
+    let (vertex, transform, model_matrix, world_pos) =
+        renderlet.get_vertex_info(vertex_index, slab);
     *out_color = vertex.color;
     *out_uv0 = vertex.uv0;
     *out_uv1 = vertex.uv1;
+    *out_world_pos = world_pos;
 
-    let config = slab.read_unchecked(renderlet.pbr_config_id);
-
-    let transform = if config.has_skinning && renderlet.skin_id.is_some() {
-        let skin = slab.read(renderlet.skin_id);
-        Transform::from(skin.get_skinning_matrix(vertex, slab))
-    } else {
-        slab.read(renderlet.transform_id)
-    };
     let scale2 = transform.scale * transform.scale;
     let normal = vertex.normal.alt_norm_or_zero();
     let tangent = vertex.tangent.xyz().alt_norm_or_zero();
-    let model_matrix = Mat4::from(transform);
     let normal_w: Vec3 = (model_matrix * (normal / scale2).extend(0.0))
         .xyz()
         .alt_norm_or_zero();
@@ -320,11 +366,29 @@ pub fn renderlet_vertex(
     let bitangent_w = normal_w.cross(tangent_w) * if vertex.tangent.w >= 0.0 { 1.0 } else { -1.0 };
     *out_bitangent = bitangent_w;
 
-    let world_pos = model_matrix.transform_point3(vertex.position);
-    *out_world_pos = world_pos;
-
     let camera = slab.read(renderlet.camera_id);
-    *out_clip_pos = camera.view_projection() * world_pos.extend(1.0);
+    let clip_pos = camera.view_projection() * world_pos.extend(1.0);
+    *out_clip_pos = clip_pos;
+    #[cfg(test)]
+    {
+        *out_info = RenderletPbrVertexInfo {
+            renderlet_id,
+            vertex_index,
+            vertex,
+            transform,
+            model_matrix,
+            view_projection: camera.view_projection(),
+            out_clip_pos: clip_pos,
+            renderlet,
+            out_color: *out_color,
+            out_uv0: *out_uv0,
+            out_uv1: *out_uv1,
+            out_norm: *out_norm,
+            out_tangent: *out_tangent,
+            out_bitangent: *out_bitangent,
+            out_pos: *out_world_pos,
+        };
+    }
 }
 
 /// Renderlet fragment shader
@@ -342,7 +406,13 @@ pub fn renderlet_fragment(
 
     #[spirv(descriptor_set = 1, binding = 6)] brdf: &Image2d,
     #[spirv(descriptor_set = 1, binding = 7)] brdf_sampler: &Sampler,
+
     #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] slab: &[u32],
+
+    #[spirv(storage_buffer, descriptor_set = 2, binding = 0)] light_slab: &[u32],
+    #[spirv(descriptor_set = 2, binding = 1)] shadow_map: &Image!(2D, type=f32, sampled, arrayed),
+    #[spirv(descriptor_set = 2, binding = 2)] shadow_map_sampler: &Sampler,
+
     #[spirv(flat)] renderlet_id: Id<Renderlet>,
     in_color: Vec4,
     in_uv0: Vec2,
@@ -362,7 +432,10 @@ pub fn renderlet_fragment(
         prefiltered_sampler,
         brdf,
         brdf_sampler,
+        shadow_map,
+        shadow_map_sampler,
         slab,
+        light_slab,
         renderlet_id,
         in_color,
         in_uv0,

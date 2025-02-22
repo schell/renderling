@@ -1,8 +1,6 @@
 //! Debug overlay.
 use crabslab::{Id, Slab};
 use glam::{Vec2, Vec3Swizzles, Vec4, Vec4Swizzles};
-#[cfg(target_arch = "spirv")]
-use spirv_std::num_traits::Float;
 use spirv_std::{arch::IndexUnchecked, spirv};
 
 use crate::{draw::DrawIndirectArgs, pbr::PbrConfig, sdf, stage::Renderlet, transform::Transform};

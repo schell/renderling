@@ -1,4 +1,4 @@
-struct type_7 {
+struct type_5 {
     member: u32,
     member_1: u32,
 }
@@ -13,11 +13,11 @@ var global_4: texture_cube<f32>;
 
 fn function() {
     var phi_454_: vec3<f32>;
-    var phi_104_: type_7;
+    var phi_104_: type_5;
     var phi_107_: vec3<f32>;
     var phi_109_: f32;
-    var phi_105_: type_7;
-    var phi_132_: type_7;
+    var phi_105_: type_5;
+    var phi_132_: type_5;
     var phi_635_: vec3<f32>;
     var phi_670_: vec3<f32>;
     var phi_705_: vec3<f32>;
@@ -44,7 +44,7 @@ fn function() {
     }
     let _e55 = phi_454_;
     let _e57 = (_e55.y * -1f);
-    phi_104_ = type_7(0u, 1024u);
+    phi_104_ = type_5(0u, 1024u);
     phi_107_ = vec3<f32>(0f, 0f, 0f);
     phi_109_ = 0f;
     loop {
@@ -58,11 +58,11 @@ fn function() {
         local_4 = _e61;
         local_5 = _e63;
         if (_e59.member < _e59.member_1) {
-            phi_105_ = type_7((_e59.member + 1u), _e59.member_1);
-            phi_132_ = type_7(1u, _e59.member);
+            phi_105_ = type_5((_e59.member + 1u), _e59.member_1);
+            phi_132_ = type_5(1u, _e59.member);
         } else {
             phi_105_ = _e59;
-            phi_132_ = type_7(0u, type_7().member_1);
+            phi_132_ = type_5(0u, type_5().member_1);
         }
         let _e76 = phi_105_;
         let _e78 = phi_132_;

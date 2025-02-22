@@ -1,9 +1,9 @@
-struct type_8 {
+struct type_3 {
     member: array<u32>,
 }
 
 @group(0) @binding(0) 
-var<storage> global: type_8;
+var<storage> global: type_3;
 var<private> global_1: vec2<f32>;
 @group(0) @binding(2) 
 var global_2: sampler;

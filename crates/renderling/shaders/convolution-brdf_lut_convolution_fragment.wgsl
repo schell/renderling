@@ -1,4 +1,4 @@
-struct type_6 {
+struct type_5 {
     member: u32,
     member_1: u32,
 }
@@ -7,11 +7,11 @@ var<private> global: vec2<f32>;
 var<private> global_1: vec2<f32>;
 
 fn function() {
-    var phi_266_: type_6;
+    var phi_266_: type_5;
     var phi_269_: f32;
     var phi_271_: f32;
-    var phi_267_: type_6;
-    var phi_294_: type_6;
+    var phi_267_: type_5;
+    var phi_294_: type_5;
     var phi_586_: vec3<f32>;
     var phi_621_: vec3<f32>;
     var phi_656_: vec3<f32>;
@@ -29,7 +29,7 @@ fn function() {
     let _e40 = max(_e37.x, 0.00000011920929f);
     let _e41 = -(_e40);
     let _e43 = sqrt(fma(_e41, _e40, 1f));
-    phi_266_ = type_6(1u, 1024u);
+    phi_266_ = type_5(1u, 1024u);
     phi_269_ = 0f;
     phi_271_ = 0f;
     loop {
@@ -39,11 +39,11 @@ fn function() {
         local = _e49;
         local_1 = _e47;
         if (_e45.member < _e45.member_1) {
-            phi_267_ = type_6((_e45.member + 1u), _e45.member_1);
-            phi_294_ = type_6(1u, _e45.member);
+            phi_267_ = type_5((_e45.member + 1u), _e45.member_1);
+            phi_294_ = type_5(1u, _e45.member);
         } else {
             phi_267_ = _e45;
-            phi_294_ = type_6(0u, type_6().member_1);
+            phi_294_ = type_5(0u, type_5().member_1);
         }
         let _e62 = phi_267_;
         let _e64 = phi_294_;

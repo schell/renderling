@@ -100,11 +100,15 @@ impl Tonemapping {
         frame_texture_format: wgpu::TextureFormat,
         hdr_texture: &Texture,
     ) -> Self {
-        let slab = SlabAllocator::new(runtime, wgpu::BufferUsages::empty());
+        let slab = SlabAllocator::new_with_label(
+            runtime,
+            wgpu::BufferUsages::empty(),
+            Some("tonemapping-slab"),
+        );
         let config = slab.new_value(TonemapConstants::default());
 
         let label = Some("tonemapping");
-        let slab_buffer = slab.get_updated_buffer();
+        let slab_buffer = slab.commit();
         let bindgroup = Arc::new(RwLock::new(create_bindgroup(
             &runtime.device,
             label,
@@ -185,7 +189,7 @@ impl Tonemapping {
 
     pub fn render(&self, device: &wgpu::Device, queue: &wgpu::Queue, view: &wgpu::TextureView) {
         let label = Some("tonemapping render");
-        assert!(self.slab.upkeep().is_none());
+        assert!(!self.slab.commit().is_new_this_commit());
 
         // UNWRAP: not safe but we want to panic
         let bindgroup = self.bindgroup.read().unwrap();
