@@ -351,6 +351,29 @@ impl Default for PointLightDescriptor {
     }
 }
 
+impl PointLightDescriptor {
+    pub fn shadow_mapping_projection_and_view_matrices(
+        &self,
+        parent_light_transform: &Mat4,
+        z_near: f32,
+        z_far: f32,
+    ) -> (Mat4, [Mat4; 6]) {
+        let p = Mat4::perspective_rh(std::f32::consts::FRAC_PI_2, 1.0, z_near, z_far);
+        let eye = parent_light_transform.transform_point3(self.position);
+        (
+            p,
+            [
+                Mat4::look_at_rh(eye, eye + Vec3::X, Vec3::Y),
+                Mat4::look_at_rh(eye, eye + Vec3::NEG_X, Vec3::Y),
+                Mat4::look_at_rh(eye, eye + Vec3::Y, Vec3::Z),
+                Mat4::look_at_rh(eye, eye + Vec3::NEG_Y, Vec3::Z),
+                Mat4::look_at_rh(eye, eye + Vec3::Z, Vec3::Y),
+                Mat4::look_at_rh(eye, eye + Vec3::NEG_Z, Vec3::Y),
+            ],
+        )
+    }
+}
+
 #[repr(u32)]
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[derive(Copy, Clone, PartialEq)]
@@ -482,6 +505,7 @@ impl ShadowCalculation {
         let shadow_map_descr = light_slab.read_unchecked(light.shadow_map_desc_id);
         let atlas_texture = {
             let atlas_texture_id =
+            // TODO: for point lights we have to pick all 6 shadow map textures
                 light_slab.read_unchecked(shadow_map_descr.atlas_textures_array.at(0));
             light_slab.read_unchecked(atlas_texture_id)
         };

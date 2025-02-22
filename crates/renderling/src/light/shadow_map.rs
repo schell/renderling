@@ -161,7 +161,7 @@ impl ShadowMap {
         &self,
         lighting: &Lighting,
         renderlets: impl IntoIterator<Item = &'a Hybrid<Renderlet>>,
-    ) {
+    ) -> Result<(), LightingError> {
         if lighting.geometry_slab.has_queued_updates() {
             lighting.geometry_slab.commit();
         }
@@ -196,10 +196,10 @@ impl ShadowMap {
                 )
             })
         };
-        let mut encoder =
-            device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Self::LABEL });
-
         for (i, atlas_texture) in self.atlas_textures.iter().enumerate() {
+            let mut encoder = device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Self::LABEL });
+
             // Update the lighting descriptor to point to this shadow map, which tells the
             // vertex shader which shadow map we're updating.
             lighting.lighting_descriptor.modify(|ld| {
@@ -210,12 +210,23 @@ impl ShadowMap {
             });
             // Sync those changes
             let _ = lighting.light_slab.commit();
+            let label = format!("{}-view-{i}", Self::LABEL.unwrap());
+            let view = self
+                .update_texture
+                .texture
+                .create_view(&wgpu::TextureViewDescriptor {
+                    label: Some(&label),
+                    base_array_layer: i as u32,
+                    array_layer_count: Some(1),
+                    dimension: Some(wgpu::TextureViewDimension::D2),
+                    ..Default::default()
+                });
             {
                 let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                     label: Self::LABEL,
                     color_attachments: &[],
                     depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                        view: &self.update_texture.view,
+                        view: &view,
                         depth_ops: Some(wgpu::Operations {
                             load: wgpu::LoadOp::Clear(1.0),
                             store: wgpu::StoreOp::Store,
@@ -242,12 +253,14 @@ impl ShadowMap {
                 lighting.light_slab.runtime(),
                 &mut encoder,
                 &self.update_texture,
+                i as u32,
                 &lighting.shadow_map_atlas,
                 atlas_texture,
-            );
+            )?;
+            let submission = queue.submit(Some(encoder.finish()));
+            device.poll(wgpu::Maintain::wait_for(submission));
         }
-        let submission = queue.submit(Some(encoder.finish()));
-        device.poll(wgpu::Maintain::wait_for(submission));
+        Ok(())
     }
 
     /// Enable shadow mapping for the given [`AnalyticalLightBundle`], creating
@@ -271,21 +284,23 @@ impl ShadowMap {
         // UNWRAP: safe because we know there's one in here
         let atlas_textures = atlas.add_images(vec![&image; count])?;
         let atlas_len = atlas.len();
-        // Regardless of light type, we only create one depth texture.
+        // Regardless of light type, we only create one depth texture,
+        // but that texture may be of layer 1 or 6
         let label = format!("shadow-map-{atlas_len}");
-        let update_texture = crate::texture::Texture::create_depth_texture(
+        let update_texture = crate::texture::Texture::create_depth_texture_for_shadow_map(
             atlas.device(),
             size.x,
             size.y,
             1,
             Some(&label),
+            is_point_light,
         );
         let atlas_textures_array = lighting
             .light_slab
             .new_array(atlas_textures.iter().map(|t| t.id()));
         let blitting_op = lighting
             .shadow_map_update_blitter
-            .new_blitting_operation(atlas);
+            .new_blitting_operation(atlas, if is_point_light { 6 } else { 1 });
         let light_space_transforms = lighting
             .light_slab
             .new_array(analytical_light_bundle.light_space_transforms(z_near, z_far));
@@ -319,5 +334,352 @@ impl ShadowMap {
             update_texture,
             blitting_op,
         })
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use image::Luma;
+
+    use crate::{camera::Camera, texture::DepthTexture};
+
+    use super::super::*;
+
+    #[test]
+    fn shadow_mapping_just_cuboid() {
+        let w = 800.0;
+        let h = 800.0;
+        let ctx = crate::Context::headless(w as u32, h as u32);
+        let mut stage = ctx
+            .new_stage()
+            .with_lighting(true)
+            .with_msaa_sample_count(4);
+
+        // let hdr_path =
+        //     std::path::PathBuf::from(std::env!("CARGO_WORKSPACE_DIR")).join("img/hdr/night.hdr");
+        // let hdr_img = AtlasImage::from_hdr_path(hdr_path).unwrap();
+
+        let camera = stage.new_value(Camera::default());
+        // let skybox = Skybox::new(&ctx, hdr_img, camera.id());
+        // stage.set_skybox(skybox);
+        log::info!("camera_id: {:?}", camera.id());
+        let doc = stage
+            .load_gltf_document_from_path(
+                crate::test::workspace_dir()
+                    .join("gltf")
+                    .join("shadow_mapping_only_cuboid.gltf"),
+                camera.id(),
+            )
+            .unwrap();
+        let gltf_camera = doc.cameras.first().unwrap();
+        let mut c = gltf_camera.get_camera();
+        c.set_projection(crate::camera::perspective(w, h));
+        camera.set(c);
+
+        let frame = ctx.get_next_frame().unwrap();
+        stage.render(&frame.view());
+        let img = frame.read_image().unwrap();
+        frame.present();
+
+        // Rendering the scene without shadows as a sanity check
+        img_diff::assert_img_eq("shadows/shadow_mapping_just_cuboid/scene_before.png", img);
+
+        let gltf_light = doc.lights.first().unwrap();
+        let shadow_map = stage
+            .lighting()
+            .new_shadow_map(gltf_light, UVec2::splat(256), 0.0, 20.0)
+            .unwrap();
+        shadow_map.shadowmap_descriptor.modify(|desc| {
+            desc.bias_min = 0.00008;
+            desc.bias_max = 0.00008;
+        });
+        shadow_map
+            .update(stage.lighting(), doc.renderlets_iter())
+            .unwrap();
+
+        let frame = ctx.get_next_frame().unwrap();
+        stage.render(&frame.view());
+        let img = frame.read_image().unwrap();
+        img_diff::assert_img_eq("shadows/shadow_mapping_just_cuboid/scene_after.png", img);
+        frame.present();
+    }
+
+    #[test]
+    fn shadow_mapping_just_cuboid_red_and_blue() {
+        let w = 800.0;
+        let h = 800.0;
+        let ctx = crate::Context::headless(w as u32, h as u32);
+        let mut stage = ctx
+            .new_stage()
+            .with_lighting(true)
+            .with_msaa_sample_count(4);
+
+        let camera = stage.new_value(Camera::default());
+        log::info!("camera_id: {:?}", camera.id());
+        let doc = stage
+            .load_gltf_document_from_path(
+                crate::test::workspace_dir()
+                    .join("gltf")
+                    .join("shadow_mapping_only_cuboid_red_and_blue.gltf"),
+                camera.id(),
+            )
+            .unwrap();
+        let gltf_camera = doc.cameras.first().unwrap();
+        let mut c = gltf_camera.get_camera();
+        c.set_projection(crate::camera::perspective(w, h));
+        camera.set(c);
+
+        let gltf_light_a = doc.lights.first().unwrap();
+        let gltf_light_b = doc.lights.get(1).unwrap();
+        let shadow_map_a = stage
+            .lighting()
+            .new_shadow_map(gltf_light_a, UVec2::splat(256), 0.0, 20.0)
+            .unwrap();
+        shadow_map_a.shadowmap_descriptor.modify(|desc| {
+            desc.bias_min = 0.00008;
+            desc.bias_max = 0.00008;
+        });
+        shadow_map_a
+            .update(stage.lighting(), doc.renderlets_iter())
+            .unwrap();
+        let shadow_map_b = stage
+            .lighting()
+            .new_shadow_map(gltf_light_b, UVec2::splat(256), 0.0, 20.0)
+            .unwrap();
+        shadow_map_b.shadowmap_descriptor.modify(|desc| {
+            desc.bias_min = 0.00008;
+            desc.bias_max = 0.00008;
+        });
+        shadow_map_b
+            .update(stage.lighting(), doc.renderlets_iter())
+            .unwrap();
+
+        let frame = ctx.get_next_frame().unwrap();
+
+        stage.render(&frame.view());
+        let img = frame.read_image().unwrap();
+        img_diff::assert_img_eq(
+            "shadows/shadow_mapping_just_cuboid/red_and_blue/frame.png",
+            img,
+        );
+        frame.present();
+    }
+
+    #[test]
+    fn shadow_mapping_sanity() {
+        let w = 800.0;
+        let h = 800.0;
+        let ctx = crate::Context::headless(w as u32, h as u32);
+        let mut stage = ctx.new_stage().with_lighting(true);
+
+        let camera = stage.new_value(Camera::default());
+
+        log::info!("camera_id: {:?}", camera.id());
+        let doc = stage
+            .load_gltf_document_from_path(
+                crate::test::workspace_dir()
+                    .join("gltf")
+                    .join("shadow_mapping_sanity.gltf"),
+                camera.id(),
+            )
+            .unwrap();
+        let gltf_camera = doc.cameras.first().unwrap();
+        let mut c = gltf_camera.get_camera();
+        c.set_projection(crate::camera::perspective(w, h));
+        camera.set(c);
+
+        let frame = ctx.get_next_frame().unwrap();
+        stage.render(&frame.view());
+        let img = frame.read_image().unwrap();
+        frame.present();
+
+        // Rendering the scene without shadows as a sanity check
+        img_diff::assert_img_eq("shadows/shadow_mapping_sanity/scene_before.png", img);
+
+        let gltf_light = doc.lights.first().unwrap();
+        assert_eq!(
+            gltf_light.light.get().transform_id,
+            gltf_light.transform.global_transform_id(),
+            "light's global transform id is different from its transform_id"
+        );
+
+        let shadows = stage
+            .lighting()
+            .new_shadow_map(gltf_light, UVec2::new(w as u32, h as u32), 0.0, 20.0)
+            .unwrap();
+        shadows
+            .update(stage.lighting(), doc.renderlets_iter())
+            .unwrap();
+
+        {
+            // Ensure the state of the "update texture", which receives the depth of the scene on update
+            let shadow_map_update_texture =
+                DepthTexture::try_new_from(&ctx, shadows.update_texture.clone()).unwrap();
+            let mut shadow_map_update_img = shadow_map_update_texture.read_image().unwrap();
+            img_diff::normalize_gray_img(&mut shadow_map_update_img);
+            img_diff::assert_img_eq(
+                "shadows/shadow_mapping_sanity/shadows_update_texture.png",
+                shadow_map_update_img,
+            );
+        }
+
+        let shadow_depth_buffer = stage.lighting().shadow_map_atlas.atlas_img_buffer(&ctx, 0);
+        let shadow_depth_img = shadow_depth_buffer
+            .into_image::<f32, Luma<f32>>(ctx.get_device())
+            .unwrap();
+        let shadow_depth_img = shadow_depth_img.into_luma8();
+        let mut depth_img = shadow_depth_img.clone();
+        img_diff::normalize_gray_img(&mut depth_img);
+        img_diff::assert_img_eq("shadows/shadow_mapping_sanity/depth.png", depth_img);
+
+        // Now do the rendering *with the shadow map* to see if it works.
+        let frame = ctx.get_next_frame().unwrap();
+        stage.render(&frame.view());
+
+        let img = frame.read_image().unwrap();
+        frame.present();
+        img_diff::assert_img_eq("shadows/shadow_mapping_sanity/stage_render.png", img);
+    }
+
+    #[test]
+    fn shadow_mapping_spot_lights() {
+        let w = 800.0;
+        let h = 800.0;
+        let ctx = crate::Context::headless(w as u32, h as u32);
+        let mut stage = ctx
+            .new_stage()
+            .with_lighting(true)
+            .with_msaa_sample_count(4);
+
+        let camera = stage.new_value(Camera::default());
+        log::info!("camera_id: {:?}", camera.id());
+        let doc = stage
+            .load_gltf_document_from_path(
+                crate::test::workspace_dir()
+                    .join("gltf")
+                    .join("shadow_mapping_spots.glb"),
+                camera.id(),
+            )
+            .unwrap();
+        let gltf_camera = doc.cameras.first().unwrap();
+        let mut c = gltf_camera.get_camera();
+        c.set_projection(crate::camera::perspective(w, h));
+        camera.set(c);
+
+        let mut shadow_maps = vec![];
+        let z_near = 0.1;
+        let z_far = 100.0;
+        for (i, light_bundle) in doc.lights.iter().enumerate() {
+            {
+                let desc = light_bundle.light_details.as_spot().unwrap().get();
+                let (p, v) = desc.shadow_mapping_projection_and_view(
+                    &light_bundle.transform.get_global_transform().into(),
+                    z_near,
+                    z_far,
+                );
+                camera.set(Camera::new(p, v));
+                let frame = ctx.get_next_frame().unwrap();
+                stage.render(&frame.view());
+                let img = frame.read_image().unwrap();
+                img_diff::assert_img_eq(
+                    &format!("shadows/shadow_mapping_spots/light_pov_{i}.png"),
+                    img,
+                );
+                frame.present();
+            }
+            let shadow = stage
+                .lighting()
+                .new_shadow_map(light_bundle, UVec2::splat(256), z_near, z_far)
+                .unwrap();
+            shadow.shadowmap_descriptor.modify(|desc| {
+                desc.bias_min = f32::EPSILON;
+                desc.bias_max = f32::EPSILON;
+            });
+
+            shadow
+                .update(stage.lighting(), doc.renderlets_iter())
+                .unwrap();
+            shadow_maps.push(shadow);
+        }
+        camera.set(c);
+
+        let frame = ctx.get_next_frame().unwrap();
+        stage.render(&frame.view());
+        let img = frame.read_image().unwrap();
+        img_diff::assert_img_eq("shadows/shadow_mapping_spots/frame.png", img);
+        frame.present();
+    }
+
+    #[test]
+    fn shadow_mapping_point_lights() {
+        let w = 800.0;
+        let h = 800.0;
+        let ctx = crate::Context::headless(w as u32, h as u32);
+        let mut stage = ctx
+            .new_stage()
+            .with_lighting(true)
+            .with_background_color(Vec3::splat(0.05087).extend(1.0))
+            .with_msaa_sample_count(4);
+        let camera = stage.new_value(Camera::default());
+        let doc = stage
+            .load_gltf_document_from_path(
+                crate::test::workspace_dir()
+                    .join("gltf")
+                    .join("shadow_mapping_points.glb"),
+                camera.id(),
+            )
+            .unwrap();
+        let gltf_camera = doc.cameras.first().unwrap();
+        let mut c = gltf_camera.get_camera();
+        c.set_projection(crate::camera::perspective(w, h));
+
+        camera.set(c);
+
+        let mut shadows = vec![];
+        let z_near = 0.1;
+        let z_far = 100.0;
+        for (i, light_bundle) in doc.lights.iter().enumerate() {
+            {
+                let desc = light_bundle.light_details.as_point().unwrap().get();
+                let (p, vs) = desc.shadow_mapping_projection_and_view_matrices(
+                    &light_bundle.transform.get_global_transform().into(),
+                    z_near,
+                    z_far,
+                );
+                for (j, v) in vs.into_iter().enumerate() {
+                    camera.set(Camera::new(p, v));
+                    let frame = ctx.get_next_frame().unwrap();
+                    stage.render(&frame.view());
+                    let img = frame.read_image().unwrap();
+                    img_diff::save(
+                        &format!("shadows/shadow_mapping_points/light_{i}_pov_{j}.png"),
+                        img,
+                    );
+                    frame.present();
+                }
+            }
+            let shadow = stage
+                .lighting()
+                .new_shadow_map(light_bundle, UVec2::splat(256), z_near, z_far)
+                .unwrap();
+            shadow.shadowmap_descriptor.modify(|desc| {
+                desc.bias_min = f32::EPSILON;
+                desc.bias_max = f32::EPSILON;
+            });
+            shadow
+                .update(stage.lighting(), doc.renderlets_iter())
+                .unwrap();
+            shadows.push(shadow);
+        }
+
+        let frame = ctx.get_next_frame().unwrap();
+        crate::test::capture_gpu_frame(
+            &ctx,
+            "shadows/shadow_mapping_points/frame.gputrace",
+            || stage.render(&frame.view()),
+        );
+        let img = frame.read_image().unwrap();
+        img_diff::save("shadows/shadow_mapping_points/frame.png", img);
+        frame.present();
     }
 }
