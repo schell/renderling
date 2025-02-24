@@ -34,7 +34,12 @@ impl InternalRenderlet {
     }
 
     fn copy_inner(&self) -> Option<Renderlet> {
-        self.inner.upgrade().map(|hy| hy.get())
+        let hy = self.get_hybrid()?;
+        Some(hy.get())
+    }
+
+    fn get_hybrid(&self) -> Option<Hybrid<Renderlet>> {
+        self.inner.upgrade()
     }
 }
 
@@ -267,12 +272,8 @@ impl DrawCalls {
     }
 
     /// Iterator over all staged [`Renderlet`]s.
-    pub fn renderlets_iter(&self) -> impl Iterator<Item = Renderlet> {
-        self.internal_renderlets
-            .iter()
-            .filter_map(|ir| ir.copy_inner())
-            .collect::<Vec<_>>()
-            .into_iter()
+    pub fn renderlets_iter(&self) -> impl Iterator<Item = WeakHybrid<Renderlet>> + '_ {
+        self.internal_renderlets.iter().map(|ir| ir.inner.clone())
     }
 
     /// Perform upkeep on queued draw calls and synchronize internal buffers.
