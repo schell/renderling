@@ -358,7 +358,7 @@ impl PointLightDescriptor {
         z_near: f32,
         z_far: f32,
     ) -> (Mat4, [Mat4; 6]) {
-        let p = Mat4::perspective_rh(std::f32::consts::FRAC_PI_2, 1.0, z_near, z_far);
+        let p = Mat4::perspective_rh(core::f32::consts::FRAC_PI_2, 1.0, z_near, z_far);
         let eye = parent_light_transform.transform_point3(self.position);
         (
             p,

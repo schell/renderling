@@ -66,70 +66,101 @@ fn create_msaa_textureview(
         .create_view(&wgpu::TextureViewDescriptor::default())
 }
 
-fn create_stage_render_pipeline(
-    device: &wgpu::Device,
-    multisample_count: u32,
-) -> wgpu::RenderPipeline {
-    log::trace!("creating stage render pipeline");
-    let label = Some("stage render");
-    let vertex_linkage = crate::linkage::renderlet_vertex::linkage(device);
-    let fragment_linkage = crate::linkage::renderlet_fragment::linkage(device);
-    let stage_slab_buffers_layout = crate::linkage::slab_bindgroup_layout(device);
-    let atlas_and_skybox_layout = crate::linkage::atlas_and_skybox_bindgroup_layout(device);
-    let light_bindgroup_layout = crate::light::Lighting::create_bindgroup_layout(device);
-    let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-        label,
-        bind_group_layouts: &[
-            &stage_slab_buffers_layout,
-            &atlas_and_skybox_layout,
-            &light_bindgroup_layout,
-        ],
-        push_constant_ranges: &[],
-    });
+/// Performs a rendering of an entire scene, given the resources at hand.
+pub struct StageRendering<'a> {
+    // TODO: include the rest of the needed paramaters from `stage`, and then remove `stage`
+    pub stage: &'a Stage,
+    pub pipeline: &'a wgpu::RenderPipeline,
+    pub color_attachment: wgpu::RenderPassColorAttachment<'a>,
+    pub depth_stencil_attachment: wgpu::RenderPassDepthStencilAttachment<'a>,
+}
 
-    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-        label,
-        layout: Some(&layout),
-        vertex: wgpu::VertexState {
-            module: &vertex_linkage.module,
-            entry_point: Some(vertex_linkage.entry_point),
-            buffers: &[],
-            compilation_options: Default::default(),
-        },
-        primitive: wgpu::PrimitiveState {
-            topology: wgpu::PrimitiveTopology::TriangleList,
-            strip_index_format: None,
-            front_face: wgpu::FrontFace::Ccw,
-            cull_mode: None,
-            unclipped_depth: false,
-            polygon_mode: wgpu::PolygonMode::Fill,
-            conservative: false,
-        },
-        depth_stencil: Some(wgpu::DepthStencilState {
-            format: wgpu::TextureFormat::Depth32Float,
-            depth_write_enabled: true,
-            depth_compare: wgpu::CompareFunction::Less,
-            stencil: wgpu::StencilState::default(),
-            bias: wgpu::DepthBiasState::default(),
-        }),
-        multisample: wgpu::MultisampleState {
-            mask: !0,
-            alpha_to_coverage_enabled: false,
-            count: multisample_count,
-        },
-        fragment: Some(wgpu::FragmentState {
-            module: &fragment_linkage.module,
-            entry_point: Some(fragment_linkage.entry_point),
-            targets: &[Some(wgpu::ColorTargetState {
-                format: wgpu::TextureFormat::Rgba16Float,
-                blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                write_mask: wgpu::ColorWrites::ALL,
-            })],
-            compilation_options: Default::default(),
-        }),
-        multiview: None,
-        cache: None,
-    })
+impl StageRendering<'_> {
+    /// Run the stage rendering.
+    ///
+    /// Returns the queue submission index and the indirect draw buffer, if available.
+    pub fn run(self) -> (wgpu::SubmissionIndex, Option<SlabBuffer<wgpu::Buffer>>) {
+        self.stage.tick_internal();
+        self.stage.lighting.upkeep();
+
+        let mut draw_calls = self.stage.draw_calls.write().unwrap();
+        let depth_texture = self.stage.depth_texture.read().unwrap();
+        // UNWRAP: safe because we know the depth texture format will always match
+        let maybe_indirect_buffer = draw_calls.pre_draw(&depth_texture).unwrap();
+        {
+            log::info!("rendering");
+            let label = Some("stage render");
+
+            log::info!("getting slab buffers bindgroup");
+            let slab_buffers_bindgroup = {
+                log::info!("getting write lock");
+                let mut stage_slab_buffer = self.stage.stage_slab_buffer.write().unwrap();
+                log::info!("got write lock");
+                let should_invalidate_buffers_bindgroup = stage_slab_buffer.update_if_invalid();
+                self.stage
+                    .buffers_bindgroup
+                    .get(should_invalidate_buffers_bindgroup, || {
+                        log::info!("renewing invalid stage slab buffers bindgroup");
+                        crate::linkage::slab_bindgroup(
+                            self.stage.device(),
+                            &stage_slab_buffer,
+                            // UNWRAP: POP
+                            &self
+                                .stage
+                                .stage_pipeline
+                                .read()
+                                .unwrap()
+                                .get_bind_group_layout(0),
+                        )
+                    })
+            };
+
+            log::info!("getting stage slab buffer");
+            let stage_slab_buffer = self.stage.stage_slab_buffer.read().unwrap();
+            let textures_bindgroup = self.stage.get_textures_bindgroup();
+            log::info!("got stage slab buffer and shadow map depth texture");
+
+            let light_bindgroup = self.stage.lighting.get_bindgroup();
+            let has_skybox = self.stage.has_skybox.load(Ordering::Relaxed);
+            let may_skybox_pipeline_and_bindgroup = if has_skybox {
+                Some(
+                    self.stage
+                        .get_skybox_pipeline_and_bindgroup(&stage_slab_buffer),
+                )
+            } else {
+                None
+            };
+
+            let mut encoder = self
+                .stage
+                .device()
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor { label });
+            {
+                let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label,
+                    color_attachments: &[Some(self.color_attachment)],
+                    depth_stencil_attachment: Some(self.depth_stencil_attachment),
+                    ..Default::default()
+                });
+
+                render_pass.set_pipeline(self.pipeline);
+                render_pass.set_bind_group(0, Some(slab_buffers_bindgroup.as_ref()), &[]);
+                render_pass.set_bind_group(1, Some(textures_bindgroup.as_ref()), &[]);
+                render_pass.set_bind_group(2, Some(&light_bindgroup), &[]);
+                draw_calls.draw(&mut render_pass);
+
+                if let Some((pipeline, bindgroup)) = may_skybox_pipeline_and_bindgroup.as_ref() {
+                    // UNWRAP: if we can't acquire the lock we want to panic.
+                    let skybox = self.stage.skybox.read().unwrap();
+                    render_pass.set_pipeline(&pipeline.pipeline);
+                    render_pass.set_bind_group(0, Some(bindgroup.as_ref()), &[]);
+                    render_pass.draw(0..36, skybox.camera.inner()..skybox.camera.inner() + 1);
+                }
+            }
+            let sindex = self.stage.queue().submit(std::iter::once(encoder.finish()));
+            (sindex, maybe_indirect_buffer)
+        }
+    }
 }
 
 /// Represents an entire scene worth of rendering data.
@@ -184,6 +215,73 @@ impl Deref for Stage {
 }
 
 impl Stage {
+    pub fn create_stage_render_pipeline(
+        device: &wgpu::Device,
+        fragment_color_format: wgpu::TextureFormat,
+        multisample_count: u32,
+    ) -> wgpu::RenderPipeline {
+        log::trace!("creating stage render pipeline");
+        let label = Some("stage render");
+        let vertex_linkage = crate::linkage::renderlet_vertex::linkage(device);
+        let fragment_linkage = crate::linkage::renderlet_fragment::linkage(device);
+        let stage_slab_buffers_layout = crate::linkage::slab_bindgroup_layout(device);
+        let atlas_and_skybox_layout = crate::linkage::atlas_and_skybox_bindgroup_layout(device);
+        let light_bindgroup_layout = crate::light::Lighting::create_bindgroup_layout(device);
+        let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label,
+            bind_group_layouts: &[
+                &stage_slab_buffers_layout,
+                &atlas_and_skybox_layout,
+                &light_bindgroup_layout,
+            ],
+            push_constant_ranges: &[],
+        });
+
+        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label,
+            layout: Some(&layout),
+            vertex: wgpu::VertexState {
+                module: &vertex_linkage.module,
+                entry_point: Some(vertex_linkage.entry_point),
+                buffers: &[],
+                compilation_options: Default::default(),
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                unclipped_depth: false,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                conservative: false,
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: wgpu::TextureFormat::Depth32Float,
+                depth_write_enabled: true,
+                depth_compare: wgpu::CompareFunction::Less,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState {
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+                count: multisample_count,
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &fragment_linkage.module,
+                entry_point: Some(fragment_linkage.entry_point),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: fragment_color_format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: Default::default(),
+            }),
+            multiview: None,
+            cache: None,
+        })
+    }
+
     /// Create a new stage.
     pub fn new(ctx: &crate::Context) -> Self {
         let runtime = ctx.runtime();
@@ -217,7 +315,11 @@ impl Stage {
             ctx.get_render_target().format().add_srgb_suffix(),
             &bloom.get_mix_texture(),
         );
-        let stage_pipeline = create_stage_render_pipeline(device, multisample_count);
+        let stage_pipeline = Self::create_stage_render_pipeline(
+            device,
+            wgpu::TextureFormat::Rgba16Float,
+            multisample_count,
+        );
         let stage_slab_buffer = mngr.commit();
 
         let lighting = Lighting::new(&mngr);
@@ -291,8 +393,11 @@ impl Stage {
 
         log::debug!("setting multisample count to {multisample_count}");
         // UNWRAP: POP
-        *self.stage_pipeline.write().unwrap() =
-            create_stage_render_pipeline(self.device(), multisample_count);
+        *self.stage_pipeline.write().unwrap() = Self::create_stage_render_pipeline(
+            self.device(),
+            wgpu::TextureFormat::Rgba16Float,
+            multisample_count,
+        );
         let size = self.get_size();
         // UNWRAP: POP
         *self.depth_texture.write().unwrap() = Texture::create_depth_texture(
@@ -698,10 +803,16 @@ impl Stage {
     }
 
     /// Iterator over all staged [`Renderlet`]s.
-    pub fn renderlets_iter(&self) -> impl Iterator<Item = Renderlet> {
+    ///
+    /// This iterator returns `Renderlets` wrapped in `WeakHybrid`, because they
+    /// are stored by weak references internally.
+    ///
+    /// You should have references of your own, but this is here as a convenience
+    /// method, and is used internally.
+    pub fn renderlets_iter(&self) -> impl Iterator<Item = WeakHybrid<Renderlet>> {
         // UNWRAP: panic on purpose
         let guard = self.draw_calls.read().unwrap();
-        guard.renderlets_iter()
+        guard.renderlets_iter().collect::<Vec<_>>().into_iter()
     }
 
     /// Returns a clone of the current depth texture.
@@ -751,6 +862,109 @@ impl Stage {
     }
 
     pub fn render(&self, view: &wgpu::TextureView) {
+        // UNWRAP: POP
+        let background_color = *self.background_color.read().unwrap();
+        // UNWRAP: POP
+        let msaa_target = self.msaa_render_target.read().unwrap();
+        let clear_colors = self.clear_color_attachments.load(Ordering::Relaxed);
+        let hdr_texture = self.hdr_texture.read().unwrap();
+
+        let mk_ops = |store| wgpu::Operations {
+            load: if clear_colors {
+                wgpu::LoadOp::Clear(background_color)
+            } else {
+                wgpu::LoadOp::Load
+            },
+            store,
+        };
+        let render_pass_color_attachment = if let Some(msaa_view) = msaa_target.as_ref() {
+            wgpu::RenderPassColorAttachment {
+                ops: mk_ops(wgpu::StoreOp::Discard),
+                view: msaa_view,
+                resolve_target: Some(&hdr_texture.view),
+            }
+        } else {
+            wgpu::RenderPassColorAttachment {
+                ops: mk_ops(wgpu::StoreOp::Store),
+                view: &hdr_texture.view,
+                resolve_target: None,
+            }
+        };
+
+        let depth_texture = self.depth_texture.read().unwrap();
+        let clear_depth = self.clear_depth_attachments.load(Ordering::Relaxed);
+        let render_pass_depth_attachment = wgpu::RenderPassDepthStencilAttachment {
+            view: &depth_texture.view,
+            depth_ops: Some(wgpu::Operations {
+                load: if clear_depth {
+                    wgpu::LoadOp::Clear(1.0)
+                } else {
+                    wgpu::LoadOp::Load
+                },
+                store: wgpu::StoreOp::Store,
+            }),
+            stencil_ops: None,
+        };
+        let pipeline_guard = self.stage_pipeline.read().unwrap();
+        let (_submission_index, maybe_indirect_buffer) = StageRendering {
+            pipeline: &pipeline_guard,
+            stage: self,
+            color_attachment: render_pass_color_attachment,
+            depth_stencil_attachment: render_pass_depth_attachment,
+        }
+        .run();
+
+        // then render bloom
+        if self.has_bloom.load(Ordering::Relaxed) {
+            self.bloom.bloom(self.device(), self.queue());
+        } else {
+            // copy the input hdr texture to the bloom mix texture
+            let mut encoder =
+                self.device()
+                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                        label: Some("no bloom copy"),
+                    });
+            let bloom_mix_texture = self.bloom.get_mix_texture();
+            encoder.copy_texture_to_texture(
+                wgpu::TexelCopyTextureInfo {
+                    texture: &self.hdr_texture.read().unwrap().texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d { x: 0, y: 0, z: 0 },
+                    aspect: wgpu::TextureAspect::All,
+                },
+                wgpu::TexelCopyTextureInfo {
+                    texture: &bloom_mix_texture.texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d { x: 0, y: 0, z: 0 },
+                    aspect: wgpu::TextureAspect::All,
+                },
+                wgpu::Extent3d {
+                    width: bloom_mix_texture.width(),
+                    height: bloom_mix_texture.height(),
+                    depth_or_array_layers: 1,
+                },
+            );
+            self.queue().submit(std::iter::once(encoder.finish()));
+        }
+
+        // then render tonemapping
+        self.tonemapping.render(self.device(), self.queue(), view);
+
+        // then render the debug overlay
+        if self.has_debug_overlay.load(Ordering::Relaxed) {
+            if let Some(indirect_draw_buffer) = maybe_indirect_buffer {
+                self.debug_overlay.render(
+                    self.device(),
+                    self.queue(),
+                    view,
+                    &self.stage_slab_buffer.read().unwrap(),
+                    &indirect_draw_buffer,
+                );
+            }
+        }
+    }
+
+    pub fn render_old(&self, view: &wgpu::TextureView) {
         self.tick_internal();
         self.lighting.upkeep();
 

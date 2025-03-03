@@ -8,7 +8,7 @@ use glam::{Mat4, UVec2, Vec3};
 
 use crate::{
     atlas::AtlasImage, camera::Camera, convolution::VertexPrefilterEnvironmentCubemapIds,
-    texture::Texture,
+    cubemap::EquirectangularImageToCubemapBlitter, texture::Texture,
 };
 
 /// Render pipeline used to draw a skybox.
@@ -330,10 +330,8 @@ impl Skybox {
         let device = &runtime.device;
         let queue = &runtime.queue;
         // Create the cubemap-making pipeline.
-        let pipeline = crate::cubemap::CubemapMakingRenderPipeline::new(
-            device,
-            wgpu::TextureFormat::Rgba16Float,
-        );
+        let pipeline =
+            EquirectangularImageToCubemapBlitter::new(device, wgpu::TextureFormat::Rgba16Float);
 
         let resources = (
             device,
@@ -341,8 +339,12 @@ impl Skybox {
             Some("hdr environment map"),
             wgpu::BufferUsages::VERTEX,
         );
-        let bindgroup =
-            crate::cubemap::cubemap_making_bindgroup(device, resources.2, buffer, hdr_texture);
+        let bindgroup = EquirectangularImageToCubemapBlitter::create_bindgroup(
+            device,
+            resources.2,
+            buffer,
+            hdr_texture,
+        );
 
         Self::render_cubemap(
             runtime,

@@ -60,6 +60,16 @@
     "wgsl_entry_point": "convolutionprefilter_environment_cubemap_vertex"
   },
   {
+    "source_path": "shaders/cubemap-cubemap_sampling_test_fragment.spv",
+    "entry_point": "cubemap::cubemap_sampling_test_fragment",
+    "wgsl_entry_point": "cubemapcubemap_sampling_test_fragment"
+  },
+  {
+    "source_path": "shaders/cubemap-cubemap_sampling_test_vertex.spv",
+    "entry_point": "cubemap::cubemap_sampling_test_vertex",
+    "wgsl_entry_point": "cubemapcubemap_sampling_test_vertex"
+  },
+  {
     "source_path": "shaders/cull-compute_copy_depth_to_pyramid.spv",
     "entry_point": "cull::compute_copy_depth_to_pyramid",
     "wgsl_entry_point": "cullcompute_copy_depth_to_pyramid"

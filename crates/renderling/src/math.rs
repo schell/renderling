@@ -81,7 +81,6 @@ impl SampleCube for Cubemap {
 
 #[cfg(not(target_arch = "spirv"))]
 mod cpu {
-    use image::GenericImageView;
 
     use super::*;
 
@@ -208,48 +207,7 @@ mod cpu {
             direction: glam::Vec3,
             _lod: f32,
         ) -> glam::Vec4 {
-            // Take the absolute value of the direction vector components
-            let abs_direction = direction.abs();
-            let (max_dim, u, v): (usize, f32, f32);
-
-            // Determine which face of the cubemap the direction vector is pointing towards
-            // by finding the largest component of the vector.
-            // The u and v texture coordinates within that face are calculated by dividing
-            // the other two components of the direction vector by the largest component.
-            if abs_direction.x >= abs_direction.y && abs_direction.x >= abs_direction.z {
-                max_dim = if direction.x >= 0.0 { 0 } else { 1 };
-                u = -direction.z / abs_direction.x;
-                v = -direction.y / abs_direction.x;
-            } else if abs_direction.y >= abs_direction.x && abs_direction.y >= abs_direction.z {
-                max_dim = if direction.y >= 0.0 { 2 } else { 3 };
-                u = direction.x / abs_direction.y;
-                v = -direction.z / abs_direction.y;
-            } else {
-                max_dim = if direction.z >= 0.0 { 4 } else { 5 };
-                u = direction.x / abs_direction.z;
-                v = direction.y / abs_direction.z;
-            }
-
-            // Get the dimensions of the cubemap image
-            let (width, height) = self.images[max_dim].dimensions();
-            // Convert the u and v coordinates from [-1, 1] to [0, width/height]
-            let tex_u = ((u + 1.0) * 0.5 * (width as f32 - 1.0)).round() as u32;
-            if tex_u >= self.images[max_dim].width() {
-                return glam::Vec4::ZERO;
-            }
-            let tex_v = ((1.0 - v) * 0.5 * (height as f32 - 1.0)).round() as u32;
-            if tex_v >= self.images[max_dim].height() {
-                return glam::Vec4::ZERO;
-            }
-
-            // Sample and return the color from the appropriate image in the cubemap
-            let pixel = self.images[max_dim].get_pixel(tex_u, tex_v);
-            glam::Vec4::new(
-                pixel[0] as f32 / 255.0,
-                pixel[1] as f32 / 255.0,
-                pixel[2] as f32 / 255.0,
-                pixel[3] as f32 / 255.0,
-            )
+            crate::cubemap::cpu_sample_cubemap(&self.images, direction)
         }
     }
 

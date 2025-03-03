@@ -1,121 +1,125 @@
-//! Render pipelines and layouts for creating cubemaps.
+//! Cubemap utilities.
+//!
+//! Shaders, render pipelines and layouts for creating and sampling cubemaps.
+use crabslab::{Array, Id, Slab};
+use glam::{Vec2, Vec3, Vec3Swizzles, Vec4};
+use spirv_std::{num_traits::Zero, spirv};
 
-use crate::texture::Texture;
+#[cfg(cpu)]
+mod cpu;
+#[cfg(cpu)]
+pub use cpu::*;
 
-pub fn cubemap_making_bindgroup_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
-    device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-        label: Some("cubemap-making bindgroup"),
-        entries: &[
-            wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Storage { read_only: true },
-                    has_dynamic_offset: false,
-                    min_binding_size: None,
-                },
-                count: None,
-            },
-            wgpu::BindGroupLayoutEntry {
-                binding: 1,
-                visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Texture {
-                    sample_type: wgpu::TextureSampleType::Float { filterable: false },
-                    view_dimension: wgpu::TextureViewDimension::D2,
-                    multisampled: false,
-                },
-                count: None,
-            },
-            wgpu::BindGroupLayoutEntry {
-                binding: 2,
-                visibility: wgpu::ShaderStages::FRAGMENT,
-                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
-                count: None,
-            },
-        ],
-    })
+use crate::{
+    atlas::{AtlasDescriptor, AtlasTexture},
+    math::{IsSampler, Sample2dArray},
+};
+
+/// Vertex shader for testing cubemap sampling.
+#[spirv(vertex)]
+pub fn cubemap_sampling_test_vertex(
+    #[spirv(vertex_index)] vertex_index: u32,
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] uv: &Vec3,
+    out_uv: &mut Vec3,
+    #[spirv(position)] out_clip_coords: &mut Vec4,
+) {
+    let vertex_index = vertex_index as usize % 6;
+    *out_clip_coords = crate::math::CLIP_SPACE_COORD_QUAD_CCW[vertex_index];
+    *out_uv = *uv;
 }
 
-pub fn cubemap_making_bindgroup(
-    device: &wgpu::Device,
-    label: Option<&str>,
-    buffer: &wgpu::Buffer,
-    // The texture to sample the environment from
-    texture: &Texture,
-) -> wgpu::BindGroup {
-    device.create_bind_group(&wgpu::BindGroupDescriptor {
-        label,
-        layout: &cubemap_making_bindgroup_layout(device),
-        entries: &[
-            wgpu::BindGroupEntry {
-                binding: 0,
-                resource: wgpu::BindingResource::Buffer(buffer.as_entire_buffer_binding()),
-            },
-            wgpu::BindGroupEntry {
-                binding: 1,
-                resource: wgpu::BindingResource::TextureView(&texture.view),
-            },
-            wgpu::BindGroupEntry {
-                binding: 2,
-                resource: wgpu::BindingResource::Sampler(&texture.sampler),
-            },
-        ],
-    })
+/// Vertex shader for testing cubemap sampling.
+#[spirv(fragment)]
+pub fn cubemap_sampling_test_fragment(
+    #[spirv(descriptor_set = 0, binding = 1)] cubemap: &spirv_std::image::Cubemap,
+    #[spirv(descriptor_set = 0, binding = 2)] sampler: &spirv_std::Sampler,
+    in_uv: Vec3,
+    frag_color: &mut Vec4,
+) {
+    *frag_color = cubemap.sample(*sampler, in_uv);
 }
 
-pub struct CubemapMakingRenderPipeline(pub wgpu::RenderPipeline);
+pub struct CubemapDescriptor {
+    atlas_descriptor_id: Id<AtlasDescriptor>,
+    faces: Array<AtlasTexture>,
+}
 
-impl CubemapMakingRenderPipeline {
-    /// Create the rendering pipeline that creates cubemaps from equirectangular
-    /// images.
-    pub fn new(device: &wgpu::Device, format: wgpu::TextureFormat) -> Self {
-        log::trace!("creating cubemap-making render pipeline with format '{format:?}'");
-        let vertex_linkage = crate::linkage::skybox_cubemap_vertex::linkage(device);
-        let fragment_linkage = crate::linkage::skybox_equirectangular_fragment::linkage(device);
-        let bg_layout = cubemap_making_bindgroup_layout(device);
-        let pp_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("cubemap-making pipeline layout"),
-            bind_group_layouts: &[&bg_layout],
-            push_constant_ranges: &[],
-        });
-        CubemapMakingRenderPipeline(device.create_render_pipeline(
-            &wgpu::RenderPipelineDescriptor {
-                label: Some("cubemap-making pipeline"),
-                layout: Some(&pp_layout),
-                vertex: wgpu::VertexState {
-                    module: &vertex_linkage.module,
-                    entry_point: Some(vertex_linkage.entry_point),
-                    buffers: &[],
-                    compilation_options: Default::default(),
-                },
-                primitive: wgpu::PrimitiveState {
-                    topology: wgpu::PrimitiveTopology::TriangleList,
-                    strip_index_format: None,
-                    front_face: wgpu::FrontFace::Ccw,
-                    cull_mode: None,
-                    unclipped_depth: false,
-                    polygon_mode: wgpu::PolygonMode::Fill,
-                    conservative: false,
-                },
-                depth_stencil: None,
-                multisample: wgpu::MultisampleState {
-                    mask: !0,
-                    alpha_to_coverage_enabled: false,
-                    count: 1,
-                },
-                fragment: Some(wgpu::FragmentState {
-                    module: &fragment_linkage.module,
-                    entry_point: Some(fragment_linkage.entry_point),
-                    targets: &[Some(wgpu::ColorTargetState {
-                        format,
-                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                        write_mask: wgpu::ColorWrites::ALL,
-                    })],
-                    compilation_options: Default::default(),
-                }),
-                multiview: None,
-                cache: None,
-            },
-        ))
+impl CubemapDescriptor {
+    /// Return the face index and UV coordinates that can be used to sample
+    /// a cubemap from the given directional coordinate.
+    ///
+    /// `coord` must be normalized, and must **not be zero**.
+    pub fn get_face_index_and_uv(coord: Vec3) -> (usize, Vec2) {
+        // Unpack coordinate components
+        let x = coord.x;
+        let y = coord.y;
+        let z = coord.z;
+
+        // Determine the major direction
+        let abs_x = x.abs();
+        let abs_y = y.abs();
+        let abs_z = z.abs();
+
+        // Initialize face index and UV coordinates
+        let (face_index, u, v);
+
+        if abs_x >= abs_y && abs_x >= abs_z {
+            // X-major direction
+            if x > 0.0 {
+                face_index = 0; // +X
+                u = -z / x;
+                v = -y / x;
+            } else {
+                face_index = 1; // -X
+                u = -z / x;
+                v = y / x;
+            }
+        } else if abs_y >= abs_x && abs_y >= abs_z {
+            // Y-major direction
+            if y > 0.0 {
+                face_index = 2; // +Y
+                u = x / y;
+                v = z / y;
+            } else {
+                face_index = 3; // -Y
+                u = x / y;
+                v = -z / y;
+            }
+        } else {
+            // Z-major direction
+            if z > 0.0 {
+                face_index = 4; // +Z
+                u = x / z;
+                v = -y / z;
+            } else {
+                face_index = 5; // -Z
+                u = -x / z;
+                v = -y / z;
+            }
+        }
+
+        // Convert from range [-1, 1] to [0, 1]
+        let u = (u + 1.0) / 2.0;
+        let v = (v + 1.0) / 2.0;
+
+        (face_index, Vec2::new(u, v))
+    }
+
+    /// Sample the cubemap with a directional coordinate.
+    pub fn sample<A, S>(&self, coord: Vec3, slab: &[u32], atlas: &A, sampler: &S) -> Vec4
+    where
+        A: Sample2dArray<Sampler = S>,
+        S: IsSampler,
+    {
+        let coord = if coord.length().is_zero() {
+            Vec3::X
+        } else {
+            coord.normalize()
+        };
+        let (face_index, uv) = Self::get_face_index_and_uv(coord);
+        let atlas_image = slab.read_unchecked(self.faces.at(face_index));
+        let atlas_desc = slab.read_unchecked(self.atlas_descriptor_id);
+        let uv = atlas_image.uv(uv, atlas_desc.size.xy());
+        atlas.sample_by_lod(*sampler, uv, 0.0)
     }
 }
