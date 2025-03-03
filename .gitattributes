@@ -3,4 +3,4 @@
 *.md text
 *.yaml text
 *.spv binary
-*.wgsl binary
+*.wgsl linguist-generated binary
