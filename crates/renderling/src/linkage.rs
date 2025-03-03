@@ -18,6 +18,8 @@ pub mod compute_copy_depth_to_pyramid;
 pub mod compute_copy_depth_to_pyramid_multisampled;
 pub mod compute_culling;
 pub mod compute_downsample_depth_pyramid;
+pub mod cubemap_sampling_test_fragment;
+pub mod cubemap_sampling_test_vertex;
 pub mod debug_overlay_fragment;
 pub mod debug_overlay_vertex;
 pub mod di_convolution_fragment;

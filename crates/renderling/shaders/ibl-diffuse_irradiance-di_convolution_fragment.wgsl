@@ -9,19 +9,19 @@ fn function() {
     var phi_273_: vec3<f32>;
     var phi_308_: vec3<f32>;
     var phi_343_: vec3<f32>;
-    var phi_138_: vec3<f32>;
-    var phi_141_: f32;
-    var phi_143_: f32;
-    var phi_153_: vec3<f32>;
-    var phi_156_: f32;
-    var phi_158_: f32;
+    var phi_146_: vec3<f32>;
+    var phi_149_: f32;
+    var phi_151_: f32;
+    var phi_161_: vec3<f32>;
+    var phi_164_: f32;
+    var phi_166_: f32;
     var phi_378_: vec3<f32>;
-    var phi_154_: vec3<f32>;
-    var phi_157_: f32;
-    var phi_159_: f32;
-    var phi_139_: vec3<f32>;
-    var phi_142_: f32;
-    var phi_144_: f32;
+    var phi_162_: vec3<f32>;
+    var phi_165_: f32;
+    var phi_167_: f32;
+    var phi_147_: vec3<f32>;
+    var phi_150_: f32;
+    var phi_152_: f32;
     var local: f32;
     var local_1: vec3<f32>;
     var local_2: vec3<f32>;
@@ -56,26 +56,26 @@ fn function() {
         phi_343_ = (vec3<f32>(_e45, _e49, _e52) * (1f / _e57));
     }
     let _e62 = phi_343_;
-    phi_138_ = vec3<f32>(0f, 0f, 0f);
-    phi_141_ = 0f;
-    phi_143_ = 0f;
+    phi_146_ = vec3<f32>(0f, 0f, 0f);
+    phi_149_ = 0f;
+    phi_151_ = 0f;
     loop {
-        let _e64 = phi_138_;
-        let _e66 = phi_141_;
-        let _e68 = phi_143_;
+        let _e64 = phi_146_;
+        let _e66 = phi_149_;
+        let _e68 = phi_151_;
         local = _e68;
         local_1 = _e64;
         local_2 = _e64;
         local_3 = _e64;
         let _e69 = (_e66 < 6.2831855f);
         if _e69 {
-            phi_153_ = _e64;
-            phi_156_ = 0f;
-            phi_158_ = _e68;
+            phi_161_ = _e64;
+            phi_164_ = 0f;
+            phi_166_ = _e68;
             loop {
-                let _e71 = phi_153_;
-                let _e73 = phi_156_;
-                let _e75 = phi_158_;
+                let _e71 = phi_161_;
+                let _e73 = phi_164_;
+                let _e75 = phi_166_;
                 local_4 = _e71;
                 local_5 = _e75;
                 let _e76 = (_e73 < 1.5707964f);
@@ -95,43 +95,43 @@ fn function() {
                     }
                     let _e104 = phi_378_;
                     let _e105 = textureSample(global_3, global_2, _e104);
-                    phi_154_ = vec3<f32>(fma((_e105.x * _e82), _e77, _e71.x), fma((_e105.y * _e82), _e77, _e71.y), fma((_e105.z * _e82), _e77, _e71.z));
-                    phi_157_ = (_e73 + 0.025f);
-                    phi_159_ = (_e75 + 1f);
+                    phi_162_ = vec3<f32>(fma((_e105.x * _e82), _e77, _e71.x), fma((_e105.y * _e82), _e77, _e71.y), fma((_e105.z * _e82), _e77, _e71.z));
+                    phi_165_ = (_e73 + 0.025f);
+                    phi_167_ = (_e75 + 1f);
                 } else {
-                    phi_154_ = vec3<f32>();
-                    phi_157_ = f32();
-                    phi_159_ = f32();
+                    phi_162_ = vec3<f32>();
+                    phi_165_ = f32();
+                    phi_167_ = f32();
                 }
-                let _e122 = phi_154_;
-                let _e124 = phi_157_;
-                let _e126 = phi_159_;
+                let _e122 = phi_162_;
+                let _e124 = phi_165_;
+                let _e126 = phi_167_;
                 continue;
                 continuing {
-                    phi_153_ = _e122;
-                    phi_156_ = _e124;
-                    phi_158_ = _e126;
+                    phi_161_ = _e122;
+                    phi_164_ = _e124;
+                    phi_166_ = _e126;
                     break if !(_e76);
                 }
             }
             let _e167 = local_4;
-            phi_139_ = _e167;
-            phi_142_ = (_e66 + 0.025f);
+            phi_147_ = _e167;
+            phi_150_ = (_e66 + 0.025f);
             let _e171 = local_5;
-            phi_144_ = _e171;
+            phi_152_ = _e171;
         } else {
-            phi_139_ = vec3<f32>();
-            phi_142_ = f32();
-            phi_144_ = f32();
+            phi_147_ = vec3<f32>();
+            phi_150_ = f32();
+            phi_152_ = f32();
         }
-        let _e130 = phi_139_;
-        let _e132 = phi_142_;
-        let _e134 = phi_144_;
+        let _e130 = phi_147_;
+        let _e132 = phi_150_;
+        let _e134 = phi_152_;
         continue;
         continuing {
-            phi_138_ = _e130;
-            phi_141_ = _e132;
-            phi_143_ = _e134;
+            phi_146_ = _e130;
+            phi_149_ = _e132;
+            phi_151_ = _e134;
             break if !(_e69);
         }
     }

@@ -66,76 +66,13 @@ fn create_msaa_textureview(
         .create_view(&wgpu::TextureViewDescriptor::default())
 }
 
-fn create_stage_render_pipeline(
-    device: &wgpu::Device,
-    multisample_count: u32,
-) -> wgpu::RenderPipeline {
-    log::trace!("creating stage render pipeline");
-    let label = Some("stage render");
-    let vertex_linkage = crate::linkage::renderlet_vertex::linkage(device);
-    let fragment_linkage = crate::linkage::renderlet_fragment::linkage(device);
-    let stage_slab_buffers_layout = crate::linkage::slab_bindgroup_layout(device);
-    let atlas_and_skybox_layout = crate::linkage::atlas_and_skybox_bindgroup_layout(device);
-    let light_bindgroup_layout = crate::light::Lighting::create_bindgroup_layout(device);
-    let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-        label,
-        bind_group_layouts: &[
-            &stage_slab_buffers_layout,
-            &atlas_and_skybox_layout,
-            &light_bindgroup_layout,
-        ],
-        push_constant_ranges: &[],
-    });
-
-    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-        label,
-        layout: Some(&layout),
-        vertex: wgpu::VertexState {
-            module: &vertex_linkage.module,
-            entry_point: Some(vertex_linkage.entry_point),
-            buffers: &[],
-            compilation_options: Default::default(),
-        },
-        primitive: wgpu::PrimitiveState {
-            topology: wgpu::PrimitiveTopology::TriangleList,
-            strip_index_format: None,
-            front_face: wgpu::FrontFace::Ccw,
-            cull_mode: None,
-            unclipped_depth: false,
-            polygon_mode: wgpu::PolygonMode::Fill,
-            conservative: false,
-        },
-        depth_stencil: Some(wgpu::DepthStencilState {
-            format: wgpu::TextureFormat::Depth32Float,
-            depth_write_enabled: true,
-            depth_compare: wgpu::CompareFunction::Less,
-            stencil: wgpu::StencilState::default(),
-            bias: wgpu::DepthBiasState::default(),
-        }),
-        multisample: wgpu::MultisampleState {
-            mask: !0,
-            alpha_to_coverage_enabled: false,
-            count: multisample_count,
-        },
-        fragment: Some(wgpu::FragmentState {
-            module: &fragment_linkage.module,
-            entry_point: Some(fragment_linkage.entry_point),
-            targets: &[Some(wgpu::ColorTargetState {
-                format: wgpu::TextureFormat::Rgba16Float,
-                blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                write_mask: wgpu::ColorWrites::ALL,
-            })],
-            compilation_options: Default::default(),
-        }),
-        multiview: None,
-        cache: None,
-    })
-}
-
 /// Performs a rendering of an entire scene, given the resources at hand.
 pub struct StageRendering<'a> {
-    stage: &'a Stage,
-    render_pass_color_attachment: wgpu::RenderPassColorAttachment<'a>,
+    // TODO: include the rest of the needed paramaters from `stage`, and then remove `stage`
+    pub stage: &'a Stage,
+    pub pipeline: &'a wgpu::RenderPipeline,
+    pub color_attachment: wgpu::RenderPassColorAttachment<'a>,
+    pub depth_stencil_attachment: wgpu::RenderPassDepthStencilAttachment<'a>,
 }
 
 impl StageRendering<'_> {
@@ -183,9 +120,6 @@ impl StageRendering<'_> {
             let textures_bindgroup = self.stage.get_textures_bindgroup();
             log::info!("got stage slab buffer and shadow map depth texture");
 
-            // UNWRAP: POP
-            let pipeline = self.stage.stage_pipeline.read().unwrap();
-
             let light_bindgroup = self.stage.lighting.get_bindgroup();
             let has_skybox = self.stage.has_skybox.load(Ordering::Relaxed);
             let may_skybox_pipeline_and_bindgroup = if has_skybox {
@@ -196,7 +130,6 @@ impl StageRendering<'_> {
             } else {
                 None
             };
-            let clear_depth = self.stage.clear_depth_attachments.load(Ordering::Relaxed);
 
             let mut encoder = self
                 .stage
@@ -205,23 +138,12 @@ impl StageRendering<'_> {
             {
                 let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                     label,
-                    color_attachments: &[Some(self.render_pass_color_attachment)],
-                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                        view: &depth_texture.view,
-                        depth_ops: Some(wgpu::Operations {
-                            load: if clear_depth {
-                                wgpu::LoadOp::Clear(1.0)
-                            } else {
-                                wgpu::LoadOp::Load
-                            },
-                            store: wgpu::StoreOp::Store,
-                        }),
-                        stencil_ops: None,
-                    }),
+                    color_attachments: &[Some(self.color_attachment)],
+                    depth_stencil_attachment: Some(self.depth_stencil_attachment),
                     ..Default::default()
                 });
 
-                render_pass.set_pipeline(&pipeline);
+                render_pass.set_pipeline(self.pipeline);
                 render_pass.set_bind_group(0, Some(slab_buffers_bindgroup.as_ref()), &[]);
                 render_pass.set_bind_group(1, Some(textures_bindgroup.as_ref()), &[]);
                 render_pass.set_bind_group(2, Some(&light_bindgroup), &[]);
@@ -293,6 +215,73 @@ impl Deref for Stage {
 }
 
 impl Stage {
+    pub fn create_stage_render_pipeline(
+        device: &wgpu::Device,
+        fragment_color_format: wgpu::TextureFormat,
+        multisample_count: u32,
+    ) -> wgpu::RenderPipeline {
+        log::trace!("creating stage render pipeline");
+        let label = Some("stage render");
+        let vertex_linkage = crate::linkage::renderlet_vertex::linkage(device);
+        let fragment_linkage = crate::linkage::renderlet_fragment::linkage(device);
+        let stage_slab_buffers_layout = crate::linkage::slab_bindgroup_layout(device);
+        let atlas_and_skybox_layout = crate::linkage::atlas_and_skybox_bindgroup_layout(device);
+        let light_bindgroup_layout = crate::light::Lighting::create_bindgroup_layout(device);
+        let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label,
+            bind_group_layouts: &[
+                &stage_slab_buffers_layout,
+                &atlas_and_skybox_layout,
+                &light_bindgroup_layout,
+            ],
+            push_constant_ranges: &[],
+        });
+
+        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label,
+            layout: Some(&layout),
+            vertex: wgpu::VertexState {
+                module: &vertex_linkage.module,
+                entry_point: Some(vertex_linkage.entry_point),
+                buffers: &[],
+                compilation_options: Default::default(),
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                unclipped_depth: false,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                conservative: false,
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: wgpu::TextureFormat::Depth32Float,
+                depth_write_enabled: true,
+                depth_compare: wgpu::CompareFunction::Less,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState {
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+                count: multisample_count,
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &fragment_linkage.module,
+                entry_point: Some(fragment_linkage.entry_point),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: fragment_color_format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: Default::default(),
+            }),
+            multiview: None,
+            cache: None,
+        })
+    }
+
     /// Create a new stage.
     pub fn new(ctx: &crate::Context) -> Self {
         let runtime = ctx.runtime();
@@ -326,7 +315,11 @@ impl Stage {
             ctx.get_render_target().format().add_srgb_suffix(),
             &bloom.get_mix_texture(),
         );
-        let stage_pipeline = create_stage_render_pipeline(device, multisample_count);
+        let stage_pipeline = Self::create_stage_render_pipeline(
+            device,
+            wgpu::TextureFormat::Rgba16Float,
+            multisample_count,
+        );
         let stage_slab_buffer = mngr.commit();
 
         let lighting = Lighting::new(&mngr);
@@ -400,8 +393,11 @@ impl Stage {
 
         log::debug!("setting multisample count to {multisample_count}");
         // UNWRAP: POP
-        *self.stage_pipeline.write().unwrap() =
-            create_stage_render_pipeline(self.device(), multisample_count);
+        *self.stage_pipeline.write().unwrap() = Self::create_stage_render_pipeline(
+            self.device(),
+            wgpu::TextureFormat::Rgba16Float,
+            multisample_count,
+        );
         let size = self.get_size();
         // UNWRAP: POP
         *self.depth_texture.write().unwrap() = Texture::create_depth_texture(
@@ -894,9 +890,27 @@ impl Stage {
                 resolve_target: None,
             }
         };
+
+        let depth_texture = self.depth_texture.read().unwrap();
+        let clear_depth = self.clear_depth_attachments.load(Ordering::Relaxed);
+        let render_pass_depth_attachment = wgpu::RenderPassDepthStencilAttachment {
+            view: &depth_texture.view,
+            depth_ops: Some(wgpu::Operations {
+                load: if clear_depth {
+                    wgpu::LoadOp::Clear(1.0)
+                } else {
+                    wgpu::LoadOp::Load
+                },
+                store: wgpu::StoreOp::Store,
+            }),
+            stencil_ops: None,
+        };
+        let pipeline_guard = self.stage_pipeline.read().unwrap();
         let (_submission_index, maybe_indirect_buffer) = StageRendering {
+            pipeline: &pipeline_guard,
             stage: self,
-            render_pass_color_attachment,
+            color_attachment: render_pass_color_attachment,
+            depth_stencil_attachment: render_pass_depth_attachment,
         }
         .run();
 
