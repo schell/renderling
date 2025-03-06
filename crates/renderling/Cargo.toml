@@ -72,6 +72,7 @@ wgpu = { workspace = true, features = ["spirv"] }
 winit = { workspace = true, optional = true }
 
 [dev-dependencies]
+acorn_prng.workspace = true
 assert_approx_eq = {workspace = true}
 ctor = "0.2.2"
 env_logger = {workspace = true}

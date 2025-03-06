@@ -145,6 +145,7 @@ mod cpu {
             // TODO: use configurable wrap mode on CPU sampling
             let px = uv.x.clamp(0.0, 1.0) * self.image.width() as f32;
             let py = uv.y.clamp(0.0, 1.0) * self.image.height() as f32;
+            println!("sampling: ({px}, {py})");
             let p = self.image.get_pixel(
                 px.round().min(self.image.width() as f32) as u32,
                 py.round().min(self.image.height() as f32) as u32,
@@ -180,12 +181,10 @@ mod cpu {
             // TODO: lerp the CPU texture sampling
             // TODO: use configurable wrap mode on CPU sampling
             let img = &self.images[uv.z as usize];
-            let px = uv.x.clamp(0.0, 1.0) * img.width() as f32;
-            let py = uv.y.clamp(0.0, 1.0) * img.height() as f32;
-            let p = img.get_pixel(
-                px.round().min(img.width() as f32) as u32,
-                py.round().min(img.height() as f32) as u32,
-            );
+            let px = (uv.x.clamp(0.0, 1.0) * (img.width() as f32 - 1.0)).round() as u32;
+            let py = (uv.y.clamp(0.0, 1.0) * (img.height() as f32 - 1.0)).round() as u32;
+            println!("sampling: ({px}, {py})");
+            let p = img.get_pixel(px, py);
             (self.convert_fn)(p)
         }
     }
@@ -580,9 +579,65 @@ pub fn is_inside_clip_space(p: Vec3) -> bool {
     p.x.abs() <= 1.0 && p.y.abs() <= 1.0 && p.z.abs() <= 1.0
 }
 
-pub struct Plane {
-    pub point: Vec3,
-    pub norm: Vec3,
+/// Calculates the intersection point between a plane and a ray, if any.
+///
+/// # Arguments
+///
+/// * `plane`: The plane, where x, y, and z components are the normal, and w is the distance.
+/// * `ray_origin`: A point from which the ray originates.
+/// * `ray_direction`: The direction vector of the ray.
+///
+/// # Returns
+///
+/// An `Option` containing the intersection point, if one exists.
+pub fn intersect_plane_with_ray(
+    plane: Vec4,
+    ray_origin: Vec3,
+    ray_direction: Vec3,
+) -> Option<Vec3> {
+    let normal = Vec3::new(plane.x, plane.y, plane.z);
+    let d = plane.w;
+
+    let denom = normal.dot(ray_direction);
+
+    if denom.abs() > f32::EPSILON {
+        let t = -(normal.dot(ray_origin) + d) / denom;
+        if t >= 0.0 {
+            return Some(ray_origin + t * ray_direction);
+        }
+    }
+
+    None
+}
+
+/// Calculates the intersection point between a plane and a ray, if any.
+///
+/// This is a simplified version of `intersect_plane_with_ray`.
+///
+/// # Arguments
+///
+/// * `plane`: The plane, where x, y, and z components are the normal, and w is the distance.
+/// * `ray_origin`: A point from which the ray originates.
+/// * `ray_direction`: The direction vector of the ray.
+///
+/// # Returns
+///
+/// * (`true`, intersection_point) if an intersection occured
+/// * (`false`, Vec3::ZERO) if no intersection occured
+pub fn intersect_plane_with_ray_from_origin(plane: Vec4, ray_direction: Vec3) -> (bool, Vec3) {
+    let normal = Vec3::new(plane.x, plane.y, plane.z);
+    let d = plane.w;
+
+    let denom = normal.dot(ray_direction);
+
+    if denom.abs() > f32::EPSILON {
+        let t = -d / denom;
+        if t >= 0.0 {
+            return (true, t * ray_direction);
+        }
+    }
+
+    (false, Vec3::ZERO)
 }
 
 pub const fn convex_mesh([p0, p1, p2, p3, p4, p5, p6, p7]: [Vec3; 8]) -> [Vec3; 36] {
@@ -625,5 +680,52 @@ mod test {
 
         let nan = f32::NAN;
         assert_eq!(0.0, signum_or_zero(nan));
+    }
+
+    #[test]
+    fn plane_intersection() {
+        let x_plane = Vec4::new(-1.0, 0.0, 0.0, 1.0);
+        let x_intersection = intersect_plane_with_ray(x_plane, Vec3::ZERO, Vec3::X);
+        assert_eq!(Some(Vec3::X), x_intersection);
+
+        // Do the same thing with the other cardinals
+        let check_dir = |dir: Vec3| {
+            let dir = dir.normalize();
+            let plane = (-dir).extend(1.0);
+            let intersection = intersect_plane_with_ray(plane, Vec3::ZERO, dir);
+            assert_eq!(Some(dir), intersection);
+            let intersection = intersect_plane_with_ray_from_origin(plane, dir);
+            assert_eq!((true, dir), intersection);
+        };
+        for dir in [
+            Vec3::X,
+            Vec3::NEG_X,
+            Vec3::Y,
+            Vec3::NEG_Y,
+            Vec3::Z,
+            Vec3::NEG_Z,
+        ] {
+            check_dir(dir);
+        }
+
+        assert_eq!(
+            Some(Vec3::new(1.0, 1.0, 0.0)),
+            intersect_plane_with_ray(x_plane, Vec3::ZERO, Vec3::new(1.0, 1.0, 0.0))
+        );
+
+        assert_eq!(
+            (false, Vec3::ZERO),
+            intersect_plane_with_ray_from_origin(x_plane, Vec3::ZERO)
+        );
+
+        assert_eq!(
+            (true, Vec3::ONE),
+            intersect_plane_with_ray_from_origin(x_plane, Vec3::ONE)
+        );
+
+        assert_eq!(
+            (true, Vec3::new(1.0, -1.0, -1.0)),
+            intersect_plane_with_ray_from_origin(x_plane, Vec3::new(1.0, -1.0, -1.0))
+        );
     }
 }

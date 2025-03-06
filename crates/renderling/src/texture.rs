@@ -61,7 +61,7 @@ pub fn wgpu_texture_format_channels_and_subpixel_bytes(format: wgpu::TextureForm
 
 static NEXT_TEXTURE_ID: LazyLock<Arc<AtomicUsize>> = LazyLock::new(|| Arc::new(0.into()));
 
-fn get_next_texture_id() -> usize {
+pub(crate) fn get_next_texture_id() -> usize {
     NEXT_TEXTURE_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
 
@@ -71,7 +71,7 @@ pub struct Texture {
     pub texture: Arc<wgpu::Texture>,
     pub view: Arc<wgpu::TextureView>,
     pub sampler: Arc<wgpu::Sampler>,
-    id: usize,
+    pub(crate) id: usize,
 }
 
 impl Texture {

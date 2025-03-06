@@ -151,6 +151,10 @@ pub(crate) fn create_skybox_render_pipeline(
 /// A clone of a skybox is a reference to the same skybox.
 ///
 /// Only available on the CPU. Not available in shaders.
+// TODO: spilt Skybox into Skybox and IBL components.
+// Skybox and IBL are different things. Sometimes you want to use a
+// skybox without having it shade things.
+// Also, the brdf_lut doesn't change, so should probably live in `Lighting`
 #[derive(Debug, Clone)]
 pub struct Skybox {
     // Cubemap texture of the environment cubemap
