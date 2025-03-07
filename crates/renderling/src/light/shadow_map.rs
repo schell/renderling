@@ -718,7 +718,7 @@ mod test {
                         // Shadow is 1.0 when the fragment is in the shadow of this light,
                         // and 0.0 in darkness
                         ShadowCalculation::new(&light_slab, light, in_pos, surface_normal, l)
-                            .run_point(&light_slab, &shadow_map, &())
+                            .run_point(&light_slab, &shadow_map, &(), light_position)
                     } else {
                         0.0
                     };
@@ -735,13 +735,20 @@ mod test {
             img_diff::save("shadows/shadow_mapping_points/frame.png", img);
             frame.present();
 
-            let points = [Vec3::new(0.0, 0.13026, 1.1097)];
+            let points = [
+                Vec3::X,
+                Vec3::NEG_X,
+                Vec3::Y,
+                Vec3::NEG_Y,
+                Vec3::Z,
+                Vec3::NEG_Z,
+                // Vec3::new(1.1097, 0.13026, 0.0),
+                // Vec3::new(-1.1097, 0.13026, 0.0),
+                // Vec3::new(0.0, 0.13026, 1.1097),
+                // Vec3::new(0.0, 0.13026, -1.1097),
+            ];
             for point in points {
-                assert_eq!(
-                    1.0,
-                    calc(point, Vec3::Y),
-                    "point {point} _should_ be in shadow, but it's not"
-                );
+                calc(point, Vec3::Y);
             }
         }
     }

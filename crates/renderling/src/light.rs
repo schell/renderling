@@ -353,13 +353,28 @@ impl Default for PointLightDescriptor {
 }
 
 impl PointLightDescriptor {
+    pub fn shadow_mapping_view_matrix(
+        &self,
+        face_index: usize,
+        parent_light_transform: &Mat4,
+    ) -> Mat4 {
+        let eye = parent_light_transform.transform_point3(self.position);
+        let mut face = CubemapFaceDirection::FACES[face_index];
+        face.eye = eye;
+        face.view()
+    }
+
+    pub fn shadow_mapping_projection_matrix(z_near: f32, z_far: f32) -> Mat4 {
+        Mat4::perspective_lh(core::f32::consts::FRAC_PI_2, 1.0, z_near, z_far)
+    }
+
     pub fn shadow_mapping_projection_and_view_matrices(
         &self,
         parent_light_transform: &Mat4,
         z_near: f32,
         z_far: f32,
     ) -> (Mat4, [Mat4; 6]) {
-        let p = Mat4::perspective_lh(core::f32::consts::FRAC_PI_2, 1.0, z_near, z_far);
+        let p = Self::shadow_mapping_projection_matrix(z_near, z_far);
         let eye = parent_light_transform.transform_point3(self.position);
         (
             p,
@@ -482,9 +497,9 @@ impl Light {
 pub struct ShadowCalculation {
     pub shadow_map_desc: ShadowMapDescriptor,
     pub shadow_map_atlas_size: UVec2,
-    pub surface_normal: Vec3,
+    pub surface_normal_in_world_space: Vec3,
     pub frag_pos_in_world_space: Vec3,
-    pub frag_to_light: Vec3,
+    pub frag_to_light_in_world_space: Vec3,
     pub bias_min: f32,
     pub bias_max: f32,
     pub pcf_samples: u32,
@@ -512,9 +527,9 @@ impl ShadowCalculation {
         ShadowCalculation {
             shadow_map_desc,
             shadow_map_atlas_size: atlas_size.xy(),
-            surface_normal,
+            surface_normal_in_world_space: surface_normal,
             frag_pos_in_world_space: in_pos,
-            frag_to_light: light_direction,
+            frag_to_light_in_world_space: light_direction,
             bias_min: shadow_map_desc.bias_min,
             bias_max: shadow_map_desc.bias_max,
             pcf_samples: shadow_map_desc.pcf_samples,
@@ -551,8 +566,8 @@ impl ShadowCalculation {
             shadow_map_desc: _,
             shadow_map_atlas_size,
             frag_pos_in_world_space: _,
-            surface_normal,
-            frag_to_light: light_direction,
+            surface_normal_in_world_space: surface_normal,
+            frag_to_light_in_world_space: light_direction,
             bias_min,
             bias_max,
             pcf_samples,
@@ -619,7 +634,13 @@ impl ShadowCalculation {
     ///
     /// Returns `0.0` when the fragment is in full light.
     /// Returns `1.0` when the fragment is in full shadow.
-    pub fn run_point<T, S>(&self, light_slab: &[u32], shadow_map: &T, shadow_map_sampler: &S) -> f32
+    pub fn run_point<T, S>(
+        &self,
+        light_slab: &[u32],
+        shadow_map: &T,
+        shadow_map_sampler: &S,
+        light_pos_in_world_space: Vec3,
+    ) -> f32
     where
         S: IsSampler,
         T: Sample2dArray<Sampler = S>,
@@ -627,35 +648,31 @@ impl ShadowCalculation {
         let ShadowCalculation {
             shadow_map_desc: _,
             shadow_map_atlas_size,
-            frag_pos_in_world_space: _,
-            surface_normal,
-            frag_to_light,
+            frag_pos_in_world_space,
+            surface_normal_in_world_space: surface_normal,
+            frag_to_light_in_world_space: frag_to_light,
             bias_min,
             bias_max,
             pcf_samples: _,
         } = self;
 
-        // Get the vector that points from the light to the fragment
-        let light_to_frag_dir = (-frag_to_light).alt_norm_or_zero();
+        let light_to_frag_dir = frag_pos_in_world_space - light_pos_in_world_space;
+        crate::println!("light_to_frag_dir: {light_to_frag_dir}");
         // Get the face of the point light cubemap and the uv coords to sample
+        // let cube_uv = light_to_frag_dir.xzy();
+        // crate::println!("cube_uv: {cube_uv}");
         let (face_index, uv) = CubemapDescriptor::get_face_index_and_uv(light_to_frag_dir);
         crate::println!("face_index: {face_index}",);
         crate::println!("uv: {uv}");
         let frag_pos_in_light_space = self.get_frag_pos_in_light_space(light_slab, face_index);
-        crate::println!("frag_pos_in_light_space: {frag_pos_in_light_space}");
         if !crate::math::is_inside_clip_space(frag_pos_in_light_space.xyz()) {
             return 0.0;
         }
         let face_texture = self.get_atlas_texture_at(light_slab, face_index);
         let uv_tex = face_texture.uv(uv, *shadow_map_atlas_size);
-        crate::println!("uv_tex: {uv_tex}");
-        crate::println!("atlas_size: {shadow_map_atlas_size}");
         let shadow_map_depth = shadow_map.sample_by_lod(*shadow_map_sampler, uv_tex, 0.0).x;
-        crate::println!("shadow_map_depth: {shadow_map_depth}");
         let fragment_depth = frag_pos_in_light_space.z;
-        crate::println!("current_depth: {fragment_depth}");
         let bias = (bias_max * (1.0 - surface_normal.dot(*frag_to_light))).max(*bias_min);
-        crate::println!("bias: {bias}");
         if (fragment_depth - bias) > shadow_map_depth {
             1.0
         } else {

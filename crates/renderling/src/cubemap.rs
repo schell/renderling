@@ -1,6 +1,9 @@
 //! Cubemap utilities.
 //!
 //! Shaders, render pipelines and layouts for creating and sampling cubemaps.
+//!
+//! For more info see:
+//! * <https://github.com/markpmlim/MetalCubemapping>
 use crabslab::{Array, Id, Slab};
 use glam::{Mat4, Vec2, Vec3, Vec3Swizzles, Vec4};
 use spirv_std::{num_traits::Zero, spirv};
@@ -12,7 +15,7 @@ pub use cpu::*;
 
 use crate::{
     atlas::{AtlasDescriptor, AtlasTexture},
-    math::{IsSampler, Sample2dArray},
+    math::{IsSampler, IsVector, Sample2dArray},
 };
 
 /// Vertex shader for testing cubemap sampling.
@@ -43,6 +46,7 @@ pub fn cubemap_sampling_test_fragment(
 ///
 /// Assumes the camera is at the origin, inside the cube, with
 /// a left-handed coordinate system (+Z going into the screen).
+#[derive(Clone, Copy)]
 pub struct CubemapFaceDirection {
     /// Where is the camera
     pub eye: Vec3,
@@ -114,69 +118,29 @@ impl CubemapDescriptor {
     /// Return the face index and UV coordinates that can be used to sample
     /// a cubemap from the given directional coordinate.
     pub fn get_face_index_and_uv(coord: Vec3) -> (usize, Vec2) {
-        // A plane is the normal of the plane and its distance from the origin
-        const X_PLANE: Vec4 = Vec4::new(-1.0, 0.0, 0.0, 1.0);
-        const NEG_X_PLANE: Vec4 = Vec4::new(1.0, 0.0, 0.0, 1.0);
-        const Y_PLANE: Vec4 = Vec4::new(0.0, -1.0, 0.0, 1.0);
-        const NEG_Y_PLANE: Vec4 = Vec4::new(0.0, 1.0, 0.0, 1.0);
-        const Z_PLANE: Vec4 = Vec4::new(0.0, 0.0, -1.0, 1.0);
-        const NEG_Z_PLANE: Vec4 = Vec4::new(0.0, 0.0, 1.0, 1.0);
+        let abs_x = coord.x.abs();
+        let abs_y = coord.y.abs();
+        let abs_z = coord.z.abs();
 
-        {
-            let (intersects, intersection) =
-                crate::math::intersect_plane_with_ray_from_origin(X_PLANE, coord);
-            if intersects {
-                let uv = (Vec2::new(-intersection.z, -intersection.y) + 1.0) / 2.0;
-                return (0, uv);
+        let (face_index, uv) = if abs_x >= abs_y && abs_x >= abs_z {
+            if coord.x > 0.0 {
+                (0, Vec2::new(-coord.z, -coord.y) / abs_x)
+            } else {
+                (1, Vec2::new(coord.z, -coord.y) / abs_x)
             }
-        }
-
-        {
-            let (intersects, intersection) =
-                crate::math::intersect_plane_with_ray_from_origin(NEG_X_PLANE, coord);
-            if intersects {
-                let uv = (Vec2::new(intersection.z, -intersection.y) + 1.0) / 2.0;
-                return (1, uv);
+        } else if abs_y >= abs_x && abs_y >= abs_z {
+            if coord.y > 0.0 {
+                (2, Vec2::new(coord.x, coord.z) / abs_y)
+            } else {
+                (3, Vec2::new(coord.x, -coord.z) / abs_y)
             }
-        }
+        } else if coord.z > 0.0 {
+            (4, Vec2::new(coord.x, -coord.y) / abs_z)
+        } else {
+            (5, Vec2::new(-coord.x, -coord.y) / abs_z)
+        };
 
-        {
-            let (intersects, intersection) =
-                crate::math::intersect_plane_with_ray_from_origin(Y_PLANE, coord);
-            if intersects {
-                let uv = (Vec2::new(intersection.x, intersection.z) + 1.0) / 2.0;
-                return (2, uv);
-            }
-        }
-
-        {
-            let (intersects, intersection) =
-                crate::math::intersect_plane_with_ray_from_origin(NEG_Y_PLANE, coord);
-            if intersects {
-                let uv = (Vec2::new(intersection.x, -intersection.z) + 1.0) / 2.0;
-                return (3, uv);
-            }
-        }
-
-        {
-            let (intersects, intersection) =
-                crate::math::intersect_plane_with_ray_from_origin(Z_PLANE, coord);
-            if intersects {
-                let uv = (Vec2::new(intersection.x, -intersection.y) + 1.0) / 2.0;
-                return (4, uv);
-            }
-        }
-
-        {
-            let (intersects, intersection) =
-                crate::math::intersect_plane_with_ray_from_origin(NEG_Z_PLANE, coord);
-            if intersects {
-                let uv = (Vec2::new(-intersection.x, -intersection.y) + 1.0) / 2.0;
-                return (5, uv);
-            }
-        }
-
-        (0, Vec2::new(0.5, 0.5))
+        (face_index, (uv + Vec2::ONE) / 2.0)
     }
 
     /// Sample the cubemap with a directional coordinate.
@@ -215,5 +179,24 @@ mod test {
             (1, Vec2::new(0.0, 1.0)),
             CubemapDescriptor::get_face_index_and_uv(Vec3::NEG_ONE)
         );
+    }
+
+    #[test]
+    fn cubemap_face_index() {
+        let center = Vec2::splat(0.5);
+        let data = [
+            (Vec3::X, 0, center),
+            (Vec3::NEG_X, 1, center),
+            (Vec3::Y, 2, center),
+            (Vec3::NEG_Y, 3, center),
+            (Vec3::Z, 4, center),
+            (Vec3::NEG_Z, 5, center),
+        ];
+        for (coord, expected_face_index, expected_uv) in data {
+            let (seen_face_index, seen_uv) = CubemapDescriptor::get_face_index_and_uv(coord);
+            dbg!((coord, seen_face_index, seen_uv));
+            assert_eq!(expected_face_index, seen_face_index);
+            assert_eq!(expected_uv, seen_uv);
+        }
     }
 }

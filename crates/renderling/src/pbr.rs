@@ -633,6 +633,7 @@ where
                         light_slab,
                         shadow_map,
                         shadow_map_sampler,
+                        position,
                     )
                 } else {
                     0.0

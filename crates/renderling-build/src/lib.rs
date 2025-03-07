@@ -93,7 +93,12 @@ fn wgsl(spv_filepath: impl AsRef<std::path::Path>, destination: impl AsRef<std::
     let module = naga::front::spv::parse_u8_slice(&bytes, &opts).unwrap();
     let mut validator =
         naga::valid::Validator::new(Default::default(), naga::valid::Capabilities::empty());
-    let info = validator.validate(&module).unwrap();
+    let info = validator.validate(&module).unwrap_or_else(|e| {
+        panic!(
+            "Could not validate '{}': {e}",
+            spv_filepath.as_ref().display(),
+        )
+    });
     let wgsl =
         naga::back::wgsl::write_string(&module, &info, naga::back::wgsl::WriterFlags::empty())
             .unwrap();
