@@ -198,6 +198,7 @@ impl ShadowMap {
             .new_array(analytical_light_bundle.light_space_transforms(z_near, z_far));
         let shadowmap_descriptor = lighting.light_slab.new_value(ShadowMapDescriptor {
             light_space_transforms_array: light_space_transforms.array(),
+            z_far,
             atlas_textures_array: atlas_textures_array.array(),
             bias_min: 0.0005,
             bias_max: 0.005,
@@ -630,7 +631,7 @@ mod test {
             .load_gltf_document_from_path(
                 crate::test::workspace_dir()
                     .join("gltf")
-                    .join("shadow_mapping_point.glb"),
+                    .join("shadow_mapping_points.glb"),
                 camera.id(),
             )
             .unwrap();
@@ -642,7 +643,7 @@ mod test {
 
         let mut shadows = vec![];
         let z_near = 0.1;
-        let z_far = 10.0;
+        let z_far = 100.0;
         for (i, light_bundle) in doc.lights.iter().enumerate() {
             {
                 let desc = light_bundle.light_details.as_point().unwrap().get();
@@ -668,8 +669,9 @@ mod test {
                 .new_shadow_map(light_bundle, UVec2::splat(256), z_near, z_far)
                 .unwrap();
             shadow.shadowmap_descriptor.modify(|desc| {
-                desc.bias_min = 0.00005;
-                desc.bias_max = 0.005;
+                desc.pcf_samples = 16;
+                desc.bias_min = 0.00010;
+                desc.bias_max = 0.010;
             });
             shadow
                 .update(stage.lighting(), doc.renderlets_iter())
@@ -678,78 +680,14 @@ mod test {
         }
         camera.set(c);
 
-        {
-            // Let's verify some points around the scene
-            let light_slab =
-                futures_lite::future::block_on(stage.lighting().light_slab.read(..)).unwrap();
-            let shadow_atlas_imgs = stage.lighting().shadow_map_atlas.read_images(&ctx);
-            fn convert(image::Rgba([r, g, b, a]): &image::Rgba<u8>) -> Vec4 {
-                Vec4::new(
-                    *r as f32 / 255.0,
-                    *g as f32 / 255.0,
-                    *b as f32 / 255.0,
-                    *a as f32 / 255.0,
-                )
-            }
-            let shadow_map = CpuTexture2dArray::from_images(shadow_atlas_imgs, convert);
-            let calc = |in_pos: Vec3, surface_normal: Vec3| -> f32 {
-                println!("\n# calc");
-                let light = doc.lights[0].light.get();
-                let transform = light_slab.read(light.transform_id);
-                let transform = Mat4::from(transform);
-                let PointLightDescriptor {
-                    position,
-                    color: _,
-                    intensity: _,
-                } = light_slab.read(light.into_point_id());
-                let light_position = transform.transform_point3(position);
-                println!("in_pos: {in_pos}");
-                println!("light_position: {light_position}");
-                let frag_to_light = light_position - in_pos;
-                println!("frag_to_light(not norm): {frag_to_light}");
-                let distance = frag_to_light.length();
-                if distance == 0.0 {
-                    return 666.0;
-                }
-                let l = frag_to_light.alt_norm_or_zero();
-                println!("l: {l}");
-                let shadow =
-                    if light.shadow_map_desc_id.is_some() {
-                        // Shadow is 1.0 when the fragment is in the shadow of this light,
-                        // and 0.0 in darkness
-                        ShadowCalculation::new(&light_slab, light, in_pos, surface_normal, l)
-                            .run_point(&light_slab, &shadow_map, &(), light_position)
-                    } else {
-                        0.0
-                    };
-                println!("shadow: {shadow}");
-                shadow
-            };
-            let frame = ctx.get_next_frame().unwrap();
-            crate::test::capture_gpu_frame(
-                &ctx,
-                "shadows/shadow_mapping_points/frame.gputrace",
-                || stage.render(&frame.view()),
-            );
-            let img = frame.read_image().unwrap();
-            img_diff::save("shadows/shadow_mapping_points/frame.png", img);
-            frame.present();
-
-            let points = [
-                Vec3::X,
-                Vec3::NEG_X,
-                Vec3::Y,
-                Vec3::NEG_Y,
-                Vec3::Z,
-                Vec3::NEG_Z,
-                // Vec3::new(1.1097, 0.13026, 0.0),
-                // Vec3::new(-1.1097, 0.13026, 0.0),
-                // Vec3::new(0.0, 0.13026, 1.1097),
-                // Vec3::new(0.0, 0.13026, -1.1097),
-            ];
-            for point in points {
-                calc(point, Vec3::Y);
-            }
-        }
+        let frame = ctx.get_next_frame().unwrap();
+        crate::test::capture_gpu_frame(
+            &ctx,
+            "shadows/shadow_mapping_points/frame.gputrace",
+            || stage.render(&frame.view()),
+        );
+        let img = frame.read_image().unwrap();
+        img_diff::save("shadows/shadow_mapping_points/frame.png", img);
+        frame.present();
     }
 }

@@ -15,7 +15,7 @@ pub use cpu::*;
 
 use crate::{
     atlas::{AtlasDescriptor, AtlasTexture},
-    math::{IsSampler, IsVector, Sample2dArray},
+    math::{IsSampler, Sample2dArray},
 };
 
 /// Vertex shader for testing cubemap sampling.

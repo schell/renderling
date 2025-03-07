@@ -45,6 +45,8 @@ pub struct LightingDescriptor {
 #[derive(Clone, Copy, Default, SlabItem, core::fmt::Debug)]
 pub struct ShadowMapDescriptor {
     pub light_space_transforms_array: Array<Mat4>,
+    /// Far plane of the projection matrix
+    pub z_far: f32,
     /// Pointers to the atlas textures where the shadow map depth
     /// data is stored.
     ///
@@ -619,17 +621,38 @@ impl ShadowCalculation {
                 crate::println!("closest_depth: {shadow_map_depth}");
                 let bias = (bias_max * (1.0 - surface_normal.dot(*light_direction))).max(*bias_min);
 
-                shadow += if (fragment_depth - bias) > shadow_map_depth {
-                    1.0
-                } else {
-                    0.0
-                };
+                if (fragment_depth - bias) > shadow_map_depth {
+                    shadow += 1.0
+                }
                 total += 1.0;
             }
         }
         shadow / total.max(1.0)
     }
 
+    pub const POINT_SAMPLE_OFFSET_DIRECTIONS: [Vec3; 21] = [
+        Vec3::ZERO,
+        Vec3::new(1.0, 1.0, 1.0),
+        Vec3::new(1.0, -1.0, 1.0),
+        Vec3::new(-1.0, -1.0, 1.0),
+        Vec3::new(-1.0, 1.0, 1.0),
+        Vec3::new(1.0, 1.0, -1.0),
+        Vec3::new(1.0, -1.0, -1.0),
+        Vec3::new(-1.0, -1.0, -1.0),
+        Vec3::new(-1.0, 1.0, -1.0),
+        Vec3::new(1.0, 1.0, 0.0),
+        Vec3::new(1.0, -1.0, 0.0),
+        Vec3::new(-1.0, -1.0, 0.0),
+        Vec3::new(-1.0, 1.0, 0.0),
+        Vec3::new(1.0, 0.0, 1.0),
+        Vec3::new(-1.0, 0.0, 1.0),
+        Vec3::new(1.0, 0.0, -1.0),
+        Vec3::new(-1.0, 0.0, -1.0),
+        Vec3::new(0.0, 1.0, 1.0),
+        Vec3::new(0.0, -1.0, 1.0),
+        Vec3::new(0.0, -1.0, -1.0),
+        Vec3::new(0.0, 1.0, -1.0),
+    ];
     /// Returns shadow _intensity_ for point lights.
     ///
     /// Returns `0.0` when the fragment is in full light.
@@ -646,38 +669,45 @@ impl ShadowCalculation {
         T: Sample2dArray<Sampler = S>,
     {
         let ShadowCalculation {
-            shadow_map_desc: _,
+            shadow_map_desc,
             shadow_map_atlas_size,
             frag_pos_in_world_space,
             surface_normal_in_world_space: surface_normal,
             frag_to_light_in_world_space: frag_to_light,
             bias_min,
             bias_max,
-            pcf_samples: _,
+            pcf_samples,
         } = self;
 
         let light_to_frag_dir = frag_pos_in_world_space - light_pos_in_world_space;
         crate::println!("light_to_frag_dir: {light_to_frag_dir}");
-        // Get the face of the point light cubemap and the uv coords to sample
-        // let cube_uv = light_to_frag_dir.xzy();
-        // crate::println!("cube_uv: {cube_uv}");
-        let (face_index, uv) = CubemapDescriptor::get_face_index_and_uv(light_to_frag_dir);
-        crate::println!("face_index: {face_index}",);
-        crate::println!("uv: {uv}");
-        let frag_pos_in_light_space = self.get_frag_pos_in_light_space(light_slab, face_index);
-        if !crate::math::is_inside_clip_space(frag_pos_in_light_space.xyz()) {
-            return 0.0;
+
+        let pcf_samplesf = (*pcf_samples as f32)
+            .max(1.0)
+            .min(Self::POINT_SAMPLE_OFFSET_DIRECTIONS.len() as f32);
+        let pcf_samples = pcf_samplesf as usize;
+        let view_distance = light_to_frag_dir.length();
+        let disk_radius = (1.0 + view_distance / shadow_map_desc.z_far) / 25.0;
+        let mut shadow = 0.0f32;
+        for i in 0..pcf_samples {
+            let sample_offset = Self::POINT_SAMPLE_OFFSET_DIRECTIONS[i] * disk_radius;
+            crate::println!("sample_offset: {sample_offset}");
+            let sample_dir = (light_to_frag_dir + sample_offset).alt_norm_or_zero();
+            let (face_index, uv) = CubemapDescriptor::get_face_index_and_uv(sample_dir);
+            crate::println!("face_index: {face_index}",);
+            crate::println!("uv: {uv}");
+            let frag_pos_in_light_space = self.get_frag_pos_in_light_space(light_slab, face_index);
+            let face_texture = self.get_atlas_texture_at(light_slab, face_index);
+            let uv_tex = face_texture.uv(uv, *shadow_map_atlas_size);
+            let shadow_map_depth = shadow_map.sample_by_lod(*shadow_map_sampler, uv_tex, 0.0).x;
+            let fragment_depth = frag_pos_in_light_space.z;
+            let bias = (bias_max * (1.0 - surface_normal.dot(*frag_to_light))).max(*bias_min);
+            if (fragment_depth - bias) > shadow_map_depth {
+                shadow += 1.0
+            }
         }
-        let face_texture = self.get_atlas_texture_at(light_slab, face_index);
-        let uv_tex = face_texture.uv(uv, *shadow_map_atlas_size);
-        let shadow_map_depth = shadow_map.sample_by_lod(*shadow_map_sampler, uv_tex, 0.0).x;
-        let fragment_depth = frag_pos_in_light_space.z;
-        let bias = (bias_max * (1.0 - surface_normal.dot(*frag_to_light))).max(*bias_min);
-        if (fragment_depth - bias) > shadow_map_depth {
-            1.0
-        } else {
-            0.0
-        }
+
+        shadow / pcf_samplesf
     }
 }
 
