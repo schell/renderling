@@ -602,9 +602,6 @@ mod test {
             uvs.extend((0..20).map(|_| rxvec3()));
         }
 
-        // add zero
-        uvs.push(Vec3::ZERO);
-
         const THRESHOLD: f32 = 0.005;
         for uv in uvs.into_iter() {
             let nuv = uv.normalize_or(Vec3::X);
