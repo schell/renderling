@@ -10,10 +10,11 @@ on:
 env:
   # For setup-rust, see https://github.com/moonrepo/setup-rust/issues/22
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  CARGO_GPU_COMMITSH: 94e832185b8a4ee437d5d614fb929006ab69ce1e
 
 jobs:
   # Installs cargo deps and sets the cache directory for subsequent jobs
-  install-cargo-deps:
+  install-cargo-gpu:
     strategy:
       matrix: 
         os: [ubuntu-latest, macos-latest, windows-latest]
@@ -34,13 +35,12 @@ jobs:
         with:
           path: ~/.cargo
           # THIS KEY MUST MATCH BELOW
-          key: cargo-cache-1-${{ runner.os }}
+          key: cargo-cache-${{ env.CARGO_GPU_COMMITSH }}-${{ runner.os }}
       - uses: moonrepo/setup-rust@v1
       - run: rustup default stable 
       - run: rustup update
-      - run: cargo install cargo-nextest
       - run: | 
-          cargo install --git https://github.com/rust-gpu/cargo-gpu --rev d1a00d8 cargo-gpu 
+          cargo install --git https://github.com/rust-gpu/cargo-gpu --rev $CARGO_GPU_COMMITSH cargo-gpu 
       - run: cargo gpu show commitsh
       - id: cachepathstep
         run: |
@@ -50,7 +50,7 @@ jobs:
 
   # Builds the shaders and ensures there is no git diff
   renderling-build-shaders:
-    needs: install-cargo-deps
+    needs: install-cargo-gpu
     strategy:
       matrix: 
         # temporarily skip windows, revisit after a fix for this error is found:
@@ -68,7 +68,7 @@ jobs:
         with:
           path: ~/.cargo
           # THIS KEY MUST MATCH ABOVE
-          key: cargo-cache-1-${{ runner.os }}
+          key: cargo-cache-${{ env.CARGO_GPU_COMMITSH }}-${{ runner.os }}
       - uses: actions/cache@v4
         with:
           path: | 
@@ -101,75 +101,34 @@ jobs:
       - run: cargo build -p example
       
   # BAU tests
-  renderling-test-linux:
-    needs: install-cargo-deps
-    runs-on: ubuntu-latest 
-    steps: 
+  renderling-test:
+    strategy:
+      matrix: 
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
       - uses: actions/checkout@v2
       - uses: moonrepo/setup-rust@v1
-      - run: sudo apt-get -y install mesa-vulkan-drivers libvulkan1 vulkan-tools vulkan-validationlayers
-      - run: cargo nextest run -j 1
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cargo
+          key: ${{ runner.os }}-test-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: Install linux deps 
+        if: runner.os == 'Linux'
+        run: sudo apt-get -y install mesa-vulkan-drivers libvulkan1 vulkan-tools vulkan-validationlayers
+
+      - name: Install cargo-nextest
+        run: cargo install --locked cargo-nextest || true
+
+      - name: Test 
+        run: cargo nextest run -j 1
         env: 
           RUST_BACKTRACE: 1
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: test-output-linux
-          path: test_output/**/*.png
-
-  renderling-test-macos:
-    needs: install-cargo-deps
-    runs-on: macos-latest        
-    steps:
-      - uses: actions/checkout@v2
-      - uses: moonrepo/setup-rust@v1
-      - run: cargo nextest run -j 1
-        env:
-          RUST_BACKTRACE: 1
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: test-output-macos
-          path: test_output/**/*.png
-
-  renderling-test-windows:
-    needs: install-cargo-deps
-    runs-on: macos-latest        
-    steps:
-      - uses: actions/checkout@v2
-      - uses: moonrepo/setup-rust@v1
-      - run: cargo nextest run -j 1
-        env:
-          RUST_BACKTRACE: 1
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: test-output-windows
-          path: test_output/**/*.png
-
-  # various linuxes w/ physical gpus
-  # renderling-test-linux-other:
-  #   continue-on-error: true
-  #   strategy:
-  #     matrix:
-  #       label: [intel, amd, pi4]
-  #   runs-on: ${{ matrix.label }}
-  #   steps:
-  #     - uses: actions/checkout@v2
-  #     - uses: moonrepo/setup-rust@v1
-  #       with:
-  #         cache: false
-  #     - uses: Swatinem/rust-cache@v2
-  #       with:
-  #         cache-all-crates: "true"
-  #         cache-on-failure: "true"
-  #     - run: apt-get -q -y update && apt-get -q -y install mesa-vulkan-drivers libvulkan1 vulkan-tools vulkan-validationlayers
-  #     - run: cargo test -j 1 -- --test-threads=1 --nocapture
-  #       continue-on-error: ${{ matrix.label == 'pi4' }}
-  #       env:
-  #         RUST_BACKTRACE: 1
-  #     - uses: actions/upload-artifact@v4
-  #       if: always()
-  #       with:
-  #         name: test-output-${{ matrix.label }}
-  #         path: test_output/**/*.png
+          name: test-output-${{ runner.os }}
+          path: test_output  
