@@ -72,9 +72,9 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: | 
-              ${{ needs.install-cargo-deps.outputs.cachepath-macOS }}
-              ${{ needs.install-cargo-deps.outputs.cachepath-Linux }}
-              ${{ needs.install-cargo-deps.outputs.cachepath-Windows }}
+              ${{ needs.install-cargo-gpu.outputs.cachepath-macOS }}
+              ${{ needs.install-cargo-gpu.outputs.cachepath-Linux }}
+              ${{ needs.install-cargo-gpu.outputs.cachepath-Windows }}
           key: rust-gpu-cache-0-${{ runner.os }}
       - uses: moonrepo/setup-rust@v1
       - run: cargo gpu show commitsh
