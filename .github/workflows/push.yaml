@@ -102,6 +102,7 @@ jobs:
       
   # BAU tests
   renderling-test-linux:
+    needs: install-cargo-deps
     runs-on: ubuntu-latest 
     steps: 
       - uses: actions/checkout@v2
@@ -117,6 +118,7 @@ jobs:
           path: test_output/**/*.png
 
   renderling-test-macos:
+    needs: install-cargo-deps
     runs-on: macos-latest        
     steps:
       - uses: actions/checkout@v2
@@ -131,6 +133,7 @@ jobs:
           path: test_output/**/*.png
 
   renderling-test-windows:
+    needs: install-cargo-deps
     runs-on: macos-latest        
     steps:
       - uses: actions/checkout@v2
