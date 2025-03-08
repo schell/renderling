@@ -45,6 +45,8 @@ pub struct LightingDescriptor {
 #[derive(Clone, Copy, Default, SlabItem, core::fmt::Debug)]
 pub struct ShadowMapDescriptor {
     pub light_space_transforms_array: Array<Mat4>,
+    /// Near plane of the projection matrix
+    pub z_near: f32,
     /// Far plane of the projection matrix
     pub z_far: f32,
     /// Pointers to the atlas textures where the shadow map depth

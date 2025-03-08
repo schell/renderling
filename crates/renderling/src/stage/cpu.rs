@@ -1172,6 +1172,15 @@ impl NestedTransform<WeakContainer> {
             parent: hybrid.parent.clone(),
         }
     }
+
+    pub(crate) fn upgrade(&self) -> Option<NestedTransform> {
+        Some(NestedTransform {
+            global_transform: self.global_transform.upgrade()?,
+            local_transform: self.local_transform.clone(),
+            children: self.children.clone(),
+            parent: self.parent.clone(),
+        })
+    }
 }
 
 impl NestedTransform {

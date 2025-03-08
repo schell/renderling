@@ -5,10 +5,11 @@ use std::sync::Arc;
 
 use craballoc::{
     prelude::Hybrid,
-    value::{HybridArray, HybridWriteGuard},
+    value::{HybridArray, HybridWriteGuard, WeakContainer},
 };
 use crabslab::Id;
 use glam::{Mat4, UVec2};
+use snafu::OptionExt;
 
 use crate::{
     atlas::{AtlasBlittingOperation, AtlasImage, AtlasTexture},
@@ -16,7 +17,10 @@ use crate::{
     stage::Renderlet,
 };
 
-use super::{AnalyticalLightBundle, Lighting, LightingError, ShadowMapDescriptor};
+use super::{
+    AnalyticalLightBundle, DroppedAnalyticalLightBundleSnafu, Lighting, LightingError,
+    ShadowMapDescriptor,
+};
 
 /// A depth map rendering of the scene from a light's point of view.
 ///
@@ -37,9 +41,10 @@ pub struct ShadowMap {
     /// Bindgroup for the shadow map update shader
     pub(crate) update_bindgroup: ManagedBindGroup,
     pub(crate) atlas_textures: Vec<Hybrid<AtlasTexture>>,
-    pub(crate) atlas_textures_array: HybridArray<Id<AtlasTexture>>,
+    pub(crate) _atlas_textures_array: HybridArray<Id<AtlasTexture>>,
     pub(crate) update_texture: crate::texture::Texture,
     pub(crate) blitting_op: AtlasBlittingOperation,
+    pub(crate) light_bundle: AnalyticalLightBundle<WeakContainer>,
 }
 
 impl ShadowMap {
@@ -198,6 +203,7 @@ impl ShadowMap {
             .new_array(analytical_light_bundle.light_space_transforms(z_near, z_far));
         let shadowmap_descriptor = lighting.light_slab.new_value(ShadowMapDescriptor {
             light_space_transforms_array: light_space_transforms.array(),
+            z_near,
             z_far,
             atlas_textures_array: atlas_textures_array.array(),
             bias_min: 0.0005,
@@ -223,19 +229,37 @@ impl ShadowMap {
             light_space_transforms,
             update_bindgroup,
             atlas_textures,
-            atlas_textures_array,
+            _atlas_textures_array: atlas_textures_array,
             update_texture,
             blitting_op,
+            light_bundle: analytical_light_bundle.weak(),
         })
     }
 
-    /// Update the shadow map, rendering the given [`Renderlet`]s to the map as shadow casters.
-    // TODO: pass `AnalyticalLightBundle` to `ShadowMap::update`
+    /// Update the `ShadowMap`, rendering the given [`Renderlet`]s to the map as shadow casters.
+    ///
+    /// The `ShadowMap` contains a weak referenc to the [`AnalyticalLightBundle`] used to create
+    /// it. Updates made to this `AnalyticalLightBundle` will automatically propogate to this
+    /// `ShadowMap`.
+    ///
+    /// ## Errors
+    /// If the `AnalyticalLightBundle` used to create this `ShadowMap` has been
+    /// dropped, calling this function will err.
     pub fn update<'a>(
         &self,
         lighting: &Lighting,
         renderlets: impl IntoIterator<Item = &'a Hybrid<Renderlet>>,
     ) -> Result<(), LightingError> {
+        let light_bundle = self
+            .light_bundle
+            .upgrade()
+            .context(DroppedAnalyticalLightBundleSnafu)?;
+        let shadow_desc = self.shadowmap_descriptor.get();
+        let new_transforms =
+            light_bundle.light_space_transforms(shadow_desc.z_near, shadow_desc.z_far);
+        for (i, t) in (0..self.light_space_transforms.len()).zip(new_transforms) {
+            self.light_space_transforms.set_item(i, t);
+        }
         if lighting.geometry_slab.has_queued_updates() {
             lighting.geometry_slab.commit();
         }
@@ -340,14 +364,9 @@ impl ShadowMap {
 
 #[cfg(test)]
 mod test {
-    use std::sync::Arc;
-
     use image::Luma;
 
-    use crate::{
-        camera::Camera, math::CpuTexture2dArray, println, skybox::Skybox,
-        stage::RenderletPbrVertexInfo, texture::DepthTexture,
-    };
+    use crate::{camera::Camera, texture::DepthTexture};
 
     use super::super::*;
 
@@ -657,7 +676,7 @@ mod test {
                     let frame = ctx.get_next_frame().unwrap();
                     stage.render(&frame.view());
                     let img = frame.read_image().unwrap();
-                    img_diff::save(
+                    img_diff::assert_img_eq(
                         &format!("shadows/shadow_mapping_points/light_{i}_pov_{j}.png"),
                         img,
                     );
@@ -681,13 +700,9 @@ mod test {
         camera.set(c);
 
         let frame = ctx.get_next_frame().unwrap();
-        crate::test::capture_gpu_frame(
-            &ctx,
-            "shadows/shadow_mapping_points/frame.gputrace",
-            || stage.render(&frame.view()),
-        );
+        stage.render(&frame.view());
         let img = frame.read_image().unwrap();
-        img_diff::save("shadows/shadow_mapping_points/frame.png", img);
+        img_diff::assert_img_eq("shadows/shadow_mapping_points/frame.png", img);
         frame.present();
     }
 }

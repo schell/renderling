@@ -322,13 +322,9 @@ mod test {
         scene_cubemap.run(&stage);
 
         let frame = ctx.get_next_frame().unwrap();
-        crate::test::capture_gpu_frame(
-            &ctx,
-            "cubemap/hand_rolled_cubemap_sampling/frame.gputrace",
-            || stage.render(&frame.view()),
-        );
+        stage.render(&frame.view());
         let img = frame.read_image().unwrap();
-        img_diff::save("cubemap/hand_rolled_cubemap_sampling/cube.png", img);
+        img_diff::assert_img_eq("cubemap/hand_rolled_cubemap_sampling/cube.png", img);
         frame.present();
 
         let slab = SlabAllocator::new(&ctx, wgpu::BufferUsages::empty());
@@ -508,12 +504,6 @@ mod test {
             )
         };
 
-        crate::test::capture_gpu_frame(
-            &ctx,
-            "cubemap/hand_rolled_cubemap_sampling/sample.gputrace",
-            || sample(Vec3::NEG_ONE),
-        );
-
         fn index_to_face_string(index: usize) -> &'static str {
             match index {
                 0 => "+X",
@@ -541,7 +531,7 @@ mod test {
             .into_image::<u8, image::Rgba<u8>>(ctx.get_device())
             .unwrap();
 
-            img_diff::save(
+            img_diff::assert_img_eq(
                 &format!(
                     "cubemap/hand_rolled_cubemap_sampling/face_{}.png",
                     index_to_face_string(i as usize)
