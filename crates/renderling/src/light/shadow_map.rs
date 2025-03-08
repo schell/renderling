@@ -5,10 +5,11 @@ use std::sync::Arc;
 
 use craballoc::{
     prelude::Hybrid,
-    value::{HybridArray, HybridWriteGuard},
+    value::{HybridArray, HybridWriteGuard, WeakContainer},
 };
 use crabslab::Id;
 use glam::{Mat4, UVec2};
+use snafu::OptionExt;
 
 use crate::{
     atlas::{AtlasBlittingOperation, AtlasImage, AtlasTexture},
@@ -16,7 +17,10 @@ use crate::{
     stage::Renderlet,
 };
 
-use super::{AnalyticalLightBundle, Lighting, LightingError, ShadowMapDescriptor};
+use super::{
+    AnalyticalLightBundle, DroppedAnalyticalLightBundleSnafu, Lighting, LightingError,
+    ShadowMapDescriptor,
+};
 
 /// A depth map rendering of the scene from a light's point of view.
 ///
@@ -37,9 +41,10 @@ pub struct ShadowMap {
     /// Bindgroup for the shadow map update shader
     pub(crate) update_bindgroup: ManagedBindGroup,
     pub(crate) atlas_textures: Vec<Hybrid<AtlasTexture>>,
-    pub(crate) atlas_textures_array: HybridArray<Id<AtlasTexture>>,
+    pub(crate) _atlas_textures_array: HybridArray<Id<AtlasTexture>>,
     pub(crate) update_texture: crate::texture::Texture,
     pub(crate) blitting_op: AtlasBlittingOperation,
+    pub(crate) light_bundle: AnalyticalLightBundle<WeakContainer>,
 }
 
 impl ShadowMap {
@@ -155,13 +160,106 @@ impl ShadowMap {
         self.shadowmap_descriptor.lock()
     }
 
-    /// Update the shadow map, rendering the given [`Renderlet`]s to the map as shadow casters.
-    // TODO: pass `AnalyticalLightBundle` to `ShadowMap::update`
+    /// Enable shadow mapping for the given [`AnalyticalLightBundle`], creating
+    /// a new [`ShadowMap`].
+    pub fn new(
+        lighting: &Lighting,
+        analytical_light_bundle: &AnalyticalLightBundle,
+        // Size of the shadow map
+        size: UVec2,
+        // Distance to the shadow map frustum's near plane
+        z_near: f32,
+        // Distance to the shadow map frustum's far plane
+        z_far: f32,
+    ) -> Result<Self, LightingError> {
+        let stage_slab_buffer = lighting.geometry_slab_buffer.read().unwrap();
+        let is_point_light =
+            analytical_light_bundle.light_details.style() == super::LightStyle::Point;
+        let count = if is_point_light { 6 } else { 1 };
+        let atlas = &lighting.shadow_map_atlas;
+        let image = AtlasImage::new(size, crate::atlas::AtlasImageFormat::R32FLOAT);
+        // UNWRAP: safe because we know there's one in here
+        let atlas_textures = atlas.add_images(vec![&image; count])?;
+        let atlas_len = atlas.len();
+        // Regardless of light type, we only create one depth texture,
+        // but that texture may be of layer 1 or 6
+        let label = format!("shadow-map-{atlas_len}");
+        let update_texture = crate::texture::Texture::create_depth_texture_for_shadow_map(
+            atlas.device(),
+            size.x,
+            size.y,
+            1,
+            Some(&label),
+            is_point_light,
+        );
+        let atlas_textures_array = lighting
+            .light_slab
+            .new_array(atlas_textures.iter().map(|t| t.id()));
+        let blitting_op = lighting
+            .shadow_map_update_blitter
+            .new_blitting_operation(atlas, if is_point_light { 6 } else { 1 });
+        let light_space_transforms = lighting
+            .light_slab
+            .new_array(analytical_light_bundle.light_space_transforms(z_near, z_far));
+        let shadowmap_descriptor = lighting.light_slab.new_value(ShadowMapDescriptor {
+            light_space_transforms_array: light_space_transforms.array(),
+            z_near,
+            z_far,
+            atlas_textures_array: atlas_textures_array.array(),
+            bias_min: 0.0005,
+            bias_max: 0.005,
+            pcf_samples: 4,
+        });
+        // Set the descriptor in the light, so the shader knows to use it
+        analytical_light_bundle.light.modify(|light| {
+            light.shadow_map_desc_id = shadowmap_descriptor.id();
+        });
+        let light_slab_buffer = lighting.light_slab.commit();
+        let update_bindgroup = ManagedBindGroup::from(ShadowMap::create_update_bindgroup(
+            lighting.light_slab.device(),
+            &lighting.shadow_map_update_bindgroup_layout,
+            stage_slab_buffer.deref(),
+            &light_slab_buffer,
+        ));
+
+        Ok(ShadowMap {
+            stage_slab_buffer_creation_time: Arc::new(stage_slab_buffer.creation_time().into()),
+            light_slab_buffer_creation_time: Arc::new(light_slab_buffer.creation_time().into()),
+            shadowmap_descriptor,
+            light_space_transforms,
+            update_bindgroup,
+            atlas_textures,
+            _atlas_textures_array: atlas_textures_array,
+            update_texture,
+            blitting_op,
+            light_bundle: analytical_light_bundle.weak(),
+        })
+    }
+
+    /// Update the `ShadowMap`, rendering the given [`Renderlet`]s to the map as shadow casters.
+    ///
+    /// The `ShadowMap` contains a weak referenc to the [`AnalyticalLightBundle`] used to create
+    /// it. Updates made to this `AnalyticalLightBundle` will automatically propogate to this
+    /// `ShadowMap`.
+    ///
+    /// ## Errors
+    /// If the `AnalyticalLightBundle` used to create this `ShadowMap` has been
+    /// dropped, calling this function will err.
     pub fn update<'a>(
         &self,
         lighting: &Lighting,
         renderlets: impl IntoIterator<Item = &'a Hybrid<Renderlet>>,
     ) -> Result<(), LightingError> {
+        let light_bundle = self
+            .light_bundle
+            .upgrade()
+            .context(DroppedAnalyticalLightBundleSnafu)?;
+        let shadow_desc = self.shadowmap_descriptor.get();
+        let new_transforms =
+            light_bundle.light_space_transforms(shadow_desc.z_near, shadow_desc.z_far);
+        for (i, t) in (0..self.light_space_transforms.len()).zip(new_transforms) {
+            self.light_space_transforms.set_item(i, t);
+        }
         if lighting.geometry_slab.has_queued_updates() {
             lighting.geometry_slab.commit();
         }
@@ -261,79 +359,6 @@ impl ShadowMap {
             device.poll(wgpu::Maintain::wait_for(submission));
         }
         Ok(())
-    }
-
-    /// Enable shadow mapping for the given [`AnalyticalLightBundle`], creating
-    /// a new [`ShadowMap`].
-    pub fn new(
-        lighting: &Lighting,
-        analytical_light_bundle: &AnalyticalLightBundle,
-        // Size of the shadow map
-        size: UVec2,
-        // Distance to the shadow map frustum's near plane
-        z_near: f32,
-        // Distance to the shadow map frustum's far plane
-        z_far: f32,
-    ) -> Result<Self, LightingError> {
-        let stage_slab_buffer = lighting.geometry_slab_buffer.read().unwrap();
-        let is_point_light =
-            analytical_light_bundle.light_details.style() == super::LightStyle::Point;
-        let count = if is_point_light { 6 } else { 1 };
-        let atlas = &lighting.shadow_map_atlas;
-        let image = AtlasImage::new(size, crate::atlas::AtlasImageFormat::R32FLOAT);
-        // UNWRAP: safe because we know there's one in here
-        let atlas_textures = atlas.add_images(vec![&image; count])?;
-        let atlas_len = atlas.len();
-        // Regardless of light type, we only create one depth texture,
-        // but that texture may be of layer 1 or 6
-        let label = format!("shadow-map-{atlas_len}");
-        let update_texture = crate::texture::Texture::create_depth_texture_for_shadow_map(
-            atlas.device(),
-            size.x,
-            size.y,
-            1,
-            Some(&label),
-            is_point_light,
-        );
-        let atlas_textures_array = lighting
-            .light_slab
-            .new_array(atlas_textures.iter().map(|t| t.id()));
-        let blitting_op = lighting
-            .shadow_map_update_blitter
-            .new_blitting_operation(atlas, if is_point_light { 6 } else { 1 });
-        let light_space_transforms = lighting
-            .light_slab
-            .new_array(analytical_light_bundle.light_space_transforms(z_near, z_far));
-        let shadowmap_descriptor = lighting.light_slab.new_value(ShadowMapDescriptor {
-            light_space_transforms_array: light_space_transforms.array(),
-            atlas_textures_array: atlas_textures_array.array(),
-            bias_min: 0.0005,
-            bias_max: 0.005,
-            pcf_samples: 4,
-        });
-        // Set the descriptor in the light, so the shader knows to use it
-        analytical_light_bundle.light.modify(|light| {
-            light.shadow_map_desc_id = shadowmap_descriptor.id();
-        });
-        let light_slab_buffer = lighting.light_slab.commit();
-        let update_bindgroup = ManagedBindGroup::from(ShadowMap::create_update_bindgroup(
-            lighting.light_slab.device(),
-            &lighting.shadow_map_update_bindgroup_layout,
-            stage_slab_buffer.deref(),
-            &light_slab_buffer,
-        ));
-
-        Ok(ShadowMap {
-            stage_slab_buffer_creation_time: Arc::new(stage_slab_buffer.creation_time().into()),
-            light_slab_buffer_creation_time: Arc::new(light_slab_buffer.creation_time().into()),
-            shadowmap_descriptor,
-            light_space_transforms,
-            update_bindgroup,
-            atlas_textures,
-            atlas_textures_array,
-            update_texture,
-            blitting_op,
-        })
     }
 }
 
@@ -651,7 +676,7 @@ mod test {
                     let frame = ctx.get_next_frame().unwrap();
                     stage.render(&frame.view());
                     let img = frame.read_image().unwrap();
-                    img_diff::save(
+                    img_diff::assert_img_eq(
                         &format!("shadows/shadow_mapping_points/light_{i}_pov_{j}.png"),
                         img,
                     );
@@ -663,23 +688,21 @@ mod test {
                 .new_shadow_map(light_bundle, UVec2::splat(256), z_near, z_far)
                 .unwrap();
             shadow.shadowmap_descriptor.modify(|desc| {
-                desc.bias_min = f32::EPSILON;
-                desc.bias_max = f32::EPSILON;
+                desc.pcf_samples = 16;
+                desc.bias_min = 0.00010;
+                desc.bias_max = 0.010;
             });
             shadow
                 .update(stage.lighting(), doc.renderlets_iter())
                 .unwrap();
             shadows.push(shadow);
         }
+        camera.set(c);
 
         let frame = ctx.get_next_frame().unwrap();
-        crate::test::capture_gpu_frame(
-            &ctx,
-            "shadows/shadow_mapping_points/frame.gputrace",
-            || stage.render(&frame.view()),
-        );
+        stage.render(&frame.view());
         let img = frame.read_image().unwrap();
-        img_diff::save("shadows/shadow_mapping_points/frame.png", img);
+        img_diff::assert_img_eq("shadows/shadow_mapping_points/frame.png", img);
         frame.present();
     }
 }

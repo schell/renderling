@@ -435,6 +435,14 @@ impl Atlas {
         let buffer = self.atlas_img_buffer(runtime, layer);
         buffer.into_linear_rgba(&runtime.device).unwrap()
     }
+
+    pub fn read_images(&self, runtime: impl AsRef<WgpuRuntime>) -> Vec<RgbaImage> {
+        let mut images = vec![];
+        for i in 0..self.layers.read().unwrap().len() {
+            images.push(self.atlas_img(runtime.as_ref(), i as u32));
+        }
+        images
+    }
 }
 
 fn pack_images<'a>(

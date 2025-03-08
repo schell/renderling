@@ -609,7 +609,7 @@ where
         let transform = Mat4::from(transform);
 
         // determine the light ray and the radiance
-        match light.light_type {
+        let (radiance, shadow) = match light.light_type {
             LightStyle::Point => {
                 let PointLightDescriptor {
                     position,
@@ -624,7 +624,21 @@ where
                 }
                 let l = frag_to_light.alt_norm_or_zero();
                 let attenuation = intensity * 1.0 / (distance * distance);
-                lo += outgoing_radiance(color, albedo, attenuation, v, l, n, metallic, roughness);
+                let radiance =
+                    outgoing_radiance(color, albedo, attenuation, v, l, n, metallic, roughness);
+                let shadow = if light.shadow_map_desc_id.is_some() {
+                    // Shadow is 1.0 when the fragment is in the shadow of this light,
+                    // and 0.0 in darkness
+                    ShadowCalculation::new(light_slab, light, in_pos, n, l).run_point(
+                        light_slab,
+                        shadow_map,
+                        shadow_map_sampler,
+                        position,
+                    )
+                } else {
+                    0.0
+                };
+                (radiance, shadow)
             }
 
             LightStyle::Spot => {
@@ -649,11 +663,11 @@ where
                     // Shadow is 1.0 when the fragment is in the shadow of this light,
                     // and 0.0 in darkness
                     ShadowCalculation::new(light_slab, light, in_pos, n, calculation.frag_to_light)
-                        .run(shadow_map, shadow_map_sampler)
+                        .run_directional_or_spot(light_slab, shadow_map, shadow_map_sampler)
                 } else {
                     0.0
                 };
-                lo += radiance * (1.0 - shadow);
+                (radiance, shadow)
             }
 
             LightStyle::Directional => {
@@ -667,19 +681,19 @@ where
                 let attenuation = intensity;
                 let radiance =
                     outgoing_radiance(color, albedo, attenuation, v, l, n, metallic, roughness);
-                my_println!("radiance: {radiance:?}");
-
-                let shadow = if light.shadow_map_desc_id.is_some() {
-                    // Shadow is 1.0 when the fragment is in the shadow of this light,
-                    // and 0.0 in darkness
-                    ShadowCalculation::new(light_slab, light, in_pos, n, l)
-                        .run(shadow_map, shadow_map_sampler)
-                } else {
-                    0.0
-                };
-                lo += radiance * (1.0 - shadow);
+                let shadow =
+                    if light.shadow_map_desc_id.is_some() {
+                        // Shadow is 1.0 when the fragment is in the shadow of this light,
+                        // and 0.0 in darkness
+                        ShadowCalculation::new(light_slab, light, in_pos, n, l)
+                            .run_directional_or_spot(light_slab, shadow_map, shadow_map_sampler)
+                    } else {
+                        0.0
+                    };
+                (radiance, shadow)
             }
-        }
+        };
+        lo += radiance * (1.0 - shadow);
     }
 
     my_println!("lo: {lo:?}");

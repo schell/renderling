@@ -24,9 +24,13 @@ use super::{
 pub use super::shadow_map::ShadowMap;
 
 #[derive(Debug, Snafu)]
+#[snafu(visibility(pub(crate)))]
 pub enum LightingError {
     #[snafu(display("{source}"))]
     Atlas { source: AtlasError },
+
+    #[snafu(display("AnalyticalLightBundle attached to this ShadowMap was dropped"))]
+    DroppedAnalyticalLightBundle,
 }
 
 impl From<AtlasError> for LightingError {
@@ -96,12 +100,20 @@ impl<C: IsContainer> LightDetails<C> {
 }
 
 impl LightDetails<WeakContainer> {
-    pub fn from_hybrid(hybrid: &LightDetails<HybridContainer>) -> Self {
+    pub(crate) fn from_hybrid(hybrid: &LightDetails<HybridContainer>) -> Self {
         match hybrid {
             LightDetails::Directional(d) => LightDetails::Directional(WeakHybrid::from_hybrid(d)),
             LightDetails::Point(p) => LightDetails::Point(WeakHybrid::from_hybrid(p)),
             LightDetails::Spot(s) => LightDetails::Spot(WeakHybrid::from_hybrid(s)),
         }
+    }
+
+    pub(crate) fn upgrade(&self) -> Option<LightDetails> {
+        Some(match self {
+            LightDetails::Directional(d) => LightDetails::Directional(d.upgrade()?),
+            LightDetails::Point(p) => LightDetails::Point(p.upgrade()?),
+            LightDetails::Spot(s) => LightDetails::Spot(s.upgrade()?),
+        })
     }
 }
 
@@ -115,17 +127,44 @@ pub struct AnalyticalLightBundle<Ct: IsContainer = HybridContainer> {
     pub transform: NestedTransform<Ct>,
 }
 
+impl<Ct: IsContainer> Clone for AnalyticalLightBundle<Ct>
+where
+    Ct::Container<Light>: Clone,
+    LightDetails<Ct>: Clone,
+    NestedTransform<Ct>: Clone,
+{
+    fn clone(&self) -> Self {
+        Self {
+            light: self.light.clone(),
+            light_details: self.light_details.clone(),
+            transform: self.transform.clone(),
+        }
+    }
+}
+
 impl AnalyticalLightBundle<WeakContainer> {
-    fn from_hybrid(light: &AnalyticalLightBundle) -> Self {
+    pub(crate) fn from_hybrid(light: &AnalyticalLightBundle) -> Self {
         AnalyticalLightBundle {
             light: WeakHybrid::from_hybrid(&light.light),
             light_details: LightDetails::from_hybrid(&light.light_details),
             transform: NestedTransform::from_hybrid(&light.transform),
         }
     }
+
+    pub(crate) fn upgrade(&self) -> Option<AnalyticalLightBundle> {
+        Some(AnalyticalLightBundle {
+            light: self.light.upgrade()?,
+            light_details: self.light_details.upgrade()?,
+            transform: self.transform.upgrade()?,
+        })
+    }
 }
 
 impl AnalyticalLightBundle {
+    pub fn weak(&self) -> AnalyticalLightBundle<WeakContainer> {
+        AnalyticalLightBundle::from_hybrid(self)
+    }
+
     pub fn light_space_transforms(&self, z_near: f32, z_far: f32) -> Vec<Mat4> {
         let t = self.transform.get();
         let m = Mat4::from(t);

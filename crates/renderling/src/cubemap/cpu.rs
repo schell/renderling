@@ -10,7 +10,7 @@ use crate::{
     texture::Texture,
 };
 
-use super::CubemapDescriptor;
+use super::{CubemapDescriptor, CubemapFaceDirection};
 
 pub fn cpu_sample_cubemap(cubemap: &[image::DynamicImage; 6], coord: Vec3) -> Vec4 {
     let coord = coord.normalize_or(Vec3::X);
@@ -34,76 +34,6 @@ pub fn cpu_sample_cubemap(cubemap: &[image::DynamicImage; 6], coord: Vec3) -> Ve
         b as f32 / 255.0,
         a as f32 / 255.0,
     )
-}
-
-/// Represents one side of a cubemap.
-///
-/// Assumes the camera is at the origin.
-pub struct CubemapFaceDirection {
-    /// Where is the camera
-    pub dir: Vec3,
-    /// Which direction is up
-    pub up: Vec3,
-    /// Which direct is right
-    pub right: Vec3,
-}
-
-impl CubemapFaceDirection {
-    pub const X: Self = Self {
-        dir: Vec3::X,
-        up: Vec3::NEG_Y,
-        right: Vec3::NEG_Z,
-    };
-    pub const NEG_X: Self = Self {
-        dir: Vec3::NEG_X,
-        up: Vec3::NEG_Y,
-        right: Vec3::Z,
-    };
-    pub const NEG_Y: Self = Self {
-        dir: Vec3::NEG_Y,
-        up: Vec3::NEG_Z,
-        right: Vec3::X,
-    };
-    pub const Y: Self = Self {
-        dir: Vec3::Y,
-        up: Vec3::Z,
-        right: Vec3::X,
-    };
-    pub const Z: Self = Self {
-        dir: Vec3::Z,
-        up: Vec3::NEG_Y,
-        right: Vec3::X,
-    };
-    pub const NEG_Z: Self = Self {
-        dir: Vec3::NEG_Z,
-        up: Vec3::NEG_Y,
-        right: Vec3::NEG_X,
-    };
-    pub const FACES: [Self; 6] = [
-        CubemapFaceDirection::X,
-        CubemapFaceDirection::NEG_X,
-        CubemapFaceDirection::NEG_Y,
-        CubemapFaceDirection::Y,
-        CubemapFaceDirection::Z,
-        CubemapFaceDirection::NEG_Z,
-    ];
-
-    pub fn view(&self) -> Mat4 {
-        Mat4::look_at_rh(Vec3::ZERO, self.dir, self.up)
-    }
-
-    pub fn to_corners_tr_tl_br_bl(self) -> [Vec3; 4] {
-        let tr = self.dir + self.up + self.right;
-        let tl = self.dir + self.up - self.right;
-        let br = self.dir - self.up + self.right;
-        let bl = self.dir - self.up - self.right;
-        [tr, tl, br, bl]
-    }
-
-    pub fn to_tri_list(self) -> [Vec3; 6] {
-        let [tr, tl, br, bl] = self.to_corners_tr_tl_br_bl();
-        [tr, tl, bl, tr, bl, br]
-    }
 }
 
 /// A cubemap that acts as a render target for an entire scene.
@@ -175,7 +105,7 @@ impl SceneCubemap {
         // faces align correctly to each other at the edges.
         let fovy = std::f32::consts::FRAC_PI_2;
         let aspect = self.cubemap_texture.width() as f32 / self.cubemap_texture.height() as f32;
-        let projection = Mat4::perspective_rh(fovy, aspect, 1.0, 25.0);
+        let projection = Mat4::perspective_lh(fovy, aspect, 1.0, 25.0);
         // Render each face by rendering the scene from each camera angle into the cubemap
         for (i, face) in CubemapFaceDirection::FACES.iter().enumerate() {
             // Update the camera angle, no need to sync as calling `Stage::render` does this
@@ -339,62 +269,16 @@ impl EquirectangularImageToCubemapBlitter {
 
 #[cfg(test)]
 mod test {
-    use core::fmt::Debug;
-
-    use assert_approx_eq::assert_approx_eq;
     use craballoc::slab::SlabAllocator;
-    use glam::{Quat, Vec2, Vec4};
+    use glam::Vec4;
     use image::GenericImageView;
 
     use crate::{
-        atlas::{Atlas, AtlasImage},
         math::{UNIT_INDICES, UNIT_POINTS},
         stage::{Renderlet, Vertex},
     };
 
     use super::*;
-
-    #[test]
-    fn cubemap_face_views() {
-        // This tests that the cubemap faces `views` make a valid cubemap.
-
-        // We got this array from the original skybox code, which we know makes
-        // valid cubemaps.
-        let skybox_views = [
-            Mat4::look_at_rh(
-                Vec3::new(0.0, 0.0, 0.0),
-                Vec3::new(1.0, 0.0, 0.0),
-                Vec3::new(0.0, -1.0, 0.0),
-            ),
-            Mat4::look_at_rh(
-                Vec3::new(0.0, 0.0, 0.0),
-                Vec3::new(-1.0, 0.0, 0.0),
-                Vec3::new(0.0, -1.0, 0.0),
-            ),
-            Mat4::look_at_rh(
-                Vec3::new(0.0, 0.0, 0.0),
-                Vec3::new(0.0, -1.0, 0.0),
-                Vec3::new(0.0, 0.0, -1.0),
-            ),
-            Mat4::look_at_rh(
-                Vec3::new(0.0, 0.0, 0.0),
-                Vec3::new(0.0, 1.0, 0.0),
-                Vec3::new(0.0, 0.0, 1.0),
-            ),
-            Mat4::look_at_rh(
-                Vec3::new(0.0, 0.0, 0.0),
-                Vec3::new(0.0, 0.0, 1.0),
-                Vec3::new(0.0, -1.0, 0.0),
-            ),
-            Mat4::look_at_rh(
-                Vec3::new(0.0, 0.0, 0.0),
-                Vec3::new(0.0, 0.0, -1.0),
-                Vec3::new(0.0, -1.0, 0.0),
-            ),
-        ];
-        let views = CubemapFaceDirection::FACES.map(|f| f.view());
-        assert_eq!(skybox_views, views);
-    }
 
     #[test]
     fn hand_rolled_cubemap_sampling() {
@@ -417,8 +301,7 @@ mod test {
                 // multiply by 2.0 because the unit cube's AABB bounds are at 0.5, and we want 1.0
                 .with_position(unit_cube_point * 2.0)
                 // "normalize" (really "shift") the space coord from [-0.5, 0.5] to [0.0, 1.0]
-                // ...but flip y
-                .with_color((unit_cube_point * Vec3::new(1.0, -1.0, 1.0) + 0.5).extend(1.0))
+                .with_color((unit_cube_point + 0.5).extend(1.0))
         }));
         let indices = stage.new_array(UNIT_INDICES.map(|u| u as u32));
         let renderlet = stage.new_value(Renderlet {
@@ -439,13 +322,9 @@ mod test {
         scene_cubemap.run(&stage);
 
         let frame = ctx.get_next_frame().unwrap();
-        crate::test::capture_gpu_frame(
-            &ctx,
-            "cubemap/hand_rolled_cubemap_sampling/frame.gputrace",
-            || stage.render(&frame.view()),
-        );
+        stage.render(&frame.view());
         let img = frame.read_image().unwrap();
-        img_diff::save("cubemap/hand_rolled_cubemap_sampling/cube.png", img);
+        img_diff::assert_img_eq("cubemap/hand_rolled_cubemap_sampling/cube.png", img);
         frame.present();
 
         let slab = SlabAllocator::new(&ctx, wgpu::BufferUsages::empty());
@@ -652,7 +531,7 @@ mod test {
             .into_image::<u8, image::Rgba<u8>>(ctx.get_device())
             .unwrap();
 
-            img_diff::save(
+            img_diff::assert_img_eq(
                 &format!(
                     "cubemap/hand_rolled_cubemap_sampling/face_{}.png",
                     index_to_face_string(i as usize)
@@ -709,21 +588,40 @@ mod test {
             }
         }
 
+        // add in some deterministic pseudo-randomn points
+        {
+            let order = acorn_prng::Order::new(666);
+            let seed = acorn_prng::Seed::new(1_000_000);
+            let mut prng = acorn_prng::Acorn::new(order, seed);
+            let mut rf32 = move || {
+                let u = prng.generate_u32_between_range(0..=u32::MAX);
+                f32::from_bits(u)
+            };
+            let mut rxvec3 = { || Vec3::new(f32::MAX, rf32(), rf32()).normalize_or(Vec3::X) };
+            // let mut rvec3 = || Vec3::new(rf32(), rf32(), rf32());
+            uvs.extend((0..20).map(|_| rxvec3()));
+        }
+
         // add zero
         uvs.push(Vec3::ZERO);
 
         const THRESHOLD: f32 = 0.005;
         for uv in uvs.into_iter() {
+            let nuv = uv.normalize_or(Vec3::X);
             let color = sample(uv);
             let (face_index, uv2d) =
                 CubemapDescriptor::get_face_index_and_uv(uv.normalize_or(Vec3::X));
+            let px = (uv2d.x * (width as f32 - 1.0)).round() as u32;
+            let py = (uv2d.y * (height as f32 - 1.0)).round() as u32;
+            let puv = UVec2::new(px, py);
             let cpu_color = cpu_sample_cubemap(&cpu_cubemap, uv);
             let dir_string = index_to_face_string(face_index);
             println!(
                 "__uv: {uv},\n\
+                 _nuv: {nuv},\n\
                  _gpu: {color}\n\
                  _cpu: {cpu_color}\n\
-                 from: {dir_string}({face_index}) {uv2d}\n"
+                 from: {dir_string}({face_index}) {uv2d} {puv}\n"
             );
             let cmp = pretty_assertions::Comparison::new(&color, &cpu_color);
             let distance = color.distance(cpu_color);

@@ -145,6 +145,7 @@ mod cpu {
             // TODO: use configurable wrap mode on CPU sampling
             let px = uv.x.clamp(0.0, 1.0) * self.image.width() as f32;
             let py = uv.y.clamp(0.0, 1.0) * self.image.height() as f32;
+            println!("sampling: ({px}, {py})");
             let p = self.image.get_pixel(
                 px.round().min(self.image.width() as f32) as u32,
                 py.round().min(self.image.height() as f32) as u32,
@@ -180,12 +181,10 @@ mod cpu {
             // TODO: lerp the CPU texture sampling
             // TODO: use configurable wrap mode on CPU sampling
             let img = &self.images[uv.z as usize];
-            let px = uv.x.clamp(0.0, 1.0) * img.width() as f32;
-            let py = uv.y.clamp(0.0, 1.0) * img.height() as f32;
-            let p = img.get_pixel(
-                px.round().min(img.width() as f32) as u32,
-                py.round().min(img.height() as f32) as u32,
-            );
+            let px = (uv.x.clamp(0.0, 1.0) * (img.width() as f32 - 1.0)).round() as u32;
+            let py = (uv.y.clamp(0.0, 1.0) * (img.height() as f32 - 1.0)).round() as u32;
+            println!("sampling: ({px}, {py})");
+            let p = img.get_pixel(px, py);
             (self.convert_fn)(p)
         }
     }
@@ -578,11 +577,6 @@ pub fn reflect(i: Vec3, n: Vec3) -> Vec3 {
 
 pub fn is_inside_clip_space(p: Vec3) -> bool {
     p.x.abs() <= 1.0 && p.y.abs() <= 1.0 && p.z.abs() <= 1.0
-}
-
-pub struct Plane {
-    pub point: Vec3,
-    pub norm: Vec3,
 }
 
 pub const fn convex_mesh([p0, p1, p2, p3, p4, p5, p6, p7]: [Vec3; 8]) -> [Vec3; 36] {
