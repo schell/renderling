@@ -261,7 +261,7 @@ fn function() {
     return;
 }
 
-@compute @workgroup_size(32, 32, 1) 
+@compute @workgroup_size(16, 16, 1) 
 fn cullcompute_downsample_depth_pyramid(@builtin(global_invocation_id) param: vec3<u32>) {
     global = param;
     function();

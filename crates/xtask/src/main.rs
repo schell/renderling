@@ -27,13 +27,16 @@ fn main() {
 
             log::info!("Calling `cargo gpu {}", paths.renderling_crate.display());
 
-            std::process::Command::new("cargo")
+            let output = std::process::Command::new("cargo")
                 .args(["gpu", "build", "--shader-crate"])
                 .arg(&paths.renderling_crate)
                 .stdout(std::process::Stdio::inherit())
                 .stderr(std::process::Stdio::inherit())
                 .output()
                 .unwrap();
+            if !output.status.success() {
+                panic!("Building shaders failed :(");
+            }
         }
         Command::GenerateLinkage => {
             log::info!("Generating linkage for shaders");

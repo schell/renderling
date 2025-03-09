@@ -1052,12 +1052,6 @@ dependencies = [
 
 [[package]]
 name = "fixedbitset"
-version = "0.4.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0ce7134b9999ecaf8bcd65542e436736ef32ddca1b3e06094cb6ec5755203b80"
-
-[[package]]
-name = "fixedbitset"
 version = "0.5.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1d674e81391d1e1ab681a28d99df07927c6d4aa5b027d7da16ba32d1d21ecd99"
@@ -1846,27 +1840,6 @@ dependencies = [
 
 [[package]]
 name = "naga"
-version = "23.0.0"
-source = "git+https://github.com/gfx-rs/wgpu.git?rev=959c2db0bc2a303b25ec27f1557ccc8377f8139a#959c2db0bc2a303b25ec27f1557ccc8377f8139a"
-dependencies = [
- "arrayvec",
- "bit-set",
- "bitflags 2.8.0",
- "cfg_aliases",
- "codespan-reporting",
- "hexf-parse",
- "indexmap",
- "log",
- "petgraph 0.6.5",
- "rustc-hash 1.1.0",
- "spirv",
- "termcolor",
- "thiserror 2.0.11",
- "unicode-xid",
-]
-
-[[package]]
-name = "naga"
 version = "24.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e380993072e52eef724eddfcde0ed013b0c023c3f0417336ed041aa9f076994e"
@@ -1879,7 +1852,7 @@ dependencies = [
  "hexf-parse",
  "indexmap",
  "log",
- "petgraph 0.7.1",
+ "petgraph",
  "rustc-hash 1.1.0",
  "spirv",
  "strum",
@@ -2315,21 +2288,11 @@ checksum = "e3148f5046208a5d56bcfc03053e3ca6334e51da8dfb19b6cdc8b306fae3283e"
 
 [[package]]
 name = "petgraph"
-version = "0.6.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b4c5cc86750666a3ed20bdaf5ca2a0344f9c67674cae0515bec2da16fbaa47db"
-dependencies = [
- "fixedbitset 0.4.2",
- "indexmap",
-]
-
-[[package]]
-name = "petgraph"
 version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3672b37090dbd86368a4145bc067582552b29c27377cad4e0a306c97f9bd7772"
 dependencies = [
- "fixedbitset 0.5.7",
+ "fixedbitset",
  "indexmap",
 ]
 
@@ -2805,7 +2768,7 @@ dependencies = [
  "img-diff",
  "log",
  "metal",
- "naga 23.0.0",
+ "naga",
  "pathdiff",
  "pretty_assertions",
  "quote",
@@ -2826,7 +2789,7 @@ name = "renderling_build"
 version = "0.1.0"
 dependencies = [
  "log",
- "naga 23.0.0",
+ "naga",
  "quote",
  "serde",
  "serde_json",
@@ -3121,7 +3084,7 @@ dependencies = [
 [[package]]
 name = "spirv-std"
 version = "0.9.0"
-source = "git+https://github.com/Rust-GPU/rust-gpu?rev=562dff9176f63b318e9b34620ffacb8aa89dae9a#562dff9176f63b318e9b34620ffacb8aa89dae9a"
+source = "git+https://github.com/Rust-GPU/rust-gpu?rev=6e2c84d#6e2c84d4fe64e32df4c060c5a7f3e35a32e45421"
 dependencies = [
  "bitflags 1.3.2",
  "glam",
@@ -3133,7 +3096,7 @@ dependencies = [
 [[package]]
 name = "spirv-std-macros"
 version = "0.9.0"
-source = "git+https://github.com/Rust-GPU/rust-gpu?rev=562dff9176f63b318e9b34620ffacb8aa89dae9a#562dff9176f63b318e9b34620ffacb8aa89dae9a"
+source = "git+https://github.com/Rust-GPU/rust-gpu?rev=6e2c84d#6e2c84d4fe64e32df4c060c5a7f3e35a32e45421"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3144,7 +3107,7 @@ dependencies = [
 [[package]]
 name = "spirv-std-types"
 version = "0.9.0"
-source = "git+https://github.com/Rust-GPU/rust-gpu?rev=562dff9176f63b318e9b34620ffacb8aa89dae9a#562dff9176f63b318e9b34620ffacb8aa89dae9a"
+source = "git+https://github.com/Rust-GPU/rust-gpu?rev=6e2c84d#6e2c84d4fe64e32df4c060c5a7f3e35a32e45421"
 
 [[package]]
 name = "static_assertions"
@@ -3742,7 +3705,7 @@ dependencies = [
  "document-features",
  "js-sys",
  "log",
- "naga 24.0.0",
+ "naga",
  "parking_lot",
  "profiling",
  "raw-window-handle",
@@ -3770,7 +3733,7 @@ dependencies = [
  "document-features",
  "indexmap",
  "log",
- "naga 24.0.0",
+ "naga",
  "once_cell",
  "parking_lot",
  "profiling",
@@ -3808,7 +3771,7 @@ dependencies = [
  "libloading",
  "log",
  "metal",
- "naga 24.0.0",
+ "naga",
  "ndk-sys 0.5.0+25.2.9519653",
  "objc",
  "once_cell",

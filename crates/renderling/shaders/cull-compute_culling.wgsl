@@ -857,7 +857,7 @@ fn function() {
     return;
 }
 
-@compute @workgroup_size(32, 1, 1) 
+@compute @workgroup_size(16, 1, 1) 
 fn cullcompute_culling(@builtin(global_invocation_id) param: vec3<u32>) {
     global_3 = param;
     function();
