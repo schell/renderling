@@ -209,7 +209,7 @@ impl ComputeCulling {
             });
             compute_pass.set_pipeline(&self.pipeline);
             compute_pass.set_bind_group(0, Some(bindgroup.as_ref()), &[]);
-            compute_pass.dispatch_workgroups(indirect_draw_count / 32 + 1, 1, 1);
+            compute_pass.dispatch_workgroups(indirect_draw_count / 16 + 1, 1, 1);
         }
         runtime.queue.submit(Some(encoder.finish()));
     }
@@ -496,8 +496,8 @@ impl ComputeCopyDepth {
             });
             compute_pass.set_pipeline(&self.pipeline);
             compute_pass.set_bind_group(0, Some(bindgroup.as_ref()), &[]);
-            let x = size.x / 32 + 1;
-            let y = size.y / 32 + 1;
+            let x = size.x / 16 + 1;
+            let y = size.y / 16 + 1;
             let z = 1;
             compute_pass.dispatch_workgroups(x, y, z);
         }
@@ -620,8 +620,8 @@ impl ComputeDownsampleDepth {
                 compute_pass.set_bind_group(0, Some(&self.bindgroup), &[]);
                 let w = size.x >> i;
                 let h = size.y >> i;
-                let x = w / 32 + 1;
-                let y = h / 32 + 1;
+                let x = w / 16 + 1;
+                let y = h / 16 + 1;
                 let z = 1;
                 compute_pass.dispatch_workgroups(x, y, z);
             }
