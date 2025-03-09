@@ -10,7 +10,7 @@ on:
 env:
   # For setup-rust, see https://github.com/moonrepo/setup-rust/issues/22
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  CARGO_GPU_COMMITSH: 94e832185b8a4ee437d5d614fb929006ab69ce1e
+  CARGO_GPU_COMMITSH: adab62777abc06eb0e93518f480c70f6e5d816fe
 
 jobs:
   # Installs cargo deps and sets the cache directory for subsequent jobs
