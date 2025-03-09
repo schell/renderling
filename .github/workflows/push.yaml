@@ -17,7 +17,7 @@ jobs:
   install-cargo-gpu:
     strategy:
       matrix: 
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-latest, macos-latest, windows-2025]
     runs-on: ${{ matrix.os }}
     defaults:
       run: 
