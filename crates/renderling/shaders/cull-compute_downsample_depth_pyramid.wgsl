@@ -1,4 +1,4 @@
-struct type_4 {
+struct type_2 {
     member: array<u32>,
 }
 
@@ -9,7 +9,7 @@ struct type_7 {
 
 var<private> global: vec3<u32>;
 @group(0) @binding(0) 
-var<storage, read_write> global_1: type_4;
+var<storage, read_write> global_1: type_2;
 
 fn function() {
     var phi_504_: bool;
@@ -261,7 +261,7 @@ fn function() {
     return;
 }
 
-@compute @workgroup_size(32, 32, 1) 
+@compute @workgroup_size(16, 16, 1) 
 fn cullcompute_downsample_depth_pyramid(@builtin(global_invocation_id) param: vec3<u32>) {
     global = param;
     function();

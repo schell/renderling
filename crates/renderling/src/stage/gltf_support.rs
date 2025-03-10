@@ -10,10 +10,11 @@ use snafu::{OptionExt, ResultExt, Snafu};
 use crate::{
     atlas::{AtlasError, AtlasImage, AtlasTexture, TextureAddressMode, TextureModes},
     camera::Camera,
-    pbr::{
-        light::{DirectionalLight, Light, LightStyle, PointLight, SpotLight},
-        Material,
+    light::{
+        AnalyticalLightBundle, DirectionalLightDescriptor, LightStyle, PointLightDescriptor,
+        SpotLightDescriptor,
     },
+    pbr::Material,
     stage::{MorphTarget, NestedTransform, Renderlet, Skin, Stage, Vertex},
     transform::Transform,
 };
@@ -93,6 +94,17 @@ impl From<gltf::Error> for StageGltfError {
 impl From<AtlasError> for StageGltfError {
     fn from(source: AtlasError) -> Self {
         Self::Atlas { source }
+    }
+}
+
+impl From<gltf::scene::Transform> for Transform {
+    fn from(transform: gltf::scene::Transform) -> Self {
+        let (translation, rotation, scale) = transform.decomposed();
+        Transform {
+            translation: Vec3::from_array(translation),
+            rotation: Quat::from_array(rotation),
+            scale: Vec3::from_array(scale),
+        }
     }
 }
 
@@ -598,6 +610,8 @@ pub struct GltfCamera {
 
 impl GltfCamera {
     fn new(stage: &mut Stage, gltf_camera: gltf::Camera<'_>, transform: &NestedTransform) -> Self {
+        log::debug!("camera: {}", gltf_camera.name().unwrap_or("unknown"));
+        log::debug!("  transform: {:#?}", transform.get_global_transform());
         let projection = match gltf_camera.projection() {
             gltf::camera::Projection::Orthographic(o) => glam::Mat4::orthographic_rh(
                 -o.xmag(),
@@ -636,20 +650,6 @@ impl GltfCamera {
         let view = Mat4::from(self.node_transform.get_global_transform()).inverse();
         Camera::new(self.projection, view)
     }
-}
-
-#[derive(Clone, Debug)]
-pub enum LightDetails {
-    Directional(Hybrid<DirectionalLight>),
-    Point(Hybrid<PointLight>),
-    Spot(Hybrid<SpotLight>),
-}
-
-#[derive(Debug)]
-pub struct GltfLight {
-    pub details: LightDetails,
-    pub node_transform: NestedTransform,
-    pub light: Hybrid<Light>,
 }
 
 /// A node in a GLTF document, ready to be 'drawn'.
@@ -759,7 +759,7 @@ impl GltfSkin {
     }
 }
 
-#[derive(Debug)]
+/// A loaded GLTF document.
 pub struct GltfDocument {
     pub animations: Vec<Animation>,
     pub cameras: Vec<GltfCamera>,
@@ -767,7 +767,7 @@ pub struct GltfDocument {
     pub default_scene: Option<usize>,
     pub extensions: Option<serde_json::Value>,
     pub textures: Vec<Hybrid<AtlasTexture>>,
-    pub lights: Vec<GltfLight>,
+    pub lights: Vec<AnalyticalLightBundle>,
     pub meshes: Vec<GltfMesh>,
     pub nodes: Vec<GltfNode>,
     pub materials: HybridArray<Material>,
@@ -908,13 +908,7 @@ impl GltfDocument {
                 nt.clone()
             } else {
                 let transform = stage.new_nested_transform();
-                let (translation, rotation, scale) = &node.transform().decomposed();
-                let t = Transform {
-                    translation: Vec3::from_array(*translation),
-                    rotation: Quat::from_array(*rotation),
-                    scale: Vec3::from_array(*scale),
-                };
-                transform.set(t);
+                transform.set(node.transform().into());
                 for node in node.children() {
                     let child_transform =
                         transform_for_node(nesting_level + 1, stage, cache, &node);
@@ -993,7 +987,7 @@ impl GltfDocument {
                         index: camera_index,
                     })?;
             let transform = node_transforms
-                .get(&camera_index)
+                .get(&node_index)
                 .context(MissingNodeSnafu { index: node_index })?;
             cameras.push(GltfCamera::new(stage, camera, transform));
         }
@@ -1002,58 +996,71 @@ impl GltfDocument {
         let mut lights = vec![];
         if let Some(gltf_lights) = document.lights() {
             for gltf_light in gltf_lights {
-                let color = Vec3::from(gltf_light.color()).extend(1.0);
-                let intensity = gltf_light.intensity();
-                let (mut light, details): (Light, _) = match gltf_light.kind() {
-                    gltf::khr_lights_punctual::Kind::Directional => {
-                        let light = stage.new_value(DirectionalLight {
-                            direction: Vec3::NEG_Z,
-                            color,
-                            intensity,
-                        });
-
-                        (light.id().into(), LightDetails::Directional(light))
-                    }
-                    gltf::khr_lights_punctual::Kind::Point => {
-                        let light = stage.new_value(PointLight {
-                            position: Vec3::ZERO,
-                            color,
-                            intensity,
-                        });
-                        (light.id().into(), LightDetails::Point(light))
-                    }
-                    gltf::khr_lights_punctual::Kind::Spot {
-                        inner_cone_angle,
-                        outer_cone_angle,
-                    } => {
-                        let light = stage.new_value(SpotLight {
-                            position: Vec3::ZERO,
-                            direction: Vec3::NEG_Z,
-                            inner_cutoff: inner_cone_angle,
-                            outer_cutoff: outer_cone_angle,
-                            color,
-                            intensity,
-                        });
-                        (light.id().into(), LightDetails::Spot(light))
-                    }
-                };
                 let node_index = *light_index_to_node_index.get(&gltf_light.index()).context(
                     MissingCameraSnafu {
                         index: gltf_light.index(),
                     },
                 )?;
-                let node_transform = node_transforms
+
+                let mut node_transform = node_transforms
                     .get(&node_index)
                     .context(MissingNodeSnafu { index: node_index })?
                     .clone();
-                light.transform = node_transform.global_transform_id();
+                node_transform.move_gpu_to_slab(stage.lighting().slab());
 
-                let light = stage.new_value(light);
-                lights.push(GltfLight {
-                    details,
-                    node_transform,
-                    light,
-                });
+                let color = Vec3::from(gltf_light.color()).extend(1.0);
+                let intensity = gltf_light.intensity();
+                let light_bundle = match gltf_light.kind() {
+                    gltf::khr_lights_punctual::Kind::Directional => {
+                        stage.lighting().new_analytical_light(
+                            DirectionalLightDescriptor {
+                                direction: Vec3::NEG_Z,
+                                color,
+                                // TODO: Set a unit for lighting.
+                                // We don't yet use a unit for our lighting, and we should.
+                                // https://www.realtimerendering.com/blog/physical-units-for-lights/
+                                //
+                                // NOTE:
+                                // glTF spec [1] says directional light is in lux, whereas spot and point are
+                                // in candelas. I haven't really set a unit, it's implicit in the shader, but it seems we
+                                // can roughly get candelas from lux by dividing by 683 [2].
+                                // 1. https://github.com/KhronosGroup/glTF/blob/main/extensions/2.0/Khronos/KHR_lights_punctual/README.md
+                                // 2. https://depts.washington.edu/mictech/optics/me557/Radiometry.pdf
+                                // 3. https://projects.blender.org/blender/blender-addons/commit/9d903a93f03b
+                                intensity: intensity / 683.0,
+                            },
+                            Some(node_transform),
+                        )
+                    }
+
+                    gltf::khr_lights_punctual::Kind::Point => {
+                        stage.lighting().new_analytical_light(
+                            PointLightDescriptor {
+                                position: Vec3::ZERO,
+                                color,
+                                intensity: intensity / 683.0,
+                            },
+                            Some(node_transform),
+                        )
+                    }
+
+                    gltf::khr_lights_punctual::Kind::Spot {
+                        inner_cone_angle,
+                        outer_cone_angle,
+                    } => stage.lighting().new_analytical_light(
+                        SpotLightDescriptor {
+                            position: Vec3::ZERO,
+                            direction: Vec3::NEG_Z,
+                            inner_cutoff: inner_cone_angle,
+                            outer_cutoff: outer_cone_angle,
+                            color,
+                            intensity: intensity / (683.0 * 4.0 * std::f32::consts::PI),
+                        },
+                        Some(node_transform),
+                    ),
+                };
+
+                lights.push(light_bundle);
             }
         }
 
@@ -1189,13 +1196,13 @@ impl Stage {
 mod test {
     use crate::{
         camera::Camera,
-        pbr::{Material, PbrConfig},
+        pbr::Material,
         stage::{Renderlet, Vertex},
         transform::Transform,
         Context,
     };
-    use crabslab::{Id, Slab};
-    use glam::{Vec2, Vec3, Vec4, Vec4Swizzles};
+    use crabslab::Id;
+    use glam::{Vec3, Vec4};
 
     #[test]
     fn get_vertex_count_primitive_sanity() {
@@ -1376,66 +1383,23 @@ mod test {
                 r.camera_id = gltf_camera.camera.id();
             });
         });
-
-        stage.set_lights(doc.lights.iter().map(|gltf_light| gltf_light.light.id()));
+        // A change to the lighting units for directional lights causes this test to fail.
+        //
+        // Instead of changing the saved picture, we'll adjust the intensity.
+        //
+        // See <https://github.com/schell/renderling/pull/158/files#r1956634581> for more info.
+        doc.lights.iter().for_each(|bundle| {
+            if let crate::light::LightDetails::Directional(d) = &bundle.light_details {
+                d.modify(|dir| {
+                    dir.intensity *= 683.0;
+                });
+            }
+        });
 
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
         let img = frame.read_image().unwrap();
         img_diff::assert_img_eq("gltf/normal_mapping_brick_sphere.png", img);
-    }
-
-    /// A helper struct that contains all outputs of the vertex shader.
-    #[allow(unused)]
-    #[derive(Clone, Debug, Default, PartialEq)]
-    pub struct GltfVertexInvocation {
-        pub instance_index: u32,
-        pub vertex_index: u32,
-        pub renderlet_id: Id<Renderlet>,
-        pub renderlet: Renderlet,
-        pub out_camera: Id<Camera>,
-        pub out_material: Id<Material>,
-        pub out_pbr_config: Id<PbrConfig>,
-        pub out_color: Vec4,
-        pub out_uv0: Vec2,
-        pub out_uv1: Vec2,
-        pub out_norm: Vec3,
-        pub out_tangent: Vec3,
-        pub out_bitangent: Vec3,
-        pub out_pos: Vec3,
-        // output clip coordinates
-        pub clip_pos: Vec4,
-        // output normalized device coordinates
-        pub ndc_pos: Vec3,
-    }
-
-    impl GltfVertexInvocation {
-        #[allow(dead_code)]
-        pub fn invoke(instance_index: u32, vertex_index: u32, slab: &[u32]) -> Self {
-            let mut v = Self {
-                instance_index,
-                vertex_index,
-                ..Default::default()
-            };
-            v.renderlet_id = Id::from(v.instance_index);
-            v.renderlet = slab.read(v.renderlet_id);
-            crate::stage::renderlet_vertex(
-                v.renderlet_id,
-                v.vertex_index,
-                slab,
-                &mut v.renderlet_id,
-                &mut v.out_color,
-                &mut v.out_uv0,
-                &mut v.out_uv1,
-                &mut v.out_norm,
-                &mut v.out_tangent,
-                &mut v.out_bitangent,
-                &mut v.out_pos,
-                &mut v.clip_pos,
-            );
-            v.ndc_pos = v.clip_pos.xyz() / v.clip_pos.w;
-            v
-        }
     }
 
     #[test]
@@ -1517,5 +1481,50 @@ mod test {
         // for joint_index in 0..skin.joints.len() {
         //     // skin.get_joint_matrix(, , )
         // }
+    }
+
+    #[test]
+    fn camera_position_sanity() {
+        // Test that the camera has the expected translation,
+        // taking into account that the gltf files may have been
+        // saved with Y up, or with Z up
+        let ctx = Context::headless(100, 100);
+        let mut stage = ctx.new_stage();
+        let doc = stage
+            .load_gltf_document_from_path(
+                crate::test::workspace_dir()
+                    .join("gltf")
+                    .join("shadow_mapping_sanity_camera.gltf"),
+                Id::NONE,
+            )
+            .unwrap();
+        let camera_a = doc.cameras.first().unwrap();
+
+        let eq = |p: Vec3| p.distance(camera_a.get_camera().position()) <= 10e-6;
+        let either_y_up_or_z_up = eq(Vec3::new(14.699949, 4.958309, 12.676651))
+            || eq(Vec3::new(14.699949, -12.676651, 4.958309));
+        assert!(either_y_up_or_z_up);
+
+        let doc = stage
+            .load_gltf_document_from_path(
+                crate::test::workspace_dir()
+                    .join("gltf")
+                    .join("shadow_mapping_sanity.gltf"),
+                Id::NONE,
+            )
+            .unwrap();
+        let camera_b = doc.cameras.first().unwrap();
+
+        let eq = |a: Vec3, b: Vec3| {
+            let c = Vec3::new(b.x, -b.z, b.y);
+            println!("a: {a}");
+            println!("b: {b}");
+            println!("c: {c}");
+            a.distance(b) <= 10e-6 || c.distance(c) <= 10e-6
+        };
+        assert!(eq(
+            camera_a.get_camera().position(),
+            camera_b.get_camera().position()
+        ));
     }
 }

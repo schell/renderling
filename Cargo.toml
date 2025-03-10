@@ -16,12 +16,13 @@ exclude = ["./shaders"]
 resolver = "2"
 
 [workspace.dependencies]
+acorn_prng = "3.0"
 assert_approx_eq = "1.1.0"
 async-channel = "1.8"
-bytemuck = { version = "1.13.0", features = ["derive"] }
+bytemuck = { version = "1.19.0", features = ["derive"] }
 cfg_aliases = "0.2"
 clap = { version = "4.5.23", features = ["derive"] }
-craballoc = { version = "0.1.1" }
+craballoc = { version = "0.1.10" }
 crabslab = { version = "0.6.3", default-features = false }
 ctor = "0.2.2"
 dagga = "0.2.1"
@@ -31,7 +32,7 @@ glam = { version = "0.29", default-features = false }
 gltf = { version = "1.4,1", features = ["KHR_lights_punctual", "KHR_materials_unlit", "KHR_materials_emissive_strength", "extras", "extensions"] }
 image = "0.25"
 log = "0.4"
-naga = { git = "https://github.com/gfx-rs/wgpu.git", rev = "959c2db0bc2a303b25ec27f1557ccc8377f8139a", features = ["spv-in", "wgsl-out", "wgsl-in", "msl-out"] }
+naga = { version = "24.0", features = ["spv-in", "wgsl-out", "wgsl-in", "msl-out"] }
 pretty_assertions = "1.4.0"
 proc-macro2 = { version = "1.0", features = ["span-locations"] }
 quote = "1.0"
@@ -40,15 +41,16 @@ serde = {version = "1.0", features = ["derive"]}
 serde_json = "1.0.117"
 send_wrapper = "0.6.0"
 snafu = "0.8"
-spirv-std = { git = "https://github.com/Rust-GPU/rust-gpu", rev = "562dff9176f63b318e9b34620ffacb8aa89dae9a" }
+spirv-std = { git = "https://github.com/Rust-GPU/rust-gpu", rev = "6e2c84d" }
 syn = { version = "2.0.49", features = ["full", "extra-traits", "parsing"] }
 tracing = "0.1.41"
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 web-sys = "0.3"
 winit = { version = "0.30" }
-wgpu = { version = "23.0" }
-
+wgpu = { version = "24.0" }
+wgpu-core = { version = "24.0" }
+metal = "0.31"
 
 [profile.dev]
 opt-level = 1
@@ -60,4 +62,4 @@ opt-level = 3
 opt-level = 3
 
 [patch.crates-io]
-spirv-std = { git = "https://github.com/Rust-GPU/rust-gpu", rev = "562dff9176f63b318e9b34620ffacb8aa89dae9a" }
+spirv-std = { git = "https://github.com/Rust-GPU/rust-gpu", rev = "6e2c84d" }

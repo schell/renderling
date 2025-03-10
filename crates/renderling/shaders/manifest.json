@@ -1,5 +1,15 @@
 [
   {
+    "source_path": "shaders/atlas-atlas_blit_fragment.spv",
+    "entry_point": "atlas::atlas_blit_fragment",
+    "wgsl_entry_point": "atlasatlas_blit_fragment"
+  },
+  {
+    "source_path": "shaders/atlas-atlas_blit_vertex.spv",
+    "entry_point": "atlas::atlas_blit_vertex",
+    "wgsl_entry_point": "atlasatlas_blit_vertex"
+  },
+  {
     "source_path": "shaders/bloom-bloom_downsample_fragment.spv",
     "entry_point": "bloom::bloom_downsample_fragment",
     "wgsl_entry_point": "bloombloom_downsample_fragment"
@@ -50,6 +60,16 @@
     "wgsl_entry_point": "convolutionprefilter_environment_cubemap_vertex"
   },
   {
+    "source_path": "shaders/cubemap-cubemap_sampling_test_fragment.spv",
+    "entry_point": "cubemap::cubemap_sampling_test_fragment",
+    "wgsl_entry_point": "cubemapcubemap_sampling_test_fragment"
+  },
+  {
+    "source_path": "shaders/cubemap-cubemap_sampling_test_vertex.spv",
+    "entry_point": "cubemap::cubemap_sampling_test_vertex",
+    "wgsl_entry_point": "cubemapcubemap_sampling_test_vertex"
+  },
+  {
     "source_path": "shaders/cull-compute_copy_depth_to_pyramid.spv",
     "entry_point": "cull::compute_copy_depth_to_pyramid",
     "wgsl_entry_point": "cullcompute_copy_depth_to_pyramid"
@@ -83,6 +103,16 @@
     "source_path": "shaders/ibl-diffuse_irradiance-di_convolution_fragment.spv",
     "entry_point": "ibl::diffuse_irradiance::di_convolution_fragment",
     "wgsl_entry_point": "ibldiffuse_irradiancedi_convolution_fragment"
+  },
+  {
+    "source_path": "shaders/light-shadow_mapping_fragment.spv",
+    "entry_point": "light::shadow_mapping_fragment",
+    "wgsl_entry_point": "lightshadow_mapping_fragment"
+  },
+  {
+    "source_path": "shaders/light-shadow_mapping_vertex.spv",
+    "entry_point": "light::shadow_mapping_vertex",
+    "wgsl_entry_point": "lightshadow_mapping_vertex"
   },
   {
     "source_path": "shaders/skybox-skybox_cubemap_fragment.spv",

@@ -170,7 +170,7 @@ fn new_instance(backends: Option<wgpu::Backends>) -> wgpu::Instance {
     );
     // BackendBit::PRIMARY => Vulkan + Metal + DX12 + Browser WebGPU
     let backends = backends.unwrap_or(wgpu::Backends::PRIMARY);
-    let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+    let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
         backends,
         ..Default::default()
     });
@@ -338,9 +338,9 @@ impl Frame {
         // Copy the data from the surface texture to the buffer
         encoder.copy_texture_to_buffer(
             texture.as_image_copy(),
-            wgpu::ImageCopyBuffer {
+            wgpu::TexelCopyBufferInfo {
                 buffer: &buffer,
-                layout: wgpu::ImageDataLayout {
+                layout: wgpu::TexelCopyBufferLayout {
                     offset: 0,
                     bytes_per_row: Some(dimensions.padded_bytes_per_row as u32),
                     rows_per_image: None,
@@ -601,6 +601,10 @@ impl Context {
         Texture::from_wgpu_tex(self.get_device(), texture, sampler, None)
     }
 
+    pub fn runtime(&self) -> &WgpuRuntime {
+        &self.runtime
+    }
+
     pub fn get_device(&self) -> &wgpu::Device {
         &self.runtime.device
     }
@@ -662,7 +666,7 @@ impl Context {
             height: size.y,
             depth_or_array_layers: size.z,
         };
-        crate::atlas::check_size(size).unwrap();
+        crate::atlas::check_size(size);
         *self.atlas_size.write().unwrap() = size;
         self
     }

@@ -5,6 +5,7 @@ use std::sync::{Arc, RwLock};
 use craballoc::{
     prelude::{Hybrid, HybridArray, SlabAllocator},
     runtime::WgpuRuntime,
+    slab::SlabBuffer,
 };
 use crabslab::Id;
 use glam::{UVec2, Vec2};
@@ -384,6 +385,7 @@ fn create_mix_bindgroup(
 #[derive(Clone)]
 pub struct Bloom {
     slab: SlabAllocator<WgpuRuntime>,
+    slab_buffer: SlabBuffer<wgpu::Buffer>,
 
     downsample_pixel_sizes: HybridArray<Vec2>,
     downsample_pipeline: Arc<wgpu::RenderPipeline>,
@@ -414,7 +416,7 @@ impl Bloom {
         let upsample_filter_radius =
             slab.new_value(1.0 / Vec2::new(resolution.x as f32, resolution.y as f32));
         let mix_strength = slab.new_value(0.04f32);
-        let slab_buffer = slab.get_updated_buffer();
+        let slab_buffer = slab.commit();
 
         let downsample_pipeline = Arc::new(create_bloom_downsample_pipeline(&runtime.device));
         let upsample_pipeline = Arc::new(create_bloom_upsample_pipeline(&runtime.device));
@@ -452,6 +454,7 @@ impl Bloom {
 
         Self {
             slab,
+            slab_buffer,
             downsample_pixel_sizes,
             downsample_pipeline,
             upsample_filter_radius,
@@ -681,8 +684,9 @@ impl Bloom {
     }
 
     pub fn bloom(&self, device: &wgpu::Device, queue: &wgpu::Queue) {
+        self.slab.commit();
         assert!(
-            self.slab.upkeep().is_none(),
+            self.slab_buffer.is_valid(),
             "bloom slab buffer should never resize"
         );
         self.render_downsamples(device, queue);

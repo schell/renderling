@@ -19,7 +19,7 @@ mod cpu;
 #[cfg(not(target_arch = "spirv"))]
 pub use cpu::*;
 
-#[spirv(compute(threads(32)))]
+#[spirv(compute(threads(16)))]
 pub fn compute_culling(
     #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] stage_slab: &[u32],
     #[spirv(storage_buffer, descriptor_set = 0, binding = 1)] depth_pyramid_slab: &[u32],
@@ -167,7 +167,7 @@ pub type DepthImage2dMultisampled = Image!(2D, type=f32, sampled, depth, multisa
 ///
 /// It is assumed that a [`DepthPyramidDescriptor`] is stored at index `0` in
 /// the given slab.
-#[spirv(compute(threads(32, 32, 1)))]
+#[spirv(compute(threads(16, 16, 1)))]
 pub fn compute_copy_depth_to_pyramid(
     #[spirv(descriptor_set = 0, binding = 0, storage_buffer)] slab: &mut [u32],
     #[spirv(descriptor_set = 0, binding = 1)] depth_texture: &DepthImage2d,
@@ -189,7 +189,7 @@ pub fn compute_copy_depth_to_pyramid(
 ///
 /// It is assumed that a [`DepthPyramidDescriptor`] is stored at index `0` in
 /// the given slab.
-#[spirv(compute(threads(32, 32, 1)))]
+#[spirv(compute(threads(16, 16, 1)))]
 pub fn compute_copy_depth_to_pyramid_multisampled(
     #[spirv(descriptor_set = 0, binding = 0, storage_buffer)] slab: &mut [u32],
     #[spirv(descriptor_set = 0, binding = 1)] depth_texture: &DepthImage2dMultisampled,
@@ -217,7 +217,7 @@ pub fn compute_copy_depth_to_pyramid_multisampled(
 /// mip level being downsampled to (the mip level being written into).
 ///
 /// This shader should be called in a loop from from `1..mip_count`.
-#[spirv(compute(threads(32, 32, 1)))]
+#[spirv(compute(threads(16, 16, 1)))]
 pub fn compute_downsample_depth_pyramid(
     #[spirv(descriptor_set = 0, binding = 0, storage_buffer)] slab: &mut [u32],
     #[spirv(global_invocation_id)] global_id: UVec3,

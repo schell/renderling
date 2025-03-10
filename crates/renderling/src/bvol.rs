@@ -192,7 +192,10 @@ pub struct Frustum {
     /// each expressed as a normal vector (xyz) and the distance (w)
     /// from the origin along that vector.
     pub planes: [Vec4; 6],
+    /// Points representing the corners of the frustum
     pub points: [Vec3; 8],
+    /// Centroid of the corners of the frustum
+    pub center: Vec3,
 }
 
 impl Frustum {
@@ -254,6 +257,7 @@ impl Frustum {
         let nrb = intersect_planes(&near, &right, &bottom);
 
         Self {
+            center: (nlt + nrt + nlb + nrb) / 4.0,
             planes: [near, left, right, bottom, top, far],
             points: [nlt, nrt, nlb, nrb, flt, frt, flb, frb],
         }
@@ -305,6 +309,10 @@ impl Frustum {
             }
         }
         true
+    }
+
+    pub fn depth(&self) -> f32 {
+        (self.planes[0].w - self.planes[5].w).abs()
     }
 }
 

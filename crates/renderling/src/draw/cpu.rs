@@ -1,10 +1,10 @@
 //! CPU-only side of renderling/draw.rs
 
-use std::sync::Arc;
-
-use craballoc::prelude::{Gpu, Hybrid, SlabAllocator, WeakHybrid, WgpuRuntime};
+use craballoc::{
+    prelude::{Gpu, Hybrid, SlabAllocator, WeakHybrid, WgpuRuntime},
+    slab::SlabBuffer,
+};
 use crabslab::Id;
-use glam::UVec2;
 use rustc_hash::FxHashMap;
 
 use crate::{
@@ -34,7 +34,12 @@ impl InternalRenderlet {
     }
 
     fn copy_inner(&self) -> Option<Renderlet> {
-        self.inner.upgrade().map(|hy| hy.get())
+        let hy = self.get_hybrid()?;
+        Some(hy.get())
+    }
+
+    fn get_hybrid(&self) -> Option<Hybrid<Renderlet>> {
+        self.inner.upgrade()
     }
 }
 
@@ -48,10 +53,25 @@ pub struct IndirectDraws {
 }
 
 impl IndirectDraws {
-    fn new(runtime: impl AsRef<WgpuRuntime>, size: UVec2, sample_count: u32) -> Self {
+    fn new(
+        runtime: impl AsRef<WgpuRuntime>,
+        stage_slab_buffer: &SlabBuffer<wgpu::Buffer>,
+        depth_texture: &Texture,
+    ) -> Self {
+        let runtime = runtime.as_ref();
+        let indirect_slab = SlabAllocator::new_with_label(
+            runtime,
+            wgpu::BufferUsages::INDIRECT,
+            Some("indirect-slab"),
+        );
         Self {
-            compute_culling: ComputeCulling::new(runtime.as_ref(), size, sample_count),
-            slab: SlabAllocator::new(runtime, wgpu::BufferUsages::INDIRECT),
+            compute_culling: ComputeCulling::new(
+                runtime,
+                stage_slab_buffer,
+                &indirect_slab.commit(),
+                depth_texture,
+            ),
+            slab: indirect_slab,
             draws: vec![],
         }
     }
@@ -62,22 +82,22 @@ impl IndirectDraws {
         }
     }
 
-    fn get_indirect_buffer(&self) -> Arc<wgpu::Buffer> {
-        self.slab.get_updated_buffer()
+    fn get_indirect_buffer(&self) -> SlabBuffer<wgpu::Buffer> {
+        self.slab.commit()
     }
 
     fn sync_with_internal_renderlets(
         &mut self,
         internal_renderlets: &[InternalRenderlet],
         redraw_args: bool,
-    ) -> Arc<wgpu::Buffer> {
+    ) -> SlabBuffer<wgpu::Buffer> {
         if redraw_args || self.draws.len() != internal_renderlets.len() {
             self.invalidate();
             // Pre-upkeep to reclaim resources - this is necessary because
             // the draw buffer has to be contiguous (it can't start with a bunch of trash)
-            if let Some(_indirect_buffer) = self.slab.upkeep() {
-                // Invalidate the compute culling buffer, it will be regenerated later...
-                self.compute_culling.invalidate_bindgroup();
+            let indirect_buffer = self.slab.commit();
+            if indirect_buffer.is_new_this_commit() {
+                log::warn!("new indirect buffer");
             }
             self.draws = internal_renderlets
                 .iter()
@@ -145,6 +165,7 @@ pub struct DrawCalls {
     /// Internal representation of all staged renderlets.
     internal_renderlets: Vec<InternalRenderlet>,
     pub(crate) drawing_strategy: DrawingStrategy,
+    stage_slab_buffer: SlabBuffer<wgpu::Buffer>,
 }
 
 impl DrawCalls {
@@ -152,7 +173,16 @@ impl DrawCalls {
     ///
     /// `use_compute_culling` can be used to set whether frustum culling is used
     /// as a GPU compute step before drawing. This is a native-only option.
-    pub fn new(ctx: &Context, use_compute_culling: bool, size: UVec2, sample_count: u32) -> Self {
+    ///
+    /// ## Note
+    /// A [`Context`] is required because `DrawCalls` needs to query for the set of available driver
+    /// features.
+    pub fn new(
+        ctx: &Context,
+        use_compute_culling: bool,
+        stage_slab_buffer: &SlabBuffer<wgpu::Buffer>,
+        depth_texture: &Texture,
+    ) -> Self {
         let can_use_multi_draw_indirect = ctx.get_adapter().features().contains(
             wgpu::Features::INDIRECT_FIRST_INSTANCE | wgpu::Features::MULTI_DRAW_INDIRECT,
         );
@@ -168,12 +198,17 @@ impl DrawCalls {
             drawing_strategy: {
                 if can_use_compute_culling {
                     log::debug!("Using indirect drawing method and compute culling");
-                    DrawingStrategy::Indirect(IndirectDraws::new(ctx, size, sample_count))
+                    DrawingStrategy::Indirect(IndirectDraws::new(
+                        ctx,
+                        stage_slab_buffer,
+                        depth_texture,
+                    ))
                 } else {
                     log::debug!("Using direct drawing method");
                     DrawingStrategy::Direct
                 }
             },
+            stage_slab_buffer: stage_slab_buffer.clone(),
         }
     }
 
@@ -237,20 +272,8 @@ impl DrawCalls {
     }
 
     /// Iterator over all staged [`Renderlet`]s.
-    pub fn renderlets_iter(&self) -> impl Iterator<Item = Renderlet> {
-        self.internal_renderlets
-            .iter()
-            .filter_map(|ir| ir.copy_inner())
-            .collect::<Vec<_>>()
-            .into_iter()
-    }
-
-    /// Invalidates any resources that depend on the external stage slab buffer
-    /// which holds the [`Renderlet`]s that have been queued to draw.
-    pub fn invalidate_external_slab_buffer(&mut self) {
-        if let DrawingStrategy::Indirect(indirect) = &mut self.drawing_strategy {
-            indirect.compute_culling.invalidate_bindgroup();
-        }
+    pub fn renderlets_iter(&self) -> impl Iterator<Item = WeakHybrid<Renderlet>> + '_ {
+        self.internal_renderlets.iter().map(|ir| ir.inner.clone())
     }
 
     /// Perform upkeep on queued draw calls and synchronize internal buffers.
@@ -287,11 +310,8 @@ impl DrawCalls {
     /// Returns the indirect draw buffer.
     pub fn pre_draw(
         &mut self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-        slab_buffer: &wgpu::Buffer,
         depth_texture: &Texture,
-    ) -> Result<Option<Arc<wgpu::Buffer>>, CullingError> {
+    ) -> Result<Option<SlabBuffer<wgpu::Buffer>>, CullingError> {
         let num_draw_calls = self.draw_count();
         // Only do compute culling if there are things we need to draw, otherwise
         // `wgpu` will err with something like:
@@ -304,23 +324,19 @@ impl DrawCalls {
             // copying `indirect_buffer` back to the CPU.
             if let DrawingStrategy::Indirect(indirect) = &mut self.drawing_strategy {
                 let maybe_buffer = indirect.slab.get_buffer();
-                if let Some(indirect_buffer) = maybe_buffer.as_ref() {
+                if let Some(indirect_buffer) = maybe_buffer {
                     log::trace!("performing culling on {num_draw_calls} renderlets");
-                    indirect.compute_culling.run(
-                        device,
-                        queue,
-                        slab_buffer,
-                        indirect_buffer,
-                        num_draw_calls as u32,
-                        depth_texture,
-                    )?;
+                    indirect
+                        .compute_culling
+                        .run(num_draw_calls as u32, depth_texture);
+                    Ok(Some(indirect_buffer))
                 } else {
                     log::warn!(
                         "DrawCalls::pre_render called without first calling `upkeep` - no culling \
                          was performed"
                     );
+                    Ok(None)
                 }
-                Ok(maybe_buffer)
             } else {
                 Ok(None)
             }

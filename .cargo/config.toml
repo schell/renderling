@@ -1,5 +1,7 @@
 [alias]
 xtask = "run --package xtask --"
+shaders = "xtask compile-shaders"
+linkage = "xtask generate-linkage"
 
 [build]
 rustflags = ["--cfg=web_sys_unstable_apis"]

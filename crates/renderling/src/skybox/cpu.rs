@@ -8,7 +8,7 @@ use glam::{Mat4, UVec2, Vec3};
 
 use crate::{
     atlas::AtlasImage, camera::Camera, convolution::VertexPrefilterEnvironmentCubemapIds,
-    texture::Texture,
+    cubemap::EquirectangularImageToCubemapBlitter, texture::Texture,
 };
 
 /// Render pipeline used to draw a skybox.
@@ -151,6 +151,10 @@ pub(crate) fn create_skybox_render_pipeline(
 /// A clone of a skybox is a reference to the same skybox.
 ///
 /// Only available on the CPU. Not available in shaders.
+// TODO: spilt Skybox into Skybox and IBL components.
+// Skybox and IBL are different things. Sometimes you want to use a
+// skybox without having it shade things.
+// Also, the brdf_lut doesn't change, so should probably live in `Lighting`
 #[derive(Debug, Clone)]
 pub struct Skybox {
     // Cubemap texture of the environment cubemap
@@ -191,7 +195,8 @@ impl Skybox {
         let runtime = runtime.as_ref();
         log::trace!("creating skybox");
 
-        let slab = SlabAllocator::new(runtime, wgpu::BufferUsages::VERTEX);
+        let slab =
+            SlabAllocator::new_with_label(runtime, wgpu::BufferUsages::VERTEX, Some("skybox-slab"));
 
         let proj = Mat4::perspective_rh(std::f32::consts::FRAC_PI_2, 1.0, 0.1, 10.0);
         let camera = slab.new_value(Camera::default().with_projection(proj));
@@ -201,10 +206,10 @@ impl Skybox {
             roughness: roughness.id(),
         });
 
-        let buffer = slab.get_updated_buffer();
+        let buffer = slab.commit();
         let mut buffer_upkeep = || {
-            let maybe_resized_buffer = slab.upkeep();
-            debug_assert!(maybe_resized_buffer.is_none());
+            let possibly_new_buffer = slab.commit();
+            debug_assert!(!possibly_new_buffer.is_new_this_commit());
         };
 
         let equirectangular_texture = Skybox::hdr_texture_from_atlas_image(runtime, hdr_img);
@@ -329,10 +334,8 @@ impl Skybox {
         let device = &runtime.device;
         let queue = &runtime.queue;
         // Create the cubemap-making pipeline.
-        let pipeline = crate::cubemap::CubemapMakingRenderPipeline::new(
-            device,
-            wgpu::TextureFormat::Rgba16Float,
-        );
+        let pipeline =
+            EquirectangularImageToCubemapBlitter::new(device, wgpu::TextureFormat::Rgba16Float);
 
         let resources = (
             device,
@@ -340,8 +343,12 @@ impl Skybox {
             Some("hdr environment map"),
             wgpu::BufferUsages::VERTEX,
         );
-        let bindgroup =
-            crate::cubemap::cubemap_making_bindgroup(device, resources.2, buffer, hdr_texture);
+        let bindgroup = EquirectangularImageToCubemapBlitter::create_bindgroup(
+            device,
+            resources.2,
+            buffer,
+            hdr_texture,
+        );
 
         Self::render_cubemap(
             runtime,

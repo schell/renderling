@@ -10,9 +10,12 @@ categories = ["rendering", "game-development", "graphics"]
 readme = "../../README.md"
 build = "src/build.rs"
 
-[package.metadata.rust-gpu.build]
+[package.metadata.rust-gpu.install]
 auto-install-rust-toolchain = true
+
+[package.metadata.rust-gpu.build]
 output-dir = "shaders" 
+multimodule = true
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -69,6 +72,7 @@ wgpu = { workspace = true, features = ["spirv"] }
 winit = { workspace = true, optional = true }
 
 [dev-dependencies]
+acorn_prng.workspace = true
 assert_approx_eq = {workspace = true}
 ctor = "0.2.2"
 env_logger = {workspace = true}
@@ -79,8 +83,11 @@ img-diff = { path = "../img-diff" }
 naga.workspace = true
 pretty_assertions.workspace = true
 ttf-parser = "0.20.0"
+wgpu-core.workspace = true
 winit.workspace = true
 
 [target.'cfg(not(target_arch = "spirv"))'.dev-dependencies]
 glam = { workspace = true, features = ["std", "debug-glam-assert"] }
 
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+metal.workspace = true

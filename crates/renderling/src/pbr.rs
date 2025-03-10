@@ -4,26 +4,25 @@
 //! * <https://learnopengl.com/PBR/Theory>
 //! * <https://github.com/KhronosGroup/glTF-Sample-Viewer/blob/5b1b7f48a8cb2b7aaef00d08fdba18ccc8dd331b/source/Renderer/shaders/pbr.frag>
 //! * <https://github.khronos.org/glTF-Sample-Viewer-Release/>
-use crabslab::{Array, Id, Slab, SlabItem};
+use crabslab::{Id, Slab, SlabItem};
 use glam::{Mat4, Vec2, Vec3, Vec4, Vec4Swizzles};
-use light::Light;
 
-#[cfg(target_arch = "spirv")]
-use spirv_std::num_traits::Float;
+#[allow(unused)]
+use spirv_std::num_traits::{Float, Zero};
 
 use crate::{
     atlas::AtlasTexture,
+    light::{
+        DirectionalLightDescriptor, LightStyle, LightingDescriptor, PointLightDescriptor,
+        ShadowCalculation, SpotLightCalculation,
+    },
     math::{self, IsSampler, IsVector, Sample2d, Sample2dArray, SampleCube},
-    pbr::light::{DirectionalLight, PointLight, SpotLight},
     println as my_println,
     stage::Renderlet,
 };
 
 pub mod debug;
 use debug::DebugChannel;
-
-pub mod light;
-use light::LightStyle;
 
 /// Represents a material on the GPU.
 #[repr(C)]
@@ -241,7 +240,6 @@ pub struct PbrConfig {
     pub has_skinning: bool,
     pub perform_frustum_culling: bool,
     pub perform_occlusion_culling: bool,
-    pub light_array: Array<Id<light::Light>>,
 }
 
 impl Default for PbrConfig {
@@ -254,7 +252,6 @@ impl Default for PbrConfig {
             has_skinning: true,
             perform_frustum_culling: true,
             perform_occlusion_culling: false,
-            light_array: Default::default(),
         }
     }
 }
@@ -296,7 +293,7 @@ pub fn texture_color<A: Sample2dArray<Sampler = S>, S: IsSampler>(
 
 /// PBR fragment shader capable of being run on CPU or GPU.
 #[allow(clippy::too_many_arguments)]
-pub fn fragment_impl<A, T, C, S>(
+pub fn fragment_impl<A, T, DtA, C, S>(
     atlas: &A,
     atlas_sampler: &S,
     irradiance: &C,
@@ -305,7 +302,11 @@ pub fn fragment_impl<A, T, C, S>(
     prefiltered_sampler: &S,
     brdf: &T,
     brdf_sampler: &S,
+    shadow_map: &DtA,
+    shadow_map_sampler: &S,
+
     slab: &[u32],
+    lighting_slab: &[u32],
 
     renderlet_id: Id<Renderlet>,
 
@@ -321,10 +322,15 @@ pub fn fragment_impl<A, T, C, S>(
 ) where
     A: Sample2dArray<Sampler = S>,
     T: Sample2d<Sampler = S>,
+    DtA: Sample2dArray<Sampler = S>,
     C: SampleCube<Sampler = S>,
     S: IsSampler,
 {
     let renderlet = slab.read_unchecked(renderlet_id);
+    // TODO: rename `PbrConfig` to `PbrShaderDescriptor`
+    let pbr_desc = slab.read_unchecked(renderlet.pbr_config_id);
+    crate::println!("pbr_desc_id: {:?}", renderlet.pbr_config_id);
+    crate::println!("pbr_desc: {pbr_desc:#?}");
     let PbrConfig {
         atlas_size,
         resolution: _,
@@ -333,11 +339,10 @@ pub fn fragment_impl<A, T, C, S>(
         has_skinning: _,
         perform_frustum_culling: _,
         perform_occlusion_culling: _,
-        light_array,
-    } = slab.read_unchecked(renderlet.pbr_config_id);
+    } = pbr_desc;
 
     let material = get_material(renderlet.material_id, has_lighting, slab);
-    my_println!("material: {:?}", material);
+    crate::println!("material: {:#?}", material);
 
     let albedo_tex_uv = if material.albedo_tex_coord == 0 {
         in_uv0
@@ -537,6 +542,8 @@ pub fn fragment_impl<A, T, C, S>(
 
     *output = if material.has_lighting {
         shade_fragment(
+            shadow_map,
+            shadow_map_sampler,
             camera.position(),
             n,
             in_pos,
@@ -548,8 +555,7 @@ pub fn fragment_impl<A, T, C, S>(
             irradiance,
             specular,
             brdf,
-            light_array,
-            slab,
+            lighting_slab,
         )
     } else {
         crate::println!("no shading!");
@@ -558,7 +564,9 @@ pub fn fragment_impl<A, T, C, S>(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn shade_fragment(
+pub fn shade_fragment<S, T>(
+    shadow_map: &T,
+    shadow_map_sampler: &S,
     // camera's position in world space
     camera_pos: Vec3,
     // normal of the fragment
@@ -575,34 +583,39 @@ pub fn shade_fragment(
     prefiltered: Vec3,
     brdf: Vec2,
 
-    lights: Array<Id<Light>>,
-    slab: &[u32],
-) -> Vec4 {
+    light_slab: &[u32],
+) -> Vec4
+where
+    S: IsSampler,
+    T: Sample2dArray<Sampler = S>,
+{
     let n = in_norm.alt_norm_or_zero();
     let v = (camera_pos - in_pos).alt_norm_or_zero();
-    my_println!("lights: {lights:?}");
+    // There is always a `LightingDescriptor` stored at index `0` of the
+    // light slab.
+    let lighting_desc = light_slab.read_unchecked(Id::<LightingDescriptor>::new(0));
+    let analytical_lights_array = lighting_desc.analytical_lights_array;
+    my_println!("lights: {analytical_lights_array:?}");
     my_println!("n: {n:?}");
     my_println!("v: {v:?}");
-    // reflectance
+
+    // accumulated outgoing radiance
     let mut lo = Vec3::ZERO;
-    for i in 0..lights.len() {
+    for i in 0..analytical_lights_array.len() {
         // calculate per-light radiance
-        let light_id = slab.read(lights.at(i));
-        if light_id.is_none() {
-            break;
-        }
-        let light = slab.read(light_id);
-        let transform = slab.read(light.transform);
+        let light_id = light_slab.read(analytical_lights_array.at(i));
+        let light = light_slab.read(light_id);
+        let transform = light_slab.read(light.transform_id);
         let transform = Mat4::from(transform);
 
         // determine the light ray and the radiance
-        match light.light_type {
+        let (radiance, shadow) = match light.light_type {
             LightStyle::Point => {
-                let PointLight {
+                let PointLightDescriptor {
                     position,
                     color,
                     intensity,
-                } = slab.read(light.into_point_id());
+                } = light_slab.read(light.into_point_id());
                 let position = transform.transform_point3(position);
                 let frag_to_light = position - in_pos;
                 let distance = frag_to_light.length();
@@ -611,48 +624,76 @@ pub fn shade_fragment(
                 }
                 let l = frag_to_light.alt_norm_or_zero();
                 let attenuation = intensity * 1.0 / (distance * distance);
-                lo += outgoing_radiance(color, albedo, attenuation, v, l, n, metallic, roughness);
+                let radiance =
+                    outgoing_radiance(color, albedo, attenuation, v, l, n, metallic, roughness);
+                let shadow = if light.shadow_map_desc_id.is_some() {
+                    // Shadow is 1.0 when the fragment is in the shadow of this light,
+                    // and 0.0 in darkness
+                    ShadowCalculation::new(light_slab, light, in_pos, n, l).run_point(
+                        light_slab,
+                        shadow_map,
+                        shadow_map_sampler,
+                        position,
+                    )
+                } else {
+                    0.0
+                };
+                (radiance, shadow)
             }
 
             LightStyle::Spot => {
-                let SpotLight {
-                    position,
-                    direction,
-                    inner_cutoff,
-                    outer_cutoff,
-                    color,
-                    intensity,
-                } = slab.read(light.into_spot_id());
-                let position = transform.transform_point3(position);
-                let frag_to_light = position - in_pos;
-                let distance = frag_to_light.length();
-                if distance == 0.0 {
+                let spot_light_descriptor = light_slab.read(light.into_spot_id());
+                let calculation =
+                    SpotLightCalculation::new(spot_light_descriptor, transform, in_pos);
+                if calculation.frag_to_light_distance == 0.0 {
                     continue;
                 }
-                let l = frag_to_light.alt_norm_or_zero();
-                let direction = transform.transform_vector3(direction).alt_norm_or_zero();
-                let theta: f32 = l.dot(direction);
-                let epsilon: f32 = inner_cutoff - outer_cutoff;
-                let attenuation: f32 =
-                    intensity * ((theta - outer_cutoff) / epsilon).clamp(0.0, 1.0);
-                lo += outgoing_radiance(color, albedo, attenuation, v, l, n, metallic, roughness);
+                let attenuation: f32 = spot_light_descriptor.intensity * calculation.contribution;
+                let radiance = outgoing_radiance(
+                    spot_light_descriptor.color,
+                    albedo,
+                    attenuation,
+                    v,
+                    calculation.frag_to_light,
+                    n,
+                    metallic,
+                    roughness,
+                );
+                let shadow = if light.shadow_map_desc_id.is_some() {
+                    // Shadow is 1.0 when the fragment is in the shadow of this light,
+                    // and 0.0 in darkness
+                    ShadowCalculation::new(light_slab, light, in_pos, n, calculation.frag_to_light)
+                        .run_directional_or_spot(light_slab, shadow_map, shadow_map_sampler)
+                } else {
+                    0.0
+                };
+                (radiance, shadow)
             }
 
             LightStyle::Directional => {
-                let DirectionalLight {
+                let DirectionalLightDescriptor {
                     direction,
                     color,
                     intensity,
-                } = slab.read(light.into_directional_id());
+                } = light_slab.read(light.into_directional_id());
                 let direction = transform.transform_vector3(direction);
                 let l = -direction.alt_norm_or_zero();
                 let attenuation = intensity;
                 let radiance =
                     outgoing_radiance(color, albedo, attenuation, v, l, n, metallic, roughness);
-                my_println!("radiance: {radiance:?}");
-                lo += radiance;
+                let shadow =
+                    if light.shadow_map_desc_id.is_some() {
+                        // Shadow is 1.0 when the fragment is in the shadow of this light,
+                        // and 0.0 in darkness
+                        ShadowCalculation::new(light_slab, light, in_pos, n, l)
+                            .run_directional_or_spot(light_slab, shadow_map, shadow_map_sampler)
+                    } else {
+                        0.0
+                    };
+                (radiance, shadow)
             }
-        }
+        };
+        lo += radiance * (1.0 - shadow);
     }
 
     my_println!("lo: {lo:?}");
