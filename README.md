@@ -90,7 +90,7 @@ By default it uses a single uber-shader for rendering.
   - [x] physically based shading
   - [x] unlit
 - [ ] light tiling
-- [ ] shadow mapping
+- [x] shadow mapping
 - [ ] ssao
 
 - [x] msaa
@@ -187,13 +187,13 @@ The `crates/renderling/shaders/` folder contains the generated SPIR-V files.
 To regenerate the shaders, run:
 
 ```
-cargo xtask compile-shaders
+cargo shaders
 ```
 
 And to explicitly re-generate `wgpu` linkage, you can run: 
 
 ```
-cargo xtask generate-linkage
+cargo linkage
 ```
 
 ...but the `build.rs` script will do this for you, so it's not strictly necessary.
@@ -223,7 +223,7 @@ Some of these solutions were then spun off into their own projects.
 
 - [`cargo-gpu`](https://githu.com/rust-gpu/cargo-gpu)
   A shader compilation cli tool.
-- [`crabslab`](https://github.com/schell/crabslab)
+- [`crabslab` and `craballoc`](https://github.com/schell/crabslab)
   A slab allocator for working across CPU/GPU boundaries.
 - [`loading-bytes`](crates/loading-bytes)
   A cross-platform (including the web) and comedically tiny way of loading files to bytes.
