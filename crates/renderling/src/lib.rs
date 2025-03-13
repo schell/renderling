@@ -225,6 +225,7 @@ mod test {
         std::path::PathBuf::from(std::env!("CARGO_WORKSPACE_DIR"))
     }
 
+    #[allow(unused, reason = "Used in debugging on macos")]
     pub fn capture_gpu_frame<T>(
         ctx: &Context,
         path: impl AsRef<std::path::Path>,
@@ -325,22 +326,11 @@ mod test {
 
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
-        let img = frame.read_image().unwrap();
         frame.present();
 
         let depth_texture = stage.get_depth_texture();
-        let mut depth_img = depth_texture.read_image().unwrap();
-        let mut min = u8::MAX;
-        let mut max = u8::MIN;
-        // depth_img.pixels_mut().for_each(|image::Luma([d])| {
-        //     min = min.min(*d);
-        //     max = max.max(*d);
-        //     let f = crate::math::scaled_u8_to_f32(*d);
-        //     *d = crate::math::scaled_f32_to_u8(camera.get().linearize_depth(f));
-        // });
-        // log::warn!("minmax: ({min}, {max})");
-        img_diff::assert_img_eq("cmy_triangle_depth.png", depth_img.clone());
-        img_diff::save("cmy_triangle/depth.png", depth_img);
+        let depth_img = depth_texture.read_image().unwrap();
+        img_diff::assert_img_eq("cmy_triangle/depth.png", depth_img);
 
         let hdr_img = stage
             .hdr_texture
@@ -348,13 +338,10 @@ mod test {
             .unwrap()
             .read_hdr_image(&ctx)
             .unwrap();
-        //let hdr_img: RgbaImage = hdr_img.convert();
-        img_diff::save("cmy_triangle/hdr.png", hdr_img);
+        img_diff::assert_img_eq("cmy_triangle/hdr.png", hdr_img);
 
         let bloom_mix = stage.bloom.get_mix_texture().read_hdr_image(&ctx).unwrap();
-        img_diff::save("cmy_triangle/bloom_mix.png", bloom_mix);
-
-        img_diff::assert_img_eq("cmy_triangle.png", img);
+        img_diff::assert_img_eq("cmy_triangle/bloom_mix.png", bloom_mix);
     }
 
     #[test]

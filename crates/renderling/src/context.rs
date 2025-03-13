@@ -101,9 +101,9 @@ impl RenderTarget {
     }
 }
 
-async fn adapter<'window>(
+async fn adapter(
     instance: &wgpu::Instance,
-    compatible_surface: Option<&wgpu::Surface<'window>>,
+    compatible_surface: Option<&wgpu::Surface<'_>>,
 ) -> Result<wgpu::Adapter, ContextError> {
     log::trace!(
         "creating adapter for a {} context",
