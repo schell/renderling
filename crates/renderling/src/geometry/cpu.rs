@@ -51,7 +51,11 @@ impl<'a> RenderletBuilder<'a> {
         (self, indices)
     }
 
-    pub fn with_transform_id(mut self, transform_id: Id<Transform>) -> Self {
+    pub fn with_transform(mut self, transform: Transform) -> (Self, Hybrid<Transform>) {
+        let transform = self.geometry.slab.new_value(transform);
+        self.data.transform_id = transform.id();
+        (self, transform)
+    }
         self.data.transform_id = transform_id;
         self
     }
