@@ -6,12 +6,13 @@ use craballoc::{
     slab::SlabAllocator,
     value::{Hybrid, HybridArray},
 };
-use crabslab::Id;
+use crabslab::{Array, Id};
 use glam::{Mat4, UVec2};
 
 use crate::{
     camera::Camera,
     geometry::GeometryDescriptor,
+    pbr::Material,
     prelude::Transform,
     stage::{MorphTarget, Renderlet, Skin, Vertex},
 };
@@ -67,10 +68,11 @@ impl<'a> RenderletBuilder<'a> {
 
     pub fn with_morph_targets(
         mut self,
-        morph_targets: impl IntoIterator<Item = HybridArray<MorphTarget>>,
-    ) -> (Self, Vec<HybridArray<MorphTarget>>) {
-        let morph_targets: Vec<_> = morph_targets.into_iter().collect();
-        self.data.morph_targets = self.geometry.slab.new_array(morph_targets.iter().map(|mt| mt.array()));
+        morph_targets: impl IntoIterator<Item = Array<MorphTarget>>,
+    ) -> (Self, HybridArray<Array<MorphTarget>>) {
+        let morph_targets = morph_targets.into_iter();
+        let morph_targets = self.geometry.slab.new_array(morph_targets);
+        self.data.morph_targets = morph_targets.array();
         (self, morph_targets)
     }
 
@@ -83,10 +85,12 @@ impl<'a> RenderletBuilder<'a> {
         (self, morph_weights)
     }
 
-    pub fn with_pbr_config_id(mut self, pbr_config_id: Id<PbrConfig>) -> Self {
-        self.data.pbr_config_id = pbr_config_id;
+    pub fn with_geometry_descriptor_id(mut self, pbr_config_id: Id<GeometryDescriptor>) -> Self {
+        self.data.geometry_descriptor_id = pbr_config_id;
         self
     }
+
+    pub fn build(self) -> Hybrid<Renderlet> {
         let RenderletBuilder { data, geometry } = self;
         geometry.new_renderlet(data)
     }
