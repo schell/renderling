@@ -41,7 +41,52 @@ impl<'a> RenderletBuilder<'a> {
         (self, vertices)
     }
 
-    pub fn build(self) -> Hybrid<Renderlet> {
+    pub fn with_indices(
+        mut self,
+        indices: impl IntoIterator<Item = u32>,
+    ) -> (Self, HybridArray<u32>) {
+        let indices = self.geometry.new_indices(indices);
+        self.data.indices_array = indices.array();
+        (self, indices)
+    }
+
+    pub fn with_transform_id(mut self, transform_id: Id<Transform>) -> Self {
+        self.data.transform_id = transform_id;
+        self
+    }
+
+    pub fn with_material_id(mut self, material_id: Id<Material>) -> Self {
+        self.data.material_id = material_id;
+        self
+    }
+
+    pub fn with_skin_id(mut self, skin_id: Id<Skin>) -> Self {
+        self.data.skin_id = skin_id;
+        self
+    }
+
+    pub fn with_morph_targets(
+        mut self,
+        morph_targets: impl IntoIterator<Item = HybridArray<MorphTarget>>,
+    ) -> (Self, Vec<HybridArray<MorphTarget>>) {
+        let morph_targets: Vec<_> = morph_targets.into_iter().collect();
+        self.data.morph_targets = self.geometry.slab.new_array(morph_targets.iter().map(|mt| mt.array()));
+        (self, morph_targets)
+    }
+
+    pub fn with_morph_weights(
+        mut self,
+        morph_weights: impl IntoIterator<Item = f32>,
+    ) -> (Self, HybridArray<f32>) {
+        let morph_weights = self.geometry.new_weights(morph_weights);
+        self.data.morph_weights = morph_weights.array();
+        (self, morph_weights)
+    }
+
+    pub fn with_pbr_config_id(mut self, pbr_config_id: Id<PbrConfig>) -> Self {
+        self.data.pbr_config_id = pbr_config_id;
+        self
+    }
         let RenderletBuilder { data, geometry } = self;
         geometry.new_renderlet(data)
     }
