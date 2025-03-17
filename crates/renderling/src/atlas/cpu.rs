@@ -978,7 +978,6 @@ mod test {
             ..Default::default()
         });
         let renderlet = stage.new_value(Renderlet {
-            camera_id: camera.id(),
             vertices_array: geometry.array(),
             transform_id: transform.id(),
             material_id: material.id(),
@@ -1056,7 +1055,6 @@ mod test {
             [tl, bl, br, tl, br, tr]
         });
         let clamp_prim = stage.new_value(Renderlet {
-            camera_id: camera.id(),
             vertices_array: geometry.array(),
             material_id: clamp_material.id(),
             ..Default::default()
@@ -1068,7 +1066,6 @@ mod test {
             ..Default::default()
         });
         let repeat_prim = stage.new_value(Renderlet {
-            camera_id: camera.id(),
             vertices_array: geometry.array(),
             material_id: repeat_material.id(),
             transform_id: repeat_transform.id(),
@@ -1081,7 +1078,6 @@ mod test {
             ..Default::default()
         });
         let mirror_prim = stage.new_value(Renderlet {
-            camera_id: camera.id(),
             vertices_array: geometry.array(),
             material_id: mirror_material.id(),
             transform_id: mirror_transform.id(),
@@ -1165,7 +1161,6 @@ mod test {
         };
 
         let clamp_prim = stage.new_value(Renderlet {
-            camera_id: camera.id(),
             vertices_array: geometry.array(),
             material_id: clamp_material.id(),
             ..Default::default()
@@ -1177,7 +1172,6 @@ mod test {
             ..Default::default()
         });
         let repeat_prim = stage.new_value(Renderlet {
-            camera_id: camera.id(),
             vertices_array: geometry.array(),
             material_id: repeat_material.id(),
             transform_id: repeat_transform.id(),
@@ -1190,7 +1184,6 @@ mod test {
             ..Default::default()
         });
         let mirror_prim = stage.new_value(Renderlet {
-            camera_id: camera.id(),
             vertices_array: geometry.array(),
             material_id: mirror_material.id(),
             transform_id: mirror_transform.id(),

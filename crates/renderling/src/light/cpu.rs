@@ -13,6 +13,7 @@ use snafu::prelude::*;
 
 use crate::{
     atlas::{Atlas, AtlasBlitter, AtlasError},
+    geometry::Geometry,
     stage::NestedTransform,
 };
 
@@ -306,8 +307,8 @@ impl Lighting {
     }
 
     /// Create a new [`Lighting`] manager.
-    pub fn new(geometry_slab: &SlabAllocator<WgpuRuntime>) -> Self {
-        let runtime = geometry_slab.runtime();
+    pub fn new(geometry: &Geometry) -> Self {
+        let runtime = geometry.runtime();
         let light_slab =
             SlabAllocator::new_with_label(runtime, wgpu::BufferUsages::empty(), Some("light-slab"));
         let lighting_descriptor = light_slab.new_value(LightingDescriptor::default());
@@ -331,11 +332,11 @@ impl Lighting {
             ),
             analytical_lights: Default::default(),
             analytical_lights_array: Arc::new(Mutex::new(light_slab.new_array([]))),
-            geometry_slab: geometry_slab.clone(),
+            geometry_slab: geometry.slab_allocator().clone(),
             light_slab,
             light_slab_buffer: Arc::new(RwLock::new(light_slab_buffer)),
             lighting_descriptor,
-            geometry_slab_buffer: Arc::new(RwLock::new(geometry_slab.commit())),
+            geometry_slab_buffer: Arc::new(RwLock::new(geometry.slab_allocator().commit())),
             bindgroup_layout: bindgroup_layout.into(),
             shadow_map_update_pipeline,
             shadow_map_update_bindgroup_layout,
@@ -347,7 +348,7 @@ impl Lighting {
         }
     }
 
-    pub fn slab(&self) -> &SlabAllocator<WgpuRuntime> {
+    pub fn slab_allocator(&self) -> &SlabAllocator<WgpuRuntime> {
         &self.light_slab
     }
 

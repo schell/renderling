@@ -3,7 +3,10 @@ use crabslab::{Id, Slab};
 use glam::{Vec2, Vec3Swizzles, Vec4, Vec4Swizzles};
 use spirv_std::{arch::IndexUnchecked, spirv};
 
-use crate::{draw::DrawIndirectArgs, pbr::PbrConfig, sdf, stage::Renderlet, transform::Transform};
+use crate::{
+    draw::DrawIndirectArgs, geometry::GeometryDescriptor, sdf, stage::Renderlet,
+    transform::Transform,
+};
 
 #[cfg(not(target_arch = "spirv"))]
 mod cpu;
@@ -29,7 +32,10 @@ pub fn debug_overlay_fragment(
     #[spirv(frag_coord)] frag_coord: Vec4,
     frag_color: &mut Vec4,
 ) {
-    let resolution_id = Id::from(PbrConfig::OFFSET_OF_RESOLUTION);
+    let camera_id_id = Id::from(GeometryDescriptor::OFFSET_OF_CAMERA_ID);
+    let camera_id = slab.read_unchecked(camera_id_id);
+    let camera = slab.read_unchecked(camera_id);
+    let resolution_id = Id::from(GeometryDescriptor::OFFSET_OF_RESOLUTION);
     let viewport_size = slab.read_unchecked(resolution_id);
 
     *frag_color = Vec4::ZERO;
@@ -37,8 +43,6 @@ pub fn debug_overlay_fragment(
     for i in 0..draw_calls.len() {
         let draw_call = unsafe { draw_calls.index_unchecked(i) };
         let renderlet_id = Id::<Renderlet>::new(draw_call.first_instance);
-        let camera_id = slab.read_unchecked(renderlet_id + Renderlet::OFFSET_OF_CAMERA_ID);
-        let camera = slab.read_unchecked(camera_id);
         let transform_id = slab.read_unchecked(renderlet_id + Renderlet::OFFSET_OF_TRANSFORM_ID);
         let mut model = Transform::IDENTITY;
         slab.read_into_if_some(transform_id, &mut model);

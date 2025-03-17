@@ -12,6 +12,7 @@ use spirv_std::num_traits::{Float, Zero};
 
 use crate::{
     atlas::AtlasTexture,
+    geometry::GeometryDescriptor,
     light::{
         DirectionalLightDescriptor, LightStyle, LightingDescriptor, PointLightDescriptor,
         ShadowCalculation, SpotLightCalculation,
@@ -228,34 +229,6 @@ pub fn sample_brdf<T: Sample2d<Sampler = S>, S: IsSampler>(
         .xy()
 }
 
-/// Holds PBR configuration info.
-#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
-#[derive(Clone, Copy, PartialEq, SlabItem)]
-#[offsets]
-pub struct PbrConfig {
-    pub atlas_size: glam::UVec2,
-    pub resolution: glam::UVec2,
-    pub debug_channel: debug::DebugChannel,
-    pub has_lighting: bool,
-    pub has_skinning: bool,
-    pub perform_frustum_culling: bool,
-    pub perform_occlusion_culling: bool,
-}
-
-impl Default for PbrConfig {
-    fn default() -> Self {
-        Self {
-            atlas_size: Default::default(),
-            resolution: glam::UVec2::ONE,
-            debug_channel: Default::default(),
-            has_lighting: true,
-            has_skinning: true,
-            perform_frustum_culling: true,
-            perform_occlusion_culling: false,
-        }
-    }
-}
-
 /// Returns the `Material` from the stage's slab.
 pub fn get_material(material_id: Id<Material>, has_lighting: bool, slab: &[u32]) -> Material {
     if material_id.is_none() {
@@ -327,11 +300,11 @@ pub fn fragment_impl<A, T, DtA, C, S>(
     S: IsSampler,
 {
     let renderlet = slab.read_unchecked(renderlet_id);
-    // TODO: rename `PbrConfig` to `PbrShaderDescriptor`
-    let pbr_desc = slab.read_unchecked(renderlet.pbr_config_id);
+    let geom_desc = slab.read_unchecked(renderlet.pbr_config_id);
     crate::println!("pbr_desc_id: {:?}", renderlet.pbr_config_id);
-    crate::println!("pbr_desc: {pbr_desc:#?}");
-    let PbrConfig {
+    crate::println!("pbr_desc: {geom_desc:#?}");
+    let GeometryDescriptor {
+        camera_id,
         atlas_size,
         resolution: _,
         debug_channel,
@@ -339,7 +312,7 @@ pub fn fragment_impl<A, T, DtA, C, S>(
         has_skinning: _,
         perform_frustum_culling: _,
         perform_occlusion_culling: _,
-    } = pbr_desc;
+    } = geom_desc;
 
     let material = get_material(renderlet.material_id, has_lighting, slab);
     crate::println!("material: {:#?}", material);
@@ -444,7 +417,7 @@ pub fn fragment_impl<A, T, DtA, C, S>(
     let emissive =
         emissive_tex_color.xyz() * material.emissive_factor * material.emissive_strength_multiplier;
     let irradiance = sample_irradiance(irradiance, irradiance_sampler, n);
-    let camera = slab.read(renderlet.camera_id);
+    let camera = slab.read(camera_id);
     let specular = sample_specular_reflection(
         prefiltered,
         prefiltered_sampler,
@@ -792,7 +765,6 @@ mod test {
                     ..Default::default()
                 });
                 let sphere = stage.new_value(Renderlet {
-                    camera_id: camera.id(),
                     vertices_array: geometry.array(),
                     transform_id: transform.id(),
                     material_id: material.id(),

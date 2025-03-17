@@ -203,9 +203,6 @@ pub struct Renderlet {
     /// Bounding sphere of the entire renderlet, in local space.
     pub bounds: BoundingSphere,
     pub indices_array: Array<u32>,
-    // TODO: Move camera to PbrConfig or something higher up,
-    // because it doesn't change all that often.
-    pub camera_id: Id<Camera>,
     pub transform_id: Id<Transform>,
     pub material_id: Id<Material>,
     pub skin_id: Id<Skin>,
@@ -221,7 +218,6 @@ impl Default for Renderlet {
             vertices_array: Array::default(),
             bounds: BoundingSphere::default(),
             indices_array: Array::default(),
-            camera_id: Id::NONE,
             transform_id: Id::NONE,
             material_id: Id::NONE,
             skin_id: Id::NONE,

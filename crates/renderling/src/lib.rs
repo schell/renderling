@@ -153,10 +153,12 @@ pub mod cubemap;
 pub mod cull;
 pub mod debug;
 pub mod draw;
+pub mod geometry;
 pub mod ibl;
 pub mod light;
 #[cfg(not(target_arch = "spirv"))]
 mod linkage;
+pub mod material;
 pub mod math;
 pub mod pbr;
 pub mod sdf;
@@ -318,7 +320,6 @@ mod test {
         let camera = stage.new_value(Camera::default_ortho2d(100.0, 100.0));
         let geometry = stage.new_array(right_tri_vertices());
         let tri = stage.new_value(Renderlet {
-            camera_id: camera.id(),
             vertices_array: geometry.array(),
             ..Default::default()
         });
@@ -359,7 +360,6 @@ mod test {
             vs
         });
         let tri = stage.new_value(Renderlet {
-            camera_id: camera.id(),
             vertices_array: geometry.array(),
             ..Default::default()
         });
@@ -389,7 +389,6 @@ mod test {
         let geometry = stage.new_array(right_tri_vertices());
         let transform = stage.new_value(Transform::default());
         let tri = stage.new_value(Renderlet {
-            camera_id: camera.id(),
             vertices_array: geometry.array(),
             transform_id: transform.id(),
             ..Default::default()
@@ -466,7 +465,6 @@ mod test {
             ..Default::default()
         });
         let cube = stage.new_value(Renderlet {
-            camera_id: camera.id(),
             vertices_array: geometry.array(),
             transform_id: transform.id(),
             ..Default::default()
@@ -497,7 +495,6 @@ mod test {
             ..Default::default()
         });
         let cube = stage.new_value(Renderlet {
-            camera_id: camera.id(),
             vertices_array: vertices.array(),
             indices_array: indices.array(),
             transform_id: transform.id(),
@@ -534,7 +531,6 @@ mod test {
         });
         let mut renderlet = Renderlet {
             vertices_array: geometry.array(),
-            camera_id: camera.id(),
             transform_id: cube_one_transform.id(),
             ..Default::default()
         };
@@ -601,7 +597,6 @@ mod test {
         });
 
         let cube: Hybrid<Renderlet> = stage.new_value(Renderlet {
-            camera_id: camera.id(),
             vertices_array: cube_geometry.array(),
             transform_id: transform.id(),
             ..Default::default()
@@ -696,7 +691,6 @@ mod test {
             ..Default::default()
         });
         let cube = stage.new_value(Renderlet {
-            camera_id: camera.id(),
             vertices_array: geometry.array(),
             material_id: material.id(),
             transform_id: transform.id(),
@@ -778,7 +772,6 @@ mod test {
         ]);
 
         let color_prim = stage.new_value(Renderlet {
-            camera_id: camera.id(),
             vertices_array: geometry.array(),
             ..Default::default()
         });
@@ -790,7 +783,6 @@ mod test {
             ..Default::default()
         });
         let cheetah_prim = stage.new_value(Renderlet {
-            camera_id: camera.id(),
             vertices_array: geometry.array(),
             transform_id: cheetah_transform.id(),
             material_id: cheetah_material.id(),
@@ -868,7 +860,6 @@ mod test {
                 .collect::<Vec<_>>(),
         );
         let cube = stage.new_value(Renderlet {
-            camera_id: camera.id(),
             vertices_array: geometry.array(),
             material_id: material.id(),
             ..Default::default()
@@ -985,7 +976,6 @@ mod test {
 
         let cyan_primitive = stage.new_value(Renderlet {
             vertices_array: geometry.array(),
-            camera_id: camera.id(),
             material_id: cyan_material.id(),
             transform_id: cyan_node.global_transform_id(),
             ..Default::default()
@@ -993,7 +983,6 @@ mod test {
         stage.add_renderlet(&cyan_primitive);
         let yellow_primitive = stage.new_value(Renderlet {
             vertices_array: geometry.array(),
-            camera_id: camera.id(),
             material_id: yellow_material.id(),
             transform_id: yellow_node.global_transform_id(),
             ..Default::default()
@@ -1001,7 +990,6 @@ mod test {
         stage.add_renderlet(&yellow_primitive);
         let red_primitive = stage.new_value(Renderlet {
             vertices_array: geometry.array(),
-            camera_id: camera.id(),
             material_id: red_material.id(),
             transform_id: red_node.global_transform_id(),
             ..Default::default()
@@ -1043,7 +1031,6 @@ mod test {
             ..Default::default()
         });
         let cube = stage.new_value(Renderlet {
-            camera_id: camera.id(),
             vertices_array: geometry.array(),
             transform_id: transform.id(),
             ..Default::default()

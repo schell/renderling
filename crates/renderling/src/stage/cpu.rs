@@ -6,20 +6,19 @@ use core::sync::atomic::{AtomicU32, Ordering};
 use craballoc::prelude::*;
 use crabslab::Id;
 use snafu::Snafu;
-use std::{
-    ops::Deref,
-    sync::{atomic::AtomicBool, Arc, Mutex, RwLock},
-};
+use std::sync::{atomic::AtomicBool, Arc, Mutex, RwLock};
 
 use crate::{
-    atlas::{Atlas, AtlasError, AtlasImage, AtlasImageError, AtlasTexture},
+    atlas::{AtlasError, AtlasImage, AtlasImageError, AtlasTexture},
     bindgroup::ManagedBindGroup,
     bloom::Bloom,
     camera::Camera,
     debug::DebugOverlay,
     draw::DrawCalls,
+    geometry::Geometry,
     light::Lighting,
-    pbr::{debug::DebugChannel, PbrConfig},
+    material::Materials,
+    pbr::debug::DebugChannel,
     skybox::{Skybox, SkyboxRenderPipeline},
     stage::Renderlet,
     texture::{DepthTexture, Texture},
@@ -171,9 +170,9 @@ impl StageRendering<'_> {
 /// Only available on the CPU. Not available in shaders.
 #[derive(Clone)]
 pub struct Stage {
-    pub(crate) mngr: SlabAllocator<WgpuRuntime>,
-
-    pub(crate) pbr_config: Hybrid<PbrConfig>,
+    pub(crate) geometry: Geometry,
+    pub(crate) materials: Materials,
+    pub(crate) lighting: Lighting,
 
     pub(crate) stage_pipeline: Arc<RwLock<wgpu::RenderPipeline>>,
     pub(crate) skybox_pipeline: Arc<RwLock<Option<Arc<SkyboxRenderPipeline>>>>,
@@ -185,10 +184,8 @@ pub struct Stage {
     pub(crate) clear_color_attachments: Arc<AtomicBool>,
     pub(crate) clear_depth_attachments: Arc<AtomicBool>,
 
-    pub(crate) atlas: Atlas,
     pub(crate) bloom: Bloom,
     pub(crate) skybox: Arc<RwLock<Skybox>>,
-    pub(crate) lighting: Lighting,
     pub(crate) tonemapping: Tonemapping,
     pub(crate) debug_overlay: DebugOverlay,
     pub(crate) background_color: Arc<RwLock<wgpu::Color>>,
@@ -206,15 +203,40 @@ pub struct Stage {
     pub(crate) draw_calls: Arc<RwLock<DrawCalls>>,
 }
 
-impl Deref for Stage {
-    type Target = SlabAllocator<WgpuRuntime>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.mngr
+impl AsRef<WgpuRuntime> for Stage {
+    fn as_ref(&self) -> &WgpuRuntime {
+        self.geometry.as_ref()
     }
 }
 
 impl Stage {
+    pub fn device(&self) -> &wgpu::Device {
+        &self.as_ref().device
+    }
+
+    pub fn queue(&self) -> &wgpu::Queue {
+        &self.as_ref().queue
+    }
+
+    pub fn runtime(&self) -> &WgpuRuntime {
+        self.as_ref()
+    }
+
+    /// Access the geometry manager.
+    pub fn geometry(&self) -> &Geometry {
+        &self.geometry
+    }
+
+    /// Access the materials manager.
+    pub fn materials(&self) -> &Materials {
+        &self.materials
+    }
+
+    /// Access the lighting manager.
+    pub fn lighting(&self) -> &Lighting {
+        &self.lighting
+    }
+
     pub fn create_stage_render_pipeline(
         device: &wgpu::Device,
         fragment_color_format: wgpu::TextureFormat,
@@ -288,16 +310,13 @@ impl Stage {
         let device = &runtime.device;
         let resolution @ UVec2 { x: w, y: h } = ctx.get_size();
         let atlas_size = *ctx.atlas_size.read().unwrap();
-
-        let mngr =
-            SlabAllocator::new_with_label(runtime, wgpu::BufferUsages::empty(), Some("stage-slab"));
-        let pbr_config = mngr.new_value(PbrConfig {
-            atlas_size: UVec2::new(atlas_size.width, atlas_size.height),
+        let geometry = Geometry::new(
+            ctx,
             resolution,
-            ..Default::default()
-        });
+            UVec2::new(atlas_size.width, atlas_size.height),
+        );
+        let materials = Materials::new(runtime, atlas_size);
 
-        let atlas = Atlas::new(&mngr, atlas_size, None, Some("stage-atlas"), None);
         let multisample_count = 1;
         let hdr_texture = Arc::new(RwLock::new(Texture::create_hdr_texture(
             device,
@@ -320,29 +339,28 @@ impl Stage {
             wgpu::TextureFormat::Rgba16Float,
             multisample_count,
         );
-        let stage_slab_buffer = mngr.commit();
+        let geometry_buffer = geometry.slab_allocator().commit();
 
-        let lighting = Lighting::new(&mngr);
+        let lighting = Lighting::new(&geometry);
 
         Self {
+            materials,
             draw_calls: Arc::new(RwLock::new(DrawCalls::new(
                 ctx,
                 true,
-                &mngr.commit(),
+                &geometry_buffer,
                 &depth_texture,
             ))),
             lighting,
             depth_texture: Arc::new(RwLock::new(depth_texture)),
             buffers_bindgroup: ManagedBindGroup::from(crate::linkage::slab_bindgroup(
                 device,
-                &stage_slab_buffer,
+                &geometry_buffer,
                 &stage_pipeline.get_bind_group_layout(0),
             )),
-            stage_slab_buffer: Arc::new(RwLock::new(stage_slab_buffer)),
-            mngr,
-            pbr_config,
+            stage_slab_buffer: Arc::new(RwLock::new(geometry_buffer)),
+            geometry,
             stage_pipeline: Arc::new(RwLock::new(stage_pipeline)),
-            atlas,
             skybox: Arc::new(RwLock::new(Skybox::empty(runtime))),
             skybox_bindgroup: Default::default(),
             skybox_pipeline: Default::default(),
@@ -460,7 +478,9 @@ impl Stage {
 
     /// Set the debug mode.
     pub fn set_debug_mode(&self, debug_mode: DebugChannel) {
-        self.pbr_config.modify(|cfg| cfg.debug_channel = debug_mode);
+        self.geometry
+            .descriptor()
+            .modify(|cfg| cfg.debug_channel = debug_mode);
     }
 
     /// Set the debug mode.
@@ -485,7 +505,8 @@ impl Stage {
     ///
     /// This defaults to `true`.
     pub fn set_use_frustum_culling(&self, use_frustum_culling: bool) {
-        self.pbr_config
+        self.geometry
+            .descriptor()
             .modify(|cfg| cfg.perform_frustum_culling = use_frustum_culling);
     }
 
@@ -503,7 +524,8 @@ impl Stage {
     ///
     /// Occlusion culling is a feature in development. YMMV.
     pub fn set_use_occlusion_culling(&self, use_occlusion_culling: bool) {
-        self.pbr_config
+        self.geometry
+            .descriptor()
             .modify(|cfg| cfg.perform_occlusion_culling = use_occlusion_culling);
     }
 
@@ -515,7 +537,8 @@ impl Stage {
 
     /// Set whether the stage uses lighting.
     pub fn set_has_lighting(&self, use_lighting: bool) {
-        self.pbr_config
+        self.geometry
+            .descriptor()
             .modify(|cfg| cfg.has_lighting = use_lighting);
     }
 
@@ -527,7 +550,8 @@ impl Stage {
 
     /// Set whether to use vertex skinning.
     pub fn set_has_vertex_skinning(&self, use_skinning: bool) {
-        self.pbr_config
+        self.geometry
+            .descriptor()
             .modify(|cfg| cfg.has_skinning = use_skinning);
     }
 
@@ -550,7 +574,9 @@ impl Stage {
             return;
         }
 
-        self.pbr_config.modify(|cfg| cfg.resolution = size);
+        self.geometry
+            .descriptor()
+            .modify(|cfg| cfg.resolution = size);
         let hdr_texture = Texture::create_hdr_texture(self.device(), size.x, size.y, 1);
         let sample_count = self.msaa_sample_count.load(Ordering::Relaxed);
         if let Some(msaa_view) = self.msaa_render_target.write().unwrap().as_mut() {
@@ -590,7 +616,7 @@ impl Stage {
     /// This will cause a repacking.
     pub fn set_atlas_size(&self, size: wgpu::Extent3d) -> Result<(), StageError> {
         log::info!("resizing atlas to {size:?}");
-        self.atlas.resize(self.runtime(), size)?;
+        self.materials.atlas().resize(self.runtime(), size)?;
         Ok(())
     }
 
@@ -614,7 +640,7 @@ impl Stage {
         images: impl IntoIterator<Item = impl Into<AtlasImage>>,
     ) -> Result<Vec<Hybrid<AtlasTexture>>, StageError> {
         let images = images.into_iter().map(|i| i.into()).collect::<Vec<_>>();
-        let frames = self.atlas.add_images(&images)?;
+        let frames = self.materials.atlas().add_images(&images)?;
 
         // The textures bindgroup will have to be remade
         let _ = self.textures_bindgroup.lock().unwrap().take();
@@ -644,7 +670,7 @@ impl Stage {
         images: impl IntoIterator<Item = impl Into<AtlasImage>>,
     ) -> Result<Vec<Hybrid<AtlasTexture>>, StageError> {
         let images = images.into_iter().map(|i| i.into()).collect::<Vec<_>>();
-        let frames = self.atlas.set_images(&images)?;
+        let frames = self.materials.atlas().set_images(&images)?;
 
         // The textures bindgroup will have to be remade
         let _ = self.textures_bindgroup.lock().unwrap().take();
@@ -760,8 +786,8 @@ impl Stage {
                 // UNWRAP: POP
                 .unwrap()
                 .get_bind_group_layout(1),
+                &self.materials.atlas(),
                 // UNWRAP: POP
-                &self.atlas,
                 &self.skybox.read().unwrap(),
             ));
             *bindgroup = Some(b.clone());
@@ -833,13 +859,14 @@ impl Stage {
     }
 
     pub fn new_nested_transform(&self) -> NestedTransform {
-        NestedTransform::new(&self.mngr)
+        NestedTransform::new(self.geometry.slab_allocator())
     }
 
     fn tick_internal(&self) {
         self.draw_calls.write().unwrap().upkeep();
 
-        let stage_slab_buffer = self.mngr.commit();
+        // TODO: maybe we should move this to Geometry
+        let stage_slab_buffer = self.geometry.slab_allocator().commit();
         if stage_slab_buffer.is_new_this_commit() {
             // invalidate our bindgroups, etc
             // TODO: we shouldn't have to invalidate skybox and other bindgroups,
@@ -853,12 +880,8 @@ impl Stage {
     /// It's good to call this after dropping assets to free up space on the
     /// slab.
     pub fn tick(&self) {
-        self.atlas.upkeep(self.runtime());
+        self.materials.upkeep();
         self.tick_internal();
-    }
-
-    pub fn lighting(&self) -> &Lighting {
-        &self.lighting
     }
 
     pub fn render(&self, view: &wgpu::TextureView) {
@@ -1287,7 +1310,7 @@ mod test {
 
     use crate::{
         camera::Camera,
-        pbr::PbrConfig,
+        pbr::GeometryDescriptor,
         stage::{cpu::SlabAllocator, NestedTransform, Renderlet, Vertex},
         transform::Transform,
         Context,
@@ -1381,7 +1404,6 @@ mod test {
                 .with_color([1.0, 0.0, 1.0, 1.0]),
         ]);
         let triangle = stage.new_value(Renderlet {
-            camera_id: camera.id(),
             vertices_array: vertices.array(),
             ..Default::default()
         });
@@ -1438,7 +1460,7 @@ mod test {
         stage.commit();
 
         let slab = futures_lite::future::block_on(stage.read(..)).unwrap();
-        let pbr_desc = slab.read_unchecked(Id::<PbrConfig>::new(0));
+        let pbr_desc = slab.read_unchecked(Id::<GeometryDescriptor>::new(0));
         pretty_assertions::assert_eq!(stage.pbr_config.get(), pbr_desc);
     }
 }

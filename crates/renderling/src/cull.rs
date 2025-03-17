@@ -12,7 +12,7 @@ use spirv_std::{
     spirv,
 };
 
-use crate::{draw::DrawIndirectArgs, pbr::PbrConfig, stage::Renderlet};
+use crate::{draw::DrawIndirectArgs, geometry::GeometryDescriptor, stage::Renderlet};
 
 #[cfg(not(target_arch = "spirv"))]
 mod cpu;
@@ -47,12 +47,12 @@ pub fn compute_culling(
         return;
     }
 
-    let config: PbrConfig = stage_slab.read(Id::new(0));
+    let config: GeometryDescriptor = stage_slab.read(Id::new(0));
     if !config.perform_frustum_culling {
         return;
     }
 
-    let camera = stage_slab.read(renderlet.camera_id);
+    let camera = stage_slab.read(config.camera_id);
     let model = stage_slab.read(renderlet.transform_id);
     // Compute frustum culling, and then occlusion culling, if need be
     let (renderlet_is_inside_frustum, sphere_in_world_coords) =

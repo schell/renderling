@@ -88,17 +88,7 @@ impl SceneCubemap {
 
     pub fn run(&self, stage: &Stage) {
         // create a camera for our cube
-        let camera = stage.new_value(Camera::default());
-
-        let mut prev_camera_ids = vec![];
-        for rlet in stage.renderlets_iter() {
-            if let Some(rlet) = rlet.upgrade() {
-                let mut guard = rlet.lock();
-                prev_camera_ids.push(guard.camera_id);
-                // Overwrite the renderlet's camera
-                guard.camera_id = camera.id();
-            }
-        }
+        let camera = stage.geometry.new_camera(Camera::default());
 
         // By setting this to 90 degrees (PI/2 radians) we make sure the viewing field
         // is exactly large enough to fill a single face of the cubemap such that all
@@ -307,7 +297,6 @@ mod test {
         let renderlet = stage.new_value(Renderlet {
             vertices_array: vertices.array(),
             indices_array: indices.array(),
-            camera_id: camera.id(),
             ..Default::default()
         });
         stage.add_renderlet(&renderlet);
