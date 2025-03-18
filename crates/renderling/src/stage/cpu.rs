@@ -24,6 +24,7 @@ use crate::{
     texture::{DepthTexture, Texture},
     tonemapping::Tonemapping,
     transform::Transform,
+    tuple::Bundle,
 };
 
 use super::*;
@@ -162,6 +163,136 @@ impl StageRendering<'_> {
     }
 }
 
+/// A helper struct to build [`Renderlet`]s in the [`Geometry`] manager.
+pub struct RenderletBuilder<'a, T> {
+    data: Renderlet,
+    resources: T,
+    stage: &'a Stage,
+}
+
+impl<'a> RenderletBuilder<'a, ()> {
+    pub fn new(stage: &'a Stage) -> Self {
+        RenderletBuilder {
+            data: Renderlet::default(),
+            resources: (),
+            stage,
+        }
+    }
+}
+
+impl<'a, T: Bundle> RenderletBuilder<'a, T> {
+    fn suffix<S>(self, element: S) -> RenderletBuilder<'a, T::Suffixed<S>> {
+        RenderletBuilder {
+            data: self.data,
+            resources: self.resources.suffix(element),
+            stage: self.stage,
+        }
+    }
+
+    pub fn with_vertices_array(mut self, array: Array<Vertex>) -> Self {
+        self.data.vertices_array = array;
+        self
+    }
+
+    pub fn with_vertices(
+        mut self,
+        vertices: impl IntoIterator<Item = Vertex>,
+    ) -> RenderletBuilder<'a, T::Suffixed<HybridArray<Vertex>>> {
+        let vertices = self.stage.geometry().new_vertices(vertices);
+        self.data.vertices_array = vertices.array();
+        self.suffix(vertices)
+    }
+
+    pub fn with_indices(
+        mut self,
+        indices: impl IntoIterator<Item = u32>,
+    ) -> RenderletBuilder<'a, T::Suffixed<HybridArray<u32>>> {
+        let indices = self.stage.geometry().new_indices(indices);
+        self.data.indices_array = indices.array();
+        self.suffix(indices)
+    }
+
+    pub fn with_transform_id(mut self, transform_id: Id<Transform>) -> Self {
+        self.data.transform_id = transform_id;
+        self
+    }
+
+    pub fn with_transform(
+        mut self,
+        transform: Transform,
+    ) -> RenderletBuilder<'a, T::Suffixed<Hybrid<Transform>>> {
+        let transform = self.stage.geometry().new_transform(transform);
+        self.data.transform_id = transform.id();
+        self.suffix(transform)
+    }
+
+    pub fn with_nested_transform(mut self, transform: &NestedTransform) -> Self {
+        self.data.transform_id = transform.global_transform_id();
+        self
+    }
+
+    pub fn with_material_id(mut self, material_id: Id<Material>) -> Self {
+        self.data.material_id = material_id;
+        self
+    }
+
+    pub fn with_material(
+        mut self,
+        material: Material,
+    ) -> RenderletBuilder<'a, T::Suffixed<Hybrid<Material>>> {
+        let material = self.stage.materials.new_material(material);
+        self.data.material_id = material.id();
+        self.suffix(material)
+    }
+
+    pub fn with_skin_id(mut self, skin_id: Id<Skin>) -> Self {
+        self.data.skin_id = skin_id;
+        self
+    }
+
+    pub fn with_morph_targets(
+        mut self,
+        morph_targets: impl IntoIterator<Item = Array<MorphTarget>>,
+    ) -> (Self, HybridArray<Array<MorphTarget>>) {
+        let morph_targets = self.stage.geometry().new_morph_targets_array(morph_targets);
+        self.data.morph_targets = morph_targets.array();
+        (self, morph_targets)
+    }
+
+    pub fn with_morph_weights(
+        mut self,
+        morph_weights: impl IntoIterator<Item = f32>,
+    ) -> (Self, HybridArray<f32>) {
+        let morph_weights = self.stage.geometry().new_weights(morph_weights);
+        self.data.morph_weights = morph_weights.array();
+        (self, morph_weights)
+    }
+
+    pub fn with_geometry_descriptor_id(mut self, pbr_config_id: Id<GeometryDescriptor>) -> Self {
+        self.data.geometry_descriptor_id = pbr_config_id;
+        self
+    }
+
+    pub fn with_bounds(mut self, bounds: impl Into<BoundingSphere>) -> Self {
+        self.data.bounds = bounds.into();
+        self
+    }
+
+    /// Build the [`Renderlet`], add it to the [`Stage`] with [`Stage::add_renderlet`] and
+    /// return the [`Hybrid`] along with any resources that were staged.
+    ///
+    /// The returned value will be a tuple with the [`Hybrid<Renderlet>`] as the head, and
+    /// all other resources added as the tail.
+    pub fn build(self) -> <T::Suffixed<Hybrid<Renderlet>> as Bundle>::Reduced
+    where
+        T::Suffixed<Hybrid<Renderlet>>: Bundle,
+    {
+        let renderlet = self.stage.geometry().new_renderlet(self.data);
+        self.stage.add_renderlet(&renderlet);
+        self.resources.suffix(renderlet).reduce()
+    }
+}
+
 /// Represents an entire scene worth of rendering data.
 ///
 /// A clone of a stage is a reference to the same stage.
@@ -235,6 +366,53 @@ impl Stage {
     /// Access the lighting manager.
     pub fn lighting(&self) -> &Lighting {
         &self.lighting
+    }
+
+    pub fn builder(&self) -> RenderletBuilder<'_, ()> {
+        RenderletBuilder::new(self)
+    }
+
+    /// Stage a [`Camera`] on the GPU.
+    ///
+    /// If the camera has not been set, this camera will be used
+    /// automatically.
+    pub fn new_camera(&self, camera: Camera) -> Hybrid<Camera> {
+        self.geometry.new_camera(camera)
+    }
+
+    /// Stage a [`Transform`] on the GPU.
+    pub fn new_transform(&self, transform: Transform) -> Hybrid<Transform> {
+        self.geometry.new_transform(transform)
+    }
+
+    /// Stage a new [`Material`] on the GPU.
+    pub fn new_material(&self, material: Material) -> Hybrid<Material> {
+        self.materials.new_material(material)
+    }
+
+    /// Stage some vertex geometry data.
+    pub fn new_vertices(&self, data: impl IntoIterator<Item = Vertex>) -> HybridArray<Vertex> {
+        self.geometry.new_vertices(data)
+    }
+
+    /// Stage some vertex index data.
+    pub fn new_indices(&self, data: impl IntoIterator<Item = u32>) -> HybridArray<u32> {
+        self.geometry.new_indices(data)
+    }
+
+    /// Stage a new [`Renderlet`].
+    ///
+    /// The `Renderlet` should still be added to the draw list with
+    /// [`Stage::add_renderlet`].
+    pub fn new_renderlet(&self, renderlet: Renderlet) -> Hybrid<Renderlet> {
+        self.geometry.new_renderlet(renderlet)
+    }
+
+    /// Commit all staged changes to the GPU.
+    pub fn commit(&self) {
+        self.geometry.slab_allocator().commit();
+        self.materials.slab_allocator().commit();
+        self.lighting.slab_allocator().commit();
     }
 
     pub fn create_stage_render_pipeline(
@@ -786,7 +964,7 @@ impl Stage {
                 // UNWRAP: POP
                 .unwrap()
                 .get_bind_group_layout(1),
-                &self.materials.atlas(),
+                self.materials.atlas(),
                 // UNWRAP: POP
                 &self.skybox.read().unwrap(),
             ));
@@ -1207,10 +1385,10 @@ impl NestedTransform<WeakContainer> {
 }
 
 impl NestedTransform {
-    pub fn new(mngr: &SlabAllocator<impl IsRuntime>) -> Self {
+    pub fn new(slab: &SlabAllocator<impl IsRuntime>) -> Self {
         let nested = NestedTransform {
             local_transform: Arc::new(RwLock::new(Transform::default())),
-            global_transform: mngr.new_value(Transform::default()),
+            global_transform: slab.new_value(Transform::default()),
             children: Default::default(),
             parent: Default::default(),
         };
@@ -1222,7 +1400,7 @@ impl NestedTransform {
     /// slab.
     ///
     /// This is used by the GLTF parser to move light's node transforms to the
-    /// light slab after they are created, which keeping any geometry's node
+    /// light slab after they are created, while keeping any geometry's node
     /// transforms untouched.
     pub(crate) fn move_gpu_to_slab(&mut self, slab: &SlabAllocator<impl IsRuntime>) {
         self.global_transform = slab.new_value(Transform::default());
@@ -1310,7 +1488,7 @@ mod test {
 
     use crate::{
         camera::Camera,
-        pbr::GeometryDescriptor,
+        geometry::GeometryDescriptor,
         stage::{cpu::SlabAllocator, NestedTransform, Renderlet, Vertex},
         transform::Transform,
         Context,
@@ -1391,23 +1569,21 @@ mod test {
             .new_stage()
             .with_background_color([1.0, 1.0, 1.0, 1.0])
             .with_lighting(false);
-        let camera = stage.new_value(Camera::default_ortho2d(100.0, 100.0));
-        let vertices = stage.new_array([
-            Vertex::default()
-                .with_position([10.0, 10.0, 0.0])
-                .with_color([0.0, 1.0, 1.0, 1.0]),
-            Vertex::default()
-                .with_position([10.0, 90.0, 0.0])
-                .with_color([1.0, 1.0, 0.0, 1.0]),
-            Vertex::default()
-                .with_position([90.0, 10.0, 0.0])
-                .with_color([1.0, 0.0, 1.0, 1.0]),
-        ]);
-        let triangle = stage.new_value(Renderlet {
-            vertices_array: vertices.array(),
-            ..Default::default()
-        });
-        stage.add_renderlet(&triangle);
+        let _camera = stage.new_camera(Camera::default_ortho2d(100.0, 100.0));
+        let _triangle_rez = stage
+            .builder()
+            .with_vertices([
+                Vertex::default()
+                    .with_position([10.0, 10.0, 0.0])
+                    .with_color([0.0, 1.0, 1.0, 1.0]),
+                Vertex::default()
+                    .with_position([10.0, 90.0, 0.0])
+                    .with_color([1.0, 1.0, 0.0, 1.0]),
+                Vertex::default()
+                    .with_position([90.0, 10.0, 0.0])
+                    .with_color([1.0, 0.0, 1.0, 1.0]),
+            ])
+            .build();
 
         log::debug!("rendering without msaa");
         let frame = ctx.get_next_frame().unwrap();
@@ -1444,7 +1620,7 @@ mod test {
     fn has_consistent_stage_renderlet_strong_count() {
         let ctx = Context::headless(100, 100);
         let stage = ctx.new_stage();
-        let r = stage.new_value(Renderlet::default());
+        let r = stage.new_renderlet(Renderlet::default());
         assert_eq!(1, r.ref_count());
 
         stage.add_renderlet(&r);
@@ -1459,8 +1635,9 @@ mod test {
         let stage = ctx.new_stage();
         stage.commit();
 
-        let slab = futures_lite::future::block_on(stage.read(..)).unwrap();
+        let slab =
+            futures_lite::future::block_on(stage.geometry().slab_allocator().read(..)).unwrap();
         let pbr_desc = slab.read_unchecked(Id::<GeometryDescriptor>::new(0));
-        pretty_assertions::assert_eq!(stage.pbr_config.get(), pbr_desc);
+        pretty_assertions::assert_eq!(stage.geometry().descriptor().get(), pbr_desc);
     }
 }

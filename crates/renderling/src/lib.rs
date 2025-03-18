@@ -168,6 +168,7 @@ pub mod stage;
 pub mod texture;
 pub mod tonemapping;
 pub mod transform;
+pub mod tuple;
 #[cfg(feature = "tutorial")]
 pub mod tutorial;
 
@@ -206,14 +207,9 @@ macro_rules! println {
 mod test {
     use super::*;
     use crate::{
-        atlas::AtlasImage,
-        camera::Camera,
-        pbr::Material,
-        stage::{NestedTransform, Renderlet, Vertex},
-        transform::Transform,
+        atlas::AtlasImage, camera::Camera, pbr::Material, stage::Vertex, transform::Transform,
     };
 
-    use craballoc::value::Hybrid;
     use glam::{Mat3, Mat4, Quat, UVec2, Vec2, Vec3, Vec4};
     use img_diff::DiffCfg;
     use pretty_assertions::assert_eq;
@@ -317,13 +313,8 @@ mod test {
     fn cmy_triangle_sanity() {
         let ctx = Context::headless(100, 100);
         let stage = ctx.new_stage().with_background_color(Vec4::splat(1.0));
-        let camera = stage.new_value(Camera::default_ortho2d(100.0, 100.0));
-        let geometry = stage.new_array(right_tri_vertices());
-        let tri = stage.new_value(Renderlet {
-            vertices_array: geometry.array(),
-            ..Default::default()
-        });
-        stage.add_renderlet(&tri);
+        let _camera = stage.new_camera(Camera::default_ortho2d(100.0, 100.0));
+        let _rez = stage.builder().with_vertices(right_tri_vertices()).build();
 
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
@@ -353,17 +344,15 @@ mod test {
 
         let ctx = Context::headless(100, 100);
         let stage = ctx.new_stage().with_background_color(Vec4::splat(1.0));
-        let camera = stage.new_value(Camera::default_ortho2d(100.0, 100.0));
-        let geometry = stage.new_array({
-            let mut vs = right_tri_vertices();
-            vs.reverse();
-            vs
-        });
-        let tri = stage.new_value(Renderlet {
-            vertices_array: geometry.array(),
-            ..Default::default()
-        });
-        stage.add_renderlet(&tri);
+        let _camera = stage.new_camera(Camera::default_ortho2d(100.0, 100.0));
+        let _rez = stage
+            .builder()
+            .with_vertices({
+                let mut vs = right_tri_vertices();
+                vs.reverse();
+                vs
+            })
+            .build();
 
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
@@ -385,15 +374,12 @@ mod test {
     fn cmy_triangle_update_transform() {
         let ctx = Context::headless(100, 100);
         let stage = ctx.new_stage().with_background_color(Vec4::splat(1.0));
-        let camera = stage.new_value(Camera::default_ortho2d(100.0, 100.0));
-        let geometry = stage.new_array(right_tri_vertices());
-        let transform = stage.new_value(Transform::default());
-        let tri = stage.new_value(Renderlet {
-            vertices_array: geometry.array(),
-            transform_id: transform.id(),
-            ..Default::default()
-        });
-        stage.add_renderlet(&tri);
+        let _camera = stage.new_camera(Camera::default_ortho2d(100.0, 100.0));
+        let (_vertices, transform, _renderlet) = stage
+            .builder()
+            .with_vertices(right_tri_vertices())
+            .with_transform(Transform::default())
+            .build();
 
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
@@ -454,22 +440,19 @@ mod test {
         let ctx = Context::headless(100, 100);
         let stage = ctx.new_stage().with_background_color(Vec4::splat(1.0));
         let camera_position = Vec3::new(0.0, 12.0, 20.0);
-        let camera = stage.new_value(Camera::new(
+        let _camera = stage.new_camera(Camera::new(
             Mat4::perspective_rh(std::f32::consts::PI / 4.0, 1.0, 0.1, 100.0),
             Mat4::look_at_rh(camera_position, Vec3::ZERO, Vec3::Y),
         ));
-        let geometry = stage.new_array(gpu_cube_vertices());
-        let transform = stage.new_value(Transform {
-            scale: Vec3::new(6.0, 6.0, 6.0),
-            rotation: Quat::from_axis_angle(Vec3::Y, -std::f32::consts::FRAC_PI_4),
-            ..Default::default()
-        });
-        let cube = stage.new_value(Renderlet {
-            vertices_array: geometry.array(),
-            transform_id: transform.id(),
-            ..Default::default()
-        });
-        stage.add_renderlet(&cube);
+        let _rez = stage
+            .builder()
+            .with_vertices(gpu_cube_vertices())
+            .with_transform(Transform {
+                scale: Vec3::new(6.0, 6.0, 6.0),
+                rotation: Quat::from_axis_angle(Vec3::Y, -std::f32::consts::FRAC_PI_4),
+                ..Default::default()
+            })
+            .build();
 
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
@@ -483,24 +466,20 @@ mod test {
         let ctx = Context::headless(100, 100);
         let stage = ctx.new_stage().with_background_color(Vec4::splat(1.0));
         let camera_position = Vec3::new(0.0, 12.0, 20.0);
-        let camera = stage.new_value(Camera::new(
+        let _camera = stage.new_camera(Camera::new(
             Mat4::perspective_rh(std::f32::consts::PI / 4.0, 1.0, 0.1, 100.0),
             Mat4::look_at_rh(camera_position, Vec3::ZERO, Vec3::Y),
         ));
-        let vertices = stage.new_array(math::UNIT_POINTS.map(cmy_gpu_vertex));
-        let indices = stage.new_array(math::UNIT_INDICES.map(|i| i as u32));
-        let transform = stage.new_value(Transform {
-            scale: Vec3::new(6.0, 6.0, 6.0),
-            rotation: Quat::from_axis_angle(Vec3::Y, -std::f32::consts::FRAC_PI_4),
-            ..Default::default()
-        });
-        let cube = stage.new_value(Renderlet {
-            vertices_array: vertices.array(),
-            indices_array: indices.array(),
-            transform_id: transform.id(),
-            ..Default::default()
-        });
-        stage.add_renderlet(&cube);
+        let _rez = stage
+            .builder()
+            .with_vertices(math::UNIT_POINTS.map(cmy_gpu_vertex))
+            .with_indices(math::UNIT_INDICES.map(|i| i as u32))
+            .with_transform(Transform {
+                scale: Vec3::new(6.0, 6.0, 6.0),
+                rotation: Quat::from_axis_angle(Vec3::Y, -std::f32::consts::FRAC_PI_4),
+                ..Default::default()
+            })
+            .build();
 
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
@@ -522,29 +501,26 @@ mod test {
         let ctx = Context::headless(100, 100);
         let stage = ctx.new_stage().with_background_color(Vec4::splat(1.0));
         let (projection, view) = camera::default_perspective(100.0, 100.0);
-        let camera = stage.new_value(Camera::new(projection, view));
-        let geometry = stage.new_array(gpu_cube_vertices());
-        let cube_one_transform = stage.new_value(Transform {
-            translation: Vec3::new(-4.5, 0.0, 0.0),
-            scale: Vec3::new(6.0, 6.0, 6.0),
-            rotation: Quat::from_axis_angle(Vec3::Y, -std::f32::consts::FRAC_PI_4),
-        });
-        let mut renderlet = Renderlet {
-            vertices_array: geometry.array(),
-            transform_id: cube_one_transform.id(),
-            ..Default::default()
-        };
-        let cube_one = stage.new_value(renderlet);
-        stage.add_renderlet(&cube_one);
+        let _camera = stage.new_camera(Camera::new(projection, view));
+        let (geometry, _cube_one_transform, _cube_one) = stage
+            .builder()
+            .with_vertices(gpu_cube_vertices())
+            .with_transform(Transform {
+                translation: Vec3::new(-4.5, 0.0, 0.0),
+                scale: Vec3::new(6.0, 6.0, 6.0),
+                rotation: Quat::from_axis_angle(Vec3::Y, -std::f32::consts::FRAC_PI_4),
+            })
+            .build();
 
-        let cube_two_transform = stage.new_value(Transform {
-            translation: Vec3::new(4.5, 0.0, 0.0),
-            scale: Vec3::new(6.0, 6.0, 6.0),
-            rotation: Quat::from_axis_angle(Vec3::Y, std::f32::consts::FRAC_PI_4),
-        });
-        renderlet.transform_id = cube_two_transform.id();
-        let cube_two = stage.new_value(renderlet);
-        stage.add_renderlet(&cube_two);
+        let (_cube_two_transform, cube_two) = stage
+            .builder()
+            .with_vertices_array(geometry.array())
+            .with_transform(Transform {
+                translation: Vec3::new(4.5, 0.0, 0.0),
+                scale: Vec3::new(6.0, 6.0, 6.0),
+                rotation: Quat::from_axis_angle(Vec3::Y, std::f32::consts::FRAC_PI_4),
+            })
+            .build();
 
         // we should see two colored cubes
         let frame = ctx.get_next_frame().unwrap();
@@ -584,24 +560,15 @@ mod test {
             .with_lighting(false)
             .with_background_color(Vec4::splat(1.0));
         let (projection, view) = camera::default_perspective(100.0, 100.0);
-        let camera = stage.new_value(Camera::new(projection, view));
-        let cube_geometry =
-            stage.new_array(math::UNIT_INDICES.map(|i| cmy_gpu_vertex(math::UNIT_POINTS[i])));
-        let pyramid_points = pyramid_points();
-        let pyramid_geometry =
-            stage.new_array(pyramid_indices().map(|i| cmy_gpu_vertex(pyramid_points[i as usize])));
-
-        let transform = stage.new_value(Transform {
-            scale: Vec3::new(10.0, 10.0, 10.0),
-            ..Default::default()
-        });
-
-        let cube: Hybrid<Renderlet> = stage.new_value(Renderlet {
-            vertices_array: cube_geometry.array(),
-            transform_id: transform.id(),
-            ..Default::default()
-        });
-        stage.add_renderlet(&cube);
+        let _camera = stage.new_camera(Camera::new(projection, view));
+        let (_cube_geometry, _transform, cube) = stage
+            .builder()
+            .with_vertices(math::UNIT_INDICES.map(|i| cmy_gpu_vertex(math::UNIT_POINTS[i])))
+            .with_transform(Transform {
+                scale: Vec3::new(10.0, 10.0, 10.0),
+                ..Default::default()
+            })
+            .build();
 
         // we should see a cube (in sRGB color space)
         let frame = ctx.get_next_frame().unwrap();
@@ -612,6 +579,9 @@ mod test {
 
         // Update the cube mesh to a pyramid by overwriting the `.vertices` field
         // of `Renderlet`
+        let pyramid_points = pyramid_points();
+        let pyramid_geometry = stage
+            .new_vertices(pyramid_indices().map(|i| cmy_gpu_vertex(pyramid_points[i as usize])));
         cube.modify(|r| r.vertices_array = pyramid_geometry.array());
 
         // we should see a pyramid (in sRGB color space)
@@ -674,29 +644,25 @@ mod test {
         let ctx = Context::headless(100, 100);
         let stage = ctx.new_stage().with_background_color(Vec4::splat(0.0));
         let (projection, view) = camera::default_perspective(100.0, 100.0);
-        let camera = stage.new_value(Camera::new(projection, view));
+        let _camera = stage.new_camera(Camera::new(projection, view));
 
         let sandstone = AtlasImage::from(image::open("../../img/sandstone.png").unwrap());
         let dirt = AtlasImage::from(image::open("../../img/dirt.jpg").unwrap());
         let entries = stage.set_images([sandstone, dirt]).unwrap();
 
-        let material = stage.new_value(Material {
-            albedo_texture_id: entries[0].id(),
-            has_lighting: false,
-            ..Default::default()
-        });
-        let geometry = stage.new_array(gpu_uv_unit_cube());
-        let transform = stage.new_value(Transform {
-            scale: Vec3::new(10.0, 10.0, 10.0),
-            ..Default::default()
-        });
-        let cube = stage.new_value(Renderlet {
-            vertices_array: geometry.array(),
-            material_id: material.id(),
-            transform_id: transform.id(),
-            ..Default::default()
-        });
-        stage.add_renderlet(&cube);
+        let (material, _geometry, _transform, cube) = stage
+            .builder()
+            .with_material(Material {
+                albedo_texture_id: entries[0].id(),
+                has_lighting: false,
+                ..Default::default()
+            })
+            .with_vertices(gpu_uv_unit_cube())
+            .with_transform(Transform {
+                scale: Vec3::new(10.0, 10.0, 10.0),
+                ..Default::default()
+            })
+            .build();
         println!("cube: {cube:?}");
 
         // we should see a cube with a stoney texture
@@ -735,60 +701,53 @@ mod test {
             .with_background_color(Vec3::splat(0.0).extend(1.0));
 
         let (projection, view) = camera::default_ortho2d(100.0, 100.0);
-        let camera = stage.new_value(Camera::new(projection, view));
+        let _camera = stage.new_camera(Camera::new(projection, view));
 
         // now test the textures functionality
         let img = AtlasImage::from_path("../../img/cheetah.jpg").unwrap();
         let entries = stage.set_images([img]).unwrap();
 
-        let cheetah_material = stage.new_value(Material {
-            albedo_texture_id: entries[0].id(),
-            has_lighting: false,
-            ..Default::default()
-        });
+        let (geometry, _color_prim) = stage
+            .builder()
+            .with_vertices([
+                Vertex {
+                    position: Vec3::new(0.0, 0.0, 0.0),
+                    color: Vec4::new(1.0, 1.0, 0.0, 1.0),
+                    uv0: Vec2::new(0.0, 0.0),
+                    uv1: Vec2::new(0.0, 0.0),
+                    ..Default::default()
+                },
+                Vertex {
+                    position: Vec3::new(100.0, 100.0, 0.0),
+                    color: Vec4::new(0.0, 1.0, 1.0, 1.0),
+                    uv0: Vec2::new(1.0, 1.0),
+                    uv1: Vec2::new(1.0, 1.0),
+                    ..Default::default()
+                },
+                Vertex {
+                    position: Vec3::new(100.0, 0.0, 0.0),
+                    color: Vec4::new(1.0, 0.0, 1.0, 1.0),
+                    uv0: Vec2::new(1.0, 0.0),
+                    uv1: Vec2::new(1.0, 0.0),
+                    ..Default::default()
+                },
+            ])
+            .build();
 
-        let geometry = stage.new_array([
-            Vertex {
-                position: Vec3::new(0.0, 0.0, 0.0),
-                color: Vec4::new(1.0, 1.0, 0.0, 1.0),
-                uv0: Vec2::new(0.0, 0.0),
-                uv1: Vec2::new(0.0, 0.0),
+        let _rez = stage
+            .builder()
+            .with_vertices_array(geometry.array())
+            .with_material(Material {
+                albedo_texture_id: entries[0].id(),
+                has_lighting: false,
                 ..Default::default()
-            },
-            Vertex {
-                position: Vec3::new(100.0, 100.0, 0.0),
-                color: Vec4::new(0.0, 1.0, 1.0, 1.0),
-                uv0: Vec2::new(1.0, 1.0),
-                uv1: Vec2::new(1.0, 1.0),
+            })
+            .with_transform(Transform {
+                translation: Vec3::new(15.0, 35.0, 0.5),
+                scale: Vec3::new(0.5, 0.5, 1.0),
                 ..Default::default()
-            },
-            Vertex {
-                position: Vec3::new(100.0, 0.0, 0.0),
-                color: Vec4::new(1.0, 0.0, 1.0, 1.0),
-                uv0: Vec2::new(1.0, 0.0),
-                uv1: Vec2::new(1.0, 0.0),
-                ..Default::default()
-            },
-        ]);
-
-        let color_prim = stage.new_value(Renderlet {
-            vertices_array: geometry.array(),
-            ..Default::default()
-        });
-        stage.add_renderlet(&color_prim);
-
-        let cheetah_transform = stage.new_value(Transform {
-            translation: Vec3::new(15.0, 35.0, 0.5),
-            scale: Vec3::new(0.5, 0.5, 1.0),
-            ..Default::default()
-        });
-        let cheetah_prim = stage.new_value(Renderlet {
-            vertices_array: geometry.array(),
-            transform_id: cheetah_transform.id(),
-            material_id: cheetah_material.id(),
-            ..Default::default()
-        });
-        stage.add_renderlet(&cheetah_prim);
+            })
+            .build();
 
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
@@ -809,7 +768,7 @@ mod test {
 
         let (projection, _) = camera::default_perspective(100.0, 100.0);
         let view = Mat4::look_at_rh(Vec3::new(1.8, 1.8, 1.8), Vec3::ZERO, Vec3::Y);
-        let camera = stage.new_value(Camera::new(projection, view));
+        let _camera = stage.new_camera(Camera::new(projection, view));
 
         let red = Vec3::X.extend(1.0);
         let green = Vec3::Y.extend(1.0);
@@ -847,24 +806,21 @@ mod test {
             Light::from(dir_red.light_details.as_directional().unwrap().id())
         );
 
-        let material = stage.new_value(Material::default());
-        let geometry = stage.new_array(
-            math::unit_cube()
-                .into_iter()
-                .map(|(p, n)| Vertex {
-                    position: p,
-                    normal: n,
-                    color: Vec4::ONE,
-                    ..Default::default()
-                })
-                .collect::<Vec<_>>(),
-        );
-        let cube = stage.new_value(Renderlet {
-            vertices_array: geometry.array(),
-            material_id: material.id(),
-            ..Default::default()
-        });
-        stage.add_renderlet(&cube);
+        let _rez = stage
+            .builder()
+            .with_material(Material::default())
+            .with_vertices(
+                math::unit_cube()
+                    .into_iter()
+                    .map(|(p, n)| Vertex {
+                        position: p,
+                        normal: n,
+                        color: Vec4::ONE,
+                        ..Default::default()
+                    })
+                    .collect::<Vec<_>>(),
+            )
+            .build();
 
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
@@ -919,29 +875,7 @@ mod test {
         let ctx = Context::headless(100, 100);
         let stage = ctx.new_stage().with_background_color(Vec4::splat(0.0));
         let (projection, view) = camera::default_ortho2d(100.0, 100.0);
-        let camera = stage.new_value(Camera::new(projection, view));
-        let size = 1.0;
-        let cyan_material = stage.new_value(Material {
-            albedo_factor: Vec4::new(0.0, 1.0, 1.0, 1.0),
-            has_lighting: false,
-            ..Default::default()
-        });
-        let yellow_material = stage.new_value(Material {
-            albedo_factor: Vec4::new(1.0, 1.0, 0.0, 1.0),
-            has_lighting: false,
-            ..Default::default()
-        });
-        let red_material = stage.new_value(Material {
-            albedo_factor: Vec4::new(1.0, 0.0, 0.0, 1.0),
-            has_lighting: false,
-            ..Default::default()
-        });
-
-        let geometry = stage.new_array([
-            Vertex::default().with_position([0.0, 0.0, 0.0]),
-            Vertex::default().with_position([size, size, 0.0]),
-            Vertex::default().with_position([size, 0.0, 0.0]),
-        ]);
+        let _camera = stage.new_camera(Camera::new(projection, view));
 
         let root_node = stage.new_nested_transform();
         root_node.set(Transform {
@@ -955,15 +889,15 @@ mod test {
             ..Default::default()
         };
 
-        let cyan_node = NestedTransform::new(&stage);
+        let cyan_node = stage.new_nested_transform();
         cyan_node.set(offset);
         println!("cyan_node: {:#?}", cyan_node.get_global_transform());
 
-        let yellow_node = NestedTransform::new(&stage);
+        let yellow_node = stage.new_nested_transform();
         yellow_node.set(offset);
         println!("yellow_node: {:#?}", yellow_node.get_global_transform());
 
-        let red_node = NestedTransform::new(&stage);
+        let red_node = stage.new_nested_transform();
         red_node.set(offset);
         println!("red_node: {:#?}", red_node.get_global_transform());
 
@@ -974,27 +908,43 @@ mod test {
         yellow_node.add_child(&red_node);
         println!("red_node: {:#?}", red_node.get_global_transform());
 
-        let cyan_primitive = stage.new_value(Renderlet {
-            vertices_array: geometry.array(),
-            material_id: cyan_material.id(),
-            transform_id: cyan_node.global_transform_id(),
-            ..Default::default()
-        });
-        stage.add_renderlet(&cyan_primitive);
-        let yellow_primitive = stage.new_value(Renderlet {
-            vertices_array: geometry.array(),
-            material_id: yellow_material.id(),
-            transform_id: yellow_node.global_transform_id(),
-            ..Default::default()
-        });
-        stage.add_renderlet(&yellow_primitive);
-        let red_primitive = stage.new_value(Renderlet {
-            vertices_array: geometry.array(),
-            material_id: red_material.id(),
-            transform_id: red_node.global_transform_id(),
-            ..Default::default()
-        });
-        stage.add_renderlet(&red_primitive);
+        let (geometry, _cyan_material, _cyan_primitive) = stage
+            .builder()
+            .with_vertices({
+                let size = 1.0;
+                [
+                    Vertex::default().with_position([0.0, 0.0, 0.0]),
+                    Vertex::default().with_position([size, size, 0.0]),
+                    Vertex::default().with_position([size, 0.0, 0.0]),
+                ]
+            })
+            .with_material(Material {
+                albedo_factor: Vec4::new(0.0, 1.0, 1.0, 1.0),
+                has_lighting: false,
+                ..Default::default()
+            })
+            .with_nested_transform(&cyan_node)
+            .build();
+        let _yellow = stage
+            .builder()
+            .with_vertices_array(geometry.array())
+            .with_material(Material {
+                albedo_factor: Vec4::new(1.0, 1.0, 0.0, 1.0),
+                has_lighting: false,
+                ..Default::default()
+            })
+            .with_nested_transform(&yellow_node)
+            .build();
+        let _red = stage
+            .builder()
+            .with_vertices_array(geometry.array())
+            .with_material(Material {
+                albedo_factor: Vec4::new(1.0, 0.0, 0.0, 1.0),
+                has_lighting: false,
+                ..Default::default()
+            })
+            .with_nested_transform(&red_node)
+            .build();
 
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
@@ -1020,22 +970,19 @@ mod test {
 
         // create the CMY cube
         let camera_position = Vec3::new(0.0, 12.0, 20.0);
-        let camera = stage.new_value(Camera::new(
+        let _camera = stage.new_camera(Camera::new(
             Mat4::perspective_rh(std::f32::consts::PI / 4.0, 1.0, 0.1, 100.0),
             Mat4::look_at_rh(camera_position, Vec3::ZERO, Vec3::Y),
         ));
-        let geometry = stage.new_array(gpu_cube_vertices());
-        let transform = stage.new_value(Transform {
-            scale: Vec3::new(6.0, 6.0, 6.0),
-            rotation: Quat::from_axis_angle(Vec3::Y, -std::f32::consts::FRAC_PI_4),
-            ..Default::default()
-        });
-        let cube = stage.new_value(Renderlet {
-            vertices_array: geometry.array(),
-            transform_id: transform.id(),
-            ..Default::default()
-        });
-        stage.add_renderlet(&cube);
+        let _rez = stage
+            .builder()
+            .with_vertices(gpu_cube_vertices())
+            .with_transform(Transform {
+                scale: Vec3::new(6.0, 6.0, 6.0),
+                rotation: Quat::from_axis_angle(Vec3::Y, -std::f32::consts::FRAC_PI_4),
+                ..Default::default()
+            })
+            .build();
 
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());

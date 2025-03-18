@@ -3,7 +3,10 @@ use crabslab::{Array, Id, Slab, SlabItem};
 use glam::{Mat4, Vec4};
 use spirv_std::spirv;
 
-use crate::stage::{Renderlet, Vertex};
+use crate::{
+    geometry::GeometryDescriptor,
+    stage::{Renderlet, Vertex},
+};
 
 /// Simple fragment shader that writes the input color to the output color.
 #[spirv(fragment)]
@@ -101,7 +104,9 @@ pub fn tutorial_slabbed_renderlet(
 
     let transform = slab.read(renderlet.transform_id);
     let model = Mat4::from(transform);
-    let camera = slab.read(renderlet.camera_id);
+    let camera_id = slab
+        .read_unchecked(renderlet.geometry_descriptor_id + GeometryDescriptor::OFFSET_OF_CAMERA_ID);
+    let camera = slab.read(camera_id);
     *clip_pos = camera.view_projection() * model * vertex.position.extend(1.0);
 }
 
@@ -583,7 +588,6 @@ mod test {
             ..Default::default()
         });
         let renderlet = Renderlet {
-            camera_id: camera.id(),
             transform_id: transform.id(),
             vertices_array: geometry.array(),
             ..Default::default()

@@ -14,91 +14,10 @@ use crate::{
     geometry::GeometryDescriptor,
     pbr::Material,
     prelude::Transform,
-    stage::{MorphTarget, Renderlet, Skin, Vertex},
+    stage::{MorphTarget, NestedTransform, Renderlet, Skin, Vertex},
 };
 
 // TODO: Move `Renderlet` to geometry.
-
-/// A helper struct to build [`Renderlet`]s in the [`Geometry`] manager.
-pub struct RenderletBuilder<'a> {
-    data: Renderlet,
-    geometry: &'a Geometry,
-}
-
-impl<'a> RenderletBuilder<'a> {
-    pub fn new(geometry: &'a Geometry) -> Self {
-        RenderletBuilder {
-            data: Renderlet::default(),
-            geometry,
-        }
-    }
-
-    pub fn with_vertices(
-        mut self,
-        vertices: impl IntoIterator<Item = Vertex>,
-    ) -> (Self, HybridArray<Vertex>) {
-        let vertices = self.geometry.new_vertices(vertices);
-        self.data.vertices_array = vertices.array();
-        (self, vertices)
-    }
-
-    pub fn with_indices(
-        mut self,
-        indices: impl IntoIterator<Item = u32>,
-    ) -> (Self, HybridArray<u32>) {
-        let indices = self.geometry.new_indices(indices);
-        self.data.indices_array = indices.array();
-        (self, indices)
-    }
-
-    pub fn with_transform(mut self, transform: Transform) -> (Self, Hybrid<Transform>) {
-        let transform = self.geometry.slab.new_value(transform);
-        self.data.transform_id = transform.id();
-        (self, transform)
-    }
-        self.data.transform_id = transform_id;
-        self
-    }
-
-    pub fn with_material_id(mut self, material_id: Id<Material>) -> Self {
-        self.data.material_id = material_id;
-        self
-    }
-
-    pub fn with_skin_id(mut self, skin_id: Id<Skin>) -> Self {
-        self.data.skin_id = skin_id;
-        self
-    }
-
-    pub fn with_morph_targets(
-        mut self,
-        morph_targets: impl IntoIterator<Item = Array<MorphTarget>>,
-    ) -> (Self, HybridArray<Array<MorphTarget>>) {
-        let morph_targets = morph_targets.into_iter();
-        let morph_targets = self.geometry.slab.new_array(morph_targets);
-        self.data.morph_targets = morph_targets.array();
-        (self, morph_targets)
-    }
-
-    pub fn with_morph_weights(
-        mut self,
-        morph_weights: impl IntoIterator<Item = f32>,
-    ) -> (Self, HybridArray<f32>) {
-        let morph_weights = self.geometry.new_weights(morph_weights);
-        self.data.morph_weights = morph_weights.array();
-        (self, morph_weights)
-    }
-
-    pub fn with_geometry_descriptor_id(mut self, pbr_config_id: Id<GeometryDescriptor>) -> Self {
-        self.data.geometry_descriptor_id = pbr_config_id;
-        self
-    }
-
-    pub fn build(self) -> Hybrid<Renderlet> {
-        let RenderletBuilder { data, geometry } = self;
-        geometry.new_renderlet(data)
-    }
-}
 
 /// Wrapper around the geometry slab, which holds mesh data and more.
 #[derive(Clone)]
@@ -164,6 +83,10 @@ impl Geometry {
         self.descriptor.modify(|cfg| cfg.camera_id = camera.id());
     }
 
+    pub fn new_transform(&self, transform: Transform) -> Hybrid<Transform> {
+        self.slab.new_value(transform)
+    }
+
     /// Create new geometry data.
     // TODO: Move `Vertex` to geometry.
     pub fn new_vertices(&self, data: impl IntoIterator<Item = Vertex>) -> HybridArray<Vertex> {
@@ -182,6 +105,15 @@ impl Geometry {
         data: impl IntoIterator<Item = MorphTarget>,
     ) -> HybridArray<MorphTarget> {
         self.slab.new_array(data)
+    }
+
+    /// Create an array of morph target arrays.
+    pub fn new_morph_targets_array(
+        &self,
+        data: impl IntoIterator<Item = Array<MorphTarget>>,
+    ) -> HybridArray<Array<MorphTarget>> {
+        let morph_targets = data.into_iter();
+        self.slab.new_array(morph_targets)
     }
 
     /// Create new morph target weights.

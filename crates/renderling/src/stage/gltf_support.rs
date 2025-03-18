@@ -1111,12 +1111,11 @@ impl GltfDocument {
                 let num_prims = mesh.primitives.len();
                 log::trace!("    has {num_prims} primitives");
                 for (prim, i) in mesh.primitives.iter().zip(1..) {
-                    let hybrid = stage.new_value(Renderlet {
+                    let hybrid = stage.geometry().new_renderlet(Renderlet {
                         vertices_array: prim.vertices.array(),
                         indices_array: prim.indices.array(),
                         transform_id: gltf_node.transform.global_transform_id(),
                         material_id: prim.material,
-                        camera_id,
                         skin_id,
                         morph_targets: prim.morph_targets_array.array(),
                         morph_weights: gltf_node.weights.array(),
@@ -1326,7 +1325,6 @@ mod test {
             indices_array: indices.array(),
             material_id: material.id(),
             transform_id: transform.id(),
-            camera_id: camera.id(),
             ..Default::default()
         });
         stage.add_renderlet(&renderlet);

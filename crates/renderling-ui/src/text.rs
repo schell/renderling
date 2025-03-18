@@ -108,11 +108,10 @@ impl UiTextBuilder {
         let entry = ui.stage.add_images(Some(img)).unwrap().pop().unwrap();
         material.albedo_texture_id = entry.id();
 
-        let vertices = ui.stage.new_array(mesh);
-        let material = ui.stage.new_value(material);
-        let renderlet = ui.stage.new_value(Renderlet {
+        let vertices = ui.stage.geometry().new_vertices(mesh);
+        let material = ui.stage.materials().new_material(material);
+        let renderlet = ui.stage.geometry().new_renderlet(Renderlet {
             vertices_array: vertices.array(),
-            camera_id: ui.camera.id(),
             material_id: material.id(),
             ..Default::default()
         });

@@ -33,6 +33,10 @@ impl Materials {
         self.as_ref()
     }
 
+    pub fn slab_allocator(&self) -> &SlabAllocator<WgpuRuntime> {
+        &self.slab
+    }
+
     pub fn atlas(&self) -> &Atlas {
         &self.atlas
     }

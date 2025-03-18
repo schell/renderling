@@ -924,7 +924,7 @@ mod test {
         atlas::{AtlasTexture, TextureAddressMode},
         camera::Camera,
         pbr::Material,
-        stage::{Renderlet, Vertex},
+        stage::Vertex,
         transform::Transform,
         Context,
     };
@@ -943,7 +943,7 @@ mod test {
             .with_background_color(Vec3::splat(0.0).extend(1.0))
             .with_bloom(false);
         let (projection, view) = crate::camera::default_ortho2d(32.0, 32.0);
-        let camera = stage.new_value(Camera::new(projection, view));
+        let _camera = stage.new_camera(Camera::new(projection, view));
         let dirt = AtlasImage::from_path("../../img/dirt.jpg").unwrap();
         let sandstone = AtlasImage::from_path("../../img/sandstone.png").unwrap();
         let texels = AtlasImage::from_path("../../test_img/atlas/uv_mapping.png").unwrap();
@@ -953,37 +953,33 @@ mod test {
 
         let texels_entry = &atlas_entries[2];
 
-        let material = stage.new_value(Material {
-            albedo_texture_id: texels_entry.id(),
-            has_lighting: false,
-            ..Default::default()
-        });
-        let geometry = stage.new_array({
-            let tl = Vertex::default()
-                .with_position(Vec3::ZERO)
-                .with_uv0(Vec2::ZERO);
-            let tr = Vertex::default()
-                .with_position(Vec3::new(1.0, 0.0, 0.0))
-                .with_uv0(Vec2::new(1.0, 0.0));
-            let bl = Vertex::default()
-                .with_position(Vec3::new(0.0, 1.0, 0.0))
-                .with_uv0(Vec2::new(0.0, 1.0));
-            let br = Vertex::default()
-                .with_position(Vec3::new(1.0, 1.0, 0.0))
-                .with_uv0(Vec2::splat(1.0));
-            [tl, bl, br, tl, br, tr]
-        });
-        let transform = stage.new_value(Transform {
-            scale: Vec3::new(32.0, 32.0, 1.0),
-            ..Default::default()
-        });
-        let renderlet = stage.new_value(Renderlet {
-            vertices_array: geometry.array(),
-            transform_id: transform.id(),
-            material_id: material.id(),
-            ..Default::default()
-        });
-        stage.add_renderlet(&renderlet);
+        let _rez = stage
+            .builder()
+            .with_material(Material {
+                albedo_texture_id: texels_entry.id(),
+                has_lighting: false,
+                ..Default::default()
+            })
+            .with_vertices({
+                let tl = Vertex::default()
+                    .with_position(Vec3::ZERO)
+                    .with_uv0(Vec2::ZERO);
+                let tr = Vertex::default()
+                    .with_position(Vec3::new(1.0, 0.0, 0.0))
+                    .with_uv0(Vec2::new(1.0, 0.0));
+                let bl = Vertex::default()
+                    .with_position(Vec3::new(0.0, 1.0, 0.0))
+                    .with_uv0(Vec2::new(0.0, 1.0));
+                let br = Vertex::default()
+                    .with_position(Vec3::new(1.0, 1.0, 0.0))
+                    .with_uv0(Vec2::splat(1.0));
+                [tl, bl, br, tl, br, tr]
+            })
+            .with_transform(Transform {
+                scale: Vec3::new(32.0, 32.0, 1.0),
+                ..Default::default()
+            })
+            .build();
 
         log::info!("rendering");
         let frame = ctx.get_next_frame().unwrap();
@@ -1006,7 +1002,7 @@ mod test {
             .new_stage()
             .with_background_color(Vec4::new(1.0, 1.0, 0.0, 1.0));
         let (projection, view) = crate::camera::default_ortho2d(w as f32, h as f32);
-        let camera = stage.new_value(Camera::new(projection, view));
+        let _camera = stage.new_camera(Camera::new(projection, view));
         let texels = AtlasImage::from_path("../../img/happy_mac.png").unwrap();
         let entries = stage.set_images(std::iter::repeat(texels).take(3)).unwrap();
         let clamp_tex = &entries[0];
@@ -1021,25 +1017,9 @@ mod test {
             t.modes.t = TextureAddressMode::MirroredRepeat;
         });
 
-        let clamp_material = stage.new_value(Material {
-            albedo_texture_id: clamp_tex.id(),
-            has_lighting: false,
-            ..Default::default()
-        });
-        let repeat_material = stage.new_value(Material {
-            albedo_texture_id: repeat_tex.id(),
-            has_lighting: false,
-            ..Default::default()
-        });
-        let mirror_material = stage.new_value(Material {
-            albedo_texture_id: mirror_tex.id(),
-            has_lighting: false,
-            ..Default::default()
-        });
-
         let sheet_w = sheet_w as f32;
         let sheet_h = sheet_h as f32;
-        let geometry = stage.new_array({
+        let geometry = stage.new_vertices({
             let tl = Vertex::default()
                 .with_position(Vec3::ZERO)
                 .with_uv0(Vec2::ZERO);
@@ -1054,36 +1034,43 @@ mod test {
                 .with_uv0(Vec2::splat(3.0));
             [tl, bl, br, tl, br, tr]
         });
-        let clamp_prim = stage.new_value(Renderlet {
-            vertices_array: geometry.array(),
-            material_id: clamp_material.id(),
-            ..Default::default()
-        });
-        stage.add_renderlet(&clamp_prim);
+        let _clamp_rez = stage
+            .builder()
+            .with_vertices_array(geometry.array())
+            .with_material(Material {
+                albedo_texture_id: clamp_tex.id(),
+                has_lighting: false,
+                ..Default::default()
+            })
+            .build();
 
-        let repeat_transform = stage.new_value(Transform {
-            translation: Vec3::new(sheet_w + 1.0, 0.0, 0.0),
-            ..Default::default()
-        });
-        let repeat_prim = stage.new_value(Renderlet {
-            vertices_array: geometry.array(),
-            material_id: repeat_material.id(),
-            transform_id: repeat_transform.id(),
-            ..Default::default()
-        });
-        stage.add_renderlet(&repeat_prim);
+        let _repeat_rez = stage
+            .builder()
+            .with_transform(Transform {
+                translation: Vec3::new(sheet_w + 1.0, 0.0, 0.0),
+                ..Default::default()
+            })
+            .with_material(Material {
+                albedo_texture_id: repeat_tex.id(),
+                has_lighting: false,
+                ..Default::default()
+            })
+            .with_vertices_array(geometry.array())
+            .build();
 
-        let mirror_transform = stage.new_value(Transform {
-            translation: Vec3::new(sheet_w * 2.0 + 2.0, 0.0, 0.0),
-            ..Default::default()
-        });
-        let mirror_prim = stage.new_value(Renderlet {
-            vertices_array: geometry.array(),
-            material_id: mirror_material.id(),
-            transform_id: mirror_transform.id(),
-            ..Default::default()
-        });
-        stage.add_renderlet(&mirror_prim);
+        let _mirror_rez = stage
+            .builder()
+            .with_transform(Transform {
+                translation: Vec3::new(sheet_w * 2.0 + 2.0, 0.0, 0.0),
+                ..Default::default()
+            })
+            .with_material(Material {
+                albedo_texture_id: mirror_tex.id(),
+                has_lighting: false,
+                ..Default::default()
+            })
+            .with_vertices_array(geometry.array())
+            .build();
 
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
@@ -1106,7 +1093,7 @@ mod test {
             .with_background_color(Vec4::new(1.0, 1.0, 0.0, 1.0));
 
         let (projection, view) = crate::camera::default_ortho2d(w as f32, h as f32);
-        let camera = stage.new_value(Camera::new(projection, view));
+        let _camera = stage.new_camera(Camera::new(projection, view));
 
         let texels = AtlasImage::from_path("../../img/happy_mac.png").unwrap();
         let entries = stage.set_images(std::iter::repeat(texels).take(3)).unwrap();
@@ -1124,72 +1111,59 @@ mod test {
             t.modes.t = TextureAddressMode::MirroredRepeat;
         });
 
-        let clamp_material = stage.new_value(Material {
-            albedo_texture_id: clamp_tex.id(),
-            has_lighting: false,
-            ..Default::default()
-        });
-
-        let repeat_material = stage.new_value(Material {
-            albedo_texture_id: repeat_tex.id(),
-            has_lighting: false,
-            ..Default::default()
-        });
-
-        let mirror_material = stage.new_value(Material {
-            albedo_texture_id: mirror_tex.id(),
-            has_lighting: false,
-            ..Default::default()
-        });
-
         let sheet_w = sheet_w as f32;
         let sheet_h = sheet_h as f32;
-        let geometry = {
-            let tl = Vertex::default()
-                .with_position(Vec3::ZERO)
-                .with_uv0(Vec2::ZERO);
-            let tr = Vertex::default()
-                .with_position(Vec3::new(sheet_w, 0.0, 0.0))
-                .with_uv0(Vec2::new(-3.0, 0.0));
-            let bl = Vertex::default()
-                .with_position(Vec3::new(0.0, sheet_h, 0.0))
-                .with_uv0(Vec2::new(0.0, -3.0));
-            let br = Vertex::default()
-                .with_position(Vec3::new(sheet_w, sheet_h, 0.0))
-                .with_uv0(Vec2::splat(-3.0));
-            stage.new_array([tl, bl, br, tl, br, tr])
-        };
+        let (geometry, _clamp_material, _clamp_prim) = stage
+            .builder()
+            .with_vertices({
+                let tl = Vertex::default()
+                    .with_position(Vec3::ZERO)
+                    .with_uv0(Vec2::ZERO);
+                let tr = Vertex::default()
+                    .with_position(Vec3::new(sheet_w, 0.0, 0.0))
+                    .with_uv0(Vec2::new(-3.0, 0.0));
+                let bl = Vertex::default()
+                    .with_position(Vec3::new(0.0, sheet_h, 0.0))
+                    .with_uv0(Vec2::new(0.0, -3.0));
+                let br = Vertex::default()
+                    .with_position(Vec3::new(sheet_w, sheet_h, 0.0))
+                    .with_uv0(Vec2::splat(-3.0));
+                [tl, bl, br, tl, br, tr]
+            })
+            .with_material(Material {
+                albedo_texture_id: clamp_tex.id(),
+                has_lighting: false,
+                ..Default::default()
+            })
+            .build();
 
-        let clamp_prim = stage.new_value(Renderlet {
-            vertices_array: geometry.array(),
-            material_id: clamp_material.id(),
-            ..Default::default()
-        });
-        stage.add_renderlet(&clamp_prim);
+        let _repeat_rez = stage
+            .builder()
+            .with_material(Material {
+                albedo_texture_id: repeat_tex.id(),
+                has_lighting: false,
+                ..Default::default()
+            })
+            .with_transform(Transform {
+                translation: Vec3::new(sheet_w + 1.0, 0.0, 0.0),
+                ..Default::default()
+            })
+            .with_vertices_array(geometry.array())
+            .build();
 
-        let repeat_transform = stage.new_value(Transform {
-            translation: Vec3::new(sheet_w + 1.0, 0.0, 0.0),
-            ..Default::default()
-        });
-        let repeat_prim = stage.new_value(Renderlet {
-            vertices_array: geometry.array(),
-            material_id: repeat_material.id(),
-            transform_id: repeat_transform.id(),
-            ..Default::default()
-        });
-        stage.add_renderlet(&repeat_prim);
-
-        let mirror_transform = stage.new_value(Transform {
-            translation: Vec3::new(sheet_w * 2.0 + 2.0, 0.0, 0.0),
-            ..Default::default()
-        });
-        let mirror_prim = stage.new_value(Renderlet {
-            vertices_array: geometry.array(),
-            material_id: mirror_material.id(),
-            transform_id: mirror_transform.id(),
-            ..Default::default()
-        });
-        stage.add_renderlet(&mirror_prim);
+        let _mirror_rez = stage
+            .builder()
+            .with_material(Material {
+                albedo_texture_id: mirror_tex.id(),
+                has_lighting: false,
+                ..Default::default()
+            })
+            .with_transform(Transform {
+                translation: Vec3::new(sheet_w * 2.0 + 2.0, 0.0, 0.0),
+                ..Default::default()
+            })
+            .with_vertices_array(geometry.array())
+            .build();
 
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
@@ -1228,9 +1202,9 @@ mod test {
             .set_images([dirt, sandstone, cheetah, texels])
             .unwrap();
 
-        let img = stage.atlas.atlas_img(&ctx, 0);
+        let img = stage.materials().atlas().atlas_img(&ctx, 0);
         img_diff::assert_img_eq("atlas/array0.png", img);
-        let img = stage.atlas.atlas_img(&ctx, 1);
+        let img = stage.materials().atlas().atlas_img(&ctx, 1);
         img_diff::assert_img_eq("atlas/array1.png", img);
     }
 
@@ -1256,14 +1230,14 @@ mod test {
                 texels,
             ])
             .unwrap();
-        assert_eq!(8, stage.atlas.len());
+        assert_eq!(8, stage.materials().atlas().len());
 
         frames.pop();
         frames.pop();
         frames.pop();
         frames.pop();
 
-        stage.atlas.upkeep(&ctx);
-        assert_eq!(4, stage.atlas.len());
+        stage.materials().atlas().upkeep(&ctx);
+        assert_eq!(4, stage.materials().atlas().len());
     }
 }

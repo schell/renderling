@@ -12,10 +12,7 @@ use spirv_std::{
 };
 
 use crate::{
-    bvol::BoundingSphere,
-    camera::Camera,
-    math::IsVector,
-    pbr::{Material, PbrConfig},
+    bvol::BoundingSphere, geometry::GeometryDescriptor, math::IsVector, pbr::Material,
     transform::Transform,
 };
 
@@ -208,7 +205,7 @@ pub struct Renderlet {
     pub skin_id: Id<Skin>,
     pub morph_targets: Array<Array<MorphTarget>>,
     pub morph_weights: Array<f32>,
-    pub pbr_config_id: Id<PbrConfig>,
+    pub geometry_descriptor_id: Id<GeometryDescriptor>,
 }
 
 impl Default for Renderlet {
@@ -223,7 +220,7 @@ impl Default for Renderlet {
             skin_id: Id::NONE,
             morph_targets: Array::default(),
             morph_weights: Array::default(),
-            pbr_config_id: Id::new(0),
+            geometry_descriptor_id: Id::new(0),
         }
     }
 }
@@ -247,7 +244,7 @@ impl Renderlet {
     ///
     /// This takes into consideration all skinning matrices.
     pub fn get_transform(&self, vertex: Vertex, slab: &[u32]) -> Transform {
-        let config = slab.read_unchecked(self.pbr_config_id);
+        let config = slab.read_unchecked(self.geometry_descriptor_id);
         if config.has_skinning && self.skin_id.is_some() {
             let skin = slab.read(self.skin_id);
             Transform::from(skin.get_skinning_matrix(vertex, slab))
@@ -362,7 +359,9 @@ pub fn renderlet_vertex(
     let bitangent_w = normal_w.cross(tangent_w) * if vertex.tangent.w >= 0.0 { 1.0 } else { -1.0 };
     *out_bitangent = bitangent_w;
 
-    let camera = slab.read(renderlet.camera_id);
+    let camera_id = slab
+        .read_unchecked(renderlet.geometry_descriptor_id + GeometryDescriptor::OFFSET_OF_CAMERA_ID);
+    let camera = slab.read(camera_id);
     let clip_pos = camera.view_projection() * world_pos.extend(1.0);
     *out_clip_pos = clip_pos;
     #[cfg(test)]

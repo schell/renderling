@@ -300,8 +300,8 @@ pub fn fragment_impl<A, T, DtA, C, S>(
     S: IsSampler,
 {
     let renderlet = slab.read_unchecked(renderlet_id);
-    let geom_desc = slab.read_unchecked(renderlet.pbr_config_id);
-    crate::println!("pbr_desc_id: {:?}", renderlet.pbr_config_id);
+    let geom_desc = slab.read_unchecked(renderlet.geometry_descriptor_id);
+    crate::println!("pbr_desc_id: {:?}", renderlet.geometry_descriptor_id);
     crate::println!("pbr_desc: {geom_desc:#?}");
     let GeometryDescriptor {
         camera_id,
@@ -691,7 +691,7 @@ mod test {
         camera::Camera,
         math::{Vec3, Vec4},
         pbr::Material,
-        stage::{Renderlet, Vertex},
+        stage::Vertex,
         transform::Transform,
     };
 
@@ -718,9 +718,9 @@ mod test {
             Vec3::new(half, half, 0.0),
             Vec3::Y,
         );
-        let camera = stage.new_value(Camera::new(projection, view));
+        let camera = stage.new_camera(Camera::new(projection, view));
 
-        let geometry = stage.new_array({
+        let geometry = stage.new_vertices({
             let mut icosphere = icosahedron::Polyhedron::new_isocahedron(radius, 5);
             icosphere.compute_triangle_normals();
             let icosahedron::Polyhedron {
@@ -754,24 +754,22 @@ mod test {
                 let metallic = j as f32 / (k - 1) as f32;
                 let y = (diameter + spacing) * j as f32;
 
-                let material = stage.new_value(Material {
-                    albedo_factor: Vec4::new(1.0, 1.0, 1.0, 1.0),
-                    metallic_factor: metallic,
-                    roughness_factor: roughness,
-                    ..Default::default()
-                });
-                let transform = stage.new_value(Transform {
-                    translation: Vec3::new(x, y, 0.0),
-                    ..Default::default()
-                });
-                let sphere = stage.new_value(Renderlet {
-                    vertices_array: geometry.array(),
-                    transform_id: transform.id(),
-                    material_id: material.id(),
-                    ..Default::default()
-                });
-                stage.add_renderlet(&sphere);
-                spheres.push((sphere, material, transform));
+                let rez = stage
+                    .builder()
+                    .with_material(Material {
+                        albedo_factor: Vec4::new(1.0, 1.0, 1.0, 1.0),
+                        metallic_factor: metallic,
+                        roughness_factor: roughness,
+                        ..Default::default()
+                    })
+                    .with_transform(Transform {
+                        translation: Vec3::new(x, y, 0.0),
+                        ..Default::default()
+                    })
+                    .with_vertices_array(geometry.array())
+                    .build();
+
+                spheres.push(rez);
             }
         }
 
