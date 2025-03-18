@@ -479,7 +479,7 @@ mod test {
 
     use glam::Vec3;
 
-    use crate::{camera::Camera, light::SpotLightCalculation, prelude::Transform};
+    use crate::{light::SpotLightCalculation, prelude::Transform};
 
     use super::*;
 
@@ -552,7 +552,6 @@ mod test {
         let (w, h) = (16.0f32 * m, 9.0 * m);
         let ctx = crate::Context::headless(w as u32, h as u32);
         let mut stage = ctx.new_stage().with_msaa_sample_count(4);
-        let camera = stage.new_value(Camera::default());
         let doc = stage
             .load_gltf_document_from_path(
                 crate::test::workspace_dir()
@@ -560,9 +559,11 @@ mod test {
                     .join("spot_one.glb"),
             )
             .unwrap();
-        let mut c = doc.cameras.first().unwrap().get_camera();
-        c.set_projection(crate::camera::perspective(w, h));
-        camera.set(c);
+        let camera = doc.cameras.first().unwrap();
+        camera
+            .as_ref()
+            .modify(|cam| cam.set_projection(crate::camera::perspective(w, h)));
+        stage.use_camera(camera);
 
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
@@ -585,8 +586,6 @@ mod test {
             .with_lighting(true)
             .with_msaa_sample_count(4);
 
-        let camera = stage.new_value(Camera::default());
-        log::info!("camera_id: {:?}", camera.id());
         let doc = stage
             .load_gltf_document_from_path(
                 crate::test::workspace_dir()
@@ -594,15 +593,16 @@ mod test {
                     .join("spot_lights.glb"),
             )
             .unwrap();
-        let gltf_camera = doc.cameras.first().unwrap();
+        let camera = doc.cameras.first().unwrap();
         // TODO: investigate using the camera's aspect for any frame size.
         // A `TextureView` of the frame could be created that renders to the frame
         // within the camera's expected aspect ratio.
         //
         // We'd probably need to constrain rendering to one camera, though.
-        let mut c = gltf_camera.get_camera();
-        c.set_projection(crate::camera::perspective(w, h));
-        camera.set(c);
+        camera
+            .as_ref()
+            .modify(|cam| cam.set_projection(crate::camera::perspective(w, h)));
+        stage.use_camera(camera);
 
         let down_light = doc.lights.first().unwrap();
         log::info!(

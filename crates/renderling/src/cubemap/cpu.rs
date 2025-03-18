@@ -265,7 +265,7 @@ mod test {
 
     use crate::{
         math::{UNIT_INDICES, UNIT_POINTS},
-        stage::{Renderlet, Vertex},
+        stage::Vertex,
     };
 
     use super::*;
@@ -280,26 +280,23 @@ mod test {
             .with_background_color(Vec4::ZERO)
             .with_lighting(false)
             .with_msaa_sample_count(4);
-        let camera =
-            stage.new_value(
+        let _camera =
+            stage.new_camera(
                 Camera::default_perspective(width as f32, height as f32)
                     .with_view(Mat4::look_at_rh(Vec3::splat(3.0), Vec3::ZERO, Vec3::Y)),
             );
         // geometry is the "clip cube" where colors are normalized 3d space coords
-        let vertices = stage.new_array(UNIT_POINTS.map(|unit_cube_point| {
-            Vertex::default()
-                // multiply by 2.0 because the unit cube's AABB bounds are at 0.5, and we want 1.0
-                .with_position(unit_cube_point * 2.0)
-                // "normalize" (really "shift") the space coord from [-0.5, 0.5] to [0.0, 1.0]
-                .with_color((unit_cube_point + 0.5).extend(1.0))
-        }));
-        let indices = stage.new_array(UNIT_INDICES.map(|u| u as u32));
-        let renderlet = stage.new_value(Renderlet {
-            vertices_array: vertices.array(),
-            indices_array: indices.array(),
-            ..Default::default()
-        });
-        stage.add_renderlet(&renderlet);
+        let _rez = stage
+            .builder()
+            .with_vertices(UNIT_POINTS.map(|unit_cube_point| {
+                Vertex::default()
+                    // multiply by 2.0 because the unit cube's AABB bounds are at 0.5, and we want 1.0
+                    .with_position(unit_cube_point * 2.0)
+                    // "normalize" (really "shift") the space coord from [-0.5, 0.5] to [0.0, 1.0]
+                    .with_color((unit_cube_point + 0.5).extend(1.0))
+            }))
+            .with_indices(UNIT_INDICES.map(|u| u as u32))
+            .build();
 
         let scene_cubemap = SceneCubemap::new(
             ctx.get_device(),

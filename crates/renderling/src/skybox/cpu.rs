@@ -659,7 +659,7 @@ mod test {
 
         let stage = ctx.new_stage();
 
-        let camera = stage.new_value(Camera::new(proj, view));
+        let _camera = stage.new_camera(Camera::new(proj, view));
         let skybox = stage
             .new_skybox_from_path("../../img/hdr/resting_place.hdr")
             .unwrap();

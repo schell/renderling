@@ -1198,14 +1198,7 @@ impl Stage {
 
 #[cfg(test)]
 mod test {
-    use crate::{
-        camera::Camera,
-        pbr::Material,
-        stage::{Renderlet, Vertex},
-        transform::Transform,
-        Context,
-    };
-    use crabslab::Id;
+    use crate::{camera::Camera, pbr::Material, stage::Vertex, transform::Transform, Context};
     use glam::{Vec3, Vec4};
 
     #[test]
@@ -1239,7 +1232,7 @@ mod test {
             .with_lighting(false)
             .with_bloom(false)
             .with_background_color(Vec3::splat(0.0).extend(1.0));
-        let camera = stage.new_value(Camera::new(projection, view));
+        let _camera = stage.new_camera(Camera::new(projection, view));
         let _doc = stage
             .load_gltf_document_from_path("../../gltf/gltfTutorial_008_SimpleMeshes.gltf")
             .unwrap();
@@ -1263,7 +1256,7 @@ mod test {
         let projection = crate::camera::perspective(20.0, 20.0);
         let eye = Vec3::new(0.5, 0.5, 2.0);
         let view = crate::camera::look_at(eye, Vec3::new(0.5, 0.5, 0.0), Vec3::Y);
-        let camera = stage.new_value(Camera::new(projection, view));
+        let _camera = stage.new_camera(Camera::new(projection, view));
 
         let _doc = stage
             .load_gltf_document_from_path("../../gltf/gltfTutorial_003_MinimalGltfFile.gltf")
@@ -1286,44 +1279,39 @@ mod test {
             .with_lighting(false)
             .with_background_color(Vec4::splat(1.0));
         let (projection, view) = crate::camera::default_ortho2d(100.0, 100.0);
-        let camera = stage.new_value(Camera::new(projection, view));
+        let _camera = stage.new_camera(Camera::new(projection, view));
         let doc = stage
             .load_gltf_document_from_path("../../gltf/cheetah_cone.glb")
             .unwrap();
         assert!(!doc.textures.is_empty());
-        let material = stage.new_value(Material {
-            albedo_texture_id: doc.textures[0].id(),
-            has_lighting: false,
-            ..Default::default()
-        });
+        let (material, _vertices, _indices, _transform, _renderlet) = stage
+            .builder()
+            .with_material(Material {
+                albedo_texture_id: doc.textures[0].id(),
+                has_lighting: false,
+                ..Default::default()
+            })
+            .with_vertices([
+                Vertex::default()
+                    .with_position([0.0, 0.0, 0.0])
+                    .with_uv0([0.0, 0.0]),
+                Vertex::default()
+                    .with_position([1.0, 0.0, 0.0])
+                    .with_uv0([1.0, 0.0]),
+                Vertex::default()
+                    .with_position([1.0, 1.0, 0.0])
+                    .with_uv0([1.0, 1.0]),
+                Vertex::default()
+                    .with_position([0.0, 1.0, 0.0])
+                    .with_uv0([0.0, 1.0]),
+            ])
+            .with_indices([0u32, 3, 2, 0, 2, 1])
+            .with_transform(Transform {
+                scale: Vec3::new(100.0, 100.0, 1.0),
+                ..Default::default()
+            })
+            .build();
         println!("material_id: {:#?}", material.id());
-        let vertices = stage.new_array([
-            Vertex::default()
-                .with_position([0.0, 0.0, 0.0])
-                .with_uv0([0.0, 0.0]),
-            Vertex::default()
-                .with_position([1.0, 0.0, 0.0])
-                .with_uv0([1.0, 0.0]),
-            Vertex::default()
-                .with_position([1.0, 1.0, 0.0])
-                .with_uv0([1.0, 1.0]),
-            Vertex::default()
-                .with_position([0.0, 1.0, 0.0])
-                .with_uv0([0.0, 1.0]),
-        ]);
-        let indices = stage.new_array([0u32, 3, 2, 0, 2, 1]);
-        let transform = stage.new_value(Transform {
-            scale: Vec3::new(100.0, 100.0, 1.0),
-            ..Default::default()
-        });
-        let renderlet = stage.new_value(Renderlet {
-            vertices_array: vertices.array(),
-            indices_array: indices.array(),
-            material_id: material.id(),
-            transform_id: transform.id(),
-            ..Default::default()
-        });
-        stage.add_renderlet(&renderlet);
 
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
@@ -1345,7 +1333,7 @@ mod test {
         let projection = crate::camera::perspective(size as f32, size as f32);
         let view =
             crate::camera::look_at(Vec3::new(0.5, 0.5, 1.25), Vec3::new(0.5, 0.5, 0.0), Vec3::Y);
-        let camera = stage.new_value(Camera::new(projection, view));
+        let _camera = stage.new_camera(Camera::new(projection, view));
 
         let _doc = stage
             .load_gltf_document_from_path("../../gltf/gltfTutorial_013_SimpleTexture.gltf")
@@ -1371,12 +1359,8 @@ mod test {
         let doc = stage
             .load_gltf_document_from_path("../../gltf/red_brick_03_1k.glb")
             .unwrap();
-        let gltf_camera = doc.cameras.first().unwrap();
-        doc.renderlets_iter().for_each(|hybrid| {
-            hybrid.modify(|r| {
-                r.camera_id = gltf_camera.camera.id();
-            });
-        });
+        let camera = doc.cameras.first().unwrap();
+        stage.use_camera(camera);
         // A change to the lighting units for directional lights causes this test to fail.
         //
         // Instead of changing the saved picture, we'll adjust the intensity.
@@ -1417,7 +1401,7 @@ mod test {
         let up = Vec3::Y;
         let view = glam::Mat4::look_at_rh(eye, target, up);
 
-        let camera = stage.new_value(Camera::new(projection, view));
+        let _camera = stage.new_camera(Camera::new(projection, view));
         let doc = stage
             .load_gltf_document_from_path("../../gltf/Fox.glb")
             .unwrap();
