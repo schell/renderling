@@ -785,7 +785,7 @@ mod test {
         let camera = stage.new_value(Camera::new(projection, view));
 
         let doc = stage
-            .load_gltf_document_from_path("../../gltf/animated_triangle.gltf", camera.id())
+            .load_gltf_document_from_path("../../gltf/animated_triangle.gltf")
             .unwrap();
 
         let nodes = doc

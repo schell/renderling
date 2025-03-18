@@ -379,6 +379,11 @@ impl Stage {
         self.geometry.new_camera(camera)
     }
 
+    /// Set the given camera as the default one to use when rendering.
+    pub fn use_camera(&self, camera: impl AsRef<Hybrid<Camera>>) {
+        self.geometry().use_camera(camera);
+    }
+
     /// Stage a [`Transform`] on the GPU.
     pub fn new_transform(&self, transform: Transform) -> Hybrid<Transform> {
         self.geometry.new_transform(transform)

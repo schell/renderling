@@ -79,8 +79,9 @@ impl Geometry {
     }
 
     /// Set all geometry to use the given camera.
-    pub fn use_camera(&self, camera: &Hybrid<Camera>) {
-        self.descriptor.modify(|cfg| cfg.camera_id = camera.id());
+    pub fn use_camera(&self, camera: impl AsRef<Hybrid<Camera>>) {
+        self.descriptor
+            .modify(|cfg| cfg.camera_id = camera.as_ref().id());
     }
 
     pub fn new_transform(&self, transform: Transform) -> Hybrid<Transform> {

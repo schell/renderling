@@ -611,6 +611,12 @@ pub struct GltfCamera {
     pub camera: Hybrid<Camera>,
 }
 
+impl AsRef<Hybrid<Camera>> for GltfCamera {
+    fn as_ref(&self) -> &Hybrid<Camera> {
+        &self.camera
+    }
+}
+
 impl GltfCamera {
     fn new(stage: &mut Stage, gltf_camera: gltf::Camera<'_>, transform: &NestedTransform) -> Self {
         log::debug!("camera: {}", gltf_camera.name().unwrap_or("unknown"));

@@ -393,7 +393,6 @@ mod test {
                 crate::test::workspace_dir()
                     .join("gltf")
                     .join("shadow_mapping_only_cuboid.gltf"),
-                camera.id(),
             )
             .unwrap();
         let gltf_camera = doc.cameras.first().unwrap();
@@ -446,7 +445,6 @@ mod test {
                 crate::test::workspace_dir()
                     .join("gltf")
                     .join("shadow_mapping_only_cuboid_red_and_blue.gltf"),
-                camera.id(),
             )
             .unwrap();
         let gltf_camera = doc.cameras.first().unwrap();
@@ -505,7 +503,6 @@ mod test {
                 crate::test::workspace_dir()
                     .join("gltf")
                     .join("shadow_mapping_sanity.gltf"),
-                camera.id(),
             )
             .unwrap();
         let gltf_camera = doc.cameras.first().unwrap();
@@ -583,7 +580,6 @@ mod test {
                 crate::test::workspace_dir()
                     .join("gltf")
                     .join("shadow_mapping_spots.glb"),
-                camera.id(),
             )
             .unwrap();
         let gltf_camera = doc.cameras.first().unwrap();
@@ -645,20 +641,18 @@ mod test {
             .with_lighting(true)
             .with_background_color(Vec3::splat(0.05087).extend(1.0))
             .with_msaa_sample_count(4);
-        let camera = stage.new_value(Camera::default());
         let doc = stage
             .load_gltf_document_from_path(
                 crate::test::workspace_dir()
                     .join("gltf")
                     .join("shadow_mapping_points.glb"),
-                camera.id(),
             )
             .unwrap();
-        let gltf_camera = doc.cameras.first().unwrap();
-        let mut c = gltf_camera.get_camera();
-        c.set_projection(crate::camera::perspective(w, h));
-
-        camera.set(c);
+        let camera = doc.cameras.first().unwrap();
+        camera
+            .camera
+            .set_projection(crate::camera::perspective(w, h));
+        stage.use_camera(&gltf_camera);
 
         let mut shadows = vec![];
         let z_near = 0.1;
