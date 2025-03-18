@@ -216,7 +216,7 @@ impl App {
 
     fn load_hdr_skybox(&mut self, bytes: Vec<u8>) {
         let img = AtlasImage::from_hdr_bytes(&bytes).unwrap();
-        let skybox = Skybox::new(self.stage.runtime(), img, self.camera.id());
+        let skybox = Skybox::new(self.stage.runtime(), img);
         self.skybox_image_bytes = Some(bytes);
         self.stage.set_skybox(skybox);
     }
@@ -261,18 +261,12 @@ impl App {
         self.model = Model::None;
         log::debug!("ticking stage to reclaim buffers");
         self.stage.tick();
-        let doc = match self
-            .stage
-            .load_gltf_document_from_bytes(bytes, self.camera.id())
-        {
+        let doc = match self.stage.load_gltf_document_from_bytes(bytes) {
             Err(e) => {
                 log::error!("gltf loading error: {e}");
                 if cfg!(not(target_arch = "wasm32")) {
                     log::info!("attempting to load by filesystem");
-                    match self
-                        .stage
-                        .load_gltf_document_from_path(path, self.camera.id())
-                    {
+                    match self.stage.load_gltf_document_from_path(path) {
                         Ok(doc) => doc,
                         Err(e) => {
                             log::error!("gltf loading error: {e}");

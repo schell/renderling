@@ -558,7 +558,6 @@ mod test {
                 crate::test::workspace_dir()
                     .join("gltf")
                     .join("spot_one.glb"),
-                camera.id(),
             )
             .unwrap();
         let mut c = doc.cameras.first().unwrap().get_camera();
@@ -593,7 +592,6 @@ mod test {
                 crate::test::workspace_dir()
                     .join("gltf")
                     .join("spot_lights.glb"),
-                camera.id(),
             )
             .unwrap();
         let gltf_camera = doc.cameras.first().unwrap();

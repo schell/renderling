@@ -774,7 +774,7 @@ mod test {
         }
 
         let hdr_image = AtlasImage::from_hdr_path("../../img/hdr/resting_place.hdr").unwrap();
-        let skybox = crate::skybox::Skybox::new(&ctx, hdr_image, camera.id());
+        let skybox = crate::skybox::Skybox::new(&ctx, hdr_image);
         stage.set_skybox(skybox);
 
         let frame = ctx.get_next_frame().unwrap();

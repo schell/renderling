@@ -150,11 +150,10 @@ impl StageRendering<'_> {
                 draw_calls.draw(&mut render_pass);
 
                 if let Some((pipeline, bindgroup)) = may_skybox_pipeline_and_bindgroup.as_ref() {
-                    // UNWRAP: if we can't acquire the lock we want to panic.
-                    let skybox = self.stage.skybox.read().unwrap();
                     render_pass.set_pipeline(&pipeline.pipeline);
                     render_pass.set_bind_group(0, Some(bindgroup.as_ref()), &[]);
-                    render_pass.draw(0..36, skybox.camera.inner()..skybox.camera.inner() + 1);
+                    let camera_id = self.stage.geometry.descriptor().get().camera_id.inner();
+                    render_pass.draw(0..36, camera_id..camera_id + 1);
                 }
             }
             let sindex = self.stage.queue().submit(std::iter::once(encoder.finish()));
@@ -1030,10 +1029,9 @@ impl Stage {
     pub fn new_skybox_from_path(
         &self,
         path: impl AsRef<std::path::Path>,
-        camera_id: Id<Camera>,
     ) -> Result<Skybox, AtlasImageError> {
         let hdr = AtlasImage::from_hdr_path(path)?;
-        Ok(Skybox::new(self.runtime(), hdr, camera_id))
+        Ok(Skybox::new(self.runtime(), hdr))
     }
 
     pub fn new_nested_transform(&self) -> NestedTransform {
@@ -1152,168 +1150,6 @@ impl Stage {
         self.tonemapping.render(self.device(), self.queue(), view);
 
         // then render the debug overlay
-        if self.has_debug_overlay.load(Ordering::Relaxed) {
-            if let Some(indirect_draw_buffer) = maybe_indirect_buffer {
-                self.debug_overlay.render(
-                    self.device(),
-                    self.queue(),
-                    view,
-                    &self.stage_slab_buffer.read().unwrap(),
-                    &indirect_draw_buffer,
-                );
-            }
-        }
-    }
-
-    pub fn render_old(&self, view: &wgpu::TextureView) {
-        self.tick_internal();
-        self.lighting.upkeep();
-
-        let mut draw_calls = self.draw_calls.write().unwrap();
-        let depth_texture = self.depth_texture.read().unwrap();
-        // UNWRAP: safe because we know the depth texture format will always match
-        let maybe_indirect_buffer = draw_calls.pre_draw(&depth_texture).unwrap();
-        {
-            log::info!("rendering");
-            let label = Some("stage render");
-
-            log::info!("getting slab buffers bindgroup");
-            let slab_buffers_bindgroup = {
-                log::info!("getting write lock");
-                let mut stage_slab_buffer = self.stage_slab_buffer.write().unwrap();
-                log::info!("got write lock");
-                let should_invalidate_buffers_bindgroup = stage_slab_buffer.update_if_invalid();
-                self.buffers_bindgroup
-                    .get(should_invalidate_buffers_bindgroup, || {
-                        log::info!("renewing invalid stage slab buffers bindgroup");
-                        crate::linkage::slab_bindgroup(
-                            self.device(),
-                            &stage_slab_buffer,
-                            // UNWRAP: POP
-                            &self.stage_pipeline.read().unwrap().get_bind_group_layout(0),
-                        )
-                    })
-            };
-
-            log::info!("getting stage slab buffer");
-            let stage_slab_buffer = self.stage_slab_buffer.read().unwrap();
-            let textures_bindgroup = self.get_textures_bindgroup();
-            log::info!("got stage slab buffer and shadow map depth texture");
-
-            // UNWRAP: POP
-            let background_color = *self.background_color.read().unwrap();
-            // UNWRAP: POP
-            let pipeline = self.stage_pipeline.read().unwrap();
-            // UNWRAP: POP
-            let msaa_target = self.msaa_render_target.read().unwrap();
-
-            let light_bindgroup = self.lighting.get_bindgroup();
-            let has_skybox = self.has_skybox.load(Ordering::Relaxed);
-            let may_skybox_pipeline_and_bindgroup = if has_skybox {
-                Some(self.get_skybox_pipeline_and_bindgroup(&stage_slab_buffer))
-            } else {
-                None
-            };
-            let clear_colors = self.clear_color_attachments.load(Ordering::Relaxed);
-            let clear_depth = self.clear_depth_attachments.load(Ordering::Relaxed);
-
-            let mut encoder = self
-                .device()
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor { label });
-            {
-                let hdr_texture = self.hdr_texture.read().unwrap();
-
-                let mk_ops = |store| wgpu::Operations {
-                    load: if clear_colors {
-                        wgpu::LoadOp::Clear(background_color)
-                    } else {
-                        wgpu::LoadOp::Load
-                    },
-                    store,
-                };
-                let color_attachment = if let Some(msaa_view) = msaa_target.as_ref() {
-                    wgpu::RenderPassColorAttachment {
-                        ops: mk_ops(wgpu::StoreOp::Discard),
-                        view: msaa_view,
-                        resolve_target: Some(&hdr_texture.view),
-                    }
-                } else {
-                    wgpu::RenderPassColorAttachment {
-                        ops: mk_ops(wgpu::StoreOp::Store),
-                        view: &hdr_texture.view,
-                        resolve_target: None,
-                    }
-                };
-                let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                    label,
-                    color_attachments: &[Some(color_attachment)],
-                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                        view: &depth_texture.view,
-                        depth_ops: Some(wgpu::Operations {
-                            load: if clear_depth {
-                                wgpu::LoadOp::Clear(1.0)
-                            } else {
-                                wgpu::LoadOp::Load
-                            },
-                            store: wgpu::StoreOp::Store,
-                        }),
-                        stencil_ops: None,
-                    }),
-                    ..Default::default()
-                });
-
-                render_pass.set_pipeline(&pipeline);
-                render_pass.set_bind_group(0, Some(slab_buffers_bindgroup.as_ref()), &[]);
-                render_pass.set_bind_group(1, Some(textures_bindgroup.as_ref()), &[]);
-                render_pass.set_bind_group(2, Some(&light_bindgroup), &[]);
-                draw_calls.draw(&mut render_pass);
-
-                if let Some((pipeline, bindgroup)) = may_skybox_pipeline_and_bindgroup.as_ref() {
-                    // UNWRAP: if we can't acquire the lock we want to panic.
-                    let skybox = self.skybox.read().unwrap();
-                    render_pass.set_pipeline(&pipeline.pipeline);
-                    render_pass.set_bind_group(0, Some(bindgroup.as_ref()), &[]);
-                    render_pass.draw(0..36, skybox.camera.inner()..skybox.camera.inner() + 1);
-                }
-            }
-            self.queue().submit(std::iter::once(encoder.finish()));
-        }
-
-        // then render bloom
-        if self.has_bloom.load(Ordering::Relaxed) {
-            self.bloom.bloom(self.device(), self.queue());
-        } else {
-            // copy the input hdr texture to the bloom mix texture
-            let mut encoder =
-                self.device()
-                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                        label: Some("no bloom copy"),
-                    });
-            let bloom_mix_texture = self.bloom.get_mix_texture();
-            encoder.copy_texture_to_texture(
-                wgpu::TexelCopyTextureInfo {
-                    texture: &self.hdr_texture.read().unwrap().texture,
-                    mip_level: 0,
-                    origin: wgpu::Origin3d { x: 0, y: 0, z: 0 },
-                    aspect: wgpu::TextureAspect::All,
-                },
-                wgpu::TexelCopyTextureInfo {
-                    texture: &bloom_mix_texture.texture,
-                    mip_level: 0,
-                    origin: wgpu::Origin3d { x: 0, y: 0, z: 0 },
-                    aspect: wgpu::TextureAspect::All,
-                },
-                wgpu::Extent3d {
-                    width: bloom_mix_texture.width(),
-                    height: bloom_mix_texture.height(),
-                    depth_or_array_layers: 1,
-                },
-            );
-            self.queue().submit(std::iter::once(encoder.finish()));
-        }
-
-        self.tonemapping.render(self.device(), self.queue(), view);
-
         if self.has_debug_overlay.load(Ordering::Relaxed) {
             if let Some(indirect_draw_buffer) = maybe_indirect_buffer {
                 self.debug_overlay.render(

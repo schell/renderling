@@ -787,8 +787,6 @@ impl GltfDocument {
         document: &gltf::Document,
         buffer_data: Vec<gltf::buffer::Data>,
         images: Vec<gltf::image::Data>,
-        // Camera id to use for any created Renderlets
-        camera_id: Id<Camera>,
     ) -> Result<GltfDocument, StageGltfError> {
         let textures = {
             let mut images = images.into_iter().map(AtlasImage::from).collect::<Vec<_>>();
@@ -1178,19 +1176,17 @@ impl Stage {
     pub fn load_gltf_document_from_path(
         &mut self,
         path: impl AsRef<std::path::Path>,
-        camera_id: Id<Camera>,
     ) -> Result<GltfDocument, StageGltfError> {
         let (document, buffers, images) = gltf::import(path)?;
-        GltfDocument::from_gltf(self, &document, buffers, images, camera_id)
+        GltfDocument::from_gltf(self, &document, buffers, images)
     }
 
     pub fn load_gltf_document_from_bytes(
         &mut self,
         bytes: impl AsRef<[u8]>,
-        camera_id: Id<Camera>,
     ) -> Result<GltfDocument, StageGltfError> {
         let (document, buffers, images) = gltf::import_slice(bytes)?;
-        GltfDocument::from_gltf(self, &document, buffers, images, camera_id)
+        GltfDocument::from_gltf(self, &document, buffers, images)
     }
 }
 
@@ -1239,10 +1235,7 @@ mod test {
             .with_background_color(Vec3::splat(0.0).extend(1.0));
         let camera = stage.new_value(Camera::new(projection, view));
         let _doc = stage
-            .load_gltf_document_from_path(
-                "../../gltf/gltfTutorial_008_SimpleMeshes.gltf",
-                camera.id(),
-            )
+            .load_gltf_document_from_path("../../gltf/gltfTutorial_008_SimpleMeshes.gltf")
             .unwrap();
 
         let frame = ctx.get_next_frame().unwrap();
@@ -1267,10 +1260,7 @@ mod test {
         let camera = stage.new_value(Camera::new(projection, view));
 
         let _doc = stage
-            .load_gltf_document_from_path(
-                "../../gltf/gltfTutorial_003_MinimalGltfFile.gltf",
-                camera.id(),
-            )
+            .load_gltf_document_from_path("../../gltf/gltfTutorial_003_MinimalGltfFile.gltf")
             .unwrap();
 
         let frame = ctx.get_next_frame().unwrap();
@@ -1292,7 +1282,7 @@ mod test {
         let (projection, view) = crate::camera::default_ortho2d(100.0, 100.0);
         let camera = stage.new_value(Camera::new(projection, view));
         let doc = stage
-            .load_gltf_document_from_path("../../gltf/cheetah_cone.glb", camera.id())
+            .load_gltf_document_from_path("../../gltf/cheetah_cone.glb")
             .unwrap();
         assert!(!doc.textures.is_empty());
         let material = stage.new_value(Material {
@@ -1352,10 +1342,7 @@ mod test {
         let camera = stage.new_value(Camera::new(projection, view));
 
         let _doc = stage
-            .load_gltf_document_from_path(
-                "../../gltf/gltfTutorial_013_SimpleTexture.gltf",
-                camera.id(),
-            )
+            .load_gltf_document_from_path("../../gltf/gltfTutorial_013_SimpleTexture.gltf")
             .unwrap();
 
         let frame = ctx.get_next_frame().unwrap();
@@ -1376,7 +1363,7 @@ mod test {
             .with_background_color(Vec4::ONE);
 
         let doc = stage
-            .load_gltf_document_from_path("../../gltf/red_brick_03_1k.glb", Id::NONE)
+            .load_gltf_document_from_path("../../gltf/red_brick_03_1k.glb")
             .unwrap();
         let gltf_camera = doc.cameras.first().unwrap();
         doc.renderlets_iter().for_each(|hybrid| {
@@ -1426,7 +1413,7 @@ mod test {
 
         let camera = stage.new_value(Camera::new(projection, view));
         let doc = stage
-            .load_gltf_document_from_path("../../gltf/Fox.glb", camera.id())
+            .load_gltf_document_from_path("../../gltf/Fox.glb")
             .unwrap();
         log::info!("renderlets: {:#?}", doc.renderlets);
 
@@ -1496,7 +1483,6 @@ mod test {
                 crate::test::workspace_dir()
                     .join("gltf")
                     .join("shadow_mapping_sanity_camera.gltf"),
-                Id::NONE,
             )
             .unwrap();
         let camera_a = doc.cameras.first().unwrap();
@@ -1511,7 +1497,6 @@ mod test {
                 crate::test::workspace_dir()
                     .join("gltf")
                     .join("shadow_mapping_sanity.gltf"),
-                Id::NONE,
             )
             .unwrap();
         let camera_b = doc.cameras.first().unwrap();
