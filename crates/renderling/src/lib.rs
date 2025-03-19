@@ -1,13 +1,19 @@
 //! A "GPU driven" renderer with a focus on simplicity and ease of use.
 //! Backed by WebGPU.
 //!
-//! Shaders are written in Rust using `rust-gpu`.
+//! Shaders are written in Rust using [`rust-gpu`](https://rust-gpu.github.io/).
 //!
-//! All data is staged on the GPU using a [slab allocator](crate::slab).
+//! All data is staged on the GPU using a [slab allocator](https://crates.io/crates/craballoc).
 //!
 //! ## Hello triangle
 //!
-//! First you must create a [`crate::context::Context`].
+//! Here we'll run through the classic "hello triangle", which will
+//! display a colored triangle.
+//!
+//! ### Context creation
+//!
+//! First you must create a [`Context`].
+//! The `Context` holds the render target - either a window or a texture.
 //!
 //! ```
 //! use renderling::prelude::*;
@@ -16,7 +22,11 @@
 //! let ctx = Context::headless(100, 100);
 //! ```
 //!
-//! Then create a stage to place your camera, geometry, materials and lights.
+//! [`Context::headless`] creates a `Context` that renders to a texture.
+//!
+//! ### Staging
+//!
+//! We then create a "stage" to place the camera, geometry, materials and lights.
 //!
 //! ```
 //! # use renderling::prelude::*;
@@ -28,64 +38,58 @@
 //!     .with_lighting(false);
 //! ```
 //!
-//! The stage is neat in that it allows you to place values and arrays of values
+//! The [`Stage`](crate::stage::Stage) is neat in that it allows you to "stage" data
 //! directly onto the GPU. Those values can be modified on the CPU and
 //! synchronization will happen during
 //! [`Stage::render`](crate::stage::Stage::render).
 //!
-//! These values are called
-//! [`Hybrid`](craballoc::Hybrid)s and
-//! [`HybridArray`](craballoc::HybridArray)s.
+//! When "staging" some data, you receive [`Hybrid`](crate::prelude::Hybrid)s and
+//! [`HybridArray`](crate::prelude::HybridArray)s in return.
 //!
-//! They come from the [`craballoc`] library, which is re-exported
+//! These types come from the [`craballoc`] library, which is re-exported
 //! from [the prelude](crate::prelude).
-//!
-//! ```
-//! # use renderling::prelude::*;
-//! # let ctx = Context::headless(100, 100);
-//! # let stage: Stage = ctx.new_stage();
-//!
-//! let an_f32: Hybrid<f32> = stage.new_value(1337.0);
-//!
-//! let an_array_of_tuples: HybridArray<(f32, u32, bool)> =
-//!     stage.new_array([(0.0, 0, false), (1.0, 1, true)]);
-//! ```
 //!
 //! In order to render, we need to "stage" a
 //! [`Renderlet`](crate::stage::Renderlet), which is a bundle of rendering
-//! resources. We do this in the same way we "staged" `an_f32` above.
+//! resources, roughly representing a singular mesh.
 //!
-//! But first we'll need a [`Camera`](crate::camera::Camera) and some vertices
+//! But first we'll need a [`Camera`](crate::camera::Camera) so we can see
+//! what's on the stage, and then we'll need a list
 //! of [`Vertex`](crate::stage::Vertex) organized as triangles with
-//! counter-clockwise winding.
+//! counter-clockwise winding. Here we'll use the builder pattern to create a
+//! staged [`Renderlet`](crate::stage::Renderlet) using our vertices.
 //!
 //! ```
 //! # use renderling::prelude::*;
 //! # let ctx = Context::headless(100, 100);
 //! # let stage: Stage = ctx.new_stage();
 //!
-//! let camera = stage.new_value(Camera::default_ortho2d(100.0, 100.0));
-//! let vertices = stage.new_array([
-//!     Vertex::default()
-//!         .with_position([0.0, 0.0, 0.0])
-//!         .with_color([0.0, 1.0, 1.0, 1.0]),
-//!     Vertex::default()
-//!         .with_position([0.0, 100.0, 0.0])
-//!         .with_color([1.0, 1.0, 0.0, 1.0]),
-//!     Vertex::default()
-//!         .with_position([100.0, 0.0, 0.0])
-//!         .with_color([1.0, 0.0, 1.0, 1.0]),
-//! ]);
-//! let triangle = stage.new_value(Renderlet {
-//!     camera_id: camera.id(),
-//!     vertices_array: vertices.array(),
-//!     ..Default::default()
-//! });
+//! let camera = stage.new_camera(Camera::default_ortho2d(100.0, 100.0));
+//! let (vertices, triangle_renderlet) = stage
+//!     .builder()
+//!     .with_vertices([
+//!         Vertex::default()
+//!             .with_position([0.0, 0.0, 0.0])
+//!             .with_color([0.0, 1.0, 1.0, 1.0]),
+//!         Vertex::default()
+//!             .with_position([0.0, 100.0, 0.0])
+//!             .with_color([1.0, 1.0, 0.0, 1.0]),
+//!         Vertex::default()
+//!             .with_position([100.0, 0.0, 0.0])
+//!             .with_color([1.0, 0.0, 1.0, 1.0]),
+//!     ])
+//!     .build();
 //! ```
 //!
-//! This gives us `triangle`, which is a `Hybrid<Renderlet>`. We can now pass
-//! `triangle` to the stage to draw each frame using
-//! [`Stage::add_renderlet`](crate::stage::Stage::add_renderlet).
+//! The builder is of the type [`RenderletBuilder`](crate::stage::RenderletBuilder)
+//! and after building, it leaves you with all the resources that have been staged,
+//! including the `Renderlet`.
+//! The return type of [`RenderletBuilder::build`](crate::stage::RenderletBuilder::build)
+//! is special in that it depends on the new resources that have been staged.
+//! The type will be a tuple of all the newly staged resources that have been added.
+//! In this case it's our mesh data and the `Renderlet`.
+//!
+//! ### Rendering
 //!
 //! Finally, we get the next frame from the context with
 //! [`Context::get_next_frame`], render to it using
@@ -96,8 +100,8 @@
 //! # use renderling::prelude::*;
 //! # let ctx = Context::headless(100, 100);
 //! # let stage = ctx.new_stage();
-//! # let camera = stage.new_value(Camera::default_ortho2d(100.0, 100.0));
-//! # let vertices = stage.new_array([
+//! # let _camera = stage.new_camera(Camera::default_ortho2d(100.0, 100.0));
+//! # let _rez = stage.builder().with_vertices([
 //! #     Vertex::default()
 //! #         .with_position([0.0, 0.0, 0.0])
 //! #         .with_color([0.0, 1.0, 1.0, 1.0]),
@@ -107,13 +111,7 @@
 //! #     Vertex::default()
 //! #         .with_position([100.0, 0.0, 0.0])
 //! #         .with_color([1.0, 0.0, 1.0, 1.0]),
-//! # ]);
-//! # let triangle = stage.new_value(Renderlet {
-//! #     camera_id: camera.id(),
-//! #     vertices_array: vertices.array(),
-//! #     ..Default::default()
-//! # });
-//! stage.add_renderlet(&triangle);
+//! # ]).build();
 //!
 //! let frame = ctx.get_next_frame().unwrap();
 //! stage.render(&frame.view());
@@ -124,6 +122,13 @@
 //! Saving `img` should give us this:
 //!
 //! ![renderling hello triangle](https://github.com/schell/renderling/blob/main/test_img/cmy_triangle.png?raw=true)
+//!
+//! ### Modifying
+//!
+//! Later, if we want to modify any of the staged values, we can do so through
+//! [`Hybrid`](crate::prelude::Hybrid) and [`HybridArray`](crate::prelude::HybridArray).
+//! The changes made will be synchronized to the GPU at the beginning of the
+//! [`Stage::render`](crate::prelude::Stage::render) function.
 //!
 //! # WARNING
 //!

@@ -120,8 +120,8 @@ impl LightDetails<WeakContainer> {
 
 /// A bundle of lighting resources representing one analytical light in a scene.
 ///
-/// Create an `AnalyticalLightBundle` with the `Lighting::new_*_light` functions:
-/// - [`Lighting::new_directional_light`]
+/// Create an `AnalyticalLightBundle` with the `Lighting::new_analytical_light`,
+/// or from `Stage::new_analytical_light`.
 pub struct AnalyticalLightBundle<Ct: IsContainer = HybridContainer> {
     pub light: Ct::Container<super::Light>,
     pub light_details: LightDetails<Ct>,
@@ -202,7 +202,6 @@ pub struct Lighting {
     pub(crate) lighting_descriptor: Hybrid<LightingDescriptor>,
     pub(crate) analytical_lights: Arc<Mutex<Vec<AnalyticalLightBundle<WeakContainer>>>>,
     pub(crate) analytical_lights_array: Arc<Mutex<HybridArray<Id<super::Light>>>>,
-    pub(crate) bindgroup_layout: Arc<wgpu::BindGroupLayout>,
     pub(crate) shadow_map_update_pipeline: Arc<wgpu::RenderPipeline>,
     pub(crate) shadow_map_update_bindgroup_layout: Arc<wgpu::BindGroupLayout>,
     pub(crate) shadow_map_update_blitter: AtlasBlitter,
@@ -268,7 +267,7 @@ impl Lighting {
         )
     }
 
-    pub(crate) fn create_bindgroup_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+    fn create_bindgroup_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
         let LightingBindGroupLayoutEntries {
             light_slab,
             shadow_map_image,
@@ -280,46 +279,6 @@ impl Lighting {
         })
     }
 
-    pub fn create_bindgroup(
-        device: &wgpu::Device,
-        bindgroup_layout: &wgpu::BindGroupLayout,
-        light_slab_buffer: &wgpu::Buffer,
-        shadow_map_depth_texture: &crate::texture::Texture,
-    ) -> wgpu::BindGroup {
-        device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Self::LABEL,
-            layout: bindgroup_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: light_slab_buffer.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::TextureView(&shadow_map_depth_texture.view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: wgpu::BindingResource::Sampler(&shadow_map_depth_texture.sampler),
-                },
-            ],
-        })
-    }
-
-    /// Returns the lighting bindgroup.
-    pub fn get_bindgroup(&self) -> wgpu::BindGroup {
-        let mut light_slab_buffer = self.light_slab_buffer.write().unwrap();
-        // TODO: invalidate
-        let _should_invalidate = light_slab_buffer.update_if_invalid();
-
-        Self::create_bindgroup(
-            self.light_slab.device(),
-            &self.bindgroup_layout,
-            &light_slab_buffer,
-            &self.shadow_map_atlas.get_texture(),
-        )
-    }
-
     /// Create a new [`Lighting`] manager.
     pub fn new(geometry: &Geometry) -> Self {
         let runtime = geometry.runtime();
@@ -327,8 +286,6 @@ impl Lighting {
             SlabAllocator::new_with_label(runtime, wgpu::BufferUsages::empty(), Some("light-slab"));
         let lighting_descriptor = light_slab.new_value(LightingDescriptor::default());
         let light_slab_buffer = light_slab.commit();
-        let bindgroup_layout = Self::create_bindgroup_layout(&runtime.device);
-
         let shadow_map_update_bindgroup_layout: Arc<_> =
             ShadowMap::create_update_bindgroup_layout(&runtime.device).into();
         let shadow_map_update_pipeline =
@@ -351,7 +308,6 @@ impl Lighting {
             light_slab_buffer: Arc::new(RwLock::new(light_slab_buffer)),
             lighting_descriptor,
             geometry_slab_buffer: Arc::new(RwLock::new(geometry.slab_allocator().commit())),
-            bindgroup_layout: bindgroup_layout.into(),
             shadow_map_update_pipeline,
             shadow_map_update_bindgroup_layout,
             shadow_map_update_blitter: AtlasBlitter::new(
@@ -412,7 +368,7 @@ impl Lighting {
     /// `T` must be one of:
     /// - [`DirectionalLightDescriptor`]
     /// - [`SpotLightDescriptor`]
-    /// - [`PointLightDescirptor`]
+    /// - [`PointLightDescriptor`]
     pub fn new_analytical_light<T>(
         &self,
         light_descriptor: T,

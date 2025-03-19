@@ -786,11 +786,6 @@ impl AtlasBlittingOperation {
 /// A texture blitting utility.
 ///
 /// [`AtlasBlitter`] copies textures to specific frames within the texture atlas.
-///
-/// Use this if you want to just render/copy texture A to texture B where
-/// [CommandEncoder::copy_texture_to_texture] would not work because of either
-/// - Textures are in incompatible formats
-/// - Textures are of different sizes
 #[derive(Clone)]
 pub struct AtlasBlitter {
     pipeline: Arc<wgpu::RenderPipeline>,
@@ -799,11 +794,12 @@ pub struct AtlasBlitter {
 }
 
 impl AtlasBlitter {
-    /// Returns a new [`TextureBlitter`]
+    /// Creates a new [`AtlasBlitter`].
+    ///
     /// # Arguments
-    /// - `device` - A [`Device`]
-    /// - `format` - The [`TextureFormat`] of the texture that will be copied to. This has to be renderable.
-    /// - `sample_type` - The [`Sampler`] Filtering Mode
+    /// - `device` - A [`wgpu::Device`]
+    /// - `format` - The [`wgpu::TextureFormat`] of the texture that will be copied to. This has to be renderable.
+    /// - `sample_type` - The [`wgpu::Sampler`] Filtering Mode
     pub fn new(
         device: &wgpu::Device,
         format: wgpu::TextureFormat,

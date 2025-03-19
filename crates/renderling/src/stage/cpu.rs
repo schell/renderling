@@ -16,7 +16,7 @@ use crate::{
     debug::DebugOverlay,
     draw::DrawCalls,
     geometry::Geometry,
-    light::{Lighting, LightingBindGroupLayoutEntries},
+    light::{AnalyticalLightBundle, Light, LightDetails, Lighting, LightingBindGroupLayoutEntries},
     material::Materials,
     pbr::debug::DebugChannel,
     skybox::{Skybox, SkyboxRenderPipeline},
@@ -527,6 +527,26 @@ impl Stage {
         self.geometry.new_renderlet(renderlet)
     }
 
+    /// Stage a new analytical light.
+    ///
+    /// `T` must be one of:
+    /// - [`DirectionalLightDescriptor`](crate::light::DirectionalLightDescriptor)
+    /// - [`SpotLightDescriptor`](crate::light::SpotLightDescriptor)
+    /// - [`PointLightDescriptor`](crate::light::PointLightDescriptor)
+    pub fn new_analytical_light<T>(
+        &self,
+        light_descriptor: T,
+        nested_transform: Option<NestedTransform>,
+    ) -> AnalyticalLightBundle
+    where
+        T: Clone + Copy + SlabItem + Send + Sync,
+        Light: From<Id<T>>,
+        LightDetails: From<Hybrid<T>>,
+    {
+        self.lighting
+            .new_analytical_light(light_descriptor, nested_transform)
+    }
+
     /// Run all upkeep and commit all staged changes to the GPU.
     ///
     /// This is done implicitly in [`Stage::render`] and [`StageRendering::run`].
@@ -1033,19 +1053,14 @@ impl Stage {
 
     /// Add images to the set of atlas images.
     ///
+    /// This returns a vector of [`Hybrid<AtlasTexture>`], which
+    /// is a descriptor of each image on the GPU. Dropping these entries
+    /// will invalidate those images and cause the atlas to be repacked, and any raw
+    /// GPU references to the underlying [`AtlasTexture`] will also be invalidated.
+    ///     
     /// Adding an image can be quite expensive, as it requires creating a new texture
     /// array for the atlas and repacking all previous images. For that reason it is
     /// good to batch images to reduce the number of calls.
-    ///
-    /// This returns a vector of [`Hybrid<AtlasTexture>`](e), which
-    /// represent each image in the atlas maintained on the GPU. Dropping these entries
-    /// will invalidate those images and cause the atlas to be repacked, and any GPU
-    /// references to the underlying [`AtlasFrame`](f) and [`AtlasTexture`](t) will also
-    /// be invalidated.
-    ///
-    /// [e]: crate::atlas::Hybrid<AtlasTexture>
-    /// [f]: crate::atlas::AtlasFrame
-    /// [t]: crate::atlas::AtlasTexture
     pub fn add_images(
         &self,
         images: impl IntoIterator<Item = impl Into<AtlasImage>>,
@@ -1062,7 +1077,7 @@ impl Stage {
     /// Clear all images from the atlas.
     ///
     /// ## WARNING
-    /// This invalidates any previously staged `AtlasFrame`s.
+    /// This invalidates any previously staged [`AtlasTexture`]s.
     pub fn clear_images(&self) -> Result<(), StageError> {
         let none = Option::<AtlasImage>::None;
         let _ = self.set_images(none)?;
@@ -1075,7 +1090,7 @@ impl Stage {
     /// vector of the frames already staged.
     ///
     /// ## WARNING
-    /// This invalidates any previously staged `Hybrid<AtlasTexture>`s.
+    /// This invalidates any previously staged [`AtlasTexture`]s.
     pub fn set_images(
         &self,
         images: impl IntoIterator<Item = impl Into<AtlasImage>>,
@@ -1243,10 +1258,12 @@ impl Stage {
         Ok(Skybox::new(self.runtime(), hdr))
     }
 
+    /// Create a new [`NestedTransform`].
     pub fn new_nested_transform(&self) -> NestedTransform {
         NestedTransform::new(self.geometry.slab_allocator())
     }
 
+    /// Render the staged scene into the given view.
     pub fn render(&self, view: &wgpu::TextureView) {
         // UNWRAP: POP
         let background_color = *self.background_color.read().unwrap();

@@ -1,8 +1,9 @@
 //! Handles queueing draw calls.
 //!
-//! [`DrawCalls`] is used to maintain the list of all staged [`Renderlet`]s.
+//! [`DrawCalls`] is used to maintain the list of all staged
+//! [`Renderlet`](crate::prelude::Renderlet)s.
 //! It also performs frustum culling and issues draw calls during
-//! [`Stage::render`].
+//! [`Stage::render`](crate::prelude::Stage::render).
 use crabslab::SlabItem;
 
 #[cfg(not(target_arch = "spirv"))]

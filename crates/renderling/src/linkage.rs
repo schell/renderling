@@ -38,17 +38,6 @@ pub mod skybox_vertex;
 pub mod tonemapping_fragment;
 pub mod tonemapping_vertex;
 
-#[cfg(feature = "tutorial")]
-pub mod tutorial_implicit_isosceles_vertex;
-#[cfg(feature = "tutorial")]
-pub mod tutorial_passthru_fragment;
-#[cfg(feature = "tutorial")]
-pub mod tutorial_slabbed_renderlet;
-#[cfg(feature = "tutorial")]
-pub mod tutorial_slabbed_vertices;
-#[cfg(feature = "tutorial")]
-pub mod tutorial_slabbed_vertices_no_instance;
-
 pub struct ShaderLinkage {
     pub module: Arc<wgpu::ShaderModule>,
     pub entry_point: &'static str,

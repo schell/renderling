@@ -7,9 +7,9 @@
 //! primitives.
 //!
 //! More resources:
-//! * https://fgiesen.wordpress.com/2010/10/17/view-frustum-culling/
-//! * http://old.cescg.org/CESCG-2002/DSykoraJJelinek/
-//! * https://iquilezles.org/www/articles/frustumcorrect/frustumcorrect.htm
+//! * <https://fgiesen.wordpress.com/2010/10/17/view-frustum-culling/>
+//! * <http://old.cescg.org/CESCG-2002/DSykoraJJelinek/>
+//! * <https://iquilezles.org/www/articles/frustumcorrect/frustumcorrect.htm>
 
 use crabslab::SlabItem;
 use glam::{Mat4, Vec2, Vec3, Vec3Swizzles, Vec4, Vec4Swizzles};
