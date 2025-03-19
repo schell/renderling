@@ -389,21 +389,21 @@ impl UiPathBuilder {
         let vertices = self
             .ui
             .stage
-            .new_array(std::mem::take(&mut geometry.vertices));
-        let indices = self.ui.stage.new_array(
+            .geometry()
+            .new_vertices(std::mem::take(&mut geometry.vertices));
+        let indices = self.ui.stage.geometry().new_indices(
             std::mem::take(&mut geometry.indices)
                 .into_iter()
                 .map(|u| u as u32),
         );
 
-        let material = self.ui.stage.new_value(Material {
+        let material = self.ui.stage.materials().new_material(Material {
             albedo_texture_id,
             ..Default::default()
         });
-        let renderlet = self.ui.stage.new_value(Renderlet {
+        let renderlet = self.ui.stage.geometry().new_renderlet(Renderlet {
             vertices_array: vertices.array(),
             indices_array: indices.array(),
-            camera_id: self.ui.camera.id(),
             material_id: material.id(),
             ..Default::default()
         });
@@ -481,20 +481,20 @@ impl UiPathBuilder {
         let vertices = self
             .ui
             .stage
-            .new_array(std::mem::take(&mut geometry.vertices));
-        let indices = self.ui.stage.new_array(
+            .geometry()
+            .new_vertices(std::mem::take(&mut geometry.vertices));
+        let indices = self.ui.stage.geometry().new_indices(
             std::mem::take(&mut geometry.indices)
                 .into_iter()
                 .map(|u| u as u32),
         );
-        let material = self.ui.stage.new_value(Material {
+        let material = self.ui.stage.materials().new_material(Material {
             albedo_texture_id,
             ..Default::default()
         });
-        let renderlet = self.ui.stage.new_value(Renderlet {
+        let renderlet = self.ui.stage.geometry().new_renderlet(Renderlet {
             vertices_array: vertices.array(),
             indices_array: indices.array(),
-            camera_id: self.ui.camera.id(),
             material_id: material.id(),
             ..Default::default()
         });

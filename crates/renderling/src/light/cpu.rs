@@ -13,6 +13,7 @@ use snafu::prelude::*;
 
 use crate::{
     atlas::{Atlas, AtlasBlitter, AtlasError},
+    geometry::Geometry,
     stage::NestedTransform,
 };
 
@@ -119,8 +120,8 @@ impl LightDetails<WeakContainer> {
 
 /// A bundle of lighting resources representing one analytical light in a scene.
 ///
-/// Create an `AnalyticalLightBundle` with the `Lighting::new_*_light` functions:
-/// - [`Lighting::new_directional_light`]
+/// Create an `AnalyticalLightBundle` with the `Lighting::new_analytical_light`,
+/// or from `Stage::new_analytical_light`.
 pub struct AnalyticalLightBundle<Ct: IsContainer = HybridContainer> {
     pub light: Ct::Container<super::Light>,
     pub light_details: LightDetails<Ct>,
@@ -201,11 +202,49 @@ pub struct Lighting {
     pub(crate) lighting_descriptor: Hybrid<LightingDescriptor>,
     pub(crate) analytical_lights: Arc<Mutex<Vec<AnalyticalLightBundle<WeakContainer>>>>,
     pub(crate) analytical_lights_array: Arc<Mutex<HybridArray<Id<super::Light>>>>,
-    pub(crate) bindgroup_layout: Arc<wgpu::BindGroupLayout>,
     pub(crate) shadow_map_update_pipeline: Arc<wgpu::RenderPipeline>,
     pub(crate) shadow_map_update_bindgroup_layout: Arc<wgpu::BindGroupLayout>,
     pub(crate) shadow_map_update_blitter: AtlasBlitter,
     pub(crate) shadow_map_atlas: Atlas,
+}
+
+pub struct LightingBindGroupLayoutEntries {
+    pub light_slab: wgpu::BindGroupLayoutEntry,
+    pub shadow_map_image: wgpu::BindGroupLayoutEntry,
+    pub shadow_map_sampler: wgpu::BindGroupLayoutEntry,
+}
+
+impl LightingBindGroupLayoutEntries {
+    pub fn new(starting_binding: u32) -> Self {
+        Self {
+            light_slab: wgpu::BindGroupLayoutEntry {
+                binding: starting_binding,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: true },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
+            shadow_map_image: wgpu::BindGroupLayoutEntry {
+                binding: starting_binding + 1,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Texture {
+                    sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                    view_dimension: wgpu::TextureViewDimension::D2Array,
+                    multisampled: false,
+                },
+                count: None,
+            },
+            shadow_map_sampler: wgpu::BindGroupLayoutEntry {
+                binding: starting_binding + 2,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
+                count: None,
+            },
+        }
+    }
 }
 
 impl Lighting {
@@ -228,92 +267,25 @@ impl Lighting {
         )
     }
 
-    pub(crate) fn create_bindgroup_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+    fn create_bindgroup_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+        let LightingBindGroupLayoutEntries {
+            light_slab,
+            shadow_map_image,
+            shadow_map_sampler,
+        } = LightingBindGroupLayoutEntries::new(0);
         device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Self::LABEL,
-            entries: &[
-                // light slab
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                // shadow map texture view
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
-                        view_dimension: wgpu::TextureViewDimension::D2Array,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                // shadow map texture sampler
-                wgpu::BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
-                    count: None,
-                },
-            ],
+            entries: &[light_slab, shadow_map_image, shadow_map_sampler],
         })
-    }
-
-    pub fn create_bindgroup(
-        device: &wgpu::Device,
-        bindgroup_layout: &wgpu::BindGroupLayout,
-        light_slab_buffer: &wgpu::Buffer,
-        shadow_map_depth_texture: &crate::texture::Texture,
-    ) -> wgpu::BindGroup {
-        device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Self::LABEL,
-            layout: bindgroup_layout,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: light_slab_buffer.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::TextureView(&shadow_map_depth_texture.view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 2,
-                    resource: wgpu::BindingResource::Sampler(&shadow_map_depth_texture.sampler),
-                },
-            ],
-        })
-    }
-
-    /// Returns the lighting bindgroup.
-    pub fn get_bindgroup(&self) -> wgpu::BindGroup {
-        let mut light_slab_buffer = self.light_slab_buffer.write().unwrap();
-        // TODO: invalidate
-        let _should_invalidate = light_slab_buffer.update_if_invalid();
-
-        Self::create_bindgroup(
-            self.light_slab.device(),
-            &self.bindgroup_layout,
-            &light_slab_buffer,
-            &self.shadow_map_atlas.get_texture(),
-        )
     }
 
     /// Create a new [`Lighting`] manager.
-    pub fn new(geometry_slab: &SlabAllocator<WgpuRuntime>) -> Self {
-        let runtime = geometry_slab.runtime();
+    pub fn new(geometry: &Geometry) -> Self {
+        let runtime = geometry.runtime();
         let light_slab =
             SlabAllocator::new_with_label(runtime, wgpu::BufferUsages::empty(), Some("light-slab"));
         let lighting_descriptor = light_slab.new_value(LightingDescriptor::default());
         let light_slab_buffer = light_slab.commit();
-        let bindgroup_layout = Self::create_bindgroup_layout(&runtime.device);
-
         let shadow_map_update_bindgroup_layout: Arc<_> =
             ShadowMap::create_update_bindgroup_layout(&runtime.device).into();
         let shadow_map_update_pipeline =
@@ -331,12 +303,11 @@ impl Lighting {
             ),
             analytical_lights: Default::default(),
             analytical_lights_array: Arc::new(Mutex::new(light_slab.new_array([]))),
-            geometry_slab: geometry_slab.clone(),
+            geometry_slab: geometry.slab_allocator().clone(),
             light_slab,
             light_slab_buffer: Arc::new(RwLock::new(light_slab_buffer)),
             lighting_descriptor,
-            geometry_slab_buffer: Arc::new(RwLock::new(geometry_slab.commit())),
-            bindgroup_layout: bindgroup_layout.into(),
+            geometry_slab_buffer: Arc::new(RwLock::new(geometry.slab_allocator().commit())),
             shadow_map_update_pipeline,
             shadow_map_update_bindgroup_layout,
             shadow_map_update_blitter: AtlasBlitter::new(
@@ -347,7 +318,7 @@ impl Lighting {
         }
     }
 
-    pub fn slab(&self) -> &SlabAllocator<WgpuRuntime> {
+    pub fn slab_allocator(&self) -> &SlabAllocator<WgpuRuntime> {
         &self.light_slab
     }
 
@@ -397,7 +368,7 @@ impl Lighting {
     /// `T` must be one of:
     /// - [`DirectionalLightDescriptor`]
     /// - [`SpotLightDescriptor`]
-    /// - [`PointLightDescirptor`]
+    /// - [`PointLightDescriptor`]
     pub fn new_analytical_light<T>(
         &self,
         light_descriptor: T,
@@ -446,7 +417,8 @@ impl Lighting {
         ShadowMap::new(self, analytical_light_bundle, size, z_near, z_far)
     }
 
-    pub fn upkeep(&self) {
+    #[must_use]
+    pub fn commit(&self) -> SlabBuffer<wgpu::Buffer> {
         {
             // Drop any analytical lights that don't have external references,
             // and update our lights array.
@@ -469,7 +441,7 @@ impl Lighting {
             update_shadow_map_id: Id::NONE,
             update_shadow_map_texture_index: 0,
         });
-        self.light_slab.commit();
+        self.light_slab.commit()
     }
 }
 
@@ -478,7 +450,7 @@ mod test {
 
     use glam::Vec3;
 
-    use crate::{camera::Camera, light::SpotLightCalculation, prelude::Transform};
+    use crate::{light::SpotLightCalculation, prelude::Transform};
 
     use super::*;
 
@@ -551,18 +523,18 @@ mod test {
         let (w, h) = (16.0f32 * m, 9.0 * m);
         let ctx = crate::Context::headless(w as u32, h as u32);
         let mut stage = ctx.new_stage().with_msaa_sample_count(4);
-        let camera = stage.new_value(Camera::default());
         let doc = stage
             .load_gltf_document_from_path(
                 crate::test::workspace_dir()
                     .join("gltf")
                     .join("spot_one.glb"),
-                camera.id(),
             )
             .unwrap();
-        let mut c = doc.cameras.first().unwrap().get_camera();
-        c.set_projection(crate::camera::perspective(w, h));
-        camera.set(c);
+        let camera = doc.cameras.first().unwrap();
+        camera
+            .as_ref()
+            .modify(|cam| cam.set_projection(crate::camera::perspective(w, h)));
+        stage.use_camera(camera);
 
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
@@ -585,25 +557,23 @@ mod test {
             .with_lighting(true)
             .with_msaa_sample_count(4);
 
-        let camera = stage.new_value(Camera::default());
-        log::info!("camera_id: {:?}", camera.id());
         let doc = stage
             .load_gltf_document_from_path(
                 crate::test::workspace_dir()
                     .join("gltf")
                     .join("spot_lights.glb"),
-                camera.id(),
             )
             .unwrap();
-        let gltf_camera = doc.cameras.first().unwrap();
+        let camera = doc.cameras.first().unwrap();
         // TODO: investigate using the camera's aspect for any frame size.
         // A `TextureView` of the frame could be created that renders to the frame
         // within the camera's expected aspect ratio.
         //
         // We'd probably need to constrain rendering to one camera, though.
-        let mut c = gltf_camera.get_camera();
-        c.set_projection(crate::camera::perspective(w, h));
-        camera.set(c);
+        camera
+            .as_ref()
+            .modify(|cam| cam.set_projection(crate::camera::perspective(w, h)));
+        stage.use_camera(camera);
 
         let down_light = doc.lights.first().unwrap();
         log::info!(

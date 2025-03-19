@@ -782,10 +782,10 @@ mod test {
             .with_background_color(Vec3::ZERO.extend(1.0));
         let projection = crate::camera::perspective(50.0, 50.0);
         let view = crate::camera::look_at(Vec3::Z * 3.0, Vec3::ZERO, Vec3::Y);
-        let camera = stage.new_value(Camera::new(projection, view));
+        let _camera = stage.new_camera(Camera::new(projection, view));
 
         let doc = stage
-            .load_gltf_document_from_path("../../gltf/animated_triangle.gltf", camera.id())
+            .load_gltf_document_from_path("../../gltf/animated_triangle.gltf")
             .unwrap();
 
         let nodes = doc

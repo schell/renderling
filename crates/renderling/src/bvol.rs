@@ -7,9 +7,9 @@
 //! primitives.
 //!
 //! More resources:
-//! * https://fgiesen.wordpress.com/2010/10/17/view-frustum-culling/
-//! * http://old.cescg.org/CESCG-2002/DSykoraJJelinek/
-//! * https://iquilezles.org/www/articles/frustumcorrect/frustumcorrect.htm
+//! * <https://fgiesen.wordpress.com/2010/10/17/view-frustum-culling/>
+//! * <http://old.cescg.org/CESCG-2002/DSykoraJJelinek/>
+//! * <https://iquilezles.org/www/articles/frustumcorrect/frustumcorrect.htm>
 
 use crabslab::SlabItem;
 use glam::{Mat4, Vec2, Vec3, Vec3Swizzles, Vec4, Vec4Swizzles};
@@ -470,10 +470,7 @@ impl BVol for Aabb {
 mod test {
     use glam::{Mat4, Quat};
 
-    use crate::{
-        stage::{Renderlet, Vertex},
-        Context,
-    };
+    use crate::{stage::Vertex, Context};
 
     use super::*;
 
@@ -535,30 +532,27 @@ mod test {
             .with_debug_overlay(true)
             .with_frustum_culling(false);
 
-        let mut min = Vec3::splat(f32::INFINITY);
-        let mut max = Vec3::splat(f32::NEG_INFINITY);
-        let vertices = stage.new_array(crate::math::unit_cube().into_iter().map(|(p, n)| {
-            min = min.min(p);
-            max = max.max(p);
-            Vertex::default()
-                .with_position(p)
-                .with_normal(n)
-                .with_color(Vec4::new(1.0, 0.0, 0.0, 1.0))
-        }));
-        let bounds = BoundingSphere::from((min, max));
-        log::info!("bounds: {bounds:?}");
-
         let projection = Mat4::perspective_rh(std::f32::consts::FRAC_PI_4, 1.0, 0.1, 20.0);
         let view = Mat4::look_at_rh(Vec3::new(0.0, 0.0, 2.0), Vec3::ZERO, Vec3::Y);
-        let camera = stage.new_value(Camera::new(projection, view));
+        let _camera = stage.new_camera(Camera::new(projection, view));
 
-        let renderlet = stage.new_value(Renderlet {
-            vertices_array: vertices.array(),
-            bounds,
-            camera_id: camera.id(),
-            ..Default::default()
-        });
-        stage.add_renderlet(&renderlet);
+        let mut min = Vec3::splat(f32::INFINITY);
+        let mut max = Vec3::splat(f32::NEG_INFINITY);
+        let _rez = stage
+            .builder()
+            .with_vertices(crate::math::unit_cube().into_iter().map(|(p, n)| {
+                min = min.min(p);
+                max = max.max(p);
+                Vertex::default()
+                    .with_position(p)
+                    .with_normal(n)
+                    .with_color(Vec4::new(1.0, 0.0, 0.0, 1.0))
+            }))
+            .with_bounds({
+                log::info!("bounds: {:?}", (min, max));
+                (min, max)
+            })
+            .build();
 
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());

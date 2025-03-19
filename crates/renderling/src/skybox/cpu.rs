@@ -166,10 +166,6 @@ pub struct Skybox {
     pub prefiltered_environment_cubemap: Texture,
     // Texture of the pre-computed brdf integration
     pub brdf_lut: Texture,
-    // `Id` of the camera to use for rendering the skybox.
-    //
-    // The camera is used to determine the orientation of the skybox.
-    pub camera: crabslab::Id<Camera>,
 }
 
 impl Skybox {
@@ -183,15 +179,11 @@ impl Skybox {
             format: crate::atlas::AtlasImageFormat::R32G32B32A32FLOAT,
             apply_linear_transfer: false,
         };
-        Self::new(runtime, hdr_img, crabslab::Id::<Camera>::NONE)
+        Self::new(runtime, hdr_img)
     }
 
     /// Create a new `Skybox`.
-    pub fn new(
-        runtime: impl AsRef<WgpuRuntime>,
-        hdr_img: AtlasImage,
-        camera_id: Id<Camera>,
-    ) -> Self {
+    pub fn new(runtime: impl AsRef<WgpuRuntime>, hdr_img: AtlasImage) -> Self {
         let runtime = runtime.as_ref();
         log::trace!("creating skybox");
 
@@ -285,7 +277,6 @@ impl Skybox {
             irradiance_cubemap,
             prefiltered_environment_cubemap,
             brdf_lut,
-            camera: camera_id,
         }
     }
 
@@ -668,9 +659,9 @@ mod test {
 
         let stage = ctx.new_stage();
 
-        let camera = stage.new_value(Camera::new(proj, view));
+        let _camera = stage.new_camera(Camera::new(proj, view));
         let skybox = stage
-            .new_skybox_from_path("../../img/hdr/resting_place.hdr", camera.id())
+            .new_skybox_from_path("../../img/hdr/resting_place.hdr")
             .unwrap();
 
         assert_eq!(

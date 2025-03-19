@@ -752,14 +752,14 @@ mod test {
 
         let projection = crate::camera::perspective(width as f32, height as f32);
         let view = crate::camera::look_at(Vec3::new(0.0, 2.0, 18.0), Vec3::ZERO, Vec3::Y);
-        let camera = stage.new_value(Camera::new(projection, view));
+        let _camera = stage.new_camera(Camera::new(projection, view));
         let skybox = stage
-            .new_skybox_from_path("../../img/hdr/night.hdr", camera.id())
+            .new_skybox_from_path("../../img/hdr/night.hdr")
             .unwrap();
         stage.set_skybox(skybox);
 
         let _doc = stage
-            .load_gltf_document_from_path("../../gltf/EmissiveStrengthTest.glb", camera.id())
+            .load_gltf_document_from_path("../../gltf/EmissiveStrengthTest.glb")
             .unwrap();
 
         let frame = ctx.get_next_frame().unwrap();

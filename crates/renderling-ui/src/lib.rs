@@ -163,7 +163,9 @@ impl Ui {
             .with_lighting(false)
             .with_bloom(false)
             .with_msaa_sample_count(4);
-        let camera = stage.new_value(Camera::default_ortho2d(x as f32, y as f32));
+        let camera = stage
+            .geometry()
+            .new_camera(Camera::default_ortho2d(x as f32, y as f32));
         Ui {
             camera,
             stage,
@@ -327,7 +329,13 @@ impl Ui {
         let mut should_reorder = false;
         // UNWRAP: panic on purpose
         let mut transforms = self.transforms.write().unwrap();
-        for update_id in self.stage.get_updated_source_ids().into_iter() {
+        for update_id in self
+            .stage
+            .geometry()
+            .slab_allocator()
+            .get_updated_source_ids()
+            .into_iter()
+        {
             if let Some(ui_transform) = transforms.get(&update_id) {
                 if Arc::strong_count(&ui_transform.renderlet_ids) == 1 {
                     let _ = transforms.remove(&update_id);
@@ -341,7 +349,6 @@ impl Ui {
             log::trace!("a ui transform changed, sorting the renderlets");
             self.reorder_renderlets();
         }
-        self.stage.tick();
         self.stage.render(view);
     }
 }

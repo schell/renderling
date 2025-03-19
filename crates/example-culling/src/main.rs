@@ -51,38 +51,9 @@ impl CullingExample {
         Aabb::new(min, max)
     }
 
-    fn add_aabb_renderlet(
-        stage: &Stage,
-        aabb: Aabb,
-        transform_id: Id<Transform>,
-        camera_id: Id<Camera>,
-        material_id: Id<Material>,
-    ) -> (Hybrid<Renderlet>, GpuArray<Vertex>) {
-        let vertices =
-            stage.new_array(
-                aabb.get_mesh()
-                    .into_iter()
-                    .map(|(position, normal)| Vertex {
-                        position,
-                        normal,
-                        ..Default::default()
-                    }),
-            );
-        let renderlet = stage.new_value(Renderlet {
-            vertices_array: vertices.array(),
-            camera_id,
-            transform_id,
-            material_id,
-            ..Default::default()
-        });
-        stage.add_renderlet(&renderlet);
-        (renderlet, vertices.into_gpu_only())
-    }
-
     fn make_aabbs(
         seed: u64,
         stage: &Stage,
-        app_camera: &AppCamera,
         frustum_camera: &FrustumCamera,
         material_outside: &Hybrid<Material>,
         material_overlapping: &Hybrid<Material>,
@@ -115,21 +86,30 @@ impl CullingExample {
                         ..Default::default()
                     };
 
-                    let transform = stage.new_value(aabb_transform);
-                    let (aabb_renderlet, aabb_vertices) = Self::add_aabb_renderlet(
-                        stage,
-                        aabb,
-                        transform.id(),
-                        app_camera.0.id(),
-                        if BoundingSphere::from(aabb)
+                    let transform = stage.new_transform(aabb_transform);
+                    let (aabb_vertices, aabb_renderlet) = {
+                        let material_id = if BoundingSphere::from(aabb)
                             .is_inside_camera_view(&frustum_camera.0, transform.get())
                             .0
                         {
                             material_overlapping.id()
                         } else {
                             material_outside.id()
-                        },
-                    );
+                        };
+                        let (renderlet, vertices) = stage
+                            .builder()
+                            .with_vertices(aabb.get_mesh().into_iter().map(|(position, normal)| {
+                                Vertex {
+                                    position,
+                                    normal,
+                                    ..Default::default()
+                                }
+                            }))
+                            .with_transform_id(transform.id())
+                            .with_material_id(material_id)
+                            .build();
+                        (renderlet, vertices.into_gpu_only())
+                    };
                     (aabb_renderlet, aabb_vertices, transform)
                 })
                 .collect::<Vec<_>>(),
@@ -160,11 +140,10 @@ impl ApplicationHandler for CullingExample {
             } => {
                 if c.as_str() == "r" {
                     self.resources.drain();
-                    self.stage.tick();
+                    let _ = self.stage.commit();
                     self.resources.push(Self::make_aabbs(
                         self.next_k,
                         &self.stage,
-                        &self.app_camera,
                         &self.frustum_camera,
                         &self.material_aabb_outside,
                         &self.material_aabb_overlapping,
@@ -245,23 +224,22 @@ impl TestAppHandler for CullingExample {
         let red_color = srgba_to_linear(hex_to_vec4(0xC96868FF));
         let yellow_color = srgba_to_linear(hex_to_vec4(0xFADFA1FF));
 
-        let material_aabb_overlapping = stage.new_value(Material {
+        let material_aabb_overlapping = stage.new_material(Material {
             albedo_factor: blue_color,
             ..Default::default()
         });
-        let material_aabb_outside = stage.new_value(Material {
+        let material_aabb_outside = stage.new_material(Material {
             albedo_factor: red_color,
             ..Default::default()
         });
-        let material_frustum = stage.new_value(Material {
+        let material_frustum = stage.new_material(Material {
             albedo_factor: yellow_color,
             ..Default::default()
         });
-        let app_camera = AppCamera(stage.new_value(Camera::default()));
+        let app_camera = AppCamera(stage.new_camera(Camera::default()));
         resources.push(Self::make_aabbs(
             seed,
             &stage,
-            &app_camera,
             &frustum_camera,
             &material_aabb_outside,
             &material_aabb_overlapping,
@@ -269,16 +247,15 @@ impl TestAppHandler for CullingExample {
         seed += 1;
 
         let frustum_vertices =
-            stage.new_array(frustum_camera.0.frustum().get_mesh().into_iter().map(
+            stage.new_vertices(frustum_camera.0.frustum().get_mesh().into_iter().map(
                 |(position, normal)| Vertex {
                     position,
                     normal,
                     ..Default::default()
                 },
             ));
-        let frustum_renderlet = stage.new_value(Renderlet {
+        let frustum_renderlet = stage.new_renderlet(Renderlet {
             vertices_array: frustum_vertices.array(),
-            camera_id: app_camera.0.id(),
             material_id: material_frustum.id(),
             ..Default::default()
         });

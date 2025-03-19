@@ -144,7 +144,7 @@ impl App {
             .with_bloom_mix_strength(0.5)
             .with_bloom_filter_radius(4.0)
             .with_msaa_sample_count(4);
-        let camera = stage.new_value(Camera::default());
+        let camera = stage.geometry().new_camera(Camera::default());
         let directional_light = DirectionalLightDescriptor {
             direction: Vec3::NEG_Y,
             color: renderling::math::hex_to_vec4(0xFDFBD3FF),
@@ -203,7 +203,6 @@ impl App {
 
     pub fn render(&self, ctx: &Context) {
         let frame = ctx.get_next_frame().unwrap();
-        self.stage.tick();
         self.stage.render(&frame.view());
         self.ui.ui.render(&frame.view());
         frame.present();
@@ -216,7 +215,7 @@ impl App {
 
     fn load_hdr_skybox(&mut self, bytes: Vec<u8>) {
         let img = AtlasImage::from_hdr_bytes(&bytes).unwrap();
-        let skybox = Skybox::new(self.stage.runtime(), img, self.camera.id());
+        let skybox = Skybox::new(self.stage.runtime(), img);
         self.skybox_image_bytes = Some(bytes);
         self.stage.set_skybox(skybox);
     }
@@ -224,26 +223,26 @@ impl App {
     pub fn load_default_model(&mut self) {
         let mut min = Vec3::splat(f32::INFINITY);
         let mut max = Vec3::splat(f32::NEG_INFINITY);
-        let vertices = self
-            .stage
-            .new_array(renderling::math::unit_cube().into_iter().map(|(p, n)| {
-                let p = p * 2.0;
-                min = min.min(p);
-                max = max.max(p);
-                Vertex::default()
-                    .with_position(p)
-                    .with_normal(n)
-                    .with_color(Vec4::new(1.0, 0.0, 0.0, 1.0))
-            }));
+        let vertices =
+            self.stage
+                .geometry()
+                .new_vertices(renderling::math::unit_cube().into_iter().map(|(p, n)| {
+                    let p = p * 2.0;
+                    min = min.min(p);
+                    max = max.max(p);
+                    Vertex::default()
+                        .with_position(p)
+                        .with_normal(n)
+                        .with_color(Vec4::new(1.0, 0.0, 0.0, 1.0))
+                }));
         log::info!("default model bounds: {min} {max}");
         let bounds = BoundingSphere::from((min, max));
         self.camera_controller.reset(Aabb::new(min, max));
         self.camera_controller
             .update_camera(self.stage.get_size(), &self.camera);
         self.last_frame_instant = now();
-        let renderlet = self.stage.new_value(Renderlet {
+        let renderlet = self.stage.geometry().new_renderlet(Renderlet {
             vertices_array: vertices.array(),
-            camera_id: self.camera.id(),
             bounds,
             ..Default::default()
         });
@@ -259,20 +258,12 @@ impl App {
             .reset(Aabb::new(Vec3::NEG_ONE, Vec3::ONE));
         self.stage.clear_images().unwrap();
         self.model = Model::None;
-        log::debug!("ticking stage to reclaim buffers");
-        self.stage.tick();
-        let doc = match self
-            .stage
-            .load_gltf_document_from_bytes(bytes, self.camera.id())
-        {
+        let doc = match self.stage.load_gltf_document_from_bytes(bytes) {
             Err(e) => {
                 log::error!("gltf loading error: {e}");
                 if cfg!(not(target_arch = "wasm32")) {
                     log::info!("attempting to load by filesystem");
-                    match self
-                        .stage
-                        .load_gltf_document_from_path(path, self.camera.id())
-                    {
+                    match self.stage.load_gltf_document_from_path(path) {
                         Ok(doc) => doc,
                         Err(e) => {
                             log::error!("gltf loading error: {e}");

@@ -509,9 +509,12 @@ impl GltfPrimitive {
         );
         let morph_targets = morph_targets
             .into_iter()
-            .map(|verts| stage.new_array(verts))
+            .map(|verts| stage.geometry().new_morph_targets(verts))
             .collect::<Vec<_>>();
-        let morph_targets_array = stage.new_array(morph_targets.iter().map(HybridArray::array));
+        let morph_targets_array = stage
+            .geometry()
+            .slab_allocator()
+            .new_array(morph_targets.iter().map(HybridArray::array));
 
         let vs = joints.into_iter().zip(weights);
         let vs = colors.zip(vs);
@@ -541,9 +544,9 @@ impl GltfPrimitive {
                 },
             )
             .collect::<Vec<_>>();
-        let vertices = stage.new_array(vertices);
+        let vertices = stage.geometry().new_vertices(vertices);
         log::debug!("{} vertices, {:?}", vertices.len(), vertices.array());
-        let indices = stage.new_array(indices);
+        let indices = stage.geometry().new_indices(indices);
         log::debug!("{} indices, {:?}", indices.len(), indices.array());
         let (bbmin, bbmax) = {
             let gltf::mesh::Bounds { min, max } = primitive.bounding_box();
@@ -594,7 +597,7 @@ impl GltfMesh {
         let weights = mesh.weights().unwrap_or(&[]).iter().copied();
         GltfMesh {
             primitives,
-            weights: stage.new_array(weights),
+            weights: stage.geometry().new_weights(weights),
         }
     }
 }
@@ -606,6 +609,12 @@ pub struct GltfCamera {
     pub node_transform: NestedTransform,
     projection: Mat4,
     pub camera: Hybrid<Camera>,
+}
+
+impl AsRef<Hybrid<Camera>> for GltfCamera {
+    fn as_ref(&self) -> &Hybrid<Camera> {
+        &self.camera
+    }
 }
 
 impl GltfCamera {
@@ -636,7 +645,7 @@ impl GltfCamera {
             }
         };
         let view = Mat4::from(transform.get_global_transform()).inverse();
-        let camera = stage.new_value(Camera::new(projection, view));
+        let camera = stage.geometry().new_camera(Camera::new(projection, view));
         GltfCamera {
             index: gltf_camera.index(),
             name: gltf_camera.name().map(String::from),
@@ -721,7 +730,7 @@ impl GltfSkin {
             log::debug!("    joint node {node_index} is {transform_id:?}");
             joint_transforms.push(transform_id);
         }
-        let joint_transforms = stage.new_array(joint_transforms);
+        let joint_transforms = stage.geometry().new_joint_transform_ids(joint_transforms);
         let reader = skin.reader(|b| buffer_data.get(b.index()).map(|d| d.0.as_slice()));
         let inverse_bind_matrices = if let Some(mats) = reader.read_inverse_bind_matrices() {
             let invs = mats
@@ -729,7 +738,7 @@ impl GltfSkin {
                 .map(|m| Mat4::from_cols_array_2d(&m))
                 .collect::<Vec<_>>();
             log::debug!("  has {} inverse bind matrices", invs.len());
-            Some(stage.new_array(invs))
+            Some(stage.geometry().new_matrices(invs))
         } else {
             log::debug!("  no inverse bind matrices");
             None
@@ -744,7 +753,7 @@ impl GltfSkin {
         };
         Ok(GltfSkin {
             index: skin.index(),
-            skin: stage.new_value(Skin {
+            skin: stage.geometry().new_skin(Skin {
                 joints: joint_transforms.array(),
                 inverse_bind_matrices: inverse_bind_matrices
                     .as_ref()
@@ -784,8 +793,6 @@ impl GltfDocument {
         document: &gltf::Document,
         buffer_data: Vec<gltf::buffer::Data>,
         images: Vec<gltf::image::Data>,
-        // Camera id to use for any created Renderlets
-        camera_id: Id<Camera>,
     ) -> Result<GltfDocument, StageGltfError> {
         let textures = {
             let mut images = images.into_iter().map(AtlasImage::from).collect::<Vec<_>>();
@@ -865,7 +872,7 @@ impl GltfDocument {
         };
 
         log::debug!("Creating materials");
-        let default_material = stage.new_value(Material::default());
+        let default_material = stage.materials().new_material(Material::default());
         let mut materials = vec![];
         for gltf_material in document.materials() {
             let material_index = gltf_material.index();
@@ -879,7 +886,7 @@ impl GltfDocument {
                 default_material.set(material);
             }
         }
-        let materials = stage.new_array(materials);
+        let materials = stage.materials().new_materials(materials);
         log::trace!("  created {} materials", materials.len());
 
         log::debug!("Loading meshes");
@@ -956,10 +963,10 @@ impl GltfDocument {
                 if let Some(mesh) = node.mesh() {
                     meshes[mesh.index()].weights.clone()
                 } else {
-                    stage.new_array(weights)
+                    stage.geometry().new_weights(weights)
                 }
             } else {
-                stage.new_array(weights)
+                stage.geometry().new_weights(weights)
             };
             let transform = transform_for_node(0, stage, &mut node_transforms, &node);
             nodes.push(GltfNode {
@@ -1006,7 +1013,7 @@ impl GltfDocument {
                     .get(&node_index)
                     .context(MissingNodeSnafu { index: node_index })?
                     .clone();
-                node_transform.move_gpu_to_slab(stage.lighting().slab());
+                node_transform.move_gpu_to_slab(stage.lighting().slab_allocator());
 
                 let color = Vec3::from(gltf_light.color()).extend(1.0);
                 let intensity = gltf_light.intensity();
@@ -1108,12 +1115,11 @@ impl GltfDocument {
                 let num_prims = mesh.primitives.len();
                 log::trace!("    has {num_prims} primitives");
                 for (prim, i) in mesh.primitives.iter().zip(1..) {
-                    let hybrid = stage.new_value(Renderlet {
+                    let hybrid = stage.geometry().new_renderlet(Renderlet {
                         vertices_array: prim.vertices.array(),
                         indices_array: prim.indices.array(),
                         transform_id: gltf_node.transform.global_transform_id(),
                         material_id: prim.material,
-                        camera_id,
                         skin_id,
                         morph_targets: prim.morph_targets_array.array(),
                         morph_weights: gltf_node.weights.array(),
@@ -1176,32 +1182,23 @@ impl Stage {
     pub fn load_gltf_document_from_path(
         &mut self,
         path: impl AsRef<std::path::Path>,
-        camera_id: Id<Camera>,
     ) -> Result<GltfDocument, StageGltfError> {
         let (document, buffers, images) = gltf::import(path)?;
-        GltfDocument::from_gltf(self, &document, buffers, images, camera_id)
+        GltfDocument::from_gltf(self, &document, buffers, images)
     }
 
     pub fn load_gltf_document_from_bytes(
         &mut self,
         bytes: impl AsRef<[u8]>,
-        camera_id: Id<Camera>,
     ) -> Result<GltfDocument, StageGltfError> {
         let (document, buffers, images) = gltf::import_slice(bytes)?;
-        GltfDocument::from_gltf(self, &document, buffers, images, camera_id)
+        GltfDocument::from_gltf(self, &document, buffers, images)
     }
 }
 
 #[cfg(test)]
 mod test {
-    use crate::{
-        camera::Camera,
-        pbr::Material,
-        stage::{Renderlet, Vertex},
-        transform::Transform,
-        Context,
-    };
-    use crabslab::Id;
+    use crate::{camera::Camera, pbr::Material, stage::Vertex, transform::Transform, Context};
     use glam::{Vec3, Vec4};
 
     #[test]
@@ -1235,12 +1232,9 @@ mod test {
             .with_lighting(false)
             .with_bloom(false)
             .with_background_color(Vec3::splat(0.0).extend(1.0));
-        let camera = stage.new_value(Camera::new(projection, view));
+        let _camera = stage.new_camera(Camera::new(projection, view));
         let _doc = stage
-            .load_gltf_document_from_path(
-                "../../gltf/gltfTutorial_008_SimpleMeshes.gltf",
-                camera.id(),
-            )
+            .load_gltf_document_from_path("../../gltf/gltfTutorial_008_SimpleMeshes.gltf")
             .unwrap();
 
         let frame = ctx.get_next_frame().unwrap();
@@ -1262,13 +1256,10 @@ mod test {
         let projection = crate::camera::perspective(20.0, 20.0);
         let eye = Vec3::new(0.5, 0.5, 2.0);
         let view = crate::camera::look_at(eye, Vec3::new(0.5, 0.5, 0.0), Vec3::Y);
-        let camera = stage.new_value(Camera::new(projection, view));
+        let _camera = stage.new_camera(Camera::new(projection, view));
 
         let _doc = stage
-            .load_gltf_document_from_path(
-                "../../gltf/gltfTutorial_003_MinimalGltfFile.gltf",
-                camera.id(),
-            )
+            .load_gltf_document_from_path("../../gltf/gltfTutorial_003_MinimalGltfFile.gltf")
             .unwrap();
 
         let frame = ctx.get_next_frame().unwrap();
@@ -1288,45 +1279,39 @@ mod test {
             .with_lighting(false)
             .with_background_color(Vec4::splat(1.0));
         let (projection, view) = crate::camera::default_ortho2d(100.0, 100.0);
-        let camera = stage.new_value(Camera::new(projection, view));
+        let _camera = stage.new_camera(Camera::new(projection, view));
         let doc = stage
-            .load_gltf_document_from_path("../../gltf/cheetah_cone.glb", camera.id())
+            .load_gltf_document_from_path("../../gltf/cheetah_cone.glb")
             .unwrap();
         assert!(!doc.textures.is_empty());
-        let material = stage.new_value(Material {
-            albedo_texture_id: doc.textures[0].id(),
-            has_lighting: false,
-            ..Default::default()
-        });
+        let (material, _vertices, _indices, _transform, _renderlet) = stage
+            .builder()
+            .with_material(Material {
+                albedo_texture_id: doc.textures[0].id(),
+                has_lighting: false,
+                ..Default::default()
+            })
+            .with_vertices([
+                Vertex::default()
+                    .with_position([0.0, 0.0, 0.0])
+                    .with_uv0([0.0, 0.0]),
+                Vertex::default()
+                    .with_position([1.0, 0.0, 0.0])
+                    .with_uv0([1.0, 0.0]),
+                Vertex::default()
+                    .with_position([1.0, 1.0, 0.0])
+                    .with_uv0([1.0, 1.0]),
+                Vertex::default()
+                    .with_position([0.0, 1.0, 0.0])
+                    .with_uv0([0.0, 1.0]),
+            ])
+            .with_indices([0u32, 3, 2, 0, 2, 1])
+            .with_transform(Transform {
+                scale: Vec3::new(100.0, 100.0, 1.0),
+                ..Default::default()
+            })
+            .build();
         println!("material_id: {:#?}", material.id());
-        let vertices = stage.new_array([
-            Vertex::default()
-                .with_position([0.0, 0.0, 0.0])
-                .with_uv0([0.0, 0.0]),
-            Vertex::default()
-                .with_position([1.0, 0.0, 0.0])
-                .with_uv0([1.0, 0.0]),
-            Vertex::default()
-                .with_position([1.0, 1.0, 0.0])
-                .with_uv0([1.0, 1.0]),
-            Vertex::default()
-                .with_position([0.0, 1.0, 0.0])
-                .with_uv0([0.0, 1.0]),
-        ]);
-        let indices = stage.new_array([0u32, 3, 2, 0, 2, 1]);
-        let transform = stage.new_value(Transform {
-            scale: Vec3::new(100.0, 100.0, 1.0),
-            ..Default::default()
-        });
-        let renderlet = stage.new_value(Renderlet {
-            vertices_array: vertices.array(),
-            indices_array: indices.array(),
-            material_id: material.id(),
-            transform_id: transform.id(),
-            camera_id: camera.id(),
-            ..Default::default()
-        });
-        stage.add_renderlet(&renderlet);
 
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
@@ -1348,13 +1333,10 @@ mod test {
         let projection = crate::camera::perspective(size as f32, size as f32);
         let view =
             crate::camera::look_at(Vec3::new(0.5, 0.5, 1.25), Vec3::new(0.5, 0.5, 0.0), Vec3::Y);
-        let camera = stage.new_value(Camera::new(projection, view));
+        let _camera = stage.new_camera(Camera::new(projection, view));
 
         let _doc = stage
-            .load_gltf_document_from_path(
-                "../../gltf/gltfTutorial_013_SimpleTexture.gltf",
-                camera.id(),
-            )
+            .load_gltf_document_from_path("../../gltf/gltfTutorial_013_SimpleTexture.gltf")
             .unwrap();
 
         let frame = ctx.get_next_frame().unwrap();
@@ -1375,14 +1357,10 @@ mod test {
             .with_background_color(Vec4::ONE);
 
         let doc = stage
-            .load_gltf_document_from_path("../../gltf/red_brick_03_1k.glb", Id::NONE)
+            .load_gltf_document_from_path("../../gltf/red_brick_03_1k.glb")
             .unwrap();
-        let gltf_camera = doc.cameras.first().unwrap();
-        doc.renderlets_iter().for_each(|hybrid| {
-            hybrid.modify(|r| {
-                r.camera_id = gltf_camera.camera.id();
-            });
-        });
+        let camera = doc.cameras.first().unwrap();
+        stage.use_camera(camera);
         // A change to the lighting units for directional lights causes this test to fail.
         //
         // Instead of changing the saved picture, we'll adjust the intensity.
@@ -1423,9 +1401,9 @@ mod test {
         let up = Vec3::Y;
         let view = glam::Mat4::look_at_rh(eye, target, up);
 
-        let camera = stage.new_value(Camera::new(projection, view));
+        let _camera = stage.new_camera(Camera::new(projection, view));
         let doc = stage
-            .load_gltf_document_from_path("../../gltf/Fox.glb", camera.id())
+            .load_gltf_document_from_path("../../gltf/Fox.glb")
             .unwrap();
         log::info!("renderlets: {:#?}", doc.renderlets);
 
@@ -1495,7 +1473,6 @@ mod test {
                 crate::test::workspace_dir()
                     .join("gltf")
                     .join("shadow_mapping_sanity_camera.gltf"),
-                Id::NONE,
             )
             .unwrap();
         let camera_a = doc.cameras.first().unwrap();
@@ -1510,7 +1487,6 @@ mod test {
                 crate::test::workspace_dir()
                     .join("gltf")
                     .join("shadow_mapping_sanity.gltf"),
-                Id::NONE,
             )
             .unwrap();
         let camera_b = doc.cameras.first().unwrap();

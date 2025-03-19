@@ -684,23 +684,19 @@ mod test {
         let ctx = Context::headless(100, 100);
         let stage = ctx.new_stage().with_background_color(Vec4::splat(1.0));
         let camera_position = Vec3::new(0.0, 9.0, 9.0);
-        let camera = stage.new_value(Camera::new(
+        let _camera = stage.new_camera(Camera::new(
             Mat4::perspective_rh(std::f32::consts::PI / 4.0, 1.0, 1.0, 24.0),
             Mat4::look_at_rh(camera_position, Vec3::ZERO, Vec3::Y),
         ));
-        let geometry = stage.new_array(crate::test::gpu_cube_vertices());
-        let transform = stage.new_value(Transform {
-            scale: Vec3::new(6.0, 6.0, 6.0),
-            rotation: Quat::from_axis_angle(Vec3::Y, -std::f32::consts::FRAC_PI_4),
-            ..Default::default()
-        });
-        let cube = stage.new_value(Renderlet {
-            camera_id: camera.id(),
-            vertices_array: geometry.array(),
-            transform_id: transform.id(),
-            ..Default::default()
-        });
-        stage.add_renderlet(&cube);
+        let _rez = stage
+            .builder()
+            .with_vertices(crate::test::gpu_cube_vertices())
+            .with_transform(Transform {
+                scale: Vec3::new(6.0, 6.0, 6.0),
+                rotation: Quat::from_axis_angle(Vec3::Y, -std::f32::consts::FRAC_PI_4),
+                ..Default::default()
+            })
+            .build();
 
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
@@ -728,7 +724,7 @@ mod test {
         )
         .unwrap();
         for (i, img) in pyramid_images.into_iter().enumerate() {
-            img_diff::save(&format!("cull/pyramid/mip_{i}.png"), img);
+            img_diff::save(format!("cull/pyramid/mip_{i}.png"), img);
         }
     }
 
@@ -786,7 +782,7 @@ mod test {
             .with_lighting(false)
             .with_bloom(false)
             .with_background_color(Vec4::splat(1.0));
-        let camera = {
+        let _camera = {
             let fovy = std::f32::consts::FRAC_PI_4;
             let aspect = 1.0;
             let znear = 0.1;
@@ -794,14 +790,14 @@ mod test {
             let projection = Mat4::perspective_rh(fovy, aspect, znear, zfar);
             // Camera is looking straight down Z, towards the origin with Y up
             let view = Mat4::look_at_rh(Vec3::new(0.0, 0.0, 10.0), Vec3::ZERO, Vec3::Y);
-            stage.new_value(Camera::new(projection, view))
+            stage.new_camera(Camera::new(projection, view))
         };
 
         let save_render = |s: &str| {
             let frame = ctx.get_next_frame().unwrap();
             stage.render(&frame.view());
             let img = frame.read_image().unwrap();
-            img_diff::save(&format!("cull/debugging_{s}.png"), img);
+            img_diff::save(format!("cull/debugging_{s}.png"), img);
             frame.present();
         };
 
@@ -817,27 +813,23 @@ mod test {
         ]
         .map(|(offset, suffix)| {
             let yellow = hex_to_vec4(0xFFE6A5FF);
-            let transform = stage.new_value(Transform {
-                // move it back behind the purple cube
-                translation: (offset * 10.0).extend(-20.0),
-                // scale it up since it's a unit cube
-                scale: Vec3::splat(2.0),
-                ..Default::default()
-            });
-            let vertices = stage.new_array(crate::math::unit_cube().into_iter().map(|(p, n)| {
-                Vertex::default()
-                    .with_position(p)
-                    .with_normal(n)
-                    .with_color(yellow)
-            }));
-            let renderlet = stage.new_value(Renderlet {
-                camera_id: camera.id(),
-                vertices_array: vertices.array(),
-                transform_id: transform.id(),
-                bounds: BoundingSphere::new(Vec3::ZERO, Vec3::splat(0.5).length()),
-                ..Default::default()
-            });
-            stage.add_renderlet(&renderlet);
+            let (transform, vertices, renderlet) = stage
+                .builder()
+                .with_transform(Transform {
+                    // move it back behind the purple cube
+                    translation: (offset * 10.0).extend(-20.0),
+                    // scale it up since it's a unit cube
+                    scale: Vec3::splat(2.0),
+                    ..Default::default()
+                })
+                .with_vertices(crate::math::unit_cube().into_iter().map(|(p, n)| {
+                    Vertex::default()
+                        .with_position(p)
+                        .with_normal(n)
+                        .with_color(yellow)
+                }))
+                .with_bounds(BoundingSphere::new(Vec3::ZERO, Vec3::splat(0.5).length()))
+                .build();
             names.insert(renderlet.id(), format!("yellow_cube_{suffix}"));
             (renderlet, transform, vertices)
         });
@@ -847,26 +839,22 @@ mod test {
         // We'll add a golden floor
         let _floor = {
             let golden = hex_to_vec4(0xFFBF61FF);
-            let transform = stage.new_value(Transform {
-                // flip it so it's facing up, like a floor should be
-                rotation: Quat::from_rotation_x(std::f32::consts::FRAC_PI_2),
-                // move it down and back a bit
-                translation: Vec3::new(0.0, -5.0, -10.0),
-                // scale it up, since it's a unit quad
-                scale: Vec3::new(100.0, 100.0, 1.0),
-            });
-            let vertices = stage.new_array(
-                crate::math::UNIT_QUAD_CCW
-                    .map(|p| Vertex::default().with_position(p).with_color(golden)),
-            );
-            let renderlet = stage.new_value(Renderlet {
-                camera_id: camera.id(),
-                vertices_array: vertices.array(),
-                transform_id: transform.id(),
-                bounds: BoundingSphere::new(Vec3::ZERO, Vec2::splat(0.5).length()),
-                ..Default::default()
-            });
-            stage.add_renderlet(&renderlet);
+            let (transform, vertices, renderlet) = stage
+                .builder()
+                .with_transform(Transform {
+                    // flip it so it's facing up, like a floor should be
+                    rotation: Quat::from_rotation_x(std::f32::consts::FRAC_PI_2),
+                    // move it down and back a bit
+                    translation: Vec3::new(0.0, -5.0, -10.0),
+                    // scale it up, since it's a unit quad
+                    scale: Vec3::new(100.0, 100.0, 1.0),
+                })
+                .with_vertices(
+                    crate::math::UNIT_QUAD_CCW
+                        .map(|p| Vertex::default().with_position(p).with_color(golden)),
+                )
+                .with_bounds(BoundingSphere::new(Vec3::ZERO, Vec2::splat(0.5).length()))
+                .build();
             names.insert(renderlet.id(), "floor".into());
             (renderlet, transform, vertices)
         };
@@ -876,26 +864,23 @@ mod test {
         // Add a green cube
         let _gcube = {
             let green = hex_to_vec4(0x8ABFA3FF);
-            let transform = stage.new_value(Transform {
-                // move it back behind the purple cube
-                translation: Vec3::new(0.0, 0.0, -10.0),
-                // scale it up since it's a unit cube
-                scale: Vec3::splat(5.0),
-                ..Default::default()
-            });
-            let vertices = stage.new_array(crate::math::unit_cube().into_iter().map(|(p, n)| {
-                Vertex::default()
-                    .with_position(p)
-                    .with_normal(n)
-                    .with_color(green)
-            }));
-            let renderlet = stage.new_value(Renderlet {
-                camera_id: camera.id(),
-                vertices_array: vertices.array(),
-                transform_id: transform.id(),
-                bounds: BoundingSphere::new(Vec3::ZERO, Vec3::splat(0.5).length()),
-                ..Default::default()
-            });
+            let (transform, vertices, renderlet) = stage
+                .builder()
+                .with_transform(Transform {
+                    // move it back behind the purple cube
+                    translation: Vec3::new(0.0, 0.0, -10.0),
+                    // scale it up since it's a unit cube
+                    scale: Vec3::splat(5.0),
+                    ..Default::default()
+                })
+                .with_vertices(crate::math::unit_cube().into_iter().map(|(p, n)| {
+                    Vertex::default()
+                        .with_position(p)
+                        .with_normal(n)
+                        .with_color(green)
+                }))
+                .with_bounds(BoundingSphere::new(Vec3::ZERO, Vec3::splat(0.5).length()))
+                .build();
             stage.add_renderlet(&renderlet);
             names.insert(renderlet.id(), "green_cube".into());
             (renderlet, transform, vertices)
@@ -906,27 +891,23 @@ mod test {
         // And a purple cube
         let _pcube = {
             let purple = hex_to_vec4(0x605678FF);
-            let transform = stage.new_value(Transform {
-                // move it back a bit
-                translation: Vec3::new(0.0, 0.0, -3.0),
-                // scale it up since it's a unit cube
-                scale: Vec3::splat(5.0),
-                ..Default::default()
-            });
-            let vertices = stage.new_array(crate::math::unit_cube().into_iter().map(|(p, n)| {
-                Vertex::default()
-                    .with_position(p)
-                    .with_normal(n)
-                    .with_color(purple)
-            }));
-            let renderlet = stage.new_value(Renderlet {
-                camera_id: camera.id(),
-                vertices_array: vertices.array(),
-                transform_id: transform.id(),
-                bounds: BoundingSphere::new(Vec3::ZERO, Vec3::splat(0.5).length()),
-                ..Default::default()
-            });
-            stage.add_renderlet(&renderlet);
+            let (transform, vertices, renderlet) = stage
+                .builder()
+                .with_transform(Transform {
+                    // move it back a bit
+                    translation: Vec3::new(0.0, 0.0, -3.0),
+                    // scale it up since it's a unit cube
+                    scale: Vec3::splat(5.0),
+                    ..Default::default()
+                })
+                .with_vertices(crate::math::unit_cube().into_iter().map(|(p, n)| {
+                    Vertex::default()
+                        .with_position(p)
+                        .with_normal(n)
+                        .with_color(purple)
+                }))
+                .with_bounds(BoundingSphere::new(Vec3::ZERO, Vec3::splat(0.5).length()))
+                .build();
             names.insert(renderlet.id(), "purple_cube".into());
             (renderlet, transform, vertices)
         };
@@ -955,11 +936,12 @@ mod test {
         .unwrap();
         for (i, mut img) in pyramid_images.into_iter().enumerate() {
             img_diff::normalize_gray_img(&mut img);
-            img_diff::save(&format!("cull/debugging_pyramid_mip_{i}.png"), img);
+            img_diff::save(format!("cull/debugging_pyramid_mip_{i}.png"), img);
         }
 
         // The stage's slab, which contains the `Renderlet`s and their `BoundingSphere`s
-        let stage_slab = futures_lite::future::block_on(stage.read(..)).unwrap();
+        let stage_slab =
+            futures_lite::future::block_on(stage.geometry().slab_allocator().read(..)).unwrap();
         let draw_calls = stage.draw_calls.read().unwrap();
         let indirect_draws = draw_calls.drawing_strategy.as_indirect().unwrap();
         // The HZB slab, which contains a `DepthPyramidDescriptor` at index 0, and all the

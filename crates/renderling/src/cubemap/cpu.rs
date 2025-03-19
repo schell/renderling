@@ -72,7 +72,7 @@ impl SceneCubemap {
             view_formats: &[],
         });
         let depth_texture = Texture::create_depth_texture(device, size.x, size.y, 1, label);
-        let pipeline = Arc::new(Stage::create_stage_render_pipeline(device, format, 1));
+        let pipeline = Arc::new(Stage::create_renderlet_pipeline(device, format, 1));
         Self {
             pipeline,
             cubemap_texture,
@@ -87,18 +87,11 @@ impl SceneCubemap {
     }
 
     pub fn run(&self, stage: &Stage) {
-        // create a camera for our cube
-        let camera = stage.new_value(Camera::default());
+        let previous_camera_id = stage.used_camera_id();
 
-        let mut prev_camera_ids = vec![];
-        for rlet in stage.renderlets_iter() {
-            if let Some(rlet) = rlet.upgrade() {
-                let mut guard = rlet.lock();
-                prev_camera_ids.push(guard.camera_id);
-                // Overwrite the renderlet's camera
-                guard.camera_id = camera.id();
-            }
-        }
+        // create a new camera for our cube, and use it to render with
+        let camera = stage.geometry.new_camera(Camera::default());
+        stage.use_camera(&camera);
 
         // By setting this to 90 degrees (PI/2 radians) we make sure the viewing field
         // is exactly large enough to fill a single face of the cubemap such that all
@@ -145,6 +138,8 @@ impl SceneCubemap {
             }
             .run();
         }
+
+        stage.use_camera_id(previous_camera_id);
     }
 }
 
@@ -275,7 +270,7 @@ mod test {
 
     use crate::{
         math::{UNIT_INDICES, UNIT_POINTS},
-        stage::{Renderlet, Vertex},
+        stage::Vertex,
     };
 
     use super::*;
@@ -290,27 +285,29 @@ mod test {
             .with_background_color(Vec4::ZERO)
             .with_lighting(false)
             .with_msaa_sample_count(4);
-        let camera =
-            stage.new_value(
+        let _camera =
+            stage.new_camera(
                 Camera::default_perspective(width as f32, height as f32)
                     .with_view(Mat4::look_at_rh(Vec3::splat(3.0), Vec3::ZERO, Vec3::Y)),
             );
         // geometry is the "clip cube" where colors are normalized 3d space coords
-        let vertices = stage.new_array(UNIT_POINTS.map(|unit_cube_point| {
-            Vertex::default()
-                // multiply by 2.0 because the unit cube's AABB bounds are at 0.5, and we want 1.0
-                .with_position(unit_cube_point * 2.0)
-                // "normalize" (really "shift") the space coord from [-0.5, 0.5] to [0.0, 1.0]
-                .with_color((unit_cube_point + 0.5).extend(1.0))
-        }));
-        let indices = stage.new_array(UNIT_INDICES.map(|u| u as u32));
-        let renderlet = stage.new_value(Renderlet {
-            vertices_array: vertices.array(),
-            indices_array: indices.array(),
-            camera_id: camera.id(),
-            ..Default::default()
-        });
-        stage.add_renderlet(&renderlet);
+        let _rez = stage
+            .builder()
+            .with_vertices(UNIT_POINTS.map(|unit_cube_point| {
+                Vertex::default()
+                    // multiply by 2.0 because the unit cube's AABB bounds are at 0.5, and we want 1.0
+                    .with_position(unit_cube_point * 2.0)
+                    // "normalize" (really "shift") the space coord from [-0.5, 0.5] to [0.0, 1.0]
+                    .with_color((unit_cube_point + 0.5).extend(1.0))
+            }))
+            .with_indices(UNIT_INDICES.map(|u| u as u32))
+            .build();
+
+        let frame = ctx.get_next_frame().unwrap();
+        stage.render(&frame.view());
+        let img = frame.read_image().unwrap();
+        img_diff::assert_img_eq("cubemap/hand_rolled_cubemap_sampling/cube.png", img);
+        frame.present();
 
         let scene_cubemap = SceneCubemap::new(
             ctx.get_device(),
@@ -318,14 +315,7 @@ mod test {
             wgpu::TextureFormat::Rgba8Unorm,
             Vec4::ZERO,
         );
-
         scene_cubemap.run(&stage);
-
-        let frame = ctx.get_next_frame().unwrap();
-        stage.render(&frame.view());
-        let img = frame.read_image().unwrap();
-        img_diff::assert_img_eq("cubemap/hand_rolled_cubemap_sampling/cube.png", img);
-        frame.present();
 
         let slab = SlabAllocator::new(&ctx, wgpu::BufferUsages::empty());
         let uv = slab.new_value(Vec3::ZERO);

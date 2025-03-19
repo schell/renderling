@@ -12,6 +12,7 @@ use spirv_std::num_traits::{Float, Zero};
 
 use crate::{
     atlas::AtlasTexture,
+    geometry::GeometryDescriptor,
     light::{
         DirectionalLightDescriptor, LightStyle, LightingDescriptor, PointLightDescriptor,
         ShadowCalculation, SpotLightCalculation,
@@ -228,36 +229,12 @@ pub fn sample_brdf<T: Sample2d<Sampler = S>, S: IsSampler>(
         .xy()
 }
 
-/// Holds PBR configuration info.
-#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
-#[derive(Clone, Copy, PartialEq, SlabItem)]
-#[offsets]
-pub struct PbrConfig {
-    pub atlas_size: glam::UVec2,
-    pub resolution: glam::UVec2,
-    pub debug_channel: debug::DebugChannel,
-    pub has_lighting: bool,
-    pub has_skinning: bool,
-    pub perform_frustum_culling: bool,
-    pub perform_occlusion_culling: bool,
-}
-
-impl Default for PbrConfig {
-    fn default() -> Self {
-        Self {
-            atlas_size: Default::default(),
-            resolution: glam::UVec2::ONE,
-            debug_channel: Default::default(),
-            has_lighting: true,
-            has_skinning: true,
-            perform_frustum_culling: true,
-            perform_occlusion_culling: false,
-        }
-    }
-}
-
 /// Returns the `Material` from the stage's slab.
-pub fn get_material(material_id: Id<Material>, has_lighting: bool, slab: &[u32]) -> Material {
+pub fn get_material(
+    material_id: Id<Material>,
+    has_lighting: bool,
+    material_slab: &[u32],
+) -> Material {
     if material_id.is_none() {
         // without an explicit material (or if the entire render has no lighting)
         // the entity will not participate in any lighting calculations
@@ -266,7 +243,7 @@ pub fn get_material(material_id: Id<Material>, has_lighting: bool, slab: &[u32])
             ..Default::default()
         }
     } else {
-        let mut material = slab.read(material_id);
+        let mut material = material_slab.read_unchecked(material_id);
         material.has_lighting &= has_lighting;
         material
     }
@@ -278,9 +255,9 @@ pub fn texture_color<A: Sample2dArray<Sampler = S>, S: IsSampler>(
     atlas: &A,
     sampler: &S,
     atlas_size: glam::UVec2,
-    slab: &[u32],
+    material_slab: &[u32],
 ) -> Vec4 {
-    let texture = slab.read(texture_id);
+    let texture = material_slab.read(texture_id);
     // uv is [0, 0] when texture_id is Id::NONE
     let uv = texture.uv(uv, atlas_size);
     crate::println!("uv: {uv}");
@@ -305,7 +282,8 @@ pub fn fragment_impl<A, T, DtA, C, S>(
     shadow_map: &DtA,
     shadow_map_sampler: &S,
 
-    slab: &[u32],
+    geometry_slab: &[u32],
+    material_slab: &[u32],
     lighting_slab: &[u32],
 
     renderlet_id: Id<Renderlet>,
@@ -326,12 +304,12 @@ pub fn fragment_impl<A, T, DtA, C, S>(
     C: SampleCube<Sampler = S>,
     S: IsSampler,
 {
-    let renderlet = slab.read_unchecked(renderlet_id);
-    // TODO: rename `PbrConfig` to `PbrShaderDescriptor`
-    let pbr_desc = slab.read_unchecked(renderlet.pbr_config_id);
-    crate::println!("pbr_desc_id: {:?}", renderlet.pbr_config_id);
-    crate::println!("pbr_desc: {pbr_desc:#?}");
-    let PbrConfig {
+    let renderlet = geometry_slab.read_unchecked(renderlet_id);
+    let geom_desc = geometry_slab.read_unchecked(renderlet.geometry_descriptor_id);
+    crate::println!("pbr_desc_id: {:?}", renderlet.geometry_descriptor_id);
+    crate::println!("pbr_desc: {geom_desc:#?}");
+    let GeometryDescriptor {
+        camera_id,
         atlas_size,
         resolution: _,
         debug_channel,
@@ -339,9 +317,9 @@ pub fn fragment_impl<A, T, DtA, C, S>(
         has_skinning: _,
         perform_frustum_culling: _,
         perform_occlusion_culling: _,
-    } = pbr_desc;
+    } = geom_desc;
 
-    let material = get_material(renderlet.material_id, has_lighting, slab);
+    let material = get_material(renderlet.material_id, has_lighting, material_slab);
     crate::println!("material: {:#?}", material);
 
     let albedo_tex_uv = if material.albedo_tex_coord == 0 {
@@ -355,7 +333,7 @@ pub fn fragment_impl<A, T, DtA, C, S>(
         atlas,
         atlas_sampler,
         atlas_size,
-        slab,
+        material_slab,
     );
     my_println!("albedo_tex_color: {:?}", albedo_tex_color);
 
@@ -370,7 +348,7 @@ pub fn fragment_impl<A, T, DtA, C, S>(
         atlas,
         atlas_sampler,
         atlas_size,
-        slab,
+        material_slab,
     );
     my_println!(
         "metallic_roughness_tex_color: {:?}",
@@ -388,7 +366,7 @@ pub fn fragment_impl<A, T, DtA, C, S>(
         atlas,
         atlas_sampler,
         atlas_size,
-        slab,
+        material_slab,
     );
     my_println!("normal_tex_color: {:?}", normal_tex_color);
 
@@ -403,7 +381,7 @@ pub fn fragment_impl<A, T, DtA, C, S>(
         atlas,
         atlas_sampler,
         atlas_size,
-        slab,
+        material_slab,
     );
 
     let emissive_tex_uv = if material.emissive_tex_coord == 0 {
@@ -417,7 +395,7 @@ pub fn fragment_impl<A, T, DtA, C, S>(
         atlas,
         atlas_sampler,
         atlas_size,
-        slab,
+        material_slab,
     );
 
     let (norm, uv_norm) = if material.normal_texture_id.is_none() {
@@ -444,7 +422,7 @@ pub fn fragment_impl<A, T, DtA, C, S>(
     let emissive =
         emissive_tex_color.xyz() * material.emissive_factor * material.emissive_strength_multiplier;
     let irradiance = sample_irradiance(irradiance, irradiance_sampler, n);
-    let camera = slab.read(renderlet.camera_id);
+    let camera = geometry_slab.read(camera_id);
     let specular = sample_specular_reflection(
         prefiltered,
         prefiltered_sampler,
@@ -718,7 +696,7 @@ mod test {
         camera::Camera,
         math::{Vec3, Vec4},
         pbr::Material,
-        stage::{Renderlet, Vertex},
+        stage::Vertex,
         transform::Transform,
     };
 
@@ -745,9 +723,9 @@ mod test {
             Vec3::new(half, half, 0.0),
             Vec3::Y,
         );
-        let camera = stage.new_value(Camera::new(projection, view));
+        let _camera = stage.new_camera(Camera::new(projection, view));
 
-        let geometry = stage.new_array({
+        let geometry = stage.new_vertices({
             let mut icosphere = icosahedron::Polyhedron::new_isocahedron(radius, 5);
             icosphere.compute_triangle_normals();
             let icosahedron::Polyhedron {
@@ -781,30 +759,27 @@ mod test {
                 let metallic = j as f32 / (k - 1) as f32;
                 let y = (diameter + spacing) * j as f32;
 
-                let material = stage.new_value(Material {
-                    albedo_factor: Vec4::new(1.0, 1.0, 1.0, 1.0),
-                    metallic_factor: metallic,
-                    roughness_factor: roughness,
-                    ..Default::default()
-                });
-                let transform = stage.new_value(Transform {
-                    translation: Vec3::new(x, y, 0.0),
-                    ..Default::default()
-                });
-                let sphere = stage.new_value(Renderlet {
-                    camera_id: camera.id(),
-                    vertices_array: geometry.array(),
-                    transform_id: transform.id(),
-                    material_id: material.id(),
-                    ..Default::default()
-                });
-                stage.add_renderlet(&sphere);
-                spheres.push((sphere, material, transform));
+                let rez = stage
+                    .builder()
+                    .with_material(Material {
+                        albedo_factor: Vec4::new(1.0, 1.0, 1.0, 1.0),
+                        metallic_factor: metallic,
+                        roughness_factor: roughness,
+                        ..Default::default()
+                    })
+                    .with_transform(Transform {
+                        translation: Vec3::new(x, y, 0.0),
+                        ..Default::default()
+                    })
+                    .with_vertices_array(geometry.array())
+                    .build();
+
+                spheres.push(rez);
             }
         }
 
         let hdr_image = AtlasImage::from_hdr_path("../../img/hdr/resting_place.hdr").unwrap();
-        let skybox = crate::skybox::Skybox::new(&ctx, hdr_image, camera.id());
+        let skybox = crate::skybox::Skybox::new(&ctx, hdr_image);
         stage.set_skybox(skybox);
 
         let frame = ctx.get_next_frame().unwrap();
