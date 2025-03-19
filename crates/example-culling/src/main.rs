@@ -140,7 +140,7 @@ impl ApplicationHandler for CullingExample {
             } => {
                 if c.as_str() == "r" {
                     self.resources.drain();
-                    self.stage.tick();
+                    let _ = self.stage.commit();
                     self.resources.push(Self::make_aabbs(
                         self.next_k,
                         &self.stage,

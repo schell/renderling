@@ -65,6 +65,7 @@ gltf = {workspace = true, optional = true}
 half = "2.3"
 image = {workspace = true, features = ["hdr"]}
 log = {workspace = true}
+pretty_assertions.workspace = true
 rustc-hash = {workspace = true}
 serde_json = {workspace = true, optional = true}
 snafu = {workspace = true}
@@ -81,7 +82,6 @@ fastrand = "2.1.1"
 icosahedron = "0.1"
 img-diff = { path = "../img-diff" }
 naga.workspace = true
-pretty_assertions.workspace = true
 ttf-parser = "0.20.0"
 wgpu-core.workspace = true
 winit.workspace = true

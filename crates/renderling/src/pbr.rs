@@ -230,7 +230,11 @@ pub fn sample_brdf<T: Sample2d<Sampler = S>, S: IsSampler>(
 }
 
 /// Returns the `Material` from the stage's slab.
-pub fn get_material(material_id: Id<Material>, has_lighting: bool, slab: &[u32]) -> Material {
+pub fn get_material(
+    material_id: Id<Material>,
+    has_lighting: bool,
+    material_slab: &[u32],
+) -> Material {
     if material_id.is_none() {
         // without an explicit material (or if the entire render has no lighting)
         // the entity will not participate in any lighting calculations
@@ -239,7 +243,7 @@ pub fn get_material(material_id: Id<Material>, has_lighting: bool, slab: &[u32])
             ..Default::default()
         }
     } else {
-        let mut material = slab.read(material_id);
+        let mut material = material_slab.read_unchecked(material_id);
         material.has_lighting &= has_lighting;
         material
     }
@@ -251,9 +255,9 @@ pub fn texture_color<A: Sample2dArray<Sampler = S>, S: IsSampler>(
     atlas: &A,
     sampler: &S,
     atlas_size: glam::UVec2,
-    slab: &[u32],
+    material_slab: &[u32],
 ) -> Vec4 {
-    let texture = slab.read(texture_id);
+    let texture = material_slab.read(texture_id);
     // uv is [0, 0] when texture_id is Id::NONE
     let uv = texture.uv(uv, atlas_size);
     crate::println!("uv: {uv}");
@@ -278,7 +282,8 @@ pub fn fragment_impl<A, T, DtA, C, S>(
     shadow_map: &DtA,
     shadow_map_sampler: &S,
 
-    slab: &[u32],
+    geometry_slab: &[u32],
+    material_slab: &[u32],
     lighting_slab: &[u32],
 
     renderlet_id: Id<Renderlet>,
@@ -299,8 +304,8 @@ pub fn fragment_impl<A, T, DtA, C, S>(
     C: SampleCube<Sampler = S>,
     S: IsSampler,
 {
-    let renderlet = slab.read_unchecked(renderlet_id);
-    let geom_desc = slab.read_unchecked(renderlet.geometry_descriptor_id);
+    let renderlet = geometry_slab.read_unchecked(renderlet_id);
+    let geom_desc = geometry_slab.read_unchecked(renderlet.geometry_descriptor_id);
     crate::println!("pbr_desc_id: {:?}", renderlet.geometry_descriptor_id);
     crate::println!("pbr_desc: {geom_desc:#?}");
     let GeometryDescriptor {
@@ -314,7 +319,7 @@ pub fn fragment_impl<A, T, DtA, C, S>(
         perform_occlusion_culling: _,
     } = geom_desc;
 
-    let material = get_material(renderlet.material_id, has_lighting, slab);
+    let material = get_material(renderlet.material_id, has_lighting, material_slab);
     crate::println!("material: {:#?}", material);
 
     let albedo_tex_uv = if material.albedo_tex_coord == 0 {
@@ -328,7 +333,7 @@ pub fn fragment_impl<A, T, DtA, C, S>(
         atlas,
         atlas_sampler,
         atlas_size,
-        slab,
+        material_slab,
     );
     my_println!("albedo_tex_color: {:?}", albedo_tex_color);
 
@@ -343,7 +348,7 @@ pub fn fragment_impl<A, T, DtA, C, S>(
         atlas,
         atlas_sampler,
         atlas_size,
-        slab,
+        material_slab,
     );
     my_println!(
         "metallic_roughness_tex_color: {:?}",
@@ -361,7 +366,7 @@ pub fn fragment_impl<A, T, DtA, C, S>(
         atlas,
         atlas_sampler,
         atlas_size,
-        slab,
+        material_slab,
     );
     my_println!("normal_tex_color: {:?}", normal_tex_color);
 
@@ -376,7 +381,7 @@ pub fn fragment_impl<A, T, DtA, C, S>(
         atlas,
         atlas_sampler,
         atlas_size,
-        slab,
+        material_slab,
     );
 
     let emissive_tex_uv = if material.emissive_tex_coord == 0 {
@@ -390,7 +395,7 @@ pub fn fragment_impl<A, T, DtA, C, S>(
         atlas,
         atlas_sampler,
         atlas_size,
-        slab,
+        material_slab,
     );
 
     let (norm, uv_norm) = if material.normal_texture_id.is_none() {
@@ -417,7 +422,7 @@ pub fn fragment_impl<A, T, DtA, C, S>(
     let emissive =
         emissive_tex_color.xyz() * material.emissive_factor * material.emissive_strength_multiplier;
     let irradiance = sample_irradiance(irradiance, irradiance_sampler, n);
-    let camera = slab.read(camera_id);
+    let camera = geometry_slab.read(camera_id);
     let specular = sample_specular_reflection(
         prefiltered,
         prefiltered_sampler,
@@ -718,7 +723,7 @@ mod test {
             Vec3::new(half, half, 0.0),
             Vec3::Y,
         );
-        let camera = stage.new_camera(Camera::new(projection, view));
+        let _camera = stage.new_camera(Camera::new(projection, view));
 
         let geometry = stage.new_vertices({
             let mut icosphere = icosahedron::Polyhedron::new_isocahedron(radius, 5);

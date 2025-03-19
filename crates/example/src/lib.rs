@@ -203,7 +203,6 @@ impl App {
 
     pub fn render(&self, ctx: &Context) {
         let frame = ctx.get_next_frame().unwrap();
-        self.stage.tick();
         self.stage.render(&frame.view());
         self.ui.ui.render(&frame.view());
         frame.present();
@@ -259,8 +258,6 @@ impl App {
             .reset(Aabb::new(Vec3::NEG_ONE, Vec3::ONE));
         self.stage.clear_images().unwrap();
         self.model = Model::None;
-        log::debug!("ticking stage to reclaim buffers");
-        self.stage.tick();
         let doc = match self.stage.load_gltf_document_from_bytes(bytes) {
             Err(e) => {
                 log::error!("gltf loading error: {e}");

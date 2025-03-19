@@ -4,8 +4,8 @@ use image::{DynamicImage, Luma, Rgb, Rgb32FImage, Rgba32FImage};
 use snafu::prelude::*;
 use std::path::Path;
 
-const TEST_IMG_DIR: &str = "../../test_img";
-const TEST_OUTPUT_DIR: &str = "../../test_output";
+const TEST_IMG_DIR: &str = concat!(std::env!("CARGO_WORKSPACE_DIR"), "test_img");
+const TEST_OUTPUT_DIR: &str = concat!(std::env!("CARGO_WORKSPACE_DIR"), "test_output");
 const PIXEL_MAGNITUDE_THRESHOLD: f32 = 0.1;
 pub const LOW_PIXEL_THRESHOLD: f32 = 0.02;
 const IMAGE_DIFF_THRESHOLD: f32 = 0.05;
@@ -124,7 +124,7 @@ fn get_results(
     }
 }
 
-pub fn save(filename: &str, seen: impl Into<DynamicImage>) {
+pub fn save(filename: impl AsRef<std::path::Path>, seen: impl Into<DynamicImage>) {
     let path = Path::new(TEST_OUTPUT_DIR).join(filename);
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     let img: DynamicImage = seen.into();
@@ -204,13 +204,9 @@ pub fn assert_eq(filename: &str, lhs: impl Into<DynamicImage>, rhs: impl Into<Dy
 }
 
 pub fn assert_img_eq_cfg(filename: &str, seen: impl Into<DynamicImage>, cfg: DiffCfg) {
-    let cwd = std::env::current_dir().expect("no cwd");
-    let lhs = image::open(Path::new(TEST_IMG_DIR).join(filename)).unwrap_or_else(|_| {
-        panic!(
-            "can't open expected image '{}'",
-            cwd.join(filename).display()
-        )
-    });
+    let path = Path::new(TEST_IMG_DIR).join(filename);
+    let lhs = image::open(&path)
+        .unwrap_or_else(|e| panic!("can't open expected image '{}': {e}", path.display(),));
     assert_eq_cfg(filename, lhs, seen, cfg)
 }
 

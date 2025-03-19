@@ -72,7 +72,7 @@ impl SceneCubemap {
             view_formats: &[],
         });
         let depth_texture = Texture::create_depth_texture(device, size.x, size.y, 1, label);
-        let pipeline = Arc::new(Stage::create_stage_render_pipeline(device, format, 1));
+        let pipeline = Arc::new(Stage::create_renderlet_pipeline(device, format, 1));
         Self {
             pipeline,
             cubemap_texture,
@@ -87,8 +87,11 @@ impl SceneCubemap {
     }
 
     pub fn run(&self, stage: &Stage) {
-        // create a camera for our cube
+        let previous_camera_id = stage.used_camera_id();
+
+        // create a new camera for our cube, and use it to render with
         let camera = stage.geometry.new_camera(Camera::default());
+        stage.use_camera(&camera);
 
         // By setting this to 90 degrees (PI/2 radians) we make sure the viewing field
         // is exactly large enough to fill a single face of the cubemap such that all
@@ -135,6 +138,8 @@ impl SceneCubemap {
             }
             .run();
         }
+
+        stage.use_camera_id(previous_camera_id);
     }
 }
 
@@ -298,20 +303,19 @@ mod test {
             .with_indices(UNIT_INDICES.map(|u| u as u32))
             .build();
 
+        let frame = ctx.get_next_frame().unwrap();
+        stage.render(&frame.view());
+        let img = frame.read_image().unwrap();
+        img_diff::assert_img_eq("cubemap/hand_rolled_cubemap_sampling/cube.png", img);
+        frame.present();
+
         let scene_cubemap = SceneCubemap::new(
             ctx.get_device(),
             UVec2::new(width, height),
             wgpu::TextureFormat::Rgba8Unorm,
             Vec4::ZERO,
         );
-
         scene_cubemap.run(&stage);
-
-        let frame = ctx.get_next_frame().unwrap();
-        stage.render(&frame.view());
-        let img = frame.read_image().unwrap();
-        img_diff::assert_img_eq("cubemap/hand_rolled_cubemap_sampling/cube.png", img);
-        frame.present();
 
         let slab = SlabAllocator::new(&ctx, wgpu::BufferUsages::empty());
         let uv = slab.new_value(Vec3::ZERO);

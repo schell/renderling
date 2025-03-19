@@ -752,7 +752,7 @@ mod test {
 
         let projection = crate::camera::perspective(width as f32, height as f32);
         let view = crate::camera::look_at(Vec3::new(0.0, 2.0, 18.0), Vec3::ZERO, Vec3::Y);
-        let camera = stage.new_camera(Camera::new(projection, view));
+        let _camera = stage.new_camera(Camera::new(projection, view));
         let skybox = stage
             .new_skybox_from_path("../../img/hdr/night.hdr")
             .unwrap();

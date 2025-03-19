@@ -349,7 +349,6 @@ impl Ui {
             log::trace!("a ui transform changed, sorting the renderlets");
             self.reorder_renderlets();
         }
-        self.stage.tick();
         self.stage.render(view);
     }
 }

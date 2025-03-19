@@ -724,7 +724,7 @@ mod test {
         )
         .unwrap();
         for (i, img) in pyramid_images.into_iter().enumerate() {
-            img_diff::save(&format!("cull/pyramid/mip_{i}.png"), img);
+            img_diff::save(format!("cull/pyramid/mip_{i}.png"), img);
         }
     }
 
@@ -782,7 +782,7 @@ mod test {
             .with_lighting(false)
             .with_bloom(false)
             .with_background_color(Vec4::splat(1.0));
-        let camera = {
+        let _camera = {
             let fovy = std::f32::consts::FRAC_PI_4;
             let aspect = 1.0;
             let znear = 0.1;
@@ -797,7 +797,7 @@ mod test {
             let frame = ctx.get_next_frame().unwrap();
             stage.render(&frame.view());
             let img = frame.read_image().unwrap();
-            img_diff::save(&format!("cull/debugging_{s}.png"), img);
+            img_diff::save(format!("cull/debugging_{s}.png"), img);
             frame.present();
         };
 
@@ -936,7 +936,7 @@ mod test {
         .unwrap();
         for (i, mut img) in pyramid_images.into_iter().enumerate() {
             img_diff::normalize_gray_img(&mut img);
-            img_diff::save(&format!("cull/debugging_pyramid_mip_{i}.png"), img);
+            img_diff::save(format!("cull/debugging_pyramid_mip_{i}.png"), img);
         }
 
         // The stage's slab, which contains the `Renderlet`s and their `BoundingSphere`s

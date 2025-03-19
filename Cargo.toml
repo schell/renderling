@@ -22,7 +22,7 @@ async-channel = "1.8"
 bytemuck = { version = "1.19.0", features = ["derive"] }
 cfg_aliases = "0.2"
 clap = { version = "4.5.23", features = ["derive"] }
-craballoc = { version = "0.1.10" }
+craballoc = { version = "0.1.11" }
 crabslab = { version = "0.6.3", default-features = false }
 ctor = "0.2.2"
 dagga = "0.2.1"
@@ -63,5 +63,3 @@ opt-level = 3
 
 [patch.crates-io]
 spirv-std = { git = "https://github.com/Rust-GPU/rust-gpu", rev = "6e2c84d" }
-craballoc = { path = "../crabslab/crates/craballoc" }
-crabslab = { path = "../crabslab/crates/crabslab" }

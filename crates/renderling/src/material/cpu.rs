@@ -2,7 +2,7 @@
 
 use craballoc::{
     runtime::WgpuRuntime,
-    slab::SlabAllocator,
+    slab::{SlabAllocator, SlabBuffer},
     value::{Hybrid, HybridArray},
 };
 
@@ -41,9 +41,13 @@ impl Materials {
         &self.atlas
     }
 
-    pub fn upkeep(&self) {
-        let _ = self.slab.commit();
-        self.atlas.upkeep(self.runtime());
+    /// Runs atlas upkeep and commits all changes to the GPU.
+    ///
+    /// Returns `true` if the atlas texture was recreated.
+    #[must_use]
+    pub fn commit(&self) -> (bool, SlabBuffer<wgpu::Buffer>) {
+        // Atlas upkeep must be called first because it generates updates into the slab
+        (self.atlas.upkeep(self.runtime()), self.slab.commit())
     }
 
     /// Create a new material.

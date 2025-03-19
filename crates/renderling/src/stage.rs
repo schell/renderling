@@ -232,10 +232,10 @@ impl Renderlet {
     pub fn get_vertex_info(
         &self,
         vertex_index: u32,
-        slab: &[u32],
+        geometry_slab: &[u32],
     ) -> (Vertex, Transform, Mat4, Vec3) {
-        let vertex = self.get_vertex(vertex_index, slab);
-        let transform = self.get_transform(vertex, slab);
+        let vertex = self.get_vertex(vertex_index, geometry_slab);
+        let transform = self.get_transform(vertex, geometry_slab);
         let model_matrix = Mat4::from(transform);
         let world_pos = model_matrix.transform_point3(vertex.position);
         (vertex, transform, model_matrix, world_pos)
@@ -312,7 +312,7 @@ pub fn renderlet_vertex(
     #[spirv(instance_index)] renderlet_id: Id<Renderlet>,
     // Which vertex within the renderlet are we rendering
     #[spirv(vertex_index)] vertex_index: u32,
-    #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] slab: &[u32],
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] geometry_slab: &[u32],
 
     #[spirv(flat)] out_renderlet: &mut Id<Renderlet>,
     // TODO: Think about placing all these out values in a G-Buffer
@@ -327,7 +327,7 @@ pub fn renderlet_vertex(
     // test-only info struct
     #[cfg(test)] out_info: &mut RenderletPbrVertexInfo,
 ) {
-    let renderlet = slab.read_unchecked(renderlet_id);
+    let renderlet = geometry_slab.read_unchecked(renderlet_id);
     if !renderlet.visible {
         // put it outside the clipping frustum
         *out_clip_pos = Vec4::new(10.0, 10.0, 10.0, 1.0);
@@ -337,7 +337,7 @@ pub fn renderlet_vertex(
     *out_renderlet = renderlet_id;
 
     let (vertex, transform, model_matrix, world_pos) =
-        renderlet.get_vertex_info(vertex_index, slab);
+        renderlet.get_vertex_info(vertex_index, geometry_slab);
     *out_color = vertex.color;
     *out_uv0 = vertex.uv0;
     *out_uv1 = vertex.uv1;
@@ -359,9 +359,9 @@ pub fn renderlet_vertex(
     let bitangent_w = normal_w.cross(tangent_w) * if vertex.tangent.w >= 0.0 { 1.0 } else { -1.0 };
     *out_bitangent = bitangent_w;
 
-    let camera_id = slab
+    let camera_id = geometry_slab
         .read_unchecked(renderlet.geometry_descriptor_id + GeometryDescriptor::OFFSET_OF_CAMERA_ID);
-    let camera = slab.read(camera_id);
+    let camera = geometry_slab.read(camera_id);
     let clip_pos = camera.view_projection() * world_pos.extend(1.0);
     *out_clip_pos = clip_pos;
     #[cfg(test)]
@@ -390,23 +390,19 @@ pub fn renderlet_vertex(
 #[allow(clippy::too_many_arguments, dead_code)]
 #[spirv(fragment)]
 pub fn renderlet_fragment(
-    #[spirv(descriptor_set = 1, binding = 0)] atlas: &Image2dArray,
-    #[spirv(descriptor_set = 1, binding = 1)] atlas_sampler: &Sampler,
-
-    #[spirv(descriptor_set = 1, binding = 2)] irradiance: &Cubemap,
-    #[spirv(descriptor_set = 1, binding = 3)] irradiance_sampler: &Sampler,
-
-    #[spirv(descriptor_set = 1, binding = 4)] prefiltered: &Cubemap,
-    #[spirv(descriptor_set = 1, binding = 5)] prefiltered_sampler: &Sampler,
-
-    #[spirv(descriptor_set = 1, binding = 6)] brdf: &Image2d,
-    #[spirv(descriptor_set = 1, binding = 7)] brdf_sampler: &Sampler,
-
-    #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] slab: &[u32],
-
-    #[spirv(storage_buffer, descriptor_set = 2, binding = 0)] light_slab: &[u32],
-    #[spirv(descriptor_set = 2, binding = 1)] shadow_map: &Image!(2D, type=f32, sampled, arrayed),
-    #[spirv(descriptor_set = 2, binding = 2)] shadow_map_sampler: &Sampler,
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] geometry_slab: &[u32],
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 1)] material_slab: &[u32],
+    #[spirv(descriptor_set = 0, binding = 2)] atlas: &Image2dArray,
+    #[spirv(descriptor_set = 0, binding = 3)] atlas_sampler: &Sampler,
+    #[spirv(descriptor_set = 0, binding = 4)] irradiance: &Cubemap,
+    #[spirv(descriptor_set = 0, binding = 5)] irradiance_sampler: &Sampler,
+    #[spirv(descriptor_set = 0, binding = 6)] prefiltered: &Cubemap,
+    #[spirv(descriptor_set = 0, binding = 7)] prefiltered_sampler: &Sampler,
+    #[spirv(descriptor_set = 0, binding = 8)] brdf: &Image2d,
+    #[spirv(descriptor_set = 0, binding = 9)] brdf_sampler: &Sampler,
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 10)] light_slab: &[u32],
+    #[spirv(descriptor_set = 0, binding = 11)] shadow_map: &Image!(2D, type=f32, sampled, arrayed),
+    #[spirv(descriptor_set = 0, binding = 12)] shadow_map_sampler: &Sampler,
 
     #[spirv(flat)] renderlet_id: Id<Renderlet>,
     in_color: Vec4,
@@ -429,7 +425,8 @@ pub fn renderlet_fragment(
         brdf_sampler,
         shadow_map,
         shadow_map_sampler,
-        slab,
+        geometry_slab,
+        material_slab,
         light_slab,
         renderlet_id,
         in_color,

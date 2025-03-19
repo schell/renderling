@@ -3,7 +3,7 @@
 
 use craballoc::{
     runtime::WgpuRuntime,
-    slab::SlabAllocator,
+    slab::{SlabAllocator, SlabBuffer},
     value::{Hybrid, HybridArray},
 };
 use crabslab::{Array, Id};
@@ -12,9 +12,8 @@ use glam::{Mat4, UVec2};
 use crate::{
     camera::Camera,
     geometry::GeometryDescriptor,
-    pbr::Material,
     prelude::Transform,
-    stage::{MorphTarget, NestedTransform, Renderlet, Skin, Vertex},
+    stage::{MorphTarget, Renderlet, Skin, Vertex},
 };
 
 // TODO: Move `Renderlet` to geometry.
@@ -62,6 +61,11 @@ impl Geometry {
 
     pub fn descriptor(&self) -> &Hybrid<GeometryDescriptor> {
         &self.descriptor
+    }
+
+    #[must_use]
+    pub fn commit(&self) -> SlabBuffer<wgpu::Buffer> {
+        self.slab.commit()
     }
 
     /// Create a new camera.

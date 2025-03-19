@@ -106,17 +106,15 @@ impl UiTextBuilder {
 
         // UNWRAP: panic on purpose
         let entry = ui.stage.add_images(Some(img)).unwrap().pop().unwrap();
+        log::trace!("ui text texture: {entry:#?}");
         material.albedo_texture_id = entry.id();
 
-        let vertices = ui.stage.geometry().new_vertices(mesh);
-        let material = ui.stage.materials().new_material(material);
-        let renderlet = ui.stage.geometry().new_renderlet(Renderlet {
-            vertices_array: vertices.array(),
-            material_id: material.id(),
-            ..Default::default()
-        });
-        ui.stage.add_renderlet(&renderlet);
-
+        let (vertices, material, renderlet) = ui
+            .stage
+            .builder()
+            .with_vertices(mesh)
+            .with_material(material)
+            .build();
         let transform = ui.new_transform(vec![renderlet.id()]);
         renderlet.modify(|r| r.transform_id = transform.id());
 

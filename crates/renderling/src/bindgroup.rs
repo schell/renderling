@@ -56,4 +56,9 @@ impl ManagedBindGroup {
             }
         }
     }
+
+    /// Invalidate the [`wgpu::BindGroup`], destroying it if it exists.
+    pub fn invalidate(&self) {
+        *self.bindgroup.write().unwrap() = None;
+    }
 }

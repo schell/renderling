@@ -2,7 +2,7 @@
 //!
 //! The `Stage` object contains a slab buffer and a render pipeline.
 //! It is used to stage [`Renderlet`]s for rendering.
-use core::sync::atomic::{AtomicU32, Ordering};
+use core::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 use craballoc::prelude::*;
 use crabslab::Id;
 use snafu::Snafu;
@@ -16,7 +16,7 @@ use crate::{
     debug::DebugOverlay,
     draw::DrawCalls,
     geometry::Geometry,
-    light::Lighting,
+    light::{Lighting, LightingBindGroupLayoutEntries},
     material::Materials,
     pbr::debug::DebugChannel,
     skybox::{Skybox, SkyboxRenderPipeline},
@@ -66,6 +66,107 @@ fn create_msaa_textureview(
         .create_view(&wgpu::TextureViewDescriptor::default())
 }
 
+pub struct StageCommitResult {
+    pub geometry_buffer: SlabBuffer<wgpu::Buffer>,
+    pub lighting_buffer: SlabBuffer<wgpu::Buffer>,
+    pub materials_buffer: SlabBuffer<wgpu::Buffer>,
+}
+
+impl StageCommitResult {
+    pub fn latest_creation_time(&self) -> usize {
+        [
+            &self.geometry_buffer,
+            &self.materials_buffer,
+            &self.lighting_buffer,
+        ]
+        .iter()
+        .map(|buffer| buffer.creation_time())
+        .max()
+        .unwrap_or_default()
+    }
+}
+
+struct RenderletBindGroup<'a> {
+    device: &'a wgpu::Device,
+    layout: &'a wgpu::BindGroupLayout,
+    geometry_buffer: &'a wgpu::Buffer,
+    material_buffer: &'a wgpu::Buffer,
+    light_buffer: &'a wgpu::Buffer,
+    atlas_texture_view: &'a wgpu::TextureView,
+    atlas_texture_sampler: &'a wgpu::Sampler,
+    irradiance_texture_view: &'a wgpu::TextureView,
+    irradiance_texture_sampler: &'a wgpu::Sampler,
+    prefiltered_texture_view: &'a wgpu::TextureView,
+    prefiltered_texture_sampler: &'a wgpu::Sampler,
+    brdf_texture_view: &'a wgpu::TextureView,
+    brdf_texture_sampler: &'a wgpu::Sampler,
+    shadow_map_texture_view: &'a wgpu::TextureView,
+    shadow_map_texture_sampler: &'a wgpu::Sampler,
+}
+
+impl RenderletBindGroup<'_> {
+    pub fn create(self) -> wgpu::BindGroup {
+        self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("renderlet"),
+            layout: self.layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: self.geometry_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: self.material_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::TextureView(self.atlas_texture_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::Sampler(self.atlas_texture_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 4,
+                    resource: wgpu::BindingResource::TextureView(self.irradiance_texture_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: wgpu::BindingResource::Sampler(self.irradiance_texture_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 6,
+                    resource: wgpu::BindingResource::TextureView(self.prefiltered_texture_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 7,
+                    resource: wgpu::BindingResource::Sampler(self.prefiltered_texture_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 8,
+                    resource: wgpu::BindingResource::TextureView(self.brdf_texture_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 9,
+                    resource: wgpu::BindingResource::Sampler(self.brdf_texture_sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 10,
+                    resource: self.light_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 11,
+                    resource: wgpu::BindingResource::TextureView(self.shadow_map_texture_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 12,
+                    resource: wgpu::BindingResource::Sampler(self.shadow_map_texture_sampler),
+                },
+            ],
+        })
+    }
+}
+
 /// Performs a rendering of an entire scene, given the resources at hand.
 pub struct StageRendering<'a> {
     // TODO: include the rest of the needed paramaters from `stage`, and then remove `stage`
@@ -80,56 +181,52 @@ impl StageRendering<'_> {
     ///
     /// Returns the queue submission index and the indirect draw buffer, if available.
     pub fn run(self) -> (wgpu::SubmissionIndex, Option<SlabBuffer<wgpu::Buffer>>) {
-        self.stage.tick_internal();
-        self.stage.lighting.upkeep();
+        let commit_result = self.stage.commit();
+        let current_renderlet_bind_group_creation_time = commit_result.latest_creation_time();
+        let previous_renderlet_bind_group_creation_time =
+            self.stage.renderlet_bind_group_created.swap(
+                current_renderlet_bind_group_creation_time,
+                std::sync::atomic::Ordering::Relaxed,
+            );
+        let should_invalidate_renderlet_bind_group = current_renderlet_bind_group_creation_time
+            > previous_renderlet_bind_group_creation_time;
+        let renderlet_bind_group =
+            self.stage
+                .renderlet_bind_group
+                .get(should_invalidate_renderlet_bind_group, || {
+                    let atlas_texture = self.stage.materials.atlas().get_texture();
+                    let skybox = self.stage.skybox.read().unwrap();
+                    let shadow_map = self.stage.lighting.shadow_map_atlas.get_texture();
+                    RenderletBindGroup {
+                        device: self.stage.device(),
+                        layout: &Stage::renderlet_pipeline_bindgroup_layout(self.stage.device()),
+                        geometry_buffer: &commit_result.geometry_buffer,
+                        material_buffer: &commit_result.materials_buffer,
+                        light_buffer: &commit_result.lighting_buffer,
+                        atlas_texture_view: &atlas_texture.view,
+                        atlas_texture_sampler: &atlas_texture.sampler,
+                        irradiance_texture_view: &skybox.irradiance_cubemap.view,
+                        irradiance_texture_sampler: &skybox.irradiance_cubemap.sampler,
+                        prefiltered_texture_view: &skybox.prefiltered_environment_cubemap.view,
+                        prefiltered_texture_sampler: &skybox
+                            .prefiltered_environment_cubemap
+                            .sampler,
+                        brdf_texture_view: &skybox.brdf_lut.view,
+                        brdf_texture_sampler: &skybox.brdf_lut.sampler,
+                        shadow_map_texture_view: &shadow_map.view,
+                        shadow_map_texture_sampler: &shadow_map.sampler,
+                    }
+                    .create()
+                });
 
+        self.stage.draw_calls.write().unwrap().upkeep();
         let mut draw_calls = self.stage.draw_calls.write().unwrap();
         let depth_texture = self.stage.depth_texture.read().unwrap();
         // UNWRAP: safe because we know the depth texture format will always match
         let maybe_indirect_buffer = draw_calls.pre_draw(&depth_texture).unwrap();
         {
-            log::info!("rendering");
+            log::trace!("rendering");
             let label = Some("stage render");
-
-            log::info!("getting slab buffers bindgroup");
-            let slab_buffers_bindgroup = {
-                log::info!("getting write lock");
-                let mut stage_slab_buffer = self.stage.stage_slab_buffer.write().unwrap();
-                log::info!("got write lock");
-                let should_invalidate_buffers_bindgroup = stage_slab_buffer.update_if_invalid();
-                self.stage
-                    .buffers_bindgroup
-                    .get(should_invalidate_buffers_bindgroup, || {
-                        log::info!("renewing invalid stage slab buffers bindgroup");
-                        crate::linkage::slab_bindgroup(
-                            self.stage.device(),
-                            &stage_slab_buffer,
-                            // UNWRAP: POP
-                            &self
-                                .stage
-                                .stage_pipeline
-                                .read()
-                                .unwrap()
-                                .get_bind_group_layout(0),
-                        )
-                    })
-            };
-
-            log::info!("getting stage slab buffer");
-            let stage_slab_buffer = self.stage.stage_slab_buffer.read().unwrap();
-            let textures_bindgroup = self.stage.get_textures_bindgroup();
-            log::info!("got stage slab buffer and shadow map depth texture");
-
-            let light_bindgroup = self.stage.lighting.get_bindgroup();
-            let has_skybox = self.stage.has_skybox.load(Ordering::Relaxed);
-            let may_skybox_pipeline_and_bindgroup = if has_skybox {
-                Some(
-                    self.stage
-                        .get_skybox_pipeline_and_bindgroup(&stage_slab_buffer),
-                )
-            } else {
-                None
-            };
 
             let mut encoder = self
                 .stage
@@ -144,12 +241,14 @@ impl StageRendering<'_> {
                 });
 
                 render_pass.set_pipeline(self.pipeline);
-                render_pass.set_bind_group(0, Some(slab_buffers_bindgroup.as_ref()), &[]);
-                render_pass.set_bind_group(1, Some(textures_bindgroup.as_ref()), &[]);
-                render_pass.set_bind_group(2, Some(&light_bindgroup), &[]);
+                render_pass.set_bind_group(0, Some(renderlet_bind_group.as_ref()), &[]);
                 draw_calls.draw(&mut render_pass);
 
-                if let Some((pipeline, bindgroup)) = may_skybox_pipeline_and_bindgroup.as_ref() {
+                let has_skybox = self.stage.has_skybox.load(Ordering::Relaxed);
+                if has_skybox {
+                    let (pipeline, bindgroup) = self
+                        .stage
+                        .get_skybox_pipeline_and_bindgroup(&commit_result.geometry_buffer);
                     render_pass.set_pipeline(&pipeline.pipeline);
                     render_pass.set_bind_group(0, Some(bindgroup.as_ref()), &[]);
                     let camera_id = self.stage.geometry.descriptor().get().camera_id.inner();
@@ -304,7 +403,10 @@ pub struct Stage {
     pub(crate) materials: Materials,
     pub(crate) lighting: Lighting,
 
-    pub(crate) stage_pipeline: Arc<RwLock<wgpu::RenderPipeline>>,
+    pub(crate) renderlet_pipeline: Arc<RwLock<wgpu::RenderPipeline>>,
+    pub(crate) renderlet_bind_group: ManagedBindGroup,
+    pub(crate) renderlet_bind_group_created: Arc<AtomicUsize>,
+
     pub(crate) skybox_pipeline: Arc<RwLock<Option<Arc<SkyboxRenderPipeline>>>>,
 
     pub(crate) hdr_texture: Arc<RwLock<Texture>>,
@@ -315,19 +417,20 @@ pub struct Stage {
     pub(crate) clear_depth_attachments: Arc<AtomicBool>,
 
     pub(crate) bloom: Bloom,
-    pub(crate) skybox: Arc<RwLock<Skybox>>,
+
     pub(crate) tonemapping: Tonemapping,
     pub(crate) debug_overlay: DebugOverlay,
     pub(crate) background_color: Arc<RwLock<wgpu::Color>>,
 
+    pub(crate) skybox: Arc<RwLock<Skybox>>,
+    pub(crate) skybox_bindgroup: Arc<Mutex<Option<Arc<wgpu::BindGroup>>>>,
     pub(crate) has_skybox: Arc<AtomicBool>,
+
     pub(crate) has_bloom: Arc<AtomicBool>,
     pub(crate) has_debug_overlay: Arc<AtomicBool>,
 
     pub(crate) stage_slab_buffer: Arc<RwLock<SlabBuffer<wgpu::Buffer>>>,
 
-    pub(crate) skybox_bindgroup: Arc<Mutex<Option<Arc<wgpu::BindGroup>>>>,
-    pub(crate) buffers_bindgroup: ManagedBindGroup,
     pub(crate) textures_bindgroup: Arc<Mutex<Option<Arc<wgpu::BindGroup>>>>,
 
     pub(crate) draw_calls: Arc<RwLock<DrawCalls>>,
@@ -384,6 +487,18 @@ impl Stage {
         self.geometry().use_camera(camera);
     }
 
+    /// Return the `Id` of the camera currently in use.
+    pub fn used_camera_id(&self) -> Id<Camera> {
+        self.geometry().descriptor().get().camera_id
+    }
+
+    /// Set the default camera `Id`.
+    pub fn use_camera_id(&self, camera_id: Id<Camera>) {
+        self.geometry()
+            .descriptor()
+            .modify(|desc| desc.camera_id = camera_id);
+    }
+
     /// Stage a [`Transform`] on the GPU.
     pub fn new_transform(&self, transform: Transform) -> Hybrid<Transform> {
         self.geometry.new_transform(transform)
@@ -412,32 +527,149 @@ impl Stage {
         self.geometry.new_renderlet(renderlet)
     }
 
-    /// Commit all staged changes to the GPU.
-    pub fn commit(&self) {
-        self.geometry.slab_allocator().commit();
-        self.materials.slab_allocator().commit();
-        self.lighting.slab_allocator().commit();
+    /// Run all upkeep and commit all staged changes to the GPU.
+    ///
+    /// This is done implicitly in [`Stage::render`] and [`StageRendering::run`].
+    ///
+    /// This can be used after dropping [`Hybrid`] or [`Gpu`] resources to reclaim
+    /// those resources on the GPU.
+    #[must_use]
+    pub fn commit(&self) -> StageCommitResult {
+        let (materials_atlas_texture_was_recreated, materials_buffer) = self.materials.commit();
+        if materials_atlas_texture_was_recreated {
+            self.renderlet_bind_group.invalidate();
+        }
+        let geometry_buffer = self.geometry.commit();
+        let lighting_buffer = self.lighting.commit();
+        StageCommitResult {
+            geometry_buffer,
+            lighting_buffer,
+            materials_buffer,
+        }
     }
 
-    pub fn create_stage_render_pipeline(
+    fn renderlet_pipeline_bindgroup_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+        let geometry_slab = wgpu::BindGroupLayoutEntry {
+            binding: 0,
+            visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        };
+        let material_slab = wgpu::BindGroupLayoutEntry {
+            binding: 1,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                has_dynamic_offset: false,
+                min_binding_size: None,
+            },
+            count: None,
+        };
+
+        fn image2d_entry(binding: u32) -> (wgpu::BindGroupLayoutEntry, wgpu::BindGroupLayoutEntry) {
+            let img = wgpu::BindGroupLayoutEntry {
+                binding,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Texture {
+                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    multisampled: false,
+                },
+                count: None,
+            };
+            let sampler = wgpu::BindGroupLayoutEntry {
+                binding: binding + 1,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                count: None,
+            };
+            (img, sampler)
+        }
+
+        fn cubemap_entry(binding: u32) -> (wgpu::BindGroupLayoutEntry, wgpu::BindGroupLayoutEntry) {
+            let img = wgpu::BindGroupLayoutEntry {
+                binding,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Texture {
+                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    view_dimension: wgpu::TextureViewDimension::Cube,
+                    multisampled: false,
+                },
+                count: None,
+            };
+            let sampler = wgpu::BindGroupLayoutEntry {
+                binding: binding + 1,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                count: None,
+            };
+            (img, sampler)
+        }
+
+        let atlas = wgpu::BindGroupLayoutEntry {
+            binding: 2,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Texture {
+                sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                view_dimension: wgpu::TextureViewDimension::D2Array,
+                multisampled: false,
+            },
+            count: None,
+        };
+        let atlas_sampler = wgpu::BindGroupLayoutEntry {
+            binding: 3,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+            count: None,
+        };
+        let (irradiance, irradiance_sampler) = cubemap_entry(4);
+        let (prefilter, prefilter_sampler) = cubemap_entry(6);
+        let (brdf, brdf_sampler) = image2d_entry(8);
+
+        let LightingBindGroupLayoutEntries {
+            light_slab,
+            shadow_map_image,
+            shadow_map_sampler,
+        } = LightingBindGroupLayoutEntries::new(10);
+
+        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("renderlet"),
+            entries: &[
+                geometry_slab,
+                material_slab,
+                atlas,
+                atlas_sampler,
+                irradiance,
+                irradiance_sampler,
+                prefilter,
+                prefilter_sampler,
+                brdf,
+                brdf_sampler,
+                light_slab,
+                shadow_map_image,
+                shadow_map_sampler,
+            ],
+        })
+    }
+
+    pub fn create_renderlet_pipeline(
         device: &wgpu::Device,
         fragment_color_format: wgpu::TextureFormat,
         multisample_count: u32,
     ) -> wgpu::RenderPipeline {
         log::trace!("creating stage render pipeline");
-        let label = Some("stage render");
+        let label = Some("renderlet");
         let vertex_linkage = crate::linkage::renderlet_vertex::linkage(device);
         let fragment_linkage = crate::linkage::renderlet_fragment::linkage(device);
-        let stage_slab_buffers_layout = crate::linkage::slab_bindgroup_layout(device);
-        let atlas_and_skybox_layout = crate::linkage::atlas_and_skybox_bindgroup_layout(device);
-        let light_bindgroup_layout = crate::light::Lighting::create_bindgroup_layout(device);
+
+        let bind_group_layout = Self::renderlet_pipeline_bindgroup_layout(device);
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label,
-            bind_group_layouts: &[
-                &stage_slab_buffers_layout,
-                &atlas_and_skybox_layout,
-                &light_bindgroup_layout,
-            ],
+            bind_group_layouts: &[&bind_group_layout],
             push_constant_ranges: &[],
         });
 
@@ -498,7 +730,6 @@ impl Stage {
             UVec2::new(atlas_size.width, atlas_size.height),
         );
         let materials = Materials::new(runtime, atlas_size);
-
         let multisample_count = 1;
         let hdr_texture = Arc::new(RwLock::new(Texture::create_hdr_texture(
             device,
@@ -516,13 +747,12 @@ impl Stage {
             ctx.get_render_target().format().add_srgb_suffix(),
             &bloom.get_mix_texture(),
         );
-        let stage_pipeline = Self::create_stage_render_pipeline(
+        let stage_pipeline = Self::create_renderlet_pipeline(
             device,
             wgpu::TextureFormat::Rgba16Float,
             multisample_count,
         );
         let geometry_buffer = geometry.slab_allocator().commit();
-
         let lighting = Lighting::new(&geometry);
 
         Self {
@@ -535,14 +765,13 @@ impl Stage {
             ))),
             lighting,
             depth_texture: Arc::new(RwLock::new(depth_texture)),
-            buffers_bindgroup: ManagedBindGroup::from(crate::linkage::slab_bindgroup(
-                device,
-                &geometry_buffer,
-                &stage_pipeline.get_bind_group_layout(0),
-            )),
             stage_slab_buffer: Arc::new(RwLock::new(geometry_buffer)),
             geometry,
-            stage_pipeline: Arc::new(RwLock::new(stage_pipeline)),
+
+            renderlet_pipeline: Arc::new(RwLock::new(stage_pipeline)),
+            renderlet_bind_group: ManagedBindGroup::default(),
+            renderlet_bind_group_created: Arc::new(0.into()),
+
             skybox: Arc::new(RwLock::new(Skybox::empty(runtime))),
             skybox_bindgroup: Default::default(),
             skybox_pipeline: Default::default(),
@@ -593,7 +822,7 @@ impl Stage {
 
         log::debug!("setting multisample count to {multisample_count}");
         // UNWRAP: POP
-        *self.stage_pipeline.write().unwrap() = Self::create_stage_render_pipeline(
+        *self.renderlet_pipeline.write().unwrap() = Self::create_renderlet_pipeline(
             self.device(),
             wgpu::TextureFormat::Rgba16Float,
             multisample_count,
@@ -913,7 +1142,7 @@ impl Stage {
     /// Return the skybox render pipeline, creating it if necessary.
     fn get_skybox_pipeline_and_bindgroup(
         &self,
-        slab_buffer: &wgpu::Buffer,
+        geometry_slab_buffer: &wgpu::Buffer,
     ) -> (Arc<SkyboxRenderPipeline>, Arc<wgpu::BindGroup>) {
         let msaa_sample_count = self.msaa_sample_count.load(Ordering::Relaxed);
         // UNWRAP: safe because we're only ever called from the render thread.
@@ -943,38 +1172,13 @@ impl Stage {
         } else {
             let bg = Arc::new(crate::skybox::create_skybox_bindgroup(
                 self.device(),
-                slab_buffer,
+                geometry_slab_buffer,
                 &self.skybox.read().unwrap().environment_cubemap,
             ));
             *bindgroup = Some(bg.clone());
             bg
         };
         (pipeline, bindgroup)
-    }
-
-    fn get_textures_bindgroup(&self) -> Arc<wgpu::BindGroup> {
-        // UNWRAP: safe because we're only ever called from the render thread.
-        let mut bindgroup = self.textures_bindgroup.lock().unwrap();
-        if let Some(bindgroup) = bindgroup.as_ref() {
-            bindgroup.clone()
-        } else {
-            let b = Arc::new(crate::linkage::atlas_and_skybox_bindgroup(
-                self.device(),
-                &{
-                    let this = &self;
-                    this.stage_pipeline.clone()
-                }
-                .read()
-                // UNWRAP: POP
-                .unwrap()
-                .get_bind_group_layout(1),
-                self.materials.atlas(),
-                // UNWRAP: POP
-                &self.skybox.read().unwrap(),
-            ));
-            *bindgroup = Some(b.clone());
-            b
-        }
     }
 
     /// Adds a renderlet to the internal list of renderlets to be drawn each
@@ -1043,28 +1247,6 @@ impl Stage {
         NestedTransform::new(self.geometry.slab_allocator())
     }
 
-    fn tick_internal(&self) {
-        self.draw_calls.write().unwrap().upkeep();
-
-        // TODO: maybe we should move this to Geometry
-        let stage_slab_buffer = self.geometry.slab_allocator().commit();
-        if stage_slab_buffer.is_new_this_commit() {
-            // invalidate our bindgroups, etc
-            // TODO: we shouldn't have to invalidate skybox and other bindgroups,
-            // they can do this in their own `run` functions
-            let _ = self.skybox_bindgroup.lock().unwrap().take();
-        }
-    }
-
-    /// Ticks the stage, synchronizing changes with the GPU.
-    ///
-    /// It's good to call this after dropping assets to free up space on the
-    /// slab.
-    pub fn tick(&self) {
-        self.materials.upkeep();
-        self.tick_internal();
-    }
-
     pub fn render(&self, view: &wgpu::TextureView) {
         // UNWRAP: POP
         let background_color = *self.background_color.read().unwrap();
@@ -1109,7 +1291,7 @@ impl Stage {
             }),
             stencil_ops: None,
         };
-        let pipeline_guard = self.stage_pipeline.read().unwrap();
+        let pipeline_guard = self.renderlet_pipeline.read().unwrap();
         let (_submission_index, maybe_indirect_buffer) = StageRendering {
             pipeline: &pipeline_guard,
             stage: self,
@@ -1471,10 +1653,10 @@ mod test {
     #[test]
     /// Tests that the PBR descriptor is written to slot 0 of the geometry buffer,
     /// and that it contains what we think it contains.
-    fn stage_pbr_desc_sanity() {
+    fn stage_geometry_desc_sanity() {
         let ctx = Context::headless(100, 100);
         let stage = ctx.new_stage();
-        stage.commit();
+        let _ = stage.commit();
 
         let slab =
             futures_lite::future::block_on(stage.geometry().slab_allocator().read(..)).unwrap();

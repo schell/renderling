@@ -355,7 +355,10 @@ impl Atlas {
     ///
     /// This removes any `TextureFrame`s that have no references and repacks the atlas
     /// if any were removed.
-    pub fn upkeep(&self, runtime: impl AsRef<WgpuRuntime>) {
+    ///
+    /// Returns `true` if the atlas texture was recreated.
+    #[must_use]
+    pub fn upkeep(&self, runtime: impl AsRef<WgpuRuntime>) -> bool {
         let mut total_dropped = 0;
         {
             let mut layers = self.layers.write().unwrap();
@@ -383,6 +386,9 @@ impl Atlas {
             // UNWRAP: safe because we can only remove frames from the atlas, which should
             // only make it easier to pack.
             self.resize(runtime.as_ref(), self.get_size()).unwrap();
+            true
+        } else {
+            false
         }
     }
 
@@ -605,9 +611,9 @@ impl StagedResources {
                         );
                     }
                     AnotherPacking::Internal(mut texture) => {
+                        let prev_t = texture.cache;
                         let mut t = texture.cache;
                         debug_assert_eq!(t.size_px, size_px);
-                        log::trace!("  copying previous frame {t:?}",);
                         // copy the frame from the old texture to the new texture
                         // in a new destination
                         encoder.copy_texture_to_texture(
@@ -633,6 +639,12 @@ impl StagedResources {
                         t.layer_index = layer_index as u32;
                         t.frame_index = frame_index as u32;
                         t.offset_px = offset_px;
+
+                        log::trace!(
+                            "  copied previous frame {}",
+                            pretty_assertions::Comparison::new(&prev_t, &t)
+                        );
+
                         texture.set(t);
                         layer.frames.push(texture);
                     }
@@ -1237,7 +1249,7 @@ mod test {
         frames.pop();
         frames.pop();
 
-        stage.materials().atlas().upkeep(&ctx);
+        let _ = stage.materials().atlas().upkeep(&ctx);
         assert_eq!(4, stage.materials().atlas().len());
     }
 }

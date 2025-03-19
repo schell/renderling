@@ -209,6 +209,45 @@ pub struct Lighting {
     pub(crate) shadow_map_atlas: Atlas,
 }
 
+pub struct LightingBindGroupLayoutEntries {
+    pub light_slab: wgpu::BindGroupLayoutEntry,
+    pub shadow_map_image: wgpu::BindGroupLayoutEntry,
+    pub shadow_map_sampler: wgpu::BindGroupLayoutEntry,
+}
+
+impl LightingBindGroupLayoutEntries {
+    pub fn new(starting_binding: u32) -> Self {
+        Self {
+            light_slab: wgpu::BindGroupLayoutEntry {
+                binding: starting_binding,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Storage { read_only: true },
+                    has_dynamic_offset: false,
+                    min_binding_size: None,
+                },
+                count: None,
+            },
+            shadow_map_image: wgpu::BindGroupLayoutEntry {
+                binding: starting_binding + 1,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Texture {
+                    sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                    view_dimension: wgpu::TextureViewDimension::D2Array,
+                    multisampled: false,
+                },
+                count: None,
+            },
+            shadow_map_sampler: wgpu::BindGroupLayoutEntry {
+                binding: starting_binding + 2,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
+                count: None,
+            },
+        }
+    }
+}
+
 impl Lighting {
     const LABEL: Option<&str> = Some("lighting");
 
@@ -230,39 +269,14 @@ impl Lighting {
     }
 
     pub(crate) fn create_bindgroup_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+        let LightingBindGroupLayoutEntries {
+            light_slab,
+            shadow_map_image,
+            shadow_map_sampler,
+        } = LightingBindGroupLayoutEntries::new(0);
         device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Self::LABEL,
-            entries: &[
-                // light slab
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                // shadow map texture view
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
-                        view_dimension: wgpu::TextureViewDimension::D2Array,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                // shadow map texture sampler
-                wgpu::BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
-                    count: None,
-                },
-            ],
+            entries: &[light_slab, shadow_map_image, shadow_map_sampler],
         })
     }
 
@@ -447,7 +461,8 @@ impl Lighting {
         ShadowMap::new(self, analytical_light_bundle, size, z_near, z_far)
     }
 
-    pub fn upkeep(&self) {
+    #[must_use]
+    pub fn commit(&self) -> SlabBuffer<wgpu::Buffer> {
         {
             // Drop any analytical lights that don't have external references,
             // and update our lights array.
@@ -470,7 +485,7 @@ impl Lighting {
             update_shadow_map_id: Id::NONE,
             update_shadow_map_texture_index: 0,
         });
-        self.light_slab.commit();
+        self.light_slab.commit()
     }
 }
 

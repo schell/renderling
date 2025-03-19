@@ -146,7 +146,7 @@ pub mod bloom;
 pub mod bvol;
 pub mod camera;
 pub mod color;
-#[cfg(not(target_arch = "spirv"))]
+#[cfg(cpu)]
 mod context;
 pub mod convolution;
 pub mod cubemap;
@@ -156,7 +156,7 @@ pub mod draw;
 pub mod geometry;
 pub mod ibl;
 pub mod light;
-#[cfg(not(target_arch = "spirv"))]
+#[cfg(cpu)]
 mod linkage;
 pub mod material;
 pub mod math;
@@ -164,15 +164,13 @@ pub mod pbr;
 pub mod sdf;
 pub mod skybox;
 pub mod stage;
-#[cfg(not(target_arch = "spirv"))]
+#[cfg(cpu)]
 pub mod texture;
 pub mod tonemapping;
 pub mod transform;
 pub mod tuple;
-#[cfg(feature = "tutorial")]
-pub mod tutorial;
 
-#[cfg(not(target_arch = "spirv"))]
+#[cfg(cpu)]
 pub use context::*;
 
 pub mod prelude {
@@ -356,9 +354,9 @@ mod test {
 
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
-        let img = frame.read_image().unwrap();
+        let img = frame.read_linear_image().unwrap();
         img_diff::assert_img_eq_cfg(
-            "cmy_triangle.png",
+            "cmy_triangle/hdr.png",
             img,
             DiffCfg {
                 test_name: Some("cmy_triangle_backface.png"),
@@ -391,8 +389,8 @@ mod test {
         });
 
         stage.render(&frame.view());
-        let img = frame.read_image().unwrap();
-        img_diff::assert_img_eq("cmy_triangle_update_transform.png", img);
+        let img = frame.read_linear_image().unwrap();
+        img_diff::assert_img_eq("cmy_triangle/update_transform.png", img);
     }
 
     /// Points around a pyramid height=1 with the base around the origin.
