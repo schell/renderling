@@ -509,12 +509,10 @@ impl GltfPrimitive {
         );
         let morph_targets = morph_targets
             .into_iter()
-            .map(|verts| stage.geometry().new_morph_targets(verts))
+            .map(|verts| stage.new_morph_targets(verts))
             .collect::<Vec<_>>();
-        let morph_targets_array = stage
-            .geometry()
-            .slab_allocator()
-            .new_array(morph_targets.iter().map(HybridArray::array));
+        let morph_targets_array =
+            stage.new_morph_targets_array(morph_targets.iter().map(HybridArray::array));
 
         let vs = joints.into_iter().zip(weights);
         let vs = colors.zip(vs);
@@ -544,9 +542,9 @@ impl GltfPrimitive {
                 },
             )
             .collect::<Vec<_>>();
-        let vertices = stage.geometry().new_vertices(vertices);
+        let vertices = stage.new_vertices(vertices);
         log::debug!("{} vertices, {:?}", vertices.len(), vertices.array());
-        let indices = stage.geometry().new_indices(indices);
+        let indices = stage.new_indices(indices);
         log::debug!("{} indices, {:?}", indices.len(), indices.array());
         let (bbmin, bbmax) = {
             let gltf::mesh::Bounds { min, max } = primitive.bounding_box();
@@ -597,7 +595,7 @@ impl GltfMesh {
         let weights = mesh.weights().unwrap_or(&[]).iter().copied();
         GltfMesh {
             primitives,
-            weights: stage.geometry().new_weights(weights),
+            weights: stage.new_weights(weights),
         }
     }
 }
@@ -645,7 +643,7 @@ impl GltfCamera {
             }
         };
         let view = Mat4::from(transform.get_global_transform()).inverse();
-        let camera = stage.geometry().new_camera(Camera::new(projection, view));
+        let camera = stage.new_camera(Camera::new(projection, view));
         GltfCamera {
             index: gltf_camera.index(),
             name: gltf_camera.name().map(String::from),
@@ -730,7 +728,7 @@ impl GltfSkin {
             log::debug!("    joint node {node_index} is {transform_id:?}");
             joint_transforms.push(transform_id);
         }
-        let joint_transforms = stage.geometry().new_joint_transform_ids(joint_transforms);
+        let joint_transforms = stage.new_joint_transform_ids(joint_transforms);
         let reader = skin.reader(|b| buffer_data.get(b.index()).map(|d| d.0.as_slice()));
         let inverse_bind_matrices = if let Some(mats) = reader.read_inverse_bind_matrices() {
             let invs = mats
@@ -738,7 +736,7 @@ impl GltfSkin {
                 .map(|m| Mat4::from_cols_array_2d(&m))
                 .collect::<Vec<_>>();
             log::debug!("  has {} inverse bind matrices", invs.len());
-            Some(stage.geometry().new_matrices(invs))
+            Some(stage.new_matrices(invs))
         } else {
             log::debug!("  no inverse bind matrices");
             None
@@ -753,7 +751,7 @@ impl GltfSkin {
         };
         Ok(GltfSkin {
             index: skin.index(),
-            skin: stage.geometry().new_skin(Skin {
+            skin: stage.new_skin(Skin {
                 joints: joint_transforms.array(),
                 inverse_bind_matrices: inverse_bind_matrices
                     .as_ref()
@@ -872,7 +870,7 @@ impl GltfDocument {
         };
 
         log::debug!("Creating materials");
-        let default_material = stage.materials().new_material(Material::default());
+        let default_material = stage.new_material(Material::default());
         let mut materials = vec![];
         for gltf_material in document.materials() {
             let material_index = gltf_material.index();
@@ -886,7 +884,7 @@ impl GltfDocument {
                 default_material.set(material);
             }
         }
-        let materials = stage.materials().new_materials(materials);
+        let materials = stage.new_materials(materials);
         log::trace!("  created {} materials", materials.len());
 
         log::debug!("Loading meshes");
@@ -963,10 +961,10 @@ impl GltfDocument {
                 if let Some(mesh) = node.mesh() {
                     meshes[mesh.index()].weights.clone()
                 } else {
-                    stage.geometry().new_weights(weights)
+                    stage.new_weights(weights)
                 }
             } else {
-                stage.geometry().new_weights(weights)
+                stage.new_weights(weights)
             };
             let transform = transform_for_node(0, stage, &mut node_transforms, &node);
             nodes.push(GltfNode {
@@ -1013,13 +1011,13 @@ impl GltfDocument {
                     .get(&node_index)
                     .context(MissingNodeSnafu { index: node_index })?
                     .clone();
-                node_transform.move_gpu_to_slab(stage.lighting().slab_allocator());
+                node_transform.move_gpu_to_slab(stage.lighting.slab_allocator());
 
                 let color = Vec3::from(gltf_light.color()).extend(1.0);
                 let intensity = gltf_light.intensity();
                 let light_bundle = match gltf_light.kind() {
                     gltf::khr_lights_punctual::Kind::Directional => {
-                        stage.lighting().new_analytical_light(
+                        stage.new_analytical_light(
                             DirectionalLightDescriptor {
                                 direction: Vec3::NEG_Z,
                                 color,
@@ -1040,21 +1038,19 @@ impl GltfDocument {
                         )
                     }
 
-                    gltf::khr_lights_punctual::Kind::Point => {
-                        stage.lighting().new_analytical_light(
-                            PointLightDescriptor {
-                                position: Vec3::ZERO,
-                                color,
-                                intensity: intensity / 683.0,
-                            },
-                            Some(node_transform),
-                        )
-                    }
+                    gltf::khr_lights_punctual::Kind::Point => stage.new_analytical_light(
+                        PointLightDescriptor {
+                            position: Vec3::ZERO,
+                            color,
+                            intensity: intensity / 683.0,
+                        },
+                        Some(node_transform),
+                    ),
 
                     gltf::khr_lights_punctual::Kind::Spot {
                         inner_cone_angle,
                         outer_cone_angle,
-                    } => stage.lighting().new_analytical_light(
+                    } => stage.new_analytical_light(
                         SpotLightDescriptor {
                             position: Vec3::ZERO,
                             direction: Vec3::NEG_Z,
@@ -1115,7 +1111,7 @@ impl GltfDocument {
                 let num_prims = mesh.primitives.len();
                 log::trace!("    has {num_prims} primitives");
                 for (prim, i) in mesh.primitives.iter().zip(1..) {
-                    let hybrid = stage.geometry().new_renderlet(Renderlet {
+                    let hybrid = stage.new_renderlet(Renderlet {
                         vertices_array: prim.vertices.array(),
                         indices_array: prim.indices.array(),
                         transform_id: gltf_node.transform.global_transform_id(),

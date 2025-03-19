@@ -42,7 +42,7 @@ pub struct LightingDescriptor {
     pub update_shadow_map_texture_index: u32,
 }
 
-#[derive(Clone, Copy, Default, SlabItem, core::fmt::Debug)]
+#[derive(Clone, Copy, SlabItem, core::fmt::Debug)]
 pub struct ShadowMapDescriptor {
     pub light_space_transforms_array: Array<Mat4>,
     /// Near plane of the projection matrix
@@ -58,6 +58,20 @@ pub struct ShadowMapDescriptor {
     pub bias_min: f32,
     pub bias_max: f32,
     pub pcf_samples: u32,
+}
+
+impl Default for ShadowMapDescriptor {
+    fn default() -> Self {
+        Self {
+            light_space_transforms_array: Default::default(),
+            z_near: Default::default(),
+            z_far: Default::default(),
+            atlas_textures_array: Default::default(),
+            bias_min: 0.0005,
+            bias_max: 0.005,
+            pcf_samples: 4,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -104,7 +118,7 @@ pub fn shadow_mapping_vertex(
     let renderlet = geometry_slab.read_unchecked(renderlet_id);
     if !renderlet.visible {
         // put it outside the clipping frustum
-        *out_clip_pos = Vec4::new(10.0, 10.0, 10.0, 1.0);
+        *out_clip_pos = Vec4::new(100.0, 100.0, 100.0, 1.0);
         return;
     }
 

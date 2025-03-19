@@ -386,29 +386,21 @@ impl UiPathBuilder {
                 }),
             )
             .unwrap();
-        let vertices = self
+        let (vertices, indices, material, renderlet) = self
             .ui
             .stage
-            .geometry()
-            .new_vertices(std::mem::take(&mut geometry.vertices));
-        let indices = self.ui.stage.geometry().new_indices(
-            std::mem::take(&mut geometry.indices)
-                .into_iter()
-                .map(|u| u as u32),
-        );
-
-        let material = self.ui.stage.materials().new_material(Material {
-            albedo_texture_id,
-            ..Default::default()
-        });
-        let renderlet = self.ui.stage.geometry().new_renderlet(Renderlet {
-            vertices_array: vertices.array(),
-            indices_array: indices.array(),
-            material_id: material.id(),
-            ..Default::default()
-        });
-
-        self.ui.stage.add_renderlet(&renderlet);
+            .builder()
+            .with_vertices(std::mem::take(&mut geometry.vertices))
+            .with_indices(
+                std::mem::take(&mut geometry.indices)
+                    .into_iter()
+                    .map(|u| u as u32),
+            )
+            .with_material(Material {
+                albedo_texture_id,
+                ..Default::default()
+            })
+            .build();
 
         let transform = self.ui.new_transform(vec![renderlet.id()]);
         renderlet.modify(|r| r.transform_id = transform.id());
@@ -478,28 +470,21 @@ impl UiPathBuilder {
                 }),
             )
             .unwrap();
-        let vertices = self
+        let (vertices, indices, material, renderlet) = self
             .ui
             .stage
-            .geometry()
-            .new_vertices(std::mem::take(&mut geometry.vertices));
-        let indices = self.ui.stage.geometry().new_indices(
-            std::mem::take(&mut geometry.indices)
-                .into_iter()
-                .map(|u| u as u32),
-        );
-        let material = self.ui.stage.materials().new_material(Material {
-            albedo_texture_id,
-            ..Default::default()
-        });
-        let renderlet = self.ui.stage.geometry().new_renderlet(Renderlet {
-            vertices_array: vertices.array(),
-            indices_array: indices.array(),
-            material_id: material.id(),
-            ..Default::default()
-        });
-
-        self.ui.stage.add_renderlet(&renderlet);
+            .builder()
+            .with_vertices(std::mem::take(&mut geometry.vertices))
+            .with_indices(
+                std::mem::take(&mut geometry.indices)
+                    .into_iter()
+                    .map(|u| u as u32),
+            )
+            .with_material(Material {
+                albedo_texture_id,
+                ..Default::default()
+            })
+            .build();
 
         let transform = self.ui.new_transform(vec![renderlet.id()]);
         renderlet.modify(|r| r.transform_id = transform.id());

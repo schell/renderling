@@ -34,6 +34,7 @@ use glyph_brush::ab_glyph;
 use renderling::{
     atlas::AtlasTexture,
     camera::Camera,
+    geometry::Geometry,
     math::{Quat, UVec2, Vec2, Vec3Swizzles, Vec4},
     stage::{NestedTransform, Renderlet, Stage},
     transform::Transform,
@@ -163,9 +164,7 @@ impl Ui {
             .with_lighting(false)
             .with_bloom(false)
             .with_msaa_sample_count(4);
-        let camera = stage
-            .geometry()
-            .new_camera(Camera::default_ortho2d(x as f32, y as f32));
+        let camera = stage.new_camera(Camera::default_ortho2d(x as f32, y as f32));
         Ui {
             camera,
             stage,
@@ -329,9 +328,8 @@ impl Ui {
         let mut should_reorder = false;
         // UNWRAP: panic on purpose
         let mut transforms = self.transforms.write().unwrap();
-        for update_id in self
-            .stage
-            .geometry()
+        let geometry: &Geometry = self.stage.as_ref();
+        for update_id in geometry
             .slab_allocator()
             .get_updated_source_ids()
             .into_iter()

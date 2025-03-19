@@ -247,9 +247,10 @@ impl ShadowMap {
     /// dropped, calling this function will err.
     pub fn update<'a>(
         &self,
-        lighting: &Lighting,
+        lighting: impl AsRef<Lighting>,
         renderlets: impl IntoIterator<Item = &'a Hybrid<Renderlet>>,
     ) -> Result<(), LightingError> {
+        let lighting = lighting.as_ref();
         let light_bundle = self
             .light_bundle
             .upgrade()
@@ -410,16 +411,13 @@ mod test {
 
         let gltf_light = doc.lights.first().unwrap();
         let shadow_map = stage
-            .lighting()
             .new_shadow_map(gltf_light, UVec2::splat(256), 0.0, 20.0)
             .unwrap();
         shadow_map.shadowmap_descriptor.modify(|desc| {
             desc.bias_min = 0.00008;
             desc.bias_max = 0.00008;
         });
-        shadow_map
-            .update(stage.lighting(), doc.renderlets_iter())
-            .unwrap();
+        shadow_map.update(&stage, doc.renderlets_iter()).unwrap();
 
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
@@ -454,27 +452,21 @@ mod test {
         let gltf_light_a = doc.lights.first().unwrap();
         let gltf_light_b = doc.lights.get(1).unwrap();
         let shadow_map_a = stage
-            .lighting()
             .new_shadow_map(gltf_light_a, UVec2::splat(256), 0.0, 20.0)
             .unwrap();
         shadow_map_a.shadowmap_descriptor.modify(|desc| {
             desc.bias_min = 0.00008;
             desc.bias_max = 0.00008;
         });
-        shadow_map_a
-            .update(stage.lighting(), doc.renderlets_iter())
-            .unwrap();
+        shadow_map_a.update(&stage, doc.renderlets_iter()).unwrap();
         let shadow_map_b = stage
-            .lighting()
             .new_shadow_map(gltf_light_b, UVec2::splat(256), 0.0, 20.0)
             .unwrap();
         shadow_map_b.shadowmap_descriptor.modify(|desc| {
             desc.bias_min = 0.00008;
             desc.bias_max = 0.00008;
         });
-        shadow_map_b
-            .update(stage.lighting(), doc.renderlets_iter())
-            .unwrap();
+        shadow_map_b.update(&stage, doc.renderlets_iter()).unwrap();
 
         let frame = ctx.get_next_frame().unwrap();
 
@@ -523,12 +515,9 @@ mod test {
         );
 
         let shadows = stage
-            .lighting()
             .new_shadow_map(gltf_light, UVec2::new(w as u32, h as u32), 0.0, 20.0)
             .unwrap();
-        shadows
-            .update(stage.lighting(), doc.renderlets_iter())
-            .unwrap();
+        shadows.update(&stage, doc.renderlets_iter()).unwrap();
 
         {
             // Ensure the state of the "update texture", which receives the depth of the scene on update
@@ -542,7 +531,8 @@ mod test {
             );
         }
 
-        let shadow_depth_buffer = stage.lighting().shadow_map_atlas.atlas_img_buffer(&ctx, 0);
+        let lighting: &Lighting = stage.as_ref();
+        let shadow_depth_buffer = lighting.shadow_map_atlas.atlas_img_buffer(&ctx, 0);
         let shadow_depth_img = shadow_depth_buffer
             .into_image::<f32, Luma<f32>>(ctx.get_device())
             .unwrap();
@@ -606,7 +596,6 @@ mod test {
                 frame.present();
             }
             let shadow = stage
-                .lighting()
                 .new_shadow_map(light_bundle, UVec2::splat(256), z_near, z_far)
                 .unwrap();
             shadow.shadowmap_descriptor.modify(|desc| {
@@ -614,9 +603,7 @@ mod test {
                 desc.bias_max = f32::EPSILON;
             });
 
-            shadow
-                .update(stage.lighting(), doc.renderlets_iter())
-                .unwrap();
+            shadow.update(&stage, doc.renderlets_iter()).unwrap();
             shadow_maps.push(shadow);
         }
         camera.as_ref().set(original_camera);
@@ -676,7 +663,6 @@ mod test {
                 }
             }
             let shadow = stage
-                .lighting()
                 .new_shadow_map(light_bundle, UVec2::splat(256), z_near, z_far)
                 .unwrap();
             shadow.shadowmap_descriptor.modify(|desc| {
@@ -684,9 +670,7 @@ mod test {
                 desc.bias_min = 0.00010;
                 desc.bias_max = 0.010;
             });
-            shadow
-                .update(stage.lighting(), doc.renderlets_iter())
-                .unwrap();
+            shadow.update(&stage, doc.renderlets_iter()).unwrap();
             shadows.push(shadow);
         }
         camera.as_ref().set(c);
