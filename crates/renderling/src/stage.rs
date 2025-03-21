@@ -414,6 +414,7 @@ pub fn renderlet_fragment(
     world_pos: Vec3,
     output: &mut Vec4,
 ) {
+    // proxy to a separate impl that allows us to test on CPU
     crate::pbr::fragment_impl(
         atlas,
         atlas_sampler,

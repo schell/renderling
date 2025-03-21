@@ -930,7 +930,7 @@ fn function() {
                 let _e1498 = global_4.member[(_e1420 + 15u)];
                 global_1 = vec4<f32>((fma(bitcast<f32>(_e1463), _e1402, fma(bitcast<f32>(_e1423), _e1400, (bitcast<f32>(_e1443) * _e1401))) + bitcast<f32>(_e1483)), (fma(bitcast<f32>(_e1468), _e1402, fma(bitcast<f32>(_e1428), _e1400, (bitcast<f32>(_e1448) * _e1401))) + bitcast<f32>(_e1488)), (fma(bitcast<f32>(_e1473), _e1402, fma(bitcast<f32>(_e1433), _e1400, (bitcast<f32>(_e1453) * _e1401))) + bitcast<f32>(_e1493)), (fma(bitcast<f32>(_e1478), _e1402, fma(bitcast<f32>(_e1438), _e1400, (bitcast<f32>(_e1458) * _e1401))) + bitcast<f32>(_e1498)));
             } else {
-                global_1 = vec4<f32>(10f, 10f, 10f, 1f);
+                global_1 = vec4<f32>(100f, 100f, 100f, 1f);
             }
             break;
         }

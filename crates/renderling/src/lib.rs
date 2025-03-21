@@ -776,7 +776,7 @@ mod test {
         let red = Vec3::X.extend(1.0);
         let green = Vec3::Y.extend(1.0);
         let blue = Vec3::Z.extend(1.0);
-        let dir_red = stage.lighting().new_analytical_light(
+        let dir_red = stage.new_analytical_light(
             DirectionalLightDescriptor {
                 direction: Vec3::NEG_Y,
                 color: red,
@@ -784,7 +784,7 @@ mod test {
             },
             None,
         );
-        let _dir_green = stage.lighting().new_analytical_light(
+        let _dir_green = stage.new_analytical_light(
             DirectionalLightDescriptor {
                 direction: Vec3::NEG_X,
                 color: green,
@@ -792,7 +792,7 @@ mod test {
             },
             None,
         );
-        let _dir_blue = stage.lighting().new_analytical_light(
+        let _dir_blue = stage.new_analytical_light(
             DirectionalLightDescriptor {
                 direction: Vec3::NEG_Z,
                 color: blue,

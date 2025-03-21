@@ -931,6 +931,7 @@ mod test {
     use crate::{
         atlas::{AtlasTexture, TextureAddressMode},
         camera::Camera,
+        material::Materials,
         pbr::Material,
         stage::Vertex,
         transform::Transform,
@@ -1209,10 +1210,10 @@ mod test {
         let _frames = stage
             .set_images([dirt, sandstone, cheetah, texels])
             .unwrap();
-
-        let img = stage.materials().atlas().atlas_img(&ctx, 0);
+        let materials: &Materials = stage.as_ref();
+        let img = materials.atlas().atlas_img(&ctx, 0);
         img_diff::assert_img_eq("atlas/array0.png", img);
-        let img = stage.materials().atlas().atlas_img(&ctx, 1);
+        let img = materials.atlas().atlas_img(&ctx, 1);
         img_diff::assert_img_eq("atlas/array1.png", img);
     }
 
@@ -1238,14 +1239,15 @@ mod test {
                 texels,
             ])
             .unwrap();
-        assert_eq!(8, stage.materials().atlas().len());
+        let materials: &Materials = stage.as_ref();
+        assert_eq!(8, materials.atlas().len());
 
         frames.pop();
         frames.pop();
         frames.pop();
         frames.pop();
 
-        let _ = stage.materials().atlas().upkeep(&ctx);
-        assert_eq!(4, stage.materials().atlas().len());
+        let _ = materials.atlas().upkeep(&ctx);
+        assert_eq!(4, materials.atlas().len());
     }
 }

@@ -674,7 +674,7 @@ mod test {
 
     use crate::{
         bvol::BoundingSphere, cull::DepthPyramidDescriptor, draw::DrawIndirectArgs,
-        math::hex_to_vec4, prelude::*,
+        geometry::Geometry, math::hex_to_vec4, prelude::*,
     };
     use crabslab::{GrowableSlab, Slab};
     use glam::{Mat4, Quat, UVec2, UVec3, Vec2, Vec3, Vec4};
@@ -940,8 +940,11 @@ mod test {
         }
 
         // The stage's slab, which contains the `Renderlet`s and their `BoundingSphere`s
-        let stage_slab =
-            futures_lite::future::block_on(stage.geometry().slab_allocator().read(..)).unwrap();
+        let stage_slab = futures_lite::future::block_on({
+            let geometry: &Geometry = stage.as_ref();
+            geometry.slab_allocator().read(..)
+        })
+        .unwrap();
         let draw_calls = stage.draw_calls.read().unwrap();
         let indirect_draws = draw_calls.drawing_strategy.as_indirect().unwrap();
         // The HZB slab, which contains a `DepthPyramidDescriptor` at index 0, and all the

@@ -16,7 +16,10 @@ use crate::{
     debug::DebugOverlay,
     draw::DrawCalls,
     geometry::Geometry,
-    light::{AnalyticalLightBundle, Light, LightDetails, Lighting, LightingBindGroupLayoutEntries},
+    light::{
+        AnalyticalLightBundle, Light, LightDetails, Lighting, LightingBindGroupLayoutEntries,
+        LightingError, ShadowMap,
+    },
     material::Materials,
     pbr::debug::DebugChannel,
     skybox::{Skybox, SkyboxRenderPipeline},
@@ -33,11 +36,20 @@ use super::*;
 pub enum StageError {
     #[snafu(display("{source}"))]
     Atlas { source: AtlasError },
+
+    #[snafu(display("{source}"))]
+    Lighting { source: LightingError },
 }
 
 impl From<AtlasError> for StageError {
     fn from(source: AtlasError) -> Self {
         Self::Atlas { source }
+    }
+}
+
+impl From<LightingError> for StageError {
+    fn from(source: LightingError) -> Self {
+        Self::Lighting { source }
     }
 }
 
@@ -296,7 +308,7 @@ impl<'a, T: Bundle> RenderletBuilder<'a, T> {
         mut self,
         vertices: impl IntoIterator<Item = Vertex>,
     ) -> RenderletBuilder<'a, T::Suffixed<HybridArray<Vertex>>> {
-        let vertices = self.stage.geometry().new_vertices(vertices);
+        let vertices = self.stage.geometry.new_vertices(vertices);
         self.data.vertices_array = vertices.array();
         self.suffix(vertices)
     }
@@ -305,7 +317,7 @@ impl<'a, T: Bundle> RenderletBuilder<'a, T> {
         mut self,
         indices: impl IntoIterator<Item = u32>,
     ) -> RenderletBuilder<'a, T::Suffixed<HybridArray<u32>>> {
-        let indices = self.stage.geometry().new_indices(indices);
+        let indices = self.stage.geometry.new_indices(indices);
         self.data.indices_array = indices.array();
         self.suffix(indices)
     }
@@ -319,7 +331,7 @@ impl<'a, T: Bundle> RenderletBuilder<'a, T> {
         mut self,
         transform: Transform,
     ) -> RenderletBuilder<'a, T::Suffixed<Hybrid<Transform>>> {
-        let transform = self.stage.geometry().new_transform(transform);
+        let transform = self.stage.geometry.new_transform(transform);
         self.data.transform_id = transform.id();
         self.suffix(transform)
     }
@@ -352,7 +364,7 @@ impl<'a, T: Bundle> RenderletBuilder<'a, T> {
         mut self,
         morph_targets: impl IntoIterator<Item = Array<MorphTarget>>,
     ) -> (Self, HybridArray<Array<MorphTarget>>) {
-        let morph_targets = self.stage.geometry().new_morph_targets_array(morph_targets);
+        let morph_targets = self.stage.geometry.new_morph_targets_array(morph_targets);
         self.data.morph_targets = morph_targets.array();
         (self, morph_targets)
     }
@@ -361,7 +373,7 @@ impl<'a, T: Bundle> RenderletBuilder<'a, T> {
         mut self,
         morph_weights: impl IntoIterator<Item = f32>,
     ) -> (Self, HybridArray<f32>) {
-        let morph_weights = self.stage.geometry().new_weights(morph_weights);
+        let morph_weights = self.stage.geometry.new_weights(morph_weights);
         self.data.morph_weights = morph_weights.array();
         (self, morph_weights)
     }
@@ -385,7 +397,7 @@ impl<'a, T: Bundle> RenderletBuilder<'a, T> {
     where
         T::Suffixed<Hybrid<Renderlet>>: Bundle,
     {
-        let renderlet = self.stage.geometry().new_renderlet(self.data);
+        let renderlet = self.stage.geometry.new_renderlet(self.data);
         self.stage.add_renderlet(&renderlet);
         self.resources.suffix(renderlet).reduce()
     }
@@ -442,38 +454,26 @@ impl AsRef<WgpuRuntime> for Stage {
     }
 }
 
-impl Stage {
-    pub fn device(&self) -> &wgpu::Device {
-        &self.as_ref().device
-    }
-
-    pub fn queue(&self) -> &wgpu::Queue {
-        &self.as_ref().queue
-    }
-
-    pub fn runtime(&self) -> &WgpuRuntime {
-        self.as_ref()
-    }
-
-    /// Access the geometry manager.
-    pub fn geometry(&self) -> &Geometry {
+impl AsRef<Geometry> for Stage {
+    fn as_ref(&self) -> &Geometry {
         &self.geometry
     }
+}
 
-    /// Access the materials manager.
-    pub fn materials(&self) -> &Materials {
+impl AsRef<Materials> for Stage {
+    fn as_ref(&self) -> &Materials {
         &self.materials
     }
+}
 
-    /// Access the lighting manager.
-    pub fn lighting(&self) -> &Lighting {
+impl AsRef<Lighting> for Stage {
+    fn as_ref(&self) -> &Lighting {
         &self.lighting
     }
+}
 
-    pub fn builder(&self) -> RenderletBuilder<'_, ()> {
-        RenderletBuilder::new(self)
-    }
-
+/// Geometry methods.
+impl Stage {
     /// Stage a [`Camera`] on the GPU.
     ///
     /// If the camera has not been set, this camera will be used
@@ -484,17 +484,17 @@ impl Stage {
 
     /// Set the given camera as the default one to use when rendering.
     pub fn use_camera(&self, camera: impl AsRef<Hybrid<Camera>>) {
-        self.geometry().use_camera(camera);
+        self.geometry.use_camera(camera);
     }
 
     /// Return the `Id` of the camera currently in use.
     pub fn used_camera_id(&self) -> Id<Camera> {
-        self.geometry().descriptor().get().camera_id
+        self.geometry.descriptor().get().camera_id
     }
 
     /// Set the default camera `Id`.
     pub fn use_camera_id(&self, camera_id: Id<Camera>) {
-        self.geometry()
+        self.geometry
             .descriptor()
             .modify(|desc| desc.camera_id = camera_id);
     }
@@ -502,11 +502,6 @@ impl Stage {
     /// Stage a [`Transform`] on the GPU.
     pub fn new_transform(&self, transform: Transform) -> Hybrid<Transform> {
         self.geometry.new_transform(transform)
-    }
-
-    /// Stage a new [`Material`] on the GPU.
-    pub fn new_material(&self, material: Material) -> Hybrid<Material> {
-        self.materials.new_material(material)
     }
 
     /// Stage some vertex geometry data.
@@ -519,6 +514,48 @@ impl Stage {
         self.geometry.new_indices(data)
     }
 
+    /// Create new morph targets.
+    // TODO: Move `MorphTarget` to geometry.
+    pub fn new_morph_targets(
+        &self,
+        data: impl IntoIterator<Item = MorphTarget>,
+    ) -> HybridArray<MorphTarget> {
+        self.geometry.new_morph_targets(data)
+    }
+
+    /// Create an array of morph target arrays.
+    pub fn new_morph_targets_array(
+        &self,
+        data: impl IntoIterator<Item = Array<MorphTarget>>,
+    ) -> HybridArray<Array<MorphTarget>> {
+        let morph_targets = data.into_iter();
+        self.geometry.new_morph_targets_array(morph_targets)
+    }
+
+    /// Create new morph target weights.
+    pub fn new_weights(&self, data: impl IntoIterator<Item = f32>) -> HybridArray<f32> {
+        self.geometry.new_weights(data)
+    }
+
+    /// Create a new array of joint transform ids that each point to a [`Transform`].
+    pub fn new_joint_transform_ids(
+        &self,
+        data: impl IntoIterator<Item = Id<Transform>>,
+    ) -> HybridArray<Id<Transform>> {
+        self.geometry.new_joint_transform_ids(data)
+    }
+
+    /// Create a new array of matrices.
+    pub fn new_matrices(&self, data: impl IntoIterator<Item = Mat4>) -> HybridArray<Mat4> {
+        self.geometry.new_matrices(data)
+    }
+
+    /// Create a new skin.
+    // TODO: move `Skin` to geometry.
+    pub fn new_skin(&self, skin: Skin) -> Hybrid<Skin> {
+        self.geometry.new_skin(skin)
+    }
+
     /// Stage a new [`Renderlet`].
     ///
     /// The `Renderlet` should still be added to the draw list with
@@ -527,6 +564,90 @@ impl Stage {
         self.geometry.new_renderlet(renderlet)
     }
 
+    /// Returns a reference to the descriptor stored at the root of the
+    /// geometry slab.
+    pub fn geometry_descriptor(&self) -> &Hybrid<GeometryDescriptor> {
+        self.geometry.descriptor()
+    }
+}
+
+/// Materials methods.
+impl Stage {
+    /// Stage a new [`Material`] on the GPU.
+    pub fn new_material(&self, material: Material) -> Hybrid<Material> {
+        self.materials.new_material(material)
+    }
+
+    /// Create an array of materials, stored contiguously.
+    pub fn new_materials(&self, data: impl IntoIterator<Item = Material>) -> HybridArray<Material> {
+        self.materials.new_materials(data)
+    }
+
+    /// Set the size of the atlas.
+    ///
+    /// This will cause a repacking.
+    pub fn set_atlas_size(&self, size: wgpu::Extent3d) -> Result<(), StageError> {
+        log::info!("resizing atlas to {size:?}");
+        self.materials.atlas().resize(self.runtime(), size)?;
+        Ok(())
+    }
+
+    /// Add images to the set of atlas images.
+    ///
+    /// This returns a vector of [`Hybrid<AtlasTexture>`], which
+    /// is a descriptor of each image on the GPU. Dropping these entries
+    /// will invalidate those images and cause the atlas to be repacked, and any raw
+    /// GPU references to the underlying [`AtlasTexture`] will also be invalidated.
+    ///     
+    /// Adding an image can be quite expensive, as it requires creating a new texture
+    /// array for the atlas and repacking all previous images. For that reason it is
+    /// good to batch images to reduce the number of calls.
+    pub fn add_images(
+        &self,
+        images: impl IntoIterator<Item = impl Into<AtlasImage>>,
+    ) -> Result<Vec<Hybrid<AtlasTexture>>, StageError> {
+        let images = images.into_iter().map(|i| i.into()).collect::<Vec<_>>();
+        let frames = self.materials.atlas().add_images(&images)?;
+
+        // The textures bindgroup will have to be remade
+        let _ = self.textures_bindgroup.lock().unwrap().take();
+
+        Ok(frames)
+    }
+
+    /// Clear all images from the atlas.
+    ///
+    /// ## WARNING
+    /// This invalidates any previously staged [`AtlasTexture`]s.
+    pub fn clear_images(&self) -> Result<(), StageError> {
+        let none = Option::<AtlasImage>::None;
+        let _ = self.set_images(none)?;
+        Ok(())
+    }
+
+    /// Set the images to use for the atlas.
+    ///
+    /// Resets the atlas, packing it with the given images and returning a
+    /// vector of the frames already staged.
+    ///
+    /// ## WARNING
+    /// This invalidates any previously staged [`AtlasTexture`]s.
+    pub fn set_images(
+        &self,
+        images: impl IntoIterator<Item = impl Into<AtlasImage>>,
+    ) -> Result<Vec<Hybrid<AtlasTexture>>, StageError> {
+        let images = images.into_iter().map(|i| i.into()).collect::<Vec<_>>();
+        let frames = self.materials.atlas().set_images(&images)?;
+
+        // The textures bindgroup will have to be remade
+        let _ = self.textures_bindgroup.lock().unwrap().take();
+
+        Ok(frames)
+    }
+}
+
+/// Lighting methods.
+impl Stage {
     /// Stage a new analytical light.
     ///
     /// `T` must be one of:
@@ -545,6 +666,65 @@ impl Stage {
     {
         self.lighting
             .new_analytical_light(light_descriptor, nested_transform)
+    }
+
+    /// Add an [`AnalyticalLightBundle`] to the internal list of lights.
+    ///
+    /// This is called implicitly by [`Stage::new_analytical_light`].
+    ///
+    /// This can be used to add the light back to the scene after using
+    /// [`Stage::remove_light`].
+    pub fn add_light(&self, bundle: &AnalyticalLightBundle) {
+        self.lighting.add_light(bundle)
+    }
+
+    /// Remove an [`AnalyticalLightBundle`] from the internal list of lights.
+    ///
+    /// Use this to exclude a light from rendering, without dropping the light.
+    ///
+    /// After calling this function you can include the light again using [`Stage::add_light`].
+    pub fn remove_light(&self, bundle: &AnalyticalLightBundle) {
+        self.lighting.remove_light(bundle);
+    }
+
+    /// Enable shadow mapping for the given [`AnalyticalLightBundle`], creating
+    /// a new [`ShadowMap`].
+    pub fn new_shadow_map(
+        &self,
+        analytical_light_bundle: &AnalyticalLightBundle,
+        // Size of the shadow map
+        size: UVec2,
+        // Distance to the near plane of the shadow map's frustum.
+        //
+        // Only objects within the shadow map's frustum will cast shadows.
+        z_near: f32,
+        // Distance to the far plane of the shadow map's frustum
+        //
+        // Only objects within the shadow map's frustum will cast shadows.
+        z_far: f32,
+    ) -> Result<ShadowMap, StageError> {
+        Ok(self
+            .lighting
+            .new_shadow_map(analytical_light_bundle, size, z_near, z_far)?)
+    }
+}
+
+impl Stage {
+    /// Returns the runtime.
+    pub fn runtime(&self) -> &WgpuRuntime {
+        self.as_ref()
+    }
+
+    pub fn device(&self) -> &wgpu::Device {
+        &self.runtime().device
+    }
+
+    pub fn queue(&self) -> &wgpu::Queue {
+        &self.runtime().queue
+    }
+
+    pub fn builder(&self) -> RenderletBuilder<'_, ()> {
+        RenderletBuilder::new(self)
     }
 
     /// Run all upkeep and commit all staged changes to the GPU.
@@ -1042,68 +1222,6 @@ impl Stage {
         self
     }
 
-    /// Set the size of the atlas.
-    ///
-    /// This will cause a repacking.
-    pub fn set_atlas_size(&self, size: wgpu::Extent3d) -> Result<(), StageError> {
-        log::info!("resizing atlas to {size:?}");
-        self.materials.atlas().resize(self.runtime(), size)?;
-        Ok(())
-    }
-
-    /// Add images to the set of atlas images.
-    ///
-    /// This returns a vector of [`Hybrid<AtlasTexture>`], which
-    /// is a descriptor of each image on the GPU. Dropping these entries
-    /// will invalidate those images and cause the atlas to be repacked, and any raw
-    /// GPU references to the underlying [`AtlasTexture`] will also be invalidated.
-    ///     
-    /// Adding an image can be quite expensive, as it requires creating a new texture
-    /// array for the atlas and repacking all previous images. For that reason it is
-    /// good to batch images to reduce the number of calls.
-    pub fn add_images(
-        &self,
-        images: impl IntoIterator<Item = impl Into<AtlasImage>>,
-    ) -> Result<Vec<Hybrid<AtlasTexture>>, StageError> {
-        let images = images.into_iter().map(|i| i.into()).collect::<Vec<_>>();
-        let frames = self.materials.atlas().add_images(&images)?;
-
-        // The textures bindgroup will have to be remade
-        let _ = self.textures_bindgroup.lock().unwrap().take();
-
-        Ok(frames)
-    }
-
-    /// Clear all images from the atlas.
-    ///
-    /// ## WARNING
-    /// This invalidates any previously staged [`AtlasTexture`]s.
-    pub fn clear_images(&self) -> Result<(), StageError> {
-        let none = Option::<AtlasImage>::None;
-        let _ = self.set_images(none)?;
-        Ok(())
-    }
-
-    /// Set the images to use for the atlas.
-    ///
-    /// Resets the atlas, packing it with the given images and returning a
-    /// vector of the frames already staged.
-    ///
-    /// ## WARNING
-    /// This invalidates any previously staged [`AtlasTexture`]s.
-    pub fn set_images(
-        &self,
-        images: impl IntoIterator<Item = impl Into<AtlasImage>>,
-    ) -> Result<Vec<Hybrid<AtlasTexture>>, StageError> {
-        let images = images.into_iter().map(|i| i.into()).collect::<Vec<_>>();
-        let frames = self.materials.atlas().set_images(&images)?;
-
-        // The textures bindgroup will have to be remade
-        let _ = self.textures_bindgroup.lock().unwrap().take();
-
-        Ok(frames)
-    }
-
     /// Set the skybox.
     pub fn set_skybox(&self, skybox: Skybox) {
         // UNWRAP: if we can't acquire the lock we want to panic.
@@ -1528,7 +1646,7 @@ mod test {
 
     use crate::{
         camera::Camera,
-        geometry::GeometryDescriptor,
+        geometry::{Geometry, GeometryDescriptor},
         stage::{cpu::SlabAllocator, NestedTransform, Renderlet, Vertex},
         transform::Transform,
         Context,
@@ -1675,9 +1793,12 @@ mod test {
         let stage = ctx.new_stage();
         let _ = stage.commit();
 
-        let slab =
-            futures_lite::future::block_on(stage.geometry().slab_allocator().read(..)).unwrap();
+        let slab = futures_lite::future::block_on({
+            let geometry: &Geometry = stage.as_ref();
+            geometry.slab_allocator().read(..)
+        })
+        .unwrap();
         let pbr_desc = slab.read_unchecked(Id::<GeometryDescriptor>::new(0));
-        pretty_assertions::assert_eq!(stage.geometry().descriptor().get(), pbr_desc);
+        pretty_assertions::assert_eq!(stage.geometry_descriptor().get(), pbr_desc);
     }
 }
