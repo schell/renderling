@@ -10,6 +10,7 @@ use spirv_std::spirv;
 use crate::{
     atlas::{AtlasDescriptor, AtlasTexture},
     cubemap::{CubemapDescriptor, CubemapFaceDirection},
+    geometry::GeometryDescriptor,
     math::{IsSampler, IsVector, Sample2dArray},
     stage::Renderlet,
     transform::Transform,
@@ -725,6 +726,48 @@ impl ShadowCalculation {
 
         shadow / pcf_samplesf
     }
+}
+
+/// Depth pre-pass for the light tiling feature.
+///
+/// This shader writes all staged [`Renderlet`]'s depth into a buffer.
+///
+/// This shader is very much like [`shadow_mapping_vertex`], except that
+/// shader gets its projection+view matrix from the light stored in a
+/// `ShadowMapDescriptor`.
+///
+/// Here we want to render as normal forward pass would, with the `Renderlet`'s view
+/// and the [`Camera`]'s projection.
+///
+/// ## Note
+/// This shader will likely be expanded to include parts of occlusion culling and order
+/// independent transparency.
+#[spirv(vertex)]
+pub fn light_tiling_depth_pre_pass(
+    // Points at a `Renderlet`.
+    #[spirv(instance_index)] renderlet_id: Id<Renderlet>,
+    // Which vertex within the renderlet are we rendering?
+    #[spirv(vertex_index)] vertex_index: u32,
+    // The slab where the renderlet's geometry is staged
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] geometry_slab: &[u32],
+    // Output clip coords
+    #[spirv(position)] out_clip_pos: &mut Vec4,
+) {
+    let renderlet = geometry_slab.read_unchecked(renderlet_id);
+    if !renderlet.visible {
+        // put it outside the clipping frustum
+        *out_clip_pos = Vec3::splat(100.0).extend(1.0);
+        return;
+    }
+
+    let camera_id = geometry_slab
+        .read_unchecked(Id::<GeometryDescriptor>::new(0) + GeometryDescriptor::OFFSET_OF_CAMERA_ID);
+    let camera = geometry_slab.read_unchecked(camera_id);
+
+    let (_vertex, _transform, _model_matrix, world_pos) =
+        renderlet.get_vertex_info(vertex_index, geometry_slab);
+
+    *out_clip_pos = camera.view_projection() * world_pos.extend(1.0);
 }
 
 #[cfg(test)]
