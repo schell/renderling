@@ -25,6 +25,7 @@ pub mod debug_overlay_vertex;
 pub mod di_convolution_fragment;
 pub mod generate_mipmap_fragment;
 pub mod generate_mipmap_vertex;
+pub mod light_tiling_depth_pre_pass;
 pub mod prefilter_environment_cubemap_fragment;
 pub mod prefilter_environment_cubemap_vertex;
 pub mod renderlet_fragment;
