@@ -89,8 +89,9 @@ By default it uses a single uber-shader for rendering.
 - [x] Built-in support for common lighting/material workflows
   - [x] physically based shading
   - [x] unlit
-- [ ] light tiling
+- [ ] light tiling/light culling (in progress)
 - [x] shadow mapping
+  - [ ] shadow mapping from image-based lighting
 - [ ] ssao
 
 - [x] msaa
@@ -102,6 +103,10 @@ By default it uses a single uber-shader for rendering.
 - [x] image based lighting
   - [x] diffuse
   - [x] specular
+     
+- [ ] order independent transparency
+
+- [ ] entirely too much raymarching 
 
 - gltf support
   - [x] scenes
