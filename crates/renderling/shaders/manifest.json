@@ -105,6 +105,11 @@
     "wgsl_entry_point": "ibldiffuse_irradiancedi_convolution_fragment"
   },
   {
+    "source_path": "shaders/light-light_tiling_depth_pre_pass.spv",
+    "entry_point": "light::light_tiling_depth_pre_pass",
+    "wgsl_entry_point": "lightlight_tiling_depth_pre_pass"
+  },
+  {
     "source_path": "shaders/light-shadow_mapping_fragment.spv",
     "entry_point": "light::shadow_mapping_fragment",
     "wgsl_entry_point": "lightshadow_mapping_fragment"
