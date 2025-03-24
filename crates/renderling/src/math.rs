@@ -8,12 +8,26 @@
 //! Lastly, it provides some constant geometry used in many shaders.
 use core::ops::Mul;
 use spirv_std::{
-    image::{Cubemap, Image2d, Image2dArray},
+    image::{sample_with, Cubemap, Image2d, Image2dArray, ImageWithMethods},
     Image, Sampler,
 };
 
 pub use glam::*;
 pub use spirv_std::num_traits::{clamp, Float, Zero};
+
+pub trait Fetch<Coords> {
+    type Output;
+
+    fn fetch(&self, coords: Coords) -> Self::Output;
+}
+
+impl Fetch<UVec2> for Image!(2D, type=f32, sampled, depth) {
+    type Output = Vec4;
+
+    fn fetch(&self, coords: UVec2) -> Self::Output {
+        self.fetch_with(coords, sample_with::lod(0))
+    }
+}
 
 pub trait IsSampler: Copy + Clone {}
 
@@ -88,6 +102,14 @@ mod cpu {
     /// value when sampled.
     pub struct ConstTexture(Vec4);
 
+    impl Fetch<UVec2> for ConstTexture {
+        type Output = Vec4;
+
+        fn fetch(&self, _coords: UVec2) -> Self::Output {
+            self.0
+        }
+    }
+
     impl Sample2d for ConstTexture {
         type Sampler = ();
 
@@ -133,6 +155,21 @@ mod cpu {
         }
     }
 
+    impl<P, Container> Fetch<UVec2> for CpuTexture2d<P, Container>
+    where
+        P: image::Pixel,
+        Container: std::ops::Deref<Target = [P::Subpixel]>,
+    {
+        type Output = Vec4;
+
+        fn fetch(&self, coords: UVec2) -> Self::Output {
+            let x = coords.x.clamp(0, self.image.width() - 1);
+            let y = coords.y.clamp(0, self.image.height() - 1);
+            let p = self.image.get_pixel(x, y);
+            (self.convert_fn)(p)
+        }
+    }
+
     impl<P, Container> Sample2d for CpuTexture2d<P, Container>
     where
         P: image::Pixel,
@@ -143,14 +180,9 @@ mod cpu {
         fn sample_by_lod(&self, _sampler: Self::Sampler, uv: glam::Vec2, _lod: f32) -> Vec4 {
             // TODO: lerp the CPU texture sampling
             // TODO: use configurable wrap mode on CPU sampling
-            let px = uv.x.clamp(0.0, 1.0) * self.image.width() as f32;
-            let py = uv.y.clamp(0.0, 1.0) * self.image.height() as f32;
-            println!("sampling: ({px}, {py})");
-            let p = self.image.get_pixel(
-                px.round().min(self.image.width() as f32) as u32,
-                py.round().min(self.image.height() as f32) as u32,
-            );
-            (self.convert_fn)(p)
+            let px = uv.x.clamp(0.0, 1.0) * (self.image.width() as f32 - 1.0);
+            let py = uv.y.clamp(0.0, 1.0) * (self.image.height() as f32 - 1.0);
+            self.fetch(UVec2::new(px.round() as u32, py.round() as u32))
         }
     }
 

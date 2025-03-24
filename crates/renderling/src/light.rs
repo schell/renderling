@@ -4,14 +4,16 @@
 //!
 //! Shadow mapping.
 use crabslab::{Array, Id, Slab, SlabItem};
-use glam::{Mat4, UVec2, Vec2, Vec3, Vec3Swizzles, Vec4, Vec4Swizzles};
-use spirv_std::spirv;
+use glam::{Mat4, UVec2, UVec3, Vec2, Vec3, Vec3Swizzles, Vec4, Vec4Swizzles};
+#[cfg(gpu)]
+use spirv_std::num_traits::Float;
+use spirv_std::{spirv, Image};
 
 use crate::{
     atlas::{AtlasDescriptor, AtlasTexture},
     cubemap::{CubemapDescriptor, CubemapFaceDirection},
     geometry::GeometryDescriptor,
-    math::{IsSampler, IsVector, Sample2dArray},
+    math::{Fetch, IsSampler, IsVector, Sample2dArray},
     stage::Renderlet,
     transform::Transform,
 };
@@ -41,6 +43,8 @@ pub struct LightingDescriptor {
     pub update_shadow_map_id: Id<ShadowMapDescriptor>,
     /// The index of the shadow map atlas texture to update.
     pub update_shadow_map_texture_index: u32,
+    /// Descriptor for performing the light tiling cull stage.
+    pub light_tiling_descriptor: LightTilingDescriptor,
 }
 
 #[derive(Clone, Copy, SlabItem, core::fmt::Debug)]
@@ -208,9 +212,6 @@ impl SpotLightCalculation {
         node_transform: Mat4,
         fragment_world_position: Vec3,
     ) -> Self {
-        #[cfg(gpu)]
-        use spirv_std::num_traits::Float;
-
         let light_position = node_transform.transform_point3(spot_light_descriptor.position);
         let frag_position = fragment_world_position;
         let frag_to_light = light_position - frag_position;
@@ -768,6 +769,85 @@ pub fn light_tiling_depth_pre_pass(
         renderlet.get_vertex_info(vertex_index, geometry_slab);
 
     *out_clip_pos = camera.view_projection() * world_pos.extend(1.0);
+}
+
+pub type DepthImage2d = Image!(2D, type=f32, sampled, depth);
+
+/// Descriptor of the light tiling operation, which culls lights by accumulating
+/// them into lists that illuminate tiles of the screen.
+#[derive(Clone, Copy, Default, SlabItem, core::fmt::Debug)]
+pub struct LightTilingDescriptor {
+    /// Array pointing to the "tiling slab", which is used only for light
+    /// tiling atomic ops.
+    pub tile_depth_mins: Array<u32>,
+    /// Array pointing to the "tiling slab", which is used only for light
+    /// tiling atomic ops.
+    pub tile_depth_maxs: Array<u32>,
+}
+
+/// Compute the min and max depth of one fragment/invocation for light tiling.
+pub fn light_tiling_compute_min_and_max_depth(
+    frag_pos: UVec2,
+    depth_texture: &impl Fetch<UVec2, Output = Vec4>,
+    lighting_slab: &[u32],
+    tiling_slab: &mut [u32],
+) {
+    // Depth frag value at the fragment position
+    let frag_depth: f32 = depth_texture.fetch(frag_pos).x;
+    // Fragment depth scaled to min/max of u32 values
+    //
+    // This is so we can compare with normal atomic ops instead of using the float extension
+    let frag_depth_u32: u32 = (u32::MAX as f32 * frag_depth) as u32;
+    // The tile's xy among all the tiles
+    let tile_xy = UVec2::new(frag_pos.x / 16, frag_pos.y / 16);
+    // The tile's index in all the tiles
+    let tile_index = tile_xy.x * 16 + tile_xy.y;
+    let tiling_desc = lighting_slab.read_unchecked(
+        Id::<LightingDescriptor>::new(0) + LightingDescriptor::OFFSET_OF_LIGHT_TILING_DESCRIPTOR,
+    );
+    // index of the tile's min depth atomic value in the tiling slab
+    let min_depth_index = tiling_desc.tile_depth_mins.at(tile_index as usize).index();
+    // index of the tile's max depth atomic value in the tiling slab
+    let max_depth_index = tiling_desc.tile_depth_maxs.at(tile_index as usize).index();
+
+    let _prev_min_depth = unsafe {
+        spirv_std::arch::atomic_u_min::<
+            u32,
+            { spirv_std::memory::Scope::Workgroup as u32 },
+            { spirv_std::memory::Semantics::WORKGROUP_MEMORY.bits() },
+        >(&mut tiling_slab[min_depth_index], frag_depth_u32)
+    };
+    let _prev_max_depth = unsafe {
+        spirv_std::arch::atomic_u_max::<
+            u32,
+            { spirv_std::memory::Scope::Workgroup as u32 },
+            { spirv_std::memory::Semantics::WORKGROUP_MEMORY.bits() },
+        >(&mut tiling_slab[max_depth_index], frag_depth_u32)
+    };
+}
+
+/// Light culling compute shader.
+#[spirv(compute(threads(16, 16, 1)))]
+pub fn light_tiling_compute_tiles(
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] geometry_slab: &[u32],
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 1)] lighting_slab: &[u32],
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 2)] tiling_slab: &mut [u32],
+    #[spirv(descriptor_set = 0, binding = 3)] depth_texture: &DepthImage2d,
+    #[spirv(global_invocation_id)] global_id: UVec3,
+) {
+    let geometry_desc = geometry_slab.read_unchecked(Id::<GeometryDescriptor>::new(0));
+    let size = geometry_desc.resolution;
+    if !(global_id.x < size.x && global_id.y < size.y) {
+        // if the invocation runs off the end of the image, bail
+        return;
+    }
+
+    light_tiling_compute_min_and_max_depth(
+        global_id.xy(),
+        depth_texture,
+        lighting_slab,
+        tiling_slab,
+    );
 }
 
 #[cfg(test)]

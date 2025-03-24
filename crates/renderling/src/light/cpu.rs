@@ -248,8 +248,6 @@ impl LightingBindGroupLayoutEntries {
 }
 
 impl Lighting {
-    const LABEL: Option<&str> = Some("lighting");
-
     /// Create the atlas used to store all shadow maps.
     fn create_shadow_map_atlas(
         light_slab: &SlabAllocator<WgpuRuntime>,
@@ -265,18 +263,6 @@ impl Lighting {
             Some("shadow-map-atlas"),
             Some(usage),
         )
-    }
-
-    fn create_bindgroup_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
-        let LightingBindGroupLayoutEntries {
-            light_slab,
-            shadow_map_image,
-            shadow_map_sampler,
-        } = LightingBindGroupLayoutEntries::new(0);
-        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Self::LABEL,
-            entries: &[light_slab, shadow_map_image, shadow_map_sampler],
-        })
     }
 
     /// Create a new [`Lighting`] manager.
@@ -435,12 +421,20 @@ impl Lighting {
                     .new_array(guard.iter().map(|bundle| bundle.light.id()));
             }
         }
-        self.lighting_descriptor.set(LightingDescriptor {
-            analytical_lights_array: self.analytical_lights_array.lock().unwrap().array(),
-            shadow_map_atlas_descriptor_id: self.shadow_map_atlas.descriptor_id(),
-            update_shadow_map_id: Id::NONE,
-            update_shadow_map_texture_index: 0,
-        });
+        self.lighting_descriptor.modify(
+            |LightingDescriptor {
+                 analytical_lights_array,
+                 shadow_map_atlas_descriptor_id,
+                 update_shadow_map_id,
+                 update_shadow_map_texture_index,
+                 light_tiling_descriptor: _,
+             }| {
+                *analytical_lights_array = self.analytical_lights_array.lock().unwrap().array();
+                *shadow_map_atlas_descriptor_id = self.shadow_map_atlas.descriptor_id();
+                *update_shadow_map_id = Id::NONE;
+                *update_shadow_map_texture_index = 0;
+            },
+        );
         self.light_slab.commit()
     }
 }
