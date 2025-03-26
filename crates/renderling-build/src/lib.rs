@@ -1,4 +1,8 @@
 #![allow(unexpected_cfgs)]
+use naga::{
+    back::wgsl::WriterFlags,
+    valid::{ValidationFlags, Validator},
+};
 use quote::quote;
 
 #[derive(Debug, serde::Deserialize)]
@@ -91,19 +95,35 @@ fn wgsl(spv_filepath: impl AsRef<std::path::Path>, destination: impl AsRef<std::
     });
     let opts = naga::front::spv::Options::default();
     let module = naga::front::spv::parse_u8_slice(&bytes, &opts).unwrap();
-    let mut validator =
-        naga::valid::Validator::new(Default::default(), naga::valid::Capabilities::empty());
-    let info = validator.validate(&module).unwrap_or_else(|e| {
-        panic!(
-            "Could not validate '{}': {e}",
-            spv_filepath.as_ref().display(),
-        )
-    });
-    let wgsl =
-        naga::back::wgsl::write_string(&module, &info, naga::back::wgsl::WriterFlags::empty())
-            .unwrap();
+    let mut wgsl = String::new();
+    let mut panic_msg: Option<String> = None;
+    for (vflags, name) in [
+        (ValidationFlags::empty(), "empty"),
+        (ValidationFlags::all(), "all"),
+    ] {
+        let mut validator = Validator::new(vflags, Default::default());
+        match validator.validate(&module) {
+            Err(e) => {
+                panic_msg = Some(format!(
+                    "Could not validate '{}' with WGSL validation flags {name}: {}",
+                    spv_filepath.as_ref().display(),
+                    e.emit_to_string(&wgsl)
+                ));
+            }
+            Ok(i) => {
+                wgsl = naga::back::wgsl::write_string(&module, &i, WriterFlags::empty()).unwrap();
+            }
+        };
+    }
+
     let destination = destination.as_ref().with_extension("wgsl");
     std::fs::write(destination, wgsl).unwrap();
+    if let Some(msg) = panic_msg {
+        panic!(
+            "{msg}\nWGSL was written to {}",
+            spv_filepath.as_ref().display()
+        );
+    }
 }
 
 pub struct RenderlingPaths {
