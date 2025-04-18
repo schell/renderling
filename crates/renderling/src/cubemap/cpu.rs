@@ -580,13 +580,8 @@ mod test {
 
         // add in some deterministic pseudo-randomn points
         {
-            let order = acorn_prng::Order::new(666);
-            let seed = acorn_prng::Seed::new(1_000_000);
-            let mut prng = acorn_prng::Acorn::new(order, seed);
-            let mut rf32 = move || {
-                let u = prng.generate_u32_between_range(0..=u32::MAX);
-                f32::from_bits(u)
-            };
+            let mut prng = crate::math::GpuRng::new(666);
+            let mut rf32 = move || prng.gen_f32(0.0, 1.0);
             let mut rxvec3 = { || Vec3::new(f32::MAX, rf32(), rf32()).normalize_or(Vec3::X) };
             // let mut rvec3 = || Vec3::new(rf32(), rf32(), rf32());
             uvs.extend((0..20).map(|_| rxvec3()));

@@ -315,7 +315,7 @@ pub struct GltfPrimitive {
 
 impl GltfPrimitive {
     pub fn from_gltf(
-        stage: &mut Stage,
+        stage: &Stage,
         primitive: gltf::Primitive,
         buffer_data: &[gltf::buffer::Data],
         materials: &HybridArray<Material>,
@@ -581,7 +581,7 @@ pub struct GltfMesh {
 
 impl GltfMesh {
     fn from_gltf(
-        stage: &mut Stage,
+        stage: &Stage,
         buffer_data: &[gltf::buffer::Data],
         materials: &HybridArray<Material>,
         mesh: gltf::Mesh,
@@ -616,7 +616,7 @@ impl AsRef<Hybrid<Camera>> for GltfCamera {
 }
 
 impl GltfCamera {
-    fn new(stage: &mut Stage, gltf_camera: gltf::Camera<'_>, transform: &NestedTransform) -> Self {
+    fn new(stage: &Stage, gltf_camera: gltf::Camera<'_>, transform: &NestedTransform) -> Self {
         log::debug!("camera: {}", gltf_camera.name().unwrap_or("unknown"));
         log::debug!("  transform: {:#?}", transform.get_global_transform());
         let projection = match gltf_camera.projection() {
@@ -711,7 +711,7 @@ pub struct GltfSkin {
 
 impl GltfSkin {
     pub fn from_gltf(
-        stage: &mut Stage,
+        stage: &Stage,
         buffer_data: &[gltf::buffer::Data],
         nodes: &[GltfNode],
         skin: gltf::Skin,
@@ -787,7 +787,7 @@ pub struct GltfDocument {
 
 impl GltfDocument {
     pub fn from_gltf(
-        stage: &mut Stage,
+        stage: &Stage,
         document: &gltf::Document,
         buffer_data: Vec<gltf::buffer::Data>,
         images: Vec<gltf::image::Data>,
@@ -901,7 +901,7 @@ impl GltfDocument {
 
         fn transform_for_node(
             nesting_level: usize,
-            stage: &mut Stage,
+            stage: &Stage,
             cache: &mut HashMap<usize, NestedTransform>,
             node: &gltf::Node,
         ) -> NestedTransform {
@@ -1176,7 +1176,7 @@ impl GltfDocument {
 
 impl Stage {
     pub fn load_gltf_document_from_path(
-        &mut self,
+        &self,
         path: impl AsRef<std::path::Path>,
     ) -> Result<GltfDocument, StageGltfError> {
         let (document, buffers, images) = gltf::import(path)?;
@@ -1184,7 +1184,7 @@ impl Stage {
     }
 
     pub fn load_gltf_document_from_bytes(
-        &mut self,
+        &self,
         bytes: impl AsRef<[u8]>,
     ) -> Result<GltfDocument, StageGltfError> {
         let (document, buffers, images) = gltf::import_slice(bytes)?;
@@ -1223,7 +1223,7 @@ mod test {
         let projection = crate::camera::perspective(100.0, 50.0);
         let position = Vec3::new(1.0, 0.5, 1.5);
         let view = crate::camera::look_at(position, Vec3::new(1.0, 0.5, 0.0), Vec3::Y);
-        let mut stage = ctx
+        let stage = ctx
             .new_stage()
             .with_lighting(false)
             .with_bloom(false)
@@ -1243,7 +1243,7 @@ mod test {
     // Ensures we can read a minimal gltf file with a simple triangle mesh.
     fn minimal_mesh() {
         let ctx = Context::headless(20, 20);
-        let mut stage = ctx
+        let stage = ctx
             .new_stage()
             .with_lighting(false)
             .with_bloom(false)
@@ -1270,7 +1270,7 @@ mod test {
     // This ensures we are decoding images correctly.
     fn gltf_images() {
         let ctx = Context::headless(100, 100);
-        let mut stage = ctx
+        let stage = ctx
             .new_stage()
             .with_lighting(false)
             .with_background_color(Vec4::splat(1.0));
@@ -1319,7 +1319,7 @@ mod test {
     fn simple_texture() {
         let size = 100;
         let ctx = Context::headless(size, size);
-        let mut stage = ctx
+        let stage = ctx
             .new_stage()
             .with_background_color(Vec3::splat(0.0).extend(1.0))
             // There are no lights in the scene and the material isn't marked as "unlit", so
@@ -1347,7 +1347,7 @@ mod test {
     fn normal_mapping_brick_sphere() {
         let size = 600;
         let ctx = Context::headless(size, size);
-        let mut stage = ctx
+        let stage = ctx
             .new_stage()
             .with_lighting(true)
             .with_background_color(Vec4::ONE);
@@ -1379,7 +1379,7 @@ mod test {
     #[test]
     fn rigged_fox() {
         let ctx = Context::headless(256, 256);
-        let mut stage = ctx
+        let stage = ctx
             .new_stage()
             .with_lighting(false)
             .with_vertex_skinning(false)
@@ -1463,7 +1463,7 @@ mod test {
         // taking into account that the gltf files may have been
         // saved with Y up, or with Z up
         let ctx = Context::headless(100, 100);
-        let mut stage = ctx.new_stage();
+        let stage = ctx.new_stage();
         let doc = stage
             .load_gltf_document_from_path(
                 crate::test::workspace_dir()

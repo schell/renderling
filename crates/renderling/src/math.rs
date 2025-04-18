@@ -474,7 +474,13 @@ pub fn smoothstep(edge_in: f32, edge_out: f32, mut x: f32) -> f32 {
 pub fn triangle_face_normal(p1: Vec3, p2: Vec3, p3: Vec3) -> Vec3 {
     let a = p1 - p2;
     let b = p1 - p3;
-    let n: Vec3 = a.cross(b).normalize();
+    let n: Vec3 = a.cross(b).alt_norm_or_zero();
+    #[cfg(cpu)]
+    debug_assert_ne!(
+        Vec3::ZERO,
+        n,
+        "normal is zero - p1: {p1}, p2: {p2}, p3: {p3}"
+    );
     n
 }
 
@@ -620,6 +626,43 @@ pub const fn convex_mesh([p0, p1, p2, p3, p4, p5, p6, p7]: [Vec3; 8]) -> [Vec3; 
         p4, p6, p5, p4, p7, p6, // bottom
         p2, p7, p1, p2, p6, p7, // back
     ]
+}
+
+/// An PCG PRNG that is optimized for GPUs, in that it is fast to evaluate and accepts
+/// sequential ids as it's initial state without sacrificing on RNG quality.
+///
+/// https://www.reedbeta.com/blog/hash-functions-for-gpu-rendering/
+/// https://jcgt.org/published/0009/03/02/
+///
+/// Thanks to Firestar99 at
+/// <https://github.com/Firestar99/nanite-at-home/blob/c55915d16ad3b5b4b706d8017633f0870dd2603e/space-engine-shader/src/utils/gpurng.rs#L19>
+pub struct GpuRng(pub u32);
+
+impl GpuRng {
+    pub fn new(state: u32) -> GpuRng {
+        Self(state)
+    }
+
+    pub fn gen(&mut self) -> u32 {
+        let state = self.0;
+        #[cfg(gpu)]
+        {
+            self.0 = self.0 * 747796405 + 2891336453;
+        }
+        #[cfg(cpu)]
+        {
+            self.0 = self.0.wrapping_sub(747796405).wrapping_add(2891336453);
+        }
+        let word = ((state >> ((state >> 28) + 4)) ^ state) * 277803737;
+        (word >> 22) ^ word
+    }
+
+    pub fn gen_f32(&mut self, min: f32, max: f32) -> f32 {
+        let range = max - min;
+        let numerator = self.gen();
+        let percentage = numerator as f32 / u32::MAX as f32;
+        min + range * percentage
+    }
 }
 
 #[cfg(test)]

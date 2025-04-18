@@ -826,6 +826,46 @@ pub fn light_tiling_compute_min_and_max_depth(
     };
 }
 
+// // Ensure that all threads in the workgroup are _here_ and have accumulated
+// // their min/max depths.
+// unsafe { spirv_std::arch::workgroup_memory_barrier_with_group_sync() };
+
+// // At this point we know the depth has been computed, so now we can construct the tile's frustum
+// // in clip space.
+// let depth_min_u32 = tiling_slab[min_depth_index];
+// let depth_max_u32 = tiling_slab[max_depth_index];
+// let depth_min = depth_min_u32 as f32 / u32::MAX as f32;
+// let depth_max = depth_max_u32 as f32 / u32::MAX as f32;
+// let min_xy = tile_xy * size;
+// let max_xy = min_xy + UVec2::splat(16);
+// // The tile's aabb in clip space.
+// //
+// // This is roughly the frustum.
+// let tile_aabb = Aabb {
+//     min: Vec3::new(min_xy.x as f32, min_xy.y as f32, depth_min),
+//     max: Vec3::new(max_xy.x as f32, max_xy.y as f32, depth_max),
+// };
+// let camera = geometry_slab.read_unchecked(geometry_desc.camera_id);
+// // The fragment's xy position within its tile
+// let frag_tile_x = global_id.x % 16;
+// let frag_tile_y = global_id.y % 16;
+// // The fragment's index in the tile, which will be 0..256
+// let frag_light_index = frag_tile_y * 16 + frag_tile_x;
+// // List of all analytical lights in the scene
+// let analytical_lights_array = lighting_slab.read_unchecked(
+//     Id::<LightingDescriptor>::new(0) + LightingDescriptor::OFFSET_OF_ANALYTICAL_LIGHTS_ARRAY,
+// );
+// for i in 0..analytical_lights_array.len() / 256 + 1 {
+//     let light_index = i * 256 + frag_light_index;
+//     if light_index > analytical_lights_array.len() {
+//         break;
+//     }
+//     let light_id = lighting_slab.read_unchecked(analytical_lights_array.at(light_index));
+//     let light = lighting_slab.read_unchecked(light_id);
+//     let transform = geometry_slab.read(light.transform_id);
+//     match light.light_type {}
+// }
+
 /// Light culling compute shader.
 #[spirv(compute(threads(16, 16, 1)))]
 pub fn light_tiling_compute_tiles(

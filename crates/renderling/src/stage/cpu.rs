@@ -923,13 +923,16 @@ impl Stage {
         let runtime = ctx.runtime();
         let device = &runtime.device;
         let resolution @ UVec2 { x: w, y: h } = ctx.get_size();
-        let atlas_size = *ctx.atlas_size.read().unwrap();
+        let stage_config = *ctx.stage_config.read().unwrap();
         let geometry = Geometry::new(
             ctx,
             resolution,
-            UVec2::new(atlas_size.width, atlas_size.height),
+            UVec2::new(
+                stage_config.atlas_size.width,
+                stage_config.atlas_size.height,
+            ),
         );
-        let materials = Materials::new(runtime, atlas_size);
+        let materials = Materials::new(runtime, stage_config.atlas_size);
         let multisample_count = 1;
         let hdr_texture = Arc::new(RwLock::new(Texture::create_hdr_texture(
             device,
@@ -953,7 +956,7 @@ impl Stage {
             multisample_count,
         );
         let geometry_buffer = geometry.slab_allocator().commit();
-        let lighting = Lighting::new(&geometry);
+        let lighting = Lighting::new(stage_config.shadow_map_atlas_size, &geometry);
 
         Self {
             materials,

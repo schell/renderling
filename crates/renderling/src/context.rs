@@ -429,6 +429,13 @@ impl Frame {
     }
 }
 
+/// Configurable default values to use when creating new [`Stage`]s.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct GlobalStageConfig {
+    pub(crate) atlas_size: wgpu::Extent3d,
+    pub(crate) shadow_map_atlas_size: wgpu::Extent3d,
+}
+
 /// Contains the adapter, device, queue, [`RenderTarget`] and initial atlas sizing.
 ///
 /// A `Context` is created to initialize rendering to a window, canvas or
@@ -443,7 +450,7 @@ pub struct Context {
     runtime: WgpuRuntime,
     adapter: Arc<wgpu::Adapter>,
     render_target: RenderTarget,
-    pub(crate) atlas_size: Arc<RwLock<wgpu::Extent3d>>,
+    pub(crate) stage_config: Arc<RwLock<GlobalStageConfig>>,
 }
 
 impl AsRef<WgpuRuntime> for Context {
@@ -464,13 +471,20 @@ impl Context {
         let w = limits
             .max_texture_dimension_2d
             .min(crate::atlas::ATLAS_SUGGESTED_SIZE);
-        let atlas_size = Arc::new(RwLock::new(wgpu::Extent3d {
-            width: w,
-            height: w,
-            depth_or_array_layers: adapter
-                .limits()
-                .max_texture_array_layers
-                .min(crate::atlas::ATLAS_SUGGESTED_LAYERS),
+        let stage_config = Arc::new(RwLock::new(GlobalStageConfig {
+            atlas_size: wgpu::Extent3d {
+                width: w,
+                height: w,
+                depth_or_array_layers: adapter
+                    .limits()
+                    .max_texture_array_layers
+                    .min(crate::atlas::ATLAS_SUGGESTED_LAYERS),
+            },
+            shadow_map_atlas_size: wgpu::Extent3d {
+                width: w,
+                height: w,
+                depth_or_array_layers: 4,
+            },
         }));
         Self {
             adapter,
@@ -479,7 +493,7 @@ impl Context {
                 queue: queue.into(),
             },
             render_target: target,
-            atlas_size,
+            stage_config,
         }
     }
 
@@ -651,14 +665,11 @@ impl Context {
         })
     }
 
-    /// Set the default texture size for any atlas.
+    /// Set the default texture size for the material atlas.
     ///
     /// * Width is `size.x` and must be a power of two.
     /// * Height is `size.y`, must match `size.x` and must be a power of two.
     /// * Layers is `size.z` and must be two or greater.
-    ///
-    /// ## Panics
-    /// Will panic if the above conditions are not met.
     pub fn set_default_atlas_texture_size(&self, size: impl Into<UVec3>) -> &Self {
         let size = size.into();
         let size = wgpu::Extent3d {
@@ -667,11 +678,11 @@ impl Context {
             depth_or_array_layers: size.z,
         };
         crate::atlas::check_size(size);
-        *self.atlas_size.write().unwrap() = size;
+        self.stage_config.write().unwrap().atlas_size = size;
         self
     }
 
-    /// Set the default texture size for any atlas.
+    /// Set the default texture size for the material atlas.
     ///
     /// * Width is `size.x` and must be a power of two.
     /// * Height is `size.y`, must match `size.x` and must be a power of two.
@@ -681,6 +692,36 @@ impl Context {
     /// Will panic if the above conditions are not met.
     pub fn with_default_atlas_texture_size(self, size: impl Into<UVec3>) -> Self {
         self.set_default_atlas_texture_size(size);
+        self
+    }
+
+    /// Set the default texture size for the shadow mapping atlas.
+    ///
+    /// * Width is `size.x` and must be a power of two.
+    /// * Height is `size.y`, must match `size.x` and must be a power of two.
+    /// * Layers is `size.z` and must be two or greater.
+    pub fn set_shadow_mapping_atlas_texture_size(&self, size: impl Into<UVec3>) -> &Self {
+        let size = size.into();
+        let size = wgpu::Extent3d {
+            width: size.x,
+            height: size.y,
+            depth_or_array_layers: size.z,
+        };
+        crate::atlas::check_size(size);
+        self.stage_config.write().unwrap().shadow_map_atlas_size = size;
+        self
+    }
+
+    /// Set the default texture size for the shadow mapping atlas.
+    ///
+    /// * Width is `size.x` and must be a power of two.
+    /// * Height is `size.y`, must match `size.x` and must be a power of two.
+    /// * Layers is `size.z` and must be greater than zero.
+    ///
+    /// ## Panics
+    /// Will panic if the above conditions are not met.
+    pub fn with_shadow_mapping_atlas_texture_size(self, size: impl Into<UVec3>) -> Self {
+        self.set_shadow_mapping_atlas_texture_size(size);
         self
     }
 

@@ -145,6 +145,11 @@
     "wgsl_entry_point": "skyboxskybox_vertex"
   },
   {
+    "source_path": "shaders/stage-go_thing.spv",
+    "entry_point": "stage::go_thing",
+    "wgsl_entry_point": "stagego_thing"
+  },
+  {
     "source_path": "shaders/stage-renderlet_fragment.spv",
     "entry_point": "stage::renderlet_fragment",
     "wgsl_entry_point": "stagerenderlet_fragment"

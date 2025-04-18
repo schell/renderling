@@ -266,7 +266,7 @@ impl Lighting {
     }
 
     /// Create a new [`Lighting`] manager.
-    pub fn new(geometry: &Geometry) -> Self {
+    pub fn new(atlas_size: wgpu::Extent3d, geometry: &Geometry) -> Self {
         let runtime = geometry.runtime();
         let light_slab =
             SlabAllocator::new_with_label(runtime, wgpu::BufferUsages::empty(), Some("light-slab"));
@@ -278,15 +278,7 @@ impl Lighting {
             ShadowMap::create_update_pipeline(&runtime.device, &shadow_map_update_bindgroup_layout)
                 .into();
         Self {
-            shadow_map_atlas: Self::create_shadow_map_atlas(
-                &light_slab,
-                // TODO: make the shadow map atlas size configurable
-                wgpu::Extent3d {
-                    width: 1024,
-                    height: 1024,
-                    depth_or_array_layers: 4,
-                },
-            ),
+            shadow_map_atlas: Self::create_shadow_map_atlas(&light_slab, atlas_size),
             analytical_lights: Default::default(),
             analytical_lights_array: Arc::new(Mutex::new(light_slab.new_array([]))),
             geometry_slab: geometry.slab_allocator().clone(),
@@ -442,9 +434,12 @@ impl Lighting {
 #[cfg(test)]
 mod test {
 
-    use glam::Vec3;
+    use glam::{Vec3, Vec4};
 
-    use crate::{light::SpotLightCalculation, prelude::Transform};
+    use crate::{
+        bvol::BoundingBox, light::SpotLightCalculation, pbr::Material, prelude::Transform,
+        stage::Vertex,
+    };
 
     use super::*;
 
@@ -546,7 +541,7 @@ mod test {
         let w = 800.0;
         let h = 800.0;
         let ctx = crate::Context::headless(w as u32, h as u32);
-        let mut stage = ctx
+        let stage = ctx
             .new_stage()
             .with_lighting(true)
             .with_msaa_sample_count(4);
@@ -579,6 +574,241 @@ mod test {
         stage.render(&frame.view());
         let img = frame.read_image().unwrap();
         img_diff::assert_img_eq("lights/spot_lights/frame.png", img);
+        frame.present();
+    }
+
+    fn bbox_mesh(center: Vec3) -> Vec<(Vec3, Vec3)> {
+        let p0 = Vec3::new(min.x, max.y, max.z);
+        let p1 = Vec3::new(min.x, max.y, min.z);
+        let p2 = Vec3::new(max.x, max.y, min.z);
+        let p3 = Vec3::new(max.x, max.y, max.z);
+        let p4 = Vec3::new(min.x, min.y, max.z);
+        let p7 = Vec3::new(min.x, min.y, min.z);
+        let p6 = Vec3::new(max.x, min.y, min.z);
+        let p5 = Vec3::new(max.x, min.y, max.z);
+
+        let positions = crate::math::convex_mesh([p0, p1, p2, p3, p4, p5, p6, p7]);
+        positions
+            .chunks_exact(3)
+            .flat_map(|chunk| match chunk {
+                [a, b, c] => {
+                    let n = crate::math::triangle_face_normal(*a, *b, *c);
+                    [(*a, n), (*b, n), (*c, n)]
+                }
+                _ => unreachable!(),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn light_tiling_light_bounds() {
+        let magnification = 8;
+        let w = 16.0 * 2.0f32.powi(magnification);
+        let h = 9.0 * 2.0f32.powi(magnification);
+        let ctx = crate::Context::headless(w as u32, h as u32);
+        let stage = ctx.new_stage().with_msaa_sample_count(4);
+        let doc = stage
+            .load_gltf_document_from_path(
+                crate::test::workspace_dir()
+                    .join("gltf")
+                    .join("light_tiling_test.glb"),
+            )
+            .unwrap();
+        let camera = doc.cameras.first().unwrap();
+        stage.use_camera(camera);
+
+        doc.lights[0]
+            .light_details
+            .as_directional()
+            .unwrap()
+            .modify(|dir| {
+                dir.intensity *= 10.0;
+            });
+
+        // Here we only want to render the bounding boxes of the renderlets,
+        // so mark the renderlets themeselves invisible
+        doc.renderlets_iter().for_each(|hy_rend| {
+            hy_rend.modify(|r| {
+                r.visible = false;
+            });
+        });
+
+        let colors = [0x6DE1D2FF, 0xFFD63AFF, 0x6DE1D2FF, 0xF75A5AFF].map(|albedo_factor| {
+            stage.new_material(Material {
+                albedo_factor: {
+                    let mut color = crate::math::hex_to_vec4(albedo_factor);
+                    crate::color::linear_xfer_vec4(&mut color);
+                    color
+                },
+                ..Default::default()
+            })
+        });
+        let mut resources = vec![];
+        for (i, node) in doc.nodes.iter().enumerate() {
+            if node.mesh.is_none() {
+                continue;
+            }
+            let transform = Mat4::from(node.transform.get_global_transform());
+            if let Some(mesh_index) = node.mesh {
+                let mesh = &doc.meshes[mesh_index];
+                for prim in mesh.primitives.iter() {
+                    let (min, max) = prim.bounding_box;
+                    log::info!("min: {min}, max: {max}");
+                    let min = transform.transform_point3(min);
+                    let max = transform.transform_point3(max);
+                    log::info!("min: {min}, max: {max}");
+                    resources.push(
+                        stage
+                            .builder()
+                            .with_vertices(
+                                bbox_mesh(min, max).into_iter().map(|(p, n)| {
+                                    Vertex::default().with_position(p).with_normal(n)
+                                }),
+                            )
+                            .with_material_id(colors[i % colors.len()].id())
+                            .build(),
+                    );
+                }
+            }
+        }
+
+        let frame = ctx.get_next_frame().unwrap();
+        stage.render(&frame.view());
+        let img = frame.read_image().unwrap();
+        img_diff::save("lights/tiling/bounds.png", img);
+        frame.present();
+    }
+
+    #[test]
+    /// Test the light tiling feature.
+    fn light_tiling_sanity() {
+        let w = 16.0 * 2.0f32.powi(8);
+        let h = 9.0 * 2.0f32.powi(8);
+        let ctx = crate::Context::headless(w as u32, h as u32);
+        let stage = ctx.new_stage().with_msaa_sample_count(4);
+        let doc = stage
+            .load_gltf_document_from_path(
+                crate::test::workspace_dir()
+                    .join("gltf")
+                    .join("light_tiling_test.glb"),
+            )
+            .unwrap();
+        let camera = doc.cameras.first().unwrap();
+        stage.use_camera(camera);
+
+        let light_mesh_node = doc
+            .nodes
+            .iter()
+            .find(|node| node.name.as_deref() == Some("light-mesh"))
+            .unwrap();
+        let light_mesh_renderlets = doc.renderlets.get(&light_mesh_node.index).unwrap();
+        assert_eq!(1, light_mesh_renderlets.len());
+        let light_mesh_renderlet = light_mesh_renderlets[0].clone();
+        let light_renderlet = light_mesh_renderlet.modify(|rlet| {
+            rlet.visible = false;
+            *rlet
+        });
+
+        for r in doc.renderlets_iter() {
+            r.modify(|r| r.visible = false);
+        }
+
+        light_mesh_renderlet.modify(|rlet| {
+            rlet.visible = true;
+        });
+
+        let mut shadows = vec![];
+        for light in doc.lights.iter() {
+            let shadow = stage
+                .new_shadow_map(light, UVec2::new(2048, 2048), 0.1, 1000.0)
+                .unwrap();
+            shadow.shadowmap_descriptor.modify(|desc| {
+                desc.bias_max = 0.0;
+                desc.bias_min = 0.0;
+            });
+            shadow.update(&stage, doc.renderlets_iter()).unwrap();
+            shadows.push(shadow);
+        }
+
+        let frame = ctx.get_next_frame().unwrap();
+        let start = std::time::Instant::now();
+        stage.render(&frame.view());
+        let elapsed = start.elapsed();
+        log::info!("rendering w/o lights: {}s", elapsed.as_secs_f32());
+        let img = frame.read_image().unwrap();
+        img_diff::save("lights/tiling/before-lights.png", img);
+        frame.present();
+
+        // Bounds
+        const NEG_X_BOUND: f32 = -81.0;
+        const X_BOUND: f32 = 70.0;
+        const NEG_Y_BOUND: f32 = -70.0;
+        const Y_BOUND: f32 = 70.0;
+        const NEG_Z_BOUND: f32 = -42.0;
+        const Z_BOUND: f32 = 32.0;
+        // Add the lights!
+        let mut prng =
+            acorn_prng::Acorn::new(acorn_prng::Order::new(123), acorn_prng::Seed::new(666));
+        fn gen_f32(prng: &mut acorn_prng::Acorn, min: f32, max: f32) -> f32 {
+            let range = max - min;
+            let val_u32 = prng.generate_u32_between_range(0..=u32::MAX);
+            let val_f32 = val_u32 as f32 / u32::MAX as f32;
+            let val_range = range * val_f32;
+            min + val_range
+        }
+        const NUM_LIGHTS: u32 = 100;
+        let mut lights = vec![];
+        for _ in 0..NUM_LIGHTS {
+            let x = gen_f32(&mut prng, NEG_X_BOUND, X_BOUND);
+            let y = gen_f32(&mut prng, NEG_Y_BOUND, Y_BOUND);
+            let z = gen_f32(&mut prng, NEG_Z_BOUND, Z_BOUND);
+            let position = Vec3::new(x, y, z);
+            log::info!("position: {position}");
+            log::info!("array: {:?}", light_renderlet.vertices_array);
+            // let nested_transform = stage.new_nested_transform();
+            // nested_transform.modify(|t| {
+            //     t.translation = position;
+            // });
+            let color = Vec4::new(
+                gen_f32(&mut prng, 0.3, 1.0),
+                gen_f32(&mut prng, 0.3, 1.0),
+                gen_f32(&mut prng, 0.3, 1.0),
+                gen_f32(&mut prng, 0.3, 1.0),
+            );
+            let scale = gen_f32(&mut prng, 0.1, 1.0);
+            // let intensity = 50.0 * scale;
+            // let light_descriptor = PointLightDescriptor {
+            //     color,
+            //     intensity,
+            //     ..Default::default()
+            // };
+            // let light = stage.new_analytical_light(light_descriptor, Some(nested_transform));
+
+            // Also make a renderlet for the light, so we can see where it is.
+            let rez = stage
+                .builder()
+                .with_vertices_array(light_renderlet.vertices_array)
+                .with_transform(Transform {
+                    translation: position,
+                    scale: Vec3::splat(scale),
+                    ..Default::default()
+                })
+                .with_material(Material {
+                    albedo_factor: color,
+                    has_lighting: false,
+                    ..Default::default()
+                })
+                .build();
+            lights.push(rez);
+        }
+
+        let frame = ctx.get_next_frame().unwrap();
+        let start = std::time::Instant::now();
+        stage.render(&frame.view());
+        let elapsed = start.elapsed();
+        log::info!("rendering with lights: {}s", elapsed.as_secs_f32());
+        let img = frame.read_image().unwrap();
+        img_diff::save("lights/tiling/after-lights.png", img);
         frame.present();
     }
 }

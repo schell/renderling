@@ -316,6 +316,43 @@ impl Frustum {
     }
 }
 
+/// Bounding box consisting of a center and three half extents.
+///
+/// Essentially a point at the center and a vector pointing from
+/// the center to the corner.
+///
+/// This is _not_ an axis aligned bounding box.
+#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
+#[derive(Clone, Copy, Default, PartialEq, SlabItem)]
+pub struct BoundingBox {
+    pub center: Vec3,
+    pub half_extent: Vec3,
+}
+
+impl BoundingBox {
+    pub fn from_min_max(min: Vec3, max: Vec3) -> Self {
+        let center = (min + max) / 2.0;
+        let half_extent = max - center;
+        Self {
+            center,
+            half_extent,
+        }
+    }
+
+    pub fn distance(&self, point: Vec3) -> f32 {
+        let p = point - self.center;
+        let component_edge_distance = p.abs() - self.half_extent;
+        let outside = component_edge_distance.max(Vec3::ZERO).length();
+        let inside = component_edge_distance
+            .x
+            .max(component_edge_distance.y)
+            .min(0.0);
+        inside + outside
+    }
+
+    pub fn get_mesh(&self) -> [(Vec3, Vec3); 36] {}
+}
+
 /// Bounding sphere consisting of a center and radius.
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[derive(Clone, Copy, Default, PartialEq, SlabItem)]
