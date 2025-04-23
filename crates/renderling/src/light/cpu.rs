@@ -554,11 +554,6 @@ mod test {
             )
             .unwrap();
         let camera = doc.cameras.first().unwrap();
-        // TODO: investigate using the camera's aspect for any frame size.
-        // A `TextureView` of the frame could be created that renders to the frame
-        // within the camera's expected aspect ratio.
-        //
-        // We'd probably need to constrain rendering to one camera, though.
         camera
             .as_ref()
             .modify(|cam| cam.set_projection(crate::camera::perspective(w, h)));
