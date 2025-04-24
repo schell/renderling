@@ -351,7 +351,43 @@ impl BoundingBox {
     }
 
     pub fn get_mesh(&self) -> [(Vec3, Vec3); 36] {
-        todo!()
+        use std::convert::TryInto;
+
+        // Derive the corner positions from centre and half-extent.
+        let min = self.center - self.half_extent;
+        let max = self.center + self.half_extent;
+
+        // Corner points (same winding/order as Aabb::get_mesh)
+        let p0 = Vec3::new(min.x, max.y, max.z);
+        let p1 = Vec3::new(min.x, max.y, min.z);
+        let p2 = Vec3::new(max.x, max.y, min.z);
+        let p3 = Vec3::new(max.x, max.y, max.z);
+        let p4 = Vec3::new(min.x, min.y, max.z);
+        let p7 = Vec3::new(min.x, min.y, min.z);
+        let p6 = Vec3::new(max.x, min.y, min.z);
+        let p5 = Vec3::new(max.x, min.y, max.z);
+
+        // Build triangles via helper used elsewhere in the crate.
+        let positions = crate::math::convex_mesh([p0, p1, p2, p3, p4, p5, p6, p7]);
+
+        // Attach per-triangle face normals.
+        let vertices: Vec<(Vec3, Vec3)> = positions
+            .chunks_exact(3)
+            .flat_map(|chunk| match chunk {
+                [a, b, c] => {
+                    let n = crate::math::triangle_face_normal(*a, *b, *c);
+                    [(*a, n), (*b, n), (*c, n)]
+                }
+                _ => unreachable!(),
+            })
+            .collect();
+
+        // Convert into fixed-size array (12 triangles × 3 vertices).
+        vertices
+            .try_into()
+            .unwrap_or_else(|v: Vec<(Vec3, Vec3)>| {
+                panic!("expected 36 vertices, got {}", v.len())
+            })
     }
 }
 
