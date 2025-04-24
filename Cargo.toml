@@ -22,8 +22,8 @@ async-channel = "1.8"
 bytemuck = { version = "1.19.0", features = ["derive"] }
 cfg_aliases = "0.2"
 clap = { version = "4.5.23", features = ["derive"] }
-craballoc = { version = "0.1.11" }
-crabslab = { version = "0.6.3", default-features = false }
+craballoc = { version = "0.1.11", path = "../crabslab/crates/craballoc" }
+crabslab = { version = "0.6.3", default-features = false, path = "../crabslab/crates/crabslab" }
 ctor = "0.2.2"
 dagga = "0.2.1"
 env_logger = "0.10.0"

@@ -350,7 +350,9 @@ impl BoundingBox {
         inside + outside
     }
 
-    pub fn get_mesh(&self) -> [(Vec3, Vec3); 36] {}
+    pub fn get_mesh(&self) -> [(Vec3, Vec3); 36] {
+        todo!()
+    }
 }
 
 /// Bounding sphere consisting of a center and radius.

@@ -81,7 +81,7 @@ impl Skin {
 /// For more info on morph targets, see
 /// <https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html#morph-targets>
 #[derive(Clone, Copy, Default, PartialEq, SlabItem)]
-#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
+#[cfg_attr(cpu, derive(Debug))]
 pub struct MorphTarget {
     pub position: Vec3,
     pub normal: Vec3,
