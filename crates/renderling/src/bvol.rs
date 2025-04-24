@@ -397,7 +397,12 @@ impl BoundingBox {
     }
 
     pub fn contains_point(&self, point: Vec3) -> bool {
-        todo!()
+        // Transform the point into the box’s local space (centred at the origin)
+        // and check that it lies within the half-extents on every axis.
+        let delta = (point - self.center).abs();
+        delta.x <= self.half_extent.x
+            && delta.y <= self.half_extent.y
+            && delta.z <= self.half_extent.z
     }
 }
 
