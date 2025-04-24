@@ -350,25 +350,33 @@ impl BoundingBox {
         inside + outside
     }
 
+    /// Return a triangle mesh connecting this `Aabb`'s corners.
+    ///
+    /// ```ignore
+    ///    y           1_____2     _____
+    ///    |           /    /|    /|    |  (same box, left and front sides removed)
+    ///    |___x     0/___3/ |   /7|____|6
+    ///   /           |    | /   | /    /
+    /// z/            |____|/   4|/____/5
+    ///
+    /// 7 is min
+    /// 3 is max
+    /// ```
     pub fn get_mesh(&self) -> [(Vec3, Vec3); 36] {
-        use std::convert::TryInto;
+        // Deriving the corner positions from centre and half-extent,
 
-        // Derive the corner positions from centre and half-extent.
-        let min = self.center - self.half_extent;
-        let max = self.center + self.half_extent;
+        let p0 = Vec3::new(-self.half_extent.x, self.half_extent.y, self.half_extent.z);
+        let p1 = Vec3::new(-self.half_extent.x, self.half_extent.y, -self.half_extent.z);
+        let p2 = Vec3::new(self.half_extent.x, self.half_extent.y, -self.half_extent.z);
+        let p3 = self.half_extent;
+        let p4 = Vec3::new(-self.half_extent.x, -self.half_extent.y, self.half_extent.z);
+        let p5 = Vec3::new(self.half_extent.x, -self.half_extent.y, self.half_extent.z);
+        let p6 = Vec3::new(self.half_extent.x, -self.half_extent.y, -self.half_extent.z);
+        // min
+        let p7 = -self.half_extent;
 
-        // Corner points (same winding/order as Aabb::get_mesh)
-        let p0 = Vec3::new(min.x, max.y, max.z);
-        let p1 = Vec3::new(min.x, max.y, min.z);
-        let p2 = Vec3::new(max.x, max.y, min.z);
-        let p3 = Vec3::new(max.x, max.y, max.z);
-        let p4 = Vec3::new(min.x, min.y, max.z);
-        let p7 = Vec3::new(min.x, min.y, min.z);
-        let p6 = Vec3::new(max.x, min.y, min.z);
-        let p5 = Vec3::new(max.x, min.y, max.z);
-
-        // Build triangles via helper used elsewhere in the crate.
-        let positions = crate::math::convex_mesh([p0, p1, p2, p3, p4, p5, p6, p7]);
+        let positions =
+            crate::math::convex_mesh([p0, p1, p2, p3, p4, p5, p6, p7].map(|p| p + self.center));
 
         // Attach per-triangle face normals.
         let vertices: Vec<(Vec3, Vec3)> = positions
@@ -385,9 +393,11 @@ impl BoundingBox {
         // Convert into fixed-size array (12 triangles × 3 vertices).
         vertices
             .try_into()
-            .unwrap_or_else(|v: Vec<(Vec3, Vec3)>| {
-                panic!("expected 36 vertices, got {}", v.len())
-            })
+            .unwrap_or_else(|v: Vec<(Vec3, Vec3)>| panic!("expected 36 vertices, got {}", v.len()))
+    }
+
+    pub fn contains_point(&self, point: Vec3) -> bool {
+        todo!()
     }
 }
 
@@ -543,9 +553,9 @@ impl BVol for Aabb {
 
 #[cfg(test)]
 mod test {
-    use glam::{Mat4, Quat};
+    use glam::{Mat4, Quat, UVec2};
 
-    use crate::{stage::Vertex, Context};
+    use crate::{light::DirectionalLightDescriptor, pbr::Material, stage::Vertex, Context};
 
     use super::*;
 
@@ -634,5 +644,99 @@ mod test {
         let img = frame.read_image().unwrap();
         img_diff::save("bvol/bounding_sphere_from_min_max.png", img);
         frame.present();
+    }
+
+    #[test]
+    fn bounding_box_from_min_max() {
+        let ctx = Context::headless(256, 256);
+        let stage = ctx
+            .new_stage()
+            .with_background_color(Vec4::ZERO)
+            .with_msaa_sample_count(4)
+            .with_lighting(true);
+        let _camera = stage.new_camera({
+            Camera::new(
+                // BUG: using orthographic here renderes nothing
+                // Mat4::orthographic_rh(-10.0, 10.0, -10.0, 10.0, 10.0, -10.0),
+                crate::camera::perspective(256.0, 256.0),
+                Mat4::look_at_rh(Vec3::new(-3.0, 3.0, 5.0) * 0.5, Vec3::ZERO, Vec3::Y),
+            )
+        });
+
+        let _sunlight_a = stage.new_analytical_light(
+            DirectionalLightDescriptor {
+                direction: Vec3::new(-0.8, -1.0, 0.5).normalize(),
+                color: Vec4::ONE,
+                intensity: 100.0,
+            },
+            None,
+        );
+        let _sunlight_b = stage.new_analytical_light(
+            DirectionalLightDescriptor {
+                direction: Vec3::new(1.0, 1.0, -0.1).normalize(),
+                color: Vec4::ONE,
+                intensity: 10.0,
+            },
+            None,
+        );
+
+        let white = stage.new_material(Material {
+            albedo_factor: Vec4::ONE,
+            ..Default::default()
+        });
+        let red = stage.new_material(Material {
+            albedo_factor: Vec4::new(1.0, 0.0, 0.0, 1.0),
+            ..Default::default()
+        });
+
+        let _w = stage
+            .builder()
+            .with_material_id(white.id())
+            .with_vertices(
+                crate::math::unit_cube()
+                    .into_iter()
+                    .map(|(p, n)| Vertex::default().with_position(p).with_normal(n)),
+            )
+            .build();
+
+        let mut corners = vec![];
+        for x in [-1.0, 1.0] {
+            for y in [-1.0, 1.0] {
+                for z in [-1.0, 1.0] {
+                    corners.push(Vec3::new(x, y, z));
+                }
+            }
+        }
+        let mut rs = vec![];
+        for corner in corners.iter() {
+            let bb = BoundingBox {
+                center: Vec3::new(0.5, 0.5, 0.5) * corner,
+                half_extent: Vec3::splat(0.25),
+            };
+
+            rs.push(
+                stage
+                    .builder()
+                    .with_material_id(red.id())
+                    .with_vertices(
+                        bb.get_mesh()
+                            .map(|(p, n)| Vertex::default().with_position(p).with_normal(n)),
+                    )
+                    .build(),
+            );
+        }
+        // let _rez = stage
+        //     .builder()
+        //     .with_vertices(bb.get_mesh().map(|(p, n)| {
+        //         Vertex::default()
+        //             .with_position(p)
+        //             .with_normal(n)
+        //             .with_color(((p.xyz() + 1.0) / 2.0).extend(1.0))
+        //     }))
+        //     .build();
+        let frame = ctx.get_next_frame().unwrap();
+        stage.render(&frame.view());
+        let img = frame.read_image().unwrap();
+        img_diff::save("bvol/bounding_box/get_mesh.png", img);
     }
 }

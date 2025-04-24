@@ -511,7 +511,7 @@ mod test {
         let m = 32.0;
         let (w, h) = (16.0f32 * m, 9.0 * m);
         let ctx = crate::Context::headless(w as u32, h as u32);
-        let mut stage = ctx.new_stage().with_msaa_sample_count(4);
+        let stage = ctx.new_stage().with_msaa_sample_count(4);
         let doc = stage
             .load_gltf_document_from_path(
                 crate::test::workspace_dir()
@@ -570,29 +570,6 @@ mod test {
         let img = frame.read_image().unwrap();
         img_diff::assert_img_eq("lights/spot_lights/frame.png", img);
         frame.present();
-    }
-
-    fn bbox_mesh(center: Vec3) -> Vec<(Vec3, Vec3)> {
-        let p0 = Vec3::new(min.x, max.y, max.z);
-        let p1 = Vec3::new(min.x, max.y, min.z);
-        let p2 = Vec3::new(max.x, max.y, min.z);
-        let p3 = Vec3::new(max.x, max.y, max.z);
-        let p4 = Vec3::new(min.x, min.y, max.z);
-        let p7 = Vec3::new(min.x, min.y, min.z);
-        let p6 = Vec3::new(max.x, min.y, min.z);
-        let p5 = Vec3::new(max.x, min.y, max.z);
-
-        let positions = crate::math::convex_mesh([p0, p1, p2, p3, p4, p5, p6, p7]);
-        positions
-            .chunks_exact(3)
-            .flat_map(|chunk| match chunk {
-                [a, b, c] => {
-                    let n = crate::math::triangle_face_normal(*a, *b, *c);
-                    [(*a, n), (*b, n), (*c, n)]
-                }
-                _ => unreachable!(),
-            })
-            .collect()
     }
 
     #[test]
@@ -656,9 +633,9 @@ mod test {
                         stage
                             .builder()
                             .with_vertices(
-                                bbox_mesh(min, max).into_iter().map(|(p, n)| {
-                                    Vertex::default().with_position(p).with_normal(n)
-                                }),
+                                [], // bbox_mesh(min, max).into_iter().map(|(p, n)| {
+                                    //     Vertex::default().with_position(p).with_normal(n)
+                                    // }),
                             )
                             .with_material_id(colors[i % colors.len()].id())
                             .build(),
