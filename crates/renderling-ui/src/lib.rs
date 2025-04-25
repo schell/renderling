@@ -28,7 +28,7 @@
 //! Happy hacking!
 use std::sync::{Arc, RwLock};
 
-use craballoc::prelude::Hybrid;
+use craballoc::prelude::{Hybrid, SourceId};
 use crabslab::Id;
 use glyph_brush::ab_glyph;
 use renderling::{
@@ -150,7 +150,7 @@ pub struct Ui {
     //
     // The `usize` key here is the update source notifier index, which is needed
     // to re-order after any transform performs an update.
-    transforms: Arc<RwLock<FxHashMap<usize, UiTransform>>>,
+    transforms: Arc<RwLock<FxHashMap<SourceId, UiTransform>>>,
     default_stroke_options: Arc<RwLock<StrokeOptions>>,
     default_fill_options: Arc<RwLock<FillOptions>>,
 }

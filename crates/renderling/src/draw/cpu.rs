@@ -32,15 +32,6 @@ impl InternalRenderlet {
             inner: WeakHybrid::from_hybrid(hr),
         }
     }
-
-    fn copy_inner(&self) -> Option<Renderlet> {
-        let hy = self.get_hybrid()?;
-        Some(hy.get())
-    }
-
-    fn get_hybrid(&self) -> Option<Hybrid<Renderlet>> {
-        self.inner.upgrade()
-    }
 }
 
 /// Issues indirect draw calls.
@@ -59,11 +50,8 @@ impl IndirectDraws {
         depth_texture: &Texture,
     ) -> Self {
         let runtime = runtime.as_ref();
-        let indirect_slab = SlabAllocator::new_with_label(
-            runtime,
-            wgpu::BufferUsages::INDIRECT,
-            Some("indirect-slab"),
-        );
+        let indirect_slab =
+            SlabAllocator::new(runtime, "indirect-slab", wgpu::BufferUsages::INDIRECT);
         Self {
             compute_culling: ComputeCulling::new(
                 runtime,
@@ -78,6 +66,7 @@ impl IndirectDraws {
 
     fn invalidate(&mut self) {
         if !self.draws.is_empty() {
+            log::trace!("draining indirect draws after invalidation");
             let _ = self.draws.drain(..);
         }
     }
@@ -165,7 +154,6 @@ pub struct DrawCalls {
     /// Internal representation of all staged renderlets.
     internal_renderlets: Vec<InternalRenderlet>,
     pub(crate) drawing_strategy: DrawingStrategy,
-    stage_slab_buffer: SlabBuffer<wgpu::Buffer>,
 }
 
 impl DrawCalls {
@@ -208,7 +196,6 @@ impl DrawCalls {
                     DrawingStrategy::Direct
                 }
             },
-            stage_slab_buffer: stage_slab_buffer.clone(),
         }
     }
 
@@ -275,7 +262,7 @@ impl DrawCalls {
     pub fn renderlets_iter(&self) -> impl Iterator<Item = WeakHybrid<Renderlet>> + '_ {
         self.internal_renderlets.iter().map(|ir| ir.inner.clone())
     }
-
+    ///
     /// Perform upkeep on queued draw calls and synchronize internal buffers.
     pub fn upkeep(&mut self) {
         let mut redraw_args = false;
@@ -302,7 +289,7 @@ impl DrawCalls {
         self.internal_renderlets.len()
     }
 
-    /// Perform pre-draw steps like compute culling, if available.
+    /// Perform pre-draw steps like frustum and occlusion culling, if available.
     ///
     /// This does not do upkeep, please call [`DrawCalls::upkeep`] before
     /// calling this function.
@@ -345,7 +332,24 @@ impl DrawCalls {
         }
     }
 
+    /// Draw into the given `RenderPass` by directly calling each draw.
+    pub fn draw_direct(&self, render_pass: &mut wgpu::RenderPass) {
+        for ir in self.internal_renderlets.iter() {
+            // UNWRAP: panic on purpose
+            if let Some(hr) = ir.inner.upgrade() {
+                let ir = hr.get();
+                let vertex_range = 0..ir.get_vertex_count();
+                let id = hr.id();
+                let instance_range = id.inner()..id.inner() + 1;
+                render_pass.draw(vertex_range, instance_range);
+            }
+        }
+    }
+
     /// Draw into the given `RenderPass`.
+    ///
+    /// This method draws using the indirect draw buffer, if possible, otherwise
+    /// it falls back to `draw_direct`.
     pub fn draw(&self, render_pass: &mut wgpu::RenderPass) {
         let num_draw_calls = self.draw_count();
         if num_draw_calls > 0 {
@@ -362,16 +366,7 @@ impl DrawCalls {
                 }
                 DrawingStrategy::Direct => {
                     log::trace!("drawing {num_draw_calls} renderlets using direct");
-                    for ir in self.internal_renderlets.iter() {
-                        // UNWRAP: panic on purpose
-                        if let Some(hr) = ir.inner.upgrade() {
-                            let ir = hr.get();
-                            let vertex_range = 0..ir.get_vertex_count();
-                            let id = hr.id();
-                            let instance_range = id.inner()..id.inner() + 1;
-                            render_pass.draw(vertex_range, instance_range);
-                        }
-                    }
+                    self.draw_direct(render_pass);
                 }
             }
         }

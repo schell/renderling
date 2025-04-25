@@ -187,8 +187,7 @@ impl Skybox {
         let runtime = runtime.as_ref();
         log::trace!("creating skybox");
 
-        let slab =
-            SlabAllocator::new_with_label(runtime, wgpu::BufferUsages::VERTEX, Some("skybox-slab"));
+        let slab = SlabAllocator::new(runtime, "skybox-slab", wgpu::BufferUsages::VERTEX);
 
         let proj = Mat4::perspective_rh(std::f32::consts::FRAC_PI_2, 1.0, 0.1, 10.0);
         let camera = slab.new_value(Camera::default().with_projection(proj));

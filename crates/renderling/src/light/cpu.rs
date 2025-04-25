@@ -268,8 +268,7 @@ impl Lighting {
     /// Create a new [`Lighting`] manager.
     pub fn new(atlas_size: wgpu::Extent3d, geometry: &Geometry) -> Self {
         let runtime = geometry.runtime();
-        let light_slab =
-            SlabAllocator::new_with_label(runtime, wgpu::BufferUsages::empty(), Some("light-slab"));
+        let light_slab = SlabAllocator::new(runtime, "light-slab", wgpu::BufferUsages::empty());
         let lighting_descriptor = light_slab.new_value(LightingDescriptor::default());
         let light_slab_buffer = light_slab.commit();
         let shadow_map_update_bindgroup_layout: Arc<_> =
@@ -435,10 +434,16 @@ impl Lighting {
 mod test {
 
     use glam::{Vec3, Vec4};
+    use spirv_std::num_traits::Zero;
 
     use crate::{
-        bvol::BoundingBox, light::SpotLightCalculation, pbr::Material, prelude::Transform,
-        stage::Vertex,
+        bvol::BoundingBox,
+        camera::Camera,
+        light::SpotLightCalculation,
+        math::GpuRng,
+        pbr::Material,
+        prelude::Transform,
+        stage::{Renderlet, Stage, Vertex},
     };
 
     use super::*;
@@ -587,15 +592,10 @@ mod test {
             )
             .unwrap();
         let camera = doc.cameras.first().unwrap();
+
         stage.use_camera(camera);
 
-        doc.lights[0]
-            .light_details
-            .as_directional()
-            .unwrap()
-            .modify(|dir| {
-                dir.intensity *= 10.0;
-            });
+        let _lights = crate::test::make_two_directional_light_setup(&stage);
 
         // Here we only want to render the bounding boxes of the renderlets,
         // so mark the renderlets themeselves invisible
@@ -622,21 +622,25 @@ mod test {
             }
             let transform = Mat4::from(node.transform.get_global_transform());
             if let Some(mesh_index) = node.mesh {
+                log::info!("mesh: {}", node.name.as_deref().unwrap_or("unknown"));
                 let mesh = &doc.meshes[mesh_index];
                 for prim in mesh.primitives.iter() {
                     let (min, max) = prim.bounding_box;
-                    log::info!("min: {min}, max: {max}");
                     let min = transform.transform_point3(min);
                     let max = transform.transform_point3(max);
+                    let bb = BoundingBox::from_min_max(min, max);
+                    if bb.half_extent.min_element().is_zero() {
+                        log::warn!("bounding box is not a volume, skipping");
+                        continue;
+                    }
                     log::info!("min: {min}, max: {max}");
                     resources.push(
                         stage
                             .builder()
-                            .with_vertices(
-                                [], // bbox_mesh(min, max).into_iter().map(|(p, n)| {
-                                    //     Vertex::default().with_position(p).with_normal(n)
-                                    // }),
-                            )
+                            .with_vertices({
+                                bb.get_mesh()
+                                    .map(|(p, n)| Vertex::default().with_position(p).with_normal(n))
+                            })
                             .with_material_id(colors[i % colors.len()].id())
                             .build(),
                     );
@@ -651,127 +655,155 @@ mod test {
         frame.present();
     }
 
+    fn gen_vec3(prng: &mut GpuRng) -> Vec3 {
+        let x = prng.gen_f32(-50.0, 50.0);
+        let y = prng.gen_f32(-50.0, 50.0);
+        let z = prng.gen_f32(-50.0, 50.0);
+        Vec3::new(x, y, z)
+    }
+
+    fn gen_light(
+        stage: &Stage,
+        prng: &mut GpuRng,
+    ) -> (HybridArray<Vertex>, Hybrid<Material>, Hybrid<Renderlet>) {
+        let position = gen_vec3(prng);
+        // while bounding_boxes.iter().any(|bb| bb.contains_point(position)) {
+        //     position = gen_vec3(&mut prng);
+        // }
+
+        // let nested_transform = stage.new_nested_transform();
+        // nested_transform.modify(|t| {
+        //     t.translation = position;
+        // });
+        let color = Vec4::new(
+            prng.gen_f32(0.0, 1.0),
+            prng.gen_f32(0.0, 1.0),
+            prng.gen_f32(0.0, 1.0),
+            1.0,
+        );
+        let scale = prng.gen_f32(0.1, 1.0);
+        let light_bb = BoundingBox {
+            center: position,
+            half_extent: Vec3::new(scale, scale, scale) * 10.0,
+        };
+        // let intensity = 50.0 * scale;
+        // let light_descriptor = PointLightDescriptor {
+        //     color,
+        //     intensity,
+        //     ..Default::default()
+        // };
+        // let light = stage.new_analytical_light(light_descriptor, Some(nested_transform));
+
+        // Also make a renderlet for the light, so we can see where it is.
+        log::info!("position: {position}, scale: {scale}, color: {color}");
+        let rez = stage
+            .builder()
+            .with_vertices(
+                light_bb
+                    .get_mesh()
+                    .map(|(p, n)| Vertex::default().with_position(p).with_normal(n)),
+            )
+            .with_material(Material {
+                albedo_factor: color,
+                ..Default::default()
+            })
+            .build();
+        log::info!(
+            "built bb renderlet {:?} {}",
+            rez.2.id(),
+            rez.2.notifier_index()
+        );
+        rez
+    }
+
+    fn size() -> UVec2 {
+        UVec2::new(
+            (16.0 * 2.0f32.powi(8)) as u32,
+            (9.0 * 2.0f32.powi(8)) as u32,
+        )
+    }
+
+    fn camera() -> Camera {
+        let size = size();
+        Camera::new(
+            Mat4::perspective_rh(
+                std::f32::consts::FRAC_PI_4,
+                size.x as f32 / size.y as f32,
+                0.1,
+                1000.0,
+            ),
+            Mat4::look_at_rh(Vec3::new(250.0, 100.0, 250.0), Vec3::ZERO, Vec3::Y),
+        )
+    }
+
+    // let doc = stage
+    //     .load_gltf_document_from_path(
+    //         crate::test::workspace_dir()
+    //             .join("gltf")
+    //             .join("light_tiling_test.glb"),
+    //     )
+    //     .unwrap();
+    // let camera = doc.cameras.first().unwrap();
+
+    // for r in doc.renderlets_iter() {
+    //     r.modify(|r| r.visible = false);
+    // }
+
+    // let frame = ctx.get_next_frame().unwrap();
+    // let start = std::time::Instant::now();
+    // stage.render(&frame.view());
+    // let elapsed = start.elapsed();
+    // log::info!("rendering w/o lights: {}s", elapsed.as_secs_f32());
+    // let img = frame.read_image().unwrap();
+    // img_diff::save("lights/tiling/before-lights.png", img);
+    // frame.present();
+
+    // let mut bounding_boxes = vec![];
+    // for node in doc.nodes.iter() {
+    //     if node.mesh.is_none() {
+    //         continue;
+    //     }
+    //     let transform = Mat4::from(node.transform.get_global_transform());
+    //     if let Some(mesh_index) = node.mesh {
+    //         let mesh = &doc.meshes[mesh_index];
+    //         for prim in mesh.primitives.iter() {
+    //             let (min, max) = prim.bounding_box;
+    //             let min = transform.transform_point3(min);
+    //             let max = transform.transform_point3(max);
+    //             let bb = BoundingBox::from_min_max(min, max);
+    //             if bb.half_extent.min_element().is_zero() {
+    //                 continue;
+    //             }
+    //             bounding_boxes.push(bb);
+    //         }
+    //     }
+    // }
+    // log::info!("have {} bounding boxes", bounding_boxes.len());
+
     #[test]
     /// Test the light tiling feature.
     fn light_tiling_sanity() {
-        let w = 16.0 * 2.0f32.powi(8);
-        let h = 9.0 * 2.0f32.powi(8);
-        let ctx = crate::Context::headless(w as u32, h as u32);
-        let stage = ctx.new_stage().with_msaa_sample_count(4);
-        let doc = stage
-            .load_gltf_document_from_path(
-                crate::test::workspace_dir()
-                    .join("gltf")
-                    .join("light_tiling_test.glb"),
-            )
-            .unwrap();
-        let camera = doc.cameras.first().unwrap();
+        let _ = env_logger::builder().is_test(true).try_init();
+        let size = size();
+        let ctx = crate::Context::headless(size.x, size.y).with_use_direct_draw(true);
+        let stage = ctx
+            .new_stage()
+            .with_lighting(false)
+            .with_frustum_culling(false)
+            .with_occlusion_culling(false);
+
+        let camera = stage.new_camera(camera());
+        let camera_id = stage.geometry_descriptor().get().camera_id;
         stage.use_camera(camera);
+        let new_camera_id = stage.geometry_descriptor().get().camera_id;
+        assert_eq!(camera_id, new_camera_id);
 
-        let light_mesh_node = doc
-            .nodes
-            .iter()
-            .find(|node| node.name.as_deref() == Some("light-mesh"))
-            .unwrap();
-        let light_mesh_renderlets = doc.renderlets.get(&light_mesh_node.index).unwrap();
-        assert_eq!(1, light_mesh_renderlets.len());
-        let light_mesh_renderlet = light_mesh_renderlets[0].clone();
-        let light_renderlet = light_mesh_renderlet.modify(|rlet| {
-            rlet.visible = false;
-            *rlet
-        });
+        let mut prng = crate::math::GpuRng::new(666);
 
-        for r in doc.renderlets_iter() {
-            r.modify(|r| r.visible = false);
-        }
-
-        light_mesh_renderlet.modify(|rlet| {
-            rlet.visible = true;
-        });
-
-        let mut shadows = vec![];
-        for light in doc.lights.iter() {
-            let shadow = stage
-                .new_shadow_map(light, UVec2::new(2048, 2048), 0.1, 1000.0)
-                .unwrap();
-            shadow.shadowmap_descriptor.modify(|desc| {
-                desc.bias_max = 0.0;
-                desc.bias_min = 0.0;
-            });
-            shadow.update(&stage, doc.renderlets_iter()).unwrap();
-            shadows.push(shadow);
-        }
-
-        let frame = ctx.get_next_frame().unwrap();
-        let start = std::time::Instant::now();
-        stage.render(&frame.view());
-        let elapsed = start.elapsed();
-        log::info!("rendering w/o lights: {}s", elapsed.as_secs_f32());
-        let img = frame.read_image().unwrap();
-        img_diff::save("lights/tiling/before-lights.png", img);
-        frame.present();
-
-        // Bounds
-        const NEG_X_BOUND: f32 = -81.0;
-        const X_BOUND: f32 = 70.0;
-        const NEG_Y_BOUND: f32 = -70.0;
-        const Y_BOUND: f32 = 70.0;
-        const NEG_Z_BOUND: f32 = -42.0;
-        const Z_BOUND: f32 = 32.0;
-        // Add the lights!
-        let mut prng =
-            acorn_prng::Acorn::new(acorn_prng::Order::new(123), acorn_prng::Seed::new(666));
-        fn gen_f32(prng: &mut acorn_prng::Acorn, min: f32, max: f32) -> f32 {
-            let range = max - min;
-            let val_u32 = prng.generate_u32_between_range(0..=u32::MAX);
-            let val_f32 = val_u32 as f32 / u32::MAX as f32;
-            let val_range = range * val_f32;
-            min + val_range
-        }
         const NUM_LIGHTS: u32 = 100;
         let mut lights = vec![];
         for _ in 0..NUM_LIGHTS {
-            let x = gen_f32(&mut prng, NEG_X_BOUND, X_BOUND);
-            let y = gen_f32(&mut prng, NEG_Y_BOUND, Y_BOUND);
-            let z = gen_f32(&mut prng, NEG_Z_BOUND, Z_BOUND);
-            let position = Vec3::new(x, y, z);
-            log::info!("position: {position}");
-            log::info!("array: {:?}", light_renderlet.vertices_array);
-            // let nested_transform = stage.new_nested_transform();
-            // nested_transform.modify(|t| {
-            //     t.translation = position;
-            // });
-            let color = Vec4::new(
-                gen_f32(&mut prng, 0.3, 1.0),
-                gen_f32(&mut prng, 0.3, 1.0),
-                gen_f32(&mut prng, 0.3, 1.0),
-                gen_f32(&mut prng, 0.3, 1.0),
-            );
-            let scale = gen_f32(&mut prng, 0.1, 1.0);
-            // let intensity = 50.0 * scale;
-            // let light_descriptor = PointLightDescriptor {
-            //     color,
-            //     intensity,
-            //     ..Default::default()
-            // };
-            // let light = stage.new_analytical_light(light_descriptor, Some(nested_transform));
-
-            // Also make a renderlet for the light, so we can see where it is.
-            let rez = stage
-                .builder()
-                .with_vertices_array(light_renderlet.vertices_array)
-                .with_transform(Transform {
-                    translation: position,
-                    scale: Vec3::splat(scale),
-                    ..Default::default()
-                })
-                .with_material(Material {
-                    albedo_factor: color,
-                    has_lighting: false,
-                    ..Default::default()
-                })
-                .build();
-            lights.push(rez);
+            lights.push(gen_light(&stage, &mut prng));
         }
 
         let frame = ctx.get_next_frame().unwrap();

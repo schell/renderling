@@ -41,8 +41,7 @@ impl Geometry {
     // TODO: move atlas size into materials.
     pub fn new(runtime: impl AsRef<WgpuRuntime>, resolution: UVec2, atlas_size: UVec2) -> Self {
         let runtime = runtime.as_ref();
-        let slab =
-            SlabAllocator::new_with_label(runtime, wgpu::BufferUsages::empty(), Some("geometry"));
+        let slab = SlabAllocator::new(runtime, "geometry", wgpu::BufferUsages::empty());
         let descriptor = slab.new_value(GeometryDescriptor {
             atlas_size,
             resolution,
@@ -74,18 +73,16 @@ impl Geometry {
     pub fn new_camera(&self, camera: Camera) -> Hybrid<Camera> {
         let c = self.slab.new_value(camera);
         if self.descriptor.get().camera_id.is_none() {
-            log::info!("automatically using camera: {:?}", c.id());
-            self.descriptor.modify(|cfg| {
-                cfg.camera_id = c.id();
-            });
+            self.use_camera(&c);
         }
         c
     }
 
     /// Set all geometry to use the given camera.
     pub fn use_camera(&self, camera: impl AsRef<Hybrid<Camera>>) {
-        self.descriptor
-            .modify(|cfg| cfg.camera_id = camera.as_ref().id());
+        let c = camera.as_ref();
+        log::info!("using camera: {:?}", c.id());
+        self.descriptor.modify(|cfg| cfg.camera_id = c.id());
     }
 
     pub fn new_transform(&self, transform: Transform) -> Hybrid<Transform> {

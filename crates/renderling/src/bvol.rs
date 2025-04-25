@@ -13,7 +13,7 @@
 
 use crabslab::SlabItem;
 use glam::{Mat4, Vec2, Vec3, Vec3Swizzles, Vec4, Vec4Swizzles};
-#[cfg(target_arch = "spirv")]
+#[cfg(gpu)]
 use spirv_std::num_traits::Float;
 
 use crate::{camera::Camera, transform::Transform};
@@ -397,9 +397,6 @@ impl BoundingBox {
     }
 
     pub fn contains_point(&self, point: Vec3) -> bool {
-        // Transform the point into the box’s local space (centred at the origin)
-        // and compare against the *absolute* half-extents in case any component
-        // of `half_extent` is negative (e.g. after a mirroring transform).
         let delta = (point - self.center).abs();
         let extent = self.half_extent.abs();
         delta.x <= extent.x && delta.y <= extent.y && delta.z <= extent.z
@@ -558,9 +555,9 @@ impl BVol for Aabb {
 
 #[cfg(test)]
 mod test {
-    use glam::{Mat4, Quat, UVec2};
+    use glam::{Mat4, Quat};
 
-    use crate::{light::DirectionalLightDescriptor, pbr::Material, stage::Vertex, Context};
+    use crate::{pbr::Material, stage::Vertex, Context};
 
     use super::*;
 
@@ -613,45 +610,6 @@ mod test {
     }
 
     #[test]
-    fn bounding_sphere_from_min_max() {
-        let ctx = Context::headless(100, 100);
-        let stage = ctx
-            .new_stage()
-            .with_lighting(false)
-            .with_background_color(Vec4::ONE)
-            .with_debug_overlay(true)
-            .with_frustum_culling(false);
-
-        let projection = Mat4::perspective_rh(std::f32::consts::FRAC_PI_4, 1.0, 0.1, 20.0);
-        let view = Mat4::look_at_rh(Vec3::new(0.0, 0.0, 2.0), Vec3::ZERO, Vec3::Y);
-        let _camera = stage.new_camera(Camera::new(projection, view));
-
-        let mut min = Vec3::splat(f32::INFINITY);
-        let mut max = Vec3::splat(f32::NEG_INFINITY);
-        let _rez = stage
-            .builder()
-            .with_vertices(crate::math::unit_cube().into_iter().map(|(p, n)| {
-                min = min.min(p);
-                max = max.max(p);
-                Vertex::default()
-                    .with_position(p)
-                    .with_normal(n)
-                    .with_color(Vec4::new(1.0, 0.0, 0.0, 1.0))
-            }))
-            .with_bounds({
-                log::info!("bounds: {:?}", (min, max));
-                (min, max)
-            })
-            .build();
-
-        let frame = ctx.get_next_frame().unwrap();
-        stage.render(&frame.view());
-        let img = frame.read_image().unwrap();
-        img_diff::save("bvol/bounding_sphere_from_min_max.png", img);
-        frame.present();
-    }
-
-    #[test]
     fn bounding_box_from_min_max() {
         let ctx = Context::headless(256, 256);
         let stage = ctx
@@ -667,23 +625,7 @@ mod test {
                 Mat4::look_at_rh(Vec3::new(-3.0, 3.0, 5.0) * 0.5, Vec3::ZERO, Vec3::Y),
             )
         });
-
-        let _sunlight_a = stage.new_analytical_light(
-            DirectionalLightDescriptor {
-                direction: Vec3::new(-0.8, -1.0, 0.5).normalize(),
-                color: Vec4::ONE,
-                intensity: 100.0,
-            },
-            None,
-        );
-        let _sunlight_b = stage.new_analytical_light(
-            DirectionalLightDescriptor {
-                direction: Vec3::new(1.0, 1.0, -0.1).normalize(),
-                color: Vec4::ONE,
-                intensity: 10.0,
-            },
-            None,
-        );
+        let _lights = crate::test::make_two_directional_light_setup(&stage);
 
         let white = stage.new_material(Material {
             albedo_factor: Vec4::ONE,
@@ -718,6 +660,10 @@ mod test {
                 center: Vec3::new(0.5, 0.5, 0.5) * corner,
                 half_extent: Vec3::splat(0.25),
             };
+            assert!(
+                bb.contains_point(bb.center),
+                "BoundingBox {bb:?} does not contain center"
+            );
 
             rs.push(
                 stage
@@ -730,18 +676,10 @@ mod test {
                     .build(),
             );
         }
-        // let _rez = stage
-        //     .builder()
-        //     .with_vertices(bb.get_mesh().map(|(p, n)| {
-        //         Vertex::default()
-        //             .with_position(p)
-        //             .with_normal(n)
-        //             .with_color(((p.xyz() + 1.0) / 2.0).extend(1.0))
-        //     }))
-        //     .build();
+
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
         let img = frame.read_image().unwrap();
-        img_diff::save("bvol/bounding_box/get_mesh.png", img);
+        img_diff::assert_img_eq("bvol/bounding_box/get_mesh.png", img);
     }
 }

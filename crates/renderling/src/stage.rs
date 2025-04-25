@@ -516,7 +516,7 @@ mod test {
         }
 
         #[expect(clippy::needless_borrows_for_generic_args, reason = "riffraff")]
-        let slab = SlabAllocator::<CpuRuntime>::new(&CpuRuntime, ());
+        let slab = SlabAllocator::<CpuRuntime>::new(&CpuRuntime, "transform", ());
         let a = NestedTransform::new(&slab);
         a.set(Transform {
             translation: Vec3::splat(100.0),

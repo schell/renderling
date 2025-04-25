@@ -962,7 +962,7 @@ impl Stage {
             materials,
             draw_calls: Arc::new(RwLock::new(DrawCalls::new(
                 ctx,
-                true,
+                ctx.get_use_direct_draw(),
                 &geometry_buffer,
                 &depth_texture,
             ))),
@@ -1568,7 +1568,7 @@ impl NestedTransform {
         self.mark_dirty();
     }
 
-    pub fn get_notifier_index(&self) -> usize {
+    pub fn get_notifier_index(&self) -> SourceId {
         self.global_transform.notifier_index()
     }
 
@@ -1690,7 +1690,7 @@ mod test {
             clippy::needless_borrows_for_generic_args,
             reason = "This is just riff-raff, as it doesn't compile without the borrow."
         )]
-        let slab = SlabAllocator::<CpuRuntime>::new(&CpuRuntime, ());
+        let slab = SlabAllocator::<CpuRuntime>::new(&CpuRuntime, "transform", ());
         // Setup a hierarchy of transforms
         log::info!("new");
         let root = NestedTransform::new(&slab);

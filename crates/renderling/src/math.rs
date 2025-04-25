@@ -645,15 +645,17 @@ impl GpuRng {
 
     pub fn gen(&mut self) -> u32 {
         let state = self.0;
-        #[cfg(gpu)]
-        {
-            self.0 = self.0 * 747796405 + 2891336453;
-        }
-        #[cfg(cpu)]
-        {
-            self.0 = self.0.wrapping_sub(747796405).wrapping_add(2891336453);
-        }
-        let word = ((state >> ((state >> 28) + 4)) ^ state) * 277803737;
+        self.0 = if cfg!(gpu) {
+            self.0 * 747796405 + 2891336453
+        } else {
+            self.0.wrapping_sub(747796405).wrapping_add(2891336453)
+        };
+        let word = (state >> ((state >> 28) + 4)) ^ state;
+        let word = if cfg!(gpu) {
+            word * 277803737
+        } else {
+            word.wrapping_mul(277803737)
+        };
         (word >> 22) ^ word
     }
 

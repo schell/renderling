@@ -317,7 +317,7 @@ mod test {
         );
         scene_cubemap.run(&stage);
 
-        let slab = SlabAllocator::new(&ctx, wgpu::BufferUsages::empty());
+        let slab = SlabAllocator::new(&ctx, "cubemap-sampling-test", wgpu::BufferUsages::empty());
         let uv = slab.new_value(Vec3::ZERO);
         let buffer = slab.commit();
         let label = Some("cubemap-sampling-test");
