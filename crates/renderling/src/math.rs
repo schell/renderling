@@ -29,6 +29,16 @@ impl Fetch<UVec2> for Image!(2D, type=f32, sampled, depth) {
     }
 }
 
+impl Fetch<UVec2> for Image!(2D, type=f32, sampled, depth, multisampled=true) {
+    type Output = Vec4;
+
+    fn fetch(&self, coords: UVec2) -> Self::Output {
+        // TODO: check whether this is doing what we think it's doing.
+        // (We think its doing roughly the same thing as the non-multisampled version above)
+        self.fetch_with(coords, sample_with::sample_index(0))
+    }
+}
+
 pub trait IsSampler: Copy + Clone {}
 
 impl IsSampler for () {}
@@ -250,6 +260,11 @@ mod cpu {
     /// Convert an f32 in range 0.0 - 1.0 into a u8 in range 0-255.
     pub fn scaled_f32_to_u8(f: f32) -> u8 {
         (f * 255.0) as u8
+    }
+
+    /// Convert a u32 in rang 0-u32::MAX to a u8 in rang 0-255.
+    pub fn scaled_u32_to_u8(u: u32) -> u8 {
+        ((u as f32 / u32::MAX as f32) * 255.0) as u8
     }
 }
 #[cfg(not(target_arch = "spirv"))]
@@ -645,15 +660,17 @@ impl GpuRng {
 
     pub fn gen(&mut self) -> u32 {
         let state = self.0;
-        #[cfg(gpu)]
-        {
-            self.0 = self.0 * 747796405 + 2891336453;
-        }
-        #[cfg(cpu)]
-        {
-            self.0 = self.0.wrapping_sub(747796405).wrapping_add(2891336453);
-        }
-        let word = ((state >> ((state >> 28) + 4)) ^ state) * 277803737;
+        self.0 = if cfg!(gpu) {
+            self.0 * 747796405 + 2891336453
+        } else {
+            self.0.wrapping_sub(747796405).wrapping_add(2891336453)
+        };
+        let word = (state >> ((state >> 28) + 4)) ^ state;
+        let word = if cfg!(gpu) {
+            word * 277803737
+        } else {
+            word.wrapping_mul(277803737)
+        };
         (word >> 22) ^ word
     }
 

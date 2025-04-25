@@ -434,6 +434,7 @@ impl Frame {
 pub(crate) struct GlobalStageConfig {
     pub(crate) atlas_size: wgpu::Extent3d,
     pub(crate) shadow_map_atlas_size: wgpu::Extent3d,
+    pub(crate) use_compute_culling: bool,
 }
 
 /// Contains the adapter, device, queue, [`RenderTarget`] and initial atlas sizing.
@@ -485,6 +486,7 @@ impl Context {
                 height: w,
                 depth_or_array_layers: 4,
             },
+            use_compute_culling: false,
         }));
         Self {
             adapter,
@@ -723,6 +725,31 @@ impl Context {
     pub fn with_shadow_mapping_atlas_texture_size(self, size: impl Into<UVec3>) -> Self {
         self.set_shadow_mapping_atlas_texture_size(size);
         self
+    }
+
+    /// Set the use of direct drawing.
+    ///
+    /// Default is **false**.
+    ///
+    /// If set to **true**, all compute culling, including frustum and occlusion culling,
+    /// will **not** run.
+    pub fn set_use_direct_draw(&self, use_direct_drawing: bool) {
+        self.stage_config.write().unwrap().use_compute_culling = !use_direct_drawing;
+    }
+
+    /// Set the use of direct drawing.
+    ///
+    /// Default is **false**.
+    ///
+    /// If set to **true**, all compute culling is turned **off**.
+    /// This includes frustum and occlusion culling.
+    pub fn with_use_direct_draw(self, use_direct_drawing: bool) -> Self {
+        self.set_use_direct_draw(use_direct_drawing);
+        self
+    }
+
+    pub fn get_use_direct_draw(&self) -> bool {
+        !self.stage_config.read().unwrap().use_compute_culling
     }
 
     /// Create and return a new [`Stage`] renderer.

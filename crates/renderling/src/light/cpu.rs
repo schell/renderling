@@ -268,8 +268,7 @@ impl Lighting {
     /// Create a new [`Lighting`] manager.
     pub fn new(atlas_size: wgpu::Extent3d, geometry: &Geometry) -> Self {
         let runtime = geometry.runtime();
-        let light_slab =
-            SlabAllocator::new_with_label(runtime, wgpu::BufferUsages::empty(), Some("light-slab"));
+        let light_slab = SlabAllocator::new(runtime, "light-slab", wgpu::BufferUsages::empty());
         let lighting_descriptor = light_slab.new_value(LightingDescriptor::default());
         let light_slab_buffer = light_slab.commit();
         let shadow_map_update_bindgroup_layout: Arc<_> =
@@ -434,11 +433,33 @@ impl Lighting {
 #[cfg(test)]
 mod test {
 
-    use glam::{Vec3, Vec4};
+    use core::time::Duration;
+    use std::time::Instant;
+
+    use craballoc::runtime::CpuRuntime;
+    use crabslab::{Array, CpuSlab, Slab};
+    use glam::{UVec3, Vec3, Vec4, Vec4Swizzles};
+    use plotters::{
+        chart::{ChartBuilder, SeriesLabelPosition},
+        prelude::{
+            BitMapBackend, Circle, EmptyElement, IntoDrawingArea, IntoSegmentedCoord, PathElement,
+            Text,
+        },
+        series::{Histogram, LineSeries, PointSeries},
+        style::{Color, IntoFont, ShapeStyle},
+    };
+    use spirv_std::num_traits::Zero;
 
     use crate::{
-        bvol::BoundingBox, light::SpotLightCalculation, pbr::Material, prelude::Transform,
-        stage::Vertex,
+        bvol::BoundingBox,
+        camera::Camera,
+        draw::DrawIndirectArgs,
+        geometry::GeometryDescriptor,
+        light::{LightTiling, LightTilingDescriptor, LightTilingInvocation, SpotLightCalculation},
+        math::GpuRng,
+        pbr::Material,
+        prelude::Transform,
+        stage::{Renderlet, Stage, Vertex},
     };
 
     use super::*;
@@ -528,7 +549,7 @@ mod test {
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
         let img = frame.read_image().unwrap();
-        img_diff::assert_img_eq("lights/spot_lights/one.png", img);
+        img_diff::assert_img_eq("light/spot_lights/one.png", img);
         frame.present();
     }
 
@@ -568,7 +589,7 @@ mod test {
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
         let img = frame.read_image().unwrap();
-        img_diff::assert_img_eq("lights/spot_lights/frame.png", img);
+        img_diff::assert_img_eq("light/spot_lights/frame.png", img);
         frame.present();
     }
 
@@ -587,15 +608,10 @@ mod test {
             )
             .unwrap();
         let camera = doc.cameras.first().unwrap();
+
         stage.use_camera(camera);
 
-        doc.lights[0]
-            .light_details
-            .as_directional()
-            .unwrap()
-            .modify(|dir| {
-                dir.intensity *= 10.0;
-            });
+        let _lights = crate::test::make_two_directional_light_setup(&stage);
 
         // Here we only want to render the bounding boxes of the renderlets,
         // so mark the renderlets themeselves invisible
@@ -622,21 +638,25 @@ mod test {
             }
             let transform = Mat4::from(node.transform.get_global_transform());
             if let Some(mesh_index) = node.mesh {
+                log::info!("mesh: {}", node.name.as_deref().unwrap_or("unknown"));
                 let mesh = &doc.meshes[mesh_index];
                 for prim in mesh.primitives.iter() {
                     let (min, max) = prim.bounding_box;
-                    log::info!("min: {min}, max: {max}");
                     let min = transform.transform_point3(min);
                     let max = transform.transform_point3(max);
+                    let bb = BoundingBox::from_min_max(min, max);
+                    if bb.half_extent.min_element().is_zero() {
+                        log::warn!("bounding box is not a volume, skipping");
+                        continue;
+                    }
                     log::info!("min: {min}, max: {max}");
                     resources.push(
                         stage
                             .builder()
-                            .with_vertices(
-                                [], // bbox_mesh(min, max).into_iter().map(|(p, n)| {
-                                    //     Vertex::default().with_position(p).with_normal(n)
-                                    // }),
-                            )
+                            .with_vertices({
+                                bb.get_mesh()
+                                    .map(|(p, n)| Vertex::default().with_position(p).with_normal(n))
+                            })
                             .with_material_id(colors[i % colors.len()].id())
                             .build(),
                     );
@@ -647,17 +667,207 @@ mod test {
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
         let img = frame.read_image().unwrap();
-        img_diff::save("lights/tiling/bounds.png", img);
+        img_diff::save("light/tiling/bounds.png", img);
         frame.present();
+    }
+
+    fn gen_vec3(prng: &mut GpuRng) -> Vec3 {
+        let x = prng.gen_f32(-120.0, 120.0);
+        let y = prng.gen_f32(0.0, 80.0);
+        let z = prng.gen_f32(-120.0, 120.0);
+        Vec3::new(x, y, z)
+    }
+
+    fn gen_light(
+        stage: &Stage,
+        prng: &mut GpuRng,
+        bounding_boxes: &[BoundingBox],
+    ) -> (
+        Hybrid<Transform>,
+        HybridArray<Vertex>,
+        Hybrid<Material>,
+        AnalyticalLightBundle,
+        Hybrid<Renderlet>,
+    ) {
+        let mut position = gen_vec3(prng);
+        while bounding_boxes.iter().any(|bb| bb.contains_point(position)) {
+            position = gen_vec3(prng);
+        }
+
+        let color = Vec4::new(
+            prng.gen_f32(0.0, 1.0),
+            prng.gen_f32(0.0, 1.0),
+            prng.gen_f32(0.0, 1.0),
+            1.0,
+        );
+
+        let scale = prng.gen_f32(0.1, 1.0);
+
+        let light_bb = BoundingBox {
+            center: Vec3::ZERO,
+            half_extent: Vec3::new(scale, scale, scale) * 0.5,
+        };
+
+        // let inner_cutoff = prng.gen_f32(0.04, 0.09);
+        // let outer_cutoff = prng.gen_f32(inner_cutoff, 0.16);
+
+        // Also make a renderlet for the light, so we can see where it is.
+        let rez = stage
+            .builder()
+            .with_transform(Transform {
+                translation: position,
+                ..Default::default()
+            })
+            .with_vertices(
+                light_bb
+                    .get_mesh()
+                    .map(|(p, n)| Vertex::default().with_position(p).with_normal(n)),
+            )
+            .with_material(Material {
+                albedo_factor: color,
+                has_lighting: false,
+                emissive_factor: color.xyz(),
+                emissive_strength_multiplier: 100.0,
+                ..Default::default()
+            })
+            .suffix({
+                let intensity = scale * 100.0;
+                // let light_descriptor = SpotLightDescriptor {
+                //     position,
+                //     color,
+                //     intensity,
+                //     direction: Vec3::NEG_Y,
+                //     inner_cutoff,
+                //     outer_cutoff,
+                // };
+                let light_descriptor = PointLightDescriptor {
+                    position,
+                    color,
+                    intensity,
+                };
+                let nested_transform = stage.new_nested_transform();
+                nested_transform.modify(|t| {
+                    t.translation = position;
+                });
+                stage.new_analytical_light(light_descriptor, None)
+            })
+            .build();
+        rez
+    }
+
+    fn size() -> UVec2 {
+        UVec2::new(
+            (10.0 * 2.0f32.powi(8)) as u32,
+            (9.0 * 2.0f32.powi(8)) as u32,
+        )
+    }
+
+    fn make_camera() -> Camera {
+        let size = size();
+        Camera::new(
+            Mat4::perspective_rh(
+                std::f32::consts::FRAC_PI_4,
+                size.x as f32 / size.y as f32,
+                0.1,
+                1000.0,
+            ),
+            Mat4::look_at_rh(Vec3::new(250.0, 200.0, 250.0), Vec3::ZERO, Vec3::Y),
+        )
+    }
+
+    #[test]
+    fn light_tiling_positions() {
+        let w = 32;
+        let h = 32;
+        let slab = SlabAllocator::new(CpuRuntime, "test", ());
+        let descriptor = slab.new_value(LightTilingDescriptor {
+            depth_texture_size: UVec2::new(w, h),
+            ..Default::default()
+        });
+        let tiled_size = descriptor.get().tile_dimensions();
+        println!("tiled_size: {tiled_size}");
+        let mins = slab.new_array(vec![u32::MAX / 2; (tiled_size.x * tiled_size.y) as usize]);
+        let maxs = slab.new_array(vec![u32::MAX / 2; (tiled_size.x * tiled_size.y) as usize]);
+        descriptor.modify(|d| {
+            d.tile_depth_mins = mins.array();
+            d.tile_depth_maxs = maxs.array();
+        });
+        let desc = descriptor.get();
+        let mut tiling_slab = slab.commit().as_vec().clone();
+
+        let mut img = image::RgbImage::new(w, h);
+        for x in 0..w {
+            for y in 0..h {
+                let global_id = UVec3::new(x, y, 0);
+                let invocation = LightTilingInvocation::new(global_id, descriptor.get());
+                if invocation.should_invoke() {
+                    let pixel = img.get_pixel_mut(x, y);
+                    let r = (x as f32 / w as f32 * 255.0) as u8;
+                    let g = (y as f32 / h as f32 * 255.0) as u8;
+                    pixel.0 = [r, g, 0x00];
+
+                    if invocation.frag_pos().x % LightTilingDescriptor::TILE_SIZE.x == 0
+                        && invocation.frag_pos().y % LightTilingDescriptor::TILE_SIZE.y == 0
+                    {
+                        pixel.0[0] = 0xFF - pixel.0[0];
+                        pixel.0[1] = 0xFF - pixel.0[1];
+                        pixel.0[2] = 0xFF - pixel.0[2];
+
+                        let tile_dimensions = tiled_size;
+                        let tile_pos = invocation.tile_pos();
+                        let tile_index = tile_pos.y * tile_dimensions.x + tile_pos.x;
+                        let num_tiles = tile_dimensions.x * tile_dimensions.y;
+
+                        // index of the tile's min depth atomic value in the tiling slab
+                        let min_depth_index = invocation
+                            .descriptor
+                            .tile_depth_mins
+                            .at(tile_index as usize)
+                            .index();
+                        // index of the tile's max depth atomic value in the tiling slab
+                        let max_depth_index = invocation
+                            .descriptor
+                            .tile_depth_maxs
+                            .at(tile_index as usize)
+                            .index();
+
+                        let percent = tile_index as f32 / num_tiles as f32; //frag_pos.x as f32 / self.descriptor.depth_texture_size.x as f32;
+                        tiling_slab[min_depth_index] = (percent * u32::MAX as f32) as u32;
+                        tiling_slab[max_depth_index] = u32::MAX; //(percent * u32::MAX as f32) as u32;
+                    }
+                }
+            }
+        }
+        img_diff::save("light/tiling/positions.png", img);
+
+        let mins = tiling_slab
+            .read_vec(desc.tile_depth_mins)
+            .into_iter()
+            .map(crate::math::scaled_u32_to_u8);
+        let mins_img =
+            image::GrayImage::from_vec(tiled_size.x, tiled_size.y, mins.collect()).unwrap();
+        img_diff::save("light/tiling/positions-mins.png", mins_img);
+        let maxs = tiling_slab
+            .read_vec(desc.tile_depth_maxs)
+            .into_iter()
+            .map(crate::math::scaled_u32_to_u8);
+        let maxs_img =
+            image::GrayImage::from_vec(tiled_size.x, tiled_size.y, maxs.collect()).unwrap();
+        img_diff::save("light/tiling/positions-maxs.png", maxs_img);
     }
 
     #[test]
     /// Test the light tiling feature.
     fn light_tiling_sanity() {
-        let w = 16.0 * 2.0f32.powi(8);
-        let h = 9.0 * 2.0f32.powi(8);
-        let ctx = crate::Context::headless(w as u32, h as u32);
-        let stage = ctx.new_stage().with_msaa_sample_count(4);
+        let _ = env_logger::builder().is_test(true).try_init();
+        let size = size();
+        let ctx = crate::Context::headless(size.x, size.y);
+        let stage = ctx
+            .new_stage()
+            .with_lighting(false)
+            .with_bloom(true)
+            .with_bloom_mix_strength(0.5);
+
         let doc = stage
             .load_gltf_document_from_path(
                 crate::test::workspace_dir()
@@ -665,122 +875,231 @@ mod test {
                     .join("light_tiling_test.glb"),
             )
             .unwrap();
-        let camera = doc.cameras.first().unwrap();
+
+        let camera = stage.new_camera(make_camera());
         stage.use_camera(camera);
+        snapshot(&ctx, &stage, "light/tiling/1-no-lighting.png");
 
-        let light_mesh_node = doc
-            .nodes
-            .iter()
-            .find(|node| node.name.as_deref() == Some("light-mesh"))
-            .unwrap();
-        let light_mesh_renderlets = doc.renderlets.get(&light_mesh_node.index).unwrap();
-        assert_eq!(1, light_mesh_renderlets.len());
-        let light_mesh_renderlet = light_mesh_renderlets[0].clone();
-        let light_renderlet = light_mesh_renderlet.modify(|rlet| {
-            rlet.visible = false;
-            *rlet
-        });
+        stage.set_has_lighting(true);
 
-        for r in doc.renderlets_iter() {
-            r.modify(|r| r.visible = false);
-        }
-
-        light_mesh_renderlet.modify(|rlet| {
-            rlet.visible = true;
-        });
-
-        let mut shadows = vec![];
-        for light in doc.lights.iter() {
-            let shadow = stage
-                .new_shadow_map(light, UVec2::new(2048, 2048), 0.1, 1000.0)
+        let moonlight = doc.lights.first().unwrap();
+        let _shadow = {
+            let sm = stage
+                .new_shadow_map(moonlight, UVec2::splat(1024), 0.1, 256.0)
                 .unwrap();
-            shadow.shadowmap_descriptor.modify(|desc| {
-                desc.bias_max = 0.0;
-                desc.bias_min = 0.0;
+            sm.shadowmap_descriptor.modify(|d| {
+                d.bias_min = 0.0;
+                d.bias_max = 0.0;
+                d.pcf_samples = 2;
             });
-            shadow.update(&stage, doc.renderlets_iter()).unwrap();
-            shadows.push(shadow);
-        }
+            sm.update(&stage, doc.renderlets_iter()).unwrap();
+            sm
+        };
+        snapshot(&ctx, &stage, "light/tiling/2-before-lights.png");
 
-        let frame = ctx.get_next_frame().unwrap();
-        let start = std::time::Instant::now();
-        stage.render(&frame.view());
-        let elapsed = start.elapsed();
-        log::info!("rendering w/o lights: {}s", elapsed.as_secs_f32());
-        let img = frame.read_image().unwrap();
-        img_diff::save("lights/tiling/before-lights.png", img);
-        frame.present();
+        crate::test::capture_gpu_frame(&ctx, "light/tiling/2.gputrace", || {
+            let frame = ctx.get_next_frame().unwrap();
+            stage.render(&frame.view());
+            frame.present();
+        });
 
-        // Bounds
-        const NEG_X_BOUND: f32 = -81.0;
-        const X_BOUND: f32 = 70.0;
-        const NEG_Y_BOUND: f32 = -70.0;
-        const Y_BOUND: f32 = 70.0;
-        const NEG_Z_BOUND: f32 = -42.0;
-        const Z_BOUND: f32 = 32.0;
-        // Add the lights!
-        let mut prng =
-            acorn_prng::Acorn::new(acorn_prng::Order::new(123), acorn_prng::Seed::new(666));
-        fn gen_f32(prng: &mut acorn_prng::Acorn, min: f32, max: f32) -> f32 {
-            let range = max - min;
-            let val_u32 = prng.generate_u32_between_range(0..=u32::MAX);
-            let val_f32 = val_u32 as f32 / u32::MAX as f32;
-            let val_range = range * val_f32;
-            min + val_range
+        let mut bounding_boxes = vec![];
+        for node in doc.nodes.iter() {
+            if node.mesh.is_none() {
+                continue;
+            }
+            let transform = Mat4::from(node.transform.get_global_transform());
+            if let Some(mesh_index) = node.mesh {
+                let mesh = &doc.meshes[mesh_index];
+                for prim in mesh.primitives.iter() {
+                    let (min, max) = prim.bounding_box;
+                    let min = transform.transform_point3(min);
+                    let max = transform.transform_point3(max);
+                    let bb = BoundingBox::from_min_max(min, max);
+                    if bb.half_extent.min_element().is_zero() {
+                        continue;
+                    }
+                    bounding_boxes.push(bb);
+                }
+            }
         }
-        const NUM_LIGHTS: u32 = 100;
+        log::info!("have {} bounding boxes", bounding_boxes.len());
+
+        let mut prng = crate::math::GpuRng::new(666);
         let mut lights = vec![];
-        for _ in 0..NUM_LIGHTS {
-            let x = gen_f32(&mut prng, NEG_X_BOUND, X_BOUND);
-            let y = gen_f32(&mut prng, NEG_Y_BOUND, Y_BOUND);
-            let z = gen_f32(&mut prng, NEG_Z_BOUND, Z_BOUND);
-            let position = Vec3::new(x, y, z);
-            log::info!("position: {position}");
-            log::info!("array: {:?}", light_renderlet.vertices_array);
-            // let nested_transform = stage.new_nested_transform();
-            // nested_transform.modify(|t| {
-            //     t.translation = position;
-            // });
-            let color = Vec4::new(
-                gen_f32(&mut prng, 0.3, 1.0),
-                gen_f32(&mut prng, 0.3, 1.0),
-                gen_f32(&mut prng, 0.3, 1.0),
-                gen_f32(&mut prng, 0.3, 1.0),
-            );
-            let scale = gen_f32(&mut prng, 0.1, 1.0);
-            // let intensity = 50.0 * scale;
-            // let light_descriptor = PointLightDescriptor {
-            //     color,
-            //     intensity,
-            //     ..Default::default()
-            // };
-            // let light = stage.new_analytical_light(light_descriptor, Some(nested_transform));
 
-            // Also make a renderlet for the light, so we can see where it is.
-            let rez = stage
-                .builder()
-                .with_vertices_array(light_renderlet.vertices_array)
-                .with_transform(Transform {
-                    translation: position,
-                    scale: Vec3::splat(scale),
-                    ..Default::default()
-                })
-                .with_material(Material {
-                    albedo_factor: color,
-                    has_lighting: false,
-                    ..Default::default()
-                })
-                .build();
-            lights.push(rez);
+        for _ in 0..MAX_LIGHTS {
+            lights.push(gen_light(&stage, &mut prng, &bounding_boxes));
         }
+        snapshot(&ctx, &stage, "light/tiling/3-after-lights.png");
 
+        // Remove the light meshes
+        for (_, _, _, _, renderlet) in lights.iter() {
+            stage.remove_renderlet(renderlet);
+        }
+        snapshot(&ctx, &stage, "light/tiling/4-after-lights-no-meshes.png");
+
+        let tiling = LightTiling::new(ctx.runtime(), false, size);
+        let desc = tiling.descriptor().get();
+        let depth = stage.depth_texture.read().unwrap();
+        let mut depth_img = crate::texture::read_depth_texture_to_image(
+            ctx.runtime(),
+            size.x as usize,
+            size.y as usize,
+            &depth.texture,
+        )
+        .unwrap();
+        img_diff::normalize_gray_img(&mut depth_img);
+        img_diff::save("light/tiling/5-depth.png", depth_img);
+        tiling.run(&stage.geometry.commit(), &stage.lighting.commit(), &depth);
+        let (mut mins_img, mut maxs_img) = futures_lite::future::block_on(tiling.read_images());
+        // img_diff::normalize_gray_img(&mut mins_img);
+        // img_diff::normalize_gray_img(&mut maxs_img);
+        img_diff::save("light/tiling/5-mins.png", mins_img);
+        img_diff::save("light/tiling/5-maxs.png", maxs_img);
+
+        return;
+        log::info!("running stats");
+
+        // Stats
+        let mut stats = LightTilingStats::default();
+        for number_of_lights in [
+            1,
+            MAX_LIGHTS / 8,
+            MAX_LIGHTS / 4,
+            MAX_LIGHTS / 2,
+            ((MAX_LIGHTS / 2) + MAX_LIGHTS) / 2,
+            MAX_LIGHTS,
+        ] {
+            let mut run = LightTilingStatsRun {
+                number_of_lights,
+                iterations: vec![],
+            };
+
+            for (i, (_, _, _, light, _)) in lights.iter().enumerate() {
+                stage.remove_light(light);
+                if i < number_of_lights {
+                    stage.add_light(light);
+                }
+            }
+
+            const NUM_RUNS: usize = 2;
+            for i in 0..NUM_RUNS {
+                log::info!("{number_of_lights} {i} running");
+                let start = Instant::now();
+                let frame = ctx.get_next_frame().unwrap();
+                stage.render(&frame.view());
+                frame.present();
+                ctx.get_device().poll(wgpu::Maintain::wait());
+                let duration = start.elapsed();
+                run.iterations.push(duration);
+            }
+            stats.runs.push(run);
+        }
+        plot(stats);
+    }
+
+    fn snapshot(ctx: &crate::Context, stage: &Stage, path: &str) {
         let frame = ctx.get_next_frame().unwrap();
         let start = std::time::Instant::now();
         stage.render(&frame.view());
         let elapsed = start.elapsed();
-        log::info!("rendering with lights: {}s", elapsed.as_secs_f32());
+        log::info!("shapshot: {}s '{path}'", elapsed.as_secs_f32());
         let img = frame.read_image().unwrap();
-        img_diff::save("lights/tiling/after-lights.png", img);
+        img_diff::save(path, img);
         frame.present();
+    }
+
+    const MAX_LIGHTS: usize = 1024;
+
+    struct LightTilingStatsRun {
+        number_of_lights: usize,
+        iterations: Vec<Duration>,
+    }
+
+    impl LightTilingStatsRun {
+        fn avg_frame_time(&self) -> f32 {
+            let total: Duration = self.iterations.iter().sum();
+            total.as_secs_f32() / self.iterations.len() as f32
+        }
+    }
+
+    #[derive(Default)]
+    struct LightTilingStats {
+        runs: Vec<LightTilingStatsRun>,
+    }
+
+    fn plot(stats: LightTilingStats) {
+        let path = crate::test::workspace_dir().join("test_output/lights/tiling/frame-time.png");
+        let root_drawing_area = BitMapBackend::new(&path, (800, 600)).into_drawing_area();
+        root_drawing_area.fill(&plotters::style::WHITE).unwrap();
+
+        let mut chart = ChartBuilder::on(&root_drawing_area)
+            .caption(
+                "Renderling lighting frame time",
+                ("sans-serif", 50).into_font(),
+            )
+            .margin(30)
+            .margin_right(100)
+            .x_label_area_size(30)
+            .y_label_area_size(30)
+            .build_cartesian_2d(
+                0..MAX_LIGHTS + 1,
+                0.0..stats
+                    .runs
+                    .iter()
+                    .map(|r| r.avg_frame_time())
+                    .max_by(|a, b| a.total_cmp(b))
+                    .unwrap_or_default(),
+            )
+            .unwrap();
+        chart
+            .configure_mesh()
+            .x_desc("number of lights")
+            .y_desc("avg fps")
+            .draw()
+            .unwrap();
+
+        chart
+            .draw_series(LineSeries::new(
+                stats
+                    .runs
+                    .iter()
+                    .map(|r| (r.number_of_lights, r.avg_frame_time())),
+                plotters::style::RED,
+            ))
+            .unwrap()
+            .label("without-tiling")
+            .legend(|(x, y)| {
+                PathElement::new(vec![(x, y), (x + 20, y)], plotters::style::RED.filled())
+            });
+        chart
+            .draw_series(PointSeries::of_element(
+                stats
+                    .runs
+                    .iter()
+                    .map(|r| (r.number_of_lights, r.avg_frame_time())),
+                5,
+                ShapeStyle::from(&plotters::style::RED).filled(),
+                &|(num_lights, seconds_per_frame), size, style| {
+                    EmptyElement::at((num_lights, seconds_per_frame))
+                        + Circle::new((0, 0), size, style)
+                        + Text::new(
+                            format!("({num_lights}, {:.2} fps)", 1.0 / seconds_per_frame),
+                            (0, 15),
+                            ("sans-serif", 15),
+                        )
+                },
+            ))
+            .unwrap();
+
+        chart
+            .configure_series_labels()
+            .position(SeriesLabelPosition::LowerRight)
+            .margin(20)
+            .label_font(("sans-serif", 20))
+            .draw()
+            .unwrap();
+        root_drawing_area.present().unwrap();
     }
 }

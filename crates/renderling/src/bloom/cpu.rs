@@ -408,8 +408,7 @@ impl Bloom {
         let runtime = runtime.as_ref();
         let resolution = UVec2::new(hdr_texture.width(), hdr_texture.height());
 
-        let slab =
-            SlabAllocator::new_with_label(runtime, wgpu::BufferUsages::empty(), Some("bloom-slab"));
+        let slab = SlabAllocator::new(runtime, "bloom-slab", wgpu::BufferUsages::empty());
         let downsample_pixel_sizes = slab.new_array(
             config_resolutions(resolution).map(|r| 1.0 / Vec2::new(r.x as f32, r.y as f32)),
         );

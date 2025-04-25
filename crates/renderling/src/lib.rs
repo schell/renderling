@@ -215,15 +215,40 @@ mod test {
 
     use glam::{Mat3, Mat4, Quat, UVec2, Vec2, Vec3, Vec4};
     use img_diff::DiffCfg;
+    use light::{AnalyticalLightBundle, DirectionalLightDescriptor};
     use pretty_assertions::assert_eq;
+    use stage::Stage;
 
     #[ctor::ctor]
     fn init_logging() {
         let _ = env_logger::builder().is_test(true).try_init();
+        log::info!("logging is on");
     }
 
     pub fn workspace_dir() -> std::path::PathBuf {
         std::path::PathBuf::from(std::env!("CARGO_WORKSPACE_DIR"))
+    }
+
+    pub fn make_two_directional_light_setup(
+        stage: &Stage,
+    ) -> (AnalyticalLightBundle, AnalyticalLightBundle) {
+        let sunlight_a = stage.new_analytical_light(
+            DirectionalLightDescriptor {
+                direction: Vec3::new(-0.8, -1.0, 0.5).normalize(),
+                color: Vec4::ONE,
+                intensity: 100.0,
+            },
+            None,
+        );
+        let sunlight_b = stage.new_analytical_light(
+            DirectionalLightDescriptor {
+                direction: Vec3::new(1.0, 1.0, -0.1).normalize(),
+                color: Vec4::ONE,
+                intensity: 10.0,
+            },
+            None,
+        );
+        (sunlight_a, sunlight_b)
     }
 
     #[allow(unused, reason = "Used in debugging on macos")]
@@ -991,7 +1016,7 @@ mod test {
         stage.render(&frame.view());
         let img = frame.read_image().unwrap();
         assert_eq!(size, UVec2::new(img.width(), img.height()));
-        img_diff::save("stage/resize_100.png", img);
+        img_diff::assert_img_eq("stage/resize_100.png", img);
         frame.present();
 
         let new_size = UVec2::new(200, 200);
@@ -1002,7 +1027,37 @@ mod test {
         stage.render(&frame.view());
         let img = frame.read_image().unwrap();
         assert_eq!(new_size, UVec2::new(img.width(), img.height()));
-        img_diff::save("stage/resize_200.png", img);
+        img_diff::assert_img_eq("stage/resize_200.png", img);
+        frame.present();
+    }
+
+    #[test]
+    fn can_direct_draw_cube() {
+        let size = UVec2::new(100, 100);
+        let ctx = Context::headless(size.x, size.y).with_use_direct_draw(true);
+        let stage = ctx.new_stage();
+
+        // create the CMY cube
+        let camera_position = Vec3::new(0.0, 12.0, 20.0);
+        let _camera = stage.new_camera(Camera::new(
+            Mat4::perspective_rh(std::f32::consts::PI / 4.0, 1.0, 0.1, 100.0),
+            Mat4::look_at_rh(camera_position, Vec3::ZERO, Vec3::Y),
+        ));
+        let _rez = stage
+            .builder()
+            .with_vertices(gpu_cube_vertices())
+            .with_transform(Transform {
+                scale: Vec3::new(6.0, 6.0, 6.0),
+                rotation: Quat::from_axis_angle(Vec3::Y, -std::f32::consts::FRAC_PI_4),
+                ..Default::default()
+            })
+            .build();
+
+        let frame = ctx.get_next_frame().unwrap();
+        stage.render(&frame.view());
+        let img = frame.read_image().unwrap();
+        assert_eq!(size, UVec2::new(img.width(), img.height()));
+        img_diff::assert_img_eq("stage/resize_100.png", img);
         frame.present();
     }
 }

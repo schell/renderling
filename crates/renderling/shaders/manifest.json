@@ -110,6 +110,11 @@
     "wgsl_entry_point": "lightlight_tiling_compute_tiles"
   },
   {
+    "source_path": "shaders/light-light_tiling_compute_tiles_multisampled.spv",
+    "entry_point": "light::light_tiling_compute_tiles_multisampled",
+    "wgsl_entry_point": "lightlight_tiling_compute_tiles_multisampled"
+  },
+  {
     "source_path": "shaders/light-light_tiling_depth_pre_pass.spv",
     "entry_point": "light::light_tiling_depth_pre_pass",
     "wgsl_entry_point": "lightlight_tiling_depth_pre_pass"
@@ -143,11 +148,6 @@
     "source_path": "shaders/skybox-skybox_vertex.spv",
     "entry_point": "skybox::skybox_vertex",
     "wgsl_entry_point": "skyboxskybox_vertex"
-  },
-  {
-    "source_path": "shaders/stage-go_thing.spv",
-    "entry_point": "stage::go_thing",
-    "wgsl_entry_point": "stagego_thing"
   },
   {
     "source_path": "shaders/stage-renderlet_fragment.spv",
