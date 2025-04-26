@@ -291,7 +291,7 @@ impl<'a> RenderletBuilder<'a, ()> {
 }
 
 impl<'a, T: Bundle> RenderletBuilder<'a, T> {
-    fn suffix<S>(self, element: S) -> RenderletBuilder<'a, T::Suffixed<S>> {
+    pub fn suffix<S>(self, element: S) -> RenderletBuilder<'a, T::Suffixed<S>> {
         RenderletBuilder {
             data: self.data,
             resources: self.resources.suffix(element),
@@ -482,7 +482,7 @@ impl Stage {
         self.geometry.new_camera(camera)
     }
 
-    /// Set the given camera as the default one to use when rendering.
+    /// Use the given camera when rendering.
     pub fn use_camera(&self, camera: impl AsRef<Hybrid<Camera>>) {
         self.geometry.use_camera(camera);
     }
@@ -689,6 +689,18 @@ impl Stage {
 
     /// Enable shadow mapping for the given [`AnalyticalLightBundle`], creating
     /// a new [`ShadowMap`].
+    ///
+    /// ## Tips for making a good shadow map
+    ///
+    /// 1. Make sure the map is big enough.
+    ///    Using a big map can fix some peter panning issues, even before
+    ///    messing with bias in the [`ShadowMapDescriptor`].
+    ///    The bigger the map, the cleaner the shadows will be. This can
+    ///    also solve PCF problems.
+    /// 2. Don't set PCF samples too high in the [`ShadowMapDescriptor`], as
+    ///    this can _cause_ peter panning.
+    /// 3. Ensure the **znear** and **zfar** parameters make sense, as the
+    ///    shadow map uses these to determine how much of the scene to cover.
     pub fn new_shadow_map(
         &self,
         analytical_light_bundle: &AnalyticalLightBundle,

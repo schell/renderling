@@ -730,20 +730,26 @@ impl Context {
     /// Set the use of direct drawing.
     ///
     /// Default is **false**.
+    ///
+    /// If set to **true**, all compute culling, including frustum and occlusion culling,
+    /// will **not** run.
     pub fn set_use_direct_draw(&self, use_direct_drawing: bool) {
-        self.stage_config.write().unwrap().use_compute_culling = use_direct_drawing;
+        self.stage_config.write().unwrap().use_compute_culling = !use_direct_drawing;
     }
 
     /// Set the use of direct drawing.
     ///
     /// Default is **false**.
+    ///
+    /// If set to **true**, all compute culling is turned **off**.
+    /// This includes frustum and occlusion culling.
     pub fn with_use_direct_draw(self, use_direct_drawing: bool) -> Self {
         self.set_use_direct_draw(use_direct_drawing);
         self
     }
 
     pub fn get_use_direct_draw(&self) -> bool {
-        self.stage_config.read().unwrap().use_compute_culling
+        !self.stage_config.read().unwrap().use_compute_culling
     }
 
     /// Create and return a new [`Stage`] renderer.

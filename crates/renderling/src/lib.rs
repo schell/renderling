@@ -222,6 +222,7 @@ mod test {
     #[ctor::ctor]
     fn init_logging() {
         let _ = env_logger::builder().is_test(true).try_init();
+        log::info!("logging is on");
     }
 
     pub fn workspace_dir() -> std::path::PathBuf {

@@ -620,7 +620,7 @@ mod test {
         let w = 800.0;
         let h = 800.0;
         let ctx = crate::Context::headless(w as u32, h as u32);
-        let mut stage = ctx
+        let stage = ctx
             .new_stage()
             .with_lighting(true)
             .with_background_color(Vec3::splat(0.05087).extend(1.0))

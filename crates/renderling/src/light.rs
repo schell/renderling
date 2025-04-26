@@ -3,6 +3,8 @@
 //! Directional, point and spot lights.
 //!
 //! Shadow mapping.
+//!
+//! Tiling.
 use crabslab::{Array, Id, Slab, SlabItem};
 use glam::{Mat4, UVec2, UVec3, Vec2, Vec3, Vec3Swizzles, Vec4, Vec4Swizzles};
 #[cfg(gpu)]
@@ -27,6 +29,11 @@ pub use cpu::*;
 mod shadow_map;
 #[cfg(cpu)]
 pub use shadow_map::*;
+
+#[cfg(cpu)]
+mod tiling;
+#[cfg(cpu)]
+pub use tiling::*;
 
 /// Root descriptor of the lighting system.
 #[derive(Clone, Copy, Default, SlabItem, core::fmt::Debug)]
@@ -264,8 +271,8 @@ pub struct SpotLightDescriptor {
 impl Default for SpotLightDescriptor {
     fn default() -> Self {
         let white = Vec4::splat(1.0);
-        let inner_cutoff = core::f32::consts::PI / 3.0;
-        let outer_cutoff = core::f32::consts::PI / 2.0;
+        let inner_cutoff = 0.077143565;
+        let outer_cutoff = 0.09075713;
         let direction = Vec3::new(0.0, -1.0, 0.0);
         let color = white;
         let intensity = 1.0;
@@ -639,7 +646,7 @@ impl ShadowCalculation {
                 crate::println!("closest_depth: {shadow_map_depth}");
                 let bias = (bias_max * (1.0 - surface_normal.dot(*light_direction))).max(*bias_min);
 
-                if (fragment_depth - bias) > shadow_map_depth {
+                if (fragment_depth - bias) >= shadow_map_depth {
                     shadow += 1.0
                 }
                 total += 1.0;
@@ -771,7 +778,20 @@ pub fn light_tiling_depth_pre_pass(
     *out_clip_pos = camera.view_projection() * world_pos.extend(1.0);
 }
 
-pub type DepthImage2d = Image!(2D, type=f32, sampled, depth);
+/// Marker trait for abstracting over depth texture types.
+pub trait IsDepth {
+    type Texture;
+}
+
+pub struct DepthImage2d;
+impl IsDepth for DepthImage2d {
+    type Texture = Image!(2D, type=f32, sampled, depth);
+}
+
+pub struct DepthImage2dMultisampled;
+impl IsDepth for DepthImage2dMultisampled {
+    type Texture = Image!(2D, type=f32, sampled, depth, multisampled=true);
+}
 
 /// Descriptor of the light tiling operation, which culls lights by accumulating
 /// them into lists that illuminate tiles of the screen.
@@ -866,14 +886,12 @@ pub fn light_tiling_compute_min_and_max_depth(
 //     match light.light_type {}
 // }
 
-/// Light culling compute shader.
-#[spirv(compute(threads(16, 16, 1)))]
-pub fn light_tiling_compute_tiles(
-    #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] geometry_slab: &[u32],
-    #[spirv(storage_buffer, descriptor_set = 0, binding = 1)] lighting_slab: &[u32],
-    #[spirv(storage_buffer, descriptor_set = 0, binding = 2)] tiling_slab: &mut [u32],
-    #[spirv(descriptor_set = 0, binding = 3)] depth_texture: &DepthImage2d,
-    #[spirv(global_invocation_id)] global_id: UVec3,
+pub fn light_tiling_compute_tiles_impl(
+    geometry_slab: &[u32],
+    lighting_slab: &[u32],
+    tiling_slab: &mut [u32],
+    depth_texture: &impl Fetch<UVec2, Output = Vec4>,
+    global_id: UVec3,
 ) {
     let geometry_desc = geometry_slab.read_unchecked(Id::<GeometryDescriptor>::new(0));
     let size = geometry_desc.resolution;
@@ -888,6 +906,43 @@ pub fn light_tiling_compute_tiles(
         lighting_slab,
         tiling_slab,
     );
+}
+
+/// Light culling compute shader, **without** a multisampled depth texture.
+#[spirv(compute(threads(16, 16, 1)))]
+pub fn light_tiling_compute_tiles(
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] geometry_slab: &[u32],
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 1)] lighting_slab: &[u32],
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 2)] tiling_slab: &mut [u32],
+    #[spirv(descriptor_set = 0, binding = 3)] depth_texture: &<DepthImage2d as IsDepth>::Texture,
+    #[spirv(global_invocation_id)] global_id: UVec3,
+) {
+    light_tiling_compute_tiles_impl(
+        geometry_slab,
+        lighting_slab,
+        tiling_slab,
+        depth_texture,
+        global_id,
+    )
+}
+
+/// Light culling compute shader, with a multisampled depth texture.
+#[spirv(compute(threads(16, 16, 1)))]
+pub fn light_tiling_compute_tiles_multisampled(
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] geometry_slab: &[u32],
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 1)] lighting_slab: &[u32],
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 2)] tiling_slab: &mut [u32],
+    #[spirv(descriptor_set = 0, binding = 3)]
+    depth_texture: &<DepthImage2dMultisampled as IsDepth>::Texture,
+    #[spirv(global_invocation_id)] global_id: UVec3,
+) {
+    light_tiling_compute_tiles_impl(
+        geometry_slab,
+        lighting_slab,
+        tiling_slab,
+        depth_texture,
+        global_id,
+    )
 }
 
 #[cfg(test)]

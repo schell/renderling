@@ -1,0 +1,220 @@
+//! Implementation of light tiling.
+//!
+//! For more info on what light tiling _is_, see
+//! [this blog post](https://renderling.xyz/articles/live/light_tiling.html).
+// TODO: Auto-generate more pipeline linkage like layout, bindgroups and pipeline itself.
+
+use core::sync::atomic::AtomicUsize;
+use std::sync::Arc;
+
+use craballoc::{
+    runtime::WgpuRuntime,
+    slab::{SlabAllocator, SlabAllocatorError, SlabBuffer},
+};
+use crabslab::{Id, Slab};
+use glam::UVec2;
+use snafu::OptionExt;
+
+use crate::bindgroup::ManagedBindGroup;
+
+use super::LightTilingDescriptor;
+
+pub struct LightTiling {
+    // depth_pre_pass_pipeline: Arc<wgpu::RenderPipeline>,
+    size: UVec2,
+    tiling_slab: SlabAllocator<WgpuRuntime>,
+    bind_group_creation_time: Arc<AtomicUsize>,
+    depth_texture_id: Arc<AtomicUsize>,
+    compute_tiles_bind_group_layout: Arc<wgpu::BindGroupLayout>,
+    compute_tiles_bind_group: ManagedBindGroup,
+    compute_tiles_pipeline: Arc<wgpu::ComputePipeline>,
+}
+
+impl LightTiling {
+    fn create_compute_tiles_pipeline(
+        device: &wgpu::Device,
+        multisampled: bool,
+    ) -> (
+        wgpu::ComputePipeline,
+        wgpu::PipelineLayout,
+        wgpu::BindGroupLayout,
+    ) {
+        let label = Some("light-tiling-compute-tiles");
+        let module = if multisampled {
+            crate::linkage::light_tiling_compute_tiles_multisampled::linkage(device)
+        } else {
+            crate::linkage::light_tiling_compute_tiles::linkage(device)
+        };
+        let bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label,
+            entries: &[
+                // Geometry slab
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                // Lighting slab
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                // Tiling slab
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: false },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+                // Depth texture
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::COMPUTE,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Depth,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled,
+                    },
+                    count: None,
+                },
+            ],
+        });
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label,
+            bind_group_layouts: &[&bind_group_layout],
+            push_constant_ranges: &[],
+        });
+        let compute_tiles_pipeline =
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label,
+                layout: Some(&pipeline_layout),
+                module: &module.module,
+                entry_point: Some(module.entry_point),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                cache: None,
+            });
+        (compute_tiles_pipeline, pipeline_layout, bind_group_layout)
+    }
+
+    pub fn new(runtime: impl AsRef<WgpuRuntime>, multisampled: bool, size: UVec2) -> Self {
+        let runtime = runtime.as_ref();
+        let (compute_tiles_pipeline, _, compute_tiles_bind_group_layout) =
+            Self::create_compute_tiles_pipeline(&runtime.device, multisampled);
+        Self {
+            tiling_slab: SlabAllocator::new(runtime, "tiling", wgpu::BufferUsages::empty()),
+            bind_group_creation_time: Default::default(),
+            depth_texture_id: Default::default(),
+            compute_tiles_bind_group_layout: compute_tiles_bind_group_layout.into(),
+            compute_tiles_bind_group: Default::default(),
+            compute_tiles_pipeline: compute_tiles_pipeline.into(),
+        }
+    }
+
+    pub fn run(
+        &self,
+        geometry_slab: &SlabBuffer<wgpu::Buffer>,
+        lighting_slab: &SlabBuffer<wgpu::Buffer>,
+        depth_texture: &crate::texture::Texture,
+    ) {
+        let runtime = self.tiling_slab.runtime();
+        let tiling_slab_buffer = self.tiling_slab.commit();
+        let label = Some("light-tiling-compute-tiles");
+        let mut encoder = runtime
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label });
+        {
+            let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label,
+                timestamp_writes: None,
+            });
+            compute_pass.set_pipeline(&self.compute_tiles_pipeline);
+
+            // UNWRAP: safe because we know there are elements
+            let latest_buffer_creation = [
+                tiling_slab_buffer.creation_time(),
+                geometry_slab.creation_time(),
+                lighting_slab.creation_time(),
+            ]
+            .into_iter()
+            .max()
+            .unwrap();
+            let prev_buffer_creation = self
+                .bind_group_creation_time
+                .swap(latest_buffer_creation, std::sync::atomic::Ordering::Relaxed);
+            let prev_depth_texture_id = self
+                .depth_texture_id
+                .swap(depth_texture.id(), std::sync::atomic::Ordering::Relaxed);
+            let should_invalidate = tiling_slab_buffer.is_new_this_commit()
+                || prev_buffer_creation < latest_buffer_creation
+                || prev_depth_texture_id < depth_texture.id();
+            let bind_group = self.compute_tiles_bind_group.get(should_invalidate, || {
+                runtime
+                    .device
+                    .create_bind_group(&wgpu::BindGroupDescriptor {
+                        label,
+                        layout: &self.compute_tiles_bind_group_layout,
+                        entries: &[
+                            wgpu::BindGroupEntry {
+                                binding: 0,
+                                resource: geometry_slab.as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 1,
+                                resource: lighting_slab.as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 2,
+                                resource: tiling_slab_buffer.as_entire_binding(),
+                            },
+                            wgpu::BindGroupEntry {
+                                binding: 3,
+                                resource: wgpu::BindingResource::TextureView(&depth_texture.view),
+                            },
+                        ],
+                    })
+            });
+            compute_pass.set_bind_group(0, bind_group.as_ref(), &[]);
+
+            let size = depth_texture.size();
+            let x = size.x / 16 + 1;
+            let y = size.y / 16 + 1;
+            let z = 1;
+            compute_pass.dispatch_workgroups(x, y, z);
+        }
+        runtime.queue.submit(Some(encoder.finish()));
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn read_image(&self, size: UVec2) -> (image::GrayImage, image::GrayImage) {
+        let slab = self.tiling_slab.read(..).await.unwrap();
+        let desc = slab.read(Id::<LightTilingDescriptor>::new(0));
+        let mins = slab
+            .read_vec(desc.tile_depth_mins)
+            .into_iter()
+            .map(crate::math::scaled_u32_to_u8)
+            .collect::<Vec<_>>();
+        let mins_img = image::GrayImage::from_vec(size.x, size.y, mins).unwrap();
+        let maxs = slab
+            .read_vec(desc.tile_depth_maxs)
+            .into_iter()
+            .map(crate::math::scaled_u32_to_u8)
+            .collect::<Vec<_>>();
+        let maxs_img = image::GrayImage::from_vec(size.x, size.y, maxs).unwrap();
+        (mins_img, maxs_img)
+    }
+}

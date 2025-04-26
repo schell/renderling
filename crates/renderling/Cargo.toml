@@ -73,15 +73,15 @@ wgpu = { workspace = true, features = ["spirv"] }
 winit = { workspace = true, optional = true }
 
 [dev-dependencies]
-acorn_prng.workspace = true
-assert_approx_eq = {workspace = true}
+assert_approx_eq.workspace = true
 ctor = "0.2.2"
-env_logger = {workspace = true}
+env_logger.workspace = true
 example = { path = "../example" }
 fastrand = "2.1.1"
 icosahedron = "0.1"
 img-diff = { path = "../img-diff" }
 naga.workspace = true
+plotters.workspace = true
 ttf-parser = "0.20.0"
 wgpu-core.workspace = true
 winit.workspace = true

@@ -6,14 +6,14 @@
 //! [`Stage::render`](crate::prelude::Stage::render).
 use crabslab::SlabItem;
 
-#[cfg(not(target_arch = "spirv"))]
+#[cfg(cpu)]
 mod cpu;
-#[cfg(not(target_arch = "spirv"))]
+#[cfg(cpu)]
 pub use cpu::*;
 
 /// Argument buffer layout for draw_indirect commands.
 #[repr(C)]
-#[cfg_attr(not(target_arch = "spirv"), derive(bytemuck::Pod, bytemuck::Zeroable))]
+#[cfg_attr(cpu, derive(Debug, bytemuck::Pod, bytemuck::Zeroable))]
 #[derive(Clone, Copy, Default, SlabItem)]
 pub struct DrawIndirectArgs {
     pub vertex_count: u32,

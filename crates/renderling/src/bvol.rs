@@ -350,6 +350,7 @@ impl BoundingBox {
         inside + outside
     }
 
+    #[cfg(cpu)]
     /// Return a triangle mesh connecting this `Aabb`'s corners.
     ///
     /// ```ignore
