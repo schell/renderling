@@ -8,7 +8,7 @@ use std::{
 use craballoc::runtime::WgpuRuntime;
 use glam::UVec2;
 use image::{
-    load_from_memory, DynamicImage, GenericImage, GenericImageView, ImageBuffer, ImageError,
+    load_from_memory, DynamicImage, GenericImage, GenericImageView, ImageBuffer, ImageError, Luma,
     PixelWithColorType, Rgba32FImage,
 };
 use mips::MipMapGenerator;
@@ -776,6 +776,19 @@ pub fn read_depth_texture_to_image(
         })
         .collect::<Vec<u8>>();
     let img_buffer = image::GrayImage::from_raw(width as u32, height as u32, pixels)?;
+    Some(img_buffer)
+}
+
+pub fn read_depth_texture_f32(
+    runtime: impl AsRef<WgpuRuntime>,
+    width: usize,
+    height: usize,
+    texture: &wgpu::Texture,
+) -> Option<image::ImageBuffer<Luma<f32>, Vec<f32>>> {
+    let depth_copied_buffer = Texture::read(runtime.as_ref(), texture, width, height, 1, 4);
+    let pixels = depth_copied_buffer.pixels(&runtime.as_ref().device);
+    let pixels = bytemuck::cast_slice::<u8, f32>(&pixels).to_vec();
+    let img_buffer = image::ImageBuffer::from_raw(width as u32, height as u32, pixels)?;
     Some(img_buffer)
 }
 
