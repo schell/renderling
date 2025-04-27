@@ -50,8 +50,6 @@ pub struct LightingDescriptor {
     pub update_shadow_map_id: Id<ShadowMapDescriptor>,
     /// The index of the shadow map atlas texture to update.
     pub update_shadow_map_texture_index: u32,
-    /// Descriptor for performing the light tiling cull stage.
-    pub light_tiling_descriptor: LightTilingDescriptor,
 }
 
 #[derive(Clone, Copy, SlabItem, core::fmt::Debug)]
@@ -846,11 +844,18 @@ impl LightTilingInvocation {
         self.global_id.xy() / LightTilingDescriptor::TILE_SIZE
     }
 
+    /// The tile's index in all the tiles
+    fn tile_index(&self) -> usize {
+        let tile_pos = self.tile_pos();
+        let tile_dimensions = self.tile_dimensions();
+        (tile_pos.y * tile_dimensions.x + tile_pos.x) as usize
+    }
+
     /// Compute the min and max depth of one fragment/invocation for light tiling.
     fn compute_min_and_max_depth(
         &self,
         depth_texture: &impl Fetch<UVec2, Output = Vec4>,
-        lighting_slab: &[u32],
+        _lighting_slab: &[u32],
         tiling_slab: &mut [u32],
     ) {
         let frag_pos = self.frag_pos();
@@ -859,19 +864,15 @@ impl LightTilingInvocation {
         // Fragment depth scaled to min/max of u32 values
         //
         // This is so we can compare with normal atomic ops instead of using the float extension
-        let frag_depth_u32: u32 = (u32::MAX as f32 * frag_depth) as u32;
+        let frag_depth_u32: u32 = (u32::MAX as f32 * frag_depth).round() as u32;
 
-        let tile_xy = self.tile_pos();
         // The tile's index in all the tiles
-        let tile_index = tile_xy.x * LightTilingDescriptor::TILE_SIZE.x + tile_xy.y;
-        let tiling_desc = lighting_slab.read_unchecked(
-            Id::<LightingDescriptor>::new(0)
-                + LightingDescriptor::OFFSET_OF_LIGHT_TILING_DESCRIPTOR,
-        );
+        let tile_index = self.tile_index();
+        let tiling_desc = tiling_slab.read_unchecked(Id::<LightTilingDescriptor>::new(0));
         // index of the tile's min depth atomic value in the tiling slab
-        let min_depth_index = tiling_desc.tile_depth_mins.at(tile_index as usize).index();
+        let min_depth_index = tiling_desc.tile_depth_mins.at(tile_index).index();
         // index of the tile's max depth atomic value in the tiling slab
-        let max_depth_index = tiling_desc.tile_depth_maxs.at(tile_index as usize).index();
+        let max_depth_index = tiling_desc.tile_depth_maxs.at(tile_index).index();
 
         let _prev_min_depth = unsafe {
             spirv_std::arch::atomic_u_min::<
@@ -895,35 +896,26 @@ impl LightTilingInvocation {
             && self.global_id.y < self.descriptor.depth_texture_size.y
     }
 
-    fn clear_tiles(&self, tiling_slab: &mut [u32]) {
+    /// Returns whether this invocation's X and Y coords are divided
+    /// evenly by the tile size.
+    fn frag_pos_is_tile_corner(&self) -> bool {
         let frag_pos = self.frag_pos();
-        if frag_pos.x % LightTilingDescriptor::TILE_SIZE.x == 0
+        frag_pos.x % LightTilingDescriptor::TILE_SIZE.x == 0
             && frag_pos.y % LightTilingDescriptor::TILE_SIZE.y == 0
-        {
+    }
+
+    fn clear_tiles(&self, tiling_slab: &mut [u32]) {
+        if self.frag_pos_is_tile_corner() {
             // only continue if this is the invocation in the top-left of the tile, as
             // we only need one invocation per tile.
-            let tile_dimensions = self.tile_dimensions();
-            let tile_pos = self.tile_pos();
-            let tile_index = tile_pos.y * tile_dimensions.x + tile_pos.x;
-            let num_tiles = tile_dimensions.x * tile_dimensions.y;
-
+            let tile_index = self.tile_index();
             // index of the tile's min depth atomic value in the tiling slab
-            let min_depth_index = self
-                .descriptor
-                .tile_depth_mins
-                .at(tile_index as usize)
-                .index();
+            let min_depth_index = self.descriptor.tile_depth_mins.at(tile_index).index();
             // index of the tile's max depth atomic value in the tiling slab
-            let max_depth_index = self
-                .descriptor
-                .tile_depth_maxs
-                .at(tile_index as usize)
-                .index();
+            let max_depth_index = self.descriptor.tile_depth_maxs.at(tile_index).index();
 
-            let x_percent = tile_pos.x as f32 / tile_dimensions.x as f32;
-            let y_percent = tile_pos.y as f32 / tile_dimensions.y as f32;
-            tiling_slab[min_depth_index] = (x_percent * u32::MAX as f32) as u32;
-            tiling_slab[max_depth_index] = (y_percent * u32::MAX as f32) as u32;
+            tiling_slab[min_depth_index] = u32::MAX;
+            tiling_slab[max_depth_index] = 0;
         }
     }
 
@@ -934,14 +926,14 @@ impl LightTilingInvocation {
         tiling_slab: &mut [u32],
     ) {
         self.clear_tiles(tiling_slab);
-        // unsafe {
-        //     spirv_std::arch::control_barrier::<
-        //         { spirv_std::memory::Scope::Workgroup as u32 },
-        //         { spirv_std::memory::Scope::Workgroup as u32 },
-        //         { spirv_std::memory::Semantics::WORKGROUP_MEMORY.bits() },
-        //     >()
-        // };
-        // self.compute_min_and_max_depth(depth_texture, lighting_slab, tiling_slab);
+        unsafe {
+            spirv_std::arch::control_barrier::<
+                { spirv_std::memory::Scope::Workgroup as u32 },
+                { spirv_std::memory::Scope::Workgroup as u32 },
+                { spirv_std::memory::Semantics::WORKGROUP_MEMORY.bits() },
+            >()
+        };
+        self.compute_min_and_max_depth(depth_texture, lighting_slab, tiling_slab);
     }
 }
 

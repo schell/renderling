@@ -232,6 +232,8 @@ impl LightTiling {
 
     #[cfg(test)]
     pub(crate) async fn read_images(&self) -> (image::GrayImage, image::GrayImage) {
+        use core::f32;
+
         let size = self.tiling_descriptor.get().depth_texture_size / 16;
         let slab = self.tiling_slab.read(..).await.unwrap();
         log::info!("tiling slab size: {}", slab.len());
@@ -239,12 +241,15 @@ impl LightTiling {
         log::info!("desc: {desc:#?}");
         assert_eq!(size.x * size.y, desc.tile_depth_mins.len() as u32);
         assert_eq!(size.x * size.y, desc.tile_depth_maxs.len() as u32);
+        let mut min = 255;
+        let mut max = 0;
         let mins = slab
             .read_vec(desc.tile_depth_mins)
             .into_iter()
             .map(crate::math::scaled_u32_to_u8)
             .collect::<Vec<_>>();
         log::info!("mins size: {}", mins.len());
+        log::info!("min,max: {min}, {max}");
         let mins_img = image::GrayImage::from_vec(size.x, size.y, mins).unwrap();
         let maxs = slab
             .read_vec(desc.tile_depth_maxs)
