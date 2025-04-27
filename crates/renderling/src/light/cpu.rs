@@ -436,8 +436,9 @@ mod test {
     use core::time::Duration;
     use std::time::Instant;
 
-    use crabslab::{Array, Slab};
-    use glam::{Vec3, Vec4, Vec4Swizzles};
+    use craballoc::runtime::CpuRuntime;
+    use crabslab::{Array, CpuSlab, Slab};
+    use glam::{UVec3, Vec3, Vec4, Vec4Swizzles};
     use plotters::{
         chart::{ChartBuilder, SeriesLabelPosition},
         prelude::{
@@ -454,7 +455,7 @@ mod test {
         camera::Camera,
         draw::DrawIndirectArgs,
         geometry::GeometryDescriptor,
-        light::{LightTiling, SpotLightCalculation},
+        light::{LightTiling, LightTilingDescriptor, LightTilingInvocation, SpotLightCalculation},
         math::GpuRng,
         pbr::Material,
         prelude::Transform,
@@ -548,7 +549,7 @@ mod test {
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
         let img = frame.read_image().unwrap();
-        img_diff::assert_img_eq("lights/spot_lights/one.png", img);
+        img_diff::assert_img_eq("light/spot_lights/one.png", img);
         frame.present();
     }
 
@@ -588,7 +589,7 @@ mod test {
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
         let img = frame.read_image().unwrap();
-        img_diff::assert_img_eq("lights/spot_lights/frame.png", img);
+        img_diff::assert_img_eq("light/spot_lights/frame.png", img);
         frame.present();
     }
 
@@ -666,7 +667,7 @@ mod test {
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
         let img = frame.read_image().unwrap();
-        img_diff::save("lights/tiling/bounds.png", img);
+        img_diff::save("light/tiling/bounds.png", img);
         frame.present();
     }
 
@@ -775,6 +776,87 @@ mod test {
     }
 
     #[test]
+    fn light_tiling_positions() {
+        let w = 32;
+        let h = 32;
+        let slab = SlabAllocator::new(CpuRuntime, "test", ());
+        let descriptor = slab.new_value(LightTilingDescriptor {
+            depth_texture_size: UVec2::new(w, h),
+            ..Default::default()
+        });
+        let tiled_size = descriptor.get().tile_dimensions();
+        println!("tiled_size: {tiled_size}");
+        let mins = slab.new_array(vec![u32::MAX / 2; (tiled_size.x * tiled_size.y) as usize]);
+        let maxs = slab.new_array(vec![u32::MAX / 2; (tiled_size.x * tiled_size.y) as usize]);
+        descriptor.modify(|d| {
+            d.tile_depth_mins = mins.array();
+            d.tile_depth_maxs = maxs.array();
+        });
+        let desc = descriptor.get();
+        let mut tiling_slab = slab.commit().as_vec().clone();
+
+        let mut img = image::RgbImage::new(w, h);
+        for x in 0..w {
+            for y in 0..h {
+                let global_id = UVec3::new(x, y, 0);
+                let invocation = LightTilingInvocation::new(global_id, descriptor.get());
+                if invocation.should_invoke() {
+                    let pixel = img.get_pixel_mut(x, y);
+                    let r = (x as f32 / w as f32 * 255.0) as u8;
+                    let g = (y as f32 / h as f32 * 255.0) as u8;
+                    pixel.0 = [r, g, 0x00];
+
+                    if invocation.frag_pos().x % LightTilingDescriptor::TILE_SIZE.x == 0
+                        && invocation.frag_pos().y % LightTilingDescriptor::TILE_SIZE.y == 0
+                    {
+                        pixel.0[0] = 0xFF - pixel.0[0];
+                        pixel.0[1] = 0xFF - pixel.0[1];
+                        pixel.0[2] = 0xFF - pixel.0[2];
+
+                        let tile_dimensions = tiled_size;
+                        let tile_pos = invocation.tile_pos();
+                        let tile_index = tile_pos.y * tile_dimensions.x + tile_pos.x;
+                        let num_tiles = tile_dimensions.x * tile_dimensions.y;
+
+                        // index of the tile's min depth atomic value in the tiling slab
+                        let min_depth_index = invocation
+                            .descriptor
+                            .tile_depth_mins
+                            .at(tile_index as usize)
+                            .index();
+                        // index of the tile's max depth atomic value in the tiling slab
+                        let max_depth_index = invocation
+                            .descriptor
+                            .tile_depth_maxs
+                            .at(tile_index as usize)
+                            .index();
+
+                        let percent = tile_index as f32 / num_tiles as f32; //frag_pos.x as f32 / self.descriptor.depth_texture_size.x as f32;
+                        tiling_slab[min_depth_index] = (percent * u32::MAX as f32) as u32;
+                        tiling_slab[max_depth_index] = u32::MAX; //(percent * u32::MAX as f32) as u32;
+                    }
+                }
+            }
+        }
+        img_diff::save("light/tiling/positions.png", img);
+
+        let mins = tiling_slab
+            .read_vec(desc.tile_depth_mins)
+            .into_iter()
+            .map(crate::math::scaled_u32_to_u8);
+        let mins_img =
+            image::GrayImage::from_vec(tiled_size.x, tiled_size.y, mins.collect()).unwrap();
+        img_diff::save("light/tiling/positions-mins.png", mins_img);
+        let maxs = tiling_slab
+            .read_vec(desc.tile_depth_maxs)
+            .into_iter()
+            .map(crate::math::scaled_u32_to_u8);
+        let maxs_img =
+            image::GrayImage::from_vec(tiled_size.x, tiled_size.y, maxs.collect()).unwrap();
+        img_diff::save("light/tiling/positions-maxs.png", maxs_img);
+    }
+
+    #[test]
     /// Test the light tiling feature.
     fn light_tiling_sanity() {
         let _ = env_logger::builder().is_test(true).try_init();
@@ -784,8 +866,7 @@ mod test {
             .new_stage()
             .with_lighting(false)
             .with_bloom(true)
-            .with_bloom_mix_strength(0.5)
-            .with_msaa_sample_count(4);
+            .with_bloom_mix_strength(0.5);
 
         let doc = stage
             .load_gltf_document_from_path(
@@ -797,7 +878,7 @@ mod test {
 
         let camera = stage.new_camera(make_camera());
         stage.use_camera(camera);
-        snapshot(&ctx, &stage, "lights/tiling/1-no-lighting.png");
+        snapshot(&ctx, &stage, "light/tiling/1-no-lighting.png");
 
         stage.set_has_lighting(true);
 
@@ -814,9 +895,9 @@ mod test {
             sm.update(&stage, doc.renderlets_iter()).unwrap();
             sm
         };
-        snapshot(&ctx, &stage, "lights/tiling/2-before-lights.png");
+        snapshot(&ctx, &stage, "light/tiling/2-before-lights.png");
 
-        crate::test::capture_gpu_frame(&ctx, "lights/tiling/2.gputrace", || {
+        crate::test::capture_gpu_frame(&ctx, "light/tiling/2.gputrace", || {
             let frame = ctx.get_next_frame().unwrap();
             stage.render(&frame.view());
             frame.present();
@@ -850,24 +931,34 @@ mod test {
         for _ in 0..MAX_LIGHTS {
             lights.push(gen_light(&stage, &mut prng, &bounding_boxes));
         }
-        snapshot(&ctx, &stage, "lights/tiling/3-after-lights.png");
+        snapshot(&ctx, &stage, "light/tiling/3-after-lights.png");
 
         // Remove the light meshes
         for (_, _, _, _, renderlet) in lights.iter() {
             stage.remove_renderlet(renderlet);
         }
-        snapshot(&ctx, &stage, "lights/tiling/4-after-lights-no-meshes.png");
+        snapshot(&ctx, &stage, "light/tiling/4-after-lights-no-meshes.png");
 
-        let tiling = LightTiling::new(ctx.runtime(), true);
+        let tiling = LightTiling::new(ctx.runtime(), false, size);
+        let desc = tiling.descriptor().get();
         let depth = stage.depth_texture.read().unwrap();
+        let mut depth_img = crate::texture::read_depth_texture_to_image(
+            ctx.runtime(),
+            size.x as usize,
+            size.y as usize,
+            &depth.texture,
+        )
+        .unwrap();
+        img_diff::normalize_gray_img(&mut depth_img);
+        img_diff::save("light/tiling/5-depth.png", depth_img);
         tiling.run(&stage.geometry.commit(), &stage.lighting.commit(), &depth);
-        let (mut mins_img, mut maxs_img) =
-            futures_lite::future::block_on(tiling.read_image(size / 16));
-        img_diff::normalize_gray_img(&mut mins_img);
-        img_diff::normalize_gray_img(&mut maxs_img);
-        img_diff::save("5-mins.png", mins_img);
-        img_diff::save("5-maxs.png", maxs_img);
+        let (mut mins_img, mut maxs_img) = futures_lite::future::block_on(tiling.read_images());
+        // img_diff::normalize_gray_img(&mut mins_img);
+        // img_diff::normalize_gray_img(&mut maxs_img);
+        img_diff::save("light/tiling/5-mins.png", mins_img);
+        img_diff::save("light/tiling/5-maxs.png", maxs_img);
 
+        return;
         log::info!("running stats");
 
         // Stats
