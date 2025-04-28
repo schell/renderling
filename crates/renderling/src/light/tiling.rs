@@ -18,14 +18,13 @@ use snafu::OptionExt;
 
 use crate::bindgroup::ManagedBindGroup;
 
-use super::LightTilingDescriptor;
+use super::{LightTile, LightTilingDescriptor};
 
 pub struct LightTiling {
     // depth_pre_pass_pipeline: Arc<wgpu::RenderPipeline>,
     tiling_slab: SlabAllocator<WgpuRuntime>,
     tiling_descriptor: Hybrid<LightTilingDescriptor>,
-    tiling_mins: GpuArray<u32>,
-    tiling_maxs: GpuArray<u32>,
+    tiles: GpuArray<LightTile>,
     bind_group_creation_time: Arc<AtomicUsize>,
     depth_texture_id: Arc<AtomicUsize>,
     compute_tiles_bind_group_layout: Arc<wgpu::BindGroupLayout>,
@@ -133,18 +132,15 @@ impl LightTiling {
         };
         let tiling_descriptor = tiling_slab.new_value(desc);
         let tiled_size = desc.tile_dimensions();
-        let tiles = vec![u32::MAX / 2; tiled_size.x as usize * tiled_size.y as usize];
-        let tiling_mins = tiling_slab.new_array(tiles.clone()).into_gpu_only();
-        let tiling_maxs = tiling_slab.new_array(tiles).into_gpu_only();
+        let tiles = vec![LightTile::default(); tiled_size.x as usize * tiled_size.y as usize];
+        let tiles = tiling_slab.new_array(tiles).into_gpu_only();
         tiling_descriptor.modify(|d| {
-            d.tile_depth_mins = tiling_mins.array();
-            d.tile_depth_maxs = tiling_maxs.array();
+            d.tiles_array = tiles.array();
         });
         Self {
             tiling_slab,
             tiling_descriptor,
-            tiling_mins,
-            tiling_maxs,
+            tiles,
             bind_group_creation_time: Default::default(),
             depth_texture_id: Default::default(),
             compute_tiles_bind_group_layout: compute_tiles_bind_group_layout.into(),
@@ -232,30 +228,23 @@ impl LightTiling {
 
     #[cfg(test)]
     pub(crate) async fn read_images(&self) -> (image::GrayImage, image::GrayImage) {
-        use core::f32;
-
         let size = self.tiling_descriptor.get().depth_texture_size / 16;
         let slab = self.tiling_slab.read(..).await.unwrap();
         log::info!("tiling slab size: {}", slab.len());
         let desc = slab.read(Id::<LightTilingDescriptor>::new(0));
         log::info!("desc: {desc:#?}");
-        assert_eq!(size.x * size.y, desc.tile_depth_mins.len() as u32);
-        assert_eq!(size.x * size.y, desc.tile_depth_maxs.len() as u32);
-        let mut min = 255;
-        let mut max = 0;
-        let mins = slab
-            .read_vec(desc.tile_depth_mins)
+        assert_eq!(size.x * size.y, desc.tiles_array.len() as u32);
+        let (mins, maxs) = slab
+            .read_vec(desc.tiles_array)
             .into_iter()
-            .map(crate::math::scaled_u32_to_u8)
-            .collect::<Vec<_>>();
-        log::info!("mins size: {}", mins.len());
-        log::info!("min,max: {min}, {max}");
+            .map(|tile| {
+                (
+                    crate::math::scaled_u32_to_u8(tile.depth_min),
+                    crate::math::scaled_u32_to_u8(tile.depth_max),
+                )
+            })
+            .unzip();
         let mins_img = image::GrayImage::from_vec(size.x, size.y, mins).unwrap();
-        let maxs = slab
-            .read_vec(desc.tile_depth_maxs)
-            .into_iter()
-            .map(crate::math::scaled_u32_to_u8)
-            .collect::<Vec<_>>();
         let maxs_img = image::GrayImage::from_vec(size.x, size.y, maxs).unwrap();
         (mins_img, maxs_img)
     }

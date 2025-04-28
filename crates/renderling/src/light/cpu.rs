@@ -454,7 +454,10 @@ mod test {
         camera::Camera,
         draw::DrawIndirectArgs,
         geometry::GeometryDescriptor,
-        light::{LightTiling, LightTilingDescriptor, LightTilingInvocation, SpotLightCalculation},
+        light::{
+            LightTile, LightTiling, LightTilingDescriptor, LightTilingInvocation,
+            SpotLightCalculation,
+        },
         math::GpuRng,
         pbr::Material,
         prelude::Transform,
@@ -785,11 +788,12 @@ mod test {
         });
         let tiled_size = descriptor.get().tile_dimensions();
         println!("tiled_size: {tiled_size}");
-        let mins = slab.new_array(vec![u32::MAX / 2; (tiled_size.x * tiled_size.y) as usize]);
-        let maxs = slab.new_array(vec![u32::MAX / 2; (tiled_size.x * tiled_size.y) as usize]);
+        let tiles = slab.new_array(vec![
+            LightTile::default();
+            (tiled_size.x * tiled_size.y) as usize
+        ]);
         descriptor.modify(|d| {
-            d.tile_depth_mins = mins.array();
-            d.tile_depth_maxs = maxs.array();
+            d.tiles_array = tiles.array();
         });
         let desc = descriptor.get();
         let mut tiling_slab = slab.commit().as_vec().clone();
@@ -818,11 +822,13 @@ mod test {
                         let num_tiles = tile_dimensions.x * tile_dimensions.y;
 
                         // index of the tile's min depth atomic value in the tiling slab
-                        let min_depth_index =
-                            invocation.descriptor.tile_depth_mins.at(tile_index).index();
+                        let min_depth_index = (invocation.descriptor.tiles_array.at(tile_index)
+                            + LightTile::OFFSET_OF_DEPTH_MIN)
+                            .index();
                         // index of the tile's max depth atomic value in the tiling slab
-                        let max_depth_index =
-                            invocation.descriptor.tile_depth_maxs.at(tile_index).index();
+                        let max_depth_index = (invocation.descriptor.tiles_array.at(tile_index)
+                            + LightTile::OFFSET_OF_DEPTH_MAX)
+                            .index();
 
                         let percent = tile_index as f32 / num_tiles as f32; //frag_pos.x as f32 / self.descriptor.depth_texture_size.x as f32;
                         tiling_slab[min_depth_index] = (percent * u32::MAX as f32) as u32;
@@ -833,19 +839,19 @@ mod test {
         }
         img_diff::save("light/tiling/positions.png", img);
 
-        let mins = tiling_slab
-            .read_vec(desc.tile_depth_mins)
+        let (mins, maxs) = tiling_slab
+            .read_vec(desc.tiles_array)
             .into_iter()
-            .map(crate::math::scaled_u32_to_u8);
-        let mins_img =
-            image::GrayImage::from_vec(tiled_size.x, tiled_size.y, mins.collect()).unwrap();
+            .map(|tile| {
+                (
+                    crate::math::scaled_u32_to_u8(tile.depth_min),
+                    crate::math::scaled_u32_to_u8(tile.depth_max),
+                )
+            })
+            .unzip();
+        let mins_img = image::GrayImage::from_vec(tiled_size.x, tiled_size.y, mins).unwrap();
         img_diff::save("light/tiling/positions-mins.png", mins_img);
-        let maxs = tiling_slab
-            .read_vec(desc.tile_depth_maxs)
-            .into_iter()
-            .map(crate::math::scaled_u32_to_u8);
-        let maxs_img =
-            image::GrayImage::from_vec(tiled_size.x, tiled_size.y, maxs.collect()).unwrap();
+        let maxs_img = image::GrayImage::from_vec(tiled_size.x, tiled_size.y, maxs).unwrap();
         img_diff::save("light/tiling/positions-maxs.png", maxs_img);
     }
 

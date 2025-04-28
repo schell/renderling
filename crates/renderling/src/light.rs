@@ -792,17 +792,29 @@ impl IsDepth for DepthImage2dMultisampled {
     type Texture = Image!(2D, type=f32, sampled, depth, multisampled=true);
 }
 
+/// A tile of screen space used to cull lights.
+#[derive(Clone, Copy, Default, SlabItem, core::fmt::Debug)]
+#[offsets]
+pub struct LightTile {
+    /// Minimum depth of objects found within the frustum of the tile.
+    pub depth_min: u32,
+    /// Maximum depth of objects foudn within the frustum of the tile.
+    pub depth_max: u32,
+    /// The count of lights in this tile.
+    ///
+    /// Also, the next available light index.
+    pub next_light_index: u32,
+    /// List of light ids that intersect this tile's frustum.
+    pub lights: Array<Id<Light>>,
+}
+
 /// Descriptor of the light tiling operation, which culls lights by accumulating
 /// them into lists that illuminate tiles of the screen.
 #[derive(Clone, Copy, Default, SlabItem, core::fmt::Debug)]
 pub struct LightTilingDescriptor {
     pub depth_texture_size: UVec2,
-    /// Array pointing to the "tiling slab", which is used only for light
-    /// tiling atomic ops.
-    pub tile_depth_mins: Array<u32>,
-    /// Array pointing to the "tiling slab", which is used only for light
-    /// tiling atomic ops.
-    pub tile_depth_maxs: Array<u32>,
+    /// Array pointing to the lighting "tiles".
+    pub tiles_array: Array<LightTile>,
 }
 
 impl LightTilingDescriptor {
@@ -845,7 +857,7 @@ impl LightTilingInvocation {
         self.global_id.xy() / LightTilingDescriptor::TILE_SIZE
     }
 
-    /// The tile's index in all the tiles
+    /// The tile's index in all the [`LightTilingDescriptor`]'s `tile_array`.
     fn tile_index(&self) -> usize {
         let tile_pos = self.tile_pos();
         let tile_dimensions = self.tile_dimensions();
@@ -881,9 +893,10 @@ impl LightTilingInvocation {
         let tile_index = self.tile_index();
         let tiling_desc = tiling_slab.read_unchecked(Id::<LightTilingDescriptor>::new(0));
         // index of the tile's min depth atomic value in the tiling slab
-        let min_depth_index = tiling_desc.tile_depth_mins.at(tile_index).index();
+        let tile_id = tiling_desc.tiles_array.at(tile_index);
+        let min_depth_index = (tile_id + LightTile::OFFSET_OF_DEPTH_MIN).index();
         // index of the tile's max depth atomic value in the tiling slab
-        let max_depth_index = tiling_desc.tile_depth_maxs.at(tile_index).index();
+        let max_depth_index = (tile_id + LightTile::OFFSET_OF_DEPTH_MAX).index();
 
         let _prev_min_depth = unsafe {
             spirv_std::arch::atomic_u_min::<
@@ -922,10 +935,20 @@ impl LightTilingInvocation {
             // only continue if this is the invocation in the top-left of the tile, as
             // we only need one invocation per tile.
             let tile_index = self.tile_index();
+            let tile_id = self.descriptor.tiles_array.at(tile_index);
+
+            {
+                let mut tile = tiling_slab.read(tile_id);
+                tile.depth_min = u32::MAX;
+                tile.depth_max = 0;
+                tile.next_light_index = 0;
+                tiling_slab.write(tile_id, &tile);
+            }
+
             // index of the tile's min depth atomic value in the tiling slab
-            let min_depth_index = self.descriptor.tile_depth_mins.at(tile_index).index();
+            let min_depth_index = (tile_id + LightTile::OFFSET_OF_DEPTH_MIN).index();
             // index of the tile's max depth atomic value in the tiling slab
-            let max_depth_index = self.descriptor.tile_depth_maxs.at(tile_index).index();
+            let max_depth_index = (tile_id + LightTile::OFFSET_OF_DEPTH_MAX).index();
 
             tiling_slab[min_depth_index] = u32::MAX;
             tiling_slab[max_depth_index] = 0;
@@ -948,6 +971,11 @@ impl LightTilingInvocation {
         let depth_max = depth_max_u32 as f32 / u32::MAX as f32;
         let min_xy = self.tile_pos() * self.descriptor.depth_texture_size;
         let max_xy = min_xy + LightTilingDescriptor::TILE_SIZE;
+
+        let tile_index = self.tile_index();
+        let tile_id = self.descriptor.tiles_array.at(tile_index);
+        let tile_lights_array = tiling_slab.read(tile_id + LightTile::OFFSET_OF_LIGHTS);
+        let next_light_id = tile_id + LightTile::OFFSET_OF_NEXT_LIGHT_INDEX;
         // The tile's aabb in clip space.
         //
         // This is roughly the frustum.
@@ -976,10 +1004,23 @@ impl LightTilingInvocation {
             let light_id = lighting_slab.read_unchecked(analytical_lights_array.at(light_index));
             let light = lighting_slab.read_unchecked(light_id);
             let transform = geometry_slab.read(light.transform_id);
-            match light.light_type {
-                LightStyle::Directional => todo!(),
-                LightStyle::Point => todo!(),
-                LightStyle::Spot => todo!(),
+            let should_add = match light.light_type {
+                LightStyle::Directional => true,
+                LightStyle::Point => false,
+                LightStyle::Spot => false,
+            };
+            if should_add {
+                let next_index = unsafe {
+                    spirv_std::arch::atomic_i_increment::<
+                        u32,
+                        { spirv_std::memory::Scope::Workgroup as u32 },
+                        { spirv_std::memory::Semantics::WORKGROUP_MEMORY.bits() },
+                    >(&mut tiling_slab[(next_light_id).index()])
+                };
+                if next_index as usize >= tile_lights_array.len() {
+                    break;
+                }
+                tiling_slab[next_index as usize] = light_id.inner();
             }
         }
     }
