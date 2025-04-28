@@ -6,11 +6,18 @@
 //! run on the CPU.
 //!
 //! Lastly, it provides some constant geometry used in many shaders.
-use core::ops::Mul;
+use core::{
+    marker::PhantomData,
+    ops::{IndexMut, Mul},
+    sync::atomic::AtomicU32,
+};
+use crabslab::{Id, Slab};
 use spirv_std::{
     image::{sample_with, Cubemap, Image2d, Image2dArray, ImageWithMethods},
+    integer::Integer,
     Image, Sampler,
 };
+use std::sync::RwLock;
 
 pub use glam::*;
 pub use spirv_std::num_traits::{clamp, Float, Zero};
@@ -100,6 +107,122 @@ impl SampleCube for Cubemap {
 
     fn sample_by_lod(&self, sampler: Self::Sampler, uv: Vec3, lod: f32) -> glam::Vec4 {
         self.sample_by_lod(sampler, uv, lod)
+    }
+}
+
+/// Abstraction over shader atomic integer operations.
+pub trait IsAtomicSlab: Slab {
+    /// Perform the following steps atomically with respect to any other atomic
+    /// accesses within `SCOPE` to the same location:
+    ///
+    /// 1. Load through `id` to get an original value,
+    /// 2. Get a new value through integer addition of 1 to original value, and
+    /// 3. Store the new value back through `id`.
+    ///
+    /// The result is the original value.
+    fn atomic_i_increment<const SCOPE: u32, const SEMANTICS: u32>(&mut self, id: Id<u32>) -> u32;
+    fn atomic_u_min<const SCOPE: u32, const SEMANTICS: u32>(
+        &mut self,
+        id: Id<u32>,
+        val: u32,
+    ) -> u32;
+    fn atomic_u_max<const SCOPE: u32, const SEMANTICS: u32>(
+        &mut self,
+        id: Id<u32>,
+        val: u32,
+    ) -> u32;
+}
+
+impl IsAtomicSlab for [u32] {
+    fn atomic_i_increment<const SCOPE: u32, const SEMANTICS: u32>(&mut self, id: Id<u32>) -> u32 {
+        let ptr = &mut self[id.index()];
+        unsafe { spirv_std::arch::atomic_i_increment::<u32, SCOPE, SEMANTICS>(ptr) }
+    }
+
+    fn atomic_u_min<const SCOPE: u32, const SEMANTICS: u32>(
+        &mut self,
+        id: Id<u32>,
+        val: u32,
+    ) -> u32 {
+        let ptr = &mut self[id.index()];
+        unsafe { spirv_std::arch::atomic_u_min::<u32, SCOPE, SEMANTICS>(ptr, val) }
+    }
+
+    fn atomic_u_max<const SCOPE: u32, const SEMANTICS: u32>(
+        &mut self,
+        id: Id<u32>,
+        val: u32,
+    ) -> u32 {
+        let ptr = &mut self[id.index()];
+        unsafe { spirv_std::arch::atomic_u_max::<u32, SCOPE, SEMANTICS>(ptr, val) }
+    }
+}
+
+#[cfg(cpu)]
+/// A slab for testing that is **not** atomic.
+pub struct NonAtomicSlab<T> {
+    inner: T,
+}
+
+impl<T> NonAtomicSlab<T> {
+    pub fn new(inner: T) -> Self {
+        NonAtomicSlab { inner }
+    }
+}
+
+#[cfg(cpu)]
+impl<S: Slab> Slab for NonAtomicSlab<S> {
+    fn len(&self) -> usize {
+        self.inner.len()
+    }
+
+    fn read_unchecked<T: crabslab::SlabItem>(&self, id: Id<T>) -> T {
+        self.inner.read_unchecked(id)
+    }
+
+    fn write_indexed<T: crabslab::SlabItem>(&mut self, t: &T, index: usize) -> usize {
+        self.inner.write_indexed(t, index)
+    }
+
+    fn write_indexed_slice<T: crabslab::SlabItem>(&mut self, t: &[T], index: usize) -> usize {
+        self.inner.write_indexed_slice(t, index)
+    }
+}
+
+#[cfg(cpu)]
+impl<S> IsAtomicSlab for NonAtomicSlab<S>
+where
+    S: Slab + IndexMut<usize, Output = u32>,
+{
+    fn atomic_i_increment<const SCOPE: u32, const SEMANTICS: u32>(&mut self, id: Id<u32>) -> u32 {
+        let ptr = &mut self.inner[id.index()];
+        let i = *ptr;
+        *ptr = i + 1;
+        i
+    }
+
+    fn atomic_u_min<const SCOPE: u32, const SEMANTICS: u32>(
+        &mut self,
+        id: Id<u32>,
+        val: u32,
+    ) -> u32 {
+        let ptr = &mut self.inner[id.index()];
+        let original = *ptr;
+        let new = original.min(val);
+        *ptr = new;
+        original
+    }
+
+    fn atomic_u_max<const SCOPE: u32, const SEMANTICS: u32>(
+        &mut self,
+        id: Id<u32>,
+        val: u32,
+    ) -> u32 {
+        let ptr = &mut self.inner[id.index()];
+        let original = *ptr;
+        let new = original.max(val);
+        *ptr = new;
+        original
     }
 }
 
@@ -255,6 +378,11 @@ mod cpu {
     /// Convert a u8 in range 0-255 to an f32 in range 0.0 - 1.0.
     pub fn scaled_u8_to_f32(u: u8) -> f32 {
         u as f32 / 255.0
+    }
+
+    pub fn luma_u8_to_vec4(p: &image::Luma<u8>) -> Vec4 {
+        let shade = scaled_u8_to_f32(p.0[0]);
+        Vec3::splat(shade).extend(1.0)
     }
 
     /// Convert an f32 in range 0.0 - 1.0 into a u8 in range 0-255.

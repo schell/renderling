@@ -191,7 +191,12 @@ impl Aabb {
     ///
     /// Returns `false` if the two are touching, but not overlapping.
     pub fn intersects_aabb(&self, other: &Aabb) -> bool {
-        todo!()
+        self.min.x < other.max.x
+            && self.max.x > other.min.x
+            && self.min.y < other.max.y
+            && self.max.y > other.min.y
+            && self.min.z < other.max.z
+            && self.max.z > other.min.z
     }
 }
 
@@ -273,8 +278,6 @@ impl Frustum {
             points: [nlt, nrt, nlb, nrb, flt, frt, flb, frb],
         }
     }
-
-    pub fn from() -> Self {}
 
     #[cfg(not(target_arch = "spirv"))]
     /// Return a triangle mesh connecting this `Frustum`'s corners.
@@ -695,5 +698,13 @@ mod test {
         stage.render(&frame.view());
         let img = frame.read_image().unwrap();
         img_diff::assert_img_eq("bvol/bounding_box/get_mesh.png", img);
+    }
+
+    #[test]
+    fn aabb_intersection() {
+        let a = Aabb::new(Vec3::ZERO, Vec3::ONE);
+        let b = Aabb::new(Vec3::splat(0.9), Vec3::splat(1.9));
+        assert!(a.intersects_aabb(&b));
+        assert!(b.intersects_aabb(&a));
     }
 }
