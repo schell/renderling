@@ -130,6 +130,10 @@ impl Aabb {
         (self.min + self.max) * 0.5
     }
 
+    pub fn extents(&self) -> Vec3 {
+        self.max - self.center()
+    }
+
     pub fn diagonal_length(&self) -> f32 {
         self.min.distance(self.max)
     }
@@ -181,6 +185,13 @@ impl Aabb {
                 _ => unreachable!(),
             })
             .collect()
+    }
+
+    /// Returns whether this `Aabb` intersects another `Aabb`.
+    ///
+    /// Returns `false` if the two are touching, but not overlapping.
+    pub fn intersects_aabb(&self, other: &Aabb) -> bool {
+        todo!()
     }
 }
 
@@ -262,6 +273,8 @@ impl Frustum {
             points: [nlt, nrt, nlb, nrb, flt, frt, flb, frb],
         }
     }
+
+    pub fn from() -> Self {}
 
     #[cfg(not(target_arch = "spirv"))]
     /// Return a triangle mesh connecting this `Frustum`'s corners.
