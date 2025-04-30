@@ -13,7 +13,7 @@ use spirv_std::{spirv, Image};
 
 use crate::{
     atlas::{AtlasDescriptor, AtlasTexture},
-    bvol::Aabb,
+    bvol::{Aabb, BoundingSphere},
     cubemap::{CubemapDescriptor, CubemapFaceDirection},
     geometry::GeometryDescriptor,
     math::{Fetch, IsSampler, IsVector, Sample2dArray},
@@ -362,6 +362,7 @@ impl DirectionalLightDescriptor {
 pub struct PointLightDescriptor {
     pub position: Vec3,
     pub color: Vec4,
+    /// Expressed as candelas.
     pub intensity: f32,
 }
 
@@ -409,6 +410,17 @@ impl PointLightDescriptor {
                 face.view()
             }),
         )
+    }
+
+    /// Returns the radius of illumination in meters.
+    ///
+    ///
+    /// • General indoor lighting: Around 100 to 300 lux.                                   
+    /// • Office lighting: Typically around 300 to 500 lux.                                 
+    /// • Reading or task lighting: Around 500 to 750 lux.                                  
+    /// • Detailed work (e.g., drafting, surgery): 1000 lux or more.
+    pub fn radius_of_illumination(&self, minimum_illuminance_lux: f32) -> f32 {
+        (self.intensity / minimum_illuminance_lux).sqrt()
     }
 }
 
@@ -792,6 +804,11 @@ impl IsDepth for DepthImage2dMultisampled {
     type Texture = Image!(2D, type=f32, sampled, depth, multisampled=true);
 }
 
+fn screen_space_to_clip_space(resolution: Vec2, screen_point: Vec2) -> Vec2 {
+    let normalized = screen_point / resolution;
+    Vec2::new(normalized.x, 1.0 - normalized.y) * 2.0 - 1.0
+}
+
 /// A tile of screen space used to cull lights.
 #[derive(Clone, Copy, Default, SlabItem, core::fmt::Debug)]
 #[offsets]
@@ -805,7 +822,7 @@ pub struct LightTile {
     /// Also, the next available light index.
     pub next_light_index: u32,
     /// List of light ids that intersect this tile's frustum.
-    pub lights: Array<Id<Light>>,
+    pub lights_array: Array<Id<Light>>,
 }
 
 /// Descriptor of the light tiling operation, which culls lights by accumulating
@@ -865,6 +882,8 @@ impl LightTilingInvocation {
     }
 
     /// The index of the fragment within its tile.
+    //
+    // TODO: verify this is correct
     fn frag_index(&self) -> usize {
         // The fragment's xy position within its tile
         let frag_tile = self.frag_pos() % LightTilingDescriptor::TILE_SIZE;
@@ -969,24 +988,29 @@ impl LightTilingInvocation {
         let depth_max_u32 = tiling_slab[max_depth_index];
         let depth_min = depth_min_u32 as f32 / u32::MAX as f32;
         let depth_max = depth_max_u32 as f32 / u32::MAX as f32;
-        let min_xy = self.tile_pos() * self.descriptor.depth_texture_size;
-        let max_xy = min_xy + LightTilingDescriptor::TILE_SIZE;
+
+        let resolution = self.descriptor.depth_texture_size.as_vec2();
+        let tile_tl_screen_space = self.tile_pos().as_vec2() * resolution;
+        // The tile's aabb in screen space / viewport space.
+        //
+        // This is roughly the frustum.
+        let tile_aabb_ss = {
+            let min = tile_tl_screen_space.extend(depth_min);
+            let max = (tile_tl_screen_space + LightTilingDescriptor::TILE_SIZE.as_vec2())
+                .extend(depth_max);
+            Aabb { min, max }
+        };
 
         let tile_index = self.tile_index();
         let tile_id = self.descriptor.tiles_array.at(tile_index);
-        let tile_lights_array = tiling_slab.read(tile_id + LightTile::OFFSET_OF_LIGHTS);
+        let tile_lights_array = tiling_slab.read(tile_id + LightTile::OFFSET_OF_LIGHTS_ARRAY);
         let next_light_id = tile_id + LightTile::OFFSET_OF_NEXT_LIGHT_INDEX;
-        // The tile's aabb in clip space.
-        //
-        // This is roughly the frustum.
-        let tile_aabb = Aabb {
-            min: Vec3::new(min_xy.x as f32, min_xy.y as f32, depth_min),
-            max: Vec3::new(max_xy.x as f32, max_xy.y as f32, depth_max),
-        };
+
         let camera_id = geometry_slab.read_unchecked(
             Id::<GeometryDescriptor>::new(0) + GeometryDescriptor::OFFSET_OF_CAMERA_ID,
         );
         let camera = geometry_slab.read_unchecked(camera_id);
+
         let frag_light_index = self.frag_index();
         // List of all analytical lights in the scene
         let analytical_lights_array = lighting_slab.read_unchecked(
@@ -994,34 +1018,44 @@ impl LightTilingInvocation {
                 + LightingDescriptor::OFFSET_OF_ANALYTICAL_LIGHTS_ARRAY,
         );
         // The number of fragments in one tile
-        let tile_frag_count =
+        let count_of_fragments_in_one_tile =
             (LightTilingDescriptor::TILE_SIZE.x * LightTilingDescriptor::TILE_SIZE.y) as usize;
-        for step in 0..(analytical_lights_array.len() / tile_frag_count) + 1 {
-            let light_index = step * tile_frag_count + frag_light_index;
+        // Each invocation will calculate a few lights' contribution to the tile, until all lights
+        // have been visited
+        for step in 0..(analytical_lights_array.len() / count_of_fragments_in_one_tile) + 1 {
+            let light_index = step * count_of_fragments_in_one_tile + frag_light_index;
             if light_index >= analytical_lights_array.len() {
                 break;
             }
             let light_id = lighting_slab.read_unchecked(analytical_lights_array.at(light_index));
             let light = lighting_slab.read_unchecked(light_id);
             let transform = geometry_slab.read(light.transform_id);
-            let should_add = match light.light_type {
-                LightStyle::Directional => true,
-                LightStyle::Point => false,
-                LightStyle::Spot => false,
+            // let should_add = match light.light_type {
+            //     LightStyle::Directional => true,
+            //     LightStyle::Point => {
+            //         let point_light = lighting_slab.read(light.into_point_id());
+            //         let center = Mat4::from(transform).transform_point3(point_light.position);
+            //         let radius = point_light.radius_of_illumination(1.0);
+            //         let sphere = BoundingSphere::new(center, radius);
+            //         let aabb_ss = sphere.project_onto_viewport(&camera, resolution);
+            //         aabb_ss.intersects_aabb(&tile_aabb_ss)
+            //     }
+            //     LightStyle::Spot => false,
+            // };
+
+            // if should_add {
+            let next_index = unsafe {
+                spirv_std::arch::atomic_i_increment::<
+                    u32,
+                    { spirv_std::memory::Scope::Workgroup as u32 },
+                    { spirv_std::memory::Semantics::WORKGROUP_MEMORY.bits() },
+                >(&mut tiling_slab[(next_light_id).index()])
             };
-            if should_add {
-                let next_index = unsafe {
-                    spirv_std::arch::atomic_i_increment::<
-                        u32,
-                        { spirv_std::memory::Scope::Workgroup as u32 },
-                        { spirv_std::memory::Semantics::WORKGROUP_MEMORY.bits() },
-                    >(&mut tiling_slab[(next_light_id).index()])
-                };
-                if next_index as usize >= tile_lights_array.len() {
-                    break;
-                }
-                tiling_slab[next_index as usize] = light_id.inner();
+            if next_index as usize >= tile_lights_array.len() {
+                break;
             }
+            // tiling_slab[next_index as usize] = light_id.inner();
+            // }
         }
     }
 
@@ -1168,6 +1202,67 @@ mod test {
         assert!(
             !crate::math::is_inside_clip_space(outside),
             "should be outside"
+        );
+    }
+
+    #[test]
+    fn screen_space_to_clip_space_sanity() {
+        let resolution = Vec2::new(800.0, 600.0);
+        let tl = Vec2::new(0.0, 0.0);
+        let tr = Vec2::new(resolution.x, 0.0);
+        let bl = Vec2::new(0.0, resolution.y);
+        let br = resolution;
+        assert_eq!(
+            Vec2::new(-1.0, 1.0),
+            screen_space_to_clip_space(resolution, tl)
+        );
+        assert_eq!(
+            Vec2::new(1.0, 1.0),
+            screen_space_to_clip_space(resolution, tr)
+        );
+        assert_eq!(
+            Vec2::new(-1.0, -1.0),
+            screen_space_to_clip_space(resolution, bl)
+        );
+        assert_eq!(
+            Vec2::new(1.0, -1.0),
+            screen_space_to_clip_space(resolution, br)
+        );
+    }
+
+    #[test]
+    fn light_tile_fragment_indices() {
+        let descriptor = LightTilingDescriptor {
+            depth_texture_size: UVec2::splat(200),
+            tiles_array: Default::default(),
+        };
+        assert_eq!(
+            0,
+            LightTilingInvocation::new(UVec3::ZERO, descriptor).frag_index()
+        );
+        assert_eq!(
+            1,
+            LightTilingInvocation::new(UVec3::new(1, 0, 0), descriptor).frag_index()
+        );
+        assert_eq!(
+            2,
+            LightTilingInvocation::new(UVec3::new(2, 0, 0), descriptor).frag_index()
+        );
+        assert_eq!(
+            3,
+            LightTilingInvocation::new(UVec3::new(3, 0, 0), descriptor).frag_index()
+        );
+        assert_eq!(
+            16,
+            LightTilingInvocation::new(UVec3::new(0, 1, 0), descriptor).frag_index()
+        );
+        assert_eq!(
+            17,
+            LightTilingInvocation::new(UVec3::new(1, 1, 0), descriptor).frag_index()
+        );
+        assert_eq!(
+            18,
+            LightTilingInvocation::new(UVec3::new(2, 1, 0), descriptor).frag_index()
         );
     }
 }

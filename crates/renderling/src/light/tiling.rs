@@ -121,6 +121,7 @@ impl LightTiling {
         runtime: impl AsRef<WgpuRuntime>,
         multisampled: bool,
         depth_texture_size: UVec2,
+        max_lights_per_tile: usize,
     ) -> Self {
         let runtime = runtime.as_ref();
         let (compute_tiles_pipeline, _, compute_tiles_bind_group_layout) =
@@ -132,7 +133,14 @@ impl LightTiling {
         };
         let tiling_descriptor = tiling_slab.new_value(desc);
         let tiled_size = desc.tile_dimensions();
-        let tiles = vec![LightTile::default(); tiled_size.x as usize * tiled_size.y as usize];
+        let mut tiles = Vec::new();
+        for _ in 0..tiled_size.x * tiled_size.y {
+            let lights = tiling_slab.new_array(vec![Id::NONE; max_lights_per_tile]);
+            tiles.push(LightTile {
+                lights_array: lights.array(),
+                ..Default::default()
+            });
+        }
         let tiles = tiling_slab.new_array(tiles).into_gpu_only();
         tiling_descriptor.modify(|d| {
             d.tiles_array = tiles.array();
@@ -227,25 +235,39 @@ impl LightTiling {
     }
 
     #[cfg(test)]
-    pub(crate) async fn read_images(&self) -> (image::GrayImage, image::GrayImage) {
+    pub(crate) async fn read_images(
+        &self,
+    ) -> (image::GrayImage, image::GrayImage, image::GrayImage) {
         let size = self.tiling_descriptor.get().depth_texture_size / 16;
         let slab = self.tiling_slab.read(..).await.unwrap();
         log::info!("tiling slab size: {}", slab.len());
         let desc = slab.read(Id::<LightTilingDescriptor>::new(0));
         log::info!("desc: {desc:#?}");
         assert_eq!(size.x * size.y, desc.tiles_array.len() as u32);
-        let (mins, maxs) = slab
+        let (mins, maxs, lights) = slab
             .read_vec(desc.tiles_array)
             .into_iter()
             .map(|tile| {
                 (
                     crate::math::scaled_u32_to_u8(tile.depth_min),
                     crate::math::scaled_u32_to_u8(tile.depth_max),
+                    crate::math::scaled_f32_to_u8(
+                        tile.next_light_index as f32 / tile.lights_array.len() as f32,
+                    ),
                 )
             })
-            .unzip();
+            .fold(
+                (vec![], vec![], vec![]),
+                |(mut ays, mut bees, mut cees), (a, b, c)| {
+                    ays.push(a);
+                    bees.push(b);
+                    cees.push(c);
+                    (ays, bees, cees)
+                },
+            );
         let mins_img = image::GrayImage::from_vec(size.x, size.y, mins).unwrap();
         let maxs_img = image::GrayImage::from_vec(size.x, size.y, maxs).unwrap();
-        (mins_img, maxs_img)
+        let lights_img = image::GrayImage::from_vec(size.x, size.y, lights).unwrap();
+        (mins_img, maxs_img, lights_img)
     }
 }

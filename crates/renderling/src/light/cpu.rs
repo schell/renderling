@@ -799,6 +799,7 @@ mod test {
         let mut tiling_slab = slab.commit().as_vec().clone();
 
         let mut img = image::RgbImage::new(w, h);
+        let mut light_img = image::RgbImage::new(w, h);
         for x in 0..w {
             for y in 0..h {
                 let global_id = UVec3::new(x, y, 0);
@@ -834,10 +835,19 @@ mod test {
                         tiling_slab[min_depth_index] = (percent * u32::MAX as f32) as u32;
                         tiling_slab[max_depth_index] = u32::MAX; //(percent * u32::MAX as f32) as u32;
                     }
+
+                    let pixel = light_img.get_pixel_mut(x, y);
+                    let index = invocation.frag_index();
+                    println!("index: {index}");
+                    let value = crate::math::scaled_f32_to_u8(index as f32 / (16.0 * 16.0));
+                    pixel.0[0] = value;
+                    pixel.0[1] = value;
+                    pixel.0[2] = value;
                 }
             }
         }
         img_diff::save("light/tiling/positions.png", img);
+        img_diff::save("light/tiling/frag_pos.png", light_img);
 
         let (mins, maxs) = tiling_slab
             .read_vec(desc.tiles_array)
@@ -938,7 +948,7 @@ mod test {
         }
         snapshot(&ctx, &stage, "light/tiling/4-after-lights-no-meshes.png");
 
-        let tiling = LightTiling::new(ctx.runtime(), false, size);
+        let tiling = LightTiling::new(ctx.runtime(), false, size, 32);
         let desc = tiling.descriptor().get();
         let depth = stage.depth_texture.read().unwrap();
         let mut depth_img = crate::texture::read_depth_texture_f32(
@@ -958,11 +968,14 @@ mod test {
         // img_diff::normalize_gray_img(&mut depth_img);
         img_diff::save("light/tiling/5-depth.png", depth_img);
         tiling.run(&stage.geometry.commit(), &stage.lighting.commit(), &depth);
-        let (mut mins_img, mut maxs_img) = futures_lite::future::block_on(tiling.read_images());
+        let (mut mins_img, mut maxs_img, mut lights_img) =
+            futures_lite::future::block_on(tiling.read_images());
         img_diff::normalize_gray_img(&mut mins_img);
         img_diff::normalize_gray_img(&mut maxs_img);
+        img_diff::normalize_gray_img(&mut lights_img);
         img_diff::save("light/tiling/5-mins.png", mins_img);
         img_diff::save("light/tiling/5-maxs.png", maxs_img);
+        img_diff::save("light/tiling/5-lights.png", lights_img);
 
         return;
         log::info!("running stats");
