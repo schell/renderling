@@ -140,13 +140,17 @@ impl RenderlingPaths {
     }
 
     /// Generate linkage (Rust source) files for each shader in the manifest.
-    pub fn generate_linkage(&self) {
+    pub fn generate_linkage(&self, from_cargo: bool, with_wgsl: bool) {
         log::trace!("{:#?}", std::env::vars().collect::<Vec<_>>());
         assert!(
             self.shader_manifest.is_file(),
             "missing file '{}', you must first compile the shaders",
             self.shader_manifest.display()
         );
+
+        if from_cargo {
+            println!("cargo::rerun-if-changed={}", self.shader_manifest.display());
+        }
 
         if !self.linkage_dir.is_dir() {
             log::info!("creating linkage directory");
@@ -170,10 +174,16 @@ impl RenderlingPaths {
             let absolute_source_path = self
                 .shader_dir
                 .join(linkage.source_path.file_name().unwrap());
-            let wgsl_source_path = linkage.source_path.with_extension("wgsl");
-            let absolute_wgsl_source_path =
-                self.shader_dir.join(wgsl_source_path.file_name().unwrap());
-            wgsl(absolute_source_path, absolute_wgsl_source_path);
+
+            if from_cargo {
+                println!("cargo::rerun-if-changed={}", absolute_source_path.display());
+            }
+            if with_wgsl {
+                let wgsl_source_path = linkage.source_path.with_extension("wgsl");
+                let absolute_wgsl_source_path =
+                    self.shader_dir.join(wgsl_source_path.file_name().unwrap());
+                wgsl(absolute_source_path, absolute_wgsl_source_path);
+            }
 
             let filepath = self.linkage_dir.join(fn_name).with_extension("rs");
             log::info!("generating: {}", linkage.entry_point,);

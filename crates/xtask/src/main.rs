@@ -6,7 +6,11 @@ enum Command {
     /// Compile the `renderling` library into multiple SPIR-V shader entry points.
     CompileShaders,
     /// Generate Rust files linking `wgpu` shaders from SPIR-V shader entry points.
-    GenerateLinkage,
+    GenerateLinkage {
+        #[clap(long)]
+        /// Whether to generate WGSL shaders.
+        wgsl: bool,
+    },
 }
 
 #[derive(Parser)]
@@ -38,10 +42,10 @@ fn main() {
                 panic!("Building shaders failed :(");
             }
         }
-        Command::GenerateLinkage => {
+        Command::GenerateLinkage { wgsl } => {
             log::info!("Generating linkage for shaders");
             let paths = renderling_build::RenderlingPaths::new().unwrap();
-            paths.generate_linkage();
+            paths.generate_linkage(false, wgsl);
         }
     }
 }
