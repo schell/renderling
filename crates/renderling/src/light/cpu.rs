@@ -437,7 +437,7 @@ mod test {
 
     use craballoc::runtime::CpuRuntime;
     use crabslab::{Array, CpuSlab, Slab};
-    use glam::{UVec3, Vec3, Vec4, Vec4Swizzles};
+    use glam::{UVec3, Vec2, Vec3, Vec4, Vec4Swizzles};
     use plotters::{
         chart::{ChartBuilder, SeriesLabelPosition},
         prelude::{
@@ -459,7 +459,7 @@ mod test {
             LightTile, LightTiling, LightTilingDescriptor, LightTilingInvocation,
             SpotLightCalculation,
         },
-        math::{hex_to_vec4, scaled_f32_to_u8, CpuTexture2d, GpuRng, NonAtomicSlab},
+        math::{hex_to_vec4, scaled_f32_to_u8, ConstTexture, CpuTexture2d, GpuRng, NonAtomicSlab},
         pbr::Material,
         prelude::Transform,
         stage::{Renderlet, Stage, Vertex},
@@ -686,6 +686,7 @@ mod test {
         prng: &mut GpuRng,
         bounding_boxes: &[BoundingBox],
     ) -> (
+        Hybrid<Transform>,
         HybridArray<Vertex>,
         Hybrid<Material>,
         AnalyticalLightBundle,
@@ -720,7 +721,10 @@ mod test {
         });
         let rez = stage
             .builder()
-            .with_transform_id(transform.global_transform_id())
+            .with_transform(Transform {
+                translation: position,
+                ..Default::default()
+            })
             .with_vertices(
                 light_bb
                     .get_mesh()
@@ -738,12 +742,12 @@ mod test {
                 let intensity = scale * 100.0;
 
                 let light_descriptor = PointLightDescriptor {
-                    position: Vec3::ZERO,
+                    position,
                     color,
                     intensity,
                 };
 
-                stage.new_analytical_light(light_descriptor, Some(transform))
+                stage.new_analytical_light(light_descriptor, None)
             })
             .build();
         rez
@@ -835,7 +839,7 @@ mod test {
         }
 
         // Remove the light meshes
-        for (_, _, _, renderlet) in lights.iter() {
+        for (_, _, _, _, renderlet) in lights.iter() {
             stage.remove_renderlet(renderlet);
         }
         snapshot(
@@ -955,19 +959,20 @@ mod test {
 
         let mut prng = crate::math::GpuRng::new(666);
         let mut lights: Vec<(
+            Hybrid<Transform>,
             HybridArray<Vertex>,
             Hybrid<Material>,
             AnalyticalLightBundle,
             Hybrid<Renderlet>,
         )> = vec![];
 
-        for _ in 0..MAX_LIGHTS / 2 {
+        for _ in 0..MAX_LIGHTS {
             lights.push(gen_light(&stage, &mut prng, &bounding_boxes));
         }
         snapshot(&ctx, &stage, "light/tiling/3-after-lights.png");
 
         // Remove the light meshes
-        for (_, _, _, renderlet) in lights.iter() {
+        for (_, _, _, _, renderlet) in lights.iter() {
             stage.remove_renderlet(renderlet);
         }
         snapshot(&ctx, &stage, "light/tiling/4-after-lights-no-meshes.png");
@@ -1019,7 +1024,7 @@ mod test {
                 iterations: vec![],
             };
 
-            for (i, (_, _, light, _)) in lights.iter().enumerate() {
+            for (i, (_, _, _, light, _)) in lights.iter().enumerate() {
                 stage.remove_light(light);
                 if i < number_of_lights {
                     stage.add_light(light);
@@ -1144,5 +1149,106 @@ mod test {
             .draw()
             .unwrap();
         root_drawing_area.present().unwrap();
+    }
+
+    #[test]
+    /// Ensures that a point light with a translated position renders the same
+    /// as a point light at the origin that has a transform applied with
+    /// that same translation.
+    ///
+    /// In other words, light in nested transform is the same as light
+    fn point_light_transform() {
+        let ctx = crate::Context::headless(256, 256);
+        let stage = ctx
+            .new_stage()
+            .with_lighting(false)
+            .with_bloom_mix_strength(0.08);
+        let doc = stage
+            .load_gltf_document_from_path(
+                crate::test::workspace_dir()
+                    .join("gltf")
+                    .join("pedastal.glb"),
+            )
+            .unwrap();
+        let camera = doc.cameras.first().unwrap();
+        camera.camera.modify(|cam| {
+            cam.set_projection(Mat4::perspective_rh(
+                std::f32::consts::FRAC_PI_6,
+                1.0,
+                0.1,
+                15.0,
+            ));
+        });
+
+        let color = {
+            let mut c = hex_to_vec4(0xEEDF7AFF);
+            linear_xfer_vec4(&mut c);
+            c
+        };
+        let position = Vec3::new(0.0, 1.0, 0.0);
+        let transform = stage.new_nested_transform();
+        transform.modify(|t| t.translation = position);
+
+        stage.set_has_lighting(true);
+        // let _dir_light = stage.new_analytical_light(
+        //     DirectionalLightDescriptor {
+        //         direction: Vec3::NEG_Y,
+        //         color,
+        //         intensity: 1.0,
+        //     },
+        //     None,
+        // );
+        // snapshot(&ctx, &stage, "light/point/transform-direction.png");
+
+        let bb = BoundingBox {
+            center: Vec3::ZERO,
+            half_extent: Vec3::splat(0.25),
+        };
+        let _light_mesh_rez = stage
+            .builder()
+            .with_transform_id(transform.global_transform_id())
+            .with_vertices(
+                bb.get_mesh()
+                    .map(|(p, n)| Vertex::default().with_position(p).with_normal(n)),
+            )
+            .with_material(Material {
+                albedo_factor: color,
+                emissive_factor: color.xyz(),
+                emissive_strength_multiplier: 4.0,
+                ..Default::default()
+            })
+            .build();
+
+        let light_descriptor = PointLightDescriptor {
+            position: Vec3::ZERO,
+            color,
+            intensity: 10.0,
+        };
+        let _light = stage.new_analytical_light(light_descriptor, Some(transform));
+        snapshot(&ctx, &stage, "light/point/pedastal.png");
+
+        // light.transform.modify(|t| t.translation = position);
+
+        // snapshot(&ctx, &stage, "light/point/transform-nest.png");
+
+        // let light_slab =
+        //     futures_lite::future::block_on(stage.lighting.light_slab.read(..)).unwrap();
+        // let frag = crate::pbr::shade_fragment(
+        //     &ConstTexture::new(Vec4::ZERO),
+        //     &(),
+        //     camera.node_transform.get_global_transform().translation,
+        //     Vec3::Y,
+        //     Vec3::ZERO,
+        //     Vec3::splat(0.5),
+        //     0.0,
+        //     1.0,
+        //     0.0,
+        //     Vec3::ZERO,
+        //     Vec3::ONE,
+        //     Vec3::ONE,
+        //     Vec2::ONE,
+        //     &light_slab,
+        // );
+        // println!("frag: {frag}");
     }
 }

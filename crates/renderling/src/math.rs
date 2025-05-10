@@ -6,18 +6,12 @@
 //! run on the CPU.
 //!
 //! Lastly, it provides some constant geometry used in many shaders.
-use core::{
-    marker::PhantomData,
-    ops::{IndexMut, Mul},
-    sync::atomic::AtomicU32,
-};
+use core::ops::{IndexMut, Mul};
 use crabslab::{Id, Slab};
 use spirv_std::{
     image::{sample_with, Cubemap, Image2d, Image2dArray, ImageWithMethods},
-    integer::Integer,
     Image, Sampler,
 };
-use std::sync::RwLock;
 
 pub use glam::*;
 pub use spirv_std::num_traits::{clamp, Float, Zero};
@@ -159,72 +153,80 @@ impl IsAtomicSlab for [u32] {
 }
 
 #[cfg(cpu)]
-/// A slab for testing that is **not** atomic.
-pub struct NonAtomicSlab<T> {
-    inner: T,
-}
+mod non_atomic {
+    use super::*;
 
-impl<T> NonAtomicSlab<T> {
-    pub fn new(inner: T) -> Self {
-        NonAtomicSlab { inner }
+    /// A slab for testing that is **not** atomic.
+    pub struct NonAtomicSlab<T> {
+        inner: T,
+    }
+
+    impl<T> NonAtomicSlab<T> {
+        pub fn new(inner: T) -> Self {
+            NonAtomicSlab { inner }
+        }
+    }
+
+    impl<S: Slab> Slab for NonAtomicSlab<S> {
+        fn len(&self) -> usize {
+            self.inner.len()
+        }
+
+        fn read_unchecked<T: crabslab::SlabItem>(&self, id: Id<T>) -> T {
+            self.inner.read_unchecked(id)
+        }
+
+        fn write_indexed<T: crabslab::SlabItem>(&mut self, t: &T, index: usize) -> usize {
+            self.inner.write_indexed(t, index)
+        }
+
+        fn write_indexed_slice<T: crabslab::SlabItem>(&mut self, t: &[T], index: usize) -> usize {
+            self.inner.write_indexed_slice(t, index)
+        }
+    }
+
+    impl<S> IsAtomicSlab for NonAtomicSlab<S>
+    where
+        S: Slab + IndexMut<usize, Output = u32>,
+    {
+        fn atomic_i_increment<const SCOPE: u32, const SEMANTICS: u32>(
+            &mut self,
+            id: Id<u32>,
+        ) -> u32 {
+            let ptr = &mut self.inner[id.index()];
+            let i = *ptr;
+            *ptr = i + 1;
+            i
+        }
+
+        fn atomic_u_min<const SCOPE: u32, const SEMANTICS: u32>(
+            &mut self,
+            id: Id<u32>,
+            val: u32,
+        ) -> u32 {
+            let ptr = &mut self.inner[id.index()];
+            let original = *ptr;
+            let new = original.min(val);
+            *ptr = new;
+            original
+        }
+
+        fn atomic_u_max<const SCOPE: u32, const SEMANTICS: u32>(
+            &mut self,
+            id: Id<u32>,
+            val: u32,
+        ) -> u32 {
+            let ptr = &mut self.inner[id.index()];
+            let original = *ptr;
+            let new = original.max(val);
+            *ptr = new;
+            original
+        }
     }
 }
 
 #[cfg(cpu)]
-impl<S: Slab> Slab for NonAtomicSlab<S> {
-    fn len(&self) -> usize {
-        self.inner.len()
-    }
-
-    fn read_unchecked<T: crabslab::SlabItem>(&self, id: Id<T>) -> T {
-        self.inner.read_unchecked(id)
-    }
-
-    fn write_indexed<T: crabslab::SlabItem>(&mut self, t: &T, index: usize) -> usize {
-        self.inner.write_indexed(t, index)
-    }
-
-    fn write_indexed_slice<T: crabslab::SlabItem>(&mut self, t: &[T], index: usize) -> usize {
-        self.inner.write_indexed_slice(t, index)
-    }
-}
-
-#[cfg(cpu)]
-impl<S> IsAtomicSlab for NonAtomicSlab<S>
-where
-    S: Slab + IndexMut<usize, Output = u32>,
-{
-    fn atomic_i_increment<const SCOPE: u32, const SEMANTICS: u32>(&mut self, id: Id<u32>) -> u32 {
-        let ptr = &mut self.inner[id.index()];
-        let i = *ptr;
-        *ptr = i + 1;
-        i
-    }
-
-    fn atomic_u_min<const SCOPE: u32, const SEMANTICS: u32>(
-        &mut self,
-        id: Id<u32>,
-        val: u32,
-    ) -> u32 {
-        let ptr = &mut self.inner[id.index()];
-        let original = *ptr;
-        let new = original.min(val);
-        *ptr = new;
-        original
-    }
-
-    fn atomic_u_max<const SCOPE: u32, const SEMANTICS: u32>(
-        &mut self,
-        id: Id<u32>,
-        val: u32,
-    ) -> u32 {
-        let ptr = &mut self.inner[id.index()];
-        let original = *ptr;
-        let new = original.max(val);
-        *ptr = new;
-        original
-    }
-}
+pub use non_atomic::*;
 
 #[cfg(not(target_arch = "spirv"))]
 mod cpu {

@@ -642,9 +642,10 @@ mod test {
         let mut shadows = vec![];
         let z_near = 0.1;
         let z_far = 100.0;
-        for (_i, light_bundle) in doc.lights.iter().enumerate() {
+        for (i, light_bundle) in doc.lights.iter().enumerate() {
             {
                 let desc = light_bundle.light_details.as_point().unwrap().get();
+                println!("point light {i}: {:?}", desc);
                 let (p, vs) = desc.shadow_mapping_projection_and_view_matrices(
                     &light_bundle.transform.get_global_transform().into(),
                     z_near,

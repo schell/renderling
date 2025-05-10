@@ -1028,16 +1028,16 @@ impl LightTilingInvocation {
                 LightStyle::Directional => true,
                 LightStyle::Point => {
                     let point_light = lighting_slab.read(light.into_point_id());
-                    println!("transform: {transform:?}");
+                    crate::println!("transform: {transform:?}");
                     if transform.translation.x.is_nan() {
-                        println!("step: {step}");
-                        println!("light_index: {light_index}");
-                        println!("light_id: {light_id:?}");
-                        println!(
+                        crate::println!("step: {step}");
+                        crate::println!("light_index: {light_index}");
+                        crate::println!("light_id: {light_id:?}");
+                        crate::println!(
                             "analytical_lights_array.len: {}",
                             analytical_lights_array.len()
                         );
-                        println!("transform_id: {:?}", light.transform_id);
+                        crate::println!("transform_id: {:?}", light.transform_id);
                     }
                     let center = Mat4::from(transform).transform_point3(point_light.position);
                     let radius = point_light.radius_of_illumination(1.0);

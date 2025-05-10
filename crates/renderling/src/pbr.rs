@@ -574,8 +574,8 @@ where
     let lighting_desc = light_slab.read_unchecked(Id::<LightingDescriptor>::new(0));
     let analytical_lights_array = lighting_desc.analytical_lights_array;
     my_println!("lights: {analytical_lights_array:?}");
-    my_println!("n: {n:?}");
-    my_println!("v: {v:?}");
+    my_println!("surface normal: {n:?}");
+    my_println!("vector from surface to camera: {v:?}");
 
     // accumulated outgoing radiance
     let mut lo = Vec3::ZERO;
@@ -595,9 +595,10 @@ where
                     intensity,
                 } = light_slab.read(light.into_point_id());
                 let position = transform.transform_point3(position);
-                let frag_to_light = position - in_pos;
+                let frag_to_light = in_pos - position; // - in_pos;
                 let distance = frag_to_light.length();
                 if distance == 0.0 {
+                    crate::println!("distance between point light and surface is zero");
                     continue;
                 }
                 let l = frag_to_light.alt_norm_or_zero();
