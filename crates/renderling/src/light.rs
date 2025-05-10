@@ -16,7 +16,7 @@ use crate::{
     bvol::{Aabb, BoundingSphere},
     cubemap::{CubemapDescriptor, CubemapFaceDirection},
     geometry::GeometryDescriptor,
-    math::{Fetch, IsSampler, IsVector, Sample2dArray},
+    math::{Fetch, IsAtomicSlab, IsSampler, IsVector, Sample2dArray},
     stage::Renderlet,
     transform::Transform,
 };
@@ -804,11 +804,6 @@ impl IsDepth for DepthImage2dMultisampled {
     type Texture = Image!(2D, type=f32, sampled, depth, multisampled=true);
 }
 
-fn screen_space_to_clip_space(resolution: Vec2, screen_point: Vec2) -> Vec2 {
-    let normalized = screen_point / resolution;
-    Vec2::new(normalized.x, 1.0 - normalized.y) * 2.0 - 1.0
-}
-
 /// A tile of screen space used to cull lights.
 #[derive(Clone, Copy, Default, SlabItem, core::fmt::Debug)]
 #[offsets]
@@ -882,8 +877,10 @@ impl LightTilingInvocation {
     }
 
     /// The index of the fragment within its tile.
-    //
-    // TODO: verify this is correct
+    ///
+    /// 1. The fragment position is determined from the global invocation index.
+    /// 2. The fragment's relative xy position within the tile is determined.
+    /// 3. The index of the fragment's tile position is calculated and returned.
     fn frag_index(&self) -> usize {
         // The fragment's xy position within its tile
         let frag_tile = self.frag_pos() % LightTilingDescriptor::TILE_SIZE;
@@ -894,12 +891,12 @@ impl LightTilingInvocation {
     /// Compute the min and max depth of one fragment/invocation for light tiling.
     ///
     /// Returns the **indices** of the min and max depths of the tile.
-    fn compute_min_and_max_depth(
+    fn compute_min_and_max_depth<S: IsAtomicSlab + ?Sized>(
         &self,
         depth_texture: &impl Fetch<UVec2, Output = Vec4>,
         _lighting_slab: &[u32],
-        tiling_slab: &mut [u32],
-    ) -> (usize, usize) {
+        tiling_slab: &mut S,
+    ) -> (Id<u32>, Id<u32>) {
         let frag_pos = self.frag_pos();
         // Depth frag value at the fragment position
         let frag_depth: f32 = depth_texture.fetch(frag_pos).x;
@@ -913,24 +910,18 @@ impl LightTilingInvocation {
         let tiling_desc = tiling_slab.read_unchecked(Id::<LightTilingDescriptor>::new(0));
         // index of the tile's min depth atomic value in the tiling slab
         let tile_id = tiling_desc.tiles_array.at(tile_index);
-        let min_depth_index = (tile_id + LightTile::OFFSET_OF_DEPTH_MIN).index();
+        let min_depth_index = tile_id + LightTile::OFFSET_OF_DEPTH_MIN;
         // index of the tile's max depth atomic value in the tiling slab
-        let max_depth_index = (tile_id + LightTile::OFFSET_OF_DEPTH_MAX).index();
+        let max_depth_index = tile_id + LightTile::OFFSET_OF_DEPTH_MAX;
 
-        let _prev_min_depth = unsafe {
-            spirv_std::arch::atomic_u_min::<
-                u32,
+        let _prev_min_depth = tiling_slab.atomic_u_min::<
                 { spirv_std::memory::Scope::Workgroup as u32 },
                 { spirv_std::memory::Semantics::WORKGROUP_MEMORY.bits() },
-            >(&mut tiling_slab[min_depth_index], frag_depth_u32)
-        };
-        let _prev_max_depth = unsafe {
-            spirv_std::arch::atomic_u_max::<
-                u32,
+        >(min_depth_index, frag_depth_u32);
+        let _prev_max_depth = tiling_slab.atomic_u_max::<
                 { spirv_std::memory::Scope::Workgroup as u32 },
-                { spirv_std::memory::Semantics::WORKGROUP_MEMORY.bits() },
-            >(&mut tiling_slab[max_depth_index], frag_depth_u32)
-        };
+                { spirv_std::memory::Semantics::WORKGROUP_MEMORY.bits() }
+            >(max_depth_index, frag_depth_u32);
 
         (min_depth_index, max_depth_index)
     }
@@ -949,7 +940,7 @@ impl LightTilingInvocation {
             && frag_pos.y % LightTilingDescriptor::TILE_SIZE.y == 0
     }
 
-    fn clear_tiles(&self, tiling_slab: &mut [u32]) {
+    fn clear_tiles<S: IsAtomicSlab + ?Sized>(&self, tiling_slab: &mut S) {
         if self.frag_pos_is_tile_corner() {
             // only continue if this is the invocation in the top-left of the tile, as
             // we only need one invocation per tile.
@@ -969,23 +960,26 @@ impl LightTilingInvocation {
             // index of the tile's max depth atomic value in the tiling slab
             let max_depth_index = (tile_id + LightTile::OFFSET_OF_DEPTH_MAX).index();
 
-            tiling_slab[min_depth_index] = u32::MAX;
-            tiling_slab[max_depth_index] = 0;
+            tiling_slab.write(min_depth_index.into(), &u32::MAX);
+            tiling_slab.write(max_depth_index.into(), &0u32);
         }
     }
 
-    fn compute_light_lists(
+    // The difficulty here is that in SPIRV we can access `tiling_slab` atomically without wrapping it
+    // in a type, but on CPU we must pass an array of (something like) `AtomicU32`. I'm not sure how to
+    // model this interaction to test it on the CPU. I think I'll need something like `AtomicSlab`.
+    fn compute_light_lists<S: IsAtomicSlab + ?Sized>(
         &self,
         geometry_slab: &[u32],
         lighting_slab: &[u32],
-        tiling_slab: &mut [u32],
-        min_depth_index: usize,
-        max_depth_index: usize,
+        tiling_slab: &mut S,
+        min_depth_index: Id<u32>,
+        max_depth_index: Id<u32>,
     ) {
         // At this point we know the depth has been computed, so now we can construct the tile's frustum
         // in clip space.
-        let depth_min_u32 = tiling_slab[min_depth_index];
-        let depth_max_u32 = tiling_slab[max_depth_index];
+        let depth_min_u32 = tiling_slab.read_unchecked(min_depth_index);
+        let depth_max_u32 = tiling_slab.read_unchecked(max_depth_index);
         let depth_min = depth_min_u32 as f32 / u32::MAX as f32;
         let depth_max = depth_max_u32 as f32 / u32::MAX as f32;
 
@@ -1011,7 +1005,7 @@ impl LightTilingInvocation {
         );
         let camera = geometry_slab.read_unchecked(camera_id);
 
-        let frag_light_index = self.frag_index();
+        let index_of_invocation_in_tile = self.frag_index();
         // List of all analytical lights in the scene
         let analytical_lights_array = lighting_slab.read_unchecked(
             Id::<LightingDescriptor>::new(0)
@@ -1023,58 +1017,68 @@ impl LightTilingInvocation {
         // Each invocation will calculate a few lights' contribution to the tile, until all lights
         // have been visited
         for step in 0..(analytical_lights_array.len() / count_of_fragments_in_one_tile) + 1 {
-            let light_index = step * count_of_fragments_in_one_tile + frag_light_index;
+            let light_index = step * count_of_fragments_in_one_tile + index_of_invocation_in_tile;
             if light_index >= analytical_lights_array.len() {
                 break;
             }
             let light_id = lighting_slab.read_unchecked(analytical_lights_array.at(light_index));
             let light = lighting_slab.read_unchecked(light_id);
             let transform = geometry_slab.read(light.transform_id);
-            // let should_add = match light.light_type {
-            //     LightStyle::Directional => true,
-            //     LightStyle::Point => {
-            //         let point_light = lighting_slab.read(light.into_point_id());
-            //         let center = Mat4::from(transform).transform_point3(point_light.position);
-            //         let radius = point_light.radius_of_illumination(1.0);
-            //         let sphere = BoundingSphere::new(center, radius);
-            //         let aabb_ss = sphere.project_onto_viewport(&camera, resolution);
-            //         aabb_ss.intersects_aabb(&tile_aabb_ss)
-            //     }
-            //     LightStyle::Spot => false,
-            // };
+            let should_add = match light.light_type {
+                LightStyle::Directional => true,
+                LightStyle::Point => {
+                    let point_light = lighting_slab.read(light.into_point_id());
+                    println!("transform: {transform:?}");
+                    if transform.translation.x.is_nan() {
+                        println!("step: {step}");
+                        println!("light_index: {light_index}");
+                        println!("light_id: {light_id:?}");
+                        println!(
+                            "analytical_lights_array.len: {}",
+                            analytical_lights_array.len()
+                        );
+                        println!("transform_id: {:?}", light.transform_id);
+                    }
+                    let center = Mat4::from(transform).transform_point3(point_light.position);
+                    let radius = point_light.radius_of_illumination(1.0);
+                    let sphere = BoundingSphere::new(center, radius);
+                    let aabb_ss = sphere.project_onto_viewport(&camera, resolution);
+                    aabb_ss.intersects_aabb(&tile_aabb_ss)
+                }
+                LightStyle::Spot => false,
+            };
 
-            // if should_add {
-            let next_index = unsafe {
-                spirv_std::arch::atomic_i_increment::<
-                    u32,
+            if should_add {
+                let next_index = tiling_slab.atomic_i_increment::<
                     { spirv_std::memory::Scope::Workgroup as u32 },
                     { spirv_std::memory::Semantics::WORKGROUP_MEMORY.bits() },
-                >(&mut tiling_slab[(next_light_id).index()])
-            };
-            if next_index as usize >= tile_lights_array.len() {
-                break;
+                >(next_light_id);
+                if next_index as usize >= tile_lights_array.len() {
+                    break;
+                }
+                tiling_slab.write(next_index.into(), &light_id);
             }
-            // tiling_slab[next_index as usize] = light_id.inner();
-            // }
         }
     }
 
     // TODO: think about breaking the light tiling "compute tiles" shader up into sub-shaders.
     // It would also be possible to join or parallelize some of this work with frustum culling
     // and occlusion culling.
-    fn compute_tiles(
+    fn compute_tiles<S: IsAtomicSlab + ?Sized>(
         &self,
         depth_texture: &impl Fetch<UVec2, Output = Vec4>,
         geometry_slab: &[u32],
         lighting_slab: &[u32],
-        tiling_slab: &mut [u32],
+        tiling_slab: &mut S,
     ) {
         self.clear_tiles(tiling_slab);
+        #[cfg(gpu)]
         unsafe {
             spirv_std::arch::workgroup_memory_barrier_with_group_sync();
         }
         let (min_index, max_index) =
             self.compute_min_and_max_depth(depth_texture, lighting_slab, tiling_slab);
+        #[cfg(gpu)]
         unsafe {
             spirv_std::arch::workgroup_memory_barrier_with_group_sync();
         }
@@ -1202,31 +1206,6 @@ mod test {
         assert!(
             !crate::math::is_inside_clip_space(outside),
             "should be outside"
-        );
-    }
-
-    #[test]
-    fn screen_space_to_clip_space_sanity() {
-        let resolution = Vec2::new(800.0, 600.0);
-        let tl = Vec2::new(0.0, 0.0);
-        let tr = Vec2::new(resolution.x, 0.0);
-        let bl = Vec2::new(0.0, resolution.y);
-        let br = resolution;
-        assert_eq!(
-            Vec2::new(-1.0, 1.0),
-            screen_space_to_clip_space(resolution, tl)
-        );
-        assert_eq!(
-            Vec2::new(1.0, 1.0),
-            screen_space_to_clip_space(resolution, tr)
-        );
-        assert_eq!(
-            Vec2::new(-1.0, -1.0),
-            screen_space_to_clip_space(resolution, bl)
-        );
-        assert_eq!(
-            Vec2::new(1.0, -1.0),
-            screen_space_to_clip_space(resolution, br)
         );
     }
 

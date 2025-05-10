@@ -9,12 +9,11 @@ use std::sync::Arc;
 
 use craballoc::{
     runtime::WgpuRuntime,
-    slab::{SlabAllocator, SlabAllocatorError, SlabBuffer},
+    slab::{SlabAllocator, SlabBuffer},
     value::{GpuArray, Hybrid},
 };
-use crabslab::{Id, Slab};
+use crabslab::Id;
 use glam::UVec2;
-use snafu::OptionExt;
 
 use crate::bindgroup::ManagedBindGroup;
 
@@ -22,9 +21,9 @@ use super::{LightTile, LightTilingDescriptor};
 
 pub struct LightTiling {
     // depth_pre_pass_pipeline: Arc<wgpu::RenderPipeline>,
-    tiling_slab: SlabAllocator<WgpuRuntime>,
+    pub(crate) tiling_slab: SlabAllocator<WgpuRuntime>,
     tiling_descriptor: Hybrid<LightTilingDescriptor>,
-    tiles: GpuArray<LightTile>,
+    _tiles: GpuArray<LightTile>,
     bind_group_creation_time: Arc<AtomicUsize>,
     depth_texture_id: Arc<AtomicUsize>,
     compute_tiles_bind_group_layout: Arc<wgpu::BindGroupLayout>,
@@ -148,7 +147,7 @@ impl LightTiling {
         Self {
             tiling_slab,
             tiling_descriptor,
-            tiles,
+            _tiles: tiles,
             bind_group_creation_time: Default::default(),
             depth_texture_id: Default::default(),
             compute_tiles_bind_group_layout: compute_tiles_bind_group_layout.into(),
@@ -157,17 +156,22 @@ impl LightTiling {
         }
     }
 
+    pub(crate) fn prepare(&self, depth_texture_size: UVec2) {
+        self.tiling_descriptor.modify(|d| {
+            d.depth_texture_size = depth_texture_size;
+        });
+    }
+
     pub fn run(
         &self,
         geometry_slab: &SlabBuffer<wgpu::Buffer>,
         lighting_slab: &SlabBuffer<wgpu::Buffer>,
         depth_texture: &crate::texture::Texture,
     ) {
+        let depth_texture_size = depth_texture.size();
+        self.prepare(depth_texture_size);
+
         let runtime = self.tiling_slab.runtime();
-        let depth_texture_size = self.tiling_descriptor.modify(|d| {
-            d.depth_texture_size = depth_texture.size();
-            d.depth_texture_size
-        });
         let tiling_slab_buffer = self.tiling_slab.commit();
         let label = Some("light-tiling-compute-tiles");
         let mut encoder = runtime
@@ -226,8 +230,8 @@ impl LightTiling {
             });
             compute_pass.set_bind_group(0, bind_group.as_ref(), &[]);
 
-            let x = depth_texture_size.x / 16 + 1;
-            let y = depth_texture_size.y / 16 + 1;
+            let x = depth_texture_size.x / LightTilingDescriptor::TILE_SIZE.x + 1;
+            let y = depth_texture_size.y / LightTilingDescriptor::TILE_SIZE.y + 1;
             let z = 1;
             compute_pass.dispatch_workgroups(x, y, z);
         }
@@ -238,6 +242,7 @@ impl LightTiling {
     pub(crate) async fn read_images(
         &self,
     ) -> (image::GrayImage, image::GrayImage, image::GrayImage) {
+        use crabslab::Slab;
         let size = self.tiling_descriptor.get().depth_texture_size / 16;
         let slab = self.tiling_slab.read(..).await.unwrap();
         log::info!("tiling slab size: {}", slab.len());

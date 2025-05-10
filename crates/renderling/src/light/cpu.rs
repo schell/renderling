@@ -452,13 +452,14 @@ mod test {
     use crate::{
         bvol::BoundingBox,
         camera::Camera,
+        color::linear_xfer_vec4,
         draw::DrawIndirectArgs,
         geometry::GeometryDescriptor,
         light::{
             LightTile, LightTiling, LightTilingDescriptor, LightTilingInvocation,
             SpotLightCalculation,
         },
-        math::GpuRng,
+        math::{hex_to_vec4, scaled_f32_to_u8, CpuTexture2d, GpuRng, NonAtomicSlab},
         pbr::Material,
         prelude::Transform,
         stage::{Renderlet, Stage, Vertex},
@@ -627,7 +628,7 @@ mod test {
             stage.new_material(Material {
                 albedo_factor: {
                     let mut color = crate::math::hex_to_vec4(albedo_factor);
-                    crate::color::linear_xfer_vec4(&mut color);
+                    linear_xfer_vec4(&mut color);
                     color
                 },
                 ..Default::default()
@@ -685,7 +686,6 @@ mod test {
         prng: &mut GpuRng,
         bounding_boxes: &[BoundingBox],
     ) -> (
-        Hybrid<Transform>,
         HybridArray<Vertex>,
         Hybrid<Material>,
         AnalyticalLightBundle,
@@ -695,6 +695,9 @@ mod test {
         while bounding_boxes.iter().any(|bb| bb.contains_point(position)) {
             position = gen_vec3(prng);
         }
+        assert!(!position.x.is_nan());
+        assert!(!position.y.is_nan());
+        assert!(!position.z.is_nan());
 
         let color = Vec4::new(
             prng.gen_f32(0.0, 1.0),
@@ -710,16 +713,14 @@ mod test {
             half_extent: Vec3::new(scale, scale, scale) * 0.5,
         };
 
-        // let inner_cutoff = prng.gen_f32(0.04, 0.09);
-        // let outer_cutoff = prng.gen_f32(inner_cutoff, 0.16);
-
         // Also make a renderlet for the light, so we can see where it is.
+        let transform = stage.new_nested_transform();
+        transform.modify(|t| {
+            t.translation = position;
+        });
         let rez = stage
             .builder()
-            .with_transform(Transform {
-                translation: position,
-                ..Default::default()
-            })
+            .with_transform_id(transform.global_transform_id())
             .with_vertices(
                 light_bb
                     .get_mesh()
@@ -733,25 +734,16 @@ mod test {
                 ..Default::default()
             })
             .suffix({
+                // suffix the actual analytical light
                 let intensity = scale * 100.0;
-                // let light_descriptor = SpotLightDescriptor {
-                //     position,
-                //     color,
-                //     intensity,
-                //     direction: Vec3::NEG_Y,
-                //     inner_cutoff,
-                //     outer_cutoff,
-                // };
+
                 let light_descriptor = PointLightDescriptor {
-                    position,
+                    position: Vec3::ZERO,
                     color,
                     intensity,
                 };
-                let nested_transform = stage.new_nested_transform();
-                nested_transform.modify(|t| {
-                    t.translation = position;
-                });
-                stage.new_analytical_light(light_descriptor, None)
+
+                stage.new_analytical_light(light_descriptor, Some(transform))
             })
             .build();
         rez
@@ -778,91 +770,118 @@ mod test {
     }
 
     #[test]
-    fn light_tiling_positions() {
-        let w = 32;
-        let h = 32;
-        let slab = SlabAllocator::new(CpuRuntime, "test", ());
-        let descriptor = slab.new_value(LightTilingDescriptor {
-            depth_texture_size: UVec2::new(w, h),
-            ..Default::default()
-        });
-        let tiled_size = descriptor.get().tile_dimensions();
-        println!("tiled_size: {tiled_size}");
-        let tiles = slab.new_array(vec![
-            LightTile::default();
-            (tiled_size.x * tiled_size.y) as usize
-        ]);
-        descriptor.modify(|d| {
-            d.tiles_array = tiles.array();
-        });
-        let desc = descriptor.get();
-        let mut tiling_slab = slab.commit().as_vec().clone();
+    /// Test the light tiling feature.
+    fn light_tiling_cpu_sanity() {
+        let _ = env_logger::builder().is_test(true).try_init();
+        let size = size();
+        let ctx = crate::Context::headless(size.x, size.y);
+        let stage = ctx
+            .new_stage()
+            .with_lighting(true)
+            .with_bloom(true)
+            .with_bloom_mix_strength(0.5);
 
-        let mut img = image::RgbImage::new(w, h);
-        let mut light_img = image::RgbImage::new(w, h);
-        for x in 0..w {
-            for y in 0..h {
-                let global_id = UVec3::new(x, y, 0);
-                let invocation = LightTilingInvocation::new(global_id, descriptor.get());
-                if invocation.should_invoke() {
-                    let pixel = img.get_pixel_mut(x, y);
-                    let r = (x as f32 / w as f32 * 255.0) as u8;
-                    let g = (y as f32 / h as f32 * 255.0) as u8;
-                    pixel.0 = [r, g, 0x00];
+        let doc = stage
+            .load_gltf_document_from_path(
+                crate::test::workspace_dir()
+                    .join("gltf")
+                    .join("light_tiling_test.glb"),
+            )
+            .unwrap();
 
-                    if invocation.frag_pos_is_tile_corner() {
-                        pixel.0[0] = 0xFF - pixel.0[0];
-                        pixel.0[1] = 0xFF - pixel.0[1];
-                        pixel.0[2] = 0xFF - pixel.0[2];
+        let camera = stage.new_camera(make_camera());
+        stage.use_camera(camera);
 
-                        let tile_dimensions = tiled_size;
-                        let tile_index = invocation.tile_index();
-                        println!("frag_pos: {}", invocation.frag_pos());
-                        println!("tile_pos: {}", invocation.tile_pos());
-                        println!("tile_index: {tile_index}");
-                        let num_tiles = tile_dimensions.x * tile_dimensions.y;
+        let moonlight = doc.lights.first().unwrap();
+        let _shadow = {
+            let sm = stage
+                .new_shadow_map(moonlight, UVec2::splat(1024), 0.1, 256.0)
+                .unwrap();
+            sm.shadowmap_descriptor.modify(|d| {
+                d.bias_min = 0.0;
+                d.bias_max = 0.0;
+                d.pcf_samples = 2;
+            });
+            sm.update(&stage, doc.renderlets_iter()).unwrap();
+            sm
+        };
 
-                        // index of the tile's min depth atomic value in the tiling slab
-                        let min_depth_index = (invocation.descriptor.tiles_array.at(tile_index)
-                            + LightTile::OFFSET_OF_DEPTH_MIN)
-                            .index();
-                        // index of the tile's max depth atomic value in the tiling slab
-                        let max_depth_index = (invocation.descriptor.tiles_array.at(tile_index)
-                            + LightTile::OFFSET_OF_DEPTH_MAX)
-                            .index();
-
-                        let percent = tile_index as f32 / num_tiles as f32; //frag_pos.x as f32 / self.descriptor.depth_texture_size.x as f32;
-                        tiling_slab[min_depth_index] = (percent * u32::MAX as f32) as u32;
-                        tiling_slab[max_depth_index] = u32::MAX; //(percent * u32::MAX as f32) as u32;
+        let mut bounding_boxes = vec![];
+        for node in doc.nodes.iter() {
+            if node.mesh.is_none() {
+                continue;
+            }
+            let transform = Mat4::from(node.transform.get_global_transform());
+            if let Some(mesh_index) = node.mesh {
+                let mesh = &doc.meshes[mesh_index];
+                for prim in mesh.primitives.iter() {
+                    let (min, max) = prim.bounding_box;
+                    let min = transform.transform_point3(min);
+                    let max = transform.transform_point3(max);
+                    let bb = BoundingBox::from_min_max(min, max);
+                    if bb.half_extent.min_element().is_zero() {
+                        continue;
                     }
-
-                    let pixel = light_img.get_pixel_mut(x, y);
-                    let index = invocation.frag_index();
-                    println!("index: {index}");
-                    let value = crate::math::scaled_f32_to_u8(index as f32 / (16.0 * 16.0));
-                    pixel.0[0] = value;
-                    pixel.0[1] = value;
-                    pixel.0[2] = value;
+                    bounding_boxes.push(bb);
                 }
             }
         }
-        img_diff::save("light/tiling/positions.png", img);
-        img_diff::save("light/tiling/frag_pos.png", light_img);
 
-        let (mins, maxs) = tiling_slab
-            .read_vec(desc.tiles_array)
-            .into_iter()
-            .map(|tile| {
-                (
-                    crate::math::scaled_u32_to_u8(tile.depth_min),
-                    crate::math::scaled_u32_to_u8(tile.depth_max),
-                )
-            })
-            .unzip();
-        let mins_img = image::GrayImage::from_vec(tiled_size.x, tiled_size.y, mins).unwrap();
-        img_diff::save("light/tiling/positions-mins.png", mins_img);
-        let maxs_img = image::GrayImage::from_vec(tiled_size.x, tiled_size.y, maxs).unwrap();
-        img_diff::save("light/tiling/positions-maxs.png", maxs_img);
+        let mut prng = crate::math::GpuRng::new(666);
+        let mut lights = vec![];
+
+        for _ in 0..MAX_LIGHTS {
+            lights.push(gen_light(&stage, &mut prng, &bounding_boxes));
+        }
+
+        // Remove the light meshes
+        for (_, _, _, renderlet) in lights.iter() {
+            stage.remove_renderlet(renderlet);
+        }
+        snapshot(
+            &ctx,
+            &stage,
+            "light/tiling/cpu/4-after-lights-no-meshes.png",
+        );
+
+        // Get all the slabs and run the shader on the CPU
+
+        let tiling = LightTiling::new(ctx.runtime(), false, size, 32);
+        let desc = tiling.descriptor().get();
+        let depth = stage.depth_texture.read().unwrap();
+        let depth_img = crate::texture::read_depth_texture_to_image(
+            ctx.runtime(),
+            size.x as usize,
+            size.y as usize,
+            &depth.texture,
+        )
+        .unwrap();
+        let geometry_slab =
+            futures_lite::future::block_on(stage.geometry.slab_allocator().read(..)).unwrap();
+        let lighting_slab =
+            futures_lite::future::block_on(stage.lighting.slab_allocator().read(..)).unwrap();
+        let tiling_slab = {
+            tiling.prepare(UVec2::new(depth_img.width(), depth_img.height()));
+            let _ = tiling.tiling_slab.commit();
+            futures_lite::future::block_on(tiling.tiling_slab.read(..)).unwrap()
+        };
+
+        let w = depth_img.width() / LightTilingDescriptor::TILE_SIZE.x + 1;
+        let h = depth_img.height() / LightTilingDescriptor::TILE_SIZE.y + 1;
+        let mut non_atomic_tiling_slab = NonAtomicSlab::new(tiling_slab);
+        let depth_img = CpuTexture2d::from_image(depth_img, crate::math::luma_u8_to_vec4);
+        for x in 0..w {
+            for y in 0..h {
+                let global_id = UVec3::new(x, y, 0);
+                let invocation = LightTilingInvocation::new(global_id, desc);
+                invocation.compute_tiles(
+                    &depth_img,
+                    &geometry_slab,
+                    &lighting_slab,
+                    &mut non_atomic_tiling_slab,
+                );
+            }
+        }
     }
 
     #[test]
@@ -935,15 +954,20 @@ mod test {
         log::info!("have {} bounding boxes", bounding_boxes.len());
 
         let mut prng = crate::math::GpuRng::new(666);
-        let mut lights = vec![];
+        let mut lights: Vec<(
+            HybridArray<Vertex>,
+            Hybrid<Material>,
+            AnalyticalLightBundle,
+            Hybrid<Renderlet>,
+        )> = vec![];
 
-        for _ in 0..MAX_LIGHTS {
+        for _ in 0..MAX_LIGHTS / 2 {
             lights.push(gen_light(&stage, &mut prng, &bounding_boxes));
         }
         snapshot(&ctx, &stage, "light/tiling/3-after-lights.png");
 
         // Remove the light meshes
-        for (_, _, _, _, renderlet) in lights.iter() {
+        for (_, _, _, renderlet) in lights.iter() {
             stage.remove_renderlet(renderlet);
         }
         snapshot(&ctx, &stage, "light/tiling/4-after-lights-no-meshes.png");
@@ -995,7 +1019,7 @@ mod test {
                 iterations: vec![],
             };
 
-            for (i, (_, _, _, light, _)) in lights.iter().enumerate() {
+            for (i, (_, _, light, _)) in lights.iter().enumerate() {
                 stage.remove_light(light);
                 if i < number_of_lights {
                     stage.add_light(light);
