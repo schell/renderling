@@ -96,6 +96,30 @@ impl StageCommitResult {
         .max()
         .unwrap_or_default()
     }
+
+    pub fn should_invalidate(&self, previous_creation_time: usize) -> bool {
+        let mut should = false;
+        if self.geometry_buffer.is_new_this_commit() {
+            log::trace!("geometry buffer is new this frame");
+            should = true;
+        }
+        if self.materials_buffer.is_new_this_commit() {
+            log::trace!("materials buffer is new this frame");
+            should = true;
+        }
+        if self.lighting_buffer.is_new_this_commit() {
+            log::trace!("lighting buffer is new this frame");
+            should = true;
+        }
+        let current = self.latest_creation_time();
+        if current > previous_creation_time {
+            log::trace!(
+                "current latest buffer creation time {current} > previous {previous_creation_time}"
+            );
+            should = true;
+        }
+        should
+    }
 }
 
 struct RenderletBindGroup<'a> {
@@ -200,12 +224,13 @@ impl StageRendering<'_> {
                 current_renderlet_bind_group_creation_time,
                 std::sync::atomic::Ordering::Relaxed,
             );
-        let should_invalidate_renderlet_bind_group = current_renderlet_bind_group_creation_time
-            > previous_renderlet_bind_group_creation_time;
+        let should_invalidate_renderlet_bind_group =
+            commit_result.should_invalidate(previous_renderlet_bind_group_creation_time);
         let renderlet_bind_group =
             self.stage
                 .renderlet_bind_group
                 .get(should_invalidate_renderlet_bind_group, || {
+                    log::trace!("recreating renderlet bind group");
                     let atlas_texture = self.stage.materials.atlas().get_texture();
                     let skybox = self.stage.skybox.read().unwrap();
                     let shadow_map = self.stage.lighting.shadow_map_atlas.get_texture();
