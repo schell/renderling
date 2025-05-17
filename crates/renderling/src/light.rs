@@ -433,6 +433,16 @@ pub enum LightStyle {
     Spot = 2,
 }
 
+impl core::fmt::Display for LightStyle {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            LightStyle::Directional => f.write_str("directional"),
+            LightStyle::Point => f.write_str("point"),
+            LightStyle::Spot => f.write_str("spot"),
+        }
+    }
+}
+
 impl SlabItem for LightStyle {
     const SLAB_SIZE: usize = { 1 };
 

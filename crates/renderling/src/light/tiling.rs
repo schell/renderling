@@ -22,7 +22,7 @@ use super::{LightTile, LightTilingDescriptor};
 pub struct LightTiling {
     // depth_pre_pass_pipeline: Arc<wgpu::RenderPipeline>,
     pub(crate) tiling_slab: SlabAllocator<WgpuRuntime>,
-    tiling_descriptor: Hybrid<LightTilingDescriptor>,
+    pub(crate) tiling_descriptor: Hybrid<LightTilingDescriptor>,
     _tiles: GpuArray<LightTile>,
     bind_group_creation_time: Arc<AtomicUsize>,
     depth_texture_id: Arc<AtomicUsize>,
@@ -110,10 +110,6 @@ impl LightTiling {
                 cache: None,
             });
         (compute_tiles_pipeline, pipeline_layout, bind_group_layout)
-    }
-
-    pub(crate) fn descriptor(&self) -> &Hybrid<LightTilingDescriptor> {
-        &self.tiling_descriptor
     }
 
     pub fn new(
