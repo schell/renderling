@@ -25,10 +25,13 @@ use crate::{
     light::{
         LightTile, LightTiling, LightTilingDescriptor, LightTilingInvocation, SpotLightCalculation,
     },
-    math::{hex_to_vec4, scaled_f32_to_u8, ConstTexture, CpuTexture2d, GpuRng, NonAtomicSlab},
+    math::{
+        hex_to_vec4, scaled_f32_to_u8, ConstTexture, CpuTexture2d, CpuTexture2dArray, GpuRng,
+        IsVector, NonAtomicSlab,
+    },
     pbr::Material,
     prelude::Transform,
-    stage::{Renderlet, Stage, Vertex},
+    stage::{Renderlet, RenderletPbrVertexInfo, Stage, Vertex},
 };
 
 use super::*;
@@ -736,6 +739,17 @@ fn pedestal() {
                 .join("pedestal.glb"),
         )
         .unwrap();
+    let materials = doc.materials.get_vec();
+    log::info!("materials: {materials:#?}");
+    doc.materials.set_item(
+        0,
+        Material {
+            albedo_factor: Vec4::ONE,
+            roughness_factor: 1.0,
+            metallic_factor: 0.0,
+            ..Default::default()
+        },
+    );
     let camera = doc.cameras.first().unwrap();
     camera.camera.modify(|cam| {
         cam.set_projection(Mat4::perspective_rh(
@@ -747,9 +761,10 @@ fn pedestal() {
     });
 
     let color = {
-        let mut c = hex_to_vec4(0xEEDF7AFF);
-        linear_xfer_vec4(&mut c);
-        c
+        // let mut c = hex_to_vec4(0xEEDF7AFF);
+        // linear_xfer_vec4(&mut c);
+        // c
+        Vec4::ONE
     };
     let position = Vec3::new(0.0, 1.0, 0.0);
     let transform = stage.new_nested_transform();
@@ -790,14 +805,89 @@ fn pedestal() {
             ..Default::default()
         })
         .build();
+    {
+        log::info!("adding spot light");
+        let spot_desc = SpotLightDescriptor {
+            position,
+            direction: Vec3::NEG_Y,
+            color,
+            intensity: 5.0,
+            ..Default::default()
+        };
+        let spot = stage.new_analytical_light(spot_desc, None);
+        snapshot(&ctx, &stage, "light/pedestal/spot.png");
 
-    let light_descriptor = PointLightDescriptor {
-        position: Vec3::ZERO,
-        color,
-        intensity: 10.0,
-    };
-    let _light = stage.new_analytical_light(light_descriptor, Some(transform));
-    snapshot(&ctx, &stage, "light/pedestal/point.png");
+        let geometry_slab =
+            futures_lite::future::block_on(stage.geometry.slab_allocator().read(..)).unwrap();
+
+        let renderlet = doc.renderlets_iter().next().unwrap();
+        log::info!("renderlet: {renderlet:#?}");
+        let mut info = RenderletPbrVertexInfo::default();
+
+        for vertex_index in 0..renderlet.get().vertices_array.len() {
+            crate::stage::renderlet_vertex(
+                renderlet.id(),
+                vertex_index as u32,
+                &geometry_slab,
+                &mut Default::default(),
+                &mut Default::default(),
+                &mut Default::default(),
+                &mut Default::default(),
+                &mut Default::default(),
+                &mut Default::default(),
+                &mut Default::default(),
+                &mut Default::default(),
+                &mut Default::default(),
+                &mut info,
+            );
+
+            if info.out_pos.y == 0.0 {
+                break;
+            }
+        }
+        log::info!("info: {info:#?}");
+
+        let texture = ConstTexture::new(Vec4::ONE);
+        let material_slab =
+            futures_lite::future::block_on(stage.materials.slab_allocator().read(..)).unwrap();
+        let lighting_slab =
+            futures_lite::future::block_on(stage.lighting.slab_allocator().read(..)).unwrap();
+        let mut fragment = Vec4::ZERO;
+        crate::pbr::fragment_impl(
+            &texture,
+            &(),
+            &texture,
+            &(),
+            &texture,
+            &(),
+            &texture,
+            &(),
+            &texture,
+            &(),
+            &geometry_slab,
+            &material_slab,
+            &lighting_slab,
+            info.renderlet_id,
+            info.out_color,
+            info.out_uv0,
+            info.out_uv1,
+            info.out_norm,
+            info.out_tangent,
+            info.out_bitangent,
+            info.out_pos,
+            &mut fragment,
+        );
+
+        log::info!("fragment: {fragment}");
+    }
+
+    // let light_descriptor = PointLightDescriptor {
+    //     position: Vec3::ZERO,
+    //     color,
+    //     intensity: 10.0,
+    // };
+    // let _light = stage.new_analytical_light(light_descriptor, Some(transform));
+    // snapshot(&ctx, &stage, "light/pedestal/point.png");
 
     // light.transform.modify(|t| t.translation = position);
 

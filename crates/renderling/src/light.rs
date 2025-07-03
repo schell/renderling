@@ -223,6 +223,7 @@ impl SpotLightCalculation {
         let frag_to_light = light_position - frag_position;
         let frag_to_light_distance = frag_to_light.length();
         if frag_to_light_distance == 0.0 {
+            crate::println!("frag_to_light_distance: {frag_to_light_distance}");
             return Self::default();
         }
         let frag_to_light = frag_to_light.alt_norm_or_zero();
