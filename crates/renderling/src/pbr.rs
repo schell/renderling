@@ -136,7 +136,7 @@ fn fresnel_schlick_roughness(cos_theta: f32, f0: Vec3, roughness: f32) -> Vec3 {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn outgoing_radiance(
+pub fn outgoing_radiance(
     light_color: Vec4,
     albedo: Vec3,
     attenuation: f32,
@@ -584,6 +584,7 @@ where
         let light_id = light_slab.read(analytical_lights_array.at(i));
         let light = light_slab.read(light_id);
         let transform = light_slab.read(light.transform_id);
+        crate::println!("transform: {transform:?}");
         let transform = Mat4::from(transform);
 
         // determine the light ray and the radiance
@@ -602,7 +603,7 @@ where
                     continue;
                 }
                 let l = frag_to_light.alt_norm_or_zero();
-                let attenuation = intensity * 1.0 / (distance * distance);
+                let attenuation = intensity / (distance * distance);
                 let radiance =
                     outgoing_radiance(color, albedo, attenuation, v, l, n, metallic, roughness);
                 let shadow = if light.shadow_map_desc_id.is_some() {
@@ -624,6 +625,7 @@ where
                 let spot_light_descriptor = light_slab.read(light.into_spot_id());
                 let calculation =
                     SpotLightCalculation::new(spot_light_descriptor, transform, in_pos);
+                crate::println!("calculation: {calculation:#?}");
                 if calculation.frag_to_light_distance == 0.0 {
                     continue;
                 }
@@ -672,6 +674,8 @@ where
                 (radiance, shadow)
             }
         };
+        crate::println!("radiance: {radiance}");
+        crate::println!("shadow: {shadow}");
         lo += radiance * (1.0 - shadow);
     }
 
