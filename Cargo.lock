@@ -732,6 +732,8 @@ dependencies = [
 [[package]]
 name = "craballoc"
 version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6a545335ac6c410d6dfa81b094e758c2a94b87fb8317a53fb7bb14ee8687062f"
 dependencies = [
  "async-channel 1.9.0",
  "bytemuck",
@@ -746,6 +748,8 @@ dependencies = [
 [[package]]
 name = "crabslab"
 version = "0.6.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cfe77aba0fb1ad6ddb4d30744bfc61e1420a9cc1fa981b3556cc423506df9450"
 dependencies = [
  "crabslab-derive",
  "futures-lite 1.13.0",
@@ -756,6 +760,8 @@ dependencies = [
 [[package]]
 name = "crabslab-derive"
 version = "0.4.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "32554318ca91eb0c2c6a05659ec2cd1627fd44142d54547bb3d0aa7405a979b2"
 dependencies = [
  "proc-macro2",
  "quote",
