@@ -719,6 +719,8 @@ fn plot(stats: LightTilingStats) {
 }
 
 #[test]
+/// For all light types:
+///
 /// Ensures that a light with a translated position renders the same
 /// as a light at the origin that has a transform applied with
 /// that same translation.
@@ -772,6 +774,7 @@ fn pedestal() {
 
     stage.set_has_lighting(true);
 
+    let mut dir_infos = vec![];
     {
         log::info!("adding dir light");
         let _dir_light = stage.new_analytical_light(
@@ -783,48 +786,15 @@ fn pedestal() {
             None,
         );
         snapshot(&ctx, &stage, "light/pedestal/directional.png");
-        log::info!("dropping dir light");
-    }
-    assert_eq!(0, stage.lighting.lights().count());
-
-    let bb = BoundingBox {
-        center: Vec3::ZERO,
-        half_extent: Vec3::splat(0.25),
-    };
-    let _light_mesh_rez = stage
-        .builder()
-        .with_transform_id(transform.global_transform_id())
-        .with_vertices(
-            bb.get_mesh()
-                .map(|(p, n)| Vertex::default().with_position(p).with_normal(n)),
-        )
-        .with_material(Material {
-            albedo_factor: color,
-            emissive_factor: color.xyz(),
-            emissive_strength_multiplier: 4.0,
-            ..Default::default()
-        })
-        .build();
-    {
-        log::info!("adding spot light");
-        let spot_desc = SpotLightDescriptor {
-            position,
-            direction: Vec3::NEG_Y,
-            color,
-            intensity: 5.0,
-            ..Default::default()
-        };
-        let spot = stage.new_analytical_light(spot_desc, None);
-        snapshot(&ctx, &stage, "light/pedestal/spot.png");
 
         let geometry_slab =
             futures_lite::future::block_on(stage.geometry.slab_allocator().read(..)).unwrap();
 
         let renderlet = doc.renderlets_iter().next().unwrap();
         log::info!("renderlet: {renderlet:#?}");
-        let mut info = RenderletPbrVertexInfo::default();
 
         for vertex_index in 0..renderlet.get().vertices_array.len() {
+            let mut info = RenderletPbrVertexInfo::default();
             crate::stage::renderlet_vertex(
                 renderlet.id(),
                 vertex_index as u32,
@@ -841,44 +811,119 @@ fn pedestal() {
                 &mut info,
             );
 
-            if info.out_pos.y == 0.0 {
-                break;
-            }
+            dir_infos.push(info);
         }
-        log::info!("info: {info:#?}");
+        log::info!("dropping dir light");
+    }
+    assert_eq!(0, stage.lighting.lights().count());
 
-        let texture = ConstTexture::new(Vec4::ONE);
-        let material_slab =
-            futures_lite::future::block_on(stage.materials.slab_allocator().read(..)).unwrap();
-        let lighting_slab =
-            futures_lite::future::block_on(stage.lighting.slab_allocator().read(..)).unwrap();
-        let mut fragment = Vec4::ZERO;
-        crate::pbr::fragment_impl(
-            &texture,
-            &(),
-            &texture,
-            &(),
-            &texture,
-            &(),
-            &texture,
-            &(),
-            &texture,
-            &(),
-            &geometry_slab,
-            &material_slab,
-            &lighting_slab,
-            info.renderlet_id,
-            info.out_color,
-            info.out_uv0,
-            info.out_uv1,
-            info.out_norm,
-            info.out_tangent,
-            info.out_bitangent,
-            info.out_pos,
-            &mut fragment,
+    {
+        log::info!("adding point light");
+        let _dir_light = stage.new_analytical_light(
+            PointLightDescriptor {
+                position,
+                color,
+                intensity: 5.0,
+            },
+            None,
         );
+        snapshot(&ctx, &stage, "light/pedestal/point.png");
+        log::info!("dropping point light");
+    }
 
-        log::info!("fragment: {fragment}");
+    let bb = BoundingBox {
+        center: Vec3::ZERO,
+        half_extent: Vec3::splat(0.25),
+    };
+    // let _light_mesh_rez = stage
+    //     .builder()
+    //     .with_transform_id(transform.global_transform_id())
+    //     .with_vertices(
+    //         bb.get_mesh()
+    //             .map(|(p, n)| Vertex::default().with_position(p).with_normal(n)),
+    //     )
+    //     .with_material(Material {
+    //         albedo_factor: color,
+    //         emissive_factor: color.xyz(),
+    //         emissive_strength_multiplier: 4.0,
+    //         ..Default::default()
+    //     })
+    //     .build();
+    {
+        log::info!("adding spot light");
+        let spot_desc = SpotLightDescriptor {
+            position,
+            direction: Vec3::NEG_Y,
+            color,
+            intensity: 5.0,
+            ..Default::default()
+        };
+        let _spot = stage.new_analytical_light(spot_desc, None);
+        snapshot(&ctx, &stage, "light/pedestal/spot.png");
+
+        let geometry_slab =
+            futures_lite::future::block_on(stage.geometry.slab_allocator().read(..)).unwrap();
+
+        let renderlet = doc.renderlets_iter().next().unwrap();
+        log::info!("renderlet: {renderlet:#?}");
+        let mut spot_infos = vec![];
+
+        for vertex_index in 0..renderlet.get().vertices_array.len() {
+            let mut info = RenderletPbrVertexInfo::default();
+            crate::stage::renderlet_vertex(
+                renderlet.id(),
+                vertex_index as u32,
+                &geometry_slab,
+                &mut Default::default(),
+                &mut Default::default(),
+                &mut Default::default(),
+                &mut Default::default(),
+                &mut Default::default(),
+                &mut Default::default(),
+                &mut Default::default(),
+                &mut Default::default(),
+                &mut Default::default(),
+                &mut info,
+            );
+            spot_infos.push(info);
+        }
+
+        // assert that the output of the vertex shader is the same for the first renderlet,
+        // regardless of the lighting
+        pretty_assertions::assert_eq!(dir_infos, spot_infos);
+
+        // let texture = ConstTexture::new(Vec4::ONE);
+        // let material_slab =
+        //     futures_lite::future::block_on(stage.materials.slab_allocator().read(..)).unwrap();
+        // let lighting_slab =
+        //     futures_lite::future::block_on(stage.lighting.slab_allocator().read(..)).unwrap();
+        // let mut fragment = Vec4::ZERO;
+        // crate::pbr::fragment_impl(
+        //     &texture,
+        //     &(),
+        //     &texture,
+        //     &(),
+        //     &texture,
+        //     &(),
+        //     &texture,
+        //     &(),
+        //     &texture,
+        //     &(),
+        //     &geometry_slab,
+        //     &material_slab,
+        //     &lighting_slab,
+        //     info.renderlet_id,
+        //     info.out_color,
+        //     info.out_uv0,
+        //     info.out_uv1,
+        //     info.out_norm,
+        //     info.out_tangent,
+        //     info.out_bitangent,
+        //     info.out_pos,
+        //     &mut fragment,
+        // );
+
+        // log::info!("fragment: {fragment}");
     }
 
     // let light_descriptor = PointLightDescriptor {
