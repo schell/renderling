@@ -596,6 +596,10 @@ where
                     intensity,
                 } = light_slab.read(light.into_point_id());
                 let position = transform.transform_point3(position);
+                // This definitely is the direction pointing from fragment to the light.
+                // It needs to stay this way.
+                // For more info, see
+                // <https://renderling.xyz/articles/live/light_tiling.html#point_and_spotlight_discrepancies__fri_11_june>
                 let frag_to_light = position - in_pos;
                 let distance = frag_to_light.length();
                 if distance == 0.0 {
