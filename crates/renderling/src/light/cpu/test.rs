@@ -754,12 +754,9 @@ fn pedestal() {
     );
     let camera = doc.cameras.first().unwrap();
     camera.camera.modify(|cam| {
-        cam.set_projection(Mat4::perspective_rh(
-            std::f32::consts::FRAC_PI_6,
-            1.0,
-            0.1,
-            15.0,
-        ));
+        let view = Mat4::look_at_rh(Vec3::new(-7.0, 5.0, 7.0), Vec3::ZERO, Vec3::Y);
+        let proj = Mat4::perspective_rh(std::f32::consts::FRAC_PI_6, 1.0, 0.1, 15.0);
+        cam.set_projection_and_view(proj, view);
     });
 
     let color = {
@@ -768,7 +765,7 @@ fn pedestal() {
         // c
         Vec4::ONE
     };
-    let position = Vec3::new(0.0, 1.0, 0.0);
+    let position = Vec3::new(1.1, 1.0, 1.1);
     let transform = stage.new_nested_transform();
     transform.modify(|t| t.translation = position);
 
@@ -779,7 +776,7 @@ fn pedestal() {
         log::info!("adding dir light");
         let _dir_light = stage.new_analytical_light(
             DirectionalLightDescriptor {
-                direction: Vec3::new(-0.5, -1.0, 0.0),
+                direction: -position,
                 color,
                 intensity: 5.0,
             },
@@ -819,7 +816,7 @@ fn pedestal() {
 
     {
         log::info!("adding point light");
-        let _dir_light = stage.new_analytical_light(
+        let _point_light = stage.new_analytical_light(
             PointLightDescriptor {
                 position,
                 color,
@@ -853,10 +850,12 @@ fn pedestal() {
         log::info!("adding spot light");
         let spot_desc = SpotLightDescriptor {
             position,
-            direction: Vec3::NEG_Y,
+            direction: -position,
             color,
             intensity: 5.0,
-            ..Default::default()
+            inner_cutoff: core::f32::consts::PI / 5.0,
+            outer_cutoff: core::f32::consts::PI / 4.0,
+            // ..Default::default()
         };
         let _spot = stage.new_analytical_light(spot_desc, None);
         snapshot(&ctx, &stage, "light/pedestal/spot.png");
