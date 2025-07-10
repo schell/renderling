@@ -256,6 +256,15 @@ impl SpotLightCalculation {
     }
 }
 
+/// Description of a spot light.
+///
+/// ## Tips
+///
+/// If your spotlight is not illuminating your scenery, ensure that the
+/// `inner_cutoff` and `outer_cutoff` values are "correct". `outer_cutoff`
+/// should be _greater than_ `inner_cutoff` and the values should be a large
+/// enough to cover at least one pixel at the distance between the light and
+/// the scenery.
 #[repr(C)]
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[derive(Copy, Clone, SlabItem)]

@@ -596,7 +596,7 @@ where
                     intensity,
                 } = light_slab.read(light.into_point_id());
                 let position = transform.transform_point3(position);
-                let frag_to_light = in_pos - position; // - in_pos;
+                let frag_to_light = position - in_pos;
                 let distance = frag_to_light.length();
                 if distance == 0.0 {
                     crate::println!("distance between point light and surface is zero");
