@@ -1637,10 +1637,12 @@ impl NestedTransform {
         });
     }
 
+    /// Returns the local transform.
     pub fn get(&self) -> Transform {
         *self.local_transform.read().unwrap()
     }
 
+    /// Returns the global transform.
     pub fn get_global_transform(&self) -> Transform {
         let maybe_parent_guard = self.parent.read().unwrap();
         let transform = self.get();
@@ -1649,6 +1651,16 @@ impl NestedTransform {
             .map(|parent| parent.get_global_transform())
             .unwrap_or_default();
         Transform::from(Mat4::from(parent_transform) * Mat4::from(transform))
+    }
+
+    /// Get a vector containing all the transforms up to the root.
+    pub fn get_all_transforms(&self) -> Vec<Transform> {
+        let mut transforms = vec![];
+        if let Some(parent) = self.parent() {
+            transforms.extend(parent.get_all_transforms());
+        }
+        transforms.push(self.get());
+        transforms
     }
 
     pub fn global_transform_id(&self) -> Id<Transform> {

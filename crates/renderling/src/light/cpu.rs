@@ -132,9 +132,9 @@ pub struct AnalyticalLightBundle<Ct: IsContainer = HybridContainer> {
 impl core::fmt::Display for AnalyticalLightBundle {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.write_fmt(format_args!(
-            "{} {:?}",
+            "AnalyticalLightBundle type={} light-id={:?}",
             self.light_details.style(),
-            self.light.id()
+            self.light.id(),
         ))
     }
 }

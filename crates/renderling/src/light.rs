@@ -1042,13 +1042,18 @@ impl LightTilingInvocation {
                 break;
             }
             let light_id = lighting_slab.read_unchecked(analytical_lights_array.at(light_index));
+            crate::println!("compute_light_lists::{step}::light_id: {light_id:?}");
             let light = lighting_slab.read_unchecked(light_id);
-            let transform = geometry_slab.read(light.transform_id);
+            let transform = lighting_slab.read(light.transform_id);
+            crate::println!(
+                "compute_light_lists::{step}::light.light_type: {}",
+                light.light_type
+            );
             let should_add = match light.light_type {
                 LightStyle::Directional => true,
                 LightStyle::Point => {
                     let point_light = lighting_slab.read(light.into_point_id());
-                    crate::println!("transform: {transform:?}");
+                    crate::println!("compute_light_lists::{step}::transform: {transform:?}");
                     if transform.translation.x.is_nan() {
                         crate::println!("step: {step}");
                         crate::println!("light_index: {light_index}");
