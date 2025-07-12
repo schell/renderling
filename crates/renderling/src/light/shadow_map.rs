@@ -377,7 +377,7 @@ mod test {
         let w = 800.0;
         let h = 800.0;
         let ctx = crate::Context::headless(w as u32, h as u32);
-        let mut stage = ctx
+        let stage = ctx
             .new_stage()
             .with_lighting(true)
             .with_msaa_sample_count(4);
@@ -431,7 +431,7 @@ mod test {
         let w = 800.0;
         let h = 800.0;
         let ctx = crate::Context::headless(w as u32, h as u32);
-        let mut stage = ctx
+        let stage = ctx
             .new_stage()
             .with_lighting(true)
             .with_msaa_sample_count(4);
@@ -483,8 +483,9 @@ mod test {
     fn shadow_mapping_sanity() {
         let w = 800.0;
         let h = 800.0;
-        let ctx = crate::Context::headless(w as u32, h as u32);
-        let mut stage = ctx.new_stage().with_lighting(true);
+        let ctx = crate::Context::headless(w as u32, h as u32)
+            .with_shadow_mapping_atlas_texture_size([1024, 1024, 2]);
+        let stage = ctx.new_stage().with_lighting(true);
 
         let doc = stage
             .load_gltf_document_from_path(
@@ -555,7 +556,7 @@ mod test {
         let w = 800.0;
         let h = 800.0;
         let ctx = crate::Context::headless(w as u32, h as u32);
-        let mut stage = ctx
+        let stage = ctx
             .new_stage()
             .with_lighting(true)
             .with_msaa_sample_count(4);
@@ -645,7 +646,7 @@ mod test {
         for (i, light_bundle) in doc.lights.iter().enumerate() {
             {
                 let desc = light_bundle.light_details.as_point().unwrap().get();
-                println!("point light {i}: {:?}", desc);
+                println!("point light {i}: {desc:?}");
                 let (p, vs) = desc.shadow_mapping_projection_and_view_matrices(
                     &light_bundle.transform.get_global_transform().into(),
                     z_near,

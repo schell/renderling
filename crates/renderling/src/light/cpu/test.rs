@@ -249,17 +249,15 @@ fn gen_vec3(prng: &mut GpuRng) -> Vec3 {
     Vec3::new(x, y, z)
 }
 
-fn gen_light(
-    stage: &Stage,
-    prng: &mut GpuRng,
-    bounding_boxes: &[BoundingBox],
-) -> (
-    Hybrid<Transform>,
-    HybridArray<Vertex>,
-    Hybrid<Material>,
-    AnalyticalLightBundle,
-    Hybrid<Renderlet>,
-) {
+struct GeneratedLight {
+    _unused_transform: Hybrid<Transform>,
+    mesh_geometry: HybridArray<Vertex>,
+    mesh_material: Hybrid<Material>,
+    light: AnalyticalLightBundle,
+    mesh_renderlet: Hybrid<Renderlet>,
+}
+
+fn gen_light(stage: &Stage, prng: &mut GpuRng, bounding_boxes: &[BoundingBox]) -> GeneratedLight {
     let mut position = gen_vec3(prng);
     while bounding_boxes.iter().any(|bb| bb.contains_point(position)) {
         position = gen_vec3(prng);
@@ -283,11 +281,14 @@ fn gen_light(
     };
 
     // Also make a renderlet for the light, so we can see where it is.
-    let transform = stage.new_nested_transform();
-    transform.modify(|t| {
-        t.translation = position;
-    });
-    let rez = stage
+    // let transform = stage.new_nested_transform();
+    // transform.modify(|t| {
+    //     if transform.global_transform_id().inner() == 5676 {
+    //         println!("generated position: {position}");
+    //     }
+    //     t.translation = position;
+    // });
+    let (a, b, c, d, e) = stage
         .builder()
         .with_transform(Transform {
             translation: position,
@@ -318,7 +319,13 @@ fn gen_light(
             stage.new_analytical_light(light_descriptor, None)
         })
         .build();
-    rez
+    GeneratedLight {
+        _unused_transform: a,
+        mesh_geometry: b,
+        mesh_material: c,
+        light: d,
+        mesh_renderlet: e,
+    }
 }
 
 fn size() -> UVec2 {
@@ -403,12 +410,25 @@ fn light_tiling_cpu_sanity() {
     let mut lights = vec![];
 
     for _ in 0..MAX_LIGHTS {
-        lights.push(gen_light(&stage, &mut prng, &bounding_boxes));
+        let light = gen_light(&stage, &mut prng, &bounding_boxes);
+        {
+            let bundle = &light.light;
+            if bundle.light.id().inner() == 5694 {
+                println!("light: {bundle}");
+                println!(
+                    "  global-transform-id: {:?}",
+                    bundle.transform.global_transform_id()
+                );
+                println!("  transforms: {:#?}", bundle.transform.get_all_transforms());
+                println!("  global: {:#?}", bundle.transform.get_global_transform());
+            }
+        }
+        lights.push(light);
     }
 
     // Remove the light meshes
-    for (_, _, _, _, renderlet) in lights.iter() {
-        stage.remove_renderlet(renderlet);
+    for generated_light in lights.iter() {
+        stage.remove_renderlet(&generated_light.mesh_renderlet);
     }
     snapshot(
         &ctx,
@@ -525,13 +545,7 @@ fn light_tiling_sanity() {
     log::info!("have {} bounding boxes", bounding_boxes.len());
 
     let mut prng = crate::math::GpuRng::new(666);
-    let mut lights: Vec<(
-        Hybrid<Transform>,
-        HybridArray<Vertex>,
-        Hybrid<Material>,
-        AnalyticalLightBundle,
-        Hybrid<Renderlet>,
-    )> = vec![];
+    let mut lights: Vec<GeneratedLight> = vec![];
 
     for _ in 0..MAX_LIGHTS {
         lights.push(gen_light(&stage, &mut prng, &bounding_boxes));
@@ -539,8 +553,8 @@ fn light_tiling_sanity() {
     snapshot(&ctx, &stage, "light/tiling/3-after-lights.png");
 
     // Remove the light meshes
-    for (_, _, _, _, renderlet) in lights.iter() {
-        stage.remove_renderlet(renderlet);
+    for generated_light in lights.iter() {
+        stage.remove_renderlet(&generated_light.mesh_renderlet);
     }
     snapshot(&ctx, &stage, "light/tiling/4-after-lights-no-meshes.png");
 
@@ -591,10 +605,10 @@ fn light_tiling_sanity() {
             iterations: vec![],
         };
 
-        for (i, (_, _, _, light, _)) in lights.iter().enumerate() {
-            stage.remove_light(light);
+        for (i, generated_light) in lights.iter().enumerate() {
+            stage.remove_light(&generated_light.light);
             if i < number_of_lights {
-                stage.add_light(light);
+                stage.add_light(&generated_light.light);
             }
         }
 
