@@ -352,6 +352,7 @@ impl DirectionalLightDescriptor {
         // Far limits of the light's reach
         z_far: f32,
     ) -> (Mat4, Mat4) {
+        crate::println!("descriptor: {self:#?}");
         let depth = (z_far - z_near).abs();
         let hd = depth * 0.5;
         let projection = Mat4::orthographic_rh(-hd, hd, -hd, hd, z_near, z_far);
@@ -472,7 +473,7 @@ impl SlabItem for LightStyle {
     }
 }
 
-/// A type-erased/generic light that is used as a slab pointer to a
+/// A generic light that is used as a slab pointer to a
 /// specific light type.
 // TODO: rename to `LightDescriptor`
 #[repr(C)]

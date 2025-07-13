@@ -18,7 +18,7 @@ use crate::{
 };
 
 use super::{
-    AnalyticalLightBundle, DroppedAnalyticalLightBundleSnafu, Lighting, LightingError,
+    AnalyticalLight, DroppedAnalyticalLightBundleSnafu, Lighting, LightingError,
     ShadowMapDescriptor,
 };
 
@@ -44,7 +44,7 @@ pub struct ShadowMap {
     pub(crate) _atlas_textures_array: HybridArray<Id<AtlasTexture>>,
     pub(crate) update_texture: crate::texture::Texture,
     pub(crate) blitting_op: AtlasBlittingOperation,
-    pub(crate) light_bundle: AnalyticalLightBundle<WeakContainer>,
+    pub(crate) light_bundle: AnalyticalLight<WeakContainer>,
 }
 
 impl ShadowMap {
@@ -164,7 +164,7 @@ impl ShadowMap {
     /// a new [`ShadowMap`].
     pub fn new(
         lighting: &Lighting,
-        analytical_light_bundle: &AnalyticalLightBundle,
+        analytical_light_bundle: &AnalyticalLight,
         // Size of the shadow map
         size: UVec2,
         // Distance to the shadow map frustum's near plane
@@ -174,7 +174,7 @@ impl ShadowMap {
     ) -> Result<Self, LightingError> {
         let stage_slab_buffer = lighting.geometry_slab_buffer.read().unwrap();
         let is_point_light =
-            analytical_light_bundle.light_details.style() == super::LightStyle::Point;
+            analytical_light_bundle.light_details().style() == super::LightStyle::Point;
         let count = if is_point_light { 6 } else { 1 };
         let atlas = &lighting.shadow_map_atlas;
         let image = AtlasImage::new(size, crate::atlas::AtlasImageFormat::R32FLOAT);
@@ -211,7 +211,7 @@ impl ShadowMap {
             pcf_samples: 4,
         });
         // Set the descriptor in the light, so the shader knows to use it
-        analytical_light_bundle.light.modify(|light| {
+        analytical_light_bundle.light().modify(|light| {
             light.shadow_map_desc_id = shadowmap_descriptor.id();
         });
         let light_slab_buffer = lighting.light_slab.commit();
@@ -510,8 +510,8 @@ mod test {
 
         let gltf_light = doc.lights.first().unwrap();
         assert_eq!(
-            gltf_light.light.get().transform_id,
-            gltf_light.transform.global_transform_id(),
+            gltf_light.light().get().transform_id,
+            gltf_light.transform().id(),
             "light's global transform id is different from its transform_id"
         );
 
@@ -580,9 +580,9 @@ mod test {
         let z_far = 100.0;
         for (_i, light_bundle) in doc.lights.iter().enumerate() {
             {
-                let desc = light_bundle.light_details.as_spot().unwrap().get();
+                let desc = light_bundle.light_details().as_spot().unwrap().get();
                 let (p, v) = desc.shadow_mapping_projection_and_view(
-                    &light_bundle.transform.get_global_transform().into(),
+                    &light_bundle.transform().get().into(),
                     z_near,
                     z_far,
                 );
@@ -645,10 +645,10 @@ mod test {
         let z_far = 100.0;
         for (i, light_bundle) in doc.lights.iter().enumerate() {
             {
-                let desc = light_bundle.light_details.as_point().unwrap().get();
+                let desc = light_bundle.light_details().as_point().unwrap().get();
                 println!("point light {i}: {desc:?}");
                 let (p, vs) = desc.shadow_mapping_projection_and_view_matrices(
-                    &light_bundle.transform.get_global_transform().into(),
+                    &light_bundle.transform().get().into(),
                     z_near,
                     z_far,
                 );

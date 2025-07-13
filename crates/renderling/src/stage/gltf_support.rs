@@ -11,7 +11,7 @@ use crate::{
     atlas::{AtlasError, AtlasImage, AtlasTexture, TextureAddressMode, TextureModes},
     camera::Camera,
     light::{
-        AnalyticalLightBundle, DirectionalLightDescriptor, LightStyle, PointLightDescriptor,
+        AnalyticalLight, DirectionalLightDescriptor, LightStyle, PointLightDescriptor,
         SpotLightDescriptor,
     },
     pbr::Material,
@@ -774,7 +774,7 @@ pub struct GltfDocument {
     pub default_scene: Option<usize>,
     pub extensions: Option<serde_json::Value>,
     pub textures: Vec<Hybrid<AtlasTexture>>,
-    pub lights: Vec<AnalyticalLightBundle>,
+    pub lights: Vec<AnalyticalLight>,
     pub meshes: Vec<GltfMesh>,
     pub nodes: Vec<GltfNode>,
     pub materials: HybridArray<Material>,
@@ -905,8 +905,7 @@ impl GltfDocument {
             cache: &mut HashMap<usize, NestedTransform>,
             node: &gltf::Node,
         ) -> NestedTransform {
-            let padding = std::iter::repeat(" ")
-                .take(nesting_level * 2)
+            let padding = std::iter::repeat_n(" ", nesting_level * 2)
                 .collect::<Vec<_>>()
                 .join("");
             let nt = if let Some(nt) = cache.get(&node.index()) {
@@ -1015,54 +1014,48 @@ impl GltfDocument {
 
                 let color = Vec3::from(gltf_light.color()).extend(1.0);
                 let intensity = gltf_light.intensity();
-                let light_bundle = match gltf_light.kind() {
+                let mut light_bundle = match gltf_light.kind() {
                     gltf::khr_lights_punctual::Kind::Directional => {
-                        stage.new_analytical_light(
-                            DirectionalLightDescriptor {
-                                direction: Vec3::NEG_Z,
-                                color,
-                                // TODO: Set a unit for lighting.
-                                // We don't yet use a unit for our lighting, and we should.
-                                // https://www.realtimerendering.com/blog/physical-units-for-lights/
-                                //
-                                // NOTE:
-                                // glTF spec [1] says directional light is in lux, whereas spot and point are
-                                // in candelas. I haven't really set a unit, it's implicit in the shader, but it seems we
-                                // can roughly get candelas from lux by dividing by 683 [2].
-                                // 1. https://github.com/KhronosGroup/glTF/blob/main/extensions/2.0/Khronos/KHR_lights_punctual/README.md
-                                // 2. https://depts.washington.edu/mictech/optics/me557/Radiometry.pdf
-                                // 3. https://projects.blender.org/blender/blender-addons/commit/9d903a93f03b
-                                intensity: intensity / 683.0,
-                            },
-                            Some(node_transform),
-                        )
+                        stage.new_analytical_light(DirectionalLightDescriptor {
+                            direction: Vec3::NEG_Z,
+                            color,
+                            // TODO: Set a unit for lighting.
+                            // We don't yet use a unit for our lighting, and we should.
+                            // https://www.realtimerendering.com/blog/physical-units-for-lights/
+                            //
+                            // NOTE:
+                            // glTF spec [1] says directional light is in lux, whereas spot and point are
+                            // in candelas. I haven't really set a unit, it's implicit in the shader, but it seems we
+                            // can roughly get candelas from lux by dividing by 683 [2].
+                            // 1. https://github.com/KhronosGroup/glTF/blob/main/extensions/2.0/Khronos/KHR_lights_punctual/README.md
+                            // 2. https://depts.washington.edu/mictech/optics/me557/Radiometry.pdf
+                            // 3. https://projects.blender.org/blender/blender-addons/commit/9d903a93f03b
+                            intensity: intensity / 683.0,
+                        })
                     }
 
-                    gltf::khr_lights_punctual::Kind::Point => stage.new_analytical_light(
-                        PointLightDescriptor {
+                    gltf::khr_lights_punctual::Kind::Point => {
+                        stage.new_analytical_light(PointLightDescriptor {
                             position: Vec3::ZERO,
                             color,
                             intensity: intensity / 683.0,
-                        },
-                        Some(node_transform),
-                    ),
+                        })
+                    }
 
                     gltf::khr_lights_punctual::Kind::Spot {
                         inner_cone_angle,
                         outer_cone_angle,
-                    } => stage.new_analytical_light(
-                        SpotLightDescriptor {
-                            position: Vec3::ZERO,
-                            direction: Vec3::NEG_Z,
-                            inner_cutoff: inner_cone_angle,
-                            outer_cutoff: outer_cone_angle,
-                            color,
-                            intensity: intensity / (683.0 * 4.0 * std::f32::consts::PI),
-                        },
-                        Some(node_transform),
-                    ),
+                    } => stage.new_analytical_light(SpotLightDescriptor {
+                        position: Vec3::ZERO,
+                        direction: Vec3::NEG_Z,
+                        inner_cutoff: inner_cone_angle,
+                        outer_cutoff: outer_cone_angle,
+                        color,
+                        intensity: intensity / (683.0 * 4.0 * std::f32::consts::PI),
+                    }),
                 };
 
+                light_bundle.link_node_transform(&node_transform);
                 lights.push(light_bundle);
             }
         }
@@ -1363,7 +1356,7 @@ mod test {
         //
         // See <https://github.com/schell/renderling/pull/158/files#r1956634581> for more info.
         doc.lights.iter().for_each(|bundle| {
-            if let crate::light::LightDetails::Directional(d) = &bundle.light_details {
+            if let crate::light::LightDetails::Directional(d) = bundle.light_details() {
                 d.modify(|dir| {
                     dir.intensity *= 683.0;
                 });
