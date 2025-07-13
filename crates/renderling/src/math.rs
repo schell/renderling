@@ -409,6 +409,9 @@ pub use cpu::*;
 /// See [this issue](https://github.com/gfx-rs/naga/issues/2461) and `crate::linkage::test`
 /// for more info.
 pub trait IsVector {
+    /// Type returned by the `orthogonal_vectors` extension function.
+    type OrthogonalVectors;
+
     /// Normalize or return zero.
     fn alt_norm_or_zero(&self) -> Self;
 
@@ -418,9 +421,14 @@ pub trait IsVector {
     /// Returns the dot product of a vector with itself (the square of its
     /// length).
     fn dot2(&self) -> f32;
+
+    /// Returns normalized orthogonal vectors.
+    fn orthonormal_vectors(&self) -> Self::OrthogonalVectors;
 }
 
 impl IsVector for glam::Vec2 {
+    type OrthogonalVectors = Vec2;
+
     fn alt_norm_or_zero(&self) -> Self {
         if self.length().is_zero() {
             glam::Vec2::ZERO
@@ -436,9 +444,16 @@ impl IsVector for glam::Vec2 {
     fn dot2(&self) -> f32 {
         self.dot(*self)
     }
+
+    fn orthonormal_vectors(&self) -> Self::OrthogonalVectors {
+        // https://graphics.pixar.com/library/OrthonormalB/paper.pdf
+        Vec2::new(self.y, self.x).alt_norm_or_zero()
+    }
 }
 
 impl IsVector for glam::Vec3 {
+    type OrthogonalVectors = [Vec3; 2];
+
     fn alt_norm_or_zero(&self) -> Self {
         if self.length().is_zero() {
             glam::Vec3::ZERO
@@ -457,6 +472,18 @@ impl IsVector for glam::Vec3 {
 
     fn dot2(&self) -> f32 {
         self.dot(*self)
+    }
+
+    fn orthonormal_vectors(&self) -> Self::OrthogonalVectors {
+        // From https://graphics.pixar.com/library/OrthonormalB/paper.pdf
+        let s = self.alt_norm_or_zero();
+        let sign = signum_or_zero(s.z);
+        let a = -1.0 / (sign + s.z);
+        let b = s.x * s.y * a;
+        [
+            Self::new(1.0 + sign * s.x * s.x * a, sign * b, -sign * s.x),
+            Self::new(b, sign + s.y * s.y * a, -s.y),
+        ]
     }
 }
 
@@ -809,6 +836,19 @@ impl GpuRng {
         let numerator = self.gen();
         let percentage = numerator as f32 / u32::MAX as f32;
         min + range * percentage
+    }
+
+    pub fn gen_vec3(&mut self, min: Vec3, max: Vec3) -> Vec3 {
+        let x = self.gen_f32(min.x, max.x);
+        let y = self.gen_f32(min.y, max.y);
+        let z = self.gen_f32(min.z, max.z);
+        Vec3::new(x, y, z)
+    }
+
+    pub fn gen_vec2(&mut self, min: Vec2, max: Vec2) -> Vec2 {
+        let x = self.gen_f32(min.x, max.x);
+        let y = self.gen_f32(min.y, max.y);
+        Vec2::new(x, y)
     }
 }
 
