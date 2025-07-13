@@ -311,7 +311,8 @@ impl SpotLightDescriptor {
             .transform_vector3(self.direction)
             .alt_norm_or_zero();
         let position = parent_light_transform.transform_point3(self.position);
-        let view = Mat4::look_to_rh(position, direction, Vec3::Z);
+        let up = direction.orthonormal_vectors()[0];
+        let view = Mat4::look_to_rh(position, direction, up);
         (projection, view)
     }
 }
@@ -362,7 +363,8 @@ impl DirectionalLightDescriptor {
         let position = -direction * depth * 0.5;
         crate::println!("direction: {direction}");
         crate::println!("position: {position}");
-        let view = Mat4::look_to_rh(position, direction, Vec3::Z);
+        let up = direction.orthonormal_vectors()[0];
+        let view = Mat4::look_to_rh(position, direction, up);
         (projection, view)
     }
 }
@@ -1173,6 +1175,8 @@ pub fn light_tiling_compute_tiles_multisampled(
 
 #[cfg(test)]
 mod test {
+    use crate::math::GpuRng;
+
     use super::*;
 
     #[cfg(feature = "gltf")]
@@ -1269,5 +1273,20 @@ mod test {
             18,
             LightTilingInvocation::new(UVec3::new(2, 1, 0), descriptor).frag_index()
         );
+    }
+
+    #[test]
+    fn finding_orthogonal_vectors_sanity() {
+        let mut prng = GpuRng::new(0);
+        for _ in 0..100 {
+            let v2 = prng.gen_vec2(Vec2::splat(-100.0), Vec2::splat(100.0));
+            let v2_ortho = v2.orthonormal_vectors();
+            assert_eq!(0.0, v2.dot(v2_ortho));
+
+            let v3 = prng.gen_vec3(Vec3::splat(-100.0), Vec3::splat(100.0));
+            let [v3_ortho_a, v3_ortho_b] = v3.orthonormal_vectors();
+            assert_eq!(0.0, v3.dot(v3_ortho_a));
+            assert_eq!(0.0, v3.dot(v3_ortho_b));
+        }
     }
 }
