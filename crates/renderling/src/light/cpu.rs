@@ -1,7 +1,5 @@
 //! CPU-only lighting and shadows.
-
-use core::ops::Deref;
-use std::sync::{Arc, Mutex, RwLock, RwLockReadGuard};
+use std::sync::{Arc, RwLock, RwLockReadGuard};
 
 use craballoc::{
     prelude::{Hybrid, SlabAllocator, WgpuRuntime},
@@ -15,6 +13,7 @@ use snafu::prelude::*;
 use crate::{
     atlas::{Atlas, AtlasBlitter, AtlasError},
     geometry::Geometry,
+    prelude::Transform,
     stage::NestedTransform,
 };
 
@@ -123,25 +122,42 @@ impl LightDetails<WeakContainer> {
 ///
 /// Create an `AnalyticalLightBundle` with the `Lighting::new_analytical_light`,
 /// or from `Stage::new_analytical_light`.
-pub struct AnalyticalLightBundle<Ct: IsContainer = HybridContainer> {
-    pub light: Ct::Container<super::Light>,
-    pub light_details: LightDetails<Ct>,
-    pub transform: NestedTransform<Ct>,
+pub struct AnalyticalLight<Ct: IsContainer = HybridContainer> {
+    /// The generic light descriptor.
+    light: Ct::Container<super::Light>,
+    /// The specific light descriptor.
+    light_details: LightDetails<Ct>,
+    /// The light's global transform.
+    ///
+    /// This value lives in the lighting slab.
+    transform: Ct::Container<Transform>,
+    /// The light's nested transform.
+    ///
+    /// This value comes from the light's node, if it belongs to one.
+    /// This may have been set if this light originated from a GLTF file.
+    /// This value lives on the geometry slab and must be referenced here
+    /// to keep the two in sync, which is required to animate lights.
+    node_transform: Option<WeakHybrid<Transform>>,
 }
 
-impl core::fmt::Display for AnalyticalLightBundle {
+impl core::fmt::Display for AnalyticalLight {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.write_fmt(format_args!(
-            "AnalyticalLightBundle type={} light-id={:?}",
+            "AnalyticalLightBundle type={} light-id={:?} node-id:{:?}",
             self.light_details.style(),
             self.light.id(),
+            self.node_transform.as_ref().and_then(|wh| {
+                let h: Hybrid<Transform> = wh.upgrade()?;
+                Some(h.id())
+            })
         ))
     }
 }
 
-impl<Ct: IsContainer> Clone for AnalyticalLightBundle<Ct>
+impl<Ct: IsContainer> Clone for AnalyticalLight<Ct>
 where
     Ct::Container<Light>: Clone,
+    Ct::Container<Transform>: Clone,
     LightDetails<Ct>: Clone,
     NestedTransform<Ct>: Clone,
 {
@@ -150,31 +166,34 @@ where
             light: self.light.clone(),
             light_details: self.light_details.clone(),
             transform: self.transform.clone(),
+            node_transform: self.node_transform.clone(),
         }
     }
 }
 
-impl AnalyticalLightBundle<WeakContainer> {
-    pub(crate) fn from_hybrid(light: &AnalyticalLightBundle) -> Self {
-        AnalyticalLightBundle {
+impl AnalyticalLight<WeakContainer> {
+    pub(crate) fn from_hybrid(light: &AnalyticalLight) -> Self {
+        AnalyticalLight {
             light: WeakHybrid::from_hybrid(&light.light),
             light_details: LightDetails::from_hybrid(&light.light_details),
-            transform: NestedTransform::from_hybrid(&light.transform),
+            transform: WeakHybrid::from_hybrid(&light.transform),
+            node_transform: light.node_transform.clone(),
         }
     }
 
-    pub(crate) fn upgrade(&self) -> Option<AnalyticalLightBundle> {
-        Some(AnalyticalLightBundle {
+    pub(crate) fn upgrade(&self) -> Option<AnalyticalLight> {
+        Some(AnalyticalLight {
             light: self.light.upgrade()?,
             light_details: self.light_details.upgrade()?,
             transform: self.transform.upgrade()?,
+            node_transform: self.node_transform.clone(),
         })
     }
 }
 
-impl AnalyticalLightBundle {
-    pub fn weak(&self) -> AnalyticalLightBundle<WeakContainer> {
-        AnalyticalLightBundle::from_hybrid(self)
+impl AnalyticalLight {
+    pub fn weak(&self) -> AnalyticalLight<WeakContainer> {
+        AnalyticalLight::from_hybrid(self)
     }
 
     pub fn light_space_transforms(&self, z_near: f32, z_far: f32) -> Vec<Mat4> {
@@ -203,13 +222,43 @@ impl AnalyticalLightBundle {
     }
 }
 
+impl<Ct: IsContainer> AnalyticalLight<Ct> {
+    /// Link this light to a node's `NestedTransform`.
+    pub fn link_node_transform(&mut self, transform: &NestedTransform) {
+        let node_transform = WeakHybrid::from_hybrid(&transform.global_transform);
+        self.node_transform = Some(node_transform);
+    }
+
+    /// Get a reference to the generic light descriptor.
+    pub fn light(&self) -> &Ct::Container<super::Light> {
+        &self.light
+    }
+
+    /// Get a reference to the specific light descriptor.
+    pub fn light_details(&self) -> &LightDetails<Ct> {
+        &self.light_details
+    }
+
+    /// Get a reference to the light's global transform.
+    ///
+    /// This value lives in the lighting slab.
+    ///
+    /// ## Note
+    /// If a `NestedTransform` has been linked to this light by using [`Self::link_node_transform`],
+    /// the transform returned by this function may be overwritten at any point by the given
+    /// `NestedTransform`.
+    pub fn transform(&self) -> &Ct::Container<Transform> {
+        &self.transform
+    }
+}
+
 struct AnalyticalLightIterator<'a> {
-    inner: RwLockReadGuard<'a, Vec<AnalyticalLightBundle<WeakContainer>>>,
+    inner: RwLockReadGuard<'a, Vec<AnalyticalLight<WeakContainer>>>,
     index: usize,
 }
 
 impl Iterator for AnalyticalLightIterator<'_> {
-    type Item = AnalyticalLightBundle;
+    type Item = AnalyticalLight;
 
     fn next(&mut self) -> Option<Self::Item> {
         let item = self.inner.get(self.index)?;
@@ -225,7 +274,7 @@ pub struct Lighting {
     pub(crate) light_slab_buffer: Arc<RwLock<SlabBuffer<wgpu::Buffer>>>,
     pub(crate) geometry_slab_buffer: Arc<RwLock<SlabBuffer<wgpu::Buffer>>>,
     pub(crate) lighting_descriptor: Hybrid<LightingDescriptor>,
-    pub(crate) analytical_lights: Arc<RwLock<Vec<AnalyticalLightBundle<WeakContainer>>>>,
+    pub(crate) analytical_lights: Arc<RwLock<Vec<AnalyticalLight<WeakContainer>>>>,
     pub(crate) analytical_lights_array: Arc<RwLock<Option<HybridArray<Id<super::Light>>>>>,
     pub(crate) shadow_map_update_pipeline: Arc<wgpu::RenderPipeline>,
     pub(crate) shadow_map_update_bindgroup_layout: Arc<wgpu::BindGroupLayout>,
@@ -330,7 +379,7 @@ impl Lighting {
     ///
     /// This can be used to add the light back to the scene after using
     /// [`Lighting::remove_light`].
-    pub fn add_light(&self, bundle: &AnalyticalLightBundle) {
+    pub fn add_light(&self, bundle: &AnalyticalLight) {
         log::trace!(
             "adding light {:?} ({})",
             bundle.light.id(),
@@ -340,7 +389,7 @@ impl Lighting {
         self.analytical_lights
             .write()
             .unwrap()
-            .push(AnalyticalLightBundle::<WeakContainer>::from_hybrid(bundle));
+            .push(AnalyticalLight::<WeakContainer>::from_hybrid(bundle));
         // Invalidate the array of lights
         *self.analytical_lights_array.write().unwrap() = None;
     }
@@ -350,7 +399,7 @@ impl Lighting {
     /// Use this to exclude a light from rendering, without dropping the light.
     ///
     /// After calling this function you can include the light again using [`Lighting::add_light`].
-    pub fn remove_light(&self, bundle: &AnalyticalLightBundle) {
+    pub fn remove_light(&self, bundle: &AnalyticalLight) {
         log::trace!(
             "removing light {:?} ({})",
             bundle.light.id(),
@@ -363,7 +412,7 @@ impl Lighting {
     }
 
     /// Return an iterator over all lights.
-    pub fn lights(&self) -> impl Iterator<Item = AnalyticalLightBundle> + '_ {
+    pub fn lights(&self) -> impl Iterator<Item = AnalyticalLight> + '_ {
         let inner = self.analytical_lights.read().unwrap();
         AnalyticalLightIterator { inner, index: 0 }
     }
@@ -374,28 +423,25 @@ impl Lighting {
     /// - [`DirectionalLightDescriptor`]
     /// - [`SpotLightDescriptor`]
     /// - [`PointLightDescriptor`]
-    pub fn new_analytical_light<T>(
-        &self,
-        light_descriptor: T,
-        nested_transform: Option<NestedTransform>,
-    ) -> AnalyticalLightBundle
+    pub fn new_analytical_light<T>(&self, light_descriptor: T) -> AnalyticalLight
     where
         T: Clone + Copy + SlabItem + Send + Sync,
         Light: From<Id<T>>,
         LightDetails: From<Hybrid<T>>,
     {
-        let transform = nested_transform.unwrap_or_else(|| NestedTransform::new(&self.light_slab));
+        let transform = self.light_slab.new_value(Transform::default());
         let light_inner = self.light_slab.new_value(light_descriptor);
         let light = self.light_slab.new_value({
             let mut light = Light::from(light_inner.id());
-            light.transform_id = transform.global_transform_id();
+            light.transform_id = transform.id();
             light
         });
         let light_details = LightDetails::from(light_inner);
-        let bundle = AnalyticalLightBundle {
+        let bundle = AnalyticalLight {
             light,
             light_details,
             transform,
+            node_transform: None,
         };
         log::trace!(
             "created light {:?} ({})",
@@ -412,7 +458,7 @@ impl Lighting {
     /// a new [`ShadowMap`].
     pub fn new_shadow_map(
         &self,
-        analytical_light_bundle: &AnalyticalLightBundle,
+        analytical_light_bundle: &AnalyticalLight,
         // Size of the shadow map
         size: UVec2,
         // Distance to the near plane of the shadow map's frustum.
@@ -435,7 +481,7 @@ impl Lighting {
             // Update the list of analytical lights to only reference lights that are still
             // held somewhere in the outside program.
             let mut analytical_lights_dropped = false;
-            lights_guard.retain(|light_bundle| {
+            lights_guard.retain_mut(|light_bundle| {
                 let has_refs = light_bundle.light.has_external_references();
                 if !has_refs {
                     log::trace!(
@@ -443,6 +489,28 @@ impl Lighting {
                         light_bundle.light.id(),
                         light_bundle.light_details.style()
                     );
+                } else {
+                    // References to this light still exist, so we'll check to see
+                    // if we need to update the values of linked node transforms.
+                    if let Some(weak_node_transform) = light_bundle.node_transform.take() {
+                        if let Some(node_transform) = weak_node_transform.upgrade() {
+                            // If we can upgrade the node transform, something is holding onto
+                            // it and may updated it in the future, so put it back.
+                            light_bundle.node_transform = Some(weak_node_transform);
+                            // Get on with checking the update.
+                            let node_global_transform_value = node_transform.get();
+                            // This should never fail because we checked the light has external
+                            // references
+                            if let Some(light_global_transform) = light_bundle.transform.upgrade() {
+                                let global_transform_value = light_global_transform.get();
+                                if global_transform_value != node_global_transform_value {
+                                    // TODO: write a test that animates a light using GLTF to ensure
+                                    // that this is working correctly
+                                    light_global_transform.set(node_global_transform_value);
+                                }
+                            }
+                        }
+                    }
                 }
                 analytical_lights_dropped = analytical_lights_dropped || !has_refs;
                 has_refs

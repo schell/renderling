@@ -10,7 +10,7 @@ use renderling::{
     atlas::AtlasImage,
     bvol::{Aabb, BoundingSphere},
     camera::Camera,
-    light::{AnalyticalLightBundle, DirectionalLightDescriptor},
+    light::{AnalyticalLight, DirectionalLightDescriptor},
     math::{Mat4, UVec2, Vec2, Vec3, Vec4},
     skybox::Skybox,
     stage::{Animator, GltfDocument, Renderlet, Stage, Vertex},
@@ -128,7 +128,7 @@ pub struct App {
     loads: Arc<Mutex<HashMap<std::path::PathBuf, Vec<u8>>>>,
     pub stage: Stage,
     camera: Hybrid<Camera>,
-    lighting: AnalyticalLightBundle,
+    lighting: AnalyticalLight,
     model: Model,
     animators: Option<Vec<Animator>>,
     animations_conflict: bool,
@@ -150,7 +150,7 @@ impl App {
             color: renderling::math::hex_to_vec4(0xFDFBD3FF),
             intensity: 10.0,
         };
-        let sunlight_bundle = stage.new_analytical_light(directional_light, None);
+        let sunlight_bundle = stage.new_analytical_light(directional_light);
 
         stage
             .set_atlas_size(wgpu::Extent3d {

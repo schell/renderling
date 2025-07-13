@@ -17,7 +17,7 @@ use crate::{
     draw::DrawCalls,
     geometry::Geometry,
     light::{
-        AnalyticalLightBundle, Light, LightDetails, Lighting, LightingBindGroupLayoutEntries,
+        AnalyticalLight, Light, LightDetails, Lighting, LightingBindGroupLayoutEntries,
         LightingError, ShadowMap,
     },
     material::Materials,
@@ -679,18 +679,13 @@ impl Stage {
     /// - [`DirectionalLightDescriptor`](crate::light::DirectionalLightDescriptor)
     /// - [`SpotLightDescriptor`](crate::light::SpotLightDescriptor)
     /// - [`PointLightDescriptor`](crate::light::PointLightDescriptor)
-    pub fn new_analytical_light<T>(
-        &self,
-        light_descriptor: T,
-        nested_transform: Option<NestedTransform>,
-    ) -> AnalyticalLightBundle
+    pub fn new_analytical_light<T>(&self, light_descriptor: T) -> AnalyticalLight
     where
         T: Clone + Copy + SlabItem + Send + Sync,
         Light: From<Id<T>>,
         LightDetails: From<Hybrid<T>>,
     {
-        self.lighting
-            .new_analytical_light(light_descriptor, nested_transform)
+        self.lighting.new_analytical_light(light_descriptor)
     }
 
     /// Add an [`AnalyticalLightBundle`] to the internal list of lights.
@@ -699,7 +694,7 @@ impl Stage {
     ///
     /// This can be used to add the light back to the scene after using
     /// [`Stage::remove_light`].
-    pub fn add_light(&self, bundle: &AnalyticalLightBundle) {
+    pub fn add_light(&self, bundle: &AnalyticalLight) {
         self.lighting.add_light(bundle)
     }
 
@@ -708,7 +703,7 @@ impl Stage {
     /// Use this to exclude a light from rendering, without dropping the light.
     ///
     /// After calling this function you can include the light again using [`Stage::add_light`].
-    pub fn remove_light(&self, bundle: &AnalyticalLightBundle) {
+    pub fn remove_light(&self, bundle: &AnalyticalLight) {
         self.lighting.remove_light(bundle);
     }
 
@@ -728,7 +723,7 @@ impl Stage {
     ///    shadow map uses these to determine how much of the scene to cover.
     pub fn new_shadow_map(
         &self,
-        analytical_light_bundle: &AnalyticalLightBundle,
+        analytical_light_bundle: &AnalyticalLight,
         // Size of the shadow map
         size: UVec2,
         // Distance to the near plane of the shadow map's frustum.
@@ -1533,7 +1528,7 @@ impl Stage {
 /// Only available on CPU.
 #[derive(Clone)]
 pub struct NestedTransform<Ct: IsContainer = HybridContainer> {
-    global_transform: Ct::Container<Transform>,
+    pub(crate) global_transform: Ct::Container<Transform>,
     local_transform: Arc<RwLock<Transform>>,
     children: Arc<RwLock<Vec<NestedTransform>>>,
     parent: Arc<RwLock<Option<NestedTransform>>>,
