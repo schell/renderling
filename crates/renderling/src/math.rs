@@ -446,8 +446,7 @@ impl IsVector for glam::Vec2 {
     }
 
     fn orthonormal_vectors(&self) -> Self::OrthogonalVectors {
-        // https://graphics.pixar.com/library/OrthonormalB/paper.pdf
-        Vec2::new(self.y, self.x).alt_norm_or_zero()
+        Vec3::new(self.x, self.y, 0.0).cross(Vec3::Z).xy()
     }
 }
 

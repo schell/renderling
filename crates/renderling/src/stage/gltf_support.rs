@@ -1006,11 +1006,10 @@ impl GltfDocument {
                     },
                 )?;
 
-                let mut node_transform = node_transforms
+                let node_transform = node_transforms
                     .get(&node_index)
                     .context(MissingNodeSnafu { index: node_index })?
                     .clone();
-                node_transform.move_gpu_to_slab(stage.lighting.slab_allocator());
 
                 let color = Vec3::from(gltf_light.color()).extend(1.0);
                 let intensity = gltf_light.intensity();
@@ -1055,6 +1054,12 @@ impl GltfDocument {
                     }),
                 };
 
+                log::trace!(
+                    "  linking light {:?} with node transform {:?}: {:#?}",
+                    light_bundle.light().id(),
+                    node_transform.global_transform_id(),
+                    node_transform.get_global_transform()
+                );
                 light_bundle.link_node_transform(&node_transform);
                 lights.push(light_bundle);
             }
@@ -1338,30 +1343,15 @@ mod test {
     // Demonstrates how to load and render a gltf file containing lighting and a
     // normal map.
     fn normal_mapping_brick_sphere() {
-        let size = 600;
-        let ctx = Context::headless(size, size);
+        let ctx = Context::headless(1920, 1080);
         let stage = ctx
             .new_stage()
             .with_lighting(true)
-            .with_background_color(Vec4::ONE);
+            .with_background_color(Vec4::new(0.01, 0.01, 0.01, 1.0));
 
-        let doc = stage
-            .load_gltf_document_from_path("../../gltf/red_brick_03_1k.glb")
+        let _doc = stage
+            .load_gltf_document_from_path("../../gltf/normal_mapping_brick_sphere.glb")
             .unwrap();
-        let camera = doc.cameras.first().unwrap();
-        stage.use_camera(camera);
-        // A change to the lighting units for directional lights causes this test to fail.
-        //
-        // Instead of changing the saved picture, we'll adjust the intensity.
-        //
-        // See <https://github.com/schell/renderling/pull/158/files#r1956634581> for more info.
-        doc.lights.iter().for_each(|bundle| {
-            if let crate::light::LightDetails::Directional(d) = bundle.light_details() {
-                d.modify(|dir| {
-                    dir.intensity *= 683.0;
-                });
-            }
-        });
 
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());

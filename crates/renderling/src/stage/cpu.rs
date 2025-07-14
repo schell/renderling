@@ -1589,17 +1589,6 @@ impl NestedTransform {
         nested
     }
 
-    /// Moves the inner `Gpu<Transform>` of the global transform to a different
-    /// slab.
-    ///
-    /// This is used by the GLTF parser to move light's node transforms to the
-    /// light slab after they are created, while keeping any geometry's node
-    /// transforms untouched.
-    pub(crate) fn move_gpu_to_slab(&mut self, slab: &SlabAllocator<impl IsRuntime>) {
-        self.global_transform = slab.new_value(Transform::default());
-        self.mark_dirty();
-    }
-
     pub fn get_notifier_index(&self) -> SourceId {
         self.global_transform.notifier_index()
     }

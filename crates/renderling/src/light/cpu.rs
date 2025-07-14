@@ -137,18 +137,18 @@ pub struct AnalyticalLight<Ct: IsContainer = HybridContainer> {
     /// This may have been set if this light originated from a GLTF file.
     /// This value lives on the geometry slab and must be referenced here
     /// to keep the two in sync, which is required to animate lights.
-    node_transform: Option<WeakHybrid<Transform>>,
+    node_transform: Arc<RwLock<Option<NestedTransform<WeakContainer>>>>,
 }
 
 impl core::fmt::Display for AnalyticalLight {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.write_fmt(format_args!(
-            "AnalyticalLightBundle type={} light-id={:?} node-id:{:?}",
+            "AnalyticalLightBundle type={} light-id={:?} node-nested-transform-global-id:{:?}",
             self.light_details.style(),
             self.light.id(),
-            self.node_transform.as_ref().and_then(|wh| {
-                let h: Hybrid<Transform> = wh.upgrade()?;
-                Some(h.id())
+            self.node_transform.read().unwrap().as_ref().and_then(|wh| {
+                let h: NestedTransform = wh.upgrade()?;
+                Some(h.global_transform_id())
             })
         ))
     }
@@ -225,8 +225,8 @@ impl AnalyticalLight {
 impl<Ct: IsContainer> AnalyticalLight<Ct> {
     /// Link this light to a node's `NestedTransform`.
     pub fn link_node_transform(&mut self, transform: &NestedTransform) {
-        let node_transform = WeakHybrid::from_hybrid(&transform.global_transform);
-        self.node_transform = Some(node_transform);
+        *self.node_transform.write().unwrap() =
+            Some(NestedTransform::<WeakContainer>::from_hybrid(transform));
     }
 
     /// Get a reference to the generic light descriptor.
@@ -249,6 +249,18 @@ impl<Ct: IsContainer> AnalyticalLight<Ct> {
     /// `NestedTransform`.
     pub fn transform(&self) -> &Ct::Container<Transform> {
         &self.transform
+    }
+
+    /// Get a reference to the light's linked global node transform.
+    ///
+    /// ## Note
+    /// The returned transform, if any, is the global transform of a linked `NestedTransform`.
+    /// To change this value, you should do so through the `NestedTransform`, which is likely
+    /// held in the
+    pub fn linked_node_transform(&self) -> Option<NestedTransform> {
+        let guard = self.node_transform.read().unwrap();
+        let weak = guard.as_ref()?;
+        weak.upgrade()
     }
 }
 
@@ -441,7 +453,7 @@ impl Lighting {
             light,
             light_details,
             transform,
-            node_transform: None,
+            node_transform: Default::default(),
         };
         log::trace!(
             "created light {:?} ({})",
@@ -482,34 +494,39 @@ impl Lighting {
             // held somewhere in the outside program.
             let mut analytical_lights_dropped = false;
             lights_guard.retain_mut(|light_bundle| {
+                log::trace!("  light_bundle: {:?}", light_bundle.light().id());
                 let has_refs = light_bundle.light.has_external_references();
                 if !has_refs {
                     log::trace!(
-                        "  light {:?} ({}) was dropped",
+                        "    light {:?} ({}) was dropped",
                         light_bundle.light.id(),
                         light_bundle.light_details.style()
                     );
                 } else {
+                    let mut node_transform_guard = light_bundle.node_transform.write().unwrap();
                     // References to this light still exist, so we'll check to see
                     // if we need to update the values of linked node transforms.
-                    if let Some(weak_node_transform) = light_bundle.node_transform.take() {
+                    if let Some(weak_node_transform) = node_transform_guard.take() {
                         if let Some(node_transform) = weak_node_transform.upgrade() {
                             // If we can upgrade the node transform, something is holding onto
                             // it and may updated it in the future, so put it back.
-                            light_bundle.node_transform = Some(weak_node_transform);
+                            *node_transform_guard = Some(weak_node_transform);
                             // Get on with checking the update.
-                            let node_global_transform_value = node_transform.get();
-                            // This should never fail because we checked the light has external
-                            // references
-                            if let Some(light_global_transform) = light_bundle.transform.upgrade() {
-                                let global_transform_value = light_global_transform.get();
-                                if global_transform_value != node_global_transform_value {
-                                    // TODO: write a test that animates a light using GLTF to ensure
-                                    // that this is working correctly
-                                    light_global_transform.set(node_global_transform_value);
-                                }
+                            let node_global_transform_value = node_transform.get_global_transform();
+                            // UNWRAP: Safe because we checked that the light has external references
+                            let light_global_transform = light_bundle.transform.upgrade().unwrap();
+                            let global_transform_value = light_global_transform.get();
+                            if global_transform_value != node_global_transform_value {
+                                log::trace!("    updating light's transform to match linked node");
+                                // TODO: write a test that animates a light using GLTF to ensure
+                                // that this is working correctly
+                                light_global_transform.set(node_global_transform_value);
                             }
+                        } else {
+                            log::trace!("    is linked to a node, but the node has no references");
                         }
+                    } else {
+                        log::trace!("    is not linked to a node");
                     }
                 }
                 analytical_lights_dropped = analytical_lights_dropped || !has_refs;
