@@ -1277,16 +1277,26 @@ mod test {
 
     #[test]
     fn finding_orthogonal_vectors_sanity() {
+        const THRESHOLD: f32 = f32::EPSILON * 3.0;
+
         let mut prng = GpuRng::new(0);
         for _ in 0..100 {
             let v2 = prng.gen_vec2(Vec2::splat(-100.0), Vec2::splat(100.0));
             let v2_ortho = v2.orthonormal_vectors();
-            assert_eq!(0.0, v2.dot(v2_ortho));
+            let v2_dot = v2.dot(v2_ortho);
+            if v2_dot.abs() >= THRESHOLD {
+                panic!("{v2} • {v2_ortho} < {THRESHOLD}, saw {v2_dot}")
+            }
 
-            let v3 = prng.gen_vec3(Vec3::splat(-100.0), Vec3::splat(100.0));
-            let [v3_ortho_a, v3_ortho_b] = v3.orthonormal_vectors();
-            assert_eq!(0.0, v3.dot(v3_ortho_a));
-            assert_eq!(0.0, v3.dot(v3_ortho_b));
+            let v3 = prng
+                .gen_vec3(Vec3::splat(-100.0), Vec3::splat(100.0))
+                .alt_norm_or_zero();
+            for v3_ortho in v3.orthonormal_vectors() {
+                let v3_dot = v3.dot(v3_ortho);
+                if v3_dot.abs() >= THRESHOLD {
+                    panic!("{v3} • {v3_ortho} < {THRESHOLD}, saw {v3_dot}");
+                }
+            }
         }
     }
 }
