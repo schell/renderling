@@ -549,9 +549,8 @@ impl Lighting {
                         .iter()
                         .map(|bundle| bundle.light.id())
                         .collect::<Vec<_>>();
-                    log::trace!("  lights are now: {new_lights:?}");
                     let array = self.light_slab.new_array(new_lights);
-                    log::trace!("  lights array is now: {array:?}");
+                    log::trace!("  lights array is now: {:?}", array.array());
                     array
                 })
                 .array()
