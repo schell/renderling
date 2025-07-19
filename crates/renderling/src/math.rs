@@ -799,6 +799,28 @@ pub const fn convex_mesh([p0, p1, p2, p3, p4, p5, p6, p7]: [Vec3; 8]) -> [Vec3; 
     ]
 }
 
+/// Converts the given pixel and depth into world coordinates.
+pub fn convert_pixel_depth_into_world_coords(
+    view_projection: Mat4,
+    viewport_dimensions: UVec2,
+    pixel_coord: UVec2,
+    // Depth in NDC coords
+    depth: f32,
+) -> Vec3 {
+    // Convert pixel coordinates to normalized device coordinates (NDC)
+    let pixel_coord = Vec2::new(pixel_coord.x as f32, pixel_coord.y as f32);
+    let ndc_xy =
+        (pixel_coord / Vec2::new(viewport_dimensions.x as f32, viewport_dimensions.y as f32)) * 2.0
+            - 1.0;
+    let ndc = ndc_xy.extend(depth);
+
+    // Transform from NDC to world space
+    let world_coords = view_projection.inverse().project_point3(ndc);
+
+    // Return the world coordinates as a Vec3
+    world_coords.xyz()
+}
+
 /// An PCG PRNG that is optimized for GPUs, in that it is fast to evaluate and accepts
 /// sequential ids as it's initial state without sacrificing on RNG quality.
 ///
@@ -880,5 +902,50 @@ mod test {
 
         let nan = f32::NAN;
         assert_eq!(0.0, signum_or_zero(nan));
+    }
+
+    #[test]
+    fn convert_pixel_depth_into_world_coords() {
+        let viewport_dimensions = UVec2::new(800, 600);
+        let z_far = 100.0;
+        let z_near = 0.1;
+        let projection = Mat4::perspective_rh(45.0_f32.to_radians(), 800.0 / 600.0, z_near, z_far);
+        let frustum_depth_in_world_coords = z_far - z_near;
+        let eye = Vec3::new(0.0, 0.0, 5.0);
+        let view = Mat4::look_at_rh(eye, Vec3::ZERO, Vec3::Y);
+        let center_pixel = UVec2::new(400, 300);
+
+        // Subtract from eye because we're looking down Z towards ZERO and on to -Z
+        let world_coords = [
+            eye - eye.normalize() * z_near,
+            eye - eye.normalize() * 0.5 * frustum_depth_in_world_coords,
+            eye - eye.normalize() * z_far,
+        ];
+
+        for world_coord in world_coords.into_iter() {
+            let ndc_coord = (projection * view).project_point3(world_coord);
+            let depth = ndc_coord.z;
+            let pixel_coord = ((ndc_coord.xy() + 1.0) / 2.0)
+                * Vec2::new(viewport_dimensions.x as f32, viewport_dimensions.y as f32);
+            println!(
+                "world_coord: {world_coord}, ndc_coord: {ndc_coord}, pixel_coord: {pixel_coord}, depth: {depth}"
+            );
+            let pixel_coord = UVec2::new(pixel_coord.x as u32, pixel_coord.y as u32);
+            assert_eq!(center_pixel, pixel_coord);
+
+            let seen = super::convert_pixel_depth_into_world_coords(
+                projection * view,
+                viewport_dimensions,
+                pixel_coord,
+                depth,
+            );
+
+            // Assert that the world coordinates are approximately at the origin
+            let expected = world_coord;
+            assert!(
+                (seen - expected).length() < 0.1,
+                "expected {expected} but saw {seen}"
+            );
+        }
     }
 }
