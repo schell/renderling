@@ -17,7 +17,9 @@ use crate::{
     camera::Camera,
     color::linear_xfer_vec4,
     light::{LightTiling, LightTilingDescriptor, LightTilingInvocation, SpotLightCalculation},
-    math::{hex_to_vec4, CpuTexture2d, GpuRng, NonAtomicSlab},
+    math::{
+        convert_pixel_depth_into_world_coords, hex_to_vec4, CpuTexture2d, GpuRng, NonAtomicSlab,
+    },
     pbr::Material,
     prelude::Transform,
     stage::{Renderlet, RenderletPbrVertexInfo, Stage, Vertex},
@@ -326,6 +328,9 @@ fn size() -> UVec2 {
 
 fn make_camera() -> Camera {
     let size = size();
+    let eye = Vec3::new(250.0, 200.0, 250.0);
+    let target = Vec3::ZERO;
+    log::info!("make_camera: forward {}", (target - eye).normalize());
     Camera::new(
         Mat4::perspective_rh(
             std::f32::consts::FRAC_PI_4,
@@ -333,7 +338,7 @@ fn make_camera() -> Camera {
             50.0,
             600.0,
         ),
-        Mat4::look_at_rh(Vec3::new(250.0, 200.0, 250.0), Vec3::ZERO, Vec3::Y),
+        Mat4::look_at_rh(eye, target, Vec3::Y),
     )
 }
 
@@ -481,6 +486,8 @@ fn light_tiling_sanity() {
         .unwrap();
 
     let camera = stage.new_camera(make_camera());
+    let camera_value = camera.get();
+    log::info!("camera: {camera_value:#?}");
     stage.use_camera(camera);
     snapshot(&ctx, &stage, "light/tiling/1-no-lighting.png", true);
 
@@ -551,7 +558,7 @@ fn light_tiling_sanity() {
     let tiling = LightTiling::new(ctx.runtime(), false, size, 32);
     let desc = tiling.tiling_descriptor.get();
     let depth = stage.depth_texture.read().unwrap();
-    let mut depth_img = crate::texture::read_depth_texture_f32(
+    let depth_img = crate::texture::read_depth_texture_f32(
         ctx.runtime(),
         size.x as usize,
         size.y as usize,
@@ -565,8 +572,37 @@ fn light_tiling_sanity() {
     //     &depth.texture,
     // )
     // .unwrap();
+    let mut linearized_normalized_depth_img = image::GrayImage::new(size.x, size.y);
+    let view_projection = camera_value.view_projection();
+    for (x, y, pixel) in linearized_normalized_depth_img.enumerate_pixels_mut() {
+        let depth_pixel = depth_img.get_pixel(x, y);
+        let depth = depth_pixel.0[0];
+        let world_coords = crate::math::convert_pixel_depth_into_world_coords(
+            view_projection,
+            size,
+            UVec2::new(x, y),
+            depth,
+        );
+        let forward = camera_value.forward();
+        let near_point = camera_value.frustum_near_point();
+        let far_point = camera_value.frustum_far_point();
+        let camera_depth = camera_value.depth();
+        let distance_from_near_point_to_world_coord = near_point.distance(world_coords);
+        let linearized_normalized_depth = distance_from_near_point_to_world_coord / camera_depth;
+        assert!(
+            (0.0..=1.0).contains(&linearized_normalized_depth),
+            "computed depth is {linearized_normalized_depth}\n\
+            world_coords {world_coords}\n\
+            forward {forward}\n\
+            near_point {near_point}\n\
+            far_point {far_point}\n\
+            distance_from_near_point_to_world_coord {distance_from_near_point_to_world_coord}\n\
+            camera_depth {camera_depth}"
+        );
+        pixel.0[0] = crate::math::scaled_f32_to_u8(linearized_normalized_depth);
+    }
     // img_diff::normalize_gray_img(&mut depth_img);
-    img_diff::save("light/tiling/5-depth.png", depth_img);
+    img_diff::save("light/tiling/5-depth.png", linearized_normalized_depth_img);
     tiling.run(&stage.geometry.commit(), &stage.lighting.commit(), &depth);
     let (mut mins_img, mut maxs_img, mut lights_img) =
         futures_lite::future::block_on(tiling.read_images());
@@ -834,11 +870,15 @@ fn pedestal() {
     {
         log::info!("adding point light with nested transform");
         let transform = stage.new_nested_transform();
-        let _point_light = stage.new_analytical_light(PointLightDescriptor {
-            position,
+        transform.modify(|t| t.translation = position);
+
+        let point_light = stage.new_analytical_light(PointLightDescriptor {
+            position: Vec3::ZERO,
             color,
             intensity: 5.0,
         });
+        point_light.link_node_transform(&transform);
+
         snapshot(&ctx, &stage, "light/pedestal/point.png", false);
         log::info!("dropping point light");
     }

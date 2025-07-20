@@ -41,6 +41,7 @@ quote.workspace = true
 renderling_build = { path = "../renderling-build", version = "0.1.0" }
 serde.workspace = true
 serde_json.workspace = true
+similarity.workspace = true
 
 # dependencies for CPU and GPU code
 [dependencies]

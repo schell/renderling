@@ -40,6 +40,7 @@ rustc-hash = "1.1"
 serde = {version = "1.0", features = ["derive"]}
 serde_json = "1.0.117"
 send_wrapper = "0.6.0"
+similarity = "0.2.0"
 snafu = "0.8"
 spirv-std = { git = "https://github.com/LegNeato/rust-gpu.git", rev = "425328a" }
 spirv-std-macros = { git = "https://github.com/LegNeato/rust-gpu.git", rev = "425328a" }
