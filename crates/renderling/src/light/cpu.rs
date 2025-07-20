@@ -224,7 +224,7 @@ impl AnalyticalLight {
 
 impl<Ct: IsContainer> AnalyticalLight<Ct> {
     /// Link this light to a node's `NestedTransform`.
-    pub fn link_node_transform(&mut self, transform: &NestedTransform) {
+    pub fn link_node_transform(&self, transform: &NestedTransform) {
         *self.node_transform.write().unwrap() =
             Some(NestedTransform::<WeakContainer>::from_hybrid(transform));
     }

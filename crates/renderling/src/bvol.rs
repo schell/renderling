@@ -327,6 +327,7 @@ impl Frustum {
         true
     }
 
+    /// Returns the depth of the frustum.
     pub fn depth(&self) -> f32 {
         (self.planes[0].w - self.planes[5].w).abs()
     }
