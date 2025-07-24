@@ -847,6 +847,7 @@ pub struct LightTile {
 /// them into lists that illuminate tiles of the screen.
 #[derive(Clone, Copy, Default, SlabItem, core::fmt::Debug)]
 pub struct LightTilingDescriptor {
+    /// Size of the [`Stage`]'s depth texture.
     pub depth_texture_size: UVec2,
     /// Array pointing to the lighting "tiles".
     pub tiles_array: Array<LightTile>,
@@ -1089,9 +1090,7 @@ impl LightTilingInvocation {
         }
     }
 
-    // TODO: think about breaking the light tiling "compute tiles" shader up into sub-shaders.
-    // It would also be possible to join or parallelize some of this work with frustum culling
-    // and occlusion culling.
+    // TODO: Parallelize computing tiles work with frustum culling and occlusion culling.
     fn compute_tiles<S: IsAtomicSlab + ?Sized>(
         &self,
         depth_texture: &impl Fetch<UVec2, Output = Vec4>,
@@ -1132,6 +1131,16 @@ pub fn light_tiling_compute_tiles_impl(
     if invocation.should_invoke() {
         invocation.compute_tiles(depth_texture, geometry_slab, lighting_slab, tiling_slab);
     }
+}
+
+#[spirv(compute(threads(16, 16, 1)))]
+pub fn light_tiling_clear_tiles(
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 2)] tiling_slab: &mut [u32],
+    #[spirv(global_invocation_id)] global_id: UVec3,
+) {
+    let descriptor = tiling_slab.read(Id::<LightTilingDescriptor>::new(0));
+    let invocation = LightTilingInvocation::new(global_id, descriptor);
+    invocation.clear_tiles(tiling_slab);
 }
 
 /// Light culling compute shader, **without** a multisampled depth texture.

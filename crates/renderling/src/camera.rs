@@ -101,23 +101,15 @@ impl Camera {
 
     /// Returns **roughly** the location of the znear plane.
     pub fn z_near(&self) -> f32 {
-        dist_bpp(&self.frustum.planes[0], self.position)
+        self.z_near_point.distance(self.position)
     }
 
     pub fn z_far(&self) -> f32 {
-        dist_bpp(&self.frustum.planes[5], self.position)
+        self.z_far_point.distance(self.position)
     }
 
     pub fn depth(&self) -> f32 {
-        self.frustum.depth()
-    }
-
-    #[warn(soft_unstable, reason = "depth linearization is currently unreliable")]
-    pub fn linearize_depth(&self, d: f32) -> f32 {
-        // TODO: figure out why z_near and z_far come out equal in ortho
-        let z_near = self.z_near();
-        let z_far = self.z_far();
-        z_near * z_far / (z_far + d * (z_near - z_far))
+        (self.z_far() - self.z_near()).abs()
     }
 
     /// Returns the normalized forward vector which points in the direction the camera is looking.

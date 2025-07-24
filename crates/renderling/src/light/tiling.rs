@@ -28,10 +28,15 @@ pub struct LightTiling {
     depth_texture_id: Arc<AtomicUsize>,
     compute_tiles_bind_group_layout: Arc<wgpu::BindGroupLayout>,
     compute_tiles_bind_group: ManagedBindGroup,
+    clear_tiles_pipeline: Arc<wgpu::ComputePipeline>,
     compute_tiles_pipeline: Arc<wgpu::ComputePipeline>,
 }
 
 impl LightTiling {
+    fn create_clear_tiles_pipeline(device: &wgpu::Device, multisampled: bool) {
+        todo!()
+    }
+
     fn create_compute_tiles_pipeline(
         device: &wgpu::Device,
         multisampled: bool,
@@ -112,6 +117,7 @@ impl LightTiling {
         (compute_tiles_pipeline, pipeline_layout, bind_group_layout)
     }
 
+    /// Creates a new [`LightTiling`] struct.
     pub fn new(
         runtime: impl AsRef<WgpuRuntime>,
         multisampled: bool,
@@ -239,12 +245,16 @@ impl LightTiling {
         &self,
     ) -> (image::GrayImage, image::GrayImage, image::GrayImage) {
         use crabslab::Slab;
-        let size = self.tiling_descriptor.get().depth_texture_size / 16;
+
+        let tile_dimensions = self.tiling_descriptor.get().tile_dimensions();
         let slab = self.tiling_slab.read(..).await.unwrap();
-        log::info!("tiling slab size: {}", slab.len());
+        log::info!("tiling slab length: {}", slab.len());
         let desc = slab.read(Id::<LightTilingDescriptor>::new(0));
-        log::info!("desc: {desc:#?}");
-        assert_eq!(size.x * size.y, desc.tiles_array.len() as u32);
+        log::info!("light-tiling-descriptor: {desc:#?}");
+        assert_eq!(
+            tile_dimensions.x * tile_dimensions.y,
+            desc.tiles_array.len() as u32
+        );
         let (mins, maxs, lights) = slab
             .read_vec(desc.tiles_array)
             .into_iter()
@@ -266,9 +276,12 @@ impl LightTiling {
                     (ays, bees, cees)
                 },
             );
-        let mins_img = image::GrayImage::from_vec(size.x, size.y, mins).unwrap();
-        let maxs_img = image::GrayImage::from_vec(size.x, size.y, maxs).unwrap();
-        let lights_img = image::GrayImage::from_vec(size.x, size.y, lights).unwrap();
+        let mins_img =
+            image::GrayImage::from_vec(tile_dimensions.x, tile_dimensions.y, mins).unwrap();
+        let maxs_img =
+            image::GrayImage::from_vec(tile_dimensions.x, tile_dimensions.y, maxs).unwrap();
+        let lights_img =
+            image::GrayImage::from_vec(tile_dimensions.x, tile_dimensions.y, lights).unwrap();
         (mins_img, maxs_img, lights_img)
     }
 }
