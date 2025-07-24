@@ -565,13 +565,7 @@ fn light_tiling_sanity() {
         depth.texture.as_ref(),
     )
     .unwrap();
-    // let mut depth_img = crate::texture::read_depth_texture_to_image(
-    //     ctx.runtime(),
-    //     size.x as usize,
-    //     size.y as usize,
-    //     &depth.texture,
-    // )
-    // .unwrap();
+    img_diff::save("light/tiling/5-depth-raw.png", depth_img.clone());
     let mut linearized_normalized_depth_img = image::GrayImage::new(size.x, size.y);
     let view_projection = camera_value.view_projection();
     for (x, y, pixel) in linearized_normalized_depth_img.enumerate_pixels_mut() {
@@ -588,7 +582,8 @@ fn light_tiling_sanity() {
         let far_point = camera_value.frustum_far_point();
         let camera_depth = camera_value.depth();
         let distance_from_near_point_to_world_coord = near_point.distance(world_coords);
-        let linearized_normalized_depth = distance_from_near_point_to_world_coord / camera_depth;
+        let linearized_normalized_depth =
+            1.0 - (distance_from_near_point_to_world_coord / camera_depth);
         assert!(
             (0.0..=1.0).contains(&linearized_normalized_depth),
             "computed depth is {linearized_normalized_depth}\n\
@@ -601,8 +596,10 @@ fn light_tiling_sanity() {
         );
         pixel.0[0] = crate::math::scaled_f32_to_u8(linearized_normalized_depth);
     }
-    // img_diff::normalize_gray_img(&mut depth_img);
-    img_diff::save("light/tiling/5-depth.png", linearized_normalized_depth_img);
+    img_diff::save(
+        "light/tiling/5-distance-from-z_near_point.png",
+        linearized_normalized_depth_img,
+    );
     tiling.run(&stage.geometry.commit(), &stage.lighting.commit(), &depth);
     let (mut mins_img, mut maxs_img, mut lights_img) =
         futures_lite::future::block_on(tiling.read_images());
@@ -612,9 +609,6 @@ fn light_tiling_sanity() {
     img_diff::save("light/tiling/5-mins.png", mins_img);
     img_diff::save("light/tiling/5-maxs.png", maxs_img);
     img_diff::save("light/tiling/5-lights.png", lights_img);
-
-    return;
-    log::info!("running stats");
 
     // Stats
     let mut stats = LightTilingStats::default();
@@ -689,7 +683,7 @@ struct LightTilingStats {
 }
 
 fn plot(stats: LightTilingStats) {
-    let path = crate::test::workspace_dir().join("test_output/lights/tiling/frame-time.png");
+    let path = crate::test::workspace_dir().join("test_output/light/tiling/frame-time.png");
     let root_drawing_area = BitMapBackend::new(&path, (800, 600)).into_drawing_area();
     root_drawing_area.fill(&plotters::style::WHITE).unwrap();
 
@@ -766,10 +760,10 @@ fn plot(stats: LightTilingStats) {
 /// For all light types that have a position:
 ///
 /// Ensures that a light with a translated position renders the same
-/// as a light at the origin that has a transform applied with
+/// as a light at the origin that has a linked `NestedTransform` applied with
 /// that same translation.
 ///
-/// In other words, light in nested transform is the same as light with
+/// In other words, light w/ nested transform is the same as light with
 /// that same transform pre-applied.
 fn pedestal() {
     let ctx = crate::Context::headless(256, 256);
@@ -884,7 +878,7 @@ fn pedestal() {
     }
 
     {
-        log::info!("adding spot light");
+        log::info!("adding spot light with pre-applied position");
         let spot_desc = SpotLightDescriptor {
             position,
             direction: -position,
@@ -927,5 +921,25 @@ fn pedestal() {
         // assert that the output of the vertex shader is the same for the first renderlet,
         // regardless of the lighting
         pretty_assertions::assert_eq!(dir_infos, spot_infos);
+    }
+
+    {
+        log::info!("adding spot light with node position");
+
+        let node_transform = stage.new_nested_transform();
+        node_transform.modify(|t| t.translation = position);
+
+        let spot_desc = SpotLightDescriptor {
+            position: Vec3::ZERO,
+            direction: -position,
+            color,
+            intensity: 5.0,
+            inner_cutoff: core::f32::consts::PI / 5.0,
+            outer_cutoff: core::f32::consts::PI / 4.0,
+            // ..Default::default()
+        };
+        let spot = stage.new_analytical_light(spot_desc);
+        spot.link_node_transform(&node_transform);
+        snapshot(&ctx, &stage, "light/pedestal/spot.png", false);
     }
 }
