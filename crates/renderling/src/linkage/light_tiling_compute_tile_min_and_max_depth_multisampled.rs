@@ -3,14 +3,16 @@
 use crate::linkage::ShaderLinkage;
 #[cfg(not(target_arch = "wasm32"))]
 mod target {
-    pub const ENTRY_POINT: &str = "light::light_tiling_compute_tiles_multisampled";
+    pub const ENTRY_POINT: &str = "light::light_tiling_compute_tile_min_and_max_depth_multisampled";
     pub fn descriptor() -> wgpu::ShaderModuleDescriptor<'static> {
-        wgpu::include_spirv!("../../shaders/light-light_tiling_compute_tiles_multisampled.spv")
+        wgpu::include_spirv!(
+            "../../shaders/light-light_tiling_compute_tile_min_and_max_depth_multisampled.spv"
+        )
     }
     pub fn linkage(device: &wgpu::Device) -> super::ShaderLinkage {
         log::debug!(
             "creating native linkage for {}",
-            "light_tiling_compute_tiles_multisampled"
+            "light_tiling_compute_tile_min_and_max_depth_multisampled"
         );
         super::ShaderLinkage {
             entry_point: ENTRY_POINT,
@@ -20,14 +22,16 @@ mod target {
 }
 #[cfg(target_arch = "wasm32")]
 mod target {
-    pub const ENTRY_POINT: &str = "lightlight_tiling_compute_tiles_multisampled";
+    pub const ENTRY_POINT: &str = "lightlight_tiling_compute_tile_min_and_max_depth_multisampled";
     pub fn descriptor() -> wgpu::ShaderModuleDescriptor<'static> {
-        wgpu::include_wgsl!("../../shaders/light-light_tiling_compute_tiles_multisampled.wgsl")
+        wgpu::include_wgsl!(
+            "../../shaders/light-light_tiling_compute_tile_min_and_max_depth_multisampled.wgsl"
+        )
     }
     pub fn linkage(device: &wgpu::Device) -> super::ShaderLinkage {
         log::debug!(
             "creating web linkage for {}",
-            "light_tiling_compute_tiles_multisampled"
+            "light_tiling_compute_tile_min_and_max_depth_multisampled"
         );
         super::ShaderLinkage {
             entry_point: ENTRY_POINT,

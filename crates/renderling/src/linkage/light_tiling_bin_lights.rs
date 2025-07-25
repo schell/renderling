@@ -3,15 +3,12 @@
 use crate::linkage::ShaderLinkage;
 #[cfg(not(target_arch = "wasm32"))]
 mod target {
-    pub const ENTRY_POINT: &str = "light::light_tiling_compute_tiles";
+    pub const ENTRY_POINT: &str = "light::light_tiling_bin_lights";
     pub fn descriptor() -> wgpu::ShaderModuleDescriptor<'static> {
-        wgpu::include_spirv!("../../shaders/light-light_tiling_compute_tiles.spv")
+        wgpu::include_spirv!("../../shaders/light-light_tiling_bin_lights.spv")
     }
     pub fn linkage(device: &wgpu::Device) -> super::ShaderLinkage {
-        log::debug!(
-            "creating native linkage for {}",
-            "light_tiling_compute_tiles"
-        );
+        log::debug!("creating native linkage for {}", "light_tiling_bin_lights");
         super::ShaderLinkage {
             entry_point: ENTRY_POINT,
             module: device.create_shader_module(descriptor()).into(),
@@ -20,12 +17,12 @@ mod target {
 }
 #[cfg(target_arch = "wasm32")]
 mod target {
-    pub const ENTRY_POINT: &str = "lightlight_tiling_compute_tiles";
+    pub const ENTRY_POINT: &str = "lightlight_tiling_bin_lights";
     pub fn descriptor() -> wgpu::ShaderModuleDescriptor<'static> {
-        wgpu::include_wgsl!("../../shaders/light-light_tiling_compute_tiles.wgsl")
+        wgpu::include_wgsl!("../../shaders/light-light_tiling_bin_lights.wgsl")
     }
     pub fn linkage(device: &wgpu::Device) -> super::ShaderLinkage {
-        log::debug!("creating web linkage for {}", "light_tiling_compute_tiles");
+        log::debug!("creating web linkage for {}", "light_tiling_bin_lights");
         super::ShaderLinkage {
             entry_point: ENTRY_POINT,
             module: device.create_shader_module(descriptor()).into(),

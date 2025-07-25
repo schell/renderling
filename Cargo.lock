@@ -1643,6 +1643,7 @@ version = "0.1.0"
 dependencies = [
  "glam",
  "image 0.25.6",
+ "log",
  "snafu 0.7.5",
 ]
 
