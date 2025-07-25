@@ -452,8 +452,8 @@ fn min_max_depth_sanity() {
         }
         ctx.runtime().queue.submit(Some(encoder.finish()));
         let (mins, maxs, _lights) = futures_lite::future::block_on(tiling.read_images());
-        img_diff::save("light/tiling/min_max_depth/2-mins.png", mins);
-        img_diff::save("light/tiling/min_max_depth/2-maxs.png", maxs);
+        img_diff::assert_img_eq("light/tiling/min_max_depth/2-mins.png", mins);
+        img_diff::assert_img_eq("light/tiling/min_max_depth/2-maxs.png", maxs);
     }
 }
 
