@@ -238,6 +238,8 @@ pub fn normalize_gray_img(seen: &mut image::GrayImage) {
         });
         c.0 = comps;
     });
+    log::info!("normalize_gray_img-min: {min}");
+    log::info!("normalize_gray_img-max: {max}");
 }
 
 #[cfg(test)]

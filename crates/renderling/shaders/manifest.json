@@ -105,6 +105,11 @@
     "wgsl_entry_point": "ibldiffuse_irradiancedi_convolution_fragment"
   },
   {
+    "source_path": "shaders/light-light_tiling_bin_lights.spv",
+    "entry_point": "light::light_tiling_bin_lights",
+    "wgsl_entry_point": "lightlight_tiling_bin_lights"
+  },
+  {
     "source_path": "shaders/light-light_tiling_clear_tiles.spv",
     "entry_point": "light::light_tiling_clear_tiles",
     "wgsl_entry_point": "lightlight_tiling_clear_tiles"
@@ -115,14 +120,9 @@
     "wgsl_entry_point": "lightlight_tiling_compute_tile_min_and_max_depth"
   },
   {
-    "source_path": "shaders/light-light_tiling_compute_tiles.spv",
-    "entry_point": "light::light_tiling_compute_tiles",
-    "wgsl_entry_point": "lightlight_tiling_compute_tiles"
-  },
-  {
-    "source_path": "shaders/light-light_tiling_compute_tiles_multisampled.spv",
-    "entry_point": "light::light_tiling_compute_tiles_multisampled",
-    "wgsl_entry_point": "lightlight_tiling_compute_tiles_multisampled"
+    "source_path": "shaders/light-light_tiling_compute_tile_min_and_max_depth_multisampled.spv",
+    "entry_point": "light::light_tiling_compute_tile_min_and_max_depth_multisampled",
+    "wgsl_entry_point": "lightlight_tiling_compute_tile_min_and_max_depth_multisampled"
   },
   {
     "source_path": "shaders/light-light_tiling_depth_pre_pass.spv",

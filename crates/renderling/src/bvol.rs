@@ -468,6 +468,20 @@ impl BoundingSphere {
         (sphere.is_inside_frustum(camera.frustum()), sphere)
     }
 
+    /// Transform this `BoundingSphere` by the given view projection matrix.
+    pub fn project_by(&self, view_projection: &Mat4) -> Self {
+        let center = self.center;
+        // Pick any direction to find a point on the surface.
+        let surface_point = self.center + self.radius * Vec3::Z;
+        let new_center = view_projection.project_point3(center);
+        let new_surface_point = view_projection.project_point3(surface_point);
+        let new_radius = new_center.distance(new_surface_point);
+        Self {
+            center: new_center,
+            radius: new_radius,
+        }
+    }
+
     /// Returns an [`Aabb`] with x and y coordinates in viewport pixels and z coordinate
     /// in NDC depth.
     pub fn project_onto_viewport(&self, camera: &Camera, viewport: Vec2) -> Aabb {

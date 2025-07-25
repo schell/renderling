@@ -1,6 +1,6 @@
 //! Implementation of light tiling.
 //!
-//! For more info on what light tiling _is_, see
+//! For more info on what light tiling is, see
 //! [this blog post](https://renderling.xyz/articles/live/light_tiling.html).
 
 use core::sync::atomic::AtomicUsize;
@@ -26,20 +26,23 @@ use super::{LightTile, LightTilingDescriptor};
 /// For info on what light tiling is, see
 /// <https://renderling.xyz/articles/live/light_tiling.html>.
 pub struct LightTiling<Ct: IsContainer = GpuArrayContainer> {
-    // depth_pre_pass_pipeline: Arc<wgpu::RenderPipeline>,
+    // TODO: maybe we don't need a tiling slab, and we could just run on the lighting slab?
+    // Revisit this after light tiling works, as managing less slabs is better
     pub(crate) tiling_slab: SlabAllocator<WgpuRuntime>,
     pub(crate) tiling_descriptor: Hybrid<LightTilingDescriptor>,
     tiles: Ct::Container<LightTile>,
-    bind_group_creation_time: Arc<AtomicUsize>,
     /// Cache of the id of the Stage's depth texture.
     ///
     /// Used to invalidate our tiling bindgroup.
     depth_texture_id: Arc<AtomicUsize>,
-    compute_tiles_bind_group_layout: Arc<wgpu::BindGroupLayout>,
-    compute_tiles_bind_group: ManagedBindGroup,
+
+    bindgroup: ManagedBindGroup,
+    bindgroup_layout: Arc<wgpu::BindGroupLayout>,
+    bindgroup_creation_time: Arc<AtomicUsize>,
+
     clear_tiles_pipeline: Arc<wgpu::ComputePipeline>,
     compute_min_max_depth_pipeline: Arc<wgpu::ComputePipeline>,
-    compute_tiles_pipeline: Arc<wgpu::ComputePipeline>,
+    compute_bins_pipeline: Arc<wgpu::ComputePipeline>,
 }
 
 const LABEL: Option<&'static str> = Some("light-tiling");
@@ -103,13 +106,7 @@ impl<Ct: IsContainer> LightTiling<Ct> {
     ) -> wgpu::ComputePipeline {
         const LABEL: Option<&'static str> = Some("light-tiling-clear-tiles");
         let module = crate::linkage::light_tiling_clear_tiles::linkage(device);
-        let bindgroup_layout = Self::create_bindgroup_layout(device, multisampled);
-        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: LABEL,
-            bind_group_layouts: &[&bindgroup_layout],
-            push_constant_ranges: &[],
-        });
-
+        let (pipeline_layout, _) = Self::create_layouts(device, multisampled);
         device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
             label: LABEL,
             layout: Some(&pipeline_layout),
@@ -126,13 +123,7 @@ impl<Ct: IsContainer> LightTiling<Ct> {
     ) -> wgpu::ComputePipeline {
         const LABEL: Option<&'static str> = Some("light-tiling-compute-min-max-depth");
         let module = crate::linkage::light_tiling_compute_tile_min_and_max_depth::linkage(device);
-        let bindgroup_layout = Self::create_bindgroup_layout(device, multisampled);
-        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: LABEL,
-            bind_group_layouts: &[&bindgroup_layout],
-            push_constant_ranges: &[],
-        });
-
+        let (pipeline_layout, _) = Self::create_layouts(device, multisampled);
         device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
             label: LABEL,
             layout: Some(&pipeline_layout),
@@ -143,36 +134,35 @@ impl<Ct: IsContainer> LightTiling<Ct> {
         })
     }
 
-    fn create_compute_tiles_pipeline(
+    fn create_compute_bins_pipeline(
         device: &wgpu::Device,
         multisampled: bool,
-    ) -> (
-        wgpu::ComputePipeline,
-        wgpu::PipelineLayout,
-        wgpu::BindGroupLayout,
-    ) {
-        let label = Some("light-tiling-compute-tiles");
-        let module = if multisampled {
-            crate::linkage::light_tiling_compute_tiles_multisampled::linkage(device)
-        } else {
-            crate::linkage::light_tiling_compute_tiles::linkage(device)
-        };
+    ) -> wgpu::ComputePipeline {
+        const LABEL: Option<&'static str> = Some("light-tiling-compute-bins");
+        let module = crate::linkage::light_tiling_bin_lights::linkage(device);
+        let (pipeline_layout, _) = Self::create_layouts(device, multisampled);
+        device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: LABEL,
+            layout: Some(&pipeline_layout),
+            module: &module.module,
+            entry_point: Some(module.entry_point),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            cache: None,
+        })
+    }
+
+    /// All pipelines share the same layout, so we do it here, once.
+    fn create_layouts(
+        device: &wgpu::Device,
+        multisampled: bool,
+    ) -> (wgpu::PipelineLayout, wgpu::BindGroupLayout) {
         let bindgroup_layout = Self::create_bindgroup_layout(device, multisampled);
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label,
+            label: LABEL,
             bind_group_layouts: &[&bindgroup_layout],
             push_constant_ranges: &[],
         });
-        let compute_tiles_pipeline =
-            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
-                label,
-                layout: Some(&pipeline_layout),
-                module: &module.module,
-                entry_point: Some(module.entry_point),
-                compilation_options: wgpu::PipelineCompilationOptions::default(),
-                cache: None,
-            });
-        (compute_tiles_pipeline, pipeline_layout, bindgroup_layout)
+        (pipeline_layout, bindgroup_layout)
     }
 
     pub(crate) fn prepare(&self, depth_texture_size: UVec2) {
@@ -218,6 +208,25 @@ impl<Ct: IsContainer> LightTiling<Ct> {
         compute_pass.dispatch_workgroups(x, y, z);
     }
 
+    pub(crate) fn compute_bins(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        bindgroup: &wgpu::BindGroup,
+        depth_texture_size: UVec2,
+    ) {
+        let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some("light-tiling-compute-bins"),
+            timestamp_writes: None,
+        });
+        compute_pass.set_pipeline(&self.compute_bins_pipeline);
+        compute_pass.set_bind_group(0, bindgroup, &[]);
+
+        let x = (depth_texture_size.x / 16) + 1;
+        let y = (depth_texture_size.y / 16) + 1;
+        let z = 1;
+        compute_pass.dispatch_workgroups(x, y, z);
+    }
+
     /// Get the bindgroup.
     ///
     /// This commits the tiling slab.
@@ -239,7 +248,7 @@ impl<Ct: IsContainer> LightTiling<Ct> {
         .max()
         .unwrap();
         let prev_buffer_creation = self
-            .bind_group_creation_time
+            .bindgroup_creation_time
             .swap(latest_buffer_creation, std::sync::atomic::Ordering::Relaxed);
         let prev_depth_texture_id = self
             .depth_texture_id
@@ -247,10 +256,10 @@ impl<Ct: IsContainer> LightTiling<Ct> {
         let should_invalidate = tiling_slab_buffer.is_new_this_commit()
             || prev_buffer_creation < latest_buffer_creation
             || prev_depth_texture_id < depth_texture.id();
-        self.compute_tiles_bind_group.get(should_invalidate, || {
+        self.bindgroup.get(should_invalidate, || {
             device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("light-tiling"),
-                layout: &self.compute_tiles_bind_group_layout,
+                layout: &self.bindgroup_layout,
                 entries: &[
                     wgpu::BindGroupEntry {
                         binding: 0,
@@ -273,6 +282,7 @@ impl<Ct: IsContainer> LightTiling<Ct> {
         })
     }
 
+    /// Run light tiling, resulting in edits to the tiling slab.
     pub fn run(
         &self,
         geometry_slab: &SlabBuffer<wgpu::Buffer>,
@@ -292,6 +302,8 @@ impl<Ct: IsContainer> LightTiling<Ct> {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor { label });
         {
             self.clear_tiles(&mut encoder, bindgroup.as_ref());
+            self.compute_min_max_depth(&mut encoder, bindgroup.as_ref(), depth_texture_size);
+            self.compute_bins(&mut encoder, bindgroup.as_ref(), depth_texture_size);
         }
         runtime.queue.submit(Some(encoder.finish()));
     }
@@ -321,8 +333,13 @@ impl<Ct: IsContainer> LightTiling<Ct> {
         let (mins, maxs, lights) = slab
             .read_vec(desc.tiles_array)
             .into_iter()
-            .map(|tile| {
+            .enumerate()
+            .map(|(i, tile)| {
                 assert!(tile.depth_min <= tile.depth_max);
+                log::info!(
+                    "read_images-light-{i}-next_light_index: {}",
+                    tile.next_light_index
+                );
                 (
                     crate::math::scaled_u32_to_u8(tile.depth_min),
                     crate::math::scaled_u32_to_u8(tile.depth_max),
@@ -359,8 +376,7 @@ impl LightTiling<HybridArrayContainer> {
         max_lights_per_tile: usize,
     ) -> Self {
         let runtime = runtime.as_ref();
-        let (compute_tiles_pipeline, _, compute_tiles_bind_group_layout) =
-            Self::create_compute_tiles_pipeline(&runtime.device, multisampled);
+
         let tiling_slab = SlabAllocator::new(runtime, "tiling", wgpu::BufferUsages::empty());
         let desc = LightTilingDescriptor {
             depth_texture_size,
@@ -388,18 +404,25 @@ impl LightTiling<HybridArrayContainer> {
             &runtime.device,
             multisampled,
         ));
+        let compute_bins_pipeline = Arc::new(Self::create_compute_bins_pipeline(
+            &runtime.device,
+            multisampled,
+        ));
+        let bindgroup_layout =
+            Arc::new(Self::create_bindgroup_layout(&runtime.device, multisampled));
 
         Self {
             tiling_slab,
             tiling_descriptor,
             tiles,
-            bind_group_creation_time: Default::default(),
+            // The inner bindgroup is created on-demand
+            bindgroup: ManagedBindGroup::default(),
+            bindgroup_creation_time: Default::default(),
+            bindgroup_layout,
             depth_texture_id: Default::default(),
             clear_tiles_pipeline,
             compute_min_max_depth_pipeline,
-            compute_tiles_bind_group_layout: compute_tiles_bind_group_layout.into(),
-            compute_tiles_bind_group: Default::default(),
-            compute_tiles_pipeline: compute_tiles_pipeline.into(),
+            compute_bins_pipeline,
         }
     }
 }
@@ -417,13 +440,13 @@ impl LightTiling {
             tiling_slab,
             tiling_descriptor,
             tiles,
-            bind_group_creation_time,
+            bindgroup_creation_time,
             depth_texture_id,
-            compute_tiles_bind_group_layout,
-            compute_tiles_bind_group,
+            bindgroup_layout,
+            bindgroup,
             clear_tiles_pipeline,
-            compute_tiles_pipeline,
             compute_min_max_depth_pipeline,
+            compute_bins_pipeline,
         } = LightTiling::new_hybrid(
             runtime,
             multisampled,
@@ -434,13 +457,13 @@ impl LightTiling {
             tiling_slab,
             tiling_descriptor,
             tiles: tiles.into_gpu_only(),
-            bind_group_creation_time,
             depth_texture_id,
-            compute_tiles_bind_group_layout,
-            compute_tiles_bind_group,
+            bindgroup,
+            bindgroup_layout,
+            bindgroup_creation_time,
             clear_tiles_pipeline,
-            compute_tiles_pipeline,
             compute_min_max_depth_pipeline,
+            compute_bins_pipeline,
         }
     }
 }

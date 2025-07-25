@@ -105,6 +105,8 @@ impl SampleCube for Cubemap {
 }
 
 /// Abstraction over shader atomic integer operations.
+// NOTE: I'm not sure this is necessary yet. It's mostly here for testing on CPU,
+// but I haven't actually done that yet, IIRC.
 pub trait IsAtomicSlab: Slab {
     /// Perform the following steps atomically with respect to any other atomic
     /// accesses within `SCOPE` to the same location:
@@ -157,6 +159,9 @@ mod non_atomic {
     use super::*;
 
     /// A slab for testing that is **not** atomic.
+    ///
+    /// This is fine because when running on CPU we don't parallelize the
+    /// shader runs.
     pub struct NonAtomicSlab<T> {
         inner: T,
     }
