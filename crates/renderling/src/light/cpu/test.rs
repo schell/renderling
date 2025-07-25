@@ -380,9 +380,9 @@ fn clear_tiles_sanity() {
         tiling.tiling_slab.commit();
 
         let (mins, maxs, lights) = futures_lite::future::block_on(tiling.read_images());
-        img_diff::save("light/clear_tiles/1-mins.png", mins);
-        img_diff::save("light/clear_tiles/1-maxs.png", maxs);
-        img_diff::save("light/clear_tiles/1-lights.png", lights);
+        img_diff::assert_img_eq("light/tiling/clear_tiles/1-mins.png", mins);
+        img_diff::assert_img_eq("light/tiling/clear_tiles/1-maxs.png", maxs);
+        img_diff::assert_img_eq("light/tiling/clear_tiles/1-lights.png", lights);
     }
 
     // Run the clear_tiles shader to ensure that the tiles are cleared.
@@ -405,9 +405,55 @@ fn clear_tiles_sanity() {
         ctx.runtime().queue.submit(Some(encoder.finish()));
 
         let (mins, maxs, lights) = futures_lite::future::block_on(tiling.read_images());
-        img_diff::save("light/clear_tiles/2-mins.png", mins);
-        img_diff::save("light/clear_tiles/2-maxs.png", maxs);
-        img_diff::save("light/clear_tiles/2-lights.png", lights);
+        img_diff::assert_img_eq("light/tiling/clear_tiles/2-mins.png", mins);
+        img_diff::assert_img_eq("light/tiling/clear_tiles/2-maxs.png", maxs);
+        img_diff::assert_img_eq("light/tiling/clear_tiles/2-lights.png", lights);
+    }
+}
+
+#[test]
+fn min_max_depth_sanity() {
+    let _ = env_logger::builder().is_test(true).try_init();
+    let s = 256;
+    let depth_texture_size = UVec2::splat(s);
+    let ctx = crate::Context::headless(s, s);
+    let stage = ctx.new_stage();
+    let _doc = stage
+        .load_gltf_document_from_path(
+            crate::test::workspace_dir()
+                .join("gltf")
+                .join("light_tiling_test.glb"),
+        )
+        .unwrap();
+    let camera = stage.new_camera(make_camera());
+    stage.use_camera(camera);
+    snapshot(&ctx, &stage, "light/tiling/min_max_depth/1-scene.png", true);
+
+    let tiling = LightTiling::new_hybrid(ctx.runtime(), false, depth_texture_size, 32);
+    tiling.prepare(depth_texture_size);
+
+    let stage_commit_result = stage.commit();
+    let bindgroup = tiling.get_bindgroup(
+        ctx.get_device(),
+        &stage_commit_result.geometry_buffer,
+        &stage_commit_result.lighting_buffer,
+        &stage.depth_texture.read().unwrap(),
+    );
+    let label = Some("light-tiling-min-max-depth-test");
+
+    // Clear the tiles, which is verified in `clear_tiles_sanity`
+    {
+        let mut encoder = ctx
+            .get_device()
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label });
+        {
+            tiling.clear_tiles(&mut encoder, bindgroup.as_ref());
+            tiling.compute_min_max_depth(&mut encoder, bindgroup.as_ref(), depth_texture_size);
+        }
+        ctx.runtime().queue.submit(Some(encoder.finish()));
+        let (mins, maxs, _lights) = futures_lite::future::block_on(tiling.read_images());
+        img_diff::save("light/tiling/min_max_depth/2-mins.png", mins);
+        img_diff::save("light/tiling/min_max_depth/2-maxs.png", maxs);
     }
 }
 

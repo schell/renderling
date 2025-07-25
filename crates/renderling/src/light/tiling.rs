@@ -38,6 +38,7 @@ pub struct LightTiling<Ct: IsContainer = GpuArrayContainer> {
     compute_tiles_bind_group_layout: Arc<wgpu::BindGroupLayout>,
     compute_tiles_bind_group: ManagedBindGroup,
     clear_tiles_pipeline: Arc<wgpu::ComputePipeline>,
+    compute_min_max_depth_pipeline: Arc<wgpu::ComputePipeline>,
     compute_tiles_pipeline: Arc<wgpu::ComputePipeline>,
 }
 
@@ -119,6 +120,29 @@ impl<Ct: IsContainer> LightTiling<Ct> {
         })
     }
 
+    fn create_compute_min_max_depth_pipeline(
+        device: &wgpu::Device,
+        multisampled: bool,
+    ) -> wgpu::ComputePipeline {
+        const LABEL: Option<&'static str> = Some("light-tiling-compute-min-max-depth");
+        let module = crate::linkage::light_tiling_compute_tile_min_and_max_depth::linkage(device);
+        let bindgroup_layout = Self::create_bindgroup_layout(device, multisampled);
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: LABEL,
+            bind_group_layouts: &[&bindgroup_layout],
+            push_constant_ranges: &[],
+        });
+
+        device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: LABEL,
+            layout: Some(&pipeline_layout),
+            module: &module.module,
+            entry_point: Some(module.entry_point),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            cache: None,
+        })
+    }
+
     fn create_compute_tiles_pipeline(
         device: &wgpu::Device,
         multisampled: bool,
@@ -169,8 +193,27 @@ impl<Ct: IsContainer> LightTiling<Ct> {
         compute_pass.set_pipeline(&self.clear_tiles_pipeline);
         compute_pass.set_bind_group(0, bindgroup, &[]);
 
-        let x = LightTilingDescriptor::TILE_SIZE.x;
-        let y = LightTilingDescriptor::TILE_SIZE.y;
+        let x = (LightTilingDescriptor::TILE_SIZE.x / 16) + 1;
+        let y = (LightTilingDescriptor::TILE_SIZE.y / 16) + 1;
+        let z = 1;
+        compute_pass.dispatch_workgroups(x, y, z);
+    }
+
+    pub(crate) fn compute_min_max_depth(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        bindgroup: &wgpu::BindGroup,
+        depth_texture_size: UVec2,
+    ) {
+        let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+            label: Some("light-tiling-compute-min-max-depth"),
+            timestamp_writes: None,
+        });
+        compute_pass.set_pipeline(&self.compute_min_max_depth_pipeline);
+        compute_pass.set_bind_group(0, bindgroup, &[]);
+
+        let x = (depth_texture_size.x / 16) + 1;
+        let y = (depth_texture_size.y / 16) + 1;
         let z = 1;
         compute_pass.dispatch_workgroups(x, y, z);
     }
@@ -279,6 +322,7 @@ impl<Ct: IsContainer> LightTiling<Ct> {
             .read_vec(desc.tiles_array)
             .into_iter()
             .map(|tile| {
+                assert!(tile.depth_min <= tile.depth_max);
                 (
                     crate::math::scaled_u32_to_u8(tile.depth_min),
                     crate::math::scaled_u32_to_u8(tile.depth_max),
@@ -340,6 +384,10 @@ impl LightTiling<HybridArrayContainer> {
             &runtime.device,
             multisampled,
         ));
+        let compute_min_max_depth_pipeline = Arc::new(Self::create_compute_min_max_depth_pipeline(
+            &runtime.device,
+            multisampled,
+        ));
 
         Self {
             tiling_slab,
@@ -348,6 +396,7 @@ impl LightTiling<HybridArrayContainer> {
             bind_group_creation_time: Default::default(),
             depth_texture_id: Default::default(),
             clear_tiles_pipeline,
+            compute_min_max_depth_pipeline,
             compute_tiles_bind_group_layout: compute_tiles_bind_group_layout.into(),
             compute_tiles_bind_group: Default::default(),
             compute_tiles_pipeline: compute_tiles_pipeline.into(),
@@ -374,6 +423,7 @@ impl LightTiling {
             compute_tiles_bind_group,
             clear_tiles_pipeline,
             compute_tiles_pipeline,
+            compute_min_max_depth_pipeline,
         } = LightTiling::new_hybrid(
             runtime,
             multisampled,
@@ -390,6 +440,7 @@ impl LightTiling {
             compute_tiles_bind_group,
             clear_tiles_pipeline,
             compute_tiles_pipeline,
+            compute_min_max_depth_pipeline,
         }
     }
 }
