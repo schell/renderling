@@ -852,6 +852,12 @@ impl GpuRng {
         (word >> 22) ^ word
     }
 
+    pub fn gen_u32(&mut self, min: u32, max: u32) -> u32 {
+        let range = max - min;
+        let percent = self.gen_f32(0.0, 1.0);
+        min + (range as f32 * percent).round() as u32
+    }
+
     pub fn gen_f32(&mut self, min: f32, max: f32) -> f32 {
         let range = max - min;
         let numerator = self.gen();

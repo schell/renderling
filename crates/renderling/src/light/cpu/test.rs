@@ -16,10 +16,10 @@ use crate::{
     bvol::BoundingBox,
     camera::Camera,
     color::linear_xfer_vec4,
-    light::{LightTiling, LightTilingDescriptor, LightTilingInvocation, SpotLightCalculation},
-    math::{
-        convert_pixel_depth_into_world_coords, hex_to_vec4, CpuTexture2d, GpuRng, NonAtomicSlab,
+    light::{
+        LightTile, LightTiling, LightTilingDescriptor, LightTilingInvocation, SpotLightCalculation,
     },
+    math::GpuRng,
     pbr::Material,
     prelude::Transform,
     stage::{Renderlet, RenderletPbrVertexInfo, Stage, Vertex},
@@ -342,126 +342,72 @@ fn make_camera() -> Camera {
     )
 }
 
+/// Ensures that `LightTile`s are cleared by the clear_tiles shader.
 #[test]
-/// Test the light tiling feature.
-fn light_tiling_cpu_sanity() {
+fn clear_tiles_sanity() {
     let _ = env_logger::builder().is_test(true).try_init();
-    let size = size();
-    let ctx = crate::Context::headless(size.x, size.y);
-    let stage = ctx
-        .new_stage()
-        .with_lighting(true)
-        .with_bloom(true)
-        .with_bloom_mix_strength(0.5);
-
-    let doc = stage
-        .load_gltf_document_from_path(
-            crate::test::workspace_dir()
-                .join("gltf")
-                .join("light_tiling_test.glb"),
-        )
-        .unwrap();
-
-    let camera = stage.new_camera(make_camera());
-    stage.use_camera(camera);
-
-    let moonlight = doc.lights.first().unwrap();
-    let _shadow = {
-        let sm = stage
-            .new_shadow_map(moonlight, UVec2::splat(1024), 0.1, 256.0)
-            .unwrap();
-        sm.shadowmap_descriptor.modify(|d| {
-            d.bias_min = 0.0;
-            d.bias_max = 0.0;
-            d.pcf_samples = 2;
-        });
-        sm.update(&stage, doc.renderlets_iter()).unwrap();
-        sm
-    };
-
-    let mut bounding_boxes = vec![];
-    for node in doc.nodes.iter() {
-        if node.mesh.is_none() {
-            continue;
-        }
-        let transform = Mat4::from(node.transform.get_global_transform());
-        if let Some(mesh_index) = node.mesh {
-            let mesh = &doc.meshes[mesh_index];
-            for prim in mesh.primitives.iter() {
-                let (min, max) = prim.bounding_box;
-                let min = transform.transform_point3(min);
-                let max = transform.transform_point3(max);
-                let bb = BoundingBox::from_min_max(min, max);
-                if bb.half_extent.min_element().is_zero() {
-                    continue;
-                }
-                bounding_boxes.push(bb);
-            }
-        }
-    }
-
-    let mut prng = crate::math::GpuRng::new(666);
-    let mut lights = vec![];
-
-    for _ in 0..MAX_LIGHTS {
-        let light = gen_light(&stage, &mut prng, &bounding_boxes);
-        {
-            let bundle = &light.light;
-            if bundle.light.id().inner() == 5694 {
-                println!("light: {bundle}");
-                println!("  transform-id: {:?}", bundle.transform.id(),);
-            }
-        }
-        lights.push(light);
-    }
-
-    // Remove the light meshes
-    for generated_light in lights.iter() {
-        stage.remove_renderlet(&generated_light.mesh_renderlet);
-    }
-    snapshot(
-        &ctx,
-        &stage,
-        "light/tiling/cpu/4-after-lights-no-meshes.png",
-        true,
-    );
-
-    // Get all the slabs and run the shader on the CPU
-    let tiling = LightTiling::new(ctx.runtime(), false, size, 32);
+    let s = 256;
+    let depth_texture_size = UVec2::splat(s);
+    let ctx = crate::Context::headless(s, s);
+    let stage = ctx.new_stage();
+    let tiling = LightTiling::new_hybrid(ctx.runtime(), false, depth_texture_size, 32);
     let desc = tiling.tiling_descriptor.get();
-    let depth = stage.depth_texture.read().unwrap();
-    let depth_img = crate::texture::read_depth_texture_to_image(
-        ctx.runtime(),
-        size.x as usize,
-        size.y as usize,
-        &depth.texture,
-    )
-    .unwrap();
-    let geometry_slab =
-        futures_lite::future::block_on(stage.geometry.slab_allocator().read(..)).unwrap();
-    let lighting_slab =
-        futures_lite::future::block_on(stage.lighting.slab_allocator().read(..)).unwrap();
-    let tiling_slab = {
-        tiling.prepare(UVec2::new(depth_img.width(), depth_img.height()));
-        let _ = tiling.tiling_slab.commit();
-        futures_lite::future::block_on(tiling.tiling_slab.read(..)).unwrap()
-    };
+    let tile_dimensions = desc.tile_dimensions();
 
-    let w = depth_img.width() / LightTilingDescriptor::TILE_SIZE.x + 1;
-    let h = depth_img.height() / LightTilingDescriptor::TILE_SIZE.y + 1;
-    let mut non_atomic_tiling_slab = NonAtomicSlab::new(tiling_slab);
-    let depth_img = CpuTexture2d::from_image(depth_img, crate::math::luma_u8_to_vec4);
-    for x in 0..w {
-        for y in 0..h {
-            let global_id = UVec3::new(x, y, 0);
-            let invocation = LightTilingInvocation::new(global_id, desc);
-            invocation.compute_tiles(
-                &depth_img,
-                &geometry_slab,
-                &lighting_slab,
-                &mut non_atomic_tiling_slab,
-            );
+    // Write to the tiles to ensure we know the starting state, that way we can
+    // ensure each step of tiling is correct.
+    {
+        let mut rng = GpuRng::new(0);
+        let max_distance = UVec2::ZERO.manhattan_distance(tile_dimensions) as f32;
+        for i in 0..tiling.tiles().len() {
+            tiling.tiles().modify(i, |item| {
+                let x = i as u32 % tile_dimensions.x;
+                let y = i as u32 / tile_dimensions.x;
+                let tile_coord = UVec2::new(x, y);
+                let distance = tile_coord.manhattan_distance(tile_dimensions) as f32;
+                // This should produce an image where pixels get darker towards the lower right corner.
+                let min = distance / max_distance;
+                // This should produce an image where pixels get darker towards the upper left corner.
+                let max = 1.0 - distance / max_distance;
+
+                item.depth_min = crate::light::quantize_depth_f32_to_u32(min);
+                item.depth_max = crate::light::quantize_depth_f32_to_u32(max);
+
+                // This should produce an image that looks like noise
+                item.next_light_index = rng.gen_u32(0, 32);
+            });
         }
+        tiling.tiling_slab.commit();
+
+        let (mins, maxs, lights) = futures_lite::future::block_on(tiling.read_images());
+        img_diff::save("light/clear_tiles/1-mins.png", mins);
+        img_diff::save("light/clear_tiles/1-maxs.png", maxs);
+        img_diff::save("light/clear_tiles/1-lights.png", lights);
+    }
+
+    // Run the clear_tiles shader to ensure that the tiles are cleared.
+    {
+        tiling.prepare(depth_texture_size);
+        let stage_commit_result = stage.commit();
+        let bindgroup = tiling.get_bindgroup(
+            ctx.get_device(),
+            &stage_commit_result.geometry_buffer,
+            &stage_commit_result.lighting_buffer,
+            &stage.depth_texture.read().unwrap(),
+        );
+        let label = Some("light-tiling-clear-tiles-test");
+        let mut encoder = ctx
+            .get_device()
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label });
+        {
+            tiling.clear_tiles(&mut encoder, bindgroup.as_ref());
+        }
+        ctx.runtime().queue.submit(Some(encoder.finish()));
+
+        let (mins, maxs, lights) = futures_lite::future::block_on(tiling.read_images());
+        img_diff::save("light/clear_tiles/2-mins.png", mins);
+        img_diff::save("light/clear_tiles/2-maxs.png", maxs);
+        img_diff::save("light/clear_tiles/2-lights.png", lights);
     }
 }
 
@@ -555,7 +501,7 @@ fn light_tiling_sanity() {
         true,
     );
 
-    let tiling = LightTiling::new(ctx.runtime(), false, size, 32);
+    let tiling = LightTiling::new_hybrid(ctx.runtime(), false, size, 32);
     let desc = tiling.tiling_descriptor.get();
     let depth = stage.depth_texture.read().unwrap();
     let depth_img = crate::texture::read_depth_texture_f32(
@@ -600,6 +546,7 @@ fn light_tiling_sanity() {
         "light/tiling/5-distance-from-z_near_point.png",
         linearized_normalized_depth_img,
     );
+
     tiling.run(&stage.geometry.commit(), &stage.lighting.commit(), &depth);
     let (mut mins_img, mut maxs_img, mut lights_img) =
         futures_lite::future::block_on(tiling.read_images());

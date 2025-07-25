@@ -856,11 +856,22 @@ pub struct LightTilingDescriptor {
 impl LightTilingDescriptor {
     pub const TILE_SIZE: UVec2 = UVec2::new(16, 16);
 
+    /// Returns the dimensions of the grid of tiles.
     pub fn tile_dimensions(&self) -> UVec2 {
         let x = (self.depth_texture_size.x as f32 / Self::TILE_SIZE.x as f32).ceil();
         let y = (self.depth_texture_size.y as f32 / Self::TILE_SIZE.y as f32).ceil();
         UVec2::new(x as u32, y as u32)
     }
+}
+
+/// Quantizes a fragment depth from `f32` to `u32`.
+pub fn quantize_depth_f32_to_u32(depth: f32) -> u32 {
+    (u32::MAX as f32 * depth).round() as u32
+}
+
+/// Reconstructs a previously quantized depth from a `u32`.
+pub fn dequantize_depth_u32_to_f32(depth: u32) -> f32 {
+    depth as f32 / u32::MAX as f32
 }
 
 struct LightTilingInvocation {
@@ -927,7 +938,7 @@ impl LightTilingInvocation {
         // Fragment depth scaled to min/max of u32 values
         //
         // This is so we can compare with normal atomic ops instead of using the float extension
-        let frag_depth_u32: u32 = (u32::MAX as f32 * frag_depth).round() as u32;
+        let frag_depth_u32 = quantize_depth_f32_to_u32(frag_depth);
 
         // The tile's index in all the tiles
         let tile_index = self.tile_index();
@@ -964,28 +975,20 @@ impl LightTilingInvocation {
             && frag_pos.y % LightTilingDescriptor::TILE_SIZE.y == 0
     }
 
-    fn clear_tiles<S: IsAtomicSlab + ?Sized>(&self, tiling_slab: &mut S) {
-        if self.frag_pos_is_tile_corner() {
-            // only continue if this is the invocation in the top-left of the tile, as
-            // we only need one invocation per tile.
-            let tile_index = self.tile_index();
-            let tile_id = self.descriptor.tiles_array.at(tile_index);
-
-            {
-                let mut tile = tiling_slab.read(tile_id);
-                tile.depth_min = u32::MAX;
-                tile.depth_max = 0;
-                tile.next_light_index = 0;
-                tiling_slab.write(tile_id, &tile);
-            }
-
-            // index of the tile's min depth atomic value in the tiling slab
-            let min_depth_index = (tile_id + LightTile::OFFSET_OF_DEPTH_MIN).index();
-            // index of the tile's max depth atomic value in the tiling slab
-            let max_depth_index = (tile_id + LightTile::OFFSET_OF_DEPTH_MAX).index();
-
-            tiling_slab.write(min_depth_index.into(), &u32::MAX);
-            tiling_slab.write(max_depth_index.into(), &0u32);
+    /// Clears one tile.
+    ///
+    /// ## Note
+    /// This is only valid to call from the [`light_tiling_clear_tiles`] shader.
+    fn clear_tile(&self, tiling_slab: &mut [u32]) {
+        let dimensions = self.tile_dimensions();
+        let index = (self.global_id.y * dimensions.x + self.global_id.x) as usize;
+        if index < self.descriptor.tiles_array.len() {
+            let tile_id = self.descriptor.tiles_array.at(index);
+            let mut tile = tiling_slab.read(tile_id);
+            tile.depth_min = u32::MAX;
+            tile.depth_max = 0;
+            tile.next_light_index = 0;
+            tiling_slab.write(tile_id, &tile);
         }
     }
 
@@ -1098,7 +1101,7 @@ impl LightTilingInvocation {
         lighting_slab: &[u32],
         tiling_slab: &mut S,
     ) {
-        self.clear_tiles(tiling_slab);
+        // self.clear_tiles(tiling_slab);
         #[cfg(gpu)]
         unsafe {
             spirv_std::arch::workgroup_memory_barrier_with_group_sync();
@@ -1140,7 +1143,7 @@ pub fn light_tiling_clear_tiles(
 ) {
     let descriptor = tiling_slab.read(Id::<LightTilingDescriptor>::new(0));
     let invocation = LightTilingInvocation::new(global_id, descriptor);
-    invocation.clear_tiles(tiling_slab);
+    invocation.clear_tile(tiling_slab);
 }
 
 /// Light culling compute shader, **without** a multisampled depth texture.
