@@ -925,13 +925,12 @@ impl LightTilingInvocation {
 
     /// Compute the min and max depth of one fragment/invocation for light tiling.
     ///
-    /// Returns the **indices** of the min and max depths of the tile.
+    /// The min and max is stored in the tiling slab.
     fn compute_min_and_max_depth<S: IsAtomicSlab + ?Sized>(
         &self,
         depth_texture: &impl Fetch<UVec2, Output = Vec4>,
-        _lighting_slab: &[u32],
         tiling_slab: &mut S,
-    ) -> (Id<u32>, Id<u32>) {
+    ) {
         let frag_pos = self.frag_pos();
         // Depth frag value at the fragment position
         let frag_depth: f32 = depth_texture.fetch(frag_pos).x;
@@ -957,8 +956,6 @@ impl LightTilingInvocation {
                 { spirv_std::memory::Scope::Workgroup as u32 },
                 { spirv_std::memory::Semantics::WORKGROUP_MEMORY.bits() }
             >(max_depth_index, frag_depth_u32);
-
-        (min_depth_index, max_depth_index)
     }
 
     /// Determine whether this invocation should run.
@@ -1106,8 +1103,8 @@ impl LightTilingInvocation {
         unsafe {
             spirv_std::arch::workgroup_memory_barrier_with_group_sync();
         }
-        let (min_index, max_index) =
-            self.compute_min_and_max_depth(depth_texture, lighting_slab, tiling_slab);
+        // let (min_index, max_index) =
+        //     self.compute_min_and_max_depth(depth_texture, lighting_slab, tiling_slab);
         #[cfg(gpu)]
         unsafe {
             spirv_std::arch::workgroup_memory_barrier_with_group_sync();
@@ -1116,8 +1113,9 @@ impl LightTilingInvocation {
             geometry_slab,
             lighting_slab,
             tiling_slab,
-            min_index,
-            max_index,
+            // TODO: these should not be `0`
+            0u32.into(),
+            0u32.into(),
         );
     }
 }
@@ -1144,6 +1142,17 @@ pub fn light_tiling_clear_tiles(
     let descriptor = tiling_slab.read(Id::<LightTilingDescriptor>::new(0));
     let invocation = LightTilingInvocation::new(global_id, descriptor);
     invocation.clear_tile(tiling_slab);
+}
+
+#[spirv(compute(threads(16, 16, 1)))]
+pub fn light_tiling_compute_tile_min_and_max_depth(
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 2)] tiling_slab: &mut [u32],
+    #[spirv(descriptor_set = 0, binding = 3)] depth_texture: &<DepthImage2d as IsDepth>::Texture,
+    #[spirv(global_invocation_id)] global_id: UVec3,
+) {
+    let descriptor = tiling_slab.read(Id::<LightTilingDescriptor>::new(0));
+    let invocation = LightTilingInvocation::new(global_id, descriptor);
+    invocation.compute_min_and_max_depth(depth_texture, tiling_slab);
 }
 
 /// Light culling compute shader, **without** a multisampled depth texture.

@@ -110,6 +110,11 @@
     "wgsl_entry_point": "lightlight_tiling_clear_tiles"
   },
   {
+    "source_path": "shaders/light-light_tiling_compute_tile_min_and_max_depth.spv",
+    "entry_point": "light::light_tiling_compute_tile_min_and_max_depth",
+    "wgsl_entry_point": "lightlight_tiling_compute_tile_min_and_max_depth"
+  },
+  {
     "source_path": "shaders/light-light_tiling_compute_tiles.spv",
     "entry_point": "light::light_tiling_compute_tiles",
     "wgsl_entry_point": "lightlight_tiling_compute_tiles"

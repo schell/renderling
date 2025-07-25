@@ -26,6 +26,7 @@ pub mod di_convolution_fragment;
 pub mod generate_mipmap_fragment;
 pub mod generate_mipmap_vertex;
 pub mod light_tiling_clear_tiles;
+pub mod light_tiling_compute_tile_min_and_max_depth;
 pub mod light_tiling_compute_tiles;
 pub mod light_tiling_compute_tiles_multisampled;
 pub mod light_tiling_depth_pre_pass;
