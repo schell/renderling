@@ -731,9 +731,9 @@ dependencies = [
 
 [[package]]
 name = "craballoc"
-version = "0.2.0"
+version = "0.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6a545335ac6c410d6dfa81b094e758c2a94b87fb8317a53fb7bb14ee8687062f"
+checksum = "bd683d06cafca92564599a275363078c8a2be118d684298fde00f930e7ffda27"
 dependencies = [
  "async-channel 1.9.0",
  "bytemuck",
@@ -3116,6 +3116,7 @@ dependencies = [
  "pretty_assertions",
  "quote",
  "renderling_build",
+ "renderling_ui",
  "rustc-hash 1.1.0",
  "serde",
  "serde_json",

@@ -418,6 +418,7 @@ pub fn renderlet_fragment(
     #[spirv(descriptor_set = 0, binding = 12)] shadow_map_sampler: &Sampler,
 
     #[spirv(flat)] renderlet_id: Id<Renderlet>,
+    #[spirv(frag_coord)] frag_coord: Vec4,
     in_color: Vec4,
     in_uv0: Vec2,
     in_uv1: Vec2,
@@ -443,6 +444,7 @@ pub fn renderlet_fragment(
         material_slab,
         light_slab,
         renderlet_id,
+        frag_coord,
         in_color,
         in_uv0,
         in_uv1,

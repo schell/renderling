@@ -51,6 +51,9 @@ pub struct LightingDescriptor {
     pub update_shadow_map_id: Id<ShadowMapDescriptor>,
     /// The index of the shadow map atlas texture to update.
     pub update_shadow_map_texture_index: u32,
+    /// `Id` of the [`LightTilingDescriptor`] to use when performing
+    /// light tiling.
+    pub light_tiling_descriptor_id: Id<LightTilingDescriptor>,
 }
 
 #[derive(Clone, Copy, SlabItem, core::fmt::Debug)]
@@ -820,7 +823,7 @@ pub type DepthImage2d = Image!(2D, type=f32, sampled, depth);
 pub type DepthImage2dMultisampled = Image!(2D, type=f32, sampled, depth, multisampled=true);
 
 /// A tile of screen space used to cull lights.
-#[derive(Clone, Copy, Default, SlabItem, core::fmt::Debug)]
+#[derive(Clone, Copy, Default, SlabItem)]
 #[offsets]
 pub struct LightTile {
     /// Minimum depth of objects found within the frustum of the tile.
@@ -833,6 +836,17 @@ pub struct LightTile {
     pub next_light_index: u32,
     /// List of light ids that intersect this tile's frustum.
     pub lights_array: Array<Id<Light>>,
+}
+
+impl core::fmt::Debug for LightTile {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("LightTile")
+            .field("depth_min", &dequantize_depth_u32_to_f32(self.depth_min))
+            .field("depth_max", &dequantize_depth_u32_to_f32(self.depth_max))
+            .field("next_light_index", &self.next_light_index)
+            .field("lights_array", &self.lights_array)
+            .finish()
+    }
 }
 
 /// Descriptor of the light tiling operation, which culls lights by accumulating
@@ -851,9 +865,16 @@ impl LightTilingDescriptor {
 
     /// Returns the dimensions of the grid of tiles.
     pub fn tile_dimensions(&self) -> UVec2 {
-        let x = (self.depth_texture_size.x as f32 / Self::TILE_SIZE.x as f32).ceil();
-        let y = (self.depth_texture_size.y as f32 / Self::TILE_SIZE.y as f32).ceil();
-        UVec2::new(x as u32, y as u32)
+        let dims_f32 = self.depth_texture_size.as_vec2() / Self::TILE_SIZE.as_vec2();
+        dims_f32.ceil().as_uvec2()
+    }
+
+    pub fn tile_index_for_fragment(&self, frag_coord: Vec4) -> usize {
+        let tile_size = LightTilingDescriptor::TILE_SIZE;
+        let frag_coord = frag_coord.xy();
+        let tile_coord = (frag_coord / tile_size.as_vec2()).floor().as_uvec2();
+        let tile_dimensions = self.tile_dimensions();
+        (tile_coord.y * tile_dimensions.x + tile_coord.x) as usize
     }
 }
 
@@ -865,6 +886,50 @@ pub fn quantize_depth_f32_to_u32(depth: f32) -> u32 {
 /// Reconstructs a previously quantized depth from a `u32`.
 pub fn dequantize_depth_u32_to_f32(depth: u32) -> f32 {
     depth as f32 / u32::MAX as f32
+}
+
+/// Helper for determining the next light to check during an
+/// invocation of the light list computation.
+struct NextLightIndex {
+    current_step: usize,
+    stride: usize,
+    lights: Array<Id<Light>>,
+    global_id: UVec3,
+}
+
+impl Iterator for NextLightIndex {
+    type Item = Id<Id<Light>>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let next_index = self.next_index();
+        self.current_step += 1;
+        if next_index < self.lights.len() {
+            Some(self.lights.at(next_index))
+        } else {
+            None
+        }
+    }
+}
+
+impl NextLightIndex {
+    pub fn new(global_id: UVec3, analytical_lights_array: Array<Id<Light>>) -> Self {
+        let stride =
+            (LightTilingDescriptor::TILE_SIZE.x * LightTilingDescriptor::TILE_SIZE.y) as f32;
+        Self {
+            current_step: 0,
+            stride: stride as usize,
+            lights: analytical_lights_array,
+            global_id,
+        }
+    }
+
+    pub fn next_index(&self) -> usize {
+        // Determine the xy coord of this invocation within the _tile_
+        let frag_tile_xy = self.global_id.xy() % LightTilingDescriptor::TILE_SIZE;
+        // Determine the index of this invocation within the _tile_
+        let offset = frag_tile_xy.y * LightTilingDescriptor::TILE_SIZE.x + frag_tile_xy.x;
+        self.current_step * self.stride + offset as usize
+    }
 }
 
 struct LightTilingInvocation {
@@ -906,36 +971,23 @@ impl LightTilingInvocation {
         (tile_pos.y * tile_dimensions.x + tile_pos.x) as usize
     }
 
-    /// The tile's screen space min and max.
-    ///
-    /// Returned values are in pixels.
-    fn tile_screen_space_min_max(&self) -> (Vec2, Vec2) {
+    /// The tile's normalized min and max.
+    fn tile_ndc_min_max(&self) -> (Vec2, Vec2) {
         let tile_size = self.tile_dimensions().as_vec2();
-        let coord = self.tile_coord().as_vec2();
-        let min = coord * tile_size;
-        let max = (coord + 1.0) * tile_size;
+        let min_coord = self.tile_coord().as_vec2();
+        let max_coord = min_coord + Vec2::ONE;
+        let min = ((min_coord / tile_size) * 2.0) - 1.0;
+        let max = ((max_coord / tile_size) * 2.0) - 1.0;
         (min, max)
-    }
-
-    /// The index of the fragment within its tile.
-    ///
-    /// 1. The fragment position is determined from the global invocation index.
-    /// 2. The fragment's relative xy position within the tile is determined.
-    /// 3. The index of the fragment's tile position is calculated and returned.
-    fn frag_index(&self) -> usize {
-        // The fragment's xy position within its tile
-        let frag_tile = self.frag_pos() % LightTilingDescriptor::TILE_SIZE;
-        // The fragment's index in the tile, which will be 0..256 if TILE_SIZE is 16x16
-        (frag_tile.y * LightTilingDescriptor::TILE_SIZE.x + frag_tile.x) as usize
     }
 
     /// Compute the min and max depth of one fragment/invocation for light tiling.
     ///
-    /// The min and max is stored in the tiling slab.
+    /// The min and max is stored in a tile on lighting slab.
     fn compute_min_and_max_depth<S: IsAtomicSlab + ?Sized>(
         &self,
         depth_texture: &impl Fetch<UVec2, Output = Vec4>,
-        tiling_slab: &mut S,
+        lighting_slab: &mut S,
     ) {
         let frag_pos = self.frag_pos();
         // Depth frag value at the fragment position
@@ -947,18 +999,19 @@ impl LightTilingInvocation {
 
         // The tile's index in all the tiles
         let tile_index = self.tile_index();
-        let tiling_desc = tiling_slab.read_unchecked(Id::<LightTilingDescriptor>::new(0));
-        // index of the tile's min depth atomic value in the tiling slab
+        let lighting_desc = lighting_slab.read_unchecked(Id::<LightingDescriptor>::new(0));
+        let tiling_desc = lighting_slab.read_unchecked(lighting_desc.light_tiling_descriptor_id);
+        // index of the tile's min depth atomic value in the lighting slab
         let tile_id = tiling_desc.tiles_array.at(tile_index);
         let min_depth_index = tile_id + LightTile::OFFSET_OF_DEPTH_MIN;
-        // index of the tile's max depth atomic value in the tiling slab
+        // index of the tile's max depth atomic value in the lighting slab
         let max_depth_index = tile_id + LightTile::OFFSET_OF_DEPTH_MAX;
 
-        let _prev_min_depth = tiling_slab.atomic_u_min::<
+        let _prev_min_depth = lighting_slab.atomic_u_min::<
                 { spirv_std::memory::Scope::Workgroup as u32 },
                 { spirv_std::memory::Semantics::WORKGROUP_MEMORY.bits() },
         >(min_depth_index, frag_depth_u32);
-        let _prev_max_depth = tiling_slab.atomic_u_max::<
+        let _prev_max_depth = lighting_slab.atomic_u_max::<
                 { spirv_std::memory::Scope::Workgroup as u32 },
                 { spirv_std::memory::Semantics::WORKGROUP_MEMORY.bits() }
             >(max_depth_index, frag_depth_u32);
@@ -974,47 +1027,57 @@ impl LightTilingInvocation {
     ///
     /// ## Note
     /// This is only valid to call from the [`light_tiling_clear_tiles`] shader.
-    fn clear_tile(&self, tiling_slab: &mut [u32]) {
+    fn clear_tile(&self, lighting_slab: &mut [u32]) {
         let dimensions = self.tile_dimensions();
         let index = (self.global_id.y * dimensions.x + self.global_id.x) as usize;
         if index < self.descriptor.tiles_array.len() {
             let tile_id = self.descriptor.tiles_array.at(index);
-            let mut tile = tiling_slab.read(tile_id);
+            let mut tile = lighting_slab.read(tile_id);
             tile.depth_min = u32::MAX;
             tile.depth_max = 0;
             tile.next_light_index = 0;
-            tiling_slab.write(tile_id, &tile);
+            lighting_slab.write(tile_id, &tile);
+            // Zero out the light list as well
+            for id in tile.lights_array.iter() {
+                lighting_slab.write(id, &Id::NONE);
+            }
         }
     }
 
-    // The difficulty here is that in SPIRV we can access `tiling_slab` atomically without wrapping it
+    // The difficulty here is that in SPIRV we can access `lighting_slab` atomically without wrapping it
     // in a type, but on CPU we must pass an array of (something like) `AtomicU32`. I'm not sure how to
     // model this interaction to test it on the CPU.
     fn compute_light_lists<S: IsAtomicSlab + ?Sized>(
         &self,
         geometry_slab: &[u32],
-        lighting_slab: &[u32],
-        tiling_slab: &mut S,
+        lighting_slab: &mut S,
     ) {
         let index = self.tile_index();
         let tile_id = self.descriptor.tiles_array.at(index);
         // Construct the tile's frustum in clip space.
-        let depth_min_u32 = tiling_slab.read_unchecked(tile_id + LightTile::OFFSET_OF_DEPTH_MIN);
-        let depth_max_u32 = tiling_slab.read_unchecked(tile_id + LightTile::OFFSET_OF_DEPTH_MAX);
+        let depth_min_u32 = lighting_slab.read_unchecked(tile_id + LightTile::OFFSET_OF_DEPTH_MIN);
+        let depth_max_u32 = lighting_slab.read_unchecked(tile_id + LightTile::OFFSET_OF_DEPTH_MAX);
         let depth_min = dequantize_depth_u32_to_f32(depth_min_u32);
         let depth_max = dequantize_depth_u32_to_f32(depth_max_u32);
 
-        let (screen_space_tile_min, screen_space_tile_max) = self.tile_screen_space_min_max();
-        // Convert into NDC coords
-        let resolution = self.descriptor.depth_texture_size.as_vec2();
-        let ndc_tile_min = (screen_space_tile_min / resolution * 2.0 - 1.0).extend(depth_min);
-        let ndc_tile_max = (screen_space_tile_max / resolution * 2.0 - 1.0).extend(depth_max);
+        if depth_min == depth_max {
+            // If we would construct a frustum with zero volume, abort.
+            //
+            // See <http://renderling.xyz/articles/live/light_tiling.html#zero-volume-frustum-optimization>
+            // for more info.
+            return;
+        }
+
+        let (ndc_tile_min, ndc_tile_max) = self.tile_ndc_min_max();
         // This is the AABB frustum, in NDC coords
-        let ndc_tile_aabb = Aabb::new(ndc_tile_min, ndc_tile_max);
+        let ndc_tile_aabb = Aabb::new(
+            ndc_tile_min.extend(depth_min),
+            ndc_tile_max.extend(depth_max),
+        );
 
         let tile_index = self.tile_index();
         let tile_id = self.descriptor.tiles_array.at(tile_index);
-        let tile_lights_array = tiling_slab.read(tile_id + LightTile::OFFSET_OF_LIGHTS_ARRAY);
+        let tile_lights_array = lighting_slab.read(tile_id + LightTile::OFFSET_OF_LIGHTS_ARRAY);
         let next_light_id = tile_id + LightTile::OFFSET_OF_NEXT_LIGHT_INDEX;
 
         let camera_id = geometry_slab.read_unchecked(
@@ -1022,36 +1085,23 @@ impl LightTilingInvocation {
         );
         let camera = geometry_slab.read_unchecked(camera_id);
 
-        // Determine the index of the fragment within the tile.
-        let index_of_frag_in_tile = self.frag_index();
         // List of all analytical lights in the scene
         let analytical_lights_array = lighting_slab.read_unchecked(
             Id::<LightingDescriptor>::new(0)
                 + LightingDescriptor::OFFSET_OF_ANALYTICAL_LIGHTS_ARRAY,
         );
-        // The number of fragments in one tile
-        let count_of_fragments_in_one_tile =
-            (LightTilingDescriptor::TILE_SIZE.x * LightTilingDescriptor::TILE_SIZE.y) as usize;
+
         // Each invocation will calculate a few lights' contribution to the tile, until all lights
         // have been visited
-        for step in 0..(analytical_lights_array.len() / count_of_fragments_in_one_tile) + 1 {
-            let light_index = step * count_of_fragments_in_one_tile + index_of_frag_in_tile;
-            if light_index >= analytical_lights_array.len() {
-                break;
-            }
-            let light_id = lighting_slab.read_unchecked(analytical_lights_array.at(light_index));
-            crate::println!("compute_light_lists::{step}::light_id: {light_id:?}");
+        let next_light = NextLightIndex::new(self.global_id, analytical_lights_array);
+        for id_of_light_id in next_light {
+            let light_id = lighting_slab.read_unchecked(id_of_light_id);
             let light = lighting_slab.read_unchecked(light_id);
             let transform = lighting_slab.read(light.transform_id);
-            crate::println!(
-                "compute_light_lists::{step}::light.light_type: {}",
-                light.light_type
-            );
             let should_add = match light.light_type {
                 LightStyle::Directional => true,
                 LightStyle::Point => {
                     let point_light = lighting_slab.read(light.into_point_id());
-                    crate::println!("compute_light_lists::{step}::transform: {transform:?}");
                     let center = Mat4::from(transform).transform_point3(point_light.position);
                     let radius = point_light.radius_of_illumination(0.25);
                     let sphere = BoundingSphere::new(center, radius);
@@ -1066,7 +1116,7 @@ impl LightTilingInvocation {
             if should_add {
                 // If the light should be added to the bin, get the next available index in the bin,
                 // then write the id of the light into that index.
-                let next_index = tiling_slab.atomic_i_increment::<
+                let next_index = lighting_slab.atomic_i_increment::<
                     { spirv_std::memory::Scope::Workgroup as u32 },
                     { spirv_std::memory::Semantics::WORKGROUP_MEMORY.bits() },
                 >(next_light_id);
@@ -1077,7 +1127,7 @@ impl LightTilingInvocation {
                 // Get the id that corresponds to the next available index in the bin
                 let binned_light_id = tile_lights_array.at(next_index as usize);
                 // Write to that location
-                tiling_slab.write(next_index.into(), &binned_light_id);
+                lighting_slab.write(binned_light_id, &light_id);
             }
         }
     }
@@ -1085,47 +1135,54 @@ impl LightTilingInvocation {
 
 #[spirv(compute(threads(16, 16, 1)))]
 pub fn light_tiling_clear_tiles(
-    #[spirv(storage_buffer, descriptor_set = 0, binding = 2)] tiling_slab: &mut [u32],
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 1)] lighting_slab: &mut [u32],
     #[spirv(global_invocation_id)] global_id: UVec3,
 ) {
-    let descriptor = tiling_slab.read(Id::<LightTilingDescriptor>::new(0));
-    let invocation = LightTilingInvocation::new(global_id, descriptor);
-    invocation.clear_tile(tiling_slab);
+    let lighting_descriptor = lighting_slab.read(Id::<LightingDescriptor>::new(0));
+    let light_tiling_descriptor =
+        lighting_slab.read(lighting_descriptor.light_tiling_descriptor_id);
+    let invocation = LightTilingInvocation::new(global_id, light_tiling_descriptor);
+    invocation.clear_tile(lighting_slab);
 }
 
 #[spirv(compute(threads(16, 16, 1)))]
 pub fn light_tiling_compute_tile_min_and_max_depth(
-    #[spirv(storage_buffer, descriptor_set = 0, binding = 2)] tiling_slab: &mut [u32],
-    #[spirv(descriptor_set = 0, binding = 3)] depth_texture: &DepthImage2d,
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 1)] lighting_slab: &mut [u32],
+    #[spirv(descriptor_set = 0, binding = 2)] depth_texture: &DepthImage2d,
     #[spirv(global_invocation_id)] global_id: UVec3,
 ) {
-    let descriptor = tiling_slab.read(Id::<LightTilingDescriptor>::new(0));
-    let invocation = LightTilingInvocation::new(global_id, descriptor);
-    invocation.compute_min_and_max_depth(depth_texture, tiling_slab);
+    let lighting_descriptor = lighting_slab.read(Id::<LightingDescriptor>::new(0));
+    let light_tiling_descriptor =
+        lighting_slab.read(lighting_descriptor.light_tiling_descriptor_id);
+    let invocation = LightTilingInvocation::new(global_id, light_tiling_descriptor);
+    invocation.compute_min_and_max_depth(depth_texture, lighting_slab);
 }
 
 #[spirv(compute(threads(16, 16, 1)))]
 pub fn light_tiling_compute_tile_min_and_max_depth_multisampled(
-    #[spirv(storage_buffer, descriptor_set = 0, binding = 2)] tiling_slab: &mut [u32],
-    #[spirv(descriptor_set = 0, binding = 3)] depth_texture: &DepthImage2dMultisampled,
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 1)] lighting_slab: &mut [u32],
+    #[spirv(descriptor_set = 0, binding = 2)] depth_texture: &DepthImage2dMultisampled,
     #[spirv(global_invocation_id)] global_id: UVec3,
 ) {
-    let descriptor = tiling_slab.read(Id::<LightTilingDescriptor>::new(0));
-    let invocation = LightTilingInvocation::new(global_id, descriptor);
-    invocation.compute_min_and_max_depth(depth_texture, tiling_slab);
+    let lighting_descriptor = lighting_slab.read(Id::<LightingDescriptor>::new(0));
+    let light_tiling_descriptor =
+        lighting_slab.read(lighting_descriptor.light_tiling_descriptor_id);
+    let invocation = LightTilingInvocation::new(global_id, light_tiling_descriptor);
+    invocation.compute_min_and_max_depth(depth_texture, lighting_slab);
 }
 
 #[spirv(compute(threads(16, 16, 1)))]
 pub fn light_tiling_bin_lights(
     #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] geometry_slab: &[u32],
-    #[spirv(storage_buffer, descriptor_set = 0, binding = 1)] lighting_slab: &[u32],
-    #[spirv(storage_buffer, descriptor_set = 0, binding = 2)] tiling_slab: &mut [u32],
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 1)] lighting_slab: &mut [u32],
     #[spirv(global_invocation_id)] global_id: UVec3,
 ) {
-    let descriptor = tiling_slab.read(Id::<LightTilingDescriptor>::new(0));
-    let invocation = LightTilingInvocation::new(global_id, descriptor);
+    let lighting_descriptor = lighting_slab.read(Id::<LightingDescriptor>::new(0));
+    let light_tiling_descriptor =
+        lighting_slab.read(lighting_descriptor.light_tiling_descriptor_id);
+    let invocation = LightTilingInvocation::new(global_id, light_tiling_descriptor);
     if invocation.should_invoke() {
-        invocation.compute_light_lists(geometry_slab, lighting_slab, tiling_slab);
+        invocation.compute_light_lists(geometry_slab, lighting_slab);
     }
 }
 
@@ -1196,42 +1253,6 @@ mod test {
     }
 
     #[test]
-    fn light_tile_fragment_indices() {
-        let descriptor = LightTilingDescriptor {
-            depth_texture_size: UVec2::splat(200),
-            tiles_array: Default::default(),
-        };
-        assert_eq!(
-            0,
-            LightTilingInvocation::new(UVec3::ZERO, descriptor).frag_index()
-        );
-        assert_eq!(
-            1,
-            LightTilingInvocation::new(UVec3::new(1, 0, 0), descriptor).frag_index()
-        );
-        assert_eq!(
-            2,
-            LightTilingInvocation::new(UVec3::new(2, 0, 0), descriptor).frag_index()
-        );
-        assert_eq!(
-            3,
-            LightTilingInvocation::new(UVec3::new(3, 0, 0), descriptor).frag_index()
-        );
-        assert_eq!(
-            16,
-            LightTilingInvocation::new(UVec3::new(0, 1, 0), descriptor).frag_index()
-        );
-        assert_eq!(
-            17,
-            LightTilingInvocation::new(UVec3::new(1, 1, 0), descriptor).frag_index()
-        );
-        assert_eq!(
-            18,
-            LightTilingInvocation::new(UVec3::new(2, 1, 0), descriptor).frag_index()
-        );
-    }
-
-    #[test]
     fn finding_orthogonal_vectors_sanity() {
         const THRESHOLD: f32 = f32::EPSILON * 3.0;
 
@@ -1254,5 +1275,70 @@ mod test {
                 }
             }
         }
+    }
+
+    #[test]
+    fn next_light_sanity() {
+        {
+            let lights_array = Array::new(0, 1);
+            // When there's only one light we only need one invocation to check that one light
+            // (per tile)
+            let mut next_light = NextLightIndex::new(UVec3::new(0, 0, 0), lights_array);
+            assert_eq!(Some(0u32.into()), next_light.next());
+            assert_eq!(None, next_light.next());
+            // The next invocation won't check anything
+            let mut next_light = NextLightIndex::new(UVec3::new(1, 0, 0), lights_array);
+            assert_eq!(None, next_light.next());
+            // Neither will the next row
+            let mut next_light = NextLightIndex::new(UVec3::new(0, 1, 0), lights_array);
+            assert_eq!(None, next_light.next());
+        }
+        {
+            let lights_array = Array::new(0, 2);
+            // When there's two lights we need two invocations
+            let mut next_light = NextLightIndex::new(UVec3::new(0, 0, 0), lights_array);
+            assert_eq!(Some(0u32.into()), next_light.next());
+            assert_eq!(None, next_light.next());
+            // The next invocation checks the second light
+            let mut next_light = NextLightIndex::new(UVec3::new(1, 0, 0), lights_array);
+            assert_eq!(Some(1u32.into()), next_light.next());
+            assert_eq!(None, next_light.next());
+            // The next one doesn't check anything
+            let mut next_light = NextLightIndex::new(UVec3::new(2, 0, 0), lights_array);
+            assert_eq!(None, next_light.next());
+        }
+        {
+            // With 256 lights (16*16), each fragment in the tile checks exactly one light
+            let lights_array = Array::new(0, 16 * 16);
+            let mut checked_lights = vec![];
+            for y in 0..16 {
+                for x in 0..16 {
+                    let mut next_light = NextLightIndex::new(UVec3::new(x, y, 0), lights_array);
+                    let next_index = next_light.next_index();
+                    let checked_light = next_light.next().unwrap();
+                    assert_eq!(next_index, checked_light.index());
+                    checked_lights.push(checked_light);
+                    assert_eq!(None, next_light.next());
+                }
+            }
+            println!("checked_lights: {checked_lights:#?}");
+            assert_eq!(256, checked_lights.len());
+        }
+    }
+
+    #[test]
+    fn frag_coord_to_tile_index() {
+        let tiling_desc = LightTilingDescriptor {
+            depth_texture_size: UVec2::new(1024, 800),
+            tiles_array: Default::default(),
+        };
+        for x in 0..16 {
+            let index = tiling_desc.tile_index_for_fragment(Vec4::new(x as f32, 0.0, 0.0, 1.0));
+            assert_eq!(0, index);
+        }
+        let index = tiling_desc.tile_index_for_fragment(Vec4::new(16.0, 0.0, 0.0, 1.0));
+        assert_eq!(1, index);
+        let index = tiling_desc.tile_index_for_fragment(Vec4::new(0.0, 16.0, 0.0, 1.0));
+        assert_eq!(1024 / 16, index);
     }
 }
