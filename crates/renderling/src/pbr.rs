@@ -14,8 +14,8 @@ use crate::{
     atlas::AtlasTexture,
     geometry::GeometryDescriptor,
     light::{
-        DirectionalLightDescriptor, LightStyle, LightingDescriptor, PointLightDescriptor,
-        ShadowCalculation, SpotLightCalculation,
+        DirectionalLightDescriptor, LightStyle, LightTile, LightingDescriptor,
+        PointLightDescriptor, ShadowCalculation, SpotLightCalculation,
     },
     math::{self, IsSampler, IsVector, Sample2d, Sample2dArray, SampleCube},
     println as my_println,
@@ -288,6 +288,7 @@ pub fn fragment_impl<A, T, DtA, C, S>(
 
     renderlet_id: Id<Renderlet>,
 
+    frag_coord: Vec4,
     in_color: Vec4,
     in_uv0: Vec2,
     in_uv1: Vec2,
@@ -534,6 +535,7 @@ pub fn fragment_impl<A, T, DtA, C, S>(
             specular,
             brdf,
             lighting_slab,
+            frag_coord,
         )
     } else {
         crate::println!("no shading!");
@@ -562,6 +564,7 @@ pub fn shade_fragment<S, T>(
     brdf: Vec2,
 
     light_slab: &[u32],
+    frag_coord: Vec4,
 ) -> Vec4
 where
     S: IsSampler,
@@ -572,7 +575,15 @@ where
     // There is always a `LightingDescriptor` stored at index `0` of the
     // light slab.
     let lighting_desc = light_slab.read_unchecked(Id::<LightingDescriptor>::new(0));
-    let analytical_lights_array = lighting_desc.analytical_lights_array;
+    // If light tiling is enabled, use the pre-computed tile's light list
+    let analytical_lights_array = if lighting_desc.light_tiling_descriptor_id.is_none() {
+        lighting_desc.analytical_lights_array
+    } else {
+        let tiling_descriptor = light_slab.read_unchecked(lighting_desc.light_tiling_descriptor_id);
+        let tile_index = tiling_descriptor.tile_index_for_fragment(frag_coord);
+        let tile = light_slab.read_unchecked(tiling_descriptor.tiles_array.at(tile_index));
+        tile.lights_array
+    };
     my_println!("lights: {analytical_lights_array:?}");
     my_println!("surface normal: {n:?}");
     my_println!("vector from surface to camera: {v:?}");

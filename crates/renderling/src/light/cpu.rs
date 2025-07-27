@@ -562,6 +562,8 @@ impl Lighting {
                  shadow_map_atlas_descriptor_id,
                  update_shadow_map_id,
                  update_shadow_map_texture_index,
+                 // Don't change the tiling descriptor
+                 light_tiling_descriptor_id: _,
              }| {
                 *analytical_lights_array = lights_array;
                 *shadow_map_atlas_descriptor_id = self.shadow_map_atlas.descriptor_id();

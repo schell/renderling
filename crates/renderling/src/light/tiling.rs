@@ -7,16 +7,16 @@ use core::sync::atomic::AtomicUsize;
 use std::sync::Arc;
 
 use craballoc::{
-    runtime::WgpuRuntime,
-    slab::{SlabAllocator, SlabBuffer},
+    slab::SlabBuffer,
     value::{GpuArrayContainer, Hybrid, HybridArrayContainer, IsContainer},
 };
 use crabslab::Id;
 use glam::UVec2;
 
-use crate::bindgroup::ManagedBindGroup;
-
-use super::{LightTile, LightTilingDescriptor};
+use crate::{
+    bindgroup::ManagedBindGroup,
+    light::{LightTile, LightTilingDescriptor, Lighting},
+};
 
 /// Shaders and resources for conducting light tiling.
 ///
@@ -26,9 +26,6 @@ use super::{LightTile, LightTilingDescriptor};
 /// For info on what light tiling is, see
 /// <https://renderling.xyz/articles/live/light_tiling.html>.
 pub struct LightTiling<Ct: IsContainer = GpuArrayContainer> {
-    // TODO: maybe we don't need a tiling slab, and we could just run on the lighting slab?
-    // Revisit this after light tiling works, as managing less slabs is better
-    pub(crate) tiling_slab: SlabAllocator<WgpuRuntime>,
     pub(crate) tiling_descriptor: Hybrid<LightTilingDescriptor>,
     tiles: Ct::Container<LightTile>,
     /// Cache of the id of the Stage's depth texture.
@@ -68,17 +65,6 @@ impl<Ct: IsContainer> LightTiling<Ct> {
                     binding: 1,
                     visibility: wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::Buffer {
-                        ty: wgpu::BufferBindingType::Storage { read_only: true },
-                        has_dynamic_offset: false,
-                        min_binding_size: None,
-                    },
-                    count: None,
-                },
-                // Tiling slab
-                wgpu::BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: wgpu::ShaderStages::COMPUTE,
-                    ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Storage { read_only: false },
                         has_dynamic_offset: false,
                         min_binding_size: None,
@@ -87,7 +73,7 @@ impl<Ct: IsContainer> LightTiling<Ct> {
                 },
                 // Depth texture
                 wgpu::BindGroupLayoutEntry {
-                    binding: 3,
+                    binding: 2,
                     visibility: wgpu::ShaderStages::COMPUTE,
                     ty: wgpu::BindingType::Texture {
                         sample_type: wgpu::TextureSampleType::Depth,
@@ -175,6 +161,7 @@ impl<Ct: IsContainer> LightTiling<Ct> {
         &self,
         encoder: &mut wgpu::CommandEncoder,
         bindgroup: &wgpu::BindGroup,
+        depth_texture_size: UVec2,
     ) {
         let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("light-tiling-clear-tiles"),
@@ -183,8 +170,10 @@ impl<Ct: IsContainer> LightTiling<Ct> {
         compute_pass.set_pipeline(&self.clear_tiles_pipeline);
         compute_pass.set_bind_group(0, bindgroup, &[]);
 
-        let x = (LightTilingDescriptor::TILE_SIZE.x / 16) + 1;
-        let y = (LightTilingDescriptor::TILE_SIZE.y / 16) + 1;
+        let dims_f32 = depth_texture_size.as_vec2() / LightTilingDescriptor::TILE_SIZE.as_vec2();
+        let workgroups = (dims_f32 / 16.0).ceil().as_uvec2();
+        let x = workgroups.x;
+        let y = workgroups.y;
         let z = 1;
         compute_pass.dispatch_workgroups(x, y, z);
     }
@@ -228,8 +217,6 @@ impl<Ct: IsContainer> LightTiling<Ct> {
     }
 
     /// Get the bindgroup.
-    ///
-    /// This commits the tiling slab.
     pub fn get_bindgroup(
         &self,
         device: &wgpu::Device,
@@ -237,24 +224,18 @@ impl<Ct: IsContainer> LightTiling<Ct> {
         lighting_slab: &SlabBuffer<wgpu::Buffer>,
         depth_texture: &crate::texture::Texture,
     ) -> Arc<wgpu::BindGroup> {
-        let tiling_slab_buffer = self.tiling_slab.commit();
         // UNWRAP: safe because we know there are elements
-        let latest_buffer_creation = [
-            tiling_slab_buffer.creation_time(),
-            geometry_slab.creation_time(),
-            lighting_slab.creation_time(),
-        ]
-        .into_iter()
-        .max()
-        .unwrap();
+        let latest_buffer_creation = [geometry_slab.creation_time(), lighting_slab.creation_time()]
+            .into_iter()
+            .max()
+            .unwrap();
         let prev_buffer_creation = self
             .bindgroup_creation_time
             .swap(latest_buffer_creation, std::sync::atomic::Ordering::Relaxed);
         let prev_depth_texture_id = self
             .depth_texture_id
             .swap(depth_texture.id(), std::sync::atomic::Ordering::Relaxed);
-        let should_invalidate = tiling_slab_buffer.is_new_this_commit()
-            || prev_buffer_creation < latest_buffer_creation
+        let should_invalidate = prev_buffer_creation < latest_buffer_creation
             || prev_depth_texture_id < depth_texture.id();
         self.bindgroup.get(should_invalidate, || {
             device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -271,10 +252,6 @@ impl<Ct: IsContainer> LightTiling<Ct> {
                     },
                     wgpu::BindGroupEntry {
                         binding: 2,
-                        resource: tiling_slab_buffer.as_entire_binding(),
-                    },
-                    wgpu::BindGroupEntry {
-                        binding: 3,
                         resource: wgpu::BindingResource::TextureView(&depth_texture.view),
                     },
                 ],
@@ -282,26 +259,27 @@ impl<Ct: IsContainer> LightTiling<Ct> {
         })
     }
 
-    /// Run light tiling, resulting in edits to the tiling slab.
-    pub fn run(
-        &self,
-        geometry_slab: &SlabBuffer<wgpu::Buffer>,
-        lighting_slab: &SlabBuffer<wgpu::Buffer>,
-        depth_texture: &crate::texture::Texture,
-    ) {
+    /// Run light tiling, resulting in edits to the lighting slab.
+    pub fn run(&self, lighting: &Lighting, depth_texture: &crate::texture::Texture) {
         let depth_texture_size = depth_texture.size();
         self.prepare(depth_texture_size);
 
-        let runtime = self.tiling_slab.runtime();
+        let light_slab = &lighting.light_slab;
+        let geometry_slab = &lighting.geometry_slab;
+        let runtime = light_slab.runtime();
         let label = Some("light-tiling-run");
-        let bindgroup =
-            self.get_bindgroup(&runtime.device, geometry_slab, lighting_slab, depth_texture);
+        let bindgroup = self.get_bindgroup(
+            &runtime.device,
+            &geometry_slab.commit(),
+            &light_slab.commit(),
+            depth_texture,
+        );
 
         let mut encoder = runtime
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor { label });
         {
-            self.clear_tiles(&mut encoder, bindgroup.as_ref());
+            self.clear_tiles(&mut encoder, bindgroup.as_ref(), depth_texture_size);
             self.compute_min_max_depth(&mut encoder, bindgroup.as_ref(), depth_texture_size);
             self.compute_bins(&mut encoder, bindgroup.as_ref(), depth_texture_size);
         }
@@ -313,17 +291,33 @@ impl<Ct: IsContainer> LightTiling<Ct> {
     }
 
     #[cfg(test)]
+    /// Read the tiles from the light slab.
+    pub(crate) async fn read_tiles(&self, lighting: &Lighting) -> Vec<LightTile> {
+        lighting
+            .light_slab
+            .read_array(self.tiling_descriptor.get().tiles_array)
+            .await
+            .unwrap()
+    }
+
+    #[cfg(test)]
     /// Returns a tuple containing an image of depth mins, depth maximums and number of lights.
     pub(crate) async fn read_images(
         &self,
+        lighting: &Lighting,
     ) -> (image::GrayImage, image::GrayImage, image::GrayImage) {
         use crabslab::Slab;
 
+        use crate::light::dequantize_depth_u32_to_f32;
+
         let tile_dimensions = self.tiling_descriptor.get().tile_dimensions();
-        let slab = self.tiling_slab.read(..).await.unwrap();
-        log::info!("tiling slab length: {}", slab.len());
-        let desc = slab.read(Id::<LightTilingDescriptor>::new(0));
-        log::info!("light-tiling-descriptor: {desc:#?}");
+        let slab = lighting.light_slab.read(..).await.unwrap();
+        let desc = slab.read(
+            lighting
+                .lighting_descriptor
+                .get()
+                .light_tiling_descriptor_id,
+        );
         assert_eq!(
             tile_dimensions.x * tile_dimensions.y,
             desc.tiles_array.len() as u32,
@@ -335,14 +329,11 @@ impl<Ct: IsContainer> LightTiling<Ct> {
             .into_iter()
             .enumerate()
             .map(|(i, tile)| {
-                assert!(tile.depth_min <= tile.depth_max);
-                log::info!(
-                    "read_images-light-{i}-next_light_index: {}",
-                    tile.next_light_index
-                );
+                let min = dequantize_depth_u32_to_f32(tile.depth_min);
+                let max = dequantize_depth_u32_to_f32(tile.depth_max);
                 (
-                    crate::math::scaled_u32_to_u8(tile.depth_min),
-                    crate::math::scaled_u32_to_u8(tile.depth_max),
+                    crate::math::scaled_f32_to_u8(min),
+                    crate::math::scaled_f32_to_u8(max),
                     crate::math::scaled_f32_to_u8(
                         tile.next_light_index as f32 / tile.lights_array.len() as f32,
                     ),
@@ -370,29 +361,33 @@ impl<Ct: IsContainer> LightTiling<Ct> {
 impl LightTiling<HybridArrayContainer> {
     /// Creates a new [`LightTiling`] struct with a [`HybridArray`] of tiles.
     pub fn new_hybrid(
-        runtime: impl AsRef<WgpuRuntime>,
+        lighting: &Lighting,
         multisampled: bool,
         depth_texture_size: UVec2,
         max_lights_per_tile: usize,
     ) -> Self {
-        let runtime = runtime.as_ref();
-
-        let tiling_slab = SlabAllocator::new(runtime, "tiling", wgpu::BufferUsages::empty());
+        log::trace!("creating LightTiling");
+        let lighting_slab = lighting.slab_allocator();
+        let runtime = lighting_slab.runtime();
         let desc = LightTilingDescriptor {
             depth_texture_size,
             ..Default::default()
         };
-        let tiling_descriptor = tiling_slab.new_value(desc);
+        let tiling_descriptor = lighting_slab.new_value(desc);
+        log::trace!("created tiling descriptor: {tiling_descriptor:?}");
+        lighting
+            .lighting_descriptor
+            .modify(|desc| desc.light_tiling_descriptor_id = tiling_descriptor.id());
         let tiled_size = desc.tile_dimensions();
         let mut tiles = Vec::new();
         for _ in 0..tiled_size.x * tiled_size.y {
-            let lights = tiling_slab.new_array(vec![Id::NONE; max_lights_per_tile]);
+            let lights = lighting_slab.new_array(vec![Id::NONE; max_lights_per_tile]);
             tiles.push(LightTile {
                 lights_array: lights.array(),
                 ..Default::default()
             });
         }
-        let tiles = tiling_slab.new_array(tiles);
+        let tiles = lighting_slab.new_array(tiles);
         tiling_descriptor.modify(|d| {
             d.tiles_array = tiles.array();
         });
@@ -412,7 +407,6 @@ impl LightTiling<HybridArrayContainer> {
             Arc::new(Self::create_bindgroup_layout(&runtime.device, multisampled));
 
         Self {
-            tiling_slab,
             tiling_descriptor,
             tiles,
             // The inner bindgroup is created on-demand
@@ -430,14 +424,13 @@ impl LightTiling<HybridArrayContainer> {
 impl LightTiling {
     /// Creates a new [`LightTiling`] struct.
     pub fn new(
-        runtime: impl AsRef<WgpuRuntime>,
+        lighting: &Lighting,
         multisampled: bool,
         depth_texture_size: UVec2,
         max_lights_per_tile: usize,
     ) -> Self {
         // Note to self, I wish we had `fmap` here.
         let LightTiling {
-            tiling_slab,
             tiling_descriptor,
             tiles,
             bindgroup_creation_time,
@@ -448,13 +441,12 @@ impl LightTiling {
             compute_min_max_depth_pipeline,
             compute_bins_pipeline,
         } = LightTiling::new_hybrid(
-            runtime,
+            lighting,
             multisampled,
             depth_texture_size,
             max_lights_per_tile,
         );
         Self {
-            tiling_slab,
             tiling_descriptor,
             tiles: tiles.into_gpu_only(),
             depth_texture_id,

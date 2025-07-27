@@ -90,8 +90,7 @@ pub fn mo_vertex(plane: &Vec4, aabb: &Aabb) -> Vec3 {
 }
 
 /// Axis aligned bounding box.
-#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
-#[derive(Clone, Copy, Default, PartialEq, SlabItem)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, SlabItem)]
 pub struct Aabb {
     pub min: Vec3,
     pub max: Vec3,
@@ -422,8 +421,7 @@ impl BoundingBox {
 }
 
 /// Bounding sphere consisting of a center and radius.
-#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
-#[derive(Clone, Copy, Default, PartialEq, SlabItem)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, SlabItem)]
 pub struct BoundingSphere {
     pub center: Vec3,
     pub radius: f32,

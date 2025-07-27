@@ -3,7 +3,7 @@
 use core::time::Duration;
 use std::time::Instant;
 
-use glam::{UVec3, Vec3, Vec4, Vec4Swizzles};
+use glam::{Vec3, Vec4, Vec4Swizzles};
 use plotters::{
     chart::{ChartBuilder, SeriesLabelPosition},
     prelude::{BitMapBackend, Circle, EmptyElement, IntoDrawingArea, PathElement, Text},
@@ -16,9 +16,7 @@ use crate::{
     bvol::BoundingBox,
     camera::Camera,
     color::linear_xfer_vec4,
-    light::{
-        LightTile, LightTiling, LightTilingDescriptor, LightTilingInvocation, SpotLightCalculation,
-    },
+    light::{LightTiling, SpotLightCalculation},
     math::GpuRng,
     pbr::Material,
     prelude::Transform,
@@ -350,7 +348,8 @@ fn clear_tiles_sanity() {
     let depth_texture_size = UVec2::splat(s);
     let ctx = crate::Context::headless(s, s);
     let stage = ctx.new_stage();
-    let tiling = LightTiling::new_hybrid(ctx.runtime(), false, depth_texture_size, 32);
+    let lighting: &Lighting = stage.as_ref();
+    let tiling = LightTiling::new_hybrid(lighting, false, depth_texture_size, 32);
     let desc = tiling.tiling_descriptor.get();
     let tile_dimensions = desc.tile_dimensions();
 
@@ -377,9 +376,9 @@ fn clear_tiles_sanity() {
                 item.next_light_index = rng.gen_u32(0, 32);
             });
         }
-        tiling.tiling_slab.commit();
+        let _ = lighting.commit();
 
-        let (mins, maxs, lights) = futures_lite::future::block_on(tiling.read_images());
+        let (mins, maxs, lights) = futures_lite::future::block_on(tiling.read_images(lighting));
         img_diff::assert_img_eq("light/tiling/clear_tiles/1-mins.png", mins);
         img_diff::assert_img_eq("light/tiling/clear_tiles/1-maxs.png", maxs);
         img_diff::assert_img_eq("light/tiling/clear_tiles/1-lights.png", lights);
@@ -400,11 +399,11 @@ fn clear_tiles_sanity() {
             .get_device()
             .create_command_encoder(&wgpu::CommandEncoderDescriptor { label });
         {
-            tiling.clear_tiles(&mut encoder, bindgroup.as_ref());
+            tiling.clear_tiles(&mut encoder, bindgroup.as_ref(), depth_texture_size);
         }
         ctx.runtime().queue.submit(Some(encoder.finish()));
 
-        let (mins, maxs, lights) = futures_lite::future::block_on(tiling.read_images());
+        let (mins, maxs, lights) = futures_lite::future::block_on(tiling.read_images(lighting));
         img_diff::assert_img_eq("light/tiling/clear_tiles/2-mins.png", mins);
         img_diff::assert_img_eq("light/tiling/clear_tiles/2-maxs.png", maxs);
         img_diff::assert_img_eq("light/tiling/clear_tiles/2-lights.png", lights);
@@ -434,7 +433,8 @@ fn min_max_depth_sanity() {
         false,
     );
 
-    let tiling = LightTiling::new_hybrid(ctx.runtime(), false, depth_texture_size, 32);
+    let lighting = &stage.lighting;
+    let tiling = LightTiling::new_hybrid(lighting, false, depth_texture_size, 32);
     tiling.prepare(depth_texture_size);
 
     let stage_commit_result = stage.commit();
@@ -452,11 +452,11 @@ fn min_max_depth_sanity() {
             .get_device()
             .create_command_encoder(&wgpu::CommandEncoderDescriptor { label });
         {
-            tiling.clear_tiles(&mut encoder, bindgroup.as_ref());
+            tiling.clear_tiles(&mut encoder, bindgroup.as_ref(), depth_texture_size);
             tiling.compute_min_max_depth(&mut encoder, bindgroup.as_ref(), depth_texture_size);
         }
         ctx.runtime().queue.submit(Some(encoder.finish()));
-        let (mins, maxs, _lights) = futures_lite::future::block_on(tiling.read_images());
+        let (mins, maxs, _lights) = futures_lite::future::block_on(tiling.read_images(lighting));
         img_diff::assert_img_eq("light/tiling/min_max_depth/2-mins.png", mins);
         img_diff::assert_img_eq("light/tiling/min_max_depth/2-maxs.png", maxs);
     }
@@ -469,7 +469,7 @@ fn light_bins_sanity() {
     let depth_texture_size = UVec2::splat(s);
     let ctx = crate::Context::headless(s, s);
     let stage = ctx.new_stage();
-    let _doc = stage
+    let doc = stage
         .load_gltf_document_from_path(
             crate::test::workspace_dir()
                 .join("gltf")
@@ -478,9 +478,14 @@ fn light_bins_sanity() {
         .unwrap();
     let camera = stage.new_camera(make_camera());
     stage.use_camera(camera);
-    snapshot(&ctx, &stage, "light/tiling/bins/1-scene.png", true);
+    snapshot(&ctx, &stage, "light/tiling/bins/1-scene.png", false);
 
-    let tiling = LightTiling::new_hybrid(ctx.runtime(), false, depth_texture_size, 32);
+    let lighting = &stage.lighting;
+    let tiling = LightTiling::new_hybrid(lighting, false, depth_texture_size, 32);
+    assert_eq!(
+        tiling.tiling_descriptor.get().tiles_array,
+        tiling.tiles().array()
+    );
     tiling.prepare(depth_texture_size);
 
     let stage_commit_result = stage.commit();
@@ -493,24 +498,101 @@ fn light_bins_sanity() {
     let label = Some("light-tiling-min-max-depth-test");
 
     {
-        let mut encoder = ctx
-            .get_device()
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label });
         {
-            tiling.clear_tiles(&mut encoder, bindgroup.as_ref());
+            let mut encoder = ctx
+                .get_device()
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor { label });
+            tiling.clear_tiles(&mut encoder, bindgroup.as_ref(), depth_texture_size);
             tiling.compute_min_max_depth(&mut encoder, bindgroup.as_ref(), depth_texture_size);
             tiling.compute_bins(&mut encoder, bindgroup.as_ref(), depth_texture_size);
+            ctx.runtime().queue.submit(Some(encoder.finish()));
         }
-        ctx.runtime().queue.submit(Some(encoder.finish()));
-        let (_mins, _maxs, mut lights) = futures_lite::future::block_on(tiling.read_images());
+        let (_mins, _maxs, mut lights) =
+            futures_lite::future::block_on(tiling.read_images(lighting));
         img_diff::normalize_gray_img(&mut lights);
-        img_diff::save("light/tiling/bins/2-lights.png", lights);
+        img_diff::assert_img_eq("light/tiling/bins/2-lights.png", lights);
+    }
+    let directional_light = doc.lights.first().unwrap();
+    let tiles = futures_lite::future::block_on(tiling.read_tiles(lighting));
+    for tile in tiles.into_iter() {
+        let light_bin =
+            futures_lite::future::block_on(lighting.light_slab.read_array(tile.lights_array))
+                .unwrap();
+        // Assert either the light is the correct one, or we're using the zero frustum optimization
+        // discussed in <http://renderling.xyz/articles/live/light_tiling.html#zero-volume-frustum-optimization>
+        if tile.depth_min != tile.depth_max {
+            assert_eq!(light_bin[0], directional_light.light.id());
+            assert_eq!(light_bin[1], Id::NONE);
+        } else {
+            assert_eq!(0, tile.next_light_index);
+            assert_eq!(light_bin[0], Id::NONE);
+        }
+    }
+}
+
+// Ensures point lights are being binned properly.
+#[test]
+fn light_bins_point() {
+    let ctx = crate::Context::headless(256, 256);
+    let stage = ctx
+        .new_stage()
+        .with_msaa_sample_count(1)
+        .with_bloom_mix_strength(0.08);
+    let doc = stage
+        .load_gltf_document_from_path(
+            crate::test::workspace_dir()
+                .join("gltf")
+                .join("pedestal.glb"),
+        )
+        .unwrap();
+    let materials = doc.materials.get_vec();
+    log::info!("materials: {materials:#?}");
+    doc.materials.set_item(
+        0,
+        Material {
+            albedo_factor: Vec4::ONE,
+            roughness_factor: 1.0,
+            metallic_factor: 0.0,
+            ..Default::default()
+        },
+    );
+    let camera = doc.cameras.first().unwrap();
+    camera.camera.modify(|cam| {
+        let view = Mat4::look_at_rh(Vec3::new(-7.0, 5.0, 7.0), Vec3::ZERO, Vec3::Y);
+        let proj = Mat4::perspective_rh(std::f32::consts::FRAC_PI_6, 1.0, 0.1, 15.0);
+        cam.set_projection_and_view(proj, view);
+    });
+
+    let _point_light = stage.new_analytical_light(PointLightDescriptor {
+        position: Vec3::new(1.1, 1.0, 1.1),
+        color: Vec4::ONE,
+        intensity: 5.0,
+    });
+    snapshot(
+        &ctx,
+        &stage,
+        "light/tiling/light_bins_point/1-scene.png",
+        true,
+    );
+
+    let tiling = LightTiling::new(stage.as_ref(), false, UVec2::new(256, 256), 2);
+    tiling.run(stage.as_ref(), &stage.depth_texture.read().unwrap());
+
+    let (_mins, _maxs, lights) = futures_lite::future::block_on(tiling.read_images(stage.as_ref()));
+    img_diff::save("light/tiling/light_bins_point/2-lights.png", lights);
+
+    let mut found = 0;
+    for tile in futures_lite::future::block_on(tiling.read_tiles(stage.as_ref())) {
+        if tile.depth_min != tile.depth_max && found < 3 {
+            found += 1;
+            log::info!("tile: {tile:#?}");
+        }
     }
 }
 
 #[test]
-/// Test the light tiling feature.
-fn light_tiling_sanity() {
+/// Test the light tiling feature, end to end.
+fn tiling_e2e_sanity() {
     let _ = env_logger::builder().is_test(true).try_init();
     let size = size();
     let ctx = crate::Context::headless(size.x, size.y);
@@ -518,7 +600,8 @@ fn light_tiling_sanity() {
         .new_stage()
         .with_lighting(false)
         .with_bloom(true)
-        .with_bloom_mix_strength(0.5);
+        .with_bloom_mix_strength(0.5)
+        .with_msaa_sample_count(1);
 
     let doc = stage
         .load_gltf_document_from_path(
@@ -532,7 +615,7 @@ fn light_tiling_sanity() {
     let camera_value = camera.get();
     log::info!("camera: {camera_value:#?}");
     stage.use_camera(camera);
-    snapshot(&ctx, &stage, "light/tiling/1-no-lighting.png", true);
+    snapshot(&ctx, &stage, "light/tiling/e2e/1-no-lighting.png", true);
 
     stage.set_has_lighting(true);
 
@@ -549,9 +632,9 @@ fn light_tiling_sanity() {
         sm.update(&stage, doc.renderlets_iter()).unwrap();
         sm
     };
-    snapshot(&ctx, &stage, "light/tiling/2-before-lights.png", true);
+    snapshot(&ctx, &stage, "light/tiling/e2e/2-before-lights.png", true);
 
-    crate::test::capture_gpu_frame(&ctx, "light/tiling/2.gputrace", || {
+    crate::test::capture_gpu_frame(&ctx, "light/tiling/e2e/2.gputrace", || {
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
         frame.present();
@@ -585,7 +668,7 @@ fn light_tiling_sanity() {
     for _ in 0..MAX_LIGHTS {
         lights.push(gen_light(&stage, &mut prng, &bounding_boxes));
     }
-    snapshot(&ctx, &stage, "light/tiling/3-after-lights.png", true);
+    snapshot(&ctx, &stage, "light/tiling/e2e/3-after-lights.png", true);
 
     // Remove the light meshes
     for generated_light in lights.iter() {
@@ -594,12 +677,10 @@ fn light_tiling_sanity() {
     snapshot(
         &ctx,
         &stage,
-        "light/tiling/4-after-lights-no-meshes.png",
+        "light/tiling/e2e/4-after-lights-no-meshes.png",
         true,
     );
 
-    let tiling = LightTiling::new_hybrid(ctx.runtime(), false, size, 32);
-    let desc = tiling.tiling_descriptor.get();
     let depth = stage.depth_texture.read().unwrap();
     let depth_img = crate::texture::read_depth_texture_f32(
         ctx.runtime(),
@@ -608,7 +689,8 @@ fn light_tiling_sanity() {
         depth.texture.as_ref(),
     )
     .unwrap();
-    img_diff::save("light/tiling/5-depth-raw.png", depth_img.clone());
+    img_diff::save("light/tiling/e2e/5-depth-raw.png", depth_img.clone());
+
     let mut linearized_normalized_depth_img = image::GrayImage::new(size.x, size.y);
     let view_projection = camera_value.view_projection();
     for (x, y, pixel) in linearized_normalized_depth_img.enumerate_pixels_mut() {
@@ -640,19 +722,61 @@ fn light_tiling_sanity() {
         pixel.0[0] = crate::math::scaled_f32_to_u8(linearized_normalized_depth);
     }
     img_diff::save(
-        "light/tiling/5-distance-from-z_near_point.png",
+        "light/tiling/e2e/5-distance-from-z_near_point.png",
         linearized_normalized_depth_img,
     );
 
-    tiling.run(&stage.geometry.commit(), &stage.lighting.commit(), &depth);
+    // Actual tiling stuff, now
+    let lighting = &stage.lighting;
+    let tiling = LightTiling::new_hybrid(lighting, false, size, 32);
+    let tile_dimensions = tiling.tiling_descriptor.get().tile_dimensions();
+    // Write to the tiles to ensure we know the starting state, that way we can
+    // ensure each step of tiling is correct.
+    {
+        let mut rng = GpuRng::new(0);
+        let max_distance = UVec2::ZERO.manhattan_distance(tile_dimensions) as f32;
+        for i in 0..tiling.tiles().len() {
+            tiling.tiles().modify(i, |item| {
+                let x = i as u32 % tile_dimensions.x;
+                let y = i as u32 / tile_dimensions.x;
+                let tile_coord = UVec2::new(x, y);
+                let distance = tile_coord.manhattan_distance(tile_dimensions) as f32;
+                // This should produce an image where pixels get darker towards the lower right corner.
+                let min = distance / max_distance;
+                // This should produce an image where pixels get darker towards the upper left corner.
+                let max = 1.0 - distance / max_distance;
+
+                item.depth_min = crate::light::quantize_depth_f32_to_u32(min);
+                item.depth_max = crate::light::quantize_depth_f32_to_u32(max);
+
+                // This should produce an image that looks like noise
+                item.next_light_index = rng.gen_u32(0, 32);
+            });
+        }
+        let _ = lighting.commit();
+
+        let (mins, maxs, lights) = futures_lite::future::block_on(tiling.read_images(lighting));
+        img_diff::save("light/tiling/e2e/clear_tiles/1-mins.png", mins);
+        img_diff::save("light/tiling/e2e/clear_tiles/1-maxs.png", maxs);
+        img_diff::save("light/tiling/e2e/clear_tiles/1-lights.png", lights);
+    }
+
+    {
+        let start = Instant::now();
+        tiling.run(lighting, &depth);
+        log::info!("tiling time: {}ms", start.elapsed().as_millis());
+    }
+
     let (mut mins_img, mut maxs_img, mut lights_img) =
-        futures_lite::future::block_on(tiling.read_images());
+        futures_lite::future::block_on(tiling.read_images(lighting));
     img_diff::normalize_gray_img(&mut mins_img);
     img_diff::normalize_gray_img(&mut maxs_img);
     img_diff::normalize_gray_img(&mut lights_img);
-    img_diff::save("light/tiling/5-mins.png", mins_img);
-    img_diff::save("light/tiling/5-maxs.png", maxs_img);
-    img_diff::save("light/tiling/5-lights.png", lights_img);
+    img_diff::save("light/tiling/e2e/5-mins.png", mins_img);
+    img_diff::save("light/tiling/e2e/5-maxs.png", maxs_img);
+    img_diff::save("light/tiling/e2e/5-lights.png", lights_img);
+
+    snapshot(&ctx, &stage, "light/tiling/e2e/6-scene.png", true);
 
     // Stats
     let mut stats = LightTilingStats::default();
@@ -677,15 +801,28 @@ fn light_tiling_sanity() {
         }
 
         const NUM_RUNS: usize = 2;
-        for i in 0..NUM_RUNS {
-            log::info!("{number_of_lights} {i} running");
+        for (i, with_tiling) in (0..NUM_RUNS).zip([true, false].iter().cycle()) {
+            log::info!(
+                "{number_of_lights} {i} {} running",
+                if true { "tiling" } else { "non-tiling" }
+            );
+            if *with_tiling {
+                tiling.run(stage.as_ref(), &stage.depth_texture.read().unwrap());
+            }
+            stage.lighting.lighting_descriptor.modify(|desc| {
+                desc.light_tiling_descriptor_id = if *with_tiling {
+                    tiling.tiling_descriptor.id()
+                } else {
+                    Id::NONE
+                }
+            });
             let start = Instant::now();
             let frame = ctx.get_next_frame().unwrap();
             stage.render(&frame.view());
             frame.present();
             ctx.get_device().poll(wgpu::Maintain::wait());
             let duration = start.elapsed();
-            run.iterations.push(duration);
+            run.iterations.push((*with_tiling, duration));
         }
         stats.runs.push(run);
     }
@@ -711,12 +848,22 @@ const MAX_LIGHTS: usize = 1024;
 
 struct LightTilingStatsRun {
     number_of_lights: usize,
-    iterations: Vec<Duration>,
+    iterations: Vec<(bool, Duration)>,
 }
 
 impl LightTilingStatsRun {
-    fn avg_frame_time(&self) -> f32 {
-        let total: Duration = self.iterations.iter().sum();
+    fn avg_frame_time(&self, with_tiling: bool) -> f32 {
+        let total: Duration = self
+            .iterations
+            .iter()
+            .filter_map(|(had_tiling, dur)| {
+                if *had_tiling == with_tiling {
+                    Some(dur)
+                } else {
+                    None
+                }
+            })
+            .sum();
         total.as_secs_f32() / self.iterations.len() as f32
     }
 }
@@ -727,7 +874,7 @@ struct LightTilingStats {
 }
 
 fn plot(stats: LightTilingStats) {
-    let path = crate::test::workspace_dir().join("test_output/light/tiling/frame-time.png");
+    let path = crate::test::workspace_dir().join("test_output/light/tiling/e2e/frame-time.png");
     let root_drawing_area = BitMapBackend::new(&path, (800, 600)).into_drawing_area();
     root_drawing_area.fill(&plotters::style::WHITE).unwrap();
 
@@ -745,7 +892,7 @@ fn plot(stats: LightTilingStats) {
             0.0..stats
                 .runs
                 .iter()
-                .map(|r| r.avg_frame_time())
+                .flat_map(|r| [r.avg_frame_time(true), r.avg_frame_time(false)])
                 .max_by(|a, b| a.total_cmp(b))
                 .unwrap_or_default(),
         )
@@ -753,31 +900,62 @@ fn plot(stats: LightTilingStats) {
     chart
         .configure_mesh()
         .x_desc("number of lights")
-        .y_desc("avg fps")
+        .y_desc("avg seconds")
         .draw()
         .unwrap();
-
     chart
         .draw_series(LineSeries::new(
             stats
                 .runs
                 .iter()
-                .map(|r| (r.number_of_lights, r.avg_frame_time())),
+                .map(|r| (r.number_of_lights, r.avg_frame_time(false))),
             plotters::style::RED,
         ))
         .unwrap()
-        .label("without-tiling")
+        .label("without tiling")
         .legend(|(x, y)| {
             PathElement::new(vec![(x, y), (x + 20, y)], plotters::style::RED.filled())
+        });
+    chart
+        .draw_series(LineSeries::new(
+            stats
+                .runs
+                .iter()
+                .map(|r| (r.number_of_lights, r.avg_frame_time(true))),
+            plotters::style::BLUE,
+        ))
+        .unwrap()
+        .label("with tiling")
+        .legend(|(x, y)| {
+            PathElement::new(vec![(x, y), (x + 20, y)], plotters::style::BLUE.filled())
         });
     chart
         .draw_series(PointSeries::of_element(
             stats
                 .runs
                 .iter()
-                .map(|r| (r.number_of_lights, r.avg_frame_time())),
+                .map(|r| (r.number_of_lights, r.avg_frame_time(false))),
             5,
             ShapeStyle::from(&plotters::style::RED).filled(),
+            &|(num_lights, seconds_per_frame), size, style| {
+                EmptyElement::at((num_lights, seconds_per_frame))
+                    + Circle::new((0, 0), size, style)
+                    + Text::new(
+                        format!("({num_lights}, {:.2} fps)", 1.0 / seconds_per_frame),
+                        (0, 15),
+                        ("sans-serif", 15),
+                    )
+            },
+        ))
+        .unwrap();
+    chart
+        .draw_series(PointSeries::of_element(
+            stats
+                .runs
+                .iter()
+                .map(|r| (r.number_of_lights, r.avg_frame_time(true))),
+            5,
+            ShapeStyle::from(&plotters::style::BLUE).filled(),
             &|(num_lights, seconds_per_frame), size, style| {
                 EmptyElement::at((num_lights, seconds_per_frame))
                     + Circle::new((0, 0), size, style)
@@ -792,7 +970,7 @@ fn plot(stats: LightTilingStats) {
 
     chart
         .configure_series_labels()
-        .position(SeriesLabelPosition::LowerRight)
+        .position(SeriesLabelPosition::UpperLeft)
         .margin(20)
         .label_font(("sans-serif", 20))
         .draw()
