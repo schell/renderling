@@ -86,6 +86,7 @@ plotters.workspace = true
 ttf-parser = "0.20.0"
 wgpu-core.workspace = true
 winit.workspace = true
+renderling_ui = { path = "../renderling-ui" }
 
 [target.'cfg(not(target_arch = "spirv"))'.dev-dependencies]
 glam = { workspace = true, features = ["std", "debug-glam-assert"] }

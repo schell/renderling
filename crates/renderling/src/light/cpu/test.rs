@@ -762,9 +762,50 @@ fn tiling_e2e_sanity() {
     }
 
     {
+        // Check each tile
         let start = Instant::now();
         tiling.run(lighting, &depth);
         log::info!("tiling time: {}ms", start.elapsed().as_millis());
+        let tiles = futures_lite::future::block_on(tiling.read_tiles(lighting));
+        let mut tiles_missing_dir_light = vec![];
+        for (i, tile) in tiles.into_iter().enumerate() {
+            let lights = futures_lite::future::block_on(
+                lighting.slab_allocator().read_array(tile.lights_array),
+            )
+            .unwrap();
+            let mut found_end = false;
+            let mut found_dir_light = false;
+            for (j, light_id) in lights.iter().enumerate() {
+                if light_id.is_none() && !found_end {
+                    found_end = true;
+                } else if light_id.is_some() {
+                    if found_end {
+                        panic!(
+                            "previously found the 'end light', but there are new lights behind it at tile {i}, light {j})!\n\
+                            tile: {tile:#?}\n\
+                            lights: {lights:#?}"
+                        );
+                    }
+                    // Check to see if the light is the directional light
+                    let light = futures_lite::future::block_on(
+                        lighting.slab_allocator().read_one(*light_id),
+                    )
+                    .unwrap();
+                    if light.light_type == LightStyle::Directional {
+                        found_dir_light = true;
+                    }
+                }
+            }
+            if !found_dir_light {
+                tiles_missing_dir_light.push(tile);
+            }
+        }
+
+        if !tiles_missing_dir_light.is_empty() {
+            let ui = crate::ui::Ui::new(&ctx);
+            // let _path = ui
+            // .new_path
+        }
     }
 
     let (mut mins_img, mut maxs_img, mut lights_img) =
@@ -780,14 +821,8 @@ fn tiling_e2e_sanity() {
 
     // Stats
     let mut stats = LightTilingStats::default();
-    for number_of_lights in [
-        1,
-        MAX_LIGHTS / 8,
-        MAX_LIGHTS / 4,
-        MAX_LIGHTS / 2,
-        ((MAX_LIGHTS / 2) + MAX_LIGHTS) / 2,
-        MAX_LIGHTS,
-    ] {
+    for number_of_lights_exponent in 2..=MAX_LIGHTS.ilog2() {
+        let number_of_lights = 2usize.pow(number_of_lights_exponent);
         let mut run = LightTilingStatsRun {
             number_of_lights,
             iterations: vec![],
@@ -844,7 +879,7 @@ fn snapshot(ctx: &crate::Context, stage: &Stage, path: &str, save: bool) {
     frame.present();
 }
 
-const MAX_LIGHTS: usize = 1024;
+const MAX_LIGHTS: usize = 2usize.pow(12);
 
 struct LightTilingStatsRun {
     number_of_lights: usize,
@@ -885,6 +920,7 @@ fn plot(stats: LightTilingStats) {
         )
         .margin(30)
         .margin_right(100)
+        .margin_left(60)
         .x_label_area_size(30)
         .y_label_area_size(30)
         .build_cartesian_2d(
@@ -897,10 +933,14 @@ fn plot(stats: LightTilingStats) {
                 .unwrap_or_default(),
         )
         .unwrap();
+    fn y_fmt(coord: &f32) -> String {
+        let fps = 1.0 / coord;
+        format!("{coord}s ({fps:.2} fps)")
+    }
     chart
         .configure_mesh()
         .x_desc("number of lights")
-        .y_desc("avg seconds")
+        .y_label_formatter(&y_fmt)
         .draw()
         .unwrap();
     chart
@@ -938,13 +978,7 @@ fn plot(stats: LightTilingStats) {
             5,
             ShapeStyle::from(&plotters::style::RED).filled(),
             &|(num_lights, seconds_per_frame), size, style| {
-                EmptyElement::at((num_lights, seconds_per_frame))
-                    + Circle::new((0, 0), size, style)
-                    + Text::new(
-                        format!("({num_lights}, {:.2} fps)", 1.0 / seconds_per_frame),
-                        (0, 15),
-                        ("sans-serif", 15),
-                    )
+                EmptyElement::at((num_lights, seconds_per_frame)) + Circle::new((0, 0), size, style)
             },
         ))
         .unwrap();
@@ -957,13 +991,7 @@ fn plot(stats: LightTilingStats) {
             5,
             ShapeStyle::from(&plotters::style::BLUE).filled(),
             &|(num_lights, seconds_per_frame), size, style| {
-                EmptyElement::at((num_lights, seconds_per_frame))
-                    + Circle::new((0, 0), size, style)
-                    + Text::new(
-                        format!("({num_lights}, {:.2} fps)", 1.0 / seconds_per_frame),
-                        (0, 15),
-                        ("sans-serif", 15),
-                    )
+                EmptyElement::at((num_lights, seconds_per_frame)) + Circle::new((0, 0), size, style)
             },
         ))
         .unwrap();

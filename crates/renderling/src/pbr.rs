@@ -590,9 +590,12 @@ where
 
     // accumulated outgoing radiance
     let mut lo = Vec3::ZERO;
-    for i in 0..analytical_lights_array.len() {
+    for light_id_id in analytical_lights_array.iter() {
         // calculate per-light radiance
-        let light_id = light_slab.read(analytical_lights_array.at(i));
+        let light_id = light_slab.read(light_id_id);
+        if light_id.is_none() {
+            break;
+        }
         let light = light_slab.read(light_id);
         let transform = light_slab.read(light.transform_id);
         crate::println!("transform: {transform:?}");

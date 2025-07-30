@@ -21,7 +21,7 @@ async-channel = "1.8"
 bytemuck = { version = "1.19.0", features = ["derive"] }
 cfg_aliases = "0.2"
 clap = { version = "4.5.23", features = ["derive"] }
-craballoc = { version = "0.2.0" }
+craballoc = { version = "0.2.1" } 
 crabslab = { version = "0.6.5", default-features = false }
 plotters = "0.3.7"
 ctor = "0.2.2"
