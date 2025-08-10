@@ -23,15 +23,13 @@ multimodule = true
 crate-type = ["rlib", "cdylib"]
 
 [features]
-default = ["gltf", "tutorial", "winit"]
+default = ["gltf", "ui", "winit"]
 gltf = ["dep:gltf", "dep:serde_json"]
-# optional shaders
-array_test = []
 test_i8_i16_extraction = []
-test_spirv_atomics = []
-tutorial = []
-
+ui = ["dep:glyph_brush", "dep:loading-bytes", "dep:lyon"]
 wasm = ["wgpu/fragile-send-sync-non-atomic-wasm"]
+test-sync = []
+debug-slab = []
 
 [build-dependencies]
 cfg_aliases.workspace = true
@@ -63,9 +61,12 @@ crunch = "0.5"
 futures-lite = {workspace=true}
 glam = { workspace = true, features = ["std"] }
 gltf = {workspace = true, optional = true}
+glyph_brush = {workspace = true, optional = true}
 half = "2.3"
 image = {workspace = true, features = ["hdr"]}
+loading-bytes = { workspace = true, optional = true }
 log = {workspace = true}
+lyon = {workspace = true, optional = true}
 pretty_assertions.workspace = true
 rustc-hash = {workspace = true}
 serde_json = {workspace = true, optional = true}
@@ -79,6 +80,7 @@ ctor = "0.2.2"
 env_logger.workspace = true
 example = { path = "../example" }
 fastrand = "2.1.1"
+human-repr = "1.1.0"
 icosahedron = "0.1"
 img-diff = { path = "../img-diff" }
 naga.workspace = true
@@ -86,7 +88,6 @@ plotters.workspace = true
 ttf-parser = "0.20.0"
 wgpu-core.workspace = true
 winit.workspace = true
-renderling_ui = { path = "../renderling-ui" }
 
 [target.'cfg(not(target_arch = "spirv"))'.dev-dependencies]
 glam = { workspace = true, features = ["std", "debug-glam-assert"] }

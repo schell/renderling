@@ -11,6 +11,10 @@ enum Command {
         #[clap(long)]
         wgsl: bool,
 
+        /// Only generate linkage for the given shader function.
+        #[clap(long)]
+        only_fn_with_name: Option<String>,
+
         /// Print cargo output as if called from cargo (this is for testing).
         #[clap(long)]
         from_cargo: bool,
@@ -46,10 +50,14 @@ fn main() {
                 panic!("Building shaders failed :(");
             }
         }
-        Command::GenerateLinkage { wgsl, from_cargo } => {
+        Command::GenerateLinkage {
+            wgsl,
+            from_cargo,
+            only_fn_with_name,
+        } => {
             log::info!("Generating linkage for shaders");
             let paths = renderling_build::RenderlingPaths::new().unwrap();
-            paths.generate_linkage(from_cargo, wgsl);
+            paths.generate_linkage(from_cargo, wgsl, only_fn_with_name);
         }
     }
 }

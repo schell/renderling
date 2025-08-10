@@ -9,7 +9,7 @@ use craballoc::{
 };
 use crabslab::Id;
 use glam::{Mat4, UVec2};
-use snafu::OptionExt;
+use snafu::{OptionExt, ResultExt};
 
 use crate::{
     atlas::{AtlasBlittingOperation, AtlasImage, AtlasTexture},
@@ -18,7 +18,7 @@ use crate::{
 };
 
 use super::{
-    AnalyticalLight, DroppedAnalyticalLightBundleSnafu, Lighting, LightingError,
+    AnalyticalLight, DroppedAnalyticalLightBundleSnafu, Lighting, LightingError, PollSnafu,
     ShadowMapDescriptor,
 };
 
@@ -357,7 +357,9 @@ impl ShadowMap {
                 atlas_texture,
             )?;
             let submission = queue.submit(Some(encoder.finish()));
-            device.poll(wgpu::Maintain::wait_for(submission));
+            device
+                .poll(wgpu::PollType::WaitForSubmissionIndex(submission))
+                .context(PollSnafu)?;
         }
         Ok(())
     }

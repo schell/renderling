@@ -580,7 +580,7 @@ where
         lighting_desc.analytical_lights_array
     } else {
         let tiling_descriptor = light_slab.read_unchecked(lighting_desc.light_tiling_descriptor_id);
-        let tile_index = tiling_descriptor.tile_index_for_fragment(frag_coord);
+        let tile_index = tiling_descriptor.tile_index_for_fragment(frag_coord.xy());
         let tile = light_slab.read_unchecked(tiling_descriptor.tiles_array.at(tile_index));
         tile.lights_array
     };

@@ -1,6 +1,11 @@
 //! Path and builder.
 //!
 //! Path colors are sRGB.
+use crate::{
+    math::{Vec2, Vec3, Vec3Swizzles, Vec4},
+    pbr::Material,
+    stage::{Renderlet, Vertex},
+};
 use craballoc::prelude::{GpuArray, Hybrid};
 use crabslab::Id;
 use lyon::{
@@ -9,13 +14,8 @@ use lyon::{
         BuffersBuilder, FillTessellator, FillVertex, StrokeTessellator, StrokeVertex, VertexBuffers,
     },
 };
-use renderling::{
-    math::{Vec2, Vec3, Vec3Swizzles, Vec4},
-    pbr::Material,
-    stage::{Renderlet, Vertex},
-};
 
-use crate::{ImageId, Ui, UiTransform};
+use super::{ImageId, Ui, UiTransform};
 pub use lyon::tessellation::{LineCap, LineJoin};
 
 pub struct UiPath {
@@ -323,7 +323,7 @@ impl UiPathBuilder {
 
     pub fn set_fill_color(&mut self, color: impl Into<Vec4>) -> &mut Self {
         let mut color = color.into();
-        renderling::color::linear_xfer_vec4(&mut color);
+        crate::color::linear_xfer_vec4(&mut color);
         self.attributes.fill_color = color;
         self
     }
@@ -335,7 +335,7 @@ impl UiPathBuilder {
 
     pub fn set_stroke_color(&mut self, color: impl Into<Vec4>) -> &mut Self {
         let mut color = color.into();
-        renderling::color::linear_xfer_vec4(&mut color);
+        crate::color::linear_xfer_vec4(&mut color);
         self.attributes.stroke_color = color;
         self
     }
@@ -523,14 +523,13 @@ impl UiPathBuilder {
 
 #[cfg(test)]
 mod test {
-    use renderling::{
-        math::{hex_to_vec4, Vec2},
-        Context,
-    };
-
     use crate::{
-        test::{cute_beach_palette, Colors},
-        Ui,
+        math::{hex_to_vec4, Vec2},
+        ui::{
+            test::{cute_beach_palette, Colors},
+            Ui,
+        },
+        Context,
     };
 
     use super::*;
@@ -708,9 +707,9 @@ mod test {
         ui.render(&frame.view());
         let mut img = frame.read_srgb_image().unwrap();
         img.pixels_mut().for_each(|p| {
-            renderling::color::opto_xfer_u8(&mut p.0[0]);
-            renderling::color::opto_xfer_u8(&mut p.0[1]);
-            renderling::color::opto_xfer_u8(&mut p.0[2]);
+            crate::color::opto_xfer_u8(&mut p.0[0]);
+            crate::color::opto_xfer_u8(&mut p.0[1]);
+            crate::color::opto_xfer_u8(&mut p.0[2]);
         });
         img_diff::assert_img_eq("ui/path/fill_image.png", img);
     }

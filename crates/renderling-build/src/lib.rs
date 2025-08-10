@@ -87,6 +87,7 @@ impl Linkage {
 }
 
 fn wgsl(spv_filepath: impl AsRef<std::path::Path>, destination: impl AsRef<std::path::Path>) {
+    log::trace!("generating WGSL for {}", spv_filepath.as_ref().display());
     let bytes = std::fs::read(spv_filepath.as_ref()).unwrap_or_else(|e| {
         panic!(
             "could not read spv filepath '{}' while attempting to translate to wgsl: {e}",
@@ -94,7 +95,8 @@ fn wgsl(spv_filepath: impl AsRef<std::path::Path>, destination: impl AsRef<std::
         );
     });
     let opts = naga::front::spv::Options::default();
-    let module = naga::front::spv::parse_u8_slice(&bytes, &opts).unwrap();
+    let module = naga::front::spv::parse_u8_slice(&bytes, &opts)
+        .unwrap_or_else(|e| panic!("could not parse {}: {e}", spv_filepath.as_ref().display()));
     let mut wgsl = String::new();
     let mut panic_msg: Option<String> = None;
     for (vflags, name) in [
@@ -111,7 +113,13 @@ fn wgsl(spv_filepath: impl AsRef<std::path::Path>, destination: impl AsRef<std::
                 ));
             }
             Ok(i) => {
-                wgsl = naga::back::wgsl::write_string(&module, &i, WriterFlags::empty()).unwrap();
+                wgsl = naga::back::wgsl::write_string(&module, &i, WriterFlags::empty())
+                    .unwrap_or_else(|e| {
+                        panic!(
+                            "could not generate WGSL code for {}: {e}",
+                            spv_filepath.as_ref().display()
+                        );
+                    });
             }
         };
     }
@@ -160,7 +168,12 @@ impl RenderlingPaths {
     }
 
     /// Generate linkage (Rust source) files for each shader in the manifest.
-    pub fn generate_linkage(&self, from_cargo: bool, with_wgsl: bool) {
+    pub fn generate_linkage(
+        &self,
+        from_cargo: bool,
+        with_wgsl: bool,
+        just_fn_name: Option<String>,
+    ) {
         log::trace!("{:#?}", std::env::vars().collect::<Vec<_>>());
         assert!(
             self.shader_manifest.is_file(),
@@ -185,6 +198,12 @@ impl RenderlingPaths {
         for linkage in manifest.into_iter() {
             log::debug!("linkage: {linkage:#?}");
             let fn_name = linkage.fn_name();
+            if let Some(fn_name_match) = just_fn_name.as_ref() {
+                if fn_name != fn_name_match {
+                    log::debug!("  skipping {fn_name} != {fn_name_match}");
+                    continue;
+                }
+            }
 
             if set.contains(fn_name) {
                 panic!("Shader name '{fn_name}' is used for two or more shaders, aborting!");

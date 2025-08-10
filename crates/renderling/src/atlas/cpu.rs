@@ -491,6 +491,7 @@ fn pack_images<'a>(
     );
     let mut newly_packed_layers: Vec<crunch::PackedItems<_>> = vec![];
     for (i, new_layer) in new_packing_layers.into_iter().enumerate() {
+        log::trace!("  packing layer {i} into power of 2 {}", extent.width);
         let packed = crunch::pack_into_po2(
             extent.width as usize,
             new_layer.into_iter().map(|p| {
@@ -770,6 +771,7 @@ impl AtlasBlittingOperation {
                     load: wgpu::LoadOp::Load,
                     store: wgpu::StoreOp::Store,
                 },
+                depth_slice: None,
             })],
             depth_stencil_attachment: None,
             timestamp_writes: None,

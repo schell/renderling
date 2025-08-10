@@ -32,6 +32,9 @@ pub enum LightingError {
 
     #[snafu(display("AnalyticalLightBundle attached to this ShadowMap was dropped"))]
     DroppedAnalyticalLightBundle,
+
+    #[snafu(display("Driver poll error: {source}"))]
+    Poll { source: wgpu::PollError },
 }
 
 impl From<AtlasError> for LightingError {

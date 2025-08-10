@@ -709,7 +709,7 @@ mod test {
         frame.present();
 
         let depth_texture = stage.get_depth_texture();
-        let depth_img = depth_texture.read_image().unwrap();
+        let depth_img = depth_texture.read_image().unwrap().unwrap();
         img_diff::save("cull/pyramid/depth.png", depth_img);
 
         let pyramid_images = futures_lite::future::block_on(
@@ -918,7 +918,7 @@ mod test {
         save_render("3_purple_cube");
 
         // save the normalized depth image
-        let mut depth_img = stage.get_depth_texture().read_image().unwrap();
+        let mut depth_img = stage.get_depth_texture().read_image().unwrap().unwrap();
         img_diff::normalize_gray_img(&mut depth_img);
         img_diff::save("cull/debugging_4_depth.png", depth_img);
 

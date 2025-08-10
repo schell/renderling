@@ -14,15 +14,15 @@ use glyph_brush::*;
 pub use ab_glyph::FontArc;
 pub use glyph_brush::{Section, Text};
 
-use image::{DynamicImage, GenericImage, ImageBuffer, Luma, Rgba};
-use renderling::{
+use crate::{
     atlas::AtlasTexture,
     math::{Vec2, Vec4},
     pbr::Material,
     stage::{Renderlet, Vertex},
 };
+use image::{DynamicImage, GenericImage, ImageBuffer, Luma, Rgba};
 
-use crate::{Ui, UiTransform};
+use super::{Ui, UiTransform};
 
 // TODO: make UiText able to be updated without fully destroying it
 #[derive(Debug)]
@@ -330,10 +330,8 @@ impl GlyphCache {
 
 #[cfg(test)]
 mod test {
+    use crate::{ui::Ui, Context};
     use glyph_brush::Section;
-    use renderling::Context;
-
-    use crate::Ui;
 
     use super::*;
 
@@ -436,7 +434,7 @@ mod test {
         ui.render(&frame.view());
         let img = frame.read_image().unwrap();
         img_diff::assert_img_eq("ui/text/overlay.png", img);
-        let depth_img = ui.stage.get_depth_texture().read_image().unwrap();
+        let depth_img = ui.stage.get_depth_texture().read_image().unwrap().unwrap();
         img_diff::assert_img_eq("ui/text/overlay_depth.png", depth_img);
     }
 

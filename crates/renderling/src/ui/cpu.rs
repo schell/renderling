@@ -1,37 +1,8 @@
-//! `renderling-ui` is a "GPU driven" 2d renderer with a focus on simplicity and
-//! ease of use.
-//!
-//! This library is meant to be used with its parent [`renderling`].
-//!
-//! # Getting Started
-//! First we create a context, then we create a [`Ui`], which we can use to
-//! "stage" our paths, text, etc:
-//!
-//! ```rust
-//! use renderling::{math::Vec2, Context};
-//! use renderling_ui::Ui;
-//!
-//! let ctx = Context::headless(100, 100);
-//! let mut ui = Ui::new(&ctx);
-//!
-//! let _path = ui
-//!     .new_path()
-//!     .with_stroke_color([1.0, 1.0, 0.0, 1.0])
-//!     .with_rectangle(Vec2::splat(10.0), Vec2::splat(60.0))
-//!     .stroke();
-//!
-//! let frame = ctx.get_next_frame().unwrap();
-//! ui.render(&frame.view());
-//! frame.present();
-//! ```
-//!
-//! Happy hacking!
+//! CPU part of ui.
+
 use std::sync::{Arc, RwLock};
 
-use craballoc::prelude::{Hybrid, SourceId};
-use crabslab::Id;
-use glyph_brush::ab_glyph;
-use renderling::{
+use crate::{
     atlas::AtlasTexture,
     camera::Camera,
     geometry::Geometry,
@@ -40,6 +11,9 @@ use renderling::{
     transform::Transform,
     Context,
 };
+use craballoc::prelude::{Hybrid, SourceId};
+use crabslab::Id;
+use glyph_brush::ab_glyph;
 use rustc_hash::FxHashMap;
 use snafu::{prelude::*, ResultExt};
 
@@ -50,6 +24,21 @@ pub use path::*;
 
 mod text;
 pub use text::*;
+
+pub mod prelude {
+    //! A prelude for user interface development, meant to be glob-imported.
+
+    #[cfg(cpu)]
+    pub extern crate craballoc;
+    pub extern crate glam;
+
+    #[cfg(cpu)]
+    pub use craballoc::prelude::*;
+    pub use crabslab::{Array, Id};
+
+    #[cfg(cpu)]
+    pub use crate::context::*;
+}
 
 #[derive(Debug, Snafu)]
 pub enum UiError {
@@ -65,9 +54,7 @@ pub enum UiError {
     Image { source: image::ImageError },
 
     #[snafu(display("{source}"))]
-    Stage {
-        source: renderling::stage::StageError,
-    },
+    Stage { source: crate::stage::StageError },
 }
 
 /// An image identifier.
@@ -116,7 +103,7 @@ impl UiTransform {
         self.transform
             .get()
             .rotation
-            .to_euler(renderling::math::EulerRot::XYZ)
+            .to_euler(crate::math::EulerRot::XYZ)
             .2
     }
 
@@ -295,8 +282,8 @@ impl Ui {
             .pop()
             .unwrap();
         entry.modify(|t| {
-            t.modes.s = renderling::atlas::TextureAddressMode::Repeat;
-            t.modes.t = renderling::atlas::TextureAddressMode::Repeat;
+            t.modes.s = crate::atlas::TextureAddressMode::Repeat;
+            t.modes.t = crate::atlas::TextureAddressMode::Repeat;
         });
         let mut guard = self.images.write().unwrap();
         let id = guard.len();
@@ -352,8 +339,8 @@ impl Ui {
 }
 
 #[cfg(test)]
-mod test {
-    use renderling::{color::rgb_hex_color, math::Vec4};
+pub(crate) mod test {
+    use crate::{color::rgb_hex_color, math::Vec4};
 
     #[ctor::ctor]
     fn init_logging() {

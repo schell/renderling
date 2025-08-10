@@ -1438,12 +1438,14 @@ impl Stage {
                 ops: mk_ops(wgpu::StoreOp::Discard),
                 view: msaa_view,
                 resolve_target: Some(&hdr_texture.view),
+                depth_slice: None,
             }
         } else {
             wgpu::RenderPassColorAttachment {
                 ops: mk_ops(wgpu::StoreOp::Store),
                 view: &hdr_texture.view,
                 resolve_target: None,
+                depth_slice: None,
             }
         };
 

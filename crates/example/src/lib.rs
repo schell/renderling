@@ -14,9 +14,9 @@ use renderling::{
     math::{Mat4, UVec2, Vec2, Vec3, Vec4},
     skybox::Skybox,
     stage::{Animator, GltfDocument, Renderlet, Stage, Vertex},
+    ui::{FontArc, Section, Text, Ui, UiPath, UiText},
     Context,
 };
-use renderling_ui::{FontArc, Section, Text, Ui, UiPath, UiText};
 
 pub mod camera;
 use camera::{
