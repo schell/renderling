@@ -416,6 +416,9 @@ pub fn renderlet_fragment(
     #[spirv(storage_buffer, descriptor_set = 0, binding = 10)] light_slab: &[u32],
     #[spirv(descriptor_set = 0, binding = 11)] shadow_map: &Image!(2D, type=f32, sampled, arrayed),
     #[spirv(descriptor_set = 0, binding = 12)] shadow_map_sampler: &Sampler,
+    #[cfg(feature = "debug-slab")]
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 13)]
+    debug_slab: &mut [u32],
 
     #[spirv(flat)] renderlet_id: Id<Renderlet>,
     #[spirv(frag_coord)] frag_coord: Vec4,

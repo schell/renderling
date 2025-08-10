@@ -36,7 +36,7 @@ impl Example {
             }
 
             winit::event::WindowEvent::RedrawRequested => {
-                self.ctx.get_device().poll(wgpu::Maintain::Wait);
+                self.ctx.get_device().poll(wgpu::PollType::Wait).unwrap();
             }
             _ => {}
         }

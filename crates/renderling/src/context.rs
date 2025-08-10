@@ -151,15 +151,13 @@ async fn device(
     let limits = adapter.limits();
     log::info!("adapter limits: {limits:#?}");
     adapter
-        .request_device(
-            &wgpu::DeviceDescriptor {
-                required_features,
-                required_limits: adapter.limits(),
-                label: None,
-                memory_hints: wgpu::MemoryHints::default(),
-            },
-            None,
-        )
+        .request_device(&wgpu::DeviceDescriptor {
+            required_features,
+            required_limits: adapter.limits(),
+            label: None,
+            memory_hints: wgpu::MemoryHints::default(),
+            trace: wgpu::Trace::Off,
+        })
         .await
 }
 
@@ -260,8 +258,8 @@ pub enum ContextError {
     #[snafu(display("missing surface texture: {}", source))]
     Surface { source: wgpu::SurfaceError },
 
-    #[snafu(display("cannot create adaptor"))]
-    CannotCreateAdaptor,
+    #[snafu(display("cannot create adaptor: {source}"))]
+    CannotCreateAdaptor { source: wgpu::RequestAdapterError },
 
     #[snafu(display("cannot request device: {}", source))]
     CannotRequestDevice { source: wgpu::RequestDeviceError },

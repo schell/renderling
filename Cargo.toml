@@ -6,7 +6,6 @@ members = [
     "crates/loading-bytes",
     "crates/renderling", 
     "crates/renderling-build",
-    "crates/renderling-ui",
     "crates/sandbox",
     "crates/xtask"
 ]
@@ -21,8 +20,8 @@ async-channel = "1.8"
 bytemuck = { version = "1.19.0", features = ["derive"] }
 cfg_aliases = "0.2"
 clap = { version = "4.5.23", features = ["derive"] }
-craballoc = { version = "0.2.1" } 
-crabslab = { version = "0.6.5", default-features = false }
+craballoc = { path = "../crabslab/crates/craballoc" } #, version = "0.2.1" } 
+crabslab = { path = "../crabslab/crates/crabslab", default-features = false } #version = "0.6.5", default-features = false }
 plotters = "0.3.7"
 ctor = "0.2.2"
 dagga = "0.2.1"
@@ -30,9 +29,12 @@ env_logger = "0.10.0"
 futures-lite = "1.13"
 glam = { version = "0.30", default-features = false }
 gltf = { version = "1.4,1", features = ["KHR_lights_punctual", "KHR_materials_unlit", "KHR_materials_emissive_strength", "extras", "extensions"] }
+glyph_brush = "0.7.8"
 image = "0.25"
 log = "0.4"
-naga = { version = "24.0", features = ["spv-in", "wgsl-out", "wgsl-in", "msl-out"] }
+loading-bytes = { path = "crates/loading-bytes", version = "0.1.1" }
+lyon = "1.0.1"
+naga = { version = "26.0", features = ["spv-in", "wgsl-out", "wgsl-in", "msl-out"] }
 pretty_assertions = "1.4.0"
 proc-macro2 = { version = "1.0", features = ["span-locations"] }
 quote = "1.0"
@@ -50,9 +52,9 @@ wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 web-sys = "0.3"
 winit = { version = "0.30" }
-wgpu = { version = "24.0" }
-wgpu-core = { version = "24.0" }
-metal = "0.31"
+wgpu = { version = "26.0" }
+wgpu-core = { version = "26.0" }
+metal = "0.32"
 
 [profile.dev]
 opt-level = 1

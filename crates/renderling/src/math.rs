@@ -117,11 +117,13 @@ pub trait IsAtomicSlab: Slab {
     ///
     /// The result is the original value.
     fn atomic_i_increment<const SCOPE: u32, const SEMANTICS: u32>(&mut self, id: Id<u32>) -> u32;
+
     fn atomic_u_min<const SCOPE: u32, const SEMANTICS: u32>(
         &mut self,
         id: Id<u32>,
         val: u32,
     ) -> u32;
+
     fn atomic_u_max<const SCOPE: u32, const SEMANTICS: u32>(
         &mut self,
         id: Id<u32>,
@@ -491,6 +493,19 @@ impl IsVector for glam::Vec3 {
     }
 }
 
+/// Quantize an f32
+
+/// Determine the distance from a point to a line segment.
+pub fn distance_to_line(p: Vec3, a: Vec3, b: Vec3) -> f32 {
+    let ab_distance = a.distance(b);
+    if ab_distance <= f32::EPSILON {
+        p.distance(a)
+    } else {
+        let tri_area = (p - a).cross(p - b).length();
+        tri_area / ab_distance
+    }
+}
+
 /// Additional/replacement methods for glam matrix types.
 ///
 /// These are required because `naga` (`wgpu`'s translation layer) doesn't like
@@ -804,28 +819,6 @@ pub const fn convex_mesh([p0, p1, p2, p3, p4, p5, p6, p7]: [Vec3; 8]) -> [Vec3; 
     ]
 }
 
-/// Converts the given pixel and depth into world coordinates.
-pub fn convert_pixel_depth_into_world_coords(
-    view_projection: Mat4,
-    viewport_dimensions: UVec2,
-    pixel_coord: UVec2,
-    // Depth in NDC coords
-    depth: f32,
-) -> Vec3 {
-    // Convert pixel coordinates to normalized device coordinates (NDC)
-    let pixel_coord = Vec2::new(pixel_coord.x as f32, pixel_coord.y as f32);
-    let ndc_xy =
-        (pixel_coord / Vec2::new(viewport_dimensions.x as f32, viewport_dimensions.y as f32)) * 2.0
-            - 1.0;
-    let ndc = ndc_xy.extend(depth);
-
-    // Transform from NDC to world space
-    let world_coords = view_projection.inverse().project_point3(ndc);
-
-    // Return the world coordinates as a Vec3
-    world_coords.xyz()
-}
-
 /// An PCG PRNG that is optimized for GPUs, in that it is fast to evaluate and accepts
 /// sequential ids as it's initial state without sacrificing on RNG quality.
 ///
@@ -884,6 +877,17 @@ impl GpuRng {
     }
 }
 
+/// Convert a pixel coordinate in screen space (origin is top left, Y increases downwards)
+/// to normalized device coordinates (origin is center, Y increses upwards).
+pub fn convert_pixel_to_ndc(pixel_coord: Vec2, viewport_size: UVec2) -> Vec2 {
+    // Normalize the point to the range [0.0, 1.0];
+    let mut normalized = pixel_coord / viewport_size.as_vec2();
+    // Flip the Y axis to increase upward
+    normalized.y = 1.0 - normalized.y;
+    // Move the origin to the center
+    (normalized * 2.0) - 1.0
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -913,50 +917,5 @@ mod test {
 
         let nan = f32::NAN;
         assert_eq!(0.0, signum_or_zero(nan));
-    }
-
-    #[test]
-    fn convert_pixel_depth_into_world_coords() {
-        let viewport_dimensions = UVec2::new(800, 600);
-        let z_far = 100.0;
-        let z_near = 0.1;
-        let projection = Mat4::perspective_rh(45.0_f32.to_radians(), 800.0 / 600.0, z_near, z_far);
-        let frustum_depth_in_world_coords = z_far - z_near;
-        let eye = Vec3::new(0.0, 0.0, 5.0);
-        let view = Mat4::look_at_rh(eye, Vec3::ZERO, Vec3::Y);
-        let center_pixel = UVec2::new(400, 300);
-
-        // Subtract from eye because we're looking down Z towards ZERO and on to -Z
-        let world_coords = [
-            eye - eye.normalize() * z_near,
-            eye - eye.normalize() * 0.5 * frustum_depth_in_world_coords,
-            eye - eye.normalize() * z_far,
-        ];
-
-        for world_coord in world_coords.into_iter() {
-            let ndc_coord = (projection * view).project_point3(world_coord);
-            let depth = ndc_coord.z;
-            let pixel_coord = ((ndc_coord.xy() + 1.0) / 2.0)
-                * Vec2::new(viewport_dimensions.x as f32, viewport_dimensions.y as f32);
-            println!(
-                "world_coord: {world_coord}, ndc_coord: {ndc_coord}, pixel_coord: {pixel_coord}, depth: {depth}"
-            );
-            let pixel_coord = UVec2::new(pixel_coord.x as u32, pixel_coord.y as u32);
-            assert_eq!(center_pixel, pixel_coord);
-
-            let seen = super::convert_pixel_depth_into_world_coords(
-                projection * view,
-                viewport_dimensions,
-                pixel_coord,
-                depth,
-            );
-
-            // Assert that the world coordinates are approximately at the origin
-            let expected = world_coord;
-            assert!(
-                (seen - expected).length() < 0.1,
-                "expected {expected} but saw {seen}"
-            );
-        }
     }
 }

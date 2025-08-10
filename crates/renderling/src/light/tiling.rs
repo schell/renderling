@@ -151,9 +151,12 @@ impl<Ct: IsContainer> LightTiling<Ct> {
         (pipeline_layout, bindgroup_layout)
     }
 
-    pub(crate) fn prepare(&self, depth_texture_size: UVec2) {
+    pub(crate) fn prepare(&self, lighting: &Lighting, depth_texture_size: UVec2) {
         self.tiling_descriptor.modify(|d| {
             d.depth_texture_size = depth_texture_size;
+        });
+        lighting.lighting_descriptor.modify(|desc| {
+            desc.light_tiling_descriptor_id = self.tiling_descriptor.id();
         });
     }
 
@@ -259,10 +262,17 @@ impl<Ct: IsContainer> LightTiling<Ct> {
         })
     }
 
+    /// Set the minimum illuminance, in lux, to determine if a light illuminates a tile.
+    pub fn set_minimum_illuminance(&self, minimum_illuminance_lux: f32) {
+        self.tiling_descriptor.modify(|desc| {
+            desc.minimum_illuminance_lux = minimum_illuminance_lux;
+        });
+    }
+
     /// Run light tiling, resulting in edits to the lighting slab.
     pub fn run(&self, lighting: &Lighting, depth_texture: &crate::texture::Texture) {
         let depth_texture_size = depth_texture.size();
-        self.prepare(depth_texture_size);
+        self.prepare(lighting, depth_texture_size);
 
         let light_slab = &lighting.light_slab;
         let geometry_slab = &lighting.geometry_slab;
@@ -301,6 +311,15 @@ impl<Ct: IsContainer> LightTiling<Ct> {
     }
 
     #[cfg(test)]
+    #[allow(dead_code)]
+    pub(crate) fn read_tile(&self, lighting: &Lighting, tile_coord: UVec2) -> LightTile {
+        let desc = self.tiling_descriptor.get();
+        let tile_index = tile_coord.y * desc.tile_grid_size().x + tile_coord.x;
+        let tile_id = desc.tiles_array.at(tile_index as usize);
+        futures_lite::future::block_on(lighting.light_slab.read_one(tile_id)).unwrap()
+    }
+
+    #[cfg(test)]
     /// Returns a tuple containing an image of depth mins, depth maximums and number of lights.
     pub(crate) async fn read_images(
         &self,
@@ -310,7 +329,7 @@ impl<Ct: IsContainer> LightTiling<Ct> {
 
         use crate::light::dequantize_depth_u32_to_f32;
 
-        let tile_dimensions = self.tiling_descriptor.get().tile_dimensions();
+        let tile_dimensions = self.tiling_descriptor.get().tile_grid_size();
         let slab = lighting.light_slab.read(..).await.unwrap();
         let desc = slab.read(
             lighting
@@ -318,42 +337,31 @@ impl<Ct: IsContainer> LightTiling<Ct> {
                 .get()
                 .light_tiling_descriptor_id,
         );
-        assert_eq!(
-            tile_dimensions.x * tile_dimensions.y,
-            desc.tiles_array.len() as u32,
-            "LightTilingDescriptor's tiles array is borked: {:?}",
-            desc.tiles_array
-        );
-        let (mins, maxs, lights) = slab
-            .read_vec(desc.tiles_array)
+        if tile_dimensions.x * tile_dimensions.y != desc.tiles_array.len() as u32 {
+            log::error!(
+                "LightTilingDescriptor's tiles array is borked: {:?}",
+                desc.tiles_array
+            );
+        }
+        let mut mins_img = image::GrayImage::new(tile_dimensions.x, tile_dimensions.y);
+        let mut maxs_img = image::GrayImage::new(tile_dimensions.x, tile_dimensions.y);
+        let mut lights_img = image::GrayImage::new(tile_dimensions.x, tile_dimensions.y);
+        slab.read_vec(desc.tiles_array)
             .into_iter()
             .enumerate()
-            .map(|(i, tile)| {
+            .for_each(|(i, tile)| {
+                let x = i as u32 % tile_dimensions.x;
+                let y = i as u32 / tile_dimensions.x;
                 let min = dequantize_depth_u32_to_f32(tile.depth_min);
                 let max = dequantize_depth_u32_to_f32(tile.depth_max);
-                (
-                    crate::math::scaled_f32_to_u8(min),
-                    crate::math::scaled_f32_to_u8(max),
-                    crate::math::scaled_f32_to_u8(
-                        tile.next_light_index as f32 / tile.lights_array.len() as f32,
-                    ),
-                )
-            })
-            .fold(
-                (vec![], vec![], vec![]),
-                |(mut ays, mut bees, mut cees), (a, b, c)| {
-                    ays.push(a);
-                    bees.push(b);
-                    cees.push(c);
-                    (ays, bees, cees)
-                },
-            );
-        let mins_img =
-            image::GrayImage::from_vec(tile_dimensions.x, tile_dimensions.y, mins).unwrap();
-        let maxs_img =
-            image::GrayImage::from_vec(tile_dimensions.x, tile_dimensions.y, maxs).unwrap();
-        let lights_img =
-            image::GrayImage::from_vec(tile_dimensions.x, tile_dimensions.y, lights).unwrap();
+
+                mins_img.get_pixel_mut(x, y).0[0] = crate::math::scaled_f32_to_u8(min);
+                maxs_img.get_pixel_mut(x, y).0[0] = crate::math::scaled_f32_to_u8(max);
+                lights_img.get_pixel_mut(x, y).0[0] = crate::math::scaled_f32_to_u8(
+                    tile.next_light_index as f32 / tile.lights_array.len() as f32,
+                );
+            });
+
         (mins_img, maxs_img, lights_img)
     }
 }
@@ -375,15 +383,14 @@ impl LightTiling<HybridArrayContainer> {
         };
         let tiling_descriptor = lighting_slab.new_value(desc);
         log::trace!("created tiling descriptor: {tiling_descriptor:?}");
-        lighting
-            .lighting_descriptor
-            .modify(|desc| desc.light_tiling_descriptor_id = tiling_descriptor.id());
-        let tiled_size = desc.tile_dimensions();
+        let tiled_size = desc.tile_grid_size();
         let mut tiles = Vec::new();
         for _ in 0..tiled_size.x * tiled_size.y {
             let lights = lighting_slab.new_array(vec![Id::NONE; max_lights_per_tile]);
+            let ratings = lighting_slab.new_array(vec![0.0; max_lights_per_tile]);
             tiles.push(LightTile {
                 lights_array: lights.array(),
+                rating_array: ratings.array(),
                 ..Default::default()
             });
         }

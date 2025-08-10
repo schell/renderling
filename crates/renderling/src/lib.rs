@@ -169,11 +169,14 @@ pub mod pbr;
 pub mod sdf;
 pub mod skybox;
 pub mod stage;
+pub mod sync;
 #[cfg(cpu)]
 pub mod texture;
 pub mod tonemapping;
 pub mod transform;
 pub mod tuple;
+#[cfg(feature = "ui")]
+pub mod ui;
 
 #[cfg(cpu)]
 pub use context::*;
@@ -229,6 +232,10 @@ mod test {
         std::path::PathBuf::from(std::env!("CARGO_WORKSPACE_DIR"))
     }
 
+    pub fn test_output_dir() -> std::path::PathBuf {
+        workspace_dir().join("test_output")
+    }
+
     pub fn make_two_directional_light_setup(stage: &Stage) -> (AnalyticalLight, AnalyticalLight) {
         let sunlight_a = stage.new_analytical_light(DirectionalLightDescriptor {
             direction: Vec3::new(-0.8, -1.0, 0.5).normalize(),
@@ -273,18 +280,12 @@ mod test {
 
             desc.set_destination(metal::MTLCaptureDestination::GpuTraceDocument);
             desc.set_output_url(path);
-            unsafe {
-                ctx.get_device()
-                    .as_hal::<wgpu_core::api::Metal, _, ()>(|maybe_metal_device| {
-                        if let Some(metal_device) = maybe_metal_device {
-                            desc.set_capture_device(
-                                metal_device.raw_device().try_lock().unwrap().as_ref(),
-                            );
-                        } else {
-                            panic!("not a capturable device")
-                        }
-                    })
-            };
+            let maybe_metal_device = unsafe { ctx.get_device().as_hal::<wgpu_core::api::Metal>() };
+            if let Some(metal_device) = maybe_metal_device {
+                desc.set_capture_device(metal_device.raw_device().try_lock().unwrap().as_ref());
+            } else {
+                panic!("not a capturable device")
+            }
             m.start_capture(&desc).unwrap();
             let t = f();
             m.stop_capture();
@@ -341,7 +342,7 @@ mod test {
         frame.present();
 
         let depth_texture = stage.get_depth_texture();
-        let depth_img = depth_texture.read_image().unwrap();
+        let depth_img = depth_texture.read_image().unwrap().unwrap();
         img_diff::assert_img_eq("cmy_triangle/depth.png", depth_img);
 
         let hdr_img = stage
@@ -842,7 +843,7 @@ mod test {
         stage.render(&frame.view());
         let img = frame.read_image().unwrap();
         let depth_texture = stage.get_depth_texture();
-        let depth_img = depth_texture.read_image().unwrap();
+        let depth_img = depth_texture.read_image().unwrap().unwrap();
         img_diff::assert_img_eq("stage/cube_directional_depth.png", depth_img);
         img_diff::assert_img_eq("stage/cube_directional.png", img);
     }

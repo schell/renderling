@@ -3,7 +3,7 @@
 use core::time::Duration;
 use std::time::Instant;
 
-use glam::{Vec3, Vec4, Vec4Swizzles};
+use glam::{UVec3, Vec2, Vec3, Vec4, Vec4Swizzles};
 use plotters::{
     chart::{ChartBuilder, SeriesLabelPosition},
     prelude::{BitMapBackend, Circle, EmptyElement, IntoDrawingArea, PathElement, Text},
@@ -16,7 +16,9 @@ use crate::{
     bvol::BoundingBox,
     camera::Camera,
     color::linear_xfer_vec4,
-    light::{LightTiling, SpotLightCalculation},
+    light::{
+        LightTile, LightTiling, LightTilingDescriptor, LightTilingInvocation, SpotLightCalculation,
+    },
     math::GpuRng,
     pbr::Material,
     prelude::Transform,
@@ -351,7 +353,7 @@ fn clear_tiles_sanity() {
     let lighting: &Lighting = stage.as_ref();
     let tiling = LightTiling::new_hybrid(lighting, false, depth_texture_size, 32);
     let desc = tiling.tiling_descriptor.get();
-    let tile_dimensions = desc.tile_dimensions();
+    let tile_dimensions = desc.tile_grid_size();
 
     // Write to the tiles to ensure we know the starting state, that way we can
     // ensure each step of tiling is correct.
@@ -386,7 +388,7 @@ fn clear_tiles_sanity() {
 
     // Run the clear_tiles shader to ensure that the tiles are cleared.
     {
-        tiling.prepare(depth_texture_size);
+        tiling.prepare(lighting, depth_texture_size);
         let stage_commit_result = stage.commit();
         let bindgroup = tiling.get_bindgroup(
             ctx.get_device(),
@@ -435,7 +437,7 @@ fn min_max_depth_sanity() {
 
     let lighting = &stage.lighting;
     let tiling = LightTiling::new_hybrid(lighting, false, depth_texture_size, 32);
-    tiling.prepare(depth_texture_size);
+    tiling.prepare(lighting, depth_texture_size);
 
     let stage_commit_result = stage.commit();
     let bindgroup = tiling.get_bindgroup(
@@ -486,7 +488,7 @@ fn light_bins_sanity() {
         tiling.tiling_descriptor.get().tiles_array,
         tiling.tiles().array()
     );
-    tiling.prepare(depth_texture_size);
+    tiling.prepare(lighting, depth_texture_size);
 
     let stage_commit_result = stage.commit();
     let bindgroup = tiling.get_bindgroup(
@@ -688,6 +690,7 @@ fn tiling_e2e_sanity() {
         size.y as usize,
         depth.texture.as_ref(),
     )
+    .unwrap()
     .unwrap();
     img_diff::save("light/tiling/e2e/5-depth-raw.png", depth_img.clone());
 
@@ -696,12 +699,8 @@ fn tiling_e2e_sanity() {
     for (x, y, pixel) in linearized_normalized_depth_img.enumerate_pixels_mut() {
         let depth_pixel = depth_img.get_pixel(x, y);
         let depth = depth_pixel.0[0];
-        let world_coords = crate::math::convert_pixel_depth_into_world_coords(
-            view_projection,
-            size,
-            UVec2::new(x, y),
-            depth,
-        );
+        let ndc = crate::math::convert_pixel_to_ndc(UVec2::new(x, y).as_vec2(), size);
+        let world_coords = view_projection.inverse().project_point3(ndc.extend(depth));
         let forward = camera_value.forward();
         let near_point = camera_value.frustum_near_point();
         let far_point = camera_value.frustum_far_point();
@@ -728,96 +727,32 @@ fn tiling_e2e_sanity() {
 
     // Actual tiling stuff, now
     let lighting = &stage.lighting;
-    let tiling = LightTiling::new_hybrid(lighting, false, size, 32);
-    let tile_dimensions = tiling.tiling_descriptor.get().tile_dimensions();
-    // Write to the tiles to ensure we know the starting state, that way we can
-    // ensure each step of tiling is correct.
-    {
-        let mut rng = GpuRng::new(0);
-        let max_distance = UVec2::ZERO.manhattan_distance(tile_dimensions) as f32;
-        for i in 0..tiling.tiles().len() {
-            tiling.tiles().modify(i, |item| {
-                let x = i as u32 % tile_dimensions.x;
-                let y = i as u32 / tile_dimensions.x;
-                let tile_coord = UVec2::new(x, y);
-                let distance = tile_coord.manhattan_distance(tile_dimensions) as f32;
-                // This should produce an image where pixels get darker towards the lower right corner.
-                let min = distance / max_distance;
-                // This should produce an image where pixels get darker towards the upper left corner.
-                let max = 1.0 - distance / max_distance;
-
-                item.depth_min = crate::light::quantize_depth_f32_to_u32(min);
-                item.depth_max = crate::light::quantize_depth_f32_to_u32(max);
-
-                // This should produce an image that looks like noise
-                item.next_light_index = rng.gen_u32(0, 32);
-            });
-        }
-        let _ = lighting.commit();
-
-        let (mins, maxs, lights) = futures_lite::future::block_on(tiling.read_images(lighting));
-        img_diff::save("light/tiling/e2e/clear_tiles/1-mins.png", mins);
-        img_diff::save("light/tiling/e2e/clear_tiles/1-maxs.png", maxs);
-        img_diff::save("light/tiling/e2e/clear_tiles/1-lights.png", lights);
-    }
-
-    {
-        // Check each tile
+    let tiling = LightTiling::new_hybrid(lighting, false, size, 128);
+    for minimum_illuminance in [0.02, 0.04, 0.08, 0.16, 0.25, 0.5] {
+        tiling.set_minimum_illuminance(minimum_illuminance);
+        let tile_dims = tiling.tiling_descriptor.get().tile_grid_size();
         let start = Instant::now();
         tiling.run(lighting, &depth);
-        log::info!("tiling time: {}ms", start.elapsed().as_millis());
-        let tiles = futures_lite::future::block_on(tiling.read_tiles(lighting));
-        let mut tiles_missing_dir_light = vec![];
-        for (i, tile) in tiles.into_iter().enumerate() {
-            let lights = futures_lite::future::block_on(
-                lighting.slab_allocator().read_array(tile.lights_array),
-            )
-            .unwrap();
-            let mut found_end = false;
-            let mut found_dir_light = false;
-            for (j, light_id) in lights.iter().enumerate() {
-                if light_id.is_none() && !found_end {
-                    found_end = true;
-                } else if light_id.is_some() {
-                    if found_end {
-                        panic!(
-                            "previously found the 'end light', but there are new lights behind it at tile {i}, light {j})!\n\
-                            tile: {tile:#?}\n\
-                            lights: {lights:#?}"
-                        );
-                    }
-                    // Check to see if the light is the directional light
-                    let light = futures_lite::future::block_on(
-                        lighting.slab_allocator().read_one(*light_id),
-                    )
-                    .unwrap();
-                    if light.light_type == LightStyle::Directional {
-                        found_dir_light = true;
-                    }
-                }
-            }
-            if !found_dir_light {
-                tiles_missing_dir_light.push(tile);
-            }
-        }
+        log::info!("tiling time: {}ns", start.elapsed().as_nanos());
+        log::info!("tile-count: {}", tile_dims.x * tile_dims.y);
 
-        if !tiles_missing_dir_light.is_empty() {
-            let ui = crate::ui::Ui::new(&ctx);
-            // let _path = ui
-            // .new_path
-        }
+        let (mut mins_img, mut maxs_img, mut lights_img) =
+            futures_lite::future::block_on(tiling.read_images(lighting));
+        img_diff::normalize_gray_img(&mut mins_img);
+        img_diff::normalize_gray_img(&mut maxs_img);
+        img_diff::normalize_gray_img(&mut lights_img);
+        img_diff::save("light/tiling/e2e/5-mins.png", mins_img);
+        img_diff::save("light/tiling/e2e/5-maxs.png", maxs_img);
+        img_diff::save("light/tiling/e2e/5-lights.png", lights_img);
+        snapshot(
+            &ctx,
+            &stage,
+            &format!("light/tiling/e2e/6-scene-illuminance-{minimum_illuminance}.png"),
+            true,
+        );
     }
 
-    let (mut mins_img, mut maxs_img, mut lights_img) =
-        futures_lite::future::block_on(tiling.read_images(lighting));
-    img_diff::normalize_gray_img(&mut mins_img);
-    img_diff::normalize_gray_img(&mut maxs_img);
-    img_diff::normalize_gray_img(&mut lights_img);
-    img_diff::save("light/tiling/e2e/5-mins.png", mins_img);
-    img_diff::save("light/tiling/e2e/5-maxs.png", maxs_img);
-    img_diff::save("light/tiling/e2e/5-lights.png", lights_img);
-
-    snapshot(&ctx, &stage, "light/tiling/e2e/6-scene.png", true);
+    return;
 
     // Stats
     let mut stats = LightTilingStats::default();
@@ -855,7 +790,7 @@ fn tiling_e2e_sanity() {
             let frame = ctx.get_next_frame().unwrap();
             stage.render(&frame.view());
             frame.present();
-            ctx.get_device().poll(wgpu::Maintain::wait());
+            ctx.get_device().poll(wgpu::PollType::Wait).unwrap();
             let duration = start.elapsed();
             run.iterations.push((*with_tiling, duration));
         }
@@ -879,7 +814,7 @@ fn snapshot(ctx: &crate::Context, stage: &Stage, path: &str, save: bool) {
     frame.present();
 }
 
-const MAX_LIGHTS: usize = 2usize.pow(12);
+const MAX_LIGHTS: usize = 2usize.pow(10);
 
 struct LightTilingStatsRun {
     number_of_lights: usize,
