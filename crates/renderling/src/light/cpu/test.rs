@@ -593,6 +593,18 @@ fn light_bins_point() {
 }
 
 #[test]
+fn tiling_debugging_cpu() {
+    let geometry_slab_bytes =
+        std::fs::read(crate::test::test_output_dir().join("light/tiling/e2e/geometry_slab.bin"))
+            .unwrap();
+    let lighting_slab_bytes =
+        std::fs::read(crate::test::test_output_dir().join("light/tiling/e2e/lighting_slab.bin"))
+            .unwrap();
+    let geometry_slab = bytemuck::cast_vec::<u8, u32>(geometry_slab_bytes);
+    let lighting_slab = bytemuck::cast_vec::<u8, u32>(lighting_slab_bytes);
+}
+
+#[test]
 /// Test the light tiling feature, end to end.
 fn tiling_e2e_sanity() {
     let _ = env_logger::builder().is_test(true).try_init();
@@ -727,32 +739,36 @@ fn tiling_e2e_sanity() {
 
     // Actual tiling stuff, now
     let lighting = &stage.lighting;
-    let tiling = LightTiling::new_hybrid(lighting, false, size, 128);
-    for minimum_illuminance in [0.02, 0.04, 0.08, 0.16, 0.25, 0.5] {
-        tiling.set_minimum_illuminance(minimum_illuminance);
-        let tile_dims = tiling.tiling_descriptor.get().tile_grid_size();
-        let start = Instant::now();
-        tiling.run(lighting, &depth);
-        log::info!("tiling time: {}ns", start.elapsed().as_nanos());
-        log::info!("tile-count: {}", tile_dims.x * tile_dims.y);
+    let mut tiling;
+    for light_bin_size in [32, 64, 128, 256, 512, 1024] {
+        for (i, min_illuminance) in [0.1, 0.2, 0.5, 1.0, 2.0, 5.0].iter().enumerate() {
+            tiling = LightTiling::new_hybrid(lighting, false, size, light_bin_size);
+            tiling.set_minimum_illuminance(*min_illuminance);
+            let tile_dims = tiling.tiling_descriptor.get().tile_grid_size();
+            let start = Instant::now();
+            tiling.run(lighting, &depth);
+            log::info!("tiling time: {}ns", start.elapsed().as_nanos());
+            log::info!("tile-count: {}", tile_dims.x * tile_dims.y);
 
-        let (mut mins_img, mut maxs_img, mut lights_img) =
-            futures_lite::future::block_on(tiling.read_images(lighting));
-        img_diff::normalize_gray_img(&mut mins_img);
-        img_diff::normalize_gray_img(&mut maxs_img);
-        img_diff::normalize_gray_img(&mut lights_img);
-        img_diff::save("light/tiling/e2e/5-mins.png", mins_img);
-        img_diff::save("light/tiling/e2e/5-maxs.png", maxs_img);
-        img_diff::save("light/tiling/e2e/5-lights.png", lights_img);
-        snapshot(
-            &ctx,
-            &stage,
-            &format!("light/tiling/e2e/6-scene-illuminance-{minimum_illuminance}.png"),
-            true,
-        );
+            let (mut mins_img, mut maxs_img, mut lights_img) =
+                futures_lite::future::block_on(tiling.read_images(lighting));
+            img_diff::normalize_gray_img(&mut mins_img);
+            img_diff::normalize_gray_img(&mut maxs_img);
+            img_diff::normalize_gray_img(&mut lights_img);
+            img_diff::save("light/tiling/e2e/5-mins.png", mins_img);
+            img_diff::save("light/tiling/e2e/5-maxs.png", maxs_img);
+            img_diff::save("light/tiling/e2e/5-lights.png", lights_img);
+            snapshot(
+                &ctx,
+                &stage,
+                &format!("light/tiling/e2e/6-scene-{light_bin_size}-{i}-{min_illuminance}.png"),
+                true,
+            );
+        }
     }
 
-    return;
+    tiling = LightTiling::new_hybrid(lighting, false, size, 128);
+    tiling.set_minimum_illuminance(0.1);
 
     // Stats
     let mut stats = LightTilingStats::default();

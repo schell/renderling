@@ -15,7 +15,7 @@ use crate::{
     atlas::{AtlasDescriptor, AtlasTexture},
     cubemap::{CubemapDescriptor, CubemapFaceDirection},
     geometry::GeometryDescriptor,
-    math::{Fetch, IsAtomicSlab, IsSampler, IsVector, Sample2dArray},
+    math::{Fetch, IsSampler, IsVector, Sample2dArray},
     stage::Renderlet,
     transform::Transform,
 };
@@ -821,6 +821,12 @@ pub type DepthImage2d = Image!(2D, type=f32, sampled, depth);
 
 pub type DepthImage2dMultisampled = Image!(2D, type=f32, sampled, depth, multisampled=true);
 
+#[derive(Clone, Copy, Default, SlabItem)]
+pub struct LightRating {
+    pub rating: f32,
+    pub light_id: Id<Light>,
+}
+
 /// A tile of screen space used to cull lights.
 #[derive(Clone, Copy, Default, SlabItem)]
 #[offsets]
@@ -835,10 +841,6 @@ pub struct LightTile {
     pub next_light_index: u32,
     /// List of light ids that intersect this tile's frustum.
     pub lights_array: Array<Id<Light>>,
-
-    pub rating_array: Array<f32>,
-    pub rating_min_spin_lock: u32,
-    pub rating_min_index: u32,
 }
 
 impl core::fmt::Debug for LightTile {
@@ -871,7 +873,7 @@ impl Default for LightTilingDescriptor {
         Self {
             depth_texture_size: Default::default(),
             tiles_array: Default::default(),
-            minimum_illuminance_lux: 0.25,
+            minimum_illuminance_lux: 0.1,
         }
     }
 }
@@ -1012,10 +1014,10 @@ impl LightTilingInvocation {
     /// Compute the min and max depth of one fragment/invocation for light tiling.
     ///
     /// The min and max is stored in a tile on lighting slab.
-    fn compute_min_and_max_depth<S: IsAtomicSlab + ?Sized>(
+    fn compute_min_and_max_depth(
         &self,
         depth_texture: &impl Fetch<UVec2, Output = Vec4>,
-        lighting_slab: &mut S,
+        lighting_slab: &mut [u32],
     ) {
         let frag_pos = self.frag_pos();
         // Depth frag value at the fragment position
@@ -1035,14 +1037,14 @@ impl LightTilingInvocation {
         // index of the tile's max depth atomic value in the lighting slab
         let max_depth_index = tile_id + LightTile::OFFSET_OF_DEPTH_MAX;
 
-        let _prev_min_depth = lighting_slab.atomic_u_min::<
-                { spirv_std::memory::Scope::Workgroup as u32 },
-                { spirv_std::memory::Semantics::WORKGROUP_MEMORY.bits() },
-        >(min_depth_index, frag_depth_u32);
-        let _prev_max_depth = lighting_slab.atomic_u_max::<
-                { spirv_std::memory::Scope::Workgroup as u32 },
-                { spirv_std::memory::Semantics::WORKGROUP_MEMORY.bits() }
-            >(max_depth_index, frag_depth_u32);
+        let _prev_min_depth = crate::sync::atomic_u_min::<
+            { spirv_std::memory::Scope::Workgroup as u32 },
+            { spirv_std::memory::Semantics::WORKGROUP_MEMORY.bits() },
+        >(lighting_slab, min_depth_index, frag_depth_u32);
+        let _prev_max_depth = crate::sync::atomic_u_max::<
+            { spirv_std::memory::Scope::Workgroup as u32 },
+            { spirv_std::memory::Semantics::WORKGROUP_MEMORY.bits() },
+        >(lighting_slab, max_depth_index, frag_depth_u32);
     }
 
     /// Determine whether this invocation should run.
@@ -1064,15 +1066,10 @@ impl LightTilingInvocation {
             tile.depth_min = u32::MAX;
             tile.depth_max = 0;
             tile.next_light_index = 0;
-            tile.rating_min_spin_lock = 0;
-            tile.rating_min_index = 0;
             lighting_slab.write(tile_id, &tile);
-            // Zero out the light list
+            // Zero out the light list and the ratings
             for id in tile.lights_array.iter() {
                 lighting_slab.write(id, &Id::NONE);
-            }
-            for id in tile.rating_array.iter() {
-                lighting_slab.write(id, &0.0);
             }
         }
     }
@@ -1097,27 +1094,35 @@ impl LightTilingInvocation {
             return;
         }
 
+        let camera_id = geometry_slab.read_unchecked(
+            Id::<GeometryDescriptor>::new(0) + GeometryDescriptor::OFFSET_OF_CAMERA_ID,
+        );
+        let camera = geometry_slab.read_unchecked(camera_id);
+
         // let (ndc_tile_min, ndc_tile_max) = self.tile_ndc_min_max();
         // // This is the AABB frustum, in NDC coords
         // let ndc_tile_aabb = Aabb::new(
         //     ndc_tile_min.extend(depth_min),
         //     ndc_tile_max.extend(depth_max),
         // );
+
+        // Get the frustum (here simplified to a line) in world coords, since we'll be
+        // using it to compare against the radius of illumination of each light
         let tile_ndc_midpoint = self.tile_ndc_midpoint();
-        let tile_line = (
+        let tile_line_ndc = (
             tile_ndc_midpoint.extend(depth_min),
             tile_ndc_midpoint.extend(depth_max),
+        );
+        let inverse_viewproj = camera.view_projection().inverse();
+        let tile_line = (
+            inverse_viewproj.project_point3(tile_line_ndc.0),
+            inverse_viewproj.project_point3(tile_line_ndc.1),
         );
 
         let tile_index = self.tile_index();
         let tile_id = self.descriptor.tiles_array.at(tile_index);
         let tile_lights_array = lighting_slab.read(tile_id + LightTile::OFFSET_OF_LIGHTS_ARRAY);
         let next_light_id = tile_id + LightTile::OFFSET_OF_NEXT_LIGHT_INDEX;
-
-        let camera_id = geometry_slab.read_unchecked(
-            Id::<GeometryDescriptor>::new(0) + GeometryDescriptor::OFFSET_OF_CAMERA_ID,
-        );
-        let camera = geometry_slab.read_unchecked(camera_id);
 
         // List of all analytical lights in the scene
         let analytical_lights_array = lighting_slab.read_unchecked(
@@ -1132,6 +1137,8 @@ impl LightTilingInvocation {
             let light_id = lighting_slab.read_unchecked(id_of_light_id);
             let light = lighting_slab.read_unchecked(light_id);
             let transform = lighting_slab.read(light.transform_id);
+            // Get the distance to the light in world coords, and the
+            // intensity of the light.
             let (distance, intensity_candelas) = match light.light_type {
                 LightStyle::Directional => {
                     let directional_light = lighting_slab.read(light.into_directional_id());
@@ -1140,81 +1147,35 @@ impl LightTilingInvocation {
                 LightStyle::Point => {
                     let point_light = lighting_slab.read(light.into_point_id());
                     let center = Mat4::from(transform).transform_point3(point_light.position);
-                    let position_ndc = camera.view_projection().project_point3(center);
-                    let distance =
-                        crate::math::distance_to_line(position_ndc, tile_line.0, tile_line.1);
+                    let distance = crate::math::distance_to_line(center, tile_line.0, tile_line.1);
                     (distance, point_light.intensity)
                 }
                 LightStyle::Spot => {
                     // TODO: take into consideration the direction the spot light is pointing
                     let spot_light = lighting_slab.read(light.into_spot_id());
                     let center = Mat4::from(transform).transform_point3(spot_light.position);
-                    let position_ndc = camera.view_projection().project_point3(center);
-                    let distance =
-                        crate::math::distance_to_line(position_ndc, tile_line.0, tile_line.1);
+                    let distance = crate::math::distance_to_line(center, tile_line.0, tile_line.1);
                     (distance, spot_light.intensity)
                 }
             };
 
             let radius =
                 radius_of_illumination(intensity_candelas, self.descriptor.minimum_illuminance_lux);
-            let rating = if distance > f32::EPSILON {
-                intensity_candelas / (distance * distance)
-            } else {
-                f32::MAX
-            };
-
             let should_add = radius >= distance;
             if should_add {
                 // If the light should be added to the bin, get the next available index in the bin,
                 // then write the id of the light into that index.
-                let next_index = lighting_slab.atomic_i_increment::<
+                let next_index = crate::sync::atomic_i_increment::<
                     { spirv_std::memory::Scope::Workgroup as u32 },
                     { spirv_std::memory::Semantics::WORKGROUP_MEMORY.bits() },
-                >(next_light_id);
+                >(lighting_slab, next_light_id);
                 if next_index as usize >= tile_lights_array.len() {
-                    // We've already filled the bin, so check to see if this rating is greater
-                    // than the weakest rating by acquiring a spin lock (because we can't use f32 atomics)
-                    let mut lock = crate::sync::SpinLock::acquire(
-                        lighting_slab,
-                        tile_id + LightTile::OFFSET_OF_RATING_MIN_SPIN_LOCK,
-                    );
-                    let ratings_array = lock
-                        .slab()
-                        .read_unchecked(tile_id + LightTile::OFFSET_OF_RATING_ARRAY);
-                    let mut min_rating_index = lock
-                        .slab()
-                        .read_unchecked(tile_id + LightTile::OFFSET_OF_RATING_MIN_INDEX);
-                    let mut min_rating = lock
-                        .slab()
-                        .read_unchecked(ratings_array.at(min_rating_index as usize));
-                    if rating > min_rating {
-                        // Replace the minimum rated light with this light and then calculate the new minimum
-                        let index = lock
-                            .slab()
-                            .read_unchecked(tile_id + LightTile::OFFSET_OF_RATING_MIN_INDEX);
-                        let binned_light_id = tile_lights_array.at(index as usize);
-                        lock.slab().write(binned_light_id, &light_id);
-                        min_rating = rating;
-                        min_rating_index = index;
-                        for index in 0..ratings_array.len() {
-                            let id = ratings_array.at(index);
-                            let existing_rating = lock.slab().read_unchecked(id);
-                            if existing_rating < min_rating {
-                                min_rating = existing_rating;
-                                min_rating_index = index as u32;
-                            }
-                        }
-                        lock.slab().write(
-                            tile_id + LightTile::OFFSET_OF_RATING_MIN_INDEX,
-                            &min_rating_index,
-                        );
-                        lock.release();
-                    } else {
-                        break;
-                    }
+                    // We've already filled the bin, so abort.
+                    //
+                    // TODO: Figure out a better way to handle light tile list overrun.
+                    break;
                 } else {
-                    // Get the id that corresponds to the next available index in the bin
+                    // Get the id that corresponds to the next available index in the ratings bin
                     let binned_light_id = tile_lights_array.at(next_index as usize);
                     // Write to that location
                     lighting_slab.write(binned_light_id, &light_id);

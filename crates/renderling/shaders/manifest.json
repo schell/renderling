@@ -170,11 +170,6 @@
     "wgsl_entry_point": "stagerenderlet_vertex"
   },
   {
-    "source_path": "shaders/sync-test_spin_lock.spv",
-    "entry_point": "sync::test_spin_lock",
-    "wgsl_entry_point": "synctest_spin_lock"
-  },
-  {
     "source_path": "shaders/tonemapping-tonemapping_fragment.spv",
     "entry_point": "tonemapping::tonemapping_fragment",
     "wgsl_entry_point": "tonemappingtonemapping_fragment"

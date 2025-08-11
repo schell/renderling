@@ -387,10 +387,8 @@ impl LightTiling<HybridArrayContainer> {
         let mut tiles = Vec::new();
         for _ in 0..tiled_size.x * tiled_size.y {
             let lights = lighting_slab.new_array(vec![Id::NONE; max_lights_per_tile]);
-            let ratings = lighting_slab.new_array(vec![0.0; max_lights_per_tile]);
             tiles.push(LightTile {
                 lights_array: lights.array(),
-                rating_array: ratings.array(),
                 ..Default::default()
             });
         }
