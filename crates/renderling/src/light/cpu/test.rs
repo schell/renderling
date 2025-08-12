@@ -379,6 +379,7 @@ fn clear_tiles_sanity() {
             });
         }
         let _ = lighting.commit();
+        ctx.get_device().poll(wgpu::PollType::Wait).unwrap();
 
         let (mins, maxs, lights) = futures_lite::future::block_on(tiling.read_images(lighting));
         img_diff::assert_img_eq("light/tiling/clear_tiles/1-mins.png", mins);

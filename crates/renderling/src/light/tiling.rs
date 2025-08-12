@@ -173,7 +173,8 @@ impl<Ct: IsContainer> LightTiling<Ct> {
         compute_pass.set_pipeline(&self.clear_tiles_pipeline);
         compute_pass.set_bind_group(0, bindgroup, &[]);
 
-        let dims_f32 = depth_texture_size.as_vec2() / LightTilingDescriptor::TILE_SIZE.as_vec2();
+        let tile_size = self.tiling_descriptor.get().tile_size;
+        let dims_f32 = depth_texture_size.as_vec2() / tile_size.as_vec2();
         let workgroups = (dims_f32 / 16.0).ceil().as_uvec2();
         let x = workgroups.x;
         let y = workgroups.y;
@@ -194,8 +195,9 @@ impl<Ct: IsContainer> LightTiling<Ct> {
         compute_pass.set_pipeline(&self.compute_min_max_depth_pipeline);
         compute_pass.set_bind_group(0, bindgroup, &[]);
 
-        let x = (depth_texture_size.x / 16) + 1;
-        let y = (depth_texture_size.y / 16) + 1;
+        let tile_size = self.tiling_descriptor.get().tile_size;
+        let x = (depth_texture_size.x / tile_size.x) + 1;
+        let y = (depth_texture_size.y / tile_size.y) + 1;
         let z = 1;
         compute_pass.dispatch_workgroups(x, y, z);
     }
@@ -213,8 +215,9 @@ impl<Ct: IsContainer> LightTiling<Ct> {
         compute_pass.set_pipeline(&self.compute_bins_pipeline);
         compute_pass.set_bind_group(0, bindgroup, &[]);
 
-        let x = (depth_texture_size.x / 16) + 1;
-        let y = (depth_texture_size.y / 16) + 1;
+        let tile_size = self.tiling_descriptor.get().tile_size;
+        let x = (depth_texture_size.x / tile_size.x) + 1;
+        let y = (depth_texture_size.y / tile_size.y) + 1;
         let z = 1;
         compute_pass.dispatch_workgroups(x, y, z);
     }
@@ -337,10 +340,13 @@ impl<Ct: IsContainer> LightTiling<Ct> {
                 .get()
                 .light_tiling_descriptor_id,
         );
-        if tile_dimensions.x * tile_dimensions.y != desc.tiles_array.len() as u32 {
+        let should_be_len = tile_dimensions.x * tile_dimensions.y;
+        if should_be_len != desc.tiles_array.len() as u32 {
             log::error!(
-                "LightTilingDescriptor's tiles array is borked: {:?}",
-                desc.tiles_array
+                "LightTilingDescriptor's tiles array is borked: {:?}\n\
+                   expected {should_be_len} tiles\n\
+                   tile_dimensions: {tile_dimensions}",
+                desc.tiles_array,
             );
         }
         let mut mins_img = image::GrayImage::new(tile_dimensions.x, tile_dimensions.y);
@@ -382,8 +388,9 @@ impl LightTiling<HybridArrayContainer> {
             ..Default::default()
         };
         let tiling_descriptor = lighting_slab.new_value(desc);
-        log::trace!("created tiling descriptor: {tiling_descriptor:?}");
+        log::trace!("created tiling descriptor: {tiling_descriptor:#?}");
         let tiled_size = desc.tile_grid_size();
+        log::trace!("  grid size: {tiled_size}");
         let mut tiles = Vec::new();
         for _ in 0..tiled_size.x * tiled_size.y {
             let lights = lighting_slab.new_array(vec![Id::NONE; max_lights_per_tile]);
@@ -394,7 +401,9 @@ impl LightTiling<HybridArrayContainer> {
         }
         let tiles = lighting_slab.new_array(tiles);
         tiling_descriptor.modify(|d| {
-            d.tiles_array = tiles.array();
+            let tiles_array = tiles.array();
+            log::trace!("  setting tiles array: {tiles_array:?}");
+            d.tiles_array = tiles_array;
         });
         let clear_tiles_pipeline = Arc::new(Self::create_clear_tiles_pipeline(
             &runtime.device,
