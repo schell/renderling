@@ -117,7 +117,9 @@ jobs:
 
       - name: Install linux deps 
         if: runner.os == 'Linux'
-        run: sudo apt-get -y install mesa-vulkan-drivers libvulkan1 vulkan-tools vulkan-validationlayers
+        run: |
+            sudo apt-get -y update
+            sudo apt-get -y install mesa-vulkan-drivers libvulkan1 vulkan-tools vulkan-validationlayers
 
       - name: Install cargo-nextest
         run: cargo install --locked cargo-nextest || true
