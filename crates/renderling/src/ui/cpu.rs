@@ -38,6 +38,8 @@ pub mod prelude {
 
     #[cfg(cpu)]
     pub use crate::context::*;
+
+    pub use super::*;
 }
 
 #[derive(Debug, Snafu)]
@@ -120,7 +122,7 @@ impl UiTransform {
 
 #[derive(Clone)]
 #[repr(transparent)]
-struct UiImage(Hybrid<AtlasTexture>);
+pub struct UiImage(Hybrid<AtlasTexture>);
 
 /// A 2d user interface renderer.
 ///

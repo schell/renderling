@@ -5,8 +5,8 @@
 //! "stage" our paths, text, etc:
 //!
 //! ```rust
-//! # use crate as renderling
 //! use renderling::ui::prelude::*;
+//! use glam::Vec2;
 //!
 //! let ctx = Context::headless(100, 100);
 //! let mut ui = Ui::new(&ctx);

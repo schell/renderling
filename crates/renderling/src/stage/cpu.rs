@@ -17,8 +17,8 @@ use crate::{
     draw::DrawCalls,
     geometry::Geometry,
     light::{
-        AnalyticalLight, Light, LightDetails, Lighting, LightingBindGroupLayoutEntries,
-        LightingError, ShadowMap,
+        AnalyticalLight, Light, LightDetails, LightTiling, LightTilingConfig, Lighting,
+        LightingBindGroupLayoutEntries, LightingError, ShadowMap,
     },
     material::Materials,
     pbr::debug::DebugChannel,
@@ -739,6 +739,19 @@ impl Stage {
             .lighting
             .new_shadow_map(analytical_light_bundle, size, z_near, z_far)?)
     }
+
+    /// Enable light tiling, creating a new [`LightTiling`].
+    pub fn new_light_tiling(&self, config: LightTilingConfig) -> LightTiling {
+        let lighting = self.as_ref();
+        let multisampled = self.get_msaa_sample_count() > 1;
+        let depth_texture_size = self.get_depth_texture().size();
+        LightTiling::new(
+            lighting,
+            multisampled,
+            UVec2::new(depth_texture_size.width, depth_texture_size.height),
+            config,
+        )
+    }
 }
 
 impl Stage {
@@ -1039,6 +1052,12 @@ impl Stage {
     pub fn with_background_color(self, color: impl Into<Vec4>) -> Self {
         self.set_background_color(color);
         self
+    }
+
+    /// Return the multisample count.
+    pub fn get_msaa_sample_count(&self) -> u32 {
+        self.msaa_sample_count
+            .load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// Set the MSAA multisample count.

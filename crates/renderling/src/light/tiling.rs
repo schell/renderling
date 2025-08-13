@@ -16,6 +16,7 @@ use glam::UVec2;
 use crate::{
     bindgroup::ManagedBindGroup,
     light::{LightTile, LightTilingDescriptor, Lighting},
+    stage::Stage,
 };
 
 /// Shaders and resources for conducting light tiling.
@@ -174,7 +175,7 @@ impl<Ct: IsContainer> LightTiling<Ct> {
         compute_pass.set_bind_group(0, bindgroup, &[]);
 
         let tile_size = self.tiling_descriptor.get().tile_size;
-        let dims_f32 = depth_texture_size.as_vec2() / tile_size.as_vec2();
+        let dims_f32 = depth_texture_size.as_vec2() / tile_size as f32;
         let workgroups = (dims_f32 / 16.0).ceil().as_uvec2();
         let x = workgroups.x;
         let y = workgroups.y;
@@ -196,8 +197,8 @@ impl<Ct: IsContainer> LightTiling<Ct> {
         compute_pass.set_bind_group(0, bindgroup, &[]);
 
         let tile_size = self.tiling_descriptor.get().tile_size;
-        let x = (depth_texture_size.x / tile_size.x) + 1;
-        let y = (depth_texture_size.y / tile_size.y) + 1;
+        let x = (depth_texture_size.x / tile_size) + 1;
+        let y = (depth_texture_size.y / tile_size) + 1;
         let z = 1;
         compute_pass.dispatch_workgroups(x, y, z);
     }
@@ -216,8 +217,8 @@ impl<Ct: IsContainer> LightTiling<Ct> {
         compute_pass.set_bind_group(0, bindgroup, &[]);
 
         let tile_size = self.tiling_descriptor.get().tile_size;
-        let x = (depth_texture_size.x / tile_size.x) + 1;
-        let y = (depth_texture_size.y / tile_size.y) + 1;
+        let x = (depth_texture_size.x / tile_size) + 1;
+        let y = (depth_texture_size.y / tile_size) + 1;
         let z = 1;
         compute_pass.dispatch_workgroups(x, y, z);
     }
@@ -273,8 +274,10 @@ impl<Ct: IsContainer> LightTiling<Ct> {
     }
 
     /// Run light tiling, resulting in edits to the lighting slab.
-    pub fn run(&self, lighting: &Lighting, depth_texture: &crate::texture::Texture) {
+    pub fn run(&self, stage: &Stage) {
+        let depth_texture = stage.depth_texture.read().unwrap();
         let depth_texture_size = depth_texture.size();
+        let lighting = stage.as_ref();
         self.prepare(lighting, depth_texture_size);
 
         let light_slab = &lighting.light_slab;
@@ -285,7 +288,7 @@ impl<Ct: IsContainer> LightTiling<Ct> {
             &runtime.device,
             &geometry_slab.commit(),
             &light_slab.commit(),
-            depth_texture,
+            &depth_texture,
         );
 
         let mut encoder = runtime
@@ -334,6 +337,12 @@ impl<Ct: IsContainer> LightTiling<Ct> {
 
         let tile_dimensions = self.tiling_descriptor.get().tile_grid_size();
         let slab = lighting.light_slab.read(..).await.unwrap();
+        let tiling_descriptor_id_in_lighting = lighting
+            .lighting_descriptor
+            .get()
+            .light_tiling_descriptor_id;
+        let tiling_descriptor_id = self.tiling_descriptor.id();
+        assert_eq!(tiling_descriptor_id_in_lighting, tiling_descriptor_id);
         let desc = slab.read(
             lighting
                 .lighting_descriptor
@@ -372,28 +381,73 @@ impl<Ct: IsContainer> LightTiling<Ct> {
     }
 }
 
+/// Parameters for tuning light tiling.
+#[derive(Debug, Clone, Copy)]
+pub struct LightTilingConfig {
+    /// The size of each tile, in pixels.
+    ///
+    /// Default is `16`.
+    pub tile_size: u32,
+    /// The maximum number of lights per tile.
+    ///
+    /// Default is `32`.
+    pub max_lights_per_tile: u32,
+    /// The minimum illuminance, in lux.
+    ///
+    /// Used to determine the radius of illumination of a light,
+    /// which is then used to determine if a light illuminates a tile.
+    ///
+    /// * Moonlight: < 1 lux.
+    ///   - Full moon on a clear night: 0.25 lux.
+    ///   - Quarter moon: 0.01 lux
+    ///   - Starlight overcast moonless night sky: 0.0001 lux.
+    /// * General indoor lighting: Around 100 to 300 lux.                                   
+    /// * Office lighting: Typically around 300 to 500 lux.                                 
+    /// * Reading or task lighting: Around 500 to 750 lux.                                  
+    /// * Detailed work (e.g., drafting, surgery): 1000 lux or more.
+    ///
+    /// Default is `0.1`.
+    pub minimum_illuminance: f32,
+}
+
+impl Default for LightTilingConfig {
+    fn default() -> Self {
+        LightTilingConfig {
+            tile_size: 16,
+            max_lights_per_tile: 32,
+            minimum_illuminance: 0.1,
+        }
+    }
+}
+
 impl LightTiling<HybridArrayContainer> {
     /// Creates a new [`LightTiling`] struct with a [`HybridArray`] of tiles.
     pub fn new_hybrid(
         lighting: &Lighting,
         multisampled: bool,
         depth_texture_size: UVec2,
-        max_lights_per_tile: usize,
+        config: LightTilingConfig,
     ) -> Self {
         log::trace!("creating LightTiling");
         let lighting_slab = lighting.slab_allocator();
         let runtime = lighting_slab.runtime();
         let desc = LightTilingDescriptor {
             depth_texture_size,
+            tile_size: config.tile_size,
+            minimum_illuminance_lux: config.minimum_illuminance,
             ..Default::default()
         };
         let tiling_descriptor = lighting_slab.new_value(desc);
+        lighting.lighting_descriptor.modify(|desc| {
+            desc.light_tiling_descriptor_id = tiling_descriptor.id();
+        });
         log::trace!("created tiling descriptor: {tiling_descriptor:#?}");
         let tiled_size = desc.tile_grid_size();
         log::trace!("  grid size: {tiled_size}");
         let mut tiles = Vec::new();
         for _ in 0..tiled_size.x * tiled_size.y {
-            let lights = lighting_slab.new_array(vec![Id::NONE; max_lights_per_tile]);
+            let lights =
+                lighting_slab.new_array(vec![Id::NONE; config.max_lights_per_tile as usize]);
             tiles.push(LightTile {
                 lights_array: lights.array(),
                 ..Default::default()
@@ -441,7 +495,7 @@ impl LightTiling {
         lighting: &Lighting,
         multisampled: bool,
         depth_texture_size: UVec2,
-        max_lights_per_tile: usize,
+        config: LightTilingConfig,
     ) -> Self {
         // Note to self, I wish we had `fmap` here.
         let LightTiling {
@@ -454,12 +508,7 @@ impl LightTiling {
             clear_tiles_pipeline,
             compute_min_max_depth_pipeline,
             compute_bins_pipeline,
-        } = LightTiling::new_hybrid(
-            lighting,
-            multisampled,
-            depth_texture_size,
-            max_lights_per_tile,
-        );
+        } = LightTiling::new_hybrid(lighting, multisampled, depth_texture_size, config);
         Self {
             tiling_descriptor,
             tiles: tiles.into_gpu_only(),

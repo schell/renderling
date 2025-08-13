@@ -497,15 +497,8 @@ impl Lighting {
             // held somewhere in the outside program.
             let mut analytical_lights_dropped = false;
             lights_guard.retain_mut(|light_bundle| {
-                log::trace!("  light_bundle: {:?}", light_bundle.light().id());
                 let has_refs = light_bundle.light.has_external_references();
-                if !has_refs {
-                    log::trace!(
-                        "    light {:?} ({}) was dropped",
-                        light_bundle.light.id(),
-                        light_bundle.light_details.style()
-                    );
-                } else {
+                if has_refs {
                     let mut node_transform_guard = light_bundle.node_transform.write().unwrap();
                     // References to this light still exist, so we'll check to see
                     // if we need to update the values of linked node transforms.
@@ -520,16 +513,11 @@ impl Lighting {
                             let light_global_transform = light_bundle.transform.upgrade().unwrap();
                             let global_transform_value = light_global_transform.get();
                             if global_transform_value != node_global_transform_value {
-                                log::trace!("    updating light's transform to match linked node");
                                 // TODO: write a test that animates a light using GLTF to ensure
                                 // that this is working correctly
                                 light_global_transform.set(node_global_transform_value);
                             }
-                        } else {
-                            log::trace!("    is linked to a node, but the node has no references");
                         }
-                    } else {
-                        log::trace!("    is not linked to a node");
                     }
                 }
                 analytical_lights_dropped = analytical_lights_dropped || !has_refs;

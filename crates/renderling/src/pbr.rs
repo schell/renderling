@@ -14,8 +14,8 @@ use crate::{
     atlas::AtlasTexture,
     geometry::GeometryDescriptor,
     light::{
-        DirectionalLightDescriptor, LightStyle, LightTile, LightingDescriptor,
-        PointLightDescriptor, ShadowCalculation, SpotLightCalculation,
+        DirectionalLightDescriptor, LightStyle, LightingDescriptor, PointLightDescriptor,
+        ShadowCalculation, SpotLightCalculation,
     },
     math::{self, IsSampler, IsVector, Sample2d, Sample2dArray, SampleCube},
     println as my_println,

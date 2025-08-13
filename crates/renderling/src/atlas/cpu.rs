@@ -1015,7 +1015,7 @@ mod test {
         let (projection, view) = crate::camera::default_ortho2d(w as f32, h as f32);
         let _camera = stage.new_camera(Camera::new(projection, view));
         let texels = AtlasImage::from_path("../../img/happy_mac.png").unwrap();
-        let entries = stage.set_images(std::iter::repeat(texels).take(3)).unwrap();
+        let entries = stage.set_images(std::iter::repeat_n(texels, 3)).unwrap();
         let clamp_tex = &entries[0];
         let repeat_tex = &entries[1];
         repeat_tex.modify(|t| {

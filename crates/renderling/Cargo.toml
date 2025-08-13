@@ -28,8 +28,8 @@ gltf = ["dep:gltf", "dep:serde_json"]
 test_i8_i16_extraction = []
 ui = ["dep:glyph_brush", "dep:loading-bytes", "dep:lyon"]
 wasm = ["wgpu/fragile-send-sync-non-atomic-wasm"]
-test-sync = []
 debug-slab = []
+light-tiling-stats = []
 
 [build-dependencies]
 cfg_aliases.workspace = true

@@ -214,7 +214,7 @@ impl ShadowMap {
         analytical_light_bundle.light().modify(|light| {
             light.shadow_map_desc_id = shadowmap_descriptor.id();
         });
-        let light_slab_buffer = lighting.light_slab.commit();
+        let light_slab_buffer = lighting.commit();
         let update_bindgroup = ManagedBindGroup::from(ShadowMap::create_update_bindgroup(
             lighting.light_slab.device(),
             &lighting.shadow_map_update_bindgroup_layout,
@@ -238,7 +238,7 @@ impl ShadowMap {
 
     /// Update the `ShadowMap`, rendering the given [`Renderlet`]s to the map as shadow casters.
     ///
-    /// The `ShadowMap` contains a weak referenc to the [`AnalyticalLightBundle`] used to create
+    /// The `ShadowMap` contains a weak reference to the [`AnalyticalLightBundle`] used to create
     /// it. Updates made to this `AnalyticalLightBundle` will automatically propogate to this
     /// `ShadowMap`.
     ///

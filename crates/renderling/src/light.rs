@@ -855,7 +855,7 @@ pub struct LightTilingDescriptor {
     /// Size of the [`Stage`]'s depth texture.
     pub depth_texture_size: UVec2,
     /// Configurable tile size.
-    pub tile_size: UVec2,
+    pub tile_size: u32,
     /// Array pointing to the lighting "tiles".
     pub tiles_array: Array<LightTile>,
     /// Minimum illuminance.
@@ -868,7 +868,7 @@ impl Default for LightTilingDescriptor {
     fn default() -> Self {
         Self {
             depth_texture_size: Default::default(),
-            tile_size: UVec2::splat(16),
+            tile_size: 16,
             tiles_array: Default::default(),
             minimum_illuminance_lux: 0.1,
         }
@@ -878,7 +878,7 @@ impl Default for LightTilingDescriptor {
 impl LightTilingDescriptor {
     /// Returns the dimensions of the grid of tiles.
     pub fn tile_grid_size(&self) -> UVec2 {
-        let dims_f32 = self.depth_texture_size.as_vec2() / self.tile_size.as_vec2();
+        let dims_f32 = self.depth_texture_size.as_vec2() / self.tile_size as f32;
         dims_f32.ceil().as_uvec2()
     }
 
@@ -908,7 +908,7 @@ pub fn dequantize_depth_u32_to_f32(depth: u32) -> f32 {
 /// invocation of the light list computation.
 struct NextLightIndex {
     current_step: usize,
-    tile_size: UVec2,
+    tile_size: u32,
     lights: Array<Id<Light>>,
     global_id: UVec3,
 }
@@ -930,7 +930,7 @@ impl Iterator for NextLightIndex {
 impl NextLightIndex {
     pub fn new(
         global_id: UVec3,
-        tile_size: UVec2,
+        tile_size: u32,
         analytical_lights_array: Array<Id<Light>>,
     ) -> Self {
         Self {
@@ -945,8 +945,8 @@ impl NextLightIndex {
         // Determine the xy coord of this invocation within the _tile_
         let frag_tile_xy = self.global_id.xy() % self.tile_size;
         // Determine the index of this invocation within the _tile_
-        let offset = frag_tile_xy.y * self.tile_size.x + frag_tile_xy.x;
-        let stride = (self.tile_size.x * self.tile_size.y) as usize;
+        let offset = frag_tile_xy.y * self.tile_size + frag_tile_xy.x;
+        let stride = (self.tile_size * self.tile_size) as usize;
         self.current_step * stride + offset as usize
     }
 }
@@ -1335,34 +1335,28 @@ mod test {
             let lights_array = Array::new(0, 1);
             // When there's only one light we only need one invocation to check that one light
             // (per tile)
-            let mut next_light =
-                NextLightIndex::new(UVec3::new(0, 0, 0), UVec2::splat(16), lights_array);
+            let mut next_light = NextLightIndex::new(UVec3::new(0, 0, 0), 16, lights_array);
             assert_eq!(Some(0u32.into()), next_light.next());
             assert_eq!(None, next_light.next());
             // The next invocation won't check anything
-            let mut next_light =
-                NextLightIndex::new(UVec3::new(1, 0, 0), UVec2::splat(16), lights_array);
+            let mut next_light = NextLightIndex::new(UVec3::new(1, 0, 0), 16, lights_array);
             assert_eq!(None, next_light.next());
             // Neither will the next row
-            let mut next_light =
-                NextLightIndex::new(UVec3::new(0, 1, 0), UVec2::splat(16), lights_array);
+            let mut next_light = NextLightIndex::new(UVec3::new(0, 1, 0), 16, lights_array);
             assert_eq!(None, next_light.next());
         }
         {
             let lights_array = Array::new(0, 2);
             // When there's two lights we need two invocations
-            let mut next_light =
-                NextLightIndex::new(UVec3::new(0, 0, 0), UVec2::splat(16), lights_array);
+            let mut next_light = NextLightIndex::new(UVec3::new(0, 0, 0), 16, lights_array);
             assert_eq!(Some(0u32.into()), next_light.next());
             assert_eq!(None, next_light.next());
             // The next invocation checks the second light
-            let mut next_light =
-                NextLightIndex::new(UVec3::new(1, 0, 0), UVec2::splat(16), lights_array);
+            let mut next_light = NextLightIndex::new(UVec3::new(1, 0, 0), 16, lights_array);
             assert_eq!(Some(1u32.into()), next_light.next());
             assert_eq!(None, next_light.next());
             // The next one doesn't check anything
-            let mut next_light =
-                NextLightIndex::new(UVec3::new(2, 0, 0), UVec2::splat(16), lights_array);
+            let mut next_light = NextLightIndex::new(UVec3::new(2, 0, 0), 16, lights_array);
             assert_eq!(None, next_light.next());
         }
         {
@@ -1371,8 +1365,7 @@ mod test {
             let mut checked_lights = vec![];
             for y in 0..16 {
                 for x in 0..16 {
-                    let mut next_light =
-                        NextLightIndex::new(UVec3::new(x, y, 0), UVec2::splat(16), lights_array);
+                    let mut next_light = NextLightIndex::new(UVec3::new(x, y, 0), 16, lights_array);
                     let next_index = next_light.next_index();
                     let checked_light = next_light.next().unwrap();
                     assert_eq!(next_index, checked_light.index());
