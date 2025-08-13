@@ -29,7 +29,7 @@ test_i8_i16_extraction = []
 ui = ["dep:glyph_brush", "dep:loading-bytes", "dep:lyon"]
 wasm = ["wgpu/fragile-send-sync-non-atomic-wasm"]
 debug-slab = []
-light-tiling-stats = []
+light-tiling-stats = [ "dep:plotters" ]
 
 [build-dependencies]
 cfg_aliases.workspace = true
@@ -67,6 +67,7 @@ image = {workspace = true, features = ["hdr"]}
 loading-bytes = { workspace = true, optional = true }
 log = {workspace = true}
 lyon = {workspace = true, optional = true}
+plotters = { workspace = true, optional = true }
 pretty_assertions.workspace = true
 rustc-hash = {workspace = true}
 serde_json = {workspace = true, optional = true}
@@ -84,7 +85,6 @@ human-repr = "1.1.0"
 icosahedron = "0.1"
 img-diff = { path = "../img-diff" }
 naga.workspace = true
-plotters.workspace = true
 ttf-parser = "0.20.0"
 wgpu-core.workspace = true
 winit.workspace = true

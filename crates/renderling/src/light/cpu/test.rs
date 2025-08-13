@@ -787,10 +787,10 @@ fn snapshot(ctx: &crate::Context, stage: &Stage, path: &str, save: bool) {
 
 const MAX_LIGHTS: usize = 2usize.pow(10);
 
+#[cfg(feature = "light-tiling-stats")]
 mod stats {
     #![allow(dead_code)]
     use core::time::Duration;
-    
 
     use plotters::{
         chart::{ChartBuilder, SeriesLabelPosition},
