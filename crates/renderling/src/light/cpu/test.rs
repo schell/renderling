@@ -502,9 +502,13 @@ fn light_bins_sanity() {
             tiling.compute_bins(&mut encoder, bindgroup.as_ref(), depth_texture_size);
             ctx.runtime().queue.submit(Some(encoder.finish()));
         }
-        let (_mins, _maxs, mut lights) =
+        let (mut mins, mut maxs, mut lights) =
             futures_lite::future::block_on(tiling.read_images(lighting));
+        img_diff::normalize_gray_img(&mut mins);
+        img_diff::normalize_gray_img(&mut maxs);
         img_diff::normalize_gray_img(&mut lights);
+        img_diff::assert_img_eq("light/tiling/bins/2-mins.png", mins);
+        img_diff::assert_img_eq("light/tiling/bins/2-maxs.png", maxs);
         img_diff::assert_img_eq("light/tiling/bins/2-lights.png", lights);
     }
     let directional_light = doc.lights.first().unwrap();
