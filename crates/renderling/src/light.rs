@@ -1016,6 +1016,10 @@ impl LightTilingInvocation {
         lighting_slab: &mut [u32],
     ) {
         let frag_pos = self.frag_pos();
+        let depth_texture_size = self.descriptor.depth_texture_size;
+        if frag_pos.x >= depth_texture_size.x || frag_pos.y >= depth_texture_size.y {
+            return;
+        }
         // Depth frag value at the fragment position
         let frag_depth: f32 = depth_texture.fetch(frag_pos).x;
         // Fragment depth scaled to min/max of u32 values
@@ -1197,6 +1201,9 @@ pub fn light_tiling_clear_tiles(
     invocation.clear_tile(lighting_slab);
 }
 
+/// Compute the min and max depth value for a tile.
+///
+/// This shader must be called **once for each fragment in the depth texture**.
 #[spirv(compute(threads(16, 16, 1)))]
 pub fn light_tiling_compute_tile_min_and_max_depth(
     #[spirv(storage_buffer, descriptor_set = 0, binding = 1)] lighting_slab: &mut [u32],
@@ -1210,6 +1217,9 @@ pub fn light_tiling_compute_tile_min_and_max_depth(
     invocation.compute_min_and_max_depth(depth_texture, lighting_slab);
 }
 
+/// Compute the min and max depth value for a tile, multisampled.
+///
+/// This shader must be called **once for each fragment in the depth texture**.
 #[spirv(compute(threads(16, 16, 1)))]
 pub fn light_tiling_compute_tile_min_and_max_depth_multisampled(
     #[spirv(storage_buffer, descriptor_set = 0, binding = 1)] lighting_slab: &mut [u32],

@@ -11,7 +11,7 @@ use craballoc::{
     value::{GpuArrayContainer, Hybrid, HybridArrayContainer, IsContainer},
 };
 use crabslab::Id;
-use glam::UVec2;
+use glam::{UVec2, UVec3};
 
 use crate::{
     bindgroup::ManagedBindGroup,
@@ -183,6 +183,8 @@ impl<Ct: IsContainer> LightTiling<Ct> {
         compute_pass.dispatch_workgroups(x, y, z);
     }
 
+    const WORKGROUP_SIZE: UVec3 = UVec3::new(16, 16, 1);
+
     pub(crate) fn compute_min_max_depth(
         &self,
         encoder: &mut wgpu::CommandEncoder,
@@ -196,9 +198,8 @@ impl<Ct: IsContainer> LightTiling<Ct> {
         compute_pass.set_pipeline(&self.compute_min_max_depth_pipeline);
         compute_pass.set_bind_group(0, bindgroup, &[]);
 
-        let tile_size = self.tiling_descriptor.get().tile_size;
-        let x = (depth_texture_size.x / tile_size) + 1;
-        let y = (depth_texture_size.y / tile_size) + 1;
+        let x = (depth_texture_size.x / Self::WORKGROUP_SIZE.x) + 1;
+        let y = (depth_texture_size.y / Self::WORKGROUP_SIZE.y) + 1;
         let z = 1;
         compute_pass.dispatch_workgroups(x, y, z);
     }
