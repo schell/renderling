@@ -23,15 +23,13 @@ multimodule = true
 crate-type = ["rlib", "cdylib"]
 
 [features]
-default = ["gltf", "tutorial", "winit"]
+default = ["gltf", "ui", "winit"]
 gltf = ["dep:gltf", "dep:serde_json"]
-# optional shaders
-array_test = []
 test_i8_i16_extraction = []
-test_spirv_atomics = []
-tutorial = []
-
+ui = ["dep:glyph_brush", "dep:loading-bytes", "dep:lyon"]
 wasm = ["wgpu/fragile-send-sync-non-atomic-wasm"]
+debug-slab = []
+light-tiling-stats = [ "dep:plotters" ]
 
 [build-dependencies]
 cfg_aliases.workspace = true
@@ -41,6 +39,7 @@ quote.workspace = true
 renderling_build = { path = "../renderling-build", version = "0.1.0" }
 serde.workspace = true
 serde_json.workspace = true
+similarity.workspace = true
 
 # dependencies for CPU and GPU code
 [dependencies]
@@ -62,9 +61,13 @@ crunch = "0.5"
 futures-lite = {workspace=true}
 glam = { workspace = true, features = ["std"] }
 gltf = {workspace = true, optional = true}
+glyph_brush = {workspace = true, optional = true}
 half = "2.3"
 image = {workspace = true, features = ["hdr"]}
+loading-bytes = { workspace = true, optional = true }
 log = {workspace = true}
+lyon = {workspace = true, optional = true}
+plotters = { workspace = true, optional = true }
 pretty_assertions.workspace = true
 rustc-hash = {workspace = true}
 serde_json = {workspace = true, optional = true}
@@ -73,12 +76,12 @@ wgpu = { workspace = true, features = ["spirv"] }
 winit = { workspace = true, optional = true }
 
 [dev-dependencies]
-acorn_prng.workspace = true
-assert_approx_eq = {workspace = true}
+assert_approx_eq.workspace = true
 ctor = "0.2.2"
-env_logger = {workspace = true}
+env_logger.workspace = true
 example = { path = "../example" }
 fastrand = "2.1.1"
+human-repr = "1.1.0"
 icosahedron = "0.1"
 img-diff = { path = "../img-diff" }
 naga.workspace = true

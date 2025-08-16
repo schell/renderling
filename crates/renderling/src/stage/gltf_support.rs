@@ -11,7 +11,7 @@ use crate::{
     atlas::{AtlasError, AtlasImage, AtlasTexture, TextureAddressMode, TextureModes},
     camera::Camera,
     light::{
-        AnalyticalLightBundle, DirectionalLightDescriptor, LightStyle, PointLightDescriptor,
+        AnalyticalLight, DirectionalLightDescriptor, LightStyle, PointLightDescriptor,
         SpotLightDescriptor,
     },
     pbr::Material,
@@ -315,7 +315,7 @@ pub struct GltfPrimitive {
 
 impl GltfPrimitive {
     pub fn from_gltf(
-        stage: &mut Stage,
+        stage: &Stage,
         primitive: gltf::Primitive,
         buffer_data: &[gltf::buffer::Data],
         materials: &HybridArray<Material>,
@@ -581,7 +581,7 @@ pub struct GltfMesh {
 
 impl GltfMesh {
     fn from_gltf(
-        stage: &mut Stage,
+        stage: &Stage,
         buffer_data: &[gltf::buffer::Data],
         materials: &HybridArray<Material>,
         mesh: gltf::Mesh,
@@ -616,7 +616,7 @@ impl AsRef<Hybrid<Camera>> for GltfCamera {
 }
 
 impl GltfCamera {
-    fn new(stage: &mut Stage, gltf_camera: gltf::Camera<'_>, transform: &NestedTransform) -> Self {
+    fn new(stage: &Stage, gltf_camera: gltf::Camera<'_>, transform: &NestedTransform) -> Self {
         log::debug!("camera: {}", gltf_camera.name().unwrap_or("unknown"));
         log::debug!("  transform: {:#?}", transform.get_global_transform());
         let projection = match gltf_camera.projection() {
@@ -711,7 +711,7 @@ pub struct GltfSkin {
 
 impl GltfSkin {
     pub fn from_gltf(
-        stage: &mut Stage,
+        stage: &Stage,
         buffer_data: &[gltf::buffer::Data],
         nodes: &[GltfNode],
         skin: gltf::Skin,
@@ -774,7 +774,7 @@ pub struct GltfDocument {
     pub default_scene: Option<usize>,
     pub extensions: Option<serde_json::Value>,
     pub textures: Vec<Hybrid<AtlasTexture>>,
-    pub lights: Vec<AnalyticalLightBundle>,
+    pub lights: Vec<AnalyticalLight>,
     pub meshes: Vec<GltfMesh>,
     pub nodes: Vec<GltfNode>,
     pub materials: HybridArray<Material>,
@@ -787,7 +787,7 @@ pub struct GltfDocument {
 
 impl GltfDocument {
     pub fn from_gltf(
-        stage: &mut Stage,
+        stage: &Stage,
         document: &gltf::Document,
         buffer_data: Vec<gltf::buffer::Data>,
         images: Vec<gltf::image::Data>,
@@ -901,12 +901,11 @@ impl GltfDocument {
 
         fn transform_for_node(
             nesting_level: usize,
-            stage: &mut Stage,
+            stage: &Stage,
             cache: &mut HashMap<usize, NestedTransform>,
             node: &gltf::Node,
         ) -> NestedTransform {
-            let padding = std::iter::repeat(" ")
-                .take(nesting_level * 2)
+            let padding = std::iter::repeat_n(" ", nesting_level * 2)
                 .collect::<Vec<_>>()
                 .join("");
             let nt = if let Some(nt) = cache.get(&node.index()) {
@@ -1007,62 +1006,61 @@ impl GltfDocument {
                     },
                 )?;
 
-                let mut node_transform = node_transforms
+                let node_transform = node_transforms
                     .get(&node_index)
                     .context(MissingNodeSnafu { index: node_index })?
                     .clone();
-                node_transform.move_gpu_to_slab(stage.lighting.slab_allocator());
 
                 let color = Vec3::from(gltf_light.color()).extend(1.0);
                 let intensity = gltf_light.intensity();
-                let light_bundle = match gltf_light.kind() {
+                let mut light_bundle = match gltf_light.kind() {
                     gltf::khr_lights_punctual::Kind::Directional => {
-                        stage.new_analytical_light(
-                            DirectionalLightDescriptor {
-                                direction: Vec3::NEG_Z,
-                                color,
-                                // TODO: Set a unit for lighting.
-                                // We don't yet use a unit for our lighting, and we should.
-                                // https://www.realtimerendering.com/blog/physical-units-for-lights/
-                                //
-                                // NOTE:
-                                // glTF spec [1] says directional light is in lux, whereas spot and point are
-                                // in candelas. I haven't really set a unit, it's implicit in the shader, but it seems we
-                                // can roughly get candelas from lux by dividing by 683 [2].
-                                // 1. https://github.com/KhronosGroup/glTF/blob/main/extensions/2.0/Khronos/KHR_lights_punctual/README.md
-                                // 2. https://depts.washington.edu/mictech/optics/me557/Radiometry.pdf
-                                // 3. https://projects.blender.org/blender/blender-addons/commit/9d903a93f03b
-                                intensity: intensity / 683.0,
-                            },
-                            Some(node_transform),
-                        )
+                        stage.new_analytical_light(DirectionalLightDescriptor {
+                            direction: Vec3::NEG_Z,
+                            color,
+                            // TODO: Set a unit for lighting.
+                            // We don't yet use a unit for our lighting, and we should.
+                            // https://www.realtimerendering.com/blog/physical-units-for-lights/
+                            //
+                            // NOTE:
+                            // glTF spec [1] says directional light is in lux, whereas spot and point are
+                            // in candelas. I haven't really set a unit, it's implicit in the shader, but it seems we
+                            // can roughly get candelas from lux by dividing by 683 [2].
+                            // 1. https://github.com/KhronosGroup/glTF/blob/main/extensions/2.0/Khronos/KHR_lights_punctual/README.md
+                            // 2. https://depts.washington.edu/mictech/optics/me557/Radiometry.pdf
+                            // 3. https://projects.blender.org/blender/blender-addons/commit/9d903a93f03b
+                            intensity: intensity / 683.0,
+                        })
                     }
 
-                    gltf::khr_lights_punctual::Kind::Point => stage.new_analytical_light(
-                        PointLightDescriptor {
+                    gltf::khr_lights_punctual::Kind::Point => {
+                        stage.new_analytical_light(PointLightDescriptor {
                             position: Vec3::ZERO,
                             color,
                             intensity: intensity / 683.0,
-                        },
-                        Some(node_transform),
-                    ),
+                        })
+                    }
 
                     gltf::khr_lights_punctual::Kind::Spot {
                         inner_cone_angle,
                         outer_cone_angle,
-                    } => stage.new_analytical_light(
-                        SpotLightDescriptor {
-                            position: Vec3::ZERO,
-                            direction: Vec3::NEG_Z,
-                            inner_cutoff: inner_cone_angle,
-                            outer_cutoff: outer_cone_angle,
-                            color,
-                            intensity: intensity / (683.0 * 4.0 * std::f32::consts::PI),
-                        },
-                        Some(node_transform),
-                    ),
+                    } => stage.new_analytical_light(SpotLightDescriptor {
+                        position: Vec3::ZERO,
+                        direction: Vec3::NEG_Z,
+                        inner_cutoff: inner_cone_angle,
+                        outer_cutoff: outer_cone_angle,
+                        color,
+                        intensity: intensity / (683.0 * 4.0 * std::f32::consts::PI),
+                    }),
                 };
 
+                log::trace!(
+                    "  linking light {:?} with node transform {:?}: {:#?}",
+                    light_bundle.light().id(),
+                    node_transform.global_transform_id(),
+                    node_transform.get_global_transform()
+                );
+                light_bundle.link_node_transform(&node_transform);
                 lights.push(light_bundle);
             }
         }
@@ -1176,7 +1174,7 @@ impl GltfDocument {
 
 impl Stage {
     pub fn load_gltf_document_from_path(
-        &mut self,
+        &self,
         path: impl AsRef<std::path::Path>,
     ) -> Result<GltfDocument, StageGltfError> {
         let (document, buffers, images) = gltf::import(path)?;
@@ -1184,7 +1182,7 @@ impl Stage {
     }
 
     pub fn load_gltf_document_from_bytes(
-        &mut self,
+        &self,
         bytes: impl AsRef<[u8]>,
     ) -> Result<GltfDocument, StageGltfError> {
         let (document, buffers, images) = gltf::import_slice(bytes)?;
@@ -1223,7 +1221,7 @@ mod test {
         let projection = crate::camera::perspective(100.0, 50.0);
         let position = Vec3::new(1.0, 0.5, 1.5);
         let view = crate::camera::look_at(position, Vec3::new(1.0, 0.5, 0.0), Vec3::Y);
-        let mut stage = ctx
+        let stage = ctx
             .new_stage()
             .with_lighting(false)
             .with_bloom(false)
@@ -1243,7 +1241,7 @@ mod test {
     // Ensures we can read a minimal gltf file with a simple triangle mesh.
     fn minimal_mesh() {
         let ctx = Context::headless(20, 20);
-        let mut stage = ctx
+        let stage = ctx
             .new_stage()
             .with_lighting(false)
             .with_bloom(false)
@@ -1270,7 +1268,7 @@ mod test {
     // This ensures we are decoding images correctly.
     fn gltf_images() {
         let ctx = Context::headless(100, 100);
-        let mut stage = ctx
+        let stage = ctx
             .new_stage()
             .with_lighting(false)
             .with_background_color(Vec4::splat(1.0));
@@ -1319,7 +1317,7 @@ mod test {
     fn simple_texture() {
         let size = 100;
         let ctx = Context::headless(size, size);
-        let mut stage = ctx
+        let stage = ctx
             .new_stage()
             .with_background_color(Vec3::splat(0.0).extend(1.0))
             // There are no lights in the scene and the material isn't marked as "unlit", so
@@ -1345,30 +1343,15 @@ mod test {
     // Demonstrates how to load and render a gltf file containing lighting and a
     // normal map.
     fn normal_mapping_brick_sphere() {
-        let size = 600;
-        let ctx = Context::headless(size, size);
-        let mut stage = ctx
+        let ctx = Context::headless(1920, 1080);
+        let stage = ctx
             .new_stage()
             .with_lighting(true)
-            .with_background_color(Vec4::ONE);
+            .with_background_color(Vec4::new(0.01, 0.01, 0.01, 1.0));
 
-        let doc = stage
-            .load_gltf_document_from_path("../../gltf/red_brick_03_1k.glb")
+        let _doc = stage
+            .load_gltf_document_from_path("../../gltf/normal_mapping_brick_sphere.glb")
             .unwrap();
-        let camera = doc.cameras.first().unwrap();
-        stage.use_camera(camera);
-        // A change to the lighting units for directional lights causes this test to fail.
-        //
-        // Instead of changing the saved picture, we'll adjust the intensity.
-        //
-        // See <https://github.com/schell/renderling/pull/158/files#r1956634581> for more info.
-        doc.lights.iter().for_each(|bundle| {
-            if let crate::light::LightDetails::Directional(d) = &bundle.light_details {
-                d.modify(|dir| {
-                    dir.intensity *= 683.0;
-                });
-            }
-        });
 
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
@@ -1379,7 +1362,7 @@ mod test {
     #[test]
     fn rigged_fox() {
         let ctx = Context::headless(256, 256);
-        let mut stage = ctx
+        let stage = ctx
             .new_stage()
             .with_lighting(false)
             .with_vertex_skinning(false)
@@ -1463,7 +1446,7 @@ mod test {
         // taking into account that the gltf files may have been
         // saved with Y up, or with Z up
         let ctx = Context::headless(100, 100);
-        let mut stage = ctx.new_stage();
+        let stage = ctx.new_stage();
         let doc = stage
             .load_gltf_document_from_path(
                 crate::test::workspace_dir()

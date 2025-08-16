@@ -136,7 +136,7 @@ fn fresnel_schlick_roughness(cos_theta: f32, f0: Vec3, roughness: f32) -> Vec3 {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn outgoing_radiance(
+pub fn outgoing_radiance(
     light_color: Vec4,
     albedo: Vec3,
     attenuation: f32,
@@ -288,6 +288,7 @@ pub fn fragment_impl<A, T, DtA, C, S>(
 
     renderlet_id: Id<Renderlet>,
 
+    frag_coord: Vec4,
     in_color: Vec4,
     in_uv0: Vec2,
     in_uv1: Vec2,
@@ -534,6 +535,7 @@ pub fn fragment_impl<A, T, DtA, C, S>(
             specular,
             brdf,
             lighting_slab,
+            frag_coord,
         )
     } else {
         crate::println!("no shading!");
@@ -562,6 +564,7 @@ pub fn shade_fragment<S, T>(
     brdf: Vec2,
 
     light_slab: &[u32],
+    frag_coord: Vec4,
 ) -> Vec4
 where
     S: IsSampler,
@@ -572,18 +575,30 @@ where
     // There is always a `LightingDescriptor` stored at index `0` of the
     // light slab.
     let lighting_desc = light_slab.read_unchecked(Id::<LightingDescriptor>::new(0));
-    let analytical_lights_array = lighting_desc.analytical_lights_array;
+    // If light tiling is enabled, use the pre-computed tile's light list
+    let analytical_lights_array = if lighting_desc.light_tiling_descriptor_id.is_none() {
+        lighting_desc.analytical_lights_array
+    } else {
+        let tiling_descriptor = light_slab.read_unchecked(lighting_desc.light_tiling_descriptor_id);
+        let tile_index = tiling_descriptor.tile_index_for_fragment(frag_coord.xy());
+        let tile = light_slab.read_unchecked(tiling_descriptor.tiles_array.at(tile_index));
+        tile.lights_array
+    };
     my_println!("lights: {analytical_lights_array:?}");
-    my_println!("n: {n:?}");
-    my_println!("v: {v:?}");
+    my_println!("surface normal: {n:?}");
+    my_println!("vector from surface to camera: {v:?}");
 
     // accumulated outgoing radiance
     let mut lo = Vec3::ZERO;
-    for i in 0..analytical_lights_array.len() {
+    for light_id_id in analytical_lights_array.iter() {
         // calculate per-light radiance
-        let light_id = light_slab.read(analytical_lights_array.at(i));
+        let light_id = light_slab.read(light_id_id);
+        if light_id.is_none() {
+            break;
+        }
         let light = light_slab.read(light_id);
         let transform = light_slab.read(light.transform_id);
+        crate::println!("transform: {transform:?}");
         let transform = Mat4::from(transform);
 
         // determine the light ray and the radiance
@@ -595,13 +610,18 @@ where
                     intensity,
                 } = light_slab.read(light.into_point_id());
                 let position = transform.transform_point3(position);
+                // This definitely is the direction pointing from fragment to the light.
+                // It needs to stay this way.
+                // For more info, see
+                // <https://renderling.xyz/articles/live/light_tiling.html#point_and_spotlight_discrepancies__fri_11_june>
                 let frag_to_light = position - in_pos;
                 let distance = frag_to_light.length();
                 if distance == 0.0 {
+                    crate::println!("distance between point light and surface is zero");
                     continue;
                 }
                 let l = frag_to_light.alt_norm_or_zero();
-                let attenuation = intensity * 1.0 / (distance * distance);
+                let attenuation = intensity / (distance * distance);
                 let radiance =
                     outgoing_radiance(color, albedo, attenuation, v, l, n, metallic, roughness);
                 let shadow = if light.shadow_map_desc_id.is_some() {
@@ -623,6 +643,7 @@ where
                 let spot_light_descriptor = light_slab.read(light.into_spot_id());
                 let calculation =
                     SpotLightCalculation::new(spot_light_descriptor, transform, in_pos);
+                crate::println!("calculation: {calculation:#?}");
                 if calculation.frag_to_light_distance == 0.0 {
                     continue;
                 }
@@ -671,6 +692,8 @@ where
                 (radiance, shadow)
             }
         };
+        crate::println!("radiance: {radiance}");
+        crate::println!("shadow: {shadow}");
         lo += radiance * (1.0 - shadow);
     }
 

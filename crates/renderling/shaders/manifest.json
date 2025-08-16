@@ -105,6 +105,31 @@
     "wgsl_entry_point": "ibldiffuse_irradiancedi_convolution_fragment"
   },
   {
+    "source_path": "shaders/light-light_tiling_bin_lights.spv",
+    "entry_point": "light::light_tiling_bin_lights",
+    "wgsl_entry_point": "lightlight_tiling_bin_lights"
+  },
+  {
+    "source_path": "shaders/light-light_tiling_clear_tiles.spv",
+    "entry_point": "light::light_tiling_clear_tiles",
+    "wgsl_entry_point": "lightlight_tiling_clear_tiles"
+  },
+  {
+    "source_path": "shaders/light-light_tiling_compute_tile_min_and_max_depth.spv",
+    "entry_point": "light::light_tiling_compute_tile_min_and_max_depth",
+    "wgsl_entry_point": "lightlight_tiling_compute_tile_min_and_max_depth"
+  },
+  {
+    "source_path": "shaders/light-light_tiling_compute_tile_min_and_max_depth_multisampled.spv",
+    "entry_point": "light::light_tiling_compute_tile_min_and_max_depth_multisampled",
+    "wgsl_entry_point": "lightlight_tiling_compute_tile_min_and_max_depth_multisampled"
+  },
+  {
+    "source_path": "shaders/light-light_tiling_depth_pre_pass.spv",
+    "entry_point": "light::light_tiling_depth_pre_pass",
+    "wgsl_entry_point": "lightlight_tiling_depth_pre_pass"
+  },
+  {
     "source_path": "shaders/light-shadow_mapping_fragment.spv",
     "entry_point": "light::shadow_mapping_fragment",
     "wgsl_entry_point": "lightshadow_mapping_fragment"

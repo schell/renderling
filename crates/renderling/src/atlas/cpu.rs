@@ -491,6 +491,7 @@ fn pack_images<'a>(
     );
     let mut newly_packed_layers: Vec<crunch::PackedItems<_>> = vec![];
     for (i, new_layer) in new_packing_layers.into_iter().enumerate() {
+        log::trace!("  packing layer {i} into power of 2 {}", extent.width);
         let packed = crunch::pack_into_po2(
             extent.width as usize,
             new_layer.into_iter().map(|p| {
@@ -770,6 +771,7 @@ impl AtlasBlittingOperation {
                     load: wgpu::LoadOp::Load,
                     store: wgpu::StoreOp::Store,
                 },
+                depth_slice: None,
             })],
             depth_stencil_attachment: None,
             timestamp_writes: None,
@@ -1013,7 +1015,7 @@ mod test {
         let (projection, view) = crate::camera::default_ortho2d(w as f32, h as f32);
         let _camera = stage.new_camera(Camera::new(projection, view));
         let texels = AtlasImage::from_path("../../img/happy_mac.png").unwrap();
-        let entries = stage.set_images(std::iter::repeat(texels).take(3)).unwrap();
+        let entries = stage.set_images(std::iter::repeat_n(texels, 3)).unwrap();
         let clamp_tex = &entries[0];
         let repeat_tex = &entries[1];
         repeat_tex.modify(|t| {

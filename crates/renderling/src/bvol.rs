@@ -13,7 +13,7 @@
 
 use crabslab::SlabItem;
 use glam::{Mat4, Vec2, Vec3, Vec3Swizzles, Vec4, Vec4Swizzles};
-#[cfg(target_arch = "spirv")]
+#[cfg(gpu)]
 use spirv_std::num_traits::Float;
 
 use crate::{camera::Camera, transform::Transform};
@@ -90,8 +90,7 @@ pub fn mo_vertex(plane: &Vec4, aabb: &Aabb) -> Vec3 {
 }
 
 /// Axis aligned bounding box.
-#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
-#[derive(Clone, Copy, Default, PartialEq, SlabItem)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, SlabItem)]
 pub struct Aabb {
     pub min: Vec3,
     pub max: Vec3,
@@ -128,6 +127,10 @@ impl Aabb {
 
     pub fn center(&self) -> Vec3 {
         (self.min + self.max) * 0.5
+    }
+
+    pub fn extents(&self) -> Vec3 {
+        self.max - self.center()
     }
 
     pub fn diagonal_length(&self) -> f32 {
@@ -181,6 +184,18 @@ impl Aabb {
                 _ => unreachable!(),
             })
             .collect()
+    }
+
+    /// Returns whether this `Aabb` intersects another `Aabb`.
+    ///
+    /// Returns `false` if the two are touching, but not overlapping.
+    pub fn intersects_aabb(&self, other: &Aabb) -> bool {
+        self.min.x < other.max.x
+            && self.max.x > other.min.x
+            && self.min.y < other.max.y
+            && self.max.y > other.min.y
+            && self.min.z < other.max.z
+            && self.max.z > other.min.z
     }
 }
 
@@ -311,14 +326,102 @@ impl Frustum {
         true
     }
 
+    /// Returns the depth of the frustum.
     pub fn depth(&self) -> f32 {
         (self.planes[0].w - self.planes[5].w).abs()
     }
 }
 
-/// Bounding sphere consisting of a center and radius.
+/// Bounding box consisting of a center and three half extents.
+///
+/// Essentially a point at the center and a vector pointing from
+/// the center to the corner.
+///
+/// This is _not_ an axis aligned bounding box.
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[derive(Clone, Copy, Default, PartialEq, SlabItem)]
+pub struct BoundingBox {
+    pub center: Vec3,
+    pub half_extent: Vec3,
+}
+
+impl BoundingBox {
+    pub fn from_min_max(min: Vec3, max: Vec3) -> Self {
+        let center = (min + max) / 2.0;
+        let half_extent = max - center;
+        Self {
+            center,
+            half_extent,
+        }
+    }
+
+    pub fn distance(&self, point: Vec3) -> f32 {
+        let p = point - self.center;
+        let component_edge_distance = p.abs() - self.half_extent;
+        let outside = component_edge_distance.max(Vec3::ZERO).length();
+        let inside = component_edge_distance
+            .x
+            .max(component_edge_distance.y)
+            .min(0.0);
+        inside + outside
+    }
+
+    #[cfg(cpu)]
+    /// Return a triangle mesh connecting this `Aabb`'s corners.
+    ///
+    /// ```ignore
+    ///    y           1_____2     _____
+    ///    |           /    /|    /|    |  (same box, left and front sides removed)
+    ///    |___x     0/___3/ |   /7|____|6
+    ///   /           |    | /   | /    /
+    /// z/            |____|/   4|/____/5
+    ///
+    /// 7 is min
+    /// 3 is max
+    /// ```
+    pub fn get_mesh(&self) -> [(Vec3, Vec3); 36] {
+        // Deriving the corner positions from centre and half-extent,
+
+        let p0 = Vec3::new(-self.half_extent.x, self.half_extent.y, self.half_extent.z);
+        let p1 = Vec3::new(-self.half_extent.x, self.half_extent.y, -self.half_extent.z);
+        let p2 = Vec3::new(self.half_extent.x, self.half_extent.y, -self.half_extent.z);
+        let p3 = self.half_extent;
+        let p4 = Vec3::new(-self.half_extent.x, -self.half_extent.y, self.half_extent.z);
+        let p5 = Vec3::new(self.half_extent.x, -self.half_extent.y, self.half_extent.z);
+        let p6 = Vec3::new(self.half_extent.x, -self.half_extent.y, -self.half_extent.z);
+        // min
+        let p7 = -self.half_extent;
+
+        let positions =
+            crate::math::convex_mesh([p0, p1, p2, p3, p4, p5, p6, p7].map(|p| p + self.center));
+
+        // Attach per-triangle face normals.
+        let vertices: Vec<(Vec3, Vec3)> = positions
+            .chunks_exact(3)
+            .flat_map(|chunk| match chunk {
+                [a, b, c] => {
+                    let n = crate::math::triangle_face_normal(*a, *b, *c);
+                    [(*a, n), (*b, n), (*c, n)]
+                }
+                _ => unreachable!(),
+            })
+            .collect();
+
+        // Convert into fixed-size array (12 triangles × 3 vertices).
+        vertices
+            .try_into()
+            .unwrap_or_else(|v: Vec<(Vec3, Vec3)>| panic!("expected 36 vertices, got {}", v.len()))
+    }
+
+    pub fn contains_point(&self, point: Vec3) -> bool {
+        let delta = (point - self.center).abs();
+        let extent = self.half_extent.abs();
+        delta.x <= extent.x && delta.y <= extent.y && delta.z <= extent.z
+    }
+}
+
+/// Bounding sphere consisting of a center and radius.
+#[derive(Clone, Copy, Debug, Default, PartialEq, SlabItem)]
 pub struct BoundingSphere {
     pub center: Vec3,
     pub radius: f32,
@@ -361,6 +464,20 @@ impl BoundingSphere {
             .distance(Vec3::ZERO);
         let sphere = BoundingSphere::new(center, radius);
         (sphere.is_inside_frustum(camera.frustum()), sphere)
+    }
+
+    /// Transform this `BoundingSphere` by the given view projection matrix.
+    pub fn project_by(&self, view_projection: &Mat4) -> Self {
+        let center = self.center;
+        // Pick any direction to find a point on the surface.
+        let surface_point = self.center + self.radius * Vec3::Z;
+        let new_center = view_projection.project_point3(center);
+        let new_surface_point = view_projection.project_point3(surface_point);
+        let new_radius = new_center.distance(new_surface_point);
+        Self {
+            center: new_center,
+            radius: new_radius,
+        }
     }
 
     /// Returns an [`Aabb`] with x and y coordinates in viewport pixels and z coordinate
@@ -470,7 +587,7 @@ impl BVol for Aabb {
 mod test {
     use glam::{Mat4, Quat};
 
-    use crate::{stage::Vertex, Context};
+    use crate::{pbr::Material, stage::Vertex, Context};
 
     use super::*;
 
@@ -523,41 +640,84 @@ mod test {
     }
 
     #[test]
-    fn bounding_sphere_from_min_max() {
-        let ctx = Context::headless(100, 100);
+    fn bounding_box_from_min_max() {
+        let ctx = Context::headless(256, 256);
         let stage = ctx
             .new_stage()
-            .with_lighting(false)
-            .with_background_color(Vec4::ONE)
-            .with_debug_overlay(true)
-            .with_frustum_culling(false);
+            .with_background_color(Vec4::ZERO)
+            .with_msaa_sample_count(4)
+            .with_lighting(true);
+        let _camera = stage.new_camera({
+            Camera::new(
+                // BUG: using orthographic here renderes nothing
+                // Mat4::orthographic_rh(-10.0, 10.0, -10.0, 10.0, 10.0, -10.0),
+                crate::camera::perspective(256.0, 256.0),
+                Mat4::look_at_rh(Vec3::new(-3.0, 3.0, 5.0) * 0.5, Vec3::ZERO, Vec3::Y),
+            )
+        });
+        let _lights = crate::test::make_two_directional_light_setup(&stage);
 
-        let projection = Mat4::perspective_rh(std::f32::consts::FRAC_PI_4, 1.0, 0.1, 20.0);
-        let view = Mat4::look_at_rh(Vec3::new(0.0, 0.0, 2.0), Vec3::ZERO, Vec3::Y);
-        let _camera = stage.new_camera(Camera::new(projection, view));
+        let white = stage.new_material(Material {
+            albedo_factor: Vec4::ONE,
+            ..Default::default()
+        });
+        let red = stage.new_material(Material {
+            albedo_factor: Vec4::new(1.0, 0.0, 0.0, 1.0),
+            ..Default::default()
+        });
 
-        let mut min = Vec3::splat(f32::INFINITY);
-        let mut max = Vec3::splat(f32::NEG_INFINITY);
-        let _rez = stage
+        let _w = stage
             .builder()
-            .with_vertices(crate::math::unit_cube().into_iter().map(|(p, n)| {
-                min = min.min(p);
-                max = max.max(p);
-                Vertex::default()
-                    .with_position(p)
-                    .with_normal(n)
-                    .with_color(Vec4::new(1.0, 0.0, 0.0, 1.0))
-            }))
-            .with_bounds({
-                log::info!("bounds: {:?}", (min, max));
-                (min, max)
-            })
+            .with_material_id(white.id())
+            .with_vertices(
+                crate::math::unit_cube()
+                    .into_iter()
+                    .map(|(p, n)| Vertex::default().with_position(p).with_normal(n)),
+            )
             .build();
+
+        let mut corners = vec![];
+        for x in [-1.0, 1.0] {
+            for y in [-1.0, 1.0] {
+                for z in [-1.0, 1.0] {
+                    corners.push(Vec3::new(x, y, z));
+                }
+            }
+        }
+        let mut rs = vec![];
+        for corner in corners.iter() {
+            let bb = BoundingBox {
+                center: Vec3::new(0.5, 0.5, 0.5) * corner,
+                half_extent: Vec3::splat(0.25),
+            };
+            assert!(
+                bb.contains_point(bb.center),
+                "BoundingBox {bb:?} does not contain center"
+            );
+
+            rs.push(
+                stage
+                    .builder()
+                    .with_material_id(red.id())
+                    .with_vertices(
+                        bb.get_mesh()
+                            .map(|(p, n)| Vertex::default().with_position(p).with_normal(n)),
+                    )
+                    .build(),
+            );
+        }
 
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
         let img = frame.read_image().unwrap();
-        img_diff::save("bvol/bounding_sphere_from_min_max.png", img);
-        frame.present();
+        img_diff::assert_img_eq("bvol/bounding_box/get_mesh.png", img);
+    }
+
+    #[test]
+    fn aabb_intersection() {
+        let a = Aabb::new(Vec3::ZERO, Vec3::ONE);
+        let b = Aabb::new(Vec3::splat(0.9), Vec3::splat(1.9));
+        assert!(a.intersects_aabb(&b));
+        assert!(b.intersects_aabb(&a));
     }
 }

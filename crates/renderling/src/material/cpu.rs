@@ -23,8 +23,7 @@ impl AsRef<WgpuRuntime> for Materials {
 
 impl Materials {
     pub fn new(runtime: impl AsRef<WgpuRuntime>, atlas_size: wgpu::Extent3d) -> Self {
-        let slab =
-            SlabAllocator::new_with_label(runtime, wgpu::BufferUsages::empty(), Some("materials"));
+        let slab = SlabAllocator::new(runtime, "materials", wgpu::BufferUsages::empty());
         let atlas = Atlas::new(&slab, atlas_size, None, Some("materials-atlas"), None);
         Self { slab, atlas }
     }

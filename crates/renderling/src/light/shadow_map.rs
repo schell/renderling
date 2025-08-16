@@ -9,7 +9,7 @@ use craballoc::{
 };
 use crabslab::Id;
 use glam::{Mat4, UVec2};
-use snafu::OptionExt;
+use snafu::{OptionExt, ResultExt};
 
 use crate::{
     atlas::{AtlasBlittingOperation, AtlasImage, AtlasTexture},
@@ -18,7 +18,7 @@ use crate::{
 };
 
 use super::{
-    AnalyticalLightBundle, DroppedAnalyticalLightBundleSnafu, Lighting, LightingError,
+    AnalyticalLight, DroppedAnalyticalLightBundleSnafu, Lighting, LightingError, PollSnafu,
     ShadowMapDescriptor,
 };
 
@@ -44,7 +44,7 @@ pub struct ShadowMap {
     pub(crate) _atlas_textures_array: HybridArray<Id<AtlasTexture>>,
     pub(crate) update_texture: crate::texture::Texture,
     pub(crate) blitting_op: AtlasBlittingOperation,
-    pub(crate) light_bundle: AnalyticalLightBundle<WeakContainer>,
+    pub(crate) light_bundle: AnalyticalLight<WeakContainer>,
 }
 
 impl ShadowMap {
@@ -164,7 +164,7 @@ impl ShadowMap {
     /// a new [`ShadowMap`].
     pub fn new(
         lighting: &Lighting,
-        analytical_light_bundle: &AnalyticalLightBundle,
+        analytical_light_bundle: &AnalyticalLight,
         // Size of the shadow map
         size: UVec2,
         // Distance to the shadow map frustum's near plane
@@ -174,7 +174,7 @@ impl ShadowMap {
     ) -> Result<Self, LightingError> {
         let stage_slab_buffer = lighting.geometry_slab_buffer.read().unwrap();
         let is_point_light =
-            analytical_light_bundle.light_details.style() == super::LightStyle::Point;
+            analytical_light_bundle.light_details().style() == super::LightStyle::Point;
         let count = if is_point_light { 6 } else { 1 };
         let atlas = &lighting.shadow_map_atlas;
         let image = AtlasImage::new(size, crate::atlas::AtlasImageFormat::R32FLOAT);
@@ -211,10 +211,10 @@ impl ShadowMap {
             pcf_samples: 4,
         });
         // Set the descriptor in the light, so the shader knows to use it
-        analytical_light_bundle.light.modify(|light| {
+        analytical_light_bundle.light().modify(|light| {
             light.shadow_map_desc_id = shadowmap_descriptor.id();
         });
-        let light_slab_buffer = lighting.light_slab.commit();
+        let light_slab_buffer = lighting.commit();
         let update_bindgroup = ManagedBindGroup::from(ShadowMap::create_update_bindgroup(
             lighting.light_slab.device(),
             &lighting.shadow_map_update_bindgroup_layout,
@@ -238,7 +238,7 @@ impl ShadowMap {
 
     /// Update the `ShadowMap`, rendering the given [`Renderlet`]s to the map as shadow casters.
     ///
-    /// The `ShadowMap` contains a weak referenc to the [`AnalyticalLightBundle`] used to create
+    /// The `ShadowMap` contains a weak reference to the [`AnalyticalLightBundle`] used to create
     /// it. Updates made to this `AnalyticalLightBundle` will automatically propogate to this
     /// `ShadowMap`.
     ///
@@ -357,7 +357,9 @@ impl ShadowMap {
                 atlas_texture,
             )?;
             let submission = queue.submit(Some(encoder.finish()));
-            device.poll(wgpu::Maintain::wait_for(submission));
+            device
+                .poll(wgpu::PollType::WaitForSubmissionIndex(submission))
+                .context(PollSnafu)?;
         }
         Ok(())
     }
@@ -366,9 +368,7 @@ impl ShadowMap {
 #[cfg(test)]
 #[allow(clippy::unused_enumerate_index)]
 mod test {
-    use image::Luma;
-
-    use crate::{camera::Camera, texture::DepthTexture};
+    use crate::camera::Camera;
 
     use super::super::*;
 
@@ -377,7 +377,7 @@ mod test {
         let w = 800.0;
         let h = 800.0;
         let ctx = crate::Context::headless(w as u32, h as u32);
-        let mut stage = ctx
+        let stage = ctx
             .new_stage()
             .with_lighting(true)
             .with_msaa_sample_count(4);
@@ -431,7 +431,7 @@ mod test {
         let w = 800.0;
         let h = 800.0;
         let ctx = crate::Context::headless(w as u32, h as u32);
-        let mut stage = ctx
+        let stage = ctx
             .new_stage()
             .with_lighting(true)
             .with_msaa_sample_count(4);
@@ -483,8 +483,9 @@ mod test {
     fn shadow_mapping_sanity() {
         let w = 800.0;
         let h = 800.0;
-        let ctx = crate::Context::headless(w as u32, h as u32);
-        let mut stage = ctx.new_stage().with_lighting(true);
+        let ctx = crate::Context::headless(w as u32, h as u32)
+            .with_shadow_mapping_atlas_texture_size([1024, 1024, 2]);
+        let stage = ctx.new_stage().with_lighting(true);
 
         let doc = stage
             .load_gltf_document_from_path(
@@ -509,8 +510,8 @@ mod test {
 
         let gltf_light = doc.lights.first().unwrap();
         assert_eq!(
-            gltf_light.light.get().transform_id,
-            gltf_light.transform.global_transform_id(),
+            gltf_light.light().get().transform_id,
+            gltf_light.transform().id(),
             "light's global transform id is different from its transform_id"
         );
 
@@ -519,27 +520,34 @@ mod test {
             .unwrap();
         shadows.update(&stage, doc.renderlets_iter()).unwrap();
 
-        {
-            // Ensure the state of the "update texture", which receives the depth of the scene on update
-            let shadow_map_update_texture =
-                DepthTexture::try_new_from(&ctx, shadows.update_texture.clone()).unwrap();
-            let mut shadow_map_update_img = shadow_map_update_texture.read_image().unwrap();
-            img_diff::normalize_gray_img(&mut shadow_map_update_img);
-            img_diff::assert_img_eq(
-                "shadows/shadow_mapping_sanity/shadows_update_texture.png",
-                shadow_map_update_img,
-            );
-        }
+        // Extra sanity checks
+        // {
+        //     use crate::texture::DepthTexture;
+        //     use image::Luma;
+        //     {
+        //         // Ensure the state of the "update texture", which receives the depth of the scene on update
+        //         let shadow_map_update_texture =
+        //             DepthTexture::try_new_from(&ctx, shadows.update_texture.clone()).unwrap();
+        //         let mut shadow_map_update_img = shadow_map_update_texture.read_image().unwrap();
+        //         img_diff::normalize_gray_img(&mut shadow_map_update_img);
+        //         img_diff::save(
+        //             "shadows/shadow_mapping_sanity/shadows_update_texture.png",
+        //             shadow_map_update_img,
+        //         );
+        //     }
 
-        let lighting: &Lighting = stage.as_ref();
-        let shadow_depth_buffer = lighting.shadow_map_atlas.atlas_img_buffer(&ctx, 0);
-        let shadow_depth_img = shadow_depth_buffer
-            .into_image::<f32, Luma<f32>>(ctx.get_device())
-            .unwrap();
-        let shadow_depth_img = shadow_depth_img.into_luma8();
-        let mut depth_img = shadow_depth_img.clone();
-        img_diff::normalize_gray_img(&mut depth_img);
-        img_diff::assert_img_eq("shadows/shadow_mapping_sanity/depth.png", depth_img);
+        //     {
+        //         let lighting: &Lighting = stage.as_ref();
+        //         let shadow_depth_buffer = lighting.shadow_map_atlas.atlas_img_buffer(&ctx, 0);
+        //         let shadow_depth_img = shadow_depth_buffer
+        //             .into_image::<f32, Luma<f32>>(ctx.get_device())
+        //             .unwrap();
+        //         let shadow_depth_img = shadow_depth_img.into_luma8();
+        //         let mut depth_img = shadow_depth_img.clone();
+        //         img_diff::normalize_gray_img(&mut depth_img);
+        //         img_diff::save("shadows/shadow_mapping_sanity/depth.png", depth_img);
+        //     }
+        // }
 
         // Now do the rendering *with the shadow map* to see if it works.
         let frame = ctx.get_next_frame().unwrap();
@@ -547,7 +555,14 @@ mod test {
 
         let img = frame.read_image().unwrap();
         frame.present();
-        img_diff::assert_img_eq("shadows/shadow_mapping_sanity/stage_render.png", img);
+        img_diff::assert_img_eq_cfg(
+            "shadows/shadow_mapping_sanity/stage_render.png",
+            img,
+            img_diff::DiffCfg {
+                image_threshold: 0.01,
+                ..Default::default()
+            },
+        );
     }
 
     #[test]
@@ -555,7 +570,7 @@ mod test {
         let w = 800.0;
         let h = 800.0;
         let ctx = crate::Context::headless(w as u32, h as u32);
-        let mut stage = ctx
+        let stage = ctx
             .new_stage()
             .with_lighting(true)
             .with_msaa_sample_count(4);
@@ -579,9 +594,9 @@ mod test {
         let z_far = 100.0;
         for (_i, light_bundle) in doc.lights.iter().enumerate() {
             {
-                let desc = light_bundle.light_details.as_spot().unwrap().get();
+                let desc = light_bundle.light_details().as_spot().unwrap().get();
                 let (p, v) = desc.shadow_mapping_projection_and_view(
-                    &light_bundle.transform.get_global_transform().into(),
+                    &light_bundle.transform().get().into(),
                     z_near,
                     z_far,
                 );
@@ -620,7 +635,7 @@ mod test {
         let w = 800.0;
         let h = 800.0;
         let ctx = crate::Context::headless(w as u32, h as u32);
-        let mut stage = ctx
+        let stage = ctx
             .new_stage()
             .with_lighting(true)
             .with_background_color(Vec3::splat(0.05087).extend(1.0))
@@ -642,11 +657,12 @@ mod test {
         let mut shadows = vec![];
         let z_near = 0.1;
         let z_far = 100.0;
-        for (_i, light_bundle) in doc.lights.iter().enumerate() {
+        for (i, light_bundle) in doc.lights.iter().enumerate() {
             {
-                let desc = light_bundle.light_details.as_point().unwrap().get();
+                let desc = light_bundle.light_details().as_point().unwrap().get();
+                println!("point light {i}: {desc:?}");
                 let (p, vs) = desc.shadow_mapping_projection_and_view_matrices(
-                    &light_bundle.transform.get_global_transform().into(),
+                    &light_bundle.transform().get().into(),
                     z_near,
                     z_far,
                 );

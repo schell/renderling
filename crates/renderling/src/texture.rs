@@ -8,7 +8,7 @@ use std::{
 use craballoc::runtime::WgpuRuntime;
 use glam::UVec2;
 use image::{
-    load_from_memory, DynamicImage, GenericImage, GenericImageView, ImageBuffer, ImageError,
+    load_from_memory, DynamicImage, GenericImage, GenericImageView, ImageBuffer, ImageError, Luma,
     PixelWithColorType, Rgba32FImage,
 };
 use mips::MipMapGenerator;
@@ -41,6 +41,9 @@ pub enum TextureError {
 
     #[snafu(display("Unsupported format"))]
     UnsupportedFormat,
+
+    #[snafu(display("Driver poll error: {source}"))]
+    Poll { source: wgpu::PollError },
 }
 
 type Result<T, E = TextureError> = std::result::Result<T, E>;
@@ -681,7 +684,7 @@ impl Texture {
             2,
         );
 
-        let pixels = copied.pixels(&runtime.device);
+        let pixels = copied.pixels(&runtime.device)?;
         let pixels = bytemuck::cast_slice::<u8, u16>(pixels.as_slice())
             .iter()
             .map(|p| half::f16::from_bits(*p).to_f32())
@@ -764,9 +767,9 @@ pub fn read_depth_texture_to_image(
     width: usize,
     height: usize,
     texture: &wgpu::Texture,
-) -> Option<image::GrayImage> {
+) -> Result<Option<image::GrayImage>> {
     let depth_copied_buffer = Texture::read(runtime.as_ref(), texture, width, height, 1, 4);
-    let pixels = depth_copied_buffer.pixels(&runtime.as_ref().device);
+    let pixels = depth_copied_buffer.pixels(&runtime.as_ref().device)?;
     let pixels = bytemuck::cast_slice::<u8, f32>(&pixels)
         .iter()
         .copied()
@@ -775,8 +778,27 @@ pub fn read_depth_texture_to_image(
             (255.0 * f) as u8
         })
         .collect::<Vec<u8>>();
-    let img_buffer = image::GrayImage::from_raw(width as u32, height as u32, pixels)?;
-    Some(img_buffer)
+    Ok(image::GrayImage::from_raw(
+        width as u32,
+        height as u32,
+        pixels,
+    ))
+}
+
+pub fn read_depth_texture_f32(
+    runtime: impl AsRef<WgpuRuntime>,
+    width: usize,
+    height: usize,
+    texture: &wgpu::Texture,
+) -> Result<Option<image::ImageBuffer<Luma<f32>, Vec<f32>>>> {
+    let depth_copied_buffer = Texture::read(runtime.as_ref(), texture, width, height, 1, 4);
+    let pixels = depth_copied_buffer.pixels(&runtime.as_ref().device)?;
+    let pixels = bytemuck::cast_slice::<u8, f32>(&pixels).to_vec();
+    Ok(image::ImageBuffer::from_raw(
+        width as u32,
+        height as u32,
+        pixels,
+    ))
 }
 
 /// A depth texture.
@@ -822,7 +844,7 @@ impl DepthTexture {
     /// ## Panics
     /// This may panic if the depth texture has a multisample count greater than
     /// 1.
-    pub fn read_image(&self) -> Option<image::GrayImage> {
+    pub fn read_image(&self) -> Result<Option<image::GrayImage>> {
         // TODO: impl AsRef<WgpuRuntime>
         read_depth_texture_to_image(
             &self.runtime,
@@ -866,10 +888,10 @@ pub struct CopiedTextureBuffer {
 
 impl CopiedTextureBuffer {
     /// Access the raw unpadded pixels of the buffer.
-    pub fn pixels(&self, device: &wgpu::Device) -> Vec<u8> {
+    pub fn pixels(&self, device: &wgpu::Device) -> Result<Vec<u8>> {
         let buffer_slice = self.buffer.slice(..);
         buffer_slice.map_async(wgpu::MapMode::Read, |_| {});
-        device.poll(wgpu::Maintain::Wait);
+        device.poll(wgpu::PollType::Wait).context(PollSnafu)?;
 
         let padded_buffer = buffer_slice.get_mapped_range();
         let mut unpadded_buffer = vec![];
@@ -878,7 +900,7 @@ impl CopiedTextureBuffer {
         for chunk in padded_buffer.chunks(self.dimensions.padded_bytes_per_row) {
             unpadded_buffer.extend_from_slice(&chunk[..self.dimensions.unpadded_bytes_per_row]);
         }
-        unpadded_buffer
+        Ok(unpadded_buffer)
     }
 
     /// Convert the post render buffer into an RgbaImage.
@@ -940,7 +962,7 @@ impl CopiedTextureBuffer {
         P: image::Pixel<Subpixel = Sp>,
         image::DynamicImage: From<image::ImageBuffer<P, Vec<Sp>>>,
     {
-        let pixels = self.pixels(device);
+        let pixels = self.pixels(device)?;
         let coerced_pixels: &[Sp] = bytemuck::cast_slice(&pixels);
         let img_buffer: image::ImageBuffer<P, Vec<Sp>> = image::ImageBuffer::from_raw(
             self.dimensions.width as u32,
@@ -953,7 +975,7 @@ impl CopiedTextureBuffer {
 
     /// Convert the post render buffer into an internal-format [`AtlasImage`].
     pub fn into_atlas_image(self, device: &wgpu::Device) -> Result<AtlasImage, TextureError> {
-        let pixels = self.pixels(device);
+        let pixels = self.pixels(device)?;
         let img = AtlasImage {
             pixels,
             size: UVec2::new(self.dimensions.width as u32, self.dimensions.height as u32),
@@ -1097,7 +1119,7 @@ mod test {
                 0,
                 None,
             );
-            let pixels = copied_buffer.pixels(r.get_device());
+            let pixels = copied_buffer.pixels(r.get_device()).unwrap();
             assert_eq!((mip_width * mip_height * 4) as usize, pixels.len());
             let img: image::RgbaImage =
                 image::ImageBuffer::from_vec(mip_width, mip_height, pixels).unwrap();

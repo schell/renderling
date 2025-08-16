@@ -187,8 +187,7 @@ impl Skybox {
         let runtime = runtime.as_ref();
         log::trace!("creating skybox");
 
-        let slab =
-            SlabAllocator::new_with_label(runtime, wgpu::BufferUsages::VERTEX, Some("skybox-slab"));
+        let slab = SlabAllocator::new(runtime, "skybox-slab", wgpu::BufferUsages::VERTEX);
 
         let proj = Mat4::perspective_rh(std::f32::consts::FRAC_PI_2, 1.0, 0.1, 10.0);
         let camera = slab.new_value(Camera::default().with_projection(proj));
@@ -409,6 +408,7 @@ impl Skybox {
                             load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
                             store: wgpu::StoreOp::Store,
                         },
+                        depth_slice: None,
                     })],
                     depth_stencil_attachment: None,
                     ..Default::default()
@@ -529,6 +529,7 @@ impl Skybox {
                                 load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
                                 store: wgpu::StoreOp::Store,
                             },
+                            depth_slice: None,
                         })],
                         depth_stencil_attachment: None,
                         ..Default::default()
@@ -630,6 +631,7 @@ impl Skybox {
                         load: wgpu::LoadOp::Clear(wgpu::Color::RED),
                         store: wgpu::StoreOp::Store,
                     },
+                    depth_slice: None,
                 })],
                 depth_stencil_attachment: None,
                 ..Default::default()
@@ -685,7 +687,7 @@ mod test {
                 0,
                 Some(wgpu::Origin3d { x: 0, y: 0, z: i }),
             );
-            let pixels = copied_buffer.pixels(ctx.get_device());
+            let pixels = copied_buffer.pixels(ctx.get_device()).unwrap();
             let pixels = bytemuck::cast_slice::<u8, u16>(pixels.as_slice())
                 .iter()
                 .map(|p| half::f16::from_bits(*p).to_f32())
@@ -708,7 +710,7 @@ mod test {
                     mip_level,
                     Some(wgpu::Origin3d { x: 0, y: 0, z: i }),
                 );
-                let pixels = copied_buffer.pixels(ctx.get_device());
+                let pixels = copied_buffer.pixels(ctx.get_device()).unwrap();
                 let pixels = bytemuck::cast_slice::<u8, u16>(pixels.as_slice())
                     .iter()
                     .map(|p| half::f16::from_bits(*p).to_f32())
@@ -740,7 +742,7 @@ mod test {
         let brdf_lut = Skybox::create_precomputed_brdf_texture(&r);
         assert_eq!(wgpu::TextureFormat::Rg16Float, brdf_lut.texture.format());
         let copied_buffer = Texture::read(&r, &brdf_lut.texture, 512, 512, 2, 2);
-        let pixels = copied_buffer.pixels(r.get_device());
+        let pixels = copied_buffer.pixels(r.get_device()).unwrap();
         let pixels: Vec<f32> = bytemuck::cast_slice::<u8, u16>(pixels.as_slice())
             .iter()
             .copied()

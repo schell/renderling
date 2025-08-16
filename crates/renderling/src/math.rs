@@ -6,14 +6,39 @@
 //! run on the CPU.
 //!
 //! Lastly, it provides some constant geometry used in many shaders.
-use core::ops::Mul;
+use core::ops::{IndexMut, Mul};
+use crabslab::{Id, Slab};
 use spirv_std::{
-    image::{Cubemap, Image2d, Image2dArray},
+    image::{sample_with, Cubemap, Image2d, Image2dArray, ImageWithMethods},
     Image, Sampler,
 };
 
 pub use glam::*;
 pub use spirv_std::num_traits::{clamp, Float, Zero};
+
+pub trait Fetch<Coords> {
+    type Output;
+
+    fn fetch(&self, coords: Coords) -> Self::Output;
+}
+
+impl Fetch<UVec2> for Image!(2D, type=f32, sampled, depth) {
+    type Output = Vec4;
+
+    fn fetch(&self, coords: UVec2) -> Self::Output {
+        self.fetch_with(coords, sample_with::lod(0))
+    }
+}
+
+impl Fetch<UVec2> for Image!(2D, type=f32, sampled, depth, multisampled=true) {
+    type Output = Vec4;
+
+    fn fetch(&self, coords: UVec2) -> Self::Output {
+        // TODO: check whether this is doing what we think it's doing.
+        // (We think its doing roughly the same thing as the non-multisampled version above)
+        self.fetch_with(coords, sample_with::sample_index(0))
+    }
+}
 
 pub trait IsSampler: Copy + Clone {}
 
@@ -88,6 +113,14 @@ mod cpu {
     /// value when sampled.
     pub struct ConstTexture(Vec4);
 
+    impl Fetch<UVec2> for ConstTexture {
+        type Output = Vec4;
+
+        fn fetch(&self, _coords: UVec2) -> Self::Output {
+            self.0
+        }
+    }
+
     impl Sample2d for ConstTexture {
         type Sampler = ();
 
@@ -133,6 +166,21 @@ mod cpu {
         }
     }
 
+    impl<P, Container> Fetch<UVec2> for CpuTexture2d<P, Container>
+    where
+        P: image::Pixel,
+        Container: std::ops::Deref<Target = [P::Subpixel]>,
+    {
+        type Output = Vec4;
+
+        fn fetch(&self, coords: UVec2) -> Self::Output {
+            let x = coords.x.clamp(0, self.image.width() - 1);
+            let y = coords.y.clamp(0, self.image.height() - 1);
+            let p = self.image.get_pixel(x, y);
+            (self.convert_fn)(p)
+        }
+    }
+
     impl<P, Container> Sample2d for CpuTexture2d<P, Container>
     where
         P: image::Pixel,
@@ -143,14 +191,9 @@ mod cpu {
         fn sample_by_lod(&self, _sampler: Self::Sampler, uv: glam::Vec2, _lod: f32) -> Vec4 {
             // TODO: lerp the CPU texture sampling
             // TODO: use configurable wrap mode on CPU sampling
-            let px = uv.x.clamp(0.0, 1.0) * self.image.width() as f32;
-            let py = uv.y.clamp(0.0, 1.0) * self.image.height() as f32;
-            println!("sampling: ({px}, {py})");
-            let p = self.image.get_pixel(
-                px.round().min(self.image.width() as f32) as u32,
-                py.round().min(self.image.height() as f32) as u32,
-            );
-            (self.convert_fn)(p)
+            let px = uv.x.clamp(0.0, 1.0) * (self.image.width() as f32 - 1.0);
+            let py = uv.y.clamp(0.0, 1.0) * (self.image.height() as f32 - 1.0);
+            self.fetch(UVec2::new(px.round() as u32, py.round() as u32))
         }
     }
 
@@ -215,9 +258,19 @@ mod cpu {
         u as f32 / 255.0
     }
 
+    pub fn luma_u8_to_vec4(p: &image::Luma<u8>) -> Vec4 {
+        let shade = scaled_u8_to_f32(p.0[0]);
+        Vec3::splat(shade).extend(1.0)
+    }
+
     /// Convert an f32 in range 0.0 - 1.0 into a u8 in range 0-255.
     pub fn scaled_f32_to_u8(f: f32) -> u8 {
         (f * 255.0) as u8
+    }
+
+    /// Convert a u32 in rang 0-u32::MAX to a u8 in rang 0-255.
+    pub fn scaled_u32_to_u8(u: u32) -> u8 {
+        ((u as f32 / u32::MAX as f32) * 255.0) as u8
     }
 }
 #[cfg(not(target_arch = "spirv"))]
@@ -232,6 +285,9 @@ pub use cpu::*;
 /// See [this issue](https://github.com/gfx-rs/naga/issues/2461) and `crate::linkage::test`
 /// for more info.
 pub trait IsVector {
+    /// Type returned by the `orthogonal_vectors` extension function.
+    type OrthogonalVectors;
+
     /// Normalize or return zero.
     fn alt_norm_or_zero(&self) -> Self;
 
@@ -241,9 +297,14 @@ pub trait IsVector {
     /// Returns the dot product of a vector with itself (the square of its
     /// length).
     fn dot2(&self) -> f32;
+
+    /// Returns normalized orthogonal vectors.
+    fn orthonormal_vectors(&self) -> Self::OrthogonalVectors;
 }
 
 impl IsVector for glam::Vec2 {
+    type OrthogonalVectors = Vec2;
+
     fn alt_norm_or_zero(&self) -> Self {
         if self.length().is_zero() {
             glam::Vec2::ZERO
@@ -259,9 +320,15 @@ impl IsVector for glam::Vec2 {
     fn dot2(&self) -> f32 {
         self.dot(*self)
     }
+
+    fn orthonormal_vectors(&self) -> Self::OrthogonalVectors {
+        Vec3::new(self.x, self.y, 0.0).cross(Vec3::Z).xy()
+    }
 }
 
 impl IsVector for glam::Vec3 {
+    type OrthogonalVectors = [Vec3; 2];
+
     fn alt_norm_or_zero(&self) -> Self {
         if self.length().is_zero() {
             glam::Vec3::ZERO
@@ -280,6 +347,31 @@ impl IsVector for glam::Vec3 {
 
     fn dot2(&self) -> f32 {
         self.dot(*self)
+    }
+
+    fn orthonormal_vectors(&self) -> Self::OrthogonalVectors {
+        // From https://graphics.pixar.com/library/OrthonormalB/paper.pdf
+        let s = self.alt_norm_or_zero();
+        let sign = signum_or_zero(s.z);
+        let a = -1.0 / (sign + s.z);
+        let b = s.x * s.y * a;
+        [
+            Self::new(1.0 + sign * s.x * s.x * a, sign * b, -sign * s.x),
+            Self::new(b, sign + s.y * s.y * a, -s.y),
+        ]
+    }
+}
+
+/// Quantize an f32
+
+/// Determine the distance from a point to a line segment.
+pub fn distance_to_line(p: Vec3, a: Vec3, b: Vec3) -> f32 {
+    let ab_distance = a.distance(b);
+    if ab_distance <= f32::EPSILON {
+        p.distance(a)
+    } else {
+        let tri_area = (p - a).cross(p - b).length();
+        tri_area / ab_distance
     }
 }
 
@@ -442,7 +534,13 @@ pub fn smoothstep(edge_in: f32, edge_out: f32, mut x: f32) -> f32 {
 pub fn triangle_face_normal(p1: Vec3, p2: Vec3, p3: Vec3) -> Vec3 {
     let a = p1 - p2;
     let b = p1 - p3;
-    let n: Vec3 = a.cross(b).normalize();
+    let n: Vec3 = a.cross(b).alt_norm_or_zero();
+    #[cfg(cpu)]
+    debug_assert_ne!(
+        Vec3::ZERO,
+        n,
+        "normal is zero - p1: {p1}, p2: {p2}, p3: {p3}"
+    );
     n
 }
 
@@ -588,6 +686,75 @@ pub const fn convex_mesh([p0, p1, p2, p3, p4, p5, p6, p7]: [Vec3; 8]) -> [Vec3; 
         p4, p6, p5, p4, p7, p6, // bottom
         p2, p7, p1, p2, p6, p7, // back
     ]
+}
+
+/// An PCG PRNG that is optimized for GPUs, in that it is fast to evaluate and accepts
+/// sequential ids as it's initial state without sacrificing on RNG quality.
+///
+/// https://www.reedbeta.com/blog/hash-functions-for-gpu-rendering/
+/// https://jcgt.org/published/0009/03/02/
+///
+/// Thanks to Firestar99 at
+/// <https://github.com/Firestar99/nanite-at-home/blob/c55915d16ad3b5b4b706d8017633f0870dd2603e/space-engine-shader/src/utils/gpurng.rs#L19>
+pub struct GpuRng(pub u32);
+
+impl GpuRng {
+    pub fn new(state: u32) -> GpuRng {
+        Self(state)
+    }
+
+    pub fn gen(&mut self) -> u32 {
+        let state = self.0;
+        self.0 = if cfg!(gpu) {
+            self.0 * 747796405 + 2891336453
+        } else {
+            self.0.wrapping_sub(747796405).wrapping_add(2891336453)
+        };
+        let word = (state >> ((state >> 28) + 4)) ^ state;
+        let word = if cfg!(gpu) {
+            word * 277803737
+        } else {
+            word.wrapping_mul(277803737)
+        };
+        (word >> 22) ^ word
+    }
+
+    pub fn gen_u32(&mut self, min: u32, max: u32) -> u32 {
+        let range = max - min;
+        let percent = self.gen_f32(0.0, 1.0);
+        min + (range as f32 * percent).round() as u32
+    }
+
+    pub fn gen_f32(&mut self, min: f32, max: f32) -> f32 {
+        let range = max - min;
+        let numerator = self.gen();
+        let percentage = numerator as f32 / u32::MAX as f32;
+        min + range * percentage
+    }
+
+    pub fn gen_vec3(&mut self, min: Vec3, max: Vec3) -> Vec3 {
+        let x = self.gen_f32(min.x, max.x);
+        let y = self.gen_f32(min.y, max.y);
+        let z = self.gen_f32(min.z, max.z);
+        Vec3::new(x, y, z)
+    }
+
+    pub fn gen_vec2(&mut self, min: Vec2, max: Vec2) -> Vec2 {
+        let x = self.gen_f32(min.x, max.x);
+        let y = self.gen_f32(min.y, max.y);
+        Vec2::new(x, y)
+    }
+}
+
+/// Convert a pixel coordinate in screen space (origin is top left, Y increases downwards)
+/// to normalized device coordinates (origin is center, Y increses upwards).
+pub fn convert_pixel_to_ndc(pixel_coord: Vec2, viewport_size: UVec2) -> Vec2 {
+    // Normalize the point to the range [0.0, 1.0];
+    let mut normalized = pixel_coord / viewport_size.as_vec2();
+    // Flip the Y axis to increase upward
+    normalized.y = 1.0 - normalized.y;
+    // Move the origin to the center
+    (normalized * 2.0) - 1.0
 }
 
 #[cfg(test)]

@@ -121,6 +121,7 @@ impl SceneCubemap {
                     load: wgpu::LoadOp::Clear(self.clear_color),
                     store: wgpu::StoreOp::Store,
                 },
+                depth_slice: None,
             };
             let depth_stencil_attachment = wgpu::RenderPassDepthStencilAttachment {
                 view: &self.depth_texture.view,
@@ -317,7 +318,7 @@ mod test {
         );
         scene_cubemap.run(&stage);
 
-        let slab = SlabAllocator::new(&ctx, wgpu::BufferUsages::empty());
+        let slab = SlabAllocator::new(&ctx, "cubemap-sampling-test", wgpu::BufferUsages::empty());
         let uv = slab.new_value(Vec3::ZERO);
         let buffer = slab.commit();
         let label = Some("cubemap-sampling-test");
@@ -469,6 +470,7 @@ mod test {
                             }),
                             store: wgpu::StoreOp::Store,
                         },
+                        depth_slice: None,
                     })],
                     depth_stencil_attachment: None,
                     timestamp_writes: None,
@@ -480,7 +482,8 @@ mod test {
             }
             let submission_index = ctx.get_queue().submit(Some(encoder.finish()));
             ctx.get_device()
-                .poll(wgpu::Maintain::wait_for(submission_index));
+                .poll(wgpu::PollType::WaitForSubmissionIndex(submission_index))
+                .unwrap();
 
             let img = Texture::read(&ctx, &render_target, 1, 1, 4, 1)
                 .into_image::<u8, image::Rgba<u8>>(ctx.get_device())
@@ -580,13 +583,8 @@ mod test {
 
         // add in some deterministic pseudo-randomn points
         {
-            let order = acorn_prng::Order::new(666);
-            let seed = acorn_prng::Seed::new(1_000_000);
-            let mut prng = acorn_prng::Acorn::new(order, seed);
-            let mut rf32 = move || {
-                let u = prng.generate_u32_between_range(0..=u32::MAX);
-                f32::from_bits(u)
-            };
+            let mut prng = crate::math::GpuRng::new(666);
+            let mut rf32 = move || prng.gen_f32(0.0, 1.0);
             let mut rxvec3 = { || Vec3::new(f32::MAX, rf32(), rf32()).normalize_or(Vec3::X) };
             // let mut rvec3 = || Vec3::new(rf32(), rf32(), rf32());
             uvs.extend((0..20).map(|_| rxvec3()));

@@ -17,8 +17,8 @@ use crate::{
     draw::DrawCalls,
     geometry::Geometry,
     light::{
-        AnalyticalLightBundle, Light, LightDetails, Lighting, LightingBindGroupLayoutEntries,
-        LightingError, ShadowMap,
+        AnalyticalLight, Light, LightDetails, LightTiling, LightTilingConfig, Lighting,
+        LightingBindGroupLayoutEntries, LightingError, ShadowMap,
     },
     material::Materials,
     pbr::debug::DebugChannel,
@@ -95,6 +95,30 @@ impl StageCommitResult {
         .map(|buffer| buffer.creation_time())
         .max()
         .unwrap_or_default()
+    }
+
+    pub fn should_invalidate(&self, previous_creation_time: usize) -> bool {
+        let mut should = false;
+        if self.geometry_buffer.is_new_this_commit() {
+            log::trace!("geometry buffer is new this frame");
+            should = true;
+        }
+        if self.materials_buffer.is_new_this_commit() {
+            log::trace!("materials buffer is new this frame");
+            should = true;
+        }
+        if self.lighting_buffer.is_new_this_commit() {
+            log::trace!("lighting buffer is new this frame");
+            should = true;
+        }
+        let current = self.latest_creation_time();
+        if current > previous_creation_time {
+            log::trace!(
+                "current latest buffer creation time {current} > previous {previous_creation_time}"
+            );
+            should = true;
+        }
+        should
     }
 }
 
@@ -200,12 +224,13 @@ impl StageRendering<'_> {
                 current_renderlet_bind_group_creation_time,
                 std::sync::atomic::Ordering::Relaxed,
             );
-        let should_invalidate_renderlet_bind_group = current_renderlet_bind_group_creation_time
-            > previous_renderlet_bind_group_creation_time;
+        let should_invalidate_renderlet_bind_group =
+            commit_result.should_invalidate(previous_renderlet_bind_group_creation_time);
         let renderlet_bind_group =
             self.stage
                 .renderlet_bind_group
                 .get(should_invalidate_renderlet_bind_group, || {
+                    log::trace!("recreating renderlet bind group");
                     let atlas_texture = self.stage.materials.atlas().get_texture();
                     let skybox = self.stage.skybox.read().unwrap();
                     let shadow_map = self.stage.lighting.shadow_map_atlas.get_texture();
@@ -291,7 +316,7 @@ impl<'a> RenderletBuilder<'a, ()> {
 }
 
 impl<'a, T: Bundle> RenderletBuilder<'a, T> {
-    fn suffix<S>(self, element: S) -> RenderletBuilder<'a, T::Suffixed<S>> {
+    pub fn suffix<S>(self, element: S) -> RenderletBuilder<'a, T::Suffixed<S>> {
         RenderletBuilder {
             data: self.data,
             resources: self.resources.suffix(element),
@@ -482,7 +507,7 @@ impl Stage {
         self.geometry.new_camera(camera)
     }
 
-    /// Set the given camera as the default one to use when rendering.
+    /// Use the given camera when rendering.
     pub fn use_camera(&self, camera: impl AsRef<Hybrid<Camera>>) {
         self.geometry.use_camera(camera);
     }
@@ -654,18 +679,13 @@ impl Stage {
     /// - [`DirectionalLightDescriptor`](crate::light::DirectionalLightDescriptor)
     /// - [`SpotLightDescriptor`](crate::light::SpotLightDescriptor)
     /// - [`PointLightDescriptor`](crate::light::PointLightDescriptor)
-    pub fn new_analytical_light<T>(
-        &self,
-        light_descriptor: T,
-        nested_transform: Option<NestedTransform>,
-    ) -> AnalyticalLightBundle
+    pub fn new_analytical_light<T>(&self, light_descriptor: T) -> AnalyticalLight
     where
         T: Clone + Copy + SlabItem + Send + Sync,
         Light: From<Id<T>>,
         LightDetails: From<Hybrid<T>>,
     {
-        self.lighting
-            .new_analytical_light(light_descriptor, nested_transform)
+        self.lighting.new_analytical_light(light_descriptor)
     }
 
     /// Add an [`AnalyticalLightBundle`] to the internal list of lights.
@@ -674,7 +694,7 @@ impl Stage {
     ///
     /// This can be used to add the light back to the scene after using
     /// [`Stage::remove_light`].
-    pub fn add_light(&self, bundle: &AnalyticalLightBundle) {
+    pub fn add_light(&self, bundle: &AnalyticalLight) {
         self.lighting.add_light(bundle)
     }
 
@@ -683,15 +703,27 @@ impl Stage {
     /// Use this to exclude a light from rendering, without dropping the light.
     ///
     /// After calling this function you can include the light again using [`Stage::add_light`].
-    pub fn remove_light(&self, bundle: &AnalyticalLightBundle) {
+    pub fn remove_light(&self, bundle: &AnalyticalLight) {
         self.lighting.remove_light(bundle);
     }
 
     /// Enable shadow mapping for the given [`AnalyticalLightBundle`], creating
     /// a new [`ShadowMap`].
+    ///
+    /// ## Tips for making a good shadow map
+    ///
+    /// 1. Make sure the map is big enough.
+    ///    Using a big map can fix some peter panning issues, even before
+    ///    messing with bias in the [`ShadowMapDescriptor`].
+    ///    The bigger the map, the cleaner the shadows will be. This can
+    ///    also solve PCF problems.
+    /// 2. Don't set PCF samples too high in the [`ShadowMapDescriptor`], as
+    ///    this can _cause_ peter panning.
+    /// 3. Ensure the **znear** and **zfar** parameters make sense, as the
+    ///    shadow map uses these to determine how much of the scene to cover.
     pub fn new_shadow_map(
         &self,
-        analytical_light_bundle: &AnalyticalLightBundle,
+        analytical_light_bundle: &AnalyticalLight,
         // Size of the shadow map
         size: UVec2,
         // Distance to the near plane of the shadow map's frustum.
@@ -706,6 +738,19 @@ impl Stage {
         Ok(self
             .lighting
             .new_shadow_map(analytical_light_bundle, size, z_near, z_far)?)
+    }
+
+    /// Enable light tiling, creating a new [`LightTiling`].
+    pub fn new_light_tiling(&self, config: LightTilingConfig) -> LightTiling {
+        let lighting = self.as_ref();
+        let multisampled = self.get_msaa_sample_count() > 1;
+        let depth_texture_size = self.get_depth_texture().size();
+        LightTiling::new(
+            lighting,
+            multisampled,
+            UVec2::new(depth_texture_size.width, depth_texture_size.height),
+            config,
+        )
     }
 }
 
@@ -923,13 +968,16 @@ impl Stage {
         let runtime = ctx.runtime();
         let device = &runtime.device;
         let resolution @ UVec2 { x: w, y: h } = ctx.get_size();
-        let atlas_size = *ctx.atlas_size.read().unwrap();
+        let stage_config = *ctx.stage_config.read().unwrap();
         let geometry = Geometry::new(
             ctx,
             resolution,
-            UVec2::new(atlas_size.width, atlas_size.height),
+            UVec2::new(
+                stage_config.atlas_size.width,
+                stage_config.atlas_size.height,
+            ),
         );
-        let materials = Materials::new(runtime, atlas_size);
+        let materials = Materials::new(runtime, stage_config.atlas_size);
         let multisample_count = 1;
         let hdr_texture = Arc::new(RwLock::new(Texture::create_hdr_texture(
             device,
@@ -953,13 +1001,13 @@ impl Stage {
             multisample_count,
         );
         let geometry_buffer = geometry.slab_allocator().commit();
-        let lighting = Lighting::new(&geometry);
+        let lighting = Lighting::new(stage_config.shadow_map_atlas_size, &geometry);
 
         Self {
             materials,
             draw_calls: Arc::new(RwLock::new(DrawCalls::new(
                 ctx,
-                true,
+                ctx.get_use_direct_draw(),
                 &geometry_buffer,
                 &depth_texture,
             ))),
@@ -1004,6 +1052,12 @@ impl Stage {
     pub fn with_background_color(self, color: impl Into<Vec4>) -> Self {
         self.set_background_color(color);
         self
+    }
+
+    /// Return the multisample count.
+    pub fn get_msaa_sample_count(&self) -> u32 {
+        self.msaa_sample_count
+            .load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// Set the MSAA multisample count.
@@ -1403,12 +1457,14 @@ impl Stage {
                 ops: mk_ops(wgpu::StoreOp::Discard),
                 view: msaa_view,
                 resolve_target: Some(&hdr_texture.view),
+                depth_slice: None,
             }
         } else {
             wgpu::RenderPassColorAttachment {
                 ops: mk_ops(wgpu::StoreOp::Store),
                 view: &hdr_texture.view,
                 resolve_target: None,
+                depth_slice: None,
             }
         };
 
@@ -1493,7 +1549,7 @@ impl Stage {
 /// Only available on CPU.
 #[derive(Clone)]
 pub struct NestedTransform<Ct: IsContainer = HybridContainer> {
-    global_transform: Ct::Container<Transform>,
+    pub(crate) global_transform: Ct::Container<Transform>,
     local_transform: Arc<RwLock<Transform>>,
     children: Arc<RwLock<Vec<NestedTransform>>>,
     parent: Arc<RwLock<Option<NestedTransform>>>,
@@ -1554,18 +1610,7 @@ impl NestedTransform {
         nested
     }
 
-    /// Moves the inner `Gpu<Transform>` of the global transform to a different
-    /// slab.
-    ///
-    /// This is used by the GLTF parser to move light's node transforms to the
-    /// light slab after they are created, while keeping any geometry's node
-    /// transforms untouched.
-    pub(crate) fn move_gpu_to_slab(&mut self, slab: &SlabAllocator<impl IsRuntime>) {
-        self.global_transform = slab.new_value(Transform::default());
-        self.mark_dirty();
-    }
-
-    pub fn get_notifier_index(&self) -> usize {
+    pub fn get_notifier_index(&self) -> SourceId {
         self.global_transform.notifier_index()
     }
 
@@ -1597,10 +1642,12 @@ impl NestedTransform {
         });
     }
 
+    /// Returns the local transform.
     pub fn get(&self) -> Transform {
         *self.local_transform.read().unwrap()
     }
 
+    /// Returns the global transform.
     pub fn get_global_transform(&self) -> Transform {
         let maybe_parent_guard = self.parent.read().unwrap();
         let transform = self.get();
@@ -1609,6 +1656,16 @@ impl NestedTransform {
             .map(|parent| parent.get_global_transform())
             .unwrap_or_default();
         Transform::from(Mat4::from(parent_transform) * Mat4::from(transform))
+    }
+
+    /// Get a vector containing all the transforms up to the root.
+    pub fn get_all_transforms(&self) -> Vec<Transform> {
+        let mut transforms = vec![];
+        if let Some(parent) = self.parent() {
+            transforms.extend(parent.get_all_transforms());
+        }
+        transforms.push(self.get());
+        transforms
     }
 
     pub fn global_transform_id(&self) -> Id<Transform> {
@@ -1687,7 +1744,7 @@ mod test {
             clippy::needless_borrows_for_generic_args,
             reason = "This is just riff-raff, as it doesn't compile without the borrow."
         )]
-        let slab = SlabAllocator::<CpuRuntime>::new(&CpuRuntime, ());
+        let slab = SlabAllocator::<CpuRuntime>::new(&CpuRuntime, "transform", ());
         // Setup a hierarchy of transforms
         log::info!("new");
         let root = NestedTransform::new(&slab);

@@ -1,6 +1,8 @@
 //! CPU side of the [super::geometry](geometry) module.
 //!
 
+use std::sync::{Arc, Mutex};
+
 use craballoc::{
     runtime::WgpuRuntime,
     slab::{SlabAllocator, SlabBuffer},
@@ -23,6 +25,11 @@ use crate::{
 pub struct Geometry {
     slab: SlabAllocator<WgpuRuntime>,
     descriptor: Hybrid<GeometryDescriptor>,
+    /// Holds the current camera just in case the user drops it,
+    /// this way we never lose a camera that is in use. Dropping
+    /// the camera would cause a blank screen, which is very confusing
+    /// =(
+    _camera: Arc<Mutex<Option<Hybrid<Camera>>>>,
 }
 
 impl AsRef<WgpuRuntime> for Geometry {
@@ -41,14 +48,17 @@ impl Geometry {
     // TODO: move atlas size into materials.
     pub fn new(runtime: impl AsRef<WgpuRuntime>, resolution: UVec2, atlas_size: UVec2) -> Self {
         let runtime = runtime.as_ref();
-        let slab =
-            SlabAllocator::new_with_label(runtime, wgpu::BufferUsages::empty(), Some("geometry"));
+        let slab = SlabAllocator::new(runtime, "geometry", wgpu::BufferUsages::empty());
         let descriptor = slab.new_value(GeometryDescriptor {
             atlas_size,
             resolution,
             ..Default::default()
         });
-        Self { slab, descriptor }
+        Self {
+            slab,
+            descriptor,
+            _camera: Default::default(),
+        }
     }
 
     pub fn runtime(&self) -> &WgpuRuntime {
@@ -74,18 +84,18 @@ impl Geometry {
     pub fn new_camera(&self, camera: Camera) -> Hybrid<Camera> {
         let c = self.slab.new_value(camera);
         if self.descriptor.get().camera_id.is_none() {
-            log::info!("automatically using camera: {:?}", c.id());
-            self.descriptor.modify(|cfg| {
-                cfg.camera_id = c.id();
-            });
+            self.use_camera(&c);
         }
         c
     }
 
     /// Set all geometry to use the given camera.
     pub fn use_camera(&self, camera: impl AsRef<Hybrid<Camera>>) {
-        self.descriptor
-            .modify(|cfg| cfg.camera_id = camera.as_ref().id());
+        let c = camera.as_ref();
+        log::info!("using camera: {:?}", c.id());
+        // Save a clone so we never lose the active camera, even if the user drops it
+        *self._camera.lock().unwrap() = Some(c.clone());
+        self.descriptor.modify(|cfg| cfg.camera_id = c.id());
     }
 
     pub fn new_transform(&self, transform: Transform) -> Hybrid<Transform> {

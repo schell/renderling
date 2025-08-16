@@ -776,7 +776,7 @@ mod test {
     #[test]
     fn gltf_simple_animation() {
         let ctx = Context::headless(16, 16);
-        let mut stage = ctx
+        let stage = ctx
             .new_stage()
             .with_bloom(false)
             .with_background_color(Vec3::ZERO.extend(1.0));
@@ -807,7 +807,7 @@ mod test {
             let frame = ctx.get_next_frame().unwrap();
             stage.render(&frame.view());
             let img = frame.read_image().unwrap();
-            img_diff::save(&format!("animation/triangle{i}.png"), img);
+            img_diff::save(format!("animation/triangle{i}.png"), img);
             frame.present();
         }
     }

@@ -169,11 +169,14 @@ pub mod pbr;
 pub mod sdf;
 pub mod skybox;
 pub mod stage;
+pub mod sync;
 #[cfg(cpu)]
 pub mod texture;
 pub mod tonemapping;
 pub mod transform;
 pub mod tuple;
+#[cfg(feature = "ui")]
+pub mod ui;
 
 #[cfg(cpu)]
 pub use context::*;
@@ -215,15 +218,36 @@ mod test {
 
     use glam::{Mat3, Mat4, Quat, UVec2, Vec2, Vec3, Vec4};
     use img_diff::DiffCfg;
+    use light::{AnalyticalLight, DirectionalLightDescriptor};
     use pretty_assertions::assert_eq;
+    use stage::Stage;
 
     #[ctor::ctor]
     fn init_logging() {
         let _ = env_logger::builder().is_test(true).try_init();
+        log::info!("logging is on");
     }
 
     pub fn workspace_dir() -> std::path::PathBuf {
         std::path::PathBuf::from(std::env!("CARGO_WORKSPACE_DIR"))
+    }
+
+    pub fn test_output_dir() -> std::path::PathBuf {
+        workspace_dir().join("test_output")
+    }
+
+    pub fn make_two_directional_light_setup(stage: &Stage) -> (AnalyticalLight, AnalyticalLight) {
+        let sunlight_a = stage.new_analytical_light(DirectionalLightDescriptor {
+            direction: Vec3::new(-0.8, -1.0, 0.5).normalize(),
+            color: Vec4::ONE,
+            intensity: 100.0,
+        });
+        let sunlight_b = stage.new_analytical_light(DirectionalLightDescriptor {
+            direction: Vec3::new(1.0, 1.0, -0.1).normalize(),
+            color: Vec4::ONE,
+            intensity: 10.0,
+        });
+        (sunlight_a, sunlight_b)
     }
 
     #[allow(unused, reason = "Used in debugging on macos")]
@@ -256,18 +280,12 @@ mod test {
 
             desc.set_destination(metal::MTLCaptureDestination::GpuTraceDocument);
             desc.set_output_url(path);
-            unsafe {
-                ctx.get_device()
-                    .as_hal::<wgpu_core::api::Metal, _, ()>(|maybe_metal_device| {
-                        if let Some(metal_device) = maybe_metal_device {
-                            desc.set_capture_device(
-                                metal_device.raw_device().try_lock().unwrap().as_ref(),
-                            );
-                        } else {
-                            panic!("not a capturable device")
-                        }
-                    })
-            };
+            let maybe_metal_device = unsafe { ctx.get_device().as_hal::<wgpu_core::api::Metal>() };
+            if let Some(metal_device) = maybe_metal_device {
+                desc.set_capture_device(metal_device.raw_device().try_lock().unwrap().as_ref());
+            } else {
+                panic!("not a capturable device")
+            }
             m.start_capture(&desc).unwrap();
             let t = f();
             m.stop_capture();
@@ -324,7 +342,7 @@ mod test {
         frame.present();
 
         let depth_texture = stage.get_depth_texture();
-        let depth_img = depth_texture.read_image().unwrap();
+        let depth_img = depth_texture.read_image().unwrap().unwrap();
         img_diff::assert_img_eq("cmy_triangle/depth.png", depth_img);
 
         let hdr_img = stage
@@ -776,37 +794,33 @@ mod test {
         let red = Vec3::X.extend(1.0);
         let green = Vec3::Y.extend(1.0);
         let blue = Vec3::Z.extend(1.0);
-        let dir_red = stage.new_analytical_light(
-            DirectionalLightDescriptor {
-                direction: Vec3::NEG_Y,
-                color: red,
-                intensity: 10.0,
-            },
-            None,
-        );
-        let _dir_green = stage.new_analytical_light(
-            DirectionalLightDescriptor {
-                direction: Vec3::NEG_X,
-                color: green,
-                intensity: 10.0,
-            },
-            None,
-        );
-        let _dir_blue = stage.new_analytical_light(
-            DirectionalLightDescriptor {
-                direction: Vec3::NEG_Z,
-                color: blue,
-                intensity: 10.0,
-            },
-            None,
-        );
+        let dir_red = stage.new_analytical_light(DirectionalLightDescriptor {
+            direction: Vec3::NEG_Y,
+            color: red,
+            intensity: 10.0,
+        });
+        let _dir_green = stage.new_analytical_light(DirectionalLightDescriptor {
+            direction: Vec3::NEG_X,
+            color: green,
+            intensity: 10.0,
+        });
+        let _dir_blue = stage.new_analytical_light(DirectionalLightDescriptor {
+            direction: Vec3::NEG_Z,
+            color: blue,
+            intensity: 10.0,
+        });
         assert_eq!(
             Light {
                 light_type: LightStyle::Directional,
-                index: dir_red.light_details.as_directional().unwrap().id().inner(),
+                index: dir_red
+                    .light_details()
+                    .as_directional()
+                    .unwrap()
+                    .id()
+                    .inner(),
                 ..Default::default()
             },
-            Light::from(dir_red.light_details.as_directional().unwrap().id())
+            Light::from(dir_red.light_details().as_directional().unwrap().id())
         );
 
         let _rez = stage
@@ -829,7 +843,7 @@ mod test {
         stage.render(&frame.view());
         let img = frame.read_image().unwrap();
         let depth_texture = stage.get_depth_texture();
-        let depth_img = depth_texture.read_image().unwrap();
+        let depth_img = depth_texture.read_image().unwrap().unwrap();
         img_diff::assert_img_eq("stage/cube_directional_depth.png", depth_img);
         img_diff::assert_img_eq("stage/cube_directional.png", img);
     }
@@ -991,7 +1005,7 @@ mod test {
         stage.render(&frame.view());
         let img = frame.read_image().unwrap();
         assert_eq!(size, UVec2::new(img.width(), img.height()));
-        img_diff::save("stage/resize_100.png", img);
+        img_diff::assert_img_eq("stage/resize_100.png", img);
         frame.present();
 
         let new_size = UVec2::new(200, 200);
@@ -1002,7 +1016,37 @@ mod test {
         stage.render(&frame.view());
         let img = frame.read_image().unwrap();
         assert_eq!(new_size, UVec2::new(img.width(), img.height()));
-        img_diff::save("stage/resize_200.png", img);
+        img_diff::assert_img_eq("stage/resize_200.png", img);
+        frame.present();
+    }
+
+    #[test]
+    fn can_direct_draw_cube() {
+        let size = UVec2::new(100, 100);
+        let ctx = Context::headless(size.x, size.y).with_use_direct_draw(true);
+        let stage = ctx.new_stage();
+
+        // create the CMY cube
+        let camera_position = Vec3::new(0.0, 12.0, 20.0);
+        let _camera = stage.new_camera(Camera::new(
+            Mat4::perspective_rh(std::f32::consts::PI / 4.0, 1.0, 0.1, 100.0),
+            Mat4::look_at_rh(camera_position, Vec3::ZERO, Vec3::Y),
+        ));
+        let _rez = stage
+            .builder()
+            .with_vertices(gpu_cube_vertices())
+            .with_transform(Transform {
+                scale: Vec3::new(6.0, 6.0, 6.0),
+                rotation: Quat::from_axis_angle(Vec3::Y, -std::f32::consts::FRAC_PI_4),
+                ..Default::default()
+            })
+            .build();
+
+        let frame = ctx.get_next_frame().unwrap();
+        stage.render(&frame.view());
+        let img = frame.read_image().unwrap();
+        assert_eq!(size, UVec2::new(img.width(), img.height()));
+        img_diff::assert_img_eq("stage/resize_100.png", img);
         frame.present();
     }
 }

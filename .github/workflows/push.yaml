@@ -10,14 +10,14 @@ on:
 env:
   # For setup-rust, see https://github.com/moonrepo/setup-rust/issues/22
   GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-  CARGO_GPU_COMMITSH: adab62777abc06eb0e93518f480c70f6e5d816fe
+  CARGO_GPU_COMMITSH: 39b238f25b7652ba79d153626e252321942cb558
 
 jobs:
   # Installs cargo deps and sets the cache directory for subsequent jobs
   install-cargo-gpu:
     strategy:
       matrix: 
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-24.04, macos-latest]
     runs-on: ${{ matrix.os }}
     defaults:
       run: 
@@ -117,7 +117,9 @@ jobs:
 
       - name: Install linux deps 
         if: runner.os == 'Linux'
-        run: sudo apt-get -y install mesa-vulkan-drivers libvulkan1 vulkan-tools vulkan-validationlayers
+        run: |
+            sudo apt-get -y update
+            sudo apt-get -y install mesa-vulkan-drivers libvulkan1 vulkan-tools vulkan-validationlayers
 
       - name: Install cargo-nextest
         run: cargo install --locked cargo-nextest || true

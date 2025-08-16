@@ -25,8 +25,8 @@ fn checkerboard_background_color(x: u32, y: u32) -> Vec3 {
 
 #[derive(Debug, Snafu)]
 enum ImgDiffError {
-    #[snafu(display("Images are different sizes"))]
-    ImageSize,
+    #[snafu(display("Images are different sizes. Expected {lhs:?}, saw {rhs:?}"))]
+    ImageSize { lhs: (u32, u32), rhs: (u32, u32) },
 }
 
 pub struct DiffCfg {
@@ -68,7 +68,7 @@ fn get_results(
 ) -> Result<Option<DiffResults>, ImgDiffError> {
     let lid @ (width, height) = left_image.dimensions();
     let rid = right_image.dimensions();
-    snafu::ensure!(lid == rid, ImageSizeSnafu);
+    snafu::ensure!(lid == rid, ImageSizeSnafu { lhs: lid, rhs: rid });
 
     let results = left_image
         .enumerate_pixels()
@@ -147,13 +147,17 @@ pub fn assert_eq_cfg(
         image_threshold,
         test_name,
     } = cfg;
+    let results = match get_results(&lhs, &rhs, pixel_threshold) {
+        Ok(maybe_diff) => maybe_diff,
+        Err(e) => panic!("Asserting {filename} failed: {e}"),
+    };
     if let Some(DiffResults {
         num_pixels: diffs,
         diff_image,
         mask_image,
         max_delta_length,
         avg_delta_length,
-    }) = get_results(&lhs, &rhs, pixel_threshold).unwrap()
+    }) = results
     {
         println!("{filename} has {diffs} pixel differences (threshold={pixel_threshold})");
         println!("  max_delta_length: {max_delta_length}");
@@ -234,6 +238,8 @@ pub fn normalize_gray_img(seen: &mut image::GrayImage) {
         });
         c.0 = comps;
     });
+    log::info!("normalize_gray_img-min: {min}");
+    log::info!("normalize_gray_img-max: {max}");
 }
 
 #[cfg(test)]

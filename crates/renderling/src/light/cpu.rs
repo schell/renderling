@@ -1,6 +1,5 @@
 //! CPU-only lighting and shadows.
-
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::{Arc, RwLock, RwLockReadGuard};
 
 use craballoc::{
     prelude::{Hybrid, SlabAllocator, WgpuRuntime},
@@ -14,6 +13,7 @@ use snafu::prelude::*;
 use crate::{
     atlas::{Atlas, AtlasBlitter, AtlasError},
     geometry::Geometry,
+    prelude::Transform,
     stage::NestedTransform,
 };
 
@@ -32,6 +32,9 @@ pub enum LightingError {
 
     #[snafu(display("AnalyticalLightBundle attached to this ShadowMap was dropped"))]
     DroppedAnalyticalLightBundle,
+
+    #[snafu(display("Driver poll error: {source}"))]
+    Poll { source: wgpu::PollError },
 }
 
 impl From<AtlasError> for LightingError {
@@ -122,15 +125,42 @@ impl LightDetails<WeakContainer> {
 ///
 /// Create an `AnalyticalLightBundle` with the `Lighting::new_analytical_light`,
 /// or from `Stage::new_analytical_light`.
-pub struct AnalyticalLightBundle<Ct: IsContainer = HybridContainer> {
-    pub light: Ct::Container<super::Light>,
-    pub light_details: LightDetails<Ct>,
-    pub transform: NestedTransform<Ct>,
+pub struct AnalyticalLight<Ct: IsContainer = HybridContainer> {
+    /// The generic light descriptor.
+    light: Ct::Container<super::Light>,
+    /// The specific light descriptor.
+    light_details: LightDetails<Ct>,
+    /// The light's global transform.
+    ///
+    /// This value lives in the lighting slab.
+    transform: Ct::Container<Transform>,
+    /// The light's nested transform.
+    ///
+    /// This value comes from the light's node, if it belongs to one.
+    /// This may have been set if this light originated from a GLTF file.
+    /// This value lives on the geometry slab and must be referenced here
+    /// to keep the two in sync, which is required to animate lights.
+    node_transform: Arc<RwLock<Option<NestedTransform<WeakContainer>>>>,
 }
 
-impl<Ct: IsContainer> Clone for AnalyticalLightBundle<Ct>
+impl core::fmt::Display for AnalyticalLight {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_fmt(format_args!(
+            "AnalyticalLightBundle type={} light-id={:?} node-nested-transform-global-id:{:?}",
+            self.light_details.style(),
+            self.light.id(),
+            self.node_transform.read().unwrap().as_ref().and_then(|wh| {
+                let h: NestedTransform = wh.upgrade()?;
+                Some(h.global_transform_id())
+            })
+        ))
+    }
+}
+
+impl<Ct: IsContainer> Clone for AnalyticalLight<Ct>
 where
     Ct::Container<Light>: Clone,
+    Ct::Container<Transform>: Clone,
     LightDetails<Ct>: Clone,
     NestedTransform<Ct>: Clone,
 {
@@ -139,31 +169,34 @@ where
             light: self.light.clone(),
             light_details: self.light_details.clone(),
             transform: self.transform.clone(),
+            node_transform: self.node_transform.clone(),
         }
     }
 }
 
-impl AnalyticalLightBundle<WeakContainer> {
-    pub(crate) fn from_hybrid(light: &AnalyticalLightBundle) -> Self {
-        AnalyticalLightBundle {
+impl AnalyticalLight<WeakContainer> {
+    pub(crate) fn from_hybrid(light: &AnalyticalLight) -> Self {
+        AnalyticalLight {
             light: WeakHybrid::from_hybrid(&light.light),
             light_details: LightDetails::from_hybrid(&light.light_details),
-            transform: NestedTransform::from_hybrid(&light.transform),
+            transform: WeakHybrid::from_hybrid(&light.transform),
+            node_transform: light.node_transform.clone(),
         }
     }
 
-    pub(crate) fn upgrade(&self) -> Option<AnalyticalLightBundle> {
-        Some(AnalyticalLightBundle {
+    pub(crate) fn upgrade(&self) -> Option<AnalyticalLight> {
+        Some(AnalyticalLight {
             light: self.light.upgrade()?,
             light_details: self.light_details.upgrade()?,
             transform: self.transform.upgrade()?,
+            node_transform: self.node_transform.clone(),
         })
     }
 }
 
-impl AnalyticalLightBundle {
-    pub fn weak(&self) -> AnalyticalLightBundle<WeakContainer> {
-        AnalyticalLightBundle::from_hybrid(self)
+impl AnalyticalLight {
+    pub fn weak(&self) -> AnalyticalLight<WeakContainer> {
+        AnalyticalLight::from_hybrid(self)
     }
 
     pub fn light_space_transforms(&self, z_near: f32, z_far: f32) -> Vec<Mat4> {
@@ -192,6 +225,62 @@ impl AnalyticalLightBundle {
     }
 }
 
+impl<Ct: IsContainer> AnalyticalLight<Ct> {
+    /// Link this light to a node's `NestedTransform`.
+    pub fn link_node_transform(&self, transform: &NestedTransform) {
+        *self.node_transform.write().unwrap() =
+            Some(NestedTransform::<WeakContainer>::from_hybrid(transform));
+    }
+
+    /// Get a reference to the generic light descriptor.
+    pub fn light(&self) -> &Ct::Container<super::Light> {
+        &self.light
+    }
+
+    /// Get a reference to the specific light descriptor.
+    pub fn light_details(&self) -> &LightDetails<Ct> {
+        &self.light_details
+    }
+
+    /// Get a reference to the light's global transform.
+    ///
+    /// This value lives in the lighting slab.
+    ///
+    /// ## Note
+    /// If a `NestedTransform` has been linked to this light by using [`Self::link_node_transform`],
+    /// the transform returned by this function may be overwritten at any point by the given
+    /// `NestedTransform`.
+    pub fn transform(&self) -> &Ct::Container<Transform> {
+        &self.transform
+    }
+
+    /// Get a reference to the light's linked global node transform.
+    ///
+    /// ## Note
+    /// The returned transform, if any, is the global transform of a linked `NestedTransform`.
+    /// To change this value, you should do so through the `NestedTransform`, which is likely
+    /// held in the
+    pub fn linked_node_transform(&self) -> Option<NestedTransform> {
+        let guard = self.node_transform.read().unwrap();
+        let weak = guard.as_ref()?;
+        weak.upgrade()
+    }
+}
+
+struct AnalyticalLightIterator<'a> {
+    inner: RwLockReadGuard<'a, Vec<AnalyticalLight<WeakContainer>>>,
+    index: usize,
+}
+
+impl Iterator for AnalyticalLightIterator<'_> {
+    type Item = AnalyticalLight;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let item = self.inner.get(self.index)?;
+        item.upgrade()
+    }
+}
+
 /// Manages lighting for an entire scene.
 #[derive(Clone)]
 pub struct Lighting {
@@ -200,8 +289,8 @@ pub struct Lighting {
     pub(crate) light_slab_buffer: Arc<RwLock<SlabBuffer<wgpu::Buffer>>>,
     pub(crate) geometry_slab_buffer: Arc<RwLock<SlabBuffer<wgpu::Buffer>>>,
     pub(crate) lighting_descriptor: Hybrid<LightingDescriptor>,
-    pub(crate) analytical_lights: Arc<Mutex<Vec<AnalyticalLightBundle<WeakContainer>>>>,
-    pub(crate) analytical_lights_array: Arc<Mutex<HybridArray<Id<super::Light>>>>,
+    pub(crate) analytical_lights: Arc<RwLock<Vec<AnalyticalLight<WeakContainer>>>>,
+    pub(crate) analytical_lights_array: Arc<RwLock<Option<HybridArray<Id<super::Light>>>>>,
     pub(crate) shadow_map_update_pipeline: Arc<wgpu::RenderPipeline>,
     pub(crate) shadow_map_update_bindgroup_layout: Arc<wgpu::BindGroupLayout>,
     pub(crate) shadow_map_update_blitter: AtlasBlitter,
@@ -248,8 +337,6 @@ impl LightingBindGroupLayoutEntries {
 }
 
 impl Lighting {
-    const LABEL: Option<&str> = Some("lighting");
-
     /// Create the atlas used to store all shadow maps.
     fn create_shadow_map_atlas(
         light_slab: &SlabAllocator<WgpuRuntime>,
@@ -267,23 +354,10 @@ impl Lighting {
         )
     }
 
-    fn create_bindgroup_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
-        let LightingBindGroupLayoutEntries {
-            light_slab,
-            shadow_map_image,
-            shadow_map_sampler,
-        } = LightingBindGroupLayoutEntries::new(0);
-        device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Self::LABEL,
-            entries: &[light_slab, shadow_map_image, shadow_map_sampler],
-        })
-    }
-
     /// Create a new [`Lighting`] manager.
-    pub fn new(geometry: &Geometry) -> Self {
+    pub fn new(atlas_size: wgpu::Extent3d, geometry: &Geometry) -> Self {
         let runtime = geometry.runtime();
-        let light_slab =
-            SlabAllocator::new_with_label(runtime, wgpu::BufferUsages::empty(), Some("light-slab"));
+        let light_slab = SlabAllocator::new(runtime, "light-slab", wgpu::BufferUsages::empty());
         let lighting_descriptor = light_slab.new_value(LightingDescriptor::default());
         let light_slab_buffer = light_slab.commit();
         let shadow_map_update_bindgroup_layout: Arc<_> =
@@ -292,17 +366,9 @@ impl Lighting {
             ShadowMap::create_update_pipeline(&runtime.device, &shadow_map_update_bindgroup_layout)
                 .into();
         Self {
-            shadow_map_atlas: Self::create_shadow_map_atlas(
-                &light_slab,
-                // TODO: make the shadow map atlas size configurable
-                wgpu::Extent3d {
-                    width: 1024,
-                    height: 1024,
-                    depth_or_array_layers: 4,
-                },
-            ),
+            shadow_map_atlas: Self::create_shadow_map_atlas(&light_slab, atlas_size),
             analytical_lights: Default::default(),
-            analytical_lights_array: Arc::new(Mutex::new(light_slab.new_array([]))),
+            analytical_lights_array: Default::default(),
             geometry_slab: geometry.slab_allocator().clone(),
             light_slab,
             light_slab_buffer: Arc::new(RwLock::new(light_slab_buffer)),
@@ -328,22 +394,19 @@ impl Lighting {
     ///
     /// This can be used to add the light back to the scene after using
     /// [`Lighting::remove_light`].
-    pub fn add_light(&self, bundle: &AnalyticalLightBundle) {
-        {
-            // Update the array of light ids
-            // UNWRAP: POP
-            let mut analytical_lights_array_guard = self.analytical_lights_array.lock().unwrap();
-            let mut analytical_light_ids_vec = analytical_lights_array_guard.get_vec();
-            analytical_light_ids_vec.push(bundle.light.id());
-            *analytical_lights_array_guard = self.light_slab.new_array(analytical_light_ids_vec);
-        }
-        {
-            // Update our list of weakly ref'd light bundles
-            self.analytical_lights
-                .lock()
-                .unwrap()
-                .push(AnalyticalLightBundle::<WeakContainer>::from_hybrid(bundle));
-        }
+    pub fn add_light(&self, bundle: &AnalyticalLight) {
+        log::trace!(
+            "adding light {:?} ({})",
+            bundle.light.id(),
+            bundle.light_details.style()
+        );
+        // Update our list of weakly ref'd light bundles
+        self.analytical_lights
+            .write()
+            .unwrap()
+            .push(AnalyticalLight::<WeakContainer>::from_hybrid(bundle));
+        // Invalidate the array of lights
+        *self.analytical_lights_array.write().unwrap() = None;
     }
 
     /// Remove an [`AnalyticalLightBundle`] from the internal list of lights.
@@ -351,16 +414,22 @@ impl Lighting {
     /// Use this to exclude a light from rendering, without dropping the light.
     ///
     /// After calling this function you can include the light again using [`Lighting::add_light`].
-    pub fn remove_light(&self, bundle: &AnalyticalLightBundle) {
-        let ids = {
-            let mut guard = self.analytical_lights.lock().unwrap();
-            guard.retain(|stored_light| stored_light.light.id() != bundle.light.id());
-            guard
-                .iter()
-                .map(|stored_light| stored_light.light.id())
-                .collect::<Vec<_>>()
-        };
-        *self.analytical_lights_array.lock().unwrap() = self.light_slab.new_array(ids);
+    pub fn remove_light(&self, bundle: &AnalyticalLight) {
+        log::trace!(
+            "removing light {:?} ({})",
+            bundle.light.id(),
+            bundle.light_details.style()
+        );
+        // Remove the light from the list of weakly ref'd light bundles
+        let mut guard = self.analytical_lights.write().unwrap();
+        guard.retain(|stored_light| stored_light.light.id() != bundle.light.id());
+        *self.analytical_lights_array.write().unwrap() = None;
+    }
+
+    /// Return an iterator over all lights.
+    pub fn lights(&self) -> impl Iterator<Item = AnalyticalLight> + '_ {
+        let inner = self.analytical_lights.read().unwrap();
+        AnalyticalLightIterator { inner, index: 0 }
     }
 
     /// Create a new [`AnalyticalLightBundle`] for the given descriptor `T`.
@@ -369,29 +438,31 @@ impl Lighting {
     /// - [`DirectionalLightDescriptor`]
     /// - [`SpotLightDescriptor`]
     /// - [`PointLightDescriptor`]
-    pub fn new_analytical_light<T>(
-        &self,
-        light_descriptor: T,
-        nested_transform: Option<NestedTransform>,
-    ) -> AnalyticalLightBundle
+    pub fn new_analytical_light<T>(&self, light_descriptor: T) -> AnalyticalLight
     where
         T: Clone + Copy + SlabItem + Send + Sync,
         Light: From<Id<T>>,
         LightDetails: From<Hybrid<T>>,
     {
-        let transform = nested_transform.unwrap_or_else(|| NestedTransform::new(&self.light_slab));
+        let transform = self.light_slab.new_value(Transform::default());
         let light_inner = self.light_slab.new_value(light_descriptor);
         let light = self.light_slab.new_value({
             let mut light = Light::from(light_inner.id());
-            light.transform_id = transform.global_transform_id();
+            light.transform_id = transform.id();
             light
         });
         let light_details = LightDetails::from(light_inner);
-        let bundle = AnalyticalLightBundle {
+        let bundle = AnalyticalLight {
             light,
             light_details,
             transform,
+            node_transform: Default::default(),
         };
+        log::trace!(
+            "created light {:?} ({})",
+            bundle.light.id(),
+            bundle.light_details.style()
+        );
 
         self.add_light(&bundle);
 
@@ -402,7 +473,7 @@ impl Lighting {
     /// a new [`ShadowMap`].
     pub fn new_shadow_map(
         &self,
-        analytical_light_bundle: &AnalyticalLightBundle,
+        analytical_light_bundle: &AnalyticalLight,
         // Size of the shadow map
         size: UVec2,
         // Distance to the near plane of the shadow map's frustum.
@@ -419,172 +490,84 @@ impl Lighting {
 
     #[must_use]
     pub fn commit(&self) -> SlabBuffer<wgpu::Buffer> {
-        {
-            // Drop any analytical lights that don't have external references,
-            // and update our lights array.
-            let mut guard = self.analytical_lights.lock().unwrap();
-            let mut changed = false;
-            guard.retain(|light_bundle| {
+        log::trace!("committing lights");
+        let lights_array = {
+            let mut lights_guard = self.analytical_lights.write().unwrap();
+            // Update the list of analytical lights to only reference lights that are still
+            // held somewhere in the outside program.
+            let mut analytical_lights_dropped = false;
+            lights_guard.retain_mut(|light_bundle| {
                 let has_refs = light_bundle.light.has_external_references();
-                changed = changed || !has_refs;
+                if has_refs {
+                    let mut node_transform_guard = light_bundle.node_transform.write().unwrap();
+                    // References to this light still exist, so we'll check to see
+                    // if we need to update the values of linked node transforms.
+                    if let Some(weak_node_transform) = node_transform_guard.take() {
+                        if let Some(node_transform) = weak_node_transform.upgrade() {
+                            // If we can upgrade the node transform, something is holding onto
+                            // it and may updated it in the future, so put it back.
+                            *node_transform_guard = Some(weak_node_transform);
+                            // Get on with checking the update.
+                            let node_global_transform_value = node_transform.get_global_transform();
+                            // UNWRAP: Safe because we checked that the light has external references
+                            let light_global_transform = light_bundle.transform.upgrade().unwrap();
+                            let global_transform_value = light_global_transform.get();
+                            if global_transform_value != node_global_transform_value {
+                                // TODO: write a test that animates a light using GLTF to ensure
+                                // that this is working correctly
+                                light_global_transform.set(node_global_transform_value);
+                            }
+                        }
+                    }
+                }
+                analytical_lights_dropped = analytical_lights_dropped || !has_refs;
                 has_refs
             });
-            if changed {
-                *self.analytical_lights_array.lock().unwrap() = self
-                    .light_slab
-                    .new_array(guard.iter().map(|bundle| bundle.light.id()));
+
+            // If lights have been dropped, invalidate the array
+            let mut array_guard = self.analytical_lights_array.write().unwrap();
+            if analytical_lights_dropped {
+                array_guard.take();
             }
-        }
-        self.lighting_descriptor.set(LightingDescriptor {
-            analytical_lights_array: self.analytical_lights_array.lock().unwrap().array(),
-            shadow_map_atlas_descriptor_id: self.shadow_map_atlas.descriptor_id(),
-            update_shadow_map_id: Id::NONE,
-            update_shadow_map_texture_index: 0,
-        });
-        self.light_slab.commit()
+
+            // If lights have been invalidated (either by some being dropped or if
+            // it was previously invalidated by `Lighting::add_light` or `Lighting::remove_light`),
+            // create a new array
+            array_guard
+                .get_or_insert_with(|| {
+                    log::trace!("  analytical lights array was invalidated");
+                    let new_lights = lights_guard
+                        .iter()
+                        .map(|bundle| bundle.light.id())
+                        .collect::<Vec<_>>();
+                    let array = self.light_slab.new_array(new_lights);
+                    log::trace!("  lights array is now: {:?}", array.array());
+                    array
+                })
+                .array()
+        };
+
+        self.lighting_descriptor.modify(
+            |LightingDescriptor {
+                 analytical_lights_array,
+                 shadow_map_atlas_descriptor_id,
+                 update_shadow_map_id,
+                 update_shadow_map_texture_index,
+                 // Don't change the tiling descriptor
+                 light_tiling_descriptor_id: _,
+             }| {
+                *analytical_lights_array = lights_array;
+                *shadow_map_atlas_descriptor_id = self.shadow_map_atlas.descriptor_id();
+                *update_shadow_map_id = Id::NONE;
+                *update_shadow_map_texture_index = 0;
+            },
+        );
+
+        let buffer = self.light_slab.commit();
+        log::trace!("  light slab creation time: {}", buffer.creation_time());
+        buffer
     }
 }
 
 #[cfg(test)]
-mod test {
-
-    use glam::Vec3;
-
-    use crate::{light::SpotLightCalculation, prelude::Transform};
-
-    use super::*;
-
-    #[test]
-    /// Ensures that a spot light can determine if a point lies inside or outside its cone
-    /// of emission.
-    fn spot_one_calc() {
-        let (doc, _, _) = gltf::import(
-            crate::test::workspace_dir()
-                .join("gltf")
-                .join("spot_one.glb"),
-        )
-        .unwrap();
-        let light = doc.lights().unwrap().next().unwrap();
-        let spot = if let gltf::khr_lights_punctual::Kind::Spot {
-            inner_cone_angle,
-            outer_cone_angle,
-        } = light.kind()
-        {
-            (inner_cone_angle, outer_cone_angle)
-        } else {
-            panic!("not a spot light");
-        };
-        log::info!("spot: {spot:#?}");
-
-        let light_node = doc.nodes().find(|node| node.light().is_some()).unwrap();
-        let parent_transform = Transform::from(light_node.transform());
-        log::info!("parent_transform: {parent_transform:#?}");
-
-        let spot_descriptor = SpotLightDescriptor {
-            position: Vec3::ZERO,
-            direction: Vec3::NEG_Z,
-            inner_cutoff: spot.0,
-            outer_cutoff: spot.1,
-            color: Vec3::from(light.color()).extend(1.0),
-            intensity: light.intensity(),
-        };
-
-        let specific_points = [
-            (Vec3::ZERO, true, true, Some(1.0)),
-            (Vec3::new(0.5, 0.0, 0.0), false, true, None),
-            (Vec3::new(0.5, 0.0, 0.5), false, false, None),
-            (Vec3::new(1.0, 0.0, 0.0), false, false, Some(0.0)),
-        ];
-        for (i, (point, inside_inner, inside_outer, maybe_contribution)) in
-            specific_points.into_iter().enumerate()
-        {
-            log::info!("{i} descriptor: {spot_descriptor:#?}");
-            let spot_calc =
-                SpotLightCalculation::new(spot_descriptor, parent_transform.into(), point);
-            log::info!("{i} spot_calc@{point}:\n{spot_calc:#?}");
-            assert_eq!(
-                (inside_inner, inside_outer),
-                (
-                    spot_calc.fragment_is_inside_inner_cone,
-                    spot_calc.fragment_is_inside_outer_cone
-                ),
-            );
-            if let Some(expected_contribution) = maybe_contribution {
-                assert_eq!(expected_contribution, spot_calc.contribution);
-            }
-        }
-    }
-
-    #[test]
-    /// Ensures that a spot light illuminates only the objects within its cone of
-    /// emission.
-    fn spot_one_frame() {
-        let m = 32.0;
-        let (w, h) = (16.0f32 * m, 9.0 * m);
-        let ctx = crate::Context::headless(w as u32, h as u32);
-        let mut stage = ctx.new_stage().with_msaa_sample_count(4);
-        let doc = stage
-            .load_gltf_document_from_path(
-                crate::test::workspace_dir()
-                    .join("gltf")
-                    .join("spot_one.glb"),
-            )
-            .unwrap();
-        let camera = doc.cameras.first().unwrap();
-        camera
-            .as_ref()
-            .modify(|cam| cam.set_projection(crate::camera::perspective(w, h)));
-        stage.use_camera(camera);
-
-        let frame = ctx.get_next_frame().unwrap();
-        stage.render(&frame.view());
-        let img = frame.read_image().unwrap();
-        img_diff::assert_img_eq("lights/spot_lights/one.png", img);
-        frame.present();
-    }
-
-    #[test]
-    /// Test the spot lights.
-    ///
-    /// This should render a cube with two spot lights illuminating a spot on two
-    /// of its sides.
-    fn spot_lights() {
-        let w = 800.0;
-        let h = 800.0;
-        let ctx = crate::Context::headless(w as u32, h as u32);
-        let mut stage = ctx
-            .new_stage()
-            .with_lighting(true)
-            .with_msaa_sample_count(4);
-
-        let doc = stage
-            .load_gltf_document_from_path(
-                crate::test::workspace_dir()
-                    .join("gltf")
-                    .join("spot_lights.glb"),
-            )
-            .unwrap();
-        let camera = doc.cameras.first().unwrap();
-        // TODO: investigate using the camera's aspect for any frame size.
-        // A `TextureView` of the frame could be created that renders to the frame
-        // within the camera's expected aspect ratio.
-        //
-        // We'd probably need to constrain rendering to one camera, though.
-        camera
-            .as_ref()
-            .modify(|cam| cam.set_projection(crate::camera::perspective(w, h)));
-        stage.use_camera(camera);
-
-        let down_light = doc.lights.first().unwrap();
-        log::info!(
-            "down_light: {:#?}",
-            down_light.light_details.as_spot().unwrap().get()
-        );
-
-        let frame = ctx.get_next_frame().unwrap();
-        stage.render(&frame.view());
-        let img = frame.read_image().unwrap();
-        img_diff::assert_img_eq("lights/spot_lights/frame.png", img);
-        frame.present();
-    }
-}
+mod test;

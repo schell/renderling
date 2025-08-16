@@ -81,7 +81,7 @@ impl Skin {
 /// For more info on morph targets, see
 /// <https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html#morph-targets>
 #[derive(Clone, Copy, Default, PartialEq, SlabItem)]
-#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
+#[cfg_attr(cpu, derive(Debug))]
 pub struct MorphTarget {
     pub position: Vec3,
     pub normal: Vec3,
@@ -182,6 +182,19 @@ impl Vertex {
         (s - s.dot(n) * n)
             .alt_norm_or_zero()
             .extend(n_cross_t_dot_s_sign)
+    }
+
+    #[cfg(cpu)]
+    /// A triangle list mesh of points.
+    pub fn cube_mesh() -> [Vertex; 36] {
+        let mut mesh = [Vertex::default(); 36];
+        let unit_cube = crate::math::unit_cube();
+        debug_assert_eq!(36, unit_cube.len());
+        for (i, (position, normal)) in unit_cube.into_iter().enumerate() {
+            mesh[i].position = position;
+            mesh[i].normal = normal;
+        }
+        mesh
     }
 }
 
@@ -403,8 +416,12 @@ pub fn renderlet_fragment(
     #[spirv(storage_buffer, descriptor_set = 0, binding = 10)] light_slab: &[u32],
     #[spirv(descriptor_set = 0, binding = 11)] shadow_map: &Image!(2D, type=f32, sampled, arrayed),
     #[spirv(descriptor_set = 0, binding = 12)] shadow_map_sampler: &Sampler,
+    #[cfg(feature = "debug-slab")]
+    #[spirv(storage_buffer, descriptor_set = 0, binding = 13)]
+    debug_slab: &mut [u32],
 
     #[spirv(flat)] renderlet_id: Id<Renderlet>,
+    #[spirv(frag_coord)] frag_coord: Vec4,
     in_color: Vec4,
     in_uv0: Vec2,
     in_uv1: Vec2,
@@ -430,6 +447,7 @@ pub fn renderlet_fragment(
         material_slab,
         light_slab,
         renderlet_id,
+        frag_coord,
         in_color,
         in_uv0,
         in_uv1,
@@ -458,132 +476,6 @@ pub fn test_i8_i16_extraction(
     if value > 0 {
         slab[index] = value as u32;
     }
-}
-
-#[cfg(feature = "test_spirv_atomics")]
-#[spirv(compute(threads(32)))]
-pub fn test_atomic_i_increment(
-    #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] global_index: &mut u32,
-    #[spirv(storage_buffer, descriptor_set = 0, binding = 1)] times: &u32,
-) {
-    let mut i = 0u32;
-    loop {
-        if i >= *times {
-            break;
-        }
-        let _ = unsafe {
-            spirv_std::arch::atomic_i_increment::<
-                u32,
-                { spirv_std::memory::Scope::Workgroup as u32 },
-                { spirv_std::memory::Semantics::NONE.bits() },
-            >(global_index)
-        };
-        i += 1;
-    }
-}
-
-#[cfg(feature = "test_spirv_atomics")]
-#[spirv(compute(threads(32)))]
-pub fn test_atomic_load_and_store(
-    #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] global_index: &mut u32,
-    #[spirv(storage_buffer, descriptor_set = 0, binding = 1)] times: &u32,
-) {
-    for _ in 0..*times {
-        let loaded = unsafe {
-            spirv_std::arch::atomic_load::<
-                u32,
-                { spirv_std::memory::Scope::Workgroup as u32 },
-                { spirv_std::memory::Semantics::NONE.bits() },
-            >(global_index)
-        };
-        unsafe {
-            spirv_std::arch::atomic_store::<
-                u32,
-                { spirv_std::memory::Scope::Workgroup as u32 },
-                { spirv_std::memory::Semantics::NONE.bits() },
-            >(global_index, loaded + 2)
-        };
-    }
-}
-
-#[cfg(feature = "test_spirv_atomics")]
-#[spirv(compute(threads(32)))]
-pub fn test_atomic_exchange(
-    #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] global_index: &mut u32,
-    #[spirv(storage_buffer, descriptor_set = 0, binding = 1)] times: &u32,
-) {
-    let mut n = 0u32;
-    for _ in 0..*times {
-        n += unsafe {
-            spirv_std::arch::atomic_exchange::<
-                u32,
-                { spirv_std::memory::Scope::Workgroup as u32 },
-                { spirv_std::memory::Semantics::NONE.bits() },
-            >(global_index, n)
-        };
-    }
-}
-
-#[cfg(feature = "test_spirv_atomics")]
-#[spirv(compute(threads(32)))]
-pub fn test_atomic_compare_exchange(
-    #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] global_index: &mut u32,
-    #[spirv(storage_buffer, descriptor_set = 0, binding = 1)] times: &u32,
-) {
-    for n in 0..*times {
-        unsafe {
-            spirv_std::arch::atomic_compare_exchange::<
-                u32,
-                { spirv_std::memory::Scope::Workgroup as u32 },
-                { spirv_std::memory::Semantics::WORKGROUP_MEMORY.bits() },
-                { spirv_std::memory::Semantics::WORKGROUP_MEMORY.bits() },
-            >(global_index, n, 3)
-        };
-    }
-}
-
-#[cfg(feature = "test_spirv_atomics")]
-#[spirv(compute(threads(32)))]
-pub fn test_atomic_i_decrement(
-    #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] global_index: &mut u32,
-    #[spirv(storage_buffer, descriptor_set = 0, binding = 1)] output: &mut [u32],
-) {
-    loop {
-        let i = unsafe {
-            spirv_std::arch::atomic_i_decrement::<
-                u32,
-                { spirv_std::memory::Scope::Workgroup as u32 },
-                { spirv_std::memory::Semantics::NONE.bits() },
-            >(global_index)
-        };
-        output[i as usize] = i;
-        if i == 0 {
-            break;
-        }
-    }
-}
-
-#[cfg(feature = "test_spirv_atomics")]
-#[spirv(compute(threads(32)))]
-pub fn test_atomic_i_add_sub(
-    #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] global_index: &mut u32,
-    #[spirv(storage_buffer, descriptor_set = 0, binding = 1)] output: &mut [u32],
-) {
-    let i = unsafe {
-        spirv_std::arch::atomic_i_add::<
-            u32,
-            { spirv_std::memory::Scope::Workgroup as u32 },
-            { spirv_std::memory::Semantics::NONE.bits() },
-        >(global_index, 2)
-    };
-
-    output[i as usize] = unsafe {
-        spirv_std::arch::atomic_i_sub::<
-            u32,
-            { spirv_std::memory::Scope::Workgroup as u32 },
-            { spirv_std::memory::Semantics::NONE.bits() },
-        >(global_index, i)
-    };
 }
 
 #[cfg(test)]
@@ -629,7 +521,7 @@ mod test {
         }
 
         #[expect(clippy::needless_borrows_for_generic_args, reason = "riffraff")]
-        let slab = SlabAllocator::<CpuRuntime>::new(&CpuRuntime, ());
+        let slab = SlabAllocator::<CpuRuntime>::new(&CpuRuntime, "transform", ());
         let a = NestedTransform::new(&slab);
         a.set(Transform {
             translation: Vec3::splat(100.0),
