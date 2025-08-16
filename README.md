@@ -89,7 +89,7 @@ By default it uses a single uber-shader for rendering.
 - [x] Built-in support for common lighting/material workflows
   - [x] physically based shading
   - [x] unlit
-- [ ] light tiling/light culling (in progress)
+- [x] forward+ style light tiling/light culling
 - [x] shadow mapping
   - [ ] shadow mapping from image-based lighting
 - [ ] ssao
