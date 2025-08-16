@@ -599,6 +599,11 @@ fn tiling_e2e_sanity_with(
     minimum_illuminance: f32,
     save_images: bool,
 ) {
+    println!(
+        "tiling e2e with tile_size:{tile_size}, \
+        max_lights_per_tile:{max_lights_per_tile}, \
+        minimum_illuminance: {minimum_illuminance}"
+    );
     let size = size();
     let ctx = crate::Context::headless(size.x, size.y);
     let stage = ctx
@@ -616,8 +621,6 @@ fn tiling_e2e_sanity_with(
         .unwrap();
 
     let camera = stage.new_camera(make_camera());
-    let camera_value = camera.get();
-    log::info!("camera: {camera_value:#?}");
     stage.use_camera(camera);
 
     let _ = stage.lighting.commit();
@@ -656,7 +659,6 @@ fn tiling_e2e_sanity_with(
             }
         }
     }
-    log::info!("have {} bounding boxes", bounding_boxes.len());
 
     let mut prng = crate::math::GpuRng::new(666);
     let mut lights: Vec<GeneratedLight> = vec![];
@@ -664,6 +666,7 @@ fn tiling_e2e_sanity_with(
     for _ in 0..MAX_LIGHTS {
         lights.push(gen_light(&stage, &mut prng, &bounding_boxes));
     }
+    println!("created lights");
 
     // Remove the light meshes
     for generated_light in lights.iter() {
