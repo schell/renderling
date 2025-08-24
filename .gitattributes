@@ -4,3 +4,4 @@
 *.yaml text
 *.spv binary
 *.wgsl linguist-generated=true binary
+* text=auto eol=lf
