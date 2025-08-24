@@ -251,7 +251,7 @@ impl Tween {
             .iter()
             .enumerate()
             .filter(|(_, keyframe)| keyframe.0 <= time)
-            .last())
+            .next_back())
     }
 
     fn get_next_keyframe(

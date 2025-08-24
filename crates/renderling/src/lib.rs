@@ -232,6 +232,7 @@ mod test {
         std::path::PathBuf::from(std::env!("CARGO_WORKSPACE_DIR"))
     }
 
+    #[allow(dead_code)]
     pub fn test_output_dir() -> std::path::PathBuf {
         workspace_dir().join("test_output")
     }

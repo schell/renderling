@@ -111,13 +111,14 @@ impl AppUi {
     }
 }
 
-struct DefaultModel {
+#[allow(dead_code)]
+pub struct DefaultModel {
     vertices: GpuArray<Vertex>,
     renderlet: Hybrid<Renderlet>,
 }
 
 pub enum Model {
-    Gltf(GltfDocument),
+    Gltf(Box<GltfDocument>),
     Default(DefaultModel),
     None,
 }
@@ -128,7 +129,7 @@ pub struct App {
     loads: Arc<Mutex<HashMap<std::path::PathBuf, Vec<u8>>>>,
     pub stage: Stage,
     camera: Hybrid<Camera>,
-    lighting: AnalyticalLight,
+    _lighting: AnalyticalLight,
     model: Model,
     animators: Option<Vec<Animator>>,
     animations_conflict: bool,
@@ -175,7 +176,7 @@ impl App {
             },
             stage,
             camera,
-            lighting: sunlight_bundle,
+            _lighting: sunlight_bundle,
             model: Model::None,
             animators: None,
             animations_conflict: false,
@@ -381,7 +382,7 @@ impl App {
         //     }
         // }
 
-        self.model = Model::Gltf(doc);
+        self.model = Model::Gltf(Box::new(doc));
     }
 
     pub fn tick_loads(&mut self) {

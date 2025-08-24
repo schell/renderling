@@ -2,10 +2,7 @@
 use crabslab::SlabItem;
 use glam::{Mat4, Vec2, Vec3, Vec4};
 
-use crate::{
-    bvol::{dist_bpp, Frustum},
-    math::IsVector,
-};
+use crate::{bvol::Frustum, math::IsVector};
 
 /// A camera used for transforming the stage during rendering.
 ///

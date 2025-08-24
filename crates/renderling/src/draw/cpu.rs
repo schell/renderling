@@ -127,24 +127,21 @@ impl From<Id<Renderlet>> for DrawIndirectArgs {
     }
 }
 
-pub(crate) enum DrawingStrategy {
-    /// The standard drawing method that includes compute culling.
-    Indirect(IndirectDraws),
-    /// Fallback drawing method for web targets.
-    ///
-    /// Does not include compute culling, as the MULTI_DRAW_INDIRECT
-    /// `wgpu` feature is required and not available on web.
-    Direct,
+/// The drawing method used to send geometry to the GPU.
+///
+/// This is one of either:
+/// * Indirect drawing - standard drawing method that includes compute culling.
+/// * Direct drawing - fallback drawing method for web targets.
+///   Does not include compute culling, as the MULTI_DRAW_INDIRECT
+///   `wgpu` feature is required and not available on web.
+pub(crate) struct DrawingStrategy {
+    indirect: Option<IndirectDraws>,
 }
 
 impl DrawingStrategy {
     #[cfg(test)]
     pub fn as_indirect(&self) -> Option<&IndirectDraws> {
-        if let DrawingStrategy::Indirect(i) = self {
-            Some(i)
-        } else {
-            None
-        }
+        self.indirect.as_ref()
     }
 }
 
@@ -183,25 +180,24 @@ impl DrawCalls {
         let can_use_compute_culling = use_compute_culling && can_use_multi_draw_indirect;
         Self {
             internal_renderlets: vec![],
-            drawing_strategy: {
-                if can_use_compute_culling {
+            drawing_strategy: DrawingStrategy {
+                indirect: if can_use_compute_culling {
                     log::debug!("Using indirect drawing method and compute culling");
-                    DrawingStrategy::Indirect(IndirectDraws::new(
-                        ctx,
-                        stage_slab_buffer,
-                        depth_texture,
-                    ))
+                    Some(IndirectDraws::new(ctx, stage_slab_buffer, depth_texture))
                 } else {
                     log::debug!("Using direct drawing method");
-                    DrawingStrategy::Direct
-                }
+                    None
+                },
             },
         }
     }
 
     /// Returns whether compute culling is available.
     pub fn get_compute_culling_available(&self) -> bool {
-        matches!(&self.drawing_strategy, DrawingStrategy::Indirect(_))
+        matches!(
+            &self.drawing_strategy,
+            DrawingStrategy { indirect: Some(_) }
+        )
     }
 
     /// Add a renderlet to the drawing queue.
@@ -209,7 +205,7 @@ impl DrawCalls {
     /// Returns the number of draw calls in the queue.
     pub fn add_renderlet(&mut self, renderlet: &Hybrid<Renderlet>) -> usize {
         log::trace!("adding renderlet {:?}", renderlet.id());
-        if let DrawingStrategy::Indirect(indirect) = &mut self.drawing_strategy {
+        if let Some(indirect) = &mut self.drawing_strategy.indirect {
             indirect.invalidate();
         }
         self.internal_renderlets
@@ -225,7 +221,7 @@ impl DrawCalls {
         let id = renderlet.id();
         self.internal_renderlets.retain(|ir| ir.inner.id() != id);
 
-        if let DrawingStrategy::Indirect(indirect) = &mut self.drawing_strategy {
+        if let Some(indirect) = &mut self.drawing_strategy.indirect {
             indirect.invalidate();
         }
 
@@ -253,7 +249,7 @@ impl DrawCalls {
         }
         self.internal_renderlets.extend(m.into_values());
         self.internal_renderlets.extend(ordered);
-        if let DrawingStrategy::Indirect(indirect) = &mut self.drawing_strategy {
+        if let Some(indirect) = &mut self.drawing_strategy.indirect {
             indirect.invalidate();
         }
     }
@@ -278,7 +274,7 @@ impl DrawCalls {
             }
         });
 
-        if let DrawingStrategy::Indirect(indirect) = &mut self.drawing_strategy {
+        if let Some(indirect) = &mut self.drawing_strategy.indirect {
             indirect.sync_with_internal_renderlets(&self.internal_renderlets, redraw_args);
         }
     }
@@ -309,7 +305,7 @@ impl DrawCalls {
             //
             // We can do this without multidraw by running GPU culling and then
             // copying `indirect_buffer` back to the CPU.
-            if let DrawingStrategy::Indirect(indirect) = &mut self.drawing_strategy {
+            if let Some(indirect) = &mut self.drawing_strategy.indirect {
                 let maybe_buffer = indirect.slab.get_buffer();
                 if let Some(indirect_buffer) = maybe_buffer {
                     log::trace!("performing culling on {num_draw_calls} renderlets");
@@ -353,21 +349,18 @@ impl DrawCalls {
     pub fn draw(&self, render_pass: &mut wgpu::RenderPass) {
         let num_draw_calls = self.draw_count();
         if num_draw_calls > 0 {
-            match &self.drawing_strategy {
-                DrawingStrategy::Indirect(indirect) => {
-                    log::trace!("drawing {num_draw_calls} renderlets using indirect");
-                    if let Some(indirect_buffer) = indirect.slab.get_buffer() {
-                        render_pass.multi_draw_indirect(&indirect_buffer, 0, num_draw_calls as u32);
-                    } else {
-                        log::warn!(
-                            "could not get the indirect buffer - was `DrawCall::upkeep` called?"
-                        );
-                    }
+            if let Some(indirect) = &self.drawing_strategy.indirect {
+                log::trace!("drawing {num_draw_calls} renderlets using indirect");
+                if let Some(indirect_buffer) = indirect.slab.get_buffer() {
+                    render_pass.multi_draw_indirect(&indirect_buffer, 0, num_draw_calls as u32);
+                } else {
+                    log::warn!(
+                        "could not get the indirect buffer - was `DrawCall::upkeep` called?"
+                    );
                 }
-                DrawingStrategy::Direct => {
-                    log::trace!("drawing {num_draw_calls} renderlets using direct");
-                    self.draw_direct(render_pass);
-                }
+            } else {
+                log::trace!("drawing {num_draw_calls} renderlets using direct");
+                self.draw_direct(render_pass);
             }
         }
     }

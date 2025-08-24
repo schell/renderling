@@ -990,16 +990,6 @@ impl LightTilingInvocation {
         (tile_pos.y * tile_dimensions.x + tile_pos.x) as usize
     }
 
-    /// The tile's normalized min and max.
-    fn tile_ndc_min_max(&self) -> (Vec2, Vec2) {
-        let grid_size = self.tile_grid_size();
-        let min_coord = self.tile_coord().as_vec2();
-        let max_coord = min_coord + 1.0;
-        let min = crate::math::convert_pixel_to_ndc(min_coord, grid_size);
-        let max = crate::math::convert_pixel_to_ndc(max_coord, grid_size);
-        (min, max)
-    }
-
     /// The tile's normalized midpoint.
     fn tile_ndc_midpoint(&self) -> Vec2 {
         let min_coord = self.tile_coord().as_vec2();
@@ -1413,21 +1403,5 @@ mod test {
         let frag_coord = Vec2::new(1917.0, 979.0);
         let tile_coord = tiling_desc.tile_coord_for_fragment(frag_coord);
         assert_eq!(UVec2::new(119, 61), tile_coord);
-    }
-
-    #[test]
-    fn light_tiling_invocation_tile_aabb() {
-        let invocation = LightTilingInvocation {
-            global_id: UVec3::new(446, 1342, 1),
-            descriptor: LightTilingDescriptor {
-                depth_texture_size: UVec2::new(2560, 2304),
-                ..Default::default()
-            },
-        };
-        let (min, max) = invocation.tile_ndc_min_max();
-        println!("min: {min}");
-        println!("max: {max}");
-        assert!(min.x < 0.0, "min: {min}");
-        assert!(min.y < 0.0, "min: {min}");
     }
 }

@@ -1013,7 +1013,7 @@ impl GltfDocument {
 
                 let color = Vec3::from(gltf_light.color()).extend(1.0);
                 let intensity = gltf_light.intensity();
-                let mut light_bundle = match gltf_light.kind() {
+                let light_bundle = match gltf_light.kind() {
                     gltf::khr_lights_punctual::Kind::Directional => {
                         stage.new_analytical_light(DirectionalLightDescriptor {
                             direction: Vec3::NEG_Z,

@@ -748,7 +748,7 @@ mod test {
         let width = 256;
         let height = 128;
         let ctx = Context::headless(width, height);
-        let mut stage = ctx.new_stage().with_bloom(false);
+        let stage = ctx.new_stage().with_bloom(false);
         // .with_frustum_culling(false)
         // .with_occlusion_culling(false);
 

@@ -6,8 +6,7 @@
 //! run on the CPU.
 //!
 //! Lastly, it provides some constant geometry used in many shaders.
-use core::ops::{IndexMut, Mul};
-use crabslab::{Id, Slab};
+use core::ops::Mul;
 use spirv_std::{
     image::{sample_with, Cubemap, Image2d, Image2dArray, ImageWithMethods},
     Image, Sampler,
@@ -363,7 +362,7 @@ impl IsVector for glam::Vec3 {
 }
 
 /// Quantize an f32
-
+///
 /// Determine the distance from a point to a line segment.
 pub fn distance_to_line(p: Vec3, a: Vec3, b: Vec3) -> f32 {
     let ab_distance = a.distance(b);
