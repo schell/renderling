@@ -222,9 +222,6 @@ impl App {
         let mut min = Vec3::splat(f32::INFINITY);
         let mut max = Vec3::splat(f32::NEG_INFINITY);
 
-        self.camera_controller.reset(Aabb::new(min, max));
-        self.camera_controller
-            .update_camera(self.stage.get_size(), &self.camera);
         self.last_frame_instant = now();
         let (vertices, renderlet) = self
             .stage
@@ -248,6 +245,9 @@ impl App {
             vertices: vertices.into_gpu_only(),
             renderlet,
         });
+        self.camera_controller.reset(Aabb::new(min, max));
+        self.camera_controller
+            .update_camera(self.stage.get_size(), &self.camera);
     }
 
     fn load_gltf_model(&mut self, path: impl AsRef<std::path::Path>, bytes: &[u8]) {

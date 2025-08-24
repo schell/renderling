@@ -75,7 +75,12 @@ impl CameraController for TurntableCameraController {
         let camera_position = Self::camera_position(self.radius, self.phi, self.theta);
         let znear = self.depth / 1000.0;
         let camera = Camera::new(
-            Mat4::perspective_infinite_rh(std::f32::consts::FRAC_PI_4, w as f32 / h as f32, znear),
+            Mat4::perspective_rh(
+                std::f32::consts::FRAC_PI_4,
+                w as f32 / h as f32,
+                znear,
+                self.depth,
+            ),
             Mat4::look_at_rh(camera_position, self.center, Vec3::Y),
         );
         debug_assert!(
