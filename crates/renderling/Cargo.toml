@@ -1,6 +1,6 @@
 [package]
 name = "renderling"
-version = "0.5.0"
+version = "0.6.0"
 edition = "2021"
 description = "User-friendly real-time rendering. 🍖"
 repository = "https://github.com/schell/renderling"
