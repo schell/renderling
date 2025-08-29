@@ -6,12 +6,13 @@ use std::{
 };
 
 use craballoc::prelude::{GpuArray, Hybrid};
+use glam::{Mat4, UVec2, Vec2, Vec3, Vec4};
 use renderling::{
     atlas::AtlasImage,
     bvol::{Aabb, BoundingSphere},
     camera::Camera,
     light::{AnalyticalLight, DirectionalLightDescriptor},
-    math::{Mat4, UVec2, Vec2, Vec3, Vec4},
+    prelude::*,
     skybox::Skybox,
     stage::{Animator, GltfDocument, Renderlet, Stage, Vertex},
     ui::{FontArc, Section, Text, Ui, UiPath, UiText},
@@ -201,10 +202,12 @@ impl App {
     }
 
     pub fn render(&self, ctx: &Context) {
+        log::info!("render");
         let frame = ctx.get_next_frame().unwrap();
         self.stage.render(&frame.view());
         self.ui.ui.render(&frame.view());
         frame.present();
+        log::info!("render done");
     }
 
     pub fn update_view(&mut self) {
@@ -212,7 +215,8 @@ impl App {
             .update_camera(self.stage.get_size(), &self.camera);
     }
 
-    fn load_hdr_skybox(&mut self, bytes: Vec<u8>) {
+    pub fn load_hdr_skybox(&mut self, bytes: Vec<u8>) {
+        log::info!("loading skybox");
         let img = AtlasImage::from_hdr_bytes(&bytes).unwrap();
         let skybox = Skybox::new(self.stage.runtime(), img);
         self.skybox_image_bytes = Some(bytes);
@@ -220,6 +224,7 @@ impl App {
     }
 
     pub fn load_default_model(&mut self) {
+        log::info!("loading default model");
         let mut min = Vec3::splat(f32::INFINITY);
         let mut max = Vec3::splat(f32::NEG_INFINITY);
 

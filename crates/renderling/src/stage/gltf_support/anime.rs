@@ -771,11 +771,12 @@ impl Animator {
 
 #[cfg(test)]
 mod test {
-    use crate::{camera::Camera, math::Vec3, stage::Animator, Context};
+    use crate::{camera::Camera, stage::Animator, test::BlockOnFuture, Context};
+    use glam::Vec3;
 
     #[test]
     fn gltf_simple_animation() {
-        let ctx = Context::headless(16, 16);
+        let ctx = Context::headless(16, 16).block();
         let stage = ctx
             .new_stage()
             .with_bloom(false)
@@ -797,7 +798,7 @@ mod test {
 
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
-        let img = frame.read_image().unwrap();
+        let img = frame.read_image().block().unwrap();
         img_diff::save("animation/triangle.png", img);
         frame.present();
 
@@ -806,7 +807,7 @@ mod test {
             animator.progress(dt).unwrap();
             let frame = ctx.get_next_frame().unwrap();
             stage.render(&frame.view());
-            let img = frame.read_image().unwrap();
+            let img = frame.read_image().block().unwrap();
             img_diff::save(format!("animation/triangle{i}.png"), img);
             frame.present();
         }

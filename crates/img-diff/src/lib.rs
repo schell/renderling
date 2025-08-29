@@ -4,8 +4,10 @@ use image::{DynamicImage, Luma, Rgb, Rgb32FImage, Rgba32FImage};
 use snafu::prelude::*;
 use std::path::Path;
 
-const TEST_IMG_DIR: &str = concat!(std::env!("CARGO_WORKSPACE_DIR"), "test_img");
-const TEST_OUTPUT_DIR: &str = concat!(std::env!("CARGO_WORKSPACE_DIR"), "test_output");
+pub const TEST_IMG_DIR: &str = concat!(std::env!("CARGO_WORKSPACE_DIR"), "test_img");
+pub const TEST_OUTPUT_DIR: &str = concat!(std::env!("CARGO_WORKSPACE_DIR"), "test_output");
+pub const WASM_TEST_OUTPUT_DIR: &str =
+    concat!(std::env!("CARGO_WORKSPACE_DIR"), "test_output/wasm");
 const PIXEL_MAGNITUDE_THRESHOLD: f32 = 0.1;
 pub const LOW_PIXEL_THRESHOLD: f32 = 0.02;
 const IMAGE_DIFF_THRESHOLD: f32 = 0.05;
@@ -41,6 +43,8 @@ pub struct DiffCfg {
     pub image_threshold: f32,
     /// The name of the test.
     pub test_name: Option<&'static str>,
+    /// The output directory to store comparisons in.
+    pub output_dir: &'static str,
 }
 
 impl Default for DiffCfg {
@@ -49,6 +53,7 @@ impl Default for DiffCfg {
             pixel_threshold: PIXEL_MAGNITUDE_THRESHOLD,
             image_threshold: IMAGE_DIFF_THRESHOLD,
             test_name: None,
+            output_dir: TEST_OUTPUT_DIR,
         }
     }
 }
@@ -124,13 +129,21 @@ fn get_results(
     }
 }
 
-pub fn save(filename: impl AsRef<std::path::Path>, seen: impl Into<DynamicImage>) {
-    let path = Path::new(TEST_OUTPUT_DIR).join(filename);
+pub fn save_to(
+    dir: impl AsRef<std::path::Path>,
+    filename: impl AsRef<std::path::Path>,
+    seen: impl Into<DynamicImage>,
+) -> Result<(), String> {
+    let path = dir.as_ref().join(filename);
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     let img: DynamicImage = seen.into();
     let img_buffer = img.into_rgba8();
     let img = DynamicImage::from(img_buffer);
-    img.save(path).unwrap();
+    img.save(path).map_err(|e| e.to_string())
+}
+
+pub fn save(filename: impl AsRef<std::path::Path>, seen: impl Into<DynamicImage>) {
+    save_to(TEST_OUTPUT_DIR, filename, seen).unwrap()
 }
 
 pub fn assert_eq_cfg(
@@ -138,7 +151,7 @@ pub fn assert_eq_cfg(
     lhs: impl Into<DynamicImage>,
     rhs: impl Into<DynamicImage>,
     cfg: DiffCfg,
-) {
+) -> Result<(), String> {
     let lhs = lhs.into();
     let lhs = lhs.into_rgba32f();
     let rhs = rhs.into().into_rgba32f();
@@ -146,10 +159,11 @@ pub fn assert_eq_cfg(
         pixel_threshold,
         image_threshold,
         test_name,
+        output_dir,
     } = cfg;
     let results = match get_results(&lhs, &rhs, pixel_threshold) {
         Ok(maybe_diff) => maybe_diff,
-        Err(e) => panic!("Asserting {filename} failed: {e}"),
+        Err(e) => return Err(format!("Asserting {filename} failed: {e}")),
     };
     if let Some(DiffResults {
         num_pixels: diffs,
@@ -168,10 +182,10 @@ pub fn assert_eq_cfg(
         let percent_diff = diffs as f32 / (lhs.width() * lhs.height()) as f32;
         println!("{filename}'s image is {percent_diff} different (threshold={image_threshold})");
         if percent_diff < image_threshold {
-            return;
+            return Ok(());
         }
 
-        let mut dir = Path::new(TEST_OUTPUT_DIR).join(test_name.unwrap_or(filename));
+        let mut dir = Path::new(output_dir).join(test_name.unwrap_or(filename));
         dir.set_extension("");
         std::fs::create_dir_all(&dir).expect("cannot create test output dir");
         let expected = dir.join("expected.png");
@@ -192,26 +206,36 @@ pub fn assert_eq_cfg(
         mask_image
             .save_with_format(&mask, image::ImageFormat::Png)
             .expect("can't save diff mask");
-        panic!(
+        Err(format!(
             "{} has >= {} differences above the threshold\nexpected: {}\nseen: {}\ndiff: {}",
             filename,
             diffs,
             expected.display(),
             seen.display(),
             diff.display()
-        );
+        ))
+    } else {
+        Ok(())
     }
 }
 
 pub fn assert_eq(filename: &str, lhs: impl Into<DynamicImage>, rhs: impl Into<DynamicImage>) {
-    assert_eq_cfg(filename, lhs, rhs, DiffCfg::default())
+    assert_eq_cfg(filename, lhs, rhs, DiffCfg::default()).unwrap()
 }
 
-pub fn assert_img_eq_cfg(filename: &str, seen: impl Into<DynamicImage>, cfg: DiffCfg) {
+pub fn assert_img_eq_cfg_result(
+    filename: &str,
+    seen: impl Into<DynamicImage>,
+    cfg: DiffCfg,
+) -> Result<(), String> {
     let path = Path::new(TEST_IMG_DIR).join(filename);
     let lhs = image::open(&path)
         .unwrap_or_else(|e| panic!("can't open expected image '{}': {e}", path.display(),));
     assert_eq_cfg(filename, lhs, seen, cfg)
+}
+
+pub fn assert_img_eq_cfg(filename: &str, seen: impl Into<DynamicImage>, cfg: DiffCfg) {
+    assert_img_eq_cfg_result(filename, seen, cfg).unwrap()
 }
 
 pub fn assert_img_eq(filename: &str, seen: impl Into<DynamicImage>) {

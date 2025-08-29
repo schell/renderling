@@ -6,13 +6,13 @@ use crate::{
     atlas::AtlasTexture,
     camera::Camera,
     geometry::Geometry,
-    math::{Quat, UVec2, Vec2, Vec3Swizzles, Vec4},
     stage::{NestedTransform, Renderlet, Stage},
     transform::Transform,
     Context,
 };
 use craballoc::prelude::{Hybrid, SourceId};
 use crabslab::Id;
+use glam::{Quat, UVec2, Vec2, Vec3Swizzles, Vec4};
 use glyph_brush::ab_glyph;
 use rustc_hash::FxHashMap;
 use snafu::{prelude::*, ResultExt};
@@ -105,7 +105,7 @@ impl UiTransform {
         self.transform
             .get()
             .rotation
-            .to_euler(crate::math::EulerRot::XYZ)
+            .to_euler(glam::EulerRot::XYZ)
             .2
     }
 
@@ -152,7 +152,8 @@ impl Ui {
             .with_background_color(Vec4::ONE)
             .with_lighting(false)
             .with_bloom(false)
-            .with_msaa_sample_count(4);
+            .with_msaa_sample_count(4)
+            .with_frustum_culling(false);
         let camera = stage.new_camera(Camera::default_ortho2d(x as f32, y as f32));
         Ui {
             camera,
@@ -342,12 +343,7 @@ impl Ui {
 
 #[cfg(test)]
 pub(crate) mod test {
-    use crate::{color::rgb_hex_color, math::Vec4};
-
-    #[ctor::ctor]
-    fn init_logging() {
-        let _ = env_logger::builder().is_test(true).try_init();
-    }
+    use crate::{color::rgb_hex_color, prelude::glam::Vec4};
 
     pub struct Colors<const N: usize>(std::iter::Cycle<std::array::IntoIter<Vec4, N>>);
 

@@ -701,7 +701,7 @@ impl Bloom {
 mod test {
     use glam::Vec3;
 
-    use crate::{camera::Camera, Context};
+    use crate::{camera::Camera, test::BlockOnFuture, Context};
 
     use super::*;
 
@@ -747,7 +747,7 @@ mod test {
     fn bloom_sanity() {
         let width = 256;
         let height = 128;
-        let ctx = Context::headless(width, height);
+        let ctx = Context::headless(width, height).block();
         let stage = ctx.new_stage().with_bloom(false);
         // .with_frustum_culling(false)
         // .with_occlusion_culling(false);
@@ -766,7 +766,7 @@ mod test {
 
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
-        let img = frame.read_image().unwrap();
+        let img = frame.read_image().block().unwrap();
         img_diff::assert_img_eq("bloom/without.png", img);
         frame.present();
 
@@ -776,7 +776,7 @@ mod test {
         stage.set_bloom_filter_radius(2.0);
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
-        let img = frame.read_image().unwrap();
+        let img = frame.read_image().block().unwrap();
         img_diff::assert_img_eq("bloom/with.png", img);
     }
 }

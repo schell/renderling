@@ -2,17 +2,23 @@
 //!
 //! For more info, see these great articles:
 //! - <https://iquilezles.org/articles/distfunctions2d/>
-
 use crabslab::SlabItem;
 use glam::Vec2;
+// use spirv_std::spirv;
+
+// #[spirv(vertex)]
+// pub fn vertex_sdf_circle(
+//     #[spirv(instance_index)] circle_id: Id<CircleDescriptor>,
+//     #[spirv(vertex_index)] vertex_index: u32,
+// )
 
 #[derive(Clone, Copy, SlabItem)]
-pub struct Circle {
+pub struct CircleDescriptor {
     pub center: Vec2,
     pub radius: f32,
 }
 
-impl Circle {
+impl CircleDescriptor {
     pub fn distance(&self, point: Vec2) -> f32 {
         let p = point - self.center;
         p.length() - self.radius
@@ -46,7 +52,7 @@ mod test {
     fn sdf_circle_sanity() {
         let mut img = image::ImageBuffer::<image::Luma<f32>, Vec<f32>>::new(32, 32);
 
-        let circle = Circle {
+        let circle = CircleDescriptor {
             center: Vec2::new(12.0, 12.0),
             radius: 4.0,
         };

@@ -8,7 +8,7 @@
 //! use renderling::ui::prelude::*;
 //! use glam::Vec2;
 //!
-//! let ctx = Context::headless(100, 100);
+//! let ctx = futures_lite::future::block_on(Context::headless(100, 100));
 //! let mut ui = Ui::new(&ctx);
 //!
 //! let _path = ui
@@ -25,3 +25,5 @@
 mod cpu;
 #[cfg(cpu)]
 pub use cpu::*;
+
+pub mod sdf;

@@ -12,7 +12,7 @@ use spirv_std::{
     Image, Sampler,
 };
 
-pub use glam::*;
+use glam::*;
 pub use spirv_std::num_traits::{clamp, Float, Zero};
 
 pub trait Fetch<Coords> {

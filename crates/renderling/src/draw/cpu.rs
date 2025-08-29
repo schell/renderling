@@ -168,6 +168,8 @@ impl DrawCalls {
         stage_slab_buffer: &SlabBuffer<wgpu::Buffer>,
         depth_texture: &Texture,
     ) -> Self {
+        let supported_features = ctx.get_adapter().features();
+        log::trace!("supported features: {supported_features:#?}");
         let can_use_multi_draw_indirect = ctx.get_adapter().features().contains(
             wgpu::Features::INDIRECT_FIRST_INSTANCE | wgpu::Features::MULTI_DRAW_INDIRECT,
         );
@@ -330,6 +332,9 @@ impl DrawCalls {
 
     /// Draw into the given `RenderPass` by directly calling each draw.
     pub fn draw_direct(&self, render_pass: &mut wgpu::RenderPass) {
+        if self.internal_renderlets.is_empty() {
+            log::warn!("no internal renderlets, nothing to draw");
+        }
         for ir in self.internal_renderlets.iter() {
             // UNWRAP: panic on purpose
             if let Some(hr) = ir.inner.upgrade() {
@@ -362,6 +367,8 @@ impl DrawCalls {
                 log::trace!("drawing {num_draw_calls} renderlets using direct");
                 self.draw_direct(render_pass);
             }
+        } else {
+            log::warn!("zero draw calls");
         }
     }
 }

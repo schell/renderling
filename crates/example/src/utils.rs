@@ -73,7 +73,7 @@ impl<T: TestAppHandler> winit::application::ApplicationHandler for TestApp<T> {
                 )
                 .unwrap(),
         );
-        let ctx = Context::try_from_window(None, window.clone()).unwrap();
+        let ctx = futures_lite::future::block_on(Context::from_winit_window(None, window.clone()));
         let mut app = T::new(event_loop, window, &ctx);
         app.resumed(event_loop);
         self.inner = Some(InnerTestApp { app, ctx });

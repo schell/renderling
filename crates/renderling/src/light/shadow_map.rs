@@ -368,7 +368,7 @@ impl ShadowMap {
 #[cfg(test)]
 #[allow(clippy::unused_enumerate_index)]
 mod test {
-    use crate::camera::Camera;
+    use crate::{camera::Camera, test::BlockOnFuture};
 
     use super::super::*;
 
@@ -376,7 +376,7 @@ mod test {
     fn shadow_mapping_just_cuboid() {
         let w = 800.0;
         let h = 800.0;
-        let ctx = crate::Context::headless(w as u32, h as u32);
+        let ctx = crate::Context::headless(w as u32, h as u32).block();
         let stage = ctx
             .new_stage()
             .with_lighting(true)
@@ -403,7 +403,7 @@ mod test {
 
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
-        let img = frame.read_image().unwrap();
+        let img = frame.read_image().block().unwrap();
         frame.present();
 
         // Rendering the scene without shadows as a sanity check
@@ -421,7 +421,7 @@ mod test {
 
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
-        let img = frame.read_image().unwrap();
+        let img = frame.read_image().block().unwrap();
         img_diff::assert_img_eq("shadows/shadow_mapping_just_cuboid/scene_after.png", img);
         frame.present();
     }
@@ -430,7 +430,7 @@ mod test {
     fn shadow_mapping_just_cuboid_red_and_blue() {
         let w = 800.0;
         let h = 800.0;
-        let ctx = crate::Context::headless(w as u32, h as u32);
+        let ctx = crate::Context::headless(w as u32, h as u32).block();
         let stage = ctx
             .new_stage()
             .with_lighting(true)
@@ -471,7 +471,7 @@ mod test {
         let frame = ctx.get_next_frame().unwrap();
 
         stage.render(&frame.view());
-        let img = frame.read_image().unwrap();
+        let img = frame.read_image().block().unwrap();
         img_diff::assert_img_eq(
             "shadows/shadow_mapping_just_cuboid/red_and_blue/frame.png",
             img,
@@ -484,6 +484,7 @@ mod test {
         let w = 800.0;
         let h = 800.0;
         let ctx = crate::Context::headless(w as u32, h as u32)
+            .block()
             .with_shadow_mapping_atlas_texture_size([1024, 1024, 2]);
         let stage = ctx.new_stage().with_lighting(true);
 
@@ -502,7 +503,7 @@ mod test {
 
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
-        let img = frame.read_image().unwrap();
+        let img = frame.read_image().block().unwrap();
         frame.present();
 
         // Rendering the scene without shadows as a sanity check
@@ -553,7 +554,7 @@ mod test {
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
 
-        let img = frame.read_image().unwrap();
+        let img = frame.read_image().block().unwrap();
         frame.present();
         img_diff::assert_img_eq_cfg(
             "shadows/shadow_mapping_sanity/stage_render.png",
@@ -569,7 +570,7 @@ mod test {
     fn shadow_mapping_spot_lights() {
         let w = 800.0;
         let h = 800.0;
-        let ctx = crate::Context::headless(w as u32, h as u32);
+        let ctx = crate::Context::headless(w as u32, h as u32).block();
         let stage = ctx
             .new_stage()
             .with_lighting(true)
@@ -603,7 +604,7 @@ mod test {
                 camera.as_ref().set(Camera::new(p, v));
                 let frame = ctx.get_next_frame().unwrap();
                 stage.render(&frame.view());
-                let _img = frame.read_image().unwrap();
+                let _img = frame.read_image().block().unwrap();
                 // img_diff::assert_img_eq(
                 //     &format!("shadows/shadow_mapping_spots/light_pov_{i}.png"),
                 //     img,
@@ -625,7 +626,7 @@ mod test {
 
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
-        let img = frame.read_image().unwrap();
+        let img = frame.read_image().block().unwrap();
         img_diff::assert_img_eq("shadows/shadow_mapping_spots/frame.png", img);
         frame.present();
     }
@@ -634,7 +635,7 @@ mod test {
     fn shadow_mapping_point_lights() {
         let w = 800.0;
         let h = 800.0;
-        let ctx = crate::Context::headless(w as u32, h as u32);
+        let ctx = crate::Context::headless(w as u32, h as u32).block();
         let stage = ctx
             .new_stage()
             .with_lighting(true)
@@ -670,7 +671,7 @@ mod test {
                     camera.as_ref().set(Camera::new(p, v));
                     let frame = ctx.get_next_frame().unwrap();
                     stage.render(&frame.view());
-                    let _img = frame.read_image().unwrap();
+                    let _img = frame.read_image().block().unwrap();
                     // img_diff::assert_img_eq(
                     //     &format!("shadows/shadow_mapping_points/light_{i}_pov_{j}.png"),
                     //     img,
@@ -693,7 +694,7 @@ mod test {
 
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
-        let img = frame.read_image().unwrap();
+        let img = frame.read_image().block().unwrap();
         img_diff::assert_img_eq("shadows/shadow_mapping_points/frame.png", img);
         frame.present();
     }

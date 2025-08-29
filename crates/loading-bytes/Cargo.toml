@@ -15,6 +15,8 @@ readme = "README.md"
 async-fs = "1.6"
 js-sys = "0.3"
 send_wrapper = {workspace=true}
+serde.workspace = true
+serde_json.workspace = true
 snafu = {workspace = true}
 wasm-bindgen = {workspace = true}
 wasm-bindgen-futures = {workspace = true}

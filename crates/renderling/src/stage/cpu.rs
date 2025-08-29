@@ -2,6 +2,7 @@
 //!
 //! The `Stage` object contains a slab buffer and a render pipeline.
 //! It is used to stage [`Renderlet`]s for rendering.
+use core::ops::Deref;
 use core::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 use craballoc::prelude::*;
 use crabslab::Id;
@@ -768,6 +769,10 @@ impl Stage {
         &self.runtime().queue
     }
 
+    pub fn hdr_texture(&self) -> impl Deref<Target = crate::texture::Texture> + '_ {
+        self.hdr_texture.read().unwrap()
+    }
+
     pub fn builder(&self) -> RenderletBuilder<'_, ()> {
         RenderletBuilder::new(self)
     }
@@ -1430,6 +1435,11 @@ impl Stage {
         Ok(Skybox::new(self.runtime(), hdr))
     }
 
+    pub fn new_skybox_from_bytes(&self, bytes: &[u8]) -> Result<Skybox, AtlasImageError> {
+        let hdr = AtlasImage::from_hdr_bytes(bytes)?;
+        Ok(Skybox::new(self.runtime(), hdr))
+    }
+
     /// Create a new [`NestedTransform`].
     pub fn new_nested_transform(&self) -> NestedTransform {
         NestedTransform::new(self.geometry.slab_allocator())
@@ -1705,6 +1715,7 @@ mod test {
         camera::Camera,
         geometry::{Geometry, GeometryDescriptor},
         stage::{cpu::SlabAllocator, NestedTransform, Renderlet, Vertex},
+        test::BlockOnFuture,
         transform::Transform,
         Context,
     };
@@ -1779,7 +1790,7 @@ mod test {
 
     #[test]
     fn can_msaa() {
-        let ctx = Context::headless(100, 100);
+        let ctx = Context::headless(100, 100).block();
         let stage = ctx
             .new_stage()
             .with_background_color([1.0, 1.0, 1.0, 1.0])
@@ -1803,7 +1814,7 @@ mod test {
         log::debug!("rendering without msaa");
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
-        let img = frame.read_image().unwrap();
+        let img = frame.read_image().block().unwrap();
         img_diff::assert_img_eq_cfg(
             "msaa/without.png",
             img,
@@ -1819,7 +1830,7 @@ mod test {
         log::debug!("rendering with msaa");
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
-        let img = frame.read_image().unwrap();
+        let img = frame.read_image().block().unwrap();
         img_diff::assert_img_eq_cfg(
             "msaa/with.png",
             img,
@@ -1833,7 +1844,7 @@ mod test {
 
     #[test]
     fn has_consistent_stage_renderlet_strong_count() {
-        let ctx = Context::headless(100, 100);
+        let ctx = Context::headless(100, 100).block();
         let stage = ctx.new_stage();
         let r = stage.new_renderlet(Renderlet::default());
         assert_eq!(1, r.ref_count());
@@ -1846,7 +1857,7 @@ mod test {
     /// Tests that the PBR descriptor is written to slot 0 of the geometry buffer,
     /// and that it contains what we think it contains.
     fn stage_geometry_desc_sanity() {
-        let ctx = Context::headless(100, 100);
+        let ctx = Context::headless(100, 100).block();
         let stage = ctx.new_stage();
         let _ = stage.commit();
 

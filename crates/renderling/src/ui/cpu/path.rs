@@ -2,12 +2,12 @@
 //!
 //! Path colors are sRGB.
 use crate::{
-    math::{Vec2, Vec3, Vec3Swizzles, Vec4},
     pbr::Material,
     stage::{Renderlet, Vertex},
 };
 use craballoc::prelude::{GpuArray, Hybrid};
 use crabslab::Id;
+use glam::{Vec2, Vec3, Vec3Swizzles, Vec4};
 use lyon::{
     path::traits::PathBuilder,
     tessellation::{
@@ -524,13 +524,15 @@ impl UiPathBuilder {
 #[cfg(test)]
 mod test {
     use crate::{
-        math::{hex_to_vec4, Vec2},
+        math::hex_to_vec4,
+        test::BlockOnFuture,
         ui::{
             test::{cute_beach_palette, Colors},
             Ui,
         },
         Context,
     };
+    use glam::Vec2;
 
     use super::*;
 
@@ -555,7 +557,7 @@ mod test {
 
     #[test]
     fn can_build_path_sanity() {
-        let ctx = Context::headless(100, 100);
+        let ctx = Context::headless(100, 100).block();
         let ui = Ui::new(&ctx).with_antialiasing(false);
         let builder = ui
             .new_path()
@@ -569,7 +571,7 @@ mod test {
 
             let frame = ctx.get_next_frame().unwrap();
             ui.render(&frame.view());
-            let img = frame.read_image().unwrap();
+            let img = frame.read_image().block().unwrap();
             img_diff::assert_img_eq("ui/path/sanity.png", img);
         }
 
@@ -581,7 +583,7 @@ mod test {
             let _resources = builder.fill_and_stroke();
             let frame = ctx.get_next_frame().unwrap();
             ui.render(&frame.view());
-            let img = frame.read_image().unwrap();
+            let img = frame.read_image().block().unwrap();
             img_diff::assert_img_eq_cfg(
                 "ui/path/sanity.png",
                 img,
@@ -595,7 +597,7 @@ mod test {
 
     #[test]
     fn can_draw_shapes() {
-        let ctx = Context::headless(256, 48);
+        let ctx = Context::headless(256, 48).block();
         let ui = Ui::new(&ctx).with_default_stroke_options(StrokeOptions {
             line_width: 4.0,
             ..Default::default()
@@ -671,14 +673,14 @@ mod test {
 
         let frame = ctx.get_next_frame().unwrap();
         ui.render(&frame.view());
-        let img = frame.read_image().unwrap();
+        let img = frame.read_image().block().unwrap();
         img_diff::assert_img_eq("ui/path/shapes.png", img);
     }
 
     #[test]
     fn can_fill_image() {
         let w = 150.0;
-        let ctx = Context::headless(w as u32, w as u32);
+        let ctx = Context::headless(w as u32, w as u32).block();
         let ui = Ui::new(&ctx);
         let image_id = futures_lite::future::block_on(ui.load_image("../../img/dirt.jpg")).unwrap();
         let center = Vec2::splat(w / 2.0);
@@ -705,7 +707,7 @@ mod test {
 
         let frame = ctx.get_next_frame().unwrap();
         ui.render(&frame.view());
-        let mut img = frame.read_srgb_image().unwrap();
+        let mut img = frame.read_srgb_image().block().unwrap();
         img.pixels_mut().for_each(|p| {
             crate::color::opto_xfer_u8(&mut p.0[0]);
             crate::color::opto_xfer_u8(&mut p.0[1]);
