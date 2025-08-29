@@ -9,6 +9,7 @@ use std::{
 
 use ab_glyph::Rect;
 use craballoc::prelude::{GpuArray, Hybrid};
+use glam::{Vec2, Vec4};
 use glyph_brush::*;
 
 pub use ab_glyph::FontArc;
@@ -16,7 +17,6 @@ pub use glyph_brush::{Section, Text};
 
 use crate::{
     atlas::AtlasTexture,
-    math::{Vec2, Vec4},
     pbr::Material,
     stage::{Renderlet, Vertex},
 };

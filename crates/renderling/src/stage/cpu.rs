@@ -2,6 +2,8 @@
 //!
 //! The `Stage` object contains a slab buffer and a render pipeline.
 //! It is used to stage [`Renderlet`]s for rendering.
+#[cfg(test)]
+use core::ops::Deref;
 use core::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 use craballoc::prelude::*;
 use crabslab::Id;
@@ -768,6 +770,11 @@ impl Stage {
         &self.runtime().queue
     }
 
+    #[cfg(feature = "test-helpers")]
+    pub fn hdr_texture(&self) -> impl Deref<Target = crate::texture::Texture> + '_ {
+        self.hdr_texture.read().unwrap()
+    }
+
     pub fn builder(&self) -> RenderletBuilder<'_, ()> {
         RenderletBuilder::new(self)
     }
@@ -1427,6 +1434,11 @@ impl Stage {
         path: impl AsRef<std::path::Path>,
     ) -> Result<Skybox, AtlasImageError> {
         let hdr = AtlasImage::from_hdr_path(path)?;
+        Ok(Skybox::new(self.runtime(), hdr))
+    }
+
+    pub fn new_skybox_from_bytes(&self, bytes: &[u8]) -> Result<Skybox, AtlasImageError> {
+        let hdr = AtlasImage::from_hdr_bytes(bytes)?;
         Ok(Skybox::new(self.runtime(), hdr))
     }
 

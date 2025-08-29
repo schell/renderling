@@ -12,6 +12,7 @@ use snafu::prelude::*;
 use crate::{
     stage::Stage,
     texture::{BufferDimensions, CopiedTextureBuffer, Texture, TextureError},
+    ui::Ui,
 };
 
 enum RenderTargetInner {
@@ -115,12 +116,14 @@ async fn adapter(
     );
     let adapter = instance
         .request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::default(),
+            power_preference: wgpu::PowerPreference::HighPerformance,
             compatible_surface,
-            force_fallback_adapter: false,
+            force_fallback_adapter: true,
         })
         .await
         .context(CannotCreateAdaptorSnafu)?;
+
+    log::info!("Adapter selected: {:?}", adapter.get_info());
     let info = adapter.get_info();
     log::info!(
         "using adapter: '{}' backend:{:?} driver:'{}'",
@@ -147,6 +150,7 @@ async fn device(
     let unsupported_features = wanted_features.difference(supported_features);
     if !unsupported_features.is_empty() {
         log::error!("requested but unsupported features: {unsupported_features:#?}");
+        log::warn!("requested and supported features: {supported_features:#?}");
     }
     let limits = adapter.limits();
     log::info!("adapter limits: {limits:#?}");
@@ -162,7 +166,7 @@ async fn device(
 }
 
 fn new_instance(backends: Option<wgpu::Backends>) -> wgpu::Instance {
-    log::trace!(
+    log::info!(
         "creating instance - available backends: {:#?}",
         wgpu::Instance::enabled_backend_features()
     );
@@ -509,7 +513,7 @@ impl Context {
         Ok(Self::new(target, adapter, device, queue))
     }
 
-    pub async fn try_from_raw_window(
+    pub async fn try_new_with_surface(
         width: u32,
         height: u32,
         backends: Option<wgpu::Backends>,
@@ -522,54 +526,26 @@ impl Context {
     }
 
     #[cfg(feature = "winit")]
-    pub async fn from_window_async(
+    /// Create a [`Context`] from an existing [`winit::window::Window`].
+    ///
+    /// ## Panics
+    /// Panics if the context could not be created.
+    pub async fn from_winit_window(
         backends: Option<wgpu::Backends>,
         window: Arc<winit::window::Window>,
     ) -> Self {
         let inner_size = window.inner_size();
-        Self::try_from_raw_window(inner_size.width, inner_size.height, backends, window)
+        Self::try_new_with_surface(inner_size.width, inner_size.height, backends, window)
             .await
             .unwrap()
     }
 
-    #[cfg(all(feature = "winit", not(target_arch = "wasm32")))]
-    /// Create a new context from a `winit::window::Window`, blocking until it
-    /// is created.
-    ///
-    /// ## Panics
-    /// Panics if the context cannot be created.
-    pub fn from_window(
-        backends: Option<wgpu::Backends>,
-        window: Arc<winit::window::Window>,
-    ) -> Self {
-        futures_lite::future::block_on(Self::from_window_async(backends, window))
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    pub fn try_from_raw_window_handle(
-        window_handle: impl Into<wgpu::SurfaceTarget<'static>>,
-        width: u32,
-        height: u32,
-        backends: Option<wgpu::Backends>,
-    ) -> Result<Self, ContextError> {
-        futures_lite::future::block_on(Self::try_from_raw_window(
-            width,
-            height,
-            backends,
-            window_handle,
-        ))
-    }
-
-    #[cfg(all(feature = "winit", not(target_arch = "wasm32")))]
-    pub fn try_from_window(
-        backends: Option<wgpu::Backends>,
-        window: Arc<winit::window::Window>,
-    ) -> Result<Self, ContextError> {
-        let inner_size = window.inner_size();
-        Self::try_from_raw_window_handle(window, inner_size.width, inner_size.height, backends)
-    }
-
     /// Create a new headless renderer.
+    ///
+    /// Immediately blocks on [`Context::try_new_headless`].
+    ///
+    /// ## Note
+    /// Only available on native.
     ///
     /// ## Panics
     /// This function will panic if an adapter cannot be found. For example this
@@ -753,5 +729,10 @@ impl Context {
     /// Create and return a new [`Stage`] renderer.
     pub fn new_stage(&self) -> Stage {
         Stage::new(self)
+    }
+
+    /// Create and return a new [`Ui`] renderer.
+    pub fn new_ui(&self) -> Ui {
+        Ui::new(self)
     }
 }

@@ -222,7 +222,7 @@ mod test {
     use pretty_assertions::assert_eq;
     use stage::Stage;
 
-    #[ctor::ctor]
+    #[cfg_attr(not(target_arch = "wasm32"), ctor::ctor)]
     fn init_logging() {
         let _ = env_logger::builder().is_test(true).try_init();
         log::info!("logging is on");

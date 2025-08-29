@@ -771,7 +771,8 @@ impl Animator {
 
 #[cfg(test)]
 mod test {
-    use crate::{camera::Camera, math::Vec3, stage::Animator, Context};
+    use crate::{camera::Camera, stage::Animator, Context};
+    use glam::Vec3;
 
     #[test]
     fn gltf_simple_animation() {

@@ -262,7 +262,7 @@ impl DepthPyramid {
     }
 
     pub fn resize(&mut self, size: UVec2) {
-        log::info!("resizing depth pyramid to {size}");
+        log::trace!("resizing depth pyramid to {size}");
         // drop the buffers
         let mip = self.slab.new_array(vec![]);
         self.mip_data = vec![];
@@ -303,8 +303,8 @@ impl DepthPyramid {
                     crate::color::f32_to_u8(depth)
                 })
                 .collect();
-            log::info!("min: {min}");
-            log::info!("max: {max}");
+            log::trace!("min: {min}");
+            log::trace!("max: {max}");
             let width = size.x >> i;
             let height = size.y >> i;
             let image = image::GrayImage::from_raw(width, height, depth_data)
@@ -329,12 +329,12 @@ impl ComputeCopyDepth {
 
     fn create_bindgroup_layout(device: &wgpu::Device, sample_count: u32) -> wgpu::BindGroupLayout {
         if sample_count > 1 {
-            log::info!(
+            log::trace!(
                 "creating bindgroup layout with {sample_count} multisampled depth for {}",
                 Self::LABEL.unwrap()
             );
         } else {
-            log::info!(
+            log::trace!(
                 "creating bindgroup layout without multisampling for {}",
                 Self::LABEL.unwrap()
             );
@@ -374,10 +374,10 @@ impl ComputeCopyDepth {
         multisampled: bool,
     ) -> wgpu::ComputePipeline {
         let linkage = if multisampled {
-            log::info!("creating multisampled shader for {}", Self::LABEL.unwrap());
+            log::trace!("creating multisampled shader for {}", Self::LABEL.unwrap());
             crate::linkage::compute_copy_depth_to_pyramid_multisampled::linkage(device)
         } else {
-            log::info!(
+            log::trace!(
                 "creating shader without multisampling for {}",
                 Self::LABEL.unwrap()
             );

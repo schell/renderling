@@ -2,12 +2,12 @@
 //!
 //! Path colors are sRGB.
 use crate::{
-    math::{Vec2, Vec3, Vec3Swizzles, Vec4},
     pbr::Material,
     stage::{Renderlet, Vertex},
 };
 use craballoc::prelude::{GpuArray, Hybrid};
 use crabslab::Id;
+use glam::{Vec2, Vec3, Vec3Swizzles, Vec4};
 use lyon::{
     path::traits::PathBuilder,
     tessellation::{
@@ -524,13 +524,14 @@ impl UiPathBuilder {
 #[cfg(test)]
 mod test {
     use crate::{
-        math::{hex_to_vec4, Vec2},
+        math::hex_to_vec4,
         ui::{
             test::{cute_beach_palette, Colors},
             Ui,
         },
         Context,
     };
+    use glam::Vec2;
 
     use super::*;
 

@@ -2,11 +2,8 @@
 use std::str::FromStr;
 
 use craballoc::prelude::Hybrid;
-use renderling::{
-    bvol::Aabb,
-    camera::Camera,
-    math::{Mat4, Quat, UVec2, Vec2, Vec3},
-};
+use renderling::prelude::glam::{Mat4, Quat, UVec2, Vec2, Vec3};
+use renderling::{bvol::Aabb, camera::Camera};
 use winit::{event::KeyEvent, keyboard::Key};
 
 const RADIUS_SCROLL_DAMPENING: f32 = 0.001;
@@ -198,8 +195,12 @@ impl CameraController for WasdMouseCameraController {
     }
 
     fn update_camera(&self, UVec2 { x: w, y: h }: UVec2, camera: &Hybrid<Camera>) {
-        let camera_rotation =
-            Quat::from_euler(renderling::math::EulerRot::XYZ, self.phi, self.theta, 0.0);
+        let camera_rotation = Quat::from_euler(
+            renderling::prelude::glam::EulerRot::XYZ,
+            self.phi,
+            self.theta,
+            0.0,
+        );
         let projection =
             Mat4::perspective_infinite_rh(std::f32::consts::FRAC_PI_4, w as f32 / h as f32, 0.01);
         let view = Mat4::from_quat(camera_rotation) * Mat4::from_translation(-self.position);

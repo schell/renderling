@@ -2,6 +2,7 @@
 xtask = "run --package xtask --"
 shaders = "xtask compile-shaders"
 linkage = "xtask generate-linkage"
+test-wasm = "xtask test-wasm"
 
 [build]
 rustflags = ["--cfg=web_sys_unstable_apis"]

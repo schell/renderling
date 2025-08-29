@@ -1,6 +1,8 @@
 //! A build helper for the `renderling` project.
 use clap::{Parser, Subcommand};
 
+mod server;
+
 #[derive(Subcommand)]
 enum Command {
     /// Compile the `renderling` library into multiple SPIR-V shader entry points.
@@ -19,6 +21,10 @@ enum Command {
         #[clap(long)]
         from_cargo: bool,
     },
+    /// Run the webdriver proxy server
+    WebdriverProxy,
+    /// Compile for WASM and run headless browser tests
+    TestWasm,
 }
 
 #[derive(Parser)]
@@ -29,8 +35,11 @@ struct Cli {
     subcommand: Command,
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
     env_logger::builder().init();
+
+    log::info!("running xtask");
 
     let cli = Cli::parse();
     match cli.subcommand {
@@ -58,6 +67,30 @@ fn main() {
             log::info!("Generating linkage for shaders");
             let paths = renderling_build::RenderlingPaths::new().unwrap();
             paths.generate_linkage(from_cargo, wgsl, only_fn_with_name);
+        }
+        Command::TestWasm => {
+            log::info!("testing WASM");
+            let _proxy_handle = tokio::spawn(server::serve());
+            let mut test_handle = tokio::process::Command::new("wasm-pack")
+                .args([
+                    "test",
+                    "--headless",
+                    "--firefox",
+                    "crates/renderling",
+                    "--features",
+                    "wasm",
+                    "--jobs",
+                    "1",
+                ])
+                .spawn()
+                .unwrap();
+            let status = test_handle.wait().await.unwrap();
+            if !status.success() {
+                panic!("Testing WASM failed :(");
+            }
+        }
+        Command::WebdriverProxy => {
+            server::serve().await;
         }
     }
 }

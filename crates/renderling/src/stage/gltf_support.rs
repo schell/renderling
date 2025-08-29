@@ -9,6 +9,7 @@ use snafu::{OptionExt, ResultExt, Snafu};
 
 use crate::{
     atlas::{AtlasError, AtlasImage, AtlasTexture, TextureAddressMode, TextureModes},
+    bvol::Aabb,
     camera::Camera,
     light::{
         AnalyticalLight, DirectionalLightDescriptor, LightStyle, PointLightDescriptor,
@@ -1169,6 +1170,29 @@ impl GltfDocument {
             }
         }
         nodes.into_iter()
+    }
+
+    /// Returns the bounding volume of this document, if possible.
+    ///
+    /// This function will return `None` if this document does not contain meshes.
+    pub fn bounding_volume(&self) -> Option<Aabb> {
+        let mut aabbs = vec![];
+        for node in self.nodes.iter() {
+            if let Some(mesh_index) = node.mesh {
+                let mesh = self.meshes.get(mesh_index)?;
+                for prim in mesh.primitives.iter() {
+                    let (prim_min, prim_max) = prim.bounding_box;
+                    let prim_aabb = Aabb::new(prim_min, prim_max);
+                    aabbs.push(prim_aabb);
+                }
+            }
+        }
+        let mut aabbs = aabbs.into_iter();
+        let mut aabb = aabbs.next()?;
+        for next_aabb in aabbs {
+            aabb = Aabb::union(aabb, next_aabb);
+        }
+        Some(aabb)
     }
 }
 

@@ -141,6 +141,14 @@ impl Aabb {
         self.min == self.max
     }
 
+    /// Returns the union of the two [`Aabbs`].
+    pub fn union(a: Self, b: Self) -> Self {
+        Aabb {
+            min: a.min.min(a.max).min(b.min).min(b.max),
+            max: a.max.max(a.min).max(b.max).max(b.min),
+        }
+    }
+
     /// Determines whether this `Aabb` can be seen by `camera` after being
     /// transformed by `transform`.
     pub fn is_outside_camera_view(&self, camera: &Camera, transform: Transform) -> bool {
@@ -719,5 +727,19 @@ mod test {
         let b = Aabb::new(Vec3::splat(0.9), Vec3::splat(1.9));
         assert!(a.intersects_aabb(&b));
         assert!(b.intersects_aabb(&a));
+    }
+
+    #[test]
+    fn aabb_union() {
+        let a = Aabb::new(Vec3::splat(4.0), Vec3::splat(5.0));
+        let b = Aabb::new(Vec3::ZERO, Vec3::ONE);
+        let c = Aabb::union(a, b);
+        assert_eq!(
+            Aabb {
+                min: Vec3::ZERO,
+                max: Vec3::splat(5.0)
+            },
+            c
+        );
     }
 }
