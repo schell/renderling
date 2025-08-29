@@ -330,7 +330,7 @@ impl GlyphCache {
 
 #[cfg(test)]
 mod test {
-    use crate::{ui::Ui, Context};
+    use crate::{test::BlockOnFuture, ui::Ui, Context};
     use glyph_brush::Section;
 
     use super::*;
@@ -342,7 +342,7 @@ mod test {
             std::fs::read("../../fonts/Recursive Mn Lnr St Med Nerd Font Complete.ttf").unwrap();
         let font = FontArc::try_from_vec(bytes).unwrap();
 
-        let ctx = Context::headless(455, 145);
+        let ctx = Context::headless(455, 145).block();
         let ui = Ui::new(&ctx);
         let _font_id = ui.add_font(font);
         let _text = ui
@@ -374,7 +374,7 @@ mod test {
 
         let frame = ctx.get_next_frame().unwrap();
         ui.render(&frame.view());
-        let img = frame.read_image().unwrap();
+        let img = frame.read_image().block().unwrap();
         img_diff::assert_img_eq("ui/text/can_display.png", img);
     }
 
@@ -384,7 +384,7 @@ mod test {
     fn text_overlayed() {
         log::info!("{:#?}", std::env::current_dir());
 
-        let ctx = Context::headless(500, 253);
+        let ctx = Context::headless(500, 253).block();
         let ui = Ui::new(&ctx).with_antialiasing(false);
         let font_id = futures_lite::future::block_on(
             ui.load_font("../../fonts/Recursive Mn Lnr St Med Nerd Font Complete.ttf"),
@@ -432,15 +432,21 @@ mod test {
 
         let frame = ctx.get_next_frame().unwrap();
         ui.render(&frame.view());
-        let img = frame.read_image().unwrap();
+        let img = frame.read_image().block().unwrap();
         img_diff::assert_img_eq("ui/text/overlay.png", img);
-        let depth_img = ui.stage.get_depth_texture().read_image().unwrap().unwrap();
+        let depth_img = ui
+            .stage
+            .get_depth_texture()
+            .read_image()
+            .block()
+            .unwrap()
+            .unwrap();
         img_diff::assert_img_eq("ui/text/overlay_depth.png", depth_img);
     }
 
     #[test]
     fn recreate_text() {
-        let ctx = Context::headless(50, 50);
+        let ctx = Context::headless(50, 50).block();
         let ui = Ui::new(&ctx).with_antialiasing(true);
         let _font_id = futures_lite::future::block_on(
             ui.load_font("../../fonts/Recursive Mn Lnr St Med Nerd Font Complete.ttf"),
@@ -461,7 +467,7 @@ mod test {
 
         let frame = ctx.get_next_frame().unwrap();
         ui.render(&frame.view());
-        let img = frame.read_image().unwrap();
+        let img = frame.read_image().block().unwrap();
         frame.present();
         img_diff::assert_img_eq("ui/text/can_recreate_0.png", img);
 
@@ -481,7 +487,7 @@ mod test {
 
         let frame = ctx.get_next_frame().unwrap();
         ui.render(&frame.view());
-        let img = frame.read_image().unwrap();
+        let img = frame.read_image().block().unwrap();
         frame.present();
         img_diff::assert_img_eq("ui/text/can_recreate_1.png", img);
     }

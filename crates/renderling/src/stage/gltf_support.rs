@@ -1216,7 +1216,10 @@ impl Stage {
 
 #[cfg(test)]
 mod test {
-    use crate::{camera::Camera, pbr::Material, stage::Vertex, transform::Transform, Context};
+    use crate::{
+        camera::Camera, pbr::Material, stage::Vertex, test::BlockOnFuture, transform::Transform,
+        Context,
+    };
     use glam::{Vec3, Vec4};
 
     #[test]
@@ -1241,7 +1244,7 @@ mod test {
     // * support primitives w/ positions and normal attributes
     // * support transforming nodes (T * R * S)
     fn stage_gltf_simple_meshes() {
-        let ctx = Context::headless(100, 50);
+        let ctx = Context::headless(100, 50).block();
         let projection = crate::camera::perspective(100.0, 50.0);
         let position = Vec3::new(1.0, 0.5, 1.5);
         let view = crate::camera::look_at(position, Vec3::new(1.0, 0.5, 0.0), Vec3::Y);
@@ -1257,14 +1260,14 @@ mod test {
 
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
-        let img = frame.read_image().unwrap();
+        let img = frame.read_image().block().unwrap();
         img_diff::assert_img_eq("gltf/simple_meshes.png", img);
     }
 
     #[test]
     // Ensures we can read a minimal gltf file with a simple triangle mesh.
     fn minimal_mesh() {
-        let ctx = Context::headless(20, 20);
+        let ctx = Context::headless(20, 20).block();
         let stage = ctx
             .new_stage()
             .with_lighting(false)
@@ -1282,7 +1285,7 @@ mod test {
 
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
-        let img = frame.read_image().unwrap();
+        let img = frame.read_image().block().unwrap();
         img_diff::assert_img_eq("gltf/minimal_mesh.png", img);
     }
 
@@ -1291,7 +1294,7 @@ mod test {
     //
     // This ensures we are decoding images correctly.
     fn gltf_images() {
-        let ctx = Context::headless(100, 100);
+        let ctx = Context::headless(100, 100).block();
         let stage = ctx
             .new_stage()
             .with_lighting(false)
@@ -1333,14 +1336,14 @@ mod test {
 
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
-        let img = frame.read_linear_image().unwrap();
+        let img = frame.read_linear_image().block().unwrap();
         img_diff::assert_img_eq("gltf/images.png", img);
     }
 
     #[test]
     fn simple_texture() {
         let size = 100;
-        let ctx = Context::headless(size, size);
+        let ctx = Context::headless(size, size).block();
         let stage = ctx
             .new_stage()
             .with_background_color(Vec3::splat(0.0).extend(1.0))
@@ -1359,7 +1362,7 @@ mod test {
 
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
-        let img = frame.read_image().unwrap();
+        let img = frame.read_image().block().unwrap();
         img_diff::assert_img_eq("gltf/simple_texture.png", img);
     }
 
@@ -1367,7 +1370,7 @@ mod test {
     // Demonstrates how to load and render a gltf file containing lighting and a
     // normal map.
     fn normal_mapping_brick_sphere() {
-        let ctx = Context::headless(1920, 1080);
+        let ctx = Context::headless(1920, 1080).block();
         let stage = ctx
             .new_stage()
             .with_lighting(true)
@@ -1379,13 +1382,13 @@ mod test {
 
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
-        let img = frame.read_image().unwrap();
+        let img = frame.read_image().block().unwrap();
         img_diff::assert_img_eq("gltf/normal_mapping_brick_sphere.png", img);
     }
 
     #[test]
     fn rigged_fox() {
-        let ctx = Context::headless(256, 256);
+        let ctx = Context::headless(256, 256).block();
         let stage = ctx
             .new_stage()
             .with_lighting(false)
@@ -1413,14 +1416,14 @@ mod test {
         // render a frame without vertex skinning as a baseline
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
-        let img = frame.read_image().unwrap();
+        let img = frame.read_image().block().unwrap();
         img_diff::assert_img_eq("gltf/skinning/rigged_fox_no_skinning.png", img);
 
         // render a frame with vertex skinning to ensure our rigging is correct
         stage.set_has_vertex_skinning(true);
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
-        let img = frame.read_image().unwrap();
+        let img = frame.read_image().block().unwrap();
         img_diff::assert_img_eq_cfg(
             "gltf/skinning/rigged_fox_no_skinning.png",
             img,
@@ -1469,7 +1472,7 @@ mod test {
         // Test that the camera has the expected translation,
         // taking into account that the gltf files may have been
         // saved with Y up, or with Z up
-        let ctx = Context::headless(100, 100);
+        let ctx = Context::headless(100, 100).block();
         let stage = ctx.new_stage();
         let doc = stage
             .load_gltf_document_from_path(

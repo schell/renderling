@@ -436,16 +436,18 @@ impl Atlas {
     /// ## Panics
     /// Panics if the pixels read from the GPU cannot be converted into an
     /// `RgbaImage`.
-    pub fn atlas_img(&self, runtime: impl AsRef<WgpuRuntime>, layer: u32) -> RgbaImage {
+    pub async fn atlas_img(&self, runtime: impl AsRef<WgpuRuntime>, layer: u32) -> RgbaImage {
         let runtime = runtime.as_ref();
         let buffer = self.atlas_img_buffer(runtime, layer);
-        buffer.into_linear_rgba(&runtime.device).unwrap()
+        buffer.into_linear_rgba(&runtime.device).await.unwrap()
     }
 
-    pub fn read_images(&self, runtime: impl AsRef<WgpuRuntime>) -> Vec<RgbaImage> {
+    // It's ok to hold this lock because this is just for testing.
+    #[allow(clippy::await_holding_lock)]
+    pub async fn read_images(&self, runtime: impl AsRef<WgpuRuntime>) -> Vec<RgbaImage> {
         let mut images = vec![];
         for i in 0..self.layers.read().unwrap().len() {
-            images.push(self.atlas_img(runtime.as_ref(), i as u32));
+            images.push(self.atlas_img(runtime.as_ref(), i as u32).await);
         }
         images
     }
@@ -936,6 +938,7 @@ mod test {
         material::Materials,
         pbr::Material,
         stage::Vertex,
+        test::BlockOnFuture,
         transform::Transform,
         Context,
     };
@@ -947,8 +950,9 @@ mod test {
     // Ensures that textures are packed and rendered correctly.
     fn atlas_uv_mapping() {
         log::info!("{:?}", std::env::current_dir());
-        let ctx =
-            Context::headless(32, 32).with_default_atlas_texture_size(UVec3::new(1024, 1024, 2));
+        let ctx = Context::headless(32, 32)
+            .block()
+            .with_default_atlas_texture_size(UVec3::new(1024, 1024, 2));
         let stage = ctx
             .new_stage()
             .with_background_color(Vec3::splat(0.0).extend(1.0))
@@ -995,7 +999,7 @@ mod test {
         log::info!("rendering");
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
-        let img = frame.read_image().unwrap();
+        let img = frame.read_image().block().unwrap();
         img_diff::assert_img_eq("atlas/uv_mapping.png", img);
     }
 
@@ -1008,7 +1012,7 @@ mod test {
         let sheet_h = icon_h * 3;
         let w = sheet_w * 3 + 2;
         let h = sheet_h;
-        let ctx = Context::headless(w, h);
+        let ctx = Context::headless(w, h).block();
         let stage = ctx
             .new_stage()
             .with_background_color(Vec4::new(1.0, 1.0, 0.0, 1.0));
@@ -1085,7 +1089,7 @@ mod test {
 
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
-        let img = frame.read_image().unwrap();
+        let img = frame.read_image().block().unwrap();
         img_diff::assert_img_eq("atlas/uv_wrapping.png", img);
     }
 
@@ -1098,7 +1102,7 @@ mod test {
         let sheet_h = icon_h * 3;
         let w = sheet_w * 3 + 2;
         let h = sheet_h;
-        let ctx = Context::headless(w, h);
+        let ctx = Context::headless(w, h).block();
         let stage = ctx
             .new_stage()
             .with_background_color(Vec4::new(1.0, 1.0, 0.0, 1.0));
@@ -1178,7 +1182,7 @@ mod test {
 
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
-        let img = frame.read_image().unwrap();
+        let img = frame.read_image().block().unwrap();
         img_diff::assert_img_eq("atlas/negative_uv_wrapping.png", img);
     }
 
@@ -1202,8 +1206,9 @@ mod test {
     #[test]
     fn can_load_and_read_atlas_texture_array() {
         // tests that the atlas lays out textures in the way we expect
-        let ctx =
-            Context::headless(100, 100).with_default_atlas_texture_size(UVec3::new(512, 512, 2));
+        let ctx = Context::headless(100, 100)
+            .block()
+            .with_default_atlas_texture_size(UVec3::new(512, 512, 2));
         let stage = ctx.new_stage();
         let dirt = AtlasImage::from_path("../../img/dirt.jpg").unwrap();
         let sandstone = AtlasImage::from_path("../../img/sandstone.png").unwrap();
@@ -1213,17 +1218,18 @@ mod test {
             .set_images([dirt, sandstone, cheetah, texels])
             .unwrap();
         let materials: &Materials = stage.as_ref();
-        let img = materials.atlas().atlas_img(&ctx, 0);
+        let img = materials.atlas().atlas_img(&ctx, 0).block();
         img_diff::assert_img_eq("atlas/array0.png", img);
-        let img = materials.atlas().atlas_img(&ctx, 1);
+        let img = materials.atlas().atlas_img(&ctx, 1).block();
         img_diff::assert_img_eq("atlas/array1.png", img);
     }
 
     #[test]
     fn upkeep_trims_the_atlas() {
         // tests that Atlas::upkeep trims out unused images and repacks the atlas
-        let ctx =
-            Context::headless(100, 100).with_default_atlas_texture_size(UVec3::new(512, 512, 2));
+        let ctx = Context::headless(100, 100)
+            .block()
+            .with_default_atlas_texture_size(UVec3::new(512, 512, 2));
         let stage = ctx.new_stage();
         let dirt = AtlasImage::from_path("../../img/dirt.jpg").unwrap();
         let sandstone = AtlasImage::from_path("../../img/sandstone.png").unwrap();

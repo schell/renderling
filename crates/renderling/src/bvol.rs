@@ -595,7 +595,7 @@ impl BVol for Aabb {
 mod test {
     use glam::{Mat4, Quat};
 
-    use crate::{pbr::Material, stage::Vertex, Context};
+    use crate::{pbr::Material, stage::Vertex, test::BlockOnFuture, Context};
 
     use super::*;
 
@@ -649,7 +649,7 @@ mod test {
 
     #[test]
     fn bounding_box_from_min_max() {
-        let ctx = Context::headless(256, 256);
+        let ctx = Context::headless(256, 256).block();
         let stage = ctx
             .new_stage()
             .with_background_color(Vec4::ZERO)
@@ -717,7 +717,7 @@ mod test {
 
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
-        let img = frame.read_image().unwrap();
+        let img = frame.read_image().block().unwrap();
         img_diff::assert_img_eq("bvol/bounding_box/get_mesh.png", img);
     }
 

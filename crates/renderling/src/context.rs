@@ -116,9 +116,9 @@ async fn adapter(
     );
     let adapter = instance
         .request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::HighPerformance,
+            power_preference: wgpu::PowerPreference::default(),
             compatible_surface,
-            force_fallback_adapter: true,
+            force_fallback_adapter: false,
         })
         .await
         .context(CannotCreateAdaptorSnafu)?;
@@ -378,14 +378,14 @@ impl Frame {
     ///
     /// ## Note
     /// This operation can take a long time, depending on how big the screen is.
-    pub fn read_image(&self) -> Result<image::RgbaImage, TextureError> {
+    pub async fn read_image(&self) -> Result<image::RgbaImage, TextureError> {
         let size = self.get_size();
         let buffer = self.copy_to_buffer(size.x, size.y);
         let is_srgb = self.texture().format().is_srgb();
         let img = if is_srgb {
-            buffer.into_srgba(&self.runtime.device)?
+            buffer.into_srgba(&self.runtime.device).await?
         } else {
-            buffer.into_linear_rgba(&self.runtime.device)?
+            buffer.into_linear_rgba(&self.runtime.device).await?
         };
         Ok(img)
     }
@@ -399,11 +399,11 @@ impl Frame {
     ///
     /// ## Note
     /// This operation can take a long time, depending on how big the screen is.
-    pub fn read_srgb_image(&self) -> Result<image::RgbaImage, TextureError> {
+    pub async fn read_srgb_image(&self) -> Result<image::RgbaImage, TextureError> {
         let size = self.get_size();
         let buffer = self.copy_to_buffer(size.x, size.y);
         log::trace!("read image has the format: {:?}", buffer.format);
-        buffer.into_srgba(&self.runtime.device)
+        buffer.into_srgba(&self.runtime.device).await
     }
     /// Read the frame into an image.
     ///
@@ -414,10 +414,10 @@ impl Frame {
     ///
     /// ## Note
     /// This operation can take a long time, depending on how big the screen is.
-    pub fn read_linear_image(&self) -> Result<image::RgbaImage, TextureError> {
+    pub async fn read_linear_image(&self) -> Result<image::RgbaImage, TextureError> {
         let size = self.get_size();
         let buffer = self.copy_to_buffer(size.x, size.y);
-        buffer.into_linear_rgba(&self.runtime.device)
+        buffer.into_linear_rgba(&self.runtime.device).await
     }
 
     /// If self is `TargetFrame::Surface` this presents the surface frame.
@@ -439,7 +439,7 @@ pub(crate) struct GlobalStageConfig {
     pub(crate) use_compute_culling: bool,
 }
 
-/// Contains the adapter, device, queue, [`RenderTarget`] and initial atlas sizing.
+/// Contains the adapter, device, queue, [`RenderTarget`] and configuration.
 ///
 /// A `Context` is created to initialize rendering to a window, canvas or
 /// texture.
@@ -447,7 +447,7 @@ pub(crate) struct GlobalStageConfig {
 /// ```
 /// use renderling::Context;
 ///
-/// let ctx = Context::headless(100, 100);
+/// let ctx = futures_lite::future::block_on(Context::headless(100, 100));
 /// ```
 pub struct Context {
     runtime: WgpuRuntime,
@@ -542,16 +542,22 @@ impl Context {
 
     /// Create a new headless renderer.
     ///
-    /// Immediately blocks on [`Context::try_new_headless`].
-    ///
-    /// ## Note
-    /// Only available on native.
+    /// Immediately proxies to [`Context::try_new_headless`] and unwraps.
     ///
     /// ## Panics
     /// This function will panic if an adapter cannot be found. For example this
     /// would happen on machines without a GPU.
-    pub fn headless(width: u32, height: u32) -> Self {
-        futures_lite::future::block_on(Self::try_new_headless(width, height, None)).unwrap()
+    pub async fn headless(width: u32, height: u32) -> Self {
+        let result = Self::try_new_headless(width, height, None).await;
+        #[cfg(target_arch = "wasm32")]
+        {
+            use wasm_bindgen::UnwrapThrowExt;
+            result.expect_throw("Could not create context")
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            result.expect("Could not create context")
+        }
     }
 
     pub fn get_size(&self) -> UVec2 {

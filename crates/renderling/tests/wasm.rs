@@ -92,7 +92,7 @@ async fn can_clear_background() {
         .with_background_color(Vec4::new(1.0, 0.0, 0.0, 1.0));
     let frame = ctx.get_next_frame().unwrap();
     stage.render(&frame.view());
-    let seen = frame.read_image().unwrap();
+    let seen = frame.read_image().await.unwrap();
     assert_img_eq("cmy_triangle/hdr.png", seen).await;
 }
 

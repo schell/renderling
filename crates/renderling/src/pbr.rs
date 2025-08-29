@@ -720,6 +720,7 @@ mod test {
         pbr::Material,
         prelude::glam::{Vec3, Vec4},
         stage::Vertex,
+        test::BlockOnFuture,
         transform::Transform,
     };
 
@@ -730,7 +731,7 @@ mod test {
     // see https://learnopengl.com/PBR/Lighting
     fn pbr_metallic_roughness_spheres() {
         let ss = 600;
-        let ctx = crate::Context::headless(ss, ss);
+        let ctx = crate::Context::headless(ss, ss).block();
         let stage = ctx.new_stage();
 
         let radius = 0.5;
@@ -807,7 +808,7 @@ mod test {
 
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
-        let img = frame.read_image().unwrap();
+        let img = frame.read_image().block().unwrap();
         img_diff::assert_img_eq("pbr/metallic_roughness_spheres.png", img);
     }
 }

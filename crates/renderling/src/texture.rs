@@ -2,7 +2,7 @@
 use core::sync::atomic::AtomicUsize;
 use std::{
     ops::Deref,
-    sync::{Arc, LazyLock},
+    sync::{Arc, LazyLock, Mutex},
 };
 
 use craballoc::runtime::WgpuRuntime;
@@ -41,6 +41,9 @@ pub enum TextureError {
 
     #[snafu(display("Unsupported format"))]
     UnsupportedFormat,
+
+    #[snafu(display("Buffer async error: {source}"))]
+    BufferAsync { source: wgpu::BufferAsyncError },
 
     #[snafu(display("Driver poll error: {source}"))]
     Poll { source: wgpu::PollError },
@@ -668,7 +671,7 @@ impl Texture {
         }
     }
 
-    pub fn read_hdr_image(
+    pub async fn read_hdr_image(
         &self,
         runtime: impl AsRef<WgpuRuntime>,
     ) -> Result<Rgba32FImage, TextureError> {
@@ -684,7 +687,7 @@ impl Texture {
             2,
         );
 
-        let pixels = copied.pixels(&runtime.device)?;
+        let pixels = copied.pixels(&runtime.device).await?;
         let pixels = bytemuck::cast_slice::<u8, u16>(pixels.as_slice())
             .iter()
             .map(|p| half::f16::from_bits(*p).to_f32())
@@ -762,14 +765,14 @@ impl Texture {
     }
 }
 
-pub fn read_depth_texture_to_image(
+pub async fn read_depth_texture_to_image(
     runtime: impl AsRef<WgpuRuntime>,
     width: usize,
     height: usize,
     texture: &wgpu::Texture,
 ) -> Result<Option<image::GrayImage>> {
     let depth_copied_buffer = Texture::read(runtime.as_ref(), texture, width, height, 1, 4);
-    let pixels = depth_copied_buffer.pixels(&runtime.as_ref().device)?;
+    let pixels = depth_copied_buffer.pixels(&runtime.as_ref().device).await?;
     let pixels = bytemuck::cast_slice::<u8, f32>(&pixels)
         .iter()
         .copied()
@@ -785,14 +788,14 @@ pub fn read_depth_texture_to_image(
     ))
 }
 
-pub fn read_depth_texture_f32(
+pub async fn read_depth_texture_f32(
     runtime: impl AsRef<WgpuRuntime>,
     width: usize,
     height: usize,
     texture: &wgpu::Texture,
 ) -> Result<Option<image::ImageBuffer<Luma<f32>, Vec<f32>>>> {
     let depth_copied_buffer = Texture::read(runtime.as_ref(), texture, width, height, 1, 4);
-    let pixels = depth_copied_buffer.pixels(&runtime.as_ref().device)?;
+    let pixels = depth_copied_buffer.pixels(&runtime.as_ref().device).await?;
     let pixels = bytemuck::cast_slice::<u8, f32>(&pixels).to_vec();
     Ok(image::ImageBuffer::from_raw(
         width as u32,
@@ -844,18 +847,19 @@ impl DepthTexture {
     /// ## Panics
     /// This may panic if the depth texture has a multisample count greater than
     /// 1.
-    pub fn read_image(&self) -> Result<Option<image::GrayImage>> {
-        // TODO: impl AsRef<WgpuRuntime>
+    pub async fn read_image(&self) -> Result<Option<image::GrayImage>> {
         read_depth_texture_to_image(
             &self.runtime,
             self.width() as usize,
             self.height() as usize,
             &self.texture,
         )
+        .await
     }
 }
 
 /// Helper for retreiving an image from a texture.
+#[derive(Clone, Copy)]
 pub struct BufferDimensions {
     pub width: usize,
     pub height: usize,
@@ -879,6 +883,44 @@ impl BufferDimensions {
     }
 }
 
+/// A buffer that is being mapped.
+///
+/// This implements `Future<Output = Vec<u8>>`.
+pub struct MappedBuffer<'a> {
+    waker: Arc<Mutex<Option<std::task::Waker>>>,
+    result: Arc<Mutex<Option<Result<(), wgpu::BufferAsyncError>>>>,
+    dimensions: BufferDimensions,
+    buffer_slice: wgpu::BufferSlice<'a>,
+}
+
+impl std::future::Future for MappedBuffer<'_> {
+    type Output = Result<Vec<u8>, wgpu::BufferAsyncError>;
+
+    fn poll(
+        self: core::pin::Pin<&mut Self>,
+        cx: &mut core::task::Context<'_>,
+    ) -> core::task::Poll<Self::Output> {
+        let this = self.deref();
+        if let Some(result) = this.result.lock().unwrap().take() {
+            std::task::Poll::Ready(result.map(|()| {
+                let padded_buffer = this.buffer_slice.get_mapped_range();
+                let mut unpadded_buffer = vec![];
+                // from the padded_buffer we write just the unpadded bytes into the
+                // unpadded_buffer
+                for chunk in padded_buffer.chunks(self.dimensions.padded_bytes_per_row) {
+                    unpadded_buffer
+                        .extend_from_slice(&chunk[..self.dimensions.unpadded_bytes_per_row]);
+                }
+                unpadded_buffer
+            }))
+        } else {
+            let waker = cx.waker().clone();
+            *this.waker.lock().unwrap() = Some(waker);
+            std::task::Poll::Pending
+        }
+    }
+}
+
 /// Helper for retreiving a rendered frame.
 pub struct CopiedTextureBuffer {
     pub format: wgpu::TextureFormat,
@@ -887,52 +929,48 @@ pub struct CopiedTextureBuffer {
 }
 
 impl CopiedTextureBuffer {
-    /// Access the raw unpadded pixels of the buffer.
-    pub fn pixels(&self, device: &wgpu::Device) -> Result<Vec<u8>> {
+    /// Return a mapped buffer that can be `await`ed for data from the GPU.
+    fn get_mapped_buffer(&self) -> MappedBuffer<'_> {
         let buffer_slice = self.buffer.slice(..);
-        buffer_slice.map_async(wgpu::MapMode::Read, |_| {});
-        device.poll(wgpu::PollType::Wait).context(PollSnafu)?;
-
-        let padded_buffer = buffer_slice.get_mapped_range();
-        let mut unpadded_buffer = vec![];
-        // from the padded_buffer we write just the unpadded bytes into the
-        // unpadded_buffer
-        for chunk in padded_buffer.chunks(self.dimensions.padded_bytes_per_row) {
-            unpadded_buffer.extend_from_slice(&chunk[..self.dimensions.unpadded_bytes_per_row]);
+        let waker: Arc<Mutex<Option<std::task::Waker>>> = Default::default();
+        let result = Arc::new(Mutex::new(None));
+        buffer_slice.map_async(wgpu::MapMode::Read, {
+            let waker = waker.clone();
+            let result = result.clone();
+            move |res| {
+                let mut result = result.lock().unwrap();
+                *result = Some(res);
+                if let Some(waker) = waker.lock().unwrap().take() {
+                    waker.wake();
+                }
+            }
+        });
+        MappedBuffer {
+            result,
+            waker,
+            buffer_slice,
+            dimensions: self.dimensions,
         }
-        Ok(unpadded_buffer)
+    }
+
+    /// Access the raw unpadded pixels of the buffer.
+    ///
+    /// This calls `wgpu::Device::poll`.
+    pub async fn pixels(&self, device: &wgpu::Device) -> Result<Vec<u8>> {
+        let buffer = self.get_mapped_buffer();
+        device.poll(wgpu::PollType::Wait).context(PollSnafu)?;
+        buffer.await.context(BufferAsyncSnafu)
     }
 
     /// Convert the post render buffer into an RgbaImage.
     pub async fn convert_to_rgba(self) -> Result<image::RgbaImage, TextureError> {
-        let buffer_slice = self.buffer.slice(..);
-        let (tx, rx) = std::sync::mpsc::channel();
-        buffer_slice.map_async(wgpu::MapMode::Read, {
-            move |result| {
-                tx.send(result).unwrap();
-            }
-        });
-        loop {
-            if let Ok(result) = rx.try_recv() {
-                result.context(CouldNotMapBufferSnafu)?;
-                break;
-            } else {
-                futures_lite::future::yield_now().await;
-            }
-        }
-
-        let padded_buffer = buffer_slice.get_mapped_range();
-        let mut unpadded_buffer = vec![];
-        // from the padded_buffer we write just the unpadded bytes into the
-        // unpadded_buffer
-        for chunk in padded_buffer.chunks(self.dimensions.padded_bytes_per_row) {
-            unpadded_buffer.extend_from_slice(&chunk[..self.dimensions.unpadded_bytes_per_row]);
-        }
+        let fut_buffer = self.get_mapped_buffer();
+        let pixels = fut_buffer.await.context(BufferAsyncSnafu)?;
         let mut img_buffer: image::ImageBuffer<image::Rgba<u8>, Vec<u8>> =
             image::ImageBuffer::from_raw(
                 self.dimensions.width as u32,
                 self.dimensions.height as u32,
-                unpadded_buffer,
+                pixels,
             )
             .context(CouldNotConvertImageBufferSnafu)?;
         if self.format.is_srgb() {
@@ -953,7 +991,7 @@ impl CopiedTextureBuffer {
     /// `Sp` is the sub-pixel type. eg, `u8` or `f32`
     ///
     /// `P` is the pixel type. eg, `Rgba<u8>` or `Luma<f32>`
-    pub fn into_image<Sp, P>(
+    pub async fn into_image<Sp, P>(
         self,
         device: &wgpu::Device,
     ) -> Result<image::DynamicImage, TextureError>
@@ -962,7 +1000,7 @@ impl CopiedTextureBuffer {
         P: image::Pixel<Subpixel = Sp>,
         image::DynamicImage: From<image::ImageBuffer<P, Vec<Sp>>>,
     {
-        let pixels = self.pixels(device)?;
+        let pixels = self.pixels(device).await?;
         let coerced_pixels: &[Sp] = bytemuck::cast_slice(&pixels);
         let img_buffer: image::ImageBuffer<P, Vec<Sp>> = image::ImageBuffer::from_raw(
             self.dimensions.width as u32,
@@ -974,8 +1012,8 @@ impl CopiedTextureBuffer {
     }
 
     /// Convert the post render buffer into an internal-format [`AtlasImage`].
-    pub fn into_atlas_image(self, device: &wgpu::Device) -> Result<AtlasImage, TextureError> {
-        let pixels = self.pixels(device)?;
+    pub async fn into_atlas_image(self, device: &wgpu::Device) -> Result<AtlasImage, TextureError> {
+        let pixels = self.pixels(device).await?;
         let img = AtlasImage {
             pixels,
             size: UVec2::new(self.dimensions.width as u32, self.dimensions.height as u32),
@@ -992,7 +1030,7 @@ impl CopiedTextureBuffer {
     /// correct transfer function if needed.
     ///
     /// Assumes the texture is in `Rgba8` format.
-    pub fn into_rgba(
+    pub async fn into_rgba(
         self,
         device: &wgpu::Device,
         // `true` - the resulting image will be in a linear color space
@@ -1000,7 +1038,10 @@ impl CopiedTextureBuffer {
         linear: bool,
     ) -> Result<image::RgbaImage, TextureError> {
         let format = self.format;
-        let mut img_buffer = self.into_image::<u8, image::Rgba<u8>>(device)?.into_rgba8();
+        let mut img_buffer = self
+            .into_image::<u8, image::Rgba<u8>>(device)
+            .await?
+            .into_rgba8();
         let linear_xfer = format.is_srgb() && linear;
         let opto_xfer = !format.is_srgb() && !linear;
         let should_xfer = linear_xfer || opto_xfer;
@@ -1033,9 +1074,15 @@ impl CopiedTextureBuffer {
     ///
     /// Ensures that the pixels are in a linear color space by applying the
     /// linear transfer if the texture this buffer was copied from was sRGB.
-    pub fn into_linear_rgba(self, device: &wgpu::Device) -> Result<image::RgbaImage, TextureError> {
+    pub async fn into_linear_rgba(
+        self,
+        device: &wgpu::Device,
+    ) -> Result<image::RgbaImage, TextureError> {
         let format = self.format;
-        let mut img_buffer = self.into_image::<u8, image::Rgba<u8>>(device)?.into_rgba8();
+        let mut img_buffer = self
+            .into_image::<u8, image::Rgba<u8>>(device)
+            .await?
+            .into_rgba8();
         if format.is_srgb() {
             log::trace!(
                 "converting by applying linear transfer fn to srgb pixels (sRGB -> linear)"
@@ -1056,9 +1103,12 @@ impl CopiedTextureBuffer {
     ///
     /// Ensures that the pixels are in a linear color space by applying the
     /// linear transfer if the texture this buffer was copied from was sRGB.
-    pub fn into_srgba(self, device: &wgpu::Device) -> Result<image::RgbaImage, TextureError> {
+    pub async fn into_srgba(self, device: &wgpu::Device) -> Result<image::RgbaImage, TextureError> {
         let format = self.format;
-        let mut img_buffer = self.into_image::<u8, image::Rgba<u8>>(device)?.into_rgba8();
+        let mut img_buffer = self
+            .into_image::<u8, image::Rgba<u8>>(device)
+            .await?
+            .into_rgba8();
         if !format.is_srgb() {
             log::trace!(
                 "converting by applying opto transfer fn to linear pixels (linear -> sRGB)"
@@ -1078,13 +1128,13 @@ impl CopiedTextureBuffer {
 
 #[cfg(test)]
 mod test {
-    use crate::Context;
+    use crate::{test::BlockOnFuture, Context};
 
     use super::Texture;
 
     #[test]
     fn generate_mipmaps() {
-        let r = Context::headless(10, 10);
+        let r = Context::headless(10, 10).block();
         let img = image::open("../../img/sandstone.png").unwrap();
         let width = img.width();
         let height = img.height();
@@ -1119,7 +1169,7 @@ mod test {
                 0,
                 None,
             );
-            let pixels = copied_buffer.pixels(r.get_device()).unwrap();
+            let pixels = copied_buffer.pixels(r.get_device()).block().unwrap();
             assert_eq!((mip_width * mip_height * 4) as usize, pixels.len());
             let img: image::RgbaImage =
                 image::ImageBuffer::from_vec(mip_width, mip_height, pixels).unwrap();
