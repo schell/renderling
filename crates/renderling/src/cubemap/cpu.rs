@@ -273,6 +273,7 @@ mod test {
         math::{UNIT_INDICES, UNIT_POINTS},
         stage::Vertex,
         test::BlockOnFuture,
+        texture::CopiedTextureBuffer,
     };
 
     use super::*;
@@ -513,7 +514,7 @@ mod test {
 
         let mut cpu_cubemap = vec![];
         for i in 0..6 {
-            let img = Texture::read_from(
+            let img = CopiedTextureBuffer::read_from(
                 &ctx,
                 &scene_cubemap.cubemap_texture,
                 width as usize,

@@ -160,6 +160,7 @@ pub mod debug;
 pub mod draw;
 pub mod geometry;
 pub mod ibl;
+pub mod internal;
 pub mod light;
 #[cfg(cpu)]
 mod linkage;

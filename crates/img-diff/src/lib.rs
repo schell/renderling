@@ -2,10 +2,12 @@
 use glam::{Vec3, Vec4, Vec4Swizzles};
 use image::{DynamicImage, Luma, Rgb, Rgb32FImage, Rgba32FImage};
 use snafu::prelude::*;
-use std::{path::Path, sync::LazyLock};
+use std::path::Path;
 
-const TEST_IMG_DIR: &str = concat!(std::env!("CARGO_WORKSPACE_DIR"), "test_img");
-const TEST_OUTPUT_DIR: &str = concat!(std::env!("CARGO_WORKSPACE_DIR"), "test_output");
+pub const TEST_IMG_DIR: &str = concat!(std::env!("CARGO_WORKSPACE_DIR"), "test_img");
+pub const TEST_OUTPUT_DIR: &str = concat!(std::env!("CARGO_WORKSPACE_DIR"), "test_output");
+pub const WASM_TEST_OUTPUT_DIR: &str =
+    concat!(std::env!("CARGO_WORKSPACE_DIR"), "test_output/wasm");
 const PIXEL_MAGNITUDE_THRESHOLD: f32 = 0.1;
 pub const LOW_PIXEL_THRESHOLD: f32 = 0.02;
 const IMAGE_DIFF_THRESHOLD: f32 = 0.05;
@@ -41,6 +43,8 @@ pub struct DiffCfg {
     pub image_threshold: f32,
     /// The name of the test.
     pub test_name: Option<&'static str>,
+    /// The output directory to store comparisons in.
+    pub output_dir: &'static str,
 }
 
 impl Default for DiffCfg {
@@ -49,6 +53,7 @@ impl Default for DiffCfg {
             pixel_threshold: PIXEL_MAGNITUDE_THRESHOLD,
             image_threshold: IMAGE_DIFF_THRESHOLD,
             test_name: None,
+            output_dir: TEST_OUTPUT_DIR,
         }
     }
 }
@@ -124,13 +129,21 @@ fn get_results(
     }
 }
 
-pub fn save(filename: impl AsRef<std::path::Path>, seen: impl Into<DynamicImage>) {
-    let path = Path::new(TEST_OUTPUT_DIR).join(filename);
+pub fn save_to(
+    dir: impl AsRef<std::path::Path>,
+    filename: impl AsRef<std::path::Path>,
+    seen: impl Into<DynamicImage>,
+) -> Result<(), String> {
+    let path = dir.as_ref().join(filename);
     std::fs::create_dir_all(path.parent().unwrap()).unwrap();
     let img: DynamicImage = seen.into();
     let img_buffer = img.into_rgba8();
     let img = DynamicImage::from(img_buffer);
-    img.save(path).unwrap();
+    img.save(path).map_err(|e| e.to_string())
+}
+
+pub fn save(filename: impl AsRef<std::path::Path>, seen: impl Into<DynamicImage>) {
+    save_to(TEST_OUTPUT_DIR, filename, seen).unwrap()
 }
 
 pub fn assert_eq_cfg(
@@ -146,6 +159,7 @@ pub fn assert_eq_cfg(
         pixel_threshold,
         image_threshold,
         test_name,
+        output_dir,
     } = cfg;
     let results = match get_results(&lhs, &rhs, pixel_threshold) {
         Ok(maybe_diff) => maybe_diff,
@@ -171,7 +185,7 @@ pub fn assert_eq_cfg(
             return Ok(());
         }
 
-        let mut dir = Path::new(TEST_OUTPUT_DIR).join(test_name.unwrap_or(filename));
+        let mut dir = Path::new(output_dir).join(test_name.unwrap_or(filename));
         dir.set_extension("");
         std::fs::create_dir_all(&dir).expect("cannot create test output dir");
         let expected = dir.join("expected.png");

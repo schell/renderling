@@ -30,7 +30,6 @@ ui = ["dep:glyph_brush", "dep:loading-bytes", "dep:lyon"]
 wasm = ["wgpu/fragile-send-sync-non-atomic-wasm"]
 debug-slab = []
 light-tiling-stats = [ "dep:plotters" ]
-test-helpers = []
 
 [build-dependencies]
 cfg_aliases.workspace = true
@@ -75,6 +74,10 @@ snafu = {workspace = true}
 wgpu = { workspace = true, features = ["spirv"] }
 winit = { workspace = true, optional = true }
 
+# dependencies for WASM CPU code
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen.workspace = true
+
 [dev-dependencies]
 assert_approx_eq.workspace = true
 ctor = "0.2.2"
@@ -87,7 +90,6 @@ icosahedron = "0.1"
 img-diff = { path = "../img-diff" }
 naga.workspace = true
 ttf-parser = "0.20.0"
-wasm-bindgen.workspace = true
 wasm-bindgen-test.workspace = true
 web-sys.workspace = true
 wgpu-core.workspace = true

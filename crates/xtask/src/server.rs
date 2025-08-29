@@ -12,6 +12,7 @@ use axum::{
     Json, Router,
 };
 use image::DynamicImage;
+use img_diff::DiffCfg;
 use wire_types::Error;
 
 pub async fn serve() {
@@ -20,6 +21,8 @@ pub async fn serve() {
         .route("/test_img/{*path}", get(static_file))
         .route("/assert_img_eq/{*filename}", options(accept))
         .route("/assert_img_eq/{*filename}", post(assert_img_eq))
+        .route("/save/{*filename}", options(accept))
+        .route("/save/{*filename}", post(save))
         .route("/{*rest}", any(accept));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:4000")
         .await
@@ -58,11 +61,8 @@ async fn static_file(Path(path): Path<String>) -> Result<Response, StatusCode> {
     }
 }
 
-async fn assert_img_eq_inner(
-    filename: &str,
-    img: wire_types::Image,
-) -> Result<(), wire_types::Error> {
-    let seen = match img.pixel {
+fn image_from_wire(img: wire_types::Image) -> Result<image::DynamicImage, Error> {
+    match img.pixel {
         wire_types::PixelType::Rgb8 => {
             image::RgbImage::from_raw(img.width, img.height, img.bytes).map(DynamicImage::from)
         }
@@ -74,9 +74,24 @@ async fn assert_img_eq_inner(
         let description = "could not construct image".to_owned();
         log::error!("{description}");
         Error { description }
-    })?;
+    })
+}
 
-    img_diff::assert_img_eq_cfg_result(filename, seen, Default::default()).map_err(|description| {
+async fn assert_img_eq_inner(
+    filename: &str,
+    img: wire_types::Image,
+) -> Result<(), wire_types::Error> {
+    let seen = image_from_wire(img)?;
+
+    img_diff::assert_img_eq_cfg_result(
+        filename,
+        seen,
+        DiffCfg {
+            output_dir: img_diff::WASM_TEST_OUTPUT_DIR,
+            ..Default::default()
+        },
+    )
+    .map_err(|description| {
         log::error!("{description}");
         Error { description }
     })
@@ -92,6 +107,31 @@ async fn assert_img_eq(
     log::info!("headers: {headers:#?}");
 
     let result = assert_img_eq_inner(&filename, img).await;
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("accept", "*/*")
+        .header("access-control-allow-origin", "*")
+        .header("access-control-allow-methods", "*")
+        .header("access-control-allow-headers", "*")
+        .body(Json(result).into_response().into_body())
+        .unwrap()
+}
+
+async fn save_inner(filename: &str, img: wire_types::Image) -> Result<(), Error> {
+    let img = image_from_wire(img)?;
+    img_diff::save_to(img_diff::WASM_TEST_OUTPUT_DIR, filename, img)
+        .map_err(|description| Error { description })
+}
+
+async fn save(
+    headers: HeaderMap,
+    Path(parts): Path<Vec<String>>,
+    Json(img): Json<wire_types::Image>,
+) -> Response {
+    let filename = parts.join("/");
+    log::info!("asserting '{filename}'");
+    log::info!("headers: {headers:#?}");
+    let result = save_inner(&filename, img).await;
     Response::builder()
         .status(StatusCode::OK)
         .header("accept", "*/*")

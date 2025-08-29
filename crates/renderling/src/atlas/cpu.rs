@@ -407,11 +407,13 @@ impl Atlas {
         let tex = self.get_texture();
         let size = tex.texture.size();
         let (channels, subpixel_bytes) =
-            crate::texture::wgpu_texture_format_channels_and_subpixel_bytes(tex.texture.format());
+            crate::texture::wgpu_texture_format_channels_and_subpixel_bytes_todo(
+                tex.texture.format(),
+            );
         log::info!("atlas_texture_format: {:#?}", tex.texture.format());
         log::info!("atlas_texture_channels: {channels:#?}");
         log::info!("atlas_texture_subpixel_bytes: {subpixel_bytes:#?}");
-        Texture::read_from(
+        CopiedTextureBuffer::read_from(
             runtime,
             &tex.texture,
             size.width as usize,

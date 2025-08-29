@@ -39,8 +39,8 @@ pub enum TextureError {
     #[snafu(display("Could not create an image buffer"))]
     CouldNotCreateImageBuffer,
 
-    #[snafu(display("Unsupported format"))]
-    UnsupportedFormat,
+    #[snafu(display("Unsupported format: {format:#?}"))]
+    UnsupportedFormat { format: wgpu::TextureFormat },
 
     #[snafu(display("Buffer async error: {source}"))]
     BufferAsync { source: wgpu::BufferAsyncError },
@@ -51,8 +51,10 @@ pub enum TextureError {
 
 type Result<T, E = TextureError> = std::result::Result<T, E>;
 
-pub fn wgpu_texture_format_channels_and_subpixel_bytes(format: wgpu::TextureFormat) -> (u32, u32) {
-    match format {
+pub fn wgpu_texture_format_channels_and_subpixel_bytes(
+    format: wgpu::TextureFormat,
+) -> Result<(u32, u32)> {
+    Ok(match format {
         wgpu::TextureFormat::Depth32Float => (1, 4),
         wgpu::TextureFormat::R32Float => (1, 4),
         wgpu::TextureFormat::Rg16Float => (2, 2),
@@ -61,8 +63,15 @@ pub fn wgpu_texture_format_channels_and_subpixel_bytes(format: wgpu::TextureForm
         wgpu::TextureFormat::Rgba32Float => (4, 4),
         wgpu::TextureFormat::Rgba8UnormSrgb => (4, 1),
         wgpu::TextureFormat::R8Unorm => (1, 1),
-        _ => todo!("temporarily unsupported format '{format:?}'"),
-    }
+        f => UnsupportedFormatSnafu { format: f }.fail()?,
+    })
+}
+
+/// ## Panics
+pub fn wgpu_texture_format_channels_and_subpixel_bytes_todo(
+    format: wgpu::TextureFormat,
+) -> (u32, u32) {
+    wgpu_texture_format_channels_and_subpixel_bytes(format).unwrap()
 }
 
 static NEXT_TEXTURE_ID: LazyLock<Arc<AtomicUsize>> = LazyLock::new(|| Arc::new(0.into()));
@@ -598,7 +607,7 @@ impl Texture {
         channels: usize,
         subpixel_bytes: usize,
     ) -> CopiedTextureBuffer {
-        Self::read_from(
+        CopiedTextureBuffer::read_from(
             runtime,
             texture,
             width,
@@ -608,67 +617,6 @@ impl Texture {
             0,
             None,
         )
-    }
-
-    /// Read the texture from the GPU.
-    ///
-    /// To read the texture you must provide the width, height, the number of
-    /// color/alpha channels and the number of bytes in the underlying
-    /// subpixel type (usually u8=1, u16=2 or f32=4).
-    #[allow(clippy::too_many_arguments)]
-    pub fn read_from(
-        runtime: impl AsRef<WgpuRuntime>,
-        texture: &wgpu::Texture,
-        width: usize,
-        height: usize,
-        channels: usize,
-        subpixel_bytes: usize,
-        mip_level: u32,
-        origin: Option<wgpu::Origin3d>,
-    ) -> CopiedTextureBuffer {
-        let runtime = runtime.as_ref();
-        let device = &runtime.device;
-        let queue = &runtime.queue;
-        let dimensions = BufferDimensions::new(channels, subpixel_bytes, width, height);
-        // The output buffer lets us retrieve the self as an array
-        let buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("Texture::read buffer"),
-            size: (dimensions.padded_bytes_per_row * dimensions.height) as u64,
-            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
-        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("post render screen capture encoder"),
-        });
-        let mut source = texture.as_image_copy();
-        source.mip_level = mip_level;
-        if let Some(origin) = origin {
-            source.origin = origin;
-        }
-        // Copy the data from the surface texture to the buffer
-        encoder.copy_texture_to_buffer(
-            source,
-            wgpu::TexelCopyBufferInfo {
-                buffer: &buffer,
-                layout: wgpu::TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some(dimensions.padded_bytes_per_row as u32),
-                    rows_per_image: None,
-                },
-            },
-            wgpu::Extent3d {
-                width: dimensions.width as u32,
-                height: dimensions.height as u32,
-                depth_or_array_layers: 1,
-            },
-        );
-        queue.submit(std::iter::once(encoder.finish()));
-
-        CopiedTextureBuffer {
-            dimensions,
-            buffer,
-            format: texture.format(),
-        }
     }
 
     pub async fn read_hdr_image(
@@ -830,8 +778,9 @@ impl DepthTexture {
         runtime: impl AsRef<WgpuRuntime>,
         value: Texture,
     ) -> Result<Self, TextureError> {
-        if value.texture.format() != wgpu::TextureFormat::Depth32Float {
-            return UnsupportedFormatSnafu.fail();
+        let format = value.texture.format();
+        if format != wgpu::TextureFormat::Depth32Float {
+            return UnsupportedFormatSnafu { format }.fail();
         }
 
         Ok(Self {
@@ -1017,8 +966,11 @@ impl CopiedTextureBuffer {
         let img = AtlasImage {
             pixels,
             size: UVec2::new(self.dimensions.width as u32, self.dimensions.height as u32),
-            format: AtlasImageFormat::from_wgpu_texture_format(self.format)
-                .context(UnsupportedFormatSnafu)?,
+            format: AtlasImageFormat::from_wgpu_texture_format(self.format).context(
+                UnsupportedFormatSnafu {
+                    format: self.format,
+                },
+            )?,
             apply_linear_transfer: false,
         };
         Ok(img)
@@ -1124,11 +1076,90 @@ impl CopiedTextureBuffer {
 
         Ok(img_buffer)
     }
+
+    /// Read the texture from the GPU.
+    ///
+    /// To read the texture you must provide the width, height, the number of
+    /// color/alpha channels and the number of bytes in the underlying
+    /// subpixel type (usually u8=1, u16=2 or f32=4).
+    #[allow(clippy::too_many_arguments)]
+    pub fn read_from(
+        runtime: impl AsRef<WgpuRuntime>,
+        texture: &wgpu::Texture,
+        width: usize,
+        height: usize,
+        channels: usize,
+        subpixel_bytes: usize,
+        mip_level: u32,
+        origin: Option<wgpu::Origin3d>,
+    ) -> CopiedTextureBuffer {
+        let runtime = runtime.as_ref();
+        let device = &runtime.device;
+        let queue = &runtime.queue;
+        let dimensions = BufferDimensions::new(channels, subpixel_bytes, width, height);
+        // The output buffer lets us retrieve the self as an array
+        let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Texture::read buffer"),
+            size: (dimensions.padded_bytes_per_row * dimensions.height) as u64,
+            usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("post render screen capture encoder"),
+        });
+        let mut source = texture.as_image_copy();
+        source.mip_level = mip_level;
+        if let Some(origin) = origin {
+            source.origin = origin;
+        }
+        // Copy the data from the surface texture to the buffer
+        encoder.copy_texture_to_buffer(
+            source,
+            wgpu::TexelCopyBufferInfo {
+                buffer: &buffer,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(dimensions.padded_bytes_per_row as u32),
+                    rows_per_image: None,
+                },
+            },
+            wgpu::Extent3d {
+                width: dimensions.width as u32,
+                height: dimensions.height as u32,
+                depth_or_array_layers: 1,
+            },
+        );
+        queue.submit(std::iter::once(encoder.finish()));
+
+        CopiedTextureBuffer {
+            dimensions,
+            buffer,
+            format: texture.format(),
+        }
+    }
+
+    /// Copy the entire texture into a buffer, at mip `0`.
+    ///
+    /// Attempts to figure out the parameters to [`CopiedTextureBuffer::read_from`].
+    pub fn new(runtime: impl AsRef<WgpuRuntime>, texture: &wgpu::Texture) -> Result<Self> {
+        let (channels, subpixel_bytes) =
+            wgpu_texture_format_channels_and_subpixel_bytes(texture.format())?;
+        Ok(Self::read_from(
+            runtime,
+            texture,
+            texture.width() as usize,
+            texture.height() as usize,
+            channels as usize,
+            subpixel_bytes as usize,
+            0,
+            None,
+        ))
+    }
 }
 
 #[cfg(test)]
 mod test {
-    use crate::{test::BlockOnFuture, Context};
+    use crate::{test::BlockOnFuture, texture::CopiedTextureBuffer, Context};
 
     use super::Texture;
 
@@ -1153,13 +1184,13 @@ mod test {
         let mips = texture.generate_mips(&r, None, mip_level_count);
 
         let (channels, subpixel_bytes) =
-            super::wgpu_texture_format_channels_and_subpixel_bytes(texture.texture.format());
+            super::wgpu_texture_format_channels_and_subpixel_bytes_todo(texture.texture.format());
         for (level, mip) in mips.into_iter().enumerate() {
             let mip_level = level + 1;
             let mip_width = width >> mip_level;
             let mip_height = height >> mip_level;
             // save out the mips
-            let copied_buffer = Texture::read_from(
+            let copied_buffer = CopiedTextureBuffer::read_from(
                 &r,
                 &mip.texture,
                 mip_width as usize,

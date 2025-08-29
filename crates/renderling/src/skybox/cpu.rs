@@ -650,7 +650,7 @@ mod test {
     use glam::Vec3;
 
     use super::*;
-    use crate::{test::BlockOnFuture, Context};
+    use crate::{test::BlockOnFuture, texture::CopiedTextureBuffer, Context};
 
     #[test]
     fn hdr_skybox_scene() {
@@ -677,7 +677,7 @@ mod test {
 
         for i in 0..6 {
             // save out the irradiance face
-            let copied_buffer = Texture::read_from(
+            let copied_buffer = CopiedTextureBuffer::read_from(
                 &ctx,
                 &skybox.irradiance_cubemap.texture,
                 32,
@@ -700,7 +700,7 @@ mod test {
             for mip_level in 0..5 {
                 let mip_size = 128u32 >> mip_level;
                 // save out the prefiltered environment faces' mips
-                let copied_buffer = Texture::read_from(
+                let copied_buffer = CopiedTextureBuffer::read_from(
                     &ctx,
                     &skybox.prefiltered_environment_cubemap.texture,
                     mip_size as usize,
