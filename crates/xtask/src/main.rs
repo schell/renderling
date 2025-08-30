@@ -21,10 +21,14 @@ enum Command {
         #[clap(long)]
         from_cargo: bool,
     },
-    /// Run the webdriver proxy server
-    WebdriverProxy,
+    /// Run the WASM test server
+    WasmServer,
     /// Compile for WASM and run headless browser tests
-    TestWasm,
+    TestWasm {
+        /// Cargo args.
+        #[clap(last = true)]
+        args: Vec<String>,
+    },
 }
 
 #[derive(Parser)]
@@ -68,28 +72,28 @@ async fn main() {
             let paths = renderling_build::RenderlingPaths::new().unwrap();
             paths.generate_linkage(from_cargo, wgsl, only_fn_with_name);
         }
-        Command::TestWasm => {
+        Command::TestWasm { args } => {
             log::info!("testing WASM");
             let _proxy_handle = tokio::spawn(server::serve());
-            let mut test_handle = tokio::process::Command::new("wasm-pack")
-                .args([
-                    "test",
-                    "--headless",
-                    "--firefox",
-                    "crates/renderling",
-                    "--features",
-                    "wasm",
-                    "--jobs",
-                    "1",
-                ])
-                .spawn()
-                .unwrap();
+            let mut test_handle = tokio::process::Command::new("wasm-pack");
+            test_handle.args([
+                "test",
+                "--headless",
+                "--firefox",
+                "crates/renderling",
+                "--features",
+                "wasm",
+            ]);
+            if !args.is_empty() {
+                test_handle.arg("--").args(args);
+            }
+            let mut test_handle = test_handle.spawn().unwrap();
             let status = test_handle.wait().await.unwrap();
             if !status.success() {
                 panic!("Testing WASM failed :(");
             }
         }
-        Command::WebdriverProxy => {
+        Command::WasmServer => {
             server::serve().await;
         }
     }

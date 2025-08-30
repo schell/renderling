@@ -16,7 +16,7 @@ use crate::{
     cubemap::{CubemapDescriptor, CubemapFaceDirection},
     geometry::GeometryDescriptor,
     math::{Fetch, IsSampler, IsVector, Sample2dArray},
-    stage::Renderlet,
+    stage::{Renderlet, VertexInfo},
     transform::Transform,
 };
 
@@ -135,8 +135,12 @@ pub fn shadow_mapping_vertex(
         return;
     }
 
-    let (_vertex, _transform, _model_matrix, world_pos) =
-        renderlet.get_vertex_info(vertex_index, geometry_slab);
+    let VertexInfo {
+        world_pos,
+        vertex: _vertex,
+        transform: _transform,
+        model_matrix: _model_matrix,
+    } = renderlet.get_vertex_info(vertex_index, geometry_slab);
 
     let lighting_desc = light_slab.read_unchecked(Id::<LightingDescriptor>::new(0));
     let shadow_desc = light_slab.read_unchecked(lighting_desc.update_shadow_map_id);
@@ -811,8 +815,7 @@ pub fn light_tiling_depth_pre_pass(
         .read_unchecked(Id::<GeometryDescriptor>::new(0) + GeometryDescriptor::OFFSET_OF_CAMERA_ID);
     let camera = geometry_slab.read_unchecked(camera_id);
 
-    let (_vertex, _transform, _model_matrix, world_pos) =
-        renderlet.get_vertex_info(vertex_index, geometry_slab);
+    let VertexInfo { world_pos, .. } = renderlet.get_vertex_info(vertex_index, geometry_slab);
 
     *out_clip_pos = camera.view_projection() * world_pos.extend(1.0);
 }

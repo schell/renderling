@@ -94,7 +94,10 @@ fn wgsl(spv_filepath: impl AsRef<std::path::Path>, destination: impl AsRef<std::
             spv_filepath.as_ref().display()
         );
     });
-    let opts = naga::front::spv::Options::default();
+    let opts = naga::front::spv::Options {
+        adjust_coordinate_space: false,
+        ..Default::default()
+    };
     let module = naga::front::spv::parse_u8_slice(&bytes, &opts)
         .unwrap_or_else(|e| panic!("could not parse {}: {e}", spv_filepath.as_ref().display()));
     let mut wgsl = String::new();

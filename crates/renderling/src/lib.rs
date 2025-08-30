@@ -160,10 +160,11 @@ pub mod debug;
 pub mod draw;
 pub mod geometry;
 pub mod ibl;
+#[cfg(cpu)]
 pub mod internal;
 pub mod light;
 #[cfg(cpu)]
-mod linkage;
+pub mod linkage;
 pub mod material;
 pub mod math;
 pub mod pbr;
@@ -176,6 +177,7 @@ pub mod texture;
 pub mod tonemapping;
 pub mod transform;
 pub mod tuple;
+pub mod tutorial;
 #[cfg(feature = "ui")]
 pub mod ui;
 

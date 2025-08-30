@@ -90,9 +90,16 @@ pub struct MorphTarget {
     // I think this would take a contribution to the `gltf` crate.
 }
 
+/// Returned by [`Renderlet::get_vertex_info`].
+pub struct VertexInfo {
+    pub vertex: Vertex,
+    pub transform: Transform,
+    pub model_matrix: Mat4,
+    pub world_pos: Vec3,
+}
+
 /// A vertex in a mesh.
-#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
-#[derive(Clone, Copy, PartialEq, SlabItem)]
+#[derive(Clone, Copy, core::fmt::Debug, PartialEq, SlabItem)]
 pub struct Vertex {
     pub position: Vec3,
     pub color: Vec4,
@@ -242,16 +249,17 @@ impl Renderlet {
     /// Returns the vertex at the given index and its related values.
     ///
     /// These values are often used in shaders, so they are grouped together.
-    pub fn get_vertex_info(
-        &self,
-        vertex_index: u32,
-        geometry_slab: &[u32],
-    ) -> (Vertex, Transform, Mat4, Vec3) {
+    pub fn get_vertex_info(&self, vertex_index: u32, geometry_slab: &[u32]) -> VertexInfo {
         let vertex = self.get_vertex(vertex_index, geometry_slab);
         let transform = self.get_transform(vertex, geometry_slab);
         let model_matrix = Mat4::from(transform);
         let world_pos = model_matrix.transform_point3(vertex.position);
-        (vertex, transform, model_matrix, world_pos)
+        VertexInfo {
+            vertex,
+            transform,
+            model_matrix,
+            world_pos,
+        }
     }
     /// Retrieve the transform of this `Renderlet`.
     ///
@@ -329,6 +337,8 @@ pub fn renderlet_vertex(
 
     #[spirv(flat)] out_renderlet: &mut Id<Renderlet>,
     // TODO: Think about placing all these out values in a G-Buffer
+    // But do we have enough buffers + enough space on web?
+    // ...and can we write to buffers from vertex shaders on web?
     out_color: &mut Vec4,
     out_uv0: &mut Vec2,
     out_uv1: &mut Vec2,
@@ -349,8 +359,12 @@ pub fn renderlet_vertex(
 
     *out_renderlet = renderlet_id;
 
-    let (vertex, transform, model_matrix, world_pos) =
-        renderlet.get_vertex_info(vertex_index, geometry_slab);
+    let VertexInfo {
+        vertex,
+        transform,
+        model_matrix,
+        world_pos,
+    } = renderlet.get_vertex_info(vertex_index, geometry_slab);
     *out_color = vertex.color;
     *out_uv0 = vertex.uv0;
     *out_uv1 = vertex.uv1;

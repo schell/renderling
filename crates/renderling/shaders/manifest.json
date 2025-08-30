@@ -178,5 +178,30 @@
     "source_path": "shaders/tonemapping-tonemapping_vertex.spv",
     "entry_point": "tonemapping::tonemapping_vertex",
     "wgsl_entry_point": "tonemappingtonemapping_vertex"
+  },
+  {
+    "source_path": "shaders/tutorial-implicit_isosceles_vertex.spv",
+    "entry_point": "tutorial::implicit_isosceles_vertex",
+    "wgsl_entry_point": "tutorialimplicit_isosceles_vertex"
+  },
+  {
+    "source_path": "shaders/tutorial-passthru_fragment.spv",
+    "entry_point": "tutorial::passthru_fragment",
+    "wgsl_entry_point": "tutorialpassthru_fragment"
+  },
+  {
+    "source_path": "shaders/tutorial-slabbed_renderlet.spv",
+    "entry_point": "tutorial::slabbed_renderlet",
+    "wgsl_entry_point": "tutorialslabbed_renderlet"
+  },
+  {
+    "source_path": "shaders/tutorial-slabbed_vertices.spv",
+    "entry_point": "tutorial::slabbed_vertices",
+    "wgsl_entry_point": "tutorialslabbed_vertices"
+  },
+  {
+    "source_path": "shaders/tutorial-slabbed_vertices_no_instance.spv",
+    "entry_point": "tutorial::slabbed_vertices_no_instance",
+    "wgsl_entry_point": "tutorialslabbed_vertices_no_instance"
   }
 ]
