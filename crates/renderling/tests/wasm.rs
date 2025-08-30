@@ -145,19 +145,11 @@ async fn can_clear_background_sanity() {
 /// Test rendering a triangle using no mesh geometry.
 #[wasm_bindgen_test]
 async fn implicit_isosceles_triangle() {
-    let instance = renderling::internal::new_instance(None);
-    let (_adapter, device, queue, target) =
-        renderling::internal::new_headless_device_queue_and_target(100, 100, &instance)
-            .await
-            .unwrap();
-    let runtime = WgpuRuntime {
-        device: device.into(),
-        queue: queue.into(),
-    };
-    let label = Some("implicit isosceles triangle");
+    let ctx = Context::headless(100, 100).await;
+    let runtime = ctx.as_ref();
 
     // The first time through render with handwritten WGSL to ensure the setup works
-    let mut hand_written_wgsl_pipeline = {
+    let hand_written_wgsl_pipeline = {
         let vertex = runtime.device.create_shader_module(wgpu::include_wgsl!(
             "../src/tutorial/implicit_isosceles_vertex.wgsl"
         ));
@@ -167,7 +159,7 @@ async fn implicit_isosceles_triangle() {
         runtime
             .device
             .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label,
+                label: None,
                 layout: None,
                 vertex: wgpu::VertexState {
                     module: &vertex,
@@ -212,7 +204,100 @@ async fn implicit_isosceles_triangle() {
         runtime
             .device
             .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label,
+                label: None,
+                layout: None,
+                vertex: wgpu::VertexState {
+                    module: &vertex.module,
+                    entry_point: Some(vertex.entry_point),
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                    buffers: &[],
+                },
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    strip_index_format: None,
+                    front_face: wgpu::FrontFace::Ccw,
+                    cull_mode: None,
+                    unclipped_depth: false,
+                    polygon_mode: wgpu::PolygonMode::Fill,
+                    conservative: false,
+                },
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState {
+                    mask: !0,
+                    alpha_to_coverage_enabled: false,
+                    count: 1,
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &fragment.module,
+                    entry_point: Some(fragment.entry_point),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                }),
+                multiview: None,
+                cache: None,
+            })
+    };
+
+    async fn render(runtime: &WgpuRuntime, frame: &Frame, pipeline: wgpu::RenderPipeline) {
+        let mut encoder = runtime
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+        {
+            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &frame.view(),
+                    resolve_target: None,
+                    depth_slice: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::GREEN),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                ..Default::default()
+            });
+            render_pass.set_pipeline(&pipeline);
+            render_pass.draw(0..3, 0..1);
+        }
+        let _index = runtime.queue.submit(std::iter::once(encoder.finish()));
+
+        let img = frame
+            .read_image()
+            .await
+            .expect_throw("could not read frame");
+        assert_img_eq("tutorial/implicit_isosceles_triangle.png", img).await;
+    }
+
+    let frame = ctx.get_next_frame().unwrap();
+    render(runtime, &frame, hand_written_wgsl_pipeline).await;
+    frame.present();
+    let frame = ctx.get_next_frame().unwrap();
+    render(runtime, &frame, linkage_pipeline).await;
+}
+
+/// Test rendering a triangle from vertices on a slab, without an instance_index.
+#[wasm_bindgen_test]
+async fn slabbed_vertices_no_instance() {
+    let instance = renderling::internal::new_instance(None);
+    let (_adapter, device, queue, target) =
+        renderling::internal::new_headless_device_queue_and_target(100, 100, &instance)
+            .await
+            .unwrap();
+    let runtime = WgpuRuntime {
+        device: device.into(),
+        queue: queue.into(),
+    };
+
+    let linkage_pipeline = {
+        let vertex = renderling::linkage::slabbed_vertices_no_instance::linkage(&runtime.device);
+        let fragment = renderling::linkage::passthru_fragment::linkage(&runtime.device);
+        runtime
+            .device
+            .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: None,
                 layout: None,
                 vertex: wgpu::VertexState {
                     module: &vertex.module,
@@ -279,7 +364,6 @@ async fn implicit_isosceles_triangle() {
         assert_img_eq("tutorial/implicit_isosceles_triangle.png", img).await;
     }
 
-    render(&runtime, &target, hand_written_wgsl_pipeline).await;
     render(&runtime, &target, linkage_pipeline).await;
 }
 
