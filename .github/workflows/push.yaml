@@ -134,3 +134,26 @@ jobs:
         with:
           name: test-output-${{ runner.os }}
           path: test_output  
+
+  # WASM tests
+  renderling-wasm-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: moonrepo/setup-rust@v1
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cargo
+          key: ${{ runner.os }}-test-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-        
+      - name: Install linux deps 
+        if: runner.os == 'Linux'
+        run: |
+            sudo apt-get -y update
+            sudo apt-get -y install mesa-vulkan-drivers libvulkan1 vulkan-tools vulkan-validationlayers
+      - name: Install wasm-pack
+        run: cargo install --locked wasm-pack || true
+      - name: Test WASM
+        env:
+          - RUST_LOG: info
+        run: cargo test-wasm
