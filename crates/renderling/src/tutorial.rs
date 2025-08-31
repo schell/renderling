@@ -1,7 +1,7 @@
 //! Shaders used in the intro tutorial and in WASM tests.
 
 use crabslab::{Array, Id, Slab, SlabItem};
-use glam::{Vec3Swizzles, Vec4};
+use glam::{Vec3, Vec3Swizzles, Vec4};
 use spirv_std::spirv;
 
 use crate::{
@@ -64,7 +64,7 @@ pub fn slabbed_vertices_no_instance(
 #[spirv(vertex)]
 pub fn slabbed_vertices(
     // Id of the array of vertices we are rendering
-    #[spirv(instance_index)] instance_index: u32,
+    #[spirv(instance_index)] array_id: Id<Array<(Vec3, Vec4)>>,
     // Which vertex within the render unit are we rendering
     #[spirv(vertex_index)] vertex_index: u32,
 
@@ -73,12 +73,11 @@ pub fn slabbed_vertices(
     out_color: &mut Vec4,
     #[spirv(position)] clip_pos: &mut Vec4,
 ) {
-    let array_id = Id::<Array<Vertex>>::from(instance_index);
     let array = slab.read(array_id);
     let vertex_id = array.at(vertex_index as usize);
-    let vertex = slab.read(vertex_id);
-    *clip_pos = vertex.position.extend(1.0);
-    *out_color = vertex.color;
+    let (position, color) = slab.read(vertex_id);
+    *clip_pos = position.extend(1.0);
+    *out_color = color;
 }
 
 // TODO: fix all this documentation

@@ -80,6 +80,7 @@ wasm-bindgen.workspace = true
 
 [dev-dependencies]
 assert_approx_eq.workspace = true
+console_log.workspace = true
 ctor = "0.2.2"
 env_logger.workspace = true
 example = { path = "../example" }

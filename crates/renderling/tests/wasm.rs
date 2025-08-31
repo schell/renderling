@@ -148,6 +148,53 @@ async fn implicit_isosceles_triangle() {
     let ctx = Context::headless(100, 100).await;
     let runtime = ctx.as_ref();
 
+    fn create_pipeline(
+        runtime: &WgpuRuntime,
+        vmodule: &wgpu::ShaderModule,
+        ventry_point: &str,
+        fmodule: &wgpu::ShaderModule,
+        fentry_point: &str,
+    ) -> wgpu::RenderPipeline {
+        runtime
+            .device
+            .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: None,
+                layout: None,
+                vertex: wgpu::VertexState {
+                    module: vmodule,
+                    entry_point: Some(ventry_point),
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                    buffers: &[],
+                },
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    strip_index_format: None,
+                    front_face: wgpu::FrontFace::Ccw,
+                    cull_mode: None,
+                    unclipped_depth: false,
+                    polygon_mode: wgpu::PolygonMode::Fill,
+                    conservative: false,
+                },
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState {
+                    mask: !0,
+                    alpha_to_coverage_enabled: false,
+                    count: 1,
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: fmodule,
+                    entry_point: Some(fentry_point),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                }),
+                multiview: None,
+                cache: None,
+            })
+    }
     // The first time through render with handwritten WGSL to ensure the setup works
     let hand_written_wgsl_pipeline = {
         let vertex = runtime.device.create_shader_module(wgpu::include_wgsl!(
@@ -156,90 +203,20 @@ async fn implicit_isosceles_triangle() {
         let fragment = runtime
             .device
             .create_shader_module(wgpu::include_wgsl!("../src/tutorial/passthru.wgsl"));
-        runtime
-            .device
-            .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: None,
-                layout: None,
-                vertex: wgpu::VertexState {
-                    module: &vertex,
-                    entry_point: Some("main"),
-                    compilation_options: wgpu::PipelineCompilationOptions::default(),
-                    buffers: &[],
-                },
-                primitive: wgpu::PrimitiveState {
-                    topology: wgpu::PrimitiveTopology::TriangleList,
-                    strip_index_format: None,
-                    front_face: wgpu::FrontFace::Ccw,
-                    cull_mode: None,
-                    unclipped_depth: false,
-                    polygon_mode: wgpu::PolygonMode::Fill,
-                    conservative: false,
-                },
-                depth_stencil: None,
-                multisample: wgpu::MultisampleState {
-                    mask: !0,
-                    alpha_to_coverage_enabled: false,
-                    count: 1,
-                },
-                fragment: Some(wgpu::FragmentState {
-                    module: &fragment,
-                    entry_point: Some("main"),
-                    targets: &[Some(wgpu::ColorTargetState {
-                        format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                        write_mask: wgpu::ColorWrites::ALL,
-                    })],
-                    compilation_options: wgpu::PipelineCompilationOptions::default(),
-                }),
-                multiview: None,
-                cache: None,
-            })
+        create_pipeline(runtime, &vertex, "main", &fragment, "main")
     };
     // The second time render with WGSL that is transpiled from Rust code and pulled in through
     // the renderling linkage machinery.
     let linkage_pipeline = {
         let vertex = renderling::linkage::implicit_isosceles_vertex::linkage(&runtime.device);
         let fragment = renderling::linkage::passthru_fragment::linkage(&runtime.device);
-        runtime
-            .device
-            .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: None,
-                layout: None,
-                vertex: wgpu::VertexState {
-                    module: &vertex.module,
-                    entry_point: Some(vertex.entry_point),
-                    compilation_options: wgpu::PipelineCompilationOptions::default(),
-                    buffers: &[],
-                },
-                primitive: wgpu::PrimitiveState {
-                    topology: wgpu::PrimitiveTopology::TriangleList,
-                    strip_index_format: None,
-                    front_face: wgpu::FrontFace::Ccw,
-                    cull_mode: None,
-                    unclipped_depth: false,
-                    polygon_mode: wgpu::PolygonMode::Fill,
-                    conservative: false,
-                },
-                depth_stencil: None,
-                multisample: wgpu::MultisampleState {
-                    mask: !0,
-                    alpha_to_coverage_enabled: false,
-                    count: 1,
-                },
-                fragment: Some(wgpu::FragmentState {
-                    module: &fragment.module,
-                    entry_point: Some(fragment.entry_point),
-                    targets: &[Some(wgpu::ColorTargetState {
-                        format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                        write_mask: wgpu::ColorWrites::ALL,
-                    })],
-                    compilation_options: wgpu::PipelineCompilationOptions::default(),
-                }),
-                multiview: None,
-                cache: None,
-            })
+        create_pipeline(
+            runtime,
+            &vertex.module,
+            vertex.entry_point,
+            &fragment.module,
+            fragment.entry_point,
+        )
     };
 
     async fn render(runtime: &WgpuRuntime, frame: &Frame, pipeline: wgpu::RenderPipeline) {
@@ -281,6 +258,8 @@ async fn implicit_isosceles_triangle() {
 /// Test rendering a triangle from vertices on a slab, without an instance_index.
 #[wasm_bindgen_test]
 async fn slabbed_vertices_no_instance() {
+    let _ = console_log::init_with_level(log::Level::Debug);
+
     let instance = renderling::internal::new_instance(None);
     let (_adapter, device, queue, target) =
         renderling::internal::new_headless_device_queue_and_target(100, 100, &instance)
@@ -291,14 +270,68 @@ async fn slabbed_vertices_no_instance() {
         queue: queue.into(),
     };
 
-    let linkage_pipeline = {
+    // Create our geometry on the slab.
+    let slab = SlabAllocator::new(
+        &runtime,
+        "isosceles-triangle-no-instance",
+        wgpu::BufferUsages::empty(),
+    );
+
+    let initial_vertices = [
+        Vertex {
+            position: Vec3::new(0.5, -0.5, 0.0),
+            color: Vec4::new(1.0, 0.0, 0.0, 1.0),
+            ..Default::default()
+        },
+        Vertex {
+            position: Vec3::new(0.0, 0.5, 0.0),
+            color: Vec4::new(0.0, 1.0, 0.0, 1.0),
+            ..Default::default()
+        },
+        Vertex {
+            position: Vec3::new(-0.5, -0.5, 0.0),
+            color: Vec4::new(0.0, 0.0, 1.0, 1.0),
+            ..Default::default()
+        },
+    ];
+
+    let vertices = slab.new_array(initial_vertices);
+
+    assert_eq!(3, vertices.len());
+
+    // Create a bindgroup for the slab so our shader can read out the types.
+
+    let bindgroup_layout =
+        runtime
+            .device
+            .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: None,
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+            });
+    let pipeline_layout = runtime
+        .device
+        .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: None,
+            bind_group_layouts: &[&bindgroup_layout],
+            push_constant_ranges: &[],
+        });
+    let pipeline = {
         let vertex = renderling::linkage::slabbed_vertices_no_instance::linkage(&runtime.device);
         let fragment = renderling::linkage::passthru_fragment::linkage(&runtime.device);
         runtime
             .device
             .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                 label: None,
-                layout: None,
+                layout: Some(&pipeline_layout),
                 vertex: wgpu::VertexState {
                     module: &vertex.module,
                     entry_point: Some(vertex.entry_point),
@@ -335,398 +368,179 @@ async fn slabbed_vertices_no_instance() {
             })
     };
 
-    async fn render(runtime: &WgpuRuntime, target: &RenderTarget, pipeline: wgpu::RenderPipeline) {
-        let texture = target.as_texture().expect("unexpected RenderTarget");
-        let view = texture.create_view(&Default::default());
-        let mut encoder = runtime
-            .device
-            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
-        {
-            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
-                    resolve_target: None,
-                    depth_slice: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color::GREEN),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                ..Default::default()
-            });
-            render_pass.set_pipeline(&pipeline);
-            render_pass.draw(0..3, 0..1);
-        }
-        let _index = runtime.queue.submit(std::iter::once(encoder.finish()));
+    let slab_buffer: SlabBuffer<wgpu::Buffer> = slab.commit();
 
-        let buffer = CopiedTextureBuffer::new(runtime, texture).unwrap();
-        let img = buffer.convert_to_rgba().await.unwrap();
-        assert_img_eq("tutorial/implicit_isosceles_triangle.png", img).await;
+    let bindgroup = runtime
+        .device
+        .create_bind_group(&wgpu::BindGroupDescriptor {
+            label: None,
+            layout: &bindgroup_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+
+                resource: slab_buffer.as_entire_binding(),
+            }],
+        });
+
+    let texture = target.as_texture().expect("unexpected RenderTarget");
+    let view = texture.create_view(&Default::default());
+    let mut encoder = runtime
+        .device
+        .create_command_encoder(&wgpu::CommandEncoderDescriptor { label: None });
+    {
+        let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: &view,
+                resolve_target: None,
+                depth_slice: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color::WHITE),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            ..Default::default()
+        });
+        render_pass.set_pipeline(&pipeline);
+        render_pass.set_bind_group(0, &bindgroup, &[]);
+        render_pass.draw(0..3, 0..1);
     }
+    let _index = runtime.queue.submit(std::iter::once(encoder.finish()));
 
-    render(&runtime, &target, linkage_pipeline).await;
+    let buffer = CopiedTextureBuffer::new(runtime, texture).unwrap();
+    let img = buffer.convert_to_rgba().await.unwrap();
+    assert_img_eq("tutorial/slabbed_isosceles_triangle_no_instance.png", img).await;
 }
 
-// #[test]
-// fn slabbed_isosceles_triangle_no_instance() {
-//     let mut r = Renderling::headless(100, 100).unwrap();
-//     let (device, queue) = r.get_device_and_queue_owned();
+#[wasm_bindgen_test]
+async fn slabbed_isosceles_triangle() {
+    let ctx = Context::headless(100, 100).await;
+    let runtime = ctx.as_ref();
 
-//     // Create our geometry on the slab.
-//     // Don't worry too much about capacity, it can grow.
-//     let slab = crate::slab::SlabBuffer::new(&device, 16);
-//     let vertices = slab.append_slice(
-//         &device,
-//         &queue,
-//         &[
-//             Vertex {
-//                 position: Vec4::new(0.5, -0.5, 0.0, 1.0),
-//                 color: Vec4::new(1.0, 0.0, 0.0, 1.0),
-//                 ..Default::default()
-//             },
-//             Vertex {
-//                 position: Vec4::new(0.0, 0.5, 0.0, 1.0),
-//                 color: Vec4::new(0.0, 1.0, 0.0, 1.0),
-//                 ..Default::default()
-//             },
-//             Vertex {
-//                 position: Vec4::new(-0.5, -0.5, 0.0, 1.0),
-//                 color: Vec4::new(0.0, 0.0, 1.0, 1.0),
-//                 ..Default::default()
-//             },
-//         ],
-//     );
-//     assert_eq!(3, vertices.len());
+    // Create our geometry on the slab.
+    let slab = SlabAllocator::new(
+        runtime,
+        "slabbed_isosceles_triangle",
+        wgpu::BufferUsages::empty(),
+    );
 
-//     // Create a bindgroup for the slab so our shader can read out the types.
-//     let label = Some("slabbed isosceles triangle");
-//     let bindgroup_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-//         label,
-//         entries: &[wgpu::BindGroupLayoutEntry {
-//             binding: 0,
-//             visibility: wgpu::ShaderStages::VERTEX,
-//             ty: wgpu::BindingType::Buffer {
-//                 ty: wgpu::BufferBindingType::Storage { read_only: true },
-//                 has_dynamic_offset: false,
-//                 min_binding_size: None,
-//             },
-//             count: None,
-//         }],
-//     });
-//     let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-//         label,
-//         bind_group_layouts: &[&bindgroup_layout],
-//         push_constant_ranges: &[],
-//     });
+    let geometry = vec![
+        (Vec3::new(0.5, -0.5, 0.0), Vec4::new(1.0, 0.0, 0.0, 1.0)),
+        (Vec3::new(0.0, 0.5, 0.0), Vec4::new(0.0, 1.0, 0.0, 1.0)),
+        (Vec3::new(-0.5, -0.5, 0.0), Vec4::new(0.0, 0.0, 1.0, 1.0)),
+        (Vec3::new(-1.0, 1.0, 0.0), Vec4::new(1.0, 0.0, 0.0, 1.0)),
+        (Vec3::new(-1.0, 0.0, 0.0), Vec4::new(0.0, 1.0, 0.0, 1.0)),
+        (Vec3::new(0.0, 1.0, 0.0), Vec4::new(0.0, 0.0, 1.0, 1.0)),
+    ];
+    let vertices = slab.new_array(geometry);
+    let array = slab.new_value(vertices.array());
 
-//     let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-//         label,
-//         layout: Some(&pipeline_layout),
-//         vertex: wgpu::VertexState {
-//             module: &device.create_shader_module(wgpu::include_spirv!(
-//                 "linkage/tutorial-slabbed_vertices_no_instance.spv"
-//             )),
-//             entry_point: "tutorial::slabbed_vertices_no_instance",
-//             buffers: &[],
-//         },
-//         primitive: wgpu::PrimitiveState {
-//             topology: wgpu::PrimitiveTopology::TriangleList,
-//             strip_index_format: None,
-//             front_face: wgpu::FrontFace::Ccw,
-//             cull_mode: None,
-//             unclipped_depth: false,
-//             polygon_mode: wgpu::PolygonMode::Fill,
-//             conservative: false,
-//         },
-//         depth_stencil: Some(wgpu::DepthStencilState {
-//             format: wgpu::TextureFormat::Depth32Float,
-//             depth_write_enabled: true,
-//             depth_compare: wgpu::CompareFunction::Less,
-//             stencil: wgpu::StencilState::default(),
-//             bias: wgpu::DepthBiasState::default(),
-//         }),
-//         multisample: wgpu::MultisampleState {
-//             mask: !0,
-//             alpha_to_coverage_enabled: false,
-//             count: 1,
-//         },
-//         fragment: Some(wgpu::FragmentState {
-//             module: &device.create_shader_module(wgpu::include_spirv!(
-//                 "linkage/tutorial-passthru_fragment.spv"
-//             )),
-//             entry_point: "tutorial::passthru_fragment",
-//             targets: &[Some(wgpu::ColorTargetState {
-//                 format: wgpu::TextureFormat::Rgba8UnormSrgb,
-//                 blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-//                 write_mask: wgpu::ColorWrites::ALL,
-//             })],
-//         }),
-//         multiview: None,
-//     });
+    // Create a bindgroup for the slab so our shader can read out the types.
+    let bindgroup_layout =
+        runtime
+            .device
+            .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: None,
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                }],
+            });
+    let pipeline_layout = runtime
+        .device
+        .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: None,
+            bind_group_layouts: &[&bindgroup_layout],
+            push_constant_ranges: &[],
+        });
 
-//     let bindgroup = device.create_bind_group(&wgpu::BindGroupDescriptor {
-//         label,
-//         layout: &bindgroup_layout,
-//         entries: &[wgpu::BindGroupEntry {
-//             binding: 0,
-//             resource: slab.get_buffer().as_entire_binding(),
-//         }],
-//     });
+    let vertex = renderling::linkage::slabbed_vertices::linkage(&runtime.device);
+    let fragment = renderling::linkage::passthru_fragment::linkage(&runtime.device);
+    let pipeline = runtime
+        .device
+        .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: None,
+            cache: None,
+            layout: Some(&pipeline_layout),
+            vertex: wgpu::VertexState {
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                module: &vertex.module,
+                entry_point: Some(vertex.entry_point),
+                buffers: &[],
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                unclipped_depth: false,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                conservative: false,
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState {
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+                count: 1,
+            },
+            fragment: Some(wgpu::FragmentState {
+                compilation_options: Default::default(),
+                module: &fragment.module,
+                entry_point: Some(fragment.entry_point),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            multiview: None,
+        });
+    let slab_buffer = slab.commit();
 
-//     struct App {
-//         pipeline: wgpu::RenderPipeline,
-//         bindgroup: wgpu::BindGroup,
-//         vertices: Array<Vertex>,
-//     }
+    let bindgroup = runtime
+        .device
+        .create_bind_group(&wgpu::BindGroupDescriptor {
+            label: None,
+            layout: &bindgroup_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: slab_buffer.as_entire_binding(),
+            }],
+        });
 
-//     let app = App {
-//         pipeline,
-//         bindgroup,
-//         vertices,
-//     };
-//     r.graph.add_resource(app);
+    let frame = ctx.get_next_frame().unwrap();
+    let mut encoder = runtime.device.create_command_encoder(&Default::default());
+    {
+        let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: &frame.view(),
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(wgpu::Color::WHITE),
+                    store: wgpu::StoreOp::Store,
+                },
+                depth_slice: None,
+            })],
+            ..Default::default()
+        });
+        render_pass.set_pipeline(&pipeline);
+        render_pass.set_bind_group(0, &bindgroup, &[]);
+        let id = array.id().inner();
+        render_pass.draw(0..vertices.len() as u32, id..id + 1);
+    }
+    runtime.queue.submit(std::iter::once(encoder.finish()));
 
-//     fn render(
-//         (device, queue, app, frame, depth): (
-//             View<Device>,
-//             View<Queue>,
-//             View<App>,
-//             View<FrameTextureView>,
-//             View<DepthTexture>,
-//         ),
-//     ) -> Result<(), GraphError> {
-//         let label = Some("slabbed isosceles triangle");
-//         let mut encoder =
-//             device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label });
-//         {
-//             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-//                 label,
-//                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-//                     view: &frame.view,
-//                     resolve_target: None,
-//                     ops: wgpu::Operations {
-//                         load: wgpu::LoadOp::Clear(wgpu::Color::WHITE),
-//                         store: true,
-//                     },
-//                 })],
-//                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-//                     view: &depth.view,
-//                     depth_ops: Some(wgpu::Operations {
-//                         load: wgpu::LoadOp::Load,
-//                         store: true,
-//                     }),
-//                     stencil_ops: None,
-//                 }),
-//             });
-//             render_pass.set_pipeline(&app.pipeline);
-//             render_pass.set_bind_group(0, &app.bindgroup, &[]);
-//             render_pass.draw(0..app.vertices.len() as u32, 0..1);
-//         }
-//         queue.submit(std::iter::once(encoder.finish()));
-//         Ok(())
-//     }
-
-//     use crate::frame::{clear_frame_and_depth, copy_frame_to_post, create_frame, present};
-//     r.graph.add_subgraph(graph!(
-//         create_frame
-//             < clear_frame_and_depth
-//             < render
-//             < copy_frame_to_post
-//             < present
-//     ));
-
-//     let img = r.render_image().unwrap();
-//     img_diff::assert_img_eq("tutorial/slabbed_isosceles_triangle_no_instance.png", img);
-// }
-
-// #[test]
-// fn slabbed_isosceles_triangle() {
-//     let mut r = Renderling::headless(100, 100).unwrap();
-//     let (device, queue) = r.get_device_and_queue_owned();
-
-//     // Create our geometry on the slab.
-//     // Don't worry too much about capacity, it can grow.
-//     let slab = crate::slab::SlabBuffer::new(&device, 16);
-//     let geometry = vec![
-//         Vertex {
-//             position: Vec4::new(0.5, -0.5, 0.0, 1.0),
-//             color: Vec4::new(1.0, 0.0, 0.0, 1.0),
-//             ..Default::default()
-//         },
-//         Vertex {
-//             position: Vec4::new(0.0, 0.5, 0.0, 1.0),
-//             color: Vec4::new(0.0, 1.0, 0.0, 1.0),
-//             ..Default::default()
-//         },
-//         Vertex {
-//             position: Vec4::new(-0.5, -0.5, 0.0, 1.0),
-//             color: Vec4::new(0.0, 0.0, 1.0, 1.0),
-//             ..Default::default()
-//         },
-//         Vertex {
-//             position: Vec4::new(-1.0, 1.0, 0.0, 1.0),
-//             color: Vec4::new(1.0, 0.0, 0.0, 1.0),
-//             ..Default::default()
-//         },
-//         Vertex {
-//             position: Vec4::new(-1.0, 0.0, 0.0, 1.0),
-//             color: Vec4::new(0.0, 1.0, 0.0, 1.0),
-//             ..Default::default()
-//         },
-//         Vertex {
-//             position: Vec4::new(0.0, 1.0, 0.0, 1.0),
-//             color: Vec4::new(0.0, 0.0, 1.0, 1.0),
-//             ..Default::default()
-//         },
-//     ];
-//     let vertices = slab.append_slice(&device, &queue, &geometry);
-//     let vertices_id = slab.append(&device, &queue, &vertices);
-
-//     // Create a bindgroup for the slab so our shader can read out the types.
-//     let label = Some("slabbed isosceles triangle");
-//     let bindgroup_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-//         label,
-//         entries: &[wgpu::BindGroupLayoutEntry {
-//             binding: 0,
-//             visibility: wgpu::ShaderStages::VERTEX,
-//             ty: wgpu::BindingType::Buffer {
-//                 ty: wgpu::BufferBindingType::Storage { read_only: true },
-//                 has_dynamic_offset: false,
-//                 min_binding_size: None,
-//             },
-//             count: None,
-//         }],
-//     });
-//     let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-//         label,
-//         bind_group_layouts: &[&bindgroup_layout],
-//         push_constant_ranges: &[],
-//     });
-
-//     let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-//         label,
-//         layout: Some(&pipeline_layout),
-//         vertex: wgpu::VertexState {
-//             module: &device.create_shader_module(wgpu::include_spirv!(
-//                 "linkage/tutorial-slabbed_vertices.spv"
-//             )),
-//             entry_point: "tutorial::slabbed_vertices",
-//             buffers: &[],
-//         },
-//         primitive: wgpu::PrimitiveState {
-//             topology: wgpu::PrimitiveTopology::TriangleList,
-//             strip_index_format: None,
-//             front_face: wgpu::FrontFace::Ccw,
-//             cull_mode: None,
-//             unclipped_depth: false,
-//             polygon_mode: wgpu::PolygonMode::Fill,
-//             conservative: false,
-//         },
-//         depth_stencil: Some(wgpu::DepthStencilState {
-//             format: wgpu::TextureFormat::Depth32Float,
-//             depth_write_enabled: true,
-//             depth_compare: wgpu::CompareFunction::Less,
-//             stencil: wgpu::StencilState::default(),
-//             bias: wgpu::DepthBiasState::default(),
-//         }),
-//         multisample: wgpu::MultisampleState {
-//             mask: !0,
-//             alpha_to_coverage_enabled: false,
-//             count: 1,
-//         },
-//         fragment: Some(wgpu::FragmentState {
-//             module: &device.create_shader_module(wgpu::include_spirv!(
-//                 "linkage/tutorial-passthru_fragment.spv"
-//             )),
-//             entry_point: "tutorial::passthru_fragment",
-//             targets: &[Some(wgpu::ColorTargetState {
-//                 format: wgpu::TextureFormat::Rgba8UnormSrgb,
-//                 blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-//                 write_mask: wgpu::ColorWrites::ALL,
-//             })],
-//         }),
-//         multiview: None,
-//     });
-
-//     let bindgroup = device.create_bind_group(&wgpu::BindGroupDescriptor {
-//         label,
-//         layout: &bindgroup_layout,
-//         entries: &[wgpu::BindGroupEntry {
-//             binding: 0,
-//             resource: slab.get_buffer().as_entire_binding(),
-//         }],
-//     });
-
-//     struct App {
-//         pipeline: wgpu::RenderPipeline,
-//         bindgroup: wgpu::BindGroup,
-//         vertices_id: Id<Array<Vertex>>,
-//         vertices: Array<Vertex>,
-//     }
-
-//     let app = App {
-//         pipeline,
-//         bindgroup,
-//         vertices_id,
-//         vertices,
-//     };
-//     r.graph.add_resource(app);
-
-//     fn render(
-//         (device, queue, app, frame, depth): (
-//             View<Device>,
-//             View<Queue>,
-//             View<App>,
-//             View<FrameTextureView>,
-//             View<DepthTexture>,
-//         ),
-//     ) -> Result<(), GraphError> {
-//         let label = Some("slabbed isosceles triangle");
-//         let mut encoder =
-//             device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label });
-//         {
-//             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-//                 label,
-//                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-//                     view: &frame.view,
-//                     resolve_target: None,
-//                     ops: wgpu::Operations {
-//                         load: wgpu::LoadOp::Clear(wgpu::Color::WHITE),
-//                         store: true,
-//                     },
-//                 })],
-//                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-//                     view: &depth.view,
-//                     depth_ops: Some(wgpu::Operations {
-//                         load: wgpu::LoadOp::Load,
-//                         store: true,
-//                     }),
-//                     stencil_ops: None,
-//                 }),
-//             });
-//             render_pass.set_pipeline(&app.pipeline);
-//             render_pass.set_bind_group(0, &app.bindgroup, &[]);
-//             render_pass.draw(
-//                 0..app.vertices.len() as u32,
-//                 app.vertices_id.inner()..app.vertices_id.inner() + 1,
-//             );
-//         }
-//         queue.submit(std::iter::once(encoder.finish()));
-//         Ok(())
-//     }
-
-//     use crate::frame::{clear_frame_and_depth, copy_frame_to_post, create_frame, present};
-//     r.graph.add_subgraph(graph!(
-//         create_frame
-//             < clear_frame_and_depth
-//             < render
-//             < copy_frame_to_post
-//             < present
-//     ));
-
-//     let img = r.render_image().unwrap();
-//     img_diff::assert_img_eq("tutorial/slabbed_isosceles_triangle.png", img);
-// }
+    let img = frame
+        .read_linear_image()
+        .await
+        .expect_throw("could not read frame");
+    assert_img_eq("tutorial/slabbed_isosceles_triangle.png", img).await;
+}
 
 // #[test]
 // fn slabbed_render_unit() {
@@ -1128,17 +942,17 @@ async fn slabbed_vertices_no_instance() {
 //     }
 // }
 
-// #[wasm_bindgen_test]
-// async fn can_clear_background() {
-//     let ctx = Context::try_new_headless(100, 100, None).await.unwrap();
-//     let stage = ctx
-//         .new_stage()
-//         .with_background_color(Vec4::new(1.0, 0.0, 0.0, 1.0));
-//     let frame = ctx.get_next_frame().unwrap();
-//     stage.render(&frame.view());
-//     let seen = frame.read_image().await.unwrap();
-//     assert_img_eq("cmy_triangle/hdr.png", seen).await;
-// }
+#[wasm_bindgen_test]
+async fn can_clear_background() {
+    let ctx = Context::try_new_headless(2, 2, None).await.unwrap();
+    let stage = ctx
+        .new_stage()
+        .with_background_color(Vec4::new(1.0, 0.0, 0.0, 1.0));
+    let frame = ctx.get_next_frame().unwrap();
+    stage.render(&frame.view());
+    let seen = frame.read_image().await.unwrap();
+    assert_img_eq("clear.png", seen).await;
+}
 
 // #[wasm_bindgen_test]
 // #[should_panic]
@@ -1147,20 +961,33 @@ async fn slabbed_vertices_no_instance() {
 //     assert_img_eq("cmy_triangle/hdr.png", img).await;
 // }
 
-// #[wasm_bindgen_test]
-// async fn can_render_hello_triangle() {
-//     // This is a wasm version of cmy_triangle_sanity
-//     let ctx = Context::try_new_headless(100, 100, None).await.unwrap();
-//     let stage = ctx.new_stage().with_background_color(Vec4::splat(1.0));
-//     let _camera = stage.new_camera(Camera::default_ortho2d(100.0, 100.0));
-//     let _rez = stage
-//         .builder()
-//         .with_vertices(renderling::::right_tri_vertices())
-//         .build();
+fn right_tri_vertices() -> Vec<Vertex> {
+    vec![
+        Vertex::default()
+            .with_position([0.0, 0.0, 0.0])
+            .with_color([0.0, 1.0, 1.0, 1.0]),
+        Vertex::default()
+            .with_position([0.0, 100.0, 0.0])
+            .with_color([1.0, 1.0, 0.0, 1.0]),
+        Vertex::default()
+            .with_position([100.0, 0.0, 0.0])
+            .with_color([1.0, 0.0, 1.0, 1.0]),
+    ]
+}
 
-//     let frame = ctx.get_next_frame().unwrap();
-//     stage.render(&frame.view());
-//     frame.present();
+#[wasm_bindgen_test]
+async fn can_render_hello_triangle() {
+    // This is a wasm version of cmy_triangle_sanity
+    let ctx = Context::try_new_headless(100, 100, None).await.unwrap();
+    let stage = ctx.new_stage().with_background_color(Vec4::splat(1.0));
+    let _camera = stage.new_camera(Camera::default_ortho2d(100.0, 100.0));
+    let _rez = stage.builder().with_vertices(right_tri_vertices()).build();
 
-//     let hdr_img = stage.hdr_texture().read_hdr_image(&ctx).unwrap();
-// }
+    let frame = ctx.get_next_frame().unwrap();
+    stage.render(&frame.view());
+    let img = frame
+        .read_linear_image()
+        .await
+        .expect_throw("could not read frame");
+    assert_img_eq("cmy_triangle/hdr.png", img).await;
+}

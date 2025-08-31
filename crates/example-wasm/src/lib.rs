@@ -7,8 +7,8 @@ use web_sys::HtmlCanvasElement;
 mod event;
 mod req_animation_frame;
 
-// const HDR_IMAGE_BYTES: &[u8] = include_bytes!("../../../img/hdr/helipad.hdr");
-// const GLTF_FOX_BYTES: &[u8] = include_bytes!("../../../gltf/Fox.glb");
+const HDR_IMAGE_BYTES: &[u8] = include_bytes!("../../../img/hdr/helipad.hdr");
+const GLTF_FOX_BYTES: &[u8] = include_bytes!("../../../gltf/Fox.glb");
 
 fn surface_from_canvas(_canvas: HtmlCanvasElement) -> Option<wgpu::SurfaceTarget<'static>> {
     #[cfg(target_arch = "wasm32")]
@@ -25,43 +25,18 @@ pub struct App {
     ctx: Context,
     ui: Ui,
     path: UiPath,
-    // stage: Stage,
-    // doc: GltfDocument,
-    // camera: Hybrid<Camera>,
-    // text: UiText,
+    stage: Stage,
+    doc: GltfDocument,
+    camera: Hybrid<Camera>,
+    text: UiText,
 }
 
 impl App {
     fn tick(&self) {
         let frame = self.ctx.get_next_frame().unwrap();
         self.ui.render(&frame.view());
-        // // self.stage.render(&frame.view());
-        // let mut encoder = self
-        //     .ctx
-        //     .get_device()
-        //     .create_command_encoder(&Default::default());
-        // {
-        //     let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-        //         color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-        //             view: &frame.view(),
-        //             depth_slice: None,
-        //             resolve_target: None,
-        //             ops: wgpu::Operations {
-        //                 load: wgpu::LoadOp::Clear(wgpu::Color::RED),
-        //                 store: wgpu::StoreOp::Store,
-        //             },
-        //         })],
-        //         depth_stencil_attachment: None,
-        //         ..Default::default()
-        //     });
-        //     render_pass.
-        // }
-
+        self.stage.render(&frame.view());
         frame.present();
-        self.ctx
-            .get_device()
-            .poll(wgpu::PollType::Wait)
-            .expect_throw("Error polling");
     }
 }
 
@@ -102,55 +77,46 @@ pub async fn main() {
         .with_circle(Vec2::splat(100.0), 20.0)
         .with_fill_color(Vec4::new(1.0, 1.0, 0.0, 1.0))
         .fill();
-    // let _ = ui
-    //     .load_font("Recursive Mn Lnr St Med Nerd Font Complete.ttf")
-    //     .await
-    //     .expect_throw("Could not load font");
-    // let text = ui
-    //     .new_text()
-    //     .with_color(
-    //         // white
-    //         Vec4::ONE,
-    //     )
-    //     .with_section(Section::default().add_text(Text::new("WASM example").with_scale(24.0)))
-    //     .build();
+    let _ = ui
+        .load_font("Recursive Mn Lnr St Med Nerd Font Complete.ttf")
+        .await
+        .expect_throw("Could not load font");
+    let text = ui
+        .new_text()
+        .with_color(
+            // white
+            Vec4::ONE,
+        )
+        .with_section(Section::default().add_text(Text::new("WASM example").with_scale(24.0)))
+        .build();
 
-    // let stage = ctx
-    //     .new_stage()
-    //     .with_background_color(
-    //         // black
-    //         // Vec3::ZERO.extend(1.0),
-    //         Vec4::new(1.0, 0.0, 0.0, 1.0),
-    //     )
-    //     .with_lighting(false);
+    let stage = ctx
+        .new_stage()
+        .with_background_color(
+            // black
+            // Vec3::ZERO.extend(1.0),
+            Vec4::new(1.0, 0.0, 0.0, 1.0),
+        )
+        .with_lighting(false);
 
-    // let skybox = stage.new_skybox_from_bytes(HDR_IMAGE_BYTES).unwrap();
-    // stage.set_skybox(skybox);
+    let skybox = stage.new_skybox_from_bytes(HDR_IMAGE_BYTES).unwrap();
+    stage.set_skybox(skybox);
 
-    // let fox = stage.load_gltf_document_from_bytes(GLTF_FOX_BYTES).unwrap();
-    // log::info!("fox aabb: {:?}", fox.bounding_volume());
+    let fox = stage.load_gltf_document_from_bytes(GLTF_FOX_BYTES).unwrap();
+    log::info!("fox aabb: {:?}", fox.bounding_volume());
 
-    // let camera = stage.new_camera(Camera::default_perspective(800.0, 600.0));
+    let camera = stage.new_camera(Camera::default_perspective(800.0, 600.0));
 
     let app = App {
         ctx,
         ui,
         path,
-        // stage,
-        // doc: fox,
-        // camera,
-        // text,
+        stage,
+        doc: fox,
+        camera,
+        text,
     };
     app.tick();
-
-    // let mut app = example::App::new(&ctx, example::camera::CameraControl::Turntable);
-    // app.load_hdr_skybox(HDR_IMAGE_BYTES.to_vec());
-    // app.load_default_model();
-    // app.tick();
-    // app.render(&ctx);
-
-    // let window_resize = event::event_stream("resize", &dom_window);
-    // let mut all_events = window_resize;
 
     loop {
         let _ = req_animation_frame::next_animation_frame().await;
