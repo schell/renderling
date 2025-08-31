@@ -137,8 +137,10 @@ fn wgsl(spv_filepath: impl AsRef<std::path::Path>, destination: impl AsRef<std::
     }
 }
 
+#[derive(Debug)]
 pub struct RenderlingPaths {
-    pub cargo_workspace: std::path::PathBuf,
+    /// `cargo_workspace` is not available when building outside of the project directory.
+    pub cargo_workspace: Option<std::path::PathBuf>,
     pub renderling_crate: std::path::PathBuf,
     pub shader_dir: std::path::PathBuf,
     pub shader_manifest: std::path::PathBuf,
@@ -148,13 +150,23 @@ pub struct RenderlingPaths {
 impl RenderlingPaths {
     /// Create a new `RenderlingPaths`.
     ///
-    /// If the `CARGO_WORKSPACE_DIR` is _not_ available, this most likely means we're building renderling
-    /// outside of its own source tree, which means we **don't want to compile shaders or generate linkage**.
+    /// If the `CARGO_WORKSPACE_DIR` and subsequently the `cargo_workspace` is
+    /// _not_ available, this most likely means we're building renderling
+    /// outside of its own source tree, which means we **don't want to compile shaders**.
     ///
-    /// For this reason we return `Option`.
+    /// But we may still need to transpile the packaged SPIR-V into WGSL for WASM, and
+    /// so `cargo_workspace` is `Option` and the entire function also returns `Option`.
     pub fn new() -> Option<Self> {
-        let cargo_workspace = std::path::PathBuf::from(std::env::var("CARGO_WORKSPACE_DIR").ok()?);
-        let renderling_crate = cargo_workspace.join("crates").join("renderling");
+        let cargo_workspace = std::env::var("CARGO_WORKSPACE_DIR")
+            .map(std::path::PathBuf::from)
+            .ok();
+        let renderling_crate = if let Some(workspace) = cargo_workspace.as_ref() {
+            workspace.join("crates").join("renderling")
+        } else {
+            std::env::var("CARGO_MANIFEST_DIR")
+                .map(std::path::PathBuf::from)
+                .ok()?
+        };
         log::debug!("cargo_manifest_dir: {renderling_crate:#?}");
         let shader_dir = renderling_crate.join("shaders");
 
