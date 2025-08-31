@@ -155,5 +155,5 @@ jobs:
         run: cargo install --locked wasm-pack || true
       - name: Test WASM
         env:
-          - RUST_LOG: info
+          RUST_LOG: info
         run: cargo test-wasm
