@@ -157,3 +157,8 @@ jobs:
         env:
           RUST_LOG: info
         run: cargo test-wasm --chrome
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-output-${{ runner.os }}-wasm
+          path: test_output
