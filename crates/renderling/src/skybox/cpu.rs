@@ -650,11 +650,11 @@ mod test {
     use glam::Vec3;
 
     use super::*;
-    use crate::Context;
+    use crate::{test::BlockOnFuture, texture::CopiedTextureBuffer, Context};
 
     #[test]
     fn hdr_skybox_scene() {
-        let ctx = Context::headless(600, 400);
+        let ctx = Context::headless(600, 400).block();
 
         let proj = crate::camera::perspective(600.0, 400.0);
         let view = crate::camera::look_at(Vec3::new(0.0, 0.0, 2.0), Vec3::ZERO, Vec3::Y);
@@ -677,7 +677,7 @@ mod test {
 
         for i in 0..6 {
             // save out the irradiance face
-            let copied_buffer = Texture::read_from(
+            let copied_buffer = CopiedTextureBuffer::read_from(
                 &ctx,
                 &skybox.irradiance_cubemap.texture,
                 32,
@@ -687,7 +687,7 @@ mod test {
                 0,
                 Some(wgpu::Origin3d { x: 0, y: 0, z: i }),
             );
-            let pixels = copied_buffer.pixels(ctx.get_device()).unwrap();
+            let pixels = copied_buffer.pixels(ctx.get_device()).block().unwrap();
             let pixels = bytemuck::cast_slice::<u8, u16>(pixels.as_slice())
                 .iter()
                 .map(|p| half::f16::from_bits(*p).to_f32())
@@ -700,7 +700,7 @@ mod test {
             for mip_level in 0..5 {
                 let mip_size = 128u32 >> mip_level;
                 // save out the prefiltered environment faces' mips
-                let copied_buffer = Texture::read_from(
+                let copied_buffer = CopiedTextureBuffer::read_from(
                     &ctx,
                     &skybox.prefiltered_environment_cubemap.texture,
                     mip_size as usize,
@@ -710,7 +710,7 @@ mod test {
                     mip_level,
                     Some(wgpu::Origin3d { x: 0, y: 0, z: i }),
                 );
-                let pixels = copied_buffer.pixels(ctx.get_device()).unwrap();
+                let pixels = copied_buffer.pixels(ctx.get_device()).block().unwrap();
                 let pixels = bytemuck::cast_slice::<u8, u16>(pixels.as_slice())
                     .iter()
                     .map(|p| half::f16::from_bits(*p).to_f32())
@@ -731,18 +731,18 @@ mod test {
 
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
-        let img = frame.read_linear_image().unwrap();
+        let img = frame.read_linear_image().block().unwrap();
         img_diff::assert_img_eq("skybox/hdr.png", img);
     }
 
     #[test]
     fn precomputed_brdf() {
         assert_eq!(2, std::mem::size_of::<u16>());
-        let r = Context::headless(32, 32);
+        let r = Context::headless(32, 32).block();
         let brdf_lut = Skybox::create_precomputed_brdf_texture(&r);
         assert_eq!(wgpu::TextureFormat::Rg16Float, brdf_lut.texture.format());
         let copied_buffer = Texture::read(&r, &brdf_lut.texture, 512, 512, 2, 2);
-        let pixels = copied_buffer.pixels(r.get_device()).unwrap();
+        let pixels = copied_buffer.pixels(r.get_device()).block().unwrap();
         let pixels: Vec<f32> = bytemuck::cast_slice::<u8, u16>(pixels.as_slice())
             .iter()
             .copied()

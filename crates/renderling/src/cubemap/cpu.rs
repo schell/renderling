@@ -272,6 +272,8 @@ mod test {
     use crate::{
         math::{UNIT_INDICES, UNIT_POINTS},
         stage::Vertex,
+        test::BlockOnFuture,
+        texture::CopiedTextureBuffer,
     };
 
     use super::*;
@@ -280,7 +282,7 @@ mod test {
     fn hand_rolled_cubemap_sampling() {
         let width = 256;
         let height = 256;
-        let ctx = crate::Context::headless(width, height);
+        let ctx = crate::Context::headless(width, height).block();
         let stage = ctx
             .new_stage()
             .with_background_color(Vec4::ZERO)
@@ -306,7 +308,7 @@ mod test {
 
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
-        let img = frame.read_image().unwrap();
+        let img = frame.read_image().block().unwrap();
         img_diff::assert_img_eq("cubemap/hand_rolled_cubemap_sampling/cube.png", img);
         frame.present();
 
@@ -487,6 +489,7 @@ mod test {
 
             let img = Texture::read(&ctx, &render_target, 1, 1, 4, 1)
                 .into_image::<u8, image::Rgba<u8>>(ctx.get_device())
+                .block()
                 .unwrap();
             let image::Rgba([r, g, b, a]) = img.get_pixel(0, 0);
             Vec4::new(
@@ -511,7 +514,7 @@ mod test {
 
         let mut cpu_cubemap = vec![];
         for i in 0..6 {
-            let img = Texture::read_from(
+            let img = CopiedTextureBuffer::read_from(
                 &ctx,
                 &scene_cubemap.cubemap_texture,
                 width as usize,
@@ -522,6 +525,7 @@ mod test {
                 Some(wgpu::Origin3d { x: 0, y: 0, z: i }),
             )
             .into_image::<u8, image::Rgba<u8>>(ctx.get_device())
+            .block()
             .unwrap();
 
             img_diff::assert_img_eq(

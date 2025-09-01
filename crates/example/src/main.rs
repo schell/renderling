@@ -4,7 +4,7 @@ use std::sync::Arc;
 use clap::Parser;
 use example::{camera::CameraControl, App};
 use renderling::{
-    math::{UVec2, Vec2},
+    prelude::glam::{UVec2, Vec2},
     Context,
 };
 use winit::{application::ApplicationHandler, event::WindowEvent, window::WindowAttributes};
@@ -86,7 +86,7 @@ impl ApplicationHandler for OuterApp {
         let window = Arc::new(event_loop.create_window(attributes).unwrap());
 
         // Set up a new renderling context
-        let ctx = Context::try_from_window(None, window.clone()).unwrap();
+        let ctx = futures_lite::future::block_on(Context::from_winit_window(None, window.clone()));
         let mut app = App::new(&ctx, self.cli.camera_control);
         if let Some(file) = self.cli.model.as_ref() {
             log::info!("loading model '{file}'");

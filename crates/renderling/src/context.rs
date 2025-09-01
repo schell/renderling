@@ -12,9 +12,10 @@ use snafu::prelude::*;
 use crate::{
     stage::Stage,
     texture::{BufferDimensions, CopiedTextureBuffer, Texture, TextureError},
+    ui::Ui,
 };
 
-enum RenderTargetInner {
+pub(crate) enum RenderTargetInner {
     Surface {
         surface: wgpu::Surface<'static>,
         surface_config: wgpu::SurfaceConfiguration,
@@ -30,7 +31,7 @@ enum RenderTargetInner {
 /// Will be a surface if the context was created with a window or canvas.
 ///
 /// Will be a texture if the context is headless.
-pub struct RenderTarget(RenderTargetInner);
+pub struct RenderTarget(pub(crate) RenderTargetInner);
 
 impl From<wgpu::Texture> for RenderTarget {
     fn from(value: wgpu::Texture) -> Self {
@@ -87,6 +88,14 @@ impl RenderTarget {
         }
     }
 
+    /// Return the underlying target as a texture, if possible.
+    pub fn as_texture(&self) -> Option<&wgpu::Texture> {
+        match &self.0 {
+            RenderTargetInner::Surface { .. } => None,
+            RenderTargetInner::Texture { texture } => Some(texture),
+        }
+    }
+
     pub fn get_size(&self) -> UVec2 {
         match &self.0 {
             RenderTargetInner::Surface {
@@ -101,159 +110,8 @@ impl RenderTarget {
     }
 }
 
-async fn adapter(
-    instance: &wgpu::Instance,
-    compatible_surface: Option<&wgpu::Surface<'_>>,
-) -> Result<wgpu::Adapter, ContextError> {
-    log::trace!(
-        "creating adapter for a {} context",
-        if compatible_surface.is_none() {
-            "headless"
-        } else {
-            "surface-based"
-        }
-    );
-    let adapter = instance
-        .request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::default(),
-            compatible_surface,
-            force_fallback_adapter: false,
-        })
-        .await
-        .context(CannotCreateAdaptorSnafu)?;
-    let info = adapter.get_info();
-    log::info!(
-        "using adapter: '{}' backend:{:?} driver:'{}'",
-        info.name,
-        info.backend,
-        info.driver
-    );
-    Ok(adapter)
-}
-
-async fn device(
-    adapter: &wgpu::Adapter,
-) -> Result<(wgpu::Device, wgpu::Queue), wgpu::RequestDeviceError> {
-    let wanted_features = wgpu::Features::INDIRECT_FIRST_INSTANCE
-        | wgpu::Features::MULTI_DRAW_INDIRECT
-        //// when debugging rust-gpu shader miscompilation it's nice to have this
-        //| wgpu::Features::SPIRV_SHADER_PASSTHROUGH
-        // this one is a funny requirement, it seems it is needed if using storage buffers in
-        // vertex shaders, even if those shaders are read-only
-        | wgpu::Features::VERTEX_WRITABLE_STORAGE
-        | wgpu::Features::CLEAR_TEXTURE;
-    let supported_features = adapter.features();
-    let required_features = wanted_features.intersection(supported_features);
-    let unsupported_features = wanted_features.difference(supported_features);
-    if !unsupported_features.is_empty() {
-        log::error!("requested but unsupported features: {unsupported_features:#?}");
-    }
-    let limits = adapter.limits();
-    log::info!("adapter limits: {limits:#?}");
-    adapter
-        .request_device(&wgpu::DeviceDescriptor {
-            required_features,
-            required_limits: adapter.limits(),
-            label: None,
-            memory_hints: wgpu::MemoryHints::default(),
-            trace: wgpu::Trace::Off,
-        })
-        .await
-}
-
-fn new_instance(backends: Option<wgpu::Backends>) -> wgpu::Instance {
-    log::trace!(
-        "creating instance - available backends: {:#?}",
-        wgpu::Instance::enabled_backend_features()
-    );
-    // BackendBit::PRIMARY => Vulkan + Metal + DX12 + Browser WebGPU
-    let backends = backends.unwrap_or(wgpu::Backends::PRIMARY);
-    let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
-        backends,
-        ..Default::default()
-    });
-
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        let adapters = instance.enumerate_adapters(backends);
-        log::trace!("available adapters: {adapters:#?}");
-    }
-
-    instance
-}
-
-async fn new_windowed_adapter_device_queue(
-    width: u32,
-    height: u32,
-    instance: &wgpu::Instance,
-    window: impl Into<wgpu::SurfaceTarget<'static>>,
-) -> Result<(wgpu::Adapter, wgpu::Device, wgpu::Queue, RenderTarget), ContextError> {
-    let surface = instance
-        .create_surface(window)
-        .map_err(|e| ContextError::CreateSurface { source: e })?;
-    let adapter = adapter(instance, Some(&surface)).await?;
-    let surface_caps = surface.get_capabilities(&adapter);
-    let fmt = if surface_caps
-        .formats
-        .contains(&wgpu::TextureFormat::Rgba8UnormSrgb)
-    {
-        wgpu::TextureFormat::Rgba8UnormSrgb
-    } else {
-        surface_caps
-            .formats
-            .iter()
-            .copied()
-            .find(|f| f.is_srgb())
-            .unwrap_or(surface_caps.formats[0])
-    };
-    let view_fmts = if fmt.is_srgb() {
-        vec![]
-    } else {
-        vec![fmt.add_srgb_suffix()]
-    };
-    log::info!("surface capabilities: {surface_caps:#?}");
-    let mut surface_config = surface
-        .get_default_config(&adapter, width, height)
-        .context(IncompatibleSurfaceSnafu)?;
-    surface_config.view_formats = view_fmts;
-    let (device, queue) = device(&adapter).await.context(CannotRequestDeviceSnafu)?;
-    surface.configure(&device, &surface_config);
-    let target = RenderTarget(RenderTargetInner::Surface {
-        surface,
-        surface_config,
-    });
-    Ok((adapter, device, queue, target))
-}
-
-async fn new_headless_device_queue_and_target(
-    width: u32,
-    height: u32,
-    instance: &wgpu::Instance,
-) -> Result<(wgpu::Adapter, wgpu::Device, wgpu::Queue, RenderTarget), ContextError> {
-    let adapter = adapter(instance, None).await?;
-    let texture_desc = wgpu::TextureDescriptor {
-        size: wgpu::Extent3d {
-            width,
-            height,
-            depth_or_array_layers: 1,
-        },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: wgpu::TextureFormat::Rgba8UnormSrgb,
-        usage: wgpu::TextureUsages::COPY_SRC
-            | wgpu::TextureUsages::RENDER_ATTACHMENT
-            | wgpu::TextureUsages::TEXTURE_BINDING,
-        label: None,
-        view_formats: &[],
-    };
-    let (device, queue) = device(&adapter).await.context(CannotRequestDeviceSnafu)?;
-    let texture = Arc::new(device.create_texture(&texture_desc));
-    let target = RenderTarget(RenderTargetInner::Texture { texture });
-    Ok((adapter, device, queue, target))
-}
-
 #[derive(Debug, Snafu)]
+#[snafu(visibility(pub(crate)))]
 pub enum ContextError {
     #[snafu(display("missing surface texture: {}", source))]
     Surface { source: wgpu::SurfaceError },
@@ -374,14 +232,14 @@ impl Frame {
     ///
     /// ## Note
     /// This operation can take a long time, depending on how big the screen is.
-    pub fn read_image(&self) -> Result<image::RgbaImage, TextureError> {
+    pub async fn read_image(&self) -> Result<image::RgbaImage, TextureError> {
         let size = self.get_size();
         let buffer = self.copy_to_buffer(size.x, size.y);
         let is_srgb = self.texture().format().is_srgb();
         let img = if is_srgb {
-            buffer.into_srgba(&self.runtime.device)?
+            buffer.into_srgba(&self.runtime.device).await?
         } else {
-            buffer.into_linear_rgba(&self.runtime.device)?
+            buffer.into_linear_rgba(&self.runtime.device).await?
         };
         Ok(img)
     }
@@ -395,11 +253,11 @@ impl Frame {
     ///
     /// ## Note
     /// This operation can take a long time, depending on how big the screen is.
-    pub fn read_srgb_image(&self) -> Result<image::RgbaImage, TextureError> {
+    pub async fn read_srgb_image(&self) -> Result<image::RgbaImage, TextureError> {
         let size = self.get_size();
         let buffer = self.copy_to_buffer(size.x, size.y);
         log::trace!("read image has the format: {:?}", buffer.format);
-        buffer.into_srgba(&self.runtime.device)
+        buffer.into_srgba(&self.runtime.device).await
     }
     /// Read the frame into an image.
     ///
@@ -410,10 +268,10 @@ impl Frame {
     ///
     /// ## Note
     /// This operation can take a long time, depending on how big the screen is.
-    pub fn read_linear_image(&self) -> Result<image::RgbaImage, TextureError> {
+    pub async fn read_linear_image(&self) -> Result<image::RgbaImage, TextureError> {
         let size = self.get_size();
         let buffer = self.copy_to_buffer(size.x, size.y);
-        buffer.into_linear_rgba(&self.runtime.device)
+        buffer.into_linear_rgba(&self.runtime.device).await
     }
 
     /// If self is `TargetFrame::Surface` this presents the surface frame.
@@ -435,7 +293,7 @@ pub(crate) struct GlobalStageConfig {
     pub(crate) use_compute_culling: bool,
 }
 
-/// Contains the adapter, device, queue, [`RenderTarget`] and initial atlas sizing.
+/// Contains the adapter, device, queue, [`RenderTarget`] and configuration.
 ///
 /// A `Context` is created to initialize rendering to a window, canvas or
 /// texture.
@@ -443,7 +301,7 @@ pub(crate) struct GlobalStageConfig {
 /// ```
 /// use renderling::Context;
 ///
-/// let ctx = Context::headless(100, 100);
+/// let ctx = futures_lite::future::block_on(Context::headless(100, 100));
 /// ```
 pub struct Context {
     runtime: WgpuRuntime,
@@ -503,79 +361,58 @@ impl Context {
         backends: Option<wgpu::Backends>,
     ) -> Result<Self, ContextError> {
         log::trace!("creating headless context of size ({width}, {height})");
-        let instance = new_instance(backends);
+        let instance = crate::internal::new_instance(backends);
         let (adapter, device, queue, target) =
-            new_headless_device_queue_and_target(width, height, &instance).await?;
+            crate::internal::new_headless_device_queue_and_target(width, height, &instance).await?;
         Ok(Self::new(target, adapter, device, queue))
     }
 
-    pub async fn try_from_raw_window(
+    pub async fn try_new_with_surface(
         width: u32,
         height: u32,
         backends: Option<wgpu::Backends>,
         window: impl Into<wgpu::SurfaceTarget<'static>>,
     ) -> Result<Self, ContextError> {
-        let instance = new_instance(backends);
+        let instance = crate::internal::new_instance(backends);
         let (adapter, device, queue, target) =
-            new_windowed_adapter_device_queue(width, height, &instance, window).await?;
+            crate::internal::new_windowed_adapter_device_queue(width, height, &instance, window)
+                .await?;
         Ok(Self::new(target, adapter, device, queue))
     }
 
     #[cfg(feature = "winit")]
-    pub async fn from_window_async(
+    /// Create a [`Context`] from an existing [`winit::window::Window`].
+    ///
+    /// ## Panics
+    /// Panics if the context could not be created.
+    pub async fn from_winit_window(
         backends: Option<wgpu::Backends>,
         window: Arc<winit::window::Window>,
     ) -> Self {
         let inner_size = window.inner_size();
-        Self::try_from_raw_window(inner_size.width, inner_size.height, backends, window)
+        Self::try_new_with_surface(inner_size.width, inner_size.height, backends, window)
             .await
             .unwrap()
     }
 
-    #[cfg(all(feature = "winit", not(target_arch = "wasm32")))]
-    /// Create a new context from a `winit::window::Window`, blocking until it
-    /// is created.
-    ///
-    /// ## Panics
-    /// Panics if the context cannot be created.
-    pub fn from_window(
-        backends: Option<wgpu::Backends>,
-        window: Arc<winit::window::Window>,
-    ) -> Self {
-        futures_lite::future::block_on(Self::from_window_async(backends, window))
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    pub fn try_from_raw_window_handle(
-        window_handle: impl Into<wgpu::SurfaceTarget<'static>>,
-        width: u32,
-        height: u32,
-        backends: Option<wgpu::Backends>,
-    ) -> Result<Self, ContextError> {
-        futures_lite::future::block_on(Self::try_from_raw_window(
-            width,
-            height,
-            backends,
-            window_handle,
-        ))
-    }
-
-    #[cfg(all(feature = "winit", not(target_arch = "wasm32")))]
-    pub fn try_from_window(
-        backends: Option<wgpu::Backends>,
-        window: Arc<winit::window::Window>,
-    ) -> Result<Self, ContextError> {
-        let inner_size = window.inner_size();
-        Self::try_from_raw_window_handle(window, inner_size.width, inner_size.height, backends)
-    }
-
     /// Create a new headless renderer.
+    ///
+    /// Immediately proxies to [`Context::try_new_headless`] and unwraps.
     ///
     /// ## Panics
     /// This function will panic if an adapter cannot be found. For example this
     /// would happen on machines without a GPU.
-    pub fn headless(width: u32, height: u32) -> Self {
-        futures_lite::future::block_on(Self::try_new_headless(width, height, None)).unwrap()
+    pub async fn headless(width: u32, height: u32) -> Self {
+        let result = Self::try_new_headless(width, height, None).await;
+        #[cfg(target_arch = "wasm32")]
+        {
+            use wasm_bindgen::UnwrapThrowExt;
+            result.expect_throw("Could not create context")
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            result.expect("Could not create context")
+        }
     }
 
     pub fn get_size(&self) -> UVec2 {
@@ -753,5 +590,10 @@ impl Context {
     /// Create and return a new [`Stage`] renderer.
     pub fn new_stage(&self) -> Stage {
         Stage::new(self)
+    }
+
+    /// Create and return a new [`Ui`] renderer.
+    pub fn new_ui(&self) -> Ui {
+        Ui::new(self)
     }
 }

@@ -262,7 +262,7 @@ impl DepthPyramid {
     }
 
     pub fn resize(&mut self, size: UVec2) {
-        log::info!("resizing depth pyramid to {size}");
+        log::trace!("resizing depth pyramid to {size}");
         // drop the buffers
         let mip = self.slab.new_array(vec![]);
         self.mip_data = vec![];
@@ -303,8 +303,8 @@ impl DepthPyramid {
                     crate::color::f32_to_u8(depth)
                 })
                 .collect();
-            log::info!("min: {min}");
-            log::info!("max: {max}");
+            log::trace!("min: {min}");
+            log::trace!("max: {max}");
             let width = size.x >> i;
             let height = size.y >> i;
             let image = image::GrayImage::from_raw(width, height, depth_data)
@@ -329,12 +329,12 @@ impl ComputeCopyDepth {
 
     fn create_bindgroup_layout(device: &wgpu::Device, sample_count: u32) -> wgpu::BindGroupLayout {
         if sample_count > 1 {
-            log::info!(
+            log::trace!(
                 "creating bindgroup layout with {sample_count} multisampled depth for {}",
                 Self::LABEL.unwrap()
             );
         } else {
-            log::info!(
+            log::trace!(
                 "creating bindgroup layout without multisampling for {}",
                 Self::LABEL.unwrap()
             );
@@ -374,10 +374,10 @@ impl ComputeCopyDepth {
         multisampled: bool,
     ) -> wgpu::ComputePipeline {
         let linkage = if multisampled {
-            log::info!("creating multisampled shader for {}", Self::LABEL.unwrap());
+            log::trace!("creating multisampled shader for {}", Self::LABEL.unwrap());
             crate::linkage::compute_copy_depth_to_pyramid_multisampled::linkage(device)
         } else {
-            log::info!(
+            log::trace!(
                 "creating shader without multisampling for {}",
                 Self::LABEL.unwrap()
             );
@@ -674,14 +674,14 @@ mod test {
 
     use crate::{
         bvol::BoundingSphere, cull::DepthPyramidDescriptor, draw::DrawIndirectArgs,
-        geometry::Geometry, math::hex_to_vec4, prelude::*,
+        geometry::Geometry, math::hex_to_vec4, prelude::*, test::BlockOnFuture,
     };
     use crabslab::{GrowableSlab, Slab};
     use glam::{Mat4, Quat, UVec2, UVec3, Vec2, Vec3, Vec4};
 
     #[test]
     fn occlusion_culling_sanity() {
-        let ctx = Context::headless(100, 100);
+        let ctx = Context::headless(100, 100).block();
         let stage = ctx.new_stage().with_background_color(Vec4::splat(1.0));
         let camera_position = Vec3::new(0.0, 9.0, 9.0);
         let _camera = stage.new_camera(Camera::new(
@@ -704,12 +704,12 @@ mod test {
 
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
-        let img = frame.read_image().unwrap();
+        let img = frame.read_image().block().unwrap();
         img_diff::save("cull/pyramid/frame.png", img);
         frame.present();
 
         let depth_texture = stage.get_depth_texture();
-        let depth_img = depth_texture.read_image().unwrap().unwrap();
+        let depth_img = depth_texture.read_image().block().unwrap().unwrap();
         img_diff::save("cull/pyramid/depth.png", depth_img);
 
         let pyramid_images = futures_lite::future::block_on(
@@ -776,7 +776,7 @@ mod test {
 
     #[test]
     fn occlusion_culling_debugging() {
-        let ctx = Context::headless(128, 128);
+        let ctx = Context::headless(128, 128).block();
         let stage = ctx
             .new_stage()
             .with_lighting(false)
@@ -796,7 +796,7 @@ mod test {
         let save_render = |s: &str| {
             let frame = ctx.get_next_frame().unwrap();
             stage.render(&frame.view());
-            let img = frame.read_image().unwrap();
+            let img = frame.read_image().block().unwrap();
             img_diff::save(format!("cull/debugging_{s}.png"), img);
             frame.present();
         };
@@ -918,7 +918,12 @@ mod test {
         save_render("3_purple_cube");
 
         // save the normalized depth image
-        let mut depth_img = stage.get_depth_texture().read_image().unwrap().unwrap();
+        let mut depth_img = stage
+            .get_depth_texture()
+            .read_image()
+            .block()
+            .unwrap()
+            .unwrap();
         img_diff::normalize_gray_img(&mut depth_img);
         img_diff::save("cull/debugging_4_depth.png", depth_img);
 

@@ -2,7 +2,8 @@
 //!
 //! This program will change on a whim and does not contain anything all that
 //! useful.
-use renderling::{math::UVec2, stage::Stage, Context};
+use glam::UVec2;
+use renderling::{stage::Stage, Context};
 use std::sync::Arc;
 use winit::{
     dpi::LogicalSize,
@@ -59,7 +60,7 @@ impl winit::application::ApplicationHandler for App {
             })
             .with_title("renderling gltf viewer");
         let window = Arc::new(event_loop.create_window(attributes).unwrap());
-        let ctx = Context::from_window(None, window.clone());
+        let ctx = futures_lite::future::block_on(Context::from_winit_window(None, window.clone()));
         let stage = ctx.new_stage();
         self.example = Some(Example { ctx, window, stage });
     }

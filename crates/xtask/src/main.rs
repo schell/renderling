@@ -1,6 +1,8 @@
 //! A build helper for the `renderling` project.
 use clap::{Parser, Subcommand};
 
+mod server;
+
 #[derive(Subcommand)]
 enum Command {
     /// Compile the `renderling` library into multiple SPIR-V shader entry points.
@@ -19,6 +21,17 @@ enum Command {
         #[clap(long)]
         from_cargo: bool,
     },
+    /// Run the WASM test server
+    WasmServer,
+    /// Compile for WASM and run headless browser tests
+    TestWasm {
+        /// Cargo args.
+        #[clap(last = true)]
+        args: Vec<String>,
+        /// Set to use chrome, otherwise firefox will be used.
+        #[clap(long)]
+        chrome: bool,
+    },
 }
 
 #[derive(Parser)]
@@ -29,8 +42,11 @@ struct Cli {
     subcommand: Command,
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
     env_logger::builder().init();
+
+    log::info!("running xtask");
 
     let cli = Cli::parse();
     match cli.subcommand {
@@ -58,6 +74,30 @@ fn main() {
             log::info!("Generating linkage for shaders");
             let paths = renderling_build::RenderlingPaths::new().unwrap();
             paths.generate_linkage(from_cargo, wgsl, only_fn_with_name);
+        }
+        Command::TestWasm { args, chrome } => {
+            log::info!("testing WASM");
+            let _proxy_handle = tokio::spawn(server::serve());
+            let mut test_handle = tokio::process::Command::new("wasm-pack");
+            test_handle.args([
+                "test",
+                "--headless",
+                if chrome { "--chrome" } else { "--firefox" },
+                "crates/renderling",
+                "--features",
+                "wasm",
+            ]);
+            if !args.is_empty() {
+                test_handle.arg("--").args(args);
+            }
+            let mut test_handle = test_handle.spawn().unwrap();
+            let status = test_handle.wait().await.unwrap();
+            if !status.success() {
+                panic!("Testing WASM failed :(");
+            }
+        }
+        Command::WasmServer => {
+            server::serve().await;
         }
     }
 }

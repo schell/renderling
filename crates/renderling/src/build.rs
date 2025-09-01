@@ -2,7 +2,8 @@
 
 fn main() {
     if std::env::var("CARGO_CFG_TARGET_ARCH").as_deref() != Ok("spirv") {
-        if let Some(paths) = renderling_build::RenderlingPaths::new() {
+        let paths = renderling_build::RenderlingPaths::new();
+        if let Some(paths) = paths {
             paths.generate_linkage(true, true, None);
         }
     }

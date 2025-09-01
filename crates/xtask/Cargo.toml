@@ -4,7 +4,15 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+axum.workspace = true
 clap.workspace = true
 env_logger.workspace = true
+futures-util.workspace = true
+image.workspace = true
+img-diff = { path = "../img-diff" }
 log.workspace = true
+new_mime_guess.workspace = true
 renderling_build = { path = "../renderling-build" }
+reqwest = { workspace = true, features = ["stream"] }
+tokio = { workspace = true, features = ["full"] }
+wire-types = { path = "../wire-types" }

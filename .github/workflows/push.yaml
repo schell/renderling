@@ -17,7 +17,7 @@ jobs:
   install-cargo-gpu:
     strategy:
       matrix: 
-        os: [ubuntu-24.04, macos-latest]
+        os: [ubuntu-latest, ubuntu-24.04, macos-latest]
     runs-on: ${{ matrix.os }}
     defaults:
       run: 
@@ -52,10 +52,11 @@ jobs:
   renderling-build-shaders:
     needs: install-cargo-gpu
     strategy:
+      fail-fast: false
       matrix: 
         # temporarily skip windows, revisit after a fix for this error is found:
         # https://github.com/rust-lang/cc-rs/issues/1331
-        os: [ubuntu-latest, macos-latest] #, windows-latest]
+        os: [ubuntu-latest, ubuntu-24.04, macos-latest] #, windows-latest]
     runs-on: ${{ matrix.os }}
     defaults:
       run: 
@@ -134,3 +135,35 @@ jobs:
         with:
           name: test-output-${{ runner.os }}
           path: test_output  
+
+  ## WASM tests, commented out until we can get a proper headless browser on CI
+  # renderling-wasm-test:
+  #   # strategy:
+  #   #   matrix: 
+  #   #     # empty string means ff, --chrome is chrome
+  #   #     browser: ["", "--chrome"]
+  #   runs-on: ubuntu-latest
+  #   steps:
+  #     - uses: actions/checkout@v2
+  #     - uses: moonrepo/setup-rust@v1
+  #     - uses: actions/cache@v4
+  #       with:
+  #         path: ~/.cargo
+  #         key: ${{ runner.os }}-test-cargo-${{ hashFiles('**/Cargo.lock') }}
+  #         restore-keys: ${{ runner.os }}-cargo-        
+  #     - name: Install linux deps 
+  #       if: runner.os == 'Linux'
+  #       run: |
+  #           sudo apt-get -y update
+  #           sudo apt-get -y install mesa-vulkan-drivers libvulkan1 vulkan-tools vulkan-validationlayers
+  #     - name: Install wasm-pack
+  #       run: cargo install --locked wasm-pack || true
+  #     - name: Test WASM
+  #       env:
+  #         RUST_LOG: info
+  #       run: cargo test-wasm --chrome #${{ matrix.browser }}
+  #     - uses: actions/upload-artifact@v4
+  #       if: always()
+  #       with:
+  #         name: test-output-${{ runner.os }}-wasm
+  #         path: test_output

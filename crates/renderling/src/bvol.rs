@@ -141,6 +141,14 @@ impl Aabb {
         self.min == self.max
     }
 
+    /// Returns the union of the two [`Aabbs`].
+    pub fn union(a: Self, b: Self) -> Self {
+        Aabb {
+            min: a.min.min(a.max).min(b.min).min(b.max),
+            max: a.max.max(a.min).max(b.max).max(b.min),
+        }
+    }
+
     /// Determines whether this `Aabb` can be seen by `camera` after being
     /// transformed by `transform`.
     pub fn is_outside_camera_view(&self, camera: &Camera, transform: Transform) -> bool {
@@ -587,7 +595,7 @@ impl BVol for Aabb {
 mod test {
     use glam::{Mat4, Quat};
 
-    use crate::{pbr::Material, stage::Vertex, Context};
+    use crate::{pbr::Material, stage::Vertex, test::BlockOnFuture, Context};
 
     use super::*;
 
@@ -641,7 +649,7 @@ mod test {
 
     #[test]
     fn bounding_box_from_min_max() {
-        let ctx = Context::headless(256, 256);
+        let ctx = Context::headless(256, 256).block();
         let stage = ctx
             .new_stage()
             .with_background_color(Vec4::ZERO)
@@ -709,7 +717,7 @@ mod test {
 
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
-        let img = frame.read_image().unwrap();
+        let img = frame.read_image().block().unwrap();
         img_diff::assert_img_eq("bvol/bounding_box/get_mesh.png", img);
     }
 
@@ -719,5 +727,19 @@ mod test {
         let b = Aabb::new(Vec3::splat(0.9), Vec3::splat(1.9));
         assert!(a.intersects_aabb(&b));
         assert!(b.intersects_aabb(&a));
+    }
+
+    #[test]
+    fn aabb_union() {
+        let a = Aabb::new(Vec3::splat(4.0), Vec3::splat(5.0));
+        let b = Aabb::new(Vec3::ZERO, Vec3::ONE);
+        let c = Aabb::union(a, b);
+        assert_eq!(
+            Aabb {
+                min: Vec3::ZERO,
+                max: Vec3::splat(5.0)
+            },
+            c
+        );
     }
 }

@@ -58,7 +58,6 @@ craballoc.workspace = true
 crabslab = { workspace = true, features = ["default"] }
 dagga = {workspace=true}
 crunch = "0.5"
-futures-lite = {workspace=true}
 glam = { workspace = true, features = ["std"] }
 gltf = {workspace = true, optional = true}
 glyph_brush = {workspace = true, optional = true}
@@ -75,22 +74,37 @@ snafu = {workspace = true}
 wgpu = { workspace = true, features = ["spirv"] }
 winit = { workspace = true, optional = true }
 
+# dependencies for WASM CPU code
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+wasm-bindgen.workspace = true
+
 [dev-dependencies]
 assert_approx_eq.workspace = true
+console_log.workspace = true
 ctor = "0.2.2"
 env_logger.workspace = true
 example = { path = "../example" }
 fastrand = "2.1.1"
+futures-lite.workspace = true
 human-repr = "1.1.0"
 icosahedron = "0.1"
 img-diff = { path = "../img-diff" }
 naga.workspace = true
 ttf-parser = "0.20.0"
+wasm-bindgen-test.workspace = true
 wgpu-core.workspace = true
 winit.workspace = true
+wire-types = { path = "../wire-types" }
 
 [target.'cfg(not(target_arch = "spirv"))'.dev-dependencies]
 glam = { workspace = true, features = ["std", "debug-glam-assert"] }
 
 [target.'cfg(target_os = "macos")'.dev-dependencies]
 metal.workspace = true
+
+[dev-dependencies.web-sys]
+workspace = true
+features = [
+  "Navigator",
+  "Window"
+]

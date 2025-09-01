@@ -31,7 +31,6 @@ impl Drop for WebCallback {
                         closure.as_ref().unchecked_ref(),
                     )
                     .unwrap();
-                log::trace!("dropping event {}", self.name);
             }
         }
     }

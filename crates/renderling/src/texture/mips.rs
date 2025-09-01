@@ -4,7 +4,7 @@ use crate::texture::Texture;
 use craballoc::runtime::WgpuRuntime;
 use snafu::Snafu;
 
-use super::wgpu_texture_format_channels_and_subpixel_bytes;
+use super::wgpu_texture_format_channels_and_subpixel_bytes_todo;
 
 const LABEL: Option<&str> = Some("mip-map-generator");
 
@@ -118,7 +118,7 @@ impl MipMapGenerator {
 
         let mip_levels = 1.max(mip_levels);
         let (color_channels, subpixel_bytes) =
-            wgpu_texture_format_channels_and_subpixel_bytes(self.format);
+            wgpu_texture_format_channels_and_subpixel_bytes_todo(self.format);
 
         let size = texture.texture.size();
         let mut mips: Vec<Texture> = vec![];

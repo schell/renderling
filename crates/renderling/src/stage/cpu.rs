@@ -2,6 +2,7 @@
 //!
 //! The `Stage` object contains a slab buffer and a render pipeline.
 //! It is used to stage [`Renderlet`]s for rendering.
+use core::ops::Deref;
 use core::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 use craballoc::prelude::*;
 use crabslab::Id;
@@ -768,6 +769,10 @@ impl Stage {
         &self.runtime().queue
     }
 
+    pub fn hdr_texture(&self) -> impl Deref<Target = crate::texture::Texture> + '_ {
+        self.hdr_texture.read().unwrap()
+    }
+
     pub fn builder(&self) -> RenderletBuilder<'_, ()> {
         RenderletBuilder::new(self)
     }
@@ -1430,6 +1435,11 @@ impl Stage {
         Ok(Skybox::new(self.runtime(), hdr))
     }
 
+    pub fn new_skybox_from_bytes(&self, bytes: &[u8]) -> Result<Skybox, AtlasImageError> {
+        let hdr = AtlasImage::from_hdr_bytes(bytes)?;
+        Ok(Skybox::new(self.runtime(), hdr))
+    }
+
     /// Create a new [`NestedTransform`].
     pub fn new_nested_transform(&self) -> NestedTransform {
         NestedTransform::new(self.geometry.slab_allocator())
@@ -1699,12 +1709,13 @@ impl NestedTransform {
 mod test {
     use craballoc::runtime::CpuRuntime;
     use crabslab::{Array, Id, Slab};
-    use glam::{Mat4, Vec2, Vec3};
+    use glam::{Mat4, Vec2, Vec3, Vec4};
 
     use crate::{
         camera::Camera,
         geometry::{Geometry, GeometryDescriptor},
         stage::{cpu::SlabAllocator, NestedTransform, Renderlet, Vertex},
+        test::BlockOnFuture,
         transform::Transform,
         Context,
     };
@@ -1779,7 +1790,7 @@ mod test {
 
     #[test]
     fn can_msaa() {
-        let ctx = Context::headless(100, 100);
+        let ctx = Context::headless(100, 100).block();
         let stage = ctx
             .new_stage()
             .with_background_color([1.0, 1.0, 1.0, 1.0])
@@ -1803,7 +1814,7 @@ mod test {
         log::debug!("rendering without msaa");
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
-        let img = frame.read_image().unwrap();
+        let img = frame.read_image().block().unwrap();
         img_diff::assert_img_eq_cfg(
             "msaa/without.png",
             img,
@@ -1819,7 +1830,7 @@ mod test {
         log::debug!("rendering with msaa");
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
-        let img = frame.read_image().unwrap();
+        let img = frame.read_image().block().unwrap();
         img_diff::assert_img_eq_cfg(
             "msaa/with.png",
             img,
@@ -1833,7 +1844,7 @@ mod test {
 
     #[test]
     fn has_consistent_stage_renderlet_strong_count() {
-        let ctx = Context::headless(100, 100);
+        let ctx = Context::headless(100, 100).block();
         let stage = ctx.new_stage();
         let r = stage.new_renderlet(Renderlet::default());
         assert_eq!(1, r.ref_count());
@@ -1846,7 +1857,7 @@ mod test {
     /// Tests that the PBR descriptor is written to slot 0 of the geometry buffer,
     /// and that it contains what we think it contains.
     fn stage_geometry_desc_sanity() {
-        let ctx = Context::headless(100, 100);
+        let ctx = Context::headless(100, 100).block();
         let stage = ctx.new_stage();
         let _ = stage.commit();
 
@@ -1857,5 +1868,137 @@ mod test {
         .unwrap();
         let pbr_desc = slab.read_unchecked(Id::<GeometryDescriptor>::new(0));
         pretty_assertions::assert_eq!(stage.geometry_descriptor().get(), pbr_desc);
+    }
+
+    #[test]
+    fn slabbed_vertices_native() {
+        let ctx = Context::headless(100, 100).block();
+        let runtime = ctx.as_ref();
+
+        // Create our geometry on the slab.
+        let slab = SlabAllocator::new(
+            runtime,
+            "slabbed_isosceles_triangle",
+            wgpu::BufferUsages::empty(),
+        );
+
+        let geometry = vec![
+            (Vec3::new(0.5, -0.5, 0.0), Vec4::new(1.0, 0.0, 0.0, 1.0)),
+            (Vec3::new(0.0, 0.5, 0.0), Vec4::new(0.0, 1.0, 0.0, 1.0)),
+            (Vec3::new(-0.5, -0.5, 0.0), Vec4::new(0.0, 0.0, 1.0, 1.0)),
+            (Vec3::new(-1.0, 1.0, 0.0), Vec4::new(1.0, 0.0, 0.0, 1.0)),
+            (Vec3::new(-1.0, 0.0, 0.0), Vec4::new(0.0, 1.0, 0.0, 1.0)),
+            (Vec3::new(0.0, 1.0, 0.0), Vec4::new(0.0, 0.0, 1.0, 1.0)),
+        ];
+        let vertices = slab.new_array(geometry);
+        let array = slab.new_value(vertices.array());
+
+        // Create a bindgroup for the slab so our shader can read out the types.
+        let bindgroup_layout =
+            runtime
+                .device
+                .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: None,
+                    entries: &[wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::VERTEX,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: true },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    }],
+                });
+        let pipeline_layout =
+            runtime
+                .device
+                .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                    label: None,
+                    bind_group_layouts: &[&bindgroup_layout],
+                    push_constant_ranges: &[],
+                });
+
+        let vertex = crate::linkage::slabbed_vertices::linkage(&runtime.device);
+        let fragment = crate::linkage::passthru_fragment::linkage(&runtime.device);
+        let pipeline = runtime
+            .device
+            .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: None,
+                cache: None,
+                layout: Some(&pipeline_layout),
+                vertex: wgpu::VertexState {
+                    compilation_options: wgpu::PipelineCompilationOptions::default(),
+                    module: &vertex.module,
+                    entry_point: Some(vertex.entry_point),
+                    buffers: &[],
+                },
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    strip_index_format: None,
+                    front_face: wgpu::FrontFace::Ccw,
+                    cull_mode: None,
+                    unclipped_depth: false,
+                    polygon_mode: wgpu::PolygonMode::Fill,
+                    conservative: false,
+                },
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState {
+                    mask: !0,
+                    alpha_to_coverage_enabled: false,
+                    count: 1,
+                },
+                fragment: Some(wgpu::FragmentState {
+                    compilation_options: Default::default(),
+                    module: &fragment.module,
+                    entry_point: Some(fragment.entry_point),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: wgpu::TextureFormat::Rgba8UnormSrgb,
+                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                }),
+                multiview: None,
+            });
+        let slab_buffer = slab.commit();
+
+        let bindgroup = runtime
+            .device
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                label: None,
+                layout: &bindgroup_layout,
+                entries: &[wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: slab_buffer.as_entire_binding(),
+                }],
+            });
+
+        let frame = ctx.get_next_frame().unwrap();
+        let mut encoder = runtime.device.create_command_encoder(&Default::default());
+        {
+            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &frame.view(),
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::WHITE),
+                        store: wgpu::StoreOp::Store,
+                    },
+                    depth_slice: None,
+                })],
+                ..Default::default()
+            });
+            render_pass.set_pipeline(&pipeline);
+            render_pass.set_bind_group(0, &bindgroup, &[]);
+            let id = array.id().inner();
+            render_pass.draw(0..vertices.len() as u32, id..id + 1);
+        }
+        runtime.queue.submit(std::iter::once(encoder.finish()));
+
+        let img = frame
+            .read_linear_image()
+            .block()
+            .expect("could not read frame");
+        img_diff::assert_img_eq("tutorial/slabbed_isosceles_triangle.png", img);
     }
 }
