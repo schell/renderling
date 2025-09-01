@@ -11,6 +11,31 @@ use wire_types::{Error, PixelType};
 wasm_bindgen_test_configure!(run_in_browser);
 
 #[wasm_bindgen_test]
+/// Writes a textfile containing some system info.
+///
+/// If you need more info on CI etc, add it here.
+async fn can_write_system_info_artifact() {
+    let user_agent = web_sys::window()
+        .expect_throw("no window")
+        .navigator()
+        .user_agent()
+        .expect_throw("no user agent");
+
+    let table = std::collections::HashMap::<String, String>::from_iter(Some((
+        "user_agent".to_owned(),
+        user_agent,
+    )));
+    let file = format!("{table:#?}");
+    loading_bytes::post_bin_wasm::<Result<(), wire_types::Error>>(
+        "http://127.0.0.1:4000/artifact/info.txt",
+        file.as_bytes(),
+    )
+    .await
+    .unwrap_throw()
+    .unwrap_throw();
+}
+
+#[wasm_bindgen_test]
 async fn can_create_headless_ctx() {
     let _ctx = renderling::Context::try_new_headless(256, 256, None)
         .await

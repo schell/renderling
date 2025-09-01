@@ -92,7 +92,6 @@ img-diff = { path = "../img-diff" }
 naga.workspace = true
 ttf-parser = "0.20.0"
 wasm-bindgen-test.workspace = true
-web-sys.workspace = true
 wgpu-core.workspace = true
 winit.workspace = true
 wire-types = { path = "../wire-types" }
@@ -102,3 +101,10 @@ glam = { workspace = true, features = ["std", "debug-glam-assert"] }
 
 [target.'cfg(target_os = "macos")'.dev-dependencies]
 metal.workspace = true
+
+[dev-dependencies.web-sys]
+workspace = true
+features = [
+  "Navigator",
+  "Window"
+]

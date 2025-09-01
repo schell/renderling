@@ -30,6 +30,7 @@ ctor = "0.2.2"
 dagga = "0.2.1"
 env_logger = "0.10.0"
 futures-lite = "1.13"
+futures-util = "0.3.31"
 glam = { version = "0.30", default-features = false }
 gltf = { version = "1.4,1", features = ["KHR_lights_punctual", "KHR_materials_unlit", "KHR_materials_emissive_strength", "extras", "extensions"] }
 glyph_brush = "0.7.8"

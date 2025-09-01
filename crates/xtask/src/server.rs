@@ -13,6 +13,7 @@ use axum::{
 };
 use image::DynamicImage;
 use img_diff::DiffCfg;
+use tokio::io::AsyncWriteExt;
 use wire_types::Error;
 
 pub async fn serve() {
@@ -23,11 +24,26 @@ pub async fn serve() {
         .route("/assert_img_eq/{*filename}", post(assert_img_eq))
         .route("/save/{*filename}", options(accept))
         .route("/save/{*filename}", post(save))
+        .route("/artifact/{*filename}", options(accept))
+        .route("/artifact/{*filename}", post(artifact))
         .route("/{*rest}", any(accept));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:4000")
         .await
         .unwrap();
     axum::serve(listener, app).await.unwrap();
+}
+
+/// Responds with access control headers to allow anything from anywhere.
+async fn accept(request: Request) -> Response {
+    log::info!("accept: {request:#?}");
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("accept", "*/*")
+        .header("access-control-allow-origin", "*")
+        .header("access-control-allow-methods", "*")
+        .header("access-control-allow-headers", "*")
+        .body(Body::default())
+        .unwrap()
 }
 
 async fn static_file(Path(path): Path<String>) -> Result<Response, StatusCode> {
@@ -142,14 +158,32 @@ async fn save(
         .unwrap()
 }
 
-async fn accept(request: Request) -> Response {
-    log::info!("accept: {request:#?}");
+async fn artifact_inner(filename: impl AsRef<std::path::Path>, body: Body) -> Result<(), Error> {
+    use futures_util::StreamExt;
+
+    let mut byte_stream = body.into_data_stream();
+    let mut file = tokio::fs::File::create(filename)
+        .await
+        .map_err(|e| Error::from(e.to_string()))?;
+    while let Some(result_bytes) = byte_stream.next().await {
+        let bytes = result_bytes.map_err(|e| Error::from(e.to_string()))?;
+        file.write_all(&bytes)
+            .await
+            .map_err(|e| Error::from(e.to_string()))?;
+    }
+    Ok(())
+}
+
+async fn artifact(Path(parts): Path<Vec<String>>, body: Body) -> Response {
+    let filename = std::path::PathBuf::from(img_diff::WASM_TEST_OUTPUT_DIR).join(parts.join("/"));
+    log::info!("saving artifact to {filename:?}");
+    let result = artifact_inner(filename, body).await;
     Response::builder()
         .status(StatusCode::OK)
         .header("accept", "*/*")
         .header("access-control-allow-origin", "*")
         .header("access-control-allow-methods", "*")
         .header("access-control-allow-headers", "*")
-        .body(Body::default())
+        .body(Json(result).into_response().into_body())
         .unwrap()
 }

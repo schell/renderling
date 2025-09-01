@@ -7,6 +7,7 @@ edition = "2021"
 axum.workspace = true
 clap.workspace = true
 env_logger.workspace = true
+futures-util.workspace = true
 image.workspace = true
 img-diff = { path = "../img-diff" }
 log.workspace = true

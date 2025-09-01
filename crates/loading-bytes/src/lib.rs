@@ -175,6 +175,71 @@ pub async fn post_json_wasm<T: serde::de::DeserializeOwned>(
     Ok(t)
 }
 
+// TODO: deduplicate post_bin_wasm and post_json_wasm
+pub async fn post_bin_wasm<T: serde::de::DeserializeOwned>(
+    path: &str,
+    data: &[u8],
+) -> Result<T, WasmError> {
+    use js_sys::JsString;
+    use wasm_bindgen::JsCast;
+
+    let path = path.to_string();
+    let opts = web_sys::RequestInit::new();
+    opts.set_method("POST");
+    let headers = js_sys::Object::new();
+    js_sys::Reflect::set(
+        &headers,
+        &JsString::from("content-type"),
+        &JsString::from("application/octet-stream"),
+    )
+    .unwrap();
+    opts.set_headers(&headers);
+    let body = js_sys::Uint8Array::from(data);
+    opts.set_body(&body.into());
+    let request = web_sys::Request::new_with_str_and_init(&path, &opts).map_err(|msg| {
+        CreateRequestSnafu {
+            path: path.clone(),
+            msg: send_wrapper::SendWrapper::new(msg),
+        }
+        .build()
+    })?;
+    let window = web_sys::window().unwrap();
+    let resp_value = wasm_bindgen_futures::JsFuture::from(window.fetch_with_request(&request))
+        .await
+        .map_err(|msg| {
+            FetchSnafu {
+                path: path.clone(),
+                msg: send_wrapper::SendWrapper::new(msg),
+            }
+            .build()
+        })?;
+    let resp: web_sys::Response = resp_value.dyn_into().map_err(|msg| {
+        NotAResponseSnafu {
+            path: path.clone(),
+            msg: send_wrapper::SendWrapper::new(msg),
+        }
+        .build()
+    })?;
+
+    snafu::ensure!(
+        resp.ok(),
+        OtherSnafu {
+            other: wasm_bindgen_futures::JsFuture::from(resp.text().unwrap())
+                .await
+                .unwrap()
+                .as_string()
+                .unwrap()
+        }
+    );
+
+    let value = wasm_bindgen_futures::JsFuture::from(resp.text().unwrap_throw())
+        .await
+        .unwrap_throw();
+    let s = value.as_string().expect_throw(&format!("{value:#?}"));
+    let t = serde_json::from_str::<T>(&s).unwrap_throw();
+    Ok(t)
+}
+
 /// Load the file at the given url fragment or path and return it as a vector of bytes, if
 /// possible.
 pub async fn load(path: &str) -> Result<Vec<u8>, LoadingBytesError> {

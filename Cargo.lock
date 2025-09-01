@@ -5888,6 +5888,7 @@ dependencies = [
  "axum",
  "clap 4.5.40",
  "env_logger",
+ "futures-util",
  "image 0.25.6",
  "img-diff",
  "log",

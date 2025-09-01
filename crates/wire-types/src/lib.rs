@@ -18,3 +18,9 @@ pub struct Image {
 pub struct Error {
     pub description: String,
 }
+
+impl From<String> for Error {
+    fn from(description: String) -> Self {
+        Error { description }
+    }
+}
