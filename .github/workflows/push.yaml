@@ -156,4 +156,4 @@ jobs:
       - name: Test WASM
         env:
           RUST_LOG: info
-        run: cargo test-wasm
+        run: cargo test-wasm --chrome

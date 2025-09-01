@@ -28,6 +28,9 @@ enum Command {
         /// Cargo args.
         #[clap(last = true)]
         args: Vec<String>,
+        /// Set to use chrome, otherwise firefox will be used.
+        #[clap(long)]
+        chrome: bool,
     },
 }
 
@@ -72,14 +75,14 @@ async fn main() {
             let paths = renderling_build::RenderlingPaths::new().unwrap();
             paths.generate_linkage(from_cargo, wgsl, only_fn_with_name);
         }
-        Command::TestWasm { args } => {
+        Command::TestWasm { args, chrome } => {
             log::info!("testing WASM");
             let _proxy_handle = tokio::spawn(server::serve());
             let mut test_handle = tokio::process::Command::new("wasm-pack");
             test_handle.args([
                 "test",
                 "--headless",
-                "--firefox",
+                if chrome { "--chrome" } else { "--firefox" },
                 "crates/renderling",
                 "--features",
                 "wasm",
