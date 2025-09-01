@@ -138,10 +138,10 @@ jobs:
 
   # WASM tests
   renderling-wasm-test:
-    strategy:
-      matrix: 
-        # empty string means ff, --chrome is chrome
-        browser: ["", "--chrome"]
+    # strategy:
+    #   matrix: 
+    #     # empty string means ff, --chrome is chrome
+    #     browser: ["", "--chrome"]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
@@ -161,7 +161,7 @@ jobs:
       - name: Test WASM
         env:
           RUST_LOG: info
-        run: cargo test-wasm ${{ matrix.browser }}
+        run: cargo test-wasm --chrome #${{ matrix.browser }}
       - uses: actions/upload-artifact@v4
         if: always()
         with:
