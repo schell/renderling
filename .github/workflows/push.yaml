@@ -156,6 +156,7 @@ jobs:
       - name: Test WASM
         env:
           RUST_LOG: info
+          WASM_BINDGEN_TEST_BROWSER: "chrome --headless --enable-unsafe-webgpu"
         run: cargo test-wasm --chrome
       - uses: actions/upload-artifact@v4
         if: always()
