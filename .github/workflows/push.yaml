@@ -52,6 +52,7 @@ jobs:
   renderling-build-shaders:
     needs: install-cargo-gpu
     strategy:
+      fail-fast: false
       matrix: 
         # temporarily skip windows, revisit after a fix for this error is found:
         # https://github.com/rust-lang/cc-rs/issues/1331
