@@ -1,0 +1,13 @@
+{
+  "moz:firefoxOptions": {
+    "prefs": {
+      "dom.webgpu.enabled": true
+    },
+    "args": []
+  },
+  "goog:chromeOptions": {
+    "args": [
+      "--enable-unsafe-webgpu"
+    ]
+  }
+}
