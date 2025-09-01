@@ -162,6 +162,14 @@ async fn artifact_inner(filename: impl AsRef<std::path::Path>, body: Body) -> Re
     use futures_util::StreamExt;
 
     let mut byte_stream = body.into_data_stream();
+    tokio::fs::create_dir_all(
+        filename
+            .as_ref()
+            .parent()
+            .ok_or_else(|| Error::from(format!("'{:?}' has no parent dir", filename.as_ref())))?,
+    )
+    .await
+    .map_err(|e| Error::from(e.to_string()))?;
     let mut file = tokio::fs::File::create(filename)
         .await
         .map_err(|e| Error::from(e.to_string()))?;

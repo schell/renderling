@@ -15,11 +15,14 @@ wasm_bindgen_test_configure!(run_in_browser);
 ///
 /// If you need more info on CI etc, add it here.
 async fn can_write_system_info_artifact() {
+    let _ = console_log::init();
+
     let user_agent = web_sys::window()
         .expect_throw("no window")
         .navigator()
         .user_agent()
         .expect_throw("no user agent");
+    log::info!("user_agent: {user_agent}");
 
     let table = std::collections::HashMap::<String, String>::from_iter(Some((
         "user_agent".to_owned(),
