@@ -137,6 +137,10 @@ jobs:
 
   # WASM tests
   renderling-wasm-test:
+    strategy:
+      matrix: 
+        # empty string means ff, --chrome is chrome
+        browser: ["", "--chrome"]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
@@ -156,8 +160,7 @@ jobs:
       - name: Test WASM
         env:
           RUST_LOG: info
-          WASM_BINDGEN_TEST_BROWSER: "chrome --headless --enable-unsafe-webgpu"
-        run: cargo test-wasm --chrome
+        run: cargo test-wasm ${{ matrix.browser }}
       - uses: actions/upload-artifact@v4
         if: always()
         with:
