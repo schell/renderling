@@ -15,11 +15,7 @@ use glyph_brush::*;
 pub use ab_glyph::FontArc;
 pub use glyph_brush::{Section, Text};
 
-use crate::{
-    atlas::AtlasTexture,
-    pbr::Material,
-    stage::{Renderlet, Vertex},
-};
+use crate::{atlas::AtlasTexture, geometry::Vertex, pbr::Material, stage::Renderlet};
 use image::{DynamicImage, GenericImage, ImageBuffer, Luma, Rgba};
 
 use super::{Ui, UiTransform};

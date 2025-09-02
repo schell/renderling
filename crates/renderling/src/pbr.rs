@@ -717,9 +717,9 @@ mod test {
     use crate::{
         atlas::AtlasImage,
         camera::Camera,
+        geometry::Vertex,
         pbr::Material,
         prelude::glam::{Vec3, Vec4},
-        stage::Vertex,
         test::BlockOnFuture,
         transform::Transform,
     };

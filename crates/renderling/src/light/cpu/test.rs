@@ -13,7 +13,8 @@ use crate::{
     math::GpuRng,
     pbr::Material,
     prelude::Transform,
-    stage::{Renderlet, RenderletPbrVertexInfo, Stage, Vertex}, test::BlockOnFuture,
+    geometry::Vertex,
+    stage::{Renderlet, RenderletPbrVertexInfo, Stage}, test::BlockOnFuture,
 };
 
 use super::*;

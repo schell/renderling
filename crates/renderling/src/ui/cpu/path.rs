@@ -1,10 +1,7 @@
 //! Path and builder.
 //!
 //! Path colors are sRGB.
-use crate::{
-    pbr::Material,
-    stage::{Renderlet, Vertex},
-};
+use crate::{geometry::Vertex, pbr::Material, stage::Renderlet};
 use craballoc::prelude::{GpuArray, Hybrid};
 use crabslab::Id;
 use glam::{Vec2, Vec3, Vec3Swizzles, Vec4};

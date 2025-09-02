@@ -13,12 +13,10 @@ use glam::{Mat4, UVec2};
 
 use crate::{
     camera::Camera,
-    geometry::GeometryDescriptor,
+    geometry::{GeometryDescriptor, MorphTarget, Skin, Vertex},
     prelude::Transform,
-    stage::{MorphTarget, Renderlet, Skin, Vertex},
+    stage::Renderlet,
 };
-
-// TODO: Move `Renderlet` to geometry.
 
 /// Wrapper around the geometry slab, which holds mesh data and more.
 #[derive(Clone)]
@@ -45,7 +43,6 @@ impl AsRef<SlabAllocator<WgpuRuntime>> for Geometry {
 }
 
 impl Geometry {
-    // TODO: move atlas size into materials.
     pub fn new(runtime: impl AsRef<WgpuRuntime>, resolution: UVec2, atlas_size: UVec2) -> Self {
         let runtime = runtime.as_ref();
         let slab = SlabAllocator::new(runtime, "geometry", wgpu::BufferUsages::empty());
@@ -98,12 +95,12 @@ impl Geometry {
         self.descriptor.modify(|cfg| cfg.camera_id = c.id());
     }
 
+    /// Stage a new transform.
     pub fn new_transform(&self, transform: Transform) -> Hybrid<Transform> {
         self.slab.new_value(transform)
     }
 
     /// Create new geometry data.
-    // TODO: Move `Vertex` to geometry.
     pub fn new_vertices(&self, data: impl IntoIterator<Item = Vertex>) -> HybridArray<Vertex> {
         self.slab.new_array(data)
     }
@@ -114,7 +111,6 @@ impl Geometry {
     }
 
     /// Create new morph targets.
-    // TODO: Move `MorphTarget` to geometry.
     pub fn new_morph_targets(
         &self,
         data: impl IntoIterator<Item = MorphTarget>,
@@ -150,7 +146,6 @@ impl Geometry {
     }
 
     /// Create a new skin.
-    // TODO: move `Skin` to geometry.
     pub fn new_skin(&self, skin: Skin) -> Hybrid<Skin> {
         self.slab.new_value(skin)
     }

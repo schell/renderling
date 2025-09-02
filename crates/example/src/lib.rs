@@ -11,10 +11,11 @@ use renderling::{
     atlas::AtlasImage,
     bvol::{Aabb, BoundingSphere},
     camera::Camera,
+    geometry::Vertex,
     light::{AnalyticalLight, DirectionalLightDescriptor},
     prelude::*,
     skybox::Skybox,
-    stage::{Animator, GltfDocument, Renderlet, Stage, Vertex},
+    stage::{Animator, GltfDocument, Renderlet, Stage},
     ui::{FontArc, Section, Text, Ui, UiPath, UiText},
     Context,
 };

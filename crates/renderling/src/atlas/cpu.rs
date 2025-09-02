@@ -937,9 +937,9 @@ mod test {
     use crate::{
         atlas::{AtlasTexture, TextureAddressMode},
         camera::Camera,
+        geometry::Vertex,
         material::Materials,
         pbr::Material,
-        stage::Vertex,
         test::BlockOnFuture,
         transform::Transform,
         Context,

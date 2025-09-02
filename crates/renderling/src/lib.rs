@@ -1,9 +1,15 @@
-//! A "GPU driven" renderer with a focus on simplicity and ease of use.
-//! Backed by WebGPU.
+//! <div style="float: right; padding: 1em;">
+//!    <img
+//!       style="image-rendering: pixelated; image-rendering: -moz-crisp-edges; image-rendering: crisp-edges;"
+//!       alt="renderling mascot" width="180"
+//!       src="https://github.com/user-attachments/assets/83eafc47-287c-4b5b-8fd7-2063e56b2338"
+//!    />
+//! </div>
+//!
+//! `renderling` is a "GPU driven" renderer with a focus on simplicity and ease
+//! of use, targeting WebGPU.
 //!
 //! Shaders are written in Rust using [`rust-gpu`](https://rust-gpu.github.io/).
-//!
-//! All data is staged on the GPU using a [slab allocator](https://crates.io/crates/craballoc).
 //!
 //! ## Hello triangle
 //!
@@ -13,7 +19,8 @@
 //! ### Context creation
 //!
 //! First you must create a [`Context`].
-//! The `Context` holds the render target - either a window or a texture.
+//! The `Context` holds the render target - either a native window, an HTML
+//! canvas or a texture.
 //!
 //! ```
 //! use renderling::prelude::*;
@@ -23,6 +30,15 @@
 //! ```
 //!
 //! [`Context::headless`] creates a `Context` that renders to a texture.
+//!
+//! [`Context::from_winit_window`] creates a `Context` that renders to a native
+//! window.
+//!
+//! [`Context::try_new_with_surface`] creates a `Context` that renders to any
+//! [`wgpu::SurfaceTarget`].
+//!
+//! See the [`renderling::context`](context) module documentation for
+//! more info.
 //!
 //! ### Staging
 //!
@@ -43,11 +59,15 @@
 //! synchronization will happen during
 //! [`Stage::render`](crate::stage::Stage::render).
 //!
-//! When "staging" some data, you receive [`Hybrid`](crate::prelude::Hybrid)s and
-//! [`HybridArray`](crate::prelude::HybridArray)s in return.
+//! Use one of the many `Stage::new_*` functions to stage data on the GPU:
+//! * [`Stage::new_camera`]
+//! * [`Stage::new_vertices`]
+//! * [`Stage::new_material`]
+//! * [`Stage::new_renderlet`]
+//! * ...and more
 //!
-//! These types come from the [`craballoc`] library, which is re-exported
-//! from [the prelude](crate::prelude).
+//! Many of these functions return [`Hybrid`](crate::prelude::Hybrid)s or
+//! [`HybridArray`](crate::prelude::HybridArray)s in return.
 //!
 //! In order to render, we need to "stage" a
 //! [`Renderlet`](crate::stage::Renderlet), which is a bundle of rendering
@@ -152,7 +172,7 @@ pub mod bvol;
 pub mod camera;
 pub mod color;
 #[cfg(cpu)]
-mod context;
+pub mod context;
 pub mod convolution;
 pub mod cubemap;
 pub mod cull;
@@ -187,15 +207,15 @@ pub use context::*;
 pub mod prelude {
     //! A prelude, meant to be glob-imported.
 
-    #[cfg(cpu)]
-    pub extern crate craballoc;
     pub extern crate glam;
 
     #[cfg(cpu)]
     pub use craballoc::prelude::*;
     pub use crabslab::{Array, Id};
 
-    pub use crate::{camera::*, light::*, pbr::Material, stage::*, transform::Transform};
+    pub use crate::{
+        camera::*, geometry::*, light::*, pbr::Material, stage::*, transform::Transform,
+    };
 
     #[cfg(cpu)]
     pub use crate::context::*;
@@ -216,7 +236,7 @@ macro_rules! println {
 mod test {
     use super::*;
     use crate::{
-        atlas::AtlasImage, camera::Camera, pbr::Material, stage::Vertex, transform::Transform,
+        atlas::AtlasImage, camera::Camera, geometry::Vertex, pbr::Material, transform::Transform,
     };
 
     use glam::{Mat3, Mat4, Quat, UVec2, Vec2, Vec3, Vec4};

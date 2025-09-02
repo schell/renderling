@@ -92,7 +92,7 @@ impl Default for ShadowMapDescriptor {
 pub struct ShadowMappingVertexInfo {
     pub renderlet_id: Id<Renderlet>,
     pub vertex_index: u32,
-    pub vertex: crate::stage::Vertex,
+    pub vertex: crate::geometry::Vertex,
     pub transform: Transform,
     pub model_matrix: Mat4,
     pub world_pos: Vec3,

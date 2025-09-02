@@ -270,8 +270,8 @@ mod test {
     use image::GenericImageView;
 
     use crate::{
+        geometry::Vertex,
         math::{UNIT_INDICES, UNIT_POINTS},
-        stage::Vertex,
         test::BlockOnFuture,
         texture::CopiedTextureBuffer,
     };

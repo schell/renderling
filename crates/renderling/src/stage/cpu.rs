@@ -1,6 +1,15 @@
 //! GPU staging area.
 //!
-//! The `Stage` object contains a slab buffer and a render pipeline.
+//! The [`Stage`] object is used to "stage" objects on the GPU, including
+//! mesh geometry, transforms, materials and lights.
+//!
+//! [`Stage`] also controls various effects:
+//! * [`Skybox`]
+//!   - [`Stage::with_skybox`]
+//!   - [`Stage::set_skybox`]
+//! * [`Bloom`]
+//! * [`Tonemapping`].
+//!
 //! It is used to stage [`Renderlet`]s for rendering.
 use core::ops::Deref;
 use core::sync::atomic::{AtomicU32, AtomicUsize, Ordering};

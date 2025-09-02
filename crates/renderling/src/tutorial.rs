@@ -5,8 +5,8 @@ use glam::{Vec3, Vec3Swizzles, Vec4};
 use spirv_std::spirv;
 
 use crate::{
-    geometry::GeometryDescriptor,
-    stage::{Renderlet, Vertex, VertexInfo},
+    geometry::{GeometryDescriptor, Vertex},
+    stage::{Renderlet, VertexInfo},
 };
 
 /// Simple fragment shader that writes the input color to the output color.
