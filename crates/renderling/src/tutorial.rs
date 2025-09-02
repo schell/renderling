@@ -6,7 +6,7 @@ use spirv_std::spirv;
 
 use crate::{
     geometry::{GeometryDescriptor, Vertex},
-    stage::{Renderlet, VertexInfo},
+    stage::{RenderletDescriptor, VertexInfo},
 };
 
 /// Simple fragment shader that writes the input color to the output color.
@@ -91,7 +91,7 @@ pub fn slabbed_vertices(
 #[spirv(vertex)]
 pub fn slabbed_renderlet(
     // Id of the array of vertices we are rendering
-    #[spirv(instance_index)] renderlet_id: Id<Renderlet>,
+    #[spirv(instance_index)] renderlet_id: Id<RenderletDescriptor>,
     // Which vertex within the render unit are we rendering
     #[spirv(vertex_index)] vertex_index: u32,
 

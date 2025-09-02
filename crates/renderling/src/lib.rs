@@ -214,7 +214,8 @@ pub mod prelude {
     pub use crabslab::{Array, Id};
 
     pub use crate::{
-        camera::*, geometry::*, light::*, pbr::Material, stage::*, transform::Transform,
+        camera::*, geometry::*, light::*, material::Material, stage::*,
+        transform::TransformDescriptor,
     };
 
     #[cfg(cpu)]
@@ -236,7 +237,8 @@ macro_rules! println {
 mod test {
     use super::*;
     use crate::{
-        atlas::AtlasImage, camera::Camera, geometry::Vertex, pbr::Material, transform::Transform,
+        atlas::AtlasImage, camera::Camera, geometry::Vertex, material::Material,
+        transform::TransformDescriptor,
     };
 
     use glam::{Mat3, Mat4, Quat, UVec2, Vec2, Vec3, Vec4};
@@ -451,13 +453,13 @@ mod test {
         let (_vertices, transform, _renderlet) = stage
             .builder()
             .with_vertices(right_tri_vertices())
-            .with_transform(Transform::default())
+            .with_transform(TransformDescriptor::default())
             .build();
 
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
 
-        transform.set(Transform {
+        transform.set(TransformDescriptor {
             translation: Vec3::new(100.0, 0.0, 0.0),
             rotation: Quat::from_axis_angle(Vec3::Z, std::f32::consts::FRAC_PI_2),
             scale: Vec3::new(0.5, 0.5, 1.0),
@@ -520,7 +522,7 @@ mod test {
         let _rez = stage
             .builder()
             .with_vertices(gpu_cube_vertices())
-            .with_transform(Transform {
+            .with_transform(TransformDescriptor {
                 scale: Vec3::new(6.0, 6.0, 6.0),
                 rotation: Quat::from_axis_angle(Vec3::Y, -std::f32::consts::FRAC_PI_4),
                 ..Default::default()
@@ -547,7 +549,7 @@ mod test {
             .builder()
             .with_vertices(math::UNIT_POINTS.map(cmy_gpu_vertex))
             .with_indices(math::UNIT_INDICES.map(|i| i as u32))
-            .with_transform(Transform {
+            .with_transform(TransformDescriptor {
                 scale: Vec3::new(6.0, 6.0, 6.0),
                 rotation: Quat::from_axis_angle(Vec3::Y, -std::f32::consts::FRAC_PI_4),
                 ..Default::default()
@@ -578,7 +580,7 @@ mod test {
         let (geometry, _cube_one_transform, _cube_one) = stage
             .builder()
             .with_vertices(gpu_cube_vertices())
-            .with_transform(Transform {
+            .with_transform(TransformDescriptor {
                 translation: Vec3::new(-4.5, 0.0, 0.0),
                 scale: Vec3::new(6.0, 6.0, 6.0),
                 rotation: Quat::from_axis_angle(Vec3::Y, -std::f32::consts::FRAC_PI_4),
@@ -588,7 +590,7 @@ mod test {
         let (_cube_two_transform, cube_two) = stage
             .builder()
             .with_vertices_array(geometry.array())
-            .with_transform(Transform {
+            .with_transform(TransformDescriptor {
                 translation: Vec3::new(4.5, 0.0, 0.0),
                 scale: Vec3::new(6.0, 6.0, 6.0),
                 rotation: Quat::from_axis_angle(Vec3::Y, std::f32::consts::FRAC_PI_4),
@@ -637,7 +639,7 @@ mod test {
         let (_cube_geometry, _transform, cube) = stage
             .builder()
             .with_vertices(math::UNIT_INDICES.map(|i| cmy_gpu_vertex(math::UNIT_POINTS[i])))
-            .with_transform(Transform {
+            .with_transform(TransformDescriptor {
                 scale: Vec3::new(10.0, 10.0, 10.0),
                 ..Default::default()
             })
@@ -731,7 +733,7 @@ mod test {
                 ..Default::default()
             })
             .with_vertices(gpu_uv_unit_cube())
-            .with_transform(Transform {
+            .with_transform(TransformDescriptor {
                 scale: Vec3::new(10.0, 10.0, 10.0),
                 ..Default::default()
             })
@@ -815,7 +817,7 @@ mod test {
                 has_lighting: false,
                 ..Default::default()
             })
-            .with_transform(Transform {
+            .with_transform(TransformDescriptor {
                 translation: Vec3::new(15.0, 35.0, 0.5),
                 scale: Vec3::new(0.5, 0.5, 1.0),
                 ..Default::default()
@@ -947,13 +949,13 @@ mod test {
         let _camera = stage.new_camera(Camera::new(projection, view));
 
         let root_node = stage.new_nested_transform();
-        root_node.set(Transform {
+        root_node.set(TransformDescriptor {
             scale: Vec3::new(25.0, 25.0, 1.0),
             ..Default::default()
         });
         println!("root_node: {:#?}", root_node.get_global_transform());
 
-        let offset = Transform {
+        let offset = TransformDescriptor {
             translation: Vec3::new(1.0, 1.0, 0.0),
             ..Default::default()
         };
@@ -1046,7 +1048,7 @@ mod test {
         let _rez = stage
             .builder()
             .with_vertices(gpu_cube_vertices())
-            .with_transform(Transform {
+            .with_transform(TransformDescriptor {
                 scale: Vec3::new(6.0, 6.0, 6.0),
                 rotation: Quat::from_axis_angle(Vec3::Y, -std::f32::consts::FRAC_PI_4),
                 ..Default::default()
@@ -1089,7 +1091,7 @@ mod test {
         let _rez = stage
             .builder()
             .with_vertices(gpu_cube_vertices())
-            .with_transform(Transform {
+            .with_transform(TransformDescriptor {
                 scale: Vec3::new(6.0, 6.0, 6.0),
                 rotation: Quat::from_axis_angle(Vec3::Y, -std::f32::consts::FRAC_PI_4),
                 ..Default::default()

@@ -938,10 +938,9 @@ mod test {
         atlas::{AtlasTexture, TextureAddressMode},
         camera::Camera,
         geometry::Vertex,
-        material::Materials,
-        pbr::Material,
+        material::{Material, Materials},
         test::BlockOnFuture,
-        transform::Transform,
+        transform::TransformDescriptor,
         Context,
     };
     use glam::{UVec3, Vec2, Vec3, Vec4};
@@ -992,7 +991,7 @@ mod test {
                     .with_uv0(Vec2::splat(1.0));
                 [tl, bl, br, tl, br, tr]
             })
-            .with_transform(Transform {
+            .with_transform(TransformDescriptor {
                 scale: Vec3::new(32.0, 32.0, 1.0),
                 ..Default::default()
             })
@@ -1063,7 +1062,7 @@ mod test {
 
         let _repeat_rez = stage
             .builder()
-            .with_transform(Transform {
+            .with_transform(TransformDescriptor {
                 translation: Vec3::new(sheet_w + 1.0, 0.0, 0.0),
                 ..Default::default()
             })
@@ -1077,7 +1076,7 @@ mod test {
 
         let _mirror_rez = stage
             .builder()
-            .with_transform(Transform {
+            .with_transform(TransformDescriptor {
                 translation: Vec3::new(sheet_w * 2.0 + 2.0, 0.0, 0.0),
                 ..Default::default()
             })
@@ -1161,7 +1160,7 @@ mod test {
                 has_lighting: false,
                 ..Default::default()
             })
-            .with_transform(Transform {
+            .with_transform(TransformDescriptor {
                 translation: Vec3::new(sheet_w + 1.0, 0.0, 0.0),
                 ..Default::default()
             })
@@ -1175,7 +1174,7 @@ mod test {
                 has_lighting: false,
                 ..Default::default()
             })
-            .with_transform(Transform {
+            .with_transform(TransformDescriptor {
                 translation: Vec3::new(sheet_w * 2.0 + 2.0, 0.0, 0.0),
                 ..Default::default()
             })

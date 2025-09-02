@@ -6,7 +6,7 @@ use craballoc::{
     value::{Hybrid, HybridArray},
 };
 
-use crate::{atlas::Atlas, pbr::Material};
+use crate::{atlas::Atlas, material::Material};
 
 /// Wrapper around the materials slab, which holds material textures in an atlas.
 #[derive(Clone)]

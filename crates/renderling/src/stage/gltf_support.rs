@@ -15,9 +15,9 @@ use crate::{
         AnalyticalLight, DirectionalLightDescriptor, LightStyle, PointLightDescriptor,
         SpotLightDescriptor,
     },
-    pbr::Material,
-    stage::{MorphTarget, NestedTransform, Renderlet, Skin, Stage, Vertex},
-    transform::Transform,
+    material::Material,
+    stage::{MorphTarget, NestedTransform, RenderletDescriptor, Skin, Stage, Vertex},
+    transform::TransformDescriptor,
 };
 
 mod anime;
@@ -98,10 +98,10 @@ impl From<AtlasError> for StageGltfError {
     }
 }
 
-impl From<gltf::scene::Transform> for Transform {
+impl From<gltf::scene::Transform> for TransformDescriptor {
     fn from(transform: gltf::scene::Transform) -> Self {
         let (translation, rotation, scale) = transform.decomposed();
-        Transform {
+        TransformDescriptor {
             translation: Vec3::from_array(translation),
             rotation: Quat::from_array(rotation),
             scale: Vec3::from_array(scale),
@@ -686,7 +686,7 @@ pub struct GltfNode {
 }
 
 impl GltfNode {
-    pub fn global_transform(&self) -> Transform {
+    pub fn global_transform(&self) -> TransformDescriptor {
         self.transform.get_global_transform()
     }
 }
@@ -697,7 +697,7 @@ pub struct GltfSkin {
     // Indices of the skeleton nodes used as joints in this skin, unused internally
     // but possibly useful.
     pub joint_nodes: Vec<usize>,
-    pub joint_transforms: HybridArray<Id<Transform>>,
+    pub joint_transforms: HybridArray<Id<TransformDescriptor>>,
     // Containins the 4x4 inverse-bind matrices.
     //
     // When None, each matrix is assumed to be the 4x4 identity matrix which implies that the
@@ -780,7 +780,7 @@ pub struct GltfDocument {
     pub nodes: Vec<GltfNode>,
     pub materials: HybridArray<Material>,
     // map of node index to renderlets
-    pub renderlets: FxHashMap<usize, Vec<Hybrid<Renderlet>>>,
+    pub renderlets: FxHashMap<usize, Vec<Hybrid<RenderletDescriptor>>>,
     /// Vector of scenes - each being a list of nodes.
     pub scenes: Vec<Vec<usize>>,
     pub skins: Vec<GltfSkin>,
@@ -1110,7 +1110,7 @@ impl GltfDocument {
                 let num_prims = mesh.primitives.len();
                 log::trace!("    has {num_prims} primitives");
                 for (prim, i) in mesh.primitives.iter().zip(1..) {
-                    let hybrid = stage.new_renderlet(Renderlet {
+                    let hybrid = stage.new_renderlet(RenderletDescriptor {
                         vertices_array: prim.vertices.array(),
                         indices_array: prim.indices.array(),
                         transform_id: gltf_node.transform.global_transform_id(),
@@ -1155,7 +1155,7 @@ impl GltfDocument {
         })
     }
 
-    pub fn renderlets_iter(&self) -> impl Iterator<Item = &Hybrid<Renderlet>> {
+    pub fn renderlets_iter(&self) -> impl Iterator<Item = &Hybrid<RenderletDescriptor>> {
         self.renderlets.iter().flat_map(|(_, rs)| rs.iter())
     }
 
@@ -1217,8 +1217,8 @@ impl Stage {
 #[cfg(test)]
 mod test {
     use crate::{
-        camera::Camera, pbr::Material, stage::Vertex, test::BlockOnFuture, transform::Transform,
-        Context,
+        camera::Camera, material::Material, stage::Vertex, test::BlockOnFuture,
+        transform::TransformDescriptor, Context,
     };
     use glam::{Vec3, Vec4};
 
@@ -1327,7 +1327,7 @@ mod test {
                     .with_uv0([0.0, 1.0]),
             ])
             .with_indices([0u32, 3, 2, 0, 2, 1])
-            .with_transform(Transform {
+            .with_transform(TransformDescriptor {
                 scale: Vec3::new(100.0, 100.0, 1.0),
                 ..Default::default()
             })

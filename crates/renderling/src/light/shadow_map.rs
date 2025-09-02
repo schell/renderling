@@ -14,7 +14,7 @@ use snafu::{OptionExt, ResultExt};
 use crate::{
     atlas::{AtlasBlittingOperation, AtlasImage, AtlasTexture},
     bindgroup::ManagedBindGroup,
-    stage::Renderlet,
+    stage::RenderletDescriptor,
 };
 
 use super::{
@@ -248,7 +248,7 @@ impl ShadowMap {
     pub fn update<'a>(
         &self,
         lighting: impl AsRef<Lighting>,
-        renderlets: impl IntoIterator<Item = &'a Hybrid<Renderlet>>,
+        renderlets: impl IntoIterator<Item = &'a Hybrid<RenderletDescriptor>>,
     ) -> Result<(), LightingError> {
         let lighting = lighting.as_ref();
         let light_bundle = self

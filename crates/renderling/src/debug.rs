@@ -4,8 +4,8 @@ use glam::{Vec2, Vec3Swizzles, Vec4, Vec4Swizzles};
 use spirv_std::{arch::IndexUnchecked, spirv};
 
 use crate::{
-    draw::DrawIndirectArgs, geometry::GeometryDescriptor, sdf, stage::Renderlet,
-    transform::Transform,
+    draw::DrawIndirectArgs, geometry::GeometryDescriptor, sdf, stage::RenderletDescriptor,
+    transform::TransformDescriptor,
 };
 
 #[cfg(not(target_arch = "spirv"))]
@@ -42,11 +42,12 @@ pub fn debug_overlay_fragment(
 
     for i in 0..draw_calls.len() {
         let draw_call = unsafe { draw_calls.index_unchecked(i) };
-        let renderlet_id = Id::<Renderlet>::new(draw_call.first_instance);
-        let transform_id = slab.read_unchecked(renderlet_id + Renderlet::OFFSET_OF_TRANSFORM_ID);
-        let mut model = Transform::IDENTITY;
+        let renderlet_id = Id::<RenderletDescriptor>::new(draw_call.first_instance);
+        let transform_id =
+            slab.read_unchecked(renderlet_id + RenderletDescriptor::OFFSET_OF_TRANSFORM_ID);
+        let mut model = TransformDescriptor::IDENTITY;
         slab.read_into_if_some(transform_id, &mut model);
-        let bounds = slab.read_unchecked(renderlet_id + Renderlet::OFFSET_OF_BOUNDS);
+        let bounds = slab.read_unchecked(renderlet_id + RenderletDescriptor::OFFSET_OF_BOUNDS);
 
         let (_, sphere_in_world_coords) = bounds.is_inside_camera_view(&camera, model);
         let sphere_aabb = sphere_in_world_coords.project_onto_viewport(

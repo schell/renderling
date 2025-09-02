@@ -1,7 +1,7 @@
 //! Path and builder.
 //!
 //! Path colors are sRGB.
-use crate::{geometry::Vertex, pbr::Material, stage::Renderlet};
+use crate::{geometry::Vertex, material::Material, stage::RenderletDescriptor};
 use craballoc::prelude::{GpuArray, Hybrid};
 use crabslab::Id;
 use glam::{Vec2, Vec3, Vec3Swizzles, Vec4};
@@ -20,7 +20,7 @@ pub struct UiPath {
     pub indices: GpuArray<u32>,
     pub transform: UiTransform,
     pub material: Hybrid<Material>,
-    pub renderlet: Hybrid<Renderlet>,
+    pub renderlet: Hybrid<RenderletDescriptor>,
 }
 
 #[derive(Clone, Copy)]

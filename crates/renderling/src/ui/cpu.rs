@@ -6,8 +6,8 @@ use crate::{
     atlas::AtlasTexture,
     camera::Camera,
     geometry::Geometry,
-    stage::{NestedTransform, Renderlet, Stage},
-    transform::Transform,
+    stage::{NestedTransform, RenderletDescriptor, Stage},
+    transform::TransformDescriptor,
     Context,
 };
 use craballoc::prelude::{Hybrid, SourceId};
@@ -74,11 +74,11 @@ pub struct ImageId(usize);
 #[derive(Clone, Debug)]
 pub struct UiTransform {
     transform: NestedTransform,
-    renderlet_ids: Arc<Vec<Id<Renderlet>>>,
+    renderlet_ids: Arc<Vec<Id<RenderletDescriptor>>>,
 }
 
 impl UiTransform {
-    pub(crate) fn id(&self) -> Id<Transform> {
+    pub(crate) fn id(&self) -> Id<TransformDescriptor> {
         self.transform.global_transform_id()
     }
 
@@ -225,7 +225,7 @@ impl Ui {
         self
     }
 
-    fn new_transform(&self, renderlet_ids: Vec<Id<Renderlet>>) -> UiTransform {
+    fn new_transform(&self, renderlet_ids: Vec<Id<RenderletDescriptor>>) -> UiTransform {
         let transform = self.stage.new_nested_transform();
         let transform = UiTransform {
             transform,

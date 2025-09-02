@@ -4,7 +4,7 @@
 //! * <https://learnopengl.com/PBR/Theory>
 //! * <https://github.com/KhronosGroup/glTF-Sample-Viewer/blob/5b1b7f48a8cb2b7aaef00d08fdba18ccc8dd331b/source/Renderer/shaders/pbr.frag>
 //! * <https://github.khronos.org/glTF-Sample-Viewer-Release/>
-use crabslab::{Id, Slab, SlabItem};
+use crabslab::{Id, Slab};
 use glam::{Mat4, Vec2, Vec3, Vec4, Vec4Swizzles};
 
 #[allow(unused)]
@@ -17,64 +17,14 @@ use crate::{
         DirectionalLightDescriptor, LightStyle, LightingDescriptor, PointLightDescriptor,
         ShadowCalculation, SpotLightCalculation,
     },
+    material::Material,
     math::{self, IsSampler, IsVector, Sample2d, Sample2dArray, SampleCube},
     println as my_println,
-    stage::Renderlet,
+    stage::RenderletDescriptor,
 };
 
 pub mod debug;
 use debug::DebugChannel;
-
-/// Represents a material on the GPU.
-#[repr(C)]
-#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
-#[derive(Clone, Copy, PartialEq, SlabItem)]
-pub struct Material {
-    pub emissive_factor: Vec3,
-    pub emissive_strength_multiplier: f32,
-    pub albedo_factor: Vec4,
-    pub metallic_factor: f32,
-    pub roughness_factor: f32,
-
-    pub albedo_texture_id: Id<AtlasTexture>,
-    pub metallic_roughness_texture_id: Id<AtlasTexture>,
-    pub normal_texture_id: Id<AtlasTexture>,
-    pub ao_texture_id: Id<AtlasTexture>,
-    pub emissive_texture_id: Id<AtlasTexture>,
-
-    pub albedo_tex_coord: u32,
-    pub metallic_roughness_tex_coord: u32,
-    pub normal_tex_coord: u32,
-    pub ao_tex_coord: u32,
-    pub emissive_tex_coord: u32,
-
-    pub has_lighting: bool,
-    pub ao_strength: f32,
-}
-
-impl Default for Material {
-    fn default() -> Self {
-        Self {
-            emissive_factor: Vec3::ZERO,
-            emissive_strength_multiplier: 1.0,
-            albedo_factor: Vec4::ONE,
-            metallic_factor: 1.0,
-            roughness_factor: 1.0,
-            albedo_texture_id: Id::NONE,
-            metallic_roughness_texture_id: Id::NONE,
-            normal_texture_id: Id::NONE,
-            ao_texture_id: Id::NONE,
-            albedo_tex_coord: 0,
-            metallic_roughness_tex_coord: 0,
-            normal_tex_coord: 0,
-            ao_tex_coord: 0,
-            has_lighting: true,
-            ao_strength: 0.0,
-            emissive_texture_id: Id::NONE,
-            emissive_tex_coord: 0,
-        }
-    }
-}
 
 /// Trowbridge-Reitz GGX normal distribution function (NDF).
 ///
@@ -286,7 +236,7 @@ pub fn fragment_impl<A, T, DtA, C, S>(
     material_slab: &[u32],
     lighting_slab: &[u32],
 
-    renderlet_id: Id<Renderlet>,
+    renderlet_id: Id<RenderletDescriptor>,
 
     frag_coord: Vec4,
     in_color: Vec4,
@@ -721,7 +671,7 @@ mod test {
         pbr::Material,
         prelude::glam::{Vec3, Vec4},
         test::BlockOnFuture,
-        transform::Transform,
+        transform::TransformDescriptor,
     };
 
     #[test]
@@ -791,7 +741,7 @@ mod test {
                         roughness_factor: roughness,
                         ..Default::default()
                     })
-                    .with_transform(Transform {
+                    .with_transform(TransformDescriptor {
                         translation: Vec3::new(x, y, 0.0),
                         ..Default::default()
                     })

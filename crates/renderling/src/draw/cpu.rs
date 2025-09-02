@@ -9,7 +9,7 @@ use rustc_hash::FxHashMap;
 
 use crate::{
     cull::{ComputeCulling, CullingError},
-    stage::Renderlet,
+    stage::RenderletDescriptor,
     texture::Texture,
     Context,
 };
@@ -19,7 +19,7 @@ use super::DrawIndirectArgs;
 /// Used to track renderlets internally.
 #[repr(transparent)]
 struct InternalRenderlet {
-    inner: WeakHybrid<Renderlet>,
+    inner: WeakHybrid<RenderletDescriptor>,
 }
 
 impl InternalRenderlet {
@@ -27,7 +27,7 @@ impl InternalRenderlet {
         self.inner.strong_count() > 0
     }
 
-    fn from_hybrid_renderlet(hr: &Hybrid<Renderlet>) -> Self {
+    fn from_hybrid_renderlet(hr: &Hybrid<RenderletDescriptor>) -> Self {
         Self {
             inner: WeakHybrid::from_hybrid(hr),
         }
@@ -113,8 +113,8 @@ impl IndirectDraws {
     }
 }
 
-impl From<Id<Renderlet>> for DrawIndirectArgs {
-    fn from(id: Id<Renderlet>) -> Self {
+impl From<Id<RenderletDescriptor>> for DrawIndirectArgs {
+    fn from(id: Id<RenderletDescriptor>) -> Self {
         // This is obviously incomplete, but that's ok because
         // the rest of this struct is filled out on the GPU during
         // culling.
@@ -205,7 +205,7 @@ impl DrawCalls {
     /// Add a renderlet to the drawing queue.
     ///
     /// Returns the number of draw calls in the queue.
-    pub fn add_renderlet(&mut self, renderlet: &Hybrid<Renderlet>) -> usize {
+    pub fn add_renderlet(&mut self, renderlet: &Hybrid<RenderletDescriptor>) -> usize {
         log::trace!("adding renderlet {:?}", renderlet.id());
         if let Some(indirect) = &mut self.drawing_strategy.indirect {
             indirect.invalidate();
@@ -219,7 +219,7 @@ impl DrawCalls {
     /// drawn each frame.
     ///
     /// Returns the number of draw calls remaining in the queue.
-    pub fn remove_renderlet(&mut self, renderlet: &Hybrid<Renderlet>) -> usize {
+    pub fn remove_renderlet(&mut self, renderlet: &Hybrid<RenderletDescriptor>) -> usize {
         let id = renderlet.id();
         self.internal_renderlets.retain(|ir| ir.inner.id() != id);
 
@@ -237,7 +237,7 @@ impl DrawCalls {
     /// If the `order` iterator is missing any renderlet ids, those missing
     /// renderlets will be drawn _before_ the ordered ones, in no particular
     /// order.
-    pub fn reorder_renderlets(&mut self, order: impl IntoIterator<Item = Id<Renderlet>>) {
+    pub fn reorder_renderlets(&mut self, order: impl IntoIterator<Item = Id<RenderletDescriptor>>) {
         let mut ordered = vec![];
         let mut m = FxHashMap::from_iter(
             std::mem::take(&mut self.internal_renderlets)
@@ -257,7 +257,7 @@ impl DrawCalls {
     }
 
     /// Iterator over all staged [`Renderlet`]s.
-    pub fn renderlets_iter(&self) -> impl Iterator<Item = WeakHybrid<Renderlet>> + '_ {
+    pub fn renderlets_iter(&self) -> impl Iterator<Item = WeakHybrid<RenderletDescriptor>> + '_ {
         self.internal_renderlets.iter().map(|ir| ir.inner.clone())
     }
     ///

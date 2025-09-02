@@ -14,9 +14,9 @@ use spirv_std::{
 use crate::{
     bvol::BoundingSphere,
     geometry::{GeometryDescriptor, MorphTarget, Skin, Vertex},
+    material::Material,
     math::IsVector,
-    pbr::Material,
-    transform::Transform,
+    transform::TransformDescriptor,
 };
 
 #[allow(unused_imports)]
@@ -35,7 +35,7 @@ pub use gltf_support::*;
 /// Returned by [`Renderlet::get_vertex_info`].
 pub struct VertexInfo {
     pub vertex: Vertex,
-    pub transform: Transform,
+    pub transform: TransformDescriptor,
     pub model_matrix: Mat4,
     pub world_pos: Vec3,
 }
@@ -49,13 +49,13 @@ pub struct VertexInfo {
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[derive(Clone, Copy, PartialEq, SlabItem)]
 #[offsets]
-pub struct Renderlet {
+pub struct RenderletDescriptor {
     pub visible: bool,
     pub vertices_array: Array<Vertex>,
     /// Bounding sphere of the entire renderlet, in local space.
     pub bounds: BoundingSphere,
     pub indices_array: Array<u32>,
-    pub transform_id: Id<Transform>,
+    pub transform_id: Id<TransformDescriptor>,
     pub material_id: Id<Material>,
     pub skin_id: Id<Skin>,
     pub morph_targets: Array<Array<MorphTarget>>,
@@ -63,9 +63,9 @@ pub struct Renderlet {
     pub geometry_descriptor_id: Id<GeometryDescriptor>,
 }
 
-impl Default for Renderlet {
+impl Default for RenderletDescriptor {
     fn default() -> Self {
-        Renderlet {
+        RenderletDescriptor {
             visible: true,
             vertices_array: Array::default(),
             bounds: BoundingSphere::default(),
@@ -80,7 +80,7 @@ impl Default for Renderlet {
     }
 }
 
-impl Renderlet {
+impl RenderletDescriptor {
     /// Returns the vertex at the given index and its related values.
     ///
     /// These values are often used in shaders, so they are grouped together.
@@ -99,11 +99,11 @@ impl Renderlet {
     /// Retrieve the transform of this `Renderlet`.
     ///
     /// This takes into consideration all skinning matrices.
-    pub fn get_transform(&self, vertex: Vertex, slab: &[u32]) -> Transform {
+    pub fn get_transform(&self, vertex: Vertex, slab: &[u32]) -> TransformDescriptor {
         let config = slab.read_unchecked(self.geometry_descriptor_id);
         if config.has_skinning && self.skin_id.is_some() {
             let skin = slab.read(self.skin_id);
-            Transform::from(skin.get_skinning_matrix(vertex, slab))
+            TransformDescriptor::from(skin.get_skinning_matrix(vertex, slab))
         } else {
             slab.read(self.transform_id)
         }
@@ -143,11 +143,11 @@ impl Renderlet {
 /// A helper struct that contains all outputs of the Renderlet's PBR vertex shader.
 #[derive(Default, Debug, Clone, Copy, PartialEq)]
 pub struct RenderletPbrVertexInfo {
-    pub renderlet: Renderlet,
-    pub renderlet_id: Id<Renderlet>,
+    pub renderlet: RenderletDescriptor,
+    pub renderlet_id: Id<RenderletDescriptor>,
     pub vertex_index: u32,
     pub vertex: Vertex,
-    pub transform: Transform,
+    pub transform: TransformDescriptor,
     pub model_matrix: Mat4,
     pub view_projection: Mat4,
     pub out_color: Vec4,
@@ -165,12 +165,12 @@ pub struct RenderletPbrVertexInfo {
 #[allow(clippy::too_many_arguments)]
 pub fn renderlet_vertex(
     // Points at a `Renderlet`
-    #[spirv(instance_index)] renderlet_id: Id<Renderlet>,
+    #[spirv(instance_index)] renderlet_id: Id<RenderletDescriptor>,
     // Which vertex within the renderlet are we rendering
     #[spirv(vertex_index)] vertex_index: u32,
     #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] geometry_slab: &[u32],
 
-    #[spirv(flat)] out_renderlet: &mut Id<Renderlet>,
+    #[spirv(flat)] out_renderlet: &mut Id<RenderletDescriptor>,
     // TODO: Think about placing all these out values in a G-Buffer
     // But do we have enough buffers + enough space on web?
     // ...and can we write to buffers from vertex shaders on web?
@@ -269,7 +269,7 @@ pub fn renderlet_fragment(
     #[spirv(storage_buffer, descriptor_set = 0, binding = 13)]
     debug_slab: &mut [u32],
 
-    #[spirv(flat)] renderlet_id: Id<Renderlet>,
+    #[spirv(flat)] renderlet_id: Id<RenderletDescriptor>,
     #[spirv(frag_coord)] frag_coord: Vec4,
     in_color: Vec4,
     in_uv0: Vec2,
@@ -332,16 +332,16 @@ mod test {
     use craballoc::{prelude::SlabAllocator, runtime::CpuRuntime};
     use glam::{Mat4, Quat, Vec3};
 
-    use crate::{math::IsMatrix, stage::NestedTransform, transform::Transform};
+    use crate::{math::IsMatrix, stage::NestedTransform, transform::TransformDescriptor};
 
     #[test]
     fn matrix_hierarchy_sanity() {
-        let a: Mat4 = Transform {
+        let a: Mat4 = TransformDescriptor {
             translation: Vec3::new(100.0, 100.0, 0.0),
             ..Default::default()
         }
         .into();
-        let b: Mat4 = Transform {
+        let b: Mat4 = TransformDescriptor {
             scale: Vec3::splat(0.5),
             ..Default::default()
         }
@@ -372,17 +372,17 @@ mod test {
         #[expect(clippy::needless_borrows_for_generic_args, reason = "riffraff")]
         let slab = SlabAllocator::<CpuRuntime>::new(&CpuRuntime, "transform", ());
         let a = NestedTransform::new(&slab);
-        a.set(Transform {
+        a.set(TransformDescriptor {
             translation: Vec3::splat(100.0),
             ..Default::default()
         });
         let b = NestedTransform::new(&slab);
-        b.set(Transform {
+        b.set(TransformDescriptor {
             rotation: Quat::from_scaled_axis(Vec3::Z),
             ..Default::default()
         });
         let c = NestedTransform::new(&slab);
-        c.set(Transform {
+        c.set(TransformDescriptor {
             scale: Vec3::splat(2.0),
             ..Default::default()
         });
@@ -390,7 +390,7 @@ mod test {
         a.add_child(&b);
         b.add_child(&c);
 
-        let Transform {
+        let TransformDescriptor {
             translation,
             rotation,
             scale,
@@ -411,7 +411,7 @@ mod test {
             all_updates
         );
 
-        let Transform {
+        let TransformDescriptor {
             translation,
             rotation,
             scale,

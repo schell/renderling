@@ -11,10 +11,10 @@ use crate::{
     color::linear_xfer_vec4,
     light::{LightTiling, LightTilingConfig, SpotLightCalculation},
     math::GpuRng,
-    pbr::Material,
-    prelude::Transform,
+    material::Material,
+    prelude::TransformDescriptor,
     geometry::Vertex,
-    stage::{Renderlet, RenderletPbrVertexInfo, Stage}, test::BlockOnFuture,
+    stage::{RenderletDescriptor, RenderletPbrVertexInfo, Stage}, test::BlockOnFuture,
 };
 
 use super::*;
@@ -42,7 +42,7 @@ fn spot_one_calc() {
     log::info!("spot: {spot:#?}");
 
     let light_node = doc.nodes().find(|node| node.light().is_some()).unwrap();
-    let parent_transform = Transform::from(light_node.transform());
+    let parent_transform = TransformDescriptor::from(light_node.transform());
     log::info!("parent_transform: {parent_transform:#?}");
 
     let spot_descriptor = SpotLightDescriptor {
@@ -233,11 +233,11 @@ fn gen_vec3(prng: &mut GpuRng) -> Vec3 {
 }
 
 struct GeneratedLight {
-    _unused_transform: Hybrid<Transform>,
+    _unused_transform: Hybrid<TransformDescriptor>,
     _mesh_geometry: HybridArray<Vertex>,
     _mesh_material: Hybrid<Material>,
     _light: AnalyticalLight,
-    mesh_renderlet: Hybrid<Renderlet>,
+    mesh_renderlet: Hybrid<RenderletDescriptor>,
 }
 
 fn gen_light(stage: &Stage, prng: &mut GpuRng, bounding_boxes: &[BoundingBox]) -> GeneratedLight {
@@ -273,7 +273,7 @@ fn gen_light(stage: &Stage, prng: &mut GpuRng, bounding_boxes: &[BoundingBox]) -
     // });
     let (a, b, c, d, e) = stage
         .builder()
-        .with_transform(Transform {
+        .with_transform(TransformDescriptor {
             translation: position,
             ..Default::default()
         })

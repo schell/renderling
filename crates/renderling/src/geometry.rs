@@ -7,9 +7,7 @@ mod cpu;
 pub use cpu::*;
 use glam::{Mat4, Vec2, Vec3, Vec4};
 
-use crate::{
-    bvol::BoundingSphere, camera::Camera, math::IsVector, pbr::Material, transform::Transform,
-};
+use crate::{camera::Camera, math::IsVector, transform::TransformDescriptor};
 
 /// A vertex skin.
 ///
@@ -19,7 +17,7 @@ use crate::{
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 pub struct Skin {
     // Ids of the skeleton nodes' global transforms used as joints in this skin.
-    pub joints: Array<Id<Transform>>,
+    pub joints: Array<Id<TransformDescriptor>>,
     // Contains the 4x4 inverse-bind matrices.
     //
     // When is none, each matrix is assumed to be the 4x4 identity matrix

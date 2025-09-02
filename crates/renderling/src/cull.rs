@@ -12,7 +12,7 @@ use spirv_std::{
     spirv,
 };
 
-use crate::{draw::DrawIndirectArgs, geometry::GeometryDescriptor, stage::Renderlet};
+use crate::{draw::DrawIndirectArgs, geometry::GeometryDescriptor, stage::RenderletDescriptor};
 
 #[cfg(not(target_arch = "spirv"))]
 mod cpu;
@@ -35,7 +35,7 @@ pub fn compute_culling(
     // Get the draw arg
     let arg = unsafe { args.index_unchecked_mut(gid) };
     // Get the renderlet using the draw arg's renderlet id
-    let renderlet_id = Id::<Renderlet>::new(arg.first_instance);
+    let renderlet_id = Id::<RenderletDescriptor>::new(arg.first_instance);
     let renderlet = stage_slab.read_unchecked(renderlet_id);
     crate::println!("renderlet: {renderlet_id:?}");
 

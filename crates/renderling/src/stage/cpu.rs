@@ -33,10 +33,10 @@ use crate::{
     material::Materials,
     pbr::debug::DebugChannel,
     skybox::{Skybox, SkyboxRenderPipeline},
-    stage::Renderlet,
+    stage::RenderletDescriptor,
     texture::{DepthTexture, Texture},
     tonemapping::Tonemapping,
-    transform::Transform,
+    transform::TransformDescriptor,
     tuple::Bundle,
 };
 
@@ -308,9 +308,32 @@ impl StageRendering<'_> {
     }
 }
 
-/// A helper struct to build [`Renderlet`]s in the [`Geometry`] manager.
+pub enum RenderletTransform<Ct: IsContainer = HybridContainer> {
+    /// A single root transform
+    Root(crate::transform::Transform<Ct>),
+    /// A heirarchy of transforms.
+    ///
+    /// Each transform represents the transform of one node in a scene graph.
+    Hierarchy(NestedTransform),
+}
+
+pub struct Renderlet<
+    RenderletDescriptorCt: IsContainer = HybridContainer,
+    TransformCt: IsContainer = HybridContainer,
+    VerticesCt: IsContainer = GpuArrayContainer,
+    IndicesCt: IsContainer = GpuArrayContainer,
+    MaterialCt: IsContainer = GpuArrayContainer,
+> {
+    transform: Option<RenderletTransform<TransformCt>>,
+    descriptor: RenderletDescriptorCt::Container<RenderletDescriptor>,
+    vertices: VerticesCt::Container<Vertex>,
+    indices: Option<IndicesCt::Container<u32>>,
+    material: Option<MaterialCt>,
+}
+
+/// A helper struct to build [`Renderlet`]s.
 pub struct RenderletBuilder<'a, T> {
-    data: Renderlet,
+    data: RenderletDescriptor,
     resources: T,
     stage: &'a Stage,
 }
@@ -318,7 +341,7 @@ pub struct RenderletBuilder<'a, T> {
 impl<'a> RenderletBuilder<'a, ()> {
     pub fn new(stage: &'a Stage) -> Self {
         RenderletBuilder {
-            data: Renderlet::default(),
+            data: RenderletDescriptor::default(),
             resources: (),
             stage,
         }
@@ -357,15 +380,15 @@ impl<'a, T: Bundle> RenderletBuilder<'a, T> {
         self.suffix(indices)
     }
 
-    pub fn with_transform_id(mut self, transform_id: Id<Transform>) -> Self {
+    pub fn with_transform_id(mut self, transform_id: Id<TransformDescriptor>) -> Self {
         self.data.transform_id = transform_id;
         self
     }
 
     pub fn with_transform(
         mut self,
-        transform: Transform,
-    ) -> RenderletBuilder<'a, T::Suffixed<Hybrid<Transform>>> {
+        transform: TransformDescriptor,
+    ) -> RenderletBuilder<'a, T::Suffixed<Hybrid<TransformDescriptor>>> {
         let transform = self.stage.geometry.new_transform(transform);
         self.data.transform_id = transform.id();
         self.suffix(transform)
@@ -428,9 +451,9 @@ impl<'a, T: Bundle> RenderletBuilder<'a, T> {
     ///
     /// The returned value will be a tuple with the [`Hybrid<Renderlet>`] as the head, and
     /// all other resources added as the tail.
-    pub fn build(self) -> <T::Suffixed<Hybrid<Renderlet>> as Bundle>::Reduced
+    pub fn build(self) -> <T::Suffixed<Hybrid<RenderletDescriptor>> as Bundle>::Reduced
     where
-        T::Suffixed<Hybrid<Renderlet>>: Bundle,
+        T::Suffixed<Hybrid<RenderletDescriptor>>: Bundle,
     {
         let renderlet = self.stage.geometry.new_renderlet(self.data);
         self.stage.add_renderlet(&renderlet);
@@ -535,7 +558,7 @@ impl Stage {
     }
 
     /// Stage a [`Transform`] on the GPU.
-    pub fn new_transform(&self, transform: Transform) -> Hybrid<Transform> {
+    pub fn new_transform(&self, transform: TransformDescriptor) -> Hybrid<TransformDescriptor> {
         self.geometry.new_transform(transform)
     }
 
@@ -575,8 +598,8 @@ impl Stage {
     /// Create a new array of joint transform ids that each point to a [`Transform`].
     pub fn new_joint_transform_ids(
         &self,
-        data: impl IntoIterator<Item = Id<Transform>>,
-    ) -> HybridArray<Id<Transform>> {
+        data: impl IntoIterator<Item = Id<TransformDescriptor>>,
+    ) -> HybridArray<Id<TransformDescriptor>> {
         self.geometry.new_joint_transform_ids(data)
     }
 
@@ -595,7 +618,7 @@ impl Stage {
     ///
     /// The `Renderlet` should still be added to the draw list with
     /// [`Stage::add_renderlet`].
-    pub fn new_renderlet(&self, renderlet: Renderlet) -> Hybrid<Renderlet> {
+    pub fn new_renderlet(&self, renderlet: RenderletDescriptor) -> Hybrid<RenderletDescriptor> {
         self.geometry.new_renderlet(renderlet)
     }
 
@@ -1388,7 +1411,7 @@ impl Stage {
     /// If you drop the renderlet and no other references are kept, it will be
     /// removed automatically from the internal list and will cease to be
     /// drawn each frame.
-    pub fn add_renderlet(&self, renderlet: &Hybrid<Renderlet>) {
+    pub fn add_renderlet(&self, renderlet: &Hybrid<RenderletDescriptor>) {
         // UNWRAP: if we can't acquire the lock we want to panic.
         let mut draws = self.draw_calls.write().unwrap();
         draws.add_renderlet(renderlet);
@@ -1396,7 +1419,7 @@ impl Stage {
 
     /// Erase the given renderlet from the internal list of renderlets to be
     /// drawn each frame.
-    pub fn remove_renderlet(&self, renderlet: &Hybrid<Renderlet>) {
+    pub fn remove_renderlet(&self, renderlet: &Hybrid<RenderletDescriptor>) {
         let mut draws = self.draw_calls.write().unwrap();
         draws.remove_renderlet(renderlet);
     }
@@ -1408,7 +1431,7 @@ impl Stage {
     /// If the `order` iterator is missing any renderlet ids, those missing
     /// renderlets will be drawn _before_ the ordered ones, in no particular
     /// order.
-    pub fn reorder_renderlets(&self, order: impl IntoIterator<Item = Id<Renderlet>>) {
+    pub fn reorder_renderlets(&self, order: impl IntoIterator<Item = Id<RenderletDescriptor>>) {
         log::trace!("reordering renderlets");
         // UNWRAP: panic on purpose
         let mut guard = self.draw_calls.write().unwrap();
@@ -1422,7 +1445,7 @@ impl Stage {
     ///
     /// You should have references of your own, but this is here as a convenience
     /// method, and is used internally.
-    pub fn renderlets_iter(&self) -> impl Iterator<Item = WeakHybrid<Renderlet>> {
+    pub fn renderlets_iter(&self) -> impl Iterator<Item = WeakHybrid<RenderletDescriptor>> {
         // UNWRAP: panic on purpose
         let guard = self.draw_calls.read().unwrap();
         guard.renderlets_iter().collect::<Vec<_>>().into_iter()
@@ -1568,8 +1591,8 @@ impl Stage {
 /// Only available on CPU.
 #[derive(Clone)]
 pub struct NestedTransform<Ct: IsContainer = HybridContainer> {
-    pub(crate) global_transform: Ct::Container<Transform>,
-    local_transform: Arc<RwLock<Transform>>,
+    pub(crate) global_transform: Ct::Container<TransformDescriptor>,
+    local_transform: Arc<RwLock<TransformDescriptor>>,
     children: Arc<RwLock<Vec<NestedTransform>>>,
     parent: Arc<RwLock<Option<NestedTransform>>>,
 }
@@ -1620,8 +1643,8 @@ impl NestedTransform<WeakContainer> {
 impl NestedTransform {
     pub fn new(slab: &SlabAllocator<impl IsRuntime>) -> Self {
         let nested = NestedTransform {
-            local_transform: Arc::new(RwLock::new(Transform::default())),
-            global_transform: slab.new_value(Transform::default()),
+            local_transform: Arc::new(RwLock::new(TransformDescriptor::default())),
+            global_transform: slab.new_value(TransformDescriptor::default()),
             children: Default::default(),
             parent: Default::default(),
         };
@@ -1643,7 +1666,7 @@ impl NestedTransform {
     /// Modify the local transform.
     ///
     /// This automatically applies the local transform to the global transform.
-    pub fn modify(&self, f: impl Fn(&mut Transform)) {
+    pub fn modify(&self, f: impl Fn(&mut TransformDescriptor)) {
         {
             // UNWRAP: panic on purpose
             let mut local_guard = self.local_transform.write().unwrap();
@@ -1655,30 +1678,30 @@ impl NestedTransform {
     /// Set the local transform.
     ///
     /// This automatically applies the local transform to the global transform.
-    pub fn set(&self, transform: Transform) {
+    pub fn set(&self, transform: TransformDescriptor) {
         self.modify(move |t| {
             *t = transform;
         });
     }
 
     /// Returns the local transform.
-    pub fn get(&self) -> Transform {
+    pub fn get(&self) -> TransformDescriptor {
         *self.local_transform.read().unwrap()
     }
 
     /// Returns the global transform.
-    pub fn get_global_transform(&self) -> Transform {
+    pub fn get_global_transform(&self) -> TransformDescriptor {
         let maybe_parent_guard = self.parent.read().unwrap();
         let transform = self.get();
         let parent_transform = maybe_parent_guard
             .as_ref()
             .map(|parent| parent.get_global_transform())
             .unwrap_or_default();
-        Transform::from(Mat4::from(parent_transform) * Mat4::from(transform))
+        TransformDescriptor::from(Mat4::from(parent_transform) * Mat4::from(transform))
     }
 
     /// Get a vector containing all the transforms up to the root.
-    pub fn get_all_transforms(&self) -> Vec<Transform> {
+    pub fn get_all_transforms(&self) -> Vec<TransformDescriptor> {
         let mut transforms = vec![];
         if let Some(parent) = self.parent() {
             transforms.extend(parent.get_all_transforms());
@@ -1687,7 +1710,7 @@ impl NestedTransform {
         transforms
     }
 
-    pub fn global_transform_id(&self) -> Id<Transform> {
+    pub fn global_transform_id(&self) -> Id<TransformDescriptor> {
         self.global_transform.id()
     }
 
@@ -1723,9 +1746,9 @@ mod test {
     use crate::{
         camera::Camera,
         geometry::{Geometry, GeometryDescriptor},
-        stage::{cpu::SlabAllocator, NestedTransform, Renderlet, Vertex},
+        stage::{cpu::SlabAllocator, NestedTransform, RenderletDescriptor, Vertex},
         test::BlockOnFuture,
-        transform::Transform,
+        transform::TransformDescriptor,
         Context,
     };
 
@@ -1770,13 +1793,13 @@ mod test {
         let root = NestedTransform::new(&slab);
         let child = NestedTransform::new(&slab);
         log::info!("set");
-        child.set(Transform {
+        child.set(TransformDescriptor {
             translation: Vec3::new(1.0, 0.0, 0.0),
             ..Default::default()
         });
         log::info!("grandchild");
         let grandchild = NestedTransform::new(&slab);
-        grandchild.set(Transform {
+        grandchild.set(TransformDescriptor {
             translation: Vec3::new(1.0, 0.0, 0.0),
             ..Default::default()
         });
@@ -1855,7 +1878,7 @@ mod test {
     fn has_consistent_stage_renderlet_strong_count() {
         let ctx = Context::headless(100, 100).block();
         let stage = ctx.new_stage();
-        let r = stage.new_renderlet(Renderlet::default());
+        let r = stage.new_renderlet(RenderletDescriptor::default());
         assert_eq!(1, r.ref_count());
 
         stage.add_renderlet(&r);

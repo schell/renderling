@@ -39,7 +39,7 @@ struct CullingExample {
     material_frustum: Hybrid<Material>,
     frustum_camera: FrustumCamera,
     frustum_vertices: HybridArray<Vertex>,
-    frustum_renderlet: Hybrid<Renderlet>,
+    frustum_renderlet: Hybrid<RenderletDescriptor>,
     resources: BagOfResources,
     next_k: u64,
 }
@@ -80,7 +80,7 @@ impl CullingExample {
                     let center = Vec3::new(x, y, z);
                     let half_size = Vec3::new(w, h, l);
                     let aabb = Self::make_aabb(Vec3::ZERO, half_size);
-                    let aabb_transform = Transform {
+                    let aabb_transform = TransformDescriptor {
                         translation: center,
                         rotation,
                         ..Default::default()
@@ -248,7 +248,7 @@ impl TestAppHandler for CullingExample {
                     ..Default::default()
                 },
             ));
-        let frustum_renderlet = stage.new_renderlet(Renderlet {
+        let frustum_renderlet = stage.new_renderlet(RenderletDescriptor {
             vertices_array: frustum_vertices.array(),
             material_id: material_frustum.id(),
             ..Default::default()

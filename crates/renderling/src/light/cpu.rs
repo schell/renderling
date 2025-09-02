@@ -13,7 +13,7 @@ use snafu::prelude::*;
 use crate::{
     atlas::{Atlas, AtlasBlitter, AtlasError},
     geometry::Geometry,
-    prelude::Transform,
+    prelude::TransformDescriptor,
     stage::NestedTransform,
 };
 
@@ -133,7 +133,7 @@ pub struct AnalyticalLight<Ct: IsContainer = HybridContainer> {
     /// The light's global transform.
     ///
     /// This value lives in the lighting slab.
-    transform: Ct::Container<Transform>,
+    transform: Ct::Container<TransformDescriptor>,
     /// The light's nested transform.
     ///
     /// This value comes from the light's node, if it belongs to one.
@@ -160,7 +160,7 @@ impl core::fmt::Display for AnalyticalLight {
 impl<Ct: IsContainer> Clone for AnalyticalLight<Ct>
 where
     Ct::Container<Light>: Clone,
-    Ct::Container<Transform>: Clone,
+    Ct::Container<TransformDescriptor>: Clone,
     LightDetails<Ct>: Clone,
     NestedTransform<Ct>: Clone,
 {
@@ -250,7 +250,7 @@ impl<Ct: IsContainer> AnalyticalLight<Ct> {
     /// If a `NestedTransform` has been linked to this light by using [`Self::link_node_transform`],
     /// the transform returned by this function may be overwritten at any point by the given
     /// `NestedTransform`.
-    pub fn transform(&self) -> &Ct::Container<Transform> {
+    pub fn transform(&self) -> &Ct::Container<TransformDescriptor> {
         &self.transform
     }
 
@@ -444,7 +444,7 @@ impl Lighting {
         Light: From<Id<T>>,
         LightDetails: From<Hybrid<T>>,
     {
-        let transform = self.light_slab.new_value(Transform::default());
+        let transform = self.light_slab.new_value(TransformDescriptor::default());
         let light_inner = self.light_slab.new_value(light_descriptor);
         let light = self.light_slab.new_value({
             let mut light = Light::from(light_inner.id());

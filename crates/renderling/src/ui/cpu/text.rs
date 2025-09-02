@@ -15,7 +15,9 @@ use glyph_brush::*;
 pub use ab_glyph::FontArc;
 pub use glyph_brush::{Section, Text};
 
-use crate::{atlas::AtlasTexture, geometry::Vertex, pbr::Material, stage::Renderlet};
+use crate::{
+    atlas::AtlasTexture, geometry::Vertex, material::Material, stage::RenderletDescriptor,
+};
 use image::{DynamicImage, GenericImage, ImageBuffer, Luma, Rgba};
 
 use super::{Ui, UiTransform};
@@ -28,7 +30,7 @@ pub struct UiText {
     pub transform: UiTransform,
     pub texture: Hybrid<AtlasTexture>,
     pub material: Hybrid<Material>,
-    pub renderlet: Hybrid<Renderlet>,
+    pub renderlet: Hybrid<RenderletDescriptor>,
     pub bounds: (Vec2, Vec2),
 }
 

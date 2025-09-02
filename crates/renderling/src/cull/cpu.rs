@@ -691,7 +691,7 @@ mod test {
         let _rez = stage
             .builder()
             .with_vertices(crate::test::gpu_cube_vertices())
-            .with_transform(Transform {
+            .with_transform(TransformDescriptor {
                 scale: Vec3::new(6.0, 6.0, 6.0),
                 rotation: Quat::from_axis_angle(Vec3::Y, -std::f32::consts::FRAC_PI_4),
                 ..Default::default()
@@ -802,7 +802,7 @@ mod test {
         };
 
         // A hashmap to hold renderlet ids to their names.
-        let mut names = HashMap::<Id<Renderlet>, String>::default();
+        let mut names = HashMap::<Id<RenderletDescriptor>, String>::default();
 
         // Add four yellow cubes in each corner
         let _ycubes = [
@@ -815,7 +815,7 @@ mod test {
             let yellow = hex_to_vec4(0xFFE6A5FF);
             let (transform, vertices, renderlet) = stage
                 .builder()
-                .with_transform(Transform {
+                .with_transform(TransformDescriptor {
                     // move it back behind the purple cube
                     translation: (offset * 10.0).extend(-20.0),
                     // scale it up since it's a unit cube
@@ -841,7 +841,7 @@ mod test {
             let golden = hex_to_vec4(0xFFBF61FF);
             let (transform, vertices, renderlet) = stage
                 .builder()
-                .with_transform(Transform {
+                .with_transform(TransformDescriptor {
                     // flip it so it's facing up, like a floor should be
                     rotation: Quat::from_rotation_x(std::f32::consts::FRAC_PI_2),
                     // move it down and back a bit
@@ -866,7 +866,7 @@ mod test {
             let green = hex_to_vec4(0x8ABFA3FF);
             let (transform, vertices, renderlet) = stage
                 .builder()
-                .with_transform(Transform {
+                .with_transform(TransformDescriptor {
                     // move it back behind the purple cube
                     translation: Vec3::new(0.0, 0.0, -10.0),
                     // scale it up since it's a unit cube
@@ -893,7 +893,7 @@ mod test {
             let purple = hex_to_vec4(0x605678FF);
             let (transform, vertices, renderlet) = stage
                 .builder()
-                .with_transform(Transform {
+                .with_transform(TransformDescriptor {
                     // move it back a bit
                     translation: Vec3::new(0.0, 0.0, -3.0),
                     // scale it up since it's a unit cube
@@ -977,7 +977,7 @@ mod test {
         }
 
         for i in 0..num_draw_calls as u32 {
-            let renderlet_id = Id::<Renderlet>::new(args[i as usize].first_instance);
+            let renderlet_id = Id::<RenderletDescriptor>::new(args[i as usize].first_instance);
             let name = names.get(&renderlet_id).unwrap();
             if name != "green_cube" {
                 continue;

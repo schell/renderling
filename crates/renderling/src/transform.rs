@@ -4,27 +4,31 @@ use glam::{Mat4, Quat, Vec3};
 
 use crate::math::IsMatrix;
 
-#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
-#[derive(Clone, Copy, PartialEq, SlabItem)]
-/// A decomposed transformation.
+#[cfg(cpu)]
+mod cpu;
+#[cfg(cpu)]
+pub use cpu::*;
+
+#[derive(Clone, Copy, PartialEq, SlabItem, core::fmt::Debug)]
+/// A GPU descriptor of a decomposed transformation.
 ///
-/// `Transform` can be converted to/from [`Mat4`].
-pub struct Transform {
+/// `TransformDescriptor` can be converted to/from [`Mat4`].
+pub struct TransformDescriptor {
     pub translation: Vec3,
     pub rotation: Quat,
     pub scale: Vec3,
 }
 
-impl Default for Transform {
+impl Default for TransformDescriptor {
     fn default() -> Self {
         Self::IDENTITY
     }
 }
 
-impl From<Mat4> for Transform {
+impl From<Mat4> for TransformDescriptor {
     fn from(value: Mat4) -> Self {
         let (scale, rotation, translation) = value.to_scale_rotation_translation_or_id();
-        Transform {
+        TransformDescriptor {
             translation,
             rotation,
             scale,
@@ -32,20 +36,20 @@ impl From<Mat4> for Transform {
     }
 }
 
-impl From<Transform> for Mat4 {
+impl From<TransformDescriptor> for Mat4 {
     fn from(
-        Transform {
+        TransformDescriptor {
             translation,
             rotation,
             scale,
-        }: Transform,
+        }: TransformDescriptor,
     ) -> Self {
         Mat4::from_scale_rotation_translation(scale, rotation, translation)
     }
 }
 
-impl Transform {
-    pub const IDENTITY: Self = Transform {
+impl TransformDescriptor {
+    pub const IDENTITY: Self = TransformDescriptor {
         translation: Vec3::ZERO,
         rotation: Quat::IDENTITY,
         scale: Vec3::ONE,
@@ -61,8 +65,8 @@ mod test {
     fn transform_roundtrip() {
         assert_eq!(3, Vec3::SLAB_SIZE, "unexpected Vec3 slab size");
         assert_eq!(4, Quat::SLAB_SIZE, "unexpected Quat slab size");
-        assert_eq!(10, Transform::SLAB_SIZE);
-        let t = Transform::default();
+        assert_eq!(10, TransformDescriptor::SLAB_SIZE);
+        let t = TransformDescriptor::default();
         let mut slab = CpuSlab::new(vec![]);
         let t_id = slab.append(&t);
         pretty_assertions::assert_eq!(

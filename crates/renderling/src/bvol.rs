@@ -16,7 +16,7 @@ use glam::{Mat4, Vec2, Vec3, Vec3Swizzles, Vec4, Vec4Swizzles};
 #[cfg(gpu)]
 use spirv_std::num_traits::Float;
 
-use crate::{camera::Camera, transform::Transform};
+use crate::{camera::Camera, transform::TransformDescriptor};
 
 /// Normalize a plane.
 pub fn normalize_plane(mut plane: Vec4) -> Vec4 {
@@ -151,7 +151,7 @@ impl Aabb {
 
     /// Determines whether this `Aabb` can be seen by `camera` after being
     /// transformed by `transform`.
-    pub fn is_outside_camera_view(&self, camera: &Camera, transform: Transform) -> bool {
+    pub fn is_outside_camera_view(&self, camera: &Camera, transform: TransformDescriptor) -> bool {
         let transform = Mat4::from(transform);
         let min = transform.transform_point3(self.min);
         let max = transform.transform_point3(self.max);
@@ -463,7 +463,7 @@ impl BoundingSphere {
     pub fn is_inside_camera_view(
         &self,
         camera: &Camera,
-        transform: Transform,
+        transform: TransformDescriptor,
     ) -> (bool, BoundingSphere) {
         let center = Mat4::from(transform).transform_point3(self.center);
         let scale = Vec3::splat(transform.scale.max_element());
@@ -595,7 +595,7 @@ impl BVol for Aabb {
 mod test {
     use glam::{Mat4, Quat};
 
-    use crate::{geometry::Vertex, pbr::Material, test::BlockOnFuture, Context};
+    use crate::{geometry::Vertex, material::Material, test::BlockOnFuture, Context};
 
     use super::*;
 
@@ -636,7 +636,7 @@ mod test {
             min: Vec3::new(-3.2869213, -3.0652206, -3.8715153),
             max: Vec3::new(3.2869213, 3.0652206, 3.8715153),
         };
-        let transform = Transform {
+        let transform = TransformDescriptor {
             translation: Vec3::new(7.5131035, -9.947085, -5.001645),
             rotation: Quat::from_xyzw(0.4700742, 0.34307128, 0.6853008, -0.43783003),
             scale: Vec3::new(1.0, 1.0, 1.0),

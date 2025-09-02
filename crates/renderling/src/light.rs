@@ -16,8 +16,8 @@ use crate::{
     cubemap::{CubemapDescriptor, CubemapFaceDirection},
     geometry::GeometryDescriptor,
     math::{Fetch, IsSampler, IsVector, Sample2dArray},
-    stage::{Renderlet, VertexInfo},
-    transform::Transform,
+    stage::{RenderletDescriptor, VertexInfo},
+    transform::TransformDescriptor,
 };
 
 #[cfg(cpu)]
@@ -90,10 +90,10 @@ impl Default for ShadowMapDescriptor {
 #[cfg(test)]
 #[derive(Default, Debug, Clone, Copy, PartialEq)]
 pub struct ShadowMappingVertexInfo {
-    pub renderlet_id: Id<Renderlet>,
+    pub renderlet_id: Id<RenderletDescriptor>,
     pub vertex_index: u32,
     pub vertex: crate::geometry::Vertex,
-    pub transform: Transform,
+    pub transform: TransformDescriptor,
     pub model_matrix: Mat4,
     pub world_pos: Vec3,
     pub view_projection: Mat4,
@@ -117,7 +117,7 @@ pub struct ShadowMappingVertexInfo {
 #[allow(clippy::too_many_arguments)]
 pub fn shadow_mapping_vertex(
     // Points at a `Renderlet`
-    #[spirv(instance_index)] renderlet_id: Id<Renderlet>,
+    #[spirv(instance_index)] renderlet_id: Id<RenderletDescriptor>,
     // Which vertex within the renderlet are we rendering
     #[spirv(vertex_index)] vertex_index: u32,
     // The slab where the renderlet's geometry is staged
@@ -498,7 +498,7 @@ pub struct Light {
     /// The id of a transform to apply to the position and direction of the light.
     ///
     /// This `Id` points to a transform on the geometry slab.
-    pub transform_id: Id<Transform>,
+    pub transform_id: Id<TransformDescriptor>,
     /// The id of the shadow map in use by this light.
     pub shadow_map_desc_id: Id<ShadowMapDescriptor>,
 }
@@ -796,7 +796,7 @@ impl ShadowCalculation {
 #[spirv(vertex)]
 pub fn light_tiling_depth_pre_pass(
     // Points at a `Renderlet`.
-    #[spirv(instance_index)] renderlet_id: Id<Renderlet>,
+    #[spirv(instance_index)] renderlet_id: Id<RenderletDescriptor>,
     // Which vertex within the renderlet are we rendering?
     #[spirv(vertex_index)] vertex_index: u32,
     // The slab where the renderlet's geometry is staged

@@ -15,7 +15,7 @@ use renderling::{
     light::{AnalyticalLight, DirectionalLightDescriptor},
     prelude::*,
     skybox::Skybox,
-    stage::{Animator, GltfDocument, Renderlet, Stage},
+    stage::{Animator, GltfDocument, RenderletDescriptor, Stage},
     ui::{FontArc, Section, Text, Ui, UiPath, UiText},
     Context,
 };
@@ -116,7 +116,7 @@ impl AppUi {
 #[allow(dead_code)]
 pub struct DefaultModel {
     vertices: GpuArray<Vertex>,
-    renderlet: Hybrid<Renderlet>,
+    renderlet: Hybrid<RenderletDescriptor>,
 }
 
 pub enum Model {

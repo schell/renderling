@@ -14,8 +14,8 @@ use glam::{Mat4, UVec2};
 use crate::{
     camera::Camera,
     geometry::{GeometryDescriptor, MorphTarget, Skin, Vertex},
-    prelude::Transform,
-    stage::Renderlet,
+    prelude::TransformDescriptor,
+    stage::RenderletDescriptor,
 };
 
 /// Wrapper around the geometry slab, which holds mesh data and more.
@@ -96,7 +96,7 @@ impl Geometry {
     }
 
     /// Stage a new transform.
-    pub fn new_transform(&self, transform: Transform) -> Hybrid<Transform> {
+    pub fn new_transform(&self, transform: TransformDescriptor) -> Hybrid<TransformDescriptor> {
         self.slab.new_value(transform)
     }
 
@@ -135,8 +135,8 @@ impl Geometry {
     /// Create a new array of joint transform ids that each point to a [`Transform`].
     pub fn new_joint_transform_ids(
         &self,
-        data: impl IntoIterator<Item = Id<Transform>>,
-    ) -> HybridArray<Id<Transform>> {
+        data: impl IntoIterator<Item = Id<TransformDescriptor>>,
+    ) -> HybridArray<Id<TransformDescriptor>> {
         self.slab.new_array(data)
     }
 
@@ -150,7 +150,7 @@ impl Geometry {
         self.slab.new_value(skin)
     }
 
-    pub fn new_renderlet(&self, renderlet: Renderlet) -> Hybrid<Renderlet> {
+    pub fn new_renderlet(&self, renderlet: RenderletDescriptor) -> Hybrid<RenderletDescriptor> {
         self.slab.new_value(renderlet)
     }
 }
