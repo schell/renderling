@@ -6,7 +6,7 @@ use craballoc::{
     value::{Hybrid, HybridArray},
 };
 
-use crate::{atlas::Atlas, material::Material};
+use crate::{atlas::Atlas, material::MaterialDescriptor};
 
 /// Wrapper around the materials slab, which holds material textures in an atlas.
 #[derive(Clone)]
@@ -51,12 +51,12 @@ impl Materials {
 
     /// Create a new material.
     // TODO: move `Material` to material
-    pub fn new_material(&self, material: Material) -> Hybrid<Material> {
+    pub fn new_material(&self, material: MaterialDescriptor) -> Hybrid<MaterialDescriptor> {
         self.slab.new_value(material)
     }
 
     /// Create an array of materials, stored contiguously.
-    pub fn new_materials(&self, data: impl IntoIterator<Item = Material>) -> HybridArray<Material> {
+    pub fn new_materials(&self, data: impl IntoIterator<Item = MaterialDescriptor>) -> HybridArray<MaterialDescriptor> {
         self.slab.new_array(data)
     }
 }

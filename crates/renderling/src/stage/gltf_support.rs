@@ -15,7 +15,7 @@ use crate::{
         AnalyticalLight, DirectionalLightDescriptor, LightStyle, PointLightDescriptor,
         SpotLightDescriptor,
     },
-    material::Material,
+    material::MaterialDescriptor,
     stage::{MorphTarget, NestedTransform, RenderletDescriptor, Skin, Stage, Vertex},
     transform::TransformDescriptor,
 };
@@ -150,7 +150,7 @@ pub fn get_vertex_count(primitive: &gltf::Primitive<'_>) -> u32 {
     }
 }
 
-impl Material {
+impl MaterialDescriptor {
     pub fn preprocess_images(
         material: gltf::Material,
         images: &mut [AtlasImage],
@@ -200,7 +200,7 @@ impl Material {
     pub fn from_gltf(
         material: gltf::Material,
         entries: &[Hybrid<AtlasTexture>],
-    ) -> Result<Material, StageGltfError> {
+    ) -> Result<MaterialDescriptor, StageGltfError> {
         let name = material.name().map(String::from);
         log::trace!("loading material {:?} {name:?}", material.index());
         let pbr = material.pbr_metallic_roughness();
@@ -215,7 +215,7 @@ impl Material {
                 (Id::NONE, 0)
             };
 
-            Material {
+            MaterialDescriptor {
                 albedo_texture_id: albedo_texture,
                 albedo_tex_coord,
                 albedo_factor: pbr.base_color_factor().into(),
@@ -280,7 +280,7 @@ impl Material {
             let emissive_factor = Vec3::from(material.emissive_factor());
             let emissive_strength_multiplier = material.emissive_strength().unwrap_or(1.0);
 
-            Material {
+            MaterialDescriptor {
                 albedo_factor,
                 metallic_factor,
                 roughness_factor,
@@ -309,7 +309,7 @@ pub struct GltfPrimitive {
     pub indices: HybridArray<u32>,
     pub vertices: HybridArray<Vertex>,
     pub bounding_box: (Vec3, Vec3),
-    pub material: Id<Material>,
+    pub material: Id<MaterialDescriptor>,
     pub morph_targets: Vec<HybridArray<MorphTarget>>,
     pub morph_targets_array: HybridArray<Array<MorphTarget>>,
 }
@@ -319,7 +319,7 @@ impl GltfPrimitive {
         stage: &Stage,
         primitive: gltf::Primitive,
         buffer_data: &[gltf::buffer::Data],
-        materials: &HybridArray<Material>,
+        materials: &HybridArray<MaterialDescriptor>,
     ) -> Self {
         let material = primitive
             .material()
@@ -584,7 +584,7 @@ impl GltfMesh {
     fn from_gltf(
         stage: &Stage,
         buffer_data: &[gltf::buffer::Data],
-        materials: &HybridArray<Material>,
+        materials: &HybridArray<MaterialDescriptor>,
         mesh: gltf::Mesh,
     ) -> Self {
         log::debug!("Loading primitives for mesh {}", mesh.index());
@@ -771,14 +771,14 @@ impl GltfSkin {
 pub struct GltfDocument {
     pub animations: Vec<Animation>,
     pub cameras: Vec<GltfCamera>,
-    pub default_material: Hybrid<Material>,
+    pub default_material: Hybrid<MaterialDescriptor>,
     pub default_scene: Option<usize>,
     pub extensions: Option<serde_json::Value>,
     pub textures: Vec<Hybrid<AtlasTexture>>,
     pub lights: Vec<AnalyticalLight>,
     pub meshes: Vec<GltfMesh>,
     pub nodes: Vec<GltfNode>,
-    pub materials: HybridArray<Material>,
+    pub materials: HybridArray<MaterialDescriptor>,
     // map of node index to renderlets
     pub renderlets: FxHashMap<usize, Vec<Hybrid<RenderletDescriptor>>>,
     /// Vector of scenes - each being a list of nodes.
@@ -796,7 +796,7 @@ impl GltfDocument {
         let textures = {
             let mut images = images.into_iter().map(AtlasImage::from).collect::<Vec<_>>();
             for gltf_material in document.materials() {
-                Material::preprocess_images(gltf_material, &mut images)?;
+                MaterialDescriptor::preprocess_images(gltf_material, &mut images)?;
             }
             // Arc these images because they could be large and we don't want duplicates
             let images = images.into_iter().map(Arc::new).collect::<Vec<_>>();
@@ -871,11 +871,11 @@ impl GltfDocument {
         };
 
         log::debug!("Creating materials");
-        let default_material = stage.new_material(Material::default());
+        let default_material = stage.new_material(MaterialDescriptor::default());
         let mut materials = vec![];
         for gltf_material in document.materials() {
             let material_index = gltf_material.index();
-            let material = Material::from_gltf(gltf_material, &textures)?;
+            let material = MaterialDescriptor::from_gltf(gltf_material, &textures)?;
             if let Some(index) = material_index {
                 log::trace!("  created material {index}");
                 debug_assert_eq!(index, materials.len(), "unexpected material index");
@@ -1217,7 +1217,7 @@ impl Stage {
 #[cfg(test)]
 mod test {
     use crate::{
-        camera::Camera, material::Material, stage::Vertex, test::BlockOnFuture,
+        camera::Camera, material::MaterialDescriptor, stage::Vertex, test::BlockOnFuture,
         transform::TransformDescriptor, Context,
     };
     use glam::{Vec3, Vec4};
@@ -1307,7 +1307,7 @@ mod test {
         assert!(!doc.textures.is_empty());
         let (material, _vertices, _indices, _transform, _renderlet) = stage
             .builder()
-            .with_material(Material {
+            .with_material(MaterialDescriptor {
                 albedo_texture_id: doc.textures[0].id(),
                 has_lighting: false,
                 ..Default::default()

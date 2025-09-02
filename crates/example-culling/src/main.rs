@@ -34,9 +34,9 @@ struct CullingExample {
     controller: example::camera::TurntableCameraController,
     stage: Stage,
     dlights: [AnalyticalLight; 2],
-    material_aabb_overlapping: Hybrid<Material>,
-    material_aabb_outside: Hybrid<Material>,
-    material_frustum: Hybrid<Material>,
+    material_aabb_overlapping: Hybrid<MaterialDescriptor>,
+    material_aabb_outside: Hybrid<MaterialDescriptor>,
+    material_frustum: Hybrid<MaterialDescriptor>,
     frustum_camera: FrustumCamera,
     frustum_vertices: HybridArray<Vertex>,
     frustum_renderlet: Hybrid<RenderletDescriptor>,
@@ -55,8 +55,8 @@ impl CullingExample {
         seed: u64,
         stage: &Stage,
         frustum_camera: &FrustumCamera,
-        material_outside: &Hybrid<Material>,
-        material_overlapping: &Hybrid<Material>,
+        material_outside: &Hybrid<MaterialDescriptor>,
+        material_overlapping: &Hybrid<MaterialDescriptor>,
     ) -> Box<dyn Any> {
         log::info!("generating aabbs with seed {seed}");
         fastrand::seed(seed);
@@ -218,15 +218,15 @@ impl TestAppHandler for CullingExample {
         let red_color = srgba_to_linear(hex_to_vec4(0xC96868FF));
         let yellow_color = srgba_to_linear(hex_to_vec4(0xFADFA1FF));
 
-        let material_aabb_overlapping = stage.new_material(Material {
+        let material_aabb_overlapping = stage.new_material(MaterialDescriptor {
             albedo_factor: blue_color,
             ..Default::default()
         });
-        let material_aabb_outside = stage.new_material(Material {
+        let material_aabb_outside = stage.new_material(MaterialDescriptor {
             albedo_factor: red_color,
             ..Default::default()
         });
-        let material_frustum = stage.new_material(Material {
+        let material_frustum = stage.new_material(MaterialDescriptor {
             albedo_factor: yellow_color,
             ..Default::default()
         });

@@ -11,7 +11,7 @@ use crate::{
     color::linear_xfer_vec4,
     light::{LightTiling, LightTilingConfig, SpotLightCalculation},
     math::GpuRng,
-    material::Material,
+    material::MaterialDescriptor,
     prelude::TransformDescriptor,
     geometry::Vertex,
     stage::{RenderletDescriptor, RenderletPbrVertexInfo, Stage}, test::BlockOnFuture,
@@ -176,7 +176,7 @@ fn light_tiling_light_bounds() {
     });
 
     let colors = [0x6DE1D2FF, 0xFFD63AFF, 0x6DE1D2FF, 0xF75A5AFF].map(|albedo_factor| {
-        stage.new_material(Material {
+        stage.new_material(MaterialDescriptor {
             albedo_factor: {
                 let mut color = crate::math::hex_to_vec4(albedo_factor);
                 linear_xfer_vec4(&mut color);
@@ -235,7 +235,7 @@ fn gen_vec3(prng: &mut GpuRng) -> Vec3 {
 struct GeneratedLight {
     _unused_transform: Hybrid<TransformDescriptor>,
     _mesh_geometry: HybridArray<Vertex>,
-    _mesh_material: Hybrid<Material>,
+    _mesh_material: Hybrid<MaterialDescriptor>,
     _light: AnalyticalLight,
     mesh_renderlet: Hybrid<RenderletDescriptor>,
 }
@@ -282,7 +282,7 @@ fn gen_light(stage: &Stage, prng: &mut GpuRng, bounding_boxes: &[BoundingBox]) -
                 .get_mesh()
                 .map(|(p, n)| Vertex::default().with_position(p).with_normal(n)),
         )
-        .with_material(Material {
+        .with_material(MaterialDescriptor {
             albedo_factor: color,
             has_lighting: false,
             emissive_factor: color.xyz(),
@@ -549,7 +549,7 @@ fn light_bins_point() {
     log::info!("materials: {materials:#?}");
     doc.materials.set_item(
         0,
-        Material {
+        MaterialDescriptor {
             albedo_factor: Vec4::ONE,
             roughness_factor: 1.0,
             metallic_factor: 0.0,
@@ -961,7 +961,7 @@ fn pedestal() {
     log::info!("materials: {materials:#?}");
     doc.materials.set_item(
         0,
-        Material {
+        MaterialDescriptor {
             albedo_factor: Vec4::ONE,
             roughness_factor: 1.0,
             metallic_factor: 0.0,

@@ -399,15 +399,15 @@ impl<'a, T: Bundle> RenderletBuilder<'a, T> {
         self
     }
 
-    pub fn with_material_id(mut self, material_id: Id<Material>) -> Self {
+    pub fn with_material_id(mut self, material_id: Id<MaterialDescriptor>) -> Self {
         self.data.material_id = material_id;
         self
     }
 
     pub fn with_material(
         mut self,
-        material: Material,
-    ) -> RenderletBuilder<'a, T::Suffixed<Hybrid<Material>>> {
+        material: MaterialDescriptor,
+    ) -> RenderletBuilder<'a, T::Suffixed<Hybrid<MaterialDescriptor>>> {
         let material = self.stage.materials.new_material(material);
         self.data.material_id = material.id();
         self.suffix(material)
@@ -632,12 +632,15 @@ impl Stage {
 /// Materials methods.
 impl Stage {
     /// Stage a new [`Material`] on the GPU.
-    pub fn new_material(&self, material: Material) -> Hybrid<Material> {
+    pub fn new_material(&self, material: MaterialDescriptor) -> Hybrid<MaterialDescriptor> {
         self.materials.new_material(material)
     }
 
     /// Create an array of materials, stored contiguously.
-    pub fn new_materials(&self, data: impl IntoIterator<Item = Material>) -> HybridArray<Material> {
+    pub fn new_materials(
+        &self,
+        data: impl IntoIterator<Item = MaterialDescriptor>,
+    ) -> HybridArray<MaterialDescriptor> {
         self.materials.new_materials(data)
     }
 

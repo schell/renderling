@@ -14,7 +14,7 @@ use spirv_std::{
 use crate::{
     bvol::BoundingSphere,
     geometry::{GeometryDescriptor, MorphTarget, Skin, Vertex},
-    material::Material,
+    material::MaterialDescriptor,
     math::IsVector,
     transform::TransformDescriptor,
 };
@@ -56,7 +56,7 @@ pub struct RenderletDescriptor {
     pub bounds: BoundingSphere,
     pub indices_array: Array<u32>,
     pub transform_id: Id<TransformDescriptor>,
-    pub material_id: Id<Material>,
+    pub material_id: Id<MaterialDescriptor>,
     pub skin_id: Id<Skin>,
     pub morph_targets: Array<Array<MorphTarget>>,
     pub morph_weights: Array<f32>,

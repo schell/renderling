@@ -214,7 +214,7 @@ pub mod prelude {
     pub use crabslab::{Array, Id};
 
     pub use crate::{
-        camera::*, geometry::*, light::*, material::Material, stage::*,
+        camera::*, geometry::*, light::*, material::MaterialDescriptor, stage::*,
         transform::TransformDescriptor,
     };
 
@@ -237,7 +237,7 @@ macro_rules! println {
 mod test {
     use super::*;
     use crate::{
-        atlas::AtlasImage, camera::Camera, geometry::Vertex, material::Material,
+        atlas::AtlasImage, camera::Camera, geometry::Vertex, material::MaterialDescriptor,
         transform::TransformDescriptor,
     };
 
@@ -727,7 +727,7 @@ mod test {
 
         let (material, _geometry, _transform, cube) = stage
             .builder()
-            .with_material(Material {
+            .with_material(MaterialDescriptor {
                 albedo_texture_id: entries[0].id(),
                 has_lighting: false,
                 ..Default::default()
@@ -812,7 +812,7 @@ mod test {
         let _rez = stage
             .builder()
             .with_vertices_array(geometry.array())
-            .with_material(Material {
+            .with_material(MaterialDescriptor {
                 albedo_texture_id: entries[0].id(),
                 has_lighting: false,
                 ..Default::default()
@@ -879,7 +879,7 @@ mod test {
 
         let _rez = stage
             .builder()
-            .with_material(Material::default())
+            .with_material(MaterialDescriptor::default())
             .with_vertices(
                 math::unit_cube()
                     .into_iter()
@@ -989,7 +989,7 @@ mod test {
                     Vertex::default().with_position([size, 0.0, 0.0]),
                 ]
             })
-            .with_material(Material {
+            .with_material(MaterialDescriptor {
                 albedo_factor: Vec4::new(0.0, 1.0, 1.0, 1.0),
                 has_lighting: false,
                 ..Default::default()
@@ -999,7 +999,7 @@ mod test {
         let _yellow = stage
             .builder()
             .with_vertices_array(geometry.array())
-            .with_material(Material {
+            .with_material(MaterialDescriptor {
                 albedo_factor: Vec4::new(1.0, 1.0, 0.0, 1.0),
                 has_lighting: false,
                 ..Default::default()
@@ -1009,7 +1009,7 @@ mod test {
         let _red = stage
             .builder()
             .with_vertices_array(geometry.array())
-            .with_material(Material {
+            .with_material(MaterialDescriptor {
                 albedo_factor: Vec4::new(1.0, 0.0, 0.0, 1.0),
                 has_lighting: false,
                 ..Default::default()

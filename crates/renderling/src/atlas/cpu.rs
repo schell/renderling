@@ -938,7 +938,7 @@ mod test {
         atlas::{AtlasTexture, TextureAddressMode},
         camera::Camera,
         geometry::Vertex,
-        material::{Material, Materials},
+        material::{MaterialDescriptor, Materials},
         test::BlockOnFuture,
         transform::TransformDescriptor,
         Context,
@@ -971,7 +971,7 @@ mod test {
 
         let _rez = stage
             .builder()
-            .with_material(Material {
+            .with_material(MaterialDescriptor {
                 albedo_texture_id: texels_entry.id(),
                 has_lighting: false,
                 ..Default::default()
@@ -1053,7 +1053,7 @@ mod test {
         let _clamp_rez = stage
             .builder()
             .with_vertices_array(geometry.array())
-            .with_material(Material {
+            .with_material(MaterialDescriptor {
                 albedo_texture_id: clamp_tex.id(),
                 has_lighting: false,
                 ..Default::default()
@@ -1066,7 +1066,7 @@ mod test {
                 translation: Vec3::new(sheet_w + 1.0, 0.0, 0.0),
                 ..Default::default()
             })
-            .with_material(Material {
+            .with_material(MaterialDescriptor {
                 albedo_texture_id: repeat_tex.id(),
                 has_lighting: false,
                 ..Default::default()
@@ -1080,7 +1080,7 @@ mod test {
                 translation: Vec3::new(sheet_w * 2.0 + 2.0, 0.0, 0.0),
                 ..Default::default()
             })
-            .with_material(Material {
+            .with_material(MaterialDescriptor {
                 albedo_texture_id: mirror_tex.id(),
                 has_lighting: false,
                 ..Default::default()
@@ -1146,7 +1146,7 @@ mod test {
                     .with_uv0(Vec2::splat(-3.0));
                 [tl, bl, br, tl, br, tr]
             })
-            .with_material(Material {
+            .with_material(MaterialDescriptor {
                 albedo_texture_id: clamp_tex.id(),
                 has_lighting: false,
                 ..Default::default()
@@ -1155,7 +1155,7 @@ mod test {
 
         let _repeat_rez = stage
             .builder()
-            .with_material(Material {
+            .with_material(MaterialDescriptor {
                 albedo_texture_id: repeat_tex.id(),
                 has_lighting: false,
                 ..Default::default()
@@ -1169,7 +1169,7 @@ mod test {
 
         let _mirror_rez = stage
             .builder()
-            .with_material(Material {
+            .with_material(MaterialDescriptor {
                 albedo_texture_id: mirror_tex.id(),
                 has_lighting: false,
                 ..Default::default()

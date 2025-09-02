@@ -17,7 +17,7 @@ use crate::{
         DirectionalLightDescriptor, LightStyle, LightingDescriptor, PointLightDescriptor,
         ShadowCalculation, SpotLightCalculation,
     },
-    material::Material,
+    material::MaterialDescriptor,
     math::{self, IsSampler, IsVector, Sample2d, Sample2dArray, SampleCube},
     println as my_println,
     stage::RenderletDescriptor,
@@ -181,14 +181,14 @@ pub fn sample_brdf<T: Sample2d<Sampler = S>, S: IsSampler>(
 
 /// Returns the `Material` from the stage's slab.
 pub fn get_material(
-    material_id: Id<Material>,
+    material_id: Id<MaterialDescriptor>,
     has_lighting: bool,
     material_slab: &[u32],
-) -> Material {
+) -> MaterialDescriptor {
     if material_id.is_none() {
         // without an explicit material (or if the entire render has no lighting)
         // the entity will not participate in any lighting calculations
-        Material {
+        MaterialDescriptor {
             has_lighting: false,
             ..Default::default()
         }
@@ -668,7 +668,7 @@ mod test {
         atlas::AtlasImage,
         camera::Camera,
         geometry::Vertex,
-        pbr::Material,
+        pbr::MaterialDescriptor,
         prelude::glam::{Vec3, Vec4},
         test::BlockOnFuture,
         transform::TransformDescriptor,
@@ -735,7 +735,7 @@ mod test {
 
                 let rez = stage
                     .builder()
-                    .with_material(Material {
+                    .with_material(MaterialDescriptor {
                         albedo_factor: Vec4::new(1.0, 1.0, 1.0, 1.0),
                         metallic_factor: metallic,
                         roughness_factor: roughness,

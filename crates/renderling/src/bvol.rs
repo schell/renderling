@@ -595,7 +595,7 @@ impl BVol for Aabb {
 mod test {
     use glam::{Mat4, Quat};
 
-    use crate::{geometry::Vertex, material::Material, test::BlockOnFuture, Context};
+    use crate::{geometry::Vertex, material::MaterialDescriptor, test::BlockOnFuture, Context};
 
     use super::*;
 
@@ -665,11 +665,11 @@ mod test {
         });
         let _lights = crate::test::make_two_directional_light_setup(&stage);
 
-        let white = stage.new_material(Material {
+        let white = stage.new_material(MaterialDescriptor {
             albedo_factor: Vec4::ONE,
             ..Default::default()
         });
-        let red = stage.new_material(Material {
+        let red = stage.new_material(MaterialDescriptor {
             albedo_factor: Vec4::new(1.0, 0.0, 0.0, 1.0),
             ..Default::default()
         });

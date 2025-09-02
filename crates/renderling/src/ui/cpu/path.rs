@@ -1,7 +1,7 @@
 //! Path and builder.
 //!
 //! Path colors are sRGB.
-use crate::{geometry::Vertex, material::Material, stage::RenderletDescriptor};
+use crate::{geometry::Vertex, material::MaterialDescriptor, stage::RenderletDescriptor};
 use craballoc::prelude::{GpuArray, Hybrid};
 use crabslab::Id;
 use glam::{Vec2, Vec3, Vec3Swizzles, Vec4};
@@ -19,7 +19,7 @@ pub struct UiPath {
     pub vertices: GpuArray<Vertex>,
     pub indices: GpuArray<u32>,
     pub transform: UiTransform,
-    pub material: Hybrid<Material>,
+    pub material: Hybrid<MaterialDescriptor>,
     pub renderlet: Hybrid<RenderletDescriptor>,
 }
 
@@ -393,7 +393,7 @@ impl UiPathBuilder {
                     .into_iter()
                     .map(|u| u as u32),
             )
-            .with_material(Material {
+            .with_material(MaterialDescriptor {
                 albedo_texture_id,
                 ..Default::default()
             })
@@ -477,7 +477,7 @@ impl UiPathBuilder {
                     .into_iter()
                     .map(|u| u as u32),
             )
-            .with_material(Material {
+            .with_material(MaterialDescriptor {
                 albedo_texture_id,
                 ..Default::default()
             })

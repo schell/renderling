@@ -16,7 +16,7 @@ pub use ab_glyph::FontArc;
 pub use glyph_brush::{Section, Text};
 
 use crate::{
-    atlas::AtlasTexture, geometry::Vertex, material::Material, stage::RenderletDescriptor,
+    atlas::AtlasTexture, geometry::Vertex, material::MaterialDescriptor, stage::RenderletDescriptor,
 };
 use image::{DynamicImage, GenericImage, ImageBuffer, Luma, Rgba};
 
@@ -29,14 +29,14 @@ pub struct UiText {
     pub vertices: GpuArray<Vertex>,
     pub transform: UiTransform,
     pub texture: Hybrid<AtlasTexture>,
-    pub material: Hybrid<Material>,
+    pub material: Hybrid<MaterialDescriptor>,
     pub renderlet: Hybrid<RenderletDescriptor>,
     pub bounds: (Vec2, Vec2),
 }
 
 pub struct UiTextBuilder {
     ui: Ui,
-    material: Material,
+    material: MaterialDescriptor,
     bounds: (Vec2, Vec2),
     brush: GlyphBrush<Vec<Vertex>>,
 }
@@ -45,7 +45,7 @@ impl UiTextBuilder {
     pub fn new(ui: &Ui) -> Self {
         Self {
             ui: ui.clone(),
-            material: Material::default(),
+            material: MaterialDescriptor::default(),
             brush: GlyphBrushBuilder::using_fonts(ui.get_fonts()).build(),
             bounds: (Vec2::ZERO, Vec2::ZERO),
         }

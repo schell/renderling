@@ -12,7 +12,7 @@ use crate::atlas::AtlasTexture;
 /// Represents a material on the GPU.
 #[repr(C)]
 #[derive(Clone, Copy, PartialEq, SlabItem, core::fmt::Debug)]
-pub struct Material {
+pub struct MaterialDescriptor {
     pub emissive_factor: Vec3,
     pub emissive_strength_multiplier: f32,
     pub albedo_factor: Vec4,
@@ -35,7 +35,7 @@ pub struct Material {
     pub ao_strength: f32,
 }
 
-impl Default for Material {
+impl Default for MaterialDescriptor {
     fn default() -> Self {
         Self {
             emissive_factor: Vec3::ZERO,
