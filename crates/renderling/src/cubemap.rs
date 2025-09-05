@@ -14,7 +14,7 @@ mod cpu;
 pub use cpu::*;
 
 use crate::{
-    atlas::{AtlasDescriptor, AtlasTexture},
+    atlas::{AtlasDescriptor, AtlasTextureDescriptor},
     math::{IsSampler, Sample2dArray},
 };
 
@@ -111,7 +111,7 @@ impl CubemapFaceDirection {
 
 pub struct CubemapDescriptor {
     atlas_descriptor_id: Id<AtlasDescriptor>,
-    faces: Array<AtlasTexture>,
+    faces: Array<AtlasTextureDescriptor>,
 }
 
 impl CubemapDescriptor {

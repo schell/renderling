@@ -684,10 +684,10 @@ mod test {
         let ctx = Context::headless(100, 100).block();
         let stage = ctx.new_stage().with_background_color(Vec4::splat(1.0));
         let camera_position = Vec3::new(0.0, 9.0, 9.0);
-        let _camera = stage.new_camera(Camera::new(
+        let _camera = stage.new_camera().with_projection_and_view(
             Mat4::perspective_rh(std::f32::consts::PI / 4.0, 1.0, 1.0, 24.0),
             Mat4::look_at_rh(camera_position, Vec3::ZERO, Vec3::Y),
-        ));
+        );
         let _rez = stage
             .builder()
             .with_vertices(crate::test::gpu_cube_vertices())
@@ -790,7 +790,9 @@ mod test {
             let projection = Mat4::perspective_rh(fovy, aspect, znear, zfar);
             // Camera is looking straight down Z, towards the origin with Y up
             let view = Mat4::look_at_rh(Vec3::new(0.0, 0.0, 10.0), Vec3::ZERO, Vec3::Y);
-            stage.new_camera(Camera::new(projection, view))
+            stage
+                .new_camera()
+                .with_projection_and_view(projection, view)
         };
 
         let save_render = |s: &str| {

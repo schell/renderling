@@ -12,9 +12,9 @@ use glam::{Mat4, UVec2};
 use snafu::{OptionExt, ResultExt};
 
 use crate::{
-    atlas::{AtlasBlittingOperation, AtlasImage, AtlasTexture},
+    atlas::{AtlasBlittingOperation, AtlasImage, AtlasTexture, AtlasTextureDescriptor},
     bindgroup::ManagedBindGroup,
-    stage::RenderletDescriptor,
+    stage::{Renderlet, RenderletDescriptor},
 };
 
 use super::{
@@ -40,8 +40,8 @@ pub struct ShadowMap {
     pub(crate) light_space_transforms: HybridArray<Mat4>,
     /// Bindgroup for the shadow map update shader
     pub(crate) update_bindgroup: ManagedBindGroup,
-    pub(crate) atlas_textures: Vec<Hybrid<AtlasTexture>>,
-    pub(crate) _atlas_textures_array: HybridArray<Id<AtlasTexture>>,
+    pub(crate) atlas_textures: Vec<AtlasTexture>,
+    pub(crate) _atlas_textures_array: HybridArray<Id<AtlasTextureDescriptor>>,
     pub(crate) update_texture: crate::texture::Texture,
     pub(crate) blitting_op: AtlasBlittingOperation,
     pub(crate) light_bundle: AnalyticalLight<WeakContainer>,
@@ -248,7 +248,7 @@ impl ShadowMap {
     pub fn update<'a>(
         &self,
         lighting: impl AsRef<Lighting>,
-        renderlets: impl IntoIterator<Item = &'a Hybrid<RenderletDescriptor>>,
+        renderlets: impl IntoIterator<Item = &'a Renderlet>,
     ) -> Result<(), LightingError> {
         let lighting = lighting.as_ref();
         let light_bundle = self
@@ -339,7 +339,7 @@ impl ShadowMap {
                 let mut count = 0;
                 for rlet in renderlets.iter() {
                     let id = rlet.id();
-                    let rlet = rlet.get();
+                    let rlet = rlet.descriptor();
                     let vertex_range = 0..rlet.get_vertex_count();
                     let instance_range = id.inner()..id.inner() + 1;
                     render_pass.draw(vertex_range, instance_range);
@@ -368,7 +368,7 @@ impl ShadowMap {
 #[cfg(test)]
 #[allow(clippy::unused_enumerate_index)]
 mod test {
-    use crate::{camera::Camera, test::BlockOnFuture};
+    use crate::{camera::CameraDescriptor, test::BlockOnFuture};
 
     use super::super::*;
 
@@ -398,7 +398,7 @@ mod test {
         let camera = doc.cameras.first().unwrap();
         camera
             .as_ref()
-            .modify(|cam| cam.set_projection(crate::camera::perspective(w, h)));
+            .set_projection(crate::camera::perspective(w, h));
         stage.use_camera(camera);
 
         let frame = ctx.get_next_frame().unwrap();
@@ -601,7 +601,7 @@ mod test {
                     z_near,
                     z_far,
                 );
-                camera.as_ref().set(Camera::new(p, v));
+                camera.as_ref().set(CameraDescriptor::new(p, v));
                 let frame = ctx.get_next_frame().unwrap();
                 stage.render(&frame.view());
                 let _img = frame.read_image().block().unwrap();
@@ -668,7 +668,7 @@ mod test {
                     z_far,
                 );
                 for (_j, v) in vs.into_iter().enumerate() {
-                    camera.as_ref().set(Camera::new(p, v));
+                    camera.as_ref().set(CameraDescriptor::new(p, v));
                     let frame = ctx.get_next_frame().unwrap();
                     stage.render(&frame.view());
                     let _img = frame.read_image().block().unwrap();

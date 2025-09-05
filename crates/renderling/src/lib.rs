@@ -196,8 +196,8 @@ pub mod sync;
 pub mod texture;
 pub mod tonemapping;
 pub mod transform;
-pub mod tuple;
 pub mod tutorial;
+pub mod types;
 #[cfg(feature = "ui")]
 pub mod ui;
 
@@ -237,7 +237,7 @@ macro_rules! println {
 mod test {
     use super::*;
     use crate::{
-        atlas::AtlasImage, camera::Camera, geometry::Vertex, material::MaterialDescriptor,
+        atlas::AtlasImage, geometry::Vertex, material::MaterialDescriptor,
         transform::TransformDescriptor,
     };
 
@@ -382,7 +382,8 @@ mod test {
     fn cmy_triangle_sanity() {
         let ctx = Context::headless(100, 100).block();
         let stage = ctx.new_stage().with_background_color(Vec4::splat(1.0));
-        let _camera = stage.new_camera(Camera::default_ortho2d(100.0, 100.0));
+        let (p, v) = crate::camera::default_ortho2d(100.0, 100.0);
+        let _camera = stage.new_camera().with_projection_and_view(p, v);
         let _rez = stage.builder().with_vertices(right_tri_vertices()).build();
 
         let frame = ctx.get_next_frame().unwrap();
@@ -419,7 +420,8 @@ mod test {
 
         let ctx = Context::headless(100, 100).block();
         let stage = ctx.new_stage().with_background_color(Vec4::splat(1.0));
-        let _camera = stage.new_camera(Camera::default_ortho2d(100.0, 100.0));
+        let (p, v) = crate::camera::default_ortho2d(100.0, 100.0);
+        let _camera = stage.new_camera().with_projection_and_view(p, v);
         let _rez = stage
             .builder()
             .with_vertices({
@@ -449,7 +451,8 @@ mod test {
     fn cmy_triangle_update_transform() {
         let ctx = Context::headless(100, 100).block();
         let stage = ctx.new_stage().with_background_color(Vec4::splat(1.0));
-        let _camera = stage.new_camera(Camera::default_ortho2d(100.0, 100.0));
+        let (p, v) = CameraDescriptor::default_ortho2d(100.0, 100.0);
+        let _camera = stage.new_camera().with_projection_and_view(p, v);
         let (_vertices, transform, _renderlet) = stage
             .builder()
             .with_vertices(right_tri_vertices())
@@ -515,10 +518,11 @@ mod test {
         let ctx = Context::headless(100, 100).block();
         let stage = ctx.new_stage().with_background_color(Vec4::splat(1.0));
         let camera_position = Vec3::new(0.0, 12.0, 20.0);
-        let _camera = stage.new_camera(Camera::new(
+        let (p, v) = CameraDescriptor::new(
             Mat4::perspective_rh(std::f32::consts::PI / 4.0, 1.0, 0.1, 100.0),
             Mat4::look_at_rh(camera_position, Vec3::ZERO, Vec3::Y),
-        ));
+        );
+        let _camera = stage.new_camera().with_projection_and_view(p, v);
         let _rez = stage
             .builder()
             .with_vertices(gpu_cube_vertices())
@@ -541,10 +545,11 @@ mod test {
         let ctx = Context::headless(100, 100).block();
         let stage = ctx.new_stage().with_background_color(Vec4::splat(1.0));
         let camera_position = Vec3::new(0.0, 12.0, 20.0);
-        let _camera = stage.new_camera(Camera::new(
+        let (p, v) = CameraDescriptor::new(
             Mat4::perspective_rh(std::f32::consts::PI / 4.0, 1.0, 0.1, 100.0),
             Mat4::look_at_rh(camera_position, Vec3::ZERO, Vec3::Y),
-        ));
+        );
+        let _camera = stage.new_camera().with_projection_and_view(p, v);
         let _rez = stage
             .builder()
             .with_vertices(math::UNIT_POINTS.map(cmy_gpu_vertex))
@@ -576,7 +581,8 @@ mod test {
         let ctx = Context::headless(100, 100).block();
         let stage = ctx.new_stage().with_background_color(Vec4::splat(1.0));
         let (projection, view) = camera::default_perspective(100.0, 100.0);
-        let _camera = stage.new_camera(Camera::new(projection, view));
+        let (p, v) = CameraDescriptor::new(projection, view);
+        let _camera = stage.new_camera().with_projection_and_view(p, v);
         let (geometry, _cube_one_transform, _cube_one) = stage
             .builder()
             .with_vertices(gpu_cube_vertices())
@@ -635,7 +641,8 @@ mod test {
             .with_lighting(false)
             .with_background_color(Vec4::splat(1.0));
         let (projection, view) = camera::default_perspective(100.0, 100.0);
-        let _camera = stage.new_camera(Camera::new(projection, view));
+        let (p, v) = CameraDescriptor::new(projection, view);
+        let _camera = stage.new_camera().with_projection_and_view(p, v);
         let (_cube_geometry, _transform, cube) = stage
             .builder()
             .with_vertices(math::UNIT_INDICES.map(|i| cmy_gpu_vertex(math::UNIT_POINTS[i])))
@@ -719,7 +726,8 @@ mod test {
         let ctx = Context::headless(100, 100).block();
         let stage = ctx.new_stage().with_background_color(Vec4::splat(0.0));
         let (projection, view) = camera::default_perspective(100.0, 100.0);
-        let _camera = stage.new_camera(Camera::new(projection, view));
+        let (p, v) = CameraDescriptor::new(projection, view);
+        let _camera = stage.new_camera().with_projection_and_view(p, v);
 
         let sandstone = AtlasImage::from(image::open("../../img/sandstone.png").unwrap());
         let dirt = AtlasImage::from(image::open("../../img/dirt.jpg").unwrap());
@@ -776,7 +784,8 @@ mod test {
             .with_background_color(Vec3::splat(0.0).extend(1.0));
 
         let (projection, view) = camera::default_ortho2d(100.0, 100.0);
-        let _camera = stage.new_camera(Camera::new(projection, view));
+        let (p, v) = CameraDescriptor::new(projection, view);
+        let _camera = stage.new_camera().with_projection_and_view(p, v);
 
         // now test the textures functionality
         let img = AtlasImage::from_path("../../img/cheetah.jpg").unwrap();
@@ -843,7 +852,8 @@ mod test {
 
         let (projection, _) = camera::default_perspective(100.0, 100.0);
         let view = Mat4::look_at_rh(Vec3::new(1.8, 1.8, 1.8), Vec3::ZERO, Vec3::Y);
-        let _camera = stage.new_camera(Camera::new(projection, view));
+        let (p, v) = CameraDescriptor::new(projection, view);
+        let _camera = stage.new_camera().with_projection_and_view(p, v);
 
         let red = Vec3::X.extend(1.0);
         let green = Vec3::Y.extend(1.0);
@@ -946,7 +956,8 @@ mod test {
         let ctx = Context::headless(100, 100).block();
         let stage = ctx.new_stage().with_background_color(Vec4::splat(0.0));
         let (projection, view) = camera::default_ortho2d(100.0, 100.0);
-        let _camera = stage.new_camera(Camera::new(projection, view));
+        let (p, v) = CameraDescriptor::new(projection, view);
+        let _camera = stage.new_camera().with_projection_and_view(p, v);
 
         let root_node = stage.new_nested_transform();
         root_node.set(TransformDescriptor {
@@ -1041,10 +1052,11 @@ mod test {
 
         // create the CMY cube
         let camera_position = Vec3::new(0.0, 12.0, 20.0);
-        let _camera = stage.new_camera(Camera::new(
+        let (p, v) = CameraDescriptor::new(
             Mat4::perspective_rh(std::f32::consts::PI / 4.0, 1.0, 0.1, 100.0),
             Mat4::look_at_rh(camera_position, Vec3::ZERO, Vec3::Y),
-        ));
+        );
+        let _camera = stage.new_camera().with_projection_and_view(p, v);
         let _rez = stage
             .builder()
             .with_vertices(gpu_cube_vertices())
@@ -1084,10 +1096,11 @@ mod test {
 
         // create the CMY cube
         let camera_position = Vec3::new(0.0, 12.0, 20.0);
-        let _camera = stage.new_camera(Camera::new(
+        let (p, v) = CameraDescriptor::new(
             Mat4::perspective_rh(std::f32::consts::PI / 4.0, 1.0, 0.1, 100.0),
             Mat4::look_at_rh(camera_position, Vec3::ZERO, Vec3::Y),
-        ));
+        );
+        let _camera = stage.new_camera().with_projection_and_view(p, v);
         let _rez = stage
             .builder()
             .with_vertices(gpu_cube_vertices())

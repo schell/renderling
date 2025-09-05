@@ -701,7 +701,7 @@ impl Bloom {
 mod test {
     use glam::Vec3;
 
-    use crate::{camera::Camera, test::BlockOnFuture, Context};
+    use crate::{camera::CameraDescriptor, test::BlockOnFuture, Context};
 
     use super::*;
 
@@ -754,7 +754,9 @@ mod test {
 
         let projection = crate::camera::perspective(width as f32, height as f32);
         let view = crate::camera::look_at(Vec3::new(0.0, 2.0, 18.0), Vec3::ZERO, Vec3::Y);
-        let _camera = stage.new_camera(Camera::new(projection, view));
+        let _camera = stage
+            .new_camera()
+            .with_projection_and_view(projection, view);
         let skybox = stage
             .new_skybox_from_path("../../img/hdr/night.hdr")
             .unwrap();

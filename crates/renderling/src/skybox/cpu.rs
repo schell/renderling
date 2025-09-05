@@ -7,7 +7,7 @@ use crabslab::Id;
 use glam::{Mat4, UVec2, Vec3};
 
 use crate::{
-    atlas::AtlasImage, camera::Camera, convolution::VertexPrefilterEnvironmentCubemapIds,
+    atlas::AtlasImage, camera::CameraDescriptor, convolution::VertexPrefilterEnvironmentCubemapIds,
     cubemap::EquirectangularImageToCubemapBlitter, texture::Texture,
 };
 
@@ -190,7 +190,7 @@ impl Skybox {
         let slab = SlabAllocator::new(runtime, "skybox-slab", wgpu::BufferUsages::VERTEX);
 
         let proj = Mat4::perspective_rh(std::f32::consts::FRAC_PI_2, 1.0, 0.1, 10.0);
-        let camera = slab.new_value(Camera::default().with_projection(proj));
+        let camera = slab.new_value(CameraDescriptor::default().with_projection(proj));
         let roughness = slab.new_value(0.0f32);
         let prefilter_ids = slab.new_value(VertexPrefilterEnvironmentCubemapIds {
             camera: camera.id(),
@@ -317,7 +317,7 @@ impl Skybox {
         buffer: &wgpu::Buffer,
         buffer_upkeep: impl FnMut(),
         hdr_texture: &Texture,
-        camera: &Hybrid<Camera>,
+        camera: &Hybrid<CameraDescriptor>,
         views: [Mat4; 6],
     ) -> Texture {
         let runtime = runtime.as_ref();
@@ -357,7 +357,7 @@ impl Skybox {
         runtime: impl AsRef<WgpuRuntime>,
         pipeline: &wgpu::RenderPipeline,
         mut buffer_upkeep: impl FnMut(),
-        camera: &Hybrid<Camera>,
+        camera: &Hybrid<CameraDescriptor>,
         bindgroup: &wgpu::BindGroup,
         views: [Mat4; 6],
         texture_size: u32,
@@ -440,7 +440,7 @@ impl Skybox {
         buffer: &wgpu::Buffer,
         buffer_upkeep: impl FnMut(),
         environment_texture: &Texture,
-        camera: &Hybrid<Camera>,
+        camera: &Hybrid<CameraDescriptor>,
         views: [Mat4; 6],
     ) -> Texture {
         let runtime = runtime.as_ref();
@@ -475,7 +475,7 @@ impl Skybox {
         runtime: impl AsRef<WgpuRuntime>,
         buffer: &wgpu::Buffer,
         mut buffer_upkeep: impl FnMut(),
-        camera: &Hybrid<Camera>,
+        camera: &Hybrid<CameraDescriptor>,
         roughness: &Hybrid<f32>,
         prefilter_id: Id<VertexPrefilterEnvironmentCubemapIds>,
         environment_texture: &Texture,
@@ -661,7 +661,7 @@ mod test {
 
         let stage = ctx.new_stage();
 
-        let _camera = stage.new_camera(Camera::new(proj, view));
+        let _camera = stage.new_camera().with_projection_and_view(proj, view);
         let skybox = stage
             .new_skybox_from_path("../../img/hdr/resting_place.hdr")
             .unwrap();

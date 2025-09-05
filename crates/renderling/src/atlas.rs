@@ -40,7 +40,7 @@ pub struct TextureModes {
 /// A texture inside the atlas.
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[derive(Clone, Copy, Default, PartialEq, SlabItem)]
-pub struct AtlasTexture {
+pub struct AtlasTextureDescriptor {
     /// The top left offset of texture in the atlas.
     pub offset_px: UVec2,
     /// The size of the texture in the atlas.
@@ -53,7 +53,7 @@ pub struct AtlasTexture {
     pub modes: TextureModes,
 }
 
-impl AtlasTexture {
+impl AtlasTextureDescriptor {
     /// Transform the given `uv` coordinates for this texture's address mode
     /// and placement in the atlas of the given size.
     pub fn uv(&self, mut uv: Vec2, atlas_size: UVec2) -> Vec3 {
@@ -202,7 +202,7 @@ impl TextureAddressMode {
 
 #[derive(Clone, Copy, Default, SlabItem, core::fmt::Debug)]
 pub struct AtlasBlittingDescriptor {
-    pub atlas_texture_id: Id<AtlasTexture>,
+    pub atlas_texture_id: Id<AtlasTextureDescriptor>,
     pub atlas_desc_id: Id<AtlasDescriptor>,
 }
 
@@ -263,7 +263,7 @@ mod test {
     /// Tests that clip coordinates can be converted into texture coords within
     /// a specific `AtlasTexture`, and back again.
     fn constrain_clip_coords_sanity() {
-        let atlas_texture = AtlasTexture {
+        let atlas_texture = AtlasTextureDescriptor {
             offset_px: UVec2::splat(0),
             size_px: UVec2::splat(800),
             layer_index: 0,

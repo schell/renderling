@@ -1,9 +1,9 @@
 //! Camera control.
 use std::str::FromStr;
 
-use craballoc::prelude::Hybrid;
+use renderling::bvol::Aabb;
+use renderling::camera::Camera;
 use renderling::prelude::glam::{Mat4, Quat, UVec2, Vec2, Vec3};
-use renderling::{bvol::Aabb, camera::Camera};
 use winit::{event::KeyEvent, keyboard::Key};
 
 const RADIUS_SCROLL_DAMPENING: f32 = 0.001;
@@ -68,10 +68,10 @@ impl CameraController for TurntableCameraController {
         self.left_mb_down = false;
     }
 
-    fn update_camera(&self, UVec2 { x: w, y: h }: UVec2, current_camera: &Hybrid<Camera>) {
+    fn update_camera(&self, UVec2 { x: w, y: h }: UVec2, current_camera: &Camera) {
         let camera_position = Self::camera_position(self.radius, self.phi, self.theta);
         let znear = self.depth / 1000.0;
-        let camera = Camera::new(
+        current_camera.set_projection_and_view(
             Mat4::perspective_rh(
                 std::f32::consts::FRAC_PI_4,
                 w as f32 / h as f32,
@@ -80,18 +80,6 @@ impl CameraController for TurntableCameraController {
             ),
             Mat4::look_at_rh(camera_position, self.center, Vec3::Y),
         );
-        debug_assert!(
-            camera.view().is_finite(),
-            "camera view is borked w:{w} h:{h} camera_position: {camera_position} center: {} \
-             radius: {} phi: {} theta: {}",
-            self.center,
-            self.radius,
-            self.phi,
-            self.theta
-        );
-        if current_camera.get() != camera {
-            current_camera.set(camera);
-        }
     }
 
     fn mouse_scroll(&mut self, delta: f32) {
@@ -194,7 +182,7 @@ impl CameraController for WasdMouseCameraController {
         }
     }
 
-    fn update_camera(&self, UVec2 { x: w, y: h }: UVec2, camera: &Hybrid<Camera>) {
+    fn update_camera(&self, UVec2 { x: w, y: h }: UVec2, camera: &Camera) {
         let camera_rotation = Quat::from_euler(
             renderling::prelude::glam::EulerRot::XYZ,
             self.phi,
@@ -204,7 +192,7 @@ impl CameraController for WasdMouseCameraController {
         let projection =
             Mat4::perspective_infinite_rh(std::f32::consts::FRAC_PI_4, w as f32 / h as f32, 0.01);
         let view = Mat4::from_quat(camera_rotation) * Mat4::from_translation(-self.position);
-        camera.modify(|c| c.set_projection_and_view(projection, view));
+        camera.set_projection_and_view(projection, view);
     }
 
     fn reset(&mut self, _bounds: Aabb) {
@@ -258,7 +246,7 @@ impl CameraController for WasdMouseCameraController {
 pub trait CameraController {
     fn reset(&mut self, bounds: Aabb);
     fn tick(&mut self);
-    fn update_camera(&self, size: UVec2, camera: &Hybrid<Camera>);
+    fn update_camera(&self, size: UVec2, camera: &Camera);
     fn mouse_scroll(&mut self, delta: f32);
     fn mouse_moved(&mut self, position: Vec2);
     fn mouse_motion(&mut self, delta: Vec2);

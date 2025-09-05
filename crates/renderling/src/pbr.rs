@@ -11,7 +11,7 @@ use glam::{Mat4, Vec2, Vec3, Vec4, Vec4Swizzles};
 use spirv_std::num_traits::{Float, Zero};
 
 use crate::{
-    atlas::AtlasTexture,
+    atlas::AtlasTextureDescriptor,
     geometry::GeometryDescriptor,
     light::{
         DirectionalLightDescriptor, LightStyle, LightingDescriptor, PointLightDescriptor,
@@ -200,7 +200,7 @@ pub fn get_material(
 }
 
 pub fn texture_color<A: Sample2dArray<Sampler = S>, S: IsSampler>(
-    texture_id: Id<AtlasTexture>,
+    texture_id: Id<AtlasTextureDescriptor>,
     uv: Vec2,
     atlas: &A,
     sampler: &S,
@@ -666,7 +666,7 @@ where
 mod test {
     use crate::{
         atlas::AtlasImage,
-        camera::Camera,
+        camera::CameraDescriptor,
         geometry::Vertex,
         pbr::MaterialDescriptor,
         prelude::glam::{Vec3, Vec4},
@@ -697,7 +697,9 @@ mod test {
             Vec3::new(half, half, 0.0),
             Vec3::Y,
         );
-        let _camera = stage.new_camera(Camera::new(projection, view));
+        let _camera = stage
+            .new_camera()
+            .with_projection_and_view(projection, view);
 
         let geometry = stage.new_vertices({
             let mut icosphere = icosahedron::Polyhedron::new_isocahedron(radius, 5);

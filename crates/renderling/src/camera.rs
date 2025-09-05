@@ -4,12 +4,19 @@ use glam::{Mat4, Vec2, Vec3, Vec4};
 
 use crate::{bvol::Frustum, math::IsVector};
 
-/// A camera used for transforming the stage during rendering.
+#[cfg(cpu)]
+mod cpu;
+#[cfg(cpu)]
+pub use cpu::*;
+
+/// GPU descriptor of a camera.
 ///
-/// Use [`Camera::new`] to create a new camera.
+/// Used for transforming the stage during rendering.
+///
+/// Use [`CameraDescriptor::new`] to create a new camera.
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[derive(Default, Clone, Copy, PartialEq, SlabItem)]
-pub struct Camera {
+pub struct CameraDescriptor {
     projection: Mat4,
     view: Mat4,
     position: Vec3,
@@ -20,19 +27,19 @@ pub struct Camera {
     z_far_point: Vec3,
 }
 
-impl Camera {
+impl CameraDescriptor {
     pub fn new(projection: Mat4, view: Mat4) -> Self {
-        Camera::default().with_projection_and_view(projection, view)
+        CameraDescriptor::default().with_projection_and_view(projection, view)
     }
 
     pub fn default_perspective(width: f32, height: f32) -> Self {
         let (projection, view) = default_perspective(width, height);
-        Camera::new(projection, view)
+        CameraDescriptor::new(projection, view)
     }
 
     pub fn default_ortho2d(width: f32, height: f32) -> Self {
         let (projection, view) = default_ortho2d(width, height);
-        Camera::new(projection, view)
+        CameraDescriptor::new(projection, view)
     }
 
     pub fn projection(&self) -> Mat4 {
@@ -207,7 +214,7 @@ mod tests {
         for (eye, expected_forward) in eyes.into_iter().zip(expected_forwards) {
             let projection = Mat4::perspective_rh(45.0_f32.to_radians(), 800.0 / 600.0, 0.1, 100.0);
             let view = Mat4::look_at_rh(eye, Vec3::ZERO, Vec3::Y);
-            let camera = Camera::new(projection, view);
+            let camera = CameraDescriptor::new(projection, view);
 
             let forward = camera.forward();
             let distance = forward.distance(expected_forward);

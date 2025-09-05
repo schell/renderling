@@ -25,8 +25,8 @@ const BOUNDS: Aabb = Aabb {
     max: Vec3::new(MAX_DIST, MAX_DIST, MAX_DIST),
 };
 
-struct AppCamera(Hybrid<Camera>);
-struct FrustumCamera(Camera);
+struct AppCamera(Hybrid<CameraDescriptor>);
+struct FrustumCamera(CameraDescriptor);
 
 #[allow(dead_code)]
 struct CullingExample {
@@ -80,13 +80,11 @@ impl CullingExample {
                     let center = Vec3::new(x, y, z);
                     let half_size = Vec3::new(w, h, l);
                     let aabb = Self::make_aabb(Vec3::ZERO, half_size);
-                    let aabb_transform = TransformDescriptor {
-                        translation: center,
-                        rotation,
-                        ..Default::default()
-                    };
 
-                    let transform = stage.new_transform(aabb_transform);
+                    let transform = stage
+                        .new_transform()
+                        .with_translation(center)
+                        .with_rotation(rotation);
                     let (aabb_vertices, aabb_renderlet) = {
                         let material_id = if BoundingSphere::from(aabb)
                             .is_inside_camera_view(&frustum_camera.0, transform.get())
@@ -208,7 +206,7 @@ impl TestAppHandler for CullingExample {
             let view = Mat4::look_at_rh(eye, target, up);
             // let projection = Mat4::orthographic_rh(-10.0, 10.0, -10.0, 10.0, -10.0,
             // 10.0); let view = Mat4::IDENTITY;
-            Camera::new(projection, view)
+            CameraDescriptor::new(projection, view)
         });
 
         let frustum = frustum_camera.0.frustum();
@@ -218,19 +216,10 @@ impl TestAppHandler for CullingExample {
         let red_color = srgba_to_linear(hex_to_vec4(0xC96868FF));
         let yellow_color = srgba_to_linear(hex_to_vec4(0xFADFA1FF));
 
-        let material_aabb_overlapping = stage.new_material(MaterialDescriptor {
-            albedo_factor: blue_color,
-            ..Default::default()
-        });
-        let material_aabb_outside = stage.new_material(MaterialDescriptor {
-            albedo_factor: red_color,
-            ..Default::default()
-        });
-        let material_frustum = stage.new_material(MaterialDescriptor {
-            albedo_factor: yellow_color,
-            ..Default::default()
-        });
-        let app_camera = AppCamera(stage.new_camera(Camera::default()));
+        let material_aabb_overlapping = stage.new_material().with_albedo_factor(blue_color);
+        let material_aabb_outside = stage.new_material().with_albedo_factor(red_color);
+        let material_frustum = stage.new_material().with_albedo_factor(yellow_color);
+        let app_camera = AppCamera(stage.new_camera());
         resources.push(Self::make_aabbs(
             seed,
             &stage,
@@ -248,11 +237,10 @@ impl TestAppHandler for CullingExample {
                     ..Default::default()
                 },
             ));
-        let frustum_renderlet = stage.new_renderlet(RenderletDescriptor {
-            vertices_array: frustum_vertices.array(),
-            material_id: material_frustum.id(),
-            ..Default::default()
-        });
+        let frustum_renderlet = stage
+            .new_renderlet()
+            .with_vertices(&frustum_vertices)
+            .with_material(&material_frustum);
         stage.add_renderlet(&frustum_renderlet);
 
         Self {

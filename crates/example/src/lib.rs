@@ -5,17 +5,15 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use craballoc::prelude::{GpuArray, Hybrid};
 use glam::{Mat4, UVec2, Vec2, Vec3, Vec4};
 use renderling::{
     atlas::AtlasImage,
     bvol::{Aabb, BoundingSphere},
-    camera::Camera,
     geometry::Vertex,
     light::{AnalyticalLight, DirectionalLightDescriptor},
     prelude::*,
     skybox::Skybox,
-    stage::{Animator, GltfDocument, RenderletDescriptor, Stage},
+    stage::{Animator, GltfDocument, Stage},
     ui::{FontArc, Section, Text, Ui, UiPath, UiText},
     Context,
 };
@@ -113,15 +111,9 @@ impl AppUi {
     }
 }
 
-#[allow(dead_code)]
-pub struct DefaultModel {
-    vertices: GpuArray<Vertex>,
-    renderlet: Hybrid<RenderletDescriptor>,
-}
-
 pub enum Model {
     Gltf(Box<GltfDocument>),
-    Default(DefaultModel),
+    Default(Renderlet),
     None,
 }
 
@@ -130,7 +122,7 @@ pub struct App {
     skybox_image_bytes: Option<Vec<u8>>,
     loads: Arc<Mutex<HashMap<std::path::PathBuf, Vec<u8>>>>,
     pub stage: Stage,
-    camera: Hybrid<Camera>,
+    camera: Camera,
     _lighting: AnalyticalLight,
     model: Model,
     animators: Option<Vec<Animator>>,
@@ -147,7 +139,9 @@ impl App {
             .with_bloom_mix_strength(0.5)
             .with_bloom_filter_radius(4.0)
             .with_msaa_sample_count(4);
-        let camera = stage.new_camera(Camera::default());
+        let size = ctx.get_size();
+        let (proj, view) = renderling::camera::default_perspective(size.x as f32, size.y as f32);
+        let camera = stage.new_camera().with_projection_and_view(proj, view);
         let directional_light = DirectionalLightDescriptor {
             direction: Vec3::NEG_Y,
             color: renderling::math::hex_to_vec4(0xFDFBD3FF),
@@ -230,10 +224,9 @@ impl App {
         let mut max = Vec3::splat(f32::NEG_INFINITY);
 
         self.last_frame_instant = now();
-        let (vertices, renderlet) = self
+        let vertices = self
             .stage
-            .builder()
-            .with_vertices(renderling::math::unit_cube().into_iter().map(|(p, n)| {
+            .new_vertices(renderling::math::unit_cube().into_iter().map(|(p, n)| {
                 let p = p * 2.0;
                 min = min.min(p);
                 max = max.max(p);
@@ -241,17 +234,17 @@ impl App {
                     .with_position(p)
                     .with_normal(n)
                     .with_color(Vec4::new(1.0, 0.0, 0.0, 1.0))
-            }))
+            }));
+        let renderlet = self
+            .stage
+            .new_renderlet()
+            .with_vertices(vertices)
             .with_bounds({
                 log::info!("default model bounds: {min} {max}");
                 BoundingSphere::from((min, max))
-            })
-            .build();
+            });
 
-        self.model = Model::Default(DefaultModel {
-            vertices: vertices.into_gpu_only(),
-            renderlet,
-        });
+        self.model = Model::Default(renderlet);
         self.camera_controller.reset(Aabb::new(min, max));
         self.camera_controller
             .update_camera(self.stage.get_size(), &self.camera);

@@ -12,7 +12,7 @@ use spirv_std::{
 #[allow(unused_imports)]
 use spirv_std::num_traits::Float;
 
-use crate::{camera::Camera, math::IsVector};
+use crate::{camera::CameraDescriptor, math::IsVector};
 
 // Allow manual bit rotation because this code is `no_std`.
 #[allow(clippy::manual_rotate)]
@@ -155,7 +155,7 @@ pub fn integrate_brdf_doesnt_work(mut n_dot_v: f32, roughness: f32) -> Vec2 {
 /// roughness values from the slab.
 #[derive(Clone, Copy, Default, SlabItem)]
 pub struct VertexPrefilterEnvironmentCubemapIds {
-    pub camera: Id<Camera>,
+    pub camera: Id<CameraDescriptor>,
     // TODO: does this have to be an Id? Pretty sure it can be inline
     pub roughness: Id<f32>,
 }

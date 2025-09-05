@@ -3,7 +3,9 @@ use craballoc::prelude::HybridArray;
 use glam::{Quat, Vec3};
 use snafu::prelude::*;
 
-use crate::stage::{gltf_support::GltfNode, NestedTransform};
+use crate::{
+    geometry::MorphTargetWeights, stage::gltf_support::GltfNode, transform::NestedTransform,
+};
 
 #[derive(Debug, Snafu)]
 pub enum InterpolationError {
@@ -546,7 +548,7 @@ impl Tween {
 #[derive(Clone, Debug)]
 pub struct AnimationNode {
     pub transform: NestedTransform,
-    pub morph_weights: HybridArray<f32>,
+    pub morph_weights: MorphTargetWeights,
 }
 
 impl From<&GltfNode> for (usize, AnimationNode) {
@@ -737,26 +739,20 @@ impl Animator {
             if let Some(node) = self.nodes.get(&node_index) {
                 match property {
                     TweenProperty::Translation(translation) => {
-                        node.transform.modify(|t| {
-                            t.translation = translation;
-                        });
+                        node.transform.set_translation(translation);
                     }
                     TweenProperty::Rotation(rotation) => {
-                        node.transform.modify(|t| {
-                            t.rotation = rotation;
-                        });
+                        node.transform.set_rotation(rotation);
                     }
                     TweenProperty::Scale(scale) => {
-                        node.transform.modify(|t| {
-                            t.scale = scale;
-                        });
+                        node.transform.set_scale(scale);
                     }
                     TweenProperty::MorphTargetWeights(new_weights) => {
-                        if node.morph_weights.is_empty() {
+                        if node.morph_weights.array().is_empty() {
                             log::error!("animation is applied to morph targets but node {node_index} is missing weights");
                         } else {
                             for (i, w) in new_weights.into_iter().enumerate() {
-                                let _ = node.morph_weights.set_item(i, w);
+                                node.morph_weights.set_item(i, w);
                             }
                         }
                     }
@@ -771,7 +767,7 @@ impl Animator {
 
 #[cfg(test)]
 mod test {
-    use crate::{camera::Camera, stage::Animator, test::BlockOnFuture, Context};
+    use crate::{camera::CameraDescriptor, stage::Animator, test::BlockOnFuture, Context};
     use glam::Vec3;
 
     #[test]
@@ -783,7 +779,9 @@ mod test {
             .with_background_color(Vec3::ZERO.extend(1.0));
         let projection = crate::camera::perspective(50.0, 50.0);
         let view = crate::camera::look_at(Vec3::Z * 3.0, Vec3::ZERO, Vec3::Y);
-        let _camera = stage.new_camera(Camera::new(projection, view));
+        let _camera = stage
+            .new_camera()
+            .with_projection_and_view(projection, view);
 
         let doc = stage
             .load_gltf_document_from_path("../../gltf/animated_triangle.gltf")

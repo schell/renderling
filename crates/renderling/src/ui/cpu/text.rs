@@ -8,35 +8,30 @@ use std::{
 };
 
 use ab_glyph::Rect;
-use craballoc::prelude::{GpuArray, Hybrid};
 use glam::{Vec2, Vec4};
 use glyph_brush::*;
 
 pub use ab_glyph::FontArc;
 pub use glyph_brush::{Section, Text};
 
-use crate::{
-    atlas::AtlasTexture, geometry::Vertex, material::MaterialDescriptor, stage::RenderletDescriptor,
-};
+use crate::{atlas::AtlasTexture, geometry::Vertex, material::Material, stage::Renderlet};
 use image::{DynamicImage, GenericImage, ImageBuffer, Luma, Rgba};
 
 use super::{Ui, UiTransform};
 
 // TODO: make UiText able to be updated without fully destroying it
-#[derive(Debug)]
 pub struct UiText {
     pub cache: GlyphCache,
-    pub vertices: GpuArray<Vertex>,
     pub transform: UiTransform,
-    pub texture: Hybrid<AtlasTexture>,
-    pub material: Hybrid<MaterialDescriptor>,
-    pub renderlet: Hybrid<RenderletDescriptor>,
+    pub texture: AtlasTexture,
+    pub material: Material,
+    pub renderlet: Renderlet,
     pub bounds: (Vec2, Vec2),
 }
 
 pub struct UiTextBuilder {
     ui: Ui,
-    material: MaterialDescriptor,
+    material: Material,
     bounds: (Vec2, Vec2),
     brush: GlyphBrush<Vec<Vertex>>,
 }
@@ -45,14 +40,14 @@ impl UiTextBuilder {
     pub fn new(ui: &Ui) -> Self {
         Self {
             ui: ui.clone(),
-            material: MaterialDescriptor::default(),
+            material: ui.stage.new_material(),
             brush: GlyphBrushBuilder::using_fonts(ui.get_fonts()).build(),
             bounds: (Vec2::ZERO, Vec2::ZERO),
         }
     }
 
     pub fn set_color(&mut self, color: impl Into<Vec4>) -> &mut Self {
-        self.material.albedo_factor = color.into();
+        self.material.set_albedo_factor(color.into());
         self
     }
 
@@ -84,7 +79,7 @@ impl UiTextBuilder {
     pub fn build(self) -> UiText {
         let UiTextBuilder {
             ui,
-            mut material,
+            material,
             bounds,
             brush,
         } = self;
@@ -104,22 +99,18 @@ impl UiTextBuilder {
 
         // UNWRAP: panic on purpose
         let entry = ui.stage.add_images(Some(img)).unwrap().pop().unwrap();
-        log::trace!("ui text texture: {entry:#?}");
-        material.albedo_texture_id = entry.id();
-
-        let (vertices, material, renderlet) = ui
+        material.set_albedo_texture(&entry);
+        let vertices = ui.stage.new_vertices(mesh);
+        let transform = ui.new_transform();
+        let renderlet = ui
             .stage
-            .builder()
-            .with_vertices(mesh)
-            .with_material(material)
-            .build();
-        let transform = ui.new_transform(vec![renderlet.id()]);
-        renderlet.modify(|r| r.transform_id = transform.id());
-
+            .new_renderlet()
+            .with_vertices(vertices)
+            .with_transform(&transform.transform)
+            .with_material(&material);
         UiText {
             cache,
             bounds,
-            vertices: vertices.into_gpu_only(),
             transform,
             texture: entry,
             material,
