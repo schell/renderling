@@ -10,7 +10,7 @@ use spirv_std::{
 use spirv_std::num_traits::Float;
 
 use crate::{
-    camera::Camera,
+    camera::CameraDescriptor,
     math::{self, IsVector},
 };
 
@@ -39,7 +39,7 @@ pub fn skybox_vertex(
     local_pos: &mut Vec3,
     #[spirv(position)] clip_pos: &mut Vec4,
 ) {
-    let camera_id = Id::<Camera>::from(camera_index);
+    let camera_id = Id::<CameraDescriptor>::from(camera_index);
     let camera = slab.read(camera_id);
     let point = math::CUBE[vertex_index as usize];
     *local_pos = point;
@@ -69,7 +69,7 @@ pub fn skybox_cubemap_fragment(
 /// convolutions.
 #[spirv(vertex)]
 pub fn skybox_cubemap_vertex(
-    #[spirv(instance_index)] camera_id: Id<Camera>,
+    #[spirv(instance_index)] camera_id: Id<CameraDescriptor>,
     #[spirv(vertex_index)] vertex_index: u32,
     #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] slab: &[u32],
     local_pos: &mut Vec3,

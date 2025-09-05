@@ -1,5 +1,4 @@
-use futures_lite::StreamExt;
-use glam::{Vec2, Vec3, Vec4};
+use glam::{Vec2, Vec4};
 use renderling::{prelude::*, ui::prelude::*};
 use wasm_bindgen::prelude::*;
 use web_sys::HtmlCanvasElement;
@@ -27,7 +26,7 @@ pub struct App {
     path: UiPath,
     stage: Stage,
     doc: GltfDocument,
-    camera: Hybrid<Camera>,
+    camera: Camera,
     text: UiText,
 }
 
@@ -105,7 +104,8 @@ pub async fn main() {
     let fox = stage.load_gltf_document_from_bytes(GLTF_FOX_BYTES).unwrap();
     log::info!("fox aabb: {:?}", fox.bounding_volume());
 
-    let camera = stage.new_camera(Camera::default_perspective(800.0, 600.0));
+    let (p, v) = renderling::camera::default_perspective(800.0, 600.0);
+    let camera = stage.new_camera().with_projection_and_view(p, v);
 
     let app = App {
         ctx,

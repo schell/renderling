@@ -16,7 +16,7 @@ use glam::{Mat4, Vec2, Vec3, Vec3Swizzles, Vec4, Vec4Swizzles};
 #[cfg(gpu)]
 use spirv_std::num_traits::Float;
 
-use crate::{camera::Camera, transform::TransformDescriptor};
+use crate::{camera::CameraDescriptor, transform::TransformDescriptor};
 
 /// Normalize a plane.
 pub fn normalize_plane(mut plane: Vec4) -> Vec4 {
@@ -151,7 +151,11 @@ impl Aabb {
 
     /// Determines whether this `Aabb` can be seen by `camera` after being
     /// transformed by `transform`.
-    pub fn is_outside_camera_view(&self, camera: &Camera, transform: TransformDescriptor) -> bool {
+    pub fn is_outside_camera_view(
+        &self,
+        camera: &CameraDescriptor,
+        transform: TransformDescriptor,
+    ) -> bool {
         let transform = Mat4::from(transform);
         let min = transform.transform_point3(self.min);
         let max = transform.transform_point3(self.max);
@@ -223,7 +227,7 @@ pub struct Frustum {
 
 impl Frustum {
     /// Compute a frustum in world space from the given [`Camera`].
-    pub fn from_camera(camera: &Camera) -> Self {
+    pub fn from_camera(camera: &CameraDescriptor) -> Self {
         let viewprojection = camera.view_projection();
         let mvp = viewprojection.to_cols_array_2d();
 
@@ -462,7 +466,7 @@ impl BoundingSphere {
     /// being transformed by `transform`.  
     pub fn is_inside_camera_view(
         &self,
-        camera: &Camera,
+        camera: &CameraDescriptor,
         transform: TransformDescriptor,
     ) -> (bool, BoundingSphere) {
         let center = Mat4::from(transform).transform_point3(self.center);
@@ -490,7 +494,7 @@ impl BoundingSphere {
 
     /// Returns an [`Aabb`] with x and y coordinates in viewport pixels and z coordinate
     /// in NDC depth.
-    pub fn project_onto_viewport(&self, camera: &Camera, viewport: Vec2) -> Aabb {
+    pub fn project_onto_viewport(&self, camera: &CameraDescriptor, viewport: Vec2) -> Aabb {
         fn ndc_to_pixel(viewport: Vec2, ndc: Vec3) -> Vec2 {
             let screen = Vec3::new((ndc.x + 1.0) * 0.5, 1.0 - (ndc.y + 1.0) * 0.5, ndc.z);
             (screen * viewport.extend(1.0)).xy()
@@ -595,14 +599,14 @@ impl BVol for Aabb {
 mod test {
     use glam::{Mat4, Quat};
 
-    use crate::{geometry::Vertex, material::MaterialDescriptor, test::BlockOnFuture, Context};
+    use crate::{geometry::Vertex, test::BlockOnFuture, Context};
 
     use super::*;
 
     #[test]
     fn bvol_frustum_is_in_world_space_sanity() {
         let (p, v) = crate::camera::default_perspective(800.0, 600.0);
-        let camera = Camera::new(p, v);
+        let camera = CameraDescriptor::new(p, v);
         let aabb_outside = Aabb {
             min: Vec3::new(-10.0, -12.0, 20.0),
             max: Vec3::new(10.0, 12.0, 40.0),
@@ -630,7 +634,7 @@ mod test {
             let target = Vec3::ZERO;
             let up = Vec3::Y;
             let view = Mat4::look_at_rh(eye, target, up);
-            Camera::new(projection, view)
+            CameraDescriptor::new(projection, view)
         };
         let aabb = Aabb {
             min: Vec3::new(-3.2869213, -3.0652206, -3.8715153),
@@ -655,34 +659,26 @@ mod test {
             .with_background_color(Vec4::ZERO)
             .with_msaa_sample_count(4)
             .with_lighting(true);
-        let _camera = stage.new_camera({
-            Camera::new(
-                // BUG: using orthographic here renderes nothing
-                // Mat4::orthographic_rh(-10.0, 10.0, -10.0, 10.0, 10.0, -10.0),
-                crate::camera::perspective(256.0, 256.0),
-                Mat4::look_at_rh(Vec3::new(-3.0, 3.0, 5.0) * 0.5, Vec3::ZERO, Vec3::Y),
-            )
-        });
+        let _camera = stage.new_camera().with_projection_and_view(
+            // TODO: BUG - using orthographic here renderes nothing
+            // Mat4::orthographic_rh(-10.0, 10.0, -10.0, 10.0, 10.0, -10.0),
+            crate::camera::perspective(256.0, 256.0),
+            Mat4::look_at_rh(Vec3::new(-3.0, 3.0, 5.0) * 0.5, Vec3::ZERO, Vec3::Y),
+        );
         let _lights = crate::test::make_two_directional_light_setup(&stage);
 
-        let white = stage.new_material(MaterialDescriptor {
-            albedo_factor: Vec4::ONE,
-            ..Default::default()
-        });
-        let red = stage.new_material(MaterialDescriptor {
-            albedo_factor: Vec4::new(1.0, 0.0, 0.0, 1.0),
-            ..Default::default()
-        });
+        let white = stage.new_material();
+        let red = stage
+            .new_material()
+            .with_albedo_factor(Vec4::new(1.0, 0.0, 0.0, 1.0));
 
-        let _w = stage
-            .builder()
-            .with_material_id(white.id())
-            .with_vertices(
+        let _w = stage.new_renderlet().with_material(&white).with_vertices(
+            stage.new_vertices(
                 crate::math::unit_cube()
                     .into_iter()
                     .map(|(p, n)| Vertex::default().with_position(p).with_normal(n)),
-            )
-            .build();
+            ),
+        );
 
         let mut corners = vec![];
         for x in [-1.0, 1.0] {
@@ -704,14 +700,12 @@ mod test {
             );
 
             rs.push(
-                stage
-                    .builder()
-                    .with_material_id(red.id())
-                    .with_vertices(
+                stage.new_renderlet().with_material(&red).with_vertices(
+                    stage.new_vertices(
                         bb.get_mesh()
                             .map(|(p, n)| Vertex::default().with_position(p).with_normal(n)),
-                    )
-                    .build(),
+                    ),
+                ),
             );
         }
 

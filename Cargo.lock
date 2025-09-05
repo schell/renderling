@@ -853,9 +853,7 @@ dependencies = [
 
 [[package]]
 name = "craballoc"
-version = "0.2.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c2a2da5589f6c4076db520b5e1a96cbfbc954f5ef50d7ade9fd219860a8d8467"
+version = "0.2.4"
 dependencies = [
  "async-channel 1.9.0",
  "bytemuck",
@@ -870,8 +868,6 @@ dependencies = [
 [[package]]
 name = "crabslab"
 version = "0.6.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cfe77aba0fb1ad6ddb4d30744bfc61e1420a9cc1fa981b3556cc423506df9450"
 dependencies = [
  "crabslab-derive",
  "futures-lite 1.13.0",
@@ -881,9 +877,7 @@ dependencies = [
 
 [[package]]
 name = "crabslab-derive"
-version = "0.4.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "32554318ca91eb0c2c6a05659ec2cd1627fd44142d54547bb3d0aa7405a979b2"
+version = "0.4.5"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2213,7 +2207,7 @@ checksum = "e04d7f318608d35d4b61ddd75cbdaee86b023ebe2bd5a66ee0915f0bf93095a9"
 dependencies = [
  "hermit-abi 0.5.2",
  "libc",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2337,7 +2331,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "07033963ba89ebaf1584d767badaa2e8fcec21aedea6b8c0346d487d49c28667"
 dependencies = [
  "cfg-if",
- "windows-targets 0.53.2",
+ "windows-targets 0.48.5",
 ]
 
 [[package]]
@@ -3906,7 +3900,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.4.15",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3919,7 +3913,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.9.4",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -4242,7 +4236,7 @@ version = "0.8.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1961e2ef424c1424204d3a5d6975f934f56b6d50ff5732382d84ebf460e147f7"
 dependencies = [
- "heck 0.5.0",
+ "heck 0.4.1",
  "proc-macro2",
  "quote",
  "syn 2.0.104",
@@ -5299,7 +5293,7 @@ version = "0.1.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf221c93e13a30d793f7645a0e7762c55d169dbb0a49671918a2319d289b10bb"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]

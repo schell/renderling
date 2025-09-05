@@ -14,7 +14,7 @@ use crate::{
     atlas::{Atlas, AtlasBlitter, AtlasError},
     geometry::Geometry,
     prelude::TransformDescriptor,
-    stage::NestedTransform,
+    transform::{NestedTransform, Transform},
 };
 
 use super::{
@@ -125,6 +125,9 @@ impl LightDetails<WeakContainer> {
 ///
 /// Create an `AnalyticalLightBundle` with the `Lighting::new_analytical_light`,
 /// or from `Stage::new_analytical_light`.
+// TODO: rework the light API.
+// * to not be based on descriptors
+// * to match the rest of the builder style APIs
 pub struct AnalyticalLight<Ct: IsContainer = HybridContainer> {
     /// The generic light descriptor.
     light: Ct::Container<super::Light>,
@@ -133,14 +136,14 @@ pub struct AnalyticalLight<Ct: IsContainer = HybridContainer> {
     /// The light's global transform.
     ///
     /// This value lives in the lighting slab.
-    transform: Ct::Container<TransformDescriptor>,
+    transform: Transform,
     /// The light's nested transform.
     ///
     /// This value comes from the light's node, if it belongs to one.
     /// This may have been set if this light originated from a GLTF file.
     /// This value lives on the geometry slab and must be referenced here
     /// to keep the two in sync, which is required to animate lights.
-    node_transform: Arc<RwLock<Option<NestedTransform<WeakContainer>>>>,
+    node_transform: Arc<RwLock<Option<NestedTransform>>>,
 }
 
 impl core::fmt::Display for AnalyticalLight {
@@ -149,10 +152,11 @@ impl core::fmt::Display for AnalyticalLight {
             "AnalyticalLightBundle type={} light-id={:?} node-nested-transform-global-id:{:?}",
             self.light_details.style(),
             self.light.id(),
-            self.node_transform.read().unwrap().as_ref().and_then(|wh| {
-                let h: NestedTransform = wh.upgrade()?;
-                Some(h.global_transform_id())
-            })
+            self.node_transform
+                .read()
+                .unwrap()
+                .as_ref()
+                .and_then(|h| { Some(h.global_id()) })
         ))
     }
 }
@@ -162,7 +166,6 @@ where
     Ct::Container<Light>: Clone,
     Ct::Container<TransformDescriptor>: Clone,
     LightDetails<Ct>: Clone,
-    NestedTransform<Ct>: Clone,
 {
     fn clone(&self) -> Self {
         Self {
@@ -179,7 +182,7 @@ impl AnalyticalLight<WeakContainer> {
         AnalyticalLight {
             light: WeakHybrid::from_hybrid(&light.light),
             light_details: LightDetails::from_hybrid(&light.light_details),
-            transform: WeakHybrid::from_hybrid(&light.transform),
+            transform: light.transform.clone(),
             node_transform: light.node_transform.clone(),
         }
     }
@@ -188,7 +191,7 @@ impl AnalyticalLight<WeakContainer> {
         Some(AnalyticalLight {
             light: self.light.upgrade()?,
             light_details: self.light_details.upgrade()?,
-            transform: self.transform.upgrade()?,
+            transform: self.transform.clone(),
             node_transform: self.node_transform.clone(),
         })
     }
@@ -200,7 +203,7 @@ impl AnalyticalLight {
     }
 
     pub fn light_space_transforms(&self, z_near: f32, z_far: f32) -> Vec<Mat4> {
-        let t = self.transform.get();
+        let t = self.transform.descriptor();
         let m = Mat4::from(t);
         match &self.light_details {
             LightDetails::Directional(d) => vec![{
@@ -228,8 +231,7 @@ impl AnalyticalLight {
 impl<Ct: IsContainer> AnalyticalLight<Ct> {
     /// Link this light to a node's `NestedTransform`.
     pub fn link_node_transform(&self, transform: &NestedTransform) {
-        *self.node_transform.write().unwrap() =
-            Some(NestedTransform::<WeakContainer>::from_hybrid(transform));
+        *self.node_transform.write().unwrap() = Some(transform.clone());
     }
 
     /// Get a reference to the generic light descriptor.
@@ -250,7 +252,7 @@ impl<Ct: IsContainer> AnalyticalLight<Ct> {
     /// If a `NestedTransform` has been linked to this light by using [`Self::link_node_transform`],
     /// the transform returned by this function may be overwritten at any point by the given
     /// `NestedTransform`.
-    pub fn transform(&self) -> &Ct::Container<TransformDescriptor> {
+    pub fn transform(&self) -> &Transform {
         &self.transform
     }
 
@@ -261,9 +263,11 @@ impl<Ct: IsContainer> AnalyticalLight<Ct> {
     /// To change this value, you should do so through the `NestedTransform`, which is likely
     /// held in the
     pub fn linked_node_transform(&self) -> Option<NestedTransform> {
-        let guard = self.node_transform.read().unwrap();
-        let weak = guard.as_ref()?;
-        weak.upgrade()
+        self.node_transform
+            .read()
+            .unwrap()
+            .as_ref()
+            .map(|t| t.clone())
     }
 }
 
@@ -444,7 +448,7 @@ impl Lighting {
         Light: From<Id<T>>,
         LightDetails: From<Hybrid<T>>,
     {
-        let transform = self.light_slab.new_value(TransformDescriptor::default());
+        let transform = Transform::new(&self.light_slab);
         let light_inner = self.light_slab.new_value(light_descriptor);
         let light = self.light_slab.new_value({
             let mut light = Light::from(light_inner.id());
@@ -499,24 +503,18 @@ impl Lighting {
             lights_guard.retain_mut(|light_bundle| {
                 let has_refs = light_bundle.light.has_external_references();
                 if has_refs {
-                    let mut node_transform_guard = light_bundle.node_transform.write().unwrap();
                     // References to this light still exist, so we'll check to see
                     // if we need to update the values of linked node transforms.
-                    if let Some(weak_node_transform) = node_transform_guard.take() {
-                        if let Some(node_transform) = weak_node_transform.upgrade() {
-                            // If we can upgrade the node transform, something is holding onto
-                            // it and may updated it in the future, so put it back.
-                            *node_transform_guard = Some(weak_node_transform);
-                            // Get on with checking the update.
-                            let node_global_transform_value = node_transform.get_global_transform();
-                            // UNWRAP: Safe because we checked that the light has external references
-                            let light_global_transform = light_bundle.transform.upgrade().unwrap();
-                            let global_transform_value = light_global_transform.get();
-                            if global_transform_value != node_global_transform_value {
-                                // TODO: write a test that animates a light using GLTF to ensure
-                                // that this is working correctly
-                                light_global_transform.set(node_global_transform_value);
-                            }
+                    if let Some(node_transform) =
+                        light_bundle.node_transform.read().unwrap().as_ref()
+                    {
+                        let node_global_transform = node_transform.global_descriptor();
+                        // UNWRAP: Safe because we checked that the light has external references
+                        let light_global_transform = light_bundle.transform.descriptor();
+                        if light_global_transform != node_global_transform {
+                            // TODO: write a test that animates a light using GLTF to ensure
+                            // that this is working correctly
+                            light_bundle.transform.set_descriptor(node_global_transform);
                         }
                     }
                 }

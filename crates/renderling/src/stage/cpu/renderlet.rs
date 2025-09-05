@@ -1,0 +1,359 @@
+//! `Renderlet` builder.
+
+use core::ops::Deref;
+use std::sync::{Arc, Mutex};
+
+use craballoc::value::Hybrid;
+use crabslab::{Array, Id};
+
+use crate::{
+    bvol::BoundingSphere,
+    geometry::{Indices, MorphTargetWeights, MorphTargets, Skin, Vertices},
+    material::{Material, MaterialDescriptor},
+    stage::RenderletDescriptor,
+    transform::{Transform, TransformDescriptor},
+    types::GpuOnlyArray,
+};
+
+/// Used to sort renderlet draw calls.
+pub struct RenderletSortItem {
+    pub descriptor: RenderletDescriptor,
+    pub transform: Option<TransformDescriptor>,
+    pub material: Option<MaterialDescriptor>,
+}
+
+/// A unit of rendering.
+///
+/// A `Renderlet` represents one draw call, or one mesh primitive.
+pub struct Renderlet {
+    pub(crate) descriptor: Hybrid<RenderletDescriptor>,
+
+    vertices: Arc<Mutex<Option<Vertices<GpuOnlyArray>>>>,
+    indices: Arc<Mutex<Option<Indices<GpuOnlyArray>>>>,
+
+    pub(crate) transform: Arc<Mutex<Option<Transform>>>,
+    pub(crate) material: Arc<Mutex<Option<Material>>>,
+    skin: Arc<Mutex<Option<Skin>>>,
+    morph_targets: Arc<Mutex<Option<(MorphTargets, MorphTargetWeights)>>>,
+}
+
+impl Renderlet {
+    /// Create a new [`Renderlet`], automatically adding it to the [`Stage`] to be drawn.
+    ///
+    /// The returned [`Renderlet`] will have the stage's default [`Vertices`], which is an all-white
+    /// unit cube.
+    pub fn new(stage: &super::Stage) -> Self {
+        let descriptor = stage
+            .geometry
+            .slab_allocator()
+            .new_value(RenderletDescriptor::default());
+        let renderlet = Renderlet {
+            descriptor,
+            vertices: Default::default(),
+            indices: Default::default(),
+            transform: Default::default(),
+            material: Default::default(),
+            skin: Default::default(),
+            morph_targets: Default::default(),
+        }
+        .with_vertices(stage.default_vertices());
+        stage.add_renderlet(&renderlet);
+        renderlet
+    }
+
+    /// Return a struct that can be used to order a [`Renderlet`] relative to others.
+    pub fn sort_item(&self) -> RenderletSortItem {
+        let transform = self
+            .transform
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|t| t.descriptor());
+        let material = self
+            .material
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|m| m.descriptor());
+        RenderletSortItem {
+            descriptor: self.descriptor.get(),
+            transform,
+            material,
+        }
+    }
+}
+
+impl Clone for Renderlet {
+    fn clone(&self) -> Self {
+        Self {
+            descriptor: self.descriptor.clone(),
+            vertices: self.vertices.clone(),
+            indices: self.indices.clone(),
+            transform: self.transform.clone(),
+            material: self.material.clone(),
+            skin: self.skin.clone(),
+            morph_targets: self.morph_targets.clone(),
+        }
+    }
+}
+
+// Vertices impls
+impl Renderlet {
+    /// Set the vertex data of this renderlet.
+    pub fn set_vertices(&self, vertices: impl Into<Vertices<GpuOnlyArray>>) -> &Self {
+        let vertices = vertices.into();
+        let array = vertices.array();
+        self.descriptor.modify(|d| d.vertices_array = array);
+        *self.vertices.lock().unwrap() = Some(vertices.clone());
+        self
+    }
+
+    /// Set the vertex data of this renderlet and return the renderlet.
+    pub fn with_vertices(self, vertices: impl Into<Vertices<GpuOnlyArray>>) -> Self {
+        self.set_vertices(vertices);
+        self
+    }
+}
+
+// Indices impls
+impl Renderlet {
+    /// Set the index data of this renderlet.
+    pub fn set_indices(&self, indices: impl Into<Indices<GpuOnlyArray>>) -> &Self {
+        let indices = indices.into();
+        let array = indices.array();
+        self.descriptor.modify(|d| d.indices_array = array);
+        *self.indices.lock().unwrap() = Some(indices.clone());
+        self
+    }
+
+    /// Set the index data of this renderlet and return the renderlet.
+    pub fn with_indices(self, indices: impl Into<Indices<GpuOnlyArray>>) -> Self {
+        self.set_indices(indices);
+        self
+    }
+
+    /// Remove the indices from this renderlet.
+    pub fn remove_indices(&self) -> &Self {
+        *self.indices.lock().unwrap() = None;
+        self.descriptor.modify(|d| d.indices_array = Array::NONE);
+        self
+    }
+}
+
+// RenderletDescriptor impls
+impl Renderlet {
+    /// Return a pointer to the underlying descriptor on the GPU.
+    pub fn id(&self) -> Id<RenderletDescriptor> {
+        self.descriptor.id()
+    }
+
+    /// Return the underlying descriptor.
+    pub fn descriptor(&self) -> RenderletDescriptor {
+        self.descriptor.get()
+    }
+
+    /// Set the bounds of this renderlet.
+    pub fn set_bounds(&self, bounds: BoundingSphere) -> &Self {
+        self.descriptor.modify(|d| d.bounds = bounds);
+        self
+    }
+
+    /// Set the bounds and return the renderlet.
+    pub fn with_bounds(self, bounds: BoundingSphere) -> Self {
+        self.set_bounds(bounds);
+        self
+    }
+
+    /// Get the bounds.
+    ///
+    /// Returns the current `BoundingSphere`.
+    pub fn bounds(&self) -> BoundingSphere {
+        self.descriptor.get().bounds
+    }
+
+    /// Modify the bounds of the renderlet.
+    ///
+    /// # Arguments
+    ///
+    /// * `f` - A closure that takes a mutable reference to the `BoundingSphere` and returns a value of type `T`.
+    pub fn modify_bounds<T: 'static>(&self, f: impl FnOnce(&mut BoundingSphere) -> T) -> T {
+        self.descriptor.modify(|d| f(&mut d.bounds))
+    }
+
+    /// Set the visibility of this renderlet.
+    pub fn set_visible(&self, visible: bool) -> &Self {
+        self.descriptor.modify(|d| d.visible = visible);
+        self
+    }
+
+    /// Set the visibility and return the renderlet.
+    pub fn with_visible(self, visible: bool) -> Self {
+        self.set_visible(visible);
+        self
+    }
+
+    /// Return the renderlet's visibility.
+    pub fn visible(&self) -> bool {
+        self.descriptor.get().visible
+    }
+
+    /// Modify the visible of the renderlet.
+    ///
+    /// # Arguments
+    ///
+    /// * `f` - A closure that takes a mutable reference to the visibility and returns a value of type `T`.
+    pub fn modify_visible<T: 'static>(&self, f: impl FnOnce(&mut bool) -> T) -> T {
+        self.descriptor.modify(|d| f(&mut d.visible))
+    }
+}
+
+// Transform functions
+impl Renderlet {
+    /// Set the transform.
+    ///
+    /// # Note
+    /// This can be set with [`Transform`] or [`NestedTransform`].
+    pub fn set_transform(&self, transform: impl Into<Transform>) -> &Self {
+        let transform = transform.into();
+        self.descriptor.modify(|d| d.transform_id = transform.id());
+        *self.transform.lock().unwrap() = Some(transform.clone());
+        self
+    }
+
+    /// Set the transform and return the `Renderlet`.
+    ///
+    /// # Note
+    /// This can be set with [`Transform`] or [`NestedTransform`].
+    pub fn with_transform(self, transform: impl Into<Transform>) -> Self {
+        self.set_transform(transform);
+        self
+    }
+
+    /// Get the transform.
+    ///
+    /// Returns a reference to the current `Transform`, if any.
+    // TODO: see if we really need to provide this.
+    pub fn transform(&self) -> impl Deref<Target = Option<Transform>> + '_ {
+        self.transform.lock().unwrap()
+    }
+
+    /// Remove the transform from this renderlet.
+    ///
+    /// This effectively makes the transform the identity.
+    pub fn remove_transform(&self) -> &Self {
+        self.descriptor.modify(|d| d.transform_id = Id::NONE);
+        *self.transform.lock().unwrap() = None;
+        self
+    }
+}
+
+// Material impls
+impl Renderlet {
+    /// Set the material of this renderlet.
+    pub fn set_material(&self, material: impl Into<Material>) -> &Self {
+        let material = material.into();
+        self.descriptor.modify(|d| d.material_id = material.id());
+        *self.material.lock().unwrap() = Some(material);
+        self
+    }
+
+    /// Set the material and return the renderlet.
+    pub fn with_material(self, material: impl Into<Material>) -> Self {
+        self.set_material(material);
+        self
+    }
+
+    /// Get the material.
+    ///
+    /// Returns a reference to the current `Material`, if any.
+    // TODO: see if we really need to provide this.
+    pub fn material(&self) -> impl Deref<Target = Option<Material>> + '_ {
+        self.material.lock().unwrap()
+    }
+
+    /// Remove the material from this renderlet.
+    pub fn remove_material(&self) -> &Self {
+        self.descriptor.modify(|d| d.material_id = Id::NONE);
+        *self.material.lock().unwrap() = None;
+        self
+    }
+}
+
+// Skin impls
+impl Renderlet {
+    /// Set the skin of this renderlet.
+    pub fn set_skin(&self, skin: impl Into<Skin>) -> &Self {
+        let skin = skin.into();
+        self.descriptor.modify(|d| d.skin_id = skin.id());
+        *self.skin.lock().unwrap() = Some(skin.clone());
+        self
+    }
+
+    /// Set the skin and return the renderlet.
+    pub fn with_skin(self, skin: impl Into<Skin>) -> Self {
+        self.set_skin(skin);
+        self
+    }
+
+    /// Get the skin.
+    ///
+    /// Returns a reference to the current `Skin`, if any.
+    pub fn skin(&self) -> impl Deref<Target = Option<Skin>> + '_ {
+        self.skin.lock().unwrap()
+    }
+
+    /// Remove the skin from this renderlet.
+    pub fn remove_skin(&self) -> &Self {
+        self.descriptor.modify(|d| d.skin_id = Id::NONE);
+        *self.skin.lock().unwrap() = None;
+        self
+    }
+}
+
+// (MorphTargets, MorphTargetsWeights) impls
+impl Renderlet {
+    /// Set the morph targets and weights of this renderlet.
+    pub fn set_morph_targets(
+        &self,
+        morph_targets: impl Into<MorphTargets>,
+        weights: impl Into<MorphTargetWeights>,
+    ) -> &Self {
+        let morph_targets = morph_targets.into();
+        let weights = weights.into();
+        self.descriptor.modify(|d| {
+            d.morph_targets = morph_targets.array();
+            d.morph_weights = weights.array();
+        });
+        *self.morph_targets.lock().unwrap() = Some((morph_targets.clone(), weights.clone()));
+        self
+    }
+
+    /// Set the morph targets and weights and return the renderlet.
+    pub fn with_morph_targets(
+        self,
+        morph_targets: impl Into<MorphTargets>,
+        weights: impl Into<MorphTargetWeights>,
+    ) -> Self {
+        self.set_morph_targets(morph_targets, weights);
+        self
+    }
+
+    /// Get the morph targets and weights.
+    ///
+    /// Returns a reference to the current `MorphTargets` and `MorphTargetsWeights`, if any.
+    pub fn morph_targets(
+        &self,
+    ) -> impl Deref<Target = Option<(MorphTargets, MorphTargetWeights)>> + '_ {
+        self.morph_targets.lock().unwrap()
+    }
+
+    /// Remove the morph targets and weights from this renderlet.
+    pub fn remove_morph_targets(&self) -> &Self {
+        self.descriptor.modify(|d| {
+            d.morph_targets = Array::NONE;
+            d.morph_weights = Array::NONE;
+        });
+        *self.morph_targets.lock().unwrap() = None;
+        self
+    }
+}

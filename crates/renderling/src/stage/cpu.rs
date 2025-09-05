@@ -18,14 +18,17 @@ use crabslab::Id;
 use snafu::Snafu;
 use std::sync::{atomic::AtomicBool, Arc, Mutex, RwLock};
 
+use crate::atlas::AtlasTexture;
+use crate::camera::Camera;
+use crate::material::Material;
 use crate::{
-    atlas::{AtlasError, AtlasImage, AtlasImageError, AtlasTexture},
+    atlas::{AtlasError, AtlasImage, AtlasImageError},
     bindgroup::ManagedBindGroup,
     bloom::Bloom,
-    camera::Camera,
+    camera::CameraDescriptor,
     debug::DebugOverlay,
     draw::DrawCalls,
-    geometry::Geometry,
+    geometry::{Geometry, Indices, MorphTargetWeights, MorphTargets, Skin, SkinJoint, Vertices},
     light::{
         AnalyticalLight, Light, LightDetails, LightTiling, LightTilingConfig, Lighting,
         LightingBindGroupLayoutEntries, LightingError, ShadowMap,
@@ -33,12 +36,15 @@ use crate::{
     material::Materials,
     pbr::debug::DebugChannel,
     skybox::{Skybox, SkyboxRenderPipeline},
-    stage::RenderletDescriptor,
     texture::{DepthTexture, Texture},
     tonemapping::Tonemapping,
-    transform::TransformDescriptor,
-    tuple::Bundle,
+    transform::{NestedTransform, Transform},
 };
+
+#[cfg(cpu)]
+pub mod renderlet;
+#[cfg(cpu)]
+pub use renderlet::*;
 
 use super::*;
 
@@ -266,198 +272,43 @@ impl StageRendering<'_> {
                     .create()
                 });
 
-        self.stage.draw_calls.write().unwrap().upkeep();
         let mut draw_calls = self.stage.draw_calls.write().unwrap();
         let depth_texture = self.stage.depth_texture.read().unwrap();
         // UNWRAP: safe because we know the depth texture format will always match
         let maybe_indirect_buffer = draw_calls.pre_draw(&depth_texture).unwrap();
+
+        log::trace!("rendering");
+        let label = Some("stage render");
+
+        let mut encoder = self
+            .stage
+            .device()
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label });
         {
-            log::trace!("rendering");
-            let label = Some("stage render");
+            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label,
+                color_attachments: &[Some(self.color_attachment)],
+                depth_stencil_attachment: Some(self.depth_stencil_attachment),
+                ..Default::default()
+            });
 
-            let mut encoder = self
-                .stage
-                .device()
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor { label });
-            {
-                let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                    label,
-                    color_attachments: &[Some(self.color_attachment)],
-                    depth_stencil_attachment: Some(self.depth_stencil_attachment),
-                    ..Default::default()
-                });
+            render_pass.set_pipeline(self.pipeline);
+            render_pass.set_bind_group(0, Some(renderlet_bind_group.as_ref()), &[]);
+            draw_calls.draw(&mut render_pass);
 
-                render_pass.set_pipeline(self.pipeline);
-                render_pass.set_bind_group(0, Some(renderlet_bind_group.as_ref()), &[]);
-                draw_calls.draw(&mut render_pass);
-
-                let has_skybox = self.stage.has_skybox.load(Ordering::Relaxed);
-                if has_skybox {
-                    let (pipeline, bindgroup) = self
-                        .stage
-                        .get_skybox_pipeline_and_bindgroup(&commit_result.geometry_buffer);
-                    render_pass.set_pipeline(&pipeline.pipeline);
-                    render_pass.set_bind_group(0, Some(bindgroup.as_ref()), &[]);
-                    let camera_id = self.stage.geometry.descriptor().get().camera_id.inner();
-                    render_pass.draw(0..36, camera_id..camera_id + 1);
-                }
+            let has_skybox = self.stage.has_skybox.load(Ordering::Relaxed);
+            if has_skybox {
+                let (pipeline, bindgroup) = self
+                    .stage
+                    .get_skybox_pipeline_and_bindgroup(&commit_result.geometry_buffer);
+                render_pass.set_pipeline(&pipeline.pipeline);
+                render_pass.set_bind_group(0, Some(bindgroup.as_ref()), &[]);
+                let camera_id = self.stage.geometry.descriptor().get().camera_id.inner();
+                render_pass.draw(0..36, camera_id..camera_id + 1);
             }
-            let sindex = self.stage.queue().submit(std::iter::once(encoder.finish()));
-            (sindex, maybe_indirect_buffer)
         }
-    }
-}
-
-pub enum RenderletTransform<Ct: IsContainer = HybridContainer> {
-    /// A single root transform
-    Root(crate::transform::Transform<Ct>),
-    /// A heirarchy of transforms.
-    ///
-    /// Each transform represents the transform of one node in a scene graph.
-    Hierarchy(NestedTransform),
-}
-
-pub struct Renderlet<
-    RenderletDescriptorCt: IsContainer = HybridContainer,
-    TransformCt: IsContainer = HybridContainer,
-    VerticesCt: IsContainer = GpuArrayContainer,
-    IndicesCt: IsContainer = GpuArrayContainer,
-    MaterialCt: IsContainer = GpuArrayContainer,
-> {
-    transform: Option<RenderletTransform<TransformCt>>,
-    descriptor: RenderletDescriptorCt::Container<RenderletDescriptor>,
-    vertices: VerticesCt::Container<Vertex>,
-    indices: Option<IndicesCt::Container<u32>>,
-    material: Option<MaterialCt>,
-}
-
-/// A helper struct to build [`Renderlet`]s.
-pub struct RenderletBuilder<'a, T> {
-    data: RenderletDescriptor,
-    resources: T,
-    stage: &'a Stage,
-}
-
-impl<'a> RenderletBuilder<'a, ()> {
-    pub fn new(stage: &'a Stage) -> Self {
-        RenderletBuilder {
-            data: RenderletDescriptor::default(),
-            resources: (),
-            stage,
-        }
-    }
-}
-
-impl<'a, T: Bundle> RenderletBuilder<'a, T> {
-    pub fn suffix<S>(self, element: S) -> RenderletBuilder<'a, T::Suffixed<S>> {
-        RenderletBuilder {
-            data: self.data,
-            resources: self.resources.suffix(element),
-            stage: self.stage,
-        }
-    }
-
-    pub fn with_vertices_array(mut self, array: Array<Vertex>) -> Self {
-        self.data.vertices_array = array;
-        self
-    }
-
-    pub fn with_vertices(
-        mut self,
-        vertices: impl IntoIterator<Item = Vertex>,
-    ) -> RenderletBuilder<'a, T::Suffixed<HybridArray<Vertex>>> {
-        let vertices = self.stage.geometry.new_vertices(vertices);
-        self.data.vertices_array = vertices.array();
-        self.suffix(vertices)
-    }
-
-    pub fn with_indices(
-        mut self,
-        indices: impl IntoIterator<Item = u32>,
-    ) -> RenderletBuilder<'a, T::Suffixed<HybridArray<u32>>> {
-        let indices = self.stage.geometry.new_indices(indices);
-        self.data.indices_array = indices.array();
-        self.suffix(indices)
-    }
-
-    pub fn with_transform_id(mut self, transform_id: Id<TransformDescriptor>) -> Self {
-        self.data.transform_id = transform_id;
-        self
-    }
-
-    pub fn with_transform(
-        mut self,
-        transform: TransformDescriptor,
-    ) -> RenderletBuilder<'a, T::Suffixed<Hybrid<TransformDescriptor>>> {
-        let transform = self.stage.geometry.new_transform(transform);
-        self.data.transform_id = transform.id();
-        self.suffix(transform)
-    }
-
-    pub fn with_nested_transform(mut self, transform: &NestedTransform) -> Self {
-        self.data.transform_id = transform.global_transform_id();
-        self
-    }
-
-    pub fn with_material_id(mut self, material_id: Id<MaterialDescriptor>) -> Self {
-        self.data.material_id = material_id;
-        self
-    }
-
-    pub fn with_material(
-        mut self,
-        material: MaterialDescriptor,
-    ) -> RenderletBuilder<'a, T::Suffixed<Hybrid<MaterialDescriptor>>> {
-        let material = self.stage.materials.new_material(material);
-        self.data.material_id = material.id();
-        self.suffix(material)
-    }
-
-    pub fn with_skin_id(mut self, skin_id: Id<Skin>) -> Self {
-        self.data.skin_id = skin_id;
-        self
-    }
-
-    pub fn with_morph_targets(
-        mut self,
-        morph_targets: impl IntoIterator<Item = Array<MorphTarget>>,
-    ) -> (Self, HybridArray<Array<MorphTarget>>) {
-        let morph_targets = self.stage.geometry.new_morph_targets_array(morph_targets);
-        self.data.morph_targets = morph_targets.array();
-        (self, morph_targets)
-    }
-
-    pub fn with_morph_weights(
-        mut self,
-        morph_weights: impl IntoIterator<Item = f32>,
-    ) -> (Self, HybridArray<f32>) {
-        let morph_weights = self.stage.geometry.new_weights(morph_weights);
-        self.data.morph_weights = morph_weights.array();
-        (self, morph_weights)
-    }
-
-    pub fn with_geometry_descriptor_id(mut self, pbr_config_id: Id<GeometryDescriptor>) -> Self {
-        self.data.geometry_descriptor_id = pbr_config_id;
-        self
-    }
-
-    pub fn with_bounds(mut self, bounds: impl Into<BoundingSphere>) -> Self {
-        self.data.bounds = bounds.into();
-        self
-    }
-
-    /// Build the [`Renderlet`], add it to the [`Stage`] with [`Stage::add_renderlet`] and
-    /// return the [`Hybrid`] along with any resources that were staged.
-    ///
-    /// The returned value will be a tuple with the [`Hybrid<Renderlet>`] as the head, and
-    /// all other resources added as the tail.
-    pub fn build(self) -> <T::Suffixed<Hybrid<RenderletDescriptor>> as Bundle>::Reduced
-    where
-        T::Suffixed<Hybrid<RenderletDescriptor>>: Bundle,
-    {
-        let renderlet = self.stage.geometry.new_renderlet(self.data);
-        self.stage.add_renderlet(&renderlet);
-        self.resources.suffix(renderlet).reduce()
+        let sindex = self.stage.queue().submit(std::iter::once(encoder.finish()));
+        (sindex, maybe_indirect_buffer)
     }
 }
 
@@ -532,94 +383,87 @@ impl AsRef<Lighting> for Stage {
 
 /// Geometry methods.
 impl Stage {
+    /// Returns the vertices of a white unit cube.
+    ///
+    /// This is the mesh of every [`Renderlet`] that has not had its vertices set.
+    pub fn default_vertices(&self) -> &Vertices {
+        self.geometry.default_vertices()
+    }
     /// Stage a [`Camera`] on the GPU.
     ///
     /// If the camera has not been set, this camera will be used
     /// automatically.
-    pub fn new_camera(&self, camera: Camera) -> Hybrid<Camera> {
-        self.geometry.new_camera(camera)
+    pub fn new_camera(&self) -> Camera {
+        self.geometry.new_camera()
     }
 
     /// Use the given camera when rendering.
-    pub fn use_camera(&self, camera: impl AsRef<Hybrid<Camera>>) {
-        self.geometry.use_camera(camera);
+    pub fn use_camera(&self, camera: impl AsRef<Camera>) {
+        self.geometry.use_camera(camera.as_ref());
     }
 
     /// Return the `Id` of the camera currently in use.
-    pub fn used_camera_id(&self) -> Id<Camera> {
+    pub fn used_camera_id(&self) -> Id<CameraDescriptor> {
         self.geometry.descriptor().get().camera_id
     }
 
     /// Set the default camera `Id`.
-    pub fn use_camera_id(&self, camera_id: Id<Camera>) {
+    pub fn use_camera_id(&self, camera_id: Id<CameraDescriptor>) {
         self.geometry
             .descriptor()
             .modify(|desc| desc.camera_id = camera_id);
     }
 
     /// Stage a [`Transform`] on the GPU.
-    pub fn new_transform(&self, transform: TransformDescriptor) -> Hybrid<TransformDescriptor> {
-        self.geometry.new_transform(transform)
+    pub fn new_transform(&self) -> Transform {
+        self.geometry.new_transform()
     }
 
     /// Stage some vertex geometry data.
-    pub fn new_vertices(&self, data: impl IntoIterator<Item = Vertex>) -> HybridArray<Vertex> {
+    pub fn new_vertices(&self, data: impl IntoIterator<Item = Vertex>) -> Vertices {
         self.geometry.new_vertices(data)
     }
 
     /// Stage some vertex index data.
-    pub fn new_indices(&self, data: impl IntoIterator<Item = u32>) -> HybridArray<u32> {
+    pub fn new_indices(&self, data: impl IntoIterator<Item = u32>) -> Indices {
         self.geometry.new_indices(data)
     }
 
     /// Create new morph targets.
-    // TODO: Move `MorphTarget` to geometry.
     pub fn new_morph_targets(
         &self,
-        data: impl IntoIterator<Item = MorphTarget>,
-    ) -> HybridArray<MorphTarget> {
+        data: impl IntoIterator<Item = Vec<MorphTarget>>,
+    ) -> MorphTargets {
         self.geometry.new_morph_targets(data)
     }
 
-    /// Create an array of morph target arrays.
-    pub fn new_morph_targets_array(
-        &self,
-        data: impl IntoIterator<Item = Array<MorphTarget>>,
-    ) -> HybridArray<Array<MorphTarget>> {
-        let morph_targets = data.into_iter();
-        self.geometry.new_morph_targets_array(morph_targets)
-    }
-
     /// Create new morph target weights.
-    pub fn new_weights(&self, data: impl IntoIterator<Item = f32>) -> HybridArray<f32> {
-        self.geometry.new_weights(data)
-    }
-
-    /// Create a new array of joint transform ids that each point to a [`Transform`].
-    pub fn new_joint_transform_ids(
+    pub fn new_morph_target_weights(
         &self,
-        data: impl IntoIterator<Item = Id<TransformDescriptor>>,
-    ) -> HybridArray<Id<TransformDescriptor>> {
-        self.geometry.new_joint_transform_ids(data)
+        data: impl IntoIterator<Item = f32>,
+    ) -> MorphTargetWeights {
+        self.geometry.new_morph_target_weights(data)
     }
 
-    /// Create a new array of matrices.
-    pub fn new_matrices(&self, data: impl IntoIterator<Item = Mat4>) -> HybridArray<Mat4> {
-        self.geometry.new_matrices(data)
+    pub fn new_skin(
+        &self,
+        joints: impl IntoIterator<Item = impl Into<SkinJoint>>,
+        inverse_bind_matrices: impl IntoIterator<Item = impl Into<Mat4>>,
+    ) -> Skin {
+        self.geometry.new_skin(joints, inverse_bind_matrices)
     }
 
-    /// Create a new skin.
-    // TODO: move `Skin` to geometry.
-    pub fn new_skin(&self, skin: Skin) -> Hybrid<Skin> {
-        self.geometry.new_skin(skin)
-    }
-
-    /// Stage a new [`Renderlet`].
+    /// Stage a new [`Renderlet`] on the GPU.
     ///
-    /// The `Renderlet` should still be added to the draw list with
-    /// [`Stage::add_renderlet`].
-    pub fn new_renderlet(&self, renderlet: RenderletDescriptor) -> Hybrid<RenderletDescriptor> {
-        self.geometry.new_renderlet(renderlet)
+    /// The returned [`Renderlet`] will automatically be added to this [`Stage`].
+    ///
+    /// The returned [`Renderlet`] will have the stage's default [`Vertices`], which is an all-white
+    /// unit cube.
+    ///
+    /// The returned [`Renderlet`] uses the stage's default [`Material`], which is white and
+    /// **does not** participate in lighting.
+    pub fn new_renderlet(&self) -> Renderlet {
+        Renderlet::new(self)
     }
 
     /// Returns a reference to the descriptor stored at the root of the
@@ -631,17 +475,18 @@ impl Stage {
 
 /// Materials methods.
 impl Stage {
-    /// Stage a new [`Material`] on the GPU.
-    pub fn new_material(&self, material: MaterialDescriptor) -> Hybrid<MaterialDescriptor> {
-        self.materials.new_material(material)
+    /// Returns the default [`Material`].
+    ///
+    /// The default is an all-white matte material.
+    pub fn default_material(&self) -> &Material {
+        self.materials.default_material()
     }
 
-    /// Create an array of materials, stored contiguously.
-    pub fn new_materials(
-        &self,
-        data: impl IntoIterator<Item = MaterialDescriptor>,
-    ) -> HybridArray<MaterialDescriptor> {
-        self.materials.new_materials(data)
+    /// Stage a new [`Material`] on the GPU.
+    ///
+    /// The returned [`Material`] can be customized using the builder pattern.
+    pub fn new_material(&self) -> Material {
+        self.materials.new_material()
     }
 
     /// Set the size of the atlas.
@@ -666,7 +511,7 @@ impl Stage {
     pub fn add_images(
         &self,
         images: impl IntoIterator<Item = impl Into<AtlasImage>>,
-    ) -> Result<Vec<Hybrid<AtlasTexture>>, StageError> {
+    ) -> Result<Vec<AtlasTexture>, StageError> {
         let images = images.into_iter().map(|i| i.into()).collect::<Vec<_>>();
         let frames = self.materials.atlas().add_images(&images)?;
 
@@ -696,7 +541,7 @@ impl Stage {
     pub fn set_images(
         &self,
         images: impl IntoIterator<Item = impl Into<AtlasImage>>,
-    ) -> Result<Vec<Hybrid<AtlasTexture>>, StageError> {
+    ) -> Result<Vec<AtlasTexture>, StageError> {
         let images = images.into_iter().map(|i| i.into()).collect::<Vec<_>>();
         let frames = self.materials.atlas().set_images(&images)?;
 
@@ -804,12 +649,13 @@ impl Stage {
         &self.runtime().queue
     }
 
-    pub fn hdr_texture(&self) -> impl Deref<Target = crate::texture::Texture> + '_ {
-        self.hdr_texture.read().unwrap()
+    /// Create a new [`SceneBuilder`] to help bundle staged resources.
+    pub fn builder(&self) -> SceneBuilder<'_, ()> {
+        SceneBuilder::new(self)
     }
 
-    pub fn builder(&self) -> RenderletBuilder<'_, ()> {
-        RenderletBuilder::new(self)
+    pub fn hdr_texture(&self) -> impl Deref<Target = crate::texture::Texture> + '_ {
+        self.hdr_texture.read().unwrap()
     }
 
     /// Run all upkeep and commit all staged changes to the GPU.
@@ -1414,7 +1260,7 @@ impl Stage {
     /// If you drop the renderlet and no other references are kept, it will be
     /// removed automatically from the internal list and will cease to be
     /// drawn each frame.
-    pub fn add_renderlet(&self, renderlet: &Hybrid<RenderletDescriptor>) {
+    pub fn add_renderlet(&self, renderlet: &Renderlet) {
         // UNWRAP: if we can't acquire the lock we want to panic.
         let mut draws = self.draw_calls.write().unwrap();
         draws.add_renderlet(renderlet);
@@ -1422,36 +1268,27 @@ impl Stage {
 
     /// Erase the given renderlet from the internal list of renderlets to be
     /// drawn each frame.
-    pub fn remove_renderlet(&self, renderlet: &Hybrid<RenderletDescriptor>) {
+    pub fn remove_renderlet(&self, renderlet: &Renderlet) {
         let mut draws = self.draw_calls.write().unwrap();
         draws.remove_renderlet(renderlet);
     }
 
-    /// Re-order the renderlets.
+    /// Sort the drawing order of renderlets.
     ///
-    /// This determines the order in which they are drawn each frame.
-    ///
-    /// If the `order` iterator is missing any renderlet ids, those missing
-    /// renderlets will be drawn _before_ the ordered ones, in no particular
-    /// order.
-    pub fn reorder_renderlets(&self, order: impl IntoIterator<Item = Id<RenderletDescriptor>>) {
-        log::trace!("reordering renderlets");
+    /// This determines the order in which [`Renderlet`]s are drawn each frame.
+    pub fn sort_renderlets(
+        &self,
+        f: impl Fn(&RenderletSortItem, &RenderletSortItem) -> std::cmp::Ordering,
+    ) {
         // UNWRAP: panic on purpose
         let mut guard = self.draw_calls.write().unwrap();
-        guard.reorder_renderlets(order);
+        guard.sort_renderlets(f);
     }
 
-    /// Iterator over all staged [`Renderlet`]s.
-    ///
-    /// This iterator returns `Renderlets` wrapped in `WeakHybrid`, because they
-    /// are stored by weak references internally.
-    ///
-    /// You should have references of your own, but this is here as a convenience
-    /// method, and is used internally.
-    pub fn renderlets_iter(&self) -> impl Iterator<Item = WeakHybrid<RenderletDescriptor>> {
+    /// Returns the sort items of all staged [`Renderlet`]s.
+    pub fn renderlet_sort_items(&self) -> Vec<RenderletSortItem> {
         // UNWRAP: panic on purpose
-        let guard = self.draw_calls.read().unwrap();
-        guard.renderlets_iter().collect::<Vec<_>>().into_iter()
+        self.draw_calls.read().unwrap().sort_items().collect()
     }
 
     /// Returns a clone of the current depth texture.
@@ -1587,156 +1424,114 @@ impl Stage {
     }
 }
 
-/// Manages scene heirarchy on the [`Stage`].
+/// A wrapper around [`Stage`] that builds up tuples of staged resources.
 ///
-/// Clones all reference the same nested transform.
-///
-/// Only available on CPU.
-#[derive(Clone)]
-pub struct NestedTransform<Ct: IsContainer = HybridContainer> {
-    pub(crate) global_transform: Ct::Container<TransformDescriptor>,
-    local_transform: Arc<RwLock<TransformDescriptor>>,
-    children: Arc<RwLock<Vec<NestedTransform>>>,
-    parent: Arc<RwLock<Option<NestedTransform>>>,
+/// [`SceneBuilder`] implements a builder pattern that allows you to
+/// build up tuples of resources like [`Vertices`], [`Indices`],
+/// [`MorphTargets`] and [`MorphTargetWeights`].
+// TODO: documentation example
+pub struct SceneBuilder<'a, T> {
+    stage: &'a Stage,
+    resources: T,
 }
 
-impl core::fmt::Debug for NestedTransform {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        let children = self
-            .children
-            .read()
-            .unwrap()
-            .iter()
-            .map(|nt| nt.global_transform.id())
-            .collect::<Vec<_>>();
-        let parent = self
-            .parent
-            .read()
-            .unwrap()
-            .as_ref()
-            .map(|nt| nt.global_transform.id());
-        f.debug_struct("NestedTransform")
-            .field("local_transform", &self.local_transform)
-            .field("children", &children)
-            .field("parent", &parent)
-            .finish()
+impl<'a> SceneBuilder<'a, ()> {
+    pub fn new(stage: &'a Stage) -> Self {
+        SceneBuilder {
+            resources: (),
+            stage,
+        }
     }
 }
 
-impl NestedTransform<WeakContainer> {
-    pub fn from_hybrid(hybrid: &NestedTransform) -> Self {
-        Self {
-            global_transform: WeakHybrid::from_hybrid(&hybrid.global_transform),
-            local_transform: hybrid.local_transform.clone(),
-            children: hybrid.children.clone(),
-            parent: hybrid.parent.clone(),
+impl<'a, T: crate::types::tuple::Bundle> SceneBuilder<'a, T> {
+    pub fn suffix<S>(self, element: S) -> SceneBuilder<'a, T::Suffixed<S>> {
+        SceneBuilder {
+            resources: self.resources.suffix(element),
+            stage: self.stage,
         }
     }
 
-    pub(crate) fn upgrade(&self) -> Option<NestedTransform> {
-        Some(NestedTransform {
-            global_transform: self.global_transform.upgrade()?,
-            local_transform: self.local_transform.clone(),
-            children: self.children.clone(),
-            parent: self.parent.clone(),
-        })
-    }
-}
-
-impl NestedTransform {
-    pub fn new(slab: &SlabAllocator<impl IsRuntime>) -> Self {
-        let nested = NestedTransform {
-            local_transform: Arc::new(RwLock::new(TransformDescriptor::default())),
-            global_transform: slab.new_value(TransformDescriptor::default()),
-            children: Default::default(),
-            parent: Default::default(),
-        };
-        nested.mark_dirty();
-        nested
+    /// Stage vertex data and add it to the resource bundle.
+    pub fn with_vertices(
+        self,
+        vertices: impl IntoIterator<Item = Vertex>,
+    ) -> SceneBuilder<'a, T::Suffixed<Vertices>> {
+        let vertices = self.stage.geometry.new_vertices(vertices);
+        self.suffix(vertices)
     }
 
-    pub fn get_notifier_index(&self) -> SourceId {
-        self.global_transform.notifier_index()
+    /// Stage vertex index data and add it to the resource bundle.
+    pub fn with_indices(
+        self,
+        indices: impl IntoIterator<Item = u32>,
+    ) -> SceneBuilder<'a, T::Suffixed<Indices>> {
+        let indices = self.stage.geometry.new_indices(indices);
+        self.suffix(indices)
     }
 
-    fn mark_dirty(&self) {
-        self.global_transform.set(self.get_global_transform());
-        for child in self.children.read().unwrap().iter() {
-            child.mark_dirty();
-        }
+    /// Stage morph target weights and add them to the resource bundle.
+    pub fn with_morph_targets(
+        self,
+        morph_targets: impl IntoIterator<Item = impl IntoIterator<Item = MorphTarget>>,
+    ) -> SceneBuilder<'a, T::Suffixed<MorphTargets>> {
+        let ts = self.stage.geometry.new_morph_targets(morph_targets);
+        self.suffix(ts)
     }
 
-    /// Modify the local transform.
+    /// Stage morph target weights and add them to the resource bundle.
+    pub fn with_morph_target_weights(
+        self,
+        morph_weights: impl IntoIterator<Item = f32>,
+    ) -> SceneBuilder<'a, T::Suffixed<MorphTargetWeights>> {
+        let ws = self.stage.new_morph_target_weights(morph_weights);
+        self.suffix(ws)
+    }
+
+    /// Stage morph target weights and add them to the resource bundle.
+    pub fn with_skin(
+        self,
+        joints: impl IntoIterator<Item = impl Into<SkinJoint>>,
+        inverse_bind_matrices: impl IntoIterator<Item = impl Into<Mat4>>,
+    ) -> SceneBuilder<'a, T::Suffixed<Skin>> {
+        let s = self.stage.new_skin(joints, inverse_bind_matrices);
+        self.suffix(s)
+    }
+
+    /// Stage images and add them to the resource bundle, if possible.
     ///
-    /// This automatically applies the local transform to the global transform.
-    pub fn modify(&self, f: impl Fn(&mut TransformDescriptor)) {
-        {
-            // UNWRAP: panic on purpose
-            let mut local_guard = self.local_transform.write().unwrap();
-            f(&mut local_guard);
-        }
-        self.mark_dirty()
+    /// # Errors
+    /// Returns an error if the images could not be packed into the [`Atlas`].
+    pub fn with_images(
+        self,
+        images: impl IntoIterator<Item = impl Into<AtlasImage>>,
+    ) -> Result<SceneBuilder<'a, T::Suffixed<Vec<AtlasTexture>>>, StageError> {
+        let i = self.stage.add_images(images)?;
+        Ok(self.suffix(i))
     }
 
-    /// Set the local transform.
+    /// Stage one image and add it to the resource bundle, if possible.
     ///
-    /// This automatically applies the local transform to the global transform.
-    pub fn set(&self, transform: TransformDescriptor) {
-        self.modify(move |t| {
-            *t = transform;
-        });
+    /// # Note
+    /// Each time the set of staged images changes, the [`Atlas`] must be repacked.
+    /// For this reason it is runtime-quicker to batch add as many images at once
+    /// as is possible. Consider using [`SceneBuilder::with_images`] instead.
+    ///
+    /// # Errors
+    /// Returns an error if the images could not be packed into the [`Atlas`].
+    pub fn with_image(
+        self,
+        image: impl Into<AtlasImage>,
+    ) -> Result<SceneBuilder<'a, T::Suffixed<AtlasTexture>>, StageError> {
+        let mut i = self.stage.add_images(Some(image))?;
+        // UNWRAP: safe because we know there is _exactly_ one in there
+        Ok(self.suffix(i.pop().unwrap()))
     }
 
-    /// Returns the local transform.
-    pub fn get(&self) -> TransformDescriptor {
-        *self.local_transform.read().unwrap()
-    }
-
-    /// Returns the global transform.
-    pub fn get_global_transform(&self) -> TransformDescriptor {
-        let maybe_parent_guard = self.parent.read().unwrap();
-        let transform = self.get();
-        let parent_transform = maybe_parent_guard
-            .as_ref()
-            .map(|parent| parent.get_global_transform())
-            .unwrap_or_default();
-        TransformDescriptor::from(Mat4::from(parent_transform) * Mat4::from(transform))
-    }
-
-    /// Get a vector containing all the transforms up to the root.
-    pub fn get_all_transforms(&self) -> Vec<TransformDescriptor> {
-        let mut transforms = vec![];
-        if let Some(parent) = self.parent() {
-            transforms.extend(parent.get_all_transforms());
-        }
-        transforms.push(self.get());
-        transforms
-    }
-
-    pub fn global_transform_id(&self) -> Id<TransformDescriptor> {
-        self.global_transform.id()
-    }
-
-    pub fn add_child(&self, node: &NestedTransform) {
-        *node.parent.write().unwrap() = Some(self.clone());
-        node.mark_dirty();
-        self.children.write().unwrap().push(node.clone());
-    }
-
-    pub fn remove_child(&self, node: &NestedTransform) {
-        self.children.write().unwrap().retain_mut(|child| {
-            if child.global_transform.id() == node.global_transform.id() {
-                node.mark_dirty();
-                let _ = node.parent.write().unwrap().take();
-                false
-            } else {
-                true
-            }
-        });
-    }
-
-    pub fn parent(&self) -> Option<NestedTransform> {
-        self.parent.read().unwrap().clone()
+    /// Consume the [`SceneBuilder`] and return the bundled resources as a tuple,
+    /// in the order they were accumulated.
+    pub fn build(self) -> T::Reduced {
+        self.resources.reduce()
     }
 }
 
@@ -1747,11 +1542,10 @@ mod test {
     use glam::{Mat4, Vec2, Vec3, Vec4};
 
     use crate::{
-        camera::Camera,
         geometry::{Geometry, GeometryDescriptor},
-        stage::{cpu::SlabAllocator, NestedTransform, RenderletDescriptor, Vertex},
+        stage::{cpu::SlabAllocator, Vertex},
         test::BlockOnFuture,
-        transform::TransformDescriptor,
+        transform::NestedTransform,
         Context,
     };
 
@@ -1792,21 +1586,9 @@ mod test {
         )]
         let slab = SlabAllocator::<CpuRuntime>::new(&CpuRuntime, "transform", ());
         // Setup a hierarchy of transforms
-        log::info!("new");
         let root = NestedTransform::new(&slab);
-        let child = NestedTransform::new(&slab);
-        log::info!("set");
-        child.set(TransformDescriptor {
-            translation: Vec3::new(1.0, 0.0, 0.0),
-            ..Default::default()
-        });
-        log::info!("grandchild");
-        let grandchild = NestedTransform::new(&slab);
-        grandchild.set(TransformDescriptor {
-            translation: Vec3::new(1.0, 0.0, 0.0),
-            ..Default::default()
-        });
-
+        let child = NestedTransform::new(&slab).with_translation(Vec3::new(1.0, 0.0, 0.0));
+        let grandchild = NestedTransform::new(&slab).with_translation(Vec3::new(1.0, 0.0, 0.0));
         log::info!("hierarchy");
         // Build the hierarchy
         root.add_child(&child);
@@ -1814,7 +1596,7 @@ mod test {
 
         log::info!("get_global_transform");
         // Calculate global transforms
-        let grandchild_global_transform = grandchild.get_global_transform();
+        let grandchild_global_transform = grandchild.global_descriptor();
 
         // Assert that the global transform is as expected
         assert_eq!(
@@ -1830,7 +1612,10 @@ mod test {
             .new_stage()
             .with_background_color([1.0, 1.0, 1.0, 1.0])
             .with_lighting(false);
-        let _camera = stage.new_camera(Camera::default_ortho2d(100.0, 100.0));
+        let (projection, view) = crate::camera::default_ortho2d(100.0, 100.0);
+        let _camera = stage
+            .new_camera()
+            .with_projection_and_view(projection, view);
         let _triangle_rez = stage
             .builder()
             .with_vertices([
@@ -1875,17 +1660,6 @@ mod test {
             },
         );
         frame.present();
-    }
-
-    #[test]
-    fn has_consistent_stage_renderlet_strong_count() {
-        let ctx = Context::headless(100, 100).block();
-        let stage = ctx.new_stage();
-        let r = stage.new_renderlet(RenderletDescriptor::default());
-        assert_eq!(1, r.ref_count());
-
-        stage.add_renderlet(&r);
-        assert_eq!(1, r.ref_count());
     }
 
     #[test]

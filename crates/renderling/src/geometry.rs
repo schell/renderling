@@ -7,33 +7,33 @@ mod cpu;
 pub use cpu::*;
 use glam::{Mat4, Vec2, Vec3, Vec4};
 
-use crate::{camera::Camera, math::IsVector, transform::TransformDescriptor};
+use crate::{camera::CameraDescriptor, math::IsVector, transform::TransformDescriptor};
 
-/// A vertex skin.
+/// A vertex skin descriptor.
 ///
 /// For more info on vertex skinning, see
 /// <https://github.khronos.org/glTF-Tutorials/gltfTutorial/gltfTutorial_019_SimpleSkin.html>
 #[derive(Clone, Copy, Default, SlabItem)]
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
-pub struct Skin {
+pub struct SkinDescriptor {
     // Ids of the skeleton nodes' global transforms used as joints in this skin.
-    pub joints: Array<Id<TransformDescriptor>>,
+    pub joints_array: Array<Id<TransformDescriptor>>,
     // Contains the 4x4 inverse-bind matrices.
     //
     // When is none, each matrix is assumed to be the 4x4 identity matrix
     // which implies that the inverse-bind matrices were pre-applied.
-    pub inverse_bind_matrices: Array<Mat4>,
+    pub inverse_bind_matrices_array: Array<Mat4>,
 }
 
-impl Skin {
+impl SkinDescriptor {
     pub fn get_joint_matrix(&self, i: usize, vertex: Vertex, slab: &[u32]) -> Mat4 {
         let joint_index = vertex.joints[i] as usize;
-        let joint_id = slab.read(self.joints.at(joint_index));
+        let joint_id = slab.read(self.joints_array.at(joint_index));
         let joint_transform = slab.read(joint_id);
         // First apply the inverse bind matrix to bring the vertex into the joint's
         // local space, then apply the joint's current transformation to move it
         // into world space.
-        let inverse_bind_matrix = slab.read(self.inverse_bind_matrices.at(joint_index));
+        let inverse_bind_matrix = slab.read(self.inverse_bind_matrices_array.at(joint_index));
         Mat4::from(joint_transform) * inverse_bind_matrix
     }
 
@@ -185,7 +185,7 @@ impl Vertex {
 #[derive(Clone, Copy, PartialEq, SlabItem)]
 #[offsets]
 pub struct GeometryDescriptor {
-    pub camera_id: Id<Camera>,
+    pub camera_id: Id<CameraDescriptor>,
     pub atlas_size: glam::UVec2,
     pub resolution: glam::UVec2,
     pub debug_channel: crate::pbr::debug::DebugChannel,

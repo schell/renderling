@@ -13,7 +13,7 @@ use spirv_std::{
 
 use crate::{
     bvol::BoundingSphere,
-    geometry::{GeometryDescriptor, MorphTarget, Skin, Vertex},
+    geometry::{GeometryDescriptor, MorphTarget, SkinDescriptor, Vertex},
     material::MaterialDescriptor,
     math::IsVector,
     transform::TransformDescriptor,
@@ -57,7 +57,7 @@ pub struct RenderletDescriptor {
     pub indices_array: Array<u32>,
     pub transform_id: Id<TransformDescriptor>,
     pub material_id: Id<MaterialDescriptor>,
-    pub skin_id: Id<Skin>,
+    pub skin_id: Id<SkinDescriptor>,
     pub morph_targets: Array<Array<MorphTarget>>,
     pub morph_weights: Array<f32>,
     pub geometry_descriptor_id: Id<GeometryDescriptor>,
@@ -332,7 +332,10 @@ mod test {
     use craballoc::{prelude::SlabAllocator, runtime::CpuRuntime};
     use glam::{Mat4, Quat, Vec3};
 
-    use crate::{math::IsMatrix, stage::NestedTransform, transform::TransformDescriptor};
+    use crate::{
+        math::IsMatrix,
+        transform::{NestedTransform, TransformDescriptor},
+    };
 
     #[test]
     fn matrix_hierarchy_sanity() {
@@ -357,7 +360,7 @@ mod test {
             let mut mat = Mat4::IDENTITY;
             let mut local = Some(tfrm.clone());
             while let Some(t) = local.take() {
-                let transform = t.get();
+                let transform = t.local_descriptor();
                 mat = Mat4::from_scale_rotation_translation(
                     transform.scale,
                     transform.rotation,
@@ -369,23 +372,13 @@ mod test {
             (t, r, s)
         }
 
-        #[expect(clippy::needless_borrows_for_generic_args, reason = "riffraff")]
-        let slab = SlabAllocator::<CpuRuntime>::new(&CpuRuntime, "transform", ());
+        let slab = SlabAllocator::new(CpuRuntime, "transform", ());
         let a = NestedTransform::new(&slab);
-        a.set(TransformDescriptor {
-            translation: Vec3::splat(100.0),
-            ..Default::default()
-        });
+        a.set_translation(Vec3::splat(100.0));
         let b = NestedTransform::new(&slab);
-        b.set(TransformDescriptor {
-            rotation: Quat::from_scaled_axis(Vec3::Z),
-            ..Default::default()
-        });
+        b.set_rotation(Quat::from_scaled_axis(Vec3::Z));
         let c = NestedTransform::new(&slab);
-        c.set(TransformDescriptor {
-            scale: Vec3::splat(2.0),
-            ..Default::default()
-        });
+        c.set_scale(Vec3::splat(2.0));
 
         a.add_child(&b);
         b.add_child(&c);
@@ -394,12 +387,12 @@ mod test {
             translation,
             rotation,
             scale,
-        } = c.get_global_transform();
+        } = c.global_descriptor();
         let global_transform = (translation, rotation, scale);
         let legacy_transform = legacy_get_world_transform(&c);
         assert_eq!(legacy_transform, global_transform);
 
-        c.modify(|t| t.translation = Vec3::ONE);
+        c.set_translation(Vec3::ONE);
 
         let all_updates = slab.get_updated_source_ids();
         assert_eq!(
@@ -415,7 +408,7 @@ mod test {
             translation,
             rotation,
             scale,
-        } = c.get_global_transform();
+        } = c.global_descriptor();
         let global_transform = (translation, rotation, scale);
         let legacy_transform = legacy_get_world_transform(&c);
         assert_eq!(legacy_transform, global_transform);

@@ -1008,7 +1008,10 @@ async fn can_render_hello_triangle() {
     // This is a wasm version of cmy_triangle_sanity
     let ctx = Context::try_new_headless(100, 100, None).await.unwrap();
     let stage = ctx.new_stage().with_background_color(Vec4::splat(1.0));
-    let _camera = stage.new_camera(Camera::default_ortho2d(100.0, 100.0));
+    let (projection, view) = renderling::camera::default_ortho2d(100.0, 100.0);
+    let _camera = stage
+        .new_camera()
+        .with_projection_and_view(projection, view);
     let _rez = stage.builder().with_vertices(right_tri_vertices()).build();
 
     let frame = ctx.get_next_frame().unwrap();

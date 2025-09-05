@@ -1,9 +1,7 @@
 //! Path and builder.
 //!
 //! Path colors are sRGB.
-use crate::{geometry::Vertex, material::MaterialDescriptor, stage::RenderletDescriptor};
-use craballoc::prelude::{GpuArray, Hybrid};
-use crabslab::Id;
+use crate::{geometry::Vertex, material::Material, stage::Renderlet};
 use glam::{Vec2, Vec3, Vec3Swizzles, Vec4};
 use lyon::{
     path::traits::PathBuilder,
@@ -16,11 +14,9 @@ use super::{ImageId, Ui, UiTransform};
 pub use lyon::tessellation::{LineCap, LineJoin};
 
 pub struct UiPath {
-    pub vertices: GpuArray<Vertex>,
-    pub indices: GpuArray<u32>,
     pub transform: UiTransform,
-    pub material: Hybrid<MaterialDescriptor>,
-    pub renderlet: Hybrid<RenderletDescriptor>,
+    pub material: Material,
+    pub renderlet: Renderlet,
 }
 
 #[derive(Clone, Copy)]
@@ -346,23 +342,18 @@ impl UiPathBuilder {
         let l_path = self.inner.build();
         let mut geometry = VertexBuffers::<Vertex, u16>::new();
         let mut tesselator = FillTessellator::new();
-
+        let material = self.ui.stage.new_material();
         let mut size = Vec2::ONE;
-        let albedo_texture_id = if let Some(ImageId(index)) = options.image_id {
+        // If we have an image use it in the material
+        if let Some(ImageId(index)) = options.image_id {
             if let Some(image) = self.ui.get_image(index) {
-                let tex = image.0.get();
-                log::debug!("size: {}", tex.size_px);
-                size.x = tex.size_px.x as f32;
-                size.y = tex.size_px.y as f32;
-                image.0.id()
-            } else {
-                Id::NONE
+                let size_px = image.0.descriptor().size_px;
+                log::debug!("size: {}", size_px);
+                size.x = size_px.x as f32;
+                size.y = size_px.y as f32;
+                material.set_albedo_texture(&image.0);
             }
-        } else {
-            log::debug!("no image");
-            Id::NONE
-        };
-
+        }
         tesselator
             .tessellate_path(
                 l_path.as_slice(),
@@ -383,28 +374,27 @@ impl UiPathBuilder {
                 }),
             )
             .unwrap();
-        let (vertices, indices, material, renderlet) = self
+        let vertices = self
             .ui
             .stage
-            .builder()
-            .with_vertices(std::mem::take(&mut geometry.vertices))
-            .with_indices(
-                std::mem::take(&mut geometry.indices)
-                    .into_iter()
-                    .map(|u| u as u32),
-            )
-            .with_material(MaterialDescriptor {
-                albedo_texture_id,
-                ..Default::default()
-            })
-            .build();
+            .new_vertices(std::mem::take(&mut geometry.vertices));
+        let indices = self.ui.stage.new_indices(
+            std::mem::take(&mut geometry.indices)
+                .into_iter()
+                .map(|u| u as u32),
+        );
 
-        let transform = self.ui.new_transform(vec![renderlet.id()]);
-        renderlet.modify(|r| r.transform_id = transform.id());
+        let transform = self.ui.new_transform();
+        let renderlet = self
+            .ui
+            .stage
+            .new_renderlet()
+            .with_vertices(&vertices)
+            .with_indices(&indices)
+            .with_material(&material)
+            .with_transform(&transform.transform);
 
         UiPath {
-            vertices: vertices.into_gpu_only(),
-            indices: indices.into_gpu_only(),
             transform,
             material,
             renderlet,
@@ -430,23 +420,18 @@ impl UiPathBuilder {
             .with_line_cap(line_cap)
             .with_line_join(line_join)
             .with_line_width(line_width);
-
+        let material = self.ui.stage.new_material();
         let mut size = Vec2::ONE;
-        let albedo_texture_id = if let Some(ImageId(index)) = image_id {
+        // If we have an image, use it in the material
+        if let Some(ImageId(index)) = image_id {
             if let Some(image) = self.ui.get_image(index) {
-                let tex = image.0.get();
-                log::debug!("size: {}", tex.size_px);
-                size.x = tex.size_px.x as f32;
-                size.y = tex.size_px.y as f32;
-                image.0.id()
-            } else {
-                Id::NONE
+                let size_px = image.0.descriptor.get().size_px;
+                log::debug!("size: {}", size_px);
+                size.x = size_px.x as f32;
+                size.y = size_px.y as f32;
+                material.set_albedo_texture(&image.0);
             }
-        } else {
-            log::debug!("no image");
-            Id::NONE
-        };
-
+        }
         tesselator
             .tessellate_path(
                 l_path.as_slice(),
@@ -467,28 +452,25 @@ impl UiPathBuilder {
                 }),
             )
             .unwrap();
-        let (vertices, indices, material, renderlet) = self
+        let vertices = self
             .ui
             .stage
-            .builder()
-            .with_vertices(std::mem::take(&mut geometry.vertices))
-            .with_indices(
-                std::mem::take(&mut geometry.indices)
-                    .into_iter()
-                    .map(|u| u as u32),
-            )
-            .with_material(MaterialDescriptor {
-                albedo_texture_id,
-                ..Default::default()
-            })
-            .build();
-
-        let transform = self.ui.new_transform(vec![renderlet.id()]);
-        renderlet.modify(|r| r.transform_id = transform.id());
-
+            .new_vertices(std::mem::take(&mut geometry.vertices));
+        let indices = self.ui.stage.new_indices(
+            std::mem::take(&mut geometry.indices)
+                .into_iter()
+                .map(|u| u as u32),
+        );
+        let transform = self.ui.new_transform();
+        let renderlet = self
+            .ui
+            .stage
+            .new_renderlet()
+            .with_vertices(vertices)
+            .with_indices(indices)
+            .with_transform(&transform.transform)
+            .with_material(&material);
         UiPath {
-            vertices: vertices.into_gpu_only(),
-            indices: indices.into_gpu_only(),
             transform,
             material,
             renderlet,

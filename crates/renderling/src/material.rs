@@ -1,13 +1,13 @@
 //! Atlas images, used for materials. CPU and GPU.
+use crabslab::{Id, SlabItem};
+use glam::{Vec3, Vec4};
+
+use crate::atlas::AtlasTextureDescriptor;
 
 #[cfg(cpu)]
 mod cpu;
 #[cfg(cpu)]
 pub use cpu::*;
-use crabslab::{Id, SlabItem};
-use glam::{Vec3, Vec4};
-
-use crate::atlas::AtlasTexture;
 
 /// Represents a material on the GPU.
 #[repr(C)]
@@ -19,11 +19,11 @@ pub struct MaterialDescriptor {
     pub metallic_factor: f32,
     pub roughness_factor: f32,
 
-    pub albedo_texture_id: Id<AtlasTexture>,
-    pub metallic_roughness_texture_id: Id<AtlasTexture>,
-    pub normal_texture_id: Id<AtlasTexture>,
-    pub ao_texture_id: Id<AtlasTexture>,
-    pub emissive_texture_id: Id<AtlasTexture>,
+    pub albedo_texture_id: Id<AtlasTextureDescriptor>,
+    pub metallic_roughness_texture_id: Id<AtlasTextureDescriptor>,
+    pub normal_texture_id: Id<AtlasTextureDescriptor>,
+    pub ao_texture_id: Id<AtlasTextureDescriptor>,
+    pub emissive_texture_id: Id<AtlasTextureDescriptor>,
 
     pub albedo_tex_coord: u32,
     pub metallic_roughness_tex_coord: u32,

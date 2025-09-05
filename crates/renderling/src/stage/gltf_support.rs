@@ -2,22 +2,26 @@
 use std::{collections::HashMap, sync::Arc};
 
 use craballoc::prelude::*;
-use crabslab::{Array, Id};
+use crabslab::Id;
 use glam::{Mat4, Quat, Vec2, Vec3, Vec4};
 use rustc_hash::{FxHashMap, FxHashSet};
 use snafu::{OptionExt, ResultExt, Snafu};
 
 use crate::{
-    atlas::{AtlasError, AtlasImage, AtlasTexture, TextureAddressMode, TextureModes},
+    atlas::{
+        AtlasError, AtlasImage, AtlasTexture, AtlasTextureDescriptor, TextureAddressMode,
+        TextureModes,
+    },
     bvol::Aabb,
-    camera::Camera,
+    camera::{Camera, CameraDescriptor},
+    geometry::{Indices, MorphTargetWeights, MorphTargets, Skin, Vertices},
     light::{
         AnalyticalLight, DirectionalLightDescriptor, LightStyle, PointLightDescriptor,
         SpotLightDescriptor,
     },
-    material::MaterialDescriptor,
-    stage::{MorphTarget, NestedTransform, RenderletDescriptor, Skin, Stage, Vertex},
-    transform::TransformDescriptor,
+    material::Material,
+    stage::{MorphTarget, Renderlet, Stage, Vertex},
+    transform::{NestedTransform, TransformDescriptor},
 };
 
 mod anime;
@@ -43,7 +47,7 @@ pub enum StageGltfError {
     #[snafu(display("Missing texture at gltf index {index} slab index {tex_id:?}"))]
     MissingTexture {
         index: usize,
-        tex_id: Id<AtlasTexture>,
+        tex_id: Id<AtlasTextureDescriptor>,
     },
 
     #[snafu(display("Missing material with index {index}"))]
@@ -150,7 +154,7 @@ pub fn get_vertex_count(primitive: &gltf::Primitive<'_>) -> u32 {
     }
 }
 
-impl MaterialDescriptor {
+impl Material {
     pub fn preprocess_images(
         material: gltf::Material,
         images: &mut [AtlasImage],
@@ -198,120 +202,87 @@ impl MaterialDescriptor {
     }
 
     pub fn from_gltf(
+        stage: &Stage,
         material: gltf::Material,
-        entries: &[Hybrid<AtlasTexture>],
-    ) -> Result<MaterialDescriptor, StageGltfError> {
+        entries: &[AtlasTexture],
+    ) -> Result<Material, StageGltfError> {
         let name = material.name().map(String::from);
         log::trace!("loading material {:?} {name:?}", material.index());
         let pbr = material.pbr_metallic_roughness();
-        let material = if material.unlit() {
+        let builder = stage.new_material();
+        if material.unlit() {
             log::trace!("  is unlit");
-            let (albedo_texture, albedo_tex_coord) = if let Some(info) = pbr.base_color_texture() {
+            if let Some(info) = pbr.base_color_texture() {
                 let texture = info.texture();
                 let index = texture.index();
-                let tex_id = entries.get(index).map(|e| e.id()).unwrap_or_default();
-                (tex_id, info.tex_coord())
-            } else {
-                (Id::NONE, 0)
-            };
-
-            MaterialDescriptor {
-                albedo_texture_id: albedo_texture,
-                albedo_tex_coord,
-                albedo_factor: pbr.base_color_factor().into(),
-                ..Default::default()
+                if let Some(tex) = entries.get(index) {
+                    builder.set_albedo_texture(tex);
+                    builder.set_albedo_tex_coord(info.tex_coord());
+                }
             }
+            builder.set_albedo_factor(pbr.base_color_factor().into());
         } else {
             log::trace!("  is pbr");
-            let albedo_factor: Vec4 = pbr.base_color_factor().into();
-            let (albedo_texture, albedo_tex_coord) = if let Some(info) = pbr.base_color_texture() {
+
+            builder.set_albedo_factor(pbr.base_color_factor().into());
+            if let Some(info) = pbr.base_color_texture() {
                 let texture = info.texture();
                 let index = texture.index();
-                let tex_id = entries.get(index).map(|e| e.id()).unwrap_or_default();
-                (tex_id, info.tex_coord())
-            } else {
-                (Id::NONE, 0)
-            };
-
-            let (
-                metallic_factor,
-                roughness_factor,
-                metallic_roughness_texture,
-                metallic_roughness_tex_coord,
-            ) = if let Some(info) = pbr.metallic_roughness_texture() {
-                let index = info.texture().index();
-                let tex_id = entries.get(index).map(|e| e.id()).unwrap_or_default();
-                (1.0, 1.0, tex_id, info.tex_coord())
-            } else {
-                (pbr.metallic_factor(), pbr.roughness_factor(), Id::NONE, 0)
-            };
-
-            let (normal_texture, normal_tex_coord) =
-                if let Some(norm_tex) = material.normal_texture() {
-                    let tex_id = entries
-                        .get(norm_tex.texture().index())
-                        .map(|e| e.id())
-                        .unwrap_or_default();
-                    (tex_id, norm_tex.tex_coord())
-                } else {
-                    (Id::NONE, 0)
-                };
-
-            let (ao_strength, ao_texture, ao_tex_coord) =
-                if let Some(occlusion_tex) = material.occlusion_texture() {
-                    let tex_id = entries
-                        .get(occlusion_tex.texture().index())
-                        .map(|e| e.id())
-                        .unwrap_or_default();
-                    (occlusion_tex.strength(), tex_id, occlusion_tex.tex_coord())
-                } else {
-                    (0.0, Id::NONE, 0)
-                };
-
-            let (emissive_texture, emissive_tex_coord) =
-                if let Some(emissive_tex) = material.emissive_texture() {
-                    let texture = emissive_tex.texture();
-                    let index = texture.index();
-                    let tex_id = entries.get(index).map(|e| e.id()).unwrap_or_default();
-                    (tex_id, emissive_tex.tex_coord())
-                } else {
-                    (Id::NONE, 0)
-                };
-            let emissive_factor = Vec3::from(material.emissive_factor());
-            let emissive_strength_multiplier = material.emissive_strength().unwrap_or(1.0);
-
-            MaterialDescriptor {
-                albedo_factor,
-                metallic_factor,
-                roughness_factor,
-                albedo_texture_id: albedo_texture,
-                metallic_roughness_texture_id: metallic_roughness_texture,
-                normal_texture_id: normal_texture,
-                ao_texture_id: ao_texture,
-                albedo_tex_coord,
-                metallic_roughness_tex_coord,
-                normal_tex_coord,
-                ao_tex_coord,
-                ao_strength,
-                emissive_factor,
-                emissive_strength_multiplier,
-                emissive_texture_id: emissive_texture,
-                emissive_tex_coord,
-                has_lighting: true,
+                if let Some(tex) = entries.get(index) {
+                    builder.set_albedo_texture(tex);
+                    builder.set_albedo_tex_coord(info.tex_coord());
+                }
             }
+
+            if let Some(info) = pbr.metallic_roughness_texture() {
+                let index = info.texture().index();
+                if let Some(tex) = entries.get(index) {
+                    builder.set_metallic_roughness_texture(tex);
+                    builder.set_metallic_roughness_tex_coord(info.tex_coord());
+                }
+            } else {
+                builder.set_metallic_factor(pbr.metallic_factor());
+                builder.set_roughness_factor(pbr.roughness_factor());
+            }
+
+            if let Some(norm_tex) = material.normal_texture() {
+                if let Some(tex) = entries.get(norm_tex.texture().index()) {
+                    builder.set_normal_texture(tex);
+                    builder.set_normal_tex_coord(norm_tex.tex_coord());
+                }
+            }
+
+            if let Some(occlusion_tex) = material.occlusion_texture() {
+                if let Some(tex) = entries.get(occlusion_tex.texture().index()) {
+                    builder.set_ambient_occlusion_texture(tex);
+                    builder.set_ambient_occlusion_tex_coord(occlusion_tex.tex_coord());
+                    builder.set_ambient_occlusion_strength(occlusion_tex.strength());
+                }
+            }
+
+            if let Some(emissive_tex) = material.emissive_texture() {
+                let texture = emissive_tex.texture();
+                let index = texture.index();
+                if let Some(tex) = entries.get(index) {
+                    builder.set_emissive_texture(tex);
+                    builder.set_emissive_tex_coord(emissive_tex.tex_coord());
+                }
+            }
+
+            builder.set_emissive_factor(Vec3::from(material.emissive_factor()));
+            builder.set_emissive_strength_multiplier(material.emissive_strength().unwrap_or(1.0));
         };
-        Ok(material)
+        Ok(builder)
     }
 }
 
 #[derive(Debug)]
 pub struct GltfPrimitive {
-    pub indices: HybridArray<u32>,
-    pub vertices: HybridArray<Vertex>,
+    pub indices: Indices,
+    pub vertices: Vertices,
     pub bounding_box: (Vec3, Vec3),
-    pub material: Id<MaterialDescriptor>,
-    pub morph_targets: Vec<HybridArray<MorphTarget>>,
-    pub morph_targets_array: HybridArray<Array<MorphTarget>>,
+    pub material_index: Option<usize>,
+    pub morph_targets: MorphTargets,
 }
 
 impl GltfPrimitive {
@@ -319,13 +290,8 @@ impl GltfPrimitive {
         stage: &Stage,
         primitive: gltf::Primitive,
         buffer_data: &[gltf::buffer::Data],
-        materials: &HybridArray<MaterialDescriptor>,
     ) -> Self {
-        let material = primitive
-            .material()
-            .index()
-            .map(|index| materials.array().at(index))
-            .unwrap_or_default();
+        let material_index = primitive.material().index();
 
         let reader = primitive.reader(|buffer| {
             let data = buffer_data.get(buffer.index())?;
@@ -508,13 +474,7 @@ impl GltfPrimitive {
             morph_targets.len(),
             morph_targets.iter().map(|mt| mt.len()).collect::<Vec<_>>()
         );
-        let morph_targets = morph_targets
-            .into_iter()
-            .map(|verts| stage.new_morph_targets(verts))
-            .collect::<Vec<_>>();
-        let morph_targets_array =
-            stage.new_morph_targets_array(morph_targets.iter().map(HybridArray::array));
-
+        let morph_targets = stage.new_morph_targets(morph_targets);
         let vs = joints.into_iter().zip(weights);
         let vs = colors.zip(vs);
         let vs = tangents.into_iter().zip(vs);
@@ -544,9 +504,13 @@ impl GltfPrimitive {
             )
             .collect::<Vec<_>>();
         let vertices = stage.new_vertices(vertices);
-        log::debug!("{} vertices, {:?}", vertices.len(), vertices.array());
+        log::debug!(
+            "{} vertices, {:?}",
+            vertices.array().len(),
+            vertices.array()
+        );
         let indices = stage.new_indices(indices);
-        log::debug!("{} indices, {:?}", indices.len(), indices.array());
+        log::debug!("{} indices, {:?}", indices.array().len(), indices.array());
         let (bbmin, bbmax) = {
             let gltf::mesh::Bounds { min, max } = primitive.bounding_box();
             (Vec3::from_array(min), Vec3::from_array(max))
@@ -564,9 +528,8 @@ impl GltfPrimitive {
         Self {
             vertices,
             indices,
-            material,
+            material_index,
             morph_targets,
-            morph_targets_array,
             bounding_box,
         }
     }
@@ -577,26 +540,21 @@ pub struct GltfMesh {
     /// Mesh primitives, aka meshlets
     pub primitives: Vec<GltfPrimitive>,
     /// Morph target weights
-    pub weights: HybridArray<f32>,
+    pub weights: MorphTargetWeights,
 }
 
 impl GltfMesh {
-    fn from_gltf(
-        stage: &Stage,
-        buffer_data: &[gltf::buffer::Data],
-        materials: &HybridArray<MaterialDescriptor>,
-        mesh: gltf::Mesh,
-    ) -> Self {
+    fn from_gltf(stage: &Stage, buffer_data: &[gltf::buffer::Data], mesh: gltf::Mesh) -> Self {
         log::debug!("Loading primitives for mesh {}", mesh.index());
         let primitives = mesh
             .primitives()
-            .map(|prim| GltfPrimitive::from_gltf(stage, prim, buffer_data, materials))
+            .map(|prim| GltfPrimitive::from_gltf(stage, prim, buffer_data))
             .collect::<Vec<_>>();
         log::debug!("  loaded {} primitives\n", primitives.len());
         let weights = mesh.weights().unwrap_or(&[]).iter().copied();
         GltfMesh {
             primitives,
-            weights: stage.new_weights(weights),
+            weights: stage.new_morph_target_weights(weights),
         }
     }
 }
@@ -607,11 +565,11 @@ pub struct GltfCamera {
     pub name: Option<String>,
     pub node_transform: NestedTransform,
     projection: Mat4,
-    pub camera: Hybrid<Camera>,
+    pub camera: Camera,
 }
 
-impl AsRef<Hybrid<Camera>> for GltfCamera {
-    fn as_ref(&self) -> &Hybrid<Camera> {
+impl AsRef<Camera> for GltfCamera {
+    fn as_ref(&self) -> &Camera {
         &self.camera
     }
 }
@@ -619,7 +577,7 @@ impl AsRef<Hybrid<Camera>> for GltfCamera {
 impl GltfCamera {
     fn new(stage: &Stage, gltf_camera: gltf::Camera<'_>, transform: &NestedTransform) -> Self {
         log::debug!("camera: {}", gltf_camera.name().unwrap_or("unknown"));
-        log::debug!("  transform: {:#?}", transform.get_global_transform());
+        log::debug!("  transform: {:#?}", transform.global_descriptor());
         let projection = match gltf_camera.projection() {
             gltf::camera::Projection::Orthographic(o) => glam::Mat4::orthographic_rh(
                 -o.xmag(),
@@ -643,8 +601,10 @@ impl GltfCamera {
                 }
             }
         };
-        let view = Mat4::from(transform.get_global_transform()).inverse();
-        let camera = stage.new_camera(Camera::new(projection, view));
+        let view = Mat4::from(transform.global_descriptor()).inverse();
+        let camera = stage
+            .new_camera()
+            .with_projection_and_view(projection, view);
         GltfCamera {
             index: gltf_camera.index(),
             name: gltf_camera.name().map(String::from),
@@ -654,9 +614,9 @@ impl GltfCamera {
         }
     }
 
-    pub fn get_camera(&self) -> Camera {
-        let view = Mat4::from(self.node_transform.get_global_transform()).inverse();
-        Camera::new(self.projection, view)
+    pub fn camera_descriptor(&self) -> CameraDescriptor {
+        let view = Mat4::from(self.node_transform.global_descriptor()).inverse();
+        CameraDescriptor::new(self.projection, view)
     }
 }
 
@@ -679,15 +639,15 @@ pub struct GltfNode {
     ///
     /// Each element indexes into the `GltfDocument`'s `nodes` field.
     pub children: Vec<usize>,
-    /// Array of morph target weights
-    pub weights: HybridArray<f32>,
+    /// Morph target weights
+    pub weights: MorphTargetWeights,
     /// This node's transform.
     pub transform: NestedTransform,
 }
 
 impl GltfNode {
     pub fn global_transform(&self) -> TransformDescriptor {
-        self.transform.get_global_transform()
+        self.transform.global_descriptor()
     }
 }
 
@@ -697,17 +657,11 @@ pub struct GltfSkin {
     // Indices of the skeleton nodes used as joints in this skin, unused internally
     // but possibly useful.
     pub joint_nodes: Vec<usize>,
-    pub joint_transforms: HybridArray<Id<TransformDescriptor>>,
-    // Containins the 4x4 inverse-bind matrices.
-    //
-    // When None, each matrix is assumed to be the 4x4 identity matrix which implies that the
-    // inverse-bind matrices were pre-applied.
-    pub inverse_bind_matrices: Option<HybridArray<Mat4>>,
     // Index of the node used as the skeleton root.
     // When None, joints transforms resolve to scene root.
     pub skeleton: Option<usize>,
-    // Skin as seen by shaders, on the GPU
-    pub skin: Hybrid<Skin>,
+    // Skin as seen by renderling
+    pub skin: Skin,
 }
 
 impl GltfSkin {
@@ -715,34 +669,33 @@ impl GltfSkin {
         stage: &Stage,
         buffer_data: &[gltf::buffer::Data],
         nodes: &[GltfNode],
-        skin: gltf::Skin,
+        gltf_skin: gltf::Skin,
     ) -> Result<Self, StageGltfError> {
-        log::debug!("reading skin {} {:?}", skin.index(), skin.name());
-        let joint_nodes = skin.joints().map(|n| n.index()).collect::<Vec<_>>();
+        log::debug!("reading skin {} {:?}", gltf_skin.index(), gltf_skin.name());
+        let joint_nodes = gltf_skin.joints().map(|n| n.index()).collect::<Vec<_>>();
         log::debug!("  has {} joints", joint_nodes.len());
         let mut joint_transforms = vec![];
         for node_index in joint_nodes.iter() {
             let gltf_node: &GltfNode = nodes
                 .get(*node_index)
                 .context(MissingNodeSnafu { index: *node_index })?;
-            let transform_id = gltf_node.transform.global_transform_id();
+            let transform_id = gltf_node.transform.global_descriptor();
             log::debug!("    joint node {node_index} is {transform_id:?}");
-            joint_transforms.push(transform_id);
+            joint_transforms.push(gltf_node.transform.clone());
         }
-        let joint_transforms = stage.new_joint_transform_ids(joint_transforms);
-        let reader = skin.reader(|b| buffer_data.get(b.index()).map(|d| d.0.as_slice()));
-        let inverse_bind_matrices = if let Some(mats) = reader.read_inverse_bind_matrices() {
+        let reader = gltf_skin.reader(|b| buffer_data.get(b.index()).map(|d| d.0.as_slice()));
+        let mut inverse_bind_matrices = vec![];
+        if let Some(mats) = reader.read_inverse_bind_matrices() {
             let invs = mats
                 .into_iter()
                 .map(|m| Mat4::from_cols_array_2d(&m))
                 .collect::<Vec<_>>();
             log::debug!("  has {} inverse bind matrices", invs.len());
-            Some(stage.new_matrices(invs))
+            inverse_bind_matrices = invs;
         } else {
             log::debug!("  no inverse bind matrices");
-            None
-        };
-        let skeleton = if let Some(n) = skin.skeleton() {
+        }
+        let skeleton = if let Some(n) = gltf_skin.skeleton() {
             let index = n.index();
             log::debug!("  skeleton is node {index}, {:?}", n.name());
             Some(index)
@@ -751,17 +704,9 @@ impl GltfSkin {
             None
         };
         Ok(GltfSkin {
-            index: skin.index(),
-            skin: stage.new_skin(Skin {
-                joints: joint_transforms.array(),
-                inverse_bind_matrices: inverse_bind_matrices
-                    .as_ref()
-                    .map(|a| a.array())
-                    .unwrap_or_default(),
-            }),
+            index: gltf_skin.index(),
+            skin: stage.new_skin(joint_transforms, inverse_bind_matrices),
             joint_nodes,
-            joint_transforms,
-            inverse_bind_matrices,
             skeleton,
         })
     }
@@ -771,16 +716,16 @@ impl GltfSkin {
 pub struct GltfDocument {
     pub animations: Vec<Animation>,
     pub cameras: Vec<GltfCamera>,
-    pub default_material: Hybrid<MaterialDescriptor>,
     pub default_scene: Option<usize>,
     pub extensions: Option<serde_json::Value>,
-    pub textures: Vec<Hybrid<AtlasTexture>>,
+    pub textures: Vec<AtlasTexture>,
     pub lights: Vec<AnalyticalLight>,
     pub meshes: Vec<GltfMesh>,
     pub nodes: Vec<GltfNode>,
-    pub materials: HybridArray<MaterialDescriptor>,
+    pub default_material: Material,
+    pub materials: Vec<Material>,
     // map of node index to renderlets
-    pub renderlets: FxHashMap<usize, Vec<Hybrid<RenderletDescriptor>>>,
+    pub renderlets: FxHashMap<usize, Vec<Renderlet>>,
     /// Vector of scenes - each being a list of nodes.
     pub scenes: Vec<Vec<usize>>,
     pub skins: Vec<GltfSkin>,
@@ -796,7 +741,7 @@ impl GltfDocument {
         let textures = {
             let mut images = images.into_iter().map(AtlasImage::from).collect::<Vec<_>>();
             for gltf_material in document.materials() {
-                MaterialDescriptor::preprocess_images(gltf_material, &mut images)?;
+                Material::preprocess_images(gltf_material, &mut images)?;
             }
             // Arc these images because they could be large and we don't want duplicates
             let images = images.into_iter().map(Arc::new).collect::<Vec<_>>();
@@ -855,9 +800,9 @@ impl GltfDocument {
                 })
                 .collect();
             let hybrid_textures = stage.add_images(prepared_images).context(StageSnafu)?;
-            let mut texture_lookup = FxHashMap::<usize, Hybrid<AtlasTexture>>::default();
+            let mut texture_lookup = FxHashMap::<usize, AtlasTexture>::default();
             for (hybrid, (tex, refs)) in hybrid_textures.into_iter().zip(deduped_textures) {
-                hybrid.modify(|t| t.modes = tex.modes);
+                hybrid.set_modes(tex.modes);
                 for tex_index in refs.into_iter() {
                     texture_lookup.insert(tex_index, hybrid.clone());
                 }
@@ -871,27 +816,26 @@ impl GltfDocument {
         };
 
         log::debug!("Creating materials");
-        let default_material = stage.new_material(MaterialDescriptor::default());
+        let mut default_material = stage.default_material().clone();
         let mut materials = vec![];
         for gltf_material in document.materials() {
             let material_index = gltf_material.index();
-            let material = MaterialDescriptor::from_gltf(gltf_material, &textures)?;
+            let material = Material::from_gltf(stage, gltf_material, &textures)?;
             if let Some(index) = material_index {
                 log::trace!("  created material {index}");
                 debug_assert_eq!(index, materials.len(), "unexpected material index");
                 materials.push(material);
             } else {
                 log::trace!("  created default material");
-                default_material.set(material);
+                default_material = material;
             }
         }
-        let materials = stage.new_materials(materials);
         log::trace!("  created {} materials", materials.len());
 
         log::debug!("Loading meshes");
         let mut meshes = vec![];
         for mesh in document.meshes() {
-            let mesh = GltfMesh::from_gltf(stage, &buffer_data, &materials, mesh);
+            let mesh = GltfMesh::from_gltf(stage, &buffer_data, mesh);
             meshes.push(mesh);
         }
         log::trace!("  loaded {} meshes", meshes.len());
@@ -912,8 +856,16 @@ impl GltfDocument {
             let nt = if let Some(nt) = cache.get(&node.index()) {
                 nt.clone()
             } else {
-                let transform = stage.new_nested_transform();
-                transform.set(node.transform().into());
+                let TransformDescriptor {
+                    translation,
+                    rotation,
+                    scale,
+                } = node.transform().into();
+                let transform = stage
+                    .new_nested_transform()
+                    .with_translation(translation)
+                    .with_rotation(rotation)
+                    .with_scale(scale);
                 for node in node.children() {
                     let child_transform =
                         transform_for_node(nesting_level + 1, stage, cache, &node);
@@ -922,7 +874,7 @@ impl GltfDocument {
                 cache.insert(node.index(), transform.clone());
                 transform
             };
-            let t = nt.get();
+            let t = nt.local_descriptor();
             log::trace!(
                 "{padding}{} {:?} {:?} {:?} {:?}",
                 node.index(),
@@ -961,10 +913,10 @@ impl GltfDocument {
                 if let Some(mesh) = node.mesh() {
                     meshes[mesh.index()].weights.clone()
                 } else {
-                    stage.new_weights(weights)
+                    stage.new_morph_target_weights(weights)
                 }
             } else {
-                stage.new_weights(weights)
+                stage.new_morph_target_weights(weights)
             };
             let transform = transform_for_node(0, stage, &mut node_transforms, &node);
             nodes.push(GltfNode {
@@ -1058,8 +1010,8 @@ impl GltfDocument {
                 log::trace!(
                     "  linking light {:?} with node transform {:?}: {:#?}",
                     light_bundle.light().id(),
-                    node_transform.global_transform_id(),
-                    node_transform.get_global_transform()
+                    node_transform.global_id(),
+                    node_transform.global_descriptor()
                 );
                 light_bundle.link_node_transform(&node_transform);
                 lights.push(light_bundle);
@@ -1088,14 +1040,14 @@ impl GltfDocument {
         let mut renderlets = FxHashMap::default();
         for gltf_node in nodes.iter() {
             let mut node_renderlets = vec![];
-            let skin_id = if let Some(skin_index) = gltf_node.skin {
+            let maybe_skin = if let Some(skin_index) = gltf_node.skin {
                 log::debug!("  node {} {:?} has skin", gltf_node.index, gltf_node.name);
                 let gltf_skin = skins
                     .get(skin_index)
                     .context(MissingSkinSnafu { index: skin_index })?;
-                gltf_skin.skin.id()
+                Some(gltf_skin.skin.clone())
             } else {
-                Id::NONE
+                None
             };
 
             if let Some(mesh_index) = gltf_node.mesh {
@@ -1110,20 +1062,26 @@ impl GltfDocument {
                 let num_prims = mesh.primitives.len();
                 log::trace!("    has {num_prims} primitives");
                 for (prim, i) in mesh.primitives.iter().zip(1..) {
-                    let hybrid = stage.new_renderlet(RenderletDescriptor {
-                        vertices_array: prim.vertices.array(),
-                        indices_array: prim.indices.array(),
-                        transform_id: gltf_node.transform.global_transform_id(),
-                        material_id: prim.material,
-                        skin_id,
-                        morph_targets: prim.morph_targets_array.array(),
-                        morph_weights: gltf_node.weights.array(),
-                        bounds: prim.bounding_box.into(),
-                        ..Default::default()
-                    });
-                    log::trace!("    created renderlet {i}/{num_prims}: {:#?}", hybrid.get());
-                    stage.add_renderlet(&hybrid);
-                    node_renderlets.push(hybrid);
+                    let material = prim
+                        .material_index
+                        .and_then(|index| materials.get(index))
+                        .unwrap_or(&default_material);
+                    let renderlet = stage
+                        .new_renderlet()
+                        .with_vertices(&prim.vertices)
+                        .with_indices(&prim.indices)
+                        .with_transform(&gltf_node.transform)
+                        .with_material(material)
+                        .with_bounds(prim.bounding_box.into())
+                        .with_morph_targets(&prim.morph_targets, &gltf_node.weights);
+                    if let Some(skin) = maybe_skin.as_ref() {
+                        renderlet.set_skin(skin);
+                    }
+                    log::trace!(
+                        "    created renderlet {i}/{num_prims}: {:#?}",
+                        renderlet.id()
+                    );
+                    node_renderlets.push(renderlet);
                 }
             }
             if !node_renderlets.is_empty() {
@@ -1155,7 +1113,7 @@ impl GltfDocument {
         })
     }
 
-    pub fn renderlets_iter(&self) -> impl Iterator<Item = &Hybrid<RenderletDescriptor>> {
+    pub fn renderlets_iter(&self) -> impl Iterator<Item = &Renderlet> {
         self.renderlets.iter().flat_map(|(_, rs)| rs.iter())
     }
 
@@ -1216,10 +1174,7 @@ impl Stage {
 
 #[cfg(test)]
 mod test {
-    use crate::{
-        camera::Camera, material::MaterialDescriptor, stage::Vertex, test::BlockOnFuture,
-        transform::TransformDescriptor, Context,
-    };
+    use crate::{stage::Vertex, test::BlockOnFuture, Context};
     use glam::{Vec3, Vec4};
 
     #[test]
@@ -1253,7 +1208,9 @@ mod test {
             .with_lighting(false)
             .with_bloom(false)
             .with_background_color(Vec3::splat(0.0).extend(1.0));
-        let _camera = stage.new_camera(Camera::new(projection, view));
+        let _camera = stage
+            .new_camera()
+            .with_projection_and_view(projection, view);
         let _doc = stage
             .load_gltf_document_from_path("../../gltf/gltfTutorial_008_SimpleMeshes.gltf")
             .unwrap();
@@ -1277,7 +1234,9 @@ mod test {
         let projection = crate::camera::perspective(20.0, 20.0);
         let eye = Vec3::new(0.5, 0.5, 2.0);
         let view = crate::camera::look_at(eye, Vec3::new(0.5, 0.5, 0.0), Vec3::Y);
-        let _camera = stage.new_camera(Camera::new(projection, view));
+        let _camera = stage
+            .new_camera()
+            .with_projection_and_view(projection, view);
 
         let _doc = stage
             .load_gltf_document_from_path("../../gltf/gltfTutorial_003_MinimalGltfFile.gltf")
@@ -1300,38 +1259,42 @@ mod test {
             .with_lighting(false)
             .with_background_color(Vec4::splat(1.0));
         let (projection, view) = crate::camera::default_ortho2d(100.0, 100.0);
-        let _camera = stage.new_camera(Camera::new(projection, view));
+        let _camera = stage
+            .new_camera()
+            .with_projection_and_view(projection, view);
         let doc = stage
             .load_gltf_document_from_path("../../gltf/cheetah_cone.glb")
             .unwrap();
         assert!(!doc.textures.is_empty());
-        let (material, _vertices, _indices, _transform, _renderlet) = stage
-            .builder()
-            .with_material(MaterialDescriptor {
-                albedo_texture_id: doc.textures[0].id(),
-                has_lighting: false,
-                ..Default::default()
-            })
-            .with_vertices([
-                Vertex::default()
-                    .with_position([0.0, 0.0, 0.0])
-                    .with_uv0([0.0, 0.0]),
-                Vertex::default()
-                    .with_position([1.0, 0.0, 0.0])
-                    .with_uv0([1.0, 0.0]),
-                Vertex::default()
-                    .with_position([1.0, 1.0, 0.0])
-                    .with_uv0([1.0, 1.0]),
-                Vertex::default()
-                    .with_position([0.0, 1.0, 0.0])
-                    .with_uv0([0.0, 1.0]),
-            ])
-            .with_indices([0u32, 3, 2, 0, 2, 1])
-            .with_transform(TransformDescriptor {
-                scale: Vec3::new(100.0, 100.0, 1.0),
-                ..Default::default()
-            })
-            .build();
+        let material = stage
+            .new_material()
+            .with_albedo_texture(&doc.textures[0])
+            .with_has_lighting(false);
+        let _rez = stage
+            .new_renderlet()
+            .with_material(&material)
+            .with_vertices(
+                stage.new_vertices([
+                    Vertex::default()
+                        .with_position([0.0, 0.0, 0.0])
+                        .with_uv0([0.0, 0.0]),
+                    Vertex::default()
+                        .with_position([1.0, 0.0, 0.0])
+                        .with_uv0([1.0, 0.0]),
+                    Vertex::default()
+                        .with_position([1.0, 1.0, 0.0])
+                        .with_uv0([1.0, 1.0]),
+                    Vertex::default()
+                        .with_position([0.0, 1.0, 0.0])
+                        .with_uv0([0.0, 1.0]),
+                ]),
+            )
+            .with_indices(stage.new_indices([0u32, 3, 2, 0, 2, 1]))
+            .with_transform(
+                stage
+                    .new_transform()
+                    .with_scale(Vec3::new(100.0, 100.0, 1.0)),
+            );
         println!("material_id: {:#?}", material.id());
 
         let frame = ctx.get_next_frame().unwrap();
@@ -1354,7 +1317,9 @@ mod test {
         let projection = crate::camera::perspective(size as f32, size as f32);
         let view =
             crate::camera::look_at(Vec3::new(0.5, 0.5, 1.25), Vec3::new(0.5, 0.5, 0.0), Vec3::Y);
-        let _camera = stage.new_camera(Camera::new(projection, view));
+        let _camera = stage
+            .new_camera()
+            .with_projection_and_view(projection, view);
 
         let _doc = stage
             .load_gltf_document_from_path("../../gltf/gltfTutorial_013_SimpleTexture.gltf")
@@ -1407,11 +1372,12 @@ mod test {
         let up = Vec3::Y;
         let view = glam::Mat4::look_at_rh(eye, target, up);
 
-        let _camera = stage.new_camera(Camera::new(projection, view));
-        let doc = stage
+        let _camera = stage
+            .new_camera()
+            .with_projection_and_view(projection, view);
+        let _doc = stage
             .load_gltf_document_from_path("../../gltf/Fox.glb")
             .unwrap();
-        log::info!("renderlets: {:#?}", doc.renderlets);
 
         // render a frame without vertex skinning as a baseline
         let frame = ctx.get_next_frame().unwrap();
@@ -1483,10 +1449,19 @@ mod test {
             .unwrap();
         let camera_a = doc.cameras.first().unwrap();
 
-        let eq = |p: Vec3| p.distance(camera_a.get_camera().position()) <= 10e-6;
-        let either_y_up_or_z_up = eq(Vec3::new(14.699949, 4.958309, 12.676651))
-            || eq(Vec3::new(14.699949, -12.676651, 4.958309));
-        assert!(either_y_up_or_z_up);
+        let desc = camera_a.camera_descriptor();
+        const THRESHOLD: f32 = 10e-6;
+        let a = Vec3::new(14.699949, 4.958309, 12.676651);
+        let b = Vec3::new(14.699949, -12.676651, 4.958309);
+        let distance_a = a.distance(desc.position());
+        let distance_b = b.distance(desc.position());
+        if distance_a > THRESHOLD && distance_b > THRESHOLD {
+            println!("desc: {desc:#?}");
+            println!("distance_a: {distance_a}");
+            println!("distance_b: {distance_b}");
+            println!("threshold: {THRESHOLD}");
+            panic!("distance greater than threshold");
+        }
 
         let doc = stage
             .load_gltf_document_from_path(
@@ -1505,8 +1480,8 @@ mod test {
             a.distance(b) <= 10e-6 || c.distance(c) <= 10e-6
         };
         assert!(eq(
-            camera_a.get_camera().position(),
-            camera_b.get_camera().position()
+            camera_a.camera_descriptor().position(),
+            camera_b.camera_descriptor().position()
         ));
     }
 }

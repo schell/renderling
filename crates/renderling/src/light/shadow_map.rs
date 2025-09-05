@@ -12,9 +12,9 @@ use glam::{Mat4, UVec2};
 use snafu::{OptionExt, ResultExt};
 
 use crate::{
-    atlas::{AtlasBlittingOperation, AtlasImage, AtlasTexture},
+    atlas::{AtlasBlittingOperation, AtlasImage, AtlasTexture, AtlasTextureDescriptor},
     bindgroup::ManagedBindGroup,
-    stage::RenderletDescriptor,
+    stage::Renderlet,
 };
 
 use super::{
@@ -40,8 +40,8 @@ pub struct ShadowMap {
     pub(crate) light_space_transforms: HybridArray<Mat4>,
     /// Bindgroup for the shadow map update shader
     pub(crate) update_bindgroup: ManagedBindGroup,
-    pub(crate) atlas_textures: Vec<Hybrid<AtlasTexture>>,
-    pub(crate) _atlas_textures_array: HybridArray<Id<AtlasTexture>>,
+    pub(crate) atlas_textures: Vec<AtlasTexture>,
+    pub(crate) _atlas_textures_array: HybridArray<Id<AtlasTextureDescriptor>>,
     pub(crate) update_texture: crate::texture::Texture,
     pub(crate) blitting_op: AtlasBlittingOperation,
     pub(crate) light_bundle: AnalyticalLight<WeakContainer>,
@@ -248,7 +248,7 @@ impl ShadowMap {
     pub fn update<'a>(
         &self,
         lighting: impl AsRef<Lighting>,
-        renderlets: impl IntoIterator<Item = &'a Hybrid<RenderletDescriptor>>,
+        renderlets: impl IntoIterator<Item = &'a Renderlet>,
     ) -> Result<(), LightingError> {
         let lighting = lighting.as_ref();
         let light_bundle = self
@@ -339,7 +339,7 @@ impl ShadowMap {
                 let mut count = 0;
                 for rlet in renderlets.iter() {
                     let id = rlet.id();
-                    let rlet = rlet.get();
+                    let rlet = rlet.descriptor();
                     let vertex_range = 0..rlet.get_vertex_count();
                     let instance_range = id.inner()..id.inner() + 1;
                     render_pass.draw(vertex_range, instance_range);
@@ -368,7 +368,7 @@ impl ShadowMap {
 #[cfg(test)]
 #[allow(clippy::unused_enumerate_index)]
 mod test {
-    use crate::{camera::Camera, test::BlockOnFuture};
+    use crate::test::BlockOnFuture;
 
     use super::super::*;
 
@@ -398,7 +398,7 @@ mod test {
         let camera = doc.cameras.first().unwrap();
         camera
             .as_ref()
-            .modify(|cam| cam.set_projection(crate::camera::perspective(w, h)));
+            .set_projection(crate::camera::perspective(w, h));
         stage.use_camera(camera);
 
         let frame = ctx.get_next_frame().unwrap();
@@ -446,7 +446,7 @@ mod test {
         let camera = doc.cameras.first().unwrap();
         camera
             .as_ref()
-            .modify(|cam| cam.set_projection(crate::camera::perspective(w, h)));
+            .set_projection(crate::camera::perspective(w, h));
         stage.use_camera(camera);
 
         let gltf_light_a = doc.lights.first().unwrap();
@@ -498,7 +498,7 @@ mod test {
         let camera = doc.cameras.first().unwrap();
         camera
             .as_ref()
-            .modify(|cam| cam.set_projection(crate::camera::perspective(w, h)));
+            .set_projection(crate::camera::perspective(w, h));
         stage.use_camera(camera);
 
         let frame = ctx.get_next_frame().unwrap();
@@ -584,10 +584,9 @@ mod test {
             )
             .unwrap();
         let camera = doc.cameras.first().unwrap();
-        let original_camera = camera.as_ref().modify(|cam| {
-            cam.set_projection(crate::camera::perspective(w, h));
-            *cam
-        });
+        camera
+            .as_ref()
+            .set_projection(crate::camera::perspective(w, h));
         stage.use_camera(camera);
 
         let mut shadow_maps = vec![];
@@ -597,11 +596,12 @@ mod test {
             {
                 let desc = light_bundle.light_details().as_spot().unwrap().get();
                 let (p, v) = desc.shadow_mapping_projection_and_view(
-                    &light_bundle.transform().get().into(),
+                    &light_bundle.transform().as_mat4(),
                     z_near,
                     z_far,
                 );
-                camera.as_ref().set(Camera::new(p, v));
+                let temp_camera = stage.new_camera().with_projection_and_view(p, v);
+                stage.use_camera(temp_camera);
                 let frame = ctx.get_next_frame().unwrap();
                 stage.render(&frame.view());
                 let _img = frame.read_image().block().unwrap();
@@ -622,7 +622,8 @@ mod test {
             shadow.update(&stage, doc.renderlets_iter()).unwrap();
             shadow_maps.push(shadow);
         }
-        camera.as_ref().set(original_camera);
+
+        stage.use_camera(camera);
 
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
@@ -649,10 +650,9 @@ mod test {
             )
             .unwrap();
         let camera = doc.cameras.first().unwrap();
-        let c = camera.as_ref().modify(|cam| {
-            cam.set_projection(crate::camera::perspective(w, h));
-            *cam
-        });
+        camera
+            .as_ref()
+            .set_projection(crate::camera::perspective(w, h));
         stage.use_camera(camera);
 
         let mut shadows = vec![];
@@ -663,12 +663,12 @@ mod test {
                 let desc = light_bundle.light_details().as_point().unwrap().get();
                 println!("point light {i}: {desc:?}");
                 let (p, vs) = desc.shadow_mapping_projection_and_view_matrices(
-                    &light_bundle.transform().get().into(),
+                    &light_bundle.transform().as_mat4(),
                     z_near,
                     z_far,
                 );
                 for (_j, v) in vs.into_iter().enumerate() {
-                    camera.as_ref().set(Camera::new(p, v));
+                    stage.use_camera(stage.new_camera().with_projection_and_view(p, v));
                     let frame = ctx.get_next_frame().unwrap();
                     stage.render(&frame.view());
                     let _img = frame.read_image().block().unwrap();
@@ -690,7 +690,8 @@ mod test {
             shadow.update(&stage, doc.renderlets_iter()).unwrap();
             shadows.push(shadow);
         }
-        camera.as_ref().set(c);
+
+        stage.use_camera(&camera);
 
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());

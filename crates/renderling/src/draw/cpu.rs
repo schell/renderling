@@ -1,38 +1,19 @@
 //! CPU-only side of renderling/draw.rs
 
 use craballoc::{
-    prelude::{Gpu, Hybrid, SlabAllocator, WeakHybrid, WgpuRuntime},
+    prelude::{Gpu, SlabAllocator, WgpuRuntime},
     slab::SlabBuffer,
 };
 use crabslab::Id;
-use rustc_hash::FxHashMap;
 
 use crate::{
     cull::{ComputeCulling, CullingError},
-    stage::RenderletDescriptor,
+    stage::{Renderlet, RenderletDescriptor, RenderletSortItem},
     texture::Texture,
     Context,
 };
 
 use super::DrawIndirectArgs;
-
-/// Used to track renderlets internally.
-#[repr(transparent)]
-struct InternalRenderlet {
-    inner: WeakHybrid<RenderletDescriptor>,
-}
-
-impl InternalRenderlet {
-    fn has_external_references(&self) -> bool {
-        self.inner.strong_count() > 0
-    }
-
-    fn from_hybrid_renderlet(hr: &Hybrid<RenderletDescriptor>) -> Self {
-        Self {
-            inner: WeakHybrid::from_hybrid(hr),
-        }
-    }
-}
 
 /// Issues indirect draw calls.
 ///
@@ -69,35 +50,6 @@ impl IndirectDraws {
             log::trace!("draining indirect draws after invalidation");
             let _ = self.draws.drain(..);
         }
-    }
-
-    fn get_indirect_buffer(&self) -> SlabBuffer<wgpu::Buffer> {
-        self.slab.commit()
-    }
-
-    fn sync_with_internal_renderlets(
-        &mut self,
-        internal_renderlets: &[InternalRenderlet],
-        redraw_args: bool,
-    ) -> SlabBuffer<wgpu::Buffer> {
-        if redraw_args || self.draws.len() != internal_renderlets.len() {
-            self.invalidate();
-            // Pre-upkeep to reclaim resources - this is necessary because
-            // the draw buffer has to be contiguous (it can't start with a bunch of trash)
-            let indirect_buffer = self.slab.commit();
-            if indirect_buffer.is_new_this_commit() {
-                log::warn!("new indirect buffer");
-            }
-            self.draws = internal_renderlets
-                .iter()
-                .map(|ir: &InternalRenderlet| {
-                    self.slab
-                        .new_value(DrawIndirectArgs::from(ir.inner.id()))
-                        .into_gpu_only()
-                })
-                .collect();
-        }
-        self.get_indirect_buffer()
     }
 
     /// Read the images from the hierarchical z-buffer used for occlusion
@@ -149,7 +101,7 @@ impl DrawingStrategy {
 /// list of all [`Renderlet`]s.
 pub struct DrawCalls {
     /// Internal representation of all staged renderlets.
-    internal_renderlets: Vec<InternalRenderlet>,
+    renderlets: Vec<Renderlet>,
     pub(crate) drawing_strategy: DrawingStrategy,
 }
 
@@ -181,7 +133,7 @@ impl DrawCalls {
         }
         let can_use_compute_culling = use_compute_culling && can_use_multi_draw_indirect;
         Self {
-            internal_renderlets: vec![],
+            renderlets: vec![],
             drawing_strategy: DrawingStrategy {
                 indirect: if can_use_compute_culling {
                     log::debug!("Using indirect drawing method and compute culling");
@@ -205,92 +157,57 @@ impl DrawCalls {
     /// Add a renderlet to the drawing queue.
     ///
     /// Returns the number of draw calls in the queue.
-    pub fn add_renderlet(&mut self, renderlet: &Hybrid<RenderletDescriptor>) -> usize {
+    pub fn add_renderlet(&mut self, renderlet: &Renderlet) -> usize {
         log::trace!("adding renderlet {:?}", renderlet.id());
         if let Some(indirect) = &mut self.drawing_strategy.indirect {
             indirect.invalidate();
         }
-        self.internal_renderlets
-            .push(InternalRenderlet::from_hybrid_renderlet(renderlet));
-        self.internal_renderlets.len()
+        self.renderlets.push(renderlet.clone());
+        self.renderlets.len()
     }
 
     /// Erase the given renderlet from the internal list of renderlets to be
     /// drawn each frame.
     ///
     /// Returns the number of draw calls remaining in the queue.
-    pub fn remove_renderlet(&mut self, renderlet: &Hybrid<RenderletDescriptor>) -> usize {
+    pub fn remove_renderlet(&mut self, renderlet: &Renderlet) -> usize {
         let id = renderlet.id();
-        self.internal_renderlets.retain(|ir| ir.inner.id() != id);
+        self.renderlets.retain(|ir| ir.descriptor.id() != id);
 
         if let Some(indirect) = &mut self.drawing_strategy.indirect {
             indirect.invalidate();
         }
 
-        self.internal_renderlets.len()
+        self.renderlets.len()
     }
 
-    /// Re-order the renderlets to that of the given list of identifiers.
-    ///
-    /// This determines the order in which they are drawn each frame.
-    ///
-    /// If the `order` iterator is missing any renderlet ids, those missing
-    /// renderlets will be drawn _before_ the ordered ones, in no particular
-    /// order.
-    pub fn reorder_renderlets(&mut self, order: impl IntoIterator<Item = Id<RenderletDescriptor>>) {
-        let mut ordered = vec![];
-        let mut m = FxHashMap::from_iter(
-            std::mem::take(&mut self.internal_renderlets)
-                .into_iter()
-                .map(|r| (r.inner.id(), r)),
-        );
-        for id in order.into_iter() {
-            if let Some(renderlet) = m.remove(&id) {
-                ordered.push(renderlet);
-            }
-        }
-        self.internal_renderlets.extend(m.into_values());
-        self.internal_renderlets.extend(ordered);
-        if let Some(indirect) = &mut self.drawing_strategy.indirect {
-            indirect.invalidate();
-        }
-    }
-
-    /// Iterator over all staged [`Renderlet`]s.
-    pub fn renderlets_iter(&self) -> impl Iterator<Item = WeakHybrid<RenderletDescriptor>> + '_ {
-        self.internal_renderlets.iter().map(|ir| ir.inner.clone())
-    }
-    ///
-    /// Perform upkeep on queued draw calls and synchronize internal buffers.
-    pub fn upkeep(&mut self) {
-        let mut redraw_args = false;
-
-        // Drop any renderlets that have no external references.
-        self.internal_renderlets.retain_mut(|ir| {
-            if ir.has_external_references() {
-                true
-            } else {
-                redraw_args = true;
-                log::trace!("dropping '{:?}' from drawing", ir.inner.id());
-                false
-            }
+    /// Sort draw calls using a function compairing [`RenderletSortItem`]s.
+    pub fn sort_renderlets(
+        &mut self,
+        f: impl Fn(&RenderletSortItem, &RenderletSortItem) -> std::cmp::Ordering,
+    ) {
+        self.renderlets.sort_by(|a, b| {
+            let a = a.sort_item();
+            let b = b.sort_item();
+            f(&a, &b)
         });
-
         if let Some(indirect) = &mut self.drawing_strategy.indirect {
-            indirect.sync_with_internal_renderlets(&self.internal_renderlets, redraw_args);
+            indirect.invalidate();
         }
+    }
+
+    /// Return an iterator over all sort items.
+    pub fn sort_items(&self) -> impl Iterator<Item = RenderletSortItem> + '_ {
+        self.renderlets.iter().map(Renderlet::sort_item)
     }
 
     /// Returns the number of draw calls (direct or indirect) that will be
     /// made during pre-rendering (compute culling) and rendering.
     pub fn draw_count(&self) -> usize {
-        self.internal_renderlets.len()
+        self.renderlets.len()
     }
 
     /// Perform pre-draw steps like frustum and occlusion culling, if available.
-    ///
-    /// This does not do upkeep, please call [`DrawCalls::upkeep`] before
-    /// calling this function.
     ///
     /// Returns the indirect draw buffer.
     pub fn pre_draw(
@@ -308,20 +225,31 @@ impl DrawCalls {
             // We can do this without multidraw by running GPU culling and then
             // copying `indirect_buffer` back to the CPU.
             if let Some(indirect) = &mut self.drawing_strategy.indirect {
-                let maybe_buffer = indirect.slab.get_buffer();
-                if let Some(indirect_buffer) = maybe_buffer {
-                    log::trace!("performing culling on {num_draw_calls} renderlets");
-                    indirect
-                        .compute_culling
-                        .run(num_draw_calls as u32, depth_texture);
-                    Ok(Some(indirect_buffer))
-                } else {
-                    log::warn!(
-                        "DrawCalls::pre_render called without first calling `upkeep` - no culling \
-                         was performed"
-                    );
-                    Ok(None)
+                if indirect.draws.len() != self.renderlets.len() {
+                    indirect.invalidate();
+                    // Pre-upkeep to reclaim resources - this is necessary because
+                    // the draw buffer has to be contiguous (it can't start with a bunch of trash)
+                    let indirect_buffer = indirect.slab.commit();
+                    if indirect_buffer.is_new_this_commit() {
+                        log::warn!("new indirect buffer");
+                    }
+                    indirect.draws = self
+                        .renderlets
+                        .iter()
+                        .map(|r| {
+                            indirect
+                                .slab
+                                .new_value(DrawIndirectArgs::from(r.descriptor.id()))
+                                .into_gpu_only()
+                        })
+                        .collect();
                 }
+                let indirect_buffer = indirect.slab.commit();
+                log::trace!("performing culling on {num_draw_calls} renderlets");
+                indirect
+                    .compute_culling
+                    .run(num_draw_calls as u32, depth_texture);
+                Ok(Some(indirect_buffer))
             } else {
                 Ok(None)
             }
@@ -332,18 +260,16 @@ impl DrawCalls {
 
     /// Draw into the given `RenderPass` by directly calling each draw.
     pub fn draw_direct(&self, render_pass: &mut wgpu::RenderPass) {
-        if self.internal_renderlets.is_empty() {
+        if self.renderlets.is_empty() {
             log::warn!("no internal renderlets, nothing to draw");
         }
-        for ir in self.internal_renderlets.iter() {
+        for ir in self.renderlets.iter() {
             // UNWRAP: panic on purpose
-            if let Some(hr) = ir.inner.upgrade() {
-                let ir = hr.get();
-                let vertex_range = 0..ir.get_vertex_count();
-                let id = hr.id();
-                let instance_range = id.inner()..id.inner() + 1;
-                render_pass.draw(vertex_range, instance_range);
-            }
+            let desc = ir.descriptor.get();
+            let vertex_range = 0..desc.get_vertex_count();
+            let id = ir.descriptor.id();
+            let instance_range = id.inner()..id.inner() + 1;
+            render_pass.draw(vertex_range, instance_range);
         }
     }
 

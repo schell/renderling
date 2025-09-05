@@ -12,7 +12,7 @@ use spirv_std::num_traits::Float;
 use spirv_std::{spirv, Image};
 
 use crate::{
-    atlas::{AtlasDescriptor, AtlasTexture},
+    atlas::{AtlasDescriptor, AtlasTextureDescriptor},
     cubemap::{CubemapDescriptor, CubemapFaceDirection},
     geometry::GeometryDescriptor,
     math::{Fetch, IsSampler, IsVector, Sample2dArray},
@@ -67,7 +67,7 @@ pub struct ShadowMapDescriptor {
     ///
     /// This will be an array of one `Id` for directional and spot lights,
     /// and an array of four `Id`s for a point light.
-    pub atlas_textures_array: Array<Id<AtlasTexture>>,
+    pub atlas_textures_array: Array<Id<AtlasTextureDescriptor>>,
     pub bias_min: f32,
     pub bias_max: f32,
     pub pcf_samples: u32,
@@ -606,7 +606,7 @@ impl ShadowCalculation {
         }
     }
 
-    fn get_atlas_texture_at(&self, light_slab: &[u32], index: usize) -> AtlasTexture {
+    fn get_atlas_texture_at(&self, light_slab: &[u32], index: usize) -> AtlasTextureDescriptor {
         let atlas_texture_id =
             light_slab.read_unchecked(self.shadow_map_desc.atlas_textures_array.at(index));
         light_slab.read_unchecked(atlas_texture_id)

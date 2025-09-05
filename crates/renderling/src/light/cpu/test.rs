@@ -6,15 +6,7 @@ use glam::{Vec3, Vec4, Vec4Swizzles};
 use spirv_std::num_traits::Zero;
 
 use crate::{
-    bvol::BoundingBox,
-    camera::Camera,
-    color::linear_xfer_vec4,
-    light::{LightTiling, LightTilingConfig, SpotLightCalculation},
-    math::GpuRng,
-    material::MaterialDescriptor,
-    prelude::TransformDescriptor,
-    geometry::Vertex,
-    stage::{RenderletDescriptor, RenderletPbrVertexInfo, Stage}, test::BlockOnFuture,
+    bvol::BoundingBox, camera::{Camera}, color::linear_xfer_vec4, geometry::Vertex, light::{LightTiling, LightTilingConfig, SpotLightCalculation}, math::GpuRng, prelude::TransformDescriptor, stage::{Renderlet, RenderletPbrVertexInfo, Stage}, test::BlockOnFuture
 };
 
 use super::*;
@@ -97,7 +89,7 @@ fn spot_one_frame() {
     let camera = doc.cameras.first().unwrap();
     camera
         .as_ref()
-        .modify(|cam| cam.set_projection(crate::camera::perspective(w, h)));
+        .set_projection(crate::camera::perspective(w, h));
     stage.use_camera(camera);
 
     let frame = ctx.get_next_frame().unwrap();
@@ -131,7 +123,7 @@ fn spot_lights() {
     let camera = doc.cameras.first().unwrap();
     camera
         .as_ref()
-        .modify(|cam| cam.set_projection(crate::camera::perspective(w, h)));
+        .set_projection(crate::camera::perspective(w, h));
     stage.use_camera(camera);
 
     let down_light = doc.lights.first().unwrap();
@@ -169,28 +161,23 @@ fn light_tiling_light_bounds() {
 
     // Here we only want to render the bounding boxes of the renderlets,
     // so mark the renderlets themeselves invisible
-    doc.renderlets_iter().for_each(|hy_rend| {
-        hy_rend.modify(|r| {
-            r.visible = false;
-        });
+    doc.renderlets_iter().for_each(|r| {
+        r.set_visible(false);
     });
 
     let colors = [0x6DE1D2FF, 0xFFD63AFF, 0x6DE1D2FF, 0xF75A5AFF].map(|albedo_factor| {
-        stage.new_material(MaterialDescriptor {
-            albedo_factor: {
+        stage.new_material().with_albedo_factor ({
                 let mut color = crate::math::hex_to_vec4(albedo_factor);
                 linear_xfer_vec4(&mut color);
                 color
-            },
-            ..Default::default()
-        })
+            })
     });
     let mut resources = vec![];
     for (i, node) in doc.nodes.iter().enumerate() {
         if node.mesh.is_none() {
             continue;
         }
-        let transform = Mat4::from(node.transform.get_global_transform());
+        let transform = Mat4::from(node.transform.global_descriptor());
         if let Some(mesh_index) = node.mesh {
             log::info!("mesh: {}", node.name.as_deref().unwrap_or("unknown"));
             let mesh = &doc.meshes[mesh_index];
@@ -206,13 +193,12 @@ fn light_tiling_light_bounds() {
                 log::info!("min: {min}, max: {max}");
                 resources.push(
                     stage
-                        .builder()
-                        .with_vertices({
+                        .new_renderlet()
+                        .with_vertices(stage.new_vertices(
                             bb.get_mesh()
                                 .map(|(p, n)| Vertex::default().with_position(p).with_normal(n))
-                        })
-                        .with_material_id(colors[i % colors.len()].id())
-                        .build(),
+                        ))
+                        .with_material(&colors[i % colors.len()])
                 );
             }
         }
@@ -233,11 +219,9 @@ fn gen_vec3(prng: &mut GpuRng) -> Vec3 {
 }
 
 struct GeneratedLight {
-    _unused_transform: Hybrid<TransformDescriptor>,
-    _mesh_geometry: HybridArray<Vertex>,
-    _mesh_material: Hybrid<MaterialDescriptor>,
+    _unused_transform: Transform,
     _light: AnalyticalLight,
-    mesh_renderlet: Hybrid<RenderletDescriptor>,
+    mesh_renderlet: Renderlet,
 }
 
 fn gen_light(stage: &Stage, prng: &mut GpuRng, bounding_boxes: &[BoundingBox]) -> GeneratedLight {
@@ -263,33 +247,19 @@ fn gen_light(stage: &Stage, prng: &mut GpuRng, bounding_boxes: &[BoundingBox]) -
         half_extent: Vec3::new(scale, scale, scale) * 0.5,
     };
 
-    // Also make a renderlet for the light, so we can see where it is.
-    // let transform = stage.new_nested_transform();
-    // transform.modify(|t| {
-    //     if transform.global_transform_id().inner() == 5676 {
-    //         println!("generated position: {position}");
-    //     }
-    //     t.translation = position;
-    // });
-    let (a, b, c, d, e) = stage
-        .builder()
-        .with_transform(TransformDescriptor {
-            translation: position,
-            ..Default::default()
-        })
-        .with_vertices(
+    let _unused_transform = stage.new_transform().with_translation(position);
+    let vertices = stage.new_vertices(
             light_bb
                 .get_mesh()
                 .map(|(p, n)| Vertex::default().with_position(p).with_normal(n)),
-        )
-        .with_material(MaterialDescriptor {
-            albedo_factor: color,
-            has_lighting: false,
-            emissive_factor: color.xyz(),
-            emissive_strength_multiplier: 100.0,
-            ..Default::default()
-        })
-        .suffix({
+        );
+    let material = stage.new_material()
+            .with_albedo_factor(color)
+            .with_has_lighting(false)
+            .with_emissive_factor(color.xyz())
+            .with_emissive_strength_multiplier(100.0);
+    let mesh_renderlet = stage.new_renderlet().with_vertices(vertices).with_material(material);
+    let _light = {
             // suffix the actual analytical light
             let intensity = scale * 100.0;
 
@@ -300,14 +270,12 @@ fn gen_light(stage: &Stage, prng: &mut GpuRng, bounding_boxes: &[BoundingBox]) -
             };
 
             stage.new_analytical_light(light_descriptor)
-        })
-        .build();
+        };
+
     GeneratedLight {
-        _unused_transform: a,
-        _mesh_geometry: b,
-        _mesh_material: c,
-        _light: d,
-        mesh_renderlet: e,
+        _unused_transform,
+        _light,
+        mesh_renderlet,
     }
 }
 
@@ -318,12 +286,12 @@ fn size() -> UVec2 {
     )
 }
 
-fn make_camera() -> Camera {
+fn make_camera(stage: &Stage) -> Camera {
     let size = size();
     let eye = Vec3::new(250.0, 200.0, 250.0);
     let target = Vec3::ZERO;
     log::info!("make_camera: forward {}", (target - eye).normalize());
-    Camera::new(
+    stage.new_camera().with_projection_and_view(
         Mat4::perspective_rh(
             std::f32::consts::FRAC_PI_4,
             size.x as f32 / size.y as f32,
@@ -420,7 +388,7 @@ fn min_max_depth_sanity() {
                 .join("light_tiling_test.glb"),
         )
         .unwrap();
-    let camera = stage.new_camera(make_camera());
+    let camera = make_camera(&stage);
     stage.use_camera(camera);
     snapshot(
         &ctx,
@@ -472,7 +440,7 @@ fn light_bins_sanity() {
                 .join("light_tiling_test.glb"),
         )
         .unwrap();
-    let camera = stage.new_camera(make_camera());
+    let camera = make_camera(&stage);
     stage.use_camera(camera);
     snapshot(&ctx, &stage, "light/tiling/bins/1-scene.png", false);
 
@@ -538,30 +506,21 @@ fn light_bins_point() {
         .new_stage()
         .with_msaa_sample_count(1)
         .with_bloom_mix_strength(0.08);
-    let doc = stage
+    let mut doc = stage
         .load_gltf_document_from_path(
             crate::test::workspace_dir()
                 .join("gltf")
                 .join("pedestal.glb"),
         )
         .unwrap();
-    let materials = doc.materials.get_vec();
-    log::info!("materials: {materials:#?}");
-    doc.materials.set_item(
-        0,
-        MaterialDescriptor {
-            albedo_factor: Vec4::ONE,
-            roughness_factor: 1.0,
-            metallic_factor: 0.0,
-            ..Default::default()
-        },
-    );
+
+    doc.materials.get_mut(0).unwrap()
+        .set_albedo_factor(Vec4::ONE).set_roughness_factor(1.0).set_metallic_factor(0.0);
+        
     let camera = doc.cameras.first().unwrap();
-    camera.camera.modify(|cam| {
         let view = Mat4::look_at_rh(Vec3::new(-7.0, 5.0, 7.0), Vec3::ZERO, Vec3::Y);
         let proj = Mat4::perspective_rh(std::f32::consts::FRAC_PI_6, 1.0, 0.1, 15.0);
-        cam.set_projection_and_view(proj, view);
-    });
+    camera.camera.set_projection_and_view(proj, view);
 
     let _point_light = stage.new_analytical_light(PointLightDescriptor {
         position: Vec3::new(1.1, 1.0, 1.1),
@@ -621,7 +580,7 @@ fn tiling_e2e_sanity_with(
         )
         .unwrap();
 
-    let camera = stage.new_camera(make_camera());
+    let camera = make_camera(&stage);
     stage.use_camera(camera);
 
     let _ = stage.lighting.commit();
@@ -645,7 +604,7 @@ fn tiling_e2e_sanity_with(
         if node.mesh.is_none() {
             continue;
         }
-        let transform = Mat4::from(node.transform.get_global_transform());
+        let transform = Mat4::from(node.transform.global_descriptor());
         if let Some(mesh_index) = node.mesh {
             let mesh = &doc.meshes[mesh_index];
             for prim in mesh.primitives.iter() {
@@ -950,30 +909,27 @@ fn pedestal() {
         .with_lighting(false)
         .with_msaa_sample_count(4)
         .with_bloom_mix_strength(0.08);
-    let doc = stage
+    let mut doc = stage
         .load_gltf_document_from_path(
             crate::test::workspace_dir()
                 .join("gltf")
                 .join("pedestal.glb"),
         )
         .unwrap();
-    let materials = doc.materials.get_vec();
-    log::info!("materials: {materials:#?}");
-    doc.materials.set_item(
-        0,
-        MaterialDescriptor {
-            albedo_factor: Vec4::ONE,
-            roughness_factor: 1.0,
-            metallic_factor: 0.0,
-            ..Default::default()
-        },
-    );
+
+    doc
+        .materials
+        .get_mut(0)
+        .unwrap()
+        .set_albedo_factor(Vec4::ONE)
+        .set_roughness_factor(1.0)
+        .set_metallic_factor(0.0);
+
     let camera = doc.cameras.first().unwrap();
-    camera.camera.modify(|cam| {
-        let view = Mat4::look_at_rh(Vec3::new(-7.0, 5.0, 7.0), Vec3::ZERO, Vec3::Y);
-        let proj = Mat4::perspective_rh(std::f32::consts::FRAC_PI_6, 1.0, 0.1, 15.0);
-        cam.set_projection_and_view(proj, view);
-    });
+    camera.camera.set_projection_and_view(
+        Mat4::perspective_rh(std::f32::consts::FRAC_PI_6, 1.0, 0.1, 15.0),
+        Mat4::look_at_rh(Vec3::new(-7.0, 5.0, 7.0), Vec3::ZERO, Vec3::Y)
+    );
 
     let color = {
         // let mut c = hex_to_vec4(0xEEDF7AFF);
@@ -982,9 +938,6 @@ fn pedestal() {
         Vec4::ONE
     };
     let position = Vec3::new(1.1, 1.0, 1.1);
-    let transform = stage.new_nested_transform();
-    transform.modify(|t| t.translation = position);
-
     stage.set_has_lighting(true);
 
     let mut dir_infos = vec![];
@@ -1001,9 +954,9 @@ fn pedestal() {
             futures_lite::future::block_on(stage.geometry.slab_allocator().read(..)).unwrap();
 
         let renderlet = doc.renderlets_iter().next().unwrap();
-        log::info!("renderlet: {renderlet:#?}");
+        log::info!("renderlet: {:#?}", renderlet.descriptor());
 
-        for vertex_index in 0..renderlet.get().vertices_array.len() {
+        for vertex_index in 0..renderlet.descriptor().vertices_array.len() {
             let mut info = RenderletPbrVertexInfo::default();
             crate::stage::renderlet_vertex(
                 renderlet.id(),
@@ -1042,7 +995,7 @@ fn pedestal() {
     {
         log::info!("adding point light with nested transform");
         let transform = stage.new_nested_transform();
-        transform.modify(|t| t.translation = position);
+        transform.set_translation(position);
 
         let point_light = stage.new_analytical_light(PointLightDescriptor {
             position: Vec3::ZERO,
@@ -1073,10 +1026,10 @@ fn pedestal() {
             futures_lite::future::block_on(stage.geometry.slab_allocator().read(..)).unwrap();
 
         let renderlet = doc.renderlets_iter().next().unwrap();
-        log::info!("renderlet: {renderlet:#?}");
+        log::info!("renderlet: {:#?}", renderlet.descriptor());
         let mut spot_infos = vec![];
 
-        for vertex_index in 0..renderlet.get().vertices_array.len() {
+        for vertex_index in 0..renderlet.descriptor().vertices_array.len() {
             let mut info = RenderletPbrVertexInfo::default();
             crate::stage::renderlet_vertex(
                 renderlet.id(),
@@ -1105,7 +1058,7 @@ fn pedestal() {
         log::info!("adding spot light with node position");
 
         let node_transform = stage.new_nested_transform();
-        node_transform.modify(|t| t.translation = position);
+        node_transform.set_translation(position);
 
         let spot_desc = SpotLightDescriptor {
             position: Vec3::ZERO,

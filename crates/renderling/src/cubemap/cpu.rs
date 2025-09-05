@@ -5,7 +5,6 @@ use glam::{Mat4, UVec2, Vec3, Vec4};
 use image::GenericImageView;
 
 use crate::{
-    camera::Camera,
     stage::{Stage, StageRendering},
     texture::Texture,
 };
@@ -90,7 +89,7 @@ impl SceneCubemap {
         let previous_camera_id = stage.used_camera_id();
 
         // create a new camera for our cube, and use it to render with
-        let camera = stage.geometry.new_camera(Camera::default());
+        let camera = stage.geometry.new_camera();
         stage.use_camera(&camera);
 
         // By setting this to 90 degrees (PI/2 radians) we make sure the viewing field
@@ -103,7 +102,7 @@ impl SceneCubemap {
         for (i, face) in CubemapFaceDirection::FACES.iter().enumerate() {
             // Update the camera angle, no need to sync as calling `Stage::render` does this
             // implicitly
-            camera.modify(|c| c.set_projection_and_view(projection, face.view()));
+            camera.set_projection_and_view(projection, face.view());
             let label_s = format!("scene-to-cubemap-{i}");
             let view = self
                 .cubemap_texture
@@ -288,23 +287,22 @@ mod test {
             .with_background_color(Vec4::ZERO)
             .with_lighting(false)
             .with_msaa_sample_count(4);
-        let _camera =
-            stage.new_camera(
-                Camera::default_perspective(width as f32, height as f32)
-                    .with_view(Mat4::look_at_rh(Vec3::splat(3.0), Vec3::ZERO, Vec3::Y)),
-            );
+        let projection = crate::camera::perspective(width as f32, height as f32);
+        let view = Mat4::look_at_rh(Vec3::splat(3.0), Vec3::ZERO, Vec3::Y);
+        let _camera = stage
+            .new_camera()
+            .with_projection_and_view(projection, view);
         // geometry is the "clip cube" where colors are normalized 3d space coords
         let _rez = stage
-            .builder()
-            .with_vertices(UNIT_POINTS.map(|unit_cube_point| {
+            .new_renderlet()
+            .with_vertices(stage.new_vertices(UNIT_POINTS.map(|unit_cube_point| {
                 Vertex::default()
                     // multiply by 2.0 because the unit cube's AABB bounds are at 0.5, and we want 1.0
                     .with_position(unit_cube_point * 2.0)
                     // "normalize" (really "shift") the space coord from [-0.5, 0.5] to [0.0, 1.0]
                     .with_color((unit_cube_point + 0.5).extend(1.0))
-            }))
-            .with_indices(UNIT_INDICES.map(|u| u as u32))
-            .build();
+            })))
+            .with_indices(stage.new_indices(UNIT_INDICES.map(|u| u as u32)));
 
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());

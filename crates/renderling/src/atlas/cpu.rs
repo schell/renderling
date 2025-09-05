@@ -12,14 +12,14 @@ use image::RgbaImage;
 use snafu::{prelude::*, OptionExt};
 
 use crate::{
-    atlas::AtlasDescriptor,
+    atlas::{AtlasDescriptor, TextureModes},
     bindgroup::ManagedBindGroup,
     texture::{CopiedTextureBuffer, Texture},
 };
 
 use super::{
     atlas_image::{convert_pixels, AtlasImage},
-    AtlasBlittingDescriptor, AtlasTexture,
+    AtlasBlittingDescriptor, AtlasTextureDescriptor,
 };
 
 pub(crate) const ATLAS_SUGGESTED_SIZE: u32 = 2048;
@@ -43,16 +43,75 @@ pub enum AtlasError {
     MissingBindgroup { layer: u32 },
 }
 
+/// A staged texture in the texture atlas.
+///
+/// An [`AtlasTexture`] can be acquired through:
+/// * [`Atlas::add_image`]
+/// * [`Atlas::add_images`].
+/// * [`Atlas::set_images`]
+///
+/// Clones of this type all point to the same underlying data.
+///
+/// Dropping all clones of this type will cause it to be unloaded from the GPU.
+///
+/// If a value of this type has been given to another staged resource,
+/// like [`Material`](crate::material::Material), this will prevent the `AtlasTexture` from
+/// being dropped and unloaded.
+///
+/// Internally an `AtlasTexture` holds a reference to its descriptor,
+/// [`AtlasTextureDescriptor`].
+#[derive(Clone)]
+pub struct AtlasTexture {
+    pub(crate) descriptor: Hybrid<AtlasTextureDescriptor>,
+}
+
+impl AtlasTexture {
+    /// Get the GPU slab identifier of the underlying descriptor.
+    ///
+    /// This is for internal use.
+    pub fn id(&self) -> Id<AtlasTextureDescriptor> {
+        self.descriptor.id()
+    }
+
+    /// Return a copy of the underlying descriptor.
+    pub fn descriptor(&self) -> AtlasTextureDescriptor {
+        self.descriptor.get()
+    }
+
+    /// Return the texture modes of the underlying descriptor.
+    pub fn modes(&self) -> TextureModes {
+        self.descriptor.get().modes
+    }
+
+    /// Sets the texture modes of the underlying descriptor.
+    ///
+    /// ## Warning
+    ///
+    /// This also sets the modes for all clones of this value.
+    pub fn set_modes(&self, modes: TextureModes) {
+        self.descriptor.modify(|d| d.modes = modes);
+    }
+}
+
 /// Used to track textures internally.
+///
+/// We need a separate struct for tracking textures because the atlas
+/// reorganizes the layout (the packing) of textures each time a new
+/// texture is added.
+///
+/// This means the textures must be updated on the GPU, but we don't
+/// want these internal representations to keep unreferenced textures
+/// from dropping, so we have to maintain a separate representation
+/// here.
 #[derive(Clone, Debug)]
 struct InternalAtlasTexture {
     /// Cached value.
-    cache: AtlasTexture,
-    weak: WeakHybrid<AtlasTexture>,
+    cache: AtlasTextureDescriptor,
+    weak: WeakHybrid<AtlasTextureDescriptor>,
 }
 
 impl InternalAtlasTexture {
-    fn from_hybrid(hat: &Hybrid<AtlasTexture>) -> Self {
+    fn from_hybrid(hat: &Hybrid<AtlasTextureDescriptor>) -> Self {
         InternalAtlasTexture {
             cache: hat.get(),
             weak: WeakHybrid::from_hybrid(hat),
@@ -63,7 +122,7 @@ impl InternalAtlasTexture {
         self.weak.has_external_references()
     }
 
-    fn set(&mut self, at: AtlasTexture) {
+    fn set(&mut self, at: AtlasTextureDescriptor) {
         self.cache = at;
         if let Some(hy) = self.weak.upgrade() {
             hy.set(at);
@@ -265,10 +324,7 @@ impl Atlas {
     /// Reset this atlas with all new images.
     ///
     /// Any existing `Hybrid<AtlasTexture>`s will be invalidated.
-    pub fn set_images(
-        &self,
-        images: &[AtlasImage],
-    ) -> Result<Vec<Hybrid<AtlasTexture>>, AtlasError> {
+    pub fn set_images(&self, images: &[AtlasImage]) -> Result<Vec<AtlasTexture>, AtlasError> {
         log::debug!("setting images");
         {
             // UNWRAP: panic on purpose
@@ -291,7 +347,7 @@ impl Atlas {
     pub fn add_images<'a>(
         &self,
         images: impl IntoIterator<Item = &'a AtlasImage>,
-    ) -> Result<Vec<Hybrid<AtlasTexture>>, AtlasError> {
+    ) -> Result<Vec<AtlasTexture>, AtlasError> {
         // UNWRAP: POP
         let mut layers = self.layers.write().unwrap();
         let mut texture_array = self.texture_array.write().unwrap();
@@ -314,7 +370,11 @@ impl Atlas {
         *layers = staged.layers;
 
         staged.image_additions.sort_by_key(|a| a.0);
-        Ok(staged.image_additions.into_iter().map(|a| a.1).collect())
+        Ok(staged
+            .image_additions
+            .into_iter()
+            .map(|a| AtlasTexture { descriptor: a.1 })
+            .collect())
     }
 
     /// Resize the atlas.
@@ -513,7 +573,7 @@ fn pack_images<'a>(
 /// Internal atlas resources.
 struct StagedResources {
     texture: Texture,
-    image_additions: Vec<(usize, Hybrid<AtlasTexture>)>,
+    image_additions: Vec<(usize, Hybrid<AtlasTextureDescriptor>)>,
     layers: Vec<Layer>,
 }
 
@@ -559,7 +619,7 @@ impl StagedResources {
                         original_index,
                         image,
                     } => {
-                        let atlas_texture = AtlasTexture {
+                        let atlas_texture = AtlasTextureDescriptor {
                             offset_px,
                             size_px,
                             frame_index: frame_index as u32,
@@ -692,7 +752,7 @@ impl AtlasBlittingOperation {
         from_texture: &crate::texture::Texture,
         layer: u32,
         to_atlas: &Atlas,
-        atlas_texture: &Hybrid<AtlasTexture>,
+        atlas_texture: &AtlasTexture,
     ) -> Result<(), AtlasError> {
         let runtime = runtime.as_ref();
 
@@ -752,7 +812,7 @@ impl AtlasBlittingOperation {
                     })
             });
 
-        let atlas_texture = atlas_texture.get();
+        let atlas_texture = atlas_texture.descriptor();
         let atlas_view = to_atlas_texture
             .texture
             .create_view(&wgpu::TextureViewDescriptor {
@@ -935,12 +995,10 @@ impl AtlasBlitter {
 #[cfg(test)]
 mod test {
     use crate::{
-        atlas::{AtlasTexture, TextureAddressMode},
-        camera::Camera,
+        atlas::{AtlasTextureDescriptor, TextureAddressMode},
         geometry::Vertex,
-        material::{MaterialDescriptor, Materials},
+        material::Materials,
         test::BlockOnFuture,
-        transform::TransformDescriptor,
         Context,
     };
     use glam::{UVec3, Vec2, Vec3, Vec4};
@@ -959,7 +1017,9 @@ mod test {
             .with_background_color(Vec3::splat(0.0).extend(1.0))
             .with_bloom(false);
         let (projection, view) = crate::camera::default_ortho2d(32.0, 32.0);
-        let _camera = stage.new_camera(Camera::new(projection, view));
+        let _camera = stage
+            .new_camera()
+            .with_projection_and_view(projection, view);
         let dirt = AtlasImage::from_path("../../img/dirt.jpg").unwrap();
         let sandstone = AtlasImage::from_path("../../img/sandstone.png").unwrap();
         let texels = AtlasImage::from_path("../../test_img/atlas/uv_mapping.png").unwrap();
@@ -970,13 +1030,14 @@ mod test {
         let texels_entry = &atlas_entries[2];
 
         let _rez = stage
-            .builder()
-            .with_material(MaterialDescriptor {
-                albedo_texture_id: texels_entry.id(),
-                has_lighting: false,
-                ..Default::default()
-            })
-            .with_vertices({
+            .new_renderlet()
+            .with_material(
+                stage
+                    .new_material()
+                    .with_albedo_texture(texels_entry)
+                    .with_has_lighting(false),
+            )
+            .with_vertices(stage.new_vertices({
                 let tl = Vertex::default()
                     .with_position(Vec3::ZERO)
                     .with_uv0(Vec2::ZERO);
@@ -990,12 +1051,8 @@ mod test {
                     .with_position(Vec3::new(1.0, 1.0, 0.0))
                     .with_uv0(Vec2::splat(1.0));
                 [tl, bl, br, tl, br, tr]
-            })
-            .with_transform(TransformDescriptor {
-                scale: Vec3::new(32.0, 32.0, 1.0),
-                ..Default::default()
-            })
-            .build();
+            }))
+            .with_transform(stage.new_transform().with_scale(Vec3::new(32.0, 32.0, 1.0)));
 
         log::info!("rendering");
         let frame = ctx.get_next_frame().unwrap();
@@ -1018,19 +1075,21 @@ mod test {
             .new_stage()
             .with_background_color(Vec4::new(1.0, 1.0, 0.0, 1.0));
         let (projection, view) = crate::camera::default_ortho2d(w as f32, h as f32);
-        let _camera = stage.new_camera(Camera::new(projection, view));
+        let _camera = stage
+            .new_camera()
+            .with_projection_and_view(projection, view);
         let texels = AtlasImage::from_path("../../img/happy_mac.png").unwrap();
         let entries = stage.set_images(std::iter::repeat_n(texels, 3)).unwrap();
         let clamp_tex = &entries[0];
         let repeat_tex = &entries[1];
-        repeat_tex.modify(|t| {
-            t.modes.s = TextureAddressMode::Repeat;
-            t.modes.t = TextureAddressMode::Repeat;
+        repeat_tex.set_modes(TextureModes {
+            s: TextureAddressMode::Repeat,
+            t: TextureAddressMode::Repeat,
         });
         let mirror_tex = &entries[2];
-        mirror_tex.modify(|t| {
-            t.modes.s = TextureAddressMode::MirroredRepeat;
-            t.modes.t = TextureAddressMode::MirroredRepeat;
+        mirror_tex.set_modes(TextureModes {
+            s: TextureAddressMode::MirroredRepeat,
+            t: TextureAddressMode::MirroredRepeat,
         });
 
         let sheet_w = sheet_w as f32;
@@ -1051,42 +1110,44 @@ mod test {
             [tl, bl, br, tl, br, tr]
         });
         let _clamp_rez = stage
-            .builder()
-            .with_vertices_array(geometry.array())
-            .with_material(MaterialDescriptor {
-                albedo_texture_id: clamp_tex.id(),
-                has_lighting: false,
-                ..Default::default()
-            })
-            .build();
+            .new_renderlet()
+            .with_vertices(&geometry)
+            .with_material(
+                stage
+                    .new_material()
+                    .with_albedo_texture(clamp_tex)
+                    .with_has_lighting(false),
+            );
 
         let _repeat_rez = stage
-            .builder()
-            .with_transform(TransformDescriptor {
-                translation: Vec3::new(sheet_w + 1.0, 0.0, 0.0),
-                ..Default::default()
-            })
-            .with_material(MaterialDescriptor {
-                albedo_texture_id: repeat_tex.id(),
-                has_lighting: false,
-                ..Default::default()
-            })
-            .with_vertices_array(geometry.array())
-            .build();
+            .new_renderlet()
+            .with_transform(stage.new_transform().with_translation(Vec3::new(
+                sheet_w + 1.0,
+                0.0,
+                0.0,
+            )))
+            .with_material(
+                stage
+                    .new_material()
+                    .with_albedo_texture(repeat_tex)
+                    .with_has_lighting(false),
+            )
+            .with_vertices(&geometry);
 
         let _mirror_rez = stage
-            .builder()
-            .with_transform(TransformDescriptor {
-                translation: Vec3::new(sheet_w * 2.0 + 2.0, 0.0, 0.0),
-                ..Default::default()
-            })
-            .with_material(MaterialDescriptor {
-                albedo_texture_id: mirror_tex.id(),
-                has_lighting: false,
-                ..Default::default()
-            })
-            .with_vertices_array(geometry.array())
-            .build();
+            .new_renderlet()
+            .with_transform(stage.new_transform().with_translation(Vec3::new(
+                sheet_w * 2.0 + 2.0,
+                0.0,
+                0.0,
+            )))
+            .with_material(
+                stage
+                    .new_material()
+                    .with_albedo_texture(mirror_tex)
+                    .with_has_lighting(false),
+            )
+            .with_vertices(geometry);
 
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
@@ -1109,77 +1170,82 @@ mod test {
             .with_background_color(Vec4::new(1.0, 1.0, 0.0, 1.0));
 
         let (projection, view) = crate::camera::default_ortho2d(w as f32, h as f32);
-        let _camera = stage.new_camera(Camera::new(projection, view));
+        let _camera = stage
+            .new_camera()
+            .with_projection_and_view(projection, view);
 
         let texels = AtlasImage::from_path("../../img/happy_mac.png").unwrap();
         let entries = stage.set_images(std::iter::repeat_n(texels, 3)).unwrap();
 
         let clamp_tex = &entries[0];
         let repeat_tex = &entries[1];
-        repeat_tex.modify(|t| {
-            t.modes.s = TextureAddressMode::Repeat;
-            t.modes.t = TextureAddressMode::Repeat;
+        repeat_tex.set_modes(TextureModes {
+            s: TextureAddressMode::Repeat,
+            t: TextureAddressMode::Repeat,
         });
 
         let mirror_tex = &entries[2];
-        mirror_tex.modify(|t| {
-            t.modes.s = TextureAddressMode::MirroredRepeat;
-            t.modes.t = TextureAddressMode::MirroredRepeat;
+        mirror_tex.set_modes(TextureModes {
+            s: TextureAddressMode::MirroredRepeat,
+            t: TextureAddressMode::MirroredRepeat,
         });
 
         let sheet_w = sheet_w as f32;
         let sheet_h = sheet_h as f32;
-        let (geometry, _clamp_material, _clamp_prim) = stage
-            .builder()
-            .with_vertices({
-                let tl = Vertex::default()
-                    .with_position(Vec3::ZERO)
-                    .with_uv0(Vec2::ZERO);
-                let tr = Vertex::default()
-                    .with_position(Vec3::new(sheet_w, 0.0, 0.0))
-                    .with_uv0(Vec2::new(-3.0, 0.0));
-                let bl = Vertex::default()
-                    .with_position(Vec3::new(0.0, sheet_h, 0.0))
-                    .with_uv0(Vec2::new(0.0, -3.0));
-                let br = Vertex::default()
-                    .with_position(Vec3::new(sheet_w, sheet_h, 0.0))
-                    .with_uv0(Vec2::splat(-3.0));
-                [tl, bl, br, tl, br, tr]
-            })
-            .with_material(MaterialDescriptor {
-                albedo_texture_id: clamp_tex.id(),
-                has_lighting: false,
-                ..Default::default()
-            })
-            .build();
+        let geometry = stage.new_vertices({
+            let tl = Vertex::default()
+                .with_position(Vec3::ZERO)
+                .with_uv0(Vec2::ZERO);
+            let tr = Vertex::default()
+                .with_position(Vec3::new(sheet_w, 0.0, 0.0))
+                .with_uv0(Vec2::new(-3.0, 0.0));
+            let bl = Vertex::default()
+                .with_position(Vec3::new(0.0, sheet_h, 0.0))
+                .with_uv0(Vec2::new(0.0, -3.0));
+            let br = Vertex::default()
+                .with_position(Vec3::new(sheet_w, sheet_h, 0.0))
+                .with_uv0(Vec2::splat(-3.0));
+            [tl, bl, br, tl, br, tr]
+        });
+        let _clamp_prim = stage
+            .new_renderlet()
+            .with_vertices(&geometry)
+            .with_material(
+                stage
+                    .new_material()
+                    .with_albedo_texture(clamp_tex)
+                    .with_has_lighting(false),
+            );
 
         let _repeat_rez = stage
-            .builder()
-            .with_material(MaterialDescriptor {
-                albedo_texture_id: repeat_tex.id(),
-                has_lighting: false,
-                ..Default::default()
-            })
-            .with_transform(TransformDescriptor {
-                translation: Vec3::new(sheet_w + 1.0, 0.0, 0.0),
-                ..Default::default()
-            })
-            .with_vertices_array(geometry.array())
-            .build();
+            .new_renderlet()
+            .with_material(
+                stage
+                    .new_material()
+                    .with_albedo_texture(repeat_tex)
+                    .with_has_lighting(false),
+            )
+            .with_transform(stage.new_transform().with_translation(Vec3::new(
+                sheet_w + 1.0,
+                0.0,
+                0.0,
+            )))
+            .with_vertices(&geometry);
 
         let _mirror_rez = stage
-            .builder()
-            .with_material(MaterialDescriptor {
-                albedo_texture_id: mirror_tex.id(),
-                has_lighting: false,
-                ..Default::default()
-            })
-            .with_transform(TransformDescriptor {
-                translation: Vec3::new(sheet_w * 2.0 + 2.0, 0.0, 0.0),
-                ..Default::default()
-            })
-            .with_vertices_array(geometry.array())
-            .build();
+            .new_renderlet()
+            .with_material(
+                stage
+                    .new_material()
+                    .with_albedo_texture(mirror_tex)
+                    .with_has_lighting(false),
+            )
+            .with_transform(stage.new_transform().with_translation(Vec3::new(
+                sheet_w * 2.0 + 2.0,
+                0.0,
+                0.0,
+            )))
+            .with_vertices(&geometry);
 
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
@@ -1189,7 +1255,7 @@ mod test {
 
     #[test]
     fn transform_uvs_for_atlas() {
-        let mut tex = AtlasTexture {
+        let mut tex = AtlasTextureDescriptor {
             offset_px: UVec2::ZERO,
             size_px: UVec2::ONE,
             ..Default::default()

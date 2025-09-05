@@ -75,3 +75,5 @@ opt-level = 3
 
 [patch.crates-io]
 spirv-std = { git = "https://github.com/LegNeato/rust-gpu.git", rev = "425328a" }
+crabslab = { path = "../crabslab/crates/crabslab" }
+craballoc = { path = "../crabslab/crates/craballoc" }
