@@ -749,7 +749,8 @@ mod test {
                 stage
                     .new_transform()
                     .with_scale(Vec3::new(10.0, 10.0, 10.0)),
-            );
+            )
+            .with_material(&material);
         println!("cube: {:?}", cube.descriptor());
 
         // we should see a cube with a stoney texture
@@ -819,6 +820,8 @@ mod test {
                 ..Default::default()
             },
         ]);
+        let _color_prim = stage.new_renderlet().with_vertices(&geometry);
+
         let material = stage
             .new_material()
             .with_albedo_texture(&entries[0])

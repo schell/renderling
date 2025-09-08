@@ -204,8 +204,6 @@ impl From<NestedTransform> for Transform {
     }
 }
 
-// Make the API mirror Transform
-
 impl NestedTransform {
     /// Stage a new hierarchical transform on the GPU.
     pub(crate) fn new(slab: &SlabAllocator<impl IsRuntime>) -> Self {
@@ -332,9 +330,7 @@ impl NestedTransform {
         self.set_local_scale(scale);
         self
     }
-}
 
-impl NestedTransform {
     /// Return a pointer to the underlying descriptor data on the GPU.
     ///
     /// The descriptor is the descriptor that describes the _global_ transform.
