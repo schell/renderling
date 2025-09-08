@@ -739,13 +739,13 @@ impl Animator {
             if let Some(node) = self.nodes.get(&node_index) {
                 match property {
                     TweenProperty::Translation(translation) => {
-                        node.transform.set_translation(translation);
+                        node.transform.set_local_translation(translation);
                     }
                     TweenProperty::Rotation(rotation) => {
-                        node.transform.set_rotation(rotation);
+                        node.transform.set_local_rotation(rotation);
                     }
                     TweenProperty::Scale(scale) => {
-                        node.transform.set_scale(scale);
+                        node.transform.set_local_scale(scale);
                     }
                     TweenProperty::MorphTargetWeights(new_weights) => {
                         if node.morph_weights.array().is_empty() {

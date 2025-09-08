@@ -5,16 +5,13 @@ use std::sync::{Arc, RwLock};
 use crate::{
     atlas::{AtlasTexture, TextureAddressMode, TextureModes},
     camera::Camera,
-    geometry::Geometry,
-    stage::{RenderletDescriptor, Stage},
+    stage::Stage,
     transform::{NestedTransform, TransformDescriptor},
     Context,
 };
-use craballoc::prelude::SourceId;
 use crabslab::Id;
 use glam::{Quat, UVec2, Vec2, Vec3Swizzles, Vec4};
 use glyph_brush::ab_glyph;
-use rustc_hash::FxHashMap;
 use snafu::{prelude::*, ResultExt};
 
 pub use glyph_brush::FontId;
@@ -82,36 +79,36 @@ impl UiTransform {
     }
 
     pub fn set_translation(&self, t: Vec2) {
-        self.transform.modify_translation(|a| {
+        self.transform.modify_local_translation(|a| {
             a.x = t.x;
             a.y = t.y;
         });
     }
 
     pub fn get_translation(&self) -> Vec2 {
-        self.transform.translation().xy()
+        self.transform.local_translation().xy()
     }
 
     pub fn set_rotation(&self, radians: f32) {
         let rotation = Quat::from_rotation_z(radians);
         // TODO: check to see if *= rotation makes sense here
-        self.transform.modify_rotation(|t| {
+        self.transform.modify_local_rotation(|t| {
             *t = *t * rotation;
         });
     }
 
     pub fn get_rotation(&self) -> f32 {
-        self.transform.rotation().to_euler(glam::EulerRot::XYZ).2
+        self.transform.local_rotation().to_euler(glam::EulerRot::XYZ).2
     }
 
     pub fn set_z(&self, z: f32) {
-        self.transform.modify_translation(|t| {
+        self.transform.modify_local_translation(|t| {
             t.z = z;
         });
     }
 
     pub fn get_z(&self) -> f32 {
-        self.transform.translation().z
+        self.transform.local_translation().z
     }
 }
 
@@ -280,8 +277,16 @@ impl Ui {
 
     fn reorder_renderlets(&self) {
         self.stage.sort_renderlets(|a, b| {
-            let za = a.transform.map(|t| t.translation.z).unwrap_or_default();
-            let zb = b.transform.map(|t| t.translation.z).unwrap_or_default();
+            let za = a
+                .transform()
+                .as_ref()
+                .map(|t| t.translation().z)
+                .unwrap_or_default();
+            let zb = b
+                .transform()
+                .as_ref()
+                .map(|t| t.translation().z)
+                .unwrap_or_default();
             za.total_cmp(&zb)
         });
     }

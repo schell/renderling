@@ -995,7 +995,7 @@ fn pedestal() {
     {
         log::info!("adding point light with nested transform");
         let transform = stage.new_nested_transform();
-        transform.set_translation(position);
+        transform.set_local_translation(position);
 
         let point_light = stage.new_analytical_light(PointLightDescriptor {
             position: Vec3::ZERO,
@@ -1058,7 +1058,7 @@ fn pedestal() {
         log::info!("adding spot light with node position");
 
         let node_transform = stage.new_nested_transform();
-        node_transform.set_translation(position);
+        node_transform.set_local_translation(position);
 
         let spot_desc = SpotLightDescriptor {
             position: Vec3::ZERO,

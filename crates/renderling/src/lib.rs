@@ -955,18 +955,18 @@ mod test {
 
         let root_node = stage
             .new_nested_transform()
-            .with_scale(Vec3::new(25.0, 25.0, 1.0));
+            .with_local_scale(Vec3::new(25.0, 25.0, 1.0));
         println!("root_node: {:#?}", root_node.global_descriptor());
 
         let offset = Vec3::new(1.0, 1.0, 0.0);
 
-        let cyan_node = stage.new_nested_transform().with_translation(offset);
+        let cyan_node = stage.new_nested_transform().with_local_translation(offset);
         println!("cyan_node: {:#?}", cyan_node.global_descriptor());
 
-        let yellow_node = stage.new_nested_transform().with_translation(offset);
+        let yellow_node = stage.new_nested_transform().with_local_translation(offset);
         println!("yellow_node: {:#?}", yellow_node.global_descriptor());
 
-        let red_node = stage.new_nested_transform().with_translation(offset);
+        let red_node = stage.new_nested_transform().with_local_translation(offset);
         println!("red_node: {:#?}", red_node.global_descriptor());
 
         root_node.add_child(&cyan_node);

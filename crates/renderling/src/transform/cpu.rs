@@ -2,11 +2,7 @@
 
 use std::sync::{Arc, RwLock};
 
-use craballoc::{
-    runtime::IsRuntime,
-    slab::{SlabAllocator, SourceId},
-    value::Hybrid,
-};
+use craballoc::{runtime::IsRuntime, slab::SlabAllocator, value::Hybrid};
 use crabslab::Id;
 use glam::{Mat4, Quat, Vec3};
 
@@ -15,7 +11,7 @@ use super::TransformDescriptor;
 /// A decomposed 3d transformation.
 #[derive(Clone)]
 pub struct Transform {
-    descriptor: Hybrid<TransformDescriptor>,
+    pub(crate) descriptor: Hybrid<TransformDescriptor>,
 }
 
 impl From<&Transform> for Transform {
@@ -223,13 +219,8 @@ impl NestedTransform {
         nested
     }
 
-    /// Return the _local_ transform in combined matrix format;
-    pub fn as_mat4(&self) -> Mat4 {
-        (*self.local_transform.read().unwrap()).into()
-    }
-
     /// Get the _local_ translation of the transform.
-    pub fn translation(&self) -> Vec3 {
+    pub fn local_translation(&self) -> Vec3 {
         self.local_transform.read().unwrap().translation
     }
 
@@ -238,9 +229,11 @@ impl NestedTransform {
     /// # Arguments
     ///
     /// - `f`: A closure that takes a mutable reference to the translation vector and returns a value of type `T`.
-    pub fn modify_translation<T>(&self, f: impl FnOnce(&mut Vec3) -> T) -> T {
+    pub fn modify_local_translation<T>(&self, f: impl FnOnce(&mut Vec3) -> T) -> T {
         let mut local_transform = self.local_transform.write().unwrap();
-        f(&mut local_transform.translation)
+        let t = f(&mut local_transform.translation);
+        self.mark_dirty();
+        t
     }
 
     /// Set the _local_ translation of the transform.
@@ -248,8 +241,9 @@ impl NestedTransform {
     /// # Arguments
     ///
     /// - `translation`: A 3d translation vector `Vec3`.
-    pub fn set_translation(&self, translation: impl Into<Vec3>) -> &Self {
+    pub fn set_local_translation(&self, translation: impl Into<Vec3>) -> &Self {
         self.local_transform.write().unwrap().translation = translation.into();
+        self.mark_dirty();
         self
     }
 
@@ -258,13 +252,13 @@ impl NestedTransform {
     /// # Arguments
     ///
     /// - `translation`: A 3d translation vector `Vec3`.
-    pub fn with_translation(self, translation: impl Into<Vec3>) -> Self {
-        self.set_translation(translation);
+    pub fn with_local_translation(self, translation: impl Into<Vec3>) -> Self {
+        self.set_local_translation(translation);
         self
     }
 
     /// Get the _local_ rotation of the transform.
-    pub fn rotation(&self) -> Quat {
+    pub fn local_rotation(&self) -> Quat {
         self.local_transform.read().unwrap().rotation
     }
 
@@ -273,9 +267,11 @@ impl NestedTransform {
     /// # Arguments
     ///
     /// - `f`: A closure that takes a mutable reference to the rotation quaternion and returns a value of type `T`.
-    pub fn modify_rotation<T>(&self, f: impl FnOnce(&mut Quat) -> T) -> T {
+    pub fn modify_local_rotation<T>(&self, f: impl FnOnce(&mut Quat) -> T) -> T {
         let mut local_transform = self.local_transform.write().unwrap();
-        f(&mut local_transform.rotation)
+        let t = f(&mut local_transform.rotation);
+        self.mark_dirty();
+        t
     }
 
     /// Set the _local_ rotation of the transform.
@@ -283,8 +279,9 @@ impl NestedTransform {
     /// # Arguments
     ///
     /// - `rotation`: A quaternion representing the rotation.
-    pub fn set_rotation(&self, rotation: impl Into<Quat>) -> &Self {
+    pub fn set_local_rotation(&self, rotation: impl Into<Quat>) -> &Self {
         self.local_transform.write().unwrap().rotation = rotation.into();
+        self.mark_dirty();
         self
     }
 
@@ -293,13 +290,13 @@ impl NestedTransform {
     /// # Arguments
     ///
     /// - `rotation`: A quaternion representing the rotation.
-    pub fn with_rotation(self, rotation: impl Into<Quat>) -> Self {
-        self.set_rotation(rotation);
+    pub fn with_local_rotation(self, rotation: impl Into<Quat>) -> Self {
+        self.set_local_rotation(rotation);
         self
     }
 
     /// Get the _local_ scale of the transform.
-    pub fn scale(&self) -> Vec3 {
+    pub fn local_scale(&self) -> Vec3 {
         self.local_transform.read().unwrap().scale
     }
 
@@ -308,9 +305,11 @@ impl NestedTransform {
     /// # Arguments
     ///
     /// - `f`: A closure that takes a mutable reference to the scale vector and returns a value of type `T`.
-    pub fn modify_scale<T>(&self, f: impl FnOnce(&mut Vec3) -> T) -> T {
+    pub fn modify_local_scale<T>(&self, f: impl FnOnce(&mut Vec3) -> T) -> T {
         let mut local_transform = self.local_transform.write().unwrap();
-        f(&mut local_transform.scale)
+        let t = f(&mut local_transform.scale);
+        self.mark_dirty();
+        t
     }
 
     /// Set the _local_ scale of the transform.
@@ -318,8 +317,9 @@ impl NestedTransform {
     /// # Arguments
     ///
     /// - `scale`: A 3d scale vector `Vec3`.
-    pub fn set_scale(&self, scale: impl Into<Vec3>) -> &Self {
+    pub fn set_local_scale(&self, scale: impl Into<Vec3>) -> &Self {
         self.local_transform.write().unwrap().scale = scale.into();
+        self.mark_dirty();
         self
     }
 
@@ -328,8 +328,8 @@ impl NestedTransform {
     /// # Arguments
     ///
     /// - `scale`: A 3d scale vector `Vec3`.
-    pub fn with_scale(self, scale: impl Into<Vec3>) -> Self {
-        self.set_scale(scale);
+    pub fn with_local_scale(self, scale: impl Into<Vec3>) -> Self {
+        self.set_local_scale(scale);
         self
     }
 }
@@ -358,10 +358,6 @@ impl NestedTransform {
     /// Return the descriptor of the _local_ tarnsform.
     pub fn local_descriptor(&self) -> TransformDescriptor {
         *self.local_transform.read().unwrap()
-    }
-
-    pub(crate) fn get_notifier_index(&self) -> SourceId {
-        self.global_transform.descriptor.notifier_index()
     }
 
     fn mark_dirty(&self) {

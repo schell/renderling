@@ -8,7 +8,7 @@ use crabslab::Id;
 
 use crate::{
     cull::{ComputeCulling, CullingError},
-    stage::{Renderlet, RenderletDescriptor, RenderletSortItem},
+    stage::{Renderlet, RenderletDescriptor},
     texture::Texture,
     Context,
 };
@@ -182,23 +182,11 @@ impl DrawCalls {
     }
 
     /// Sort draw calls using a function compairing [`RenderletSortItem`]s.
-    pub fn sort_renderlets(
-        &mut self,
-        f: impl Fn(&RenderletSortItem, &RenderletSortItem) -> std::cmp::Ordering,
-    ) {
-        self.renderlets.sort_by(|a, b| {
-            let a = a.sort_item();
-            let b = b.sort_item();
-            f(&a, &b)
-        });
+    pub fn sort_renderlets(&mut self, f: impl Fn(&Renderlet, &Renderlet) -> std::cmp::Ordering) {
+        self.renderlets.sort_by(f);
         if let Some(indirect) = &mut self.drawing_strategy.indirect {
             indirect.invalidate();
         }
-    }
-
-    /// Return an iterator over all sort items.
-    pub fn sort_items(&self) -> impl Iterator<Item = RenderletSortItem> + '_ {
-        self.renderlets.iter().map(Renderlet::sort_item)
     }
 
     /// Returns the number of draw calls (direct or indirect) that will be

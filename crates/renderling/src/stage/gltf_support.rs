@@ -212,6 +212,8 @@ impl Material {
         let builder = stage.new_material();
         if material.unlit() {
             log::trace!("  is unlit");
+            builder.set_has_lighting(false);
+
             if let Some(info) = pbr.base_color_texture() {
                 let texture = info.texture();
                 let index = texture.index();
@@ -223,8 +225,8 @@ impl Material {
             builder.set_albedo_factor(pbr.base_color_factor().into());
         } else {
             log::trace!("  is pbr");
+            builder.set_has_lighting(true);
 
-            builder.set_albedo_factor(pbr.base_color_factor().into());
             if let Some(info) = pbr.base_color_texture() {
                 let texture = info.texture();
                 let index = texture.index();
@@ -233,6 +235,7 @@ impl Material {
                     builder.set_albedo_tex_coord(info.tex_coord());
                 }
             }
+            builder.set_albedo_factor(pbr.base_color_factor().into());
 
             if let Some(info) = pbr.metallic_roughness_texture() {
                 let index = info.texture().index();
@@ -268,8 +271,6 @@ impl Material {
                     builder.set_emissive_tex_coord(emissive_tex.tex_coord());
                 }
             }
-
-            builder.set_emissive_factor(Vec3::from(material.emissive_factor()));
             builder.set_emissive_strength_multiplier(material.emissive_strength().unwrap_or(1.0));
         };
         Ok(builder)
@@ -863,9 +864,9 @@ impl GltfDocument {
                 } = node.transform().into();
                 let transform = stage
                     .new_nested_transform()
-                    .with_translation(translation)
-                    .with_rotation(rotation)
-                    .with_scale(scale);
+                    .with_local_translation(translation)
+                    .with_local_rotation(rotation)
+                    .with_local_scale(scale);
                 for node in node.children() {
                     let child_transform =
                         transform_for_node(nesting_level + 1, stage, cache, &node);

@@ -1271,19 +1271,10 @@ impl Stage {
     /// Sort the drawing order of renderlets.
     ///
     /// This determines the order in which [`Renderlet`]s are drawn each frame.
-    pub fn sort_renderlets(
-        &self,
-        f: impl Fn(&RenderletSortItem, &RenderletSortItem) -> std::cmp::Ordering,
-    ) {
+    pub fn sort_renderlets(&self, f: impl Fn(&Renderlet, &Renderlet) -> std::cmp::Ordering) {
         // UNWRAP: panic on purpose
         let mut guard = self.draw_calls.write().unwrap();
         guard.sort_renderlets(f);
-    }
-
-    /// Returns the sort items of all staged [`Renderlet`]s.
-    pub fn renderlet_sort_items(&self) -> Vec<RenderletSortItem> {
-        // UNWRAP: panic on purpose
-        self.draw_calls.read().unwrap().sort_items().collect()
     }
 
     /// Returns a clone of the current depth texture.
@@ -1471,8 +1462,9 @@ mod test {
         let slab = SlabAllocator::<CpuRuntime>::new(&CpuRuntime, "transform", ());
         // Setup a hierarchy of transforms
         let root = NestedTransform::new(&slab);
-        let child = NestedTransform::new(&slab).with_translation(Vec3::new(1.0, 0.0, 0.0));
-        let grandchild = NestedTransform::new(&slab).with_translation(Vec3::new(1.0, 0.0, 0.0));
+        let child = NestedTransform::new(&slab).with_local_translation(Vec3::new(1.0, 0.0, 0.0));
+        let grandchild =
+            NestedTransform::new(&slab).with_local_translation(Vec3::new(1.0, 0.0, 0.0));
         log::info!("hierarchy");
         // Build the hierarchy
         root.add_child(&child);

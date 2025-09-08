@@ -9,18 +9,11 @@ use crabslab::{Array, Id};
 use crate::{
     bvol::BoundingSphere,
     geometry::{Indices, MorphTargetWeights, MorphTargets, Skin, Vertices},
-    material::{Material, MaterialDescriptor},
+    material::Material,
     stage::RenderletDescriptor,
-    transform::{Transform, TransformDescriptor},
+    transform::Transform,
     types::GpuOnlyArray,
 };
-
-/// Used to sort renderlet draw calls.
-pub struct RenderletSortItem {
-    pub descriptor: RenderletDescriptor,
-    pub transform: Option<TransformDescriptor>,
-    pub material: Option<MaterialDescriptor>,
-}
 
 /// A unit of rendering.
 ///
@@ -59,27 +52,6 @@ impl Renderlet {
         .with_vertices(stage.default_vertices());
         stage.add_renderlet(&renderlet);
         renderlet
-    }
-
-    /// Return a struct that can be used to order a [`Renderlet`] relative to others.
-    pub fn sort_item(&self) -> RenderletSortItem {
-        let transform = self
-            .transform
-            .lock()
-            .unwrap()
-            .as_ref()
-            .map(|t| t.descriptor());
-        let material = self
-            .material
-            .lock()
-            .unwrap()
-            .as_ref()
-            .map(|m| m.descriptor());
-        RenderletSortItem {
-            descriptor: self.descriptor.get(),
-            transform,
-            material,
-        }
     }
 }
 
