@@ -1,17 +1,19 @@
 //! CPU part of ui.
 
+use core::sync::atomic::AtomicBool;
 use std::sync::{Arc, RwLock};
 
 use crate::{
-    atlas::{AtlasTexture, TextureAddressMode, TextureModes},
+    atlas::{AtlasTexture, AtlasTextureDescriptor, TextureAddressMode, TextureModes},
     camera::Camera,
     stage::Stage,
-    transform::{NestedTransform, TransformDescriptor},
+    transform::NestedTransform,
     Context,
 };
 use crabslab::Id;
 use glam::{Quat, UVec2, Vec2, Vec3Swizzles, Vec4};
 use glyph_brush::ab_glyph;
+use rustc_hash::FxHashMap;
 use snafu::{prelude::*, ResultExt};
 
 pub use glyph_brush::FontId;
@@ -63,22 +65,25 @@ pub enum UiError {
 /// `ImageId` can be created with [`Ui::load_image`].
 #[repr(transparent)]
 #[derive(Clone, Copy, Debug)]
-pub struct ImageId(usize);
+pub struct ImageId(Id<AtlasTextureDescriptor>);
 
 /// A two dimensional transformation.
 ///
 /// Clones of `UiTransform` all point to the same data.
 #[derive(Clone, Debug)]
 pub struct UiTransform {
+    should_reorder: Arc<AtomicBool>,
     transform: NestedTransform,
 }
 
 impl UiTransform {
-    pub(crate) fn id(&self) -> Id<TransformDescriptor> {
-        self.transform.global_id()
+    fn mark_should_reorder(&self) {
+        self.should_reorder
+            .store(true, std::sync::atomic::Ordering::Relaxed);
     }
 
     pub fn set_translation(&self, t: Vec2) {
+        self.mark_should_reorder();
         self.transform.modify_local_translation(|a| {
             a.x = t.x;
             a.y = t.y;
@@ -90,6 +95,7 @@ impl UiTransform {
     }
 
     pub fn set_rotation(&self, radians: f32) {
+        self.mark_should_reorder();
         let rotation = Quat::from_rotation_z(radians);
         // TODO: check to see if *= rotation makes sense here
         self.transform.modify_local_rotation(|t| {
@@ -105,6 +111,7 @@ impl UiTransform {
     }
 
     pub fn set_z(&self, z: f32) {
+        self.mark_should_reorder();
         self.transform.modify_local_translation(|t| {
             t.z = z;
         });
@@ -126,7 +133,8 @@ pub struct UiImage(AtlasTexture);
 pub struct Ui {
     camera: Camera,
     stage: Stage,
-    images: Arc<RwLock<Vec<UiImage>>>,
+    should_reorder: Arc<AtomicBool>,
+    images: Arc<RwLock<FxHashMap<Id<AtlasTextureDescriptor>, UiImage>>>,
     fonts: Arc<RwLock<Vec<FontArc>>>,
     default_stroke_options: Arc<RwLock<StrokeOptions>>,
     default_fill_options: Arc<RwLock<FillOptions>>,
@@ -147,6 +155,7 @@ impl Ui {
         Ui {
             camera,
             stage,
+            should_reorder: AtomicBool::new(true).into(),
             images: Default::default(),
             fonts: Default::default(),
             default_stroke_options: Default::default(),
@@ -214,16 +223,43 @@ impl Ui {
     }
 
     fn new_transform(&self) -> UiTransform {
+        self.mark_should_reorder();
         let transform = self.stage.new_nested_transform();
-        UiTransform { transform }
+        UiTransform {
+            transform,
+            should_reorder: self.should_reorder.clone(),
+        }
     }
 
-    pub fn new_path(&self) -> UiPathBuilder {
+    fn mark_should_reorder(&self) {
+        self.should_reorder
+            .store(true, std::sync::atomic::Ordering::Relaxed)
+    }
+
+    pub fn path_builder(&self) -> UiPathBuilder {
+        self.mark_should_reorder();
         UiPathBuilder::new(self)
     }
 
-    pub fn new_text(&self) -> UiTextBuilder {
+    /// Remove the `path` from the [`Ui`].
+    ///
+    /// The given `path` must have been created with this [`Ui`], otherwise this function is
+    /// a noop.
+    pub fn remove_path(&self, path: &UiPath) {
+        self.stage.remove_renderlet(&path.renderlet);
+    }
+
+    pub fn text_builder(&self) -> UiTextBuilder {
+        self.mark_should_reorder();
         UiTextBuilder::new(self)
+    }
+
+    /// Remove the text from the [`Ui`].
+    ///
+    /// The given `text` must have been created with this [`Ui`], otherwise this function is
+    /// a noop.
+    pub fn remove_text(&self, text: &UiText) {
+        self.stage.remove_renderlet(&text.renderlet);
     }
 
     pub async fn load_font(&self, path: impl AsRef<str>) -> Result<FontId, UiError> {
@@ -269,13 +305,14 @@ impl Ui {
             t: TextureAddressMode::Repeat,
         });
         let mut guard = self.images.write().unwrap();
-        let id = guard.len();
-        guard.push(UiImage(entry));
+        let id = entry.id();
+        guard.insert(id, UiImage(entry));
         Ok(ImageId(id))
     }
 
-    pub(crate) fn get_image(&self, index: usize) -> Option<UiImage> {
-        self.images.read().unwrap().get(index).cloned()
+    /// Remove an image previously loaded with [`Ui::load_image`].
+    pub fn remove_image(&self, image_id: &ImageId) -> Option<UiImage> {
+        self.images.write().unwrap().remove(&image_id.0)
     }
 
     fn reorder_renderlets(&self) {
@@ -295,6 +332,12 @@ impl Ui {
     }
 
     pub fn render(&self, view: &wgpu::TextureView) {
+        if self
+            .should_reorder
+            .swap(false, std::sync::atomic::Ordering::Relaxed)
+        {
+            self.reorder_renderlets();
+        }
         self.stage.render(view);
     }
 }

@@ -345,8 +345,9 @@ impl UiPathBuilder {
         let material = self.ui.stage.new_material();
         let mut size = Vec2::ONE;
         // If we have an image use it in the material
-        if let Some(ImageId(index)) = options.image_id {
-            if let Some(image) = self.ui.get_image(index) {
+        if let Some(ImageId(id)) = &options.image_id {
+            let guard = self.ui.images.read().unwrap();
+            if let Some(image) = guard.get(id) {
                 let size_px = image.0.descriptor().size_px;
                 log::debug!("size: {}", size_px);
                 size.x = size_px.x as f32;
@@ -423,8 +424,9 @@ impl UiPathBuilder {
         let material = self.ui.stage.new_material();
         let mut size = Vec2::ONE;
         // If we have an image, use it in the material
-        if let Some(ImageId(index)) = image_id {
-            if let Some(image) = self.ui.get_image(index) {
+        if let Some(ImageId(id)) = &image_id {
+            let guard = self.ui.images.read().unwrap();
+            if let Some(image) = guard.get(id) {
                 let size_px = image.0.descriptor.get().size_px;
                 log::debug!("size: {}", size_px);
                 size.x = size_px.x as f32;
@@ -539,7 +541,7 @@ mod test {
         let ctx = Context::headless(100, 100).block();
         let ui = Ui::new(&ctx).with_antialiasing(false);
         let builder = ui
-            .new_path()
+            .path_builder()
             .with_fill_color([1.0, 1.0, 0.0, 1.0])
             .with_stroke_color([0.0, 1.0, 1.0, 1.0])
             .with_rectangle(Vec2::splat(10.0), Vec2::splat(60.0))
@@ -586,7 +588,7 @@ mod test {
         // rectangle
         let fill = colors.next_color();
         let _rect = ui
-            .new_path()
+            .path_builder()
             .with_fill_color(fill)
             .with_stroke_color(hex_to_vec4(0x333333FF))
             .with_rectangle(Vec2::splat(2.0), Vec2::splat(42.0))
@@ -595,7 +597,7 @@ mod test {
         // circle
         let fill = colors.next_color();
         let _circ = ui
-            .new_path()
+            .path_builder()
             .with_fill_color(fill)
             .with_stroke_color(hex_to_vec4(0x333333FF))
             .with_circle([64.0, 22.0], 20.0)
@@ -604,7 +606,7 @@ mod test {
         // ellipse
         let fill = colors.next_color();
         let _elli = ui
-            .new_path()
+            .path_builder()
             .with_fill_color(fill)
             .with_stroke_color(hex_to_vec4(0x333333FF))
             .with_ellipse([104.0, 22.0], [20.0, 15.0], std::f32::consts::FRAC_PI_4)
@@ -623,7 +625,7 @@ mod test {
         let fill = colors.next_color();
         let center = Vec2::new(144.0, 22.0);
         let _penta = ui
-            .new_path()
+            .path_builder()
             .with_fill_color(fill)
             .with_stroke_color(hex_to_vec4(0x333333FF))
             .with_polygon(true, circle_points(5, 20.0).into_iter().map(|p| p + center))
@@ -632,7 +634,7 @@ mod test {
         let fill = colors.next_color();
         let center = Vec2::new(184.0, 22.0);
         let _star = ui
-            .new_path()
+            .path_builder()
             .with_fill_color(fill)
             .with_stroke_color(hex_to_vec4(0x333333FF))
             .with_polygon(
@@ -644,7 +646,7 @@ mod test {
         let fill = colors.next_color();
         let tl = Vec2::new(210.0, 4.0);
         let _rrect = ui
-            .new_path()
+            .path_builder()
             .with_fill_color(fill)
             .with_stroke_color(hex_to_vec4(0x333333FF))
             .with_rounded_rectangle(tl, tl + Vec2::new(40.0, 40.0), 5.0, 0.0, 0.0, 10.0)
@@ -664,7 +666,7 @@ mod test {
         let image_id = futures_lite::future::block_on(ui.load_image("../../img/dirt.jpg")).unwrap();
         let center = Vec2::splat(w / 2.0);
         let _path = ui
-            .new_path()
+            .path_builder()
             .with_polygon(
                 true,
                 star_points(7, w / 2.0, w / 3.0)

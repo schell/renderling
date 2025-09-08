@@ -691,7 +691,7 @@ mod test {
             shadows.push(shadow);
         }
 
-        stage.use_camera(&camera);
+        stage.use_camera(camera);
 
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());

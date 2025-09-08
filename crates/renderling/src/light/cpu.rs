@@ -156,7 +156,7 @@ impl core::fmt::Display for AnalyticalLight {
                 .read()
                 .unwrap()
                 .as_ref()
-                .and_then(|h| { Some(h.global_id()) })
+                .map(|h| h.global_id())
         ))
     }
 }

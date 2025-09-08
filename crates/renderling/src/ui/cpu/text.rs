@@ -19,16 +19,6 @@ use image::{DynamicImage, GenericImage, ImageBuffer, Luma, Rgba};
 
 use super::{Ui, UiTransform};
 
-// TODO: make UiText able to be updated without fully destroying it
-pub struct UiText {
-    pub cache: GlyphCache,
-    pub transform: UiTransform,
-    pub texture: AtlasTexture,
-    pub material: Material,
-    pub renderlet: Renderlet,
-    pub bounds: (Vec2, Vec2),
-}
-
 pub struct UiTextBuilder {
     ui: Ui,
     material: Material,
@@ -109,13 +99,35 @@ impl UiTextBuilder {
             .with_transform(&transform.transform)
             .with_material(&material);
         UiText {
-            cache,
+            _cache: cache,
             bounds,
             transform,
-            texture: entry,
-            material,
+            _texture: entry,
+            _material: material,
             renderlet,
         }
+    }
+}
+
+pub struct UiText {
+    pub(crate) transform: UiTransform,
+    pub(crate) renderlet: Renderlet,
+    pub(crate) bounds: (Vec2, Vec2),
+
+    pub(crate) _cache: GlyphCache,
+    pub(crate) _texture: AtlasTexture,
+    pub(crate) _material: Material,
+}
+
+impl UiText {
+    /// Returns the bounds of this text.
+    pub fn bounds(&self) -> (Vec2, Vec2) {
+        self.bounds
+    }
+
+    /// Returns the transform of this text.
+    pub fn transform(&self) -> &UiTransform {
+        &self.transform
     }
 }
 
@@ -335,7 +347,7 @@ mod test {
         let ui = Ui::new(&ctx);
         let _font_id = ui.add_font(font);
         let _text = ui
-            .new_text()
+            .text_builder()
             .with_section(
                 Section::default()
                     .add_text(
@@ -387,7 +399,7 @@ mod test {
                      molestiae eaque ab commodi et.\nQuidem ex tempore ipsam. Incidunt suscipit \
                      aut commodi cum atque voluptate est.";
         let text = ui
-            .new_text()
+            .text_builder()
             .with_section(
                 Section::default().add_text(
                     Text::new(text1)
@@ -409,7 +421,7 @@ mod test {
         log::info!("created text");
 
         let (fill, stroke) = ui
-            .new_path()
+            .path_builder()
             .with_fill_color([1.0, 1.0, 0.0, 1.0])
             .with_stroke_color([1.0, 0.0, 1.0, 1.0])
             .with_rectangle(text.bounds.0, text.bounds.1)
@@ -461,8 +473,8 @@ mod test {
         )
         .unwrap();
         log::info!("loaded font");
-        let mut _text = ui
-            .new_text()
+        let text = ui
+            .text_builder()
             .with_section(
                 Section::default()
                     .add_text(
@@ -481,8 +493,10 @@ mod test {
         img_diff::assert_img_eq("ui/text/can_recreate_0.png", img);
 
         log::info!("replacing text");
-        _text = ui
-            .new_text()
+        ui.remove_text(&text);
+
+        let _ = ui
+            .text_builder()
             .with_section(
                 Section::default()
                     .add_text(

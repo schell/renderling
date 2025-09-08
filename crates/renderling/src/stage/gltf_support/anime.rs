@@ -1,5 +1,4 @@
 //! Animation helpers for gltf.
-use craballoc::prelude::HybridArray;
 use glam::{Quat, Vec3};
 use snafu::prelude::*;
 
@@ -767,7 +766,7 @@ impl Animator {
 
 #[cfg(test)]
 mod test {
-    use crate::{camera::CameraDescriptor, stage::Animator, test::BlockOnFuture, Context};
+    use crate::{stage::Animator, test::BlockOnFuture, Context};
     use glam::Vec3;
 
     #[test]

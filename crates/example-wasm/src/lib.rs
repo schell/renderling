@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use glam::{Vec2, Vec4};
 use renderling::{prelude::*, ui::prelude::*};
 use wasm_bindgen::prelude::*;
@@ -72,7 +73,7 @@ pub async fn main() {
 
     let ui = ctx.new_ui();
     let path = ui
-        .new_path()
+        .path_builder()
         .with_circle(Vec2::splat(100.0), 20.0)
         .with_fill_color(Vec4::new(1.0, 1.0, 0.0, 1.0))
         .fill();
@@ -81,7 +82,7 @@ pub async fn main() {
         .await
         .expect_throw("Could not load font");
     let text = ui
-        .new_text()
+        .text_builder()
         .with_color(
             // white
             Vec4::ONE,

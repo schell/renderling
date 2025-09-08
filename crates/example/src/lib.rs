@@ -84,15 +84,15 @@ impl AppUi {
         let translation = Vec2::new(2.0, 2.0);
         let text = format!("{}fps", fps_counter.current_fps_string());
         let fps_text = ui
-            .new_text()
+            .text_builder()
             .with_color(Vec3::ZERO.extend(1.0))
             .with_section(Section::new().add_text(Text::new(&text).with_scale(32.0)))
             .build();
-        fps_text.transform.set_translation(translation);
+        fps_text.transform().set_translation(translation);
         let background = ui
-            .new_path()
+            .path_builder()
             .with_fill_color(Vec4::ONE)
-            .with_rectangle(fps_text.bounds.0, fps_text.bounds.1)
+            .with_rectangle(fps_text.bounds().0, fps_text.bounds().1)
             .fill();
         background.transform.set_translation(translation);
         background.transform.set_z(-0.9);
