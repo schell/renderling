@@ -379,6 +379,8 @@ mod test {
             ui.load_font("../../fonts/Recursive Mn Lnr St Med Nerd Font Complete.ttf"),
         )
         .unwrap();
+        log::info!("loaded font");
+
         let text1 = "Voluptas magnam sint et incidunt. Aliquam praesentium voluptas ut nemo \
                      laboriosam. Dicta qui et dicta.";
         let text2 = "Inventore impedit quo ratione ullam blanditiis soluta aliquid. Enim \
@@ -404,6 +406,7 @@ mod test {
                     .with_bounds((400.0, f32::INFINITY)),
             )
             .build();
+        log::info!("created text");
 
         let (fill, stroke) = ui
             .new_path()
@@ -411,26 +414,42 @@ mod test {
             .with_stroke_color([1.0, 0.0, 1.0, 1.0])
             .with_rectangle(text.bounds.0, text.bounds.1)
             .fill_and_stroke();
+        log::info!("filled and stroked");
 
-        for path in [&fill, &stroke] {
+        for (i, path) in [&fill, &stroke].into_iter().enumerate() {
+            log::info!("for {i}");
             // move the path to (50, 50)
             path.transform.set_translation(Vec2::new(51.0, 53.0));
+            log::info!("translated");
             // move it to the back
-            path.transform.set_z(-0.1);
+            path.transform.set_z(0.1);
+            log::info!("z'd");
         }
+        log::info!("transformed");
 
         let frame = ctx.get_next_frame().unwrap();
         ui.render(&frame.view());
+        log::info!("rendered");
         let img = frame.read_image().block().unwrap();
-        img_diff::assert_img_eq("ui/text/overlay.png", img);
-        let depth_img = ui
-            .stage
-            .get_depth_texture()
-            .read_image()
-            .block()
-            .unwrap()
-            .unwrap();
-        img_diff::assert_img_eq("ui/text/overlay_depth.png", depth_img);
+        if let Err(e) =
+            img_diff::assert_img_eq_cfg_result("ui/text/overlay.png", img, Default::default())
+        {
+            let depth_img = ui
+                .stage
+                .get_depth_texture()
+                .read_image()
+                .block()
+                .unwrap()
+                .unwrap();
+            let e2 = img_diff::assert_img_eq_cfg_result(
+                "ui/text/overlay_depth.png",
+                depth_img,
+                Default::default(),
+            )
+            .err()
+            .unwrap_or_default();
+            panic!("{e}\n{e2}");
+        }
     }
 
     #[test]
@@ -441,6 +460,7 @@ mod test {
             ui.load_font("../../fonts/Recursive Mn Lnr St Med Nerd Font Complete.ttf"),
         )
         .unwrap();
+        log::info!("loaded font");
         let mut _text = ui
             .new_text()
             .with_section(

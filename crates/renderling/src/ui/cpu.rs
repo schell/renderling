@@ -93,12 +93,15 @@ impl UiTransform {
         let rotation = Quat::from_rotation_z(radians);
         // TODO: check to see if *= rotation makes sense here
         self.transform.modify_local_rotation(|t| {
-            *t = *t * rotation;
+            *t *= rotation;
         });
     }
 
     pub fn get_rotation(&self) -> f32 {
-        self.transform.local_rotation().to_euler(glam::EulerRot::XYZ).2
+        self.transform
+            .local_rotation()
+            .to_euler(glam::EulerRot::XYZ)
+            .2
     }
 
     pub fn set_z(&self, z: f32) {

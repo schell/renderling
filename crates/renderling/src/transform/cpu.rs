@@ -228,8 +228,10 @@ impl NestedTransform {
     ///
     /// - `f`: A closure that takes a mutable reference to the translation vector and returns a value of type `T`.
     pub fn modify_local_translation<T>(&self, f: impl FnOnce(&mut Vec3) -> T) -> T {
-        let mut local_transform = self.local_transform.write().unwrap();
-        let t = f(&mut local_transform.translation);
+        let t = {
+            let mut local_transform = self.local_transform.write().unwrap();
+            f(&mut local_transform.translation)
+        };
         self.mark_dirty();
         t
     }
@@ -266,8 +268,10 @@ impl NestedTransform {
     ///
     /// - `f`: A closure that takes a mutable reference to the rotation quaternion and returns a value of type `T`.
     pub fn modify_local_rotation<T>(&self, f: impl FnOnce(&mut Quat) -> T) -> T {
-        let mut local_transform = self.local_transform.write().unwrap();
-        let t = f(&mut local_transform.rotation);
+        let t = {
+            let mut local_transform = self.local_transform.write().unwrap();
+            f(&mut local_transform.rotation)
+        };
         self.mark_dirty();
         t
     }
@@ -304,8 +308,10 @@ impl NestedTransform {
     ///
     /// - `f`: A closure that takes a mutable reference to the scale vector and returns a value of type `T`.
     pub fn modify_local_scale<T>(&self, f: impl FnOnce(&mut Vec3) -> T) -> T {
-        let mut local_transform = self.local_transform.write().unwrap();
-        let t = f(&mut local_transform.scale);
+        let t = {
+            let mut local_transform = self.local_transform.write().unwrap();
+            f(&mut local_transform.scale)
+        };
         self.mark_dirty();
         t
     }
