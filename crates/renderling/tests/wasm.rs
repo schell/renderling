@@ -1012,7 +1012,9 @@ async fn can_render_hello_triangle() {
     let _camera = stage
         .new_camera()
         .with_projection_and_view(projection, view);
-    let _rez = stage.builder().with_vertices(right_tri_vertices()).build();
+    let _rez = stage
+        .new_renderlet()
+        .with_vertices(stage.new_vertices(right_tri_vertices()));
 
     let frame = ctx.get_next_frame().unwrap();
     stage.render(&frame.view());

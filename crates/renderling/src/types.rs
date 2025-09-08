@@ -2,8 +2,6 @@
 
 use craballoc::value::{GpuArrayContainer, GpuContainer, HybridArrayContainer, HybridContainer};
 
-pub mod tuple;
-
 /// Specifies that a staged value has been unloaded from the CPU
 /// and now lives solely on the GPU.
 pub type GpuOnly = GpuContainer;

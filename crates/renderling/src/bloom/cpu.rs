@@ -701,7 +701,7 @@ impl Bloom {
 mod test {
     use glam::Vec3;
 
-    use crate::{camera::CameraDescriptor, test::BlockOnFuture, Context};
+    use crate::{test::BlockOnFuture, Context};
 
     use super::*;
 
@@ -749,9 +749,6 @@ mod test {
         let height = 128;
         let ctx = Context::headless(width, height).block();
         let stage = ctx.new_stage().with_bloom(false);
-        // .with_frustum_culling(false)
-        // .with_occlusion_culling(false);
-
         let projection = crate::camera::perspective(width as f32, height as f32);
         let view = crate::camera::look_at(Vec3::new(0.0, 2.0, 18.0), Vec3::ZERO, Vec3::Y);
         let _camera = stage

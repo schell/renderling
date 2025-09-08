@@ -649,11 +649,6 @@ impl Stage {
         &self.runtime().queue
     }
 
-    /// Create a new [`SceneBuilder`] to help bundle staged resources.
-    pub fn builder(&self) -> SceneBuilder<'_, ()> {
-        SceneBuilder::new(self)
-    }
-
     pub fn hdr_texture(&self) -> impl Deref<Target = crate::texture::Texture> + '_ {
         self.hdr_texture.read().unwrap()
     }
@@ -1424,117 +1419,6 @@ impl Stage {
     }
 }
 
-/// A wrapper around [`Stage`] that builds up tuples of staged resources.
-///
-/// [`SceneBuilder`] implements a builder pattern that allows you to
-/// build up tuples of resources like [`Vertices`], [`Indices`],
-/// [`MorphTargets`] and [`MorphTargetWeights`].
-// TODO: documentation example
-pub struct SceneBuilder<'a, T> {
-    stage: &'a Stage,
-    resources: T,
-}
-
-impl<'a> SceneBuilder<'a, ()> {
-    pub fn new(stage: &'a Stage) -> Self {
-        SceneBuilder {
-            resources: (),
-            stage,
-        }
-    }
-}
-
-impl<'a, T: crate::types::tuple::Bundle> SceneBuilder<'a, T> {
-    pub fn suffix<S>(self, element: S) -> SceneBuilder<'a, T::Suffixed<S>> {
-        SceneBuilder {
-            resources: self.resources.suffix(element),
-            stage: self.stage,
-        }
-    }
-
-    /// Stage vertex data and add it to the resource bundle.
-    pub fn with_vertices(
-        self,
-        vertices: impl IntoIterator<Item = Vertex>,
-    ) -> SceneBuilder<'a, T::Suffixed<Vertices>> {
-        let vertices = self.stage.geometry.new_vertices(vertices);
-        self.suffix(vertices)
-    }
-
-    /// Stage vertex index data and add it to the resource bundle.
-    pub fn with_indices(
-        self,
-        indices: impl IntoIterator<Item = u32>,
-    ) -> SceneBuilder<'a, T::Suffixed<Indices>> {
-        let indices = self.stage.geometry.new_indices(indices);
-        self.suffix(indices)
-    }
-
-    /// Stage morph target weights and add them to the resource bundle.
-    pub fn with_morph_targets(
-        self,
-        morph_targets: impl IntoIterator<Item = impl IntoIterator<Item = MorphTarget>>,
-    ) -> SceneBuilder<'a, T::Suffixed<MorphTargets>> {
-        let ts = self.stage.geometry.new_morph_targets(morph_targets);
-        self.suffix(ts)
-    }
-
-    /// Stage morph target weights and add them to the resource bundle.
-    pub fn with_morph_target_weights(
-        self,
-        morph_weights: impl IntoIterator<Item = f32>,
-    ) -> SceneBuilder<'a, T::Suffixed<MorphTargetWeights>> {
-        let ws = self.stage.new_morph_target_weights(morph_weights);
-        self.suffix(ws)
-    }
-
-    /// Stage morph target weights and add them to the resource bundle.
-    pub fn with_skin(
-        self,
-        joints: impl IntoIterator<Item = impl Into<SkinJoint>>,
-        inverse_bind_matrices: impl IntoIterator<Item = impl Into<Mat4>>,
-    ) -> SceneBuilder<'a, T::Suffixed<Skin>> {
-        let s = self.stage.new_skin(joints, inverse_bind_matrices);
-        self.suffix(s)
-    }
-
-    /// Stage images and add them to the resource bundle, if possible.
-    ///
-    /// # Errors
-    /// Returns an error if the images could not be packed into the [`Atlas`].
-    pub fn with_images(
-        self,
-        images: impl IntoIterator<Item = impl Into<AtlasImage>>,
-    ) -> Result<SceneBuilder<'a, T::Suffixed<Vec<AtlasTexture>>>, StageError> {
-        let i = self.stage.add_images(images)?;
-        Ok(self.suffix(i))
-    }
-
-    /// Stage one image and add it to the resource bundle, if possible.
-    ///
-    /// # Note
-    /// Each time the set of staged images changes, the [`Atlas`] must be repacked.
-    /// For this reason it is runtime-quicker to batch add as many images at once
-    /// as is possible. Consider using [`SceneBuilder::with_images`] instead.
-    ///
-    /// # Errors
-    /// Returns an error if the images could not be packed into the [`Atlas`].
-    pub fn with_image(
-        self,
-        image: impl Into<AtlasImage>,
-    ) -> Result<SceneBuilder<'a, T::Suffixed<AtlasTexture>>, StageError> {
-        let mut i = self.stage.add_images(Some(image))?;
-        // UNWRAP: safe because we know there is _exactly_ one in there
-        Ok(self.suffix(i.pop().unwrap()))
-    }
-
-    /// Consume the [`SceneBuilder`] and return the bundled resources as a tuple,
-    /// in the order they were accumulated.
-    pub fn build(self) -> T::Reduced {
-        self.resources.reduce()
-    }
-}
-
 #[cfg(test)]
 mod test {
     use craballoc::runtime::CpuRuntime;
@@ -1616,9 +1500,8 @@ mod test {
         let _camera = stage
             .new_camera()
             .with_projection_and_view(projection, view);
-        let _triangle_rez = stage
-            .builder()
-            .with_vertices([
+        let _triangle_rez = stage.new_renderlet().with_vertices(
+            stage.new_vertices([
                 Vertex::default()
                     .with_position([10.0, 10.0, 0.0])
                     .with_color([0.0, 1.0, 1.0, 1.0]),
@@ -1628,8 +1511,8 @@ mod test {
                 Vertex::default()
                     .with_position([90.0, 10.0, 0.0])
                     .with_color([1.0, 0.0, 1.0, 1.0]),
-            ])
-            .build();
+            ]),
+        );
 
         log::debug!("rendering without msaa");
         let frame = ctx.get_next_frame().unwrap();
