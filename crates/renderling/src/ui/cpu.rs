@@ -246,7 +246,7 @@ impl Ui {
     /// The given `path` must have been created with this [`Ui`], otherwise this function is
     /// a noop.
     pub fn remove_path(&self, path: &UiPath) {
-        self.stage.remove_renderlet(&path.renderlet);
+        self.stage.remove_primitive(&path.primitive);
     }
 
     pub fn text_builder(&self) -> UiTextBuilder {
@@ -259,7 +259,7 @@ impl Ui {
     /// The given `text` must have been created with this [`Ui`], otherwise this function is
     /// a noop.
     pub fn remove_text(&self, text: &UiText) {
-        self.stage.remove_renderlet(&text.renderlet);
+        self.stage.remove_primitive(&text.renderlet);
     }
 
     pub async fn load_font(&self, path: impl AsRef<str>) -> Result<FontId, UiError> {

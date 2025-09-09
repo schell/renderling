@@ -14,7 +14,7 @@ use glyph_brush::*;
 pub use ab_glyph::FontArc;
 pub use glyph_brush::{Section, Text};
 
-use crate::{atlas::AtlasTexture, geometry::Vertex, material::Material, stage::Renderlet};
+use crate::{atlas::AtlasTexture, geometry::Vertex, material::Material, stage::Primitive};
 use image::{DynamicImage, GenericImage, ImageBuffer, Luma, Rgba};
 
 use super::{Ui, UiTransform};
@@ -94,7 +94,7 @@ impl UiTextBuilder {
         let transform = ui.new_transform();
         let renderlet = ui
             .stage
-            .new_renderlet()
+            .new_primitive()
             .with_vertices(vertices)
             .with_transform(&transform.transform)
             .with_material(&material);
@@ -111,7 +111,7 @@ impl UiTextBuilder {
 
 pub struct UiText {
     pub(crate) transform: UiTransform,
-    pub(crate) renderlet: Renderlet,
+    pub(crate) renderlet: Primitive,
     pub(crate) bounds: (Vec2, Vec2),
 
     pub(crate) _cache: GlyphCache,

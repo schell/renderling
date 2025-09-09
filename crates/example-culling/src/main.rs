@@ -36,10 +36,10 @@ struct CullingExample {
     stage: Stage,
     dlights: [AnalyticalLight<DirectionalLight>; 2],
     frustum_camera: FrustumCamera,
-    frustum_renderlet: Renderlet,
+    frustum_primitive: Primitive,
     material_aabb_outside: Material,
     material_aabb_overlapping: Material,
-    renderlets: Vec<Renderlet>,
+    primitives: Vec<Primitive>,
     next_k: u64,
 }
 
@@ -56,7 +56,7 @@ impl CullingExample {
         frustum_camera: &FrustumCamera,
         material_outside: &Material,
         material_overlapping: &Material,
-    ) -> Vec<Renderlet> {
+    ) -> Vec<Primitive> {
         log::info!("generating aabbs with seed {seed}");
         fastrand::seed(seed);
         (0..25u32)
@@ -84,7 +84,7 @@ impl CullingExample {
                     .with_translation(center)
                     .with_rotation(rotation);
                 stage
-                    .new_renderlet()
+                    .new_primitive()
                     .with_vertices(stage.new_vertices(aabb.get_mesh().into_iter().map(
                         |(position, normal)| Vertex {
                             position,
@@ -130,9 +130,9 @@ impl ApplicationHandler for CullingExample {
                 ..
             } => {
                 if c.as_str() == "r" {
-                    self.renderlets.drain(..);
+                    self.primitives.drain(..);
                     let _ = self.stage.commit();
-                    self.renderlets.extend(Self::make_aabbs(
+                    self.primitives.extend(Self::make_aabbs(
                         self.next_k,
                         &self.stage,
                         &self.frustum_camera,
@@ -172,7 +172,7 @@ impl TestAppHandler for CullingExample {
         ctx: &Context,
     ) -> Self {
         let mut seed = 46;
-        let mut renderlets = vec![];
+        let mut prims = vec![];
         let stage = ctx.new_stage().with_lighting(true);
         let sunlight_a = stage
             .new_directional_light()
@@ -213,7 +213,7 @@ impl TestAppHandler for CullingExample {
         let material_aabb_outside = stage.new_material().with_albedo_factor(red_color);
         let material_frustum = stage.new_material().with_albedo_factor(yellow_color);
         let app_camera = AppCamera(stage.new_camera());
-        renderlets.extend(Self::make_aabbs(
+        prims.extend(Self::make_aabbs(
             seed,
             &stage,
             &frustum_camera,
@@ -230,11 +230,11 @@ impl TestAppHandler for CullingExample {
                     ..Default::default()
                 },
             ));
-        let frustum_renderlet = stage
-            .new_renderlet()
+        let frustum_prim = stage
+            .new_primitive()
             .with_vertices(&frustum_vertices)
             .with_material(&material_frustum);
-        stage.add_renderlet(&frustum_renderlet);
+        stage.add_primitive(&frustum_prim);
 
         Self {
             next_k: seed,
@@ -250,8 +250,8 @@ impl TestAppHandler for CullingExample {
             stage,
             material_aabb_overlapping,
             material_aabb_outside,
-            frustum_renderlet,
-            renderlets,
+            frustum_primitive: frustum_prim,
+            primitives: prims,
         }
     }
 

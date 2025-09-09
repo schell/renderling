@@ -60,59 +60,53 @@
 //! [`Stage::render`](crate::stage::Stage::render).
 //!
 //! Use one of the many `Stage::new_*` functions to stage data on the GPU:
-//! * [`Stage::new_camera`]
-//! * [`Stage::new_vertices`]
-//! * [`Stage::new_material`]
-//! * [`Stage::new_renderlet`]
+//! * [`Stage::new_camera`](crate::stage::Stage::new_camera)
+//! * [`Stage::new_vertices`](crate::stage::Stage::new_vertices)
+//! * [`Stage::new_indices`](crate::stage::Stage::new_indices)
+//! * [`Stage::new_material`](crate::stage::Stage::new_material)
+//! * [`Stage::new_primitive`](crate::stage::Stage::new_primitive)
 //! * ...and more
 //!
-//! Many of these functions return [`Hybrid`](crate::prelude::Hybrid)s or
-//! [`HybridArray`](crate::prelude::HybridArray)s in return.
-//!
 //! In order to render, we need to "stage" a
-//! [`Renderlet`](crate::stage::Renderlet), which is a bundle of rendering
+//! [`Primitive`](crate::stage::Primitive), which is a bundle of rendering
 //! resources, roughly representing a singular mesh.
 //!
-//! But first we'll need a [`Camera`](crate::camera::Camera) so we can see
-//! what's on the stage, and then we'll need a list
-//! of [`Vertex`](crate::stage::Vertex) organized as triangles with
-//! counter-clockwise winding. Here we'll use the builder pattern to create a
-//! staged [`Renderlet`](crate::stage::Renderlet) using our vertices.
+//! But first we'll need a list of [`Vertex`](crate::geometry::Vertex) organized
+//! as triangles with counter-clockwise winding. Here we'll use the builder
+//! pattern to create a staged [`Primitive`](crate::stage::Primitive) using our
+//! vertices.
+//!
+//! We'll also create a [`Camera`](crate::camera::Camera) so we can see the
+//! stage.
 //!
 //! ```
 //! # use renderling::prelude::*;
 //! # let ctx = futures_lite::future::block_on(Context::headless(100, 100));
 //! # let stage: Stage = ctx.new_stage();
+//! let vertices = stage.new_vertices([
+//!     Vertex::default()
+//!         .with_position([0.0, 0.0, 0.0])
+//!         .with_color([0.0, 1.0, 1.0, 1.0]),
+//!     Vertex::default()
+//!         .with_position([0.0, 100.0, 0.0])
+//!         .with_color([1.0, 1.0, 0.0, 1.0]),
+//!     Vertex::default()
+//!         .with_position([100.0, 0.0, 0.0])
+//!         .with_color([1.0, 0.0, 1.0, 1.0]),
+//!     ]);
+//! let triangle_prim = stage
+//!     .new_primitive()
+//!     .with_vertices(vertices);
 //!
-//! let camera = stage.new_camera(Camera::default_ortho2d(100.0, 100.0));
-//! let (vertices, triangle_renderlet) = stage
-//!     .builder()
-//!     .with_vertices([
-//!         Vertex::default()
-//!             .with_position([0.0, 0.0, 0.0])
-//!             .with_color([0.0, 1.0, 1.0, 1.0]),
-//!         Vertex::default()
-//!             .with_position([0.0, 100.0, 0.0])
-//!             .with_color([1.0, 1.0, 0.0, 1.0]),
-//!         Vertex::default()
-//!             .with_position([100.0, 0.0, 0.0])
-//!             .with_color([1.0, 0.0, 1.0, 1.0]),
-//!     ])
-//!     .build();
+//! let (projection, view) = renderling::camera::default_ortho2d(100.0, 100.0);
+//! let camera = stage.new_camera()
+//!     .with_projection_and_view(projection, view);
 //! ```
-//!
-//! The builder is of the type [`RenderletBuilder`](crate::stage::RenderletBuilder)
-//! and after building, it leaves you with all the resources that have been staged,
-//! including the `Renderlet`.
-//! The return type of [`RenderletBuilder::build`](crate::stage::RenderletBuilder::build)
-//! is special in that it depends on the new resources that have been staged.
-//! The type will be a tuple of all the newly staged resources that have been added.
-//! In this case it's our mesh data and the `Renderlet`.
 //!
 //! ### Rendering
 //!
 //! Finally, we get the next frame from the context with
-//! [`Context::get_next_frame`], render to it using
+//! [`Context::get_next_frame`]. Then we render to it using
 //! [`Stage::render`](crate::stage::Stage::render) and then present the
 //! frame with [`Frame::present`].
 //!
@@ -120,8 +114,10 @@
 //! # use renderling::prelude::*;
 //! # let ctx = futures_lite::future::block_on(Context::headless(100, 100));
 //! # let stage = ctx.new_stage();
-//! # let _camera = stage.new_camera(Camera::default_ortho2d(100.0, 100.0));
-//! # let _rez = stage.builder().with_vertices([
+//! # let (projection, view) = renderling::camera::default_ortho2d(100.0, 100.0);
+//! # let camera = stage.new_camera()
+//! #     .with_projection_and_view(projection, view);
+//! # let vertices = stage.new_vertices([
 //! #     Vertex::default()
 //! #         .with_position([0.0, 0.0, 0.0])
 //! #         .with_color([0.0, 1.0, 1.0, 1.0]),
@@ -131,24 +127,56 @@
 //! #     Vertex::default()
 //! #         .with_position([100.0, 0.0, 0.0])
 //! #         .with_color([1.0, 0.0, 1.0, 1.0]),
-//! # ]).build();
-//!
+//! #     ]);
+//! # let triangle_prim = stage
+//! #     .new_primitive()
+//! #     .with_vertices(vertices);
 //! let frame = ctx.get_next_frame().unwrap();
 //! stage.render(&frame.view());
 //! let img = futures_lite::future::block_on(frame.read_image()).unwrap();
 //! frame.present();
 //! ```
 //!
+//! Here for our purposes we also read the rendered frame as an image.
 //! Saving `img` should give us this:
 //!
-//! ![renderling hello triangle](https://github.com/schell/renderling/blob/main/test_img/cmy_triangle.png?raw=true)
+//! ![renderling hello triangle](https://github.com/schell/renderling/blob/main/test_img/cmy_triangle/hdr.png?raw=true)
 //!
 //! ### Modifying
 //!
-//! Later, if we want to modify any of the staged values, we can do so through
-//! [`Hybrid`](crate::prelude::Hybrid) and [`HybridArray`](crate::prelude::HybridArray).
-//! The changes made will be synchronized to the GPU at the beginning of the
+//! Later, if we want to modify any of the staged values, we can do so through each resource's
+//! struct, using `set_*`, `modify_*` and `with_*` functions.
+//!
+//! The changes made will be synchronized to the GPU at the beginning of the next
 //! [`Stage::render`](crate::prelude::Stage::render) function.
+//!
+//! ### Removing primitives
+//!
+//! To remove primitives from the stage, use
+//! [`Stage::remove_primitive`](crate::stage::Stage::remove_primitive). This
+//! will remove the primitive from rendering entirely.
+//!
+//! If you just want to mark a [`Primitive`](crate::stage::Primitive) invisible, use
+//! [`Primitive::set_visible`](crate::stage::Primitive::set_visible).
+//!
+//! ### Releasing resources
+//!
+//! GPU resources are automatically released when dropped. The data they
+//! occupy on the GPU is reclaimed during calls to
+//! [`Stage::render`](crate::stage::Stage::render). If you would like to
+//! manually reclaim resources without rendering, you can do so with
+//! [`Stage::commit`](crate::stage::Stage::commit).
+//!
+//! [`Primitive`](crate::stage::Primitive) and
+//! [`AnalyticalLight`](crate::light::AnalyticalLight) are special in that you
+//! must remove them from the [`Stage`](crate::stage::Stage) explicitly, because
+//! clones are made internally.
+//!
+//! Other resources like [`Vertices`](crate::geometry::Vertices),
+//! [`Indices`](crate::geometry::Indices),
+//! [`Transform`](crate::transform::Transform),
+//! [`NestedTransform`](crate::transform::NestedTransform) and others can simply
+//! be dropped.
 //!
 //! # WARNING
 //!
@@ -165,8 +193,7 @@
 
 pub mod atlas;
 #[cfg(cpu)]
-pub mod bindgroup;
-pub mod bits;
+pub(crate) mod bindgroup;
 pub mod bloom;
 pub mod bvol;
 pub mod camera;
@@ -384,7 +411,7 @@ mod test {
         let _camera = stage.new_camera().with_projection_and_view(p, v);
 
         let _prim = stage
-            .new_renderlet()
+            .new_primitive()
             .with_vertices(stage.new_vertices(right_tri_vertices()));
 
         let frame = ctx.get_next_frame().unwrap();
@@ -423,7 +450,7 @@ mod test {
         let stage = ctx.new_stage().with_background_color(Vec4::splat(1.0));
         let (p, v) = crate::camera::default_ortho2d(100.0, 100.0);
         let _camera = stage.new_camera().with_projection_and_view(p, v);
-        let _rez = stage.new_renderlet().with_vertices(stage.new_vertices({
+        let _rez = stage.new_primitive().with_vertices(stage.new_vertices({
             let mut vs = right_tri_vertices();
             vs.reverse();
             vs
@@ -453,7 +480,7 @@ mod test {
         let _camera = stage.new_camera().with_projection_and_view(p, v);
         let transform = stage.new_transform();
         let _renderlet = stage
-            .new_renderlet()
+            .new_primitive()
             .with_vertices(stage.new_vertices(right_tri_vertices()))
             .with_transform(&transform);
 
@@ -520,7 +547,7 @@ mod test {
             Mat4::look_at_rh(camera_position, Vec3::ZERO, Vec3::Y),
         );
         let _rez = stage
-            .new_renderlet()
+            .new_primitive()
             .with_vertices(stage.new_vertices(gpu_cube_vertices()))
             .with_transform(
                 stage
@@ -547,7 +574,7 @@ mod test {
         );
 
         let _rez = stage
-            .new_renderlet()
+            .new_primitive()
             .with_vertices(stage.new_vertices(math::UNIT_POINTS.map(cmy_gpu_vertex)))
             .with_indices(stage.new_indices(math::UNIT_INDICES.map(|i| i as u32)))
             .with_transform(
@@ -582,7 +609,7 @@ mod test {
             .with_projection_and_view(projection, view);
         let geometry = stage.new_vertices(gpu_cube_vertices());
         let _cube_one = stage
-            .new_renderlet()
+            .new_primitive()
             .with_vertices(&geometry)
             .with_transform(
                 stage
@@ -593,7 +620,7 @@ mod test {
             );
 
         let cube_two = stage
-            .new_renderlet()
+            .new_primitive()
             .with_vertices(&geometry)
             .with_transform(
                 stage
@@ -645,7 +672,7 @@ mod test {
             .new_camera()
             .with_projection_and_view(projection, view);
         let cube = stage
-            .new_renderlet()
+            .new_primitive()
             .with_vertices(
                 stage
                     .new_vertices(math::UNIT_INDICES.map(|i| cmy_gpu_vertex(math::UNIT_POINTS[i]))),
@@ -743,7 +770,7 @@ mod test {
             .with_albedo_texture(&entries[0])
             .with_has_lighting(false);
         let cube = stage
-            .new_renderlet()
+            .new_primitive()
             .with_vertices(stage.new_vertices(gpu_uv_unit_cube()))
             .with_transform(
                 stage
@@ -820,7 +847,7 @@ mod test {
                 ..Default::default()
             },
         ]);
-        let _color_prim = stage.new_renderlet().with_vertices(&geometry);
+        let _color_prim = stage.new_primitive().with_vertices(&geometry);
 
         let material = stage
             .new_material()
@@ -831,7 +858,7 @@ mod test {
             .with_translation(Vec3::new(15.0, 35.0, 0.5))
             .with_scale(Vec3::new(0.5, 0.5, 1.0));
         let _rez = stage
-            .new_renderlet()
+            .new_primitive()
             .with_vertices(&geometry)
             .with_material(material)
             .with_transform(transform);
@@ -877,7 +904,7 @@ mod test {
             .with_intensity(10.0);
 
         let _rez = stage
-            .new_renderlet()
+            .new_primitive()
             .with_material(stage.default_material());
 
         let frame = ctx.get_next_frame().unwrap();
@@ -973,7 +1000,7 @@ mod test {
             ]
         });
         let _cyan_primitive = stage
-            .new_renderlet()
+            .new_primitive()
             .with_vertices(&geometry)
             .with_material(
                 stage
@@ -983,7 +1010,7 @@ mod test {
             )
             .with_transform(&cyan_node);
         let _yellow_primitive = stage
-            .new_renderlet()
+            .new_primitive()
             .with_vertices(&geometry)
             .with_material(
                 stage
@@ -993,7 +1020,7 @@ mod test {
             )
             .with_transform(&yellow_node);
         let _red_primitive = stage
-            .new_renderlet()
+            .new_primitive()
             .with_vertices(&geometry)
             .with_material(
                 stage
@@ -1032,7 +1059,7 @@ mod test {
             Mat4::look_at_rh(camera_position, Vec3::ZERO, Vec3::Y),
         );
         let _rez = stage
-            .new_renderlet()
+            .new_primitive()
             .with_vertices(stage.new_vertices(gpu_cube_vertices()))
             .with_transform(
                 stage
@@ -1075,7 +1102,7 @@ mod test {
             Mat4::look_at_rh(camera_position, Vec3::ZERO, Vec3::Y),
         );
         let _rez = stage
-            .new_renderlet()
+            .new_primitive()
             .with_vertices(stage.new_vertices(gpu_cube_vertices()))
             .with_transform(
                 stage

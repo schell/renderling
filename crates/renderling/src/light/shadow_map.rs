@@ -15,7 +15,7 @@ use crate::{
     atlas::{AtlasBlittingOperation, AtlasImage, AtlasTexture, AtlasTextureDescriptor},
     bindgroup::ManagedBindGroup,
     light::{IsLight, Light},
-    stage::Renderlet,
+    stage::Primitive,
 };
 
 use super::{AnalyticalLight, Lighting, LightingError, PollSnafu, ShadowMapDescriptor};
@@ -158,7 +158,7 @@ impl ShadowMap {
         self.shadowmap_descriptor.lock()
     }
 
-    /// Enable shadow mapping for the given [`AnalyticalLightBundle`], creating
+    /// Enable shadow mapping for the given [`AnalyticalLight`], creating
     /// a new [`ShadowMap`].
     pub fn new<T>(
         lighting: &Lighting,
@@ -242,19 +242,20 @@ impl ShadowMap {
         })
     }
 
-    /// Update the `ShadowMap`, rendering the given [`Renderlet`]s to the map as shadow casters.
+    /// Update the `ShadowMap`, rendering the given [`Primitive`]s to the map as
+    /// shadow casters.
     ///
-    /// The `ShadowMap` contains a weak reference to the [`AnalyticalLightBundle`] used to create
-    /// it. Updates made to this `AnalyticalLightBundle` will automatically propogate to this
+    /// The `ShadowMap` contains a weak reference to the [`AnalyticalLight`] used to create
+    /// it. Updates made to this `AnalyticalLight` will automatically propogate to this
     /// `ShadowMap`.
     ///
     /// ## Errors
-    /// If the `AnalyticalLightBundle` used to create this `ShadowMap` has been
+    /// If the `AnalyticalLight` used to create this `ShadowMap` has been
     /// dropped, calling this function will err.
     pub fn update<'a>(
         &self,
         lighting: impl AsRef<Lighting>,
-        renderlets: impl IntoIterator<Item = &'a Renderlet>,
+        renderlets: impl IntoIterator<Item = &'a Primitive>,
     ) -> Result<(), LightingError> {
         let lighting = lighting.as_ref();
         let shadow_desc = self.shadowmap_descriptor.get();

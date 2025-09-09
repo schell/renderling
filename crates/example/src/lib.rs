@@ -113,7 +113,7 @@ impl AppUi {
 
 pub enum Model {
     Gltf(Box<GltfDocument>),
-    Default(Renderlet),
+    Default(Primitive),
     None,
 }
 
@@ -235,16 +235,16 @@ impl App {
                     .with_normal(n)
                     .with_color(Vec4::new(1.0, 0.0, 0.0, 1.0))
             }));
-        let renderlet = self
+        let primitive = self
             .stage
-            .new_renderlet()
+            .new_primitive()
             .with_vertices(vertices)
             .with_bounds({
                 log::info!("default model bounds: {min} {max}");
                 BoundingSphere::from((min, max))
             });
 
-        self.model = Model::Default(renderlet);
+        self.model = Model::Default(primitive);
         self.camera_controller.reset(Aabb::new(min, max));
         self.camera_controller
             .update_camera(self.stage.get_size(), &self.camera);
@@ -375,7 +375,7 @@ impl App {
 
         //         self.lighting
         //             .shadow_map
-        //             .update(&self.lighting.lighting, doc.renderlets.values().flatten());
+        //             .update(&self.lighting.lighting, doc.primitives.values().flatten());
         //         self.lighting.light = light.light.clone();
         //         self.lighting.light_details = dir.clone();
         //     }

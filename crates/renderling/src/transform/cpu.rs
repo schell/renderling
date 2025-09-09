@@ -158,7 +158,10 @@ impl Transform {
     }
 }
 
-/// Manages scene heirarchy on the [`Stage`].
+/// Manages scene heirarchy on the [`Stage`](crate::stage::Stage).
+///
+/// Can be created with
+/// [`Stage::new_nested_transform`](crate::stage::Stage::new_nested_transform).
 ///
 /// Clones all reference the same nested transform.
 #[derive(Clone)]

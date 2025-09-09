@@ -1,5 +1,4 @@
 //! CPU side of materials.
-
 use std::sync::{Arc, Mutex};
 
 use craballoc::{
@@ -84,7 +83,7 @@ impl Materials {
         (self.atlas.upkeep(self.runtime()), self.slab.commit())
     }
 
-    /// Returns a [`MaterialBuilder`] for building a new [`Material`].
+    /// Stage a new [`Material`] on the materials slab.
     pub fn new_material(&self) -> Material {
         let descriptor = self.slab.new_value(MaterialDescriptor::default());
         Material {
@@ -362,7 +361,7 @@ impl Material {
 
     /// Remove the albedo texture.
     ///
-    /// This causes any `[Renderlet]` that references this material to fall back to
+    /// This causes any `[Primitive]` that references this material to fall back to
     /// using the albedo factor for color.
     pub fn remove_albedo_texture(&self) {
         self.descriptor.modify(|d| d.albedo_texture_id = Id::NONE);

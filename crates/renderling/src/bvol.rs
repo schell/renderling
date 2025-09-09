@@ -141,7 +141,7 @@ impl Aabb {
         self.min == self.max
     }
 
-    /// Returns the union of the two [`Aabbs`].
+    /// Returns the union of the two [`Aabb`]s.
     pub fn union(a: Self, b: Self) -> Self {
         Aabb {
             min: a.min.min(a.max).min(b.min).min(b.max),
@@ -226,7 +226,7 @@ pub struct Frustum {
 }
 
 impl Frustum {
-    /// Compute a frustum in world space from the given [`Camera`].
+    /// Compute a frustum in world space from the given [`CameraDescriptor`].
     pub fn from_camera(camera: &CameraDescriptor) -> Self {
         let viewprojection = camera.view_projection();
         let mvp = viewprojection.to_cols_array_2d();
@@ -672,7 +672,7 @@ mod test {
             .new_material()
             .with_albedo_factor(Vec4::new(1.0, 0.0, 0.0, 1.0));
 
-        let _w = stage.new_renderlet().with_material(&white).with_vertices(
+        let _w = stage.new_primitive().with_material(&white).with_vertices(
             stage.new_vertices(
                 crate::math::unit_cube()
                     .into_iter()
@@ -700,7 +700,7 @@ mod test {
             );
 
             rs.push(
-                stage.new_renderlet().with_material(&red).with_vertices(
+                stage.new_primitive().with_material(&red).with_vertices(
                     stage.new_vertices(
                         bb.get_mesh()
                             .map(|(p, n)| Vertex::default().with_position(p).with_normal(n)),

@@ -28,6 +28,8 @@ use crate::{
 /// <https://renderling.xyz/articles/live/light_tiling.html>.
 pub struct LightTiling<Ct: IsContainer = GpuArrayContainer> {
     pub(crate) tiling_descriptor: Hybrid<LightTilingDescriptor>,
+    /// Container is a type variable for testing, as we have to load
+    /// the tiles with known values from the CPU.
     tiles: Ct::Container<LightTile>,
     /// Cache of the id of the Stage's depth texture.
     ///
@@ -422,8 +424,8 @@ impl Default for LightTilingConfig {
 }
 
 impl LightTiling<HybridArrayContainer> {
-    /// Creates a new [`LightTiling`] struct with a [`HybridArray`] of tiles.
-    pub fn new_hybrid(
+    /// Creates a new [`LightTiling`] struct with a `HybridArray` of tiles.
+    pub(crate) fn new_hybrid(
         lighting: &Lighting,
         multisampled: bool,
         depth_texture_size: UVec2,

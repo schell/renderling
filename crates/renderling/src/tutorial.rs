@@ -6,7 +6,7 @@ use spirv_std::spirv;
 
 use crate::{
     geometry::{GeometryDescriptor, Vertex},
-    stage::{RenderletDescriptor, VertexInfo},
+    stage::{PrimitiveDescriptor, VertexInfo},
 };
 
 /// Simple fragment shader that writes the input color to the output color.
@@ -80,18 +80,19 @@ pub fn slabbed_vertices(
     *out_color = color;
 }
 
-// TODO: fix all this documentation
-/// This shader uses the `instance_index` as a slab [`Id`].
-/// The `instance_index` is the [`Id`] of a [`RenderUnit`].
-/// The [`RenderUnit`] contains an [`Array`] of [`Vertex`]s
-/// as its mesh, the [`Id`]s of a [`Material`] and [`Camera`],
+/// This shader uses the `instance_index` as a slab id.
+/// The `instance_index` is the `id` of a [`PrimitiveDescriptor`].
+/// The [`PrimitiveDescriptor`] contains an [`Array`] of [`Vertex`]s
+/// as its mesh, the [`Id`]s of a
+/// [`MaterialDescriptor`](crate::material::MaterialDescriptor) and
+///[`CameraDescriptor`](crate::camera::CameraDescriptor),
 /// and TRS transforms.
 /// The `vertex_index` is the index of a [`Vertex`] within the
-/// [`RenderUnit`]'s `vertices` [`Array`].
+/// [`PrimitiveDescriptor`]'s `vertices` [`Array`].
 #[spirv(vertex)]
 pub fn slabbed_renderlet(
     // Id of the array of vertices we are rendering
-    #[spirv(instance_index)] renderlet_id: Id<RenderletDescriptor>,
+    #[spirv(instance_index)] primitive_id: Id<PrimitiveDescriptor>,
     // Which vertex within the render unit are we rendering
     #[spirv(vertex_index)] vertex_index: u32,
 
@@ -100,14 +101,14 @@ pub fn slabbed_renderlet(
     out_color: &mut Vec4,
     #[spirv(position)] clip_pos: &mut Vec4,
 ) {
-    let renderlet = slab.read(renderlet_id);
+    let prim = slab.read(primitive_id);
     let VertexInfo {
         vertex,
         model_matrix,
         ..
-    } = renderlet.get_vertex_info(vertex_index, slab);
-    let camera_id = slab
-        .read_unchecked(renderlet.geometry_descriptor_id + GeometryDescriptor::OFFSET_OF_CAMERA_ID);
+    } = prim.get_vertex_info(vertex_index, slab);
+    let camera_id =
+        slab.read_unchecked(prim.geometry_descriptor_id + GeometryDescriptor::OFFSET_OF_CAMERA_ID);
     let camera = slab.read(camera_id);
     *clip_pos = camera.view_projection() * model_matrix * vertex.position.xyz().extend(1.0);
     *out_color = vertex.color;

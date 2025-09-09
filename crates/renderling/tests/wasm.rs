@@ -1013,7 +1013,7 @@ async fn can_render_hello_triangle() {
         .new_camera()
         .with_projection_and_view(projection, view);
     let _rez = stage
-        .new_renderlet()
+        .new_primitive()
         .with_vertices(stage.new_vertices(right_tri_vertices()));
 
     let frame = ctx.get_next_frame().unwrap();

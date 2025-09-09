@@ -12,7 +12,7 @@
 //! let mut ui = Ui::new(&ctx);
 //!
 //! let _path = ui
-//!     .new_path()
+//!     .path_builder()
 //!     .with_stroke_color([1.0, 1.0, 0.0, 1.0])
 //!     .with_rectangle(Vec2::splat(10.0), Vec2::splat(60.0))
 //!     .stroke();

@@ -520,7 +520,7 @@ impl IsLight for Light {
 
 /// A bundle of lighting resources representing one analytical light in a scene.
 ///
-/// Create an `AnalyticalLightBundle` with the `Lighting::new_analytical_light`,
+/// Create an `AnalyticalLight` with the `Lighting::new_analytical_light`,
 /// or from `Stage::new_analytical_light`.
 #[derive(Clone)]
 pub struct AnalyticalLight<T = Light> {
@@ -544,7 +544,7 @@ pub struct AnalyticalLight<T = Light> {
 impl<T: IsLight> core::fmt::Display for AnalyticalLight<T> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.write_fmt(format_args!(
-            "AnalyticalLightBundle type={} light-id={:?} node-nested-transform-global-id:{:?}",
+            "AnalyticalLight type={} light-id={:?} node-nested-transform-global-id:{:?}",
             self.inner.style(),
             self.light_descriptor.id(),
             self.node_transform
@@ -782,7 +782,7 @@ impl Lighting {
         &self.light_slab
     }
 
-    /// Add an [`AnalyticalLightBundle`] to the internal list of lights.
+    /// Add an [`AnalyticalLight`] to the internal list of lights.
     ///
     /// This is called implicitly by:
     ///
@@ -811,7 +811,7 @@ impl Lighting {
         *self.analytical_lights_array.write().unwrap() = None;
     }
 
-    /// Remove an [`AnalyticalLightBundle`] from the internal list of lights.
+    /// Remove an [`AnalyticalLight`] from the internal list of lights.
     ///
     /// Use this to exclude a light from rendering, without dropping the light.
     ///
@@ -906,11 +906,11 @@ impl Lighting {
         bundle
     }
 
-    /// Enable shadow mapping for the given [`AnalyticalLightBundle`], creating
+    /// Enable shadow mapping for the given [`AnalyticalLight`], creating
     /// a new [`ShadowMap`].
-    pub fn new_shadow_map(
+    pub fn new_shadow_map<T>(
         &self,
-        analytical_light_bundle: &AnalyticalLight,
+        analytical_light_bundle: &AnalyticalLight<T>,
         // Size of the shadow map
         size: UVec2,
         // Distance to the near plane of the shadow map's frustum.
@@ -921,7 +921,11 @@ impl Lighting {
         //
         // Only objects within the shadow map's frustum will cast shadows.
         z_far: f32,
-    ) -> Result<ShadowMap, LightingError> {
+    ) -> Result<ShadowMap, LightingError>
+    where
+        T: IsLight,
+        Light: From<T>,
+    {
         ShadowMap::new(self, analytical_light_bundle, size, z_near, z_far)
     }
 

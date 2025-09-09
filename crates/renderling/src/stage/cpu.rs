@@ -43,9 +43,9 @@ use crate::{
 };
 
 #[cfg(cpu)]
-pub mod renderlet;
+pub mod primitive;
 #[cfg(cpu)]
-pub use renderlet::*;
+pub use primitive::*;
 
 use super::*;
 
@@ -386,14 +386,15 @@ impl AsRef<Lighting> for Stage {
 impl Stage {
     /// Returns the vertices of a white unit cube.
     ///
-    /// This is the mesh of every [`Renderlet`] that has not had its vertices set.
+    /// This is the mesh of every [`Primitive`] that has not had its vertices set.
     pub fn default_vertices(&self) -> &Vertices {
         self.geometry.default_vertices()
     }
-    /// Stage a [`Camera`] on the GPU.
+
+    /// Stage a new [`Camera`] on the GPU.
     ///
-    /// If the camera has not been set, this camera will be used
-    /// automatically.
+    /// If no camera is currently in use on the [`Stage`] through
+    /// [`Stage::use_camera`], this new camera will be used automatically.
     pub fn new_camera(&self) -> Camera {
         self.geometry.new_camera()
     }
@@ -430,7 +431,7 @@ impl Stage {
         self.geometry.new_indices(data)
     }
 
-    /// Create new morph targets.
+    /// Stage new morph targets.
     pub fn new_morph_targets(
         &self,
         data: impl IntoIterator<Item = Vec<MorphTarget>>,
@@ -438,7 +439,7 @@ impl Stage {
         self.geometry.new_morph_targets(data)
     }
 
-    /// Create new morph target weights.
+    /// Stage new morph target weights.
     pub fn new_morph_target_weights(
         &self,
         data: impl IntoIterator<Item = f32>,
@@ -446,6 +447,7 @@ impl Stage {
         self.geometry.new_morph_target_weights(data)
     }
 
+    /// Stage a new skin.
     pub fn new_skin(
         &self,
         joints: impl IntoIterator<Item = impl Into<SkinJoint>>,
@@ -454,17 +456,18 @@ impl Stage {
         self.geometry.new_skin(joints, inverse_bind_matrices)
     }
 
-    /// Stage a new [`Renderlet`] on the GPU.
+    /// Stage a new [`Primitive`] on the GPU.
     ///
-    /// The returned [`Renderlet`] will automatically be added to this [`Stage`].
+    /// The returned [`Primitive`] will automatically be added to this [`Stage`].
     ///
-    /// The returned [`Renderlet`] will have the stage's default [`Vertices`], which is an all-white
+    /// The returned [`Primitive`] will have the stage's default [`Vertices`], which is an all-white
     /// unit cube.
     ///
-    /// The returned [`Renderlet`] uses the stage's default [`Material`], which is white and
-    /// **does not** participate in lighting.
-    pub fn new_renderlet(&self) -> Renderlet {
-        Renderlet::new(self)
+    /// The returned [`Primitive`] uses the stage's default [`Material`], which is white and
+    /// **does not** participate in lighting. To change this, first create a [`Material`] with
+    /// [`Stage::new_material`] and then call [`Primitive::set_material`] with the new material.
+    pub fn new_primitive(&self) -> Primitive {
+        Primitive::new(self)
     }
 
     /// Returns a reference to the descriptor stored at the root of the
@@ -570,9 +573,9 @@ impl Stage {
         self.lighting.new_spot_light()
     }
 
-    /// Add an [`AnalyticalLightBundle`] to the internal list of lights.
+    /// Add an [`AnalyticalLight`] to the internal list of lights.
     ///
-    /// This is called implicitly by [`Stage::new_analytical_light`].
+    /// This is called implicitly by `Stage::new_*_light`.
     ///
     /// This can be used to add the light back to the scene after using
     /// [`Stage::remove_light`].
@@ -584,7 +587,7 @@ impl Stage {
         self.lighting.add_light(bundle)
     }
 
-    /// Remove an [`AnalyticalLightBundle`] from the internal list of lights.
+    /// Remove an [`AnalyticalLight`] from the internal list of lights.
     ///
     /// Use this to exclude a light from rendering, without dropping the light.
     ///
@@ -593,23 +596,25 @@ impl Stage {
         self.lighting.remove_light(bundle);
     }
 
-    /// Enable shadow mapping for the given [`AnalyticalLightBundle`], creating
+    /// Enable shadow mapping for the given [`AnalyticalLight`], creating
     /// a new [`ShadowMap`].
     ///
     /// ## Tips for making a good shadow map
     ///
     /// 1. Make sure the map is big enough.
     ///    Using a big map can fix some peter panning issues, even before
-    ///    messing with bias in the [`ShadowMapDescriptor`].
+    ///    playing with bias in the returned [`ShadowMap`].
     ///    The bigger the map, the cleaner the shadows will be. This can
     ///    also solve PCF problems.
-    /// 2. Don't set PCF samples too high in the [`ShadowMapDescriptor`], as
+    /// 2. Don't set PCF samples too high in the returned [`ShadowMap`], as
     ///    this can _cause_ peter panning.
     /// 3. Ensure the **znear** and **zfar** parameters make sense, as the
     ///    shadow map uses these to determine how much of the scene to cover.
-    pub fn new_shadow_map(
+    ///    If you find that shadows are cut off in a straight line, it's likely
+    ///    `znear` or `zfar` needs adjustment.
+    pub fn new_shadow_map<T>(
         &self,
-        analytical_light_bundle: &AnalyticalLight,
+        analytical_light_bundle: &AnalyticalLight<T>,
         // Size of the shadow map
         size: UVec2,
         // Distance to the near plane of the shadow map's frustum.
@@ -620,7 +625,11 @@ impl Stage {
         //
         // Only objects within the shadow map's frustum will cast shadows.
         z_far: f32,
-    ) -> Result<ShadowMap, StageError> {
+    ) -> Result<ShadowMap, StageError>
+    where
+        T: IsLight,
+        Light: From<T>,
+    {
         Ok(self
             .lighting
             .new_shadow_map(analytical_light_bundle, size, z_near, z_far)?)
@@ -662,8 +671,7 @@ impl Stage {
     ///
     /// This is done implicitly in [`Stage::render`] and [`StageRendering::run`].
     ///
-    /// This can be used after dropping [`Hybrid`] or [`Gpu`] resources to reclaim
-    /// those resources on the GPU.
+    /// This can be used after dropping resources to reclaim those resources on the GPU.
     #[must_use]
     pub fn commit(&self) -> StageCommitResult {
         let (materials_atlas_texture_was_recreated, materials_buffer) = self.materials.commit();
@@ -787,7 +795,7 @@ impl Stage {
         })
     }
 
-    pub fn create_renderlet_pipeline(
+    pub fn create_primitive_pipeline(
         device: &wgpu::Device,
         fragment_color_format: wgpu::TextureFormat,
         multisample_count: u32,
@@ -881,7 +889,7 @@ impl Stage {
             ctx.get_render_target().format().add_srgb_suffix(),
             &bloom.get_mix_texture(),
         );
-        let stage_pipeline = Self::create_renderlet_pipeline(
+        let stage_pipeline = Self::create_primitive_pipeline(
             device,
             wgpu::TextureFormat::Rgba16Float,
             multisample_count,
@@ -962,7 +970,7 @@ impl Stage {
 
         log::debug!("setting multisample count to {multisample_count}");
         // UNWRAP: POP
-        *self.renderlet_pipeline.write().unwrap() = Self::create_renderlet_pipeline(
+        *self.renderlet_pipeline.write().unwrap() = Self::create_primitive_pipeline(
             self.device(),
             wgpu::TextureFormat::Rgba16Float,
             multisample_count,
@@ -1260,26 +1268,26 @@ impl Stage {
     /// If you drop the renderlet and no other references are kept, it will be
     /// removed automatically from the internal list and will cease to be
     /// drawn each frame.
-    pub fn add_renderlet(&self, renderlet: &Renderlet) {
+    pub fn add_primitive(&self, renderlet: &Primitive) {
         // UNWRAP: if we can't acquire the lock we want to panic.
         let mut draws = self.draw_calls.write().unwrap();
-        draws.add_renderlet(renderlet);
+        draws.add_primitive(renderlet);
     }
 
     /// Erase the given renderlet from the internal list of renderlets to be
     /// drawn each frame.
-    pub fn remove_renderlet(&self, renderlet: &Renderlet) {
+    pub fn remove_primitive(&self, renderlet: &Primitive) {
         let mut draws = self.draw_calls.write().unwrap();
-        draws.remove_renderlet(renderlet);
+        draws.remove_primitive(renderlet);
     }
 
     /// Sort the drawing order of renderlets.
     ///
-    /// This determines the order in which [`Renderlet`]s are drawn each frame.
-    pub fn sort_renderlets(&self, f: impl Fn(&Renderlet, &Renderlet) -> std::cmp::Ordering) {
+    /// This determines the order in which [`Primitive`]s are drawn each frame.
+    pub fn sort_renderlets(&self, f: impl Fn(&Primitive, &Primitive) -> std::cmp::Ordering) {
         // UNWRAP: panic on purpose
         let mut guard = self.draw_calls.write().unwrap();
-        guard.sort_renderlets(f);
+        guard.sort_primitives(f);
     }
 
     /// Returns a clone of the current depth texture.
@@ -1497,7 +1505,7 @@ mod test {
         let _camera = stage
             .new_camera()
             .with_projection_and_view(projection, view);
-        let _triangle_rez = stage.new_renderlet().with_vertices(
+        let _triangle_rez = stage.new_primitive().with_vertices(
             stage.new_vertices([
                 Vertex::default()
                     .with_position([10.0, 10.0, 0.0])

@@ -16,7 +16,7 @@ use crate::{
     cubemap::{CubemapDescriptor, CubemapFaceDirection},
     geometry::GeometryDescriptor,
     math::{Fetch, IsSampler, IsVector, Sample2dArray},
-    stage::{RenderletDescriptor, VertexInfo},
+    stage::{PrimitiveDescriptor, VertexInfo},
     transform::TransformDescriptor,
 };
 
@@ -90,7 +90,7 @@ impl Default for ShadowMapDescriptor {
 #[cfg(test)]
 #[derive(Default, Debug, Clone, Copy, PartialEq)]
 pub struct ShadowMappingVertexInfo {
-    pub renderlet_id: Id<RenderletDescriptor>,
+    pub renderlet_id: Id<PrimitiveDescriptor>,
     pub vertex_index: u32,
     pub vertex: crate::geometry::Vertex,
     pub transform: TransformDescriptor,
@@ -117,7 +117,7 @@ pub struct ShadowMappingVertexInfo {
 #[allow(clippy::too_many_arguments)]
 pub fn shadow_mapping_vertex(
     // Points at a `Renderlet`
-    #[spirv(instance_index)] renderlet_id: Id<RenderletDescriptor>,
+    #[spirv(instance_index)] renderlet_id: Id<PrimitiveDescriptor>,
     // Which vertex within the renderlet are we rendering
     #[spirv(vertex_index)] vertex_index: u32,
     // The slab where the renderlet's geometry is staged
@@ -784,22 +784,21 @@ impl ShadowCalculation {
 
 /// Depth pre-pass for the light tiling feature.
 ///
-/// This shader writes all staged [`Renderlet`]'s depth into a buffer.
+/// This shader writes all staged [`PrimitiveDescriptor`]'s depth into a buffer.
 ///
 /// This shader is very much like [`shadow_mapping_vertex`], except that
 /// shader gets its projection+view matrix from the light stored in a
 /// `ShadowMapDescriptor`.
 ///
-/// Here we want to render as normal forward pass would, with the `Renderlet`'s view
-/// and the [`Camera`]'s projection.
-///
+/// Here we want to render as normal forward pass would, with the `PrimitiveDescriptor`
+/// and the `Camera`'s view projection matrix.
 /// ## Note
 /// This shader will likely be expanded to include parts of occlusion culling and order
 /// independent transparency.
 #[spirv(vertex)]
 pub fn light_tiling_depth_pre_pass(
     // Points at a `Renderlet`.
-    #[spirv(instance_index)] renderlet_id: Id<RenderletDescriptor>,
+    #[spirv(instance_index)] renderlet_id: Id<PrimitiveDescriptor>,
     // Which vertex within the renderlet are we rendering?
     #[spirv(vertex_index)] vertex_index: u32,
     // The slab where the renderlet's geometry is staged
@@ -858,7 +857,7 @@ impl core::fmt::Debug for LightTile {
 /// them into lists that illuminate tiles of the screen.
 #[derive(Clone, Copy, SlabItem, core::fmt::Debug)]
 pub struct LightTilingDescriptor {
-    /// Size of the [`Stage`]'s depth texture.
+    /// Size of the [`Stage`](crate::stage::Stage)'s depth texture.
     pub depth_texture_size: UVec2,
     /// Configurable tile size.
     pub tile_size: u32,

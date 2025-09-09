@@ -71,7 +71,7 @@ impl SceneCubemap {
             view_formats: &[],
         });
         let depth_texture = Texture::create_depth_texture(device, size.x, size.y, 1, label);
-        let pipeline = Arc::new(Stage::create_renderlet_pipeline(device, format, 1));
+        let pipeline = Arc::new(Stage::create_primitive_pipeline(device, format, 1));
         Self {
             pipeline,
             cubemap_texture,
@@ -294,7 +294,7 @@ mod test {
             .with_projection_and_view(projection, view);
         // geometry is the "clip cube" where colors are normalized 3d space coords
         let _rez = stage
-            .new_renderlet()
+            .new_primitive()
             .with_vertices(stage.new_vertices(UNIT_POINTS.map(|unit_cube_point| {
                 Vertex::default()
                     // multiply by 2.0 because the unit cube's AABB bounds are at 0.5, and we want 1.0

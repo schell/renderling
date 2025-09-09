@@ -689,7 +689,7 @@ mod test {
             Mat4::look_at_rh(camera_position, Vec3::ZERO, Vec3::Y),
         );
         let _rez = stage
-            .new_renderlet()
+            .new_primitive()
             .with_vertices(stage.new_vertices(crate::test::gpu_cube_vertices()))
             .with_transform(
                 stage
@@ -804,7 +804,7 @@ mod test {
         };
 
         // A hashmap to hold renderlet ids to their names.
-        let mut names = HashMap::<Id<RenderletDescriptor>, String>::default();
+        let mut names = HashMap::<Id<PrimitiveDescriptor>, String>::default();
 
         // Add four yellow cubes in each corner
         let _ycubes = [
@@ -816,7 +816,7 @@ mod test {
         .map(|(offset, suffix)| {
             let yellow = hex_to_vec4(0xFFE6A5FF);
             let renderlet = stage
-                .new_renderlet()
+                .new_primitive()
                 .with_transform(
                     stage
                         .new_transform()
@@ -844,7 +844,7 @@ mod test {
         let _floor = {
             let golden = hex_to_vec4(0xFFBF61FF);
             let renderlet = stage
-                .new_renderlet()
+                .new_primitive()
                 .with_transform(
                     stage
                         .new_transform()
@@ -872,7 +872,7 @@ mod test {
         let _gcube = {
             let green = hex_to_vec4(0x8ABFA3FF);
             let renderlet = stage
-                .new_renderlet()
+                .new_primitive()
                 .with_transform(
                     stage
                         .new_transform()
@@ -890,7 +890,7 @@ mod test {
                     },
                 )))
                 .with_bounds(BoundingSphere::new(Vec3::ZERO, Vec3::splat(0.5).length()));
-            stage.add_renderlet(&renderlet);
+            stage.add_primitive(&renderlet);
             names.insert(renderlet.id(), "green_cube".into());
             renderlet
         };
@@ -901,7 +901,7 @@ mod test {
         let _pcube = {
             let purple = hex_to_vec4(0x605678FF);
             let renderlet = stage
-                .new_renderlet()
+                .new_primitive()
                 .with_transform(
                     stage
                         .new_transform()
@@ -988,7 +988,7 @@ mod test {
         }
 
         for i in 0..num_draw_calls as u32 {
-            let renderlet_id = Id::<RenderletDescriptor>::new(args[i as usize].first_instance);
+            let renderlet_id = Id::<PrimitiveDescriptor>::new(args[i as usize].first_instance);
             let name = names.get(&renderlet_id).unwrap();
             if name != "green_cube" {
                 continue;

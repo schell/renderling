@@ -8,7 +8,7 @@ use crabslab::Id;
 
 use crate::{
     cull::{ComputeCulling, CullingError},
-    stage::{Renderlet, RenderletDescriptor},
+    stage::{Primitive, PrimitiveDescriptor},
     texture::Texture,
     Context,
 };
@@ -65,8 +65,8 @@ impl IndirectDraws {
     }
 }
 
-impl From<Id<RenderletDescriptor>> for DrawIndirectArgs {
-    fn from(id: Id<RenderletDescriptor>) -> Self {
+impl From<Id<PrimitiveDescriptor>> for DrawIndirectArgs {
+    fn from(id: Id<PrimitiveDescriptor>) -> Self {
         // This is obviously incomplete, but that's ok because
         // the rest of this struct is filled out on the GPU during
         // culling.
@@ -98,10 +98,10 @@ impl DrawingStrategy {
 }
 
 /// Used to determine which objects are drawn and maintains the
-/// list of all [`Renderlet`]s.
+/// list of all [`Primitive`]s.
 pub struct DrawCalls {
     /// Internal representation of all staged renderlets.
-    renderlets: Vec<Renderlet>,
+    renderlets: Vec<Primitive>,
     pub(crate) drawing_strategy: DrawingStrategy,
 }
 
@@ -157,7 +157,7 @@ impl DrawCalls {
     /// Add a renderlet to the drawing queue.
     ///
     /// Returns the number of draw calls in the queue.
-    pub fn add_renderlet(&mut self, renderlet: &Renderlet) -> usize {
+    pub fn add_primitive(&mut self, renderlet: &Primitive) -> usize {
         log::trace!("adding renderlet {:?}", renderlet.id());
         if let Some(indirect) = &mut self.drawing_strategy.indirect {
             indirect.invalidate();
@@ -170,7 +170,7 @@ impl DrawCalls {
     /// drawn each frame.
     ///
     /// Returns the number of draw calls remaining in the queue.
-    pub fn remove_renderlet(&mut self, renderlet: &Renderlet) -> usize {
+    pub fn remove_primitive(&mut self, renderlet: &Primitive) -> usize {
         let id = renderlet.id();
         self.renderlets.retain(|ir| ir.descriptor.id() != id);
 
@@ -181,8 +181,8 @@ impl DrawCalls {
         self.renderlets.len()
     }
 
-    /// Sort draw calls using a function compairing [`RenderletSortItem`]s.
-    pub fn sort_renderlets(&mut self, f: impl Fn(&Renderlet, &Renderlet) -> std::cmp::Ordering) {
+    /// Sort draw calls using a function compairing [`Primitive`]s.
+    pub fn sort_primitives(&mut self, f: impl Fn(&Primitive, &Primitive) -> std::cmp::Ordering) {
         self.renderlets.sort_by(f);
         if let Some(indirect) = &mut self.drawing_strategy.indirect {
             indirect.invalidate();

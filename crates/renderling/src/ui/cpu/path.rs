@@ -1,7 +1,7 @@
 //! Path and builder.
 //!
 //! Path colors are sRGB.
-use crate::{geometry::Vertex, material::Material, stage::Renderlet};
+use crate::{geometry::Vertex, material::Material, stage::Primitive};
 use glam::{Vec2, Vec3, Vec3Swizzles, Vec4};
 use lyon::{
     path::traits::PathBuilder,
@@ -16,7 +16,7 @@ pub use lyon::tessellation::{LineCap, LineJoin};
 pub struct UiPath {
     pub transform: UiTransform,
     pub material: Material,
-    pub renderlet: Renderlet,
+    pub primitive: Primitive,
 }
 
 #[derive(Clone, Copy)]
@@ -386,10 +386,10 @@ impl UiPathBuilder {
         );
 
         let transform = self.ui.new_transform();
-        let renderlet = self
+        let primitive = self
             .ui
             .stage
-            .new_renderlet()
+            .new_primitive()
             .with_vertices(&vertices)
             .with_indices(&indices)
             .with_material(&material)
@@ -398,7 +398,7 @@ impl UiPathBuilder {
         UiPath {
             transform,
             material,
-            renderlet,
+            primitive,
         }
     }
 
@@ -467,7 +467,7 @@ impl UiPathBuilder {
         let renderlet = self
             .ui
             .stage
-            .new_renderlet()
+            .new_primitive()
             .with_vertices(vertices)
             .with_indices(indices)
             .with_transform(&transform.transform)
@@ -475,7 +475,7 @@ impl UiPathBuilder {
         UiPath {
             transform,
             material,
-            renderlet,
+            primitive: renderlet,
         }
     }
 

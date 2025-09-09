@@ -12,7 +12,7 @@ use spirv_std::{
     spirv,
 };
 
-use crate::{draw::DrawIndirectArgs, geometry::GeometryDescriptor, stage::RenderletDescriptor};
+use crate::{draw::DrawIndirectArgs, geometry::GeometryDescriptor, stage::PrimitiveDescriptor};
 
 #[cfg(not(target_arch = "spirv"))]
 mod cpu;
@@ -34,16 +34,16 @@ pub fn compute_culling(
     crate::println!("gid: {gid}");
     // Get the draw arg
     let arg = unsafe { args.index_unchecked_mut(gid) };
-    // Get the renderlet using the draw arg's renderlet id
-    let renderlet_id = Id::<RenderletDescriptor>::new(arg.first_instance);
-    let renderlet = stage_slab.read_unchecked(renderlet_id);
-    crate::println!("renderlet: {renderlet_id:?}");
+    // Get the primitive using the draw arg's primitive id
+    let primitive_id = Id::<PrimitiveDescriptor>::new(arg.first_instance);
+    let primitive = stage_slab.read_unchecked(primitive_id);
+    crate::println!("primitive: {primitive_id:?}");
 
-    arg.vertex_count = renderlet.get_vertex_count();
-    arg.instance_count = if renderlet.visible { 1 } else { 0 };
+    arg.vertex_count = primitive.get_vertex_count();
+    arg.instance_count = if primitive.visible { 1 } else { 0 };
 
-    if renderlet.bounds.radius == 0.0 {
-        crate::println!("renderlet bounding radius is zero, cannot cull");
+    if primitive.bounds.radius == 0.0 {
+        crate::println!("primitive bounding radius is zero, cannot cull");
         return;
     }
 
@@ -53,14 +53,14 @@ pub fn compute_culling(
     }
 
     let camera = stage_slab.read(config.camera_id);
-    let model = stage_slab.read(renderlet.transform_id);
+    let model = stage_slab.read(primitive.transform_id);
     // Compute frustum culling, and then occlusion culling, if need be
-    let (renderlet_is_inside_frustum, sphere_in_world_coords) =
-        renderlet.bounds.is_inside_camera_view(&camera, model);
+    let (primitive_is_inside_frustum, sphere_in_world_coords) =
+        primitive.bounds.is_inside_camera_view(&camera, model);
 
-    if renderlet_is_inside_frustum {
+    if primitive_is_inside_frustum {
         arg.instance_count = 1;
-        crate::println!("renderlet is inside frustum");
+        crate::println!("primitive is inside frustum");
         crate::println!("znear: {}", camera.frustum().planes[0]);
         crate::println!(" zfar: {}", camera.frustum().planes[5]);
         if !config.perform_occlusion_culling {
@@ -79,7 +79,7 @@ pub fn compute_culling(
         } else {
             size_in_pixels.y
         };
-        crate::println!("renderlet size in pixels: {size_in_pixels}");
+        crate::println!("primitive size in pixels: {size_in_pixels}");
 
         let mip_level = size_in_pixels.log2().floor() as u32;
         let max_mip_level = hzb_desc.mip.len() as u32 - 1;
@@ -109,10 +109,10 @@ pub fn compute_culling(
         let depth_of_sphere = sphere_aabb.min.z;
         crate::println!("depth_of_sphere: {depth_of_sphere}");
 
-        let renderlet_is_behind_something = depth_of_sphere > depth_in_hzb;
-        let renderlet_surrounds_camera = depth_of_sphere > 1.0;
+        let primitive_is_behind_something = depth_of_sphere > depth_in_hzb;
+        let primitive_surrounds_camera = depth_of_sphere > 1.0;
 
-        if renderlet_is_behind_something || renderlet_surrounds_camera {
+        if primitive_is_behind_something || primitive_surrounds_camera {
             crate::println!("CULLED");
             arg.instance_count = 0;
         }

@@ -6,7 +6,7 @@ use glam::{Vec3, Vec4, Vec4Swizzles};
 use spirv_std::num_traits::Zero;
 
 use crate::{
-    bvol::BoundingBox, camera::{Camera}, color::linear_xfer_vec4, geometry::Vertex, light::{LightTiling, LightTilingConfig, SpotLightCalculation}, math::GpuRng, prelude::TransformDescriptor, stage::{Renderlet, RenderletPbrVertexInfo, Stage}, test::BlockOnFuture
+    bvol::BoundingBox, camera::Camera, color::linear_xfer_vec4, geometry::Vertex, light::{LightTiling, LightTilingConfig, SpotLightCalculation}, math::GpuRng, prelude::TransformDescriptor, stage::{Primitive, PrimitivePbrVertexInfo, Stage}, test::BlockOnFuture
 };
 
 use super::*;
@@ -193,7 +193,7 @@ fn light_tiling_light_bounds() {
                 log::info!("min: {min}, max: {max}");
                 resources.push(
                     stage
-                        .new_renderlet()
+                        .new_primitive()
                         .with_vertices(stage.new_vertices(
                             bb.get_mesh()
                                 .map(|(p, n)| Vertex::default().with_position(p).with_normal(n))
@@ -221,7 +221,7 @@ fn gen_vec3(prng: &mut GpuRng) -> Vec3 {
 struct GeneratedLight {
     _unused_transform: Transform,
     _light: AnalyticalLight<PointLight>,
-    mesh_renderlet: Renderlet,
+    mesh_renderlet: Primitive,
 }
 
 fn gen_light(stage: &Stage, prng: &mut GpuRng, bounding_boxes: &[BoundingBox]) -> GeneratedLight {
@@ -258,7 +258,7 @@ fn gen_light(stage: &Stage, prng: &mut GpuRng, bounding_boxes: &[BoundingBox]) -
             .with_has_lighting(false)
             .with_emissive_factor(color.xyz())
             .with_emissive_strength_multiplier(100.0);
-    let mesh_renderlet = stage.new_renderlet().with_vertices(vertices).with_material(material);
+    let mesh_renderlet = stage.new_primitive().with_vertices(vertices).with_material(material);
     let _light = {
         // suffix the actual analytical light
         let intensity = scale * 100.0;
@@ -622,7 +622,7 @@ fn tiling_e2e_sanity_with(
 
     // Remove the light meshes
     for generated_light in lights.iter() {
-        stage.remove_renderlet(&generated_light.mesh_renderlet);
+        stage.remove_primitive(&generated_light.mesh_renderlet);
     }
     snapshot(
         &ctx,
@@ -948,8 +948,8 @@ fn pedestal() {
         log::info!("renderlet: {:#?}", renderlet.descriptor());
 
         for vertex_index in 0..renderlet.descriptor().vertices_array.len() {
-            let mut info = RenderletPbrVertexInfo::default();
-            crate::stage::renderlet_vertex(
+            let mut info = PrimitivePbrVertexInfo::default();
+            crate::stage::primitive_vertex(
                 renderlet.id(),
                 vertex_index as u32,
                 &geometry_slab,
@@ -1016,8 +1016,8 @@ fn pedestal() {
         let mut spot_infos = vec![];
 
         for vertex_index in 0..renderlet.descriptor().vertices_array.len() {
-            let mut info = RenderletPbrVertexInfo::default();
-            crate::stage::renderlet_vertex(
+            let mut info = PrimitivePbrVertexInfo::default();
+            crate::stage::primitive_vertex(
                 renderlet.id(),
                 vertex_index as u32,
                 &geometry_slab,

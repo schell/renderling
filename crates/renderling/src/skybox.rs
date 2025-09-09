@@ -63,7 +63,7 @@ pub fn skybox_cubemap_fragment(
 
 /// Vertex shader that draws a cubemap.
 ///
-/// Uses the `instance_index` as the [`Id`] for a [`Camera`].
+/// Uses the `instance_index` as the [`Id`] for a [`CameraDescriptor`].
 ///
 /// Used to create a cubemap from an equirectangular image as well as cubemap
 /// convolutions.

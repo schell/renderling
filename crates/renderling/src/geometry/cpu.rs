@@ -89,6 +89,24 @@ impl Vertices {
             inner: self.inner.into_gpu_only(),
         }
     }
+
+    /// Returns a [`Vertex`] at a specific index, if any.
+    pub fn get(&self, index: usize) -> Option<Vertex> {
+        self.inner.get(index)
+    }
+
+    /// Return all vertices as a vector.
+    pub fn get_vec(&self) -> Vec<Vertex> {
+        self.inner.get_vec()
+    }
+
+    /// Set the [`Vertex`] at the given index to the given value, if the item at
+    /// the index exists.
+    ///
+    /// Returns the previous value, if any.
+    pub fn set_item(&self, index: usize, value: Vertex) -> Option<Vertex> {
+        self.inner.set_item(index, value)
+    }
 }
 
 impl<T> Vertices<T>
@@ -171,9 +189,6 @@ impl Indices {
     }
 
     /// Unload the CPU side of this index data.
-    ///
-    /// After this operation the data can still be updated using [`Indices::set_item`],
-    /// but it cannot be modified in-place.
     pub fn into_gpu_only(self) -> Indices<GpuOnlyArray> {
         Indices {
             inner: self.inner.into_gpu_only(),
@@ -483,7 +498,7 @@ impl Skin {
 /// from either of those types using the [`From`] trait.
 ///
 /// You can also pass an iterator of either [`Transform`] or [`NestedTransform`]
-/// to [`Stage::new_skin`].
+/// to [`Stage::new_skin`](crate::stage::Stage::new_skin).
 pub struct SkinJoint(pub(crate) Transform);
 
 impl From<Transform> for SkinJoint {

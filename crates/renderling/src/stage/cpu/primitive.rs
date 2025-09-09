@@ -1,4 +1,4 @@
-//! `Renderlet` builder.
+//! Mesh primitives.
 
 use core::ops::Deref;
 use std::sync::{Arc, Mutex};
@@ -10,16 +10,16 @@ use crate::{
     bvol::BoundingSphere,
     geometry::{Indices, MorphTargetWeights, MorphTargets, Skin, Vertices},
     material::Material,
-    stage::RenderletDescriptor,
+    stage::PrimitiveDescriptor,
     transform::Transform,
     types::GpuOnlyArray,
 };
 
 /// A unit of rendering.
 ///
-/// A `Renderlet` represents one draw call, or one mesh primitive.
-pub struct Renderlet {
-    pub(crate) descriptor: Hybrid<RenderletDescriptor>,
+/// A `Primitive` represents one draw call, or one mesh primitive.
+pub struct Primitive {
+    pub(crate) descriptor: Hybrid<PrimitiveDescriptor>,
 
     vertices: Arc<Mutex<Option<Vertices<GpuOnlyArray>>>>,
     indices: Arc<Mutex<Option<Indices<GpuOnlyArray>>>>,
@@ -30,17 +30,18 @@ pub struct Renderlet {
     morph_targets: Arc<Mutex<Option<(MorphTargets, MorphTargetWeights)>>>,
 }
 
-impl Renderlet {
-    /// Create a new [`Renderlet`], automatically adding it to the [`Stage`] to be drawn.
+impl Primitive {
+    /// Create a new [`Primitive`], automatically adding it to the
+    /// [`Stage`](crate::stage::Stage) to be drawn.
     ///
-    /// The returned [`Renderlet`] will have the stage's default [`Vertices`], which is an all-white
-    /// unit cube.
+    /// The returned [`Primitive`] will have the stage's default [`Vertices`],
+    /// which is an all-white unit cube.
     pub fn new(stage: &super::Stage) -> Self {
         let descriptor = stage
             .geometry
             .slab_allocator()
-            .new_value(RenderletDescriptor::default());
-        let renderlet = Renderlet {
+            .new_value(PrimitiveDescriptor::default());
+        let primitive = Primitive {
             descriptor,
             vertices: Default::default(),
             indices: Default::default(),
@@ -50,12 +51,12 @@ impl Renderlet {
             morph_targets: Default::default(),
         }
         .with_vertices(stage.default_vertices());
-        stage.add_renderlet(&renderlet);
-        renderlet
+        stage.add_primitive(&primitive);
+        primitive
     }
 }
 
-impl Clone for Renderlet {
+impl Clone for Primitive {
     fn clone(&self) -> Self {
         Self {
             descriptor: self.descriptor.clone(),
@@ -70,8 +71,8 @@ impl Clone for Renderlet {
 }
 
 // Vertices impls
-impl Renderlet {
-    /// Set the vertex data of this renderlet.
+impl Primitive {
+    /// Set the vertex data of this primitive.
     pub fn set_vertices(&self, vertices: impl Into<Vertices<GpuOnlyArray>>) -> &Self {
         let vertices = vertices.into();
         let array = vertices.array();
@@ -80,7 +81,7 @@ impl Renderlet {
         self
     }
 
-    /// Set the vertex data of this renderlet and return the renderlet.
+    /// Set the vertex data of this primitive and return the primitive.
     pub fn with_vertices(self, vertices: impl Into<Vertices<GpuOnlyArray>>) -> Self {
         self.set_vertices(vertices);
         self
@@ -88,8 +89,8 @@ impl Renderlet {
 }
 
 // Indices impls
-impl Renderlet {
-    /// Set the index data of this renderlet.
+impl Primitive {
+    /// Set the index data of this primitive.
     pub fn set_indices(&self, indices: impl Into<Indices<GpuOnlyArray>>) -> &Self {
         let indices = indices.into();
         let array = indices.array();
@@ -98,13 +99,13 @@ impl Renderlet {
         self
     }
 
-    /// Set the index data of this renderlet and return the renderlet.
+    /// Set the index data of this primitive and return the primitive.
     pub fn with_indices(self, indices: impl Into<Indices<GpuOnlyArray>>) -> Self {
         self.set_indices(indices);
         self
     }
 
-    /// Remove the indices from this renderlet.
+    /// Remove the indices from this primitive.
     pub fn remove_indices(&self) -> &Self {
         *self.indices.lock().unwrap() = None;
         self.descriptor.modify(|d| d.indices_array = Array::NONE);
@@ -112,25 +113,25 @@ impl Renderlet {
     }
 }
 
-// RenderletDescriptor impls
-impl Renderlet {
+// PrimitiveDescriptor impls
+impl Primitive {
     /// Return a pointer to the underlying descriptor on the GPU.
-    pub fn id(&self) -> Id<RenderletDescriptor> {
+    pub fn id(&self) -> Id<PrimitiveDescriptor> {
         self.descriptor.id()
     }
 
     /// Return the underlying descriptor.
-    pub fn descriptor(&self) -> RenderletDescriptor {
+    pub fn descriptor(&self) -> PrimitiveDescriptor {
         self.descriptor.get()
     }
 
-    /// Set the bounds of this renderlet.
+    /// Set the bounds of this primitive.
     pub fn set_bounds(&self, bounds: BoundingSphere) -> &Self {
         self.descriptor.modify(|d| d.bounds = bounds);
         self
     }
 
-    /// Set the bounds and return the renderlet.
+    /// Set the bounds and return the primitive.
     pub fn with_bounds(self, bounds: BoundingSphere) -> Self {
         self.set_bounds(bounds);
         self
@@ -138,53 +139,56 @@ impl Renderlet {
 
     /// Get the bounds.
     ///
-    /// Returns the current `BoundingSphere`.
+    /// Returns the current [`BoundingSphere`].
     pub fn bounds(&self) -> BoundingSphere {
         self.descriptor.get().bounds
     }
 
-    /// Modify the bounds of the renderlet.
+    /// Modify the bounds of the primitive.
     ///
     /// # Arguments
     ///
-    /// * `f` - A closure that takes a mutable reference to the `BoundingSphere` and returns a value of type `T`.
+    /// * `f` - A closure that takes a mutable reference to the
+    ///   [`BoundingSphere`] and returns a value of type `T`.
     pub fn modify_bounds<T: 'static>(&self, f: impl FnOnce(&mut BoundingSphere) -> T) -> T {
         self.descriptor.modify(|d| f(&mut d.bounds))
     }
 
-    /// Set the visibility of this renderlet.
+    /// Set the visibility of this primitive.
     pub fn set_visible(&self, visible: bool) -> &Self {
         self.descriptor.modify(|d| d.visible = visible);
         self
     }
 
-    /// Set the visibility and return the renderlet.
+    /// Set the visibility and return the primitive.
     pub fn with_visible(self, visible: bool) -> Self {
         self.set_visible(visible);
         self
     }
 
-    /// Return the renderlet's visibility.
+    /// Return the primitive's visibility.
     pub fn visible(&self) -> bool {
         self.descriptor.get().visible
     }
 
-    /// Modify the visible of the renderlet.
+    /// Modify the visible of the primitive.
     ///
     /// # Arguments
     ///
-    /// * `f` - A closure that takes a mutable reference to the visibility and returns a value of type `T`.
+    /// * `f` - A closure that takes a mutable reference to the visibility and
+    ///   returns a value of type `T`.
     pub fn modify_visible<T: 'static>(&self, f: impl FnOnce(&mut bool) -> T) -> T {
         self.descriptor.modify(|d| f(&mut d.visible))
     }
 }
 
 // Transform functions
-impl Renderlet {
+impl Primitive {
     /// Set the transform.
     ///
     /// # Note
-    /// This can be set with [`Transform`] or [`NestedTransform`].
+    /// This can be set with [`Transform`] or
+    /// [`NestedTransform`](crate::transform::NestedTransform).
     pub fn set_transform(&self, transform: impl Into<Transform>) -> &Self {
         let transform = transform.into();
         self.descriptor.modify(|d| d.transform_id = transform.id());
@@ -192,10 +196,11 @@ impl Renderlet {
         self
     }
 
-    /// Set the transform and return the `Renderlet`.
+    /// Set the transform and return the `Primitive`.
     ///
     /// # Note
-    /// This can be set with [`Transform`] or [`NestedTransform`].
+    /// This can be set with [`Transform`] or
+    /// [`NestedTransform`](crate::transform::NestedTransform).
     pub fn with_transform(self, transform: impl Into<Transform>) -> Self {
         self.set_transform(transform);
         self
@@ -209,7 +214,7 @@ impl Renderlet {
         self.transform.lock().unwrap()
     }
 
-    /// Remove the transform from this renderlet.
+    /// Remove the transform from this primitive.
     ///
     /// This effectively makes the transform the identity.
     pub fn remove_transform(&self) -> &Self {
@@ -220,8 +225,8 @@ impl Renderlet {
 }
 
 // Material impls
-impl Renderlet {
-    /// Set the material of this renderlet.
+impl Primitive {
+    /// Set the material of this primitive.
     pub fn set_material(&self, material: impl Into<Material>) -> &Self {
         let material = material.into();
         self.descriptor.modify(|d| d.material_id = material.id());
@@ -229,7 +234,7 @@ impl Renderlet {
         self
     }
 
-    /// Set the material and return the renderlet.
+    /// Set the material and return the primitive.
     pub fn with_material(self, material: impl Into<Material>) -> Self {
         self.set_material(material);
         self
@@ -243,7 +248,7 @@ impl Renderlet {
         self.material.lock().unwrap()
     }
 
-    /// Remove the material from this renderlet.
+    /// Remove the material from this primitive.
     pub fn remove_material(&self) -> &Self {
         self.descriptor.modify(|d| d.material_id = Id::NONE);
         *self.material.lock().unwrap() = None;
@@ -252,8 +257,8 @@ impl Renderlet {
 }
 
 // Skin impls
-impl Renderlet {
-    /// Set the skin of this renderlet.
+impl Primitive {
+    /// Set the skin of this primitive.
     pub fn set_skin(&self, skin: impl Into<Skin>) -> &Self {
         let skin = skin.into();
         self.descriptor.modify(|d| d.skin_id = skin.id());
@@ -261,7 +266,7 @@ impl Renderlet {
         self
     }
 
-    /// Set the skin and return the renderlet.
+    /// Set the skin and return the primitive.
     pub fn with_skin(self, skin: impl Into<Skin>) -> Self {
         self.set_skin(skin);
         self
@@ -274,7 +279,7 @@ impl Renderlet {
         self.skin.lock().unwrap()
     }
 
-    /// Remove the skin from this renderlet.
+    /// Remove the skin from this primitive.
     pub fn remove_skin(&self) -> &Self {
         self.descriptor.modify(|d| d.skin_id = Id::NONE);
         *self.skin.lock().unwrap() = None;
@@ -283,8 +288,8 @@ impl Renderlet {
 }
 
 // (MorphTargets, MorphTargetsWeights) impls
-impl Renderlet {
-    /// Set the morph targets and weights of this renderlet.
+impl Primitive {
+    /// Set the morph targets and weights of this primitive.
     pub fn set_morph_targets(
         &self,
         morph_targets: impl Into<MorphTargets>,
@@ -300,7 +305,7 @@ impl Renderlet {
         self
     }
 
-    /// Set the morph targets and weights and return the renderlet.
+    /// Set the morph targets and weights and return the primitive.
     pub fn with_morph_targets(
         self,
         morph_targets: impl Into<MorphTargets>,
@@ -319,7 +324,7 @@ impl Renderlet {
         self.morph_targets.lock().unwrap()
     }
 
-    /// Remove the morph targets and weights from this renderlet.
+    /// Remove the morph targets and weights from this primitive.
     pub fn remove_morph_targets(&self) -> &Self {
         self.descriptor.modify(|d| {
             d.morph_targets = Array::NONE;

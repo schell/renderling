@@ -46,6 +46,7 @@ pub enum AtlasError {
 /// A staged texture in the texture atlas.
 ///
 /// An [`AtlasTexture`] can be acquired through:
+///
 /// * [`Atlas::add_image`]
 /// * [`Atlas::add_images`].
 /// * [`Atlas::set_images`]
@@ -375,6 +376,15 @@ impl Atlas {
             .into_iter()
             .map(|a| AtlasTexture { descriptor: a.1 })
             .collect())
+    }
+
+    /// Add one image.
+    ///
+    /// If you have more than one image, you should use [`Atlas::add_images`], as every
+    /// change in images causes a repacking, which might be expensive.
+    pub fn add_image(&self, image: &AtlasImage) -> Result<AtlasTexture, AtlasError> {
+        // UNWRAP: safe because we know there's at least one image
+        Ok(self.add_images(Some(image))?.pop().unwrap())
     }
 
     /// Resize the atlas.
@@ -1030,7 +1040,7 @@ mod test {
         let texels_entry = &atlas_entries[2];
 
         let _rez = stage
-            .new_renderlet()
+            .new_primitive()
             .with_material(
                 stage
                     .new_material()
@@ -1110,7 +1120,7 @@ mod test {
             [tl, bl, br, tl, br, tr]
         });
         let _clamp_rez = stage
-            .new_renderlet()
+            .new_primitive()
             .with_vertices(&geometry)
             .with_material(
                 stage
@@ -1120,7 +1130,7 @@ mod test {
             );
 
         let _repeat_rez = stage
-            .new_renderlet()
+            .new_primitive()
             .with_transform(stage.new_transform().with_translation(Vec3::new(
                 sheet_w + 1.0,
                 0.0,
@@ -1135,7 +1145,7 @@ mod test {
             .with_vertices(&geometry);
 
         let _mirror_rez = stage
-            .new_renderlet()
+            .new_primitive()
             .with_transform(stage.new_transform().with_translation(Vec3::new(
                 sheet_w * 2.0 + 2.0,
                 0.0,
@@ -1208,7 +1218,7 @@ mod test {
             [tl, bl, br, tl, br, tr]
         });
         let _clamp_prim = stage
-            .new_renderlet()
+            .new_primitive()
             .with_vertices(&geometry)
             .with_material(
                 stage
@@ -1218,7 +1228,7 @@ mod test {
             );
 
         let _repeat_rez = stage
-            .new_renderlet()
+            .new_primitive()
             .with_material(
                 stage
                     .new_material()
@@ -1233,7 +1243,7 @@ mod test {
             .with_vertices(&geometry);
 
         let _mirror_rez = stage
-            .new_renderlet()
+            .new_primitive()
             .with_material(
                 stage
                     .new_material()

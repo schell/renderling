@@ -1,7 +1,7 @@
 //! Handles queueing draw calls.
 //!
 //! [`DrawCalls`] is used to maintain the list of all staged
-//! [`Renderlet`](crate::prelude::Renderlet)s.
+//! [`PrimitiveDescriptor`](crate::stage::PrimitiveDescriptor)s.
 //! It also performs frustum culling and issues draw calls during
 //! [`Stage::render`](crate::prelude::Stage::render).
 use crabslab::SlabItem;

@@ -690,8 +690,8 @@ pub const fn convex_mesh([p0, p1, p2, p3, p4, p5, p6, p7]: [Vec3; 8]) -> [Vec3; 
 /// An PCG PRNG that is optimized for GPUs, in that it is fast to evaluate and accepts
 /// sequential ids as it's initial state without sacrificing on RNG quality.
 ///
-/// https://www.reedbeta.com/blog/hash-functions-for-gpu-rendering/
-/// https://jcgt.org/published/0009/03/02/
+/// * <https://www.reedbeta.com/blog/hash-functions-for-gpu-rendering/>
+/// * <https://jcgt.org/published/0009/03/02/>
 ///
 /// Thanks to Firestar99 at
 /// <https://github.com/Firestar99/nanite-at-home/blob/c55915d16ad3b5b4b706d8017633f0870dd2603e/space-engine-shader/src/utils/gpurng.rs#L19>

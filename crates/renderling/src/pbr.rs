@@ -20,7 +20,7 @@ use crate::{
     material::MaterialDescriptor,
     math::{self, IsSampler, IsVector, Sample2d, Sample2dArray, SampleCube},
     println as my_println,
-    stage::RenderletDescriptor,
+    stage::PrimitiveDescriptor,
 };
 
 pub mod debug;
@@ -236,7 +236,7 @@ pub fn fragment_impl<A, T, DtA, C, S>(
     material_slab: &[u32],
     lighting_slab: &[u32],
 
-    renderlet_id: Id<RenderletDescriptor>,
+    renderlet_id: Id<PrimitiveDescriptor>,
 
     frag_coord: Vec4,
     in_color: Vec4,
@@ -733,7 +733,7 @@ mod test {
                 let y = (diameter + spacing) * j as f32;
 
                 let rez = stage
-                    .new_renderlet()
+                    .new_primitive()
                     .with_material(
                         stage
                             .new_material()

@@ -17,7 +17,7 @@ use crate::{
     geometry::{Indices, MorphTargetWeights, MorphTargets, Skin, Vertices},
     light::{AnalyticalLight, LightStyle},
     material::Material,
-    stage::{MorphTarget, Renderlet, Stage, Vertex},
+    stage::{MorphTarget, Primitive, Stage, Vertex},
     transform::{NestedTransform, TransformDescriptor},
 };
 
@@ -723,7 +723,7 @@ pub struct GltfDocument {
     pub default_material: Material,
     pub materials: Vec<Material>,
     // map of node index to renderlets
-    pub renderlets: FxHashMap<usize, Vec<Renderlet>>,
+    pub renderlets: FxHashMap<usize, Vec<Primitive>>,
     /// Vector of scenes - each being a list of nodes.
     pub scenes: Vec<Vec<usize>>,
     pub skins: Vec<GltfSkin>,
@@ -1066,7 +1066,7 @@ impl GltfDocument {
                         .and_then(|index| materials.get(index))
                         .unwrap_or(&default_material);
                     let renderlet = stage
-                        .new_renderlet()
+                        .new_primitive()
                         .with_vertices(&prim.vertices)
                         .with_indices(&prim.indices)
                         .with_transform(&gltf_node.transform)
@@ -1112,7 +1112,7 @@ impl GltfDocument {
         })
     }
 
-    pub fn renderlets_iter(&self) -> impl Iterator<Item = &Renderlet> {
+    pub fn renderlets_iter(&self) -> impl Iterator<Item = &Primitive> {
         self.renderlets.iter().flat_map(|(_, rs)| rs.iter())
     }
 
@@ -1270,7 +1270,7 @@ mod test {
             .with_albedo_texture(&doc.textures[0])
             .with_has_lighting(false);
         let _rez = stage
-            .new_renderlet()
+            .new_primitive()
             .with_material(&material)
             .with_vertices(
                 stage.new_vertices([

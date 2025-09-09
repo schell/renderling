@@ -32,7 +32,7 @@ mod gltf_support;
 #[cfg(all(feature = "gltf", not(target_arch = "spirv")))]
 pub use gltf_support::*;
 
-/// Returned by [`Renderlet::get_vertex_info`].
+/// Returned by [`PrimitiveDescriptor::get_vertex_info`].
 pub struct VertexInfo {
     pub vertex: Vertex,
     pub transform: TransformDescriptor,
@@ -41,18 +41,12 @@ pub struct VertexInfo {
 }
 
 /// A draw call used to render some geometry.
-///
-/// ## Note
-/// The default implentation returns a `Renderlet` with `pbr_config` set to
-/// `Id::new(0)`. This corresponds to the `PbrConfig` that is maintained by
-/// the [`Stage`].
-#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
-#[derive(Clone, Copy, PartialEq, SlabItem)]
+#[derive(Clone, Copy, PartialEq, SlabItem, Debug)]
 #[offsets]
-pub struct RenderletDescriptor {
+pub struct PrimitiveDescriptor {
     pub visible: bool,
     pub vertices_array: Array<Vertex>,
-    /// Bounding sphere of the entire renderlet, in local space.
+    /// Bounding sphere of the entire primitive, in local space.
     pub bounds: BoundingSphere,
     pub indices_array: Array<u32>,
     pub transform_id: Id<TransformDescriptor>,
@@ -63,9 +57,9 @@ pub struct RenderletDescriptor {
     pub geometry_descriptor_id: Id<GeometryDescriptor>,
 }
 
-impl Default for RenderletDescriptor {
+impl Default for PrimitiveDescriptor {
     fn default() -> Self {
-        RenderletDescriptor {
+        PrimitiveDescriptor {
             visible: true,
             vertices_array: Array::default(),
             bounds: BoundingSphere::default(),
@@ -80,7 +74,7 @@ impl Default for RenderletDescriptor {
     }
 }
 
-impl RenderletDescriptor {
+impl PrimitiveDescriptor {
     /// Returns the vertex at the given index and its related values.
     ///
     /// These values are often used in shaders, so they are grouped together.
@@ -96,7 +90,7 @@ impl RenderletDescriptor {
             world_pos,
         }
     }
-    /// Retrieve the transform of this `Renderlet`.
+    /// Retrieve the transform of this `primitive`.
     ///
     /// This takes into consideration all skinning matrices.
     pub fn get_transform(&self, vertex: Vertex, slab: &[u32]) -> TransformDescriptor {
@@ -140,11 +134,11 @@ impl RenderletDescriptor {
 }
 
 #[cfg(test)]
-/// A helper struct that contains all outputs of the Renderlet's PBR vertex shader.
+/// A helper struct that contains all outputs of the primitive's PBR vertex shader.
 #[derive(Default, Debug, Clone, Copy, PartialEq)]
-pub struct RenderletPbrVertexInfo {
-    pub renderlet: RenderletDescriptor,
-    pub renderlet_id: Id<RenderletDescriptor>,
+pub struct PrimitivePbrVertexInfo {
+    pub primitive: PrimitiveDescriptor,
+    pub primitive_id: Id<PrimitiveDescriptor>,
     pub vertex_index: u32,
     pub vertex: Vertex,
     pub transform: TransformDescriptor,
@@ -160,17 +154,17 @@ pub struct RenderletPbrVertexInfo {
     pub out_clip_pos: Vec4,
 }
 
-/// Renderlet vertex shader.
+/// primitive vertex shader.
 #[spirv(vertex)]
 #[allow(clippy::too_many_arguments)]
-pub fn renderlet_vertex(
-    // Points at a `Renderlet`
-    #[spirv(instance_index)] renderlet_id: Id<RenderletDescriptor>,
-    // Which vertex within the renderlet are we rendering
+pub fn primitive_vertex(
+    // Points at a `primitive`
+    #[spirv(instance_index)] primitive_id: Id<PrimitiveDescriptor>,
+    // Which vertex within the primitive are we rendering
     #[spirv(vertex_index)] vertex_index: u32,
     #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] geometry_slab: &[u32],
 
-    #[spirv(flat)] out_renderlet: &mut Id<RenderletDescriptor>,
+    #[spirv(flat)] out_primitive: &mut Id<PrimitiveDescriptor>,
     // TODO: Think about placing all these out values in a G-Buffer
     // But do we have enough buffers + enough space on web?
     // ...and can we write to buffers from vertex shaders on web?
@@ -183,23 +177,23 @@ pub fn renderlet_vertex(
     out_world_pos: &mut Vec3,
     #[spirv(position)] out_clip_pos: &mut Vec4,
     // test-only info struct
-    #[cfg(test)] out_info: &mut RenderletPbrVertexInfo,
+    #[cfg(test)] out_info: &mut PrimitivePbrVertexInfo,
 ) {
-    let renderlet = geometry_slab.read_unchecked(renderlet_id);
-    if !renderlet.visible {
+    let primitive = geometry_slab.read_unchecked(primitive_id);
+    if !primitive.visible {
         // put it outside the clipping frustum
         *out_clip_pos = Vec4::new(10.0, 10.0, 10.0, 1.0);
         return;
     }
 
-    *out_renderlet = renderlet_id;
+    *out_primitive = primitive_id;
 
     let VertexInfo {
         vertex,
         transform,
         model_matrix,
         world_pos,
-    } = renderlet.get_vertex_info(vertex_index, geometry_slab);
+    } = primitive.get_vertex_info(vertex_index, geometry_slab);
     *out_color = vertex.color;
     *out_uv0 = vertex.uv0;
     *out_uv1 = vertex.uv1;
@@ -222,21 +216,21 @@ pub fn renderlet_vertex(
     *out_bitangent = bitangent_w;
 
     let camera_id = geometry_slab
-        .read_unchecked(renderlet.geometry_descriptor_id + GeometryDescriptor::OFFSET_OF_CAMERA_ID);
+        .read_unchecked(primitive.geometry_descriptor_id + GeometryDescriptor::OFFSET_OF_CAMERA_ID);
     let camera = geometry_slab.read(camera_id);
     let clip_pos = camera.view_projection() * world_pos.extend(1.0);
     *out_clip_pos = clip_pos;
     #[cfg(test)]
     {
-        *out_info = RenderletPbrVertexInfo {
-            renderlet_id,
+        *out_info = PrimitivePbrVertexInfo {
+            primitive_id,
             vertex_index,
             vertex,
             transform,
             model_matrix,
             view_projection: camera.view_projection(),
             out_clip_pos: clip_pos,
-            renderlet,
+            primitive,
             out_color: *out_color,
             out_uv0: *out_uv0,
             out_uv1: *out_uv1,
@@ -248,10 +242,10 @@ pub fn renderlet_vertex(
     }
 }
 
-/// Renderlet fragment shader
+/// primitive fragment shader
 #[allow(clippy::too_many_arguments, dead_code)]
 #[spirv(fragment)]
-pub fn renderlet_fragment(
+pub fn primitive_fragment(
     #[spirv(storage_buffer, descriptor_set = 0, binding = 0)] geometry_slab: &[u32],
     #[spirv(storage_buffer, descriptor_set = 0, binding = 1)] material_slab: &[u32],
     #[spirv(descriptor_set = 0, binding = 2)] atlas: &Image2dArray,
@@ -269,7 +263,7 @@ pub fn renderlet_fragment(
     #[spirv(storage_buffer, descriptor_set = 0, binding = 13)]
     debug_slab: &mut [u32],
 
-    #[spirv(flat)] renderlet_id: Id<RenderletDescriptor>,
+    #[spirv(flat)] primitive_id: Id<PrimitiveDescriptor>,
     #[spirv(frag_coord)] frag_coord: Vec4,
     in_color: Vec4,
     in_uv0: Vec2,
@@ -295,7 +289,7 @@ pub fn renderlet_fragment(
         geometry_slab,
         material_slab,
         light_slab,
-        renderlet_id,
+        primitive_id,
         frag_coord,
         in_color,
         in_uv0,
