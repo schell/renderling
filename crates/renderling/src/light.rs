@@ -40,7 +40,7 @@ pub use tiling::*;
 #[offsets]
 pub struct LightingDescriptor {
     /// List of all analytical lights in the scene.
-    pub analytical_lights_array: Array<Id<Light>>,
+    pub analytical_lights_array: Array<Id<LightDescriptor>>,
     /// Shadow mapping atlas info.
     pub shadow_map_atlas_descriptor_id: Id<AtlasDescriptor>,
     /// `Id` of the [`ShadowMapDescriptor`] to use when updating
@@ -486,24 +486,27 @@ impl SlabItem for LightStyle {
 
 /// A generic light that is used as a slab pointer to a
 /// specific light type.
-// TODO: rename to `LightDescriptor`
 #[repr(C)]
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[derive(Copy, Clone, PartialEq, SlabItem)]
-pub struct Light {
+pub struct LightDescriptor {
     /// The type of the light
     pub light_type: LightStyle,
     /// The index of the light in the lighting slab
     pub index: u32,
     /// The id of a transform to apply to the position and direction of the light.
     ///
-    /// This `Id` points to a transform on the geometry slab.
+    /// This `Id` points to a transform on the lighting slab.
+    ///
+    /// The value of this descriptor can be synchronized with that of a node
+    /// transform on the geometry slab from
+    /// [`crate::light::AnalyticalLight::link_node_transform`].
     pub transform_id: Id<TransformDescriptor>,
     /// The id of the shadow map in use by this light.
     pub shadow_map_desc_id: Id<ShadowMapDescriptor>,
 }
 
-impl Default for Light {
+impl Default for LightDescriptor {
     fn default() -> Self {
         Self {
             light_type: LightStyle::Directional,
@@ -514,7 +517,7 @@ impl Default for Light {
     }
 }
 
-impl From<Id<DirectionalLightDescriptor>> for Light {
+impl From<Id<DirectionalLightDescriptor>> for LightDescriptor {
     fn from(id: Id<DirectionalLightDescriptor>) -> Self {
         Self {
             light_type: LightStyle::Directional,
@@ -525,7 +528,7 @@ impl From<Id<DirectionalLightDescriptor>> for Light {
     }
 }
 
-impl From<Id<SpotLightDescriptor>> for Light {
+impl From<Id<SpotLightDescriptor>> for LightDescriptor {
     fn from(id: Id<SpotLightDescriptor>) -> Self {
         Self {
             light_type: LightStyle::Spot,
@@ -536,7 +539,7 @@ impl From<Id<SpotLightDescriptor>> for Light {
     }
 }
 
-impl From<Id<PointLightDescriptor>> for Light {
+impl From<Id<PointLightDescriptor>> for LightDescriptor {
     fn from(id: Id<PointLightDescriptor>) -> Self {
         Self {
             light_type: LightStyle::Point,
@@ -547,7 +550,7 @@ impl From<Id<PointLightDescriptor>> for Light {
     }
 }
 
-impl Light {
+impl LightDescriptor {
     pub fn into_directional_id(self) -> Id<DirectionalLightDescriptor> {
         Id::from(self.index)
     }
@@ -579,7 +582,7 @@ impl ShadowCalculation {
     /// Reads various required parameters from the slab and creates a `ShadowCalculation`.
     pub fn new(
         light_slab: &[u32],
-        light: crate::prelude::Light,
+        light: crate::prelude::LightDescriptor,
         in_pos: Vec3,
         surface_normal: Vec3,
         light_direction: Vec3,
@@ -837,7 +840,7 @@ pub struct LightTile {
     /// Also, the next available light index.
     pub next_light_index: u32,
     /// List of light ids that intersect this tile's frustum.
-    pub lights_array: Array<Id<Light>>,
+    pub lights_array: Array<Id<LightDescriptor>>,
 }
 
 impl core::fmt::Debug for LightTile {
@@ -912,12 +915,12 @@ pub fn dequantize_depth_u32_to_f32(depth: u32) -> f32 {
 struct NextLightIndex {
     current_step: usize,
     tile_size: u32,
-    lights: Array<Id<Light>>,
+    lights: Array<Id<LightDescriptor>>,
     global_id: UVec3,
 }
 
 impl Iterator for NextLightIndex {
-    type Item = Id<Id<Light>>;
+    type Item = Id<Id<LightDescriptor>>;
 
     fn next(&mut self) -> Option<Self::Item> {
         let next_index = self.next_index();
@@ -934,7 +937,7 @@ impl NextLightIndex {
     pub fn new(
         global_id: UVec3,
         tile_size: u32,
-        analytical_lights_array: Array<Id<Light>>,
+        analytical_lights_array: Array<Id<LightDescriptor>>,
     ) -> Self {
         Self {
             current_step: 0,

@@ -15,10 +15,7 @@ use crate::{
     bvol::Aabb,
     camera::{Camera, CameraDescriptor},
     geometry::{Indices, MorphTargetWeights, MorphTargets, Skin, Vertices},
-    light::{
-        AnalyticalLight, DirectionalLightDescriptor, LightStyle, PointLightDescriptor,
-        SpotLightDescriptor,
-    },
+    light::{AnalyticalLight, LightStyle},
     material::Material,
     stage::{MorphTarget, Renderlet, Stage, Vertex},
     transform::{NestedTransform, TransformDescriptor},
@@ -969,9 +966,10 @@ impl GltfDocument {
                 let intensity = gltf_light.intensity();
                 let light_bundle = match gltf_light.kind() {
                     gltf::khr_lights_punctual::Kind::Directional => {
-                        stage.new_analytical_light(DirectionalLightDescriptor {
-                            direction: Vec3::NEG_Z,
-                            color,
+                        stage
+                            .new_directional_light()
+                            .with_direction(Vec3::NEG_Z)
+                            .with_color(color)
                             // TODO: Set a unit for lighting.
                             // We don't yet use a unit for our lighting, and we should.
                             // https://www.realtimerendering.com/blog/physical-units-for-lights/
@@ -983,34 +981,34 @@ impl GltfDocument {
                             // 1. https://github.com/KhronosGroup/glTF/blob/main/extensions/2.0/Khronos/KHR_lights_punctual/README.md
                             // 2. https://depts.washington.edu/mictech/optics/me557/Radiometry.pdf
                             // 3. https://projects.blender.org/blender/blender-addons/commit/9d903a93f03b
-                            intensity: intensity / 683.0,
-                        })
+                            .with_intensity(intensity / 683.0)
+                            .into_generic()
                     }
 
-                    gltf::khr_lights_punctual::Kind::Point => {
-                        stage.new_analytical_light(PointLightDescriptor {
-                            position: Vec3::ZERO,
-                            color,
-                            intensity: intensity / 683.0,
-                        })
-                    }
+                    gltf::khr_lights_punctual::Kind::Point => stage
+                        .new_point_light()
+                        .with_position(Vec3::ZERO)
+                        .with_color(color)
+                        .with_intensity(intensity / 683.0)
+                        .into_generic(),
 
                     gltf::khr_lights_punctual::Kind::Spot {
                         inner_cone_angle,
                         outer_cone_angle,
-                    } => stage.new_analytical_light(SpotLightDescriptor {
-                        position: Vec3::ZERO,
-                        direction: Vec3::NEG_Z,
-                        inner_cutoff: inner_cone_angle,
-                        outer_cutoff: outer_cone_angle,
-                        color,
-                        intensity: intensity / (683.0 * 4.0 * std::f32::consts::PI),
-                    }),
+                    } => stage
+                        .new_spot_light()
+                        .with_position(Vec3::ZERO)
+                        .with_direction(Vec3::NEG_Z)
+                        .with_inner_cutoff(inner_cone_angle)
+                        .with_outer_cutoff(outer_cone_angle)
+                        .with_color(color)
+                        .with_intensity(intensity / (683.0 * 4.0 * std::f32::consts::PI))
+                        .into_generic(),
                 };
 
                 log::trace!(
                     "  linking light {:?} with node transform {:?}: {:#?}",
-                    light_bundle.light().id(),
+                    light_bundle.id(),
                     node_transform.global_id(),
                     node_transform.global_descriptor()
                 );

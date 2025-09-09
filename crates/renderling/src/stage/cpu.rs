@@ -20,6 +20,7 @@ use std::sync::{atomic::AtomicBool, Arc, Mutex, RwLock};
 
 use crate::atlas::AtlasTexture;
 use crate::camera::Camera;
+use crate::light::{DirectionalLight, PointLight, SpotLight};
 use crate::material::Material;
 use crate::{
     atlas::{AtlasError, AtlasImage, AtlasImageError},
@@ -30,7 +31,7 @@ use crate::{
     draw::DrawCalls,
     geometry::{Geometry, Indices, MorphTargetWeights, MorphTargets, Skin, SkinJoint, Vertices},
     light::{
-        AnalyticalLight, Light, LightDetails, LightTiling, LightTilingConfig, Lighting,
+        AnalyticalLight, LightDescriptor, LightTiling, LightTilingConfig, Lighting,
         LightingBindGroupLayoutEntries, LightingError, ShadowMap,
     },
     material::Materials,
@@ -554,19 +555,19 @@ impl Stage {
 
 /// Lighting methods.
 impl Stage {
-    /// Stage a new analytical light.
-    ///
-    /// `T` must be one of:
-    /// - [`DirectionalLightDescriptor`](crate::light::DirectionalLightDescriptor)
-    /// - [`SpotLightDescriptor`](crate::light::SpotLightDescriptor)
-    /// - [`PointLightDescriptor`](crate::light::PointLightDescriptor)
-    pub fn new_analytical_light<T>(&self, light_descriptor: T) -> AnalyticalLight
-    where
-        T: Clone + Copy + SlabItem + Send + Sync,
-        Light: From<Id<T>>,
-        LightDetails: From<Hybrid<T>>,
-    {
-        self.lighting.new_analytical_light(light_descriptor)
+    /// Stage a new directional light.
+    pub fn new_directional_light(&self) -> AnalyticalLight<DirectionalLight> {
+        self.lighting.new_directional_light()
+    }
+
+    /// Stage a new point light.
+    pub fn new_point_light(&self) -> AnalyticalLight<PointLight> {
+        self.lighting.new_point_light()
+    }
+
+    /// Stage a new spot light.
+    pub fn new_spot_light(&self) -> AnalyticalLight<SpotLight> {
+        self.lighting.new_spot_light()
     }
 
     /// Add an [`AnalyticalLightBundle`] to the internal list of lights.

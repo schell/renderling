@@ -9,7 +9,7 @@ use glam::{Mat4, Quat, Vec3};
 use super::TransformDescriptor;
 
 /// A decomposed 3d transformation.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Transform {
     pub(crate) descriptor: Hybrid<TransformDescriptor>,
 }

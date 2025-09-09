@@ -10,7 +10,7 @@ use renderling::{
     atlas::AtlasImage,
     bvol::{Aabb, BoundingSphere},
     geometry::Vertex,
-    light::{AnalyticalLight, DirectionalLightDescriptor},
+    light::AnalyticalLight,
     prelude::*,
     skybox::Skybox,
     stage::{Animator, GltfDocument, Stage},
@@ -142,12 +142,12 @@ impl App {
         let size = ctx.get_size();
         let (proj, view) = renderling::camera::default_perspective(size.x as f32, size.y as f32);
         let camera = stage.new_camera().with_projection_and_view(proj, view);
-        let directional_light = DirectionalLightDescriptor {
-            direction: Vec3::NEG_Y,
-            color: renderling::math::hex_to_vec4(0xFDFBD3FF),
-            intensity: 10.0,
-        };
-        let sunlight_bundle = stage.new_analytical_light(directional_light);
+
+        let sunlight = stage
+            .new_directional_light()
+            .with_direction(Vec3::NEG_Y)
+            .with_color(renderling::math::hex_to_vec4(0xFDFBD3FF))
+            .with_intensity(10.0);
 
         stage
             .set_atlas_size(wgpu::Extent3d {
@@ -172,7 +172,7 @@ impl App {
             },
             stage,
             camera,
-            _lighting: sunlight_bundle,
+            _lighting: sunlight.into_generic(),
             model: Model::None,
             animators: None,
             animations_conflict: false,

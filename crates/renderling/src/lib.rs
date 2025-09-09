@@ -845,7 +845,7 @@ mod test {
     #[test]
     /// Tests shading with directional light.
     fn scene_cube_directional() {
-        use crate::light::{DirectionalLightDescriptor, Light, LightStyle};
+        use crate::light::{DirectionalLightDescriptor, LightDescriptor, LightStyle};
 
         let ctx = Context::headless(100, 100).block();
         let stage = ctx
@@ -878,7 +878,7 @@ mod test {
             intensity: 10.0,
         });
         assert_eq!(
-            Light {
+            LightDescriptor {
                 light_type: LightStyle::Directional,
                 index: dir_red
                     .light_details()
@@ -888,7 +888,7 @@ mod test {
                     .inner(),
                 ..Default::default()
             },
-            Light::from(dir_red.light_details().as_directional().unwrap().id())
+            LightDescriptor::from(dir_red.light_details().as_directional().unwrap().id())
         );
 
         let _rez = stage

@@ -5,22 +5,20 @@ use std::sync::Arc;
 
 use craballoc::{
     prelude::Hybrid,
-    value::{HybridArray, HybridWriteGuard, WeakContainer},
+    value::{HybridArray, HybridWriteGuard},
 };
 use crabslab::Id;
 use glam::{Mat4, UVec2};
-use snafu::{OptionExt, ResultExt};
+use snafu::ResultExt;
 
 use crate::{
     atlas::{AtlasBlittingOperation, AtlasImage, AtlasTexture, AtlasTextureDescriptor},
     bindgroup::ManagedBindGroup,
+    light::{IsLight, Light},
     stage::Renderlet,
 };
 
-use super::{
-    AnalyticalLight, DroppedAnalyticalLightBundleSnafu, Lighting, LightingError, PollSnafu,
-    ShadowMapDescriptor,
-};
+use super::{AnalyticalLight, Lighting, LightingError, PollSnafu, ShadowMapDescriptor};
 
 /// A depth map rendering of the scene from a light's point of view.
 ///
@@ -44,7 +42,7 @@ pub struct ShadowMap {
     pub(crate) _atlas_textures_array: HybridArray<Id<AtlasTextureDescriptor>>,
     pub(crate) update_texture: crate::texture::Texture,
     pub(crate) blitting_op: AtlasBlittingOperation,
-    pub(crate) light_bundle: AnalyticalLight<WeakContainer>,
+    pub(crate) light_bundle: AnalyticalLight,
 }
 
 impl ShadowMap {
@@ -162,19 +160,22 @@ impl ShadowMap {
 
     /// Enable shadow mapping for the given [`AnalyticalLightBundle`], creating
     /// a new [`ShadowMap`].
-    pub fn new(
+    pub fn new<T>(
         lighting: &Lighting,
-        analytical_light_bundle: &AnalyticalLight,
+        analytical_light_bundle: &AnalyticalLight<T>,
         // Size of the shadow map
         size: UVec2,
         // Distance to the shadow map frustum's near plane
         z_near: f32,
         // Distance to the shadow map frustum's far plane
         z_far: f32,
-    ) -> Result<Self, LightingError> {
+    ) -> Result<Self, LightingError>
+    where
+        T: IsLight,
+        Light: From<T>,
+    {
         let stage_slab_buffer = lighting.geometry_slab_buffer.read().unwrap();
-        let is_point_light =
-            analytical_light_bundle.light_details().style() == super::LightStyle::Point;
+        let is_point_light = analytical_light_bundle.style() == super::LightStyle::Point;
         let count = if is_point_light { 6 } else { 1 };
         let atlas = &lighting.shadow_map_atlas;
         let image = AtlasImage::new(size, crate::atlas::AtlasImageFormat::R32FLOAT);
@@ -198,9 +199,14 @@ impl ShadowMap {
         let blitting_op = lighting
             .shadow_map_update_blitter
             .new_blitting_operation(atlas, if is_point_light { 6 } else { 1 });
-        let light_space_transforms = lighting
-            .light_slab
-            .new_array(analytical_light_bundle.light_space_transforms(z_near, z_far));
+        let light_space_transforms =
+            lighting
+                .light_slab
+                .new_array(analytical_light_bundle.light_space_transforms(
+                    &analytical_light_bundle.transform().descriptor(),
+                    z_near,
+                    z_far,
+                ));
         let shadowmap_descriptor = lighting.light_slab.new_value(ShadowMapDescriptor {
             light_space_transforms_array: light_space_transforms.array(),
             z_near,
@@ -211,7 +217,7 @@ impl ShadowMap {
             pcf_samples: 4,
         });
         // Set the descriptor in the light, so the shader knows to use it
-        analytical_light_bundle.light().modify(|light| {
+        analytical_light_bundle.light_descriptor.modify(|light| {
             light.shadow_map_desc_id = shadowmap_descriptor.id();
         });
         let light_slab_buffer = lighting.commit();
@@ -232,7 +238,7 @@ impl ShadowMap {
             _atlas_textures_array: atlas_textures_array,
             update_texture,
             blitting_op,
-            light_bundle: analytical_light_bundle.weak(),
+            light_bundle: analytical_light_bundle.clone().into_generic(),
         })
     }
 
@@ -251,13 +257,12 @@ impl ShadowMap {
         renderlets: impl IntoIterator<Item = &'a Renderlet>,
     ) -> Result<(), LightingError> {
         let lighting = lighting.as_ref();
-        let light_bundle = self
-            .light_bundle
-            .upgrade()
-            .context(DroppedAnalyticalLightBundleSnafu)?;
         let shadow_desc = self.shadowmap_descriptor.get();
-        let new_transforms =
-            light_bundle.light_space_transforms(shadow_desc.z_near, shadow_desc.z_far);
+        let new_transforms = self.light_bundle.light_space_transforms(
+            &self.light_bundle.transform().descriptor(),
+            shadow_desc.z_near,
+            shadow_desc.z_far,
+        );
         for (i, t) in (0..self.light_space_transforms.len()).zip(new_transforms) {
             self.light_space_transforms.set_item(i, t);
         }
@@ -594,7 +599,7 @@ mod test {
         let z_far = 100.0;
         for (_i, light_bundle) in doc.lights.iter().enumerate() {
             {
-                let desc = light_bundle.light_details().as_spot().unwrap().get();
+                let desc = light_bundle.inner().as_spot().unwrap().get();
                 let (p, v) = desc.shadow_mapping_projection_and_view(
                     &light_bundle.transform().as_mat4(),
                     z_near,
@@ -660,7 +665,7 @@ mod test {
         let z_far = 100.0;
         for (i, light_bundle) in doc.lights.iter().enumerate() {
             {
-                let desc = light_bundle.light_details().as_point().unwrap().get();
+                let desc = light_bundle.inner().as_point().unwrap().get();
                 println!("point light {i}: {desc:?}");
                 let (p, vs) = desc.shadow_mapping_projection_and_view_matrices(
                     &light_bundle.transform().as_mat4(),
