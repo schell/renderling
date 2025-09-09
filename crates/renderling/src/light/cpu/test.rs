@@ -2,11 +2,18 @@
 
 use glam::{Vec3, Vec4, Vec4Swizzles};
 
-
 use spirv_std::num_traits::Zero;
 
 use crate::{
-    bvol::BoundingBox, camera::Camera, color::linear_xfer_vec4, geometry::Vertex, light::{LightTiling, LightTilingConfig, SpotLightCalculation}, math::GpuRng, prelude::TransformDescriptor, stage::{Primitive, PrimitivePbrVertexInfo, Stage}, test::BlockOnFuture
+    bvol::BoundingBox,
+    camera::Camera,
+    color::linear_xfer_vec4,
+    geometry::Vertex,
+    light::{LightTiling, LightTilingConfig, SpotLightCalculation},
+    math::GpuRng,
+    stage::{Primitive, PrimitivePbrVertexInfo, Stage},
+    test::BlockOnFuture,
+    transform::TransformDescriptor,
 };
 
 use super::*;
@@ -127,10 +134,7 @@ fn spot_lights() {
     stage.use_camera(camera);
 
     let down_light = doc.lights.first().unwrap();
-    log::info!(
-        "down_light: {:#?}",
-        down_light.as_spot().unwrap()
-    );
+    log::info!("down_light: {:#?}", down_light.as_spot().unwrap());
 
     let frame = ctx.get_next_frame().unwrap();
     stage.render(&frame.view());
@@ -166,11 +170,11 @@ fn light_tiling_light_bounds() {
     });
 
     let colors = [0x6DE1D2FF, 0xFFD63AFF, 0x6DE1D2FF, 0xF75A5AFF].map(|albedo_factor| {
-        stage.new_material().with_albedo_factor ({
-                let mut color = crate::math::hex_to_vec4(albedo_factor);
-                linear_xfer_vec4(&mut color);
-                color
-            })
+        stage.new_material().with_albedo_factor({
+            let mut color = crate::math::hex_to_vec4(albedo_factor);
+            linear_xfer_vec4(&mut color);
+            color
+        })
     });
     let mut resources = vec![];
     for (i, node) in doc.nodes.iter().enumerate() {
@@ -194,11 +198,14 @@ fn light_tiling_light_bounds() {
                 resources.push(
                     stage
                         .new_primitive()
-                        .with_vertices(stage.new_vertices(
-                            bb.get_mesh()
-                                .map(|(p, n)| Vertex::default().with_position(p).with_normal(n))
-                        ))
-                        .with_material(&colors[i % colors.len()])
+                        .with_vertices(
+                            stage.new_vertices(
+                                bb.get_mesh().map(|(p, n)| {
+                                    Vertex::default().with_position(p).with_normal(n)
+                                }),
+                            ),
+                        )
+                        .with_material(&colors[i % colors.len()]),
                 );
             }
         }
@@ -249,20 +256,28 @@ fn gen_light(stage: &Stage, prng: &mut GpuRng, bounding_boxes: &[BoundingBox]) -
 
     let _unused_transform = stage.new_transform().with_translation(position);
     let vertices = stage.new_vertices(
-            light_bb
-                .get_mesh()
-                .map(|(p, n)| Vertex::default().with_position(p).with_normal(n)),
-        );
-    let material = stage.new_material()
-            .with_albedo_factor(color)
-            .with_has_lighting(false)
-            .with_emissive_factor(color.xyz())
-            .with_emissive_strength_multiplier(100.0);
-    let mesh_renderlet = stage.new_primitive().with_vertices(vertices).with_material(material);
+        light_bb
+            .get_mesh()
+            .map(|(p, n)| Vertex::default().with_position(p).with_normal(n)),
+    );
+    let material = stage
+        .new_material()
+        .with_albedo_factor(color)
+        .with_has_lighting(false)
+        .with_emissive_factor(color.xyz())
+        .with_emissive_strength_multiplier(100.0);
+    let mesh_renderlet = stage
+        .new_primitive()
+        .with_vertices(vertices)
+        .with_material(material);
     let _light = {
         // suffix the actual analytical light
         let intensity = scale * 100.0;
-        stage.new_point_light().with_position(position).with_color(color).with_intensity(intensity)
+        stage
+            .new_point_light()
+            .with_position(position)
+            .with_color(color)
+            .with_intensity(intensity)
     };
 
     GeneratedLight {
@@ -507,15 +522,20 @@ fn light_bins_point() {
         )
         .unwrap();
 
-    doc.materials.get_mut(0).unwrap()
-        .set_albedo_factor(Vec4::ONE).set_roughness_factor(1.0).set_metallic_factor(0.0);
-        
+    doc.materials
+        .get_mut(0)
+        .unwrap()
+        .set_albedo_factor(Vec4::ONE)
+        .set_roughness_factor(1.0)
+        .set_metallic_factor(0.0);
+
     let camera = doc.cameras.first().unwrap();
-        let view = Mat4::look_at_rh(Vec3::new(-7.0, 5.0, 7.0), Vec3::ZERO, Vec3::Y);
-        let proj = Mat4::perspective_rh(std::f32::consts::FRAC_PI_6, 1.0, 0.1, 15.0);
+    let view = Mat4::look_at_rh(Vec3::new(-7.0, 5.0, 7.0), Vec3::ZERO, Vec3::Y);
+    let proj = Mat4::perspective_rh(std::f32::consts::FRAC_PI_6, 1.0, 0.1, 15.0);
     camera.camera.set_projection_and_view(proj, view);
 
-    let _point_light = stage.new_point_light()
+    let _point_light = stage
+        .new_point_light()
         .with_position(Vec3::new(1.1, 1.0, 1.1))
         .with_color(Vec4::ONE)
         .with_intensity(5.0);
@@ -643,7 +663,7 @@ fn tiling_e2e_sanity_with(
         &ctx,
         &stage,
         &format!("light/tiling/e2e/6-scene-{tile_size}-{max_lights_per_tile}-lights-{i}-{minimum_illuminance}-min-lux.png"),
-        save_images    
+        save_images
     );
 
     #[cfg(feature = "light-tiling-stats")]
@@ -721,7 +741,7 @@ fn tiling_e2e_sanity() {
                         max_lights_per_tile,
                         i as u32,
                         *minimum_illuminance,
-                        true
+                        true,
                     )
                 }
             }
@@ -733,7 +753,7 @@ fn snapshot(ctx: &crate::Context, stage: &Stage, path: &str, save: bool) {
     let frame = ctx.get_next_frame().unwrap();
     let start = std::time::Instant::now();
     stage.render(&frame.view());
-    let   elapsed = start.elapsed();
+    let elapsed = start.elapsed();
     log::info!("shapshot: {}s '{path}'", elapsed.as_secs_f32());
     let img = frame.read_image().block().unwrap();
     if save {
@@ -786,8 +806,8 @@ mod stats {
     }
 
     pub fn plot(stats: LightTilingStats, filename: &str) {
-        let path =
-            crate::test::workspace_dir().join(format!("test_output/light/tiling/e2e/{filename}.png"));
+        let path = crate::test::workspace_dir()
+            .join(format!("test_output/light/tiling/e2e/{filename}.png"));
         let root_drawing_area = BitMapBackend::new(&path, (800, 600)).into_drawing_area();
         root_drawing_area.fill(&plotters::style::WHITE).unwrap();
 
@@ -856,7 +876,8 @@ mod stats {
                 5,
                 ShapeStyle::from(&plotters::style::RED).filled(),
                 &|(num_lights, seconds_per_frame), size, style| {
-                    EmptyElement::at((num_lights, seconds_per_frame)) + Circle::new((0, 0), size, style)
+                    EmptyElement::at((num_lights, seconds_per_frame))
+                        + Circle::new((0, 0), size, style)
                 },
             ))
             .unwrap();
@@ -869,7 +890,8 @@ mod stats {
                 5,
                 ShapeStyle::from(&plotters::style::BLUE).filled(),
                 &|(num_lights, seconds_per_frame), size, style| {
-                    EmptyElement::at((num_lights, seconds_per_frame)) + Circle::new((0, 0), size, style)
+                    EmptyElement::at((num_lights, seconds_per_frame))
+                        + Circle::new((0, 0), size, style)
                 },
             ))
             .unwrap();
@@ -909,8 +931,7 @@ fn pedestal() {
         )
         .unwrap();
 
-    doc
-        .materials
+    doc.materials
         .get_mut(0)
         .unwrap()
         .set_albedo_factor(Vec4::ONE)
@@ -920,7 +941,7 @@ fn pedestal() {
     let camera = doc.cameras.first().unwrap();
     camera.camera.set_projection_and_view(
         Mat4::perspective_rh(std::f32::consts::FRAC_PI_6, 1.0, 0.1, 15.0),
-        Mat4::look_at_rh(Vec3::new(-7.0, 5.0, 7.0), Vec3::ZERO, Vec3::Y)
+        Mat4::look_at_rh(Vec3::new(-7.0, 5.0, 7.0), Vec3::ZERO, Vec3::Y),
     );
 
     let color = {
@@ -935,7 +956,8 @@ fn pedestal() {
     let mut dir_infos = vec![];
     {
         log::info!("adding dir light");
-        let dir_light = stage.new_directional_light()
+        let dir_light = stage
+            .new_directional_light()
             .with_direction(-position)
             .with_color(color)
             .with_intensity(5.0);
@@ -974,7 +996,8 @@ fn pedestal() {
     // Point lights
     {
         log::info!("adding point light with pre-applied position");
-        let point_light = stage.new_point_light()
+        let point_light = stage
+            .new_point_light()
             .with_position(position)
             .with_color(color)
             .with_intensity(5.0);
@@ -987,7 +1010,8 @@ fn pedestal() {
         let transform = stage.new_nested_transform();
         transform.set_local_translation(position);
 
-        let point_light = stage.new_point_light()
+        let point_light = stage
+            .new_point_light()
             .with_position(Vec3::ZERO)
             .with_color(color)
             .with_intensity(5.0);
@@ -999,7 +1023,8 @@ fn pedestal() {
 
     {
         log::info!("adding spot light with pre-applied position");
-        let spot = stage.new_spot_light()
+        let spot = stage
+            .new_spot_light()
             .with_position(position)
             .with_direction(-position)
             .with_color(color)
@@ -1047,7 +1072,8 @@ fn pedestal() {
         let node_transform = stage.new_nested_transform();
         node_transform.set_local_translation(position);
 
-        let spot = stage.new_spot_light()
+        let spot = stage
+            .new_spot_light()
             .with_position(Vec3::ZERO)
             .with_direction(-position)
             .with_color(color)

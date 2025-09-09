@@ -10,24 +10,24 @@
     "wgsl_entry_point": "atlasatlas_blit_vertex"
   },
   {
-    "source_path": "shaders/bloom-bloom_downsample_fragment.spv",
-    "entry_point": "bloom::bloom_downsample_fragment",
-    "wgsl_entry_point": "bloombloom_downsample_fragment"
+    "source_path": "shaders/bloom-shaders-bloom_downsample_fragment.spv",
+    "entry_point": "bloom::shaders::bloom_downsample_fragment",
+    "wgsl_entry_point": "bloomshadersbloom_downsample_fragment"
   },
   {
-    "source_path": "shaders/bloom-bloom_mix_fragment.spv",
-    "entry_point": "bloom::bloom_mix_fragment",
-    "wgsl_entry_point": "bloombloom_mix_fragment"
+    "source_path": "shaders/bloom-shaders-bloom_mix_fragment.spv",
+    "entry_point": "bloom::shaders::bloom_mix_fragment",
+    "wgsl_entry_point": "bloomshadersbloom_mix_fragment"
   },
   {
-    "source_path": "shaders/bloom-bloom_upsample_fragment.spv",
-    "entry_point": "bloom::bloom_upsample_fragment",
-    "wgsl_entry_point": "bloombloom_upsample_fragment"
+    "source_path": "shaders/bloom-shaders-bloom_upsample_fragment.spv",
+    "entry_point": "bloom::shaders::bloom_upsample_fragment",
+    "wgsl_entry_point": "bloomshadersbloom_upsample_fragment"
   },
   {
-    "source_path": "shaders/bloom-bloom_vertex.spv",
-    "entry_point": "bloom::bloom_vertex",
-    "wgsl_entry_point": "bloombloom_vertex"
+    "source_path": "shaders/bloom-shaders-bloom_vertex.spv",
+    "entry_point": "bloom::shaders::bloom_vertex",
+    "wgsl_entry_point": "bloomshadersbloom_vertex"
   },
   {
     "source_path": "shaders/convolution-brdf_lut_convolution_fragment.spv",
@@ -160,14 +160,14 @@
     "wgsl_entry_point": "skyboxskybox_vertex"
   },
   {
-    "source_path": "shaders/stage-renderlet_fragment.spv",
-    "entry_point": "stage::renderlet_fragment",
-    "wgsl_entry_point": "stagerenderlet_fragment"
+    "source_path": "shaders/stage-primitive_fragment.spv",
+    "entry_point": "stage::primitive_fragment",
+    "wgsl_entry_point": "stageprimitive_fragment"
   },
   {
-    "source_path": "shaders/stage-renderlet_vertex.spv",
-    "entry_point": "stage::renderlet_vertex",
-    "wgsl_entry_point": "stagerenderlet_vertex"
+    "source_path": "shaders/stage-primitive_vertex.spv",
+    "entry_point": "stage::primitive_vertex",
+    "wgsl_entry_point": "stageprimitive_vertex"
   },
   {
     "source_path": "shaders/tonemapping-tonemapping_fragment.spv",

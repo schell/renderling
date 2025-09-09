@@ -237,14 +237,7 @@ pub mod prelude {
 
     pub extern crate glam;
 
-    #[cfg(cpu)]
-    pub use craballoc::prelude::*;
-    pub use crabslab::{Array, Id};
-
-    pub use crate::{
-        camera::*, geometry::*, light::*, material::MaterialDescriptor, stage::*,
-        transform::TransformDescriptor,
-    };
+    pub use crate::{camera::*, geometry::*, light::*, stage::*};
 
     #[cfg(cpu)]
     pub use crate::context::*;

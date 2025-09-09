@@ -1,6 +1,10 @@
 //! WASM tests.
 #![allow(dead_code)]
 
+use craballoc::{
+    runtime::WgpuRuntime,
+    slab::{SlabAllocator, SlabBuffer},
+};
 use glam::{Vec3, Vec4};
 use image::DynamicImage;
 use renderling::{prelude::*, texture::CopiedTextureBuffer};

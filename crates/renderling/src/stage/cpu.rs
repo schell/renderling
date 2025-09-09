@@ -802,8 +802,8 @@ impl Stage {
     ) -> wgpu::RenderPipeline {
         log::trace!("creating stage render pipeline");
         let label = Some("renderlet");
-        let vertex_linkage = crate::linkage::renderlet_vertex::linkage(device);
-        let fragment_linkage = crate::linkage::renderlet_fragment::linkage(device);
+        let vertex_linkage = crate::linkage::primitive_vertex::linkage(device);
+        let fragment_linkage = crate::linkage::primitive_fragment::linkage(device);
 
         let bind_group_layout = Self::renderlet_pipeline_bindgroup_layout(device);
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {

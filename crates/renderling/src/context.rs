@@ -5,7 +5,6 @@ use std::{
     sync::{Arc, RwLock},
 };
 
-use craballoc::runtime::WgpuRuntime;
 use glam::{UVec2, UVec3};
 use snafu::prelude::*;
 
@@ -14,6 +13,8 @@ use crate::{
     texture::{BufferDimensions, CopiedTextureBuffer, Texture, TextureError},
     ui::Ui,
 };
+
+pub use craballoc::runtime::WgpuRuntime;
 
 pub(crate) enum RenderTargetInner {
     Surface {

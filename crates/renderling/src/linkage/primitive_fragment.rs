@@ -3,12 +3,12 @@
 use crate::linkage::ShaderLinkage;
 #[cfg(not(target_arch = "wasm32"))]
 mod target {
-    pub const ENTRY_POINT: &str = "stage::renderlet_vertex";
+    pub const ENTRY_POINT: &str = "stage::primitive_fragment";
     pub fn descriptor() -> wgpu::ShaderModuleDescriptor<'static> {
-        wgpu::include_spirv!("../../shaders/stage-renderlet_vertex.spv")
+        wgpu::include_spirv!("../../shaders/stage-primitive_fragment.spv")
     }
     pub fn linkage(device: &wgpu::Device) -> super::ShaderLinkage {
-        log::debug!("creating native linkage for {}", "renderlet_vertex");
+        log::debug!("creating native linkage for {}", "primitive_fragment");
         super::ShaderLinkage {
             entry_point: ENTRY_POINT,
             module: device.create_shader_module(descriptor()).into(),
@@ -17,12 +17,12 @@ mod target {
 }
 #[cfg(target_arch = "wasm32")]
 mod target {
-    pub const ENTRY_POINT: &str = "stagerenderlet_vertex";
+    pub const ENTRY_POINT: &str = "stageprimitive_fragment";
     pub fn descriptor() -> wgpu::ShaderModuleDescriptor<'static> {
-        wgpu::include_wgsl!("../../shaders/stage-renderlet_vertex.wgsl")
+        wgpu::include_wgsl!("../../shaders/stage-primitive_fragment.wgsl")
     }
     pub fn linkage(device: &wgpu::Device) -> super::ShaderLinkage {
-        log::debug!("creating web linkage for {}", "renderlet_vertex");
+        log::debug!("creating web linkage for {}", "primitive_fragment");
         super::ShaderLinkage {
             entry_point: ENTRY_POINT,
             module: device.create_shader_module(descriptor()).into(),

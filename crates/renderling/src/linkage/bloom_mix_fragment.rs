@@ -3,9 +3,9 @@
 use crate::linkage::ShaderLinkage;
 #[cfg(not(target_arch = "wasm32"))]
 mod target {
-    pub const ENTRY_POINT: &str = "bloom::bloom_mix_fragment";
+    pub const ENTRY_POINT: &str = "bloom::shaders::bloom_mix_fragment";
     pub fn descriptor() -> wgpu::ShaderModuleDescriptor<'static> {
-        wgpu::include_spirv!("../../shaders/bloom-bloom_mix_fragment.spv")
+        wgpu::include_spirv!("../../shaders/bloom-shaders-bloom_mix_fragment.spv")
     }
     pub fn linkage(device: &wgpu::Device) -> super::ShaderLinkage {
         log::debug!("creating native linkage for {}", "bloom_mix_fragment");
@@ -17,9 +17,9 @@ mod target {
 }
 #[cfg(target_arch = "wasm32")]
 mod target {
-    pub const ENTRY_POINT: &str = "bloombloom_mix_fragment";
+    pub const ENTRY_POINT: &str = "bloomshadersbloom_mix_fragment";
     pub fn descriptor() -> wgpu::ShaderModuleDescriptor<'static> {
-        wgpu::include_wgsl!("../../shaders/bloom-bloom_mix_fragment.wgsl")
+        wgpu::include_wgsl!("../../shaders/bloom-shaders-bloom_mix_fragment.wgsl")
     }
     pub fn linkage(device: &wgpu::Device) -> super::ShaderLinkage {
         log::debug!("creating web linkage for {}", "bloom_mix_fragment");

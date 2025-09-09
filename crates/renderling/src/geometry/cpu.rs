@@ -12,8 +12,7 @@ use glam::{Mat4, UVec2, Vec4};
 use crate::{
     camera::Camera,
     geometry::{GeometryDescriptor, MorphTarget, SkinDescriptor, Vertex},
-    prelude::TransformDescriptor,
-    transform::{NestedTransform, Transform},
+    transform::{NestedTransform, Transform, TransformDescriptor},
     types::{GpuCpuArray, GpuOnlyArray},
 };
 

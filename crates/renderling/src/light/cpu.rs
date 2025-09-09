@@ -13,8 +13,7 @@ use snafu::prelude::*;
 use crate::{
     atlas::{Atlas, AtlasBlitter, AtlasError},
     geometry::Geometry,
-    prelude::TransformDescriptor,
-    transform::{NestedTransform, Transform},
+    transform::{NestedTransform, Transform, TransformDescriptor},
 };
 
 use super::{

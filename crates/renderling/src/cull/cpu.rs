@@ -676,7 +676,7 @@ mod test {
         bvol::BoundingSphere, cull::DepthPyramidDescriptor, draw::DrawIndirectArgs,
         geometry::Geometry, math::hex_to_vec4, prelude::*, test::BlockOnFuture,
     };
-    use crabslab::{GrowableSlab, Slab};
+    use crabslab::{Array, GrowableSlab, Id, Slab};
     use glam::{Mat4, Quat, UVec2, UVec3, Vec2, Vec3, Vec4};
 
     #[test]
