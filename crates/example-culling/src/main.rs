@@ -34,7 +34,7 @@ struct CullingExample {
     app_camera: AppCamera,
     controller: example::camera::TurntableCameraController,
     stage: Stage,
-    dlights: [AnalyticalLight; 2],
+    dlights: [AnalyticalLight<DirectionalLight>; 2],
     frustum_camera: FrustumCamera,
     frustum_renderlet: Renderlet,
     material_aabb_outside: Material,
@@ -174,16 +174,16 @@ impl TestAppHandler for CullingExample {
         let mut seed = 46;
         let mut renderlets = vec![];
         let stage = ctx.new_stage().with_lighting(true);
-        let sunlight_a = stage.new_analytical_light(DirectionalLightDescriptor {
-            direction: Vec3::new(-0.8, -1.0, 0.5).normalize(),
-            color: Vec4::ONE,
-            intensity: 10.0,
-        });
-        let sunlight_b = stage.new_analytical_light(DirectionalLightDescriptor {
-            direction: Vec3::new(1.0, 1.0, -0.1).normalize(),
-            color: Vec4::ONE,
-            intensity: 1.0,
-        });
+        let sunlight_a = stage
+            .new_directional_light()
+            .with_direction(Vec3::new(-0.8, -1.0, 0.5).normalize())
+            .with_color(Vec4::ONE)
+            .with_intensity(10.0);
+        let sunlight_b = stage
+            .new_directional_light()
+            .with_direction(Vec3::new(1.0, 1.0, -0.1).normalize())
+            .with_color(Vec4::ONE)
+            .with_intensity(1.0);
 
         let dlights = [sunlight_a, sunlight_b];
 

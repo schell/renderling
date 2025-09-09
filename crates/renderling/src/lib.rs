@@ -241,7 +241,7 @@ mod test {
 
     use glam::{Mat3, Mat4, Quat, UVec2, Vec2, Vec3, Vec4};
     use img_diff::DiffCfg;
-    use light::{AnalyticalLight, DirectionalLightDescriptor};
+    use light::AnalyticalLight;
     use pretty_assertions::assert_eq;
     use stage::Stage;
 
@@ -283,17 +283,17 @@ mod test {
     }
 
     pub fn make_two_directional_light_setup(stage: &Stage) -> (AnalyticalLight, AnalyticalLight) {
-        let sunlight_a = stage.new_analytical_light(DirectionalLightDescriptor {
-            direction: Vec3::new(-0.8, -1.0, 0.5).normalize(),
-            color: Vec4::ONE,
-            intensity: 100.0,
-        });
-        let sunlight_b = stage.new_analytical_light(DirectionalLightDescriptor {
-            direction: Vec3::new(1.0, 1.0, -0.1).normalize(),
-            color: Vec4::ONE,
-            intensity: 10.0,
-        });
-        (sunlight_a, sunlight_b)
+        let sunlight_a = stage
+            .new_directional_light()
+            .with_direction(Vec3::new(-0.8, -1.0, 0.5).normalize())
+            .with_color(Vec4::ONE)
+            .with_intensity(100.0);
+        let sunlight_b = stage
+            .new_directional_light()
+            .with_direction(Vec3::new(1.0, 1.0, -0.1).normalize())
+            .with_color(Vec4::ONE)
+            .with_intensity(10.0);
+        (sunlight_a.into_generic(), sunlight_b.into_generic())
     }
 
     #[allow(unused, reason = "Used in debugging on macos")]
@@ -845,8 +845,6 @@ mod test {
     #[test]
     /// Tests shading with directional light.
     fn scene_cube_directional() {
-        use crate::light::{DirectionalLightDescriptor, LightDescriptor, LightStyle};
-
         let ctx = Context::headless(100, 100).block();
         let stage = ctx
             .new_stage()
@@ -862,34 +860,21 @@ mod test {
         let red = Vec3::X.extend(1.0);
         let green = Vec3::Y.extend(1.0);
         let blue = Vec3::Z.extend(1.0);
-        let dir_red = stage.new_analytical_light(DirectionalLightDescriptor {
-            direction: Vec3::NEG_Y,
-            color: red,
-            intensity: 10.0,
-        });
-        let _dir_green = stage.new_analytical_light(DirectionalLightDescriptor {
-            direction: Vec3::NEG_X,
-            color: green,
-            intensity: 10.0,
-        });
-        let _dir_blue = stage.new_analytical_light(DirectionalLightDescriptor {
-            direction: Vec3::NEG_Z,
-            color: blue,
-            intensity: 10.0,
-        });
-        assert_eq!(
-            LightDescriptor {
-                light_type: LightStyle::Directional,
-                index: dir_red
-                    .light_details()
-                    .as_directional()
-                    .unwrap()
-                    .id()
-                    .inner(),
-                ..Default::default()
-            },
-            LightDescriptor::from(dir_red.light_details().as_directional().unwrap().id())
-        );
+        let _dir_red = stage
+            .new_directional_light()
+            .with_direction(Vec3::NEG_Y)
+            .with_color(red)
+            .with_intensity(10.0);
+        let _dir_green = stage
+            .new_directional_light()
+            .with_direction(Vec3::NEG_X)
+            .with_color(green)
+            .with_intensity(10.0);
+        let _dir_blue = stage
+            .new_directional_light()
+            .with_direction(Vec3::NEG_Z)
+            .with_color(blue)
+            .with_intensity(10.0);
 
         let _rez = stage
             .new_renderlet()

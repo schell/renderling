@@ -579,6 +579,32 @@ impl<T: IsLight> IsLight for AnalyticalLight<T> {
     }
 }
 
+impl AnalyticalLight {
+    /// Returns a reference to the inner `DirectionalLight`, if this light is directional.
+    pub fn as_directional(&self) -> Option<&DirectionalLight> {
+        match &self.inner {
+            Light::Directional(light) => Some(light),
+            _ => None,
+        }
+    }
+
+    /// Returns a reference to the inner `PointLight`, if this light is a point light.
+    pub fn as_point(&self) -> Option<&PointLight> {
+        match &self.inner {
+            Light::Point(light) => Some(light),
+            _ => None,
+        }
+    }
+
+    /// Returns a reference to the inner `SpotLight`, if this light is a spot light.
+    pub fn as_spot(&self) -> Option<&SpotLight> {
+        match &self.inner {
+            Light::Spot(light) => Some(light),
+            _ => None,
+        }
+    }
+}
+
 impl<T: IsLight> AnalyticalLight<T> {
     /// Returns a pointer to this light on the GPU
     pub fn id(&self) -> Id<LightDescriptor> {
@@ -902,6 +928,17 @@ impl Lighting {
     #[must_use]
     pub fn commit(&self) -> SlabBuffer<wgpu::Buffer> {
         log::trace!("committing lights");
+
+        // Sync any lights whose node transforms have changed
+        for light in self.analytical_lights.read().unwrap().iter() {
+            if let Some(node_transform) = light.node_transform.read().unwrap().as_ref() {
+                let global_node_transform = node_transform.global_descriptor();
+                if node_transform.global_descriptor() != light.transform.descriptor() {
+                    light.transform.set_descriptor(global_node_transform);
+                }
+            }
+        }
+
         let lights_array = {
             let mut array_guard = self.analytical_lights_array.write().unwrap();
 

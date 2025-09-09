@@ -516,7 +516,7 @@ mod test {
 
         let gltf_light = doc.lights.first().unwrap();
         assert_eq!(
-            gltf_light.light().get().transform_id,
+            gltf_light.descriptor().transform_id,
             gltf_light.transform().id(),
             "light's global transform id is different from its transform_id"
         );
@@ -599,7 +599,7 @@ mod test {
         let z_far = 100.0;
         for (_i, light_bundle) in doc.lights.iter().enumerate() {
             {
-                let desc = light_bundle.inner().as_spot().unwrap().get();
+                let desc = light_bundle.as_spot().unwrap().descriptor();
                 let (p, v) = desc.shadow_mapping_projection_and_view(
                     &light_bundle.transform().as_mat4(),
                     z_near,
@@ -665,7 +665,7 @@ mod test {
         let z_far = 100.0;
         for (i, light_bundle) in doc.lights.iter().enumerate() {
             {
-                let desc = light_bundle.inner().as_point().unwrap().get();
+                let desc = light_bundle.as_point().unwrap().descriptor();
                 println!("point light {i}: {desc:?}");
                 let (p, vs) = desc.shadow_mapping_projection_and_view_matrices(
                     &light_bundle.transform().as_mat4(),

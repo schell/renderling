@@ -129,7 +129,7 @@ fn spot_lights() {
     let down_light = doc.lights.first().unwrap();
     log::info!(
         "down_light: {:#?}",
-        down_light.light_details.as_spot().unwrap().get()
+        down_light.as_spot().unwrap()
     );
 
     let frame = ctx.get_next_frame().unwrap();
@@ -220,7 +220,7 @@ fn gen_vec3(prng: &mut GpuRng) -> Vec3 {
 
 struct GeneratedLight {
     _unused_transform: Transform,
-    _light: AnalyticalLight,
+    _light: AnalyticalLight<PointLight>,
     mesh_renderlet: Renderlet,
 }
 
@@ -260,17 +260,10 @@ fn gen_light(stage: &Stage, prng: &mut GpuRng, bounding_boxes: &[BoundingBox]) -
             .with_emissive_strength_multiplier(100.0);
     let mesh_renderlet = stage.new_renderlet().with_vertices(vertices).with_material(material);
     let _light = {
-            // suffix the actual analytical light
-            let intensity = scale * 100.0;
-
-            let light_descriptor = PointLightDescriptor {
-                position,
-                color,
-                intensity,
-            };
-
-            stage.new_analytical_light(light_descriptor)
-        };
+        // suffix the actual analytical light
+        let intensity = scale * 100.0;
+        stage.new_point_light().with_position(position).with_color(color).with_intensity(intensity)
+    };
 
     GeneratedLight {
         _unused_transform,
@@ -489,7 +482,7 @@ fn light_bins_sanity() {
         // Assert either the light is the correct one, or we're using the zero frustum optimization
         // discussed in <http://renderling.xyz/articles/live/light_tiling.html#zero-volume-frustum-optimization>
         if tile.depth_min != tile.depth_max {
-            assert_eq!(light_bin[0], directional_light.light.id());
+            assert_eq!(light_bin[0], directional_light.id());
             assert_eq!(light_bin[1], Id::NONE);
         } else {
             assert_eq!(0, tile.next_light_index);
@@ -522,11 +515,10 @@ fn light_bins_point() {
         let proj = Mat4::perspective_rh(std::f32::consts::FRAC_PI_6, 1.0, 0.1, 15.0);
     camera.camera.set_projection_and_view(proj, view);
 
-    let _point_light = stage.new_analytical_light(PointLightDescriptor {
-        position: Vec3::new(1.1, 1.0, 1.1),
-        color: Vec4::ONE,
-        intensity: 5.0,
-    });
+    let _point_light = stage.new_point_light()
+        .with_position(Vec3::new(1.1, 1.0, 1.1))
+        .with_color(Vec4::ONE)
+        .with_intensity(5.0);
     snapshot(
         &ctx,
         &stage,
@@ -943,11 +935,10 @@ fn pedestal() {
     let mut dir_infos = vec![];
     {
         log::info!("adding dir light");
-        let _dir_light = stage.new_analytical_light(DirectionalLightDescriptor {
-            direction: -position,
-            color,
-            intensity: 5.0,
-        });
+        let dir_light = stage.new_directional_light()
+            .with_direction(-position)
+            .with_color(color)
+            .with_intensity(5.0);
         snapshot(&ctx, &stage, "light/pedestal/directional.png", false);
 
         let geometry_slab =
@@ -976,20 +967,19 @@ fn pedestal() {
 
             dir_infos.push(info);
         }
-        log::info!("dropping dir light");
+        stage.remove_light(&dir_light);
     }
-    assert_eq!(0, stage.lighting.lights().count());
+    assert_eq!(0, stage.lighting.lights().len());
 
     // Point lights
     {
         log::info!("adding point light with pre-applied position");
-        let _point_light = stage.new_analytical_light(PointLightDescriptor {
-            position,
-            color,
-            intensity: 5.0,
-        });
+        let point_light = stage.new_point_light()
+            .with_position(position)
+            .with_color(color)
+            .with_intensity(5.0);
         snapshot(&ctx, &stage, "light/pedestal/point.png", false);
-        log::info!("dropping point light");
+        stage.remove_light(&point_light);
     }
 
     {
@@ -997,29 +987,25 @@ fn pedestal() {
         let transform = stage.new_nested_transform();
         transform.set_local_translation(position);
 
-        let point_light = stage.new_analytical_light(PointLightDescriptor {
-            position: Vec3::ZERO,
-            color,
-            intensity: 5.0,
-        });
+        let point_light = stage.new_point_light()
+            .with_position(Vec3::ZERO)
+            .with_color(color)
+            .with_intensity(5.0);
         point_light.link_node_transform(&transform);
 
         snapshot(&ctx, &stage, "light/pedestal/point.png", false);
-        log::info!("dropping point light");
+        stage.remove_light(&point_light);
     }
 
     {
         log::info!("adding spot light with pre-applied position");
-        let spot_desc = SpotLightDescriptor {
-            position,
-            direction: -position,
-            color,
-            intensity: 5.0,
-            inner_cutoff: core::f32::consts::PI / 5.0,
-            outer_cutoff: core::f32::consts::PI / 4.0,
-            // ..Default::default()
-        };
-        let _spot = stage.new_analytical_light(spot_desc);
+        let spot = stage.new_spot_light()
+            .with_position(position)
+            .with_direction(-position)
+            .with_color(color)
+            .with_intensity(5.0)
+            .with_inner_cutoff(core::f32::consts::PI / 5.0)
+            .with_outer_cutoff(core::f32::consts::PI / 4.0);
         snapshot(&ctx, &stage, "light/pedestal/spot.png", false);
 
         let geometry_slab =
@@ -1052,6 +1038,7 @@ fn pedestal() {
         // assert that the output of the vertex shader is the same for the first renderlet,
         // regardless of the lighting
         pretty_assertions::assert_eq!(dir_infos, spot_infos);
+        stage.remove_light(&spot);
     }
 
     {
@@ -1060,16 +1047,13 @@ fn pedestal() {
         let node_transform = stage.new_nested_transform();
         node_transform.set_local_translation(position);
 
-        let spot_desc = SpotLightDescriptor {
-            position: Vec3::ZERO,
-            direction: -position,
-            color,
-            intensity: 5.0,
-            inner_cutoff: core::f32::consts::PI / 5.0,
-            outer_cutoff: core::f32::consts::PI / 4.0,
-            // ..Default::default()
-        };
-        let spot = stage.new_analytical_light(spot_desc);
+        let spot = stage.new_spot_light()
+            .with_position(Vec3::ZERO)
+            .with_direction(-position)
+            .with_color(color)
+            .with_intensity(5.0)
+            .with_inner_cutoff(core::f32::consts::PI / 5.0)
+            .with_outer_cutoff(core::f32::consts::PI / 4.0);
         spot.link_node_transform(&node_transform);
         snapshot(&ctx, &stage, "light/pedestal/spot.png", false);
     }

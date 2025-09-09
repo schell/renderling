@@ -20,7 +20,7 @@ use std::sync::{atomic::AtomicBool, Arc, Mutex, RwLock};
 
 use crate::atlas::AtlasTexture;
 use crate::camera::Camera;
-use crate::light::{DirectionalLight, PointLight, SpotLight};
+use crate::light::{DirectionalLight, IsLight, Light, PointLight, SpotLight};
 use crate::material::Material;
 use crate::{
     atlas::{AtlasError, AtlasImage, AtlasImageError},
@@ -31,8 +31,8 @@ use crate::{
     draw::DrawCalls,
     geometry::{Geometry, Indices, MorphTargetWeights, MorphTargets, Skin, SkinJoint, Vertices},
     light::{
-        AnalyticalLight, LightDescriptor, LightTiling, LightTilingConfig, Lighting,
-        LightingBindGroupLayoutEntries, LightingError, ShadowMap,
+        AnalyticalLight, LightTiling, LightTilingConfig, Lighting, LightingBindGroupLayoutEntries,
+        LightingError, ShadowMap,
     },
     material::Materials,
     pbr::debug::DebugChannel,
@@ -576,7 +576,11 @@ impl Stage {
     ///
     /// This can be used to add the light back to the scene after using
     /// [`Stage::remove_light`].
-    pub fn add_light(&self, bundle: &AnalyticalLight) {
+    pub fn add_light<T>(&self, bundle: &AnalyticalLight<T>)
+    where
+        T: IsLight,
+        Light: From<T>,
+    {
         self.lighting.add_light(bundle)
     }
 
@@ -585,7 +589,7 @@ impl Stage {
     /// Use this to exclude a light from rendering, without dropping the light.
     ///
     /// After calling this function you can include the light again using [`Stage::add_light`].
-    pub fn remove_light(&self, bundle: &AnalyticalLight) {
+    pub fn remove_light<T: IsLight>(&self, bundle: &AnalyticalLight<T>) {
         self.lighting.remove_light(bundle);
     }
 
