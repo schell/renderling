@@ -3,9 +3,9 @@
 use crate::linkage::ShaderLinkage;
 #[cfg(not(target_arch = "wasm32"))]
 mod target {
-    pub const ENTRY_POINT: &str = "bloom::shaders::bloom_vertex";
+    pub const ENTRY_POINT: &str = "bloom::shader::bloom_vertex";
     pub fn descriptor() -> wgpu::ShaderModuleDescriptor<'static> {
-        wgpu::include_spirv!("../../shaders/bloom-shaders-bloom_vertex.spv")
+        wgpu::include_spirv!("../../shaders/bloom-shader-bloom_vertex.spv")
     }
     pub fn linkage(device: &wgpu::Device) -> super::ShaderLinkage {
         log::debug!("creating native linkage for {}", "bloom_vertex");
@@ -17,9 +17,9 @@ mod target {
 }
 #[cfg(target_arch = "wasm32")]
 mod target {
-    pub const ENTRY_POINT: &str = "bloomshadersbloom_vertex";
+    pub const ENTRY_POINT: &str = "bloomshaderbloom_vertex";
     pub fn descriptor() -> wgpu::ShaderModuleDescriptor<'static> {
-        wgpu::include_wgsl!("../../shaders/bloom-shaders-bloom_vertex.wgsl")
+        wgpu::include_wgsl!("../../shaders/bloom-shader-bloom_vertex.wgsl")
     }
     pub fn linkage(device: &wgpu::Device) -> super::ShaderLinkage {
         log::debug!("creating web linkage for {}", "bloom_vertex");

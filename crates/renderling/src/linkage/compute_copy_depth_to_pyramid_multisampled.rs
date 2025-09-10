@@ -3,9 +3,11 @@
 use crate::linkage::ShaderLinkage;
 #[cfg(not(target_arch = "wasm32"))]
 mod target {
-    pub const ENTRY_POINT: &str = "cull::compute_copy_depth_to_pyramid_multisampled";
+    pub const ENTRY_POINT: &str = "cull::shader::compute_copy_depth_to_pyramid_multisampled";
     pub fn descriptor() -> wgpu::ShaderModuleDescriptor<'static> {
-        wgpu::include_spirv!("../../shaders/cull-compute_copy_depth_to_pyramid_multisampled.spv")
+        wgpu::include_spirv!(
+            "../../shaders/cull-shader-compute_copy_depth_to_pyramid_multisampled.spv"
+        )
     }
     pub fn linkage(device: &wgpu::Device) -> super::ShaderLinkage {
         log::debug!(
@@ -20,9 +22,11 @@ mod target {
 }
 #[cfg(target_arch = "wasm32")]
 mod target {
-    pub const ENTRY_POINT: &str = "cullcompute_copy_depth_to_pyramid_multisampled";
+    pub const ENTRY_POINT: &str = "cullshadercompute_copy_depth_to_pyramid_multisampled";
     pub fn descriptor() -> wgpu::ShaderModuleDescriptor<'static> {
-        wgpu::include_wgsl!("../../shaders/cull-compute_copy_depth_to_pyramid_multisampled.wgsl")
+        wgpu::include_wgsl!(
+            "../../shaders/cull-shader-compute_copy_depth_to_pyramid_multisampled.wgsl"
+        )
     }
     pub fn linkage(device: &wgpu::Device) -> super::ShaderLinkage {
         log::debug!(

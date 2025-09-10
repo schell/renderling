@@ -1,33 +1,33 @@
 [
   {
-    "source_path": "shaders/atlas-atlas_blit_fragment.spv",
-    "entry_point": "atlas::atlas_blit_fragment",
-    "wgsl_entry_point": "atlasatlas_blit_fragment"
+    "source_path": "shaders/atlas-shader-atlas_blit_fragment.spv",
+    "entry_point": "atlas::shader::atlas_blit_fragment",
+    "wgsl_entry_point": "atlasshaderatlas_blit_fragment"
   },
   {
-    "source_path": "shaders/atlas-atlas_blit_vertex.spv",
-    "entry_point": "atlas::atlas_blit_vertex",
-    "wgsl_entry_point": "atlasatlas_blit_vertex"
+    "source_path": "shaders/atlas-shader-atlas_blit_vertex.spv",
+    "entry_point": "atlas::shader::atlas_blit_vertex",
+    "wgsl_entry_point": "atlasshaderatlas_blit_vertex"
   },
   {
-    "source_path": "shaders/bloom-shaders-bloom_downsample_fragment.spv",
-    "entry_point": "bloom::shaders::bloom_downsample_fragment",
-    "wgsl_entry_point": "bloomshadersbloom_downsample_fragment"
+    "source_path": "shaders/bloom-shader-bloom_downsample_fragment.spv",
+    "entry_point": "bloom::shader::bloom_downsample_fragment",
+    "wgsl_entry_point": "bloomshaderbloom_downsample_fragment"
   },
   {
-    "source_path": "shaders/bloom-shaders-bloom_mix_fragment.spv",
-    "entry_point": "bloom::shaders::bloom_mix_fragment",
-    "wgsl_entry_point": "bloomshadersbloom_mix_fragment"
+    "source_path": "shaders/bloom-shader-bloom_mix_fragment.spv",
+    "entry_point": "bloom::shader::bloom_mix_fragment",
+    "wgsl_entry_point": "bloomshaderbloom_mix_fragment"
   },
   {
-    "source_path": "shaders/bloom-shaders-bloom_upsample_fragment.spv",
-    "entry_point": "bloom::shaders::bloom_upsample_fragment",
-    "wgsl_entry_point": "bloomshadersbloom_upsample_fragment"
+    "source_path": "shaders/bloom-shader-bloom_upsample_fragment.spv",
+    "entry_point": "bloom::shader::bloom_upsample_fragment",
+    "wgsl_entry_point": "bloomshaderbloom_upsample_fragment"
   },
   {
-    "source_path": "shaders/bloom-shaders-bloom_vertex.spv",
-    "entry_point": "bloom::shaders::bloom_vertex",
-    "wgsl_entry_point": "bloomshadersbloom_vertex"
+    "source_path": "shaders/bloom-shader-bloom_vertex.spv",
+    "entry_point": "bloom::shader::bloom_vertex",
+    "wgsl_entry_point": "bloomshaderbloom_vertex"
   },
   {
     "source_path": "shaders/convolution-brdf_lut_convolution_fragment.spv",
@@ -60,44 +60,44 @@
     "wgsl_entry_point": "convolutionprefilter_environment_cubemap_vertex"
   },
   {
-    "source_path": "shaders/cubemap-cubemap_sampling_test_fragment.spv",
-    "entry_point": "cubemap::cubemap_sampling_test_fragment",
-    "wgsl_entry_point": "cubemapcubemap_sampling_test_fragment"
+    "source_path": "shaders/cubemap-shader-cubemap_sampling_test_fragment.spv",
+    "entry_point": "cubemap::shader::cubemap_sampling_test_fragment",
+    "wgsl_entry_point": "cubemapshadercubemap_sampling_test_fragment"
   },
   {
-    "source_path": "shaders/cubemap-cubemap_sampling_test_vertex.spv",
-    "entry_point": "cubemap::cubemap_sampling_test_vertex",
-    "wgsl_entry_point": "cubemapcubemap_sampling_test_vertex"
+    "source_path": "shaders/cubemap-shader-cubemap_sampling_test_vertex.spv",
+    "entry_point": "cubemap::shader::cubemap_sampling_test_vertex",
+    "wgsl_entry_point": "cubemapshadercubemap_sampling_test_vertex"
   },
   {
-    "source_path": "shaders/cull-compute_copy_depth_to_pyramid.spv",
-    "entry_point": "cull::compute_copy_depth_to_pyramid",
-    "wgsl_entry_point": "cullcompute_copy_depth_to_pyramid"
+    "source_path": "shaders/cull-shader-compute_copy_depth_to_pyramid.spv",
+    "entry_point": "cull::shader::compute_copy_depth_to_pyramid",
+    "wgsl_entry_point": "cullshadercompute_copy_depth_to_pyramid"
   },
   {
-    "source_path": "shaders/cull-compute_copy_depth_to_pyramid_multisampled.spv",
-    "entry_point": "cull::compute_copy_depth_to_pyramid_multisampled",
-    "wgsl_entry_point": "cullcompute_copy_depth_to_pyramid_multisampled"
+    "source_path": "shaders/cull-shader-compute_copy_depth_to_pyramid_multisampled.spv",
+    "entry_point": "cull::shader::compute_copy_depth_to_pyramid_multisampled",
+    "wgsl_entry_point": "cullshadercompute_copy_depth_to_pyramid_multisampled"
   },
   {
-    "source_path": "shaders/cull-compute_culling.spv",
-    "entry_point": "cull::compute_culling",
-    "wgsl_entry_point": "cullcompute_culling"
+    "source_path": "shaders/cull-shader-compute_culling.spv",
+    "entry_point": "cull::shader::compute_culling",
+    "wgsl_entry_point": "cullshadercompute_culling"
   },
   {
-    "source_path": "shaders/cull-compute_downsample_depth_pyramid.spv",
-    "entry_point": "cull::compute_downsample_depth_pyramid",
-    "wgsl_entry_point": "cullcompute_downsample_depth_pyramid"
+    "source_path": "shaders/cull-shader-compute_downsample_depth_pyramid.spv",
+    "entry_point": "cull::shader::compute_downsample_depth_pyramid",
+    "wgsl_entry_point": "cullshadercompute_downsample_depth_pyramid"
   },
   {
-    "source_path": "shaders/debug-debug_overlay_fragment.spv",
-    "entry_point": "debug::debug_overlay_fragment",
-    "wgsl_entry_point": "debugdebug_overlay_fragment"
+    "source_path": "shaders/debug-shader-debug_overlay_fragment.spv",
+    "entry_point": "debug::shader::debug_overlay_fragment",
+    "wgsl_entry_point": "debugshaderdebug_overlay_fragment"
   },
   {
-    "source_path": "shaders/debug-debug_overlay_vertex.spv",
-    "entry_point": "debug::debug_overlay_vertex",
-    "wgsl_entry_point": "debugdebug_overlay_vertex"
+    "source_path": "shaders/debug-shader-debug_overlay_vertex.spv",
+    "entry_point": "debug::shader::debug_overlay_vertex",
+    "wgsl_entry_point": "debugshaderdebug_overlay_vertex"
   },
   {
     "source_path": "shaders/ibl-diffuse_irradiance-di_convolution_fragment.spv",
@@ -140,6 +140,16 @@
     "wgsl_entry_point": "lightshadow_mapping_vertex"
   },
   {
+    "source_path": "shaders/primitive-shader-primitive_fragment.spv",
+    "entry_point": "primitive::shader::primitive_fragment",
+    "wgsl_entry_point": "primitiveshaderprimitive_fragment"
+  },
+  {
+    "source_path": "shaders/primitive-shader-primitive_vertex.spv",
+    "entry_point": "primitive::shader::primitive_vertex",
+    "wgsl_entry_point": "primitiveshaderprimitive_vertex"
+  },
+  {
     "source_path": "shaders/skybox-skybox_cubemap_fragment.spv",
     "entry_point": "skybox::skybox_cubemap_fragment",
     "wgsl_entry_point": "skyboxskybox_cubemap_fragment"
@@ -158,16 +168,6 @@
     "source_path": "shaders/skybox-skybox_vertex.spv",
     "entry_point": "skybox::skybox_vertex",
     "wgsl_entry_point": "skyboxskybox_vertex"
-  },
-  {
-    "source_path": "shaders/stage-primitive_fragment.spv",
-    "entry_point": "stage::primitive_fragment",
-    "wgsl_entry_point": "stageprimitive_fragment"
-  },
-  {
-    "source_path": "shaders/stage-primitive_vertex.spv",
-    "entry_point": "stage::primitive_vertex",
-    "wgsl_entry_point": "stageprimitive_vertex"
   },
   {
     "source_path": "shaders/tonemapping-tonemapping_fragment.spv",

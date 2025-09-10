@@ -3,9 +3,9 @@
 use crate::linkage::ShaderLinkage;
 #[cfg(not(target_arch = "wasm32"))]
 mod target {
-    pub const ENTRY_POINT: &str = "bloom::shaders::bloom_downsample_fragment";
+    pub const ENTRY_POINT: &str = "bloom::shader::bloom_downsample_fragment";
     pub fn descriptor() -> wgpu::ShaderModuleDescriptor<'static> {
-        wgpu::include_spirv!("../../shaders/bloom-shaders-bloom_downsample_fragment.spv")
+        wgpu::include_spirv!("../../shaders/bloom-shader-bloom_downsample_fragment.spv")
     }
     pub fn linkage(device: &wgpu::Device) -> super::ShaderLinkage {
         log::debug!(
@@ -20,9 +20,9 @@ mod target {
 }
 #[cfg(target_arch = "wasm32")]
 mod target {
-    pub const ENTRY_POINT: &str = "bloomshadersbloom_downsample_fragment";
+    pub const ENTRY_POINT: &str = "bloomshaderbloom_downsample_fragment";
     pub fn descriptor() -> wgpu::ShaderModuleDescriptor<'static> {
-        wgpu::include_wgsl!("../../shaders/bloom-shaders-bloom_downsample_fragment.wgsl")
+        wgpu::include_wgsl!("../../shaders/bloom-shader-bloom_downsample_fragment.wgsl")
     }
     pub fn linkage(device: &wgpu::Device) -> super::ShaderLinkage {
         log::debug!("creating web linkage for {}", "bloom_downsample_fragment");

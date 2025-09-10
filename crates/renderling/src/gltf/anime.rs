@@ -2,9 +2,7 @@
 use glam::{Quat, Vec3};
 use snafu::prelude::*;
 
-use crate::{
-    geometry::MorphTargetWeights, stage::gltf_support::GltfNode, transform::NestedTransform,
-};
+use crate::{geometry::MorphTargetWeights, gltf::GltfNode, transform::NestedTransform};
 
 #[derive(Debug, Snafu)]
 pub enum InterpolationError {
@@ -766,7 +764,7 @@ impl Animator {
 
 #[cfg(test)]
 mod test {
-    use crate::{stage::Animator, test::BlockOnFuture, Context};
+    use crate::{gltf::Animator, test::BlockOnFuture, Context};
     use glam::Vec3;
 
     #[test]

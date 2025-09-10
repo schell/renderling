@@ -1,7 +1,7 @@
 //! Path and builder.
 //!
 //! Path colors are sRGB.
-use crate::{geometry::Vertex, material::Material, stage::Primitive};
+use crate::{geometry::Vertex, material::Material, primitive::Primitive};
 use glam::{Vec2, Vec3, Vec3Swizzles, Vec4};
 use lyon::{
     path::traits::PathBuilder,

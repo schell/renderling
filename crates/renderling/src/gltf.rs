@@ -1,24 +1,31 @@
-//! Gltf support for the [`Stage`](crate::Stage).
+//! GLTF support.
+//!
+//! # Loading GLTF files
+//!
+//! Loading GLTF files is accomplished through [`Stage::load_gltf_document_from_path`]
+//! and [`Stage::load_gltf_document_from_bytes`].
 use std::{collections::HashMap, sync::Arc};
 
 use craballoc::prelude::*;
-use crabslab::Id;
+use crabslab::{Array, Id};
 use glam::{Mat4, Quat, Vec2, Vec3, Vec4};
 use rustc_hash::{FxHashMap, FxHashSet};
 use snafu::{OptionExt, ResultExt, Snafu};
 
 use crate::{
     atlas::{
-        AtlasError, AtlasImage, AtlasTexture, AtlasTextureDescriptor, TextureAddressMode,
+        shader::AtlasTextureDescriptor, AtlasError, AtlasImage, AtlasTexture, TextureAddressMode,
         TextureModes,
     },
     bvol::Aabb,
-    camera::{Camera, CameraDescriptor},
-    geometry::{Indices, MorphTargetWeights, MorphTargets, Skin, Vertices},
-    light::{AnalyticalLight, LightStyle},
+    camera::Camera,
+    geometry::{Indices, MorphTarget, MorphTargetWeights, MorphTargets, Skin, Vertex, Vertices},
+    light::{shader::LightStyle, AnalyticalLight},
     material::Material,
-    stage::{MorphTarget, Primitive, Stage, Vertex},
-    transform::{NestedTransform, TransformDescriptor},
+    primitive::Primitive,
+    stage::{Stage, StageError},
+    transform::{shader::TransformDescriptor, NestedTransform},
+    types::{GpuCpuArray, GpuOnlyArray},
 };
 
 mod anime;
@@ -26,9 +33,6 @@ pub use anime::*;
 
 #[derive(Debug, Snafu)]
 pub enum StageGltfError {
-    #[snafu(display("{source}"))]
-    Stage { source: crate::stage::StageError },
-
     #[snafu(display("{source}"))]
     Gltf { source: gltf::Error },
 
@@ -274,13 +278,28 @@ impl Material {
     }
 }
 
-#[derive(Debug)]
-pub struct GltfPrimitive {
-    pub indices: Indices,
-    pub vertices: Vertices,
+pub struct GltfPrimitive<Ct: IsContainer = GpuCpuArray> {
+    pub indices: Indices<Ct>,
+    pub vertices: Vertices<Ct>,
     pub bounding_box: (Vec3, Vec3),
     pub material_index: Option<usize>,
     pub morph_targets: MorphTargets,
+}
+
+impl<Ct> core::fmt::Debug for GltfPrimitive<Ct>
+where
+    Ct: IsContainer<Pointer<Vertex> = Array<Vertex>>,
+    Ct: IsContainer<Pointer<u32> = Array<u32>>,
+{
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("GltfPrimitive")
+            .field("indices", &self.indices)
+            .field("vertices", &self.vertices)
+            .field("bounding_box", &self.bounding_box)
+            .field("material_index", &self.material_index)
+            .field("morph_targets", &self.morph_targets)
+            .finish()
+    }
 }
 
 impl GltfPrimitive {
@@ -531,14 +550,43 @@ impl GltfPrimitive {
             bounding_box,
         }
     }
+
+    pub fn into_gpu_only(self) -> GltfPrimitive<GpuOnlyArray> {
+        let Self {
+            indices,
+            vertices,
+            bounding_box,
+            material_index,
+            morph_targets,
+        } = self;
+        GltfPrimitive {
+            indices: indices.into_gpu_only(),
+            vertices: vertices.into_gpu_only(),
+            bounding_box,
+            material_index,
+            morph_targets,
+        }
+    }
 }
 
-#[derive(Debug)]
-pub struct GltfMesh {
+pub struct GltfMesh<Ct: IsContainer = GpuCpuArray> {
     /// Mesh primitives, aka meshlets
-    pub primitives: Vec<GltfPrimitive>,
+    pub primitives: Vec<GltfPrimitive<Ct>>,
     /// Morph target weights
     pub weights: MorphTargetWeights,
+}
+
+impl<Ct> core::fmt::Debug for GltfMesh<Ct>
+where
+    Ct: IsContainer<Pointer<Vertex> = Array<Vertex>>,
+    Ct: IsContainer<Pointer<u32> = Array<u32>>,
+{
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("GltfMesh")
+            .field("primitives", &self.primitives)
+            .field("weights", &self.weights)
+            .finish()
+    }
 }
 
 impl GltfMesh {
@@ -555,6 +603,21 @@ impl GltfMesh {
             weights: stage.new_morph_target_weights(weights),
         }
     }
+
+    pub fn into_gpu_only(self) -> GltfMesh<GpuOnlyArray> {
+        let Self {
+            primitives,
+            weights,
+        } = self;
+        let primitives = primitives
+            .into_iter()
+            .map(GltfPrimitive::into_gpu_only)
+            .collect::<Vec<_>>();
+        GltfMesh {
+            primitives,
+            weights,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -562,7 +625,6 @@ pub struct GltfCamera {
     pub index: usize,
     pub name: Option<String>,
     pub node_transform: NestedTransform,
-    projection: Mat4,
     pub camera: Camera,
 }
 
@@ -606,15 +668,9 @@ impl GltfCamera {
         GltfCamera {
             index: gltf_camera.index(),
             name: gltf_camera.name().map(String::from),
-            projection,
             node_transform: transform.clone(),
             camera,
         }
-    }
-
-    pub fn camera_descriptor(&self) -> CameraDescriptor {
-        let view = Mat4::from(self.node_transform.global_descriptor()).inverse();
-        CameraDescriptor::new(self.projection, view)
     }
 }
 
@@ -711,19 +767,31 @@ impl GltfSkin {
 }
 
 /// A loaded GLTF document.
-pub struct GltfDocument {
+///
+/// After being loaded, a [`GltfDocument`] is a collection of staged resources.
+///
+/// All primitives are automatically added to the [`Stage`] they were loaded
+/// from.
+///
+/// ## Note
+///
+/// After being loaded, the `meshes` field contains [`Vertices`] and [`Indices`]
+/// that can be inspected from the CPU. This has memory implications, so if your
+/// document contains lots of geometric data it is advised that you unload that
+/// data from the CPU using [`GltfDocument::into_gpu_only`].
+pub struct GltfDocument<Ct: IsContainer = GpuCpuArray> {
     pub animations: Vec<Animation>,
     pub cameras: Vec<GltfCamera>,
     pub default_scene: Option<usize>,
     pub extensions: Option<serde_json::Value>,
     pub textures: Vec<AtlasTexture>,
     pub lights: Vec<AnalyticalLight>,
-    pub meshes: Vec<GltfMesh>,
+    pub meshes: Vec<GltfMesh<Ct>>,
     pub nodes: Vec<GltfNode>,
     pub default_material: Material,
     pub materials: Vec<Material>,
-    // map of node index to renderlets
-    pub renderlets: FxHashMap<usize, Vec<Primitive>>,
+    // map of node index to primitives
+    pub primitives: FxHashMap<usize, Vec<Primitive>>,
     /// Vector of scenes - each being a list of nodes.
     pub scenes: Vec<Vec<usize>>,
     pub skins: Vec<GltfSkin>,
@@ -735,7 +803,7 @@ impl GltfDocument {
         document: &gltf::Document,
         buffer_data: Vec<gltf::buffer::Data>,
         images: Vec<gltf::image::Data>,
-    ) -> Result<GltfDocument, StageGltfError> {
+    ) -> Result<GltfDocument, StageError> {
         let textures = {
             let mut images = images.into_iter().map(AtlasImage::from).collect::<Vec<_>>();
             for gltf_material in document.materials() {
@@ -797,7 +865,7 @@ impl GltfDocument {
                     Err(aimg) => aimg.as_ref().clone(),
                 })
                 .collect();
-            let hybrid_textures = stage.add_images(prepared_images).context(StageSnafu)?;
+            let hybrid_textures = stage.add_images(prepared_images)?;
             let mut texture_lookup = FxHashMap::<usize, AtlasTexture>::default();
             for (hybrid, (tex, refs)) in hybrid_textures.into_iter().zip(deduped_textures) {
                 hybrid.set_modes(tex.modes);
@@ -1104,7 +1172,7 @@ impl GltfDocument {
             scenes,
             skins,
             default_scene: document.default_scene().map(|scene| scene.index()),
-            renderlets,
+            primitives: renderlets,
             extensions: document
                 .extensions()
                 .cloned()
@@ -1112,8 +1180,54 @@ impl GltfDocument {
         })
     }
 
+    /// Unload vertex and index data from the CPU.
+    ///
+    /// The data can still be updated from the CPU, but will not be inspectable.
+    pub fn into_gpu_only(self) -> GltfDocument<GpuOnlyArray> {
+        let Self {
+            animations,
+            cameras,
+            default_scene,
+            extensions,
+            textures,
+            lights,
+            meshes,
+            nodes,
+            default_material,
+            materials,
+            primitives,
+            scenes,
+            skins,
+        } = self;
+        let meshes = meshes
+            .into_iter()
+            .map(GltfMesh::into_gpu_only)
+            .collect::<Vec<_>>();
+        GltfDocument {
+            animations,
+            cameras,
+            default_scene,
+            extensions,
+            textures,
+            lights,
+            meshes,
+            nodes,
+            default_material,
+            materials,
+            primitives,
+            scenes,
+            skins,
+        }
+    }
+}
+
+impl<Ct> GltfDocument<Ct>
+where
+    Ct: IsContainer<Pointer<Vertex> = Array<Vertex>>,
+    Ct: IsContainer<Pointer<u32> = Array<u32>>,
+{
     pub fn renderlets_iter(&self) -> impl Iterator<Item = &Primitive> {
-        self.renderlets.iter().flat_map(|(_, rs)| rs.iter())
+        self.primitives.iter().flat_map(|(_, rs)| rs.iter())
     }
 
     pub fn nodes_in_scene(&self, scene_index: usize) -> impl Iterator<Item = &GltfNode> {
@@ -1153,27 +1267,9 @@ impl GltfDocument {
     }
 }
 
-impl Stage {
-    pub fn load_gltf_document_from_path(
-        &self,
-        path: impl AsRef<std::path::Path>,
-    ) -> Result<GltfDocument, StageGltfError> {
-        let (document, buffers, images) = gltf::import(path)?;
-        GltfDocument::from_gltf(self, &document, buffers, images)
-    }
-
-    pub fn load_gltf_document_from_bytes(
-        &self,
-        bytes: impl AsRef<[u8]>,
-    ) -> Result<GltfDocument, StageGltfError> {
-        let (document, buffers, images) = gltf::import_slice(bytes)?;
-        GltfDocument::from_gltf(self, &document, buffers, images)
-    }
-}
-
 #[cfg(test)]
 mod test {
-    use crate::{stage::Vertex, test::BlockOnFuture, Context};
+    use crate::{geometry::Vertex, test::BlockOnFuture, Context};
     use glam::{Vec3, Vec4};
 
     #[test]
@@ -1448,7 +1544,7 @@ mod test {
             .unwrap();
         let camera_a = doc.cameras.first().unwrap();
 
-        let desc = camera_a.camera_descriptor();
+        let desc = camera_a.camera.descriptor();
         const THRESHOLD: f32 = 10e-6;
         let a = Vec3::new(14.699949, 4.958309, 12.676651);
         let b = Vec3::new(14.699949, -12.676651, 4.958309);
@@ -1479,8 +1575,8 @@ mod test {
             a.distance(b) <= 10e-6 || c.distance(c) <= 10e-6
         };
         assert!(eq(
-            camera_a.camera_descriptor().position(),
-            camera_b.camera_descriptor().position()
+            camera_a.camera.descriptor().position(),
+            camera_b.camera.descriptor().position()
         ));
     }
 }

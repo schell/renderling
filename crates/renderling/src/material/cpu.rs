@@ -12,7 +12,7 @@ use glam::{Vec3, Vec4};
 
 use crate::{
     atlas::{Atlas, AtlasTexture},
-    material::MaterialDescriptor,
+    material::shader::MaterialDescriptor,
 };
 
 /// Wrapper around the materials slab, which holds material textures in an atlas.

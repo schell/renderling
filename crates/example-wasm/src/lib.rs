@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 use glam::{Vec2, Vec4};
-use renderling::{prelude::*, ui::prelude::*};
+use renderling::{camera::Camera, gltf::GltfDocument, stage::Stage, ui::prelude::*};
 use wasm_bindgen::prelude::*;
 use web_sys::HtmlCanvasElement;
 

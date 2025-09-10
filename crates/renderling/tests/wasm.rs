@@ -7,7 +7,7 @@ use craballoc::{
 };
 use glam::{Vec3, Vec4};
 use image::DynamicImage;
-use renderling::{prelude::*, texture::CopiedTextureBuffer};
+use renderling::{geometry::Vertex, prelude::*, texture::CopiedTextureBuffer};
 use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
 use web_sys::wasm_bindgen::prelude::*;
 use wire_types::{Error, PixelType};

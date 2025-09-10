@@ -9,11 +9,12 @@ use crate::{
     camera::Camera,
     color::linear_xfer_vec4,
     geometry::Vertex,
-    light::{LightTiling, LightTilingConfig, SpotLightCalculation},
+    light::{shader::SpotLightCalculation, LightTiling, LightTilingConfig},
     math::GpuRng,
-    stage::{Primitive, PrimitivePbrVertexInfo, Stage},
+    primitive::{shader::PrimitivePbrVertexInfo, Primitive},
+    stage::Stage,
     test::BlockOnFuture,
-    transform::TransformDescriptor,
+    transform::shader::TransformDescriptor,
 };
 
 use super::*;
@@ -340,8 +341,8 @@ fn clear_tiles_sanity() {
                 // This should produce an image where pixels get darker towards the upper left corner.
                 let max = 1.0 - distance / max_distance;
 
-                item.depth_min = crate::light::quantize_depth_f32_to_u32(min);
-                item.depth_max = crate::light::quantize_depth_f32_to_u32(max);
+                item.depth_min = crate::light::shader::quantize_depth_f32_to_u32(min);
+                item.depth_max = crate::light::shader::quantize_depth_f32_to_u32(max);
 
                 // This should produce an image that looks like noise
                 item.next_light_index = rng.gen_u32(0, 32);
@@ -971,7 +972,7 @@ fn pedestal() {
 
         for vertex_index in 0..renderlet.descriptor().vertices_array.len() {
             let mut info = PrimitivePbrVertexInfo::default();
-            crate::stage::primitive_vertex(
+            crate::primitive::shader::primitive_vertex(
                 renderlet.id(),
                 vertex_index as u32,
                 &geometry_slab,
@@ -1042,7 +1043,7 @@ fn pedestal() {
 
         for vertex_index in 0..renderlet.descriptor().vertices_array.len() {
             let mut info = PrimitivePbrVertexInfo::default();
-            crate::stage::primitive_vertex(
+            crate::primitive::shader::primitive_vertex(
                 renderlet.id(),
                 vertex_index as u32,
                 &geometry_slab,

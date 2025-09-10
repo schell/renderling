@@ -7,4 +7,4 @@ mod cpu;
 #[cfg(not(target_arch = "spirv"))]
 pub use cpu::*;
 
-pub mod shaders;
+pub mod shader;

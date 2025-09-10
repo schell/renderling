@@ -3,9 +3,9 @@
 use crate::linkage::ShaderLinkage;
 #[cfg(not(target_arch = "wasm32"))]
 mod target {
-    pub const ENTRY_POINT: &str = "cubemap::cubemap_sampling_test_vertex";
+    pub const ENTRY_POINT: &str = "cubemap::shader::cubemap_sampling_test_vertex";
     pub fn descriptor() -> wgpu::ShaderModuleDescriptor<'static> {
-        wgpu::include_spirv!("../../shaders/cubemap-cubemap_sampling_test_vertex.spv")
+        wgpu::include_spirv!("../../shaders/cubemap-shader-cubemap_sampling_test_vertex.spv")
     }
     pub fn linkage(device: &wgpu::Device) -> super::ShaderLinkage {
         log::debug!(
@@ -20,9 +20,9 @@ mod target {
 }
 #[cfg(target_arch = "wasm32")]
 mod target {
-    pub const ENTRY_POINT: &str = "cubemapcubemap_sampling_test_vertex";
+    pub const ENTRY_POINT: &str = "cubemapshadercubemap_sampling_test_vertex";
     pub fn descriptor() -> wgpu::ShaderModuleDescriptor<'static> {
-        wgpu::include_wgsl!("../../shaders/cubemap-cubemap_sampling_test_vertex.wgsl")
+        wgpu::include_wgsl!("../../shaders/cubemap-shader-cubemap_sampling_test_vertex.wgsl")
     }
     pub fn linkage(device: &wgpu::Device) -> super::ShaderLinkage {
         log::debug!(

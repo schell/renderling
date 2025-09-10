@@ -1,4 +1,4 @@
-//! "Physically based" types and functions.
+//! "Physically based" shader types and functions.
 //!
 //! ## References
 //! * <https://learnopengl.com/PBR/Theory>
@@ -11,16 +11,16 @@ use glam::{Mat4, Vec2, Vec3, Vec4, Vec4Swizzles};
 use spirv_std::num_traits::{Float, Zero};
 
 use crate::{
-    atlas::AtlasTextureDescriptor,
-    geometry::GeometryDescriptor,
-    light::{
+    atlas::shader::AtlasTextureDescriptor,
+    geometry::shader::GeometryDescriptor,
+    light::shader::{
         DirectionalLightDescriptor, LightStyle, LightingDescriptor, PointLightDescriptor,
         ShadowCalculation, SpotLightCalculation,
     },
-    material::MaterialDescriptor,
+    material::shader::MaterialDescriptor,
     math::{self, IsSampler, IsVector, Sample2d, Sample2dArray, SampleCube},
+    primitive::shader::PrimitiveDescriptor,
     println as my_println,
-    stage::PrimitiveDescriptor,
 };
 
 pub mod debug;

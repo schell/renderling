@@ -6,7 +6,7 @@ use craballoc::{runtime::IsRuntime, slab::SlabAllocator, value::Hybrid};
 use crabslab::Id;
 use glam::{Mat4, Quat, Vec3};
 
-use super::TransformDescriptor;
+use super::shader::TransformDescriptor;
 
 /// A decomposed 3d transformation.
 #[derive(Clone, Debug)]

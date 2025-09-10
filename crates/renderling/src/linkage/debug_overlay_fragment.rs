@@ -3,9 +3,9 @@
 use crate::linkage::ShaderLinkage;
 #[cfg(not(target_arch = "wasm32"))]
 mod target {
-    pub const ENTRY_POINT: &str = "debug::debug_overlay_fragment";
+    pub const ENTRY_POINT: &str = "debug::shader::debug_overlay_fragment";
     pub fn descriptor() -> wgpu::ShaderModuleDescriptor<'static> {
-        wgpu::include_spirv!("../../shaders/debug-debug_overlay_fragment.spv")
+        wgpu::include_spirv!("../../shaders/debug-shader-debug_overlay_fragment.spv")
     }
     pub fn linkage(device: &wgpu::Device) -> super::ShaderLinkage {
         log::debug!("creating native linkage for {}", "debug_overlay_fragment");
@@ -17,9 +17,9 @@ mod target {
 }
 #[cfg(target_arch = "wasm32")]
 mod target {
-    pub const ENTRY_POINT: &str = "debugdebug_overlay_fragment";
+    pub const ENTRY_POINT: &str = "debugshaderdebug_overlay_fragment";
     pub fn descriptor() -> wgpu::ShaderModuleDescriptor<'static> {
-        wgpu::include_wgsl!("../../shaders/debug-debug_overlay_fragment.wgsl")
+        wgpu::include_wgsl!("../../shaders/debug-shader-debug_overlay_fragment.wgsl")
     }
     pub fn linkage(device: &wgpu::Device) -> super::ShaderLinkage {
         log::debug!("creating web linkage for {}", "debug_overlay_fragment");

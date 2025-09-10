@@ -10,7 +10,8 @@ use crate::{
     bvol::BoundingSphere,
     geometry::{Indices, MorphTargetWeights, MorphTargets, Skin, Vertices},
     material::Material,
-    stage::PrimitiveDescriptor,
+    primitive::shader::PrimitiveDescriptor,
+    stage::Stage,
     transform::Transform,
     types::GpuOnlyArray,
 };
@@ -36,7 +37,7 @@ impl Primitive {
     ///
     /// The returned [`Primitive`] will have the stage's default [`Vertices`],
     /// which is an all-white unit cube.
-    pub fn new(stage: &super::Stage) -> Self {
+    pub fn new(stage: &Stage) -> Self {
         let descriptor = stage
             .geometry
             .slab_allocator()

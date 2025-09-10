@@ -1,12 +1,12 @@
-//! Shaders used in the intro tutorial and in WASM tests.
+//! Shaders used in the contributor intro tutorial and in WASM tests.
 
 use crabslab::{Array, Id, Slab, SlabItem};
 use glam::{Vec3, Vec3Swizzles, Vec4};
 use spirv_std::spirv;
 
 use crate::{
-    geometry::{GeometryDescriptor, Vertex},
-    stage::{PrimitiveDescriptor, VertexInfo},
+    geometry::{shader::GeometryDescriptor, Vertex},
+    primitive::shader::{PrimitiveDescriptor, VertexInfo},
 };
 
 /// Simple fragment shader that writes the input color to the output color.
@@ -84,8 +84,8 @@ pub fn slabbed_vertices(
 /// The `instance_index` is the `id` of a [`PrimitiveDescriptor`].
 /// The [`PrimitiveDescriptor`] contains an [`Array`] of [`Vertex`]s
 /// as its mesh, the [`Id`]s of a
-/// [`MaterialDescriptor`](crate::material::MaterialDescriptor) and
-///[`CameraDescriptor`](crate::camera::CameraDescriptor),
+/// [`MaterialDescriptor`](crate::material::shader::MaterialDescriptor) and
+///[`CameraDescriptor`](crate::camera::shader::CameraDescriptor),
 /// and TRS transforms.
 /// The `vertex_index` is the index of a [`Vertex`] within the
 /// [`PrimitiveDescriptor`]'s `vertices` [`Array`].

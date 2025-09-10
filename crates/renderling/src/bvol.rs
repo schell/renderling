@@ -16,7 +16,7 @@ use glam::{Mat4, Vec2, Vec3, Vec3Swizzles, Vec4, Vec4Swizzles};
 #[cfg(gpu)]
 use spirv_std::num_traits::Float;
 
-use crate::{camera::CameraDescriptor, transform::TransformDescriptor};
+use crate::{camera::shader::CameraDescriptor, transform::shader::TransformDescriptor};
 
 /// Normalize a plane.
 pub fn normalize_plane(mut plane: Vec4) -> Vec4 {

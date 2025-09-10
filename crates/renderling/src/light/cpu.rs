@@ -1,6 +1,8 @@
 //! CPU-only lighting and shadows.
 use std::sync::{Arc, RwLock};
 
+#[cfg(doc)]
+use crate::stage::Stage;
 use craballoc::{
     prelude::{Hybrid, SlabAllocator, WgpuRuntime},
     slab::SlabBuffer,
@@ -13,10 +15,10 @@ use snafu::prelude::*;
 use crate::{
     atlas::{Atlas, AtlasBlitter, AtlasError},
     geometry::Geometry,
-    transform::{NestedTransform, Transform, TransformDescriptor},
+    transform::{shader::TransformDescriptor, NestedTransform, Transform},
 };
 
-use super::{
+use super::shader::{
     DirectionalLightDescriptor, LightDescriptor, LightStyle, LightingDescriptor,
     PointLightDescriptor, SpotLightDescriptor,
 };
@@ -100,6 +102,9 @@ impl DirectionalLight {
     }
 }
 
+/// A [`DirectionalLight`] comes wrapped in [`AnalyticalLight`], giving the
+/// [`AnalyticalLight`] the ability to simulate sunlight or other lights that
+/// are "infinitely" far away.
 impl AnalyticalLight<DirectionalLight> {
     /// Set the direction of the directional light.
     pub fn set_direction(&self, direction: Vec3) -> &Self {
@@ -211,6 +216,10 @@ impl PointLight {
     }
 }
 
+/// A [`PointLight`] comes wrapped in [`AnalyticalLight`], giving the
+/// [`AnalyticalLight`] the ability to simulate lights that
+/// emit from a single point in space and attenuate exponentially with
+/// distance.
 impl AnalyticalLight<PointLight> {
     /// Set the position of the point light.
     pub fn set_position(&self, position: Vec3) -> &Self {
@@ -324,6 +333,10 @@ impl SpotLight {
     }
 }
 
+/// A [`SpotLight`] comes wrapped in [`AnalyticalLight`], giving the
+/// [`AnalyticalLight`] the ability to simulate lights that
+/// emit from a single point in space in a specific direction, with
+/// a specific spread.
 impl AnalyticalLight<SpotLight> {
     /// Set the position of the spot light.
     pub fn set_position(&self, position: Vec3) -> &Self {
@@ -519,8 +532,15 @@ impl IsLight for Light {
 
 /// A bundle of lighting resources representing one analytical light in a scene.
 ///
-/// Create an `AnalyticalLight` with the `Lighting::new_analytical_light`,
-/// or from `Stage::new_analytical_light`.
+/// Create an [`AnalyticalLight`] with:
+/// * [`Stage::new_directional_light`]
+/// * [`Stage::new_point_light`]
+/// * [`Stage::new_spot_light`].
+///
+/// Lights may be added and removed from rendering with [`Stage::add_light`] and
+/// [`Stage::remove_light`].
+/// The GPU resources a light uses will not be released until [`Stage::remove_light`]
+/// is called _and_ the light is dropped.
 #[derive(Clone)]
 pub struct AnalyticalLight<T = Light> {
     /// The generic light descriptor.

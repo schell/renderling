@@ -14,7 +14,7 @@ use glyph_brush::*;
 pub use ab_glyph::FontArc;
 pub use glyph_brush::{Section, Text};
 
-use crate::{atlas::AtlasTexture, geometry::Vertex, material::Material, stage::Primitive};
+use crate::{atlas::AtlasTexture, geometry::Vertex, material::Material, primitive::Primitive};
 use image::{DynamicImage, GenericImage, ImageBuffer, Luma, Rgba};
 
 use super::{Ui, UiTransform};

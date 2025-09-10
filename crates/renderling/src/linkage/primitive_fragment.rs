@@ -3,9 +3,9 @@
 use crate::linkage::ShaderLinkage;
 #[cfg(not(target_arch = "wasm32"))]
 mod target {
-    pub const ENTRY_POINT: &str = "stage::primitive_fragment";
+    pub const ENTRY_POINT: &str = "primitive::shader::primitive_fragment";
     pub fn descriptor() -> wgpu::ShaderModuleDescriptor<'static> {
-        wgpu::include_spirv!("../../shaders/stage-primitive_fragment.spv")
+        wgpu::include_spirv!("../../shaders/primitive-shader-primitive_fragment.spv")
     }
     pub fn linkage(device: &wgpu::Device) -> super::ShaderLinkage {
         log::debug!("creating native linkage for {}", "primitive_fragment");
@@ -17,9 +17,9 @@ mod target {
 }
 #[cfg(target_arch = "wasm32")]
 mod target {
-    pub const ENTRY_POINT: &str = "stageprimitive_fragment";
+    pub const ENTRY_POINT: &str = "primitiveshaderprimitive_fragment";
     pub fn descriptor() -> wgpu::ShaderModuleDescriptor<'static> {
-        wgpu::include_wgsl!("../../shaders/stage-primitive_fragment.wgsl")
+        wgpu::include_wgsl!("../../shaders/primitive-shader-primitive_fragment.wgsl")
     }
     pub fn linkage(device: &wgpu::Device) -> super::ShaderLinkage {
         log::debug!("creating web linkage for {}", "primitive_fragment");

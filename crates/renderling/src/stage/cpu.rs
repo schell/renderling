@@ -1,32 +1,26 @@
 //! GPU staging area.
-//!
-//! The [`Stage`] object is used to "stage" objects on the GPU, including
-//! mesh geometry, transforms, materials and lights.
-//!
-//! [`Stage`] also controls various effects:
-//! * [`Skybox`]
-//!   - [`Stage::with_skybox`]
-//!   - [`Stage::set_skybox`]
-//! * [`Bloom`]
-//! * [`Tonemapping`].
-//!
-//! It is used to stage [`Renderlet`]s for rendering.
 use core::ops::Deref;
 use core::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 use craballoc::prelude::*;
 use crabslab::Id;
+use glam::{Mat4, UVec2, Vec4};
 use snafu::Snafu;
 use std::sync::{atomic::AtomicBool, Arc, Mutex, RwLock};
 
 use crate::atlas::AtlasTexture;
 use crate::camera::Camera;
+use crate::geometry::{shader::GeometryDescriptor, MorphTarget, Vertex};
+use crate::gltf::GltfDocument;
+#[cfg(gltf)]
+use crate::gltf::StageGltfError;
 use crate::light::{DirectionalLight, IsLight, Light, PointLight, SpotLight};
 use crate::material::Material;
+use crate::primitive::Primitive;
 use crate::{
     atlas::{AtlasError, AtlasImage, AtlasImageError},
     bindgroup::ManagedBindGroup,
     bloom::Bloom,
-    camera::CameraDescriptor,
+    camera::shader::CameraDescriptor,
     debug::DebugOverlay,
     draw::DrawCalls,
     geometry::{Geometry, Indices, MorphTargetWeights, MorphTargets, Skin, SkinJoint, Vertices},
@@ -42,13 +36,7 @@ use crate::{
     transform::{NestedTransform, Transform},
 };
 
-#[cfg(cpu)]
-pub mod primitive;
-#[cfg(cpu)]
-pub use primitive::*;
-
-use super::*;
-
+/// Enumeration of errors that may be the result of [`Stage`] functions.
 #[derive(Debug, Snafu)]
 pub enum StageError {
     #[snafu(display("{source}"))]
@@ -56,6 +44,10 @@ pub enum StageError {
 
     #[snafu(display("{source}"))]
     Lighting { source: LightingError },
+
+    #[cfg(gltf)]
+    #[snafu(display("{source}"))]
+    Gltf { source: crate::gltf::StageGltfError },
 }
 
 impl From<AtlasError> for StageError {
@@ -67,6 +59,13 @@ impl From<AtlasError> for StageError {
 impl From<LightingError> for StageError {
     fn from(source: LightingError) -> Self {
         Self::Lighting { source }
+    }
+}
+
+#[cfg(gltf)]
+impl From<crate::gltf::StageGltfError> for StageError {
+    fn from(source: crate::gltf::StageGltfError) -> Self {
+        Self::Gltf { source }
     }
 }
 
@@ -95,14 +94,16 @@ fn create_msaa_textureview(
         .create_view(&wgpu::TextureViewDescriptor::default())
 }
 
+/// Result of calling [`Stage::commit`].
 pub struct StageCommitResult {
-    pub geometry_buffer: SlabBuffer<wgpu::Buffer>,
-    pub lighting_buffer: SlabBuffer<wgpu::Buffer>,
-    pub materials_buffer: SlabBuffer<wgpu::Buffer>,
+    pub(crate) geometry_buffer: SlabBuffer<wgpu::Buffer>,
+    pub(crate) lighting_buffer: SlabBuffer<wgpu::Buffer>,
+    pub(crate) materials_buffer: SlabBuffer<wgpu::Buffer>,
 }
 
 impl StageCommitResult {
-    pub fn latest_creation_time(&self) -> usize {
+    /// Timestamp of the most recently created buffer used by the stage.
+    pub(crate) fn latest_creation_time(&self) -> usize {
         [
             &self.geometry_buffer,
             &self.materials_buffer,
@@ -114,7 +115,9 @@ impl StageCommitResult {
         .unwrap_or_default()
     }
 
-    pub fn should_invalidate(&self, previous_creation_time: usize) -> bool {
+    /// Whether or not the stage's bindgroups need to be invalidated as a result
+    /// of the call to [`Stage::commit`] that produced this `StageCommitResult`.
+    pub(crate) fn should_invalidate(&self, previous_creation_time: usize) -> bool {
         let mut should = false;
         if self.geometry_buffer.is_new_this_commit() {
             log::trace!("geometry buffer is new this frame");
@@ -221,7 +224,7 @@ impl RenderletBindGroup<'_> {
 }
 
 /// Performs a rendering of an entire scene, given the resources at hand.
-pub struct StageRendering<'a> {
+pub(crate) struct StageRendering<'a> {
     // TODO: include the rest of the needed paramaters from `stage`, and then remove `stage`
     pub stage: &'a Stage,
     pub pipeline: &'a wgpu::RenderPipeline,
@@ -313,12 +316,60 @@ impl StageRendering<'_> {
     }
 }
 
-/// Represents an entire scene worth of rendering data.
+/// Entrypoint for staging data on the GPU and interacting with lighting.
 ///
-/// A clone of a stage is a reference to the same stage.
+/// # Design
 ///
-/// ## Note
-/// Only available on the CPU. Not available in shaders.
+/// The `Stage` struct serves as the central hub for managing and staging data on the GPU.
+/// It provides a consistent API for creating resources, applying effects, and customizing parameters.
+///
+/// The `Stage` uses a combination of `new_*`, `with_*`, `set_*`, and getter functions to facilitate
+/// resource management and customization.
+///
+/// Resources are managed internally, requiring no additional lifecycle work from the user.
+/// This design simplifies the process of resource management, allowing developers to focus on creating and rendering
+/// their scenes without worrying about the underlying GPU resource management.
+///
+/// # Resources
+///
+/// The `Stage` is responsible for creating various resources and staging them on the GPU.
+/// It handles the setup and management of the following resources:
+///
+/// * [`Camera`]: Manages the view and projection matrices for rendering scenes.
+///   - [`Stage::new_camera`] creates a new [`Camera`].
+///   - [`Stage::use_camera`] tells the `Stage` to use a camera.
+/// * [`Transform`]: Represents the position, rotation, and scale of objects.
+///   - [`Stage::new_transform`] creates a new [`Transform`].
+/// * [`NestedTransform`]: Allows for hierarchical transformations, useful for complex object hierarchies.
+///   - [`Stage::new_nested_transform`] creates a new [`NestedTransform`]
+/// * [`Vertices`]: Manages vertex data for rendering meshes.
+///   - [`Stage::new_vertices`]
+/// * [`Indices`]: Manages index data for rendering meshes with indexed drawing.
+///   - [`Stage::new_indices`]
+/// * [`Primitive`]: Represents a drawable object in the scene.
+///   - [`Stage::new_primitive`]
+/// * [`GltfDocument`]: Handles loading and managing GLTF assets.
+///   - [`Stage::load_gltf_document_from_path`] loads a new GLTF document from the local filesystem.
+///   - [`Stage::load_gltf_document_from_bytes`] parses a new GLTF document from pre-loaded bytes.
+/// * [`Skin`]: Animation and rigging information.
+///   - [`Stage::new_skin`]
+///
+/// # Lighting effects
+///
+/// The `Stage` also manages various lighting effects, which enhance the visual quality of the scene:
+///
+/// * [`AnalyticalLight`]: Simulates a single light source, with three flavors:
+///   - [`DirectionalLight`]: Represents sunlight or other distant light sources.
+///   - [`PointLight`]: Represents a light source that emits light in all directions from a single point.
+///   - [`SpotLight`]: Represents a light source that emits light in a cone shape.
+/// * [`Skybox`]: Provides image-based lighting (IBL) for realistic environmental reflections and ambient lighting.
+/// * [`Bloom`]: Adds a glow effect to bright areas of the scene, enhancing visual appeal.
+/// * [`ShadowMap`]: Manages shadow mapping for realistic shadow rendering.
+/// * [`LightTiling`]: Optimizes lighting calculations by dividing the scene into tiles for efficient processing.
+///
+/// # Note
+///
+/// Clones of [`Stage`] all point to the same underlying data.
 #[derive(Clone)]
 pub struct Stage {
     pub(crate) geometry: Geometry,
@@ -382,7 +433,28 @@ impl AsRef<Lighting> for Stage {
     }
 }
 
-/// Geometry methods.
+#[cfg(gltf)]
+/// GLTF functions
+impl Stage {
+    pub fn load_gltf_document_from_path(
+        &self,
+        path: impl AsRef<std::path::Path>,
+    ) -> Result<GltfDocument, StageError> {
+        let (document, buffers, images) = gltf::import(path).map_err(StageGltfError::from)?;
+        GltfDocument::from_gltf(self, &document, buffers, images)
+    }
+
+    pub fn load_gltf_document_from_bytes(
+        &self,
+        bytes: impl AsRef<[u8]>,
+    ) -> Result<GltfDocument, StageError> {
+        let (document, buffers, images) =
+            gltf::import_slice(bytes).map_err(StageGltfError::from)?;
+        GltfDocument::from_gltf(self, &document, buffers, images)
+    }
+}
+
+/// Geometry functions
 impl Stage {
     /// Returns the vertices of a white unit cube.
     ///
@@ -614,7 +686,7 @@ impl Stage {
     ///    `znear` or `zfar` needs adjustment.
     pub fn new_shadow_map<T>(
         &self,
-        analytical_light_bundle: &AnalyticalLight<T>,
+        analytical_light: &AnalyticalLight<T>,
         // Size of the shadow map
         size: UVec2,
         // Distance to the near plane of the shadow map's frustum.
@@ -632,7 +704,7 @@ impl Stage {
     {
         Ok(self
             .lighting
-            .new_shadow_map(analytical_light_bundle, size, z_near, z_far)?)
+            .new_shadow_map(analytical_light, size, z_near, z_far)?)
     }
 
     /// Enable light tiling, creating a new [`LightTiling`].
@@ -669,7 +741,7 @@ impl Stage {
 
     /// Run all upkeep and commit all staged changes to the GPU.
     ///
-    /// This is done implicitly in [`Stage::render`] and [`StageRendering::run`].
+    /// This is done implicitly in [`Stage::render`].
     ///
     /// This can be used after dropping resources to reclaim those resources on the GPU.
     #[must_use]
@@ -1425,13 +1497,12 @@ impl Stage {
 
 #[cfg(test)]
 mod test {
-    use craballoc::runtime::CpuRuntime;
+    use craballoc::{runtime::CpuRuntime, slab::SlabAllocator};
     use crabslab::{Array, Id, Slab};
     use glam::{Mat4, Vec2, Vec3, Vec4};
 
     use crate::{
-        geometry::{Geometry, GeometryDescriptor},
-        stage::{cpu::SlabAllocator, Vertex},
+        geometry::{shader::GeometryDescriptor, Geometry, Vertex},
         test::BlockOnFuture,
         transform::NestedTransform,
         Context,

@@ -7,7 +7,8 @@ use crabslab::Id;
 use glam::{Mat4, UVec2, Vec3};
 
 use crate::{
-    atlas::AtlasImage, camera::CameraDescriptor, convolution::VertexPrefilterEnvironmentCubemapIds,
+    atlas::AtlasImage, camera::shader::CameraDescriptor,
+    convolution::VertexPrefilterEnvironmentCubemapIds,
     cubemap::EquirectangularImageToCubemapBlitter, texture::Texture,
 };
 

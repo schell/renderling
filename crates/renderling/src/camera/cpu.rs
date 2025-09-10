@@ -3,6 +3,8 @@
 use craballoc::{runtime::IsRuntime, slab::SlabAllocator, value::Hybrid};
 use crabslab::Id;
 
+use crate::camera::shader::CameraDescriptor;
+
 use super::*;
 
 /// A camera used for transforming the stage during rendering.
@@ -42,6 +44,36 @@ impl Camera {
         self.inner.get()
     }
 
+    /// Set the camera to a default perspective projection and view based
+    /// on the width and height of the viewport.
+    pub fn set_default_perspective(&self, width: f32, height: f32) -> &Self {
+        self.inner
+            .modify(|d| *d = CameraDescriptor::default_perspective(width, height));
+        self
+    }
+
+    /// Set the camera to a default perspective projection and view based
+    /// on the width and height of the viewport.
+    pub fn with_default_perspective(self, width: f32, height: f32) -> Self {
+        self.set_default_perspective(width, height);
+        self
+    }
+
+    /// Set the camera to a default orthographic 2d projection and view based
+    /// on the width and height of the viewport.
+    pub fn set_default_ortho2d(&self, width: f32, height: f32) -> &Self {
+        self.inner
+            .modify(|d| *d = CameraDescriptor::default_ortho2d(width, height));
+        self
+    }
+
+    /// Set the camera to a default orthographic 2d projection and view based
+    /// on the width and height of the viewport.
+    pub fn with_default_ortho2d(self, width: f32, height: f32) -> Self {
+        self.set_default_ortho2d(width, height);
+        self
+    }
+
     /// Set the projection and view matrices of this camera.
     pub fn set_projection_and_view(
         &self,
@@ -66,7 +98,7 @@ impl Camera {
     /// Returns the projection and view matrices.
     pub fn projection_and_view(&self) -> (Mat4, Mat4) {
         let d = self.inner.get();
-        (d.projection, d.view())
+        (d.projection(), d.view())
     }
 
     /// Set the projection matrix of this camera.
@@ -83,7 +115,7 @@ impl Camera {
 
     /// Returns the projection matrix.
     pub fn projection(&self) -> Mat4 {
-        self.inner.get().projection
+        self.inner.get().projection()
     }
 
     /// Set the view matrix of this camera.

@@ -1,4 +1,4 @@
-//! Resources for image based lighting.
+//! Shader resources for image based lighting.
 
 pub mod diffuse_irradiance;
 #[cfg(not(target_arch = "spirv"))]

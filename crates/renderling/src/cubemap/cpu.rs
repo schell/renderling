@@ -9,7 +9,7 @@ use crate::{
     texture::Texture,
 };
 
-use super::{CubemapDescriptor, CubemapFaceDirection};
+use super::shader::{CubemapDescriptor, CubemapFaceDirection};
 
 pub fn cpu_sample_cubemap(cubemap: &[image::DynamicImage; 6], coord: Vec3) -> Vec4 {
     let coord = coord.normalize_or(Vec3::X);

@@ -3,9 +3,9 @@
 use crate::linkage::ShaderLinkage;
 #[cfg(not(target_arch = "wasm32"))]
 mod target {
-    pub const ENTRY_POINT: &str = "cull::compute_culling";
+    pub const ENTRY_POINT: &str = "cull::shader::compute_culling";
     pub fn descriptor() -> wgpu::ShaderModuleDescriptor<'static> {
-        wgpu::include_spirv!("../../shaders/cull-compute_culling.spv")
+        wgpu::include_spirv!("../../shaders/cull-shader-compute_culling.spv")
     }
     pub fn linkage(device: &wgpu::Device) -> super::ShaderLinkage {
         log::debug!("creating native linkage for {}", "compute_culling");
@@ -17,9 +17,9 @@ mod target {
 }
 #[cfg(target_arch = "wasm32")]
 mod target {
-    pub const ENTRY_POINT: &str = "cullcompute_culling";
+    pub const ENTRY_POINT: &str = "cullshadercompute_culling";
     pub fn descriptor() -> wgpu::ShaderModuleDescriptor<'static> {
-        wgpu::include_wgsl!("../../shaders/cull-compute_culling.wgsl")
+        wgpu::include_wgsl!("../../shaders/cull-shader-compute_culling.wgsl")
     }
     pub fn linkage(device: &wgpu::Device) -> super::ShaderLinkage {
         log::debug!("creating web linkage for {}", "compute_culling");

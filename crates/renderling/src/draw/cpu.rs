@@ -8,7 +8,7 @@ use crabslab::Id;
 
 use crate::{
     cull::{ComputeCulling, CullingError},
-    stage::{Primitive, PrimitiveDescriptor},
+    primitive::{shader::PrimitiveDescriptor, Primitive},
     texture::Texture,
     Context,
 };

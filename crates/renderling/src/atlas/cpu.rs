@@ -12,15 +12,15 @@ use image::RgbaImage;
 use snafu::{prelude::*, OptionExt};
 
 use crate::{
-    atlas::{AtlasDescriptor, TextureModes},
+    atlas::{
+        shader::{AtlasBlittingDescriptor, AtlasDescriptor, AtlasTextureDescriptor},
+        TextureModes,
+    },
     bindgroup::ManagedBindGroup,
     texture::{CopiedTextureBuffer, Texture},
 };
 
-use super::{
-    atlas_image::{convert_pixels, AtlasImage},
-    AtlasBlittingDescriptor, AtlasTextureDescriptor,
-};
+use super::atlas_image::{convert_pixels, AtlasImage};
 
 pub(crate) const ATLAS_SUGGESTED_SIZE: u32 = 2048;
 pub(crate) const ATLAS_SUGGESTED_LAYERS: u32 = 8;
@@ -1005,7 +1005,7 @@ impl AtlasBlitter {
 #[cfg(test)]
 mod test {
     use crate::{
-        atlas::{AtlasTextureDescriptor, TextureAddressMode},
+        atlas::{shader::AtlasTextureDescriptor, TextureAddressMode},
         geometry::Vertex,
         material::Materials,
         test::BlockOnFuture,

@@ -6,9 +6,14 @@ use example::{camera::CameraController, utils::*};
 use glam::*;
 use renderling::{
     bvol::{Aabb, BoundingSphere},
+    camera::{shader::CameraDescriptor, Camera},
+    geometry::Vertex,
+    light::{AnalyticalLight, DirectionalLight},
     material::Material,
     math::hex_to_vec4,
     prelude::*,
+    primitive::Primitive,
+    stage::Stage,
     tonemapping::srgba_to_linear,
 };
 use winit::{
@@ -29,6 +34,8 @@ const BOUNDS: Aabb = Aabb {
 struct AppCamera(Camera);
 struct FrustumCamera(CameraDescriptor);
 
+type Type = Primitive;
+
 #[allow(dead_code)]
 struct CullingExample {
     app_camera: AppCamera,
@@ -39,7 +46,7 @@ struct CullingExample {
     frustum_primitive: Primitive,
     material_aabb_outside: Material,
     material_aabb_overlapping: Material,
-    primitives: Vec<Primitive>,
+    primitives: Vec<Type>,
     next_k: u64,
 }
 

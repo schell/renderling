@@ -10,7 +10,7 @@ use spirv_std::{
 use spirv_std::num_traits::Float;
 
 use crate::{
-    camera::CameraDescriptor,
+    camera::shader::CameraDescriptor,
     math::{self, IsVector},
 };
 

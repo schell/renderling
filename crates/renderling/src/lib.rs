@@ -23,7 +23,7 @@
 //! canvas or a texture.
 //!
 //! ```
-//! use renderling::prelude::*;
+//! use renderling::{context::Context, stage::Stage, geometry::Vertex};
 //!
 //! // create a headless context with dimensions 100, 100.
 //! let ctx = futures_lite::future::block_on(Context::headless(100, 100));
@@ -40,12 +40,12 @@
 //! See the [`renderling::context`](context) module documentation for
 //! more info.
 //!
-//! ### Staging
+//! ### Staging resources
 //!
 //! We then create a "stage" to place the camera, geometry, materials and lights.
 //!
 //! ```
-//! # use renderling::prelude::*;
+//! # use renderling::{context::Context, stage::Stage};
 //! # let ctx = futures_lite::future::block_on(Context::headless(100, 100));
 //! let stage: Stage = ctx
 //!     .new_stage()
@@ -54,33 +54,30 @@
 //!     .with_lighting(false);
 //! ```
 //!
-//! The [`Stage`](crate::stage::Stage) is neat in that it allows you to "stage" data
+//! The [`Stage`] is neat in that it allows you to "stage" data
 //! directly onto the GPU. Those values can be modified on the CPU and
-//! synchronization will happen during
-//! [`Stage::render`](crate::stage::Stage::render).
+//! synchronization will happen during [`Stage::render`].
 //!
 //! Use one of the many `Stage::new_*` functions to stage data on the GPU:
-//! * [`Stage::new_camera`](crate::stage::Stage::new_camera)
-//! * [`Stage::new_vertices`](crate::stage::Stage::new_vertices)
-//! * [`Stage::new_indices`](crate::stage::Stage::new_indices)
-//! * [`Stage::new_material`](crate::stage::Stage::new_material)
-//! * [`Stage::new_primitive`](crate::stage::Stage::new_primitive)
+//! * [`Stage::new_camera`]
+//! * [`Stage::new_vertices`]
+//! * [`Stage::new_indices`]
+//! * [`Stage::new_material`]
+//! * [`Stage::new_primitive`]
 //! * ...and more
 //!
 //! In order to render, we need to "stage" a
-//! [`Primitive`](crate::stage::Primitive), which is a bundle of rendering
+//! [`Primitive`], which is a bundle of rendering
 //! resources, roughly representing a singular mesh.
 //!
-//! But first we'll need a list of [`Vertex`](crate::geometry::Vertex) organized
+//! But first we'll need a list of [`Vertex`] organized
 //! as triangles with counter-clockwise winding. Here we'll use the builder
-//! pattern to create a staged [`Primitive`](crate::stage::Primitive) using our
-//! vertices.
+//! pattern to create a staged [`Primitive`] using our vertices.
 //!
-//! We'll also create a [`Camera`](crate::camera::Camera) so we can see the
-//! stage.
+//! We'll also create a [`Camera`] so we can see the stage.
 //!
 //! ```
-//! # use renderling::prelude::*;
+//! # use renderling::{context::Context, geometry::Vertex, stage::Stage};
 //! # let ctx = futures_lite::future::block_on(Context::headless(100, 100));
 //! # let stage: Stage = ctx.new_stage();
 //! let vertices = stage.new_vertices([
@@ -98,25 +95,20 @@
 //!     .new_primitive()
 //!     .with_vertices(vertices);
 //!
-//! let (projection, view) = renderling::camera::default_ortho2d(100.0, 100.0);
-//! let camera = stage.new_camera()
-//!     .with_projection_and_view(projection, view);
+//! let camera = stage.new_camera().with_default_ortho2d(100.0, 100.0);
 //! ```
 //!
 //! ### Rendering
 //!
 //! Finally, we get the next frame from the context with
-//! [`Context::get_next_frame`]. Then we render to it using
-//! [`Stage::render`](crate::stage::Stage::render) and then present the
-//! frame with [`Frame::present`].
+//! [`Context::get_next_frame`]. Then we render to it using [`Stage::render`]
+//! and then present the frame with [`Frame::present`].
 //!
 //! ```
-//! # use renderling::prelude::*;
+//! # use renderling::{context::Context, geometry::Vertex, stage::Stage};
 //! # let ctx = futures_lite::future::block_on(Context::headless(100, 100));
 //! # let stage = ctx.new_stage();
-//! # let (projection, view) = renderling::camera::default_ortho2d(100.0, 100.0);
-//! # let camera = stage.new_camera()
-//! #     .with_projection_and_view(projection, view);
+//! # let camera = stage.new_camera().with_default_ortho2d(100.0, 100.0);
 //! # let vertices = stage.new_vertices([
 //! #     Vertex::default()
 //! #         .with_position([0.0, 0.0, 0.0])
@@ -142,41 +134,53 @@
 //!
 //! ![renderling hello triangle](https://github.com/schell/renderling/blob/main/test_img/cmy_triangle/hdr.png?raw=true)
 //!
-//! ### Modifying
+//! ### Modifying resources
 //!
-//! Later, if we want to modify any of the staged values, we can do so through each resource's
-//! struct, using `set_*`, `modify_*` and `with_*` functions.
+//! Later, if we want to modify any of the staged values, we can do so through
+//! each resource's struct, using `set_*`, `modify_*` and `with_*` functions.
 //!
-//! The changes made will be synchronized to the GPU at the beginning of the next
-//! [`Stage::render`](crate::prelude::Stage::render) function.
+//! The changes made will be synchronized to the GPU at the beginning of the
+//! next [`Stage::render`] function.
 //!
-//! ### Removing primitives
+//! ### Removing and hiding primitives
 //!
-//! To remove primitives from the stage, use
-//! [`Stage::remove_primitive`](crate::stage::Stage::remove_primitive). This
-//! will remove the primitive from rendering entirely.
+//! To remove primitives from the stage, use [`Stage::remove_primitive`].
+//! This will remove the primitive from rendering entirely, but the GPU
+//! resources will not be released until all clones have been dropped.
 //!
-//! If you just want to mark a [`Primitive`](crate::stage::Primitive) invisible, use
-//! [`Primitive::set_visible`](crate::stage::Primitive::set_visible).
+//! If you just want to mark a [`Primitive`] invisible, use
+//! [`Primitive::set_visible`].
 //!
 //! ### Releasing resources
 //!
-//! GPU resources are automatically released when dropped. The data they
-//! occupy on the GPU is reclaimed during calls to
-//! [`Stage::render`](crate::stage::Stage::render). If you would like to
-//! manually reclaim resources without rendering, you can do so with
-//! [`Stage::commit`](crate::stage::Stage::commit).
+//! GPU resources are automatically released when all clones are dropped.
+//! The data they occupy on the GPU is reclaimed during calls to
+//! [`Stage::render`].
+//! If you would like to manually reclaim the resources of fully dropped
+//! resources without rendering, you can do so with
+//! [`Stage::commit`].
 //!
-//! [`Primitive`](crate::stage::Primitive) and
-//! [`AnalyticalLight`](crate::light::AnalyticalLight) are special in that you
-//! must remove them from the [`Stage`](crate::stage::Stage) explicitly, because
-//! clones are made internally.
+//! #### Ensuring resources are released
 //!
-//! Other resources like [`Vertices`](crate::geometry::Vertices),
-//! [`Indices`](crate::geometry::Indices),
-//! [`Transform`](crate::transform::Transform),
-//! [`NestedTransform`](crate::transform::NestedTransform) and others can simply
-//! be dropped.
+//! Keep in mind that many resource functions (like [`Primitive::set_material`]
+//! for example) take another resource as a parameter. In these functions the
+//! parameter resource is cloned and held internally. This is done to keep
+//! resources that are in use from being released. Therefore if you want a
+//! resource to be released, you must ensure that all references to it are
+//! removed. You can use the `remove_*` functions on many resources for this
+//! purpose, like [`Primitive::remove_material`], for example, which would
+//! remove the material from the primitive. After that call, if no other
+//! primitives are using that material and the material is dropped from
+//! user code, the next call to [`Stage::render`] or [`Stage::commit`] will
+//! reclaim the GPU resources of the material to be re-used.
+//!
+//! Other resources like [`Vertices`], [`Indices`], [`Transform`],
+//! [`NestedTransform`] and others can simply be dropped.
+//!
+//! # Next steps
+//!
+//! For further introduction to what renderling can do, take a tour of the
+//! [`Stage`] type, or get started with [the manual](#todo).
 //!
 //! # WARNING
 //!
@@ -184,12 +188,16 @@
 //!
 //! Your mileage may vary, but I hope you get good use out of this library.
 //!
-//! PRs, criticisms and ideas are all very much welcomed [at the repo](https://github.com/schell/renderling).
+//! PRs, criticisms and ideas are all very much welcomed [at the
+//! repo](https://github.com/schell/renderling).
 //!
 //! 😀☕
 #![allow(unexpected_cfgs)]
 #![cfg_attr(target_arch = "spirv", no_std)]
 #![deny(clippy::disallowed_methods)]
+
+#[cfg(doc)]
+use crate::{camera::Camera, geometry::*, primitive::Primitive, stage::Stage, transform::*};
 
 pub mod atlas;
 #[cfg(cpu)]
@@ -206,6 +214,8 @@ pub mod cull;
 pub mod debug;
 pub mod draw;
 pub mod geometry;
+#[cfg(all(cpu, gltf))]
+pub mod gltf;
 pub mod ibl;
 #[cfg(cpu)]
 pub mod internal;
@@ -215,6 +225,7 @@ pub mod linkage;
 pub mod material;
 pub mod math;
 pub mod pbr;
+pub mod primitive;
 pub mod sdf;
 pub mod skybox;
 pub mod stage;
@@ -236,8 +247,6 @@ pub mod prelude {
     //! A prelude, meant to be glob-imported.
 
     pub extern crate glam;
-
-    pub use crate::{camera::*, geometry::*, light::*, stage::*};
 
     #[cfg(cpu)]
     pub use crate::context::*;

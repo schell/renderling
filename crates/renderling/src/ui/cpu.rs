@@ -4,7 +4,7 @@ use core::sync::atomic::AtomicBool;
 use std::sync::{Arc, RwLock};
 
 use crate::{
-    atlas::{AtlasTexture, AtlasTextureDescriptor, TextureAddressMode, TextureModes},
+    atlas::{shader::AtlasTextureDescriptor, AtlasTexture, TextureAddressMode, TextureModes},
     camera::Camera,
     stage::Stage,
     transform::NestedTransform,

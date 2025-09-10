@@ -1,6 +1,7 @@
 //! A build helper for the `renderling` project.
 use clap::{Parser, Subcommand};
 
+mod deps;
 mod server;
 
 #[derive(Subcommand)]
@@ -32,6 +33,8 @@ enum Command {
         #[clap(long)]
         chrome: bool,
     },
+    /// Build the manual
+    BuildManual,
 }
 
 #[derive(Parser)]
@@ -98,6 +101,12 @@ async fn main() {
         }
         Command::WasmServer => {
             server::serve().await;
+        }
+        Command::BuildManual => {
+            log::info!("building manual");
+            if !deps::has_binary("mdbook").await {
+                deps::cargo_install("mdbook").await;
+            }
         }
     }
 }

@@ -3,9 +3,9 @@
 use crate::linkage::ShaderLinkage;
 #[cfg(not(target_arch = "wasm32"))]
 mod target {
-    pub const ENTRY_POINT: &str = "stage::primitive_vertex";
+    pub const ENTRY_POINT: &str = "primitive::shader::primitive_vertex";
     pub fn descriptor() -> wgpu::ShaderModuleDescriptor<'static> {
-        wgpu::include_spirv!("../../shaders/stage-primitive_vertex.spv")
+        wgpu::include_spirv!("../../shaders/primitive-shader-primitive_vertex.spv")
     }
     pub fn linkage(device: &wgpu::Device) -> super::ShaderLinkage {
         log::debug!("creating native linkage for {}", "primitive_vertex");
@@ -17,9 +17,9 @@ mod target {
 }
 #[cfg(target_arch = "wasm32")]
 mod target {
-    pub const ENTRY_POINT: &str = "stageprimitive_vertex";
+    pub const ENTRY_POINT: &str = "primitiveshaderprimitive_vertex";
     pub fn descriptor() -> wgpu::ShaderModuleDescriptor<'static> {
-        wgpu::include_wgsl!("../../shaders/stage-primitive_vertex.wgsl")
+        wgpu::include_wgsl!("../../shaders/primitive-shader-primitive_vertex.wgsl")
     }
     pub fn linkage(device: &wgpu::Device) -> super::ShaderLinkage {
         log::debug!("creating web linkage for {}", "primitive_vertex");

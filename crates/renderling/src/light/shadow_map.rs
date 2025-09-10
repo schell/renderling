@@ -12,17 +12,25 @@ use glam::{Mat4, UVec2};
 use snafu::ResultExt;
 
 use crate::{
-    atlas::{AtlasBlittingOperation, AtlasImage, AtlasTexture, AtlasTextureDescriptor},
+    atlas::{shader::AtlasTextureDescriptor, AtlasBlittingOperation, AtlasImage, AtlasTexture},
     bindgroup::ManagedBindGroup,
     light::{IsLight, Light},
-    stage::Primitive,
+    primitive::Primitive,
 };
 
-use super::{AnalyticalLight, Lighting, LightingError, PollSnafu, ShadowMapDescriptor};
+use super::{
+    shader::{LightStyle, ShadowMapDescriptor},
+    AnalyticalLight, Lighting, LightingError, PollSnafu,
+};
 
-/// A depth map rendering of the scene from a light's point of view.
+/// Projects shadows from a single light source for specific objects.
 ///
-/// Used to project shadows from one light source for specific objects.
+/// A `ShadowMap` is essentially a depth map rendering of the scene from one
+/// light's point of view. We use this rendering of the scene to determine if
+/// an object lies in shadow.
+///
+/// To create a new [`ShadowMap`], use
+/// [`Stage::new_shadow_map`](crate::stage::Stage::new_shadow_map).
 #[derive(Clone)]
 pub struct ShadowMap {
     /// Last time the stage slab was bound.
@@ -175,7 +183,7 @@ impl ShadowMap {
         Light: From<T>,
     {
         let stage_slab_buffer = lighting.geometry_slab_buffer.read().unwrap();
-        let is_point_light = analytical_light_bundle.style() == super::LightStyle::Point;
+        let is_point_light = analytical_light_bundle.style() == LightStyle::Point;
         let count = if is_point_light { 6 } else { 1 };
         let atlas = &lighting.shadow_map_atlas;
         let image = AtlasImage::new(size, crate::atlas::AtlasImageFormat::R32FLOAT);
@@ -374,9 +382,9 @@ impl ShadowMap {
 #[cfg(test)]
 #[allow(clippy::unused_enumerate_index)]
 mod test {
-    use crate::test::BlockOnFuture;
+    use glam::{UVec2, Vec3};
 
-    use super::super::*;
+    use crate::test::BlockOnFuture;
 
     #[test]
     fn shadow_mapping_just_cuboid() {

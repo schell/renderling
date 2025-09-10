@@ -11,7 +11,7 @@ use snafu::{OptionExt, Snafu};
 
 use crate::{bindgroup::ManagedBindGroup, texture::Texture};
 
-use super::DepthPyramidDescriptor;
+use super::shader::DepthPyramidDescriptor;
 
 #[derive(Debug, Snafu)]
 pub enum CullingError {
@@ -673,8 +673,14 @@ mod test {
     use std::collections::HashMap;
 
     use crate::{
-        bvol::BoundingSphere, cull::DepthPyramidDescriptor, draw::DrawIndirectArgs,
-        geometry::Geometry, math::hex_to_vec4, prelude::*, test::BlockOnFuture,
+        bvol::BoundingSphere,
+        cull::shader::DepthPyramidDescriptor,
+        draw::DrawIndirectArgs,
+        geometry::{Geometry, Vertex},
+        math::hex_to_vec4,
+        prelude::*,
+        primitive::shader::PrimitiveDescriptor,
+        test::BlockOnFuture,
     };
     use crabslab::{Array, GrowableSlab, Id, Slab};
     use glam::{Mat4, Quat, UVec2, UVec3, Vec2, Vec3, Vec4};
@@ -995,7 +1001,7 @@ mod test {
             }
             log::info!("");
             log::info!("name: {name}");
-            crate::cull::compute_culling(
+            crate::cull::shader::compute_culling(
                 &stage_slab,
                 &depth_pyramid_slab,
                 args,

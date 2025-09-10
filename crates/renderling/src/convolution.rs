@@ -12,7 +12,7 @@ use spirv_std::{
 #[allow(unused_imports)]
 use spirv_std::num_traits::Float;
 
-use crate::{camera::CameraDescriptor, math::IsVector};
+use crate::{camera::shader::CameraDescriptor, math::IsVector};
 
 // Allow manual bit rotation because this code is `no_std`.
 #[allow(clippy::manual_rotate)]
