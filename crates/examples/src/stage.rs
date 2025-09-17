@@ -2,6 +2,8 @@
 
 #[tokio::test]
 async fn manual_stage() {
+    env_logger::init();
+
     // ANCHOR: creation
     use renderling::{context::Context, glam::Vec4, stage::Stage};
 
@@ -63,7 +65,7 @@ async fn manual_stage() {
     // ANCHOR_END: material
 
     // ANCHOR: prim
-    let _prim = stage
+    let prim = stage
         .new_primitive()
         .with_vertices(&vertices)
         .with_material(&material);
@@ -83,4 +85,24 @@ async fn manual_stage() {
     img.save("stage-example.png").unwrap();
     frame.present();
     // ANCHOR_END: render
+
+    // ANCHOR: committed_size_bytes
+    let bytes_committed = stage.used_gpu_buffer_byte_size();
+    println!("bytes_committed: {bytes_committed}");
+    // ANCHOR_END: committed_size_bytes
+
+    // ANCHOR: removal
+    let staged_prim_count = stage.remove_primitive(&prim);
+    assert_eq!(0, staged_prim_count);
+    drop(vertices);
+    drop(material);
+    drop(prim);
+    // ANCHOR_END: removal
+
+    let frame = ctx.get_next_frame().unwrap();
+    stage.render(&frame.view());
+
+    let img = frame.read_image().await.unwrap();
+    img.save("stage-example-gone.png").unwrap();
+    frame.present();
 }

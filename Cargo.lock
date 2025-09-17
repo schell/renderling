@@ -833,9 +833,9 @@ dependencies = [
 
 [[package]]
 name = "craballoc"
-version = "0.3.0"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3c9d96bb4eed7f67b467d045c9563040dd5101b359bc60c9d355d3bb9ea858d1"
+checksum = "6042c2cfdfce510235f88fea69e263ab3d3a1780f4a645fbddca2adf3af8d6bc"
 dependencies = [
  "async-channel 1.9.0",
  "bytemuck",
@@ -1179,6 +1179,7 @@ name = "examples"
 version = "0.1.0"
 dependencies = [
  "doc-comment",
+ "env_logger",
  "futures-lite 1.13.0",
  "renderling",
  "tokio",

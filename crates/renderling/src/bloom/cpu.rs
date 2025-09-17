@@ -470,6 +470,10 @@ impl Bloom {
         }
     }
 
+    pub(crate) fn slab_allocator(&self) -> &SlabAllocator<WgpuRuntime> {
+        &self.slab
+    }
+
     pub fn set_mix_strength(&self, strength: f32) {
         self.mix_strength.set(strength);
     }

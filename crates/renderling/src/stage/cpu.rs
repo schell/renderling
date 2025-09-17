@@ -739,6 +739,30 @@ impl Stage {
         &self.runtime().queue
     }
 
+    /// Sum the byte size of all used GPU memory.
+    ///
+    /// Adds together the byte size of all underlying slab buffers.
+    ///
+    /// ## Note
+    /// This does not take into consideration staged data that has not yet
+    /// been committed with either [`Stage::commit`] or [`Stage::render`].
+    pub fn used_gpu_buffer_byte_size(&self) -> usize {
+        let num_u32s = self.geometry.slab_allocator().len()
+            + self.lighting.slab_allocator().len()
+            + self.materials.slab_allocator().len()
+            + self.bloom.slab_allocator().len()
+            + self.tonemapping.slab_allocator().len()
+            + self
+                .draw_calls
+                .read()
+                .unwrap()
+                .drawing_strategy()
+                .as_indirect()
+                .map(|draws| draws.slab_allocator().len())
+                .unwrap_or_default();
+        4 * num_u32s
+    }
+
     pub fn hdr_texture(&self) -> impl Deref<Target = crate::texture::Texture> + '_ {
         self.hdr_texture.read().unwrap()
     }
@@ -1338,23 +1362,27 @@ impl Stage {
         (pipeline, bindgroup)
     }
 
-    /// Adds a renderlet to the internal list of renderlets to be drawn each
+    /// Adds a primitive to the internal list of renderlets to be drawn each
     /// frame.
+    ///
+    /// Returns the number of primitives added.
     ///
     /// If you drop the renderlet and no other references are kept, it will be
     /// removed automatically from the internal list and will cease to be
     /// drawn each frame.
-    pub fn add_primitive(&self, renderlet: &Primitive) {
+    pub fn add_primitive(&self, renderlet: &Primitive) -> usize {
         // UNWRAP: if we can't acquire the lock we want to panic.
         let mut draws = self.draw_calls.write().unwrap();
-        draws.add_primitive(renderlet);
+        draws.add_primitive(renderlet)
     }
 
-    /// Erase the given renderlet from the internal list of renderlets to be
+    /// Erase the given primitive from the internal list of primitives to be
     /// drawn each frame.
-    pub fn remove_primitive(&self, renderlet: &Primitive) {
+    ///
+    /// Returns the number of primitives added.
+    pub fn remove_primitive(&self, renderlet: &Primitive) -> usize {
         let mut draws = self.draw_calls.write().unwrap();
-        draws.remove_primitive(renderlet);
+        draws.remove_primitive(renderlet)
     }
 
     /// Sort the drawing order of renderlets.

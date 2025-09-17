@@ -145,7 +145,34 @@ so we can see it here.
 
 ![image of a unit cube with colored vertices](assets/stage-example.png)
 
-And there you have it!
+And there you have it! We've rendered a nice cube.
+
+## Removing resources
+
+To remove resources from the stage we can usually just `Drop` them from all
+scopes. There are a few types that require extra work to remove, though.
+
+[`Primitive`]s must be manually removed with [`Stage::remove_primitive`],
+which removes the primitive from all internal lists (like the list of draw calls).
+
+Lights must also be removed from the stage for similar reasons.
+
+Now we'll run through removing the cube primitive, but first let's see how many
+bytes we've committed to the GPU through the stage:
+
+```rust,ignore
+{{#include ../../crates/examples/src/stage.rs:committed_size_bytes}}
+```
+
+As of this writing, these lines print out `8296`, or roughly 8k bytes.
+That may seem like a lot for one cube, but keep in mind that is a count of
+all bytes in all buffers, including any internal machinery.
+
+Now let's remove the cube primitive, drop the other resources, and render again:
+
+```rust,ignore
+{{#include ../../crates/examples/src/stage.rs:removal}}
+```
 
 [`Stage`]: {{DOCS_URL}}/renderling/stage/struct.Stage.html
 [`Stage::new_camera`]: {{DOCS_URL}}/renderling/stage/struct.Stage.html#method.new_camera

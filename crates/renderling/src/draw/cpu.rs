@@ -45,6 +45,10 @@ impl IndirectDraws {
         }
     }
 
+    pub(crate) fn slab_allocator(&self) -> &SlabAllocator<WgpuRuntime> {
+        &self.slab
+    }
+
     fn invalidate(&mut self) {
         if !self.draws.is_empty() {
             log::trace!("draining indirect draws after invalidation");
@@ -91,8 +95,7 @@ pub(crate) struct DrawingStrategy {
 }
 
 impl DrawingStrategy {
-    #[cfg(test)]
-    pub fn as_indirect(&self) -> Option<&IndirectDraws> {
+    pub(crate) fn as_indirect(&self) -> Option<&IndirectDraws> {
         self.indirect.as_ref()
     }
 }
@@ -144,6 +147,10 @@ impl DrawCalls {
                 },
             },
         }
+    }
+
+    pub(crate) fn drawing_strategy(&self) -> &DrawingStrategy {
+        &self.drawing_strategy
     }
 
     /// Returns whether compute culling is available.
