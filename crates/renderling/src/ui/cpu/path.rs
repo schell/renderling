@@ -505,13 +505,13 @@ impl UiPathBuilder {
 #[cfg(test)]
 mod test {
     use crate::{
+        context::Context,
         math::hex_to_vec4,
         test::BlockOnFuture,
         ui::{
             test::{cute_beach_palette, Colors},
             Ui,
         },
-        Context,
     };
     use glam::Vec2;
 

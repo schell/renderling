@@ -4,15 +4,14 @@ use core::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 use craballoc::prelude::*;
 use crabslab::Id;
 use glam::{Mat4, UVec2, Vec4};
-use snafu::Snafu;
+use snafu::{ResultExt, Snafu};
 use std::sync::{atomic::AtomicBool, Arc, Mutex, RwLock};
 
 use crate::atlas::AtlasTexture;
 use crate::camera::Camera;
 use crate::geometry::{shader::GeometryDescriptor, MorphTarget, Vertex};
-use crate::gltf::GltfDocument;
 #[cfg(gltf)]
-use crate::gltf::StageGltfError;
+use crate::gltf::GltfDocument;
 use crate::light::{DirectionalLight, IsLight, Light, PointLight, SpotLight};
 use crate::material::Material;
 use crate::primitive::Primitive;
@@ -440,7 +439,12 @@ impl Stage {
         &self,
         path: impl AsRef<std::path::Path>,
     ) -> Result<GltfDocument, StageError> {
-        let (document, buffers, images) = gltf::import(path).map_err(StageGltfError::from)?;
+        use snafu::ResultExt;
+
+        let (document, buffers, images) =
+            gltf::import(&path).with_context(|_| crate::gltf::GltfSnafu {
+                path: Some(path.as_ref().to_path_buf()),
+            })?;
         GltfDocument::from_gltf(self, &document, buffers, images)
     }
 
@@ -449,7 +453,7 @@ impl Stage {
         bytes: impl AsRef<[u8]>,
     ) -> Result<GltfDocument, StageError> {
         let (document, buffers, images) =
-            gltf::import_slice(bytes).map_err(StageGltfError::from)?;
+            gltf::import_slice(bytes).context(crate::gltf::GltfSnafu { path: None })?;
         GltfDocument::from_gltf(self, &document, buffers, images)
     }
 }
@@ -930,7 +934,7 @@ impl Stage {
     }
 
     /// Create a new stage.
-    pub fn new(ctx: &crate::Context) -> Self {
+    pub fn new(ctx: &crate::context::Context) -> Self {
         let runtime = ctx.runtime();
         let device = &runtime.device;
         let resolution @ UVec2 { x: w, y: h } = ctx.get_size();
@@ -1502,10 +1506,10 @@ mod test {
     use glam::{Mat4, Vec2, Vec3, Vec4};
 
     use crate::{
+        context::Context,
         geometry::{shader::GeometryDescriptor, Geometry, Vertex},
         test::BlockOnFuture,
         transform::NestedTransform,
-        Context,
     };
 
     #[test]

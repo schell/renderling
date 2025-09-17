@@ -701,7 +701,7 @@ impl Bloom {
 mod test {
     use glam::Vec3;
 
-    use crate::{test::BlockOnFuture, Context};
+    use crate::{context::Context, test::BlockOnFuture};
 
     use super::*;
 

@@ -764,7 +764,7 @@ impl Animator {
 
 #[cfg(test)]
 mod test {
-    use crate::{gltf::Animator, test::BlockOnFuture, Context};
+    use crate::{context::Context, gltf::Animator, test::BlockOnFuture};
     use glam::Vec3;
 
     #[test]

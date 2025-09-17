@@ -1,0 +1,10 @@
+[package]
+name = "examples"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+doc-comment = "0.3"
+futures-lite.workspace = true
+renderling = { path = "../renderling" }
+tokio = { workspace = true, features = ["full"] }

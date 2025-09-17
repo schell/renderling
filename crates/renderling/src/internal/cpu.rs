@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use snafu::{OptionExt, ResultExt};
 
-use crate::{
+use crate::context::{
     CannotCreateAdaptorSnafu, CannotRequestDeviceSnafu, ContextError, IncompatibleSurfaceSnafu,
     RenderTarget, RenderTargetInner,
 };

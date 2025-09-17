@@ -1159,7 +1159,7 @@ impl CopiedTextureBuffer {
 
 #[cfg(test)]
 mod test {
-    use crate::{test::BlockOnFuture, texture::CopiedTextureBuffer, Context};
+    use crate::{context::Context, test::BlockOnFuture, texture::CopiedTextureBuffer};
 
     use super::Texture;
 

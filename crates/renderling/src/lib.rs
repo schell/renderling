@@ -240,17 +240,7 @@ pub mod types;
 #[cfg(feature = "ui")]
 pub mod ui;
 
-#[cfg(cpu)]
-pub use context::*;
-
-pub mod prelude {
-    //! A prelude, meant to be glob-imported.
-
-    pub extern crate glam;
-
-    #[cfg(cpu)]
-    pub use crate::context::*;
-}
+pub extern crate glam;
 
 #[macro_export]
 /// A wrapper around `std::println` that is a noop on the GPU.
@@ -266,7 +256,7 @@ macro_rules! println {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::{atlas::AtlasImage, geometry::Vertex};
+    use crate::{atlas::AtlasImage, context::Context, geometry::Vertex};
 
     use glam::{Mat3, Mat4, Quat, UVec2, Vec2, Vec3, Vec4};
     use img_diff::DiffCfg;

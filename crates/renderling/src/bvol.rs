@@ -599,7 +599,7 @@ impl BVol for Aabb {
 mod test {
     use glam::{Mat4, Quat};
 
-    use crate::{geometry::Vertex, test::BlockOnFuture, Context};
+    use crate::{context::Context, geometry::Vertex, test::BlockOnFuture};
 
     use super::*;
 

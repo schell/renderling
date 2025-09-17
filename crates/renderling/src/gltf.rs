@@ -33,8 +33,19 @@ pub use anime::*;
 
 #[derive(Debug, Snafu)]
 pub enum StageGltfError {
-    #[snafu(display("{source}"))]
-    Gltf { source: gltf::Error },
+    #[snafu(
+        display(
+            "GLTF error with '{}': {source}",
+            path
+                .as_ref()
+                .map(|p| p.display().to_string())
+                .unwrap_or("<bytes>".to_string())),
+        visibility(pub(crate))
+    )]
+    Gltf {
+        source: gltf::Error,
+        path: Option<std::path::PathBuf>,
+    },
 
     #[snafu(display("{source}"))]
     Atlas { source: crate::atlas::AtlasError },
@@ -89,12 +100,6 @@ pub enum StageGltfError {
 
     #[snafu(display("{source}"))]
     Animation { source: anime::AnimationError },
-}
-
-impl From<gltf::Error> for StageGltfError {
-    fn from(source: gltf::Error) -> Self {
-        Self::Gltf { source }
-    }
 }
 
 impl From<AtlasError> for StageGltfError {
@@ -1269,7 +1274,7 @@ where
 
 #[cfg(test)]
 mod test {
-    use crate::{geometry::Vertex, test::BlockOnFuture, Context};
+    use crate::{context::Context, geometry::Vertex, test::BlockOnFuture};
     use glam::{Vec3, Vec4};
 
     #[test]

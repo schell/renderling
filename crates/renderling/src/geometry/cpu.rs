@@ -21,8 +21,20 @@ use crate::{
 
 /// A contiguous array of vertices, staged on the GPU.
 ///
-/// The type variable `Ct` denotes whether the dta lives on the GPU only, or on
-/// the CPU and the GPU.
+/// The type variable `Ct` denotes whether the staged data lives on the GPU
+/// only, or on the CPU and the GPU.
+///
+/// # Note
+/// The amount of data staged in `Vertices` can potentially be very large, and
+/// it is common to unload the data from the CPU with
+/// [`Vertices::into_gpu_only`].
+///
+/// The only reason to keep data on the CPU is if it needs to be inspected and
+/// modified _in place_. This type of modification can be done with
+/// [`Vertices::modify_vertex`].
+///
+/// After unloading it is still possible to _replace_ a [`Vertex`] at a
+/// specific index using [`Vertices::set_vertex`].
 pub struct Vertices<Ct: IsContainer = GpuCpuArray> {
     inner: Ct::Container<Vertex>,
 }
@@ -93,7 +105,7 @@ impl Vertices {
     }
 
     /// Returns a [`Vertex`] at a specific index, if any.
-    pub fn get(&self, index: usize) -> Option<Vertex> {
+    pub fn get_vertex(&self, index: usize) -> Option<Vertex> {
         self.inner.get(index)
     }
 
@@ -102,12 +114,13 @@ impl Vertices {
         self.inner.get_vec()
     }
 
-    /// Set the [`Vertex`] at the given index to the given value, if the item at
-    /// the index exists.
-    ///
-    /// Returns the previous value, if any.
-    pub fn set_item(&self, index: usize, value: Vertex) -> Option<Vertex> {
-        self.inner.set_item(index, value)
+    /// Modify a vertex at a specific index, if it exists.
+    pub fn modify_vertex<T: 'static>(
+        &self,
+        index: usize,
+        f: impl FnOnce(&mut Vertex) -> T,
+    ) -> Option<T> {
+        self.inner.modify(index, f)
     }
 }
 
@@ -118,6 +131,14 @@ where
     /// Returns a pointer to the underlying data on the GPU.
     pub fn array(&self) -> Array<Vertex> {
         T::get_pointer(&self.inner)
+    }
+}
+
+impl Vertices<GpuOnlyArray> {
+    /// Set the [`Vertex`] at the given index to the given value, if the item at
+    /// the index exists.
+    pub fn set_vertex(&self, index: usize, value: &Vertex) {
+        self.inner.set_item(index, value)
     }
 }
 

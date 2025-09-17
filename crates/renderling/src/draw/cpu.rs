@@ -7,10 +7,10 @@ use craballoc::{
 use crabslab::Id;
 
 use crate::{
+    context::Context,
     cull::{ComputeCulling, CullingError},
     primitive::{shader::PrimitiveDescriptor, Primitive},
     texture::Texture,
-    Context,
 };
 
 use super::DrawIndirectArgs;

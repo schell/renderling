@@ -269,6 +269,7 @@ mod test {
     use image::GenericImageView;
 
     use crate::{
+        context::Context,
         geometry::Vertex,
         math::{UNIT_INDICES, UNIT_POINTS},
         test::BlockOnFuture,
@@ -281,7 +282,7 @@ mod test {
     fn hand_rolled_cubemap_sampling() {
         let width = 256;
         let height = 256;
-        let ctx = crate::Context::headless(width, height).block();
+        let ctx = Context::headless(width, height).block();
         let stage = ctx
             .new_stage()
             .with_background_color(Vec4::ZERO)

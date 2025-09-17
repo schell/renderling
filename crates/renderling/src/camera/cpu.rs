@@ -46,6 +46,25 @@ impl Camera {
 
     /// Set the camera to a default perspective projection and view based
     /// on the width and height of the viewport.
+    ///
+    /// The default projection and view matrices are defined as:
+    ///
+    /// ```rust
+    /// use glam::*;
+    ///
+    /// let width = 800.0;
+    /// let height = 600.0;
+    /// let aspect = width / height;
+    /// let fovy = core::f32::consts::PI / 4.0;
+    /// let znear = 0.1;
+    /// let zfar = 100.0;
+    /// let projection = Mat4::perspective_rh(fovy, aspect, znear, zfar);
+    /// let eye = Vec3::new(0.0, 12.0, 20.0);
+    /// let target = Vec3::ZERO;
+    /// let up = Vec3::Y;
+    /// let view = Mat4::look_at_rh(eye, target, up);
+    /// assert_eq!(renderling::camera::default_perspective(width, height), (projection, view));
+    /// ```
     pub fn set_default_perspective(&self, width: f32, height: f32) -> &Self {
         self.inner
             .modify(|d| *d = CameraDescriptor::default_perspective(width, height));
@@ -54,6 +73,25 @@ impl Camera {
 
     /// Set the camera to a default perspective projection and view based
     /// on the width and height of the viewport.
+    ///
+    /// The default projection and view matrices are defined as:
+    ///
+    /// ```rust
+    /// use glam::*;
+    ///
+    /// let width = 800.0;
+    /// let height = 600.0;
+    /// let aspect = width / height;
+    /// let fovy = core::f32::consts::PI / 4.0;
+    /// let znear = 0.1;
+    /// let zfar = 100.0;
+    /// let projection = Mat4::perspective_rh(fovy, aspect, znear, zfar);
+    /// let eye = Vec3::new(0.0, 12.0, 20.0);
+    /// let target = Vec3::ZERO;
+    /// let up = Vec3::Y;
+    /// let view = Mat4::look_at_rh(eye, target, up);
+    /// assert_eq!(renderling::camera::default_perspective(width, height), (projection, view));
+    /// ```
     pub fn with_default_perspective(self, width: f32, height: f32) -> Self {
         self.set_default_perspective(width, height);
         self

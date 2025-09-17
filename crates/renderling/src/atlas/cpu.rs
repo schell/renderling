@@ -1006,10 +1006,10 @@ impl AtlasBlitter {
 mod test {
     use crate::{
         atlas::{shader::AtlasTextureDescriptor, TextureAddressMode},
+        context::Context,
         geometry::Vertex,
         material::Materials,
         test::BlockOnFuture,
-        Context,
     };
     use glam::{UVec3, Vec2, Vec3, Vec4};
 

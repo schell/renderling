@@ -331,7 +331,7 @@ impl GlyphCache {
 
 #[cfg(test)]
 mod test {
-    use crate::{test::BlockOnFuture, ui::Ui, Context};
+    use crate::{context::Context, test::BlockOnFuture, ui::Ui};
     use glyph_brush::Section;
 
     use super::*;

@@ -667,18 +667,19 @@ mod test {
     use crate::{
         atlas::AtlasImage,
         geometry::Vertex,
-        prelude::glam::{Vec3, Vec4},
+        glam::{Vec3, Vec4},
         test::BlockOnFuture,
     };
 
     #[test]
+    // TODO: Move this over to a manual example
     // Tests the initial implementation of pbr metallic roughness on an array of
     // spheres with different metallic roughnesses lit by an environment map.
     //
     // see https://learnopengl.com/PBR/Lighting
     fn pbr_metallic_roughness_spheres() {
         let ss = 600;
-        let ctx = crate::Context::headless(ss, ss).block();
+        let ctx = crate::context::Context::headless(ss, ss).block();
         let stage = ctx.new_stage();
 
         let radius = 0.5;

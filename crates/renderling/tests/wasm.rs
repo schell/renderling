@@ -7,7 +7,11 @@ use craballoc::{
 };
 use glam::{Vec3, Vec4};
 use image::DynamicImage;
-use renderling::{geometry::Vertex, prelude::*, texture::CopiedTextureBuffer};
+use renderling::{
+    context::{Context, Frame},
+    geometry::Vertex,
+    texture::CopiedTextureBuffer,
+};
 use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
 use web_sys::wasm_bindgen::prelude::*;
 use wire_types::{Error, PixelType};
@@ -44,14 +48,14 @@ async fn can_write_system_info_artifact() {
 
 #[wasm_bindgen_test]
 async fn can_create_headless_ctx() {
-    let _ctx = renderling::Context::try_new_headless(256, 256, None)
+    let _ctx = Context::try_new_headless(256, 256, None)
         .await
         .unwrap_throw();
 }
 
 #[wasm_bindgen_test]
 async fn stage_creation() {
-    let ctx = renderling::Context::try_new_headless(256, 256, None)
+    let ctx = Context::try_new_headless(256, 256, None)
         .await
         .unwrap_throw();
     let _stage = ctx.new_stage();
@@ -980,10 +984,13 @@ async fn can_clear_background() {
     let stage = ctx
         .new_stage()
         .with_background_color(Vec4::new(1.0, 0.0, 0.0, 1.0));
+    // ANCHOR: manual_context_frame
     let frame = ctx.get_next_frame().unwrap();
     stage.render(&frame.view());
     let seen = frame.read_image().await.unwrap();
     assert_img_eq("clear.png", seen).await;
+    frame.present();
+    // ANCHOR_END: manual_context_frame
 }
 
 // #[wasm_bindgen_test]

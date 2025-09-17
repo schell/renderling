@@ -33,8 +33,58 @@ enum Command {
         #[clap(long)]
         chrome: bool,
     },
-    /// Build the manual
-    BuildManual,
+    /// Perform actions regarding the manual
+    Manual(Manual),
+}
+
+#[derive(Parser)]
+pub struct Manual {
+    /// Whether to skip building the docs
+    #[clap(long)]
+    no_build_docs: bool,
+
+    /// Whether to skip testing the manual
+    #[clap(long)]
+    no_test: bool,
+
+    /// Serve the manual instead of simply building it
+    #[clap(long)]
+    serve: bool,
+}
+
+impl Manual {
+    async fn install_deps() {
+        const DEPS: &[&str] = &["mdbook", "mdbook-environment"];
+        for dep in DEPS {
+            if !deps::has_binary(dep).await {
+                deps::cargo_install(dep).await;
+            }
+        }
+    }
+
+    async fn build_docs() {
+        log::info!("building docs");
+        let mut process = tokio::process::Command::new("cargo")
+            .args(["doc", "-p", "renderling", "--all-features"])
+            .spawn()
+            .unwrap();
+        let status = process.wait().await.unwrap();
+        if !status.success() {
+            panic!("Failed building docs");
+        }
+    }
+
+    async fn test() {
+        log::info!("testing the manual snippets");
+        let mut process = tokio::process::Command::new("cargo")
+            .args(["test", "-p", "test-manual"])
+            .spawn()
+            .unwrap();
+        let status = process.wait().await.unwrap();
+        if !status.success() {
+            panic!("Failed testing manual");
+        }
+    }
 }
 
 #[derive(Parser)]
@@ -102,10 +152,53 @@ async fn main() {
         Command::WasmServer => {
             server::serve().await;
         }
-        Command::BuildManual => {
-            log::info!("building manual");
-            if !deps::has_binary("mdbook").await {
-                deps::cargo_install("mdbook").await;
+        Command::Manual(Manual {
+            no_build_docs,
+            no_test,
+            serve,
+        }) => {
+            log::info!("checking dependencies for the manual");
+            Manual::install_deps().await;
+            if !no_test {
+                Manual::test().await;
+            }
+            if !no_build_docs {
+                Manual::build_docs().await;
+            }
+
+            if serve {
+                log::info!("serving manual");
+
+                // serve the docs in the meantime
+                let _docs_handle = tokio::spawn(server::serve_docs());
+
+                let mut build = tokio::process::Command::new("mdbook")
+                    .arg("serve")
+                    .current_dir(
+                        std::path::PathBuf::from(env!("CARGO_WORKSPACE_DIR")).join("manual"),
+                    )
+                    .env("DOCS_URL", "http://localhost:4000")
+                    .spawn()
+                    .unwrap();
+                let build_status = build.wait().await.unwrap();
+                if !build_status.success() {
+                    log::error!("could not build the manual");
+                }
+            } else {
+                log::info!("building manual");
+
+                let mut build = tokio::process::Command::new("mdbook")
+                    .arg("build")
+                    .env("DOCS_URL", "http://docs.rs/renderling/latest")
+                    .current_dir(
+                        std::path::PathBuf::from(env!("CARGO_WORKSPACE_DIR")).join("manual"),
+                    )
+                    .spawn()
+                    .unwrap();
+                let build_status = build.wait().await.unwrap();
+                if !build_status.success() {
+                    log::error!("could not build the manual");
+                }
             }
         }
     }

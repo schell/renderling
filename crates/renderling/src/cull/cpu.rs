@@ -674,11 +674,11 @@ mod test {
 
     use crate::{
         bvol::BoundingSphere,
+        context::Context,
         cull::shader::DepthPyramidDescriptor,
         draw::DrawIndirectArgs,
         geometry::{Geometry, Vertex},
         math::hex_to_vec4,
-        prelude::*,
         primitive::shader::PrimitiveDescriptor,
         test::BlockOnFuture,
     };

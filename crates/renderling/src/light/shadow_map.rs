@@ -384,13 +384,13 @@ impl ShadowMap {
 mod test {
     use glam::{UVec2, Vec3};
 
-    use crate::test::BlockOnFuture;
+    use crate::{context::Context, test::BlockOnFuture};
 
     #[test]
     fn shadow_mapping_just_cuboid() {
         let w = 800.0;
         let h = 800.0;
-        let ctx = crate::Context::headless(w as u32, h as u32).block();
+        let ctx = Context::headless(w as u32, h as u32).block();
         let stage = ctx
             .new_stage()
             .with_lighting(true)
@@ -444,7 +444,7 @@ mod test {
     fn shadow_mapping_just_cuboid_red_and_blue() {
         let w = 800.0;
         let h = 800.0;
-        let ctx = crate::Context::headless(w as u32, h as u32).block();
+        let ctx = Context::headless(w as u32, h as u32).block();
         let stage = ctx
             .new_stage()
             .with_lighting(true)
@@ -497,7 +497,7 @@ mod test {
     fn shadow_mapping_sanity() {
         let w = 800.0;
         let h = 800.0;
-        let ctx = crate::Context::headless(w as u32, h as u32)
+        let ctx = Context::headless(w as u32, h as u32)
             .block()
             .with_shadow_mapping_atlas_texture_size([1024, 1024, 2]);
         let stage = ctx.new_stage().with_lighting(true);
@@ -584,7 +584,7 @@ mod test {
     fn shadow_mapping_spot_lights() {
         let w = 800.0;
         let h = 800.0;
-        let ctx = crate::Context::headless(w as u32, h as u32).block();
+        let ctx = Context::headless(w as u32, h as u32).block();
         let stage = ctx
             .new_stage()
             .with_lighting(true)
@@ -650,7 +650,7 @@ mod test {
     fn shadow_mapping_point_lights() {
         let w = 800.0;
         let h = 800.0;
-        let ctx = crate::Context::headless(w as u32, h as u32).block();
+        let ctx = Context::headless(w as u32, h as u32).block();
         let stage = ctx
             .new_stage()
             .with_lighting(true)

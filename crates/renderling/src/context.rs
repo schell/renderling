@@ -307,7 +307,7 @@ pub(crate) struct GlobalStageConfig {
 /// texture.
 ///
 /// ```
-/// use renderling::Context;
+/// use renderling::context::Context;
 ///
 /// let ctx = futures_lite::future::block_on(Context::headless(100, 100));
 /// ```

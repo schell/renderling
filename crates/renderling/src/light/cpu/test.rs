@@ -8,6 +8,7 @@ use crate::{
     bvol::BoundingBox,
     camera::Camera,
     color::linear_xfer_vec4,
+    context::Context,
     geometry::Vertex,
     light::{shader::SpotLightCalculation, LightTiling, LightTilingConfig},
     math::GpuRng,
@@ -85,7 +86,7 @@ fn spot_one_calc() {
 fn spot_one_frame() {
     let m = 32.0;
     let (w, h) = (16.0f32 * m, 9.0 * m);
-    let ctx = crate::Context::headless(w as u32, h as u32).block();
+    let ctx = Context::headless(w as u32, h as u32).block();
     let stage = ctx.new_stage().with_msaa_sample_count(4);
     let doc = stage
         .load_gltf_document_from_path(
@@ -115,7 +116,7 @@ fn spot_one_frame() {
 fn spot_lights() {
     let w = 800.0;
     let h = 800.0;
-    let ctx = crate::Context::headless(w as u32, h as u32).block();
+    let ctx = Context::headless(w as u32, h as u32).block();
     let stage = ctx
         .new_stage()
         .with_lighting(true)
@@ -149,7 +150,7 @@ fn light_tiling_light_bounds() {
     let magnification = 8;
     let w = 16.0 * 2.0f32.powi(magnification);
     let h = 9.0 * 2.0f32.powi(magnification);
-    let ctx = crate::Context::headless(w as u32, h as u32).block();
+    let ctx = Context::headless(w as u32, h as u32).block();
     let stage = ctx.new_stage().with_msaa_sample_count(4);
     let doc = stage
         .load_gltf_document_from_path(
@@ -317,7 +318,7 @@ fn clear_tiles_sanity() {
     let _ = env_logger::builder().is_test(true).try_init();
     let s = 256;
     let depth_texture_size = UVec2::splat(s);
-    let ctx = crate::Context::headless(s, s).block();
+    let ctx = Context::headless(s, s).block();
     let stage = ctx.new_stage();
     let lighting: &Lighting = stage.as_ref();
     let tiling_config = LightTilingConfig::default();
@@ -388,7 +389,7 @@ fn min_max_depth_sanity() {
     let _ = env_logger::builder().is_test(true).try_init();
     let s = 256;
     let depth_texture_size = UVec2::splat(s);
-    let ctx = crate::Context::headless(s, s).block();
+    let ctx = Context::headless(s, s).block();
     let stage = ctx.new_stage();
     let _doc = stage
         .load_gltf_document_from_path(
@@ -440,7 +441,7 @@ fn light_bins_sanity() {
     let _ = env_logger::builder().is_test(true).try_init();
     let s = 256;
     let depth_texture_size = UVec2::splat(s);
-    let ctx = crate::Context::headless(s, s).block();
+    let ctx = Context::headless(s, s).block();
     let stage = ctx.new_stage();
     let doc = stage
         .load_gltf_document_from_path(
@@ -510,7 +511,7 @@ fn light_bins_sanity() {
 // Ensures point lights are being binned properly.
 #[test]
 fn light_bins_point() {
-    let ctx = crate::Context::headless(256, 256).block();
+    let ctx = Context::headless(256, 256).block();
     let stage = ctx
         .new_stage()
         .with_msaa_sample_count(1)
@@ -578,7 +579,7 @@ fn tiling_e2e_sanity_with(
         minimum_illuminance: {minimum_illuminance}"
     );
     let size = size();
-    let ctx = crate::Context::headless(size.x, size.y).block();
+    let ctx = Context::headless(size.x, size.y).block();
     let stage = ctx
         .new_stage()
         .with_bloom(true)
@@ -750,7 +751,7 @@ fn tiling_e2e_sanity() {
     }
 }
 
-fn snapshot(ctx: &crate::Context, stage: &Stage, path: &str, save: bool) {
+fn snapshot(ctx: &crate::context::Context, stage: &Stage, path: &str, save: bool) {
     let frame = ctx.get_next_frame().unwrap();
     let start = std::time::Instant::now();
     stage.render(&frame.view());
@@ -918,7 +919,7 @@ mod stats {
 /// In other words, light w/ nested transform is the same as light with
 /// that same transform pre-applied.
 fn pedestal() {
-    let ctx = crate::Context::headless(256, 256).block();
+    let ctx = crate::context::Context::headless(256, 256).block();
     let stage = ctx
         .new_stage()
         .with_lighting(false)

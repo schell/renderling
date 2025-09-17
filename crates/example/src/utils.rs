@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use renderling::Context;
+use renderling::context::Context;
 use winit::monitor::MonitorHandle;
 
 pub trait TestAppHandler: winit::application::ApplicationHandler {

@@ -6,9 +6,9 @@ use std::sync::{Arc, RwLock};
 use crate::{
     atlas::{shader::AtlasTextureDescriptor, AtlasTexture, TextureAddressMode, TextureModes},
     camera::Camera,
+    context::Context,
     stage::Stage,
     transform::NestedTransform,
-    Context,
 };
 use crabslab::Id;
 use glam::{Quat, UVec2, Vec2, Vec3Swizzles, Vec4};
@@ -344,7 +344,7 @@ impl Ui {
 
 #[cfg(test)]
 pub(crate) mod test {
-    use crate::{color::rgb_hex_color, prelude::glam::Vec4};
+    use crate::{color::rgb_hex_color, glam::Vec4};
 
     pub struct Colors<const N: usize>(std::iter::Cycle<std::array::IntoIter<Vec4, N>>);
 

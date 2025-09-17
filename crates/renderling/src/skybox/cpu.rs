@@ -651,7 +651,7 @@ mod test {
     use glam::Vec3;
 
     use super::*;
-    use crate::{test::BlockOnFuture, texture::CopiedTextureBuffer, Context};
+    use crate::{context::Context, test::BlockOnFuture, texture::CopiedTextureBuffer};
 
     #[test]
     fn hdr_skybox_scene() {

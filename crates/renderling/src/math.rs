@@ -1,11 +1,10 @@
 //! Mathematical helper types and functions.
 //!
-//! Primarily this module re-exports types from `glam`. It also adds
-//! some traits to help using `glam` types on the GPU without panicking,
-//! as well as a few traits to aid in writing generic shader code that can be
-//! run on the CPU.
+//! Primarily this module adds some traits to help using `glam` types on the GPU
+//! without panicking, as well as a few traits to aid in writing generic shader
+//! code that can be run on the CPU.
 //!
-//! Lastly, it provides some constant geometry used in many shaders.
+//! Lastly, it provides some common geometry and constants used in many shaders.
 use core::ops::Mul;
 use spirv_std::{
     image::{sample_with, Cubemap, Image2d, Image2dArray, ImageWithMethods},
