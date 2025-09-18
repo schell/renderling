@@ -3,9 +3,9 @@
 use crate::linkage::ShaderLinkage;
 #[cfg(not(target_arch = "wasm32"))]
 mod target {
-    pub const ENTRY_POINT: &str = "light::light_tiling_clear_tiles";
+    pub const ENTRY_POINT: &str = "light::shader::light_tiling_clear_tiles";
     pub fn descriptor() -> wgpu::ShaderModuleDescriptor<'static> {
-        wgpu::include_spirv!("../../shaders/light-light_tiling_clear_tiles.spv")
+        wgpu::include_spirv!("../../shaders/light-shader-light_tiling_clear_tiles.spv")
     }
     pub fn linkage(device: &wgpu::Device) -> super::ShaderLinkage {
         log::debug!("creating native linkage for {}", "light_tiling_clear_tiles");
@@ -17,9 +17,9 @@ mod target {
 }
 #[cfg(target_arch = "wasm32")]
 mod target {
-    pub const ENTRY_POINT: &str = "lightlight_tiling_clear_tiles";
+    pub const ENTRY_POINT: &str = "lightshaderlight_tiling_clear_tiles";
     pub fn descriptor() -> wgpu::ShaderModuleDescriptor<'static> {
-        wgpu::include_wgsl!("../../shaders/light-light_tiling_clear_tiles.wgsl")
+        wgpu::include_wgsl!("../../shaders/light-shader-light_tiling_clear_tiles.wgsl")
     }
     pub fn linkage(device: &wgpu::Device) -> super::ShaderLinkage {
         log::debug!("creating web linkage for {}", "light_tiling_clear_tiles");

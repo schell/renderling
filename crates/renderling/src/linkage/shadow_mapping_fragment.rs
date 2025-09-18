@@ -3,9 +3,9 @@
 use crate::linkage::ShaderLinkage;
 #[cfg(not(target_arch = "wasm32"))]
 mod target {
-    pub const ENTRY_POINT: &str = "light::shadow_mapping_fragment";
+    pub const ENTRY_POINT: &str = "light::shader::shadow_mapping_fragment";
     pub fn descriptor() -> wgpu::ShaderModuleDescriptor<'static> {
-        wgpu::include_spirv!("../../shaders/light-shadow_mapping_fragment.spv")
+        wgpu::include_spirv!("../../shaders/light-shader-shadow_mapping_fragment.spv")
     }
     pub fn linkage(device: &wgpu::Device) -> super::ShaderLinkage {
         log::debug!("creating native linkage for {}", "shadow_mapping_fragment");
@@ -17,9 +17,9 @@ mod target {
 }
 #[cfg(target_arch = "wasm32")]
 mod target {
-    pub const ENTRY_POINT: &str = "lightshadow_mapping_fragment";
+    pub const ENTRY_POINT: &str = "lightshadershadow_mapping_fragment";
     pub fn descriptor() -> wgpu::ShaderModuleDescriptor<'static> {
-        wgpu::include_wgsl!("../../shaders/light-shadow_mapping_fragment.wgsl")
+        wgpu::include_wgsl!("../../shaders/light-shader-shadow_mapping_fragment.wgsl")
     }
     pub fn linkage(device: &wgpu::Device) -> super::ShaderLinkage {
         log::debug!("creating web linkage for {}", "shadow_mapping_fragment");

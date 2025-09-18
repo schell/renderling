@@ -3,9 +3,9 @@
 use crate::linkage::ShaderLinkage;
 #[cfg(not(target_arch = "wasm32"))]
 mod target {
-    pub const ENTRY_POINT: &str = "skybox::skybox_cubemap_fragment";
+    pub const ENTRY_POINT: &str = "skybox::shader::skybox_cubemap_fragment";
     pub fn descriptor() -> wgpu::ShaderModuleDescriptor<'static> {
-        wgpu::include_spirv!("../../shaders/skybox-skybox_cubemap_fragment.spv")
+        wgpu::include_spirv!("../../shaders/skybox-shader-skybox_cubemap_fragment.spv")
     }
     pub fn linkage(device: &wgpu::Device) -> super::ShaderLinkage {
         log::debug!("creating native linkage for {}", "skybox_cubemap_fragment");
@@ -17,9 +17,9 @@ mod target {
 }
 #[cfg(target_arch = "wasm32")]
 mod target {
-    pub const ENTRY_POINT: &str = "skyboxskybox_cubemap_fragment";
+    pub const ENTRY_POINT: &str = "skyboxshaderskybox_cubemap_fragment";
     pub fn descriptor() -> wgpu::ShaderModuleDescriptor<'static> {
-        wgpu::include_wgsl!("../../shaders/skybox-skybox_cubemap_fragment.wgsl")
+        wgpu::include_wgsl!("../../shaders/skybox-shader-skybox_cubemap_fragment.wgsl")
     }
     pub fn linkage(device: &wgpu::Device) -> super::ShaderLinkage {
         log::debug!("creating web linkage for {}", "skybox_cubemap_fragment");
