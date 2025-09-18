@@ -20,7 +20,7 @@ section of our `Cargo.toml`:
 
 ```toml
 [patch.crates-io]
-spirv-std = { git = "https://github.com/rust-gpu/rust-gpu.git", rev = "425328a" }  
+spirv-std = { git = "https://github.com/rust-gpu/rust-gpu.git", rev = "de03e8d" }  
 ```
 
 This is a temporary workaround that will be resolved after the next Rust-GPU

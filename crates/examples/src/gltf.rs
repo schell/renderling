@@ -16,17 +16,16 @@ async fn manual_gltf() {
     let ctx = Context::headless(256, 256).await;
     let stage: Stage = ctx
         .new_stage()
-        .with_background_color(Vec4::new(0.5, 0.5, 0.5, 1.0));
+        .with_background_color(Vec4::new(0.25, 0.25, 0.25, 1.0));
 
     let _camera: Camera = {
         let aspect = 1.0;
         let fovy = core::f32::consts::PI / 4.0;
         let znear = 0.1;
-        let zfar = 1000.0;
+        let zfar = 10.0;
         let projection = Mat4::perspective_rh(fovy, aspect, znear, zfar);
-        let y = 50.0;
-        let eye = Vec3::new(120.0, y, 120.0);
-        let target = Vec3::new(0.0, y, 0.0);
+        let eye = Vec3::new(0.5, 0.5, 0.8);
+        let target = Vec3::new(0.0, 0.3, 0.0);
         let up = Vec3::Y;
         let view = Mat4::look_at_rh(eye, target, up);
 
@@ -38,10 +37,11 @@ async fn manual_gltf() {
 
     // ANCHOR: load
     use renderling::{gltf::GltfDocument, types::GpuOnlyArray};
-    let _model: GltfDocument<GpuOnlyArray> = stage
-        .load_gltf_document_from_path(workspace_dir().join("gltf/Fox.glb"))
+    let model: GltfDocument<GpuOnlyArray> = stage
+        .load_gltf_document_from_path(workspace_dir().join("gltf/marble_bust_1k.glb"))
         .unwrap()
         .into_gpu_only();
+    println!("bounds: {:?}", model.bounding_volume());
     // ANCHOR_END: load
 
     super::cwd_to_manual_assets_dir();

@@ -97,12 +97,11 @@ async fn manual_stage() {
     drop(vertices);
     drop(material);
     drop(prim);
-    // ANCHOR_END: removal
 
     let frame = ctx.get_next_frame().unwrap();
     stage.render(&frame.view());
-
     let img = frame.read_image().await.unwrap();
     img.save("stage-example-gone.png").unwrap();
     frame.present();
+    // ANCHOR_END: removal
 }

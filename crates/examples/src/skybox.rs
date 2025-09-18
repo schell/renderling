@@ -1,12 +1,13 @@
 //! Skybox manual page.
 
+use crate::workspace_dir;
+
 #[tokio::test]
-async fn manual_stage() {
+async fn manual_skybox() {
     // ANCHOR: setup
     use renderling::{
         camera::Camera,
         context::Context,
-        geometry::Vertex,
         glam::Vec4,
         glam::{Mat4, Vec3},
         stage::Stage,
@@ -15,52 +16,39 @@ async fn manual_stage() {
     let ctx = Context::headless(256, 256).await;
     let stage: Stage = ctx
         .new_stage()
-        .with_background_color(Vec4::new(0.5, 0.5, 0.5, 1.0));
+        .with_background_color(Vec4::new(0.25, 0.25, 0.25, 1.0));
 
-    let _camera: Camera = stage
-        .new_camera()
-        .with_default_perspective(256.0, 256.0)
-        .with_view(Mat4::look_at_rh(Vec3::splat(1.5), Vec3::ZERO, Vec3::Y));
+    let _camera: Camera = {
+        let aspect = 1.0;
+        let fovy = core::f32::consts::PI / 4.0;
+        let znear = 0.1;
+        let zfar = 10.0;
+        let projection = Mat4::perspective_rh(fovy, aspect, znear, zfar);
+        let eye = Vec3::new(0.5, 0.5, 0.8);
+        let target = Vec3::new(0.0, 0.3, 0.0);
+        let up = Vec3::Y;
+        let view = Mat4::look_at_rh(eye, target, up);
 
-    let vertices = stage.new_vertices(renderling::math::unit_cube().into_iter().map(
-        |(position, normal)| {
-            Vertex::default()
-                .with_position(position)
-                .with_normal(normal)
-                .with_color({
-                    // The color can vary from vertex to vertex
-                    //
-                    // X axis is green
-                    let g: f32 = position.x + 0.5;
-                    // Y axis is blue
-                    let b: f32 = position.y + 0.5;
-                    // Z is red
-                    let r: f32 = position.z + 0.5;
-                    Vec4::new(r, g, b, 1.0)
-                })
-        },
-    ));
+        stage
+            .new_camera()
+            .with_projection_and_view(projection, view)
+    };
 
-    let material = stage.new_material().with_albedo_factor(Vec4::ONE);
+    use renderling::{gltf::GltfDocument, types::GpuOnlyArray};
+    let model: GltfDocument<GpuOnlyArray> = stage
+        .load_gltf_document_from_path(workspace_dir().join("gltf/marble_bust_1k.glb"))
+        .unwrap()
+        .into_gpu_only();
+    println!("bounds: {:?}", model.bounding_volume());
 
-    let _prim = stage
-        .new_primitive()
-        .with_vertices(&vertices)
-        .with_material(&material);
-    // ANCHOR_END: setup
-
-    // ANCHOR: render_cube
     let frame = ctx.get_next_frame().unwrap();
     stage.render(&frame.view());
     frame.present();
-    // ANCHOR_END: render_cube
-
-    // Excluded from the manual because it's off-topic
-    super::cwd_to_manual_assets_dir();
+    // ANCHOR_END: setup
 
     // ANCHOR: skybox
     let skybox = stage
-        .new_skybox_from_path("qwantani_dusk_2_puresky_1k.hdr")
+        .new_skybox_from_path(workspace_dir().join("img/hdr/helipad.hdr"))
         .unwrap();
     stage.set_skybox(skybox);
     // ANCHOR_END: skybox

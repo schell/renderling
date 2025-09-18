@@ -1,22 +1,24 @@
-# Stage
+# Staging resources 🎭
 
 The [`Stage`] is the most important type in `renderling`.
 It's responsible for staging all your scene's data on the GPU, as well as
 linking all the various effects together and rendering it all.
 
 <!--toc:start-->
-- [Stage](#stage)
-  - [Stage creation](#stage-creation)
-  - [Resource creation](#resource-creation)
-    - [Camera](#camera)
-      - [glam and re-exports](#glam-and-re-exports)
-      - [Creation](#creation)
-    - [Geometry](#geometry)
-    - [Material](#material)
-    - [Primitive](#primitive)
-  - [Rendering](#rendering)
-  - [Results](#results)
+- [Stage creation](#stage-creation)
+- [Resource creation](#resource-creation)
+  - [Camera](#camera)
+    - [glam and re-exports](#glam-and-re-exports)
+    - [Creation](#creation)
+  - [Geometry](#geometry)
+  - [Material](#material)
+  - [Primitive](#primitive)
+- [Rendering](#rendering)
+- [Results](#results)
+- [Removing resources](#removing-resources)
+- [Visibility](#visibility)
 <!--toc:end-->
+
 
 ## Stage creation 
 
@@ -174,10 +176,21 @@ Now let's remove the cube primitive, drop the other resources, and render again:
 {{#include ../../crates/examples/src/stage.rs:removal}}
 ```
 
+![the cube is gone](assets/stage-example-gone.png)
+
+## Visibility
+
+If instead we wanted to keep the resources around but make the [`Primitive`] invisible,
+we could have used [`Primitive::set_visible`].
+
+See the [`Stage`] and [`Primitive`] docs for more info.
+
 [`Stage`]: {{DOCS_URL}}/renderling/stage/struct.Stage.html
 [`Stage::new_camera`]: {{DOCS_URL}}/renderling/stage/struct.Stage.html#method.new_camera
+[`Stage::remove_primitive`]: {{DOCS_URL}}/renderling/stage/struct.Stage.html#method.remove_primitive
 [`Context::new_stage`]: {{DOCS_URL}}/renderling/context/struct.Context.html#method.new_stage
 [`Primitive`]: {{DOCS_URL}}/renderling/primitive/struct.Primitive.html
+[`Primitive::set_visible`]: {{DOCS_URL}}/renderling/primitive/struct.Primitive.html#method.set_visible
 [`Camera`]: {{DOCS_URL}}/renderling/camera/struct.Camera.html
 [`Camera::with_default_perspective`]: {{DOCS_URL}}/renderling/camera/struct.Camera.html#method.with_default_perspective
 [`Vertices`]: {{DOCS_URL}}/renderling/geometry/struct.Vertices.html

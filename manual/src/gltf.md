@@ -1,4 +1,4 @@
-# GLTF
+# Loading GLTF files 📂
 
 `renderling`'s built-in model format is [GLTF](https://www.khronos.org/gltf/), a
 versatile and efficient format for transmitting 3D models. GLTF, which stands
@@ -47,7 +47,7 @@ unload the mesh geometry from the CPU.
 
 ## Result
 
-![a loaded GLTF file, Fox, in shadow](assets/gltf-example-shadow.png)
+![a loaded GLTF file, a marble bust, in shadow](assets/gltf-example-shadow.png)
 
 But wait! It's all in shadow.
 
@@ -63,7 +63,7 @@ For now we'll go with option `1`, as lighting happens in a later section:
 {{#include ../../crates/examples/src/gltf.rs:no_lights}}
 ```
 
-![a loaded GLTF file, Fox, unlit](assets/gltf-example-unlit.png)
+![a loaded GLTF file, a marble bust, unlit](assets/gltf-example-unlit.png)
 
 [`Context`]: {{DOCS_URL}}/renderling/context/struct.Context.html
 [`Stage`]: {{DOCS_URL}}/renderling/stage/struct.Stage.html
