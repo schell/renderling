@@ -204,9 +204,11 @@ impl ShadowMap {
         let atlas_textures_array = lighting
             .light_slab
             .new_array(atlas_textures.iter().map(|t| t.id()));
-        let blitting_op = lighting
-            .shadow_map_update_blitter
-            .new_blitting_operation(atlas, if is_point_light { 6 } else { 1 });
+        let blitting_op = AtlasBlittingOperation::new(
+            &lighting.shadow_map_update_blitter,
+            atlas,
+            if is_point_light { 6 } else { 1 },
+        );
         let light_space_transforms =
             lighting
                 .light_slab

@@ -17,7 +17,7 @@ use crate::{
         TextureModes,
     },
     bindgroup::ManagedBindGroup,
-    texture::{CopiedTextureBuffer, Texture},
+    texture::{self, CopiedTextureBuffer, Texture},
 };
 
 use super::atlas_image::{convert_pixels, AtlasImage};
@@ -41,6 +41,11 @@ pub enum AtlasError {
 
     #[snafu(display("Missing bindgroup {layer}"))]
     MissingBindgroup { layer: u32 },
+
+    #[snafu(display("{source}"))]
+    Texture {
+        source: crate::texture::TextureError,
+    },
 }
 
 /// A staged texture in the texture atlas.
@@ -200,6 +205,8 @@ pub struct Atlas {
     layers: Arc<RwLock<Vec<Layer>>>,
     label: Option<String>,
     descriptor: Hybrid<AtlasDescriptor>,
+    /// Used for user updates into the atlas by blit images into specific frames.
+    blitter: AtlasBlitter,
 }
 
 impl Atlas {
@@ -286,13 +293,18 @@ impl Atlas {
             size: UVec3::new(size.width, size.height, size.depth_or_array_layers),
         });
         let label = label.map(|s| s.to_owned());
-
+        let blitter = AtlasBlitter::new(
+            slab.device(),
+            texture.texture.format(),
+            wgpu::FilterMode::Linear,
+        );
         Atlas {
             slab: slab.clone(),
             layers: Arc::new(RwLock::new(layers)),
-            texture_array: Arc::new(RwLock::new(texture)),
             descriptor,
             label,
+            blitter,
+            texture_array: Arc::new(RwLock::new(texture)),
         }
     }
 
@@ -523,6 +535,107 @@ impl Atlas {
         }
         images
     }
+
+    /// Update the given [`AtlasTexture`] with a [`Texture`](crate::texture::Texture).
+    ///
+    /// This will blit the `Texture` into the frame of the [`Atlas`] pointed to by the
+    /// `AtlasTexture`.
+    ///
+    /// Returns a submission index that can be polled with [`wgpu::Device::poll`].
+    pub fn update_texture(
+        &self,
+        atlas_texture: &AtlasTexture,
+        source_texture: &texture::Texture,
+    ) -> Result<wgpu::SubmissionIndex, AtlasError> {
+        self.update_textures(Some((atlas_texture, source_texture)))
+    }
+
+    /// Update the given [`AtlasTexture`]s with [`Texture`](crate::texture::Texture)s.
+    ///
+    /// This will blit the `Texture` into the frame of the [`Atlas`] pointed to by the
+    /// `AtlasTexture`.
+    ///
+    /// Returns a submission index that can be polled with [`wgpu::Device::poll`].
+    pub fn update_textures<'a>(
+        &self,
+        updates: impl IntoIterator<Item = (&'a AtlasTexture, &'a texture::Texture)>,
+    ) -> Result<wgpu::SubmissionIndex, AtlasError> {
+        let updates = updates.into_iter().collect::<Vec<_>>();
+        let op = AtlasBlittingOperation::new(&self.blitter, &self, updates.len());
+        let runtime = self.slab.runtime();
+        let mut encoder = runtime
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("Atlas::update_texture"),
+            });
+        for (i, (atlas_texture, source_texture)) in updates.into_iter().enumerate() {
+            op.run(
+                &runtime,
+                &mut encoder,
+                source_texture,
+                i as u32,
+                &self,
+                atlas_texture,
+            )?;
+        }
+        Ok(runtime.queue.submit(Some(encoder.finish())))
+    }
+
+    /// Update the given [`AtlasTexture`]s with new data.
+    ///
+    /// This will blit the image data into the frame of the [`Atlas`] pointed to by the
+    /// `AtlasTexture`.
+    ///
+    /// Returns a submission index that can be polled with [`wgpu::Device::poll`].
+    pub fn update_images<'a>(
+        &self,
+        updates: impl IntoIterator<Item = (&'a AtlasTexture, impl Into<AtlasImage>)>,
+    ) -> Result<wgpu::SubmissionIndex, AtlasError> {
+        let (atlas_textures, images): (Vec<_>, Vec<_>) = updates.into_iter().unzip();
+        let mut textures = vec![];
+        for image in images.into_iter() {
+            let image: AtlasImage = image.into();
+            let atlas_format = self.get_texture().texture.format();
+            let bytes = super::atlas_image::convert_pixels(
+                image.pixels,
+                image.format,
+                atlas_format,
+                image.apply_linear_transfer,
+            );
+            let (channels, subpixel_bytes) =
+                texture::wgpu_texture_format_channels_and_subpixel_bytes(atlas_format)
+                    .context(TextureSnafu)?;
+            let texture = texture::Texture::new_with(
+                self.slab.runtime(),
+                Some("atlas-image-update"),
+                Some(wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST),
+                None,
+                atlas_format,
+                channels,
+                subpixel_bytes,
+                image.size.x,
+                image.size.y,
+                1,
+                &bytes,
+            );
+            textures.push(texture);
+        }
+        self.update_textures(atlas_textures.into_iter().zip(textures.iter()))
+    }
+
+    /// Update the given [`AtlasTexture`]s with new data.
+    ///
+    /// This will blit the image data into the frame of the [`Atlas`] pointed to by the
+    /// `AtlasTexture`.
+    ///
+    /// Returns a submission index that can be polled with [`wgpu::Device::poll`].
+    pub fn update_image(
+        &self,
+        atlas_texture: &AtlasTexture,
+        source_image: impl Into<AtlasImage>,
+    ) -> Result<wgpu::SubmissionIndex, AtlasError> {
+        self.update_images(Some((atlas_texture, source_image)))
+    }
 }
 
 fn pack_images<'a>(
@@ -750,6 +863,30 @@ pub struct AtlasBlittingOperation {
 }
 
 impl AtlasBlittingOperation {
+    pub fn new(
+        blitter: &AtlasBlitter,
+        into_atlas: &Atlas,
+        source_layers: usize,
+    ) -> AtlasBlittingOperation {
+        AtlasBlittingOperation {
+            desc: into_atlas
+                .slab
+                .new_value(AtlasBlittingDescriptor::default()),
+            atlas_slab_buffer: Arc::new(Mutex::new(into_atlas.slab.commit())),
+            bindgroups: {
+                let mut bgs = vec![];
+                for _ in 0..source_layers {
+                    bgs.push(ManagedBindGroup::default());
+                }
+                Arc::new(bgs)
+            },
+            pipeline: blitter.pipeline.clone(),
+            sampler: blitter.sampler.clone(),
+            bindgroup_layout: blitter.bind_group_layout.clone(),
+            from_texture_id: Default::default(),
+        }
+    }
+
     /// Copies the data from texture this [`AtlasBlittingOperation`] was created with
     /// into the atlas.
     ///
@@ -760,7 +897,7 @@ impl AtlasBlittingOperation {
         runtime: impl AsRef<WgpuRuntime>,
         encoder: &mut wgpu::CommandEncoder,
         from_texture: &crate::texture::Texture,
-        layer: u32,
+        from_layer: u32,
         to_atlas: &Atlas,
         atlas_texture: &AtlasTexture,
     ) -> Result<(), AtlasError> {
@@ -788,15 +925,15 @@ impl AtlasBlittingOperation {
             .texture
             .create_view(&wgpu::TextureViewDescriptor {
                 label: Some("atlas-blitting"),
-                base_array_layer: layer,
+                base_array_layer: from_layer,
                 array_layer_count: Some(1),
                 dimension: Some(wgpu::TextureViewDimension::D2),
                 ..Default::default()
             });
         let bindgroup = self
             .bindgroups
-            .get(layer as usize)
-            .context(MissingBindgroupSnafu { layer })?
+            .get(from_layer as usize)
+            .context(MissingBindgroupSnafu { layer: from_layer })?
             .get(should_invalidate, || {
                 runtime
                     .device
@@ -874,19 +1011,20 @@ impl AtlasBlitter {
     ///
     /// # Arguments
     /// - `device` - A [`wgpu::Device`]
-    /// - `format` - The [`wgpu::TextureFormat`] of the texture that will be copied to. This has to be renderable.
-    /// - `sample_type` - The [`wgpu::Sampler`] Filtering Mode
+    /// - `format` - The [`wgpu::TextureFormat`] of the atlas being updated.
+    /// - `mag_filter` - The filtering algorithm to use when magnifying.
+    ///   This is used when the input source is smaller than the destination.
     pub fn new(
         device: &wgpu::Device,
         format: wgpu::TextureFormat,
-        sample_type: wgpu::FilterMode,
+        mag_filter: wgpu::FilterMode,
     ) -> Self {
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("atlas-blitter"),
             address_mode_u: wgpu::AddressMode::ClampToEdge,
             address_mode_v: wgpu::AddressMode::ClampToEdge,
             address_mode_w: wgpu::AddressMode::ClampToEdge,
-            mag_filter: sample_type,
+            mag_filter,
             ..Default::default()
         });
 
@@ -908,7 +1046,7 @@ impl AtlasBlitter {
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Texture {
                         sample_type: wgpu::TextureSampleType::Float {
-                            filterable: sample_type == wgpu::FilterMode::Linear,
+                            filterable: mag_filter == wgpu::FilterMode::Linear,
                         },
                         view_dimension: wgpu::TextureViewDimension::D2,
                         multisampled: false,
@@ -918,7 +1056,7 @@ impl AtlasBlitter {
                 wgpu::BindGroupLayoutEntry {
                     binding: 2,
                     visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(if sample_type == wgpu::FilterMode::Linear {
+                    ty: wgpu::BindingType::Sampler(if mag_filter == wgpu::FilterMode::Linear {
                         wgpu::SamplerBindingType::Filtering
                     } else {
                         wgpu::SamplerBindingType::NonFiltering
@@ -974,30 +1112,6 @@ impl AtlasBlitter {
             pipeline: pipeline.into(),
             bind_group_layout: bind_group_layout.into(),
             sampler: sampler.into(),
-        }
-    }
-
-    pub fn new_blitting_operation(
-        &self,
-        into_atlas: &Atlas,
-        layers: usize,
-    ) -> AtlasBlittingOperation {
-        AtlasBlittingOperation {
-            desc: into_atlas
-                .slab
-                .new_value(AtlasBlittingDescriptor::default()),
-            atlas_slab_buffer: Arc::new(Mutex::new(into_atlas.slab.commit())),
-            bindgroups: {
-                let mut bgs = vec![];
-                for _ in 0..layers {
-                    bgs.push(ManagedBindGroup::default());
-                }
-                Arc::new(bgs)
-            },
-            pipeline: self.pipeline.clone(),
-            sampler: self.sampler.clone(),
-            bindgroup_layout: self.bind_group_layout.clone(),
-            from_texture_id: Default::default(),
         }
     }
 }
