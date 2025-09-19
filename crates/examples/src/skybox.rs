@@ -1,6 +1,6 @@
 //! Skybox manual page.
 
-use crate::workspace_dir;
+use crate::{test_output_dir, workspace_dir};
 
 #[tokio::test]
 async fn manual_skybox() {
@@ -60,4 +60,23 @@ async fn manual_skybox() {
     image.save("skybox.png").unwrap();
     frame.present();
     // ANCHOR_END: render_skybox
+    //
+
+    let frame = ctx.get_next_frame().unwrap();
+    renderling::capture_gpu_frame(&ctx, test_output_dir().join("skybox.gputrace"), || {
+        stage.render(&frame.view());
+    });
+    let image = frame.read_image().await.unwrap();
+    image.save("skybox.png").unwrap();
+    frame.present();
+    let frame = ctx.get_next_frame().unwrap();
+    stage.render(&frame.view());
+    let image = frame.read_image().await.unwrap();
+    image.save("skybox.png").unwrap();
+    frame.present();
+    let frame = ctx.get_next_frame().unwrap();
+    stage.render(&frame.view());
+    let image = frame.read_image().await.unwrap();
+    image.save("skybox.png").unwrap();
+    frame.present();
 }

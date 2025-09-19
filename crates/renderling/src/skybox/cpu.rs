@@ -152,7 +152,8 @@ pub(crate) fn create_skybox_render_pipeline(
 /// A clone of a skybox is a reference to the same skybox.
 ///
 /// Only available on the CPU. Not available in shaders.
-// TODO: spilt Skybox into Skybox and IBL components.
+// TODO: move brdf lut into Stage or Context, we only need one, ever
+// TODO: decouple Skybox and IBL
 // Skybox and IBL are different things. Sometimes you want to use a
 // skybox without having it shade things.
 // Also, the brdf_lut doesn't change, so should probably live in `Lighting`

@@ -253,6 +253,55 @@ macro_rules! println {
     }
 }
 
+#[cfg(all(cpu, feature = "test-utils"))]
+#[allow(unused, reason = "Used in debugging on macos")]
+pub fn capture_gpu_frame<T>(
+    ctx: &crate::context::Context,
+    path: impl AsRef<std::path::Path>,
+    f: impl FnOnce() -> T,
+) -> T {
+    let path = path.as_ref();
+    let parent = path.parent().unwrap();
+    std::fs::create_dir_all(parent).unwrap();
+
+    #[cfg(target_os = "macos")]
+    {
+        if path.exists() {
+            log::info!(
+                "deleting {} before writing gpu frame capture",
+                path.display()
+            );
+            std::fs::remove_dir_all(path).unwrap();
+        }
+
+        if std::env::var("METAL_CAPTURE_ENABLED").is_err() {
+            log::error!("Env var METAL_CAPTURE_ENABLED must be set");
+            panic!("missing METAL_CAPTURE_ENABLED=1");
+        }
+
+        let m = metal::CaptureManager::shared();
+        let desc = metal::CaptureDescriptor::new();
+
+        desc.set_destination(metal::MTLCaptureDestination::GpuTraceDocument);
+        desc.set_output_url(path);
+        let maybe_metal_device = unsafe { ctx.get_device().as_hal::<wgpu_core::api::Metal>() };
+        if let Some(metal_device) = maybe_metal_device {
+            desc.set_capture_device(metal_device.raw_device().try_lock().unwrap().as_ref());
+        } else {
+            panic!("not a capturable device")
+        }
+        m.start_capture(&desc).unwrap();
+        let t = f();
+        m.stop_capture();
+        t
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        log::warn!("capturing a GPU frame is only supported on macos");
+        f()
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -264,19 +313,22 @@ mod test {
     use pretty_assertions::assert_eq;
     use stage::Stage;
 
+    pub use renderling_build::{test_output_dir, workspace_dir};
+
     #[cfg_attr(not(target_arch = "wasm32"), ctor::ctor)]
     fn init_logging() {
         let _ = env_logger::builder().is_test(true).try_init();
         log::info!("logging is on");
     }
 
-    pub fn workspace_dir() -> std::path::PathBuf {
-        std::path::PathBuf::from(std::env!("CARGO_WORKSPACE_DIR"))
-    }
-
-    #[allow(dead_code)]
-    pub fn test_output_dir() -> std::path::PathBuf {
-        workspace_dir().join("test_output")
+    #[allow(unused, reason = "Used in debugging on macos")]
+    pub fn capture_gpu_frame<T>(
+        ctx: &Context,
+        path: impl AsRef<std::path::Path>,
+        f: impl FnOnce() -> T,
+    ) -> T {
+        let path = workspace_dir().join("test_output").join(path);
+        super::capture_gpu_frame(ctx, path, f)
     }
 
     /// Marker trait to block on futures in synchronous code.
@@ -313,53 +365,6 @@ mod test {
             .with_color(Vec4::ONE)
             .with_intensity(10.0);
         (sunlight_a.into_generic(), sunlight_b.into_generic())
-    }
-
-    #[allow(unused, reason = "Used in debugging on macos")]
-    pub fn capture_gpu_frame<T>(
-        ctx: &Context,
-        path: impl AsRef<std::path::Path>,
-        f: impl FnOnce() -> T,
-    ) -> T {
-        let path = workspace_dir().join("test_output").join(path);
-        let parent = path.parent().unwrap();
-        std::fs::create_dir_all(parent).unwrap();
-
-        #[cfg(target_os = "macos")]
-        {
-            if path.exists() {
-                log::info!(
-                    "deleting {} before writing gpu frame capture",
-                    path.display()
-                );
-                std::fs::remove_dir_all(&path).unwrap();
-            }
-
-            if std::env::var("METAL_CAPTURE_ENABLED").is_err() {
-                log::error!("Env var METAL_CAPTURE_ENABLED must be set");
-                panic!("missing METAL_CAPTURE_ENABLED=1");
-            }
-
-            let m = metal::CaptureManager::shared();
-            let desc = metal::CaptureDescriptor::new();
-
-            desc.set_destination(metal::MTLCaptureDestination::GpuTraceDocument);
-            desc.set_output_url(path);
-            let maybe_metal_device = unsafe { ctx.get_device().as_hal::<wgpu_core::api::Metal>() };
-            if let Some(metal_device) = maybe_metal_device {
-                desc.set_capture_device(metal_device.raw_device().try_lock().unwrap().as_ref());
-            } else {
-                panic!("not a capturable device")
-            }
-            m.start_capture(&desc).unwrap();
-            let t = f();
-            m.stop_capture();
-            t
-        }
-        #[cfg(not(target_os = "macos"))]
-        {
-            f()
-        }
     }
 
     #[test]

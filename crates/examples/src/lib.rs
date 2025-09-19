@@ -25,8 +25,11 @@ pub fn cwd_to_manual_assets_dir() -> std::path::PathBuf {
 }
 
 pub fn workspace_dir() -> std::path::PathBuf {
-    let current_dir = std::path::PathBuf::from(std::env!("CARGO_WORKSPACE_DIR"));
-    current_dir.canonicalize().unwrap()
+    renderling_build::workspace_dir().canonicalize().unwrap()
+}
+
+pub fn test_output_dir() -> std::path::PathBuf {
+    renderling_build::test_output_dir().canonicalize().unwrap()
 }
 
 pub fn cwd_to_cargo_workspace() -> std::path::PathBuf {

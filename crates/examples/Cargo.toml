@@ -7,5 +7,6 @@ edition = "2024"
 doc-comment = "0.3"
 env_logger.workspace = true
 futures-lite.workspace = true
-renderling = { path = "../renderling" }
+renderling = { path = "../renderling", features = ["test-utils"] }
+renderling_build = { path = "../renderling-build" }
 tokio = { workspace = true, features = ["full"] }

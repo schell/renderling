@@ -1182,6 +1182,7 @@ dependencies = [
  "env_logger",
  "futures-lite 1.13.0",
  "renderling",
+ "renderling_build",
  "tokio",
 ]
 
