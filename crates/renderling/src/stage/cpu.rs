@@ -1367,7 +1367,7 @@ impl Stage {
             let bg = Arc::new(crate::skybox::create_skybox_bindgroup(
                 self.device(),
                 geometry_slab_buffer,
-                &self.skybox.read().unwrap().environment_cubemap,
+                self.skybox.read().unwrap().environment_cubemap_texture(),
             ));
             *bindgroup = Some(bg.clone());
             bg

@@ -7,9 +7,11 @@ use crabslab::Id;
 use glam::{Mat4, UVec2, Vec3};
 
 use crate::{
-    atlas::AtlasImage, camera::shader::CameraDescriptor,
+    atlas::AtlasImage,
+    camera::shader::CameraDescriptor,
     convolution::VertexPrefilterEnvironmentCubemapIds,
-    cubemap::EquirectangularImageToCubemapBlitter, texture::Texture,
+    cubemap::EquirectangularImageToCubemapBlitter,
+    texture::{self, Texture},
 };
 
 /// Render pipeline used to draw a skybox.
@@ -160,7 +162,7 @@ pub(crate) fn create_skybox_render_pipeline(
 #[derive(Debug, Clone)]
 pub struct Skybox {
     // Cubemap texture of the environment cubemap
-    pub environment_cubemap: Texture,
+    environment_cubemap: Texture,
     // Cubemap texture of the pre-computed irradiance cubemap
     pub irradiance_cubemap: Texture,
     // Cubemap texture and mip maps of the specular highlights,
@@ -274,6 +276,11 @@ impl Skybox {
             irradiance_cubemap,
             prefiltered_environment_cubemap,
         }
+    }
+
+    /// Return a reference to the environment cubemap texture.
+    pub fn environment_cubemap_texture(&self) -> &texture::Texture {
+        &self.environment_cubemap
     }
 
     /// Convert an HDR [`AtlasImage`] into a texture.
