@@ -9,7 +9,7 @@ use glam::{Mat4, UVec2, Vec3};
 use crate::{
     atlas::AtlasImage, camera::shader::CameraDescriptor,
     convolution::VertexPrefilterEnvironmentCubemapIds,
-    cubemap::EquirectangularImageToCubemapBlitter, pbr::brdf::BrdfLut, texture::Texture,
+    cubemap::EquirectangularImageToCubemapBlitter, texture::Texture,
 };
 
 /// Render pipeline used to draw a skybox.
@@ -442,13 +442,12 @@ impl Skybox {
     ) -> Texture {
         let runtime = runtime.as_ref();
         let device = &runtime.device;
-        let pipeline =
-            crate::ibl::diffuse_irradiance::DiffuseIrradianceConvolutionRenderPipeline::new(
-                device,
-                wgpu::TextureFormat::Rgba16Float,
-            );
+        let pipeline = crate::pbr::ibl::DiffuseIrradianceConvolutionRenderPipeline::new(
+            device,
+            wgpu::TextureFormat::Rgba16Float,
+        );
 
-        let bindgroup = crate::ibl::diffuse_irradiance::diffuse_irradiance_convolution_bindgroup(
+        let bindgroup = crate::pbr::ibl::diffuse_irradiance_convolution_bindgroup(
             device,
             Some("irradiance"),
             buffer,
@@ -479,7 +478,7 @@ impl Skybox {
         views: [Mat4; 6],
     ) -> Texture {
         let (pipeline, bindgroup) =
-            crate::ibl::prefiltered_environment::create_pipeline_and_bindgroup(
+            crate::pbr::ibl::create_prefiltered_environment_pipeline_and_bindgroup(
                 &runtime.as_ref().device,
                 buffer,
                 environment_texture,
@@ -558,7 +557,9 @@ mod test {
     use glam::Vec3;
 
     use super::*;
-    use crate::{context::Context, test::BlockOnFuture, texture::CopiedTextureBuffer};
+    use crate::{
+        context::Context, pbr::brdf::BrdfLut, test::BlockOnFuture, texture::CopiedTextureBuffer,
+    };
 
     #[test]
     fn hdr_skybox_scene() {

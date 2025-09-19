@@ -216,7 +216,6 @@ pub mod draw;
 pub mod geometry;
 #[cfg(all(cpu, gltf))]
 pub mod gltf;
-pub mod ibl;
 #[cfg(cpu)]
 pub mod internal;
 pub mod light;
@@ -313,6 +312,7 @@ mod test {
     use pretty_assertions::assert_eq;
     use stage::Stage;
 
+    #[allow(unused_imports)]
     pub use renderling_build::{test_output_dir, workspace_dir};
 
     #[cfg_attr(not(target_arch = "wasm32"), ctor::ctor)]

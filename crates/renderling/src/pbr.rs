@@ -25,6 +25,7 @@ use crate::{
 
 pub mod brdf;
 pub mod debug;
+pub mod ibl;
 
 use debug::DebugChannel;
 
