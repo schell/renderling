@@ -14,6 +14,7 @@ use crate::geometry::{shader::GeometryDescriptor, MorphTarget, Vertex};
 use crate::gltf::GltfDocument;
 use crate::light::{DirectionalLight, IsLight, Light, PointLight, SpotLight};
 use crate::material::Material;
+use crate::pbr::brdf::BrdfLut;
 use crate::primitive::Primitive;
 use crate::{
     atlas::{AtlasError, AtlasImage, AtlasImageError},
@@ -267,8 +268,8 @@ impl StageRendering<'_> {
                         prefiltered_texture_sampler: &skybox
                             .prefiltered_environment_cubemap
                             .sampler,
-                        brdf_texture_view: &skybox.brdf_lut.view,
-                        brdf_texture_sampler: &skybox.brdf_lut.sampler,
+                        brdf_texture_view: &self.stage.brdf_lut.inner.view,
+                        brdf_texture_sampler: &self.stage.brdf_lut.inner.sampler,
                         shadow_map_texture_view: &shadow_map.view,
                         shadow_map_texture_sampler: &shadow_map.sampler,
                     }
@@ -393,6 +394,8 @@ pub struct Stage {
     pub(crate) tonemapping: Tonemapping,
     pub(crate) debug_overlay: DebugOverlay,
     pub(crate) background_color: Arc<RwLock<wgpu::Color>>,
+
+    pub(crate) brdf_lut: BrdfLut,
 
     pub(crate) skybox: Arc<RwLock<Skybox>>,
     pub(crate) skybox_bindgroup: Arc<Mutex<Option<Arc<wgpu::BindGroup>>>>,
@@ -739,6 +742,13 @@ impl Stage {
         &self.runtime().queue
     }
 
+    /// Returns a reference to the [`BrdfLut`].
+    ///
+    /// This is used for creating skyboxes used in image based lighting.
+    pub fn brdf_lut(&self) -> &BrdfLut {
+        &self.brdf_lut
+    }
+
     /// Sum the byte size of all used GPU memory.
     ///
     /// Adds together the byte size of all underlying slab buffers.
@@ -997,6 +1007,8 @@ impl Stage {
         let geometry_buffer = geometry.slab_allocator().commit();
         let lighting = Lighting::new(stage_config.shadow_map_atlas_size, &geometry);
 
+        let brdf_lut = BrdfLut::new(runtime);
+
         Self {
             materials,
             draw_calls: Arc::new(RwLock::new(DrawCalls::new(
@@ -1018,6 +1030,7 @@ impl Stage {
             skybox_bindgroup: Default::default(),
             skybox_pipeline: Default::default(),
             has_skybox: Arc::new(AtomicBool::new(false)),
+            brdf_lut,
             bloom,
             tonemapping,
             has_bloom: AtomicBool::from(true).into(),

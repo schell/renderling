@@ -1,4 +1,4 @@
-//! "Physically based" shader types and functions.
+//! "Physically based" types and functions.
 //!
 //! ## References
 //! * <https://learnopengl.com/PBR/Theory>
@@ -23,7 +23,9 @@ use crate::{
     println as my_println,
 };
 
+pub mod brdf;
 pub mod debug;
+
 use debug::DebugChannel;
 
 /// Trowbridge-Reitz GGX normal distribution function (NDF).
@@ -161,22 +163,6 @@ pub fn sample_specular_reflection<T: SampleCube<Sampler = S>, S: IsSampler>(
     prefiltered
         .sample_by_lod(*prefiltered_sampler, reflect_dir, roughness * 4.0)
         .xyz()
-}
-
-pub fn sample_brdf<T: Sample2d<Sampler = S>, S: IsSampler>(
-    brdf: &T,
-    brdf_sampler: &S,
-    // camera position in world space
-    camera_pos: Vec3,
-    // fragment position in world space
-    in_pos: Vec3,
-    // normal vector
-    n: Vec3,
-    roughness: f32,
-) -> Vec2 {
-    let v = (camera_pos - in_pos).alt_norm_or_zero();
-    brdf.sample_by_lod(*brdf_sampler, Vec2::new(n.dot(v).max(0.0), roughness), 0.0)
-        .xy()
 }
 
 /// Returns the `Material` from the stage's slab.
@@ -382,7 +368,8 @@ pub fn fragment_impl<A, T, DtA, C, S>(
         n,
         roughness,
     );
-    let brdf = sample_brdf(brdf, brdf_sampler, camera.position(), in_pos, n, roughness);
+    let brdf =
+        brdf::shader::sample_brdf(brdf, brdf_sampler, camera.position(), in_pos, n, roughness);
 
     fn colorize(u: Vec3) -> Vec4 {
         ((u.alt_norm_or_zero() + Vec3::splat(1.0)) / 2.0).extend(1.0)
@@ -668,6 +655,7 @@ mod test {
         atlas::AtlasImage,
         geometry::Vertex,
         glam::{Vec3, Vec4},
+        pbr::brdf::BrdfLut,
         test::BlockOnFuture,
     };
 

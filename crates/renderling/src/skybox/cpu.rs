@@ -9,7 +9,7 @@ use glam::{Mat4, UVec2, Vec3};
 use crate::{
     atlas::AtlasImage, camera::shader::CameraDescriptor,
     convolution::VertexPrefilterEnvironmentCubemapIds,
-    cubemap::EquirectangularImageToCubemapBlitter, texture::Texture,
+    cubemap::EquirectangularImageToCubemapBlitter, pbr::brdf::BrdfLut, texture::Texture,
 };
 
 /// Render pipeline used to draw a skybox.
@@ -166,8 +166,6 @@ pub struct Skybox {
     // Cubemap texture and mip maps of the specular highlights,
     // where each mip level is a different roughness.
     pub prefiltered_environment_cubemap: Texture,
-    // Texture of the pre-computed brdf integration
-    pub brdf_lut: Texture,
 }
 
 impl Skybox {
@@ -271,13 +269,10 @@ impl Skybox {
             views,
         );
 
-        let brdf_lut = Skybox::create_precomputed_brdf_texture(runtime);
-
         Skybox {
             environment_cubemap,
             irradiance_cubemap,
             prefiltered_environment_cubemap,
-            brdf_lut,
         }
     }
 
@@ -556,95 +551,6 @@ impl Skybox {
             5,
         )
     }
-
-    fn create_precomputed_brdf_texture(runtime: impl AsRef<WgpuRuntime>) -> Texture {
-        let runtime = runtime.as_ref();
-        let device = &runtime.device;
-        let queue = &runtime.queue;
-        let vertex_linkage = crate::linkage::brdf_lut_convolution_vertex::linkage(device);
-        let fragment_linkage = crate::linkage::brdf_lut_convolution_fragment::linkage(device);
-        let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("brdf_lut_convolution"),
-            layout: None,
-            vertex: wgpu::VertexState {
-                module: &vertex_linkage.module,
-                entry_point: Some(vertex_linkage.entry_point),
-                buffers: &[],
-                compilation_options: Default::default(),
-            },
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList,
-                strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw,
-                cull_mode: None,
-                unclipped_depth: false,
-                polygon_mode: wgpu::PolygonMode::Fill,
-                conservative: false,
-            },
-            depth_stencil: None,
-            multisample: wgpu::MultisampleState {
-                mask: !0,
-                alpha_to_coverage_enabled: false,
-                count: 1,
-            },
-            fragment: Some(wgpu::FragmentState {
-                module: &fragment_linkage.module,
-                entry_point: Some(fragment_linkage.entry_point),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: wgpu::TextureFormat::Rg16Float,
-                    blend: Some(wgpu::BlendState {
-                        color: wgpu::BlendComponent::REPLACE,
-                        alpha: wgpu::BlendComponent::REPLACE,
-                    }),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-                compilation_options: Default::default(),
-            }),
-            multiview: None,
-            cache: None,
-        });
-
-        let framebuffer = Texture::new_with(
-            runtime,
-            Some("brdf_lut"),
-            Some(
-                wgpu::TextureUsages::RENDER_ATTACHMENT
-                    | wgpu::TextureUsages::TEXTURE_BINDING
-                    | wgpu::TextureUsages::COPY_SRC,
-            ),
-            None,
-            wgpu::TextureFormat::Rg16Float,
-            2,
-            2,
-            512,
-            512,
-            1,
-            &[],
-        );
-
-        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
-        {
-            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("brdf_lut_convolution"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &framebuffer.view,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color::RED),
-                        store: wgpu::StoreOp::Store,
-                    },
-                    depth_slice: None,
-                })],
-                depth_stencil_attachment: None,
-                ..Default::default()
-            });
-
-            render_pass.set_pipeline(&pipeline);
-            render_pass.draw(0..6, 0..1);
-        }
-        queue.submit([encoder.finish()]);
-        framebuffer
-    }
 }
 
 #[cfg(test)]
@@ -741,9 +647,12 @@ mod test {
     fn precomputed_brdf() {
         assert_eq!(2, std::mem::size_of::<u16>());
         let r = Context::headless(32, 32).block();
-        let brdf_lut = Skybox::create_precomputed_brdf_texture(&r);
-        assert_eq!(wgpu::TextureFormat::Rg16Float, brdf_lut.texture.format());
-        let copied_buffer = Texture::read(&r, &brdf_lut.texture, 512, 512, 2, 2);
+        let brdf_lut = BrdfLut::new(&r);
+        assert_eq!(
+            wgpu::TextureFormat::Rg16Float,
+            brdf_lut.texture().texture.format()
+        );
+        let copied_buffer = Texture::read(&r, &brdf_lut.texture().texture, 512, 512, 2, 2);
         let pixels = copied_buffer.pixels(r.get_device()).block().unwrap();
         let pixels: Vec<f32> = bytemuck::cast_slice::<u8, u16>(pixels.as_slice())
             .iter()

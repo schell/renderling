@@ -84,6 +84,8 @@ pub(crate) fn get_next_texture_id() -> usize {
 #[derive(Debug, Clone)]
 pub struct Texture {
     pub texture: Arc<wgpu::Texture>,
+    // TODO: revisit whether we really need to create view and sampler for textures
+    // automatically
     pub view: Arc<wgpu::TextureView>,
     pub sampler: Arc<wgpu::Sampler>,
     pub(crate) id: usize,
