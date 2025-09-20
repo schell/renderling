@@ -210,7 +210,6 @@ impl Primitive {
     /// Get the transform.
     ///
     /// Returns a reference to the current `Transform`, if any.
-    // TODO: see if we really need to provide this.
     pub fn transform(&self) -> impl Deref<Target = Option<Transform>> + '_ {
         self.transform.lock().unwrap()
     }
@@ -244,7 +243,6 @@ impl Primitive {
     /// Get the material.
     ///
     /// Returns a reference to the current `Material`, if any.
-    // TODO: see if we really need to provide this.
     pub fn material(&self) -> impl Deref<Target = Option<Material>> + '_ {
         self.material.lock().unwrap()
     }

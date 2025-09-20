@@ -147,17 +147,15 @@ pub(crate) fn create_skybox_render_pipeline(
     }
 }
 
-/// An HDR skybox that also provides IBL cubemaps and lookups.
+/// An HDR skybox.
 ///
-/// A clone of a skybox is a reference to the same skybox.
+/// Skyboxes provide an environment cubemap around all your scenery
+/// that acts as a background.
 ///
-/// Only available on the CPU. Not available in shaders.
-// TODO: make the Skybox API a builder
-// TODO: move brdf lut into Stage or Context, we only need one, ever
-// TODO: decouple Skybox and IBL
-// Skybox and IBL are different things. Sometimes you want to use a
-// skybox without having it shade things.
-// Also, the brdf_lut doesn't change, so should probably live in `Lighting`
+/// A [`Skybox`] can also be used to create [`Ibl`], which illuminates
+/// your scene using the environment map as a light source.
+///
+/// All clones of a skybox point to the same underlying data.
 #[derive(Debug, Clone)]
 pub struct Skybox {
     is_empty: Arc<AtomicBool>,
