@@ -561,7 +561,7 @@ impl Atlas {
         updates: impl IntoIterator<Item = (&'a AtlasTexture, &'a texture::Texture)>,
     ) -> Result<wgpu::SubmissionIndex, AtlasError> {
         let updates = updates.into_iter().collect::<Vec<_>>();
-        let op = AtlasBlittingOperation::new(&self.blitter, &self, updates.len());
+        let op = AtlasBlittingOperation::new(&self.blitter, self, updates.len());
         let runtime = self.slab.runtime();
         let mut encoder = runtime
             .device
@@ -570,11 +570,11 @@ impl Atlas {
             });
         for (i, (atlas_texture, source_texture)) in updates.into_iter().enumerate() {
             op.run(
-                &runtime,
+                runtime,
                 &mut encoder,
                 source_texture,
                 i as u32,
-                &self,
+                self,
                 atlas_texture,
             )?;
         }
