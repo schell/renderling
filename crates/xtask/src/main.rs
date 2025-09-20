@@ -69,7 +69,7 @@ impl Manual {
     async fn build_docs() {
         log::info!("building docs");
         let mut process = tokio::process::Command::new("cargo")
-            .args(["doc", "-p", "renderling", "--all-features"])
+            .args(["doc", "-p", "renderling", "--all-features", "--no-deps"])
             .spawn()
             .unwrap();
         let status = process.wait().await.unwrap();
