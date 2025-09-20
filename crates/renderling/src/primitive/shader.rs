@@ -270,7 +270,7 @@ pub fn primitive_fragment(
     output: &mut Vec4,
 ) {
     // proxy to a separate impl that allows us to test on CPU
-    crate::pbr::fragment_impl(
+    crate::pbr::shader::fragment_impl(
         atlas,
         atlas_sampler,
         irradiance,

@@ -29,7 +29,9 @@ pub fn workspace_dir() -> std::path::PathBuf {
 }
 
 pub fn test_output_dir() -> std::path::PathBuf {
-    renderling_build::test_output_dir().canonicalize().unwrap()
+    let dir = renderling_build::test_output_dir();
+    std::fs::create_dir_all(&dir).unwrap();
+    dir.canonicalize().unwrap()
 }
 
 pub fn cwd_to_cargo_workspace() -> std::path::PathBuf {

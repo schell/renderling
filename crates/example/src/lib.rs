@@ -218,7 +218,9 @@ impl App {
         let img = AtlasImage::from_hdr_bytes(&bytes).unwrap();
         let skybox = Skybox::new(self.stage.runtime(), img);
         self.skybox_image_bytes = Some(bytes);
-        self.stage.set_skybox(skybox);
+        self.stage.use_skybox(&skybox);
+        let ibl = self.stage.new_ibl(&skybox);
+        self.stage.use_ibl(&ibl);
     }
 
     pub fn load_default_model(&mut self) {

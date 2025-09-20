@@ -30,34 +30,34 @@
     "wgsl_entry_point": "bloomshaderbloom_vertex"
   },
   {
-    "source_path": "shaders/convolution-brdf_lut_convolution_fragment.spv",
-    "entry_point": "convolution::brdf_lut_convolution_fragment",
-    "wgsl_entry_point": "convolutionbrdf_lut_convolution_fragment"
+    "source_path": "shaders/convolution-shader-brdf_lut_convolution_fragment.spv",
+    "entry_point": "convolution::shader::brdf_lut_convolution_fragment",
+    "wgsl_entry_point": "convolutionshaderbrdf_lut_convolution_fragment"
   },
   {
-    "source_path": "shaders/convolution-brdf_lut_convolution_vertex.spv",
-    "entry_point": "convolution::brdf_lut_convolution_vertex",
-    "wgsl_entry_point": "convolutionbrdf_lut_convolution_vertex"
+    "source_path": "shaders/convolution-shader-brdf_lut_convolution_vertex.spv",
+    "entry_point": "convolution::shader::brdf_lut_convolution_vertex",
+    "wgsl_entry_point": "convolutionshaderbrdf_lut_convolution_vertex"
   },
   {
-    "source_path": "shaders/convolution-generate_mipmap_fragment.spv",
-    "entry_point": "convolution::generate_mipmap_fragment",
-    "wgsl_entry_point": "convolutiongenerate_mipmap_fragment"
+    "source_path": "shaders/convolution-shader-generate_mipmap_fragment.spv",
+    "entry_point": "convolution::shader::generate_mipmap_fragment",
+    "wgsl_entry_point": "convolutionshadergenerate_mipmap_fragment"
   },
   {
-    "source_path": "shaders/convolution-generate_mipmap_vertex.spv",
-    "entry_point": "convolution::generate_mipmap_vertex",
-    "wgsl_entry_point": "convolutiongenerate_mipmap_vertex"
+    "source_path": "shaders/convolution-shader-generate_mipmap_vertex.spv",
+    "entry_point": "convolution::shader::generate_mipmap_vertex",
+    "wgsl_entry_point": "convolutionshadergenerate_mipmap_vertex"
   },
   {
-    "source_path": "shaders/convolution-prefilter_environment_cubemap_fragment.spv",
-    "entry_point": "convolution::prefilter_environment_cubemap_fragment",
-    "wgsl_entry_point": "convolutionprefilter_environment_cubemap_fragment"
+    "source_path": "shaders/convolution-shader-prefilter_environment_cubemap_fragment.spv",
+    "entry_point": "convolution::shader::prefilter_environment_cubemap_fragment",
+    "wgsl_entry_point": "convolutionshaderprefilter_environment_cubemap_fragment"
   },
   {
-    "source_path": "shaders/convolution-prefilter_environment_cubemap_vertex.spv",
-    "entry_point": "convolution::prefilter_environment_cubemap_vertex",
-    "wgsl_entry_point": "convolutionprefilter_environment_cubemap_vertex"
+    "source_path": "shaders/convolution-shader-prefilter_environment_cubemap_vertex.spv",
+    "entry_point": "convolution::shader::prefilter_environment_cubemap_vertex",
+    "wgsl_entry_point": "convolutionshaderprefilter_environment_cubemap_vertex"
   },
   {
     "source_path": "shaders/cubemap-shader-cubemap_sampling_test_fragment.spv",
@@ -100,11 +100,6 @@
     "wgsl_entry_point": "debugshaderdebug_overlay_vertex"
   },
   {
-    "source_path": "shaders/ibl-diffuse_irradiance-di_convolution_fragment.spv",
-    "entry_point": "ibl::diffuse_irradiance::di_convolution_fragment",
-    "wgsl_entry_point": "ibldiffuse_irradiancedi_convolution_fragment"
-  },
-  {
     "source_path": "shaders/light-shader-light_tiling_bin_lights.spv",
     "entry_point": "light::shader::light_tiling_bin_lights",
     "wgsl_entry_point": "lightshaderlight_tiling_bin_lights"
@@ -138,6 +133,11 @@
     "source_path": "shaders/light-shader-shadow_mapping_vertex.spv",
     "entry_point": "light::shader::shadow_mapping_vertex",
     "wgsl_entry_point": "lightshadershadow_mapping_vertex"
+  },
+  {
+    "source_path": "shaders/pbr-ibl-shader-di_convolution_fragment.spv",
+    "entry_point": "pbr::ibl::shader::di_convolution_fragment",
+    "wgsl_entry_point": "pbriblshaderdi_convolution_fragment"
   },
   {
     "source_path": "shaders/primitive-shader-primitive_fragment.spv",

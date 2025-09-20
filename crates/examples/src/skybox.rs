@@ -1,6 +1,6 @@
 //! Skybox manual page.
 
-use crate::{test_output_dir, workspace_dir};
+use crate::{cwd_to_manual_assets_dir, test_output_dir, workspace_dir};
 
 #[tokio::test]
 async fn manual_skybox() {
@@ -16,7 +16,8 @@ async fn manual_skybox() {
     let ctx = Context::headless(256, 256).await;
     let stage: Stage = ctx
         .new_stage()
-        .with_background_color(Vec4::new(0.25, 0.25, 0.25, 1.0));
+        .with_background_color(Vec4::new(0.25, 0.25, 0.25, 1.0))
+        .with_lighting(false);
 
     let _camera: Camera = {
         let aspect = 1.0;
@@ -50,8 +51,10 @@ async fn manual_skybox() {
     let skybox = stage
         .new_skybox_from_path(workspace_dir().join("img/hdr/helipad.hdr"))
         .unwrap();
-    stage.set_skybox(skybox);
+    stage.use_skybox(&skybox);
     // ANCHOR_END: skybox
+
+    cwd_to_manual_assets_dir();
 
     // ANCHOR: render_skybox
     let frame = ctx.get_next_frame().unwrap();
@@ -60,23 +63,4 @@ async fn manual_skybox() {
     image.save("skybox.png").unwrap();
     frame.present();
     // ANCHOR_END: render_skybox
-    //
-
-    let frame = ctx.get_next_frame().unwrap();
-    renderling::capture_gpu_frame(&ctx, test_output_dir().join("skybox.gputrace"), || {
-        stage.render(&frame.view());
-    });
-    let image = frame.read_image().await.unwrap();
-    image.save("skybox.png").unwrap();
-    frame.present();
-    let frame = ctx.get_next_frame().unwrap();
-    stage.render(&frame.view());
-    let image = frame.read_image().await.unwrap();
-    image.save("skybox.png").unwrap();
-    frame.present();
-    let frame = ctx.get_next_frame().unwrap();
-    stage.render(&frame.view());
-    let image = frame.read_image().await.unwrap();
-    image.save("skybox.png").unwrap();
-    frame.present();
 }

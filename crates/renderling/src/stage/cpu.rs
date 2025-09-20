@@ -15,6 +15,7 @@ use crate::gltf::GltfDocument;
 use crate::light::{DirectionalLight, IsLight, Light, PointLight, SpotLight};
 use crate::material::Material;
 use crate::pbr::brdf::BrdfLut;
+use crate::pbr::ibl::Ibl;
 use crate::primitive::Primitive;
 use crate::{
     atlas::{AtlasError, AtlasImage, AtlasImageError},
@@ -252,7 +253,7 @@ impl StageRendering<'_> {
                 .get(should_invalidate_renderlet_bind_group, || {
                     log::trace!("recreating renderlet bind group");
                     let atlas_texture = self.stage.materials.atlas().get_texture();
-                    let skybox = self.stage.skybox.read().unwrap();
+                    let ibl = self.stage.ibl.read().unwrap();
                     let shadow_map = self.stage.lighting.shadow_map_atlas.get_texture();
                     RenderletBindGroup {
                         device: self.stage.device(),
@@ -262,12 +263,10 @@ impl StageRendering<'_> {
                         light_buffer: &commit_result.lighting_buffer,
                         atlas_texture_view: &atlas_texture.view,
                         atlas_texture_sampler: &atlas_texture.sampler,
-                        irradiance_texture_view: &skybox.irradiance_cubemap.view,
-                        irradiance_texture_sampler: &skybox.irradiance_cubemap.sampler,
-                        prefiltered_texture_view: &skybox.prefiltered_environment_cubemap.view,
-                        prefiltered_texture_sampler: &skybox
-                            .prefiltered_environment_cubemap
-                            .sampler,
+                        irradiance_texture_view: &ibl.irradiance_cubemap.view,
+                        irradiance_texture_sampler: &ibl.irradiance_cubemap.sampler,
+                        prefiltered_texture_view: &ibl.prefiltered_environment_cubemap.view,
+                        prefiltered_texture_sampler: &ibl.prefiltered_environment_cubemap.sampler,
                         brdf_texture_view: &self.stage.brdf_lut.inner.view,
                         brdf_texture_sampler: &self.stage.brdf_lut.inner.sampler,
                         shadow_map_texture_view: &shadow_map.view,
@@ -397,8 +396,11 @@ pub struct Stage {
 
     pub(crate) brdf_lut: BrdfLut,
 
+    pub(crate) ibl: Arc<RwLock<Ibl>>,
+
     pub(crate) skybox: Arc<RwLock<Skybox>>,
     pub(crate) skybox_bindgroup: Arc<Mutex<Option<Arc<wgpu::BindGroup>>>>,
+    // TODO: remove Stage.has_skybox, replace with Skybox::is_empty
     pub(crate) has_skybox: Arc<AtomicBool>,
 
     pub(crate) has_bloom: Arc<AtomicBool>,
@@ -728,6 +730,132 @@ impl Stage {
     }
 }
 
+/// Skybox methods
+impl Stage {
+    /// Return the cached skybox render pipeline, creating it if necessary.
+    fn get_skybox_pipeline_and_bindgroup(
+        &self,
+        geometry_slab_buffer: &wgpu::Buffer,
+    ) -> (Arc<SkyboxRenderPipeline>, Arc<wgpu::BindGroup>) {
+        let msaa_sample_count = self.msaa_sample_count.load(Ordering::Relaxed);
+        // UNWRAP: safe because we're only ever called from the render thread.
+        let mut pipeline_guard = self.skybox_pipeline.write().unwrap();
+        let pipeline = if let Some(pipeline) = pipeline_guard.as_mut() {
+            if pipeline.msaa_sample_count() != msaa_sample_count {
+                *pipeline = Arc::new(crate::skybox::create_skybox_render_pipeline(
+                    self.device(),
+                    Texture::HDR_TEXTURE_FORMAT,
+                    Some(msaa_sample_count),
+                ));
+            }
+            pipeline.clone()
+        } else {
+            let pipeline = Arc::new(crate::skybox::create_skybox_render_pipeline(
+                self.device(),
+                Texture::HDR_TEXTURE_FORMAT,
+                Some(msaa_sample_count),
+            ));
+            *pipeline_guard = Some(pipeline.clone());
+            pipeline
+        };
+        // UNWRAP: safe because we're only ever called from the render thread.
+        let mut bindgroup = self.skybox_bindgroup.lock().unwrap();
+        let bindgroup = if let Some(bindgroup) = bindgroup.as_ref() {
+            bindgroup.clone()
+        } else {
+            let bg = Arc::new(crate::skybox::create_skybox_bindgroup(
+                self.device(),
+                geometry_slab_buffer,
+                self.skybox.read().unwrap().environment_cubemap_texture(),
+            ));
+            *bindgroup = Some(bg.clone());
+            bg
+        };
+        (pipeline, bindgroup)
+    }
+
+    /// Used the given [`Skybox`].
+    ///
+    /// To remove the currently used [`Skybox`], call [`Skybox::remove_skybox`].
+    pub fn use_skybox(&self, skybox: &Skybox) -> &Self {
+        // UNWRAP: if we can't acquire the lock we want to panic.
+        let mut guard = self.skybox.write().unwrap();
+        *guard = skybox.clone();
+        self.has_skybox
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        *self.skybox_bindgroup.lock().unwrap() = None;
+        *self.textures_bindgroup.lock().unwrap() = None;
+        self
+    }
+
+    /// Removes the currently used [`Skybox`].
+    ///
+    /// Returns the currently used [`Skybox`], if any.
+    ///
+    /// After calling this the [`Stage`] will not render with any [`Skybox`], until
+    /// [`Skybox::use_skybox`] is called with another [`Skybox`].
+    pub fn remove_skybox(&self) -> Option<Skybox> {
+        let mut guard = self.skybox.write().unwrap();
+        if guard.is_empty() {
+            // Do nothing, the skybox is already empty
+            None
+        } else {
+            let skybox = guard.clone();
+            *guard = Skybox::empty(self.runtime());
+            Some(skybox)
+        }
+    }
+
+    /// Returns a new [`Skybox`] using the HDR image at the given path, if possible.
+    ///
+    /// The returned [`Skybox`] must be **used** with [`Stage::use_skybox`].
+    pub fn new_skybox_from_path(
+        &self,
+        path: impl AsRef<std::path::Path>,
+    ) -> Result<Skybox, AtlasImageError> {
+        let hdr = AtlasImage::from_hdr_path(path)?;
+        Ok(Skybox::new(self.runtime(), hdr))
+    }
+
+    /// Returns a new [`Skybox`] using the bytes of an HDR image, if possible.
+    ///
+    /// The returned [`Skybox`] must be **used** with [`Stage::use_skybox`].
+    pub fn new_skybox_from_bytes(&self, bytes: &[u8]) -> Result<Skybox, AtlasImageError> {
+        let hdr = AtlasImage::from_hdr_bytes(bytes)?;
+        Ok(Skybox::new(self.runtime(), hdr))
+    }
+}
+
+/// Image based lighting methods
+impl Stage {
+    /// Crate a new [`Ibl`] from the given [`Skybox`].
+    pub fn new_ibl(&self, skybox: &Skybox) -> Ibl {
+        Ibl::new(self.runtime(), skybox)
+    }
+
+    /// Use the given image based lighting.
+    ///
+    /// Use [`Stage::new_ibl`] to create a new [`Ibl`].
+    pub fn use_ibl(&self, ibl: &Ibl) -> &Self {
+        let mut guard = self.ibl.write().unwrap();
+        *guard = ibl.clone();
+        self
+    }
+
+    /// Remove the current image based lighting from the stage and return it, if any.
+    pub fn remove_ibl(&self) -> Option<Ibl> {
+        let mut guard = self.ibl.write().unwrap();
+        if guard.is_empty() {
+            // Do nothing, we're already not using IBL
+            None
+        } else {
+            let ibl = guard.clone();
+            *guard = Ibl::new(self.runtime(), &Skybox::empty(self.runtime()));
+            Some(ibl)
+        }
+    }
+}
+
 impl Stage {
     /// Returns the runtime.
     pub fn runtime(&self) -> &WgpuRuntime {
@@ -1008,6 +1136,8 @@ impl Stage {
         let lighting = Lighting::new(stage_config.shadow_map_atlas_size, &geometry);
 
         let brdf_lut = BrdfLut::new(runtime);
+        let skybox = Skybox::empty(runtime);
+        let ibl = Ibl::new(runtime, &skybox);
 
         Self {
             materials,
@@ -1026,7 +1156,8 @@ impl Stage {
             renderlet_bind_group: ManagedBindGroup::default(),
             renderlet_bind_group_created: Arc::new(0.into()),
 
-            skybox: Arc::new(RwLock::new(Skybox::empty(runtime))),
+            ibl: Arc::new(RwLock::new(ibl)),
+            skybox: Arc::new(RwLock::new(skybox)),
             skybox_bindgroup: Default::default(),
             skybox_pipeline: Default::default(),
             has_skybox: Arc::new(AtomicBool::new(false)),
@@ -1283,17 +1414,6 @@ impl Stage {
         self
     }
 
-    /// Set the skybox.
-    pub fn set_skybox(&self, skybox: Skybox) {
-        // UNWRAP: if we can't acquire the lock we want to panic.
-        let mut guard = self.skybox.write().unwrap();
-        *guard = skybox;
-        self.has_skybox
-            .store(true, std::sync::atomic::Ordering::Relaxed);
-        *self.skybox_bindgroup.lock().unwrap() = None;
-        *self.textures_bindgroup.lock().unwrap() = None;
-    }
-
     /// Turn the bloom effect on or off.
     pub fn set_has_bloom(&self, has_bloom: bool) {
         self.has_bloom
@@ -1331,48 +1451,6 @@ impl Stage {
     pub fn with_bloom_filter_radius(self, filter_radius: f32) -> Self {
         self.set_bloom_filter_radius(filter_radius);
         self
-    }
-
-    /// Return the skybox render pipeline, creating it if necessary.
-    fn get_skybox_pipeline_and_bindgroup(
-        &self,
-        geometry_slab_buffer: &wgpu::Buffer,
-    ) -> (Arc<SkyboxRenderPipeline>, Arc<wgpu::BindGroup>) {
-        let msaa_sample_count = self.msaa_sample_count.load(Ordering::Relaxed);
-        // UNWRAP: safe because we're only ever called from the render thread.
-        let mut pipeline_guard = self.skybox_pipeline.write().unwrap();
-        let pipeline = if let Some(pipeline) = pipeline_guard.as_mut() {
-            if pipeline.msaa_sample_count() != msaa_sample_count {
-                *pipeline = Arc::new(crate::skybox::create_skybox_render_pipeline(
-                    self.device(),
-                    Texture::HDR_TEXTURE_FORMAT,
-                    Some(msaa_sample_count),
-                ));
-            }
-            pipeline.clone()
-        } else {
-            let pipeline = Arc::new(crate::skybox::create_skybox_render_pipeline(
-                self.device(),
-                Texture::HDR_TEXTURE_FORMAT,
-                Some(msaa_sample_count),
-            ));
-            *pipeline_guard = Some(pipeline.clone());
-            pipeline
-        };
-        // UNWRAP: safe because we're only ever called from the render thread.
-        let mut bindgroup = self.skybox_bindgroup.lock().unwrap();
-        let bindgroup = if let Some(bindgroup) = bindgroup.as_ref() {
-            bindgroup.clone()
-        } else {
-            let bg = Arc::new(crate::skybox::create_skybox_bindgroup(
-                self.device(),
-                geometry_slab_buffer,
-                self.skybox.read().unwrap().environment_cubemap_texture(),
-            ));
-            *bindgroup = Some(bg.clone());
-            bg
-        };
-        (pipeline, bindgroup)
     }
 
     /// Adds a primitive to the internal list of renderlets to be drawn each
@@ -1413,19 +1491,6 @@ impl Stage {
             runtime: self.runtime().clone(),
             texture: self.depth_texture.read().unwrap().texture.clone(),
         }
-    }
-
-    pub fn new_skybox_from_path(
-        &self,
-        path: impl AsRef<std::path::Path>,
-    ) -> Result<Skybox, AtlasImageError> {
-        let hdr = AtlasImage::from_hdr_path(path)?;
-        Ok(Skybox::new(self.runtime(), hdr))
-    }
-
-    pub fn new_skybox_from_bytes(&self, bytes: &[u8]) -> Result<Skybox, AtlasImageError> {
-        let hdr = AtlasImage::from_hdr_bytes(bytes)?;
-        Ok(Skybox::new(self.runtime(), hdr))
     }
 
     /// Create a new [`NestedTransform`].

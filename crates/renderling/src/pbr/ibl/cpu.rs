@@ -1,5 +1,236 @@
 //! CPU side of IBL
 
+use core::sync::atomic::AtomicBool;
+use std::sync::Arc;
+
+use craballoc::{runtime::WgpuRuntime, slab::SlabAllocator, value::Hybrid};
+use crabslab::Id;
+use glam::{Mat4, Vec3};
+
+use crate::{
+    camera::Camera, convolution::shader::VertexPrefilterEnvironmentCubemapIds, skybox::Skybox,
+    texture,
+};
+
+/// Image based lighting resources.
+#[derive(Clone)]
+pub struct Ibl {
+    is_empty: Arc<AtomicBool>,
+    // Cubemap texture of the pre-computed irradiance cubemap
+    pub(crate) irradiance_cubemap: texture::Texture,
+    // Cubemap texture and mip maps of the specular highlights,
+    // where each mip level is a different roughness.
+    pub(crate) prefiltered_environment_cubemap: texture::Texture,
+}
+
+impl Ibl {
+    pub fn create_irradiance_and_prefilters(
+        runtime: impl AsRef<WgpuRuntime>,
+        skybox: &Skybox,
+    ) -> Self {
+        let runtime = runtime.as_ref();
+        let slab = SlabAllocator::new(runtime, "ibl", wgpu::BufferUsages::VERTEX);
+        let proj = Mat4::perspective_rh(std::f32::consts::FRAC_PI_2, 1.0, 0.1, 10.0);
+        let camera = Camera::new(&slab).with_projection(proj);
+        let roughness = slab.new_value(0.0f32);
+        let prefilter_ids = slab.new_value(VertexPrefilterEnvironmentCubemapIds {
+            camera: camera.id(),
+            roughness: roughness.id(),
+        });
+
+        let buffer = slab.commit();
+        let mut buffer_upkeep = || {
+            let possibly_new_buffer = slab.commit();
+            debug_assert!(!possibly_new_buffer.is_new_this_commit());
+        };
+
+        let views = [
+            Mat4::look_at_rh(
+                Vec3::new(0.0, 0.0, 0.0),
+                Vec3::new(1.0, 0.0, 0.0),
+                Vec3::new(0.0, -1.0, 0.0),
+            ),
+            Mat4::look_at_rh(
+                Vec3::new(0.0, 0.0, 0.0),
+                Vec3::new(-1.0, 0.0, 0.0),
+                Vec3::new(0.0, -1.0, 0.0),
+            ),
+            Mat4::look_at_rh(
+                Vec3::new(0.0, 0.0, 0.0),
+                Vec3::new(0.0, -1.0, 0.0),
+                Vec3::new(0.0, 0.0, -1.0),
+            ),
+            Mat4::look_at_rh(
+                Vec3::new(0.0, 0.0, 0.0),
+                Vec3::new(0.0, 1.0, 0.0),
+                Vec3::new(0.0, 0.0, 1.0),
+            ),
+            Mat4::look_at_rh(
+                Vec3::new(0.0, 0.0, 0.0),
+                Vec3::new(0.0, 0.0, 1.0),
+                Vec3::new(0.0, -1.0, 0.0),
+            ),
+            Mat4::look_at_rh(
+                Vec3::new(0.0, 0.0, 0.0),
+                Vec3::new(0.0, 0.0, -1.0),
+                Vec3::new(0.0, -1.0, 0.0),
+            ),
+        ];
+
+        let environment_cubemap = skybox.environment_cubemap_texture();
+
+        // Convolve the environment map.
+        let irradiance_cubemap = create_irradiance_map(
+            runtime,
+            &buffer,
+            &mut buffer_upkeep,
+            environment_cubemap,
+            &camera,
+            views,
+        );
+
+        // Generate specular IBL pre-filtered environment map.
+        let prefiltered_environment_cubemap = create_prefiltered_environment_map(
+            runtime,
+            &buffer,
+            &mut buffer_upkeep,
+            &camera,
+            &roughness,
+            prefilter_ids.id(),
+            environment_cubemap,
+            views,
+        );
+
+        Self {
+            is_empty: Arc::new(skybox.is_empty().into()),
+            irradiance_cubemap,
+            prefiltered_environment_cubemap,
+        }
+    }
+    /// Create a new [`Ibl`] resource.
+    pub fn new(runtime: impl AsRef<WgpuRuntime>, skybox: &Skybox) -> Self {
+        let runtime = runtime.as_ref();
+        let slab = SlabAllocator::new(runtime, "ibl", wgpu::BufferUsages::VERTEX);
+        let proj = Mat4::perspective_rh(std::f32::consts::FRAC_PI_2, 1.0, 0.1, 10.0);
+        let camera = Camera::new(&slab).with_projection(proj);
+        let roughness = slab.new_value(0.0f32);
+        let prefilter_ids = slab.new_value(VertexPrefilterEnvironmentCubemapIds {
+            camera: camera.id(),
+            roughness: roughness.id(),
+        });
+
+        let buffer = slab.commit();
+        let mut buffer_upkeep = || {
+            let possibly_new_buffer = slab.commit();
+            debug_assert!(!possibly_new_buffer.is_new_this_commit());
+        };
+
+        let views = [
+            Mat4::look_at_rh(
+                Vec3::new(0.0, 0.0, 0.0),
+                Vec3::new(1.0, 0.0, 0.0),
+                Vec3::new(0.0, -1.0, 0.0),
+            ),
+            Mat4::look_at_rh(
+                Vec3::new(0.0, 0.0, 0.0),
+                Vec3::new(-1.0, 0.0, 0.0),
+                Vec3::new(0.0, -1.0, 0.0),
+            ),
+            Mat4::look_at_rh(
+                Vec3::new(0.0, 0.0, 0.0),
+                Vec3::new(0.0, -1.0, 0.0),
+                Vec3::new(0.0, 0.0, -1.0),
+            ),
+            Mat4::look_at_rh(
+                Vec3::new(0.0, 0.0, 0.0),
+                Vec3::new(0.0, 1.0, 0.0),
+                Vec3::new(0.0, 0.0, 1.0),
+            ),
+            Mat4::look_at_rh(
+                Vec3::new(0.0, 0.0, 0.0),
+                Vec3::new(0.0, 0.0, 1.0),
+                Vec3::new(0.0, -1.0, 0.0),
+            ),
+            Mat4::look_at_rh(
+                Vec3::new(0.0, 0.0, 0.0),
+                Vec3::new(0.0, 0.0, -1.0),
+                Vec3::new(0.0, -1.0, 0.0),
+            ),
+        ];
+
+        let environment_cubemap = skybox.environment_cubemap_texture();
+
+        // Convolve the environment map.
+        let irradiance_cubemap = create_irradiance_map(
+            runtime,
+            &buffer,
+            &mut buffer_upkeep,
+            environment_cubemap,
+            &camera,
+            views,
+        );
+
+        // Generate specular IBL pre-filtered environment map.
+        let prefiltered_environment_cubemap = create_prefiltered_environment_map(
+            runtime,
+            &buffer,
+            &mut buffer_upkeep,
+            &camera,
+            &roughness,
+            prefilter_ids.id(),
+            environment_cubemap,
+            views,
+        );
+
+        Self {
+            is_empty: Arc::new(skybox.is_empty().into()),
+            irradiance_cubemap,
+            prefiltered_environment_cubemap,
+        }
+    }
+
+    /// Returns whether this [`Ibl`] is empty.
+    ///
+    /// An [`Ibl`] is empty if it was created from an empty [`Skybox`].
+    pub fn is_empty(&self) -> bool {
+        self.is_empty.load(std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
+fn create_irradiance_map(
+    runtime: impl AsRef<WgpuRuntime>,
+    buffer: &wgpu::Buffer,
+    buffer_upkeep: impl FnMut(),
+    environment_texture: &texture::Texture,
+    camera: &Camera,
+    views: [Mat4; 6],
+) -> texture::Texture {
+    let runtime = runtime.as_ref();
+    let device = &runtime.device;
+    let pipeline = crate::pbr::ibl::DiffuseIrradianceConvolutionRenderPipeline::new(
+        device,
+        wgpu::TextureFormat::Rgba16Float,
+    );
+
+    let bindgroup = crate::pbr::ibl::diffuse_irradiance_convolution_bindgroup(
+        device,
+        Some("irradiance"),
+        buffer,
+        environment_texture,
+    );
+
+    texture::Texture::render_cubemap(
+        runtime,
+        &pipeline.0,
+        buffer_upkeep,
+        camera,
+        &bindgroup,
+        views,
+        32,
+        None,
+    )
+}
+
 /// Pipeline for creating a prefiltered environment map from an existing
 /// environment cubemap.
 pub(crate) fn create_prefiltered_environment_pipeline_and_bindgroup(
@@ -106,6 +337,93 @@ pub(crate) fn create_prefiltered_environment_pipeline_and_bindgroup(
         cache: None,
     });
     (pipeline, bindgroup)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn create_prefiltered_environment_map(
+    runtime: impl AsRef<WgpuRuntime>,
+    buffer: &wgpu::Buffer,
+    mut buffer_upkeep: impl FnMut(),
+    camera: &Camera,
+    roughness: &Hybrid<f32>,
+    prefilter_id: Id<VertexPrefilterEnvironmentCubemapIds>,
+    environment_texture: &texture::Texture,
+    views: [Mat4; 6],
+) -> texture::Texture {
+    let (pipeline, bindgroup) =
+        crate::pbr::ibl::create_prefiltered_environment_pipeline_and_bindgroup(
+            &runtime.as_ref().device,
+            buffer,
+            environment_texture,
+        );
+    let mut cubemap_faces = Vec::new();
+
+    for (i, view) in views.iter().enumerate() {
+        for mip_level in 0..5 {
+            let mip_width: u32 = 128 >> mip_level;
+            let mip_height: u32 = 128 >> mip_level;
+
+            let mut encoder =
+                runtime
+                    .as_ref()
+                    .device
+                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                        label: Some("specular convolution"),
+                    });
+
+            let cubemap_face = texture::Texture::new_with(
+                runtime.as_ref(),
+                Some(&format!("cubemap{i}{mip_level}prefiltered_environment")),
+                Some(wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC),
+                None,
+                wgpu::TextureFormat::Rgba16Float,
+                4,
+                2,
+                mip_width,
+                mip_height,
+                1,
+                &[],
+            );
+
+            // update the roughness for these mips
+            roughness.set(mip_level as f32 / 4.0);
+            // update the view to point at one of the cube faces
+            camera.set_view(*view);
+            buffer_upkeep();
+            {
+                let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some(&format!("cubemap{i}")),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &cubemap_face.view,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                            store: wgpu::StoreOp::Store,
+                        },
+                        depth_slice: None,
+                    })],
+                    depth_stencil_attachment: None,
+                    ..Default::default()
+                });
+
+                render_pass.set_pipeline(&pipeline);
+                render_pass.set_bind_group(0, Some(&bindgroup), &[]);
+                render_pass.draw(0..36, prefilter_id.inner()..prefilter_id.inner() + 1);
+            }
+
+            runtime.as_ref().queue.submit([encoder.finish()]);
+            cubemap_faces.push(cubemap_face);
+        }
+    }
+
+    texture::Texture::new_cubemap_texture(
+        runtime,
+        Some("prefiltered environment cubemap"),
+        128,
+        cubemap_faces.as_slice(),
+        wgpu::TextureFormat::Rgba16Float,
+        5,
+    )
 }
 
 pub fn diffuse_irradiance_convolution_bindgroup_layout(

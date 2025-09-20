@@ -3,9 +3,11 @@
 use crate::linkage::ShaderLinkage;
 #[cfg(not(target_arch = "wasm32"))]
 mod target {
-    pub const ENTRY_POINT: &str = "convolution::prefilter_environment_cubemap_vertex";
+    pub const ENTRY_POINT: &str = "convolution::shader::prefilter_environment_cubemap_vertex";
     pub fn descriptor() -> wgpu::ShaderModuleDescriptor<'static> {
-        wgpu::include_spirv!("../../shaders/convolution-prefilter_environment_cubemap_vertex.spv")
+        wgpu::include_spirv!(
+            "../../shaders/convolution-shader-prefilter_environment_cubemap_vertex.spv"
+        )
     }
     pub fn linkage(device: &wgpu::Device) -> super::ShaderLinkage {
         log::debug!(
@@ -20,9 +22,11 @@ mod target {
 }
 #[cfg(target_arch = "wasm32")]
 mod target {
-    pub const ENTRY_POINT: &str = "convolutionprefilter_environment_cubemap_vertex";
+    pub const ENTRY_POINT: &str = "convolutionshaderprefilter_environment_cubemap_vertex";
     pub fn descriptor() -> wgpu::ShaderModuleDescriptor<'static> {
-        wgpu::include_wgsl!("../../shaders/convolution-prefilter_environment_cubemap_vertex.wgsl")
+        wgpu::include_wgsl!(
+            "../../shaders/convolution-shader-prefilter_environment_cubemap_vertex.wgsl"
+        )
     }
     pub fn linkage(device: &wgpu::Device) -> super::ShaderLinkage {
         log::debug!(

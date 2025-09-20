@@ -1,4 +1,4 @@
-//! Internal CPU stuff.
+//! Internal CPU utilities and stuff.
 use std::sync::Arc;
 
 use snafu::{OptionExt, ResultExt};
