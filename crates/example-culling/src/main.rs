@@ -3,15 +3,15 @@
 use std::sync::Arc;
 
 use example::{camera::CameraController, utils::*};
-use glam::*;
 use renderling::{
     bvol::{Aabb, BoundingSphere},
     camera::{shader::CameraDescriptor, Camera},
+    context::Context,
     geometry::Vertex,
+    glam::{EulerRot, Mat4, Quat, UVec2, Vec3, Vec4},
     light::{AnalyticalLight, DirectionalLight},
     material::Material,
     math::hex_to_vec4,
-    prelude::*,
     primitive::Primitive,
     stage::Stage,
     tonemapping::srgba_to_linear,
@@ -137,7 +137,11 @@ impl ApplicationHandler for CullingExample {
                 ..
             } => {
                 if c.as_str() == "r" {
-                    self.primitives.drain(..);
+                    // remove all the primitives, dropping their resources
+                    for primitive in self.primitives.drain(..) {
+                        self.stage.remove_primitive(&primitive);
+                    }
+
                     let _ = self.stage.commit();
                     self.primitives.extend(Self::make_aabbs(
                         self.next_k,
