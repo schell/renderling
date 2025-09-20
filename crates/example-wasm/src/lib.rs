@@ -1,6 +1,6 @@
-use futures_lite::StreamExt;
-use glam::{Vec2, Vec3, Vec4};
-use renderling::{prelude::*, ui::prelude::*};
+#![allow(dead_code)]
+use glam::{Vec2, Vec4};
+use renderling::{camera::Camera, gltf::GltfDocument, stage::Stage, ui::prelude::*};
 use wasm_bindgen::prelude::*;
 use web_sys::HtmlCanvasElement;
 
@@ -27,7 +27,7 @@ pub struct App {
     path: UiPath,
     stage: Stage,
     doc: GltfDocument,
-    camera: Hybrid<Camera>,
+    camera: Camera,
     text: UiText,
 }
 
@@ -73,7 +73,7 @@ pub async fn main() {
 
     let ui = ctx.new_ui();
     let path = ui
-        .new_path()
+        .path_builder()
         .with_circle(Vec2::splat(100.0), 20.0)
         .with_fill_color(Vec4::new(1.0, 1.0, 0.0, 1.0))
         .fill();
@@ -82,7 +82,7 @@ pub async fn main() {
         .await
         .expect_throw("Could not load font");
     let text = ui
-        .new_text()
+        .text_builder()
         .with_color(
             // white
             Vec4::ONE,
@@ -105,7 +105,8 @@ pub async fn main() {
     let fox = stage.load_gltf_document_from_bytes(GLTF_FOX_BYTES).unwrap();
     log::info!("fox aabb: {:?}", fox.bounding_volume());
 
-    let camera = stage.new_camera(Camera::default_perspective(800.0, 600.0));
+    let (p, v) = renderling::camera::default_perspective(800.0, 600.0);
+    let camera = stage.new_camera().with_projection_and_view(p, v);
 
     let app = App {
         ctx,

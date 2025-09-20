@@ -1,127 +1,12 @@
 //! Camera projection, view and utilities.
-use crabslab::SlabItem;
-use glam::{Mat4, Vec2, Vec3, Vec4};
+use glam::{Mat4, Vec3};
 
-use crate::{bvol::Frustum, math::IsVector};
+#[cfg(cpu)]
+mod cpu;
+#[cfg(cpu)]
+pub use cpu::*;
 
-/// A camera used for transforming the stage during rendering.
-///
-/// Use [`Camera::new`] to create a new camera.
-#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
-#[derive(Default, Clone, Copy, PartialEq, SlabItem)]
-pub struct Camera {
-    projection: Mat4,
-    view: Mat4,
-    position: Vec3,
-    frustum: Frustum,
-    /// Nearest center point on the frustum
-    z_near_point: Vec3,
-    /// Furthest center point on the frustum
-    z_far_point: Vec3,
-}
-
-impl Camera {
-    pub fn new(projection: Mat4, view: Mat4) -> Self {
-        Camera::default().with_projection_and_view(projection, view)
-    }
-
-    pub fn default_perspective(width: f32, height: f32) -> Self {
-        let (projection, view) = default_perspective(width, height);
-        Camera::new(projection, view)
-    }
-
-    pub fn default_ortho2d(width: f32, height: f32) -> Self {
-        let (projection, view) = default_ortho2d(width, height);
-        Camera::new(projection, view)
-    }
-
-    pub fn projection(&self) -> Mat4 {
-        self.projection
-    }
-
-    pub fn set_projection_and_view(&mut self, projection: Mat4, view: Mat4) {
-        self.projection = projection;
-        self.view = view;
-        self.position = view.inverse().transform_point3(Vec3::ZERO);
-        let inverse = (projection * view).inverse();
-        self.z_near_point = inverse.project_point3(Vec3::ZERO);
-        self.z_far_point = inverse.project_point3(Vec2::ZERO.extend(1.0));
-        self.frustum = Frustum::from_camera(self);
-    }
-
-    pub fn with_projection_and_view(mut self, projection: Mat4, view: Mat4) -> Self {
-        self.set_projection_and_view(projection, view);
-        self
-    }
-
-    pub fn set_projection(&mut self, projection: Mat4) {
-        self.set_projection_and_view(projection, self.view);
-    }
-
-    pub fn with_projection(mut self, projection: Mat4) -> Self {
-        self.set_projection(projection);
-        self
-    }
-
-    pub fn view(&self) -> Mat4 {
-        self.view
-    }
-
-    pub fn set_view(&mut self, view: Mat4) {
-        self.set_projection_and_view(self.projection, view);
-    }
-
-    pub fn with_view(mut self, view: Mat4) -> Self {
-        self.set_view(view);
-        self
-    }
-
-    pub fn position(&self) -> Vec3 {
-        self.position
-    }
-
-    pub fn frustum(&self) -> Frustum {
-        self.frustum
-    }
-
-    pub fn view_projection(&self) -> Mat4 {
-        self.projection * self.view
-    }
-
-    pub fn near_plane(&self) -> Vec4 {
-        self.frustum.planes[0]
-    }
-
-    pub fn far_plane(&self) -> Vec4 {
-        self.frustum.planes[5]
-    }
-
-    /// Returns **roughly** the location of the znear plane.
-    pub fn z_near(&self) -> f32 {
-        self.z_near_point.distance(self.position)
-    }
-
-    pub fn z_far(&self) -> f32 {
-        self.z_far_point.distance(self.position)
-    }
-
-    pub fn depth(&self) -> f32 {
-        (self.z_far() - self.z_near()).abs()
-    }
-
-    /// Returns the normalized forward vector which points in the direction the camera is looking.
-    pub fn forward(&self) -> Vec3 {
-        (self.z_far_point - self.z_near_point).alt_norm_or_zero()
-    }
-
-    pub fn frustum_near_point(&self) -> Vec3 {
-        self.forward() * self.z_near()
-    }
-
-    pub fn frustum_far_point(&self) -> Vec3 {
-        self.forward() * self.z_far()
-    }
-}
+pub mod shader;
 
 /// Returns the projection and view matrices for a camera with default
 /// perspective.
@@ -130,7 +15,6 @@ impl Camera {
 ///
 /// ```rust
 /// use glam::*;
-/// use renderling::prelude::*;
 ///
 /// let width = 800.0;
 /// let height = 600.0;
@@ -143,7 +27,7 @@ impl Camera {
 /// let target = Vec3::ZERO;
 /// let up = Vec3::Y;
 /// let view = Mat4::look_at_rh(eye, target, up);
-/// assert_eq!(default_perspective(width, height), (projection, view));
+/// assert_eq!(renderling::camera::default_perspective(width, height), (projection, view));
 /// ```
 pub fn default_perspective(width: f32, height: f32) -> (Mat4, Mat4) {
     let projection = perspective(width, height);
@@ -192,6 +76,8 @@ pub fn default_ortho2d(width: f32, height: f32) -> (Mat4, Mat4) {
 
 #[cfg(test)]
 mod tests {
+    use crate::camera::shader::CameraDescriptor;
+
     use super::*;
     use glam::Vec3;
 
@@ -207,7 +93,7 @@ mod tests {
         for (eye, expected_forward) in eyes.into_iter().zip(expected_forwards) {
             let projection = Mat4::perspective_rh(45.0_f32.to_radians(), 800.0 / 600.0, 0.1, 100.0);
             let view = Mat4::look_at_rh(eye, Vec3::ZERO, Vec3::Y);
-            let camera = Camera::new(projection, view);
+            let camera = CameraDescriptor::new(projection, view);
 
             let forward = camera.forward();
             let distance = forward.distance(expected_forward);

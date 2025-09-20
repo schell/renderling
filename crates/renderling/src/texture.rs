@@ -6,7 +6,7 @@ use std::{
 };
 
 use craballoc::runtime::WgpuRuntime;
-use glam::UVec2;
+use glam::{Mat4, UVec2};
 use image::{
     load_from_memory, DynamicImage, GenericImage, GenericImageView, ImageBuffer, ImageError, Luma,
     PixelWithColorType, Rgba32FImage,
@@ -14,7 +14,10 @@ use image::{
 use mips::MipMapGenerator;
 use snafu::prelude::*;
 
-use crate::atlas::{AtlasImage, AtlasImageFormat};
+use crate::{
+    atlas::{AtlasImage, AtlasImageFormat},
+    camera::Camera,
+};
 
 pub mod mips;
 
@@ -84,6 +87,8 @@ pub(crate) fn get_next_texture_id() -> usize {
 #[derive(Debug, Clone)]
 pub struct Texture {
     pub texture: Arc<wgpu::Texture>,
+    // TODO: revisit whether we really need to create view and sampler for textures
+    // automatically
     pub view: Arc<wgpu::TextureView>,
     pub sampler: Arc<wgpu::Sampler>,
     pub(crate) id: usize,
@@ -711,6 +716,89 @@ impl Texture {
             id: get_next_texture_id(),
         }
     }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn render_cubemap(
+        runtime: impl AsRef<WgpuRuntime>,
+        pipeline: &wgpu::RenderPipeline,
+        mut buffer_upkeep: impl FnMut(),
+        camera: &Camera,
+        bindgroup: &wgpu::BindGroup,
+        views: [Mat4; 6],
+        texture_size: u32,
+        mip_levels: Option<u32>,
+    ) -> Self {
+        let runtime = runtime.as_ref();
+        let device = &runtime.device;
+        let queue = &runtime.queue;
+        let mut cubemap_faces = Vec::new();
+        let mip_levels = mip_levels.unwrap_or(1);
+
+        // Render every cube face.
+        for (i, view) in views.iter().enumerate() {
+            let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some(&format!("cubemap{i}")),
+            });
+
+            let mut cubemap_face = Texture::new_with(
+                runtime,
+                Some(&format!("cubemap{i}")),
+                Some(
+                    wgpu::TextureUsages::RENDER_ATTACHMENT
+                        | wgpu::TextureUsages::COPY_SRC
+                        | wgpu::TextureUsages::COPY_DST
+                        | wgpu::TextureUsages::TEXTURE_BINDING,
+                ),
+                None,
+                wgpu::TextureFormat::Rgba16Float,
+                4,
+                2,
+                texture_size,
+                texture_size,
+                1,
+                &[],
+            );
+
+            // update the view to point at one of the cube faces
+            camera.set_view(*view);
+            buffer_upkeep();
+
+            {
+                let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some(&format!("cubemap{i}")),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &cubemap_face.view,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                            store: wgpu::StoreOp::Store,
+                        },
+                        depth_slice: None,
+                    })],
+                    depth_stencil_attachment: None,
+                    ..Default::default()
+                });
+
+                render_pass.set_pipeline(pipeline);
+                render_pass.set_bind_group(0, Some(bindgroup), &[]);
+                render_pass.draw(0..36, 0..1);
+            }
+
+            queue.submit([encoder.finish()]);
+            let mips = cubemap_face.generate_mips(runtime, Some("cubemap mips"), mip_levels);
+            cubemap_faces.push(cubemap_face);
+            cubemap_faces.extend(mips);
+        }
+
+        Texture::new_cubemap_texture(
+            runtime,
+            Some("skybox cubemap"),
+            texture_size,
+            cubemap_faces.as_slice(),
+            wgpu::TextureFormat::Rgba16Float,
+            mip_levels,
+        )
+    }
 }
 
 pub async fn read_depth_texture_to_image(
@@ -1159,7 +1247,7 @@ impl CopiedTextureBuffer {
 
 #[cfg(test)]
 mod test {
-    use crate::{test::BlockOnFuture, texture::CopiedTextureBuffer, Context};
+    use crate::{context::Context, test::BlockOnFuture, texture::CopiedTextureBuffer};
 
     use super::Texture;
 

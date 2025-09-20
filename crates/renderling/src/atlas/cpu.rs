@@ -12,15 +12,15 @@ use image::RgbaImage;
 use snafu::{prelude::*, OptionExt};
 
 use crate::{
-    atlas::AtlasDescriptor,
+    atlas::{
+        shader::{AtlasBlittingDescriptor, AtlasDescriptor, AtlasTextureDescriptor},
+        TextureModes,
+    },
     bindgroup::ManagedBindGroup,
-    texture::{CopiedTextureBuffer, Texture},
+    texture::{self, CopiedTextureBuffer, Texture},
 };
 
-use super::{
-    atlas_image::{convert_pixels, AtlasImage},
-    AtlasBlittingDescriptor, AtlasTexture,
-};
+use super::atlas_image::{convert_pixels, AtlasImage};
 
 pub(crate) const ATLAS_SUGGESTED_SIZE: u32 = 2048;
 pub(crate) const ATLAS_SUGGESTED_LAYERS: u32 = 8;
@@ -41,18 +41,83 @@ pub enum AtlasError {
 
     #[snafu(display("Missing bindgroup {layer}"))]
     MissingBindgroup { layer: u32 },
+
+    #[snafu(display("{source}"))]
+    Texture {
+        source: crate::texture::TextureError,
+    },
+}
+
+/// A staged texture in the texture atlas.
+///
+/// An [`AtlasTexture`] can be acquired through:
+///
+/// * [`Atlas::add_image`]
+/// * [`Atlas::add_images`].
+/// * [`Atlas::set_images`]
+///
+/// Clones of this type all point to the same underlying data.
+///
+/// Dropping all clones of this type will cause it to be unloaded from the GPU.
+///
+/// If a value of this type has been given to another staged resource,
+/// like [`Material`](crate::material::Material), this will prevent the `AtlasTexture` from
+/// being dropped and unloaded.
+///
+/// Internally an `AtlasTexture` holds a reference to its descriptor,
+/// [`AtlasTextureDescriptor`].
+#[derive(Clone)]
+pub struct AtlasTexture {
+    pub(crate) descriptor: Hybrid<AtlasTextureDescriptor>,
+}
+
+impl AtlasTexture {
+    /// Get the GPU slab identifier of the underlying descriptor.
+    ///
+    /// This is for internal use.
+    pub fn id(&self) -> Id<AtlasTextureDescriptor> {
+        self.descriptor.id()
+    }
+
+    /// Return a copy of the underlying descriptor.
+    pub fn descriptor(&self) -> AtlasTextureDescriptor {
+        self.descriptor.get()
+    }
+
+    /// Return the texture modes of the underlying descriptor.
+    pub fn modes(&self) -> TextureModes {
+        self.descriptor.get().modes
+    }
+
+    /// Sets the texture modes of the underlying descriptor.
+    ///
+    /// ## Warning
+    ///
+    /// This also sets the modes for all clones of this value.
+    pub fn set_modes(&self, modes: TextureModes) {
+        self.descriptor.modify(|d| d.modes = modes);
+    }
 }
 
 /// Used to track textures internally.
+///
+/// We need a separate struct for tracking textures because the atlas
+/// reorganizes the layout (the packing) of textures each time a new
+/// texture is added.
+///
+/// This means the textures must be updated on the GPU, but we don't
+/// want these internal representations to keep unreferenced textures
+/// from dropping, so we have to maintain a separate representation
+/// here.
 #[derive(Clone, Debug)]
 struct InternalAtlasTexture {
     /// Cached value.
-    cache: AtlasTexture,
-    weak: WeakHybrid<AtlasTexture>,
+    cache: AtlasTextureDescriptor,
+    weak: WeakHybrid<AtlasTextureDescriptor>,
 }
 
 impl InternalAtlasTexture {
-    fn from_hybrid(hat: &Hybrid<AtlasTexture>) -> Self {
+    fn from_hybrid(hat: &Hybrid<AtlasTextureDescriptor>) -> Self {
         InternalAtlasTexture {
             cache: hat.get(),
             weak: WeakHybrid::from_hybrid(hat),
@@ -63,7 +128,7 @@ impl InternalAtlasTexture {
         self.weak.has_external_references()
     }
 
-    fn set(&mut self, at: AtlasTexture) {
+    fn set(&mut self, at: AtlasTextureDescriptor) {
         self.cache = at;
         if let Some(hy) = self.weak.upgrade() {
             hy.set(at);
@@ -140,6 +205,8 @@ pub struct Atlas {
     layers: Arc<RwLock<Vec<Layer>>>,
     label: Option<String>,
     descriptor: Hybrid<AtlasDescriptor>,
+    /// Used for user updates into the atlas by blit images into specific frames.
+    blitter: AtlasBlitter,
 }
 
 impl Atlas {
@@ -226,13 +293,18 @@ impl Atlas {
             size: UVec3::new(size.width, size.height, size.depth_or_array_layers),
         });
         let label = label.map(|s| s.to_owned());
-
+        let blitter = AtlasBlitter::new(
+            slab.device(),
+            texture.texture.format(),
+            wgpu::FilterMode::Linear,
+        );
         Atlas {
             slab: slab.clone(),
             layers: Arc::new(RwLock::new(layers)),
-            texture_array: Arc::new(RwLock::new(texture)),
             descriptor,
             label,
+            blitter,
+            texture_array: Arc::new(RwLock::new(texture)),
         }
     }
 
@@ -265,10 +337,7 @@ impl Atlas {
     /// Reset this atlas with all new images.
     ///
     /// Any existing `Hybrid<AtlasTexture>`s will be invalidated.
-    pub fn set_images(
-        &self,
-        images: &[AtlasImage],
-    ) -> Result<Vec<Hybrid<AtlasTexture>>, AtlasError> {
+    pub fn set_images(&self, images: &[AtlasImage]) -> Result<Vec<AtlasTexture>, AtlasError> {
         log::debug!("setting images");
         {
             // UNWRAP: panic on purpose
@@ -291,7 +360,7 @@ impl Atlas {
     pub fn add_images<'a>(
         &self,
         images: impl IntoIterator<Item = &'a AtlasImage>,
-    ) -> Result<Vec<Hybrid<AtlasTexture>>, AtlasError> {
+    ) -> Result<Vec<AtlasTexture>, AtlasError> {
         // UNWRAP: POP
         let mut layers = self.layers.write().unwrap();
         let mut texture_array = self.texture_array.write().unwrap();
@@ -314,7 +383,20 @@ impl Atlas {
         *layers = staged.layers;
 
         staged.image_additions.sort_by_key(|a| a.0);
-        Ok(staged.image_additions.into_iter().map(|a| a.1).collect())
+        Ok(staged
+            .image_additions
+            .into_iter()
+            .map(|a| AtlasTexture { descriptor: a.1 })
+            .collect())
+    }
+
+    /// Add one image.
+    ///
+    /// If you have more than one image, you should use [`Atlas::add_images`], as every
+    /// change in images causes a repacking, which might be expensive.
+    pub fn add_image(&self, image: &AtlasImage) -> Result<AtlasTexture, AtlasError> {
+        // UNWRAP: safe because we know there's at least one image
+        Ok(self.add_images(Some(image))?.pop().unwrap())
     }
 
     /// Resize the atlas.
@@ -453,6 +535,107 @@ impl Atlas {
         }
         images
     }
+
+    /// Update the given [`AtlasTexture`] with a [`Texture`](crate::texture::Texture).
+    ///
+    /// This will blit the `Texture` into the frame of the [`Atlas`] pointed to by the
+    /// `AtlasTexture`.
+    ///
+    /// Returns a submission index that can be polled with [`wgpu::Device::poll`].
+    pub fn update_texture(
+        &self,
+        atlas_texture: &AtlasTexture,
+        source_texture: &texture::Texture,
+    ) -> Result<wgpu::SubmissionIndex, AtlasError> {
+        self.update_textures(Some((atlas_texture, source_texture)))
+    }
+
+    /// Update the given [`AtlasTexture`]s with [`Texture`](crate::texture::Texture)s.
+    ///
+    /// This will blit the `Texture` into the frame of the [`Atlas`] pointed to by the
+    /// `AtlasTexture`.
+    ///
+    /// Returns a submission index that can be polled with [`wgpu::Device::poll`].
+    pub fn update_textures<'a>(
+        &self,
+        updates: impl IntoIterator<Item = (&'a AtlasTexture, &'a texture::Texture)>,
+    ) -> Result<wgpu::SubmissionIndex, AtlasError> {
+        let updates = updates.into_iter().collect::<Vec<_>>();
+        let op = AtlasBlittingOperation::new(&self.blitter, self, updates.len());
+        let runtime = self.slab.runtime();
+        let mut encoder = runtime
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("Atlas::update_texture"),
+            });
+        for (i, (atlas_texture, source_texture)) in updates.into_iter().enumerate() {
+            op.run(
+                runtime,
+                &mut encoder,
+                source_texture,
+                i as u32,
+                self,
+                atlas_texture,
+            )?;
+        }
+        Ok(runtime.queue.submit(Some(encoder.finish())))
+    }
+
+    /// Update the given [`AtlasTexture`]s with new data.
+    ///
+    /// This will blit the image data into the frame of the [`Atlas`] pointed to by the
+    /// `AtlasTexture`.
+    ///
+    /// Returns a submission index that can be polled with [`wgpu::Device::poll`].
+    pub fn update_images<'a>(
+        &self,
+        updates: impl IntoIterator<Item = (&'a AtlasTexture, impl Into<AtlasImage>)>,
+    ) -> Result<wgpu::SubmissionIndex, AtlasError> {
+        let (atlas_textures, images): (Vec<_>, Vec<_>) = updates.into_iter().unzip();
+        let mut textures = vec![];
+        for image in images.into_iter() {
+            let image: AtlasImage = image.into();
+            let atlas_format = self.get_texture().texture.format();
+            let bytes = super::atlas_image::convert_pixels(
+                image.pixels,
+                image.format,
+                atlas_format,
+                image.apply_linear_transfer,
+            );
+            let (channels, subpixel_bytes) =
+                texture::wgpu_texture_format_channels_and_subpixel_bytes(atlas_format)
+                    .context(TextureSnafu)?;
+            let texture = texture::Texture::new_with(
+                self.slab.runtime(),
+                Some("atlas-image-update"),
+                Some(wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST),
+                None,
+                atlas_format,
+                channels,
+                subpixel_bytes,
+                image.size.x,
+                image.size.y,
+                1,
+                &bytes,
+            );
+            textures.push(texture);
+        }
+        self.update_textures(atlas_textures.into_iter().zip(textures.iter()))
+    }
+
+    /// Update the given [`AtlasTexture`]s with new data.
+    ///
+    /// This will blit the image data into the frame of the [`Atlas`] pointed to by the
+    /// `AtlasTexture`.
+    ///
+    /// Returns a submission index that can be polled with [`wgpu::Device::poll`].
+    pub fn update_image(
+        &self,
+        atlas_texture: &AtlasTexture,
+        source_image: impl Into<AtlasImage>,
+    ) -> Result<wgpu::SubmissionIndex, AtlasError> {
+        self.update_images(Some((atlas_texture, source_image)))
+    }
 }
 
 fn pack_images<'a>(
@@ -513,7 +696,7 @@ fn pack_images<'a>(
 /// Internal atlas resources.
 struct StagedResources {
     texture: Texture,
-    image_additions: Vec<(usize, Hybrid<AtlasTexture>)>,
+    image_additions: Vec<(usize, Hybrid<AtlasTextureDescriptor>)>,
     layers: Vec<Layer>,
 }
 
@@ -559,7 +742,7 @@ impl StagedResources {
                         original_index,
                         image,
                     } => {
-                        let atlas_texture = AtlasTexture {
+                        let atlas_texture = AtlasTextureDescriptor {
                             offset_px,
                             size_px,
                             frame_index: frame_index as u32,
@@ -680,6 +863,30 @@ pub struct AtlasBlittingOperation {
 }
 
 impl AtlasBlittingOperation {
+    pub fn new(
+        blitter: &AtlasBlitter,
+        into_atlas: &Atlas,
+        source_layers: usize,
+    ) -> AtlasBlittingOperation {
+        AtlasBlittingOperation {
+            desc: into_atlas
+                .slab
+                .new_value(AtlasBlittingDescriptor::default()),
+            atlas_slab_buffer: Arc::new(Mutex::new(into_atlas.slab.commit())),
+            bindgroups: {
+                let mut bgs = vec![];
+                for _ in 0..source_layers {
+                    bgs.push(ManagedBindGroup::default());
+                }
+                Arc::new(bgs)
+            },
+            pipeline: blitter.pipeline.clone(),
+            sampler: blitter.sampler.clone(),
+            bindgroup_layout: blitter.bind_group_layout.clone(),
+            from_texture_id: Default::default(),
+        }
+    }
+
     /// Copies the data from texture this [`AtlasBlittingOperation`] was created with
     /// into the atlas.
     ///
@@ -690,9 +897,9 @@ impl AtlasBlittingOperation {
         runtime: impl AsRef<WgpuRuntime>,
         encoder: &mut wgpu::CommandEncoder,
         from_texture: &crate::texture::Texture,
-        layer: u32,
+        from_layer: u32,
         to_atlas: &Atlas,
-        atlas_texture: &Hybrid<AtlasTexture>,
+        atlas_texture: &AtlasTexture,
     ) -> Result<(), AtlasError> {
         let runtime = runtime.as_ref();
 
@@ -718,15 +925,15 @@ impl AtlasBlittingOperation {
             .texture
             .create_view(&wgpu::TextureViewDescriptor {
                 label: Some("atlas-blitting"),
-                base_array_layer: layer,
+                base_array_layer: from_layer,
                 array_layer_count: Some(1),
                 dimension: Some(wgpu::TextureViewDimension::D2),
                 ..Default::default()
             });
         let bindgroup = self
             .bindgroups
-            .get(layer as usize)
-            .context(MissingBindgroupSnafu { layer })?
+            .get(from_layer as usize)
+            .context(MissingBindgroupSnafu { layer: from_layer })?
             .get(should_invalidate, || {
                 runtime
                     .device
@@ -752,7 +959,7 @@ impl AtlasBlittingOperation {
                     })
             });
 
-        let atlas_texture = atlas_texture.get();
+        let atlas_texture = atlas_texture.descriptor();
         let atlas_view = to_atlas_texture
             .texture
             .create_view(&wgpu::TextureViewDescriptor {
@@ -804,19 +1011,20 @@ impl AtlasBlitter {
     ///
     /// # Arguments
     /// - `device` - A [`wgpu::Device`]
-    /// - `format` - The [`wgpu::TextureFormat`] of the texture that will be copied to. This has to be renderable.
-    /// - `sample_type` - The [`wgpu::Sampler`] Filtering Mode
+    /// - `format` - The [`wgpu::TextureFormat`] of the atlas being updated.
+    /// - `mag_filter` - The filtering algorithm to use when magnifying.
+    ///   This is used when the input source is smaller than the destination.
     pub fn new(
         device: &wgpu::Device,
         format: wgpu::TextureFormat,
-        sample_type: wgpu::FilterMode,
+        mag_filter: wgpu::FilterMode,
     ) -> Self {
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("atlas-blitter"),
             address_mode_u: wgpu::AddressMode::ClampToEdge,
             address_mode_v: wgpu::AddressMode::ClampToEdge,
             address_mode_w: wgpu::AddressMode::ClampToEdge,
-            mag_filter: sample_type,
+            mag_filter,
             ..Default::default()
         });
 
@@ -838,7 +1046,7 @@ impl AtlasBlitter {
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Texture {
                         sample_type: wgpu::TextureSampleType::Float {
-                            filterable: sample_type == wgpu::FilterMode::Linear,
+                            filterable: mag_filter == wgpu::FilterMode::Linear,
                         },
                         view_dimension: wgpu::TextureViewDimension::D2,
                         multisampled: false,
@@ -848,7 +1056,7 @@ impl AtlasBlitter {
                 wgpu::BindGroupLayoutEntry {
                     binding: 2,
                     visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(if sample_type == wgpu::FilterMode::Linear {
+                    ty: wgpu::BindingType::Sampler(if mag_filter == wgpu::FilterMode::Linear {
                         wgpu::SamplerBindingType::Filtering
                     } else {
                         wgpu::SamplerBindingType::NonFiltering
@@ -906,43 +1114,16 @@ impl AtlasBlitter {
             sampler: sampler.into(),
         }
     }
-
-    pub fn new_blitting_operation(
-        &self,
-        into_atlas: &Atlas,
-        layers: usize,
-    ) -> AtlasBlittingOperation {
-        AtlasBlittingOperation {
-            desc: into_atlas
-                .slab
-                .new_value(AtlasBlittingDescriptor::default()),
-            atlas_slab_buffer: Arc::new(Mutex::new(into_atlas.slab.commit())),
-            bindgroups: {
-                let mut bgs = vec![];
-                for _ in 0..layers {
-                    bgs.push(ManagedBindGroup::default());
-                }
-                Arc::new(bgs)
-            },
-            pipeline: self.pipeline.clone(),
-            sampler: self.sampler.clone(),
-            bindgroup_layout: self.bind_group_layout.clone(),
-            from_texture_id: Default::default(),
-        }
-    }
 }
 
 #[cfg(test)]
 mod test {
     use crate::{
-        atlas::{AtlasTexture, TextureAddressMode},
-        camera::Camera,
+        atlas::{shader::AtlasTextureDescriptor, TextureAddressMode},
+        context::Context,
+        geometry::Vertex,
         material::Materials,
-        pbr::Material,
-        stage::Vertex,
         test::BlockOnFuture,
-        transform::Transform,
-        Context,
     };
     use glam::{UVec3, Vec2, Vec3, Vec4};
 
@@ -960,7 +1141,9 @@ mod test {
             .with_background_color(Vec3::splat(0.0).extend(1.0))
             .with_bloom(false);
         let (projection, view) = crate::camera::default_ortho2d(32.0, 32.0);
-        let _camera = stage.new_camera(Camera::new(projection, view));
+        let _camera = stage
+            .new_camera()
+            .with_projection_and_view(projection, view);
         let dirt = AtlasImage::from_path("../../img/dirt.jpg").unwrap();
         let sandstone = AtlasImage::from_path("../../img/sandstone.png").unwrap();
         let texels = AtlasImage::from_path("../../test_img/atlas/uv_mapping.png").unwrap();
@@ -971,13 +1154,14 @@ mod test {
         let texels_entry = &atlas_entries[2];
 
         let _rez = stage
-            .builder()
-            .with_material(Material {
-                albedo_texture_id: texels_entry.id(),
-                has_lighting: false,
-                ..Default::default()
-            })
-            .with_vertices({
+            .new_primitive()
+            .with_material(
+                stage
+                    .new_material()
+                    .with_albedo_texture(texels_entry)
+                    .with_has_lighting(false),
+            )
+            .with_vertices(stage.new_vertices({
                 let tl = Vertex::default()
                     .with_position(Vec3::ZERO)
                     .with_uv0(Vec2::ZERO);
@@ -991,12 +1175,8 @@ mod test {
                     .with_position(Vec3::new(1.0, 1.0, 0.0))
                     .with_uv0(Vec2::splat(1.0));
                 [tl, bl, br, tl, br, tr]
-            })
-            .with_transform(Transform {
-                scale: Vec3::new(32.0, 32.0, 1.0),
-                ..Default::default()
-            })
-            .build();
+            }))
+            .with_transform(stage.new_transform().with_scale(Vec3::new(32.0, 32.0, 1.0)));
 
         log::info!("rendering");
         let frame = ctx.get_next_frame().unwrap();
@@ -1019,19 +1199,21 @@ mod test {
             .new_stage()
             .with_background_color(Vec4::new(1.0, 1.0, 0.0, 1.0));
         let (projection, view) = crate::camera::default_ortho2d(w as f32, h as f32);
-        let _camera = stage.new_camera(Camera::new(projection, view));
+        let _camera = stage
+            .new_camera()
+            .with_projection_and_view(projection, view);
         let texels = AtlasImage::from_path("../../img/happy_mac.png").unwrap();
         let entries = stage.set_images(std::iter::repeat_n(texels, 3)).unwrap();
         let clamp_tex = &entries[0];
         let repeat_tex = &entries[1];
-        repeat_tex.modify(|t| {
-            t.modes.s = TextureAddressMode::Repeat;
-            t.modes.t = TextureAddressMode::Repeat;
+        repeat_tex.set_modes(TextureModes {
+            s: TextureAddressMode::Repeat,
+            t: TextureAddressMode::Repeat,
         });
         let mirror_tex = &entries[2];
-        mirror_tex.modify(|t| {
-            t.modes.s = TextureAddressMode::MirroredRepeat;
-            t.modes.t = TextureAddressMode::MirroredRepeat;
+        mirror_tex.set_modes(TextureModes {
+            s: TextureAddressMode::MirroredRepeat,
+            t: TextureAddressMode::MirroredRepeat,
         });
 
         let sheet_w = sheet_w as f32;
@@ -1052,42 +1234,44 @@ mod test {
             [tl, bl, br, tl, br, tr]
         });
         let _clamp_rez = stage
-            .builder()
-            .with_vertices_array(geometry.array())
-            .with_material(Material {
-                albedo_texture_id: clamp_tex.id(),
-                has_lighting: false,
-                ..Default::default()
-            })
-            .build();
+            .new_primitive()
+            .with_vertices(&geometry)
+            .with_material(
+                stage
+                    .new_material()
+                    .with_albedo_texture(clamp_tex)
+                    .with_has_lighting(false),
+            );
 
         let _repeat_rez = stage
-            .builder()
-            .with_transform(Transform {
-                translation: Vec3::new(sheet_w + 1.0, 0.0, 0.0),
-                ..Default::default()
-            })
-            .with_material(Material {
-                albedo_texture_id: repeat_tex.id(),
-                has_lighting: false,
-                ..Default::default()
-            })
-            .with_vertices_array(geometry.array())
-            .build();
+            .new_primitive()
+            .with_transform(stage.new_transform().with_translation(Vec3::new(
+                sheet_w + 1.0,
+                0.0,
+                0.0,
+            )))
+            .with_material(
+                stage
+                    .new_material()
+                    .with_albedo_texture(repeat_tex)
+                    .with_has_lighting(false),
+            )
+            .with_vertices(&geometry);
 
         let _mirror_rez = stage
-            .builder()
-            .with_transform(Transform {
-                translation: Vec3::new(sheet_w * 2.0 + 2.0, 0.0, 0.0),
-                ..Default::default()
-            })
-            .with_material(Material {
-                albedo_texture_id: mirror_tex.id(),
-                has_lighting: false,
-                ..Default::default()
-            })
-            .with_vertices_array(geometry.array())
-            .build();
+            .new_primitive()
+            .with_transform(stage.new_transform().with_translation(Vec3::new(
+                sheet_w * 2.0 + 2.0,
+                0.0,
+                0.0,
+            )))
+            .with_material(
+                stage
+                    .new_material()
+                    .with_albedo_texture(mirror_tex)
+                    .with_has_lighting(false),
+            )
+            .with_vertices(geometry);
 
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
@@ -1110,77 +1294,82 @@ mod test {
             .with_background_color(Vec4::new(1.0, 1.0, 0.0, 1.0));
 
         let (projection, view) = crate::camera::default_ortho2d(w as f32, h as f32);
-        let _camera = stage.new_camera(Camera::new(projection, view));
+        let _camera = stage
+            .new_camera()
+            .with_projection_and_view(projection, view);
 
         let texels = AtlasImage::from_path("../../img/happy_mac.png").unwrap();
         let entries = stage.set_images(std::iter::repeat_n(texels, 3)).unwrap();
 
         let clamp_tex = &entries[0];
         let repeat_tex = &entries[1];
-        repeat_tex.modify(|t| {
-            t.modes.s = TextureAddressMode::Repeat;
-            t.modes.t = TextureAddressMode::Repeat;
+        repeat_tex.set_modes(TextureModes {
+            s: TextureAddressMode::Repeat,
+            t: TextureAddressMode::Repeat,
         });
 
         let mirror_tex = &entries[2];
-        mirror_tex.modify(|t| {
-            t.modes.s = TextureAddressMode::MirroredRepeat;
-            t.modes.t = TextureAddressMode::MirroredRepeat;
+        mirror_tex.set_modes(TextureModes {
+            s: TextureAddressMode::MirroredRepeat,
+            t: TextureAddressMode::MirroredRepeat,
         });
 
         let sheet_w = sheet_w as f32;
         let sheet_h = sheet_h as f32;
-        let (geometry, _clamp_material, _clamp_prim) = stage
-            .builder()
-            .with_vertices({
-                let tl = Vertex::default()
-                    .with_position(Vec3::ZERO)
-                    .with_uv0(Vec2::ZERO);
-                let tr = Vertex::default()
-                    .with_position(Vec3::new(sheet_w, 0.0, 0.0))
-                    .with_uv0(Vec2::new(-3.0, 0.0));
-                let bl = Vertex::default()
-                    .with_position(Vec3::new(0.0, sheet_h, 0.0))
-                    .with_uv0(Vec2::new(0.0, -3.0));
-                let br = Vertex::default()
-                    .with_position(Vec3::new(sheet_w, sheet_h, 0.0))
-                    .with_uv0(Vec2::splat(-3.0));
-                [tl, bl, br, tl, br, tr]
-            })
-            .with_material(Material {
-                albedo_texture_id: clamp_tex.id(),
-                has_lighting: false,
-                ..Default::default()
-            })
-            .build();
+        let geometry = stage.new_vertices({
+            let tl = Vertex::default()
+                .with_position(Vec3::ZERO)
+                .with_uv0(Vec2::ZERO);
+            let tr = Vertex::default()
+                .with_position(Vec3::new(sheet_w, 0.0, 0.0))
+                .with_uv0(Vec2::new(-3.0, 0.0));
+            let bl = Vertex::default()
+                .with_position(Vec3::new(0.0, sheet_h, 0.0))
+                .with_uv0(Vec2::new(0.0, -3.0));
+            let br = Vertex::default()
+                .with_position(Vec3::new(sheet_w, sheet_h, 0.0))
+                .with_uv0(Vec2::splat(-3.0));
+            [tl, bl, br, tl, br, tr]
+        });
+        let _clamp_prim = stage
+            .new_primitive()
+            .with_vertices(&geometry)
+            .with_material(
+                stage
+                    .new_material()
+                    .with_albedo_texture(clamp_tex)
+                    .with_has_lighting(false),
+            );
 
         let _repeat_rez = stage
-            .builder()
-            .with_material(Material {
-                albedo_texture_id: repeat_tex.id(),
-                has_lighting: false,
-                ..Default::default()
-            })
-            .with_transform(Transform {
-                translation: Vec3::new(sheet_w + 1.0, 0.0, 0.0),
-                ..Default::default()
-            })
-            .with_vertices_array(geometry.array())
-            .build();
+            .new_primitive()
+            .with_material(
+                stage
+                    .new_material()
+                    .with_albedo_texture(repeat_tex)
+                    .with_has_lighting(false),
+            )
+            .with_transform(stage.new_transform().with_translation(Vec3::new(
+                sheet_w + 1.0,
+                0.0,
+                0.0,
+            )))
+            .with_vertices(&geometry);
 
         let _mirror_rez = stage
-            .builder()
-            .with_material(Material {
-                albedo_texture_id: mirror_tex.id(),
-                has_lighting: false,
-                ..Default::default()
-            })
-            .with_transform(Transform {
-                translation: Vec3::new(sheet_w * 2.0 + 2.0, 0.0, 0.0),
-                ..Default::default()
-            })
-            .with_vertices_array(geometry.array())
-            .build();
+            .new_primitive()
+            .with_material(
+                stage
+                    .new_material()
+                    .with_albedo_texture(mirror_tex)
+                    .with_has_lighting(false),
+            )
+            .with_transform(stage.new_transform().with_translation(Vec3::new(
+                sheet_w * 2.0 + 2.0,
+                0.0,
+                0.0,
+            )))
+            .with_vertices(&geometry);
 
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
@@ -1190,7 +1379,7 @@ mod test {
 
     #[test]
     fn transform_uvs_for_atlas() {
-        let mut tex = AtlasTexture {
+        let mut tex = AtlasTextureDescriptor {
             offset_px: UVec2::ZERO,
             size_px: UVec2::ONE,
             ..Default::default()

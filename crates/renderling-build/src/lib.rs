@@ -137,6 +137,16 @@ fn wgsl(spv_filepath: impl AsRef<std::path::Path>, destination: impl AsRef<std::
     }
 }
 
+/// The cargo workspace directory.
+pub fn workspace_dir() -> std::path::PathBuf {
+    std::path::PathBuf::from(std::env!("CARGO_WORKSPACE_DIR"))
+}
+
+/// The test_output directory.
+pub fn test_output_dir() -> std::path::PathBuf {
+    workspace_dir().join("test_output")
+}
+
 #[derive(Debug)]
 pub struct RenderlingPaths {
     /// `cargo_workspace` is not available when building outside of the project directory.

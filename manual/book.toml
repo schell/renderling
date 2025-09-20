@@ -1,0 +1,21 @@
+[book]
+authors = ["Schell Carl Scivally"]
+language = "en"
+src = "src"
+title = "The Renderling Manual"
+description = "Operations manual for the Renderling real-time renderer"
+
+# The "environment" preprocessor, provided by `mdbook-environment`,
+# references variables from here and the environment that can then be
+# interpolated in the book with `{{VARIABLE}}`.
+#
+# Setting variables here overrides any set in the environment, so for
+# variables that must change based on environment we add them here
+# commented out.
+[preprocessor.environment]
+# when deploying the manual 
+# DOCS_URL = "https://docs.rs/renderling/latest"
+
+# when running locally
+# DOCS_URL = "http://localhost:4000"
+

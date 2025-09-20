@@ -1,38 +1,43 @@
 //! GPU staging area.
-//!
-//! The `Stage` object contains a slab buffer and a render pipeline.
-//! It is used to stage [`Renderlet`]s for rendering.
 use core::ops::Deref;
 use core::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
 use craballoc::prelude::*;
 use crabslab::Id;
-use snafu::Snafu;
+use glam::{Mat4, UVec2, Vec4};
+use snafu::{ResultExt, Snafu};
 use std::sync::{atomic::AtomicBool, Arc, Mutex, RwLock};
 
+use crate::atlas::AtlasTexture;
+use crate::camera::Camera;
+use crate::geometry::{shader::GeometryDescriptor, MorphTarget, Vertex};
+#[cfg(gltf)]
+use crate::gltf::GltfDocument;
+use crate::light::{DirectionalLight, IsLight, Light, PointLight, SpotLight};
+use crate::material::Material;
+use crate::pbr::brdf::BrdfLut;
+use crate::pbr::ibl::Ibl;
+use crate::primitive::Primitive;
 use crate::{
-    atlas::{AtlasError, AtlasImage, AtlasImageError, AtlasTexture},
+    atlas::{AtlasError, AtlasImage, AtlasImageError},
     bindgroup::ManagedBindGroup,
     bloom::Bloom,
-    camera::Camera,
+    camera::shader::CameraDescriptor,
     debug::DebugOverlay,
     draw::DrawCalls,
-    geometry::Geometry,
+    geometry::{Geometry, Indices, MorphTargetWeights, MorphTargets, Skin, SkinJoint, Vertices},
     light::{
-        AnalyticalLight, Light, LightDetails, LightTiling, LightTilingConfig, Lighting,
-        LightingBindGroupLayoutEntries, LightingError, ShadowMap,
+        AnalyticalLight, LightTiling, LightTilingConfig, Lighting, LightingBindGroupLayoutEntries,
+        LightingError, ShadowMap,
     },
     material::Materials,
     pbr::debug::DebugChannel,
     skybox::{Skybox, SkyboxRenderPipeline},
-    stage::Renderlet,
     texture::{DepthTexture, Texture},
     tonemapping::Tonemapping,
-    transform::Transform,
-    tuple::Bundle,
+    transform::{NestedTransform, Transform},
 };
 
-use super::*;
-
+/// Enumeration of errors that may be the result of [`Stage`] functions.
 #[derive(Debug, Snafu)]
 pub enum StageError {
     #[snafu(display("{source}"))]
@@ -40,6 +45,10 @@ pub enum StageError {
 
     #[snafu(display("{source}"))]
     Lighting { source: LightingError },
+
+    #[cfg(gltf)]
+    #[snafu(display("{source}"))]
+    Gltf { source: crate::gltf::StageGltfError },
 }
 
 impl From<AtlasError> for StageError {
@@ -51,6 +60,13 @@ impl From<AtlasError> for StageError {
 impl From<LightingError> for StageError {
     fn from(source: LightingError) -> Self {
         Self::Lighting { source }
+    }
+}
+
+#[cfg(gltf)]
+impl From<crate::gltf::StageGltfError> for StageError {
+    fn from(source: crate::gltf::StageGltfError) -> Self {
+        Self::Gltf { source }
     }
 }
 
@@ -79,14 +95,16 @@ fn create_msaa_textureview(
         .create_view(&wgpu::TextureViewDescriptor::default())
 }
 
+/// Result of calling [`Stage::commit`].
 pub struct StageCommitResult {
-    pub geometry_buffer: SlabBuffer<wgpu::Buffer>,
-    pub lighting_buffer: SlabBuffer<wgpu::Buffer>,
-    pub materials_buffer: SlabBuffer<wgpu::Buffer>,
+    pub(crate) geometry_buffer: SlabBuffer<wgpu::Buffer>,
+    pub(crate) lighting_buffer: SlabBuffer<wgpu::Buffer>,
+    pub(crate) materials_buffer: SlabBuffer<wgpu::Buffer>,
 }
 
 impl StageCommitResult {
-    pub fn latest_creation_time(&self) -> usize {
+    /// Timestamp of the most recently created buffer used by the stage.
+    pub(crate) fn latest_creation_time(&self) -> usize {
         [
             &self.geometry_buffer,
             &self.materials_buffer,
@@ -98,7 +116,9 @@ impl StageCommitResult {
         .unwrap_or_default()
     }
 
-    pub fn should_invalidate(&self, previous_creation_time: usize) -> bool {
+    /// Whether or not the stage's bindgroups need to be invalidated as a result
+    /// of the call to [`Stage::commit`] that produced this `StageCommitResult`.
+    pub(crate) fn should_invalidate(&self, previous_creation_time: usize) -> bool {
         let mut should = false;
         if self.geometry_buffer.is_new_this_commit() {
             log::trace!("geometry buffer is new this frame");
@@ -205,7 +225,7 @@ impl RenderletBindGroup<'_> {
 }
 
 /// Performs a rendering of an entire scene, given the resources at hand.
-pub struct StageRendering<'a> {
+pub(crate) struct StageRendering<'a> {
     // TODO: include the rest of the needed paramaters from `stage`, and then remove `stage`
     pub stage: &'a Stage,
     pub pipeline: &'a wgpu::RenderPipeline,
@@ -233,7 +253,7 @@ impl StageRendering<'_> {
                 .get(should_invalidate_renderlet_bind_group, || {
                     log::trace!("recreating renderlet bind group");
                     let atlas_texture = self.stage.materials.atlas().get_texture();
-                    let skybox = self.stage.skybox.read().unwrap();
+                    let ibl = self.stage.ibl.read().unwrap();
                     let shadow_map = self.stage.lighting.shadow_map_atlas.get_texture();
                     RenderletBindGroup {
                         device: self.stage.device(),
@@ -243,198 +263,112 @@ impl StageRendering<'_> {
                         light_buffer: &commit_result.lighting_buffer,
                         atlas_texture_view: &atlas_texture.view,
                         atlas_texture_sampler: &atlas_texture.sampler,
-                        irradiance_texture_view: &skybox.irradiance_cubemap.view,
-                        irradiance_texture_sampler: &skybox.irradiance_cubemap.sampler,
-                        prefiltered_texture_view: &skybox.prefiltered_environment_cubemap.view,
-                        prefiltered_texture_sampler: &skybox
-                            .prefiltered_environment_cubemap
-                            .sampler,
-                        brdf_texture_view: &skybox.brdf_lut.view,
-                        brdf_texture_sampler: &skybox.brdf_lut.sampler,
+                        irradiance_texture_view: &ibl.irradiance_cubemap.view,
+                        irradiance_texture_sampler: &ibl.irradiance_cubemap.sampler,
+                        prefiltered_texture_view: &ibl.prefiltered_environment_cubemap.view,
+                        prefiltered_texture_sampler: &ibl.prefiltered_environment_cubemap.sampler,
+                        brdf_texture_view: &self.stage.brdf_lut.inner.view,
+                        brdf_texture_sampler: &self.stage.brdf_lut.inner.sampler,
                         shadow_map_texture_view: &shadow_map.view,
                         shadow_map_texture_sampler: &shadow_map.sampler,
                     }
                     .create()
                 });
 
-        self.stage.draw_calls.write().unwrap().upkeep();
         let mut draw_calls = self.stage.draw_calls.write().unwrap();
         let depth_texture = self.stage.depth_texture.read().unwrap();
         // UNWRAP: safe because we know the depth texture format will always match
         let maybe_indirect_buffer = draw_calls.pre_draw(&depth_texture).unwrap();
+
+        log::trace!("rendering");
+        let label = Some("stage render");
+
+        let mut encoder = self
+            .stage
+            .device()
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor { label });
         {
-            log::trace!("rendering");
-            let label = Some("stage render");
+            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label,
+                color_attachments: &[Some(self.color_attachment)],
+                depth_stencil_attachment: Some(self.depth_stencil_attachment),
+                ..Default::default()
+            });
 
-            let mut encoder = self
-                .stage
-                .device()
-                .create_command_encoder(&wgpu::CommandEncoderDescriptor { label });
-            {
-                let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                    label,
-                    color_attachments: &[Some(self.color_attachment)],
-                    depth_stencil_attachment: Some(self.depth_stencil_attachment),
-                    ..Default::default()
-                });
+            render_pass.set_pipeline(self.pipeline);
+            render_pass.set_bind_group(0, Some(renderlet_bind_group.as_ref()), &[]);
+            draw_calls.draw(&mut render_pass);
 
-                render_pass.set_pipeline(self.pipeline);
-                render_pass.set_bind_group(0, Some(renderlet_bind_group.as_ref()), &[]);
-                draw_calls.draw(&mut render_pass);
-
-                let has_skybox = self.stage.has_skybox.load(Ordering::Relaxed);
-                if has_skybox {
-                    let (pipeline, bindgroup) = self
-                        .stage
-                        .get_skybox_pipeline_and_bindgroup(&commit_result.geometry_buffer);
-                    render_pass.set_pipeline(&pipeline.pipeline);
-                    render_pass.set_bind_group(0, Some(bindgroup.as_ref()), &[]);
-                    let camera_id = self.stage.geometry.descriptor().get().camera_id.inner();
-                    render_pass.draw(0..36, camera_id..camera_id + 1);
-                }
+            let has_skybox = self.stage.has_skybox.load(Ordering::Relaxed);
+            if has_skybox {
+                let (pipeline, bindgroup) = self
+                    .stage
+                    .get_skybox_pipeline_and_bindgroup(&commit_result.geometry_buffer);
+                render_pass.set_pipeline(&pipeline.pipeline);
+                render_pass.set_bind_group(0, Some(bindgroup.as_ref()), &[]);
+                let camera_id = self.stage.geometry.descriptor().get().camera_id.inner();
+                render_pass.draw(0..36, camera_id..camera_id + 1);
             }
-            let sindex = self.stage.queue().submit(std::iter::once(encoder.finish()));
-            (sindex, maybe_indirect_buffer)
         }
+        let sindex = self.stage.queue().submit(std::iter::once(encoder.finish()));
+        (sindex, maybe_indirect_buffer)
     }
 }
 
-/// A helper struct to build [`Renderlet`]s in the [`Geometry`] manager.
-pub struct RenderletBuilder<'a, T> {
-    data: Renderlet,
-    resources: T,
-    stage: &'a Stage,
-}
-
-impl<'a> RenderletBuilder<'a, ()> {
-    pub fn new(stage: &'a Stage) -> Self {
-        RenderletBuilder {
-            data: Renderlet::default(),
-            resources: (),
-            stage,
-        }
-    }
-}
-
-impl<'a, T: Bundle> RenderletBuilder<'a, T> {
-    pub fn suffix<S>(self, element: S) -> RenderletBuilder<'a, T::Suffixed<S>> {
-        RenderletBuilder {
-            data: self.data,
-            resources: self.resources.suffix(element),
-            stage: self.stage,
-        }
-    }
-
-    pub fn with_vertices_array(mut self, array: Array<Vertex>) -> Self {
-        self.data.vertices_array = array;
-        self
-    }
-
-    pub fn with_vertices(
-        mut self,
-        vertices: impl IntoIterator<Item = Vertex>,
-    ) -> RenderletBuilder<'a, T::Suffixed<HybridArray<Vertex>>> {
-        let vertices = self.stage.geometry.new_vertices(vertices);
-        self.data.vertices_array = vertices.array();
-        self.suffix(vertices)
-    }
-
-    pub fn with_indices(
-        mut self,
-        indices: impl IntoIterator<Item = u32>,
-    ) -> RenderletBuilder<'a, T::Suffixed<HybridArray<u32>>> {
-        let indices = self.stage.geometry.new_indices(indices);
-        self.data.indices_array = indices.array();
-        self.suffix(indices)
-    }
-
-    pub fn with_transform_id(mut self, transform_id: Id<Transform>) -> Self {
-        self.data.transform_id = transform_id;
-        self
-    }
-
-    pub fn with_transform(
-        mut self,
-        transform: Transform,
-    ) -> RenderletBuilder<'a, T::Suffixed<Hybrid<Transform>>> {
-        let transform = self.stage.geometry.new_transform(transform);
-        self.data.transform_id = transform.id();
-        self.suffix(transform)
-    }
-
-    pub fn with_nested_transform(mut self, transform: &NestedTransform) -> Self {
-        self.data.transform_id = transform.global_transform_id();
-        self
-    }
-
-    pub fn with_material_id(mut self, material_id: Id<Material>) -> Self {
-        self.data.material_id = material_id;
-        self
-    }
-
-    pub fn with_material(
-        mut self,
-        material: Material,
-    ) -> RenderletBuilder<'a, T::Suffixed<Hybrid<Material>>> {
-        let material = self.stage.materials.new_material(material);
-        self.data.material_id = material.id();
-        self.suffix(material)
-    }
-
-    pub fn with_skin_id(mut self, skin_id: Id<Skin>) -> Self {
-        self.data.skin_id = skin_id;
-        self
-    }
-
-    pub fn with_morph_targets(
-        mut self,
-        morph_targets: impl IntoIterator<Item = Array<MorphTarget>>,
-    ) -> (Self, HybridArray<Array<MorphTarget>>) {
-        let morph_targets = self.stage.geometry.new_morph_targets_array(morph_targets);
-        self.data.morph_targets = morph_targets.array();
-        (self, morph_targets)
-    }
-
-    pub fn with_morph_weights(
-        mut self,
-        morph_weights: impl IntoIterator<Item = f32>,
-    ) -> (Self, HybridArray<f32>) {
-        let morph_weights = self.stage.geometry.new_weights(morph_weights);
-        self.data.morph_weights = morph_weights.array();
-        (self, morph_weights)
-    }
-
-    pub fn with_geometry_descriptor_id(mut self, pbr_config_id: Id<GeometryDescriptor>) -> Self {
-        self.data.geometry_descriptor_id = pbr_config_id;
-        self
-    }
-
-    pub fn with_bounds(mut self, bounds: impl Into<BoundingSphere>) -> Self {
-        self.data.bounds = bounds.into();
-        self
-    }
-
-    /// Build the [`Renderlet`], add it to the [`Stage`] with [`Stage::add_renderlet`] and
-    /// return the [`Hybrid`] along with any resources that were staged.
-    ///
-    /// The returned value will be a tuple with the [`Hybrid<Renderlet>`] as the head, and
-    /// all other resources added as the tail.
-    pub fn build(self) -> <T::Suffixed<Hybrid<Renderlet>> as Bundle>::Reduced
-    where
-        T::Suffixed<Hybrid<Renderlet>>: Bundle,
-    {
-        let renderlet = self.stage.geometry.new_renderlet(self.data);
-        self.stage.add_renderlet(&renderlet);
-        self.resources.suffix(renderlet).reduce()
-    }
-}
-
-/// Represents an entire scene worth of rendering data.
+/// Entrypoint for staging data on the GPU and interacting with lighting.
 ///
-/// A clone of a stage is a reference to the same stage.
+/// # Design
 ///
-/// ## Note
-/// Only available on the CPU. Not available in shaders.
+/// The `Stage` struct serves as the central hub for managing and staging data on the GPU.
+/// It provides a consistent API for creating resources, applying effects, and customizing parameters.
+///
+/// The `Stage` uses a combination of `new_*`, `with_*`, `set_*`, and getter functions to facilitate
+/// resource management and customization.
+///
+/// Resources are managed internally, requiring no additional lifecycle work from the user.
+/// This design simplifies the process of resource management, allowing developers to focus on creating and rendering
+/// their scenes without worrying about the underlying GPU resource management.
+///
+/// # Resources
+///
+/// The `Stage` is responsible for creating various resources and staging them on the GPU.
+/// It handles the setup and management of the following resources:
+///
+/// * [`Camera`]: Manages the view and projection matrices for rendering scenes.
+///   - [`Stage::new_camera`] creates a new [`Camera`].
+///   - [`Stage::use_camera`] tells the `Stage` to use a camera.
+/// * [`Transform`]: Represents the position, rotation, and scale of objects.
+///   - [`Stage::new_transform`] creates a new [`Transform`].
+/// * [`NestedTransform`]: Allows for hierarchical transformations, useful for complex object hierarchies.
+///   - [`Stage::new_nested_transform`] creates a new [`NestedTransform`]
+/// * [`Vertices`]: Manages vertex data for rendering meshes.
+///   - [`Stage::new_vertices`]
+/// * [`Indices`]: Manages index data for rendering meshes with indexed drawing.
+///   - [`Stage::new_indices`]
+/// * [`Primitive`]: Represents a drawable object in the scene.
+///   - [`Stage::new_primitive`]
+/// * [`GltfDocument`]: Handles loading and managing GLTF assets.
+///   - [`Stage::load_gltf_document_from_path`] loads a new GLTF document from the local filesystem.
+///   - [`Stage::load_gltf_document_from_bytes`] parses a new GLTF document from pre-loaded bytes.
+/// * [`Skin`]: Animation and rigging information.
+///   - [`Stage::new_skin`]
+///
+/// # Lighting effects
+///
+/// The `Stage` also manages various lighting effects, which enhance the visual quality of the scene:
+///
+/// * [`AnalyticalLight`]: Simulates a single light source, with three flavors:
+///   - [`DirectionalLight`]: Represents sunlight or other distant light sources.
+///   - [`PointLight`]: Represents a light source that emits light in all directions from a single point.
+///   - [`SpotLight`]: Represents a light source that emits light in a cone shape.
+/// * [`Skybox`]: Provides image-based lighting (IBL) for realistic environmental reflections and ambient lighting.
+/// * [`Bloom`]: Adds a glow effect to bright areas of the scene, enhancing visual appeal.
+/// * [`ShadowMap`]: Manages shadow mapping for realistic shadow rendering.
+/// * [`LightTiling`]: Optimizes lighting calculations by dividing the scene into tiles for efficient processing.
+///
+/// # Note
+///
+/// Clones of [`Stage`] all point to the same underlying data.
 #[derive(Clone)]
 pub struct Stage {
     pub(crate) geometry: Geometry,
@@ -460,8 +394,13 @@ pub struct Stage {
     pub(crate) debug_overlay: DebugOverlay,
     pub(crate) background_color: Arc<RwLock<wgpu::Color>>,
 
+    pub(crate) brdf_lut: BrdfLut,
+
+    pub(crate) ibl: Arc<RwLock<Ibl>>,
+
     pub(crate) skybox: Arc<RwLock<Skybox>>,
     pub(crate) skybox_bindgroup: Arc<Mutex<Option<Arc<wgpu::BindGroup>>>>,
+    // TODO: remove Stage.has_skybox, replace with Skybox::is_empty
     pub(crate) has_skybox: Arc<AtomicBool>,
 
     pub(crate) has_bloom: Arc<AtomicBool>,
@@ -498,96 +437,118 @@ impl AsRef<Lighting> for Stage {
     }
 }
 
-/// Geometry methods.
+#[cfg(gltf)]
+/// GLTF functions
 impl Stage {
-    /// Stage a [`Camera`] on the GPU.
+    pub fn load_gltf_document_from_path(
+        &self,
+        path: impl AsRef<std::path::Path>,
+    ) -> Result<GltfDocument, StageError> {
+        use snafu::ResultExt;
+
+        let (document, buffers, images) =
+            gltf::import(&path).with_context(|_| crate::gltf::GltfSnafu {
+                path: Some(path.as_ref().to_path_buf()),
+            })?;
+        GltfDocument::from_gltf(self, &document, buffers, images)
+    }
+
+    pub fn load_gltf_document_from_bytes(
+        &self,
+        bytes: impl AsRef<[u8]>,
+    ) -> Result<GltfDocument, StageError> {
+        let (document, buffers, images) =
+            gltf::import_slice(bytes).context(crate::gltf::GltfSnafu { path: None })?;
+        GltfDocument::from_gltf(self, &document, buffers, images)
+    }
+}
+
+/// Geometry functions
+impl Stage {
+    /// Returns the vertices of a white unit cube.
     ///
-    /// If the camera has not been set, this camera will be used
-    /// automatically.
-    pub fn new_camera(&self, camera: Camera) -> Hybrid<Camera> {
-        self.geometry.new_camera(camera)
+    /// This is the mesh of every [`Primitive`] that has not had its vertices set.
+    pub fn default_vertices(&self) -> &Vertices {
+        self.geometry.default_vertices()
+    }
+
+    /// Stage a new [`Camera`] on the GPU.
+    ///
+    /// If no camera is currently in use on the [`Stage`] through
+    /// [`Stage::use_camera`], this new camera will be used automatically.
+    pub fn new_camera(&self) -> Camera {
+        self.geometry.new_camera()
     }
 
     /// Use the given camera when rendering.
-    pub fn use_camera(&self, camera: impl AsRef<Hybrid<Camera>>) {
-        self.geometry.use_camera(camera);
+    pub fn use_camera(&self, camera: impl AsRef<Camera>) {
+        self.geometry.use_camera(camera.as_ref());
     }
 
     /// Return the `Id` of the camera currently in use.
-    pub fn used_camera_id(&self) -> Id<Camera> {
+    pub fn used_camera_id(&self) -> Id<CameraDescriptor> {
         self.geometry.descriptor().get().camera_id
     }
 
     /// Set the default camera `Id`.
-    pub fn use_camera_id(&self, camera_id: Id<Camera>) {
+    pub fn use_camera_id(&self, camera_id: Id<CameraDescriptor>) {
         self.geometry
             .descriptor()
             .modify(|desc| desc.camera_id = camera_id);
     }
 
     /// Stage a [`Transform`] on the GPU.
-    pub fn new_transform(&self, transform: Transform) -> Hybrid<Transform> {
-        self.geometry.new_transform(transform)
+    pub fn new_transform(&self) -> Transform {
+        self.geometry.new_transform()
     }
 
     /// Stage some vertex geometry data.
-    pub fn new_vertices(&self, data: impl IntoIterator<Item = Vertex>) -> HybridArray<Vertex> {
+    pub fn new_vertices(&self, data: impl IntoIterator<Item = Vertex>) -> Vertices {
         self.geometry.new_vertices(data)
     }
 
     /// Stage some vertex index data.
-    pub fn new_indices(&self, data: impl IntoIterator<Item = u32>) -> HybridArray<u32> {
+    pub fn new_indices(&self, data: impl IntoIterator<Item = u32>) -> Indices {
         self.geometry.new_indices(data)
     }
 
-    /// Create new morph targets.
-    // TODO: Move `MorphTarget` to geometry.
+    /// Stage new morph targets.
     pub fn new_morph_targets(
         &self,
-        data: impl IntoIterator<Item = MorphTarget>,
-    ) -> HybridArray<MorphTarget> {
+        data: impl IntoIterator<Item = Vec<MorphTarget>>,
+    ) -> MorphTargets {
         self.geometry.new_morph_targets(data)
     }
 
-    /// Create an array of morph target arrays.
-    pub fn new_morph_targets_array(
+    /// Stage new morph target weights.
+    pub fn new_morph_target_weights(
         &self,
-        data: impl IntoIterator<Item = Array<MorphTarget>>,
-    ) -> HybridArray<Array<MorphTarget>> {
-        let morph_targets = data.into_iter();
-        self.geometry.new_morph_targets_array(morph_targets)
+        data: impl IntoIterator<Item = f32>,
+    ) -> MorphTargetWeights {
+        self.geometry.new_morph_target_weights(data)
     }
 
-    /// Create new morph target weights.
-    pub fn new_weights(&self, data: impl IntoIterator<Item = f32>) -> HybridArray<f32> {
-        self.geometry.new_weights(data)
-    }
-
-    /// Create a new array of joint transform ids that each point to a [`Transform`].
-    pub fn new_joint_transform_ids(
+    /// Stage a new skin.
+    pub fn new_skin(
         &self,
-        data: impl IntoIterator<Item = Id<Transform>>,
-    ) -> HybridArray<Id<Transform>> {
-        self.geometry.new_joint_transform_ids(data)
+        joints: impl IntoIterator<Item = impl Into<SkinJoint>>,
+        inverse_bind_matrices: impl IntoIterator<Item = impl Into<Mat4>>,
+    ) -> Skin {
+        self.geometry.new_skin(joints, inverse_bind_matrices)
     }
 
-    /// Create a new array of matrices.
-    pub fn new_matrices(&self, data: impl IntoIterator<Item = Mat4>) -> HybridArray<Mat4> {
-        self.geometry.new_matrices(data)
-    }
-
-    /// Create a new skin.
-    // TODO: move `Skin` to geometry.
-    pub fn new_skin(&self, skin: Skin) -> Hybrid<Skin> {
-        self.geometry.new_skin(skin)
-    }
-
-    /// Stage a new [`Renderlet`].
+    /// Stage a new [`Primitive`] on the GPU.
     ///
-    /// The `Renderlet` should still be added to the draw list with
-    /// [`Stage::add_renderlet`].
-    pub fn new_renderlet(&self, renderlet: Renderlet) -> Hybrid<Renderlet> {
-        self.geometry.new_renderlet(renderlet)
+    /// The returned [`Primitive`] will automatically be added to this [`Stage`].
+    ///
+    /// The returned [`Primitive`] will have the stage's default [`Vertices`], which is an all-white
+    /// unit cube.
+    ///
+    /// The returned [`Primitive`] uses the stage's default [`Material`], which is white and
+    /// **does not** participate in lighting. To change this, first create a [`Material`] with
+    /// [`Stage::new_material`] and then call [`Primitive::set_material`] with the new material.
+    pub fn new_primitive(&self) -> Primitive {
+        Primitive::new(self)
     }
 
     /// Returns a reference to the descriptor stored at the root of the
@@ -599,14 +560,18 @@ impl Stage {
 
 /// Materials methods.
 impl Stage {
-    /// Stage a new [`Material`] on the GPU.
-    pub fn new_material(&self, material: Material) -> Hybrid<Material> {
-        self.materials.new_material(material)
+    /// Returns the default [`Material`].
+    ///
+    /// The default is an all-white matte material.
+    pub fn default_material(&self) -> &Material {
+        self.materials.default_material()
     }
 
-    /// Create an array of materials, stored contiguously.
-    pub fn new_materials(&self, data: impl IntoIterator<Item = Material>) -> HybridArray<Material> {
-        self.materials.new_materials(data)
+    /// Stage a new [`Material`] on the GPU.
+    ///
+    /// The returned [`Material`] can be customized using the builder pattern.
+    pub fn new_material(&self) -> Material {
+        self.materials.new_material()
     }
 
     /// Set the size of the atlas.
@@ -631,7 +596,7 @@ impl Stage {
     pub fn add_images(
         &self,
         images: impl IntoIterator<Item = impl Into<AtlasImage>>,
-    ) -> Result<Vec<Hybrid<AtlasTexture>>, StageError> {
+    ) -> Result<Vec<AtlasTexture>, StageError> {
         let images = images.into_iter().map(|i| i.into()).collect::<Vec<_>>();
         let frames = self.materials.atlas().add_images(&images)?;
 
@@ -661,7 +626,7 @@ impl Stage {
     pub fn set_images(
         &self,
         images: impl IntoIterator<Item = impl Into<AtlasImage>>,
-    ) -> Result<Vec<Hybrid<AtlasTexture>>, StageError> {
+    ) -> Result<Vec<AtlasTexture>, StageError> {
         let images = images.into_iter().map(|i| i.into()).collect::<Vec<_>>();
         let frames = self.materials.atlas().set_images(&images)?;
 
@@ -674,57 +639,63 @@ impl Stage {
 
 /// Lighting methods.
 impl Stage {
-    /// Stage a new analytical light.
-    ///
-    /// `T` must be one of:
-    /// - [`DirectionalLightDescriptor`](crate::light::DirectionalLightDescriptor)
-    /// - [`SpotLightDescriptor`](crate::light::SpotLightDescriptor)
-    /// - [`PointLightDescriptor`](crate::light::PointLightDescriptor)
-    pub fn new_analytical_light<T>(&self, light_descriptor: T) -> AnalyticalLight
-    where
-        T: Clone + Copy + SlabItem + Send + Sync,
-        Light: From<Id<T>>,
-        LightDetails: From<Hybrid<T>>,
-    {
-        self.lighting.new_analytical_light(light_descriptor)
+    /// Stage a new directional light.
+    pub fn new_directional_light(&self) -> AnalyticalLight<DirectionalLight> {
+        self.lighting.new_directional_light()
     }
 
-    /// Add an [`AnalyticalLightBundle`] to the internal list of lights.
+    /// Stage a new point light.
+    pub fn new_point_light(&self) -> AnalyticalLight<PointLight> {
+        self.lighting.new_point_light()
+    }
+
+    /// Stage a new spot light.
+    pub fn new_spot_light(&self) -> AnalyticalLight<SpotLight> {
+        self.lighting.new_spot_light()
+    }
+
+    /// Add an [`AnalyticalLight`] to the internal list of lights.
     ///
-    /// This is called implicitly by [`Stage::new_analytical_light`].
+    /// This is called implicitly by `Stage::new_*_light`.
     ///
     /// This can be used to add the light back to the scene after using
     /// [`Stage::remove_light`].
-    pub fn add_light(&self, bundle: &AnalyticalLight) {
+    pub fn add_light<T>(&self, bundle: &AnalyticalLight<T>)
+    where
+        T: IsLight,
+        Light: From<T>,
+    {
         self.lighting.add_light(bundle)
     }
 
-    /// Remove an [`AnalyticalLightBundle`] from the internal list of lights.
+    /// Remove an [`AnalyticalLight`] from the internal list of lights.
     ///
     /// Use this to exclude a light from rendering, without dropping the light.
     ///
     /// After calling this function you can include the light again using [`Stage::add_light`].
-    pub fn remove_light(&self, bundle: &AnalyticalLight) {
+    pub fn remove_light<T: IsLight>(&self, bundle: &AnalyticalLight<T>) {
         self.lighting.remove_light(bundle);
     }
 
-    /// Enable shadow mapping for the given [`AnalyticalLightBundle`], creating
+    /// Enable shadow mapping for the given [`AnalyticalLight`], creating
     /// a new [`ShadowMap`].
     ///
     /// ## Tips for making a good shadow map
     ///
     /// 1. Make sure the map is big enough.
     ///    Using a big map can fix some peter panning issues, even before
-    ///    messing with bias in the [`ShadowMapDescriptor`].
+    ///    playing with bias in the returned [`ShadowMap`].
     ///    The bigger the map, the cleaner the shadows will be. This can
     ///    also solve PCF problems.
-    /// 2. Don't set PCF samples too high in the [`ShadowMapDescriptor`], as
+    /// 2. Don't set PCF samples too high in the returned [`ShadowMap`], as
     ///    this can _cause_ peter panning.
     /// 3. Ensure the **znear** and **zfar** parameters make sense, as the
     ///    shadow map uses these to determine how much of the scene to cover.
-    pub fn new_shadow_map(
+    ///    If you find that shadows are cut off in a straight line, it's likely
+    ///    `znear` or `zfar` needs adjustment.
+    pub fn new_shadow_map<T>(
         &self,
-        analytical_light_bundle: &AnalyticalLight,
+        analytical_light: &AnalyticalLight<T>,
         // Size of the shadow map
         size: UVec2,
         // Distance to the near plane of the shadow map's frustum.
@@ -735,10 +706,14 @@ impl Stage {
         //
         // Only objects within the shadow map's frustum will cast shadows.
         z_far: f32,
-    ) -> Result<ShadowMap, StageError> {
+    ) -> Result<ShadowMap, StageError>
+    where
+        T: IsLight,
+        Light: From<T>,
+    {
         Ok(self
             .lighting
-            .new_shadow_map(analytical_light_bundle, size, z_near, z_far)?)
+            .new_shadow_map(analytical_light, size, z_near, z_far)?)
     }
 
     /// Enable light tiling, creating a new [`LightTiling`].
@@ -752,6 +727,132 @@ impl Stage {
             UVec2::new(depth_texture_size.width, depth_texture_size.height),
             config,
         )
+    }
+}
+
+/// Skybox methods
+impl Stage {
+    /// Return the cached skybox render pipeline, creating it if necessary.
+    fn get_skybox_pipeline_and_bindgroup(
+        &self,
+        geometry_slab_buffer: &wgpu::Buffer,
+    ) -> (Arc<SkyboxRenderPipeline>, Arc<wgpu::BindGroup>) {
+        let msaa_sample_count = self.msaa_sample_count.load(Ordering::Relaxed);
+        // UNWRAP: safe because we're only ever called from the render thread.
+        let mut pipeline_guard = self.skybox_pipeline.write().unwrap();
+        let pipeline = if let Some(pipeline) = pipeline_guard.as_mut() {
+            if pipeline.msaa_sample_count() != msaa_sample_count {
+                *pipeline = Arc::new(crate::skybox::create_skybox_render_pipeline(
+                    self.device(),
+                    Texture::HDR_TEXTURE_FORMAT,
+                    Some(msaa_sample_count),
+                ));
+            }
+            pipeline.clone()
+        } else {
+            let pipeline = Arc::new(crate::skybox::create_skybox_render_pipeline(
+                self.device(),
+                Texture::HDR_TEXTURE_FORMAT,
+                Some(msaa_sample_count),
+            ));
+            *pipeline_guard = Some(pipeline.clone());
+            pipeline
+        };
+        // UNWRAP: safe because we're only ever called from the render thread.
+        let mut bindgroup = self.skybox_bindgroup.lock().unwrap();
+        let bindgroup = if let Some(bindgroup) = bindgroup.as_ref() {
+            bindgroup.clone()
+        } else {
+            let bg = Arc::new(crate::skybox::create_skybox_bindgroup(
+                self.device(),
+                geometry_slab_buffer,
+                self.skybox.read().unwrap().environment_cubemap_texture(),
+            ));
+            *bindgroup = Some(bg.clone());
+            bg
+        };
+        (pipeline, bindgroup)
+    }
+
+    /// Used the given [`Skybox`].
+    ///
+    /// To remove the currently used [`Skybox`], call [`Skybox::remove_skybox`].
+    pub fn use_skybox(&self, skybox: &Skybox) -> &Self {
+        // UNWRAP: if we can't acquire the lock we want to panic.
+        let mut guard = self.skybox.write().unwrap();
+        *guard = skybox.clone();
+        self.has_skybox
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        *self.skybox_bindgroup.lock().unwrap() = None;
+        *self.textures_bindgroup.lock().unwrap() = None;
+        self
+    }
+
+    /// Removes the currently used [`Skybox`].
+    ///
+    /// Returns the currently used [`Skybox`], if any.
+    ///
+    /// After calling this the [`Stage`] will not render with any [`Skybox`], until
+    /// [`Skybox::use_skybox`] is called with another [`Skybox`].
+    pub fn remove_skybox(&self) -> Option<Skybox> {
+        let mut guard = self.skybox.write().unwrap();
+        if guard.is_empty() {
+            // Do nothing, the skybox is already empty
+            None
+        } else {
+            let skybox = guard.clone();
+            *guard = Skybox::empty(self.runtime());
+            Some(skybox)
+        }
+    }
+
+    /// Returns a new [`Skybox`] using the HDR image at the given path, if possible.
+    ///
+    /// The returned [`Skybox`] must be **used** with [`Stage::use_skybox`].
+    pub fn new_skybox_from_path(
+        &self,
+        path: impl AsRef<std::path::Path>,
+    ) -> Result<Skybox, AtlasImageError> {
+        let hdr = AtlasImage::from_hdr_path(path)?;
+        Ok(Skybox::new(self.runtime(), hdr))
+    }
+
+    /// Returns a new [`Skybox`] using the bytes of an HDR image, if possible.
+    ///
+    /// The returned [`Skybox`] must be **used** with [`Stage::use_skybox`].
+    pub fn new_skybox_from_bytes(&self, bytes: &[u8]) -> Result<Skybox, AtlasImageError> {
+        let hdr = AtlasImage::from_hdr_bytes(bytes)?;
+        Ok(Skybox::new(self.runtime(), hdr))
+    }
+}
+
+/// Image based lighting methods
+impl Stage {
+    /// Crate a new [`Ibl`] from the given [`Skybox`].
+    pub fn new_ibl(&self, skybox: &Skybox) -> Ibl {
+        Ibl::new(self.runtime(), skybox)
+    }
+
+    /// Use the given image based lighting.
+    ///
+    /// Use [`Stage::new_ibl`] to create a new [`Ibl`].
+    pub fn use_ibl(&self, ibl: &Ibl) -> &Self {
+        let mut guard = self.ibl.write().unwrap();
+        *guard = ibl.clone();
+        self
+    }
+
+    /// Remove the current image based lighting from the stage and return it, if any.
+    pub fn remove_ibl(&self) -> Option<Ibl> {
+        let mut guard = self.ibl.write().unwrap();
+        if guard.is_empty() {
+            // Do nothing, we're already not using IBL
+            None
+        } else {
+            let ibl = guard.clone();
+            *guard = Ibl::new(self.runtime(), &Skybox::empty(self.runtime()));
+            Some(ibl)
+        }
     }
 }
 
@@ -769,20 +870,46 @@ impl Stage {
         &self.runtime().queue
     }
 
+    /// Returns a reference to the [`BrdfLut`].
+    ///
+    /// This is used for creating skyboxes used in image based lighting.
+    pub fn brdf_lut(&self) -> &BrdfLut {
+        &self.brdf_lut
+    }
+
+    /// Sum the byte size of all used GPU memory.
+    ///
+    /// Adds together the byte size of all underlying slab buffers.
+    ///
+    /// ## Note
+    /// This does not take into consideration staged data that has not yet
+    /// been committed with either [`Stage::commit`] or [`Stage::render`].
+    pub fn used_gpu_buffer_byte_size(&self) -> usize {
+        let num_u32s = self.geometry.slab_allocator().len()
+            + self.lighting.slab_allocator().len()
+            + self.materials.slab_allocator().len()
+            + self.bloom.slab_allocator().len()
+            + self.tonemapping.slab_allocator().len()
+            + self
+                .draw_calls
+                .read()
+                .unwrap()
+                .drawing_strategy()
+                .as_indirect()
+                .map(|draws| draws.slab_allocator().len())
+                .unwrap_or_default();
+        4 * num_u32s
+    }
+
     pub fn hdr_texture(&self) -> impl Deref<Target = crate::texture::Texture> + '_ {
         self.hdr_texture.read().unwrap()
     }
 
-    pub fn builder(&self) -> RenderletBuilder<'_, ()> {
-        RenderletBuilder::new(self)
-    }
-
     /// Run all upkeep and commit all staged changes to the GPU.
     ///
-    /// This is done implicitly in [`Stage::render`] and [`StageRendering::run`].
+    /// This is done implicitly in [`Stage::render`].
     ///
-    /// This can be used after dropping [`Hybrid`] or [`Gpu`] resources to reclaim
-    /// those resources on the GPU.
+    /// This can be used after dropping resources to reclaim those resources on the GPU.
     #[must_use]
     pub fn commit(&self) -> StageCommitResult {
         let (materials_atlas_texture_was_recreated, materials_buffer) = self.materials.commit();
@@ -906,15 +1033,15 @@ impl Stage {
         })
     }
 
-    pub fn create_renderlet_pipeline(
+    pub fn create_primitive_pipeline(
         device: &wgpu::Device,
         fragment_color_format: wgpu::TextureFormat,
         multisample_count: u32,
     ) -> wgpu::RenderPipeline {
         log::trace!("creating stage render pipeline");
         let label = Some("renderlet");
-        let vertex_linkage = crate::linkage::renderlet_vertex::linkage(device);
-        let fragment_linkage = crate::linkage::renderlet_fragment::linkage(device);
+        let vertex_linkage = crate::linkage::primitive_vertex::linkage(device);
+        let fragment_linkage = crate::linkage::primitive_fragment::linkage(device);
 
         let bind_group_layout = Self::renderlet_pipeline_bindgroup_layout(device);
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -969,7 +1096,7 @@ impl Stage {
     }
 
     /// Create a new stage.
-    pub fn new(ctx: &crate::Context) -> Self {
+    pub fn new(ctx: &crate::context::Context) -> Self {
         let runtime = ctx.runtime();
         let device = &runtime.device;
         let resolution @ UVec2 { x: w, y: h } = ctx.get_size();
@@ -1000,13 +1127,17 @@ impl Stage {
             ctx.get_render_target().format().add_srgb_suffix(),
             &bloom.get_mix_texture(),
         );
-        let stage_pipeline = Self::create_renderlet_pipeline(
+        let stage_pipeline = Self::create_primitive_pipeline(
             device,
             wgpu::TextureFormat::Rgba16Float,
             multisample_count,
         );
         let geometry_buffer = geometry.slab_allocator().commit();
         let lighting = Lighting::new(stage_config.shadow_map_atlas_size, &geometry);
+
+        let brdf_lut = BrdfLut::new(runtime);
+        let skybox = Skybox::empty(runtime);
+        let ibl = Ibl::new(runtime, &skybox);
 
         Self {
             materials,
@@ -1025,10 +1156,12 @@ impl Stage {
             renderlet_bind_group: ManagedBindGroup::default(),
             renderlet_bind_group_created: Arc::new(0.into()),
 
-            skybox: Arc::new(RwLock::new(Skybox::empty(runtime))),
+            ibl: Arc::new(RwLock::new(ibl)),
+            skybox: Arc::new(RwLock::new(skybox)),
             skybox_bindgroup: Default::default(),
             skybox_pipeline: Default::default(),
             has_skybox: Arc::new(AtomicBool::new(false)),
+            brdf_lut,
             bloom,
             tonemapping,
             has_bloom: AtomicBool::from(true).into(),
@@ -1081,7 +1214,7 @@ impl Stage {
 
         log::debug!("setting multisample count to {multisample_count}");
         // UNWRAP: POP
-        *self.renderlet_pipeline.write().unwrap() = Self::create_renderlet_pipeline(
+        *self.renderlet_pipeline.write().unwrap() = Self::create_primitive_pipeline(
             self.device(),
             wgpu::TextureFormat::Rgba16Float,
             multisample_count,
@@ -1281,17 +1414,6 @@ impl Stage {
         self
     }
 
-    /// Set the skybox.
-    pub fn set_skybox(&self, skybox: Skybox) {
-        // UNWRAP: if we can't acquire the lock we want to panic.
-        let mut guard = self.skybox.write().unwrap();
-        *guard = skybox;
-        self.has_skybox
-            .store(true, std::sync::atomic::Ordering::Relaxed);
-        *self.skybox_bindgroup.lock().unwrap() = None;
-        *self.textures_bindgroup.lock().unwrap() = None;
-    }
-
     /// Turn the bloom effect on or off.
     pub fn set_has_bloom(&self, has_bloom: bool) {
         self.has_bloom
@@ -1331,92 +1453,36 @@ impl Stage {
         self
     }
 
-    /// Return the skybox render pipeline, creating it if necessary.
-    fn get_skybox_pipeline_and_bindgroup(
-        &self,
-        geometry_slab_buffer: &wgpu::Buffer,
-    ) -> (Arc<SkyboxRenderPipeline>, Arc<wgpu::BindGroup>) {
-        let msaa_sample_count = self.msaa_sample_count.load(Ordering::Relaxed);
-        // UNWRAP: safe because we're only ever called from the render thread.
-        let mut pipeline_guard = self.skybox_pipeline.write().unwrap();
-        let pipeline = if let Some(pipeline) = pipeline_guard.as_mut() {
-            if pipeline.msaa_sample_count() != msaa_sample_count {
-                *pipeline = Arc::new(crate::skybox::create_skybox_render_pipeline(
-                    self.device(),
-                    Texture::HDR_TEXTURE_FORMAT,
-                    Some(msaa_sample_count),
-                ));
-            }
-            pipeline.clone()
-        } else {
-            let pipeline = Arc::new(crate::skybox::create_skybox_render_pipeline(
-                self.device(),
-                Texture::HDR_TEXTURE_FORMAT,
-                Some(msaa_sample_count),
-            ));
-            *pipeline_guard = Some(pipeline.clone());
-            pipeline
-        };
-        // UNWRAP: safe because we're only ever called from the render thread.
-        let mut bindgroup = self.skybox_bindgroup.lock().unwrap();
-        let bindgroup = if let Some(bindgroup) = bindgroup.as_ref() {
-            bindgroup.clone()
-        } else {
-            let bg = Arc::new(crate::skybox::create_skybox_bindgroup(
-                self.device(),
-                geometry_slab_buffer,
-                &self.skybox.read().unwrap().environment_cubemap,
-            ));
-            *bindgroup = Some(bg.clone());
-            bg
-        };
-        (pipeline, bindgroup)
-    }
-
-    /// Adds a renderlet to the internal list of renderlets to be drawn each
+    /// Adds a primitive to the internal list of renderlets to be drawn each
     /// frame.
+    ///
+    /// Returns the number of primitives added.
     ///
     /// If you drop the renderlet and no other references are kept, it will be
     /// removed automatically from the internal list and will cease to be
     /// drawn each frame.
-    pub fn add_renderlet(&self, renderlet: &Hybrid<Renderlet>) {
+    pub fn add_primitive(&self, renderlet: &Primitive) -> usize {
         // UNWRAP: if we can't acquire the lock we want to panic.
         let mut draws = self.draw_calls.write().unwrap();
-        draws.add_renderlet(renderlet);
+        draws.add_primitive(renderlet)
     }
 
-    /// Erase the given renderlet from the internal list of renderlets to be
+    /// Erase the given primitive from the internal list of primitives to be
     /// drawn each frame.
-    pub fn remove_renderlet(&self, renderlet: &Hybrid<Renderlet>) {
+    ///
+    /// Returns the number of primitives added.
+    pub fn remove_primitive(&self, renderlet: &Primitive) -> usize {
         let mut draws = self.draw_calls.write().unwrap();
-        draws.remove_renderlet(renderlet);
+        draws.remove_primitive(renderlet)
     }
 
-    /// Re-order the renderlets.
+    /// Sort the drawing order of renderlets.
     ///
-    /// This determines the order in which they are drawn each frame.
-    ///
-    /// If the `order` iterator is missing any renderlet ids, those missing
-    /// renderlets will be drawn _before_ the ordered ones, in no particular
-    /// order.
-    pub fn reorder_renderlets(&self, order: impl IntoIterator<Item = Id<Renderlet>>) {
-        log::trace!("reordering renderlets");
+    /// This determines the order in which [`Primitive`]s are drawn each frame.
+    pub fn sort_renderlets(&self, f: impl Fn(&Primitive, &Primitive) -> std::cmp::Ordering) {
         // UNWRAP: panic on purpose
         let mut guard = self.draw_calls.write().unwrap();
-        guard.reorder_renderlets(order);
-    }
-
-    /// Iterator over all staged [`Renderlet`]s.
-    ///
-    /// This iterator returns `Renderlets` wrapped in `WeakHybrid`, because they
-    /// are stored by weak references internally.
-    ///
-    /// You should have references of your own, but this is here as a convenience
-    /// method, and is used internally.
-    pub fn renderlets_iter(&self) -> impl Iterator<Item = WeakHybrid<Renderlet>> {
-        // UNWRAP: panic on purpose
-        let guard = self.draw_calls.read().unwrap();
-        guard.renderlets_iter().collect::<Vec<_>>().into_iter()
+        guard.sort_primitives(f);
     }
 
     /// Returns a clone of the current depth texture.
@@ -1425,19 +1491,6 @@ impl Stage {
             runtime: self.runtime().clone(),
             texture: self.depth_texture.read().unwrap().texture.clone(),
         }
-    }
-
-    pub fn new_skybox_from_path(
-        &self,
-        path: impl AsRef<std::path::Path>,
-    ) -> Result<Skybox, AtlasImageError> {
-        let hdr = AtlasImage::from_hdr_path(path)?;
-        Ok(Skybox::new(self.runtime(), hdr))
-    }
-
-    pub fn new_skybox_from_bytes(&self, bytes: &[u8]) -> Result<Skybox, AtlasImageError> {
-        let hdr = AtlasImage::from_hdr_bytes(bytes)?;
-        Ok(Skybox::new(self.runtime(), hdr))
     }
 
     /// Create a new [`NestedTransform`].
@@ -1552,172 +1605,17 @@ impl Stage {
     }
 }
 
-/// Manages scene heirarchy on the [`Stage`].
-///
-/// Clones all reference the same nested transform.
-///
-/// Only available on CPU.
-#[derive(Clone)]
-pub struct NestedTransform<Ct: IsContainer = HybridContainer> {
-    pub(crate) global_transform: Ct::Container<Transform>,
-    local_transform: Arc<RwLock<Transform>>,
-    children: Arc<RwLock<Vec<NestedTransform>>>,
-    parent: Arc<RwLock<Option<NestedTransform>>>,
-}
-
-impl core::fmt::Debug for NestedTransform {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        let children = self
-            .children
-            .read()
-            .unwrap()
-            .iter()
-            .map(|nt| nt.global_transform.id())
-            .collect::<Vec<_>>();
-        let parent = self
-            .parent
-            .read()
-            .unwrap()
-            .as_ref()
-            .map(|nt| nt.global_transform.id());
-        f.debug_struct("NestedTransform")
-            .field("local_transform", &self.local_transform)
-            .field("children", &children)
-            .field("parent", &parent)
-            .finish()
-    }
-}
-
-impl NestedTransform<WeakContainer> {
-    pub fn from_hybrid(hybrid: &NestedTransform) -> Self {
-        Self {
-            global_transform: WeakHybrid::from_hybrid(&hybrid.global_transform),
-            local_transform: hybrid.local_transform.clone(),
-            children: hybrid.children.clone(),
-            parent: hybrid.parent.clone(),
-        }
-    }
-
-    pub(crate) fn upgrade(&self) -> Option<NestedTransform> {
-        Some(NestedTransform {
-            global_transform: self.global_transform.upgrade()?,
-            local_transform: self.local_transform.clone(),
-            children: self.children.clone(),
-            parent: self.parent.clone(),
-        })
-    }
-}
-
-impl NestedTransform {
-    pub fn new(slab: &SlabAllocator<impl IsRuntime>) -> Self {
-        let nested = NestedTransform {
-            local_transform: Arc::new(RwLock::new(Transform::default())),
-            global_transform: slab.new_value(Transform::default()),
-            children: Default::default(),
-            parent: Default::default(),
-        };
-        nested.mark_dirty();
-        nested
-    }
-
-    pub fn get_notifier_index(&self) -> SourceId {
-        self.global_transform.notifier_index()
-    }
-
-    fn mark_dirty(&self) {
-        self.global_transform.set(self.get_global_transform());
-        for child in self.children.read().unwrap().iter() {
-            child.mark_dirty();
-        }
-    }
-
-    /// Modify the local transform.
-    ///
-    /// This automatically applies the local transform to the global transform.
-    pub fn modify(&self, f: impl Fn(&mut Transform)) {
-        {
-            // UNWRAP: panic on purpose
-            let mut local_guard = self.local_transform.write().unwrap();
-            f(&mut local_guard);
-        }
-        self.mark_dirty()
-    }
-
-    /// Set the local transform.
-    ///
-    /// This automatically applies the local transform to the global transform.
-    pub fn set(&self, transform: Transform) {
-        self.modify(move |t| {
-            *t = transform;
-        });
-    }
-
-    /// Returns the local transform.
-    pub fn get(&self) -> Transform {
-        *self.local_transform.read().unwrap()
-    }
-
-    /// Returns the global transform.
-    pub fn get_global_transform(&self) -> Transform {
-        let maybe_parent_guard = self.parent.read().unwrap();
-        let transform = self.get();
-        let parent_transform = maybe_parent_guard
-            .as_ref()
-            .map(|parent| parent.get_global_transform())
-            .unwrap_or_default();
-        Transform::from(Mat4::from(parent_transform) * Mat4::from(transform))
-    }
-
-    /// Get a vector containing all the transforms up to the root.
-    pub fn get_all_transforms(&self) -> Vec<Transform> {
-        let mut transforms = vec![];
-        if let Some(parent) = self.parent() {
-            transforms.extend(parent.get_all_transforms());
-        }
-        transforms.push(self.get());
-        transforms
-    }
-
-    pub fn global_transform_id(&self) -> Id<Transform> {
-        self.global_transform.id()
-    }
-
-    pub fn add_child(&self, node: &NestedTransform) {
-        *node.parent.write().unwrap() = Some(self.clone());
-        node.mark_dirty();
-        self.children.write().unwrap().push(node.clone());
-    }
-
-    pub fn remove_child(&self, node: &NestedTransform) {
-        self.children.write().unwrap().retain_mut(|child| {
-            if child.global_transform.id() == node.global_transform.id() {
-                node.mark_dirty();
-                let _ = node.parent.write().unwrap().take();
-                false
-            } else {
-                true
-            }
-        });
-    }
-
-    pub fn parent(&self) -> Option<NestedTransform> {
-        self.parent.read().unwrap().clone()
-    }
-}
-
 #[cfg(test)]
 mod test {
-    use craballoc::runtime::CpuRuntime;
+    use craballoc::{runtime::CpuRuntime, slab::SlabAllocator};
     use crabslab::{Array, Id, Slab};
     use glam::{Mat4, Vec2, Vec3, Vec4};
 
     use crate::{
-        camera::Camera,
-        geometry::{Geometry, GeometryDescriptor},
-        stage::{cpu::SlabAllocator, NestedTransform, Renderlet, Vertex},
+        context::Context,
+        geometry::{shader::GeometryDescriptor, Geometry, Vertex},
         test::BlockOnFuture,
-        transform::Transform,
-        Context,
+        transform::NestedTransform,
     };
 
     #[test]
@@ -1757,21 +1655,10 @@ mod test {
         )]
         let slab = SlabAllocator::<CpuRuntime>::new(&CpuRuntime, "transform", ());
         // Setup a hierarchy of transforms
-        log::info!("new");
         let root = NestedTransform::new(&slab);
-        let child = NestedTransform::new(&slab);
-        log::info!("set");
-        child.set(Transform {
-            translation: Vec3::new(1.0, 0.0, 0.0),
-            ..Default::default()
-        });
-        log::info!("grandchild");
-        let grandchild = NestedTransform::new(&slab);
-        grandchild.set(Transform {
-            translation: Vec3::new(1.0, 0.0, 0.0),
-            ..Default::default()
-        });
-
+        let child = NestedTransform::new(&slab).with_local_translation(Vec3::new(1.0, 0.0, 0.0));
+        let grandchild =
+            NestedTransform::new(&slab).with_local_translation(Vec3::new(1.0, 0.0, 0.0));
         log::info!("hierarchy");
         // Build the hierarchy
         root.add_child(&child);
@@ -1779,7 +1666,7 @@ mod test {
 
         log::info!("get_global_transform");
         // Calculate global transforms
-        let grandchild_global_transform = grandchild.get_global_transform();
+        let grandchild_global_transform = grandchild.global_descriptor();
 
         // Assert that the global transform is as expected
         assert_eq!(
@@ -1795,10 +1682,12 @@ mod test {
             .new_stage()
             .with_background_color([1.0, 1.0, 1.0, 1.0])
             .with_lighting(false);
-        let _camera = stage.new_camera(Camera::default_ortho2d(100.0, 100.0));
-        let _triangle_rez = stage
-            .builder()
-            .with_vertices([
+        let (projection, view) = crate::camera::default_ortho2d(100.0, 100.0);
+        let _camera = stage
+            .new_camera()
+            .with_projection_and_view(projection, view);
+        let _triangle_rez = stage.new_primitive().with_vertices(
+            stage.new_vertices([
                 Vertex::default()
                     .with_position([10.0, 10.0, 0.0])
                     .with_color([0.0, 1.0, 1.0, 1.0]),
@@ -1808,8 +1697,8 @@ mod test {
                 Vertex::default()
                     .with_position([90.0, 10.0, 0.0])
                     .with_color([1.0, 0.0, 1.0, 1.0]),
-            ])
-            .build();
+            ]),
+        );
 
         log::debug!("rendering without msaa");
         let frame = ctx.get_next_frame().unwrap();
@@ -1840,17 +1729,6 @@ mod test {
             },
         );
         frame.present();
-    }
-
-    #[test]
-    fn has_consistent_stage_renderlet_strong_count() {
-        let ctx = Context::headless(100, 100).block();
-        let stage = ctx.new_stage();
-        let r = stage.new_renderlet(Renderlet::default());
-        assert_eq!(1, r.ref_count());
-
-        stage.add_renderlet(&r);
-        assert_eq!(1, r.ref_count());
     }
 
     #[test]

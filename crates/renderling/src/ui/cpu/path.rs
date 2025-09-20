@@ -1,12 +1,7 @@
 //! Path and builder.
 //!
 //! Path colors are sRGB.
-use crate::{
-    pbr::Material,
-    stage::{Renderlet, Vertex},
-};
-use craballoc::prelude::{GpuArray, Hybrid};
-use crabslab::Id;
+use crate::{geometry::Vertex, material::Material, primitive::Primitive};
 use glam::{Vec2, Vec3, Vec3Swizzles, Vec4};
 use lyon::{
     path::traits::PathBuilder,
@@ -19,11 +14,9 @@ use super::{ImageId, Ui, UiTransform};
 pub use lyon::tessellation::{LineCap, LineJoin};
 
 pub struct UiPath {
-    pub vertices: GpuArray<Vertex>,
-    pub indices: GpuArray<u32>,
     pub transform: UiTransform,
-    pub material: Hybrid<Material>,
-    pub renderlet: Hybrid<Renderlet>,
+    pub material: Material,
+    pub primitive: Primitive,
 }
 
 #[derive(Clone, Copy)]
@@ -349,23 +342,19 @@ impl UiPathBuilder {
         let l_path = self.inner.build();
         let mut geometry = VertexBuffers::<Vertex, u16>::new();
         let mut tesselator = FillTessellator::new();
-
+        let material = self.ui.stage.new_material();
         let mut size = Vec2::ONE;
-        let albedo_texture_id = if let Some(ImageId(index)) = options.image_id {
-            if let Some(image) = self.ui.get_image(index) {
-                let tex = image.0.get();
-                log::debug!("size: {}", tex.size_px);
-                size.x = tex.size_px.x as f32;
-                size.y = tex.size_px.y as f32;
-                image.0.id()
-            } else {
-                Id::NONE
+        // If we have an image use it in the material
+        if let Some(ImageId(id)) = &options.image_id {
+            let guard = self.ui.images.read().unwrap();
+            if let Some(image) = guard.get(id) {
+                let size_px = image.0.descriptor().size_px;
+                log::debug!("size: {}", size_px);
+                size.x = size_px.x as f32;
+                size.y = size_px.y as f32;
+                material.set_albedo_texture(&image.0);
             }
-        } else {
-            log::debug!("no image");
-            Id::NONE
-        };
-
+        }
         tesselator
             .tessellate_path(
                 l_path.as_slice(),
@@ -386,31 +375,30 @@ impl UiPathBuilder {
                 }),
             )
             .unwrap();
-        let (vertices, indices, material, renderlet) = self
+        let vertices = self
             .ui
             .stage
-            .builder()
-            .with_vertices(std::mem::take(&mut geometry.vertices))
-            .with_indices(
-                std::mem::take(&mut geometry.indices)
-                    .into_iter()
-                    .map(|u| u as u32),
-            )
-            .with_material(Material {
-                albedo_texture_id,
-                ..Default::default()
-            })
-            .build();
+            .new_vertices(std::mem::take(&mut geometry.vertices));
+        let indices = self.ui.stage.new_indices(
+            std::mem::take(&mut geometry.indices)
+                .into_iter()
+                .map(|u| u as u32),
+        );
 
-        let transform = self.ui.new_transform(vec![renderlet.id()]);
-        renderlet.modify(|r| r.transform_id = transform.id());
+        let transform = self.ui.new_transform();
+        let primitive = self
+            .ui
+            .stage
+            .new_primitive()
+            .with_vertices(&vertices)
+            .with_indices(&indices)
+            .with_material(&material)
+            .with_transform(&transform.transform);
 
         UiPath {
-            vertices: vertices.into_gpu_only(),
-            indices: indices.into_gpu_only(),
             transform,
             material,
-            renderlet,
+            primitive,
         }
     }
 
@@ -433,23 +421,19 @@ impl UiPathBuilder {
             .with_line_cap(line_cap)
             .with_line_join(line_join)
             .with_line_width(line_width);
-
+        let material = self.ui.stage.new_material();
         let mut size = Vec2::ONE;
-        let albedo_texture_id = if let Some(ImageId(index)) = image_id {
-            if let Some(image) = self.ui.get_image(index) {
-                let tex = image.0.get();
-                log::debug!("size: {}", tex.size_px);
-                size.x = tex.size_px.x as f32;
-                size.y = tex.size_px.y as f32;
-                image.0.id()
-            } else {
-                Id::NONE
+        // If we have an image, use it in the material
+        if let Some(ImageId(id)) = &image_id {
+            let guard = self.ui.images.read().unwrap();
+            if let Some(image) = guard.get(id) {
+                let size_px = image.0.descriptor.get().size_px;
+                log::debug!("size: {}", size_px);
+                size.x = size_px.x as f32;
+                size.y = size_px.y as f32;
+                material.set_albedo_texture(&image.0);
             }
-        } else {
-            log::debug!("no image");
-            Id::NONE
-        };
-
+        }
         tesselator
             .tessellate_path(
                 l_path.as_slice(),
@@ -470,31 +454,28 @@ impl UiPathBuilder {
                 }),
             )
             .unwrap();
-        let (vertices, indices, material, renderlet) = self
+        let vertices = self
             .ui
             .stage
-            .builder()
-            .with_vertices(std::mem::take(&mut geometry.vertices))
-            .with_indices(
-                std::mem::take(&mut geometry.indices)
-                    .into_iter()
-                    .map(|u| u as u32),
-            )
-            .with_material(Material {
-                albedo_texture_id,
-                ..Default::default()
-            })
-            .build();
-
-        let transform = self.ui.new_transform(vec![renderlet.id()]);
-        renderlet.modify(|r| r.transform_id = transform.id());
-
+            .new_vertices(std::mem::take(&mut geometry.vertices));
+        let indices = self.ui.stage.new_indices(
+            std::mem::take(&mut geometry.indices)
+                .into_iter()
+                .map(|u| u as u32),
+        );
+        let transform = self.ui.new_transform();
+        let renderlet = self
+            .ui
+            .stage
+            .new_primitive()
+            .with_vertices(vertices)
+            .with_indices(indices)
+            .with_transform(&transform.transform)
+            .with_material(&material);
         UiPath {
-            vertices: vertices.into_gpu_only(),
-            indices: indices.into_gpu_only(),
             transform,
             material,
-            renderlet,
+            primitive: renderlet,
         }
     }
 
@@ -524,13 +505,13 @@ impl UiPathBuilder {
 #[cfg(test)]
 mod test {
     use crate::{
+        context::Context,
         math::hex_to_vec4,
         test::BlockOnFuture,
         ui::{
             test::{cute_beach_palette, Colors},
             Ui,
         },
-        Context,
     };
     use glam::Vec2;
 
@@ -560,7 +541,7 @@ mod test {
         let ctx = Context::headless(100, 100).block();
         let ui = Ui::new(&ctx).with_antialiasing(false);
         let builder = ui
-            .new_path()
+            .path_builder()
             .with_fill_color([1.0, 1.0, 0.0, 1.0])
             .with_stroke_color([0.0, 1.0, 1.0, 1.0])
             .with_rectangle(Vec2::splat(10.0), Vec2::splat(60.0))
@@ -607,7 +588,7 @@ mod test {
         // rectangle
         let fill = colors.next_color();
         let _rect = ui
-            .new_path()
+            .path_builder()
             .with_fill_color(fill)
             .with_stroke_color(hex_to_vec4(0x333333FF))
             .with_rectangle(Vec2::splat(2.0), Vec2::splat(42.0))
@@ -616,7 +597,7 @@ mod test {
         // circle
         let fill = colors.next_color();
         let _circ = ui
-            .new_path()
+            .path_builder()
             .with_fill_color(fill)
             .with_stroke_color(hex_to_vec4(0x333333FF))
             .with_circle([64.0, 22.0], 20.0)
@@ -625,7 +606,7 @@ mod test {
         // ellipse
         let fill = colors.next_color();
         let _elli = ui
-            .new_path()
+            .path_builder()
             .with_fill_color(fill)
             .with_stroke_color(hex_to_vec4(0x333333FF))
             .with_ellipse([104.0, 22.0], [20.0, 15.0], std::f32::consts::FRAC_PI_4)
@@ -644,7 +625,7 @@ mod test {
         let fill = colors.next_color();
         let center = Vec2::new(144.0, 22.0);
         let _penta = ui
-            .new_path()
+            .path_builder()
             .with_fill_color(fill)
             .with_stroke_color(hex_to_vec4(0x333333FF))
             .with_polygon(true, circle_points(5, 20.0).into_iter().map(|p| p + center))
@@ -653,7 +634,7 @@ mod test {
         let fill = colors.next_color();
         let center = Vec2::new(184.0, 22.0);
         let _star = ui
-            .new_path()
+            .path_builder()
             .with_fill_color(fill)
             .with_stroke_color(hex_to_vec4(0x333333FF))
             .with_polygon(
@@ -665,7 +646,7 @@ mod test {
         let fill = colors.next_color();
         let tl = Vec2::new(210.0, 4.0);
         let _rrect = ui
-            .new_path()
+            .path_builder()
             .with_fill_color(fill)
             .with_stroke_color(hex_to_vec4(0x333333FF))
             .with_rounded_rectangle(tl, tl + Vec2::new(40.0, 40.0), 5.0, 0.0, 0.0, 10.0)
@@ -685,7 +666,7 @@ mod test {
         let image_id = futures_lite::future::block_on(ui.load_image("../../img/dirt.jpg")).unwrap();
         let center = Vec2::splat(w / 2.0);
         let _path = ui
-            .new_path()
+            .path_builder()
             .with_polygon(
                 true,
                 star_points(7, w / 2.0, w / 3.0)

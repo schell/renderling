@@ -1,9 +1,15 @@
-//! A "GPU driven" renderer with a focus on simplicity and ease of use.
-//! Backed by WebGPU.
+//! <div style="float: right; padding: 1em;">
+//!    <img
+//!       style="image-rendering: pixelated; image-rendering: -moz-crisp-edges; image-rendering: crisp-edges;"
+//!       alt="renderling mascot" width="180"
+//!       src="https://github.com/user-attachments/assets/83eafc47-287c-4b5b-8fd7-2063e56b2338"
+//!    />
+//! </div>
+//!
+//! `renderling` is a "GPU driven" renderer with a focus on simplicity and ease
+//! of use, targeting WebGPU.
 //!
 //! Shaders are written in Rust using [`rust-gpu`](https://rust-gpu.github.io/).
-//!
-//! All data is staged on the GPU using a [slab allocator](https://crates.io/crates/craballoc).
 //!
 //! ## Hello triangle
 //!
@@ -13,10 +19,11 @@
 //! ### Context creation
 //!
 //! First you must create a [`Context`].
-//! The `Context` holds the render target - either a window or a texture.
+//! The `Context` holds the render target - either a native window, an HTML
+//! canvas or a texture.
 //!
 //! ```
-//! use renderling::prelude::*;
+//! use renderling::{context::Context, stage::Stage, geometry::Vertex};
 //!
 //! // create a headless context with dimensions 100, 100.
 //! let ctx = futures_lite::future::block_on(Context::headless(100, 100));
@@ -24,12 +31,21 @@
 //!
 //! [`Context::headless`] creates a `Context` that renders to a texture.
 //!
-//! ### Staging
+//! [`Context::from_winit_window`] creates a `Context` that renders to a native
+//! window.
+//!
+//! [`Context::try_new_with_surface`] creates a `Context` that renders to any
+//! [`wgpu::SurfaceTarget`].
+//!
+//! See the [`renderling::context`](context) module documentation for
+//! more info.
+//!
+//! ### Staging resources
 //!
 //! We then create a "stage" to place the camera, geometry, materials and lights.
 //!
 //! ```
-//! # use renderling::prelude::*;
+//! # use renderling::{context::Context, stage::Stage};
 //! # let ctx = futures_lite::future::block_on(Context::headless(100, 100));
 //! let stage: Stage = ctx
 //!     .new_stage()
@@ -38,70 +54,62 @@
 //!     .with_lighting(false);
 //! ```
 //!
-//! The [`Stage`](crate::stage::Stage) is neat in that it allows you to "stage" data
+//! The [`Stage`] is neat in that it allows you to "stage" data
 //! directly onto the GPU. Those values can be modified on the CPU and
-//! synchronization will happen during
-//! [`Stage::render`](crate::stage::Stage::render).
+//! synchronization will happen during [`Stage::render`].
 //!
-//! When "staging" some data, you receive [`Hybrid`](crate::prelude::Hybrid)s and
-//! [`HybridArray`](crate::prelude::HybridArray)s in return.
-//!
-//! These types come from the [`craballoc`] library, which is re-exported
-//! from [the prelude](crate::prelude).
+//! Use one of the many `Stage::new_*` functions to stage data on the GPU:
+//! * [`Stage::new_camera`]
+//! * [`Stage::new_vertices`]
+//! * [`Stage::new_indices`]
+//! * [`Stage::new_material`]
+//! * [`Stage::new_primitive`]
+//! * ...and more
 //!
 //! In order to render, we need to "stage" a
-//! [`Renderlet`](crate::stage::Renderlet), which is a bundle of rendering
+//! [`Primitive`], which is a bundle of rendering
 //! resources, roughly representing a singular mesh.
 //!
-//! But first we'll need a [`Camera`](crate::camera::Camera) so we can see
-//! what's on the stage, and then we'll need a list
-//! of [`Vertex`](crate::stage::Vertex) organized as triangles with
-//! counter-clockwise winding. Here we'll use the builder pattern to create a
-//! staged [`Renderlet`](crate::stage::Renderlet) using our vertices.
+//! But first we'll need a list of [`Vertex`] organized
+//! as triangles with counter-clockwise winding. Here we'll use the builder
+//! pattern to create a staged [`Primitive`] using our vertices.
+//!
+//! We'll also create a [`Camera`] so we can see the stage.
 //!
 //! ```
-//! # use renderling::prelude::*;
+//! # use renderling::{context::Context, geometry::Vertex, stage::Stage};
 //! # let ctx = futures_lite::future::block_on(Context::headless(100, 100));
 //! # let stage: Stage = ctx.new_stage();
+//! let vertices = stage.new_vertices([
+//!     Vertex::default()
+//!         .with_position([0.0, 0.0, 0.0])
+//!         .with_color([0.0, 1.0, 1.0, 1.0]),
+//!     Vertex::default()
+//!         .with_position([0.0, 100.0, 0.0])
+//!         .with_color([1.0, 1.0, 0.0, 1.0]),
+//!     Vertex::default()
+//!         .with_position([100.0, 0.0, 0.0])
+//!         .with_color([1.0, 0.0, 1.0, 1.0]),
+//!     ]);
+//! let triangle_prim = stage
+//!     .new_primitive()
+//!     .with_vertices(vertices);
 //!
-//! let camera = stage.new_camera(Camera::default_ortho2d(100.0, 100.0));
-//! let (vertices, triangle_renderlet) = stage
-//!     .builder()
-//!     .with_vertices([
-//!         Vertex::default()
-//!             .with_position([0.0, 0.0, 0.0])
-//!             .with_color([0.0, 1.0, 1.0, 1.0]),
-//!         Vertex::default()
-//!             .with_position([0.0, 100.0, 0.0])
-//!             .with_color([1.0, 1.0, 0.0, 1.0]),
-//!         Vertex::default()
-//!             .with_position([100.0, 0.0, 0.0])
-//!             .with_color([1.0, 0.0, 1.0, 1.0]),
-//!     ])
-//!     .build();
+//! let camera = stage.new_camera().with_default_ortho2d(100.0, 100.0);
 //! ```
-//!
-//! The builder is of the type [`RenderletBuilder`](crate::stage::RenderletBuilder)
-//! and after building, it leaves you with all the resources that have been staged,
-//! including the `Renderlet`.
-//! The return type of [`RenderletBuilder::build`](crate::stage::RenderletBuilder::build)
-//! is special in that it depends on the new resources that have been staged.
-//! The type will be a tuple of all the newly staged resources that have been added.
-//! In this case it's our mesh data and the `Renderlet`.
 //!
 //! ### Rendering
 //!
 //! Finally, we get the next frame from the context with
-//! [`Context::get_next_frame`], render to it using
-//! [`Stage::render`](crate::stage::Stage::render) and then present the
-//! frame with [`Frame::present`].
+//! [`Context::get_next_frame`]. Then we render to it using [`Stage::render`]
+//! and then present the frame with [`Frame::present`].
 //!
 //! ```
-//! # use renderling::prelude::*;
+//! # use renderling::{context::Context, geometry::Vertex, stage::Stage};
 //! # let ctx = futures_lite::future::block_on(Context::headless(100, 100));
 //! # let stage = ctx.new_stage();
-//! # let _camera = stage.new_camera(Camera::default_ortho2d(100.0, 100.0));
-//! # let _rez = stage.builder().with_vertices([
+//! # let camera = stage.new_camera().with_default_ortho2d(100.0, 100.0);
+//! # let vertices = stage.new_vertices([
 //! #     Vertex::default()
 //! #         .with_position([0.0, 0.0, 0.0])
 //! #         .with_color([0.0, 1.0, 1.0, 1.0]),
@@ -111,24 +119,68 @@
 //! #     Vertex::default()
 //! #         .with_position([100.0, 0.0, 0.0])
 //! #         .with_color([1.0, 0.0, 1.0, 1.0]),
-//! # ]).build();
-//!
+//! #     ]);
+//! # let triangle_prim = stage
+//! #     .new_primitive()
+//! #     .with_vertices(vertices);
 //! let frame = ctx.get_next_frame().unwrap();
 //! stage.render(&frame.view());
 //! let img = futures_lite::future::block_on(frame.read_image()).unwrap();
 //! frame.present();
 //! ```
 //!
+//! Here for our purposes we also read the rendered frame as an image.
 //! Saving `img` should give us this:
 //!
-//! ![renderling hello triangle](https://github.com/schell/renderling/blob/main/test_img/cmy_triangle.png?raw=true)
+//! ![renderling hello triangle](https://github.com/schell/renderling/blob/main/test_img/cmy_triangle/hdr.png?raw=true)
 //!
-//! ### Modifying
+//! ### Modifying resources
 //!
 //! Later, if we want to modify any of the staged values, we can do so through
-//! [`Hybrid`](crate::prelude::Hybrid) and [`HybridArray`](crate::prelude::HybridArray).
+//! each resource's struct, using `set_*`, `modify_*` and `with_*` functions.
+//!
 //! The changes made will be synchronized to the GPU at the beginning of the
-//! [`Stage::render`](crate::prelude::Stage::render) function.
+//! next [`Stage::render`] function.
+//!
+//! ### Removing and hiding primitives
+//!
+//! To remove primitives from the stage, use [`Stage::remove_primitive`].
+//! This will remove the primitive from rendering entirely, but the GPU
+//! resources will not be released until all clones have been dropped.
+//!
+//! If you just want to mark a [`Primitive`] invisible, use
+//! [`Primitive::set_visible`].
+//!
+//! ### Releasing resources
+//!
+//! GPU resources are automatically released when all clones are dropped.
+//! The data they occupy on the GPU is reclaimed during calls to
+//! [`Stage::render`].
+//! If you would like to manually reclaim the resources of fully dropped
+//! resources without rendering, you can do so with
+//! [`Stage::commit`].
+//!
+//! #### Ensuring resources are released
+//!
+//! Keep in mind that many resource functions (like [`Primitive::set_material`]
+//! for example) take another resource as a parameter. In these functions the
+//! parameter resource is cloned and held internally. This is done to keep
+//! resources that are in use from being released. Therefore if you want a
+//! resource to be released, you must ensure that all references to it are
+//! removed. You can use the `remove_*` functions on many resources for this
+//! purpose, like [`Primitive::remove_material`], for example, which would
+//! remove the material from the primitive. After that call, if no other
+//! primitives are using that material and the material is dropped from
+//! user code, the next call to [`Stage::render`] or [`Stage::commit`] will
+//! reclaim the GPU resources of the material to be re-used.
+//!
+//! Other resources like [`Vertices`], [`Indices`], [`Transform`],
+//! [`NestedTransform`] and others can simply be dropped.
+//!
+//! # Next steps
+//!
+//! For further introduction to what renderling can do, take a tour of the
+//! [`Stage`] type, or get started with [the manual](#todo).
 //!
 //! # WARNING
 //!
@@ -136,30 +188,34 @@
 //!
 //! Your mileage may vary, but I hope you get good use out of this library.
 //!
-//! PRs, criticisms and ideas are all very much welcomed [at the repo](https://github.com/schell/renderling).
+//! PRs, criticisms and ideas are all very much welcomed [at the
+//! repo](https://github.com/schell/renderling).
 //!
 //! 😀☕
 #![allow(unexpected_cfgs)]
 #![cfg_attr(target_arch = "spirv", no_std)]
 #![deny(clippy::disallowed_methods)]
 
+#[cfg(doc)]
+use crate::{camera::Camera, geometry::*, primitive::Primitive, stage::Stage, transform::*};
+
 pub mod atlas;
 #[cfg(cpu)]
-pub mod bindgroup;
-pub mod bits;
+pub(crate) mod bindgroup;
 pub mod bloom;
 pub mod bvol;
 pub mod camera;
 pub mod color;
 #[cfg(cpu)]
-mod context;
+pub mod context;
 pub mod convolution;
 pub mod cubemap;
 pub mod cull;
 pub mod debug;
 pub mod draw;
 pub mod geometry;
-pub mod ibl;
+#[cfg(all(cpu, gltf))]
+pub mod gltf;
 #[cfg(cpu)]
 pub mod internal;
 pub mod light;
@@ -168,6 +224,7 @@ pub mod linkage;
 pub mod material;
 pub mod math;
 pub mod pbr;
+pub mod primitive;
 pub mod sdf;
 pub mod skybox;
 pub mod stage;
@@ -176,30 +233,13 @@ pub mod sync;
 pub mod texture;
 pub mod tonemapping;
 pub mod transform;
-pub mod tuple;
 pub mod tutorial;
+#[cfg(cpu)]
+pub mod types;
 #[cfg(feature = "ui")]
 pub mod ui;
 
-#[cfg(cpu)]
-pub use context::*;
-
-pub mod prelude {
-    //! A prelude, meant to be glob-imported.
-
-    #[cfg(cpu)]
-    pub extern crate craballoc;
-    pub extern crate glam;
-
-    #[cfg(cpu)]
-    pub use craballoc::prelude::*;
-    pub use crabslab::{Array, Id};
-
-    pub use crate::{camera::*, light::*, pbr::Material, stage::*, transform::Transform};
-
-    #[cfg(cpu)]
-    pub use crate::context::*;
-}
+pub extern crate glam;
 
 #[macro_export]
 /// A wrapper around `std::println` that is a noop on the GPU.
@@ -212,18 +252,68 @@ macro_rules! println {
     }
 }
 
+#[cfg(all(cpu, any(test, feature = "test-utils")))]
+#[allow(unused, reason = "Used in debugging on macos")]
+pub fn capture_gpu_frame<T>(
+    ctx: &crate::context::Context,
+    path: impl AsRef<std::path::Path>,
+    f: impl FnOnce() -> T,
+) -> T {
+    let path = path.as_ref();
+    let parent = path.parent().unwrap();
+    std::fs::create_dir_all(parent).unwrap();
+
+    #[cfg(target_os = "macos")]
+    {
+        if path.exists() {
+            log::info!(
+                "deleting {} before writing gpu frame capture",
+                path.display()
+            );
+            std::fs::remove_dir_all(path).unwrap();
+        }
+
+        if std::env::var("METAL_CAPTURE_ENABLED").is_err() {
+            log::error!("Env var METAL_CAPTURE_ENABLED must be set");
+            panic!("missing METAL_CAPTURE_ENABLED=1");
+        }
+
+        let m = metal::CaptureManager::shared();
+        let desc = metal::CaptureDescriptor::new();
+
+        desc.set_destination(metal::MTLCaptureDestination::GpuTraceDocument);
+        desc.set_output_url(path);
+        let maybe_metal_device = unsafe { ctx.get_device().as_hal::<wgpu_core::api::Metal>() };
+        if let Some(metal_device) = maybe_metal_device {
+            desc.set_capture_device(metal_device.raw_device().try_lock().unwrap().as_ref());
+        } else {
+            panic!("not a capturable device")
+        }
+        m.start_capture(&desc).unwrap();
+        let t = f();
+        m.stop_capture();
+        t
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        log::warn!("capturing a GPU frame is only supported on macos");
+        f()
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::{
-        atlas::AtlasImage, camera::Camera, pbr::Material, stage::Vertex, transform::Transform,
-    };
+    use crate::{atlas::AtlasImage, context::Context, geometry::Vertex};
 
     use glam::{Mat3, Mat4, Quat, UVec2, Vec2, Vec3, Vec4};
     use img_diff::DiffCfg;
-    use light::{AnalyticalLight, DirectionalLightDescriptor};
+    use light::AnalyticalLight;
     use pretty_assertions::assert_eq;
     use stage::Stage;
+
+    #[allow(unused_imports)]
+    pub use renderling_build::{test_output_dir, workspace_dir};
 
     #[cfg_attr(not(target_arch = "wasm32"), ctor::ctor)]
     fn init_logging() {
@@ -231,13 +321,14 @@ mod test {
         log::info!("logging is on");
     }
 
-    pub fn workspace_dir() -> std::path::PathBuf {
-        std::path::PathBuf::from(std::env!("CARGO_WORKSPACE_DIR"))
-    }
-
-    #[allow(dead_code)]
-    pub fn test_output_dir() -> std::path::PathBuf {
-        workspace_dir().join("test_output")
+    #[allow(unused, reason = "Used in debugging on macos")]
+    pub fn capture_gpu_frame<T>(
+        ctx: &Context,
+        path: impl AsRef<std::path::Path>,
+        f: impl FnOnce() -> T,
+    ) -> T {
+        let path = workspace_dir().join("test_output").join(path);
+        super::capture_gpu_frame(ctx, path, f)
     }
 
     /// Marker trait to block on futures in synchronous code.
@@ -263,64 +354,17 @@ mod test {
     }
 
     pub fn make_two_directional_light_setup(stage: &Stage) -> (AnalyticalLight, AnalyticalLight) {
-        let sunlight_a = stage.new_analytical_light(DirectionalLightDescriptor {
-            direction: Vec3::new(-0.8, -1.0, 0.5).normalize(),
-            color: Vec4::ONE,
-            intensity: 100.0,
-        });
-        let sunlight_b = stage.new_analytical_light(DirectionalLightDescriptor {
-            direction: Vec3::new(1.0, 1.0, -0.1).normalize(),
-            color: Vec4::ONE,
-            intensity: 10.0,
-        });
-        (sunlight_a, sunlight_b)
-    }
-
-    #[allow(unused, reason = "Used in debugging on macos")]
-    pub fn capture_gpu_frame<T>(
-        ctx: &Context,
-        path: impl AsRef<std::path::Path>,
-        f: impl FnOnce() -> T,
-    ) -> T {
-        let path = workspace_dir().join("test_output").join(path);
-        let parent = path.parent().unwrap();
-        std::fs::create_dir_all(parent).unwrap();
-
-        #[cfg(target_os = "macos")]
-        {
-            if path.exists() {
-                log::info!(
-                    "deleting {} before writing gpu frame capture",
-                    path.display()
-                );
-                std::fs::remove_dir_all(&path).unwrap();
-            }
-
-            if std::env::var("METAL_CAPTURE_ENABLED").is_err() {
-                log::error!("Env var METAL_CAPTURE_ENABLED must be set");
-                panic!("missing METAL_CAPTURE_ENABLED=1");
-            }
-
-            let m = metal::CaptureManager::shared();
-            let desc = metal::CaptureDescriptor::new();
-
-            desc.set_destination(metal::MTLCaptureDestination::GpuTraceDocument);
-            desc.set_output_url(path);
-            let maybe_metal_device = unsafe { ctx.get_device().as_hal::<wgpu_core::api::Metal>() };
-            if let Some(metal_device) = maybe_metal_device {
-                desc.set_capture_device(metal_device.raw_device().try_lock().unwrap().as_ref());
-            } else {
-                panic!("not a capturable device")
-            }
-            m.start_capture(&desc).unwrap();
-            let t = f();
-            m.stop_capture();
-            t
-        }
-        #[cfg(not(target_os = "macos"))]
-        {
-            f()
-        }
+        let sunlight_a = stage
+            .new_directional_light()
+            .with_direction(Vec3::new(-0.8, -1.0, 0.5).normalize())
+            .with_color(Vec4::ONE)
+            .with_intensity(100.0);
+        let sunlight_b = stage
+            .new_directional_light()
+            .with_direction(Vec3::new(1.0, 1.0, -0.1).normalize())
+            .with_color(Vec4::ONE)
+            .with_intensity(10.0);
+        (sunlight_a.into_generic(), sunlight_b.into_generic())
     }
 
     #[test]
@@ -360,8 +404,12 @@ mod test {
     fn cmy_triangle_sanity() {
         let ctx = Context::headless(100, 100).block();
         let stage = ctx.new_stage().with_background_color(Vec4::splat(1.0));
-        let _camera = stage.new_camera(Camera::default_ortho2d(100.0, 100.0));
-        let _rez = stage.builder().with_vertices(right_tri_vertices()).build();
+        let (p, v) = crate::camera::default_ortho2d(100.0, 100.0);
+        let _camera = stage.new_camera().with_projection_and_view(p, v);
+
+        let _prim = stage
+            .new_primitive()
+            .with_vertices(stage.new_vertices(right_tri_vertices()));
 
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
@@ -397,15 +445,13 @@ mod test {
 
         let ctx = Context::headless(100, 100).block();
         let stage = ctx.new_stage().with_background_color(Vec4::splat(1.0));
-        let _camera = stage.new_camera(Camera::default_ortho2d(100.0, 100.0));
-        let _rez = stage
-            .builder()
-            .with_vertices({
-                let mut vs = right_tri_vertices();
-                vs.reverse();
-                vs
-            })
-            .build();
+        let (p, v) = crate::camera::default_ortho2d(100.0, 100.0);
+        let _camera = stage.new_camera().with_projection_and_view(p, v);
+        let _rez = stage.new_primitive().with_vertices(stage.new_vertices({
+            let mut vs = right_tri_vertices();
+            vs.reverse();
+            vs
+        }));
 
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
@@ -427,21 +473,21 @@ mod test {
     fn cmy_triangle_update_transform() {
         let ctx = Context::headless(100, 100).block();
         let stage = ctx.new_stage().with_background_color(Vec4::splat(1.0));
-        let _camera = stage.new_camera(Camera::default_ortho2d(100.0, 100.0));
-        let (_vertices, transform, _renderlet) = stage
-            .builder()
-            .with_vertices(right_tri_vertices())
-            .with_transform(Transform::default())
-            .build();
+        let (p, v) = crate::camera::default_ortho2d(100.0, 100.0);
+        let _camera = stage.new_camera().with_projection_and_view(p, v);
+        let transform = stage.new_transform();
+        let _renderlet = stage
+            .new_primitive()
+            .with_vertices(stage.new_vertices(right_tri_vertices()))
+            .with_transform(&transform);
 
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
 
-        transform.set(Transform {
-            translation: Vec3::new(100.0, 0.0, 0.0),
-            rotation: Quat::from_axis_angle(Vec3::Z, std::f32::consts::FRAC_PI_2),
-            scale: Vec3::new(0.5, 0.5, 1.0),
-        });
+        transform
+            .set_translation(Vec3::new(100.0, 0.0, 0.0))
+            .set_rotation(Quat::from_axis_angle(Vec3::Z, std::f32::consts::FRAC_PI_2))
+            .set_scale(Vec3::new(0.5, 0.5, 1.0));
 
         stage.render(&frame.view());
         let img = frame.read_linear_image().block().unwrap();
@@ -493,19 +539,19 @@ mod test {
         let ctx = Context::headless(100, 100).block();
         let stage = ctx.new_stage().with_background_color(Vec4::splat(1.0));
         let camera_position = Vec3::new(0.0, 12.0, 20.0);
-        let _camera = stage.new_camera(Camera::new(
+        let _camera = stage.new_camera().with_projection_and_view(
             Mat4::perspective_rh(std::f32::consts::PI / 4.0, 1.0, 0.1, 100.0),
             Mat4::look_at_rh(camera_position, Vec3::ZERO, Vec3::Y),
-        ));
+        );
         let _rez = stage
-            .builder()
-            .with_vertices(gpu_cube_vertices())
-            .with_transform(Transform {
-                scale: Vec3::new(6.0, 6.0, 6.0),
-                rotation: Quat::from_axis_angle(Vec3::Y, -std::f32::consts::FRAC_PI_4),
-                ..Default::default()
-            })
-            .build();
+            .new_primitive()
+            .with_vertices(stage.new_vertices(gpu_cube_vertices()))
+            .with_transform(
+                stage
+                    .new_transform()
+                    .with_scale(Vec3::new(6.0, 6.0, 6.0))
+                    .with_rotation(Quat::from_axis_angle(Vec3::Y, -std::f32::consts::FRAC_PI_4)),
+            );
 
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
@@ -519,20 +565,21 @@ mod test {
         let ctx = Context::headless(100, 100).block();
         let stage = ctx.new_stage().with_background_color(Vec4::splat(1.0));
         let camera_position = Vec3::new(0.0, 12.0, 20.0);
-        let _camera = stage.new_camera(Camera::new(
+        let _camera = stage.new_camera().with_projection_and_view(
             Mat4::perspective_rh(std::f32::consts::PI / 4.0, 1.0, 0.1, 100.0),
             Mat4::look_at_rh(camera_position, Vec3::ZERO, Vec3::Y),
-        ));
+        );
+
         let _rez = stage
-            .builder()
-            .with_vertices(math::UNIT_POINTS.map(cmy_gpu_vertex))
-            .with_indices(math::UNIT_INDICES.map(|i| i as u32))
-            .with_transform(Transform {
-                scale: Vec3::new(6.0, 6.0, 6.0),
-                rotation: Quat::from_axis_angle(Vec3::Y, -std::f32::consts::FRAC_PI_4),
-                ..Default::default()
-            })
-            .build();
+            .new_primitive()
+            .with_vertices(stage.new_vertices(math::UNIT_POINTS.map(cmy_gpu_vertex)))
+            .with_indices(stage.new_indices(math::UNIT_INDICES.map(|i| i as u32)))
+            .with_transform(
+                stage
+                    .new_transform()
+                    .with_scale(Vec3::new(6.0, 6.0, 6.0))
+                    .with_rotation(Quat::from_axis_angle(Vec3::Y, -std::f32::consts::FRAC_PI_4)),
+            );
 
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
@@ -554,26 +601,31 @@ mod test {
         let ctx = Context::headless(100, 100).block();
         let stage = ctx.new_stage().with_background_color(Vec4::splat(1.0));
         let (projection, view) = camera::default_perspective(100.0, 100.0);
-        let _camera = stage.new_camera(Camera::new(projection, view));
-        let (geometry, _cube_one_transform, _cube_one) = stage
-            .builder()
-            .with_vertices(gpu_cube_vertices())
-            .with_transform(Transform {
-                translation: Vec3::new(-4.5, 0.0, 0.0),
-                scale: Vec3::new(6.0, 6.0, 6.0),
-                rotation: Quat::from_axis_angle(Vec3::Y, -std::f32::consts::FRAC_PI_4),
-            })
-            .build();
+        let _camera = stage
+            .new_camera()
+            .with_projection_and_view(projection, view);
+        let geometry = stage.new_vertices(gpu_cube_vertices());
+        let _cube_one = stage
+            .new_primitive()
+            .with_vertices(&geometry)
+            .with_transform(
+                stage
+                    .new_transform()
+                    .with_translation(Vec3::new(-4.5, 0.0, 0.0))
+                    .with_scale(Vec3::new(6.0, 6.0, 6.0))
+                    .with_rotation(Quat::from_axis_angle(Vec3::Y, -std::f32::consts::FRAC_PI_4)),
+            );
 
-        let (_cube_two_transform, cube_two) = stage
-            .builder()
-            .with_vertices_array(geometry.array())
-            .with_transform(Transform {
-                translation: Vec3::new(4.5, 0.0, 0.0),
-                scale: Vec3::new(6.0, 6.0, 6.0),
-                rotation: Quat::from_axis_angle(Vec3::Y, std::f32::consts::FRAC_PI_4),
-            })
-            .build();
+        let cube_two = stage
+            .new_primitive()
+            .with_vertices(&geometry)
+            .with_transform(
+                stage
+                    .new_transform()
+                    .with_translation(Vec3::new(4.5, 0.0, 0.0))
+                    .with_scale(Vec3::new(6.0, 6.0, 6.0))
+                    .with_rotation(Quat::from_axis_angle(Vec3::Y, std::f32::consts::FRAC_PI_4)),
+            );
 
         // we should see two colored cubes
         let frame = ctx.get_next_frame().unwrap();
@@ -584,7 +636,7 @@ mod test {
         frame.present();
 
         // update cube two making it invisible
-        cube_two.modify(|r| r.visible = false);
+        cube_two.set_visible(false);
 
         // we should see only one colored cube
         let frame = ctx.get_next_frame().unwrap();
@@ -594,7 +646,7 @@ mod test {
         frame.present();
 
         // update cube two making in visible again
-        cube_two.modify(|r| r.visible = true);
+        cube_two.set_visible(true);
 
         // we should see two colored cubes again
         let frame = ctx.get_next_frame().unwrap();
@@ -613,15 +665,20 @@ mod test {
             .with_lighting(false)
             .with_background_color(Vec4::splat(1.0));
         let (projection, view) = camera::default_perspective(100.0, 100.0);
-        let _camera = stage.new_camera(Camera::new(projection, view));
-        let (_cube_geometry, _transform, cube) = stage
-            .builder()
-            .with_vertices(math::UNIT_INDICES.map(|i| cmy_gpu_vertex(math::UNIT_POINTS[i])))
-            .with_transform(Transform {
-                scale: Vec3::new(10.0, 10.0, 10.0),
-                ..Default::default()
-            })
-            .build();
+        let _camera = stage
+            .new_camera()
+            .with_projection_and_view(projection, view);
+        let cube = stage
+            .new_primitive()
+            .with_vertices(
+                stage
+                    .new_vertices(math::UNIT_INDICES.map(|i| cmy_gpu_vertex(math::UNIT_POINTS[i]))),
+            )
+            .with_transform(
+                stage
+                    .new_transform()
+                    .with_scale(Vec3::new(10.0, 10.0, 10.0)),
+            );
 
         // we should see a cube (in sRGB color space)
         let frame = ctx.get_next_frame().unwrap();
@@ -635,7 +692,7 @@ mod test {
         let pyramid_points = pyramid_points();
         let pyramid_geometry = stage
             .new_vertices(pyramid_indices().map(|i| cmy_gpu_vertex(pyramid_points[i as usize])));
-        cube.modify(|r| r.vertices_array = pyramid_geometry.array());
+        cube.set_vertices(pyramid_geometry);
 
         // we should see a pyramid (in sRGB color space)
         let frame = ctx.get_next_frame().unwrap();
@@ -697,26 +754,28 @@ mod test {
         let ctx = Context::headless(100, 100).block();
         let stage = ctx.new_stage().with_background_color(Vec4::splat(0.0));
         let (projection, view) = camera::default_perspective(100.0, 100.0);
-        let _camera = stage.new_camera(Camera::new(projection, view));
+        let _camera = stage
+            .new_camera()
+            .with_projection_and_view(projection, view);
 
         let sandstone = AtlasImage::from(image::open("../../img/sandstone.png").unwrap());
         let dirt = AtlasImage::from(image::open("../../img/dirt.jpg").unwrap());
         let entries = stage.set_images([sandstone, dirt]).unwrap();
 
-        let (material, _geometry, _transform, cube) = stage
-            .builder()
-            .with_material(Material {
-                albedo_texture_id: entries[0].id(),
-                has_lighting: false,
-                ..Default::default()
-            })
-            .with_vertices(gpu_uv_unit_cube())
-            .with_transform(Transform {
-                scale: Vec3::new(10.0, 10.0, 10.0),
-                ..Default::default()
-            })
-            .build();
-        println!("cube: {cube:?}");
+        let material = stage
+            .new_material()
+            .with_albedo_texture(&entries[0])
+            .with_has_lighting(false);
+        let cube = stage
+            .new_primitive()
+            .with_vertices(stage.new_vertices(gpu_uv_unit_cube()))
+            .with_transform(
+                stage
+                    .new_transform()
+                    .with_scale(Vec3::new(10.0, 10.0, 10.0)),
+            )
+            .with_material(&material);
+        println!("cube: {:?}", cube.descriptor());
 
         // we should see a cube with a stoney texture
         let frame = ctx.get_next_frame().unwrap();
@@ -726,7 +785,7 @@ mod test {
         frame.present();
 
         // update the material's texture on the GPU
-        material.modify(|m| m.albedo_texture_id = entries[1].id());
+        material.set_albedo_texture(&entries[1]);
 
         // we should see a cube with a dirty texture
         let frame = ctx.get_next_frame().unwrap();
@@ -754,53 +813,52 @@ mod test {
             .with_background_color(Vec3::splat(0.0).extend(1.0));
 
         let (projection, view) = camera::default_ortho2d(100.0, 100.0);
-        let _camera = stage.new_camera(Camera::new(projection, view));
+        let _camera = stage
+            .new_camera()
+            .with_projection_and_view(projection, view);
 
         // now test the textures functionality
         let img = AtlasImage::from_path("../../img/cheetah.jpg").unwrap();
         let entries = stage.set_images([img]).unwrap();
 
-        let (geometry, _color_prim) = stage
-            .builder()
-            .with_vertices([
-                Vertex {
-                    position: Vec3::new(0.0, 0.0, 0.0),
-                    color: Vec4::new(1.0, 1.0, 0.0, 1.0),
-                    uv0: Vec2::new(0.0, 0.0),
-                    uv1: Vec2::new(0.0, 0.0),
-                    ..Default::default()
-                },
-                Vertex {
-                    position: Vec3::new(100.0, 100.0, 0.0),
-                    color: Vec4::new(0.0, 1.0, 1.0, 1.0),
-                    uv0: Vec2::new(1.0, 1.0),
-                    uv1: Vec2::new(1.0, 1.0),
-                    ..Default::default()
-                },
-                Vertex {
-                    position: Vec3::new(100.0, 0.0, 0.0),
-                    color: Vec4::new(1.0, 0.0, 1.0, 1.0),
-                    uv0: Vec2::new(1.0, 0.0),
-                    uv1: Vec2::new(1.0, 0.0),
-                    ..Default::default()
-                },
-            ])
-            .build();
+        let geometry = stage.new_vertices([
+            Vertex {
+                position: Vec3::new(0.0, 0.0, 0.0),
+                color: Vec4::new(1.0, 1.0, 0.0, 1.0),
+                uv0: Vec2::new(0.0, 0.0),
+                uv1: Vec2::new(0.0, 0.0),
+                ..Default::default()
+            },
+            Vertex {
+                position: Vec3::new(100.0, 100.0, 0.0),
+                color: Vec4::new(0.0, 1.0, 1.0, 1.0),
+                uv0: Vec2::new(1.0, 1.0),
+                uv1: Vec2::new(1.0, 1.0),
+                ..Default::default()
+            },
+            Vertex {
+                position: Vec3::new(100.0, 0.0, 0.0),
+                color: Vec4::new(1.0, 0.0, 1.0, 1.0),
+                uv0: Vec2::new(1.0, 0.0),
+                uv1: Vec2::new(1.0, 0.0),
+                ..Default::default()
+            },
+        ]);
+        let _color_prim = stage.new_primitive().with_vertices(&geometry);
 
+        let material = stage
+            .new_material()
+            .with_albedo_texture(&entries[0])
+            .with_has_lighting(false);
+        let transform = stage
+            .new_transform()
+            .with_translation(Vec3::new(15.0, 35.0, 0.5))
+            .with_scale(Vec3::new(0.5, 0.5, 1.0));
         let _rez = stage
-            .builder()
-            .with_vertices_array(geometry.array())
-            .with_material(Material {
-                albedo_texture_id: entries[0].id(),
-                has_lighting: false,
-                ..Default::default()
-            })
-            .with_transform(Transform {
-                translation: Vec3::new(15.0, 35.0, 0.5),
-                scale: Vec3::new(0.5, 0.5, 1.0),
-                ..Default::default()
-            })
-            .build();
+            .new_primitive()
+            .with_vertices(&geometry)
+            .with_material(material)
+            .with_transform(transform);
 
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
@@ -811,8 +869,6 @@ mod test {
     #[test]
     /// Tests shading with directional light.
     fn scene_cube_directional() {
-        use crate::light::{DirectionalLightDescriptor, Light, LightStyle};
-
         let ctx = Context::headless(100, 100).block();
         let stage = ctx
             .new_stage()
@@ -821,58 +877,39 @@ mod test {
 
         let (projection, _) = camera::default_perspective(100.0, 100.0);
         let view = Mat4::look_at_rh(Vec3::new(1.8, 1.8, 1.8), Vec3::ZERO, Vec3::Y);
-        let _camera = stage.new_camera(Camera::new(projection, view));
+        let _camera = stage
+            .new_camera()
+            .with_projection_and_view(projection, view);
 
         let red = Vec3::X.extend(1.0);
         let green = Vec3::Y.extend(1.0);
         let blue = Vec3::Z.extend(1.0);
-        let dir_red = stage.new_analytical_light(DirectionalLightDescriptor {
-            direction: Vec3::NEG_Y,
-            color: red,
-            intensity: 10.0,
-        });
-        let _dir_green = stage.new_analytical_light(DirectionalLightDescriptor {
-            direction: Vec3::NEG_X,
-            color: green,
-            intensity: 10.0,
-        });
-        let _dir_blue = stage.new_analytical_light(DirectionalLightDescriptor {
-            direction: Vec3::NEG_Z,
-            color: blue,
-            intensity: 10.0,
-        });
-        assert_eq!(
-            Light {
-                light_type: LightStyle::Directional,
-                index: dir_red
-                    .light_details()
-                    .as_directional()
-                    .unwrap()
-                    .id()
-                    .inner(),
-                ..Default::default()
-            },
-            Light::from(dir_red.light_details().as_directional().unwrap().id())
-        );
+        let _dir_red = stage
+            .new_directional_light()
+            .with_direction(Vec3::NEG_Y)
+            .with_color(red)
+            .with_intensity(10.0);
+        let _dir_green = stage
+            .new_directional_light()
+            .with_direction(Vec3::NEG_X)
+            .with_color(green)
+            .with_intensity(10.0);
+        let _dir_blue = stage
+            .new_directional_light()
+            .with_direction(Vec3::NEG_Z)
+            .with_color(blue)
+            .with_intensity(10.0);
 
         let _rez = stage
-            .builder()
-            .with_material(Material::default())
-            .with_vertices(
-                math::unit_cube()
-                    .into_iter()
-                    .map(|(p, n)| Vertex {
-                        position: p,
-                        normal: n,
-                        color: Vec4::ONE,
-                        ..Default::default()
-                    })
-                    .collect::<Vec<_>>(),
-            )
-            .build();
+            .new_primitive()
+            .with_material(stage.default_material());
 
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
+        println!(
+            "lighting_descriptor: {:#?}",
+            stage.lighting.lighting_descriptor.get()
+        );
         let img = frame.read_image().block().unwrap();
         let depth_texture = stage.get_depth_texture();
         let depth_img = depth_texture.read_image().block().unwrap().unwrap();
@@ -924,76 +961,71 @@ mod test {
         let ctx = Context::headless(100, 100).block();
         let stage = ctx.new_stage().with_background_color(Vec4::splat(0.0));
         let (projection, view) = camera::default_ortho2d(100.0, 100.0);
-        let _camera = stage.new_camera(Camera::new(projection, view));
+        let _camera = stage
+            .new_camera()
+            .with_projection_and_view(projection, view);
 
-        let root_node = stage.new_nested_transform();
-        root_node.set(Transform {
-            scale: Vec3::new(25.0, 25.0, 1.0),
-            ..Default::default()
-        });
-        println!("root_node: {:#?}", root_node.get_global_transform());
+        let root_node = stage
+            .new_nested_transform()
+            .with_local_scale(Vec3::new(25.0, 25.0, 1.0));
+        println!("root_node: {:#?}", root_node.global_descriptor());
 
-        let offset = Transform {
-            translation: Vec3::new(1.0, 1.0, 0.0),
-            ..Default::default()
-        };
+        let offset = Vec3::new(1.0, 1.0, 0.0);
 
-        let cyan_node = stage.new_nested_transform();
-        cyan_node.set(offset);
-        println!("cyan_node: {:#?}", cyan_node.get_global_transform());
+        let cyan_node = stage.new_nested_transform().with_local_translation(offset);
+        println!("cyan_node: {:#?}", cyan_node.global_descriptor());
 
-        let yellow_node = stage.new_nested_transform();
-        yellow_node.set(offset);
-        println!("yellow_node: {:#?}", yellow_node.get_global_transform());
+        let yellow_node = stage.new_nested_transform().with_local_translation(offset);
+        println!("yellow_node: {:#?}", yellow_node.global_descriptor());
 
-        let red_node = stage.new_nested_transform();
-        red_node.set(offset);
-        println!("red_node: {:#?}", red_node.get_global_transform());
+        let red_node = stage.new_nested_transform().with_local_translation(offset);
+        println!("red_node: {:#?}", red_node.global_descriptor());
 
         root_node.add_child(&cyan_node);
-        println!("cyan_node: {:#?}", cyan_node.get_global_transform());
+        println!("cyan_node: {:#?}", cyan_node.global_descriptor());
         cyan_node.add_child(&yellow_node);
-        println!("yellow_node: {:#?}", yellow_node.get_global_transform());
+        println!("yellow_node: {:#?}", yellow_node.global_descriptor());
         yellow_node.add_child(&red_node);
-        println!("red_node: {:#?}", red_node.get_global_transform());
+        println!("red_node: {:#?}", red_node.global_descriptor());
 
-        let (geometry, _cyan_material, _cyan_primitive) = stage
-            .builder()
-            .with_vertices({
-                let size = 1.0;
-                [
-                    Vertex::default().with_position([0.0, 0.0, 0.0]),
-                    Vertex::default().with_position([size, size, 0.0]),
-                    Vertex::default().with_position([size, 0.0, 0.0]),
-                ]
-            })
-            .with_material(Material {
-                albedo_factor: Vec4::new(0.0, 1.0, 1.0, 1.0),
-                has_lighting: false,
-                ..Default::default()
-            })
-            .with_nested_transform(&cyan_node)
-            .build();
-        let _yellow = stage
-            .builder()
-            .with_vertices_array(geometry.array())
-            .with_material(Material {
-                albedo_factor: Vec4::new(1.0, 1.0, 0.0, 1.0),
-                has_lighting: false,
-                ..Default::default()
-            })
-            .with_nested_transform(&yellow_node)
-            .build();
-        let _red = stage
-            .builder()
-            .with_vertices_array(geometry.array())
-            .with_material(Material {
-                albedo_factor: Vec4::new(1.0, 0.0, 0.0, 1.0),
-                has_lighting: false,
-                ..Default::default()
-            })
-            .with_nested_transform(&red_node)
-            .build();
+        let geometry = stage.new_vertices({
+            let size = 1.0;
+            [
+                Vertex::default().with_position([0.0, 0.0, 0.0]),
+                Vertex::default().with_position([size, size, 0.0]),
+                Vertex::default().with_position([size, 0.0, 0.0]),
+            ]
+        });
+        let _cyan_primitive = stage
+            .new_primitive()
+            .with_vertices(&geometry)
+            .with_material(
+                stage
+                    .new_material()
+                    .with_albedo_factor(Vec4::new(0.0, 1.0, 1.0, 1.0))
+                    .with_has_lighting(false),
+            )
+            .with_transform(&cyan_node);
+        let _yellow_primitive = stage
+            .new_primitive()
+            .with_vertices(&geometry)
+            .with_material(
+                stage
+                    .new_material()
+                    .with_albedo_factor(Vec4::new(1.0, 1.0, 0.0, 1.0))
+                    .with_has_lighting(false),
+            )
+            .with_transform(&yellow_node);
+        let _red_primitive = stage
+            .new_primitive()
+            .with_vertices(&geometry)
+            .with_material(
+                stage
+                    .new_material()
+                    .with_albedo_factor(Vec4::new(1.0, 0.0, 0.0, 1.0))
+                    .with_has_lighting(false),
+            )
+            .with_transform(&red_node);
 
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
@@ -1019,19 +1051,19 @@ mod test {
 
         // create the CMY cube
         let camera_position = Vec3::new(0.0, 12.0, 20.0);
-        let _camera = stage.new_camera(Camera::new(
+        let _camera = stage.new_camera().with_projection_and_view(
             Mat4::perspective_rh(std::f32::consts::PI / 4.0, 1.0, 0.1, 100.0),
             Mat4::look_at_rh(camera_position, Vec3::ZERO, Vec3::Y),
-        ));
+        );
         let _rez = stage
-            .builder()
-            .with_vertices(gpu_cube_vertices())
-            .with_transform(Transform {
-                scale: Vec3::new(6.0, 6.0, 6.0),
-                rotation: Quat::from_axis_angle(Vec3::Y, -std::f32::consts::FRAC_PI_4),
-                ..Default::default()
-            })
-            .build();
+            .new_primitive()
+            .with_vertices(stage.new_vertices(gpu_cube_vertices()))
+            .with_transform(
+                stage
+                    .new_transform()
+                    .with_scale(Vec3::new(6.0, 6.0, 6.0))
+                    .with_rotation(Quat::from_axis_angle(Vec3::Y, -std::f32::consts::FRAC_PI_4)),
+            );
 
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
@@ -1062,19 +1094,19 @@ mod test {
 
         // create the CMY cube
         let camera_position = Vec3::new(0.0, 12.0, 20.0);
-        let _camera = stage.new_camera(Camera::new(
+        let _camera = stage.new_camera().with_projection_and_view(
             Mat4::perspective_rh(std::f32::consts::PI / 4.0, 1.0, 0.1, 100.0),
             Mat4::look_at_rh(camera_position, Vec3::ZERO, Vec3::Y),
-        ));
+        );
         let _rez = stage
-            .builder()
-            .with_vertices(gpu_cube_vertices())
-            .with_transform(Transform {
-                scale: Vec3::new(6.0, 6.0, 6.0),
-                rotation: Quat::from_axis_angle(Vec3::Y, -std::f32::consts::FRAC_PI_4),
-                ..Default::default()
-            })
-            .build();
+            .new_primitive()
+            .with_vertices(stage.new_vertices(gpu_cube_vertices()))
+            .with_transform(
+                stage
+                    .new_transform()
+                    .with_scale(Vec3::new(6.0, 6.0, 6.0))
+                    .with_rotation(Quat::from_axis_angle(Vec3::Y, -std::f32::consts::FRAC_PI_4)),
+            );
 
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());

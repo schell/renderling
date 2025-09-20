@@ -4,8 +4,8 @@ use std::sync::Arc;
 use clap::Parser;
 use example::{camera::CameraControl, App};
 use renderling::{
-    prelude::glam::{UVec2, Vec2},
-    Context,
+    context::Context,
+    glam::{UVec2, Vec2},
 };
 use winit::{application::ApplicationHandler, event::WindowEvent, window::WindowAttributes};
 

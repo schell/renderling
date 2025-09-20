@@ -1,9 +1,17 @@
 //! WASM tests.
 #![allow(dead_code)]
 
+use craballoc::{
+    runtime::WgpuRuntime,
+    slab::{SlabAllocator, SlabBuffer},
+};
 use glam::{Vec3, Vec4};
 use image::DynamicImage;
-use renderling::{prelude::*, texture::CopiedTextureBuffer};
+use renderling::{
+    context::{Context, Frame},
+    geometry::Vertex,
+    texture::CopiedTextureBuffer,
+};
 use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
 use web_sys::wasm_bindgen::prelude::*;
 use wire_types::{Error, PixelType};
@@ -40,14 +48,14 @@ async fn can_write_system_info_artifact() {
 
 #[wasm_bindgen_test]
 async fn can_create_headless_ctx() {
-    let _ctx = renderling::Context::try_new_headless(256, 256, None)
+    let _ctx = Context::try_new_headless(256, 256, None)
         .await
         .unwrap_throw();
 }
 
 #[wasm_bindgen_test]
 async fn stage_creation() {
-    let ctx = renderling::Context::try_new_headless(256, 256, None)
+    let ctx = Context::try_new_headless(256, 256, None)
         .await
         .unwrap_throw();
     let _stage = ctx.new_stage();
@@ -976,10 +984,13 @@ async fn can_clear_background() {
     let stage = ctx
         .new_stage()
         .with_background_color(Vec4::new(1.0, 0.0, 0.0, 1.0));
+    // ANCHOR: manual_context_frame
     let frame = ctx.get_next_frame().unwrap();
     stage.render(&frame.view());
     let seen = frame.read_image().await.unwrap();
     assert_img_eq("clear.png", seen).await;
+    frame.present();
+    // ANCHOR_END: manual_context_frame
 }
 
 // #[wasm_bindgen_test]
@@ -1008,8 +1019,13 @@ async fn can_render_hello_triangle() {
     // This is a wasm version of cmy_triangle_sanity
     let ctx = Context::try_new_headless(100, 100, None).await.unwrap();
     let stage = ctx.new_stage().with_background_color(Vec4::splat(1.0));
-    let _camera = stage.new_camera(Camera::default_ortho2d(100.0, 100.0));
-    let _rez = stage.builder().with_vertices(right_tri_vertices()).build();
+    let (projection, view) = renderling::camera::default_ortho2d(100.0, 100.0);
+    let _camera = stage
+        .new_camera()
+        .with_projection_and_view(projection, view);
+    let _rez = stage
+        .new_primitive()
+        .with_vertices(stage.new_vertices(right_tri_vertices()));
 
     let frame = ctx.get_next_frame().unwrap();
     stage.render(&frame.view());

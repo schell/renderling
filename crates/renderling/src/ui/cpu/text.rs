@@ -8,33 +8,16 @@ use std::{
 };
 
 use ab_glyph::Rect;
-use craballoc::prelude::{GpuArray, Hybrid};
 use glam::{Vec2, Vec4};
 use glyph_brush::*;
 
 pub use ab_glyph::FontArc;
 pub use glyph_brush::{Section, Text};
 
-use crate::{
-    atlas::AtlasTexture,
-    pbr::Material,
-    stage::{Renderlet, Vertex},
-};
+use crate::{atlas::AtlasTexture, geometry::Vertex, material::Material, primitive::Primitive};
 use image::{DynamicImage, GenericImage, ImageBuffer, Luma, Rgba};
 
 use super::{Ui, UiTransform};
-
-// TODO: make UiText able to be updated without fully destroying it
-#[derive(Debug)]
-pub struct UiText {
-    pub cache: GlyphCache,
-    pub vertices: GpuArray<Vertex>,
-    pub transform: UiTransform,
-    pub texture: Hybrid<AtlasTexture>,
-    pub material: Hybrid<Material>,
-    pub renderlet: Hybrid<Renderlet>,
-    pub bounds: (Vec2, Vec2),
-}
 
 pub struct UiTextBuilder {
     ui: Ui,
@@ -47,14 +30,14 @@ impl UiTextBuilder {
     pub fn new(ui: &Ui) -> Self {
         Self {
             ui: ui.clone(),
-            material: Material::default(),
+            material: ui.stage.new_material(),
             brush: GlyphBrushBuilder::using_fonts(ui.get_fonts()).build(),
             bounds: (Vec2::ZERO, Vec2::ZERO),
         }
     }
 
     pub fn set_color(&mut self, color: impl Into<Vec4>) -> &mut Self {
-        self.material.albedo_factor = color.into();
+        self.material.set_albedo_factor(color.into());
         self
     }
 
@@ -86,7 +69,7 @@ impl UiTextBuilder {
     pub fn build(self) -> UiText {
         let UiTextBuilder {
             ui,
-            mut material,
+            material,
             bounds,
             brush,
         } = self;
@@ -106,27 +89,45 @@ impl UiTextBuilder {
 
         // UNWRAP: panic on purpose
         let entry = ui.stage.add_images(Some(img)).unwrap().pop().unwrap();
-        log::trace!("ui text texture: {entry:#?}");
-        material.albedo_texture_id = entry.id();
-
-        let (vertices, material, renderlet) = ui
+        material.set_albedo_texture(&entry);
+        let vertices = ui.stage.new_vertices(mesh);
+        let transform = ui.new_transform();
+        let renderlet = ui
             .stage
-            .builder()
-            .with_vertices(mesh)
-            .with_material(material)
-            .build();
-        let transform = ui.new_transform(vec![renderlet.id()]);
-        renderlet.modify(|r| r.transform_id = transform.id());
-
+            .new_primitive()
+            .with_vertices(vertices)
+            .with_transform(&transform.transform)
+            .with_material(&material);
         UiText {
-            cache,
+            _cache: cache,
             bounds,
-            vertices: vertices.into_gpu_only(),
             transform,
-            texture: entry,
-            material,
+            _texture: entry,
+            _material: material,
             renderlet,
         }
+    }
+}
+
+pub struct UiText {
+    pub(crate) transform: UiTransform,
+    pub(crate) renderlet: Primitive,
+    pub(crate) bounds: (Vec2, Vec2),
+
+    pub(crate) _cache: GlyphCache,
+    pub(crate) _texture: AtlasTexture,
+    pub(crate) _material: Material,
+}
+
+impl UiText {
+    /// Returns the bounds of this text.
+    pub fn bounds(&self) -> (Vec2, Vec2) {
+        self.bounds
+    }
+
+    /// Returns the transform of this text.
+    pub fn transform(&self) -> &UiTransform {
+        &self.transform
     }
 }
 
@@ -330,7 +331,7 @@ impl GlyphCache {
 
 #[cfg(test)]
 mod test {
-    use crate::{test::BlockOnFuture, ui::Ui, Context};
+    use crate::{context::Context, test::BlockOnFuture, ui::Ui};
     use glyph_brush::Section;
 
     use super::*;
@@ -346,7 +347,7 @@ mod test {
         let ui = Ui::new(&ctx);
         let _font_id = ui.add_font(font);
         let _text = ui
-            .new_text()
+            .text_builder()
             .with_section(
                 Section::default()
                     .add_text(
@@ -390,13 +391,15 @@ mod test {
             ui.load_font("../../fonts/Recursive Mn Lnr St Med Nerd Font Complete.ttf"),
         )
         .unwrap();
+        log::info!("loaded font");
+
         let text1 = "Voluptas magnam sint et incidunt. Aliquam praesentium voluptas ut nemo \
                      laboriosam. Dicta qui et dicta.";
         let text2 = "Inventore impedit quo ratione ullam blanditiis soluta aliquid. Enim \
                      molestiae eaque ab commodi et.\nQuidem ex tempore ipsam. Incidunt suscipit \
                      aut commodi cum atque voluptate est.";
         let text = ui
-            .new_text()
+            .text_builder()
             .with_section(
                 Section::default().add_text(
                     Text::new(text1)
@@ -415,33 +418,50 @@ mod test {
                     .with_bounds((400.0, f32::INFINITY)),
             )
             .build();
+        log::info!("created text");
 
         let (fill, stroke) = ui
-            .new_path()
+            .path_builder()
             .with_fill_color([1.0, 1.0, 0.0, 1.0])
             .with_stroke_color([1.0, 0.0, 1.0, 1.0])
             .with_rectangle(text.bounds.0, text.bounds.1)
             .fill_and_stroke();
+        log::info!("filled and stroked");
 
-        for path in [&fill, &stroke] {
+        for (i, path) in [&fill, &stroke].into_iter().enumerate() {
+            log::info!("for {i}");
             // move the path to (50, 50)
             path.transform.set_translation(Vec2::new(51.0, 53.0));
+            log::info!("translated");
             // move it to the back
-            path.transform.set_z(-0.1);
+            path.transform.set_z(0.1);
+            log::info!("z'd");
         }
+        log::info!("transformed");
 
         let frame = ctx.get_next_frame().unwrap();
         ui.render(&frame.view());
+        log::info!("rendered");
         let img = frame.read_image().block().unwrap();
-        img_diff::assert_img_eq("ui/text/overlay.png", img);
-        let depth_img = ui
-            .stage
-            .get_depth_texture()
-            .read_image()
-            .block()
-            .unwrap()
-            .unwrap();
-        img_diff::assert_img_eq("ui/text/overlay_depth.png", depth_img);
+        if let Err(e) =
+            img_diff::assert_img_eq_cfg_result("ui/text/overlay.png", img, Default::default())
+        {
+            let depth_img = ui
+                .stage
+                .get_depth_texture()
+                .read_image()
+                .block()
+                .unwrap()
+                .unwrap();
+            let e2 = img_diff::assert_img_eq_cfg_result(
+                "ui/text/overlay_depth.png",
+                depth_img,
+                Default::default(),
+            )
+            .err()
+            .unwrap_or_default();
+            panic!("{e}\n{e2}");
+        }
     }
 
     #[test]
@@ -452,8 +472,9 @@ mod test {
             ui.load_font("../../fonts/Recursive Mn Lnr St Med Nerd Font Complete.ttf"),
         )
         .unwrap();
-        let mut _text = ui
-            .new_text()
+        log::info!("loaded font");
+        let text = ui
+            .text_builder()
             .with_section(
                 Section::default()
                     .add_text(
@@ -472,8 +493,10 @@ mod test {
         img_diff::assert_img_eq("ui/text/can_recreate_0.png", img);
 
         log::info!("replacing text");
-        _text = ui
-            .new_text()
+        ui.remove_text(&text);
+
+        let _ = ui
+            .text_builder()
             .with_section(
                 Section::default()
                     .add_text(

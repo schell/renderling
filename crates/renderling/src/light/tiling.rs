@@ -1,7 +1,10 @@
-//! Implementation of light tiling.
+//! This module implements light tiling, a technique used in rendering to efficiently manage and apply lighting effects across a scene.
 //!
-//! For more info on what light tiling is, see
-//! [this blog post](https://renderling.xyz/articles/live/light_tiling.html).
+//! Light tiling divides the rendering surface into a grid of tiles, allowing for the efficient computation of lighting effects by processing each tile independently. This approach helps in optimizing the rendering pipeline by reducing the number of lighting calculations needed, especially in complex scenes with multiple light sources.
+//!
+//! The `LightTiling` struct and its associated methods provide the necessary functionality to set up and execute light tiling operations. It includes the creation of compute pipelines for clearing tiles, computing minimum and maximum depths, and binning lights into tiles.
+//!
+//! For more detailed information on light tiling and its implementation, refer to [this blog post](https://renderling.xyz/articles/live/light_tiling.html).
 
 use core::sync::atomic::AtomicUsize;
 use std::sync::Arc;
@@ -15,7 +18,10 @@ use glam::{UVec2, UVec3};
 
 use crate::{
     bindgroup::ManagedBindGroup,
-    light::{LightTile, LightTilingDescriptor, Lighting},
+    light::{
+        shader::{LightTile, LightTilingDescriptor},
+        Lighting,
+    },
     stage::Stage,
 };
 
@@ -28,6 +34,8 @@ use crate::{
 /// <https://renderling.xyz/articles/live/light_tiling.html>.
 pub struct LightTiling<Ct: IsContainer = GpuArrayContainer> {
     pub(crate) tiling_descriptor: Hybrid<LightTilingDescriptor>,
+    /// Container is a type variable for testing, as we have to load
+    /// the tiles with known values from the CPU.
     tiles: Ct::Container<LightTile>,
     /// Cache of the id of the Stage's depth texture.
     ///
@@ -334,7 +342,7 @@ impl<Ct: IsContainer> LightTiling<Ct> {
     ) -> (image::GrayImage, image::GrayImage, image::GrayImage) {
         use crabslab::Slab;
 
-        use crate::light::dequantize_depth_u32_to_f32;
+        use crate::light::shader::dequantize_depth_u32_to_f32;
 
         let tile_dimensions = self.tiling_descriptor.get().tile_grid_size();
         let slab = lighting.light_slab.read(..).await.unwrap();
@@ -422,8 +430,8 @@ impl Default for LightTilingConfig {
 }
 
 impl LightTiling<HybridArrayContainer> {
-    /// Creates a new [`LightTiling`] struct with a [`HybridArray`] of tiles.
-    pub fn new_hybrid(
+    /// Creates a new [`LightTiling`] struct with a `HybridArray` of tiles.
+    pub(crate) fn new_hybrid(
         lighting: &Lighting,
         multisampled: bool,
         depth_texture_size: UVec2,

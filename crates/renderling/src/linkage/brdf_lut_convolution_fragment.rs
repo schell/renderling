@@ -3,9 +3,9 @@
 use crate::linkage::ShaderLinkage;
 #[cfg(not(target_arch = "wasm32"))]
 mod target {
-    pub const ENTRY_POINT: &str = "convolution::brdf_lut_convolution_fragment";
+    pub const ENTRY_POINT: &str = "convolution::shader::brdf_lut_convolution_fragment";
     pub fn descriptor() -> wgpu::ShaderModuleDescriptor<'static> {
-        wgpu::include_spirv!("../../shaders/convolution-brdf_lut_convolution_fragment.spv")
+        wgpu::include_spirv!("../../shaders/convolution-shader-brdf_lut_convolution_fragment.spv")
     }
     pub fn linkage(device: &wgpu::Device) -> super::ShaderLinkage {
         log::debug!(
@@ -20,9 +20,9 @@ mod target {
 }
 #[cfg(target_arch = "wasm32")]
 mod target {
-    pub const ENTRY_POINT: &str = "convolutionbrdf_lut_convolution_fragment";
+    pub const ENTRY_POINT: &str = "convolutionshaderbrdf_lut_convolution_fragment";
     pub fn descriptor() -> wgpu::ShaderModuleDescriptor<'static> {
-        wgpu::include_wgsl!("../../shaders/convolution-brdf_lut_convolution_fragment.wgsl")
+        wgpu::include_wgsl!("../../shaders/convolution-shader-brdf_lut_convolution_fragment.wgsl")
     }
     pub fn linkage(device: &wgpu::Device) -> super::ShaderLinkage {
         log::debug!(

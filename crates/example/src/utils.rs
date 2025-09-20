@@ -1,22 +1,9 @@
 //! Example app utilities.
 
-use std::{any::Any, sync::Arc};
+use std::sync::Arc;
 
-use renderling::Context;
+use renderling::context::Context;
 use winit::monitor::MonitorHandle;
-
-#[derive(Default)]
-pub struct BagOfResources(Vec<Box<dyn Any>>);
-
-impl BagOfResources {
-    pub fn push(&mut self, rez: impl Any) {
-        self.0.push(Box::new(rez));
-    }
-
-    pub fn drain(&mut self) {
-        let _ = self.0.drain(..);
-    }
-}
 
 pub trait TestAppHandler: winit::application::ApplicationHandler {
     fn new(

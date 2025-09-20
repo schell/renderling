@@ -5,26 +5,32 @@ use std::sync::Arc;
 
 use craballoc::{
     prelude::Hybrid,
-    value::{HybridArray, HybridWriteGuard, WeakContainer},
+    value::{HybridArray, HybridWriteGuard},
 };
 use crabslab::Id;
 use glam::{Mat4, UVec2};
-use snafu::{OptionExt, ResultExt};
+use snafu::ResultExt;
 
 use crate::{
-    atlas::{AtlasBlittingOperation, AtlasImage, AtlasTexture},
+    atlas::{shader::AtlasTextureDescriptor, AtlasBlittingOperation, AtlasImage, AtlasTexture},
     bindgroup::ManagedBindGroup,
-    stage::Renderlet,
+    light::{IsLight, Light},
+    primitive::Primitive,
 };
 
 use super::{
-    AnalyticalLight, DroppedAnalyticalLightBundleSnafu, Lighting, LightingError, PollSnafu,
-    ShadowMapDescriptor,
+    shader::{LightStyle, ShadowMapDescriptor},
+    AnalyticalLight, Lighting, LightingError, PollSnafu,
 };
 
-/// A depth map rendering of the scene from a light's point of view.
+/// Projects shadows from a single light source for specific objects.
 ///
-/// Used to project shadows from one light source for specific objects.
+/// A `ShadowMap` is essentially a depth map rendering of the scene from one
+/// light's point of view. We use this rendering of the scene to determine if
+/// an object lies in shadow.
+///
+/// To create a new [`ShadowMap`], use
+/// [`Stage::new_shadow_map`](crate::stage::Stage::new_shadow_map).
 #[derive(Clone)]
 pub struct ShadowMap {
     /// Last time the stage slab was bound.
@@ -40,11 +46,11 @@ pub struct ShadowMap {
     pub(crate) light_space_transforms: HybridArray<Mat4>,
     /// Bindgroup for the shadow map update shader
     pub(crate) update_bindgroup: ManagedBindGroup,
-    pub(crate) atlas_textures: Vec<Hybrid<AtlasTexture>>,
-    pub(crate) _atlas_textures_array: HybridArray<Id<AtlasTexture>>,
+    pub(crate) atlas_textures: Vec<AtlasTexture>,
+    pub(crate) _atlas_textures_array: HybridArray<Id<AtlasTextureDescriptor>>,
     pub(crate) update_texture: crate::texture::Texture,
     pub(crate) blitting_op: AtlasBlittingOperation,
-    pub(crate) light_bundle: AnalyticalLight<WeakContainer>,
+    pub(crate) light_bundle: AnalyticalLight,
 }
 
 impl ShadowMap {
@@ -160,21 +166,24 @@ impl ShadowMap {
         self.shadowmap_descriptor.lock()
     }
 
-    /// Enable shadow mapping for the given [`AnalyticalLightBundle`], creating
+    /// Enable shadow mapping for the given [`AnalyticalLight`], creating
     /// a new [`ShadowMap`].
-    pub fn new(
+    pub fn new<T>(
         lighting: &Lighting,
-        analytical_light_bundle: &AnalyticalLight,
+        analytical_light_bundle: &AnalyticalLight<T>,
         // Size of the shadow map
         size: UVec2,
         // Distance to the shadow map frustum's near plane
         z_near: f32,
         // Distance to the shadow map frustum's far plane
         z_far: f32,
-    ) -> Result<Self, LightingError> {
+    ) -> Result<Self, LightingError>
+    where
+        T: IsLight,
+        Light: From<T>,
+    {
         let stage_slab_buffer = lighting.geometry_slab_buffer.read().unwrap();
-        let is_point_light =
-            analytical_light_bundle.light_details().style() == super::LightStyle::Point;
+        let is_point_light = analytical_light_bundle.style() == LightStyle::Point;
         let count = if is_point_light { 6 } else { 1 };
         let atlas = &lighting.shadow_map_atlas;
         let image = AtlasImage::new(size, crate::atlas::AtlasImageFormat::R32FLOAT);
@@ -195,12 +204,19 @@ impl ShadowMap {
         let atlas_textures_array = lighting
             .light_slab
             .new_array(atlas_textures.iter().map(|t| t.id()));
-        let blitting_op = lighting
-            .shadow_map_update_blitter
-            .new_blitting_operation(atlas, if is_point_light { 6 } else { 1 });
-        let light_space_transforms = lighting
-            .light_slab
-            .new_array(analytical_light_bundle.light_space_transforms(z_near, z_far));
+        let blitting_op = AtlasBlittingOperation::new(
+            &lighting.shadow_map_update_blitter,
+            atlas,
+            if is_point_light { 6 } else { 1 },
+        );
+        let light_space_transforms =
+            lighting
+                .light_slab
+                .new_array(analytical_light_bundle.light_space_transforms(
+                    &analytical_light_bundle.transform().descriptor(),
+                    z_near,
+                    z_far,
+                ));
         let shadowmap_descriptor = lighting.light_slab.new_value(ShadowMapDescriptor {
             light_space_transforms_array: light_space_transforms.array(),
             z_near,
@@ -211,7 +227,7 @@ impl ShadowMap {
             pcf_samples: 4,
         });
         // Set the descriptor in the light, so the shader knows to use it
-        analytical_light_bundle.light().modify(|light| {
+        analytical_light_bundle.light_descriptor.modify(|light| {
             light.shadow_map_desc_id = shadowmap_descriptor.id();
         });
         let light_slab_buffer = lighting.commit();
@@ -232,32 +248,32 @@ impl ShadowMap {
             _atlas_textures_array: atlas_textures_array,
             update_texture,
             blitting_op,
-            light_bundle: analytical_light_bundle.weak(),
+            light_bundle: analytical_light_bundle.clone().into_generic(),
         })
     }
 
-    /// Update the `ShadowMap`, rendering the given [`Renderlet`]s to the map as shadow casters.
+    /// Update the `ShadowMap`, rendering the given [`Primitive`]s to the map as
+    /// shadow casters.
     ///
-    /// The `ShadowMap` contains a weak reference to the [`AnalyticalLightBundle`] used to create
-    /// it. Updates made to this `AnalyticalLightBundle` will automatically propogate to this
+    /// The `ShadowMap` contains a weak reference to the [`AnalyticalLight`] used to create
+    /// it. Updates made to this `AnalyticalLight` will automatically propogate to this
     /// `ShadowMap`.
     ///
     /// ## Errors
-    /// If the `AnalyticalLightBundle` used to create this `ShadowMap` has been
+    /// If the `AnalyticalLight` used to create this `ShadowMap` has been
     /// dropped, calling this function will err.
     pub fn update<'a>(
         &self,
         lighting: impl AsRef<Lighting>,
-        renderlets: impl IntoIterator<Item = &'a Hybrid<Renderlet>>,
+        renderlets: impl IntoIterator<Item = &'a Primitive>,
     ) -> Result<(), LightingError> {
         let lighting = lighting.as_ref();
-        let light_bundle = self
-            .light_bundle
-            .upgrade()
-            .context(DroppedAnalyticalLightBundleSnafu)?;
         let shadow_desc = self.shadowmap_descriptor.get();
-        let new_transforms =
-            light_bundle.light_space_transforms(shadow_desc.z_near, shadow_desc.z_far);
+        let new_transforms = self.light_bundle.light_space_transforms(
+            &self.light_bundle.transform().descriptor(),
+            shadow_desc.z_near,
+            shadow_desc.z_far,
+        );
         for (i, t) in (0..self.light_space_transforms.len()).zip(new_transforms) {
             self.light_space_transforms.set_item(i, t);
         }
@@ -339,7 +355,7 @@ impl ShadowMap {
                 let mut count = 0;
                 for rlet in renderlets.iter() {
                     let id = rlet.id();
-                    let rlet = rlet.get();
+                    let rlet = rlet.descriptor();
                     let vertex_range = 0..rlet.get_vertex_count();
                     let instance_range = id.inner()..id.inner() + 1;
                     render_pass.draw(vertex_range, instance_range);
@@ -368,15 +384,15 @@ impl ShadowMap {
 #[cfg(test)]
 #[allow(clippy::unused_enumerate_index)]
 mod test {
-    use crate::{camera::Camera, test::BlockOnFuture};
+    use glam::{UVec2, Vec3};
 
-    use super::super::*;
+    use crate::{context::Context, test::BlockOnFuture};
 
     #[test]
     fn shadow_mapping_just_cuboid() {
         let w = 800.0;
         let h = 800.0;
-        let ctx = crate::Context::headless(w as u32, h as u32).block();
+        let ctx = Context::headless(w as u32, h as u32).block();
         let stage = ctx
             .new_stage()
             .with_lighting(true)
@@ -398,7 +414,7 @@ mod test {
         let camera = doc.cameras.first().unwrap();
         camera
             .as_ref()
-            .modify(|cam| cam.set_projection(crate::camera::perspective(w, h)));
+            .set_projection(crate::camera::perspective(w, h));
         stage.use_camera(camera);
 
         let frame = ctx.get_next_frame().unwrap();
@@ -430,7 +446,7 @@ mod test {
     fn shadow_mapping_just_cuboid_red_and_blue() {
         let w = 800.0;
         let h = 800.0;
-        let ctx = crate::Context::headless(w as u32, h as u32).block();
+        let ctx = Context::headless(w as u32, h as u32).block();
         let stage = ctx
             .new_stage()
             .with_lighting(true)
@@ -446,7 +462,7 @@ mod test {
         let camera = doc.cameras.first().unwrap();
         camera
             .as_ref()
-            .modify(|cam| cam.set_projection(crate::camera::perspective(w, h)));
+            .set_projection(crate::camera::perspective(w, h));
         stage.use_camera(camera);
 
         let gltf_light_a = doc.lights.first().unwrap();
@@ -483,7 +499,7 @@ mod test {
     fn shadow_mapping_sanity() {
         let w = 800.0;
         let h = 800.0;
-        let ctx = crate::Context::headless(w as u32, h as u32)
+        let ctx = Context::headless(w as u32, h as u32)
             .block()
             .with_shadow_mapping_atlas_texture_size([1024, 1024, 2]);
         let stage = ctx.new_stage().with_lighting(true);
@@ -498,7 +514,7 @@ mod test {
         let camera = doc.cameras.first().unwrap();
         camera
             .as_ref()
-            .modify(|cam| cam.set_projection(crate::camera::perspective(w, h)));
+            .set_projection(crate::camera::perspective(w, h));
         stage.use_camera(camera);
 
         let frame = ctx.get_next_frame().unwrap();
@@ -511,7 +527,7 @@ mod test {
 
         let gltf_light = doc.lights.first().unwrap();
         assert_eq!(
-            gltf_light.light().get().transform_id,
+            gltf_light.descriptor().transform_id,
             gltf_light.transform().id(),
             "light's global transform id is different from its transform_id"
         );
@@ -570,7 +586,7 @@ mod test {
     fn shadow_mapping_spot_lights() {
         let w = 800.0;
         let h = 800.0;
-        let ctx = crate::Context::headless(w as u32, h as u32).block();
+        let ctx = Context::headless(w as u32, h as u32).block();
         let stage = ctx
             .new_stage()
             .with_lighting(true)
@@ -584,10 +600,9 @@ mod test {
             )
             .unwrap();
         let camera = doc.cameras.first().unwrap();
-        let original_camera = camera.as_ref().modify(|cam| {
-            cam.set_projection(crate::camera::perspective(w, h));
-            *cam
-        });
+        camera
+            .as_ref()
+            .set_projection(crate::camera::perspective(w, h));
         stage.use_camera(camera);
 
         let mut shadow_maps = vec![];
@@ -595,13 +610,14 @@ mod test {
         let z_far = 100.0;
         for (_i, light_bundle) in doc.lights.iter().enumerate() {
             {
-                let desc = light_bundle.light_details().as_spot().unwrap().get();
+                let desc = light_bundle.as_spot().unwrap().descriptor();
                 let (p, v) = desc.shadow_mapping_projection_and_view(
-                    &light_bundle.transform().get().into(),
+                    &light_bundle.transform().as_mat4(),
                     z_near,
                     z_far,
                 );
-                camera.as_ref().set(Camera::new(p, v));
+                let temp_camera = stage.new_camera().with_projection_and_view(p, v);
+                stage.use_camera(temp_camera);
                 let frame = ctx.get_next_frame().unwrap();
                 stage.render(&frame.view());
                 let _img = frame.read_image().block().unwrap();
@@ -622,7 +638,8 @@ mod test {
             shadow.update(&stage, doc.renderlets_iter()).unwrap();
             shadow_maps.push(shadow);
         }
-        camera.as_ref().set(original_camera);
+
+        stage.use_camera(camera);
 
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
@@ -635,7 +652,7 @@ mod test {
     fn shadow_mapping_point_lights() {
         let w = 800.0;
         let h = 800.0;
-        let ctx = crate::Context::headless(w as u32, h as u32).block();
+        let ctx = Context::headless(w as u32, h as u32).block();
         let stage = ctx
             .new_stage()
             .with_lighting(true)
@@ -649,10 +666,9 @@ mod test {
             )
             .unwrap();
         let camera = doc.cameras.first().unwrap();
-        let c = camera.as_ref().modify(|cam| {
-            cam.set_projection(crate::camera::perspective(w, h));
-            *cam
-        });
+        camera
+            .as_ref()
+            .set_projection(crate::camera::perspective(w, h));
         stage.use_camera(camera);
 
         let mut shadows = vec![];
@@ -660,15 +676,15 @@ mod test {
         let z_far = 100.0;
         for (i, light_bundle) in doc.lights.iter().enumerate() {
             {
-                let desc = light_bundle.light_details().as_point().unwrap().get();
+                let desc = light_bundle.as_point().unwrap().descriptor();
                 println!("point light {i}: {desc:?}");
                 let (p, vs) = desc.shadow_mapping_projection_and_view_matrices(
-                    &light_bundle.transform().get().into(),
+                    &light_bundle.transform().as_mat4(),
                     z_near,
                     z_far,
                 );
                 for (_j, v) in vs.into_iter().enumerate() {
-                    camera.as_ref().set(Camera::new(p, v));
+                    stage.use_camera(stage.new_camera().with_projection_and_view(p, v));
                     let frame = ctx.get_next_frame().unwrap();
                     stage.render(&frame.view());
                     let _img = frame.read_image().block().unwrap();
@@ -690,7 +706,8 @@ mod test {
             shadow.update(&stage, doc.renderlets_iter()).unwrap();
             shadows.push(shadow);
         }
-        camera.as_ref().set(c);
+
+        stage.use_camera(camera);
 
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());

@@ -46,6 +46,26 @@ pub enum AtlasImageFormat {
     D32FLOAT,
 }
 
+impl From<AtlasImageFormat> for wgpu::TextureFormat {
+    fn from(value: AtlasImageFormat) -> Self {
+        match value {
+            AtlasImageFormat::R8 => wgpu::TextureFormat::R8Unorm,
+            AtlasImageFormat::R8G8 => wgpu::TextureFormat::Rg8Unorm,
+            AtlasImageFormat::R8G8B8 => wgpu::TextureFormat::Rgba8Unorm, // No direct 3-channel format, using 4-channel
+            AtlasImageFormat::R8G8B8A8 => wgpu::TextureFormat::Rgba8Unorm,
+            AtlasImageFormat::R16 => wgpu::TextureFormat::R16Unorm,
+            AtlasImageFormat::R16G16 => wgpu::TextureFormat::Rg16Unorm,
+            AtlasImageFormat::R16G16B16 => wgpu::TextureFormat::Rgba16Unorm, // No direct 3-channel format, using 4-channel
+            AtlasImageFormat::R16G16B16A16 => wgpu::TextureFormat::Rgba16Unorm,
+            AtlasImageFormat::R16G16B16A16FLOAT => wgpu::TextureFormat::Rgba16Float,
+            AtlasImageFormat::R32FLOAT => wgpu::TextureFormat::R32Float,
+            AtlasImageFormat::R32G32B32FLOAT => wgpu::TextureFormat::Rgba32Float, // No direct 3-channel format, using 4-channel
+            AtlasImageFormat::R32G32B32A32FLOAT => wgpu::TextureFormat::Rgba32Float,
+            AtlasImageFormat::D32FLOAT => wgpu::TextureFormat::Depth32Float,
+        }
+    }
+}
+
 impl AtlasImageFormat {
     pub fn from_wgpu_texture_format(value: wgpu::TextureFormat) -> Option<Self> {
         match value {

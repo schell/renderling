@@ -17,7 +17,7 @@ use tokio::io::AsyncWriteExt;
 use wire_types::Error;
 
 pub async fn serve() {
-    log::info!("starting the webdriver proxy");
+    log::info!("starting the xtask server");
     let app = Router::new()
         .route("/test_img/{*path}", get(static_file))
         .route("/assert_img_eq/{*filename}", options(accept))
@@ -35,7 +35,7 @@ pub async fn serve() {
 
 /// Responds with access control headers to allow anything from anywhere.
 async fn accept(request: Request) -> Response {
-    log::info!("accept: {request:#?}");
+    log::debug!("accept: {request:#?}");
     Response::builder()
         .status(StatusCode::OK)
         .header("accept", "*/*")
@@ -46,16 +46,25 @@ async fn accept(request: Request) -> Response {
         .unwrap()
 }
 
-async fn static_file(Path(path): Path<String>) -> Result<Response, StatusCode> {
-    log::info!("requested static '{path}'");
-    let test_img = std::path::PathBuf::from(std::env!("CARGO_WORKSPACE_DIR")).join("test_img");
-    let path = test_img.join(path);
-    if path.exists() {
-        let bytes = tokio::fs::read(&path).await.map_err(|e| {
-            log::error!("could not read path '{path:?}': {e}");
+async fn static_file_inner(
+    path: impl AsRef<std::path::Path>,
+    prefix: impl AsRef<std::path::Path>,
+) -> Result<Response, StatusCode> {
+    log::info!(
+        "requested '{}' '{}'",
+        prefix.as_ref().display(),
+        path.as_ref().display()
+    );
+    let mut full_path = prefix.as_ref().join(path);
+    if full_path.is_dir() {
+        full_path = full_path.join("index.html");
+    }
+    if full_path.exists() {
+        let bytes = tokio::fs::read(&full_path).await.map_err(|e| {
+            log::error!("could not read path '{full_path:?}': {e}");
             StatusCode::BAD_REQUEST
         })?;
-        let mime = new_mime_guess::from_path(path);
+        let mime = new_mime_guess::from_path(full_path);
         let mimetype = if let Some(mt) = mime.first() {
             mt.to_string()
         } else {
@@ -72,9 +81,14 @@ async fn static_file(Path(path): Path<String>) -> Result<Response, StatusCode> {
             })?;
         Ok(resp)
     } else {
-        log::error!("{path:?} not found");
+        log::error!("{full_path:?} not found");
         Err(StatusCode::NOT_FOUND)
     }
+}
+
+async fn static_file(Path(path): Path<String>) -> Result<Response, StatusCode> {
+    let test_img_dir = std::path::PathBuf::from(std::env!("CARGO_WORKSPACE_DIR")).join("test_img");
+    static_file_inner(path, test_img_dir).await
 }
 
 fn image_from_wire(img: wire_types::Image) -> Result<image::DynamicImage, Error> {
@@ -194,4 +208,19 @@ async fn artifact(Path(parts): Path<Vec<String>>, body: Body) -> Response {
         .header("access-control-allow-headers", "*")
         .body(Json(result).into_response().into_body())
         .unwrap()
+}
+
+pub async fn serve_docs() {
+    log::info!("starting the xtask docs server");
+    let app = Router::new().route("/{*rest}", get(docs));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:4000")
+        .await
+        .unwrap();
+    log::info!("serving docs");
+    axum::serve(listener, app).await.unwrap();
+}
+
+async fn docs(Path(path): Path<String>) -> impl IntoResponse {
+    log::info!("path: {path:#?}");
+    static_file_inner(path, "target/doc").await
 }

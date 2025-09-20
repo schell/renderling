@@ -165,6 +165,10 @@ impl Tonemapping {
         }
     }
 
+    pub(crate) fn slab_allocator(&self) -> &SlabAllocator<WgpuRuntime> {
+        &self.slab
+    }
+
     pub fn set_hdr_texture(&self, device: &wgpu::Device, hdr_texture: &Texture) {
         // UNWRAP: safe because the buffer is created in `Self::new` and guaranteed to
         // exist

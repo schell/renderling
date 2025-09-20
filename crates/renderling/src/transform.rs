@@ -1,68 +1,77 @@
-//! Decomposed 3d transform.
-use crabslab::SlabItem;
-use glam::{Mat4, Quat, Vec3};
+//! Decomposed 3d transforms and hierarchies.
 
-use crate::math::IsMatrix;
+#[cfg(cpu)]
+mod cpu;
+#[cfg(cpu)]
+pub use cpu::*;
 
-#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
-#[derive(Clone, Copy, PartialEq, SlabItem)]
-/// A decomposed transformation.
-///
-/// `Transform` can be converted to/from [`Mat4`].
-pub struct Transform {
-    pub translation: Vec3,
-    pub rotation: Quat,
-    pub scale: Vec3,
-}
+pub mod shader {
+    use crabslab::SlabItem;
+    use glam::{Mat4, Quat, Vec3};
 
-impl Default for Transform {
-    fn default() -> Self {
-        Self::IDENTITY
+    use crate::math::IsMatrix;
+
+    #[derive(Clone, Copy, PartialEq, SlabItem, core::fmt::Debug)]
+    /// A GPU descriptor of a decomposed transformation.
+    ///
+    /// `TransformDescriptor` can be converted to/from [`Mat4`].
+    pub struct TransformDescriptor {
+        pub translation: Vec3,
+        pub rotation: Quat,
+        pub scale: Vec3,
     }
-}
 
-impl From<Mat4> for Transform {
-    fn from(value: Mat4) -> Self {
-        let (scale, rotation, translation) = value.to_scale_rotation_translation_or_id();
-        Transform {
-            translation,
-            rotation,
-            scale,
+    impl Default for TransformDescriptor {
+        fn default() -> Self {
+            Self::IDENTITY
         }
     }
-}
 
-impl From<Transform> for Mat4 {
-    fn from(
-        Transform {
-            translation,
-            rotation,
-            scale,
-        }: Transform,
-    ) -> Self {
-        Mat4::from_scale_rotation_translation(scale, rotation, translation)
+    impl From<Mat4> for TransformDescriptor {
+        fn from(value: Mat4) -> Self {
+            let (scale, rotation, translation) = value.to_scale_rotation_translation_or_id();
+            TransformDescriptor {
+                translation,
+                rotation,
+                scale,
+            }
+        }
     }
-}
 
-impl Transform {
-    pub const IDENTITY: Self = Transform {
-        translation: Vec3::ZERO,
-        rotation: Quat::IDENTITY,
-        scale: Vec3::ONE,
-    };
+    impl From<TransformDescriptor> for Mat4 {
+        fn from(
+            TransformDescriptor {
+                translation,
+                rotation,
+                scale,
+            }: TransformDescriptor,
+        ) -> Self {
+            Mat4::from_scale_rotation_translation(scale, rotation, translation)
+        }
+    }
+
+    impl TransformDescriptor {
+        pub const IDENTITY: Self = TransformDescriptor {
+            translation: Vec3::ZERO,
+            rotation: Quat::IDENTITY,
+            scale: Vec3::ONE,
+        };
+    }
 }
 
 #[cfg(test)]
 mod test {
-    use super::*;
     use crabslab::*;
+    use glam::{Quat, Vec3};
+
+    use crate::transform::shader::TransformDescriptor;
 
     #[test]
     fn transform_roundtrip() {
         assert_eq!(3, Vec3::SLAB_SIZE, "unexpected Vec3 slab size");
         assert_eq!(4, Quat::SLAB_SIZE, "unexpected Quat slab size");
-        assert_eq!(10, Transform::SLAB_SIZE);
-        let t = Transform::default();
+        assert_eq!(10, TransformDescriptor::SLAB_SIZE);
+        let t = TransformDescriptor::default();
         let mut slab = CpuSlab::new(vec![]);
         let t_id = slab.append(&t);
         pretty_assertions::assert_eq!(

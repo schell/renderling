@@ -3,9 +3,9 @@
 use crate::linkage::ShaderLinkage;
 #[cfg(not(target_arch = "wasm32"))]
 mod target {
-    pub const ENTRY_POINT: &str = "light::light_tiling_depth_pre_pass";
+    pub const ENTRY_POINT: &str = "light::shader::light_tiling_depth_pre_pass";
     pub fn descriptor() -> wgpu::ShaderModuleDescriptor<'static> {
-        wgpu::include_spirv!("../../shaders/light-light_tiling_depth_pre_pass.spv")
+        wgpu::include_spirv!("../../shaders/light-shader-light_tiling_depth_pre_pass.spv")
     }
     pub fn linkage(device: &wgpu::Device) -> super::ShaderLinkage {
         log::debug!(
@@ -20,9 +20,9 @@ mod target {
 }
 #[cfg(target_arch = "wasm32")]
 mod target {
-    pub const ENTRY_POINT: &str = "lightlight_tiling_depth_pre_pass";
+    pub const ENTRY_POINT: &str = "lightshaderlight_tiling_depth_pre_pass";
     pub fn descriptor() -> wgpu::ShaderModuleDescriptor<'static> {
-        wgpu::include_wgsl!("../../shaders/light-light_tiling_depth_pre_pass.wgsl")
+        wgpu::include_wgsl!("../../shaders/light-shader-light_tiling_depth_pre_pass.wgsl")
     }
     pub fn linkage(device: &wgpu::Device) -> super::ShaderLinkage {
         log::debug!("creating web linkage for {}", "light_tiling_depth_pre_pass");

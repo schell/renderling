@@ -3,9 +3,9 @@
 use crate::linkage::ShaderLinkage;
 #[cfg(not(target_arch = "wasm32"))]
 mod target {
-    pub const ENTRY_POINT: &str = "skybox::skybox_vertex";
+    pub const ENTRY_POINT: &str = "skybox::shader::skybox_vertex";
     pub fn descriptor() -> wgpu::ShaderModuleDescriptor<'static> {
-        wgpu::include_spirv!("../../shaders/skybox-skybox_vertex.spv")
+        wgpu::include_spirv!("../../shaders/skybox-shader-skybox_vertex.spv")
     }
     pub fn linkage(device: &wgpu::Device) -> super::ShaderLinkage {
         log::debug!("creating native linkage for {}", "skybox_vertex");
@@ -17,9 +17,9 @@ mod target {
 }
 #[cfg(target_arch = "wasm32")]
 mod target {
-    pub const ENTRY_POINT: &str = "skyboxskybox_vertex";
+    pub const ENTRY_POINT: &str = "skyboxshaderskybox_vertex";
     pub fn descriptor() -> wgpu::ShaderModuleDescriptor<'static> {
-        wgpu::include_wgsl!("../../shaders/skybox-skybox_vertex.wgsl")
+        wgpu::include_wgsl!("../../shaders/skybox-shader-skybox_vertex.wgsl")
     }
     pub fn linkage(device: &wgpu::Device) -> super::ShaderLinkage {
         log::debug!("creating web linkage for {}", "skybox_vertex");

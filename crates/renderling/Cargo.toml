@@ -26,6 +26,7 @@ crate-type = ["rlib", "cdylib"]
 default = ["gltf", "ui", "winit"]
 gltf = ["dep:gltf", "dep:serde_json"]
 test_i8_i16_extraction = []
+test-utils = ["dep:metal", "dep:wgpu-core"]
 ui = ["dep:glyph_brush", "dep:loading-bytes", "dep:lyon"]
 wasm = ["wgpu/fragile-send-sync-non-atomic-wasm"]
 debug-slab = []
@@ -90,17 +91,22 @@ human-repr = "1.1.0"
 icosahedron = "0.1"
 img-diff = { path = "../img-diff" }
 naga.workspace = true
+renderling_build = { path = "../renderling-build" }
 ttf-parser = "0.20.0"
 wasm-bindgen-test.workspace = true
-wgpu-core.workspace = true
 winit.workspace = true
 wire-types = { path = "../wire-types" }
 
 [target.'cfg(not(target_arch = "spirv"))'.dev-dependencies]
 glam = { workspace = true, features = ["std", "debug-glam-assert"] }
 
+[target.'cfg(target_os = "macos")'.dependencies]
+metal = { workspace = true, optional = true }
+wgpu-core = { workspace = true, optional = true }
+
 [target.'cfg(target_os = "macos")'.dev-dependencies]
 metal.workspace = true
+wgpu-core.workspace = true
 
 [dev-dependencies.web-sys]
 workspace = true

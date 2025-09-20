@@ -3,9 +3,11 @@
 use crate::linkage::ShaderLinkage;
 #[cfg(not(target_arch = "wasm32"))]
 mod target {
-    pub const ENTRY_POINT: &str = "light::light_tiling_compute_tile_min_and_max_depth";
+    pub const ENTRY_POINT: &str = "light::shader::light_tiling_compute_tile_min_and_max_depth";
     pub fn descriptor() -> wgpu::ShaderModuleDescriptor<'static> {
-        wgpu::include_spirv!("../../shaders/light-light_tiling_compute_tile_min_and_max_depth.spv")
+        wgpu::include_spirv!(
+            "../../shaders/light-shader-light_tiling_compute_tile_min_and_max_depth.spv"
+        )
     }
     pub fn linkage(device: &wgpu::Device) -> super::ShaderLinkage {
         log::debug!(
@@ -20,9 +22,11 @@ mod target {
 }
 #[cfg(target_arch = "wasm32")]
 mod target {
-    pub const ENTRY_POINT: &str = "lightlight_tiling_compute_tile_min_and_max_depth";
+    pub const ENTRY_POINT: &str = "lightshaderlight_tiling_compute_tile_min_and_max_depth";
     pub fn descriptor() -> wgpu::ShaderModuleDescriptor<'static> {
-        wgpu::include_wgsl!("../../shaders/light-light_tiling_compute_tile_min_and_max_depth.wgsl")
+        wgpu::include_wgsl!(
+            "../../shaders/light-shader-light_tiling_compute_tile_min_and_max_depth.wgsl"
+        )
     }
     pub fn linkage(device: &wgpu::Device) -> super::ShaderLinkage {
         log::debug!(

@@ -5,18 +5,20 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use craballoc::prelude::{GpuArray, Hybrid};
 use glam::{Mat4, UVec2, Vec2, Vec3, Vec4};
 use renderling::{
     atlas::AtlasImage,
     bvol::{Aabb, BoundingSphere},
     camera::Camera,
-    light::{AnalyticalLight, DirectionalLightDescriptor},
-    prelude::*,
+    context::Context,
+    geometry::Vertex,
+    glam,
+    gltf::{Animator, GltfDocument},
+    light::AnalyticalLight,
+    primitive::Primitive,
     skybox::Skybox,
-    stage::{Animator, GltfDocument, Renderlet, Stage, Vertex},
+    stage::Stage,
     ui::{FontArc, Section, Text, Ui, UiPath, UiText},
-    Context,
 };
 
 pub mod camera;
@@ -85,15 +87,15 @@ impl AppUi {
         let translation = Vec2::new(2.0, 2.0);
         let text = format!("{}fps", fps_counter.current_fps_string());
         let fps_text = ui
-            .new_text()
+            .text_builder()
             .with_color(Vec3::ZERO.extend(1.0))
             .with_section(Section::new().add_text(Text::new(&text).with_scale(32.0)))
             .build();
-        fps_text.transform.set_translation(translation);
+        fps_text.transform().set_translation(translation);
         let background = ui
-            .new_path()
+            .path_builder()
             .with_fill_color(Vec4::ONE)
-            .with_rectangle(fps_text.bounds.0, fps_text.bounds.1)
+            .with_rectangle(fps_text.bounds().0, fps_text.bounds().1)
             .fill();
         background.transform.set_translation(translation);
         background.transform.set_z(-0.9);
@@ -112,15 +114,9 @@ impl AppUi {
     }
 }
 
-#[allow(dead_code)]
-pub struct DefaultModel {
-    vertices: GpuArray<Vertex>,
-    renderlet: Hybrid<Renderlet>,
-}
-
 pub enum Model {
     Gltf(Box<GltfDocument>),
-    Default(DefaultModel),
+    Default(Primitive),
     None,
 }
 
@@ -129,7 +125,7 @@ pub struct App {
     skybox_image_bytes: Option<Vec<u8>>,
     loads: Arc<Mutex<HashMap<std::path::PathBuf, Vec<u8>>>>,
     pub stage: Stage,
-    camera: Hybrid<Camera>,
+    camera: Camera,
     _lighting: AnalyticalLight,
     model: Model,
     animators: Option<Vec<Animator>>,
@@ -146,13 +142,15 @@ impl App {
             .with_bloom_mix_strength(0.5)
             .with_bloom_filter_radius(4.0)
             .with_msaa_sample_count(4);
-        let camera = stage.new_camera(Camera::default());
-        let directional_light = DirectionalLightDescriptor {
-            direction: Vec3::NEG_Y,
-            color: renderling::math::hex_to_vec4(0xFDFBD3FF),
-            intensity: 10.0,
-        };
-        let sunlight_bundle = stage.new_analytical_light(directional_light);
+        let size = ctx.get_size();
+        let (proj, view) = renderling::camera::default_perspective(size.x as f32, size.y as f32);
+        let camera = stage.new_camera().with_projection_and_view(proj, view);
+
+        let sunlight = stage
+            .new_directional_light()
+            .with_direction(Vec3::NEG_Y)
+            .with_color(renderling::math::hex_to_vec4(0xFDFBD3FF))
+            .with_intensity(10.0);
 
         stage
             .set_atlas_size(wgpu::Extent3d {
@@ -177,7 +175,7 @@ impl App {
             },
             stage,
             camera,
-            _lighting: sunlight_bundle,
+            _lighting: sunlight.into_generic(),
             model: Model::None,
             animators: None,
             animations_conflict: false,
@@ -220,7 +218,9 @@ impl App {
         let img = AtlasImage::from_hdr_bytes(&bytes).unwrap();
         let skybox = Skybox::new(self.stage.runtime(), img);
         self.skybox_image_bytes = Some(bytes);
-        self.stage.set_skybox(skybox);
+        self.stage.use_skybox(&skybox);
+        let ibl = self.stage.new_ibl(&skybox);
+        self.stage.use_ibl(&ibl);
     }
 
     pub fn load_default_model(&mut self) {
@@ -229,10 +229,9 @@ impl App {
         let mut max = Vec3::splat(f32::NEG_INFINITY);
 
         self.last_frame_instant = now();
-        let (vertices, renderlet) = self
+        let vertices = self
             .stage
-            .builder()
-            .with_vertices(renderling::math::unit_cube().into_iter().map(|(p, n)| {
+            .new_vertices(renderling::math::unit_cube().into_iter().map(|(p, n)| {
                 let p = p * 2.0;
                 min = min.min(p);
                 max = max.max(p);
@@ -240,17 +239,17 @@ impl App {
                     .with_position(p)
                     .with_normal(n)
                     .with_color(Vec4::new(1.0, 0.0, 0.0, 1.0))
-            }))
+            }));
+        let primitive = self
+            .stage
+            .new_primitive()
+            .with_vertices(vertices)
             .with_bounds({
                 log::info!("default model bounds: {min} {max}");
                 BoundingSphere::from((min, max))
-            })
-            .build();
+            });
 
-        self.model = Model::Default(DefaultModel {
-            vertices: vertices.into_gpu_only(),
-            renderlet,
-        });
+        self.model = Model::Default(primitive);
         self.camera_controller.reset(Aabb::new(min, max));
         self.camera_controller
             .update_camera(self.stage.get_size(), &self.camera);
@@ -381,7 +380,7 @@ impl App {
 
         //         self.lighting
         //             .shadow_map
-        //             .update(&self.lighting.lighting, doc.renderlets.values().flatten());
+        //             .update(&self.lighting.lighting, doc.primitives.values().flatten());
         //         self.lighting.light = light.light.clone();
         //         self.lighting.light_details = dir.clone();
         //     }

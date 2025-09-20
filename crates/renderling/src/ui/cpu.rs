@@ -1,16 +1,15 @@
 //! CPU part of ui.
 
+use core::sync::atomic::AtomicBool;
 use std::sync::{Arc, RwLock};
 
 use crate::{
-    atlas::AtlasTexture,
+    atlas::{shader::AtlasTextureDescriptor, AtlasTexture, TextureAddressMode, TextureModes},
     camera::Camera,
-    geometry::Geometry,
-    stage::{NestedTransform, Renderlet, Stage},
-    transform::Transform,
-    Context,
+    context::Context,
+    stage::Stage,
+    transform::NestedTransform,
 };
-use craballoc::prelude::{Hybrid, SourceId};
 use crabslab::Id;
 use glam::{Quat, UVec2, Vec2, Vec3Swizzles, Vec4};
 use glyph_brush::ab_glyph;
@@ -66,80 +65,77 @@ pub enum UiError {
 /// `ImageId` can be created with [`Ui::load_image`].
 #[repr(transparent)]
 #[derive(Clone, Copy, Debug)]
-pub struct ImageId(usize);
+pub struct ImageId(Id<AtlasTextureDescriptor>);
 
 /// A two dimensional transformation.
 ///
 /// Clones of `UiTransform` all point to the same data.
 #[derive(Clone, Debug)]
 pub struct UiTransform {
+    should_reorder: Arc<AtomicBool>,
     transform: NestedTransform,
-    renderlet_ids: Arc<Vec<Id<Renderlet>>>,
 }
 
 impl UiTransform {
-    pub(crate) fn id(&self) -> Id<Transform> {
-        self.transform.global_transform_id()
+    fn mark_should_reorder(&self) {
+        self.should_reorder
+            .store(true, std::sync::atomic::Ordering::Relaxed);
     }
 
     pub fn set_translation(&self, t: Vec2) {
-        self.transform.modify(|a| {
-            a.translation.x = t.x;
-            a.translation.y = t.y;
+        self.mark_should_reorder();
+        self.transform.modify_local_translation(|a| {
+            a.x = t.x;
+            a.y = t.y;
         });
     }
 
     pub fn get_translation(&self) -> Vec2 {
-        let t = self.transform.get();
-        t.translation.xy()
+        self.transform.local_translation().xy()
     }
 
     pub fn set_rotation(&self, radians: f32) {
+        self.mark_should_reorder();
         let rotation = Quat::from_rotation_z(radians);
-        self.transform.modify(|t| {
-            t.rotation *= rotation;
+        // TODO: check to see if *= rotation makes sense here
+        self.transform.modify_local_rotation(|t| {
+            *t *= rotation;
         });
     }
 
     pub fn get_rotation(&self) -> f32 {
         self.transform
-            .get()
-            .rotation
+            .local_rotation()
             .to_euler(glam::EulerRot::XYZ)
             .2
     }
 
     pub fn set_z(&self, z: f32) {
-        self.transform.modify(|t| {
-            t.translation.z = z;
+        self.mark_should_reorder();
+        self.transform.modify_local_translation(|t| {
+            t.z = z;
         });
     }
 
     pub fn get_z(&self) -> f32 {
-        self.transform.get().translation.z
+        self.transform.local_translation().z
     }
 }
 
 #[derive(Clone)]
 #[repr(transparent)]
-pub struct UiImage(Hybrid<AtlasTexture>);
+pub struct UiImage(AtlasTexture);
 
 /// A 2d user interface renderer.
 ///
 /// Clones of `Ui` all point to the same data.
 #[derive(Clone)]
 pub struct Ui {
-    camera: Hybrid<Camera>,
+    camera: Camera,
     stage: Stage,
-    images: Arc<RwLock<Vec<UiImage>>>,
+    should_reorder: Arc<AtomicBool>,
+    images: Arc<RwLock<FxHashMap<Id<AtlasTextureDescriptor>, UiImage>>>,
     fonts: Arc<RwLock<Vec<FontArc>>>,
-    // We keep a list of transforms that we use to "manually" order renderlets.
-    //
-    // This is required because interface elements have transparency.
-    //
-    // The `usize` key here is the update source notifier index, which is needed
-    // to re-order after any transform performs an update.
-    transforms: Arc<RwLock<FxHashMap<SourceId, UiTransform>>>,
     default_stroke_options: Arc<RwLock<StrokeOptions>>,
     default_fill_options: Arc<RwLock<FillOptions>>,
 }
@@ -154,13 +150,14 @@ impl Ui {
             .with_bloom(false)
             .with_msaa_sample_count(4)
             .with_frustum_culling(false);
-        let camera = stage.new_camera(Camera::default_ortho2d(x as f32, y as f32));
+        let (proj, view) = crate::camera::default_ortho2d(x as f32, y as f32);
+        let camera = stage.new_camera().with_projection_and_view(proj, view);
         Ui {
             camera,
             stage,
+            should_reorder: AtomicBool::new(true).into(),
             images: Default::default(),
             fonts: Default::default(),
-            transforms: Default::default(),
             default_stroke_options: Default::default(),
             default_fill_options: Default::default(),
         }
@@ -225,25 +222,44 @@ impl Ui {
         self
     }
 
-    fn new_transform(&self, renderlet_ids: Vec<Id<Renderlet>>) -> UiTransform {
+    fn new_transform(&self) -> UiTransform {
+        self.mark_should_reorder();
         let transform = self.stage.new_nested_transform();
-        let transform = UiTransform {
+        UiTransform {
             transform,
-            renderlet_ids: Arc::new(renderlet_ids),
-        };
-        self.transforms
-            .write()
-            .unwrap()
-            .insert(transform.transform.get_notifier_index(), transform.clone());
-        transform
+            should_reorder: self.should_reorder.clone(),
+        }
     }
 
-    pub fn new_path(&self) -> UiPathBuilder {
+    fn mark_should_reorder(&self) {
+        self.should_reorder
+            .store(true, std::sync::atomic::Ordering::Relaxed)
+    }
+
+    pub fn path_builder(&self) -> UiPathBuilder {
+        self.mark_should_reorder();
         UiPathBuilder::new(self)
     }
 
-    pub fn new_text(&self) -> UiTextBuilder {
+    /// Remove the `path` from the [`Ui`].
+    ///
+    /// The given `path` must have been created with this [`Ui`], otherwise this function is
+    /// a noop.
+    pub fn remove_path(&self, path: &UiPath) {
+        self.stage.remove_primitive(&path.primitive);
+    }
+
+    pub fn text_builder(&self) -> UiTextBuilder {
+        self.mark_should_reorder();
         UiTextBuilder::new(self)
+    }
+
+    /// Remove the text from the [`Ui`].
+    ///
+    /// The given `text` must have been created with this [`Ui`], otherwise this function is
+    /// a noop.
+    pub fn remove_text(&self, text: &UiText) {
+        self.stage.remove_primitive(&text.renderlet);
     }
 
     pub async fn load_font(&self, path: impl AsRef<str>) -> Result<FontId, UiError> {
@@ -266,7 +282,7 @@ impl Ui {
         self.fonts.read().unwrap().clone()
     }
 
-    pub fn get_camera(&self) -> &Hybrid<Camera> {
+    pub fn get_camera(&self) -> &Camera {
         &self.camera
     }
 
@@ -284,57 +300,42 @@ impl Ui {
             .context(StageSnafu)?
             .pop()
             .unwrap();
-        entry.modify(|t| {
-            t.modes.s = crate::atlas::TextureAddressMode::Repeat;
-            t.modes.t = crate::atlas::TextureAddressMode::Repeat;
+        entry.set_modes(TextureModes {
+            s: TextureAddressMode::Repeat,
+            t: TextureAddressMode::Repeat,
         });
         let mut guard = self.images.write().unwrap();
-        let id = guard.len();
-        guard.push(UiImage(entry));
+        let id = entry.id();
+        guard.insert(id, UiImage(entry));
         Ok(ImageId(id))
     }
 
-    pub(crate) fn get_image(&self, index: usize) -> Option<UiImage> {
-        self.images.read().unwrap().get(index).cloned()
+    /// Remove an image previously loaded with [`Ui::load_image`].
+    pub fn remove_image(&self, image_id: &ImageId) -> Option<UiImage> {
+        self.images.write().unwrap().remove(&image_id.0)
     }
 
     fn reorder_renderlets(&self) {
-        // UNWRAP: panic on purpose
-        let guard = self.transforms.read().unwrap();
-        let mut transforms = guard.values().collect::<Vec<_>>();
-        transforms.sort_by(|a, b| {
-            let ta = a.transform.get_global_transform();
-            let tb = b.transform.get_global_transform();
-            ta.translation.z.total_cmp(&tb.translation.z)
+        self.stage.sort_renderlets(|a, b| {
+            let za = a
+                .transform()
+                .as_ref()
+                .map(|t| t.translation().z)
+                .unwrap_or_default();
+            let zb = b
+                .transform()
+                .as_ref()
+                .map(|t| t.translation().z)
+                .unwrap_or_default();
+            za.total_cmp(&zb)
         });
-        self.stage.reorder_renderlets(
-            transforms
-                .iter()
-                .flat_map(|t| t.renderlet_ids.as_ref().clone()),
-        );
     }
 
     pub fn render(&self, view: &wgpu::TextureView) {
-        let mut should_reorder = false;
-        // UNWRAP: panic on purpose
-        let mut transforms = self.transforms.write().unwrap();
-        let geometry: &Geometry = self.stage.as_ref();
-        for update_id in geometry
-            .slab_allocator()
-            .get_updated_source_ids()
-            .into_iter()
+        if self
+            .should_reorder
+            .swap(false, std::sync::atomic::Ordering::Relaxed)
         {
-            if let Some(ui_transform) = transforms.get(&update_id) {
-                if Arc::strong_count(&ui_transform.renderlet_ids) == 1 {
-                    let _ = transforms.remove(&update_id);
-                } else {
-                    should_reorder = true;
-                }
-            }
-        }
-        drop(transforms);
-        if should_reorder {
-            log::trace!("a ui transform changed, sorting the renderlets");
             self.reorder_renderlets();
         }
         self.stage.render(view);
@@ -343,7 +344,7 @@ impl Ui {
 
 #[cfg(test)]
 pub(crate) mod test {
-    use crate::{color::rgb_hex_color, prelude::glam::Vec4};
+    use crate::{color::rgb_hex_color, glam::Vec4};
 
     pub struct Colors<const N: usize>(std::iter::Cycle<std::array::IntoIter<Vec4, N>>);
 

@@ -3,9 +3,9 @@
 use crate::linkage::ShaderLinkage;
 #[cfg(not(target_arch = "wasm32"))]
 mod target {
-    pub const ENTRY_POINT: &str = "atlas::atlas_blit_vertex";
+    pub const ENTRY_POINT: &str = "atlas::shader::atlas_blit_vertex";
     pub fn descriptor() -> wgpu::ShaderModuleDescriptor<'static> {
-        wgpu::include_spirv!("../../shaders/atlas-atlas_blit_vertex.spv")
+        wgpu::include_spirv!("../../shaders/atlas-shader-atlas_blit_vertex.spv")
     }
     pub fn linkage(device: &wgpu::Device) -> super::ShaderLinkage {
         log::debug!("creating native linkage for {}", "atlas_blit_vertex");
@@ -17,9 +17,9 @@ mod target {
 }
 #[cfg(target_arch = "wasm32")]
 mod target {
-    pub const ENTRY_POINT: &str = "atlasatlas_blit_vertex";
+    pub const ENTRY_POINT: &str = "atlasshaderatlas_blit_vertex";
     pub fn descriptor() -> wgpu::ShaderModuleDescriptor<'static> {
-        wgpu::include_wgsl!("../../shaders/atlas-atlas_blit_vertex.wgsl")
+        wgpu::include_wgsl!("../../shaders/atlas-shader-atlas_blit_vertex.wgsl")
     }
     pub fn linkage(device: &wgpu::Device) -> super::ShaderLinkage {
         log::debug!("creating web linkage for {}", "atlas_blit_vertex");

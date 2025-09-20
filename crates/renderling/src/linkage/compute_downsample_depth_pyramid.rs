@@ -3,9 +3,9 @@
 use crate::linkage::ShaderLinkage;
 #[cfg(not(target_arch = "wasm32"))]
 mod target {
-    pub const ENTRY_POINT: &str = "cull::compute_downsample_depth_pyramid";
+    pub const ENTRY_POINT: &str = "cull::shader::compute_downsample_depth_pyramid";
     pub fn descriptor() -> wgpu::ShaderModuleDescriptor<'static> {
-        wgpu::include_spirv!("../../shaders/cull-compute_downsample_depth_pyramid.spv")
+        wgpu::include_spirv!("../../shaders/cull-shader-compute_downsample_depth_pyramid.spv")
     }
     pub fn linkage(device: &wgpu::Device) -> super::ShaderLinkage {
         log::debug!(
@@ -20,9 +20,9 @@ mod target {
 }
 #[cfg(target_arch = "wasm32")]
 mod target {
-    pub const ENTRY_POINT: &str = "cullcompute_downsample_depth_pyramid";
+    pub const ENTRY_POINT: &str = "cullshadercompute_downsample_depth_pyramid";
     pub fn descriptor() -> wgpu::ShaderModuleDescriptor<'static> {
-        wgpu::include_wgsl!("../../shaders/cull-compute_downsample_depth_pyramid.wgsl")
+        wgpu::include_wgsl!("../../shaders/cull-shader-compute_downsample_depth_pyramid.wgsl")
     }
     pub fn linkage(device: &wgpu::Device) -> super::ShaderLinkage {
         log::debug!(

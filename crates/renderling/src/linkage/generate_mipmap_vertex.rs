@@ -3,9 +3,9 @@
 use crate::linkage::ShaderLinkage;
 #[cfg(not(target_arch = "wasm32"))]
 mod target {
-    pub const ENTRY_POINT: &str = "convolution::generate_mipmap_vertex";
+    pub const ENTRY_POINT: &str = "convolution::shader::generate_mipmap_vertex";
     pub fn descriptor() -> wgpu::ShaderModuleDescriptor<'static> {
-        wgpu::include_spirv!("../../shaders/convolution-generate_mipmap_vertex.spv")
+        wgpu::include_spirv!("../../shaders/convolution-shader-generate_mipmap_vertex.spv")
     }
     pub fn linkage(device: &wgpu::Device) -> super::ShaderLinkage {
         log::debug!("creating native linkage for {}", "generate_mipmap_vertex");
@@ -17,9 +17,9 @@ mod target {
 }
 #[cfg(target_arch = "wasm32")]
 mod target {
-    pub const ENTRY_POINT: &str = "convolutiongenerate_mipmap_vertex";
+    pub const ENTRY_POINT: &str = "convolutionshadergenerate_mipmap_vertex";
     pub fn descriptor() -> wgpu::ShaderModuleDescriptor<'static> {
-        wgpu::include_wgsl!("../../shaders/convolution-generate_mipmap_vertex.wgsl")
+        wgpu::include_wgsl!("../../shaders/convolution-shader-generate_mipmap_vertex.wgsl")
     }
     pub fn linkage(device: &wgpu::Device) -> super::ShaderLinkage {
         log::debug!("creating web linkage for {}", "generate_mipmap_vertex");

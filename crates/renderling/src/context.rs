@@ -1,11 +1,14 @@
-//! Rendering context initialization and frame management.
+//! Rendering context initialization
+//!
+//! This module contains [`Context`] initialization and frame management.
+//! This module provides the setup and management of rendering targets,
+//! frames, and surface configurations.
 use core::fmt::Debug;
 use std::{
     ops::Deref,
     sync::{Arc, RwLock},
 };
 
-use craballoc::runtime::WgpuRuntime;
 use glam::{UVec2, UVec3};
 use snafu::prelude::*;
 
@@ -15,6 +18,9 @@ use crate::{
     ui::Ui,
 };
 
+pub use craballoc::runtime::WgpuRuntime;
+
+/// Represents the internal structure of a render target, which can either be a surface or a texture.
 pub(crate) enum RenderTargetInner {
     Surface {
         surface: wgpu::Surface<'static>,
@@ -26,13 +32,12 @@ pub(crate) enum RenderTargetInner {
 }
 
 #[repr(transparent)]
-/// Either a surface or a texture.
-///
-/// Will be a surface if the context was created with a window or canvas.
-///
-/// Will be a texture if the context is headless.
+/// Represents a render target that can either be a surface or a texture.
+/// It will be a surface if the context was created with a window or canvas,
+/// and a texture if the context is headless.
 pub struct RenderTarget(pub(crate) RenderTargetInner);
 
+/// Converts a `wgpu::Texture` into a `RenderTarget`.
 impl From<wgpu::Texture> for RenderTarget {
     fn from(value: wgpu::Texture) -> Self {
         RenderTarget(RenderTargetInner::Texture {
@@ -42,6 +47,7 @@ impl From<wgpu::Texture> for RenderTarget {
 }
 
 impl RenderTarget {
+    /// Resizes the render target to the specified width and height using the provided device.
     pub fn resize(&mut self, width: u32, height: u32, device: &wgpu::Device) {
         match &mut self.0 {
             RenderTargetInner::Surface {
@@ -74,6 +80,7 @@ impl RenderTarget {
         }
     }
 
+    /// Returns the format of the render target.
     pub fn format(&self) -> wgpu::TextureFormat {
         match &self.0 {
             RenderTargetInner::Surface { surface_config, .. } => surface_config.format,
@@ -81,6 +88,7 @@ impl RenderTarget {
         }
     }
 
+    /// Checks if the render target is headless (i.e., a texture).
     pub fn is_headless(&self) -> bool {
         match &self.0 {
             RenderTargetInner::Surface { .. } => false,
@@ -88,7 +96,7 @@ impl RenderTarget {
         }
     }
 
-    /// Return the underlying target as a texture, if possible.
+    /// Returns the underlying target as a texture, if possible.
     pub fn as_texture(&self) -> Option<&wgpu::Texture> {
         match &self.0 {
             RenderTargetInner::Surface { .. } => None,
@@ -96,6 +104,7 @@ impl RenderTarget {
         }
     }
 
+    /// Returns the size of the render target as a `UVec2`.
     pub fn get_size(&self) -> UVec2 {
         match &self.0 {
             RenderTargetInner::Surface {
@@ -112,6 +121,7 @@ impl RenderTarget {
 
 #[derive(Debug, Snafu)]
 #[snafu(visibility(pub(crate)))]
+/// Represents errors that can occur within the rendering context.
 pub enum ContextError {
     #[snafu(display("missing surface texture: {}", source))]
     Surface { source: wgpu::SurfaceError },
@@ -143,6 +153,7 @@ impl Deref for FrameTextureView {
     }
 }
 
+/// Represents the surface of a frame, which can either be a surface texture or a texture.
 pub(crate) enum FrameSurface {
     Surface(wgpu::SurfaceTexture),
     Texture(Arc<wgpu::Texture>),
@@ -165,6 +176,7 @@ impl Frame {
         }
     }
 
+    /// Returns a view of the current frame's texture.
     pub fn view(&self) -> wgpu::TextureView {
         let texture = self.texture();
         let format = texture.format().add_srgb_suffix();
@@ -175,6 +187,7 @@ impl Frame {
         })
     }
 
+    /// Copies the current frame to a buffer for further processing.
     pub fn copy_to_buffer(&self, width: u32, height: u32) -> CopiedTextureBuffer {
         let dimensions = BufferDimensions::new(4, 1, width as usize, height as usize);
         // The output buffer lets us retrieve the self as an array
@@ -223,7 +236,7 @@ impl Frame {
         UVec2::new(s.width, s.height)
     }
 
-    /// Read the current frame buffer into an image.
+    /// Reads the current frame buffer into an image.
     ///
     /// This should be called after rendering, before presentation.
     /// Good for getting headless screen grabs.
@@ -244,12 +257,10 @@ impl Frame {
         Ok(img)
     }
 
-    /// Read the frame into an image.
+    /// Reads the frame into an image in a sRGB color space.
     ///
     /// This should be called after rendering, before presentation.
     /// Good for getting headless screen grabs.
-    ///
-    /// The resulting image will be in a sRGB color space.
     ///
     /// ## Note
     /// This operation can take a long time, depending on how big the screen is.
@@ -259,12 +270,10 @@ impl Frame {
         log::trace!("read image has the format: {:?}", buffer.format);
         buffer.into_srgba(&self.runtime.device).await
     }
-    /// Read the frame into an image.
+    /// Reads the frame into an image in a linear color space.
     ///
     /// This should be called after rendering, before presentation.
     /// Good for getting headless screen grabs.
-    ///
-    /// The resulting image will be in a linear color space.
     ///
     /// ## Note
     /// This operation can take a long time, depending on how big the screen is.
@@ -274,9 +283,8 @@ impl Frame {
         buffer.into_linear_rgba(&self.runtime.device).await
     }
 
-    /// If self is `TargetFrame::Surface` this presents the surface frame.
-    ///
-    /// If self is a `TargetFrame::Texture` this is a noop.
+    /// Presents the surface frame if the frame is a `TargetFrame::Surface`.
+    /// If the frame is a `TargetFrame::Texture`, this is a no-op.
     pub fn present(self) {
         match self.surface {
             FrameSurface::Surface(s) => s.present(),
@@ -299,7 +307,7 @@ pub(crate) struct GlobalStageConfig {
 /// texture.
 ///
 /// ```
-/// use renderling::Context;
+/// use renderling::context::Context;
 ///
 /// let ctx = futures_lite::future::block_on(Context::headless(100, 100));
 /// ```
@@ -317,6 +325,7 @@ impl AsRef<WgpuRuntime> for Context {
 }
 
 impl Context {
+    /// Creates a new `Context` with the specified target, adapter, device, and queue.
     pub fn new(
         target: RenderTarget,
         adapter: impl Into<Arc<wgpu::Adapter>>,
@@ -355,6 +364,7 @@ impl Context {
         }
     }
 
+    /// Attempts to create a new headless `Context` with the specified width, height, and backends.
     pub async fn try_new_headless(
         width: u32,
         height: u32,
@@ -367,6 +377,7 @@ impl Context {
         Ok(Self::new(target, adapter, device, queue))
     }
 
+    /// Attempts to create a new `Context` with a surface, using the specified width, height, backends, and window.
     pub async fn try_new_with_surface(
         width: u32,
         height: u32,
@@ -395,12 +406,12 @@ impl Context {
             .unwrap()
     }
 
-    /// Create a new headless renderer.
+    /// Creates a new headless renderer.
     ///
-    /// Immediately proxies to [`Context::try_new_headless`] and unwraps.
+    /// Immediately proxies to `Context::try_new_headless` and unwraps.
     ///
     /// ## Panics
-    /// This function will panic if an adapter cannot be found. For example this
+    /// This function will panic if an adapter cannot be found. For example, this
     /// would happen on machines without a GPU.
     pub async fn headless(width: u32, height: u32) -> Self {
         let result = Self::try_new_headless(width, height, None).await;
@@ -419,12 +430,13 @@ impl Context {
         self.render_target.get_size()
     }
 
+    /// Sets the size of the render target.
     pub fn set_size(&mut self, size: UVec2) {
         self.render_target
             .resize(size.x, size.y, &self.runtime.device);
     }
 
-    /// Convenience method for creating textures from an image buffer.
+    /// Creates a texture from an image buffer.
     pub fn create_texture<P>(
         &self,
         label: Option<&str>,
@@ -444,6 +456,7 @@ impl Context {
         )
     }
 
+    /// Creates a `Texture` from a `wgpu::Texture` and an optional sampler.
     pub fn texture_from_wgpu_tex(
         &self,
         texture: impl Into<Arc<wgpu::Texture>>,
@@ -452,38 +465,44 @@ impl Context {
         Texture::from_wgpu_tex(self.get_device(), texture, sampler, None)
     }
 
+    /// Returns a reference to the `WgpuRuntime`.
     pub fn runtime(&self) -> &WgpuRuntime {
         &self.runtime
     }
 
+    /// Returns a reference to the `wgpu::Device`.
     pub fn get_device(&self) -> &wgpu::Device {
         &self.runtime.device
     }
 
+    /// Returns a reference to the `wgpu::Queue`.
     pub fn get_queue(&self) -> &wgpu::Queue {
         &self.runtime.queue
     }
 
+    /// Returns a reference to the `wgpu::Adapter`.
     pub fn get_adapter(&self) -> &wgpu::Adapter {
         &self.adapter
     }
 
-    /// Returns a the adapter in an owned wrapper.
+    /// Returns the adapter in an owned wrapper.
     pub fn get_adapter_owned(&self) -> Arc<wgpu::Adapter> {
         self.adapter.clone()
     }
 
+    /// Returns a reference to the `RenderTarget`.
     pub fn get_render_target(&self) -> &RenderTarget {
         &self.render_target
     }
 
-    /// Get the next frame from the render target.
+    /// Gets the next frame from the render target.
     ///
     /// A surface context (window or canvas) will return the next swapchain
     /// texture.
     ///
     /// A headless context will return the underlying headless texture.
     ///
+    /// ## Errors
     /// Errs if the render target is a surface and there was an error getting
     /// the next swapchain texture. This can happen if the frame has already
     /// been acquired.
@@ -502,7 +521,7 @@ impl Context {
         })
     }
 
-    /// Set the default texture size for the material atlas.
+    /// Sets the default texture size for the material atlas.
     ///
     /// * Width is `size.x` and must be a power of two.
     /// * Height is `size.y`, must match `size.x` and must be a power of two.
@@ -519,7 +538,7 @@ impl Context {
         self
     }
 
-    /// Set the default texture size for the material atlas.
+    /// Sets the default texture size for the material atlas.
     ///
     /// * Width is `size.x` and must be a power of two.
     /// * Height is `size.y`, must match `size.x` and must be a power of two.
@@ -532,7 +551,7 @@ impl Context {
         self
     }
 
-    /// Set the default texture size for the shadow mapping atlas.
+    /// Sets the default texture size for the shadow mapping atlas.
     ///
     /// * Width is `size.x` and must be a power of two.
     /// * Height is `size.y`, must match `size.x` and must be a power of two.
@@ -549,7 +568,7 @@ impl Context {
         self
     }
 
-    /// Set the default texture size for the shadow mapping atlas.
+    /// Sets the default texture size for the shadow mapping atlas.
     ///
     /// * Width is `size.x` and must be a power of two.
     /// * Height is `size.y`, must match `size.x` and must be a power of two.
@@ -562,7 +581,7 @@ impl Context {
         self
     }
 
-    /// Set the use of direct drawing.
+    /// Sets the use of direct drawing.
     ///
     /// Default is **false**.
     ///
@@ -572,7 +591,7 @@ impl Context {
         self.stage_config.write().unwrap().use_compute_culling = !use_direct_drawing;
     }
 
-    /// Set the use of direct drawing.
+    /// Sets the use of direct drawing.
     ///
     /// Default is **false**.
     ///
@@ -583,16 +602,17 @@ impl Context {
         self
     }
 
+    /// Returns whether direct drawing is used.
     pub fn get_use_direct_draw(&self) -> bool {
         !self.stage_config.read().unwrap().use_compute_culling
     }
 
-    /// Create and return a new [`Stage`] renderer.
+    /// Creates and returns a new [`Stage`] renderer.
     pub fn new_stage(&self) -> Stage {
         Stage::new(self)
     }
 
-    /// Create and return a new [`Ui`] renderer.
+    /// Creates and returns a new [`Ui`] renderer.
     pub fn new_ui(&self) -> Ui {
         Ui::new(self)
     }

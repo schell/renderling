@@ -1,11 +1,10 @@
 //! Mathematical helper types and functions.
 //!
-//! Primarily this module re-exports types from `glam`. It also adds
-//! some traits to help using `glam` types on the GPU without panicking,
-//! as well as a few traits to aid in writing generic shader code that can be
-//! run on the CPU.
+//! Primarily this module adds some traits to help using `glam` types on the GPU
+//! without panicking, as well as a few traits to aid in writing generic shader
+//! code that can be run on the CPU.
 //!
-//! Lastly, it provides some constant geometry used in many shaders.
+//! Lastly, it provides some common geometry and constants used in many shaders.
 use core::ops::Mul;
 use spirv_std::{
     image::{sample_with, Cubemap, Image2d, Image2dArray, ImageWithMethods},
@@ -690,8 +689,8 @@ pub const fn convex_mesh([p0, p1, p2, p3, p4, p5, p6, p7]: [Vec3; 8]) -> [Vec3; 
 /// An PCG PRNG that is optimized for GPUs, in that it is fast to evaluate and accepts
 /// sequential ids as it's initial state without sacrificing on RNG quality.
 ///
-/// https://www.reedbeta.com/blog/hash-functions-for-gpu-rendering/
-/// https://jcgt.org/published/0009/03/02/
+/// * <https://www.reedbeta.com/blog/hash-functions-for-gpu-rendering/>
+/// * <https://jcgt.org/published/0009/03/02/>
 ///
 /// Thanks to Firestar99 at
 /// <https://github.com/Firestar99/nanite-at-home/blob/c55915d16ad3b5b4b706d8017633f0870dd2603e/space-engine-shader/src/utils/gpurng.rs#L19>
