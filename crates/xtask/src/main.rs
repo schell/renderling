@@ -47,6 +47,10 @@ pub struct Manual {
     #[clap(long)]
     no_test: bool,
 
+    /// The URL to the renderling docs
+    #[clap(long, default_value = "http://localhost:4000")]
+    docs_url: String,
+
     /// Serve the manual instead of simply building it
     #[clap(long)]
     serve: bool,
@@ -155,6 +159,7 @@ async fn main() {
         Command::Manual(Manual {
             no_build_docs,
             no_test,
+            docs_url,
             serve,
         }) => {
             log::info!("checking dependencies for the manual");
@@ -177,7 +182,7 @@ async fn main() {
                     .current_dir(
                         std::path::PathBuf::from(env!("CARGO_WORKSPACE_DIR")).join("manual"),
                     )
-                    .env("DOCS_URL", "http://localhost:4000")
+                    .env("DOCS_URL", docs_url)
                     .spawn()
                     .unwrap();
                 let build_status = build.wait().await.unwrap();
@@ -189,7 +194,7 @@ async fn main() {
 
                 let mut build = tokio::process::Command::new("mdbook")
                     .arg("build")
-                    .env("DOCS_URL", "http://docs.rs/renderling/latest")
+                    .env("DOCS_URL", docs_url)
                     .current_dir(
                         std::path::PathBuf::from(env!("CARGO_WORKSPACE_DIR")).join("manual"),
                     )
