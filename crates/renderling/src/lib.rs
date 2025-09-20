@@ -252,7 +252,7 @@ macro_rules! println {
     }
 }
 
-#[cfg(all(cpu, feature = "test-utils"))]
+#[cfg(all(cpu, any(test, feature = "test-utils")))]
 #[allow(unused, reason = "Used in debugging on macos")]
 pub fn capture_gpu_frame<T>(
     ctx: &crate::context::Context,

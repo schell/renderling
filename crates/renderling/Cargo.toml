@@ -104,6 +104,10 @@ glam = { workspace = true, features = ["std", "debug-glam-assert"] }
 metal = { workspace = true, optional = true }
 wgpu-core = { workspace = true, optional = true }
 
+[target.'cfg(target_os = "macos")'.dev-dependencies]
+metal.workspace = true
+wgpu-core.workspace = true
+
 [dev-dependencies.web-sys]
 workspace = true
 features = [

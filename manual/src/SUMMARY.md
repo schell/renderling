@@ -5,4 +5,4 @@
 - [Context creation](./context.md)
 - [Staging resources](./stage.md)
 - [Loading GLTF files](./gltf.md)
-- [Skybox](./skybox.md)
+- [Rendering with a skybox](./skybox.md)

@@ -1,6 +1,6 @@
 //! Skybox manual page.
 
-use crate::{cwd_to_manual_assets_dir, test_output_dir, workspace_dir};
+use crate::{cwd_to_manual_assets_dir, workspace_dir};
 
 #[tokio::test]
 async fn manual_skybox() {

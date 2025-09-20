@@ -762,6 +762,8 @@ mod test {
             .new_skybox_from_path("../../img/hdr/night.hdr")
             .unwrap();
         stage.use_skybox(&skybox);
+        let ibl = stage.new_ibl(&skybox);
+        stage.use_ibl(&ibl);
 
         let _doc = stage
             .load_gltf_document_from_path("../../gltf/EmissiveStrengthTest.glb")

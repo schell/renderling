@@ -17,7 +17,6 @@ mod test {
         atlas::AtlasImage,
         geometry::Vertex,
         glam::{Vec3, Vec4},
-        pbr::brdf::BrdfLut,
         test::BlockOnFuture,
     };
 
@@ -101,6 +100,9 @@ mod test {
         let hdr_image = AtlasImage::from_hdr_path("../../img/hdr/resting_place.hdr").unwrap();
         let skybox = crate::skybox::Skybox::new(&ctx, hdr_image);
         stage.use_skybox(&skybox);
+
+        let ibl = stage.new_ibl(&skybox);
+        stage.use_ibl(&ibl);
 
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());

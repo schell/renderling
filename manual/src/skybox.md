@@ -1,10 +1,12 @@
-# Skybox 🌌
+# Rendering a skybox 🌌
 
 One of the most striking effects we can provide is a
 [skybox](https://en.wikipedia.org/wiki/Skybox_(video_games)).
 
 Using a skybox is an easy way to improve immersion, and with
-`renderling` your skyboxes also illuminate the scene.
+`renderling` your skyboxes can also illuminate the scene, but
+we'll save that for a later example. For now let's set up
+simple skybox for our marble bust scene.
 
 ## Building on the stage example 
 
