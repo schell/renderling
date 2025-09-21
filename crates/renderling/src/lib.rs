@@ -241,6 +241,9 @@ pub mod ui;
 
 pub extern crate glam;
 
+// TODO: document the crate's feature flags here.
+// Similar to [ndarray](https://docs.rs/ndarray/latest/ndarray/#crate-feature-flags).
+
 #[macro_export]
 /// A wrapper around `std::println` that is a noop on the GPU.
 macro_rules! println {
