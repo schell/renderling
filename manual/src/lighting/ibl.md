@@ -32,7 +32,7 @@ on the [`Stage`] to use it:
 {{#include ../../../crates/examples/src/lighting.rs:ibl}}
 ```
 
-![image of a marble bust lit by the helipad environment map](/assets/lighting/ibl.png)
+![image of a marble bust lit by the helipad environment map](../assets/lighting/ibl.png)
 
 ## Mix it up! 🎨
 
@@ -43,7 +43,7 @@ might expect. Here we'll build on the previous example to add a point light:
 {{#include ../../../crates/examples/src/lighting.rs:mix}}
 ```
 
-![image of a marble bust lit by the helipad environment map](/assets/lighting/ibl-analytical-mixed.png)
+![image of a marble bust lit by the helipad environment map](../assets/lighting/ibl-analytical-mixed.png)
 
 By combining IBL with analytical lights, you can achieve a rich and dynamic
 lighting environment that captures both the subtle nuances of ambient light and

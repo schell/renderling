@@ -12,7 +12,7 @@ To do any lighting, though, we have to turn lighting back on in the stage:
 {{#include ../../../crates/examples/src/lighting.rs:lighting_on}}
 ```
 
-![image of a marble bust in shadow](/assets/lighting/no-lights.png)
+![image of a marble bust in shadow](../assets/lighting/no-lights.png)
 
 As we talked about in [the GLTF example](/gltf.html#render), with no lights
 on the stage, the bust renders in shadow.
@@ -32,7 +32,7 @@ Let's create a directional light:
 {{#include ../../../crates/examples/src/lighting.rs:directional}}
 ```
 
-![image of a marble bust lit by a single directional light](/assets/lighting/directional.png)
+![image of a marble bust lit by a single directional light](../assets/lighting/directional.png)
 
 Not bad!
 
@@ -57,7 +57,7 @@ Let's create a point light:
 {{#include ../../../crates/examples/src/lighting.rs:point}}
 ```
 
-![image of a marble bust lit by a single point light](/assets/lighting/point.png)
+![image of a marble bust lit by a single point light](../assets/lighting/point.png)
 
 Similarly we'll remove the point light before moving on:
 
@@ -69,7 +69,7 @@ Similarly we'll remove the point light before moving on:
 
 Spot lights emit a cone of light from a single point, with a specified direction
 and angle. They are useful for highlighting specific areas or objects in a
-scene, such as a spotlight on a stage. The intensity of a spot light diminishes
+scene, such as a spotlight on a stage. The intensity of a spotlight diminishes
 with distance and is also affected by the angle of the cone, allowing for
 precise control over the lighting effect.
 
@@ -82,6 +82,6 @@ you can see the effect:
 {{#include ../../../crates/examples/src/lighting.rs:spot}}
 ```
 
-![image of a marble bust lit by a single spot light](/assets/lighting/spot.png)
+![image of a marble bust lit by a single spot light](../assets/lighting/spot.png)
 
 Good enough! Now on to image-based lighting, which uses environment maps to simulate complex lighting scenarios. This technique captures real-world lighting conditions and applies them to the scene, providing more realistic reflections and ambient lighting.

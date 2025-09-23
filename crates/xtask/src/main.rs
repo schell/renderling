@@ -81,7 +81,7 @@ impl Manual {
     async fn test() {
         log::info!("testing the manual snippets");
         let mut process = tokio::process::Command::new("cargo")
-            .args(["test", "-p", "test-manual"])
+            .args(["test", "-p", "examples"])
             .spawn()
             .unwrap();
         let status = process.wait().await.unwrap();
