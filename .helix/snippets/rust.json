@@ -1,0 +1,11 @@
+{
+  "anchor-snippet": {
+    "prefix": "anchor",
+    "body": [
+      "// ANCHOR: ${1:anchor}",
+  	  "$2",
+  	  "// ANCHOR_END: $1"
+    ],
+    "description": "insert a video tag"
+  }
+}

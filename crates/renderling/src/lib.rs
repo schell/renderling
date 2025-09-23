@@ -307,7 +307,7 @@ pub fn capture_gpu_frame<T>(
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::{atlas::AtlasImage, context::Context, geometry::Vertex};
+    use crate::{atlas::AtlasImage, context::Context, geometry::Vertex, light::Lux};
 
     use glam::{Mat3, Mat4, Quat, UVec2, Vec2, Vec3, Vec4};
     use img_diff::DiffCfg;
@@ -361,12 +361,12 @@ mod test {
             .new_directional_light()
             .with_direction(Vec3::new(-0.8, -1.0, 0.5).normalize())
             .with_color(Vec4::ONE)
-            .with_intensity(100.0);
+            .with_intensity(Lux::OUTDOOR_DIRECT_SUNLIGHT_HIGH);
         let sunlight_b = stage
             .new_directional_light()
             .with_direction(Vec3::new(1.0, 1.0, -0.1).normalize())
             .with_color(Vec4::ONE)
-            .with_intensity(10.0);
+            .with_intensity(Lux::OUTDOOR_FOXS_WEDDING);
         (sunlight_a.into_generic(), sunlight_b.into_generic())
     }
 
@@ -891,17 +891,17 @@ mod test {
             .new_directional_light()
             .with_direction(Vec3::NEG_Y)
             .with_color(red)
-            .with_intensity(10.0);
+            .with_intensity(Lux::OUTDOOR_FULL_DAYLIGHT_LOW);
         let _dir_green = stage
             .new_directional_light()
             .with_direction(Vec3::NEG_X)
             .with_color(green)
-            .with_intensity(10.0);
+            .with_intensity(Lux::OUTDOOR_FULL_DAYLIGHT_LOW);
         let _dir_blue = stage
             .new_directional_light()
             .with_direction(Vec3::NEG_Z)
             .with_color(blue)
-            .with_intensity(10.0);
+            .with_intensity(Lux::OUTDOOR_FULL_DAYLIGHT_LOW);
 
         let _rez = stage
             .new_primitive()

@@ -1,4 +1,25 @@
-/// Root descriptor of the lighting system.
+//! Shader functions for the lighting system.
+//!
+//! Directional lights are in lux, spot and point lights are in
+//! candelas. Conversion happens in the [PBR shader during radiance
+//! accumulation](crate::pbr::shader::shade_fragment).
+//!
+//! More info is here
+//! <https://www.realtimerendering.com/blog/physical-units-for-lights>.
+//!
+//! ## Note
+//!
+//! The glTF spec [1] says directional light is in lux, whereas spot and point are
+//! in candelas. The same goes for this library's shaders, but not a ton of work
+//! has gone into verifying that conversion from these units into radiometric units
+//! is accurate _in any way_. The shaders roughly do a conversion by dividing by 683 [2]
+//! or some other constant involving 683 [3].
+//!
+//! More work needs to be done here. PRs would be very appreciated.
+//!
+//! [1]: https://github.com/KhronosGroup/glTF/blob/main/extensions/2.0/Khronos/KHR_lights_punctual/README.md
+//! [2]: https://depts.washington.edu/mictech/optics/me557/Radiometry.pdf
+//! [3]: https://projects.blender.org/blender/blender-addons/commit/9d903a93f03b
 use crabslab::{Array, Id, Slab, SlabItem};
 use glam::{Mat4, UVec2, UVec3, Vec2, Vec3, Vec3Swizzles, Vec4, Vec4Swizzles};
 #[cfg(gpu)]
@@ -253,12 +274,14 @@ impl SpotLightCalculation {
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[derive(Copy, Clone, SlabItem)]
 pub struct SpotLightDescriptor {
+    // TODO: add `range` to SpotLightDescriptor
+    // See <https://github.com/KhronosGroup/glTF/blob/main/extensions/2.0/Khronos/KHR_lights_punctual/README.md#light-shared-properties>
     pub position: Vec3,
     pub direction: Vec3,
     pub inner_cutoff: f32,
     pub outer_cutoff: f32,
     pub color: Vec4,
-    pub intensity: f32,
+    pub intensity: Candela,
 }
 
 impl Default for SpotLightDescriptor {
@@ -268,7 +291,7 @@ impl Default for SpotLightDescriptor {
         let outer_cutoff = 0.09075713;
         let direction = Vec3::new(0.0, -1.0, 0.0);
         let color = white;
-        let intensity = 1.0;
+        let intensity = Candela::COMMON_WAX_CANDLE;
 
         Self {
             position: Default::default(),
@@ -301,20 +324,84 @@ impl SpotLightDescriptor {
     }
 }
 
+/// A unit of luminous intensity, lumen per steradian (lm/sr).
+///
+/// Candelas measure the luminous power per unit solid angle emitted in a
+/// particular direction. A common wax candle has a luminous intensity of
+/// roughly 1 candela.
+///
+/// The type provides a collection of const `Candela` lighting levels for use in
+/// constructing analytical lights.
+#[repr(transparent)]
+#[derive(Clone, Copy, Default, Debug, SlabItem)]
+pub struct Candela(pub f32);
+
+impl core::fmt::Display for Candela {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        self.0.fmt(f)?;
+        if self.0 == 1.0 {
+            f.write_str(" candela (lm/sr)")
+        } else {
+            f.write_str(" candelas (lm/sr)")
+        }
+    }
+}
+
+impl Candela {
+    pub const COMMON_WAX_CANDLE: Self = Candela(1.0);
+}
+
+/// A unit of illuminance, lumen per meter squared (lm/m^2).
+///
+/// Lux measures the amount of light that falls on a surface, which is
+/// appropriate for directional lights, as they simulate light coming from a
+/// specific direction, like sunlight.
+///
+/// The type provides a collection of const Lux lighting levels for use in
+/// constructing analytical lights.
+#[repr(transparent)]
+#[derive(Clone, Copy, Default, Debug, SlabItem)]
+pub struct Lux(pub f32);
+
+impl core::fmt::Display for Lux {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        self.0.fmt(f)?;
+        f.write_str(" lux (lm/m^2)")
+    }
+}
+
+impl Lux {
+    pub const OUTDOOR_TWILIGHT: Self = Lux(1.0);
+    pub const OUTDOOR_STREET_LIGHT_MIN: Self = Lux(5.0);
+    pub const OUTDOOR_SUNSET: Self = Lux(10.0);
+    pub const INDOOR_LOUNGE: Self = Lux(50.0);
+    pub const INDOOR_HALLWAY: Self = Lux(80.0);
+    pub const OUTDOOR_OVERCAST_LOW: Self = Lux(100.0);
+    pub const INDOOR_OFFICE_LOW: Self = Lux(320.0);
+    pub const OUTDOOR_SUNRISE_OR_SUNSET: Self = Lux(400.0);
+    pub const INDOOR_OFFICE_HIGH: Self = Lux(500.0);
+    pub const OUTDOOR_OVERCAST_HIGH: Self = Lux(1000.0);
+    pub const OUTDOOR_FOXS_WEDDING: Self = Lux(3000.0);
+    pub const OUTDOOR_FULL_DAYLIGHT_LOW: Self = Lux(10_000.0);
+    pub const OUTDOOR_FULL_DAYLIGHT_HIGH: Self = Lux(25_000.0);
+    pub const OUTDOOR_DIRECT_SUNLIGHT_LOW: Self = Lux(32_000.0);
+    pub const OUTDOOR_DIRECT_SUNLIGHT_HIGH: Self = Lux(130_000.0);
+}
+
 #[repr(C)]
-#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
-#[derive(Copy, Clone, SlabItem)]
+#[derive(Copy, Clone, SlabItem, Debug)]
 pub struct DirectionalLightDescriptor {
     pub direction: Vec3,
     pub color: Vec4,
-    pub intensity: f32,
+    /// Intensity of the directional light in lux (lm/m^2).
+    pub intensity: Lux,
 }
 
 impl Default for DirectionalLightDescriptor {
     fn default() -> Self {
         let direction = Vec3::new(0.0, -1.0, 0.0);
         let color = Vec4::splat(1.0);
-        let intensity = 1.0;
+        let intensity = Lux::OUTDOOR_TWILIGHT;
 
         Self {
             direction,
@@ -357,16 +444,18 @@ impl DirectionalLightDescriptor {
 #[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[derive(Copy, Clone, SlabItem)]
 pub struct PointLightDescriptor {
+    // TODO: add `range` to PointLightDescriptor
+    // See <https://github.com/KhronosGroup/glTF/blob/main/extensions/2.0/Khronos/KHR_lights_punctual/README.md#light-shared-properties>
     pub position: Vec3,
     pub color: Vec4,
-    /// Expressed as candelas.
-    pub intensity: f32,
+    /// Intensity as candelas.
+    pub intensity: Candela,
 }
 
 impl Default for PointLightDescriptor {
     fn default() -> Self {
         let color = Vec4::splat(1.0);
-        let intensity = 1.0;
+        let intensity = Candela::COMMON_WAX_CANDLE;
 
         Self {
             position: Default::default(),
@@ -1119,20 +1208,23 @@ impl LightTilingInvocation {
             let (distance, intensity_candelas) = match light.light_type {
                 LightStyle::Directional => {
                     let directional_light = lighting_slab.read(light.into_directional_id());
-                    (0.0, directional_light.intensity)
+                    // Very hand-wavey conversion
+                    (0.0, directional_light.intensity.0 / 683.0)
                 }
                 LightStyle::Point => {
                     let point_light = lighting_slab.read(light.into_point_id());
                     let center = Mat4::from(transform).transform_point3(point_light.position);
                     let distance = crate::math::distance_to_line(center, tile_line.0, tile_line.1);
-                    (distance, point_light.intensity)
+                    // Again, very hand-wavey
+                    (distance, point_light.intensity.0 / 683.0)
                 }
                 LightStyle::Spot => {
                     // TODO: take into consideration the direction the spot light is pointing
                     let spot_light = lighting_slab.read(light.into_spot_id());
                     let center = Mat4::from(transform).transform_point3(spot_light.position);
                     let distance = crate::math::distance_to_line(center, tile_line.0, tile_line.1);
-                    (distance, spot_light.intensity)
+                    // Again, very hand-wavey
+                    (distance, spot_light.intensity.0 / 683.0)
                 }
             };
 

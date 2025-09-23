@@ -23,6 +23,7 @@ use super::shader::{
     PointLightDescriptor, SpotLightDescriptor,
 };
 
+pub use super::shader::{Candela, Lux};
 pub use super::shadow_map::ShadowMap;
 
 #[derive(Debug, Snafu)]
@@ -151,24 +152,24 @@ impl AnalyticalLight<DirectionalLight> {
     }
 
     /// Set the intensity of the directional light.
-    pub fn set_intensity(&self, intensity: f32) -> &Self {
+    pub fn set_intensity(&self, intensity: Lux) -> &Self {
         self.inner.descriptor.modify(|d| d.intensity = intensity);
         self
     }
 
     /// Set the intensity and return the directional light.
-    pub fn with_intensity(self, intensity: f32) -> Self {
+    pub fn with_intensity(self, intensity: Lux) -> Self {
         self.set_intensity(intensity);
         self
     }
 
     /// Modify the intensity of the directional light.
-    pub fn modify_intensity<T: 'static>(&self, f: impl FnOnce(&mut f32) -> T) -> T {
+    pub fn modify_intensity<T: 'static>(&self, f: impl FnOnce(&mut Lux) -> T) -> T {
         self.inner.descriptor.modify(|d| f(&mut d.intensity))
     }
 
     /// Get the intensity of the directional light.
-    pub fn intensity(&self) -> f32 {
+    pub fn intensity(&self) -> Lux {
         self.inner.descriptor.get().intensity
     }
 }
@@ -266,24 +267,24 @@ impl AnalyticalLight<PointLight> {
     }
 
     /// Set the intensity of the point light.
-    pub fn set_intensity(&self, intensity: f32) -> &Self {
+    pub fn set_intensity(&self, intensity: Candela) -> &Self {
         self.inner.descriptor.modify(|d| d.intensity = intensity);
         self
     }
 
     /// Set the intensity and return the point light.
-    pub fn with_intensity(self, intensity: f32) -> Self {
+    pub fn with_intensity(self, intensity: Candela) -> Self {
         self.set_intensity(intensity);
         self
     }
 
     /// Modify the intensity of the point light.
-    pub fn modify_intensity<T: 'static>(&self, f: impl FnOnce(&mut f32) -> T) -> T {
+    pub fn modify_intensity<T: 'static>(&self, f: impl FnOnce(&mut Candela) -> T) -> T {
         self.inner.descriptor.modify(|d| f(&mut d.intensity))
     }
 
     /// Get the intensity of the point light.
-    pub fn intensity(&self) -> f32 {
+    pub fn intensity(&self) -> Candela {
         self.inner.descriptor.get().intensity
     }
 }
@@ -453,24 +454,24 @@ impl AnalyticalLight<SpotLight> {
     }
 
     /// Set the intensity of the spot light.
-    pub fn set_intensity(&self, intensity: f32) -> &Self {
+    pub fn set_intensity(&self, intensity: Candela) -> &Self {
         self.inner.descriptor.modify(|d| d.intensity = intensity);
         self
     }
 
     /// Set the intensity and return the spot light.
-    pub fn with_intensity(self, intensity: f32) -> Self {
+    pub fn with_intensity(self, intensity: Candela) -> Self {
         self.set_intensity(intensity);
         self
     }
 
     /// Modify the intensity of the spot light.
-    pub fn modify_intensity<T: 'static>(&self, f: impl FnOnce(&mut f32) -> T) -> T {
+    pub fn modify_intensity<T: 'static>(&self, f: impl FnOnce(&mut Candela) -> T) -> T {
         self.inner.descriptor.modify(|d| f(&mut d.intensity))
     }
 
     /// Get the intensity of the spot light.
-    pub fn intensity(&self) -> f32 {
+    pub fn intensity(&self) -> Candela {
         self.inner.descriptor.get().intensity
     }
 }

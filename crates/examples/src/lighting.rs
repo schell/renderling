@@ -1,16 +1,18 @@
-//! Skybox manual page.
+//! Lighting examples.
 
 use crate::{cwd_to_manual_assets_dir, workspace_dir};
 
 #[tokio::test]
-pub async fn manual_skybox() {
+async fn manual_lighting() {
     // ANCHOR: setup
     use renderling::{
         camera::Camera,
         context::Context,
         glam::Vec4,
         glam::{Mat4, Vec3},
+        gltf::GltfDocument,
         stage::Stage,
+        types::GpuOnlyArray,
     };
 
     let ctx = Context::headless(256, 256).await;
@@ -35,32 +37,51 @@ pub async fn manual_skybox() {
             .with_projection_and_view(projection, view)
     };
 
-    use renderling::{gltf::GltfDocument, types::GpuOnlyArray};
     let model: GltfDocument<GpuOnlyArray> = stage
         .load_gltf_document_from_path(workspace_dir().join("gltf/marble_bust_1k.glb"))
         .unwrap()
         .into_gpu_only();
     println!("bounds: {:?}", model.bounding_volume());
 
+    let skybox = stage
+        .new_skybox_from_path(workspace_dir().join("img/hdr/helipad.hdr"))
+        .unwrap();
+    stage.use_skybox(&skybox);
+
     let frame = ctx.get_next_frame().unwrap();
     stage.render(&frame.view());
     frame.present();
     // ANCHOR_END: setup
 
-    // ANCHOR: skybox
-    let skybox = stage
-        .new_skybox_from_path(workspace_dir().join("img/hdr/helipad.hdr"))
-        .unwrap();
-    stage.use_skybox(&skybox);
-    // ANCHOR_END: skybox
-
     cwd_to_manual_assets_dir();
 
-    // ANCHOR: render_skybox
+    // ANCHOR: lighting_on
+    stage.set_has_lighting(true);
+
     let frame = ctx.get_next_frame().unwrap();
     stage.render(&frame.view());
-    let image = frame.read_image().await.unwrap();
-    image.save("skybox.png").unwrap();
+    let img = frame.read_image().await.unwrap();
+    img.save("lighting/no-lights.png").unwrap();
     frame.present();
-    // ANCHOR_END: render_skybox
+    // ANCHOR_END: lighting_on
+
+    // ANCHOR: directional
+    use renderling::{
+        color::css_srgb_color_to_linear,
+        light::{AnalyticalLight, DirectionalLight},
+    };
+
+    let sunset_amber_sunlight_color = css_srgb_color_to_linear(250, 198, 104);
+
+    let _directional: AnalyticalLight<DirectionalLight> = stage
+        .new_directional_light()
+        .with_direction(Vec3::new(-0.5, -0.5, 0.0))
+        .with_color(sunset_amber_sunlight_color);
+
+    let frame = ctx.get_next_frame().unwrap();
+    stage.render(&frame.view());
+    let img = frame.read_image().await.unwrap();
+    img.save("lighting/directional.png").unwrap();
+    frame.present();
+    // ANCHOR_END: directional
 }

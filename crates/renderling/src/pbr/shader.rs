@@ -9,7 +9,7 @@ use crate::{
     atlas::shader::AtlasTextureDescriptor,
     geometry::shader::GeometryDescriptor,
     light::shader::{
-        DirectionalLightDescriptor, LightStyle, LightingDescriptor, PointLightDescriptor,
+        Candela, DirectionalLightDescriptor, LightStyle, LightingDescriptor, PointLightDescriptor,
         ShadowCalculation, SpotLightCalculation,
     },
     material::shader::MaterialDescriptor,
@@ -537,8 +537,11 @@ where
                 let PointLightDescriptor {
                     position,
                     color,
-                    intensity,
+                    intensity: Candela(intensity_candelas),
                 } = light_slab.read(light.into_point_id());
+                // Convert candelas into radiometric
+                // TODO: write true radiometric light conversions for Lux and Candela
+                let intensity = intensity_candelas / 683.0;
                 let position = transform.transform_point3(position);
                 // This definitely is the direction pointing from fragment to the light.
                 // It needs to stay this way.
@@ -577,7 +580,13 @@ where
                 if calculation.frag_to_light_distance == 0.0 {
                     continue;
                 }
-                let attenuation: f32 = spot_light_descriptor.intensity * calculation.contribution;
+                // Convert from candelas to a radiometric unit.
+                //
+                // TODO: verify that spot light radiometric conversion is correct.
+                let intensity =
+                // TODO: write true radiometric light conversions for Lux and Candela
+                    spot_light_descriptor.intensity.0 / (683.0 * 4.0 * core::f32::consts::PI);
+                let attenuation: f32 = intensity * calculation.contribution;
                 let radiance = outgoing_radiance(
                     spot_light_descriptor.color,
                     albedo,
@@ -603,11 +612,12 @@ where
                 let DirectionalLightDescriptor {
                     direction,
                     color,
-                    intensity,
+                    intensity: intensity_lux,
                 } = light_slab.read(light.into_directional_id());
                 let direction = transform.transform_vector3(direction);
                 let l = -direction.alt_norm_or_zero();
-                let attenuation = intensity;
+                // TODO: write true radiometric light conversions for Lux and Candela
+                let attenuation = intensity_lux.0 / 683.0;
                 let radiance =
                     outgoing_radiance(color, albedo, attenuation, v, l, n, metallic, roughness);
                 let shadow =

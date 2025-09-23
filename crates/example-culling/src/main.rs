@@ -9,7 +9,7 @@ use renderling::{
     context::Context,
     geometry::Vertex,
     glam::{EulerRot, Mat4, Quat, UVec2, Vec3, Vec4},
-    light::{AnalyticalLight, DirectionalLight},
+    light::{AnalyticalLight, DirectionalLight, Lux},
     material::Material,
     math::hex_to_vec4,
     primitive::Primitive,
@@ -189,12 +189,12 @@ impl TestAppHandler for CullingExample {
             .new_directional_light()
             .with_direction(Vec3::new(-0.8, -1.0, 0.5).normalize())
             .with_color(Vec4::ONE)
-            .with_intensity(10.0);
+            .with_intensity(Lux::OUTDOOR_SUNSET);
         let sunlight_b = stage
             .new_directional_light()
             .with_direction(Vec3::new(1.0, 1.0, -0.1).normalize())
             .with_color(Vec4::ONE)
-            .with_intensity(1.0);
+            .with_intensity(Lux::OUTDOOR_TWILIGHT);
 
         let dlights = [sunlight_a, sunlight_b];
 

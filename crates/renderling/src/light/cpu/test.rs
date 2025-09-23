@@ -52,7 +52,7 @@ fn spot_one_calc() {
         inner_cutoff: spot.0,
         outer_cutoff: spot.1,
         color: Vec3::from(light.color()).extend(1.0),
-        intensity: light.intensity(),
+        intensity: Candela(light.intensity()),
     };
 
     let specific_points = [
@@ -215,8 +215,8 @@ fn light_tiling_light_bounds() {
 
     let frame = ctx.get_next_frame().unwrap();
     stage.render(&frame.view());
-    let img = frame.read_image().block().unwrap();
-    img_diff::save("light/tiling/bounds.png", img);
+    // let img = frame.read_image().block().unwrap();
+    // img_diff::save("light/tiling/bounds.png", img);
     frame.present();
 }
 
@@ -274,12 +274,12 @@ fn gen_light(stage: &Stage, prng: &mut GpuRng, bounding_boxes: &[BoundingBox]) -
         .with_material(material);
     let _light = {
         // suffix the actual analytical light
-        let intensity = scale * 100.0;
+        let intensity = scale * 100.0 * 683.0;
         stage
             .new_point_light()
             .with_position(position)
             .with_color(color)
-            .with_intensity(intensity)
+            .with_intensity(Candela(intensity))
     };
 
     GeneratedLight {
@@ -540,7 +540,7 @@ fn light_bins_point() {
         .new_point_light()
         .with_position(Vec3::new(1.1, 1.0, 1.1))
         .with_color(Vec4::ONE)
-        .with_intensity(5.0);
+        .with_intensity(Candela(5.0));
     snapshot(
         &ctx,
         &stage,
@@ -962,8 +962,9 @@ fn pedestal() {
             .new_directional_light()
             .with_direction(-position)
             .with_color(color)
-            .with_intensity(5.0);
-        snapshot(&ctx, &stage, "light/pedestal/directional.png", false);
+            .with_intensity(Lux::OUTDOOR_FOXS_WEDDING);
+        let _ = stage.commit();
+        //snapshot(&ctx, &stage, "light/pedestal/directional.png", false);
 
         let geometry_slab =
             futures_lite::future::block_on(stage.geometry.slab_allocator().read(..)).unwrap();
@@ -1002,7 +1003,8 @@ fn pedestal() {
             .new_point_light()
             .with_position(position)
             .with_color(color)
-            .with_intensity(5.0);
+            .with_intensity(Candela(5000.0));
+        let _ = stage.commit();
         snapshot(&ctx, &stage, "light/pedestal/point.png", false);
         stage.remove_light(&point_light);
     }
@@ -1016,9 +1018,10 @@ fn pedestal() {
             .new_point_light()
             .with_position(Vec3::ZERO)
             .with_color(color)
-            .with_intensity(5.0);
+            .with_intensity(Candela(5000.0));
         point_light.link_node_transform(&transform);
 
+        let _ = stage.commit();
         snapshot(&ctx, &stage, "light/pedestal/point.png", false);
         stage.remove_light(&point_light);
     }
@@ -1030,7 +1033,7 @@ fn pedestal() {
             .with_position(position)
             .with_direction(-position)
             .with_color(color)
-            .with_intensity(5.0)
+            .with_intensity(Candela(40_000.0))
             .with_inner_cutoff(core::f32::consts::PI / 5.0)
             .with_outer_cutoff(core::f32::consts::PI / 4.0);
         snapshot(&ctx, &stage, "light/pedestal/spot.png", false);
@@ -1079,7 +1082,7 @@ fn pedestal() {
             .with_position(Vec3::ZERO)
             .with_direction(-position)
             .with_color(color)
-            .with_intensity(5.0)
+            .with_intensity(Candela(40_000.0))
             .with_inner_cutoff(core::f32::consts::PI / 5.0)
             .with_outer_cutoff(core::f32::consts::PI / 4.0);
         spot.link_node_transform(&node_transform);

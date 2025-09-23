@@ -896,7 +896,7 @@ impl DepthTexture {
 }
 
 /// Helper for retreiving an image from a texture.
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct BufferDimensions {
     pub width: usize,
     pub height: usize,
@@ -1141,8 +1141,8 @@ impl CopiedTextureBuffer {
 
     /// Convert the post render buffer into an RgbaImage.
     ///
-    /// Ensures that the pixels are in a linear color space by applying the
-    /// linear transfer if the texture this buffer was copied from was sRGB.
+    /// Ensures that the pixels are in a sRGB color space by applying the
+    /// opto transfer function if the texture this buffer was copied from was linear.
     pub async fn into_srgba(self, device: &wgpu::Device) -> Result<image::RgbaImage, TextureError> {
         let format = self.format;
         let mut img_buffer = self
@@ -1150,9 +1150,7 @@ impl CopiedTextureBuffer {
             .await?
             .into_rgba8();
         if !format.is_srgb() {
-            log::trace!(
-                "converting by applying opto transfer fn to linear pixels (linear -> sRGB)"
-            );
+            log::warn!("converting by applying opto transfer fn to linear pixels (linear -> sRGB)");
             // Convert back to linear
             img_buffer.pixels_mut().for_each(|p| {
                 crate::color::opto_xfer_u8(&mut p.0[0]);

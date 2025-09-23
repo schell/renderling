@@ -20,7 +20,7 @@ use crate::{
     bvol::Aabb,
     camera::Camera,
     geometry::{Indices, MorphTarget, MorphTargetWeights, MorphTargets, Skin, Vertex, Vertices},
-    light::{shader::LightStyle, AnalyticalLight},
+    light::{shader::LightStyle, AnalyticalLight, Candela, Lux},
     material::Material,
     primitive::Primitive,
     stage::{Stage, StageError},
@@ -670,6 +670,11 @@ impl GltfCamera {
         let camera = stage
             .new_camera()
             .with_projection_and_view(projection, view);
+        // what else can we get out of the camera
+        let extensions = gltf_camera.extensions();
+        log::debug!("  extensions: {extensions:#?}");
+        let extras = gltf_camera.extras();
+        log::debug!("  extras: {extras:#?}");
         GltfCamera {
             index: gltf_camera.index(),
             name: gltf_camera.name().map(String::from),
@@ -1043,18 +1048,8 @@ impl GltfDocument {
                             .new_directional_light()
                             .with_direction(Vec3::NEG_Z)
                             .with_color(color)
-                            // TODO: Set a unit for lighting.
-                            // We don't yet use a unit for our lighting, and we should.
-                            // https://www.realtimerendering.com/blog/physical-units-for-lights/
-                            //
-                            // NOTE:
-                            // glTF spec [1] says directional light is in lux, whereas spot and point are
-                            // in candelas. I haven't really set a unit, it's implicit in the shader, but it seems we
-                            // can roughly get candelas from lux by dividing by 683 [2].
-                            // 1. https://github.com/KhronosGroup/glTF/blob/main/extensions/2.0/Khronos/KHR_lights_punctual/README.md
-                            // 2. https://depts.washington.edu/mictech/optics/me557/Radiometry.pdf
-                            // 3. https://projects.blender.org/blender/blender-addons/commit/9d903a93f03b
-                            .with_intensity(intensity / 683.0)
+                            // Assumed to be lux
+                            .with_intensity(Lux(intensity))
                             .into_generic()
                     }
 
@@ -1062,7 +1057,10 @@ impl GltfDocument {
                         .new_point_light()
                         .with_position(Vec3::ZERO)
                         .with_color(color)
-                        .with_intensity(intensity / 683.0)
+                        // Assumed to be Candelas.
+                        //
+                        // This is converted to radiometric units in the PBR shader.
+                        .with_intensity(Candela(intensity))
                         .into_generic(),
 
                     gltf::khr_lights_punctual::Kind::Spot {
@@ -1075,7 +1073,10 @@ impl GltfDocument {
                         .with_inner_cutoff(inner_cone_angle)
                         .with_outer_cutoff(outer_cone_angle)
                         .with_color(color)
-                        .with_intensity(intensity / (683.0 * 4.0 * std::f32::consts::PI))
+                        // Assumed to be Candelas.
+                        //
+                        // This is converted to radiometric units in the PBR shader.
+                        .with_intensity(Candela(intensity))
                         .into_generic(),
                 };
 

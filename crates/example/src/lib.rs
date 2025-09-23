@@ -14,7 +14,7 @@ use renderling::{
     geometry::Vertex,
     glam,
     gltf::{Animator, GltfDocument},
-    light::AnalyticalLight,
+    light::{AnalyticalLight, Lux},
     primitive::Primitive,
     skybox::Skybox,
     stage::Stage,
@@ -150,7 +150,7 @@ impl App {
             .new_directional_light()
             .with_direction(Vec3::NEG_Y)
             .with_color(renderling::math::hex_to_vec4(0xFDFBD3FF))
-            .with_intensity(10.0);
+            .with_intensity(Lux::OUTDOOR_SUNSET);
 
         stage
             .set_atlas_size(wgpu::Extent3d {
