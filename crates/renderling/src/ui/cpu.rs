@@ -316,7 +316,7 @@ impl Ui {
     }
 
     fn reorder_renderlets(&self) {
-        self.stage.sort_renderlets(|a, b| {
+        self.stage.sort_primitive(|a, b| {
             let za = a
                 .transform()
                 .as_ref()

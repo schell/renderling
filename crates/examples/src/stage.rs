@@ -2,7 +2,7 @@
 
 #[tokio::test]
 async fn manual_stage() {
-    env_logger::init();
+    let _ = env_logger::builder().try_init();
 
     // ANCHOR: creation
     use renderling::{context::Context, glam::Vec4, stage::Stage};

@@ -466,7 +466,7 @@ impl DiffuseIrradianceConvolutionRenderPipeline {
 
 #[cfg(test)]
 mod test {
-    use glam::Vec3;
+    use glam::{Mat4, Vec3};
 
     use crate::{
         context::Context,
@@ -480,17 +480,15 @@ mod test {
     /// ensure creation is valid.
     fn creates_valid_cubemaps() {
         let ctx = Context::headless(600, 400).block();
-
         let proj = crate::camera::perspective(600.0, 400.0);
         let view = crate::camera::look_at(Vec3::new(0.0, 0.0, 2.0), Vec3::ZERO, Vec3::Y);
-
         let stage = ctx.new_stage();
-
         let _camera = stage.new_camera().with_projection_and_view(proj, view);
         let skybox = stage
             .new_skybox_from_path(workspace_dir().join("img/hdr/resting_place.hdr"))
             .unwrap();
         let ibl = stage.new_ibl(&skybox);
+        stage.use_ibl(&ibl);
         assert_eq!(
             wgpu::TextureFormat::Rgba16Float,
             ibl.irradiance_cubemap.texture.format()
@@ -499,7 +497,6 @@ mod test {
             wgpu::TextureFormat::Rgba16Float,
             ibl.prefiltered_environment_cubemap.texture.format()
         );
-
         for i in 0..6 {
             // save out the irradiance face
             let copied_buffer = CopiedTextureBuffer::read_from(
@@ -551,5 +548,48 @@ mod test {
                 );
             }
         }
+    }
+
+    #[test]
+    /// Creates a Skybox, Ibl, and uses the Ibl to light a mirror cube.
+    fn mirror_cube_is_lit_by_environment() {
+        let ctx = Context::headless(256, 256).block();
+        let stage = ctx.new_stage();
+
+        let _camera = stage
+            .new_camera()
+            .with_default_perspective(256.0, 256.0)
+            .with_view(Mat4::look_at_rh(Vec3::ONE * 1.5, Vec3::ZERO, Vec3::Y));
+        let _model = stage.new_primitive().with_material(
+            stage
+                .new_material()
+                .with_metallic_factor(0.9)
+                .with_roughness_factor(0.1),
+        );
+
+        let skybox = stage
+            .new_skybox_from_path(workspace_dir().join("img/hdr/helipad.hdr"))
+            .unwrap();
+        stage.use_skybox(&skybox);
+
+        // Render once here because we found a bug where rendering before setting
+        // ibl would cause the primitive bindgroup to *not* be invalidated when
+        // ibl was set.
+        //
+        // This essentially just ensures that `Stage::use_ibl` is invalidating the
+        // primitive bindgroup.
+        let frame = ctx.get_next_frame().unwrap();
+        stage.render(&frame.view());
+        frame.present();
+
+        let ibl = stage.new_ibl(&skybox);
+        stage.use_ibl(&ibl);
+        stage.remove_skybox();
+
+        let frame = ctx.get_next_frame().unwrap();
+        stage.render(&frame.view());
+        let img = frame.read_image().block().unwrap();
+        img_diff::save("pbr/ibl/mirror_cube_is_lit_by_environment.png", img);
+        frame.present();
     }
 }

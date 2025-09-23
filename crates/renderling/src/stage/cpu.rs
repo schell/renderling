@@ -148,7 +148,7 @@ impl StageCommitResult {
 /// This is the bindgroup that occupies `descriptor_set = 0` in
 /// [crate::primitive::shader::primitive_vertex] and
 /// [crate::primitive::shader::primitive_fragment].
-struct RenderletBindGroup<'a> {
+struct PrimitiveBindGroup<'a> {
     device: &'a wgpu::Device,
     layout: &'a wgpu::BindGroupLayout,
     geometry_buffer: &'a wgpu::Buffer,
@@ -166,10 +166,10 @@ struct RenderletBindGroup<'a> {
     shadow_map_texture_sampler: &'a wgpu::Sampler,
 }
 
-impl RenderletBindGroup<'_> {
+impl PrimitiveBindGroup<'_> {
     pub fn create(self) -> wgpu::BindGroup {
         self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("renderlet"),
+            label: Some("primitive"),
             layout: self.layout,
             entries: &[
                 wgpu::BindGroupEntry {
@@ -244,25 +244,29 @@ impl StageRendering<'_> {
     /// Returns the queue submission index and the indirect draw buffer, if available.
     pub fn run(self) -> (wgpu::SubmissionIndex, Option<SlabBuffer<wgpu::Buffer>>) {
         let commit_result = self.stage.commit();
-        let current_renderlet_bind_group_creation_time = commit_result.latest_creation_time();
-        let previous_renderlet_bind_group_creation_time =
-            self.stage.renderlet_bind_group_created.swap(
-                current_renderlet_bind_group_creation_time,
+        let current_primitive_bind_group_creation_time = commit_result.latest_creation_time();
+        log::trace!("current_primitive_bind_group_creation_time: {current_primitive_bind_group_creation_time}");
+        let previous_primitive_bind_group_creation_time =
+            self.stage.primitive_bind_group_created.swap(
+                current_primitive_bind_group_creation_time,
                 std::sync::atomic::Ordering::Relaxed,
             );
-        let should_invalidate_renderlet_bind_group =
-            commit_result.should_invalidate(previous_renderlet_bind_group_creation_time);
-        let renderlet_bind_group =
+        let should_invalidate_primitive_bind_group =
+            commit_result.should_invalidate(previous_primitive_bind_group_creation_time);
+        log::trace!(
+            "should_invalidate_primitive_bind_group: {should_invalidate_primitive_bind_group}"
+        );
+        let primitive_bind_group =
             self.stage
-                .renderlet_bind_group
-                .get(should_invalidate_renderlet_bind_group, || {
-                    log::trace!("recreating renderlet bind group");
+                .primitive_bind_group
+                .get(should_invalidate_primitive_bind_group, || {
+                    log::trace!("recreating primitive bind group");
                     let atlas_texture = self.stage.materials.atlas().get_texture();
                     let ibl = self.stage.ibl.read().unwrap();
                     let shadow_map = self.stage.lighting.shadow_map_atlas.get_texture();
-                    RenderletBindGroup {
+                    PrimitiveBindGroup {
                         device: self.stage.device(),
-                        layout: &Stage::renderlet_pipeline_bindgroup_layout(self.stage.device()),
+                        layout: &Stage::primitive_pipeline_bindgroup_layout(self.stage.device()),
                         geometry_buffer: &commit_result.geometry_buffer,
                         material_buffer: &commit_result.materials_buffer,
                         light_buffer: &commit_result.lighting_buffer,
@@ -301,7 +305,7 @@ impl StageRendering<'_> {
             });
 
             render_pass.set_pipeline(self.pipeline);
-            render_pass.set_bind_group(0, Some(renderlet_bind_group.as_ref()), &[]);
+            render_pass.set_bind_group(0, Some(primitive_bind_group.as_ref()), &[]);
             draw_calls.draw(&mut render_pass);
 
             let has_skybox = self.stage.has_skybox.load(Ordering::Relaxed);
@@ -380,9 +384,9 @@ pub struct Stage {
     pub(crate) materials: Materials,
     pub(crate) lighting: Lighting,
 
-    pub(crate) renderlet_pipeline: Arc<RwLock<wgpu::RenderPipeline>>,
-    pub(crate) renderlet_bind_group: ManagedBindGroup,
-    pub(crate) renderlet_bind_group_created: Arc<AtomicUsize>,
+    pub(crate) primitive_pipeline: Arc<RwLock<wgpu::RenderPipeline>>,
+    pub(crate) primitive_bind_group: ManagedBindGroup,
+    pub(crate) primitive_bind_group_created: Arc<AtomicUsize>,
 
     pub(crate) skybox_pipeline: Arc<RwLock<Option<Arc<SkyboxRenderPipeline>>>>,
 
@@ -846,6 +850,7 @@ impl Stage {
     pub fn use_ibl(&self, ibl: &Ibl) -> &Self {
         let mut guard = self.ibl.write().unwrap();
         *guard = ibl.clone();
+        self.primitive_bind_group.invalidate();
         self
     }
 
@@ -858,7 +863,7 @@ impl Stage {
         } else {
             let ibl = guard.clone();
             *guard = Ibl::new(self.runtime(), &Skybox::empty(self.runtime()));
-            self.renderlet_bind_group.invalidate();
+            self.primitive_bind_group.invalidate();
             Some(ibl)
         }
     }
@@ -922,7 +927,7 @@ impl Stage {
     pub fn commit(&self) -> StageCommitResult {
         let (materials_atlas_texture_was_recreated, materials_buffer) = self.materials.commit();
         if materials_atlas_texture_was_recreated {
-            self.renderlet_bind_group.invalidate();
+            self.primitive_bind_group.invalidate();
         }
         let geometry_buffer = self.geometry.commit();
         let lighting_buffer = self.lighting.commit();
@@ -933,7 +938,7 @@ impl Stage {
         }
     }
 
-    fn renderlet_pipeline_bindgroup_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+    fn primitive_pipeline_bindgroup_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
         let geometry_slab = wgpu::BindGroupLayoutEntry {
             binding: 0,
             visibility: wgpu::ShaderStages::VERTEX | wgpu::ShaderStages::FRAGMENT,
@@ -1022,7 +1027,7 @@ impl Stage {
         } = LightingBindGroupLayoutEntries::new(10);
 
         device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("renderlet"),
+            label: Some("primitive"),
             entries: &[
                 geometry_slab,
                 material_slab,
@@ -1047,11 +1052,11 @@ impl Stage {
         multisample_count: u32,
     ) -> wgpu::RenderPipeline {
         log::trace!("creating stage render pipeline");
-        let label = Some("renderlet");
+        let label = Some("primitive");
         let vertex_linkage = crate::linkage::primitive_vertex::linkage(device);
         let fragment_linkage = crate::linkage::primitive_fragment::linkage(device);
 
-        let bind_group_layout = Self::renderlet_pipeline_bindgroup_layout(device);
+        let bind_group_layout = Self::primitive_pipeline_bindgroup_layout(device);
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label,
             bind_group_layouts: &[&bind_group_layout],
@@ -1160,9 +1165,9 @@ impl Stage {
             stage_slab_buffer: Arc::new(RwLock::new(geometry_buffer)),
             geometry,
 
-            renderlet_pipeline: Arc::new(RwLock::new(stage_pipeline)),
-            renderlet_bind_group: ManagedBindGroup::default(),
-            renderlet_bind_group_created: Arc::new(0.into()),
+            primitive_pipeline: Arc::new(RwLock::new(stage_pipeline)),
+            primitive_bind_group: ManagedBindGroup::default(),
+            primitive_bind_group_created: Arc::new(0.into()),
 
             ibl: Arc::new(RwLock::new(ibl)),
             skybox: Arc::new(RwLock::new(skybox)),
@@ -1222,7 +1227,7 @@ impl Stage {
 
         log::debug!("setting multisample count to {multisample_count}");
         // UNWRAP: POP
-        *self.renderlet_pipeline.write().unwrap() = Self::create_primitive_pipeline(
+        *self.primitive_pipeline.write().unwrap() = Self::create_primitive_pipeline(
             self.device(),
             wgpu::TextureFormat::Rgba16Float,
             multisample_count,
@@ -1461,33 +1466,33 @@ impl Stage {
         self
     }
 
-    /// Adds a primitive to the internal list of renderlets to be drawn each
+    /// Adds a primitive to the internal list of primitives to be drawn each
     /// frame.
     ///
     /// Returns the number of primitives added.
     ///
-    /// If you drop the renderlet and no other references are kept, it will be
+    /// If you drop the primitive and no other references are kept, it will be
     /// removed automatically from the internal list and will cease to be
     /// drawn each frame.
-    pub fn add_primitive(&self, renderlet: &Primitive) -> usize {
+    pub fn add_primitive(&self, primitive: &Primitive) -> usize {
         // UNWRAP: if we can't acquire the lock we want to panic.
         let mut draws = self.draw_calls.write().unwrap();
-        draws.add_primitive(renderlet)
+        draws.add_primitive(primitive)
     }
 
     /// Erase the given primitive from the internal list of primitives to be
     /// drawn each frame.
     ///
     /// Returns the number of primitives added.
-    pub fn remove_primitive(&self, renderlet: &Primitive) -> usize {
+    pub fn remove_primitive(&self, primitive: &Primitive) -> usize {
         let mut draws = self.draw_calls.write().unwrap();
-        draws.remove_primitive(renderlet)
+        draws.remove_primitive(primitive)
     }
 
-    /// Sort the drawing order of renderlets.
+    /// Sort the drawing order of primitives.
     ///
     /// This determines the order in which [`Primitive`]s are drawn each frame.
-    pub fn sort_renderlets(&self, f: impl Fn(&Primitive, &Primitive) -> std::cmp::Ordering) {
+    pub fn sort_primitive(&self, f: impl Fn(&Primitive, &Primitive) -> std::cmp::Ordering) {
         // UNWRAP: panic on purpose
         let mut guard = self.draw_calls.write().unwrap();
         guard.sort_primitives(f);
@@ -1553,7 +1558,7 @@ impl Stage {
             }),
             stencil_ops: None,
         };
-        let pipeline_guard = self.renderlet_pipeline.read().unwrap();
+        let pipeline_guard = self.primitive_pipeline.read().unwrap();
         let (_submission_index, maybe_indirect_buffer) = StageRendering {
             pipeline: &pipeline_guard,
             stage: self,

@@ -84,4 +84,4 @@ you can see the effect:
 
 ![image of a marble bust lit by a single spot light](/assets/lighting/spot.png)
 
-Good enough! Now on to image based lighting.
+Good enough! Now on to image-based lighting, which uses environment maps to simulate complex lighting scenarios. This technique captures real-world lighting conditions and applies them to the scene, providing more realistic reflections and ambient lighting.

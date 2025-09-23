@@ -20,6 +20,8 @@
 
 [`RenderTarget`]: {{DOCS_URL}}/renderling/context/struct.RenderTarget.html
 
+[`Skybox`]: {{DOCS_URL}}/renderling/skybox/struct.Skybox.html
+
 [`Stage`]: {{DOCS_URL}}/renderling/stage/struct.Stage.html
 [`Stage::new_camera`]: {{DOCS_URL}}/renderling/stage/struct.Stage.html#method.new_camera
 
