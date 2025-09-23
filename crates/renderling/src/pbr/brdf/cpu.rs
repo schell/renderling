@@ -106,3 +106,40 @@ impl BrdfLut {
         &self.inner
     }
 }
+
+#[cfg(test)]
+mod test {
+    use crate::{context::Context, pbr::brdf::BrdfLut, test::BlockOnFuture, texture::Texture};
+
+    #[test]
+    fn precomputed_brdf() {
+        assert_eq!(2, std::mem::size_of::<u16>());
+        let r = Context::headless(32, 32).block();
+        let brdf_lut = BrdfLut::new(&r);
+        assert_eq!(
+            wgpu::TextureFormat::Rg16Float,
+            brdf_lut.texture().texture.format()
+        );
+        let copied_buffer = Texture::read(&r, &brdf_lut.texture().texture, 512, 512, 2, 2);
+        let pixels = copied_buffer.pixels(r.get_device()).block().unwrap();
+        let pixels: Vec<f32> = bytemuck::cast_slice::<u8, u16>(pixels.as_slice())
+            .iter()
+            .copied()
+            .map(|bits| half::f16::from_bits(bits).to_f32())
+            .collect();
+        assert_eq!(512 * 512 * 2, pixels.len());
+        let pixels: Vec<f32> = pixels
+            .chunks_exact(2)
+            .flat_map(|pixel| match pixel {
+                [r, g] => [*r, *g, 0.0, 1.0],
+                _ => unreachable!(),
+            })
+            .collect();
+
+        let img: image::ImageBuffer<image::Rgba<f32>, Vec<f32>> =
+            image::ImageBuffer::from_vec(512, 512, pixels).unwrap();
+        let img = image::DynamicImage::from(img);
+        let img = img.into_rgba8();
+        img_diff::assert_img_eq("skybox/brdf_lut.png", img);
+    }
+}

@@ -143,6 +143,11 @@ impl StageCommitResult {
     }
 }
 
+/// Bindgroup used to render primitives.
+///
+/// This is the bindgroup that occupies `descriptor_set = 0` in
+/// [crate::primitive::shader::primitive_vertex] and
+/// [crate::primitive::shader::primitive_fragment].
 struct RenderletBindGroup<'a> {
     device: &'a wgpu::Device,
     layout: &'a wgpu::BindGroupLayout,
@@ -802,6 +807,8 @@ impl Stage {
         } else {
             let skybox = guard.clone();
             *guard = Skybox::empty(self.runtime());
+            self.skybox_bindgroup.lock().unwrap().take();
+            self.textures_bindgroup.lock().unwrap().take();
             Some(skybox)
         }
     }
@@ -851,6 +858,7 @@ impl Stage {
         } else {
             let ibl = guard.clone();
             *guard = Ibl::new(self.runtime(), &Skybox::empty(self.runtime()));
+            self.renderlet_bind_group.invalidate();
             Some(ibl)
         }
     }

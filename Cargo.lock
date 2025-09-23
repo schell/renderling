@@ -1196,6 +1196,7 @@ dependencies = [
  "renderling",
  "renderling_build",
  "tokio",
+ "wgpu",
 ]
 
 [[package]]

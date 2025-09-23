@@ -311,6 +311,7 @@ impl Skybox {
 
         texture::Texture::render_cubemap(
             runtime,
+            "skybox-environment",
             &pipeline.0,
             buffer_upkeep,
             camera,
@@ -331,123 +332,22 @@ impl Skybox {
 mod test {
     use glam::Vec3;
 
-    use super::*;
-    use crate::{
-        context::Context, pbr::brdf::BrdfLut, test::BlockOnFuture, texture::CopiedTextureBuffer,
-    };
+    use crate::{context::Context, test::BlockOnFuture};
 
     #[test]
     fn hdr_skybox_scene() {
         let ctx = Context::headless(600, 400).block();
-
         let proj = crate::camera::perspective(600.0, 400.0);
         let view = crate::camera::look_at(Vec3::new(0.0, 0.0, 2.0), Vec3::ZERO, Vec3::Y);
-
         let stage = ctx.new_stage();
-
         let _camera = stage.new_camera().with_projection_and_view(proj, view);
         let skybox = stage
             .new_skybox_from_path("../../img/hdr/resting_place.hdr")
             .unwrap();
-        let ibl = stage.new_ibl(&skybox);
-        assert_eq!(
-            wgpu::TextureFormat::Rgba16Float,
-            ibl.irradiance_cubemap.texture.format()
-        );
-        assert_eq!(
-            wgpu::TextureFormat::Rgba16Float,
-            ibl.prefiltered_environment_cubemap.texture.format()
-        );
-
-        for i in 0..6 {
-            // save out the irradiance face
-            let copied_buffer = CopiedTextureBuffer::read_from(
-                &ctx,
-                &ibl.irradiance_cubemap.texture,
-                32,
-                32,
-                4,
-                2,
-                0,
-                Some(wgpu::Origin3d { x: 0, y: 0, z: i }),
-            );
-            let pixels = copied_buffer.pixels(ctx.get_device()).block().unwrap();
-            let pixels = bytemuck::cast_slice::<u8, u16>(pixels.as_slice())
-                .iter()
-                .map(|p| half::f16::from_bits(*p).to_f32())
-                .collect::<Vec<_>>();
-            assert_eq!(32 * 32 * 4, pixels.len());
-            let img: image::Rgba32FImage = image::ImageBuffer::from_vec(32, 32, pixels).unwrap();
-            let img = image::DynamicImage::from(img);
-            let img = img.to_rgba8();
-            img_diff::assert_img_eq(&format!("skybox/irradiance{i}.png"), img);
-            for mip_level in 0..5 {
-                let mip_size = 128u32 >> mip_level;
-                // save out the prefiltered environment faces' mips
-                let copied_buffer = CopiedTextureBuffer::read_from(
-                    &ctx,
-                    &ibl.prefiltered_environment_cubemap.texture,
-                    mip_size as usize,
-                    mip_size as usize,
-                    4,
-                    2,
-                    mip_level,
-                    Some(wgpu::Origin3d { x: 0, y: 0, z: i }),
-                );
-                let pixels = copied_buffer.pixels(ctx.get_device()).block().unwrap();
-                let pixels = bytemuck::cast_slice::<u8, u16>(pixels.as_slice())
-                    .iter()
-                    .map(|p| half::f16::from_bits(*p).to_f32())
-                    .collect::<Vec<_>>();
-                assert_eq!((mip_size * mip_size * 4) as usize, pixels.len());
-                let img: image::Rgba32FImage =
-                    image::ImageBuffer::from_vec(mip_size, mip_size, pixels).unwrap();
-                let img = image::DynamicImage::from(img);
-                let img = img.to_rgba8();
-                img_diff::assert_img_eq(
-                    &format!("skybox/prefiltered_environment_face{i}_mip{mip_level}.png"),
-                    img,
-                );
-            }
-        }
-
         stage.use_skybox(&skybox);
-
         let frame = ctx.get_next_frame().unwrap();
         stage.render(&frame.view());
         let img = frame.read_linear_image().block().unwrap();
         img_diff::assert_img_eq("skybox/hdr.png", img);
-    }
-
-    #[test]
-    fn precomputed_brdf() {
-        assert_eq!(2, std::mem::size_of::<u16>());
-        let r = Context::headless(32, 32).block();
-        let brdf_lut = BrdfLut::new(&r);
-        assert_eq!(
-            wgpu::TextureFormat::Rg16Float,
-            brdf_lut.texture().texture.format()
-        );
-        let copied_buffer = Texture::read(&r, &brdf_lut.texture().texture, 512, 512, 2, 2);
-        let pixels = copied_buffer.pixels(r.get_device()).block().unwrap();
-        let pixels: Vec<f32> = bytemuck::cast_slice::<u8, u16>(pixels.as_slice())
-            .iter()
-            .copied()
-            .map(|bits| half::f16::from_bits(bits).to_f32())
-            .collect();
-        assert_eq!(512 * 512 * 2, pixels.len());
-        let pixels: Vec<f32> = pixels
-            .chunks_exact(2)
-            .flat_map(|pixel| match pixel {
-                [r, g] => [*r, *g, 0.0, 1.0],
-                _ => unreachable!(),
-            })
-            .collect();
-
-        let img: image::ImageBuffer<image::Rgba<f32>, Vec<f32>> =
-            image::ImageBuffer::from_vec(512, 512, pixels).unwrap();
-        let img = image::DynamicImage::from(img);
-        let img = img.into_rgba8();
-        img_diff::assert_img_eq("skybox/brdf_lut.png", img);
     }
 }

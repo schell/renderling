@@ -121,12 +121,13 @@ impl Texture {
     /// Create a cubemap texture from 6 faces.
     pub fn new_cubemap_texture(
         runtime: impl AsRef<WgpuRuntime>,
-        label: Option<&str>,
+        label: Option<impl AsRef<str>>,
         texture_size: u32,
         face_textures: &[Texture],
         image_format: wgpu::TextureFormat,
         mip_levels: u32,
     ) -> Self {
+        let label = label.as_ref().map(|s| s.as_ref());
         let WgpuRuntime { device, queue } = runtime.as_ref();
         let size = wgpu::Extent3d {
             width: texture_size,
@@ -720,6 +721,7 @@ impl Texture {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn render_cubemap(
         runtime: impl AsRef<WgpuRuntime>,
+        label: &str,
         pipeline: &wgpu::RenderPipeline,
         mut buffer_upkeep: impl FnMut(),
         camera: &Camera,
@@ -737,12 +739,12 @@ impl Texture {
         // Render every cube face.
         for (i, view) in views.iter().enumerate() {
             let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some(&format!("cubemap{i}")),
+                label: Some(&format!("{label}-cubemap{i}")),
             });
 
             let mut cubemap_face = Texture::new_with(
                 runtime,
-                Some(&format!("cubemap{i}")),
+                Some(&format!("{label}-cubemap{i}")),
                 Some(
                     wgpu::TextureUsages::RENDER_ATTACHMENT
                         | wgpu::TextureUsages::COPY_SRC
@@ -765,7 +767,7 @@ impl Texture {
 
             {
                 let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                    label: Some(&format!("cubemap{i}")),
+                    label: Some(&format!("{label}-cubemap{i}")),
                     color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                         view: &cubemap_face.view,
                         resolve_target: None,
@@ -785,14 +787,18 @@ impl Texture {
             }
 
             queue.submit([encoder.finish()]);
-            let mips = cubemap_face.generate_mips(runtime, Some("cubemap mips"), mip_levels);
+            let mips = cubemap_face.generate_mips(
+                runtime,
+                Some(&format!("{label}-cubemap mips")),
+                mip_levels,
+            );
             cubemap_faces.push(cubemap_face);
             cubemap_faces.extend(mips);
         }
 
         Texture::new_cubemap_texture(
             runtime,
-            Some("skybox cubemap"),
+            Some(format!("{label}-cubemap")),
             texture_size,
             cubemap_faces.as_slice(),
             wgpu::TextureFormat::Rgba16Float,

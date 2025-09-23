@@ -10,3 +10,4 @@ futures-lite.workspace = true
 renderling = { path = "../renderling", features = ["test-utils"] }
 renderling_build = { path = "../renderling-build" }
 tokio = { workspace = true, features = ["full"] }
+wgpu.workspace = true
