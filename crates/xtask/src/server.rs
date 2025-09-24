@@ -117,7 +117,7 @@ async fn assert_img_eq_inner(
         filename,
         seen,
         DiffCfg {
-            output_dir: img_diff::WASM_TEST_OUTPUT_DIR,
+            output_dir: renderling_build::wasm_test_output_dir(),
             ..Default::default()
         },
     )
@@ -149,7 +149,7 @@ async fn assert_img_eq(
 
 async fn save_inner(filename: &str, img: wire_types::Image) -> Result<(), Error> {
     let img = image_from_wire(img)?;
-    img_diff::save_to(img_diff::WASM_TEST_OUTPUT_DIR, filename, img)
+    img_diff::save_to(renderling_build::wasm_test_output_dir(), filename, img)
         .map_err(|description| Error { description })
 }
 
@@ -197,7 +197,7 @@ async fn artifact_inner(filename: impl AsRef<std::path::Path>, body: Body) -> Re
 }
 
 async fn artifact(Path(parts): Path<Vec<String>>, body: Body) -> Response {
-    let filename = std::path::PathBuf::from(img_diff::WASM_TEST_OUTPUT_DIR).join(parts.join("/"));
+    let filename = renderling_build::wasm_test_output_dir().join(parts.join("/"));
     log::info!("saving artifact to {filename:?}");
     let result = artifact_inner(filename, body).await;
     Response::builder()
