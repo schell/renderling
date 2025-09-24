@@ -138,8 +138,11 @@ fn wgsl(spv_filepath: impl AsRef<std::path::Path>, destination: impl AsRef<std::
 }
 
 /// The cargo workspace directory.
+///
+/// ## Panics
+/// Panics if not called from a checkout of the renderling repo.
 pub fn workspace_dir() -> std::path::PathBuf {
-    std::path::PathBuf::from(std::env!("CARGO_WORKSPACE_DIR"))
+    std::path::PathBuf::from(std::env::var("CARGO_WORKSPACE_DIR").unwrap())
 }
 
 /// The test_output directory.
