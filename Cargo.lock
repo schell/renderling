@@ -2097,6 +2097,7 @@ dependencies = [
  "glam",
  "image 0.25.6",
  "log",
+ "renderling_build",
  "snafu 0.7.5",
 ]
 

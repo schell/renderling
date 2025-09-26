@@ -1,13 +1,9 @@
 //! Provides image diffing for testing.
 use glam::{Vec3, Vec4, Vec4Swizzles};
 use image::{DynamicImage, Luma, Rgb, Rgb32FImage, Rgba32FImage};
+use renderling_build::{test_img_dir, test_output_dir};
 use snafu::prelude::*;
-use std::path::Path;
 
-pub const TEST_IMG_DIR: &str = concat!(std::env!("CARGO_WORKSPACE_DIR"), "test_img");
-pub const TEST_OUTPUT_DIR: &str = concat!(std::env!("CARGO_WORKSPACE_DIR"), "test_output");
-pub const WASM_TEST_OUTPUT_DIR: &str =
-    concat!(std::env!("CARGO_WORKSPACE_DIR"), "test_output/wasm");
 const PIXEL_MAGNITUDE_THRESHOLD: f32 = 0.1;
 pub const LOW_PIXEL_THRESHOLD: f32 = 0.02;
 const IMAGE_DIFF_THRESHOLD: f32 = 0.05;
@@ -44,7 +40,7 @@ pub struct DiffCfg {
     /// The name of the test.
     pub test_name: Option<&'static str>,
     /// The output directory to store comparisons in.
-    pub output_dir: &'static str,
+    pub output_dir: std::path::PathBuf,
 }
 
 impl Default for DiffCfg {
@@ -53,7 +49,7 @@ impl Default for DiffCfg {
             pixel_threshold: PIXEL_MAGNITUDE_THRESHOLD,
             image_threshold: IMAGE_DIFF_THRESHOLD,
             test_name: None,
-            output_dir: TEST_OUTPUT_DIR,
+            output_dir: test_output_dir(),
         }
     }
 }
@@ -143,7 +139,7 @@ pub fn save_to(
 }
 
 pub fn save(filename: impl AsRef<std::path::Path>, seen: impl Into<DynamicImage>) {
-    save_to(TEST_OUTPUT_DIR, filename, seen).unwrap()
+    save_to(test_output_dir(), filename, seen).unwrap()
 }
 
 pub fn assert_eq_cfg(
@@ -185,7 +181,7 @@ pub fn assert_eq_cfg(
             return Ok(());
         }
 
-        let mut dir = Path::new(output_dir).join(test_name.unwrap_or(filename));
+        let mut dir = output_dir.join(test_name.unwrap_or(filename));
         dir.set_extension("");
         std::fs::create_dir_all(&dir).expect("cannot create test output dir");
         let expected = dir.join("expected.png");
@@ -228,7 +224,7 @@ pub fn assert_img_eq_cfg_result(
     seen: impl Into<DynamicImage>,
     cfg: DiffCfg,
 ) -> Result<(), String> {
-    let path = Path::new(TEST_IMG_DIR).join(filename);
+    let path = test_img_dir().join(filename);
     let lhs = image::open(&path)
         .unwrap_or_else(|e| panic!("can't open expected image '{}': {e}", path.display(),));
     assert_eq_cfg(filename, lhs, seen, cfg)
