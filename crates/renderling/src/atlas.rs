@@ -95,7 +95,16 @@ impl TextureAddressMode {
             TextureAddressMode::MirroredRepeat => {
                 let sign = if input >= 0.0 { 1.0f32 } else { -1.0 };
                 let i = input.abs();
-                let flip = (i as u32).is_multiple_of(2);
+                // TODO: Remove this clippy allowance after <https://github.com/Rust-GPU/rust-gpu/pull/460>
+                // merges.
+                #[cfg_attr(
+                    cpu,
+                    expect(
+                        clippy::manual_is_multiple_of,
+                        reason = "rust-gpu is not yet on rustc 1.91, which introduced this lint"
+                    )
+                )]
+                let flip = ((i as u32) % 2) == 0;
                 let t = repeat(i);
                 if sign > 0.0 {
                     if flip {
