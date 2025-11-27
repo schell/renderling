@@ -84,8 +84,7 @@ pub fn tone_map_reinhard(color: Vec3) -> Vec3 {
 }
 
 #[repr(transparent)]
-#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
-#[derive(Clone, Copy, Default, PartialEq, Eq, SlabItem)]
+#[derive(Clone, Copy, Default, PartialEq, Eq, SlabItem, core::fmt::Debug)]
 pub struct Tonemap(u32);
 
 impl Tonemap {

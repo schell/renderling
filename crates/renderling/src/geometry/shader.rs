@@ -9,8 +9,7 @@ use crate::{
 ///
 /// For more info on vertex skinning, see
 /// <https://github.khronos.org/glTF-Tutorials/gltfTutorial/gltfTutorial_019_SimpleSkin.html>
-#[derive(Clone, Copy, Default, SlabItem)]
-#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
+#[derive(Clone, Copy, Default, SlabItem, core::fmt::Debug)]
 pub struct SkinDescriptor {
     // Ids of the skeleton nodes' global transforms used as joints in this skin.
     pub joints_array: Array<Id<TransformDescriptor>>,
@@ -54,8 +53,7 @@ impl SkinDescriptor {
 /// geometry.
 ///
 /// This descriptor lives at the root (index 0) of the geometry slab.
-#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
-#[derive(Clone, Copy, PartialEq, SlabItem)]
+#[derive(Clone, Copy, PartialEq, SlabItem, core::fmt::Debug)]
 #[offsets]
 pub struct GeometryDescriptor {
     pub camera_id: Id<CameraDescriptor>,

@@ -271,8 +271,7 @@ impl SpotLightCalculation {
 /// enough to cover at least one pixel at the distance between the light and
 /// the scenery.
 #[repr(C)]
-#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
-#[derive(Copy, Clone, SlabItem)]
+#[derive(Copy, Clone, SlabItem, core::fmt::Debug)]
 pub struct SpotLightDescriptor {
     // TODO: add `range` to SpotLightDescriptor
     // See <https://github.com/KhronosGroup/glTF/blob/main/extensions/2.0/Khronos/KHR_lights_punctual/README.md#light-shared-properties>
@@ -441,8 +440,7 @@ impl DirectionalLightDescriptor {
 }
 
 #[repr(C)]
-#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
-#[derive(Copy, Clone, SlabItem)]
+#[derive(Copy, Clone, SlabItem, core::fmt::Debug)]
 pub struct PointLightDescriptor {
     // TODO: add `range` to PointLightDescriptor
     // See <https://github.com/KhronosGroup/glTF/blob/main/extensions/2.0/Khronos/KHR_lights_punctual/README.md#light-shared-properties>
@@ -514,8 +512,7 @@ pub fn radius_of_illumination(intensity_candelas: f32, minimum_illuminance_lux: 
 }
 
 #[repr(u32)]
-#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
-#[derive(Copy, Clone, PartialEq)]
+#[derive(Copy, Clone, PartialEq, core::fmt::Debug)]
 pub enum LightStyle {
     Directional = 0,
     Point = 1,
@@ -554,8 +551,7 @@ impl SlabItem for LightStyle {
 /// A generic light that is used as a slab pointer to a
 /// specific light type.
 #[repr(C)]
-#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
-#[derive(Copy, Clone, PartialEq, SlabItem)]
+#[derive(Copy, Clone, PartialEq, SlabItem, core::fmt::Debug)]
 pub struct LightDescriptor {
     /// The type of the light
     pub light_type: LightStyle,

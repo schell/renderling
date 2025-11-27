@@ -10,8 +10,7 @@ use crate::{bvol::Frustum, math::IsVector};
 /// Used for transforming the stage during rendering.
 ///
 /// Use [`CameraDescriptor::new`] to create a new camera.
-#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
-#[derive(Default, Clone, Copy, PartialEq, SlabItem)]
+#[derive(Default, Clone, Copy, PartialEq, SlabItem, core::fmt::Debug)]
 pub struct CameraDescriptor {
     projection: Mat4,
     view: Mat4,

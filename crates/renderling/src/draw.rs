@@ -13,8 +13,8 @@ pub use cpu::*;
 
 /// Argument buffer layout for draw_indirect commands.
 #[repr(C)]
-#[cfg_attr(cpu, derive(Debug, bytemuck::Pod, bytemuck::Zeroable))]
-#[derive(Clone, Copy, Default, SlabItem)]
+#[cfg_attr(cpu, derive(bytemuck::Pod, bytemuck::Zeroable))]
+#[derive(Clone, Copy, Default, SlabItem, core::fmt::Debug)]
 pub struct DrawIndirectArgs {
     pub vertex_count: u32,
     pub instance_count: u32,
