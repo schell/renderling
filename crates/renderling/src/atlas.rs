@@ -24,8 +24,9 @@ pub use cpu::*;
 pub mod shader;
 
 /// Method of addressing the edges of a texture.
-#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
-#[derive(Clone, Copy, Default, PartialEq, Eq, Hash, PartialOrd, Ord, SlabItem)]
+#[derive(
+    Clone, Copy, Default, PartialEq, Eq, Hash, PartialOrd, Ord, SlabItem, core::fmt::Debug,
+)]
 pub struct TextureModes {
     pub s: TextureAddressMode,
     pub t: TextureAddressMode,
@@ -56,9 +57,10 @@ pub fn clamp(input: f32) -> f32 {
 }
 
 /// How edges should be handled in texture addressing/wrapping.
-#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[repr(u32)]
-#[derive(Clone, Copy, Default, PartialEq, Eq, Hash, PartialOrd, Ord, SlabItem)]
+#[derive(
+    Clone, Copy, Default, PartialEq, Eq, Hash, PartialOrd, Ord, SlabItem, core::fmt::Debug,
+)]
 pub enum TextureAddressMode {
     #[default]
     ClampToEdge,
@@ -93,7 +95,16 @@ impl TextureAddressMode {
             TextureAddressMode::MirroredRepeat => {
                 let sign = if input >= 0.0 { 1.0f32 } else { -1.0 };
                 let i = input.abs();
-                let flip = i as u32 % 2 == 0;
+                // TODO: Remove this clippy allowance after <https://github.com/Rust-GPU/rust-gpu/pull/460>
+                // merges.
+                #[cfg_attr(
+                    cpu,
+                    expect(
+                        clippy::manual_is_multiple_of,
+                        reason = "rust-gpu is not yet on rustc 1.91, which introduced this lint"
+                    )
+                )]
+                let flip = ((i as u32) % 2) == 0;
                 let t = repeat(i);
                 if sign > 0.0 {
                     if flip {

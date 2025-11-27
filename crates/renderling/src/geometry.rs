@@ -16,8 +16,7 @@ pub mod shader;
 ///
 /// For more info on morph targets in general, see
 /// <https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html#morph-targets>
-#[derive(Clone, Copy, Default, PartialEq, SlabItem)]
-#[cfg_attr(cpu, derive(Debug))]
+#[derive(Clone, Copy, Default, PartialEq, SlabItem, core::fmt::Debug)]
 pub struct MorphTarget {
     pub position: Vec3,
     pub normal: Vec3,

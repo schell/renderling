@@ -668,7 +668,7 @@ fn pack_images<'a>(
             )
             .collect()
     };
-    new_packing.sort_by_key(|a| (a.size().length_squared()));
+    new_packing.sort_by_key(|a| a.size().length_squared());
     let total_images = new_packing.len();
     let new_packing_layers: Vec<Vec<AnotherPacking>> =
         fan_split_n(extent.depth_or_array_layers as usize, new_packing);

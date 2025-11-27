@@ -192,8 +192,7 @@
 //! repo](https://github.com/schell/renderling).
 //!
 //! 😀☕
-#![allow(unexpected_cfgs)]
-#![cfg_attr(target_arch = "spirv", no_std)]
+#![cfg_attr(gpu, no_std)]
 #![deny(clippy::disallowed_methods)]
 
 #[cfg(doc)]
@@ -248,7 +247,7 @@ pub extern crate glam;
 /// A wrapper around `std::println` that is a noop on the GPU.
 macro_rules! println {
     ($($arg:tt)*) => {
-        #[cfg(not(target_arch = "spirv"))]
+        #[cfg(cpu)]
         {
             std::println!($($arg)*);
         }
@@ -304,6 +303,31 @@ pub fn capture_gpu_frame<T>(
     }
 }
 
+#[cfg(all(cpu, any(test, feature = "test-utils")))]
+#[allow(unused, reason = "Used in sync tests in userland")]
+/// Marker trait to block on futures in synchronous code.
+///
+/// This is a simple convenience.
+/// Many of the tests in this crate render something and then read a
+/// texture in order to perform a diff on the result using a known image.
+/// Since reading from the GPU is async, this trait helps cut down
+/// boilerplate.
+pub trait BlockOnFuture {
+    type Output;
+
+    /// Block on the future using [`futures_util::future::block_on`].
+    fn block(self) -> Self::Output;
+}
+
+#[cfg(all(cpu, any(test, feature = "test-utils")))]
+impl<T: std::future::Future> BlockOnFuture for T {
+    type Output = <Self as std::future::Future>::Output;
+
+    fn block(self) -> Self::Output {
+        futures_lite::future::block_on(self)
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -317,6 +341,8 @@ mod test {
 
     #[allow(unused_imports)]
     pub use renderling_build::{test_output_dir, workspace_dir};
+
+    pub use super::BlockOnFuture;
 
     #[cfg_attr(not(target_arch = "wasm32"), ctor::ctor)]
     fn init_logging() {
@@ -332,28 +358,6 @@ mod test {
     ) -> T {
         let path = workspace_dir().join("test_output").join(path);
         super::capture_gpu_frame(ctx, path, f)
-    }
-
-    /// Marker trait to block on futures in synchronous code.
-    ///
-    /// This is a simple convenience.
-    /// Many of the tests in this crate render something and then read a
-    /// texture in order to perform a diff on the result using a known image.
-    /// Since reading from the GPU is async, this trait helps cut down
-    /// boilerplate.
-    pub trait BlockOnFuture {
-        type Output;
-
-        /// Block on the future using [`futures_util::future::block_on`].
-        fn block(self) -> Self::Output;
-    }
-
-    impl<T: std::future::Future> BlockOnFuture for T {
-        type Output = <Self as std::future::Future>::Output;
-
-        fn block(self) -> Self::Output {
-            futures_lite::future::block_on(self)
-        }
     }
 
     pub fn make_two_directional_light_setup(stage: &Stage) -> (AnalyticalLight, AnalyticalLight) {

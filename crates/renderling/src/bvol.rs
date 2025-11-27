@@ -212,8 +212,7 @@ impl Aabb {
 }
 
 /// Six planes of a view frustum.
-#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
-#[derive(Clone, Copy, Default, PartialEq, SlabItem)]
+#[derive(Clone, Copy, Default, PartialEq, SlabItem, core::fmt::Debug)]
 pub struct Frustum {
     /// Planes constructing the sides of the frustum,
     /// each expressed as a normal vector (xyz) and the distance (w)
@@ -350,8 +349,7 @@ impl Frustum {
 /// the center to the corner.
 ///
 /// This is _not_ an axis aligned bounding box.
-#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
-#[derive(Clone, Copy, Default, PartialEq, SlabItem)]
+#[derive(Clone, Copy, Default, PartialEq, SlabItem, core::fmt::Debug)]
 pub struct BoundingBox {
     pub center: Vec3,
     pub half_extent: Vec3,

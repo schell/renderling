@@ -9,4 +9,5 @@ edition = "2021"
 glam = { workspace = true, features = ["std"] }
 image.workspace = true
 log.workspace = true
+renderling_build = { path = "../renderling-build" }
 snafu = "^0.7"

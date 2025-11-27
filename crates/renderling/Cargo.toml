@@ -26,7 +26,7 @@ crate-type = ["rlib", "cdylib"]
 default = ["gltf", "ui", "winit"]
 gltf = ["dep:gltf", "dep:serde_json"]
 test_i8_i16_extraction = []
-test-utils = ["dep:metal", "dep:wgpu-core"]
+test-utils = ["dep:metal", "dep:wgpu-core", "dep:futures-lite"]
 ui = ["dep:glyph_brush", "dep:loading-bytes", "dep:lyon"]
 wasm = ["wgpu/fragile-send-sync-non-atomic-wasm"]
 debug-slab = []
@@ -57,8 +57,9 @@ async-channel = {workspace = true}
 bytemuck = {workspace = true}
 craballoc.workspace = true
 crabslab = { workspace = true, features = ["default"] }
-dagga = {workspace=true}
 crunch = "0.5"
+dagga = {workspace=true}
+futures-lite = { workspace = true, optional = true }
 glam = { workspace = true, features = ["std"] }
 gltf = {workspace = true, optional = true}
 glyph_brush = {workspace = true, optional = true}
@@ -114,3 +115,6 @@ features = [
   "Navigator",
   "Window"
 ]
+
+[lints]
+workspace = true

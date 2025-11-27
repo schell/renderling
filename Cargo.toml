@@ -76,3 +76,6 @@ opt-level = 3
 
 [patch.crates-io]
 spirv-std = { git = "https://github.com/rust-gpu/rust-gpu.git", rev = "05b34493ce661dccd6694cf58afc13e3c8f7a7e0" }
+
+[workspace.lints.rust]
+unexpected_cfgs = { level = "allow", check-cfg = [ 'cfg(spirv)' ] }

@@ -3,9 +3,8 @@ use crabslab::SlabItem;
 
 /// Used to debug shaders by early exiting the shader and attempting to display
 /// the value as shaded colors.
-#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
 #[repr(u32)]
-#[derive(Clone, Copy, Default, PartialEq, PartialOrd, SlabItem)]
+#[derive(Clone, Copy, Default, PartialEq, PartialOrd, SlabItem, core::fmt::Debug)]
 pub enum DebugChannel {
     #[default]
     None,

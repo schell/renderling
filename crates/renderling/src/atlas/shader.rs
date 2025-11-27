@@ -9,8 +9,7 @@ pub struct AtlasDescriptor {
 }
 
 /// A texture inside the atlas.
-#[cfg_attr(not(target_arch = "spirv"), derive(Debug))]
-#[derive(Clone, Copy, Default, PartialEq, SlabItem)]
+#[derive(Clone, Copy, Default, PartialEq, SlabItem, core::fmt::Debug)]
 pub struct AtlasTextureDescriptor {
     /// The top left offset of texture in the atlas.
     pub offset_px: UVec2,

@@ -138,13 +138,35 @@ fn wgsl(spv_filepath: impl AsRef<std::path::Path>, destination: impl AsRef<std::
 }
 
 /// The cargo workspace directory.
+///
+/// ## Panics
+/// Panics if not called from a checkout of the renderling repo.
 pub fn workspace_dir() -> std::path::PathBuf {
-    std::path::PathBuf::from(std::env!("CARGO_WORKSPACE_DIR"))
+    std::path::PathBuf::from(std::env::var("CARGO_WORKSPACE_DIR").unwrap())
+}
+
+/// The test_img directory.
+///
+/// ## Panics
+/// Panics if not called from a checkout of the renderling repo.
+pub fn test_img_dir() -> std::path::PathBuf {
+    workspace_dir().join("test_img")
 }
 
 /// The test_output directory.
+///
+/// ## Panics
+/// Panics if not called from a checkout of the renderling repo.
 pub fn test_output_dir() -> std::path::PathBuf {
     workspace_dir().join("test_output")
+}
+
+/// The WASM test_output directory.
+///
+/// ## Panics
+/// Panics if not called from a checkout of the renderling repo.
+pub fn wasm_test_output_dir() -> std::path::PathBuf {
+    test_output_dir().join("wasm")
 }
 
 #[derive(Debug)]

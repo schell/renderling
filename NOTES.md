@@ -22,6 +22,13 @@ Just pro-cons on tech choices and little things I don't want to forget whil impl
 
 ## cons / limititions / gotchas
 
+* Can't use an array as a slice, it causes this error:
+  ```
+  error: cannot cast between pointer types
+         from `*[u32; 3]`
+           to `*[u32]`  
+  ```
+  See the ticket I opened <https://github.com/Rust-GPU/rust-gpu/issues/465>
 * ~~can't use enums (but you can't in glsl or hlsl or msl or wgsl either)~~ you _can_ but they must be simple (like `#[repr(u32)]`)
 * ~~struct layout size/alignment errors can be really tricky~~ solved by using a slab
 * rust code must be no-std
