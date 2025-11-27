@@ -11,9 +11,9 @@ const IMAGE_DIFF_THRESHOLD: f32 = 0.05;
 fn checkerboard_background_color(x: u32, y: u32) -> Vec3 {
     let size = 16;
     let x_square_index = x / size;
-    let x_grey = x_square_index % 2 == 0;
+    let x_grey = x_square_index.is_multiple_of(2);
     let y_square_index = y / size;
-    let y_grey = y_square_index % 2 == 0;
+    let y_grey = y_square_index.is_multiple_of(2);
     if (x_grey && y_grey) || (!x_grey && !y_grey) {
         Vec3::from([0.5, 0.5, 0.5])
     } else {

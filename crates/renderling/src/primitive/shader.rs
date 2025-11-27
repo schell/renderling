@@ -256,7 +256,7 @@ pub fn primitive_fragment(
     #[spirv(descriptor_set = 0, binding = 12)] shadow_map_sampler: &Sampler,
     #[cfg(feature = "debug-slab")]
     #[spirv(storage_buffer, descriptor_set = 0, binding = 13)]
-    debug_slab: &mut [u32],
+    _debug_slab: &mut [u32],
 
     #[spirv(flat)] primitive_id: Id<PrimitiveDescriptor>,
     #[spirv(frag_coord)] frag_coord: Vec4,

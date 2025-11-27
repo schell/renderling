@@ -192,8 +192,7 @@
 //! repo](https://github.com/schell/renderling).
 //!
 //! 😀☕
-#![allow(unexpected_cfgs)]
-#![cfg_attr(target_arch = "spirv", no_std)]
+#![cfg_attr(gpu, no_std)]
 #![deny(clippy::disallowed_methods)]
 
 #[cfg(doc)]
@@ -248,7 +247,7 @@ pub extern crate glam;
 /// A wrapper around `std::println` that is a noop on the GPU.
 macro_rules! println {
     ($($arg:tt)*) => {
-        #[cfg(not(target_arch = "spirv"))]
+        #[cfg(cpu)]
         {
             std::println!($($arg)*);
         }

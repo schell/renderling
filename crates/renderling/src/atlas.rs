@@ -93,7 +93,7 @@ impl TextureAddressMode {
             TextureAddressMode::MirroredRepeat => {
                 let sign = if input >= 0.0 { 1.0f32 } else { -1.0 };
                 let i = input.abs();
-                let flip = i as u32 % 2 == 0;
+                let flip = (i as u32).is_multiple_of(2);
                 let t = repeat(i);
                 if sign > 0.0 {
                     if flip {
