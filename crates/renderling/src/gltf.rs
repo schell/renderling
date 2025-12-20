@@ -1236,14 +1236,21 @@ where
         self.primitives.iter().flat_map(|(_, rs)| rs.iter())
     }
 
+    fn nodes_in_scene_recursive<'a>(&'a self, node_index: usize, nodes: &mut Vec<&'a GltfNode>) {
+        if let Some(node) = self.nodes.get(node_index) {
+            nodes.push(node);
+            for child_index in node.children.iter() {
+                self.nodes_in_scene_recursive(*child_index, nodes);
+            }
+        }
+    }
+
     pub fn nodes_in_scene(&self, scene_index: usize) -> impl Iterator<Item = &GltfNode> {
         let scene = self.scenes.get(scene_index);
         let mut nodes = vec![];
         if let Some(indices) = scene {
             for node_index in indices {
-                if let Some(node) = self.nodes.get(*node_index) {
-                    nodes.push(node);
-                }
+                self.nodes_in_scene_recursive(*node_index, &mut nodes);
             }
         }
         nodes.into_iter()
