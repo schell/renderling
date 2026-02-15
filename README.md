@@ -15,9 +15,10 @@ Visit <https://renderling.xyz> to read the development blog.
 
 <img width="912" alt="ibl_environment_test" src="https://github.com/schell/renderling/assets/24942/297d6150-64b2-45b8-9760-12b27dc8cc3e">
 
-This project is funded through [NGI Zero Core](https://nlnet.nl/core), a fund established by [NLnet](https://nlnet.nl) 
+This project is funded through [NGI Zero Commons](https://nlnet.nl/commonsfund/), a fund established by [NLnet](https://nlnet.nl) 
 with financial support from the European Commission's [Next Generation Internet](https://ngi.eu) program. 
-Learn more at the [NLnet project page](https://nlnet.nl/project/Renderling).
+Learn more at the [2025 NLnet project page](https://nlnet.nl/project/Renderling-Ecosystem/) and the 
+[2024 NLnet project page](https://nlnet.nl/project/Renderling).
 
 [<img src="https://nlnet.nl/logo/banner.png" alt="NLnet foundation logo" width="20%" />](https://nlnet.nl)
 
@@ -230,8 +231,8 @@ If you use it (outright or for inspiration), please consider donating.
 Many projects were born from first solving a need within `renderling`. 
 Some of these solutions were then spun off into their own projects.
 
-- [`cargo-gpu`](https://githu.com/rust-gpu/cargo-gpu)
-  A shader compilation cli tool.
+- [`wgsl-rs`](https://github.com/schell/wgsl-rs)
+  Write WGSL shaders using a subset of Rust and run them on CPU _and_ GPU
 - [`crabslab` and `craballoc`](https://github.com/schell/crabslab)
   A slab allocator for working across CPU/GPU boundaries.
 - [`loading-bytes`](crates/loading-bytes)
@@ -239,8 +240,10 @@ Some of these solutions were then spun off into their own projects.
 - [`moongraph`](https://github.com/schell/moongraph)
   A DAG and resource graph runner.
 - Contributions to [`naga`](https://github.com/gfx-rs/wgpu/issues/4489)
-  * Adding atomics support to the SPIR-V frontend (in progress)
+  * Adding atomics support to the SPIR-V frontend
 - Contributions to [`gltf`](https://github.com/gltf-rs/gltf/pull/419)
+- [`cargo-gpu`](https://githu.com/rust-gpu/cargo-gpu)
+  A shader compilation cli tool.
 
 Sponsoring this project contributes to the ecosystem. 
 
