@@ -490,8 +490,8 @@ impl BoundingSphere {
         }
     }
 
-    /// Returns an [`Aabb`] with x and y coordinates in viewport pixels and z coordinate
-    /// in NDC depth.
+    /// Returns an [`Aabb`] with x and y coordinates in viewport pixels and z
+    /// coordinate in NDC depth.
     pub fn project_onto_viewport(&self, camera: &CameraDescriptor, viewport: Vec2) -> Aabb {
         fn ndc_to_pixel(viewport: Vec2, ndc: Vec3) -> Vec2 {
             let screen = Vec3::new((ndc.x + 1.0) * 0.5, 1.0 - (ndc.y + 1.0) * 0.5, ndc.z);
@@ -658,10 +658,10 @@ mod test {
             .with_msaa_sample_count(4)
             .with_lighting(true);
         let _camera = stage.new_camera().with_projection_and_view(
-            // TODO: BUG - using orthographic here renderes nothing
-            // Mat4::orthographic_rh(-10.0, 10.0, -10.0, 10.0, 10.0, -10.0),
-            crate::camera::perspective(256.0, 256.0),
-            Mat4::look_at_rh(Vec3::new(-3.0, 3.0, 5.0) * 0.5, Vec3::ZERO, Vec3::Y),
+            // Fixed: was `near=10, far=-10` which reversed depth ordering.
+            // Using `near=0.1, far=20` ensures correct depth testing.
+            Mat4::orthographic_rh(-3.0, 3.0, -3.0, 3.0, 0.1, 20.0),
+            Mat4::look_at_rh(Vec3::new(-3.0, 3.0, 5.0), Vec3::ZERO, Vec3::Y),
         );
         let _lights = crate::test::make_two_directional_light_setup(&stage);
 
@@ -711,6 +711,71 @@ mod test {
         stage.render(&frame.view());
         let img = frame.read_image().block().unwrap();
         img_diff::assert_img_eq("bvol/bounding_box/get_mesh.png", img);
+    }
+
+    /// Verifies that an orthographic projection with correct `near < far`
+    /// produces visible lit output.
+    ///
+    /// The original bug was that `orthographic_rh(-10, 10, -10, 10, 10, -10)`
+    /// (note: `near=10 > far=-10`) reversed the depth mapping, causing back
+    /// faces to win the depth test and produce zero lighting output.
+    ///
+    /// The fix is to use `near < far`, matching the convention of glTF, wgpu,
+    /// and every major rendering engine.
+    #[test]
+    fn orthographic_projection_lighting() {
+        let ctx = Context::headless(256, 256).block();
+        let view = Mat4::look_at_rh(Vec3::new(-3.0, 3.0, 5.0) * 0.5, Vec3::ZERO, Vec3::Y);
+
+        // Helper: render a lit unit cube and return the number of bright
+        // pixels (any RGB channel > 10).
+        let render = |projection: Mat4, label: &str| -> usize {
+            let stage = ctx
+                .new_stage()
+                .with_background_color(Vec4::ZERO)
+                .with_msaa_sample_count(4)
+                .with_lighting(true);
+            let _camera = stage
+                .new_camera()
+                .with_projection_and_view(projection, view);
+            let _lights = crate::test::make_two_directional_light_setup(&stage);
+            let white = stage.new_material().with_albedo_factor(Vec4::ONE);
+            let _prim = stage.new_primitive().with_material(&white).with_vertices(
+                stage.new_vertices(
+                    crate::math::unit_cube()
+                        .into_iter()
+                        .map(|(p, n)| Vertex::default().with_position(p).with_normal(n)),
+                ),
+            );
+            let frame = ctx.get_next_frame().unwrap();
+            stage.render(&frame.view());
+            let img = frame.read_image().block().unwrap();
+            img_diff::save(&format!("bvol/ortho_lighting_{label}.png"), img.clone());
+            let bright = img
+                .pixels()
+                .filter(|p| p.0[0] > 10 || p.0[1] > 10 || p.0[2] > 10)
+                .count();
+            bright
+        };
+
+        // Correct orthographic: near=-10, far=10 (near < far)
+        let ortho_bright = render(
+            Mat4::orthographic_rh(-10.0, 10.0, -10.0, 10.0, -10.0, 10.0),
+            "ortho_correct",
+        );
+
+        // Perspective for reference
+        let persp_bright = render(crate::camera::perspective(256.0, 256.0), "perspective");
+
+        assert!(
+            persp_bright > 100,
+            "Sanity: perspective should have bright pixels, got {persp_bright}"
+        );
+        assert!(
+            ortho_bright > 100,
+            "Orthographic projection (near=-10, far=10) should produce visible lit output, got \
+             only {ortho_bright} bright pixels (perspective had {persp_bright})"
+        );
     }
 
     #[test]

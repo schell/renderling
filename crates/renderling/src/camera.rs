@@ -27,7 +27,10 @@ pub mod shader;
 /// let target = Vec3::ZERO;
 /// let up = Vec3::Y;
 /// let view = Mat4::look_at_rh(eye, target, up);
-/// assert_eq!(renderling::camera::default_perspective(width, height), (projection, view));
+/// assert_eq!(
+///     renderling::camera::default_perspective(width, height),
+///     (projection, view)
+/// );
 /// ```
 pub fn default_perspective(width: f32, height: f32) -> (Mat4, Mat4) {
     let projection = perspective(width, height);
@@ -46,6 +49,12 @@ pub fn perspective(width: f32, height: f32) -> Mat4 {
     Mat4::perspective_rh(fovy, aspect, znear, zfar)
 }
 
+/// Creates a right-handed orthographic projection matrix.
+///
+/// ## Note
+/// When constructing orthographic projections, `near` must be less than `far`
+/// to ensure correct depth testing. Reversed depth (`near > far`) will cause
+/// back faces to be drawn over front faces, producing incorrect lighting.
 pub fn ortho(width: f32, height: f32) -> Mat4 {
     let left = 0.0;
     let right = width;
@@ -62,6 +71,11 @@ pub fn look_at(eye: impl Into<Vec3>, target: impl Into<Vec3>, up: impl Into<Vec3
 
 /// Creates a typical 2d orthographic projection with +Y extending downward
 /// and the +Z axis coming out towards the viewer.
+///
+/// ## Note
+/// When constructing orthographic projections, `near` must be less than `far`
+/// to ensure correct depth testing. Reversed depth (`near > far`) will cause
+/// back faces to be drawn over front faces, producing incorrect lighting.
 pub fn default_ortho2d(width: f32, height: f32) -> (Mat4, Mat4) {
     let left = 0.0;
     let right = width;
@@ -100,10 +114,8 @@ mod tests {
             const THRESHOLD: f32 = 1e-3;
             assert!(
                 distance < THRESHOLD,
-                "Forward vector is incorrect\n\
-                forward: {forward}\n\
-                expected: {expected_forward}\n\
-                distance: {distance}, threshold: {THRESHOLD}"
+                "Forward vector is incorrect\nforward: {forward}\nexpected: \
+                 {expected_forward}\ndistance: {distance}, threshold: {THRESHOLD}"
             );
         }
     }

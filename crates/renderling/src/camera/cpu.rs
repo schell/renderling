@@ -9,8 +9,10 @@ use super::*;
 
 /// A camera used for transforming the stage during rendering.
 ///
-/// * Use [`Stage::new_camera`](crate::stage::Stage::new_camera) to create a new camera.
-/// * Use [`Stage::use_camera`](crate::stage::Stage::use_camera) to set a camera on the stage.
+/// * Use [`Stage::new_camera`](crate::stage::Stage::new_camera) to create a new
+///   camera.
+/// * Use [`Stage::use_camera`](crate::stage::Stage::use_camera) to set a camera
+///   on the stage.
 ///
 /// ## Note
 ///
@@ -63,7 +65,10 @@ impl Camera {
     /// let target = Vec3::ZERO;
     /// let up = Vec3::Y;
     /// let view = Mat4::look_at_rh(eye, target, up);
-    /// assert_eq!(renderling::camera::default_perspective(width, height), (projection, view));
+    /// assert_eq!(
+    ///     renderling::camera::default_perspective(width, height),
+    ///     (projection, view)
+    /// );
     /// ```
     pub fn set_default_perspective(&self, width: f32, height: f32) -> &Self {
         self.inner
@@ -90,7 +95,10 @@ impl Camera {
     /// let target = Vec3::ZERO;
     /// let up = Vec3::Y;
     /// let view = Mat4::look_at_rh(eye, target, up);
-    /// assert_eq!(renderling::camera::default_perspective(width, height), (projection, view));
+    /// assert_eq!(
+    ///     renderling::camera::default_perspective(width, height),
+    ///     (projection, view)
+    /// );
     /// ```
     pub fn with_default_perspective(self, width: f32, height: f32) -> Self {
         self.set_default_perspective(width, height);

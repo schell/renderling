@@ -41,7 +41,35 @@ impl CameraDescriptor {
         self.projection
     }
 
+    /// Set the projection and view matrices for this camera.
+    ///
+    /// ## Note on depth ordering
+    /// The rendering pipeline uses `CompareFunction::Less` for depth testing.
+    /// This requires that the projection matrix maps closer objects to
+    /// *smaller* z_ndc values. For orthographic projections created with
+    /// `Mat4::orthographic_rh`, this means `near` must be less than `far`.
+    /// If `near > far`, the depth mapping is reversed and back faces will
+    /// be drawn over front faces, producing incorrect (typically black)
+    /// lighting output.
     pub fn set_projection_and_view(&mut self, projection: Mat4, view: Mat4) {
+        // The z column of the projection matrix determines the depth mapping
+        // direction. A positive z coefficient (projection.z_axis.z > 0)
+        // indicates reversed depth (closer objects get larger z_ndc), which
+        // will cause incorrect results with the standard
+        // CompareFunction::Less depth test. This typically happens when
+        // `near > far` is passed to `Mat4::orthographic_rh`.
+        #[cfg(cpu)]
+        {
+            let z_coeff = projection.z_axis.z;
+            if z_coeff > 0.0 {
+                log::warn!(
+                    "Projection matrix has a positive z coefficient ({z_coeff}), indicating \
+                     reversed depth mapping. This will cause incorrect depth testing (back faces \
+                     drawn over front faces) with the standard CompareFunction::Less. For \
+                     orthographic projections, ensure near < far."
+                );
+            }
+        }
         self.projection = projection;
         self.view = view;
         self.position = view.inverse().transform_point3(Vec3::ZERO);
@@ -111,7 +139,8 @@ impl CameraDescriptor {
         (self.z_far() - self.z_near()).abs()
     }
 
-    /// Returns the normalized forward vector which points in the direction the camera is looking.
+    /// Returns the normalized forward vector which points in the direction the
+    /// camera is looking.
     pub fn forward(&self) -> Vec3 {
         (self.z_far_point - self.z_near_point).alt_norm_or_zero()
     }
