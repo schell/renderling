@@ -175,8 +175,11 @@ impl Tonemapping {
         let slab_buffer = self.slab.get_buffer().unwrap();
         let bindgroup = create_bindgroup(device, Some("tonemapping"), hdr_texture, &slab_buffer);
         // UNWRAP: not safe but we want to panic
-        *self.bindgroup.write().unwrap() = bindgroup;
-        *self.hdr_texture.write().unwrap() = hdr_texture.clone();
+        *self.bindgroup.write().expect("tonemapping bindgroup write") = bindgroup;
+        *self
+            .hdr_texture
+            .write()
+            .expect("tonemapping hdr_texture write") = hdr_texture.clone();
     }
 
     pub fn get_tonemapping_config(&self) -> TonemapConstants {
@@ -192,7 +195,7 @@ impl Tonemapping {
         assert!(!self.slab.commit().is_new_this_commit());
 
         // UNWRAP: not safe but we want to panic
-        let bindgroup = self.bindgroup.read().unwrap();
+        let bindgroup = self.bindgroup.read().expect("tonemapping bindgroup read");
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label });
         let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label,

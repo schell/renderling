@@ -284,7 +284,7 @@ impl<Ct: IsContainer> LightTiling<Ct> {
 
     /// Run light tiling, resulting in edits to the lighting slab.
     pub fn run(&self, stage: &Stage) {
-        let depth_texture = stage.depth_texture.read().unwrap();
+        let depth_texture = stage.depth_texture.read().expect("depth_texture read");
         let depth_texture_size = depth_texture.size();
         let lighting = stage.as_ref();
         self.prepare(lighting, depth_texture_size);

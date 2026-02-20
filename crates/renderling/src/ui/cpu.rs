@@ -203,7 +203,7 @@ impl Ui {
     }
 
     pub fn set_default_stroke_options(&self, options: StrokeOptions) -> &Self {
-        *self.default_stroke_options.write().unwrap() = options;
+        *self.default_stroke_options.write().expect("default_stroke_options write") = options;
         self
     }
 
@@ -213,7 +213,7 @@ impl Ui {
     }
 
     pub fn set_default_fill_options(&self, options: FillOptions) -> &Self {
-        *self.default_fill_options.write().unwrap() = options;
+        *self.default_fill_options.write().expect("default_fill_options write") = options;
         self
     }
 
@@ -271,7 +271,7 @@ impl Ui {
 
     pub fn add_font(&self, font: FontArc) -> FontId {
         // UNWRAP: panic on purpose
-        let mut fonts = self.fonts.write().unwrap();
+        let mut fonts = self.fonts.write().expect("fonts write");
         let id = fonts.len();
         fonts.push(font);
         FontId(id)
@@ -279,7 +279,7 @@ impl Ui {
 
     pub fn get_fonts(&self) -> Vec<FontArc> {
         // UNWRAP: panic on purpose
-        self.fonts.read().unwrap().clone()
+        self.fonts.read().expect("fonts read").clone()
     }
 
     pub fn get_camera(&self) -> &Camera {
@@ -304,7 +304,7 @@ impl Ui {
             s: TextureAddressMode::Repeat,
             t: TextureAddressMode::Repeat,
         });
-        let mut guard = self.images.write().unwrap();
+        let mut guard = self.images.write().expect("images write");
         let id = entry.id();
         guard.insert(id, UiImage(entry));
         Ok(ImageId(id))
@@ -312,7 +312,7 @@ impl Ui {
 
     /// Remove an image previously loaded with [`Ui::load_image`].
     pub fn remove_image(&self, image_id: &ImageId) -> Option<UiImage> {
-        self.images.write().unwrap().remove(&image_id.0)
+        self.images.write().expect("images write").remove(&image_id.0)
     }
 
     fn reorder_renderlets(&self) {

@@ -23,8 +23,10 @@ use super::shader::{
     PointLightDescriptor, SpotLightDescriptor,
 };
 
-pub use super::shader::{Candela, Lux};
-pub use super::shadow_map::ShadowMap;
+pub use super::{
+    shader::{Candela, Lux},
+    shadow_map::ShadowMap,
+};
 
 #[derive(Debug, Snafu)]
 #[snafu(visibility(pub(crate)))]
@@ -55,7 +57,8 @@ pub trait IsLight: Clone {
         //
         // The maximum should be the `Camera`'s `Frustum::depth()`.
         // TODO: in `DirectionalLightDescriptor::shadow_mapping_projection_and_view`, take Frustum
-        // as a parameter and then figure out the minimal view projection that includes that frustum
+        // as a parameter and then figure out the minimal view projection that includes that
+        // frustum
         z_near: f32,
         // Far limits of the light's reach
         z_far: f32,
@@ -540,8 +543,8 @@ impl IsLight for Light {
 ///
 /// Lights may be added and removed from rendering with [`Stage::add_light`] and
 /// [`Stage::remove_light`].
-/// The GPU resources a light uses will not be released until [`Stage::remove_light`]
-/// is called _and_ the light is dropped.
+/// The GPU resources a light uses will not be released until
+/// [`Stage::remove_light`] is called _and_ the light is dropped.
 #[derive(Clone)]
 pub struct AnalyticalLight<T = Light> {
     /// The generic light descriptor.
@@ -589,7 +592,8 @@ impl<T: IsLight> IsLight for AnalyticalLight<T> {
         //
         // The maximum should be the `Camera`'s `Frustum::depth()`.
         // TODO: in `DirectionalLightDescriptor::shadow_mapping_projection_and_view`, take Frustum
-        // as a parameter and then figure out the minimal view projection that includes that frustum
+        // as a parameter and then figure out the minimal view projection that includes that
+        // frustum
         z_near: f32,
         // Far limits of the light's reach
         z_far: f32,
@@ -600,7 +604,8 @@ impl<T: IsLight> IsLight for AnalyticalLight<T> {
 }
 
 impl AnalyticalLight {
-    /// Returns a reference to the inner `DirectionalLight`, if this light is directional.
+    /// Returns a reference to the inner `DirectionalLight`, if this light is
+    /// directional.
     pub fn as_directional(&self) -> Option<&DirectionalLight> {
         match &self.inner {
             Light::Directional(light) => Some(light),
@@ -608,7 +613,8 @@ impl AnalyticalLight {
         }
     }
 
-    /// Returns a reference to the inner `PointLight`, if this light is a point light.
+    /// Returns a reference to the inner `PointLight`, if this light is a point
+    /// light.
     pub fn as_point(&self) -> Option<&PointLight> {
         match &self.inner {
             Light::Point(light) => Some(light),
@@ -616,7 +622,8 @@ impl AnalyticalLight {
         }
     }
 
-    /// Returns a reference to the inner `SpotLight`, if this light is a spot light.
+    /// Returns a reference to the inner `SpotLight`, if this light is a spot
+    /// light.
     pub fn as_spot(&self) -> Option<&SpotLight> {
         match &self.inner {
             Light::Spot(light) => Some(light),
@@ -638,7 +645,10 @@ impl<T: IsLight> AnalyticalLight<T> {
 
     /// Link this light to a node's `NestedTransform`.
     pub fn link_node_transform(&self, transform: &NestedTransform) {
-        *self.node_transform.write().unwrap() = Some(transform.clone());
+        *self
+            .node_transform
+            .write()
+            .expect("light node_transform write") = Some(transform.clone());
     }
 
     /// Get a reference to the inner light.
@@ -651,8 +661,9 @@ impl<T: IsLight> AnalyticalLight<T> {
     /// This value lives in the lighting slab.
     ///
     /// ## Note
-    /// If a [`NestedTransform`] has been linked to this light by using [`Self::link_node_transform`],
-    /// the transform returned by this function may be overwritten at any point by the given
+    /// If a [`NestedTransform`] has been linked to this light by using
+    /// [`Self::link_node_transform`], the transform returned by this
+    /// function may be overwritten at any point by the given
     /// [`NestedTransform`].
     pub fn transform(&self) -> &Transform {
         &self.transform
@@ -661,9 +672,9 @@ impl<T: IsLight> AnalyticalLight<T> {
     /// Get a reference to the light's linked global node transform.
     ///
     /// ## Note
-    /// The returned transform, if any, is the global transform of a linked `NestedTransform`.
-    /// To change this value, you should do so through the `NestedTransform`, which is likely
-    /// held in the
+    /// The returned transform, if any, is the global transform of a linked
+    /// `NestedTransform`. To change this value, you should do so through
+    /// the `NestedTransform`, which is likely held in the
     pub fn linked_node_transform(&self) -> Option<NestedTransform> {
         self.node_transform
             .read()
@@ -672,7 +683,8 @@ impl<T: IsLight> AnalyticalLight<T> {
             .map(|t| t.clone())
     }
 
-    /// Convert this light into a generic light, hiding the specific light type that it is.
+    /// Convert this light into a generic light, hiding the specific light type
+    /// that it is.
     ///
     /// This is useful if you want to store your lights together.
     pub fn into_generic(self) -> AnalyticalLight
@@ -825,17 +837,21 @@ impl Lighting {
         // Update our list of weakly ref'd light bundles
         self.analytical_lights
             .write()
-            .unwrap()
+            .expect("analytical_lights write")
             .push(bundle.clone().into_generic());
         // Invalidate the array of lights
-        *self.analytical_lights_array.write().unwrap() = None;
+        *self
+            .analytical_lights_array
+            .write()
+            .expect("analytical_lights_array write") = None;
     }
 
     /// Remove an [`AnalyticalLight`] from the internal list of lights.
     ///
     /// Use this to exclude a light from rendering, without dropping the light.
     ///
-    /// After calling this function you can include the light again using [`Lighting::add_light`].
+    /// After calling this function you can include the light again using
+    /// [`Lighting::add_light`].
     pub fn remove_light<T: IsLight>(&self, bundle: &AnalyticalLight<T>) {
         log::trace!(
             "removing light {:?} ({})",
@@ -843,16 +859,25 @@ impl Lighting {
             bundle.inner.style()
         );
         // Remove the light from the list of weakly ref'd light bundles
-        let mut guard = self.analytical_lights.write().unwrap();
+        let mut guard = self
+            .analytical_lights
+            .write()
+            .expect("analytical_lights write");
         guard.retain(|stored_light| {
             stored_light.light_descriptor.id() != bundle.light_descriptor.id()
         });
-        *self.analytical_lights_array.write().unwrap() = None;
+        *self
+            .analytical_lights_array
+            .write()
+            .expect("analytical_lights_array write") = None;
     }
 
     /// Return an iterator over all lights.
     pub fn lights(&self) -> Vec<AnalyticalLight> {
-        self.analytical_lights.read().unwrap().clone()
+        self.analytical_lights
+            .read()
+            .expect("analytical_lights read")
+            .clone()
     }
 
     /// Create a new [`AnalyticalLight<DirectionalLight>`].
@@ -954,8 +979,18 @@ impl Lighting {
         log::trace!("committing lights");
 
         // Sync any lights whose node transforms have changed
-        for light in self.analytical_lights.read().unwrap().iter() {
-            if let Some(node_transform) = light.node_transform.read().unwrap().as_ref() {
+        for light in self
+            .analytical_lights
+            .read()
+            .expect("analytical_lights read")
+            .iter()
+        {
+            if let Some(node_transform) = light
+                .node_transform
+                .read()
+                .expect("light node_transform read")
+                .as_ref()
+            {
                 let global_node_transform = node_transform.global_descriptor();
                 if node_transform.global_descriptor() != light.transform.descriptor() {
                     light.transform.set_descriptor(global_node_transform);
@@ -964,14 +999,20 @@ impl Lighting {
         }
 
         let lights_array = {
-            let mut array_guard = self.analytical_lights_array.write().unwrap();
+            let mut array_guard = self
+                .analytical_lights_array
+                .write()
+                .expect("analytical_lights_array write");
 
             // Create a new array if lights have been invalidated by
             // `Lighting::add_light` or `Lighting::remove_light`
             array_guard
                 .get_or_insert_with(|| {
                     log::trace!("  analytical lights array was invalidated");
-                    let lights_guard = self.analytical_lights.read().unwrap();
+                    let lights_guard = self
+                        .analytical_lights
+                        .read()
+                        .expect("analytical_lights read");
                     let new_lights = lights_guard
                         .iter()
                         .map(|bundle| bundle.light_descriptor.id());

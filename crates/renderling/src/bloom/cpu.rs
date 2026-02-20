@@ -506,33 +506,39 @@ impl Bloom {
         let runtime = runtime.as_ref();
         let textures = create_textures(runtime, resolution);
 
-        *self.bindgroups.write().unwrap() = create_bindgroups(
+        *self.bindgroups.write().expect("bloom bindgroups write") = create_bindgroups(
             &runtime.device,
             &self.downsample_pipeline,
             &slab_buffer,
             &textures,
         );
-        *self.hdr_texture_downsample_bindgroup.write().unwrap() = create_bindgroup(
+        *self
+            .hdr_texture_downsample_bindgroup
+            .write()
+            .expect("bloom hdr downsample bindgroup write") = create_bindgroup(
             &runtime.device,
             &self.downsample_pipeline.get_bind_group_layout(0),
             &slab_buffer,
             hdr_texture,
         );
-        *self.mix_texture.write().unwrap() = create_texture(
+        *self.mix_texture.write().expect("bloom mix_texture write") = create_texture(
             runtime,
             resolution.x,
             resolution.y,
             Some("bloom mix"),
             wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::COPY_DST,
         );
-        *self.mix_bindgroup.write().unwrap() = create_mix_bindgroup(
+        *self
+            .mix_bindgroup
+            .write()
+            .expect("bloom mix_bindgroup write") = create_mix_bindgroup(
             &runtime.device,
             &self.mix_pipeline,
             &slab_buffer,
             hdr_texture,
             &textures[0],
         );
-        *self.textures.write().unwrap() = textures;
+        *self.textures.write().expect("bloom textures write") = textures;
     }
 
     /// Returns a clone of the current mix texture.
@@ -541,7 +547,10 @@ impl Bloom {
     /// mix strength.
     pub fn get_mix_texture(&self) -> Texture {
         // UNWRAP: not safe but we want to panic
-        self.mix_texture.read().unwrap().clone()
+        self.mix_texture
+            .read()
+            .expect("bloom mix_texture read")
+            .clone()
     }
 
     pub(crate) fn render_downsamples(&self, device: &wgpu::Device, queue: &wgpu::Queue) {
@@ -556,12 +565,14 @@ impl Bloom {
         // to the front) the last bindgroup will not be used, which is good - we
         // don't need to read from the smallest texture during downsampling.
         // UNWRAP: not safe but we want to panic
-        let textures_guard = self.textures.read().unwrap();
-        let hdr_texture_downsample_bindgroup_guard =
-            self.hdr_texture_downsample_bindgroup.read().unwrap();
+        let textures_guard = self.textures.read().expect("bloom textures read");
+        let hdr_texture_downsample_bindgroup_guard = self
+            .hdr_texture_downsample_bindgroup
+            .read()
+            .expect("bloom hdr downsample bindgroup read");
         let hdr_texture_downsample_bindgroup: &wgpu::BindGroup =
             &hdr_texture_downsample_bindgroup_guard;
-        let bindgroups_guard = self.bindgroups.read().unwrap();
+        let bindgroups_guard = self.bindgroups.read().expect("bloom bindgroups read");
         let bindgroups =
             std::iter::once(hdr_texture_downsample_bindgroup).chain(bindgroups_guard.iter());
         let items = textures_guard
@@ -619,11 +630,11 @@ impl Bloom {
         // Get all the bindgroups (which are what we're reading from),
         // starting with the last mip.
         // UNWRAP: not safe but we want to panic
-        let bindgroups_guard = self.bindgroups.read().unwrap();
+        let bindgroups_guard = self.bindgroups.read().expect("bloom bindgroups read");
         let bindgroups = bindgroups_guard.iter().rev();
         // Get all the texture views (which are what we're writing to),
         // starting with the second-to-last mip.
-        let textures_guard = self.textures.read().unwrap();
+        let textures_guard = self.textures.read().expect("bloom textures read");
         let views = textures_guard.iter().rev().skip(1).map(|t| &t.view);
         let items = bindgroups
             .zip(views)
@@ -661,8 +672,8 @@ impl Bloom {
     fn render_mix(&self, device: &wgpu::Device, queue: &wgpu::Queue) {
         let label = Some("bloom mix");
         // UNWRAP: not safe but we want to panic
-        let mix_texture = self.mix_texture.read().unwrap();
-        let mix_bindgroup = self.mix_bindgroup.read().unwrap();
+        let mix_texture = self.mix_texture.read().expect("bloom mix_texture read");
+        let mix_bindgroup = self.mix_bindgroup.read().expect("bloom mix_bindgroup read");
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label });
         {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {

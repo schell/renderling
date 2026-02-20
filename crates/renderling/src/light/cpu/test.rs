@@ -21,8 +21,8 @@ use crate::{
 use super::*;
 
 #[test]
-/// Ensures that a spot light can determine if a point lies inside or outside its cone
-/// of emission.
+/// Ensures that a spot light can determine if a point lies inside or outside
+/// its cone of emission.
 fn spot_one_calc() {
     let (doc, _, _) = gltf::import(
         crate::test::workspace_dir()
@@ -337,9 +337,11 @@ fn clear_tiles_sanity() {
                 let y = i as u32 / tile_dimensions.x;
                 let tile_coord = UVec2::new(x, y);
                 let distance = tile_coord.manhattan_distance(tile_dimensions) as f32;
-                // This should produce an image where pixels get darker towards the lower right corner.
+                // This should produce an image where pixels get darker towards the lower right
+                // corner.
                 let min = distance / max_distance;
-                // This should produce an image where pixels get darker towards the upper left corner.
+                // This should produce an image where pixels get darker towards the upper left
+                // corner.
                 let max = 1.0 - distance / max_distance;
 
                 item.depth_min = crate::light::shader::quantize_depth_f32_to_u32(min);
@@ -420,7 +422,8 @@ fn min_max_depth_sanity() {
     );
     let label = Some("light-tiling-min-max-depth-test");
 
-    // Clear the tiles, which is verified in `clear_tiles_sanity`, then assert the min/max depth
+    // Clear the tiles, which is verified in `clear_tiles_sanity`, then assert the
+    // min/max depth
     {
         let mut encoder = ctx
             .get_device()
@@ -496,8 +499,8 @@ fn light_bins_sanity() {
         let light_bin =
             futures_lite::future::block_on(lighting.light_slab.read_array(tile.lights_array))
                 .unwrap();
-        // Assert either the light is the correct one, or we're using the zero frustum optimization
-        // discussed in <http://renderling.xyz/articles/live/light_tiling.html#zero-volume-frustum-optimization>
+        // Assert either the light is the correct one, or we're using the zero frustum
+        // optimization discussed in <http://renderling.xyz/articles/live/light_tiling.html#zero-volume-frustum-optimization>
         if tile.depth_min != tile.depth_max {
             assert_eq!(light_bin[0], directional_light.id());
             assert_eq!(light_bin[1], Id::NONE);
@@ -574,9 +577,8 @@ fn tiling_e2e_sanity_with(
     save_images: bool,
 ) {
     println!(
-        "tiling e2e with tile_size:{tile_size}, \
-        max_lights_per_tile:{max_lights_per_tile}, \
-        minimum_illuminance: {minimum_illuminance}"
+        "tiling e2e with tile_size:{tile_size}, max_lights_per_tile:{max_lights_per_tile}, \
+         minimum_illuminance: {minimum_illuminance}"
     );
     let size = size();
     let ctx = Context::headless(size.x, size.y).block();
@@ -664,8 +666,12 @@ fn tiling_e2e_sanity_with(
     snapshot(
         &ctx,
         &stage,
-        &format!("light/tiling/e2e/6-scene-{tile_size}-{max_lights_per_tile}-lights-{i}-{minimum_illuminance}-min-lux.png"),
-        save_images
+        &format!(
+            "light/tiling/e2e/\
+             6-scene-{tile_size}-{max_lights_per_tile}-lights-{i}-{minimum_illuminance}-min-lux.\
+             png"
+        ),
+        save_images,
     );
 
     #[cfg(feature = "light-tiling-stats")]
@@ -1065,8 +1071,8 @@ fn pedestal() {
             spot_infos.push(info);
         }
 
-        // assert that the output of the vertex shader is the same for the first renderlet,
-        // regardless of the lighting
+        // assert that the output of the vertex shader is the same for the first
+        // renderlet, regardless of the lighting
         pretty_assertions::assert_eq!(dir_infos, spot_infos);
         stage.remove_light(&spot);
     }

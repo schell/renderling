@@ -107,8 +107,14 @@ impl UiPathBuilder {
             ui: ui.clone(),
             attributes: PathAttributes::default(),
             inner: lyon::path::Path::builder_with_attributes(PathAttributes::NUM_ATTRIBUTES),
-            default_stroke_options: *ui.default_stroke_options.read().unwrap(),
-            default_fill_options: *ui.default_fill_options.read().unwrap(),
+            default_stroke_options: *ui
+                .default_stroke_options
+                .read()
+                .expect("default_stroke_options read"),
+            default_fill_options: *ui
+                .default_fill_options
+                .read()
+                .expect("default_fill_options read"),
         }
     }
 
@@ -346,7 +352,7 @@ impl UiPathBuilder {
         let mut size = Vec2::ONE;
         // If we have an image use it in the material
         if let Some(ImageId(id)) = &options.image_id {
-            let guard = self.ui.images.read().unwrap();
+            let guard = self.ui.images.read().expect("images read");
             if let Some(image) = guard.get(id) {
                 let size_px = image.0.descriptor().size_px;
                 log::debug!("size: {}", size_px);
@@ -425,7 +431,7 @@ impl UiPathBuilder {
         let mut size = Vec2::ONE;
         // If we have an image, use it in the material
         if let Some(ImageId(id)) = &image_id {
-            let guard = self.ui.images.read().unwrap();
+            let guard = self.ui.images.read().expect("images read");
             if let Some(image) = guard.get(id) {
                 let size_px = image.0.descriptor.get().size_px;
                 log::debug!("size: {}", size_px);

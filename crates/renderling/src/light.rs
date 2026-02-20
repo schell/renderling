@@ -154,10 +154,15 @@ mod test {
             crate::math::is_inside_clip_space(inside),
             "should be inside"
         );
-        let inside = Vec3::new(0.5, -0.5, -0.8);
+        let inside = Vec3::new(0.5, -0.5, 0.8);
         assert!(
             crate::math::is_inside_clip_space(inside),
             "should be inside"
+        );
+        let outside_neg_z = Vec3::new(0.5, -0.5, -0.8);
+        assert!(
+            !crate::math::is_inside_clip_space(outside_neg_z),
+            "negative z should be outside (wgpu z range is [0, 1])"
         );
         let outside = Vec3::new(0.5, 0.0, 1.3);
         assert!(

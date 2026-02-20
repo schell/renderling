@@ -1,4 +1,5 @@
-//! A helper wrapper around `Arc<RwLock<Arc<wgpu::BindGroup>>>` that provides invalidation.
+//! A helper wrapper around `Arc<RwLock<Arc<wgpu::BindGroup>>>` that provides
+//! invalidation.
 
 use std::sync::{Arc, RwLock};
 
@@ -21,7 +22,7 @@ impl From<wgpu::BindGroup> for ManagedBindGroup {
     fn from(value: wgpu::BindGroup) -> Self {
         let mbg = ManagedBindGroup::new();
         // UNWRAP: POP
-        *mbg.bindgroup.write().unwrap() = Some(value.into());
+        *mbg.bindgroup.write().expect("bindgroup write") = Some(value.into());
         mbg
     }
 }
@@ -39,7 +40,7 @@ impl ManagedBindGroup {
         fn_recreate: impl FnOnce() -> wgpu::BindGroup,
     ) -> Arc<wgpu::BindGroup> {
         let recreate = || {
-            let mut guard = self.bindgroup.write().unwrap();
+            let mut guard = self.bindgroup.write().expect("bindgroup write");
 
             let bg = Arc::new(fn_recreate());
             *guard = Some(bg.clone());
@@ -48,7 +49,7 @@ impl ManagedBindGroup {
         if should_invalidate {
             recreate()
         } else {
-            let maybe_buffer = self.bindgroup.read().unwrap().clone();
+            let maybe_buffer = self.bindgroup.read().expect("bindgroup read").clone();
             if let Some(buffer) = maybe_buffer {
                 buffer
             } else {
@@ -59,6 +60,6 @@ impl ManagedBindGroup {
 
     /// Invalidate the [`wgpu::BindGroup`], destroying it if it exists.
     pub fn invalidate(&self) {
-        *self.bindgroup.write().unwrap() = None;
+        *self.bindgroup.write().expect("bindgroup write") = None;
     }
 }

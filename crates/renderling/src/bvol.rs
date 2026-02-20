@@ -254,12 +254,9 @@ impl Frustum {
             -mvp[2][1] + mvp[2][3],
             -mvp[3][1] + mvp[3][3],
         ));
-        let near = normalize_plane(Vec4::new(
-            mvp[0][2] + mvp[0][3],
-            mvp[1][2] + mvp[1][3],
-            mvp[2][2] + mvp[2][3],
-            mvp[3][2] + mvp[3][3],
-        ));
+        // For wgpu/Vulkan/D3D (z_ndc ∈ [0, 1]) the near plane is just row2,
+        // not row2 + row3 (which is the OpenGL z_ndc ∈ [-1, 1] convention).
+        let near = normalize_plane(Vec4::new(mvp[0][2], mvp[1][2], mvp[2][2], mvp[3][2]));
         let far = normalize_plane(Vec4::new(
             -mvp[0][2] + mvp[0][3],
             -mvp[1][2] + mvp[1][3],

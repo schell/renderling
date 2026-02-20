@@ -1,36 +1,34 @@
 //! GPU staging area.
-use core::ops::Deref;
-use core::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
+use core::{
+    ops::Deref,
+    sync::atomic::{AtomicU32, AtomicUsize, Ordering},
+};
 use craballoc::prelude::*;
 use crabslab::Id;
 use glam::{Mat4, UVec2, Vec4};
 use snafu::{ResultExt, Snafu};
 use std::sync::{atomic::AtomicBool, Arc, Mutex, RwLock};
 
-use crate::atlas::AtlasTexture;
-use crate::camera::Camera;
-use crate::geometry::{shader::GeometryDescriptor, MorphTarget, Vertex};
 #[cfg(gltf)]
 use crate::gltf::GltfDocument;
-use crate::light::{DirectionalLight, IsLight, Light, PointLight, SpotLight};
-use crate::material::Material;
-use crate::pbr::brdf::BrdfLut;
-use crate::pbr::ibl::Ibl;
-use crate::primitive::Primitive;
 use crate::{
-    atlas::{AtlasError, AtlasImage, AtlasImageError},
+    atlas::{AtlasError, AtlasImage, AtlasImageError, AtlasTexture},
     bindgroup::ManagedBindGroup,
     bloom::Bloom,
-    camera::shader::CameraDescriptor,
+    camera::{shader::CameraDescriptor, Camera},
     debug::DebugOverlay,
     draw::DrawCalls,
-    geometry::{Geometry, Indices, MorphTargetWeights, MorphTargets, Skin, SkinJoint, Vertices},
-    light::{
-        AnalyticalLight, LightTiling, LightTilingConfig, Lighting, LightingBindGroupLayoutEntries,
-        LightingError, ShadowMap,
+    geometry::{
+        shader::GeometryDescriptor, Geometry, Indices, MorphTarget, MorphTargetWeights,
+        MorphTargets, Skin, SkinJoint, Vertex, Vertices,
     },
-    material::Materials,
-    pbr::debug::DebugChannel,
+    light::{
+        AnalyticalLight, DirectionalLight, IsLight, Light, LightTiling, LightTilingConfig,
+        Lighting, LightingBindGroupLayoutEntries, LightingError, PointLight, ShadowMap, SpotLight,
+    },
+    material::{Material, Materials},
+    pbr::{brdf::BrdfLut, debug::DebugChannel, ibl::Ibl},
+    primitive::Primitive,
     skybox::{Skybox, SkyboxRenderPipeline},
     texture::{DepthTexture, Texture},
     tonemapping::Tonemapping,
@@ -241,11 +239,15 @@ pub(crate) struct StageRendering<'a> {
 impl StageRendering<'_> {
     /// Run the stage rendering.
     ///
-    /// Returns the queue submission index and the indirect draw buffer, if available.
+    /// Returns the queue submission index and the indirect draw buffer, if
+    /// available.
     pub fn run(self) -> (wgpu::SubmissionIndex, Option<SlabBuffer<wgpu::Buffer>>) {
         let commit_result = self.stage.commit();
         let current_primitive_bind_group_creation_time = commit_result.latest_creation_time();
-        log::trace!("current_primitive_bind_group_creation_time: {current_primitive_bind_group_creation_time}");
+        log::trace!(
+            "current_primitive_bind_group_creation_time: \
+             {current_primitive_bind_group_creation_time}"
+        );
         let previous_primitive_bind_group_creation_time =
             self.stage.primitive_bind_group_created.swap(
                 current_primitive_bind_group_creation_time,
@@ -262,7 +264,7 @@ impl StageRendering<'_> {
                 .get(should_invalidate_primitive_bind_group, || {
                     log::trace!("recreating primitive bind group");
                     let atlas_texture = self.stage.materials.atlas().get_texture();
-                    let ibl = self.stage.ibl.read().unwrap();
+                    let ibl = self.stage.ibl.read().expect("ibl read");
                     let shadow_map = self.stage.lighting.shadow_map_atlas.get_texture();
                     PrimitiveBindGroup {
                         device: self.stage.device(),
@@ -284,8 +286,8 @@ impl StageRendering<'_> {
                     .create()
                 });
 
-        let mut draw_calls = self.stage.draw_calls.write().unwrap();
-        let depth_texture = self.stage.depth_texture.read().unwrap();
+        let mut draw_calls = self.stage.draw_calls.write().expect("draw_calls write");
+        let depth_texture = self.stage.depth_texture.read().expect("depth_texture read");
         // UNWRAP: safe because we know the depth texture format will always match
         let maybe_indirect_buffer = draw_calls.pre_draw(&depth_texture).unwrap();
 
@@ -328,27 +330,30 @@ impl StageRendering<'_> {
 ///
 /// # Design
 ///
-/// The `Stage` struct serves as the central hub for managing and staging data on the GPU.
-/// It provides a consistent API for creating resources, applying effects, and customizing parameters.
+/// The `Stage` struct serves as the central hub for managing and staging data
+/// on the GPU. It provides a consistent API for creating resources, applying
+/// effects, and customizing parameters.
 ///
-/// The `Stage` uses a combination of `new_*`, `with_*`, `set_*`, and getter functions to facilitate
-/// resource management and customization.
+/// The `Stage` uses a combination of `new_*`, `with_*`, `set_*`, and getter
+/// functions to facilitate resource management and customization.
 ///
-/// Resources are managed internally, requiring no additional lifecycle work from the user.
-/// This design simplifies the process of resource management, allowing developers to focus on creating and rendering
-/// their scenes without worrying about the underlying GPU resource management.
+/// Resources are managed internally, requiring no additional lifecycle work
+/// from the user. This design simplifies the process of resource management,
+/// allowing developers to focus on creating and rendering their scenes without
+/// worrying about the underlying GPU resource management.
 ///
 /// # Resources
 ///
-/// The `Stage` is responsible for creating various resources and staging them on the GPU.
-/// It handles the setup and management of the following resources:
+/// The `Stage` is responsible for creating various resources and staging them
+/// on the GPU. It handles the setup and management of the following resources:
 ///
 /// * [`Camera`]: Manages the view and projection matrices for rendering scenes.
 ///   - [`Stage::new_camera`] creates a new [`Camera`].
 ///   - [`Stage::use_camera`] tells the `Stage` to use a camera.
 /// * [`Transform`]: Represents the position, rotation, and scale of objects.
 ///   - [`Stage::new_transform`] creates a new [`Transform`].
-/// * [`NestedTransform`]: Allows for hierarchical transformations, useful for complex object hierarchies.
+/// * [`NestedTransform`]: Allows for hierarchical transformations, useful for
+///   complex object hierarchies.
 ///   - [`Stage::new_nested_transform`] creates a new [`NestedTransform`]
 /// * [`Vertices`]: Manages vertex data for rendering meshes.
 ///   - [`Stage::new_vertices`]
@@ -357,23 +362,32 @@ impl StageRendering<'_> {
 /// * [`Primitive`]: Represents a drawable object in the scene.
 ///   - [`Stage::new_primitive`]
 /// * [`GltfDocument`]: Handles loading and managing GLTF assets.
-///   - [`Stage::load_gltf_document_from_path`] loads a new GLTF document from the local filesystem.
-///   - [`Stage::load_gltf_document_from_bytes`] parses a new GLTF document from pre-loaded bytes.
+///   - [`Stage::load_gltf_document_from_path`] loads a new GLTF document from
+///     the local filesystem.
+///   - [`Stage::load_gltf_document_from_bytes`] parses a new GLTF document from
+///     pre-loaded bytes.
 /// * [`Skin`]: Animation and rigging information.
 ///   - [`Stage::new_skin`]
 ///
 /// # Lighting effects
 ///
-/// The `Stage` also manages various lighting effects, which enhance the visual quality of the scene:
+/// The `Stage` also manages various lighting effects, which enhance the visual
+/// quality of the scene:
 ///
 /// * [`AnalyticalLight`]: Simulates a single light source, with three flavors:
-///   - [`DirectionalLight`]: Represents sunlight or other distant light sources.
-///   - [`PointLight`]: Represents a light source that emits light in all directions from a single point.
-///   - [`SpotLight`]: Represents a light source that emits light in a cone shape.
-/// * [`Skybox`]: Provides image-based lighting (IBL) for realistic environmental reflections and ambient lighting.
-/// * [`Bloom`]: Adds a glow effect to bright areas of the scene, enhancing visual appeal.
+///   - [`DirectionalLight`]: Represents sunlight or other distant light
+///     sources.
+///   - [`PointLight`]: Represents a light source that emits light in all
+///     directions from a single point.
+///   - [`SpotLight`]: Represents a light source that emits light in a cone
+///     shape.
+/// * [`Skybox`]: Provides image-based lighting (IBL) for realistic
+///   environmental reflections and ambient lighting.
+/// * [`Bloom`]: Adds a glow effect to bright areas of the scene, enhancing
+///   visual appeal.
 /// * [`ShadowMap`]: Manages shadow mapping for realistic shadow rendering.
-/// * [`LightTiling`]: Optimizes lighting calculations by dividing the scene into tiles for efficient processing.
+/// * [`LightTiling`]: Optimizes lighting calculations by dividing the scene
+///   into tiles for efficient processing.
 ///
 /// # Note
 ///
@@ -476,7 +490,8 @@ impl Stage {
 impl Stage {
     /// Returns the vertices of a white unit cube.
     ///
-    /// This is the mesh of every [`Primitive`] that has not had its vertices set.
+    /// This is the mesh of every [`Primitive`] that has not had its vertices
+    /// set.
     pub fn default_vertices(&self) -> &Vertices {
         self.geometry.default_vertices()
     }
@@ -548,14 +563,16 @@ impl Stage {
 
     /// Stage a new [`Primitive`] on the GPU.
     ///
-    /// The returned [`Primitive`] will automatically be added to this [`Stage`].
+    /// The returned [`Primitive`] will automatically be added to this
+    /// [`Stage`].
     ///
-    /// The returned [`Primitive`] will have the stage's default [`Vertices`], which is an all-white
-    /// unit cube.
+    /// The returned [`Primitive`] will have the stage's default [`Vertices`],
+    /// which is an all-white unit cube.
     ///
-    /// The returned [`Primitive`] uses the stage's default [`Material`], which is white and
-    /// **does not** participate in lighting. To change this, first create a [`Material`] with
-    /// [`Stage::new_material`] and then call [`Primitive::set_material`] with the new material.
+    /// The returned [`Primitive`] uses the stage's default [`Material`], which
+    /// is white and **does not** participate in lighting. To change this,
+    /// first create a [`Material`] with [`Stage::new_material`] and then
+    /// call [`Primitive::set_material`] with the new material.
     pub fn new_primitive(&self) -> Primitive {
         Primitive::new(self)
     }
@@ -596,12 +613,13 @@ impl Stage {
     ///
     /// This returns a vector of [`Hybrid<AtlasTexture>`], which
     /// is a descriptor of each image on the GPU. Dropping these entries
-    /// will invalidate those images and cause the atlas to be repacked, and any raw
-    /// GPU references to the underlying [`AtlasTexture`] will also be invalidated.
-    ///     
-    /// Adding an image can be quite expensive, as it requires creating a new texture
-    /// array for the atlas and repacking all previous images. For that reason it is
-    /// good to batch images to reduce the number of calls.
+    /// will invalidate those images and cause the atlas to be repacked, and any
+    /// raw GPU references to the underlying [`AtlasTexture`] will also be
+    /// invalidated.     
+    /// Adding an image can be quite expensive, as it requires creating a new
+    /// texture array for the atlas and repacking all previous images. For
+    /// that reason it is good to batch images to reduce the number of
+    /// calls.
     pub fn add_images(
         &self,
         images: impl IntoIterator<Item = impl Into<AtlasImage>>,
@@ -610,7 +628,11 @@ impl Stage {
         let frames = self.materials.atlas().add_images(&images)?;
 
         // The textures bindgroup will have to be remade
-        let _ = self.textures_bindgroup.lock().unwrap().take();
+        let _ = self
+            .textures_bindgroup
+            .lock()
+            .expect("textures_bindgroup lock")
+            .take();
 
         Ok(frames)
     }
@@ -640,7 +662,11 @@ impl Stage {
         let frames = self.materials.atlas().set_images(&images)?;
 
         // The textures bindgroup will have to be remade
-        let _ = self.textures_bindgroup.lock().unwrap().take();
+        let _ = self
+            .textures_bindgroup
+            .lock()
+            .expect("textures_bindgroup lock")
+            .take();
 
         Ok(frames)
     }
@@ -681,7 +707,8 @@ impl Stage {
     ///
     /// Use this to exclude a light from rendering, without dropping the light.
     ///
-    /// After calling this function you can include the light again using [`Stage::add_light`].
+    /// After calling this function you can include the light again using
+    /// [`Stage::add_light`].
     pub fn remove_light<T: IsLight>(&self, bundle: &AnalyticalLight<T>) {
         self.lighting.remove_light(bundle);
     }
@@ -691,16 +718,15 @@ impl Stage {
     ///
     /// ## Tips for making a good shadow map
     ///
-    /// 1. Make sure the map is big enough.
-    ///    Using a big map can fix some peter panning issues, even before
-    ///    playing with bias in the returned [`ShadowMap`].
-    ///    The bigger the map, the cleaner the shadows will be. This can
-    ///    also solve PCF problems.
-    /// 2. Don't set PCF samples too high in the returned [`ShadowMap`], as
-    ///    this can _cause_ peter panning.
+    /// 1. Make sure the map is big enough. Using a big map can fix some peter
+    ///    panning issues, even before playing with bias in the returned
+    ///    [`ShadowMap`]. The bigger the map, the cleaner the shadows will be.
+    ///    This can also solve PCF problems.
+    /// 2. Don't set PCF samples too high in the returned [`ShadowMap`], as this
+    ///    can _cause_ peter panning.
     /// 3. Ensure the **znear** and **zfar** parameters make sense, as the
-    ///    shadow map uses these to determine how much of the scene to cover.
-    ///    If you find that shadows are cut off in a straight line, it's likely
+    ///    shadow map uses these to determine how much of the scene to cover. If
+    ///    you find that shadows are cut off in a straight line, it's likely
     ///    `znear` or `zfar` needs adjustment.
     pub fn new_shadow_map<T>(
         &self,
@@ -748,7 +774,7 @@ impl Stage {
     ) -> (Arc<SkyboxRenderPipeline>, Arc<wgpu::BindGroup>) {
         let msaa_sample_count = self.msaa_sample_count.load(Ordering::Relaxed);
         // UNWRAP: safe because we're only ever called from the render thread.
-        let mut pipeline_guard = self.skybox_pipeline.write().unwrap();
+        let mut pipeline_guard = self.skybox_pipeline.write().expect("skybox_pipeline write");
         let pipeline = if let Some(pipeline) = pipeline_guard.as_mut() {
             if pipeline.msaa_sample_count() != msaa_sample_count {
                 *pipeline = Arc::new(crate::skybox::create_skybox_render_pipeline(
@@ -768,14 +794,17 @@ impl Stage {
             pipeline
         };
         // UNWRAP: safe because we're only ever called from the render thread.
-        let mut bindgroup = self.skybox_bindgroup.lock().unwrap();
+        let mut bindgroup = self.skybox_bindgroup.lock().expect("skybox_bindgroup lock");
         let bindgroup = if let Some(bindgroup) = bindgroup.as_ref() {
             bindgroup.clone()
         } else {
             let bg = Arc::new(crate::skybox::create_skybox_bindgroup(
                 self.device(),
                 geometry_slab_buffer,
-                self.skybox.read().unwrap().environment_cubemap_texture(),
+                self.skybox
+                    .read()
+                    .expect("skybox read")
+                    .environment_cubemap_texture(),
             ));
             *bindgroup = Some(bg.clone());
             bg
@@ -788,12 +817,15 @@ impl Stage {
     /// To remove the currently used [`Skybox`], call [`Skybox::remove_skybox`].
     pub fn use_skybox(&self, skybox: &Skybox) -> &Self {
         // UNWRAP: if we can't acquire the lock we want to panic.
-        let mut guard = self.skybox.write().unwrap();
+        let mut guard = self.skybox.write().expect("skybox write");
         *guard = skybox.clone();
         self.has_skybox
             .store(true, std::sync::atomic::Ordering::Relaxed);
-        *self.skybox_bindgroup.lock().unwrap() = None;
-        *self.textures_bindgroup.lock().unwrap() = None;
+        *self.skybox_bindgroup.lock().expect("skybox_bindgroup lock") = None;
+        *self
+            .textures_bindgroup
+            .lock()
+            .expect("textures_bindgroup lock") = None;
         self
     }
 
@@ -801,23 +833,30 @@ impl Stage {
     ///
     /// Returns the currently used [`Skybox`], if any.
     ///
-    /// After calling this the [`Stage`] will not render with any [`Skybox`], until
-    /// [`Skybox::use_skybox`] is called with another [`Skybox`].
+    /// After calling this the [`Stage`] will not render with any [`Skybox`],
+    /// until [`Skybox::use_skybox`] is called with another [`Skybox`].
     pub fn remove_skybox(&self) -> Option<Skybox> {
-        let mut guard = self.skybox.write().unwrap();
+        let mut guard = self.skybox.write().expect("skybox write");
         if guard.is_empty() {
             // Do nothing, the skybox is already empty
             None
         } else {
             let skybox = guard.clone();
             *guard = Skybox::empty(self.runtime());
-            self.skybox_bindgroup.lock().unwrap().take();
-            self.textures_bindgroup.lock().unwrap().take();
+            self.skybox_bindgroup
+                .lock()
+                .expect("skybox_bindgroup lock")
+                .take();
+            self.textures_bindgroup
+                .lock()
+                .expect("textures_bindgroup lock")
+                .take();
             Some(skybox)
         }
     }
 
-    /// Returns a new [`Skybox`] using the HDR image at the given path, if possible.
+    /// Returns a new [`Skybox`] using the HDR image at the given path, if
+    /// possible.
     ///
     /// The returned [`Skybox`] must be **used** with [`Stage::use_skybox`].
     pub fn new_skybox_from_path(
@@ -848,15 +887,16 @@ impl Stage {
     ///
     /// Use [`Stage::new_ibl`] to create a new [`Ibl`].
     pub fn use_ibl(&self, ibl: &Ibl) -> &Self {
-        let mut guard = self.ibl.write().unwrap();
+        let mut guard = self.ibl.write().expect("ibl write");
         *guard = ibl.clone();
         self.primitive_bind_group.invalidate();
         self
     }
 
-    /// Remove the current image based lighting from the stage and return it, if any.
+    /// Remove the current image based lighting from the stage and return it, if
+    /// any.
     pub fn remove_ibl(&self) -> Option<Ibl> {
-        let mut guard = self.ibl.write().unwrap();
+        let mut guard = self.ibl.write().expect("ibl write");
         if guard.is_empty() {
             // Do nothing, we're already not using IBL
             None
@@ -915,14 +955,15 @@ impl Stage {
     }
 
     pub fn hdr_texture(&self) -> impl Deref<Target = crate::texture::Texture> + '_ {
-        self.hdr_texture.read().unwrap()
+        self.hdr_texture.read().expect("hdr_texture read")
     }
 
     /// Run all upkeep and commit all staged changes to the GPU.
     ///
     /// This is done implicitly in [`Stage::render`].
     ///
-    /// This can be used after dropping resources to reclaim those resources on the GPU.
+    /// This can be used after dropping resources to reclaim those resources on
+    /// the GPU.
     #[must_use]
     pub fn commit(&self) -> StageCommitResult {
         let (materials_atlas_texture_was_recreated, materials_buffer) = self.materials.commit();
@@ -1113,7 +1154,7 @@ impl Stage {
         let runtime = ctx.runtime();
         let device = &runtime.device;
         let resolution @ UVec2 { x: w, y: h } = ctx.get_size();
-        let stage_config = *ctx.stage_config.read().unwrap();
+        let stage_config = *ctx.stage_config.read().expect("stage_config read");
         let geometry = Geometry::new(
             ctx,
             resolution,
@@ -1134,7 +1175,7 @@ impl Stage {
             Texture::create_depth_texture(device, w, h, multisample_count, Some("stage-depth"));
         let msaa_render_target = Default::default();
         // UNWRAP: safe because no other references at this point (created above^)
-        let bloom = Bloom::new(ctx, &hdr_texture.read().unwrap());
+        let bloom = Bloom::new(ctx, &hdr_texture.read().expect("hdr_texture read"));
         let tonemapping = Tonemapping::new(
             runtime,
             ctx.get_render_target().format().add_srgb_suffix(),
@@ -1192,7 +1233,10 @@ impl Stage {
 
     pub fn set_background_color(&self, color: impl Into<Vec4>) {
         let color = color.into();
-        *self.background_color.write().unwrap() = wgpu::Color {
+        *self
+            .background_color
+            .write()
+            .expect("background_color write") = wgpu::Color {
             r: color.x as f64,
             g: color.y as f64,
             b: color.z as f64,
@@ -1227,23 +1271,35 @@ impl Stage {
 
         log::debug!("setting multisample count to {multisample_count}");
         // UNWRAP: POP
-        *self.primitive_pipeline.write().unwrap() = Self::create_primitive_pipeline(
+        *self
+            .primitive_pipeline
+            .write()
+            .expect("primitive_pipeline write") = Self::create_primitive_pipeline(
             self.device(),
             wgpu::TextureFormat::Rgba16Float,
             multisample_count,
         );
         let size = self.get_size();
         // UNWRAP: POP
-        *self.depth_texture.write().unwrap() = Texture::create_depth_texture(
+        *self.depth_texture.write().expect("depth_texture write") = Texture::create_depth_texture(
             self.device(),
             size.x,
             size.y,
             multisample_count,
             Some("stage-depth"),
         );
+        let size = self.get_size();
         // UNWRAP: POP
-        let format = self.hdr_texture.read().unwrap().texture.format();
-        *self.msaa_render_target.write().unwrap() = if multisample_count == 1 {
+        let format = self
+            .hdr_texture
+            .read()
+            .expect("hdr_texture read")
+            .texture
+            .format();
+        *self
+            .msaa_render_target
+            .write()
+            .expect("msaa_render_target write") = if multisample_count == 1 {
             None
         } else {
             Some(create_msaa_textureview(
@@ -1256,7 +1312,11 @@ impl Stage {
         };
 
         // Invalidate the textures bindgroup - it must be recreated
-        let _ = self.textures_bindgroup.lock().unwrap().take();
+        let _ = self
+            .textures_bindgroup
+            .lock()
+            .expect("textures_bindgroup lock")
+            .take();
     }
 
     /// Set the MSAA multisample count.
@@ -1379,7 +1439,7 @@ impl Stage {
 
     pub fn get_size(&self) -> UVec2 {
         // UNWRAP: panic on purpose
-        let hdr = self.hdr_texture.read().unwrap();
+        let hdr = self.hdr_texture.read().expect("hdr_texture read");
         let w = hdr.width();
         let h = hdr.height();
         UVec2::new(w, h)
@@ -1395,7 +1455,12 @@ impl Stage {
             .modify(|cfg| cfg.resolution = size);
         let hdr_texture = Texture::create_hdr_texture(self.device(), size.x, size.y, 1);
         let sample_count = self.msaa_sample_count.load(Ordering::Relaxed);
-        if let Some(msaa_view) = self.msaa_render_target.write().unwrap().as_mut() {
+        if let Some(msaa_view) = self
+            .msaa_render_target
+            .write()
+            .expect("msaa_render_target write")
+            .as_mut()
+        {
             *msaa_view = create_msaa_textureview(
                 self.device(),
                 size.x,
@@ -1406,7 +1471,7 @@ impl Stage {
         }
 
         // UNWRAP: panic on purpose
-        *self.depth_texture.write().unwrap() = Texture::create_depth_texture(
+        *self.depth_texture.write().expect("depth_texture write") = Texture::create_depth_texture(
             self.device(),
             size.x,
             size.y,
@@ -1416,10 +1481,18 @@ impl Stage {
         self.bloom.set_hdr_texture(self.runtime(), &hdr_texture);
         self.tonemapping
             .set_hdr_texture(self.device(), &hdr_texture);
-        *self.hdr_texture.write().unwrap() = hdr_texture;
+        *self.hdr_texture.write().expect("hdr_texture write") = hdr_texture;
 
-        let _ = self.skybox_bindgroup.lock().unwrap().take();
-        let _ = self.textures_bindgroup.lock().unwrap().take();
+        let _ = self
+            .skybox_bindgroup
+            .lock()
+            .expect("skybox_bindgroup lock")
+            .take();
+        let _ = self
+            .textures_bindgroup
+            .lock()
+            .expect("textures_bindgroup lock")
+            .take();
     }
 
     pub fn with_size(self, size: UVec2) -> Self {
@@ -1476,7 +1549,7 @@ impl Stage {
     /// drawn each frame.
     pub fn add_primitive(&self, primitive: &Primitive) -> usize {
         // UNWRAP: if we can't acquire the lock we want to panic.
-        let mut draws = self.draw_calls.write().unwrap();
+        let mut draws = self.draw_calls.write().expect("draw_calls write");
         draws.add_primitive(primitive)
     }
 
@@ -1485,7 +1558,7 @@ impl Stage {
     ///
     /// Returns the number of primitives added.
     pub fn remove_primitive(&self, primitive: &Primitive) -> usize {
-        let mut draws = self.draw_calls.write().unwrap();
+        let mut draws = self.draw_calls.write().expect("draw_calls write");
         draws.remove_primitive(primitive)
     }
 
@@ -1494,7 +1567,7 @@ impl Stage {
     /// This determines the order in which [`Primitive`]s are drawn each frame.
     pub fn sort_primitive(&self, f: impl Fn(&Primitive, &Primitive) -> std::cmp::Ordering) {
         // UNWRAP: panic on purpose
-        let mut guard = self.draw_calls.write().unwrap();
+        let mut guard = self.draw_calls.write().expect("draw_calls write");
         guard.sort_primitives(f);
     }
 
@@ -1502,7 +1575,12 @@ impl Stage {
     pub fn get_depth_texture(&self) -> DepthTexture {
         DepthTexture {
             runtime: self.runtime().clone(),
-            texture: self.depth_texture.read().unwrap().texture.clone(),
+            texture: self
+                .depth_texture
+                .read()
+                .expect("depth_texture read")
+                .texture
+                .clone(),
         }
     }
 
@@ -1514,11 +1592,14 @@ impl Stage {
     /// Render the staged scene into the given view.
     pub fn render(&self, view: &wgpu::TextureView) {
         // UNWRAP: POP
-        let background_color = *self.background_color.read().unwrap();
+        let background_color = *self.background_color.read().expect("background_color read");
         // UNWRAP: POP
-        let msaa_target = self.msaa_render_target.read().unwrap();
+        let msaa_target = self
+            .msaa_render_target
+            .read()
+            .expect("msaa_render_target read");
         let clear_colors = self.clear_color_attachments.load(Ordering::Relaxed);
-        let hdr_texture = self.hdr_texture.read().unwrap();
+        let hdr_texture = self.hdr_texture.read().expect("hdr_texture read");
 
         let mk_ops = |store| wgpu::Operations {
             load: if clear_colors {
@@ -1544,7 +1625,7 @@ impl Stage {
             }
         };
 
-        let depth_texture = self.depth_texture.read().unwrap();
+        let depth_texture = self.depth_texture.read().expect("depth_texture read");
         let clear_depth = self.clear_depth_attachments.load(Ordering::Relaxed);
         let render_pass_depth_attachment = wgpu::RenderPassDepthStencilAttachment {
             view: &depth_texture.view,
@@ -1558,7 +1639,10 @@ impl Stage {
             }),
             stencil_ops: None,
         };
-        let pipeline_guard = self.primitive_pipeline.read().unwrap();
+        let pipeline_guard = self
+            .primitive_pipeline
+            .read()
+            .expect("primitive_pipeline read");
         let (_submission_index, maybe_indirect_buffer) = StageRendering {
             pipeline: &pipeline_guard,
             stage: self,
@@ -1580,7 +1664,7 @@ impl Stage {
             let bloom_mix_texture = self.bloom.get_mix_texture();
             encoder.copy_texture_to_texture(
                 wgpu::TexelCopyTextureInfo {
-                    texture: &self.hdr_texture.read().unwrap().texture,
+                    texture: &self.hdr_texture.read().expect("hdr_texture read").texture,
                     mip_level: 0,
                     origin: wgpu::Origin3d { x: 0, y: 0, z: 0 },
                     aspect: wgpu::TextureAspect::All,
@@ -1610,7 +1694,10 @@ impl Stage {
                     self.device(),
                     self.queue(),
                     view,
-                    &self.stage_slab_buffer.read().unwrap(),
+                    &self
+                        .stage_slab_buffer
+                        .read()
+                        .expect("stage_slab_buffer read"),
                     &indirect_draw_buffer,
                 );
             }
@@ -1745,8 +1832,8 @@ mod test {
     }
 
     #[test]
-    /// Tests that the PBR descriptor is written to slot 0 of the geometry buffer,
-    /// and that it contains what we think it contains.
+    /// Tests that the PBR descriptor is written to slot 0 of the geometry
+    /// buffer, and that it contains what we think it contains.
     fn stage_geometry_desc_sanity() {
         let ctx = Context::headless(100, 100).block();
         let stage = ctx.new_stage();

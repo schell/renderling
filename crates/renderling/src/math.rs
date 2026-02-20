@@ -33,7 +33,8 @@ impl Fetch<UVec2> for Image!(2D, type=f32, sampled, depth, multisampled=true) {
 
     fn fetch(&self, coords: UVec2) -> Self::Output {
         // TODO: check whether this is doing what we think it's doing.
-        // (We think its doing roughly the same thing as the non-multisampled version above)
+        // (We think its doing roughly the same thing as the non-multisampled version
+        // above)
         self.fetch_with(coords, sample_with::sample_index(0))
     }
 }
@@ -671,8 +672,11 @@ pub fn reflect(i: Vec3, n: Vec3) -> Vec3 {
     i - 2.0 * n.dot(i) * n
 }
 
+/// Returns `true` if `p` is inside normalized device coordinates.
+///
+/// x and y are in [-1, 1]; z is in [0, 1] (wgpu / Vulkan / D3D convention).
 pub fn is_inside_clip_space(p: Vec3) -> bool {
-    p.x.abs() <= 1.0 && p.y.abs() <= 1.0 && p.z.abs() <= 1.0
+    p.x.abs() <= 1.0 && p.y.abs() <= 1.0 && p.z >= 0.0 && p.z <= 1.0
 }
 
 pub const fn convex_mesh([p0, p1, p2, p3, p4, p5, p6, p7]: [Vec3; 8]) -> [Vec3; 36] {
@@ -686,8 +690,9 @@ pub const fn convex_mesh([p0, p1, p2, p3, p4, p5, p6, p7]: [Vec3; 8]) -> [Vec3; 
     ]
 }
 
-/// An PCG PRNG that is optimized for GPUs, in that it is fast to evaluate and accepts
-/// sequential ids as it's initial state without sacrificing on RNG quality.
+/// An PCG PRNG that is optimized for GPUs, in that it is fast to evaluate and
+/// accepts sequential ids as it's initial state without sacrificing on RNG
+/// quality.
 ///
 /// * <https://www.reedbeta.com/blog/hash-functions-for-gpu-rendering/>
 /// * <https://jcgt.org/published/0009/03/02/>
@@ -744,8 +749,9 @@ impl GpuRng {
     }
 }
 
-/// Convert a pixel coordinate in screen space (origin is top left, Y increases downwards)
-/// to normalized device coordinates (origin is center, Y increses upwards).
+/// Convert a pixel coordinate in screen space (origin is top left, Y increases
+/// downwards) to normalized device coordinates (origin is center, Y increses
+/// upwards).
 pub fn convert_pixel_to_ndc(pixel_coord: Vec2, viewport_size: UVec2) -> Vec2 {
     // Normalize the point to the range [0.0, 1.0];
     let mut normalized = pixel_coord / viewport_size.as_vec2();

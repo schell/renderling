@@ -534,7 +534,7 @@ impl Context {
             depth_or_array_layers: size.z,
         };
         crate::atlas::check_size(size);
-        self.stage_config.write().unwrap().atlas_size = size;
+        self.stage_config.write().expect("stage_config write").atlas_size = size;
         self
     }
 
@@ -564,7 +564,7 @@ impl Context {
             depth_or_array_layers: size.z,
         };
         crate::atlas::check_size(size);
-        self.stage_config.write().unwrap().shadow_map_atlas_size = size;
+        self.stage_config.write().expect("stage_config write").shadow_map_atlas_size = size;
         self
     }
 
@@ -588,7 +588,7 @@ impl Context {
     /// If set to **true**, all compute culling, including frustum and occlusion culling,
     /// will **not** run.
     pub fn set_use_direct_draw(&self, use_direct_drawing: bool) {
-        self.stage_config.write().unwrap().use_compute_culling = !use_direct_drawing;
+        self.stage_config.write().expect("stage_config write").use_compute_culling = !use_direct_drawing;
     }
 
     /// Sets the use of direct drawing.
@@ -604,7 +604,7 @@ impl Context {
 
     /// Returns whether direct drawing is used.
     pub fn get_use_direct_draw(&self) -> bool {
-        !self.stage_config.read().unwrap().use_compute_culling
+        !self.stage_config.read().expect("stage_config read").use_compute_culling
     }
 
     /// Creates and returns a new [`Stage`] renderer.

@@ -314,7 +314,7 @@ impl Atlas {
 
     pub fn len(&self) -> usize {
         // UNWRAP: panic on purpose
-        let layers = self.layers.read().unwrap();
+        let layers = self.layers.read().expect("atlas layers read");
         layers.iter().map(|layer| layer.frames.len()).sum::<usize>()
     }
 
@@ -326,12 +326,12 @@ impl Atlas {
     /// Returns a reference to the current atlas texture array.
     pub fn get_texture(&self) -> impl Deref<Target = Texture> + '_ {
         // UNWRAP: panic on purpose
-        self.texture_array.read().unwrap()
+        self.texture_array.read().expect("atlas texture_array read")
     }
 
     pub fn get_layers(&self) -> impl Deref<Target = Vec<Layer>> + '_ {
         // UNWRAP: panic on purpose
-        self.layers.read().unwrap()
+        self.layers.read().expect("atlas layers read")
     }
 
     /// Reset this atlas with all new images.
@@ -341,8 +341,8 @@ impl Atlas {
         log::debug!("setting images");
         {
             // UNWRAP: panic on purpose
-            let texture = self.texture_array.read().unwrap();
-            let mut guard = self.layers.write().unwrap();
+            let texture = self.texture_array.read().expect("atlas texture_array read");
+            let mut guard = self.layers.write().expect("atlas layers write");
             let layers: &mut Vec<_> = guard.as_mut();
             let new_layers =
                 vec![Layer::default(); texture.texture.size().depth_or_array_layers as usize];
@@ -353,7 +353,7 @@ impl Atlas {
 
     pub fn get_size(&self) -> wgpu::Extent3d {
         // UNWRAP: POP
-        self.texture_array.read().unwrap().texture.size()
+        self.texture_array.read().expect("atlas texture_array read").texture.size()
     }
 
     /// Add the given images
@@ -362,8 +362,8 @@ impl Atlas {
         images: impl IntoIterator<Item = &'a AtlasImage>,
     ) -> Result<Vec<AtlasTexture>, AtlasError> {
         // UNWRAP: POP
-        let mut layers = self.layers.write().unwrap();
-        let mut texture_array = self.texture_array.write().unwrap();
+        let mut layers = self.layers.write().expect("atlas layers write");
+        let mut texture_array = self.texture_array.write().expect("atlas texture_array write");
         let extent = texture_array.texture.size();
 
         let newly_packed_layers = pack_images(&layers, images, extent)
@@ -411,8 +411,8 @@ impl Atlas {
         runtime: impl AsRef<WgpuRuntime>,
         extent: wgpu::Extent3d,
     ) -> Result<(), AtlasError> {
-        let mut layers = self.layers.write().unwrap();
-        let mut texture_array = self.texture_array.write().unwrap();
+        let mut layers = self.layers.write().expect("atlas layers write");
+        let mut texture_array = self.texture_array.write().expect("atlas texture_array write");
 
         let newly_packed_layers =
             pack_images(&layers, &[], extent).context(CannotPackTexturesSnafu { size: extent })?;
@@ -443,7 +443,7 @@ impl Atlas {
     pub fn upkeep(&self, runtime: impl AsRef<WgpuRuntime>) -> bool {
         let mut total_dropped = 0;
         {
-            let mut layers = self.layers.write().unwrap();
+            let mut layers = self.layers.write().expect("atlas layers write");
             for (i, layer) in layers.iter_mut().enumerate() {
                 let mut dropped = 0;
                 layer.frames.retain(|entry| {
@@ -530,7 +530,7 @@ impl Atlas {
     #[allow(clippy::await_holding_lock)]
     pub async fn read_images(&self, runtime: impl AsRef<WgpuRuntime>) -> Vec<RgbaImage> {
         let mut images = vec![];
-        for i in 0..self.layers.read().unwrap().len() {
+        for i in 0..self.layers.read().expect("atlas layers read").len() {
             images.push(self.atlas_img(runtime.as_ref(), i as u32).await);
         }
         images
@@ -912,7 +912,7 @@ impl AtlasBlittingOperation {
         let _ = to_atlas.slab.commit();
 
         let to_atlas_texture = to_atlas.get_texture();
-        let mut atlas_slab_buffer = self.atlas_slab_buffer.lock().unwrap();
+        let mut atlas_slab_buffer = self.atlas_slab_buffer.lock().expect("atlas slab buffer lock");
         let atlas_slab_invalid = atlas_slab_buffer.update_if_invalid();
         let from_texture_has_been_replaced = {
             let prev_id = self

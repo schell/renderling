@@ -15,7 +15,8 @@ use crate::{
     material::shader::MaterialDescriptor,
 };
 
-/// Wrapper around the materials slab, which holds material textures in an atlas.
+/// Wrapper around the materials slab, which holds material textures in an
+/// atlas.
 #[derive(Clone)]
 pub struct Materials {
     slab: SlabAllocator<WgpuRuntime>,
@@ -30,7 +31,8 @@ impl AsRef<WgpuRuntime> for Materials {
 }
 
 impl Materials {
-    /// Creates a new `Materials` instance with the specified runtime and atlas size.
+    /// Creates a new `Materials` instance with the specified runtime and atlas
+    /// size.
     ///
     /// # Arguments
     ///
@@ -111,7 +113,8 @@ impl Materials {
 /// ## Note
 ///
 /// Clones of `Material` all point to the same underlying data.
-/// Changing a value on one `Material` will change that value for all clones as well.
+/// Changing a value on one `Material` will change that value for all clones as
+/// well.
 #[derive(Clone)]
 pub struct Material {
     descriptor: Hybrid<MaterialDescriptor>,
@@ -361,18 +364,21 @@ impl Material {
 
     /// Remove the albedo texture.
     ///
-    /// This causes any `[Primitive]` that references this material to fall back to
-    /// using the albedo factor for color.
+    /// This causes any `[Primitive]` that references this material to fall back
+    /// to using the albedo factor for color.
     pub fn remove_albedo_texture(&self) {
         self.descriptor.modify(|d| d.albedo_texture_id = Id::NONE);
-        self.albedo_texture.lock().unwrap().take();
+        self.albedo_texture
+            .lock()
+            .expect("albedo_texture lock")
+            .take();
     }
 
     /// Sets the albedo color texture.
     pub fn set_albedo_texture(&self, texture: &AtlasTexture) -> &Self {
         self.descriptor
             .modify(|d| d.albedo_texture_id = texture.id());
-        *self.albedo_texture.lock().unwrap() = Some(texture.clone());
+        *self.albedo_texture.lock().expect("albedo_texture lock") = Some(texture.clone());
         self
     }
 
@@ -380,18 +386,21 @@ impl Material {
     pub fn with_albedo_texture(self, texture: &AtlasTexture) -> Self {
         self.descriptor
             .modify(|d| d.albedo_texture_id = texture.id());
-        *self.albedo_texture.lock().unwrap() = Some(texture.clone());
+        *self.albedo_texture.lock().expect("albedo_texture lock") = Some(texture.clone());
         self
     }
 
     /// Remove the metallic roughness texture.
     ///
-    /// This causes any `[Renderlet]` that references this material to fall back to
-    /// using the metallic and roughness factors for appearance.
+    /// This causes any `[Renderlet]` that references this material to fall back
+    /// to using the metallic and roughness factors for appearance.
     pub fn remove_metallic_roughness_texture(&self) {
         self.descriptor
             .modify(|d| d.metallic_roughness_texture_id = Id::NONE);
-        self.metallic_roughness_texture.lock().unwrap().take();
+        self.metallic_roughness_texture
+            .lock()
+            .expect("metallic_roughness_texture lock")
+            .take();
     }
 
     /// Sets the metallic roughness texture of the material.
@@ -402,7 +411,10 @@ impl Material {
     pub fn set_metallic_roughness_texture(&self, texture: &AtlasTexture) -> &Self {
         self.descriptor
             .modify(|d| d.metallic_roughness_texture_id = texture.id());
-        *self.metallic_roughness_texture.lock().unwrap() = Some(texture.clone());
+        *self
+            .metallic_roughness_texture
+            .lock()
+            .expect("metallic_roughness_texture lock") = Some(texture.clone());
         self
     }
 
@@ -418,11 +430,14 @@ impl Material {
 
     /// Remove the normal texture.
     ///
-    /// This causes any `[Renderlet]` that references this material to fall back to
-    /// using the default normal mapping.
+    /// This causes any `[Renderlet]` that references this material to fall back
+    /// to using the default normal mapping.
     pub fn remove_normal_texture(&self) {
         self.descriptor.modify(|d| d.normal_texture_id = Id::NONE);
-        self.normal_mapping_texture.lock().unwrap().take();
+        self.normal_mapping_texture
+            .lock()
+            .expect("normal_mapping_texture lock")
+            .take();
     }
 
     /// Sets the normal texture of the material.
@@ -433,7 +448,10 @@ impl Material {
     pub fn set_normal_texture(&self, texture: &AtlasTexture) -> &Self {
         self.descriptor
             .modify(|d| d.normal_texture_id = texture.id());
-        *self.normal_mapping_texture.lock().unwrap() = Some(texture.clone());
+        *self
+            .normal_mapping_texture
+            .lock()
+            .expect("normal_mapping_texture lock") = Some(texture.clone());
         self
     }
 
@@ -449,11 +467,11 @@ impl Material {
 
     /// Remove the ambient occlusion texture.
     ///
-    /// This causes any `[Renderlet]` that references this material to fall back to
-    /// using the default ambient occlusion.
+    /// This causes any `[Renderlet]` that references this material to fall back
+    /// to using the default ambient occlusion.
     pub fn remove_ambient_occlusion_texture(&self) {
         self.descriptor.modify(|d| d.ao_texture_id = Id::NONE);
-        self.ao_texture.lock().unwrap().take();
+        self.ao_texture.lock().expect("ao_texture lock").take();
     }
 
     /// Sets the ambient occlusion texture of the material.
@@ -463,7 +481,7 @@ impl Material {
     /// * `texture` - A reference to the ambient occlusion `AtlasTexture`.
     pub fn set_ambient_occlusion_texture(&self, texture: &AtlasTexture) -> &Self {
         self.descriptor.modify(|d| d.ao_texture_id = texture.id());
-        *self.ao_texture.lock().unwrap() = Some(texture.clone());
+        *self.ao_texture.lock().expect("ao_texture lock") = Some(texture.clone());
         self
     }
 
@@ -479,11 +497,14 @@ impl Material {
 
     /// Remove the emissive texture.
     ///
-    /// This causes any `[Renderlet]` that references this material to fall back to
-    /// using the emissive factor for appearance.
+    /// This causes any `[Renderlet]` that references this material to fall back
+    /// to using the emissive factor for appearance.
     pub fn remove_emissive_texture(&self) {
         self.descriptor.modify(|d| d.emissive_texture_id = Id::NONE);
-        self.emissive_texture.lock().unwrap().take();
+        self.emissive_texture
+            .lock()
+            .expect("emissive_texture lock")
+            .take();
     }
 
     /// Sets the emissive texture of the material.
@@ -494,7 +515,7 @@ impl Material {
     pub fn set_emissive_texture(&self, texture: &AtlasTexture) -> &Self {
         self.descriptor
             .modify(|d| d.emissive_texture_id = texture.id());
-        *self.emissive_texture.lock().unwrap() = Some(texture.clone());
+        *self.emissive_texture.lock().expect("emissive_texture lock") = Some(texture.clone());
         self
     }
 

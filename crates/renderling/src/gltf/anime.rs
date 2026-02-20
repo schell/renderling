@@ -249,8 +249,7 @@ impl Tween {
             .keyframes
             .iter()
             .enumerate()
-            .filter(|(_, keyframe)| keyframe.0 <= time)
-            .next_back())
+            .rfind(|(_, keyframe)| keyframe.0 <= time))
     }
 
     fn get_next_keyframe(
@@ -746,7 +745,10 @@ impl Animator {
                     }
                     TweenProperty::MorphTargetWeights(new_weights) => {
                         if node.morph_weights.array().is_empty() {
-                            log::error!("animation is applied to morph targets but node {node_index} is missing weights");
+                            log::error!(
+                                "animation is applied to morph targets but node {node_index} is \
+                                 missing weights"
+                            );
                         } else {
                             for (i, w) in new_weights.into_iter().enumerate() {
                                 node.morph_weights.set_item(i, w);

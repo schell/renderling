@@ -182,7 +182,10 @@ impl ShadowMap {
         T: IsLight,
         Light: From<T>,
     {
-        let stage_slab_buffer = lighting.geometry_slab_buffer.read().unwrap();
+        let stage_slab_buffer = lighting
+            .geometry_slab_buffer
+            .read()
+            .expect("geometry_slab_buffer read");
         let is_point_light = analytical_light_bundle.style() == LightStyle::Point;
         let count = if is_point_light { 6 } else { 1 };
         let atlas = &lighting.shadow_map_atlas;
@@ -255,9 +258,9 @@ impl ShadowMap {
     /// Update the `ShadowMap`, rendering the given [`Primitive`]s to the map as
     /// shadow casters.
     ///
-    /// The `ShadowMap` contains a weak reference to the [`AnalyticalLight`] used to create
-    /// it. Updates made to this `AnalyticalLight` will automatically propogate to this
-    /// `ShadowMap`.
+    /// The `ShadowMap` contains a weak reference to the [`AnalyticalLight`]
+    /// used to create it. Updates made to this `AnalyticalLight` will
+    /// automatically propogate to this `ShadowMap`.
     ///
     /// ## Errors
     /// If the `AnalyticalLight` used to create this `ShadowMap` has been
@@ -284,8 +287,14 @@ impl ShadowMap {
 
         let device = lighting.light_slab.device();
         let queue = lighting.light_slab.queue();
-        let mut light_slab_buffer = lighting.light_slab_buffer.write().unwrap();
-        let mut stage_slab_buffer = lighting.geometry_slab_buffer.write().unwrap();
+        let mut light_slab_buffer = lighting
+            .light_slab_buffer
+            .write()
+            .expect("light_slab_buffer write");
+        let mut stage_slab_buffer = lighting
+            .geometry_slab_buffer
+            .write()
+            .expect("geometry_slab_buffer write");
 
         let bindgroup = {
             light_slab_buffer.update_if_invalid();
@@ -399,8 +408,9 @@ mod test {
             .with_msaa_sample_count(4);
 
         // let hdr_path =
-        //     std::path::PathBuf::from(std::env!("CARGO_WORKSPACE_DIR")).join("img/hdr/night.hdr");
-        // let hdr_img = AtlasImage::from_hdr_path(hdr_path).unwrap();
+        //     std::path::PathBuf::from(std::env!("CARGO_WORKSPACE_DIR")).join("img/hdr/
+        // night.hdr"); let hdr_img =
+        // AtlasImage::from_hdr_path(hdr_path).unwrap();
 
         // let skybox = Skybox::new(&ctx, hdr_img, camera.id());
         // stage.set_skybox(skybox);
@@ -542,10 +552,11 @@ mod test {
         //     use crate::texture::DepthTexture;
         //     use image::Luma;
         //     {
-        //         // Ensure the state of the "update texture", which receives the depth of the scene on update
-        //         let shadow_map_update_texture =
-        //             DepthTexture::try_new_from(&ctx, shadows.update_texture.clone()).unwrap();
-        //         let mut shadow_map_update_img = shadow_map_update_texture.read_image().unwrap();
+        //         // Ensure the state of the "update texture", which receives the depth
+        // of the scene on update         let shadow_map_update_texture =
+        //             DepthTexture::try_new_from(&ctx,
+        // shadows.update_texture.clone()).unwrap();         let mut
+        // shadow_map_update_img = shadow_map_update_texture.read_image().unwrap();
         //         img_diff::normalize_gray_img(&mut shadow_map_update_img);
         //         img_diff::save(
         //             "shadows/shadow_mapping_sanity/shadows_update_texture.png",
@@ -555,10 +566,10 @@ mod test {
 
         //     {
         //         let lighting: &Lighting = stage.as_ref();
-        //         let shadow_depth_buffer = lighting.shadow_map_atlas.atlas_img_buffer(&ctx, 0);
-        //         let shadow_depth_img = shadow_depth_buffer
-        //             .into_image::<f32, Luma<f32>>(ctx.get_device())
-        //             .unwrap();
+        //         let shadow_depth_buffer =
+        // lighting.shadow_map_atlas.atlas_img_buffer(&ctx, 0);         let
+        // shadow_depth_img = shadow_depth_buffer             .into_image::<f32,
+        // Luma<f32>>(ctx.get_device())             .unwrap();
         //         let shadow_depth_img = shadow_depth_img.into_luma8();
         //         let mut depth_img = shadow_depth_img.clone();
         //         img_diff::normalize_gray_img(&mut depth_img);

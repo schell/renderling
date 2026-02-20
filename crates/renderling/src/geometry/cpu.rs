@@ -83,8 +83,9 @@ impl From<&Vertices<GpuOnlyArray>> for Vertices<GpuOnlyArray> {
 impl Vertices {
     /// Stage a new array of vertex data on the GPU.
     ///
-    /// The resulting `Vertices` will live on the GPU and CPU, allowing for modification.
-    /// If you would like to unload the CPU side, use [`Vertices::into_gpu_only`].
+    /// The resulting `Vertices` will live on the GPU and CPU, allowing for
+    /// modification. If you would like to unload the CPU side, use
+    /// [`Vertices::into_gpu_only`].
     pub(crate) fn new(
         slab: &SlabAllocator<WgpuRuntime>,
         vertices: impl IntoIterator<Item = Vertex>,
@@ -96,8 +97,8 @@ impl Vertices {
 
     /// Unload the CPU side of vertex data.
     ///
-    /// After this operation the data can still be updated using [`Vertices::set_item`],
-    /// but it cannot be modified in-place.
+    /// After this operation the data can still be updated using
+    /// [`Vertices::set_item`], but it cannot be modified in-place.
     pub fn into_gpu_only(self) -> Vertices<GpuOnlyArray> {
         Vertices {
             inner: self.inner.into_gpu_only(),
@@ -203,8 +204,9 @@ where
 impl Indices {
     /// Stage a new array of index data on the GPU.
     ///
-    /// The resulting `Indices` will live on the GPU and CPU, allowing for modification.
-    /// If you would like to unload the CPU side, use [`Indices::into_gpu_only`].
+    /// The resulting `Indices` will live on the GPU and CPU, allowing for
+    /// modification. If you would like to unload the CPU side, use
+    /// [`Indices::into_gpu_only`].
     pub fn new(geometry: &Geometry, indices: impl IntoIterator<Item = u32>) -> Self {
         Indices {
             inner: geometry.slab.new_array(indices),
@@ -257,7 +259,8 @@ impl MorphTargets {
             arrays,
         }
     }
-    /// Returns a pointer to the underlying morph targets data on the GPU.                    
+    /// Returns a pointer to the underlying morph targets data on the GPU.
+    ///
     pub fn array(&self) -> Array<Array<MorphTarget>> {
         self.arrays.array()
     }
@@ -285,7 +288,8 @@ impl MorphTargetWeights {
         }
     }
 
-    /// Returns a pointer to the underlying morph targets weights data on the GPU.            
+    /// Returns a pointer to the underlying morph targets weights data on the
+    /// GPU.
     pub fn array(&self) -> Array<f32> {
         self.inner.array()
     }
@@ -392,7 +396,7 @@ impl Geometry {
         log::info!("using camera: {id:?}");
         // Save a clone so we never lose the active camera, even if the user drops it
         self.descriptor.modify(|cfg| cfg.camera_id = id);
-        *self.camera.lock().unwrap() = Some(camera.clone());
+        *self.camera.lock().expect("geometry camera lock") = Some(camera.clone());
     }
 
     /// Stage a new transform.

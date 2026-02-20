@@ -944,7 +944,7 @@ impl std::future::Future for MappedBuffer<'_> {
         cx: &mut core::task::Context<'_>,
     ) -> core::task::Poll<Self::Output> {
         let this = self.deref();
-        if let Some(result) = this.result.lock().unwrap().take() {
+        if let Some(result) = this.result.lock().expect("texture result lock").take() {
             std::task::Poll::Ready(result.map(|()| {
                 let padded_buffer = this.buffer_slice.get_mapped_range();
                 let mut unpadded_buffer = vec![];
@@ -958,7 +958,7 @@ impl std::future::Future for MappedBuffer<'_> {
             }))
         } else {
             let waker = cx.waker().clone();
-            *this.waker.lock().unwrap() = Some(waker);
+            *this.waker.lock().expect("texture waker lock") = Some(waker);
             std::task::Poll::Pending
         }
     }
@@ -981,9 +981,9 @@ impl CopiedTextureBuffer {
             let waker = waker.clone();
             let result = result.clone();
             move |res| {
-                let mut result = result.lock().unwrap();
+                let mut result = result.lock().expect("texture result lock");
                 *result = Some(res);
-                if let Some(waker) = waker.lock().unwrap().take() {
+                if let Some(waker) = waker.lock().expect("texture waker lock").take() {
                     waker.wake();
                 }
             }

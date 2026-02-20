@@ -157,7 +157,7 @@ impl DebugOverlay {
             });
             render_pass.set_pipeline(&self.pipeline);
             // UNWRAP: panic on purpose
-            let mut guard = self.bindgroup.lock().unwrap();
+            let mut guard = self.bindgroup.lock().expect("debug bindgroup lock");
             if guard.is_none() {
                 *guard = Some(self.create_bindgroup(device, slab_buffer, indirect_draw_buffer));
             }

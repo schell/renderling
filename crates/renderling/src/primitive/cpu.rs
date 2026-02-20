@@ -78,7 +78,7 @@ impl Primitive {
         let vertices = vertices.into();
         let array = vertices.array();
         self.descriptor.modify(|d| d.vertices_array = array);
-        *self.vertices.lock().unwrap() = Some(vertices.clone());
+        *self.vertices.lock().expect("vertices lock") = Some(vertices.clone());
         self
     }
 
@@ -96,7 +96,7 @@ impl Primitive {
         let indices = indices.into();
         let array = indices.array();
         self.descriptor.modify(|d| d.indices_array = array);
-        *self.indices.lock().unwrap() = Some(indices.clone());
+        *self.indices.lock().expect("indices lock") = Some(indices.clone());
         self
     }
 
@@ -108,7 +108,7 @@ impl Primitive {
 
     /// Remove the indices from this primitive.
     pub fn remove_indices(&self) -> &Self {
-        *self.indices.lock().unwrap() = None;
+        *self.indices.lock().expect("indices lock") = None;
         self.descriptor.modify(|d| d.indices_array = Array::NONE);
         self
     }
@@ -193,7 +193,7 @@ impl Primitive {
     pub fn set_transform(&self, transform: impl Into<Transform>) -> &Self {
         let transform = transform.into();
         self.descriptor.modify(|d| d.transform_id = transform.id());
-        *self.transform.lock().unwrap() = Some(transform.clone());
+        *self.transform.lock().expect("transform lock") = Some(transform.clone());
         self
     }
 
@@ -211,7 +211,7 @@ impl Primitive {
     ///
     /// Returns a reference to the current `Transform`, if any.
     pub fn transform(&self) -> impl Deref<Target = Option<Transform>> + '_ {
-        self.transform.lock().unwrap()
+        self.transform.lock().expect("transform lock")
     }
 
     /// Remove the transform from this primitive.
@@ -219,7 +219,7 @@ impl Primitive {
     /// This effectively makes the transform the identity.
     pub fn remove_transform(&self) -> &Self {
         self.descriptor.modify(|d| d.transform_id = Id::NONE);
-        *self.transform.lock().unwrap() = None;
+        *self.transform.lock().expect("transform lock") = None;
         self
     }
 }
@@ -230,7 +230,7 @@ impl Primitive {
     pub fn set_material(&self, material: impl Into<Material>) -> &Self {
         let material = material.into();
         self.descriptor.modify(|d| d.material_id = material.id());
-        *self.material.lock().unwrap() = Some(material);
+        *self.material.lock().expect("material lock") = Some(material);
         self
     }
 
@@ -244,13 +244,13 @@ impl Primitive {
     ///
     /// Returns a reference to the current `Material`, if any.
     pub fn material(&self) -> impl Deref<Target = Option<Material>> + '_ {
-        self.material.lock().unwrap()
+        self.material.lock().expect("material lock")
     }
 
     /// Remove the material from this primitive.
     pub fn remove_material(&self) -> &Self {
         self.descriptor.modify(|d| d.material_id = Id::NONE);
-        *self.material.lock().unwrap() = None;
+        *self.material.lock().expect("material lock") = None;
         self
     }
 }
@@ -261,7 +261,7 @@ impl Primitive {
     pub fn set_skin(&self, skin: impl Into<Skin>) -> &Self {
         let skin = skin.into();
         self.descriptor.modify(|d| d.skin_id = skin.id());
-        *self.skin.lock().unwrap() = Some(skin.clone());
+        *self.skin.lock().expect("skin lock") = Some(skin.clone());
         self
     }
 
@@ -275,13 +275,13 @@ impl Primitive {
     ///
     /// Returns a reference to the current `Skin`, if any.
     pub fn skin(&self) -> impl Deref<Target = Option<Skin>> + '_ {
-        self.skin.lock().unwrap()
+        self.skin.lock().expect("skin lock")
     }
 
     /// Remove the skin from this primitive.
     pub fn remove_skin(&self) -> &Self {
         self.descriptor.modify(|d| d.skin_id = Id::NONE);
-        *self.skin.lock().unwrap() = None;
+        *self.skin.lock().expect("skin lock") = None;
         self
     }
 }
@@ -300,7 +300,8 @@ impl Primitive {
             d.morph_targets = morph_targets.array();
             d.morph_weights = weights.array();
         });
-        *self.morph_targets.lock().unwrap() = Some((morph_targets.clone(), weights.clone()));
+        *self.morph_targets.lock().expect("morph_targets lock") =
+            Some((morph_targets.clone(), weights.clone()));
         self
     }
 
@@ -316,11 +317,12 @@ impl Primitive {
 
     /// Get the morph targets and weights.
     ///
-    /// Returns a reference to the current `MorphTargets` and `MorphTargetsWeights`, if any.
+    /// Returns a reference to the current `MorphTargets` and
+    /// `MorphTargetsWeights`, if any.
     pub fn morph_targets(
         &self,
     ) -> impl Deref<Target = Option<(MorphTargets, MorphTargetWeights)>> + '_ {
-        self.morph_targets.lock().unwrap()
+        self.morph_targets.lock().expect("morph_targets lock")
     }
 
     /// Remove the morph targets and weights from this primitive.
@@ -329,7 +331,7 @@ impl Primitive {
             d.morph_targets = Array::NONE;
             d.morph_weights = Array::NONE;
         });
-        *self.morph_targets.lock().unwrap() = None;
+        *self.morph_targets.lock().expect("morph_targets lock") = None;
         self
     }
 }

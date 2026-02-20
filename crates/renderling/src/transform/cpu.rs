@@ -63,7 +63,8 @@ impl Transform {
     ///
     /// # Arguments
     ///
-    /// - `f`: A closure that takes a mutable reference to the translation vector and returns a value of type `T`.
+    /// - `f`: A closure that takes a mutable reference to the translation
+    ///   vector and returns a value of type `T`.
     pub fn modify_translation<T: 'static>(&self, f: impl FnOnce(&mut Vec3) -> T) -> T {
         self.descriptor.modify(|t| f(&mut t.translation))
     }
@@ -98,7 +99,8 @@ impl Transform {
     ///
     /// # Arguments
     ///
-    /// - `f`: A closure that takes a mutable reference to the rotation quaternion and returns a value of type `T`.
+    /// - `f`: A closure that takes a mutable reference to the rotation
+    ///   quaternion and returns a value of type `T`.
     pub fn modify_rotation<T: 'static>(&self, f: impl FnOnce(&mut Quat) -> T) -> T {
         self.descriptor.modify(|t| f(&mut t.rotation))
     }
@@ -132,7 +134,8 @@ impl Transform {
     ///
     /// # Arguments
     ///
-    /// - `f`: A closure that takes a mutable reference to the scale vector and returns a value of type `T`.
+    /// - `f`: A closure that takes a mutable reference to the scale vector and
+    ///   returns a value of type `T`.
     pub fn modify_scale<T: 'static>(&self, f: impl FnOnce(&mut Vec3) -> T) -> T {
         self.descriptor.modify(|t| f(&mut t.scale))
     }
@@ -222,17 +225,21 @@ impl NestedTransform {
 
     /// Get the _local_ translation of the transform.
     pub fn local_translation(&self) -> Vec3 {
-        self.local_transform.read().unwrap().translation
+        self.local_transform
+            .read()
+            .expect("local_transform read")
+            .translation
     }
 
     /// Modify the _local_ translation of the transform.
     ///
     /// # Arguments
     ///
-    /// - `f`: A closure that takes a mutable reference to the translation vector and returns a value of type `T`.
+    /// - `f`: A closure that takes a mutable reference to the translation
+    ///   vector and returns a value of type `T`.
     pub fn modify_local_translation<T>(&self, f: impl FnOnce(&mut Vec3) -> T) -> T {
         let t = {
-            let mut local_transform = self.local_transform.write().unwrap();
+            let mut local_transform = self.local_transform.write().expect("local_transform write");
             f(&mut local_transform.translation)
         };
         self.mark_dirty();
@@ -245,7 +252,10 @@ impl NestedTransform {
     ///
     /// - `translation`: A 3d translation vector `Vec3`.
     pub fn set_local_translation(&self, translation: impl Into<Vec3>) -> &Self {
-        self.local_transform.write().unwrap().translation = translation.into();
+        self.local_transform
+            .write()
+            .expect("local_transform write")
+            .translation = translation.into();
         self.mark_dirty();
         self
     }
@@ -262,17 +272,21 @@ impl NestedTransform {
 
     /// Get the _local_ rotation of the transform.
     pub fn local_rotation(&self) -> Quat {
-        self.local_transform.read().unwrap().rotation
+        self.local_transform
+            .read()
+            .expect("local_transform read")
+            .rotation
     }
 
     /// Modify the _local_ rotation of the transform.
     ///
     /// # Arguments
     ///
-    /// - `f`: A closure that takes a mutable reference to the rotation quaternion and returns a value of type `T`.
+    /// - `f`: A closure that takes a mutable reference to the rotation
+    ///   quaternion and returns a value of type `T`.
     pub fn modify_local_rotation<T>(&self, f: impl FnOnce(&mut Quat) -> T) -> T {
         let t = {
-            let mut local_transform = self.local_transform.write().unwrap();
+            let mut local_transform = self.local_transform.write().expect("local_transform write");
             f(&mut local_transform.rotation)
         };
         self.mark_dirty();
@@ -285,7 +299,10 @@ impl NestedTransform {
     ///
     /// - `rotation`: A quaternion representing the rotation.
     pub fn set_local_rotation(&self, rotation: impl Into<Quat>) -> &Self {
-        self.local_transform.write().unwrap().rotation = rotation.into();
+        self.local_transform
+            .write()
+            .expect("local_transform write")
+            .rotation = rotation.into();
         self.mark_dirty();
         self
     }
@@ -302,17 +319,21 @@ impl NestedTransform {
 
     /// Get the _local_ scale of the transform.
     pub fn local_scale(&self) -> Vec3 {
-        self.local_transform.read().unwrap().scale
+        self.local_transform
+            .read()
+            .expect("local_transform read")
+            .scale
     }
 
     /// Modify the _local_ scale of the transform.
     ///
     /// # Arguments
     ///
-    /// - `f`: A closure that takes a mutable reference to the scale vector and returns a value of type `T`.
+    /// - `f`: A closure that takes a mutable reference to the scale vector and
+    ///   returns a value of type `T`.
     pub fn modify_local_scale<T>(&self, f: impl FnOnce(&mut Vec3) -> T) -> T {
         let t = {
-            let mut local_transform = self.local_transform.write().unwrap();
+            let mut local_transform = self.local_transform.write().expect("local_transform write");
             f(&mut local_transform.scale)
         };
         self.mark_dirty();
@@ -325,7 +346,10 @@ impl NestedTransform {
     ///
     /// - `scale`: A 3d scale vector `Vec3`.
     pub fn set_local_scale(&self, scale: impl Into<Vec3>) -> &Self {
-        self.local_transform.write().unwrap().scale = scale.into();
+        self.local_transform
+            .write()
+            .expect("local_transform write")
+            .scale = scale.into();
         self.mark_dirty();
         self
     }
@@ -351,7 +375,7 @@ impl NestedTransform {
     ///
     /// This traverses the heirarchy and computes the result.
     pub fn global_descriptor(&self) -> TransformDescriptor {
-        let maybe_parent_guard = self.parent.read().unwrap();
+        let maybe_parent_guard = self.parent.read().expect("parent read");
         let transform = self.local_descriptor();
         let parent_transform = maybe_parent_guard
             .as_ref()
@@ -362,14 +386,14 @@ impl NestedTransform {
 
     /// Return the descriptor of the _local_ tarnsform.
     pub fn local_descriptor(&self) -> TransformDescriptor {
-        *self.local_transform.read().unwrap()
+        *self.local_transform.read().expect("local_transform read")
     }
 
     fn mark_dirty(&self) {
         self.global_transform
             .descriptor
             .set(self.global_descriptor());
-        for child in self.children.read().unwrap().iter() {
+        for child in self.children.read().expect("children read").iter() {
             child.mark_dirty();
         }
     }
@@ -387,25 +411,31 @@ impl NestedTransform {
     }
 
     pub fn add_child(&self, node: &NestedTransform) {
-        *node.parent.write().unwrap() = Some(self.clone());
+        *node.parent.write().expect("parent write") = Some(self.clone());
         node.mark_dirty();
-        self.children.write().unwrap().push(node.clone());
+        self.children
+            .write()
+            .expect("children write")
+            .push(node.clone());
     }
 
     pub fn remove_child(&self, node: &NestedTransform) {
-        self.children.write().unwrap().retain_mut(|child| {
-            if child.global_transform.id() == node.global_transform.id() {
-                node.mark_dirty();
-                let _ = node.parent.write().unwrap().take();
-                false
-            } else {
-                true
-            }
-        });
+        self.children
+            .write()
+            .expect("children write")
+            .retain_mut(|child| {
+                if child.global_transform.id() == node.global_transform.id() {
+                    node.mark_dirty();
+                    let _ = node.parent.write().expect("parent write").take();
+                    false
+                } else {
+                    true
+                }
+            });
     }
 
     /// Return a clone of the parent `NestedTransform`, if any.
     pub fn parent(&self) -> Option<NestedTransform> {
-        self.parent.read().unwrap().clone()
+        self.parent.read().expect("parent read").clone()
     }
 }
