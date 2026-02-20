@@ -6,10 +6,7 @@ mod target {
     pub const ENTRY_POINT: &str =
         "light::shader::light_tiling_compute_tile_min_and_max_depth_multisampled";
     pub fn descriptor() -> wgpu::ShaderModuleDescriptor<'static> {
-        wgpu::include_spirv!(
-            "../../shaders/light-shader-light_tiling_compute_tile_min_and_max_depth_multisampled.\
-             spv"
-        )
+        wgpu :: include_spirv ! ("../../shaders/light-shader-light_tiling_compute_tile_min_and_max_depth_multisampled.spv")
     }
     pub fn linkage(device: &wgpu::Device) -> super::ShaderLinkage {
         log::debug!(
@@ -27,10 +24,7 @@ mod target {
     pub const ENTRY_POINT: &str =
         "lightshaderlight_tiling_compute_tile_min_and_max_depth_multisampled";
     pub fn descriptor() -> wgpu::ShaderModuleDescriptor<'static> {
-        wgpu::include_wgsl!(
-            "../../shaders/light-shader-light_tiling_compute_tile_min_and_max_depth_multisampled.\
-             wgsl"
-        )
+        wgpu :: include_wgsl ! ("../../shaders/light-shader-light_tiling_compute_tile_min_and_max_depth_multisampled.wgsl")
     }
     pub fn linkage(device: &wgpu::Device) -> super::ShaderLinkage {
         log::debug!(

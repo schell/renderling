@@ -772,6 +772,65 @@ fn snapshot(ctx: &crate::context::Context, stage: &Stage, path: &str, save: bool
     frame.present();
 }
 
+#[test]
+/// Ensures that setting an ambient light color produces a visibly different
+/// render than the default (zero) ambient.
+fn ambient_light() {
+    let ctx = Context::headless(256, 256).block();
+    let stage = ctx
+        .new_stage()
+        .with_lighting(true)
+        .with_msaa_sample_count(4);
+
+    let doc = stage
+        .load_gltf_document_from_path(
+            crate::test::workspace_dir()
+                .join("gltf")
+                .join("pedestal.glb"),
+        )
+        .unwrap();
+
+    let camera = doc.cameras.first().unwrap();
+    camera.camera.set_projection_and_view(
+        Mat4::perspective_rh(std::f32::consts::FRAC_PI_6, 1.0, 0.1, 15.0),
+        Mat4::look_at_rh(Vec3::new(-7.0, 5.0, 7.0), Vec3::ZERO, Vec3::Y),
+    );
+
+    let position = Vec3::new(1.1, 1.0, 1.1);
+    let dir_light = stage
+        .new_directional_light()
+        .with_direction(-position)
+        .with_color(Vec4::ONE)
+        .with_intensity(Lux::OUTDOOR_FOXS_WEDDING);
+
+    let shadow_map = stage
+        .new_shadow_map(&dir_light, UVec2::splat(256), 0.1, 15.0)
+        .unwrap();
+    shadow_map.update(&stage, doc.renderlets_iter()).unwrap();
+
+    // Render with default ambient (Vec4::ZERO)
+    assert_eq!(stage.ambient_color(), Vec4::ZERO);
+    let frame = ctx.get_next_frame().unwrap();
+    stage.render(&frame.view());
+    let default_img = frame.read_image().block().unwrap();
+    img_diff::assert_img_eq("light/ambient/default.png", default_img.clone());
+    frame.present();
+
+    // Render with orange ambient light
+    stage.set_ambient_color(Vec4::new(1.0, 0.5, 0.0, 0.3));
+    let frame = ctx.get_next_frame().unwrap();
+    stage.render(&frame.view());
+    let orange_img = frame.read_image().block().unwrap();
+    img_diff::assert_img_eq("light/ambient/orange.png", orange_img.clone());
+    frame.present();
+
+    // The ambient light should visibly change the rendered image
+    assert_ne!(
+        default_img, orange_img,
+        "ambient light should visibly affect the rendered image"
+    );
+}
+
 const MAX_LIGHTS: usize = 2usize.pow(10);
 
 #[cfg(feature = "light-tiling-stats")]
