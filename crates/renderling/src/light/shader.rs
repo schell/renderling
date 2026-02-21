@@ -9,11 +9,11 @@
 //!
 //! ## Note
 //!
-//! The glTF spec [1] says directional light is in lux, whereas spot and point are
-//! in candelas. The same goes for this library's shaders, but not a ton of work
-//! has gone into verifying that conversion from these units into radiometric units
-//! is accurate _in any way_. The shaders roughly do a conversion by dividing by 683 [2]
-//! or some other constant involving 683 [3].
+//! The glTF spec [1] says directional light is in lux, whereas spot and point
+//! are in candelas. The same goes for this library's shaders, but not a ton of
+//! work has gone into verifying that conversion from these units into
+//! radiometric units is accurate _in any way_. The shaders roughly do a
+//! conversion by dividing by 683 [2] or some other constant involving 683 [3].
 //!
 //! More work needs to be done here. PRs would be very appreciated.
 //!
@@ -52,6 +52,14 @@ pub struct LightingDescriptor {
     /// `Id` of the [`LightTilingDescriptor`] to use when performing
     /// light tiling.
     pub light_tiling_descriptor_id: Id<LightTilingDescriptor>,
+    /// Global ambient light color and intensity.
+    ///
+    /// XYZ components are the RGB color, W is the intensity.
+    /// The ambient term is added to the final shaded color,
+    /// modulated by the surface albedo and ambient occlusion.
+    ///
+    /// Defaults to `Vec4::ZERO` (no ambient contribution).
+    pub ambient_color: Vec4,
 }
 
 #[derive(Clone, Copy, SlabItem, core::fmt::Debug)]
@@ -186,11 +194,13 @@ pub struct SpotLightCalculation {
     pub frag_to_light_distance: f32,
     /// Unit vector (SpotDir) direction that the light is pointing in
     pub light_direction: Vec3,
-    /// The cosine of the cutoff angle (Phi ϕ) that specifies the spotlight's radius.
+    /// The cosine of the cutoff angle (Phi ϕ) that specifies the spotlight's
+    /// radius.
     ///
     /// Everything inside this angle is lit by the spotlight.
     pub cos_inner_cutoff: f32,
-    /// The cosine of the cutoff angle (Gamma γ) that specifies the spotlight's outer radius.
+    /// The cosine of the cutoff angle (Gamma γ) that specifies the spotlight's
+    /// outer radius.
     ///
     /// Everything outside this angle is not lit by the spotlight.
     ///
@@ -203,21 +213,22 @@ pub struct SpotLightCalculation {
     pub fragment_is_inside_outer_cone: bool,
     /// `outer_cutoff` - `inner_cutoff`
     pub epsilon: f32,
-    /// Cosine of the angle (Theta θ) between `frag_to_light` (LightDir) vector and the
-    /// `light_direction` (SpotDir) vector.
+    /// Cosine of the angle (Theta θ) between `frag_to_light` (LightDir) vector
+    /// and the `light_direction` (SpotDir) vector.
     ///
     /// θ  should be smaller than `outer_cutoff` (Gamma γ) to be
-    /// inside the spotlight, but since these are all cosines of angles, we actually
-    /// compare using `>`.
+    /// inside the spotlight, but since these are all cosines of angles, we
+    /// actually compare using `>`.
     pub cos_theta: f32,
     pub contribution_unclamped: f32,
-    /// The intensity level between `0.0` and `1.0` that should be used to determine
-    /// outgoing radiance.
+    /// The intensity level between `0.0` and `1.0` that should be used to
+    /// determine outgoing radiance.
     pub contribution: f32,
 }
 
 impl SpotLightCalculation {
-    /// Calculate the values required to determine outgoing radiance of a spot light.
+    /// Calculate the values required to determine outgoing radiance of a spot
+    /// light.
     pub fn new(
         spot_light_descriptor: SpotLightDescriptor,
         node_transform: Mat4,
@@ -418,7 +429,8 @@ impl DirectionalLightDescriptor {
         //
         // The maximum should be the `Camera`'s `Frustum::depth()`.
         // TODO: in `DirectionalLightDescriptor::shadow_mapping_projection_and_view`, take Frustum
-        // as a parameter and then figure out the minimal view projection that includes that frustum
+        // as a parameter and then figure out the minimal view projection that includes that
+        // frustum
         z_near: f32,
         // Far limits of the light's reach
         z_far: f32,
@@ -503,9 +515,9 @@ impl PointLightDescriptor {
 ///   - Full moon on a clear night: 0.25 lux.
 ///   - Quarter moon: 0.01 lux
 ///   - Starlight overcast moonless night sky: 0.0001 lux.
-/// * General indoor lighting: Around 100 to 300 lux.                                   
-/// * Office lighting: Typically around 300 to 500 lux.                                 
-/// * Reading or task lighting: Around 500 to 750 lux.                                  
+/// * General indoor lighting: Around 100 to 300 lux.
+/// * Office lighting: Typically around 300 to 500 lux.
+/// * Reading or task lighting: Around 500 to 750 lux.
 /// * Detailed work (e.g., drafting, surgery): 1000 lux or more.
 pub fn radius_of_illumination(intensity_candelas: f32, minimum_illuminance_lux: f32) -> f32 {
     (intensity_candelas / minimum_illuminance_lux).sqrt()
@@ -557,7 +569,8 @@ pub struct LightDescriptor {
     pub light_type: LightStyle,
     /// The index of the light in the lighting slab
     pub index: u32,
-    /// The id of a transform to apply to the position and direction of the light.
+    /// The id of a transform to apply to the position and direction of the
+    /// light.
     ///
     /// This `Id` points to a transform on the lighting slab.
     ///
@@ -642,7 +655,8 @@ pub struct ShadowCalculation {
 }
 
 impl ShadowCalculation {
-    /// Reads various required parameters from the slab and creates a `ShadowCalculation`.
+    /// Reads various required parameters from the slab and creates a
+    /// `ShadowCalculation`.
     pub fn new(
         light_slab: &[u32],
         light: LightDescriptor,
@@ -713,10 +727,10 @@ impl ShadowCalculation {
         if !crate::math::is_inside_clip_space(frag_pos_in_light_space.xyz()) {
             return 0.0;
         }
-        // The range of coordinates in the light's clip space is -1.0 to 1.0 for x and y,
-        // but the texture space is [0, 1], and Y increases downward, so we do this
-        // conversion to flip Y and also normalize to the range [0.0, 1.0].
-        // Z should already be 0.0 to 1.0.
+        // The range of coordinates in the light's clip space is -1.0 to 1.0 for x and
+        // y, but the texture space is [0, 1], and Y increases downward, so we
+        // do this conversion to flip Y and also normalize to the range [0.0,
+        // 1.0]. Z should already be 0.0 to 1.0.
         let proj_coords_uv = (frag_pos_in_light_space.xy() * Vec2::new(1.0, -1.0)
             + Vec2::splat(1.0))
             * Vec2::splat(0.5);
@@ -744,13 +758,14 @@ impl ShadowCalculation {
                 let shadow_map_depth = shadow_map
                     .sample_by_lod(*shadow_map_sampler, proj_coords, 0.0)
                     .x;
-                // To get the current depth at this fragment we simply retrieve the projected vector's z
-                // coordinate which equals the depth of this fragment from the light's perspective.
+                // To get the current depth at this fragment we simply retrieve the projected
+                // vector's z coordinate which equals the depth of this fragment
+                // from the light's perspective.
                 let fragment_depth = frag_pos_in_light_space.z;
 
-                // If the `current_depth`, which is the depth of the fragment from the lights POV, is
-                // greater than the `closest_depth` of the shadow map at that fragment, the fragment
-                // is in shadow
+                // If the `current_depth`, which is the depth of the fragment from the lights
+                // POV, is greater than the `closest_depth` of the shadow map at
+                // that fragment, the fragment is in shadow
                 crate::println!("current_depth: {fragment_depth}");
                 crate::println!("closest_depth: {shadow_map_depth}");
                 let bias = (bias_max * (1.0 - surface_normal.dot(*light_direction))).max(*bias_min);
@@ -853,11 +868,11 @@ impl ShadowCalculation {
 /// shader gets its projection+view matrix from the light stored in a
 /// `ShadowMapDescriptor`.
 ///
-/// Here we want to render as normal forward pass would, with the `PrimitiveDescriptor`
-/// and the `Camera`'s view projection matrix.
+/// Here we want to render as normal forward pass would, with the
+/// `PrimitiveDescriptor` and the `Camera`'s view projection matrix.
 /// ## Note
-/// This shader will likely be expanded to include parts of occlusion culling and order
-/// independent transparency.
+/// This shader will likely be expanded to include parts of occlusion culling
+/// and order independent transparency.
 #[spirv(vertex)]
 pub fn light_tiling_depth_pre_pass(
     // Points at a `Renderlet`.
@@ -1065,7 +1080,8 @@ impl LightTilingInvocation {
         crate::math::convert_pixel_to_ndc(mid_coord, self.tile_grid_size())
     }
 
-    /// Compute the min and max depth of one fragment/invocation for light tiling.
+    /// Compute the min and max depth of one fragment/invocation for light
+    /// tiling.
     ///
     /// The min and max is stored in a tile on lighting slab.
     fn compute_min_and_max_depth(
@@ -1082,7 +1098,8 @@ impl LightTilingInvocation {
         let frag_depth: f32 = depth_texture.fetch(frag_pos).x;
         // Fragment depth scaled to min/max of u32 values
         //
-        // This is so we can compare with normal atomic ops instead of using the float extension
+        // This is so we can compare with normal atomic ops instead of using the float
+        // extension
         let frag_depth_u32 = quantize_depth_f32_to_u32(frag_depth);
 
         // The tile's index in all the tiles
@@ -1132,9 +1149,10 @@ impl LightTilingInvocation {
         }
     }
 
-    // The difficulty here is that in SPIRV we can access `lighting_slab` atomically without wrapping it
-    // in a type, but on CPU we must pass an array of (something like) `AtomicU32`. I'm not sure how to
-    // model this interaction to test it on the CPU.
+    // The difficulty here is that in SPIRV we can access `lighting_slab` atomically
+    // without wrapping it in a type, but on CPU we must pass an array of
+    // (something like) `AtomicU32`. I'm not sure how to model this interaction
+    // to test it on the CPU.
     fn compute_light_lists(&self, geometry_slab: &[u32], lighting_slab: &mut [u32]) {
         let index = self.tile_index();
         let tile_id = self.descriptor.tiles_array.at(index);
@@ -1188,8 +1206,8 @@ impl LightTilingInvocation {
                 + LightingDescriptor::OFFSET_OF_ANALYTICAL_LIGHTS_ARRAY,
         );
 
-        // Each invocation will calculate a few lights' contribution to the tile, until all lights
-        // have been visited
+        // Each invocation will calculate a few lights' contribution to the tile, until
+        // all lights have been visited
         let next_light = NextLightIndex::new(
             self.global_id,
             self.descriptor.tile_size,
@@ -1228,8 +1246,8 @@ impl LightTilingInvocation {
                 radius_of_illumination(intensity_candelas, self.descriptor.minimum_illuminance_lux);
             let should_add = radius >= distance;
             if should_add {
-                // If the light should be added to the bin, get the next available index in the bin,
-                // then write the id of the light into that index.
+                // If the light should be added to the bin, get the next available index in the
+                // bin, then write the id of the light into that index.
                 let next_index = crate::sync::atomic_i_increment::<
                     { spirv_std::memory::Scope::Workgroup as u32 },
                     { spirv_std::memory::Semantics::WORKGROUP_MEMORY.bits() },

@@ -648,6 +648,8 @@ where
     let kd = (1.0 - ks) * (1.0 - metallic);
     let diffuse = irradiance * albedo;
     let specular = prefiltered * (fresnel * brdf.x + brdf.y);
-    let color = (kd * diffuse + specular) * ao + lo + emissive;
+    // Global ambient light contribution, modulated by surface albedo and AO.
+    let ambient_light = lighting_desc.ambient_color.xyz() * lighting_desc.ambient_color.w;
+    let color = (kd * diffuse + specular) * ao + lo + emissive + ambient_light * albedo * ao;
     color.extend(1.0)
 }

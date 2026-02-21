@@ -713,6 +713,29 @@ impl Stage {
         self.lighting.remove_light(bundle);
     }
 
+    /// Set the global ambient light color and intensity.
+    ///
+    /// XYZ components are the RGB color, W is the intensity.
+    /// The ambient term is added to the final shaded color, modulated by
+    /// the surface albedo and ambient occlusion.
+    ///
+    /// Defaults to `Vec4::ZERO` (no ambient contribution).
+    pub fn set_ambient_color(&self, color: Vec4) -> &Self {
+        self.lighting.set_ambient_color(color);
+        self
+    }
+
+    /// Set the global ambient light color and intensity (builder pattern).
+    pub fn with_ambient_color(self, color: Vec4) -> Self {
+        self.set_ambient_color(color);
+        self
+    }
+
+    /// Get the current global ambient light color and intensity.
+    pub fn ambient_color(&self) -> Vec4 {
+        self.lighting.ambient_color()
+    }
+
     /// Enable shadow mapping for the given [`AnalyticalLight`], creating
     /// a new [`ShadowMap`].
     ///

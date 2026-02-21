@@ -951,6 +951,22 @@ impl Lighting {
         bundle
     }
 
+    /// Set the global ambient light color and intensity.
+    ///
+    /// XYZ components are the RGB color, W is the intensity.
+    /// The ambient term is added to the final shaded color, modulated by
+    /// the surface albedo and ambient occlusion.
+    ///
+    /// Defaults to `Vec4::ZERO` (no ambient contribution).
+    pub fn set_ambient_color(&self, color: Vec4) {
+        self.lighting_descriptor.modify(|d| d.ambient_color = color);
+    }
+
+    /// Get the current global ambient light color and intensity.
+    pub fn ambient_color(&self) -> Vec4 {
+        self.lighting_descriptor.get().ambient_color
+    }
+
     /// Enable shadow mapping for the given [`AnalyticalLight`], creating
     /// a new [`ShadowMap`].
     pub fn new_shadow_map<T>(
@@ -1031,6 +1047,8 @@ impl Lighting {
                  update_shadow_map_texture_index,
                  // Don't change the tiling descriptor
                  light_tiling_descriptor_id: _,
+                 // Don't change the ambient color (set via set_ambient_color)
+                 ambient_color: _,
              }| {
                 *analytical_lights_array = lights_array;
                 *shadow_map_atlas_descriptor_id = self.shadow_map_atlas.descriptor_id();
