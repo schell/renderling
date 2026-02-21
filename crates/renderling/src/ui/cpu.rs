@@ -143,12 +143,13 @@ pub struct Ui {
 impl Ui {
     pub fn new(ctx: &Context) -> Self {
         let UVec2 { x, y } = ctx.get_size();
+        let msaa = ctx.get_default_msaa_sample_count();
         let stage = ctx
             .new_stage()
             .with_background_color(Vec4::ONE)
             .with_lighting(false)
             .with_bloom(false)
-            .with_msaa_sample_count(4)
+            .with_msaa_sample_count(msaa)
             .with_frustum_culling(false);
         let (proj, view) = crate::camera::default_ortho2d(x as f32, y as f32);
         let camera = stage.new_camera().with_projection_and_view(proj, view);

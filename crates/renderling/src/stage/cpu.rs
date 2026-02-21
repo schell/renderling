@@ -1241,7 +1241,7 @@ impl Stage {
             brdf_lut,
             bloom,
             tonemapping,
-            has_bloom: AtomicBool::from(true).into(),
+            has_bloom: AtomicBool::from(stage_config.default_bloom).into(),
             textures_bindgroup: Default::default(),
             debug_overlay: DebugOverlay::new(device, ctx.get_render_target().format()),
             has_debug_overlay: Arc::new(false.into()),
