@@ -308,7 +308,15 @@ impl StageRendering<'_> {
 
             render_pass.set_pipeline(self.pipeline);
             render_pass.set_bind_group(0, Some(primitive_bind_group.as_ref()), &[]);
-            draw_calls.draw(&mut render_pass);
+            // For the direct-draw fallback (no MULTI_DRAW_INDIRECT),
+            // provide the camera for CPU-side frustum culling.
+            let geo_desc = self.stage.geometry.descriptor().get();
+            let frustum_cull = if geo_desc.perform_frustum_culling {
+                self.stage.geometry.camera_descriptor()
+            } else {
+                None
+            };
+            draw_calls.draw(&mut render_pass, frustum_cull.as_ref());
 
             let has_skybox = self.stage.has_skybox.load(Ordering::Relaxed);
             if has_skybox {

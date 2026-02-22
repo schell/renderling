@@ -7,10 +7,12 @@ use craballoc::{
 use crabslab::Id;
 
 use crate::{
+    camera::shader::CameraDescriptor,
     context::Context,
     cull::{ComputeCulling, CullingError},
     primitive::{shader::PrimitiveDescriptor, Primitive},
     texture::Texture,
+    transform::shader::TransformDescriptor,
 };
 
 use super::DrawIndirectArgs;
@@ -254,39 +256,91 @@ impl DrawCalls {
     }
 
     /// Draw into the given `RenderPass` by directly calling each draw.
-    pub fn draw_direct(&self, render_pass: &mut wgpu::RenderPass) {
+    ///
+    /// When `frustum_cull` is `Some`, each primitive's bounding sphere
+    /// is tested against the camera frustum on the CPU and skipped if
+    /// outside the view. This is the fallback for GPUs without
+    /// `MULTI_DRAW_INDIRECT` support (e.g. Raspberry Pi).
+    pub fn draw_direct(
+        &self,
+        render_pass: &mut wgpu::RenderPass,
+        frustum_cull: Option<&CameraDescriptor>,
+    ) {
         if self.renderlets.is_empty() {
             log::warn!("no internal renderlets, nothing to draw");
         }
+        let mut drawn = 0u32;
+        let mut culled = 0u32;
         for ir in self.renderlets.iter() {
-            // UNWRAP: panic on purpose
             let desc = ir.descriptor.get();
+
+            // CPU-side frustum culling
+            if let Some(camera) = frustum_cull {
+                if desc.bounds.radius > 0.0 {
+                    // Read the transform from the Primitive's
+                    // CPU-side handle, falling back to identity.
+                    let transform = ir
+                        .transform
+                        .lock()
+                        .expect("transform lock")
+                        .as_ref()
+                        .map(|t| t.descriptor.get())
+                        .unwrap_or(TransformDescriptor::default());
+                    let (inside, _) =
+                        desc.bounds.is_inside_camera_view(camera, transform);
+                    if !inside {
+                        culled += 1;
+                        continue;
+                    }
+                }
+            }
+
             let vertex_range = 0..desc.get_vertex_count();
             let id = ir.descriptor.id();
             let instance_range = id.inner()..id.inner() + 1;
             render_pass.draw(vertex_range, instance_range);
+            drawn += 1;
+        }
+        if culled > 0 {
+            log::trace!(
+                "CPU frustum culling: drawn {drawn}, culled {culled}"
+            );
         }
     }
 
     /// Draw into the given `RenderPass`.
     ///
-    /// This method draws using the indirect draw buffer, if possible, otherwise
-    /// it falls back to `draw_direct`.
-    pub fn draw(&self, render_pass: &mut wgpu::RenderPass) {
+    /// This method draws using the indirect draw buffer, if possible,
+    /// otherwise it falls back to `draw_direct` with optional CPU-side
+    /// frustum culling.
+    pub fn draw(
+        &self,
+        render_pass: &mut wgpu::RenderPass,
+        frustum_cull: Option<&CameraDescriptor>,
+    ) {
         let num_draw_calls = self.draw_count();
         if num_draw_calls > 0 {
             if let Some(indirect) = &self.drawing_strategy.indirect {
-                log::trace!("drawing {num_draw_calls} renderlets using indirect");
+                log::trace!(
+                    "drawing {num_draw_calls} renderlets using indirect"
+                );
                 if let Some(indirect_buffer) = indirect.slab.get_buffer() {
-                    render_pass.multi_draw_indirect(&indirect_buffer, 0, num_draw_calls as u32);
+                    render_pass.multi_draw_indirect(
+                        &indirect_buffer,
+                        0,
+                        num_draw_calls as u32,
+                    );
                 } else {
                     log::warn!(
-                        "could not get the indirect buffer - was `DrawCall::upkeep` called?"
+                        "could not get the indirect buffer - \
+                         was `DrawCall::upkeep` called?"
                     );
                 }
             } else {
-                log::trace!("drawing {num_draw_calls} renderlets using direct");
-                self.draw_direct(render_pass);
+                log::trace!(
+                    "drawing {num_draw_calls} renderlets using direct"
+                );
+                self.draw_direct(render_pass, frustum_cull);
             }
         } else {
             log::warn!("zero draw calls");
