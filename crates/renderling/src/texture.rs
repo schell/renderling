@@ -678,16 +678,36 @@ impl Texture {
         height: u32,
         multisample_count: u32,
     ) -> Texture {
-        // * The hdr texture is what we render to in most cases
-        // * we also read from it to calculate bloom
-        // * we also write the bloom mix result back to it
-        // * we also read the texture in tests
+        Self::create_render_texture(
+            device,
+            width,
+            height,
+            multisample_count,
+            Self::HDR_TEXTURE_FORMAT,
+        )
+    }
+
+    /// Create a render texture with the specified format.
+    ///
+    /// In HDR mode this is `Rgba16Float`; in LDR mode it can be the
+    /// surface format (e.g. `Rgba8UnormSrgb`), halving bandwidth.
+    pub fn create_render_texture(
+        device: &wgpu::Device,
+        width: u32,
+        height: u32,
+        multisample_count: u32,
+        format: wgpu::TextureFormat,
+    ) -> Texture {
+        // * The render texture is what we render to in most cases
+        // * In HDR mode we also read from it to calculate bloom
+        // * In HDR mode we also write the bloom mix result back to it
+        // * We also read the texture in tests
         let usage = wgpu::TextureUsages::RENDER_ATTACHMENT
             | wgpu::TextureUsages::TEXTURE_BINDING
             | wgpu::TextureUsages::COPY_DST
             | wgpu::TextureUsages::COPY_SRC;
         let texture = Arc::new(device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("hdr"),
+            label: Some("render"),
             size: wgpu::Extent3d {
                 width,
                 height,
@@ -696,7 +716,7 @@ impl Texture {
             mip_level_count: 1,
             sample_count: multisample_count,
             dimension: wgpu::TextureDimension::D2,
-            format: Self::HDR_TEXTURE_FORMAT,
+            format,
             usage,
             view_formats: &[],
         }));

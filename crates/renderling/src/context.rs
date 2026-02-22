@@ -356,6 +356,11 @@ pub(crate) struct GlobalStageConfig {
     pub(crate) gpu_profile: GpuProfile,
     pub(crate) default_bloom: bool,
     pub(crate) default_msaa_sample_count: u32,
+    /// When `true`, stages use `Rgba16Float` render targets, bloom, and
+    /// tonemapping. When `false`, stages render in the surface format
+    /// (LDR), skipping bloom and tonemapping entirely. This halves
+    /// render-target bandwidth on low-power GPUs.
+    pub(crate) default_hdr: bool,
 }
 
 /// Contains the adapter, device, queue, [`RenderTarget`] and configuration.
@@ -411,7 +416,7 @@ impl Context {
         let adapter: Arc<wgpu::Adapter> = adapter.into();
         let limits = adapter.limits();
 
-        let (atlas_dim, atlas_layers, shadow_dim, shadow_layers, bloom, msaa) =
+        let (atlas_dim, atlas_layers, shadow_dim, shadow_layers, bloom, msaa, hdr) =
             match profile {
                 GpuProfile::High => (
                     crate::atlas::ATLAS_SUGGESTED_SIZE,
@@ -420,9 +425,10 @@ impl Context {
                     4u32,
                     true,
                     4u32,
+                    true,
                 ),
-                GpuProfile::Medium => (1024, 4, 1024, 2, true, 2),
-                GpuProfile::Low => (512, 2, 512, 2, false, 1),
+                GpuProfile::Medium => (1024, 4, 1024, 2, true, 2, true),
+                GpuProfile::Low => (512, 2, 512, 2, false, 1, false),
             };
 
         let w = limits.max_texture_dimension_2d.min(atlas_dim);
@@ -446,6 +452,7 @@ impl Context {
             gpu_profile: profile,
             default_bloom: bloom,
             default_msaa_sample_count: msaa,
+            default_hdr: hdr,
         }));
         Self {
             adapter,
@@ -724,6 +731,17 @@ impl Context {
             .read()
             .expect("stage_config read")
             .default_msaa_sample_count
+    }
+
+    /// Returns the default HDR setting for this context's GPU profile.
+    ///
+    /// When `false`, stages use LDR rendering (surface format), skipping
+    /// bloom and tonemapping for reduced bandwidth on low-power GPUs.
+    pub fn get_default_hdr(&self) -> bool {
+        self.stage_config
+            .read()
+            .expect("stage_config read")
+            .default_hdr
     }
 
     /// Creates and returns a new [`Stage`] renderer.
