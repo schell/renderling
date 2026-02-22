@@ -764,6 +764,9 @@ impl LightingBindGroupLayoutEntries {
 
 impl Lighting {
     /// Create the atlas used to store all shadow maps.
+    ///
+    /// The atlas is created at `size` and can auto-grow by up to 2x
+    /// in each dimension if packing fails.
     fn create_shadow_map_atlas(
         light_slab: &SlabAllocator<WgpuRuntime>,
         size: wgpu::Extent3d,
@@ -771,6 +774,11 @@ impl Lighting {
         let usage = wgpu::TextureUsages::RENDER_ATTACHMENT
             | wgpu::TextureUsages::TEXTURE_BINDING
             | wgpu::TextureUsages::COPY_SRC;
+        let max_size = wgpu::Extent3d {
+            width: size.width * 2,
+            height: size.height * 2,
+            depth_or_array_layers: (size.depth_or_array_layers * 2).max(2),
+        };
         Atlas::new(
             light_slab,
             size,
@@ -778,6 +786,7 @@ impl Lighting {
             Some("shadow-map-atlas"),
             Some(usage),
         )
+        .with_max_size(max_size)
     }
 
     /// Create a new [`Lighting`] manager.

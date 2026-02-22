@@ -422,7 +422,7 @@ impl Context {
                     4u32,
                 ),
                 GpuProfile::Medium => (1024, 4, 1024, 2, true, 2),
-                GpuProfile::Low => (512, 2, 512, 1, false, 1),
+                GpuProfile::Low => (512, 2, 512, 2, false, 1),
             };
 
         let w = limits.max_texture_dimension_2d.min(atlas_dim);
