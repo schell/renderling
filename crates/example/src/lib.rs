@@ -136,14 +136,16 @@ pub struct App {
 
 impl App {
     pub fn new(ctx: &Context, camera_control: CameraControl) -> Self {
+        // Use library defaults for atlas size and MSAA -- the Context
+        // auto-detects appropriate settings based on GPU capabilities.
         let stage = ctx
             .new_stage()
             .with_background_color(DARK_BLUE_BG_COLOR)
             .with_bloom_mix_strength(0.5)
-            .with_bloom_filter_radius(4.0)
-            .with_msaa_sample_count(4);
+            .with_bloom_filter_radius(4.0);
         let size = ctx.get_size();
-        let (proj, view) = renderling::camera::default_perspective(size.x as f32, size.y as f32);
+        let (proj, view) =
+            renderling::camera::default_perspective(size.x as f32, size.y as f32);
         let camera = stage.new_camera().with_projection_and_view(proj, view);
 
         let sunlight = stage
@@ -151,14 +153,6 @@ impl App {
             .with_direction(Vec3::NEG_Y)
             .with_color(renderling::math::hex_to_vec4(0xFDFBD3FF))
             .with_intensity(Lux::OUTDOOR_SUNSET);
-
-        stage
-            .set_atlas_size(wgpu::Extent3d {
-                width: 2048,
-                height: 2048,
-                depth_or_array_layers: 32,
-            })
-            .unwrap();
 
         let ui = Ui::new(ctx).with_background_color(Vec4::ZERO);
         let _ = ui.add_font(FontArc::try_from_slice(FONT_BYTES).unwrap());

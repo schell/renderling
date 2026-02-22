@@ -308,7 +308,15 @@ impl StageRendering<'_> {
 
             render_pass.set_pipeline(self.pipeline);
             render_pass.set_bind_group(0, Some(primitive_bind_group.as_ref()), &[]);
-            draw_calls.draw(&mut render_pass);
+            // For the direct-draw fallback (no MULTI_DRAW_INDIRECT),
+            // provide the camera for CPU-side frustum culling.
+            let geo_desc = self.stage.geometry.descriptor().get();
+            let frustum_cull = if geo_desc.perform_frustum_culling {
+                self.stage.geometry.camera_descriptor()
+            } else {
+                None
+            };
+            draw_calls.draw(&mut render_pass, frustum_cull.as_ref());
 
             let has_skybox = self.stage.has_skybox.load(Ordering::Relaxed);
             if has_skybox {
@@ -428,6 +436,14 @@ pub struct Stage {
 
     pub(crate) has_bloom: Arc<AtomicBool>,
     pub(crate) has_debug_overlay: Arc<AtomicBool>,
+    /// When `true` the stage renders to `Rgba16Float`, runs bloom, and
+    /// tonemaps to the output. When `false` (LDR) it renders in
+    /// `surface_format`, skipping bloom and tonemapping entirely.
+    pub(crate) use_hdr: Arc<AtomicBool>,
+    /// The format of the final output surface (e.g. `Rgba8UnormSrgb`).
+    pub(crate) surface_format: wgpu::TextureFormat,
+    /// Shared reference to the context's memory budget.
+    pub(crate) memory_budget: Arc<RwLock<Option<usize>>>,
 
     pub(crate) stage_slab_buffer: Arc<RwLock<SlabBuffer<wgpu::Buffer>>>,
 
@@ -634,6 +650,8 @@ impl Stage {
             .expect("textures_bindgroup lock")
             .take();
 
+        self.log_budget_warning();
+
         Ok(frames)
     }
 
@@ -797,12 +815,13 @@ impl Stage {
     ) -> (Arc<SkyboxRenderPipeline>, Arc<wgpu::BindGroup>) {
         let msaa_sample_count = self.msaa_sample_count.load(Ordering::Relaxed);
         // UNWRAP: safe because we're only ever called from the render thread.
+        let render_fmt = self.render_format();
         let mut pipeline_guard = self.skybox_pipeline.write().expect("skybox_pipeline write");
         let pipeline = if let Some(pipeline) = pipeline_guard.as_mut() {
             if pipeline.msaa_sample_count() != msaa_sample_count {
                 *pipeline = Arc::new(crate::skybox::create_skybox_render_pipeline(
                     self.device(),
-                    Texture::HDR_TEXTURE_FORMAT,
+                    render_fmt,
                     Some(msaa_sample_count),
                 ));
             }
@@ -810,7 +829,7 @@ impl Stage {
         } else {
             let pipeline = Arc::new(crate::skybox::create_skybox_render_pipeline(
                 self.device(),
-                Texture::HDR_TEXTURE_FORMAT,
+                render_fmt,
                 Some(msaa_sample_count),
             ));
             *pipeline_guard = Some(pipeline.clone());
@@ -953,7 +972,7 @@ impl Stage {
         &self.brdf_lut
     }
 
-    /// Sum the byte size of all used GPU memory.
+    /// Sum the byte size of all used GPU slab-buffer memory.
     ///
     /// Adds together the byte size of all underlying slab buffers.
     ///
@@ -975,6 +994,89 @@ impl Stage {
                 .map(|draws| draws.slab_allocator().len())
                 .unwrap_or_default();
         4 * num_u32s
+    }
+
+    /// Estimate the byte size of all GPU textures owned by this stage.
+    ///
+    /// Includes the render target, depth buffer, MSAA target, bloom
+    /// textures, material atlas, shadow map atlas, BRDF LUT, and IBL
+    /// cubemaps.
+    pub fn used_gpu_texture_byte_size(&self) -> usize {
+        let size = self.get_size();
+        let w = size.x as usize;
+        let h = size.y as usize;
+        let msaa = self.get_msaa_sample_count() as usize;
+        let use_hdr = self.use_hdr.load(Ordering::Relaxed);
+
+        // Bytes per pixel for the render-target format.
+        let render_bpp: usize = if use_hdr { 8 } else { 4 };
+
+        let mut total: usize = 0;
+
+        // 1. Render texture (hdr_texture)
+        total += w * h * render_bpp;
+        // 2. Depth texture
+        total += w * h * 4;
+        // 3. MSAA render target (only when MSAA > 1)
+        if msaa > 1 {
+            total += w * h * render_bpp * msaa;
+            // MSAA depth
+            total += w * h * 4 * msaa;
+        }
+        // 4. Bloom textures (only in HDR mode)
+        if use_hdr {
+            // Mix texture: full resolution, Rgba16Float
+            total += w * h * 8;
+            // Mip chain textures
+            let mips = (w.min(h) as u32).max(1).ilog2() as usize;
+            for i in 1..=mips {
+                total += (w >> i) * (h >> i) * 8;
+            }
+        }
+        // 5. Material atlas (Rgba8Unorm, 4 bpp)
+        let atlas_size = self.materials.atlas().get_size();
+        total += (atlas_size.width as usize)
+            * (atlas_size.height as usize)
+            * (atlas_size.depth_or_array_layers as usize)
+            * 4;
+        // 6. Shadow map atlas (R32Float, 4 bpp)
+        let shadow_size = self.lighting.shadow_map_atlas.get_size();
+        total += (shadow_size.width as usize)
+            * (shadow_size.height as usize)
+            * (shadow_size.depth_or_array_layers as usize)
+            * 4;
+        // 7. BRDF LUT (Rg16Float, 512x512, 4 bpp)
+        total += 512 * 512 * 4;
+        // 8. IBL irradiance cubemap (Rgba16Float, 32x32x6 faces)
+        total += 32 * 32 * 6 * 8;
+        // 9. IBL prefiltered environment cubemap (Rgba16Float, 128x128 down to 8x8, 5
+        //    mip levels, 6 faces)
+        for m in 0..5u32 {
+            let s = (128 >> m) as usize;
+            total += s * s * 6 * 8;
+        }
+
+        total
+    }
+
+    /// Total estimated GPU memory usage (buffers + textures).
+    pub fn used_gpu_total_byte_size(&self) -> usize {
+        self.used_gpu_buffer_byte_size() + self.used_gpu_texture_byte_size()
+    }
+
+    /// Check current GPU memory usage against the configured budget.
+    ///
+    /// Logs a warning if the estimated usage exceeds the budget. Does
+    /// nothing if no budget has been set.
+    pub fn log_budget_warning(&self) {
+        if let Some(budget) = *self.memory_budget.read().expect("memory_budget read") {
+            let used = self.used_gpu_total_byte_size();
+            if used > budget {
+                let used_mb = used as f64 / (1024.0 * 1024.0);
+                let budget_mb = budget as f64 / (1024.0 * 1024.0);
+                log::warn!("GPU memory usage ({used_mb:.1} MB) exceeds budget ({budget_mb:.1} MB)");
+            }
+        }
     }
 
     pub fn hdr_texture(&self) -> impl Deref<Target = crate::texture::Texture> + '_ {
@@ -1172,12 +1274,31 @@ impl Stage {
         })
     }
 
+    /// Return the texture format used for the main render pass.
+    ///
+    /// `Rgba16Float` when HDR is enabled, or the surface format when in
+    /// LDR mode.
+    pub fn render_format(&self) -> wgpu::TextureFormat {
+        if self.use_hdr.load(Ordering::Relaxed) {
+            Texture::HDR_TEXTURE_FORMAT
+        } else {
+            self.surface_format
+        }
+    }
+
     /// Create a new stage.
     pub fn new(ctx: &crate::context::Context) -> Self {
         let runtime = ctx.runtime();
         let device = &runtime.device;
         let resolution @ UVec2 { x: w, y: h } = ctx.get_size();
         let stage_config = *ctx.stage_config.read().expect("stage_config read");
+        let use_hdr = stage_config.default_hdr;
+        let surface_format = ctx.get_render_target().format().add_srgb_suffix();
+        let render_format = if use_hdr {
+            Texture::HDR_TEXTURE_FORMAT
+        } else {
+            surface_format
+        };
         let geometry = Geometry::new(
             ctx,
             resolution,
@@ -1188,29 +1309,26 @@ impl Stage {
         );
         let materials = Materials::new(runtime, stage_config.atlas_size);
         let multisample_count = 1;
-        let hdr_texture = Arc::new(RwLock::new(Texture::create_hdr_texture(
+        let hdr_texture = Arc::new(RwLock::new(Texture::create_render_texture(
             device,
             w,
             h,
             multisample_count,
+            render_format,
         )));
         let depth_texture =
             Texture::create_depth_texture(device, w, h, multisample_count, Some("stage-depth"));
         let msaa_render_target = Default::default();
         // UNWRAP: safe because no other references at this point (created above^)
         let bloom = Bloom::new(ctx, &hdr_texture.read().expect("hdr_texture read"));
-        let tonemapping = Tonemapping::new(
-            runtime,
-            ctx.get_render_target().format().add_srgb_suffix(),
-            &bloom.get_mix_texture(),
-        );
-        let stage_pipeline = Self::create_primitive_pipeline(
-            device,
-            wgpu::TextureFormat::Rgba16Float,
-            multisample_count,
-        );
+        let tonemapping = Tonemapping::new(runtime, surface_format, &bloom.get_mix_texture());
+        let stage_pipeline =
+            Self::create_primitive_pipeline(device, render_format, multisample_count);
         let geometry_buffer = geometry.slab_allocator().commit();
         let lighting = Lighting::new(stage_config.shadow_map_atlas_size, &geometry);
+
+        // In LDR mode, bloom is always off regardless of the profile default.
+        let has_bloom = use_hdr && stage_config.default_bloom;
 
         let brdf_lut = BrdfLut::new(runtime);
         let skybox = Skybox::empty(runtime);
@@ -1241,7 +1359,7 @@ impl Stage {
             brdf_lut,
             bloom,
             tonemapping,
-            has_bloom: AtomicBool::from(true).into(),
+            has_bloom: AtomicBool::from(has_bloom).into(),
             textures_bindgroup: Default::default(),
             debug_overlay: DebugOverlay::new(device, ctx.get_render_target().format()),
             has_debug_overlay: Arc::new(false.into()),
@@ -1251,6 +1369,9 @@ impl Stage {
             clear_color_attachments: Arc::new(true.into()),
             clear_depth_attachments: Arc::new(true.into()),
             background_color: Arc::new(RwLock::new(wgpu::Color::TRANSPARENT)),
+            use_hdr: Arc::new(AtomicBool::new(use_hdr)),
+            surface_format,
+            memory_budget: ctx.memory_budget.clone(),
         }
     }
 
@@ -1297,11 +1418,8 @@ impl Stage {
         *self
             .primitive_pipeline
             .write()
-            .expect("primitive_pipeline write") = Self::create_primitive_pipeline(
-            self.device(),
-            wgpu::TextureFormat::Rgba16Float,
-            multisample_count,
-        );
+            .expect("primitive_pipeline write") =
+            Self::create_primitive_pipeline(self.device(), self.render_format(), multisample_count);
         let size = self.get_size();
         // UNWRAP: POP
         *self.depth_texture.write().expect("depth_texture write") = Texture::create_depth_texture(
@@ -1476,7 +1594,8 @@ impl Stage {
         self.geometry
             .descriptor()
             .modify(|cfg| cfg.resolution = size);
-        let hdr_texture = Texture::create_hdr_texture(self.device(), size.x, size.y, 1);
+        let hdr_texture =
+            Texture::create_render_texture(self.device(), size.x, size.y, 1, self.render_format());
         let sample_count = self.msaa_sample_count.load(Ordering::Relaxed);
         if let Some(msaa_view) = self
             .msaa_render_target
@@ -1562,6 +1681,93 @@ impl Stage {
         self
     }
 
+    /// Enable or disable HDR rendering.
+    ///
+    /// When `true` (default on High/Medium profiles) the stage renders to
+    /// `Rgba16Float`, runs bloom, and tonemaps to the output surface.
+    ///
+    /// When `false` (default on Low profile) the stage renders directly in
+    /// the surface format (LDR), skipping bloom and tonemapping entirely.
+    /// This halves render-target bandwidth and is recommended for
+    /// low-power GPUs like the Raspberry Pi 5.
+    ///
+    /// Changing this setting recreates the render pipeline and render
+    /// textures.
+    pub fn set_hdr(&self, hdr: bool) {
+        let prev = self.use_hdr.swap(hdr, Ordering::Relaxed);
+        if prev == hdr {
+            return;
+        }
+        let format = if hdr {
+            Texture::HDR_TEXTURE_FORMAT
+        } else {
+            self.surface_format
+        };
+        log::info!("switching HDR mode to {hdr} (render format: {format:?})");
+
+        let size = self.get_size();
+        let sample_count = self.msaa_sample_count.load(Ordering::Relaxed);
+
+        // Recreate the primitive pipeline with the new format
+        *self
+            .primitive_pipeline
+            .write()
+            .expect("primitive_pipeline write") =
+            Self::create_primitive_pipeline(self.device(), format, sample_count);
+
+        // Recreate the render texture
+        let render_texture =
+            Texture::create_render_texture(self.device(), size.x, size.y, 1, format);
+
+        // Update MSAA target format
+        if let Some(msaa_view) = self
+            .msaa_render_target
+            .write()
+            .expect("msaa_render_target write")
+            .as_mut()
+        {
+            *msaa_view =
+                create_msaa_textureview(self.device(), size.x, size.y, format, sample_count);
+        }
+
+        // Update bloom and tonemapping references
+        self.bloom.set_hdr_texture(self.runtime(), &render_texture);
+        self.tonemapping
+            .set_hdr_texture(self.device(), &render_texture);
+        *self.hdr_texture.write().expect("hdr_texture write") = render_texture;
+
+        // If switching to LDR, disable bloom
+        if !hdr {
+            self.has_bloom.store(false, Ordering::Relaxed);
+        }
+
+        // Invalidate skybox pipeline (format changed)
+        *self.skybox_pipeline.write().expect("skybox_pipeline write") = None;
+        let _ = self
+            .skybox_bindgroup
+            .lock()
+            .expect("skybox_bindgroup lock")
+            .take();
+        let _ = self
+            .textures_bindgroup
+            .lock()
+            .expect("textures_bindgroup lock")
+            .take();
+    }
+
+    /// Enable or disable HDR rendering (builder pattern).
+    ///
+    /// See [`Stage::set_hdr`] for details.
+    pub fn with_hdr(self, hdr: bool) -> Self {
+        self.set_hdr(hdr);
+        self
+    }
+
+    /// Returns whether HDR rendering is enabled.
+    pub fn get_hdr(&self) -> bool {
+        self.use_hdr.load(Ordering::Relaxed)
+    }
+
     /// Adds a primitive to the internal list of primitives to be drawn each
     /// frame.
     ///
@@ -1614,6 +1820,8 @@ impl Stage {
 
     /// Render the staged scene into the given view.
     pub fn render(&self, view: &wgpu::TextureView) {
+        let use_hdr = self.use_hdr.load(Ordering::Relaxed);
+
         // UNWRAP: POP
         let background_color = *self.background_color.read().expect("background_color read");
         // UNWRAP: POP
@@ -1622,7 +1830,6 @@ impl Stage {
             .read()
             .expect("msaa_render_target read");
         let clear_colors = self.clear_color_attachments.load(Ordering::Relaxed);
-        let hdr_texture = self.hdr_texture.read().expect("hdr_texture read");
 
         let mk_ops = |store| wgpu::Operations {
             load: if clear_colors {
@@ -1632,17 +1839,24 @@ impl Stage {
             },
             store,
         };
+
+        // In LDR mode the main pass writes directly to the output view,
+        // skipping bloom and tonemapping entirely. In HDR mode it writes
+        // to the intermediate HDR render texture as before.
+        let hdr_texture = self.hdr_texture.read().expect("hdr_texture read");
+        let color_target_view = if use_hdr { &hdr_texture.view } else { view };
+
         let render_pass_color_attachment = if let Some(msaa_view) = msaa_target.as_ref() {
             wgpu::RenderPassColorAttachment {
                 ops: mk_ops(wgpu::StoreOp::Discard),
                 view: msaa_view,
-                resolve_target: Some(&hdr_texture.view),
+                resolve_target: Some(color_target_view),
                 depth_slice: None,
             }
         } else {
             wgpu::RenderPassColorAttachment {
                 ops: mk_ops(wgpu::StoreOp::Store),
-                view: &hdr_texture.view,
+                view: color_target_view,
                 resolve_target: None,
                 depth_slice: None,
             }
@@ -1674,41 +1888,45 @@ impl Stage {
         }
         .run();
 
-        // then render bloom
-        if self.has_bloom.load(Ordering::Relaxed) {
-            self.bloom.bloom(self.device(), self.queue());
-        } else {
-            // copy the input hdr texture to the bloom mix texture
-            let mut encoder =
-                self.device()
-                    .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                        label: Some("no bloom copy"),
-                    });
-            let bloom_mix_texture = self.bloom.get_mix_texture();
-            encoder.copy_texture_to_texture(
-                wgpu::TexelCopyTextureInfo {
-                    texture: &self.hdr_texture.read().expect("hdr_texture read").texture,
-                    mip_level: 0,
-                    origin: wgpu::Origin3d { x: 0, y: 0, z: 0 },
-                    aspect: wgpu::TextureAspect::All,
-                },
-                wgpu::TexelCopyTextureInfo {
-                    texture: &bloom_mix_texture.texture,
-                    mip_level: 0,
-                    origin: wgpu::Origin3d { x: 0, y: 0, z: 0 },
-                    aspect: wgpu::TextureAspect::All,
-                },
-                wgpu::Extent3d {
-                    width: bloom_mix_texture.width(),
-                    height: bloom_mix_texture.height(),
-                    depth_or_array_layers: 1,
-                },
-            );
-            self.queue().submit(std::iter::once(encoder.finish()));
-        }
+        if use_hdr {
+            // HDR path: bloom -> tonemapping -> output view
+            if self.has_bloom.load(Ordering::Relaxed) {
+                self.bloom.bloom(self.device(), self.queue());
+            } else {
+                // copy the input hdr texture to the bloom mix texture
+                let mut encoder =
+                    self.device()
+                        .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                            label: Some("no bloom copy"),
+                        });
+                let bloom_mix_texture = self.bloom.get_mix_texture();
+                encoder.copy_texture_to_texture(
+                    wgpu::TexelCopyTextureInfo {
+                        texture: &self.hdr_texture.read().expect("hdr_texture read").texture,
+                        mip_level: 0,
+                        origin: wgpu::Origin3d { x: 0, y: 0, z: 0 },
+                        aspect: wgpu::TextureAspect::All,
+                    },
+                    wgpu::TexelCopyTextureInfo {
+                        texture: &bloom_mix_texture.texture,
+                        mip_level: 0,
+                        origin: wgpu::Origin3d { x: 0, y: 0, z: 0 },
+                        aspect: wgpu::TextureAspect::All,
+                    },
+                    wgpu::Extent3d {
+                        width: bloom_mix_texture.width(),
+                        height: bloom_mix_texture.height(),
+                        depth_or_array_layers: 1,
+                    },
+                );
+                self.queue().submit(std::iter::once(encoder.finish()));
+            }
 
-        // then render tonemapping
-        self.tonemapping.render(self.device(), self.queue(), view);
+            // then render tonemapping
+            self.tonemapping.render(self.device(), self.queue(), view);
+        }
+        // In LDR mode the main pass already wrote to `view`, so there is
+        // nothing more to do — bloom and tonemapping are skipped entirely.
 
         // then render the debug overlay
         if self.has_debug_overlay.load(Ordering::Relaxed) {

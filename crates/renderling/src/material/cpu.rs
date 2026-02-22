@@ -31,16 +31,26 @@ impl AsRef<WgpuRuntime> for Materials {
 }
 
 impl Materials {
-    /// Creates a new `Materials` instance with the specified runtime and atlas
-    /// size.
+    /// Creates a new `Materials` instance with the specified runtime and
+    /// atlas size.
+    ///
+    /// The atlas is created at `atlas_size` and can auto-grow by up to
+    /// 2x in each dimension if packing fails.
     ///
     /// # Arguments
     ///
     /// * `runtime` - A reference to the WgpuRuntime.
-    /// * `atlas_size` - The size of the atlas texture.
+    /// * `atlas_size` - The initial (and default) size of the atlas texture.
     pub fn new(runtime: impl AsRef<WgpuRuntime>, atlas_size: wgpu::Extent3d) -> Self {
         let slab = SlabAllocator::new(runtime, "materials", wgpu::BufferUsages::empty());
-        let atlas = Atlas::new(&slab, atlas_size, None, Some("materials-atlas"), None);
+        // Allow the atlas to auto-grow up to 2x its configured size.
+        let max_size = wgpu::Extent3d {
+            width: atlas_size.width * 2,
+            height: atlas_size.height * 2,
+            depth_or_array_layers: (atlas_size.depth_or_array_layers * 2).max(2),
+        };
+        let atlas = Atlas::new(&slab, atlas_size, None, Some("materials-atlas"), None)
+            .with_max_size(max_size);
         let default_material = Material {
             descriptor: slab.new_value(Default::default()),
             albedo_texture: Default::default(),

@@ -42,30 +42,83 @@ pub async fn adapter(
 }
 
 /// Create a new [`wgpu::Device`].
+///
+/// Requests only the features and limits that renderling actually needs,
+/// intersected with what the adapter supports.
 pub async fn device(
     adapter: &wgpu::Adapter,
 ) -> Result<(wgpu::Device, wgpu::Queue), wgpu::RequestDeviceError> {
     let wanted_features = wgpu::Features::INDIRECT_FIRST_INSTANCE
         | wgpu::Features::MULTI_DRAW_INDIRECT
-        //// when debugging rust-gpu shader miscompilation it's nice to have this
+        //// when debugging rust-gpu shader miscompilation it's nice to have
+        //// this
         //| wgpu::Features::SPIRV_SHADER_PASSTHROUGH
-        // this one is a funny requirement, it seems it is needed if using storage buffers in
-        // vertex shaders, even if those shaders are read-only
+        // this one is a funny requirement, it seems it is needed if using
+        // storage buffers in vertex shaders, even if those shaders are
+        // read-only
         | wgpu::Features::VERTEX_WRITABLE_STORAGE
         | wgpu::Features::CLEAR_TEXTURE;
     let supported_features = adapter.features();
     let required_features = wanted_features.intersection(supported_features);
     let unsupported_features = wanted_features.difference(supported_features);
     if !unsupported_features.is_empty() {
-        log::error!("requested but unsupported features: {unsupported_features:#?}");
-        log::warn!("requested and supported features: {supported_features:#?}");
+        log::error!(
+            "requested but unsupported features: \
+             {unsupported_features:#?}"
+        );
+        log::warn!(
+            "requested and supported features: {supported_features:#?}"
+        );
     }
-    let limits = adapter.limits();
-    log::info!("adapter limits: {limits:#?}");
+    let adapter_limits = adapter.limits();
+    log::info!("adapter limits: {adapter_limits:#?}");
+
+    // Request only what we need, clamped to what the adapter supports.
+    // This avoids forcing drivers (e.g. V3D on RPi) to reserve resources
+    // up to their maximum reported limits.
+    let required_limits = wgpu::Limits {
+        max_texture_dimension_2d: adapter_limits.max_texture_dimension_2d,
+        max_texture_dimension_1d: adapter_limits.max_texture_dimension_1d,
+        max_texture_array_layers: adapter_limits.max_texture_array_layers,
+        max_storage_buffers_per_shader_stage: adapter_limits
+            .max_storage_buffers_per_shader_stage
+            .min(8),
+        max_storage_buffer_binding_size: adapter_limits
+            .max_storage_buffer_binding_size,
+        max_uniform_buffer_binding_size: adapter_limits
+            .max_uniform_buffer_binding_size
+            .min(65536),
+        max_bind_groups: adapter_limits.max_bind_groups.min(4),
+        max_bindings_per_bind_group: adapter_limits
+            .max_bindings_per_bind_group
+            .min(640),
+        max_color_attachments: adapter_limits.max_color_attachments.min(4),
+        max_buffer_size: adapter_limits.max_buffer_size,
+        max_vertex_buffers: adapter_limits.max_vertex_buffers.min(8),
+        max_vertex_attributes: adapter_limits.max_vertex_attributes.min(16),
+        max_vertex_buffer_array_stride: adapter_limits
+            .max_vertex_buffer_array_stride
+            .min(2048),
+        max_inter_stage_shader_components: adapter_limits
+            .max_inter_stage_shader_components,
+        max_compute_workgroups_per_dimension: adapter_limits
+            .max_compute_workgroups_per_dimension,
+        max_compute_workgroup_size_x: adapter_limits
+            .max_compute_workgroup_size_x,
+        max_compute_workgroup_size_y: adapter_limits
+            .max_compute_workgroup_size_y,
+        max_compute_workgroup_size_z: adapter_limits
+            .max_compute_workgroup_size_z,
+        max_compute_invocations_per_workgroup: adapter_limits
+            .max_compute_invocations_per_workgroup,
+        max_compute_workgroup_storage_size: adapter_limits
+            .max_compute_workgroup_storage_size,
+        ..wgpu::Limits::downlevel_defaults()
+    };
     adapter
         .request_device(&wgpu::DeviceDescriptor {
             required_features,
-            required_limits: adapter.limits(),
+            required_limits,
             label: None,
             memory_hints: wgpu::MemoryHints::default(),
             trace: wgpu::Trace::Off,

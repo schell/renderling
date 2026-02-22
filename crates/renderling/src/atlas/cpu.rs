@@ -207,6 +207,9 @@ pub struct Atlas {
     descriptor: Hybrid<AtlasDescriptor>,
     /// Used for user updates into the atlas by blit images into specific frames.
     blitter: AtlasBlitter,
+    /// Maximum size the atlas is allowed to grow to.
+    /// When `None`, the atlas will not auto-grow.
+    max_size: Arc<RwLock<Option<wgpu::Extent3d>>>,
 }
 
 impl Atlas {
@@ -305,7 +308,25 @@ impl Atlas {
             label,
             blitter,
             texture_array: Arc::new(RwLock::new(texture)),
+            max_size: Arc::new(RwLock::new(None)),
         }
+    }
+
+    /// Set the maximum size the atlas is allowed to auto-grow to.
+    ///
+    /// When the atlas cannot pack new images into its current size,
+    /// it will attempt to grow (doubling dimensions, then adding
+    /// layers) up to this limit before returning an error.
+    ///
+    /// Pass `None` to disable auto-growing.
+    pub fn set_max_size(&self, max_size: Option<wgpu::Extent3d>) {
+        *self.max_size.write().expect("atlas max_size write") = max_size;
+    }
+
+    /// Builder-style setter for the maximum auto-grow size.
+    pub fn with_max_size(self, max_size: wgpu::Extent3d) -> Self {
+        self.set_max_size(Some(max_size));
+        self
     }
 
     pub fn descriptor_id(&self) -> Id<AtlasDescriptor> {
@@ -356,18 +377,77 @@ impl Atlas {
         self.texture_array.read().expect("atlas texture_array read").texture.size()
     }
 
-    /// Add the given images
+    /// Compute the next larger extent for auto-growing.
+    ///
+    /// Strategy: first double the width/height, then add layers.
+    fn next_grow_extent(
+        current: wgpu::Extent3d,
+        max: wgpu::Extent3d,
+    ) -> Option<wgpu::Extent3d> {
+        // Try doubling dimensions first (if below max)
+        if current.width * 2 <= max.width
+            && current.height * 2 <= max.height
+        {
+            return Some(wgpu::Extent3d {
+                width: current.width * 2,
+                height: current.height * 2,
+                depth_or_array_layers: current.depth_or_array_layers,
+            });
+        }
+        // Try adding a layer
+        if current.depth_or_array_layers
+            < max.depth_or_array_layers
+        {
+            return Some(wgpu::Extent3d {
+                width: current.width,
+                height: current.height,
+                depth_or_array_layers: current.depth_or_array_layers + 1,
+            });
+        }
+        // Already at max
+        None
+    }
+
+    /// Add the given images, auto-growing the atlas if necessary.
     pub fn add_images<'a>(
         &self,
         images: impl IntoIterator<Item = &'a AtlasImage>,
     ) -> Result<Vec<AtlasTexture>, AtlasError> {
+        let images: Vec<&AtlasImage> = images.into_iter().collect();
         // UNWRAP: POP
-        let mut layers = self.layers.write().expect("atlas layers write");
-        let mut texture_array = self.texture_array.write().expect("atlas texture_array write");
-        let extent = texture_array.texture.size();
+        let mut layers =
+            self.layers.write().expect("atlas layers write");
+        let mut texture_array = self
+            .texture_array
+            .write()
+            .expect("atlas texture_array write");
+        let mut extent = texture_array.texture.size();
+        let max_size =
+            *self.max_size.read().expect("atlas max_size read");
 
-        let newly_packed_layers = pack_images(&layers, images, extent)
-            .context(CannotPackTexturesSnafu { size: extent })?;
+        // Try packing, auto-growing if a max_size is configured.
+        let newly_packed_layers = loop {
+            match pack_images(&layers, images.iter().copied(), extent) {
+                Some(packed) => break packed,
+                None => {
+                    if let Some(max) = max_size {
+                        if let Some(bigger) =
+                            Self::next_grow_extent(extent, max)
+                        {
+                            log::info!(
+                                "atlas auto-growing from {extent:?} \
+                                 to {bigger:?}"
+                            );
+                            extent = bigger;
+                            continue;
+                        }
+                    }
+                    return Err(AtlasError::CannotPackTextures {
+                        size: extent,
+                    });
+                }
+            }
+        };
 
         let mut staged = StagedResources::try_staging(
             self.slab.runtime(),
@@ -377,6 +457,15 @@ impl Atlas {
             &texture_array,
             self.label.as_deref(),
         )?;
+
+        // Update the descriptor with the new size.
+        self.descriptor.set(AtlasDescriptor {
+            size: UVec3::new(
+                extent.width,
+                extent.height,
+                extent.depth_or_array_layers,
+            ),
+        });
 
         // Commit our newly staged values, now that everything is done.
         *texture_array = staged.texture;

@@ -10,7 +10,7 @@ use crabslab::{Array, Id};
 use glam::{Mat4, UVec2, Vec4};
 
 use crate::{
-    camera::Camera,
+    camera::{shader::CameraDescriptor, Camera},
     geometry::{
         shader::{GeometryDescriptor, SkinDescriptor},
         MorphTarget, Vertex,
@@ -260,7 +260,6 @@ impl MorphTargets {
         }
     }
     /// Returns a pointer to the underlying morph targets data on the GPU.
-    ///
     pub fn array(&self) -> Array<Array<MorphTarget>> {
         self.arrays.array()
     }
@@ -367,6 +366,16 @@ impl Geometry {
 
     pub fn descriptor(&self) -> &Hybrid<GeometryDescriptor> {
         &self.descriptor
+    }
+
+    /// Returns a copy of the current camera's descriptor, if a camera
+    /// is set.
+    pub fn camera_descriptor(&self) -> Option<CameraDescriptor> {
+        self.camera
+            .lock()
+            .expect("geometry camera lock")
+            .as_ref()
+            .map(|c| c.descriptor())
     }
 
     /// Returns the vertices of a white unit cube.

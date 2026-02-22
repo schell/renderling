@@ -293,12 +293,74 @@ impl Frame {
     }
 }
 
+/// Rendering quality profile based on GPU capabilities.
+///
+/// The profile is auto-detected from adapter features and info, but can
+/// be overridden via [`Context::with_gpu_profile`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum GpuProfile {
+    /// Desktop GPUs with full feature support.
+    High,
+    /// Mid-range or integrated GPUs.
+    Medium,
+    /// Low-power GPUs (e.g. Raspberry Pi 5, mobile SoCs).
+    Low,
+}
+
+impl GpuProfile {
+    /// Auto-detect a profile from the adapter's supported features and
+    /// info.
+    pub fn detect(adapter: &wgpu::Adapter) -> Self {
+        let features = adapter.features();
+        let info = adapter.get_info();
+        let name = info.name.to_lowercase();
+
+        // Known low-power GPU families
+        let is_low_power = name.contains("v3d")
+            || name.contains("videocore")
+            || name.contains("mali-4")
+            || name.contains("mali-t")
+            || name.contains("powervr")
+            || name.contains("sgx")
+            || name.contains("llvmpipe")
+            || name.contains("softpipe")
+            || name.contains("swrast");
+
+        if is_low_power {
+            return Self::Low;
+        }
+
+        // If multi-draw indirect is missing the GPU is likely low-end
+        if !features.contains(wgpu::Features::MULTI_DRAW_INDIRECT) {
+            // But it could still be medium (e.g. some Intel integrated)
+            let is_integrated = name.contains("intel")
+                || name.contains("adreno")
+                || name.contains("mali");
+            return if is_integrated {
+                Self::Medium
+            } else {
+                Self::Low
+            };
+        }
+
+        Self::High
+    }
+}
+
 /// Configurable default values to use when creating new [`Stage`]s.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct GlobalStageConfig {
     pub(crate) atlas_size: wgpu::Extent3d,
     pub(crate) shadow_map_atlas_size: wgpu::Extent3d,
     pub(crate) use_compute_culling: bool,
+    pub(crate) gpu_profile: GpuProfile,
+    pub(crate) default_bloom: bool,
+    pub(crate) default_msaa_sample_count: u32,
+    /// When `true`, stages use `Rgba16Float` render targets, bloom, and
+    /// tonemapping. When `false`, stages render in the surface format
+    /// (LDR), skipping bloom and tonemapping entirely. This halves
+    /// render-target bandwidth on low-power GPUs.
+    pub(crate) default_hdr: bool,
 }
 
 /// Contains the adapter, device, queue, [`RenderTarget`] and configuration.
@@ -316,6 +378,9 @@ pub struct Context {
     adapter: Arc<wgpu::Adapter>,
     render_target: RenderTarget,
     pub(crate) stage_config: Arc<RwLock<GlobalStageConfig>>,
+    /// Soft GPU memory budget in bytes. When set, atlas auto-grow and
+    /// other large allocations will refuse to exceed this limit.
+    pub(crate) memory_budget: Arc<RwLock<Option<usize>>>,
 }
 
 impl AsRef<WgpuRuntime> for Context {
@@ -325,7 +390,11 @@ impl AsRef<WgpuRuntime> for Context {
 }
 
 impl Context {
-    /// Creates a new `Context` with the specified target, adapter, device, and queue.
+    /// Creates a new `Context` with the specified target, adapter, device,
+    /// and queue.
+    ///
+    /// The GPU profile is auto-detected from the adapter and used to select
+    /// sensible defaults for atlas sizes, bloom, MSAA, etc.
     pub fn new(
         target: RenderTarget,
         adapter: impl Into<Arc<wgpu::Adapter>>,
@@ -333,25 +402,60 @@ impl Context {
         queue: impl Into<Arc<wgpu::Queue>>,
     ) -> Self {
         let adapter: Arc<wgpu::Adapter> = adapter.into();
+        let profile = GpuProfile::detect(&adapter);
+        log::info!("detected GPU profile: {profile:?}");
+        Self::new_with_profile(target, adapter, device, queue, profile)
+    }
+
+    /// Creates a new `Context` with a specific GPU profile, overriding
+    /// auto-detection.
+    pub fn new_with_profile(
+        target: RenderTarget,
+        adapter: impl Into<Arc<wgpu::Adapter>>,
+        device: impl Into<Arc<wgpu::Device>>,
+        queue: impl Into<Arc<wgpu::Queue>>,
+        profile: GpuProfile,
+    ) -> Self {
+        let adapter: Arc<wgpu::Adapter> = adapter.into();
         let limits = adapter.limits();
-        let w = limits
-            .max_texture_dimension_2d
-            .min(crate::atlas::ATLAS_SUGGESTED_SIZE);
+
+        let (atlas_dim, atlas_layers, shadow_dim, shadow_layers, bloom, msaa, hdr) =
+            match profile {
+                GpuProfile::High => (
+                    crate::atlas::ATLAS_SUGGESTED_SIZE,
+                    crate::atlas::ATLAS_SUGGESTED_LAYERS,
+                    crate::atlas::ATLAS_SUGGESTED_SIZE,
+                    4u32,
+                    true,
+                    4u32,
+                    true,
+                ),
+                GpuProfile::Medium => (1024, 4, 1024, 2, true, 2, true),
+                GpuProfile::Low => (512, 2, 512, 2, false, 1, false),
+            };
+
+        let w = limits.max_texture_dimension_2d.min(atlas_dim);
+        let sw = limits.max_texture_dimension_2d.min(shadow_dim);
         let stage_config = Arc::new(RwLock::new(GlobalStageConfig {
             atlas_size: wgpu::Extent3d {
                 width: w,
                 height: w,
-                depth_or_array_layers: adapter
-                    .limits()
+                depth_or_array_layers: limits
                     .max_texture_array_layers
-                    .min(crate::atlas::ATLAS_SUGGESTED_LAYERS),
+                    .min(atlas_layers),
             },
             shadow_map_atlas_size: wgpu::Extent3d {
-                width: w,
-                height: w,
-                depth_or_array_layers: 4,
+                width: sw,
+                height: sw,
+                depth_or_array_layers: limits
+                    .max_texture_array_layers
+                    .min(shadow_layers),
             },
             use_compute_culling: false,
+            gpu_profile: profile,
+            default_bloom: bloom,
+            default_msaa_sample_count: msaa,
+            default_hdr: hdr,
         }));
         Self {
             adapter,
@@ -361,6 +465,7 @@ impl Context {
             },
             render_target: target,
             stage_config,
+            memory_budget: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -605,6 +710,63 @@ impl Context {
     /// Returns whether direct drawing is used.
     pub fn get_use_direct_draw(&self) -> bool {
         !self.stage_config.read().expect("stage_config read").use_compute_culling
+    }
+
+    /// Returns the auto-detected (or overridden) GPU profile.
+    pub fn get_gpu_profile(&self) -> GpuProfile {
+        self.stage_config
+            .read()
+            .expect("stage_config read")
+            .gpu_profile
+    }
+
+    /// Returns the default bloom setting for this context's GPU profile.
+    pub fn get_default_bloom(&self) -> bool {
+        self.stage_config
+            .read()
+            .expect("stage_config read")
+            .default_bloom
+    }
+
+    /// Returns the default MSAA sample count for this context's GPU
+    /// profile.
+    pub fn get_default_msaa_sample_count(&self) -> u32 {
+        self.stage_config
+            .read()
+            .expect("stage_config read")
+            .default_msaa_sample_count
+    }
+
+    /// Returns the default HDR setting for this context's GPU profile.
+    ///
+    /// When `false`, stages use LDR rendering (surface format), skipping
+    /// bloom and tonemapping for reduced bandwidth on low-power GPUs.
+    pub fn get_default_hdr(&self) -> bool {
+        self.stage_config
+            .read()
+            .expect("stage_config read")
+            .default_hdr
+    }
+
+    /// Set a soft GPU memory budget in bytes.
+    ///
+    /// When set, atlas auto-grow and other large allocations will refuse
+    /// to exceed this limit, logging a warning instead of risking OOM.
+    ///
+    /// Pass `None` to remove the budget (default).
+    pub fn set_memory_budget(&self, budget: Option<usize>) {
+        *self.memory_budget.write().expect("memory_budget write") = budget;
+    }
+
+    /// Set a soft GPU memory budget in bytes (builder pattern).
+    pub fn with_memory_budget(self, budget: usize) -> Self {
+        self.set_memory_budget(Some(budget));
+        self
+    }
+
+    /// Returns the current memory budget, if set.
+    pub fn get_memory_budget(&self) -> Option<usize> {
+        *self.memory_budget.read().expect("memory_budget read")
     }
 
     /// Creates and returns a new [`Stage`] renderer.
