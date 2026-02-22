@@ -378,6 +378,9 @@ pub struct Context {
     adapter: Arc<wgpu::Adapter>,
     render_target: RenderTarget,
     pub(crate) stage_config: Arc<RwLock<GlobalStageConfig>>,
+    /// Soft GPU memory budget in bytes. When set, atlas auto-grow and
+    /// other large allocations will refuse to exceed this limit.
+    pub(crate) memory_budget: Arc<RwLock<Option<usize>>>,
 }
 
 impl AsRef<WgpuRuntime> for Context {
@@ -462,6 +465,7 @@ impl Context {
             },
             render_target: target,
             stage_config,
+            memory_budget: Arc::new(RwLock::new(None)),
         }
     }
 
@@ -742,6 +746,27 @@ impl Context {
             .read()
             .expect("stage_config read")
             .default_hdr
+    }
+
+    /// Set a soft GPU memory budget in bytes.
+    ///
+    /// When set, atlas auto-grow and other large allocations will refuse
+    /// to exceed this limit, logging a warning instead of risking OOM.
+    ///
+    /// Pass `None` to remove the budget (default).
+    pub fn set_memory_budget(&self, budget: Option<usize>) {
+        *self.memory_budget.write().expect("memory_budget write") = budget;
+    }
+
+    /// Set a soft GPU memory budget in bytes (builder pattern).
+    pub fn with_memory_budget(self, budget: usize) -> Self {
+        self.set_memory_budget(Some(budget));
+        self
+    }
+
+    /// Returns the current memory budget, if set.
+    pub fn get_memory_budget(&self) -> Option<usize> {
+        *self.memory_budget.read().expect("memory_budget read")
     }
 
     /// Creates and returns a new [`Stage`] renderer.

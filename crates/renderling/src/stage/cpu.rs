@@ -442,6 +442,8 @@ pub struct Stage {
     pub(crate) use_hdr: Arc<AtomicBool>,
     /// The format of the final output surface (e.g. `Rgba8UnormSrgb`).
     pub(crate) surface_format: wgpu::TextureFormat,
+    /// Shared reference to the context's memory budget.
+    pub(crate) memory_budget: Arc<RwLock<Option<usize>>>,
 
     pub(crate) stage_slab_buffer: Arc<RwLock<SlabBuffer<wgpu::Buffer>>>,
 
@@ -647,6 +649,8 @@ impl Stage {
             .lock()
             .expect("textures_bindgroup lock")
             .take();
+
+        self.log_budget_warning();
 
         Ok(frames)
     }
@@ -968,7 +972,7 @@ impl Stage {
         &self.brdf_lut
     }
 
-    /// Sum the byte size of all used GPU memory.
+    /// Sum the byte size of all used GPU slab-buffer memory.
     ///
     /// Adds together the byte size of all underlying slab buffers.
     ///
@@ -990,6 +994,89 @@ impl Stage {
                 .map(|draws| draws.slab_allocator().len())
                 .unwrap_or_default();
         4 * num_u32s
+    }
+
+    /// Estimate the byte size of all GPU textures owned by this stage.
+    ///
+    /// Includes the render target, depth buffer, MSAA target, bloom
+    /// textures, material atlas, shadow map atlas, BRDF LUT, and IBL
+    /// cubemaps.
+    pub fn used_gpu_texture_byte_size(&self) -> usize {
+        let size = self.get_size();
+        let w = size.x as usize;
+        let h = size.y as usize;
+        let msaa = self.get_msaa_sample_count() as usize;
+        let use_hdr = self.use_hdr.load(Ordering::Relaxed);
+
+        // Bytes per pixel for the render-target format.
+        let render_bpp: usize = if use_hdr { 8 } else { 4 };
+
+        let mut total: usize = 0;
+
+        // 1. Render texture (hdr_texture)
+        total += w * h * render_bpp;
+        // 2. Depth texture
+        total += w * h * 4;
+        // 3. MSAA render target (only when MSAA > 1)
+        if msaa > 1 {
+            total += w * h * render_bpp * msaa;
+            // MSAA depth
+            total += w * h * 4 * msaa;
+        }
+        // 4. Bloom textures (only in HDR mode)
+        if use_hdr {
+            // Mix texture: full resolution, Rgba16Float
+            total += w * h * 8;
+            // Mip chain textures
+            let mips = (w.min(h) as u32).max(1).ilog2() as usize;
+            for i in 1..=mips {
+                total += (w >> i) * (h >> i) * 8;
+            }
+        }
+        // 5. Material atlas (Rgba8Unorm, 4 bpp)
+        let atlas_size = self.materials.atlas().get_size();
+        total += (atlas_size.width as usize)
+            * (atlas_size.height as usize)
+            * (atlas_size.depth_or_array_layers as usize)
+            * 4;
+        // 6. Shadow map atlas (R32Float, 4 bpp)
+        let shadow_size = self.lighting.shadow_map_atlas.get_size();
+        total += (shadow_size.width as usize)
+            * (shadow_size.height as usize)
+            * (shadow_size.depth_or_array_layers as usize)
+            * 4;
+        // 7. BRDF LUT (Rg16Float, 512x512, 4 bpp)
+        total += 512 * 512 * 4;
+        // 8. IBL irradiance cubemap (Rgba16Float, 32x32x6 faces)
+        total += 32 * 32 * 6 * 8;
+        // 9. IBL prefiltered environment cubemap (Rgba16Float, 128x128 down to 8x8, 5
+        //    mip levels, 6 faces)
+        for m in 0..5u32 {
+            let s = (128 >> m) as usize;
+            total += s * s * 6 * 8;
+        }
+
+        total
+    }
+
+    /// Total estimated GPU memory usage (buffers + textures).
+    pub fn used_gpu_total_byte_size(&self) -> usize {
+        self.used_gpu_buffer_byte_size() + self.used_gpu_texture_byte_size()
+    }
+
+    /// Check current GPU memory usage against the configured budget.
+    ///
+    /// Logs a warning if the estimated usage exceeds the budget. Does
+    /// nothing if no budget has been set.
+    pub fn log_budget_warning(&self) {
+        if let Some(budget) = *self.memory_budget.read().expect("memory_budget read") {
+            let used = self.used_gpu_total_byte_size();
+            if used > budget {
+                let used_mb = used as f64 / (1024.0 * 1024.0);
+                let budget_mb = budget as f64 / (1024.0 * 1024.0);
+                log::warn!("GPU memory usage ({used_mb:.1} MB) exceeds budget ({budget_mb:.1} MB)");
+            }
+        }
     }
 
     pub fn hdr_texture(&self) -> impl Deref<Target = crate::texture::Texture> + '_ {
@@ -1284,6 +1371,7 @@ impl Stage {
             background_color: Arc::new(RwLock::new(wgpu::Color::TRANSPARENT)),
             use_hdr: Arc::new(AtomicBool::new(use_hdr)),
             surface_format,
+            memory_budget: ctx.memory_budget.clone(),
         }
     }
 
