@@ -236,6 +236,7 @@ pub mod tutorial;
 pub mod types;
 #[cfg(feature = "ui")]
 pub mod ui;
+pub mod ui_slab;
 
 pub extern crate glam;
 

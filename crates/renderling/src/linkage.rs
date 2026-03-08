@@ -44,6 +44,10 @@ pub mod skybox_vertex;
 pub mod tonemapping_fragment;
 pub mod tonemapping_vertex;
 
+// 2D/UI shaders
+pub mod ui_fragment;
+pub mod ui_vertex;
+
 // Tutorial shaders
 pub mod implicit_isosceles_vertex;
 pub mod passthru_fragment;

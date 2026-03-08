@@ -15,8 +15,9 @@ use snafu::prelude::*;
 use crate::{
     stage::Stage,
     texture::{BufferDimensions, CopiedTextureBuffer, Texture, TextureError},
-    ui::Ui,
 };
+#[cfg(feature = "ui")]
+use crate::ui::Ui;
 
 pub use craballoc::runtime::WgpuRuntime;
 
@@ -632,6 +633,7 @@ impl Context {
     }
 
     /// Creates and returns a new [`Ui`] renderer.
+    #[cfg(feature = "ui")]
     pub fn new_ui(&self) -> Ui {
         Ui::new(self)
     }

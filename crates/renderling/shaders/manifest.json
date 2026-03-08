@@ -203,5 +203,15 @@
     "source_path": "shaders/tutorial-slabbed_vertices_no_instance.spv",
     "entry_point": "tutorial::slabbed_vertices_no_instance",
     "wgsl_entry_point": "tutorialslabbed_vertices_no_instance"
+  },
+  {
+    "source_path": "shaders/ui_slab-shader-ui_fragment.spv",
+    "entry_point": "ui_slab::shader::ui_fragment",
+    "wgsl_entry_point": "ui_slabshaderui_fragment"
+  },
+  {
+    "source_path": "shaders/ui_slab-shader-ui_vertex.spv",
+    "entry_point": "ui_slab::shader::ui_vertex",
+    "wgsl_entry_point": "ui_slabshaderui_vertex"
   }
 ]
