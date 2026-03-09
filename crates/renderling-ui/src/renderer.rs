@@ -23,6 +23,7 @@ use craballoc::{
 use crabslab::Id;
 use glam::{Mat4, UVec2, Vec2, Vec4};
 use renderling::{
+    atlas::{Atlas, AtlasImage, AtlasTexture},
     context::Context,
     ui_slab::{GradientDescriptor, UiDrawCallDescriptor, UiElementType, UiViewport},
 };
@@ -388,6 +389,98 @@ impl UiEllipse {
     }
 }
 
+/// A live handle to an image element in the renderer.
+///
+/// See [`UiRect`] for general usage notes.
+#[derive(Clone)]
+pub struct UiImage {
+    inner: Hybrid<UiDrawCallDescriptor>,
+    /// Kept alive to prevent the atlas from garbage-collecting the texture.
+    #[allow(dead_code)]
+    atlas_texture: AtlasTexture,
+}
+
+impl std::fmt::Debug for UiImage {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("UiImage")
+            .field("inner", &self.inner)
+            .finish_non_exhaustive()
+    }
+}
+
+impl UiImage {
+    /// Returns the slab [`Id`] of the underlying descriptor.
+    pub fn id(&self) -> Id<UiDrawCallDescriptor> {
+        self.inner.id()
+    }
+
+    /// Returns a copy of the underlying descriptor.
+    pub fn descriptor(&self) -> UiDrawCallDescriptor {
+        self.inner.get()
+    }
+
+    /// Set the top-left position in screen pixels.
+    pub fn set_position(&self, position: Vec2) -> &Self {
+        self.inner.modify(|d| d.position = position);
+        self
+    }
+
+    /// Set the top-left position in screen pixels (builder).
+    pub fn with_position(self, position: Vec2) -> Self {
+        self.set_position(position);
+        self
+    }
+
+    /// Set the size in screen pixels.
+    pub fn set_size(&self, size: Vec2) -> &Self {
+        self.inner.modify(|d| d.size = size);
+        self
+    }
+
+    /// Set the size in screen pixels (builder).
+    pub fn with_size(self, size: Vec2) -> Self {
+        self.set_size(size);
+        self
+    }
+
+    /// Set a tint color (multiplied with the texture color).
+    /// Use `Vec4::ONE` for no tint.
+    pub fn set_tint(&self, color: Vec4) -> &Self {
+        self.inner.modify(|d| d.fill_color = color);
+        self
+    }
+
+    /// Set a tint color (builder).
+    pub fn with_tint(self, color: Vec4) -> Self {
+        self.set_tint(color);
+        self
+    }
+
+    /// Set the opacity (0.0 = transparent, 1.0 = opaque).
+    pub fn set_opacity(&self, opacity: f32) -> &Self {
+        self.inner.modify(|d| d.opacity = opacity);
+        self
+    }
+
+    /// Set the opacity (builder).
+    pub fn with_opacity(self, opacity: f32) -> Self {
+        self.set_opacity(opacity);
+        self
+    }
+
+    /// Set the z-depth for sorting.
+    pub fn set_z(&self, z: f32) -> &Self {
+        self.inner.modify(|d| d.z = z);
+        self
+    }
+
+    /// Set the z-depth for sorting (builder).
+    pub fn with_z(self, z: f32) -> Self {
+        self.set_z(z);
+        self
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Internal draw call entry
 // ---------------------------------------------------------------------------
@@ -416,14 +509,18 @@ struct DrawCall {
 /// [`render`](Self::render) call.
 pub struct UiRenderer {
     slab: SlabAllocator<WgpuRuntime>,
-    #[allow(dead_code)]
     viewport: Hybrid<UiViewport>,
+    atlas: Atlas,
     pipeline: wgpu::RenderPipeline,
     bindgroup_layout: wgpu::BindGroupLayout,
     /// Cached slab buffer from the last commit.
     slab_buffer: Option<SlabBuffer<wgpu::Buffer>>,
     /// Cached bind group (recreated when slab buffer changes).
     bindgroup: Option<wgpu::BindGroup>,
+    /// ID of the atlas texture at the time the bind group was created.
+    /// Used to detect when the atlas is recreated and the bind group
+    /// needs rebuilding.
+    bindgroup_atlas_texture_id: Option<usize>,
     /// All active draw calls, sorted by z before rendering.
     draw_calls: Vec<DrawCall>,
     /// Viewport size.
@@ -436,14 +533,17 @@ pub struct UiRenderer {
     format: wgpu::TextureFormat,
     /// MSAA resolve texture (if msaa_sample_count > 1).
     msaa_texture: Option<wgpu::TextureView>,
-    /// Dummy atlas texture view (1x1x1, created once).
-    dummy_atlas_view: wgpu::TextureView,
-    /// Dummy atlas sampler (created once).
-    dummy_atlas_sampler: wgpu::Sampler,
 }
 
 impl UiRenderer {
     const LABEL: Option<&'static str> = Some("renderling-ui");
+
+    /// Default atlas texture size.
+    const DEFAULT_ATLAS_SIZE: wgpu::Extent3d = wgpu::Extent3d {
+        width: 512,
+        height: 512,
+        depth_or_array_layers: 2,
+    };
 
     /// Create a new `UiRenderer` from a renderling `Context`.
     pub fn new(ctx: &Context) -> Self {
@@ -452,32 +552,45 @@ impl UiRenderer {
         let format = ctx.get_render_target().format();
 
         let slab = SlabAllocator::new(ctx.runtime(), "ui-slab", wgpu::BufferUsages::empty());
+
+        // IMPORTANT: The viewport must be the first slab allocation so it
+        // lands at offset 0. The vertex/fragment shaders read UiViewport
+        // via `Id::new(0)`.
         let viewport = slab.new_value(UiViewport {
             projection: Self::ortho2d(size.x as f32, size.y as f32),
             size,
+            atlas_size: UVec2::new(
+                Self::DEFAULT_ATLAS_SIZE.width,
+                Self::DEFAULT_ATLAS_SIZE.height,
+            ),
         });
+
+        let atlas = Atlas::new(
+            &slab,
+            Self::DEFAULT_ATLAS_SIZE,
+            None,
+            Some("ui-atlas"),
+            None,
+        );
 
         let bindgroup_layout = Self::create_bindgroup_layout(device);
         let pipeline = Self::create_pipeline(device, &bindgroup_layout, format, 1);
 
-        // Create the dummy atlas texture and sampler once.
-        let (dummy_atlas_view, dummy_atlas_sampler) = Self::create_dummy_atlas(device);
-
         Self {
             slab,
             viewport,
+            atlas,
             pipeline,
             bindgroup_layout,
             slab_buffer: None,
             bindgroup: None,
+            bindgroup_atlas_texture_id: None,
             draw_calls: Vec::new(),
             viewport_size: size,
             background_color: None,
             msaa_sample_count: 1,
             format,
             msaa_texture: None,
-            dummy_atlas_view,
-            dummy_atlas_sampler,
         }
     }
 
@@ -576,6 +689,48 @@ impl UiRenderer {
         element
     }
 
+    /// Add an image element and return a live handle.
+    ///
+    /// The image is loaded into the atlas from an [`AtlasImage`]
+    /// (CPU-side pixel data). The element is sized to match the
+    /// image dimensions by default.
+    ///
+    /// ```ignore
+    /// let img = image::open("icon.png").unwrap();
+    /// let _icon = ui.add_image(img.into())
+    ///     .with_position(Vec2::new(10.0, 10.0));
+    /// ```
+    pub fn add_image(&mut self, image: impl Into<AtlasImage>) -> UiImage {
+        let image = image.into();
+        let image_size = image.size;
+        let atlas_texture = self
+            .atlas
+            .add_image(&image)
+            .expect("failed to add image to atlas");
+
+        // Update the viewport with the (possibly new) atlas size.
+        let atlas_extent = self.atlas.get_size();
+        self.viewport.modify(|v| {
+            v.atlas_size = UVec2::new(atlas_extent.width, atlas_extent.height);
+        });
+
+        let mut desc = self.default_descriptor(UiElementType::Image);
+        desc.size = Vec2::new(image_size.x as f32, image_size.y as f32);
+        desc.atlas_texture_id = atlas_texture.id().inner();
+        desc.fill_color = Vec4::ONE; // no tint
+
+        let hybrid = self.slab.new_value(desc);
+        let element = UiImage {
+            inner: hybrid.clone(),
+            atlas_texture,
+        };
+        self.draw_calls.push(DrawCall {
+            descriptor: hybrid,
+            vertex_count: 6,
+        });
+        element
+    }
+
     /// Remove a rectangle element by its handle.
     pub fn remove_rect(&mut self, element: &UiRect) {
         self.remove_by_id(element.id());
@@ -588,6 +743,11 @@ impl UiRenderer {
 
     /// Remove an ellipse element by its handle.
     pub fn remove_ellipse(&mut self, element: &UiEllipse) {
+        self.remove_by_id(element.id());
+    }
+
+    /// Remove an image element by its handle.
+    pub fn remove_image(&mut self, element: &UiImage) {
         self.remove_by_id(element.id());
     }
 
@@ -613,13 +773,32 @@ impl UiRenderer {
             z_a.partial_cmp(&z_b).unwrap_or(core::cmp::Ordering::Equal)
         });
 
+        // Run atlas upkeep (garbage-collect dropped textures).
+        let atlas_texture_recreated = self.atlas.upkeep(self.slab.runtime());
+        if atlas_texture_recreated {
+            // Update viewport with new atlas size.
+            let extent = self.atlas.get_size();
+            self.viewport.modify(|v| {
+                v.atlas_size = UVec2::new(extent.width, extent.height);
+            });
+        }
+
         // Commit slab changes to the GPU.
         let buffer = self.slab.commit();
-        let should_recreate_bindgroup = buffer.is_new_this_commit() || self.bindgroup.is_none();
+
+        // Check if bind group needs recreation: slab buffer changed,
+        // atlas texture changed, or first render.
+        let atlas_tex = self.atlas.get_texture();
+        let atlas_tex_id = atlas_tex.id();
+        let atlas_changed = self.bindgroup_atlas_texture_id != Some(atlas_tex_id);
+        let should_recreate_bindgroup =
+            buffer.is_new_this_commit() || atlas_changed || self.bindgroup.is_none();
 
         if should_recreate_bindgroup {
-            self.bindgroup = Some(self.create_bindgroup(&buffer));
+            self.bindgroup = Some(self.create_bindgroup(&buffer, &atlas_tex));
+            self.bindgroup_atlas_texture_id = Some(atlas_tex_id);
         }
+        drop(atlas_tex);
         self.slab_buffer = Some(buffer);
 
         let device = self.slab.device();
@@ -835,38 +1014,13 @@ impl UiRenderer {
         texture.create_view(&wgpu::TextureViewDescriptor::default())
     }
 
-    /// Create a dummy 1x1x1 atlas texture and sampler (used until
-    /// texture/image support is fully wired up).
-    fn create_dummy_atlas(device: &wgpu::Device) -> (wgpu::TextureView, wgpu::Sampler) {
-        let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("renderling-ui-dummy-atlas"),
-            size: wgpu::Extent3d {
-                width: 1,
-                height: 1,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8Unorm,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        });
-        let view = texture.create_view(&wgpu::TextureViewDescriptor {
-            dimension: Some(wgpu::TextureViewDimension::D2Array),
-            ..Default::default()
-        });
-        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            label: Some("renderling-ui-dummy-sampler"),
-            mag_filter: wgpu::FilterMode::Nearest,
-            min_filter: wgpu::FilterMode::Nearest,
-            ..Default::default()
-        });
-        (view, sampler)
-    }
-
-    /// Create a bind group using the given slab buffer.
-    fn create_bindgroup(&self, buffer: &SlabBuffer<wgpu::Buffer>) -> wgpu::BindGroup {
+    /// Create a bind group using the given slab buffer and atlas
+    /// texture.
+    fn create_bindgroup(
+        &self,
+        buffer: &SlabBuffer<wgpu::Buffer>,
+        atlas_tex: &renderling::texture::Texture,
+    ) -> wgpu::BindGroup {
         self.slab
             .device()
             .create_bind_group(&wgpu::BindGroupDescriptor {
@@ -879,11 +1033,11 @@ impl UiRenderer {
                     },
                     wgpu::BindGroupEntry {
                         binding: 1,
-                        resource: wgpu::BindingResource::TextureView(&self.dummy_atlas_view),
+                        resource: wgpu::BindingResource::TextureView(&atlas_tex.view),
                     },
                     wgpu::BindGroupEntry {
                         binding: 2,
-                        resource: wgpu::BindingResource::Sampler(&self.dummy_atlas_sampler),
+                        resource: wgpu::BindingResource::Sampler(&atlas_tex.sampler),
                     },
                 ],
             })

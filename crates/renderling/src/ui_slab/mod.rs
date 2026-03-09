@@ -167,11 +167,14 @@ pub struct UiDrawCallDescriptor {
 
 /// Camera/viewport descriptor for the 2D UI pipeline.
 ///
-/// Contains the orthographic projection matrix and viewport dimensions.
+/// Contains the orthographic projection matrix, viewport dimensions,
+/// and atlas texture dimensions.
 #[derive(Clone, Copy, Default, PartialEq, SlabItem, core::fmt::Debug)]
 pub struct UiViewport {
     /// Orthographic projection matrix (typically top-left origin, +Y down).
     pub projection: Mat4,
     /// Viewport size in pixels.
     pub size: UVec2,
+    /// Atlas texture size in pixels.
+    pub atlas_size: UVec2,
 }

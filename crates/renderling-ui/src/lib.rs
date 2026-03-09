@@ -39,6 +39,7 @@ mod test;
 
 // Re-export key types from renderling that users will need.
 pub use renderling::{
+    atlas::{AtlasImage, AtlasTexture},
     context::Context,
     glam,
     ui_slab::{
@@ -47,4 +48,4 @@ pub use renderling::{
 };
 
 // Re-export our own types.
-pub use renderer::{UiCircle, UiEllipse, UiRect, UiRenderer};
+pub use renderer::{UiCircle, UiEllipse, UiImage, UiRect, UiRenderer};

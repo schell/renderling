@@ -143,6 +143,55 @@ mod tests {
     }
 
     #[test]
+    fn can_render_image() {
+        init_logging();
+        let ctx = futures_lite::future::block_on(Context::headless(200, 200));
+        let mut ui = UiRenderer::new(&ctx).with_background_color(Vec4::ONE);
+
+        // Create a programmatic 64x64 checkerboard image.
+        let size = 64u32;
+        let mut img = image::RgbaImage::new(size, size);
+        for y in 0..size {
+            for x in 0..size {
+                let checker = ((x / 8) + (y / 8)) % 2 == 0;
+                let c = if checker { 255 } else { 80 };
+                img.put_pixel(x, y, image::Rgba([c, c, c, 255]));
+            }
+        }
+
+        let atlas_img: renderling::atlas::AtlasImage = image::DynamicImage::ImageRgba8(img).into();
+        let _image_el = ui.add_image(atlas_img).with_position(Vec2::new(20.0, 20.0));
+
+        let frame = ctx.get_next_frame().unwrap();
+        ui.render(&frame.view());
+        let output = futures_lite::future::block_on(frame.read_image()).unwrap();
+        save_and_assert("ui2d/image.png", output);
+    }
+
+    #[test]
+    fn can_render_image_with_tint() {
+        init_logging();
+        let ctx = futures_lite::future::block_on(Context::headless(200, 200));
+        let mut ui = UiRenderer::new(&ctx).with_background_color(Vec4::ONE);
+
+        // Create a 64x64 solid white image.
+        let size = 64u32;
+        let img = image::RgbaImage::from_pixel(size, size, image::Rgba([255, 255, 255, 255]));
+        let atlas_img: renderling::atlas::AtlasImage = image::DynamicImage::ImageRgba8(img).into();
+
+        // Apply a red tint.
+        let _image_el = ui
+            .add_image(atlas_img)
+            .with_position(Vec2::new(50.0, 50.0))
+            .with_tint(Vec4::new(1.0, 0.0, 0.0, 1.0));
+
+        let frame = ctx.get_next_frame().unwrap();
+        ui.render(&frame.view());
+        let output = futures_lite::future::block_on(frame.read_image()).unwrap();
+        save_and_assert("ui2d/image_tint.png", output);
+    }
+
+    #[test]
     fn can_render_gradient_rect() {
         init_logging();
         let ctx = futures_lite::future::block_on(Context::headless(200, 200));

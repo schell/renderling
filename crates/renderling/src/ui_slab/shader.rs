@@ -187,7 +187,7 @@ pub fn ui_fragment(
             let atlas_tex_id = Id::<AtlasTextureDescriptor>::new(draw_call.atlas_texture_id);
             let atlas_tex: AtlasTextureDescriptor = slab.read_unchecked(atlas_tex_id);
             let viewport: UiViewport = slab.read_unchecked(Id::new(0));
-            let atlas_uv = atlas_tex.uv(in_uv, viewport.size);
+            let atlas_uv = atlas_tex.uv(in_uv, viewport.atlas_size);
             let sample: Vec4 = atlas.sample_by_lod(*atlas_sampler, atlas_uv, 0.0);
             color = draw_call.fill_color;
             color.w *= sample.w;
@@ -197,7 +197,7 @@ pub fn ui_fragment(
             let atlas_tex_id = Id::<AtlasTextureDescriptor>::new(draw_call.atlas_texture_id);
             let atlas_tex: AtlasTextureDescriptor = slab.read_unchecked(atlas_tex_id);
             let viewport: UiViewport = slab.read_unchecked(Id::new(0));
-            let atlas_uv = atlas_tex.uv(in_uv, viewport.size);
+            let atlas_uv = atlas_tex.uv(in_uv, viewport.atlas_size);
             color = atlas.sample_by_lod(*atlas_sampler, atlas_uv, 0.0);
             // Modulate with fill color (tint).
             color *= draw_call.fill_color;
