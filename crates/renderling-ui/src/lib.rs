@@ -49,3 +49,7 @@ pub use renderling::{
 
 // Re-export our own types.
 pub use renderer::{UiCircle, UiEllipse, UiImage, UiRect, UiRenderer};
+
+// Re-export text types (behind "text" feature).
+#[cfg(feature = "text")]
+pub use renderer::{FontArc, FontId, Section, Text, UiText};

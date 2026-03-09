@@ -216,4 +216,76 @@ mod tests {
         let img = futures_lite::future::block_on(frame.read_image()).unwrap();
         save_and_assert("ui2d/gradient_rect.png", img);
     }
+
+    #[cfg(feature = "text")]
+    #[test]
+    fn can_render_text() {
+        use crate::{FontArc, Section, Text};
+
+        init_logging();
+        let ctx = futures_lite::future::block_on(Context::headless(400, 100));
+        let mut ui = UiRenderer::new(&ctx).with_background_color(Vec4::ONE);
+
+        let font_bytes =
+            std::fs::read("../../fonts/Recursive Mn Lnr St Med Nerd Font Complete.ttf").unwrap();
+        let font = FontArc::try_from_vec(font_bytes).unwrap();
+        let _font_id = ui.add_font(font);
+
+        let _text = ui.add_text(
+            Section::default()
+                .add_text(
+                    Text::new("Hello, renderling-ui!")
+                        .with_scale(32.0)
+                        .with_color([0.0, 0.0, 0.0, 1.0]),
+                )
+                .with_screen_position((10.0, 10.0)),
+        );
+
+        let frame = ctx.get_next_frame().unwrap();
+        ui.render(&frame.view());
+        let img = futures_lite::future::block_on(frame.read_image()).unwrap();
+        save_and_assert("ui2d/text.png", img);
+    }
+
+    #[cfg(feature = "text")]
+    #[test]
+    fn can_render_text_with_shapes() {
+        use crate::{FontArc, Section, Text};
+
+        init_logging();
+        let ctx = futures_lite::future::block_on(Context::headless(400, 100));
+        let mut ui = UiRenderer::new(&ctx).with_background_color(Vec4::ONE);
+
+        let font_bytes =
+            std::fs::read("../../fonts/Recursive Mn Lnr St Med Nerd Font Complete.ttf").unwrap();
+        let font = FontArc::try_from_vec(font_bytes).unwrap();
+        let _font_id = ui.add_font(font);
+
+        // Background rounded rect behind the text.
+        let _bg = ui
+            .add_rect()
+            .with_position(Vec2::new(5.0, 5.0))
+            .with_size(Vec2::new(350.0, 50.0))
+            .with_corner_radii(Vec4::splat(8.0))
+            .with_fill_color(Vec4::new(0.2, 0.4, 0.8, 1.0))
+            .with_z(0.0);
+
+        // Text on top.
+        let _text = ui
+            .add_text(
+                Section::default()
+                    .add_text(
+                        Text::new("Text on a rect!")
+                            .with_scale(28.0)
+                            .with_color([1.0, 1.0, 1.0, 1.0]),
+                    )
+                    .with_screen_position((15.0, 15.0)),
+            )
+            .with_z(0.1);
+
+        let frame = ctx.get_next_frame().unwrap();
+        ui.render(&frame.view());
+        let img = futures_lite::future::block_on(frame.read_image()).unwrap();
+        save_and_assert("ui2d/text_with_shapes.png", img);
+    }
 }

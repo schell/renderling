@@ -482,6 +482,286 @@ impl UiImage {
 }
 
 // ---------------------------------------------------------------------------
+// Text types (behind "text" feature)
+// ---------------------------------------------------------------------------
+
+#[cfg(feature = "text")]
+mod text {
+    use super::*;
+    use glyph_brush::ab_glyph;
+
+    /// Re-export common glyph_brush types for convenience.
+    pub use ab_glyph::FontArc;
+    use glyph_brush::GlyphCruncher as _;
+    pub use glyph_brush::{FontId, Section, Text};
+
+    /// A CPU-side glyph rasterization cache.
+    ///
+    /// Wraps a `GlyphBrush` and maintains a single-channel (Luma8) image
+    /// that accumulates rasterized glyph bitmaps.
+    pub(crate) struct GlyphCache {
+        brush: glyph_brush::GlyphBrush<GlyphQuad>,
+        cache_img: image::ImageBuffer<image::Luma<u8>, Vec<u8>>,
+        /// Cached dimensions (updated whenever cache_img is replaced).
+        cache_w: f32,
+        cache_h: f32,
+        dirty: bool,
+    }
+
+    /// Intermediate representation of one glyph quad produced by the brush.
+    #[derive(Clone, Debug)]
+    pub(crate) struct GlyphQuad {
+        /// Top-left position in screen pixels.
+        pub position: Vec2,
+        /// Size in screen pixels.
+        pub size: Vec2,
+        /// UV rect within the glyph cache image (in pixels).
+        pub tex_offset_px: UVec2,
+        /// UV rect size within the glyph cache image (in pixels).
+        pub tex_size_px: UVec2,
+        /// Text color from the section.
+        pub color: Vec4,
+    }
+
+    impl GlyphCache {
+        /// Create a new glyph cache with the given fonts.
+        pub fn new(fonts: Vec<FontArc>) -> Self {
+            let brush = glyph_brush::GlyphBrushBuilder::using_fonts(fonts).build();
+            let (w, h) = brush.texture_dimensions();
+            Self {
+                brush,
+                cache_img: image::ImageBuffer::from_pixel(w, h, image::Luma([0])),
+                cache_w: w as f32,
+                cache_h: h as f32,
+                dirty: false,
+            }
+        }
+
+        /// Rebuild the brush with the current font set (after adding fonts).
+        pub fn rebuild_with_fonts(&mut self, fonts: Vec<FontArc>) {
+            self.brush = self.brush.to_builder().replace_fonts(|_| fonts).build();
+            let (w, h) = self.brush.texture_dimensions();
+            self.cache_img = image::ImageBuffer::from_pixel(w, h, image::Luma([0]));
+            self.cache_w = w as f32;
+            self.cache_h = h as f32;
+            self.dirty = false;
+        }
+
+        /// Queue a section for layout and rasterization.
+        pub fn queue<'a>(&mut self, section: impl Into<std::borrow::Cow<'a, Section<'a>>>) {
+            self.brush.queue(section);
+        }
+
+        /// Compute the bounding rectangle for a section.
+        pub fn glyph_bounds<'a>(
+            &mut self,
+            section: impl Into<std::borrow::Cow<'a, Section<'a>>>,
+        ) -> Option<ab_glyph::Rect> {
+            self.brush.glyph_bounds(section)
+        }
+
+        /// Process queued sections, rasterizing glyphs and producing quad
+        /// data. Returns `Some(quads)` if new vertices need to be drawn,
+        /// or `None` if the previous frame's data can be reused.
+        ///
+        /// Also marks whether the cache image is dirty (needs re-upload).
+        pub fn process(&mut self) -> Option<Vec<GlyphQuad>> {
+            let cache_img = &mut self.cache_img;
+            let dirty = &mut self.dirty;
+
+            let mut result;
+            loop {
+                // Capture dimensions each iteration (they change on resize).
+                let cw = cache_img.width() as f32;
+                let ch = cache_img.height() as f32;
+                result = self.brush.process_queued(
+                    // Callback: write rasterized glyph data into cache image.
+                    |rect, tex_data| {
+                        let src = image::ImageBuffer::<image::Luma<u8>, Vec<u8>>::from_vec(
+                            rect.width(),
+                            rect.height(),
+                            tex_data.to_vec(),
+                        )
+                        .expect("glyph rasterization buffer size mismatch");
+                        image::imageops::replace(
+                            cache_img,
+                            &src,
+                            rect.min[0] as i64,
+                            rect.min[1] as i64,
+                        );
+                        *dirty = true;
+                    },
+                    // Callback: convert GlyphVertex -> GlyphQuad.
+                    |gv| {
+                        let mut tex_coords = gv.tex_coords;
+                        let pixel_coords = gv.pixel_coords;
+                        let bounds = gv.bounds;
+
+                        // Clip glyph rect to section bounds.
+                        let mut gl_rect = ab_glyph::Rect {
+                            min: ab_glyph::point(pixel_coords.min.x, pixel_coords.min.y),
+                            max: ab_glyph::point(pixel_coords.max.x, pixel_coords.max.y),
+                        };
+
+                        if gl_rect.max.x > bounds.max.x {
+                            let old_width = gl_rect.width();
+                            gl_rect.max.x = bounds.max.x;
+                            tex_coords.max.x =
+                                tex_coords.min.x + tex_coords.width() * gl_rect.width() / old_width;
+                        }
+                        if gl_rect.min.x < bounds.min.x {
+                            let old_width = gl_rect.width();
+                            gl_rect.min.x = bounds.min.x;
+                            tex_coords.min.x =
+                                tex_coords.max.x - tex_coords.width() * gl_rect.width() / old_width;
+                        }
+                        if gl_rect.max.y > bounds.max.y {
+                            let old_height = gl_rect.height();
+                            gl_rect.max.y = bounds.max.y;
+                            tex_coords.max.y = tex_coords.min.y
+                                + tex_coords.height() * gl_rect.height() / old_height;
+                        }
+                        if gl_rect.min.y < bounds.min.y {
+                            let old_height = gl_rect.height();
+                            gl_rect.min.y = bounds.min.y;
+                            tex_coords.min.y = tex_coords.max.y
+                                - tex_coords.height() * gl_rect.height() / old_height;
+                        }
+
+                        // tex_coords are in normalized 0..1 space of the
+                        // glyph cache image. Convert to pixel coordinates.
+                        let tex_offset_px = UVec2::new(
+                            (tex_coords.min.x * cw) as u32,
+                            (tex_coords.min.y * ch) as u32,
+                        );
+                        let tex_size_px = UVec2::new(
+                            ((tex_coords.max.x - tex_coords.min.x) * cw) as u32,
+                            ((tex_coords.max.y - tex_coords.min.y) * ch) as u32,
+                        );
+
+                        GlyphQuad {
+                            position: Vec2::new(gl_rect.min.x, gl_rect.min.y),
+                            size: Vec2::new(gl_rect.width(), gl_rect.height()),
+                            tex_offset_px,
+                            tex_size_px,
+                            color: Vec4::new(
+                                gv.extra.color[0],
+                                gv.extra.color[1],
+                                gv.extra.color[2],
+                                gv.extra.color[3],
+                            ),
+                        }
+                    },
+                );
+
+                match &result {
+                    Err(glyph_brush::BrushError::TextureTooSmall { suggested, .. }) => {
+                        let (new_w, new_h) = *suggested;
+                        let max_dim = 2048;
+                        let (new_w, new_h) = if (new_w > max_dim || new_h > max_dim)
+                            && (cache_img.width() < max_dim || cache_img.height() < max_dim)
+                        {
+                            (max_dim, max_dim)
+                        } else {
+                            (new_w, new_h)
+                        };
+                        *cache_img = image::ImageBuffer::from_pixel(new_w, new_h, image::Luma([0]));
+                        self.brush.resize_texture(new_w, new_h);
+                        *dirty = true;
+                    }
+                    Ok(_) => break,
+                }
+            }
+
+            match result.unwrap() {
+                glyph_brush::BrushAction::Draw(quads) => Some(quads),
+                glyph_brush::BrushAction::ReDraw => None,
+            }
+        }
+
+        /// Returns the cache image if it has been modified since the last
+        /// call to `take_image()`, converting from Luma8 to RGBA8 (white +
+        /// alpha).
+        pub fn take_image(&mut self) -> Option<image::RgbaImage> {
+            if !self.dirty {
+                return None;
+            }
+            self.dirty = false;
+            let (w, h) = (self.cache_img.width(), self.cache_img.height());
+            let rgba = image::RgbaImage::from_fn(w, h, |x, y| {
+                let luma = self.cache_img.get_pixel(x, y).0[0];
+                image::Rgba([255, 255, 255, luma])
+            });
+            Some(rgba)
+        }
+    }
+
+    /// A live handle to a text element in the renderer.
+    ///
+    /// This represents a block of text rendered as a set of glyph quads.
+    /// Each glyph is a separate draw call internally, but they are all
+    /// managed as a single logical element.
+    ///
+    /// **Dropping this handle does NOT remove the text** — call
+    /// [`UiRenderer::remove_text`] explicitly.
+    #[derive(Clone, Debug)]
+    pub struct UiText {
+        /// The descriptors for each glyph quad (one per visible glyph).
+        pub(crate) glyph_descriptors: Vec<Hybrid<UiDrawCallDescriptor>>,
+        /// Per-glyph atlas texture descriptors (kept alive for slab lifetime).
+        #[allow(dead_code)]
+        pub(crate) glyph_atlas_descriptors:
+            Vec<Hybrid<renderling::atlas::shader::AtlasTextureDescriptor>>,
+        /// Bounding box of the text (min, max) in screen pixels.
+        pub(crate) bounds: (Vec2, Vec2),
+        /// Unique identifier for this text block.
+        #[allow(dead_code)]
+        pub(crate) text_id: u64,
+    }
+
+    impl UiText {
+        /// Returns the bounding box of the laid-out text (min, max) in
+        /// screen pixels.
+        pub fn bounds(&self) -> (Vec2, Vec2) {
+            self.bounds
+        }
+
+        /// Set the z-depth for all glyphs in this text block.
+        pub fn set_z(&self, z: f32) -> &Self {
+            for desc in &self.glyph_descriptors {
+                desc.modify(|d| d.z = z);
+            }
+            self
+        }
+
+        /// Set the z-depth for all glyphs (builder).
+        pub fn with_z(self, z: f32) -> Self {
+            self.set_z(z);
+            self
+        }
+
+        /// Set the opacity for all glyphs in this text block.
+        pub fn set_opacity(&self, opacity: f32) -> &Self {
+            for desc in &self.glyph_descriptors {
+                desc.modify(|d| d.opacity = opacity);
+            }
+            self
+        }
+
+        /// Set the opacity for all glyphs (builder).
+        pub fn with_opacity(self, opacity: f32) -> Self {
+            self.set_opacity(opacity);
+            self
+        }
+    }
+}
+
+#[cfg(feature = "text")]
+use text::GlyphCache;
+#[cfg(feature = "text")]
+pub use text::{FontArc, FontId, Section, Text, UiText};
+
+// ---------------------------------------------------------------------------
 // Internal draw call entry
 // ---------------------------------------------------------------------------
 
@@ -533,6 +813,19 @@ pub struct UiRenderer {
     format: wgpu::TextureFormat,
     /// MSAA resolve texture (if msaa_sample_count > 1).
     msaa_texture: Option<wgpu::TextureView>,
+
+    // --- Text support (behind "text" feature) ---
+    #[cfg(feature = "text")]
+    fonts: Vec<glyph_brush::ab_glyph::FontArc>,
+    #[cfg(feature = "text")]
+    glyph_cache: GlyphCache,
+    /// Atlas texture entry for the glyph cache image. Replaced when the
+    /// cache image is re-uploaded.
+    #[cfg(feature = "text")]
+    glyph_cache_atlas_texture: Option<AtlasTexture>,
+    /// Monotonic counter for assigning unique text block IDs.
+    #[cfg(feature = "text")]
+    next_text_id: u64,
 }
 
 impl UiRenderer {
@@ -591,6 +884,14 @@ impl UiRenderer {
             msaa_sample_count: 1,
             format,
             msaa_texture: None,
+            #[cfg(feature = "text")]
+            fonts: Vec::new(),
+            #[cfg(feature = "text")]
+            glyph_cache: GlyphCache::new(Vec::new()),
+            #[cfg(feature = "text")]
+            glyph_cache_atlas_texture: None,
+            #[cfg(feature = "text")]
+            next_text_id: 0,
         }
     }
 
@@ -731,6 +1032,132 @@ impl UiRenderer {
         element
     }
 
+    /// Register a font and return its [`FontId`].
+    ///
+    /// Fonts must be registered before they can be used in
+    /// [`Section`]/[`Text`] for [`add_text`](Self::add_text).
+    ///
+    /// ```ignore
+    /// let bytes = std::fs::read("fonts/MyFont.ttf").unwrap();
+    /// let font = FontArc::try_from_vec(bytes).unwrap();
+    /// let font_id = ui.add_font(font);
+    /// ```
+    #[cfg(feature = "text")]
+    pub fn add_font(&mut self, font: FontArc) -> FontId {
+        let id = self.fonts.len();
+        self.fonts.push(font);
+        self.glyph_cache.rebuild_with_fonts(self.fonts.clone());
+        FontId(id)
+    }
+
+    /// Add a text element from a glyph_brush [`Section`].
+    ///
+    /// This rasterizes the glyphs, uploads the cache image to the atlas,
+    /// and creates one draw call per visible glyph.
+    ///
+    /// ```ignore
+    /// use glyph_brush::{Section, Text};
+    /// let font_id = ui.add_font(my_font);
+    /// let _text = ui.add_text(
+    ///     Section::default()
+    ///         .add_text(
+    ///             Text::new("Hello, UI!")
+    ///                 .with_scale(32.0)
+    ///                 .with_color([0.0, 0.0, 0.0, 1.0])
+    ///         )
+    ///         .with_screen_position((10.0, 10.0))
+    /// );
+    /// ```
+    #[cfg(feature = "text")]
+    pub fn add_text<'a>(
+        &mut self,
+        section: impl Into<std::borrow::Cow<'a, Section<'a>>>,
+    ) -> UiText {
+        use renderling::atlas::shader::AtlasTextureDescriptor;
+
+        let section = section.into();
+
+        // Compute text bounds.
+        let bounds = self
+            .glyph_cache
+            .glyph_bounds(section.clone())
+            .map(|r| (Vec2::new(r.min.x, r.min.y), Vec2::new(r.max.x, r.max.y)))
+            .unwrap_or((Vec2::ZERO, Vec2::ZERO));
+
+        // Queue and process.
+        self.glyph_cache.queue(section);
+        let quads = self.glyph_cache.process().unwrap_or_default();
+
+        // Upload the glyph cache image to the atlas (if dirty).
+        if let Some(rgba_img) = self.glyph_cache.take_image() {
+            // Drop old atlas entry (if any) so the atlas can reclaim space.
+            self.glyph_cache_atlas_texture = None;
+
+            let atlas_img = AtlasImage::from(image::DynamicImage::ImageRgba8(rgba_img));
+            let atlas_tex = self
+                .atlas
+                .add_image(&atlas_img)
+                .expect("failed to upload glyph cache to atlas");
+
+            // Update the viewport with the (possibly new) atlas size.
+            let atlas_extent = self.atlas.get_size();
+            self.viewport.modify(|v| {
+                v.atlas_size = UVec2::new(atlas_extent.width, atlas_extent.height);
+            });
+
+            self.glyph_cache_atlas_texture = Some(atlas_tex);
+        }
+
+        // Get the atlas placement of the glyph cache image.
+        let cache_atlas_desc = self
+            .glyph_cache_atlas_texture
+            .as_ref()
+            .expect("glyph cache not uploaded")
+            .descriptor();
+
+        let text_id = self.next_text_id;
+        self.next_text_id += 1;
+
+        let mut glyph_descriptors = Vec::with_capacity(quads.len());
+        let mut glyph_atlas_descriptors = Vec::with_capacity(quads.len());
+
+        for quad in &quads {
+            // Create an AtlasTextureDescriptor for this specific glyph's
+            // sub-region within the glyph cache, which itself is a sub-
+            // region of the atlas.
+            let glyph_atlas_desc = AtlasTextureDescriptor {
+                offset_px: cache_atlas_desc.offset_px + quad.tex_offset_px,
+                size_px: quad.tex_size_px,
+                layer_index: cache_atlas_desc.layer_index,
+                frame_index: 0,
+                ..Default::default()
+            };
+            let glyph_atlas_hybrid = self.slab.new_value(glyph_atlas_desc);
+
+            let mut desc = self.default_descriptor(UiElementType::TextGlyph);
+            desc.position = quad.position;
+            desc.size = quad.size;
+            desc.fill_color = quad.color;
+            desc.atlas_texture_id = glyph_atlas_hybrid.id().inner();
+
+            let hybrid = self.slab.new_value(desc);
+            self.draw_calls.push(DrawCall {
+                descriptor: hybrid.clone(),
+                vertex_count: 6,
+            });
+
+            glyph_descriptors.push(hybrid);
+            glyph_atlas_descriptors.push(glyph_atlas_hybrid);
+        }
+
+        UiText {
+            glyph_descriptors,
+            glyph_atlas_descriptors,
+            bounds,
+            text_id,
+        }
+    }
+
     /// Remove a rectangle element by its handle.
     pub fn remove_rect(&mut self, element: &UiRect) {
         self.remove_by_id(element.id());
@@ -749,6 +1176,14 @@ impl UiRenderer {
     /// Remove an image element by its handle.
     pub fn remove_image(&mut self, element: &UiImage) {
         self.remove_by_id(element.id());
+    }
+
+    /// Remove a text element by its handle.
+    #[cfg(feature = "text")]
+    pub fn remove_text(&mut self, element: &UiText) {
+        for desc in &element.glyph_descriptors {
+            self.remove_by_id(desc.id());
+        }
     }
 
     /// Remove all elements.
