@@ -482,6 +482,510 @@ impl UiImage {
 }
 
 // ---------------------------------------------------------------------------
+// Path types (behind "path" feature)
+// ---------------------------------------------------------------------------
+
+#[cfg(feature = "path")]
+mod path {
+    use super::*;
+    use craballoc::value::HybridArray;
+    use lyon::{
+        geom,
+        math::Angle,
+        path::{builder::BorderRadii, traits::PathBuilder, Winding},
+        tessellation::{
+            BuffersBuilder, FillTessellator, FillVertex, LineCap, LineJoin, StrokeTessellator,
+            StrokeVertex, VertexBuffers,
+        },
+    };
+    use renderling::ui_slab::UiVertex;
+
+    fn vec2_to_point(v: impl Into<Vec2>) -> geom::Point<f32> {
+        let v = v.into();
+        geom::point(v.x, v.y)
+    }
+
+    fn vec2_to_vec(v: impl Into<Vec2>) -> geom::Vector<f32> {
+        let v = v.into();
+        geom::Vector::new(v.x, v.y)
+    }
+
+    /// Number of per-vertex attributes (stroke_color[4] + fill_color[4]).
+    const NUM_ATTRIBUTES: usize = 8;
+
+    /// Per-vertex attributes passed through lyon's attribute system.
+    #[derive(Clone, Copy)]
+    struct PathAttributes {
+        stroke_color: Vec4,
+        fill_color: Vec4,
+    }
+
+    impl PathAttributes {
+        fn to_array(self) -> [f32; NUM_ATTRIBUTES] {
+            let s = self.stroke_color;
+            let f = self.fill_color;
+            [s.x, s.y, s.z, s.w, f.x, f.y, f.z, f.w]
+        }
+
+        fn from_slice(s: &[f32]) -> Self {
+            Self {
+                stroke_color: Vec4::new(s[0], s[1], s[2], s[3]),
+                fill_color: Vec4::new(s[4], s[5], s[6], s[7]),
+            }
+        }
+    }
+
+    /// Stroke rendering options.
+    pub struct StrokeConfig {
+        /// Line width in pixels.
+        pub line_width: f32,
+        /// Line cap style.
+        pub line_cap: LineCap,
+        /// Line join style.
+        pub line_join: LineJoin,
+    }
+
+    impl Default for StrokeConfig {
+        fn default() -> Self {
+            Self {
+                line_width: 2.0,
+                line_cap: LineCap::Round,
+                line_join: LineJoin::Round,
+            }
+        }
+    }
+
+    /// A builder for constructing 2D vector paths.
+    ///
+    /// Uses lyon for tessellation. Build a path with `begin`/`line_to`/
+    /// `end` commands (or convenience methods like `add_rectangle`,
+    /// `add_circle`, etc.), then call `fill()` or `stroke()` to
+    /// tessellate and register the result with the renderer.
+    ///
+    /// ```ignore
+    /// let path = ui.path_builder()
+    ///     .with_fill_color(Vec4::new(1.0, 0.0, 0.0, 1.0))
+    ///     .with_begin(Vec2::new(10.0, 10.0))
+    ///     .with_line_to(Vec2::new(100.0, 10.0))
+    ///     .with_line_to(Vec2::new(55.0, 80.0))
+    ///     .with_end(true)
+    ///     .fill(&mut ui);
+    /// ```
+    pub struct UiPathBuilder {
+        inner: lyon::path::BuilderWithAttributes,
+        attrs: PathAttributes,
+        stroke_config: StrokeConfig,
+    }
+
+    impl UiPathBuilder {
+        pub(crate) fn new() -> Self {
+            Self {
+                inner: lyon::path::Path::builder_with_attributes(NUM_ATTRIBUTES),
+                attrs: PathAttributes {
+                    stroke_color: Vec4::ZERO,
+                    fill_color: Vec4::ONE,
+                },
+                stroke_config: StrokeConfig::default(),
+            }
+        }
+
+        // --- Color setters ---
+
+        /// Set the fill color for subsequent path commands.
+        pub fn set_fill_color(&mut self, color: impl Into<Vec4>) -> &mut Self {
+            self.attrs.fill_color = color.into();
+            self
+        }
+
+        /// Set the fill color (builder).
+        pub fn with_fill_color(mut self, color: impl Into<Vec4>) -> Self {
+            self.set_fill_color(color);
+            self
+        }
+
+        /// Set the stroke color for subsequent path commands.
+        pub fn set_stroke_color(&mut self, color: impl Into<Vec4>) -> &mut Self {
+            self.attrs.stroke_color = color.into();
+            self
+        }
+
+        /// Set the stroke color (builder).
+        pub fn with_stroke_color(mut self, color: impl Into<Vec4>) -> Self {
+            self.set_stroke_color(color);
+            self
+        }
+
+        /// Set stroke options.
+        pub fn set_stroke_config(&mut self, config: StrokeConfig) -> &mut Self {
+            self.stroke_config = config;
+            self
+        }
+
+        /// Set stroke options (builder).
+        pub fn with_stroke_config(mut self, config: StrokeConfig) -> Self {
+            self.stroke_config = config;
+            self
+        }
+
+        // --- Path commands ---
+
+        /// Begin a new sub-path at the given point.
+        pub fn begin(&mut self, at: impl Into<Vec2>) -> &mut Self {
+            let _ = self.inner.begin(vec2_to_point(at), &self.attrs.to_array());
+            self
+        }
+
+        /// Begin a new sub-path (builder).
+        pub fn with_begin(mut self, at: impl Into<Vec2>) -> Self {
+            self.begin(at);
+            self
+        }
+
+        /// End the current sub-path, optionally closing it.
+        pub fn end(&mut self, close: bool) -> &mut Self {
+            self.inner.end(close);
+            self
+        }
+
+        /// End the current sub-path (builder).
+        pub fn with_end(mut self, close: bool) -> Self {
+            self.end(close);
+            self
+        }
+
+        /// Add a line segment to the given point.
+        pub fn line_to(&mut self, to: impl Into<Vec2>) -> &mut Self {
+            let _ = self
+                .inner
+                .line_to(vec2_to_point(to), &self.attrs.to_array());
+            self
+        }
+
+        /// Add a line segment (builder).
+        pub fn with_line_to(mut self, to: impl Into<Vec2>) -> Self {
+            self.line_to(to);
+            self
+        }
+
+        /// Add a quadratic Bezier curve.
+        pub fn quadratic_bezier_to(
+            &mut self,
+            ctrl: impl Into<Vec2>,
+            to: impl Into<Vec2>,
+        ) -> &mut Self {
+            let _ = self.inner.quadratic_bezier_to(
+                vec2_to_point(ctrl),
+                vec2_to_point(to),
+                &self.attrs.to_array(),
+            );
+            self
+        }
+
+        /// Add a quadratic Bezier curve (builder).
+        pub fn with_quadratic_bezier_to(
+            mut self,
+            ctrl: impl Into<Vec2>,
+            to: impl Into<Vec2>,
+        ) -> Self {
+            self.quadratic_bezier_to(ctrl, to);
+            self
+        }
+
+        /// Add a cubic Bezier curve.
+        pub fn cubic_bezier_to(
+            &mut self,
+            ctrl1: impl Into<Vec2>,
+            ctrl2: impl Into<Vec2>,
+            to: impl Into<Vec2>,
+        ) -> &mut Self {
+            let _ = self.inner.cubic_bezier_to(
+                vec2_to_point(ctrl1),
+                vec2_to_point(ctrl2),
+                vec2_to_point(to),
+                &self.attrs.to_array(),
+            );
+            self
+        }
+
+        /// Add a cubic Bezier curve (builder).
+        pub fn with_cubic_bezier_to(
+            mut self,
+            ctrl1: impl Into<Vec2>,
+            ctrl2: impl Into<Vec2>,
+            to: impl Into<Vec2>,
+        ) -> Self {
+            self.cubic_bezier_to(ctrl1, ctrl2, to);
+            self
+        }
+
+        // --- Convenience shapes ---
+
+        /// Add an axis-aligned rectangle.
+        pub fn add_rectangle(&mut self, min: impl Into<Vec2>, max: impl Into<Vec2>) -> &mut Self {
+            let min = min.into();
+            let max = max.into();
+            let rect = lyon::geom::Box2D::new(vec2_to_point(min), vec2_to_point(max));
+            self.inner
+                .add_rectangle(&rect, Winding::Positive, &self.attrs.to_array());
+            self
+        }
+
+        /// Add a rectangle (builder).
+        pub fn with_rectangle(mut self, min: impl Into<Vec2>, max: impl Into<Vec2>) -> Self {
+            self.add_rectangle(min, max);
+            self
+        }
+
+        /// Add a rounded rectangle.
+        pub fn add_rounded_rectangle(
+            &mut self,
+            min: impl Into<Vec2>,
+            max: impl Into<Vec2>,
+            top_left: f32,
+            top_right: f32,
+            bottom_left: f32,
+            bottom_right: f32,
+        ) -> &mut Self {
+            let min = min.into();
+            let max = max.into();
+            let rect = lyon::geom::Box2D::new(vec2_to_point(min), vec2_to_point(max));
+            let radii = BorderRadii {
+                top_left,
+                top_right,
+                bottom_left,
+                bottom_right,
+            };
+            self.inner.add_rounded_rectangle(
+                &rect,
+                &radii,
+                Winding::Positive,
+                &self.attrs.to_array(),
+            );
+            self
+        }
+
+        /// Add a rounded rectangle (builder).
+        pub fn with_rounded_rectangle(
+            mut self,
+            min: impl Into<Vec2>,
+            max: impl Into<Vec2>,
+            top_left: f32,
+            top_right: f32,
+            bottom_left: f32,
+            bottom_right: f32,
+        ) -> Self {
+            self.add_rounded_rectangle(min, max, top_left, top_right, bottom_left, bottom_right);
+            self
+        }
+
+        /// Add a circle.
+        pub fn add_circle(&mut self, center: impl Into<Vec2>, radius: f32) -> &mut Self {
+            self.inner.add_circle(
+                vec2_to_point(center),
+                radius,
+                Winding::Positive,
+                &self.attrs.to_array(),
+            );
+            self
+        }
+
+        /// Add a circle (builder).
+        pub fn with_circle(mut self, center: impl Into<Vec2>, radius: f32) -> Self {
+            self.add_circle(center, radius);
+            self
+        }
+
+        /// Add an ellipse.
+        pub fn add_ellipse(
+            &mut self,
+            center: impl Into<Vec2>,
+            radii: impl Into<Vec2>,
+            rotation: f32,
+        ) -> &mut Self {
+            let radii = radii.into();
+            self.inner.add_ellipse(
+                vec2_to_point(center),
+                vec2_to_vec(radii),
+                Angle::radians(rotation),
+                Winding::Positive,
+                &self.attrs.to_array(),
+            );
+            self
+        }
+
+        /// Add an ellipse (builder).
+        pub fn with_ellipse(
+            mut self,
+            center: impl Into<Vec2>,
+            radii: impl Into<Vec2>,
+            rotation: f32,
+        ) -> Self {
+            self.add_ellipse(center, radii, rotation);
+            self
+        }
+
+        /// Add a closed polygon from a series of points.
+        pub fn add_polygon(&mut self, points: &[Vec2]) -> &mut Self {
+            let pts: Vec<geom::Point<f32>> = points.iter().map(|p| vec2_to_point(*p)).collect();
+            self.inner.add_polygon(
+                lyon::path::Polygon {
+                    points: &pts,
+                    closed: true,
+                },
+                &self.attrs.to_array(),
+            );
+            self
+        }
+
+        /// Add a polygon (builder).
+        pub fn with_polygon(mut self, points: &[Vec2]) -> Self {
+            self.add_polygon(points);
+            self
+        }
+
+        // --- Tessellation ---
+
+        /// Tessellate the path as a filled shape and register it with the
+        /// renderer. Consumes the builder.
+        pub fn fill(self, renderer: &mut UiRenderer) -> UiPath {
+            let path = self.inner.build();
+            let mut geometry = VertexBuffers::<UiVertex, u32>::new();
+            let mut tessellator = FillTessellator::new();
+
+            tessellator
+                .tessellate_path(
+                    path.as_slice(),
+                    &Default::default(),
+                    &mut BuffersBuilder::new(&mut geometry, |mut vertex: FillVertex| {
+                        let p = vertex.position();
+                        let attrs = PathAttributes::from_slice(vertex.interpolated_attributes());
+                        UiVertex {
+                            position: Vec2::new(p.x, p.y),
+                            uv: Vec2::ZERO,
+                            color: attrs.fill_color,
+                        }
+                    }),
+                )
+                .expect("fill tessellation failed");
+
+            Self::upload(renderer, &geometry)
+        }
+
+        /// Tessellate the path as a stroked outline and register it with
+        /// the renderer. Consumes the builder.
+        pub fn stroke(self, renderer: &mut UiRenderer) -> UiPath {
+            let path = self.inner.build();
+            let mut geometry = VertexBuffers::<UiVertex, u32>::new();
+            let mut tessellator = StrokeTessellator::new();
+
+            let opts = lyon::tessellation::StrokeOptions::default()
+                .with_line_width(self.stroke_config.line_width)
+                .with_line_cap(self.stroke_config.line_cap)
+                .with_line_join(self.stroke_config.line_join);
+
+            tessellator
+                .tessellate_path(
+                    path.as_slice(),
+                    &opts,
+                    &mut BuffersBuilder::new(&mut geometry, |mut vertex: StrokeVertex| {
+                        let p = vertex.position();
+                        let attrs = PathAttributes::from_slice(vertex.interpolated_attributes());
+                        UiVertex {
+                            position: Vec2::new(p.x, p.y),
+                            uv: Vec2::ZERO,
+                            color: attrs.stroke_color,
+                        }
+                    }),
+                )
+                .expect("stroke tessellation failed");
+
+            Self::upload(renderer, &geometry)
+        }
+
+        /// De-index the tessellated geometry, write vertices to the slab,
+        /// and create a draw call.
+        fn upload(renderer: &mut UiRenderer, geometry: &VertexBuffers<UiVertex, u32>) -> UiPath {
+            // De-index: expand indexed triangles to flat vertex list.
+            let expanded: Vec<UiVertex> = geometry
+                .indices
+                .iter()
+                .map(|&i| geometry.vertices[i as usize])
+                .collect();
+
+            let vertex_count = expanded.len() as u32;
+            let vertex_array = renderer.slab.new_array(expanded);
+            let vertex_offset = vertex_array.array().starting_index() as u32;
+
+            let mut desc = renderer.default_descriptor(UiElementType::Path);
+            desc.atlas_texture_id = vertex_offset; // repurposed as vertex
+                                                   // slab offset
+            let hybrid = renderer.slab.new_value(desc);
+            renderer.draw_calls.push(DrawCall {
+                descriptor: hybrid.clone(),
+                vertex_count,
+            });
+
+            UiPath {
+                inner: hybrid,
+                _vertices: vertex_array,
+            }
+        }
+    }
+
+    /// A live handle to a tessellated path element in the renderer.
+    ///
+    /// **Dropping this handle does NOT remove the path** — call
+    /// [`UiRenderer::remove_path`] explicitly.
+    pub struct UiPath {
+        inner: Hybrid<UiDrawCallDescriptor>,
+        /// Kept alive so the slab doesn't reclaim the vertex data.
+        _vertices: HybridArray<UiVertex>,
+    }
+
+    impl std::fmt::Debug for UiPath {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.debug_struct("UiPath")
+                .field("inner", &self.inner)
+                .finish_non_exhaustive()
+        }
+    }
+
+    impl UiPath {
+        /// Returns the slab [`Id`] of the underlying descriptor.
+        pub fn id(&self) -> Id<UiDrawCallDescriptor> {
+            self.inner.id()
+        }
+
+        /// Set the z-depth for sorting.
+        pub fn set_z(&self, z: f32) -> &Self {
+            self.inner.modify(|d| d.z = z);
+            self
+        }
+
+        /// Set the z-depth for sorting (builder).
+        pub fn with_z(self, z: f32) -> Self {
+            self.set_z(z);
+            self
+        }
+
+        /// Set the opacity.
+        pub fn set_opacity(&self, opacity: f32) -> &Self {
+            self.inner.modify(|d| d.opacity = opacity);
+            self
+        }
+
+        /// Set the opacity (builder).
+        pub fn with_opacity(self, opacity: f32) -> Self {
+            self.set_opacity(opacity);
+            self
+        }
+    }
+}
+
+#[cfg(feature = "path")]
+pub use path::{StrokeConfig, UiPath, UiPathBuilder};
+
+// ---------------------------------------------------------------------------
 // Text types (behind "text" feature)
 // ---------------------------------------------------------------------------
 
@@ -1184,6 +1688,28 @@ impl UiRenderer {
         for desc in &element.glyph_descriptors {
             self.remove_by_id(desc.id());
         }
+    }
+
+    /// Create a new path builder for constructing vector paths.
+    ///
+    /// Use the builder's methods to define shapes, then call `.fill()`
+    /// or `.stroke()` to tessellate and register the path.
+    ///
+    /// ```ignore
+    /// let path = ui.path_builder()
+    ///     .with_fill_color(Vec4::new(1.0, 0.0, 0.0, 1.0))
+    ///     .with_circle(Vec2::new(50.0, 50.0), 30.0)
+    ///     .fill(&mut ui);
+    /// ```
+    #[cfg(feature = "path")]
+    pub fn path_builder(&self) -> UiPathBuilder {
+        UiPathBuilder::new()
+    }
+
+    /// Remove a path element by its handle.
+    #[cfg(feature = "path")]
+    pub fn remove_path(&mut self, element: &UiPath) {
+        self.remove_by_id(element.id());
     }
 
     /// Remove all elements.

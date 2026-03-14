@@ -247,6 +247,87 @@ mod tests {
         save_and_assert("ui2d/text.png", img);
     }
 
+    #[cfg(feature = "path")]
+    #[test]
+    fn can_render_filled_path() {
+        init_logging();
+        let ctx = futures_lite::future::block_on(Context::headless(200, 200));
+        let mut ui = UiRenderer::new(&ctx).with_background_color(Vec4::ONE);
+
+        // Filled red triangle.
+        let _path = ui
+            .path_builder()
+            .with_fill_color(Vec4::new(1.0, 0.0, 0.0, 1.0))
+            .with_begin(Vec2::new(100.0, 20.0))
+            .with_line_to(Vec2::new(180.0, 160.0))
+            .with_line_to(Vec2::new(20.0, 160.0))
+            .with_end(true)
+            .fill(&mut ui);
+
+        let frame = ctx.get_next_frame().unwrap();
+        ui.render(&frame.view());
+        let img = futures_lite::future::block_on(frame.read_image()).unwrap();
+        save_and_assert("ui2d/filled_path.png", img);
+    }
+
+    #[cfg(feature = "path")]
+    #[test]
+    fn can_render_stroked_path() {
+        init_logging();
+        let ctx = futures_lite::future::block_on(Context::headless(200, 200));
+        let mut ui = UiRenderer::new(&ctx).with_background_color(Vec4::ONE);
+
+        // Blue stroked circle.
+        let _path = ui
+            .path_builder()
+            .with_stroke_color(Vec4::new(0.0, 0.0, 1.0, 1.0))
+            .with_circle(Vec2::new(100.0, 100.0), 60.0)
+            .stroke(&mut ui);
+
+        let frame = ctx.get_next_frame().unwrap();
+        ui.render(&frame.view());
+        let img = futures_lite::future::block_on(frame.read_image()).unwrap();
+        save_and_assert("ui2d/stroked_path.png", img);
+    }
+
+    #[cfg(feature = "path")]
+    #[test]
+    fn can_render_path_shapes() {
+        init_logging();
+        let ctx = futures_lite::future::block_on(Context::headless(300, 200));
+        let mut ui = UiRenderer::new(&ctx).with_background_color(Vec4::ONE);
+
+        // Filled rounded rectangle.
+        let _rect = ui
+            .path_builder()
+            .with_fill_color(Vec4::new(0.2, 0.6, 0.3, 1.0))
+            .with_rounded_rectangle(
+                Vec2::new(10.0, 10.0),
+                Vec2::new(140.0, 90.0),
+                12.0,
+                12.0,
+                12.0,
+                12.0,
+            )
+            .fill(&mut ui);
+
+        // Stroked ellipse.
+        let _ellipse = ui
+            .path_builder()
+            .with_stroke_color(Vec4::new(0.8, 0.2, 0.1, 1.0))
+            .with_stroke_config(crate::StrokeConfig {
+                line_width: 3.0,
+                ..Default::default()
+            })
+            .with_ellipse(Vec2::new(220.0, 100.0), Vec2::new(60.0, 40.0), 0.0)
+            .stroke(&mut ui);
+
+        let frame = ctx.get_next_frame().unwrap();
+        ui.render(&frame.view());
+        let img = futures_lite::future::block_on(frame.read_image()).unwrap();
+        save_and_assert("ui2d/path_shapes.png", img);
+    }
+
     #[cfg(feature = "text")]
     #[test]
     fn can_render_text_with_shapes() {

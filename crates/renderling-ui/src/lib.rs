@@ -53,3 +53,7 @@ pub use renderer::{UiCircle, UiEllipse, UiImage, UiRect, UiRenderer};
 // Re-export text types (behind "text" feature).
 #[cfg(feature = "text")]
 pub use renderer::{FontArc, FontId, Section, Text, UiText};
+
+// Re-export path types (behind "path" feature).
+#[cfg(feature = "path")]
+pub use renderer::{StrokeConfig, UiPath, UiPathBuilder};
