@@ -234,8 +234,6 @@ pub mod transform;
 pub mod tutorial;
 #[cfg(cpu)]
 pub mod types;
-#[cfg(feature = "ui")]
-pub mod ui;
 pub mod ui_slab;
 
 pub extern crate glam;

@@ -16,9 +16,6 @@ use crate::{
     stage::Stage,
     texture::{BufferDimensions, CopiedTextureBuffer, Texture, TextureError},
 };
-#[cfg(feature = "ui")]
-use crate::ui::Ui;
-
 pub use craballoc::runtime::WgpuRuntime;
 
 /// Represents the internal structure of a render target, which can either be a
@@ -632,9 +629,4 @@ impl Context {
         Stage::new(self)
     }
 
-    /// Creates and returns a new [`Ui`] renderer.
-    #[cfg(feature = "ui")]
-    pub fn new_ui(&self) -> Ui {
-        Ui::new(self)
-    }
 }
