@@ -4,8 +4,10 @@
 //! (shader entry points in this crate). They are stored in a GPU slab buffer
 //! and read by the UI vertex and fragment shaders.
 
-use crabslab::SlabItem;
+use crabslab::{Id, SlabItem};
 use glam::{Mat4, UVec2, Vec2, Vec4};
+
+use crate::atlas::shader::{AtlasDescriptor, AtlasTextureDescriptor};
 
 pub mod shader;
 
@@ -147,12 +149,20 @@ pub struct UiDrawCallDescriptor {
     pub fill_color: Vec4,
     /// Gradient fill descriptor.
     pub gradient: GradientDescriptor,
-    /// ID of the atlas texture descriptor on the slab (for Image elements).
+    /// ID of the atlas texture descriptor on the slab.
+    ///
+    /// For `Image` and `TextGlyph` elements: points to an
+    /// `AtlasTextureDescriptor`.
+    /// For `Path` elements: when not `Id::NONE`, points to an
+    /// `AtlasTextureDescriptor` for image-filled paths.
     /// Set to `Id::NONE` when unused.
-    pub atlas_texture_id: u32,
+    pub atlas_texture_id: Id<AtlasTextureDescriptor>,
     /// ID of the atlas descriptor on the slab.
+    ///
+    /// For `Path` elements: repurposed to store the slab offset of
+    /// the first `UiVertex` (via `Id::new(offset)`).
     /// Set to `Id::NONE` when unused.
-    pub atlas_descriptor_id: u32,
+    pub atlas_descriptor_id: Id<AtlasDescriptor>,
     /// Scissor/clip rectangle (x, y, width, height).
     /// Elements outside this rect are clipped. Set to (0,0, viewport_w,
     /// viewport_h) for no clipping.

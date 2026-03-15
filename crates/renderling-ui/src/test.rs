@@ -369,4 +369,65 @@ mod tests {
         let img = futures_lite::future::block_on(frame.read_image()).unwrap();
         save_and_assert("ui2d/text_with_shapes.png", img);
     }
+
+    /// Generates points for a star shape.
+    ///
+    /// `num_points` is the number of tips. Points alternate between
+    /// `outer_radius` and `inner_radius`.
+    fn star_points(num_points: usize, outer_radius: f32, inner_radius: f32) -> Vec<Vec2> {
+        let mut points = Vec::with_capacity(num_points * 2);
+        let angle_step = std::f32::consts::PI / num_points as f32;
+        for i in 0..num_points * 2 {
+            let angle = angle_step * i as f32;
+            let radius = if i % 2 == 0 {
+                outer_radius
+            } else {
+                inner_radius
+            };
+            points.push(Vec2::new(radius * angle.cos(), radius * angle.sin()));
+        }
+        points
+    }
+
+    #[cfg(feature = "path")]
+    #[test]
+    fn can_render_path_with_image_fill() {
+        use renderling::atlas::AtlasImage;
+
+        init_logging();
+        let w = 150.0;
+        let ctx = futures_lite::future::block_on(Context::headless(w as u32, w as u32));
+        let mut ui = UiRenderer::new(&ctx).with_background_color(Vec4::ONE);
+
+        // Load dirt texture into the atlas.
+        let atlas_img = AtlasImage::from_path("../../img/dirt.jpg").unwrap();
+        let tex = ui.upload_image(atlas_img);
+
+        // Build a 7-pointed star polygon centered in the viewport, filled
+        // with the dirt image and stroked in red.
+        let center = Vec2::splat(w / 2.0);
+        let star = star_points(7, w / 2.0, w / 3.0);
+
+        let _fill = ui
+            .path_builder()
+            .with_fill_color(Vec4::ONE) // white tint = unmodified image
+            .with_fill_image(&tex)
+            .with_polygon(&star.iter().map(|p| *p + center).collect::<Vec<_>>())
+            .fill(&mut ui);
+
+        let _stroke = ui
+            .path_builder()
+            .with_stroke_color(Vec4::new(1.0, 0.0, 0.0, 1.0))
+            .with_stroke_config(crate::StrokeConfig {
+                line_width: 3.0,
+                ..Default::default()
+            })
+            .with_polygon(&star.iter().map(|p| *p + center).collect::<Vec<_>>())
+            .stroke(&mut ui);
+
+        let frame = ctx.get_next_frame().unwrap();
+        ui.render(&frame.view());
+        let img = futures_lite::future::block_on(frame.read_image()).unwrap();
+        save_and_assert("ui2d/path_image_fill.png", img);
+    }
 }

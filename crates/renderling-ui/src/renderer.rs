@@ -498,7 +498,7 @@ mod path {
             StrokeVertex, VertexBuffers,
         },
     };
-    use renderling::ui_slab::UiVertex;
+    use renderling::{atlas::shader::AtlasTextureDescriptor, ui_slab::UiVertex};
 
     fn vec2_to_point(v: impl Into<Vec2>) -> geom::Point<f32> {
         let v = v.into();
@@ -575,6 +575,8 @@ mod path {
         inner: lyon::path::BuilderWithAttributes,
         attrs: PathAttributes,
         stroke_config: StrokeConfig,
+        /// Atlas texture descriptor ID for image-filled paths.
+        fill_image_id: Id<AtlasTextureDescriptor>,
     }
 
     impl UiPathBuilder {
@@ -586,6 +588,7 @@ mod path {
                     fill_color: Vec4::ONE,
                 },
                 stroke_config: StrokeConfig::default(),
+                fill_image_id: Id::NONE,
             }
         }
 
@@ -624,6 +627,25 @@ mod path {
         /// Set stroke options (builder).
         pub fn with_stroke_config(mut self, config: StrokeConfig) -> Self {
             self.stroke_config = config;
+            self
+        }
+
+        /// Set an image to fill the path with.
+        ///
+        /// The image is sampled using UVs computed from each vertex's
+        /// position relative to the path's bounding box (0..1 range).
+        /// The vertex color acts as a tint/modulator.
+        ///
+        /// The `AtlasTexture` should be obtained from
+        /// [`UiRenderer::upload_image`].
+        pub fn set_fill_image(&mut self, texture: &AtlasTexture) -> &mut Self {
+            self.fill_image_id = texture.id();
+            self
+        }
+
+        /// Set an image to fill the path with (builder).
+        pub fn with_fill_image(mut self, texture: &AtlasTexture) -> Self {
+            self.set_fill_image(texture);
             self
         }
 
@@ -848,6 +870,7 @@ mod path {
         /// Tessellate the path as a filled shape and register it with the
         /// renderer. Consumes the builder.
         pub fn fill(self, renderer: &mut UiRenderer) -> UiPath {
+            let fill_image_id = self.fill_image_id;
             let path = self.inner.build();
             let mut geometry = VertexBuffers::<UiVertex, u32>::new();
             let mut tessellator = FillTessellator::new();
@@ -868,12 +891,18 @@ mod path {
                 )
                 .expect("fill tessellation failed");
 
-            Self::upload(renderer, &geometry)
+            // If an image fill is set, compute UVs from the bounding box.
+            if !fill_image_id.is_none() {
+                Self::compute_bounding_box_uvs(&mut geometry);
+            }
+
+            Self::upload(renderer, &geometry, fill_image_id)
         }
 
         /// Tessellate the path as a stroked outline and register it with
         /// the renderer. Consumes the builder.
         pub fn stroke(self, renderer: &mut UiRenderer) -> UiPath {
+            let fill_image_id = self.fill_image_id;
             let path = self.inner.build();
             let mut geometry = VertexBuffers::<UiVertex, u32>::new();
             let mut tessellator = StrokeTessellator::new();
@@ -899,12 +928,45 @@ mod path {
                 )
                 .expect("stroke tessellation failed");
 
-            Self::upload(renderer, &geometry)
+            // If an image fill is set, compute UVs from the bounding box.
+            if !fill_image_id.is_none() {
+                Self::compute_bounding_box_uvs(&mut geometry);
+            }
+
+            Self::upload(renderer, &geometry, fill_image_id)
+        }
+
+        /// Compute UVs from the bounding box of the tessellated vertices.
+        ///
+        /// Maps each vertex position into 0..1 UV space relative to the
+        /// axis-aligned bounding box of all vertices.
+        fn compute_bounding_box_uvs(geometry: &mut VertexBuffers<UiVertex, u32>) {
+            if geometry.vertices.is_empty() {
+                return;
+            }
+            let mut min = Vec2::splat(f32::INFINITY);
+            let mut max = Vec2::splat(f32::NEG_INFINITY);
+            for v in &geometry.vertices {
+                min = min.min(v.position);
+                max = max.max(v.position);
+            }
+            let extent = max - min;
+            let inv_extent = Vec2::new(
+                if extent.x > 0.0 { 1.0 / extent.x } else { 0.0 },
+                if extent.y > 0.0 { 1.0 / extent.y } else { 0.0 },
+            );
+            for v in &mut geometry.vertices {
+                v.uv = (v.position - min) * inv_extent;
+            }
         }
 
         /// De-index the tessellated geometry, write vertices to the slab,
         /// and create a draw call.
-        fn upload(renderer: &mut UiRenderer, geometry: &VertexBuffers<UiVertex, u32>) -> UiPath {
+        fn upload(
+            renderer: &mut UiRenderer,
+            geometry: &VertexBuffers<UiVertex, u32>,
+            atlas_texture_id: Id<AtlasTextureDescriptor>,
+        ) -> UiPath {
             // De-index: expand indexed triangles to flat vertex list.
             let expanded: Vec<UiVertex> = geometry
                 .indices
@@ -917,8 +979,8 @@ mod path {
             let vertex_offset = vertex_array.array().starting_index() as u32;
 
             let mut desc = renderer.default_descriptor(UiElementType::Path);
-            desc.atlas_texture_id = vertex_offset; // repurposed as vertex
-                                                   // slab offset
+            desc.atlas_descriptor_id = Id::new(vertex_offset);
+            desc.atlas_texture_id = atlas_texture_id;
             let hybrid = renderer.slab.new_value(desc);
             renderer.draw_calls.push(DrawCall {
                 descriptor: hybrid.clone(),
@@ -1371,7 +1433,14 @@ impl UiRenderer {
         );
 
         let bindgroup_layout = Self::create_bindgroup_layout(device);
-        let pipeline = Self::create_pipeline(device, &bindgroup_layout, format, 1);
+        let default_msaa = 4;
+        let pipeline = Self::create_pipeline(device, &bindgroup_layout, format, default_msaa);
+        let msaa_texture = Some(Self::create_msaa_texture(
+            device,
+            format,
+            size,
+            default_msaa,
+        ));
 
         Self {
             slab,
@@ -1385,9 +1454,9 @@ impl UiRenderer {
             draw_calls: Vec::new(),
             viewport_size: size,
             background_color: None,
-            msaa_sample_count: 1,
+            msaa_sample_count: default_msaa,
             format,
-            msaa_texture: None,
+            msaa_texture,
             #[cfg(feature = "text")]
             fonts: Vec::new(),
             #[cfg(feature = "text")]
@@ -1409,6 +1478,27 @@ impl UiRenderer {
     /// Builder-style background color setter.
     pub fn with_background_color(mut self, color: Vec4) -> Self {
         self.background_color = Some(color);
+        self
+    }
+
+    /// Set the MSAA sample count (builder).
+    ///
+    /// Higher values produce smoother edges. Common values are 1 (off)
+    /// and 4 (default). The pipeline and MSAA texture are recreated.
+    pub fn with_msaa_sample_count(mut self, count: u32) -> Self {
+        self.msaa_sample_count = count;
+        let device = self.slab.device();
+        self.pipeline = Self::create_pipeline(device, &self.bindgroup_layout, self.format, count);
+        if count > 1 {
+            self.msaa_texture = Some(Self::create_msaa_texture(
+                device,
+                self.format,
+                self.viewport_size,
+                count,
+            ));
+        } else {
+            self.msaa_texture = None;
+        }
         self
     }
 
@@ -1521,7 +1611,7 @@ impl UiRenderer {
 
         let mut desc = self.default_descriptor(UiElementType::Image);
         desc.size = Vec2::new(image_size.x as f32, image_size.y as f32);
-        desc.atlas_texture_id = atlas_texture.id().inner();
+        desc.atlas_texture_id = atlas_texture.id();
         desc.fill_color = Vec4::ONE; // no tint
 
         let hybrid = self.slab.new_value(desc);
@@ -1534,6 +1624,37 @@ impl UiRenderer {
             vertex_count: 6,
         });
         element
+    }
+
+    /// Upload an image to the atlas without creating a draw call.
+    ///
+    /// Returns the [`AtlasTexture`] handle, which can be passed to
+    /// [`UiPathBuilder::with_fill_image`] for image-filled paths
+    /// or used for other custom purposes.
+    ///
+    /// ```ignore
+    /// let atlas_img = AtlasImage::from_path("icon.png").unwrap();
+    /// let tex = ui.upload_image(atlas_img);
+    /// let _path = ui.path_builder()
+    ///     .with_fill_image(&tex)
+    ///     .with_fill_color(Vec4::ONE)
+    ///     .with_circle(Vec2::new(50.0, 50.0), 30.0)
+    ///     .fill(&mut ui);
+    /// ```
+    pub fn upload_image(&mut self, image: impl Into<AtlasImage>) -> AtlasTexture {
+        let image = image.into();
+        let atlas_texture = self
+            .atlas
+            .add_image(&image)
+            .expect("failed to add image to atlas");
+
+        // Update the viewport with the (possibly new) atlas size.
+        let atlas_extent = self.atlas.get_size();
+        self.viewport.modify(|v| {
+            v.atlas_size = UVec2::new(atlas_extent.width, atlas_extent.height);
+        });
+
+        atlas_texture
     }
 
     /// Register a font and return its [`FontId`].
@@ -1642,7 +1763,7 @@ impl UiRenderer {
             desc.position = quad.position;
             desc.size = quad.size;
             desc.fill_color = quad.color;
-            desc.atlas_texture_id = glyph_atlas_hybrid.id().inner();
+            desc.atlas_texture_id = glyph_atlas_hybrid.id();
 
             let hybrid = self.slab.new_value(desc);
             self.draw_calls.push(DrawCall {
@@ -1848,8 +1969,8 @@ impl UiRenderer {
             border_color: Vec4::ZERO,
             fill_color: Vec4::ONE,
             gradient: GradientDescriptor::default(),
-            atlas_texture_id: u32::MAX,
-            atlas_descriptor_id: u32::MAX,
+            atlas_texture_id: Id::NONE,
+            atlas_descriptor_id: Id::NONE,
             clip_rect: Vec4::new(
                 0.0,
                 0.0,

@@ -116,9 +116,8 @@ pub fn ui_vertex(
         UiElementType::Path => {
             // For path elements, the draw_call stores an offset into the
             // slab where UiVertex data lives. We read the vertex directly.
-            // The atlas_texture_id field is repurposed as vertex_offset for
-            // paths.
-            let vertex_offset = draw_call.atlas_texture_id;
+            // The atlas_descriptor_id field stores the vertex slab offset.
+            let vertex_offset = draw_call.atlas_descriptor_id.inner();
             let vertex_id =
                 Id::<UiVertex>::new(vertex_offset + vertex_index * UiVertex::SLAB_SIZE as u32);
             let vertex: UiVertex = slab.read_unchecked(vertex_id);
@@ -179,13 +178,21 @@ pub fn ui_fragment(
 
     match draw_call.element_type {
         UiElementType::Path => {
-            // Pre-tessellated path: just use vertex color.
+            // Pre-tessellated path: start with vertex color.
             color = in_color;
+            // If an atlas texture is set, sample it and multiply.
+            if !draw_call.atlas_texture_id.is_none() {
+                let atlas_tex: AtlasTextureDescriptor =
+                    slab.read_unchecked(draw_call.atlas_texture_id);
+                let viewport: UiViewport = slab.read_unchecked(Id::new(0));
+                let atlas_uv = atlas_tex.uv(in_uv, viewport.atlas_size);
+                let sample: Vec4 = atlas.sample_by_lod(*atlas_sampler, atlas_uv, 0.0);
+                color *= sample;
+            }
         }
         UiElementType::TextGlyph => {
             // Text glyph: sample the glyph texture and multiply by color.
-            let atlas_tex_id = Id::<AtlasTextureDescriptor>::new(draw_call.atlas_texture_id);
-            let atlas_tex: AtlasTextureDescriptor = slab.read_unchecked(atlas_tex_id);
+            let atlas_tex: AtlasTextureDescriptor = slab.read_unchecked(draw_call.atlas_texture_id);
             let viewport: UiViewport = slab.read_unchecked(Id::new(0));
             let atlas_uv = atlas_tex.uv(in_uv, viewport.atlas_size);
             let sample: Vec4 = atlas.sample_by_lod(*atlas_sampler, atlas_uv, 0.0);
@@ -194,8 +201,7 @@ pub fn ui_fragment(
         }
         UiElementType::Image => {
             // Textured quad: sample the atlas texture.
-            let atlas_tex_id = Id::<AtlasTextureDescriptor>::new(draw_call.atlas_texture_id);
-            let atlas_tex: AtlasTextureDescriptor = slab.read_unchecked(atlas_tex_id);
+            let atlas_tex: AtlasTextureDescriptor = slab.read_unchecked(draw_call.atlas_texture_id);
             let viewport: UiViewport = slab.read_unchecked(Id::new(0));
             let atlas_uv = atlas_tex.uv(in_uv, viewport.atlas_size);
             color = atlas.sample_by_lod(*atlas_sampler, atlas_uv, 0.0);
