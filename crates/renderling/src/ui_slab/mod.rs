@@ -164,8 +164,8 @@ pub struct UiDrawCallDescriptor {
     /// Set to `Id::NONE` when unused.
     pub atlas_descriptor_id: Id<AtlasDescriptor>,
     /// Scissor/clip rectangle (x, y, width, height).
-    /// Elements outside this rect are clipped. Set to (0,0, viewport_w,
-    /// viewport_h) for no clipping.
+    /// Reserved for future use — not currently enforced by the shader
+    /// or renderer. Set to (0, 0, viewport_w, viewport_h) by default.
     pub clip_rect: Vec4,
     /// Element opacity (0.0 = fully transparent, 1.0 = fully opaque).
     /// Multiplied with the final alpha.

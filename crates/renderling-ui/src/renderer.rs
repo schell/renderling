@@ -2299,7 +2299,7 @@ impl UiRenderer {
             layout: Some(&pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &vertex_linkage.module,
-                entry_point: None,
+                entry_point: Some(vertex_linkage.entry_point),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
                 buffers: &[],
             },
@@ -2320,11 +2320,11 @@ impl UiRenderer {
             },
             fragment: Some(wgpu::FragmentState {
                 module: &fragment_linkage.module,
-                entry_point: None,
+                entry_point: Some(fragment_linkage.entry_point),
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
                 targets: &[Some(wgpu::ColorTargetState {
                     format,
-                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
                     write_mask: wgpu::ColorWrites::ALL,
                 })],
             }),

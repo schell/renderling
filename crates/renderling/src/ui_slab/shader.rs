@@ -4,7 +4,7 @@
 //! crate's `UiRenderer`.
 
 use crabslab::{Id, Slab, SlabItem};
-use glam::{Vec2, Vec4};
+use glam::{Vec2, Vec4, Vec4Swizzles};
 use spirv_std::{image::Image2dArray, spirv, Sampler};
 
 use super::{GradientType, UiDrawCallDescriptor, UiElementType, UiVertex, UiViewport};
@@ -95,8 +95,8 @@ fn eval_gradient(
 /// size, reading from the slab. The vertex index (0..5) selects which
 /// corner of the quad.
 ///
-/// For Path and TextGlyph elements, the vertex data is read directly
-/// from the slab (pre-tessellated vertices).
+/// For Path elements, the vertex data is read directly from the slab
+/// (pre-tessellated vertices).
 #[spirv(vertex)]
 pub fn ui_vertex(
     #[spirv(vertex_index)] vertex_index: u32,
@@ -254,11 +254,21 @@ pub fn ui_fragment(
                 let inner_distance = distance + draw_call.border_width;
                 let border_alpha =
                     1.0 - crate::math::smoothstep(-aa_width, aa_width, inner_distance);
-                // Inside the border but outside the fill = border color.
-                let in_border = fill_alpha;
-                let in_fill = border_alpha;
-                color = draw_call.border_color * (in_border - in_fill) + fill * in_fill;
-                color.w = draw_call.border_color.w * (in_border - in_fill) + fill.w * in_fill;
+                // Coverage weights.
+                let border_weight = fill_alpha - border_alpha;
+                let fill_weight = border_alpha;
+                let total = fill_alpha;
+                // Straight-alpha RGB: weighted blend of border and fill.
+                if total > 0.0 {
+                    let rgb = (draw_call.border_color.xyz() * border_weight
+                        + fill.xyz() * fill_weight)
+                        / total;
+                    let a =
+                        (draw_call.border_color.w * border_weight + fill.w * fill_weight) / total;
+                    color = rgb.extend(a * total);
+                } else {
+                    color = Vec4::ZERO;
+                }
             } else {
                 color = fill;
                 color.w *= fill_alpha;
@@ -268,6 +278,9 @@ pub fn ui_fragment(
 
     // Apply element opacity.
     color.w *= draw_call.opacity;
+
+    // Premultiply RGB by final alpha for premultiplied-alpha blending.
+    color = (color.xyz() * color.w).extend(color.w);
 
     *frag_color = color;
 }
