@@ -30,6 +30,16 @@
     "wgsl_entry_point": "bloomshaderbloom_vertex"
   },
   {
+    "source_path": "shaders/compositor-compositor_fragment.spv",
+    "entry_point": "compositor::compositor_fragment",
+    "wgsl_entry_point": "compositorcompositor_fragment"
+  },
+  {
+    "source_path": "shaders/compositor-compositor_vertex.spv",
+    "entry_point": "compositor::compositor_vertex",
+    "wgsl_entry_point": "compositorcompositor_vertex"
+  },
+  {
     "source_path": "shaders/convolution-shader-brdf_lut_convolution_fragment.spv",
     "entry_point": "convolution::shader::brdf_lut_convolution_fragment",
     "wgsl_entry_point": "convolutionshaderbrdf_lut_convolution_fragment"

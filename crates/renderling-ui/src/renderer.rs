@@ -24,6 +24,7 @@ use crabslab::Id;
 use glam::{Mat4, UVec2, Vec2, Vec4};
 use renderling::{
     atlas::{Atlas, AtlasImage, AtlasTexture},
+    compositor::Compositor,
     context::Context,
     ui_slab::{GradientDescriptor, UiDrawCallDescriptor, UiElementType, UiViewport},
 };
@@ -157,6 +158,53 @@ impl UiRect {
         self.set_z(z);
         self
     }
+
+    // --- Getters ---
+
+    /// Returns the top-left position in screen pixels.
+    pub fn position(&self) -> Vec2 {
+        self.inner.get().position
+    }
+
+    /// Returns the size in screen pixels.
+    pub fn size(&self) -> Vec2 {
+        self.inner.get().size
+    }
+
+    /// Returns the fill color (RGBA).
+    pub fn fill_color(&self) -> Vec4 {
+        self.inner.get().fill_color
+    }
+
+    /// Returns the per-corner radii.
+    pub fn corner_radii(&self) -> Vec4 {
+        self.inner.get().corner_radii
+    }
+
+    /// Returns the border width in pixels.
+    pub fn border_width(&self) -> f32 {
+        self.inner.get().border_width
+    }
+
+    /// Returns the border color (RGBA).
+    pub fn border_color(&self) -> Vec4 {
+        self.inner.get().border_color
+    }
+
+    /// Returns the gradient descriptor.
+    pub fn gradient(&self) -> GradientDescriptor {
+        self.inner.get().gradient
+    }
+
+    /// Returns the opacity.
+    pub fn opacity(&self) -> f32 {
+        self.inner.get().opacity
+    }
+
+    /// Returns the z-depth.
+    pub fn z(&self) -> f32 {
+        self.inner.get().z
+    }
 }
 
 /// A live handle to a circle element in the renderer.
@@ -271,6 +319,49 @@ impl UiCircle {
     pub fn with_z(self, z: f32) -> Self {
         self.set_z(z);
         self
+    }
+
+    // --- Getters ---
+
+    /// Returns the center position in screen pixels.
+    pub fn center(&self) -> Vec2 {
+        let d = self.inner.get();
+        d.position + d.size / 2.0
+    }
+
+    /// Returns the radius in screen pixels.
+    pub fn radius(&self) -> f32 {
+        self.inner.get().size.x / 2.0
+    }
+
+    /// Returns the fill color (RGBA).
+    pub fn fill_color(&self) -> Vec4 {
+        self.inner.get().fill_color
+    }
+
+    /// Returns the border width in pixels.
+    pub fn border_width(&self) -> f32 {
+        self.inner.get().border_width
+    }
+
+    /// Returns the border color (RGBA).
+    pub fn border_color(&self) -> Vec4 {
+        self.inner.get().border_color
+    }
+
+    /// Returns the gradient descriptor.
+    pub fn gradient(&self) -> GradientDescriptor {
+        self.inner.get().gradient
+    }
+
+    /// Returns the opacity.
+    pub fn opacity(&self) -> f32 {
+        self.inner.get().opacity
+    }
+
+    /// Returns the z-depth.
+    pub fn z(&self) -> f32 {
+        self.inner.get().z
     }
 }
 
@@ -387,6 +478,49 @@ impl UiEllipse {
         self.set_z(z);
         self
     }
+
+    // --- Getters ---
+
+    /// Returns the center position in screen pixels.
+    pub fn center(&self) -> Vec2 {
+        let d = self.inner.get();
+        d.position + d.size / 2.0
+    }
+
+    /// Returns the radii (horizontal, vertical) in screen pixels.
+    pub fn radii(&self) -> Vec2 {
+        self.inner.get().size / 2.0
+    }
+
+    /// Returns the fill color (RGBA).
+    pub fn fill_color(&self) -> Vec4 {
+        self.inner.get().fill_color
+    }
+
+    /// Returns the border width in pixels.
+    pub fn border_width(&self) -> f32 {
+        self.inner.get().border_width
+    }
+
+    /// Returns the border color (RGBA).
+    pub fn border_color(&self) -> Vec4 {
+        self.inner.get().border_color
+    }
+
+    /// Returns the gradient descriptor.
+    pub fn gradient(&self) -> GradientDescriptor {
+        self.inner.get().gradient
+    }
+
+    /// Returns the opacity.
+    pub fn opacity(&self) -> f32 {
+        self.inner.get().opacity
+    }
+
+    /// Returns the z-depth.
+    pub fn z(&self) -> f32 {
+        self.inner.get().z
+    }
 }
 
 /// A live handle to an image element in the renderer.
@@ -478,6 +612,33 @@ impl UiImage {
     pub fn with_z(self, z: f32) -> Self {
         self.set_z(z);
         self
+    }
+
+    // --- Getters ---
+
+    /// Returns the top-left position in screen pixels.
+    pub fn position(&self) -> Vec2 {
+        self.inner.get().position
+    }
+
+    /// Returns the size in screen pixels.
+    pub fn size(&self) -> Vec2 {
+        self.inner.get().size
+    }
+
+    /// Returns the tint color (RGBA).
+    pub fn tint(&self) -> Vec4 {
+        self.inner.get().fill_color
+    }
+
+    /// Returns the opacity.
+    pub fn opacity(&self) -> f32 {
+        self.inner.get().opacity
+    }
+
+    /// Returns the z-depth.
+    pub fn z(&self) -> f32 {
+        self.inner.get().z
     }
 }
 
@@ -1018,6 +1179,11 @@ mod path {
             self.inner.id()
         }
 
+        /// Returns a copy of the underlying descriptor.
+        pub fn descriptor(&self) -> UiDrawCallDescriptor {
+            self.inner.get()
+        }
+
         /// Set the z-depth for sorting.
         pub fn set_z(&self, z: f32) -> &Self {
             self.inner.modify(|d| d.z = z);
@@ -1040,6 +1206,18 @@ mod path {
         pub fn with_opacity(self, opacity: f32) -> Self {
             self.set_opacity(opacity);
             self
+        }
+
+        // --- Getters ---
+
+        /// Returns the opacity.
+        pub fn opacity(&self) -> f32 {
+            self.inner.get().opacity
+        }
+
+        /// Returns the z-depth.
+        pub fn z(&self) -> f32 {
+            self.inner.get().z
         }
     }
 }
@@ -1319,6 +1497,26 @@ mod text {
             self.set_opacity(opacity);
             self
         }
+
+        // --- Getters ---
+
+        /// Returns the opacity (reads from the first glyph, or 1.0 if
+        /// empty).
+        pub fn opacity(&self) -> f32 {
+            self.glyph_descriptors
+                .first()
+                .map(|h| h.get().opacity)
+                .unwrap_or(1.0)
+        }
+
+        /// Returns the z-depth (reads from the first glyph, or 0.0 if
+        /// empty).
+        pub fn z(&self) -> f32 {
+            self.glyph_descriptors
+                .first()
+                .map(|h| h.get().z)
+                .unwrap_or(0.0)
+        }
     }
 }
 
@@ -1379,6 +1577,14 @@ pub struct UiRenderer {
     format: wgpu::TextureFormat,
     /// MSAA resolve texture (if msaa_sample_count > 1).
     msaa_texture: Option<wgpu::TextureView>,
+    /// Non-MSAA intermediate texture for overlay compositing.
+    /// Used when `background_color` is `None` and MSAA is active:
+    /// the MSAA texture resolves here, then the compositor blends
+    /// this onto the caller's target view.
+    overlay_texture: Option<wgpu::TextureView>,
+    /// Compositor for alpha-blending the overlay texture onto the
+    /// final target.
+    compositor: Compositor,
 
     // --- Text support (behind "text" feature) ---
     #[cfg(feature = "text")]
@@ -1441,6 +1647,8 @@ impl UiRenderer {
             size,
             default_msaa,
         ));
+        let overlay_texture = Some(Self::create_overlay_texture(device, format, size));
+        let compositor = Compositor::new(device, format);
 
         Self {
             slab,
@@ -1457,6 +1665,8 @@ impl UiRenderer {
             msaa_sample_count: default_msaa,
             format,
             msaa_texture,
+            overlay_texture,
+            compositor,
             #[cfg(feature = "text")]
             fonts: Vec::new(),
             #[cfg(feature = "text")]
@@ -1496,8 +1706,14 @@ impl UiRenderer {
                 self.viewport_size,
                 count,
             ));
+            self.overlay_texture = Some(Self::create_overlay_texture(
+                device,
+                self.format,
+                self.viewport_size,
+            ));
         } else {
             self.msaa_texture = None;
+            self.overlay_texture = None;
         }
         self
     }
@@ -1518,6 +1734,11 @@ impl UiRenderer {
                     self.format,
                     size,
                     self.msaa_sample_count,
+                ));
+                self.overlay_texture = Some(Self::create_overlay_texture(
+                    self.slab.device(),
+                    self.format,
+                    size,
                 ));
             }
         }
@@ -1890,6 +2111,18 @@ impl UiRenderer {
         let mut encoder =
             device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Self::LABEL });
 
+        let is_overlay = self.background_color.is_none();
+        let use_msaa = self.msaa_sample_count > 1;
+
+        // Determine load op, color attachment, and resolve target.
+        //
+        // Overlay + MSAA: clear MSAA to transparent, resolve to
+        //   intermediate overlay texture, then compositor blends onto
+        //   the caller's view.
+        // Overlay + no MSAA: load existing view content, render
+        //   directly (alpha blending preserves the scene).
+        // Standalone: clear to background color, resolve (or render)
+        //   directly to the caller's view.
         let load_op = if let Some(bg) = self.background_color {
             wgpu::LoadOp::Clear(wgpu::Color {
                 r: bg.x as f64,
@@ -1897,13 +2130,32 @@ impl UiRenderer {
                 b: bg.z as f64,
                 a: bg.w as f64,
             })
+        } else if use_msaa {
+            // Overlay + MSAA: clear the MSAA texture to transparent
+            // so non-UI pixels resolve as fully transparent.
+            wgpu::LoadOp::Clear(wgpu::Color {
+                r: 0.0,
+                g: 0.0,
+                b: 0.0,
+                a: 0.0,
+            })
         } else {
             wgpu::LoadOp::Load
         };
 
-        let (color_view, resolve_target) = if self.msaa_sample_count > 1 {
+        let (color_view, resolve_target) = if use_msaa {
             if let Some(msaa_view) = &self.msaa_texture {
-                (msaa_view, Some(view))
+                if is_overlay {
+                    // Overlay: resolve to intermediate texture
+                    // (NOT the caller's view, which would overwrite
+                    // the 3D scene).
+                    let resolve = self.overlay_texture.as_ref().unwrap();
+                    (msaa_view as &wgpu::TextureView, Some(resolve))
+                } else {
+                    // Standalone: resolve directly to the caller's
+                    // view.
+                    (msaa_view as &wgpu::TextureView, Some(view))
+                }
             } else {
                 (view, None)
             }
@@ -1942,6 +2194,14 @@ impl UiRenderer {
         }
 
         queue.submit(Some(encoder.finish()));
+
+        // Overlay + MSAA: alpha-blend the resolved UI texture onto
+        // the caller's view, preserving the 3D scene underneath.
+        if is_overlay && use_msaa {
+            if let Some(overlay) = &self.overlay_texture {
+                self.compositor.composite(device, queue, overlay, view);
+            }
+        }
     }
 
     // --- Private helpers ---
@@ -2091,6 +2351,34 @@ impl UiRenderer {
             dimension: wgpu::TextureDimension::D2,
             format,
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        });
+        texture.create_view(&wgpu::TextureViewDescriptor::default())
+    }
+
+    /// Create a non-MSAA intermediate texture for overlay compositing.
+    ///
+    /// When the UI is rendered as an overlay (no background clear) with
+    /// MSAA enabled, the MSAA texture resolves into this intermediate
+    /// texture, which is then alpha-blended onto the final target by
+    /// the compositor.
+    fn create_overlay_texture(
+        device: &wgpu::Device,
+        format: wgpu::TextureFormat,
+        size: UVec2,
+    ) -> wgpu::TextureView {
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("renderling-ui-overlay"),
+            size: wgpu::Extent3d {
+                width: size.x,
+                height: size.y,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
             view_formats: &[],
         });
         texture.create_view(&wgpu::TextureViewDescriptor::default())

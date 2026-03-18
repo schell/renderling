@@ -204,6 +204,7 @@ pub mod bloom;
 pub mod bvol;
 pub mod camera;
 pub mod color;
+pub mod compositor;
 #[cfg(cpu)]
 pub mod context;
 pub mod convolution;

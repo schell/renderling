@@ -83,10 +83,7 @@ struct AppUi {
 }
 
 impl AppUi {
-    fn make_fps_widget(
-        fps_counter: &FPSCounter,
-        ui: &mut UiRenderer,
-    ) -> (UiText, UiRect) {
+    fn make_fps_widget(fps_counter: &FPSCounter, ui: &mut UiRenderer) -> (UiText, UiRect) {
         let offset = Vec2::new(2.0, 2.0);
         let text = format!("{}fps", fps_counter.current_fps_string());
         let fps_text = ui.add_text(
@@ -116,8 +113,7 @@ impl AppUi {
             // Remove old text and background before recreating.
             self.ui.remove_text(&self.fps_text);
             self.ui.remove_rect(&self.fps_background);
-            let (fps_text, background) =
-                Self::make_fps_widget(&self.fps_counter, &mut self.ui);
+            let (fps_text, background) = Self::make_fps_widget(&self.fps_counter, &mut self.ui);
             self.fps_text = fps_text;
             self.fps_background = background;
             self.last_fps_display = now;
@@ -171,7 +167,7 @@ impl App {
             })
             .unwrap();
 
-        let mut ui = UiRenderer::new(ctx).with_background_color(Vec4::ZERO);
+        let mut ui = UiRenderer::new(ctx);
         let _ = ui.add_font(FontArc::try_from_slice(FONT_BYTES).unwrap());
         let fps_counter = FPSCounter::default();
         let (fps_text, fps_background) = AppUi::make_fps_widget(&fps_counter, &mut ui);
@@ -234,6 +230,24 @@ impl App {
         self.stage.use_ibl(&ibl);
     }
 
+    fn set_model(&mut self, model: Model) {
+        match std::mem::replace(&mut self.model, model) {
+            Model::Gltf(gltf_document) => {
+                // Remove all the things that was loaded by the document
+                for prim in gltf_document.primitives.values().flatten() {
+                    self.stage.remove_primitive(prim);
+                }
+                for light in gltf_document.lights.iter() {
+                    self.stage.remove_light(light);
+                }
+            }
+            Model::Default(primitive) => {
+                self.stage.remove_primitive(&primitive);
+            }
+            Model::None => {}
+        }
+    }
+
     pub fn load_default_model(&mut self) {
         log::info!("loading default model");
         let mut min = Vec3::splat(f32::INFINITY);
@@ -260,7 +274,8 @@ impl App {
                 BoundingSphere::from((min, max))
             });
 
-        self.model = Model::Default(primitive);
+        self.set_model(Model::Default(primitive));
+
         self.camera_controller.reset(Aabb::new(min, max));
         self.camera_controller
             .update_camera(self.stage.get_size(), &self.camera);
@@ -271,7 +286,6 @@ impl App {
         self.camera_controller
             .reset(Aabb::new(Vec3::NEG_ONE, Vec3::ONE));
         self.stage.clear_images().unwrap();
-        self.model = Model::None;
         let doc = match self.stage.load_gltf_document_from_bytes(bytes) {
             Err(e) => {
                 log::error!("gltf loading error: {e}");
@@ -376,7 +390,7 @@ impl App {
         // dir.clone();     }
         // }
 
-        self.model = Model::Gltf(Box::new(doc));
+        self.set_model(Model::Gltf(Box::new(doc)));
     }
 
     pub fn tick_loads(&mut self) {
