@@ -1237,21 +1237,47 @@ where
         self.primitives.iter().flat_map(|(_, rs)| rs.iter())
     }
 
-    fn nodes_in_scene_recursive<'a>(&'a self, node_index: usize, nodes: &mut Vec<&'a GltfNode>) {
+    fn collect_nodes_recursive<'a>(&'a self, node_index: usize, nodes: &mut Vec<&'a GltfNode>) {
         if let Some(node) = self.nodes.get(node_index) {
             nodes.push(node);
             for child_index in node.children.iter() {
-                self.nodes_in_scene_recursive(*child_index, nodes);
+                self.collect_nodes_recursive(*child_index, nodes);
             }
         }
     }
 
-    pub fn nodes_in_scene(&self, scene_index: usize) -> impl Iterator<Item = &GltfNode> {
+    /// Returns the root (top-level) nodes in the given scene.
+    ///
+    /// This roughly follows [`gltf::Scene::nodes`](https://docs.rs/gltf/latest/gltf/scene/struct.Scene.html#method.nodes),
+    /// returning only the nodes directly referenced by the scene — not
+    /// their children.
+    ///
+    /// Use [`recursive_nodes_in_scene`](Self::recursive_nodes_in_scene)
+    /// if you need all nodes (including descendants).
+    pub fn root_nodes_in_scene(&self, scene_index: usize) -> impl Iterator<Item = &GltfNode> {
         let scene = self.scenes.get(scene_index);
         let mut nodes = vec![];
         if let Some(indices) = scene {
             for node_index in indices {
-                self.nodes_in_scene_recursive(*node_index, &mut nodes);
+                if let Some(node) = self.nodes.get(*node_index) {
+                    nodes.push(node);
+                }
+            }
+        }
+        nodes.into_iter()
+    }
+
+    /// Returns all nodes in the given scene, recursively including
+    /// children.
+    ///
+    /// Root nodes are visited first, followed by their descendants in
+    /// depth-first order.
+    pub fn recursive_nodes_in_scene(&self, scene_index: usize) -> impl Iterator<Item = &GltfNode> {
+        let scene = self.scenes.get(scene_index);
+        let mut nodes = vec![];
+        if let Some(indices) = scene {
+            for node_index in indices {
+                self.collect_nodes_recursive(*node_index, &mut nodes);
             }
         }
         nodes.into_iter()

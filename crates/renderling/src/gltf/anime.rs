@@ -787,7 +787,7 @@ mod test {
             .unwrap();
 
         let nodes = doc
-            .nodes_in_scene(doc.default_scene.unwrap_or_default())
+            .recursive_nodes_in_scene(doc.default_scene.unwrap_or_default())
             .collect::<Vec<_>>();
 
         let mut animator = Animator::new(nodes, doc.animations.first().unwrap().clone());
