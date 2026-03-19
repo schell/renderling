@@ -90,8 +90,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v2
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cargo
+          # THIS KEY MUST MATCH ABOVE
+          key: cargo-cache-${{ env.CARGO_GPU_COMMITSH }}-${{ runner.os }}
       - uses: moonrepo/setup-rust@v1
       - run: rustup install nightly
+      - run: rustup component add --toolchain nightly rustfmt
       - run: cargo +nightly fmt -- --check
 
   # BAU clippy lints
