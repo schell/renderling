@@ -171,7 +171,8 @@ pub fn wasm_test_output_dir() -> std::path::PathBuf {
 
 #[derive(Debug)]
 pub struct RenderlingPaths {
-    /// `cargo_workspace` is not available when building outside of the project directory.
+    /// `cargo_workspace` is not available when building outside of the project
+    /// directory.
     pub cargo_workspace: Option<std::path::PathBuf>,
     pub renderling_crate: std::path::PathBuf,
     pub shader_dir: std::path::PathBuf,
@@ -184,10 +185,12 @@ impl RenderlingPaths {
     ///
     /// If the `CARGO_WORKSPACE_DIR` and subsequently the `cargo_workspace` is
     /// _not_ available, this most likely means we're building renderling
-    /// outside of its own source tree, which means we **don't want to compile shaders**.
+    /// outside of its own source tree, which means we **don't want to compile
+    /// shaders**.
     ///
-    /// But we may still need to transpile the packaged SPIR-V into WGSL for WASM, and
-    /// so `cargo_workspace` is `Option` and the entire function also returns `Option`.
+    /// But we may still need to transpile the packaged SPIR-V into WGSL for
+    /// WASM, and so `cargo_workspace` is `Option` and the entire function
+    /// also returns `Option`.
     pub fn new() -> Option<Self> {
         let cargo_workspace = std::env::var("CARGO_WORKSPACE_DIR")
             .map(std::path::PathBuf::from)

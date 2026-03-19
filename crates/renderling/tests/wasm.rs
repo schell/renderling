@@ -241,8 +241,8 @@ async fn implicit_isosceles_triangle() {
             .create_shader_module(wgpu::include_wgsl!("../src/tutorial/passthru.wgsl"));
         create_pipeline(runtime, &vertex, "main", &fragment, "main")
     };
-    // The second time render with WGSL that is transpiled from Rust code and pulled in through
-    // the renderling linkage machinery.
+    // The second time render with WGSL that is transpiled from Rust code and pulled
+    // in through the renderling linkage machinery.
     let linkage_pipeline = {
         let vertex = renderling::linkage::implicit_isosceles_vertex::linkage(&runtime.device);
         let fragment = renderling::linkage::passthru_fragment::linkage(&runtime.device);
@@ -291,7 +291,8 @@ async fn implicit_isosceles_triangle() {
     render(runtime, &frame, linkage_pipeline).await;
 }
 
-/// Test rendering a triangle from vertices on a slab, without an instance_index.
+/// Test rendering a triangle from vertices on a slab, without an
+/// instance_index.
 #[wasm_bindgen_test]
 async fn slabbed_vertices_no_instance() {
     let _ = console_log::init_with_level(log::Level::Debug);
@@ -627,7 +628,8 @@ async fn slabbed_isosceles_triangle() {
 
 //     // Create a bindgroup for the slab so our shader can read out the types.
 //     let label = Some("slabbed isosceles triangle");
-//     let bindgroup_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+//     let bindgroup_layout =
+// device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
 //         label,
 //         entries: &[wgpu::BindGroupLayoutEntry {
 //             binding: 0,
@@ -640,13 +642,15 @@ async fn slabbed_isosceles_triangle() {
 //             count: None,
 //         }],
 //     });
-//     let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+//     let pipeline_layout =
+// device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
 //         label,
 //         bind_group_layouts: &[&bindgroup_layout],
 //         push_constant_ranges: &[],
 //     });
 
-//     let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+//     let pipeline =
+// device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
 //         label,
 //         layout: Some(&pipeline_layout),
 //         vertex: wgpu::VertexState {
@@ -726,21 +730,21 @@ async fn slabbed_isosceles_triangle() {
 //     ) -> Result<(), GraphError> {
 //         let label = Some("slabbed isosceles triangle");
 //         let mut encoder =
-//             device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label });
-//         {
-//             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-//                 label,
-//                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-//                     view: &frame.view,
-//                     resolve_target: None,
+//             device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+// label });         {
+//             let mut render_pass =
+// encoder.begin_render_pass(&wgpu::RenderPassDescriptor {                 
+// label,                 color_attachments:
+// &[Some(wgpu::RenderPassColorAttachment {                     view:
+// &frame.view,                     resolve_target: None,
 //                     ops: wgpu::Operations {
 //                         load: wgpu::LoadOp::Clear(wgpu::Color::WHITE),
 //                         store: true,
 //                     },
 //                 })],
-//                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-//                     view: &depth.view,
-//                     depth_ops: Some(wgpu::Operations {
+//                 depth_stencil_attachment:
+// Some(wgpu::RenderPassDepthStencilAttachment {                     view:
+// &depth.view,                     depth_ops: Some(wgpu::Operations {
 //                         load: wgpu::LoadOp::Load,
 //                         store: true,
 //                     }),
@@ -758,8 +762,8 @@ async fn slabbed_isosceles_triangle() {
 //         Ok(())
 //     }
 
-//     use crate::frame::{clear_frame_and_depth, copy_frame_to_post, create_frame, present};
-//     r.graph.add_subgraph(graph!(
+//     use crate::frame::{clear_frame_and_depth, copy_frame_to_post,
+// create_frame, present};     r.graph.add_subgraph(graph!(
 //         create_frame
 //             < clear_frame_and_depth
 //             < render
@@ -831,9 +835,10 @@ async fn slabbed_isosceles_triangle() {
 //         };
 //         let unit_id = slab.append(&device, &queue, &unit);
 
-//         // Create a bindgroup for the slab so our shader can read out the types.
-//         let label = Some("slabbed isosceles triangle");
-//         let bindgroup_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+//         // Create a bindgroup for the slab so our shader can read out the
+// types.         let label = Some("slabbed isosceles triangle");
+//         let bindgroup_layout =
+// device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
 //             label,
 //             entries: &[wgpu::BindGroupLayoutEntry {
 //                 binding: 0,
@@ -846,15 +851,15 @@ async fn slabbed_isosceles_triangle() {
 //                 count: None,
 //             }],
 //         });
-//         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-//             label,
-//             bind_group_layouts: &[&bindgroup_layout],
+//         let pipeline_layout =
+// device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {             
+// label,             bind_group_layouts: &[&bindgroup_layout],
 //             push_constant_ranges: &[],
 //         });
 
-//         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-//             label,
-//             layout: Some(&pipeline_layout),
+//         let pipeline =
+// device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {             
+// label,             layout: Some(&pipeline_layout),
 //             vertex: wgpu::VertexState {
 //                 module: &device.create_shader_module(wgpu::include_spirv!(
 //                     "linkage/tutorial-slabbed_render_unit.spv"
@@ -932,21 +937,21 @@ async fn slabbed_isosceles_triangle() {
 //         ) -> Result<(), GraphError> {
 //             let label = Some("slabbed isosceles triangle");
 //             let mut encoder =
-//                 device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label });
-//             {
-//                 let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-//                     label,
-//                     color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-//                         view: &frame.view,
-//                         resolve_target: None,
+//                 device.create_command_encoder(&wgpu::CommandEncoderDescriptor
+// { label });             {
+//                 let mut render_pass =
+// encoder.begin_render_pass(&wgpu::RenderPassDescriptor {                     
+// label,                     color_attachments:
+// &[Some(wgpu::RenderPassColorAttachment {                         view:
+// &frame.view,                         resolve_target: None,
 //                         ops: wgpu::Operations {
 //                             load: wgpu::LoadOp::Clear(wgpu::Color::WHITE),
 //                             store: true,
 //                         },
 //                     })],
-//                     depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-//                         view: &depth.view,
-//                         depth_ops: Some(wgpu::Operations {
+//                     depth_stencil_attachment:
+// Some(wgpu::RenderPassDepthStencilAttachment {                         view:
+// &depth.view,                         depth_ops: Some(wgpu::Operations {
 //                             load: wgpu::LoadOp::Load,
 //                             store: true,
 //                         }),
@@ -964,8 +969,8 @@ async fn slabbed_isosceles_triangle() {
 //             Ok(())
 //         }
 
-//         use crate::frame::{clear_frame_and_depth, copy_frame_to_post, create_frame, present};
-//         r.graph.add_subgraph(graph!(
+//         use crate::frame::{clear_frame_and_depth, copy_frame_to_post,
+// create_frame, present};         r.graph.add_subgraph(graph!(
 //             create_frame
 //                 < clear_frame_and_depth
 //                 < render
@@ -974,8 +979,8 @@ async fn slabbed_isosceles_triangle() {
 //         ));
 
 //         let img = r.render_image().unwrap();
-//         img_diff::assert_img_eq("tutorial/slabbed_render_unit_camera.png", img);
-//     }
+//         img_diff::assert_img_eq("tutorial/slabbed_render_unit_camera.png",
+// img);     }
 // }
 
 #[wasm_bindgen_test]

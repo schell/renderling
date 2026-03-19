@@ -819,7 +819,8 @@ pub async fn read_depth_texture_to_image(
         .iter()
         .copied()
         .map(|f| {
-            // Depth texture is stored as Depth32Float, but the values are normalized 0.0-1.0
+            // Depth texture is stored as Depth32Float, but the values are normalized
+            // 0.0-1.0
             (255.0 * f) as u8
         })
         .collect::<Vec<u8>>();
@@ -1148,7 +1149,8 @@ impl CopiedTextureBuffer {
     /// Convert the post render buffer into an RgbaImage.
     ///
     /// Ensures that the pixels are in a sRGB color space by applying the
-    /// opto transfer function if the texture this buffer was copied from was linear.
+    /// opto transfer function if the texture this buffer was copied from was
+    /// linear.
     pub async fn into_srgba(self, device: &wgpu::Device) -> Result<image::RgbaImage, TextureError> {
         let format = self.format;
         let mut img_buffer = self
@@ -1232,7 +1234,8 @@ impl CopiedTextureBuffer {
 
     /// Copy the entire texture into a buffer, at mip `0`.
     ///
-    /// Attempts to figure out the parameters to [`CopiedTextureBuffer::read_from`].
+    /// Attempts to figure out the parameters to
+    /// [`CopiedTextureBuffer::read_from`].
     pub fn new(runtime: impl AsRef<WgpuRuntime>, texture: &wgpu::Texture) -> Result<Self> {
         let (channels, subpixel_bytes) =
             wgpu_texture_format_channels_and_subpixel_bytes(texture.format())?;

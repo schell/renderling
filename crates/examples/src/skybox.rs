@@ -8,8 +8,7 @@ pub async fn manual_skybox() {
     use renderling::{
         camera::Camera,
         context::Context,
-        glam::Vec4,
-        glam::{Mat4, Vec3},
+        glam::{Mat4, Vec3, Vec4},
         stage::Stage,
     };
 

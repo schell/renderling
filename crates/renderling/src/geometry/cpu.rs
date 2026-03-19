@@ -260,7 +260,6 @@ impl MorphTargets {
         }
     }
     /// Returns a pointer to the underlying morph targets data on the GPU.
-    ///
     pub fn array(&self) -> Array<Array<MorphTarget>> {
         self.arrays.array()
     }

@@ -61,8 +61,8 @@ pub enum AtlasError {
 /// Dropping all clones of this type will cause it to be unloaded from the GPU.
 ///
 /// If a value of this type has been given to another staged resource,
-/// like [`Material`](crate::material::Material), this will prevent the `AtlasTexture` from
-/// being dropped and unloaded.
+/// like [`Material`](crate::material::Material), this will prevent the
+/// `AtlasTexture` from being dropped and unloaded.
 ///
 /// Internally an `AtlasTexture` holds a reference to its descriptor,
 /// [`AtlasTextureDescriptor`].
@@ -205,7 +205,8 @@ pub struct Atlas {
     layers: Arc<RwLock<Vec<Layer>>>,
     label: Option<String>,
     descriptor: Hybrid<AtlasDescriptor>,
-    /// Used for user updates into the atlas by blit images into specific frames.
+    /// Used for user updates into the atlas by blit images into specific
+    /// frames.
     blitter: AtlasBlitter,
 }
 
@@ -353,7 +354,11 @@ impl Atlas {
 
     pub fn get_size(&self) -> wgpu::Extent3d {
         // UNWRAP: POP
-        self.texture_array.read().expect("atlas texture_array read").texture.size()
+        self.texture_array
+            .read()
+            .expect("atlas texture_array read")
+            .texture
+            .size()
     }
 
     /// Add the given images
@@ -363,7 +368,10 @@ impl Atlas {
     ) -> Result<Vec<AtlasTexture>, AtlasError> {
         // UNWRAP: POP
         let mut layers = self.layers.write().expect("atlas layers write");
-        let mut texture_array = self.texture_array.write().expect("atlas texture_array write");
+        let mut texture_array = self
+            .texture_array
+            .write()
+            .expect("atlas texture_array write");
         let extent = texture_array.texture.size();
 
         let newly_packed_layers = pack_images(&layers, images, extent)
@@ -392,8 +400,9 @@ impl Atlas {
 
     /// Add one image.
     ///
-    /// If you have more than one image, you should use [`Atlas::add_images`], as every
-    /// change in images causes a repacking, which might be expensive.
+    /// If you have more than one image, you should use [`Atlas::add_images`],
+    /// as every change in images causes a repacking, which might be
+    /// expensive.
     pub fn add_image(&self, image: &AtlasImage) -> Result<AtlasTexture, AtlasError> {
         // UNWRAP: safe because we know there's at least one image
         Ok(self.add_images(Some(image))?.pop().unwrap())
@@ -401,18 +410,22 @@ impl Atlas {
 
     /// Resize the atlas.
     ///
-    /// This also distributes the images by size among all layers in an effort to reduce
-    /// the likelyhood that packing the atlas may fail.
+    /// This also distributes the images by size among all layers in an effort
+    /// to reduce the likelyhood that packing the atlas may fail.
     ///
     /// ## Errors
-    /// Errors if `size` has a width or height that is not a power of two, or are unequal
+    /// Errors if `size` has a width or height that is not a power of two, or
+    /// are unequal
     pub fn resize(
         &self,
         runtime: impl AsRef<WgpuRuntime>,
         extent: wgpu::Extent3d,
     ) -> Result<(), AtlasError> {
         let mut layers = self.layers.write().expect("atlas layers write");
-        let mut texture_array = self.texture_array.write().expect("atlas texture_array write");
+        let mut texture_array = self
+            .texture_array
+            .write()
+            .expect("atlas texture_array write");
 
         let newly_packed_layers =
             pack_images(&layers, &[], extent).context(CannotPackTexturesSnafu { size: extent })?;
@@ -435,8 +448,8 @@ impl Atlas {
 
     /// Perform upkeep on the atlas.
     ///
-    /// This removes any `TextureFrame`s that have no references and repacks the atlas
-    /// if any were removed.
+    /// This removes any `TextureFrame`s that have no references and repacks the
+    /// atlas if any were removed.
     ///
     /// Returns `true` if the atlas texture was recreated.
     #[must_use]
@@ -536,12 +549,14 @@ impl Atlas {
         images
     }
 
-    /// Update the given [`AtlasTexture`] with a [`Texture`](crate::texture::Texture).
+    /// Update the given [`AtlasTexture`] with a
+    /// [`Texture`](crate::texture::Texture).
     ///
-    /// This will blit the `Texture` into the frame of the [`Atlas`] pointed to by the
-    /// `AtlasTexture`.
+    /// This will blit the `Texture` into the frame of the [`Atlas`] pointed to
+    /// by the `AtlasTexture`.
     ///
-    /// Returns a submission index that can be polled with [`wgpu::Device::poll`].
+    /// Returns a submission index that can be polled with
+    /// [`wgpu::Device::poll`].
     pub fn update_texture(
         &self,
         atlas_texture: &AtlasTexture,
@@ -550,12 +565,14 @@ impl Atlas {
         self.update_textures(Some((atlas_texture, source_texture)))
     }
 
-    /// Update the given [`AtlasTexture`]s with [`Texture`](crate::texture::Texture)s.
+    /// Update the given [`AtlasTexture`]s with
+    /// [`Texture`](crate::texture::Texture)s.
     ///
-    /// This will blit the `Texture` into the frame of the [`Atlas`] pointed to by the
-    /// `AtlasTexture`.
+    /// This will blit the `Texture` into the frame of the [`Atlas`] pointed to
+    /// by the `AtlasTexture`.
     ///
-    /// Returns a submission index that can be polled with [`wgpu::Device::poll`].
+    /// Returns a submission index that can be polled with
+    /// [`wgpu::Device::poll`].
     pub fn update_textures<'a>(
         &self,
         updates: impl IntoIterator<Item = (&'a AtlasTexture, &'a texture::Texture)>,
@@ -583,10 +600,11 @@ impl Atlas {
 
     /// Update the given [`AtlasTexture`]s with new data.
     ///
-    /// This will blit the image data into the frame of the [`Atlas`] pointed to by the
-    /// `AtlasTexture`.
+    /// This will blit the image data into the frame of the [`Atlas`] pointed to
+    /// by the `AtlasTexture`.
     ///
-    /// Returns a submission index that can be polled with [`wgpu::Device::poll`].
+    /// Returns a submission index that can be polled with
+    /// [`wgpu::Device::poll`].
     pub fn update_images<'a>(
         &self,
         updates: impl IntoIterator<Item = (&'a AtlasTexture, impl Into<AtlasImage>)>,
@@ -625,10 +643,11 @@ impl Atlas {
 
     /// Update the given [`AtlasTexture`]s with new data.
     ///
-    /// This will blit the image data into the frame of the [`Atlas`] pointed to by the
-    /// `AtlasTexture`.
+    /// This will blit the image data into the frame of the [`Atlas`] pointed to
+    /// by the `AtlasTexture`.
     ///
-    /// Returns a submission index that can be polled with [`wgpu::Device::poll`].
+    /// Returns a submission index that can be polled with
+    /// [`wgpu::Device::poll`].
     pub fn update_image(
         &self,
         atlas_texture: &AtlasTexture,
@@ -887,11 +906,12 @@ impl AtlasBlittingOperation {
         }
     }
 
-    /// Copies the data from texture this [`AtlasBlittingOperation`] was created with
-    /// into the atlas.
+    /// Copies the data from texture this [`AtlasBlittingOperation`] was created
+    /// with into the atlas.
     ///
-    /// The original items used to create the inner bind group are required here, to
-    /// determine whether or not the bind group needs to be invalidated.
+    /// The original items used to create the inner bind group are required
+    /// here, to determine whether or not the bind group needs to be
+    /// invalidated.
     pub fn run(
         &self,
         runtime: impl AsRef<WgpuRuntime>,
@@ -912,7 +932,10 @@ impl AtlasBlittingOperation {
         let _ = to_atlas.slab.commit();
 
         let to_atlas_texture = to_atlas.get_texture();
-        let mut atlas_slab_buffer = self.atlas_slab_buffer.lock().expect("atlas slab buffer lock");
+        let mut atlas_slab_buffer = self
+            .atlas_slab_buffer
+            .lock()
+            .expect("atlas slab buffer lock");
         let atlas_slab_invalid = atlas_slab_buffer.update_if_invalid();
         let from_texture_has_been_replaced = {
             let prev_id = self
@@ -998,7 +1021,8 @@ impl AtlasBlittingOperation {
 
 /// A texture blitting utility.
 ///
-/// [`AtlasBlitter`] copies textures to specific frames within the texture atlas.
+/// [`AtlasBlitter`] copies textures to specific frames within the texture
+/// atlas.
 #[derive(Clone)]
 pub struct AtlasBlitter {
     pipeline: Arc<wgpu::RenderPipeline>,
@@ -1012,8 +1036,8 @@ impl AtlasBlitter {
     /// # Arguments
     /// - `device` - A [`wgpu::Device`]
     /// - `format` - The [`wgpu::TextureFormat`] of the atlas being updated.
-    /// - `mag_filter` - The filtering algorithm to use when magnifying.
-    ///   This is used when the input source is smaller than the destination.
+    /// - `mag_filter` - The filtering algorithm to use when magnifying. This is
+    ///   used when the input source is smaller than the destination.
     pub fn new(
         device: &wgpu::Device,
         format: wgpu::TextureFormat,
@@ -1056,11 +1080,13 @@ impl AtlasBlitter {
                 wgpu::BindGroupLayoutEntry {
                     binding: 2,
                     visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(if mag_filter == wgpu::FilterMode::Linear {
-                        wgpu::SamplerBindingType::Filtering
-                    } else {
-                        wgpu::SamplerBindingType::NonFiltering
-                    }),
+                    ty: wgpu::BindingType::Sampler(
+                        if mag_filter == wgpu::FilterMode::Linear {
+                            wgpu::SamplerBindingType::Filtering
+                        } else {
+                            wgpu::SamplerBindingType::NonFiltering
+                        },
+                    ),
                     count: None,
                 },
             ],

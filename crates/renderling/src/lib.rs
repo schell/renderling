@@ -1,7 +1,7 @@
 //! <div style="float: right; padding: 1em;">
 //!    <img
-//!       style="image-rendering: pixelated; image-rendering: -moz-crisp-edges; image-rendering: crisp-edges;"
-//!       alt="renderling mascot" width="180"
+//!       style="image-rendering: pixelated; image-rendering: -moz-crisp-edges;
+//! image-rendering: crisp-edges;"       alt="renderling mascot" width="180"
 //!       src="https://github.com/user-attachments/assets/83eafc47-287c-4b5b-8fd7-2063e56b2338"
 //!    />
 //! </div>
@@ -23,7 +23,7 @@
 //! canvas or a texture.
 //!
 //! ```
-//! use renderling::{context::Context, stage::Stage, geometry::Vertex};
+//! use renderling::{context::Context, geometry::Vertex, stage::Stage};
 //!
 //! // create a headless context with dimensions 100, 100.
 //! let ctx = futures_lite::future::block_on(Context::headless(100, 100));
@@ -42,7 +42,8 @@
 //!
 //! ### Staging resources
 //!
-//! We then create a "stage" to place the camera, geometry, materials and lights.
+//! We then create a "stage" to place the camera, geometry, materials and
+//! lights.
 //!
 //! ```
 //! # use renderling::{context::Context, stage::Stage};
@@ -90,10 +91,8 @@
 //!     Vertex::default()
 //!         .with_position([100.0, 0.0, 0.0])
 //!         .with_color([1.0, 0.0, 1.0, 1.0]),
-//!     ]);
-//! let triangle_prim = stage
-//!     .new_primitive()
-//!     .with_vertices(vertices);
+//! ]);
+//! let triangle_prim = stage.new_primitive().with_vertices(vertices);
 //!
 //! let camera = stage.new_camera().with_default_ortho2d(100.0, 100.0);
 //! ```

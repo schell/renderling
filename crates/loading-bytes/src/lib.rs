@@ -240,8 +240,8 @@ pub async fn post_bin_wasm<T: serde::de::DeserializeOwned>(
     Ok(t)
 }
 
-/// Load the file at the given url fragment or path and return it as a vector of bytes, if
-/// possible.
+/// Load the file at the given url fragment or path and return it as a vector of
+/// bytes, if possible.
 pub async fn load(path: &str) -> Result<Vec<u8>, LoadingBytesError> {
     #[cfg(target_arch = "wasm32")]
     {

@@ -6,9 +6,11 @@ mod server;
 
 #[derive(Subcommand)]
 enum Command {
-    /// Compile the `renderling` library into multiple SPIR-V shader entry points.
+    /// Compile the `renderling` library into multiple SPIR-V shader entry
+    /// points.
     CompileShaders,
-    /// Generate Rust files linking `wgpu` shaders from SPIR-V shader entry points.
+    /// Generate Rust files linking `wgpu` shaders from SPIR-V shader entry
+    /// points.
     GenerateLinkage {
         /// Whether to generate WGSL shaders.
         #[clap(long)]

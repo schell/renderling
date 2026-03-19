@@ -129,7 +129,8 @@ impl PrimitiveDescriptor {
 }
 
 #[cfg(test)]
-/// A helper struct that contains all outputs of the primitive's PBR vertex shader.
+/// A helper struct that contains all outputs of the primitive's PBR vertex
+/// shader.
 #[derive(Default, Debug, Clone, Copy, PartialEq)]
 pub struct PrimitivePbrVertexInfo {
     pub primitive: PrimitiveDescriptor,

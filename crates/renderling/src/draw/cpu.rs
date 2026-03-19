@@ -87,9 +87,9 @@ impl From<Id<PrimitiveDescriptor>> for DrawIndirectArgs {
 ///
 /// This is one of either:
 /// * Indirect drawing - standard drawing method that includes compute culling.
-/// * Direct drawing - fallback drawing method for web targets.
-///   Does not include compute culling, as the MULTI_DRAW_INDIRECT
-///   `wgpu` feature is required and not available on web.
+/// * Direct drawing - fallback drawing method for web targets. Does not include
+///   compute culling, as the MULTI_DRAW_INDIRECT `wgpu` feature is required and
+///   not available on web.
 pub(crate) struct DrawingStrategy {
     indirect: Option<IndirectDraws>,
 }
@@ -115,8 +115,8 @@ impl DrawCalls {
     /// as a GPU compute step before drawing. This is a native-only option.
     ///
     /// ## Note
-    /// A [`Context`] is required because `DrawCalls` needs to query for the set of available driver
-    /// features.
+    /// A [`Context`] is required because `DrawCalls` needs to query for the set
+    /// of available driver features.
     pub fn new(
         ctx: &Context,
         use_compute_culling: bool,

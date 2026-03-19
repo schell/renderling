@@ -15,7 +15,8 @@ pub struct AtlasTextureDescriptor {
     pub offset_px: UVec2,
     /// The size of the texture in the atlas.
     pub size_px: UVec2,
-    /// The index of the layer within the atlas that this `AtlasTexture `belongs to.
+    /// The index of the layer within the atlas that this `AtlasTexture `belongs
+    /// to.
     pub layer_index: u32,
     /// The index of this frame within the layer.
     pub frame_index: u32,

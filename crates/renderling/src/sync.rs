@@ -2,7 +2,8 @@
 
 use crabslab::Id;
 
-/// Perform an [atomic_i_increment](spirv_std::arch::atomic_i_increment) operation.
+/// Perform an [atomic_i_increment](spirv_std::arch::atomic_i_increment)
+/// operation.
 ///
 /// ## Note
 /// This is **not** atomic on CPU.
