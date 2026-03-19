@@ -15,5 +15,7 @@
 - Tests: inline `#[cfg(test)] mod test { ... }` within modules
 - CPU-only code: wrap with `#[cfg(cpu)]`
 
+Always format with `cargo +nightly fmt`.
+
 ## Disallowed Methods (clippy.toml)
 Avoid: `Vec{2,3,4}::normalize_or_zero`, `Mat4::to_scale_rotation_translation`, `f32::signum`

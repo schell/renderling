@@ -85,6 +85,15 @@ jobs:
       - run: cargo build -p renderling
       - run: git diff --exit-code --no-ext-diff
 
+  # Ensures code is properly formatted with nightly rustfmt
+  renderling-fmt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v2
+      - uses: moonrepo/setup-rust@v1
+      - run: rustup install nightly
+      - run: cargo +nightly fmt -- --check
+
   # BAU clippy lints
   renderling-clippy:
     runs-on: ubuntu-latest
