@@ -65,6 +65,10 @@ jobs:
       RUST_LOG: debug
     steps:
       - uses: actions/checkout@v2
+      # Run moonrepo/setup-rust BEFORE restoring ~/.cargo cache, because
+      # moonrepo restores its own ~/.cargo cache which would overwrite
+      # the cargo-gpu binary installed by the install-cargo-gpu job.
+      - uses: moonrepo/setup-rust@v1
       - uses: actions/cache@v4
         with:
           path: ~/.cargo
@@ -77,7 +81,6 @@ jobs:
               ${{ needs.install-cargo-gpu.outputs.cachepath-Linux }}
               ${{ needs.install-cargo-gpu.outputs.cachepath-Windows }}
           key: rust-gpu-cache-0-${{ runner.os }}
-      - uses: moonrepo/setup-rust@v1
       - run: rustup install nightly
       - run: rustup component add --toolchain nightly rustfmt
       - run: cargo gpu show commitsh
