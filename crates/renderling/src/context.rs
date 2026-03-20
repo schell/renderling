@@ -628,5 +628,4 @@ impl Context {
     pub fn new_stage(&self) -> Stage {
         Stage::new(self)
     }
-
 }
