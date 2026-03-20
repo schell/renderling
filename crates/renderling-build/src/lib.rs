@@ -279,11 +279,14 @@ impl RenderlingPaths {
 
             let contents = linkage.to_string();
             std::fs::write(&filepath, contents).unwrap();
-            std::process::Command::new("rustfmt")
-                .args([&format!("{}", filepath.display())])
-                .output()
-                .expect("could not format generated code");
         }
+        // Just format the whole project. I know this is less than ideal,
+        // but people should be running with a formatter in their editor, and all of
+        // this is temporary given the wgsl-rs re-stacking happening this year (2026)
+        std::process::Command::new("cargo")
+            .args(["+nightly", "fmt"])
+            .output()
+            .expect("could not format generated code");
         log::info!("...done!")
     }
 }

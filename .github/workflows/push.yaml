@@ -78,6 +78,8 @@ jobs:
               ${{ needs.install-cargo-gpu.outputs.cachepath-Windows }}
           key: rust-gpu-cache-0-${{ runner.os }}
       - uses: moonrepo/setup-rust@v1
+      - run: rustup install nightly
+      - run: rustup component add --toolchain nightly rustfmt
       - run: cargo gpu show commitsh
       - run: rm -rf crates/renderling/src/linkage/* crates/renderling/shaders
       - run: cargo shaders
