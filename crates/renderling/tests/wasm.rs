@@ -733,7 +733,7 @@ async fn slabbed_isosceles_triangle() {
 //             device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
 // label });         {
 //             let mut render_pass =
-// encoder.begin_render_pass(&wgpu::RenderPassDescriptor {                 
+// encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
 // label,                 color_attachments:
 // &[Some(wgpu::RenderPassColorAttachment {                     view:
 // &frame.view,                     resolve_target: None,
@@ -852,13 +852,13 @@ async fn slabbed_isosceles_triangle() {
 //             }],
 //         });
 //         let pipeline_layout =
-// device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {             
+// device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
 // label,             bind_group_layouts: &[&bindgroup_layout],
 //             push_constant_ranges: &[],
 //         });
 
 //         let pipeline =
-// device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {             
+// device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
 // label,             layout: Some(&pipeline_layout),
 //             vertex: wgpu::VertexState {
 //                 module: &device.create_shader_module(wgpu::include_spirv!(
@@ -940,7 +940,7 @@ async fn slabbed_isosceles_triangle() {
 //                 device.create_command_encoder(&wgpu::CommandEncoderDescriptor
 // { label });             {
 //                 let mut render_pass =
-// encoder.begin_render_pass(&wgpu::RenderPassDescriptor {                     
+// encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
 // label,                     color_attachments:
 // &[Some(wgpu::RenderPassColorAttachment {                         view:
 // &frame.view,                         resolve_target: None,

@@ -51,9 +51,9 @@ impl From<AtlasImageFormat> for wgpu::TextureFormat {
         match value {
             AtlasImageFormat::R8 => wgpu::TextureFormat::R8Unorm,
             AtlasImageFormat::R8G8 => wgpu::TextureFormat::Rg8Unorm,
-            AtlasImageFormat::R8G8B8 => wgpu::TextureFormat::Rgba8Unorm, /* No direct 3-channel
-                                                                           * format, using
-                                                                           * 4-channel */
+            AtlasImageFormat::R8G8B8 => wgpu::TextureFormat::Rgba8Unorm, /* No direct 3-channel */
+            // format, using
+            // 4-channel
             AtlasImageFormat::R8G8B8A8 => wgpu::TextureFormat::Rgba8Unorm,
             AtlasImageFormat::R16 => wgpu::TextureFormat::R16Unorm,
             AtlasImageFormat::R16G16 => wgpu::TextureFormat::Rg16Unorm,
