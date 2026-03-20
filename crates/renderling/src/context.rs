@@ -20,7 +20,8 @@ use crate::{
 
 pub use craballoc::runtime::WgpuRuntime;
 
-/// Represents the internal structure of a render target, which can either be a surface or a texture.
+/// Represents the internal structure of a render target, which can either be a
+/// surface or a texture.
 pub(crate) enum RenderTargetInner {
     Surface {
         surface: wgpu::Surface<'static>,
@@ -47,7 +48,8 @@ impl From<wgpu::Texture> for RenderTarget {
 }
 
 impl RenderTarget {
-    /// Resizes the render target to the specified width and height using the provided device.
+    /// Resizes the render target to the specified width and height using the
+    /// provided device.
     pub fn resize(&mut self, width: u32, height: u32, device: &wgpu::Device) {
         match &mut self.0 {
             RenderTargetInner::Surface {
@@ -153,7 +155,8 @@ impl Deref for FrameTextureView {
     }
 }
 
-/// Represents the surface of a frame, which can either be a surface texture or a texture.
+/// Represents the surface of a frame, which can either be a surface texture or
+/// a texture.
 pub(crate) enum FrameSurface {
     Surface(wgpu::SurfaceTexture),
     Texture(Arc<wgpu::Texture>),
@@ -325,7 +328,8 @@ impl AsRef<WgpuRuntime> for Context {
 }
 
 impl Context {
-    /// Creates a new `Context` with the specified target, adapter, device, and queue.
+    /// Creates a new `Context` with the specified target, adapter, device, and
+    /// queue.
     pub fn new(
         target: RenderTarget,
         adapter: impl Into<Arc<wgpu::Adapter>>,
@@ -364,7 +368,8 @@ impl Context {
         }
     }
 
-    /// Attempts to create a new headless `Context` with the specified width, height, and backends.
+    /// Attempts to create a new headless `Context` with the specified width,
+    /// height, and backends.
     pub async fn try_new_headless(
         width: u32,
         height: u32,
@@ -377,7 +382,8 @@ impl Context {
         Ok(Self::new(target, adapter, device, queue))
     }
 
-    /// Attempts to create a new `Context` with a surface, using the specified width, height, backends, and window.
+    /// Attempts to create a new `Context` with a surface, using the specified
+    /// width, height, backends, and window.
     pub async fn try_new_with_surface(
         width: u32,
         height: u32,
@@ -411,8 +417,8 @@ impl Context {
     /// Immediately proxies to `Context::try_new_headless` and unwraps.
     ///
     /// ## Panics
-    /// This function will panic if an adapter cannot be found. For example, this
-    /// would happen on machines without a GPU.
+    /// This function will panic if an adapter cannot be found. For example,
+    /// this would happen on machines without a GPU.
     pub async fn headless(width: u32, height: u32) -> Self {
         let result = Self::try_new_headless(width, height, None).await;
         #[cfg(target_arch = "wasm32")]
@@ -534,7 +540,10 @@ impl Context {
             depth_or_array_layers: size.z,
         };
         crate::atlas::check_size(size);
-        self.stage_config.write().expect("stage_config write").atlas_size = size;
+        self.stage_config
+            .write()
+            .expect("stage_config write")
+            .atlas_size = size;
         self
     }
 
@@ -564,7 +573,10 @@ impl Context {
             depth_or_array_layers: size.z,
         };
         crate::atlas::check_size(size);
-        self.stage_config.write().expect("stage_config write").shadow_map_atlas_size = size;
+        self.stage_config
+            .write()
+            .expect("stage_config write")
+            .shadow_map_atlas_size = size;
         self
     }
 
@@ -585,10 +597,13 @@ impl Context {
     ///
     /// Default is **false**.
     ///
-    /// If set to **true**, all compute culling, including frustum and occlusion culling,
-    /// will **not** run.
+    /// If set to **true**, all compute culling, including frustum and occlusion
+    /// culling, will **not** run.
     pub fn set_use_direct_draw(&self, use_direct_drawing: bool) {
-        self.stage_config.write().expect("stage_config write").use_compute_culling = !use_direct_drawing;
+        self.stage_config
+            .write()
+            .expect("stage_config write")
+            .use_compute_culling = !use_direct_drawing;
     }
 
     /// Sets the use of direct drawing.
@@ -604,7 +619,11 @@ impl Context {
 
     /// Returns whether direct drawing is used.
     pub fn get_use_direct_draw(&self) -> bool {
-        !self.stage_config.read().expect("stage_config read").use_compute_culling
+        !self
+            .stage_config
+            .read()
+            .expect("stage_config read")
+            .use_compute_culling
     }
 
     /// Creates and returns a new [`Stage`] renderer.

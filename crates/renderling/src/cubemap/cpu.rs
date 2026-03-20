@@ -98,7 +98,8 @@ impl SceneCubemap {
         let fovy = std::f32::consts::FRAC_PI_2;
         let aspect = self.cubemap_texture.width() as f32 / self.cubemap_texture.height() as f32;
         let projection = Mat4::perspective_lh(fovy, aspect, 1.0, 25.0);
-        // Render each face by rendering the scene from each camera angle into the cubemap
+        // Render each face by rendering the scene from each camera angle into the
+        // cubemap
         for (i, face) in CubemapFaceDirection::FACES.iter().enumerate() {
             // Update the camera angle, no need to sync as calling `Stage::render` does this
             // implicitly
@@ -298,7 +299,8 @@ mod test {
             .new_primitive()
             .with_vertices(stage.new_vertices(UNIT_POINTS.map(|unit_cube_point| {
                 Vertex::default()
-                    // multiply by 2.0 because the unit cube's AABB bounds are at 0.5, and we want 1.0
+                    // multiply by 2.0 because the unit cube's AABB bounds are at 0.5, and we want
+                    // 1.0
                     .with_position(unit_cube_point * 2.0)
                     // "normalize" (really "shift") the space coord from [-0.5, 0.5] to [0.0, 1.0]
                     .with_color((unit_cube_point + 0.5).extend(1.0))
@@ -605,11 +607,8 @@ mod test {
             let cpu_color = cpu_sample_cubemap(&cpu_cubemap, uv);
             let dir_string = index_to_face_string(face_index);
             println!(
-                "__uv: {uv},\n\
-                 _nuv: {nuv},\n\
-                 _gpu: {color}\n\
-                 _cpu: {cpu_color}\n\
-                 from: {dir_string}({face_index}) {uv2d} {puv}\n"
+                "__uv: {uv},\n_nuv: {nuv},\n_gpu: {color}\n_cpu: {cpu_color}\nfrom: \
+                 {dir_string}({face_index}) {uv2d} {puv}\n"
             );
             let cmp = pretty_assertions::Comparison::new(&color, &cpu_color);
             let distance = color.distance(cpu_color);

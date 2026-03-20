@@ -1,7 +1,8 @@
 //! 2d signed distance fields.
 use glam::Vec2;
 
-/// Returns the distance to the edge of a circle of radius `r` with center at `p`.
+/// Returns the distance to the edge of a circle of radius `r` with center at
+/// `p`.
 fn distance_circle(p: Vec2, r: f32) -> f32 {
     p.length() - r
 }

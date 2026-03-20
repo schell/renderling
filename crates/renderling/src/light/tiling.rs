@@ -1,8 +1,16 @@
-//! This module implements light tiling, a technique used in rendering to efficiently manage and apply lighting effects across a scene.
+//! This module implements light tiling, a technique used in rendering to
+//! efficiently manage and apply lighting effects across a scene.
 //!
-//! Light tiling divides the rendering surface into a grid of tiles, allowing for the efficient computation of lighting effects by processing each tile independently. This approach helps in optimizing the rendering pipeline by reducing the number of lighting calculations needed, especially in complex scenes with multiple light sources.
+//! Light tiling divides the rendering surface into a grid of tiles, allowing
+//! for the efficient computation of lighting effects by processing each tile
+//! independently. This approach helps in optimizing the rendering pipeline by
+//! reducing the number of lighting calculations needed, especially in complex
+//! scenes with multiple light sources.
 //!
-//! The `LightTiling` struct and its associated methods provide the necessary functionality to set up and execute light tiling operations. It includes the creation of compute pipelines for clearing tiles, computing minimum and maximum depths, and binning lights into tiles.
+//! The `LightTiling` struct and its associated methods provide the necessary
+//! functionality to set up and execute light tiling operations. It includes the
+//! creation of compute pipelines for clearing tiles, computing minimum and
+//! maximum depths, and binning lights into tiles.
 //!
 //! For more detailed information on light tiling and its implementation, refer to [this blog post](https://renderling.xyz/articles/live/light_tiling.html).
 
@@ -275,7 +283,8 @@ impl<Ct: IsContainer> LightTiling<Ct> {
         })
     }
 
-    /// Set the minimum illuminance, in lux, to determine if a light illuminates a tile.
+    /// Set the minimum illuminance, in lux, to determine if a light illuminates
+    /// a tile.
     pub fn set_minimum_illuminance(&self, minimum_illuminance_lux: f32) {
         self.tiling_descriptor.modify(|desc| {
             desc.minimum_illuminance_lux = minimum_illuminance_lux;
@@ -335,7 +344,8 @@ impl<Ct: IsContainer> LightTiling<Ct> {
     }
 
     #[cfg(test)]
-    /// Returns a tuple containing an image of depth mins, depth maximums and number of lights.
+    /// Returns a tuple containing an image of depth mins, depth maximums and
+    /// number of lights.
     pub(crate) async fn read_images(
         &self,
         lighting: &Lighting,
@@ -361,9 +371,8 @@ impl<Ct: IsContainer> LightTiling<Ct> {
         let should_be_len = tile_dimensions.x * tile_dimensions.y;
         if should_be_len != desc.tiles_array.len() as u32 {
             log::error!(
-                "LightTilingDescriptor's tiles array is borked: {:?}\n\
-                   expected {should_be_len} tiles\n\
-                   tile_dimensions: {tile_dimensions}",
+                "LightTilingDescriptor's tiles array is borked: {:?}\nexpected {should_be_len} \
+                 tiles\ntile_dimensions: {tile_dimensions}",
                 desc.tiles_array,
             );
         }
@@ -410,9 +419,9 @@ pub struct LightTilingConfig {
     ///   - Full moon on a clear night: 0.25 lux.
     ///   - Quarter moon: 0.01 lux
     ///   - Starlight overcast moonless night sky: 0.0001 lux.
-    /// * General indoor lighting: Around 100 to 300 lux.                                   
-    /// * Office lighting: Typically around 300 to 500 lux.                                 
-    /// * Reading or task lighting: Around 500 to 750 lux.                                  
+    /// * General indoor lighting: Around 100 to 300 lux.
+    /// * Office lighting: Typically around 300 to 500 lux.
+    /// * Reading or task lighting: Around 500 to 750 lux.
     /// * Detailed work (e.g., drafting, surgery): 1000 lux or more.
     ///
     /// Default is `0.1`.

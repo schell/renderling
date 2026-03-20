@@ -4,30 +4,33 @@ use glam::Vec4;
 #[cfg(target_arch = "spirv")]
 use spirv_std::num_traits::Float;
 
-/// Applies a linear transfer function to an 8-bit unsigned integer color component.
+/// Applies a linear transfer function to an 8-bit unsigned integer color
+/// component.
 ///
-/// This function simulates the gamma correction process by raising the component
-/// to the power of 2.2.
+/// This function simulates the gamma correction process by raising the
+/// component to the power of 2.2.
 ///
 /// Converts from sRGB to linear color space.
 pub fn linear_xfer_u8(c: &mut u8) {
     *c = ((*c as f32 / 255.0).powf(2.2) * 255.0) as u8;
 }
 
-/// Applies an optical transfer function to an 8-bit unsigned integer color component.
+/// Applies an optical transfer function to an 8-bit unsigned integer color
+/// component.
 ///
-/// This function simulates the inverse gamma correction process by raising the component
-/// to the power of 1/2.2.
+/// This function simulates the inverse gamma correction process by raising the
+/// component to the power of 1/2.2.
 ///
 /// Converts from linear to sRGB color space.
 pub fn opto_xfer_u8(c: &mut u8) {
     *c = ((*c as f32 / 255.0).powf(1.0 / 2.2) * 255.0) as u8;
 }
 
-/// Applies a linear transfer function to a 16-bit unsigned integer color component.
+/// Applies a linear transfer function to a 16-bit unsigned integer color
+/// component.
 ///
-/// This function simulates the gamma correction process by raising the component
-/// to the power of 2.2.
+/// This function simulates the gamma correction process by raising the
+/// component to the power of 2.2.
 ///
 /// Converts from sRGB to linear color space.
 pub fn linear_xfer_u16(c: &mut u16) {
@@ -39,10 +42,11 @@ mod cpu {
     use super::*;
     use glam::Vec3;
 
-    /// Applies a linear transfer function to a 16-bit floating-point color component.
+    /// Applies a linear transfer function to a 16-bit floating-point color
+    /// component.
     ///
-    /// This function simulates the gamma correction process by raising the component
-    /// to the power of 2.2.
+    /// This function simulates the gamma correction process by raising the
+    /// component to the power of 2.2.
     ///
     /// Converts from sRGB to linear color space.
     pub fn linear_xfer_f16(c: &mut u16) {
@@ -77,10 +81,11 @@ mod cpu {
 #[cfg(not(target_arch = "spirv"))]
 pub use cpu::*;
 
-/// Applies a linear transfer function to a 32-bit floating-point color component.
+/// Applies a linear transfer function to a 32-bit floating-point color
+/// component.
 ///
-/// This function simulates the gamma correction process by raising the component
-/// to the power of 2.2.
+/// This function simulates the gamma correction process by raising the
+/// component to the power of 2.2.
 ///
 /// Converts from sRGB to linear color space.
 pub fn linear_xfer_f32(c: &mut f32) {
@@ -89,8 +94,8 @@ pub fn linear_xfer_f32(c: &mut f32) {
 
 /// Applies a linear transfer function to each component of a `Vec4`.
 ///
-/// This function simulates the gamma correction process by raising each component
-/// to the power of 2.2.
+/// This function simulates the gamma correction process by raising each
+/// component to the power of 2.2.
 ///
 /// Converts from sRGB to linear color space for each component.
 pub fn linear_xfer_vec4(v: &mut Vec4) {

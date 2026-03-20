@@ -203,7 +203,10 @@ impl Ui {
     }
 
     pub fn set_default_stroke_options(&self, options: StrokeOptions) -> &Self {
-        *self.default_stroke_options.write().expect("default_stroke_options write") = options;
+        *self
+            .default_stroke_options
+            .write()
+            .expect("default_stroke_options write") = options;
         self
     }
 
@@ -213,7 +216,10 @@ impl Ui {
     }
 
     pub fn set_default_fill_options(&self, options: FillOptions) -> &Self {
-        *self.default_fill_options.write().expect("default_fill_options write") = options;
+        *self
+            .default_fill_options
+            .write()
+            .expect("default_fill_options write") = options;
         self
     }
 
@@ -243,8 +249,8 @@ impl Ui {
 
     /// Remove the `path` from the [`Ui`].
     ///
-    /// The given `path` must have been created with this [`Ui`], otherwise this function is
-    /// a noop.
+    /// The given `path` must have been created with this [`Ui`], otherwise this
+    /// function is a noop.
     pub fn remove_path(&self, path: &UiPath) {
         self.stage.remove_primitive(&path.primitive);
     }
@@ -256,8 +262,8 @@ impl Ui {
 
     /// Remove the text from the [`Ui`].
     ///
-    /// The given `text` must have been created with this [`Ui`], otherwise this function is
-    /// a noop.
+    /// The given `text` must have been created with this [`Ui`], otherwise this
+    /// function is a noop.
     pub fn remove_text(&self, text: &UiText) {
         self.stage.remove_primitive(&text.renderlet);
     }
@@ -312,7 +318,10 @@ impl Ui {
 
     /// Remove an image previously loaded with [`Ui::load_image`].
     pub fn remove_image(&self, image_id: &ImageId) -> Option<UiImage> {
-        self.images.write().expect("images write").remove(&image_id.0)
+        self.images
+            .write()
+            .expect("images write")
+            .remove(&image_id.0)
     }
 
     fn reorder_renderlets(&self) {

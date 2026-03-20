@@ -1,6 +1,7 @@
 //! BRDF computation.
 //!
-//! Helpers for computing (and holding onto) a Bidirectional Reflectance Distribution Function.
+//! Helpers for computing (and holding onto) a Bidirectional Reflectance
+//! Distribution Function.
 
 #[cfg(cpu)]
 mod cpu;

@@ -380,10 +380,10 @@ impl App {
 
         //         self.lighting
         //             .shadow_map
-        //             .update(&self.lighting.lighting, doc.primitives.values().flatten());
-        //         self.lighting.light = light.light.clone();
-        //         self.lighting.light_details = dir.clone();
-        //     }
+        //             .update(&self.lighting.lighting,
+        // doc.primitives.values().flatten());         self.lighting.light =
+        // light.light.clone();         self.lighting.light_details =
+        // dir.clone();     }
         // }
 
         self.model = Model::Gltf(Box::new(doc));

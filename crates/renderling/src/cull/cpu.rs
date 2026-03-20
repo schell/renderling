@@ -652,7 +652,8 @@ impl ComputeDepthPyramid {
         }
     }
 
-    /// Run depth pyramid copy and downsampling, then return the updated HZB buffer.
+    /// Run depth pyramid copy and downsampling, then return the updated HZB
+    /// buffer.
     pub fn run(&mut self, depth_texture: &Texture) {
         let extent = depth_texture.texture.size();
         let size = UVec2::new(extent.width, extent.height);
@@ -969,8 +970,8 @@ mod test {
         .unwrap();
         let draw_calls = stage.draw_calls.read().unwrap();
         let indirect_draws = draw_calls.drawing_strategy.as_indirect().unwrap();
-        // The HZB slab, which contains a `DepthPyramidDescriptor` at index 0, and all the
-        // pyramid's mips
+        // The HZB slab, which contains a `DepthPyramidDescriptor` at index 0, and all
+        // the pyramid's mips
         let depth_pyramid_slab = futures_lite::future::block_on(
             indirect_draws
                 .compute_culling

@@ -8,8 +8,7 @@ async fn manual_lighting() {
     use renderling::{
         camera::Camera,
         context::Context,
-        glam::Vec4,
-        glam::{Mat4, Vec3},
+        glam::{Mat4, Vec3, Vec4},
         gltf::GltfDocument,
         stage::Stage,
         types::GpuOnlyArray,
@@ -155,8 +154,7 @@ async fn manual_lighting_ibl() {
     use renderling::{
         camera::Camera,
         context::Context,
-        glam::Vec4,
-        glam::{Mat4, Vec3},
+        glam::{Mat4, Vec3, Vec4},
         gltf::GltfDocument,
         stage::Stage,
         types::GpuOnlyArray,

@@ -3,7 +3,8 @@
 //! All images are packed into an atlas at staging time.
 //! Texture descriptors describe where in the atlas an image is,
 //! and how it should sample pixels. These descriptors are packed into a buffer
-//! on the GPU. This keeps the number of texture binds to a minimum (one, in most cases).
+//! on the GPU. This keeps the number of texture binds to a minimum (one, in
+//! most cases).
 //!
 //! ## NOTE:
 //! `Atlas` is a temporary work around until we can use bindless techniques

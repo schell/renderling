@@ -3,11 +3,13 @@
 //! This module includes support for various types of lights such as
 //! directional, point, and spot lights.
 //!
-//! Additionally, the module provides shadow mapping to create realistic shadows.
+//! Additionally, the module provides shadow mapping to create realistic
+//! shadows.
 //!
-//! Also provided is an implementation of light tiling, a technique that optimizes
-//! the rendering of thousands of analytical lights. If you find your scene performing
-//! poorly under the load of very many lights, [`LightTiling`] can speed things up.
+//! Also provided is an implementation of light tiling, a technique that
+//! optimizes the rendering of thousands of analytical lights. If you find your
+//! scene performing poorly under the load of very many lights, [`LightTiling`]
+//! can speed things up.
 //!
 //! ## Analytical lights
 //!
@@ -24,7 +26,8 @@
 //! [`Transform`] or [`NestedTransform`] objects. The [`Transform`] allows you
 //! to set the position, rotation, and scale of the light, while
 //! [`NestedTransform`] enables hierarchical transformations, which is useful
-//! for complex scenes where lights need to follow specific objects or structures.
+//! for complex scenes where lights need to follow specific objects or
+//! structures.
 //!
 //! By adjusting the properties of these lights, such as intensity, color, and
 //! direction, you can achieve a wide range of lighting effects, from simulating
@@ -37,9 +40,9 @@
 //! Shadow mapping is a technique used to add realistic shadows to a scene by
 //! simulating the way light interacts with objects.
 //!
-//! To create a [`ShadowMap`], use the [`Stage::new_shadow_map`] method, passing in
-//! the light source and desired parameters such as the size of the shadow map
-//! and the near and far planes of the light's frustum.  Once created, the
+//! To create a [`ShadowMap`], use the [`Stage::new_shadow_map`] method, passing
+//! in the light source and desired parameters such as the size of the shadow
+//! map and the near and far planes of the light's frustum.  Once created, the
 //! shadow map needs to be updated each frame (or as needed) using the
 //! [`ShadowMap::update`] method, which renders the scene from the light's
 //! perspective to determine which areas are in shadow.
@@ -70,7 +73,8 @@
 //! many lights.
 //!
 //! By using light tiling, you can significantly improve the performance of your
-//! rendering pipeline, especially in complex scenes with numerous light sources.
+//! rendering pipeline, especially in complex scenes with numerous light
+//! sources.
 
 #[cfg(doc)]
 use crate::{
@@ -200,8 +204,8 @@ mod test {
     fn next_light_sanity() {
         {
             let lights_array = Array::new(0, 1);
-            // When there's only one light we only need one invocation to check that one light
-            // (per tile)
+            // When there's only one light we only need one invocation to check that one
+            // light (per tile)
             let mut next_light = NextLightIndex::new(UVec3::new(0, 0, 0), 16, lights_array);
             assert_eq!(Some(0u32.into()), next_light.next());
             assert_eq!(None, next_light.next());

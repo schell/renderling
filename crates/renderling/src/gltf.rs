@@ -2,7 +2,8 @@
 //!
 //! # Loading GLTF files
 //!
-//! Loading GLTF files is accomplished through [`Stage::load_gltf_document_from_path`]
+//! Loading GLTF files is accomplished through
+//! [`Stage::load_gltf_document_from_path`]
 //! and [`Stage::load_gltf_document_from_bytes`].
 use std::{collections::HashMap, sync::Arc};
 
@@ -458,8 +459,8 @@ impl GltfPrimitive {
         // https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html#morph-targets
         //
         // TODO: Generate morph target normals and tangents if absent.
-        // Although the spec says we have to generate normals or tangents if not specified,
-        // we are explicitly *not* doing that here.
+        // Although the spec says we have to generate normals or tangents if not
+        // specified, we are explicitly *not* doing that here.
         let morph_targets: Vec<Vec<MorphTarget>> = reader
             .read_morph_targets()
             .map(|(may_ps, may_ns, may_ts)| {
@@ -1251,7 +1252,8 @@ where
 
     /// Returns the bounding volume of this document, if possible.
     ///
-    /// This function will return `None` if this document does not contain meshes.
+    /// This function will return `None` if this document does not contain
+    /// meshes.
     pub fn bounding_volume(&self) -> Option<Aabb> {
         let mut aabbs = vec![];
         for node in self.nodes.iter() {
@@ -1505,8 +1507,8 @@ mod test {
         //     .get(0)
         //     .unwrap()
         //     .clone()
-        //     .into_animator(doc.nodes.iter().map(|n| (n.index, n.transform.clone())));
-        // animator.progress(0.0).unwrap();
+        //     .into_animator(doc.nodes.iter().map(|n| (n.index,
+        // n.transform.clone()))); animator.progress(0.0).unwrap();
         // let frame = ctx.get_next_frame().unwrap();
         // stage.render(&frame.view());
         // let img = frame.read_image().unwrap();

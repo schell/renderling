@@ -5,8 +5,8 @@
 //! "stage" our paths, text, etc:
 //!
 //! ```rust
-//! use renderling::ui::prelude::*;
 //! use glam::Vec2;
+//! use renderling::ui::prelude::*;
 //!
 //! let ctx = futures_lite::future::block_on(Context::headless(100, 100));
 //! let mut ui = Ui::new(&ctx);
