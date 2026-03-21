@@ -100,6 +100,7 @@ jobs:
           path: ~/.cargo
           # THIS KEY MUST MATCH ABOVE
           key: cargo-cache-${{ env.CARGO_GPU_COMMITSH }}-${{ matrix.os }}
+      - run: mkdir -p ~/.cargo/bin
       - uses: moonrepo/setup-rust@v1
       - run: rustup install nightly
       - run: rustup component add --toolchain nightly rustfmt
