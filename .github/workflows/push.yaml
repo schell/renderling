@@ -17,7 +17,7 @@ jobs:
   install-cargo-gpu:
     strategy:
       matrix: 
-        os: [ubuntu-latest, ubuntu-24.04, macos-latest]
+        os: [ubuntu-24.04, macos-latest]
     runs-on: ${{ matrix.os }}
     defaults:
       run: 
@@ -83,7 +83,7 @@ jobs:
               ${{ needs.install-cargo-gpu.outputs.cachepath-macOS }}
               ${{ needs.install-cargo-gpu.outputs.cachepath-Linux }}
               ${{ needs.install-cargo-gpu.outputs.cachepath-Windows }}
-          key: rust-gpu-cache-0-${{ matrix.os }}
+          key: rust-gpu-cache-1-${{ matrix.os }}
       - run: rustup install nightly
       - run: rustup component add --toolchain nightly rustfmt
       - run: cargo gpu show commitsh
