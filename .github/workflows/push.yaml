@@ -99,7 +99,7 @@ jobs:
         with:
           path: ~/.cargo
           # THIS KEY MUST MATCH ABOVE
-          key: cargo-cache-${{ env.CARGO_GPU_COMMITSH }}-${{ matrix.os }}
+          key: cargo-cache-${{ env.CARGO_GPU_COMMITSH }}-ubuntu-latest
       - run: mkdir -p $HOME/.cargo/bin
       - uses: moonrepo/setup-rust@v1
       - run: rustup install nightly
