@@ -22,6 +22,7 @@ lazy_static = "1.4.0"
 loading-bytes = { path = "../loading-bytes" }
 log = { workspace = true }
 renderling = { path = "../renderling" }
+renderling-ui = { path = "../renderling-ui", features = ["text", "path"] }
 wasm-bindgen = { workspace = true }
 wasm-bindgen-futures = "^0.4"
 web-sys = { workspace = true, features = ["Performance", "Window"] }

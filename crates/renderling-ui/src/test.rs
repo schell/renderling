@@ -1,0 +1,433 @@
+//! Tests for the 2D/UI renderer.
+
+#[cfg(test)]
+mod tests {
+    use glam::{Vec2, Vec4};
+
+    use crate::{GradientDescriptor, UiRenderer};
+    use renderling::context::Context;
+
+    fn init_logging() {
+        let _ = env_logger::builder().is_test(true).try_init();
+    }
+
+    /// Save the rendered image for visual inspection and as a baseline
+    /// reference. Uses `img_diff::assert_img_eq` which will create the
+    /// expected image on first run.
+    fn save_and_assert(name: &str, img: image::RgbaImage) {
+        // Save a copy to test_output for inspection.
+        img_diff::save(name, img.clone());
+        // If the expected image doesn't exist yet, save it as the baseline.
+        let test_img_path = renderling_build::test_img_dir().join(name);
+        if !test_img_path.exists() {
+            std::fs::create_dir_all(test_img_path.parent().unwrap()).unwrap();
+            image::DynamicImage::from(img.clone())
+                .save(&test_img_path)
+                .unwrap();
+            log::info!("saved baseline image: {}", test_img_path.display());
+        }
+        img_diff::assert_img_eq(name, img);
+    }
+
+    #[test]
+    fn can_render_rect() {
+        init_logging();
+        let ctx = futures_lite::future::block_on(Context::headless(200, 200));
+        let mut ui = UiRenderer::new(&ctx).with_background_color(Vec4::ONE);
+
+        let _rect = ui
+            .add_rect()
+            .with_position(Vec2::new(10.0, 10.0))
+            .with_size(Vec2::new(80.0, 60.0))
+            .with_fill_color(Vec4::new(0.2, 0.4, 0.8, 1.0));
+
+        let frame = ctx.get_next_frame().unwrap();
+        ui.render(&frame.view());
+        let img = futures_lite::future::block_on(frame.read_image()).unwrap();
+        save_and_assert("ui2d/rect.png", img);
+    }
+
+    #[test]
+    fn can_render_rounded_rect() {
+        init_logging();
+        let ctx = futures_lite::future::block_on(Context::headless(200, 200));
+        let mut ui = UiRenderer::new(&ctx).with_background_color(Vec4::ONE);
+
+        let _rect = ui
+            .add_rect()
+            .with_position(Vec2::new(10.0, 10.0))
+            .with_size(Vec2::new(120.0, 80.0))
+            .with_corner_radii(Vec4::splat(16.0))
+            .with_fill_color(Vec4::new(0.8, 0.2, 0.3, 1.0));
+
+        let frame = ctx.get_next_frame().unwrap();
+        ui.render(&frame.view());
+        let img = futures_lite::future::block_on(frame.read_image()).unwrap();
+        save_and_assert("ui2d/rounded_rect.png", img);
+    }
+
+    #[test]
+    fn can_render_circle() {
+        init_logging();
+        let ctx = futures_lite::future::block_on(Context::headless(200, 200));
+        let mut ui = UiRenderer::new(&ctx).with_background_color(Vec4::ONE);
+
+        let _circle = ui
+            .add_circle()
+            .with_center(Vec2::new(100.0, 100.0))
+            .with_radius(40.0)
+            .with_fill_color(Vec4::new(0.1, 0.7, 0.3, 1.0));
+
+        let frame = ctx.get_next_frame().unwrap();
+        ui.render(&frame.view());
+        let img = futures_lite::future::block_on(frame.read_image()).unwrap();
+        save_and_assert("ui2d/circle.png", img);
+    }
+
+    #[test]
+    fn can_render_bordered_rect() {
+        init_logging();
+        let ctx = futures_lite::future::block_on(Context::headless(200, 200));
+        let mut ui = UiRenderer::new(&ctx).with_background_color(Vec4::ONE);
+
+        let _rect = ui
+            .add_rect()
+            .with_position(Vec2::new(20.0, 20.0))
+            .with_size(Vec2::new(100.0, 80.0))
+            .with_corner_radii(Vec4::splat(12.0))
+            .with_fill_color(Vec4::new(0.95, 0.95, 0.8, 1.0))
+            .with_border(3.0, Vec4::new(0.2, 0.2, 0.2, 1.0));
+
+        let frame = ctx.get_next_frame().unwrap();
+        ui.render(&frame.view());
+        let img = futures_lite::future::block_on(frame.read_image()).unwrap();
+        save_and_assert("ui2d/bordered_rect.png", img);
+    }
+
+    #[test]
+    fn can_render_multiple_shapes() {
+        init_logging();
+        let ctx = futures_lite::future::block_on(Context::headless(300, 200));
+        let mut ui = UiRenderer::new(&ctx).with_background_color(Vec4::ONE);
+
+        // Background rect
+        let _rect = ui
+            .add_rect()
+            .with_position(Vec2::new(10.0, 10.0))
+            .with_size(Vec2::new(120.0, 80.0))
+            .with_corner_radii(Vec4::splat(8.0))
+            .with_fill_color(Vec4::new(0.2, 0.4, 0.8, 1.0))
+            .with_z(0.0);
+
+        // Circle on top
+        let _circle = ui
+            .add_circle()
+            .with_center(Vec2::new(200.0, 100.0))
+            .with_radius(35.0)
+            .with_fill_color(Vec4::new(0.9, 0.3, 0.1, 1.0))
+            .with_border(2.0, Vec4::new(0.0, 0.0, 0.0, 1.0))
+            .with_z(0.1);
+
+        // Ellipse
+        let _ellipse = ui
+            .add_ellipse()
+            .with_center(Vec2::new(150.0, 150.0))
+            .with_radii(Vec2::new(60.0, 30.0))
+            .with_fill_color(Vec4::new(0.1, 0.8, 0.4, 0.8))
+            .with_z(0.2);
+
+        let frame = ctx.get_next_frame().unwrap();
+        ui.render(&frame.view());
+        let img = futures_lite::future::block_on(frame.read_image()).unwrap();
+        save_and_assert("ui2d/multiple_shapes.png", img);
+    }
+
+    #[test]
+    fn can_render_image() {
+        init_logging();
+        let ctx = futures_lite::future::block_on(Context::headless(200, 200));
+        let mut ui = UiRenderer::new(&ctx).with_background_color(Vec4::ONE);
+
+        // Create a programmatic 64x64 checkerboard image.
+        let size = 64u32;
+        let mut img = image::RgbaImage::new(size, size);
+        for y in 0..size {
+            for x in 0..size {
+                let checker = ((x / 8) + (y / 8)) % 2 == 0;
+                let c = if checker { 255 } else { 80 };
+                img.put_pixel(x, y, image::Rgba([c, c, c, 255]));
+            }
+        }
+
+        let atlas_img: renderling::atlas::AtlasImage = image::DynamicImage::ImageRgba8(img).into();
+        let _image_el = ui.add_image(atlas_img).with_position(Vec2::new(20.0, 20.0));
+
+        let frame = ctx.get_next_frame().unwrap();
+        ui.render(&frame.view());
+        let output = futures_lite::future::block_on(frame.read_image()).unwrap();
+        save_and_assert("ui2d/image.png", output);
+    }
+
+    #[test]
+    fn can_render_image_with_tint() {
+        init_logging();
+        let ctx = futures_lite::future::block_on(Context::headless(200, 200));
+        let mut ui = UiRenderer::new(&ctx).with_background_color(Vec4::ONE);
+
+        // Create a 64x64 solid white image.
+        let size = 64u32;
+        let img = image::RgbaImage::from_pixel(size, size, image::Rgba([255, 255, 255, 255]));
+        let atlas_img: renderling::atlas::AtlasImage = image::DynamicImage::ImageRgba8(img).into();
+
+        // Apply a red tint.
+        let _image_el = ui
+            .add_image(atlas_img)
+            .with_position(Vec2::new(50.0, 50.0))
+            .with_tint(Vec4::new(1.0, 0.0, 0.0, 1.0));
+
+        let frame = ctx.get_next_frame().unwrap();
+        ui.render(&frame.view());
+        let output = futures_lite::future::block_on(frame.read_image()).unwrap();
+        save_and_assert("ui2d/image_tint.png", output);
+    }
+
+    #[test]
+    fn can_render_gradient_rect() {
+        init_logging();
+        let ctx = futures_lite::future::block_on(Context::headless(200, 200));
+        let mut ui = UiRenderer::new(&ctx).with_background_color(Vec4::ONE);
+
+        let _rect = ui
+            .add_rect()
+            .with_position(Vec2::new(20.0, 20.0))
+            .with_size(Vec2::new(160.0, 100.0))
+            .with_corner_radii(Vec4::splat(12.0))
+            .with_gradient(Some(GradientDescriptor {
+                gradient_type: 1, // Linear
+                start: Vec2::new(0.0, 0.0),
+                end: Vec2::new(1.0, 0.0),
+                radius: 0.0,
+                color_start: Vec4::new(1.0, 0.0, 0.0, 1.0),
+                color_end: Vec4::new(0.0, 0.0, 1.0, 1.0),
+            }));
+
+        let frame = ctx.get_next_frame().unwrap();
+        ui.render(&frame.view());
+        let img = futures_lite::future::block_on(frame.read_image()).unwrap();
+        save_and_assert("ui2d/gradient_rect.png", img);
+    }
+
+    #[cfg(feature = "text")]
+    #[test]
+    fn can_render_text() {
+        use crate::{FontArc, Section, Text};
+
+        init_logging();
+        let ctx = futures_lite::future::block_on(Context::headless(400, 100));
+        let mut ui = UiRenderer::new(&ctx).with_background_color(Vec4::ONE);
+
+        let font_bytes =
+            std::fs::read("../../fonts/Recursive Mn Lnr St Med Nerd Font Complete.ttf").unwrap();
+        let font = FontArc::try_from_vec(font_bytes).unwrap();
+        let _font_id = ui.add_font(font);
+
+        let _text = ui.add_text(
+            Section::default()
+                .add_text(
+                    Text::new("Hello, renderling-ui!")
+                        .with_scale(32.0)
+                        .with_color([0.0, 0.0, 0.0, 1.0]),
+                )
+                .with_screen_position((10.0, 10.0)),
+        );
+
+        let frame = ctx.get_next_frame().unwrap();
+        ui.render(&frame.view());
+        let img = futures_lite::future::block_on(frame.read_image()).unwrap();
+        save_and_assert("ui2d/text.png", img);
+    }
+
+    #[cfg(feature = "path")]
+    #[test]
+    fn can_render_filled_path() {
+        init_logging();
+        let ctx = futures_lite::future::block_on(Context::headless(200, 200));
+        let mut ui = UiRenderer::new(&ctx).with_background_color(Vec4::ONE);
+
+        // Filled red triangle.
+        let _path = ui
+            .path_builder()
+            .with_fill_color(Vec4::new(1.0, 0.0, 0.0, 1.0))
+            .with_begin(Vec2::new(100.0, 20.0))
+            .with_line_to(Vec2::new(180.0, 160.0))
+            .with_line_to(Vec2::new(20.0, 160.0))
+            .with_end(true)
+            .fill(&mut ui);
+
+        let frame = ctx.get_next_frame().unwrap();
+        ui.render(&frame.view());
+        let img = futures_lite::future::block_on(frame.read_image()).unwrap();
+        save_and_assert("ui2d/filled_path.png", img);
+    }
+
+    #[cfg(feature = "path")]
+    #[test]
+    fn can_render_stroked_path() {
+        init_logging();
+        let ctx = futures_lite::future::block_on(Context::headless(200, 200));
+        let mut ui = UiRenderer::new(&ctx).with_background_color(Vec4::ONE);
+
+        // Blue stroked circle.
+        let _path = ui
+            .path_builder()
+            .with_stroke_color(Vec4::new(0.0, 0.0, 1.0, 1.0))
+            .with_circle(Vec2::new(100.0, 100.0), 60.0)
+            .stroke(&mut ui);
+
+        let frame = ctx.get_next_frame().unwrap();
+        ui.render(&frame.view());
+        let img = futures_lite::future::block_on(frame.read_image()).unwrap();
+        save_and_assert("ui2d/stroked_path.png", img);
+    }
+
+    #[cfg(feature = "path")]
+    #[test]
+    fn can_render_path_shapes() {
+        init_logging();
+        let ctx = futures_lite::future::block_on(Context::headless(300, 200));
+        let mut ui = UiRenderer::new(&ctx).with_background_color(Vec4::ONE);
+
+        // Filled rounded rectangle.
+        let _rect = ui
+            .path_builder()
+            .with_fill_color(Vec4::new(0.2, 0.6, 0.3, 1.0))
+            .with_rounded_rectangle(
+                Vec2::new(10.0, 10.0),
+                Vec2::new(140.0, 90.0),
+                12.0,
+                12.0,
+                12.0,
+                12.0,
+            )
+            .fill(&mut ui);
+
+        // Stroked ellipse.
+        let _ellipse = ui
+            .path_builder()
+            .with_stroke_color(Vec4::new(0.8, 0.2, 0.1, 1.0))
+            .with_stroke_config(crate::StrokeConfig {
+                line_width: 3.0,
+                ..Default::default()
+            })
+            .with_ellipse(Vec2::new(220.0, 100.0), Vec2::new(60.0, 40.0), 0.0)
+            .stroke(&mut ui);
+
+        let frame = ctx.get_next_frame().unwrap();
+        ui.render(&frame.view());
+        let img = futures_lite::future::block_on(frame.read_image()).unwrap();
+        save_and_assert("ui2d/path_shapes.png", img);
+    }
+
+    #[cfg(feature = "text")]
+    #[test]
+    fn can_render_text_with_shapes() {
+        use crate::{FontArc, Section, Text};
+
+        init_logging();
+        let ctx = futures_lite::future::block_on(Context::headless(400, 100));
+        let mut ui = UiRenderer::new(&ctx).with_background_color(Vec4::ONE);
+
+        let font_bytes =
+            std::fs::read("../../fonts/Recursive Mn Lnr St Med Nerd Font Complete.ttf").unwrap();
+        let font = FontArc::try_from_vec(font_bytes).unwrap();
+        let _font_id = ui.add_font(font);
+
+        // Background rounded rect behind the text.
+        let _bg = ui
+            .add_rect()
+            .with_position(Vec2::new(5.0, 5.0))
+            .with_size(Vec2::new(350.0, 50.0))
+            .with_corner_radii(Vec4::splat(8.0))
+            .with_fill_color(Vec4::new(0.2, 0.4, 0.8, 1.0))
+            .with_z(0.0);
+
+        // Text on top.
+        let _text = ui
+            .add_text(
+                Section::default()
+                    .add_text(
+                        Text::new("Text on a rect!")
+                            .with_scale(28.0)
+                            .with_color([1.0, 1.0, 1.0, 1.0]),
+                    )
+                    .with_screen_position((15.0, 15.0)),
+            )
+            .with_z(0.1);
+
+        let frame = ctx.get_next_frame().unwrap();
+        ui.render(&frame.view());
+        let img = futures_lite::future::block_on(frame.read_image()).unwrap();
+        save_and_assert("ui2d/text_with_shapes.png", img);
+    }
+
+    /// Generates points for a star shape.
+    ///
+    /// `num_points` is the number of tips. Points alternate between
+    /// `outer_radius` and `inner_radius`.
+    fn star_points(num_points: usize, outer_radius: f32, inner_radius: f32) -> Vec<Vec2> {
+        let mut points = Vec::with_capacity(num_points * 2);
+        let angle_step = std::f32::consts::PI / num_points as f32;
+        for i in 0..num_points * 2 {
+            let angle = angle_step * i as f32;
+            let radius = if i % 2 == 0 {
+                outer_radius
+            } else {
+                inner_radius
+            };
+            points.push(Vec2::new(radius * angle.cos(), radius * angle.sin()));
+        }
+        points
+    }
+
+    #[cfg(feature = "path")]
+    #[test]
+    fn can_render_path_with_image_fill() {
+        use renderling::atlas::AtlasImage;
+
+        init_logging();
+        let w = 150.0;
+        let ctx = futures_lite::future::block_on(Context::headless(w as u32, w as u32));
+        let mut ui = UiRenderer::new(&ctx).with_background_color(Vec4::ONE);
+
+        // Load dirt texture into the atlas.
+        let atlas_img = AtlasImage::from_path("../../img/dirt.jpg").unwrap();
+        let tex = ui.upload_image(atlas_img);
+
+        // Build a 7-pointed star polygon centered in the viewport, filled
+        // with the dirt image and stroked in red.
+        let center = Vec2::splat(w / 2.0);
+        let star = star_points(7, w / 2.0, w / 3.0);
+
+        let _fill = ui
+            .path_builder()
+            .with_fill_color(Vec4::ONE) // white tint = unmodified image
+            .with_fill_image(&tex)
+            .with_polygon(&star.iter().map(|p| *p + center).collect::<Vec<_>>())
+            .fill(&mut ui);
+
+        let _stroke = ui
+            .path_builder()
+            .with_stroke_color(Vec4::new(1.0, 0.0, 0.0, 1.0))
+            .with_stroke_config(crate::StrokeConfig {
+                line_width: 3.0,
+                ..Default::default()
+            })
+            .with_polygon(&star.iter().map(|p| *p + center).collect::<Vec<_>>())
+            .stroke(&mut ui);
+
+        let frame = ctx.get_next_frame().unwrap();
+        ui.render(&frame.view());
+        let img = futures_lite::future::block_on(frame.read_image()).unwrap();
+        save_and_assert("ui2d/path_image_fill.png", img);
+    }
+}

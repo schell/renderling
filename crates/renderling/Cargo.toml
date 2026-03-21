@@ -23,11 +23,10 @@ multimodule = true
 crate-type = ["rlib", "cdylib"]
 
 [features]
-default = ["gltf", "ui", "winit"]
+default = ["gltf", "winit"]
 gltf = ["dep:gltf", "dep:serde_json"]
 test_i8_i16_extraction = []
 test-utils = ["dep:metal", "dep:wgpu-core", "dep:futures-lite"]
-ui = ["dep:glyph_brush", "dep:loading-bytes", "dep:lyon"]
 wasm = ["wgpu/fragile-send-sync-non-atomic-wasm"]
 debug-slab = []
 light-tiling-stats = [ "dep:plotters" ]
@@ -62,12 +61,9 @@ dagga = {workspace=true}
 futures-lite = { workspace = true, optional = true }
 glam = { workspace = true, features = ["std"] }
 gltf = {workspace = true, optional = true}
-glyph_brush = {workspace = true, optional = true}
 half = "2.3"
 image = {workspace = true, features = ["hdr"]}
-loading-bytes = { workspace = true, optional = true }
 log = {workspace = true}
-lyon = {workspace = true, optional = true}
 plotters = { workspace = true, optional = true }
 pretty_assertions.workspace = true
 rustc-hash = {workspace = true}
@@ -91,6 +87,7 @@ futures-lite.workspace = true
 human-repr = "1.1.0"
 icosahedron = "0.1"
 img-diff = { path = "../img-diff" }
+loading-bytes = { workspace = true }
 naga.workspace = true
 renderling_build = { path = "../renderling-build" }
 ttf-parser = "0.20.0"

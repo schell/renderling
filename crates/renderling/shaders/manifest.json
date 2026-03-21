@@ -30,6 +30,16 @@
     "wgsl_entry_point": "bloomshaderbloom_vertex"
   },
   {
+    "source_path": "shaders/compositor-compositor_fragment.spv",
+    "entry_point": "compositor::compositor_fragment",
+    "wgsl_entry_point": "compositorcompositor_fragment"
+  },
+  {
+    "source_path": "shaders/compositor-compositor_vertex.spv",
+    "entry_point": "compositor::compositor_vertex",
+    "wgsl_entry_point": "compositorcompositor_vertex"
+  },
+  {
     "source_path": "shaders/convolution-shader-brdf_lut_convolution_fragment.spv",
     "entry_point": "convolution::shader::brdf_lut_convolution_fragment",
     "wgsl_entry_point": "convolutionshaderbrdf_lut_convolution_fragment"
@@ -203,5 +213,15 @@
     "source_path": "shaders/tutorial-slabbed_vertices_no_instance.spv",
     "entry_point": "tutorial::slabbed_vertices_no_instance",
     "wgsl_entry_point": "tutorialslabbed_vertices_no_instance"
+  },
+  {
+    "source_path": "shaders/ui_slab-shader-ui_fragment.spv",
+    "entry_point": "ui_slab::shader::ui_fragment",
+    "wgsl_entry_point": "ui_slabshaderui_fragment"
+  },
+  {
+    "source_path": "shaders/ui_slab-shader-ui_vertex.spv",
+    "entry_point": "ui_slab::shader::ui_vertex",
+    "wgsl_entry_point": "ui_slabshaderui_vertex"
   }
 ]

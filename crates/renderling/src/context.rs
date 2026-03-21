@@ -15,9 +15,7 @@ use snafu::prelude::*;
 use crate::{
     stage::Stage,
     texture::{BufferDimensions, CopiedTextureBuffer, Texture, TextureError},
-    ui::Ui,
 };
-
 pub use craballoc::runtime::WgpuRuntime;
 
 /// Represents the internal structure of a render target, which can either be a
@@ -629,10 +627,5 @@ impl Context {
     /// Creates and returns a new [`Stage`] renderer.
     pub fn new_stage(&self) -> Stage {
         Stage::new(self)
-    }
-
-    /// Creates and returns a new [`Ui`] renderer.
-    pub fn new_ui(&self) -> Ui {
-        Ui::new(self)
     }
 }

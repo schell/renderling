@@ -18,8 +18,8 @@ use renderling::{
     primitive::Primitive,
     skybox::Skybox,
     stage::Stage,
-    ui::{FontArc, Section, Text, Ui, UiPath, UiText},
 };
+use renderling_ui::{FontArc, Section, Text, UiRect, UiRenderer, UiText};
 
 pub mod camera;
 use camera::{
@@ -75,30 +75,34 @@ fn now() -> f64 {
 }
 
 struct AppUi {
-    ui: Ui,
+    ui: UiRenderer,
     fps_text: UiText,
     fps_counter: FPSCounter,
-    fps_background: UiPath,
+    fps_background: UiRect,
     last_fps_display: f64,
 }
 
 impl AppUi {
-    fn make_fps_widget(fps_counter: &FPSCounter, ui: &Ui) -> (UiText, UiPath) {
-        let translation = Vec2::new(2.0, 2.0);
+    fn make_fps_widget(fps_counter: &FPSCounter, ui: &mut UiRenderer) -> (UiText, UiRect) {
+        let offset = Vec2::new(2.0, 2.0);
         let text = format!("{}fps", fps_counter.current_fps_string());
-        let fps_text = ui
-            .text_builder()
-            .with_color(Vec3::ZERO.extend(1.0))
-            .with_section(Section::new().add_text(Text::new(&text).with_scale(32.0)))
-            .build();
-        fps_text.transform().set_translation(translation);
+        let fps_text = ui.add_text(
+            Section::default()
+                .add_text(
+                    Text::new(&text)
+                        .with_scale(32.0)
+                        .with_color([0.0, 0.0, 0.0, 1.0]),
+                )
+                .with_screen_position((offset.x, offset.y)),
+        );
+        let (min, max) = fps_text.bounds();
+        let size = max - min;
         let background = ui
-            .path_builder()
+            .add_rect()
+            .with_position(min)
+            .with_size(size)
             .with_fill_color(Vec4::ONE)
-            .with_rectangle(fps_text.bounds().0, fps_text.bounds().1)
-            .fill();
-        background.transform.set_translation(translation);
-        background.transform.set_z(-0.9);
+            .with_z(-0.9);
         (fps_text, background)
     }
 
@@ -106,7 +110,10 @@ impl AppUi {
         self.fps_counter.next_frame();
         let now = now();
         if now - self.last_fps_display >= 1.0 {
-            let (fps_text, background) = Self::make_fps_widget(&self.fps_counter, &self.ui);
+            // Remove old text and background before recreating.
+            self.ui.remove_text(&self.fps_text);
+            self.ui.remove_rect(&self.fps_background);
+            let (fps_text, background) = Self::make_fps_widget(&self.fps_counter, &mut self.ui);
             self.fps_text = fps_text;
             self.fps_background = background;
             self.last_fps_display = now;
@@ -160,10 +167,10 @@ impl App {
             })
             .unwrap();
 
-        let ui = Ui::new(ctx).with_background_color(Vec4::ZERO);
+        let mut ui = UiRenderer::new(ctx);
         let _ = ui.add_font(FontArc::try_from_slice(FONT_BYTES).unwrap());
         let fps_counter = FPSCounter::default();
-        let (fps_text, fps_background) = AppUi::make_fps_widget(&fps_counter, &ui);
+        let (fps_text, fps_background) = AppUi::make_fps_widget(&fps_counter, &mut ui);
 
         Self {
             ui: AppUi {
@@ -199,7 +206,7 @@ impl App {
         self.ui.tick();
     }
 
-    pub fn render(&self, ctx: &Context) {
+    pub fn render(&mut self, ctx: &Context) {
         log::info!("render");
         let frame = ctx.get_next_frame().unwrap();
         self.stage.render(&frame.view());
@@ -221,6 +228,24 @@ impl App {
         self.stage.use_skybox(&skybox);
         let ibl = self.stage.new_ibl(&skybox);
         self.stage.use_ibl(&ibl);
+    }
+
+    fn set_model(&mut self, model: Model) {
+        match std::mem::replace(&mut self.model, model) {
+            Model::Gltf(gltf_document) => {
+                // Remove all the things that was loaded by the document
+                for prim in gltf_document.primitives.values().flatten() {
+                    self.stage.remove_primitive(prim);
+                }
+                for light in gltf_document.lights.iter() {
+                    self.stage.remove_light(light);
+                }
+            }
+            Model::Default(primitive) => {
+                self.stage.remove_primitive(&primitive);
+            }
+            Model::None => {}
+        }
     }
 
     pub fn load_default_model(&mut self) {
@@ -249,7 +274,8 @@ impl App {
                 BoundingSphere::from((min, max))
             });
 
-        self.model = Model::Default(primitive);
+        self.set_model(Model::Default(primitive));
+
         self.camera_controller.reset(Aabb::new(min, max));
         self.camera_controller
             .update_camera(self.stage.get_size(), &self.camera);
@@ -260,7 +286,6 @@ impl App {
         self.camera_controller
             .reset(Aabb::new(Vec3::NEG_ONE, Vec3::ONE));
         self.stage.clear_images().unwrap();
-        self.model = Model::None;
         let doc = match self.stage.load_gltf_document_from_bytes(bytes) {
             Err(e) => {
                 log::error!("gltf loading error: {e}");
@@ -365,7 +390,7 @@ impl App {
         // dir.clone();     }
         // }
 
-        self.model = Model::Gltf(Box::new(doc));
+        self.set_model(Model::Gltf(Box::new(doc)));
     }
 
     pub fn tick_loads(&mut self) {

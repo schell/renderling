@@ -1,0 +1,39 @@
+[package]
+name = "renderling-ui"
+version = "0.1.0"
+edition = "2021"
+description = "Lightweight 2D/UI renderer for renderling."
+repository = "https://github.com/schell/renderling"
+license = "MIT OR Apache-2.0"
+
+[features]
+default = ["text", "path"]
+text = ["dep:glyph_brush", "dep:image", "dep:loading-bytes"]
+path = ["dep:lyon"]
+test-utils = ["renderling/test-utils"]
+
+[dependencies]
+bytemuck = { workspace = true }
+craballoc = { workspace = true }
+crabslab = { workspace = true, features = ["default"] }
+glam = { workspace = true, features = ["std"] }
+glyph_brush = { workspace = true, optional = true }
+image = { workspace = true, optional = true }
+loading-bytes = { workspace = true, optional = true }
+log = { workspace = true }
+lyon = { workspace = true, optional = true }
+renderling = { path = "../renderling", default-features = false }
+rustc-hash = { workspace = true }
+snafu = { workspace = true }
+wgpu = { workspace = true, features = ["spirv"] }
+
+[dev-dependencies]
+env_logger = { workspace = true }
+futures-lite = { workspace = true }
+img-diff = { path = "../img-diff" }
+image = { workspace = true }
+renderling = { path = "../renderling", features = ["test-utils"] }
+renderling_build = { path = "../renderling-build" }
+
+[lints]
+workspace = true

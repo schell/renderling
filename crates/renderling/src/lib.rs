@@ -204,6 +204,7 @@ pub mod bloom;
 pub mod bvol;
 pub mod camera;
 pub mod color;
+pub mod compositor;
 #[cfg(cpu)]
 pub mod context;
 pub mod convolution;
@@ -234,8 +235,7 @@ pub mod transform;
 pub mod tutorial;
 #[cfg(cpu)]
 pub mod types;
-#[cfg(feature = "ui")]
-pub mod ui;
+pub mod ui_slab;
 
 pub extern crate glam;
 

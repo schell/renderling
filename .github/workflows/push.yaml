@@ -17,7 +17,7 @@ jobs:
   install-cargo-gpu:
     strategy:
       matrix: 
-        os: [ubuntu-latest, ubuntu-24.04, macos-latest]
+        os: [ubuntu-24.04, macos-latest]
     runs-on: ${{ matrix.os }}
     defaults:
       run: 
@@ -35,8 +35,10 @@ jobs:
         with:
           path: ~/.cargo
           # THIS KEY MUST MATCH BELOW
-          key: cargo-cache-${{ env.CARGO_GPU_COMMITSH }}-${{ matrix.os }}
+          key: cargo-cache-2-${{ env.CARGO_GPU_COMMITSH }}-${{ matrix.os }}
       - uses: moonrepo/setup-rust@v1
+        with:
+          cache: false
       - run: rustup default stable 
       - run: rustup update
       - run: | 
@@ -56,7 +58,7 @@ jobs:
       matrix: 
         # temporarily skip windows, revisit after a fix for this error is found:
         # https://github.com/rust-lang/cc-rs/issues/1331
-        os: [ubuntu-latest, ubuntu-24.04, macos-latest] #, windows-latest]
+        os: [ubuntu-24.04, macos-latest] #, windows-latest]
     runs-on: ${{ matrix.os }}
     defaults:
       run: 
@@ -65,22 +67,23 @@ jobs:
       RUST_LOG: debug
     steps:
       - uses: actions/checkout@v2
-      # Run moonrepo/setup-rust BEFORE restoring ~/.cargo cache, because
-      # moonrepo restores its own ~/.cargo cache which would overwrite
-      # the cargo-gpu binary installed by the install-cargo-gpu job.
+      # Disable moonrepo's built-in cache so it doesn't overwrite ~/.cargo
+      # (which contains the cargo-gpu binary from the install-cargo-gpu job).
       - uses: moonrepo/setup-rust@v1
+        with:
+          cache: false
       - uses: actions/cache@v4
         with:
           path: ~/.cargo
           # THIS KEY MUST MATCH ABOVE
-          key: cargo-cache-${{ env.CARGO_GPU_COMMITSH }}-${{ matrix.os }}
+          key: cargo-cache-2-${{ env.CARGO_GPU_COMMITSH }}-${{ matrix.os }}
       - uses: actions/cache@v4
         with:
           path: | 
               ${{ needs.install-cargo-gpu.outputs.cachepath-macOS }}
               ${{ needs.install-cargo-gpu.outputs.cachepath-Linux }}
               ${{ needs.install-cargo-gpu.outputs.cachepath-Windows }}
-          key: rust-gpu-cache-0-${{ matrix.os }}
+          key: rust-gpu-cache-1-${{ matrix.os }}
       - run: rustup install nightly
       - run: rustup component add --toolchain nightly rustfmt
       - run: cargo gpu show commitsh
@@ -99,7 +102,7 @@ jobs:
         with:
           path: ~/.cargo
           # THIS KEY MUST MATCH ABOVE
-          key: cargo-cache-${{ env.CARGO_GPU_COMMITSH }}-ubuntu-latest
+          key: renderling-fmt-${{ env.CARGO_GPU_COMMITSH }}-ubuntu-24.04
       - run: mkdir -p $HOME/.cargo/bin
       - uses: moonrepo/setup-rust@v1
       - run: rustup install nightly

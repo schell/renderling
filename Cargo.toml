@@ -7,6 +7,7 @@ members = [
     "crates/loading-bytes",
     "crates/renderling", 
     "crates/renderling-build",
+    "crates/renderling-ui",
     "crates/wire-types",
     # "crates/sandbox",
     "crates/xtask"

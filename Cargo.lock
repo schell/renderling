@@ -1167,6 +1167,7 @@ dependencies = [
  "loading-bytes",
  "log",
  "renderling",
+ "renderling-ui",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "web-sys",
@@ -3714,7 +3715,6 @@ dependencies = [
  "futures-lite 1.13.0",
  "glam",
  "gltf",
- "glyph_brush",
  "half",
  "human-repr",
  "icosahedron",
@@ -3722,7 +3722,6 @@ dependencies = [
  "img-diff",
  "loading-bytes",
  "log",
- "lyon",
  "metal",
  "naga",
  "pathdiff",
@@ -3744,6 +3743,29 @@ dependencies = [
  "wgpu-core",
  "winit",
  "wire-types",
+]
+
+[[package]]
+name = "renderling-ui"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "craballoc",
+ "crabslab",
+ "env_logger",
+ "futures-lite 1.13.0",
+ "glam",
+ "glyph_brush",
+ "image 0.25.6",
+ "img-diff",
+ "loading-bytes",
+ "log",
+ "lyon",
+ "renderling",
+ "renderling_build",
+ "rustc-hash 1.1.0",
+ "snafu 0.8.6",
+ "wgpu",
 ]
 
 [[package]]
