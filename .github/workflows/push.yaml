@@ -80,7 +80,7 @@ jobs:
               ${{ needs.install-cargo-gpu.outputs.cachepath-macOS }}
               ${{ needs.install-cargo-gpu.outputs.cachepath-Linux }}
               ${{ needs.install-cargo-gpu.outputs.cachepath-Windows }}
-          key: rust-gpu-cache-0-${{ runner.os }}
+          key: rust-gpu-cache-0-${{ matrix.os }}
       - run: rustup install nightly
       - run: rustup component add --toolchain nightly rustfmt
       - run: cargo gpu show commitsh
