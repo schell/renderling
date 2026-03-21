@@ -35,7 +35,7 @@ jobs:
         with:
           path: ~/.cargo
           # THIS KEY MUST MATCH BELOW
-          key: cargo-cache-1-${{ env.CARGO_GPU_COMMITSH }}-${{ matrix.os }}
+          key: cargo-cache-2-${{ env.CARGO_GPU_COMMITSH }}-${{ matrix.os }}
       - uses: moonrepo/setup-rust@v1
         with:
           cache: false
@@ -76,7 +76,7 @@ jobs:
         with:
           path: ~/.cargo
           # THIS KEY MUST MATCH ABOVE
-          key: cargo-cache-1-${{ env.CARGO_GPU_COMMITSH }}-${{ matrix.os }}
+          key: cargo-cache-2-${{ env.CARGO_GPU_COMMITSH }}-${{ matrix.os }}
       - uses: actions/cache@v4
         with:
           path: | 
@@ -102,7 +102,7 @@ jobs:
         with:
           path: ~/.cargo
           # THIS KEY MUST MATCH ABOVE
-          key: cargo-cache-1-${{ env.CARGO_GPU_COMMITSH }}-ubuntu-24.04
+          key: renderling-fmt-${{ env.CARGO_GPU_COMMITSH }}-ubuntu-24.04
       - run: mkdir -p $HOME/.cargo/bin
       - uses: moonrepo/setup-rust@v1
       - run: rustup install nightly
