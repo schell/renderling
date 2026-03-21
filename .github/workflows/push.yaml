@@ -37,6 +37,8 @@ jobs:
           # THIS KEY MUST MATCH BELOW
           key: cargo-cache-1-${{ env.CARGO_GPU_COMMITSH }}-${{ matrix.os }}
       - uses: moonrepo/setup-rust@v1
+        with:
+          cache: false
       - run: rustup default stable 
       - run: rustup update
       - run: | 
@@ -65,10 +67,11 @@ jobs:
       RUST_LOG: debug
     steps:
       - uses: actions/checkout@v2
-      # Run moonrepo/setup-rust BEFORE restoring ~/.cargo cache, because
-      # moonrepo restores its own ~/.cargo cache which would overwrite
-      # the cargo-gpu binary installed by the install-cargo-gpu job.
+      # Disable moonrepo's built-in cache so it doesn't overwrite ~/.cargo
+      # (which contains the cargo-gpu binary from the install-cargo-gpu job).
       - uses: moonrepo/setup-rust@v1
+        with:
+          cache: false
       - uses: actions/cache@v4
         with:
           path: ~/.cargo
