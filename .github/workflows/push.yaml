@@ -35,7 +35,7 @@ jobs:
         with:
           path: ~/.cargo
           # THIS KEY MUST MATCH BELOW
-          key: cargo-cache-${{ env.CARGO_GPU_COMMITSH }}-${{ runner.os }}
+          key: cargo-cache-${{ env.CARGO_GPU_COMMITSH }}-${{ matrix.os }}
       - uses: moonrepo/setup-rust@v1
       - run: rustup default stable 
       - run: rustup update
@@ -73,7 +73,7 @@ jobs:
         with:
           path: ~/.cargo
           # THIS KEY MUST MATCH ABOVE
-          key: cargo-cache-${{ env.CARGO_GPU_COMMITSH }}-${{ runner.os }}
+          key: cargo-cache-${{ env.CARGO_GPU_COMMITSH }}-${{ matrix.os }}
       - uses: actions/cache@v4
         with:
           path: | 
@@ -99,7 +99,7 @@ jobs:
         with:
           path: ~/.cargo
           # THIS KEY MUST MATCH ABOVE
-          key: cargo-cache-${{ env.CARGO_GPU_COMMITSH }}-${{ runner.os }}
+          key: cargo-cache-${{ env.CARGO_GPU_COMMITSH }}-${{ matrix.os }}
       - uses: moonrepo/setup-rust@v1
       - run: rustup install nightly
       - run: rustup component add --toolchain nightly rustfmt
@@ -133,8 +133,8 @@ jobs:
       - uses: actions/cache@v4
         with:
           path: ~/.cargo
-          key: ${{ runner.os }}-test-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-
+          key: ${{ matrix.os }}-test-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: ${{ matrix.os }}-cargo-
 
       - name: Install linux deps 
         if: runner.os == 'Linux'
@@ -153,7 +153,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: test-output-${{ runner.os }}
+          name: test-output-${{ matrix.os }}
           path: test_output  
 
   ## WASM tests, commented out until we can get a proper headless browser on CI
