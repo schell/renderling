@@ -9,3 +9,6 @@
 - [Lighting](./lighting.md)
   - [Analytical lights](./lighting/analytical.md)
   - [Image based lighting](./lighting/ibl.md)
+  - [Shadow mapping](./lighting/shadow-mapping.md)
+- [Materials and textures](./material.md)
+- [Post-processing](./postprocessing.md)

@@ -15,12 +15,29 @@
 [`Primitive`]: {{DOCS_URL}}/renderling/primitive/struct.Primitive.html
 
 [`Material`]: {{DOCS_URL}}/renderling/material/struct.Material.html
+[`Material::set_albedo_texture`]: {{DOCS_URL}}/renderling/material/struct.Material.html#method.set_albedo_texture
+[`Material::with_normal_texture`]: {{DOCS_URL}}/renderling/material/struct.Material.html#method.with_normal_texture
+
+[`AtlasImage`]: {{DOCS_URL}}/renderling/atlas/struct.AtlasImage.html
+[`AtlasTexture`]: {{DOCS_URL}}/renderling/atlas/struct.AtlasTexture.html
+[`Stage::set_images`]: {{DOCS_URL}}/renderling/stage/struct.Stage.html#method.set_images
+
+[`Stage::tonemapping`]: {{DOCS_URL}}/renderling/stage/struct.Stage.html#method.tonemapping
+[`Tonemapping`]: {{DOCS_URL}}/renderling/tonemapping/struct.Tonemapping.html
+[`TonemapConstants`]: {{DOCS_URL}}/renderling/tonemapping/struct.TonemapConstants.html
+[`Tonemap`]: {{DOCS_URL}}/renderling/tonemapping/struct.Tonemap.html
 
 [`Mat4`]: https://docs.rs/glam/latest/glam/f32/struct.Mat4.html
 
 [`RenderTarget`]: {{DOCS_URL}}/renderling/context/struct.RenderTarget.html
 
 [`Skybox`]: {{DOCS_URL}}/renderling/skybox/struct.Skybox.html
+
+[`ShadowMap`]: {{DOCS_URL}}/renderling/light/struct.ShadowMap.html
+[`ShadowMap::update`]: {{DOCS_URL}}/renderling/light/struct.ShadowMap.html#method.update
+[`ShadowMap::descriptor_lock`]: {{DOCS_URL}}/renderling/light/struct.ShadowMap.html#method.descriptor_lock
+[`Stage::new_shadow_map`]: {{DOCS_URL}}/renderling/stage/struct.Stage.html#method.new_shadow_map
+[`Context::with_shadow_mapping_atlas_texture_size`]: {{DOCS_URL}}/renderling/context/struct.Context.html#method.with_shadow_mapping_atlas_texture_size
 
 [`Stage`]: {{DOCS_URL}}/renderling/stage/struct.Stage.html
 [`Stage::new_camera`]: {{DOCS_URL}}/renderling/stage/struct.Stage.html#method.new_camera

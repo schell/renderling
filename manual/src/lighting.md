@@ -31,4 +31,5 @@ HDR image into a skybox, and then rendered:
 
 ![renderling skybox](assets/skybox.png)
 
-Now let's learn about analytical lights, and then image based lighting.
+Now let's learn about analytical lights, then image based lighting, and
+finally shadow mapping.
