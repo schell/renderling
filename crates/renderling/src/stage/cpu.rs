@@ -1523,6 +1523,15 @@ impl Stage {
         self
     }
 
+    /// Returns the stage's [`Tonemapping`], used to configure the tone
+    /// mapping algorithm and exposure of the final rendered image.
+    ///
+    /// Use [`Tonemapping::set_tonemapping_config`] with a
+    /// `TonemapConstants` to change the settings.
+    pub fn tonemapping(&self) -> &Tonemapping {
+        &self.tonemapping
+    }
+
     /// Turn the bloom effect on or off.
     pub fn set_has_bloom(&self, has_bloom: bool) {
         self.has_bloom
