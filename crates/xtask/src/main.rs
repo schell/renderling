@@ -60,7 +60,7 @@ pub struct Manual {
 
 impl Manual {
     async fn install_deps() {
-        const DEPS: &[&str] = &["mdbook", "mdbook-environment"];
+        const DEPS: &[&str] = &["mdbook", "mdbook-variables"];
         for dep in DEPS {
             if !deps::has_binary(dep).await {
                 deps::cargo_install(dep).await;
