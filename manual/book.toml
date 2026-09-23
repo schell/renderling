@@ -5,14 +5,20 @@ src = "src"
 title = "The Renderling Manual"
 description = "Operations manual for the Renderling real-time renderer"
 
-# The "environment" preprocessor, provided by `mdbook-environment`,
-# references variables from here and the environment that can then be
-# interpolated in the book with `{{VARIABLE}}`.
+# The "variables" preprocessor, provided by `mdbook-variables`,
+# interpolates `{{VARIABLE}}` in the book, resolving variables from here
+# and from the environment.
 #
 # Setting variables here overrides any set in the environment, so for
 # variables that must change based on environment we add them here
 # commented out.
-[preprocessor.environment]
+[preprocessor.variables]
+# Look up variables not defined here in the environment.
+use_env = true
+
+[preprocessor.variables.variables]
+# Variables can be pinned here; values from the environment are used as a
+# fallback for anything not defined in this table.
 # when deploying the manual 
 # DOCS_URL = "https://docs.rs/renderling/latest"
 

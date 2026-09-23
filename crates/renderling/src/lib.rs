@@ -179,7 +179,8 @@
 //! # Next steps
 //!
 //! For further introduction to what renderling can do, take a tour of the
-//! [`Stage`] type, or get started with [the manual](#todo).
+//! [`Stage`] type, or get started with
+//! [the manual](https://renderling.xyz/manual/index.html).
 //!
 //! # WARNING
 //!

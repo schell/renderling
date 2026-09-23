@@ -18,6 +18,27 @@ mod skybox;
 #[cfg(test)]
 mod lighting;
 
+#[cfg(test)]
+mod shadow;
+
+#[cfg(test)]
+mod material;
+
+#[cfg(test)]
+mod postprocessing;
+
+#[cfg(test)]
+mod debug;
+
+#[cfg(test)]
+mod scene;
+
+#[cfg(test)]
+mod animation;
+
+#[cfg(test)]
+mod performance;
+
 pub fn cwd_to_manual_assets_dir() -> std::path::PathBuf {
     let current_dir =
         std::path::PathBuf::from(std::env!("CARGO_WORKSPACE_DIR")).join("manual/src/assets");
