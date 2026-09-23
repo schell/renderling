@@ -12,3 +12,4 @@
   - [Shadow mapping](./lighting/shadow-mapping.md)
 - [Materials and textures](./material.md)
 - [Post-processing](./postprocessing.md)
+- [Debug modes](./debug.md)

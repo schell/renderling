@@ -27,6 +27,10 @@
 [`TonemapConstants`]: {{DOCS_URL}}/renderling/tonemapping/struct.TonemapConstants.html
 [`Tonemap`]: {{DOCS_URL}}/renderling/tonemapping/struct.Tonemap.html
 
+[`DebugChannel`]: {{DOCS_URL}}/renderling/pbr/debug/enum.DebugChannel.html
+[`Stage::set_debug_mode`]: {{DOCS_URL}}/renderling/stage/struct.Stage.html#method.set_debug_mode
+[`Stage::set_use_debug_overlay`]: {{DOCS_URL}}/renderling/stage/struct.Stage.html#method.set_use_debug_overlay
+
 [`Mat4`]: https://docs.rs/glam/latest/glam/f32/struct.Mat4.html
 
 [`RenderTarget`]: {{DOCS_URL}}/renderling/context/struct.RenderTarget.html
