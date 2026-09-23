@@ -15,3 +15,4 @@
 - [Debug modes](./debug.md)
 - [Scene hierarchy](./scene.md)
 - [Animation](./animation.md)
+- [Performance](./performance.md)

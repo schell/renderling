@@ -36,6 +36,9 @@ mod scene;
 #[cfg(test)]
 mod animation;
 
+#[cfg(test)]
+mod performance;
+
 pub fn cwd_to_manual_assets_dir() -> std::path::PathBuf {
     let current_dir =
         std::path::PathBuf::from(std::env!("CARGO_WORKSPACE_DIR")).join("manual/src/assets");

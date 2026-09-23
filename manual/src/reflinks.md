@@ -40,6 +40,12 @@
 [`Stage::new_morph_target_weights`]: {{DOCS_URL}}/renderling/stage/struct.Stage.html#method.new_morph_target_weights
 [`Primitive::set_morph_targets`]: {{DOCS_URL}}/renderling/primitive/struct.Primitive.html#method.set_morph_targets
 
+[`Stage::set_use_frustum_culling`]: {{DOCS_URL}}/renderling/stage/struct.Stage.html#method.set_use_frustum_culling
+[`Stage::set_use_occlusion_culling`]: {{DOCS_URL}}/renderling/stage/struct.Stage.html#method.set_use_occlusion_culling
+[`Stage::new_light_tiling`]: {{DOCS_URL}}/renderling/stage/struct.Stage.html#method.new_light_tiling
+[`LightTilingConfig`]: {{DOCS_URL}}/renderling/light/struct.LightTilingConfig.html
+[`Stage::set_msaa_sample_count`]: {{DOCS_URL}}/renderling/stage/struct.Stage.html#method.set_msaa_sample_count
+
 [`Mat4`]: https://docs.rs/glam/latest/glam/f32/struct.Mat4.html
 
 [`RenderTarget`]: {{DOCS_URL}}/renderling/context/struct.RenderTarget.html
