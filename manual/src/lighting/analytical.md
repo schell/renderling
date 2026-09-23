@@ -84,4 +84,22 @@ you can see the effect:
 
 ![image of a marble bust lit by a single spot light](../assets/lighting/spot.png)
 
+## Ambient light
+
+In addition to the three light types above, the stage has a global **ambient**
+color - a constant light contribution added to every fragment, modulated by
+the surface albedo. It defaults to zero.
+
+Ambient light fills in shadowed areas, so shadows read as the ambient color
+instead of pure black:
+
+```rust,ignore
+// An orange ambient glow, at 30% intensity.
+stage.set_ambient_color(Vec4::new(1.0, 0.5, 0.0, 0.3));
+```
+
+The XYZ components are the color, and W is the intensity. It can also be set
+at stage creation with `.with_ambient_color(...)`, and the current value read
+back with `Stage::ambient_color`.
+
 Good enough! Now on to image-based lighting, which uses environment maps to simulate complex lighting scenarios. This technique captures real-world lighting conditions and applies them to the scene, providing more realistic reflections and ambient lighting.

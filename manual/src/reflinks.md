@@ -46,6 +46,10 @@
 [`LightTilingConfig`]: {{DOCS_URL}}/renderling/light/struct.LightTilingConfig.html
 [`Stage::set_msaa_sample_count`]: {{DOCS_URL}}/renderling/stage/struct.Stage.html#method.set_msaa_sample_count
 
+[`Stage::set_ambient_color`]: {{DOCS_URL}}/renderling/stage/struct.Stage.html#method.set_ambient_color
+[`Stage::with_ambient_color`]: {{DOCS_URL}}/renderling/stage/struct.Stage.html#method.with_ambient_color
+[`Stage::ambient_color`]: {{DOCS_URL}}/renderling/stage/struct.Stage.html#method.ambient_color
+
 [`Mat4`]: https://docs.rs/glam/latest/glam/f32/struct.Mat4.html
 
 [`RenderTarget`]: {{DOCS_URL}}/renderling/context/struct.RenderTarget.html
