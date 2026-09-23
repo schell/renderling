@@ -14,3 +14,4 @@
 - [Post-processing](./postprocessing.md)
 - [Debug modes](./debug.md)
 - [Scene hierarchy](./scene.md)
+- [Animation](./animation.md)

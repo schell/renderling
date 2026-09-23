@@ -35,6 +35,11 @@
 [`NestedTransform::add_child`]: {{DOCS_URL}}/renderling/transform/struct.NestedTransform.html#method.add_child
 [`Stage::new_nested_transform`]: {{DOCS_URL}}/renderling/stage/struct.Stage.html#method.new_nested_transform
 
+[`Animator`]: {{DOCS_URL}}/renderling/gltf/anime/struct.Animator.html
+[`Stage::new_morph_targets`]: {{DOCS_URL}}/renderling/stage/struct.Stage.html#method.new_morph_targets
+[`Stage::new_morph_target_weights`]: {{DOCS_URL}}/renderling/stage/struct.Stage.html#method.new_morph_target_weights
+[`Primitive::set_morph_targets`]: {{DOCS_URL}}/renderling/primitive/struct.Primitive.html#method.set_morph_targets
+
 [`Mat4`]: https://docs.rs/glam/latest/glam/f32/struct.Mat4.html
 
 [`RenderTarget`]: {{DOCS_URL}}/renderling/context/struct.RenderTarget.html
