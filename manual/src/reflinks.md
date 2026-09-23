@@ -31,6 +31,10 @@
 [`Stage::set_debug_mode`]: {{DOCS_URL}}/renderling/stage/struct.Stage.html#method.set_debug_mode
 [`Stage::set_use_debug_overlay`]: {{DOCS_URL}}/renderling/stage/struct.Stage.html#method.set_use_debug_overlay
 
+[`NestedTransform`]: {{DOCS_URL}}/renderling/transform/struct.NestedTransform.html
+[`NestedTransform::add_child`]: {{DOCS_URL}}/renderling/transform/struct.NestedTransform.html#method.add_child
+[`Stage::new_nested_transform`]: {{DOCS_URL}}/renderling/stage/struct.Stage.html#method.new_nested_transform
+
 [`Mat4`]: https://docs.rs/glam/latest/glam/f32/struct.Mat4.html
 
 [`RenderTarget`]: {{DOCS_URL}}/renderling/context/struct.RenderTarget.html

@@ -13,3 +13,4 @@
 - [Materials and textures](./material.md)
 - [Post-processing](./postprocessing.md)
 - [Debug modes](./debug.md)
+- [Scene hierarchy](./scene.md)
