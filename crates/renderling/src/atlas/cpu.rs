@@ -239,7 +239,11 @@ impl Atlas {
             usage: usage
                 | wgpu::TextureUsages::TEXTURE_BINDING
                 | wgpu::TextureUsages::COPY_DST
-                | wgpu::TextureUsages::COPY_SRC,
+                | wgpu::TextureUsages::COPY_SRC
+                // The blitting operation (`AtlasBlittingOperation::run`) renders
+                // directly into atlas frames (see `update_textures`), so the
+                // atlas texture must be usable as a render target.
+                | wgpu::TextureUsages::RENDER_ATTACHMENT,
             view_formats: &[],
         });
 
@@ -1145,7 +1149,7 @@ impl AtlasBlitter {
 #[cfg(test)]
 mod test {
     use crate::{
-        atlas::{shader::AtlasTextureDescriptor, TextureAddressMode},
+        atlas::{shader::AtlasTextureDescriptor, AtlasImageFormat, TextureAddressMode},
         context::Context,
         geometry::Vertex,
         material::Materials,
@@ -1439,6 +1443,42 @@ mod test {
         img_diff::assert_img_eq("atlas/array0.png", img);
         let img = materials.atlas().atlas_img(&ctx, 1).block();
         img_diff::assert_img_eq("atlas/array1.png", img);
+    }
+
+    #[test]
+    // Regression test for https://github.com/schell/renderling/issues/246
+    //
+    // `Atlas::update_image` panicked with a wgpu validation error because
+    // the atlas texture array lacked the RENDER_ATTACHMENT usage required
+    // by the blitting render pass.
+    fn update_image_regression_246() {
+        let ctx = Context::headless(100, 100)
+            .block()
+            .with_default_atlas_texture_size(UVec3::new(512, 512, 2));
+        let stage = ctx.new_stage();
+        let white = AtlasImage {
+            pixels: vec![255u8; 256 * 256 * 4],
+            size: UVec2::new(256, 256),
+            format: AtlasImageFormat::R8G8B8A8,
+            apply_linear_transfer: false,
+        };
+        let texture = &stage.add_images([white]).unwrap()[0];
+
+        let gray = AtlasImage {
+            pixels: [64u8, 64, 64, 255].repeat(256 * 256),
+            size: UVec2::new(256, 256),
+            format: AtlasImageFormat::R8G8B8A8,
+            apply_linear_transfer: false,
+        };
+        let materials: &Materials = stage.as_ref();
+        materials.atlas().update_image(texture, gray).unwrap();
+
+        // No panic: read back the frame and check the blit actually landed.
+        let desc = texture.descriptor();
+        let img = materials.atlas().atlas_img(&ctx, desc.layer_index).block();
+        let pixel = img.get_pixel(desc.offset_px.x + 10, desc.offset_px.y + 10);
+        let [r, g, b, a] = pixel.0;
+        assert_eq!((64, 64, 64, 255), (r, g, b, a));
     }
 
     #[test]
